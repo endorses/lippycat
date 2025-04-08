@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/endorses/lippycat/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"

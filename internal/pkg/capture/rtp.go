@@ -16,15 +16,16 @@ func ExtractPortFromSDP(line string, callID string) {
 	parts := strings.Fields(partThatContainsPort)
 	if len(parts) >= 1 {
 		port := parts[0]
-		key := port
-		portToCallID[key] = callID
+		portToCallID[port] = callID
 	}
 }
 
 func IsTracked(packet gopacket.Packet) bool {
 	dst := packet.TransportLayer().TransportFlow().Dst().String()
-	_, ok := portToCallID[dst]
-	return ok
+	src := packet.TransportLayer().TransportFlow().Src().String()
+	_, dstOk := portToCallID[dst]
+	_, srcOk := portToCallID[src]
+	return dstOk || srcOk
 }
 
 func GetCallIDForPacket(packet gopacket.Packet) string {

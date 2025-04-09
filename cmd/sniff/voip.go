@@ -68,23 +68,38 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		case *layers.TCP:
 			if layer.SrcPort == 5060 || layer.DstPort == 5060 {
 
-				callID := extractCallID(packet)
-				if callID != "" {
-					capture.WriteSIP(callID, packet)
+				if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+					tcp, _ := tcpLayer.(*layers.TCP)
+					payload := tcp.Payload
+					if HandleSIPMessage(payload, sipusers) == false {
+						continue
+					}
+					callID := extractCallID(packet)
+					if callID != "" {
+						// fmt.Println("Call-ID:", callID)
+						capture.WriteSIP(callID, packet)
+						// _, body := capture.ParseSIPHeaders(payload)
+						// if strings.Contains(body, "m=audio") {
+						// 	fmt.Println("Extracting Port")
+						// 	capture.ExtractPortFromSDP(body, callID)
+						// }
+					}
+					capture.UpdateCallState(callID, "TCP-SIP", pkt.LinkType)
+					assembler.AssembleWithTimestamp(
+						packet.NetworkLayer().NetworkFlow(),
+						layer,
+						packet.Metadata().Timestamp,
+					)
 				}
-				capture.UpdateCallState(callID, "TCP-SIP", pkt.LinkType)
-				assembler.AssembleWithTimestamp(
-					packet.NetworkLayer().NetworkFlow(),
-					layer,
-					packet.Metadata().Timestamp,
-				)
 			}
 		case *layers.UDP:
 			if layer.SrcPort == 5060 || layer.DstPort == 5060 {
 				if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 					udp, _ := udpLayer.(*layers.UDP)
 					payload := udp.Payload
-					HandleSIPMessage(payload, sipusers)
+					if HandleSIPMessage(payload, sipusers) == false {
+						continue
+					}
 					headers, body := capture.ParseSIPHeaders(payload)
 
 					callID := headers["call-id"]
@@ -97,8 +112,8 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 					}
 				}
 			} else if capture.IsTracked(packet) {
-				fmt.Println("caught tracked packet")
 				callID := capture.GetCallIDForPacket(packet)
+				fmt.Println("caught tracked packet, callid", callID)
 				capture.WriteRTP(callID, packet)
 			}
 		}
@@ -121,14 +136,14 @@ func extractCallID(packet gopacket.Packet) string {
 	return ""
 }
 
-func HandleSIPMessage(data []byte, usernames []string) {
+func HandleSIPMessage(data []byte, usernames []string) bool {
 	lines := bytes.Split(data, []byte("\n"))
 	if len(lines) == 0 {
-		return
+		return false
 	}
 	startLine := strings.TrimSpace(string(lines[0]))
 	if !isSIPStartLine(startLine) {
-		return
+		return false
 	}
 
 	headers, body := capture.ParseSIPHeaders(data)
@@ -139,13 +154,17 @@ func HandleSIPMessage(data []byte, usernames []string) {
 			// method := detectSIPMethod(startLine)
 
 			if strings.Contains(body, "m=audio") {
+				fmt.Println("extracting Port for callid", callID)
 				capture.ExtractPortFromSDP(body, callID)
 			}
 		}
+		return true
 	}
+	return false
 }
 
 func processSIPStream(r io.Reader, usernames []string) {
+	fmt.Println("processSIPStream")
 	full, err := io.ReadAll(r)
 	if err != nil || len(full) == 0 {
 		return
@@ -168,6 +187,7 @@ func containsUserInHeaders(headers map[string]string, usernames []string) bool {
 		val := headers[field]
 		for _, u := range usernames {
 			if strings.Contains(val, u) {
+				// fmt.Println("true", val)
 				return true
 			}
 		}

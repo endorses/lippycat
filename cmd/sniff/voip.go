@@ -76,13 +76,7 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 					}
 					callID := extractCallID(packet)
 					if callID != "" {
-						// fmt.Println("Call-ID:", callID)
 						capture.WriteSIP(callID, packet)
-						// _, body := capture.ParseSIPHeaders(payload)
-						// if strings.Contains(body, "m=audio") {
-						// 	fmt.Println("Extracting Port")
-						// 	capture.ExtractPortFromSDP(body, callID)
-						// }
 					}
 					capture.UpdateCallState(callID, "TCP-SIP", pkt.LinkType)
 					assembler.AssembleWithTimestamp(

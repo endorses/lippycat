@@ -74,16 +74,16 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 					if HandleSIPMessage(payload, sipusers) == false {
 						continue
 					}
-					callID := extractCallID(packet)
-					if callID != "" {
-						capture.WriteSIP(callID, packet)
-					}
+					callID := extractCallIDFromTCP(packet)
 					capture.UpdateCallState(callID, "TCP-SIP", pkt.LinkType)
 					assembler.AssembleWithTimestamp(
 						packet.NetworkLayer().NetworkFlow(),
 						layer,
 						packet.Metadata().Timestamp,
 					)
+					if callID != "" {
+						capture.WriteSIP(callID, packet)
+					}
 				}
 			}
 		case *layers.UDP:
@@ -94,9 +94,10 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 					if HandleSIPMessage(payload, sipusers) == false {
 						continue
 					}
-					headers, body := capture.ParseSIPHeaders(payload)
+					_, body := capture.ParseSIPHeaders(payload)
 
-					callID := headers["call-id"]
+					callID := extractCallIDFromUDP(packet)
+					// callID := headers["call-id"]
 					if callID != "" {
 						capture.UpdateCallState(callID, "UDP-SIP", pkt.LinkType)
 						capture.WriteSIP(callID, packet)
@@ -114,17 +115,30 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 	}
 }
 
-func extractCallID(packet gopacket.Packet) string {
+func extractCallIDFromTCP(packet gopacket.Packet) string {
+	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		tcp, _ := tcpLayer.(*layers.TCP)
+		return (extractCallIDFromPayload(tcp.Payload))
+	}
+	return ""
+}
+
+func extractCallIDFromUDP(packet gopacket.Packet) string {
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp, _ := udpLayer.(*layers.UDP)
-		payload := udp.Payload
-		text := string(payload)
-		lines := strings.Split(text, "\n")
-		for _, line := range lines {
-			if strings.HasPrefix(strings.ToLower(line), "call-id:") {
-				callID := strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
-				return string(callID)
-			}
+		// payload := udp.Payload
+		return (extractCallIDFromPayload(udp.Payload))
+	}
+	return ""
+}
+
+func extractCallIDFromPayload(payload gopacket.Payload) string {
+	text := string(payload)
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(strings.ToLower(line), "call-id:") {
+			callID := strings.TrimSpace(strings.SplitN(line, ":", 2)[1])
+			return string(callID)
 		}
 	}
 	return ""

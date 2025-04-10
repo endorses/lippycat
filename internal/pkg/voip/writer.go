@@ -1,4 +1,4 @@
-package capture
+package voip
 
 import (
 	"os"
@@ -8,8 +8,10 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
-var sipFile, rtpFile *os.File
-var sipWriter, rtpWriter *pcapgo.Writer
+var (
+	sipFile, rtpFile     *os.File
+	sipWriter, rtpWriter *pcapgo.Writer
+)
 
 func CloseWriters() {
 	sipFile.Close()

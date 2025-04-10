@@ -1,6 +1,7 @@
-package capture
+package voip
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +34,27 @@ func init() {
 	go janitorLoop()
 }
 
-func UpdateCallState(callID, newState string, linkType layers.LinkType) *CallInfo {
+func (c *CallInfo) SetCallInfoState(newState string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	c.State = newState
+	c.LastUpdated = time.Now()
+}
+
+func getCall(callID string) (*CallInfo, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	result, exists := callMap[callID]
+	if exists != true {
+		return nil, errors.New("The CallID does not exist.")
+	}
+
+	return result, nil
+}
+
+func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -41,22 +62,19 @@ func UpdateCallState(callID, newState string, linkType layers.LinkType) *CallInf
 	if !exists {
 		call = &CallInfo{
 			CallID:      callID,
-			State:       newState,
+			State:       "NEW", // or empty string
 			Created:     time.Now(),
 			LastUpdated: time.Now(),
 			LinkType:    linkType,
 		}
 		call.initWriters()
 		callMap[callID] = call
-	} else {
-		call.State = newState
-		call.LastUpdated = time.Now()
 	}
 	return call
 }
 
 func (c *CallInfo) initWriters() {
-	os.MkdirAll("captures", 0755)
+	os.MkdirAll("captures", 0o755)
 
 	sipPath := filepath.Join("captures", fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
 	rtpPath := filepath.Join("captures", fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))

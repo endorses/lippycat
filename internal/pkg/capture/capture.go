@@ -47,7 +47,7 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 			tcpInfo.Device = device
 			tcpInfo.LinkType = tcpHandle.LinkType()
 			tcpInfo.Handle = tcpHandle
-			go captureFromInterface(tcpInfo, filter, packetChan)
+			captureFromInterface(tcpInfo, filter, packetChan)
 
 			// UDP handle
 			udpHandle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
@@ -59,7 +59,7 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 			udpInfo.Device = device
 			udpInfo.LinkType = udpHandle.LinkType()
 			udpInfo.Handle = udpHandle
-			go captureFromInterface(udpInfo, filter, packetChan)
+			captureFromInterface(udpInfo, filter, packetChan)
 
 			// captureFromInterface(info, filter, packetChan)
 		}(iface)

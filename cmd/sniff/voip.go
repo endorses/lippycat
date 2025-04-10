@@ -19,14 +19,14 @@ var sipuser string
 
 func voipHandler(cmd *cobra.Command, args []string) {
 	for _, user := range strings.Split(sipuser, ",") {
-		voip.SIPUsers.AddSIPUser(user)
+		voip.SipUsers.AddSipUser(user)
 	}
 
 	fmt.Println("Sniffing Voip")
 
-	// if filter == "" {
-	// 	filter = "port 5060"
-	// }
+	if filter == "" {
+		filter = "port 5060"
+	}
 
 	voip.StartVoipSniffer(interfaces, filter)
 }

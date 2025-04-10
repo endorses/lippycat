@@ -39,7 +39,7 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 func containsUserInHeaders(headers map[string]string) bool {
 	for _, field := range []string{"from", "to", "p-asserted-identity"} {
 		val := headers[field]
-		for _, u := range SIPUsers.usernames {
+		for _, u := range SipUsers.usernames {
 			if strings.Contains(val, u) {
 				// fmt.Println("true", val)
 				return true

@@ -2,34 +2,34 @@ package voip
 
 import "sync"
 
-type SIPUserList struct {
+type SipUserList struct {
 	usernames []string
 }
 
 var (
-	SIPUsers SIPUserList
+	SipUsers SipUserList
 	mu2      sync.Mutex
 )
 
-func (s *SIPUserList) AddSIPUser(username string) {
+func (s *SipUserList) AddSipUser(username string) {
 	mu2.Lock()
 	defer mu2.Unlock()
 	s.usernames = append(s.usernames, username)
 }
 
-func (s *SIPUserList) AddMultipleSIPUsers(usernames []string) {
+func (s *SipUserList) AddMultipleSipUsers(usernames []string) {
 	mu2.Lock()
 	defer mu2.Unlock()
 	s.usernames = append(s.usernames, usernames...)
 }
 
-func (s *SIPUserList) DeleteSIPUser(username string) {
+func (s *SipUserList) DeleteSipUser(username string) {
 	mu2.Lock()
 	defer mu2.Unlock()
 	s.usernames = remove(s.usernames, username)
 }
 
-func (s *SIPUserList) DeleteMultipleSIPUsers(usernames []string) {
+func (s *SipUserList) DeleteMultipleSipUsers(usernames []string) {
 	mu2.Lock()
 	defer mu2.Unlock()
 	for _, username := range usernames {

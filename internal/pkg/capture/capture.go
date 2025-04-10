@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"fmt"
 	"log"
 	"sync"
 
@@ -31,6 +32,7 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 
 	var udpInfo, tcpInfo InterfaceInfo
 	var wg sync.WaitGroup
+	fmt.Println("filter", filter)
 
 	for _, iface := range devices {
 		wg.Add(1)
@@ -38,7 +40,6 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 			defer wg.Done()
 			// TCP handle
 			tcpHandle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
-			tcpHandle.SetBPFFilter("tcp and port 5060")
 			if err != nil {
 				log.Fatal("Error setting TCP pcap handle:", err)
 			}
@@ -46,11 +47,10 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 			tcpInfo.Device = device
 			tcpInfo.LinkType = tcpHandle.LinkType()
 			tcpInfo.Handle = tcpHandle
-			go captureFromInterface(tcpInfo, iface, packetChan)
+			go captureFromInterface(tcpInfo, filter, packetChan)
 
 			// UDP handle
 			udpHandle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
-			udpHandle.SetBPFFilter("udp and port 5060")
 			// handle, err := pcap.OpenLive(device, snapshotLen, promiscuous, timeout)
 			if err != nil {
 				log.Fatal("Error setting UDP pcap handle:", err)
@@ -59,7 +59,7 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 			udpInfo.Device = device
 			udpInfo.LinkType = udpHandle.LinkType()
 			udpInfo.Handle = udpHandle
-			go captureFromInterface(udpInfo, iface, packetChan)
+			go captureFromInterface(udpInfo, filter, packetChan)
 
 			// captureFromInterface(info, filter, packetChan)
 		}(iface)
@@ -75,7 +75,7 @@ func captureFromInterface(info InterfaceInfo, filter string, ch chan PacketInfo)
 
 	err := handle.SetBPFFilter(filter)
 	if err != nil {
-		log.Fatal("Error setting BPF filter:", err)
+		log.Fatal("Error setting BPF filter:", filter, err)
 	}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())

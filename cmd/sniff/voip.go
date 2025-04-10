@@ -24,6 +24,10 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 	fmt.Println("Sniffing Voip")
 
+	if filter == "" {
+		filter = "port 5060"
+	}
+
 	voip.StartSIPSniffer(interfaces, filter)
 }
 

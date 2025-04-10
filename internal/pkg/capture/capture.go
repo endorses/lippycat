@@ -30,40 +30,62 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 	snapshotLen := int32(65535)
 	timeout := pcap.BlockForever
 
-	var udpInfo, tcpInfo InterfaceInfo
-	var wg sync.WaitGroup
-	fmt.Println("filter", filter)
+	var wgTcp sync.WaitGroup
+	var info InterfaceInfo
+	fmt.Println("filter tcp", filter)
 
 	for _, iface := range devices {
-		wg.Add(1)
+		wgTcp.Add(1)
 		go func(device string) {
-			defer wg.Done()
-			tcpHandle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
+			defer wgTcp.Done()
+			handle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
 			if err != nil {
 				log.Fatal("Error setting TCP pcap handle:", err)
 			}
-			defer tcpHandle.Close()
-			tcpInfo.Device = device
-			tcpInfo.LinkType = tcpHandle.LinkType()
-			tcpInfo.Handle = tcpHandle
-			captureFromInterface(tcpInfo, filter, packetChan)
-
-			udpHandle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
-			if err != nil {
-				log.Fatal("Error setting UDP pcap handle:", err)
-			}
-			defer udpHandle.Close()
-			udpInfo.Device = device
-			udpInfo.LinkType = udpHandle.LinkType()
-			udpInfo.Handle = udpHandle
-			captureFromInterface(udpInfo, filter, packetChan)
+			defer handle.Close()
+			info.Device = device
+			info.LinkType = handle.LinkType()
+			info.Handle = handle
+			captureFromInterface(info, filter, packetChan)
 		}(iface)
 	}
 	go packetProcessor(packetChan, assembler)
 
-	wg.Wait()
+	wgTcp.Wait()
 	close(packetChan)
 }
+
+// func InitUdp(devices []string, filter string, packetProcessor func(ch <-chan PacketInfo)) {
+// 	packetChan := make(chan PacketInfo, 1000)
+//
+// 	promiscuous := false
+// 	snapshotLen := int32(65535)
+// 	timeout := pcap.BlockForever
+//
+// 	var wg sync.WaitGroup
+// 	var info InterfaceInfo
+// 	fmt.Println("filter", filter)
+//
+// 	for _, iface := range devices {
+// 		wg.Add(1)
+// 		go func(device string) {
+// 			defer wg.Done()
+// 			handle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
+// 			if err != nil {
+// 				log.Fatal("Error setting TCP pcap handle:", err)
+// 			}
+// 			defer handle.Close()
+// 			info.Device = device
+// 			info.LinkType = handle.LinkType()
+// 			info.Handle = handle
+// 			captureFromInterface(info, filter, packetChan)
+// 		}(iface)
+// 	}
+// 	go packetProcessor(packetChan)
+//
+// 	wg.Wait()
+// 	close(packetChan)
+// }
 
 func captureFromInterface(info InterfaceInfo, filter string, ch chan PacketInfo) {
 	handle := info.Handle

@@ -24,11 +24,11 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 	fmt.Println("Sniffing Voip")
 
-	if filter == "" {
-		filter = "port 5060"
-	}
+	// if filter == "" {
+	// 	filter = "port 5060"
+	// }
 
-	voip.StartSIPSniffer(interfaces, filter)
+	voip.StartVoipSniffer(interfaces, filter)
 }
 
 // func containsAny(s string, substrs []string) bool {

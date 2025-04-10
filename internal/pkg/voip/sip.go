@@ -3,17 +3,7 @@ package voip
 import (
 	"bytes"
 	"strings"
-
-	"github.com/endorses/lippycat/internal/pkg/capture"
-	"github.com/google/gopacket/tcpassembly"
 )
-
-func StartSIPSniffer(interfaces, filter string) {
-	streamFactory := NewSIPStreamFactory()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
-	capture.Init(strings.Split(interfaces, ","), filter, StartProcessor, assembler)
-}
 
 func handleSIPMessage(data []byte) bool {
 	lines := bytes.Split(data, []byte("\n"))

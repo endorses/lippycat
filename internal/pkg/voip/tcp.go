@@ -2,7 +2,6 @@ package voip
 
 import (
 	"io"
-	"log"
 	"sync"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -25,7 +24,7 @@ func (c *CallIDDetector) SetCallID(id string) {
 	if !c.found {
 		c.callID = id
 		c.found = true
-		close(c.done) // signal others
+		close(c.done)
 	}
 }
 
@@ -38,18 +37,17 @@ func (c *CallIDDetector) Wait() string {
 
 type sipStreamFactory struct{}
 
-func NewSIPStreamFactory() tcpassembly.StreamFactory {
+func NewSipStreamFactory() tcpassembly.StreamFactory {
 	return &sipStreamFactory{}
 }
 
 func (f *sipStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
 	r := tcpreader.NewReaderStream()
-	go processTCPSIPStream(&r)
+	go processTcpSipStream(&r)
 	return &r
 }
 
-func processTCPSIPStream(r io.Reader) {
-	// fmt.Println("processSIPStream")
+func processTcpSipStream(r io.Reader) {
 	full, err := io.ReadAll(r)
 	if err != nil || len(full) == 0 {
 		return
@@ -57,32 +55,18 @@ func processTCPSIPStream(r io.Reader) {
 	handleSIPMessage(full)
 }
 
-func HandleTCPPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {
+func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {
 	if layer.SrcPort == 5060 || layer.DstPort == 5060 {
 		packet := pkt.Packet
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-			// tcp, _ := tcpLayer.(*layers.TCP)
-			// payload := tcp.Payload
-			// if handleSIPMessage(payload) == false {
-			// 	return
-			// }
 
 			callIDDetector := &CallIDDetector{done: make(chan struct{})}
-
-			// callID := extractCallIDFromTCP(packet)
-			// if capture.HasCall(callID) == false {
-			// 	capture.GetOrCreateCall(callID, pkt.LinkType)
-			// } else {
-			// 	capture.UpdateCallState(callID, "TCP-SIP")
-			// }
 			assembler.AssembleWithTimestamp(
 				packet.NetworkLayer().NetworkFlow(),
 				layer,
 				packet.Metadata().Timestamp,
 			)
-			// Wait until Call-ID is found
 			callID := callIDDetector.Wait()
-			log.Printf("Got Call-ID: %s", callID)
 			if callID != "" {
 				WriteSIP(callID, packet)
 			}

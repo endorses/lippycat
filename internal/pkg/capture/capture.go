@@ -18,9 +18,8 @@ type PacketInfo struct {
 }
 
 type InterfaceInfo struct {
-	Device   string
-	LinkType layers.LinkType
-	Handle   *pcap.Handle
+	Device string
+	Handle *pcap.Handle
 }
 
 func Init(devices []string, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
@@ -44,7 +43,6 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 			}
 			defer handle.Close()
 			info.Device = device
-			info.LinkType = handle.LinkType()
 			info.Handle = handle
 			captureFromInterface(info, filter, packetChan)
 		}(iface)
@@ -67,7 +65,7 @@ func captureFromInterface(info InterfaceInfo, filter string, ch chan PacketInfo)
 	for packet := range packetSource.Packets() {
 		ch <- PacketInfo{
 			Device:   info.Device,
-			LinkType: info.LinkType,
+			LinkType: handle.LinkType(),
 			Packet:   packet,
 		}
 	}

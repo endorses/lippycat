@@ -21,7 +21,7 @@ func handleSipMessage(data []byte) bool {
 		callID := headers["call-id"]
 		if callID != "" {
 			if strings.Contains(body, "m=audio") {
-				method := detectSIPMethod(startLine)
+				method := detectSipMethod(startLine)
 				call, err := getCall(callID)
 				if err != nil {
 					call.SetCallInfoState(method)
@@ -35,7 +35,7 @@ func handleSipMessage(data []byte) bool {
 	return false
 }
 
-func detectSIPMethod(line string) string {
+func detectSipMethod(line string) string {
 	if strings.HasPrefix(line, "INVITE") {
 		return "INVITE"
 	}

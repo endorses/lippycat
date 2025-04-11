@@ -11,7 +11,7 @@ func handleSipMessage(data []byte) bool {
 		return false
 	}
 	startLine := strings.TrimSpace(string(lines[0]))
-	if !isSIPStartLine(startLine) {
+	if !isSipStartLine(startLine) {
 		return false
 	}
 
@@ -51,7 +51,7 @@ func detectSipMethod(line string) string {
 	return "UNKNOWN"
 }
 
-func isSIPStartLine(line string) bool {
+func isSipStartLine(line string) bool {
 	return strings.HasPrefix(line, "INVITE") ||
 		strings.HasPrefix(line, "BYE") ||
 		strings.HasPrefix(line, "ACK") ||

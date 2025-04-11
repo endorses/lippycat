@@ -52,7 +52,7 @@ func processTcpSipStream(r io.Reader) {
 	if err != nil || len(full) == 0 {
 		return
 	}
-	handleSIPMessage(full)
+	handleSipMessage(full)
 }
 
 func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {

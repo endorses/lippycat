@@ -14,7 +14,7 @@ func HandleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 			udp, _ := udpLayer.(*layers.UDP)
 			payload := udp.Payload
-			if handleSIPMessage(payload) == false {
+			if handleSipMessage(payload) == false {
 				return
 			}
 			headers, body := parseSIPHeaders(payload)

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func handleSIPMessage(data []byte) bool {
+func handleSipMessage(data []byte) bool {
 	lines := bytes.Split(data, []byte("\n"))
 	if len(lines) == 0 {
 		return false

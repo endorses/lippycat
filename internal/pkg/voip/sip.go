@@ -15,7 +15,7 @@ func handleSipMessage(data []byte) bool {
 		return false
 	}
 
-	headers, body := parseSIPHeaders(data)
+	headers, body := parseSipHeaders(data)
 
 	if containsUserInHeaders(headers) {
 		callID := headers["call-id"]
@@ -61,7 +61,7 @@ func isSIPStartLine(line string) bool {
 		strings.HasPrefix(line, "SIP/2.0")
 }
 
-func parseSIPHeaders(data []byte) (map[string]string, string) {
+func parseSipHeaders(data []byte) (map[string]string, string) {
 	headers := make(map[string]string)
 	text := string(data)
 	lines := strings.Split(text, "\n")

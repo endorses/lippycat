@@ -17,7 +17,7 @@ func HandleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 			if handleSipMessage(payload) == false {
 				return
 			}
-			headers, body := parseSIPHeaders(payload)
+			headers, body := parseSipHeaders(payload)
 			callID := headers["call-id"]
 			if callID != "" {
 				GetOrCreateCall(callID, pkt.LinkType)

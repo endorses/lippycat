@@ -3,6 +3,7 @@ package sniff
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
@@ -18,8 +19,11 @@ var voipCmd = &cobra.Command{
 var sipuser string
 
 func voipHandler(cmd *cobra.Command, args []string) {
+	expirationDate := time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)
+	su := voip.SipUser{ExpirationDate: expirationDate}
+
 	for _, user := range strings.Split(sipuser, ",") {
-		voip.SipUsers.AddSipUser(user)
+		voip.AddSipUser(user, &su)
 	}
 
 	fmt.Println("Sniffing Voip")

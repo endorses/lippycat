@@ -1,48 +1,47 @@
 package voip
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
-type SipUserList struct {
-	usernames []string
+type SipUser struct {
+	ExpirationDate time.Time
 }
 
 var (
-	SipUsers SipUserList
-	mu2      sync.Mutex
+	SipUserMap = make(map[string]*SipUser)
+	muSu       sync.Mutex
 )
 
-func (s *SipUserList) AddSipUser(username string) {
-	mu2.Lock()
-	defer mu2.Unlock()
-	s.usernames = append(s.usernames, username)
+func AddSipUser(username string, newSipUser *SipUser) {
+	muSu.Lock()
+	defer muSu.Unlock()
+	su, exists := SipUserMap[username]
+	if !exists {
+		su = &SipUser{ExpirationDate: newSipUser.ExpirationDate}
+		SipUserMap[username] = su
+	}
 }
 
-func (s *SipUserList) AddMultipleSipUsers(usernames []string) {
-	mu2.Lock()
-	defer mu2.Unlock()
-	s.usernames = append(s.usernames, usernames...)
+func AddMultipleSipUsers(sipUsers map[string]*SipUser) {
+	muSu.Lock()
+	defer muSu.Unlock()
+	for username, sipUser := range sipUsers {
+		AddSipUser(username, sipUser)
+	}
 }
 
-func (s *SipUserList) DeleteSipUser(username string) {
-	mu2.Lock()
-	defer mu2.Unlock()
-	s.usernames = remove(s.usernames, username)
+func DeleteSipUser(username string) {
+	muSu.Lock()
+	defer muSu.Unlock()
+	delete(SipUserMap, username)
 }
 
-func (s *SipUserList) DeleteMultipleSipUsers(usernames []string) {
-	mu2.Lock()
-	defer mu2.Unlock()
+func DeleteMultipleSipUsers(usernames []string) {
+	muSu.Lock()
+	defer muSu.Unlock()
 	for _, username := range usernames {
-		s.usernames = remove(s.usernames, username)
+		delete(SipUserMap, username)
 	}
-}
-
-func remove(slice []string, value string) []string {
-	newSlice := []string{}
-	for _, item := range slice {
-		if item != value {
-			newSlice = append(newSlice, item)
-		}
-	}
-	return newSlice
 }

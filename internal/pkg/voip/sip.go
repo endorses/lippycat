@@ -27,7 +27,7 @@ func handleSipMessage(data []byte) bool {
 					call.SetCallInfoState(method)
 				}
 				// fmt.Println("extracting Port for callid", callID)
-				ExtractPortFromSDP(body, callID)
+				ExtractPortFromSdp(body, callID)
 			}
 		}
 		return true

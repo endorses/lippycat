@@ -8,7 +8,7 @@ import (
 
 var portToCallID = make(map[string]string) // key = port, value = CallID
 
-func ExtractPortFromSDP(line string, callID string) {
+func ExtractPortFromSdp(line string, callID string) {
 	_, partThatContainsPort, hasPort := strings.Cut(line, "m=audio")
 	if hasPort != true {
 		return

@@ -23,7 +23,7 @@ func HandleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 				GetOrCreateCall(callID, pkt.LinkType)
 				WriteSIP(callID, packet)
 				if strings.Contains(body, "m=audio") {
-					ExtractPortFromSDP(body, callID)
+					ExtractPortFromSdp(body, callID)
 				}
 			}
 		}

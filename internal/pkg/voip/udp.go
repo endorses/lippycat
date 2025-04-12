@@ -8,7 +8,7 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-func HandleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
+func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 	packet := pkt.Packet
 	if layer.SrcPort == 5060 || layer.DstPort == 5060 {
 		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {

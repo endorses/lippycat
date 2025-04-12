@@ -55,7 +55,7 @@ func processTcpSipStream(r io.Reader) {
 	handleSipMessage(full)
 }
 
-func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {
+func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {
 	if layer.SrcPort == 5060 || layer.DstPort == 5060 {
 		packet := pkt.Packet
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {

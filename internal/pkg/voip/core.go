@@ -15,10 +15,10 @@ func StartVoipSniffer(interfaces, filter string) {
 	streamFactory := NewSipStreamFactory()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
-	capture.Init(strings.Split(interfaces, ","), filter, StartProcessor, assembler)
+	capture.Init(strings.Split(interfaces, ","), filter, startProcessor, assembler)
 }
 
-func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 	defer CloseWriters()
 	fmt.Println("Starting Processor")
 	for pkt := range ch {
@@ -29,10 +29,10 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		switch layer := packet.TransportLayer().(type) {
 		case *layers.TCP:
 			// fmt.Println("TCP")
-			HandleTcpPackets(pkt, layer, assembler)
+			handleTcpPackets(pkt, layer, assembler)
 		case *layers.UDP:
 			// fmt.Println("UDP")
-			HandleUdpPackets(pkt, layer)
+			handleUdpPackets(pkt, layer)
 		}
 	}
 }

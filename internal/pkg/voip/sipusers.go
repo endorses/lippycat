@@ -33,7 +33,9 @@ func AddMultipleSipUsers(sipUsers map[string]*SipUser) {
 func DeleteSipUser(username string) {
 	muSu.Lock()
 	defer muSu.Unlock()
-	delete(SipUserMap, username)
+	if _, ok := SipUserMap[username]; ok {
+		delete(SipUserMap, username)
+	}
 }
 
 func DeleteMultipleSipUsers(usernames []string) {

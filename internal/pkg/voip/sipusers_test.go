@@ -15,6 +15,7 @@ type testCase struct {
 var (
 	sipUser1 = SipUser{ExpirationDate: time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)}
 	sipUser2 = SipUser{ExpirationDate: time.Date(2035, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)}
+	test     = make(map[string]*SipUser)
 )
 
 func TestAddSipUser(t *testing.T) {
@@ -32,10 +33,28 @@ func TestAddSipUser(t *testing.T) {
 
 func TestAddMultipleSipUsers(t *testing.T) {
 	t.Run("multi user add", func(t *testing.T) {
-		test := make(map[string]*SipUser)
-		test["sipUser1"] = &sipUser1
-		test["sipUser2"] = &sipUser2
+		test["testuser3"] = &sipUser1
+		test["testuser4"] = &sipUser2
 		AddMultipleSipUsers(test)
-		assert.Equal(t, test["sipUser1"], SipUserMap["sipUser1"])
+		assert.Equal(t, test["sipUser3"], SipUserMap["sipUser3"])
+		assert.Equal(t, test["sipUser4"], SipUserMap["sipUser4"])
+	})
+}
+
+func TestDeleteSipUser(t *testing.T) {
+	t.Run("delete sip user", func(t *testing.T) {
+		SipUserMap["testuser5"] = &sipUser2
+		DeleteSipUser("sipUser3")
+		assert.Equal(t, (*SipUser)(nil), test["testuser5"])
+	})
+}
+
+func TestDeleteMultipleSipUsers(t *testing.T) {
+	t.Run("delete multiple sip users", func(t *testing.T) {
+		SipUserMap["testuser6"] = &sipUser2
+		SipUserMap["testuser7"] = &sipUser2
+		DeleteMultipleSipUsers([]string{"testuser6", "testuser7"})
+		assert.Equal(t, (*SipUser)(nil), test["testuser6"])
+		assert.Equal(t, (*SipUser)(nil), test["testuser7"])
 	})
 }

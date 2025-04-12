@@ -45,7 +45,6 @@ func captureFromInterface(iface pcaptypes.PcapInterface, filter string, ch chan 
 	if filterErr != nil {
 		log.Fatal("Error setting BPF filter:", filter, err)
 	}
-
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		ch <- PacketInfo{

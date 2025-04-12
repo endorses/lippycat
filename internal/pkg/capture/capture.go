@@ -1,7 +1,6 @@
 package capture
 
 import (
-	"fmt"
 	"log"
 	"sync"
 
@@ -29,14 +28,13 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 	snapshotLen := int32(65535)
 	timeout := pcap.BlockForever
 
-	var wgTcp sync.WaitGroup
+	var wg sync.WaitGroup
 	var info InterfaceInfo
-	fmt.Println("filter tcp", filter)
 
 	for _, iface := range devices {
-		wgTcp.Add(1)
+		wg.Add(1)
 		go func(device string) {
-			defer wgTcp.Done()
+			defer wg.Done()
 			handle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
 			if err != nil {
 				log.Fatal("Error setting TCP pcap handle:", err)
@@ -49,7 +47,7 @@ func Init(devices []string, filter string, packetProcessor func(ch <-chan Packet
 	}
 	go packetProcessor(packetChan, assembler)
 
-	wgTcp.Wait()
+	wg.Wait()
 	close(packetChan)
 }
 

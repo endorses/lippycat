@@ -25,6 +25,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 	for _, user := range strings.Split(sipuser, ",") {
 		sipusers.AddSipUser(user, &su)
+		// sipusers.AddSipUser(user, &sipusers.SipUser{ExpirationDate: time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)})
 	}
 
 	fmt.Println("Sniffing Voip")

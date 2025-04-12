@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
@@ -12,10 +13,15 @@ import (
 
 func StartVoipSniffer(interfaces, filter string) {
 	fmt.Println("Starting VOIP Sniffer")
+	var devices []pcaptypes.PcapInterface
+	for _, device := range strings.Split(interfaces, ",") {
+		iface := pcaptypes.CreateLiveInterface(device)
+		devices = append(devices, iface)
+	}
 	streamFactory := NewSipStreamFactory()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
-	capture.Init(strings.Split(interfaces, ","), filter, startProcessor, assembler)
+	capture.Init(devices, filter, startProcessor, assembler)
 }
 
 func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {

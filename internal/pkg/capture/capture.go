@@ -4,65 +4,51 @@ import (
 	"log"
 	"sync"
 
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 	"github.com/google/gopacket/tcpassembly"
 )
 
 type PacketInfo struct {
-	Device   string
 	LinkType layers.LinkType
 	Packet   gopacket.Packet
 }
 
-type InterfaceInfo struct {
-	Device string
-	Handle *pcap.Handle
-}
-
-func Init(devices []string, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
 	packetChan := make(chan PacketInfo, 1000)
-
-	promiscuous := false
-	snapshotLen := int32(65535)
-	timeout := pcap.BlockForever
-
 	var wg sync.WaitGroup
-	var info InterfaceInfo
-
-	for _, iface := range devices {
+	for _, iface := range ifaces {
 		wg.Add(1)
-		go func(device string) {
+		go func(pif pcaptypes.PcapInterface) {
 			defer wg.Done()
-			handle, err := pcap.OpenLive(iface, snapshotLen, promiscuous, timeout)
+			err := iface.SetHandle()
 			if err != nil {
 				log.Fatal("Error setting TCP pcap handle:", err)
 			}
+			handle, err := iface.GetHandle()
 			defer handle.Close()
-			info.Device = device
-			info.Handle = handle
-			captureFromInterface(info, filter, packetChan)
+			captureFromInterface(iface, filter, packetChan)
 		}(iface)
 	}
 	go packetProcessor(packetChan, assembler)
-
 	wg.Wait()
 	close(packetChan)
 }
 
-func captureFromInterface(info InterfaceInfo, filter string, ch chan PacketInfo) {
-	handle := info.Handle
-
-	err := handle.SetBPFFilter(filter)
+func captureFromInterface(iface pcaptypes.PcapInterface, filter string, ch chan PacketInfo) {
+	handle, err := iface.GetHandle()
 	if err != nil {
+		log.Fatal("Unable to set handle")
+	}
+	filterErr := handle.SetBPFFilter(filter)
+	if filterErr != nil {
 		log.Fatal("Error setting BPF filter:", filter, err)
 	}
 
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		ch <- PacketInfo{
-			Device:   info.Device,
 			LinkType: handle.LinkType(),
 			Packet:   packet,
 		}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
@@ -28,11 +29,15 @@ func sniff(cmd *cobra.Command, args []string) {
 	streamFactory := NewTCPStreamFactory()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
-	capture.Init(strings.Split(interfaces, ","), filter, processPacket, assembler)
+	var ifaces []pcaptypes.PcapInterface
+	for _, device := range strings.Split(interfaces, ",") {
+		iface := pcaptypes.CreateLiveInterface(device)
+		ifaces = append(ifaces, iface)
+	}
+	capture.Init(ifaces, filter, processPacket, assembler)
 }
 
-type tcpStreamFactory struct {
-}
+type tcpStreamFactory struct{}
 
 func NewTCPStreamFactory() tcpassembly.StreamFactory {
 	return &tcpStreamFactory{}
@@ -49,7 +54,8 @@ func processStream(r io.Reader) {
 
 func processPacket(packetChan <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 	for p := range packetChan {
-		fmt.Printf("[%s] %s\n", p.Device, p.Packet)
+		// fmt.Printf("[%s] %s\n", p.Device, p.Packet)
+		fmt.Printf("%s\n", p.Packet)
 	}
 }
 

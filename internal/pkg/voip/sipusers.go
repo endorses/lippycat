@@ -25,8 +25,6 @@ func AddSipUser(username string, newSipUser *SipUser) {
 }
 
 func AddMultipleSipUsers(sipUsers map[string]*SipUser) {
-	muSu.Lock()
-	defer muSu.Unlock()
 	for username, sipUser := range sipUsers {
 		AddSipUser(username, sipUser)
 	}

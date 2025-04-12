@@ -1,6 +1,7 @@
-package voip
+package sipusers
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -10,17 +11,17 @@ type SipUser struct {
 }
 
 var (
-	SipUserMap = make(map[string]*SipUser)
+	sipUserMap = make(map[string]*SipUser)
 	muSu       sync.Mutex
 )
 
 func AddSipUser(username string, newSipUser *SipUser) {
 	muSu.Lock()
 	defer muSu.Unlock()
-	su, exists := SipUserMap[username]
+	su, exists := sipUserMap[username]
 	if !exists {
 		su = &SipUser{ExpirationDate: newSipUser.ExpirationDate}
-		SipUserMap[username] = su
+		sipUserMap[username] = su
 	}
 }
 
@@ -33,8 +34,8 @@ func AddMultipleSipUsers(sipUsers map[string]*SipUser) {
 func DeleteSipUser(username string) {
 	muSu.Lock()
 	defer muSu.Unlock()
-	if _, ok := SipUserMap[username]; ok {
-		delete(SipUserMap, username)
+	if _, ok := sipUserMap[username]; ok {
+		delete(sipUserMap, username)
 	}
 }
 
@@ -42,6 +43,15 @@ func DeleteMultipleSipUsers(usernames []string) {
 	muSu.Lock()
 	defer muSu.Unlock()
 	for _, username := range usernames {
-		delete(SipUserMap, username)
+		delete(sipUserMap, username)
 	}
+}
+
+func IsSurveiled(sipHeader string) bool {
+	for username := range sipUserMap {
+		if strings.Contains(sipHeader, username) {
+			return true
+		}
+	}
+	return false
 }

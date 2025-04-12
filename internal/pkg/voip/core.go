@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
 )
@@ -39,11 +40,8 @@ func StartProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 func containsUserInHeaders(headers map[string]string) bool {
 	for _, field := range []string{"from", "to", "p-asserted-identity"} {
 		val := headers[field]
-		for username := range SipUserMap {
-			if strings.Contains(val, username) {
-				// fmt.Println("true", val)
-				return true
-			}
+		if sipusers.IsSurveiled(val) {
+			return true
 		}
 	}
 	return false

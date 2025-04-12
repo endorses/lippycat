@@ -1,4 +1,4 @@
-package voip
+package sipusers
 
 import (
 	"testing"
@@ -26,7 +26,7 @@ func TestAddSipUser(t *testing.T) {
 		}
 		for _, test := range tests {
 			AddSipUser(test.username, test.newSipUser)
-			assert.Equal(t, test.newSipUser.ExpirationDate, SipUserMap[test.username].ExpirationDate)
+			assert.Equal(t, test.newSipUser.ExpirationDate, sipUserMap[test.username].ExpirationDate)
 		}
 	})
 }
@@ -36,14 +36,14 @@ func TestAddMultipleSipUsers(t *testing.T) {
 		test["testuser3"] = &sipUser1
 		test["testuser4"] = &sipUser2
 		AddMultipleSipUsers(test)
-		assert.Equal(t, test["sipUser3"], SipUserMap["sipUser3"])
-		assert.Equal(t, test["sipUser4"], SipUserMap["sipUser4"])
+		assert.Equal(t, test["sipUser3"], sipUserMap["sipUser3"])
+		assert.Equal(t, test["sipUser4"], sipUserMap["sipUser4"])
 	})
 }
 
 func TestDeleteSipUser(t *testing.T) {
 	t.Run("delete sip user", func(t *testing.T) {
-		SipUserMap["testuser5"] = &sipUser2
+		sipUserMap["testuser5"] = &sipUser2
 		DeleteSipUser("sipUser3")
 		assert.Equal(t, (*SipUser)(nil), test["testuser5"])
 	})
@@ -51,8 +51,8 @@ func TestDeleteSipUser(t *testing.T) {
 
 func TestDeleteMultipleSipUsers(t *testing.T) {
 	t.Run("delete multiple sip users", func(t *testing.T) {
-		SipUserMap["testuser6"] = &sipUser2
-		SipUserMap["testuser7"] = &sipUser2
+		sipUserMap["testuser6"] = &sipUser2
+		sipUserMap["testuser7"] = &sipUser2
 		DeleteMultipleSipUsers([]string{"testuser6", "testuser7"})
 		assert.Equal(t, (*SipUser)(nil), test["testuser6"])
 		assert.Equal(t, (*SipUser)(nil), test["testuser7"])

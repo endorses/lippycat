@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/spf13/cobra"
 )
 
@@ -20,10 +21,10 @@ var sipuser string
 
 func voipHandler(cmd *cobra.Command, args []string) {
 	expirationDate := time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)
-	su := voip.SipUser{ExpirationDate: expirationDate}
+	su := sipusers.SipUser{ExpirationDate: expirationDate}
 
 	for _, user := range strings.Split(sipuser, ",") {
-		voip.AddSipUser(user, &su)
+		sipusers.AddSipUser(user, &su)
 	}
 
 	fmt.Println("Sniffing Voip")

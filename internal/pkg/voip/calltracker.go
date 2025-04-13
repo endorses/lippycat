@@ -62,7 +62,7 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 	if !exists {
 		call = &CallInfo{
 			CallID:      callID,
-			State:       "NEW", // or empty string
+			State:       "NEW",
 			Created:     time.Now(),
 			LastUpdated: time.Now(),
 			LinkType:    linkType,

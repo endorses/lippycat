@@ -17,7 +17,10 @@ var voipCmd = &cobra.Command{
 	Run:   voipHandler,
 }
 
-var sipuser string
+var (
+	sipuser string
+	write   bool
+)
 
 func voipHandler(cmd *cobra.Command, args []string) {
 	expirationDate := time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)
@@ -52,4 +55,5 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 func init() {
 	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")
+	voipCmd.Flags().BoolVarP(&write, "write-file", "w", false, "write to pcap file")
 }

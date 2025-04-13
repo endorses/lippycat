@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
@@ -27,6 +28,7 @@ func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pc
 	if err != nil {
 		log.Fatal("Could not read file.")
 	}
+	defer file.Close()
 	iface := pcaptypes.CreateOfflineInterface(file)
 	devices := []pcaptypes.PcapInterface{iface}
 	startSniffer(devices, filter)
@@ -43,24 +45,42 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 type streamFactory struct{}
 
 func NewStreamFactory() tcpassembly.StreamFactory {
+	fmt.Println("NewStreamFactory")
 	return &streamFactory{}
 }
 
 func (f *streamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+	fmt.Println("New")
 	r := tcpreader.NewReaderStream()
 	go processStream(&r)
 	return &r
 }
 
 func processStream(r io.Reader) {
-	full, err := io.ReadAll(r)
-	if err != nil || len(full) == 0 {
-		return
+	fmt.Println("processStream")
+	for {
+		full, err := io.ReadAll(r)
+		if err != nil || len(full) == 0 {
+			return
+		}
 	}
 }
 
 func processPacket(packetChan <-chan PacketInfo, assembler *tcpassembly.Assembler) {
+	fmt.Println("processPacket")
 	for p := range packetChan {
+		packet := p.Packet
+		switch layer := packet.TransportLayer().(type) {
+		case *layers.TCP:
+			// fmt.Println("TCP")
+			assembler.AssembleWithTimestamp(
+				packet.NetworkLayer().NetworkFlow(),
+				layer,
+				packet.Metadata().Timestamp,
+			)
+		case *layers.UDP:
+			// fmt.Println("UDP")
+		}
 		fmt.Printf("%s\n", p.Packet)
 	}
 }

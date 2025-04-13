@@ -9,19 +9,19 @@ import (
 
 type offlineInterface struct {
 	file   *os.File
-	Handle *pcap.Handle
+	handle *pcap.Handle
 }
 
 func (iface *offlineInterface) SetHandle() error {
 	handle, err := pcap.OpenOfflineFile(iface.file)
-	iface.Handle = handle
+	iface.handle = handle
 	return err
 }
 
-func (iface offlineInterface) GetHandle() (*pcap.Handle, error) {
+func (iface offlineInterface) Handle() (*pcap.Handle, error) {
 	var err error
-	if iface.Handle == nil {
+	if iface.handle == nil {
 		err = errors.New("Interface has no handle")
 	}
-	return iface.Handle, err
+	return iface.handle, err
 }

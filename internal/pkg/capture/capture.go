@@ -18,27 +18,34 @@ type PacketInfo struct {
 func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
 	packetChan := make(chan PacketInfo, 1000)
 	var wg sync.WaitGroup
+	var processorWg sync.WaitGroup
+	processorWg.Add(1)
 	for _, iface := range ifaces {
 		wg.Add(1)
 		go func(pif pcaptypes.PcapInterface) {
 			defer wg.Done()
-			err := iface.SetHandle()
+			err := pif.SetHandle()
 			if err != nil {
 				log.Fatal("Error setting TCP pcap handle:", err)
 			}
-			handle, err := iface.GetHandle()
-			// fmt.Println(handle)
+			handle, err := pif.Handle()
 			defer handle.Close()
-			captureFromInterface(iface, filter, packetChan)
+			captureFromInterface(pif, filter, packetChan)
 		}(iface)
 	}
-	go packetProcessor(packetChan, assembler)
-	wg.Wait()
-	close(packetChan)
+	go func() {
+		wg.Wait()
+		close(packetChan)
+	}()
+	go func() {
+		defer processorWg.Done()
+		packetProcessor(packetChan, assembler)
+	}()
+	processorWg.Wait()
 }
 
 func captureFromInterface(iface pcaptypes.PcapInterface, filter string, ch chan PacketInfo) {
-	handle, err := iface.GetHandle()
+	handle, err := iface.Handle()
 	if err != nil {
 		log.Fatal("Unable to set handle")
 	}

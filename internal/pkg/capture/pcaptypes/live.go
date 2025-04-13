@@ -8,7 +8,7 @@ import (
 
 type liveInterface struct {
 	Device string
-	Handle *pcap.Handle
+	handle *pcap.Handle
 }
 
 func (iface *liveInterface) SetHandle() error {
@@ -16,14 +16,14 @@ func (iface *liveInterface) SetHandle() error {
 	snapshotLen := int32(65535)
 	timeout := pcap.BlockForever
 	handle, err := pcap.OpenLive(iface.Device, snapshotLen, promiscuous, timeout)
-	iface.Handle = handle
+	iface.handle = handle
 	return err
 }
 
-func (iface liveInterface) GetHandle() (*pcap.Handle, error) {
+func (iface liveInterface) Handle() (*pcap.Handle, error) {
 	var err error
-	if iface.Handle == nil {
+	if iface.handle == nil {
 		err = errors.New("Interface has no handle")
 	}
-	return iface.Handle, err
+	return iface.handle, err
 }

@@ -2,6 +2,7 @@ package capture
 
 import (
 	"log"
+	"runtime"
 	"sync"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -19,6 +20,7 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 	packetChan := make(chan PacketInfo, 1000)
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
+	numProcessors := runtime.NumCPU()
 	processorWg.Add(1)
 	for _, iface := range ifaces {
 		wg.Add(1)
@@ -37,10 +39,12 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 		wg.Wait()
 		close(packetChan)
 	}()
-	go func() {
-		defer processorWg.Done()
-		packetProcessor(packetChan, assembler)
-	}()
+	for range numProcessors {
+		go func() {
+			defer processorWg.Done()
+			packetProcessor(packetChan, assembler)
+		}()
+	}
 	processorWg.Wait()
 }
 

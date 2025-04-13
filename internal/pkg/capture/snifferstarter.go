@@ -45,19 +45,16 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 type streamFactory struct{}
 
 func NewStreamFactory() tcpassembly.StreamFactory {
-	fmt.Println("NewStreamFactory")
 	return &streamFactory{}
 }
 
 func (f *streamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	fmt.Println("New")
 	r := tcpreader.NewReaderStream()
 	go processStream(&r)
 	return &r
 }
 
 func processStream(r io.Reader) {
-	fmt.Println("processStream")
 	for {
 		full, err := io.ReadAll(r)
 		if err != nil || len(full) == 0 {
@@ -67,7 +64,6 @@ func processStream(r io.Reader) {
 }
 
 func processPacket(packetChan <-chan PacketInfo, assembler *tcpassembly.Assembler) {
-	fmt.Println("processPacket")
 	for p := range packetChan {
 		packet := p.Packet
 		switch layer := packet.TransportLayer().(type) {

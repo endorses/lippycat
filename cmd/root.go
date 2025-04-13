@@ -1,6 +1,5 @@
 /*
 Copyright © 2025 NAME HERE <EMAIL ADDRESS>
-
 */
 package cmd
 
@@ -8,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -38,9 +38,14 @@ func Execute() {
 	}
 }
 
+func addSubCommandPalattes() {
+	rootCmd.AddCommand(sniff.SniffCmd)
+}
+
 func init() {
 	cobra.OnInitialize(initConfig)
 
+	addSubCommandPalattes()
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
@@ -50,6 +55,8 @@ func init() {
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+}
+func init() {
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -2,7 +2,6 @@ package voip
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -11,35 +10,41 @@ import (
 	"github.com/google/gopacket/tcpassembly"
 )
 
-func StartVoipSniffer(interfaces, filter string) {
+func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	fmt.Println("Starting VOIP Sniffer")
-	var devices []pcaptypes.PcapInterface
-	for _, device := range strings.Split(interfaces, ",") {
-		iface := pcaptypes.CreateLiveInterface(device)
-		devices = append(devices, iface)
-	}
 	streamFactory := NewSipStreamFactory()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 	capture.Init(devices, filter, startProcessor, assembler)
 }
 
+func StartLiveVoipSniffer(interfaces, filter string) {
+	capture.StartLiveSniffer(interfaces, filter, StartVoipSniffer)
+}
+
+func StartOfflineVoipSniffer(interfaces, filter string) {
+	capture.StartOfflineSniffer(interfaces, filter, StartVoipSniffer)
+}
+
 func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 	defer CloseWriters()
 	fmt.Println("Starting Processor")
 	for pkt := range ch {
+		fmt.Println("startProcessor for")
 		packet := pkt.Packet
 		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+			fmt.Println("startProcessor nil")
 			continue
 		}
 		switch layer := packet.TransportLayer().(type) {
 		case *layers.TCP:
-			// fmt.Println("TCP")
+			fmt.Println("TCP")
 			handleTcpPackets(pkt, layer, assembler)
 		case *layers.UDP:
-			// fmt.Println("UDP")
+			fmt.Println("UDP")
 			handleUdpPackets(pkt, layer)
 		}
+		fmt.Println("startProcessor postswitch")
 	}
 }
 

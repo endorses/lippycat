@@ -34,7 +34,11 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		filter = "port 5060"
 	}
 
-	voip.StartVoipSniffer(interfaces, filter)
+	if readFile == "" {
+		voip.StartLiveVoipSniffer(interfaces, filter)
+	} else {
+		voip.StartOfflineVoipSniffer(readFile, filter)
+	}
 }
 
 // func containsAny(s string, substrs []string) bool {

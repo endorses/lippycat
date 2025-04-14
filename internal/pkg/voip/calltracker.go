@@ -48,7 +48,6 @@ func getCall(callID string) (*CallInfo, error) {
 	defer mu.Unlock()
 
 	result, exists := callMap[callID]
-	fmt.Println("result call, exist:", result, exists)
 	if !exists {
 		return nil, errors.New("the CallID does not exist")
 	}

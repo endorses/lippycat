@@ -34,7 +34,7 @@ func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 		}
 	} else if IsTracked(packet) {
 		callID := GetCallIDForPacket(packet)
-		fmt.Println("caught tracked packet, callid", callID)
+		// fmt.Println("caught tracked packet, callid", callID)
 		if viper.GetViper().GetBool("writeVoip") {
 			WriteRTP(callID, packet)
 		} else {

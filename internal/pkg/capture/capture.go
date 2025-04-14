@@ -31,6 +31,9 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 				log.Fatal("Error setting TCP pcap handle:", err)
 			}
 			handle, err := pif.Handle()
+			if err != nil {
+				log.Fatal("Error setting TCP pcap handle:", err)
+			}
 			defer handle.Close()
 			captureFromInterface(pif, filter, packetChan)
 		}(iface)

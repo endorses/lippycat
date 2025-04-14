@@ -5,13 +5,9 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/pcapgo"
 )
 
-var (
-	sipFile, rtpFile     *os.File
-	sipWriter, rtpWriter *pcapgo.Writer
-)
+var sipFile, rtpFile *os.File
 
 func CloseWriters() {
 	sipFile.Close()

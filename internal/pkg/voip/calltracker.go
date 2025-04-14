@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+	"github.com/spf13/viper"
 )
 
 type CallInfo struct {
@@ -47,8 +48,9 @@ func getCall(callID string) (*CallInfo, error) {
 	defer mu.Unlock()
 
 	result, exists := callMap[callID]
-	if exists != true {
-		return nil, errors.New("The CallID does not exist.")
+	fmt.Println("result call, exist:", result, exists)
+	if !exists {
+		return nil, errors.New("the CallID does not exist")
 	}
 
 	return result, nil
@@ -67,7 +69,9 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 			LastUpdated: time.Now(),
 			LinkType:    linkType,
 		}
-		call.initWriters()
+		if viper.GetViper().GetBool("writeVoip") {
+			call.initWriters()
+		}
 		callMap[callID] = call
 	}
 	return call

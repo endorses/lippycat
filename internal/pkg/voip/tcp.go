@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"fmt"
 	"io"
 	"sync"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/spf13/viper"
 )
 
 type CallIDDetector struct {
@@ -68,6 +70,10 @@ func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpa
 			)
 			callID := callIDDetector.Wait()
 			if callID != "" {
+				if viper.GetViper().GetBool("writeVoip") {
+				} else {
+					fmt.Printf("[%s]%s\n", callID, packet)
+				}
 				WriteSIP(callID, packet)
 			}
 		}

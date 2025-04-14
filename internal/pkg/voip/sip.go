@@ -23,7 +23,7 @@ func handleSipMessage(data []byte) bool {
 			if strings.Contains(body, "m=audio") {
 				method := detectSipMethod(startLine)
 				call, err := getCall(callID)
-				if err != nil {
+				if err == nil {
 					call.SetCallInfoState(method)
 				}
 				// fmt.Println("extracting Port for callid", callID)

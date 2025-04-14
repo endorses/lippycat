@@ -18,8 +18,8 @@ var voipCmd = &cobra.Command{
 }
 
 var (
-	sipuser string
-	write   bool
+	sipuser   string
+	writeVoip bool
 )
 
 func voipHandler(cmd *cobra.Command, args []string) {
@@ -55,5 +55,5 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 func init() {
 	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")
-	voipCmd.Flags().BoolVarP(&write, "write-file", "w", false, "write to pcap file")
+	voipCmd.Flags().BoolVarP(&writeVoip, "write-file", "w", false, "write to pcap file")
 }

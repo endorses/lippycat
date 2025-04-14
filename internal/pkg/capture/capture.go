@@ -21,7 +21,7 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
 	numProcessors := runtime.NumCPU()
-	processorWg.Add(1)
+	processorWg.Add(numProcessors)
 	for _, iface := range ifaces {
 		wg.Add(1)
 		go func(pif pcaptypes.PcapInterface) {

@@ -1,10 +1,7 @@
 package sniff
 
 import (
-	"strings"
-
 	"github.com/endorses/lippycat/internal/pkg/capture"
-	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/spf13/cobra"
 )
 
@@ -23,11 +20,11 @@ var (
 )
 
 func sniff(cmd *cobra.Command, args []string) {
-	var ifaces []pcaptypes.PcapInterface
-	for _, device := range strings.Split(interfaces, ",") {
-		iface := pcaptypes.CreateLiveInterface(device)
-		ifaces = append(ifaces, iface)
-	}
+	// var ifaces []pcaptypes.PcapInterface
+	// // for _, device := range strings.Split(interfaces, ",") {
+	// // 	iface := pcaptypes.CreateLiveInterface(device)
+	// // 	ifaces = append(ifaces, iface)
+	// }
 	if readFile == "" {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
 	} else {

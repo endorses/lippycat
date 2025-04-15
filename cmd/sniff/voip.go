@@ -8,6 +8,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var voipCmd = &cobra.Command{
@@ -32,10 +33,11 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Println("Sniffing Voip")
+	viper.Set("writeVoip", writeVoip)
 
-	if filter == "" {
-		filter = "port 5060"
-	}
+	// if filter == "" {
+	// 	filter = "port 5060"
+	// }
 
 	if readFile == "" {
 		voip.StartLiveVoipSniffer(interfaces, filter)

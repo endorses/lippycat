@@ -32,7 +32,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 	for pkt := range ch {
 		packet := pkt.Packet
 		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
-			fmt.Println("startProcessor nil")
+			// fmt.Println("startProcessor nil")
 			continue
 		}
 		switch layer := packet.TransportLayer().(type) {

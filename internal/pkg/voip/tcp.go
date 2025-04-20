@@ -25,6 +25,7 @@ type CallIDDetector struct {
 }
 
 func (c *CallIDDetector) SetCallID(id string) {
+	fmt.Println("setcallid c,id", c, id)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.found {
@@ -38,6 +39,7 @@ func (c *CallIDDetector) Wait() string {
 	<-c.done
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	fmt.Println("wait c.callID", c.callID)
 	return c.callID
 }
 
@@ -46,10 +48,11 @@ type sipStreamFactory struct {
 }
 
 func NewSipStreamFactory() tcpassembly.StreamFactory {
-	return &sipStreamFactory{}
+	return &sipStreamFactory{callIDDetector: &CallIDDetector{done: make(chan struct{})}}
 }
 
 func (f *sipStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+	fmt.Println("New() callIDDetector", f.callIDDetector)
 	r := tcpreader.NewReaderStream()
 	stream := &SIPStream{
 		reader:         &r,
@@ -68,6 +71,7 @@ type SIPStream struct {
 }
 
 func (s *SIPStream) run() {
+	fmt.Println("run")
 	buf := bufio.NewReader(s.reader)
 	for {
 		line, err := buf.ReadString('\n')
@@ -77,9 +81,11 @@ func (s *SIPStream) run() {
 			}
 			return
 		}
+		fmt.Println("run line", line)
 
 		// Detect SIP header line
 		if strings.HasPrefix(line, "Call-ID:") || strings.HasPrefix(line, "i:") {
+			fmt.Println("HasPrefix")
 			callID := strings.TrimSpace(strings.TrimPrefix(line, "Call-ID:"))
 			callID = strings.TrimSpace(strings.TrimPrefix(callID, "i:")) // short form
 			s.callIDDetector.SetCallID(callID)
@@ -101,15 +107,24 @@ func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpa
 		packet := pkt.Packet
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			callIDDetector := &CallIDDetector{done: make(chan struct{})}
+			// callIDDetector := str
+			// fmt.Println("handleTcpPackets callIDDetector", callIDDetector)
+			// streamFactory := &sipStreamFactory{callIDDetector: callIDDetector}
+			// streamPool := tcpassembly.NewStreamPool(streamFactory)
+			// assembler2 := tcpassembly.NewAssembler(streamPool)
+			// assembler2.AssembleWithTimestamp(
 			assembler.AssembleWithTimestamp(
 				packet.NetworkLayer().NetworkFlow(),
 				layer,
 				packet.Metadata().Timestamp,
 			)
 			select {
+			// case <-streamFactory.callIDDetector.done:
+			// 	callID := streamFactory.callIDDetector.Wait()
 			case <-callIDDetector.done:
 				callID := callIDDetector.Wait()
 				if callID != "" {
+					fmt.Println("handleTcpPackets callID", callID)
 					if viper.GetViper().GetBool("writeVoip") {
 					} else {
 						fmt.Printf("[%s]%s\n", callID, packet)

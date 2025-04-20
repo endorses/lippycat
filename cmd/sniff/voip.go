@@ -29,15 +29,10 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 	for _, user := range strings.Split(sipuser, ",") {
 		sipusers.AddSipUser(user, &su)
-		// sipusers.AddSipUser(user, &sipusers.SipUser{ExpirationDate: time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)})
 	}
 
 	fmt.Println("Sniffing Voip")
 	viper.Set("writeVoip", writeVoip)
-
-	// if filter == "" {
-	// 	filter = "port 5060"
-	// }
 
 	if readFile == "" {
 		voip.StartLiveVoipSniffer(interfaces, filter)
@@ -45,15 +40,6 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		voip.StartOfflineVoipSniffer(readFile, filter)
 	}
 }
-
-// func containsAny(s string, substrs []string) bool {
-// 	for _, u := range substrs {
-// 		if strings.Contains(s, u) {
-// 			return true
-// 		}
-// 	}
-// 	return false
-// }
 
 func init() {
 	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")

@@ -21,11 +21,6 @@ var (
 )
 
 func sniff(cmd *cobra.Command, args []string) {
-	// var ifaces []pcaptypes.PcapInterface
-	// // for _, device := range strings.Split(interfaces, ",") {
-	// // 	iface := pcaptypes.CreateLiveInterface(device)
-	// // 	ifaces = append(ifaces, iface)
-	// }
 	if readFile == "" {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
 	} else {
@@ -40,5 +35,4 @@ func init() {
 	SniffCmd.PersistentFlags().StringVarP(&readFile, "read-file", "r", "", "read from pcap file")
 	SniffCmd.PersistentFlags().BoolVarP(&promiscuous, "promiscuous", "p", true, "use promiscuous mode")
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
-	// sniffCmd.Flags().BoolVarP("promiscuous", "p", false, "use promiscuous mode")
 }

@@ -13,10 +13,11 @@ var SniffCmd = &cobra.Command{
 }
 
 var (
-	interfaces string
-	filter     string
-	readFile   string
-	writeFile  string
+	interfaces  string
+	filter      string
+	readFile    string
+	writeFile   string
+	promiscuous bool
 )
 
 func sniff(cmd *cobra.Command, args []string) {
@@ -37,6 +38,7 @@ func init() {
 	SniffCmd.PersistentFlags().StringVarP(&interfaces, "interface", "i", "any", "interface(s) to monitor, comma separated")
 	SniffCmd.PersistentFlags().StringVarP(&filter, "filter", "f", "", "bpf filter to apply")
 	SniffCmd.PersistentFlags().StringVarP(&readFile, "read-file", "r", "", "read from pcap file")
+	SniffCmd.PersistentFlags().BoolVarP(&promiscuous, "promiscuous", "p", true, "use promiscuous mode")
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
 	// sniffCmd.Flags().BoolVarP("promiscuous", "p", false, "use promiscuous mode")
 }

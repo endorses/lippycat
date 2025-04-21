@@ -24,7 +24,7 @@ func (iface *liveInterface) SetHandle() error {
 func (iface liveInterface) Handle() (*pcap.Handle, error) {
 	var err error
 	if iface.handle == nil {
-		err = errors.New("Interface has no handle")
+		err = errors.New("interface has no handle")
 	}
 	return iface.handle, err
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/google/gopacket/pcap"
+	"github.com/spf13/viper"
 )
 
 type liveInterface struct {
@@ -12,7 +13,7 @@ type liveInterface struct {
 }
 
 func (iface *liveInterface) SetHandle() error {
-	promiscuous := false
+	promiscuous := viper.GetViper().GetBool("promiscuous")
 	snapshotLen := int32(65535)
 	timeout := pcap.BlockForever
 	handle, err := pcap.OpenLive(iface.Device, snapshotLen, promiscuous, timeout)

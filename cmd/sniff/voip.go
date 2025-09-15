@@ -1,7 +1,7 @@
 package sniff
 
 import (
-	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -31,7 +31,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		sipusers.AddSipUser(user, &su)
 	}
 
-	fmt.Println("Sniffing Voip")
+	log.Println("Sniffing Voip")
 	viper.Set("writeVoip", writeVoip)
 
 	if readFile == "" {

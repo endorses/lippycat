@@ -25,7 +25,6 @@ type CallIDDetector struct {
 }
 
 func (c *CallIDDetector) SetCallID(id string) {
-	fmt.Println("setcallid c,id", c, id)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.found {
@@ -39,7 +38,6 @@ func (c *CallIDDetector) Wait() string {
 	<-c.done
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	fmt.Println("wait c.callID", c.callID)
 	return c.callID
 }
 
@@ -52,7 +50,6 @@ func NewSipStreamFactory() tcpassembly.StreamFactory {
 }
 
 func (f *sipStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	fmt.Println("New() callIDDetector", f.callIDDetector)
 	r := tcpreader.NewReaderStream()
 	stream := &SIPStream{
 		reader:         &r,
@@ -71,7 +68,12 @@ type SIPStream struct {
 }
 
 func (s *SIPStream) run() {
-	fmt.Println("run")
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("SIP stream panic recovered: %v", r)
+		}
+	}()
+
 	buf := bufio.NewReader(s.reader)
 	for {
 		line, err := buf.ReadString('\n')
@@ -81,11 +83,9 @@ func (s *SIPStream) run() {
 			}
 			return
 		}
-		fmt.Println("run line", line)
 
 		// Detect SIP header line
 		if strings.HasPrefix(line, "Call-ID:") || strings.HasPrefix(line, "i:") {
-			fmt.Println("HasPrefix")
 			callID := strings.TrimSpace(strings.TrimPrefix(line, "Call-ID:"))
 			callID = strings.TrimSpace(strings.TrimPrefix(callID, "i:")) // short form
 			s.callIDDetector.SetCallID(callID)
@@ -124,15 +124,14 @@ func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpa
 			case <-callIDDetector.done:
 				callID := callIDDetector.Wait()
 				if callID != "" {
-					fmt.Println("handleTcpPackets callID", callID)
-					if viper.GetViper().GetBool("writeVoip") {
+						if viper.GetViper().GetBool("writeVoip") {
 					} else {
 						fmt.Printf("[%s]%s\n", callID, packet)
 					}
 					WriteSIP(callID, packet)
 				}
-			case <-time.After(5 * time.Second):
-				log.Println("Timeout: No Call-ID found in any stream")
+			case <-time.After(1 * time.Second):
+				log.Println("Timeout: No Call-ID found in TCP stream within 1 second")
 			}
 		}
 	}

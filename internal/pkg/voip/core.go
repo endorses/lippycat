@@ -1,7 +1,7 @@
 package voip
 
 import (
-	"fmt"
+	"log"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -11,7 +11,7 @@ import (
 )
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
-	fmt.Println("Starting VOIP Sniffer")
+	log.Println("Starting VOIP Sniffer")
 	streamFactory := NewSipStreamFactory()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)

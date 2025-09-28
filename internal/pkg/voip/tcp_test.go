@@ -310,3 +310,399 @@ func TestHandleTcpPackets_NonSipPort(t *testing.T) {
 		closer.Close()
 	}
 }
+
+// Phase 3 Performance Optimization Tests
+
+func TestTCPBufferStats(t *testing.T) {
+	// Reset stats for test
+	tcpBufferStats = &tcpBufferStatsInternal{
+		lastCleanupTime: time.Now(),
+	}
+
+	stats := GetTCPBufferStats()
+	assert.Equal(t, int64(0), stats.TotalBuffers)
+	assert.Equal(t, int64(0), stats.TotalPackets)
+	assert.Equal(t, int64(0), stats.BuffersDropped)
+	assert.Equal(t, int64(0), stats.PacketsDropped)
+}
+
+func TestTCPStreamMetrics(t *testing.T) {
+	// Reset metrics for test
+	tcpStreamMetrics = &tcpStreamMetricsInternal{
+		lastMetricsUpdate: time.Now(),
+	}
+
+	metrics := GetTCPStreamMetrics()
+	assert.Equal(t, int64(0), metrics.ActiveStreams)
+	assert.Equal(t, int64(0), metrics.TotalStreamsCreated)
+	assert.Equal(t, int64(0), metrics.TotalStreamsCompleted)
+	assert.Equal(t, int64(0), metrics.TotalStreamsFailed)
+}
+
+func TestTCPBufferStrategies(t *testing.T) {
+	tests := []struct {
+		name     string
+		strategy string
+		maxSize  int
+		packets  int
+		expected int
+	}{
+		{
+			name:     "fixed strategy - drops when full",
+			strategy: "fixed",
+			maxSize:  3,
+			packets:  5,
+			expected: 3,
+		},
+		{
+			name:     "ring strategy - overwrites oldest",
+			strategy: "ring",
+			maxSize:  3,
+			packets:  5,
+			expected: 3,
+		},
+		{
+			name:     "adaptive strategy - removes 25% when full",
+			strategy: "adaptive",
+			maxSize:  4,
+			packets:  6,
+			expected: 4,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test buffer
+			buffer := getOrCreateBuffer(tt.strategy, tt.maxSize)
+			require.NotNil(t, buffer)
+			assert.Equal(t, tt.strategy, buffer.strategy)
+			assert.Equal(t, tt.maxSize, buffer.maxSize)
+
+			// Create test packets
+			testPackets := make([]capture.PacketInfo, tt.packets)
+			for i := 0; i < tt.packets; i++ {
+				testPackets[i] = capture.PacketInfo{
+					Packet: createTestPacket(t, layers.LayerTypeEthernet),
+				}
+			}
+
+			// Simulate packet buffering based on strategy
+			buffer.mu.Lock()
+			for _, pkt := range testPackets {
+				switch tt.strategy {
+				case "ring":
+					if len(buffer.packets) >= buffer.maxSize {
+						buffer.packets[0] = pkt
+						buffer.packets = append(buffer.packets[1:], buffer.packets[0])
+					} else {
+						buffer.packets = append(buffer.packets, pkt)
+					}
+				case "adaptive":
+					if len(buffer.packets) >= buffer.maxSize {
+						removeCount := buffer.maxSize / 4
+						if removeCount < 1 {
+							removeCount = 1
+						}
+						buffer.packets = buffer.packets[removeCount:]
+					}
+					buffer.packets = append(buffer.packets, pkt)
+				default: // "fixed"
+					if len(buffer.packets) >= buffer.maxSize {
+						buffer.packets = buffer.packets[1:]
+					}
+					buffer.packets = append(buffer.packets, pkt)
+				}
+			}
+			buffer.mu.Unlock()
+
+			assert.LessOrEqual(t, len(buffer.packets), tt.expected)
+			releaseBuffer(buffer)
+		})
+	}
+}
+
+func TestTCPBufferPool(t *testing.T) {
+	// Save original pool state
+	originalPool := tcpBufferPool
+	defer func() {
+		tcpBufferPool = originalPool
+	}()
+
+	// Reset pool for test
+	tcpBufferPool = &TCPBufferPool{
+		buffers: make([]*TCPPacketBuffer, 0, 10),
+		maxSize: 10,
+	}
+
+	// Test buffer creation
+	buffer1 := getOrCreateBuffer("adaptive", 100)
+	require.NotNil(t, buffer1)
+	assert.Equal(t, int64(1), tcpBufferPool.created)
+	assert.Equal(t, int64(0), tcpBufferPool.reused)
+
+	// Test buffer release
+	releaseBuffer(buffer1)
+	assert.Equal(t, int64(1), tcpBufferPool.released)
+	assert.Equal(t, 1, len(tcpBufferPool.buffers))
+
+	// Test buffer reuse
+	buffer2 := getOrCreateBuffer("fixed", 200)
+	require.NotNil(t, buffer2)
+	assert.Equal(t, buffer1, buffer2) // Should be the same buffer
+	assert.Equal(t, int64(1), tcpBufferPool.reused)
+	assert.Equal(t, "fixed", buffer2.strategy)
+	assert.Equal(t, 200, buffer2.maxSize)
+}
+
+func TestPerformanceModeOptimizations(t *testing.T) {
+	tests := []struct {
+		name         string
+		mode         string
+		expectedBatch int
+		expectedStrategy string
+	}{
+		{
+			name:             "throughput mode",
+			mode:             "throughput",
+			expectedBatch:    64,
+			expectedStrategy: "ring",
+		},
+		{
+			name:             "latency mode",
+			mode:             "latency",
+			expectedBatch:    1,
+			expectedStrategy: "fixed",
+		},
+		{
+			name:             "memory mode",
+			mode:             "memory",
+			expectedBatch:    32, // uses default
+			expectedStrategy: "adaptive",
+		},
+		{
+			name:             "balanced mode",
+			mode:             "balanced",
+			expectedBatch:    32, // uses default
+			expectedStrategy: "adaptive", // uses default
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				TCPPerformanceMode: tt.mode,
+				TCPBatchSize:       32, // default
+				TCPBufferStrategy:  "adaptive", // default
+				MaxGoroutines:      1000, // default
+			}
+
+			applyPerformanceModeOptimizations(config)
+
+			assert.Equal(t, tt.expectedBatch, config.TCPBatchSize)
+			assert.Equal(t, tt.expectedStrategy, config.TCPBufferStrategy)
+
+			switch tt.mode {
+			case "throughput":
+				assert.Equal(t, 2000, config.MaxGoroutines)
+			case "memory":
+				assert.Equal(t, 100, config.MaxGoroutines)
+				assert.True(t, config.MemoryOptimization)
+			case "latency":
+				assert.True(t, config.TCPLatencyOptimization)
+			}
+		})
+	}
+}
+
+func TestDetectCallIDHeader(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		expected string
+		valid    bool
+	}{
+		{
+			name:     "full form call-id",
+			line:     "Call-ID: 1234567890@example.com",
+			expected: "1234567890@example.com",
+			valid:    true,
+		},
+		{
+			name:     "compact form call-id",
+			line:     "i: call-123-abc",
+			expected: "call-123-abc",
+			valid:    true,
+		},
+		{
+			name:     "case insensitive",
+			line:     "call-id: UPPER-CASE-ID",
+			expected: "UPPER-CASE-ID",
+			valid:    true,
+		},
+		{
+			name:     "with extra spaces",
+			line:     "Call-ID:   spaced-call-id   ",
+			expected: "spaced-call-id",
+			valid:    true,
+		},
+		{
+			name:     "not a call-id header",
+			line:     "Via: SIP/2.0/TCP example.com",
+			expected: "",
+			valid:    false,
+		},
+		{
+			name:     "empty call-id",
+			line:     "Call-ID: ",
+			expected: "",
+			valid:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var callID string
+			valid := detectCallIDHeader(tt.line, &callID)
+			assert.Equal(t, tt.valid, valid)
+			assert.Equal(t, tt.expected, callID)
+		})
+	}
+}
+
+func TestParseContentLength(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected int
+	}{
+		{
+			name:     "valid number",
+			value:    "123",
+			expected: 123,
+		},
+		{
+			name:     "zero",
+			value:    "0",
+			expected: 0,
+		},
+		{
+			name:     "with whitespace",
+			value:    "  456  ",
+			expected: 456,
+		},
+		{
+			name:     "invalid characters",
+			value:    "123abc",
+			expected: 123,
+		},
+		{
+			name:     "no numbers",
+			value:    "abc",
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseContentLength(tt.value)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSipStreamFactoryHealthChecks(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ResetConfigOnce()
+	config := GetConfig()
+	config.MaxGoroutines = 10
+	config.StreamQueueBuffer = 5
+	config.TCPCleanupInterval = 100 * time.Millisecond
+
+	factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+	defer factory.Close()
+
+	// Test initial healthy state
+	assert.True(t, factory.IsHealthy())
+
+	// Test health status details
+	status := factory.GetHealthStatus()
+	healthy, ok := status["healthy"].(bool)
+	require.True(t, ok)
+	assert.True(t, healthy)
+
+	activeGoroutines, ok := status["active_goroutines"].(int64)
+	require.True(t, ok)
+	assert.Equal(t, int64(0), activeGoroutines)
+
+	queueLength, ok := status["queue_length"].(int)
+	require.True(t, ok)
+	assert.Equal(t, 0, queueLength)
+}
+
+func TestGlobalTCPAssemblerMonitoring(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Test with no factory registered
+	health := GetTCPAssemblerHealth()
+	require.NotNil(t, health)
+	status, ok := health["status"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "not_initialized", status)
+
+	healthy := IsTCPAssemblerHealthy()
+	assert.False(t, healthy)
+
+	// Register a factory
+	factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+	defer factory.Close()
+
+	// Now health should be available
+	health = GetTCPAssemblerHealth()
+	require.NotNil(t, health)
+	healthy, ok = health["healthy"].(bool)
+	require.True(t, ok)
+	assert.True(t, healthy)
+
+	// Test comprehensive metrics
+	metrics := GetTCPAssemblerMetrics()
+	require.NotNil(t, metrics)
+	assert.Contains(t, metrics, "health")
+	assert.Contains(t, metrics, "buffers")
+	assert.Contains(t, metrics, "streams")
+	assert.Contains(t, metrics, "timestamp")
+}
+
+// Helper function to create test packets
+func createTestPacket(t *testing.T, linkType gopacket.LayerType) gopacket.Packet {
+	t.Helper()
+
+	var buf gopacket.SerializeBuffer = gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{}
+
+	// Create a minimal packet based on link type
+	switch linkType {
+	case layers.LayerTypeEthernet:
+		eth := &layers.Ethernet{
+			SrcMAC:       []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05},
+			DstMAC:       []byte{0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b},
+			EthernetType: layers.EthernetTypeIPv4,
+		}
+		err := gopacket.SerializeLayers(buf, opts, eth)
+		require.NoError(t, err)
+	default:
+		// Create a minimal raw packet
+		bytes := buf.Bytes()
+		copy(bytes, []byte{0x00, 0x01, 0x02, 0x03})
+	}
+
+	return gopacket.NewPacket(buf.Bytes(), linkType, gopacket.Default)
+}
+
+// Helper function to reset config for testing
+func ResetConfigOnce() {
+	configOnce = sync.Once{}
+}

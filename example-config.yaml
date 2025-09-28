@@ -1,0 +1,57 @@
+# Example lippycat configuration with Phase 3 TCP optimizations
+voip:
+  # Basic TCP configuration
+  max_goroutines: 1000
+  tcp_cleanup_interval: 60s
+  tcp_buffer_max_age: 300s
+  tcp_stream_max_queue_time: 120s
+  max_tcp_buffers: 10000
+  tcp_stream_timeout: 600s
+  tcp_assembler_max_pages: 100
+
+  # Performance Mode Selection
+  # Options: "balanced", "throughput", "latency", "memory"
+  tcp_performance_mode: "balanced"
+
+  # Buffer Strategy
+  # Options: "adaptive", "fixed", "ring"
+  tcp_buffer_strategy: "adaptive"
+
+  # Backpressure and Memory Optimization
+  enable_backpressure: true
+  memory_optimization: false
+
+  # Advanced Performance Tuning
+  tcp_buffer_pool_size: 1000
+  tcp_batch_size: 32
+  tcp_io_threads: 4
+  tcp_compression_level: 1
+  tcp_memory_limit: 104857600  # 100MB
+  tcp_latency_optimization: false
+
+# Performance Mode Examples:
+
+# High Throughput Configuration
+# voip:
+#   tcp_performance_mode: "throughput"
+#   tcp_buffer_strategy: "ring"
+#   max_goroutines: 2000
+#   tcp_batch_size: 64
+#   enable_backpressure: true
+
+# Low Latency Configuration
+# voip:
+#   tcp_performance_mode: "latency"
+#   tcp_buffer_strategy: "fixed"
+#   tcp_batch_size: 1
+#   tcp_latency_optimization: true
+#   tcp_cleanup_interval: 30s
+
+# Memory Optimized Configuration
+# voip:
+#   tcp_performance_mode: "memory"
+#   tcp_buffer_strategy: "adaptive"
+#   max_goroutines: 100
+#   max_tcp_buffers: 1000
+#   memory_optimization: true
+#   tcp_memory_limit: 52428800  # 50MB

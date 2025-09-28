@@ -153,8 +153,8 @@ m: <sip:caller@192.168.1.100:5060>
 
 `),
 			expected: map[string]string{
-				"from": "<sip:caller@example.com>;tag=123",
-				"to": "<sip:user@example.com>",
+				"from":    "<sip:caller@example.com>;tag=123",
+				"to":      "<sip:user@example.com>",
 				"call-id": "test-call-456@example.com",
 				"contact": "<sip:caller@192.168.1.100:5060>",
 			},

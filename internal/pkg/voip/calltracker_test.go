@@ -230,7 +230,7 @@ func TestSanitizeCallID(t *testing.T) {
 		{
 			name:     "Very long call ID",
 			input:    string(make([]byte, 200)), // 200 null bytes
-			expected: strings.Repeat("_", 100), // Null bytes become underscores, truncated to 100
+			expected: strings.Repeat("_", 100),  // Null bytes become underscores, truncated to 100
 		},
 		{
 			name:     "Call ID with forward slashes",

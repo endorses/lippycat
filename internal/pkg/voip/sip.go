@@ -155,25 +155,25 @@ func parseHeaderLine(line string) (string, string) {
 // normalizeHeaderName converts SIP compact header names to their full form
 func normalizeHeaderName(compact string) string {
 	compactToFull := map[string]string{
-		"i":  "call-id",
-		"f":  "from",
-		"t":  "to",
-		"v":  "via",
-		"c":  "contact",
-		"m":  "contact", // m can also be contact in some contexts
-		"l":  "content-length",
-		"x":  "expires",
-		"s":  "subject",
-		"k":  "supported",
-		"r":  "refer-to",
-		"b":  "referred-by",
-		"j":  "reject-contact",
-		"d":  "request-disposition",
-		"u":  "allow-events",
-		"o":  "event",
-		"a":  "accept-contact",
-		"n":  "in-reply-to",
-		"p":  "p-access-network-info",
+		"i": "call-id",
+		"f": "from",
+		"t": "to",
+		"v": "via",
+		"c": "contact",
+		"m": "contact", // m can also be contact in some contexts
+		"l": "content-length",
+		"x": "expires",
+		"s": "subject",
+		"k": "supported",
+		"r": "refer-to",
+		"b": "referred-by",
+		"j": "reject-contact",
+		"d": "request-disposition",
+		"u": "allow-events",
+		"o": "event",
+		"a": "accept-contact",
+		"n": "in-reply-to",
+		"p": "p-access-network-info",
 	}
 
 	if full, exists := compactToFull[compact]; exists {

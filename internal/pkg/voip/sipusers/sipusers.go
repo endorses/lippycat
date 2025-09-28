@@ -48,8 +48,17 @@ func DeleteMultipleSipUsers(usernames []string) {
 }
 
 func IsSurveiled(sipHeader string) bool {
+	muSu.Lock()
+	defer muSu.Unlock()
+
+	// Normalize SIP header to lowercase for case-insensitive matching
+	normalizedHeader := strings.ToLower(sipHeader)
+
 	for username := range sipUserMap {
-		if strings.Contains(sipHeader, username) {
+		normalizedUsername := strings.ToLower(username)
+
+		// Use case-insensitive matching for SIP headers
+		if strings.Contains(normalizedHeader, normalizedUsername) {
 			return true
 		}
 	}

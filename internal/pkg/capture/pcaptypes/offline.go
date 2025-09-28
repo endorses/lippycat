@@ -25,3 +25,10 @@ func (iface offlineInterface) Handle() (*pcap.Handle, error) {
 	}
 	return iface.handle, err
 }
+
+func (iface offlineInterface) Name() string {
+	if iface.file != nil {
+		return iface.file.Name()
+	}
+	return "offline"
+}

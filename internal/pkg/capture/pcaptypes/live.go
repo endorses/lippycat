@@ -13,12 +13,22 @@ type liveInterface struct {
 }
 
 func (iface *liveInterface) SetHandle() error {
+	// Close existing handle if it exists to prevent leaks
+	if iface.handle != nil {
+		iface.handle.Close()
+		iface.handle = nil
+	}
+
 	promiscuous := viper.GetViper().GetBool("promiscuous")
-	snapshotLen := int32(65535)
+	snapshotLen := int32(MaxPcapSnapshotLen)
 	timeout := pcap.BlockForever
 	handle, err := pcap.OpenLive(iface.Device, snapshotLen, promiscuous, timeout)
+	if err != nil {
+		return err
+	}
+
 	iface.handle = handle
-	return err
+	return nil
 }
 
 func (iface liveInterface) Handle() (*pcap.Handle, error) {
@@ -27,4 +37,8 @@ func (iface liveInterface) Handle() (*pcap.Handle, error) {
 		err = errors.New("interface has no handle")
 	}
 	return iface.handle, err
+}
+
+func (iface liveInterface) Name() string {
+	return iface.Device
 }

@@ -1,10 +1,10 @@
 package sniff
 
 import (
-	"log"
 	"strings"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/spf13/cobra"
@@ -24,14 +24,17 @@ var (
 )
 
 func voipHandler(cmd *cobra.Command, args []string) {
-	expirationDate := time.Date(0o001, 0o1, 0o1, 0o1, 0o1, 0o1, 0o00000001, time.UTC)
+	expirationDate := time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)
 	su := sipusers.SipUser{ExpirationDate: expirationDate}
 
 	for _, user := range strings.Split(sipuser, ",") {
 		sipusers.AddSipUser(user, &su)
 	}
 
-	log.Println("Sniffing Voip")
+	logger.Info("Starting VoIP sniffing",
+		"users", strings.Split(sipuser, ","),
+		"interfaces", interfaces,
+		"write_voip", writeVoip)
 	viper.Set("writeVoip", writeVoip)
 
 	if readFile == "" {

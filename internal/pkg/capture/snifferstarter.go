@@ -1,13 +1,16 @@
 package capture
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
@@ -26,12 +29,38 @@ func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pca
 func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
 	file, err := os.Open(readFile)
 	if err != nil {
-		log.Fatal("Could not read file.")
+		logger.Error("Could not read file",
+			"file", readFile,
+			"error", err)
+		return
 	}
+
+	// Create a context with timeout to prevent indefinite blocking
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Ensure file is always closed, even if startSniffer blocks
 	defer file.Close()
+
 	iface := pcaptypes.CreateOfflineInterface(file)
 	devices := []pcaptypes.PcapInterface{iface}
-	startSniffer(devices, filter)
+
+	// Run startSniffer in a goroutine with context monitoring
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		startSniffer(devices, filter)
+	}()
+
+	// Wait for completion or timeout
+	select {
+	case <-done:
+		// Completed normally
+	case <-ctx.Done():
+		logger.Error("Offline sniffer timed out, forcing cleanup",
+			"file", readFile,
+			"error", ctx.Err())
+	}
 }
 
 func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
@@ -42,23 +71,78 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	Init(devices, filter, processPacket, assembler)
 }
 
-type streamFactory struct{}
+const maxStreamWorkers = 50 // Maximum concurrent stream processing goroutines
+
+type streamFactory struct {
+	workerPool chan struct{}
+	wg         sync.WaitGroup
+}
 
 func NewStreamFactory() tcpassembly.StreamFactory {
-	return &streamFactory{}
+	return &streamFactory{
+		workerPool: make(chan struct{}, maxStreamWorkers),
+	}
 }
 
 func (f *streamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
 	r := tcpreader.NewReaderStream()
-	go processStream(&r)
+
+	// Try to acquire a worker from the pool (non-blocking)
+	select {
+	case f.workerPool <- struct{}{}:
+		// Got a worker slot, start processing
+		f.wg.Add(1)
+		go f.processStreamWithPool(&r)
+	default:
+		// Pool is full, log and skip processing to prevent goroutine explosion
+		logger.Warn("Stream worker pool exhausted, skipping stream processing",
+			"max_workers", maxStreamWorkers)
+	}
+
 	return &r
 }
 
+func (f *streamFactory) processStreamWithPool(r io.Reader) {
+	defer func() {
+		// Release worker slot back to pool
+		<-f.workerPool
+		f.wg.Done()
+
+		if rec := recover(); rec != nil {
+			logger.Error("Stream processing panic recovered",
+				"panic_value", rec)
+		}
+	}()
+
+	processStream(r)
+}
+
+// Shutdown waits for all active stream workers to complete
+func (f *streamFactory) Shutdown() {
+	f.wg.Wait()
+}
+
 func processStream(r io.Reader) {
+	// Process the stream data properly
+	buffer := make([]byte, 4096)
 	for {
-		full, err := io.ReadAll(r)
-		if err != nil || len(full) == 0 {
+		n, err := r.Read(buffer)
+		if err != nil {
+			if err != io.EOF {
+				logger.Error("Error reading stream", "error", err)
+			}
 			return
+		}
+		if n == 0 {
+			return
+		}
+
+		// Process the data (this is a placeholder - real processing would depend on protocol)
+		data := buffer[:n]
+		if len(data) > 0 {
+			logger.Debug("Processed bytes from stream",
+				"bytes_count", len(data))
+			// Here you would implement actual protocol parsing
 		}
 	}
 }

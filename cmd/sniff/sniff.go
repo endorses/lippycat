@@ -3,6 +3,7 @@ package sniff
 import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var SniffCmd = &cobra.Command{
@@ -33,6 +34,8 @@ func init() {
 	SniffCmd.PersistentFlags().StringVarP(&interfaces, "interface", "i", "any", "interface(s) to monitor, comma separated")
 	SniffCmd.PersistentFlags().StringVarP(&filter, "filter", "f", "", "bpf filter to apply")
 	SniffCmd.PersistentFlags().StringVarP(&readFile, "read-file", "r", "", "read from pcap file")
-	SniffCmd.PersistentFlags().BoolVarP(&promiscuous, "promiscuous", "p", true, "use promiscuous mode")
+	SniffCmd.PersistentFlags().BoolVarP(&promiscuous, "promiscuous", "p", false, "use promiscuous mode (captures all network traffic - use with caution)")
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
+
+	viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
 }

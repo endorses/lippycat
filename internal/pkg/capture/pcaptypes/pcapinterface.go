@@ -9,6 +9,7 @@ import (
 type PcapInterface interface {
 	SetHandle() error
 	Handle() (*pcap.Handle, error)
+	Name() string
 }
 
 func CreateLiveInterface(device string) PcapInterface {

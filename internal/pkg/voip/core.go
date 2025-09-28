@@ -1,18 +1,23 @@
 package voip
 
 import (
-	"log"
+	"context"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
 )
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
-	log.Println("Starting VOIP Sniffer")
-	streamFactory := NewSipStreamFactory()
+	ctx := context.Background()
+	logger.InfoContext(ctx, "Starting VoIP sniffer",
+		"device_count", len(devices),
+		"filter", filter)
+
+	streamFactory := NewSipStreamFactory(ctx)
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 	capture.Init(devices, filter, startProcessor, assembler)

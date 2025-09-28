@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/endorses/lippycat/cmd/sniff"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -15,9 +16,6 @@ var rootCmd = &cobra.Command{
 	Use:   "lippycat",
 	Short: "lippycat sniffs for you",
 	Long:  `lippycat sniffs traffic for you, including voip traffic.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
 }
 
 func Execute() {
@@ -34,14 +32,14 @@ func addSubCommandPalattes() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
+	// Initialize structured logging
+	logger.Initialize()
+
 	addSubCommandPalattes()
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.lippycat.yaml)")
 
 	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
-}
-
-func init() {
 }
 
 func initConfig() {

@@ -68,7 +68,13 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	streamFactory := NewStreamFactory()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
-	Init(devices, filter, processPacket, assembler)
+
+	// Create a context-aware processor wrapper
+	processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processPacket(ch, asm)
+	}
+
+	Init(devices, filter, processor, assembler)
 }
 
 const maxStreamWorkers = 50 // Maximum concurrent stream processing goroutines
@@ -152,15 +158,57 @@ func processPacket(packetChan <-chan PacketInfo, assembler *tcpassembly.Assemble
 		packet := p.Packet
 		switch layer := packet.TransportLayer().(type) {
 		case *layers.TCP:
-			// fmt.Println("TCP")
-			assembler.AssembleWithTimestamp(
-				packet.NetworkLayer().NetworkFlow(),
-				layer,
-				packet.Metadata().Timestamp,
-			)
+			// Recover from any panics in the TCP assembler (e.g., malformed packets)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error("TCP assembler panic recovered",
+							"panic_value", r,
+							"packet", packet)
+					}
+				}()
+
+				// Validate network layer exists before passing to assembler
+				if netLayer := packet.NetworkLayer(); netLayer != nil {
+					assembler.AssembleWithTimestamp(
+						netLayer.NetworkFlow(),
+						layer,
+						packet.Metadata().Timestamp,
+					)
+				}
+			}()
 		case *layers.UDP:
 			// fmt.Println("UDP")
 		}
 		fmt.Printf("%s\n", p.Packet)
 	}
+}
+
+func processPacketWithContext(p PacketInfo, assembler *tcpassembly.Assembler, ctx context.Context) {
+	packet := p.Packet
+	switch layer := packet.TransportLayer().(type) {
+	case *layers.TCP:
+		// Recover from any panics in the TCP assembler (e.g., malformed packets)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("TCP assembler panic recovered",
+						"panic_value", r,
+						"packet", packet)
+				}
+			}()
+
+			// Validate network layer exists before passing to assembler
+			if netLayer := packet.NetworkLayer(); netLayer != nil {
+				assembler.AssembleWithTimestamp(
+					netLayer.NetworkFlow(),
+					layer,
+					packet.Metadata().Timestamp,
+				)
+			}
+		}()
+	case *layers.UDP:
+		// fmt.Println("UDP")
+	}
+	fmt.Printf("%s\n", p.Packet)
 }

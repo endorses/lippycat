@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -10,6 +11,8 @@ import (
 var (
 	defaultLogger *slog.Logger
 	once          sync.Once
+	disabled      bool
+	disabledMux   sync.RWMutex
 )
 
 // Initialize sets up the structured logger
@@ -22,6 +25,37 @@ func Initialize() {
 		})
 		defaultLogger = slog.New(handler)
 	})
+}
+
+// Disable disables logging output (useful for TUI mode)
+func Disable() {
+	disabledMux.Lock()
+	defer disabledMux.Unlock()
+	disabled = true
+	// Redirect to discard
+	handler := slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	defaultLogger = slog.New(handler)
+}
+
+// Enable re-enables logging output
+func Enable() {
+	disabledMux.Lock()
+	defer disabledMux.Unlock()
+	disabled = false
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     slog.LevelInfo,
+		AddSource: false,
+	})
+	defaultLogger = slog.New(handler)
+}
+
+// IsDisabled returns whether logging is disabled
+func IsDisabled() bool {
+	disabledMux.RLock()
+	defer disabledMux.RUnlock()
+	return disabled
 }
 
 // Get returns the default structured logger

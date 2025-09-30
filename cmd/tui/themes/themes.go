@@ -1,0 +1,141 @@
+package themes
+
+import "github.com/charmbracelet/lipgloss"
+
+// Theme represents a color theme for the TUI
+type Theme struct {
+	Name string
+
+	// General UI colors
+	Background    lipgloss.Color
+	Foreground    lipgloss.Color
+	HeaderBg      lipgloss.Color
+	HeaderFg      lipgloss.Color
+	StatusBarBg   lipgloss.Color
+	StatusBarFg   lipgloss.Color
+	SelectionBg   lipgloss.Color
+	SelectionFg   lipgloss.Color
+	BorderColor   lipgloss.Color
+
+	// Protocol colors
+	TCPColor     lipgloss.Color
+	UDPColor     lipgloss.Color
+	SIPColor     lipgloss.Color
+	RTPColor     lipgloss.Color
+	DNSColor     lipgloss.Color
+	HTTPColor    lipgloss.Color
+	TLSColor     lipgloss.Color
+	ICMPColor    lipgloss.Color
+	UnknownColor lipgloss.Color
+	ErrorColor   lipgloss.Color
+
+	// Emphasis colors
+	WarningColor lipgloss.Color
+	SuccessColor lipgloss.Color
+	InfoColor    lipgloss.Color
+}
+
+// Solarized color palette
+var (
+	// Solarized Dark base colors
+	solarizedBase03  = lipgloss.Color("#002b36") // background
+	solarizedBase02  = lipgloss.Color("#073642") // background highlights
+	solarizedBase01  = lipgloss.Color("#586e75") // comments / secondary content
+	solarizedBase00  = lipgloss.Color("#657b83") // body text / default code
+	solarizedBase0   = lipgloss.Color("#839496") // body text / default code
+	solarizedBase1   = lipgloss.Color("#93a1a1") // optional emphasized content
+	solarizedBase2   = lipgloss.Color("#eee8d5") // background highlights (light)
+	solarizedBase3   = lipgloss.Color("#fdf6e3") // background (light)
+
+	// Solarized accent colors
+	solarizedYellow  = lipgloss.Color("#b58900")
+	solarizedOrange  = lipgloss.Color("#cb4b16")
+	solarizedRed     = lipgloss.Color("#dc322f")
+	solarizedMagenta = lipgloss.Color("#d33682")
+	solarizedViolet  = lipgloss.Color("#6c71c4")
+	solarizedBlue    = lipgloss.Color("#268bd2")
+	solarizedCyan    = lipgloss.Color("#2aa198")
+	solarizedGreen   = lipgloss.Color("#859900")
+)
+
+// SolarizedDark returns the Solarized Dark theme
+func SolarizedDark() Theme {
+	return Theme{
+		Name: "Solarized Dark",
+
+		// General UI
+		Background:  solarizedBase03,
+		Foreground:  solarizedBase0,
+		HeaderBg:    solarizedBase02,
+		HeaderFg:    solarizedBase1,
+		StatusBarBg: solarizedBase02,
+		StatusBarFg: solarizedBase1,
+		SelectionBg: solarizedBase02,
+		SelectionFg: solarizedBase3, // Light text on blue background
+		BorderColor: solarizedBase01,
+
+		// Protocol colors
+		TCPColor:     solarizedCyan,
+		UDPColor:     solarizedGreen,
+		SIPColor:     solarizedBlue,
+		RTPColor:     solarizedGreen,
+		DNSColor:     solarizedYellow,
+		HTTPColor:    solarizedCyan,
+		TLSColor:     solarizedMagenta,
+		ICMPColor:    solarizedOrange,
+		UnknownColor: solarizedBase0,
+		ErrorColor:   solarizedRed,
+
+		// Emphasis
+		WarningColor: solarizedOrange,
+		SuccessColor: solarizedGreen,
+		InfoColor:    solarizedBlue,
+	}
+}
+
+// SolarizedLight returns the Solarized Light theme
+func SolarizedLight() Theme {
+	return Theme{
+		Name: "Solarized Light",
+
+		// General UI
+		Background:  solarizedBase3,
+		Foreground:  solarizedBase00,
+		HeaderBg:    solarizedBase2,
+		HeaderFg:    solarizedBase01,
+		StatusBarBg: solarizedBase2,
+		StatusBarFg: solarizedBase01,
+		SelectionBg: solarizedBase2,
+		SelectionFg: solarizedBase3, // Light text on blue background
+		BorderColor: solarizedBase1,
+
+		// Protocol colors (same accent colors work in both themes)
+		TCPColor:     solarizedCyan,
+		UDPColor:     solarizedGreen,
+		SIPColor:     solarizedBlue,
+		RTPColor:     solarizedGreen,
+		DNSColor:     solarizedYellow,
+		HTTPColor:    solarizedCyan,
+		TLSColor:     solarizedMagenta,
+		ICMPColor:    solarizedOrange,
+		UnknownColor: solarizedBase00,
+		ErrorColor:   solarizedRed,
+
+		// Emphasis
+		WarningColor: solarizedOrange,
+		SuccessColor: solarizedGreen,
+		InfoColor:    solarizedBlue,
+	}
+}
+
+// GetTheme returns a theme by name
+func GetTheme(name string) Theme {
+	switch name {
+	case "light", "solarized-light":
+		return SolarizedLight()
+	case "dark", "solarized-dark":
+		return SolarizedDark()
+	default:
+		return SolarizedDark() // Default to dark
+	}
+}

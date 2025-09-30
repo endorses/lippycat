@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -128,8 +127,7 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
-	numProcessors := runtime.NumCPU()
-	processorWg.Add(numProcessors)
+	processorWg.Add(1)
 
 	for _, iface := range ifaces {
 		wg.Add(1)
@@ -157,33 +155,18 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 	go func() {
 		select {
 		case <-ctx.Done():
-			// Context cancelled, force cleanup
-			packetBuffer.Close()
-		default:
+			// Context cancelled, wait for capture goroutines to stop
 			wg.Wait()
 			packetBuffer.Close()
 		}
 	}()
 
-	for range numProcessors {
-		go func() {
-			defer processorWg.Done()
-			// Create a context-aware packet processor that can be cancelled
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					// Run packet processor with context monitoring
-					packetProcessor(packetBuffer.Receive(), assembler)
-					// Check if buffer is closed
-					if packetBuffer.IsClosed() {
-						return
-					}
-				}
-			}
-		}()
-	}
+	// Start a single goroutine that calls the user-provided packet processor
+	// The packet processor is responsible for reading from the channel
+	go func() {
+		defer processorWg.Done()
+		packetProcessor(packetBuffer.Receive(), assembler)
+	}()
 
 	processorWg.Wait()
 }

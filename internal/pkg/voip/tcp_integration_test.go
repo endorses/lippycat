@@ -41,39 +41,39 @@ a=rtpmap:0 PCMU/8000
 `
 
 	tests := []struct {
-		name             string
-		performanceMode  string
-		bufferStrategy   string
-		expectedCallID   string
-		expectedRTPPort  string
+		name            string
+		performanceMode string
+		bufferStrategy  string
+		expectedCallID  string
+		expectedRTPPort string
 	}{
 		{
-			name:             "balanced mode processing",
-			performanceMode:  "balanced",
-			bufferStrategy:   "adaptive",
-			expectedCallID:   "integration-test-call-12345@example.com",
-			expectedRTPPort:  "8000",
+			name:            "balanced mode processing",
+			performanceMode: "balanced",
+			bufferStrategy:  "adaptive",
+			expectedCallID:  "integration-test-call-12345@example.com",
+			expectedRTPPort: "8000",
 		},
 		{
-			name:             "throughput mode processing",
-			performanceMode:  "throughput",
-			bufferStrategy:   "ring",
-			expectedCallID:   "integration-test-call-12345@example.com",
-			expectedRTPPort:  "8000",
+			name:            "throughput mode processing",
+			performanceMode: "throughput",
+			bufferStrategy:  "ring",
+			expectedCallID:  "integration-test-call-12345@example.com",
+			expectedRTPPort: "8000",
 		},
 		{
-			name:             "latency mode processing",
-			performanceMode:  "latency",
-			bufferStrategy:   "fixed",
-			expectedCallID:   "integration-test-call-12345@example.com",
-			expectedRTPPort:  "8000",
+			name:            "latency mode processing",
+			performanceMode: "latency",
+			bufferStrategy:  "fixed",
+			expectedCallID:  "integration-test-call-12345@example.com",
+			expectedRTPPort: "8000",
 		},
 		{
-			name:             "memory mode processing",
-			performanceMode:  "memory",
-			bufferStrategy:   "adaptive",
-			expectedCallID:   "integration-test-call-12345@example.com",
-			expectedRTPPort:  "8000",
+			name:            "memory mode processing",
+			performanceMode: "memory",
+			bufferStrategy:  "adaptive",
+			expectedCallID:  "integration-test-call-12345@example.com",
+			expectedRTPPort: "8000",
 		},
 	}
 
@@ -150,39 +150,39 @@ a=rtpmap:0 PCMU/8000
 func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
 	// Test user surveillance filtering using actual PCAP files
 	testCases := []struct {
-		name        string
-		pcapFile    string
-		targetUsers []string
+		name          string
+		pcapFile      string
+		targetUsers   []string
 		expectedUsers []string
-		description string
+		description   string
 	}{
 		{
-			name:        "alice surveillance from invite",
-			pcapFile:    "../../../captures/tcp-sip-invite.pcap",
-			targetUsers: []string{"alice"},
+			name:          "alice surveillance from invite",
+			pcapFile:      "../../../captures/tcp-sip-invite.pcap",
+			targetUsers:   []string{"alice"},
 			expectedUsers: []string{"alice"},
-			description: "Should capture alice from INVITE call",
+			description:   "Should capture alice from INVITE call",
 		},
 		{
-			name:        "testuser surveillance from register",
-			pcapFile:    "../../../captures/tcp-sip-register.pcap",
-			targetUsers: []string{"testuser"},
+			name:          "testuser surveillance from register",
+			pcapFile:      "../../../captures/tcp-sip-register.pcap",
+			targetUsers:   []string{"testuser"},
 			expectedUsers: []string{"testuser"},
-			description: "Should capture testuser from REGISTER flow",
+			description:   "Should capture testuser from REGISTER flow",
 		},
 		{
-			name:        "multi-user surveillance",
-			pcapFile:    "../../../captures/tcp-sip-multiuser.pcap",
-			targetUsers: []string{"alice", "testuser"},
+			name:          "multi-user surveillance",
+			pcapFile:      "../../../captures/tcp-sip-multiuser.pcap",
+			targetUsers:   []string{"alice", "testuser"},
 			expectedUsers: []string{"alice", "testuser"},
-			description: "Should capture multiple targeted users",
+			description:   "Should capture multiple targeted users",
 		},
 		{
-			name:        "no match surveillance",
-			pcapFile:    "../../../captures/tcp-sip-invite.pcap",
-			targetUsers: []string{"charlie"},
+			name:          "no match surveillance",
+			pcapFile:      "../../../captures/tcp-sip-invite.pcap",
+			targetUsers:   []string{"charlie"},
 			expectedUsers: []string{},
-			description: "Should not capture non-targeted users",
+			description:   "Should not capture non-targeted users",
 		},
 	}
 
@@ -273,27 +273,27 @@ Content-Length: 0
 `
 
 	tests := []struct {
-		name            string
-		linkType        layers.LinkType
-		expectedFile    string
+		name             string
+		linkType         layers.LinkType
+		expectedFile     string
 		writeVoipEnabled bool
 	}{
 		{
-			name:            "null link pcap creation",
-			linkType:        layers.LinkTypeNull,
-			expectedFile:    "pcap-test-call-98765@example.com.pcap",
+			name:             "null link pcap creation",
+			linkType:         layers.LinkTypeNull,
+			expectedFile:     "pcap-test-call-98765@example.com.pcap",
 			writeVoipEnabled: true,
 		},
 		{
-			name:            "loop link pcap creation",
-			linkType:        layers.LinkTypeLoop,
-			expectedFile:    "pcap-test-call-98765@example.com.pcap",
+			name:             "loop link pcap creation",
+			linkType:         layers.LinkTypeLoop,
+			expectedFile:     "pcap-test-call-98765@example.com.pcap",
 			writeVoipEnabled: true,
 		},
 		{
-			name:            "no pcap when disabled",
-			linkType:        layers.LinkTypeNull,
-			expectedFile:    "",
+			name:             "no pcap when disabled",
+			linkType:         layers.LinkTypeNull,
+			expectedFile:     "",
 			writeVoipEnabled: false,
 		},
 	}
@@ -433,20 +433,20 @@ Content-Length: 0
 	}
 
 	tests := []struct {
-		name           string
-		performanceMode string
+		name             string
+		performanceMode  string
 		expectedMessages int
 		expectedRTPPorts []string
 	}{
 		{
-			name:           "complete call in balanced mode",
-			performanceMode: "balanced",
+			name:             "complete call in balanced mode",
+			performanceMode:  "balanced",
 			expectedMessages: 4,
 			expectedRTPPorts: []string{"8000", "8001"},
 		},
 		{
-			name:           "complete call in throughput mode",
-			performanceMode: "throughput",
+			name:             "complete call in throughput mode",
+			performanceMode:  "throughput",
 			expectedMessages: 4,
 			expectedRTPPorts: []string{"8000", "8001"},
 		},
@@ -632,7 +632,7 @@ func resetGlobalStateForTest() {
 	// Reset TCP buffer state
 	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
 	tcpBufferStats = &tcpBufferStatsInternal{
-		lastCleanupTime: time.Now(),
+		lastStatsUpdate: time.Now(),
 	}
 	tcpStreamMetrics = &tcpStreamMetricsInternal{
 		lastMetricsUpdate: time.Now(),

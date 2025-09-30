@@ -48,7 +48,27 @@ type Config struct {
 	TCPIOThreads           int   `mapstructure:"tcp_io_threads"`
 	TCPCompressionLevel    int   `mapstructure:"tcp_compression_level"`
 	TCPMemoryLimit         int64 `mapstructure:"tcp_memory_limit"`
+
+	// Plugin system configurations
+	PluginsEnabled         bool     `mapstructure:"plugins_enabled"`
+	PluginPaths           []string `mapstructure:"plugin_paths"`
+	PluginWatchEnabled    bool     `mapstructure:"plugin_watch_enabled"`
+	PluginSIPEnabled      bool     `mapstructure:"plugin_sip_enabled"`
+	PluginRTPEnabled      bool     `mapstructure:"plugin_rtp_enabled"`
+	PluginGenericEnabled  bool     `mapstructure:"plugin_generic_enabled"`
+
+	// Monitoring configurations - disabled by default
+	MonitoringEnabled        bool          `mapstructure:"monitoring_enabled"`
+	MetricsEnabled          bool          `mapstructure:"metrics_enabled"`
+	PrometheusEnabled       bool          `mapstructure:"prometheus_enabled"`
+	PrometheusPort          int           `mapstructure:"prometheus_port"`
+	TracingEnabled          bool          `mapstructure:"tracing_enabled"`
+	MonitoringUpdateInterval time.Duration `mapstructure:"monitoring_update_interval"`
+	EnableRuntimeMetrics    bool          `mapstructure:"enable_runtime_metrics"`
+	EnableSystemMetrics     bool          `mapstructure:"enable_system_metrics"`
+	EnablePluginMetrics     bool          `mapstructure:"enable_plugin_metrics"`
 	TCPLatencyOptimization bool  `mapstructure:"tcp_latency_optimization"`
+	EnableAutoTuning       bool  `mapstructure:"enable_auto_tuning"`
 }
 
 // initConfigDefaults initializes viper defaults once
@@ -80,6 +100,26 @@ func initConfigDefaults() {
 	viper.SetDefault("voip.tcp_compression_level", DefaultTCPCompressionLevel)
 	viper.SetDefault("voip.tcp_memory_limit", DefaultTCPMemoryLimit)
 	viper.SetDefault("voip.tcp_latency_optimization", DefaultTCPLatencyOptimization)
+	viper.SetDefault("voip.enable_auto_tuning", true)
+
+	// Plugin system defaults - disabled by default for backward compatibility
+	viper.SetDefault("voip.plugins_enabled", false)
+	viper.SetDefault("voip.plugin_paths", []string{})
+	viper.SetDefault("voip.plugin_watch_enabled", false)
+	viper.SetDefault("voip.plugin_sip_enabled", true)
+	viper.SetDefault("voip.plugin_rtp_enabled", true)
+	viper.SetDefault("voip.plugin_generic_enabled", true)
+
+	// Monitoring system defaults - disabled by default for backward compatibility
+	viper.SetDefault("voip.monitoring_enabled", false)
+	viper.SetDefault("voip.metrics_enabled", false)
+	viper.SetDefault("voip.prometheus_enabled", false)
+	viper.SetDefault("voip.prometheus_port", 9090)
+	viper.SetDefault("voip.tracing_enabled", false)
+	viper.SetDefault("voip.monitoring_update_interval", 30*time.Second)
+	viper.SetDefault("voip.enable_runtime_metrics", true)
+	viper.SetDefault("voip.enable_system_metrics", false)
+	viper.SetDefault("voip.enable_plugin_metrics", true)
 }
 
 // GetConfig returns the current VoIP configuration with defaults
@@ -115,6 +155,25 @@ func GetConfig() *Config {
 		TCPCompressionLevel:    viper.GetInt("voip.tcp_compression_level"),
 		TCPMemoryLimit:         viper.GetInt64("voip.tcp_memory_limit"),
 		TCPLatencyOptimization: viper.GetBool("voip.tcp_latency_optimization"),
+
+		// Plugin system configurations
+		PluginsEnabled:        viper.GetBool("voip.plugins_enabled"),
+		PluginPaths:          viper.GetStringSlice("voip.plugin_paths"),
+		PluginWatchEnabled:   viper.GetBool("voip.plugin_watch_enabled"),
+		PluginSIPEnabled:     viper.GetBool("voip.plugin_sip_enabled"),
+		PluginRTPEnabled:     viper.GetBool("voip.plugin_rtp_enabled"),
+		PluginGenericEnabled: viper.GetBool("voip.plugin_generic_enabled"),
+
+		// Monitoring configurations
+		MonitoringEnabled:        viper.GetBool("voip.monitoring_enabled"),
+		MetricsEnabled:          viper.GetBool("voip.metrics_enabled"),
+		PrometheusEnabled:       viper.GetBool("voip.prometheus_enabled"),
+		PrometheusPort:          viper.GetInt("voip.prometheus_port"),
+		TracingEnabled:          viper.GetBool("voip.tracing_enabled"),
+		MonitoringUpdateInterval: viper.GetDuration("voip.monitoring_update_interval"),
+		EnableRuntimeMetrics:    viper.GetBool("voip.enable_runtime_metrics"),
+		EnableSystemMetrics:     viper.GetBool("voip.enable_system_metrics"),
+		EnablePluginMetrics:     viper.GetBool("voip.enable_plugin_metrics"),
 	}
 
 	return config

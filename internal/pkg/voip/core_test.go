@@ -14,6 +14,9 @@ import (
 )
 
 func TestStartProcessor_UDPHandling(t *testing.T) {
+	// Reset and initialize config for this test
+	ResetConfigOnce()
+
 	// Create a mock UDP packet with SIP content
 	eth := &layers.Ethernet{
 		SrcMAC:       []byte{0x00, 0x0c, 0x29, 0x1f, 0x3c, 0x4e},

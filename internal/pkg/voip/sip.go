@@ -22,13 +22,20 @@ func handleSipMessage(data []byte) bool {
 	if containsUserInHeaders(headers) {
 		callID := headers["call-id"]
 		if callID != "" {
+			// Validate the Call-ID for security
+			if err := ValidateCallIDForSecurity(callID); err != nil {
+				logger.Warn("Malicious Call-ID detected and rejected",
+					"call_id", SanitizeCallIDForLogging(callID),
+					"error", err,
+					"source", "sip_processing")
+				return false
+			}
 			if strings.Contains(body, "m=audio") {
 				method := detectSipMethod(startLine)
 				call, err := getCall(callID)
 				if err == nil {
 					call.SetCallInfoState(method)
 				}
-				// fmt.Println("extracting Port for callid", callID)
 				ExtractPortFromSdp(body, callID)
 			}
 		}

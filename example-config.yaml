@@ -29,6 +29,28 @@ voip:
   tcp_memory_limit: 104857600  # 100MB
   tcp_latency_optimization: false
 
+  # Security Configuration
+  security:
+    # Call-ID Sanitization for preventing information leakage in logs
+    sanitize_call_ids: false          # Set to true to enable Call-ID sanitization
+    call_id_hash_length: 8            # Length of hash prefix for sanitized Call-IDs
+    call_id_max_log_length: 16        # Maximum Call-ID length before sanitization kicks in
+
+    # PCAP File Encryption for sensitive deployments
+    enable_pcap_encryption: false     # Set to true to enable PCAP encryption
+
+    # Content-Length Bounds Validation for DoS protection
+    max_content_length: 1048576       # Maximum Content-Length value (1MB default)
+    max_message_size: 2097152         # Maximum total SIP message size (2MB default)
+
+  # Encryption Configuration (only used when enable_pcap_encryption is true)
+  encryption:
+    enabled: false                    # Master encryption toggle
+    key_file: "/etc/lippycat/keys/pcap.key"  # Path to encryption key file (will be generated if missing)
+    algorithm: "aes-256-gcm"         # Encryption algorithm (only aes-256-gcm supported)
+    key_derive: "pbkdf2"             # Key derivation method (only pbkdf2 supported)
+    pbkdf2_iterations: 100000        # PBKDF2 iterations for key derivation
+
 # Performance Mode Examples:
 
 # High Throughput Configuration
@@ -55,3 +77,18 @@ voip:
 #   max_tcp_buffers: 1000
 #   memory_optimization: true
 #   tcp_memory_limit: 52428800  # 50MB
+
+# Security Enhanced Configuration (for sensitive deployments)
+# voip:
+#   security:
+#     sanitize_call_ids: true           # Enable Call-ID sanitization in logs
+#     call_id_hash_length: 12          # Longer hash for better anonymization
+#     call_id_max_log_length: 8        # Shorter threshold for aggressive sanitization
+#     enable_pcap_encryption: true     # Enable PCAP file encryption
+#     max_content_length: 65536        # Strict 64KB Content-Length limit
+#     max_message_size: 131072         # Strict 128KB total message limit
+#   encryption:
+#     enabled: true                     # Master encryption toggle
+#     key_file: "/secure/keys/lippycat-pcap.key"  # Secure key file location
+#     algorithm: "aes-256-gcm"         # Strong encryption algorithm
+#     pbkdf2_iterations: 200000        # Higher iterations for stronger key derivation

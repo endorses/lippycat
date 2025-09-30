@@ -33,19 +33,15 @@ func StartOfflineVoipSniffer(interfaces, filter string) {
 
 func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 	defer CloseWriters()
-	// fmt.Println("Starting Processor")
 	for pkt := range ch {
 		packet := pkt.Packet
 		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
-			// fmt.Println("startProcessor nil")
 			continue
 		}
 		switch layer := packet.TransportLayer().(type) {
 		case *layers.TCP:
-			// fmt.Println("TCP")
 			handleTcpPackets(pkt, layer, assembler)
 		case *layers.UDP:
-			// fmt.Println("UDP")
 			handleUdpPackets(pkt, layer)
 		}
 	}

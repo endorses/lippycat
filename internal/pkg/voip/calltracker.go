@@ -31,6 +31,8 @@ type CallInfo struct {
 	RTPWriter   *pcapgo.Writer
 	sipFile     *os.File
 	rtpFile     *os.File
+	sipWriterMu sync.Mutex // Protects SIPWriter access
+	rtpWriterMu sync.Mutex // Protects RTPWriter access
 }
 
 type CallTracker struct {
@@ -164,7 +166,7 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 		if viper.GetViper().GetBool("writeVoip") {
 			if err := call.initWriters(); err != nil {
 				logger.Error("Failed to initialize writers for call",
-					"call_id", callID,
+					"call_id", SanitizeCallIDForLogging(callID),
 					"error", err)
 				// Don't track call if we can't write it - prevents silent data loss
 				return nil
@@ -331,20 +333,20 @@ func (ct *CallTracker) cleanupOldCalls() {
 	for id, call := range ct.callMap {
 		if now.Sub(call.LastUpdated) > expireAfter {
 			logger.Info("Cleaning up expired call",
-				"call_id", id,
+				"call_id", SanitizeCallIDForLogging(id),
 				"last_updated", call.LastUpdated,
 				"age_seconds", int(now.Sub(call.LastUpdated).Seconds()))
 			if call.sipFile != nil {
 				if err := call.sipFile.Close(); err != nil {
 					logger.Error("Error closing SIP file for call",
-						"call_id", id,
+						"call_id", SanitizeCallIDForLogging(id),
 						"error", err)
 				}
 			}
 			if call.rtpFile != nil {
 				if err := call.rtpFile.Close(); err != nil {
 					logger.Error("Error closing RTP file for call",
-						"call_id", id,
+						"call_id", SanitizeCallIDForLogging(id),
 						"error", err)
 				}
 			}

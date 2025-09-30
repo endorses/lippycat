@@ -46,6 +46,9 @@ func TestStartVoipSnifferIntegration(t *testing.T) {
 }
 
 func TestStartProcessorChannelProcessing(t *testing.T) {
+	// Reset and initialize config for this test
+	ResetConfigOnce()
+
 	// Create isolated tracker for this test
 	tracker := TestCallTracker(t)
 	restore := OverrideDefaultTracker(tracker)

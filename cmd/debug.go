@@ -235,8 +235,8 @@ func showTCPMetrics(jsonOutput bool) {
 		fmt.Printf("   Total Buffers: %d\n", buffers.TotalBuffers)
 		fmt.Printf("   Total Packets: %d\n", buffers.TotalPackets)
 		fmt.Printf("   Buffers Dropped: %d\n", buffers.BuffersDropped)
-		fmt.Printf("   Packets Dropped: %d\n", buffers.PacketsDropped)
-		fmt.Printf("   Last Cleanup: %v ago\n", time.Since(buffers.LastCleanupTime).Round(time.Second))
+		fmt.Printf("   Total Packets Buffered: %d\n", buffers.TotalPacketsBuffered)
+		fmt.Printf("   Last Stats Update: %v ago\n", time.Since(buffers.LastStatsUpdate).Round(time.Second))
 
 		if buffers.TotalBuffers > 8000 {
 			fmt.Println("   ⚠️  HIGH buffer count - consider memory optimization")
@@ -344,8 +344,8 @@ func showBufferStats(jsonOutput bool) {
 	fmt.Printf("Total Buffers: %d\n", stats.TotalBuffers)
 	fmt.Printf("Total Packets: %d\n", stats.TotalPackets)
 	fmt.Printf("Buffers Dropped: %d\n", stats.BuffersDropped)
-	fmt.Printf("Packets Dropped: %d\n", stats.PacketsDropped)
-	fmt.Printf("Last Cleanup: %v ago\n", time.Since(stats.LastCleanupTime).Round(time.Second))
+	fmt.Printf("Total Packets Buffered: %d\n", stats.TotalPacketsBuffered)
+	fmt.Printf("Last Stats Update: %v ago\n", time.Since(stats.LastStatsUpdate).Round(time.Second))
 
 	if stats.TotalBuffers > 0 {
 		avgPacketsPerBuffer := float64(stats.TotalPackets) / float64(stats.TotalBuffers)

@@ -18,15 +18,15 @@ func TestCallTracker(t *testing.T) *CallTracker {
 // This should be used sparingly and only when necessary for integration tests
 func OverrideDefaultTracker(tracker *CallTracker) func() {
 	oldTracker := defaultTracker
-	oldOnce := trackerOnce
 
-	trackerOnce = sync.Once{}
+	// Simply set the default tracker directly without touching sync.Once
 	defaultTracker = tracker
 
 	// Return restore function
 	return func() {
 		defaultTracker = oldTracker
-		trackerOnce = oldOnce
+		// Note: We don't reset trackerOnce as it's meant to run only once
+		// If needed for testing, create a new tracker instance instead
 	}
 }
 

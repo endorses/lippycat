@@ -1,0 +1,85 @@
+# Simplified VoIP Configuration for lippycat
+# Reduces complexity from 25+ parameters to 8 essential settings
+
+# ========================================
+# SIMPLIFIED TCP CONFIGURATION (8 parameters)
+# ========================================
+
+voip:
+  # Core Performance Profile - automatically sets 17+ detailed parameters
+  # Options: "minimal", "balanced", "high_performance", "low_latency"
+  performance_profile: "balanced"
+
+  # Essential Resource Limits
+  max_memory_mb: 100        # Total memory limit in MB (10-2048)
+  max_active_streams: 1000  # Maximum concurrent TCP streams (10-50000)
+  stream_timeout: "5m"      # Stream processing timeout (30s-1h)
+
+  # Core Processing Settings
+  worker_threads: 0         # Worker threads (0=auto-detect CPU cores, max=4*CPU)
+  enable_metrics: true      # Enable performance metrics collection
+
+  # Advanced Settings (optional)
+  custom_buffer_size: 0     # Custom batch size (0=auto-calculate)
+  debug_mode: false         # Enable detailed debug logging
+
+# ========================================
+# WHAT EACH PROFILE AUTOMATICALLY CONFIGURES
+# ========================================
+
+# "minimal" profile (for resource-constrained environments):
+#   - 25MB memory limit, 500 max buffers, memory optimization enabled
+#   - Fixed buffer strategy, 1 I/O thread, minimal cleanup intervals
+#   - Auto-configures 17 detailed parameters
+
+# "balanced" profile (recommended default):
+#   - 100MB memory limit, 5000 max buffers, adaptive strategy
+#   - CPU-aware threading, auto-tuning enabled, balanced timeouts
+#   - Auto-configures 19 detailed parameters
+
+# "high_performance" profile (for high-volume environments):
+#   - 500MB memory limit, 20000 max buffers, ring buffer strategy
+#   - 2x CPU threads, backpressure disabled, no compression
+#   - Auto-configures 19 detailed parameters
+
+# "low_latency" profile (for real-time processing):
+#   - 200MB memory limit, immediate processing (batch=1)
+#   - Fixed strategy, auto-tuning disabled, aggressive cleanup
+#   - Auto-configures 18 detailed parameters
+
+# ========================================
+# MIGRATION FROM OLD CONFIG
+# ========================================
+
+# OLD (25+ parameters):
+# voip:
+#   tcp_performance_mode: "balanced"
+#   tcp_batch_size: 32
+#   max_tcp_buffers: 5000
+#   tcp_buffer_strategy: "adaptive"
+#   tcp_memory_limit: 104857600
+#   stream_queue_buffer: 250
+#   tcp_stream_max_queue_time: "2m"
+#   tcp_buffer_max_age: "5m"
+#   tcp_cleanup_interval: "1m"
+#   memory_optimization: false
+#   enable_auto_tuning: true
+#   tcp_stream_timeout: "5m"
+#   tcp_assembler_max_pages: 100
+#   enable_backpressure: true
+#   tcp_buffer_pool_size: 1000
+#   tcp_io_threads: 8
+#   tcp_compression_level: 1
+#   tcp_latency_optimization: false
+#   # ... plus 7 more parameters
+
+# NEW (8 parameters):
+# voip:
+#   performance_profile: "balanced"  # Automatically sets all the above!
+#   max_memory_mb: 100
+#   max_active_streams: 1000
+#   stream_timeout: "5m"
+#   worker_threads: 8
+#   enable_metrics: true
+#   custom_buffer_size: 0
+#   debug_mode: false

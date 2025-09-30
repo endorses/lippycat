@@ -209,6 +209,9 @@ func TestSIPStream_ContextCancellation(t *testing.T) {
 }
 
 func TestSIPStream_CallIDParsing(t *testing.T) {
+	// Reset and initialize config for this test
+	ResetConfigOnce()
+
 	tests := []struct {
 		name           string
 		input          string
@@ -263,10 +266,18 @@ func TestSIPStream_CallIDParsing(t *testing.T) {
 			// Create a mock ReaderStream
 			readerStream := tcpreader.NewReaderStream()
 
+			// Create a minimal factory for testing
+			config := GetConfig()
+			mockFactory := &sipStreamFactory{
+				config: config,
+			}
+
 			stream := &SIPStream{
 				reader:         &readerStream,
 				callIDDetector: detector,
 				ctx:            ctx,
+				factory:        mockFactory,
+				createdAt:      time.Now(),
 			}
 
 			// Write data to the stream and close it

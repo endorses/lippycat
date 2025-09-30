@@ -33,14 +33,14 @@ func (a AlertLevel) String() string {
 
 // Alert represents a TCP resource alert
 type Alert struct {
-	ID          string    `json:"id"`
-	Level       AlertLevel `json:"level"`
-	Component   string    `json:"component"`
-	Message     string    `json:"message"`
-	Timestamp   time.Time `json:"timestamp"`
-	Metrics     map[string]interface{} `json:"metrics,omitempty"`
-	Resolved    bool      `json:"resolved"`
-	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
+	ID         string                 `json:"id"`
+	Level      AlertLevel             `json:"level"`
+	Component  string                 `json:"component"`
+	Message    string                 `json:"message"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Metrics    map[string]interface{} `json:"metrics,omitempty"`
+	Resolved   bool                   `json:"resolved"`
+	ResolvedAt *time.Time             `json:"resolved_at,omitempty"`
 }
 
 // AlertHandler defines the interface for handling alerts
@@ -73,11 +73,11 @@ func (h *LogAlertHandler) HandleAlert(alert Alert) error {
 type ConsoleAlertHandler struct{}
 
 func (h *ConsoleAlertHandler) HandleAlert(alert Alert) error {
-	fmt.Printf("[%s] %s - %s: %s\n",
-		alert.Timestamp.Format("2006-01-02 15:04:05"),
-		alert.Level.String(),
-		alert.Component,
-		alert.Message)
+	logger.Info("Alert triggered",
+		"timestamp", alert.Timestamp.Format("2006-01-02 15:04:05"),
+		"level", alert.Level.String(),
+		"component", alert.Component,
+		"message", alert.Message)
 	return nil
 }
 
@@ -123,18 +123,18 @@ type AlertThresholds struct {
 // DefaultAlertThresholds returns sensible default thresholds
 func DefaultAlertThresholds() *AlertThresholds {
 	return &AlertThresholds{
-		MemoryWarningMB:           200, // 200MB
-		MemoryCriticalMB:          500, // 500MB
-		GoroutineWarningPercent:   80,  // 80% of max_goroutines
-		GoroutineCriticalPercent:  95,  // 95% of max_goroutines
-		QueueWarningPercent:       70,  // 70% of queue capacity
-		QueueCriticalPercent:      90,  // 90% of queue capacity
-		BufferWarningCount:        8000, // 8000 buffers
-		BufferCriticalCount:       9500, // 9500 buffers
-		FailureRateWarningPercent: 5,   // 5% failure rate
-		FailureRateCriticalPercent: 15, // 15% failure rate
-		UnhealthyDurationWarning:  2 * time.Minute,
-		UnhealthyDurationCritical: 5 * time.Minute,
+		MemoryWarningMB:            200,  // 200MB
+		MemoryCriticalMB:           500,  // 500MB
+		GoroutineWarningPercent:    80,   // 80% of max_goroutines
+		GoroutineCriticalPercent:   95,   // 95% of max_goroutines
+		QueueWarningPercent:        70,   // 70% of queue capacity
+		QueueCriticalPercent:       90,   // 90% of queue capacity
+		BufferWarningCount:         8000, // 8000 buffers
+		BufferCriticalCount:        9500, // 9500 buffers
+		FailureRateWarningPercent:  5,    // 5% failure rate
+		FailureRateCriticalPercent: 15,   // 15% failure rate
+		UnhealthyDurationWarning:   2 * time.Minute,
+		UnhealthyDurationCritical:  5 * time.Minute,
 	}
 }
 
@@ -257,8 +257,8 @@ func (am *AlertManager) checkGoroutineUsage(health map[string]interface{}) {
 					utilizationPercent, am.thresholds.GoroutineCriticalPercent),
 				map[string]interface{}{
 					"utilization_percent": utilizationPercent,
-					"active_goroutines": health["active_goroutines"],
-					"max_goroutines": health["max_goroutines"],
+					"active_goroutines":   health["active_goroutines"],
+					"max_goroutines":      health["max_goroutines"],
 				})
 		} else if utilizationPercent >= am.thresholds.GoroutineWarningPercent {
 			am.triggerAlert("goroutine-warning", AlertWarning, "Goroutine Pool",
@@ -266,8 +266,8 @@ func (am *AlertManager) checkGoroutineUsage(health map[string]interface{}) {
 					utilizationPercent, am.thresholds.GoroutineWarningPercent),
 				map[string]interface{}{
 					"utilization_percent": utilizationPercent,
-					"active_goroutines": health["active_goroutines"],
-					"max_goroutines": health["max_goroutines"],
+					"active_goroutines":   health["active_goroutines"],
+					"max_goroutines":      health["max_goroutines"],
 				})
 		} else {
 			// Resolve if below warning threshold
@@ -288,8 +288,8 @@ func (am *AlertManager) checkQueueUsage(health map[string]interface{}) {
 					utilizationPercent, am.thresholds.QueueCriticalPercent),
 				map[string]interface{}{
 					"utilization_percent": utilizationPercent,
-					"queue_length": health["queue_length"],
-					"queue_capacity": health["queue_capacity"],
+					"queue_length":        health["queue_length"],
+					"queue_capacity":      health["queue_capacity"],
 				})
 		} else if utilizationPercent >= am.thresholds.QueueWarningPercent {
 			am.triggerAlert("queue-warning", AlertWarning, "Stream Queue",
@@ -297,8 +297,8 @@ func (am *AlertManager) checkQueueUsage(health map[string]interface{}) {
 					utilizationPercent, am.thresholds.QueueWarningPercent),
 				map[string]interface{}{
 					"utilization_percent": utilizationPercent,
-					"queue_length": health["queue_length"],
-					"queue_capacity": health["queue_capacity"],
+					"queue_length":        health["queue_length"],
+					"queue_capacity":      health["queue_capacity"],
 				})
 		} else {
 			// Resolve if below warning threshold
@@ -317,8 +317,8 @@ func (am *AlertManager) checkBufferUsage() {
 			fmt.Sprintf("Buffer count at %d (critical threshold: %d)",
 				bufferStats.TotalBuffers, am.thresholds.BufferCriticalCount),
 			map[string]interface{}{
-				"total_buffers": bufferStats.TotalBuffers,
-				"total_packets": bufferStats.TotalPackets,
+				"total_buffers":   bufferStats.TotalBuffers,
+				"total_packets":   bufferStats.TotalPackets,
 				"buffers_dropped": bufferStats.BuffersDropped,
 			})
 	} else if bufferStats.TotalBuffers >= am.thresholds.BufferWarningCount {
@@ -326,8 +326,8 @@ func (am *AlertManager) checkBufferUsage() {
 			fmt.Sprintf("Buffer count at %d (warning threshold: %d)",
 				bufferStats.TotalBuffers, am.thresholds.BufferWarningCount),
 			map[string]interface{}{
-				"total_buffers": bufferStats.TotalBuffers,
-				"total_packets": bufferStats.TotalPackets,
+				"total_buffers":   bufferStats.TotalBuffers,
+				"total_packets":   bufferStats.TotalPackets,
 				"buffers_dropped": bufferStats.BuffersDropped,
 			})
 	} else {
@@ -350,9 +350,9 @@ func (am *AlertManager) checkFailureRates() {
 					failureRate, am.thresholds.FailureRateCriticalPercent),
 				map[string]interface{}{
 					"failure_rate_percent": failureRate,
-					"total_created": metrics.TotalStreamsCreated,
-					"total_failed": metrics.TotalStreamsFailed,
-					"total_completed": metrics.TotalStreamsCompleted,
+					"total_created":        metrics.TotalStreamsCreated,
+					"total_failed":         metrics.TotalStreamsFailed,
+					"total_completed":      metrics.TotalStreamsCompleted,
 				})
 		} else if failureRate >= am.thresholds.FailureRateWarningPercent {
 			am.triggerAlert("failure-rate-warning", AlertWarning, "Stream Processing",
@@ -360,9 +360,9 @@ func (am *AlertManager) checkFailureRates() {
 					failureRate, am.thresholds.FailureRateWarningPercent),
 				map[string]interface{}{
 					"failure_rate_percent": failureRate,
-					"total_created": metrics.TotalStreamsCreated,
-					"total_failed": metrics.TotalStreamsFailed,
-					"total_completed": metrics.TotalStreamsCompleted,
+					"total_created":        metrics.TotalStreamsCreated,
+					"total_failed":         metrics.TotalStreamsFailed,
+					"total_completed":      metrics.TotalStreamsCompleted,
 				})
 		} else {
 			// Resolve if below warning threshold
@@ -418,12 +418,12 @@ func (am *AlertManager) resolveAlert(id string) {
 
 		// Create resolution alert
 		resolutionAlert := Alert{
-			ID:        id + "-resolved",
-			Level:     AlertInfo,
-			Component: alert.Component,
-			Message:   fmt.Sprintf("RESOLVED: %s", alert.Message),
-			Timestamp: now,
-			Resolved:  true,
+			ID:         id + "-resolved",
+			Level:      AlertInfo,
+			Component:  alert.Component,
+			Message:    fmt.Sprintf("RESOLVED: %s", alert.Message),
+			Timestamp:  now,
+			Resolved:   true,
 			ResolvedAt: &now,
 		}
 
@@ -476,7 +476,7 @@ func GetAlertManager() *AlertManager {
 
 		// Override thresholds based on configuration
 		if config.TCPMemoryLimit > 0 {
-			thresholds.MemoryWarningMB = config.TCPMemoryLimit / (1024 * 1024) * 80 / 100 // 80% of limit
+			thresholds.MemoryWarningMB = config.TCPMemoryLimit / (1024 * 1024) * 80 / 100  // 80% of limit
 			thresholds.MemoryCriticalMB = config.TCPMemoryLimit / (1024 * 1024) * 95 / 100 // 95% of limit
 		}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -316,14 +317,14 @@ func TestHandleTcpPackets_NonSipPort(t *testing.T) {
 func TestTCPBufferStats(t *testing.T) {
 	// Reset stats for test
 	tcpBufferStats = &tcpBufferStatsInternal{
-		lastCleanupTime: time.Now(),
+		lastStatsUpdate: time.Now(),
 	}
 
 	stats := GetTCPBufferStats()
 	assert.Equal(t, int64(0), stats.TotalBuffers)
 	assert.Equal(t, int64(0), stats.TotalPackets)
 	assert.Equal(t, int64(0), stats.BuffersDropped)
-	assert.Equal(t, int64(0), stats.PacketsDropped)
+	// PacketsDropped field was removed, use BuffersDropped instead
 }
 
 func TestTCPStreamMetrics(t *testing.T) {
@@ -387,7 +388,6 @@ func TestTCPBufferStrategies(t *testing.T) {
 			}
 
 			// Simulate packet buffering based on strategy
-			buffer.mu.Lock()
 			for _, pkt := range testPackets {
 				switch tt.strategy {
 				case "ring":
@@ -413,7 +413,6 @@ func TestTCPBufferStrategies(t *testing.T) {
 					buffer.packets = append(buffer.packets, pkt)
 				}
 			}
-			buffer.mu.Unlock()
 
 			assert.LessOrEqual(t, len(buffer.packets), tt.expected)
 			releaseBuffer(buffer)
@@ -437,28 +436,27 @@ func TestTCPBufferPool(t *testing.T) {
 	// Test buffer creation
 	buffer1 := getOrCreateBuffer("adaptive", 100)
 	require.NotNil(t, buffer1)
-	assert.Equal(t, int64(1), tcpBufferPool.created)
-	assert.Equal(t, int64(0), tcpBufferPool.reused)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&bufferCreationCount))
 
 	// Test buffer release
 	releaseBuffer(buffer1)
-	assert.Equal(t, int64(1), tcpBufferPool.released)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&bufferReleaseCount))
 	assert.Equal(t, 1, len(tcpBufferPool.buffers))
 
 	// Test buffer reuse
 	buffer2 := getOrCreateBuffer("fixed", 200)
 	require.NotNil(t, buffer2)
 	assert.Equal(t, buffer1, buffer2) // Should be the same buffer
-	assert.Equal(t, int64(1), tcpBufferPool.reused)
+	assert.Equal(t, int64(1), atomic.LoadInt64(&bufferReuseCount))
 	assert.Equal(t, "fixed", buffer2.strategy)
 	assert.Equal(t, 200, buffer2.maxSize)
 }
 
 func TestPerformanceModeOptimizations(t *testing.T) {
 	tests := []struct {
-		name         string
-		mode         string
-		expectedBatch int
+		name             string
+		mode             string
+		expectedBatch    int
 		expectedStrategy string
 	}{
 		{
@@ -482,7 +480,7 @@ func TestPerformanceModeOptimizations(t *testing.T) {
 		{
 			name:             "balanced mode",
 			mode:             "balanced",
-			expectedBatch:    32, // uses default
+			expectedBatch:    32,         // uses default
 			expectedStrategy: "adaptive", // uses default
 		},
 	}
@@ -491,9 +489,9 @@ func TestPerformanceModeOptimizations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := &Config{
 				TCPPerformanceMode: tt.mode,
-				TCPBatchSize:       32, // default
+				TCPBatchSize:       32,         // default
 				TCPBufferStrategy:  "adaptive", // default
-				MaxGoroutines:      1000, // default
+				MaxGoroutines:      1000,       // default
 			}
 
 			applyPerformanceModeOptimizations(config)
@@ -643,6 +641,10 @@ func TestSipStreamFactoryHealthChecks(t *testing.T) {
 }
 
 func TestGlobalTCPAssemblerMonitoring(t *testing.T) {
+	// Reset global state for test isolation
+	ResetTestState()
+	defer ResetTestState() // Clean up after test
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -705,4 +707,15 @@ func createTestPacket(t *testing.T, linkType gopacket.LayerType) gopacket.Packet
 // Helper function to reset config for testing
 func ResetConfigOnce() {
 	configOnce = sync.Once{}
+}
+
+// ResetTestState resets all global state for test isolation
+func ResetTestState() {
+	// Reset config
+	configOnce = sync.Once{}
+
+	// Reset global TCP factory
+	globalTCPMutex.Lock()
+	globalTCPFactory = nil
+	globalTCPMutex.Unlock()
 }

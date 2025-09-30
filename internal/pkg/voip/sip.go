@@ -30,7 +30,8 @@ func handleSipMessage(data []byte) bool {
 					"source", "sip_processing")
 				return false
 			}
-			if strings.Contains(body, "m=audio") {
+			bodyBytes := StringToBytes(body)
+			if BytesContains(bodyBytes, []byte("m=audio")) {
 				method := detectSipMethod(startLine)
 				call, err := getCall(callID)
 				if err == nil {
@@ -45,48 +46,32 @@ func handleSipMessage(data []byte) bool {
 }
 
 func detectSipMethod(line string) string {
-	if strings.HasPrefix(line, "INVITE") {
-		return "INVITE"
-	}
-	if strings.HasPrefix(line, "REGISTER") {
-		return "REGISTER"
-	}
-	if strings.HasPrefix(line, "BYE") {
-		return "BYE"
-	}
-	if strings.HasPrefix(line, "CANCEL") {
-		return "CANCEL"
-	}
-	if strings.HasPrefix(line, "ACK") {
-		return "ACK"
-	}
-	if strings.HasPrefix(line, "OPTIONS") {
-		return "OPTIONS"
-	}
-	if strings.HasPrefix(line, "SIP/2.0") {
-		return ""
-	}
-	return ""
+	lineBytes := StringToBytes(line)
+
+	// Use SIMD-optimized method matching if available
+	return SIPMethodMatchSIMD(lineBytes)
 }
 
 func isSipStartLine(line string) bool {
+	lineBytes := StringToBytes(line)
+
 	// SIP responses start with SIP/2.0
-	if strings.HasPrefix(line, "SIP/2.0") {
+	if BytesHasPrefixString(lineBytes, "SIP/2.0") {
 		return true
 	}
 
 	// SIP requests must contain "SIP/2.0" at the end
-	if !strings.Contains(line, "SIP/2.0") {
+	if !BytesContains(lineBytes, []byte("SIP/2.0")) {
 		return false
 	}
 
 	// Check for valid SIP methods at the beginning
-	return strings.HasPrefix(line, "INVITE ") ||
-		strings.HasPrefix(line, "BYE ") ||
-		strings.HasPrefix(line, "ACK ") ||
-		strings.HasPrefix(line, "OPTIONS ") ||
-		strings.HasPrefix(line, "REGISTER ") ||
-		strings.HasPrefix(line, "CANCEL ")
+	return BytesHasPrefixString(lineBytes, "INVITE ") ||
+		BytesHasPrefixString(lineBytes, "BYE ") ||
+		BytesHasPrefixString(lineBytes, "ACK ") ||
+		BytesHasPrefixString(lineBytes, "OPTIONS ") ||
+		BytesHasPrefixString(lineBytes, "REGISTER ") ||
+		BytesHasPrefixString(lineBytes, "CANCEL ")
 }
 
 func parseSipHeaders(data []byte) (map[string]string, string) {

@@ -2,7 +2,6 @@ package voip
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -76,7 +75,8 @@ func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 				} else {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
 				}
-				if strings.Contains(body, "m=audio") {
+				bodyBytes := StringToBytes(body)
+				if BytesContains(bodyBytes, []byte("m=audio")) {
 					ExtractPortFromSdp(body, callID)
 				}
 			}

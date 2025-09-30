@@ -139,32 +139,13 @@ func SIPMethodMatchSIMD(line []byte) string {
 	return ""
 }
 
-// Assembly implementations - see simd_amd64.s
-// These functions are implemented in assembly for optimal performance
+// bytesContainsAVX2 and bytesContainsSSE42 are implemented in:
+// - simd_amd64_nocuda_impl.go (non-CUDA builds)
+// - simd_cuda.go (CUDA builds - Go fallbacks)
 
-func bytesContainsAVX2(data []byte, pattern []byte) bool {
-	// TODO: Implement in assembly (voip/simd_amd64.s)
-	// For now, fall back to BMH
-	return bytesContainsBMH(data, pattern)
-}
-
-func bytesContainsSSE42(data []byte, pattern []byte) bool {
-	// TODO: Implement in assembly using PCMPESTRI instruction
-	// For now, fall back to BMH
-	return bytesContainsBMH(data, pattern)
-}
-
-// bytesEqualAVX2 is implemented in assembly
-func bytesEqualAVX2(a, b []byte) bool
-
-// bytesEqualSSE2 is implemented in assembly
-func bytesEqualSSE2(a, b []byte) bool
-
-// indexByteAVX2 is implemented in assembly
-func indexByteAVX2(data []byte, c byte) int
-
-// indexByteSSE2 is implemented in assembly
-func indexByteSSE2(data []byte, c byte) int
+// Assembly-based implementations are declared in:
+// - simd_amd64_nocuda.go (when building without CUDA - links to simd_amd64.s)
+// - simd_cuda.go (when building with CUDA - provides Go fallbacks due to CGo+asm conflict)
 
 func sipMethodMatchSSE42(line []byte) string {
 	// TODO: Implement in assembly using PCMPESTRI for parallel string matching

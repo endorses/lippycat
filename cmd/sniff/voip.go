@@ -22,6 +22,12 @@ var (
 	sipuser   string
 	writeVoip bool
 
+	// GPU acceleration flags
+	gpuBackend         string
+	gpuBatchSize       int
+	gpuMaxMemory       int64
+	gpuEnable          bool
+
 	// TCP-specific configuration flags
 	tcpMaxGoroutines      int
 	tcpCleanupInterval    time.Duration
@@ -49,6 +55,20 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"interfaces", interfaces,
 		"write_voip", writeVoip)
 	viper.Set("writeVoip", writeVoip)
+
+	// Set GPU configuration values
+	if cmd.Flags().Changed("gpu-enable") {
+		viper.Set("voip.gpu_enable", gpuEnable)
+	}
+	if cmd.Flags().Changed("gpu-backend") {
+		viper.Set("voip.gpu_backend", gpuBackend)
+	}
+	if cmd.Flags().Changed("gpu-batch-size") {
+		viper.Set("voip.gpu_batch_size", gpuBatchSize)
+	}
+	if cmd.Flags().Changed("gpu-max-memory") {
+		viper.Set("voip.gpu_max_memory", gpuMaxMemory)
+	}
 
 	// Set TCP-specific configuration values
 	if cmd.Flags().Changed("tcp-max-goroutines") {
@@ -85,7 +105,9 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		viper.Set("voip.memory_optimization", memoryOptimization)
 	}
 
-	logger.Info("Starting VoIP sniffing with TCP optimizations",
+	logger.Info("Starting VoIP sniffing with optimizations",
+		"gpu_enable", viper.GetBool("voip.gpu_enable"),
+		"gpu_backend", viper.GetString("voip.gpu_backend"),
 		"tcp_max_goroutines", viper.GetInt("voip.max_goroutines"),
 		"tcp_performance_mode", viper.GetString("voip.tcp_performance_mode"),
 		"tcp_buffer_strategy", viper.GetString("voip.tcp_buffer_strategy"),
@@ -103,6 +125,12 @@ func init() {
 	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")
 	voipCmd.Flags().BoolVarP(&writeVoip, "write-file", "w", false, "write to pcap file")
 
+	// GPU Acceleration Flags
+	voipCmd.Flags().BoolVar(&gpuEnable, "gpu-enable", true, "Enable GPU acceleration for pattern matching (default: true)")
+	voipCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd', 'disabled' (default: auto)")
+	voipCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 1024, "Batch size for GPU processing (default: 1024)")
+	voipCmd.Flags().Int64Var(&gpuMaxMemory, "gpu-max-memory", 0, "Maximum GPU memory in bytes (0 = auto)")
+
 	// TCP Performance and Configuration Flags
 	voipCmd.Flags().IntVar(&tcpMaxGoroutines, "tcp-max-goroutines", 0, "Maximum concurrent TCP stream processing goroutines (0 = use default)")
 	voipCmd.Flags().DurationVar(&tcpCleanupInterval, "tcp-cleanup-interval", 0, "TCP resource cleanup interval (0 = use default)")
@@ -117,6 +145,12 @@ func init() {
 	voipCmd.Flags().StringVar(&tcpBufferStrategy, "tcp-buffer-strategy", "", "TCP buffering strategy: 'adaptive', 'fixed', 'ring' (default: adaptive)")
 	voipCmd.Flags().BoolVar(&enableBackpressure, "enable-backpressure", false, "Enable backpressure handling for TCP streams")
 	voipCmd.Flags().BoolVar(&memoryOptimization, "memory-optimization", false, "Enable memory usage optimizations")
+
+	// Bind GPU flags to viper for config file support
+	viper.BindPFlag("voip.gpu_enable", voipCmd.Flags().Lookup("gpu-enable"))
+	viper.BindPFlag("voip.gpu_backend", voipCmd.Flags().Lookup("gpu-backend"))
+	viper.BindPFlag("voip.gpu_batch_size", voipCmd.Flags().Lookup("gpu-batch-size"))
+	viper.BindPFlag("voip.gpu_max_memory", voipCmd.Flags().Lookup("gpu-max-memory"))
 
 	// Bind flags to viper for config file support
 	viper.BindPFlag("voip.max_goroutines", voipCmd.Flags().Lookup("tcp-max-goroutines"))

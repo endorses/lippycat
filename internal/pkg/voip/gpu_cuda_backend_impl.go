@@ -97,6 +97,11 @@ func NewCUDABackendImpl() *CUDABackendImpl {
 	return &CUDABackendImpl{}
 }
 
+// NewCUDABackend creates a new CUDA backend (interface-compatible wrapper)
+func NewCUDABackend() GPUBackend {
+	return NewCUDABackendImpl()
+}
+
 // Initialize initializes the CUDA backend
 func (cb *CUDABackendImpl) Initialize(config *GPUConfig) error {
 	// Check device count

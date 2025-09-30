@@ -121,9 +121,9 @@ type GPUStats struct {
 // DefaultGPUConfig returns default GPU configuration
 func DefaultGPUConfig() *GPUConfig {
 	return &GPUConfig{
-		Enabled:           false, // Disabled by default
+		Enabled:           true, // Enabled by default for pattern matching
 		DeviceID:          0,
-		Backend:           "auto", // Auto-detect best backend
+		Backend:           "auto", // Auto-detect best backend (cuda > opencl > cpu-simd)
 		MaxBatchSize:      1024,
 		PinnedMemory:      true,
 		StreamCount:       4,
@@ -324,6 +324,9 @@ func matchContains(data, pattern []byte) (bool, int) {
 }
 
 // ExtractCallIDsGPU extracts Call-IDs using GPU acceleration
+// NOTE: This method is deprecated for production use. CallID extraction is faster on CPU.
+// Use ExtractCallIDFast() or VectorizedCallIDExtractor.ExtractCallIDs() instead.
+// GPU should only be used for pattern matching against large pattern sets.
 func (ga *GPUAccelerator) ExtractCallIDsGPU(packets [][]byte) ([]string, error) {
 	// Define Call-ID patterns
 	patterns := []GPUPattern{
@@ -389,6 +392,37 @@ func (ga *GPUAccelerator) Close() error {
 		return ga.backend.Cleanup()
 	}
 	return nil
+}
+
+// ConfigFromViper creates a GPU config from viper settings
+func ConfigFromViper(v interface{ GetBool(string) bool; GetString(string) string; GetInt(string) int; GetInt64(string) int64 }) *GPUConfig {
+	config := DefaultGPUConfig()
+
+	// Check if explicitly disabled
+	if backend := v.GetString("voip.gpu_backend"); backend == "disabled" {
+		config.Enabled = false
+		return config
+	}
+
+	// Override defaults with config values
+	if v.GetBool("voip.gpu_enable") != config.Enabled {
+		config.Enabled = v.GetBool("voip.gpu_enable")
+	}
+
+	if backend := v.GetString("voip.gpu_backend"); backend != "" && backend != "auto" {
+		config.Backend = backend
+	}
+
+	if batchSize := v.GetInt("voip.gpu_batch_size"); batchSize > 0 {
+		config.MaxBatchSize = batchSize
+	}
+
+	if maxMem := v.GetInt64("voip.gpu_max_memory"); maxMem > 0 {
+		// Convert to pattern buffer size (simplified)
+		config.PatternBufferSize = int(maxMem)
+	}
+
+	return config
 }
 
 // Common errors

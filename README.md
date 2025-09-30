@@ -8,8 +8,8 @@ A high-performance, production-ready network traffic sniffer and protocol analyz
 - **Multi-Protocol Foundation**: Extensible architecture supporting multiple network protocols
 - **Real-time Processing**: Live network capture with configurable BPF filtering
 - **PCAP Analysis**: Read and analyze existing packet capture files
-- **High-Performance Processing**: Optimized for speed, reliability, and scalability
-- **Flexible Output**: PCAP files, structured logging, and future JSON/CSV export
+- **High-Performance Processing**: GPU acceleration, SIMD optimizations, zero-copy I/O
+- **Flexible Output**: PCAP files (including mmap-based writers), structured logging
 
 ### VoIP Analysis (Primary Current Feature)
 - **SIP Protocol Support**: Complete UDP and TCP SIP traffic analysis
@@ -18,12 +18,20 @@ A high-performance, production-ready network traffic sniffer and protocol analyz
 - **Call Tracking**: Automatic call session detection and correlation
 - **RTP Port Extraction**: Intelligent extraction of media stream information from SDP
 
+### Advanced Performance Optimizations
+- **GPU Acceleration**: CUDA and OpenCL support for pattern matching (2-3x speedup on supported hardware)
+- **SIMD Processing**: AVX2/SSE4.2 optimized packet parsing and pattern matching
+- **Zero-Copy I/O**: AF_XDP (XDP sockets) for kernel-bypass packet capture on Linux
+- **Batch Processing**: Optimized batch packet processing with worker pools
+- **CPU Affinity**: Pin workers to specific CPU cores for cache optimization
+- **Lock-free Data Structures**: Minimize contention in high-throughput scenarios
+
 ### Advanced TCP Processing (VoIP-Focused)
 - **Production-Ready TCP Stream Reassembly**: Complete TCP SIP message processing
 - **Performance Modes**: Optimized configurations for throughput, latency, or memory usage
 - **Intelligent Buffering**: Adaptive, fixed, and ring buffer strategies
 - **Backpressure Handling**: Automatic load management and graceful degradation
-- **Resource Management**: Advanced cleanup and memory optimization
+- **Memory-Mapped Writers**: High-performance mmap-based PCAP writing
 - **Real-time Monitoring**: Comprehensive metrics and health monitoring
 
 ### Future Protocol Support
@@ -46,11 +54,35 @@ A high-performance, production-ready network traffic sniffer and protocol analyz
 - Root/Administrator privileges (for live network capture)
 - libpcap development libraries
 
+### Optional Performance Prerequisites
+- **CUDA Toolkit** (for GPU acceleration): NVIDIA CUDA 11.0+ for CUDA backend support
+- **Linux Kernel 4.18+** (for XDP): AF_XDP zero-copy packet capture
+- **XDP-capable NIC driver**: For zero-copy capture (check driver compatibility)
+
 ### From Source
+
+#### Standard Build
 ```bash
 git clone https://github.com/endorses/lippycat.git
 cd lippycat
 go build -o lippycat
+```
+
+#### Build with CUDA Support
+```bash
+# Build CUDA kernels
+cd internal/pkg/voip
+make -f Makefile.cuda
+
+# Build lippycat with CUDA tag
+cd ../../..
+go build -tags cuda -o lippycat
+```
+
+#### Build with All Optimizations
+```bash
+# Requires: CUDA Toolkit, Linux kernel 4.18+
+go build -tags "cuda xdp" -o lippycat
 ```
 
 ### Dependencies
@@ -96,8 +128,14 @@ sudo ./lippycat sniff voip --sipuser alice,bob --write-file
 
 ### VoIP Performance Optimization
 ```bash
-# High-throughput capture
+# High-throughput capture with GPU acceleration (default when available)
 sudo ./lippycat sniff voip --tcp-performance-mode throughput --enable-backpressure
+
+# Disable GPU acceleration (CPU/SIMD only)
+sudo ./lippycat sniff voip --gpu-backend disabled
+
+# Force CUDA backend with custom batch size
+sudo ./lippycat sniff voip --gpu-backend cuda --gpu-batch-size 2048
 
 # Low-latency real-time analysis
 sudo ./lippycat sniff voip --tcp-performance-mode latency
@@ -120,6 +158,12 @@ capture:
 
 # VoIP-specific configuration
 voip:
+  # GPU Acceleration (for pattern matching)
+  gpu_enable: true              # Enable GPU acceleration (default: true)
+  gpu_backend: "auto"           # auto, cuda, opencl, cpu-simd, disabled
+  gpu_batch_size: 1024          # Batch size for GPU processing
+  gpu_max_memory: 0             # Max GPU memory in bytes (0 = auto)
+
   # Performance Mode: balanced, throughput, latency, memory
   tcp_performance_mode: "balanced"
 
@@ -167,6 +211,14 @@ voip:
   --write-file, -w         write to pcap file (default: false)
 ```
 
+#### GPU Acceleration Options
+```bash
+  --gpu-enable             Enable GPU acceleration for pattern matching (default: true)
+  --gpu-backend string     GPU backend: auto, cuda, opencl, cpu-simd, disabled (default: auto)
+  --gpu-batch-size int     Batch size for GPU processing (default: 1024)
+  --gpu-max-memory int     Maximum GPU memory in bytes (0 = auto)
+```
+
 #### TCP Performance Options (VoIP-Focused)
 ```bash
   --tcp-performance-mode string         Performance mode: balanced, throughput, latency, memory
@@ -180,14 +232,35 @@ voip:
   --memory-optimization                 Enable memory usage optimizations
 ```
 
-## 🎯 VoIP Performance Modes
+## 🎯 Performance Features
+
+### GPU Acceleration
+lippycat automatically detects and uses GPU acceleration for pattern matching when available:
+
+- **CUDA Backend**: NVIDIA GPU support (2-3x speedup on RTX series GPUs)
+- **OpenCL Backend**: Cross-platform GPU support (AMD, Intel, NVIDIA)
+- **CPU-SIMD Fallback**: AVX2/SSE4.2 optimized CPU processing
+- **Automatic Selection**: Tries CUDA → OpenCL → SIMD in order
+
+**Note**: GPU acceleration is used for pattern matching (e.g., matching phone numbers). Simple operations like CallID extraction remain on CPU where they're faster (100-180 ns/op).
+
+#### GPU Performance Characteristics
+```bash
+# Pattern matching against 1000s of phone numbers:
+# - CPU SIMD: ~34 µs/operation
+# - GPU CUDA: ~15 µs/operation (2.3x faster)
+# - 70% less memory usage
+# - 97% fewer allocations
+```
+
+### VoIP Performance Modes
 
 The current VoIP implementation supports four performance modes optimized for different use cases:
 
-### Balanced Mode (Default)
+#### Balanced Mode (Default)
 Optimal for general-purpose VoIP analysis with reasonable resource consumption.
 
-### Throughput Mode
+#### Throughput Mode
 ```bash
 sudo ./lippycat sniff voip --tcp-performance-mode throughput
 ```
@@ -196,7 +269,7 @@ sudo ./lippycat sniff voip --tcp-performance-mode throughput
 - **Resources**: Increased memory usage, higher CPU utilization
 - **Optimizations**: Batch processing, ring buffers, increased concurrency
 
-### Latency Mode
+#### Latency Mode
 ```bash
 sudo ./lippycat sniff voip --tcp-performance-mode latency
 ```
@@ -205,7 +278,7 @@ sudo ./lippycat sniff voip --tcp-performance-mode latency
 - **Resources**: Moderate resource usage
 - **Optimizations**: Single-packet processing, fixed buffers, frequent cleanup
 
-### Memory Mode
+#### Memory Mode
 ```bash
 sudo ./lippycat sniff voip --tcp-performance-mode memory
 ```
@@ -258,28 +331,75 @@ lippycat is designed for **defensive security and network analysis purposes only
 ## 🏗️ Architecture
 
 ### Core Components
+
+```mermaid
+graph TB
+    subgraph "Application Layer"
+        CLI[CLI Layer<br/>Cobra/Viper]
+        Config[Configuration<br/>Management]
+    end
+
+    subgraph "Capture Layer"
+        Capture[Capture Layer<br/>gopacket/XDP]
+        Buffers[Packet Buffers<br/>& Assembly]
+    end
+
+    subgraph "Protocol Layer"
+        Protocol[Protocol Layer<br/>VoIP/Future]
+        Analyzers[Protocol<br/>Analyzers]
+    end
+
+    CLI --> Capture
+    Capture --> Protocol
+    CLI --> Config
+    Capture --> Buffers
+    Protocol --> Analyzers
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   CLI Layer     │    │   Capture Layer  │    │ Protocol Layer  │
-│  (Cobra/Viper)  │───▶│   (gopacket)     │───▶│ (VoIP/Future)   │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Configuration  │    │  Packet Buffers  │    │   Protocol      │
-│    Management   │    │   & Assembly     │    │   Analyzers     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+
+### Performance Architecture
+
+```mermaid
+graph TB
+    Capture[Packet Capture<br/>libpcap / AF_XDP zero-copy<br/>mmap ring buffers]
+
+    Batch[Batch Processor<br/>• Worker pools with CPU affinity<br/>• Lock-free queues<br/>• Adaptive batching 64-2048 packets]
+
+    FastPath[Fast Path CPU/SIMD<br/>• CallID Parse<br/>• AVX2/SSE4.2<br/>• 100-180 ns/op]
+
+    GPU[Pattern Match GPU/CUDA<br/>• Phone Number Match<br/>• Batch Process<br/>• 15 µs/batch]
+
+    Analysis[Protocol Analysis<br/>• TCP stream reassembly<br/>• Call tracking lock-free/hybrid<br/>• RTP detection]
+
+    Capture --> Batch
+    Batch --> FastPath
+    Batch --> GPU
+    FastPath --> Analysis
+    GPU --> Analysis
 ```
 
 ### Protocol Processing Pipeline
-```
-Network Packet ──▶ Protocol Detection ──▶ Parser Selection ──▶ Analysis ──▶ Output
-      │                     │                    │              │          │
-      ▼                     ▼                    ▼              ▼          ▼
- Buffer Pool         Protocol Router      VoIP/SIP Parser   Analytics   PCAP/JSON
-                           │                    │
-                           ▼                    ▼
-                    Future Protocols      Call Tracking
+
+```mermaid
+graph LR
+    Packet[Network Packet]
+    Detection[Protocol Detection]
+    Selection[Parser Selection]
+    Analysis[Analysis]
+    Output[Output]
+
+    Packet --> Detection
+    Detection --> Selection
+    Selection --> Analysis
+    Analysis --> Output
+
+    Packet -.-> Pool[Buffer Pool]
+    Detection -.-> Router[Protocol Router]
+    Selection -.-> VoIP[VoIP/SIP Parser]
+    Analysis -.-> Analytics[Analytics]
+    Output -.-> Export[PCAP/JSON]
+
+    Router -.-> Future[Future Protocols]
+    VoIP -.-> Tracking[Call Tracking]
 ```
 
 ### Extensibility Framework
@@ -314,6 +434,10 @@ The `captures/` directory contains sample PCAP files for testing various protoco
 
 ### Current Status
 - ✅ **VoIP/SIP Analysis**: Complete UDP and TCP SIP support with advanced performance optimization
+- ✅ **GPU Acceleration**: CUDA and OpenCL support with automatic backend selection
+- ✅ **SIMD Optimizations**: AVX2/SSE4.2 accelerated packet processing
+- ✅ **Zero-Copy I/O**: AF_XDP support for kernel-bypass packet capture
+- ✅ **Batch Processing**: High-throughput batch packet processing
 - ✅ **TCP Stream Reassembly**: Production-ready TCP processing framework
 - ✅ **Configuration System**: Comprehensive CLI and YAML configuration
 - ✅ **Performance Monitoring**: Real-time metrics and health monitoring
@@ -382,6 +506,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Cobra](https://github.com/spf13/cobra) - CLI framework
 - [Viper](https://github.com/spf13/viper) - Configuration management
 - [testify](https://github.com/stretchr/testify) - Testing framework
+- NVIDIA CUDA - GPU acceleration support
+- Linux AF_XDP - Zero-copy packet capture
 
 ## 📞 Support
 

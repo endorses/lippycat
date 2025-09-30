@@ -1,0 +1,30 @@
+# Makefile for compiling CUDA kernels
+
+NVCC = nvcc
+CUDA_ARCH = -arch=sm_89  # RTX 4090 (Ada Lovelace) compute capability 8.9
+
+# CUDA compiler flags
+NVCCFLAGS = -O3 -use_fast_math -Xcompiler -fPIC --shared
+
+# Target shared library
+TARGET = libcuda_kernels.so
+
+# Source files
+CUDA_SOURCES = cuda_kernels.cu
+
+# Build shared library
+all: $(TARGET)
+
+$(TARGET): $(CUDA_SOURCES)
+	$(NVCC) $(CUDA_ARCH) $(NVCCFLAGS) -o $@ $<
+
+# Clean build artifacts
+clean:
+	rm -f $(TARGET) *.o
+
+# Install to system library path (optional)
+install: $(TARGET)
+	sudo cp $(TARGET) /usr/local/lib/
+	sudo ldconfig
+
+.PHONY: all clean install

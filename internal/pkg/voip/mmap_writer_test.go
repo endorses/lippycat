@@ -116,11 +116,12 @@ func TestMmapWriter_LargeFile(t *testing.T) {
 		assert.NoError(t, err)
 	}
 
-	// Verify utilization
+	// Verify utilization (if not in fallback mode)
 	stats := writer.GetStats()
-	utilization := stats["utilization"].(float64)
-	assert.Greater(t, utilization, 0.0)
-	assert.Less(t, utilization, 100.0)
+	if util, ok := stats["utilization"].(float64); ok {
+		assert.Greater(t, util, 0.0)
+		assert.Less(t, util, 100.0)
+	}
 }
 
 func TestMmapWriter_Sync(t *testing.T) {

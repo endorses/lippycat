@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
@@ -22,10 +24,12 @@ type Statistics struct {
 
 // StatisticsView displays statistics
 type StatisticsView struct {
-	width  int
-	height int
-	theme  themes.Theme
-	stats  *Statistics
+	viewport viewport.Model
+	width    int
+	height   int
+	theme    themes.Theme
+	stats    *Statistics
+	ready    bool
 }
 
 // NewStatisticsView creates a new statistics view
@@ -35,6 +39,7 @@ func NewStatisticsView() StatisticsView {
 		height: 20,
 		theme:  themes.SolarizedDark(),
 		stats:  nil,
+		ready:  false,
 	}
 }
 
@@ -47,18 +52,41 @@ func (s *StatisticsView) SetTheme(theme themes.Theme) {
 func (s *StatisticsView) SetSize(width, height int) {
 	s.width = width
 	s.height = height
+
+	if !s.ready {
+		s.viewport = viewport.New(width, height)
+		s.ready = true
+		// Set initial content if stats are already available
+		if s.stats != nil {
+			s.viewport.SetContent(s.renderContent())
+		}
+	} else {
+		s.viewport.Width = width
+		s.viewport.Height = height
+	}
 }
 
 // SetStatistics updates the statistics data
 func (s *StatisticsView) SetStatistics(stats *Statistics) {
 	s.stats = stats
+	// Update viewport content when stats change (only if viewport is ready)
+	if s.ready {
+		s.viewport.SetContent(s.renderContent())
+	}
+}
+
+// Update handles viewport messages for scrolling
+func (s *StatisticsView) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	s.viewport, cmd = s.viewport.Update(msg)
+	return cmd
 }
 
 // View renders the statistics view
 func (s *StatisticsView) View() string {
-	containerStyle := lipgloss.NewStyle().
-		Width(s.width).
-		Height(s.height)
+	if !s.ready {
+		return ""
+	}
 
 	if s.stats == nil || s.stats.TotalPackets == 0 {
 		emptyStyle := lipgloss.NewStyle().
@@ -67,6 +95,15 @@ func (s *StatisticsView) View() string {
 			Width(s.width).
 			Height(s.height)
 		return emptyStyle.Render("No statistics available yet...")
+	}
+
+	return s.viewport.View()
+}
+
+// renderContent generates the statistics content
+func (s *StatisticsView) renderContent() string {
+	if s.stats == nil || s.stats.TotalPackets == 0 {
+		return ""
 	}
 
 	var result strings.Builder
@@ -181,7 +218,7 @@ func (s *StatisticsView) View() string {
 		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", dc.ip, dc.count))
 	}
 
-	return containerStyle.Render(result.String())
+	return result.String()
 }
 
 // formatBytes formats bytes into human-readable format

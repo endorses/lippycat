@@ -19,13 +19,14 @@ type PacketDisplay struct {
 	Protocol  string
 	Length    int
 	Info      string
+	RawData   []byte // Raw packet bytes for hex dump
 }
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {
 	packets      []PacketDisplay
-	cursor       int          // Currently selected packet
-	offset       int          // Scroll offset
+	cursor       int // Currently selected packet
+	offset       int // Scroll offset
 	width        int
 	height       int
 	headerHeight int
@@ -41,8 +42,8 @@ func NewPacketList() PacketList {
 		offset:       0,
 		width:        80,
 		height:       20,
-		headerHeight: 2, // Header + separator
-		autoScroll:   true, // Start with auto-scroll enabled
+		headerHeight: 2,                      // Header + separator
+		autoScroll:   true,                   // Start with auto-scroll enabled
 		theme:        themes.SolarizedDark(), // Default theme
 	}
 }
@@ -61,6 +62,14 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 		p.cursor = len(p.packets) - 1
 		p.adjustOffset()
 	}
+}
+
+// Reset resets the packet list to initial state
+func (p *PacketList) Reset() {
+	p.packets = []PacketDisplay{}
+	p.cursor = 0
+	p.offset = 0
+	p.autoScroll = true
 }
 
 // SetSize sets the display size
@@ -114,7 +123,13 @@ func (p *PacketList) GotoBottom() {
 
 // PageUp moves up by one page
 func (p *PacketList) PageUp() {
-	pageSize := p.height - p.headerHeight
+	// Must match the calculation in View() and adjustOffset()
+	contentHeight := p.height - 3
+	pageSize := contentHeight - p.headerHeight
+	if pageSize < 1 {
+		pageSize = 1
+	}
+
 	p.cursor -= pageSize
 	if p.cursor < 0 {
 		p.cursor = 0
@@ -126,7 +141,13 @@ func (p *PacketList) PageUp() {
 
 // PageDown moves down by one page
 func (p *PacketList) PageDown() {
-	pageSize := p.height - p.headerHeight
+	// Must match the calculation in View() and adjustOffset()
+	contentHeight := p.height - 3
+	pageSize := contentHeight - p.headerHeight
+	if pageSize < 1 {
+		pageSize = 1
+	}
+
 	p.cursor += pageSize
 	if p.cursor >= len(p.packets) {
 		p.cursor = len(p.packets) - 1
@@ -145,7 +166,15 @@ func (p *PacketList) PageDown() {
 
 // adjustOffset ensures the cursor is visible
 func (p *PacketList) adjustOffset() {
-	visibleLines := p.height - p.headerHeight
+	// Must match the calculation in View()
+	// Box overhead: 3 lines to match details panel
+	// Header: 2 lines
+	contentHeight := p.height - 3
+	visibleLines := contentHeight - p.headerHeight
+
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
 
 	// Cursor above visible area
 	if p.cursor < p.offset {
@@ -174,70 +203,176 @@ func (p *PacketList) GetCursor() int {
 }
 
 // View renders the packet list
-func (p *PacketList) View() string {
-	if len(p.packets) == 0 {
-		return p.renderHeader() + "\n" + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Render("No packets captured yet...")
-	}
+func (p *PacketList) View(focused bool) string {
+	// Calculate the space available for content inside the box
+	// Box overhead: 2 (border) + 2 (vertical padding) = 4
+	// So the content height should be p.height - 3 to match details panel
+	contentHeight := p.height - 3
+
+	// The content includes header (2 lines) + packet lines
+	// So available lines for packets = contentHeight - 2
+	availableForPackets := contentHeight - p.headerHeight
 
 	var sb strings.Builder
 
-	// Render header
-	sb.WriteString(p.renderHeader())
-	sb.WriteString("\n")
-
-	// Calculate visible range
-	visibleLines := p.height - p.headerHeight
-	start := p.offset
-	end := p.offset + visibleLines
-
-	if end > len(p.packets) {
-		end = len(p.packets)
-	}
-
-	// Render visible packets
-	for i := start; i < end; i++ {
-		line := p.renderPacket(i, i == p.cursor)
-		sb.WriteString(line)
+	if len(p.packets) == 0 {
+		sb.WriteString(p.renderHeader())
 		sb.WriteString("\n")
-	}
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("No packets captured yet..."))
 
-	// Fill remaining space
-	for i := end - start; i < visibleLines; i++ {
+		// Fill remaining space
+		for i := 1; i < availableForPackets; i++ {
+			sb.WriteString("\n")
+		}
+	} else {
+		// Render header
+		sb.WriteString(p.renderHeader())
 		sb.WriteString("\n")
+
+		// Calculate visible range based on available space
+		visibleLines := availableForPackets
+		if visibleLines < 1 {
+			visibleLines = 1
+		}
+
+		start := p.offset
+		end := p.offset + visibleLines
+
+		if end > len(p.packets) {
+			end = len(p.packets)
+		}
+
+		// Render visible packets
+		for i := start; i < end; i++ {
+			line := p.renderPacket(i, i == p.cursor)
+			sb.WriteString(line)
+			if i < end-1 {
+				sb.WriteString("\n")
+			}
+		}
+
+		// Fill remaining space to maintain consistent box size
+		linesRendered := end - start
+		for i := linesRendered; i < visibleLines; i++ {
+			if i > 0 || linesRendered > 0 {
+				sb.WriteString("\n")
+			}
+			// Empty line for padding
+		}
 	}
 
-	return sb.String()
+	// Wrap in border - the height should match our total height minus margins
+	borderColor := p.theme.BorderColor
+	if focused {
+		borderColor = p.theme.FocusedBorderColor // Solarized yellow when focused
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Width(p.width - 4).
+		Height(contentHeight)
+
+	return borderStyle.Render(sb.String())
+}
+
+// getColumnWidths returns responsive column widths based on available width
+func (p *PacketList) getColumnWidths() (timeWidth, srcWidth, dstWidth, protoWidth, lenWidth, infoWidth int) {
+	// Account for padding and borders (estimate)
+	availableWidth := p.width - 10
+
+	// Define minimum and preferred widths
+	const (
+		timeMin  = 8  // HH:MM:SS
+		timePref = 15 // HH:MM:SS.microsec
+
+		srcMin  = 9  // Short IP or partial
+		srcPref = 22 // Full IP:Port
+
+		dstMin  = 9
+		dstPref = 22
+
+		protoMin  = 3 // Short protocol names
+		protoPref = 8
+
+		lenMin  = 4 // Length
+		lenPref = 8
+
+		infoMin = 10 // Minimal info
+	)
+
+	// Start with minimum widths
+	totalMin := timeMin + srcMin + dstMin + protoMin + lenMin + infoMin + 5 // +5 for spaces
+
+	if availableWidth < totalMin {
+		// Extremely narrow - use absolute minimums
+		return timeMin, srcMin, dstMin, protoMin, lenMin, infoMin
+	}
+
+	// Try preferred widths
+	totalPref := timePref + srcPref + dstPref + protoPref + lenPref + infoMin + 5
+
+	if availableWidth >= totalPref {
+		// Plenty of space - use preferred widths + remaining for info
+		infoWidth = availableWidth - timePref - srcPref - dstPref - protoPref - lenPref - 5
+		return timePref, srcPref, dstPref, protoPref, lenPref, infoWidth
+	}
+
+	// Medium width - scale between min and preferred
+	remaining := availableWidth - totalMin
+
+	// Distribute remaining space proportionally
+	timeExtra := min(remaining/6, timePref-timeMin)
+	remaining -= timeExtra
+
+	srcExtra := min(remaining/5, srcPref-srcMin)
+	remaining -= srcExtra
+
+	dstExtra := min(remaining/4, dstPref-dstMin)
+	remaining -= dstExtra
+
+	protoExtra := min(remaining/3, protoPref-protoMin)
+	remaining -= protoExtra
+
+	lenExtra := min(remaining/2, lenPref-lenMin)
+	remaining -= lenExtra
+
+	// Give remaining to info
+	infoWidth = infoMin + remaining
+
+	return timeMin + timeExtra, srcMin + srcExtra, dstMin + dstExtra,
+	       protoMin + protoExtra, lenMin + lenExtra, infoWidth
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // renderHeader renders the table header
 func (p *PacketList) renderHeader() string {
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(p.theme.SelectionFg).
-		Background(p.theme.InfoColor)
+		Foreground(p.theme.HeaderBg).
+		Reverse(true)
 
-	// Column widths
-	timeWidth := 15
-	srcWidth := 22 // IP:Port
-	dstWidth := 22
-	protoWidth := 8
-	lenWidth := 8
-	infoWidth := p.width - timeWidth - srcWidth - dstWidth - protoWidth - lenWidth - 10
-
-	if infoWidth < 10 {
-		infoWidth = 10
-	}
+	// Get responsive column widths
+	timeWidth, srcWidth, dstWidth, protoWidth, lenWidth, infoWidth := p.getColumnWidths()
 
 	header := fmt.Sprintf(
 		"%-*s %-*s %-*s %-*s %-*s %-*s",
-		timeWidth, "Time",
-		srcWidth, "Source",
-		dstWidth, "Destination",
-		protoWidth, "Protocol",
-		lenWidth, "Length",
-		infoWidth, "Info",
+		timeWidth, truncate("Time", timeWidth),
+		srcWidth, truncate("Source", srcWidth),
+		dstWidth, truncate("Destination", dstWidth),
+		protoWidth, truncate("Protocol", protoWidth),
+		lenWidth, truncate("Length", lenWidth),
+		infoWidth, truncate("Info", infoWidth),
 	)
 
 	// Ensure header spans full width
@@ -251,45 +386,48 @@ func (p *PacketList) renderHeader() string {
 	return renderedHeader
 }
 
+// truncate truncates a string to fit width with ellipsis if needed
+func truncate(s string, width int) string {
+	if len(s) <= width {
+		return s
+	}
+	if width <= 3 {
+		return s[:width]
+	}
+	return s[:width-3] + "..."
+}
+
 // renderPacket renders a single packet row
 func (p *PacketList) renderPacket(index int, selected bool) string {
 	pkt := p.packets[index]
 
-	// Column widths (match header)
-	timeWidth := 15
-	srcWidth := 22
-	dstWidth := 22
-	protoWidth := 8
-	lenWidth := 8
-	infoWidth := p.width - timeWidth - srcWidth - dstWidth - protoWidth - lenWidth - 10
+	// Get responsive column widths (match header)
+	timeWidth, srcWidth, dstWidth, protoWidth, lenWidth, infoWidth := p.getColumnWidths()
 
-	if infoWidth < 10 {
-		infoWidth = 10
+	// Format timestamp based on available width
+	var timeStr string
+	if timeWidth >= 15 {
+		timeStr = pkt.Timestamp.Format("15:04:05.000000")
+	} else if timeWidth >= 12 {
+		timeStr = pkt.Timestamp.Format("15:04:05.000")
+	} else {
+		timeStr = pkt.Timestamp.Format("15:04:05")
 	}
-
-	// Format timestamp
-	timeStr := pkt.Timestamp.Format("15:04:05.000000")
-	if len(timeStr) > timeWidth {
-		timeStr = timeStr[:timeWidth]
-	}
+	timeStr = truncate(timeStr, timeWidth)
 
 	// Format source and destination
 	src := fmt.Sprintf("%s:%s", pkt.SrcIP, pkt.SrcPort)
 	dst := fmt.Sprintf("%s:%s", pkt.DstIP, pkt.DstPort)
 
-	// Truncate if needed
-	if len(src) > srcWidth {
-		src = src[:srcWidth-3] + "..."
-	}
-	if len(dst) > dstWidth {
-		dst = dst[:dstWidth-3] + "..."
-	}
+	// Truncate addresses intelligently
+	src = truncate(src, srcWidth)
+	dst = truncate(dst, dstWidth)
+
+	// Truncate protocol
+	proto := truncate(pkt.Protocol, protoWidth)
 
 	// Truncate info
-	info := pkt.Info
-	if len(info) > infoWidth {
-		info = info[:infoWidth-3] + "..."
-	}
+	info := truncate(pkt.Info, infoWidth)
 
 	// Format row
 	row := fmt.Sprintf(
@@ -297,7 +435,7 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 		timeWidth, timeStr,
 		srcWidth, src,
 		dstWidth, dst,
-		protoWidth, pkt.Protocol,
+		protoWidth, proto,
 		lenWidth, pkt.Length,
 		infoWidth, info,
 	)
@@ -308,8 +446,8 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 	if selected {
 		// Make selection stand out with distinct colors
 		style = style.
-			Background(p.theme.InfoColor).
-			Foreground(p.theme.SelectionFg).
+			Foreground(p.theme.SelectionBg).
+			Reverse(true).
 			Bold(true)
 
 		// Ensure selection spans full width
@@ -321,26 +459,11 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 		}
 		return renderedRow
 	} else {
-		// Zebra striping - alternating row colors
-		if index%2 == 0 {
-			// Even rows get a subtle background
-			style = style.Background(p.theme.Background)
-		} else {
-			// Odd rows get slightly highlighted background
-			style = style.Background(p.theme.HeaderBg)
-		}
-
+		// No background - transparent
 		// Protocol-based coloring using theme
 		style = style.Foreground(p.getProtocolColor(pkt.Protocol))
 
-		// Ensure row spans full width
-		renderedRow := style.Render(row)
-		rowLen := lipgloss.Width(renderedRow)
-		if rowLen < p.width {
-			padding := p.width - rowLen
-			renderedRow += style.Render(strings.Repeat(" ", padding))
-		}
-		return renderedRow
+		return style.Render(row)
 	}
 }
 

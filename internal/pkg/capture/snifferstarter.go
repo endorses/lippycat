@@ -15,6 +15,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/spf13/viper"
 )
 
 func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
@@ -65,16 +66,43 @@ func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pc
 
 func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	fmt.Println("Starting Sniffer")
-	streamFactory := NewStreamFactory()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
-
-	// Create a context-aware processor wrapper
+	// For basic sniffing, we don't need TCP stream reassembly
+	// Pass nil assembler to skip expensive TCP assembly
 	processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
-		processPacket(ch, asm)
+		processPacketSimple(ch)
 	}
 
-	Init(devices, filter, processor, assembler)
+	Init(devices, filter, processor, nil)
+}
+
+// processPacketSimple is a lightweight processor without TCP reassembly
+func processPacketSimple(packetChan <-chan PacketInfo) {
+	packetCount := 0
+	lastStatsTime := time.Now()
+	startTime := time.Now()
+	quietMode := viper.GetBool("sniff.quiet")
+
+	for p := range packetChan {
+		packetCount++
+
+		// Print each packet (basic info) unless in quiet mode
+		if !quietMode {
+			fmt.Printf("%s\n", p.Packet)
+		}
+
+		// Print statistics summary every second
+		if time.Since(lastStatsTime) >= 1*time.Second {
+			elapsed := time.Since(startTime).Seconds()
+			if elapsed > 0 {
+				logger.Info("Packet statistics",
+					"total_processed", packetCount,
+					"rate_pps", int64(float64(packetCount)/elapsed))
+			}
+			lastStatsTime = time.Now()
+		}
+	}
+
+	logger.Info("Packet processing completed", "total_packets", packetCount)
 }
 
 const maxStreamWorkers = 50 // Maximum concurrent stream processing goroutines
@@ -154,8 +182,19 @@ func processStream(r io.Reader) {
 }
 
 func processPacket(packetChan <-chan PacketInfo, assembler *tcpassembly.Assembler) {
+	packetCount := 0
+	lastPrintTime := time.Now()
+
 	for p := range packetChan {
 		packet := p.Packet
+		packetCount++
+
+		// Print summary less frequently to avoid blocking on I/O
+		if time.Since(lastPrintTime) >= 1*time.Second {
+			logger.Debug("Processed packets", "count", packetCount)
+			lastPrintTime = time.Now()
+		}
+
 		switch layer := packet.TransportLayer().(type) {
 		case *layers.TCP:
 			// Recover from any panics in the TCP assembler (e.g., malformed packets)
@@ -178,10 +217,11 @@ func processPacket(packetChan <-chan PacketInfo, assembler *tcpassembly.Assemble
 				}
 			}()
 		case *layers.UDP:
-			// fmt.Println("UDP")
+			// UDP packets - no processing needed for basic sniff
 		}
-		fmt.Printf("%s\n", p.Packet)
 	}
+
+	logger.Info("Packet processing completed", "total_packets", packetCount)
 }
 
 func processPacketWithContext(p PacketInfo, assembler *tcpassembly.Assembler, ctx context.Context) {

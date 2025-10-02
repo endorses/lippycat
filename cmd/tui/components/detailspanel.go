@@ -4,16 +4,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
 
 // DetailsPanel displays detailed information about a selected packet
 type DetailsPanel struct {
-	packet *PacketDisplay
-	width  int
-	height int
-	theme  themes.Theme
+	viewport viewport.Model
+	packet   *PacketDisplay
+	width    int
+	height   int
+	theme    themes.Theme
+	ready    bool
 }
 
 // NewDetailsPanel creates a new details panel
@@ -23,6 +27,7 @@ func NewDetailsPanel() DetailsPanel {
 		width:  40,
 		height: 20,
 		theme:  themes.SolarizedDark(),
+		ready:  false,
 	}
 }
 
@@ -33,41 +38,88 @@ func (d *DetailsPanel) SetTheme(theme themes.Theme) {
 
 // SetPacket sets the packet to display
 func (d *DetailsPanel) SetPacket(packet *PacketDisplay) {
+	// Only update if packet actually changed
+	packetChanged := false
+	if d.packet == nil && packet != nil {
+		packetChanged = true
+	} else if d.packet != nil && packet == nil {
+		packetChanged = true
+	} else if d.packet != nil && packet != nil {
+		// Compare timestamps to detect if it's a different packet
+		if !d.packet.Timestamp.Equal(packet.Timestamp) {
+			packetChanged = true
+		}
+	}
+
 	d.packet = packet
+
+	// Update viewport content when packet changes
+	if d.ready && packetChanged {
+		d.viewport.SetContent(d.renderContent())
+		d.viewport.GotoTop()
+	}
 }
 
 // SetSize sets the display size
 func (d *DetailsPanel) SetSize(width, height int) {
 	d.width = width
 	d.height = height
+
+	// Account for border (2), padding (2), and title + spacing (3)
+	viewportHeight := height - 7
+	if viewportHeight < 5 {
+		viewportHeight = 5
+	}
+
+	if !d.ready {
+		d.viewport = viewport.New(width-8, viewportHeight) // -8 for borders and padding
+		d.ready = true
+		if d.packet != nil {
+			d.viewport.SetContent(d.renderContent())
+		}
+	} else {
+		d.viewport.Width = width - 8
+		d.viewport.Height = viewportHeight
+	}
+}
+
+// Update handles viewport messages for scrolling
+func (d *DetailsPanel) Update(msg tea.Msg) tea.Cmd {
+	if !d.ready {
+		return nil
+	}
+	var cmd tea.Cmd
+	d.viewport, cmd = d.viewport.Update(msg)
+	return cmd
 }
 
 // View renders the details panel
-func (d *DetailsPanel) View() string {
+func (d *DetailsPanel) View(focused bool) string {
+	if !d.ready {
+		return ""
+	}
+
 	// Ensure minimum width
 	contentWidth := d.width - 4
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
 
+	borderColor := d.theme.BorderColor
+	if focused {
+		borderColor = d.theme.FocusedBorderColor // Solarized yellow when focused
+	}
+
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(d.theme.BorderColor).
+		BorderForeground(borderColor).
 		Padding(1, 2).
 		Width(contentWidth).
 		Height(d.height - 2)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(d.theme.InfoColor).
-		MarginBottom(1)
-
-	labelStyle := lipgloss.NewStyle().
-		Foreground(d.theme.HeaderFg).
-		Bold(true)
-
-	valueStyle := lipgloss.NewStyle().
-		Foreground(d.theme.Foreground)
+		Foreground(d.theme.InfoColor)
 
 	if d.packet == nil {
 		emptyStyle := lipgloss.NewStyle().
@@ -77,40 +129,68 @@ func (d *DetailsPanel) View() string {
 		return borderStyle.Render(content)
 	}
 
-	var details strings.Builder
-	details.WriteString(titleStyle.Render("Packet Details"))
-	details.WriteString("\n\n")
+	title := titleStyle.Render("Packet Details & Hex Dump")
+	return borderStyle.Render(title + "\n\n" + d.viewport.View())
+}
 
-	details.WriteString(labelStyle.Render("Timestamp: "))
-	details.WriteString(valueStyle.Render(d.packet.Timestamp.Format("15:04:05.000000")))
-	details.WriteString("\n\n")
+// renderContent generates the combined packet details and hex dump content
+func (d *DetailsPanel) renderContent() string {
+	if d.packet == nil {
+		return ""
+	}
 
-	details.WriteString(labelStyle.Render("Protocol: "))
+	contentWidth := d.width - 8
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(d.theme.HeaderFg).
+		Bold(true)
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(d.theme.Foreground)
+
+	sectionStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(d.theme.InfoColor)
+
+	var content strings.Builder
+
+	// Packet Details Section
+	content.WriteString(sectionStyle.Render("📋 Packet Details"))
+	content.WriteString("\n\n")
+
+	content.WriteString(labelStyle.Render("Timestamp: "))
+	content.WriteString(valueStyle.Render(d.packet.Timestamp.Format("15:04:05.000000")))
+	content.WriteString("\n")
+
+	content.WriteString(labelStyle.Render("Protocol: "))
 	protocolStyle := valueStyle.Copy().Foreground(d.getProtocolColor(d.packet.Protocol))
-	details.WriteString(protocolStyle.Render(d.packet.Protocol))
-	details.WriteString("\n\n")
+	content.WriteString(protocolStyle.Render(d.packet.Protocol))
+	content.WriteString("\n")
 
-	details.WriteString(labelStyle.Render("Source: "))
+	content.WriteString(labelStyle.Render("Source: "))
 	srcAddr := fmt.Sprintf("%s:%s", d.packet.SrcIP, d.packet.SrcPort)
 	if len(srcAddr) > contentWidth-10 {
 		srcAddr = srcAddr[:contentWidth-13] + "..."
 	}
-	details.WriteString(valueStyle.Render(srcAddr))
-	details.WriteString("\n\n")
+	content.WriteString(valueStyle.Render(srcAddr))
+	content.WriteString("\n")
 
-	details.WriteString(labelStyle.Render("Destination: "))
+	content.WriteString(labelStyle.Render("Destination: "))
 	dstAddr := fmt.Sprintf("%s:%s", d.packet.DstIP, d.packet.DstPort)
 	if len(dstAddr) > contentWidth-10 {
 		dstAddr = dstAddr[:contentWidth-13] + "..."
 	}
-	details.WriteString(valueStyle.Render(dstAddr))
-	details.WriteString("\n\n")
+	content.WriteString(valueStyle.Render(dstAddr))
+	content.WriteString("\n")
 
-	details.WriteString(labelStyle.Render("Length: "))
-	details.WriteString(valueStyle.Render(fmt.Sprintf("%d bytes", d.packet.Length)))
-	details.WriteString("\n\n")
+	content.WriteString(labelStyle.Render("Length: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%d bytes", d.packet.Length)))
+	content.WriteString("\n")
 
-	details.WriteString(labelStyle.Render("Info: "))
+	content.WriteString(labelStyle.Render("Info: "))
 	// Word wrap info if it's too long
 	wrapWidth := contentWidth - 6 // Account for padding and label
 	if wrapWidth < 20 {
@@ -119,12 +199,25 @@ func (d *DetailsPanel) View() string {
 	infoLines := d.wordWrap(d.packet.Info, wrapWidth)
 	for i, line := range infoLines {
 		if i > 0 {
-			details.WriteString("\n      ")
+			content.WriteString("\n      ")
 		}
-		details.WriteString(valueStyle.Render(line))
+		content.WriteString(valueStyle.Render(line))
 	}
 
-	return borderStyle.Render(details.String())
+	// Hex Dump Section
+	content.WriteString("\n\n")
+	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))
+	content.WriteString("\n\n")
+
+	if d.packet.RawData != nil && len(d.packet.RawData) > 0 {
+		content.WriteString(d.renderHexDump(d.packet.RawData))
+	} else {
+		content.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("No raw packet data available"))
+	}
+
+	return content.String()
 }
 
 // getProtocolColor returns the theme color for a protocol
@@ -180,4 +273,58 @@ func (d *DetailsPanel) wordWrap(text string, maxWidth int) []string {
 	}
 
 	return lines
+}
+
+// renderHexDump renders a hex/ASCII dump of the packet data
+func (d *DetailsPanel) renderHexDump(data []byte) string {
+	if data == nil || len(data) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Style for hex bytes
+	hexStyle := lipgloss.NewStyle().Foreground(d.theme.Foreground)
+	// Style for ASCII
+	asciiStyle := lipgloss.NewStyle().Foreground(d.theme.SuccessColor)
+	// Style for offset
+	offsetStyle := lipgloss.NewStyle().Foreground(d.theme.HeaderFg).Bold(true)
+
+	for offset := 0; offset < len(data); offset += 16 {
+		// Offset column
+		sb.WriteString(offsetStyle.Render(fmt.Sprintf("%04x", offset)))
+		sb.WriteString("  ")
+
+		// Hex column (16 bytes per line)
+		hexPart := ""
+		asciiPart := ""
+		for i := 0; i < 16; i++ {
+			if offset+i < len(data) {
+				b := data[offset+i]
+				hexPart += fmt.Sprintf("%02x ", b)
+
+				// ASCII representation
+				if b >= 32 && b <= 126 {
+					asciiPart += string(b)
+				} else {
+					asciiPart += "."
+				}
+			} else {
+				hexPart += "   "
+				asciiPart += " "
+			}
+
+			// Add extra space after 8 bytes for readability
+			if i == 7 {
+				hexPart += " "
+			}
+		}
+
+		sb.WriteString(hexStyle.Render(hexPart))
+		sb.WriteString(" ")
+		sb.WriteString(asciiStyle.Render(asciiPart))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }

@@ -7,15 +7,19 @@ type Theme struct {
 	Name string
 
 	// General UI colors
-	Background    lipgloss.Color
-	Foreground    lipgloss.Color
-	HeaderBg      lipgloss.Color
-	HeaderFg      lipgloss.Color
-	StatusBarBg   lipgloss.Color
-	StatusBarFg   lipgloss.Color
-	SelectionBg   lipgloss.Color
-	SelectionFg   lipgloss.Color
-	BorderColor   lipgloss.Color
+	Background         lipgloss.Color
+	Foreground         lipgloss.Color
+	TerminalBg         lipgloss.Color // Actual terminal background (transparent)
+	HeaderBg           lipgloss.Color
+	HeaderFg           lipgloss.Color
+	StatusBarBg        lipgloss.Color
+	StatusBarFg        lipgloss.Color
+	SelectionBg        lipgloss.Color
+	SelectionFg        lipgloss.Color
+	CursorBg           lipgloss.Color // Cursor background color
+	CursorFg           lipgloss.Color // Cursor foreground color
+	BorderColor        lipgloss.Color
+	FocusedBorderColor lipgloss.Color
 
 	// Protocol colors
 	TCPColor     lipgloss.Color
@@ -38,14 +42,14 @@ type Theme struct {
 // Solarized color palette
 var (
 	// Solarized Dark base colors
-	solarizedBase03  = lipgloss.Color("#002b36") // background
-	solarizedBase02  = lipgloss.Color("#073642") // background highlights
-	solarizedBase01  = lipgloss.Color("#586e75") // comments / secondary content
-	solarizedBase00  = lipgloss.Color("#657b83") // body text / default code
-	solarizedBase0   = lipgloss.Color("#839496") // body text / default code
-	solarizedBase1   = lipgloss.Color("#93a1a1") // optional emphasized content
-	solarizedBase2   = lipgloss.Color("#eee8d5") // background highlights (light)
-	solarizedBase3   = lipgloss.Color("#fdf6e3") // background (light)
+	solarizedBase03 = lipgloss.Color("#002b36") // background
+	solarizedBase02 = lipgloss.Color("#073642") // background highlights
+	solarizedBase01 = lipgloss.Color("#586e75") // comments / secondary content
+	solarizedBase00 = lipgloss.Color("#657b83") // body text / default code
+	solarizedBase0  = lipgloss.Color("#839496") // body text / default code
+	solarizedBase1  = lipgloss.Color("#93a1a1") // optional emphasized content
+	solarizedBase2  = lipgloss.Color("#eee8d5") // background highlights (light)
+	solarizedBase3  = lipgloss.Color("#fdf6e3") // background (light)
 
 	// Solarized accent colors
 	solarizedYellow  = lipgloss.Color("#b58900")
@@ -64,15 +68,19 @@ func SolarizedDark() Theme {
 		Name: "Solarized Dark",
 
 		// General UI
-		Background:  solarizedBase03,
-		Foreground:  solarizedBase0,
-		HeaderBg:    solarizedBase02,
-		HeaderFg:    solarizedBase1,
-		StatusBarBg: solarizedBase02,
-		StatusBarFg: solarizedBase1,
-		SelectionBg: solarizedBase02,
-		SelectionFg: solarizedBase3, // Light text on blue background
-		BorderColor: solarizedBase01,
+		Background:         solarizedBase03,
+		Foreground:         solarizedBase0,
+		TerminalBg:         lipgloss.Color("0"),
+		HeaderBg:           solarizedGreen,
+		HeaderFg:           lipgloss.Color("0"),
+		StatusBarBg:        solarizedBase02,
+		StatusBarFg:        solarizedBase1,
+		SelectionBg:        solarizedCyan,
+		SelectionFg:        lipgloss.Color("0"),
+		CursorBg:           solarizedBlue,
+		CursorFg:           solarizedBase3, // Light foreground for cursor in dark mode
+		BorderColor:        solarizedBase01,
+		FocusedBorderColor: solarizedRed,
 
 		// Protocol colors
 		TCPColor:     solarizedCyan,
@@ -99,15 +107,19 @@ func SolarizedLight() Theme {
 		Name: "Solarized Light",
 
 		// General UI
-		Background:  solarizedBase3,
-		Foreground:  solarizedBase00,
-		HeaderBg:    solarizedBase2,
-		HeaderFg:    solarizedBase01,
-		StatusBarBg: solarizedBase2,
-		StatusBarFg: solarizedBase01,
-		SelectionBg: solarizedBase2,
-		SelectionFg: solarizedBase3, // Light text on blue background
-		BorderColor: solarizedBase1,
+		Background:         solarizedBase3,
+		Foreground:         solarizedBase00,
+		TerminalBg:         lipgloss.Color(""),
+		HeaderBg:           solarizedGreen,
+		HeaderFg:           lipgloss.Color(""),
+		StatusBarBg:        solarizedBase2,
+		StatusBarFg:        solarizedBase01,
+		SelectionBg:        solarizedCyan,
+		SelectionFg:        lipgloss.Color(""),
+		CursorBg:           solarizedBlue,
+		CursorFg:           solarizedBase3, // Light foreground for cursor in light mode
+		BorderColor:        solarizedBase1,
+		FocusedBorderColor: solarizedRed,
 
 		// Protocol colors (same accent colors work in both themes)
 		TCPColor:     solarizedCyan,

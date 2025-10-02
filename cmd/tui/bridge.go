@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strconv"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/cmd/tui/components"
@@ -12,11 +14,181 @@ import (
 
 // StartPacketBridge creates a bridge between packet capture and TUI
 // It converts capture.PacketInfo to PacketMsg for the TUI
+// Uses intelligent sampling and throttling to handle high packet rates
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program) {
-	for pktInfo := range packetChan {
-		packet := convertPacket(pktInfo)
-		program.Send(PacketMsg{Packet: packet})
+	const (
+		targetPacketsPerSecond = 200              // Target display rate
+		batchInterval          = 100 * time.Millisecond // Batch interval
+	)
+
+	batch := make([]components.PacketDisplay, 0, 100)
+	packetCount := int64(0)
+	displayedCount := int64(0)
+	startTime := time.Now()
+
+	ticker := time.NewTicker(batchInterval)
+	defer ticker.Stop()
+
+	sendBatch := func() {
+		if len(batch) > 0 {
+			// Send batch to TUI
+			for _, pkt := range batch {
+				program.Send(PacketMsg{Packet: pkt})
+			}
+			displayedCount += int64(len(batch))
+			batch = batch[:0]
+		}
 	}
+
+	// Calculate sampling ratio based on recent packet rate
+	getSamplingRatio := func() float64 {
+		elapsed := time.Since(startTime).Seconds()
+		if elapsed < 1.0 {
+			return 1.0 // No sampling for first second
+		}
+
+		currentRate := float64(packetCount) / elapsed
+		if currentRate <= float64(targetPacketsPerSecond) {
+			return 1.0 // Show all packets if under target
+		}
+
+		// Sample to achieve target rate
+		ratio := float64(targetPacketsPerSecond) / currentRate
+		if ratio < 0.01 {
+			ratio = 0.01 // Show at least 1%
+		}
+		return ratio
+	}
+
+	for {
+		select {
+		case pktInfo, ok := <-packetChan:
+			if !ok {
+				// Channel closed, send remaining batch
+				sendBatch()
+				return
+			}
+
+			packetCount++
+
+			// Adaptive sampling based on load
+			samplingRatio := getSamplingRatio()
+
+			// Use fast conversion for sampled packets, full for important ones
+			var packet components.PacketDisplay
+			if samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1) {
+				// This packet should be displayed
+				if samplingRatio < 0.5 {
+					// High load - use fast conversion
+					packet = convertPacketFast(pktInfo)
+				} else {
+					// Normal load - full conversion
+					packet = convertPacket(pktInfo)
+				}
+				batch = append(batch, packet)
+			}
+
+			// Send if batch is large enough
+			if len(batch) >= 50 {
+				sendBatch()
+			}
+
+		case <-ticker.C:
+			// Send batch on interval
+			sendBatch()
+		}
+	}
+}
+
+// convertPacketFast is a lightweight version for high-speed scenarios
+// Still extracts basic protocol info, but skips expensive payload inspection
+func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
+	pkt := pktInfo.Packet
+	display := components.PacketDisplay{
+		Timestamp: pkt.Metadata().Timestamp,
+		SrcIP:     "unknown",
+		DstIP:     "unknown",
+		SrcPort:   "",
+		DstPort:   "",
+		Protocol:  "unknown",
+		Length:    pkt.Metadata().Length,
+		Info:      "",
+		RawData:   nil, // Don't copy raw data for performance
+	}
+
+	// Check for ARP (common link-layer protocol)
+	if arpLayer := pkt.Layer(layers.LayerTypeARP); arpLayer != nil {
+		display.Protocol = "ARP"
+		return display
+	}
+
+	// Check for Linux SLL (cooked capture) - fast path
+	if sllLayer := pkt.Layer(layers.LayerTypeLinuxSLL); sllLayer != nil {
+		if pkt.NetworkLayer() == nil {
+			display.Protocol = "LinuxSLL"
+			return display
+		}
+	}
+
+	// Check Ethernet layer for non-IP protocols
+	if ethLayer := pkt.Layer(layers.LayerTypeEthernet); ethLayer != nil {
+		eth, _ := ethLayer.(*layers.Ethernet)
+		if eth != nil && pkt.NetworkLayer() == nil {
+			display.SrcIP = eth.SrcMAC.String()
+			display.DstIP = eth.DstMAC.String()
+			switch eth.EthernetType {
+			case layers.EthernetTypeLLC:
+				display.Protocol = "LLC"
+			case layers.EthernetTypeCiscoDiscovery:
+				display.Protocol = "CDP"
+			case layers.EthernetTypeLinkLayerDiscovery:
+				display.Protocol = "LLDP"
+			default:
+				display.Protocol = fmt.Sprintf("Eth:0x%04x", uint16(eth.EthernetType))
+			}
+			return display
+		}
+	}
+
+	// Extract IPs
+	if netLayer := pkt.NetworkLayer(); netLayer != nil {
+		switch net := netLayer.(type) {
+		case *layers.IPv4:
+			display.SrcIP = net.SrcIP.String()
+			display.DstIP = net.DstIP.String()
+			// Set protocol from IP if no transport layer
+			if pkt.TransportLayer() == nil {
+				display.Protocol = net.Protocol.String()
+			}
+		case *layers.IPv6:
+			display.SrcIP = net.SrcIP.String()
+			display.DstIP = net.DstIP.String()
+			// Set protocol from IPv6 if no transport layer
+			if pkt.TransportLayer() == nil {
+				display.Protocol = net.NextHeader.String()
+			}
+		}
+	}
+
+	// Extract basic protocol (cheap operation, no payload inspection)
+	if transLayer := pkt.TransportLayer(); transLayer != nil {
+		switch trans := transLayer.(type) {
+		case *layers.TCP:
+			display.Protocol = "TCP"
+			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
+			display.DstPort = strconv.Itoa(int(trans.DstPort))
+		case *layers.UDP:
+			display.Protocol = "UDP"
+			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
+			display.DstPort = strconv.Itoa(int(trans.DstPort))
+		}
+	} else if pkt.Layer(layers.LayerTypeICMPv4) != nil {
+		display.Protocol = "ICMP"
+	} else if pkt.Layer(layers.LayerTypeICMPv6) != nil {
+		display.Protocol = "ICMPv6"
+	}
+
+	return display
 }
 
 // convertPacket converts a gopacket.Packet to PacketDisplay
@@ -31,6 +203,83 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		Protocol:  "unknown",
 		Length:    pkt.Metadata().Length,
 		Info:      "",
+		RawData:   pkt.Data(), // Capture raw packet bytes
+	}
+
+	// Check for link-layer protocols first (ARP, etc.)
+	if arpLayer := pkt.Layer(layers.LayerTypeARP); arpLayer != nil {
+		arp, _ := arpLayer.(*layers.ARP)
+		display.Protocol = "ARP"
+		if arp != nil {
+			display.SrcIP = fmt.Sprintf("%d.%d.%d.%d", arp.SourceProtAddress[0], arp.SourceProtAddress[1], arp.SourceProtAddress[2], arp.SourceProtAddress[3])
+			display.DstIP = fmt.Sprintf("%d.%d.%d.%d", arp.DstProtAddress[0], arp.DstProtAddress[1], arp.DstProtAddress[2], arp.DstProtAddress[3])
+			if arp.Operation == 1 {
+				display.Info = "Who has " + display.DstIP + "?"
+			} else if arp.Operation == 2 {
+				display.Info = display.SrcIP + " is at " + fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", arp.SourceHwAddress[0], arp.SourceHwAddress[1], arp.SourceHwAddress[2], arp.SourceHwAddress[3], arp.SourceHwAddress[4], arp.SourceHwAddress[5])
+			}
+		}
+		return display
+	}
+
+	// Check for Linux SLL (cooked capture) - used when capturing on "any" interface
+	if sllLayer := pkt.Layer(layers.LayerTypeLinuxSLL); sllLayer != nil {
+		sll, _ := sllLayer.(*layers.LinuxSLL)
+		if sll != nil && pkt.NetworkLayer() == nil {
+			// SLL packet with no network layer - likely malformed or non-IP
+			display.Protocol = "LinuxSLL"
+			display.SrcIP = fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+				sll.Addr[0], sll.Addr[1], sll.Addr[2], sll.Addr[3], sll.Addr[4], sll.Addr[5])
+			display.Info = fmt.Sprintf("Type: 0x%04x", uint16(sll.EthernetType))
+
+			// Check if it's a decode failure
+			if pkt.ErrorLayer() != nil {
+				display.Info = "Decode failed: " + pkt.ErrorLayer().Error().Error()
+			}
+			return display
+		}
+	}
+
+	// Check for Ethernet layer to extract MAC addresses if no IP layer
+	if ethLayer := pkt.Layer(layers.LayerTypeEthernet); ethLayer != nil {
+		eth, _ := ethLayer.(*layers.Ethernet)
+		if eth != nil {
+			// Store MAC addresses in IP fields if we don't have IP layer
+			if pkt.NetworkLayer() == nil {
+				display.SrcIP = eth.SrcMAC.String()
+				display.DstIP = eth.DstMAC.String()
+
+				// Check for broadcast
+				isBroadcast := eth.DstMAC.String() == "ff:ff:ff:ff:ff:ff"
+
+				// Identify the ethernet protocol type
+				switch eth.EthernetType {
+				case layers.EthernetTypeLLC:
+					display.Protocol = "LLC"
+				case layers.EthernetTypeDot1Q:
+					display.Protocol = "802.1Q"
+				case layers.EthernetTypeCiscoDiscovery:
+					display.Protocol = "CDP"
+				case layers.EthernetTypeLinkLayerDiscovery: // 0x88CC
+					display.Protocol = "LLDP"
+				case layers.EthernetTypeEthernetCTP:
+					display.Protocol = "EthernetCTP"
+				case 0x888E: // 802.1X (EAP)
+					display.Protocol = "802.1X"
+				case 0x8912: // Cisco proprietary
+					display.Protocol = "Cisco"
+				default:
+					display.Protocol = fmt.Sprintf("Eth:0x%04x", uint16(eth.EthernetType))
+				}
+
+				if isBroadcast {
+					display.Info = "Broadcast frame"
+				} else {
+					display.Info = "Non-IP frame"
+				}
+				return display
+			}
+		}
 	}
 
 	// Extract network layer info
@@ -39,9 +288,17 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		case *layers.IPv4:
 			display.SrcIP = net.SrcIP.String()
 			display.DstIP = net.DstIP.String()
+			// Set protocol from IP layer if no transport layer
+			if pkt.TransportLayer() == nil {
+				display.Protocol = net.Protocol.String()
+			}
 		case *layers.IPv6:
 			display.SrcIP = net.SrcIP.String()
 			display.DstIP = net.DstIP.String()
+			// Set protocol from IPv6 layer if no transport layer
+			if pkt.TransportLayer() == nil {
+				display.Protocol = net.NextHeader.String()
+			}
 		}
 	}
 
@@ -61,6 +318,19 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
 			display.Info = fmt.Sprintf("%s → %s", display.SrcPort, display.DstPort)
 		}
+	} else if icmpLayer := pkt.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
+		// Handle ICMP separately since it's not a transport layer
+		icmp, _ := icmpLayer.(*layers.ICMPv4)
+		display.Protocol = "ICMP"
+		if icmp != nil {
+			display.Info = fmt.Sprintf("Type %d Code %d", icmp.TypeCode.Type(), icmp.TypeCode.Code())
+		}
+	} else if icmp6Layer := pkt.Layer(layers.LayerTypeICMPv6); icmp6Layer != nil {
+		icmp6, _ := icmp6Layer.(*layers.ICMPv6)
+		display.Protocol = "ICMPv6"
+		if icmp6 != nil {
+			display.Info = fmt.Sprintf("Type %d Code %d", icmp6.TypeCode.Type(), icmp6.TypeCode.Code())
+		}
 	}
 
 	// Extract application layer info
@@ -77,6 +347,22 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				display.Protocol = "DNS"
 				display.Info = "DNS Query/Response"
 			}
+		}
+	}
+
+	// Final fallback: if still unknown, list what layers we detected
+	if display.Protocol == "unknown" && display.SrcIP == "unknown" {
+		layers := pkt.Layers()
+		if len(layers) > 0 {
+			layerNames := make([]string, 0, len(layers))
+			for _, layer := range layers {
+				layerNames = append(layerNames, layer.LayerType().String())
+			}
+			display.Protocol = "Unknown"
+			display.Info = "Layers: " + strings.Join(layerNames, ", ")
+		} else {
+			display.Protocol = "Malformed"
+			display.Info = fmt.Sprintf("%d bytes", display.Length)
 		}
 	}
 

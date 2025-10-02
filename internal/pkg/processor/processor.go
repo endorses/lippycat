@@ -1,0 +1,829 @@
+package processor
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+// Config contains processor configuration
+type Config struct {
+	ListenAddr   string
+	UpstreamAddr string
+	MaxHunters   int
+	WriteFile    string
+	DisplayStats bool
+}
+
+// Processor represents a processor node
+type Processor struct {
+	config Config
+
+	// gRPC server
+	grpcServer *grpc.Server
+	listener   net.Listener
+
+	// Connected hunters
+	huntersMu sync.RWMutex
+	hunters   map[string]*ConnectedHunter
+
+	// PCAP writer
+	pcapFile   *os.File
+	pcapWriter *pcapgo.Writer
+	pcapMu     sync.Mutex
+
+	// Statistics
+	stats Stats
+	mu    sync.RWMutex
+
+	// Filters
+	filtersMu      sync.RWMutex
+	filters        map[string]*management.Filter
+	filterChannels map[string]chan *management.FilterUpdate // hunterID -> channel
+
+	// Upstream connection (hierarchical mode)
+	upstreamConn   *grpc.ClientConn
+	upstreamClient data.DataServiceClient
+	upstreamStream data.DataService_StreamPacketsClient
+	upstreamMu     sync.Mutex
+
+	// Control
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	// Embed gRPC service implementations
+	data.UnimplementedDataServiceServer
+	management.UnimplementedManagementServiceServer
+}
+
+// ConnectedHunter represents a connected hunter node
+type ConnectedHunter struct {
+	ID             string
+	Hostname       string
+	RemoteAddr     string
+	Interfaces     []string
+	ConnectedAt    int64
+	LastHeartbeat  int64
+	PacketsReceived uint64
+	Status         management.HunterStatus
+}
+
+// Stats contains processor statistics
+type Stats struct {
+	TotalHunters           uint32
+	HealthyHunters         uint32
+	WarningHunters         uint32
+	ErrorHunters           uint32
+	TotalPacketsReceived   uint64
+	TotalPacketsForwarded  uint64
+	TotalFilters           uint32
+}
+
+// New creates a new processor instance
+func New(config Config) (*Processor, error) {
+	if config.ListenAddr == "" {
+		return nil, fmt.Errorf("listen address is required")
+	}
+
+	p := &Processor{
+		config:         config,
+		hunters:        make(map[string]*ConnectedHunter),
+		filters:        make(map[string]*management.Filter),
+		filterChannels: make(map[string]chan *management.FilterUpdate),
+	}
+
+	return p, nil
+}
+
+// Start begins processor operation
+func (p *Processor) Start(ctx context.Context) error {
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	defer p.cancel()
+
+	logger.Info("Processor starting", "listen_addr", p.config.ListenAddr)
+
+	// Initialize PCAP writer if configured
+	if p.config.WriteFile != "" {
+		if err := p.initPCAPWriter(); err != nil {
+			return fmt.Errorf("failed to initialize PCAP writer: %w", err)
+		}
+		defer p.closePCAPWriter()
+	}
+
+	// Create listener
+	listener, err := net.Listen("tcp", p.config.ListenAddr)
+	if err != nil {
+		return fmt.Errorf("failed to listen: %w", err)
+	}
+	p.listener = listener
+
+	// Create gRPC server
+	p.grpcServer = grpc.NewServer(
+		grpc.MaxRecvMsgSize(10*1024*1024), // 10MB
+	)
+
+	// Register services
+	data.RegisterDataServiceServer(p.grpcServer, p)
+	management.RegisterManagementServiceServer(p.grpcServer, p)
+
+	logger.Info("gRPC server created",
+		"addr", listener.Addr().String(),
+		"services", []string{"DataService", "ManagementService"})
+
+	// Start server in background
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		if err := p.grpcServer.Serve(listener); err != nil {
+			logger.Error("gRPC server failed", "error", err)
+		}
+	}()
+
+	// Connect to upstream if configured (hierarchical mode)
+	if p.config.UpstreamAddr != "" {
+		if err := p.connectToUpstream(); err != nil {
+			return fmt.Errorf("failed to connect to upstream: %w", err)
+		}
+		defer p.disconnectUpstream()
+	}
+
+	// Start heartbeat monitor
+	p.wg.Add(1)
+	go p.monitorHeartbeats()
+
+	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
+
+	// Wait for shutdown
+	<-p.ctx.Done()
+
+	// Graceful shutdown
+	logger.Info("Shutting down processor")
+	p.grpcServer.GracefulStop()
+	p.wg.Wait()
+
+	logger.Info("Processor stopped")
+	return nil
+}
+
+// StreamPackets handles packet streaming from hunters (Data Service)
+func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) error {
+	logger.Info("New packet stream connection")
+
+	for {
+		batch, err := stream.Recv()
+		if err != nil {
+			logger.Debug("Stream ended", "error", err)
+			return err
+		}
+
+		// Process batch
+		p.processBatch(batch)
+
+		// Send acknowledgment
+		ack := &data.StreamControl{
+			AckSequence: batch.Sequence,
+			FlowControl: data.FlowControl_FLOW_CONTINUE,
+		}
+
+		if err := stream.Send(ack); err != nil {
+			logger.Error("Failed to send acknowledgment", "error", err)
+			return err
+		}
+	}
+}
+
+// processBatch processes a received packet batch
+func (p *Processor) processBatch(batch *data.PacketBatch) {
+	hunterID := batch.HunterId
+
+	logger.Debug("Received packet batch",
+		"hunter_id", hunterID,
+		"sequence", batch.Sequence,
+		"packets", len(batch.Packets))
+
+	// Update hunter statistics
+	p.huntersMu.Lock()
+	if hunter, exists := p.hunters[hunterID]; exists {
+		hunter.PacketsReceived += uint64(len(batch.Packets))
+		hunter.LastHeartbeat = batch.TimestampNs
+	}
+	p.huntersMu.Unlock()
+
+	// Write packets to PCAP file if configured
+	if p.pcapWriter != nil {
+		p.writePacketsToPCAP(batch.Packets)
+	}
+
+	// Update processor statistics
+	p.mu.Lock()
+	p.stats.TotalPacketsReceived += uint64(len(batch.Packets))
+	p.mu.Unlock()
+
+	// Forward to upstream in hierarchical mode
+	if p.upstreamStream != nil {
+		p.forwardToUpstream(batch)
+	}
+}
+
+// RegisterHunter handles hunter registration (Management Service)
+func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRegistration) (*management.RegistrationResponse, error) {
+	hunterID := req.HunterId
+
+	logger.Info("Hunter registration request",
+		"hunter_id", hunterID,
+		"hostname", req.Hostname,
+		"interfaces", req.Interfaces)
+
+	// Check if hunter already exists
+	p.huntersMu.Lock()
+	if _, exists := p.hunters[hunterID]; exists {
+		p.huntersMu.Unlock()
+		logger.Warn("Hunter already registered", "hunter_id", hunterID)
+		return &management.RegistrationResponse{
+			Accepted:   false,
+			Error:      "hunter already registered",
+			AssignedId: hunterID,
+		}, nil
+	}
+
+	// Check max hunters limit
+	if len(p.hunters) >= p.config.MaxHunters {
+		p.huntersMu.Unlock()
+		logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)
+		return &management.RegistrationResponse{
+			Accepted: false,
+			Error:    "maximum number of hunters reached",
+		}, nil
+	}
+
+	// Register hunter
+	hunter := &ConnectedHunter{
+		ID:          hunterID,
+		Hostname:    req.Hostname,
+		Interfaces:  req.Interfaces,
+		ConnectedAt: time.Now().UnixNano(),
+		Status:      management.HunterStatus_STATUS_HEALTHY,
+	}
+	p.hunters[hunterID] = hunter
+	p.huntersMu.Unlock()
+
+	// Update statistics
+	p.mu.Lock()
+	p.stats.TotalHunters++
+	p.stats.HealthyHunters++
+	p.mu.Unlock()
+
+	logger.Info("Hunter registered successfully", "hunter_id", hunterID)
+
+	// Get applicable filters for this hunter
+	filters := p.getFiltersForHunter(hunterID)
+
+	return &management.RegistrationResponse{
+		Accepted:   true,
+		AssignedId: hunterID,
+		Filters:    filters,
+		Config: &management.ProcessorConfig{
+			BatchSize:             64,
+			BatchTimeoutMs:        100,
+			ReconnectIntervalSec:  5,
+			MaxReconnectAttempts:  0, // infinite
+		},
+	}, nil
+}
+
+// Heartbeat handles bidirectional heartbeat stream (Management Service)
+func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServer) error {
+	logger.Debug("New heartbeat stream")
+
+	for {
+		hb, err := stream.Recv()
+		if err != nil {
+			logger.Debug("Heartbeat stream ended", "error", err)
+			return err
+		}
+
+		hunterID := hb.HunterId
+
+		// Update hunter status
+		p.huntersMu.Lock()
+		if hunter, exists := p.hunters[hunterID]; exists {
+			hunter.LastHeartbeat = hb.TimestampNs
+			hunter.Status = hb.Status
+		}
+		p.huntersMu.Unlock()
+
+		logger.Debug("Heartbeat received", "hunter_id", hunterID)
+
+		// Send response
+		resp := &management.ProcessorHeartbeat{
+			TimestampNs:       hb.TimestampNs,
+			Status:            management.ProcessorStatus_PROCESSOR_HEALTHY,
+			HuntersConnected:  p.stats.TotalHunters,
+		}
+
+		if err := stream.Send(resp); err != nil {
+			logger.Error("Failed to send heartbeat response", "error", err)
+			return err
+		}
+	}
+}
+
+// GetFilters retrieves filters for a hunter (Management Service)
+func (p *Processor) GetFilters(ctx context.Context, req *management.FilterRequest) (*management.FilterResponse, error) {
+	filters := p.getFiltersForHunter(req.HunterId)
+
+	return &management.FilterResponse{
+		Filters: filters,
+	}, nil
+}
+
+// SubscribeFilters streams filter updates to hunters (Management Service)
+func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream management.ManagementService_SubscribeFiltersServer) error {
+	hunterID := req.HunterId
+	logger.Info("Filter subscription started", "hunter_id", hunterID)
+
+	// Create filter update channel for this hunter
+	filterChan := make(chan *management.FilterUpdate, 10)
+
+	p.filtersMu.Lock()
+	p.filterChannels[hunterID] = filterChan
+	p.filtersMu.Unlock()
+
+	// Cleanup on disconnect
+	defer func() {
+		p.filtersMu.Lock()
+		delete(p.filterChannels, hunterID)
+		close(filterChan)
+		p.filtersMu.Unlock()
+		logger.Info("Filter subscription ended", "hunter_id", hunterID)
+	}()
+
+	// Send current filters immediately
+	currentFilters := p.getFiltersForHunter(hunterID)
+	for _, filter := range currentFilters {
+		update := &management.FilterUpdate{
+			UpdateType: management.FilterUpdateType_UPDATE_ADD,
+			Filter:     filter,
+		}
+		if err := stream.Send(update); err != nil {
+			logger.Error("Failed to send initial filter", "error", err, "filter_id", filter.Id)
+			return err
+		}
+	}
+
+	logger.Info("Sent initial filters", "hunter_id", hunterID, "count", len(currentFilters))
+
+	// Stream filter updates
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case update, ok := <-filterChan:
+			if !ok {
+				return nil
+			}
+
+			logger.Debug("Sending filter update",
+				"hunter_id", hunterID,
+				"update_type", update.UpdateType,
+				"filter_id", update.Filter.Id)
+
+			if err := stream.Send(update); err != nil {
+				logger.Error("Failed to send filter update", "error", err)
+				return err
+			}
+		}
+	}
+}
+
+// GetHunterStatus retrieves status of connected hunters (Management Service)
+func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusRequest) (*management.StatusResponse, error) {
+	p.huntersMu.RLock()
+	defer p.huntersMu.RUnlock()
+
+	connectedHunters := make([]*management.ConnectedHunter, 0, len(p.hunters))
+
+	for _, hunter := range p.hunters {
+		// Skip if filtering by hunter ID
+		if req.HunterId != "" && hunter.ID != req.HunterId {
+			continue
+		}
+
+		connectedHunters = append(connectedHunters, &management.ConnectedHunter{
+			HunterId:             hunter.ID,
+			Hostname:             hunter.Hostname,
+			RemoteAddr:           hunter.RemoteAddr,
+			Status:               hunter.Status,
+			ConnectedDurationSec: 0, // TODO: calculate
+			LastHeartbeatNs:      hunter.LastHeartbeat,
+			Stats: &management.HunterStats{
+				PacketsCaptured:  hunter.PacketsReceived,
+				PacketsForwarded: hunter.PacketsReceived,
+			},
+		})
+	}
+
+	p.mu.RLock()
+	stats := p.stats
+	p.mu.RUnlock()
+
+	return &management.StatusResponse{
+		Hunters: connectedHunters,
+		ProcessorStats: &management.ProcessorStats{
+			TotalHunters:           stats.TotalHunters,
+			HealthyHunters:         stats.HealthyHunters,
+			WarningHunters:         stats.WarningHunters,
+			ErrorHunters:           stats.ErrorHunters,
+			TotalPacketsReceived:   stats.TotalPacketsReceived,
+			TotalPacketsForwarded:  stats.TotalPacketsForwarded,
+			TotalFilters:           stats.TotalFilters,
+		},
+	}, nil
+}
+
+// UpdateFilter adds or modifies a filter (Management Service)
+func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
+	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
+
+	// Determine if this is add or modify
+	p.filtersMu.Lock()
+	_, exists := p.filters[filter.Id]
+	p.filters[filter.Id] = filter
+	p.filtersMu.Unlock()
+
+	updateType := management.FilterUpdateType_UPDATE_ADD
+	if exists {
+		updateType = management.FilterUpdateType_UPDATE_MODIFY
+	}
+
+	// Push filter update to affected hunters
+	update := &management.FilterUpdate{
+		UpdateType: updateType,
+		Filter:     filter,
+	}
+
+	huntersUpdated := p.pushFilterUpdate(filter, update)
+
+	logger.Info("Filter updated",
+		"filter_id", filter.Id,
+		"hunters_updated", huntersUpdated,
+		"update_type", updateType)
+
+	return &management.FilterUpdateResult{
+		Success:        true,
+		HuntersUpdated: huntersUpdated,
+	}, nil
+}
+
+// DeleteFilter removes a filter (Management Service)
+func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDeleteRequest) (*management.FilterUpdateResult, error) {
+	logger.Info("Delete filter request", "filter_id", req.FilterId)
+
+	p.filtersMu.Lock()
+	filter, exists := p.filters[req.FilterId]
+	if !exists {
+		p.filtersMu.Unlock()
+		return &management.FilterUpdateResult{
+			Success: false,
+			Error:   "filter not found",
+		}, nil
+	}
+	delete(p.filters, req.FilterId)
+	p.filtersMu.Unlock()
+
+	// Push filter deletion to affected hunters
+	update := &management.FilterUpdate{
+		UpdateType: management.FilterUpdateType_UPDATE_DELETE,
+		Filter:     filter,
+	}
+
+	huntersUpdated := p.pushFilterUpdate(filter, update)
+
+	logger.Info("Filter deleted",
+		"filter_id", req.FilterId,
+		"hunters_updated", huntersUpdated)
+
+	return &management.FilterUpdateResult{
+		Success:        true,
+		HuntersUpdated: huntersUpdated,
+	}, nil
+}
+
+// getFiltersForHunter returns filters applicable to a hunter
+func (p *Processor) getFiltersForHunter(hunterID string) []*management.Filter {
+	p.filtersMu.RLock()
+	defer p.filtersMu.RUnlock()
+
+	filters := make([]*management.Filter, 0)
+
+	for _, filter := range p.filters {
+		// If no target hunters specified, apply to all
+		if len(filter.TargetHunters) == 0 {
+			filters = append(filters, filter)
+			continue
+		}
+
+		// Check if this hunter is targeted
+		for _, target := range filter.TargetHunters {
+			if target == hunterID {
+				filters = append(filters, filter)
+				break
+			}
+		}
+	}
+
+	return filters
+}
+
+// GetStats returns current statistics
+func (p *Processor) GetStats() Stats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.stats
+}
+
+// initPCAPWriter initializes PCAP file writer
+func (p *Processor) initPCAPWriter() error {
+	logger.Info("Initializing PCAP writer", "file", p.config.WriteFile)
+
+	file, err := os.Create(p.config.WriteFile)
+	if err != nil {
+		return fmt.Errorf("failed to create PCAP file: %w", err)
+	}
+
+	p.pcapFile = file
+	p.pcapWriter = pcapgo.NewWriter(file)
+
+	// Write PCAP header (Ethernet link type)
+	if err := p.pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+		file.Close()
+		return fmt.Errorf("failed to write PCAP header: %w", err)
+	}
+
+	logger.Info("PCAP writer initialized", "file", p.config.WriteFile)
+	return nil
+}
+
+// writePacketsToPCAP writes packets to PCAP file
+func (p *Processor) writePacketsToPCAP(packets []*data.CapturedPacket) {
+	p.pcapMu.Lock()
+	defer p.pcapMu.Unlock()
+
+	for _, pkt := range packets {
+		// Convert timestamp
+		timestamp := time.Unix(0, pkt.TimestampNs)
+
+		// Create capture info
+		ci := gopacket.CaptureInfo{
+			Timestamp:     timestamp,
+			CaptureLength: int(pkt.CaptureLength),
+			Length:        int(pkt.OriginalLength),
+		}
+
+		// Write packet
+		if err := p.pcapWriter.WritePacket(ci, pkt.Data); err != nil {
+			logger.Error("Failed to write packet to PCAP", "error", err)
+		}
+	}
+}
+
+// closePCAPWriter closes PCAP file
+func (p *Processor) closePCAPWriter() {
+	p.pcapMu.Lock()
+	defer p.pcapMu.Unlock()
+
+	if p.pcapFile != nil {
+		p.pcapFile.Close()
+		logger.Info("PCAP file closed", "file", p.config.WriteFile)
+	}
+}
+
+// pushFilterUpdate sends filter update to affected hunters
+func (p *Processor) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) uint32 {
+	p.filtersMu.RLock()
+	defer p.filtersMu.RUnlock()
+
+	var huntersUpdated uint32
+
+	// If no target hunters specified, send to all
+	if len(filter.TargetHunters) == 0 {
+		for hunterID, ch := range p.filterChannels {
+			select {
+			case ch <- update:
+				huntersUpdated++
+				logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", filter.Id)
+			default:
+				logger.Warn("Filter channel full, dropping update", "hunter_id", hunterID)
+			}
+		}
+		return huntersUpdated
+	}
+
+	// Send to specific hunters
+	for _, targetID := range filter.TargetHunters {
+		if ch, exists := p.filterChannels[targetID]; exists {
+			select {
+			case ch <- update:
+				huntersUpdated++
+				logger.Debug("Sent filter update", "hunter_id", targetID, "filter_id", filter.Id)
+			default:
+				logger.Warn("Filter channel full, dropping update", "hunter_id", targetID)
+			}
+		}
+	}
+
+	return huntersUpdated
+}
+
+// monitorHeartbeats monitors hunter heartbeats and marks stale hunters
+func (p *Processor) monitorHeartbeats() {
+	defer p.wg.Done()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	logger.Info("Heartbeat monitor started")
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			logger.Info("Heartbeat monitor stopped")
+			return
+
+		case <-ticker.C:
+			p.huntersMu.Lock()
+			now := time.Now().UnixNano()
+			staleThreshold := int64(30 * time.Second) // 30 seconds without heartbeat
+
+			for hunterID, hunter := range p.hunters {
+				if hunter.LastHeartbeat > 0 {
+					timeSinceHeartbeat := now - hunter.LastHeartbeat
+
+					if timeSinceHeartbeat > staleThreshold {
+						if hunter.Status != management.HunterStatus_STATUS_ERROR {
+							logger.Warn("Hunter heartbeat timeout",
+								"hunter_id", hunterID,
+								"last_heartbeat_sec", timeSinceHeartbeat/int64(time.Second))
+							hunter.Status = management.HunterStatus_STATUS_ERROR
+						}
+					}
+				}
+			}
+
+			// Update stats based on hunter statuses
+			p.updateHealthStats()
+
+			p.huntersMu.Unlock()
+		}
+	}
+}
+
+// updateHealthStats updates processor health statistics based on hunter statuses
+func (p *Processor) updateHealthStats() {
+	var healthy, warning, errCount uint32
+
+	for _, hunter := range p.hunters {
+		switch hunter.Status {
+		case management.HunterStatus_STATUS_HEALTHY:
+			healthy++
+		case management.HunterStatus_STATUS_WARNING:
+			warning++
+		case management.HunterStatus_STATUS_ERROR:
+			errCount++
+		}
+	}
+
+	p.mu.Lock()
+	p.stats.TotalHunters = uint32(len(p.hunters))
+	p.stats.HealthyHunters = healthy
+	p.stats.WarningHunters = warning
+	p.stats.ErrorHunters = errCount
+	p.mu.Unlock()
+}
+
+// connectToUpstream establishes connection to upstream processor
+func (p *Processor) connectToUpstream() error {
+	logger.Info("Connecting to upstream processor", "addr", p.config.UpstreamAddr)
+
+	// Create gRPC connection
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10 * 1024 * 1024)), // 10MB
+	}
+
+	conn, err := grpc.Dial(p.config.UpstreamAddr, opts...)
+	if err != nil {
+		return fmt.Errorf("failed to dial upstream: %w", err)
+	}
+
+	p.upstreamConn = conn
+	p.upstreamClient = data.NewDataServiceClient(conn)
+
+	// Create streaming connection
+	stream, err := p.upstreamClient.StreamPackets(p.ctx)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to create upstream stream: %w", err)
+	}
+
+	p.upstreamMu.Lock()
+	p.upstreamStream = stream
+	p.upstreamMu.Unlock()
+
+	// Start goroutine to receive upstream acks
+	p.wg.Add(1)
+	go p.receiveUpstreamAcks()
+
+	logger.Info("Connected to upstream processor", "addr", p.config.UpstreamAddr)
+	return nil
+}
+
+// disconnectUpstream closes upstream connection
+func (p *Processor) disconnectUpstream() {
+	p.upstreamMu.Lock()
+	if p.upstreamStream != nil {
+		p.upstreamStream.CloseSend()
+		p.upstreamStream = nil
+	}
+	p.upstreamMu.Unlock()
+
+	if p.upstreamConn != nil {
+		p.upstreamConn.Close()
+		p.upstreamConn = nil
+	}
+
+	logger.Info("Disconnected from upstream processor")
+}
+
+// forwardToUpstream forwards packet batch to upstream processor
+func (p *Processor) forwardToUpstream(batch *data.PacketBatch) {
+	p.upstreamMu.Lock()
+	stream := p.upstreamStream
+	p.upstreamMu.Unlock()
+
+	if stream == nil {
+		logger.Warn("Upstream stream not available, dropping batch")
+		return
+	}
+
+	// Forward batch (keeping original hunter ID for traceability)
+	if err := stream.Send(batch); err != nil {
+		logger.Error("Failed to forward batch to upstream", "error", err)
+		return
+	}
+
+	// Update forwarded stats
+	p.mu.Lock()
+	p.stats.TotalPacketsForwarded += uint64(len(batch.Packets))
+	p.mu.Unlock()
+
+	logger.Debug("Forwarded batch to upstream",
+		"hunter_id", batch.HunterId,
+		"sequence", batch.Sequence,
+		"packets", len(batch.Packets))
+}
+
+// receiveUpstreamAcks receives acknowledgments from upstream
+func (p *Processor) receiveUpstreamAcks() {
+	defer p.wg.Done()
+
+	p.upstreamMu.Lock()
+	stream := p.upstreamStream
+	p.upstreamMu.Unlock()
+
+	if stream == nil {
+		logger.Error("Upstream stream not available for receiving acks")
+		return
+	}
+
+	for {
+		ack, err := stream.Recv()
+		if err != nil {
+			if p.ctx.Err() != nil {
+				logger.Info("Upstream ack receiver closed")
+				return
+			}
+			logger.Error("Upstream ack receive error", "error", err)
+			return
+		}
+
+		logger.Debug("Received upstream ack",
+			"ack_sequence", ack.AckSequence,
+			"flow_control", ack.FlowControl)
+
+		// TODO: Implement flow control from upstream (pause forwarding if FLOW_PAUSE)
+	}
+}

@@ -107,7 +107,12 @@ func (pb *PacketBuffer) IsClosed() bool {
 }
 
 func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
-	ctx, cancel := context.WithCancel(context.Background())
+	InitWithContext(context.Background(), ifaces, filter, packetProcessor, assembler)
+}
+
+// InitWithContext starts packet capture with a cancellable context
+func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Set up signal handler for graceful shutdown
@@ -152,13 +157,15 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 		}(iface)
 	}
 
+	shutdownCh := make(chan struct{})
 	go func() {
-		select {
-		case <-ctx.Done():
-			// Context cancelled, wait for capture goroutines to stop
-			wg.Wait()
-			packetBuffer.Close()
-		}
+		<-ctx.Done()
+		// Context cancelled, wait for capture goroutines to stop
+		wg.Wait()
+		// Close the buffer which will cause the processor to exit
+		packetBuffer.Close()
+		// Signal that shutdown has started
+		close(shutdownCh)
 	}()
 
 	// Start a single goroutine that calls the user-provided packet processor
@@ -168,7 +175,30 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 		packetProcessor(packetBuffer.Receive(), assembler)
 	}()
 
-	processorWg.Wait()
+	// Wait for processor to complete or timeout after shutdown
+	done := make(chan struct{})
+	go func() {
+		processorWg.Wait()
+		close(done)
+	}()
+
+	// Wait for either completion or shutdown + timeout
+	select {
+	case <-done:
+		// Completed normally (before or after shutdown)
+		return
+	case <-shutdownCh:
+		// Shutdown started, now wait with timeout for processor to finish draining
+		select {
+		case <-done:
+			// Processor finished draining
+			return
+		case <-time.After(2 * time.Second):
+			// Force exit after timeout
+			logger.Warn("Forcing shutdown after drain timeout", "timeout", "2s")
+			return
+		}
+	}
 }
 
 func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer) {

@@ -75,8 +75,9 @@ func (f *Footer) View() string {
 		bindings = []string{
 			keyStyle.Render("/") + descStyle.Render(": filter"),
 			keyStyle.Render("Space") + descStyle.Render(": pause"),
+			keyStyle.Render("x") + descStyle.Render(": flush"),
 			keyStyle.Render("t") + descStyle.Render(": theme"),
-			keyStyle.Render("↑↓/jk") + descStyle.Render(": navigate"),
+			keyStyle.Render("←↓↑→/hjkl") + descStyle.Render(": nav"),
 		}
 
 		if f.hasFilter {
@@ -106,3 +107,4 @@ func (f *Footer) View() string {
 
 	return footer
 }
+

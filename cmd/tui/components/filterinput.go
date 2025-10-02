@@ -158,6 +158,17 @@ func (f *FilterInput) CursorEnd() {
 	f.cursor = len(f.value)
 }
 
+// DeleteToBeginning deletes from cursor to beginning of line (Ctrl+U)
+func (f *FilterInput) DeleteToBeginning() {
+	f.value = f.value[f.cursor:]
+	f.cursor = 0
+}
+
+// DeleteToEnd deletes from cursor to end of line (Ctrl+K)
+func (f *FilterInput) DeleteToEnd() {
+	f.value = f.value[:f.cursor]
+}
+
 // View renders the filter input
 func (f *FilterInput) View() string {
 	if !f.active {
@@ -175,8 +186,7 @@ func (f *FilterInput) View() string {
 		Width(f.width - 4)
 
 	inputStyle := lipgloss.NewStyle().
-		Foreground(f.theme.Foreground).
-		Background(f.theme.Background)
+		Foreground(f.theme.Foreground)
 
 	promptStyle := lipgloss.NewStyle().
 		Foreground(f.theme.InfoColor).
@@ -185,8 +195,8 @@ func (f *FilterInput) View() string {
 	// Build the input line with cursor
 	displayValue := f.value
 	cursorStyle := lipgloss.NewStyle().
-		Foreground(f.theme.SelectionFg).
-		Background(f.theme.InfoColor)
+		Foreground(f.theme.CursorFg).
+		Background(f.theme.CursorBg)
 
 	if f.cursor < len(f.value) {
 		// Show cursor in the middle of text

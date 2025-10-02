@@ -10,23 +10,25 @@ import (
 
 // Header displays the top header bar
 type Header struct {
-	width      int
-	theme      themes.Theme
-	capturing  bool
-	paused     bool
-	iface      string
-	packets    int
+	width       int
+	theme       themes.Theme
+	capturing   bool
+	paused      bool
+	iface       string
+	packets     int
+	captureMode CaptureMode
 }
 
 // NewHeader creates a new header component
 func NewHeader() Header {
 	return Header{
-		width:     80,
-		theme:     themes.SolarizedDark(),
-		capturing: true,
-		paused:    false,
-		iface:     "any",
-		packets:   0,
+		width:       80,
+		theme:       themes.SolarizedDark(),
+		capturing:   true,
+		paused:      false,
+		iface:       "any",
+		packets:     0,
+		captureMode: CaptureModeLive,
 	}
 }
 
@@ -56,6 +58,11 @@ func (h *Header) SetPacketCount(count int) {
 	h.packets = count
 }
 
+// SetCaptureMode sets the capture mode
+func (h *Header) SetCaptureMode(mode CaptureMode) {
+	h.captureMode = mode
+}
+
 // View renders the header
 func (h *Header) View() string {
 	// Clean header with visible text
@@ -79,46 +86,48 @@ func (h *Header) View() string {
 		statusText = "⏸ PAUSED"
 		statusColor = h.theme.SuccessColor // Green for paused
 	} else if h.capturing {
-		statusText = "● CAPTURING"
-		statusColor = h.theme.ErrorColor // Red for capturing
+		if h.captureMode == CaptureModeOffline {
+			statusText = "● READING"
+			statusColor = h.theme.InfoColor // Blue for reading file
+		} else {
+			statusText = "● CAPTURING"
+			statusColor = h.theme.ErrorColor // Red for capturing
+		}
 	} else {
 		statusText = "○ STOPPED"
 		statusColor = lipgloss.Color("240")
 	}
 
 	statusStyle := leftStyle.Copy().Foreground(statusColor)
-	leftPart := statusStyle.Render(statusText)
 
-	// Middle part - interface
-	middlePart := middleStyle.Render(fmt.Sprintf("Interface: %s", h.iface))
+	// Fixed width sections to prevent shifting
+	// Left: 20 chars, Middle: flexible, Right: 20 chars
+	leftWidth := 20
+	rightWidth := 20
 
-	// Right part - packet count
-	rightPart := rightStyle.Render(fmt.Sprintf("Packets: %s", formatNumber(h.packets)))
+	// Create fixed-width left section (status)
+	leftContent := statusStyle.Render(statusText)
+	leftPart := leftStyle.Copy().Width(leftWidth).Render(leftContent)
 
-	// Calculate spacing
-	leftWidth := lipgloss.Width(leftPart)
-	middleWidth := lipgloss.Width(middlePart)
-	rightWidth := lipgloss.Width(rightPart)
-
-	totalContentWidth := leftWidth + middleWidth + rightWidth
-	remainingSpace := h.width - totalContentWidth
-
-	// Create spacers without background
-	var leftSpacer, rightSpacer string
-	if remainingSpace > 0 {
-		leftSpacerWidth := remainingSpace / 3
-		rightSpacerWidth := remainingSpace - leftSpacerWidth
-		leftSpacer = strings.Repeat(" ", leftSpacerWidth)
-		rightSpacer = strings.Repeat(" ", rightSpacerWidth)
+	// Middle part - interface or file (takes remaining space)
+	var middleText string
+	if h.captureMode == CaptureModeOffline {
+		middleText = fmt.Sprintf("File: %s", h.iface)
+	} else {
+		middleText = fmt.Sprintf("Interface: %s", h.iface)
 	}
+	middleWidth := h.width - leftWidth - rightWidth
+	middlePart := middleStyle.Copy().Width(middleWidth).Align(lipgloss.Center).Render(middleText)
+
+	// Right part - packet count (fixed width)
+	rightText := fmt.Sprintf("Packets: %s", formatNumber(h.packets))
+	rightPart := rightStyle.Copy().Width(rightWidth).Align(lipgloss.Right).Render(rightText)
 
 	// Join parts
 	header := lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		leftPart,
-		leftSpacer,
 		middlePart,
-		rightSpacer,
 		rightPart,
 	)
 

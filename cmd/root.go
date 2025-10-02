@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/endorses/lippycat/cmd/hunt"
+	"github.com/endorses/lippycat/cmd/process"
 	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/cmd/tui"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -29,6 +31,8 @@ func Execute() {
 func addSubCommandPalattes() {
 	rootCmd.AddCommand(sniff.SniffCmd)
 	rootCmd.AddCommand(tui.TuiCmd)
+	rootCmd.AddCommand(hunt.HuntCmd)
+	rootCmd.AddCommand(process.ProcessCmd)
 }
 
 func init() {

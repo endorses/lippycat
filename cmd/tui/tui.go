@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -37,24 +38,26 @@ func runTUI(cmd *cobra.Command, args []string) {
 	defer logger.Enable()
 
 	// Create TUI model
-	model := NewModel(bufferSize)
-	model.interfaceName = interfaces
-
-	// Create packet channel
-	packetChan := make(chan capture.PacketInfo, 1000)
+	model := NewModel(bufferSize, interfaces, filter, readFile, promiscuous)
 
 	// Start bubbletea program
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
+	// Store program reference globally
+	currentProgram = p
+
 	// Start packet capture in background
+	ctx, cancel := context.WithCancel(context.Background())
+	currentCaptureCancel = cancel
+
 	go func() {
 		if readFile != "" {
 			capture.StartOfflineSniffer(readFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-				startTUISniffer(devices, filter, packetChan, p)
+				startTUISniffer(ctx, devices, filter, p)
 			})
 		} else {
 			capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-				startTUISniffer(devices, filter, packetChan, p)
+				startTUISniffer(ctx, devices, filter, p)
 			})
 		}
 	}()
@@ -66,14 +69,14 @@ func runTUI(cmd *cobra.Command, args []string) {
 	}
 }
 
-func startTUISniffer(devices []pcaptypes.PcapInterface, filter string, packetChan chan<- capture.PacketInfo, program *tea.Program) {
+func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 		// Don't use goroutine - block here so capture.Init doesn't exit early
 		StartPacketBridge(ch, program)
 	}
 
-	capture.Init(devices, filter, processor, nil)
+	capture.InitWithContext(ctx, devices, filter, processor, nil)
 }
 
 func init() {

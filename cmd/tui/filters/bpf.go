@@ -2,6 +2,7 @@ package filters
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 
@@ -118,6 +119,24 @@ func (f *BPFFilter) GetExpression() string {
 
 // containsIP checks if an IP address matches a pattern (partial match or CIDR)
 func containsIP(ip, pattern string) bool {
+	// Check if pattern is CIDR notation
+	if strings.Contains(pattern, "/") {
+		_, ipnet, err := net.ParseCIDR(pattern)
+		if err != nil {
+			// Invalid CIDR, fall back to substring match
+			return strings.Contains(ip, pattern)
+		}
+
+		// Parse the IP address
+		parsedIP := net.ParseIP(ip)
+		if parsedIP == nil {
+			return false
+		}
+
+		// Check if IP is in the CIDR range
+		return ipnet.Contains(parsedIP)
+	}
+
 	// Simple substring match for partial IPs like "192.168.1"
 	return strings.Contains(ip, pattern)
 }

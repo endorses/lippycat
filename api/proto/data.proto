@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package lippycat.data;
+
+option go_package = "github.com/endorses/lippycat/api/proto/data";
+
+// DataService handles high-volume packet streaming from hunters to processors
+service DataService {
+    // StreamPackets is a bidirectional stream for packet transmission
+    // Hunter → Processor: Captured packets
+    // Processor → Hunter: Acknowledgments and flow control signals
+    rpc StreamPackets(stream PacketBatch) returns (stream StreamControl);
+}
+
+// PacketBatch contains multiple packets captured by a hunter
+message PacketBatch {
+    // Unique hunter identifier
+    string hunter_id = 1;
+
+    // Batch sequence number (for ordering and loss detection)
+    uint64 sequence = 2;
+
+    // Timestamp when batch was created (Unix nanoseconds)
+    int64 timestamp_ns = 3;
+
+    // Individual packets in this batch
+    repeated CapturedPacket packets = 4;
+
+    // Statistics about this hunter's capture
+    BatchStats stats = 5;
+}
+
+// CapturedPacket represents a single captured network packet
+message CapturedPacket {
+    // Packet payload (raw network data)
+    bytes data = 1;
+
+    // Capture timestamp (Unix nanoseconds)
+    int64 timestamp_ns = 2;
+
+    // Capture length (actual bytes captured)
+    uint32 capture_length = 3;
+
+    // Original length (may be > capture_length if truncated)
+    uint32 original_length = 4;
+
+    // Interface index where packet was captured
+    uint32 interface_index = 5;
+
+    // Link type (Ethernet, Raw IP, etc.) - from libpcap
+    uint32 link_type = 6;
+
+    // Optional: Metadata from local analysis
+    PacketMetadata metadata = 7;
+}
+
+// PacketMetadata contains hunter-side analysis results
+message PacketMetadata {
+    // Protocol detected (e.g., "SIP", "RTP", "RTCP")
+    string protocol = 1;
+
+    // Source IP address
+    string src_ip = 2;
+
+    // Destination IP address
+    string dst_ip = 3;
+
+    // Source port
+    uint32 src_port = 4;
+
+    // Destination port
+    uint32 dst_port = 5;
+
+    // Transport protocol (TCP, UDP, etc.)
+    string transport = 6;
+
+    // SIP-specific metadata (if applicable)
+    SIPMetadata sip = 7;
+
+    // RTP-specific metadata (if applicable)
+    RTPMetadata rtp = 8;
+}
+
+// SIPMetadata for SIP packets
+message SIPMetadata {
+    // SIP method (INVITE, BYE, REGISTER, etc.)
+    string method = 1;
+
+    // Call-ID
+    string call_id = 2;
+
+    // From user
+    string from_user = 3;
+
+    // To user
+    string to_user = 4;
+
+    // Response code (for responses)
+    uint32 response_code = 5;
+}
+
+// RTPMetadata for RTP packets
+message RTPMetadata {
+    // SSRC identifier
+    uint32 ssrc = 1;
+
+    // Payload type
+    uint32 payload_type = 2;
+
+    // Sequence number
+    uint32 sequence = 3;
+
+    // Timestamp
+    uint32 timestamp = 4;
+}
+
+// BatchStats contains statistics about a hunter's capture
+message BatchStats {
+    // Total packets captured (before filtering)
+    uint64 total_captured = 1;
+
+    // Packets that matched filters
+    uint64 filtered_matched = 2;
+
+    // Packets dropped (buffer full, etc.)
+    uint64 dropped = 3;
+
+    // Current buffer usage percentage (0-100)
+    uint32 buffer_usage = 4;
+}
+
+// StreamControl messages from processor to hunter
+message StreamControl {
+    // Acknowledged sequence number
+    uint64 ack_sequence = 1;
+
+    // Flow control signal
+    FlowControl flow_control = 2;
+
+    // Error message (if any)
+    string error = 3;
+}
+
+// FlowControl signals
+enum FlowControl {
+    // Continue sending at current rate
+    FLOW_CONTINUE = 0;
+
+    // Slow down transmission
+    FLOW_SLOW = 1;
+
+    // Pause transmission temporarily
+    FLOW_PAUSE = 2;
+
+    // Resume after pause
+    FLOW_RESUME = 3;
+}

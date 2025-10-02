@@ -63,6 +63,14 @@ func (t *Tabs) Previous() {
 	t.active = (t.active - 1 + len(t.tabs)) % len(t.tabs)
 }
 
+// UpdateTab updates the label and icon of a tab at the given index
+func (t *Tabs) UpdateTab(index int, label string, icon string) {
+	if index >= 0 && index < len(t.tabs) {
+		t.tabs[index].Label = label
+		t.tabs[index].Icon = icon
+	}
+}
+
 // View renders the tabs
 func (t *Tabs) View() string {
 	// Active tab: no bottom border, sides extend down with one extra line

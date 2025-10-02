@@ -1,0 +1,329 @@
+syntax = "proto3";
+
+package lippycat.management;
+
+option go_package = "github.com/endorses/lippycat/api/proto/management";
+
+// ManagementService handles monitoring, configuration, and filter distribution
+service ManagementService {
+    // RegisterHunter is called when a hunter connects to a processor
+    rpc RegisterHunter(HunterRegistration) returns (RegistrationResponse);
+
+    // Heartbeat maintains connection and reports hunter status
+    rpc Heartbeat(stream HunterHeartbeat) returns (stream ProcessorHeartbeat);
+
+    // GetFilters retrieves current filter configuration for a hunter
+    rpc GetFilters(FilterRequest) returns (FilterResponse);
+
+    // SubscribeFilters is a stream for real-time filter updates
+    rpc SubscribeFilters(FilterRequest) returns (stream FilterUpdate);
+
+    // GetHunterStatus retrieves status of connected hunters (for TUI)
+    rpc GetHunterStatus(StatusRequest) returns (StatusResponse);
+
+    // UpdateFilter adds or modifies a filter (processor only)
+    rpc UpdateFilter(Filter) returns (FilterUpdateResult);
+
+    // DeleteFilter removes a filter (processor only)
+    rpc DeleteFilter(FilterDeleteRequest) returns (FilterUpdateResult);
+}
+
+// HunterRegistration sent when hunter first connects
+message HunterRegistration {
+    // Unique hunter identifier
+    string hunter_id = 1;
+
+    // Hunter hostname
+    string hostname = 2;
+
+    // Network interfaces being captured
+    repeated string interfaces = 3;
+
+    // Hunter version
+    string version = 4;
+
+    // Capture capabilities
+    HunterCapabilities capabilities = 5;
+}
+
+// HunterCapabilities describes what a hunter can do
+message HunterCapabilities {
+    // Supported filter types
+    repeated string filter_types = 1;
+
+    // Maximum buffer size (bytes)
+    uint64 max_buffer_size = 2;
+
+    // Supports GPU acceleration
+    bool gpu_acceleration = 3;
+
+    // Supports AF_XDP
+    bool af_xdp = 4;
+}
+
+// RegistrationResponse from processor after registration
+message RegistrationResponse {
+    // Registration accepted
+    bool accepted = 1;
+
+    // Error message if rejected
+    string error = 2;
+
+    // Assigned hunter ID (may differ from requested)
+    string assigned_id = 3;
+
+    // Initial filter configuration
+    repeated Filter filters = 4;
+
+    // Processor configuration
+    ProcessorConfig config = 5;
+}
+
+// ProcessorConfig sent to hunter
+message ProcessorConfig {
+    // Batch size for packet transmission
+    uint32 batch_size = 1;
+
+    // Batch timeout (milliseconds)
+    uint32 batch_timeout_ms = 2;
+
+    // Reconnection interval (seconds)
+    uint32 reconnect_interval_sec = 3;
+
+    // Maximum reconnection attempts (0 = infinite)
+    uint32 max_reconnect_attempts = 4;
+}
+
+// HunterHeartbeat sent periodically by hunter
+message HunterHeartbeat {
+    // Hunter identifier
+    string hunter_id = 1;
+
+    // Timestamp (Unix nanoseconds)
+    int64 timestamp_ns = 2;
+
+    // Current hunter status
+    HunterStatus status = 3;
+
+    // Statistics since last heartbeat
+    HunterStats stats = 4;
+}
+
+// HunterStatus enum
+enum HunterStatus {
+    // Hunter is capturing and forwarding normally
+    STATUS_HEALTHY = 0;
+
+    // Hunter is capturing but buffer is filling up
+    STATUS_WARNING = 1;
+
+    // Hunter has errors or stopped capturing
+    STATUS_ERROR = 2;
+
+    // Hunter is shutting down
+    STATUS_STOPPING = 3;
+}
+
+// HunterStats contains capture statistics
+message HunterStats {
+    // Packets captured
+    uint64 packets_captured = 1;
+
+    // Packets matched by filters
+    uint64 packets_matched = 2;
+
+    // Packets forwarded to processor
+    uint64 packets_forwarded = 3;
+
+    // Packets dropped
+    uint64 packets_dropped = 4;
+
+    // Current buffer usage (bytes)
+    uint64 buffer_bytes = 5;
+
+    // Active filters count
+    uint32 active_filters = 6;
+}
+
+// ProcessorHeartbeat response from processor
+message ProcessorHeartbeat {
+    // Timestamp (Unix nanoseconds)
+    int64 timestamp_ns = 1;
+
+    // Processor status
+    ProcessorStatus status = 2;
+
+    // Total hunters connected
+    uint32 hunters_connected = 3;
+}
+
+// ProcessorStatus enum
+enum ProcessorStatus {
+    // Processor operating normally
+    PROCESSOR_HEALTHY = 0;
+
+    // Processor under load
+    PROCESSOR_WARNING = 1;
+
+    // Processor has errors
+    PROCESSOR_ERROR = 2;
+}
+
+// FilterRequest to retrieve filters
+message FilterRequest {
+    // Hunter identifier
+    string hunter_id = 1;
+}
+
+// FilterResponse contains filters for a hunter
+message FilterResponse {
+    // List of filters
+    repeated Filter filters = 1;
+}
+
+// Filter definition
+message Filter {
+    // Unique filter identifier
+    string id = 1;
+
+    // Filter type
+    FilterType type = 2;
+
+    // Filter pattern/value
+    string pattern = 3;
+
+    // Target hunter IDs (empty = all hunters)
+    repeated string target_hunters = 4;
+
+    // Filter enabled
+    bool enabled = 5;
+
+    // Filter description
+    string description = 6;
+}
+
+// FilterType enum
+enum FilterType {
+    // SIP user (From/To headers)
+    FILTER_SIP_USER = 0;
+
+    // Phone number (with wildcard support)
+    FILTER_PHONE_NUMBER = 1;
+
+    // IP address or CIDR range
+    FILTER_IP_ADDRESS = 2;
+
+    // Call-ID
+    FILTER_CALL_ID = 3;
+
+    // Codec
+    FILTER_CODEC = 4;
+
+    // Custom BPF filter
+    FILTER_BPF = 5;
+}
+
+// FilterUpdate pushed to hunters in real-time
+message FilterUpdate {
+    // Update type
+    FilterUpdateType update_type = 1;
+
+    // Filter being added/modified/deleted
+    Filter filter = 2;
+}
+
+// FilterUpdateType enum
+enum FilterUpdateType {
+    // Filter added
+    UPDATE_ADD = 0;
+
+    // Filter modified
+    UPDATE_MODIFY = 1;
+
+    // Filter deleted
+    UPDATE_DELETE = 2;
+}
+
+// FilterUpdateResult response after filter update
+message FilterUpdateResult {
+    // Success
+    bool success = 1;
+
+    // Error message if failed
+    string error = 2;
+
+    // Number of hunters that received the update
+    uint32 hunters_updated = 3;
+}
+
+// FilterDeleteRequest to delete a filter
+message FilterDeleteRequest {
+    // Filter ID to delete
+    string filter_id = 1;
+}
+
+// StatusRequest to get hunter status (for TUI)
+message StatusRequest {
+    // Optional: filter by hunter ID
+    string hunter_id = 1;
+}
+
+// StatusResponse with hunter statuses
+message StatusResponse {
+    // Connected hunters
+    repeated ConnectedHunter hunters = 1;
+
+    // Processor statistics
+    ProcessorStats processor_stats = 2;
+}
+
+// ConnectedHunter status information
+message ConnectedHunter {
+    // Hunter identifier
+    string hunter_id = 1;
+
+    // Hostname
+    string hostname = 2;
+
+    // Remote address
+    string remote_addr = 3;
+
+    // Connection status
+    HunterStatus status = 4;
+
+    // Connected duration (seconds)
+    uint64 connected_duration_sec = 5;
+
+    // Last heartbeat timestamp
+    int64 last_heartbeat_ns = 6;
+
+    // Current statistics
+    HunterStats stats = 7;
+
+    // Active filters
+    repeated Filter filters = 8;
+}
+
+// ProcessorStats for processor node
+message ProcessorStats {
+    // Total hunters connected
+    uint32 total_hunters = 1;
+
+    // Healthy hunters
+    uint32 healthy_hunters = 2;
+
+    // Warning hunters
+    uint32 warning_hunters = 3;
+
+    // Error hunters
+    uint32 error_hunters = 4;
+
+    // Total packets received from all hunters
+    uint64 total_packets_received = 5;
+
+    // Total packets forwarded upstream
+    uint64 total_packets_forwarded = 6;
+
+    // Total filters active
+    uint32 total_filters = 7;
+}

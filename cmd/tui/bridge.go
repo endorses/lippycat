@@ -43,6 +43,7 @@ var (
 		"SSL":       "SSL",
 		"ICMP":      "ICMP",
 		"ICMPv6":    "ICMPv6",
+		"IGMP":      "IGMP",
 		"ARP":       "ARP",
 		"LLC":       "LLC",
 		"LLDP":      "LLDP",
@@ -284,6 +285,8 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 		display.Protocol = internProtocol("ICMP")
 	} else if pkt.Layer(layers.LayerTypeICMPv6) != nil {
 		display.Protocol = internProtocol("ICMPv6")
+	} else if pkt.Layer(layers.LayerTypeIGMP) != nil {
+		display.Protocol = internProtocol("IGMP")
 	}
 
 	return display
@@ -507,6 +510,32 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				}
 			} else {
 				display.Info = "ICMP"
+			}
+
+		case "IGMP":
+			// Extract IGMP message type from raw packet
+			if igmpLayer := pkt.Layer(layers.LayerTypeIGMP); igmpLayer != nil {
+				igmp := igmpLayer.(*layers.IGMPv1or2)
+				switch igmp.Type {
+				case layers.IGMPMembershipQuery:
+					display.Info = "Membership Query"
+				case layers.IGMPMembershipReportV1:
+					display.Info = "Membership Report v1"
+				case layers.IGMPMembershipReportV2:
+					display.Info = "Membership Report v2"
+				case layers.IGMPLeaveGroup:
+					display.Info = "Leave Group"
+				case layers.IGMPMembershipReportV3:
+					display.Info = "Membership Report v3"
+				default:
+					display.Info = fmt.Sprintf("Type %d", igmp.Type)
+				}
+				// Add group address if present
+				if igmp.GroupAddress != nil && !igmp.GroupAddress.IsUnspecified() {
+					display.Info += fmt.Sprintf(" (%s)", igmp.GroupAddress.String())
+				}
+			} else {
+				display.Info = "IGMP"
 			}
 
 		case "ARP":

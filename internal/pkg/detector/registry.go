@@ -22,9 +22,12 @@ func InitDefault() *Detector {
 		DefaultDetector.RegisterSignature(voip.NewSIPSignature())
 		DefaultDetector.RegisterSignature(voip.NewRTPSignature())
 
-		// Register application signatures
-		DefaultDetector.RegisterSignature(application.NewDNSSignature())
-		DefaultDetector.RegisterSignature(application.NewGRPCSignature())
+		// Register application signatures (in priority order)
+		DefaultDetector.RegisterSignature(application.NewGRPCSignature())      // Priority 130
+		DefaultDetector.RegisterSignature(application.NewWebSocketSignature()) // Priority 90
+		DefaultDetector.RegisterSignature(application.NewTLSSignature())       // Priority 85
+		DefaultDetector.RegisterSignature(application.NewHTTPSignature())      // Priority 80
+		DefaultDetector.RegisterSignature(application.NewDNSSignature())       // Priority 120
 	})
 
 	return DefaultDetector

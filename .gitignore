@@ -1,6 +1,7 @@
 lippycat
 captures
 *.md
+!docs/*.md
 !README.md
 !CLAUDE.md
 nodes.yaml

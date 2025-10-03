@@ -1072,7 +1072,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
 
 	// Handle mouse wheel scrolling
-	if msg.Type == tea.MouseWheelUp {
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
 		if m.tabs.GetActive() == 0 {
 			// On capture tab - scroll packet list if focused on left
 			if m.focusedPane == "left" {
@@ -1087,7 +1087,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.Type == tea.MouseWheelDown {
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
 		if m.tabs.GetActive() == 0 {
 			// On capture tab - scroll packet list if focused on left
 			if m.focusedPane == "left" {
@@ -1102,9 +1102,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle clicks - for now just check Type field since it works for other tabs
-	// TODO: The newer Action/Button fields might not be populated by all terminals
-	if msg.Type != tea.MouseLeft {
+	// Handle clicks - use newer Button and Action fields
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
 

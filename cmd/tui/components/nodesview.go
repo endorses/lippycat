@@ -739,8 +739,8 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 	// 	f.Close()
 	// }
 
-	// Only handle left button events (using deprecated Type field for compatibility)
-	if msg.Type != tea.MouseLeft {
+	// Only handle left button press events
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
 		// DEBUG: Uncomment to see why clicks are being filtered
 		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		// 	fmt.Fprintf(f, "      -> Not MouseLeft, returning\n")

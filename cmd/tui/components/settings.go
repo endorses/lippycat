@@ -117,15 +117,15 @@ type SettingsView struct {
 	savedInterfaceString string          // Save interface string when entering editing mode
 	savedSelectedIfaces  map[string]bool // Save interface selection when entering editing mode
 	captureMode          CaptureMode
-	errorMessage         string          // Error message to display
+	errorMessage         string // Error message to display
 	viewport             viewport.Model
 	viewportReady        bool
-	fileList             list.Model      // File list for PCAP file selection
+	fileList             list.Model // File list for PCAP file selection
 	fileListActive       bool
-	currentDirectory     string          // Current directory being browsed
+	currentDirectory     string // Current directory being browsed
 	selectedFile         string
-	lastClickField       int             // Track which field was last clicked for double-click detection
-	lastClickTime        time.Time       // Track when field was last clicked
+	lastClickField       int       // Track which field was last clicked for double-click detection
+	lastClickTime        time.Time // Track when field was last clicked
 }
 
 const (
@@ -696,7 +696,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		// Handle mouse clicks for focusing different settings
-		if msg.Type == tea.MouseLeft {
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
 			// Calculate which setting was clicked based on Y position
 			// Need to account for: header (2) + tabs (4) = 6 lines before content
 			relativeY := msg.Y - 6
@@ -752,13 +752,13 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					if relativeY >= 2 && relativeY <= 4 {
 						// Click on capture mode tabs - check X position to determine which tab
 						// "Live" is approximately at X 20-35, "Offline" at X 36-55, "Remote" at X 56-75
-						if msg.X >= 20 && msg.X <= 35 {
+						if msg.X >= 21 && msg.X <= 31 {
 							// Already in Live mode, do nothing
-						} else if msg.X >= 36 && msg.X <= 55 {
+						} else if msg.X >= 32 && msg.X <= 42 {
 							// Switch to Offline mode
 							s.captureMode = CaptureModeOffline
 							return s.restartCapture()
-						} else if msg.X >= 56 && msg.X <= 75 {
+						} else if msg.X >= 43 && msg.X <= 50 {
 							// Switch to Remote mode
 							s.captureMode = CaptureModeRemote
 							return s.restartCapture()
@@ -784,13 +784,13 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					// Offline mode: Mode(0), PCAP File(1), Buffer(2), Filter(3)
 					if relativeY >= 2 && relativeY <= 4 {
 						// Click on capture mode tabs
-						if msg.X >= 20 && msg.X <= 35 {
+						if msg.X >= 20 && msg.X <= 31 {
 							// Switch to Live mode
 							s.captureMode = CaptureModeLive
 							return s.restartCapture()
-						} else if msg.X >= 36 && msg.X <= 55 {
+						} else if msg.X >= 32 && msg.X <= 42 {
 							// Already in Offline mode, do nothing
-						} else if msg.X >= 56 && msg.X <= 75 {
+						} else if msg.X >= 43 && msg.X <= 50 {
 							// Switch to Remote mode
 							s.captureMode = CaptureModeRemote
 							return s.restartCapture()
@@ -807,15 +807,15 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					// Remote mode: Mode(0), Nodes File(1), Buffer(2), Filter(3)
 					if relativeY >= 2 && relativeY <= 4 {
 						// Click on capture mode tabs
-						if msg.X >= 20 && msg.X <= 35 {
+						if msg.X >= 20 && msg.X <= 31 {
 							// Switch to Live mode
 							s.captureMode = CaptureModeLive
 							return s.restartCapture()
-						} else if msg.X >= 36 && msg.X <= 55 {
+						} else if msg.X >= 32 && msg.X <= 42 {
 							// Switch to Offline mode
 							s.captureMode = CaptureModeOffline
 							return s.restartCapture()
-						} else if msg.X >= 56 && msg.X <= 75 {
+						} else if msg.X >= 43 && msg.X <= 50 {
 							// Already in Remote mode, do nothing
 						}
 						s.focusIndex = 0 // Mode
@@ -832,7 +832,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 
 		// Handle double-click to enter edit mode on input fields
 		// Check if this is a double-click (second click within 500ms on same field)
-		if msg.Type == tea.MouseLeft {
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
 			relativeY := msg.Y - 6
 			now := time.Now()
 			const doubleClickThreshold = 500 * time.Millisecond
@@ -865,7 +865,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 
 			// Check if this is a double-click on the same field
 			if clickedField >= 0 && clickedField == s.lastClickField &&
-			   now.Sub(s.lastClickTime) < doubleClickThreshold && !s.editing {
+				now.Sub(s.lastClickTime) < doubleClickThreshold && !s.editing {
 				// Double-click detected - enter edit mode
 				if s.captureMode == CaptureModeLive {
 					if clickedField == 3 {

@@ -471,6 +471,52 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		case "gRPC", "HTTP2":
 			display.Info = "gRPC/HTTP2"
 
+		case "SSH":
+			if versionStr, ok := detectionResult.Metadata["version_string"].(string); ok {
+				display.Info = versionStr
+			} else {
+				display.Info = "SSH"
+			}
+
+		case "DHCP", "BOOTP":
+			if msgType, ok := detectionResult.Metadata["message_type"].(string); ok {
+				display.Info = msgType
+			} else {
+				display.Info = detectionResult.Protocol
+			}
+
+		case "NTP":
+			if mode, ok := detectionResult.Metadata["mode"].(string); ok {
+				display.Info = "NTP " + mode
+			} else {
+				display.Info = "NTP"
+			}
+
+		case "ICMP":
+			if typeName, ok := detectionResult.Metadata["type_name"].(string); ok {
+				display.Info = typeName
+				if codeName, ok := detectionResult.Metadata["code_name"].(string); ok && codeName != "" {
+					display.Info += " - " + codeName
+				}
+			} else {
+				display.Info = "ICMP"
+			}
+
+		case "ARP":
+			if op, ok := detectionResult.Metadata["operation"].(string); ok {
+				if senderIP, ok := detectionResult.Metadata["sender_ip"].(string); ok {
+					if targetIP, ok := detectionResult.Metadata["target_ip"].(string); ok {
+						display.Info = fmt.Sprintf("%s: %s → %s", op, senderIP, targetIP)
+					} else {
+						display.Info = op
+					}
+				} else {
+					display.Info = op
+				}
+			} else {
+				display.Info = "ARP"
+			}
+
 		default:
 			display.Info = detectionResult.Protocol
 		}

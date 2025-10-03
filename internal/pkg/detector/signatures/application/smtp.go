@@ -32,6 +32,18 @@ func (s *SMTPSignature) Layer() signatures.LayerType {
 }
 
 func (s *SMTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
+	// SMTP uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known SMTP ports (25, 465, 587)
+	onSMTPPort := ctx.SrcPort == 25 || ctx.SrcPort == 465 || ctx.SrcPort == 587 ||
+		ctx.DstPort == 25 || ctx.DstPort == 465 || ctx.DstPort == 587
+	if !onSMTPPort {
+		return nil
+	}
+
 	if len(ctx.Payload) < 4 {
 		return nil
 	}

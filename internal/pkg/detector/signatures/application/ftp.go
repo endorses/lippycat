@@ -32,6 +32,18 @@ func (f *FTPSignature) Layer() signatures.LayerType {
 }
 
 func (f *FTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
+	// FTP uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known FTP ports (21 control, 20 data, 990 FTPS)
+	onFTPPort := ctx.SrcPort == 20 || ctx.SrcPort == 21 || ctx.SrcPort == 990 ||
+		ctx.DstPort == 20 || ctx.DstPort == 21 || ctx.DstPort == 990
+	if !onFTPPort {
+		return nil
+	}
+
 	if len(ctx.Payload) < 4 {
 		return nil
 	}

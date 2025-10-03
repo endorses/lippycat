@@ -35,6 +35,16 @@ func (p *POP3Signature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	// Server responses: "+OK" or "-ERR" followed by message
 	// Client commands: USER, PASS, STAT, LIST, RETR, DELE, QUIT, etc.
 
+	// POP3 uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known POP3 ports (110, 995)
+	if ctx.SrcPort != 110 && ctx.SrcPort != 995 && ctx.DstPort != 110 && ctx.DstPort != 995 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 4 {
 		return nil
 	}

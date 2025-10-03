@@ -35,6 +35,17 @@ func (i *IMAPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	// Server responses: "* " or "tag OK/NO/BAD"
 	// Client commands: "tag COMMAND args"
 
+	// IMAP uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known IMAP ports (143, 993)
+	// Text patterns like " OK " are too common in HTTP and other protocols
+	if ctx.SrcPort != 143 && ctx.SrcPort != 993 && ctx.DstPort != 143 && ctx.DstPort != 993 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 4 {
 		return nil
 	}

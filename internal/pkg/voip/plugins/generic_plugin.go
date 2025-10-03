@@ -196,9 +196,30 @@ func (g *GenericPlugin) detectProtocolHint(payload []byte) string {
 		return "stun"
 	}
 
-	// Check for DNS
-	if len(payload) >= 12 && payload[2]&0x80 == 0 { // Query flag
-		return "dns"
+	// Check for gRPC/HTTP2 (connection preface or frame)
+	if len(payload) >= 24 && string(payload[:24]) == "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" {
+		return "grpc"
+	}
+	// Check for HTTP/2 frame headers (3-byte length + 1-byte type + 1-byte flags + 4-byte stream ID)
+	if len(payload) >= 9 && payload[3] < 0x0B { // Valid HTTP/2 frame types are 0x00-0x0A
+		return "grpc"
+	}
+
+	// Check for DNS - must have valid DNS header structure
+	if len(payload) >= 12 {
+		// DNS header: ID(2) + Flags(2) + Questions(2) + Answers(2) + Authority(2) + Additional(2)
+		// Check for reasonable DNS flags and question count
+		flags := uint16(payload[2])<<8 | uint16(payload[3])
+		questionCount := uint16(payload[4])<<8 | uint16(payload[5])
+
+		// DNS must have at least one question, and flags should look reasonable
+		// QR bit (0x8000), Opcode (0x7800), and RCODE (0x000F) within valid ranges
+		opcode := (flags >> 11) & 0x0F
+		rcode := flags & 0x0F
+
+		if questionCount > 0 && questionCount < 100 && opcode <= 5 && rcode <= 10 {
+			return "dns"
+		}
 	}
 
 	// Check for DHCP

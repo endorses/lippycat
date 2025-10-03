@@ -449,6 +449,9 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				display.Info = extractSIPInfo(payloadStr)
 				// Parse full SIP metadata
 				display.VoIPData = parseSIPPacket(string(payload))
+			} else if isGRPC(payload) {
+				display.Protocol = "gRPC"
+				display.Info = "gRPC/HTTP2"
 			} else if isDNS(payload) {
 				display.Protocol = "DNS"
 				display.Info = "DNS Query/Response"
@@ -542,10 +545,44 @@ func extractSIPInfo(payload string) string {
 	return "SIP message"
 }
 
+// isGRPC checks if the payload might be gRPC/HTTP2
+func isGRPC(payload []byte) bool {
+	// Check for HTTP/2 connection preface
+	if len(payload) >= 24 && string(payload[:24]) == "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" {
+		return true
+	}
+
+	// Check for HTTP/2 frame header (9 bytes minimum)
+	// Frame format: 3-byte length + 1-byte type + 1-byte flags + 4-byte stream ID
+	if len(payload) >= 9 {
+		frameType := payload[3]
+		// Valid HTTP/2 frame types are 0x00-0x0A
+		if frameType <= 0x0A {
+			return true
+		}
+	}
+
+	return false
+}
+
 // isDNS checks if the payload might be DNS
 func isDNS(payload []byte) bool {
-	// Basic DNS check: minimum length and valid flags
-	return len(payload) > 12
+	if len(payload) < 12 {
+		return false
+	}
+
+	// DNS header: ID(2) + Flags(2) + Questions(2) + Answers(2) + Authority(2) + Additional(2)
+	// Check for reasonable DNS flags and question count
+	flags := uint16(payload[2])<<8 | uint16(payload[3])
+	questionCount := uint16(payload[4])<<8 | uint16(payload[5])
+
+	// DNS must have at least one question, and flags should look reasonable
+	// Opcode (bits 11-14) should be <= 5, RCODE (bits 0-3) should be <= 10
+	opcode := (flags >> 11) & 0x0F
+	rcode := flags & 0x0F
+
+	// Must have valid question count and reasonable opcode/rcode
+	return questionCount > 0 && questionCount < 100 && opcode <= 5 && rcode <= 10
 }
 
 // splitLines splits a string by newlines

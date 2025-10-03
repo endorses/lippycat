@@ -94,9 +94,39 @@ func (g *GRPCSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		return nil
 	}
 
-	// Validate frame length (should be reasonable, max 16MB)
+	// Validate frame length (should be reasonable, max 16MB default)
 	if frameLength > 16*1024*1024 {
 		return nil
+	}
+
+	// Validate frame length is reasonable for detection
+	// TLS handshakes often get misinterpreted as HTTP/2 with huge frame lengths
+	// Typical HTTP/2 initial frames:
+	// - SETTINGS: usually 0-36 bytes
+	// - PING: exactly 8 bytes
+	// - HEADERS: typically < 8KB
+	// - DATA: can be large, but first packet is usually smaller
+
+	// If frame length is > 64KB, be very suspicious
+	if frameLength > 64*1024 {
+		// Only allow large DATA frames, and only if packet actually contains data
+		if frameType != 0x00 || len(payload) < 9+min(int(frameLength), 1024) {
+			return nil
+		}
+	}
+
+	// For non-DATA frames, enforce stricter limits
+	if frameType != 0x00 && frameLength > 16*1024 {
+		return nil
+	}
+
+	// Sanity check: if claimed frame length is small, packet should contain it
+	// This catches TLS ClientHello being misread as a massive DATA frame
+	if frameLength < 100 {
+		// Small frame should be fully present in packet
+		if len(payload) < int(9+frameLength) {
+			return nil
+		}
 	}
 
 	// Additional validation based on frame type

@@ -65,6 +65,8 @@ type Model struct {
 	nodesView       *components.NodesView        // Nodes view component (pointer so View() changes persist)
 	statisticsView  components.StatisticsView    // Statistics view component
 	settingsView    components.SettingsView      // Settings view component
+	callsView       components.CallsView         // VoIP calls view component
+	protocolSelector components.ProtocolSelector // Protocol selector component
 	statistics      *components.Statistics       // Statistics data
 	capturing       bool                         // Whether capture is active
 	paused          bool                       // Whether display is paused
@@ -84,6 +86,8 @@ type Model struct {
 	bpfFilter       string                     // Current BPF filter
 	captureMode     components.CaptureMode     // Current capture mode (live or offline)
 	nodesFilePath   string                     // Path to nodes YAML file for remote mode
+	selectedProtocol components.Protocol       // Currently selected protocol
+	viewMode        string                     // "packets" or "calls" (for VoIP)
 }
 
 // NewModel creates a new TUI model
@@ -124,6 +128,12 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 
 	statisticsView := components.NewStatisticsView()
 	statisticsView.SetTheme(theme)
+
+	callsView := components.NewCallsView()
+	callsView.SetTheme(theme)
+
+	protocolSelector := components.NewProtocolSelector()
+	protocolSelector.SetTheme(theme)
 
 	// Initialize statistics
 	statistics := &components.Statistics{
@@ -201,6 +211,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		nodesView:       nodesViewPtr,
 		statisticsView:  statisticsView,
 		settingsView:    settingsView,
+		callsView:       callsView,
+		protocolSelector: protocolSelector,
 		statistics:      statistics,
 		capturing:       true,
 		paused:          false,
@@ -219,6 +231,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		bpfFilter:       bpfFilter,
 		captureMode:     initialMode,
 		nodesFilePath:   nodesFilePath,
+		selectedProtocol: components.Protocol{Name: "All", BPFFilter: ""}, // Default to "All"
+		viewMode:        "packets", // Default to packet view
 	}
 }
 
@@ -263,6 +277,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	case tea.KeyMsg:
+		// Handle protocol selector mode
+		if m.protocolSelector.IsActive() {
+			cmd := m.protocolSelector.Update(msg)
+			return m, cmd
+		}
+
 		// Handle filter input mode
 		if m.filterMode {
 			return m.handleFilterInput(msg)
@@ -399,6 +419,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showDetails = !m.showDetails
 			return m, nil
 
+		case "p": // Open protocol selector
+			m.protocolSelector.Activate()
+			m.protocolSelector.SetSize(m.width, m.height)
+			return m, nil
+
+		case "v": // Toggle view mode (packets vs calls for VoIP)
+			if m.selectedProtocol.Name == "VoIP (SIP/RTP)" {
+				if m.viewMode == "packets" {
+					m.viewMode = "calls"
+				} else {
+					m.viewMode = "packets"
+				}
+			}
+			return m, nil
+
 		case "h", "left": // Focus left pane (packet list)
 			m.focusedPane = "left"
 			return m, nil
@@ -432,6 +467,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tabs.SetTheme(m.theme)
 			m.statisticsView.SetTheme(m.theme)
 			m.settingsView.SetTheme(m.theme)
+			m.callsView.SetTheme(m.theme)
+			m.protocolSelector.SetTheme(m.theme)
 			m.filterInput.SetTheme(m.theme)
 			// Save theme preference
 			saveThemePreference(m.theme)
@@ -1050,6 +1087,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}()
 		}
 		return m, nil
+
+	case components.ProtocolSelectedMsg:
+		// User selected a protocol from the protocol selector
+		m.selectedProtocol = msg.Protocol
+
+		// Apply BPF filter if protocol has one
+		if msg.Protocol.BPFFilter != "" {
+			m.parseAndApplyFilter(msg.Protocol.BPFFilter)
+		} else {
+			// "All" protocol - clear filters
+			m.filterChain.Clear()
+			m.filteredPackets = make([]components.PacketDisplay, 0)
+			m.matchedPackets = len(m.packets)
+			m.packetList.SetPackets(m.packets)
+		}
+
+		// Switch to calls view if VoIP protocol selected
+		if msg.Protocol.Name == "VoIP (SIP/RTP)" {
+			m.viewMode = "calls"
+		} else {
+			m.viewMode = "packets"
+		}
+
+		return m, nil
 	}
 
 	return m, nil
@@ -1255,25 +1316,33 @@ func (m Model) View() string {
 	// Render main content based on active tab
 	switch m.tabs.GetActive() {
 	case 0: // Live/Remote/Offline Capture
-		minWidthForDetails := 120
-		if m.showDetails && m.width >= minWidthForDetails {
-			// Split pane layout
-			leftFocused := m.focusedPane == "left"
-			rightFocused := m.focusedPane == "right"
-
-			listWidth := m.width * 65 / 100
-			detailsWidth := m.width - listWidth
-
-			// Ensure details panel has the right size set
-			m.detailsPanel.SetSize(detailsWidth, contentHeight)
-
-			packetListView := m.packetList.View(leftFocused)
-			detailsPanelView := m.detailsPanel.View(rightFocused)
-
-			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, packetListView, detailsPanelView)
+		// Check if we should display calls view or packets view
+		if m.viewMode == "calls" {
+			// Render calls view
+			m.callsView.SetSize(m.width, contentHeight)
+			mainContent = m.callsView.View()
 		} else {
-			// Full width packet list
-			mainContent = m.packetList.View(m.focusedPane == "left")
+			// Render packets view
+			minWidthForDetails := 120
+			if m.showDetails && m.width >= minWidthForDetails {
+				// Split pane layout
+				leftFocused := m.focusedPane == "left"
+				rightFocused := m.focusedPane == "right"
+
+				listWidth := m.width * 65 / 100
+				detailsWidth := m.width - listWidth
+
+				// Ensure details panel has the right size set
+				m.detailsPanel.SetSize(detailsWidth, contentHeight)
+
+				packetListView := m.packetList.View(leftFocused)
+				detailsPanelView := m.detailsPanel.View(rightFocused)
+
+				mainContent = lipgloss.JoinHorizontal(lipgloss.Top, packetListView, detailsPanelView)
+			} else {
+				// Full width packet list
+				mainContent = m.packetList.View(m.focusedPane == "left")
+			}
 		}
 	case 1: // Nodes
 		// Render nodes view
@@ -1307,6 +1376,19 @@ func (m Model) View() string {
 	}
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left, mainView, bottomArea)
+
+	// Overlay protocol selector if active - render it centered over a semi-transparent background
+	if m.protocolSelector.IsActive() {
+		selectorView := m.protocolSelector.View()
+
+		// Simply place the selector in the center with background filling
+		return lipgloss.Place(
+			m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			selectorView,
+			lipgloss.WithWhitespaceBackground(m.theme.Background),
+		)
+	}
 
 	return fullView
 }

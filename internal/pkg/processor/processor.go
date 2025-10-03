@@ -21,11 +21,12 @@ import (
 
 // Config contains processor configuration
 type Config struct {
-	ListenAddr   string
-	UpstreamAddr string
-	MaxHunters   int
-	WriteFile    string
-	DisplayStats bool
+	ListenAddr      string
+	UpstreamAddr    string
+	MaxHunters      int
+	WriteFile       string
+	DisplayStats    bool
+	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration
 }
 
 // Processor represents a processor node
@@ -41,11 +42,12 @@ type Processor struct {
 	hunters   map[string]*ConnectedHunter
 
 	// PCAP writer (async)
-	pcapFile       *os.File
-	pcapWriter     *pcapgo.Writer
-	pcapWriteQueue chan []*data.CapturedPacket
-	pcapWriterWg   sync.WaitGroup
-	pcapWriterMu   sync.Mutex // Protects pcapWriter (not thread-safe)
+	pcapFile          *os.File
+	pcapWriter        *pcapgo.Writer
+	pcapWriteQueue    chan []*data.CapturedPacket
+	pcapWriterWg      sync.WaitGroup
+	pcapWriterMu      sync.Mutex // Protects pcapWriter (not thread-safe)
+	perCallPcapWriter *PcapWriterManager // Per-call PCAP writer
 
 	// Statistics - use atomic.Value for lock-free reads
 	statsCache           atomic.Value  // stores *cachedStats

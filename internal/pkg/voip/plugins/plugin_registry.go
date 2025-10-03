@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 )
@@ -263,33 +265,18 @@ func (r *PluginRegistry) ProcessPacket(ctx context.Context, packet gopacket.Pack
 	return results, firstError
 }
 
-// detectProtocols attempts to detect protocols in the packet
+// detectProtocols attempts to detect protocols in the packet using centralized detector
 func (r *PluginRegistry) detectProtocols(packet gopacket.Packet) []string {
 	var protocols []string
 
-	// Check common VoIP protocols
-	if packet.ApplicationLayer() != nil {
-		payload := packet.ApplicationLayer().Payload()
-		if len(payload) > 0 {
-			// Simple heuristics for protocol detection
-			maxLen := len(payload)
-			if maxLen > 100 {
-				maxLen = 100
-			}
-			payloadStr := string(payload[:maxLen])
-
-			if contains(payloadStr, "SIP/2.0") || contains(payloadStr, "INVITE") || contains(payloadStr, "REGISTER") {
-				protocols = append(protocols, "sip")
-			}
-
-			if contains(payloadStr, "RTCP") || len(payload) >= 12 && payload[0] >= 128 && payload[0] <= 191 {
-				protocols = append(protocols, "rtp")
-			}
-
-			if contains(payloadStr, "H.323") || contains(payloadStr, "Q.931") {
-				protocols = append(protocols, "h323")
-			}
-		}
+	// Use centralized detector without cache to avoid test cross-contamination
+	// In production, the cache improves performance, but in tests it can cause
+	// false results when packets with the same flow ID are reused across tests
+	detectionResult := detector.GetDefault().DetectWithoutCache(packet)
+	if detectionResult != nil && detectionResult.Protocol != "unknown" {
+		// Normalize protocol name to lowercase for plugin mapping
+		protocolName := strings.ToLower(detectionResult.Protocol)
+		protocols = append(protocols, protocolName)
 	}
 
 	// If no specific protocol detected, use generic

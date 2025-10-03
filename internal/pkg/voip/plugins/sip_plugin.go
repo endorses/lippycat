@@ -95,13 +95,20 @@ func (s *SIPPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packet) (
 		s.metrics.PacketsProcessed.Add(1)
 	}()
 
-	// Check if this is actually a SIP packet
-	appLayer := packet.ApplicationLayer()
-	if appLayer == nil {
+	// Extract payload from transport layer to get the full unparsed data
+	// Note: We use transport layer instead of application layer because gopacket's
+	// protocol parsers may consume/modify the payload (e.g., SIP parser separates
+	// headers from body), making it unsuitable for protocol detection
+	var payloadBytes []byte
+	if transLayer := packet.TransportLayer(); transLayer != nil {
+		payloadBytes = transLayer.LayerPayload()
+	}
+
+	if len(payloadBytes) == 0 {
 		return nil, nil
 	}
 
-	payload := string(appLayer.Payload())
+	payload := string(payloadBytes)
 	if !s.isSIPPacket(payload) {
 		return nil, nil
 	}

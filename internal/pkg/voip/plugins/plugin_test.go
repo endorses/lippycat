@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -170,6 +171,9 @@ func TestGenericPlugin(t *testing.T) {
 }
 
 func TestPluginRegistry(t *testing.T) {
+	// Initialize the default detector (required for protocol detection)
+	detector.InitDefault()
+
 	registry := NewPluginRegistry()
 	require.NotNil(t, registry)
 
@@ -224,9 +228,8 @@ func TestPluginRegistry(t *testing.T) {
 	assert.Equal(t, int64(1), stats.TotalPlugins.Load())
 
 	// Test packet processing
-	sipPayload := `INVITE sip:test@example.com SIP/2.0
-Call-ID: test-123`
-	packet := createMockPacket([]byte(sipPayload))
+	sipPayload := []byte("INVITE sip:test@example.com SIP/2.0\r\nCall-ID: test-123\r\n\r\n")
+	packet := createMockPacket(sipPayload)
 
 	ctx := context.Background()
 	results, err := registry.ProcessPacket(ctx, packet)
@@ -315,23 +318,32 @@ func TestPluginFactories(t *testing.T) {
 }
 
 func TestDetectProtocols(t *testing.T) {
+	// Initialize the default detector (required for centralized detection)
+	detector.InitDefault()
+
 	registry := NewPluginRegistry()
 
 	// Test SIP detection
-	sipPayload := []byte("INVITE sip:test@example.com SIP/2.0")
+	sipPayload := []byte("INVITE sip:test@example.com SIP/2.0\r\nFrom: <sip:alice@example.com>\r\nTo: <sip:bob@example.com>\r\nCall-ID: test123\r\n\r\n")
 	packet := createMockPacket(sipPayload)
 	protocols := registry.detectProtocols(packet)
 	assert.Contains(t, protocols, "sip")
 
-	// Test RTP detection (basic heuristic)
-	rtpPayload := []byte{0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x12, 0x34, 0x56, 0x78}
-	packet = createMockPacket(rtpPayload)
+	// Test RTP detection (valid RTP header: version 2, PT 0, seq 1, timestamp 100, SSRC 0x12345678)
+	rtpPayload := []byte{
+		0x80,       // V=2, P=0, X=0, CC=0
+		0x00,       // M=0, PT=0 (PCMU)
+		0x00, 0x01, // Sequence number 1
+		0x00, 0x00, 0x00, 0x64, // Timestamp 100
+		0x12, 0x34, 0x56, 0x78, // SSRC
+	}
+	packet = createMockPacketWithPorts(rtpPayload, 10000, 10000) // RTP typically uses high ports
 	protocols = registry.detectProtocols(packet)
 	assert.Contains(t, protocols, "rtp")
 
 	// Test generic fallback
-	unknownPayload := []byte("unknown protocol data")
-	packet = createMockPacket(unknownPayload)
+	unknownPayload := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a} // Binary data
+	packet = createMockPacketWithPorts(unknownPayload, 12345, 54321) // Non-standard ports
 	protocols = registry.detectProtocols(packet)
 	assert.Contains(t, protocols, "generic")
 }
@@ -373,10 +385,24 @@ func TestEventTypes(t *testing.T) {
 }
 
 // Helper function to create mock packets for testing
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func createMockPacket(payload []byte) gopacket.Packet {
+	return createMockPacketWithPorts(payload, 5060, 5060)
+}
+
+func createMockPacketWithPorts(payload []byte, srcPort, dstPort uint16) gopacket.Packet {
 	// Create a mock packet with the payload as application layer
 	buffer := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{}
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
 
 	// Create Ethernet layer
 	ethLayer := &layers.Ethernet{
@@ -390,6 +416,7 @@ func createMockPacket(payload []byte) gopacket.Packet {
 		Version:  4,
 		IHL:      5,
 		TTL:      64,
+		Id:       1234,
 		Protocol: layers.IPProtocolUDP,
 		SrcIP:    []byte{192, 168, 1, 100},
 		DstIP:    []byte{192, 168, 1, 200},
@@ -397,8 +424,8 @@ func createMockPacket(payload []byte) gopacket.Packet {
 
 	// Create UDP layer
 	udpLayer := &layers.UDP{
-		SrcPort: 5060,
-		DstPort: 5060,
+		SrcPort: layers.UDPPort(srcPort),
+		DstPort: layers.UDPPort(dstPort),
 	}
 	udpLayer.SetNetworkLayerForChecksum(ipLayer)
 

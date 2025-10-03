@@ -159,9 +159,14 @@ func (d *Detector) buildContext(packet gopacket.Packet) *signatures.DetectionCon
 	// Extract application layer payload
 	if appLayer := packet.ApplicationLayer(); appLayer != nil {
 		ctx.Payload = appLayer.Payload()
-	} else if transLayer := packet.TransportLayer(); transLayer != nil {
-		// If no application layer, get payload from transport layer
-		ctx.Payload = transLayer.LayerPayload()
+	}
+
+	// If payload is empty and we have a transport layer, try getting payload from there
+	// This handles cases where gopacket's protocol parsers consume the payload
+	if len(ctx.Payload) == 0 {
+		if transLayer := packet.TransportLayer(); transLayer != nil {
+			ctx.Payload = transLayer.LayerPayload()
+		}
 	}
 
 	// Generate flow ID

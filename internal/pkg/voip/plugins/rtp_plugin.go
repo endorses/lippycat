@@ -90,13 +90,15 @@ func (r *RTPPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packet) (
 		r.metrics.PacketsProcessed.Add(1)
 	}()
 
-	// Check if this is an RTP/RTCP packet
-	appLayer := packet.ApplicationLayer()
-	if appLayer == nil {
-		return nil, nil
+	// Extract payload from transport layer to get the full unparsed data
+	// Note: We use transport layer instead of application layer because gopacket's
+	// protocol parsers may consume/modify the payload, making it unsuitable for
+	// protocol detection
+	var payload []byte
+	if transLayer := packet.TransportLayer(); transLayer != nil {
+		payload = transLayer.LayerPayload()
 	}
 
-	payload := appLayer.Payload()
 	if len(payload) < 12 {
 		return nil, nil // RTP header is at least 12 bytes
 	}

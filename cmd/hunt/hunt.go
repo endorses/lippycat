@@ -40,17 +40,19 @@ var (
 	bufferSize    int
 	batchSize     int
 	batchTimeout  int
+	promiscuous   bool
 )
 
 func init() {
 	// Required flags
-	HuntCmd.Flags().StringVarP(&processorAddr, "processor", "p", "", "Processor address (host:port)")
+	HuntCmd.Flags().StringVar(&processorAddr, "processor", "", "Processor address (host:port)")
 	HuntCmd.MarkFlagRequired("processor")
 
 	// Hunter configuration
 	HuntCmd.Flags().StringVarP(&hunterID, "hunter-id", "", "", "Unique hunter identifier (default: hostname)")
 	HuntCmd.Flags().StringSliceVarP(&interfaces, "interface", "i", []string{"any"}, "Network interfaces to capture (comma-separated)")
 	HuntCmd.Flags().StringVarP(&bpfFilter, "filter", "f", "", "BPF filter expression")
+	HuntCmd.Flags().BoolVarP(&promiscuous, "promisc", "p", false, "Enable promiscuous mode")
 
 	// Performance tuning
 	HuntCmd.Flags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
@@ -65,6 +67,7 @@ func init() {
 	viper.BindPFlag("hunter.buffer_size", HuntCmd.Flags().Lookup("buffer-size"))
 	viper.BindPFlag("hunter.batch_size", HuntCmd.Flags().Lookup("batch-size"))
 	viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.Flags().Lookup("batch-timeout"))
+	viper.BindPFlag("promiscuous", HuntCmd.Flags().Lookup("promisc"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {

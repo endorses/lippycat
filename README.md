@@ -1,6 +1,6 @@
 # lippycat 🫦🐱
 
-A high-performance, production-ready network traffic sniffer and protocol analyzer built with Go. Designed as an extensible platform for multi-protocol network monitoring and analysis, lippycat currently features comprehensive VoIP analysis capabilities with plans for additional protocol support.
+A high-performance, network traffic sniffer and protocol analyzer built with Go. Designed as an extensible platform for multi-protocol network monitoring and analysis, lippycat currently features comprehensive VoIP analysis capabilities with plans for additional protocol support.
 
 ## 🚀 Features
 

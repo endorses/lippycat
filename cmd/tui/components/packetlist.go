@@ -21,6 +21,7 @@ type PacketDisplay struct {
 	Info      string
 	RawData   []byte // Raw packet bytes for hex dump
 	NodeID    string // Source node identifier: "Local", hunter_id, or processor_id
+	Interface string // Network interface where packet was captured
 }
 
 // PacketList is a component that displays a list of packets
@@ -430,10 +431,10 @@ func (p *PacketList) renderHeader() string {
 
 	header := fmt.Sprintf(
 		"%-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-		nodeWidth, truncate("Node", nodeWidth),
+		nodeWidth, truncate("Source", nodeWidth),
 		timeWidth, truncate("Time", timeWidth),
-		srcWidth, truncate("Source", srcWidth),
-		dstWidth, truncate("Destination", dstWidth),
+		srcWidth, truncate("Src IP:Port", srcWidth),
+		dstWidth, truncate("Dst IP:Port", dstWidth),
 		protoWidth, truncate("Protocol", protoWidth),
 		lenWidth, truncate("Length", lenWidth),
 		infoWidth, truncate("Info", infoWidth),
@@ -531,12 +532,16 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 	// Get responsive column widths (match header)
 	nodeWidth, timeWidth, srcWidth, dstWidth, protoWidth, lenWidth, infoWidth := p.getColumnWidths()
 
-	// Format node ID with color
-	nodeID := pkt.NodeID
-	if nodeID == "" {
-		nodeID = "Local" // Default for local capture
+	// Format source: "nodeID (interface)" for remote, just "interface" for local
+	var source string
+	if pkt.NodeID == "" || pkt.NodeID == "Local" {
+		// Local capture - show only interface
+		source = pkt.Interface
+	} else {
+		// Remote capture - show nodeID (interface)
+		source = fmt.Sprintf("%s (%s)", pkt.NodeID, pkt.Interface)
 	}
-	nodeID = truncate(nodeID, nodeWidth)
+	source = truncate(source, nodeWidth)
 
 	// Format timestamp based on available width
 	var timeStr string
@@ -566,7 +571,7 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 	// Format row
 	row := fmt.Sprintf(
 		"%-*s %-*s %-*s %-*s %-*s %-*d %-*s",
-		nodeWidth, nodeID,
+		nodeWidth, source,
 		timeWidth, timeStr,
 		srcWidth, src,
 		dstWidth, dst,

@@ -3,6 +3,7 @@ package remotecapture
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,6 +37,10 @@ type Client struct {
 	nodeType   NodeType
 	nodeID     string // ID of connected node
 	addr       string // Address of connected node
+
+	// Interface mapping: hunterID -> []interfaceName (indexed by interface_index)
+	interfacesMu sync.RWMutex
+	interfaces   map[string][]string
 }
 
 // PacketMsg is sent to TUI when a single packet is received
@@ -75,6 +80,7 @@ func NewClient(addr string, program *tea.Program) (*Client, error) {
 		ctx:        ctx,
 		cancel:     cancel,
 		addr:       addr,
+		interfaces: make(map[string][]string),
 	}
 
 	// Detect node type by checking if GetHunterStatus is available
@@ -201,6 +207,15 @@ func (c *Client) SubscribeHunterStatus() error {
 				if err != nil {
 					continue
 				}
+
+				// Update interface mapping
+				c.interfacesMu.Lock()
+				for _, h := range resp.Hunters {
+					if len(h.Interfaces) > 0 {
+						c.interfaces[h.HunterId] = h.Interfaces
+					}
+				}
+				c.interfacesMu.Unlock()
 
 				// Convert to HunterInfo list
 				hunters := make([]components.HunterInfo, len(resp.Hunters))
@@ -362,6 +377,20 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 	// Parse timestamp
 	ts := time.Unix(0, pkt.TimestampNs)
 
+	// Get actual interface name from mapping
+	c.interfacesMu.RLock()
+	hunterInterfaces, exists := c.interfaces[hunterID]
+	c.interfacesMu.RUnlock()
+
+	var ifaceName string
+	if exists && int(pkt.InterfaceIndex) < len(hunterInterfaces) {
+		// Use actual interface name from hunter registration
+		ifaceName = hunterInterfaces[pkt.InterfaceIndex]
+	} else {
+		// Fallback to interface index if mapping not available yet
+		ifaceName = fmt.Sprintf("iface%d", pkt.InterfaceIndex)
+	}
+
 	return components.PacketDisplay{
 		Timestamp: ts,
 		SrcIP:     srcIP,
@@ -372,7 +401,8 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		Length:    int(pkt.CaptureLength),
 		Info:      info,
 		RawData:   pkt.Data,
-		NodeID:    hunterID, // Set node ID from batch
+		NodeID:    hunterID,  // Set node ID from batch
+		Interface: ifaceName, // Interface where packet was captured
 	}
 }
 
@@ -392,8 +422,8 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) components.H
 		PacketsForwarded: h.Stats.PacketsForwarded,
 		PacketsDropped:   h.Stats.PacketsDropped,
 		ActiveFilters:    h.Stats.ActiveFilters,
-		Interfaces:       []string{}, // TODO: Extract from hunter registration
-		ProcessorAddr:    c.addr,     // Address of processor this client is connected to
+		Interfaces:       h.Interfaces,
+		ProcessorAddr:    c.addr, // Address of processor this client is connected to
 	}
 }
 

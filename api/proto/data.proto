@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package lippycat.data;
 
-option go_package = "github.com/endorses/lippycat/api/proto/data";
+option go_package = "github.com/endorses/lippycat/api/gen/data";
 
 // DataService handles high-volume packet streaming from hunters to processors
 service DataService {

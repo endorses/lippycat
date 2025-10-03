@@ -18,8 +18,9 @@ import (
 )
 
 type PacketInfo struct {
-	LinkType layers.LinkType
-	Packet   gopacket.Packet
+	LinkType  layers.LinkType
+	Packet    gopacket.Packet
+	Interface string // Name of the interface where packet was captured
 }
 
 type PacketBuffer struct {
@@ -250,8 +251,9 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				return
 			}
 			pktInfo := PacketInfo{
-				LinkType: handle.LinkType(),
-				Packet:   packet,
+				LinkType:  handle.LinkType(),
+				Packet:    packet,
+				Interface: iface.Name(),
 			}
 			buffer.Send(pktInfo)
 

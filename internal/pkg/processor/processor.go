@@ -475,6 +475,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 				PacketsCaptured:  hunter.PacketsReceived,
 				PacketsForwarded: hunter.PacketsReceived,
 			},
+			Interfaces: hunter.Interfaces,
 		})
 	}
 

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package lippycat.management;
 
-option go_package = "github.com/endorses/lippycat/api/proto/management";
+option go_package = "github.com/endorses/lippycat/api/gen/management";
 
 // ManagementService handles monitoring, configuration, and filter distribution
 service ManagementService {
@@ -302,6 +302,9 @@ message ConnectedHunter {
 
     // Active filters
     repeated Filter filters = 8;
+
+    // Network interfaces being captured
+    repeated string interfaces = 9;
 }
 
 // ProcessorStats for processor node

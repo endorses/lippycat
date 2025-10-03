@@ -1,4 +1,4 @@
-# lippycat 🐱
+# lippycat 🫦🐱
 
 A high-performance, production-ready network traffic sniffer and protocol analyzer built with Go. Designed as an extensible platform for multi-protocol network monitoring and analysis, lippycat currently features comprehensive VoIP analysis capabilities with plans for additional protocol support.
 
@@ -99,6 +99,17 @@ brew install libpcap
 
 ## 🏃‍♂️ Quick Start
 
+### Available Commands
+```bash
+lippycat sniff          # Packet capture CLI mode
+lippycat sniff voip     # VoIP-specific capture with SIP/RTP analysis
+lippycat tui            # Terminal User Interface for real-time monitoring
+lippycat hunt           # Hunter node (distributed capture)
+lippycat process        # Processor node (distributed analysis)
+lippycat interfaces     # List available network interfaces
+lippycat debug          # Debug TCP SIP processing components
+```
+
 ### Basic Network Monitoring
 ```bash
 # General packet capture with BPF filter
@@ -144,10 +155,41 @@ sudo ./lippycat sniff voip --tcp-performance-mode latency
 sudo ./lippycat sniff voip --tcp-performance-mode memory --memory-optimization
 ```
 
+### Distributed Mode (Multi-Node Capture)
+```bash
+# Start processor node (receives packets from hunters)
+./lippycat process --listen 0.0.0.0:50051
+
+# Start hunter nodes on different machines/interfaces
+sudo ./lippycat hunt --interface eth0 --processor processor-host:50051
+sudo ./lippycat hunt --interface eth1 --processor processor-host:50051
+
+# Monitor distributed capture via TUI
+./lippycat tui --remote --nodes-file nodes.yaml
+
+# Example nodes.yaml:
+# nodes:
+#   - name: "Hunter-1"
+#     address: "192.168.1.10:50051"
+#   - name: "Hunter-2"
+#     address: "192.168.1.11:50051"
+```
+
+**Use Cases for Distributed Mode:**
+- **Multi-interface monitoring**: Deploy hunters on different network interfaces or segments
+- **Scalable capture**: Distribute capture load across multiple machines
+- **Network segmentation**: Capture in restricted zones, analyze in monitoring zones
+- **Centralized analysis**: Aggregate packets from multiple sources for unified analysis
+
 ## ⚙️ Configuration
 
 ### Configuration File
-Create `~/.lippycat.yaml`:
+Create configuration file (in priority order):
+1. `~/.config/lippycat/config.yaml` (preferred)
+2. `~/.config/lippycat.yaml` (XDG standard)
+3. `~/.lippycat.yaml` (legacy)
+
+Example configuration:
 
 ```yaml
 # General network capture settings
@@ -336,70 +378,94 @@ lippycat is designed for **defensive security and network analysis purposes only
 graph TB
     subgraph "Application Layer"
         CLI[CLI Layer<br/>Cobra/Viper]
+        TUI[TUI Layer<br/>Bubbletea]
         Config[Configuration<br/>Management]
     end
 
+    subgraph "Distributed Layer"
+        Hunter[Hunter Nodes<br/>gRPC Client]
+        Processor[Processor Node<br/>gRPC Server]
+    end
+
     subgraph "Capture Layer"
-        Capture[Capture Layer<br/>gopacket/XDP]
-        Buffers[Packet Buffers<br/>& Assembly]
+        CaptureGopacket[Capture<br/>gopacket/libpcap]
+        CaptureXDP[Capture<br/>AF_XDP Optional]
+        Buffers[Packet Buffers<br/>& TCP Assembly]
     end
 
     subgraph "Protocol Layer"
-        Protocol[Protocol Layer<br/>VoIP/Future]
-        Analyzers[Protocol<br/>Analyzers]
+        VoIP[VoIP Protocol<br/>SIP/RTP]
+        Plugins[Plugin System<br/>VoIP-scoped]
+        SIMD[SIMD/GPU Accel<br/>AVX2/CUDA]
     end
 
-    CLI --> Capture
-    Capture --> Protocol
-    CLI --> Config
-    Capture --> Buffers
-    Protocol --> Analyzers
+    CLI --> CaptureGopacket
+    CLI --> Hunter
+    TUI --> Processor
+    Hunter -->|Forward Packets| Processor
+    Processor --> VoIP
+    CaptureGopacket --> Buffers
+    CaptureXDP --> Buffers
+    Buffers --> VoIP
+    VoIP --> Plugins
+    VoIP --> SIMD
+    Config --> CLI
+    Config --> TUI
 ```
 
-### Performance Architecture
+### Performance Architecture (VoIP Mode)
 
 ```mermaid
 graph TB
-    Capture[Packet Capture<br/>libpcap / AF_XDP zero-copy<br/>mmap ring buffers]
+    Capture[Packet Capture<br/>libpcap / AF_XDP zero-copy optional<br/>mmap ring buffers]
 
     Batch[Batch Processor<br/>• Worker pools with CPU affinity<br/>• Lock-free queues<br/>• Adaptive batching 64-2048 packets]
 
-    FastPath[Fast Path CPU/SIMD<br/>• CallID Parse<br/>• AVX2/SSE4.2<br/>• 100-180 ns/op]
+    FastPath[Fast Path CPU/SIMD<br/>• CallID Parse<br/>• AVX2/SSE4.2<br/>• 100-180 ns/op benchmark]
 
-    GPU[Pattern Match GPU/CUDA<br/>• Phone Number Match<br/>• Batch Process<br/>• 15 µs/batch]
+    GPU[Pattern Match GPU/CUDA optional<br/>• Phone Number Match<br/>• Batch Process<br/>• 15 µs/batch benchmark]
 
     Analysis[Protocol Analysis<br/>• TCP stream reassembly<br/>• Call tracking lock-free/hybrid<br/>• RTP detection]
 
+    Distributed[Distributed Mode optional<br/>• gRPC packet forwarding<br/>• Multi-node aggregation]
+
     Capture --> Batch
+    Capture --> Distributed
     Batch --> FastPath
     Batch --> GPU
     FastPath --> Analysis
     GPU --> Analysis
+    Distributed --> Analysis
 ```
 
-### Protocol Processing Pipeline
+**Note**: This architecture applies primarily to **VoIP mode**. AF_XDP requires Linux 4.18+ and XDP-capable NIC drivers. GPU acceleration requires CUDA/OpenCL hardware. Performance numbers are from benchmarks.
+
+### Distributed Architecture
 
 ```mermaid
-graph LR
-    Packet[Network Packet]
-    Detection[Protocol Detection]
-    Selection[Parser Selection]
-    Analysis[Analysis]
-    Output[Output]
+graph TB
+    subgraph "Hunter Nodes"
+        H1[Hunter 1<br/>Packet Capture]
+        H2[Hunter 2<br/>Packet Capture]
+        H3[Hunter 3<br/>Packet Capture]
+    end
 
-    Packet --> Detection
-    Detection --> Selection
-    Selection --> Analysis
-    Analysis --> Output
+    subgraph "Processor Node"
+        P[Processor<br/>Aggregation & Analysis]
+        Analysis[Protocol Analysis<br/>VoIP/SIP/RTP]
+    end
 
-    Packet -.-> Pool[Buffer Pool]
-    Detection -.-> Router[Protocol Router]
-    Selection -.-> VoIP[VoIP/SIP Parser]
-    Analysis -.-> Analytics[Analytics]
-    Output -.-> Export[PCAP/JSON]
+    subgraph "User Interface"
+        TUI[TUI<br/>Real-time Monitoring]
+        CLI[CLI<br/>Output/Export]
+    end
 
-    Router -.-> Future[Future Protocols]
-    VoIP -.-> Tracking[Call Tracking]
+    H1 -->|gRPC Stream| P
+    H2 -->|gRPC Stream| P
+    H3 -->|gRPC Stream| P
+    P --> Analysis
+    Analysis --> TUI
+    Analysis --> CLI
 ```
 
 ### Extensibility Framework
@@ -512,9 +578,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/endorses/lippycat/issues)
-- **Documentation**: [Project Wiki](https://github.com/endorses/lippycat/wiki)
 - **Feature Requests**: Use GitHub Issues to request new protocol support
-- **Security**: Report security issues privately to security@endorses.com
 
 ---
 

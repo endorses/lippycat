@@ -2,6 +2,7 @@ package application
 
 import (
 	"strings"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 	"github.com/endorses/lippycat/internal/pkg/simd"
@@ -127,6 +128,19 @@ func (h *HTTPSignature) detectRequest(ctx *signatures.DetectionContext) *signatu
 		metadata["content_type"] = contentType
 	}
 
+	// Store request in flow state for response correlation
+	if ctx.Flow != nil {
+		httpState := &HTTPFlowState{
+			LastMethod:      method,
+			LastPath:        path,
+			LastHost:        headers["Host"],
+			LastRequestTime: ctx.Packet.Metadata().Timestamp,
+		}
+		ctx.Flow.State = httpState
+		ctx.Flow.Metadata["http_method"] = method
+		ctx.Flow.Metadata["http_path"] = path
+	}
+
 	// Calculate confidence based on indicators
 	indicators := []signatures.Indicator{
 		{Name: "method", Weight: 0.4, Confidence: 1.0},
@@ -202,6 +216,18 @@ func (h *HTTPSignature) detectResponse(ctx *signatures.DetectionContext) *signat
 		metadata["content_length"] = contentLength
 	}
 
+	// Correlate with request if available
+	if ctx.Flow != nil && ctx.Flow.State != nil {
+		if httpState, ok := ctx.Flow.State.(*HTTPFlowState); ok {
+			metadata["request_method"] = httpState.LastMethod
+			metadata["request_path"] = httpState.LastPath
+			if !httpState.LastRequestTime.IsZero() {
+				responseTime := ctx.Packet.Metadata().Timestamp.Sub(httpState.LastRequestTime)
+				metadata["response_time_ms"] = responseTime.Milliseconds()
+			}
+		}
+	}
+
 	// Calculate confidence
 	indicators := []signatures.Indicator{
 		{Name: "version", Weight: 0.5, Confidence: 1.0},
@@ -244,4 +270,12 @@ func (h *HTTPSignature) extractHeaders(lines []string) map[string]string {
 	}
 
 	return headers
+}
+
+// HTTPFlowState tracks HTTP request/response correlation
+type HTTPFlowState struct {
+	LastMethod      string
+	LastPath        string
+	LastHost        string
+	LastRequestTime time.Time
 }

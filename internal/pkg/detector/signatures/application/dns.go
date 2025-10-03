@@ -1,6 +1,9 @@
 package application
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 )
 
@@ -119,6 +122,32 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		"additional":        additionalCount,
 	}
 
+	// Store query or correlate response
+	transactionID := uint16(payload[0])<<8 | uint16(payload[1])
+	if ctx.Flow != nil {
+		if qr == 0 {
+			// This is a query - store it
+			queryKey := fmt.Sprintf("dns_query_%d", transactionID)
+			ctx.Flow.Metadata[queryKey] = DNSQuery{
+				TransactionID: transactionID,
+				QuestionCount: questionCount,
+				Timestamp:     ctx.Packet.Metadata().Timestamp,
+			}
+		} else {
+			// This is a response - try to correlate with query
+			queryKey := fmt.Sprintf("dns_query_%d", transactionID)
+			if queryData, ok := ctx.Flow.Metadata[queryKey]; ok {
+				if query, ok := queryData.(DNSQuery); ok {
+					responseTime := ctx.Packet.Metadata().Timestamp.Sub(query.Timestamp)
+					metadata["query_response_time_ms"] = responseTime.Milliseconds()
+					metadata["correlated_query"] = true
+					// Clean up the query
+					delete(ctx.Flow.Metadata, queryKey)
+				}
+			}
+		}
+	}
+
 	// Calculate confidence
 	confidence := d.calculateConfidence(ctx, metadata, flags)
 
@@ -216,4 +245,11 @@ func (d *DNSSignature) rcodeToString(rcode uint16) string {
 		return s
 	}
 	return "Unknown"
+}
+
+// DNSQuery stores information about a DNS query for response correlation
+type DNSQuery struct {
+	TransactionID uint16
+	QuestionCount uint16
+	Timestamp     time.Time
 }

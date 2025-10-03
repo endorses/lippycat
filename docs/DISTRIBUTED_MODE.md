@@ -807,10 +807,10 @@ service ManagementService {
    - Mitigation: Firewall rules, network segmentation
    - Future: Add token-based authentication
 
-5. **TUI Not Integrated with Processor**
-   - Nodes tab shows placeholder
-   - Mitigation: Use command-line stats
-   - Future: Add processor mode to TUI
+5. **TUI Remote Mode Available**
+   - Remote monitoring via `--remote` and `--nodes-file` flags
+   - Real-time node status and packet statistics
+   - See TUI_REMOTE_CAPTURE.md for setup details
 
 ---
 
@@ -826,7 +826,7 @@ service ManagementService {
 
 **Medium Priority:**
 - Authentication and authorization
-- TUI processor integration
+- Enhanced TUI remote mode features
 - Compression (zstd/lz4)
 - Metrics export (Prometheus)
 

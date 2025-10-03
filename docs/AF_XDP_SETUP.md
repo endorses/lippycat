@@ -272,11 +272,11 @@ for pkt := range engine.Packets() {
 
 ### Check XDP Support
 ```bash
-# Test if XDP is supported
-sudo ./lippycat --check-xdp
-
-# Or check kernel support
+# Check kernel XDP support
 bpftool feature probe | grep XDP
+
+# Verify kernel version (must be 4.18+)
+uname -r
 ```
 
 ### Monitor XDP Statistics

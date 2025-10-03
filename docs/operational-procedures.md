@@ -17,9 +17,6 @@ This document provides standardized operational procedures for managing lippycat
 
 #### Configuration Validation
 ```bash
-# Test configuration syntax
-./lippycat sniff voip --config /etc/lippycat/lippycat.yaml --validate-config
-
 # Test with sample traffic
 ./lippycat sniff voip --read-file test-sip-tcp.pcap --tcp-performance-mode balanced
 
@@ -569,11 +566,6 @@ echo "Disaster recovery complete"
 - **Level 1:** Operations team (immediate response)
 - **Level 2:** Engineering team (within 4 hours)
 - **Level 3:** Development team (next business day)
-
-### Emergency Contacts
-- **Operations:** ops@example.com
-- **Engineering:** engineering@example.com
-- **Security Issues:** security@endorses.com
 
 ### Documentation Updates
 This document should be reviewed and updated:

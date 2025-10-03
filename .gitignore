@@ -3,3 +3,4 @@ captures
 *.md
 !README.md
 !CLAUDE.md
+nodes.yaml

@@ -517,6 +517,93 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				display.Info = "ARP"
 			}
 
+		case "FTP":
+			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
+				if msgType == "response" {
+					if code, ok := detectionResult.Metadata["code"].(int); ok {
+						if msg, ok := detectionResult.Metadata["message"].(string); ok {
+							display.Info = fmt.Sprintf("%d %s", code, msg)
+						} else {
+							display.Info = fmt.Sprintf("%d", code)
+						}
+					} else {
+						display.Info = "Response"
+					}
+				} else if msgType == "command" {
+					if cmd, ok := detectionResult.Metadata["command"].(string); ok {
+						display.Info = cmd
+					} else {
+						display.Info = "Command"
+					}
+				}
+			} else {
+				display.Info = "FTP"
+			}
+
+		case "SMTP":
+			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
+				if msgType == "response" {
+					if code, ok := detectionResult.Metadata["code"].(int); ok {
+						display.Info = fmt.Sprintf("%d", code)
+					} else {
+						display.Info = "Response"
+					}
+				} else if msgType == "command" {
+					if cmd, ok := detectionResult.Metadata["command"].(string); ok {
+						display.Info = cmd
+					} else {
+						display.Info = "Command"
+					}
+				}
+			} else {
+				display.Info = "SMTP"
+			}
+
+		case "MySQL":
+			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
+				if msgType == "handshake" {
+					if version, ok := detectionResult.Metadata["server_version"].(string); ok {
+						display.Info = "Handshake: " + version
+					} else {
+						display.Info = "Handshake"
+					}
+				} else if msgType == "command" {
+					if cmdName, ok := detectionResult.Metadata["command_name"].(string); ok {
+						display.Info = cmdName
+					} else {
+						display.Info = "Command"
+					}
+				} else {
+					display.Info = msgType
+				}
+			} else {
+				display.Info = "MySQL"
+			}
+
+		case "PostgreSQL":
+			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
+				if msg, ok := detectionResult.Metadata["message"].(string); ok {
+					display.Info = msg
+				} else if msgName, ok := detectionResult.Metadata["message_name"].(string); ok {
+					display.Info = msgName
+				} else {
+					display.Info = msgType
+				}
+			} else {
+				display.Info = "PostgreSQL"
+			}
+
+		case "SNMP":
+			if version, ok := detectionResult.Metadata["version"].(string); ok {
+				if pduType, ok := detectionResult.Metadata["pdu_type"].(string); ok {
+					display.Info = version + " " + pduType
+				} else {
+					display.Info = version
+				}
+			} else {
+				display.Info = "SNMP"
+			}
+
 		default:
 			display.Info = detectionResult.Protocol
 		}

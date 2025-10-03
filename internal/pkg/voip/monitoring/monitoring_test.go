@@ -334,7 +334,8 @@ func TestGlobalInstances(t *testing.T) {
 	RecordDuration("test_global_duration", 100*time.Millisecond)
 
 	// Test global Prometheus functions
-	RecordPacket("sip", "inbound", "eth0")
+	ctx := context.Background()
+	RecordPacket(ctx, "sip", "inbound", 1*time.Millisecond)
 	RecordCall("created", "sip")
 	UpdateActiveCalls(10, "sip")
 	RecordProcessingTime("processor", "sip", 10*time.Millisecond)
@@ -346,7 +347,6 @@ func TestGlobalInstances(t *testing.T) {
 	UpdateBufferUsage("tcp", 0.75)
 
 	// Test global monitoring functions
-	ctx := context.Background()
 	RecordPacket(ctx, "sip", "inbound", 10*time.Millisecond)
 	RecordPlugin(ctx, "sip_plugin", "sip", 5*time.Millisecond, true)
 	RecordCallEvent(ctx, "call123", "created", map[string]interface{}{"protocol": "sip"})

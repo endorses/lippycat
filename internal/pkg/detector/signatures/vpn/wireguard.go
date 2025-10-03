@@ -40,6 +40,15 @@ func (w *WireGuardSignature) Detect(ctx *signatures.DetectionContext) *signature
 	// - Reserved (3 bytes): typically zero
 	// Followed by type-specific data
 
+	// WireGuard uses UDP only
+	if ctx.Transport != "UDP" {
+		return nil
+	}
+
+	// STRICT: WireGuard typically uses port 51820, but can use any port
+	// For non-standard ports, require exact length match
+	onWireGuardPort := ctx.SrcPort == 51820 || ctx.DstPort == 51820
+
 	if len(ctx.Payload) < 4 {
 		return nil
 	}
@@ -118,6 +127,18 @@ func (w *WireGuardSignature) Detect(ctx *signatures.DetectionContext) *signature
 	allZero := reserved[0] == 0 && reserved[1] == 0 && reserved[2] == 0
 	if allZero {
 		metadata["reserved_zero"] = true
+	}
+
+	// STRICT: If not on WireGuard port, require reserved bytes to be zero
+	// AND exact length match for non-transport packets
+	if !onWireGuardPort {
+		if !allZero {
+			return nil
+		}
+		// For handshake and cookie packets, require exact length
+		if msgType != 4 && len(payload) != expectedLen {
+			return nil
+		}
 	}
 
 	// Calculate confidence

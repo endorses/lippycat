@@ -29,6 +29,11 @@ func (n *NTPSignature) Layer() signatures.LayerType {
 }
 
 func (n *NTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
+	// NTP is UDP-only protocol
+	if ctx.Transport != "UDP" {
+		return nil
+	}
+
 	// NTP packet is typically 48 bytes
 	// Minimum size is 48 bytes for standard NTP
 	if len(ctx.Payload) < 48 {

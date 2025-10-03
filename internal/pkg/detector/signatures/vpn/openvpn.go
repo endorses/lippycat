@@ -49,8 +49,15 @@ func (o *OpenVPNSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 
 	payload := ctx.Payload
 
-	// Extract opcode from first byte (upper 5 bits)
+	// Exclude TLS traffic (content types 0x14-0x18)
+	// TLS starts with content type byte, which would create false positives
 	firstByte := payload[0]
+	if firstByte >= 0x14 && firstByte <= 0x18 {
+		// This is likely TLS (ChangeCipherSpec=20, Alert=21, Handshake=22, Application=23, Heartbeat=24)
+		return nil
+	}
+
+	// Extract opcode from first byte (upper 5 bits)
 	opcode := firstByte >> 3
 
 	// Valid OpenVPN opcodes: 1-9
@@ -69,6 +76,49 @@ func (o *OpenVPNSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 	}
 
 	keyID := firstByte & 0x07
+
+	// STRICT VALIDATION: OpenVPN detection is very prone to false positives
+	// Only detect if we're on the well-known OpenVPN port OR have very strong indicators
+	onOpenVPNPort := ctx.SrcPort == 1194 || ctx.DstPort == 1194
+
+	// If not on standard port, require VERY strict validation
+	if !onOpenVPNPort {
+		// Must be a control packet (more distinctive than data)
+		if !o.isControlPacket(opcode) {
+			return nil
+		}
+
+		// For control packets, validate session ID structure
+		// Session ID is at bytes 1-8
+		sessionID := payload[1:9]
+
+		// Check if it looks like a valid session ID (all zeros OR has some structure)
+		// Random data would be very unlikely to have all zeros
+		allZero := true
+		for _, b := range sessionID {
+			if b != 0 {
+				allZero = false
+				break
+			}
+		}
+
+		// Require either:
+		// 1. Hard reset with zero session ID (initial handshake)
+		// 2. Port in typical VPN range (1024-65535) to avoid system ports
+		isHardReset := opcode == 1 || opcode == 2 || opcode == 7 || opcode == 8
+		if !isHardReset || !allZero {
+			// Additional check: packet ID at bytes 9-12 should be reasonable
+			if len(payload) >= 13 {
+				// Packet ID should be small for initial packets
+				packetID := uint32(payload[9])<<24 | uint32(payload[10])<<16 |
+				           uint32(payload[11])<<8 | uint32(payload[12])
+				// Reject if packet ID is too large (likely random data)
+				if packetID > 1000000 {
+					return nil
+				}
+			}
+		}
+	}
 
 	metadata := map[string]interface{}{
 		"opcode":      opcode,

@@ -41,6 +41,16 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	//   P=1: Priority
 	//   Ver=2 for L2TPv2, Ver=3 for L2TPv3
 
+	// L2TP uses UDP on port 1701
+	if ctx.Transport != "UDP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known L2TP port to avoid false positives
+	if ctx.SrcPort != 1701 && ctx.DstPort != 1701 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 6 {
 		return nil
 	}

@@ -43,6 +43,18 @@ func (i *IKEv2Signature) Detect(ctx *signatures.DetectionContext) *signatures.De
 	// Length (4 bytes) - total message length
 	// Total header: 28 bytes
 
+	// IKE/IKEv2 uses UDP only
+	if ctx.Transport != "UDP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known IKE ports (500, 4500 for NAT-T)
+	onIKEPort := ctx.SrcPort == 500 || ctx.DstPort == 500 ||
+		ctx.SrcPort == 4500 || ctx.DstPort == 4500
+	if !onIKEPort {
+		return nil
+	}
+
 	if len(ctx.Payload) < 28 {
 		return nil
 	}

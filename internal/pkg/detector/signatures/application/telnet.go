@@ -34,6 +34,17 @@ func (t *TelnetSignature) Detect(ctx *signatures.DetectionContext) *signatures.D
 	// - IAC WILL/WONT/DO/DONT option
 	// - IAC SB option ... IAC SE (subnegotiation)
 
+	// Telnet uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known Telnet port (23) to avoid false positives
+	// The 0xFF byte is very common in encrypted/random data (TLS, etc.)
+	if ctx.SrcPort != 23 && ctx.DstPort != 23 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 3 {
 		return nil
 	}

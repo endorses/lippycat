@@ -41,6 +41,16 @@ func (p *PPTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	//   Reserved (2 bytes)
 	//   ... message-specific fields
 
+	// PPTP control uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known PPTP port
+	if ctx.SrcPort != 1723 && ctx.DstPort != 1723 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 12 {
 		return nil
 	}

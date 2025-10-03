@@ -52,9 +52,13 @@ func (d *Detector) RegisterSignature(sig signatures.Signature) {
 func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
 	ctx := d.buildContext(packet)
 
-	// Check cache first
-	if cached := d.cache.Get(ctx.FlowID); cached != nil {
-		return cached
+	// Check cache first, but skip for well-known ports where protocol might appear later
+	// (e.g., HTTPS on port 443 - TLS handshake comes after TCP handshake)
+	useCache := !isWellKnownPort(ctx.SrcPort) && !isWellKnownPort(ctx.DstPort)
+	if useCache {
+		if cached := d.cache.Get(ctx.FlowID); cached != nil {
+			return cached
+		}
 	}
 
 	// Try each signature in priority order
@@ -65,8 +69,8 @@ func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
 	for _, sig := range sigs {
 		result := sig.Detect(ctx)
 		if result != nil {
-			// Cache the result if requested
-			if result.ShouldCache {
+			// Cache the result if requested and caching is enabled for this flow
+			if result.ShouldCache && useCache {
 				d.cache.Set(ctx.FlowID, result)
 			}
 
@@ -82,16 +86,40 @@ func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
 		}
 	}
 
-	// No protocol detected - cache negative result
+	// No protocol detected - only cache negative result if caching is enabled
 	unknownResult := &signatures.DetectionResult{
 		Protocol:    "unknown",
 		Confidence:  0.0,
 		Metadata:    make(map[string]interface{}),
 		ShouldCache: true,
 	}
-	d.cache.Set(ctx.FlowID, unknownResult)
+
+	if useCache {
+		d.cache.Set(ctx.FlowID, unknownResult)
+	}
 
 	return unknownResult
+}
+
+// isWellKnownPort checks if a port is a well-known port where protocols
+// typically establish after transport-layer handshake (e.g., HTTP, HTTPS, SSH)
+func isWellKnownPort(port uint16) bool {
+	wellKnownPorts := map[uint16]bool{
+		80:    true, // HTTP
+		443:   true, // HTTPS
+		8080:  true, // HTTP alternate
+		8443:  true, // HTTPS alternate
+		22:    true, // SSH
+		21:    true, // FTP
+		25:    true, // SMTP
+		110:   true, // POP3
+		143:   true, // IMAP
+		3306:  true, // MySQL
+		5432:  true, // PostgreSQL
+		6379:  true, // Redis
+		27017: true, // MongoDB
+	}
+	return wellKnownPorts[port]
 }
 
 // DetectWithoutCache performs detection without using or updating cache

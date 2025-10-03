@@ -34,15 +34,36 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
+	// RTP is almost always UDP - reject TCP to avoid false positives on encrypted protocols
+	if ctx.Transport != "UDP" {
+		return nil
+	}
+
+	// Reject well-known TCP/TLS ports to avoid false positives
+	// (even though we already filtered TCP above, this is defense in depth)
+	if isWellKnownTCPPort(ctx.SrcPort) || isWellKnownTCPPort(ctx.DstPort) {
+		return nil
+	}
+
 	// Check RTP version (must be 2)
 	version := (ctx.Payload[0] >> 6) & 0x03
 	if version != 2 {
 		return nil
 	}
 
-	// Additional validation: check payload type range (0-127)
+	// Extract key fields for validation
 	payloadType := ctx.Payload[1] & 0x7F
-	if payloadType > 127 {
+	csrcCount := ctx.Payload[0] & 0x0F
+
+	// Validate CSRC count is reasonable (typically 0-15, but rarely > 4)
+	if csrcCount > 15 {
+		return nil
+	}
+
+	// Validate payload type is in valid range
+	// Common types: 0-34 (static), 96-127 (dynamic)
+	// Reject 35-95 as these are unassigned/reserved
+	if payloadType >= 35 && payloadType < 96 {
 		return nil
 	}
 
@@ -216,4 +237,27 @@ func payloadTypeToCodec(pt uint8) string {
 	}
 
 	return "Unknown"
+}
+
+// isWellKnownTCPPort checks if a port is a well-known TCP port
+// to avoid false RTP detection on encrypted TCP protocols
+func isWellKnownTCPPort(port uint16) bool {
+	wellKnownPorts := map[uint16]bool{
+		80:    true, // HTTP
+		443:   true, // HTTPS
+		8080:  true, // HTTP alternate
+		8443:  true, // HTTPS alternate
+		22:    true, // SSH
+		21:    true, // FTP
+		25:    true, // SMTP
+		110:   true, // POP3
+		143:   true, // IMAP
+		993:   true, // IMAPS
+		995:   true, // POP3S
+		3306:  true, // MySQL
+		5432:  true, // PostgreSQL
+		6379:  true, // Redis
+		27017: true, // MongoDB
+	}
+	return wellKnownPorts[port]
 }

@@ -1,7 +1,6 @@
 package application
 
 import (
-	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 )
 
@@ -157,10 +156,10 @@ func (g *GRPCSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 
 // calculateConfidence determines confidence level for gRPC/HTTP2 detection
 func (g *GRPCSignature) calculateConfidence(ctx *signatures.DetectionContext, metadata map[string]interface{}, frameType uint8, streamID uint32) float64 {
-	indicators := []detector.Indicator{}
+	indicators := []signatures.Indicator{}
 
 	// Valid frame type and structure
-	indicators = append(indicators, detector.Indicator{
+	indicators = append(indicators, signatures.Indicator{
 		Name:       "valid_frame",
 		Weight:     0.5,
 		Confidence: signatures.ConfidenceHigh,
@@ -169,14 +168,14 @@ func (g *GRPCSignature) calculateConfidence(ctx *signatures.DetectionContext, me
 	// Stream ID validation (0 for connection-level frames, >0 for stream frames)
 	if (frameType == 0x04 || frameType == 0x06 || frameType == 0x07) && streamID == 0 {
 		// Connection-level frame with correct stream ID
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "correct_stream_id",
 			Weight:     0.3,
 			Confidence: signatures.ConfidenceHigh,
 		})
 	} else if streamID > 0 {
 		// Stream-level frame
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "stream_frame",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceMedium,
@@ -185,12 +184,12 @@ func (g *GRPCSignature) calculateConfidence(ctx *signatures.DetectionContext, me
 
 	// TCP transport (HTTP/2 is always over TCP)
 	if ctx.Transport == "TCP" {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "tcp_transport",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceMedium,
 		})
 	}
 
-	return detector.ScoreDetection(indicators)
+	return signatures.ScoreDetection(indicators)
 }

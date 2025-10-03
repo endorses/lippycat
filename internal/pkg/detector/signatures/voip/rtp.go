@@ -1,7 +1,6 @@
 package voip
 
 import (
-	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 )
 
@@ -123,11 +122,11 @@ func (r *RTPSignature) extractMetadata(payload []byte) map[string]interface{} {
 
 // calculateConfidence determines confidence level for RTP detection
 func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, metadata map[string]interface{}) float64 {
-	indicators := []detector.Indicator{}
+	indicators := []signatures.Indicator{}
 
 	// Version 2 (strong indicator)
 	if version, ok := metadata["version"].(uint8); ok && version == 2 {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "rtp_version",
 			Weight:     0.4,
 			Confidence: signatures.ConfidenceHigh,
@@ -136,7 +135,7 @@ func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Valid payload type (medium indicator)
 	if pt, ok := metadata["payload_type"].(uint8); ok && pt < 128 {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "valid_payload_type",
 			Weight:     0.3,
 			Confidence: signatures.ConfidenceMedium,
@@ -145,7 +144,7 @@ func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// UDP transport (RTP is almost always UDP)
 	if ctx.Transport == "UDP" {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "udp_transport",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceMedium,
@@ -154,14 +153,14 @@ func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Typical RTP port range (10000-20000)
 	if (ctx.SrcPort >= 10000 && ctx.SrcPort <= 20000) || (ctx.DstPort >= 10000 && ctx.DstPort <= 20000) {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "typical_port_range",
 			Weight:     0.1,
 			Confidence: signatures.ConfidenceLow,
 		})
 	}
 
-	return detector.ScoreDetection(indicators)
+	return signatures.ScoreDetection(indicators)
 }
 
 // SIPFlowState holds SIP flow state for RTP correlation

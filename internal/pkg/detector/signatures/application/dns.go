@@ -1,7 +1,6 @@
 package application
 
 import (
-	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 )
 
@@ -124,11 +123,11 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	confidence := d.calculateConfidence(ctx, metadata, flags)
 
 	// Port-based confidence adjustment
-	portFactor := detector.PortBasedConfidence(ctx.SrcPort, []uint16{53})
+	portFactor := signatures.PortBasedConfidence(ctx.SrcPort, []uint16{53})
 	if portFactor < 1.0 {
-		portFactor = detector.PortBasedConfidence(ctx.DstPort, []uint16{53})
+		portFactor = signatures.PortBasedConfidence(ctx.DstPort, []uint16{53})
 	}
-	confidence = detector.AdjustConfidenceByContext(confidence, map[string]float64{
+	confidence = signatures.AdjustConfidenceByContext(confidence, map[string]float64{
 		"port": portFactor,
 	})
 
@@ -142,10 +141,10 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 
 // calculateConfidence determines confidence level for DNS detection
 func (d *DNSSignature) calculateConfidence(ctx *signatures.DetectionContext, metadata map[string]interface{}, flags uint16) float64 {
-	indicators := []detector.Indicator{}
+	indicators := []signatures.Indicator{}
 
 	// Valid header structure (passed all validation checks)
-	indicators = append(indicators, detector.Indicator{
+	indicators = append(indicators, signatures.Indicator{
 		Name:       "valid_header",
 		Weight:     0.5,
 		Confidence: signatures.ConfidenceHigh,
@@ -153,7 +152,7 @@ func (d *DNSSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Reasonable question count
 	if qCount, ok := metadata["questions"].(uint16); ok && qCount > 0 && qCount < 10 {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "reasonable_questions",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceMedium,
@@ -162,7 +161,7 @@ func (d *DNSSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Standard opcode (QUERY = 0)
 	if opcode, ok := metadata["opcode"].(string); ok && opcode == "QUERY" {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "standard_query",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceMedium,
@@ -171,14 +170,14 @@ func (d *DNSSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// UDP transport (DNS is typically UDP)
 	if ctx.Transport == "UDP" {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "udp_transport",
 			Weight:     0.1,
 			Confidence: signatures.ConfidenceLow,
 		})
 	}
 
-	return detector.ScoreDetection(indicators)
+	return signatures.ScoreDetection(indicators)
 }
 
 // opcodeToString converts DNS opcode to string

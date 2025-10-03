@@ -1,8 +1,4 @@
-package detector
-
-import (
-	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
-)
+package signatures
 
 // Indicator represents a single piece of evidence for protocol detection
 type Indicator struct {
@@ -76,17 +72,17 @@ func AdjustConfidenceByContext(baseConfidence float64, factors map[string]float6
 // GetConfidenceLevel returns a human-readable confidence level
 func GetConfidenceLevel(confidence float64) string {
 	switch {
-	case confidence >= signatures.ConfidenceDefinite:
+	case confidence >= ConfidenceDefinite:
 		return "Definite"
-	case confidence >= signatures.ConfidenceVeryHigh:
+	case confidence >= ConfidenceVeryHigh:
 		return "Very High"
-	case confidence >= signatures.ConfidenceHigh:
+	case confidence >= ConfidenceHigh:
 		return "High"
-	case confidence >= signatures.ConfidenceMedium:
+	case confidence >= ConfidenceMedium:
 		return "Medium"
-	case confidence >= signatures.ConfidenceLow:
+	case confidence >= ConfidenceLow:
 		return "Low"
-	case confidence >= signatures.ConfidenceGuess:
+	case confidence >= ConfidenceGuess:
 		return "Guess"
 	default:
 		return "Unknown"

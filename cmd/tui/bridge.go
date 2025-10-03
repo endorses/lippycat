@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/google/gopacket/layers"
 )
 
@@ -405,7 +406,6 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 	}
 
 	// Extract transport layer info
-	var udpLayer *layers.UDP
 	if transLayer := pkt.TransportLayer(); transLayer != nil {
 		switch trans := transLayer.(type) {
 		case *layers.TCP:
@@ -416,7 +416,6 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				display.SrcPort, display.DstPort, tcpFlags(trans))
 
 		case *layers.UDP:
-			udpLayer = trans // Save for RTP detection later
 			display.Protocol = "UDP"
 			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
@@ -437,40 +436,43 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		}
 	}
 
-	// Extract application layer info
-	if appLayer := pkt.ApplicationLayer(); appLayer != nil {
-		payload := appLayer.Payload()
+	// Use centralized detector for application layer protocols
+	detectionResult := detector.GetDefault().Detect(pkt)
+	if detectionResult != nil && detectionResult.Protocol != "unknown" {
+		display.Protocol = detectionResult.Protocol
 
-		// Try to detect SIP
-		if len(payload) > 4 {
-			payloadStr := string(payload[:min(100, len(payload))])
-			if isSIP(payloadStr) {
-				display.Protocol = "SIP"
-				display.Info = extractSIPInfo(payloadStr)
-				// Parse full SIP metadata
-				display.VoIPData = parseSIPPacket(string(payload))
-			} else if isGRPC(payload) {
-				display.Protocol = "gRPC"
-				display.Info = "gRPC/HTTP2"
-			} else if isDNS(payload) {
-				display.Protocol = "DNS"
-				display.Info = "DNS Query/Response"
-			}
-		}
-	}
-
-	// Check for RTP (if UDP and in typical RTP port range)
-	if display.Protocol == "UDP" && udpLayer != nil {
-		srcPort := int(udpLayer.SrcPort)
-		dstPort := int(udpLayer.DstPort)
-		if (srcPort >= 10000 && srcPort <= 20000) || (dstPort >= 10000 && dstPort <= 20000) {
-			if appLayer := pkt.ApplicationLayer(); appLayer != nil {
-				if rtpData := parseRTPPacket(appLayer.Payload()); rtpData != nil {
-					display.Protocol = "RTP"
-					display.VoIPData = rtpData
-					display.Info = rtpData.Codec
+		// Generate display info from metadata
+		switch detectionResult.Protocol {
+		case "SIP":
+			if firstLine, ok := detectionResult.Metadata["first_line"].(string); ok {
+				if len(firstLine) > 60 {
+					display.Info = firstLine[:60] + "..."
+				} else {
+					display.Info = firstLine
 				}
+			} else {
+				display.Info = "SIP message"
 			}
+			// Convert metadata to VoIPData for compatibility
+			display.VoIPData = metadataToVoIPData(detectionResult.Metadata)
+
+		case "RTP":
+			if codec, ok := detectionResult.Metadata["codec"].(string); ok {
+				display.Info = codec
+			} else {
+				display.Info = "RTP stream"
+			}
+			// Convert metadata to VoIPData for compatibility
+			display.VoIPData = metadataToVoIPData(detectionResult.Metadata)
+
+		case "DNS":
+			display.Info = "DNS Query/Response"
+
+		case "gRPC", "HTTP2":
+			display.Info = "gRPC/HTTP2"
+
+		default:
+			display.Info = detectionResult.Protocol
 		}
 	}
 
@@ -746,4 +748,47 @@ func rtpPayloadTypeToCodec(pt uint8) string {
 		return codec
 	}
 	return "Unknown"
+}
+
+// metadataToVoIPData converts detector metadata to VoIPMetadata for compatibility
+func metadataToVoIPData(metadata map[string]interface{}) *components.VoIPMetadata {
+	voipData := &components.VoIPMetadata{
+		Headers: make(map[string]string),
+	}
+
+	// Convert common fields
+	if method, ok := metadata["method"].(string); ok {
+		voipData.Method = method
+	}
+	if from, ok := metadata["from"].(string); ok {
+		voipData.From = from
+	}
+	if to, ok := metadata["to"].(string); ok {
+		voipData.To = to
+	}
+	if callID, ok := metadata["call_id"].(string); ok {
+		voipData.CallID = callID
+	}
+	if user, ok := metadata["from_user"].(string); ok {
+		voipData.User = user
+	}
+
+	// RTP-specific fields
+	if ssrc, ok := metadata["ssrc"].(uint32); ok {
+		voipData.SSRC = ssrc
+		voipData.IsRTP = true
+	}
+	if seqNum, ok := metadata["sequence_number"].(uint16); ok {
+		voipData.SeqNumber = seqNum
+	}
+	if codec, ok := metadata["codec"].(string); ok {
+		voipData.Codec = codec
+	}
+
+	// Convert headers map
+	if headers, ok := metadata["headers"].(map[string]string); ok {
+		voipData.Headers = headers
+	}
+
+	return voipData
 }

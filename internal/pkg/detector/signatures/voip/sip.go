@@ -3,7 +3,6 @@ package voip
 import (
 	"strings"
 
-	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 )
 
@@ -58,11 +57,11 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 			confidence := s.calculateConfidence(ctx, metadata)
 
 			// Check if we're on standard SIP port for confidence boost
-			portFactor := detector.PortBasedConfidence(ctx.SrcPort, []uint16{5060, 5061})
+			portFactor := signatures.PortBasedConfidence(ctx.SrcPort, []uint16{5060, 5061})
 			if portFactor < 1.0 {
-				portFactor = detector.PortBasedConfidence(ctx.DstPort, []uint16{5060, 5061})
+				portFactor = signatures.PortBasedConfidence(ctx.DstPort, []uint16{5060, 5061})
 			}
-			confidence = detector.AdjustConfidenceByContext(confidence, map[string]float64{
+			confidence = signatures.AdjustConfidenceByContext(confidence, map[string]float64{
 				"port": portFactor,
 			})
 
@@ -156,10 +155,10 @@ func (s *SIPSignature) extractMetadata(payload string) map[string]interface{} {
 
 // calculateConfidence determines confidence level based on SIP indicators
 func (s *SIPSignature) calculateConfidence(ctx *signatures.DetectionContext, metadata map[string]interface{}) float64 {
-	indicators := []detector.Indicator{}
+	indicators := []signatures.Indicator{}
 
 	// Method/response indicator (very strong)
-	indicators = append(indicators, detector.Indicator{
+	indicators = append(indicators, signatures.Indicator{
 		Name:       "sip_method",
 		Weight:     0.5,
 		Confidence: signatures.ConfidenceVeryHigh,
@@ -167,7 +166,7 @@ func (s *SIPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Has Call-ID header (strong indicator)
 	if _, ok := metadata["call_id"]; ok {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "has_call_id",
 			Weight:     0.3,
 			Confidence: signatures.ConfidenceHigh,
@@ -176,7 +175,7 @@ func (s *SIPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Has From/To headers (strong indicator)
 	if _, ok := metadata["from"]; ok {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "has_from",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceHigh,
@@ -185,14 +184,14 @@ func (s *SIPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 
 	// Has valid SIP structure
 	if headers, ok := metadata["headers"].(map[string]string); ok && len(headers) > 0 {
-		indicators = append(indicators, detector.Indicator{
+		indicators = append(indicators, signatures.Indicator{
 			Name:       "has_headers",
 			Weight:     0.2,
 			Confidence: signatures.ConfidenceMedium,
 		})
 	}
 
-	return detector.ScoreDetection(indicators)
+	return signatures.ScoreDetection(indicators)
 }
 
 // Helper functions

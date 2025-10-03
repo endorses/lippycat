@@ -1388,7 +1388,6 @@ func (m Model) View() string {
 			m.width, m.height,
 			lipgloss.Center, lipgloss.Center,
 			selectorView,
-			lipgloss.WithWhitespaceBackground(m.theme.Background),
 		)
 	}
 

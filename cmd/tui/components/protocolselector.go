@@ -150,7 +150,6 @@ func (ps *ProtocolSelector) View() string {
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ps.theme.HeaderBg).
-		Background(ps.theme.StatusBarBg).
 		Padding(1, 2).
 		Width(modalWidth)
 

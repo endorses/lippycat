@@ -9,6 +9,7 @@ import (
 	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/cmd/tui"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -16,9 +17,10 @@ import (
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "lippycat",
-	Short: "lippycat sniffs for you",
-	Long:  `lippycat sniffs traffic for you, including voip traffic.`,
+	Use:     "lippycat",
+	Short:   "lippycat sniffs for you",
+	Long:    fmt.Sprintf("lippycat %s - Network traffic sniffer and analyzer\n\n%s", version.GetVersion(), "http://🫦🐱.ws"),
+	Version: version.GetFullVersion(),
 }
 
 func Execute() {

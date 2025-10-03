@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
@@ -59,7 +60,48 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		if len(ctx.Payload) >= len(methodBytes) &&
 			simd.BytesEqual(ctx.Payload[:len(methodBytes)], methodBytes) {
 			// Extract metadata (still needs string for parsing headers)
-			metadata := s.extractMetadata(string(ctx.Payload))
+			payloadStr := string(ctx.Payload)
+			metadata := s.extractMetadata(payloadStr)
+
+			// Extract SDP media ports for RTP correlation
+			mediaPorts := s.extractSDPMediaPorts(payloadStr)
+			if len(mediaPorts) > 0 {
+				// Store in flow context for RTP correlation
+				if ctx.Flow != nil {
+					// Get or create SIP flow state
+					var sipState *SIPFlowState
+					if ctx.Flow.State != nil {
+						sipState, _ = ctx.Flow.State.(*SIPFlowState)
+					}
+					if sipState == nil {
+						sipState = &SIPFlowState{
+							MediaPorts: make([]uint16, 0),
+						}
+						ctx.Flow.State = sipState
+					}
+
+					// Update Call-ID if available
+					if callID, ok := metadata["call_id"].(string); ok {
+						sipState.CallID = callID
+					}
+
+					// Add new media ports (avoid duplicates)
+					for _, port := range mediaPorts {
+						found := false
+						for _, existing := range sipState.MediaPorts {
+							if existing == port {
+								found = true
+								break
+							}
+						}
+						if !found {
+							sipState.MediaPorts = append(sipState.MediaPorts, port)
+						}
+					}
+
+					metadata["media_ports"] = mediaPorts
+				}
+			}
 
 			// Calculate confidence
 			confidence := s.calculateConfidence(ctx, metadata)
@@ -247,4 +289,49 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// extractSDPMediaPorts extracts RTP media ports from SDP (Session Description Protocol)
+// embedded in SIP messages
+func (s *SIPSignature) extractSDPMediaPorts(payload string) []uint16 {
+	ports := make([]uint16, 0)
+
+	// Look for SDP content (appears after empty line in SIP message)
+	lines := strings.Split(payload, "\n")
+	inSDP := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Empty line marks start of SDP body
+		if line == "" {
+			inSDP = true
+			continue
+		}
+
+		if !inSDP {
+			continue
+		}
+
+		// SDP media lines: m=audio 49170 RTP/AVP 0
+		// Format: m=<media> <port> <proto> <fmt>
+		if strings.HasPrefix(line, "m=") {
+			parts := strings.Fields(line)
+			if len(parts) >= 3 {
+				// parts[0] = "m=audio" or "m=video"
+				// parts[1] = port number
+				// parts[2] = protocol (RTP/AVP, etc.)
+
+				// Extract port from parts[1]
+				var port int
+				if _, err := fmt.Sscanf(parts[1], "%d", &port); err == nil {
+					if port > 0 && port <= 65535 {
+						ports = append(ports, uint16(port))
+					}
+				}
+			}
+		}
+	}
+
+	return ports
 }

@@ -22,14 +22,17 @@ var TuiCmd = &cobra.Command{
 }
 
 var (
-	interfaces  string
-	filter      string
-	readFile    string
-	bufferSize  int
-	promiscuous bool
-	themeName   string
-	remoteMode  bool
-	nodesFile   string
+	interfaces    string
+	filter        string
+	readFile      string
+	bufferSize    int
+	promiscuous   bool
+	themeName     string
+	remoteMode    bool
+	nodesFile     string
+	enableGPU     bool
+	gpuBackend    string
+	gpuBatchSize  int
 )
 
 func runTUI(cmd *cobra.Command, args []string) {
@@ -99,7 +102,13 @@ func init() {
 	TuiCmd.Flags().StringVar(&themeName, "theme", "", "color theme: 'dark', 'light', 'solarized-dark', 'solarized-light' (default: saved preference or dark)")
 	TuiCmd.Flags().BoolVar(&remoteMode, "remote", false, "start in remote capture mode")
 	TuiCmd.Flags().StringVar(&nodesFile, "nodes-file", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
+	TuiCmd.Flags().BoolVar(&enableGPU, "enable-gpu", false, "enable GPU-accelerated VoIP parsing")
+	TuiCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
+	TuiCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
 
 	viper.BindPFlag("promiscuous", TuiCmd.Flags().Lookup("promiscuous"))
 	viper.BindPFlag("tui.theme", TuiCmd.Flags().Lookup("theme"))
+	viper.BindPFlag("tui.gpu.enabled", TuiCmd.Flags().Lookup("enable-gpu"))
+	viper.BindPFlag("tui.gpu.backend", TuiCmd.Flags().Lookup("gpu-backend"))
+	viper.BindPFlag("tui.gpu.batch_size", TuiCmd.Flags().Lookup("gpu-batch-size"))
 }

@@ -33,14 +33,17 @@ Example:
 }
 
 var (
-	processorAddr string
-	hunterID      string
-	interfaces    []string
-	bpfFilter     string
-	bufferSize    int
-	batchSize     int
-	batchTimeout  int
-	promiscuous   bool
+	processorAddr    string
+	hunterID         string
+	interfaces       []string
+	bpfFilter        string
+	bufferSize       int
+	batchSize        int
+	batchTimeout     int
+	promiscuous      bool
+	enableVoIPFilter bool
+	gpuBackend       string
+	gpuBatchSize     int
 )
 
 func init() {
@@ -59,6 +62,11 @@ func init() {
 	HuntCmd.Flags().IntVarP(&batchSize, "batch-size", "", 64, "Packets per batch sent to processor")
 	HuntCmd.Flags().IntVarP(&batchTimeout, "batch-timeout", "", 100, "Batch timeout in milliseconds")
 
+	// VoIP filtering with GPU acceleration
+	HuntCmd.Flags().BoolVar(&enableVoIPFilter, "enable-voip-filter", false, "Enable GPU-accelerated VoIP filtering")
+	HuntCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
+	HuntCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "Batch size for GPU processing")
+
 	// Bind to viper for config file support
 	viper.BindPFlag("hunter.processor_addr", HuntCmd.Flags().Lookup("processor"))
 	viper.BindPFlag("hunter.hunter_id", HuntCmd.Flags().Lookup("hunter-id"))
@@ -68,6 +76,9 @@ func init() {
 	viper.BindPFlag("hunter.batch_size", HuntCmd.Flags().Lookup("batch-size"))
 	viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.Flags().Lookup("batch-timeout"))
 	viper.BindPFlag("promiscuous", HuntCmd.Flags().Lookup("promisc"))
+	viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.Flags().Lookup("enable-voip-filter"))
+	viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.Flags().Lookup("gpu-backend"))
+	viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.Flags().Lookup("gpu-batch-size"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {
@@ -75,13 +86,16 @@ func runHunt(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := hunter.Config{
-		ProcessorAddr: getStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:      getStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:    getStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:     getStringConfig("hunter.bpf_filter", bpfFilter),
-		BufferSize:    getIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:     getIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:  time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		ProcessorAddr:    getStringConfig("hunter.processor_addr", processorAddr),
+		HunterID:         getStringConfig("hunter.hunter_id", hunterID),
+		Interfaces:       getStringSliceConfig("hunter.interfaces", interfaces),
+		BPFFilter:        getStringConfig("hunter.bpf_filter", bpfFilter),
+		BufferSize:       getIntConfig("hunter.buffer_size", bufferSize),
+		BatchSize:        getIntConfig("hunter.batch_size", batchSize),
+		BatchTimeout:     time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		EnableVoIPFilter: getBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
+		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
+		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
 	}
 
 	// Set default hunter ID to hostname if not specified
@@ -169,6 +183,13 @@ func getIntConfig(key string, flagValue int) int {
 	// Simplified version without circular reference
 	if viper.IsSet(key) {
 		return viper.GetInt(key)
+	}
+	return flagValue
+}
+
+func getBoolConfig(key string, flagValue bool) bool {
+	if viper.IsSet(key) {
+		return viper.GetBool(key)
 	}
 	return flagValue
 }

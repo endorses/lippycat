@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket/tcpassembly"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -32,6 +33,10 @@ type Config struct {
 	// Flow control settings
 	MaxBufferedBatches int           // Max batches to buffer before blocking (0 = unlimited)
 	SendTimeout        time.Duration // Timeout for sending batches (0 = no timeout)
+	// VoIP filtering
+	EnableVoIPFilter bool   // Enable VoIP filtering with GPU acceleration
+	GPUBackend       string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
+	GPUBatchSize     int    // Batch size for GPU processing
 }
 
 // Hunter represents a hunter node
@@ -67,7 +72,8 @@ type Hunter struct {
 	mu    sync.RWMutex
 
 	// Filters
-	filters []*management.Filter
+	filters    []*management.Filter
+	voipFilter *VoIPFilter // GPU-accelerated VoIP filter
 
 	// Reconnection
 	reconnectAttempts int
@@ -127,6 +133,33 @@ func (h *Hunter) Start(ctx context.Context) error {
 	defer h.cancel()
 
 	logger.Info("Hunter starting", "hunter_id", h.config.HunterID)
+
+	// Initialize VoIP filter if enabled
+	if h.config.EnableVoIPFilter {
+		gpuConfig := &voip.GPUConfig{
+			Enabled:      true,
+			DeviceID:     0,
+			Backend:      h.config.GPUBackend,
+			MaxBatchSize: h.config.GPUBatchSize,
+			PinnedMemory: true,
+			StreamCount:  4,
+		}
+
+		voipFilter, err := NewVoIPFilter(gpuConfig)
+		if err != nil {
+			logger.Warn("Failed to initialize VoIP filter, continuing without it", "error", err)
+		} else {
+			h.voipFilter = voipFilter
+			logger.Info("VoIP filter initialized",
+				"gpu_backend", h.config.GPUBackend,
+				"batch_size", h.config.GPUBatchSize)
+		}
+	}
+	defer func() {
+		if h.voipFilter != nil {
+			h.voipFilter.Close()
+		}
+	}()
 
 	// Start packet capture first (works independently of processor connection)
 	if err := h.startCapture(); err != nil {
@@ -337,6 +370,16 @@ func (h *Hunter) forwardPackets() {
 
 			// Use atomic increment - no mutex needed
 			h.stats.PacketsCaptured.Add(1)
+
+			// Apply VoIP filter if enabled
+			if h.voipFilter != nil {
+				if !h.voipFilter.MatchPacket(pktInfo.Packet) {
+					// Packet didn't match VoIP filter - skip it
+					continue
+				}
+				// Packet matched - count it
+				h.stats.PacketsMatched.Add(1)
+			}
 
 			// Convert to protobuf packet
 			pbPkt := h.convertPacket(pktInfo)

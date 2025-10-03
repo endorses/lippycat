@@ -405,6 +405,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 	}
 
 	// Extract transport layer info
+	var udpLayer *layers.UDP
 	if transLayer := pkt.TransportLayer(); transLayer != nil {
 		switch trans := transLayer.(type) {
 		case *layers.TCP:
@@ -415,6 +416,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				display.SrcPort, display.DstPort, tcpFlags(trans))
 
 		case *layers.UDP:
+			udpLayer = trans // Save for RTP detection later
 			display.Protocol = "UDP"
 			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
@@ -445,9 +447,26 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 			if isSIP(payloadStr) {
 				display.Protocol = "SIP"
 				display.Info = extractSIPInfo(payloadStr)
+				// Parse full SIP metadata
+				display.VoIPData = parseSIPPacket(string(payload))
 			} else if isDNS(payload) {
 				display.Protocol = "DNS"
 				display.Info = "DNS Query/Response"
+			}
+		}
+	}
+
+	// Check for RTP (if UDP and in typical RTP port range)
+	if display.Protocol == "UDP" && udpLayer != nil {
+		srcPort := int(udpLayer.SrcPort)
+		dstPort := int(udpLayer.DstPort)
+		if (srcPort >= 10000 && srcPort <= 20000) || (dstPort >= 10000 && dstPort <= 20000) {
+			if appLayer := pkt.ApplicationLayer(); appLayer != nil {
+				if rtpData := parseRTPPacket(appLayer.Payload()); rtpData != nil {
+					display.Protocol = "RTP"
+					display.VoIPData = rtpData
+					display.Info = rtpData.Codec
+				}
 			}
 		}
 	}
@@ -555,4 +574,139 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// parseSIPPacket parses SIP packet and extracts metadata
+func parseSIPPacket(payload string) *components.VoIPMetadata {
+	metadata := &components.VoIPMetadata{
+		Headers: make(map[string]string),
+		IsRTP:   false,
+	}
+
+	lines := splitLines(payload)
+	if len(lines) == 0 {
+		return nil
+	}
+
+	// Parse SIP method (first line)
+	metadata.Method = extractSIPMethod(lines[0])
+
+	// Parse headers
+	for _, line := range lines[1:] {
+		if line == "" {
+			break // End of headers
+		}
+		key, value := parseSIPHeader(line)
+		if key != "" {
+			metadata.Headers[key] = value
+
+			// Extract common fields
+			switch key {
+			case "From":
+				metadata.From = value
+				metadata.User = extractUserFromURI(value)
+			case "To":
+				metadata.To = value
+			case "Call-ID":
+				metadata.CallID = value
+			}
+		}
+	}
+
+	return metadata
+}
+
+// parseRTPPacket parses RTP packet and extracts metadata
+func parseRTPPacket(payload []byte) *components.VoIPMetadata {
+	if len(payload) < 12 {
+		return nil
+	}
+
+	// RTP header check (version should be 2)
+	version := (payload[0] >> 6) & 0x03
+	if version != 2 {
+		return nil
+	}
+
+	metadata := &components.VoIPMetadata{
+		IsRTP:   true,
+		Headers: make(map[string]string),
+	}
+
+	// Extract SSRC (bytes 8-11)
+	metadata.SSRC = uint32(payload[8])<<24 | uint32(payload[9])<<16 | uint32(payload[10])<<8 | uint32(payload[11])
+
+	// Extract sequence number (bytes 2-3)
+	metadata.SeqNumber = uint16(payload[2])<<8 | uint16(payload[3])
+
+	// Extract payload type (byte 1, lower 7 bits)
+	payloadType := payload[1] & 0x7F
+	metadata.Codec = rtpPayloadTypeToCodec(payloadType)
+	metadata.Method = metadata.Codec // Store codec in Method field for display
+
+	return metadata
+}
+
+// extractSIPMethod extracts the SIP method from the first line
+func extractSIPMethod(line string) string {
+	for i := 0; i < len(line); i++ {
+		if line[i] == ' ' {
+			return line[:i]
+		}
+	}
+	return line
+}
+
+// parseSIPHeader parses a SIP header line
+func parseSIPHeader(line string) (string, string) {
+	for i := 0; i < len(line); i++ {
+		if line[i] == ':' {
+			key := line[:i]
+			value := line[i+1:]
+			if len(value) > 0 && value[0] == ' ' {
+				value = value[1:]
+			}
+			return key, value
+		}
+	}
+	return "", ""
+}
+
+// extractUserFromURI extracts username from SIP URI
+func extractUserFromURI(uri string) string {
+	// Extract username from SIP URI: "Alice <sip:alice@domain.com>"
+	start := -1
+	for i := 0; i < len(uri); i++ {
+		if uri[i] == ':' {
+			start = i + 1
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+
+	for i := start; i < len(uri); i++ {
+		if uri[i] == '@' {
+			return uri[start:i]
+		}
+	}
+	return ""
+}
+
+// rtpPayloadTypeToCodec maps RTP payload type to codec name
+func rtpPayloadTypeToCodec(pt uint8) string {
+	codecs := map[uint8]string{
+		0:  "G.711 µ-law",
+		8:  "G.711 A-law",
+		9:  "G.722",
+		18: "G.729",
+		97: "Dynamic",
+		98: "Dynamic",
+		99: "Dynamic",
+	}
+	if codec, ok := codecs[pt]; ok {
+		return codec
+	}
+	return "Unknown"
 }

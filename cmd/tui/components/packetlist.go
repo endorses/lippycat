@@ -9,6 +9,20 @@ import (
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
 
+// VoIPMetadata contains parsed VoIP-specific data
+type VoIPMetadata struct {
+	From      string            // SIP From header
+	To        string            // SIP To header
+	CallID    string            // SIP Call-ID header
+	Method    string            // SIP method (INVITE, BYE, etc.)
+	User      string            // Username from URI
+	Codec     string            // RTP codec (if applicable)
+	Headers   map[string]string // All SIP headers
+	IsRTP     bool              // Whether this is an RTP packet
+	SSRC      uint32            // RTP SSRC
+	SeqNumber uint16            // RTP sequence number
+}
+
 // PacketDisplay represents a packet for display
 type PacketDisplay struct {
 	Timestamp time.Time
@@ -19,9 +33,10 @@ type PacketDisplay struct {
 	Protocol  string
 	Length    int
 	Info      string
-	RawData   []byte // Raw packet bytes for hex dump
-	NodeID    string // Source node identifier: "Local", hunter_id, or processor_id
-	Interface string // Network interface where packet was captured
+	RawData   []byte        // Raw packet bytes for hex dump
+	NodeID    string        // Source node identifier: "Local", hunter_id, or processor_id
+	Interface string        // Network interface where packet was captured
+	VoIPData  *VoIPMetadata // Parsed VoIP metadata (nil if not VoIP)
 }
 
 // PacketList is a component that displays a list of packets

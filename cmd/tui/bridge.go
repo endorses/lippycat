@@ -32,25 +32,32 @@ var (
 
 	// String interning for protocol names (reduce memory footprint)
 	protocolStrings = map[string]string{
-		"TCP":     "TCP",
-		"UDP":     "UDP",
-		"SIP":     "SIP",
-		"RTP":     "RTP",
-		"DNS":     "DNS",
-		"HTTP":    "HTTP",
-		"HTTPS":   "HTTPS",
-		"TLS":     "TLS",
-		"SSL":     "SSL",
-		"ICMP":    "ICMP",
-		"ICMPv6":  "ICMPv6",
-		"ARP":     "ARP",
-		"LLC":     "LLC",
-		"LLDP":    "LLDP",
-		"CDP":     "CDP",
-		"802.1Q":  "802.1Q",
-		"802.1X":  "802.1X",
-		"Unknown": "Unknown",
-		"unknown": "unknown",
+		"TCP":       "TCP",
+		"UDP":       "UDP",
+		"SIP":       "SIP",
+		"RTP":       "RTP",
+		"DNS":       "DNS",
+		"HTTP":      "HTTP",
+		"HTTPS":     "HTTPS",
+		"TLS":       "TLS",
+		"SSL":       "SSL",
+		"ICMP":      "ICMP",
+		"ICMPv6":    "ICMPv6",
+		"ARP":       "ARP",
+		"LLC":       "LLC",
+		"LLDP":      "LLDP",
+		"CDP":       "CDP",
+		"802.1Q":    "802.1Q",
+		"802.1X":    "802.1X",
+		"OpenVPN":   "OpenVPN",
+		"WireGuard": "WireGuard",
+		"L2TP":      "L2TP",
+		"PPTP":      "PPTP",
+		"IKEv2":     "IKEv2",
+		"IKEv1":     "IKEv1",
+		"IKE":       "IKE",
+		"Unknown":   "Unknown",
+		"unknown":   "unknown",
 	}
 	protocolMu sync.RWMutex
 )
@@ -667,6 +674,59 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				}
 			} else {
 				display.Info = "IMAP"
+			}
+
+		case "OpenVPN":
+			if typeName, ok := detectionResult.Metadata["type_name"].(string); ok {
+				display.Info = typeName
+			} else if opcodeName, ok := detectionResult.Metadata["opcode_name"].(string); ok {
+				display.Info = opcodeName
+			} else {
+				display.Info = "OpenVPN"
+			}
+
+		case "WireGuard":
+			if typeName, ok := detectionResult.Metadata["type_name"].(string); ok {
+				display.Info = typeName
+			} else {
+				display.Info = "WireGuard"
+			}
+
+		case "L2TP":
+			if packetType, ok := detectionResult.Metadata["packet_type"].(string); ok {
+				if version, ok := detectionResult.Metadata["version"].(uint16); ok {
+					display.Info = fmt.Sprintf("L2TPv%d %s", version, packetType)
+				} else {
+					display.Info = packetType
+				}
+			} else {
+				display.Info = "L2TP"
+			}
+
+		case "PPTP":
+			if ctrlType, ok := detectionResult.Metadata["control_type_name"].(string); ok {
+				display.Info = ctrlType
+			} else if category, ok := detectionResult.Metadata["category"].(string); ok {
+				display.Info = category
+			} else {
+				display.Info = "PPTP"
+			}
+
+		case "IKEv2", "IKEv1", "IKE":
+			if exchangeName, ok := detectionResult.Metadata["exchange_name"].(string); ok {
+				if isResp, ok := detectionResult.Metadata["is_response"].(bool); ok {
+					if isResp {
+						display.Info = exchangeName + " (response)"
+					} else {
+						display.Info = exchangeName + " (request)"
+					}
+				} else {
+					display.Info = exchangeName
+				}
+			} else if version, ok := detectionResult.Metadata["version"].(float64); ok {
+				display.Info = fmt.Sprintf("IKEv%.1f", version)
+			} else {
+				display.Info = detectionResult.Protocol
 			}
 
 		default:

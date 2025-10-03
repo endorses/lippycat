@@ -7,6 +7,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures/link"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures/network"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures/voip"
+	"github.com/endorses/lippycat/internal/pkg/detector/signatures/vpn"
 )
 
 var (
@@ -23,6 +24,13 @@ func InitDefault() *Detector {
 		// Register VoIP signatures
 		DefaultDetector.RegisterSignature(voip.NewSIPSignature())  // Priority 150
 		DefaultDetector.RegisterSignature(voip.NewRTPSignature())  // Priority 140
+
+		// Register VPN/Tunneling signatures
+		DefaultDetector.RegisterSignature(vpn.NewOpenVPNSignature())           // Priority 100
+		DefaultDetector.RegisterSignature(vpn.NewWireGuardSignature())         // Priority 100
+		DefaultDetector.RegisterSignature(vpn.NewL2TPSignature())              // Priority 100
+		DefaultDetector.RegisterSignature(vpn.NewPPTPSignature())              // Priority 100
+		DefaultDetector.RegisterSignature(vpn.NewIKEv2Signature())             // Priority 100
 
 		// Register application signatures (in priority order)
 		DefaultDetector.RegisterSignature(application.NewGRPCSignature())      // Priority 130

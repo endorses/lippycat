@@ -1511,9 +1511,11 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
-		// Insert character
-		if len(msg.Runes) == 1 {
-			m.filterInput.InsertRune(msg.Runes[0])
+		// Insert character(s) - handles both single keypress and paste
+		if len(msg.Runes) > 0 {
+			for _, r := range msg.Runes {
+				m.filterInput.InsertRune(r)
+			}
 		}
 		return m, nil
 	}

@@ -23,10 +23,19 @@ This architecture allows for:
 - **CLI Framework**: Uses Cobra CLI framework with Viper for configuration
 - **Plugin System**: Extensible architecture allowing protocol-specific analyzers to be added
 - **Main Components**:
-  - `cmd/`: CLI command definitions and argument handling, including TUI mode
+  - `cmd/`: CLI command definitions and argument handling
   - `cmd/tui/`: Terminal User Interface with Bubbletea framework
+  - `cmd/hunt/`: Hunter node implementation for distributed capture
+  - `cmd/process/`: Processor node implementation for distributed analysis
   - `internal/pkg/capture/`: Network packet capture functionality using gopacket
   - `internal/pkg/voip/`: VoIP protocol plugin (SIP, RTP, call tracking)
+  - `internal/pkg/hunter/`: Hunter node core logic and gRPC client
+  - `internal/pkg/processor/`: Processor node core logic and gRPC server
+  - `internal/pkg/remotecapture/`: Remote capture infrastructure
+  - `internal/pkg/simd/`: SIMD optimizations (AVX2/SSE4.2)
+  - `internal/pkg/logger/`: Structured logging
+  - `api/proto/`: gRPC protocol buffer definitions
+  - `api/gen/`: Generated gRPC code for data and management services
 
 ## Key Dependencies
 - `github.com/spf13/cobra`: CLI framework
@@ -76,15 +85,43 @@ go mod download
 
 ## CLI Usage
 
-### Standalone Mode
+### Available Commands
 - `lippycat sniff`: CLI mode for packet capture with various output formats
+- `lippycat sniff voip`: VoIP-specific packet capture with SIP/RTP analysis
 - `lippycat tui`: TUI mode for interactive real-time packet monitoring on local interface
+- `lippycat hunt`: Hunter node for distributed capture (forwards packets to processor)
+- `lippycat process`: Processor node for distributed analysis (receives from hunters)
+- `lippycat interfaces`: List available network interfaces
+- `lippycat debug`: Debug and inspect TCP SIP processing components
+
+### Standalone Mode
+```bash
+# General packet capture
+sudo lippycat sniff --interface eth0 --filter "port 80"
+
+# VoIP-specific capture
+sudo lippycat sniff voip --interface eth0 --sipuser alice
+
+# Interactive TUI
+sudo lippycat tui
+```
 
 ### Distributed Mode
-- **Processor Node**: `lippycat tui --mode processor` - Start as processor node, accepting connections from hunters
-- **Hunter Node**: `lippycat sniff --mode hunter --processor <address>` - Start as hunter node, forwarding packets to processor
+```bash
+# Start processor node (receives packets from hunters)
+lippycat process --listen 0.0.0.0:50051
 
-Configuration via YAML file at `$HOME/.config/lippycat.yaml` (preferred) or `$HOME/.lippycat.yaml` (legacy)
+# Start hunter node (captures and forwards packets)
+sudo lippycat hunt --interface eth0 --processor processor-host:50051
+
+# Monitor remote nodes via TUI
+lippycat tui --remote --nodes-file nodes.yaml
+```
+
+Configuration via YAML file (in priority order):
+1. `$HOME/.config/lippycat/config.yaml` (preferred)
+2. `$HOME/.config/lippycat.yaml` (XDG standard)
+3. `$HOME/.lippycat.yaml` (legacy)
 
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.

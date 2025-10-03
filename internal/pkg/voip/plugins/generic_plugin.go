@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -140,20 +141,22 @@ func (g *GenericPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packe
 		}
 	}
 
+	// Use centralized detector for protocol detection
+	detectionResult := detector.GetDefault().Detect(packet)
+	if detectionResult != nil && detectionResult.Protocol != "unknown" {
+		result.Protocol = detectionResult.Protocol
+		result.Confidence = detectionResult.Confidence
+
+		// Merge detection metadata
+		for k, v := range detectionResult.Metadata {
+			result.Metadata[k] = v
+		}
+	}
+
 	// Extract application layer information if available
 	if appLayer := packet.ApplicationLayer(); appLayer != nil {
 		payload := appLayer.Payload()
 		result.Metadata["payload_size"] = len(payload)
-
-		// Try to detect protocol hints from payload
-		if len(payload) > 0 {
-			protocolHint := g.detectProtocolHint(payload)
-			if protocolHint != "" {
-				result.Metadata["protocol_hint"] = protocolHint
-				result.Protocol = protocolHint
-				result.Confidence = 0.7 // Higher confidence with protocol hint
-			}
-		}
 	}
 
 	// Add timestamp
@@ -165,69 +168,6 @@ func (g *GenericPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packe
 	}
 
 	return result, nil
-}
-
-// detectProtocolHint attempts to detect protocol from payload content
-func (g *GenericPlugin) detectProtocolHint(payload []byte) string {
-	if len(payload) < 4 {
-		return ""
-	}
-
-	payloadStr := string(payload[:min(len(payload), 100)])
-
-	// Check for common protocol signatures
-	if strings.Contains(strings.ToUpper(payloadStr), "HTTP/") {
-		return "http"
-	}
-
-	if strings.Contains(strings.ToUpper(payloadStr), "RTSP/") {
-		return "rtsp"
-	}
-
-	// Check for SIP (fallback in case SIP plugin missed it)
-	if strings.Contains(payloadStr, "SIP/2.0") ||
-	   strings.HasPrefix(payloadStr, "INVITE ") ||
-	   strings.HasPrefix(payloadStr, "REGISTER ") {
-		return "sip"
-	}
-
-	// Check for STUN/TURN
-	if len(payload) >= 20 && payload[0] == 0x00 && (payload[1] == 0x01 || payload[1] == 0x11) {
-		return "stun"
-	}
-
-	// Check for gRPC/HTTP2 (connection preface or frame)
-	if len(payload) >= 24 && string(payload[:24]) == "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" {
-		return "grpc"
-	}
-	// Check for HTTP/2 frame headers (3-byte length + 1-byte type + 1-byte flags + 4-byte stream ID)
-	if len(payload) >= 9 && payload[3] < 0x0B { // Valid HTTP/2 frame types are 0x00-0x0A
-		return "grpc"
-	}
-
-	// Check for DNS - must have valid DNS header structure
-	if len(payload) >= 12 {
-		// DNS header: ID(2) + Flags(2) + Questions(2) + Answers(2) + Authority(2) + Additional(2)
-		// Check for reasonable DNS flags and question count
-		flags := uint16(payload[2])<<8 | uint16(payload[3])
-		questionCount := uint16(payload[4])<<8 | uint16(payload[5])
-
-		// DNS must have at least one question, and flags should look reasonable
-		// QR bit (0x8000), Opcode (0x7800), and RCODE (0x000F) within valid ranges
-		opcode := (flags >> 11) & 0x0F
-		rcode := flags & 0x0F
-
-		if questionCount > 0 && questionCount < 100 && opcode <= 5 && rcode <= 10 {
-			return "dns"
-		}
-	}
-
-	// Check for DHCP
-	if len(payload) >= 4 && (payload[0] == 0x01 || payload[0] == 0x02) {
-		return "dhcp"
-	}
-
-	return ""
 }
 
 // generatePseudoCallID creates a pseudo call ID for packet correlation
@@ -322,7 +262,7 @@ func (f *GenericPluginFactory) PluginInfo() PluginInfo {
 		Name:        "Generic Protocol Handler",
 		Version:     "1.0.0",
 		Author:      "lippycat",
-		Description: "Handles generic packet analysis for unknown protocols and provides fallback processing",
+		Description: "Handles generic packet analysis using centralized detector",
 		Protocols:   []string{"generic", "unknown"},
 		Config: PluginConfig{
 			Enabled:  true,
@@ -330,12 +270,4 @@ func (f *GenericPluginFactory) PluginInfo() PluginInfo {
 			Timeout:  1 * time.Second,
 		},
 	}
-}
-
-// Helper function (define locally since it's commonly used)
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

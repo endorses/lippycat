@@ -88,6 +88,19 @@ func (f *FilterInput) AddToHistory(value string) {
 	}
 }
 
+// GetHistory returns the filter history
+func (f *FilterInput) GetHistory() []string {
+	return f.history
+}
+
+// SetHistory sets the filter history
+func (f *FilterInput) SetHistory(history []string) {
+	f.history = history
+	if len(f.history) > 20 {
+		f.history = f.history[:20]
+	}
+}
+
 // HistoryUp navigates up in history
 func (f *FilterInput) HistoryUp() {
 	if len(f.history) == 0 {

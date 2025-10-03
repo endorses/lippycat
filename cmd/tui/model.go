@@ -136,6 +136,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 
 	filterInput := components.NewFilterInput("/")
 	filterInput.SetTheme(theme)
+	// Load filter history from config
+	loadFilterHistory(&filterInput)
 
 	// Determine initial capture mode and interface name
 	initialMode := components.CaptureModeLive
@@ -1368,6 +1370,8 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if filterValue != "" {
 			m.parseAndApplyFilter(filterValue)
 			m.filterInput.AddToHistory(filterValue)
+			// Save filter history to config
+			saveFilterHistory(&m.filterInput)
 		} else {
 			// Empty filter = clear all filters
 			m.filterChain.Clear()
@@ -1443,29 +1447,9 @@ func (m *Model) parseAndApplyFilter(filterStr string) {
 		return
 	}
 
-	// Detect filter type based on syntax
-	if strings.Contains(filterStr, "sip.") {
-		// VoIP filter: sip.user:alice, sip.from:555*, etc.
-		parts := strings.SplitN(filterStr, ":", 2)
-		if len(parts) == 2 {
-			field := strings.TrimPrefix(parts[0], "sip.")
-			value := parts[1]
-			filter := filters.NewVoIPFilter(field, value)
-			m.filterChain.Add(filter)
-		}
-	} else if isBPFExpression(filterStr) {
-		// BPF filter: port 5060, host 192.168.1.1, tcp, udp, etc.
-		filter, err := filters.NewBPFFilter(filterStr)
-		if err == nil {
-			m.filterChain.Add(filter)
-		} else {
-			// Fall back to text filter if BPF parse fails
-			textFilter := filters.NewTextFilter(filterStr, []string{"all"})
-			m.filterChain.Add(textFilter)
-		}
-	} else {
-		// Simple text filter for anything else
-		filter := filters.NewTextFilter(filterStr, []string{"all"})
+	// Try to parse as boolean expression first
+	filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
+	if err == nil && filter != nil {
 		m.filterChain.Add(filter)
 	}
 
@@ -1478,6 +1462,32 @@ func (m *Model) parseAndApplyFilter(filterStr string) {
 	} else {
 		m.packetList.SetPackets(m.filteredPackets)
 	}
+}
+
+// parseSimpleFilter parses a simple (non-boolean) filter expression
+func (m *Model) parseSimpleFilter(filterStr string) filters.Filter {
+	filterStr = strings.TrimSpace(filterStr)
+
+	// Detect filter type based on syntax
+	if strings.Contains(filterStr, "sip.") {
+		// VoIP filter: sip.user:alice, sip.from:555*, etc.
+		parts := strings.SplitN(filterStr, ":", 2)
+		if len(parts) == 2 {
+			field := strings.TrimPrefix(parts[0], "sip.")
+			value := parts[1]
+			return filters.NewVoIPFilter(field, value)
+		}
+	} else if isBPFExpression(filterStr) {
+		// BPF filter: port 5060, host 192.168.1.1, tcp, udp, etc.
+		filter, err := filters.NewBPFFilter(filterStr)
+		if err == nil {
+			return filter
+		}
+		// Fall back to text filter if BPF parse fails
+	}
+
+	// Simple text filter for anything else
+	return filters.NewTextFilter(filterStr, []string{"all"})
 }
 
 // isBPFExpression checks if a string looks like a BPF expression
@@ -1622,5 +1632,44 @@ func startRemoteCapture(nodesFile string, remoteClients map[string]interface{ Cl
 			}
 		}
 	}()
+}
+
+// loadFilterHistory loads filter history from config
+func loadFilterHistory(filterInput *components.FilterInput) {
+	history := viper.GetStringSlice("tui.filter_history")
+	if len(history) > 0 {
+		filterInput.SetHistory(history)
+	}
+}
+
+// saveFilterHistory saves filter history to config
+func saveFilterHistory(filterInput *components.FilterInput) {
+	history := filterInput.GetHistory()
+	viper.Set("tui.filter_history", history)
+
+	// Write to config file
+	if err := viper.WriteConfig(); err != nil {
+		// If config file doesn't exist, create it
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return
+			}
+
+			// Use ~/.config/lippycat/config.yaml as primary location
+			configDir := filepath.Join(home, ".config", "lippycat")
+			if err := os.MkdirAll(configDir, 0755); err != nil {
+				return
+			}
+
+			configPath := filepath.Join(configDir, "config.yaml")
+			viper.SetConfigFile(configPath)
+
+			if err := viper.SafeWriteConfig(); err != nil {
+				// Silently ignore errors - history will still work for this session
+				return
+			}
+		}
+	}
 }
 

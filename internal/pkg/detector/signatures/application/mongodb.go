@@ -39,6 +39,18 @@ func (m *MongoDBSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 	//   - opCode (4 bytes, int32)
 	// Body: varies by opCode
 
+	// MongoDB uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known MongoDB ports (27017-27019)
+	onMongoPort := (ctx.SrcPort >= 27017 && ctx.SrcPort <= 27019) ||
+		(ctx.DstPort >= 27017 && ctx.DstPort <= 27019)
+	if !onMongoPort {
+		return nil
+	}
+
 	if len(ctx.Payload) < 16 {
 		return nil
 	}

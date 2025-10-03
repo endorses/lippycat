@@ -34,6 +34,17 @@ func (m *MySQLSignature) Detect(ctx *signatures.DetectionContext) *signatures.De
 	// MySQL packet structure:
 	// Payload length (3 bytes) + Sequence ID (1 byte) + Payload
 	// Minimum packet is 4 bytes header + 1 byte payload
+
+	// MySQL uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known MySQL port (3306)
+	if ctx.SrcPort != 3306 && ctx.DstPort != 3306 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 5 {
 		return nil
 	}

@@ -42,6 +42,16 @@ func (r *RedisSignature) Detect(ctx *signatures.DetectionContext) *signatures.De
 	// $ Bulk String
 	// * Array
 
+	// Redis uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known Redis port (6379)
+	if ctx.SrcPort != 6379 && ctx.DstPort != 6379 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 3 {
 		return nil
 	}

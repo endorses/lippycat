@@ -35,6 +35,17 @@ func (p *PostgreSQLSignature) Detect(ctx *signatures.DetectionContext) *signatur
 	// For startup: Length (4 bytes) + Protocol version (4 bytes) + parameters
 	// For regular: Type (1 byte) + Length (4 bytes) + payload
 
+	// PostgreSQL uses TCP only
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// STRICT: Only detect on well-known PostgreSQL port (5432)
+	// Message type detection is too permissive (any uppercase letter)
+	if ctx.SrcPort != 5432 && ctx.DstPort != 5432 {
+		return nil
+	}
+
 	if len(ctx.Payload) < 8 {
 		return nil
 	}

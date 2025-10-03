@@ -31,11 +31,16 @@ func InitDefault() *Detector {
 		DefaultDetector.RegisterSignature(application.NewNTPSignature())       // Priority 105
 		DefaultDetector.RegisterSignature(application.NewSSHSignature())       // Priority 100
 		DefaultDetector.RegisterSignature(application.NewSNMPSignature())      // Priority 100
+		DefaultDetector.RegisterSignature(application.NewPOP3Signature())      // Priority 95
+		DefaultDetector.RegisterSignature(application.NewIMAPSignature())      // Priority 95
 		DefaultDetector.RegisterSignature(application.NewFTPSignature())       // Priority 95
 		DefaultDetector.RegisterSignature(application.NewSMTPSignature())      // Priority 95
 		DefaultDetector.RegisterSignature(application.NewWebSocketSignature()) // Priority 90
 		DefaultDetector.RegisterSignature(application.NewMySQLSignature())     // Priority 90
 		DefaultDetector.RegisterSignature(application.NewPostgreSQLSignature())// Priority 90
+		DefaultDetector.RegisterSignature(application.NewMongoDBSignature())   // Priority 90
+		DefaultDetector.RegisterSignature(application.NewRedisSignature())     // Priority 90
+		DefaultDetector.RegisterSignature(application.NewTelnetSignature())    // Priority 85
 		DefaultDetector.RegisterSignature(application.NewTLSSignature())       // Priority 85
 		DefaultDetector.RegisterSignature(application.NewHTTPSignature())      // Priority 80
 

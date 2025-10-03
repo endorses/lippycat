@@ -604,6 +604,71 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				display.Info = "SNMP"
 			}
 
+		case "Redis":
+			if cmd, ok := detectionResult.Metadata["command"].(string); ok {
+				display.Info = cmd
+			} else if msg, ok := detectionResult.Metadata["message"].(string); ok {
+				display.Info = msg
+			} else if respType, ok := detectionResult.Metadata["resp_type"].(string); ok {
+				display.Info = respType
+			} else {
+				display.Info = "Redis"
+			}
+
+		case "MongoDB":
+			if opName, ok := detectionResult.Metadata["op_name"].(string); ok {
+				display.Info = opName
+			} else {
+				display.Info = "MongoDB"
+			}
+
+		case "Telnet":
+			if iacCount, ok := detectionResult.Metadata["iac_count"].(int); ok {
+				display.Info = fmt.Sprintf("Telnet negotiation (%d IAC)", iacCount)
+			} else {
+				display.Info = "Telnet"
+			}
+
+		case "POP3":
+			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
+				if msgType == "response" {
+					if status, ok := detectionResult.Metadata["status"].(string); ok {
+						display.Info = status
+					} else {
+						display.Info = "Response"
+					}
+				} else if msgType == "command" {
+					if cmd, ok := detectionResult.Metadata["command"].(string); ok {
+						display.Info = cmd
+					} else {
+						display.Info = "Command"
+					}
+				}
+			} else {
+				display.Info = "POP3"
+			}
+
+		case "IMAP":
+			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
+				if msgType == "response" {
+					if respType, ok := detectionResult.Metadata["response_type"].(string); ok {
+						display.Info = respType
+					} else if status, ok := detectionResult.Metadata["status"].(string); ok {
+						display.Info = status
+					} else {
+						display.Info = "Response"
+					}
+				} else if msgType == "command" {
+					if cmd, ok := detectionResult.Metadata["command"].(string); ok {
+						display.Info = cmd
+					} else {
+						display.Info = "Command"
+					}
+				}
+			} else {
+				display.Info = "IMAP"
+			}
+
 		default:
 			display.Info = detectionResult.Protocol
 		}

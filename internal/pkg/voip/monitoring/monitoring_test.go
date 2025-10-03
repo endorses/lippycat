@@ -142,7 +142,7 @@ func TestTracingExporter(t *testing.T) {
 	span.LogError("test error", assert.AnError, map[string]interface{}{"error_type": "test"})
 
 	// Test child span
-	childSpan, childCtx := tracer.StartSpan(newCtx, "child_operation", "child_component")
+	childSpan, _ := tracer.StartSpan(newCtx, "child_operation", "child_component")
 	require.NotNil(t, childSpan)
 	assert.Equal(t, span.TraceID, childSpan.TraceID)
 	assert.Equal(t, span.SpanID, childSpan.ParentID)
@@ -166,7 +166,7 @@ func TestSpanOperations(t *testing.T) {
 	tracer.Enable()
 
 	ctx := context.Background()
-	span, newCtx := tracer.StartSpan(ctx, "test", "test")
+	span, _ := tracer.StartSpan(ctx, "test", "test")
 	require.NotNil(t, span)
 
 	// Test tag operations

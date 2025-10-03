@@ -121,7 +121,7 @@ not_equal_sse2:
     RET
 
 // func indexByteAVX2(data []byte, c byte) int
-TEXT ·indexByteAVX2(SB), NOSPLIT, $0-33
+TEXT ·indexByteAVX2(SB), NOSPLIT, $0-40
     MOVQ data_base+0(FP), SI  // SI = &data[0]
     MOVQ data_len+8(FP), CX   // CX = len(data)
     MOVBQZX c+24(FP), DX      // DX = c (zero-extended)
@@ -188,7 +188,7 @@ found_scalar_avx2:
     RET
 
 // func indexByteSSE2(data []byte, c byte) int
-TEXT ·indexByteSSE2(SB), NOSPLIT, $0-33
+TEXT ·indexByteSSE2(SB), NOSPLIT, $0-40
     MOVQ data_base+0(FP), SI  // SI = &data[0]
     MOVQ data_len+8(FP), CX   // CX = len(data)
     MOVBQZX c+24(FP), DX      // DX = c

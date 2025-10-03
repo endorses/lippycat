@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 

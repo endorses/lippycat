@@ -120,10 +120,10 @@ not_equal_sse2:
     MOVB $0, ret+48(FP)
     RET
 
-// func indexByteAVX2(data []byte, c byte) int
-TEXT ·indexByteAVX2(SB), NOSPLIT, $0-33
-    MOVQ data_base+0(FP), SI  // SI = &data[0]
-    MOVQ data_len+8(FP), CX   // CX = len(data)
+// func indexByteAVX2(s []byte, c byte) int
+TEXT ·indexByteAVX2(SB), NOSPLIT, $0-40
+    MOVQ s_base+0(FP), SI     // SI = &s[0]
+    MOVQ s_len+8(FP), CX      // CX = len(s)
     MOVBQZX c+24(FP), DX      // DX = c (zero-extended)
 
     // Broadcast byte to all positions in YMM register
@@ -187,10 +187,10 @@ found_scalar_avx2:
     MOVQ AX, ret+32(FP)
     RET
 
-// func indexByteSSE2(data []byte, c byte) int
-TEXT ·indexByteSSE2(SB), NOSPLIT, $0-33
-    MOVQ data_base+0(FP), SI  // SI = &data[0]
-    MOVQ data_len+8(FP), CX   // CX = len(data)
+// func indexByteSSE2(s []byte, c byte) int
+TEXT ·indexByteSSE2(SB), NOSPLIT, $0-40
+    MOVQ s_base+0(FP), SI     // SI = &s[0]
+    MOVQ s_len+8(FP), CX      // CX = len(s)
     MOVBQZX c+24(FP), DX      // DX = c
 
     // Broadcast byte to all positions

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/simd"
 )
 
 // WebSocketSignature detects WebSocket protocol
@@ -47,12 +48,23 @@ func (w *WebSocketSignature) detectHandshake(ctx *signatures.DetectionContext) *
 		return nil
 	}
 
+	// Quick SIMD check for GET or HTTP prefix (case-sensitive, fast path)
+	getBytes := []byte("GET ")
+	httpBytes := []byte("HTTP/")
+
+	isGet := len(ctx.Payload) >= 4 && simd.BytesEqual(ctx.Payload[:4], getBytes)
+	isHttp := len(ctx.Payload) >= 5 && simd.BytesEqual(ctx.Payload[:5], httpBytes)
+
+	if !isGet && !isHttp {
+		return nil // Not HTTP at all, can't be WebSocket
+	}
+
 	payloadStr := string(ctx.Payload[:min(1000, len(ctx.Payload))])
 	lowerPayload := strings.ToLower(payloadStr)
 
 	// Check for WebSocket upgrade request
-	if strings.HasPrefix(lowerPayload, "get ") {
-		if !strings.Contains(lowerPayload, "upgrade: websocket") {
+	if isGet || strings.HasPrefix(lowerPayload, "get ") {
+		if !simd.StringContains(lowerPayload, "upgrade: websocket") {
 			return nil
 		}
 
@@ -113,8 +125,11 @@ func (w *WebSocketSignature) detectHandshake(ctx *signatures.DetectionContext) *
 	}
 
 	// Check for WebSocket upgrade response
-	if strings.HasPrefix(lowerPayload, "http/") && strings.Contains(lowerPayload, "101 switching protocols") {
-		if !strings.Contains(lowerPayload, "upgrade: websocket") {
+	if isHttp || strings.HasPrefix(lowerPayload, "http/") {
+		if !simd.StringContains(lowerPayload, "101 switching protocols") {
+			return nil
+		}
+		if !simd.StringContains(lowerPayload, "upgrade: websocket") {
 			return nil
 		}
 

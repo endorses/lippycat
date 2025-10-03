@@ -4,21 +4,32 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/simd"
 )
 
 // SIPSignature detects SIP (Session Initiation Protocol) traffic
 type SIPSignature struct {
-	methods []string
+	methods      []string
+	methodsBytes [][]byte // Byte versions for SIMD matching
 }
 
 // NewSIPSignature creates a new SIP signature detector
 func NewSIPSignature() *SIPSignature {
+	methods := []string{
+		"INVITE", "ACK", "BYE", "CANCEL", "REGISTER", "OPTIONS",
+		"PRACK", "SUBSCRIBE", "NOTIFY", "PUBLISH", "INFO", "REFER",
+		"MESSAGE", "UPDATE", "SIP/2.0",
+	}
+
+	// Pre-convert methods to byte slices for SIMD matching
+	methodsBytes := make([][]byte, len(methods))
+	for i, m := range methods {
+		methodsBytes[i] = []byte(m)
+	}
+
 	return &SIPSignature{
-		methods: []string{
-			"INVITE", "ACK", "BYE", "CANCEL", "REGISTER", "OPTIONS",
-			"PRACK", "SUBSCRIBE", "NOTIFY", "PUBLISH", "INFO", "REFER",
-			"MESSAGE", "UPDATE", "SIP/2.0",
-		},
+		methods:      methods,
+		methodsBytes: methodsBytes,
 	}
 }
 
@@ -43,14 +54,11 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
-	// Convert payload to string for pattern matching
-	// TODO: Use SIMD byte matching to avoid allocation
-	payloadStr := string(ctx.Payload[:min(len(ctx.Payload), 100)])
-
-	// Check for SIP methods
-	for _, method := range s.methods {
-		if len(payloadStr) >= len(method) && payloadStr[:len(method)] == method {
-			// Extract metadata
+	// Check for SIP methods using SIMD byte matching (zero allocation)
+	for i, methodBytes := range s.methodsBytes {
+		if len(ctx.Payload) >= len(methodBytes) &&
+			simd.BytesEqual(ctx.Payload[:len(methodBytes)], methodBytes) {
+			// Extract metadata (still needs string for parsing headers)
 			metadata := s.extractMetadata(string(ctx.Payload))
 
 			// Calculate confidence
@@ -64,6 +72,9 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 			confidence = signatures.AdjustConfidenceByContext(confidence, map[string]float64{
 				"port": portFactor,
 			})
+
+			// Add method name to metadata from pre-computed list
+			metadata["matched_method"] = s.methods[i]
 
 			return &signatures.DetectionResult{
 				Protocol:    "SIP",
@@ -197,22 +208,22 @@ func (s *SIPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 // Helper functions
 
 func splitLines(s string) []string {
-	var lines []string
-	var line string
-	for _, c := range s {
-		if c == '\n' || c == '\r' {
-			if line != "" {
-				lines = append(lines, line)
-				line = ""
-			}
-		} else {
-			line += string(c)
+	// Use bytes.Split for better performance (stdlib is optimized)
+	lines := strings.Split(s, "\r\n")
+	if len(lines) == 1 {
+		// Try splitting by \n only
+		lines = strings.Split(s, "\n")
+	}
+
+	// Filter out empty lines
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			filtered = append(filtered, line)
 		}
 	}
-	if line != "" {
-		lines = append(lines, line)
-	}
-	return lines
+	return filtered
 }
 
 func extractUserFromURI(uri string) string {

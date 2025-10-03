@@ -1,28 +1,46 @@
 package application
 
 import (
-	"bytes"
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/simd"
 )
 
 // HTTPSignature detects HTTP protocol
 type HTTPSignature struct {
-	methods       []string
-	statusPrefixes []string
+	methods         []string
+	methodsBytes    [][]byte
+	statusPrefixes  []string
+	statusPrefixBytes [][]byte
 }
 
 // NewHTTPSignature creates a new HTTP signature detector
 func NewHTTPSignature() *HTTPSignature {
+	methods := []string{
+		"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ",
+		"PATCH ", "TRACE ", "CONNECT ",
+	}
+	statusPrefixes := []string{
+		"HTTP/1.0 ", "HTTP/1.1 ", "HTTP/2.0 ", "HTTP/2 ",
+	}
+
+	// Pre-convert to bytes for SIMD matching
+	methodsBytes := make([][]byte, len(methods))
+	for i, m := range methods {
+		methodsBytes[i] = []byte(m)
+	}
+
+	statusPrefixBytes := make([][]byte, len(statusPrefixes))
+	for i, s := range statusPrefixes {
+		statusPrefixBytes[i] = []byte(s)
+	}
+
 	return &HTTPSignature{
-		methods: []string{
-			"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ",
-			"PATCH ", "TRACE ", "CONNECT ",
-		},
-		statusPrefixes: []string{
-			"HTTP/1.0 ", "HTTP/1.1 ", "HTTP/2.0 ", "HTTP/2 ",
-		},
+		methods:           methods,
+		methodsBytes:      methodsBytes,
+		statusPrefixes:    statusPrefixes,
+		statusPrefixBytes: statusPrefixBytes,
 	}
 }
 
@@ -47,16 +65,18 @@ func (h *HTTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		return nil
 	}
 
-	// Check for HTTP request methods
-	for _, method := range h.methods {
-		if bytes.HasPrefix(ctx.Payload, []byte(method)) {
+	// Check for HTTP request methods using SIMD
+	for _, methodBytes := range h.methodsBytes {
+		if len(ctx.Payload) >= len(methodBytes) &&
+			simd.BytesEqual(ctx.Payload[:len(methodBytes)], methodBytes) {
 			return h.detectRequest(ctx)
 		}
 	}
 
-	// Check for HTTP response
-	for _, statusPrefix := range h.statusPrefixes {
-		if bytes.HasPrefix(ctx.Payload, []byte(statusPrefix)) {
+	// Check for HTTP response using SIMD
+	for _, statusBytes := range h.statusPrefixBytes {
+		if len(ctx.Payload) >= len(statusBytes) &&
+			simd.BytesEqual(ctx.Payload[:len(statusBytes)], statusBytes) {
 			return h.detectResponse(ctx)
 		}
 	}

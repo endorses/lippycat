@@ -1,3 +1,5 @@
 lippycat
 captures
-CODE_REVIEW.md
+*.md
+!README.md
+!CLAUDE.md

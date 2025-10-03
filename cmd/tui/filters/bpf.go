@@ -19,6 +19,13 @@ var (
 // BPFFilter filters based on BPF (Berkeley Packet Filter) syntax
 type BPFFilter struct {
 	expression string
+
+	// Pre-parsed fields for fast matching
+	matchType  string // "protocol", "port", "host", "net", "unknown"
+	protocol   string // for protocol filters
+	direction  string // "src", "dst", "" (both)
+	value      string // port number, IP, or network
+	ipnet      *net.IPNet // parsed CIDR for network filters
 }
 
 // NewBPFFilter creates a new BPF filter
@@ -30,76 +37,111 @@ func NewBPFFilter(expression string) (*BPFFilter, error) {
 		return nil, fmt.Errorf("empty BPF expression")
 	}
 
-	return &BPFFilter{
+	f := &BPFFilter{
 		expression: expression,
-	}, nil
+		matchType:  "unknown",
+	}
+
+	// Pre-parse the expression for faster matching
+	expr := strings.ToLower(expression)
+
+	// Protocol filters
+	if expr == "tcp" || expr == "udp" || expr == "icmp" {
+		f.matchType = "protocol"
+		f.protocol = strings.ToUpper(expr)
+		return f, nil
+	}
+
+	// Port filters
+	if matches := portRegex.FindStringSubmatch(expression); len(matches) > 0 {
+		f.matchType = "port"
+		f.direction = matches[1]
+		f.value = matches[2]
+		return f, nil
+	}
+
+	// Host filters
+	if matches := hostRegex.FindStringSubmatch(expression); len(matches) > 0 {
+		f.matchType = "host"
+		f.direction = matches[1]
+		f.value = matches[2]
+		return f, nil
+	}
+
+	// Net filters
+	if matches := netRegex.FindStringSubmatch(expression); len(matches) > 0 {
+		f.matchType = "net"
+		f.direction = matches[1]
+		f.value = matches[2]
+
+		// Pre-parse CIDR if applicable
+		if strings.Contains(f.value, "/") {
+			_, ipnet, err := net.ParseCIDR(f.value)
+			if err == nil {
+				f.ipnet = ipnet
+			}
+		}
+		return f, nil
+	}
+
+	return f, nil
 }
 
 // Match checks if the packet matches the BPF filter
-// This is a simplified post-capture matcher for common BPF expressions
+// Optimized: uses pre-parsed fields to avoid regex matching on every packet
 func (f *BPFFilter) Match(packet components.PacketDisplay) bool {
-	// Parse common BPF expressions for post-capture filtering
-	// This handles the most common cases without full BPF compilation
+	// Use pre-parsed matchType for fast dispatch
+	switch f.matchType {
+	case "protocol":
+		return packet.Protocol == f.protocol
 
-	// Protocol filters
-	if f.expression == "tcp" || f.expression == "TCP" {
-		return packet.Protocol == "TCP"
-	}
-	if f.expression == "udp" || f.expression == "UDP" {
-		return packet.Protocol == "UDP"
-	}
-	if f.expression == "icmp" || f.expression == "ICMP" {
-		return packet.Protocol == "ICMP"
-	}
-
-	// Port filters: "port 5060", "src port 5060", "dst port 5060"
-	if matches := portRegex.FindStringSubmatch(f.expression); len(matches) > 0 {
-		direction := matches[1] // "src", "dst", or ""
-		port := matches[2]
-
-		switch direction {
+	case "port":
+		switch f.direction {
 		case "src":
-			return packet.SrcPort == port
+			return packet.SrcPort == f.value
 		case "dst":
-			return packet.DstPort == port
+			return packet.DstPort == f.value
 		default:
-			return packet.SrcPort == port || packet.DstPort == port
+			return packet.SrcPort == f.value || packet.DstPort == f.value
 		}
-	}
 
-	// Host filters: "host 192.168.1.1", "src host 192.168.1.1", "dst host 192.168.1.1"
-	if matches := hostRegex.FindStringSubmatch(f.expression); len(matches) > 0 {
-		direction := matches[1]
-		host := matches[2]
-
-		switch direction {
+	case "host":
+		switch f.direction {
 		case "src":
-			return containsIP(packet.SrcIP, host)
+			return strings.Contains(packet.SrcIP, f.value)
 		case "dst":
-			return containsIP(packet.DstIP, host)
+			return strings.Contains(packet.DstIP, f.value)
 		default:
-			return containsIP(packet.SrcIP, host) || containsIP(packet.DstIP, host)
+			return strings.Contains(packet.SrcIP, f.value) || strings.Contains(packet.DstIP, f.value)
 		}
-	}
 
-	// Net filters: "net 192.168.1.0/24", "src net 192.168.1", "dst net 192.168.1"
-	if matches := netRegex.FindStringSubmatch(f.expression); len(matches) > 0 {
-		direction := matches[1]
-		network := matches[2]
-
-		switch direction {
+	case "net":
+		// Use pre-parsed CIDR if available
+		if f.ipnet != nil {
+			switch f.direction {
+			case "src":
+				return ipInCIDR(packet.SrcIP, f.ipnet)
+			case "dst":
+				return ipInCIDR(packet.DstIP, f.ipnet)
+			default:
+				return ipInCIDR(packet.SrcIP, f.ipnet) || ipInCIDR(packet.DstIP, f.ipnet)
+			}
+		}
+		// Fallback to substring match
+		switch f.direction {
 		case "src":
-			return containsIP(packet.SrcIP, network)
+			return strings.Contains(packet.SrcIP, f.value)
 		case "dst":
-			return containsIP(packet.DstIP, network)
+			return strings.Contains(packet.DstIP, f.value)
 		default:
-			return containsIP(packet.SrcIP, network) || containsIP(packet.DstIP, network)
+			return strings.Contains(packet.SrcIP, f.value) || strings.Contains(packet.DstIP, f.value)
 		}
-	}
 
-	// For complex BPF expressions, we can't match post-capture
-	// Return true to show all packets (or we could return false to be strict)
-	return true
+	default:
+		// For complex BPF expressions, we can't match post-capture
+		// Return true to show all packets
+		return true
+	}
 }
 
 // String returns the BPF expression
@@ -117,26 +159,11 @@ func (f *BPFFilter) GetExpression() string {
 	return f.expression
 }
 
-// containsIP checks if an IP address matches a pattern (partial match or CIDR)
-func containsIP(ip, pattern string) bool {
-	// Check if pattern is CIDR notation
-	if strings.Contains(pattern, "/") {
-		_, ipnet, err := net.ParseCIDR(pattern)
-		if err != nil {
-			// Invalid CIDR, fall back to substring match
-			return strings.Contains(ip, pattern)
-		}
-
-		// Parse the IP address
-		parsedIP := net.ParseIP(ip)
-		if parsedIP == nil {
-			return false
-		}
-
-		// Check if IP is in the CIDR range
-		return ipnet.Contains(parsedIP)
+// ipInCIDR checks if an IP is in a CIDR range (using pre-parsed net.IPNet)
+func ipInCIDR(ip string, ipnet *net.IPNet) bool {
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
 	}
-
-	// Simple substring match for partial IPs like "192.168.1"
-	return strings.Contains(ip, pattern)
+	return ipnet.Contains(parsedIP)
 }

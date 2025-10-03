@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +12,95 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket/layers"
 )
+
+// Object pools for reducing allocations
+var (
+	packetDisplayPool = sync.Pool{
+		New: func() interface{} {
+			return &components.PacketDisplay{}
+		},
+	}
+
+	byteBufferPool = sync.Pool{
+		New: func() interface{} {
+			// Pre-allocate 1500 bytes (typical MTU)
+			buf := make([]byte, 0, 1500)
+			return &buf
+		},
+	}
+
+	// String interning for protocol names (reduce memory footprint)
+	protocolStrings = map[string]string{
+		"TCP":     "TCP",
+		"UDP":     "UDP",
+		"SIP":     "SIP",
+		"RTP":     "RTP",
+		"DNS":     "DNS",
+		"HTTP":    "HTTP",
+		"HTTPS":   "HTTPS",
+		"TLS":     "TLS",
+		"SSL":     "SSL",
+		"ICMP":    "ICMP",
+		"ICMPv6":  "ICMPv6",
+		"ARP":     "ARP",
+		"LLC":     "LLC",
+		"LLDP":    "LLDP",
+		"CDP":     "CDP",
+		"802.1Q":  "802.1Q",
+		"802.1X":  "802.1X",
+		"Unknown": "Unknown",
+		"unknown": "unknown",
+	}
+	protocolMu sync.RWMutex
+)
+
+// internProtocol returns an interned protocol string to reduce allocations
+func internProtocol(protocol string) string {
+	protocolMu.RLock()
+	if interned, ok := protocolStrings[protocol]; ok {
+		protocolMu.RUnlock()
+		return interned
+	}
+	protocolMu.RUnlock()
+
+	// Not found - add it (rare)
+	protocolMu.Lock()
+	// Check again in case another goroutine added it
+	if interned, ok := protocolStrings[protocol]; ok {
+		protocolMu.Unlock()
+		return interned
+	}
+	// Limit pool size to prevent unbounded growth
+	if len(protocolStrings) < 100 {
+		protocolStrings[protocol] = protocol
+	}
+	protocolMu.Unlock()
+	return protocol
+}
+
+// getPacketDisplay acquires a PacketDisplay from the pool
+func getPacketDisplay() *components.PacketDisplay {
+	return packetDisplayPool.Get().(*components.PacketDisplay)
+}
+
+// putPacketDisplay returns a PacketDisplay to the pool
+func putPacketDisplay(pkt *components.PacketDisplay) {
+	// Clear the packet before returning to pool
+	*pkt = components.PacketDisplay{}
+	packetDisplayPool.Put(pkt)
+}
+
+// getByteBuffer acquires a byte buffer from the pool
+func getByteBuffer() *[]byte {
+	return byteBufferPool.Get().(*[]byte)
+}
+
+// putByteBuffer returns a byte buffer to the pool
+func putByteBuffer(buf *[]byte) {
+	// Reset slice but keep capacity
+	*buf = (*buf)[:0]
+	byteBufferPool.Put(buf)
+}
 
 // StartPacketBridge creates a bridge between packet capture and TUI
 // It converts capture.PacketInfo to PacketMsg for the TUI
@@ -31,12 +121,10 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 	sendBatch := func() {
 		if len(batch) > 0 {
-			// Send batch to TUI
-			for _, pkt := range batch {
-				program.Send(PacketMsg{Packet: pkt})
-			}
+			// Send entire batch as single message to reduce Update() calls
+			program.Send(PacketBatchMsg{Packets: batch})
 			displayedCount += int64(len(batch))
-			batch = batch[:0]
+			batch = make([]components.PacketDisplay, 0, 100)
 		}
 	}
 
@@ -104,6 +192,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 // Still extracts basic protocol info, but skips expensive payload inspection
 func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 	pkt := pktInfo.Packet
+	// Use stack allocation for fast path - no pooling needed for fast conversion
 	display := components.PacketDisplay{
 		Timestamp: pkt.Metadata().Timestamp,
 		SrcIP:     "unknown",
@@ -118,7 +207,7 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 	// Check for ARP (common link-layer protocol)
 	if arpLayer := pkt.Layer(layers.LayerTypeARP); arpLayer != nil {
-		display.Protocol = "ARP"
+		display.Protocol = internProtocol("ARP")
 		return display
 	}
 
@@ -174,18 +263,18 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 	if transLayer := pkt.TransportLayer(); transLayer != nil {
 		switch trans := transLayer.(type) {
 		case *layers.TCP:
-			display.Protocol = "TCP"
+			display.Protocol = internProtocol("TCP")
 			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
 		case *layers.UDP:
-			display.Protocol = "UDP"
+			display.Protocol = internProtocol("UDP")
 			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
 		}
 	} else if pkt.Layer(layers.LayerTypeICMPv4) != nil {
-		display.Protocol = "ICMP"
+		display.Protocol = internProtocol("ICMP")
 	} else if pkt.Layer(layers.LayerTypeICMPv6) != nil {
-		display.Protocol = "ICMPv6"
+		display.Protocol = internProtocol("ICMPv6")
 	}
 
 	return display
@@ -194,6 +283,17 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 // convertPacket converts a gopacket.Packet to PacketDisplay
 func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 	pkt := pktInfo.Packet
+
+	// Get buffer from pool for raw data
+	var rawData []byte
+	if pkt.Data() != nil {
+		bufPtr := getByteBuffer()
+		*bufPtr = append(*bufPtr, pkt.Data()...)
+		rawData = *bufPtr
+		// Note: We don't return the buffer to pool here - it's owned by the PacketDisplay
+		// The model will need to handle cleanup when packets age out
+	}
+
 	display := components.PacketDisplay{
 		Timestamp: pkt.Metadata().Timestamp,
 		SrcIP:     "unknown",
@@ -203,7 +303,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		Protocol:  "unknown",
 		Length:    pkt.Metadata().Length,
 		Info:      "",
-		RawData:   pkt.Data(), // Capture raw packet bytes
+		RawData:   rawData, // Use pooled buffer
 	}
 
 	// Check for link-layer protocols first (ARP, etc.)

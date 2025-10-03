@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	// "fmt" // Only needed for debug logging - uncomment if enabling DEBUG logs
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,10 +11,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/components"
+	"github.com/endorses/lippycat/cmd/tui/config"
 	"github.com/endorses/lippycat/cmd/tui/filters"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/remotecapture"
 	"github.com/spf13/viper"
 )
 
@@ -26,6 +29,16 @@ var (
 // PacketMsg is sent when a new packet is captured
 type PacketMsg struct {
 	Packet components.PacketDisplay
+}
+
+// PacketBatchMsg is sent when multiple packets are captured
+type PacketBatchMsg struct {
+	Packets []components.PacketDisplay
+}
+
+// HunterStatusMsg is sent with hunter status updates from remote processor
+type HunterStatusMsg struct {
+	Hunters []components.HunterInfo
 }
 
 // TickMsg is sent periodically to trigger UI updates
@@ -44,11 +57,12 @@ type Model struct {
 	maxPackets      int                        // Maximum packets to keep in memory
 	packetList      components.PacketList      // Packet list component
 	detailsPanel    components.DetailsPanel    // Details panel component
+	remoteClients   map[string]interface{ Close() } // Multiple remote capture clients (addr -> client)
 	hexDumpView     components.HexDumpView     // Hex dump component
 	header          components.Header          // Header component
 	footer          components.Footer          // Footer component
 	tabs            components.Tabs              // Tabs component
-	nodesView       components.NodesView         // Nodes view component
+	nodesView       *components.NodesView        // Nodes view component (pointer so View() changes persist)
 	statisticsView  components.StatisticsView    // Statistics view component
 	settingsView    components.SettingsView      // Settings view component
 	statistics      *components.Statistics       // Statistics data
@@ -69,10 +83,11 @@ type Model struct {
 	needsUIUpdate   bool                       // Flag to indicate UI needs refresh
 	bpfFilter       string                     // Current BPF filter
 	captureMode     components.CaptureMode     // Current capture mode (live or offline)
+	nodesFilePath   string                     // Path to nodes YAML file for remote mode
 }
 
 // NewModel creates a new TUI model
-func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile string, promiscuous bool) Model {
+func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile string, promiscuous bool, startInRemoteMode bool, nodesFilePath string) Model {
 	// Load theme from config, default to Solarized Dark
 	themeName := viper.GetString("tui.theme")
 	if themeName == "" {
@@ -105,12 +120,10 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 
 	nodesView := components.NewNodesView()
 	nodesView.SetTheme(theme)
+	nodesViewPtr := &nodesView
 
 	statisticsView := components.NewStatisticsView()
 	statisticsView.SetTheme(theme)
-
-	settingsView := components.NewSettingsView(interfaceName, bufferSize, promiscuous, bpfFilter, pcapFile)
-	settingsView.SetTheme(theme)
 
 	// Initialize statistics
 	statistics := &components.Statistics{
@@ -124,12 +137,54 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 	filterInput := components.NewFilterInput("/")
 	filterInput.SetTheme(theme)
 
-	// Determine initial capture mode
+	// Determine initial capture mode and interface name
 	initialMode := components.CaptureModeLive
+	initialInterfaceName := interfaceName
+	initialPCAPFile := pcapFile
 	if pcapFile != "" {
 		initialMode = components.CaptureModeOffline
+		initialInterfaceName = pcapFile
 		// Update first tab for offline mode
 		tabs.UpdateTab(0, "Offline Capture", "📄")
+	} else if startInRemoteMode {
+		initialMode = components.CaptureModeRemote
+		// Set interface name to nodes file or look for default
+		if nodesFilePath == "" {
+			// Try default paths: ./nodes.yaml or ~/.config/lippycat/nodes.yaml
+			if _, err := os.Stat("nodes.yaml"); err == nil {
+				nodesFilePath = "nodes.yaml"
+			} else {
+				homeDir, err := os.UserHomeDir()
+				if err == nil {
+					configPath := filepath.Join(homeDir, ".config", "lippycat", "nodes.yaml")
+					if _, err := os.Stat(configPath); err == nil {
+						nodesFilePath = configPath
+					}
+				}
+			}
+		}
+
+		if nodesFilePath != "" {
+			initialInterfaceName = nodesFilePath
+		} else {
+			initialInterfaceName = ""
+		}
+		// Clear pcapFile and interface for remote mode
+		initialPCAPFile = ""
+		// Update first tab for remote mode
+		tabs.UpdateTab(0, "Remote Capture", "🌐")
+		// Switch to Nodes tab when starting in remote mode
+		tabs.SetActive(1)
+	}
+
+	// Create settings view with correct initial mode
+	settingsView := components.NewSettingsView(interfaceName, bufferSize, promiscuous, bpfFilter, initialPCAPFile)
+	settingsView.SetTheme(theme)
+	// Set the correct capture mode in settings
+	settingsView.SetCaptureMode(initialMode)
+	// Set nodes file if in remote mode
+	if startInRemoteMode && nodesFilePath != "" {
+		settingsView.SetNodesFile(nodesFilePath)
 	}
 
 	return Model{
@@ -138,11 +193,12 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		maxPackets:      bufferSize,
 		packetList:      packetList,
 		detailsPanel:    detailsPanel,
+		remoteClients:   make(map[string]interface{ Close() }), // Initialize remote clients map
 		hexDumpView:     hexDumpView,
 		header:          header,
 		footer:          footer,
 		tabs:            tabs,
-		nodesView:       nodesView,
+		nodesView:       nodesViewPtr,
 		statisticsView:  statisticsView,
 		settingsView:    settingsView,
 		statistics:      statistics,
@@ -159,14 +215,19 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		filterMode:      false,
 		showDetails:     true,
 		focusedPane:     "left", // Start with packet list focused
-		interfaceName:   interfaceName,
+		interfaceName:   initialInterfaceName,
 		bpfFilter:       bpfFilter,
 		captureMode:     initialMode,
+		nodesFilePath:   nodesFilePath,
 	}
 }
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
+	// Load remote nodes if in remote mode
+	if m.captureMode == components.CaptureModeRemote && m.nodesFilePath != "" && currentProgram != nil {
+		startRemoteCapture(m.nodesFilePath, m.remoteClients, currentProgram)
+	}
 	return tickCmd()
 }
 
@@ -180,12 +241,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case PacketMsg, TickMsg, components.RestartCaptureMsg:
 			// Let these fall through to normal handling
 		default:
-			// Handle quit keys
+			// Handle quit/suspend keys
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
 				case "q", "ctrl+c":
 					m.quitting = true
 					return m, tea.Quit
+				case "ctrl+z":
+					// Suspend the process
+					return m, tea.Suspend
 				}
 			}
 			// Pass all other messages to settings view
@@ -195,21 +259,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+
 	case tea.KeyMsg:
 		// Handle filter input mode
 		if m.filterMode {
 			return m.handleFilterInput(msg)
 		}
 
-		// Settings tab gets priority for most keys (except q, ctrl+c, space, tab/shift+tab)
+		// Settings tab gets priority for most keys (except q, ctrl+c, ctrl+z, space, tab/shift+tab)
 		if m.tabs.GetActive() == 3 {
 			// If actively editing ANY field, pass ALL keys to settings view
-			// (except quit keys) to prevent global shortcuts from interfering with text input
+			// (except quit/suspend keys) to prevent global shortcuts from interfering with text input
 			if m.settingsView.IsEditing() {
 				switch msg.String() {
 				case "q", "ctrl+c":
 					m.quitting = true
 					return m, tea.Quit
+				case "ctrl+z":
+					// Suspend the process
+					return m, tea.Suspend
 				default:
 					// Pass everything to settings view including t, space, etc.
 					cmd := m.settingsView.Update(msg)
@@ -222,8 +292,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "q", "ctrl+c":
 				m.quitting = true
 				return m, tea.Quit
+			case "ctrl+z":
+				// Suspend the process
+				return m, tea.Suspend
 			case " ": // Allow space to pause/resume capture
 				m.paused = !m.paused
+				// Resume ticking when unpausing
+				if !m.paused {
+					return m, tickCmd()
+				}
 				return m, nil
 			case "t": // Allow theme toggle
 				if m.theme.Name == "Solarized Dark" {
@@ -254,10 +331,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Nodes tab gets priority for certain keys (add node, etc.)
+		if m.tabs.GetActive() == 1 {
+			// If editing node input, pass ALL keys to NodesView
+			if m.nodesView.IsEditing() {
+				cmd := m.nodesView.Update(msg)
+				return m, cmd
+			}
+			// Not editing - forward message to NodesView
+			if cmd := m.nodesView.Update(msg); cmd != nil {
+				return m, cmd
+			}
+			// If NodesView didn't handle it, fall through to normal handling
+		}
+
 		// Normal mode key handling
 		switch msg.String() {
 		case "ctrl+z":
-			// Suspend the process
+			// Suspend the process - Bubbletea will automatically handle resume
 			return m, tea.Suspend
 
 		case "q", "ctrl+c":
@@ -285,9 +376,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.totalPackets = 0
 			m.matchedPackets = 0
 			m.packetList.SetPackets(m.packets)
-			m.statistics.ProtocolCounts = make(map[string]int)
-			m.statistics.SourceCounts = make(map[string]int)
-			m.statistics.DestCounts = make(map[string]int)
+			// Reuse maps instead of reallocating (Go 1.21+)
+			clear(m.statistics.ProtocolCounts)
+			clear(m.statistics.SourceCounts)
+			clear(m.statistics.DestCounts)
 			m.statistics.TotalBytes = 0
 			m.statistics.TotalPackets = 0
 			m.statistics.MinPacketSize = 999999
@@ -297,6 +389,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case " ": // Space to pause/resume
 			m.paused = !m.paused
+			// Resume ticking when unpausing
+			if !m.paused {
+				return m, tickCmd()
+			}
 			return m, nil
 
 		case "d": // Toggle details panel
@@ -475,11 +571,84 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
+	case tea.ResumeMsg:
+		// Handle resume after suspend (ctrl+z / fg)
+		// Manually re-enable mouse support as some terminals don't restore it properly
+		// This sends the escape sequence to re-enable mouse tracking
+		cmd := tea.Batch(
+			tea.EnableMouseAllMotion,
+			tea.EnterAltScreen,
+		)
+		if !m.paused && m.capturing {
+			cmd = tea.Batch(cmd, tickCmd())
+		}
+		return m, cmd
+
 	case TickMsg:
-		// Periodic UI refresh (10 times per second)
-		if m.needsUIUpdate && !m.paused {
-			// Update packet list component with filtered packets
-			// No need to reapply filters - they're applied per-packet now
+		// Only run tick when capturing and not paused
+		if !m.paused && m.capturing {
+			// Periodic UI refresh (10 times per second)
+			if m.needsUIUpdate {
+				// Update packet list component with filtered packets
+				// No need to reapply filters - they're applied per-packet now
+				if m.filterChain.IsEmpty() {
+					m.packetList.SetPackets(m.packets)
+				} else {
+					m.packetList.SetPackets(m.filteredPackets)
+				}
+
+				// Update details panel if showing details
+				if m.showDetails {
+					m.updateDetailsPanel()
+				}
+
+				m.needsUIUpdate = false
+			}
+			return m, tickCmd()
+		}
+		// When paused, stop ticking to save CPU
+		return m, nil
+
+	case PacketBatchMsg:
+		// Handle batch of packets more efficiently
+		if !m.paused {
+			for _, packet := range msg.Packets {
+				// Set NodeID to "Local" if not already set (for local/offline capture)
+				if packet.NodeID == "" {
+					packet.NodeID = "Local"
+				}
+
+				// Add packet to ring buffer
+				if len(m.packets) >= m.maxPackets {
+					// Remove oldest packet
+					m.packets = m.packets[1:]
+					// Also remove from filtered if needed
+					if len(m.filteredPackets) > 0 {
+						m.filteredPackets = m.filteredPackets[1:]
+					}
+				}
+				m.packets = append(m.packets, packet)
+				m.totalPackets++
+
+				// Update statistics (lightweight)
+				m.updateStatistics(packet)
+
+				// Apply filter to this single packet immediately
+				if !m.filterChain.IsEmpty() {
+					if m.filterChain.Match(packet) {
+						m.filteredPackets = append(m.filteredPackets, packet)
+					}
+				}
+			}
+
+			// Update matched count once per batch
+			if m.filterChain.IsEmpty() {
+				m.matchedPackets = len(m.packets)
+			} else {
+				m.matchedPackets = len(m.filteredPackets)
+			}
+
+			// Update packet list immediately for smooth streaming
 			if m.filterChain.IsEmpty() {
 				m.packetList.SetPackets(m.packets)
 			} else {
@@ -490,13 +659,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showDetails {
 				m.updateDetailsPanel()
 			}
-
-			m.needsUIUpdate = false
 		}
-		return m, tickCmd()
+		return m, nil
 
 	case PacketMsg:
 		if !m.paused {
+			// Set NodeID to "Local" if not already set (for local/offline capture)
+			packet := msg.Packet
+			if packet.NodeID == "" {
+				packet.NodeID = "Local"
+			}
+
 			// Add packet to ring buffer
 			if len(m.packets) >= m.maxPackets {
 				// Remove oldest packet
@@ -506,46 +679,182 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.filteredPackets = m.filteredPackets[1:]
 				}
 			}
-			m.packets = append(m.packets, msg.Packet)
+			m.packets = append(m.packets, packet)
 			m.totalPackets++
 
 			// Update statistics (lightweight)
-			m.updateStatistics(msg.Packet)
+			m.updateStatistics(packet)
 
 			// Apply filter to this single packet immediately to avoid race condition
 			if !m.filterChain.IsEmpty() {
-				if m.filterChain.Match(msg.Packet) {
-					m.filteredPackets = append(m.filteredPackets, msg.Packet)
+				if m.filterChain.Match(packet) {
+					m.filteredPackets = append(m.filteredPackets, packet)
 					m.matchedPackets = len(m.filteredPackets)
 				}
 			} else {
 				m.matchedPackets = len(m.packets)
 			}
 
-			// Mark that UI needs update, but don't update immediately
-			m.needsUIUpdate = true
+			// Update packet list immediately for smooth streaming
+			if m.filterChain.IsEmpty() {
+				m.packetList.SetPackets(m.packets)
+			} else {
+				m.packetList.SetPackets(m.filteredPackets)
+			}
+
+			// Update details panel if showing details
+			if m.showDetails {
+				m.updateDetailsPanel()
+			}
 		}
+		return m, nil
+
+	case remotecapture.PacketMsg:
+		// Handle packets from remote capture client
+		// Only process if we're in remote capture mode and not paused
+		if m.captureMode == components.CaptureModeRemote && !m.paused {
+			packet := msg.Packet
+			// NodeID should already be set by remotecapture client
+
+			// Add packet to ring buffer
+			if len(m.packets) >= m.maxPackets {
+				m.packets = m.packets[1:]
+				if len(m.filteredPackets) > 0 {
+					m.filteredPackets = m.filteredPackets[1:]
+				}
+			}
+			m.packets = append(m.packets, packet)
+			m.totalPackets++
+
+			m.updateStatistics(packet)
+
+			if !m.filterChain.IsEmpty() {
+				if m.filterChain.Match(packet) {
+					m.filteredPackets = append(m.filteredPackets, packet)
+					m.matchedPackets = len(m.filteredPackets)
+				}
+			} else {
+				m.matchedPackets = len(m.packets)
+			}
+
+			// Update packet list immediately for smooth streaming
+			if m.filterChain.IsEmpty() {
+				m.packetList.SetPackets(m.packets)
+			} else {
+				m.packetList.SetPackets(m.filteredPackets)
+			}
+
+			// Update details panel if showing details
+			if m.showDetails {
+				m.updateDetailsPanel()
+			}
+		}
+		return m, nil
+
+	case remotecapture.PacketBatchMsg:
+		// Handle batch of packets from remote capture client
+		// Only process if we're in remote capture mode and not paused
+		if m.captureMode == components.CaptureModeRemote && !m.paused {
+			for _, packet := range msg.Packets {
+				// Add packet to ring buffer
+				if len(m.packets) >= m.maxPackets {
+					m.packets = m.packets[1:]
+					if len(m.filteredPackets) > 0 {
+						m.filteredPackets = m.filteredPackets[1:]
+					}
+				}
+				m.packets = append(m.packets, packet)
+				m.totalPackets++
+
+				m.updateStatistics(packet)
+
+				// Apply filter to this single packet immediately
+				if !m.filterChain.IsEmpty() {
+					if m.filterChain.Match(packet) {
+						m.filteredPackets = append(m.filteredPackets, packet)
+					}
+				}
+			}
+
+			// Update matched count once per batch
+			if m.filterChain.IsEmpty() {
+				m.matchedPackets = len(m.packets)
+			} else {
+				m.matchedPackets = len(m.filteredPackets)
+			}
+
+			// Update packet list immediately for smooth streaming
+			if m.filterChain.IsEmpty() {
+				m.packetList.SetPackets(m.packets)
+			} else {
+				m.packetList.SetPackets(m.filteredPackets)
+			}
+
+			// Update details panel if showing details
+			if m.showDetails {
+				m.updateDetailsPanel()
+			}
+		}
+		return m, nil
+
+	case remotecapture.HunterStatusMsg:
+		// Handle hunter status from remote capture client
+		m.nodesView.SetHunters(msg.Hunters)
+		return m, nil
+
+	case components.UpdateBufferSizeMsg:
+		// Update buffer size on-the-fly without restarting capture
+		m.maxPackets = msg.Size
+
+		// If current packets exceed new buffer size, trim them
+		if len(m.packets) > m.maxPackets {
+			m.packets = m.packets[len(m.packets)-m.maxPackets:]
+		}
+
+		// Save to config file
+		m.settingsView.SaveBufferSize()
+
 		return m, nil
 
 	case components.RestartCaptureMsg:
 		// Stop current capture using global cancel function
 		if currentCaptureCancel != nil {
-			currentCaptureCancel()
-			// Give the old capture time to clean up (up to 2s drain timeout in InitWithContext)
-			time.Sleep(500 * time.Millisecond)
+			// Cancel in a goroutine to avoid blocking the UI
+			cancelFunc := currentCaptureCancel
+			currentCaptureCancel = nil // Clear immediately to prevent double-cancellation
+
+			go func() {
+				// Call cancel and give it time to clean up
+				cancelFunc()
+				// The capture will clean up in the background (up to 2s drain timeout in InitWithContext)
+			}()
 		}
 
+		// Keep all remote clients connected regardless of mode
+		// Users can switch between modes without losing node connections
+
 		// Update settings based on mode
-		if msg.Mode == components.CaptureModeLive {
+		switch msg.Mode {
+		case components.CaptureModeLive:
 			m.interfaceName = msg.Interface
-			// Update tab to Live Capture
 			m.tabs.UpdateTab(0, "Live Capture", "📡")
-		} else {
+		case components.CaptureModeOffline:
 			m.interfaceName = msg.PCAPFile
-			// Update tab to Offline Capture
 			m.tabs.UpdateTab(0, "Offline Capture", "📄")
+		case components.CaptureModeRemote:
+			m.interfaceName = msg.NodesFile
+			m.tabs.UpdateTab(0, "Remote Capture", "🌐")
 		}
 		m.bpfFilter = msg.Filter
+
+		// Clean up remote clients when switching away from remote mode
+		if m.captureMode == components.CaptureModeRemote && msg.Mode != components.CaptureModeRemote {
+			for addr, client := range m.remoteClients {
+				client.Close()
+				delete(m.remoteClients, addr)
+			}
+		}
+
 		m.captureMode = msg.Mode
 		m.maxPackets = msg.BufferSize // Apply the new buffer size
 		m.paused = false              // Unpause when restarting capture
@@ -557,10 +866,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.matchedPackets = 0
 		m.packetList.Reset() // Reset packet list including autoscroll state
 
-		// Reset statistics
-		m.statistics.ProtocolCounts = make(map[string]int)
-		m.statistics.SourceCounts = make(map[string]int)
-		m.statistics.DestCounts = make(map[string]int)
+		// Reset statistics (reuse maps)
+		clear(m.statistics.ProtocolCounts)
+		clear(m.statistics.SourceCounts)
+		clear(m.statistics.DestCounts)
 		m.statistics.TotalBytes = 0
 		m.statistics.TotalPackets = 0
 		m.statistics.MinPacketSize = 999999
@@ -569,17 +878,344 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Start new capture in background using global program reference
 		if currentProgram != nil {
-			ctx, cancel := context.WithCancel(context.Background())
-			currentCaptureCancel = cancel
+			// Only create new capture context for live/offline modes
+			// Remote mode doesn't need a capture context since it uses gRPC clients
+			if msg.Mode == components.CaptureModeLive || msg.Mode == components.CaptureModeOffline {
+				ctx, cancel := context.WithCancel(context.Background())
+				currentCaptureCancel = cancel
 
-			if msg.Mode == components.CaptureModeLive {
-				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, currentProgram)
-			} else {
-				go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram)
+				switch msg.Mode {
+				case components.CaptureModeLive:
+					go startLiveCapture(ctx, msg.Interface, m.bpfFilter, currentProgram)
+				case components.CaptureModeOffline:
+					go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram)
+				}
+			} else if msg.Mode == components.CaptureModeRemote {
+				// Remote mode: set capture cancel to nil since we're not running local capture
+				currentCaptureCancel = nil
+
+				// Load and connect to nodes from YAML file (if provided)
+				if msg.NodesFile != "" {
+					// Check if program is still valid before starting goroutine
+					if currentProgram == nil {
+						return m, nil
+					}
+
+					// Capture program reference for the goroutine
+					prog := currentProgram
+
+					go func() {
+						// Recover from any panic in this goroutine to prevent crashing the TUI
+						defer func() {
+							if r := recover(); r != nil {
+								// Panic occurred, log it but don't crash the TUI
+								// In production, this should send an error message to the UI
+								_ = r
+							}
+						}()
+
+						nodes, err := config.LoadNodesFromYAML(msg.NodesFile)
+						if err != nil {
+							// TODO: Show error in UI
+							return
+						}
+
+						// Connect to each node
+						for _, node := range nodes {
+							// Skip if already connected
+							if _, exists := m.remoteClients[node.Address]; exists {
+								continue
+							}
+
+							// Create client - use captured program reference
+							client, err := remotecapture.NewClient(node.Address, prog)
+							if err != nil {
+								// TODO: Show error in UI (but continue with other nodes)
+								continue
+							}
+
+							// Store client
+							m.remoteClients[node.Address] = client
+
+							// Start packet stream
+							if err := client.StreamPackets(); err != nil {
+								// TODO: Show error in UI
+								client.Close()
+								delete(m.remoteClients, node.Address)
+								continue
+							}
+
+							// Start hunter status subscription
+							if err := client.SubscribeHunterStatus(); err != nil {
+								// TODO: Show error in UI (non-fatal)
+							}
+						}
+					}()
+				}
+				// If no nodes file, remote mode is active but no nodes connected yet
+				// User can add nodes via Nodes tab
 			}
 		}
 
 		return m, nil
+
+	case components.AddNodeMsg:
+		// User wants to add a remote node
+		if msg.Address != "" {
+			// Just add the node - don't change capture mode
+			// Start remote connection in background
+			go func() {
+				// Recover from any panic in this goroutine to prevent crashing the TUI
+				defer func() {
+					if r := recover(); r != nil {
+						// Panic occurred, log it but don't crash the TUI
+						_ = r
+					}
+				}()
+
+				client, err := remotecapture.NewClient(msg.Address, currentProgram)
+				if err != nil {
+					// TODO: Show error in UI
+					return
+				}
+
+				// Store client
+				m.remoteClients[msg.Address] = client
+
+				// Start packet stream
+				if err := client.StreamPackets(); err != nil {
+					// TODO: Show error in UI
+					client.Close()
+					delete(m.remoteClients, msg.Address)
+					return
+				}
+
+				// Start hunter status subscription
+				if err := client.SubscribeHunterStatus(); err != nil {
+					// TODO: Show error in UI (non-fatal, packets still work)
+				}
+			}()
+		}
+		return m, nil
+
+	case components.LoadNodesMsg:
+		// Load nodes from YAML file and connect to them
+		if msg.FilePath != "" {
+			go func() {
+				// Recover from any panic in this goroutine to prevent crashing the TUI
+				defer func() {
+					if r := recover(); r != nil {
+						// Panic occurred, log it but don't crash the TUI
+						_ = r
+					}
+				}()
+
+				// Import the config package at the top of the file
+				nodes, err := config.LoadNodesFromYAML(msg.FilePath)
+				if err != nil {
+					// TODO: Show error in UI
+					return
+				}
+
+				// Connect to each node
+				for _, node := range nodes {
+					// Skip if already connected
+					if _, exists := m.remoteClients[node.Address]; exists {
+						continue
+					}
+
+					// Create client
+					client, err := remotecapture.NewClient(node.Address, currentProgram)
+					if err != nil {
+						// TODO: Show error in UI (but continue with other nodes)
+						continue
+					}
+
+					// Store client
+					m.remoteClients[node.Address] = client
+
+					// Start packet stream
+					if err := client.StreamPackets(); err != nil {
+						// TODO: Show error in UI
+						client.Close()
+						delete(m.remoteClients, node.Address)
+						continue
+					}
+
+					// Start hunter status subscription
+					if err := client.SubscribeHunterStatus(); err != nil {
+						// TODO: Show error in UI (non-fatal)
+					}
+				}
+			}()
+		}
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleMouse handles mouse click and scroll events
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	// DEBUG: Uncomment to log mouse events to /tmp/lippycat-mouse-debug.log for troubleshooting
+	// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+	// 	fmt.Fprintf(f, "handleMouse: Y=%d Type=%v Action=%v Button=%v ActiveTab=%d\n",
+	// 		msg.Y, msg.Type, msg.Action, msg.Button, m.tabs.GetActive())
+	// 	f.Close()
+	// }
+
+	// Layout constants
+	headerHeight := 2  // Header takes 2 lines (text + border)
+	tabsHeight := 4    // Tabs take 4 lines
+	bottomHeight := 4  // Footer/filter area
+	contentStartY := headerHeight + tabsHeight // Y=6
+	contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+
+	// Handle mouse wheel scrolling
+	if msg.Type == tea.MouseWheelUp {
+		if m.tabs.GetActive() == 0 {
+			// On capture tab - scroll packet list if focused on left
+			if m.focusedPane == "left" {
+				m.packetList.CursorUp()
+				m.updateDetailsPanel()
+			} else if m.focusedPane == "right" {
+				// Scroll details panel viewport
+				cmd := m.detailsPanel.Update(tea.KeyMsg{Type: tea.KeyUp})
+				return m, cmd
+			}
+		}
+		return m, nil
+	}
+
+	if msg.Type == tea.MouseWheelDown {
+		if m.tabs.GetActive() == 0 {
+			// On capture tab - scroll packet list if focused on left
+			if m.focusedPane == "left" {
+				m.packetList.CursorDown()
+				m.updateDetailsPanel()
+			} else if m.focusedPane == "right" {
+				// Scroll details panel viewport
+				cmd := m.detailsPanel.Update(tea.KeyMsg{Type: tea.KeyDown})
+				return m, cmd
+			}
+		}
+		return m, nil
+	}
+
+	// Handle clicks - for now just check Type field since it works for other tabs
+	// TODO: The newer Action/Button fields might not be populated by all terminals
+	if msg.Type != tea.MouseLeft {
+		return m, nil
+	}
+
+	// Tab bar is at Y=2-5 (4 lines including borders)
+	// Clickable area is Y=2-4 (bottom extends one row too much at Y=5)
+	if msg.Y >= 2 && msg.Y <= 4 {
+		// Use the tab component's method to get the clicked tab
+		clickedTab := m.tabs.GetTabAtX(msg.X)
+		if clickedTab >= 0 {
+			m.tabs.SetActive(clickedTab)
+		}
+		return m, nil
+	}
+
+	// Only handle clicks in content area for capture tab
+	// (Nodes and Settings tabs handle their own bounds checking)
+	if m.tabs.GetActive() == 0 {
+		if msg.Y < contentStartY || msg.Y >= contentStartY+contentHeight {
+			return m, nil
+		}
+	}
+
+	// Packet list clicks (only on first tab - capture tab)
+	if m.tabs.GetActive() == 0 {
+		minWidthForDetails := 120
+
+		// Check if we're in split pane mode
+		if m.showDetails && m.width >= minWidthForDetails {
+			// Split pane: packet list on left (65%), details on right (35%)
+			// Both panels have borders and padding, so calculate actual widths
+			listWidth := m.width * 65 / 100
+
+			// The packet list renders at full listWidth
+			// The details panel starts immediately after the packet list
+			// Packet list has border(1) + padding(2) = 3 chars on right side
+			// So the actual packet list content ends at listWidth - 3
+			// Clicks from listWidth - 2 onwards should focus the details panel
+
+			detailsContentStart := listWidth - 2 // Move boundary left to account for packet list's right border/padding
+
+			if msg.X < detailsContentStart {
+				// Click in packet list area - switch focus to left pane
+				m.focusedPane = "left"
+
+				// First line of data is at contentStartY + 1 (after table header)
+				tableHeaderY := contentStartY + 1
+				if msg.Y > tableHeaderY {
+					// Calculate which row was clicked (relative to visible area)
+					visibleRow := msg.Y - tableHeaderY - 1 // -1 for separator line
+
+					packets := m.packets
+					if !m.filterChain.IsEmpty() {
+						packets = m.filteredPackets
+					}
+
+					// Add scroll offset to get actual packet index
+					actualPacketIndex := m.packetList.GetOffset() + visibleRow
+
+					if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
+						// Set cursor directly without scrolling
+						m.packetList.SetCursor(actualPacketIndex)
+						m.detailsPanel.SetPacket(&packets[actualPacketIndex])
+					}
+				}
+			} else {
+				// Click inside details panel content - switch focus to right pane
+				m.focusedPane = "right"
+			}
+		} else {
+			// Full width packet list
+			tableHeaderY := contentStartY + 1
+			if msg.Y > tableHeaderY {
+				// Calculate which row was clicked (relative to visible area)
+				visibleRow := msg.Y - tableHeaderY - 1
+
+				packets := m.packets
+				if !m.filterChain.IsEmpty() {
+					packets = m.filteredPackets
+				}
+
+				// Add scroll offset to get actual packet index
+				actualPacketIndex := m.packetList.GetOffset() + visibleRow
+
+				if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
+					// Set cursor directly without scrolling
+					m.packetList.SetCursor(actualPacketIndex)
+					m.detailsPanel.SetPacket(&packets[actualPacketIndex])
+					m.focusedPane = "left"
+				}
+			}
+		}
+		return m, nil
+	}
+
+	// Nodes tab clicks (tab 1)
+	if m.tabs.GetActive() == 1 {
+		// DEBUG: Uncomment to trace mouse event forwarding
+		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		// 	fmt.Fprintf(f, "  -> Forwarding to NodesView.Update\n")
+		// 	f.Close()
+		// }
+		// Forward mouse events to the nodes view (like settings tab, let it handle coordinate adjustment)
+		cmd := m.nodesView.Update(msg)
+		return m, cmd
+	}
+
+	// Settings tab clicks (tab 3)
+	if m.tabs.GetActive() == 3 {
+		// Forward mouse events to the settings view
+		cmd := m.settingsView.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil
@@ -596,6 +1232,9 @@ func (m Model) View() string {
 	m.header.SetPacketCount(m.totalPackets)
 	m.header.SetInterface(m.interfaceName)
 	m.header.SetCaptureMode(m.captureMode)
+	// Use hunter count (not remote client count) for accurate node display
+	m.header.SetNodeCount(m.nodesView.GetHunterCount())
+	m.header.SetProcessorCount(m.nodesView.GetProcessorCount())
 
 	// Update footer state
 	m.footer.SetFilterMode(m.filterMode)
@@ -616,7 +1255,7 @@ func (m Model) View() string {
 
 	// Render main content based on active tab
 	switch m.tabs.GetActive() {
-	case 0: // Live Capture
+	case 0: // Live/Remote/Offline Capture
 		minWidthForDetails := 120
 		if m.showDetails && m.width >= minWidthForDetails {
 			// Split pane layout
@@ -894,23 +1533,22 @@ func saveThemePreference(theme themes.Theme) {
 
 	// Write to config file
 	if err := viper.WriteConfig(); err != nil {
-		// If config file doesn't exist, create it in ~/.config/lippycat.yaml
+		// If config file doesn't exist, create it in ~/.config/lippycat/config.yaml
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			// Ensure ~/.config directory exists
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return
 			}
-			configDir := filepath.Join(home, ".config")
+
+			// Use ~/.config/lippycat/config.yaml as primary location
+			configDir := filepath.Join(home, ".config", "lippycat")
 			if err := os.MkdirAll(configDir, 0755); err != nil {
 				return
 			}
 
-			// Set the config file path
-			configPath := filepath.Join(configDir, "lippycat.yaml")
+			configPath := filepath.Join(configDir, "config.yaml")
 			viper.SetConfigFile(configPath)
 
-			// Try to write
 			if err := viper.SafeWriteConfig(); err != nil {
 				// Silently ignore errors - theme will still work for this session
 				return
@@ -932,3 +1570,58 @@ func startOfflineCapture(ctx context.Context, pcapFile string, filter string, pr
 		startTUISniffer(ctx, devices, filter, program)
 	})
 }
+
+// startRemoteCapture loads and connects to nodes from YAML file
+func startRemoteCapture(nodesFile string, remoteClients map[string]interface{ Close() }, program *tea.Program) {
+	if nodesFile == "" {
+		return
+	}
+
+	go func() {
+		// Recover from any panic in this goroutine to prevent crashing the TUI
+		defer func() {
+			if r := recover(); r != nil {
+				// Panic occurred, log it but don't crash the TUI
+				_ = r
+			}
+		}()
+
+		nodes, err := config.LoadNodesFromYAML(nodesFile)
+		if err != nil {
+			// TODO: Show error in UI
+			return
+		}
+
+		// Connect to each node
+		for _, node := range nodes {
+			// Skip if already connected
+			if _, exists := remoteClients[node.Address]; exists {
+				continue
+			}
+
+			// Create client
+			client, err := remotecapture.NewClient(node.Address, program)
+			if err != nil {
+				// TODO: Show error in UI (but continue with other nodes)
+				continue
+			}
+
+			// Store client
+			remoteClients[node.Address] = client
+
+			// Start packet stream
+			if err := client.StreamPackets(); err != nil {
+				// TODO: Show error in UI
+				client.Close()
+				delete(remoteClients, node.Address)
+				continue
+			}
+
+			// Start hunter status subscription
+			if err := client.SubscribeHunterStatus(); err != nil {
+				// TODO: Show error in UI (non-fatal)
+			}
+		}
+	}()
+}
+

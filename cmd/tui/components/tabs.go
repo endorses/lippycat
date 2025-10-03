@@ -53,6 +53,39 @@ func (t *Tabs) GetActive() int {
 	return t.active
 }
 
+// GetTabAtX returns the tab index at the given X coordinate, or -1 if not on a tab
+func (t *Tabs) GetTabAtX(x int) int {
+	// Calculate the rendered width of each tab
+	// Active tab: padding 0,3,1,3 + borders + icon + " " + label
+	// Inactive tab: padding 0,3 + borders + icon + " " + label
+
+	currentX := 0
+
+	for i, tab := range t.tabs {
+		label := tab.Icon + " " + tab.Label
+
+		// Calculate tab width including padding and borders
+		var tabWidth int
+		if i == t.active {
+			// Active: left border(1) + left padding(3) + text + right padding(3) + right border(1) = 8 + text
+			tabWidth = 1 + 3 + lipgloss.Width(label) + 3 + 1
+		} else {
+			// Inactive: left border(1) + left padding(3) + text + right padding(3) + right border(1) = 8 + text
+			tabWidth = 1 + 3 + lipgloss.Width(label) + 3 + 1
+		}
+
+		// Check if click is within this tab's bounds
+		if x >= currentX && x < currentX+tabWidth {
+			return i
+		}
+
+		// Move to next tab position (add 1 for the gap between tabs)
+		currentX += tabWidth + 1
+	}
+
+	return -1
+}
+
 // Next switches to the next tab
 func (t *Tabs) Next() {
 	t.active = (t.active + 1) % len(t.tabs)

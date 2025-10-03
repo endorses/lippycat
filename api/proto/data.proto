@@ -10,6 +10,10 @@ service DataService {
     // Hunter → Processor: Captured packets
     // Processor → Hunter: Acknowledgments and flow control signals
     rpc StreamPackets(stream PacketBatch) returns (stream StreamControl);
+
+    // SubscribePackets allows monitoring clients (like TUI) to receive packet stream
+    // Monitoring Client ← Processor/Hunter: Packet batches
+    rpc SubscribePackets(SubscribeRequest) returns (stream PacketBatch);
 }
 
 // PacketBatch contains multiple packets captured by a hunter
@@ -154,4 +158,16 @@ enum FlowControl {
 
     // Resume after pause
     FLOW_RESUME = 3;
+}
+
+// SubscribeRequest for monitoring clients to subscribe to packet stream
+message SubscribeRequest {
+    // Optional: Filter by specific hunter IDs (empty = all hunters)
+    repeated string hunter_ids = 1;
+
+    // Optional: BPF filter to apply on server side
+    string bpf_filter = 2;
+
+    // Client identifier for logging/tracking
+    string client_id = 3;
 }

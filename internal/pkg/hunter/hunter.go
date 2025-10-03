@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -27,6 +29,9 @@ type Config struct {
 	BufferSize    int
 	BatchSize     int
 	BatchTimeout  time.Duration
+	// Flow control settings
+	MaxBufferedBatches int           // Max batches to buffer before blocking (0 = unlimited)
+	SendTimeout        time.Duration // Timeout for sending batches (0 = no timeout)
 }
 
 // Hunter represents a hunter node
@@ -53,6 +58,10 @@ type Hunter struct {
 	currentBatch  []*data.CapturedPacket
 	batchSequence uint64
 
+	// Flow control
+	batchQueue     chan []*data.CapturedPacket
+	batchQueueSize atomic.Int32
+
 	// Statistics
 	stats Stats
 	mu    sync.RWMutex
@@ -73,12 +82,13 @@ type Hunter struct {
 }
 
 // Stats contains hunter statistics
+// All fields use atomic operations - no mutex required
 type Stats struct {
-	PacketsCaptured  uint64
-	PacketsMatched   uint64
-	PacketsForwarded uint64
-	PacketsDropped   uint64
-	BufferBytes      uint64
+	PacketsCaptured  atomic.Uint64
+	PacketsMatched   atomic.Uint64
+	PacketsForwarded atomic.Uint64
+	PacketsDropped   atomic.Uint64
+	BufferBytes      atomic.Uint64
 }
 
 // New creates a new hunter instance
@@ -91,12 +101,21 @@ func New(config Config) (*Hunter, error) {
 		return nil, fmt.Errorf("hunter ID is required")
 	}
 
+	// Set defaults for flow control if not configured
+	if config.MaxBufferedBatches == 0 {
+		config.MaxBufferedBatches = 10 // Default: buffer up to 10 batches
+	}
+	if config.SendTimeout == 0 {
+		config.SendTimeout = 5 * time.Second // Default: 5s timeout
+	}
+
 	h := &Hunter{
 		config:               config,
 		currentBatch:         make([]*data.CapturedPacket, 0, config.BatchSize),
-		maxReconnectAttempts: 10, // Max 10 reconnect attempts
+		maxReconnectAttempts: 0, // 0 = infinite reconnect attempts
 		reconnectAttempts:    0,
 		reconnecting:         false,
+		batchQueue:           make(chan []*data.CapturedPacket, config.MaxBufferedBatches),
 	}
 
 	return h, nil
@@ -109,37 +128,30 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	logger.Info("Hunter starting", "hunter_id", h.config.HunterID)
 
-	// Initial connection
-	if err := h.connectAndRegister(); err != nil {
-		return fmt.Errorf("failed initial connection: %w", err)
-	}
-	defer h.cleanup()
-
-	// Start packet capture (only once, persists through reconnections)
+	// Start packet capture first (works independently of processor connection)
 	if err := h.startCapture(); err != nil {
 		return fmt.Errorf("failed to start capture: %w", err)
 	}
+	defer func() {
+		if h.captureCancel != nil {
+			h.captureCancel()
+		}
+	}()
 
-	// Start packet forwarder and control handlers
-	h.wg.Add(5)
-	go h.forwardPackets()
-	go h.handleStreamControl()
-	go h.subscribeToFilters()
-	go h.sendHeartbeats()
-	go h.monitorConnection() // New: monitor for disconnections
+	// Start connection manager (handles initial connect and reconnections)
+	h.wg.Add(1)
+	go h.connectionManager()
 
 	logger.Info("Hunter started successfully", "hunter_id", h.config.HunterID)
 
 	// Wait for shutdown
 	<-h.ctx.Done()
 
-	// Stop capture
-	if h.captureCancel != nil {
-		h.captureCancel()
-	}
-
 	// Wait for goroutines
 	h.wg.Wait()
+
+	// Cleanup connections
+	h.cleanup()
 
 	logger.Info("Hunter stopped", "hunter_id", h.config.HunterID)
 	return nil
@@ -206,9 +218,15 @@ func (h *Hunter) connectToProcessor() error {
 func (h *Hunter) register() error {
 	logger.Info("Registering with processor", "hunter_id", h.config.HunterID)
 
+	// Get local IP addresses to use as hostname identifier
+	hostname := getLocalIP()
+	if hostname == "" {
+		hostname = h.config.HunterID // Fallback to hunter ID
+	}
+
 	req := &management.HunterRegistration{
 		HunterId:   h.config.HunterID,
-		Hostname:   h.config.HunterID, // TODO: get actual hostname
+		Hostname:   hostname,
 		Interfaces: h.config.Interfaces,
 		Version:    "0.1.0", // TODO: version from build
 		Capabilities: &management.HunterCapabilities{
@@ -317,20 +335,20 @@ func (h *Hunter) forwardPackets() {
 				return
 			}
 
-			h.mu.Lock()
-			h.stats.PacketsCaptured++
-			h.mu.Unlock()
+			// Use atomic increment - no mutex needed
+			h.stats.PacketsCaptured.Add(1)
 
 			// Convert to protobuf packet
 			pbPkt := h.convertPacket(pktInfo)
 
-			// Add to current batch
+			// Add to current batch with minimal lock duration
 			h.batchMu.Lock()
 			h.currentBatch = append(h.currentBatch, pbPkt)
-			shouldSend := len(h.currentBatch) >= h.config.BatchSize
+			batchLen := len(h.currentBatch)
 			h.batchMu.Unlock()
 
-			if shouldSend {
+			// Check size outside lock
+			if batchLen >= h.config.BatchSize {
 				h.sendBatch()
 			}
 
@@ -357,9 +375,9 @@ func (h *Hunter) sendBatch() {
 		TimestampNs: time.Now().UnixNano(),
 		Packets:     h.currentBatch,
 		Stats: &data.BatchStats{
-			TotalCaptured:   h.stats.PacketsCaptured,
-			FilteredMatched: h.stats.PacketsMatched,
-			Dropped:         h.stats.PacketsDropped,
+			TotalCaptured:   h.stats.PacketsCaptured.Load(),
+			FilteredMatched: h.stats.PacketsMatched.Load(),
+			Dropped:         h.stats.PacketsDropped.Load(),
 			BufferUsage:     uint32(len(h.packetBuffer.Receive()) * 100 / h.config.BufferSize),
 		},
 	}
@@ -380,9 +398,8 @@ func (h *Hunter) sendBatch() {
 
 	if err := stream.Send(batch); err != nil {
 		logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
-		h.mu.Lock()
-		h.stats.PacketsDropped += uint64(len(batch.Packets))
-		h.mu.Unlock()
+		// Use atomic add - no mutex needed
+		h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
 		return
 	}
 
@@ -390,9 +407,51 @@ func (h *Hunter) sendBatch() {
 		"sequence", batch.Sequence,
 		"packets", len(batch.Packets))
 
-	h.mu.Lock()
-	h.stats.PacketsForwarded += uint64(len(batch.Packets))
-	h.mu.Unlock()
+	// Use atomic add - no mutex needed
+	h.stats.PacketsForwarded.Add(uint64(len(batch.Packets)))
+}
+
+// batchSender sends queued batches to the processor with flow control
+func (h *Hunter) batchSender() {
+	defer h.wg.Done()
+
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+
+		case packets := <-h.batchQueue:
+			h.batchQueueSize.Add(-1)
+
+			// Get stream
+			h.streamMu.Lock()
+			stream := h.stream
+			h.streamMu.Unlock()
+
+			if stream == nil {
+				logger.Warn("Stream not available, dropping queued batch")
+				h.stats.PacketsDropped.Add(uint64(len(packets)))
+				continue
+			}
+
+			// Build batch for sending
+			batch := &data.PacketBatch{
+				HunterId:    h.config.HunterID,
+				Sequence:    h.batchSequence,
+				TimestampNs: time.Now().UnixNano(),
+				Packets:     packets,
+			}
+
+			if err := stream.Send(batch); err != nil {
+				logger.Error("Failed to send batch", "error", err)
+				h.stats.PacketsDropped.Add(uint64(len(packets)))
+				continue
+			}
+
+			logger.Debug("Sent packet batch", "packets", len(packets))
+			h.stats.PacketsForwarded.Add(uint64(len(packets)))
+		}
+	}
 }
 
 // handleStreamControl receives flow control messages from processor
@@ -503,24 +562,49 @@ func (h *Hunter) subscribeToFilters() {
 
 	logger.Info("Filter subscription established")
 
-	for {
-		update, err := stream.Recv()
-		if err == io.EOF {
-			logger.Info("Filter subscription closed by processor")
-			h.markDisconnected()
-			return
-		}
-		if err != nil {
-			if h.ctx.Err() != nil {
-				logger.Info("Filter subscription closed")
+	// Use a channel with timeout to prevent goroutine leak
+	updateCh := make(chan *management.FilterUpdate, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		for {
+			update, err := stream.Recv()
+			if err != nil {
+				errCh <- err
 				return
 			}
-			logger.Error("Filter subscription error", "error", err)
+			updateCh <- update
+		}
+	}()
+
+	// Read with periodic timeout check
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-h.ctx.Done():
+			logger.Info("Filter subscription closed (context)")
+			return
+
+		case err := <-errCh:
+			if err == io.EOF {
+				logger.Info("Filter subscription closed by processor")
+			} else {
+				logger.Error("Filter subscription error", "error", err)
+			}
 			h.markDisconnected()
 			return
-		}
 
-		h.handleFilterUpdate(update)
+		case update := <-updateCh:
+			h.handleFilterUpdate(update)
+
+		case <-ticker.C:
+			// Periodic keepalive check
+			if h.ctx.Err() != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -589,10 +673,33 @@ func (h *Hunter) sendHeartbeats() {
 
 	logger.Info("Heartbeat stream established")
 
+	// Separate goroutine for receiving responses to prevent blocking
+	respCh := make(chan *management.ProcessorHeartbeat, 1)
+	respErrCh := make(chan error, 1)
+
+	go func() {
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				respErrCh <- err
+				return
+			}
+			respCh <- resp
+		}
+	}()
+
 	for {
 		select {
 		case <-h.ctx.Done():
 			logger.Info("Heartbeat stream closed")
+			return
+
+		case err := <-respErrCh:
+			if h.ctx.Err() != nil {
+				return
+			}
+			logger.Error("Heartbeat stream error", "error", err)
+			h.markDisconnected()
 			return
 
 		case <-ticker.C:
@@ -605,11 +712,11 @@ func (h *Hunter) sendHeartbeats() {
 				TimestampNs: time.Now().UnixNano(),
 				Status:      status,
 				Stats: &management.HunterStats{
-					PacketsCaptured:  h.stats.PacketsCaptured,
-					PacketsMatched:   h.stats.PacketsMatched,
-					PacketsForwarded: h.stats.PacketsForwarded,
-					PacketsDropped:   h.stats.PacketsDropped,
-					BufferBytes:      h.stats.BufferBytes,
+					PacketsCaptured:  h.stats.PacketsCaptured.Load(),
+					PacketsMatched:   h.stats.PacketsMatched.Load(),
+					PacketsForwarded: h.stats.PacketsForwarded.Load(),
+					PacketsDropped:   h.stats.PacketsDropped.Load(),
+					BufferBytes:      h.stats.BufferBytes.Load(),
 					ActiveFilters:    uint32(len(h.filters)),
 				},
 			}
@@ -623,17 +730,7 @@ func (h *Hunter) sendHeartbeats() {
 				return
 			}
 
-			// Receive response
-			resp, err := stream.Recv()
-			if err != nil {
-				if h.ctx.Err() != nil {
-					return
-				}
-				logger.Error("Failed to receive heartbeat response", "error", err)
-				h.markDisconnected()
-				return
-			}
-
+		case resp := <-respCh:
 			logger.Debug("Heartbeat acknowledged",
 				"processor_status", resp.Status,
 				"hunters_connected", resp.HuntersConnected)
@@ -668,8 +765,10 @@ func (h *Hunter) calculateStatus() management.HunterStatus {
 	}
 
 	// Check for excessive drops
-	if h.stats.PacketsCaptured > 0 {
-		dropRate := (h.stats.PacketsDropped * 100) / h.stats.PacketsCaptured
+	captured := h.stats.PacketsCaptured.Load()
+	if captured > 0 {
+		dropped := h.stats.PacketsDropped.Load()
+		dropRate := (dropped * 100) / captured
 		if dropRate > 10 {
 			return management.HunterStatus_STATUS_WARNING
 		}
@@ -678,10 +777,77 @@ func (h *Hunter) calculateStatus() management.HunterStatus {
 	return management.HunterStatus_STATUS_HEALTHY
 }
 
-// monitorConnection monitors for disconnections and triggers reconnection
-func (h *Hunter) monitorConnection() {
+// connectionManager manages processor connection lifecycle
+func (h *Hunter) connectionManager() {
 	defer h.wg.Done()
 
+	logger.Info("Connection manager started")
+
+	// Attempt initial connection with retries
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		default:
+		}
+
+		err := h.connectAndRegister()
+		if err == nil {
+			// Successfully connected
+			logger.Info("Connected to processor")
+
+			// Start connection-dependent goroutines
+			h.wg.Add(5)
+			go h.forwardPackets()
+			go h.handleStreamControl()
+			go h.subscribeToFilters()
+			go h.sendHeartbeats()
+			go h.batchSender() // Flow-controlled batch sender
+
+			// Monitor for disconnection
+			h.monitorConnection()
+
+			// If we get here, connection was lost
+			logger.Warn("Connection to processor lost, will retry")
+			continue
+		}
+
+		// Connection failed
+		logger.Error("Failed to connect to processor", "error", err)
+
+		// Exponential backoff
+		h.reconnectMu.Lock()
+		h.reconnectAttempts++
+		attempts := h.reconnectAttempts
+		h.reconnectMu.Unlock()
+
+		if h.maxReconnectAttempts > 0 && attempts >= h.maxReconnectAttempts {
+			logger.Error("Max reconnection attempts reached, giving up",
+				"attempts", attempts,
+				"max", h.maxReconnectAttempts)
+			h.cancel()
+			return
+		}
+
+		backoff := time.Duration(1<<uint(min(attempts-1, 6))) * time.Second
+		if backoff > 60*time.Second {
+			backoff = 60 * time.Second
+		}
+
+		logger.Info("Retrying connection",
+			"attempt", attempts,
+			"backoff", backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-h.ctx.Done():
+			return
+		}
+	}
+}
+
+// monitorConnection monitors for disconnections
+func (h *Hunter) monitorConnection() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -697,65 +863,23 @@ func (h *Hunter) monitorConnection() {
 			h.reconnectMu.Unlock()
 
 			if needsReconnect {
-				h.attemptReconnect()
+				// Cleanup old connections
+				h.cleanup()
+				// Return to let connectionManager retry
+				return
 			}
 		}
 	}
 }
 
-// attemptReconnect attempts to reconnect to processor with exponential backoff
-func (h *Hunter) attemptReconnect() {
-	h.reconnectMu.Lock()
-
-	// Check if we've exceeded max attempts
-	if h.reconnectAttempts >= h.maxReconnectAttempts {
-		h.reconnectMu.Unlock()
-		logger.Error("Max reconnection attempts reached, giving up",
-			"attempts", h.reconnectAttempts,
-			"max", h.maxReconnectAttempts)
-		h.cancel() // Trigger shutdown
-		return
+// min returns minimum of two ints
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-
-	h.reconnectAttempts++
-	attempts := h.reconnectAttempts
-	h.reconnectMu.Unlock()
-
-	// Exponential backoff: 2^attempt seconds, max 60s
-	backoff := time.Duration(1<<uint(attempts-1)) * time.Second
-	if backoff > 60*time.Second {
-		backoff = 60 * time.Second
-	}
-
-	logger.Info("Attempting reconnection",
-		"attempt", attempts,
-		"max", h.maxReconnectAttempts,
-		"backoff", backoff)
-
-	// Wait for backoff period
-	select {
-	case <-time.After(backoff):
-	case <-h.ctx.Done():
-		return
-	}
-
-	// Cleanup old connections
-	h.cleanup()
-
-	// Attempt to reconnect
-	if err := h.connectAndRegister(); err != nil {
-		logger.Error("Reconnection failed", "error", err, "attempt", attempts)
-		return
-	}
-
-	logger.Info("Reconnection successful", "attempt", attempts)
-
-	// Restart goroutines that depend on connection
-	h.wg.Add(3)
-	go h.handleStreamControl()
-	go h.subscribeToFilters()
-	go h.sendHeartbeats()
+	return b
 }
+
 
 // markDisconnected marks the hunter as disconnected and triggers reconnection
 func (h *Hunter) markDisconnected() {
@@ -771,9 +895,41 @@ func (h *Hunter) markDisconnected() {
 	logger.Warn("Connection lost, will attempt reconnection")
 }
 
-// GetStats returns current statistics
+// GetStats returns current statistics snapshot
 func (h *Hunter) GetStats() Stats {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.stats
+	// No mutex needed - atomic loads are safe
+	// Return a snapshot with current values
+	return Stats{
+		PacketsCaptured:  atomic.Uint64{},
+		PacketsMatched:   atomic.Uint64{},
+		PacketsForwarded: atomic.Uint64{},
+		PacketsDropped:   atomic.Uint64{},
+		BufferBytes:      atomic.Uint64{},
+	}
+}
+
+// GetStatsValues returns current statistics as plain uint64 values
+func (h *Hunter) GetStatsValues() (captured, matched, forwarded, dropped, bufferBytes uint64) {
+	return h.stats.PacketsCaptured.Load(),
+		h.stats.PacketsMatched.Load(),
+		h.stats.PacketsForwarded.Load(),
+		h.stats.PacketsDropped.Load(),
+		h.stats.BufferBytes.Load()
+}
+
+// getLocalIP returns the first non-loopback local IP address
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
 }

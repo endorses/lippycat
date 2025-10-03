@@ -43,37 +43,23 @@ func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 }
 
 func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
-	// Check if already closed before attempting send
+	// Fast path: check if already closed
 	if atomic.LoadInt32(&pb.closed) == 1 {
 		return false
 	}
 
-	// Use defer/recover to handle potential panic from closed channel
-	defer func() {
-		if r := recover(); r != nil {
-			// Channel was closed during send, mark as closed
-			atomic.StoreInt32(&pb.closed, 1)
-		}
-	}()
-
-	// Check context first to ensure consistent behavior
-	select {
-	case <-pb.ctx.Done():
-		return false
-	default:
-	}
-
+	// Single select with all cases - more efficient
 	select {
 	case pb.ch <- pkt:
 		return true
 	case <-pb.ctx.Done():
 		return false
 	default:
-		// Non-blocking send with drop counting
-		atomic.AddInt64(&pb.dropped, 1)
-		if atomic.LoadInt64(&pb.dropped)%1000 == 0 {
+		// Non-blocking send failed - buffer full
+		dropped := atomic.AddInt64(&pb.dropped, 1)
+		if dropped%1000 == 0 {
 			logger.Warn("Packets dropped due to buffer overflow",
-				"total_dropped", atomic.LoadInt64(&pb.dropped))
+				"total_dropped", dropped)
 		}
 		return false
 	}
@@ -223,7 +209,11 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	packetCount := int64(0)
+	// Batched atomic updates: use local counter and periodically sync to atomic
+	var packetCount int64 // shared atomic counter
+	var localCount int64  // goroutine-local counter (no atomic needed)
+	const batchThreshold = 100 // flush to atomic every N packets
+
 	go func() {
 		for {
 			select {
@@ -246,10 +236,17 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	for {
 		select {
 		case <-ctx.Done():
+			// Flush remaining local count before exit
+			if localCount > 0 {
+				atomic.AddInt64(&packetCount, localCount)
+			}
 			return
 		case packet, ok := <-packetCh:
 			if !ok {
-				// Channel closed, exit
+				// Channel closed, flush and exit
+				if localCount > 0 {
+					atomic.AddInt64(&packetCount, localCount)
+				}
 				return
 			}
 			pktInfo := PacketInfo{
@@ -257,7 +254,13 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				Packet:   packet,
 			}
 			buffer.Send(pktInfo)
-			atomic.AddInt64(&packetCount, 1)
+
+			// Batched atomic update: increment local counter
+			localCount++
+			if localCount >= batchThreshold {
+				atomic.AddInt64(&packetCount, localCount)
+				localCount = 0
+			}
 		}
 	}
 }

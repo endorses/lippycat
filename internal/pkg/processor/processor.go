@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -39,14 +40,18 @@ type Processor struct {
 	huntersMu sync.RWMutex
 	hunters   map[string]*ConnectedHunter
 
-	// PCAP writer
-	pcapFile   *os.File
-	pcapWriter *pcapgo.Writer
-	pcapMu     sync.Mutex
+	// PCAP writer (async)
+	pcapFile       *os.File
+	pcapWriter     *pcapgo.Writer
+	pcapWriteQueue chan []*data.CapturedPacket
+	pcapWriterWg   sync.WaitGroup
+	pcapWriterMu   sync.Mutex // Protects pcapWriter (not thread-safe)
 
-	// Statistics
-	stats Stats
-	mu    sync.RWMutex
+	// Statistics - use atomic.Value for lock-free reads
+	statsCache           atomic.Value  // stores *cachedStats
+	statsUpdates         atomic.Uint64 // incremented on every stats change
+	packetsReceived      atomic.Uint64 // incremental counter
+	packetsForwarded     atomic.Uint64 // incremental counter
 
 	// Filters
 	filtersMu      sync.RWMutex
@@ -58,6 +63,11 @@ type Processor struct {
 	upstreamClient data.DataServiceClient
 	upstreamStream data.DataService_StreamPacketsClient
 	upstreamMu     sync.Mutex
+
+	// Monitoring subscribers (TUI clients) - uses copy-on-write for lock-free reads
+	subscribersMu    sync.Mutex
+	subscribersAtomic atomic.Value // stores *subscriberMap
+	nextSubID         atomic.Uint64
 
 	// Control
 	ctx    context.Context
@@ -92,6 +102,18 @@ type Stats struct {
 	TotalFilters           uint32
 }
 
+// cachedStats holds incrementally updated statistics
+type cachedStats struct {
+	stats      Stats
+	lastUpdate int64 // Unix timestamp
+}
+
+// subscriberMap holds the current set of subscribers
+// Used with atomic.Value for copy-on-write pattern
+type subscriberMap struct {
+	subscribers map[string]chan *data.PacketBatch
+}
+
 // New creates a new processor instance
 func New(config Config) (*Processor, error) {
 	if config.ListenAddr == "" {
@@ -104,6 +126,17 @@ func New(config Config) (*Processor, error) {
 		filters:        make(map[string]*management.Filter),
 		filterChannels: make(map[string]chan *management.FilterUpdate),
 	}
+
+	// Initialize subscriber map with copy-on-write
+	p.subscribersAtomic.Store(&subscriberMap{
+		subscribers: make(map[string]chan *data.PacketBatch),
+	})
+
+	// Initialize stats cache
+	p.statsCache.Store(&cachedStats{
+		stats:      Stats{},
+		lastUpdate: time.Now().Unix(),
+	})
 
 	return p, nil
 }
@@ -222,20 +255,27 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	}
 	p.huntersMu.Unlock()
 
-	// Write packets to PCAP file if configured
-	if p.pcapWriter != nil {
-		p.writePacketsToPCAP(batch.Packets)
+	// Queue packets for async PCAP write if configured
+	if p.pcapWriteQueue != nil {
+		select {
+		case p.pcapWriteQueue <- batch.Packets:
+			// Queued successfully
+		default:
+			// Queue full - log warning but don't block
+			logger.Warn("PCAP write queue full, dropping batch", "packets", len(batch.Packets))
+		}
 	}
 
-	// Update processor statistics
-	p.mu.Lock()
-	p.stats.TotalPacketsReceived += uint64(len(batch.Packets))
-	p.mu.Unlock()
+	// Update processor statistics (atomic increment)
+	p.packetsReceived.Add(uint64(len(batch.Packets)))
 
 	// Forward to upstream in hierarchical mode
 	if p.upstreamStream != nil {
 		p.forwardToUpstream(batch)
 	}
+
+	// Broadcast to monitoring subscribers (TUI clients)
+	p.broadcastToSubscribers(batch)
 }
 
 // RegisterHunter handles hunter registration (Management Service)
@@ -249,27 +289,24 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 
 	// Check if hunter already exists
 	p.huntersMu.Lock()
+	isReconnect := false
 	if _, exists := p.hunters[hunterID]; exists {
-		p.huntersMu.Unlock()
-		logger.Warn("Hunter already registered", "hunter_id", hunterID)
-		return &management.RegistrationResponse{
-			Accepted:   false,
-			Error:      "hunter already registered",
-			AssignedId: hunterID,
-		}, nil
+		logger.Info("Hunter re-registering (replacing old connection)", "hunter_id", hunterID)
+		isReconnect = true
+		// Allow re-registration (old connection will be replaced)
+	} else {
+		// Check max hunters limit (only for new hunters)
+		if len(p.hunters) >= p.config.MaxHunters {
+			p.huntersMu.Unlock()
+			logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)
+			return &management.RegistrationResponse{
+				Accepted: false,
+				Error:    "maximum number of hunters reached",
+			}, nil
+		}
 	}
 
-	// Check max hunters limit
-	if len(p.hunters) >= p.config.MaxHunters {
-		p.huntersMu.Unlock()
-		logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)
-		return &management.RegistrationResponse{
-			Accepted: false,
-			Error:    "maximum number of hunters reached",
-		}, nil
-	}
-
-	// Register hunter
+	// Register/re-register hunter
 	hunter := &ConnectedHunter{
 		ID:          hunterID,
 		Hostname:    req.Hostname,
@@ -278,13 +315,13 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 		Status:      management.HunterStatus_STATUS_HEALTHY,
 	}
 	p.hunters[hunterID] = hunter
-	p.huntersMu.Unlock()
 
-	// Update statistics
-	p.mu.Lock()
-	p.stats.TotalHunters++
-	p.stats.HealthyHunters++
-	p.mu.Unlock()
+	// Update stats cache (while still holding huntersMu)
+	if !isReconnect {
+		p.updateHealthStats()
+	}
+
+	p.huntersMu.Unlock()
 
 	logger.Info("Hunter registered successfully", "hunter_id", hunterID)
 
@@ -328,10 +365,11 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 		logger.Debug("Heartbeat received", "hunter_id", hunterID)
 
 		// Send response
+		stats := p.GetStats()
 		resp := &management.ProcessorHeartbeat{
 			TimestampNs:       hb.TimestampNs,
 			Status:            management.ProcessorStatus_PROCESSOR_HEALTHY,
-			HuntersConnected:  p.stats.TotalHunters,
+			HuntersConnected:  stats.TotalHunters,
 		}
 
 		if err := stream.Send(resp); err != nil {
@@ -422,12 +460,16 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			continue
 		}
 
+		// Calculate connection duration
+		durationNs := time.Now().UnixNano() - hunter.ConnectedAt
+		durationSec := uint64(durationNs / 1e9)
+
 		connectedHunters = append(connectedHunters, &management.ConnectedHunter{
 			HunterId:             hunter.ID,
 			Hostname:             hunter.Hostname,
 			RemoteAddr:           hunter.RemoteAddr,
 			Status:               hunter.Status,
-			ConnectedDurationSec: 0, // TODO: calculate
+			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      hunter.LastHeartbeat,
 			Stats: &management.HunterStats{
 				PacketsCaptured:  hunter.PacketsReceived,
@@ -436,9 +478,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 		})
 	}
 
-	p.mu.RLock()
-	stats := p.stats
-	p.mu.RUnlock()
+	stats := p.GetStats()
 
 	return &management.StatusResponse{
 		Hunters: connectedHunters,
@@ -550,14 +590,20 @@ func (p *Processor) getFiltersForHunter(hunterID string) []*management.Filter {
 
 // GetStats returns current statistics
 func (p *Processor) GetStats() Stats {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.stats
+	// Lock-free read from cache (hunter health stats)
+	cached := p.statsCache.Load().(*cachedStats)
+	stats := cached.stats
+
+	// Add atomic packet counters
+	stats.TotalPacketsReceived = p.packetsReceived.Load()
+	stats.TotalPacketsForwarded = p.packetsForwarded.Load()
+
+	return stats
 }
 
-// initPCAPWriter initializes PCAP file writer
+// initPCAPWriter initializes PCAP file writer with async worker pool
 func (p *Processor) initPCAPWriter() error {
-	logger.Info("Initializing PCAP writer", "file", p.config.WriteFile)
+	logger.Info("Initializing async PCAP writer", "file", p.config.WriteFile)
 
 	file, err := os.Create(p.config.WriteFile)
 	if err != nil {
@@ -573,14 +619,52 @@ func (p *Processor) initPCAPWriter() error {
 		return fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 
-	logger.Info("PCAP writer initialized", "file", p.config.WriteFile)
+	// Create write queue (buffered channel)
+	p.pcapWriteQueue = make(chan []*data.CapturedPacket, 1000)
+
+	// Start worker pool (2-4 workers for parallel writes)
+	numWorkers := 2
+	for i := 0; i < numWorkers; i++ {
+		p.pcapWriterWg.Add(1)
+		go p.pcapWriteWorker(i)
+	}
+
+	logger.Info("Async PCAP writer initialized", "file", p.config.WriteFile, "workers", numWorkers)
 	return nil
 }
 
-// writePacketsToPCAP writes packets to PCAP file
-func (p *Processor) writePacketsToPCAP(packets []*data.CapturedPacket) {
-	p.pcapMu.Lock()
-	defer p.pcapMu.Unlock()
+// pcapWriteWorker processes PCAP write queue asynchronously
+func (p *Processor) pcapWriteWorker(workerID int) {
+	defer p.pcapWriterWg.Done()
+
+	logger.Debug("PCAP write worker started", "worker_id", workerID)
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			logger.Debug("PCAP write worker stopping", "worker_id", workerID)
+			return
+
+		case packets, ok := <-p.pcapWriteQueue:
+			if !ok {
+				logger.Debug("PCAP write queue closed", "worker_id", workerID)
+				return
+			}
+
+			// Write batch to PCAP file
+			// Note: gopacket's pcapgo.Writer is NOT thread-safe
+			// We need a mutex here, but it's only contended by workers, not the hot path
+			p.writePacketBatchToPCAP(packets)
+		}
+	}
+}
+
+// writePacketBatchToPCAP writes a batch of packets to PCAP file (called by workers)
+func (p *Processor) writePacketBatchToPCAP(packets []*data.CapturedPacket) {
+	// pcapgo.Writer is not thread-safe, so we need synchronization between workers
+	// This mutex is only contended by workers, not the main packet processing path
+	p.pcapWriterMu.Lock()
+	defer p.pcapWriterMu.Unlock()
 
 	for _, pkt := range packets {
 		// Convert timestamp
@@ -600,11 +684,18 @@ func (p *Processor) writePacketsToPCAP(packets []*data.CapturedPacket) {
 	}
 }
 
-// closePCAPWriter closes PCAP file
+// closePCAPWriter closes PCAP file and waits for workers
 func (p *Processor) closePCAPWriter() {
-	p.pcapMu.Lock()
-	defer p.pcapMu.Unlock()
+	// Close queue to signal workers
+	if p.pcapWriteQueue != nil {
+		close(p.pcapWriteQueue)
+	}
 
+	// Wait for all workers to finish
+	logger.Info("Waiting for PCAP writers to finish")
+	p.pcapWriterWg.Wait()
+
+	// Close file
 	if p.pcapFile != nil {
 		p.pcapFile.Close()
 		logger.Info("PCAP file closed", "file", p.config.WriteFile)
@@ -692,6 +783,7 @@ func (p *Processor) monitorHeartbeats() {
 }
 
 // updateHealthStats updates processor health statistics based on hunter statuses
+// Assumes huntersMu is already locked by caller
 func (p *Processor) updateHealthStats() {
 	var healthy, warning, errCount uint32
 
@@ -706,12 +798,22 @@ func (p *Processor) updateHealthStats() {
 		}
 	}
 
-	p.mu.Lock()
-	p.stats.TotalHunters = uint32(len(p.hunters))
-	p.stats.HealthyHunters = healthy
-	p.stats.WarningHunters = warning
-	p.stats.ErrorHunters = errCount
-	p.mu.Unlock()
+	// Get current cache, update, and store back (copy-on-write)
+	oldCache := p.statsCache.Load().(*cachedStats)
+	newStats := oldCache.stats // Copy current stats
+
+	// Update hunter health stats
+	newStats.TotalHunters = uint32(len(p.hunters))
+	newStats.HealthyHunters = healthy
+	newStats.WarningHunters = warning
+	newStats.ErrorHunters = errCount
+
+	// Store updated cache
+	p.statsCache.Store(&cachedStats{
+		stats:      newStats,
+		lastUpdate: time.Now().Unix(),
+	})
+	p.statsUpdates.Add(1)
 }
 
 // connectToUpstream establishes connection to upstream processor
@@ -785,10 +887,8 @@ func (p *Processor) forwardToUpstream(batch *data.PacketBatch) {
 		return
 	}
 
-	// Update forwarded stats
-	p.mu.Lock()
-	p.stats.TotalPacketsForwarded += uint64(len(batch.Packets))
-	p.mu.Unlock()
+	// Update forwarded stats (atomic increment)
+	p.packetsForwarded.Add(uint64(len(batch.Packets)))
 
 	logger.Debug("Forwarded batch to upstream",
 		"hunter_id", batch.HunterId,
@@ -825,5 +925,122 @@ func (p *Processor) receiveUpstreamAcks() {
 			"flow_control", ack.FlowControl)
 
 		// TODO: Implement flow control from upstream (pause forwarding if FLOW_PAUSE)
+	}
+}
+
+// SubscribePackets allows monitoring clients (TUI) to receive packet stream (Data Service)
+func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.DataService_SubscribePacketsServer) error {
+	clientID := req.ClientId
+	if clientID == "" {
+		nextID := p.nextSubID.Add(1)
+		clientID = fmt.Sprintf("subscriber-%d", nextID)
+	}
+
+	logger.Info("New packet subscriber", "client_id", clientID)
+
+	// Create channel for this subscriber
+	subChan := make(chan *data.PacketBatch, 100)
+
+	// Add subscriber using copy-on-write
+	p.addSubscriber(clientID, subChan)
+
+	// Cleanup on disconnect
+	defer func() {
+		p.removeSubscriber(clientID)
+		close(subChan)
+		logger.Info("Packet subscriber disconnected", "client_id", clientID)
+	}()
+
+	// Stream packets to client
+	for {
+		select {
+		case <-stream.Context().Done():
+			return nil
+		case batch, ok := <-subChan:
+			if !ok {
+				return nil
+			}
+
+			// Apply BPF filter if specified
+			if req.BpfFilter != "" {
+				// TODO: Implement server-side BPF filtering
+				// For now, send all packets
+			}
+
+			// Filter by hunter IDs if specified
+			if len(req.HunterIds) > 0 {
+				found := false
+				for _, hunterID := range req.HunterIds {
+					if batch.HunterId == hunterID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
+			}
+
+			if err := stream.Send(batch); err != nil {
+				logger.Error("Failed to send batch to subscriber", "error", err, "client_id", clientID)
+				return err
+			}
+		}
+	}
+}
+
+// addSubscriber adds a subscriber using copy-on-write
+func (p *Processor) addSubscriber(clientID string, ch chan *data.PacketBatch) {
+	p.subscribersMu.Lock()
+	defer p.subscribersMu.Unlock()
+
+	// Get current map
+	oldMap := p.subscribersAtomic.Load().(*subscriberMap)
+
+	// Create new map with added subscriber
+	newSubs := make(map[string]chan *data.PacketBatch, len(oldMap.subscribers)+1)
+	for k, v := range oldMap.subscribers {
+		newSubs[k] = v
+	}
+	newSubs[clientID] = ch
+
+	// Atomically replace the map
+	p.subscribersAtomic.Store(&subscriberMap{subscribers: newSubs})
+}
+
+// removeSubscriber removes a subscriber using copy-on-write
+func (p *Processor) removeSubscriber(clientID string) {
+	p.subscribersMu.Lock()
+	defer p.subscribersMu.Unlock()
+
+	// Get current map
+	oldMap := p.subscribersAtomic.Load().(*subscriberMap)
+
+	// Create new map without the subscriber
+	newSubs := make(map[string]chan *data.PacketBatch, len(oldMap.subscribers)-1)
+	for k, v := range oldMap.subscribers {
+		if k != clientID {
+			newSubs[k] = v
+		}
+	}
+
+	// Atomically replace the map
+	p.subscribersAtomic.Store(&subscriberMap{subscribers: newSubs})
+}
+
+// broadcastToSubscribers broadcasts a packet batch to all monitoring subscribers
+// Uses lock-free read from atomic value
+func (p *Processor) broadcastToSubscribers(batch *data.PacketBatch) {
+	// Lock-free read of subscriber map
+	subMap := p.subscribersAtomic.Load().(*subscriberMap)
+
+	// Iterate over snapshot - no locks needed
+	for clientID, ch := range subMap.subscribers {
+		select {
+		case ch <- batch:
+			logger.Debug("Broadcasted batch to subscriber", "client_id", clientID, "packets", len(batch.Packets))
+		default:
+			logger.Warn("Subscriber channel full, dropping batch", "client_id", clientID)
+		}
 	}
 }

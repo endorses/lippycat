@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 	"github.com/google/gopacket/pcap"
+	"github.com/spf13/viper"
 )
 
 // CaptureMode represents the capture mode
@@ -23,15 +25,28 @@ type CaptureMode int
 const (
 	CaptureModeLive CaptureMode = iota
 	CaptureModeOffline
+	CaptureModeRemote // Connect to processor/hunter node
 )
 
 // RestartCaptureMsg is sent when capture needs to be restarted
 type RestartCaptureMsg struct {
-	Mode       CaptureMode
-	Interface  string
-	PCAPFile   string
-	Filter     string
-	BufferSize int
+	Mode        CaptureMode
+	Interface   string
+	PCAPFile    string
+	NodesFile   string // For remote mode: path to nodes YAML file
+	Filter      string
+	BufferSize  int
+	Promiscuous bool
+}
+
+// LoadNodesMsg is sent when nodes should be loaded from YAML file
+type LoadNodesMsg struct {
+	FilePath string
+}
+
+// UpdateBufferSizeMsg is sent when buffer size changes
+type UpdateBufferSizeMsg struct {
+	Size int
 }
 
 type settingItem struct {
@@ -88,33 +103,36 @@ func (d interfaceDelegate) Render(w io.Writer, m list.Model, index int, item lis
 
 // SettingsView displays settings configuration
 type SettingsView struct {
-	width                  int
-	height                 int
-	theme                  themes.Theme
-	interfaceList          list.Model
-	inputs                 []textinput.Model
-	focusIndex             int
-	promiscuous            bool
-	availableIfaces        []string
-	selectedIfaces         map[string]bool // Multiple selected interfaces
-	editing                bool
-	savedInterfaceIndex    int                 // Save list position when entering editing mode
-	savedInterfaceString   string              // Save interface string when entering editing mode
-	savedSelectedIfaces    map[string]bool     // Save interface selection when entering editing mode
-	captureMode            CaptureMode
-	errorMessage           string // Error message to display
-	viewport               viewport.Model
-	viewportReady          bool
-	fileList               list.Model          // File list for PCAP file selection
-	fileListActive         bool
-	currentDirectory       string              // Current directory being browsed
-	selectedFile           string
+	width                int
+	height               int
+	theme                themes.Theme
+	interfaceList        list.Model
+	inputs               []textinput.Model
+	focusIndex           int
+	promiscuous          bool
+	availableIfaces      []string
+	selectedIfaces       map[string]bool // Multiple selected interfaces
+	editing              bool
+	savedInterfaceIndex  int             // Save list position when entering editing mode
+	savedInterfaceString string          // Save interface string when entering editing mode
+	savedSelectedIfaces  map[string]bool // Save interface selection when entering editing mode
+	captureMode          CaptureMode
+	errorMessage         string          // Error message to display
+	viewport             viewport.Model
+	viewportReady        bool
+	fileList             list.Model      // File list for PCAP file selection
+	fileListActive       bool
+	currentDirectory     string          // Current directory being browsed
+	selectedFile         string
+	lastClickField       int             // Track which field was last clicked for double-click detection
+	lastClickTime        time.Time       // Track when field was last clicked
 }
 
 const (
 	inputBufferSize = iota
 	inputBPFFilter
 	inputPCAPFile
+	inputNodesFile // Path to nodes YAML file for remote mode
 	inputCount
 )
 
@@ -266,6 +284,12 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 	inputs[inputPCAPFile].SetValue(currentPCAPFile)
 	inputs[inputPCAPFile].CharLimit = 512
 
+	// Nodes File input (for remote mode)
+	inputs[inputNodesFile] = textinput.New()
+	inputs[inputNodesFile].Placeholder = "nodes.yaml or ~/.config/lippycat/nodes.yaml"
+	inputs[inputNodesFile].SetValue("")
+	inputs[inputNodesFile].CharLimit = 512
+
 	// Determine initial mode based on whether pcap file was provided
 	mode := CaptureModeLive
 	if currentPCAPFile != "" {
@@ -319,6 +343,16 @@ func (s *SettingsView) SetTheme(theme themes.Theme) {
 	// Update list delegate with new theme
 	delegate := newInterfaceDelegate(s.selectedIfaces, theme)
 	s.interfaceList.SetDelegate(delegate)
+}
+
+// SetCaptureMode sets the capture mode
+func (s *SettingsView) SetCaptureMode(mode CaptureMode) {
+	s.captureMode = mode
+}
+
+// SetNodesFile sets the nodes file path for remote mode
+func (s *SettingsView) SetNodesFile(path string) {
+	s.inputs[inputNodesFile].SetValue(path)
 }
 
 // SetSize sets the view dimensions
@@ -434,6 +468,24 @@ func (s *SettingsView) validateSettings() error {
 		if info.IsDir() {
 			return fmt.Errorf("Path is a directory, not a file: %s", pcapFile)
 		}
+	} else if s.captureMode == CaptureModeRemote {
+		// Remote mode validation - nodes file is optional
+		// Users can add nodes via the Nodes tab instead
+		nodesFile := s.inputs[inputNodesFile].Value()
+		if nodesFile != "" {
+			// Expand tilde to home directory for validation
+			expandedPath := nodesFile
+			if strings.HasPrefix(nodesFile, "~/") {
+				if home, err := os.UserHomeDir(); err == nil {
+					expandedPath = filepath.Join(home, nodesFile[2:])
+				}
+			}
+			// If a file is specified, check if it exists
+			if _, err := os.Stat(expandedPath); os.IsNotExist(err) {
+				return fmt.Errorf("Nodes file does not exist: %s", nodesFile)
+			}
+		}
+		// If no file specified, that's OK - user can add nodes via Nodes tab
 	} else {
 		// Live mode validation
 		if len(s.selectedIfaces) == 0 {
@@ -460,13 +512,48 @@ func (s *SettingsView) restartCapture() tea.Cmd {
 	// Clear error message on successful validation
 	s.errorMessage = ""
 
+	// Save buffer size to config
+	s.SaveBufferSize()
+
 	return func() tea.Msg {
 		return RestartCaptureMsg{
-			Mode:       s.captureMode,
-			Interface:  s.GetInterface(),
-			PCAPFile:   s.GetPCAPFile(),
-			Filter:     s.GetBPFFilter(),
-			BufferSize: s.GetBufferSize(),
+			Mode:        s.captureMode,
+			Interface:   s.GetInterface(),
+			PCAPFile:    s.GetPCAPFile(),
+			NodesFile:   s.inputs[inputNodesFile].Value(),
+			Filter:      s.GetBPFFilter(),
+			BufferSize:  s.GetBufferSize(),
+			Promiscuous: s.promiscuous,
+		}
+	}
+}
+
+// SaveBufferSize persists the buffer size to config file
+func (s *SettingsView) SaveBufferSize() {
+	bufferSize := s.GetBufferSize()
+	viper.Set("tui.buffer_size", bufferSize)
+
+	// Write to config file
+	if err := viper.WriteConfig(); err != nil {
+		// If config file doesn't exist, create it
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return
+			}
+
+			// Use ~/.config/lippycat/config.yaml as primary location
+			configDir := filepath.Join(home, ".config", "lippycat")
+			if err := os.MkdirAll(configDir, 0755); err != nil {
+				return
+			}
+
+			configPath := filepath.Join(configDir, "config.yaml")
+			viper.SetConfigFile(configPath)
+
+			if err := viper.SafeWriteConfig(); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -477,6 +564,9 @@ func (s *SettingsView) getMaxFocusIndex() int {
 	if s.captureMode == CaptureModeLive {
 		// 0: mode, 1: interface, 2: promiscuous, 3: buffer, 4: filter
 		return 5
+	} else if s.captureMode == CaptureModeRemote {
+		// 0: mode, 1: remote address, 2: buffer, 3: filter
+		return 4
 	}
 	// 0: mode, 1: pcap file, 2: buffer, 3: filter
 	return 4
@@ -604,16 +694,241 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 	}
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// Handle mouse clicks for focusing different settings
+		if msg.Type == tea.MouseLeft {
+			// Calculate which setting was clicked based on Y position
+			// Need to account for: header (2) + tabs (4) = 6 lines before content
+			relativeY := msg.Y - 6
+
+			// Exit edit mode if clicking outside the currently editing field
+			if s.editing && relativeY >= 0 {
+				clickedField := -1
+				if s.captureMode == CaptureModeLive {
+					if relativeY >= 11 && relativeY <= 13 {
+						clickedField = 3 // Buffer
+					} else if relativeY >= 14 && relativeY <= 16 {
+						clickedField = 4 // Filter
+					}
+				} else if s.captureMode == CaptureModeOffline {
+					if relativeY >= 5 && relativeY <= 7 {
+						clickedField = 1 // PCAP File
+					} else if relativeY >= 8 && relativeY <= 10 {
+						clickedField = 2 // Buffer
+					} else if relativeY >= 11 && relativeY <= 13 {
+						clickedField = 3 // Filter
+					}
+				} else if s.captureMode == CaptureModeRemote {
+					if relativeY >= 5 && relativeY <= 7 {
+						clickedField = 1 // Nodes File
+					} else if relativeY >= 8 && relativeY <= 10 {
+						clickedField = 2 // Buffer
+					} else if relativeY >= 11 && relativeY <= 13 {
+						clickedField = 3 // Filter
+					}
+				}
+
+				// If clicking outside the currently focused field, exit edit mode
+				if clickedField != s.focusIndex {
+					s.editing = false
+					s.fileListActive = false
+					s.inputs[inputBufferSize].Blur()
+					s.inputs[inputBPFFilter].Blur()
+					s.inputs[inputPCAPFile].Blur()
+					s.inputs[inputNodesFile].Blur()
+				}
+			}
+
+			if relativeY >= 0 { // Within settings area
+				// Based on user feedback, the actual Y ranges are:
+				// Mode: starts at line 2, ends at line 4 (3 lines total)
+				// Interface: starts at line 5, ends at line 7 (3 lines total)
+				// Promiscuous: starts at line 8, ends at line 10 (3 lines total)
+				// Buffer: starts at line 11, ends at line 13 (3 lines total)
+				// Filter: starts at line 14, ends at line 16 (3 lines total)
+
+				if s.captureMode == CaptureModeLive {
+					// Live mode: Mode(0), Interface(1), Promiscuous(2), Buffer(3), Filter(4)
+					if relativeY >= 2 && relativeY <= 4 {
+						// Click on capture mode tabs - check X position to determine which tab
+						// "Live" is approximately at X 20-35, "Offline" at X 36-55, "Remote" at X 56-75
+						if msg.X >= 20 && msg.X <= 35 {
+							// Already in Live mode, do nothing
+						} else if msg.X >= 36 && msg.X <= 55 {
+							// Switch to Offline mode
+							s.captureMode = CaptureModeOffline
+							return s.restartCapture()
+						} else if msg.X >= 56 && msg.X <= 75 {
+							// Switch to Remote mode
+							s.captureMode = CaptureModeRemote
+							return s.restartCapture()
+						}
+						s.focusIndex = 0 // Mode
+					} else if relativeY >= 5 && relativeY <= 7 {
+						s.focusIndex = 1 // Interface
+					} else if relativeY >= 8 && relativeY <= 10 {
+						// Click on promiscuous mode - toggle it
+						if !s.selectedIfaces["any"] {
+							s.promiscuous = !s.promiscuous
+							s.errorMessage = ""
+						} else {
+							s.errorMessage = "Cannot enable promiscuous mode with 'any' interface"
+						}
+						s.focusIndex = 2 // Promiscuous
+					} else if relativeY >= 11 && relativeY <= 13 {
+						s.focusIndex = 3 // Buffer
+					} else if relativeY >= 14 && relativeY <= 16 {
+						s.focusIndex = 4 // Filter
+					}
+				} else if s.captureMode == CaptureModeOffline {
+					// Offline mode: Mode(0), PCAP File(1), Buffer(2), Filter(3)
+					if relativeY >= 2 && relativeY <= 4 {
+						// Click on capture mode tabs
+						if msg.X >= 20 && msg.X <= 35 {
+							// Switch to Live mode
+							s.captureMode = CaptureModeLive
+							return s.restartCapture()
+						} else if msg.X >= 36 && msg.X <= 55 {
+							// Already in Offline mode, do nothing
+						} else if msg.X >= 56 && msg.X <= 75 {
+							// Switch to Remote mode
+							s.captureMode = CaptureModeRemote
+							return s.restartCapture()
+						}
+						s.focusIndex = 0 // Mode
+					} else if relativeY >= 5 && relativeY <= 7 {
+						s.focusIndex = 1 // PCAP File
+					} else if relativeY >= 8 && relativeY <= 10 {
+						s.focusIndex = 2 // Buffer
+					} else if relativeY >= 11 && relativeY <= 13 {
+						s.focusIndex = 3 // Filter
+					}
+				} else if s.captureMode == CaptureModeRemote {
+					// Remote mode: Mode(0), Nodes File(1), Buffer(2), Filter(3)
+					if relativeY >= 2 && relativeY <= 4 {
+						// Click on capture mode tabs
+						if msg.X >= 20 && msg.X <= 35 {
+							// Switch to Live mode
+							s.captureMode = CaptureModeLive
+							return s.restartCapture()
+						} else if msg.X >= 36 && msg.X <= 55 {
+							// Switch to Offline mode
+							s.captureMode = CaptureModeOffline
+							return s.restartCapture()
+						} else if msg.X >= 56 && msg.X <= 75 {
+							// Already in Remote mode, do nothing
+						}
+						s.focusIndex = 0 // Mode
+					} else if relativeY >= 5 && relativeY <= 7 {
+						s.focusIndex = 1 // Nodes File
+					} else if relativeY >= 8 && relativeY <= 10 {
+						s.focusIndex = 2 // Buffer
+					} else if relativeY >= 11 && relativeY <= 13 {
+						s.focusIndex = 3 // Filter
+					}
+				}
+			}
+		}
+
+		// Handle double-click to enter edit mode on input fields
+		// Check if this is a double-click (second click within 500ms on same field)
+		if msg.Type == tea.MouseLeft {
+			relativeY := msg.Y - 6
+			now := time.Now()
+			const doubleClickThreshold = 500 * time.Millisecond
+
+			// Determine which field was clicked based on Y position
+			clickedField := -1
+			if s.captureMode == CaptureModeLive {
+				if relativeY >= 11 && relativeY <= 13 {
+					clickedField = 3 // Buffer
+				} else if relativeY >= 14 && relativeY <= 16 {
+					clickedField = 4 // Filter
+				}
+			} else if s.captureMode == CaptureModeOffline {
+				if relativeY >= 5 && relativeY <= 7 {
+					clickedField = 1 // PCAP File
+				} else if relativeY >= 8 && relativeY <= 10 {
+					clickedField = 2 // Buffer
+				} else if relativeY >= 11 && relativeY <= 13 {
+					clickedField = 3 // Filter
+				}
+			} else if s.captureMode == CaptureModeRemote {
+				if relativeY >= 5 && relativeY <= 7 {
+					clickedField = 1 // Nodes File
+				} else if relativeY >= 8 && relativeY <= 10 {
+					clickedField = 2 // Buffer
+				} else if relativeY >= 11 && relativeY <= 13 {
+					clickedField = 3 // Filter
+				}
+			}
+
+			// Check if this is a double-click on the same field
+			if clickedField >= 0 && clickedField == s.lastClickField &&
+			   now.Sub(s.lastClickTime) < doubleClickThreshold && !s.editing {
+				// Double-click detected - enter edit mode
+				if s.captureMode == CaptureModeLive {
+					if clickedField == 3 {
+						s.editing = true
+						s.inputs[inputBufferSize].Focus()
+					} else if clickedField == 4 {
+						s.editing = true
+						s.inputs[inputBPFFilter].Focus()
+					}
+				} else if s.captureMode == CaptureModeOffline {
+					if clickedField == 1 {
+						s.editing = true
+						s.fileListActive = true
+						s.errorMessage = ""
+						s.fileList.Title = "Select PCAP File: " + s.currentDirectory
+					} else if clickedField == 2 {
+						s.editing = true
+						s.inputs[inputBufferSize].Focus()
+					} else if clickedField == 3 {
+						s.editing = true
+						s.inputs[inputBPFFilter].Focus()
+					}
+				} else if s.captureMode == CaptureModeRemote {
+					if clickedField == 1 {
+						s.editing = true
+						s.errorMessage = ""
+						currentVal := s.inputs[inputNodesFile].Value()
+						if currentVal == "" {
+							s.inputs[inputNodesFile].Placeholder = ""
+						}
+						s.inputs[inputNodesFile].SetValue("")
+						s.inputs[inputNodesFile].SetValue(currentVal)
+						s.inputs[inputNodesFile].SetCursor(len(currentVal))
+						s.inputs[inputNodesFile].Focus()
+					} else if clickedField == 2 {
+						s.editing = true
+						s.inputs[inputBufferSize].Focus()
+					} else if clickedField == 3 {
+						s.editing = true
+						s.inputs[inputBPFFilter].Focus()
+					}
+				}
+			}
+
+			// Update last click tracking
+			s.lastClickField = clickedField
+			s.lastClickTime = now
+		}
+		return nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
 			// Mode selector
 			if s.focusIndex == 0 {
-				// Toggle between modes
+				// Cycle through modes: Live -> Offline -> Remote -> Live
 				oldMode := s.captureMode
-				if s.captureMode == CaptureModeLive {
+				switch s.captureMode {
+				case CaptureModeLive:
 					s.captureMode = CaptureModeOffline
-				} else {
+				case CaptureModeOffline:
+					s.captureMode = CaptureModeRemote
+				case CaptureModeRemote:
 					s.captureMode = CaptureModeLive
 				}
 
@@ -656,16 +971,66 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 			if s.captureMode == CaptureModeLive {
 				// In live mode: buffer (3), filter (4)
 				if s.focusIndex == 3 || s.focusIndex == 4 {
-					inputIdx := s.focusIndex - 3 // Map to inputBufferSize or inputBPFFilter
+					s.editing = !s.editing
+					if s.editing {
+						if s.focusIndex == 3 {
+							s.inputs[inputBufferSize].Focus()
+						} else {
+							s.inputs[inputBPFFilter].Focus()
+						}
+					} else {
+						// Send buffer size update when exiting edit mode
+						if s.focusIndex == 3 {
+							return func() tea.Msg {
+								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+							}
+						}
+						s.inputs[inputBufferSize].Blur()
+						s.inputs[inputBPFFilter].Blur()
+					}
+					return nil
+				}
+			} else if s.captureMode == CaptureModeRemote {
+				// In remote mode: nodes file (1), buffer (2), filter (3)
+				if s.focusIndex == 1 || s.focusIndex == 2 || s.focusIndex == 3 {
 					s.editing = !s.editing
 					if s.editing {
 						s.errorMessage = "" // Clear error when editing
-						s.inputs[inputIdx].Focus()
+						if s.focusIndex == 1 {
+							// Ensure clean state before focusing
+							currentVal := s.inputs[inputNodesFile].Value()
+							// Temporarily clear placeholder to avoid rendering bug
+							if currentVal == "" {
+								s.inputs[inputNodesFile].Placeholder = ""
+							}
+							s.inputs[inputNodesFile].SetValue("")
+							s.inputs[inputNodesFile].SetValue(currentVal)
+							s.inputs[inputNodesFile].SetCursor(len(currentVal))
+							s.inputs[inputNodesFile].Focus()
+						} else if s.focusIndex == 2 {
+							s.inputs[inputBufferSize].Focus()
+						} else {
+							s.inputs[inputBPFFilter].Focus()
+						}
 					} else {
-						s.inputs[inputIdx].Blur()
-						// Trigger restart when exiting buffer size or filter edit
-						return s.restartCapture()
+						// Exiting edit mode
+						if s.focusIndex == 1 {
+							// Nodes file changed - trigger restart to load nodes
+							s.inputs[inputNodesFile].Placeholder = "nodes.yaml or ~/.config/lippycat/nodes.yaml"
+							s.inputs[inputNodesFile].Blur()
+							return s.restartCapture()
+						} else if s.focusIndex == 2 {
+							// Send buffer size update when exiting edit mode
+							s.inputs[inputBufferSize].Blur()
+							return func() tea.Msg {
+								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+							}
+						} else {
+							// BPF filter
+							s.inputs[inputBPFFilter].Blur()
+						}
 					}
+					return nil
 				}
 			} else {
 				// In offline mode: pcap file (1), buffer (2), filter (3)
@@ -692,8 +1057,12 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.inputs[inputIdx].Focus()
 					} else {
 						s.inputs[inputIdx].Blur()
-						// Trigger restart when exiting buffer size or filter edit
-						return s.restartCapture()
+						// Send buffer size update when exiting buffer size edit
+						if s.focusIndex == 2 {
+							return func() tea.Msg {
+								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+							}
+						}
 					}
 				}
 			}
@@ -707,6 +1076,17 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 						return cmd
 					} else if s.focusIndex == 4 {
+						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
+						return cmd
+					}
+				} else if s.captureMode == CaptureModeRemote {
+					if s.focusIndex == 1 {
+						s.inputs[inputNodesFile], cmd = s.inputs[inputNodesFile].Update(msg)
+						return cmd
+					} else if s.focusIndex == 2 {
+						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
+						return cmd
+					} else if s.focusIndex == 3 {
 						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
 						return cmd
 					}
@@ -744,6 +1124,17 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
 						return cmd
 					}
+				} else if s.captureMode == CaptureModeRemote {
+					if s.focusIndex == 1 {
+						s.inputs[inputNodesFile], cmd = s.inputs[inputNodesFile].Update(msg)
+						return cmd
+					} else if s.focusIndex == 2 {
+						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
+						return cmd
+					} else if s.focusIndex == 3 {
+						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
+						return cmd
+					}
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -778,6 +1169,17 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
 						return cmd
 					}
+				} else if s.captureMode == CaptureModeRemote {
+					if s.focusIndex == 1 {
+						s.inputs[inputNodesFile], cmd = s.inputs[inputNodesFile].Update(msg)
+						return cmd
+					} else if s.focusIndex == 2 {
+						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
+						return cmd
+					} else if s.focusIndex == 3 {
+						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
+						return cmd
+					}
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -792,11 +1194,16 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 
-			// Toggle mode when focused on mode selector (and not editing)
+			// Previous mode when focused on mode selector (and not editing)
 			if s.focusIndex == 0 && !s.editing {
 				oldMode := s.captureMode
-				if s.captureMode == CaptureModeOffline {
+				switch s.captureMode {
+				case CaptureModeLive:
+					s.captureMode = CaptureModeRemote
+				case CaptureModeOffline:
 					s.captureMode = CaptureModeLive
+				case CaptureModeRemote:
+					s.captureMode = CaptureModeOffline
 				}
 				if oldMode != s.captureMode {
 					return s.restartCapture()
@@ -815,6 +1222,17 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
 						return cmd
 					}
+				} else if s.captureMode == CaptureModeRemote {
+					if s.focusIndex == 1 {
+						s.inputs[inputNodesFile], cmd = s.inputs[inputNodesFile].Update(msg)
+						return cmd
+					} else if s.focusIndex == 2 {
+						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
+						return cmd
+					} else if s.focusIndex == 3 {
+						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
+						return cmd
+					}
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -829,11 +1247,16 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 
-			// Toggle mode when focused on mode selector (and not editing)
+			// Next mode when focused on mode selector (and not editing)
 			if s.focusIndex == 0 && !s.editing {
 				oldMode := s.captureMode
-				if s.captureMode == CaptureModeLive {
+				switch s.captureMode {
+				case CaptureModeLive:
 					s.captureMode = CaptureModeOffline
+				case CaptureModeOffline:
+					s.captureMode = CaptureModeRemote
+				case CaptureModeRemote:
+					s.captureMode = CaptureModeLive
 				}
 				if oldMode != s.captureMode {
 					return s.restartCapture()
@@ -847,7 +1270,27 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				if s.captureMode == CaptureModeLive {
 					if s.focusIndex == 3 {
 						s.inputs[inputBufferSize].Blur()
+						// Save buffer size when exiting edit mode
+						s.editing = false
+						return func() tea.Msg {
+							return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+						}
 					} else if s.focusIndex == 4 {
+						s.inputs[inputBPFFilter].Blur()
+					}
+				} else if s.captureMode == CaptureModeRemote {
+					// Restore placeholder when blurring with Esc
+					if s.focusIndex == 1 {
+						s.inputs[inputNodesFile].Placeholder = "nodes.yaml or ~/.config/lippycat/nodes.yaml"
+						s.inputs[inputNodesFile].Blur()
+					} else if s.focusIndex == 2 {
+						s.inputs[inputBufferSize].Blur()
+						// Save buffer size when exiting edit mode
+						s.editing = false
+						return func() tea.Msg {
+							return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+						}
+					} else if s.focusIndex == 3 {
 						s.inputs[inputBPFFilter].Blur()
 					}
 				} else {
@@ -855,6 +1298,10 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.inputs[inputPCAPFile].Blur()
 					} else if s.focusIndex == 2 {
 						s.inputs[inputBufferSize].Blur()
+						// Save buffer size when exiting edit mode
+						return func() tea.Msg {
+							return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+						}
 					} else if s.focusIndex == 3 {
 						s.inputs[inputBPFFilter].Blur()
 					}
@@ -872,6 +1319,17 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 				return cmd
 			} else if s.focusIndex == 4 {
+				s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
+				return cmd
+			}
+		} else if s.captureMode == CaptureModeRemote {
+			if s.focusIndex == 1 {
+				s.inputs[inputNodesFile], cmd = s.inputs[inputNodesFile].Update(msg)
+				return cmd
+			} else if s.focusIndex == 2 {
+				s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
+				return cmd
+			} else if s.focusIndex == 3 {
 				s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
 				return cmd
 			}
@@ -916,7 +1374,14 @@ func (s *SettingsView) View() string {
 		Bold(true).
 		Width(20)
 
-	focusedStyle := lipgloss.NewStyle().
+	// Blue border when selected but not editing
+	selectedStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(s.theme.InfoColor).
+		Padding(0, 1)
+
+	// Red border when actively editing
+	editingStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(s.theme.FocusedBorderColor).
 		Padding(0, 1)
@@ -934,7 +1399,11 @@ func (s *SettingsView) View() string {
 	// Capture Mode Selector (tab-style)
 	modeStyle := unfocusedStyle
 	if s.focusIndex == 0 {
-		modeStyle = focusedStyle
+		if s.editing {
+			modeStyle = editingStyle
+		} else {
+			modeStyle = selectedStyle
+		}
 	}
 
 	liveTabStyle := lipgloss.NewStyle().
@@ -943,27 +1412,38 @@ func (s *SettingsView) View() string {
 	offlineTabStyle := lipgloss.NewStyle().
 		Padding(0, 2).
 		Foreground(s.theme.Foreground)
+	remoteTabStyle := lipgloss.NewStyle().
+		Padding(0, 2).
+		Foreground(s.theme.Foreground)
 
-	if s.captureMode == CaptureModeLive {
+	switch s.captureMode {
+	case CaptureModeLive:
 		liveTabStyle = liveTabStyle.
 			Background(s.theme.InfoColor).
 			Foreground(s.theme.Background).
 			Bold(true)
-	} else {
+	case CaptureModeOffline:
 		offlineTabStyle = offlineTabStyle.
+			Background(s.theme.InfoColor).
+			Foreground(s.theme.Background).
+			Bold(true)
+	case CaptureModeRemote:
+		remoteTabStyle = remoteTabStyle.
 			Background(s.theme.InfoColor).
 			Foreground(s.theme.Background).
 			Bold(true)
 	}
 
 	modeSelector := lipgloss.JoinHorizontal(lipgloss.Left,
-		liveTabStyle.Render("Live Capture"),
+		liveTabStyle.Render("Live"),
 		lipgloss.NewStyle().Render(" "),
-		offlineTabStyle.Render("Offline Capture"),
+		offlineTabStyle.Render("Offline"),
+		lipgloss.NewStyle().Render(" "),
+		remoteTabStyle.Render("Remote"),
 	)
 
 	sections = append(sections, modeStyle.Width(s.width-4).Render(
-		labelStyle.Render("Capture Mode:") + " " + modeSelector,
+		labelStyle.Render("Capture Mode:")+" "+modeSelector,
 	))
 
 	// Mode-specific fields
@@ -972,11 +1452,11 @@ func (s *SettingsView) View() string {
 		ifaceSection := ""
 		if s.focusIndex == 1 && s.editing {
 			// Show full list when editing
-			ifaceSection = focusedStyle.Width(s.width - 4).Render(s.interfaceList.View())
+			ifaceSection = editingStyle.Width(s.width - 4).Render(s.interfaceList.View())
 		} else if s.focusIndex == 1 && !s.editing {
 			// Show selected interfaces when focused but not editing
 			selectedIfacesStr := s.GetInterface()
-			ifaceSection = focusedStyle.Width(s.width - 4).Render(
+			ifaceSection = selectedStyle.Width(s.width - 4).Render(
 				labelStyle.Render("Interfaces:") + " " + selectedIfacesStr,
 			)
 		} else {
@@ -991,20 +1471,28 @@ func (s *SettingsView) View() string {
 		// Promiscuous Mode
 		promiscStyle := unfocusedStyle
 		if s.focusIndex == 2 {
-			promiscStyle = focusedStyle
+			if s.editing {
+				promiscStyle = editingStyle
+			} else {
+				promiscStyle = selectedStyle
+			}
 		}
 		promiscValue := "[ ]"
 		if s.promiscuous {
 			promiscValue = "[✓]"
 		}
 		sections = append(sections, promiscStyle.Width(s.width-4).Render(
-			labelStyle.Render("Promiscuous Mode:") + " " + promiscValue,
+			labelStyle.Render("Promiscuous Mode:")+" "+promiscValue,
 		))
-	} else {
+	} else if s.captureMode == CaptureModeOffline {
 		// PCAP File
 		fileStyle := unfocusedStyle
 		if s.focusIndex == 1 {
-			fileStyle = focusedStyle
+			if s.editing {
+				fileStyle = editingStyle
+			} else {
+				fileStyle = selectedStyle
+			}
 		}
 
 		// Show file list if active, otherwise show file path
@@ -1019,7 +1507,7 @@ func (s *SettingsView) View() string {
 				availableHeight = 20 // Maximum height
 			}
 			s.fileList.SetHeight(availableHeight)
-			sections = append(sections, focusedStyle.Width(s.width-4).Render(s.fileList.View()))
+			sections = append(sections, editingStyle.Width(s.width-4).Render(s.fileList.View()))
 		} else {
 			// Show just the filename if a file is selected, otherwise show the input
 			displayValue := s.inputs[inputPCAPFile].Value()
@@ -1027,7 +1515,33 @@ func (s *SettingsView) View() string {
 				displayValue = filepath.Base(s.selectedFile)
 			}
 			sections = append(sections, fileStyle.Width(s.width-4).Render(
-				labelStyle.Render("PCAP File:") + " " + displayValue,
+				labelStyle.Render("PCAP File:")+" "+displayValue,
+			))
+		}
+	} else if s.captureMode == CaptureModeRemote {
+		// Nodes File input
+		fileStyle := unfocusedStyle
+		if s.focusIndex == 1 {
+			if s.editing {
+				fileStyle = editingStyle
+			} else {
+				fileStyle = selectedStyle
+			}
+		}
+
+		if s.editing && s.focusIndex == 1 {
+			// Show input field when editing
+			sections = append(sections, fileStyle.Width(s.width-4).Render(
+				labelStyle.Render("Nodes File:")+" "+s.inputs[inputNodesFile].View(),
+			))
+		} else {
+			// Show value when not editing
+			displayValue := s.inputs[inputNodesFile].Value()
+			if displayValue == "" {
+				displayValue = s.inputs[inputNodesFile].Placeholder
+			}
+			sections = append(sections, fileStyle.Width(s.width-4).Render(
+				labelStyle.Render("Nodes File:")+" "+displayValue,
 			))
 		}
 	}
@@ -1037,12 +1551,18 @@ func (s *SettingsView) View() string {
 	bufferFocusIdx := 3
 	if s.captureMode == CaptureModeOffline {
 		bufferFocusIdx = 2
+	} else if s.captureMode == CaptureModeRemote {
+		bufferFocusIdx = 2
 	}
 	if s.focusIndex == bufferFocusIdx {
-		bufferStyle = focusedStyle
+		if s.editing {
+			bufferStyle = editingStyle
+		} else {
+			bufferStyle = selectedStyle
+		}
 	}
 	sections = append(sections, bufferStyle.Width(s.width-4).Render(
-		labelStyle.Render("Buffer Size:") + " " + s.inputs[inputBufferSize].View(),
+		labelStyle.Render("Buffer Size:")+" "+s.inputs[inputBufferSize].View(),
 	))
 
 	// Capture Filter (always visible)
@@ -1050,12 +1570,18 @@ func (s *SettingsView) View() string {
 	filterFocusIdx := 4
 	if s.captureMode == CaptureModeOffline {
 		filterFocusIdx = 3
+	} else if s.captureMode == CaptureModeRemote {
+		filterFocusIdx = 3
 	}
 	if s.focusIndex == filterFocusIdx {
-		filterStyle = focusedStyle
+		if s.editing {
+			filterStyle = editingStyle
+		} else {
+			filterStyle = selectedStyle
+		}
 	}
 	sections = append(sections, filterStyle.Width(s.width-4).Render(
-		labelStyle.Render("Capture Filter:") + " " + s.inputs[inputBPFFilter].View(),
+		labelStyle.Render("Capture Filter:")+" "+s.inputs[inputBPFFilter].View(),
 	))
 
 	// Error message (if any)
@@ -1137,13 +1663,18 @@ func (s *SettingsView) scrollToFocusedField() {
 func (s *SettingsView) GetSettings() string {
 	var settings []string
 	modeStr := "Live"
-	if s.captureMode == CaptureModeOffline {
+	switch s.captureMode {
+	case CaptureModeOffline:
 		modeStr = "Offline"
+	case CaptureModeRemote:
+		modeStr = "Remote"
 	}
 	settings = append(settings, fmt.Sprintf("Mode: %s", modeStr))
 	if s.captureMode == CaptureModeLive {
 		settings = append(settings, fmt.Sprintf("Interface: %s", s.GetInterface()))
 		settings = append(settings, fmt.Sprintf("Promiscuous: %t", s.GetPromiscuous()))
+	} else if s.captureMode == CaptureModeRemote {
+		settings = append(settings, fmt.Sprintf("Nodes File: %s", s.inputs[inputNodesFile].Value()))
 	} else {
 		settings = append(settings, fmt.Sprintf("PCAP File: %s", s.GetPCAPFile()))
 	}

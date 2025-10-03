@@ -55,12 +55,21 @@ func initConfig() {
 		home, err := os.UserHomeDir()
 		cobra.CheckErr(err)
 
-		// Check ~/.config/lippycat.yaml first (XDG standard)
+		// Priority order for config files:
+		// 1. ~/.config/lippycat/config.yaml (preferred, with directory for other files)
+		// 2. ~/.config/lippycat.yaml (XDG standard)
+		// 3. ~/.lippycat.yaml (legacy)
+		viper.AddConfigPath(home + "/.config/lippycat")
 		viper.AddConfigPath(home + "/.config")
-		// Fall back to ~/.lippycat.yaml (legacy)
 		viper.AddConfigPath(home)
 		viper.SetConfigType("yaml")
-		viper.SetConfigName("lippycat")
+
+		// Try "config" name first (in ~/.config/lippycat/config.yaml)
+		viper.SetConfigName("config")
+		if err := viper.ReadInConfig(); err != nil {
+			// Fall back to "lippycat" name
+			viper.SetConfigName("lippycat")
+		}
 	}
 
 	viper.AutomaticEnv()

@@ -28,6 +28,8 @@ var (
 	bufferSize  int
 	promiscuous bool
 	themeName   string
+	remoteMode  bool
+	nodesFile   string
 )
 
 func runTUI(cmd *cobra.Command, args []string) {
@@ -37,30 +39,39 @@ func runTUI(cmd *cobra.Command, args []string) {
 	// Re-enable logging on exit
 	defer logger.Enable()
 
-	// Create TUI model
-	model := NewModel(bufferSize, interfaces, filter, readFile, promiscuous)
+	// Load buffer size from config, use flag value as fallback
+	configBufferSize := viper.GetInt("tui.buffer_size")
+	if configBufferSize > 0 {
+		bufferSize = configBufferSize
+	}
 
-	// Start bubbletea program
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	// Create TUI model
+	model := NewModel(bufferSize, interfaces, filter, readFile, promiscuous, remoteMode, nodesFile)
+
+	// Start bubbletea program with mouse support
+	// Use WithMouseAllMotion for better mouse support that survives suspend/resume
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
 
 	// Store program reference globally
 	currentProgram = p
 
-	// Start packet capture in background
-	ctx, cancel := context.WithCancel(context.Background())
-	currentCaptureCancel = cancel
+	// Start packet capture in background (skip if starting in remote mode)
+	if !remoteMode {
+		ctx, cancel := context.WithCancel(context.Background())
+		currentCaptureCancel = cancel
 
-	go func() {
-		if readFile != "" {
-			capture.StartOfflineSniffer(readFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-				startTUISniffer(ctx, devices, filter, p)
-			})
-		} else {
-			capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-				startTUISniffer(ctx, devices, filter, p)
-			})
-		}
-	}()
+		go func() {
+			if readFile != "" {
+				capture.StartOfflineSniffer(readFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+					startTUISniffer(ctx, devices, filter, p)
+				})
+			} else {
+				capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+					startTUISniffer(ctx, devices, filter, p)
+				})
+			}
+		}()
+	}
 
 	// Run TUI
 	if _, err := p.Run(); err != nil {
@@ -86,6 +97,8 @@ func init() {
 	TuiCmd.Flags().IntVar(&bufferSize, "buffer-size", 10000, "maximum number of packets to keep in memory")
 	TuiCmd.Flags().BoolVarP(&promiscuous, "promiscuous", "p", false, "use promiscuous mode")
 	TuiCmd.Flags().StringVar(&themeName, "theme", "", "color theme: 'dark', 'light', 'solarized-dark', 'solarized-light' (default: saved preference or dark)")
+	TuiCmd.Flags().BoolVar(&remoteMode, "remote", false, "start in remote capture mode")
+	TuiCmd.Flags().StringVar(&nodesFile, "nodes-file", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
 
 	viper.BindPFlag("promiscuous", TuiCmd.Flags().Lookup("promiscuous"))
 	viper.BindPFlag("tui.theme", TuiCmd.Flags().Lookup("theme"))

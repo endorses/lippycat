@@ -4,26 +4,17 @@ import (
 	"strconv"
 	"sync"
 	"unsafe"
+
+	"github.com/endorses/lippycat/internal/pkg/simd"
 )
 
 // Zero-allocation string operations for hot paths
 
 // BytesContains checks if subslice is in slice without allocating
+// Uses SIMD acceleration when available for better performance
 func BytesContains(data []byte, substr []byte) bool {
-	if len(substr) == 0 {
-		return true
-	}
-	if len(substr) > len(data) {
-		return false
-	}
-
-	// Simple Boyer-Moore-Horspool-like approach for small patterns
-	if len(substr) <= 4 {
-		return bytesContainsSimple(data, substr)
-	}
-
-	// For longer patterns, use a more efficient algorithm
-	return bytesContainsBMH(data, substr)
+	// Use general-purpose SIMD package
+	return simd.BytesContains(data, substr)
 }
 
 func bytesContainsSimple(data []byte, substr []byte) bool {

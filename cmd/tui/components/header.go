@@ -10,13 +10,15 @@ import (
 
 // Header displays the top header bar
 type Header struct {
-	width       int
-	theme       themes.Theme
-	capturing   bool
-	paused      bool
-	iface       string
-	packets     int
-	captureMode CaptureMode
+	width         int
+	theme         themes.Theme
+	capturing     bool
+	paused        bool
+	iface         string
+	packets       int
+	captureMode   CaptureMode
+	nodeCount     int // Number of connected remote nodes (hunters)
+	processorCount int // Number of connected processors
 }
 
 // NewHeader creates a new header component
@@ -63,6 +65,16 @@ func (h *Header) SetCaptureMode(mode CaptureMode) {
 	h.captureMode = mode
 }
 
+// SetNodeCount sets the number of connected remote nodes (hunters)
+func (h *Header) SetNodeCount(count int) {
+	h.nodeCount = count
+}
+
+// SetProcessorCount sets the number of connected processors
+func (h *Header) SetProcessorCount(count int) {
+	h.processorCount = count
+}
+
 // View renders the header
 func (h *Header) View() string {
 	// Clean header with visible text
@@ -86,10 +98,14 @@ func (h *Header) View() string {
 		statusText = "⏸ PAUSED"
 		statusColor = h.theme.SuccessColor // Green for paused
 	} else if h.capturing {
-		if h.captureMode == CaptureModeOffline {
+		switch h.captureMode {
+		case CaptureModeOffline:
 			statusText = "● READING"
 			statusColor = h.theme.InfoColor // Blue for reading file
-		} else {
+		case CaptureModeRemote:
+			statusText = "🌐 REMOTE"
+			statusColor = h.theme.InfoColor // Blue for remote
+		default:
 			statusText = "● CAPTURING"
 			statusColor = h.theme.ErrorColor // Red for capturing
 		}
@@ -101,22 +117,54 @@ func (h *Header) View() string {
 	statusStyle := leftStyle.Copy().Foreground(statusColor)
 
 	// Fixed width sections to prevent shifting
+	// Account for padding (0,1) = 2 chars per section = 6 total
 	// Left: 20 chars, Middle: flexible, Right: 20 chars
 	leftWidth := 20
 	rightWidth := 20
+	paddingTotal := 6 // 2 per section * 3 sections
 
 	// Create fixed-width left section (status)
 	leftContent := statusStyle.Render(statusText)
 	leftPart := leftStyle.Copy().Width(leftWidth).Render(leftContent)
 
-	// Middle part - interface or file (takes remaining space)
+	// Middle part - interface, file, or remote address (takes remaining space)
 	var middleText string
-	if h.captureMode == CaptureModeOffline {
+	switch h.captureMode {
+	case CaptureModeOffline:
 		middleText = fmt.Sprintf("File: %s", h.iface)
-	} else {
+	case CaptureModeRemote:
+		if h.nodeCount > 0 || h.processorCount > 0 {
+			// Show processor and hunter counts
+			if h.processorCount > 0 {
+				processorWord := "processor"
+				if h.processorCount > 1 {
+					processorWord = "processors"
+				}
+				hunterWord := "hunter"
+				if h.nodeCount > 1 {
+					hunterWord = "hunters"
+				}
+				middleText = fmt.Sprintf("🌐 Remote: %d %s | %d %s", h.processorCount, processorWord, h.nodeCount, hunterWord)
+			} else {
+				// Direct hunter connections (no processors)
+				hunterWord := "hunter"
+				if h.nodeCount > 1 {
+					hunterWord = "hunters"
+				}
+				middleText = fmt.Sprintf("🌐 Remote: %d %s (direct)", h.nodeCount, hunterWord)
+			}
+		} else if h.iface != "" {
+			middleText = fmt.Sprintf("🌐 Remote: %s", h.iface)
+		} else {
+			middleText = "🌐 Remote: add nodes via Nodes tab"
+		}
+	default:
 		middleText = fmt.Sprintf("Interface: %s", h.iface)
 	}
-	middleWidth := h.width - leftWidth - rightWidth
+	middleWidth := h.width - leftWidth - rightWidth - paddingTotal
+	if middleWidth < 10 {
+		middleWidth = 10 // Minimum width
+	}
 	middlePart := middleStyle.Copy().Width(middleWidth).Align(lipgloss.Center).Render(middleText)
 
 	// Right part - packet count (fixed width)

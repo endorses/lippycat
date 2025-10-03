@@ -1,0 +1,29 @@
+# lippycat Nodes Configuration
+# This file defines remote hunter and processor nodes for distributed capture
+
+# Processor nodes (collect traffic from hunters)
+processors:
+  - name: main-processor
+    address: processor.local:50051
+
+  - name: backup-processor
+    address: processor2.local:50051
+
+# Hunter nodes (capture packets on network interfaces)
+hunters:
+  - name: edge-hunter-01
+    address: 192.168.1.10:50051
+
+  - name: edge-hunter-02
+    address: 192.168.1.11:50051
+
+  - name: datacenter-hunter
+    address: dc-hunter.example.com:50051
+
+# Usage:
+# 1. Copy this file to ~/.config/lippycat/nodes.yaml or ./nodes.yaml
+# 2. In the TUI, go to Settings tab
+# 3. Set "Nodes File" to the path of this file
+# 4. Apply settings to load and connect to all configured nodes
+#
+# Or use the Nodes tab to add individual nodes with the "Add Node" button

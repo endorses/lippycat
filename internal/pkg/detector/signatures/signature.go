@@ -1,6 +1,7 @@
 package signatures
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/gopacket"
@@ -57,7 +58,19 @@ type DetectionContext struct {
 	// Flow tracking
 	FlowID string
 	Flow   *FlowContext
+
+	// Context for cancellation and deadlines
+	Context context.Context
 }
+
+// CacheStrategy indicates how detection results should be cached
+type CacheStrategy int
+
+const (
+	CacheNever  CacheStrategy = iota // Never cache (e.g., DNS queries, HTTP GET)
+	CacheFlow                         // Cache for multi-packet flows (e.g., SIP→RTP)
+	CacheSession                      // Cache for sessions (e.g., TLS connections)
+)
 
 // DetectionResult contains the outcome of protocol detection
 type DetectionResult struct {
@@ -72,6 +85,9 @@ type DetectionResult struct {
 
 	// ShouldCache indicates if this result should be cached
 	ShouldCache bool
+
+	// CacheStrategy indicates caching strategy
+	CacheStrategy CacheStrategy
 
 	// Priority override (optional, for multi-protocol packets)
 	PriorityOverride int

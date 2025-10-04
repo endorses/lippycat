@@ -156,10 +156,11 @@ func TestDetector_Cache(t *testing.T) {
 		detectFn: func(ctx *signatures.DetectionContext) *signatures.DetectionResult {
 			callCount++
 			return &signatures.DetectionResult{
-				Protocol:    "CACHE",
-				Confidence:  signatures.ConfidenceHigh,
-				Metadata:    map[string]interface{}{},
-				ShouldCache: true,
+				Protocol:      "CACHE",
+				Confidence:    signatures.ConfidenceHigh,
+				Metadata:      map[string]interface{}{},
+				ShouldCache:   true,
+				CacheStrategy: signatures.CacheFlow, // Use CacheFlow to actually cache
 			}
 		},
 	})
@@ -232,7 +233,6 @@ func TestGenerateFlowID(t *testing.T) {
 		srcPort   uint16
 		dstPort   uint16
 		transport string
-		expected  string
 	}{
 		{
 			name:      "Normal order",
@@ -241,7 +241,6 @@ func TestGenerateFlowID(t *testing.T) {
 			srcPort:   12345,
 			dstPort:   80,
 			transport: "TCP",
-			expected:  "192.168.1.1:192.168.1.2:12345:80:TCP",
 		},
 		{
 			name:      "Reverse order (should normalize)",
@@ -250,7 +249,6 @@ func TestGenerateFlowID(t *testing.T) {
 			srcPort:   80,
 			dstPort:   12345,
 			transport: "TCP",
-			expected:  "192.168.1.1:192.168.1.2:12345:80:TCP",
 		},
 		{
 			name:      "UDP transport",
@@ -259,16 +257,22 @@ func TestGenerateFlowID(t *testing.T) {
 			srcPort:   5060,
 			dstPort:   5060,
 			transport: "UDP",
-			expected:  "10.0.0.1:10.0.0.2:5060:5060:UDP",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			flowID := generateFlowID(tt.srcIP, tt.dstIP, tt.srcPort, tt.dstPort, tt.transport)
-			assert.Equal(t, tt.expected, flowID)
+			// Verify it's a hex hash string (16 characters from 64-bit hash)
+			assert.Len(t, flowID, 16, "Flow ID should be 16 character hex hash")
+			assert.Regexp(t, "^[0-9a-f]{16}$", flowID, "Flow ID should be lowercase hex")
 		})
 	}
+
+	// Test bidirectional normalization
+	flow1 := generateFlowID("192.168.1.1", "192.168.1.2", 12345, 80, "TCP")
+	flow2 := generateFlowID("192.168.1.2", "192.168.1.1", 80, 12345, "TCP")
+	assert.Equal(t, flow1, flow2, "Bidirectional flows should have same ID")
 }
 
 // Helper function to create test packets

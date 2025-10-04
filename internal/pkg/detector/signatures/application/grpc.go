@@ -33,6 +33,11 @@ func (g *GRPCSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		return nil
 	}
 
+	// HTTP/2 is always over TCP
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
 	payload := ctx.Payload
 
 	// Check for HTTP/2 connection preface (24 bytes)

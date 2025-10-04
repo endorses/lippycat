@@ -83,6 +83,12 @@ message PacketMetadata {
 
     // RTP-specific metadata (if applicable)
     RTPMetadata rtp = 8;
+
+    // Generic info string for display (e.g., "SSH-2.0-OpenSSH_...", "Echo Reply")
+    string info = 9;
+
+    // Generic key-value details for protocol-specific data
+    map<string, string> details = 10;
 }
 
 // SIPMetadata for SIP packets

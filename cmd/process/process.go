@@ -34,11 +34,12 @@ Example:
 }
 
 var (
-	listenAddr   string
-	upstreamAddr string
-	maxHunters   int
-	writeFile    string
-	displayStats bool
+	listenAddr      string
+	upstreamAddr    string
+	maxHunters      int
+	writeFile       string
+	displayStats    bool
+	enableDetection bool
 )
 
 func init() {
@@ -50,6 +51,7 @@ func init() {
 	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", 100, "Maximum number of concurrent hunter connections")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
+	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")
 
 	// Bind to viper for config file support
 	viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -57,6 +59,7 @@ func init() {
 	viper.BindPFlag("processor.max_hunters", ProcessCmd.Flags().Lookup("max-hunters"))
 	viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
 	viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
+	viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -64,11 +67,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := processor.Config{
-		ListenAddr:   getStringConfig("processor.listen_addr", listenAddr),
-		UpstreamAddr: getStringConfig("processor.upstream_addr", upstreamAddr),
-		MaxHunters:   getIntConfig("processor.max_hunters", maxHunters),
-		WriteFile:    getStringConfig("processor.write_file", writeFile),
-		DisplayStats: getBoolConfig("processor.display_stats", displayStats),
+		ListenAddr:      getStringConfig("processor.listen_addr", listenAddr),
+		UpstreamAddr:    getStringConfig("processor.upstream_addr", upstreamAddr),
+		MaxHunters:      getIntConfig("processor.max_hunters", maxHunters),
+		WriteFile:       getStringConfig("processor.write_file", writeFile),
+		DisplayStats:    getBoolConfig("processor.display_stats", displayStats),
+		EnableDetection: getBoolConfig("processor.enable_detection", enableDetection),
 	}
 
 	// Validate configuration
@@ -86,7 +90,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		"listen", config.ListenAddr,
 		"upstream", config.UpstreamAddr,
 		"max_hunters", config.MaxHunters,
-		"write_file", config.WriteFile)
+		"write_file", config.WriteFile,
+		"enable_detection", config.EnableDetection)
 
 	// Create processor instance
 	p, err := processor.New(config)

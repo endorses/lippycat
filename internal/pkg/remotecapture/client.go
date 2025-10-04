@@ -344,16 +344,49 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		}
 	}
 
-	// Try to get protocol from metadata if available
+	// Use pre-computed metadata from processor if available (centralized detection)
 	if pkt.Metadata != nil && pkt.Metadata.Protocol != "" {
 		protocol = pkt.Metadata.Protocol
 
-		// Extract SIP info if available
-		if pkt.Metadata.Sip != nil {
-			if pkt.Metadata.Sip.Method != "" {
-				info = pkt.Metadata.Sip.Method
-			} else if pkt.Metadata.Sip.ResponseCode > 0 {
-				info = fmt.Sprintf("%d", pkt.Metadata.Sip.ResponseCode)
+		// Use metadata IPs/ports if available (avoid re-parsing packet)
+		if pkt.Metadata.SrcIp != "" {
+			srcIP = pkt.Metadata.SrcIp
+		}
+		if pkt.Metadata.DstIp != "" {
+			dstIP = pkt.Metadata.DstIp
+		}
+		if pkt.Metadata.SrcPort > 0 {
+			srcPort = fmt.Sprintf("%d", pkt.Metadata.SrcPort)
+		}
+		if pkt.Metadata.DstPort > 0 {
+			dstPort = fmt.Sprintf("%d", pkt.Metadata.DstPort)
+		}
+
+		// Use pre-computed info string if available (processor already built it)
+		if pkt.Metadata.Info != "" {
+			info = pkt.Metadata.Info
+		} else {
+			// Fallback: extract protocol-specific info from metadata
+			switch protocol {
+			case "SIP":
+				if pkt.Metadata.Sip != nil {
+					if pkt.Metadata.Sip.Method != "" {
+						info = pkt.Metadata.Sip.Method
+					} else if pkt.Metadata.Sip.ResponseCode > 0 {
+						info = fmt.Sprintf("%d", pkt.Metadata.Sip.ResponseCode)
+					}
+				}
+
+			case "RTP":
+				if pkt.Metadata.Rtp != nil {
+					// Derive codec name from payload type
+					if pkt.Metadata.Rtp.PayloadType > 0 {
+						codec := payloadTypeToCodec(uint8(pkt.Metadata.Rtp.PayloadType))
+						info = codec
+					} else {
+						info = "RTP stream"
+					}
+				}
 			}
 		}
 	}
@@ -426,6 +459,23 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) components.H
 		Interfaces:       h.Interfaces,
 		ProcessorAddr:    c.addr, // Address of processor this client is connected to
 	}
+}
+
+// payloadTypeToCodec maps RTP payload type to codec name
+func payloadTypeToCodec(pt uint8) string {
+	codecs := map[uint8]string{
+		0:  "G.711 µ-law",
+		8:  "G.711 A-law",
+		9:  "G.722",
+		18: "G.729",
+		97: "Dynamic",
+		98: "Dynamic",
+		99: "Dynamic",
+	}
+	if codec, ok := codecs[pt]; ok {
+		return codec
+	}
+	return fmt.Sprintf("PT %d", pt)
 }
 
 // formatTCPFlags returns a string representation of TCP flags

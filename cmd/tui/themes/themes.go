@@ -88,7 +88,7 @@ func Solarized() Theme {
 		SIPColor:     solarizedBlue,
 		RTPColor:     solarizedGreen,
 		DNSColor:     solarizedYellow,
-		HTTPColor:    solarizedCyan,
+		HTTPColor:    solarizedViolet,
 		TLSColor:     solarizedMagenta,
 		ICMPColor:    solarizedOrange,
 		UnknownColor: solarizedBase0,

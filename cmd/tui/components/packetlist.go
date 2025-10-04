@@ -622,7 +622,7 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 func (p *PacketList) rebuildStyleCache() {
 	// Cache protocol styles
 	p.cachedStyles = make(map[string]lipgloss.Style)
-	protocols := []string{"TCP", "UDP", "SIP", "RTP", "DNS", "HTTP", "HTTPS", "TLS", "SSL", "ICMP"}
+	protocols := []string{"TCP", "UDP", "SIP", "RTP", "DNS", "HTTP", "HTTPS", "HTTP2", "gRPC", "TLS", "SSL", "ICMP"}
 	for _, proto := range protocols {
 		p.cachedStyles[proto] = lipgloss.NewStyle().Foreground(p.getProtocolColor(proto))
 	}
@@ -653,7 +653,7 @@ func (p *PacketList) getProtocolColor(protocol string) lipgloss.Color {
 		return p.theme.RTPColor
 	case "DNS":
 		return p.theme.DNSColor
-	case "HTTP", "HTTPS":
+	case "HTTP", "HTTPS", "HTTP2", "gRPC":
 		return p.theme.HTTPColor
 	case "TLS", "SSL":
 		return p.theme.TLSColor

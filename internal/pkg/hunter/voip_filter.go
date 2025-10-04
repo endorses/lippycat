@@ -5,15 +5,16 @@ import (
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 )
 
 // VoIPFilter handles GPU-accelerated VoIP packet filtering
 type VoIPFilter struct {
 	gpuAccel     *voip.GPUAccelerator
+	detector     *detector.Detector // Protocol detector for accurate VoIP detection
 	config       *voip.GPUConfig
 	sipUsers     []string
 	phoneNumbers []string
@@ -26,6 +27,7 @@ type VoIPFilter struct {
 func NewVoIPFilter(config *voip.GPUConfig) (*VoIPFilter, error) {
 	vf := &VoIPFilter{
 		config:       config,
+		detector:     detector.InitDefault(), // Use centralized detector for accurate VoIP detection
 		sipUsers:     make([]string, 0),
 		phoneNumbers: make([]string, 0),
 		patterns:     make([]voip.GPUPattern, 0),
@@ -43,6 +45,7 @@ func NewVoIPFilter(config *voip.GPUConfig) (*VoIPFilter, error) {
 		}
 	}
 
+	logger.Info("VoIP filter initialized with centralized detector")
 	return vf, nil
 }
 
@@ -222,32 +225,22 @@ func (vf *VoIPFilter) matchWithCPU(payload string) bool {
 	return false
 }
 
-// isVoIPPacket checks if a packet is SIP or RTP
+// isVoIPPacket checks if a packet is SIP or RTP using centralized detector
 func (vf *VoIPFilter) isVoIPPacket(packet gopacket.Packet) bool {
-	// Check for UDP layer (both SIP and RTP use UDP)
-	udpLayer := packet.Layer(layers.LayerTypeUDP)
-	if udpLayer == nil {
+	// Use centralized detector for accurate protocol detection
+	// This replaces unreliable port-based heuristics
+	result := vf.detector.Detect(packet)
+	if result == nil {
 		return false
 	}
 
-	udp, ok := udpLayer.(*layers.UDP)
-	if !ok {
+	// Check if detected protocol is VoIP-related
+	switch result.Protocol {
+	case "SIP", "RTP", "RTCP":
+		return true
+	default:
 		return false
 	}
-
-	// SIP uses port 5060
-	if udp.SrcPort == 5060 || udp.DstPort == 5060 {
-		return true
-	}
-
-	// RTP typically uses ports 10000-20000
-	srcPort := int(udp.SrcPort)
-	dstPort := int(udp.DstPort)
-	if (srcPort >= 10000 && srcPort <= 20000) || (dstPort >= 10000 && dstPort <= 20000) {
-		return true
-	}
-
-	return false
 }
 
 // Close cleans up GPU resources

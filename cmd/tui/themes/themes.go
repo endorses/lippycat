@@ -68,7 +68,7 @@ func Solarized() Theme {
 		Name: "Solarized",
 
 		// General UI
-		Background:         solarizedBase03,
+		Background:         lipgloss.Color("0"),
 		Foreground:         solarizedBase0,
 		TerminalBg:         lipgloss.Color("0"),
 		HeaderBg:           solarizedGreen,

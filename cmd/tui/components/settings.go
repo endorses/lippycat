@@ -1430,17 +1430,17 @@ func (s *SettingsView) View() string {
 	case CaptureModeLive:
 		liveTabStyle = liveTabStyle.
 			Background(s.theme.InfoColor).
-			Foreground(s.theme.Background).
+			Foreground(lipgloss.Color("0")).
 			Bold(true)
 	case CaptureModeOffline:
 		offlineTabStyle = offlineTabStyle.
 			Background(s.theme.InfoColor).
-			Foreground(s.theme.Background).
+			Foreground(lipgloss.Color("0")).
 			Bold(true)
 	case CaptureModeRemote:
 		remoteTabStyle = remoteTabStyle.
 			Background(s.theme.InfoColor).
-			Foreground(s.theme.Background).
+			Foreground(lipgloss.Color("0")).
 			Bold(true)
 	}
 

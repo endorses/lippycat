@@ -32,9 +32,8 @@ func (a *ARPSignature) Layer() signatures.LayerType {
 }
 
 func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
-	// ARP packet is 28 bytes for IPv4 over Ethernet
-	// Minimum: 8 bytes header + variable addresses
-	if len(ctx.Payload) < 28 {
+	// ARP minimum: 8 bytes header + addresses (variable based on hlen/plen)
+	if len(ctx.Payload) < 8 {
 		return nil
 	}
 
@@ -42,13 +41,14 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 
 	// ARP header structure:
 	// Hardware Type (2) + Protocol Type (2) + Hardware Len (1) + Protocol Len (1) + Operation (2)
-	// Sender Hardware Address (6) + Sender Protocol Address (4)
-	// Target Hardware Address (6) + Target Protocol Address (4)
+	// Sender Hardware Address (hlen) + Sender Protocol Address (plen)
+	// Target Hardware Address (hlen) + Target Protocol Address (plen)
 
 	// Extract hardware type
 	htype := binary.BigEndian.Uint16(payload[0:2])
 
-	// Check for Ethernet (1 is most common, but others exist)
+	// Valid hardware types: 1=Ethernet, 15=Frame Relay, etc.
+	// See: https://www.iana.org/assignments/arp-parameters/arp-parameters.xhtml
 	if htype == 0 || htype > 256 {
 		return nil // Invalid hardware type
 	}
@@ -65,9 +65,9 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	// Extract hardware address length
 	hlen := payload[4]
 
-	// For Ethernet, should be 6
-	if hlen != 6 {
-		return nil
+	// Hardware address length varies: Ethernet=6, Frame Relay=2-4, etc.
+	if hlen == 0 || hlen > 20 {
+		return nil // Invalid or too large
 	}
 
 	// Extract protocol address length
@@ -75,6 +75,12 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 
 	// For IPv4, should be 4
 	if plen != 4 {
+		return nil
+	}
+
+	// Verify we have enough data for the full packet
+	minLength := 8 + int(hlen)*2 + int(plen)*2
+	if len(payload) < minLength {
 		return nil
 	}
 
@@ -87,19 +93,23 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
-	// Extract addresses (for Ethernet + IPv4)
-	senderMAC := payload[8:14]
-	senderIP := payload[14:18]
-	targetMAC := payload[18:24]
-	targetIP := payload[24:28]
+	// Extract addresses (variable length based on hlen/plen)
+	addrStart := 8
+	senderHW := payload[addrStart : addrStart+int(hlen)]
+	senderIP := payload[addrStart+int(hlen) : addrStart+int(hlen)+int(plen)]
+	targetHW := payload[addrStart+int(hlen)+int(plen) : addrStart+int(hlen)*2+int(plen)]
+	targetIP := payload[addrStart+int(hlen)*2+int(plen) : addrStart+int(hlen)*2+int(plen)*2]
 
 	metadata := map[string]interface{}{
 		"operation":        a.operationToString(operation),
 		"hardware_type":    htype,
+		"hardware_type_name": a.hardwareTypeToString(htype),
 		"protocol_type":    ptype,
-		"sender_mac":       a.macToString(senderMAC),
+		"hardware_length":  hlen,
+		"protocol_length":  plen,
+		"sender_hw":        a.hwAddrToString(senderHW, htype),
 		"sender_ip":        a.ipToString(senderIP),
-		"target_mac":       a.macToString(targetMAC),
+		"target_hw":        a.hwAddrToString(targetHW, htype),
 		"target_ip":        a.ipToString(targetIP),
 	}
 
@@ -114,7 +124,7 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	}
 
 	// Calculate confidence
-	confidence := a.calculateConfidence(ctx, metadata, operation)
+	confidence := a.calculateConfidence(ctx, metadata, operation, htype)
 
 	return &signatures.DetectionResult{
 		Protocol:    "ARP",
@@ -124,14 +134,18 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	}
 }
 
-func (a *ARPSignature) calculateConfidence(ctx *signatures.DetectionContext, metadata map[string]interface{}, operation uint16) float64 {
+func (a *ARPSignature) calculateConfidence(ctx *signatures.DetectionContext, metadata map[string]interface{}, operation uint16, htype uint16) float64 {
 	indicators := []signatures.Indicator{}
 
-	// Valid hardware type (Ethernet)
+	// Valid hardware type
+	hwConfidence := signatures.ConfidenceHigh
+	if htype == 1 { // Ethernet is most common
+		hwConfidence = signatures.ConfidenceVeryHigh
+	}
 	indicators = append(indicators, signatures.Indicator{
 		Name:       "valid_hardware_type",
 		Weight:     0.3,
-		Confidence: signatures.ConfidenceHigh,
+		Confidence: hwConfidence,
 	})
 
 	// Valid protocol type (IPv4)
@@ -171,12 +185,41 @@ func (a *ARPSignature) operationToString(operation uint16) string {
 	return "Unknown"
 }
 
-func (a *ARPSignature) macToString(mac []byte) string {
-	if len(mac) != 6 {
+func (a *ARPSignature) hardwareTypeToString(htype uint16) string {
+	types := map[uint16]string{
+		1:  "Ethernet",
+		6:  "IEEE 802",
+		7:  "ARCNET",
+		15: "Frame Relay",
+		16: "ATM",
+		17: "HDLC",
+		18: "Fibre Channel",
+		19: "ATM (RFC2225)",
+		20: "Serial Line",
+	}
+	if s, ok := types[htype]; ok {
+		return s
+	}
+	return fmt.Sprintf("Type %d", htype)
+}
+
+func (a *ARPSignature) hwAddrToString(hw []byte, htype uint16) string {
+	if len(hw) == 0 {
 		return "00:00:00:00:00:00"
 	}
-	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
-		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
+
+	// For Ethernet (most common), format as MAC address
+	if htype == 1 && len(hw) == 6 {
+		return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+			hw[0], hw[1], hw[2], hw[3], hw[4], hw[5])
+	}
+
+	// For other types, show as hex bytes separated by colons
+	hexParts := make([]string, len(hw))
+	for i, b := range hw {
+		hexParts[i] = fmt.Sprintf("%02x", b)
+	}
+	return fmt.Sprintf("%s", hexParts)
 }
 
 func (a *ARPSignature) ipToString(ip []byte) string {

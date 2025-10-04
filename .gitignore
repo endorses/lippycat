@@ -5,3 +5,4 @@ captures
 !README.md
 !CLAUDE.md
 nodes.yaml
+testdata/pcaps/*.pcap

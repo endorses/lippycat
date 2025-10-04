@@ -116,7 +116,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 
 	tabs := components.NewTabs([]components.Tab{
 		{Label: "Live Capture", Icon: "📡"},
-		{Label: "Nodes", Icon: "🌐"},
+		{Label: "Nodes", Icon: "🔗"},
 		{Label: "Statistics", Icon: "📊"},
 		{Label: "Settings", Icon: "⚙"},
 	})

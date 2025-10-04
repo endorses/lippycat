@@ -139,25 +139,26 @@ func (o *OpenVPNSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 			}
 		}
 
-		if opcode == 1 || opcode == 7 {
+		switch opcode {
+		case 1, 7:
 			// Hard reset from client
 			metadata["packet_type"] = "control"
 			metadata["control_type"] = "hard_reset_client"
 			if allZero {
 				metadata["initial_handshake"] = true
 			}
-		} else if opcode == 2 || opcode == 8 {
+		case 2, 8:
 			// Hard reset from server
 			metadata["packet_type"] = "control"
 			metadata["control_type"] = "hard_reset_server"
-		} else if opcode == 3 {
+		case 3:
 			// Soft reset
 			metadata["packet_type"] = "control"
 			metadata["control_type"] = "soft_reset"
-		} else if opcode == 4 {
+		case 4:
 			// Control packet
 			metadata["packet_type"] = "control"
-		} else if opcode == 5 {
+		case 5:
 			// ACK
 			metadata["packet_type"] = "ack"
 		}

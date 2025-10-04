@@ -326,9 +326,10 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		if arp != nil {
 			display.SrcIP = fmt.Sprintf("%d.%d.%d.%d", arp.SourceProtAddress[0], arp.SourceProtAddress[1], arp.SourceProtAddress[2], arp.SourceProtAddress[3])
 			display.DstIP = fmt.Sprintf("%d.%d.%d.%d", arp.DstProtAddress[0], arp.DstProtAddress[1], arp.DstProtAddress[2], arp.DstProtAddress[3])
-			if arp.Operation == 1 {
+			switch arp.Operation {
+			case 1:
 				display.Info = "Who has " + display.DstIP + "?"
-			} else if arp.Operation == 2 {
+			case 2:
 				display.Info = display.SrcIP + " is at " + fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", arp.SourceHwAddress[0], arp.SourceHwAddress[1], arp.SourceHwAddress[2], arp.SourceHwAddress[3], arp.SourceHwAddress[4], arp.SourceHwAddress[5])
 			}
 		}
@@ -555,7 +556,8 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 		case "FTP":
 			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
-				if msgType == "response" {
+				switch msgType {
+				case "response":
 					if code, ok := detectionResult.Metadata["code"].(int); ok {
 						if msg, ok := detectionResult.Metadata["message"].(string); ok {
 							display.Info = fmt.Sprintf("%d %s", code, msg)
@@ -565,7 +567,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 					} else {
 						display.Info = "Response"
 					}
-				} else if msgType == "command" {
+				case "command":
 					if cmd, ok := detectionResult.Metadata["command"].(string); ok {
 						display.Info = cmd
 					} else {
@@ -578,13 +580,14 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 		case "SMTP":
 			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
-				if msgType == "response" {
+				switch msgType {
+				case "response":
 					if code, ok := detectionResult.Metadata["code"].(int); ok {
 						display.Info = fmt.Sprintf("%d", code)
 					} else {
 						display.Info = "Response"
 					}
-				} else if msgType == "command" {
+				case "command":
 					if cmd, ok := detectionResult.Metadata["command"].(string); ok {
 						display.Info = cmd
 					} else {
@@ -597,19 +600,20 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 		case "MySQL":
 			if msgType, ok := detectionResult.Metadata["type"].(string); ok {
-				if msgType == "handshake" {
+				switch msgType {
+				case "handshake":
 					if version, ok := detectionResult.Metadata["server_version"].(string); ok {
 						display.Info = "Handshake: " + version
 					} else {
 						display.Info = "Handshake"
 					}
-				} else if msgType == "command" {
+				case "command":
 					if cmdName, ok := detectionResult.Metadata["command_name"].(string); ok {
 						display.Info = cmdName
 					} else {
 						display.Info = "Command"
 					}
-				} else {
+				default:
 					display.Info = msgType
 				}
 			} else {

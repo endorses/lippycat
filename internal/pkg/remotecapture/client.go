@@ -280,9 +280,10 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 			srcIP = fmt.Sprintf("%d.%d.%d.%d", arp.SourceProtAddress[0], arp.SourceProtAddress[1], arp.SourceProtAddress[2], arp.SourceProtAddress[3])
 			dstIP = fmt.Sprintf("%d.%d.%d.%d", arp.DstProtAddress[0], arp.DstProtAddress[1], arp.DstProtAddress[2], arp.DstProtAddress[3])
 			protocol = "ARP"
-			if arp.Operation == 1 {
+			switch arp.Operation {
+			case 1:
 				info = "Request"
-			} else if arp.Operation == 2 {
+			case 2:
 				info = "Reply"
 			}
 		} else if ethLayer := packet.Layer(layers.LayerTypeEthernet); ethLayer != nil {

@@ -99,9 +99,10 @@ func (i *IKEv2Signature) Detect(ctx *signatures.DetectionContext) *signatures.De
 	// 37 = INFORMATIONAL
 	// Valid IKEv1 Exchange Types: 0-6, 32-33
 	validExchangeType := false
-	if majorVersion == 2 {
+	switch majorVersion {
+	case 2:
 		validExchangeType = exchangeType >= 34 && exchangeType <= 37
-	} else if majorVersion == 1 {
+	case 1:
 		validExchangeType = exchangeType <= 6 || exchangeType == 32 || exchangeType == 33
 	}
 
@@ -245,13 +246,14 @@ func (i *IKEv2Signature) calculateConfidence(ctx *signatures.DetectionContext, m
 	indicators := []signatures.Indicator{}
 
 	// Valid version
-	if majorVersion == 2 {
+	switch majorVersion {
+	case 2:
 		indicators = append(indicators, signatures.Indicator{
 			Name:       "valid_ikev2_version",
 			Weight:     0.3,
 			Confidence: signatures.ConfidenceVeryHigh,
 		})
-	} else if majorVersion == 1 {
+	case 1:
 		indicators = append(indicators, signatures.Indicator{
 			Name:       "valid_ikev1_version",
 			Weight:     0.3,
@@ -290,7 +292,8 @@ func (i *IKEv2Signature) calculateConfidence(ctx *signatures.DetectionContext, m
 }
 
 func (i *IKEv2Signature) exchangeTypeToString(exchangeType, majorVersion uint8) string {
-	if majorVersion == 2 {
+	switch majorVersion {
+	case 2:
 		// IKEv2 exchange types
 		types := map[uint8]string{
 			34: "IKE_SA_INIT",
@@ -301,7 +304,7 @@ func (i *IKEv2Signature) exchangeTypeToString(exchangeType, majorVersion uint8) 
 		if name, ok := types[exchangeType]; ok {
 			return name
 		}
-	} else if majorVersion == 1 {
+	case 1:
 		// IKEv1 exchange types
 		types := map[uint8]string{
 			0:  "None",

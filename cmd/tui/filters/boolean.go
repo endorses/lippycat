@@ -276,9 +276,10 @@ func isBalancedOutermost(expr string) bool {
 
 	depth := 0
 	for i, ch := range expr {
-		if ch == '(' {
+		switch ch {
+		case '(':
 			depth++
-		} else if ch == ')' {
+		case ')':
 			depth--
 			// If we hit zero before the end, the outer parens aren't outermost
 			if depth == 0 && i < len(expr)-1 {

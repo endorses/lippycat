@@ -29,8 +29,9 @@ func (r *RTPSignature) Layer() signatures.LayerType {
 }
 
 func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
-	// RTP requires minimum 12 bytes for header
-	if len(ctx.Payload) < 12 {
+	// RTP requires minimum 12 bytes for header + some payload
+	// Require at least 16 bytes to reduce false positives
+	if len(ctx.Payload) < 16 {
 		return nil
 	}
 
@@ -53,9 +54,10 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 
 	// Extract key fields for validation
 	payloadType := ctx.Payload[1] & 0x7F
-	csrcCount := ctx.Payload[0] & 0x0F
+	csrcCount := int(ctx.Payload[0] & 0x0F)
+	extension := (ctx.Payload[0] >> 4) & 0x01
 
-	// Validate CSRC count is reasonable (typically 0-15, but rarely > 4)
+	// Validate CSRC count is reasonable (typically 0-4, max 15)
 	if csrcCount > 15 {
 		return nil
 	}
@@ -65,6 +67,160 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	// Reject 35-95 as these are unassigned/reserved
 	if payloadType >= 35 && payloadType < 96 {
 		return nil
+	}
+
+	// Additional validation: Calculate expected header size
+	headerSize := 12 + (csrcCount * 4)
+	if extension == 1 {
+		headerSize += 4 // Extension header is at least 4 bytes
+	}
+
+	// Ensure packet is large enough for declared header size
+	if len(ctx.Payload) < headerSize {
+		return nil
+	}
+
+	// Validate sequence number and timestamp are not all zeros or all ones
+	// (very unlikely in real RTP)
+	seqNum := uint16(ctx.Payload[2])<<8 | uint16(ctx.Payload[3])
+	timestamp := uint32(ctx.Payload[4])<<24 | uint32(ctx.Payload[5])<<16 | uint32(ctx.Payload[6])<<8 | uint32(ctx.Payload[7])
+	ssrc := uint32(ctx.Payload[8])<<24 | uint32(ctx.Payload[9])<<16 | uint32(ctx.Payload[10])<<8 | uint32(ctx.Payload[11])
+
+	// Reject pathological cases
+	if ssrc == 0 || ssrc == 0xFFFFFFFF {
+		return nil
+	}
+	if timestamp == 0xFFFFFFFF {
+		return nil
+	}
+
+	// Additional heuristics to reduce false positives:
+	// 1. Check that at least some bits vary in timestamp and seqnum
+	//    (all zeros or simple patterns are suspicious)
+	if timestamp == 0 && seqNum == 0 {
+		return nil
+	}
+
+	// 2. Marker bit validation - it should be 0 for most packets
+	//    Marker bit is typically only set on key frames or end of talk spurts
+	marker := (ctx.Payload[1] >> 7) & 0x01
+	if marker == 1 {
+		// Reduce confidence for marked packets (less common)
+		// But don't reject outright as they are valid
+	}
+
+	// 3. Stricter payload type validation
+	//    Only accept well-known static types OR clearly dynamic types
+	isValidPayloadType := false
+	if payloadType <= 23 {
+		// Well-known static audio/video types (PCMU, GSM, G722, etc.)
+		isValidPayloadType = true
+	} else if payloadType >= 96 && payloadType <= 127 {
+		// Dynamic types - but require additional validation
+		// Dynamic types should only be accepted with SIP correlation or port hints
+		isValidPayloadType = false // Will be validated below
+	}
+
+	// 4. Check port ranges - RTP typically uses even ports 16384-32768
+	//    This is the IANA recommended range for RTP
+	inTypicalRange := false
+	if (ctx.SrcPort >= 16384 && ctx.SrcPort <= 32768 && ctx.SrcPort%2 == 0) ||
+		(ctx.DstPort >= 16384 && ctx.DstPort <= 32768 && ctx.DstPort%2 == 0) {
+		inTypicalRange = true
+	}
+	// Legacy implementations sometimes use 10000-20000, but be more restrictive
+	// Require even ports in this range too
+	if (ctx.SrcPort >= 10000 && ctx.SrcPort <= 20000 && ctx.SrcPort%2 == 0) ||
+		(ctx.DstPort >= 10000 && ctx.DstPort <= 20000 && ctx.DstPort%2 == 0) {
+		inTypicalRange = true
+	}
+
+	// 5. Require typical port range OR correlation for detection
+	//    Correlation can be: SIP negotiation OR existing RTP flow state
+	hasSIPCorrelation := false
+	hasRTPFlowCorrelation := false
+
+	// Store SSRC in flow for validation across packets
+	if ctx.Flow != nil {
+		// Check for SIP correlation first
+		if sipState, ok := ctx.Flow.State.(*SIPFlowState); ok {
+			for _, port := range sipState.MediaPorts {
+				if ctx.DstPort == port || ctx.SrcPort == port {
+					hasSIPCorrelation = true
+					break
+				}
+			}
+		}
+
+		if rtpState, ok := ctx.Flow.State.(*RTPFlowState); ok {
+			// We already have RTP state for this flow - this is likely the return path!
+			hasRTPFlowCorrelation = true
+
+			// Determine if this is forward or reverse direction
+			isForward := (rtpState.FirstSrcPort == ctx.SrcPort)
+
+			// Check SSRC and sequence consistency for this direction
+			if isForward {
+				if rtpState.SSRCForward != 0 && rtpState.SSRCForward != ssrc {
+					// Forward SSRC changed - possible false positive
+					return nil
+				}
+				rtpState.SSRCForward = ssrc
+
+				// Check sequence progression for forward direction
+				if rtpState.LastSeqForward != 0 {
+					seqDiff := int32(seqNum) - int32(rtpState.LastSeqForward)
+					// Allow wrap-around but reject huge jumps
+					if seqDiff > 1000 || seqDiff < -1000 {
+						return nil
+					}
+				}
+				rtpState.LastSeqForward = seqNum
+			} else {
+				// Reverse direction
+				if rtpState.SSRCReverse != 0 && rtpState.SSRCReverse != ssrc {
+					// Reverse SSRC changed - possible false positive
+					return nil
+				}
+				rtpState.SSRCReverse = ssrc
+
+				// Check sequence progression for reverse direction
+				if rtpState.LastSeqReverse != 0 {
+					seqDiff := int32(seqNum) - int32(rtpState.LastSeqReverse)
+					// Allow wrap-around but reject huge jumps
+					if seqDiff > 1000 || seqDiff < -1000 {
+						return nil
+					}
+				}
+				rtpState.LastSeqReverse = seqNum
+			}
+
+			rtpState.PacketCount++
+		} else if !hasSIPCorrelation {
+			// Initialize RTP flow state (only if not SIP-correlated)
+			ctx.Flow.State = &RTPFlowState{
+				SSRCForward:    ssrc,
+				SSRCReverse:    0, // Will be set when reverse packet arrives
+				LastSeqForward: seqNum,
+				LastSeqReverse: 0,
+				PacketCount:    1,
+				FirstSrcPort:   ctx.SrcPort,
+			}
+		}
+	}
+
+	// Require either correlation OR BOTH (typical port range AND valid static payload type)
+	// Correlation = SIP negotiation OR existing RTP flow (bidirectional support)
+	if !hasSIPCorrelation && !hasRTPFlowCorrelation {
+		// Must have typical port range
+		if !inTypicalRange {
+			return nil
+		}
+		// Must have valid static payload type (not dynamic)
+		// Dynamic types (96-127) require SIP correlation
+		if !isValidPayloadType {
+			return nil
+		}
 	}
 
 	// Extract metadata
@@ -172,12 +328,20 @@ func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 		})
 	}
 
-	// Typical RTP port range (10000-20000)
+	// Typical RTP port range (IANA recommended 16384-32768 or legacy 10000-20000)
+	inTypicalRange := false
+	if (ctx.SrcPort >= 16384 && ctx.SrcPort <= 32768) || (ctx.DstPort >= 16384 && ctx.DstPort <= 32768) {
+		inTypicalRange = true
+	}
 	if (ctx.SrcPort >= 10000 && ctx.SrcPort <= 20000) || (ctx.DstPort >= 10000 && ctx.DstPort <= 20000) {
+		inTypicalRange = true
+	}
+
+	if inTypicalRange {
 		indicators = append(indicators, signatures.Indicator{
 			Name:       "typical_port_range",
-			Weight:     0.1,
-			Confidence: signatures.ConfidenceLow,
+			Weight:     0.15, // Increased from 0.1
+			Confidence: signatures.ConfidenceMedium, // Upgraded from Low
 		})
 	}
 
@@ -189,6 +353,17 @@ type SIPFlowState struct {
 	CallID     string
 	MediaPorts []uint16
 	CodecInfo  string
+}
+
+// RTPFlowState holds RTP flow state for SSRC and sequence validation
+// Supports bidirectional flows with different SSRCs
+type RTPFlowState struct {
+	SSRCForward     uint32 // SSRC for forward direction
+	SSRCReverse     uint32 // SSRC for reverse direction
+	LastSeqForward  uint16 // Last sequence number in forward direction
+	LastSeqReverse  uint16 // Last sequence number in reverse direction
+	PacketCount     int
+	FirstSrcPort    uint16 // Port of first packet to determine direction
 }
 
 // payloadTypeToCodec maps RTP payload type to codec name

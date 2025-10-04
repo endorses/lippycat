@@ -1,7 +1,9 @@
 package detector
 
 import (
+	"context"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"sync"
 	"time"
@@ -29,6 +31,11 @@ func New() *Detector {
 	}
 }
 
+// NewDetector is an alias for New() for compatibility
+func NewDetector() *Detector {
+	return New()
+}
+
 // RegisterSignature registers a new protocol signature
 func (d *Detector) RegisterSignature(sig signatures.Signature) {
 	d.mu.Lock()
@@ -48,57 +55,117 @@ func (d *Detector) RegisterSignature(sig signatures.Signature) {
 		"layer", sig.Layer())
 }
 
+// GetSignatures returns all registered signatures
+func (d *Detector) GetSignatures() []signatures.Signature {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	// Return a copy to prevent external modification
+	sigs := make([]signatures.Signature, len(d.signatures))
+	copy(sigs, d.signatures)
+	return sigs
+}
+
 // Detect performs protocol detection on a packet
 func (d *Detector) Detect(packet gopacket.Packet) *signatures.DetectionResult {
 	ctx := d.buildContext(packet)
 
-	// Check cache first, but skip for well-known ports where protocol might appear later
-	// (e.g., HTTPS on port 443 - TLS handshake comes after TCP handshake)
-	useCache := !isWellKnownPort(ctx.SrcPort) && !isWellKnownPort(ctx.DstPort)
-	if useCache {
-		if cached := d.cache.Get(ctx.FlowID); cached != nil {
+	// Check cache only for flow/session protocols, not for single-packet protocols
+	// This optimization skips cache for DNS, HTTP GET, etc.
+	if cached := d.cache.Get(ctx.FlowID); cached != nil {
+		// Only use cache if it was explicitly requested for this protocol
+		if cached.CacheStrategy != signatures.CacheNever {
 			return cached
 		}
 	}
 
-	// Try each signature in priority order
 	d.mu.RLock()
 	sigs := d.signatures
 	d.mu.RUnlock()
 
-	for _, sig := range sigs {
-		result := sig.Detect(ctx)
-		if result != nil {
-			// Cache the result if requested and caching is enabled for this flow
-			if result.ShouldCache && useCache {
-				d.cache.Set(ctx.FlowID, result)
-			}
-
-			// Update flow context
-			if ctx.Flow != nil {
-				ctx.Flow.LastSeen = time.Now()
-				if !contains(ctx.Flow.Protocols, result.Protocol) {
-					ctx.Flow.Protocols = append(ctx.Flow.Protocols, result.Protocol)
-				}
-			}
-
+	// Fast path: Check port-based hints first for well-known ports
+	// This avoids checking all signatures when we have a strong hint
+	if hint := d.getPortHint(ctx.DstPort); hint != nil {
+		if result := hint.Detect(ctx); result != nil && result.Confidence >= signatures.ConfidenceHigh {
+			d.cacheAndUpdateFlow(ctx, result)
+			return result
+		}
+	}
+	if hint := d.getPortHint(ctx.SrcPort); hint != nil {
+		if result := hint.Detect(ctx); result != nil && result.Confidence >= signatures.ConfidenceHigh {
+			d.cacheAndUpdateFlow(ctx, result)
 			return result
 		}
 	}
 
-	// No protocol detected - only cache negative result if caching is enabled
-	unknownResult := &signatures.DetectionResult{
-		Protocol:    "unknown",
-		Confidence:  0.0,
-		Metadata:    make(map[string]interface{}),
-		ShouldCache: true,
+	// Fallback: Try each signature in priority order
+	for _, sig := range sigs {
+		result := sig.Detect(ctx)
+		if result != nil {
+			d.cacheAndUpdateFlow(ctx, result)
+			return result
+		}
 	}
 
-	if useCache {
-		d.cache.Set(ctx.FlowID, unknownResult)
+	// No protocol detected
+	return &signatures.DetectionResult{
+		Protocol:      "unknown",
+		Confidence:    0.0,
+		Metadata:      make(map[string]interface{}),
+		ShouldCache:   false,
+		CacheStrategy: signatures.CacheNever,
+	}
+}
+
+// cacheAndUpdateFlow handles caching and flow updates
+func (d *Detector) cacheAndUpdateFlow(ctx *signatures.DetectionContext, result *signatures.DetectionResult) {
+	// Only cache based on strategy
+	switch result.CacheStrategy {
+	case signatures.CacheFlow, signatures.CacheSession:
+		d.cache.Set(ctx.FlowID, result)
 	}
 
-	return unknownResult
+	// Update flow context
+	if ctx.Flow != nil {
+		ctx.Flow.LastSeen = time.Now()
+		if !contains(ctx.Flow.Protocols, result.Protocol) {
+			ctx.Flow.Protocols = append(ctx.Flow.Protocols, result.Protocol)
+		}
+	}
+}
+
+// getPortHint returns a signature hint based on well-known port
+func (d *Detector) getPortHint(port uint16) signatures.Signature {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	// Map of well-known ports to signature indices (built at registration)
+	// For now, linear search through signatures checking their typical ports
+	for _, sig := range d.signatures {
+		switch sig.Name() {
+		case "DNS Detector":
+			if port == 53 {
+				return sig
+			}
+		case "HTTP Detector":
+			if port == 80 || port == 8080 {
+				return sig
+			}
+		case "TLS/SSL Detector":
+			if port == 443 || port == 8443 {
+				return sig
+			}
+		case "SSH Detector":
+			if port == 22 {
+				return sig
+			}
+		case "gRPC/HTTP2 Detector":
+			if port == 50051 {
+				return sig
+			}
+		}
+	}
+	return nil
 }
 
 // isWellKnownPort checks if a port is a well-known port where protocols
@@ -146,12 +213,17 @@ func (d *Detector) DetectWithoutCache(packet gopacket.Packet) *signatures.Detect
 }
 
 // buildContext creates a detection context from a packet
+func (d *Detector) BuildContext(packet gopacket.Packet) *signatures.DetectionContext {
+	return d.buildContext(packet)
+}
+
 func (d *Detector) buildContext(packet gopacket.Packet) *signatures.DetectionContext {
 	ctx := &signatures.DetectionContext{
 		Packet:    packet,
 		Transport: "unknown",
 		SrcIP:     "unknown",
 		DstIP:     "unknown",
+		Context:   context.Background(),
 	}
 
 	// Extract network layer info
@@ -184,9 +256,45 @@ func (d *Detector) buildContext(packet gopacket.Packet) *signatures.DetectionCon
 		}
 	}
 
+	// Check for link-layer protocols first (ARP, etc.)
+	if arpLayer := packet.Layer(layers.LayerTypeARP); arpLayer != nil {
+		ctx.Payload = arpLayer.LayerContents()
+	} else if failLayer := packet.Layer(gopacket.LayerTypeDecodeFailure); failLayer != nil {
+		// Handle Frame Relay and other encapsulations that gopacket can't decode
+		// Look for ARP EtherType (0x0806) and extract ARP data after it
+		failData := failLayer.LayerContents()
+		for i := 0; i < len(failData)-10; i++ {
+			// Check for ARP EtherType
+			if failData[i] == 0x08 && failData[i+1] == 0x06 {
+				// ARP data starts after EtherType (2 bytes)
+				arpStart := i + 2
+				if arpStart+8 <= len(failData) {
+					// Validate it looks like ARP (reasonable hlen, plen, op)
+					hlen := failData[arpStart+4]
+					plen := failData[arpStart+5]
+					if hlen > 0 && hlen < 20 && plen == 4 {
+						ctx.Payload = failData[arpStart:]
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Check for network-layer protocols (ICMP, etc.)
+	if len(ctx.Payload) == 0 {
+		if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
+			ctx.Payload = icmpLayer.LayerContents()
+		} else if icmpLayer := packet.Layer(layers.LayerTypeICMPv6); icmpLayer != nil {
+			ctx.Payload = icmpLayer.LayerContents()
+		}
+	}
+
 	// Extract application layer payload
-	if appLayer := packet.ApplicationLayer(); appLayer != nil {
-		ctx.Payload = appLayer.Payload()
+	if len(ctx.Payload) == 0 {
+		if appLayer := packet.ApplicationLayer(); appLayer != nil {
+			ctx.Payload = appLayer.Payload()
+		}
 	}
 
 	// If payload is empty and we have a transport layer, try getting payload from there
@@ -206,15 +314,32 @@ func (d *Detector) buildContext(packet gopacket.Packet) *signatures.DetectionCon
 	return ctx
 }
 
-// generateFlowID creates a deterministic flow ID from connection 5-tuple
+// generateFlowID creates a deterministic numeric flow ID from connection 5-tuple
+// Uses FNV-1a hash for fast, collision-resistant hashing without string allocations
 func generateFlowID(srcIP, dstIP string, srcPort, dstPort uint16, transport string) string {
-	// Normalize direction (sort IPs and ports)
+	h := fnv.New64a()
+
+	// Normalize direction (sort IPs and ports) for bidirectional flow matching
 	ip1, ip2, port1, port2 := srcIP, dstIP, srcPort, dstPort
 	if srcIP > dstIP || (srcIP == dstIP && srcPort > dstPort) {
 		ip1, ip2, port1, port2 = dstIP, srcIP, dstPort, srcPort
 	}
 
-	return fmt.Sprintf("%s:%s:%d:%d:%s", ip1, ip2, port1, port2, transport)
+	// Write to hash (no string concatenation allocations)
+	h.Write([]byte(ip1))
+	h.Write([]byte{':'})
+	h.Write([]byte(ip2))
+	h.Write([]byte{':'})
+
+	// Write ports as bytes
+	h.Write([]byte{byte(port1 >> 8), byte(port1)})
+	h.Write([]byte{':'})
+	h.Write([]byte{byte(port2 >> 8), byte(port2)})
+	h.Write([]byte{':'})
+	h.Write([]byte(transport))
+
+	// Return as string representation of hash (still need string for map key)
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 // GetStats returns detector statistics

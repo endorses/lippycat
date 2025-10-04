@@ -26,7 +26,7 @@ func NewDetailsPanel() DetailsPanel {
 		packet: nil,
 		width:  40,
 		height: 20,
-		theme:  themes.SolarizedDark(),
+		theme:  themes.Solarized(),
 		ready:  false,
 	}
 }
@@ -145,11 +145,11 @@ func (d *DetailsPanel) renderContent() string {
 	}
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(d.theme.HeaderFg).
+		Foreground(d.theme.StatusBarFg).
 		Bold(true)
 
 	valueStyle := lipgloss.NewStyle().
-		Foreground(d.theme.Foreground)
+		Foreground(d.theme.StatusBarFg)
 
 	sectionStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -284,11 +284,11 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 	var sb strings.Builder
 
 	// Style for hex bytes
-	hexStyle := lipgloss.NewStyle().Foreground(d.theme.Foreground)
+	hexStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg)
 	// Style for ASCII
 	asciiStyle := lipgloss.NewStyle().Foreground(d.theme.SuccessColor)
 	// Style for offset
-	offsetStyle := lipgloss.NewStyle().Foreground(d.theme.HeaderFg).Bold(true)
+	offsetStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg).Bold(true)
 
 	for offset := 0; offset < len(data); offset += 16 {
 		// Offset column

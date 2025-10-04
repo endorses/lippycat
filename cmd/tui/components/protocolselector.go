@@ -44,7 +44,7 @@ func NewProtocolSelector() ProtocolSelector {
 		protocols: protocols,
 		selected:  0,
 		active:    false,
-		theme:     themes.SolarizedDark(),
+		theme:     themes.Solarized(),
 	}
 }
 
@@ -136,8 +136,8 @@ func (ps *ProtocolSelector) View() string {
 		Width(modalWidth - 4)
 
 	selectedStyle := lipgloss.NewStyle().
-		Foreground(ps.theme.TerminalBg).
-		Background(ps.theme.HeaderBg).
+		Foreground(ps.theme.SelectionFg).
+		Background(ps.theme.SelectionBg).
 		Bold(true).
 		Padding(0, 1).
 		Width(modalWidth - 4)
@@ -149,7 +149,7 @@ func (ps *ProtocolSelector) View() string {
 
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ps.theme.HeaderBg).
+		BorderForeground(ps.theme.InfoColor).
 		Padding(1, 2).
 		Width(modalWidth)
 

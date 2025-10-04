@@ -62,10 +62,10 @@ var (
 	solarizedGreen   = lipgloss.Color("#859900")
 )
 
-// SolarizedDark returns the Solarized Dark theme
-func SolarizedDark() Theme {
+// Solarized returns the Solarized theme (htop-like with transparent background)
+func Solarized() Theme {
 	return Theme{
-		Name: "Solarized Dark",
+		Name: "Solarized",
 
 		// General UI
 		Background:         solarizedBase03,
@@ -74,12 +74,12 @@ func SolarizedDark() Theme {
 		HeaderBg:           solarizedGreen,
 		HeaderFg:           lipgloss.Color("0"),
 		StatusBarBg:        solarizedBase02,
-		StatusBarFg:        solarizedBase1,
+		StatusBarFg:        solarizedBase0,
 		SelectionBg:        solarizedCyan,
 		SelectionFg:        lipgloss.Color("0"),
 		CursorBg:           solarizedBlue,
 		CursorFg:           solarizedBase3, // Light foreground for cursor in dark mode
-		BorderColor:        solarizedBase01,
+		BorderColor:        solarizedBase1,
 		FocusedBorderColor: solarizedRed,
 
 		// Protocol colors
@@ -101,53 +101,12 @@ func SolarizedDark() Theme {
 	}
 }
 
-// SolarizedLight returns the Solarized Light theme
-func SolarizedLight() Theme {
-	return Theme{
-		Name: "Solarized Light",
-
-		// General UI
-		Background:         solarizedBase3,
-		Foreground:         solarizedBase00,
-		TerminalBg:         lipgloss.Color(""),
-		HeaderBg:           solarizedGreen,
-		HeaderFg:           lipgloss.Color(""),
-		StatusBarBg:        solarizedBase2,
-		StatusBarFg:        solarizedBase01,
-		SelectionBg:        solarizedCyan,
-		SelectionFg:        lipgloss.Color(""),
-		CursorBg:           solarizedBlue,
-		CursorFg:           solarizedBase3, // Light foreground for cursor in light mode
-		BorderColor:        solarizedBase1,
-		FocusedBorderColor: solarizedRed,
-
-		// Protocol colors (same accent colors work in both themes)
-		TCPColor:     solarizedCyan,
-		UDPColor:     solarizedGreen,
-		SIPColor:     solarizedBlue,
-		RTPColor:     solarizedGreen,
-		DNSColor:     solarizedYellow,
-		HTTPColor:    solarizedCyan,
-		TLSColor:     solarizedMagenta,
-		ICMPColor:    solarizedOrange,
-		UnknownColor: solarizedBase00,
-		ErrorColor:   solarizedRed,
-
-		// Emphasis
-		WarningColor: solarizedOrange,
-		SuccessColor: solarizedGreen,
-		InfoColor:    solarizedBlue,
-	}
-}
-
 // GetTheme returns a theme by name
 func GetTheme(name string) Theme {
 	switch name {
-	case "light", "solarized-light":
-		return SolarizedLight()
-	case "dark", "solarized-dark":
-		return SolarizedDark()
+	case "solarized":
+		return Solarized()
 	default:
-		return SolarizedDark() // Default to dark
+		return Solarized() // Default to solarized
 	}
 }

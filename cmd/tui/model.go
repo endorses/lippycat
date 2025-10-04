@@ -325,11 +325,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "t": // Allow theme toggle
-				if m.theme.Name == "Solarized Dark" {
-					m.theme = themes.SolarizedLight()
-				} else {
-					m.theme = themes.SolarizedDark()
-				}
+				// For future: add theme cycling logic here
+				// Currently only Solarized theme available
+				m.theme = themes.Solarized()
 				// Update all components with new theme
 				m.packetList.SetTheme(m.theme)
 				m.detailsPanel.SetTheme(m.theme)
@@ -455,11 +453,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "t": // Toggle theme
-			if m.theme.Name == "Solarized Dark" {
-				m.theme = themes.SolarizedLight()
-			} else {
-				m.theme = themes.SolarizedDark()
-			}
+			// For future: add theme cycling logic here
+			// Currently only Solarized theme available
+			m.theme = themes.Solarized()
 			// Update all components with new theme
 			m.packetList.SetTheme(m.theme)
 			m.detailsPanel.SetTheme(m.theme)

@@ -25,7 +25,7 @@ type Header struct {
 func NewHeader() Header {
 	return Header{
 		width:       80,
-		theme:       themes.SolarizedDark(),
+		theme:       themes.Solarized(),
 		capturing:   true,
 		paused:      false,
 		iface:       "any",

@@ -17,7 +17,7 @@ type Footer struct {
 func NewFooter() Footer {
 	return Footer{
 		width:      80,
-		theme:      themes.SolarizedDark(),
+		theme:      themes.Solarized(),
 		filterMode: false,
 		hasFilter:  false,
 	}

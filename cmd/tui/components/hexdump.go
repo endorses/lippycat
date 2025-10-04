@@ -26,7 +26,7 @@ func NewHexDumpView() HexDumpView {
 	return HexDumpView{
 		width:  40,
 		height: 20,
-		theme:  themes.SolarizedDark(),
+		theme:  themes.Solarized(),
 		ready:  false,
 		cursor: 0,
 	}

@@ -254,7 +254,7 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 		}
 	}
 
-	delegate := newInterfaceDelegate(selectedIfaces, themes.SolarizedDark())
+	delegate := newInterfaceDelegate(selectedIfaces, themes.Solarized())
 	interfaceList := list.New(items, delegate, 80, 24)
 	interfaceList.Title = "Network Interfaces (Space to toggle, Enter to confirm)"
 	interfaceList.SetShowStatusBar(false)
@@ -318,7 +318,7 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 	return SettingsView{
 		width:            80,
 		height:           24,
-		theme:            themes.SolarizedDark(),
+		theme:            themes.Solarized(),
 		interfaceList:    interfaceList,
 		inputs:           inputs,
 		focusIndex:       0,

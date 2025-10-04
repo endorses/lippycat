@@ -24,7 +24,7 @@ func NewModal() Modal {
 		content: "",
 		width:   80,
 		height:  24,
-		theme:   themes.SolarizedDark(),
+		theme:   themes.Solarized(),
 		visible: false,
 	}
 }

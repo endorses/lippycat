@@ -75,7 +75,7 @@ func NewNodesView() NodesView {
 		selectedIndex: -1, // Start with input focused (no hunters initially)
 		width:         80,
 		height:        20,
-		theme:         themes.SolarizedDark(),
+		theme:         themes.Solarized(),
 		scrollOffset:  0,
 		nodeInput:     ti,
 		editing:       false,

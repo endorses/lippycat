@@ -70,7 +70,7 @@ func NewCallsView() CallsView {
 		selected:    0,
 		offset:      0,
 		showDetails: false,
-		theme:       themes.SolarizedDark(),
+		theme:       themes.Solarized(),
 	}
 }
 

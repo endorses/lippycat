@@ -68,7 +68,7 @@ func NewPacketList() PacketList {
 		height:       20,
 		headerHeight: 2,                      // Header + separator
 		autoScroll:   true,                   // Start with auto-scroll enabled
-		theme:        themes.SolarizedDark(), // Default theme
+		theme:        themes.Solarized(), // Default theme
 		cachedStyles: make(map[string]lipgloss.Style),
 		sizeChanged:  true, // Force initial cache build
 	}

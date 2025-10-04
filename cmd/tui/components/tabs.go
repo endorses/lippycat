@@ -15,10 +15,10 @@ type Tab struct {
 
 // Tabs displays a tab bar for switching views
 type Tabs struct {
-	tabs     []Tab
-	active   int
-	width    int
-	theme    themes.Theme
+	tabs   []Tab
+	active int
+	width  int
+	theme  themes.Theme
 }
 
 // NewTabs creates a new tabs component
@@ -27,7 +27,7 @@ func NewTabs(tabs []Tab) Tabs {
 		tabs:   tabs,
 		active: 0,
 		width:  80,
-		theme:  themes.SolarizedDark(),
+		theme:  themes.Solarized(),
 	}
 }
 
@@ -129,7 +129,7 @@ func (t *Tabs) View() string {
 
 	// Inactive tab: no background, muted, with visible bottom border
 	inactiveStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(t.theme.StatusBarFg).
 		Padding(0, 3).
 		Border(lipgloss.Border{
 			Top:         "─",
@@ -243,3 +243,4 @@ func (t *Tabs) View() string {
 
 	return result.String()
 }
+

@@ -23,7 +23,7 @@ func NewFilterInput(prompt string) FilterInput {
 		value:      "",
 		cursor:     0,
 		prompt:     prompt,
-		theme:      themes.SolarizedDark(),
+		theme:      themes.Solarized(),
 		width:      80,
 		active:     false,
 		history:    make([]string, 0, 20),

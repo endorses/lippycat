@@ -37,7 +37,7 @@ func NewStatisticsView() StatisticsView {
 	return StatisticsView{
 		width:  80,
 		height: 20,
-		theme:  themes.SolarizedDark(),
+		theme:  themes.Solarized(),
 		stats:  nil,
 		ready:  false,
 	}
@@ -116,12 +116,12 @@ func (s *StatisticsView) renderContent() string {
 
 	// Label style
 	labelStyle := lipgloss.NewStyle().
-		Foreground(s.theme.HeaderFg).
+		Foreground(s.theme.StatusBarFg).
 		Bold(true)
 
 	// Value style
 	valueStyle := lipgloss.NewStyle().
-		Foreground(s.theme.Foreground)
+		Foreground(s.theme.StatusBarFg)
 
 	// Section: Overview
 	result.WriteString(titleStyle.Render("📊 Overview"))

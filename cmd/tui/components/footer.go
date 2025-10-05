@@ -1,8 +1,11 @@
 package components
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/version"
 )
 
 // Footer displays the bottom footer bar with keybindings
@@ -96,13 +99,32 @@ func (f *Footer) View() string {
 		content += binding
 	}
 
-	footer := baseStyle.Render(content)
+	// Version info for far right (only show if enough space)
+	versionText := fmt.Sprintf("🫦🐱 v%s", version.GetVersion())
+	versionStyle := lipgloss.NewStyle().
+		Foreground(f.theme.BorderColor)
+	versionRendered := versionStyle.Render(versionText)
+	versionWidth := lipgloss.Width(versionRendered)
 
-	// Pad to full width
-	footerWidth := lipgloss.Width(footer)
-	if footerWidth < f.width {
-		padding := f.width - footerWidth
-		footer += baseStyle.Render(lipgloss.NewStyle().Width(padding).Render(""))
+	// Calculate minimum width needed to show version (keybindings + padding + version + margins)
+	leftContent := baseStyle.Render(content)
+	leftWidth := lipgloss.Width(leftContent)
+	minWidthForVersion := leftWidth + versionWidth + 4 // 4 chars for spacing
+
+	var footer string
+	if f.width >= minWidthForVersion {
+		// Enough space - show version on far right
+		paddingWidth := f.width - leftWidth - versionWidth
+		paddingStr := lipgloss.NewStyle().Width(paddingWidth).Render("")
+		footer = leftContent + paddingStr + versionRendered
+	} else {
+		// Not enough space - skip version, just show keybindings
+		footer = leftContent
+		footerWidth := lipgloss.Width(footer)
+		if footerWidth < f.width {
+			padding := f.width - footerWidth
+			footer += baseStyle.Render(lipgloss.NewStyle().Width(padding).Render(""))
+		}
 	}
 
 	return footer

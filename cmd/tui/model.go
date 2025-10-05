@@ -127,6 +127,8 @@ type Model struct {
 	nodesFilePath   string                     // Path to nodes YAML file for remote mode
 	selectedProtocol components.Protocol       // Currently selected protocol
 	viewMode        string                     // "packets" or "calls" (for VoIP)
+	lastClickTime   time.Time                  // Time of last mouse click for double-click detection
+	lastClickPacket int                        // Index of packet clicked for double-click detection
 }
 
 // NewModel creates a new TUI model
@@ -463,11 +465,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tabsHeight := 4
 			bottomHeight := 4
 			contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
-			minWidthForDetails := 120
+			minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
 			if m.showDetails && m.width >= minWidthForDetails {
-				// Split view
-				listWidth := m.width * 65 / 100
-				detailsWidth := m.width - listWidth
+				// Details panel gets exactly what it needs for hex dump, packet list gets the rest
+				detailsWidth := 77 // Hex dump (72) + borders/padding (5)
+				listWidth := m.width - detailsWidth
 				m.packetList.SetSize(listWidth, contentHeight)
 				m.detailsPanel.SetSize(detailsWidth, contentHeight)
 			} else {
@@ -650,11 +652,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settingsView.SetSize(msg.Width, contentHeight)
 
 		// Auto-hide details panel if terminal is too narrow or if details are toggled off
-		minWidthForDetails := 120 // Minimum terminal width to show details panel
+		minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
 		if m.showDetails && msg.Width >= minWidthForDetails {
-			// Split between packet list and details panel
-			listWidth := msg.Width * 65 / 100
-			detailsWidth := msg.Width - listWidth
+			// Details panel gets exactly what it needs for hex dump, packet list gets the rest
+			detailsWidth := 77 // Hex dump (72) + borders/padding (5)
+			listWidth := msg.Width - detailsWidth
 			m.packetList.SetSize(listWidth, contentHeight)
 			m.detailsPanel.SetSize(detailsWidth, contentHeight)
 		} else {
@@ -1280,9 +1282,38 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 					actualPacketIndex := m.packetList.GetOffset() + visibleRow
 
 					if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
+						// Check for double-click (same packet clicked within 500ms)
+						now := time.Now()
+						isDoubleClick := actualPacketIndex == m.lastClickPacket &&
+							now.Sub(m.lastClickTime) < 500*time.Millisecond
+
+						// Update last click tracking
+						m.lastClickTime = now
+						m.lastClickPacket = actualPacketIndex
+
 						// Set cursor directly without scrolling
 						m.packetList.SetCursor(actualPacketIndex)
 						m.detailsPanel.SetPacket(&packets[actualPacketIndex])
+
+						// Toggle details panel on double-click
+						if isDoubleClick {
+							m.showDetails = !m.showDetails
+							// Recalculate sizes when toggling details
+							headerHeight := 2
+							tabsHeight := 4
+							bottomHeight := 4
+							contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+							minWidthForDetails := 160
+							if m.showDetails && m.width >= minWidthForDetails {
+								detailsWidth := 77
+								listWidth := m.width - detailsWidth
+								m.packetList.SetSize(listWidth, contentHeight)
+								m.detailsPanel.SetSize(detailsWidth, contentHeight)
+							} else {
+								m.packetList.SetSize(m.width, contentHeight)
+								m.detailsPanel.SetSize(0, contentHeight)
+							}
+						}
 					}
 				}
 			} else {
@@ -1305,10 +1336,39 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				actualPacketIndex := m.packetList.GetOffset() + visibleRow
 
 				if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
+					// Check for double-click (same packet clicked within 500ms)
+					now := time.Now()
+					isDoubleClick := actualPacketIndex == m.lastClickPacket &&
+						now.Sub(m.lastClickTime) < 500*time.Millisecond
+
+					// Update last click tracking
+					m.lastClickTime = now
+					m.lastClickPacket = actualPacketIndex
+
 					// Set cursor directly without scrolling
 					m.packetList.SetCursor(actualPacketIndex)
 					m.detailsPanel.SetPacket(&packets[actualPacketIndex])
 					m.focusedPane = "left"
+
+					// Toggle details panel on double-click
+					if isDoubleClick {
+						m.showDetails = !m.showDetails
+						// Recalculate sizes when toggling details
+						headerHeight := 2
+						tabsHeight := 4
+						bottomHeight := 4
+						contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+						minWidthForDetails := 160
+						if m.showDetails && m.width >= minWidthForDetails {
+							detailsWidth := 77
+							listWidth := m.width - detailsWidth
+							m.packetList.SetSize(listWidth, contentHeight)
+							m.detailsPanel.SetSize(detailsWidth, contentHeight)
+						} else {
+							m.packetList.SetSize(m.width, contentHeight)
+							m.detailsPanel.SetSize(0, contentHeight)
+						}
+					}
 				}
 			}
 		}
@@ -1379,14 +1439,13 @@ func (m Model) View() string {
 			mainContent = m.callsView.View()
 		} else {
 			// Render packets view
-			minWidthForDetails := 120
+			minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
 			if m.showDetails && m.width >= minWidthForDetails {
 				// Split pane layout
 				leftFocused := m.focusedPane == "left"
 				rightFocused := m.focusedPane == "right"
 
-				listWidth := m.width * 65 / 100
-				detailsWidth := m.width - listWidth
+				detailsWidth := 77 // Hex dump (72) + borders/padding (5)
 
 				// Ensure details panel has the right size set
 				m.detailsPanel.SetSize(detailsWidth, contentHeight)

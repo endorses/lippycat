@@ -65,20 +65,27 @@ func (d *DetailsPanel) SetSize(width, height int) {
 	d.width = width
 	d.height = height
 
-	// Account for border (2), padding (2), and title + spacing (3)
-	viewportHeight := height - 7
+	// Account for border (2) and padding (2)
+	viewportHeight := height - 4
 	if viewportHeight < 5 {
 		viewportHeight = 5
 	}
 
+	// Width accounting: border (2) + padding left/right (4) = 6 total
+	// Ensure minimum width for hex dump (72 chars: offset(4) + spaces(2) + hex(49) + space(1) + ascii(16))
+	viewportWidth := width - 6
+	if viewportWidth < 72 {
+		viewportWidth = 72
+	}
+
 	if !d.ready {
-		d.viewport = viewport.New(width-8, viewportHeight) // -8 for borders and padding
+		d.viewport = viewport.New(viewportWidth, viewportHeight)
 		d.ready = true
 		if d.packet != nil {
 			d.viewport.SetContent(d.renderContent())
 		}
 	} else {
-		d.viewport.Width = width - 8
+		d.viewport.Width = viewportWidth
 		d.viewport.Height = viewportHeight
 	}
 }
@@ -99,12 +106,6 @@ func (d *DetailsPanel) View(focused bool) string {
 		return ""
 	}
 
-	// Ensure minimum width
-	contentWidth := d.width - 4
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
-
 	borderColor := d.theme.BorderColor
 	if focused {
 		borderColor = d.theme.FocusedBorderColor // Solarized yellow when focused
@@ -114,12 +115,8 @@ func (d *DetailsPanel) View(focused bool) string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
-		Width(contentWidth).
+		Width(d.width).
 		Height(d.height - 2)
-
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(d.theme.InfoColor)
 
 	if d.packet == nil {
 		emptyStyle := lipgloss.NewStyle().
@@ -129,8 +126,7 @@ func (d *DetailsPanel) View(focused bool) string {
 		return borderStyle.Render(content)
 	}
 
-	title := titleStyle.Render("Packet Details & Hex Dump")
-	return borderStyle.Render(title + "\n\n" + d.viewport.View())
+	return borderStyle.Render(d.viewport.View())
 }
 
 // renderContent generates the combined packet details and hex dump content
@@ -168,6 +164,11 @@ func (d *DetailsPanel) renderContent() string {
 	content.WriteString(labelStyle.Render("Protocol: "))
 	protocolStyle := valueStyle.Copy().Foreground(d.getProtocolColor(d.packet.Protocol))
 	content.WriteString(protocolStyle.Render(d.packet.Protocol))
+	content.WriteString("\n")
+
+	content.WriteString(labelStyle.Render("Captured From: "))
+	captureSource := fmt.Sprintf("%s / %s", d.packet.NodeID, d.packet.Interface)
+	content.WriteString(valueStyle.Render(captureSource))
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Source: "))

@@ -327,11 +327,18 @@ func (p *PacketList) View(focused bool) string {
 		borderColor = p.theme.FocusedBorderColor // Solarized yellow when focused
 	}
 
+	// Adaptive width: when in full-screen mode (details hidden), use full width
+	// When in split mode (details visible), use normal width with padding
+	borderWidth := p.width - 4
+	if p.width > 140 { // Likely full-screen mode (details hidden)
+		borderWidth = p.width - 2
+	}
+
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
-		Width(p.width - 4).
+		Width(borderWidth).
 		Height(contentHeight)
 
 	return borderStyle.Render(sb.String())
@@ -347,11 +354,15 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	}
 
 	// Recalculate column widths
-	// The border box has Width(p.width - 4), Padding(1, 2), and Border(RoundedBorder)
+	// Border width is adaptive: p.width - 2 in full-screen, p.width - 4 in split mode
 	// Content width = box_width - padding - border
-	// Content width = (p.width - 4) - 4 (padding left/right) - 2 (border left/right)
-	// Content width = p.width - 10
-	availableWidth := p.width - 10
+	// In full-screen: (p.width - 2) - 4 (padding) - 2 (border) = p.width - 8
+	// In split mode: (p.width - 4) - 4 (padding) - 2 (border) = p.width - 10
+	// We add 1 char back for better spacing
+	availableWidth := p.width - 9
+	if p.width > 140 { // Full-screen mode (details hidden)
+		availableWidth = p.width - 7
+	}
 
 	// Define minimum, preferred, and maximum widths
 	const (

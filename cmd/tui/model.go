@@ -417,6 +417,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "d": // Toggle details panel
 			m.showDetails = !m.showDetails
+			// Recalculate packet list size based on new showDetails state
+			headerHeight := 2
+			tabsHeight := 4
+			bottomHeight := 4
+			contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+			minWidthForDetails := 120
+			if m.showDetails && m.width >= minWidthForDetails {
+				// Split view
+				listWidth := m.width * 65 / 100
+				detailsWidth := m.width - listWidth
+				m.packetList.SetSize(listWidth, contentHeight)
+				m.detailsPanel.SetSize(detailsWidth, contentHeight)
+			} else {
+				// Full width for packet list
+				m.packetList.SetSize(m.width, contentHeight)
+				m.detailsPanel.SetSize(0, contentHeight)
+			}
 			return m, nil
 
 		case "p": // Open protocol selector
@@ -591,7 +608,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Set settings view size
 		m.settingsView.SetSize(msg.Width, contentHeight)
 
-		// Auto-hide details panel if terminal is too narrow
+		// Auto-hide details panel if terminal is too narrow or if details are toggled off
 		minWidthForDetails := 120 // Minimum terminal width to show details panel
 		if m.showDetails && msg.Width >= minWidthForDetails {
 			// Split between packet list and details panel
@@ -600,8 +617,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.packetList.SetSize(listWidth, contentHeight)
 			m.detailsPanel.SetSize(detailsWidth, contentHeight)
 		} else {
-			// Full width for packet list (details hidden)
+			// Full width for packet list (details hidden or terminal too narrow)
 			m.packetList.SetSize(msg.Width, contentHeight)
+			m.detailsPanel.SetSize(0, contentHeight) // Set to 0 when hidden
 		}
 
 		return m, nil

@@ -347,10 +347,13 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	}
 
 	// Recalculate column widths
-	// Account for padding and borders (estimate)
+	// The border box has Width(p.width - 4), Padding(1, 2), and Border(RoundedBorder)
+	// Content width = box_width - padding - border
+	// Content width = (p.width - 4) - 4 (padding left/right) - 2 (border left/right)
+	// Content width = p.width - 10
 	availableWidth := p.width - 10
 
-	// Define minimum and preferred widths
+	// Define minimum, preferred, and maximum widths
 	const (
 		nodeMin  = 5  // "Local" or short ID
 		nodePref = 12 // Full node ID
@@ -373,6 +376,37 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 		infoMin = 10 // Minimal info
 	)
 
+	// Dynamic max widths based on available width
+	// For narrow views (details visible), use conservative max for fixed columns
+	// For wide views (details hidden), use generous max
+	// Info column always gets all remaining space
+	var nodeMax, timeMax, srcMax, dstMax, protoMax, lenMax int
+	if availableWidth < 100 {
+		// Very narrow - use preferred as max
+		nodeMax = nodePref
+		timeMax = timePref
+		srcMax = srcPref
+		dstMax = dstPref
+		protoMax = protoPref
+		lenMax = lenPref
+	} else if availableWidth < 150 {
+		// Narrow/medium (split view with details) - keep columns compact, give space to Info
+		nodeMax = 13
+		timeMax = 12
+		srcMax = 22
+		dstMax = 22
+		protoMax = 8
+		lenMax = 6
+	} else {
+		// Wide (full width, no details) - generous max
+		nodeMax = 25
+		timeMax = 20
+		srcMax = 35
+		dstMax = 35
+		protoMax = 15
+		lenMax = 10
+	}
+
 	// Start with minimum widths
 	totalMin := nodeMin + timeMin + srcMin + dstMin + protoMin + lenMin + infoMin + 6 // +6 for spaces
 
@@ -381,35 +415,81 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 		return nodeMin, timeMin, srcMin, dstMin, protoMin, lenMin, infoMin
 	}
 
-	// Try preferred widths
+	// Calculate with preferred widths
 	totalPref := nodePref + timePref + srcPref + dstPref + protoPref + lenPref + infoMin + 6
 
-	if availableWidth >= totalPref {
-		// Plenty of space - use preferred widths + remaining for info
-		infoWidth = availableWidth - nodePref - timePref - srcPref - dstPref - protoPref - lenPref - 6
-		return nodePref, timePref, srcPref, dstPref, protoPref, lenPref, infoWidth
+	if availableWidth < totalPref {
+		// Medium width - scale between min and preferred
+		remaining := availableWidth - totalMin
+
+		// Distribute remaining space proportionally
+		nodeExtra := min(remaining/7, nodePref-nodeMin)
+		remaining -= nodeExtra
+
+		timeExtra := min(remaining/6, timePref-timeMin)
+		remaining -= timeExtra
+
+		srcExtra := min(remaining/5, srcPref-srcMin)
+		remaining -= srcExtra
+
+		dstExtra := min(remaining/4, dstPref-dstMin)
+		remaining -= dstExtra
+
+		protoExtra := min(remaining/3, protoPref-protoMin)
+		remaining -= protoExtra
+
+		lenExtra := min(remaining/2, lenPref-lenMin)
+		remaining -= lenExtra
+
+		// Give remaining to info
+		infoWidth = infoMin + remaining
+
+		// Cache the results
+		p.cachedColWidths = [7]int{
+			nodeMin + nodeExtra,
+			timeMin + timeExtra,
+			srcMin + srcExtra,
+			dstMin + dstExtra,
+			protoMin + protoExtra,
+			lenMin + lenExtra,
+			infoWidth,
+		}
+		p.sizeChanged = false
+		return p.cachedColWidths[0], p.cachedColWidths[1], p.cachedColWidths[2],
+			p.cachedColWidths[3], p.cachedColWidths[4], p.cachedColWidths[5], p.cachedColWidths[6]
 	}
 
-	// Medium width - scale between min and preferred
-	remaining := availableWidth - totalMin
+	// Wide terminal - expand columns beyond preferred up to max, then give rest to info
+	totalMax := nodeMax + timeMax + srcMax + dstMax + protoMax + lenMax + infoMin + 6
 
-	// Distribute remaining space proportionally
-	nodeExtra := min(remaining/7, nodePref-nodeMin)
+	if availableWidth >= totalMax {
+		// Very wide - use max widths + remaining for info
+		infoWidth = availableWidth - nodeMax - timeMax - srcMax - dstMax - protoMax - lenMax - 6
+		p.cachedColWidths = [7]int{nodeMax, timeMax, srcMax, dstMax, protoMax, lenMax, infoWidth}
+		p.sizeChanged = false
+		return nodeMax, timeMax, srcMax, dstMax, protoMax, lenMax, infoWidth
+	}
+
+	// Between preferred and max - scale proportionally
+	remaining := availableWidth - totalPref
+
+	// Distribute remaining space to expand columns toward max
+	nodeExtra := min(remaining/7, nodeMax-nodePref)
 	remaining -= nodeExtra
 
-	timeExtra := min(remaining/6, timePref-timeMin)
+	timeExtra := min(remaining/6, timeMax-timePref)
 	remaining -= timeExtra
 
-	srcExtra := min(remaining/5, srcPref-srcMin)
+	srcExtra := min(remaining/5, srcMax-srcPref)
 	remaining -= srcExtra
 
-	dstExtra := min(remaining/4, dstPref-dstMin)
+	dstExtra := min(remaining/4, dstMax-dstPref)
 	remaining -= dstExtra
 
-	protoExtra := min(remaining/3, protoPref-protoMin)
+	protoExtra := min(remaining/3, protoMax-protoPref)
 	remaining -= protoExtra
 
-	lenExtra := min(remaining/2, lenPref-lenMin)
+	lenExtra := min(remaining/2, lenMax-lenPref)
 	remaining -= lenExtra
 
 	// Give remaining to info
@@ -417,15 +497,15 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 
 	// Cache the results
 	p.cachedColWidths = [7]int{
-		nodeMin + nodeExtra,
-		timeMin + timeExtra,
-		srcMin + srcExtra,
-		dstMin + dstExtra,
-		protoMin + protoExtra,
-		lenMin + lenExtra,
+		nodePref + nodeExtra,
+		timePref + timeExtra,
+		srcPref + srcExtra,
+		dstPref + dstExtra,
+		protoPref + protoExtra,
+		lenPref + lenExtra,
 		infoWidth,
 	}
-	p.sizeChanged = false // Mark cache as valid
+	p.sizeChanged = false
 
 	return p.cachedColWidths[0], p.cachedColWidths[1], p.cachedColWidths[2],
 		p.cachedColWidths[3], p.cachedColWidths[4], p.cachedColWidths[5], p.cachedColWidths[6]
@@ -455,15 +535,8 @@ func (p *PacketList) renderHeader() string {
 		infoWidth, truncate("Info", infoWidth),
 	)
 
-	// Ensure header spans full width
-	renderedHeader := p.cachedHeaderStyle.Render(header)
-	headerLen := lipgloss.Width(renderedHeader)
-	if headerLen < p.width {
-		padding := p.width - headerLen
-		renderedHeader += p.cachedHeaderStyle.Render(strings.Repeat(" ", padding))
-	}
-
-	return renderedHeader
+	// Render header with style
+	return p.cachedHeaderStyle.Render(header)
 }
 
 // sanitizeString removes problematic characters that can break terminal rendering
@@ -602,15 +675,7 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 			Foreground(p.theme.SelectionBg).
 			Reverse(true).
 			Bold(true)
-
-		// Ensure selection spans full width
-		renderedRow := style.Render(row)
-		rowLen := lipgloss.Width(renderedRow)
-		if rowLen < p.width {
-			padding := p.width - rowLen
-			renderedRow += style.Render(strings.Repeat(" ", padding))
-		}
-		return renderedRow
+		return style.Render(row)
 	} else {
 		// Use cached protocol style
 		style := p.getCachedStyle(pkt.Protocol)

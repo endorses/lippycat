@@ -966,14 +966,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.bpfFilter = msg.Filter
 
-		// Clean up remote clients when switching away from remote mode
-		if m.captureMode == components.CaptureModeRemote && msg.Mode != components.CaptureModeRemote {
-			for addr, client := range m.remoteClients {
-				client.Close()
-				delete(m.remoteClients, addr)
-			}
-		}
-
+		// Update mode BEFORE starting new capture so packet handlers check the right mode
 		m.captureMode = msg.Mode
 		m.maxPackets = msg.BufferSize // Apply the new buffer size
 		m.paused = false              // Unpause when restarting capture

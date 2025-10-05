@@ -58,6 +58,7 @@ type Model struct {
 	packetList      components.PacketList      // Packet list component
 	detailsPanel    components.DetailsPanel    // Details panel component
 	remoteClients   map[string]interface{ Close() } // Multiple remote capture clients (addr -> client)
+	huntersByProcessor map[string][]components.HunterInfo // Hunters grouped by processor address
 	hexDumpView     components.HexDumpView     // Hex dump component
 	header          components.Header          // Header component
 	footer          components.Footer          // Footer component
@@ -206,6 +207,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		packetList:      packetList,
 		detailsPanel:    detailsPanel,
 		remoteClients:   make(map[string]interface{ Close() }), // Initialize remote clients map
+		huntersByProcessor: make(map[string][]components.HunterInfo), // Initialize hunters map
 		hexDumpView:     hexDumpView,
 		header:          header,
 		footer:          footer,
@@ -852,7 +854,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case remotecapture.HunterStatusMsg:
 		// Handle hunter status from remote capture client
-		m.nodesView.SetHunters(msg.Hunters)
+		// Determine processor address from hunters or from the message source
+		var processorAddr string
+		if len(msg.Hunters) > 0 {
+			// Extract processor address from first hunter (all hunters in msg have same processor)
+			processorAddr = msg.Hunters[0].ProcessorAddr
+		} else {
+			// Empty hunter list - need to determine processor from remoteClients
+			// For now, we'll skip updating if we can't determine the processor
+			// This is a limitation but prevents incorrect state
+			// TODO: Add ProcessorAddr to HunterStatusMsg to handle empty hunter lists
+			return m, nil
+		}
+
+		// Update hunters for this processor
+		m.huntersByProcessor[processorAddr] = msg.Hunters
+
+		// Merge all hunters from all processors for display
+		allHunters := make([]components.HunterInfo, 0)
+		for _, hunters := range m.huntersByProcessor {
+			allHunters = append(allHunters, hunters...)
+		}
+
+		// Update NodesView with merged hunters and list of all processors
+		m.nodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
 		return m, nil
 
 	case components.UpdateBufferSizeMsg:
@@ -1605,6 +1630,15 @@ func isBPFExpression(s string) bool {
 	}
 
 	return false
+}
+
+// getConnectedProcessors returns a list of all processor addresses from remoteClients
+func (m *Model) getConnectedProcessors() []string {
+	processors := make([]string, 0, len(m.remoteClients))
+	for addr := range m.remoteClients {
+		processors = append(processors, addr)
+	}
+	return processors
 }
 
 // applyFilters applies the filter chain to all packets

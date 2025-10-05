@@ -2,10 +2,12 @@ package components
 
 import (
 	"fmt"
+	"sort"
 	// "os" // Only needed for debug logging - uncomment if enabling DEBUG logs
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
@@ -49,9 +51,10 @@ type NodesView struct {
 	width         int
 	height        int
 	theme         themes.Theme
-	scrollOffset  int
 	nodeInput     textinput.Model // Input field for node address
 	editing       bool            // Whether input is in edit mode (red border)
+	viewport      viewport.Model  // Viewport for scrolling
+	ready         bool            // Whether viewport is initialized
 
 	// Mouse click regions
 	inputStartLine int // Line number where input field starts
@@ -76,9 +79,9 @@ func NewNodesView() NodesView {
 		width:         80,
 		height:        20,
 		theme:         themes.Solarized(),
-		scrollOffset:  0,
 		nodeInput:     ti,
 		editing:       false,
+		ready:         false,
 		hunterLines:   make(map[int]int),
 	}
 }
@@ -92,6 +95,25 @@ func (n *NodesView) SetTheme(theme themes.Theme) {
 func (n *NodesView) SetSize(width, height int) {
 	n.width = width
 	n.height = height
+
+	// Calculate viewport height (subtract space for input field)
+	// Input section takes: 1 (label) + 3 (input with border) + 2 (spacing) = 6 lines
+	// Add 1 line to push footer down to match other tabs
+	inputSectionHeight := 6
+	viewportHeight := height - inputSectionHeight + 1
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+
+	if !n.ready {
+		n.viewport = viewport.New(width, viewportHeight)
+		n.ready = true
+		// Set initial content if we already have data
+		n.updateViewportContent()
+	} else {
+		n.viewport.Width = width
+		n.viewport.Height = viewportHeight
+	}
 }
 
 // SetHunters updates the hunter list and groups by processor
@@ -121,6 +143,58 @@ func (n *NodesView) SetHunters(hunters []HunterInfo) {
 	if n.selectedIndex >= len(n.hunters) {
 		n.selectedIndex = 0
 	}
+
+	// Update viewport content
+	n.updateViewportContent()
+}
+
+// SetHuntersAndProcessors updates both the hunter list and ensures all processors are shown
+func (n *NodesView) SetHuntersAndProcessors(hunters []HunterInfo, processorAddrs []string) {
+	n.hunters = hunters
+
+	// Group hunters by processor address
+	processorMap := make(map[string][]HunterInfo)
+	for _, hunter := range hunters {
+		addr := hunter.ProcessorAddr
+		if addr == "" {
+			addr = "Direct" // Hunters without processor (direct connections)
+		}
+		processorMap[addr] = append(processorMap[addr], hunter)
+	}
+
+	// Ensure all connected processors are in the map (even with 0 hunters)
+	for _, addr := range processorAddrs {
+		if _, exists := processorMap[addr]; !exists {
+			processorMap[addr] = []HunterInfo{} // Empty hunter list for this processor
+		}
+	}
+
+	// Convert map to slice and sort processors alphabetically by address
+	n.processors = make([]ProcessorInfo, 0, len(processorMap))
+	for addr, hunterList := range processorMap {
+		// Sort hunters by hunter ID within each processor
+		sort.Slice(hunterList, func(i, j int) bool {
+			return hunterList[i].ID < hunterList[j].ID
+		})
+
+		n.processors = append(n.processors, ProcessorInfo{
+			Address: addr,
+			Hunters: hunterList,
+		})
+	}
+
+	// Sort processors alphabetically by address
+	sort.Slice(n.processors, func(i, j int) bool {
+		return n.processors[i].Address < n.processors[j].Address
+	})
+
+	// Reset selection if out of bounds
+	if n.selectedIndex >= len(n.hunters) {
+		n.selectedIndex = 0
+	}
+
+	// Update viewport content
+	n.updateViewportContent()
 }
 
 // GetHunterCount returns the number of hunters
@@ -144,13 +218,13 @@ func (n *NodesView) SelectNext() {
 		n.editing = false
 		n.nodeInput.Blur()
 		n.selectedIndex = 0
-		n.adjustScroll()
+		n.updateViewportContent() // Refresh to show selection
 		return
 	}
 
 	// Otherwise, move to next hunter
 	n.selectedIndex = (n.selectedIndex + 1) % len(n.hunters)
-	n.adjustScroll()
+	n.updateViewportContent() // Refresh to show selection
 }
 
 // SelectPrevious moves selection to previous hunter or from first hunter to input
@@ -175,12 +249,13 @@ func (n *NodesView) SelectPrevious() {
 		n.selectedIndex = -1
 		n.editing = false
 		n.nodeInput.Blur()
+		n.updateViewportContent() // Refresh to show selection change
 		return
 	}
 
 	// Otherwise, move to previous hunter
 	n.selectedIndex = n.selectedIndex - 1
-	n.adjustScroll()
+	n.updateViewportContent() // Refresh to show selection
 }
 
 // Update handles key presses and mouse events
@@ -194,7 +269,15 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 		// 	fmt.Fprintf(f, "    -> NodesView.Update: Y=%d Type=%v\n", msg.Y, msg.Type)
 		// 	f.Close()
 		// }
-		return n.handleMouseClick(msg)
+		// Pass mouse events to viewport for scrolling (if not handling clicks)
+		clickCmd := n.handleMouseClick(msg)
+		if clickCmd != nil {
+			return clickCmd
+		}
+		// Let viewport handle scroll wheel
+		n.viewport, cmd = n.viewport.Update(msg)
+		return cmd
+
 	case tea.KeyMsg:
 		// Check if input is focused (selectedIndex = -1)
 		if n.selectedIndex == -1 {
@@ -236,6 +319,10 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 					return nil
 				}
 			}
+		} else {
+			// Hunter is selected - pass keyboard events to viewport for scrolling
+			n.viewport, cmd = n.viewport.Update(msg)
+			return cmd
 		}
 	}
 
@@ -303,17 +390,6 @@ func (n *NodesView) getColumnWidths() (idCol, hostCol, statusCol, uptimeCol, cap
 	return
 }
 
-// adjustScroll adjusts scroll offset to keep selected item visible
-func (n *NodesView) adjustScroll() {
-	visibleRows := n.height - 3 // Header + borders
-	if n.selectedIndex < n.scrollOffset {
-		n.scrollOffset = n.selectedIndex
-	}
-	if n.selectedIndex >= n.scrollOffset+visibleRows {
-		n.scrollOffset = n.selectedIndex - visibleRows + 1
-	}
-}
-
 // GetSelectedHunter returns the currently selected hunter
 func (n *NodesView) GetSelectedHunter() *HunterInfo {
 	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
@@ -322,9 +398,48 @@ func (n *NodesView) GetSelectedHunter() *HunterInfo {
 	return nil
 }
 
-// View renders the nodes view
+// updateViewportContent updates the viewport with current content
+func (n *NodesView) updateViewportContent() {
+	if !n.ready {
+		return
+	}
+	n.viewport.SetContent(n.renderContent())
+}
+
+// renderContent renders the tree view content as a string for the viewport
+func (n *NodesView) renderContent() string {
+	var b strings.Builder
+
+	// Reset mouse click regions
+	n.hunterLines = make(map[int]int)
+
+	if len(n.processors) == 0 && len(n.hunters) == 0 {
+		// Empty state - no processors and no hunters
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Align(lipgloss.Center)
+
+		b.WriteString(emptyStyle.Render("No nodes connected") + "\n\n")
+		b.WriteString(emptyStyle.Render("Type an address above and press Enter to add a node") + "\n\n")
+		b.WriteString(emptyStyle.Render("Or start a hunter with:") + "\n")
+		b.WriteString(emptyStyle.Render("  lippycat hunt --processor <processor-addr>") + "\n")
+		return b.String()
+	}
+
+	if len(n.processors) > 0 {
+		// Tree view: Group hunters by processor
+		n.renderTreeView(&b)
+	} else {
+		// Flat view (if no processors but have hunters)
+		n.renderFlatView(&b)
+	}
+
+	return b.String()
+}
+
 // renderTreeView renders the processors and hunters in a tree structure with table columns
-func (n *NodesView) renderTreeView(b *strings.Builder, linesRendered *int) {
+func (n *NodesView) renderTreeView(b *strings.Builder) {
+	linesRendered := 0
 	processorStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(n.theme.InfoColor)
@@ -340,23 +455,11 @@ func (n *NodesView) renderTreeView(b *strings.Builder, linesRendered *int) {
 	// Tree prefix is fixed width
 	treeCol := 6 // "  ├─ " or "  └─ "
 
-	// Calculate max rows available
-	maxRows := n.height - *linesRendered - 1
-
-	rowIndex := 0
 	for _, proc := range n.processors {
-		// Save the starting line for this processor's hunters (before headers)
-		// This is where clicks should be tracked, even though headers are rendered
-		huntersStartLine := *linesRendered
-
 		// Processor header
 		procLine := fmt.Sprintf("📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
 		b.WriteString(processorStyle.Render(procLine) + "\n")
-		rowIndex++
-
-		if rowIndex >= maxRows {
-			break
-		}
+		linesRendered++
 
 		// Table header for hunters under this processor
 		// Add tree structure continuation to header
@@ -375,16 +478,18 @@ func (n *NodesView) renderTreeView(b *strings.Builder, linesRendered *int) {
 			Foreground(n.theme.Foreground).
 			Bold(true)
 		b.WriteString(headerStyle.Render(headerLine) + "\n")
-		rowIndex++
-
-		if rowIndex >= maxRows {
-			break
-		}
-
-		// Track actual visual line count (including headers)
-		*linesRendered = huntersStartLine + rowIndex
+		linesRendered++
 
 		// Render hunters under this processor in table format
+		if len(proc.Hunters) == 0 {
+			// No hunters for this processor - show empty state
+			emptyStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240"))
+			emptyLine := fmt.Sprintf("  └─  (no hunters connected)")
+			b.WriteString(emptyStyle.Render(emptyLine) + "\n")
+			linesRendered++
+		}
+
 		for i, hunter := range proc.Hunters {
 			isLast := i == len(proc.Hunters)-1
 			prefix := "  ├─ "
@@ -446,8 +551,8 @@ func (n *NodesView) renderTreeView(b *strings.Builder, linesRendered *int) {
 			filtersStr := fmt.Sprintf("%d", hunter.ActiveFilters)
 
 			// Track this hunter's line position for mouse clicks
-			// Use huntersStartLine + hunter index within this processor to make headers clickable
-			n.hunterLines[huntersStartLine+i] = globalIndex
+			// Current line is linesRendered (before we increment it)
+			n.hunterLines[linesRendered] = globalIndex
 
 			// Build the line differently based on selection
 			if globalIndex == n.selectedIndex {
@@ -481,53 +586,127 @@ func (n *NodesView) renderTreeView(b *strings.Builder, linesRendered *int) {
 				b.WriteString(hunterLine + "\n")
 			}
 
-			*linesRendered++
-			rowIndex++
-
-			if rowIndex >= maxRows {
-				break
-			}
-		}
-
-		if rowIndex >= maxRows {
-			break
+			linesRendered++
 		}
 
 		// Add blank line after processor group
 		b.WriteString("\n")
-		*linesRendered++
-		rowIndex++
+		linesRendered++
+	}
+}
 
-		if rowIndex >= maxRows {
-			break
+// renderFlatView renders hunters in a flat table (no processors grouping)
+func (n *NodesView) renderFlatView(b *strings.Builder) {
+	// This is a fallback case - shouldn't normally be used with current architecture
+	// Get responsive column widths
+	idCol, hostCol, statusCol, uptimeCol, capturedCol, forwardedCol, filtersCol := n.getColumnWidths()
+
+	// Table header
+	header := fmt.Sprintf(
+		" %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+		idCol, "Hunter ID",
+		hostCol, "IP Address",
+		statusCol, "Status",
+		uptimeCol, "Uptime",
+		capturedCol, "Captured",
+		forwardedCol, "Forwarded",
+		filtersCol, "Filters",
+	)
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(n.theme.InfoColor)
+
+	b.WriteString(headerStyle.Render(header) + "\n")
+
+	// Separator
+	sepStyle := lipgloss.NewStyle().Foreground(n.theme.BorderColor)
+	separator := sepStyle.Render(strings.Repeat("─", n.width))
+	b.WriteString(separator + "\n")
+
+	// Render all hunters
+	for i, hunter := range n.hunters {
+		// Status color
+		statusStyle := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
+		var statusText string
+		switch hunter.Status {
+		case management.HunterStatus_STATUS_HEALTHY:
+			statusStyle = statusStyle.Foreground(n.theme.SuccessColor)
+			statusText = "HEALTHY"
+		case management.HunterStatus_STATUS_WARNING:
+			statusStyle = statusStyle.Foreground(n.theme.WarningColor)
+			statusText = "WARNING"
+		case management.HunterStatus_STATUS_ERROR:
+			statusStyle = statusStyle.Foreground(n.theme.ErrorColor)
+			statusText = "ERROR"
+		case management.HunterStatus_STATUS_STOPPING:
+			statusStyle = statusStyle.Foreground(lipgloss.Color("240"))
+			statusText = "STOPPING"
+		}
+
+		// Calculate uptime
+		uptime := ""
+		if hunter.ConnectedAt > 0 {
+			duration := time.Since(time.Unix(0, hunter.ConnectedAt))
+			if duration.Hours() >= 1 {
+				uptime = fmt.Sprintf("%.0fh %.0fm", duration.Hours(), duration.Minutes()-duration.Hours()*60)
+			} else if duration.Minutes() >= 1 {
+				uptime = fmt.Sprintf("%.0fm %.0fs", duration.Minutes(), duration.Seconds()-duration.Minutes()*60)
+			} else {
+				uptime = fmt.Sprintf("%.0fs", duration.Seconds())
+			}
+		}
+
+		// Format row string
+		row := fmt.Sprintf(
+			" %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+			idCol, truncateString(hunter.ID, idCol),
+			hostCol, truncateString(hunter.Hostname, hostCol),
+			statusCol, statusText,
+			uptimeCol, uptime,
+			capturedCol, formatPacketNumber(hunter.PacketsCaptured),
+			forwardedCol, formatPacketNumber(hunter.PacketsForwarded),
+			filtersCol, fmt.Sprintf("%d", hunter.ActiveFilters),
+		)
+
+		// Apply style to entire row
+		if i == n.selectedIndex {
+			rowStyle := lipgloss.NewStyle().
+				Foreground(n.theme.SelectionBg).
+				Reverse(true).
+				Bold(true)
+
+			renderedRow := rowStyle.Render(row)
+			rowLen := lipgloss.Width(renderedRow)
+			if rowLen < n.width {
+				padding := n.width - rowLen
+				renderedRow += rowStyle.Render(strings.Repeat(" ", padding))
+			}
+			b.WriteString(renderedRow + "\n")
+		} else {
+			b.WriteString(row + "\n")
 		}
 	}
 }
 
 func (n *NodesView) View() string {
+	if !n.ready {
+		return ""
+	}
+
 	var b strings.Builder
 
-	// Reset mouse click regions
-	n.hunterLines = make(map[int]int)
+	// Track input field position for mouse clicks
+	n.inputStartLine = 0
 
-	// Count lines as we build to ensure we fill exactly n.height
-	linesRendered := 0
-
-	// Label and input at top (like Settings tab style)
+	// Label and input at top
 	labelStyle := lipgloss.NewStyle().
 		Foreground(n.theme.InfoColor).
 		Bold(true)
 
-	// Track input field position (include the label)
-	n.inputStartLine = linesRendered
-
 	b.WriteString(labelStyle.Render("Add Node:") + "\n")
-	linesRendered++ // Label line
 
-	// Input border color logic (same as settings page):
-	// - Red when editing (n.editing = true)
-	// - Blue when focused but not editing (selectedIndex = -1 && !editing)
-	// - Gray when unfocused (selectedIndex >= 0)
+	// Input border color logic
 	var borderColor lipgloss.Color
 	if n.editing {
 		borderColor = n.theme.FocusedBorderColor // Red when editing
@@ -544,153 +723,14 @@ func (n *NodesView) View() string {
 		Width(n.width - 4)
 
 	b.WriteString(inputWithBorder.Render(n.nodeInput.View()) + "\n\n")
-	linesRendered += 3 // Input box with border (top border + content + bottom border)
-	n.inputEndLine = linesRendered - 1 // End line is before the blank lines
-	linesRendered += 2 // Two newlines after input
+	n.inputEndLine = 4 // Label (1) + border top (1) + content (1) + border bottom (1) = 4
 
-	if len(n.hunters) == 0 {
-		// Empty state
-		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Align(lipgloss.Center)
-
-		b.WriteString(emptyStyle.Render("No nodes connected") + "\n\n")
-		linesRendered += 2 // Text line + blank line
-
-		b.WriteString(emptyStyle.Render("Type an address above and press Enter to add a node") + "\n\n")
-		linesRendered += 2 // Text line + blank line
-
-		b.WriteString(emptyStyle.Render("Or start a hunter with:") + "\n")
-		linesRendered += 1
-
-		b.WriteString(emptyStyle.Render("  lippycat hunt --processor <processor-addr>") + "\n")
-		linesRendered += 1
-	} else if len(n.processors) > 0 {
-		// Tree view: Group hunters by processor
-		n.renderTreeView(&b, &linesRendered)
-	} else {
-		// Get responsive column widths
-		idCol, hostCol, statusCol, uptimeCol, capturedCol, forwardedCol, filtersCol := n.getColumnWidths()
-
-		// Table header
-		header := fmt.Sprintf(
-			" %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-			idCol, "Hunter ID",
-			hostCol, "IP Address",
-			statusCol, "Status",
-			uptimeCol, "Uptime",
-			capturedCol, "Captured",
-			forwardedCol, "Forwarded",
-			filtersCol, "Filters",
-		)
-
-		headerStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(n.theme.InfoColor)
-
-		b.WriteString(headerStyle.Render(header) + "\n")
-		linesRendered++ // Header line
-
-		// Separator
-		sepStyle := lipgloss.NewStyle().Foreground(n.theme.BorderColor)
-		separator := sepStyle.Render(strings.Repeat("─", n.width))
-		b.WriteString(separator + "\n")
-		linesRendered++ // Separator line
-
-		// Calculate how many rows we can show
-		// We need to leave room for: footer(1) + optionally scroll_indicator(1)
-		maxRows := n.height - linesRendered - 1 // Reserve 1 for footer
-		endIndex := n.scrollOffset + maxRows
-		if endIndex > len(n.hunters) {
-			endIndex = len(n.hunters)
-		}
-
-		for i := n.scrollOffset; i < endIndex; i++ {
-			hunter := n.hunters[i]
-
-			// Status color
-			statusStyle := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
-			var statusText string
-			switch hunter.Status {
-			case management.HunterStatus_STATUS_HEALTHY:
-				statusStyle = statusStyle.Foreground(n.theme.SuccessColor)
-				statusText = "HEALTHY"
-			case management.HunterStatus_STATUS_WARNING:
-				statusStyle = statusStyle.Foreground(n.theme.WarningColor)
-				statusText = "WARNING"
-			case management.HunterStatus_STATUS_ERROR:
-				statusStyle = statusStyle.Foreground(n.theme.ErrorColor)
-				statusText = "ERROR"
-			case management.HunterStatus_STATUS_STOPPING:
-				statusStyle = statusStyle.Foreground(lipgloss.Color("240"))
-				statusText = "STOPPING"
-			}
-
-			// Calculate uptime
-			uptime := ""
-			if hunter.ConnectedAt > 0 {
-				duration := time.Since(time.Unix(0, hunter.ConnectedAt))
-				if duration.Hours() >= 1 {
-					uptime = fmt.Sprintf("%.0fh %.0fm", duration.Hours(), duration.Minutes()-duration.Hours()*60)
-				} else if duration.Minutes() >= 1 {
-					uptime = fmt.Sprintf("%.0fm %.0fs", duration.Minutes(), duration.Seconds()-duration.Minutes()*60)
-				} else {
-					uptime = fmt.Sprintf("%.0fs", duration.Seconds())
-				}
-			}
-
-			// Format row string first (without styles)
-			row := fmt.Sprintf(
-				" %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-				idCol, truncateString(hunter.ID, idCol),
-				hostCol, truncateString(hunter.Hostname, hostCol),
-				statusCol, statusText,
-				uptimeCol, uptime,
-				capturedCol, formatPacketNumber(hunter.PacketsCaptured),
-				forwardedCol, formatPacketNumber(hunter.PacketsForwarded),
-				filtersCol, fmt.Sprintf("%d", hunter.ActiveFilters),
-			)
-
-			// Apply style to entire row
-			if i == n.selectedIndex {
-				// Use same selection style as packet list (foreground + reverse)
-				rowStyle := lipgloss.NewStyle().
-					Foreground(n.theme.SelectionBg).
-					Reverse(true).
-					Bold(true)
-
-				// Render with style and ensure it spans full width
-				renderedRow := rowStyle.Render(row)
-				rowLen := lipgloss.Width(renderedRow)
-				if rowLen < n.width {
-					padding := n.width - rowLen
-					renderedRow += rowStyle.Render(strings.Repeat(" ", padding))
-				}
-				b.WriteString(renderedRow + "\n")
-			} else {
-				// Normal row - apply status color to status column only
-				// For simplicity, just render the row as-is
-				b.WriteString(row + "\n")
-			}
-			linesRendered++
-		}
-	}
-
-	// Calculate padding to fill remaining space
-	// Total should be: linesRendered + padding = n.height
-	paddingLines := n.height - linesRendered
-	if paddingLines < 0 {
-		paddingLines = 0
-	}
-
-	if paddingLines > 0 {
-		b.WriteString(strings.Repeat("\n", paddingLines))
-	}
+	// Render viewport with scrollable content
+	b.WriteString(n.viewport.View())
 
 	return b.String()
 }
 
-// truncateString truncates a string to maxLen with ellipsis
 func truncateString(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -807,7 +847,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		n.selectedIndex = hunterIndex
 		n.editing = false
 		n.nodeInput.Blur()
-		n.adjustScroll()
+		n.updateViewportContent() // Refresh to show selection
 		return nil
 	}
 

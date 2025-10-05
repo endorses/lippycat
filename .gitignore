@@ -1,4 +1,5 @@
 lippycat
+lc
 captures
 *.md
 !docs/*.md

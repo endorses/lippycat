@@ -1,7 +1,7 @@
 .PHONY: build build-pgo build-release install dev profile pgo-prepare clean test test-verbose test-coverage bench fmt vet tidy version help
 
 # Build variables
-BINARY_NAME=lippycat
+BINARY_NAME=lc
 PGO_PROFILE=default.pgo
 PROFILE_DATA=cpu.prof
 

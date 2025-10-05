@@ -119,9 +119,8 @@ func (c *Client) GetAddr() string {
 // StreamPackets starts receiving packet stream from remote node
 func (c *Client) StreamPackets() error {
 	// Subscribe to packet stream using the new SubscribePackets RPC
-	req := &data.SubscribeRequest{
-		ClientId: "tui-" + c.addr, // Identify this TUI client
-	}
+	// ClientId is omitted - processor will auto-generate a unique ID
+	req := &data.SubscribeRequest{}
 
 	stream, err := c.dataClient.SubscribePackets(c.ctx, req)
 	if err != nil {

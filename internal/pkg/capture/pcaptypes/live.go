@@ -23,10 +23,15 @@ func (iface *liveInterface) SetHandle() error {
 	promiscuous := viper.GetViper().GetBool("promiscuous")
 	snapshotLen := int32(MaxPcapSnapshotLen)
 
-	// Use a timeout to allow graceful shutdown and prevent orphaned goroutines
+	// Use configurable timeout to allow graceful shutdown and prevent orphaned goroutines
 	// BlockForever causes capture goroutines to hang when context is cancelled
-	// 200ms is responsive enough for shutdown while being infrequent enough to avoid choppiness
-	timeout := 200 * time.Millisecond
+	// Default 200ms is responsive enough for shutdown while being infrequent enough to avoid choppiness
+	// Configure via pcap_timeout_ms in config file or LIPPYCAT_PCAP_TIMEOUT_MS env var
+	timeoutMs := viper.GetInt("pcap_timeout_ms")
+	if timeoutMs <= 0 {
+		timeoutMs = 200 // Default 200ms
+	}
+	timeout := time.Duration(timeoutMs) * time.Millisecond
 	handle, err := pcap.OpenLive(iface.Device, snapshotLen, promiscuous, timeout)
 	if err != nil {
 		return err

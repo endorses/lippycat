@@ -76,6 +76,9 @@ func initConfig() {
 
 	viper.AutomaticEnv()
 
+	// Set defaults for capture configuration
+	viper.SetDefault("pcap_timeout_ms", 200) // 200ms default for pcap read timeout
+
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	}

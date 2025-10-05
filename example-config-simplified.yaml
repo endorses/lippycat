@@ -2,6 +2,12 @@
 # Reduces complexity from 25+ parameters to 8 essential settings
 
 # ========================================
+# CAPTURE CONFIGURATION
+# ========================================
+
+# pcap_timeout_ms: 200  # PCAP read timeout in ms (default: 200, range: 50-1000)
+
+# ========================================
 # SIMPLIFIED TCP CONFIGURATION (8 parameters)
 # ========================================
 

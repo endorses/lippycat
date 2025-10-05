@@ -1,4 +1,12 @@
 # Example lippycat configuration with Phase 3 TCP optimizations
+
+# Packet Capture Configuration
+# pcap_timeout_ms: 200  # PCAP read timeout in milliseconds (default: 200)
+                        # Controls how often capture goroutines check for shutdown signals
+                        # Lower values (50-100ms) = faster shutdown response, potentially choppy display
+                        # Higher values (200-500ms) = smoother display, slightly slower shutdown
+                        # Can also be set via env var: LIPPYCAT_PCAP_TIMEOUT_MS=200
+
 voip:
   # Basic TCP configuration
   max_goroutines: 1000

@@ -268,3 +268,22 @@ func getPacketBufferSize() int {
 	// Fall back to default
 	return defaultBufferSize
 }
+
+// GetPcapTimeout returns the configured pcap read timeout
+// This timeout allows graceful shutdown while maintaining smooth packet display.
+// Default is 200ms, but can be overridden via configuration (pcap_timeout_ms).
+// Values: 50-1000ms recommended. Lower = more responsive shutdown, Higher = smoother display
+func GetPcapTimeout() time.Duration {
+	const defaultTimeout = DefaultPcapTimeout
+
+	// Check for configuration via viper (environment variables, config files, etc.)
+	if viper.IsSet("pcap_timeout_ms") {
+		timeoutMs := viper.GetInt("pcap_timeout_ms")
+		if timeoutMs > 0 {
+			return time.Duration(timeoutMs) * time.Millisecond
+		}
+	}
+
+	// Fall back to default
+	return defaultTimeout
+}

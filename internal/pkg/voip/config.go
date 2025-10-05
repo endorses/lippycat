@@ -122,38 +122,65 @@ func initConfigDefaults() {
 	viper.SetDefault("voip.enable_plugin_metrics", true)
 }
 
+// getPositiveDuration returns the duration from viper if it's positive, otherwise returns the default
+func getPositiveDuration(key string, defaultVal time.Duration) time.Duration {
+	val := viper.GetDuration(key)
+	if val <= 0 {
+		return defaultVal
+	}
+	return val
+}
+
+// getPositiveInt returns the int from viper if it's positive, otherwise returns the default
+func getPositiveInt(key string, defaultVal int) int {
+	val := viper.GetInt(key)
+	if val <= 0 {
+		return defaultVal
+	}
+	return val
+}
+
+// getPositiveInt64 returns the int64 from viper if it's positive, otherwise returns the default
+func getPositiveInt64(key string, defaultVal int64) int64 {
+	val := viper.GetInt64(key)
+	if val <= 0 {
+		return defaultVal
+	}
+	return val
+}
+
 // GetConfig returns the current VoIP configuration with defaults
 func GetConfig() *Config {
 	// Initialize defaults only once to prevent race conditions
 	configOnce.Do(initConfigDefaults)
 
 	config := &Config{
-		MaxGoroutines:             viper.GetInt("voip.max_goroutines"),
-		CallIDDetectionTimeout:    viper.GetDuration("voip.call_id_detection_timeout"),
-		JanitorCleanupInterval:    viper.GetDuration("voip.janitor_cleanup_interval"),
-		CallExpirationTime:        viper.GetDuration("voip.call_expiration_time"),
-		StreamQueueBuffer:         viper.GetInt("voip.stream_queue_buffer"),
+		MaxGoroutines:             getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
+		CallIDDetectionTimeout:    getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),
+		JanitorCleanupInterval:    getPositiveDuration("voip.janitor_cleanup_interval", DefaultJanitorCleanupInterval),
+		CallExpirationTime:        getPositiveDuration("voip.call_expiration_time", DefaultCallExpirationTime),
+		StreamQueueBuffer:         getPositiveInt("voip.stream_queue_buffer", DefaultStreamQueueBuffer),
 		MaxFilenameLength:         viper.GetInt("voip.max_filename_length"),
-		LogGoroutineLimitInterval: viper.GetDuration("voip.log_goroutine_limit_interval"),
+		LogGoroutineLimitInterval: getPositiveDuration("voip.log_goroutine_limit_interval", 30*time.Second),
 
 		// TCP-specific configurations
-		TCPCleanupInterval:    viper.GetDuration("voip.tcp_cleanup_interval"),
-		TCPBufferMaxAge:       viper.GetDuration("voip.tcp_buffer_max_age"),
-		TCPStreamMaxQueueTime: viper.GetDuration("voip.tcp_stream_max_queue_time"),
-		MaxTCPBuffers:         viper.GetInt("voip.max_tcp_buffers"),
-		TCPStreamTimeout:      viper.GetDuration("voip.tcp_stream_timeout"),
-		TCPAssemblerMaxPages:  viper.GetInt("voip.tcp_assembler_max_pages"),
+		TCPCleanupInterval:    getPositiveDuration("voip.tcp_cleanup_interval", DefaultTCPCleanupInterval),
+		TCPBufferMaxAge:       getPositiveDuration("voip.tcp_buffer_max_age", DefaultTCPBufferMaxAge),
+		TCPStreamMaxQueueTime: getPositiveDuration("voip.tcp_stream_max_queue_time", DefaultTCPStreamMaxQueueTime),
+		MaxTCPBuffers:         getPositiveInt("voip.max_tcp_buffers", DefaultMaxTCPBuffers),
+		TCPStreamTimeout:      getPositiveDuration("voip.tcp_stream_timeout", DefaultTCPStreamTimeout),
+		TCPAssemblerMaxPages:  getPositiveInt("voip.tcp_assembler_max_pages", DefaultTCPAssemblerMaxPages),
 
 		// TCP Performance configurations
 		TCPPerformanceMode:     viper.GetString("voip.tcp_performance_mode"),
 		TCPBufferStrategy:      viper.GetString("voip.tcp_buffer_strategy"),
 		EnableBackpressure:     viper.GetBool("voip.enable_backpressure"),
 		MemoryOptimization:     viper.GetBool("voip.memory_optimization"),
-		TCPBufferPoolSize:      viper.GetInt("voip.tcp_buffer_pool_size"),
-		TCPBatchSize:           viper.GetInt("voip.tcp_batch_size"),
-		TCPIOThreads:           viper.GetInt("voip.tcp_io_threads"),
+		TCPBufferPoolSize:      getPositiveInt("voip.tcp_buffer_pool_size", DefaultTCPBufferPoolSize),
+		TCPBatchSize:           getPositiveInt("voip.tcp_batch_size", DefaultTCPBatchSize),
+		TCPIOThreads:           getPositiveInt("voip.tcp_io_threads", DefaultTCPIOThreads),
 		TCPCompressionLevel:    viper.GetInt("voip.tcp_compression_level"),
-		TCPMemoryLimit:         viper.GetInt64("voip.tcp_memory_limit"),
+		TCPMemoryLimit:         getPositiveInt64("voip.tcp_memory_limit", DefaultTCPMemoryLimit),
 		TCPLatencyOptimization: viper.GetBool("voip.tcp_latency_optimization"),
 
 		// Plugin system configurations
@@ -170,7 +197,7 @@ func GetConfig() *Config {
 		PrometheusEnabled:       viper.GetBool("voip.prometheus_enabled"),
 		PrometheusPort:          viper.GetInt("voip.prometheus_port"),
 		TracingEnabled:          viper.GetBool("voip.tracing_enabled"),
-		MonitoringUpdateInterval: viper.GetDuration("voip.monitoring_update_interval"),
+		MonitoringUpdateInterval: getPositiveDuration("voip.monitoring_update_interval", 30*time.Second),
 		EnableRuntimeMetrics:    viper.GetBool("voip.enable_runtime_metrics"),
 		EnableSystemMetrics:     viper.GetBool("voip.enable_system_metrics"),
 		EnablePluginMetrics:     viper.GetBool("voip.enable_plugin_metrics"),

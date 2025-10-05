@@ -20,7 +20,9 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	streamFactory := NewSipStreamFactory(ctx)
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
-	capture.Init(devices, filter, startProcessor, assembler)
+
+	// Use common signal handler pattern (like hunt and sniff do)
+	capture.RunWithSignalHandler(devices, filter, startProcessor, assembler)
 }
 
 func StartLiveVoipSniffer(interfaces, filter string) {

@@ -86,11 +86,15 @@ func runTUI(cmd *cobra.Command, args []string) {
 func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
-		// Don't use goroutine - block here so capture.Init doesn't exit early
 		StartPacketBridge(ch, program)
 	}
 
-	capture.InitWithContext(ctx, devices, filter, processor, nil)
+	// Run capture in background goroutine and return immediately (like hunter nodes do)
+	// When context is cancelled, capture will clean up in background
+	// This prevents blocking the caller and allows mode switching without waiting
+	go func() {
+		capture.InitWithContext(ctx, devices, filter, processor, nil)
+	}()
 }
 
 func init() {

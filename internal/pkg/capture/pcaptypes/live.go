@@ -2,6 +2,7 @@ package pcaptypes
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/gopacket/pcap"
 	"github.com/spf13/viper"
@@ -21,7 +22,11 @@ func (iface *liveInterface) SetHandle() error {
 
 	promiscuous := viper.GetViper().GetBool("promiscuous")
 	snapshotLen := int32(MaxPcapSnapshotLen)
-	timeout := pcap.BlockForever
+
+	// Use a timeout to allow graceful shutdown and prevent orphaned goroutines
+	// BlockForever causes capture goroutines to hang when context is cancelled
+	// 200ms is responsive enough for shutdown while being infrequent enough to avoid choppiness
+	timeout := 200 * time.Millisecond
 	handle, err := pcap.OpenLive(iface.Device, snapshotLen, promiscuous, timeout)
 	if err != nil {
 		return err

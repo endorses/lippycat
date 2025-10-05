@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -64,15 +66,44 @@ func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pc
 	}
 }
 
+// RunWithSignalHandler runs the capture in background and handles signals for graceful shutdown
+// This is the common pattern used by hunt, sniff, and sniff voip commands
+func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
+	processor func(ch <-chan PacketInfo, asm *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+
+	// Create cancellable context for capture
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Set up signal handler for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+
+	// Run capture in background (like hunter nodes do)
+	go func() {
+		InitWithContext(ctx, devices, filter, processor, assembler)
+	}()
+
+	// Wait for signal
+	sig := <-sigCh
+	logger.Info("Received signal, shutting down gracefully", "signal", sig.String())
+	cancel()
+
+	// Give a brief moment for graceful cleanup (like hunt nodes do)
+	time.Sleep(500 * time.Millisecond)
+}
+
 func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	fmt.Println("Starting Sniffer")
+
 	// For basic sniffing, we don't need TCP stream reassembly
 	// Pass nil assembler to skip expensive TCP assembly
 	processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
 		processPacketSimple(ch)
 	}
 
-	Init(devices, filter, processor, nil)
+	RunWithSignalHandler(devices, filter, processor, nil)
 }
 
 // processPacketSimple is a lightweight processor without TCP reassembly

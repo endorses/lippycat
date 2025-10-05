@@ -2,11 +2,8 @@ package capture
 
 import (
 	"context"
-	"os"
-	"os/signal"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -98,20 +95,8 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 }
 
 // InitWithContext starts packet capture with a cancellable context
+// Note: Signal handling should be done by the caller. This function only respects context cancellation.
 func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Set up signal handler for graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-	go func() {
-		sig := <-sigCh
-		logger.Info("Received signal, shutting down gracefully", "signal", sig.String())
-		cancel()
-	}()
-
 	// Use a configurable buffer size with proper backpressure handling
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)

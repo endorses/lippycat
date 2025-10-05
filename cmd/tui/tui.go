@@ -89,31 +89,10 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 		StartPacketBridge(ch, program)
 	}
 
-	// For offline captures (reading from file), we need to block until capture completes
-	// to keep the file handle open. Check if any device is an offline interface.
-	isOffline := false
-	if len(devices) > 0 {
-		// Check the first device name - offline captures use the file path as the name
-		name := devices[0].Name()
-		// Offline interfaces will have a file path, not "any" or "eth0" etc.
-		// We detect this by checking if the name contains "/" or ends with .pcap/.pcapng
-		if name != "any" && (name[0] == '/' || name[0] == '.' ||
-			len(name) > 5 && (name[len(name)-5:] == ".pcap" || len(name) > 7 && name[len(name)-7:] == ".pcapng")) {
-			isOffline = true
-		}
-	}
-
-	if isOffline {
-		// Offline mode: block until capture completes to keep file handle open
-		capture.InitWithContext(ctx, devices, filter, processor, nil)
-	} else {
-		// Live mode: run in background goroutine and return immediately (like hunter nodes do)
-		// When context is cancelled, capture will clean up in background
-		// This prevents blocking the caller and allows mode switching without waiting
-		go func() {
-			capture.InitWithContext(ctx, devices, filter, processor, nil)
-		}()
-	}
+	// Run capture - InitWithContext handles both live and offline modes
+	// For offline: blocks until file is read (StartOfflineSniffer keeps file open)
+	// For live: caller uses goroutine for non-blocking behavior
+	capture.InitWithContext(ctx, devices, filter, processor, nil)
 }
 
 func init() {

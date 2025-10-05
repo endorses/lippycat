@@ -938,15 +938,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.RestartCaptureMsg:
 		// Stop current capture using global cancel function
 		if currentCaptureCancel != nil {
-			// Cancel in a goroutine to avoid blocking the UI
+			// Cancel the old capture and wait briefly for cleanup
+			// This prevents the old and new captures from running simultaneously
 			cancelFunc := currentCaptureCancel
 			currentCaptureCancel = nil // Clear immediately to prevent double-cancellation
 
-			go func() {
-				// Call cancel and give it time to clean up
-				cancelFunc()
-				// The capture will clean up in the background (up to 2s drain timeout in InitWithContext)
-			}()
+			cancelFunc()
+			// Give old capture a moment to stop sending packets
+			// (most captures stop immediately, offline captures may take slightly longer)
+			time.Sleep(100 * time.Millisecond)
 		}
 
 		// Keep all remote clients connected regardless of mode

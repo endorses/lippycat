@@ -3,13 +3,14 @@ package components
 import (
 	"fmt"
 	"sort"
+
 	// "os" // Only needed for debug logging - uncomment if enabling DEBUG logs
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/themes"
@@ -17,19 +18,19 @@ import (
 
 // HunterInfo represents a hunter node for display
 type HunterInfo struct {
-	ID              string
-	Hostname        string
-	RemoteAddr      string
-	Status          management.HunterStatus
-	ConnectedAt     int64
-	LastHeartbeat   int64
-	PacketsCaptured uint64
-	PacketsMatched  uint64
+	ID               string
+	Hostname         string
+	RemoteAddr       string
+	Status           management.HunterStatus
+	ConnectedAt      int64
+	LastHeartbeat    int64
+	PacketsCaptured  uint64
+	PacketsMatched   uint64
 	PacketsForwarded uint64
-	PacketsDropped  uint64
-	ActiveFilters   uint32
-	Interfaces      []string
-	ProcessorAddr   string // Address of processor this hunter belongs to
+	PacketsDropped   uint64
+	ActiveFilters    uint32
+	Interfaces       []string
+	ProcessorAddr    string // Address of processor this hunter belongs to
 }
 
 // ProcessorInfo represents a processor node
@@ -57,8 +58,8 @@ type NodesView struct {
 	ready         bool            // Whether viewport is initialized
 
 	// Mouse click regions
-	inputStartLine int // Line number where input field starts
-	inputEndLine   int // Line number where input field ends
+	inputStartLine int         // Line number where input field starts
+	inputEndLine   int         // Line number where input field ends
 	hunterLines    map[int]int // Map of line number -> hunter index
 
 	// Double-click detection
@@ -697,7 +698,10 @@ func (n *NodesView) View() string {
 	var b strings.Builder
 
 	// Track input field position for mouse clicks
+	// Line 0: "Add Node:" label (not clickable)
+	// Lines 1-3: Bordered input box (clickable)
 	n.inputStartLine = 0
+	n.inputEndLine = 2
 
 	// Label and input at top
 	labelStyle := lipgloss.NewStyle().
@@ -723,7 +727,6 @@ func (n *NodesView) View() string {
 		Width(n.width - 4)
 
 	b.WriteString(inputWithBorder.Render(n.nodeInput.View()) + "\n\n")
-	n.inputEndLine = 4 // Label (1) + border top (1) + content (1) + border bottom (1) = 4
 
 	// Render viewport with scrollable content
 	b.WriteString(n.viewport.View())
@@ -793,10 +796,16 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 	contentStartY := 6
 	clickY := msg.Y - contentStartY
 
+	// Input field occupies lines 0-3 (label + bordered input)
+	// Line 0: "Add Node:" label
+	// Lines 1-3: Bordered input (top border, content, bottom border)
+	// The two \n after input are part of the viewport content, not the input field
+	inputFieldHeight := 4
+
 	// DEBUG: Uncomment to see computed click positions and tracked regions
 	// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-	// 	fmt.Fprintf(f, "      -> clickY=%d inputStart=%d inputEnd=%d hunterLines=%v\n",
-	// 		clickY, n.inputStartLine, n.inputEndLine, n.hunterLines)
+	// 	fmt.Fprintf(f, "      -> clickY=%d inputStart=%d inputEnd=%d viewport.YOffset=%d hunterLines=%v\n",
+	// 		clickY, n.inputStartLine, n.inputEndLine, n.viewport.YOffset, n.hunterLines)
 	// 	f.Close()
 	// }
 
@@ -820,7 +829,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 
 		// Check if this is a double-click (second click within 500ms)
 		if n.selectedIndex == -1 && !n.editing &&
-		   now.Sub(n.lastClickTime) < doubleClickThreshold {
+			now.Sub(n.lastClickTime) < doubleClickThreshold {
 			// Double-click detected - start editing
 			n.editing = true
 			n.nodeInput.Focus()
@@ -836,19 +845,33 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	// Check if clicked on a hunter row
-	if hunterIndex, ok := n.hunterLines[clickY]; ok {
-		// DEBUG: Uncomment to confirm hunter row clicks
+	// Check if clicked on a hunter row within the viewport
+	if clickY > n.inputEndLine {
+		// Click is below input field - it's in the viewport area
+		// Calculate the line within the viewport content
+		viewportClickY := clickY - inputFieldHeight
+		// Add viewport scroll offset to get the actual content line
+		contentLineY := viewportClickY + n.viewport.YOffset
+
+		// DEBUG: Uncomment to see viewport click calculation
 		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER %d\n", hunterIndex)
+		// 	fmt.Fprintf(f, "      -> viewportClickY=%d contentLineY=%d\n", viewportClickY, contentLineY)
 		// 	f.Close()
 		// }
-		// Select this hunter
-		n.selectedIndex = hunterIndex
-		n.editing = false
-		n.nodeInput.Blur()
-		n.updateViewportContent() // Refresh to show selection
-		return nil
+
+		if hunterIndex, ok := n.hunterLines[contentLineY]; ok {
+			// DEBUG: Uncomment to confirm hunter row clicks
+			// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER %d\n", hunterIndex)
+			// 	f.Close()
+			// }
+			// Select this hunter
+			n.selectedIndex = hunterIndex
+			n.editing = false
+			n.nodeInput.Blur()
+			n.updateViewportContent() // Refresh to show selection
+			return nil
+		}
 	}
 
 	// DEBUG: Uncomment to see when clicks don't match any region

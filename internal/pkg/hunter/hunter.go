@@ -251,10 +251,19 @@ func (h *Hunter) connectToProcessor() error {
 func (h *Hunter) register() error {
 	logger.Info("Registering with processor", "hunter_id", h.config.HunterID)
 
-	// Get local IP addresses to use as hostname identifier
-	hostname := getLocalIP()
+	// Get local IP address - prefer the capture interface IP
+	hostname := getInterfaceIP(h.config.Interfaces)
+	logger.Info("Detected IP from capture interface", "ip", hostname)
+
 	if hostname == "" {
-		hostname = h.config.HunterID // Fallback to hunter ID
+		// Fallback to connection-based detection
+		hostname = getConnectionLocalIP(h.managementConn)
+		logger.Info("Using connection local IP", "ip", hostname)
+	}
+
+	if hostname == "" {
+		logger.Warn("Failed to detect local IP, using hunter ID as hostname")
+		hostname = h.config.HunterID // Final fallback to hunter ID
 	}
 
 	req := &management.HunterRegistration{
@@ -960,19 +969,129 @@ func (h *Hunter) GetStatsValues() (captured, matched, forwarded, dropped, buffer
 		h.stats.BufferBytes.Load()
 }
 
-// getLocalIP returns the first non-loopback local IP address
-func getLocalIP() string {
+// getConnectionLocalIP returns the local IP address used for the gRPC connection
+// This returns the IP address that the processor sees the hunter connecting from
+func getConnectionLocalIP(conn *grpc.ClientConn) string {
+	if conn == nil {
+		logger.Debug("getConnectionLocalIP: conn is nil")
+		return ""
+	}
+
+	// Parse the target address to determine what we're connecting to
+	target := conn.Target()
+	logger.Debug("getConnectionLocalIP: target", "target", target)
+
+	host, port, err := net.SplitHostPort(target)
+	if err != nil {
+		// Try to parse as just host (might not have port in Target())
+		// Use a dummy port for the UDP dial
+		logger.Debug("getConnectionLocalIP: failed to split host:port, using target as host", "error", err)
+		host = target
+		port = "1"
+	}
+	if port == "" {
+		port = "1"
+	}
+
+	// Check if the target is a loopback address
+	resolvedIPs, err := net.LookupIP(host)
+	if err == nil && len(resolvedIPs) > 0 {
+		targetIP := resolvedIPs[0]
+		logger.Debug("getConnectionLocalIP: resolved target", "host", host, "ip", targetIP.String())
+
+		// If connecting to loopback, we need to find our actual network IP
+		if targetIP.IsLoopback() {
+			logger.Debug("getConnectionLocalIP: target is loopback, finding non-loopback IP")
+			return getFirstNonLoopbackIP()
+		}
+	}
+
+	dialAddr := net.JoinHostPort(host, port)
+	logger.Debug("getConnectionLocalIP: dialing UDP", "addr", dialAddr)
+
+	// Dial a temporary UDP connection to see which local IP would be used
+	// UDP doesn't actually send packets, so this is lightweight
+	udpConn, err := net.Dial("udp", dialAddr)
+	if err != nil {
+		logger.Debug("getConnectionLocalIP: failed to dial UDP", "error", err)
+		return ""
+	}
+	defer udpConn.Close()
+
+	localAddr := udpConn.LocalAddr().(*net.UDPAddr)
+	ip := localAddr.IP.String()
+
+	// Double-check if we got a loopback IP even for non-loopback target
+	if localAddr.IP.IsLoopback() {
+		logger.Debug("getConnectionLocalIP: got loopback IP, finding non-loopback IP")
+		return getFirstNonLoopbackIP()
+	}
+
+	logger.Debug("getConnectionLocalIP: detected IP", "ip", ip)
+	return ip
+}
+
+// getFirstNonLoopbackIP returns the first non-loopback IPv4 address
+func getFirstNonLoopbackIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
+		logger.Debug("getFirstNonLoopbackIP: failed to get interfaces", "error", err)
 		return ""
 	}
 
 	for _, addr := range addrs {
 		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			// Prefer IPv4
 			if ipnet.IP.To4() != nil {
+				logger.Debug("getFirstNonLoopbackIP: found IPv4", "ip", ipnet.IP.String())
 				return ipnet.IP.String()
 			}
 		}
 	}
+
+	logger.Debug("getFirstNonLoopbackIP: no non-loopback IPv4 found")
+	return ""
+}
+
+// getInterfaceIP returns the IP address of the capture interface
+// If multiple interfaces or "any", returns the first non-loopback IP
+func getInterfaceIP(interfaces []string) string {
+	if len(interfaces) == 0 {
+		logger.Debug("getInterfaceIP: no interfaces specified")
+		return ""
+	}
+
+	// If interface is "any" or multiple interfaces, use first non-loopback IP
+	if len(interfaces) > 1 || interfaces[0] == "any" {
+		logger.Debug("getInterfaceIP: multiple interfaces or 'any', using first non-loopback IP")
+		return getFirstNonLoopbackIP()
+	}
+
+	// Get the specific interface
+	ifaceName := interfaces[0]
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		logger.Debug("getInterfaceIP: failed to get interface", "interface", ifaceName, "error", err)
+		return ""
+	}
+
+	// Get addresses for this interface
+	addrs, err := iface.Addrs()
+	if err != nil {
+		logger.Debug("getInterfaceIP: failed to get interface addresses", "interface", ifaceName, "error", err)
+		return ""
+	}
+
+	// Find first IPv4 address
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok {
+			if ipnet.IP.To4() != nil {
+				logger.Debug("getInterfaceIP: found IPv4 on interface", "interface", ifaceName, "ip", ipnet.IP.String())
+				return ipnet.IP.String()
+			}
+		}
+	}
+
+	logger.Debug("getInterfaceIP: no IPv4 found on interface", "interface", ifaceName)
 	return ""
 }

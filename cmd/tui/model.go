@@ -41,6 +41,23 @@ type HunterStatusMsg struct {
 	Hunters []components.HunterInfo
 }
 
+// ProcessorConnectedMsg is sent when a processor connection succeeds
+type ProcessorConnectedMsg struct {
+	Address string
+	Client  interface{ Close() }
+}
+
+// ProcessorDisconnectedMsg is sent when a processor connection is lost
+type ProcessorDisconnectedMsg struct {
+	Address string
+	Error   error
+}
+
+// ProcessorReconnectMsg is sent to trigger a reconnection attempt
+type ProcessorReconnectMsg struct {
+	Address string
+}
+
 // TickMsg is sent periodically to trigger UI updates
 type TickMsg struct{}
 
@@ -50,6 +67,26 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+// ProcessorState represents the connection state of a processor
+type ProcessorState int
+
+const (
+	ProcessorStateDisconnected ProcessorState = iota
+	ProcessorStateConnecting
+	ProcessorStateConnected
+	ProcessorStateFailed
+)
+
+// ProcessorConnection tracks a configured processor and its connection state
+type ProcessorConnection struct {
+	Address         string
+	State           ProcessorState
+	Client          interface{ Close() }
+	LastAttempt     time.Time
+	FailureCount    int
+	ReconnectTimer  *time.Timer
+}
+
 // Model represents the TUI application state
 type Model struct {
 	packets         []components.PacketDisplay // Ring buffer of packets (all captured)
@@ -57,7 +94,8 @@ type Model struct {
 	maxPackets      int                        // Maximum packets to keep in memory
 	packetList      components.PacketList      // Packet list component
 	detailsPanel    components.DetailsPanel    // Details panel component
-	remoteClients   map[string]interface{ Close() } // Multiple remote capture clients (addr -> client)
+	remoteClients   map[string]interface{ Close() } // DEPRECATED: use processors instead
+	processors      map[string]*ProcessorConnection // Configured processors and their connection state
 	huntersByProcessor map[string][]components.HunterInfo // Hunters grouped by processor address
 	hexDumpView     components.HexDumpView     // Hex dump component
 	header          components.Header          // Header component
@@ -206,7 +244,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		maxPackets:      bufferSize,
 		packetList:      packetList,
 		detailsPanel:    detailsPanel,
-		remoteClients:   make(map[string]interface{ Close() }), // Initialize remote clients map
+		remoteClients:   make(map[string]interface{ Close() }), // DEPRECATED
+		processors:      make(map[string]*ProcessorConnection),  // Track processors with state
 		huntersByProcessor: make(map[string][]components.HunterInfo), // Initialize hunters map
 		hexDumpView:     hexDumpView,
 		header:          header,
@@ -243,8 +282,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
 	// Load remote nodes if in remote mode
-	if m.captureMode == components.CaptureModeRemote && m.nodesFilePath != "" && currentProgram != nil {
-		startRemoteCapture(m.nodesFilePath, m.remoteClients, currentProgram)
+	if m.captureMode == components.CaptureModeRemote && m.nodesFilePath != "" {
+		return tea.Batch(tickCmd(), loadNodesFile(m.nodesFilePath))
 	}
 	return tickCmd()
 }
@@ -974,61 +1013,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Load and connect to nodes from YAML file (if provided)
 				if msg.NodesFile != "" {
-					// Check if program is still valid before starting goroutine
-					if currentProgram == nil {
-						return m, nil
-					}
-
-					// Capture program reference for the goroutine
-					prog := currentProgram
-
-					go func() {
-						// Recover from any panic in this goroutine to prevent crashing the TUI
-						defer func() {
-							if r := recover(); r != nil {
-								// Panic occurred, log it but don't crash the TUI
-								// In production, this should send an error message to the UI
-								_ = r
-							}
-						}()
-
-						nodes, err := config.LoadNodesFromYAML(msg.NodesFile)
-						if err != nil {
-							// TODO: Show error in UI
-							return
-						}
-
-						// Connect to each node
-						for _, node := range nodes {
-							// Skip if already connected
-							if _, exists := m.remoteClients[node.Address]; exists {
-								continue
-							}
-
-							// Create client - use captured program reference
-							client, err := remotecapture.NewClient(node.Address, prog)
-							if err != nil {
-								// TODO: Show error in UI (but continue with other nodes)
-								continue
-							}
-
-							// Store client
-							m.remoteClients[node.Address] = client
-
-							// Start packet stream
-							if err := client.StreamPackets(); err != nil {
-								// TODO: Show error in UI
-								client.Close()
-								delete(m.remoteClients, node.Address)
-								continue
-							}
-
-							// Start hunter status subscription
-							if err := client.SubscribeHunterStatus(); err != nil {
-								// TODO: Show error in UI (non-fatal)
-							}
-						}
-					}()
+					m.nodesFilePath = msg.NodesFile
+					return m, loadNodesFile(msg.NodesFile)
 				}
 				// If no nodes file, remote mode is active but no nodes connected yet
 				// User can add nodes via Nodes tab
@@ -1040,92 +1026,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.AddNodeMsg:
 		// User wants to add a remote node
 		if msg.Address != "" {
-			// Just add the node - don't change capture mode
-			// Start remote connection in background
-			go func() {
-				// Recover from any panic in this goroutine to prevent crashing the TUI
-				defer func() {
-					if r := recover(); r != nil {
-						// Panic occurred, log it but don't crash the TUI
-						_ = r
-					}
-				}()
-
-				client, err := remotecapture.NewClient(msg.Address, currentProgram)
-				if err != nil {
-					// TODO: Show error in UI
-					return
+			// Add processor to tracking if not already present
+			if _, exists := m.processors[msg.Address]; !exists {
+				m.processors[msg.Address] = &ProcessorConnection{
+					Address:      msg.Address,
+					State:        ProcessorStateDisconnected,
+					FailureCount: 0,
 				}
 
-				// Store client
-				m.remoteClients[msg.Address] = client
-
-				// Start packet stream
-				if err := client.StreamPackets(); err != nil {
-					// TODO: Show error in UI
-					client.Close()
-					delete(m.remoteClients, msg.Address)
-					return
+				// Update nodes view to show the new processor immediately
+				// Merge all hunters from all processors for display
+				allHunters := make([]components.HunterInfo, 0)
+				for _, hunters := range m.huntersByProcessor {
+					allHunters = append(allHunters, hunters...)
 				}
-
-				// Start hunter status subscription
-				if err := client.SubscribeHunterStatus(); err != nil {
-					// TODO: Show error in UI (non-fatal, packets still work)
-				}
-			}()
+				m.nodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
+			}
+			// Trigger connection attempt
+			return m, func() tea.Msg {
+				return ProcessorReconnectMsg{Address: msg.Address}
+			}
 		}
 		return m, nil
 
 	case components.LoadNodesMsg:
 		// Load nodes from YAML file and connect to them
 		if msg.FilePath != "" {
-			go func() {
-				// Recover from any panic in this goroutine to prevent crashing the TUI
-				defer func() {
-					if r := recover(); r != nil {
-						// Panic occurred, log it but don't crash the TUI
-						_ = r
-					}
-				}()
-
-				// Import the config package at the top of the file
-				nodes, err := config.LoadNodesFromYAML(msg.FilePath)
-				if err != nil {
-					// TODO: Show error in UI
-					return
-				}
-
-				// Connect to each node
-				for _, node := range nodes {
-					// Skip if already connected
-					if _, exists := m.remoteClients[node.Address]; exists {
-						continue
-					}
-
-					// Create client
-					client, err := remotecapture.NewClient(node.Address, currentProgram)
-					if err != nil {
-						// TODO: Show error in UI (but continue with other nodes)
-						continue
-					}
-
-					// Store client
-					m.remoteClients[node.Address] = client
-
-					// Start packet stream
-					if err := client.StreamPackets(); err != nil {
-						// TODO: Show error in UI
-						client.Close()
-						delete(m.remoteClients, node.Address)
-						continue
-					}
-
-					// Start hunter status subscription
-					if err := client.SubscribeHunterStatus(); err != nil {
-						// TODO: Show error in UI (non-fatal)
-					}
-				}
-			}()
+			return m, loadNodesFile(msg.FilePath)
 		}
 		return m, nil
 
@@ -1151,6 +1078,94 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewMode = "packets"
 		}
 
+		return m, nil
+
+	case ProcessorReconnectMsg:
+		// Attempt to connect/reconnect to a processor
+		proc, exists := m.processors[msg.Address]
+		if !exists {
+			return m, nil
+		}
+
+		// Don't reconnect if already connecting or connected
+		if proc.State == ProcessorStateConnecting || proc.State == ProcessorStateConnected {
+			return m, nil
+		}
+
+		// Update state to connecting
+		proc.State = ProcessorStateConnecting
+		proc.LastAttempt = time.Now()
+
+		// Attempt connection in background
+		go func() {
+			client, err := remotecapture.NewClient(msg.Address, currentProgram)
+			if err != nil {
+				// Connection failed
+				currentProgram.Send(ProcessorDisconnectedMsg{
+					Address: msg.Address,
+					Error:   err,
+				})
+				return
+			}
+
+			// Start packet stream
+			if err := client.StreamPackets(); err != nil {
+				client.Close()
+				currentProgram.Send(ProcessorDisconnectedMsg{
+					Address: msg.Address,
+					Error:   err,
+				})
+				return
+			}
+
+			// Start hunter status subscription
+			if err := client.SubscribeHunterStatus(); err != nil {
+				// Non-fatal - continue anyway
+			}
+
+			// Connection successful
+			currentProgram.Send(ProcessorConnectedMsg{
+				Address: msg.Address,
+				Client:  client,
+			})
+		}()
+
+		return m, nil
+
+	case ProcessorConnectedMsg:
+		// Processor connection established successfully
+		if proc, exists := m.processors[msg.Address]; exists {
+			proc.State = ProcessorStateConnected
+			proc.Client = msg.Client
+			proc.FailureCount = 0
+			// Also store in deprecated map for compatibility
+			m.remoteClients[msg.Address] = msg.Client
+		}
+		return m, nil
+
+	case ProcessorDisconnectedMsg:
+		// Processor connection lost or failed
+		if proc, exists := m.processors[msg.Address]; exists {
+			proc.State = ProcessorStateFailed
+			proc.FailureCount++
+
+			// Clean up old client
+			if proc.Client != nil {
+				proc.Client.Close()
+				proc.Client = nil
+			}
+			delete(m.remoteClients, msg.Address)
+
+			// Schedule reconnection with exponential backoff
+			backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 6))) * time.Second
+			if backoff > 60*time.Second {
+				backoff = 60 * time.Second
+			}
+
+			return m, tea.Tick(backoff, func(t time.Time) tea.Msg {
+				return ProcessorReconnectMsg{Address: msg.Address}
+			})
+		}
 		return m, nil
 	}
 
@@ -1632,13 +1647,38 @@ func isBPFExpression(s string) bool {
 	return false
 }
 
-// getConnectedProcessors returns a list of all processor addresses from remoteClients
+// getConnectedProcessors returns a list of all configured processor addresses
+// This includes both connected and disconnected processors
 func (m *Model) getConnectedProcessors() []string {
-	processors := make([]string, 0, len(m.remoteClients))
-	for addr := range m.remoteClients {
+	processors := make([]string, 0, len(m.processors))
+	for addr := range m.processors {
 		processors = append(processors, addr)
 	}
 	return processors
+}
+
+// loadNodesFile loads processors from a YAML file and adds them for connection
+// This is the single consolidated function for loading nodes from YAML
+func loadNodesFile(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Load nodes in background
+		nodes, err := config.LoadNodesFromYAML(filePath)
+		if err != nil {
+			// TODO: Show error in UI
+			return nil
+		}
+
+		// Return a batch of AddNodeMsg for each node
+		cmds := make([]tea.Cmd, len(nodes))
+		for i, node := range nodes {
+			addr := node.Address
+			cmds[i] = func() tea.Msg {
+				return components.AddNodeMsg{Address: addr}
+			}
+		}
+
+		return tea.Batch(cmds...)()
+	}
 }
 
 // applyFilters applies the filter chain to all packets
@@ -1709,60 +1749,6 @@ func startOfflineCapture(ctx context.Context, pcapFile string, filter string, pr
 	capture.StartOfflineSniffer(pcapFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTUISniffer(ctx, devices, filter, program)
 	})
-}
-
-// startRemoteCapture loads and connects to nodes from YAML file
-func startRemoteCapture(nodesFile string, remoteClients map[string]interface{ Close() }, program *tea.Program) {
-	if nodesFile == "" {
-		return
-	}
-
-	go func() {
-		// Recover from any panic in this goroutine to prevent crashing the TUI
-		defer func() {
-			if r := recover(); r != nil {
-				// Panic occurred, log it but don't crash the TUI
-				_ = r
-			}
-		}()
-
-		nodes, err := config.LoadNodesFromYAML(nodesFile)
-		if err != nil {
-			// TODO: Show error in UI
-			return
-		}
-
-		// Connect to each node
-		for _, node := range nodes {
-			// Skip if already connected
-			if _, exists := remoteClients[node.Address]; exists {
-				continue
-			}
-
-			// Create client
-			client, err := remotecapture.NewClient(node.Address, program)
-			if err != nil {
-				// TODO: Show error in UI (but continue with other nodes)
-				continue
-			}
-
-			// Store client
-			remoteClients[node.Address] = client
-
-			// Start packet stream
-			if err := client.StreamPackets(); err != nil {
-				// TODO: Show error in UI
-				client.Close()
-				delete(remoteClients, node.Address)
-				continue
-			}
-
-			// Start hunter status subscription
-			if err := client.SubscribeHunterStatus(); err != nil {
-				// TODO: Show error in UI (non-fatal)
-			}
-		}
-	}()
 }
 
 // loadFilterHistory loads filter history from config

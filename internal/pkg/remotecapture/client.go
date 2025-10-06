@@ -366,12 +366,25 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		protocol = "ICMP"
 		if icmp != nil {
 			info = fmt.Sprintf("Type %d Code %d", icmp.TypeCode.Type(), icmp.TypeCode.Code())
+		} else {
+			info = "ICMP packet"
 		}
 	} else if icmp6Layer := packet.Layer(layers.LayerTypeICMPv6); icmp6Layer != nil {
 		icmp6, _ := icmp6Layer.(*layers.ICMPv6)
 		protocol = "ICMPv6"
 		if icmp6 != nil {
 			info = fmt.Sprintf("Type %d Code %d", icmp6.TypeCode.Type(), icmp6.TypeCode.Code())
+		} else {
+			info = "ICMPv6 packet"
+		}
+	} else if igmpLayer := packet.Layer(layers.LayerTypeIGMP); igmpLayer != nil {
+		// Handle IGMP (Internet Group Management Protocol)
+		igmp, _ := igmpLayer.(*layers.IGMP)
+		protocol = "IGMP"
+		if igmp != nil {
+			info = fmt.Sprintf("Type %d Group %s", igmp.Type, igmp.GroupAddress.String())
+		} else {
+			info = "IGMP packet"
 		}
 	}
 

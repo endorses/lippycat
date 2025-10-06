@@ -444,12 +444,25 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		display.Protocol = "ICMP"
 		if icmp != nil {
 			display.Info = fmt.Sprintf("Type %d Code %d", icmp.TypeCode.Type(), icmp.TypeCode.Code())
+		} else {
+			display.Info = "ICMP packet"
 		}
 	} else if icmp6Layer := pkt.Layer(layers.LayerTypeICMPv6); icmp6Layer != nil {
 		icmp6, _ := icmp6Layer.(*layers.ICMPv6)
 		display.Protocol = "ICMPv6"
 		if icmp6 != nil {
 			display.Info = fmt.Sprintf("Type %d Code %d", icmp6.TypeCode.Type(), icmp6.TypeCode.Code())
+		} else {
+			display.Info = "ICMPv6 packet"
+		}
+	} else if igmpLayer := pkt.Layer(layers.LayerTypeIGMP); igmpLayer != nil {
+		// Handle IGMP (Internet Group Management Protocol)
+		igmp, _ := igmpLayer.(*layers.IGMP)
+		display.Protocol = "IGMP"
+		if igmp != nil {
+			display.Info = fmt.Sprintf("Type %d Group %s", igmp.Type, igmp.GroupAddress.String())
+		} else {
+			display.Info = "IGMP packet"
 		}
 	}
 

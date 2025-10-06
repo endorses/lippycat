@@ -243,7 +243,8 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 			case layers.EthernetTypeLinkLayerDiscovery:
 				display.Protocol = "LLDP"
 			default:
-				display.Protocol = fmt.Sprintf("Eth:0x%04x", uint16(eth.EthernetType))
+				// Non-standard EtherType - show hex value clearly
+				display.Protocol = fmt.Sprintf("0x%04x", uint16(eth.EthernetType))
 			}
 			return display
 		}
@@ -370,26 +371,31 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 				switch eth.EthernetType {
 				case layers.EthernetTypeLLC:
 					display.Protocol = "LLC"
+					display.Info = "Logical Link Control"
 				case layers.EthernetTypeDot1Q:
 					display.Protocol = "802.1Q"
+					display.Info = "VLAN tag"
 				case layers.EthernetTypeCiscoDiscovery:
 					display.Protocol = "CDP"
+					display.Info = "Cisco Discovery Protocol"
 				case layers.EthernetTypeLinkLayerDiscovery: // 0x88CC
 					display.Protocol = "LLDP"
+					display.Info = "Link Layer Discovery Protocol"
 				case layers.EthernetTypeEthernetCTP:
 					display.Protocol = "EthernetCTP"
+					display.Info = "Configuration Test Protocol"
 				case 0x888E: // 802.1X (EAP)
 					display.Protocol = "802.1X"
-				case 0x8912: // Cisco proprietary
-					display.Protocol = "Cisco"
+					display.Info = "Port-based authentication"
 				default:
-					display.Protocol = fmt.Sprintf("Eth:0x%04x", uint16(eth.EthernetType))
+					// Non-standard EtherType - show hex value clearly
+					display.Protocol = fmt.Sprintf("0x%04x", uint16(eth.EthernetType))
+					display.Info = "Vendor-specific EtherType"
 				}
 
+				// Add broadcast indicator to info if applicable
 				if isBroadcast {
-					display.Info = "Broadcast frame"
-				} else {
-					display.Info = "Non-IP frame"
+					display.Info = display.Info + " (broadcast)"
 				}
 				return display
 			}

@@ -40,6 +40,7 @@ var (
 	writeFile       string
 	displayStats    bool
 	enableDetection bool
+	filterFile      string
 )
 
 func init() {
@@ -52,6 +53,7 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")
+	ProcessCmd.Flags().StringVarP(&filterFile, "filter-file", "f", "", "Path to filter persistence file (YAML, default: ~/.config/lippycat/filters.yaml)")
 
 	// Bind to viper for config file support
 	viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -60,6 +62,7 @@ func init() {
 	viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
 	viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
 	viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))
+	viper.BindPFlag("processor.filter_file", ProcessCmd.Flags().Lookup("filter-file"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -73,6 +76,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		WriteFile:       getStringConfig("processor.write_file", writeFile),
 		DisplayStats:    getBoolConfig("processor.display_stats", displayStats),
 		EnableDetection: getBoolConfig("processor.enable_detection", enableDetection),
+		FilterFile:      getStringConfig("processor.filter_file", filterFile),
 	}
 
 	// Validate configuration

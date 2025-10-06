@@ -29,6 +29,7 @@ type Config struct {
 	DisplayStats     bool
 	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration
 	EnableDetection  bool              // Enable centralized protocol detection
+	FilterFile       string            // Path to filter persistence file (YAML)
 }
 
 // Processor represents a processor node
@@ -160,6 +161,12 @@ func (p *Processor) Start(ctx context.Context) error {
 	defer p.cancel()
 
 	logger.Info("Processor starting", "listen_addr", p.config.ListenAddr)
+
+	// Load filters from persistence file
+	if err := p.loadFilters(); err != nil {
+		logger.Warn("Failed to load filters from file", "error", err)
+		// Continue anyway - not a fatal error
+	}
 
 	// Initialize PCAP writer if configured
 	if p.config.WriteFile != "" {
@@ -536,6 +543,12 @@ func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter)
 
 	huntersUpdated := p.pushFilterUpdate(filter, update)
 
+	// Persist filters to disk
+	if err := p.saveFilters(); err != nil {
+		logger.Error("Failed to save filters to disk", "error", err)
+		// Don't fail the request - filter is already in memory
+	}
+
 	logger.Info("Filter updated",
 		"filter_id", filter.Id,
 		"hunters_updated", huntersUpdated,
@@ -570,6 +583,12 @@ func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDele
 	}
 
 	huntersUpdated := p.pushFilterUpdate(filter, update)
+
+	// Persist filters to disk
+	if err := p.saveFilters(); err != nil {
+		logger.Error("Failed to save filters to disk", "error", err)
+		// Don't fail the request - filter is already removed from memory
+	}
 
 	logger.Info("Filter deleted",
 		"filter_id", req.FilterId,

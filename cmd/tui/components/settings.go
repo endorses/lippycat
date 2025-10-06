@@ -271,24 +271,28 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 	inputs[inputBufferSize].Placeholder = "10000"
 	inputs[inputBufferSize].SetValue(strconv.Itoa(currentBufferSize))
 	inputs[inputBufferSize].CharLimit = 10
+	inputs[inputBufferSize].Width = 50 // Set explicit width for proper rendering
 
 	// Capture Filter input (BPF)
 	inputs[inputBPFFilter] = textinput.New()
 	inputs[inputBPFFilter].Placeholder = "e.g., port 5060 or tcp"
 	inputs[inputBPFFilter].SetValue(currentFilter)
 	inputs[inputBPFFilter].CharLimit = 256
+	inputs[inputBPFFilter].Width = 50 // Set explicit width for proper rendering
 
 	// PCAP File input
 	inputs[inputPCAPFile] = textinput.New()
 	inputs[inputPCAPFile].Placeholder = "/path/to/file.pcap"
 	inputs[inputPCAPFile].SetValue(currentPCAPFile)
 	inputs[inputPCAPFile].CharLimit = 512
+	inputs[inputPCAPFile].Width = 50 // Set explicit width for proper rendering
 
 	// Nodes File input (for remote mode)
 	inputs[inputNodesFile] = textinput.New()
 	inputs[inputNodesFile].Placeholder = "nodes.yaml or ~/.config/lippycat/nodes.yaml"
 	inputs[inputNodesFile].SetValue("")
 	inputs[inputNodesFile].CharLimit = 512
+	inputs[inputNodesFile].Width = 50 // Set explicit width for proper rendering
 
 	// Determine initial mode based on whether pcap file was provided
 	mode := CaptureModeLive

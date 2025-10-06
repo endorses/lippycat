@@ -565,14 +565,14 @@ func (s *SettingsView) SaveBufferSize() {
 
 // getMaxFocusIndex returns the maximum focus index based on current mode
 func (s *SettingsView) getMaxFocusIndex() int {
-	// Mode selector (0) + mode-specific fields + buffer size + BPF filter
+	// Mode selector (0) + mode-specific fields + buffer size + BPF filter (if applicable)
 	switch s.captureMode {
 	case CaptureModeLive:
 		// 0: mode, 1: interface, 2: promiscuous, 3: buffer, 4: filter
 		return 5
 	case CaptureModeRemote:
-		// 0: mode, 1: remote address, 2: buffer, 3: filter
-		return 4
+		// 0: mode, 1: nodes file, 2: buffer (no filter in remote mode)
+		return 3
 	default:
 		// 0: mode, 1: pcap file, 2: buffer, 3: filter
 		return 4
@@ -731,13 +731,12 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						clickedField = 1 // Nodes File
 					} else if relativeY >= 8 && relativeY <= 10 {
 						clickedField = 2 // Buffer
-					} else if relativeY >= 11 && relativeY <= 13 {
-						clickedField = 3 // Filter
 					}
+					// No filter field in remote mode
 				}
 
-				// If clicking outside the currently focused field, exit edit mode
-				if clickedField != s.focusIndex {
+				// If clicking on a different field (not empty space), exit edit mode
+				if clickedField >= 0 && clickedField != s.focusIndex {
 					s.editing = false
 					s.fileListActive = false
 					s.inputs[inputBufferSize].Blur()
@@ -813,7 +812,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.focusIndex = 3 // Filter
 					}
 				case CaptureModeRemote:
-					// Remote mode: Mode(0), Nodes File(1), Buffer(2), Filter(3)
+					// Remote mode: Mode(0), Nodes File(1), Buffer(2) - no filter
 					if relativeY >= 2 && relativeY <= 4 {
 						// Click on capture mode tabs
 						if msg.X >= 20 && msg.X <= 31 {
@@ -832,9 +831,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						s.focusIndex = 1 // Nodes File
 					} else if relativeY >= 8 && relativeY <= 10 {
 						s.focusIndex = 2 // Buffer
-					} else if relativeY >= 11 && relativeY <= 13 {
-						s.focusIndex = 3 // Filter
 					}
+					// No filter field in remote mode
 				}
 			}
 		}
@@ -868,9 +866,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					clickedField = 1 // Nodes File
 				} else if relativeY >= 8 && relativeY <= 10 {
 					clickedField = 2 // Buffer
-				} else if relativeY >= 11 && relativeY <= 13 {
-					clickedField = 3 // Filter
 				}
+				// No filter field in remote mode
 			}
 
 			// Check if this is a double-click on the same field
@@ -914,10 +911,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else if clickedField == 2 {
 						s.editing = true
 						s.inputs[inputBufferSize].Focus()
-					} else if clickedField == 3 {
-						s.editing = true
-						s.inputs[inputBPFFilter].Focus()
 					}
+					// No filter field in remote mode
 				}
 			}
 
@@ -1002,8 +997,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					return nil
 				}
 			} else if s.captureMode == CaptureModeRemote {
-				// In remote mode: nodes file (1), buffer (2), filter (3)
-				if s.focusIndex == 1 || s.focusIndex == 2 || s.focusIndex == 3 {
+				// In remote mode: nodes file (1), buffer (2) - no filter
+				if s.focusIndex == 1 || s.focusIndex == 2 {
 					s.editing = !s.editing
 					if s.editing {
 						s.errorMessage = "" // Clear error when editing
@@ -1021,8 +1016,6 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 							s.inputs[inputNodesFile].Focus()
 						case 2:
 							s.inputs[inputBufferSize].Focus()
-						default:
-							s.inputs[inputBPFFilter].Focus()
 						}
 					} else {
 						// Exiting edit mode
@@ -1038,9 +1031,6 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 							return func() tea.Msg {
 								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 							}
-						default:
-							// BPF filter
-							s.inputs[inputBPFFilter].Blur()
 						}
 					}
 					return nil
@@ -1100,10 +1090,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else if s.focusIndex == 2 {
 						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 						return cmd
-					} else if s.focusIndex == 3 {
-						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
-						return cmd
 					}
+					// No filter field in remote mode
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -1145,10 +1133,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else if s.focusIndex == 2 {
 						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 						return cmd
-					} else if s.focusIndex == 3 {
-						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
-						return cmd
 					}
+					// No filter field in remote mode
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -1190,10 +1176,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else if s.focusIndex == 2 {
 						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 						return cmd
-					} else if s.focusIndex == 3 {
-						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
-						return cmd
 					}
+					// No filter field in remote mode
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -1243,10 +1227,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else if s.focusIndex == 2 {
 						s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 						return cmd
-					} else if s.focusIndex == 3 {
-						s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
-						return cmd
 					}
+					// No filter field in remote mode
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -1304,9 +1286,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						return func() tea.Msg {
 							return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 						}
-					} else if s.focusIndex == 3 {
-						s.inputs[inputBPFFilter].Blur()
 					}
+					// No filter field in remote mode
 				} else {
 					if s.focusIndex == 1 {
 						s.inputs[inputPCAPFile].Blur()
@@ -1343,10 +1324,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 			} else if s.focusIndex == 2 {
 				s.inputs[inputBufferSize], cmd = s.inputs[inputBufferSize].Update(msg)
 				return cmd
-			} else if s.focusIndex == 3 {
-				s.inputs[inputBPFFilter], cmd = s.inputs[inputBPFFilter].Update(msg)
-				return cmd
 			}
+			// No filter field in remote mode
 		} else {
 			if s.focusIndex == 1 {
 				s.inputs[inputPCAPFile], cmd = s.inputs[inputPCAPFile].Update(msg)
@@ -1579,24 +1558,24 @@ func (s *SettingsView) View() string {
 		labelStyle.Render("Buffer Size:")+" "+s.inputs[inputBufferSize].View(),
 	))
 
-	// Capture Filter (always visible)
-	filterStyle := unfocusedStyle
-	filterFocusIdx := 4
-	if s.captureMode == CaptureModeOffline {
-		filterFocusIdx = 3
-	} else if s.captureMode == CaptureModeRemote {
-		filterFocusIdx = 3
-	}
-	if s.focusIndex == filterFocusIdx {
-		if s.editing {
-			filterStyle = editingStyle
-		} else {
-			filterStyle = selectedStyle
+	// Capture Filter (only visible in Live and Offline modes, not Remote)
+	if s.captureMode != CaptureModeRemote {
+		filterStyle := unfocusedStyle
+		filterFocusIdx := 4
+		if s.captureMode == CaptureModeOffline {
+			filterFocusIdx = 3
 		}
+		if s.focusIndex == filterFocusIdx {
+			if s.editing {
+				filterStyle = editingStyle
+			} else {
+				filterStyle = selectedStyle
+			}
+		}
+		sections = append(sections, filterStyle.Width(s.width-4).Render(
+			labelStyle.Render("Capture Filter:")+" "+s.inputs[inputBPFFilter].View(),
+		))
 	}
-	sections = append(sections, filterStyle.Width(s.width-4).Render(
-		labelStyle.Render("Capture Filter:")+" "+s.inputs[inputBPFFilter].View(),
-	))
 
 	// Error message (if any)
 	if s.errorMessage != "" {

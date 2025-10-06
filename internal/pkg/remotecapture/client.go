@@ -289,7 +289,39 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 			eth, _ := ethLayer.(*layers.Ethernet)
 			srcIP = eth.SrcMAC.String()
 			dstIP = eth.DstMAC.String()
-			protocol = eth.EthernetType.String()
+			// Handle EtherType - use hex format for non-standard types
+			switch eth.EthernetType {
+			case layers.EthernetTypeLLC:
+				protocol = "LLC"
+				info = "Logical Link Control"
+			case layers.EthernetTypeDot1Q:
+				protocol = "802.1Q"
+				info = "VLAN tag"
+			case layers.EthernetTypeCiscoDiscovery:
+				protocol = "CDP"
+				info = "Cisco Discovery Protocol"
+			case layers.EthernetTypeLinkLayerDiscovery:
+				protocol = "LLDP"
+				info = "Link Layer Discovery Protocol"
+			case layers.EthernetTypeEthernetCTP:
+				protocol = "EthernetCTP"
+				info = "Configuration Test Protocol"
+			case 0x888E: // 802.1X (EAP)
+				protocol = "802.1X"
+				info = "Port-based authentication"
+			default:
+				// Non-standard EtherType - show hex value clearly
+				protocol = fmt.Sprintf("0x%04x", uint16(eth.EthernetType))
+				info = "Vendor-specific EtherType"
+			}
+			// Add broadcast indicator if applicable
+			if eth.DstMAC.String() == "ff:ff:ff:ff:ff:ff" {
+				if info != "" {
+					info = info + " (broadcast)"
+				} else {
+					info = "Broadcast frame"
+				}
+			}
 		} else if linuxSLL := packet.Layer(layers.LayerTypeLinuxSLL); linuxSLL != nil {
 			// Linux cooked capture (interface "any")
 			sll, _ := linuxSLL.(*layers.LinuxSLL)

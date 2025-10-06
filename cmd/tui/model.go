@@ -921,6 +921,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.nodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
 		return m, nil
 
+	case remotecapture.ProcessorDisconnectedMsg:
+		// Handle disconnection from remotecapture client (stream error, keepalive timeout, etc.)
+		// Convert to local ProcessorDisconnectedMsg type to trigger reconnection logic
+		return m.Update(ProcessorDisconnectedMsg{
+			Address: msg.Address,
+			Error:   msg.Error,
+		})
+
 	case components.UpdateBufferSizeMsg:
 		// Update buffer size on-the-fly without restarting capture
 		m.maxPackets = msg.Size

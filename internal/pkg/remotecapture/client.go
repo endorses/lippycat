@@ -11,6 +11,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
@@ -61,12 +62,29 @@ type HunterStatusMsg struct {
 	Hunters []components.HunterInfo
 }
 
+// ProcessorDisconnectedMsg is sent to TUI when connection to processor is lost
+// This must match the type in cmd/tui/model.go
+type ProcessorDisconnectedMsg struct {
+	Address string
+	Error   error
+}
+
 // NewClient creates a new remote capture client
 func NewClient(addr string, program *tea.Program) (*Client, error) {
 	// Dial node (hunter or processor)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	conn, err := grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Configure keepalive to detect broken connections quickly
+	keepaliveParams := keepalive.ClientParameters{
+		Time:                10 * time.Second, // Send ping every 10s
+		Timeout:             3 * time.Second,  // Wait 3s for ping ack
+		PermitWithoutStream: true,             // Send pings even without active streams
+	}
+
+	conn, err := grpc.DialContext(ctx, addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithKeepaliveParams(keepaliveParams),
+	)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
@@ -136,7 +154,14 @@ func (c *Client) StreamPackets() error {
 			default:
 				batch, err := stream.Recv()
 				if err != nil {
-					// Connection lost or stream ended
+					// Don't report error if context was cancelled (normal shutdown)
+					if c.ctx.Err() == nil && c.program != nil {
+						// Send disconnection message to trigger reconnection
+						c.program.Send(ProcessorDisconnectedMsg{
+							Address: c.addr,
+							Error:   fmt.Errorf("stream error: %w", err),
+						})
+					}
 					return
 				}
 
@@ -204,7 +229,15 @@ func (c *Client) SubscribeHunterStatus() error {
 			case <-ticker.C:
 				resp, err := c.mgmtClient.GetHunterStatus(c.ctx, &management.StatusRequest{})
 				if err != nil {
-					continue
+					// Don't report error if context was cancelled (normal shutdown)
+					if c.ctx.Err() == nil && c.program != nil {
+						// Send disconnection message to trigger reconnection
+						c.program.Send(ProcessorDisconnectedMsg{
+							Address: c.addr,
+							Error:   fmt.Errorf("hunter status error: %w", err),
+						})
+					}
+					return
 				}
 
 				// Update interface mapping

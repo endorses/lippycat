@@ -485,13 +485,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.protocolSelector.SetSize(m.width, m.height)
 			return m, nil
 
-		case "v": // Toggle view mode (packets vs calls for VoIP)
-			if m.selectedProtocol.Name == "VoIP (SIP/RTP)" {
-				if m.viewMode == "packets" {
-					m.viewMode = "calls"
-				} else {
-					m.viewMode = "packets"
+		case "v": // Toggle view mode
+			// On capture tab: toggle between packets and calls for VoIP
+			if m.tabs.GetActive() == 0 {
+				if m.selectedProtocol.Name == "VoIP (SIP/RTP)" {
+					if m.viewMode == "packets" {
+						m.viewMode = "calls"
+					} else {
+						m.viewMode = "packets"
+					}
 				}
+			} else if m.tabs.GetActive() == 1 {
+				// On nodes tab: toggle between table and graph view
+				m.nodesView.ToggleView()
 			}
 			return m, nil
 

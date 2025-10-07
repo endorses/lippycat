@@ -47,21 +47,40 @@ type AddNodeMsg struct {
 
 // NodesView displays connected hunter nodes in a tree view grouped by processor
 type NodesView struct {
-	processors    []ProcessorInfo // Grouped by processor
-	hunters       []HunterInfo    // Flat list for backward compatibility
-	selectedIndex int             // -1 means input is focused/editing, >= 0 means hunter is selected
-	width         int
-	height        int
+	processors            []ProcessorInfo // Grouped by processor
+	hunters               []HunterInfo    // Flat list for backward compatibility
+	selectedIndex         int             // -1 means input is focused/editing, >= 0 means hunter is selected
+	selectedProcessorAddr string          // Non-empty means a processor is selected (instead of hunter)
+	width                 int
+	height                int
 	theme         themes.Theme
 	nodeInput     textinput.Model // Input field for node address
 	editing       bool            // Whether input is in edit mode (red border)
 	viewport      viewport.Model  // Viewport for scrolling
 	ready         bool            // Whether viewport is initialized
+	viewMode      string          // "table" or "graph" - current view mode
 
 	// Mouse click regions
-	inputStartLine int         // Line number where input field starts
-	inputEndLine   int         // Line number where input field ends
-	hunterLines    map[int]int // Map of line number -> hunter index
+	inputStartLine  int         // Line number where input field starts
+	inputEndLine    int         // Line number where input field ends
+	hunterLines     map[int]int // Map of line number -> hunter index (for table view)
+	processorLines  map[int]int // Map of line number -> processor index (for table view)
+
+	// Graph view click regions
+	hunterBoxRegions []struct {
+		startLine   int
+		endLine     int
+		startCol    int
+		endCol      int
+		hunterIndex int
+	}
+	processorBoxRegions []struct {
+		startLine       int
+		endLine         int
+		startCol        int
+		endCol          int
+		processorAddr   string
+	}
 
 	// Double-click detection
 	lastClickTime time.Time // Track when input was last clicked for double-click detection
@@ -76,21 +95,34 @@ func NewNodesView() NodesView {
 	ti.Blur() // Start unfocused
 
 	return NodesView{
-		hunters:       []HunterInfo{},
-		selectedIndex: -1, // Start with input focused (no hunters initially)
-		width:         80,
-		height:        20,
-		theme:         themes.Solarized(),
-		nodeInput:     ti,
-		editing:       false,
-		ready:         false,
-		hunterLines:   make(map[int]int),
+		hunters:               []HunterInfo{},
+		selectedIndex:         -1, // Start with input focused (no hunters initially)
+		selectedProcessorAddr: "",
+		width:                 80,
+		height:                20,
+		theme:                 themes.Solarized(),
+		nodeInput:             ti,
+		editing:               false,
+		ready:                 false,
+		viewMode:              "table", // Start with table view
+		hunterLines:           make(map[int]int),
+		processorLines:        make(map[int]int),
 	}
 }
 
 // SetTheme updates the theme
 func (n *NodesView) SetTheme(theme themes.Theme) {
 	n.theme = theme
+}
+
+// ToggleView switches between table and graph view modes
+func (n *NodesView) ToggleView() {
+	if n.viewMode == "table" {
+		n.viewMode = "graph"
+	} else {
+		n.viewMode = "table"
+	}
+	n.updateViewportContent()
 }
 
 // SetSize updates the view dimensions
@@ -201,18 +233,26 @@ func (n *NodesView) SetHuntersAndProcessors(hunters []HunterInfo, processorAddrs
 
 // SetProcessors updates the processor list directly with ProcessorInfo
 func (n *NodesView) SetProcessors(processors []ProcessorInfo) {
-	// Flatten all hunters from all processors
+	// Sort processors alphabetically by address
+	sort.Slice(processors, func(i, j int) bool {
+		return processors[i].Address < processors[j].Address
+	})
+
+	// Sort hunters within each processor by ID for consistent ordering
+	for i := range processors {
+		sort.Slice(processors[i].Hunters, func(a, b int) bool {
+			return processors[i].Hunters[a].ID < processors[i].Hunters[b].ID
+		})
+	}
+
+	n.processors = processors
+
+	// Flatten all hunters from all processors (maintaining sorted order)
 	allHunters := make([]HunterInfo, 0)
 	for _, proc := range processors {
 		allHunters = append(allHunters, proc.Hunters...)
 	}
 	n.hunters = allHunters
-
-	// Sort processors alphabetically by address
-	sort.Slice(processors, func(i, j int) bool {
-		return processors[i].Address < processors[j].Address
-	})
-	n.processors = processors
 
 	// Reset selection if out of bounds
 	if n.selectedIndex >= len(n.hunters) {
@@ -239,10 +279,11 @@ func (n *NodesView) SelectNext() {
 		return
 	}
 
-	// If input is focused (selectedIndex = -1), move to first hunter
+	// If input is focused or processor is selected, move to first hunter
 	if n.selectedIndex == -1 {
 		n.editing = false
 		n.nodeInput.Blur()
+		n.selectedProcessorAddr = "" // Clear processor selection
 		n.selectedIndex = 0
 		n.updateViewportContent() // Refresh to show selection
 		return
@@ -265,14 +306,15 @@ func (n *NodesView) SelectPrevious() {
 		return
 	}
 
-	// If already at input (selectedIndex = -1), do nothing
-	if n.selectedIndex == -1 {
+	// If already at input (selectedIndex = -1 and no processor selected), do nothing
+	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
 		return
 	}
 
-	// If at first hunter, move to input field (focused but not editing)
-	if n.selectedIndex == 0 {
+	// If at first hunter or processor is selected, move to input field (focused but not editing)
+	if n.selectedIndex == 0 || n.selectedProcessorAddr != "" {
 		n.selectedIndex = -1
+		n.selectedProcessorAddr = "" // Clear processor selection
 		n.editing = false
 		n.nodeInput.Blur()
 		n.updateViewportContent() // Refresh to show selection change
@@ -305,8 +347,8 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 		return cmd
 
 	case tea.KeyMsg:
-		// Check if input is focused (selectedIndex = -1)
-		if n.selectedIndex == -1 {
+		// Check if input is focused (selectedIndex = -1 and no processor selected)
+		if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
 			if n.editing {
 				// In edit mode - handle input field keys
 				switch msg.String() {
@@ -438,6 +480,7 @@ func (n *NodesView) renderContent() string {
 
 	// Reset mouse click regions
 	n.hunterLines = make(map[int]int)
+	n.processorLines = make(map[int]int)
 
 	if len(n.processors) == 0 && len(n.hunters) == 0 {
 		// Empty state - no processors and no hunters
@@ -452,12 +495,18 @@ func (n *NodesView) renderContent() string {
 		return b.String()
 	}
 
-	if len(n.processors) > 0 {
-		// Tree view: Group hunters by processor
-		n.renderTreeView(&b)
+	// Render based on view mode
+	if n.viewMode == "graph" {
+		// Graph view: Box drawing visualization
+		n.renderGraphView(&b)
 	} else {
-		// Flat view (if no processors but have hunters)
-		n.renderFlatView(&b)
+		// Table view: Tree structure with table columns
+		if len(n.processors) > 0 {
+			n.renderTreeView(&b)
+		} else {
+			// Flat view (if no processors but have hunters)
+			n.renderFlatView(&b)
+		}
 	}
 
 	return b.String()
@@ -481,7 +530,10 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 	// Tree prefix is fixed width
 	treeCol := 6 // "  ├─ " or "  └─ "
 
-	for _, proc := range n.processors {
+	for procIdx, proc := range n.processors {
+		// Track this processor's line position for mouse clicks
+		n.processorLines[linesRendered] = procIdx
+
 		// Processor header with ID (if available)
 		var procLine string
 		if proc.ProcessorID != "" {
@@ -489,7 +541,13 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 		} else {
 			procLine = fmt.Sprintf("📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
 		}
-		b.WriteString(processorStyle.Render(procLine) + "\n")
+
+		// Apply selection styling if this processor is selected
+		if n.selectedProcessorAddr == proc.Address {
+			b.WriteString(selectedStyle.Width(n.width).Render(procLine) + "\n")
+		} else {
+			b.WriteString(processorStyle.Render(procLine) + "\n")
+		}
 		linesRendered++
 
 		// Table header for hunters under this processor
@@ -720,6 +778,623 @@ func (n *NodesView) renderFlatView(b *strings.Builder) {
 	}
 }
 
+// renderGraphView renders the processors and hunters in a graph-like visualization using box drawing characters
+func (n *NodesView) renderGraphView(b *strings.Builder) {
+	// Reset click regions for graph view
+	n.hunterBoxRegions = make([]struct {
+		startLine   int
+		endLine     int
+		startCol    int
+		endCol      int
+		hunterIndex int
+	}, 0)
+	n.processorBoxRegions = make([]struct {
+		startLine     int
+		endLine       int
+		startCol      int
+		endCol        int
+		processorAddr string
+	}, 0)
+
+	// Style for processor and hunter boxes
+	processorStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(n.theme.InfoColor)
+
+	hunterStyle := lipgloss.NewStyle().
+		Foreground(n.theme.Foreground)
+
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(n.theme.SelectionBg).
+		Reverse(true).
+		Bold(true)
+
+	// Sort processors consistently before rendering
+	sortedProcs := make([]ProcessorInfo, len(n.processors))
+	copy(sortedProcs, n.processors)
+	sort.Slice(sortedProcs, func(i, j int) bool {
+		return sortedProcs[i].Address < sortedProcs[j].Address
+	})
+
+	// Track current line number for click region tracking
+	currentLine := 0
+
+	// Calculate the maximum number of hunters across all processors
+	maxHunters := 0
+	for _, proc := range sortedProcs {
+		if len(proc.Hunters) > maxHunters {
+			maxHunters = len(proc.Hunters)
+		}
+	}
+
+	// Calculate responsive box widths based on terminal width
+	// Adjust box sizes and spacing to fit available width
+	processorBoxWidth := 40
+	hunterBoxWidth := 28
+	hunterSpacing := 8
+
+	if maxHunters > 0 {
+		// Calculate required width for current settings
+		requiredWidth := maxHunters*hunterBoxWidth + (maxHunters-1)*hunterSpacing + 20
+
+		// If it doesn't fit, scale down
+		if requiredWidth > n.width {
+			// Try smaller boxes first
+			hunterBoxWidth = 24
+			requiredWidth = maxHunters*hunterBoxWidth + (maxHunters-1)*hunterSpacing + 20
+
+			if requiredWidth > n.width {
+				// Still doesn't fit - reduce spacing
+				hunterSpacing = 4
+				requiredWidth = maxHunters*hunterBoxWidth + (maxHunters-1)*hunterSpacing + 20
+
+				if requiredWidth > n.width {
+					// Still doesn't fit - make boxes even smaller
+					hunterBoxWidth = 20
+					requiredWidth = maxHunters*hunterBoxWidth + (maxHunters-1)*hunterSpacing + 20
+
+					if requiredWidth > n.width {
+						// Last resort - minimal spacing
+						hunterSpacing = 2
+						// Calculate minimum possible box width
+						availableWidth := n.width - (maxHunters-1)*hunterSpacing - 20
+						hunterBoxWidth = availableWidth / maxHunters
+						if hunterBoxWidth < 18 {
+							hunterBoxWidth = 18 // Absolute minimum
+						}
+					}
+				}
+			}
+
+			// Also scale down processor box if needed
+			if processorBoxWidth > n.width-20 {
+				processorBoxWidth = n.width - 20
+				if processorBoxWidth < 30 {
+					processorBoxWidth = 30
+				}
+			}
+		}
+	}
+
+	renderWidth := n.width
+
+	// Render each processor and its hunters
+	for procIdx, proc := range sortedProcs {
+		// Ensure hunters are sorted consistently within this processor
+		sortedHunters := make([]HunterInfo, len(proc.Hunters))
+		copy(sortedHunters, proc.Hunters)
+		sort.Slice(sortedHunters, func(i, j int) bool {
+			return sortedHunters[i].ID < sortedHunters[j].ID
+		})
+		proc.Hunters = sortedHunters
+		if procIdx > 0 {
+			// Add spacing between processor groups
+			b.WriteString("\n\n")
+			currentLine += 2
+		}
+
+		// Processor box
+		var procLines []string
+		procHeader := fmt.Sprintf("Processor-%d", procIdx+1)
+		if proc.ProcessorID != "" {
+			procHeader = proc.ProcessorID
+		}
+		procLines = append(procLines, procHeader)
+		procLines = append(procLines, proc.Address)
+
+		// Determine if processor is selected
+		isProcessorSelected := n.selectedProcessorAddr == proc.Address
+
+		// Render processor box (centered) with selection styling
+		// In graph view, we want to change border color (like hunters), not text color
+		processorBox := n.renderProcessorBox(procLines, processorBoxWidth, processorStyle, isProcessorSelected)
+
+		// Center the processor box
+		centerPos := (renderWidth - processorBoxWidth) / 2
+		if centerPos < 0 {
+			centerPos = 0
+		}
+
+		// Track click region for processor box
+		processorStartLine := currentLine
+		processorBoxLines := strings.Split(processorBox, "\n")
+		n.processorBoxRegions = append(n.processorBoxRegions, struct {
+			startLine     int
+			endLine       int
+			startCol      int
+			endCol        int
+			processorAddr string
+		}{
+			startLine:     processorStartLine,
+			endLine:       processorStartLine + len(processorBoxLines) - 1,
+			startCol:      centerPos,
+			endCol:        centerPos + processorBoxWidth,
+			processorAddr: proc.Address,
+		})
+
+		for _, line := range processorBoxLines {
+			b.WriteString(strings.Repeat(" ", centerPos))
+			b.WriteString(line)
+			b.WriteString("\n")
+			currentLine++
+		}
+
+		// Draw connection lines from processor to hunters
+		if len(proc.Hunters) > 0 {
+			// Draw downward arrow from processor
+			arrowPos := centerPos + processorBoxWidth/2
+			b.WriteString(strings.Repeat(" ", arrowPos))
+			b.WriteString("│\n")
+			currentLine++
+
+			// Calculate positions for hunters (distribute horizontally)
+			totalHuntersWidth := len(proc.Hunters)*hunterBoxWidth + (len(proc.Hunters)-1)*hunterSpacing
+			startPos := (renderWidth - totalHuntersWidth) / 2
+			if startPos < 0 {
+				startPos = 0
+			}
+
+			// Draw horizontal line connecting to hunters
+			if len(proc.Hunters) > 1 {
+				firstHunterCenter := startPos + hunterBoxWidth/2
+				lastHunterCenter := startPos + (len(proc.Hunters)-1)*(hunterBoxWidth+hunterSpacing) + hunterBoxWidth/2
+				lineStart := firstHunterCenter
+				lineEnd := lastHunterCenter
+
+				// Check if we have an odd number of hunters (3+)
+				// In this case, the middle hunter aligns with the processor center
+				hasOddHunters := len(proc.Hunters) >= 3 && len(proc.Hunters)%2 == 1
+
+				// Draw the horizontal connector line
+				for i := 0; i < renderWidth; i++ {
+					if i == centerPos+processorBoxWidth/2 {
+						// If odd number of hunters, use cross (┼) since vertical lines align
+						// Otherwise use upward branch (┴)
+						if hasOddHunters {
+							b.WriteString("┼")
+						} else {
+							b.WriteString("┴")
+						}
+					} else if i >= lineStart && i <= lineEnd {
+						if i == firstHunterCenter {
+							b.WriteString("╭")
+						} else if i == lastHunterCenter {
+							b.WriteString("╮")
+						} else {
+							// Check if this is a hunter center position
+							isHunterCenter := false
+							for hIdx := 1; hIdx < len(proc.Hunters)-1; hIdx++ {
+								hunterCenter := startPos + hIdx*(hunterBoxWidth+hunterSpacing) + hunterBoxWidth/2
+								if i == hunterCenter {
+									b.WriteString("┬")
+									isHunterCenter = true
+									break
+								}
+							}
+							if !isHunterCenter {
+								b.WriteString("─")
+							}
+						}
+					} else {
+						b.WriteString(" ")
+					}
+				}
+				b.WriteString("\n")
+				currentLine++
+
+				// Draw vertical lines down to hunter boxes
+				for i := 0; i < renderWidth; i++ {
+					isHunterCenter := false
+					for hIdx := 0; hIdx < len(proc.Hunters); hIdx++ {
+						hunterCenter := startPos + hIdx*(hunterBoxWidth+hunterSpacing) + hunterBoxWidth/2
+						if i == hunterCenter {
+							b.WriteString("│")
+							isHunterCenter = true
+							break
+						}
+					}
+					if !isHunterCenter {
+						b.WriteString(" ")
+					}
+				}
+				b.WriteString("\n")
+				currentLine++
+			} else {
+				// Single hunter - just a straight line
+				linePos := centerPos + processorBoxWidth/2
+				b.WriteString(strings.Repeat(" ", linePos))
+				b.WriteString("│\n")
+				currentLine++
+			}
+
+			// Render hunter boxes
+			type HunterBoxContent struct {
+				HeaderLines []string
+				BodyLines   []string
+			}
+			hunterBoxContents := make([]HunterBoxContent, 0)
+			for hIdx, hunter := range proc.Hunters {
+				var headerLines []string
+				var bodyLines []string
+
+				// Hunter header (centered, bold)
+				hunterName := fmt.Sprintf("Hunter-%d", hIdx+1)
+				if hunter.ID != "" {
+					hunterName = hunter.ID
+					if len(hunterName) > hunterBoxWidth-2 {
+						hunterName = hunterName[:hunterBoxWidth-5] + "..."
+					}
+				}
+				headerLines = append(headerLines, hunterName)
+
+				// IP address (shortened) (centered, bold)
+				ip := hunter.Hostname
+				if len(ip) > hunterBoxWidth-2 {
+					ip = ip[:hunterBoxWidth-5] + "..."
+				}
+				headerLines = append(headerLines, ip)
+
+				// Body content (left-aligned, not bold)
+				// Interface
+				iface := "any"
+				if len(hunter.Interfaces) > 0 {
+					iface = hunter.Interfaces[0]
+				}
+				bodyLines = append(bodyLines, fmt.Sprintf("Interface: %s", truncateString(iface, hunterBoxWidth-12)))
+
+				// Uptime
+				var uptimeStr string
+				if hunter.ConnectedAt > 0 {
+					uptime := time.Now().UnixNano() - hunter.ConnectedAt
+					uptimeStr = formatDuration(uptime)
+				} else {
+					uptimeStr = "-"
+				}
+				bodyLines = append(bodyLines, fmt.Sprintf("Uptime: %s", uptimeStr))
+
+				// Captured
+				bodyLines = append(bodyLines, fmt.Sprintf("Captured: %s", formatPacketNumber(hunter.PacketsCaptured)))
+
+				// Forwarded
+				bodyLines = append(bodyLines, fmt.Sprintf("Forwarded: %s", formatPacketNumber(hunter.PacketsForwarded)))
+
+				// Filters
+				bodyLines = append(bodyLines, fmt.Sprintf("Filters: %d", hunter.ActiveFilters))
+
+				hunterBoxContents = append(hunterBoxContents, HunterBoxContent{
+					HeaderLines: headerLines,
+					BodyLines:   bodyLines,
+				})
+			}
+
+			// Render hunter boxes line by line (so they align horizontally)
+			// First, render all boxes
+			renderedBoxes := make([][]string, len(hunterBoxContents))
+			for hIdx, content := range hunterBoxContents {
+				// Calculate global hunter index for selection
+				globalIndex := 0
+				found := false
+				for _, p := range n.processors {
+					for _, h := range p.Hunters {
+						if h.ID == proc.Hunters[hIdx].ID && h.ProcessorAddr == proc.Hunters[hIdx].ProcessorAddr {
+							found = true
+							break
+						}
+						globalIndex++
+					}
+					if found {
+						break
+					}
+				}
+
+				var boxStyle lipgloss.Style
+				isSelected := globalIndex == n.selectedIndex
+				if isSelected {
+					boxStyle = selectedStyle
+				} else {
+					boxStyle = hunterStyle
+				}
+
+				// Get status color for this hunter
+				hunter := proc.Hunters[hIdx]
+				box := n.renderHunterBox(content.HeaderLines, content.BodyLines, hunterBoxWidth, boxStyle, isSelected, hunter.Status)
+				renderedBoxes[hIdx] = strings.Split(box, "\n")
+			}
+
+			// Render boxes side by side
+			maxBoxLines := 0
+			for _, box := range renderedBoxes {
+				if len(box) > maxBoxLines {
+					maxBoxLines = len(box)
+				}
+			}
+
+			// Track click regions for each hunter box
+			hunterStartLine := currentLine
+			for hIdx := 0; hIdx < len(renderedBoxes); hIdx++ {
+				// Calculate global hunter index
+				globalIndex := 0
+				found := false
+				for _, p := range n.processors {
+					for _, h := range p.Hunters {
+						if h.ID == proc.Hunters[hIdx].ID && h.ProcessorAddr == proc.Hunters[hIdx].ProcessorAddr {
+							found = true
+							break
+						}
+						globalIndex++
+					}
+					if found {
+						break
+					}
+				}
+
+				// Calculate horizontal position
+				var startCol int
+				if hIdx == 0 {
+					startCol = startPos
+				} else {
+					startCol = startPos + hIdx*(hunterBoxWidth+hunterSpacing)
+				}
+				endCol := startCol + hunterBoxWidth
+
+				// Register click region
+				n.hunterBoxRegions = append(n.hunterBoxRegions, struct {
+					startLine   int
+					endLine     int
+					startCol    int
+					endCol      int
+					hunterIndex int
+				}{
+					startLine:   hunterStartLine,
+					endLine:     hunterStartLine + maxBoxLines - 1,
+					startCol:    startCol,
+					endCol:      endCol,
+					hunterIndex: globalIndex,
+				})
+			}
+
+			for lineIdx := 0; lineIdx < maxBoxLines; lineIdx++ {
+				for hIdx := 0; hIdx < len(renderedBoxes); hIdx++ {
+					// Add spacing before this hunter
+					if hIdx > 0 {
+						b.WriteString(strings.Repeat(" ", hunterSpacing))
+					} else {
+						b.WriteString(strings.Repeat(" ", startPos))
+					}
+
+					// Render this line of the hunter box
+					if lineIdx < len(renderedBoxes[hIdx]) {
+						b.WriteString(renderedBoxes[hIdx][lineIdx])
+					} else {
+						// Pad with spaces if this box has fewer lines
+						b.WriteString(strings.Repeat(" ", hunterBoxWidth))
+					}
+				}
+				b.WriteString("\n")
+				currentLine++
+			}
+		} else {
+			// No hunters for this processor
+			b.WriteString("\n")
+			currentLine++
+			emptyStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240"))
+			emptyLine := emptyStyle.Render("(no hunters connected)")
+			b.WriteString(strings.Repeat(" ", centerPos))
+			b.WriteString(emptyLine)
+			b.WriteString("\n")
+			currentLine++
+		}
+	}
+}
+
+// renderBox renders a box with rounded corners around the given lines
+func (n *NodesView) renderBox(lines []string, width int, style lipgloss.Style) string {
+	var b strings.Builder
+
+	// Top border
+	b.WriteString("╭")
+	b.WriteString(strings.Repeat("─", width-2))
+	b.WriteString("╮")
+	b.WriteString("\n")
+
+	// Content lines
+	for _, line := range lines {
+		// Truncate or pad to fit width
+		displayLine := line
+		if len(displayLine) > width-4 {
+			displayLine = displayLine[:width-7] + "..."
+		}
+		padding := width - len(displayLine) - 4
+		leftPad := padding / 2
+		rightPad := padding - leftPad
+
+		b.WriteString("│ ")
+		b.WriteString(strings.Repeat(" ", leftPad))
+		b.WriteString(style.Render(displayLine))
+		b.WriteString(strings.Repeat(" ", rightPad))
+		b.WriteString(" │")
+		b.WriteString("\n")
+	}
+
+	// Bottom border
+	b.WriteString("╰")
+	b.WriteString(strings.Repeat("─", width-2))
+	b.WriteString("╯")
+
+	return b.String()
+}
+
+// renderProcessorBox renders a processor box with optional selection highlighting
+func (n *NodesView) renderProcessorBox(lines []string, width int, style lipgloss.Style, isSelected bool) string {
+	var b strings.Builder
+
+	// For selected boxes, use cyan border and normal text colors
+	// For unselected boxes, use default theme colors
+	var borderStyle lipgloss.Style
+	var contentStyle lipgloss.Style
+
+	if isSelected {
+		// Selected: cyan border, normal text colors
+		borderStyle = lipgloss.NewStyle().Foreground(n.theme.SelectionBg)
+		contentStyle = style
+	} else {
+		// Unselected: gray border like hunters
+		borderStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground)
+		contentStyle = style
+	}
+
+	// Top border
+	b.WriteString(borderStyle.Render("╭"))
+	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
+	b.WriteString(borderStyle.Render("╮"))
+	b.WriteString("\n")
+
+	// Content lines
+	for _, line := range lines {
+		// Truncate or pad to fit width
+		displayLine := line
+		if len(displayLine) > width-4 {
+			displayLine = displayLine[:width-7] + "..."
+		}
+		padding := width - len(displayLine) - 4
+		leftPad := padding / 2
+		rightPad := padding - leftPad
+
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(" ")
+		b.WriteString(strings.Repeat(" ", leftPad))
+		b.WriteString(contentStyle.Render(displayLine))
+		b.WriteString(strings.Repeat(" ", rightPad))
+		b.WriteString(" ")
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString("\n")
+	}
+
+	// Bottom border
+	b.WriteString(borderStyle.Render("╰"))
+	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
+	b.WriteString(borderStyle.Render("╯"))
+
+	return b.String()
+}
+
+// renderHunterBox renders a hunter box with centered bold headers and left-aligned body
+func (n *NodesView) renderHunterBox(headerLines []string, bodyLines []string, width int, baseStyle lipgloss.Style, isSelected bool, status management.HunterStatus) string {
+	var b strings.Builder
+
+	// Determine status color for header text
+	var statusColor lipgloss.Color
+	switch status {
+	case management.HunterStatus_STATUS_HEALTHY:
+		statusColor = n.theme.SuccessColor
+	case management.HunterStatus_STATUS_WARNING:
+		statusColor = n.theme.WarningColor
+	case management.HunterStatus_STATUS_ERROR:
+		statusColor = n.theme.ErrorColor
+	case management.HunterStatus_STATUS_STOPPING:
+		statusColor = lipgloss.Color("240")
+	default:
+		statusColor = n.theme.SuccessColor
+	}
+
+	// For selected boxes, use cyan border and status-colored text
+	// For unselected boxes, use default border and status-colored text
+	var borderStyle lipgloss.Style
+	var headerStyle lipgloss.Style
+	var bodyStyle lipgloss.Style
+
+	if isSelected {
+		// Selected: cyan border, status-colored header text
+		borderStyle = lipgloss.NewStyle().Foreground(n.theme.SelectionBg)
+		headerStyle = lipgloss.NewStyle().Foreground(statusColor).Bold(true)
+		bodyStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground).Bold(false)
+	} else {
+		// Unselected: normal border, status-colored header text
+		borderStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground)
+		headerStyle = lipgloss.NewStyle().Foreground(statusColor).Bold(true)
+		bodyStyle = baseStyle.Bold(false)
+	}
+
+	// Top border
+	b.WriteString(borderStyle.Render("╭"))
+	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
+	b.WriteString(borderStyle.Render("╮"))
+	b.WriteString("\n")
+
+	// Header lines (centered and bold)
+	for _, line := range headerLines {
+		displayLine := line
+		if len(displayLine) > width-4 {
+			displayLine = displayLine[:width-7] + "..."
+		}
+		padding := width - len(displayLine) - 4
+		leftPad := padding / 2
+		rightPad := padding - leftPad
+
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(" ")
+		b.WriteString(strings.Repeat(" ", leftPad))
+		b.WriteString(headerStyle.Render(displayLine))
+		b.WriteString(strings.Repeat(" ", rightPad))
+		b.WriteString(" ")
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString("\n")
+	}
+
+	// Empty line separator between header and body
+	b.WriteString(borderStyle.Render("│"))
+	b.WriteString(" ")
+	b.WriteString(strings.Repeat(" ", width-4))
+	b.WriteString(" ")
+	b.WriteString(borderStyle.Render("│"))
+	b.WriteString("\n")
+
+	// Body lines (left-aligned, not bold)
+	for _, line := range bodyLines {
+		displayLine := line
+		if len(displayLine) > width-4 {
+			displayLine = displayLine[:width-7] + "..."
+		}
+		padding := width - len(displayLine) - 4
+
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(" ")
+		b.WriteString(bodyStyle.Render(displayLine))
+		b.WriteString(strings.Repeat(" ", padding))
+		b.WriteString(" ")
+		b.WriteString(borderStyle.Render("│"))
+		b.WriteString("\n")
+	}
+
+	// Bottom border
+	b.WriteString(borderStyle.Render("╰"))
+	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
+	b.WriteString(borderStyle.Render("╯"))
+
+	return b.String()
+}
+
 func (n *NodesView) View() string {
 	if !n.ready {
 		return ""
@@ -744,7 +1419,7 @@ func (n *NodesView) View() string {
 	var borderColor lipgloss.Color
 	if n.editing {
 		borderColor = n.theme.FocusedBorderColor // Red when editing
-	} else if n.selectedIndex == -1 {
+	} else if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
 		borderColor = n.theme.InfoColor // Blue when focused but not editing
 	} else {
 		borderColor = n.theme.BorderColor // Gray when unfocused
@@ -858,7 +1533,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		const doubleClickThreshold = 500 * time.Millisecond
 
 		// Check if this is a double-click (second click within 500ms)
-		if n.selectedIndex == -1 && !n.editing &&
+		if n.selectedIndex == -1 && n.selectedProcessorAddr == "" && !n.editing &&
 			now.Sub(n.lastClickTime) < doubleClickThreshold {
 			// Double-click detected - start editing
 			n.editing = true
@@ -869,6 +1544,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 
 		// Single click - just focus input (don't start editing)
 		n.selectedIndex = -1
+		n.selectedProcessorAddr = "" // Clear processor selection
 		n.editing = false
 		n.nodeInput.Blur()
 		n.lastClickTime = now
@@ -889,6 +1565,66 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		// 	f.Close()
 		// }
 
+		// Check graph view click regions first (if in graph view)
+		if n.viewMode == "graph" {
+			clickX := msg.X
+
+			// Check processor box clicks first
+			for _, region := range n.processorBoxRegions {
+				if contentLineY >= region.startLine && contentLineY <= region.endLine &&
+					clickX >= region.startCol && clickX <= region.endCol {
+					// DEBUG: Uncomment to confirm processor box clicks
+					// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+					// 	fmt.Fprintf(f, "      -> CLICKED ON PROCESSOR BOX %s (X=%d Y=%d)\n", region.processorAddr, clickX, contentLineY)
+					// 	f.Close()
+					// }
+					// Select this processor
+					n.selectedProcessorAddr = region.processorAddr
+					n.selectedIndex = -1 // Deselect hunters
+					n.editing = false
+					n.nodeInput.Blur()
+					n.updateViewportContent() // Refresh to show selection
+					return nil
+				}
+			}
+
+			// Check hunter box clicks
+			for _, region := range n.hunterBoxRegions {
+				if contentLineY >= region.startLine && contentLineY <= region.endLine &&
+					clickX >= region.startCol && clickX <= region.endCol {
+					// DEBUG: Uncomment to confirm hunter box clicks
+					// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+					// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER BOX %d (X=%d Y=%d)\n", region.hunterIndex, clickX, contentLineY)
+					// 	f.Close()
+					// }
+					// Select this hunter
+					n.selectedIndex = region.hunterIndex
+					n.selectedProcessorAddr = "" // Deselect processors
+					n.editing = false
+					n.nodeInput.Blur()
+					n.updateViewportContent() // Refresh to show selection
+					return nil
+				}
+			}
+		}
+
+		// Check table view processor lines
+		if procIdx, ok := n.processorLines[contentLineY]; ok {
+			// DEBUG: Uncomment to confirm processor row clicks
+			// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			// 	fmt.Fprintf(f, "      -> CLICKED ON PROCESSOR %d\n", procIdx)
+			// 	f.Close()
+			// }
+			// Select this processor
+			n.selectedProcessorAddr = n.processors[procIdx].Address
+			n.selectedIndex = -1 // Deselect hunters
+			n.editing = false
+			n.nodeInput.Blur()
+			n.updateViewportContent() // Refresh to show selection
+			return nil
+		}
+
+		// Check table view hunter lines
 		if hunterIndex, ok := n.hunterLines[contentLineY]; ok {
 			// DEBUG: Uncomment to confirm hunter row clicks
 			// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
@@ -897,6 +1633,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 			// }
 			// Select this hunter
 			n.selectedIndex = hunterIndex
+			n.selectedProcessorAddr = "" // Deselect processors
 			n.editing = false
 			n.nodeInput.Blur()
 			n.updateViewportContent() // Refresh to show selection

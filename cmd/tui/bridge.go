@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/google/gopacket/layers"
 )
 
@@ -61,6 +62,15 @@ var (
 		"unknown":   "unknown",
 	}
 	protocolMu sync.RWMutex
+
+	// Pre-allocated SIP method prefixes for fast detection (no allocations)
+	sipMethodINVITE   = []byte("INVITE")
+	sipMethodREGISTER = []byte("REGISTER")
+	sipMethodOPTIONS  = []byte("OPTIONS")
+	sipMethodACK      = []byte("ACK")
+	sipMethodBYE      = []byte("BYE")
+	sipMethodCANCEL   = []byte("CANCEL")
+	sipResponse       = []byte("SIP/2.0")
 )
 
 // internProtocol returns an interned protocol string to reduce allocations
@@ -85,6 +95,40 @@ func internProtocol(protocol string) string {
 	}
 	protocolMu.Unlock()
 	return protocol
+}
+
+// isSIPBytes performs fast SIP detection using SIMD-optimized byte comparison
+// This is used in the fast conversion path to avoid full protocol detection overhead
+func isSIPBytes(payload []byte) bool {
+	if len(payload) < 3 {
+		return false
+	}
+
+	// Check for common SIP methods and responses
+	// Using pre-allocated byte slices and SIMD comparison for zero allocations
+	if len(payload) >= len(sipMethodINVITE) && simd.BytesEqual(payload[:len(sipMethodINVITE)], sipMethodINVITE) {
+		return true
+	}
+	if len(payload) >= len(sipMethodREGISTER) && simd.BytesEqual(payload[:len(sipMethodREGISTER)], sipMethodREGISTER) {
+		return true
+	}
+	if len(payload) >= len(sipMethodOPTIONS) && simd.BytesEqual(payload[:len(sipMethodOPTIONS)], sipMethodOPTIONS) {
+		return true
+	}
+	if len(payload) >= len(sipResponse) && simd.BytesEqual(payload[:len(sipResponse)], sipResponse) {
+		return true
+	}
+	if len(payload) >= len(sipMethodACK) && simd.BytesEqual(payload[:len(sipMethodACK)], sipMethodACK) {
+		return true
+	}
+	if len(payload) >= len(sipMethodBYE) && simd.BytesEqual(payload[:len(sipMethodBYE)], sipMethodBYE) {
+		return true
+	}
+	if len(payload) >= len(sipMethodCANCEL) && simd.BytesEqual(payload[:len(sipMethodCANCEL)], sipMethodCANCEL) {
+		return true
+	}
+
+	return false
 }
 
 // getPacketDisplay acquires a PacketDisplay from the pool
@@ -277,10 +321,20 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 			display.Protocol = internProtocol("TCP")
 			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
+
+			// Fast SIP detection for VoIP over TCP
+			if isSIPBytes(trans.LayerPayload()) {
+				display.Protocol = internProtocol("SIP")
+			}
 		case *layers.UDP:
 			display.Protocol = internProtocol("UDP")
 			display.SrcPort = strconv.Itoa(int(trans.SrcPort))
 			display.DstPort = strconv.Itoa(int(trans.DstPort))
+
+			// Fast SIP detection for VoIP over UDP
+			if isSIPBytes(trans.LayerPayload()) {
+				display.Protocol = internProtocol("SIP")
+			}
 		}
 	} else if pkt.Layer(layers.LayerTypeICMPv4) != nil {
 		display.Protocol = internProtocol("ICMP")

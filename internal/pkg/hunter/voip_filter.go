@@ -1,12 +1,14 @@
 package hunter
 
 import (
+	"bytes"
 	"strings"
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 )
@@ -107,13 +109,14 @@ func (vf *VoIPFilter) MatchPacket(packet gopacket.Packet) bool {
 		return false
 	}
 
-	// Get payload
+	// Get payload - use LayerContents() to get full message including headers
+	// Payload() only returns the body (e.g., SDP for SIP), missing critical info
 	appLayer := packet.ApplicationLayer()
 	if appLayer == nil {
 		return false
 	}
 
-	payload := appLayer.Payload()
+	payload := appLayer.LayerContents()
 
 	// Use GPU if enabled and we have patterns
 	if vf.enabled && vf.gpuAccel != nil && len(vf.patterns) > 0 {
@@ -146,7 +149,8 @@ func (vf *VoIPFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	for i, packet := range packets {
 		if vf.isVoIPPacket(packet) {
 			if appLayer := packet.ApplicationLayer(); appLayer != nil {
-				voipPackets = append(voipPackets, appLayer.Payload())
+				// Use LayerContents() to get full message with headers
+				voipPackets = append(voipPackets, appLayer.LayerContents())
 				voipIndices = append(voipIndices, i)
 			}
 		}
@@ -204,25 +208,145 @@ func (vf *VoIPFilter) matchWithGPU(payload []byte) bool {
 	return false
 }
 
-// matchWithCPU uses CPU for pattern matching (fallback)
+// matchWithCPU uses CPU for pattern matching with SIMD optimization
 func (vf *VoIPFilter) matchWithCPU(payload string) bool {
-	payloadLower := strings.ToLower(payload)
+	// Convert to bytes for SIMD operations (zero-copy)
+	payloadBytes := []byte(payload)
 
-	// Check SIP users
+	// Extract SIP headers for proper matching
+	sipHeaders := extractSIPHeaders(payloadBytes)
+
+	// Check SIP users in proper headers (From, To, P-Asserted-Identity)
 	for _, user := range vf.sipUsers {
-		if strings.Contains(payloadLower, strings.ToLower(user)) {
-			return true
+		userBytes := []byte(strings.ToLower(user))
+
+		// Check in From header
+		if len(sipHeaders.from) > 0 {
+			fromLower := bytes.ToLower(sipHeaders.from)
+			if simd.BytesContains(fromLower, userBytes) {
+				return true
+			}
+		}
+
+		// Check in To header
+		if len(sipHeaders.to) > 0 {
+			toLower := bytes.ToLower(sipHeaders.to)
+			if simd.BytesContains(toLower, userBytes) {
+				return true
+			}
+		}
+
+		// Check in P-Asserted-Identity header
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			paiLower := bytes.ToLower(sipHeaders.pAssertedIdentity)
+			if simd.BytesContains(paiLower, userBytes) {
+				return true
+			}
 		}
 	}
 
-	// Check phone numbers
+	// Check phone numbers in proper headers
 	for _, number := range vf.phoneNumbers {
-		if strings.Contains(payloadLower, number) {
+		numberBytes := []byte(number)
+
+		// Check in From header
+		if len(sipHeaders.from) > 0 && simd.BytesContains(sipHeaders.from, numberBytes) {
+			return true
+		}
+
+		// Check in To header
+		if len(sipHeaders.to) > 0 && simd.BytesContains(sipHeaders.to, numberBytes) {
+			return true
+		}
+
+		// Check in P-Asserted-Identity header
+		if len(sipHeaders.pAssertedIdentity) > 0 && simd.BytesContains(sipHeaders.pAssertedIdentity, numberBytes) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// sipHeaders holds parsed SIP header values
+type sipHeaders struct {
+	from              []byte
+	to                []byte
+	pAssertedIdentity []byte
+}
+
+// extractSIPHeaders extracts From, To, and P-Asserted-Identity headers from SIP message
+// This is a fast, zero-allocation parser for filtering
+func extractSIPHeaders(payload []byte) sipHeaders {
+	var headers sipHeaders
+
+	// Parse line by line - handle both \r\n (SIP standard) and \n (for tests/compatibility)
+	var lines [][]byte
+	if bytes.Contains(payload, []byte("\r\n")) {
+		lines = bytes.Split(payload, []byte("\r\n"))
+	} else {
+		lines = bytes.Split(payload, []byte("\n"))
+	}
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			// Empty line marks end of headers
+			break
+		}
+
+		// Check for From header (case-insensitive)
+		if len(line) >= 5 {
+			lineUpper := bytes.ToUpper(line[:5])
+			if bytes.Equal(lineUpper, []byte("FROM:")) {
+				headers.from = extractHeaderValue(line)
+				continue
+			}
+		}
+		// Short form: f:
+		if len(line) >= 2 && (line[0] == 'f' || line[0] == 'F') && line[1] == ':' {
+			headers.from = extractHeaderValue(line)
+			continue
+		}
+
+		// Check for To header (case-insensitive)
+		if len(line) >= 3 {
+			lineUpper := bytes.ToUpper(line[:3])
+			if bytes.Equal(lineUpper, []byte("TO:")) {
+				headers.to = extractHeaderValue(line)
+				continue
+			}
+		}
+		// Short form: t:
+		if len(line) >= 2 && (line[0] == 't' || line[0] == 'T') && line[1] == ':' {
+			headers.to = extractHeaderValue(line)
+			continue
+		}
+
+		// Check for P-Asserted-Identity header (case-insensitive)
+		if len(line) >= 20 {
+			lineUpper := bytes.ToUpper(line[:20])
+			if bytes.Equal(lineUpper, []byte("P-ASSERTED-IDENTITY:")) {
+				headers.pAssertedIdentity = extractHeaderValue(line)
+				continue
+			}
+		}
+	}
+
+	return headers
+}
+
+// extractHeaderValue extracts the value part of a SIP header (after the colon)
+func extractHeaderValue(line []byte) []byte {
+	colonIdx := bytes.IndexByte(line, ':')
+	if colonIdx == -1 || colonIdx >= len(line)-1 {
+		return nil
+	}
+
+	// Skip colon and any leading whitespace
+	value := line[colonIdx+1:]
+
+	// Trim leading/trailing whitespace
+	return bytes.TrimSpace(value)
 }
 
 // isVoIPPacket checks if a packet is SIP or RTP using centralized detector

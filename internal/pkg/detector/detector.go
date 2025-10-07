@@ -293,7 +293,10 @@ func (d *Detector) buildContext(packet gopacket.Packet) *signatures.DetectionCon
 	// Extract application layer payload
 	if len(ctx.Payload) == 0 {
 		if appLayer := packet.ApplicationLayer(); appLayer != nil {
-			ctx.Payload = appLayer.Payload()
+			// Use LayerContents() instead of Payload() to get the full protocol message
+			// including headers. Payload() only returns the body, which breaks detection
+			// for protocols like SIP where we need to see the method/headers.
+			ctx.Payload = appLayer.LayerContents()
 		}
 	}
 

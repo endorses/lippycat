@@ -537,7 +537,7 @@ func (p *PacketList) renderHeader() string {
 
 	header := fmt.Sprintf(
 		"%-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-		nodeWidth, truncate("Source", nodeWidth),
+		nodeWidth, truncate("Origin", nodeWidth),
 		timeWidth, truncate("Time", timeWidth),
 		srcWidth, truncate("Src IP:Port", srcWidth),
 		dstWidth, truncate("Dst IP:Port", dstWidth),

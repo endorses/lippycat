@@ -166,7 +166,7 @@ func (d *DetailsPanel) renderContent() string {
 	content.WriteString(protocolStyle.Render(d.packet.Protocol))
 	content.WriteString("\n")
 
-	content.WriteString(labelStyle.Render("Captured From: "))
+	content.WriteString(labelStyle.Render("Origin: "))
 	captureSource := fmt.Sprintf("%s / %s", d.packet.NodeID, d.packet.Interface)
 	content.WriteString(valueStyle.Render(captureSource))
 	content.WriteString("\n")

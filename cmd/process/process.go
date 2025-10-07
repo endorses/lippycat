@@ -35,6 +35,7 @@ Example:
 
 var (
 	listenAddr      string
+	processorID     string
 	upstreamAddr    string
 	maxHunters      int
 	writeFile       string
@@ -48,6 +49,7 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&listenAddr, "listen", "l", ":50051", "Listen address for hunter connections (host:port)")
 
 	// Processor configuration
+	ProcessCmd.Flags().StringVarP(&processorID, "processor-id", "", "", "Unique processor identifier (default: hostname)")
 	ProcessCmd.Flags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
 	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", 100, "Maximum number of concurrent hunter connections")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
@@ -57,6 +59,7 @@ func init() {
 
 	// Bind to viper for config file support
 	viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
+	viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
 	viper.BindPFlag("processor.upstream_addr", ProcessCmd.Flags().Lookup("upstream"))
 	viper.BindPFlag("processor.max_hunters", ProcessCmd.Flags().Lookup("max-hunters"))
 	viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
@@ -71,12 +74,22 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	// Get configuration (flags override config file)
 	config := processor.Config{
 		ListenAddr:      getStringConfig("processor.listen_addr", listenAddr),
+		ProcessorID:     getStringConfig("processor.processor_id", processorID),
 		UpstreamAddr:    getStringConfig("processor.upstream_addr", upstreamAddr),
 		MaxHunters:      getIntConfig("processor.max_hunters", maxHunters),
 		WriteFile:       getStringConfig("processor.write_file", writeFile),
 		DisplayStats:    getBoolConfig("processor.display_stats", displayStats),
 		EnableDetection: getBoolConfig("processor.enable_detection", enableDetection),
 		FilterFile:      getStringConfig("processor.filter_file", filterFile),
+	}
+
+	// Set default processor ID to hostname if not specified
+	if config.ProcessorID == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return fmt.Errorf("failed to get hostname: %w", err)
+		}
+		config.ProcessorID = hostname
 	}
 
 	// Validate configuration
@@ -90,6 +103,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Info("Processor configuration",
+		"processor_id", config.ProcessorID,
 		"mode", mode,
 		"listen", config.ListenAddr,
 		"upstream", config.UpstreamAddr,

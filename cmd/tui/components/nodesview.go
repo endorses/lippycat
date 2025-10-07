@@ -35,8 +35,9 @@ type HunterInfo struct {
 
 // ProcessorInfo represents a processor node
 type ProcessorInfo struct {
-	Address string
-	Hunters []HunterInfo
+	Address     string
+	ProcessorID string // ID of the processor
+	Hunters     []HunterInfo
 }
 
 // AddNodeMsg is sent when user wants to add a node
@@ -188,6 +189,30 @@ func (n *NodesView) SetHuntersAndProcessors(hunters []HunterInfo, processorAddrs
 	sort.Slice(n.processors, func(i, j int) bool {
 		return n.processors[i].Address < n.processors[j].Address
 	})
+
+	// Reset selection if out of bounds
+	if n.selectedIndex >= len(n.hunters) {
+		n.selectedIndex = 0
+	}
+
+	// Update viewport content
+	n.updateViewportContent()
+}
+
+// SetProcessors updates the processor list directly with ProcessorInfo
+func (n *NodesView) SetProcessors(processors []ProcessorInfo) {
+	// Flatten all hunters from all processors
+	allHunters := make([]HunterInfo, 0)
+	for _, proc := range processors {
+		allHunters = append(allHunters, proc.Hunters...)
+	}
+	n.hunters = allHunters
+
+	// Sort processors alphabetically by address
+	sort.Slice(processors, func(i, j int) bool {
+		return processors[i].Address < processors[j].Address
+	})
+	n.processors = processors
 
 	// Reset selection if out of bounds
 	if n.selectedIndex >= len(n.hunters) {
@@ -457,8 +482,13 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 	treeCol := 6 // "  ├─ " or "  └─ "
 
 	for _, proc := range n.processors {
-		// Processor header
-		procLine := fmt.Sprintf("📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
+		// Processor header with ID (if available)
+		var procLine string
+		if proc.ProcessorID != "" {
+			procLine = fmt.Sprintf("📡 Processor: %s [%s] (%d hunters)", proc.Address, proc.ProcessorID, len(proc.Hunters))
+		} else {
+			procLine = fmt.Sprintf("📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
+		}
 		b.WriteString(processorStyle.Render(procLine) + "\n")
 		linesRendered++
 

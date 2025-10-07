@@ -23,6 +23,7 @@ import (
 // Config contains processor configuration
 type Config struct {
 	ListenAddr       string
+	ProcessorID      string
 	UpstreamAddr     string
 	MaxHunters       int
 	WriteFile        string
@@ -160,7 +161,7 @@ func (p *Processor) Start(ctx context.Context) error {
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	defer p.cancel()
 
-	logger.Info("Processor starting", "listen_addr", p.config.ListenAddr)
+	logger.Info("Processor starting", "processor_id", p.config.ProcessorID, "listen_addr", p.config.ListenAddr)
 
 	// Load filters from persistence file
 	if err := p.loadFilters(); err != nil {
@@ -362,6 +363,7 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 			BatchTimeoutMs:        100,
 			ReconnectIntervalSec:  5,
 			MaxReconnectAttempts:  0, // infinite
+			ProcessorId:           p.config.ProcessorID,
 		},
 	}, nil
 }
@@ -395,6 +397,7 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 			TimestampNs:       hb.TimestampNs,
 			Status:            management.ProcessorStatus_PROCESSOR_HEALTHY,
 			HuntersConnected:  stats.TotalHunters,
+			ProcessorId:       p.config.ProcessorID,
 		}
 
 		if err := stream.Send(resp); err != nil {
@@ -516,6 +519,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			TotalPacketsReceived:   stats.TotalPacketsReceived,
 			TotalPacketsForwarded:  stats.TotalPacketsForwarded,
 			TotalFilters:           stats.TotalFilters,
+			ProcessorId:            p.config.ProcessorID,
 		},
 	}, nil
 }

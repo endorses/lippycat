@@ -80,6 +80,7 @@ const (
 // ProcessorConnection tracks a configured processor and its connection state
 type ProcessorConnection struct {
 	Address         string
+	ProcessorID     string // ID of the processor (from ProcessorHeartbeat)
 	State           ProcessorState
 	Client          interface{ Close() }
 	LastAttempt     time.Time
@@ -908,17 +909,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Update processor ID if provided
+		if msg.ProcessorID != "" && processorAddr != "" && processorAddr != "Direct" {
+			if proc, exists := m.processors[processorAddr]; exists {
+				proc.ProcessorID = msg.ProcessorID
+			}
+		}
+
 		// Update hunters for this processor
 		m.huntersByProcessor[processorAddr] = msg.Hunters
 
-		// Merge all hunters from all processors for display
-		allHunters := make([]components.HunterInfo, 0)
-		for _, hunters := range m.huntersByProcessor {
-			allHunters = append(allHunters, hunters...)
-		}
-
-		// Update NodesView with merged hunters and list of all processors
-		m.nodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
+		// Update NodesView with processor info (includes processor IDs)
+		m.nodesView.SetProcessors(m.getProcessorInfoList())
 		return m, nil
 
 	case remotecapture.ProcessorDisconnectedMsg:
@@ -1715,6 +1717,19 @@ func (m *Model) getConnectedProcessors() []string {
 		processors = append(processors, addr)
 	}
 	return processors
+}
+
+// getProcessorInfoList returns ProcessorInfo for all configured processors
+func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
+	procInfos := make([]components.ProcessorInfo, 0, len(m.processors))
+	for addr, proc := range m.processors {
+		procInfos = append(procInfos, components.ProcessorInfo{
+			Address:     addr,
+			ProcessorID: proc.ProcessorID,
+			Hunters:     m.huntersByProcessor[addr],
+		})
+	}
+	return procInfos
 }
 
 // loadNodesFile loads processors from a YAML file and adds them for connection

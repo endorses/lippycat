@@ -92,6 +92,9 @@ message ProcessorConfig {
 
     // Maximum reconnection attempts (0 = infinite)
     uint32 max_reconnect_attempts = 4;
+
+    // Processor identifier
+    string processor_id = 5;
 }
 
 // HunterHeartbeat sent periodically by hunter
@@ -155,6 +158,9 @@ message ProcessorHeartbeat {
 
     // Total hunters connected
     uint32 hunters_connected = 3;
+
+    // Processor identifier
+    string processor_id = 4;
 }
 
 // ProcessorStatus enum
@@ -329,4 +335,7 @@ message ProcessorStats {
 
     // Total filters active
     uint32 total_filters = 7;
+
+    // Processor identifier
+    string processor_id = 8;
 }

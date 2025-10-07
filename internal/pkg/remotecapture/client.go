@@ -59,7 +59,8 @@ type PacketBatchMsg struct {
 // HunterStatusMsg is sent to TUI with hunter status updates
 // This must match the type in cmd/tui/model.go
 type HunterStatusMsg struct {
-	Hunters []components.HunterInfo
+	Hunters     []components.HunterInfo
+	ProcessorID string // ID of the processor these hunters belong to
 }
 
 // ProcessorDisconnectedMsg is sent to TUI when connection to processor is lost
@@ -209,7 +210,10 @@ func (c *Client) SubscribeHunterStatus() error {
 						},
 					}
 					if c.program != nil {
-						c.program.Send(HunterStatusMsg{Hunters: hunters})
+						c.program.Send(HunterStatusMsg{
+							Hunters:     hunters,
+							ProcessorID: "", // No processor for direct hunter connection
+						})
 					}
 				}
 			}
@@ -255,9 +259,18 @@ func (c *Client) SubscribeHunterStatus() error {
 					hunters[i] = c.convertToHunterInfo(h)
 				}
 
+				// Get processor ID from stats
+				processorID := ""
+				if resp.ProcessorStats != nil {
+					processorID = resp.ProcessorStats.ProcessorId
+				}
+
 				// Send to TUI
 				if c.program != nil {
-					c.program.Send(HunterStatusMsg{Hunters: hunters})
+					c.program.Send(HunterStatusMsg{
+						Hunters:     hunters,
+						ProcessorID: processorID,
+					})
 				}
 			}
 		}

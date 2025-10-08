@@ -1167,8 +1167,12 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 
 				// Interface(s) - show all interfaces
 				iface := "any"
+				ifaceLabel := "Interface:"
 				if len(hunter.Interfaces) > 0 {
 					iface = strings.Join(hunter.Interfaces, ", ")
+					if len(hunter.Interfaces) > 1 {
+						ifaceLabel = "Interfaces:"
+					}
 				}
 
 				// Uptime
@@ -1192,7 +1196,7 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 					bodyLines = append(bodyLines, fmt.Sprintf("%d", hunter.ActiveFilters))
 				} else {
 					// Full format with aligned labels for wider boxes
-					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Interface:", truncateString(iface, hunterBoxWidth-labelWidth-2)))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, ifaceLabel, truncateString(iface, hunterBoxWidth-labelWidth-2)))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Uptime:", uptimeStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Captured:", capturedStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Forwarded:", forwardedStr))

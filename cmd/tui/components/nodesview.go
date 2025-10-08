@@ -273,57 +273,164 @@ func (n *NodesView) GetProcessorCount() int {
 	return len(n.processors)
 }
 
-// SelectNext moves selection to next hunter or from input to first hunter
+// SelectNext moves selection following tree structure: processor → its hunters → next processor → its hunters
 func (n *NodesView) SelectNext() {
-	if len(n.hunters) == 0 {
-		return
-	}
-
-	// If input is focused or processor is selected, move to first hunter
-	if n.selectedIndex == -1 {
+	// If input is focused, move to first processor
+	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
 		n.editing = false
 		n.nodeInput.Blur()
-		n.selectedProcessorAddr = "" // Clear processor selection
-		n.selectedIndex = 0
-		n.updateViewportContent() // Refresh to show selection
+
+		if len(n.processors) > 0 {
+			n.selectedProcessorAddr = n.processors[0].Address
+		}
+		n.updateViewportContent()
 		return
 	}
 
-	// Otherwise, move to next hunter
-	n.selectedIndex = (n.selectedIndex + 1) % len(n.hunters)
-	n.updateViewportContent() // Refresh to show selection
+	// If a processor is selected, move to its first hunter or next processor
+	if n.selectedProcessorAddr != "" {
+		// Find current processor
+		var currentProc *ProcessorInfo
+		currentProcIdx := -1
+		for i, proc := range n.processors {
+			if proc.Address == n.selectedProcessorAddr {
+				currentProc = &n.processors[i]
+				currentProcIdx = i
+				break
+			}
+		}
+
+		if currentProc != nil && len(currentProc.Hunters) > 0 {
+			// Move to first hunter of this processor
+			n.selectedProcessorAddr = ""
+			// Find global index of this hunter
+			n.selectedIndex = n.getGlobalHunterIndex(currentProc.Hunters[0].ID, currentProc.Address)
+		} else {
+			// No hunters, move to next processor or wrap to input
+			if currentProcIdx < len(n.processors)-1 {
+				n.selectedProcessorAddr = n.processors[currentProcIdx+1].Address
+			} else {
+				// Last processor, wrap to input
+				n.selectedProcessorAddr = ""
+				n.selectedIndex = -1
+			}
+		}
+		n.updateViewportContent()
+		return
+	}
+
+	// If a hunter is selected, move to next hunter of same processor or next processor
+	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+		currentHunter := n.hunters[n.selectedIndex]
+
+		// Find which processor this hunter belongs to and its position
+		for procIdx, proc := range n.processors {
+			for hunterIdx, hunter := range proc.Hunters {
+				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
+					// Found the hunter, check if there's a next hunter in this processor
+					if hunterIdx < len(proc.Hunters)-1 {
+						// Move to next hunter in same processor
+						n.selectedIndex = n.getGlobalHunterIndex(proc.Hunters[hunterIdx+1].ID, proc.Address)
+					} else {
+						// Last hunter of this processor, move to next processor or wrap
+						n.selectedIndex = -1
+						if procIdx < len(n.processors)-1 {
+							n.selectedProcessorAddr = n.processors[procIdx+1].Address
+						} else {
+							// Last processor, wrap to input
+							n.selectedProcessorAddr = ""
+						}
+					}
+					n.updateViewportContent()
+					return
+				}
+			}
+		}
+	}
 }
 
-// SelectPrevious moves selection to previous hunter or from first hunter to input
-func (n *NodesView) SelectPrevious() {
-	if len(n.hunters) == 0 {
-		// No hunters, but allow focusing input
-		if n.selectedIndex != -1 {
-			n.selectedIndex = -1
-			n.editing = false
-			n.nodeInput.Blur()
+// getGlobalHunterIndex finds the global index of a hunter by ID and processor address
+func (n *NodesView) getGlobalHunterIndex(hunterID string, processorAddr string) int {
+	for i, hunter := range n.hunters {
+		if hunter.ID == hunterID && hunter.ProcessorAddr == processorAddr {
+			return i
 		}
-		return
 	}
+	return 0
+}
 
-	// If already at input (selectedIndex = -1 and no processor selected), do nothing
+// SelectPrevious moves selection following tree structure in reverse: hunters ← processor ← previous processor
+func (n *NodesView) SelectPrevious() {
+	// If at input, wrap to last hunter of last processor (or last processor if it has no hunters)
 	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
+		if len(n.processors) > 0 {
+			lastProc := n.processors[len(n.processors)-1]
+			if len(lastProc.Hunters) > 0 {
+				// Move to last hunter of last processor
+				lastHunter := lastProc.Hunters[len(lastProc.Hunters)-1]
+				n.selectedIndex = n.getGlobalHunterIndex(lastHunter.ID, lastProc.Address)
+			} else {
+				// Last processor has no hunters, select the processor itself
+				n.selectedProcessorAddr = lastProc.Address
+			}
+		}
+		n.updateViewportContent()
 		return
 	}
 
-	// If at first hunter or processor is selected, move to input field (focused but not editing)
-	if n.selectedIndex == 0 || n.selectedProcessorAddr != "" {
-		n.selectedIndex = -1
-		n.selectedProcessorAddr = "" // Clear processor selection
-		n.editing = false
-		n.nodeInput.Blur()
-		n.updateViewportContent() // Refresh to show selection change
+	// If a processor is selected, move to previous processor's last hunter or previous processor
+	if n.selectedProcessorAddr != "" {
+		// Find current processor index
+		currentProcIdx := -1
+		for i, proc := range n.processors {
+			if proc.Address == n.selectedProcessorAddr {
+				currentProcIdx = i
+				break
+			}
+		}
+
+		if currentProcIdx > 0 {
+			// Move to previous processor's last hunter (or the processor if no hunters)
+			prevProc := n.processors[currentProcIdx-1]
+			n.selectedProcessorAddr = ""
+			if len(prevProc.Hunters) > 0 {
+				lastHunter := prevProc.Hunters[len(prevProc.Hunters)-1]
+				n.selectedIndex = n.getGlobalHunterIndex(lastHunter.ID, prevProc.Address)
+			} else {
+				// Previous processor has no hunters, select it
+				n.selectedProcessorAddr = prevProc.Address
+			}
+		} else {
+			// First processor, move to input
+			n.selectedProcessorAddr = ""
+			n.selectedIndex = -1
+		}
+		n.updateViewportContent()
 		return
 	}
 
-	// Otherwise, move to previous hunter
-	n.selectedIndex = n.selectedIndex - 1
-	n.updateViewportContent() // Refresh to show selection
+	// If a hunter is selected, move to previous hunter or to processor
+	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+		currentHunter := n.hunters[n.selectedIndex]
+
+		// Find which processor this hunter belongs to and its position
+		for _, proc := range n.processors {
+			for hunterIdx, hunter := range proc.Hunters {
+				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
+					if hunterIdx > 0 {
+						// Move to previous hunter in same processor
+						n.selectedIndex = n.getGlobalHunterIndex(proc.Hunters[hunterIdx-1].ID, proc.Address)
+					} else {
+						// First hunter of this processor, move to the processor itself
+						n.selectedIndex = -1
+						n.selectedProcessorAddr = proc.Address
+					}
+					n.updateViewportContent()
+					return
+				}
+			}
+		}
+	}
 }
 
 // Update handles key presses and mouse events

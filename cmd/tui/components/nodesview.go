@@ -1161,15 +1161,15 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 				}
 				headerLines = append(headerLines, ip)
 
-				// Body content (left-aligned, not bold, with aligned values)
-				const labelWidth = 10 // Width for label column
+				// Body content - use condensed format for narrow boxes, labeled format for wider boxes
+				const minWidthForLabels = 26 // Minimum width needed for labels
+				const labelWidth = 10         // Width for label column when labels are shown
 
 				// Interface
 				iface := "any"
 				if len(hunter.Interfaces) > 0 {
 					iface = hunter.Interfaces[0]
 				}
-				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Interface:", truncateString(iface, hunterBoxWidth-labelWidth-2)))
 
 				// Uptime
 				var uptimeStr string
@@ -1179,16 +1179,25 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 				} else {
 					uptimeStr = "-"
 				}
-				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Uptime:", uptimeStr))
 
-				// Captured
-				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Captured:", formatPacketNumber(hunter.PacketsCaptured)))
+				// Captured and Forwarded
+				capturedStr := formatPacketNumber(hunter.PacketsCaptured)
+				forwardedStr := formatPacketNumber(hunter.PacketsForwarded)
 
-				// Forwarded
-				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Forwarded:", formatPacketNumber(hunter.PacketsForwarded)))
-
-				// Filters
-				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %d", labelWidth, "Filters:", hunter.ActiveFilters))
+				if hunterBoxWidth < minWidthForLabels {
+					// Condensed format without labels for narrow boxes
+					bodyLines = append(bodyLines, truncateString(iface, hunterBoxWidth-4))
+					bodyLines = append(bodyLines, uptimeStr)
+					bodyLines = append(bodyLines, fmt.Sprintf("%s/%s", forwardedStr, capturedStr))
+					bodyLines = append(bodyLines, fmt.Sprintf("%d", hunter.ActiveFilters))
+				} else {
+					// Full format with aligned labels for wider boxes
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Interface:", truncateString(iface, hunterBoxWidth-labelWidth-2)))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Uptime:", uptimeStr))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Captured:", capturedStr))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Forwarded:", forwardedStr))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %d", labelWidth, "Filters:", hunter.ActiveFilters))
+				}
 
 				hunterBoxContents = append(hunterBoxContents, HunterBoxContent{
 					HeaderLines: headerLines,

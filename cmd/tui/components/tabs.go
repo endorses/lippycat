@@ -106,18 +106,18 @@ func (t *Tabs) UpdateTab(index int, label string, icon string) {
 
 // View renders the tabs
 func (t *Tabs) View() string {
-	// Active tab: no bottom border, sides extend down with one extra line
+	// Active tab: no bottom border, sides extend down with one extra line, heavy box characters
 	activeStyle := lipgloss.NewStyle().
 		Foreground(t.theme.InfoColor).
 		Bold(true).
 		Padding(0, 3, 1, 3).
 		Border(lipgloss.Border{
-			Top:         "─",
+			Top:         "━",
 			Bottom:      "",
-			Left:        "│",
-			Right:       "│",
-			TopLeft:     "╭",
-			TopRight:    "╮",
+			Left:        "┃",
+			Right:       "┃",
+			TopLeft:     "┏",
+			TopRight:    "┓",
 			BottomLeft:  "",
 			BottomRight: "",
 		}).
@@ -161,6 +161,7 @@ func (t *Tabs) View() string {
 	// Join tabs - we'll manually modify the last line to add corners
 	borderStyle := lipgloss.NewStyle().Foreground(t.theme.InfoColor)
 	activeCornerStyle := lipgloss.NewStyle().Foreground(t.theme.InfoColor)
+	activeBorderChar := "━" // Heavy horizontal line for entire bottom border
 
 	// Split each tab into lines (now indices match t.tabs)
 	tabLines := make([][]string, len(tabParts))
@@ -204,41 +205,41 @@ func (t *Tabs) View() string {
 		tabWidth := lipgloss.Width(lastLine)
 
 		if i == t.active {
-			// Active tab: replace border chars with corners
+			// Active tab: replace border chars with heavy corners
 			if tabWidth >= 2 {
 				if i == 0 {
-					// First tab: left corner ┘, right corner └
-					result.WriteString(activeCornerStyle.Render("┘"))
+					// First tab: left corner ┛, right corner ┗
+					result.WriteString(activeCornerStyle.Render("┛"))
 					if tabWidth > 2 {
 						result.WriteString(strings.Repeat(" ", tabWidth-2))
 					}
-					result.WriteString(activeCornerStyle.Render("└"))
+					result.WriteString(activeCornerStyle.Render("┗"))
 				} else {
-					// Other tabs: both corners ┘ and └
-					result.WriteString(activeCornerStyle.Render("┘"))
+					// Other tabs: both corners ┛ and ┗
+					result.WriteString(activeCornerStyle.Render("┛"))
 					if tabWidth > 2 {
 						result.WriteString(strings.Repeat(" ", tabWidth-2))
 					}
-					result.WriteString(activeCornerStyle.Render("└"))
+					result.WriteString(activeCornerStyle.Render("┗"))
 				}
 			}
 		} else {
-			// Inactive tab: horizontal line
+			// Inactive tab: heavy horizontal line (consistent with active tab)
 			if tabWidth > 0 {
-				result.WriteString(borderStyle.Render(strings.Repeat("─", tabWidth)))
+				result.WriteString(borderStyle.Render(strings.Repeat(activeBorderChar, tabWidth)))
 			}
 		}
 
-		// Add gap between tabs
+		// Add gap between tabs - always use heavy line for consistency
 		if i < len(t.tabs)-1 {
-			result.WriteString(borderStyle.Render("─"))
+			result.WriteString(borderStyle.Render(activeBorderChar))
 		}
 	}
 
-	// Fill remaining width with horizontal line
+	// Fill remaining width with heavy horizontal line
 	currentWidth := lipgloss.Width(result.String()) - lipgloss.Width(result.String()[:strings.LastIndex(result.String(), "\n")+1])
 	if currentWidth < t.width {
-		result.WriteString(borderStyle.Render(strings.Repeat("─", t.width-currentWidth)))
+		result.WriteString(borderStyle.Render(strings.Repeat(activeBorderChar, t.width-currentWidth)))
 	}
 
 	return result.String()

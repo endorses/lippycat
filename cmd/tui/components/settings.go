@@ -1367,15 +1367,15 @@ func (s *SettingsView) View() string {
 		Bold(true).
 		Width(20)
 
-	// Blue border when selected but not editing
+	// Cyan border with heavy characters when selected but not editing
 	selectedStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(s.theme.InfoColor).
+		Border(lipgloss.ThickBorder()).
+		BorderForeground(s.theme.SelectionBg).
 		Padding(0, 1)
 
-	// Red border when actively editing
+	// Red border with heavy characters when actively editing
 	editingStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.ThickBorder()).
 		BorderForeground(s.theme.FocusedBorderColor).
 		Padding(0, 1)
 
@@ -1412,17 +1412,17 @@ func (s *SettingsView) View() string {
 	switch s.captureMode {
 	case CaptureModeLive:
 		liveTabStyle = liveTabStyle.
-			Background(s.theme.InfoColor).
+			Background(s.theme.SelectionBg).
 			Foreground(lipgloss.Color("0")).
 			Bold(true)
 	case CaptureModeOffline:
 		offlineTabStyle = offlineTabStyle.
-			Background(s.theme.InfoColor).
+			Background(s.theme.SelectionBg).
 			Foreground(lipgloss.Color("0")).
 			Bold(true)
 	case CaptureModeRemote:
 		remoteTabStyle = remoteTabStyle.
-			Background(s.theme.InfoColor).
+			Background(s.theme.SelectionBg).
 			Foreground(lipgloss.Color("0")).
 			Bold(true)
 	}

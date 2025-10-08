@@ -323,8 +323,10 @@ func (p *PacketList) View(focused bool) string {
 
 	// Wrap in border - the height should match our total height minus margins
 	borderColor := p.theme.BorderColor
+	borderType := lipgloss.RoundedBorder()
 	if focused {
-		borderColor = p.theme.FocusedBorderColor // Solarized yellow when focused
+		borderColor = p.theme.SelectionBg // Cyan when focused
+		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
 	}
 
 	// Adaptive width: when in full-screen mode (details hidden), use full width
@@ -335,7 +337,7 @@ func (p *PacketList) View(focused bool) string {
 	}
 
 	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(borderType).
 		BorderForeground(borderColor).
 		Padding(1, 2).
 		Width(borderWidth).

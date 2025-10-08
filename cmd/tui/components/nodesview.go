@@ -1253,21 +1253,34 @@ func (n *NodesView) renderProcessorBox(lines []string, width int, style lipgloss
 	// For unselected boxes, use default theme colors
 	var borderStyle lipgloss.Style
 	var contentStyle lipgloss.Style
+	var topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical string
 
 	if isSelected {
-		// Selected: cyan border, normal text colors
+		// Selected: cyan border with heavy/bold box characters
 		borderStyle = lipgloss.NewStyle().Foreground(n.theme.SelectionBg)
 		contentStyle = style
+		topLeft = "┏"
+		topRight = "┓"
+		bottomLeft = "┗"
+		bottomRight = "┛"
+		horizontal = "━"
+		vertical = "┃"
 	} else {
-		// Unselected: gray border like hunters
+		// Unselected: gray border with light rounded box characters
 		borderStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground)
 		contentStyle = style
+		topLeft = "╭"
+		topRight = "╮"
+		bottomLeft = "╰"
+		bottomRight = "╯"
+		horizontal = "─"
+		vertical = "│"
 	}
 
 	// Top border
-	b.WriteString(borderStyle.Render("╭"))
-	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
-	b.WriteString(borderStyle.Render("╮"))
+	b.WriteString(borderStyle.Render(topLeft))
+	b.WriteString(borderStyle.Render(strings.Repeat(horizontal, width-2)))
+	b.WriteString(borderStyle.Render(topRight))
 	b.WriteString("\n")
 
 	// Content lines
@@ -1281,20 +1294,20 @@ func (n *NodesView) renderProcessorBox(lines []string, width int, style lipgloss
 		leftPad := padding / 2
 		rightPad := padding - leftPad
 
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString(" ")
 		b.WriteString(strings.Repeat(" ", leftPad))
 		b.WriteString(contentStyle.Render(displayLine))
 		b.WriteString(strings.Repeat(" ", rightPad))
 		b.WriteString(" ")
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString("\n")
 	}
 
 	// Bottom border
-	b.WriteString(borderStyle.Render("╰"))
-	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
-	b.WriteString(borderStyle.Render("╯"))
+	b.WriteString(borderStyle.Render(bottomLeft))
+	b.WriteString(borderStyle.Render(strings.Repeat(horizontal, width-2)))
+	b.WriteString(borderStyle.Render(bottomRight))
 
 	return b.String()
 }
@@ -1323,23 +1336,36 @@ func (n *NodesView) renderHunterBox(headerLines []string, bodyLines []string, wi
 	var borderStyle lipgloss.Style
 	var headerStyle lipgloss.Style
 	var bodyStyle lipgloss.Style
+	var topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical string
 
 	if isSelected {
-		// Selected: cyan border, status-colored header text
+		// Selected: cyan border with heavy/bold box characters, status-colored header text
 		borderStyle = lipgloss.NewStyle().Foreground(n.theme.SelectionBg)
 		headerStyle = lipgloss.NewStyle().Foreground(statusColor).Bold(true)
 		bodyStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground).Bold(false)
+		topLeft = "┏"
+		topRight = "┓"
+		bottomLeft = "┗"
+		bottomRight = "┛"
+		horizontal = "━"
+		vertical = "┃"
 	} else {
-		// Unselected: normal border, status-colored header text
+		// Unselected: normal border with light rounded box characters, status-colored header text
 		borderStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground)
 		headerStyle = lipgloss.NewStyle().Foreground(statusColor).Bold(true)
 		bodyStyle = baseStyle.Bold(false)
+		topLeft = "╭"
+		topRight = "╮"
+		bottomLeft = "╰"
+		bottomRight = "╯"
+		horizontal = "─"
+		vertical = "│"
 	}
 
 	// Top border
-	b.WriteString(borderStyle.Render("╭"))
-	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
-	b.WriteString(borderStyle.Render("╮"))
+	b.WriteString(borderStyle.Render(topLeft))
+	b.WriteString(borderStyle.Render(strings.Repeat(horizontal, width-2)))
+	b.WriteString(borderStyle.Render(topRight))
 	b.WriteString("\n")
 
 	// Header lines (centered and bold)
@@ -1352,22 +1378,22 @@ func (n *NodesView) renderHunterBox(headerLines []string, bodyLines []string, wi
 		leftPad := padding / 2
 		rightPad := padding - leftPad
 
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString(" ")
 		b.WriteString(strings.Repeat(" ", leftPad))
 		b.WriteString(headerStyle.Render(displayLine))
 		b.WriteString(strings.Repeat(" ", rightPad))
 		b.WriteString(" ")
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString("\n")
 	}
 
 	// Empty line separator between header and body
-	b.WriteString(borderStyle.Render("│"))
+	b.WriteString(borderStyle.Render(vertical))
 	b.WriteString(" ")
 	b.WriteString(strings.Repeat(" ", width-4))
 	b.WriteString(" ")
-	b.WriteString(borderStyle.Render("│"))
+	b.WriteString(borderStyle.Render(vertical))
 	b.WriteString("\n")
 
 	// Body lines (left-aligned, not bold)
@@ -1378,19 +1404,19 @@ func (n *NodesView) renderHunterBox(headerLines []string, bodyLines []string, wi
 		}
 		padding := width - len(displayLine) - 4
 
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString(" ")
 		b.WriteString(bodyStyle.Render(displayLine))
 		b.WriteString(strings.Repeat(" ", padding))
 		b.WriteString(" ")
-		b.WriteString(borderStyle.Render("│"))
+		b.WriteString(borderStyle.Render(vertical))
 		b.WriteString("\n")
 	}
 
 	// Bottom border
-	b.WriteString(borderStyle.Render("╰"))
-	b.WriteString(borderStyle.Render(strings.Repeat("─", width-2)))
-	b.WriteString(borderStyle.Render("╯"))
+	b.WriteString(borderStyle.Render(bottomLeft))
+	b.WriteString(borderStyle.Render(strings.Repeat(horizontal, width-2)))
+	b.WriteString(borderStyle.Render(bottomRight))
 
 	return b.String()
 }
@@ -1415,18 +1441,22 @@ func (n *NodesView) View() string {
 
 	b.WriteString(labelStyle.Render("Add Node:") + "\n")
 
-	// Input border color logic
+	// Input border color and style logic
 	var borderColor lipgloss.Color
+	var borderStyle lipgloss.Border
 	if n.editing {
 		borderColor = n.theme.FocusedBorderColor // Red when editing
+		borderStyle = lipgloss.ThickBorder()     // Heavy box characters when editing
 	} else if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
-		borderColor = n.theme.InfoColor // Blue when focused but not editing
+		borderColor = n.theme.SelectionBg    // Cyan when focused but not editing
+		borderStyle = lipgloss.ThickBorder() // Heavy box characters when focused
 	} else {
-		borderColor = n.theme.BorderColor // Gray when unfocused
+		borderColor = n.theme.BorderColor       // Gray when unfocused
+		borderStyle = lipgloss.RoundedBorder() // Light rounded characters when unfocused
 	}
 
 	inputWithBorder := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
+		BorderStyle(borderStyle).
 		BorderForeground(borderColor).
 		Padding(0, 1).
 		Width(n.width - 4)

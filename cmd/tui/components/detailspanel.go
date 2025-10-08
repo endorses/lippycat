@@ -107,12 +107,14 @@ func (d *DetailsPanel) View(focused bool) string {
 	}
 
 	borderColor := d.theme.BorderColor
+	borderType := lipgloss.RoundedBorder()
 	if focused {
-		borderColor = d.theme.FocusedBorderColor // Solarized yellow when focused
+		borderColor = d.theme.SelectionBg // Cyan when focused
+		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
 	}
 
 	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(borderType).
 		BorderForeground(borderColor).
 		Padding(1, 2).
 		Width(d.width).

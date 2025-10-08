@@ -1,3 +1,6 @@
+//go:build tui || all
+// +build tui all
+
 package tui
 
 import (
@@ -31,26 +34,10 @@ type PacketMsg struct {
 	Packet components.PacketDisplay
 }
 
-// PacketBatchMsg is sent when multiple packets are captured
-type PacketBatchMsg struct {
-	Packets []components.PacketDisplay
-}
-
-// HunterStatusMsg is sent with hunter status updates from remote processor
-type HunterStatusMsg struct {
-	Hunters []components.HunterInfo
-}
-
 // ProcessorConnectedMsg is sent when a processor connection succeeds
 type ProcessorConnectedMsg struct {
 	Address string
 	Client  interface{ Close() }
-}
-
-// ProcessorDisconnectedMsg is sent when a processor connection is lost
-type ProcessorDisconnectedMsg struct {
-	Address string
-	Error   error
 }
 
 // ProcessorReconnectMsg is sent to trigger a reconnection attempt
@@ -828,95 +815,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case remotecapture.PacketMsg:
-		// Handle packets from remote capture client
-		// Only process if we're in remote capture mode and not paused
-		if m.captureMode == components.CaptureModeRemote && !m.paused {
-			packet := msg.Packet
-			// NodeID should already be set by remotecapture client
-
-			// Add packet to ring buffer
-			if len(m.packets) >= m.maxPackets {
-				m.packets = m.packets[1:]
-				if len(m.filteredPackets) > 0 {
-					m.filteredPackets = m.filteredPackets[1:]
-				}
-			}
-			m.packets = append(m.packets, packet)
-			m.totalPackets++
-
-			m.updateStatistics(packet)
-
-			if !m.filterChain.IsEmpty() {
-				if m.filterChain.Match(packet) {
-					m.filteredPackets = append(m.filteredPackets, packet)
-					m.matchedPackets = len(m.filteredPackets)
-				}
-			} else {
-				m.matchedPackets = len(m.packets)
-			}
-
-			// Update packet list immediately for smooth streaming
-			if m.filterChain.IsEmpty() {
-				m.packetList.SetPackets(m.packets)
-			} else {
-				m.packetList.SetPackets(m.filteredPackets)
-			}
-
-			// Update details panel if showing details
-			if m.showDetails {
-				m.updateDetailsPanel()
-			}
-		}
-		return m, nil
-
-	case remotecapture.PacketBatchMsg:
-		// Handle batch of packets from remote capture client
-		// Only process if we're in remote capture mode and not paused
-		if m.captureMode == components.CaptureModeRemote && !m.paused {
-			for _, packet := range msg.Packets {
-				// Add packet to ring buffer
-				if len(m.packets) >= m.maxPackets {
-					m.packets = m.packets[1:]
-					if len(m.filteredPackets) > 0 {
-						m.filteredPackets = m.filteredPackets[1:]
-					}
-				}
-				m.packets = append(m.packets, packet)
-				m.totalPackets++
-
-				m.updateStatistics(packet)
-
-				// Apply filter to this single packet immediately
-				if !m.filterChain.IsEmpty() {
-					if m.filterChain.Match(packet) {
-						m.filteredPackets = append(m.filteredPackets, packet)
-					}
-				}
-			}
-
-			// Update matched count once per batch
-			if m.filterChain.IsEmpty() {
-				m.matchedPackets = len(m.packets)
-			} else {
-				m.matchedPackets = len(m.filteredPackets)
-			}
-
-			// Update packet list immediately for smooth streaming
-			if m.filterChain.IsEmpty() {
-				m.packetList.SetPackets(m.packets)
-			} else {
-				m.packetList.SetPackets(m.filteredPackets)
-			}
-
-			// Update details panel if showing details
-			if m.showDetails {
-				m.updateDetailsPanel()
-			}
-		}
-		return m, nil
-
-	case remotecapture.HunterStatusMsg:
+	case HunterStatusMsg:
 		// Handle hunter status from remote capture client
 		// Determine processor address from hunters or from the message source
 		var processorAddr string
@@ -944,14 +843,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update NodesView with processor info (includes processor IDs)
 		m.nodesView.SetProcessors(m.getProcessorInfoList())
 		return m, nil
-
-	case remotecapture.ProcessorDisconnectedMsg:
-		// Handle disconnection from remotecapture client (stream error, keepalive timeout, etc.)
-		// Convert to local ProcessorDisconnectedMsg type to trigger reconnection logic
-		return m.Update(ProcessorDisconnectedMsg{
-			Address: msg.Address,
-			Error:   msg.Error,
-		})
 
 	case components.UpdateBufferSizeMsg:
 		// Update buffer size on-the-fly without restarting capture
@@ -1125,7 +1016,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Attempt connection in background
 		go func() {
-			client, err := remotecapture.NewClient(msg.Address, currentProgram)
+			// Create TUI event handler adapter
+			handler := NewTUIEventHandler(currentProgram)
+			client, err := remotecapture.NewClient(msg.Address, handler)
 			if err != nil {
 				// Connection failed
 				currentProgram.Send(ProcessorDisconnectedMsg{

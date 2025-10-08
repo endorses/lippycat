@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"google.golang.org/grpc"
@@ -15,7 +14,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
-	"github.com/endorses/lippycat/cmd/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
 // NodeType represents the type of remote node
@@ -32,7 +31,7 @@ type Client struct {
 	conn       *grpc.ClientConn
 	dataClient data.DataServiceClient
 	mgmtClient management.ManagementServiceClient
-	program    *tea.Program
+	handler    types.EventHandler
 	ctx        context.Context
 	cancel     context.CancelFunc
 	nodeType   NodeType
@@ -44,34 +43,8 @@ type Client struct {
 	interfaces   map[string][]string
 }
 
-// PacketMsg is sent to TUI when a single packet is received
-// This must match the type in cmd/tui/model.go
-type PacketMsg struct {
-	Packet components.PacketDisplay
-}
-
-// PacketBatchMsg is sent to TUI when a batch of packets is received
-// This must match the type in cmd/tui/bridge.go
-type PacketBatchMsg struct {
-	Packets []components.PacketDisplay
-}
-
-// HunterStatusMsg is sent to TUI with hunter status updates
-// This must match the type in cmd/tui/model.go
-type HunterStatusMsg struct {
-	Hunters     []components.HunterInfo
-	ProcessorID string // ID of the processor these hunters belong to
-}
-
-// ProcessorDisconnectedMsg is sent to TUI when connection to processor is lost
-// This must match the type in cmd/tui/model.go
-type ProcessorDisconnectedMsg struct {
-	Address string
-	Error   error
-}
-
 // NewClient creates a new remote capture client
-func NewClient(addr string, program *tea.Program) (*Client, error) {
+func NewClient(addr string, handler types.EventHandler) (*Client, error) {
 	// Dial node (hunter or processor)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -95,7 +68,7 @@ func NewClient(addr string, program *tea.Program) (*Client, error) {
 		conn:       conn,
 		dataClient: data.NewDataServiceClient(conn),
 		mgmtClient: management.NewManagementServiceClient(conn),
-		program:    program,
+		handler:    handler,
 		ctx:        ctx,
 		cancel:     cancel,
 		addr:       addr,
@@ -156,26 +129,22 @@ func (c *Client) StreamPackets() error {
 				batch, err := stream.Recv()
 				if err != nil {
 					// Don't report error if context was cancelled (normal shutdown)
-					if c.ctx.Err() == nil && c.program != nil {
-						// Send disconnection message to trigger reconnection
-						c.program.Send(ProcessorDisconnectedMsg{
-							Address: c.addr,
-							Error:   fmt.Errorf("stream error: %w", err),
-						})
+					if c.ctx.Err() == nil && c.handler != nil {
+						// Notify handler of disconnection
+						c.handler.OnDisconnect(c.addr, fmt.Errorf("stream error: %w", err))
 					}
 					return
 				}
 
-				// Convert entire batch to PacketDisplay and send as single message to TUI
-				// This reduces Bubbletea Update() calls by ~100x
-				if c.program != nil && len(batch.Packets) > 0 {
-					displays := make([]components.PacketDisplay, 0, len(batch.Packets))
+				// Convert entire batch to PacketDisplay and send to handler
+				if c.handler != nil && len(batch.Packets) > 0 {
+					displays := make([]types.PacketDisplay, 0, len(batch.Packets))
 					for _, pkt := range batch.Packets {
 						display := c.convertToPacketDisplay(pkt, batch.HunterId)
 						displays = append(displays, display)
 					}
-					// Send entire batch as PacketBatchMsg (same as local capture)
-					c.program.Send(PacketBatchMsg{Packets: displays})
+					// Send entire batch to handler
+					c.handler.OnPacketBatch(displays)
 				}
 			}
 		}
@@ -199,7 +168,7 @@ func (c *Client) SubscribeHunterStatus() error {
 					return
 				case <-ticker.C:
 					// Create hunter info for this direct connection
-					hunters := []components.HunterInfo{
+					hunters := []types.HunterInfo{
 						{
 							ID:            c.nodeID,
 							Hostname:      c.addr,
@@ -209,11 +178,8 @@ func (c *Client) SubscribeHunterStatus() error {
 							// Stats will be inferred from packet stream
 						},
 					}
-					if c.program != nil {
-						c.program.Send(HunterStatusMsg{
-							Hunters:     hunters,
-							ProcessorID: "", // No processor for direct hunter connection
-						})
+					if c.handler != nil {
+						c.handler.OnHunterStatus(hunters, "") // No processor for direct hunter connection
 					}
 				}
 			}
@@ -234,12 +200,9 @@ func (c *Client) SubscribeHunterStatus() error {
 				resp, err := c.mgmtClient.GetHunterStatus(c.ctx, &management.StatusRequest{})
 				if err != nil {
 					// Don't report error if context was cancelled (normal shutdown)
-					if c.ctx.Err() == nil && c.program != nil {
-						// Send disconnection message to trigger reconnection
-						c.program.Send(ProcessorDisconnectedMsg{
-							Address: c.addr,
-							Error:   fmt.Errorf("hunter status error: %w", err),
-						})
+					if c.ctx.Err() == nil && c.handler != nil {
+						// Notify handler of disconnection
+						c.handler.OnDisconnect(c.addr, fmt.Errorf("hunter status error: %w", err))
 					}
 					return
 				}
@@ -254,7 +217,7 @@ func (c *Client) SubscribeHunterStatus() error {
 				c.interfacesMu.Unlock()
 
 				// Convert to HunterInfo list
-				hunters := make([]components.HunterInfo, len(resp.Hunters))
+				hunters := make([]types.HunterInfo, len(resp.Hunters))
 				for i, h := range resp.Hunters {
 					hunters[i] = c.convertToHunterInfo(h)
 				}
@@ -265,12 +228,9 @@ func (c *Client) SubscribeHunterStatus() error {
 					processorID = resp.ProcessorStats.ProcessorId
 				}
 
-				// Send to TUI
-				if c.program != nil {
-					c.program.Send(HunterStatusMsg{
-						Hunters:     hunters,
-						ProcessorID: processorID,
-					})
+				// Send to handler
+				if c.handler != nil {
+					c.handler.OnHunterStatus(hunters, processorID)
 				}
 			}
 		}
@@ -288,7 +248,7 @@ func (c *Client) Close() {
 }
 
 // convertToPacketDisplay converts a CapturedPacket to PacketDisplay
-func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID string) components.PacketDisplay {
+func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID string) types.PacketDisplay {
 	// Determine link type from packet metadata
 	linkType := layers.LinkType(pkt.LinkType)
 	if linkType == 0 {
@@ -515,7 +475,7 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		ifaceName = fmt.Sprintf("iface%d", pkt.InterfaceIndex)
 	}
 
-	return components.PacketDisplay{
+	return types.PacketDisplay{
 		Timestamp: ts,
 		SrcIP:     srcIP,
 		SrcPort:   srcPort,
@@ -531,10 +491,10 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 }
 
 // convertToHunterInfo converts ConnectedHunter to HunterInfo
-func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) components.HunterInfo {
+func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.HunterInfo {
 	connectedAt := time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9)
 
-	return components.HunterInfo{
+	return types.HunterInfo{
 		ID:               h.HunterId,
 		Hostname:         h.Hostname,
 		RemoteAddr:       h.RemoteAddr,

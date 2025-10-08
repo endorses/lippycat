@@ -1,43 +1,24 @@
+//go:build tui || all
+// +build tui all
+
 package components
 
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// VoIPMetadata contains parsed VoIP-specific data
-type VoIPMetadata struct {
-	From      string            // SIP From header
-	To        string            // SIP To header
-	CallID    string            // SIP Call-ID header
-	Method    string            // SIP method (INVITE, BYE, etc.)
-	User      string            // Username from URI
-	Codec     string            // RTP codec (if applicable)
-	Headers   map[string]string // All SIP headers
-	IsRTP     bool              // Whether this is an RTP packet
-	SSRC      uint32            // RTP SSRC
-	SeqNumber uint16            // RTP sequence number
-}
-
-// PacketDisplay represents a packet for display
-type PacketDisplay struct {
-	Timestamp time.Time
-	SrcIP     string
-	DstIP     string
-	SrcPort   string
-	DstPort   string
-	Protocol  string
-	Length    int
-	Info      string
-	RawData   []byte        // Raw packet bytes for hex dump
-	NodeID    string        // Source node identifier: "Local", hunter_id, or processor_id
-	Interface string        // Network interface where packet was captured
-	VoIPData  *VoIPMetadata // Parsed VoIP metadata (nil if not VoIP)
-}
+// Type aliases for backward compatibility within TUI
+// These types are now defined in internal/pkg/types to enable sharing
+// across the codebase without violating Go architecture principles.
+type (
+	VoIPMetadata  = types.VoIPMetadata
+	PacketDisplay = types.PacketDisplay
+)
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {

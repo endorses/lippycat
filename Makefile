@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage bench fmt vet tidy version help
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage bench fmt vet tidy version help all hunter processor cli tui binaries clean-binaries
 
 # Build variables
 BINARY_NAME=lc
@@ -20,10 +20,45 @@ LDFLAGS = -X github.com/endorses/lippycat/internal/pkg/version.Version=$(VERSION
           -X github.com/endorses/lippycat/internal/pkg/version.GitCommit=$(GIT_COMMIT) \
           -X github.com/endorses/lippycat/internal/pkg/version.BuildDate=$(BUILD_DATE)
 
-# Standard build
+# Standard build (complete suite with all tags)
 build:
-	@echo "Building $(BINARY_NAME) $(VERSION)..."
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY_NAME)
+	@echo "Building $(BINARY_NAME) $(VERSION) (complete suite)..."
+	$(GO) build $(GOFLAGS) -tags all -ldflags "$(LDFLAGS)" -o $(BINARY_NAME)
+
+# Build complete suite (explicit all tag)
+all:
+	@echo "Building complete suite $(BINARY_NAME) $(VERSION)..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags all -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)
+
+# Build hunter-only binary
+hunter:
+	@echo "Building hunter binary $(VERSION)..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags hunter -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-hunt
+
+# Build processor-only binary
+processor:
+	@echo "Building processor binary $(VERSION)..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags processor -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-process
+
+# Build CLI-only binary
+cli:
+	@echo "Building CLI binary $(VERSION)..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags cli -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-cli
+
+# Build TUI-only binary
+tui:
+	@echo "Building TUI binary $(VERSION)..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags tui -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-tui
+
+# Build all binary variants
+binaries: all hunter processor cli tui
+	@echo "All binary variants built successfully:"
+	@ls -lh bin/
 
 # Build with Profile-Guided Optimization
 build-pgo: $(PGO_PROFILE)
@@ -122,6 +157,11 @@ clean:
 	rm -f coverage.out coverage.html
 	$(GO) clean
 
+# Clean all binary variants
+clean-binaries:
+	@echo "Cleaning all binary variants..."
+	rm -rf bin/
+
 # Clean CUDA artifacts
 clean-cuda:
 	@echo "Cleaning CUDA artifacts..."
@@ -133,12 +173,20 @@ help:
 	@echo "lippycat Makefile - Current version: $(VERSION)"
 	@echo ""
 	@echo "Build targets:"
-	@echo "  make build          - Build with version info"
+	@echo "  make build          - Build complete suite (all commands)"
 	@echo "  make build-release  - Build optimized release binary"
 	@echo "  make build-pgo      - Build with Profile-Guided Optimization"
 	@echo "  make build-cuda     - Build with CUDA GPU acceleration"
 	@echo "  make cuda-kernels   - Build only CUDA kernels"
 	@echo "  make dev            - Quick build without version info"
+	@echo ""
+	@echo "Binary variants (built to bin/ directory):"
+	@echo "  make all            - Build complete suite (all commands)"
+	@echo "  make hunter         - Build hunter node only"
+	@echo "  make processor      - Build processor node only"
+	@echo "  make cli            - Build CLI commands only"
+	@echo "  make tui            - Build TUI interface only"
+	@echo "  make binaries       - Build all variants"
 	@echo ""
 	@echo "Installation:"
 	@echo "  make install        - Install to GOPATH/bin as 'lc'"
@@ -161,6 +209,7 @@ help:
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean          - Remove build artifacts"
+	@echo "  make clean-binaries - Remove all binary variants"
 	@echo "  make clean-cuda     - Remove CUDA build artifacts"
 	@echo "  make version        - Show version information"
 	@echo "  make help           - Show this help message"

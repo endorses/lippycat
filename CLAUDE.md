@@ -49,8 +49,18 @@ This architecture allows for:
 
 ### Build
 ```bash
-# Development build
+# Development build (complete suite)
 make build
+
+# Build all specialized variants
+make binaries
+
+# Build specific variants (outputs to bin/ directory)
+make all        # Complete suite with all commands
+make hunter     # Hunter node only (edge capture)
+make processor  # Processor node only (central aggregation)
+make cli        # CLI tools only (sniff, debug, interfaces)
+make tui        # TUI only (terminal interface)
 
 # Optimized release build
 make build-release
@@ -61,6 +71,15 @@ make build-cuda
 # Profile-guided optimization build
 make build-pgo
 ```
+
+**Build Tags:** The project uses Go build tags to create specialized binaries:
+- `all`: Complete suite (default)
+- `hunter`: Hunter node only
+- `processor`: Processor node only
+- `cli`: CLI commands only
+- `tui`: TUI interface only
+
+Each specialized build reduces binary size and dependencies by excluding unused commands.
 
 ### Install
 ```bash
@@ -92,8 +111,9 @@ make tidy  # Run go mod tidy
 
 ### Clean
 ```bash
-make clean       # Remove build artifacts
-make clean-cuda  # Remove CUDA artifacts
+make clean          # Remove build artifacts
+make clean-binaries # Remove all specialized binaries
+make clean-cuda     # Remove CUDA artifacts
 ```
 
 ## Development Guidelines

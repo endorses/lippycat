@@ -1,3 +1,6 @@
+//go:build cli || tui || all
+// +build cli tui all
+
 package cmd
 
 import (

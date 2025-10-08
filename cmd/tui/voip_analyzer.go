@@ -1,3 +1,6 @@
+//go:build tui || all
+// +build tui all
+
 package tui
 
 import (

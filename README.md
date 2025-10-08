@@ -39,13 +39,38 @@ make build-release
 make build-cuda
 ```
 
+#### Building Specialized Binaries
+
+lippycat supports building specialized binaries for specific deployment scenarios, reducing size and dependencies:
+
+```bash
+# Build all variants (output to bin/ directory)
+make binaries
+
+# Or build specific variants:
+make all        # Complete suite (36 MB) - all commands
+make hunter     # Hunter node only (28 MB) - edge capture
+make processor  # Processor node only (20 MB) - central aggregation
+make cli        # CLI tools only (29 MB) - sniff, debug, interfaces
+make tui        # TUI only (32 MB) - terminal interface
+```
+
+**Use cases:**
+- **Hunter**: Lightweight edge deployment on resource-constrained nodes
+- **Processor**: Central aggregation servers without TUI/CLI overhead
+- **CLI**: Headless servers for scripted packet capture
+- **TUI**: Interactive monitoring without distributed mode
+
 #### Using go build directly
 ```bash
-# Build as lc (to match Makefile)
-go build -o lc
+# Build complete suite
+go build -tags all -o lc
 
-# Or use custom binary name
-go build -o lippycat
+# Build specific variant
+go build -tags hunter -o lc-hunt
+go build -tags processor -o lc-process
+go build -tags cli -o lc-cli
+go build -tags tui -o lc-tui
 ```
 
 #### Installing system-wide

@@ -1,3 +1,6 @@
+//go:build tui || all
+// +build tui all
+
 package components
 
 import (
@@ -14,24 +17,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// HunterInfo represents a hunter node for display
-type HunterInfo struct {
-	ID               string
-	Hostname         string
-	RemoteAddr       string
-	Status           management.HunterStatus
-	ConnectedAt      int64
-	LastHeartbeat    int64
-	PacketsCaptured  uint64
-	PacketsMatched   uint64
-	PacketsForwarded uint64
-	PacketsDropped   uint64
-	ActiveFilters    uint32
-	Interfaces       []string
-	ProcessorAddr    string // Address of processor this hunter belongs to
-}
+// Type alias for backward compatibility within TUI
+// HunterInfo is now defined in internal/pkg/types to enable sharing
+type HunterInfo = types.HunterInfo
 
 // ProcessorInfo represents a processor node
 type ProcessorInfo struct {

@@ -1,3 +1,6 @@
+//go:build tui || all
+// +build tui all
+
 package themes
 
 import "github.com/charmbracelet/lipgloss"

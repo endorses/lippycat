@@ -1161,13 +1161,15 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 				}
 				headerLines = append(headerLines, ip)
 
-				// Body content (left-aligned, not bold)
+				// Body content (left-aligned, not bold, with aligned values)
+				const labelWidth = 10 // Width for label column
+
 				// Interface
 				iface := "any"
 				if len(hunter.Interfaces) > 0 {
 					iface = hunter.Interfaces[0]
 				}
-				bodyLines = append(bodyLines, fmt.Sprintf("Interface: %s", truncateString(iface, hunterBoxWidth-12)))
+				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Interface:", truncateString(iface, hunterBoxWidth-labelWidth-2)))
 
 				// Uptime
 				var uptimeStr string
@@ -1177,16 +1179,16 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 				} else {
 					uptimeStr = "-"
 				}
-				bodyLines = append(bodyLines, fmt.Sprintf("Uptime: %s", uptimeStr))
+				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Uptime:", uptimeStr))
 
 				// Captured
-				bodyLines = append(bodyLines, fmt.Sprintf("Captured: %s", formatPacketNumber(hunter.PacketsCaptured)))
+				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Captured:", formatPacketNumber(hunter.PacketsCaptured)))
 
 				// Forwarded
-				bodyLines = append(bodyLines, fmt.Sprintf("Forwarded: %s", formatPacketNumber(hunter.PacketsForwarded)))
+				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Forwarded:", formatPacketNumber(hunter.PacketsForwarded)))
 
 				// Filters
-				bodyLines = append(bodyLines, fmt.Sprintf("Filters: %d", hunter.ActiveFilters))
+				bodyLines = append(bodyLines, fmt.Sprintf("%-*s %d", labelWidth, "Filters:", hunter.ActiveFilters))
 
 				hunterBoxContents = append(hunterBoxContents, HunterBoxContent{
 					HeaderLines: headerLines,

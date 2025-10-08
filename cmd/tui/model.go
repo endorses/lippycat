@@ -1449,7 +1449,8 @@ func (m Model) View() string {
 		} else {
 			// Render packets view
 			minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-			if m.showDetails && m.width >= minWidthForDetails {
+			detailsVisible := m.showDetails && m.width >= minWidthForDetails
+			if detailsVisible {
 				// Split pane layout
 				leftFocused := m.focusedPane == "left"
 				rightFocused := m.focusedPane == "right"
@@ -1459,13 +1460,13 @@ func (m Model) View() string {
 				// Ensure details panel has the right size set
 				m.detailsPanel.SetSize(detailsWidth, contentHeight)
 
-				packetListView := m.packetList.View(leftFocused)
+				packetListView := m.packetList.View(leftFocused, true)
 				detailsPanelView := m.detailsPanel.View(rightFocused)
 
 				mainContent = lipgloss.JoinHorizontal(lipgloss.Top, packetListView, detailsPanelView)
 			} else {
-				// Full width packet list
-				mainContent = m.packetList.View(m.focusedPane == "left")
+				// Full width packet list - always show unfocused when details are hidden
+				mainContent = m.packetList.View(false, false)
 			}
 		}
 	case 1: // Nodes

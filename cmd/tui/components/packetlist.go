@@ -49,6 +49,7 @@ type PacketList struct {
 	headerHeight int
 	autoScroll   bool         // Whether to auto-scroll to bottom (like chat)
 	theme        themes.Theme // Color theme
+	detailsVisible bool       // Whether details panel is visible (affects column widths)
 
 	// Cached rendering state (invalidated on size/theme change)
 	cachedStyles     map[string]lipgloss.Style // protocol -> style
@@ -261,7 +262,13 @@ func (p *PacketList) SetCursor(position int) {
 }
 
 // View renders the packet list
-func (p *PacketList) View(focused bool) string {
+func (p *PacketList) View(focused bool, detailsVisible bool) string {
+	// Store detailsVisible for column width calculations
+	if p.detailsVisible != detailsVisible {
+		p.detailsVisible = detailsVisible
+		p.sizeChanged = true // Force recalculation of column widths
+	}
+
 	// Calculate the space available for content inside the box
 	// Box overhead: 2 (border) + 2 (vertical padding) = 4
 	// So the content height should be p.height - 3 to match details panel
@@ -322,17 +329,19 @@ func (p *PacketList) View(focused bool) string {
 	}
 
 	// Wrap in border - the height should match our total height minus margins
+	// When details are hidden, always show unfocused (gray with rounded borders)
+	// When details are visible, show focused state based on focused parameter
 	borderColor := p.theme.BorderColor
 	borderType := lipgloss.RoundedBorder()
-	if focused {
+	if focused && detailsVisible {
 		borderColor = p.theme.SelectionBg // Cyan when focused
 		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
 	}
 
-	// Adaptive width: when in full-screen mode (details hidden), use full width
-	// When in split mode (details visible), use normal width with padding
+	// Adaptive width: when details hidden, use full width (width - 2)
+	// When details visible (split mode), use width with padding (width - 4)
 	borderWidth := p.width - 4
-	if p.width > 140 { // Likely full-screen mode (details hidden)
+	if !detailsVisible {
 		borderWidth = p.width - 2
 	}
 
@@ -356,13 +365,13 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	}
 
 	// Recalculate column widths
-	// Border width is adaptive: p.width - 2 in full-screen, p.width - 4 in split mode
+	// Border width is adaptive: p.width - 2 when details hidden, p.width - 4 when details visible
 	// Content width = box_width - padding - border
-	// In full-screen: (p.width - 2) - 4 (padding) - 2 (border) = p.width - 8
-	// In split mode: (p.width - 4) - 4 (padding) - 2 (border) = p.width - 10
+	// Details hidden: (p.width - 2) - 4 (padding) - 2 (border) = p.width - 8
+	// Details visible: (p.width - 4) - 4 (padding) - 2 (border) = p.width - 10
 	// We add 1 char back for better spacing
 	availableWidth := p.width - 9
-	if p.width > 140 { // Full-screen mode (details hidden)
+	if !p.detailsVisible { // Full-width mode (details hidden)
 		availableWidth = p.width - 7
 	}
 

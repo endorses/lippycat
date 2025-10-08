@@ -49,24 +49,51 @@ This architecture allows for:
 
 ### Build
 ```bash
-go build -o lippycat
+# Development build
+make build
+
+# Optimized release build
+make build-release
+
+# Build with CUDA GPU acceleration
+make build-cuda
+
+# Profile-guided optimization build
+make build-pgo
+```
+
+### Install
+```bash
+# Install to GOPATH/bin
+make install
+
+# Install system-wide to /usr/local/bin (requires sudo)
+make install-system
 ```
 
 ### Test
 ```bash
-go test ./...
+make test          # Run all tests
+make test-verbose  # Verbose test output
+make test-coverage # Generate coverage report
+make bench         # Run benchmarks
 ```
 
 ### Format and Lint
 ```bash
-go fmt ./...
-go vet ./...
+make fmt   # Format code
+make vet   # Run go vet
 ```
 
 ### Module Management
 ```bash
-go mod tidy
-go mod download
+make tidy  # Run go mod tidy
+```
+
+### Clean
+```bash
+make clean       # Remove build artifacts
+make clean-cuda  # Remove CUDA artifacts
 ```
 
 ## Development Guidelines
@@ -86,36 +113,36 @@ go mod download
 ## CLI Usage
 
 ### Available Commands
-- `lippycat sniff`: CLI mode for packet capture with various output formats
-- `lippycat sniff voip`: VoIP-specific packet capture with SIP/RTP analysis
-- `lippycat tui`: TUI mode for interactive real-time packet monitoring on local interface
-- `lippycat hunt`: Hunter node for distributed capture (forwards packets to processor)
-- `lippycat process`: Processor node for distributed analysis (receives from hunters)
-- `lippycat interfaces`: List available network interfaces
-- `lippycat debug`: Debug and inspect TCP SIP processing components
+- `lc sniff`: CLI mode for packet capture with various output formats
+- `lc sniff voip`: VoIP-specific packet capture with SIP/RTP analysis
+- `lc tui`: TUI mode for interactive real-time packet monitoring on local interface
+- `lc hunt`: Hunter node for distributed capture (forwards packets to processor)
+- `lc process`: Processor node for distributed analysis (receives from hunters)
+- `lc interfaces`: List available network interfaces
+- `lc debug`: Debug and inspect TCP SIP processing components
 
 ### Standalone Mode
 ```bash
 # General packet capture
-sudo lippycat sniff --interface eth0 --filter "port 80"
+sudo lc sniff --interface eth0 --filter "port 80"
 
 # VoIP-specific capture
-sudo lippycat sniff voip --interface eth0 --sipuser alice
+sudo lc sniff voip --interface eth0 --sipuser alice
 
 # Interactive TUI
-sudo lippycat tui
+sudo lc tui
 ```
 
 ### Distributed Mode
 ```bash
 # Start processor node (receives packets from hunters)
-lippycat process --listen 0.0.0.0:50051
+lc process --listen 0.0.0.0:50051
 
 # Start hunter node (captures and forwards packets)
-sudo lippycat hunt --interface eth0 --processor processor-host:50051
+sudo lc hunt --interface eth0 --processor processor-host:50051
 
 # Monitor remote nodes via TUI
-lippycat tui --remote --nodes-file nodes.yaml
+lc tui --remote --nodes-file nodes.yaml
 ```
 
 Configuration via YAML file (in priority order):

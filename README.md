@@ -2,7 +2,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Currently focused on VoIP (SIP/RTP) analysis with plans for multi-protocol support.
 
-**Status:** v0.1.0 - Early development. Expect breaking changes.
+**Status:** v0.2.0 - Early development. Expect breaking changes.
 
 ## Features
 
@@ -218,11 +218,12 @@ go test ./...
 
 ## Roadmap
 
-### Current (v0.1.0)
+### Current (v0.2.0)
 - VoIP/SIP analysis (UDP and TCP)
-- Distributed capture architecture
-- SIMD optimizations
+- Distributed capture architecture with build-tagged specialized binaries
+- SIMD optimizations and optional GPU acceleration
 - TUI and CLI interfaces
+- Protocol detection with signature-based matching
 
 ### Planned
 - HTTP/HTTPS protocol support

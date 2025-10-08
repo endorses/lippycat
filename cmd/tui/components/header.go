@@ -144,19 +144,19 @@ func (h *Header) View() string {
 				if h.nodeCount > 1 {
 					hunterWord = "hunters"
 				}
-				middleText = fmt.Sprintf("Remote: %d %s | %d %s", h.processorCount, processorWord, h.nodeCount, hunterWord)
+				middleText = fmt.Sprintf("Nodes: %d %s | %d %s", h.processorCount, processorWord, h.nodeCount, hunterWord)
 			} else {
 				// Direct hunter connections (no processors)
 				hunterWord := "hunter"
 				if h.nodeCount > 1 {
 					hunterWord = "hunters"
 				}
-				middleText = fmt.Sprintf("Remote: %d %s (direct)", h.nodeCount, hunterWord)
+				middleText = fmt.Sprintf("Nodes: %d %s (direct)", h.nodeCount, hunterWord)
 			}
 		} else if h.iface != "" {
-			middleText = fmt.Sprintf("Remote: %s", h.iface)
+			middleText = fmt.Sprintf("Nodes: %s", h.iface)
 		} else {
-			middleText = "Remote: add nodes via Nodes tab"
+			middleText = "Nodes: add nodes via Nodes tab"
 		}
 	default:
 		middleText = fmt.Sprintf("Interface: %s", h.iface)

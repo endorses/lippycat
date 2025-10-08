@@ -384,7 +384,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.SetTheme(m.theme)
 				saveThemePreference(m.theme)
 				return m, nil
-			case "tab", "shift+tab":
+			case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4":
 				// Let these fall through to normal tab switching logic
 			default:
 				// Forward everything else to settings view
@@ -517,6 +517,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "shift+tab": // Switch tabs backward
 			m.tabs.Previous()
+			return m, nil
+
+		case "alt+1": // Switch to Capture tab
+			m.tabs.SetActive(0)
+			return m, nil
+
+		case "alt+2": // Switch to Nodes tab
+			m.tabs.SetActive(1)
+			return m, nil
+
+		case "alt+3": // Switch to Statistics tab
+			m.tabs.SetActive(2)
+			return m, nil
+
+		case "alt+4": // Switch to Settings tab
+			m.tabs.SetActive(3)
 			return m, nil
 
 		case "t": // Toggle theme

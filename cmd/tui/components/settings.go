@@ -987,9 +987,14 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else {
 						// Send buffer size update when exiting edit mode
 						if s.focusIndex == 3 {
+							s.inputs[inputBufferSize].Blur()
 							return func() tea.Msg {
 								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 							}
+						} else if s.focusIndex == 4 {
+							// BPF filter changed - restart capture to apply it
+							s.inputs[inputBPFFilter].Blur()
+							return s.restartCapture()
 						}
 						s.inputs[inputBufferSize].Blur()
 						s.inputs[inputBPFFilter].Blur()
@@ -1066,6 +1071,9 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 							return func() tea.Msg {
 								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 							}
+						} else if s.focusIndex == 3 {
+							// BPF filter changed - restart capture to apply it
+							return s.restartCapture()
 						}
 					}
 				}
@@ -1273,6 +1281,9 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 						}
 					} else if s.focusIndex == 4 {
 						s.inputs[inputBPFFilter].Blur()
+						s.editing = false
+						// BPF filter changed - restart capture to apply it
+						return s.restartCapture()
 					}
 				} else if s.captureMode == CaptureModeRemote {
 					// Restore placeholder when blurring with Esc
@@ -1294,11 +1305,15 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					} else if s.focusIndex == 2 {
 						s.inputs[inputBufferSize].Blur()
 						// Save buffer size when exiting edit mode
+						s.editing = false
 						return func() tea.Msg {
 							return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 						}
 					} else if s.focusIndex == 3 {
 						s.inputs[inputBPFFilter].Blur()
+						s.editing = false
+						// BPF filter changed - restart capture to apply it
+						return s.restartCapture()
 					}
 				}
 				s.editing = false
@@ -1607,7 +1622,7 @@ func (s *SettingsView) View() string {
 		Foreground(s.theme.InfoColor).
 		Padding(0, 2)
 
-	noteText := "Note: Changes to mode, interface, or PCAP file trigger capture restart"
+	noteText := "Note: Changes to mode, interface, PCAP file, or BPF filter trigger capture restart"
 	sections = append(sections, noteStyle.Render(noteText))
 
 	// Additional help text explaining filters

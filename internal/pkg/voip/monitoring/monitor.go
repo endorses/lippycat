@@ -13,37 +13,33 @@ import (
 
 // Monitor coordinates all monitoring subsystems
 type Monitor struct {
-	enabled           atomic.Bool
-	metricsCollector  *MetricsCollector
-	prometheusExporter *PrometheusExporter
-	tracingExporter   *TracingExporter
-	updateInterval    time.Duration
-	stopChan          chan struct{}
-	wg                sync.WaitGroup
-	mu                sync.RWMutex
+	enabled          atomic.Bool
+	metricsCollector *MetricsCollector
+	tracingExporter  *TracingExporter
+	updateInterval   time.Duration
+	stopChan         chan struct{}
+	wg               sync.WaitGroup
+	mu               sync.RWMutex
 }
 
 // MonitorConfig contains configuration for the monitoring system
 type MonitorConfig struct {
-	Enabled                bool          `mapstructure:"enabled"`
-	MetricsEnabled         bool          `mapstructure:"metrics_enabled"`
-	PrometheusEnabled      bool          `mapstructure:"prometheus_enabled"`
-	PrometheusPort         int           `mapstructure:"prometheus_port"`
-	TracingEnabled         bool          `mapstructure:"tracing_enabled"`
-	UpdateInterval         time.Duration `mapstructure:"update_interval"`
-	EnableRuntimeMetrics   bool          `mapstructure:"enable_runtime_metrics"`
-	EnableSystemMetrics    bool          `mapstructure:"enable_system_metrics"`
-	EnablePluginMetrics    bool          `mapstructure:"enable_plugin_metrics"`
+	Enabled              bool          `mapstructure:"enabled"`
+	MetricsEnabled       bool          `mapstructure:"metrics_enabled"`
+	TracingEnabled       bool          `mapstructure:"tracing_enabled"`
+	UpdateInterval       time.Duration `mapstructure:"update_interval"`
+	EnableRuntimeMetrics bool          `mapstructure:"enable_runtime_metrics"`
+	EnableSystemMetrics  bool          `mapstructure:"enable_system_metrics"`
+	EnablePluginMetrics  bool          `mapstructure:"enable_plugin_metrics"`
 }
 
 // NewMonitor creates a new monitoring coordinator
 func NewMonitor(config MonitorConfig) *Monitor {
 	monitor := &Monitor{
-		metricsCollector:   NewMetricsCollector(),
-		prometheusExporter: NewPrometheusExporter(config.PrometheusPort),
-		tracingExporter:    NewTracingExporter("lippycat"),
-		updateInterval:     config.UpdateInterval,
-		stopChan:          make(chan struct{}),
+		metricsCollector: NewMetricsCollector(),
+		tracingExporter:  NewTracingExporter("lippycat"),
+		updateInterval:   config.UpdateInterval,
+		stopChan:         make(chan struct{}),
 	}
 
 	if config.UpdateInterval == 0 {
@@ -68,15 +64,6 @@ func (m *Monitor) Enable(config MonitorConfig) error {
 	if config.MetricsEnabled {
 		m.metricsCollector.Enable()
 		logger.Info("Internal metrics collection enabled")
-	}
-
-	// Start Prometheus exporter if enabled
-	if config.PrometheusEnabled {
-		if err := m.prometheusExporter.Enable(); err != nil {
-			logger.Error("Failed to enable Prometheus exporter", "error", err)
-			return err
-		}
-		logger.Info("Prometheus metrics enabled", "port", config.PrometheusPort)
 	}
 
 	// Start tracing if enabled
@@ -111,7 +98,6 @@ func (m *Monitor) Disable() error {
 
 	// Disable subsystems
 	m.metricsCollector.Disable()
-	m.prometheusExporter.Disable()
 	m.tracingExporter.Disable()
 
 	m.enabled.Store(false)
@@ -156,11 +142,6 @@ func (m *Monitor) updateMetrics(config MonitorConfig) {
 	// Collect system metrics if enabled
 	if config.EnableSystemMetrics {
 		m.collectSystemMetrics()
-	}
-
-	// Update Prometheus metrics from internal collector
-	if config.PrometheusEnabled && m.prometheusExporter.IsEnabled() {
-		m.prometheusExporter.UpdateMetrics()
 	}
 
 	logger.Debug("Updated monitoring metrics")
@@ -212,11 +193,6 @@ func (m *Monitor) GetMetricsCollector() *MetricsCollector {
 	return m.metricsCollector
 }
 
-// GetPrometheusExporter returns the Prometheus exporter
-func (m *Monitor) GetPrometheusExporter() *PrometheusExporter {
-	return m.prometheusExporter
-}
-
 // GetTracingExporter returns the tracing exporter
 func (m *Monitor) GetTracingExporter() *TracingExporter {
 	return m.tracingExporter
@@ -225,11 +201,10 @@ func (m *Monitor) GetTracingExporter() *TracingExporter {
 // GetStats returns comprehensive monitoring statistics
 func (m *Monitor) GetStats() map[string]interface{} {
 	stats := map[string]interface{}{
-		"enabled":    m.enabled.Load(),
+		"enabled": m.enabled.Load(),
 		"components": map[string]interface{}{
-			"metrics":    m.metricsCollector.GetAllMetrics(),
-			"prometheus": m.prometheusExporter.IsEnabled(),
-			"tracing":    m.tracingExporter.GetStats(),
+			"metrics": m.metricsCollector.GetAllMetrics(),
+			"tracing": m.tracingExporter.GetStats(),
 		},
 	}
 
@@ -244,13 +219,6 @@ func (m *Monitor) RecordVoIPEvent(ctx context.Context, eventType string, metadat
 
 	// Record metrics
 	m.metricsCollector.IncrementCounter(fmt.Sprintf("voip_events_%s", eventType))
-
-	// Add to Prometheus if enabled
-	if m.prometheusExporter.IsEnabled() {
-		if protocol, ok := metadata["protocol"].(string); ok {
-			m.prometheusExporter.RecordCallEvent(eventType, protocol)
-		}
-	}
 
 	// Add trace info if span exists
 	if span := SpanFromContext(ctx); span != nil {
@@ -272,12 +240,6 @@ func (m *Monitor) RecordPacketProcessing(ctx context.Context, protocol, directio
 	m.metricsCollector.IncrementCounter("packets_processed")
 	m.metricsCollector.RecordDuration("packet_processing_time", duration)
 
-	// Prometheus metrics
-	if m.prometheusExporter.IsEnabled() {
-		m.prometheusExporter.RecordPacketProcessed(protocol, direction, "default")
-		m.prometheusExporter.RecordProcessingDuration("packet_processor", protocol, duration)
-	}
-
 	// Tracing
 	if span := SpanFromContext(ctx); span != nil {
 		span.AddTag("processing_duration_ms", float64(duration.Nanoseconds())/1e6)
@@ -296,14 +258,6 @@ func (m *Monitor) RecordPluginExecution(ctx context.Context, pluginName, protoco
 
 	if !success {
 		m.metricsCollector.IncrementCounter(fmt.Sprintf("plugin_%s_errors", pluginName))
-	}
-
-	// Prometheus metrics
-	if m.prometheusExporter.IsEnabled() {
-		m.prometheusExporter.RecordPluginProcessingDuration(pluginName, protocol, duration)
-		if !success {
-			m.prometheusExporter.RecordError("plugin", pluginName)
-		}
 	}
 
 	// Tracing
@@ -325,13 +279,6 @@ func (m *Monitor) RecordCallTrackingEvent(ctx context.Context, callID, event str
 	// Record metrics
 	m.metricsCollector.IncrementCounter(fmt.Sprintf("call_events_%s", event))
 
-	// Prometheus metrics
-	if m.prometheusExporter.IsEnabled() {
-		if protocol, ok := metadata["protocol"].(string); ok {
-			m.prometheusExporter.RecordCallEvent(event, protocol)
-		}
-	}
-
 	// Tracing
 	if span := SpanFromContext(ctx); span != nil {
 		span.AddTag("call_event", event)
@@ -349,10 +296,6 @@ func (m *Monitor) UpdateActiveCallCount(count int, protocol string) {
 	}
 
 	m.metricsCollector.SetGauge("active_calls", int64(count))
-
-	if m.prometheusExporter.IsEnabled() {
-		m.prometheusExporter.SetActiveCalls(count, protocol)
-	}
 }
 
 // Global monitoring instance
@@ -365,7 +308,6 @@ var (
 func GetGlobalMonitor() *Monitor {
 	monitorOnce.Do(func() {
 		config := MonitorConfig{
-			PrometheusPort: 9090,
 			UpdateInterval: 30 * time.Second,
 		}
 		globalMonitor = NewMonitor(config)

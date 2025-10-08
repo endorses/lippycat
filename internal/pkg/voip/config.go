@@ -59,16 +59,14 @@ type Config struct {
 
 	// Monitoring configurations - disabled by default
 	MonitoringEnabled        bool          `mapstructure:"monitoring_enabled"`
-	MetricsEnabled          bool          `mapstructure:"metrics_enabled"`
-	PrometheusEnabled       bool          `mapstructure:"prometheus_enabled"`
-	PrometheusPort          int           `mapstructure:"prometheus_port"`
-	TracingEnabled          bool          `mapstructure:"tracing_enabled"`
+	MetricsEnabled           bool          `mapstructure:"metrics_enabled"`
+	TracingEnabled           bool          `mapstructure:"tracing_enabled"`
 	MonitoringUpdateInterval time.Duration `mapstructure:"monitoring_update_interval"`
-	EnableRuntimeMetrics    bool          `mapstructure:"enable_runtime_metrics"`
-	EnableSystemMetrics     bool          `mapstructure:"enable_system_metrics"`
-	EnablePluginMetrics     bool          `mapstructure:"enable_plugin_metrics"`
-	TCPLatencyOptimization bool  `mapstructure:"tcp_latency_optimization"`
-	EnableAutoTuning       bool  `mapstructure:"enable_auto_tuning"`
+	EnableRuntimeMetrics     bool          `mapstructure:"enable_runtime_metrics"`
+	EnableSystemMetrics      bool          `mapstructure:"enable_system_metrics"`
+	EnablePluginMetrics      bool          `mapstructure:"enable_plugin_metrics"`
+	TCPLatencyOptimization   bool          `mapstructure:"tcp_latency_optimization"`
+	EnableAutoTuning         bool          `mapstructure:"enable_auto_tuning"`
 }
 
 // initConfigDefaults initializes viper defaults once
@@ -113,8 +111,6 @@ func initConfigDefaults() {
 	// Monitoring system defaults - disabled by default for backward compatibility
 	viper.SetDefault("voip.monitoring_enabled", false)
 	viper.SetDefault("voip.metrics_enabled", false)
-	viper.SetDefault("voip.prometheus_enabled", false)
-	viper.SetDefault("voip.prometheus_port", 9090)
 	viper.SetDefault("voip.tracing_enabled", false)
 	viper.SetDefault("voip.monitoring_update_interval", 30*time.Second)
 	viper.SetDefault("voip.enable_runtime_metrics", true)
@@ -193,14 +189,12 @@ func GetConfig() *Config {
 
 		// Monitoring configurations
 		MonitoringEnabled:        viper.GetBool("voip.monitoring_enabled"),
-		MetricsEnabled:          viper.GetBool("voip.metrics_enabled"),
-		PrometheusEnabled:       viper.GetBool("voip.prometheus_enabled"),
-		PrometheusPort:          viper.GetInt("voip.prometheus_port"),
-		TracingEnabled:          viper.GetBool("voip.tracing_enabled"),
+		MetricsEnabled:           viper.GetBool("voip.metrics_enabled"),
+		TracingEnabled:           viper.GetBool("voip.tracing_enabled"),
 		MonitoringUpdateInterval: getPositiveDuration("voip.monitoring_update_interval", 30*time.Second),
-		EnableRuntimeMetrics:    viper.GetBool("voip.enable_runtime_metrics"),
-		EnableSystemMetrics:     viper.GetBool("voip.enable_system_metrics"),
-		EnablePluginMetrics:     viper.GetBool("voip.enable_plugin_metrics"),
+		EnableRuntimeMetrics:     viper.GetBool("voip.enable_runtime_metrics"),
+		EnableSystemMetrics:      viper.GetBool("voip.enable_system_metrics"),
+		EnablePluginMetrics:      viper.GetBool("voip.enable_plugin_metrics"),
 	}
 
 	return config

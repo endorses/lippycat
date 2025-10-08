@@ -41,25 +41,26 @@ make build-cuda
 
 #### Building Specialized Binaries
 
-lippycat supports building specialized binaries for specific deployment scenarios, reducing size and dependencies:
+lippycat uses Go build tags to create optimized binaries for specific deployment scenarios:
 
 ```bash
 # Build all variants (output to bin/ directory)
 make binaries
 
-# Or build specific variants:
-make all        # Complete suite (36 MB) - all commands
-make hunter     # Hunter node only (28 MB) - edge capture
-make processor  # Processor node only (20 MB) - central aggregation
-make cli        # CLI tools only (29 MB) - sniff, debug, interfaces
-make tui        # TUI only (32 MB) - terminal interface
+# Or build specific variants (all stripped and optimized):
+make all        # Complete suite (22 MB) - all commands
+make hunter     # Hunter node only (18 MB) - edge capture
+make processor  # Processor node only (14 MB) - central aggregation
+make cli        # CLI tools only - sniff, debug, interfaces
+make tui        # TUI only - terminal interface
 ```
 
 **Use cases:**
-- **Hunter**: Lightweight edge deployment on resource-constrained nodes
+- **Hunter**: Edge deployment with GPU-accelerated filtering, minimal size
 - **Processor**: Central aggregation servers without TUI/CLI overhead
 - **CLI**: Headless servers for scripted packet capture
 - **TUI**: Interactive monitoring without distributed mode
+- **Complete suite**: All-in-one deployment with every feature
 
 #### Using go build directly
 ```bash

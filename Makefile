@@ -29,31 +29,31 @@ build:
 all:
 	@echo "Building complete suite $(BINARY_NAME) $(VERSION)..."
 	@mkdir -p bin
-	$(GO) build $(GOFLAGS) -tags all -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)
+	$(GO) build $(GOFLAGS) -tags all -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)
 
-# Build hunter-only binary
+# Build hunter-only binary (stripped, no metrics)
 hunter:
-	@echo "Building hunter binary $(VERSION)..."
+	@echo "Building hunter binary $(VERSION) (stripped, minimal)..."
 	@mkdir -p bin
-	$(GO) build $(GOFLAGS) -tags hunter -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-hunt
+	$(GO) build $(GOFLAGS) -tags hunter -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-hunt
 
-# Build processor-only binary
+# Build processor-only binary (stripped, no metrics)
 processor:
-	@echo "Building processor binary $(VERSION)..."
+	@echo "Building processor binary $(VERSION) (stripped, minimal)..."
 	@mkdir -p bin
-	$(GO) build $(GOFLAGS) -tags processor -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-process
+	$(GO) build $(GOFLAGS) -tags processor -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-process
 
-# Build CLI-only binary
+# Build CLI-only binary (stripped, no metrics)
 cli:
-	@echo "Building CLI binary $(VERSION)..."
+	@echo "Building CLI binary $(VERSION) (stripped, minimal)..."
 	@mkdir -p bin
-	$(GO) build $(GOFLAGS) -tags cli -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-cli
+	$(GO) build $(GOFLAGS) -tags cli -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-cli
 
-# Build TUI-only binary
+# Build TUI-only binary (stripped, no metrics)
 tui:
-	@echo "Building TUI binary $(VERSION)..."
+	@echo "Building TUI binary $(VERSION) (stripped, minimal)..."
 	@mkdir -p bin
-	$(GO) build $(GOFLAGS) -tags tui -ldflags "$(LDFLAGS)" -o bin/$(BINARY_NAME)-tui
+	$(GO) build $(GOFLAGS) -tags tui -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tui
 
 # Build all binary variants
 binaries: all hunter processor cli tui
@@ -63,12 +63,12 @@ binaries: all hunter processor cli tui
 # Build with Profile-Guided Optimization
 build-pgo: $(PGO_PROFILE)
 	@echo "Building $(BINARY_NAME) $(VERSION) with PGO..."
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -pgo=$(PGO_PROFILE) -o $(BINARY_NAME)
+	$(GO) build $(GOFLAGS) -tags all -ldflags "$(LDFLAGS)" -pgo=$(PGO_PROFILE) -o $(BINARY_NAME)
 
 # Build release (optimized, stripped)
 build-release:
 	@echo "Building release $(BINARY_NAME) $(VERSION)..."
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS) -s -w" -o $(BINARY_NAME)
+	$(GO) build $(GOFLAGS) -tags all -ldflags "$(LDFLAGS) -s -w" -o $(BINARY_NAME)
 
 # Build CUDA kernels
 cuda-kernels:
@@ -97,7 +97,7 @@ install-system: build
 # Quick dev build without version info
 dev:
 	@echo "Building development version..."
-	$(GO) build -o $(BINARY_NAME)
+	$(GO) build -tags all -o $(BINARY_NAME)
 
 # Generate CPU profile for PGO
 # Run this with a realistic workload to capture production behavior

@@ -17,15 +17,13 @@ func InitializeMonitoringFromConfig() error {
 	}
 
 	monitorConfig := monitoring.MonitorConfig{
-		Enabled:                config.MonitoringEnabled,
-		MetricsEnabled:         config.MetricsEnabled,
-		PrometheusEnabled:      config.PrometheusEnabled,
-		PrometheusPort:         config.PrometheusPort,
-		TracingEnabled:         config.TracingEnabled,
-		UpdateInterval:         config.MonitoringUpdateInterval,
-		EnableRuntimeMetrics:   config.EnableRuntimeMetrics,
-		EnableSystemMetrics:    config.EnableSystemMetrics,
-		EnablePluginMetrics:    config.EnablePluginMetrics,
+		Enabled:              config.MonitoringEnabled,
+		MetricsEnabled:       config.MetricsEnabled,
+		TracingEnabled:       config.TracingEnabled,
+		UpdateInterval:       config.MonitoringUpdateInterval,
+		EnableRuntimeMetrics: config.EnableRuntimeMetrics,
+		EnableSystemMetrics:  config.EnableSystemMetrics,
+		EnablePluginMetrics:  config.EnablePluginMetrics,
 	}
 
 	if err := monitoring.InitializeMonitoring(monitorConfig); err != nil {
@@ -34,8 +32,6 @@ func InitializeMonitoringFromConfig() error {
 
 	logger.Info("VoIP monitoring initialized",
 		"metrics_enabled", config.MetricsEnabled,
-		"prometheus_enabled", config.PrometheusEnabled,
-		"prometheus_port", config.PrometheusPort,
 		"tracing_enabled", config.TracingEnabled)
 
 	return nil

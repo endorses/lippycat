@@ -22,16 +22,19 @@ This architecture allows for:
 ### Core Architecture
 - **CLI Framework**: Uses Cobra CLI framework with Viper for configuration
 - **Plugin System**: Extensible architecture allowing protocol-specific analyzers to be added
+- **Build Tags**: Go build tags enable specialized binary variants (hunter, processor, cli, tui, all)
 - **Main Components**:
-  - `cmd/`: CLI command definitions and argument handling
+  - `cmd/`: CLI command definitions with build-tag-based variants
   - `cmd/tui/`: Terminal User Interface with Bubbletea framework
   - `cmd/hunt/`: Hunter node implementation for distributed capture
   - `cmd/process/`: Processor node implementation for distributed analysis
+  - `internal/pkg/types/`: Shared domain types (PacketDisplay, VoIPMetadata, EventHandler)
   - `internal/pkg/capture/`: Network packet capture functionality using gopacket
   - `internal/pkg/voip/`: VoIP protocol plugin (SIP, RTP, call tracking)
   - `internal/pkg/hunter/`: Hunter node core logic and gRPC client
   - `internal/pkg/processor/`: Processor node core logic and gRPC server
-  - `internal/pkg/remotecapture/`: Remote capture infrastructure
+  - `internal/pkg/remotecapture/`: Remote capture infrastructure with EventHandler pattern
+  - `internal/pkg/detector/`: Protocol detection with signature-based matching
   - `internal/pkg/simd/`: SIMD optimizations (AVX2/SSE4.2)
   - `internal/pkg/logger/`: Structured logging
   - `api/proto/`: gRPC protocol buffer definitions
@@ -49,21 +52,24 @@ This architecture allows for:
 
 ### Build
 ```bash
-# Development build (complete suite)
-make build
+# Development build (complete suite, unstripped)
+make build        # ~31 MB with debug symbols
 
-# Build all specialized variants
+# Build all specialized variants (stripped, optimized)
 make binaries
 
-# Build specific variants (outputs to bin/ directory)
-make all        # Complete suite with all commands
-make hunter     # Hunter node only (edge capture)
-make processor  # Processor node only (central aggregation)
-make cli        # CLI tools only (sniff, debug, interfaces)
-make tui        # TUI only (terminal interface)
+# Build specific variants (outputs to bin/ directory, all stripped)
+make all          # Complete suite (22 MB) - all commands
+make hunter       # Hunter node (18 MB) - edge capture with GPU filtering
+make processor    # Processor node (14 MB) - central aggregation
+make cli          # CLI tools only - sniff, debug, interfaces
+make tui          # TUI only - terminal interface
 
-# Optimized release build
-make build-release
+# Optimized release build (stripped)
+make build-release  # 22 MB
+
+# Quick dev build (unstripped, no version info)
+make dev           # ~31 MB
 
 # Build with CUDA GPU acceleration
 make build-cuda
@@ -73,13 +79,13 @@ make build-pgo
 ```
 
 **Build Tags:** The project uses Go build tags to create specialized binaries:
-- `all`: Complete suite (default)
-- `hunter`: Hunter node only
-- `processor`: Processor node only
-- `cli`: CLI commands only
-- `tui`: TUI interface only
+- `all`: Complete suite with all commands (default)
+- `hunter`: Hunter node only - includes GPU acceleration and protocol detection
+- `processor`: Processor node only - includes protocol analysis and gRPC server
+- `cli`: CLI commands only - sniff, debug, interfaces
+- `tui`: TUI interface only - terminal UI with remote monitoring
 
-Each specialized build reduces binary size and dependencies by excluding unused commands.
+Each specialized build is stripped (`-s -w`) and optimized to reduce binary size while maintaining full functionality for its role. Hunter nodes include all protocol detectors and GPU acceleration for edge filtering.
 
 ### Install
 ```bash
@@ -170,5 +176,42 @@ Configuration via YAML file (in priority order):
 2. `$HOME/.config/lippycat.yaml` (XDG standard)
 3. `$HOME/.lippycat.yaml` (legacy)
 
+## Architecture Patterns
+
+### EventHandler Pattern
+The `internal/pkg/remotecapture` package uses the EventHandler pattern to decouple infrastructure from presentation:
+
+```go
+// internal/pkg/types/events.go
+type EventHandler interface {
+    OnPacketBatch(packets []PacketDisplay)
+    OnHunterStatus(hunters []HunterInfo, processorID string)
+    OnDisconnect(address string, err error)
+}
+```
+
+This allows the remote capture client to work with different frontends (TUI, CLI, Web) without coupling to specific UI frameworks.
+
+### Shared Types
+`internal/pkg/types` provides domain types shared across packages:
+- `PacketDisplay`: Common packet representation
+- `VoIPMetadata`: VoIP-specific packet metadata
+- `HunterInfo`: Hunter node status
+- `EventHandler`: Event notification interface
+
+This prevents circular dependencies and maintains clean architecture boundaries (cmd ← internal, never internal → cmd).
+
+### Build Tag Architecture
+Each command has build-tagged root files:
+- `cmd/root_all.go`: Complete suite (`//go:build all`)
+- `cmd/root_hunter.go`: Hunter only (`//go:build hunter && !all`)
+- `cmd/root_processor.go`: Processor only (`//go:build processor && !all`)
+- `cmd/root_cli.go`: CLI only (`//go:build cli && !all`)
+- `cmd/root_tui.go`: TUI only (`//go:build tui && !all`)
+
+Commands register themselves in their respective root files, allowing the compiler to exclude unused code paths.
+
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.
+
+The hunter node includes protocol detection for multiple protocols (HTTP, DNS, TLS, MySQL, PostgreSQL, VoIP, VPN) with signature-based matching and GPU acceleration support for filtering at the edge.

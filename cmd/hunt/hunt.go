@@ -183,7 +183,6 @@ func getStringSliceConfig(key string, flagValue []string) []string {
 }
 
 func getIntConfig(key string, flagValue int) int {
-	// Simplified version without circular reference
 	if viper.IsSet(key) {
 		return viper.GetInt(key)
 	}

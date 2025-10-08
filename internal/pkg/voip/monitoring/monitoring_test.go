@@ -83,38 +83,6 @@ func TestHistogram(t *testing.T) {
 	assert.Contains(t, stats.Percentiles, "p99")
 }
 
-func TestPrometheusExporter(t *testing.T) {
-	exporter := NewPrometheusExporter(9091) // Use different port to avoid conflicts
-	require.NotNil(t, exporter)
-
-	// Test enable/disable
-	assert.False(t, exporter.IsEnabled())
-
-	err := exporter.Enable()
-	require.NoError(t, err)
-	assert.True(t, exporter.IsEnabled())
-
-	// Give server time to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Test metrics recording
-	exporter.RecordPacketProcessed("sip", "inbound", "eth0")
-	exporter.RecordCallEvent("created", "sip")
-	exporter.SetActiveCalls(5, "sip")
-	exporter.RecordProcessingDuration("packet_processor", "sip", 10*time.Millisecond)
-	exporter.RecordError("plugin", "sip_error")
-
-	// Test update metrics
-	collector := NewMetricsCollector()
-	collector.Enable()
-	collector.IncrementCounter("test_metric")
-	exporter.UpdateMetrics()
-
-	err = exporter.Disable()
-	require.NoError(t, err)
-	assert.False(t, exporter.IsEnabled())
-}
-
 func TestTracingExporter(t *testing.T) {
 	tracer := NewTracingExporter("test-service")
 	require.NotNil(t, tracer)
@@ -201,11 +169,10 @@ func TestSpanOperations(t *testing.T) {
 
 func TestMonitor(t *testing.T) {
 	config := MonitorConfig{
-		Enabled:           true,
-		MetricsEnabled:    true,
-		PrometheusEnabled: false, // Disable to avoid port conflicts
-		TracingEnabled:    true,
-		UpdateInterval:    1 * time.Second,
+		Enabled:        true,
+		MetricsEnabled: true,
+		TracingEnabled: true,
+		UpdateInterval: 1 * time.Second,
 	}
 
 	monitor := NewMonitor(config)
@@ -314,10 +281,6 @@ func TestGlobalInstances(t *testing.T) {
 	collector := GetGlobalMetricsCollector()
 	require.NotNil(t, collector)
 
-	// Test global Prometheus exporter
-	prometheus := GetGlobalPrometheusExporter()
-	require.NotNil(t, prometheus)
-
 	// Test global tracing exporter
 	tracing := GetGlobalTracingExporter()
 	require.NotNil(t, tracing)
@@ -333,20 +296,8 @@ func TestGlobalInstances(t *testing.T) {
 	RecordHistogram("test_global_histogram", 10.5)
 	RecordDuration("test_global_duration", 100*time.Millisecond)
 
-	// Test global Prometheus functions
-	ctx := context.Background()
-	RecordPacket(ctx, "sip", "inbound", 1*time.Millisecond)
-	RecordCall("created", "sip")
-	UpdateActiveCalls(10, "sip")
-	RecordProcessingTime("processor", "sip", 10*time.Millisecond)
-	RecordPluginTime("sip_plugin", "sip", 5*time.Millisecond)
-	UpdatePluginHealth("sip_plugin", 2)
-	RecordMonitoringError("test", "error")
-	UpdateMemoryUsage("test", 1024)
-	UpdateTCPStreams("active", 5)
-	UpdateBufferUsage("tcp", 0.75)
-
 	// Test global monitoring functions
+	ctx := context.Background()
 	RecordPacket(ctx, "sip", "inbound", 10*time.Millisecond)
 	RecordPlugin(ctx, "sip_plugin", "sip", 5*time.Millisecond, true)
 	RecordCallEvent(ctx, "call123", "created", map[string]interface{}{"protocol": "sip"})

@@ -1,9 +1,11 @@
-.PHONY: build build-pgo build-release install dev profile pgo-prepare clean test test-verbose test-coverage bench fmt vet tidy version help
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage bench fmt vet tidy version help
 
 # Build variables
 BINARY_NAME=lc
+CUDA_BINARY_NAME=lc-cuda
 PGO_PROFILE=default.pgo
 PROFILE_DATA=cpu.prof
+CUDA_DIR=internal/pkg/voip
 
 # Version information
 # Try git tag first, then VERSION file, then git commit, finally "dev"
@@ -33,10 +35,29 @@ build-release:
 	@echo "Building release $(BINARY_NAME) $(VERSION)..."
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS) -s -w" -o $(BINARY_NAME)
 
-# Install to GOPATH/bin
-install:
-	@echo "Installing $(BINARY_NAME) $(VERSION)..."
-	$(GO) install $(GOFLAGS) -ldflags "$(LDFLAGS)"
+# Build CUDA kernels
+cuda-kernels:
+	@echo "Building CUDA kernels..."
+	cd $(CUDA_DIR) && $(MAKE) -f Makefile.cuda
+
+# Build with CUDA support
+build-cuda: cuda-kernels
+	@echo "Building $(CUDA_BINARY_NAME) $(VERSION) with CUDA support..."
+	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags cuda -ldflags "$(LDFLAGS)" -o $(CUDA_BINARY_NAME)
+
+# Install to GOPATH/bin or /usr/local/bin
+install: build
+	@echo "Installing $(BINARY_NAME) $(VERSION) to $(shell go env GOPATH)/bin/..."
+	@mkdir -p $(shell go env GOPATH)/bin
+	@cp $(BINARY_NAME) $(shell go env GOPATH)/bin/$(BINARY_NAME)
+	@echo "Installed as: $(BINARY_NAME)"
+	@echo "Make sure $(shell go env GOPATH)/bin is in your PATH"
+
+# Install to system-wide location (requires sudo)
+install-system: build
+	@echo "Installing $(BINARY_NAME) $(VERSION) to /usr/local/bin/..."
+	sudo cp $(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
+	@echo "Installed system-wide as: $(BINARY_NAME)"
 
 # Quick dev build without version info
 dev:
@@ -101,6 +122,12 @@ clean:
 	rm -f coverage.out coverage.html
 	$(GO) clean
 
+# Clean CUDA artifacts
+clean-cuda:
+	@echo "Cleaning CUDA artifacts..."
+	cd $(CUDA_DIR) && $(MAKE) -f Makefile.cuda clean
+	rm -f $(CUDA_BINARY_NAME)
+
 # Help
 help:
 	@echo "lippycat Makefile - Current version: $(VERSION)"
@@ -109,8 +136,13 @@ help:
 	@echo "  make build          - Build with version info"
 	@echo "  make build-release  - Build optimized release binary"
 	@echo "  make build-pgo      - Build with Profile-Guided Optimization"
-	@echo "  make install        - Install to GOPATH/bin"
+	@echo "  make build-cuda     - Build with CUDA GPU acceleration"
+	@echo "  make cuda-kernels   - Build only CUDA kernels"
 	@echo "  make dev            - Quick build without version info"
+	@echo ""
+	@echo "Installation:"
+	@echo "  make install        - Install to GOPATH/bin as 'lc'"
+	@echo "  make install-system - Install to /usr/local/bin as 'lc' (requires sudo)"
 	@echo ""
 	@echo "Development:"
 	@echo "  make test           - Run tests"
@@ -129,5 +161,6 @@ help:
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean          - Remove build artifacts"
+	@echo "  make clean-cuda     - Remove CUDA build artifacts"
 	@echo "  make version        - Show version information"
 	@echo "  make help           - Show this help message"

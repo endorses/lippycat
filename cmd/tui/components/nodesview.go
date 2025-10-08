@@ -1165,10 +1165,10 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 				const minWidthForLabels = 26 // Minimum width needed for labels
 				const labelWidth = 10         // Width for label column when labels are shown
 
-				// Interface
+				// Interface(s) - show all interfaces
 				iface := "any"
 				if len(hunter.Interfaces) > 0 {
-					iface = hunter.Interfaces[0]
+					iface = strings.Join(hunter.Interfaces, ", ")
 				}
 
 				// Uptime

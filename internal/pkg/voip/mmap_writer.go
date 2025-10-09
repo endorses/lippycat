@@ -136,6 +136,16 @@ func (w *MmapWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
 	// Write packet record directly to memory-mapped region
 	pos := w.currentPos
 
+	// Verify bounds before unsafe operations to prevent buffer overflow
+	if pos < 0 || pos+16 > int64(len(w.mmapData)) {
+		return fmt.Errorf("invalid header position: pos=%d, need 16 bytes, have %d",
+			pos, len(w.mmapData))
+	}
+	if pos+16+int64(len(data)) > int64(len(w.mmapData)) {
+		return fmt.Errorf("insufficient mmap space: need %d bytes at pos=%d, have %d",
+			16+len(data), pos, len(w.mmapData))
+	}
+
 	// Write PCAP record header (16 bytes)
 	// This is a simplified version - in production you'd want proper endianness handling
 	header := (*[16]byte)(unsafe.Pointer(&w.mmapData[pos]))
@@ -149,7 +159,7 @@ func (w *MmapWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
 	// Original length
 	*(*uint32)(unsafe.Pointer(&header[12])) = uint32(ci.Length)
 
-	// Copy packet data
+	// Copy packet data (bounds already verified above)
 	copy(w.mmapData[pos+16:pos+16+int64(len(data))], data)
 
 	w.currentPos += recordSize

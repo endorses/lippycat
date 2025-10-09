@@ -60,12 +60,11 @@ type Processor struct {
 	huntersMu sync.RWMutex
 	hunters   map[string]*ConnectedHunter
 
-	// PCAP writer (async)
+	// PCAP writer (async with single writer goroutine)
 	pcapFile            *os.File
 	pcapWriter          *pcapgo.Writer
 	pcapWriteQueue      chan []*data.CapturedPacket
 	pcapWriterWg        sync.WaitGroup
-	pcapWriterMu        sync.Mutex     // Protects pcapWriter (not thread-safe)
 	perCallPcapWriter   *PcapWriterManager // Per-call PCAP writer
 	pcapWriteErrors     atomic.Uint64  // Track total write errors
 	pcapConsecErrors    atomic.Uint64  // Track consecutive write errors
@@ -755,49 +754,43 @@ func (p *Processor) initPCAPWriter() error {
 	// Create write queue (buffered channel)
 	p.pcapWriteQueue = make(chan []*data.CapturedPacket, 1000)
 
-	// Start worker pool (2-4 workers for parallel writes)
-	numWorkers := 2
-	for i := 0; i < numWorkers; i++ {
-		p.pcapWriterWg.Add(1)
-		go p.pcapWriteWorker(i)
-	}
+	// Start single writer goroutine
+	// Note: PCAP writes are inherently serial (file format requires sequential writes)
+	// Multiple workers would just compete for mutex with no benefit
+	p.pcapWriterWg.Add(1)
+	go p.pcapWriteWorker()
 
-	logger.Info("Async PCAP writer initialized", "file", p.config.WriteFile, "workers", numWorkers)
+	logger.Info("Async PCAP writer initialized", "file", p.config.WriteFile)
 	return nil
 }
 
-// pcapWriteWorker processes PCAP write queue asynchronously
-func (p *Processor) pcapWriteWorker(workerID int) {
+// pcapWriteWorker processes PCAP write queue asynchronously (single writer)
+func (p *Processor) pcapWriteWorker() {
 	defer p.pcapWriterWg.Done()
 
-	logger.Debug("PCAP write worker started", "worker_id", workerID)
+	logger.Debug("PCAP write worker started")
 
 	for {
 		select {
 		case <-p.ctx.Done():
-			logger.Debug("PCAP write worker stopping", "worker_id", workerID)
+			logger.Debug("PCAP write worker stopping")
 			return
 
 		case packets, ok := <-p.pcapWriteQueue:
 			if !ok {
-				logger.Debug("PCAP write queue closed", "worker_id", workerID)
+				logger.Debug("PCAP write queue closed")
 				return
 			}
 
-			// Write batch to PCAP file
-			// Note: gopacket's pcapgo.Writer is NOT thread-safe
-			// We need a mutex here, but it's only contended by workers, not the hot path
+			// Write batch to PCAP file (single writer - no mutex needed)
 			p.writePacketBatchToPCAP(packets)
 		}
 	}
 }
 
-// writePacketBatchToPCAP writes a batch of packets to PCAP file (called by workers)
+// writePacketBatchToPCAP writes a batch of packets to PCAP file (called by single writer)
 func (p *Processor) writePacketBatchToPCAP(packets []*data.CapturedPacket) {
-	// pcapgo.Writer is not thread-safe, so we need synchronization between workers
-	// This mutex is only contended by workers, not the main packet processing path
-	p.pcapWriterMu.Lock()
-	defer p.pcapWriterMu.Unlock()
+	// No mutex needed - single writer goroutine ensures serial access
 
 	batchErrors := 0
 	for _, pkt := range packets {

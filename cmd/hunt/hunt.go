@@ -47,6 +47,13 @@ var (
 	enableVoIPFilter bool
 	gpuBackend       string
 	gpuBatchSize     int
+	// TLS flags
+	tlsEnabled      bool
+	tlsCertFile     string
+	tlsKeyFile      string
+	tlsCAFile       string
+	tlsSkipVerify   bool
+	insecureAllowed bool
 )
 
 func init() {
@@ -70,6 +77,14 @@ func init() {
 	HuntCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	HuntCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "Batch size for GPU processing")
 
+	// TLS configuration (security)
+	HuntCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption (recommended for production)")
+	HuntCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "Path to client TLS certificate (for mutual TLS)")
+	HuntCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "Path to client TLS key (for mutual TLS)")
+	HuntCmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for server verification")
+	HuntCmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (INSECURE - testing only)")
+	HuntCmd.Flags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
+
 	// Bind to viper for config file support
 	viper.BindPFlag("hunter.processor_addr", HuntCmd.Flags().Lookup("processor"))
 	viper.BindPFlag("hunter.hunter_id", HuntCmd.Flags().Lookup("hunter-id"))
@@ -82,6 +97,11 @@ func init() {
 	viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.Flags().Lookup("enable-voip-filter"))
 	viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.Flags().Lookup("gpu-backend"))
 	viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.Flags().Lookup("gpu-batch-size"))
+	viper.BindPFlag("hunter.tls.enabled", HuntCmd.Flags().Lookup("tls"))
+	viper.BindPFlag("hunter.tls.cert_file", HuntCmd.Flags().Lookup("tls-cert"))
+	viper.BindPFlag("hunter.tls.key_file", HuntCmd.Flags().Lookup("tls-key"))
+	viper.BindPFlag("hunter.tls.ca_file", HuntCmd.Flags().Lookup("tls-ca"))
+	viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.Flags().Lookup("tls-skip-verify"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {
@@ -99,6 +119,36 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		EnableVoIPFilter: getBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
 		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
 		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
+		// TLS configuration
+		TLSEnabled:    getBoolConfig("hunter.tls.enabled", tlsEnabled),
+		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),
+		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
+		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
+		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+	}
+
+	// Security check: require explicit opt-in to insecure mode
+	if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
+		return fmt.Errorf("TLS is disabled but --insecure flag not set\n\n" +
+			"For security, lippycat requires TLS encryption for production deployments.\n" +
+			"To enable TLS, use: --tls --tls-ca=/path/to/ca.crt\n" +
+			"To explicitly allow insecure connections (NOT RECOMMENDED), use: --insecure\n\n" +
+			"WARNING: Insecure mode transmits network traffic in cleartext!")
+	}
+
+	// Display security banner
+	if !config.TLSEnabled {
+		logger.Warn("═══════════════════════════════════════════════════════════")
+		logger.Warn("  SECURITY WARNING: TLS ENCRYPTION DISABLED")
+		logger.Warn("  Packet data will be transmitted in CLEARTEXT")
+		logger.Warn("  This mode should ONLY be used in trusted networks")
+		logger.Warn("  Enable TLS for production: --tls --tls-ca=/path/to/ca.crt")
+		logger.Warn("═══════════════════════════════════════════════════════════")
+	} else {
+		logger.Info("═══════════════════════════════════════════════════════════")
+		logger.Info("  Security: TLS ENABLED ✓")
+		logger.Info("  All traffic to processor will be encrypted")
+		logger.Info("═══════════════════════════════════════════════════════════")
 	}
 
 	// Set default hunter ID to hostname if not specified

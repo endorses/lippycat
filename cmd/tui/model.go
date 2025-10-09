@@ -90,6 +90,8 @@ type ProcessorConnection struct {
 // Model represents the TUI application state
 type Model struct {
 	packets         []components.PacketDisplay // Ring buffer of packets (all captured)
+	packetsHead     int                        // Head index for circular buffer
+	packetsCount    int                        // Current number of packets in buffer
 	filteredPackets []components.PacketDisplay // Filtered packets for display
 	maxPackets      int                        // Maximum packets to keep in memory
 	packetList      components.PacketList      // Packet list component
@@ -129,6 +131,25 @@ type Model struct {
 	viewMode        string                     // "packets" or "calls" (for VoIP)
 	lastClickTime   time.Time                  // Time of last mouse click for double-click detection
 	lastClickPacket int                        // Index of packet clicked for double-click detection
+}
+
+// getPacketsInOrder returns packets from the circular buffer in chronological order
+func (m *Model) getPacketsInOrder() []components.PacketDisplay {
+	if m.packetsCount == 0 {
+		return nil
+	}
+
+	if m.packetsCount < m.maxPackets {
+		// Buffer not full yet, packets are in order from index 0
+		return m.packets[:m.packetsCount]
+	}
+
+	// Buffer is full, need to reorder starting from head
+	result := make([]components.PacketDisplay, m.maxPackets)
+	for i := 0; i < m.maxPackets; i++ {
+		result[i] = m.packets[(m.packetsHead+i)%m.maxPackets]
+	}
+	return result
 }
 
 // NewModel creates a new TUI model
@@ -429,17 +450,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.filterChain.IsEmpty() {
 				m.filterChain.Clear()
 				m.filteredPackets = make([]components.PacketDisplay, 0)
-				m.matchedPackets = len(m.packets)
-				m.packetList.SetPackets(m.packets)
+				m.matchedPackets = m.packetsCount
+				m.packetList.SetPackets(m.getPacketsInOrder())
 			}
 			return m, nil
 
 		case "x": // Clear/flush packets
 			m.packets = make([]components.PacketDisplay, 0, m.maxPackets)
+			m.packetsHead = 0
+			m.packetsCount = 0
 			m.filteredPackets = make([]components.PacketDisplay, 0)
 			m.totalPackets = 0
 			m.matchedPackets = 0
-			m.packetList.SetPackets(m.packets)
+			m.packetList.SetPackets(m.getPacketsInOrder())
 			// Reuse maps instead of reallocating (Go 1.21+)
 			clear(m.statistics.ProtocolCounts)
 			clear(m.statistics.SourceCounts)
@@ -715,7 +738,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Update packet list component with filtered packets
 				// No need to reapply filters - they're applied per-packet now
 				if m.filterChain.IsEmpty() {
-					m.packetList.SetPackets(m.packets)
+					m.packetList.SetPackets(m.getPacketsInOrder())
 				} else {
 					m.packetList.SetPackets(m.filteredPackets)
 				}
@@ -741,16 +764,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					packet.NodeID = "Local"
 				}
 
-				// Add packet to ring buffer
-				if len(m.packets) >= m.maxPackets {
-					// Remove oldest packet
-					m.packets = m.packets[1:]
-					// Also remove from filtered if needed
-					if len(m.filteredPackets) > 0 {
+				// Add packet to circular ring buffer
+				if m.packetsCount < m.maxPackets {
+					// Buffer not full yet - append
+					m.packets = append(m.packets, packet)
+					m.packetsCount++
+				} else {
+					// Buffer full - overwrite oldest (at head)
+					m.packets[m.packetsHead] = packet
+					m.packetsHead = (m.packetsHead + 1) % m.maxPackets
+
+					// Also remove oldest from filtered if buffer full
+					if len(m.filteredPackets) >= m.maxPackets {
 						m.filteredPackets = m.filteredPackets[1:]
 					}
 				}
-				m.packets = append(m.packets, packet)
 				m.totalPackets++
 
 				// Update statistics (lightweight)
@@ -766,14 +794,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Update matched count once per batch
 			if m.filterChain.IsEmpty() {
-				m.matchedPackets = len(m.packets)
+				m.matchedPackets = m.packetsCount
 			} else {
 				m.matchedPackets = len(m.filteredPackets)
 			}
 
 			// Update packet list immediately for smooth streaming
 			if m.filterChain.IsEmpty() {
-				m.packetList.SetPackets(m.packets)
+				m.packetList.SetPackets(m.getPacketsInOrder())
 			} else {
 				m.packetList.SetPackets(m.filteredPackets)
 			}
@@ -793,16 +821,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				packet.NodeID = "Local"
 			}
 
-			// Add packet to ring buffer
-			if len(m.packets) >= m.maxPackets {
-				// Remove oldest packet
-				m.packets = m.packets[1:]
-				// Also remove from filtered if needed
-				if len(m.filteredPackets) > 0 {
+			// Add packet to circular ring buffer
+			if m.packetsCount < m.maxPackets {
+				// Buffer not full yet - append
+				m.packets = append(m.packets, packet)
+				m.packetsCount++
+			} else {
+				// Buffer full - overwrite oldest (at head)
+				m.packets[m.packetsHead] = packet
+				m.packetsHead = (m.packetsHead + 1) % m.maxPackets
+
+				// Also remove oldest from filtered if buffer full
+				if len(m.filteredPackets) >= m.maxPackets {
+					// Simple approach: rebuild filtered list
+					// This is still O(n) but happens less frequently than every packet
 					m.filteredPackets = m.filteredPackets[1:]
 				}
 			}
-			m.packets = append(m.packets, packet)
 			m.totalPackets++
 
 			// Update statistics (lightweight)
@@ -815,12 +850,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.matchedPackets = len(m.filteredPackets)
 				}
 			} else {
-				m.matchedPackets = len(m.packets)
+				m.matchedPackets = m.packetsCount
 			}
 
 			// Update packet list immediately for smooth streaming
 			if m.filterChain.IsEmpty() {
-				m.packetList.SetPackets(m.packets)
+				m.packetList.SetPackets(m.getPacketsInOrder())
 			} else {
 				m.packetList.SetPackets(m.filteredPackets)
 			}
@@ -866,9 +901,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update buffer size on-the-fly without restarting capture
 		m.maxPackets = msg.Size
 
-		// If current packets exceed new buffer size, trim them
-		if len(m.packets) > m.maxPackets {
-			m.packets = m.packets[len(m.packets)-m.maxPackets:]
+		// If current packets exceed new buffer size, rebuild buffer keeping newest packets
+		if m.packetsCount > m.maxPackets {
+			// Extract packets in order (handling circular buffer)
+			orderedPackets := m.getPacketsInOrder()
+
+			// Keep only the newest maxPackets
+			if len(orderedPackets) > m.maxPackets {
+				orderedPackets = orderedPackets[len(orderedPackets)-m.maxPackets:]
+			}
+
+			// Reset circular buffer with new data
+			m.packets = orderedPackets
+			m.packetsHead = 0
+			m.packetsCount = len(orderedPackets)
 		}
 
 		// Save to config file
@@ -914,6 +960,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Clear old packets with new buffer size
 		m.packets = make([]components.PacketDisplay, 0, m.maxPackets)
+		m.packetsHead = 0
+		m.packetsCount = 0
 		m.filteredPackets = make([]components.PacketDisplay, 0)
 		m.totalPackets = 0
 		m.matchedPackets = 0
@@ -1003,8 +1051,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// "All" protocol - clear filters
 			m.filterChain.Clear()
 			m.filteredPackets = make([]components.PacketDisplay, 0)
-			m.matchedPackets = len(m.packets)
-			m.packetList.SetPackets(m.packets)
+			m.matchedPackets = m.packetsCount
+			m.packetList.SetPackets(m.getPacketsInOrder())
 		}
 
 		// Switch to calls view if VoIP protocol selected
@@ -1543,8 +1591,8 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Empty filter = clear all filters
 			m.filterChain.Clear()
 			m.filteredPackets = make([]components.PacketDisplay, 0)
-			m.matchedPackets = len(m.packets)
-			m.packetList.SetPackets(m.packets)
+			m.matchedPackets = m.packetsCount
+			m.packetList.SetPackets(m.getPacketsInOrder())
 		}
 		m.filterMode = false
 		m.filterInput.Deactivate()
@@ -1627,7 +1675,7 @@ func (m *Model) parseAndApplyFilter(filterStr string) {
 
 	// Update display
 	if m.filterChain.IsEmpty() {
-		m.packetList.SetPackets(m.packets)
+		m.packetList.SetPackets(m.getPacketsInOrder())
 	} else {
 		m.packetList.SetPackets(m.filteredPackets)
 	}
@@ -1747,13 +1795,14 @@ func loadNodesFile(filePath string) tea.Cmd {
 // This is only called when filters change, not on every packet
 func (m *Model) applyFilters() {
 	if m.filterChain.IsEmpty() {
-		m.matchedPackets = len(m.packets)
+		m.matchedPackets = m.packetsCount
 		m.filteredPackets = make([]components.PacketDisplay, 0)
 		return
 	}
 
-	m.filteredPackets = make([]components.PacketDisplay, 0, len(m.packets))
-	for _, pkt := range m.packets {
+	orderedPackets := m.getPacketsInOrder()
+	m.filteredPackets = make([]components.PacketDisplay, 0, len(orderedPackets))
+	for _, pkt := range orderedPackets {
 		if m.filterChain.Match(pkt) {
 			m.filteredPackets = append(m.filteredPackets, pkt)
 		}

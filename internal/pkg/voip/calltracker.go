@@ -95,8 +95,16 @@ func (ct *CallTracker) setupSignalHandler() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 		go func() {
-			<-sigCh // Block until we receive a signal
-			ct.Shutdown()
+			select {
+			case <-sigCh:
+				// Signal received, initiate shutdown
+				ct.Shutdown()
+			case <-ct.janitorCtx.Done():
+				// Context cancelled (Shutdown called), clean up signal handler
+				signal.Stop(sigCh)
+				close(sigCh)
+				return
+			}
 		}()
 	})
 }

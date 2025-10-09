@@ -55,6 +55,15 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+// CleanupOldProcessorsMsg is sent periodically to clean up old disconnected processors
+type CleanupOldProcessorsMsg struct{}
+
+func cleanupProcessorsCmd() tea.Cmd {
+	return tea.Tick(5*time.Minute, func(t time.Time) tea.Msg {
+		return CleanupOldProcessorsMsg{}
+	})
+}
+
 // ProcessorState represents the connection state of a processor
 type ProcessorState int
 
@@ -67,14 +76,15 @@ const (
 
 // ProcessorConnection tracks a configured processor and its connection state
 type ProcessorConnection struct {
-	Address         string
-	ProcessorID     string // ID of the processor (from ProcessorHeartbeat)
-	Status          management.ProcessorStatus // Status of the processor
-	State           ProcessorState
-	Client          interface{ Close() }
-	LastAttempt     time.Time
-	FailureCount    int
-	ReconnectTimer  *time.Timer
+	Address            string
+	ProcessorID        string                 // ID of the processor (from ProcessorHeartbeat)
+	Status             management.ProcessorStatus // Status of the processor
+	State              ProcessorState
+	Client             interface{ Close() }
+	LastAttempt        time.Time
+	LastDisconnectedAt time.Time // Time when processor was last disconnected (for cleanup)
+	FailureCount       int
+	ReconnectTimer     *time.Timer
 }
 
 // Model represents the TUI application state
@@ -275,9 +285,9 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 func (m Model) Init() tea.Cmd {
 	// Load remote nodes if in remote mode
 	if m.captureMode == components.CaptureModeRemote && m.nodesFilePath != "" {
-		return tea.Batch(tickCmd(), loadNodesFile(m.nodesFilePath))
+		return tea.Batch(tickCmd(), cleanupProcessorsCmd(), loadNodesFile(m.nodesFilePath))
 	}
-	return tickCmd()
+	return tea.Batch(tickCmd(), cleanupProcessorsCmd())
 }
 
 // Update handles messages and updates the model
@@ -1076,6 +1086,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if proc, exists := m.processors[msg.Address]; exists {
 			proc.State = ProcessorStateFailed
 			proc.FailureCount++
+			proc.LastDisconnectedAt = time.Now() // Track when disconnected for cleanup
 
 			// Clean up old client
 			if proc.Client != nil {
@@ -1095,6 +1106,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 		return m, nil
+
+	case CleanupOldProcessorsMsg:
+		// Clean up disconnected processors that have been offline for > 30 minutes
+		const cleanupTimeout = 30 * time.Minute
+		now := time.Now()
+
+		for addr, proc := range m.processors {
+			// Only clean up processors that are:
+			// 1. In failed/disconnected state
+			// 2. Have been disconnected for > 30 minutes
+			// 3. Have a non-zero LastDisconnectedAt time
+			if (proc.State == ProcessorStateFailed || proc.State == ProcessorStateDisconnected) &&
+				!proc.LastDisconnectedAt.IsZero() &&
+				now.Sub(proc.LastDisconnectedAt) > cleanupTimeout {
+
+				// Clean up any remaining client
+				if proc.Client != nil {
+					proc.Client.Close()
+				}
+
+				// Remove from maps
+				delete(m.processors, addr)
+				delete(m.remoteClients, addr)
+				delete(m.huntersByProcessor, addr)
+			}
+		}
+
+		// Schedule next cleanup
+		return m, cleanupProcessorsCmd()
 	}
 
 	return m, nil

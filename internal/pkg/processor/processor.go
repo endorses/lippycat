@@ -102,14 +102,16 @@ type Processor struct {
 
 // ConnectedHunter represents a connected hunter node
 type ConnectedHunter struct {
-	ID             string
-	Hostname       string
-	RemoteAddr     string
-	Interfaces     []string
-	ConnectedAt    int64
-	LastHeartbeat  int64
-	PacketsReceived uint64
-	Status         management.HunterStatus
+	ID                      string
+	Hostname                string
+	RemoteAddr              string
+	Interfaces              []string
+	ConnectedAt             int64
+	LastHeartbeat           int64
+	PacketsReceived         uint64
+	Status                  management.HunterStatus
+	FilterUpdateFailures    uint32 // Consecutive filter update send failures
+	LastFilterUpdateFailure int64  // Timestamp of last filter update failure
 }
 
 // Stats contains processor statistics
@@ -813,16 +815,55 @@ func (p *Processor) pushFilterUpdate(filter *management.Filter, update *manageme
 	defer p.filtersMu.RUnlock()
 
 	var huntersUpdated uint32
+	const sendTimeout = 2 * time.Second
+	const maxConsecutiveFailures = 5
+
+	// Helper to send with timeout and track failures
+	sendUpdate := func(hunterID string, ch chan *management.FilterUpdate) bool {
+		timer := time.NewTimer(sendTimeout)
+		defer timer.Stop()
+
+		select {
+		case ch <- update:
+			// Success - reset failure counter
+			p.huntersMu.Lock()
+			if hunter, exists := p.hunters[hunterID]; exists {
+				hunter.FilterUpdateFailures = 0
+			}
+			p.huntersMu.Unlock()
+			logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", filter.Id)
+			return true
+
+		case <-timer.C:
+			// Timeout - track failure
+			p.huntersMu.Lock()
+			if hunter, exists := p.hunters[hunterID]; exists {
+				hunter.FilterUpdateFailures++
+				hunter.LastFilterUpdateFailure = time.Now().UnixNano()
+
+				if hunter.FilterUpdateFailures >= maxConsecutiveFailures {
+					logger.Error("Hunter not receiving filter updates - marking as unhealthy",
+						"hunter_id", hunterID,
+						"consecutive_failures", hunter.FilterUpdateFailures,
+						"recommendation", "hunter may be overloaded or network issue")
+					hunter.Status = management.HunterStatus_STATUS_UNHEALTHY
+				} else {
+					logger.Warn("Filter update send timeout",
+						"hunter_id", hunterID,
+						"consecutive_failures", hunter.FilterUpdateFailures,
+						"max_failures", maxConsecutiveFailures)
+				}
+			}
+			p.huntersMu.Unlock()
+			return false
+		}
+	}
 
 	// If no target hunters specified, send to all
 	if len(filter.TargetHunters) == 0 {
 		for hunterID, ch := range p.filterChannels {
-			select {
-			case ch <- update:
+			if sendUpdate(hunterID, ch) {
 				huntersUpdated++
-				logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", filter.Id)
-			default:
-				logger.Warn("Filter channel full, dropping update", "hunter_id", hunterID)
 			}
 		}
 		return huntersUpdated
@@ -831,12 +872,8 @@ func (p *Processor) pushFilterUpdate(filter *management.Filter, update *manageme
 	// Send to specific hunters
 	for _, targetID := range filter.TargetHunters {
 		if ch, exists := p.filterChannels[targetID]; exists {
-			select {
-			case ch <- update:
+			if sendUpdate(targetID, ch) {
 				huntersUpdated++
-				logger.Debug("Sent filter update", "hunter_id", targetID, "filter_id", filter.Id)
-			default:
-				logger.Warn("Filter channel full, dropping update", "hunter_id", targetID)
 			}
 		}
 	}

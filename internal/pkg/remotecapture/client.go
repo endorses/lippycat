@@ -2,18 +2,23 @@ package remotecapture
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -25,6 +30,20 @@ const (
 	NodeTypeHunter           // Direct hunter connection
 	NodeTypeProcessor        // Processor (aggregates hunters)
 )
+
+// ClientConfig holds configuration for remote capture client
+type ClientConfig struct {
+	// Address of remote node (host:port)
+	Address string
+
+	// TLS settings
+	TLSEnabled           bool   // Enable TLS encryption
+	TLSCAFile            string // Path to CA certificate file
+	TLSCertFile          string // Path to client certificate file (for mutual TLS)
+	TLSKeyFile           string // Path to client key file (for mutual TLS)
+	TLSSkipVerify        bool   // Skip certificate verification (insecure, for testing only)
+	TLSServerNameOverride string // Override server name for certificate verification
+}
 
 // Client wraps gRPC client for remote packet capture
 type Client struct {
@@ -47,8 +66,16 @@ type Client struct {
 	healthMu       sync.RWMutex
 }
 
-// NewClient creates a new remote capture client
+// NewClient creates a new remote capture client (deprecated, use NewClientWithConfig)
 func NewClient(addr string, handler types.EventHandler) (*Client, error) {
+	return NewClientWithConfig(&ClientConfig{
+		Address:    addr,
+		TLSEnabled: false,
+	}, handler)
+}
+
+// NewClientWithConfig creates a new remote capture client with TLS support
+func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Client, error) {
 	// Dial node (hunter or processor)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -59,13 +86,33 @@ func NewClient(addr string, handler types.EventHandler) (*Client, error) {
 		PermitWithoutStream: true,             // Send pings even without active streams
 	}
 
-	conn, err := grpc.DialContext(ctx, addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	// Build dial options
+	opts := []grpc.DialOption{
 		grpc.WithKeepaliveParams(keepaliveParams),
-	)
+	}
+
+	// Configure TLS if enabled
+	if config.TLSEnabled {
+		tlsCreds, err := buildTLSCredentials(config)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("failed to build TLS credentials: %w", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
+		logger.Info("Using TLS for remote capture connection",
+			"addr", config.Address,
+			"skip_verify", config.TLSSkipVerify)
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		logger.Warn("Using insecure remote capture connection (no TLS)",
+			"addr", config.Address,
+			"security_risk", "packet data transmitted in cleartext")
+	}
+
+	conn, err := grpc.DialContext(ctx, config.Address, opts...)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("failed to connect to %s: %w", addr, err)
+		return nil, fmt.Errorf("failed to connect to %s: %w", config.Address, err)
 	}
 
 	client := &Client{
@@ -75,7 +122,7 @@ func NewClient(addr string, handler types.EventHandler) (*Client, error) {
 		handler:        handler,
 		ctx:            ctx,
 		cancel:         cancel,
-		addr:           addr,
+		addr:           config.Address,
 		interfaces:     make(map[string][]string),
 		lastPacketTime: time.Now(),
 	}
@@ -598,6 +645,49 @@ func formatTCPFlags(tcp *layers.TCP) string {
 		return "NONE"
 	}
 	return flags[:len(flags)-1] // Remove trailing space
+}
+
+// buildTLSCredentials creates TLS credentials for gRPC client
+func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials, error) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: config.TLSSkipVerify,
+		ServerName:         config.TLSServerNameOverride,
+		MinVersion:         tls.VersionTLS12,
+	}
+
+	if config.TLSSkipVerify {
+		logger.Warn("TLS certificate verification disabled",
+			"security_risk", "vulnerable to man-in-the-middle attacks",
+			"recommendation", "only use in testing environments")
+	}
+
+	// Load CA certificate if provided
+	if config.TLSCAFile != "" {
+		caCert, err := os.ReadFile(config.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.RootCAs = certPool
+		logger.Info("Loaded CA certificate for remote capture", "file", config.TLSCAFile)
+	}
+
+	// Load client certificate for mutual TLS if provided
+	if config.TLSCertFile != "" && config.TLSKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(config.TLSCertFile, config.TLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+		logger.Info("Loaded client certificate for mutual TLS",
+			"cert", config.TLSCertFile,
+			"key", config.TLSKeyFile)
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 // min returns the minimum of two integers

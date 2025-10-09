@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/cmd/tui/config"
 	"github.com/endorses/lippycat/cmd/tui/filters"
@@ -68,6 +69,7 @@ const (
 type ProcessorConnection struct {
 	Address         string
 	ProcessorID     string // ID of the processor (from ProcessorHeartbeat)
+	Status          management.ProcessorStatus // Status of the processor
 	State           ProcessorState
 	Client          interface{ Close() }
 	LastAttempt     time.Time
@@ -830,17 +832,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Update processor ID if provided
+		// Update processor ID and status if provided
 		if msg.ProcessorID != "" && processorAddr != "" && processorAddr != "Direct" {
 			if proc, exists := m.processors[processorAddr]; exists {
 				proc.ProcessorID = msg.ProcessorID
+				proc.Status = msg.ProcessorStatus
 			}
 		}
 
 		// Update hunters for this processor
 		m.huntersByProcessor[processorAddr] = msg.Hunters
 
-		// Update NodesView with processor info (includes processor IDs)
+		// Update NodesView with processor info (includes processor IDs and status)
 		m.nodesView.SetProcessors(m.getProcessorInfoList())
 		return m, nil
 
@@ -1639,10 +1642,27 @@ func (m *Model) getConnectedProcessors() []string {
 func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 	procInfos := make([]components.ProcessorInfo, 0, len(m.processors))
 	for addr, proc := range m.processors {
+		// Convert model ProcessorState to components.ProcessorConnectionState
+		var connState components.ProcessorConnectionState
+		switch proc.State {
+		case ProcessorStateDisconnected:
+			connState = components.ProcessorConnectionStateDisconnected
+		case ProcessorStateConnecting:
+			connState = components.ProcessorConnectionStateConnecting
+		case ProcessorStateConnected:
+			connState = components.ProcessorConnectionStateConnected
+		case ProcessorStateFailed:
+			connState = components.ProcessorConnectionStateFailed
+		default:
+			connState = components.ProcessorConnectionStateDisconnected
+		}
+
 		procInfos = append(procInfos, components.ProcessorInfo{
-			Address:     addr,
-			ProcessorID: proc.ProcessorID,
-			Hunters:     m.huntersByProcessor[addr],
+			Address:         addr,
+			ProcessorID:     proc.ProcessorID,
+			Status:          proc.Status,
+			ConnectionState: connState,
+			Hunters:         m.huntersByProcessor[addr],
 		})
 	}
 	return procInfos

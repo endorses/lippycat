@@ -24,11 +24,23 @@ import (
 // HunterInfo is now defined in internal/pkg/types to enable sharing
 type HunterInfo = types.HunterInfo
 
+// ProcessorConnectionState represents the connection state of a processor
+type ProcessorConnectionState int
+
+const (
+	ProcessorConnectionStateDisconnected ProcessorConnectionState = iota
+	ProcessorConnectionStateConnecting
+	ProcessorConnectionStateConnected
+	ProcessorConnectionStateFailed
+)
+
 // ProcessorInfo represents a processor node
 type ProcessorInfo struct {
-	Address     string
-	ProcessorID string // ID of the processor
-	Hunters     []HunterInfo
+	Address         string
+	ProcessorID     string // ID of the processor
+	Status          management.ProcessorStatus // Status of the processor (when connected)
+	ConnectionState ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
+	Hunters         []HunterInfo
 }
 
 // AddNodeMsg is sent when user wants to add a node
@@ -632,19 +644,64 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 		// Track this processor's line position for mouse clicks
 		n.processorLines[linesRendered] = procIdx
 
+		// Status indicator for processor - prioritize connection state over reported status
+		var statusIcon string
+		var statusColor lipgloss.Color
+
+		// First check connection state (takes precedence)
+		switch proc.ConnectionState {
+		case ProcessorConnectionStateDisconnected:
+			statusIcon = "○" // Empty circle for disconnected
+			statusColor = lipgloss.Color("240") // Gray
+		case ProcessorConnectionStateConnecting:
+			statusIcon = "◐" // Half-filled circle for connecting
+			statusColor = lipgloss.Color("11") // Cyan/blue
+		case ProcessorConnectionStateFailed:
+			statusIcon = "✗" // X for failed
+			statusColor = n.theme.ErrorColor // Red
+		case ProcessorConnectionStateConnected:
+			// When connected, use the processor's reported status
+			switch proc.Status {
+			case management.ProcessorStatus_PROCESSOR_HEALTHY:
+				statusIcon = "●"
+				statusColor = n.theme.SuccessColor
+			case management.ProcessorStatus_PROCESSOR_WARNING:
+				statusIcon = "●"
+				statusColor = n.theme.WarningColor
+			case management.ProcessorStatus_PROCESSOR_ERROR:
+				statusIcon = "✗"
+				statusColor = n.theme.ErrorColor
+			default:
+				statusIcon = "●"
+				statusColor = n.theme.SuccessColor
+			}
+		default:
+			// Unknown state - show as disconnected
+			statusIcon = "○"
+			statusColor = lipgloss.Color("240")
+		}
+
 		// Processor header with ID (if available)
 		var procLine string
 		if proc.ProcessorID != "" {
-			procLine = fmt.Sprintf("📡 Processor: %s [%s] (%d hunters)", proc.Address, proc.ProcessorID, len(proc.Hunters))
+			procLine = fmt.Sprintf("%s 📡 Processor: %s [%s] (%d hunters)", statusIcon, proc.Address, proc.ProcessorID, len(proc.Hunters))
 		} else {
-			procLine = fmt.Sprintf("📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
+			procLine = fmt.Sprintf("%s 📡 Processor: %s (%d hunters)", statusIcon, proc.Address, len(proc.Hunters))
 		}
 
 		// Apply selection styling if this processor is selected
 		if n.selectedProcessorAddr == proc.Address {
 			b.WriteString(selectedStyle.Width(n.width).Render(procLine) + "\n")
 		} else {
-			b.WriteString(processorStyle.Render(procLine) + "\n")
+			// Style the status icon with color, then the rest with processor style
+			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
+			// Remove the icon from procLine since we're rendering it separately
+			if proc.ProcessorID != "" {
+				procLine = fmt.Sprintf(" 📡 Processor: %s [%s] (%d hunters)", proc.Address, proc.ProcessorID, len(proc.Hunters))
+			} else {
+				procLine = fmt.Sprintf(" 📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
+			}
+			b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 		}
 		linesRendered++
 
@@ -1003,9 +1060,9 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 		// Determine if processor is selected
 		isProcessorSelected := n.selectedProcessorAddr == proc.Address
 
-		// Render processor box (centered) with selection styling
-		// In graph view, we want to change border color (like hunters), not text color
-		processorBox := n.renderProcessorBox(procLines, processorBoxWidth, processorStyle, isProcessorSelected)
+		// Render processor box (centered) with selection styling and status
+		// In graph view, we want to change border color and text color based on connection state and status
+		processorBox := n.renderProcessorBox(procLines, processorBoxWidth, processorStyle, isProcessorSelected, proc.ConnectionState, proc.Status)
 
 		// Center the processor box
 		centerPos := (renderWidth - processorBoxWidth) / 2
@@ -1358,20 +1415,48 @@ func (n *NodesView) renderBox(lines []string, width int, style lipgloss.Style) s
 	return b.String()
 }
 
-// renderProcessorBox renders a processor box with optional selection highlighting
-func (n *NodesView) renderProcessorBox(lines []string, width int, style lipgloss.Style, isSelected bool) string {
+// renderProcessorBox renders a processor box with optional selection highlighting and status color
+func (n *NodesView) renderProcessorBox(lines []string, width int, style lipgloss.Style, isSelected bool, connState ProcessorConnectionState, status management.ProcessorStatus) string {
 	var b strings.Builder
 
-	// For selected boxes, use cyan border and normal text colors
-	// For unselected boxes, use default theme colors
+	// Determine status color for text - prioritize connection state
+	var statusColor lipgloss.Color
+
+	// First check connection state (takes precedence)
+	switch connState {
+	case ProcessorConnectionStateDisconnected:
+		statusColor = lipgloss.Color("240") // Gray for disconnected
+	case ProcessorConnectionStateConnecting:
+		statusColor = lipgloss.Color("11") // Cyan/blue for connecting
+	case ProcessorConnectionStateFailed:
+		statusColor = n.theme.ErrorColor // Red for failed
+	case ProcessorConnectionStateConnected:
+		// When connected, use the processor's reported status
+		switch status {
+		case management.ProcessorStatus_PROCESSOR_HEALTHY:
+			statusColor = n.theme.SuccessColor
+		case management.ProcessorStatus_PROCESSOR_WARNING:
+			statusColor = n.theme.WarningColor
+		case management.ProcessorStatus_PROCESSOR_ERROR:
+			statusColor = n.theme.ErrorColor
+		default:
+			statusColor = n.theme.SuccessColor
+		}
+	default:
+		// Unknown state - show as gray
+		statusColor = lipgloss.Color("240")
+	}
+
+	// For selected boxes, use cyan border and status-colored text
+	// For unselected boxes, use default border and status-colored text
 	var borderStyle lipgloss.Style
 	var contentStyle lipgloss.Style
 	var topLeft, topRight, bottomLeft, bottomRight, horizontal, vertical string
 
 	if isSelected {
-		// Selected: cyan border with heavy/bold box characters
+		// Selected: cyan border with heavy/bold box characters, status-colored text
 		borderStyle = lipgloss.NewStyle().Foreground(n.theme.SelectionBg)
-		contentStyle = style
+		contentStyle = lipgloss.NewStyle().Foreground(statusColor).Bold(true)
 		topLeft = "┏"
 		topRight = "┓"
 		bottomLeft = "┗"
@@ -1379,9 +1464,9 @@ func (n *NodesView) renderProcessorBox(lines []string, width int, style lipgloss
 		horizontal = "━"
 		vertical = "┃"
 	} else {
-		// Unselected: gray border with light rounded box characters
+		// Unselected: gray border with light rounded box characters, status-colored text
 		borderStyle = lipgloss.NewStyle().Foreground(n.theme.Foreground)
-		contentStyle = style
+		contentStyle = lipgloss.NewStyle().Foreground(statusColor).Bold(true)
 		topLeft = "╭"
 		topRight = "╮"
 		bottomLeft = "╰"

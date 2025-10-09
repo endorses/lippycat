@@ -338,4 +338,7 @@ message ProcessorStats {
 
     // Processor identifier
     string processor_id = 8;
+
+    // Processor status
+    ProcessorStatus status = 9;
 }

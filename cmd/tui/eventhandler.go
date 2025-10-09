@@ -5,6 +5,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -31,13 +32,14 @@ func (h *TUIEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 }
 
 // OnHunterStatus sends HunterStatusMsg to TUI
-func (h *TUIEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string) {
+func (h *TUIEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus) {
 	if h.program != nil {
 		// Convert to components.HunterInfo (which is now an alias)
 		// and send as HunterStatusMsg
 		h.program.Send(HunterStatusMsg{
-			Hunters:     hunters,
-			ProcessorID: processorID,
+			Hunters:         hunters,
+			ProcessorID:     processorID,
+			ProcessorStatus: processorStatus,
 		})
 	}
 }
@@ -59,8 +61,9 @@ type PacketBatchMsg struct {
 
 // HunterStatusMsg is sent with hunter status updates from remote processor
 type HunterStatusMsg struct {
-	Hunters     []components.HunterInfo
-	ProcessorID string
+	Hunters         []components.HunterInfo
+	ProcessorID     string
+	ProcessorStatus management.ProcessorStatus
 }
 
 // ProcessorDisconnectedMsg is sent when a processor connection is lost

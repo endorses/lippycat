@@ -98,6 +98,11 @@ type Hunter struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// Connection-scoped control (for managing goroutine lifecycle during reconnects)
+	connCtx    context.Context
+	connCancel context.CancelFunc
+	connWg     sync.WaitGroup
 }
 
 // Stats contains hunter statistics
@@ -379,7 +384,7 @@ func (h *Hunter) startStreaming() error {
 	h.streamMu.Unlock()
 
 	// Start goroutine to receive flow control messages from processor
-	h.wg.Add(1)
+	h.connWg.Add(1)
 	go h.receiveStreamControl(stream)
 
 	logger.Info("Packet stream established with flow control")
@@ -388,11 +393,11 @@ func (h *Hunter) startStreaming() error {
 
 // receiveStreamControl receives and processes flow control messages from processor
 func (h *Hunter) receiveStreamControl(stream data.DataService_StreamPacketsClient) {
-	defer h.wg.Done()
+	defer h.connWg.Done()
 
 	for {
 		select {
-		case <-h.ctx.Done():
+		case <-h.connCtx.Done():
 			return
 		default:
 			ctrl, err := stream.Recv()
@@ -497,7 +502,7 @@ func (h *Hunter) startCapture() error {
 
 // forwardPackets reads from packet buffer and forwards batches to processor
 func (h *Hunter) forwardPackets() {
-	defer h.wg.Done()
+	defer h.connWg.Done()
 
 	ticker := time.NewTicker(h.config.BatchTimeout)
 	defer ticker.Stop()
@@ -508,7 +513,7 @@ func (h *Hunter) forwardPackets() {
 
 	for {
 		select {
-		case <-h.ctx.Done():
+		case <-h.connCtx.Done():
 			// Send remaining batch before shutdown
 			h.sendBatch()
 			return
@@ -629,11 +634,11 @@ func (h *Hunter) sendBatch() {
 
 // batchSender sends queued batches to the processor with flow control
 func (h *Hunter) batchSender() {
-	defer h.wg.Done()
+	defer h.connWg.Done()
 
 	for {
 		select {
-		case <-h.ctx.Done():
+		case <-h.connCtx.Done():
 			return
 
 		case packets := <-h.batchQueue:
@@ -672,7 +677,7 @@ func (h *Hunter) batchSender() {
 
 // handleStreamControl receives flow control messages from processor
 func (h *Hunter) handleStreamControl() {
-	defer h.wg.Done()
+	defer h.connWg.Done()
 
 	h.streamMu.Lock()
 	stream := h.stream
@@ -741,6 +746,16 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 
 // cleanup closes connections
 func (h *Hunter) cleanup() {
+	// Cancel connection-scoped context to signal all goroutines to exit
+	if h.connCancel != nil {
+		h.connCancel()
+	}
+
+	// Wait for all connection-scoped goroutines to finish
+	logger.Debug("Waiting for connection goroutines to finish...")
+	h.connWg.Wait()
+	logger.Debug("All connection goroutines finished")
+
 	if h.packetBuffer != nil {
 		h.packetBuffer.Close()
 	}
@@ -762,7 +777,7 @@ func (h *Hunter) cleanup() {
 
 // subscribeToFilters subscribes to filter updates from processor
 func (h *Hunter) subscribeToFilters() {
-	defer h.wg.Done()
+	defer h.connWg.Done()
 
 	logger.Info("Subscribing to filter updates")
 
@@ -799,7 +814,7 @@ func (h *Hunter) subscribeToFilters() {
 
 	for {
 		select {
-		case <-h.ctx.Done():
+		case <-h.connCtx.Done():
 			logger.Info("Filter subscription closed (context)")
 			return
 
@@ -874,7 +889,7 @@ func (h *Hunter) handleFilterUpdate(update *management.FilterUpdate) {
 
 // sendHeartbeats sends periodic heartbeat to processor
 func (h *Hunter) sendHeartbeats() {
-	defer h.wg.Done()
+	defer h.connWg.Done()
 
 	logger.Info("Starting heartbeat stream to processor")
 
@@ -906,7 +921,7 @@ func (h *Hunter) sendHeartbeats() {
 
 	for {
 		select {
-		case <-h.ctx.Done():
+		case <-h.connCtx.Done():
 			logger.Info("Heartbeat stream closed")
 			return
 
@@ -1012,8 +1027,11 @@ func (h *Hunter) connectionManager() {
 			// Successfully connected
 			logger.Info("Connected to processor")
 
-			// Start connection-dependent goroutines
-			h.wg.Add(5)
+			// Create connection-scoped context for this connection's goroutines
+			h.connCtx, h.connCancel = context.WithCancel(h.ctx)
+
+			// Start connection-dependent goroutines with connection-scoped waitgroup
+			h.connWg.Add(5)
 			go h.forwardPackets()
 			go h.handleStreamControl()
 			go h.subscribeToFilters()
@@ -1023,8 +1041,9 @@ func (h *Hunter) connectionManager() {
 			// Monitor for disconnection
 			h.monitorConnection()
 
-			// If we get here, connection was lost
-			logger.Warn("Connection to processor lost, will retry")
+			// If we get here, connection was lost - clean up before reconnecting
+			logger.Warn("Connection to processor lost, cleaning up goroutines before retry")
+			h.cleanup()
 			continue
 		}
 

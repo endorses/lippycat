@@ -81,7 +81,7 @@ build-cuda: cuda-kernels
 	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags cuda -ldflags "$(LDFLAGS)" -o $(CUDA_BINARY_NAME)
 
 # Install to GOPATH/bin or /usr/local/bin
-install: build
+install: build-release
 	@echo "Installing $(BINARY_NAME) $(VERSION) to $(shell go env GOPATH)/bin/..."
 	@mkdir -p $(shell go env GOPATH)/bin
 	@cp $(BINARY_NAME) $(shell go env GOPATH)/bin/$(BINARY_NAME)
@@ -89,7 +89,7 @@ install: build
 	@echo "Make sure $(shell go env GOPATH)/bin is in your PATH"
 
 # Install to system-wide location (requires sudo)
-install-system: build
+install-system: build-release
 	@echo "Installing $(BINARY_NAME) $(VERSION) to /usr/local/bin/..."
 	sudo cp $(BINARY_NAME) /usr/local/bin/$(BINARY_NAME)
 	@echo "Installed system-wide as: $(BINARY_NAME)"

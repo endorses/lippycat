@@ -218,7 +218,7 @@ go test ./...
 
 ## Roadmap
 
-### Current (v0.2.0)
+### Current (v0.2.1)
 - VoIP/SIP analysis (UDP and TCP)
 - Distributed capture architecture with build-tagged specialized binaries
 - SIMD optimizations and optional GPU acceleration

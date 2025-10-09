@@ -41,6 +41,10 @@ type Client struct {
 	// Interface mapping: hunterID -> []interfaceName (indexed by interface_index)
 	interfacesMu sync.RWMutex
 	interfaces   map[string][]string
+
+	// Stream health monitoring
+	lastPacketTime time.Time
+	healthMu       sync.RWMutex
 }
 
 // NewClient creates a new remote capture client
@@ -65,14 +69,15 @@ func NewClient(addr string, handler types.EventHandler) (*Client, error) {
 	}
 
 	client := &Client{
-		conn:       conn,
-		dataClient: data.NewDataServiceClient(conn),
-		mgmtClient: management.NewManagementServiceClient(conn),
-		handler:    handler,
-		ctx:        ctx,
-		cancel:     cancel,
-		addr:       addr,
-		interfaces: make(map[string][]string),
+		conn:           conn,
+		dataClient:     data.NewDataServiceClient(conn),
+		mgmtClient:     management.NewManagementServiceClient(conn),
+		handler:        handler,
+		ctx:            ctx,
+		cancel:         cancel,
+		addr:           addr,
+		interfaces:     make(map[string][]string),
+		lastPacketTime: time.Now(),
 	}
 
 	// Detect node type by checking if GetHunterStatus is available
@@ -119,6 +124,9 @@ func (c *Client) StreamPackets() error {
 		return fmt.Errorf("failed to subscribe to packets: %w", err)
 	}
 
+	// Start health monitor to detect stalled streams
+	go c.monitorStreamHealth()
+
 	// Start goroutine to receive packets
 	go func() {
 		for {
@@ -136,6 +144,11 @@ func (c *Client) StreamPackets() error {
 					return
 				}
 
+				// Update last packet time for health monitoring
+				c.healthMu.Lock()
+				c.lastPacketTime = time.Now()
+				c.healthMu.Unlock()
+
 				// Convert entire batch to PacketDisplay and send to handler
 				if c.handler != nil && len(batch.Packets) > 0 {
 					displays := make([]types.PacketDisplay, 0, len(batch.Packets))
@@ -151,6 +164,36 @@ func (c *Client) StreamPackets() error {
 	}()
 
 	return nil
+}
+
+// monitorStreamHealth periodically checks if stream is still receiving data
+func (c *Client) monitorStreamHealth() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	const streamTimeout = 60 * time.Second // Alert if no packets for 60 seconds
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.healthMu.RLock()
+			lastPacket := c.lastPacketTime
+			c.healthMu.RUnlock()
+
+			timeSinceLastPacket := time.Since(lastPacket)
+
+			if timeSinceLastPacket > streamTimeout {
+				// Stream may be stalled - notify handler
+				if c.ctx.Err() == nil && c.handler != nil {
+					c.handler.OnDisconnect(c.addr,
+						fmt.Errorf("stream timeout: no packets received for %v", timeSinceLastPacket))
+				}
+				return
+			}
+		}
+	}
 }
 
 // SubscribeHunterStatus subscribes to hunter status updates

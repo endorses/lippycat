@@ -52,20 +52,18 @@ type AddNodeMsg struct {
 type NodesView struct {
 	processors            []ProcessorInfo // Grouped by processor
 	hunters               []HunterInfo    // Flat list for backward compatibility
-	selectedIndex         int             // -1 means input is focused/editing, >= 0 means hunter is selected
+	selectedIndex         int             // -1 means nothing selected, >= 0 means hunter is selected
 	selectedProcessorAddr string          // Non-empty means a processor is selected (instead of hunter)
 	width                 int
 	height                int
 	theme         themes.Theme
-	nodeInput     textinput.Model // Input field for node address
-	editing       bool            // Whether input is in edit mode (red border)
+	nodeInput     textinput.Model // Input field for node address (used in modal)
+	showModal     bool            // Whether add node modal is visible
 	viewport      viewport.Model  // Viewport for scrolling
 	ready         bool            // Whether viewport is initialized
 	viewMode      string          // "table" or "graph" - current view mode
 
 	// Mouse click regions
-	inputStartLine  int         // Line number where input field starts
-	inputEndLine    int         // Line number where input field ends
 	hunterLines     map[int]int // Map of line number -> hunter index (for table view)
 	processorLines  map[int]int // Map of line number -> processor index (for table view)
 
@@ -84,28 +82,24 @@ type NodesView struct {
 		endCol          int
 		processorAddr   string
 	}
-
-	// Double-click detection
-	lastClickTime time.Time // Track when input was last clicked for double-click detection
 }
 
 // NewNodesView creates a new nodes view component
 func NewNodesView() NodesView {
 	ti := textinput.New()
-	ti.Placeholder = "Press Enter to add a node..."
+	ti.Placeholder = "e.g., localhost:50051"
 	ti.CharLimit = 256
 	ti.Width = 50
-	ti.Blur() // Start unfocused
 
 	return NodesView{
 		hunters:               []HunterInfo{},
-		selectedIndex:         -1, // Start with input focused (no hunters initially)
+		selectedIndex:         -1, // Start with nothing selected
 		selectedProcessorAddr: "",
 		width:                 80,
 		height:                20,
 		theme:                 themes.Solarized(),
 		nodeInput:             ti,
-		editing:               false,
+		showModal:             false,
 		ready:                 false,
 		viewMode:              "table", // Start with table view
 		hunterLines:           make(map[int]int),
@@ -116,6 +110,25 @@ func NewNodesView() NodesView {
 // SetTheme updates the theme
 func (n *NodesView) SetTheme(theme themes.Theme) {
 	n.theme = theme
+}
+
+// ShowAddNodeModal shows the add node modal
+func (n *NodesView) ShowAddNodeModal() {
+	n.showModal = true
+	n.nodeInput.Focus()
+	n.nodeInput.SetValue("")
+}
+
+// HideAddNodeModal hides the add node modal
+func (n *NodesView) HideAddNodeModal() {
+	n.showModal = false
+	n.nodeInput.Blur()
+	n.nodeInput.SetValue("")
+}
+
+// IsModalOpen returns whether the add node modal is open
+func (n *NodesView) IsModalOpen() bool {
+	return n.showModal
 }
 
 // ToggleView switches between table and graph view modes
@@ -133,11 +146,8 @@ func (n *NodesView) SetSize(width, height int) {
 	n.width = width
 	n.height = height
 
-	// Calculate viewport height (subtract space for input field)
-	// Input section takes: 1 (label) + 3 (input with border) + 2 (spacing) = 6 lines
-	// Add 1 line to push footer down to match other tabs
-	inputSectionHeight := 6
-	viewportHeight := height - inputSectionHeight + 1
+	// Viewport takes full height
+	viewportHeight := height
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -278,11 +288,8 @@ func (n *NodesView) GetProcessorCount() int {
 
 // SelectNext moves selection following tree structure: processor → its hunters → next processor → its hunters
 func (n *NodesView) SelectNext() {
-	// If input is focused, move to first processor
+	// If nothing selected, move to first processor
 	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
-		n.editing = false
-		n.nodeInput.Blur()
-
 		if len(n.processors) > 0 {
 			n.selectedProcessorAddr = n.processors[0].Address
 		}
@@ -309,11 +316,11 @@ func (n *NodesView) SelectNext() {
 			// Find global index of this hunter
 			n.selectedIndex = n.getGlobalHunterIndex(currentProc.Hunters[0].ID, currentProc.Address)
 		} else {
-			// No hunters, move to next processor or wrap to input
+			// No hunters, move to next processor or wrap to nothing
 			if currentProcIdx < len(n.processors)-1 {
 				n.selectedProcessorAddr = n.processors[currentProcIdx+1].Address
 			} else {
-				// Last processor, wrap to input
+				// Last processor, wrap to nothing
 				n.selectedProcessorAddr = ""
 				n.selectedIndex = -1
 			}
@@ -340,7 +347,7 @@ func (n *NodesView) SelectNext() {
 						if procIdx < len(n.processors)-1 {
 							n.selectedProcessorAddr = n.processors[procIdx+1].Address
 						} else {
-							// Last processor, wrap to input
+							// Last processor, wrap to nothing
 							n.selectedProcessorAddr = ""
 						}
 					}
@@ -364,7 +371,7 @@ func (n *NodesView) getGlobalHunterIndex(hunterID string, processorAddr string) 
 
 // SelectPrevious moves selection following tree structure in reverse: hunters ← processor ← previous processor
 func (n *NodesView) SelectPrevious() {
-	// If at input, wrap to last hunter of last processor (or last processor if it has no hunters)
+	// If nothing selected, wrap to last hunter of last processor (or last processor if it has no hunters)
 	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
 		if len(n.processors) > 0 {
 			lastProc := n.processors[len(n.processors)-1]
@@ -404,7 +411,7 @@ func (n *NodesView) SelectPrevious() {
 				n.selectedProcessorAddr = prevProc.Address
 			}
 		} else {
-			// First processor, move to input
+			// First processor, wrap to nothing
 			n.selectedProcessorAddr = ""
 			n.selectedIndex = -1
 		}
@@ -442,6 +449,10 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		// If modal is open, don't handle mouse events on the underlying content
+		if n.showModal {
+			return nil
+		}
 		// DEBUG: Uncomment to trace NodesView mouse event handling
 		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		// 	fmt.Fprintf(f, "    -> NodesView.Update: Y=%d Type=%v\n", msg.Y, msg.Type)
@@ -457,59 +468,43 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 		return cmd
 
 	case tea.KeyMsg:
-		// Check if input is focused (selectedIndex = -1 and no processor selected)
-		if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
-			if n.editing {
-				// In edit mode - handle input field keys
-				switch msg.String() {
-				case "enter":
-					// Submit node address
-					addr := n.nodeInput.Value()
-					if addr != "" {
-						n.nodeInput.SetValue("")
-						n.editing = false
-						n.nodeInput.Blur()
-						return func() tea.Msg {
-							return AddNodeMsg{Address: addr}
-						}
+		// Handle modal input if modal is open
+		if n.showModal {
+			switch msg.String() {
+			case "enter":
+				// Submit node address
+				addr := n.nodeInput.Value()
+				if addr != "" {
+					n.HideAddNodeModal()
+					return func() tea.Msg {
+						return AddNodeMsg{Address: addr}
 					}
-					// If empty, just exit edit mode (stay focused)
-					n.editing = false
-					n.nodeInput.Blur()
-					return nil
-				case "esc":
-					// Cancel editing, stay focused
-					n.editing = false
-					n.nodeInput.Blur()
-					n.nodeInput.SetValue("")
-					return nil
-				default:
-					// Pass other keys to input field
-					n.nodeInput, cmd = n.nodeInput.Update(msg)
-					return cmd
 				}
-			} else {
-				// Input is focused but not editing - enter key starts editing
-				if msg.String() == "enter" {
-					n.editing = true
-					n.nodeInput.Focus()
-					n.nodeInput.SetValue("")
-					return nil
-				}
+				// If empty, just close modal
+				n.HideAddNodeModal()
+				return nil
+			case "esc":
+				// Cancel and close modal
+				n.HideAddNodeModal()
+				return nil
+			default:
+				// Pass other keys to input field
+				n.nodeInput, cmd = n.nodeInput.Update(msg)
+				return cmd
 			}
-		} else {
-			// Hunter is selected - pass keyboard events to viewport for scrolling
-			n.viewport, cmd = n.viewport.Update(msg)
-			return cmd
 		}
+
+		// Normal mode - pass keyboard events to viewport for scrolling
+		n.viewport, cmd = n.viewport.Update(msg)
+		return cmd
 	}
 
 	return nil
 }
 
-// IsEditing returns whether the input field is in edit mode
+// IsEditing returns whether the add node modal is open (for compatibility)
 func (n *NodesView) IsEditing() bool {
-	return n.editing
+	return n.showModal
 }
 
 // getColumnWidths returns responsive column widths based on available width
@@ -599,7 +594,7 @@ func (n *NodesView) renderContent() string {
 			Align(lipgloss.Center)
 
 		b.WriteString(emptyStyle.Render("No nodes connected") + "\n\n")
-		b.WriteString(emptyStyle.Render("Type an address above and press Enter to add a node") + "\n\n")
+		b.WriteString(emptyStyle.Render("Press 'n' to add a node") + "\n\n")
 		b.WriteString(emptyStyle.Render("Or start a hunter with:") + "\n")
 		b.WriteString(emptyStyle.Render("  lippycat hunt --processor <processor-addr>") + "\n")
 		return b.String()
@@ -1624,47 +1619,92 @@ func (n *NodesView) View() string {
 		return ""
 	}
 
-	var b strings.Builder
+	// Render main viewport content (modal is rendered at top level)
+	return n.viewport.View()
+}
 
-	// Track input field position for mouse clicks
-	// Line 0: "Add Node:" label (not clickable)
-	// Lines 1-3: Bordered input box (clickable)
-	n.inputStartLine = 0
-	n.inputEndLine = 2
+// RenderModal renders the add node modal if it's open (for top-level overlay)
+func (n *NodesView) RenderModal(width, height int) string {
+	if !n.showModal {
+		return ""
+	}
+	return n.renderAddNodeModal(width, height)
+}
 
-	// Label and input at top
-	labelStyle := lipgloss.NewStyle().
-		Foreground(n.theme.InfoColor).
-		Bold(true)
+// renderAddNodeModal renders the add node modal overlay
+func (n *NodesView) renderAddNodeModal(width, height int) string {
+	// Calculate modal dimensions (smaller than default modal)
+	modalWidth := 60
 
-	b.WriteString(labelStyle.Render("Add Node:") + "\n")
-
-	// Input border color and style logic
-	var borderColor lipgloss.Color
-	var borderStyle lipgloss.Border
-	if n.editing {
-		borderColor = n.theme.FocusedBorderColor // Red when editing
-		borderStyle = lipgloss.ThickBorder()     // Heavy box characters when editing
-	} else if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
-		borderColor = n.theme.SelectionBg    // Cyan when focused but not editing
-		borderStyle = lipgloss.ThickBorder() // Heavy box characters when focused
-	} else {
-		borderColor = n.theme.BorderColor       // Gray when unfocused
-		borderStyle = lipgloss.RoundedBorder() // Light rounded characters when unfocused
+	if modalWidth > width-4 {
+		modalWidth = width - 4
+	}
+	if modalWidth < 40 {
+		modalWidth = 40
 	}
 
-	inputWithBorder := lipgloss.NewStyle().
-		BorderStyle(borderStyle).
-		BorderForeground(borderColor).
+	// Modal container - NO background color (uses terminal background like protocol selector)
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(n.theme.InfoColor).
+		Width(modalWidth).
+		Padding(1, 2)
+
+	// Title style (matches protocol selector)
+	titleStyle := lipgloss.NewStyle().
+		Foreground(n.theme.HeaderBg).
+		Bold(true).
 		Padding(0, 1).
-		Width(n.width - 4)
+		Width(modalWidth - 4)
 
-	b.WriteString(inputWithBorder.Render(n.nodeInput.View()) + "\n\n")
+	title := titleStyle.Render("Add Node")
 
-	// Render viewport with scrollable content
-	b.WriteString(n.viewport.View())
+	// Input label
+	labelStyle := lipgloss.NewStyle().
+		Foreground(n.theme.Foreground).
+		Padding(0, 1).
+		MarginTop(1)
 
-	return b.String()
+	label := labelStyle.Render("Address (host:port):")
+
+	// Input field
+	inputStyle := lipgloss.NewStyle().
+		Padding(0, 1)
+
+	input := inputStyle.Render(n.nodeInput.View())
+
+	// Instructions (matches protocol selector)
+	instructionStyle := lipgloss.NewStyle().
+		Foreground(n.theme.StatusBarFg).
+		Italic(true).
+		Padding(0, 1).
+		MarginTop(1)
+
+	instructions := instructionStyle.Render("Enter: confirm | Esc: cancel")
+
+	// Assemble modal content
+	modalContent := lipgloss.JoinVertical(
+		lipgloss.Left,
+		title,
+		"",
+		label,
+		input,
+		"",
+		instructions,
+	)
+
+	modal := modalStyle.Render(modalContent)
+
+	// Center the modal (no dimming to match protocol selector)
+	centeredModal := lipgloss.Place(
+		width,
+		height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modal,
+	)
+
+	return centeredModal
 }
 
 func truncateString(s string, maxLen int) string {
@@ -1725,148 +1765,86 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	// Adjust Y coordinate to be relative to content area (header=2, tabs=4, so content starts at Y=6)
-	contentStartY := 6
+	// Adjust Y coordinate to be relative to content area (header=2, tabs=4, but one less line, so content starts at Y=5)
+	contentStartY := 5
 	clickY := msg.Y - contentStartY
 
-	// Input field occupies lines 0-3 (label + bordered input)
-	// Line 0: "Add Node:" label
-	// Lines 1-3: Bordered input (top border, content, bottom border)
-	// The two \n after input are part of the viewport content, not the input field
-	inputFieldHeight := 4
+	// Since we removed the input field, viewport starts at clickY=0
+	// Add viewport scroll offset to get the actual content line
+	contentLineY := clickY + n.viewport.YOffset
 
-	// DEBUG: Uncomment to see computed click positions and tracked regions
+	// DEBUG: Uncomment to see viewport click calculation
 	// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-	// 	fmt.Fprintf(f, "      -> clickY=%d inputStart=%d inputEnd=%d viewport.YOffset=%d hunterLines=%v\n",
-	// 		clickY, n.inputStartLine, n.inputEndLine, n.viewport.YOffset, n.hunterLines)
+	// 	fmt.Fprintf(f, "      -> clickY=%d contentLineY=%d viewport.YOffset=%d\n",
+	// 		clickY, contentLineY, n.viewport.YOffset)
 	// 	f.Close()
 	// }
 
-	// Exit edit mode if clicking outside the input field
-	if n.editing && (clickY < n.inputStartLine || clickY > n.inputEndLine) {
-		n.editing = false
-		n.nodeInput.Blur()
-		n.nodeInput.SetValue("")
-	}
+	// Check graph view click regions first (if in graph view)
+	if n.viewMode == "graph" {
+		clickX := msg.X
 
-	// Check if clicked on input field
-	if clickY >= n.inputStartLine && clickY <= n.inputEndLine {
-		// DEBUG: Uncomment to confirm input field clicks
-		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		// 	fmt.Fprintf(f, "      -> CLICKED ON INPUT FIELD\n")
-		// 	f.Close()
-		// }
-
-		now := time.Now()
-		const doubleClickThreshold = 500 * time.Millisecond
-
-		// Check if this is a double-click (second click within 500ms)
-		if n.selectedIndex == -1 && n.selectedProcessorAddr == "" && !n.editing &&
-			now.Sub(n.lastClickTime) < doubleClickThreshold {
-			// Double-click detected - start editing
-			n.editing = true
-			n.nodeInput.Focus()
-			n.nodeInput.SetValue("")
-			return nil
+		// Check processor box clicks first
+		for _, region := range n.processorBoxRegions {
+			if contentLineY >= region.startLine && contentLineY <= region.endLine &&
+				clickX >= region.startCol && clickX <= region.endCol {
+				// DEBUG: Uncomment to confirm processor box clicks
+				// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+				// 	fmt.Fprintf(f, "      -> CLICKED ON PROCESSOR BOX %s (X=%d Y=%d)\n", region.processorAddr, clickX, contentLineY)
+				// 	f.Close()
+				// }
+				// Select this processor
+				n.selectedProcessorAddr = region.processorAddr
+				n.selectedIndex = -1 // Deselect hunters
+				n.updateViewportContent() // Refresh to show selection
+				return nil
+			}
 		}
 
-		// Single click - just focus input (don't start editing)
-		n.selectedIndex = -1
-		n.selectedProcessorAddr = "" // Clear processor selection
-		n.editing = false
-		n.nodeInput.Blur()
-		n.lastClickTime = now
+		// Check hunter box clicks
+		for _, region := range n.hunterBoxRegions {
+			if contentLineY >= region.startLine && contentLineY <= region.endLine &&
+				clickX >= region.startCol && clickX <= region.endCol {
+				// DEBUG: Uncomment to confirm hunter box clicks
+				// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+				// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER BOX %d (X=%d Y=%d)\n", region.hunterIndex, clickX, contentLineY)
+				// 	f.Close()
+				// }
+				// Select this hunter
+				n.selectedIndex = region.hunterIndex
+				n.selectedProcessorAddr = "" // Deselect processors
+				n.updateViewportContent() // Refresh to show selection
+				return nil
+			}
+		}
+	}
+
+	// Check table view processor lines
+	if procIdx, ok := n.processorLines[contentLineY]; ok {
+		// DEBUG: Uncomment to confirm processor row clicks
+		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		// 	fmt.Fprintf(f, "      -> CLICKED ON PROCESSOR %d\n", procIdx)
+		// 	f.Close()
+		// }
+		// Select this processor
+		n.selectedProcessorAddr = n.processors[procIdx].Address
+		n.selectedIndex = -1 // Deselect hunters
+		n.updateViewportContent() // Refresh to show selection
 		return nil
 	}
 
-	// Check if clicked on a hunter row within the viewport
-	if clickY > n.inputEndLine {
-		// Click is below input field - it's in the viewport area
-		// Calculate the line within the viewport content
-		viewportClickY := clickY - inputFieldHeight
-		// Add viewport scroll offset to get the actual content line
-		contentLineY := viewportClickY + n.viewport.YOffset
-
-		// DEBUG: Uncomment to see viewport click calculation
+	// Check table view hunter lines
+	if hunterIndex, ok := n.hunterLines[contentLineY]; ok {
+		// DEBUG: Uncomment to confirm hunter row clicks
 		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-		// 	fmt.Fprintf(f, "      -> viewportClickY=%d contentLineY=%d\n", viewportClickY, contentLineY)
+		// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER %d\n", hunterIndex)
 		// 	f.Close()
 		// }
-
-		// Check graph view click regions first (if in graph view)
-		if n.viewMode == "graph" {
-			clickX := msg.X
-
-			// Check processor box clicks first
-			for _, region := range n.processorBoxRegions {
-				if contentLineY >= region.startLine && contentLineY <= region.endLine &&
-					clickX >= region.startCol && clickX <= region.endCol {
-					// DEBUG: Uncomment to confirm processor box clicks
-					// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-					// 	fmt.Fprintf(f, "      -> CLICKED ON PROCESSOR BOX %s (X=%d Y=%d)\n", region.processorAddr, clickX, contentLineY)
-					// 	f.Close()
-					// }
-					// Select this processor
-					n.selectedProcessorAddr = region.processorAddr
-					n.selectedIndex = -1 // Deselect hunters
-					n.editing = false
-					n.nodeInput.Blur()
-					n.updateViewportContent() // Refresh to show selection
-					return nil
-				}
-			}
-
-			// Check hunter box clicks
-			for _, region := range n.hunterBoxRegions {
-				if contentLineY >= region.startLine && contentLineY <= region.endLine &&
-					clickX >= region.startCol && clickX <= region.endCol {
-					// DEBUG: Uncomment to confirm hunter box clicks
-					// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-					// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER BOX %d (X=%d Y=%d)\n", region.hunterIndex, clickX, contentLineY)
-					// 	f.Close()
-					// }
-					// Select this hunter
-					n.selectedIndex = region.hunterIndex
-					n.selectedProcessorAddr = "" // Deselect processors
-					n.editing = false
-					n.nodeInput.Blur()
-					n.updateViewportContent() // Refresh to show selection
-					return nil
-				}
-			}
-		}
-
-		// Check table view processor lines
-		if procIdx, ok := n.processorLines[contentLineY]; ok {
-			// DEBUG: Uncomment to confirm processor row clicks
-			// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			// 	fmt.Fprintf(f, "      -> CLICKED ON PROCESSOR %d\n", procIdx)
-			// 	f.Close()
-			// }
-			// Select this processor
-			n.selectedProcessorAddr = n.processors[procIdx].Address
-			n.selectedIndex = -1 // Deselect hunters
-			n.editing = false
-			n.nodeInput.Blur()
-			n.updateViewportContent() // Refresh to show selection
-			return nil
-		}
-
-		// Check table view hunter lines
-		if hunterIndex, ok := n.hunterLines[contentLineY]; ok {
-			// DEBUG: Uncomment to confirm hunter row clicks
-			// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			// 	fmt.Fprintf(f, "      -> CLICKED ON HUNTER %d\n", hunterIndex)
-			// 	f.Close()
-			// }
-			// Select this hunter
-			n.selectedIndex = hunterIndex
-			n.selectedProcessorAddr = "" // Deselect processors
-			n.editing = false
-			n.nodeInput.Blur()
-			n.updateViewportContent() // Refresh to show selection
-			return nil
-		}
+		// Select this hunter
+		n.selectedIndex = hunterIndex
+		n.selectedProcessorAddr = "" // Deselect processors
+		n.updateViewportContent() // Refresh to show selection
+		return nil
 	}
 
 	// DEBUG: Uncomment to see when clicks don't match any region

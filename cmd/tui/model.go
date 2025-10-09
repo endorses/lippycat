@@ -318,6 +318,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Handle add node modal (highest priority after protocol selector)
+		if m.nodesView.IsModalOpen() {
+			cmd := m.nodesView.Update(msg)
+			return m, cmd
+		}
+
 		// Handle filter input mode
 		if m.filterMode {
 			return m.handleFilterInput(msg)
@@ -373,8 +379,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filterInput.SetTheme(m.theme)
 				saveThemePreference(m.theme)
 				return m, nil
-			case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4":
-				// Let these fall through to normal tab switching logic
+			case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "n":
+				// Let these fall through to normal tab switching and global key handling
 			default:
 				// Forward everything else to settings view
 				cmd := m.settingsView.Update(msg)
@@ -384,14 +390,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Nodes tab gets priority for certain keys (add node, etc.)
+		// Nodes tab gets priority for certain keys (navigation, etc.)
 		if m.tabs.GetActive() == 1 {
-			// If editing node input, pass ALL keys to NodesView
-			if m.nodesView.IsEditing() {
-				cmd := m.nodesView.Update(msg)
-				return m, cmd
-			}
-			// Not editing - forward message to NodesView
+			// Forward message to NodesView for handling (modal is handled globally above)
 			if cmd := m.nodesView.Update(msg); cmd != nil {
 				return m, cmd
 			}
@@ -522,6 +523,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "alt+4": // Switch to Settings tab
 			m.tabs.SetActive(3)
+			return m, nil
+
+		case "n": // Add node (open modal)
+			m.nodesView.ShowAddNodeModal()
 			return m, nil
 
 		case "t": // Toggle theme
@@ -1424,6 +1429,12 @@ func (m Model) View() string {
 			lipgloss.Center, lipgloss.Center,
 			selectorView,
 		)
+	}
+
+	// Overlay add node modal if active
+	if m.nodesView.IsModalOpen() {
+		modalView := m.nodesView.RenderModal(m.width, m.height)
+		return modalView
 	}
 
 	return fullView

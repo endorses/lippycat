@@ -602,7 +602,12 @@ func (h *Hunter) sendBatch() {
 		return
 	}
 
-	// Implement timeout for send to prevent blocking indefinitely
+	// Send with context timeout to prevent blocking indefinitely
+	// This avoids goroutine leak that would occur with timeout in select
+	sendCtx, sendCancel := context.WithTimeout(h.connCtx, 5*time.Second)
+	defer sendCancel()
+
+	// Create a channel to receive the result
 	sendDone := make(chan error, 1)
 	go func() {
 		sendDone <- stream.Send(batch)
@@ -624,11 +629,15 @@ func (h *Hunter) sendBatch() {
 		// Use atomic add - no mutex needed
 		h.stats.PacketsForwarded.Add(uint64(len(batch.Packets)))
 
-	case <-time.After(5 * time.Second):
+	case <-sendCtx.Done():
+		// Context cancelled or timed out
 		logger.Error("Batch send timeout - processor may be unresponsive",
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets))
 		h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
+		// Note: The goroutine will eventually complete when stream.Send returns
+		// or when connCtx is cancelled. We can't force-kill it, but at least
+		// the timeout doesn't leak the goroutine indefinitely.
 	}
 }
 

@@ -186,14 +186,29 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 }
 
 func (c *CallInfo) initWriters() error {
-	if err := os.MkdirAll("captures", 0o755); err != nil {
+	// Use safe absolute path for captures directory
+	capturesDir, err := getCapturesDir()
+	if err != nil {
+		return fmt.Errorf("failed to get captures directory: %w", err)
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create captures directory: %w", err)
 	}
 
-	sipPath := filepath.Join("captures", fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
-	rtpPath := filepath.Join("captures", fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))
+	// Verify directory is not a symlink to prevent symlink attacks
+	dirInfo, err := os.Lstat(capturesDir)
+	if err != nil {
+		return fmt.Errorf("failed to stat captures directory: %w", err)
+	}
+	if dirInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("captures directory is a symlink, refusing to use it for security")
+	}
 
-	var err error
+	sipPath := filepath.Join(capturesDir, fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
+	rtpPath := filepath.Join(capturesDir, fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))
+
 	c.sipFile, err = os.Create(sipPath)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP file %s: %w", sipPath, err)
@@ -361,4 +376,20 @@ func (ct *CallTracker) cleanupOldCalls() {
 			delete(ct.callMap, id)
 		}
 	}
+}
+
+// getCapturesDir returns a safe absolute path for the captures directory
+func getCapturesDir() (string, error) {
+	// Try XDG data directory first (Linux standard)
+	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "lippycat", "captures"), nil
+	}
+
+	// Fall back to user's home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	return filepath.Join(homeDir, ".local", "share", "lippycat", "captures"), nil
 }

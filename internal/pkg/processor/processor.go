@@ -1061,14 +1061,61 @@ func (p *Processor) buildTLSCredentials() (credentials.TransportCredentials, err
 	return credentials.NewTLS(tlsConfig), nil
 }
 
+// buildClientTLSCredentials creates TLS credentials for gRPC client (upstream connection)
+func (p *Processor) buildClientTLSCredentials() (credentials.TransportCredentials, error) {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// Load CA certificate if provided
+	if p.config.TLSCAFile != "" {
+		caCert, err := os.ReadFile(p.config.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.RootCAs = certPool
+		logger.Info("Loaded CA certificate for upstream connection", "file", p.config.TLSCAFile)
+	}
+
+	// Load client certificate for mutual TLS if provided
+	if p.config.TLSCertFile != "" && p.config.TLSKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(p.config.TLSCertFile, p.config.TLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+		logger.Info("Loaded client certificate for mutual TLS to upstream",
+			"cert", p.config.TLSCertFile,
+			"key", p.config.TLSKeyFile)
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
+}
+
 // connectToUpstream establishes connection to upstream processor
 func (p *Processor) connectToUpstream() error {
 	logger.Info("Connecting to upstream processor", "addr", p.config.UpstreamAddr)
 
-	// Create gRPC connection
+	// Create gRPC connection with TLS if enabled
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10 * 1024 * 1024)), // 10MB
+	}
+
+	if p.config.TLSEnabled {
+		tlsCreds, err := p.buildClientTLSCredentials()
+		if err != nil {
+			return fmt.Errorf("failed to build TLS credentials for upstream: %w", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
+		logger.Info("Using TLS for upstream connection")
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		logger.Warn("Using insecure upstream connection (no TLS)",
+			"security_risk", "packet data transmitted in cleartext")
 	}
 
 	conn, err := grpc.Dial(p.config.UpstreamAddr, opts...)

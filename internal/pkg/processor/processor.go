@@ -878,6 +878,7 @@ func (p *Processor) pushFilterUpdate(filter *management.Filter, update *manageme
 	var huntersUpdated uint32
 	const sendTimeout = 2 * time.Second
 	const maxConsecutiveFailures = 5
+	const circuitBreakerThreshold = 10 // Disconnect after this many failures
 
 	// Helper to send with timeout and track failures
 	sendUpdate := func(hunterID string, ch chan *management.FilterUpdate) bool {
@@ -902,7 +903,18 @@ func (p *Processor) pushFilterUpdate(filter *management.Filter, update *manageme
 				hunter.FilterUpdateFailures++
 				hunter.LastFilterUpdateFailure = time.Now().UnixNano()
 
-				if hunter.FilterUpdateFailures >= maxConsecutiveFailures {
+				if hunter.FilterUpdateFailures >= circuitBreakerThreshold {
+					// Circuit breaker: disconnect permanently failed hunter
+					logger.Error("Circuit breaker triggered - disconnecting hunter",
+						"hunter_id", hunterID,
+						"consecutive_failures", hunter.FilterUpdateFailures,
+						"threshold", circuitBreakerThreshold,
+						"action", "removing hunter from processor")
+					hunter.Status = management.HunterStatus_STATUS_ERROR
+
+					// Schedule immediate removal (will be picked up by cleanup)
+					hunter.LastHeartbeat = time.Now().Add(-60 * time.Minute).UnixNano()
+				} else if hunter.FilterUpdateFailures >= maxConsecutiveFailures {
 					logger.Error("Hunter not receiving filter updates - marking as error",
 						"hunter_id", hunterID,
 						"consecutive_failures", hunter.FilterUpdateFailures,

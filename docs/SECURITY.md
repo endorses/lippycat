@@ -4,13 +4,501 @@ This document describes the security enhancements available in lippycat for prot
 
 ## Overview
 
-Lippycat includes three primary security enhancements:
+Lippycat includes four primary security enhancements:
 
-1. **Call-ID Sanitization** - Prevents information leakage in log files
-2. **PCAP File Encryption** - Protects captured traffic data at rest
-3. **Content-Length Bounds Validation** - Prevents DoS attacks via memory exhaustion
+1. **TLS Transport Encryption** - Protects hunter-processor communication in transit
+2. **Call-ID Sanitization** - Prevents information leakage in log files
+3. **PCAP File Encryption** - Protects captured traffic data at rest
+4. **Content-Length Bounds Validation** - Prevents DoS attacks via memory exhaustion
 
 These features are designed for sensitive deployments where VoIP traffic data requires additional protection.
+
+## Table of Contents
+
+- [TLS Transport Encryption](#tls-transport-encryption)
+- [Call-ID Sanitization](#call-id-sanitization)
+- [PCAP File Encryption](#pcap-file-encryption)
+- [Content-Length Bounds Validation](#content-length-bounds-validation)
+- [Security Best Practices](#security-best-practices)
+
+## TLS Transport Encryption
+
+### Purpose
+
+In distributed mode, hunters forward captured network traffic to processor nodes via gRPC. This communication includes:
+- Complete packet payloads (potentially containing sensitive data)
+- Network topology information
+- SIP credentials and authentication data
+- RTP media streams
+- Internal IP addresses and network configuration
+
+**Without TLS encryption, this data is transmitted in cleartext**, making it vulnerable to:
+- Man-in-the-middle (MitM) attacks
+- Network eavesdropping
+- Traffic injection and tampering
+- Unauthorized access to captured data
+
+### Security Model
+
+Lippycat enforces TLS by default in v0.2.0+ with a **secure-by-default** approach:
+
+- ✅ **TLS Required**: Hunters and processors refuse to start without TLS unless explicitly allowed
+- ✅ **Mutual TLS Supported**: Processor can require client certificates for hunter authentication
+- ✅ **Certificate Verification**: Server certificates validated against trusted CA by default
+- ⚠️ **Insecure Mode**: Requires explicit `--insecure` flag with prominent warnings
+
+### Quick Start
+
+#### 1. Generate Certificates
+
+For testing and development, use self-signed certificates:
+
+```bash
+# Create certificate directory
+mkdir -p /etc/lippycat/certs
+cd /etc/lippycat/certs
+
+# Generate CA private key and certificate
+openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
+  -keyout ca-key.pem -out ca-cert.pem \
+  -subj "/CN=Lippycat CA"
+
+# Generate server private key
+openssl genrsa -out server-key.pem 4096
+
+# Generate server certificate signing request
+openssl req -new -key server-key.pem -out server-req.pem \
+  -subj "/CN=processor.example.com"
+
+# Sign server certificate with CA
+openssl x509 -req -in server-req.pem -days 365 \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out server-cert.pem
+
+# Generate client private key (for mutual TLS)
+openssl genrsa -out client-key.pem 4096
+
+# Generate client certificate signing request
+openssl req -new -key client-key.pem -out client-req.pem \
+  -subj "/CN=hunter-01.example.com"
+
+# Sign client certificate with CA
+openssl x509 -req -in client-req.pem -days 365 \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out client-cert.pem
+
+# Set restrictive permissions
+chmod 600 *-key.pem
+chmod 644 *-cert.pem
+```
+
+#### 2. Start Processor with TLS
+
+```bash
+# Server TLS (one-way authentication)
+lippycat process \
+  --listen 0.0.0.0:50051 \
+  --tls \
+  --tls-cert /etc/lippycat/certs/server-cert.pem \
+  --tls-key /etc/lippycat/certs/server-key.pem
+
+# Mutual TLS (two-way authentication - recommended)
+lippycat process \
+  --listen 0.0.0.0:50051 \
+  --tls \
+  --tls-cert /etc/lippycat/certs/server-cert.pem \
+  --tls-key /etc/lippycat/certs/server-key.pem \
+  --tls-client-auth \
+  --tls-ca /etc/lippycat/certs/ca-cert.pem
+```
+
+#### 3. Start Hunter with TLS
+
+```bash
+# Basic TLS (verify server certificate)
+lippycat hunt \
+  --processor processor.example.com:50051 \
+  --interface eth0 \
+  --tls \
+  --tls-ca /etc/lippycat/certs/ca-cert.pem
+
+# Mutual TLS (present client certificate)
+lippycat hunt \
+  --processor processor.example.com:50051 \
+  --interface eth0 \
+  --tls \
+  --tls-cert /etc/lippycat/certs/client-cert.pem \
+  --tls-key /etc/lippycat/certs/client-key.pem \
+  --tls-ca /etc/lippycat/certs/ca-cert.pem
+```
+
+### Configuration via YAML
+
+For production deployments, use configuration files:
+
+```yaml
+# ~/.config/lippycat/config.yaml
+
+# Processor configuration
+processor:
+  listen_addr: "0.0.0.0:50051"
+  tls:
+    enabled: true
+    cert_file: "/etc/lippycat/certs/server-cert.pem"
+    key_file: "/etc/lippycat/certs/server-key.pem"
+    ca_file: "/etc/lippycat/certs/ca-cert.pem"
+    client_auth: true  # Require client certificates
+
+# Hunter configuration
+hunter:
+  processor_addr: "processor.example.com:50051"
+  tls:
+    enabled: true
+    cert_file: "/etc/lippycat/certs/client-cert.pem"
+    key_file: "/etc/lippycat/certs/client-key.pem"
+    ca_file: "/etc/lippycat/certs/ca-cert.pem"
+```
+
+Then start without command-line flags:
+
+```bash
+lippycat process  # Uses config file
+lippycat hunt --interface eth0  # Uses config file
+```
+
+### TLS Modes
+
+#### 1. Server TLS (One-Way Authentication)
+
+**Use case:** Encrypt traffic, verify processor identity
+
+```
+Hunter                    Processor
+  |                           |
+  |---- TLS Handshake ------->|
+  |<--- Server Certificate ----|
+  | (verify cert)              |
+  |<--- Encrypted Channel ---->|
+```
+
+**Configuration:**
+
+```bash
+# Processor: Present server certificate
+lippycat process --tls --tls-cert server.crt --tls-key server.key
+
+# Hunter: Verify server certificate
+lippycat hunt --tls --tls-ca ca.crt --processor host:50051
+```
+
+**Security:** Protects against eavesdropping, but hunters are not authenticated.
+
+#### 2. Mutual TLS (Two-Way Authentication) ⭐ Recommended
+
+**Use case:** Encrypt traffic + authenticate both hunter and processor
+
+```
+Hunter                    Processor
+  |                           |
+  |---- TLS Handshake ------->|
+  |<--- Server Certificate ----|
+  | (verify server cert)       |
+  |---- Client Certificate --->|
+  |     (processor verifies)   |
+  |<--- Encrypted Channel ---->|
+```
+
+**Configuration:**
+
+```bash
+# Processor: Require client certificates
+lippycat process \
+  --tls \
+  --tls-cert server.crt \
+  --tls-key server.key \
+  --tls-client-auth \
+  --tls-ca ca.crt
+
+# Hunter: Present client certificate
+lippycat hunt \
+  --tls \
+  --tls-cert client.crt \
+  --tls-key client.key \
+  --tls-ca ca.crt \
+  --processor host:50051
+```
+
+**Security:** Strongest option - mutual authentication prevents unauthorized hunters.
+
+#### 3. Insecure Mode (No TLS) ⚠️
+
+**Use case:** Testing on localhost or trusted internal networks only
+
+```bash
+# Processor: Explicitly allow insecure
+lippycat process --insecure
+
+# Hunter: Explicitly allow insecure
+lippycat hunt --insecure --processor localhost:50051
+```
+
+**Warning:** Prominent security banners displayed on startup:
+
+```
+═══════════════════════════════════════════════════════════
+  SECURITY WARNING: TLS ENCRYPTION DISABLED
+  Packet data will be transmitted in CLEARTEXT
+  This mode should ONLY be used in trusted networks
+  Enable TLS for production: --tls --tls-ca=/path/to/ca.crt
+═══════════════════════════════════════════════════════════
+```
+
+### Production Certificate Setup
+
+For production deployments, use proper certificate management:
+
+#### Option 1: Internal Certificate Authority
+
+Recommended for most deployments:
+
+```bash
+# 1. Set up CA infrastructure
+mkdir -p /secure/ca/{certs,private}
+cd /secure/ca
+
+# 2. Create CA
+openssl req -x509 -newkey rsa:4096 -days 3650 -nodes \
+  -keyout private/ca-key.pem -out certs/ca-cert.pem \
+  -subj "/C=US/ST=State/L=City/O=YourOrg/CN=YourOrg Root CA"
+
+# 3. Create certificate config
+cat > server-cert.conf <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C = US
+ST = State
+L = City
+O = YourOrg
+CN = processor.yourorg.internal
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = processor.yourorg.internal
+DNS.2 = processor
+IP.1 = 10.0.1.100
+EOF
+
+# 4. Generate and sign server certificate
+openssl req -new -newkey rsa:4096 -nodes \
+  -keyout private/server-key.pem \
+  -out server-req.pem \
+  -config server-cert.conf
+
+openssl x509 -req -in server-req.pem \
+  -CA certs/ca-cert.pem -CAkey private/ca-key.pem \
+  -CAcreateserial -out certs/server-cert.pem \
+  -days 365 -extensions v3_req -extfile server-cert.conf
+
+# 5. Distribute CA certificate to all hunters
+# 6. Generate client certificates for each hunter
+```
+
+#### Option 2: Commercial Certificate Authority
+
+For internet-facing deployments:
+
+1. Purchase certificate from trusted CA (Let's Encrypt, DigiCert, etc.)
+2. Install certificate on processor
+3. Hunters automatically trust well-known CAs
+
+```bash
+# No --tls-ca needed for well-known CAs
+lippycat hunt --tls --processor processor.example.com:50051
+```
+
+### Certificate Management
+
+#### Certificate Expiration
+
+Monitor certificate expiration:
+
+```bash
+# Check certificate validity
+openssl x509 -in /etc/lippycat/certs/server-cert.pem -noout -dates
+
+# Set up expiration monitoring
+0 0 * * * /usr/local/bin/check-cert-expiry.sh
+```
+
+#### Certificate Rotation
+
+Zero-downtime certificate rotation:
+
+```bash
+# 1. Generate new certificate
+openssl genrsa -out server-key-new.pem 4096
+openssl req -new -key server-key-new.pem -out server-req-new.pem
+openssl x509 -req -in server-req-new.pem -CA ca-cert.pem \
+  -CAkey ca-key.pem -out server-cert-new.pem -days 365
+
+# 2. Update processor config
+vim /etc/lippycat/config.yaml
+# Change cert_file and key_file paths
+
+# 3. Reload processor (graceful)
+systemctl reload lippycat-processor
+
+# 4. Verify new certificate in use
+openssl s_client -connect processor:50051 -showcerts
+```
+
+#### Revocation
+
+To revoke compromised certificates:
+
+1. Remove certificate from CA signing list
+2. Restart processor to disconnect affected hunters
+3. Generate and distribute new certificates
+4. Update hunter configurations
+
+### Troubleshooting
+
+#### "TLS is disabled but --insecure flag not set"
+
+**Cause:** Attempting to start without TLS or explicit insecure flag
+
+**Solution:**
+```bash
+# Enable TLS (recommended)
+lippycat hunt --tls --tls-ca ca.crt --processor host:50051
+
+# OR explicitly allow insecure (testing only)
+lippycat hunt --insecure --processor host:50051
+```
+
+#### "Failed to verify certificate"
+
+**Cause:** Certificate validation failed (wrong CA, hostname mismatch, expired)
+
+**Solution:**
+```bash
+# Check certificate details
+openssl x509 -in server-cert.pem -noout -text
+
+# Verify hostname matches
+openssl x509 -in server-cert.pem -noout -subject
+
+# For testing, skip verification (INSECURE)
+lippycat hunt --tls --tls-skip-verify --processor host:50051
+```
+
+#### "No client certificate provided"
+
+**Cause:** Processor requires client certificates but hunter didn't provide one
+
+**Solution:**
+```bash
+# Provide client certificate
+lippycat hunt \
+  --tls \
+  --tls-cert client.crt \
+  --tls-key client.key \
+  --tls-ca ca.crt \
+  --processor host:50051
+```
+
+#### "Certificate has expired"
+
+**Cause:** Certificate validity period has passed
+
+**Solution:**
+```bash
+# Check expiration
+openssl x509 -in cert.pem -noout -enddate
+
+# Generate new certificate
+# (see Certificate Rotation section)
+```
+
+### Performance Impact
+
+TLS encryption has minimal performance impact with modern hardware:
+
+- **CPU**: ~2-5% overhead for TLS handshake and encryption
+- **Latency**: +1-5ms for initial handshake, <1ms per packet thereafter
+- **Throughput**: ~95-98% of non-TLS throughput on modern CPUs
+- **Memory**: ~50KB per connection for TLS session state
+
+**Hardware acceleration:** Modern CPUs with AES-NI provide near-zero overhead.
+
+### Security Considerations
+
+#### Threat Model
+
+TLS protects against:
+- ✅ Network eavesdropping (passive attacks)
+- ✅ Man-in-the-middle attacks (active attacks)
+- ✅ Traffic injection and tampering
+- ✅ Unauthorized hunter connections (with mutual TLS)
+- ✅ Replay attacks (via TLS nonce)
+
+TLS does NOT protect against:
+- ❌ Compromised hunter or processor hosts
+- ❌ Malicious insiders with valid certificates
+- ❌ Side-channel attacks (timing, power analysis)
+- ❌ Vulnerabilities in application code
+
+#### Defense in Depth
+
+TLS is one layer in a comprehensive security strategy:
+
+1. **Network Layer:** Firewall rules, network segmentation
+2. **Transport Layer:** **TLS encryption (this feature)**
+3. **Application Layer:** Call-ID sanitization, input validation
+4. **Storage Layer:** PCAP file encryption
+5. **Access Control:** OS-level permissions, SELinux/AppArmor
+6. **Monitoring:** Log analysis, intrusion detection
+
+#### Compliance
+
+TLS encryption helps meet regulatory requirements:
+
+- **GDPR:** Encryption of personal data in transit
+- **HIPAA:** Protected health information (PHI) safeguards
+- **PCI DSS:** Requirement 4 - Encrypt cardholder data in transit
+- **SOX:** Data integrity and confidentiality controls
+- **NIST 800-53:** SC-8 Transmission Confidentiality
+
+### Best Practices
+
+#### ✅ DO
+
+- **Use mutual TLS in production** for strongest security
+- **Use proper CA infrastructure** with internal or commercial CA
+- **Monitor certificate expiration** with automated alerting
+- **Rotate certificates regularly** (annually or per policy)
+- **Use strong key sizes** (4096-bit RSA or 256-bit ECDSA)
+- **Restrict certificate permissions** (600 for keys, 644 for certs)
+- **Use configuration files** instead of command-line flags in production
+- **Test TLS setup** in development before deploying to production
+
+#### ❌ DON'T
+
+- **Don't use --tls-skip-verify in production** (defeats certificate verification)
+- **Don't use --insecure in production** (transmits sensitive data in cleartext)
+- **Don't share private keys** across multiple systems
+- **Don't commit certificates to git** (use secrets management)
+- **Don't use weak key sizes** (<2048-bit RSA)
+- **Don't ignore certificate expiration warnings**
+- **Don't rely on TLS alone** (use defense-in-depth)
 
 ## Call-ID Sanitization
 

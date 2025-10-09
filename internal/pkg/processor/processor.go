@@ -58,12 +58,15 @@ type Processor struct {
 	hunters   map[string]*ConnectedHunter
 
 	// PCAP writer (async)
-	pcapFile          *os.File
-	pcapWriter        *pcapgo.Writer
-	pcapWriteQueue    chan []*data.CapturedPacket
-	pcapWriterWg      sync.WaitGroup
-	pcapWriterMu      sync.Mutex // Protects pcapWriter (not thread-safe)
-	perCallPcapWriter *PcapWriterManager // Per-call PCAP writer
+	pcapFile            *os.File
+	pcapWriter          *pcapgo.Writer
+	pcapWriteQueue      chan []*data.CapturedPacket
+	pcapWriterWg        sync.WaitGroup
+	pcapWriterMu        sync.Mutex     // Protects pcapWriter (not thread-safe)
+	perCallPcapWriter   *PcapWriterManager // Per-call PCAP writer
+	pcapWriteErrors     atomic.Uint64  // Track total write errors
+	pcapConsecErrors    atomic.Uint64  // Track consecutive write errors
+	pcapLastErrorLogged atomic.Int64   // Timestamp of last error log
 
 	// Statistics - use atomic.Value for lock-free reads
 	statsCache           atomic.Value  // stores *cachedStats
@@ -733,6 +736,7 @@ func (p *Processor) writePacketBatchToPCAP(packets []*data.CapturedPacket) {
 	p.pcapWriterMu.Lock()
 	defer p.pcapWriterMu.Unlock()
 
+	batchErrors := 0
 	for _, pkt := range packets {
 		// Convert timestamp
 		timestamp := time.Unix(0, pkt.TimestampNs)
@@ -746,8 +750,42 @@ func (p *Processor) writePacketBatchToPCAP(packets []*data.CapturedPacket) {
 
 		// Write packet
 		if err := p.pcapWriter.WritePacket(ci, pkt.Data); err != nil {
-			logger.Error("Failed to write packet to PCAP", "error", err)
+			batchErrors++
+			p.pcapWriteErrors.Add(1)
+			consecErrors := p.pcapConsecErrors.Add(1)
+
+			// Log errors with rate limiting (max once per 10 seconds)
+			now := time.Now().Unix()
+			lastLogged := p.pcapLastErrorLogged.Load()
+			if now-lastLogged >= 10 {
+				if p.pcapLastErrorLogged.CompareAndSwap(lastLogged, now) {
+					logger.Error("Failed to write packet to PCAP",
+						"error", err,
+						"consecutive_errors", consecErrors,
+						"total_errors", p.pcapWriteErrors.Load())
+
+					// Emit critical warning if many consecutive failures
+					if consecErrors >= 100 {
+						logger.Warn("PCAP writing may be failing due to disk full or permissions",
+							"consecutive_errors", consecErrors,
+							"recommendation", "check disk space and file permissions")
+					}
+				}
+			}
+		} else {
+			// Successful write - reset consecutive error counter
+			if p.pcapConsecErrors.Load() > 0 {
+				p.pcapConsecErrors.Store(0)
+			}
 		}
+	}
+
+	// Log batch summary if there were errors
+	if batchErrors > 0 && len(packets) > 0 {
+		logger.Warn("PCAP batch write completed with errors",
+			"batch_size", len(packets),
+			"errors", batchErrors,
+			"success_rate", float64(len(packets)-batchErrors)/float64(len(packets))*100)
 	}
 }
 

@@ -140,7 +140,7 @@ func TestOfflineInterface_Handle_NoHandle(t *testing.T) {
 
 	assert.Nil(t, handle, "Handle should be nil when not set")
 	assert.Error(t, err, "Should return error when handle is not set")
-	assert.Contains(t, err.Error(), "Interface has no handle", "Error message should be descriptive")
+	assert.Contains(t, err.Error(), "interface has no handle", "Error message should be descriptive")
 }
 
 func TestInterface_Consistency(t *testing.T) {

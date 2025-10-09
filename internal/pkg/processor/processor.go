@@ -896,11 +896,11 @@ func (p *Processor) pushFilterUpdate(filter *management.Filter, update *manageme
 				hunter.LastFilterUpdateFailure = time.Now().UnixNano()
 
 				if hunter.FilterUpdateFailures >= maxConsecutiveFailures {
-					logger.Error("Hunter not receiving filter updates - marking as unhealthy",
+					logger.Error("Hunter not receiving filter updates - marking as error",
 						"hunter_id", hunterID,
 						"consecutive_failures", hunter.FilterUpdateFailures,
 						"recommendation", "hunter may be overloaded or network issue")
-					hunter.Status = management.HunterStatus_STATUS_UNHEALTHY
+					hunter.Status = management.HunterStatus_STATUS_ERROR
 				} else {
 					logger.Warn("Filter update send timeout",
 						"hunter_id", hunterID,

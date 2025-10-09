@@ -251,6 +251,10 @@ func (p *Processor) Start(ctx context.Context) error {
 	p.wg.Add(1)
 	go p.monitorHeartbeats()
 
+	// Start hunter cleanup janitor
+	p.wg.Add(1)
+	go p.cleanupStaleHunters()
+
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
 
 	// Wait for shutdown
@@ -1013,6 +1017,60 @@ func (p *Processor) updateHealthStats() {
 		lastUpdate: time.Now().Unix(),
 	})
 	p.statsUpdates.Add(1)
+}
+
+// cleanupStaleHunters periodically removes hunters that have been in ERROR state for too long
+func (p *Processor) cleanupStaleHunters() {
+	defer p.wg.Done()
+
+	// Cleanup interval: check every 5 minutes
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	// Grace period: remove hunters that have been in ERROR state for 30 minutes
+	const gracePeriod = 30 * time.Minute
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			p.huntersMu.Lock()
+
+			var toRemove []string
+			for hunterID, hunter := range p.hunters {
+				if hunter.Status == management.HunterStatus_STATUS_ERROR {
+					// Check how long it's been in ERROR state
+					lastHeartbeat := time.Unix(0, hunter.LastHeartbeat)
+					timeSinceError := now.Sub(lastHeartbeat)
+
+					if timeSinceError > gracePeriod {
+						toRemove = append(toRemove, hunterID)
+					}
+				}
+			}
+
+			// Remove stale hunters
+			for _, hunterID := range toRemove {
+				logger.Info("Removing stale hunter from map",
+					"hunter_id", hunterID,
+					"reason", "in ERROR state beyond grace period")
+				delete(p.hunters, hunterID)
+
+				// Also remove from filter channels
+				delete(p.filterChannels, hunterID)
+			}
+
+			p.huntersMu.Unlock()
+
+			if len(toRemove) > 0 {
+				logger.Info("Cleaned up stale hunters",
+					"count", len(toRemove),
+					"grace_period", gracePeriod)
+			}
+		}
+	}
 }
 
 // buildTLSCredentials creates TLS credentials for gRPC server

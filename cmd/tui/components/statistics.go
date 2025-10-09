@@ -5,7 +5,6 @@ package components
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -15,10 +14,11 @@ import (
 )
 
 // Statistics holds aggregated packet statistics
+// Uses bounded counters to prevent unbounded memory growth
 type Statistics struct {
-	ProtocolCounts map[string]int // Protocol -> packet count
-	SourceCounts   map[string]int // Source IP -> packet count
-	DestCounts     map[string]int // Dest IP -> packet count
+	ProtocolCounts *BoundedCounter // Protocol -> packet count (max 1000)
+	SourceCounts   *BoundedCounter // Source IP -> packet count (max 10000)
+	DestCounts     *BoundedCounter // Dest IP -> packet count (max 10000)
 	TotalBytes     int64
 	TotalPackets   int
 	MinPacketSize  int
@@ -150,27 +150,12 @@ func (s *StatisticsView) renderContent() string {
 	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
 	result.WriteString("\n\n")
 
-	// Sort protocols by count
-	type protocolCount struct {
-		protocol string
-		count    int
-	}
-	var protocols []protocolCount
-	for proto, count := range s.stats.ProtocolCounts {
-		protocols = append(protocols, protocolCount{proto, count})
-	}
-	sort.Slice(protocols, func(i, j int) bool {
-		return protocols[i].count > protocols[j].count
-	})
-
 	// Show top 5 protocols
-	for i, pc := range protocols {
-		if i >= 5 {
-			break
-		}
-		percentage := float64(pc.count) / float64(s.stats.TotalPackets) * 100
+	topProtocols := s.stats.ProtocolCounts.GetTopN(5)
+	for _, pc := range topProtocols {
+		percentage := float64(pc.Count) / float64(s.stats.TotalPackets) * 100
 		result.WriteString(fmt.Sprintf("  %-10s %6d packets  (%.1f%%)\n",
-			pc.protocol, pc.count, percentage))
+			pc.Key, pc.Count, percentage))
 	}
 	result.WriteString("\n")
 
@@ -178,25 +163,10 @@ func (s *StatisticsView) renderContent() string {
 	result.WriteString(titleStyle.Render("⬆️  Top Source IPs"))
 	result.WriteString("\n\n")
 
-	// Sort sources by count
-	type ipCount struct {
-		ip    string
-		count int
-	}
-	var sources []ipCount
-	for ip, count := range s.stats.SourceCounts {
-		sources = append(sources, ipCount{ip, count})
-	}
-	sort.Slice(sources, func(i, j int) bool {
-		return sources[i].count > sources[j].count
-	})
-
 	// Show top 5 sources
-	for i, sc := range sources {
-		if i >= 5 {
-			break
-		}
-		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", sc.ip, sc.count))
+	topSources := s.stats.SourceCounts.GetTopN(5)
+	for _, sc := range topSources {
+		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", sc.Key, sc.Count))
 	}
 	result.WriteString("\n")
 
@@ -204,21 +174,10 @@ func (s *StatisticsView) renderContent() string {
 	result.WriteString(titleStyle.Render("⬇️  Top Destination IPs"))
 	result.WriteString("\n\n")
 
-	// Sort destinations by count
-	var dests []ipCount
-	for ip, count := range s.stats.DestCounts {
-		dests = append(dests, ipCount{ip, count})
-	}
-	sort.Slice(dests, func(i, j int) bool {
-		return dests[i].count > dests[j].count
-	})
-
 	// Show top 5 destinations
-	for i, dc := range dests {
-		if i >= 5 {
-			break
-		}
-		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", dc.ip, dc.count))
+	topDests := s.stats.DestCounts.GetTopN(5)
+	for _, dc := range topDests {
+		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", dc.Key, dc.Count))
 	}
 
 	return result.String()

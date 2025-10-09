@@ -197,11 +197,11 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 	protocolSelector := components.NewProtocolSelector()
 	protocolSelector.SetTheme(theme)
 
-	// Initialize statistics
+	// Initialize statistics with bounded counters to prevent memory growth
 	statistics := &components.Statistics{
-		ProtocolCounts: make(map[string]int),
-		SourceCounts:   make(map[string]int),
-		DestCounts:     make(map[string]int),
+		ProtocolCounts: components.NewBoundedCounter(1000),   // Max 1000 unique protocols
+		SourceCounts:   components.NewBoundedCounter(10000),  // Max 10000 unique source IPs
+		DestCounts:     components.NewBoundedCounter(10000),  // Max 10000 unique dest IPs
 		MinPacketSize:  999999,
 		MaxPacketSize:  0,
 	}
@@ -463,10 +463,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.totalPackets = 0
 			m.matchedPackets = 0
 			m.packetList.SetPackets(m.getPacketsInOrder())
-			// Reuse maps instead of reallocating (Go 1.21+)
-			clear(m.statistics.ProtocolCounts)
-			clear(m.statistics.SourceCounts)
-			clear(m.statistics.DestCounts)
+			// Reset bounded counters
+			m.statistics.ProtocolCounts.Clear()
+			m.statistics.SourceCounts.Clear()
+			m.statistics.DestCounts.Clear()
 			m.statistics.TotalBytes = 0
 			m.statistics.TotalPackets = 0
 			m.statistics.MinPacketSize = 999999
@@ -967,10 +967,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.matchedPackets = 0
 		m.packetList.Reset() // Reset packet list including autoscroll state
 
-		// Reset statistics (reuse maps)
-		clear(m.statistics.ProtocolCounts)
-		clear(m.statistics.SourceCounts)
-		clear(m.statistics.DestCounts)
+		// Reset statistics (bounded counters)
+		m.statistics.ProtocolCounts.Clear()
+		m.statistics.SourceCounts.Clear()
+		m.statistics.DestCounts.Clear()
 		m.statistics.TotalBytes = 0
 		m.statistics.TotalPackets = 0
 		m.statistics.MinPacketSize = 999999
@@ -1530,14 +1530,14 @@ func (m Model) View() string {
 
 // updateStatistics updates statistics with new packet data
 func (m *Model) updateStatistics(pkt components.PacketDisplay) {
-	// Update protocol counts
-	m.statistics.ProtocolCounts[pkt.Protocol]++
+	// Update protocol counts (bounded - evicts lowest count when full)
+	m.statistics.ProtocolCounts.Increment(pkt.Protocol)
 
-	// Update source counts
-	m.statistics.SourceCounts[pkt.SrcIP]++
+	// Update source counts (bounded - evicts lowest count when full)
+	m.statistics.SourceCounts.Increment(pkt.SrcIP)
 
-	// Update destination counts
-	m.statistics.DestCounts[pkt.DstIP]++
+	// Update destination counts (bounded - evicts lowest count when full)
+	m.statistics.DestCounts.Increment(pkt.DstIP)
 
 	// Update total bytes and packets
 	m.statistics.TotalBytes += int64(pkt.Length)

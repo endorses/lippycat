@@ -26,7 +26,8 @@ type PacketBuffer struct {
 	cancel     context.CancelFunc
 	dropped    int64
 	bufferSize int
-	closed     int32 // atomic flag: 0 = open, 1 = closed
+	closed     int32       // atomic flag: 0 = open, 1 = closed
+	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
@@ -42,6 +43,15 @@ func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 
 func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	// Fast path: check if already closed
+	if atomic.LoadInt32(&pb.closed) == 1 {
+		return false
+	}
+
+	// Register this sender to prevent channel close race
+	pb.sendersWg.Add(1)
+	defer pb.sendersWg.Done()
+
+	// Double-check closed flag after registering (in case Close() was called concurrently)
 	if atomic.LoadInt32(&pb.closed) == 1 {
 		return false
 	}
@@ -76,8 +86,9 @@ func (pb *PacketBuffer) Close() {
 
 	pb.cancel()
 
-	// Give senders a small window to finish
-	time.Sleep(10 * time.Millisecond)
+	// Wait for all active Send() operations to complete
+	// This prevents closing the channel while senders are still active
+	pb.sendersWg.Wait()
 
 	close(pb.ch)
 	if dropped := atomic.LoadInt64(&pb.dropped); dropped > 0 {

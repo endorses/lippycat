@@ -276,10 +276,13 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		// Process batch
 		p.processBatch(batch)
 
-		// Send acknowledgment
+		// Determine flow control state based on processor load
+		flowControl := p.determineFlowControl()
+
+		// Send acknowledgment with flow control signal
 		ack := &data.StreamControl{
 			AckSequence: batch.Sequence,
-			FlowControl: data.FlowControl_FLOW_CONTINUE,
+			FlowControl: flowControl,
 		}
 
 		if err := stream.Send(ack); err != nil {
@@ -287,6 +290,57 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 			return err
 		}
 	}
+}
+
+// determineFlowControl determines appropriate flow control signal based on processor load
+func (p *Processor) determineFlowControl() data.FlowControl {
+	// Check PCAP write queue depth if configured
+	if p.pcapWriteQueue != nil {
+		queueDepth := len(p.pcapWriteQueue)
+		queueCapacity := cap(p.pcapWriteQueue)
+
+		utilizationPct := float64(queueDepth) / float64(queueCapacity) * 100
+
+		// Pause if queue is critically full (>90%)
+		if utilizationPct > 90 {
+			logger.Warn("PCAP write queue critically full - requesting pause",
+				"queue_depth", queueDepth,
+				"capacity", queueCapacity,
+				"utilization", utilizationPct)
+			return data.FlowControl_FLOW_PAUSE
+		}
+
+		// Slow down if queue is getting full (>70%)
+		if utilizationPct > 70 {
+			logger.Debug("PCAP write queue filling - requesting slowdown",
+				"queue_depth", queueDepth,
+				"capacity", queueCapacity,
+				"utilization", utilizationPct)
+			return data.FlowControl_FLOW_SLOW
+		}
+
+		// Resume if queue has drained (< 30% and was previously paused)
+		if utilizationPct < 30 {
+			return data.FlowControl_FLOW_RESUME
+		}
+	}
+
+	// Check overall packet processing load
+	packetsReceived := p.packetsReceived.Load()
+	packetsForwarded := p.packetsForwarded.Load()
+
+	// If we're significantly behind in forwarding, slow down
+	if packetsReceived > packetsForwarded {
+		backlog := packetsReceived - packetsForwarded
+		if backlog > 10000 {
+			logger.Warn("Large packet backlog detected - requesting slowdown",
+				"backlog", backlog)
+			return data.FlowControl_FLOW_SLOW
+		}
+	}
+
+	// Normal operation
+	return data.FlowControl_FLOW_CONTINUE
 }
 
 // processBatch processes a received packet batch

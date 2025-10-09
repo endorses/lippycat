@@ -75,8 +75,10 @@ type Hunter struct {
 	batchSequence uint64
 
 	// Flow control
-	batchQueue     chan []*data.CapturedPacket
-	batchQueueSize atomic.Int32
+	batchQueue       chan []*data.CapturedPacket
+	batchQueueSize   atomic.Int32
+	flowControlState atomic.Int32  // FlowControl enum value
+	paused           atomic.Bool    // Whether sending is paused
 
 	// Statistics
 	stats Stats
@@ -376,8 +378,84 @@ func (h *Hunter) startStreaming() error {
 	h.stream = stream
 	h.streamMu.Unlock()
 
-	logger.Info("Packet stream established")
+	// Start goroutine to receive flow control messages from processor
+	h.wg.Add(1)
+	go h.receiveStreamControl(stream)
+
+	logger.Info("Packet stream established with flow control")
 	return nil
+}
+
+// receiveStreamControl receives and processes flow control messages from processor
+func (h *Hunter) receiveStreamControl(stream data.DataService_StreamPacketsClient) {
+	defer h.wg.Done()
+
+	for {
+		select {
+		case <-h.ctx.Done():
+			return
+		default:
+			ctrl, err := stream.Recv()
+			if err != nil {
+				if h.ctx.Err() == nil {
+					logger.Error("Stream control receive error", "error", err)
+				}
+				return
+			}
+
+			// Process flow control signal
+			h.handleFlowControl(ctrl)
+		}
+	}
+}
+
+// handleFlowControl processes flow control signals from processor
+func (h *Hunter) handleFlowControl(ctrl *data.StreamControl) {
+	oldState := data.FlowControl(h.flowControlState.Load())
+	newState := ctrl.FlowControl
+
+	// Update flow control state
+	h.flowControlState.Store(int32(newState))
+
+	// Log state changes
+	if oldState != newState {
+		logger.Info("Flow control state changed",
+			"old_state", oldState,
+			"new_state", newState,
+			"ack_sequence", ctrl.AckSequence)
+	}
+
+	// Handle specific flow control actions
+	switch newState {
+	case data.FlowControl_FLOW_PAUSE:
+		if !h.paused.Load() {
+			h.paused.Store(true)
+			logger.Warn("Processor requested pause - buffering packets",
+				"recommendation", "processor may be overloaded")
+		}
+
+	case data.FlowControl_FLOW_RESUME:
+		if h.paused.Load() {
+			h.paused.Store(false)
+			logger.Info("Processor requested resume - sending packets")
+		}
+
+	case data.FlowControl_FLOW_SLOW:
+		logger.Debug("Processor requested slow down",
+			"current_queue_size", h.batchQueueSize.Load())
+
+	case data.FlowControl_FLOW_CONTINUE:
+		// Normal operation - no action needed
+		logger.Debug("Flow control: continue",
+			"ack_sequence", ctrl.AckSequence)
+	}
+
+	// Log errors if any
+	if ctrl.Error != "" {
+		logger.Error("Processor reported error",
+			"error", ctrl.Error,
+			"ack_sequence", ctrl.AckSequence)
+	}
 }
 
 // startCapture begins packet capture
@@ -478,6 +556,12 @@ func (h *Hunter) forwardPackets() {
 
 // sendBatch sends the current batch to processor
 func (h *Hunter) sendBatch() {
+	// Check if paused by processor
+	if h.paused.Load() {
+		logger.Debug("Skipping batch send - paused by processor")
+		return
+	}
+
 	h.batchMu.Lock()
 	if len(h.currentBatch) == 0 {
 		h.batchMu.Unlock()
@@ -513,19 +597,34 @@ func (h *Hunter) sendBatch() {
 		return
 	}
 
-	if err := stream.Send(batch); err != nil {
-		logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
+	// Implement timeout for send to prevent blocking indefinitely
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- stream.Send(batch)
+	}()
+
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
+			// Use atomic add - no mutex needed
+			h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
+			return
+		}
+
+		logger.Debug("Sent packet batch",
+			"sequence", batch.Sequence,
+			"packets", len(batch.Packets))
+
 		// Use atomic add - no mutex needed
+		h.stats.PacketsForwarded.Add(uint64(len(batch.Packets)))
+
+	case <-time.After(5 * time.Second):
+		logger.Error("Batch send timeout - processor may be unresponsive",
+			"sequence", batch.Sequence,
+			"packets", len(batch.Packets))
 		h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
-		return
 	}
-
-	logger.Debug("Sent packet batch",
-		"sequence", batch.Sequence,
-		"packets", len(batch.Packets))
-
-	// Use atomic add - no mutex needed
-	h.stats.PacketsForwarded.Add(uint64(len(batch.Packets)))
 }
 
 // batchSender sends queued batches to the processor with flow control

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,6 +139,7 @@ func (s *SIPStream) run() {
 			tcpStreamMetrics.totalStreamsFailed++
 			logger.Error("SIP stream panic recovered",
 				"panic_value", r,
+				"stack_trace", string(debug.Stack()),
 				"stream_context", s.ctx.Err(),
 				"stream_age", time.Since(s.createdAt),
 				"processed_bytes", atomic.LoadInt64(&s.processedBytes),

@@ -2,6 +2,8 @@ package processor
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"os"
@@ -17,6 +19,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -31,6 +34,12 @@ type Config struct {
 	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration
 	EnableDetection  bool              // Enable centralized protocol detection
 	FilterFile       string            // Path to filter persistence file (YAML)
+	// TLS settings
+	TLSEnabled    bool   // Enable TLS encryption for gRPC server
+	TLSCertFile   string // Path to TLS certificate file
+	TLSKeyFile    string // Path to TLS key file
+	TLSCAFile     string // Path to CA certificate file (for mutual TLS)
+	TLSClientAuth bool   // Require client certificate authentication (mutual TLS)
 }
 
 // Processor represents a processor node
@@ -184,10 +193,25 @@ func (p *Processor) Start(ctx context.Context) error {
 	}
 	p.listener = listener
 
-	// Create gRPC server
-	p.grpcServer = grpc.NewServer(
-		grpc.MaxRecvMsgSize(10*1024*1024), // 10MB
-	)
+	// Create gRPC server with TLS if configured
+	serverOpts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(10 * 1024 * 1024), // 10MB
+	}
+
+	if p.config.TLSEnabled {
+		tlsCreds, err := p.buildTLSCredentials()
+		if err != nil {
+			return fmt.Errorf("failed to build TLS credentials: %w", err)
+		}
+		serverOpts = append(serverOpts, grpc.Creds(tlsCreds))
+		logger.Info("gRPC server using TLS", "client_auth", p.config.TLSClientAuth)
+	} else {
+		logger.Warn("gRPC server using insecure connection (no TLS)",
+			"security_risk", "packet data transmitted in cleartext",
+			"recommendation", "enable TLS for production deployments")
+	}
+
+	p.grpcServer = grpc.NewServer(serverOpts...)
 
 	// Register services
 	data.RegisterDataServiceServer(p.grpcServer, p)
@@ -195,7 +219,8 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	logger.Info("gRPC server created",
 		"addr", listener.Addr().String(),
-		"services", []string{"DataService", "ManagementService"})
+		"services", []string{"DataService", "ManagementService"},
+		"tls", p.config.TLSEnabled)
 
 	// Start server in background
 	p.wg.Add(1)
@@ -856,6 +881,55 @@ func (p *Processor) updateHealthStats() {
 		lastUpdate: time.Now().Unix(),
 	})
 	p.statsUpdates.Add(1)
+}
+
+// buildTLSCredentials creates TLS credentials for gRPC server
+func (p *Processor) buildTLSCredentials() (credentials.TransportCredentials, error) {
+	if p.config.TLSCertFile == "" || p.config.TLSKeyFile == "" {
+		return nil, fmt.Errorf("TLS enabled but certificate or key file not specified")
+	}
+
+	// Load server certificate and key
+	cert, err := tls.LoadX509KeyPair(p.config.TLSCertFile, p.config.TLSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load server certificate: %w", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	// Configure client certificate authentication if enabled
+	if p.config.TLSClientAuth {
+		if p.config.TLSCAFile == "" {
+			return nil, fmt.Errorf("client auth enabled but CA file not specified")
+		}
+
+		// Load CA certificate for verifying client certificates
+		caCert, err := os.ReadFile(p.config.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+
+		tlsConfig.ClientCAs = certPool
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+
+		logger.Info("Mutual TLS enabled - requiring client certificates",
+			"ca_file", p.config.TLSCAFile)
+	}
+
+	logger.Info("TLS credentials loaded",
+		"cert", p.config.TLSCertFile,
+		"key", p.config.TLSKeyFile,
+		"min_version", "TLS 1.2")
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 // connectToUpstream establishes connection to upstream processor

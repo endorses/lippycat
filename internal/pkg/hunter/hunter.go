@@ -2,9 +2,12 @@ package hunter
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +21,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket/tcpassembly"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -37,6 +41,13 @@ type Config struct {
 	EnableVoIPFilter bool   // Enable VoIP filtering with GPU acceleration
 	GPUBackend       string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
 	GPUBatchSize     int    // Batch size for GPU processing
+	// TLS settings
+	TLSEnabled         bool   // Enable TLS encryption for gRPC connections
+	TLSCertFile        string // Path to TLS certificate file (for server verification)
+	TLSKeyFile         string // Path to TLS key file (for mutual TLS)
+	TLSCAFile          string // Path to CA certificate file
+	TLSSkipVerify      bool   // Skip certificate verification (insecure, for testing only)
+	TLSServerNameOverride string // Override server name for TLS verification (testing only)
 }
 
 // Hunter represents a hunter node
@@ -220,10 +231,22 @@ func (h *Hunter) connectAndRegister() error {
 func (h *Hunter) connectToProcessor() error {
 	logger.Info("Connecting to processor", "addr", h.config.ProcessorAddr)
 
-	// For now, use insecure connection (TLS can be added later)
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10 * 1024 * 1024)), // 10MB
+	}
+
+	// Configure TLS or insecure credentials
+	if h.config.TLSEnabled {
+		tlsCreds, err := h.buildTLSCredentials()
+		if err != nil {
+			return fmt.Errorf("failed to build TLS credentials: %w", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
+		logger.Info("Using TLS for gRPC connection", "skip_verify", h.config.TLSSkipVerify)
+	} else {
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		logger.Warn("Using insecure gRPC connection (no TLS)",
+			"security_risk", "packet data transmitted in cleartext")
 	}
 
 	// Connect data channel
@@ -243,8 +266,50 @@ func (h *Hunter) connectToProcessor() error {
 	h.managementConn = mgmtConn
 	h.mgmtClient = management.NewManagementServiceClient(mgmtConn)
 
-	logger.Info("Connected to processor", "addr", h.config.ProcessorAddr)
+	logger.Info("Connected to processor", "addr", h.config.ProcessorAddr, "tls", h.config.TLSEnabled)
 	return nil
+}
+
+// buildTLSCredentials creates TLS credentials for gRPC client
+func (h *Hunter) buildTLSCredentials() (credentials.TransportCredentials, error) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: h.config.TLSSkipVerify,
+		ServerName:         h.config.TLSServerNameOverride,
+	}
+
+	if h.config.TLSSkipVerify {
+		logger.Warn("TLS certificate verification disabled",
+			"security_risk", "vulnerable to man-in-the-middle attacks",
+			"recommendation", "only use in testing environments")
+	}
+
+	// Load CA certificate if provided
+	if h.config.TLSCAFile != "" {
+		caCert, err := os.ReadFile(h.config.TLSCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.RootCAs = certPool
+		logger.Info("Loaded CA certificate", "file", h.config.TLSCAFile)
+	}
+
+	// Load client certificate for mutual TLS if provided
+	if h.config.TLSCertFile != "" && h.config.TLSKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(h.config.TLSCertFile, h.config.TLSKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+		logger.Info("Loaded client certificate for mutual TLS",
+			"cert", h.config.TLSCertFile,
+			"key", h.config.TLSKeyFile)
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 // register registers hunter with processor

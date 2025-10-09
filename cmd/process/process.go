@@ -41,6 +41,7 @@ var (
 	processorID     string
 	upstreamAddr    string
 	maxHunters      int
+	maxSubscribers  int
 	writeFile       string
 	displayStats    bool
 	enableDetection bool
@@ -62,6 +63,7 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&processorID, "processor-id", "", "", "Unique processor identifier (default: hostname)")
 	ProcessCmd.Flags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
 	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", 100, "Maximum number of concurrent hunter connections")
+	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", 100, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")
@@ -80,6 +82,7 @@ func init() {
 	viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
 	viper.BindPFlag("processor.upstream_addr", ProcessCmd.Flags().Lookup("upstream"))
 	viper.BindPFlag("processor.max_hunters", ProcessCmd.Flags().Lookup("max-hunters"))
+	viper.BindPFlag("processor.max_subscribers", ProcessCmd.Flags().Lookup("max-subscribers"))
 	viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
 	viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
 	viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))
@@ -100,6 +103,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		ProcessorID:     getStringConfig("processor.processor_id", processorID),
 		UpstreamAddr:    getStringConfig("processor.upstream_addr", upstreamAddr),
 		MaxHunters:      getIntConfig("processor.max_hunters", maxHunters),
+		MaxSubscribers:  getIntConfig("processor.max_subscribers", maxSubscribers),
 		WriteFile:       getStringConfig("processor.write_file", writeFile),
 		DisplayStats:    getBoolConfig("processor.display_stats", displayStats),
 		EnableDetection: getBoolConfig("processor.enable_detection", enableDetection),

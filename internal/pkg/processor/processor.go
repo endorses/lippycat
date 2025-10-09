@@ -19,8 +19,10 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // Config contains processor configuration
@@ -29,6 +31,7 @@ type Config struct {
 	ProcessorID      string
 	UpstreamAddr     string
 	MaxHunters       int
+	MaxSubscribers   int    // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
 	WriteFile        string
 	DisplayStats     bool
 	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration
@@ -1226,6 +1229,19 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 	if clientID == "" {
 		nextID := p.nextSubID.Add(1)
 		clientID = fmt.Sprintf("subscriber-%d", nextID)
+	}
+
+	// Check subscriber limit to prevent DoS
+	if p.config.MaxSubscribers > 0 {
+		currentMap := p.subscribersAtomic.Load().(*subscriberMap)
+		if len(currentMap.subscribers) >= p.config.MaxSubscribers {
+			logger.Warn("Subscriber limit reached, rejecting new subscriber",
+				"client_id", clientID,
+				"current_subscribers", len(currentMap.subscribers),
+				"max_subscribers", p.config.MaxSubscribers)
+			return status.Errorf(codes.ResourceExhausted,
+				"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
+		}
 	}
 
 	logger.Info("New packet subscriber", "client_id", clientID)

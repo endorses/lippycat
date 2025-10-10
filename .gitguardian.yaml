@@ -1,0 +1,30 @@
+# GitGuardian configuration for lippycat
+# https://docs.gitguardian.com/internal-repositories-monitoring/integrations/git_hooks/pre_commit
+
+version: 2
+
+# Paths to ignore for secret scanning
+paths-ignore:
+  # Test files may contain embedded test certificates for TLS integration tests
+  - "**/*_test.go"
+  - "test/**"
+
+  # Testcerts directory - contains generated test certificates (also in .gitignore)
+  - "test/testcerts/**"
+
+  # Generated protobuf files
+  - "api/gen/**/*.pb.go"
+
+# Specific secrets to ignore (by match)
+matches-ignore:
+  # Test certificate in test/tls_integration_test.go
+  - name: Test TLS Certificate
+    match: selfSignedKeyPEM
+  - name: Test TLS Certificate Cert
+    match: selfSignedCertPEM
+
+# Note: This configuration ensures that:
+# 1. Real secrets in production code are still detected
+# 2. Test certificates in test files are ignored (test/tls_integration_test.go)
+# 3. Generated test certificates (test/testcerts/*.pem, *.key) are ignored
+# 4. GitGuardian will still scan all production code paths for actual secrets

@@ -71,8 +71,14 @@ func TestSIMDBackend_PatternMatching(t *testing.T) {
 
 	// Should find Call-ID in first two packets
 	assert.Equal(t, 2, len(results))
-	assert.Equal(t, 0, results[0].PacketIndex)
-	assert.Equal(t, 1, results[1].PacketIndex)
+
+	// Check both packets were matched (order may vary)
+	indices := make(map[int]bool)
+	for _, result := range results {
+		indices[result.PacketIndex] = true
+	}
+	assert.True(t, indices[0], "Packet 0 should be matched")
+	assert.True(t, indices[1], "Packet 1 should be matched")
 }
 
 func TestSIMDBackend_MultiplePatterns(t *testing.T) {

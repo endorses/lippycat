@@ -300,8 +300,8 @@ func (ce *CaptureEngine) Packets() <-chan []byte {
 }
 
 // GetStats returns current statistics
-func (ce *CaptureEngine) GetStats() CaptureStats {
-	return ce.stats
+func (ce *CaptureEngine) GetStats() *CaptureStats {
+	return &ce.stats
 }
 
 // GetMode returns the current capture mode

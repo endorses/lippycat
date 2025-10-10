@@ -186,8 +186,8 @@ func (pcq *PerCPUQueue) GetStats(cpuID int) *QueueStats {
 }
 
 // GetTotalStats returns aggregate statistics across all queues
-func (pcq *PerCPUQueue) GetTotalStats() QueueStats {
-	var total QueueStats
+func (pcq *PerCPUQueue) GetTotalStats() *QueueStats {
+	total := &QueueStats{}
 
 	for i := 0; i < pcq.numCPUs; i++ {
 		stats := &pcq.queues[i].stats

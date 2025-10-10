@@ -130,10 +130,10 @@ func WriteRTPSync(callID string, packet gopacket.Packet) error {
 }
 
 // GetWriterStats returns statistics from the async writer pool
-func GetWriterStats() AsyncWriterStats {
+func GetWriterStats() *AsyncWriterStats {
 	asyncWriter := GetAsyncWriter()
 	if asyncWriter != nil {
 		return asyncWriter.GetStats()
 	}
-	return AsyncWriterStats{} // Return empty stats if no async writer
+	return &AsyncWriterStats{} // Return empty stats if no async writer
 }

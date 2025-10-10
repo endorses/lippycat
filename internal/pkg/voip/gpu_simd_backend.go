@@ -278,8 +278,8 @@ func (sb *SIMDBackend) IsAvailable() bool {
 }
 
 // GetStats returns SIMD backend statistics
-func (sb *SIMDBackend) GetStats() SIMDBackendStats {
-	return sb.stats
+func (sb *SIMDBackend) GetStats() *SIMDBackendStats {
+	return &sb.stats
 }
 
 // SIMDPatternMatcher provides vectorized pattern matching

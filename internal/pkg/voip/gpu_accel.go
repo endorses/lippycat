@@ -367,10 +367,21 @@ func (ga *GPUAccelerator) ExtractCallIDsGPU(packets [][]byte) ([]string, error) 
 }
 
 // GetStats returns GPU acceleration statistics
-func (ga *GPUAccelerator) GetStats() GPUStats {
+func (ga *GPUAccelerator) GetStats() *GPUStats {
 	ga.mu.RLock()
 	defer ga.mu.RUnlock()
-	return ga.stats
+	// Create a snapshot by reading atomic values
+	stats := &GPUStats{}
+	stats.BatchesProcessed.Add(ga.stats.BatchesProcessed.Get())
+	stats.PacketsProcessed.Add(ga.stats.PacketsProcessed.Get())
+	stats.PatternsMatched.Add(ga.stats.PatternsMatched.Get())
+	stats.TransferToGPUNS.Add(ga.stats.TransferToGPUNS.Get())
+	stats.KernelExecutionNS.Add(ga.stats.KernelExecutionNS.Get())
+	stats.TransferFromGPUNS.Add(ga.stats.TransferFromGPUNS.Get())
+	stats.TotalProcessingNS.Add(ga.stats.TotalProcessingNS.Get())
+	stats.GPUMemoryUsed.Add(ga.stats.GPUMemoryUsed.Get())
+	stats.FallbackToCPU.Add(ga.stats.FallbackToCPU.Get())
+	return stats
 }
 
 // IsEnabled returns whether GPU acceleration is enabled

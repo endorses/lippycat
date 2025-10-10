@@ -158,8 +158,8 @@ func (bp *BatchProcessor) GetResults() <-chan *BatchResult {
 }
 
 // GetStats returns batch processing statistics
-func (bp *BatchProcessor) GetStats() BatchStats {
-	return bp.stats
+func (bp *BatchProcessor) GetStats() *BatchStats {
+	return &bp.stats
 }
 
 // GetWorkerStats returns statistics for a specific worker

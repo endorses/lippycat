@@ -494,8 +494,8 @@ func (xs *XDPSocket) Close() error {
 }
 
 // GetStats returns current statistics
-func (xs *XDPSocket) GetStats() XDPStats {
-	return xs.stats
+func (xs *XDPSocket) GetStats() *XDPStats {
+	return &xs.stats
 }
 
 // IsXDPSupported checks if AF_XDP is supported

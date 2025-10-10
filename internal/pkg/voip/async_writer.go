@@ -311,8 +311,8 @@ func (p *AsyncWriterPool) updateAverageQueueTime(newTime int64) {
 }
 
 // GetStats returns a snapshot of the current statistics
-func (p *AsyncWriterPool) GetStats() AsyncWriterStats {
-	stats := AsyncWriterStats{}
+func (p *AsyncWriterPool) GetStats() *AsyncWriterStats {
+	stats := &AsyncWriterStats{}
 	// Load current values atomically
 	stats.PacketsQueued.Store(p.stats.PacketsQueued.Load())
 	stats.PacketsWritten.Store(p.stats.PacketsWritten.Load())

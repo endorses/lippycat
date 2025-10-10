@@ -369,8 +369,8 @@ func (r *PluginRegistry) AddEventHandler(handler EventHandler) {
 }
 
 // GetStats returns current registry statistics
-func (r *PluginRegistry) GetStats() RegistryStats {
-	return r.stats
+func (r *PluginRegistry) GetStats() *RegistryStats {
+	return &r.stats
 }
 
 // HealthCheck returns the health status of all plugins

@@ -3,6 +3,7 @@ package voip
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -94,6 +95,12 @@ func TestCallIDDetector_Concurrency(t *testing.T) {
 }
 
 func TestCallIDDetector_Wait_Timeout(t *testing.T) {
+	// Skip by default as this test takes 30 seconds
+	// Set LIPPYCAT_LONG_TESTS=1 to enable
+	if os.Getenv("LIPPYCAT_LONG_TESTS") != "1" {
+		t.Skip("Skipping 30-second timeout test (set LIPPYCAT_LONG_TESTS=1 to enable)")
+	}
+
 	detector := NewCallIDDetector()
 	defer detector.Close()
 

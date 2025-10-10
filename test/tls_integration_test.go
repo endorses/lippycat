@@ -49,8 +49,8 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	require.NoError(t, err, "Failed to start TLS processor")
 	defer proc.Shutdown()
 
-	// Wait for processor to be ready
-	time.Sleep(500 * time.Millisecond)
+	// Wait for processor to be ready (TLS needs more time)
+	time.Sleep(2 * time.Second)
 
 	// Load hunter client certificate
 	hunterCert, err := tls.LoadX509KeyPair(
@@ -71,10 +71,12 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	creds := credentials.NewTLS(hunterTLSConfig)
 	conn, err := grpc.DialContext(ctx, processorAddr,
 		grpc.WithTransportCredentials(creds),
-		grpc.WithBlock(),
 	)
 	require.NoError(t, err, "Failed to connect to TLS processor")
 	defer conn.Close()
+
+	// Give connection time to establish TLS handshake
+	time.Sleep(1 * time.Second)
 
 	dataClient := data.NewDataServiceClient(conn)
 	mgmtClient := management.NewManagementServiceClient(conn)

@@ -142,8 +142,12 @@ func TestIntegration_HunterCrashRecovery(t *testing.T) {
 	err = stream2.Send(batch2)
 	require.NoError(t, err, "Failed to send after recovery")
 
-	// Wait for packets to be processed
-	time.Sleep(500 * time.Millisecond)
+	// Wait for ACK from processor
+	_, err = stream2.Recv()
+	require.NoError(t, err, "Failed to receive ACK from processor")
+
+	// Wait a bit for stats to be updated
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify processor handled reconnection gracefully
 	stats := proc.GetStats()
@@ -225,8 +229,14 @@ func TestIntegration_ProcessorRestartWithConnectedHunters(t *testing.T) {
 	err = stream4.Send(batch4)
 	require.NoError(t, err, "Failed to send to new processor from hunter 2")
 
-	// Wait for packets to be processed
-	time.Sleep(500 * time.Millisecond)
+	// Wait for ACKs from processor
+	_, err = stream3.Recv()
+	require.NoError(t, err, "Failed to receive ACK from processor")
+	_, err = stream4.Recv()
+	require.NoError(t, err, "Failed to receive ACK from processor")
+
+	// Wait a bit for stats to be updated
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify new processor received packets
 	stats2 := proc2.GetStats()
@@ -279,6 +289,13 @@ func TestIntegration_NetworkPartition(t *testing.T) {
 	batch2 := createTestBatch("hunter-partition", 2, 5)
 	err = stream2.Send(batch2)
 	require.NoError(t, err, "Failed to send after partition recovery")
+
+	// Wait for ACK from processor
+	_, err = stream2.Recv()
+	require.NoError(t, err, "Failed to receive ACK from processor")
+
+	// Wait a bit for stats to be updated
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify processor recovered
 	stats := proc.GetStats()
@@ -451,6 +468,13 @@ func TestIntegration_JumboFrames(t *testing.T) {
 
 	err = stream.Send(batch)
 	require.NoError(t, err, "Failed to send jumbo frames")
+
+	// Wait for ACK from processor
+	_, err = stream.Recv()
+	require.NoError(t, err, "Failed to receive ACK from processor")
+
+	// Wait a bit for stats to be updated
+	time.Sleep(100 * time.Millisecond)
 
 	// Verify processor handled jumbo frames
 	stats := proc.GetStats()

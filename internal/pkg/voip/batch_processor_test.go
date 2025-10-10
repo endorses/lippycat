@@ -220,7 +220,7 @@ func TestBatchCollector(t *testing.T) {
 	}
 
 	// Should not have flushed yet (batch size = 4)
-	assert.Equal(t, 3, bc.currentBatch.Count)
+	assert.Equal(t, 3, bc.GetCurrentCount())
 
 	// Add one more to trigger flush
 	pkt := GetPacketPool().Get()
@@ -233,7 +233,7 @@ func TestBatchCollector(t *testing.T) {
 	bc.Add(pkt, ci, 999)
 
 	// Should have flushed
-	assert.Equal(t, 0, bc.currentBatch.Count)
+	assert.Equal(t, 0, bc.GetCurrentCount())
 }
 
 func TestBatchCollector_FlushTimer(t *testing.T) {
@@ -264,13 +264,13 @@ func TestBatchCollector_FlushTimer(t *testing.T) {
 	}
 
 	// Should have packets waiting
-	assert.Equal(t, 3, bc.currentBatch.Count)
+	assert.Equal(t, 3, bc.GetCurrentCount())
 
 	// Wait for flush timer
 	time.Sleep(200 * time.Millisecond)
 
 	// Should have flushed by timer
-	assert.Equal(t, 0, bc.currentBatch.Count)
+	assert.Equal(t, 0, bc.GetCurrentCount())
 }
 
 // Benchmarks

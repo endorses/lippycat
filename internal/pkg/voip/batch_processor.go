@@ -463,6 +463,13 @@ func (bc *BatchCollector) flushLocked() {
 	bc.flushTimer.Reset(bc.config.FlushInterval)
 }
 
+// GetCurrentCount returns the current batch count (thread-safe)
+func (bc *BatchCollector) GetCurrentCount() int {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	return bc.currentBatch.Count
+}
+
 // GetNumCPUs returns the number of CPUs
 func GetNumCPUs() int {
 	topo, err := GetTopology()

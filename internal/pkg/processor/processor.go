@@ -284,6 +284,25 @@ func (p *Processor) Start(ctx context.Context) error {
 	return nil
 }
 
+// Shutdown gracefully shuts down the processor
+// This method is primarily used for testing and programmatic shutdown
+func (p *Processor) Shutdown() error {
+	if p.cancel != nil {
+		p.cancel()
+	}
+
+	// Give time for graceful shutdown
+	if p.grpcServer != nil {
+		p.grpcServer.GracefulStop()
+	}
+
+	// Wait for all goroutines to complete
+	p.wg.Wait()
+
+	logger.Info("Processor shutdown complete")
+	return nil
+}
+
 // StreamPackets handles packet streaming from hunters (Data Service)
 func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) error {
 	logger.Info("New packet stream connection")

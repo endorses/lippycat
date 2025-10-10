@@ -28,7 +28,7 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 	processorAddr := "127.0.0.1:50064"
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
-	proc, err := startTestProcessor(procCtx, processorAddr)
+	_, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err)
 
 	time.Sleep(500 * time.Millisecond)
@@ -61,7 +61,7 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 	assert.True(t, regResp.Accepted)
 
 	// Subscribe to filter updates
-	filterStream, err := mgmtClient.SubscribeToFilters(ctx, &management.FilterSubscription{
+	filterStream, err := mgmtClient.SubscribeFilters(ctx, &management.FilterRequest{
 		HunterId: hunterID,
 	})
 	require.NoError(t, err)
@@ -79,15 +79,14 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 	}()
 
 	// Push a filter from processor
-	filterResp, err := mgmtClient.PushFilter(ctx, &management.FilterRequest{
-		Filter: &management.Filter{
-			Id:         "filter-1",
-			Type:       "bpf",
-			Expression: "tcp port 5060",
-			Priority:   100,
-		},
+	filter := &management.Filter{
+		Id:            "filter-1",
+		Type:          management.FilterType_FILTER_SIP_USER,
+		Pattern:       "alice@example.com",
 		TargetHunters: []string{hunterID},
-	})
+		Enabled:       true,
+	}
+	filterResp, err := mgmtClient.UpdateFilter(ctx, filter)
 	require.NoError(t, err)
 	assert.Greater(t, filterResp.HuntersUpdated, uint32(0), "Filter should be distributed to hunter")
 
@@ -95,9 +94,9 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 	select {
 	case update := <-filterReceived:
 		assert.NotNil(t, update)
-		assert.Equal(t, "add", update.Operation)
+		assert.Equal(t, management.FilterUpdateType_UPDATE_ADD, update.UpdateType)
 		assert.Equal(t, "filter-1", update.Filter.Id)
-		assert.Equal(t, "tcp port 5060", update.Filter.Expression)
+		assert.Equal(t, "alice@example.com", update.Filter.Pattern)
 		t.Logf("✓ Filter distribution test: Filter successfully distributed to hunter")
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for filter update")
@@ -117,7 +116,7 @@ func TestIntegration_FilterDistribution_MultipleHunters(t *testing.T) {
 	processorAddr := "127.0.0.1:50065"
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
-	proc, err := startTestProcessor(procCtx, processorAddr)
+	_, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err)
 
 	time.Sleep(500 * time.Millisecond)
@@ -158,7 +157,7 @@ func TestIntegration_FilterDistribution_MultipleHunters(t *testing.T) {
 		assert.True(t, regResp.Accepted)
 
 		// Subscribe to filter updates
-		filterStream, err := mgmtClient.SubscribeToFilters(ctx, &management.FilterSubscription{
+		filterStream, err := mgmtClient.SubscribeFilters(ctx, &management.FilterRequest{
 			HunterId: hunterID,
 		})
 		require.NoError(t, err)
@@ -185,14 +184,12 @@ func TestIntegration_FilterDistribution_MultipleHunters(t *testing.T) {
 	defer conn.Close()
 
 	mgmtClient := management.NewManagementServiceClient(conn)
-	filterResp, err := mgmtClient.PushFilter(ctx, &management.FilterRequest{
-		Filter: &management.Filter{
-			Id:         "broadcast-filter",
-			Type:       "bpf",
-			Expression: "udp port 5060",
-			Priority:   100,
-		},
+	filterResp, err := mgmtClient.UpdateFilter(ctx, &management.Filter{
+		Id:            "broadcast-filter",
+		Type:          management.FilterType_FILTER_SIP_USER,
+		Pattern:       "udp port 5060",
 		TargetHunters: hunters, // All hunters
+		Enabled:       true,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, uint32(numHunters), filterResp.HuntersUpdated, "Filter should be distributed to all hunters")
@@ -209,7 +206,7 @@ func TestIntegration_FilterDistribution_MultipleHunters(t *testing.T) {
 			select {
 			case update := <-ch:
 				assert.NotNil(t, update)
-				assert.Equal(t, "add", update.Operation)
+				assert.Equal(t, management.FilterUpdateType_UPDATE_ADD, update.UpdateType)
 				assert.Equal(t, "broadcast-filter", update.Filter.Id)
 				receivedCount.Add(1)
 			case <-time.After(3 * time.Second):
@@ -237,7 +234,7 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 	processorAddr := "127.0.0.1:50066"
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
-	proc, err := startTestProcessor(procCtx, processorAddr)
+	_, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err)
 
 	time.Sleep(500 * time.Millisecond)
@@ -269,7 +266,7 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 	assert.True(t, regResp.Accepted)
 
 	// Subscribe to filter updates
-	filterStream, err := mgmtClient.SubscribeToFilters(ctx, &management.FilterSubscription{
+	filterStream, err := mgmtClient.SubscribeFilters(ctx, &management.FilterRequest{
 		HunterId: hunterID,
 	})
 	require.NoError(t, err)
@@ -286,14 +283,12 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 	}()
 
 	// 1. Add filter
-	filterResp, err := mgmtClient.PushFilter(ctx, &management.FilterRequest{
-		Filter: &management.Filter{
-			Id:         "dynamic-filter",
-			Type:       "bpf",
-			Expression: "tcp port 80",
-			Priority:   100,
-		},
+	filterResp, err := mgmtClient.UpdateFilter(ctx, &management.Filter{
+		Id:            "dynamic-filter",
+		Type:          management.FilterType_FILTER_SIP_USER,
+		Pattern:       "tcp port 80",
 		TargetHunters: []string{hunterID},
+		Enabled:       true,
 	})
 	require.NoError(t, err)
 	assert.Greater(t, filterResp.HuntersUpdated, uint32(0))
@@ -301,22 +296,20 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 	// Verify ADD operation
 	select {
 	case update := <-filterReceived:
-		assert.Equal(t, "add", update.Operation)
+		assert.Equal(t, management.FilterUpdateType_UPDATE_ADD, update.UpdateType)
 		assert.Equal(t, "dynamic-filter", update.Filter.Id)
-		assert.Equal(t, "tcp port 80", update.Filter.Expression)
+		assert.Equal(t, "tcp port 80", update.Filter.Pattern)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for ADD filter update")
 	}
 
 	// 2. Update filter
-	filterResp, err = mgmtClient.PushFilter(ctx, &management.FilterRequest{
-		Filter: &management.Filter{
-			Id:         "dynamic-filter",
-			Type:       "bpf",
-			Expression: "tcp port 443", // Updated expression
-			Priority:   200,             // Updated priority
-		},
+	filterResp, err = mgmtClient.UpdateFilter(ctx, &management.Filter{
+		Id:            "dynamic-filter",
+		Type:          management.FilterType_FILTER_SIP_USER,
+		Pattern:       "tcp port 443", // Updated pattern
 		TargetHunters: []string{hunterID},
+		Enabled:       true,
 	})
 	require.NoError(t, err)
 	assert.Greater(t, filterResp.HuntersUpdated, uint32(0))
@@ -324,18 +317,16 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 	// Verify UPDATE operation
 	select {
 	case update := <-filterReceived:
-		assert.Equal(t, "update", update.Operation)
+		assert.Equal(t, management.FilterUpdateType_UPDATE_MODIFY, update.UpdateType)
 		assert.Equal(t, "dynamic-filter", update.Filter.Id)
-		assert.Equal(t, "tcp port 443", update.Filter.Expression)
-		assert.Equal(t, uint32(200), update.Filter.Priority)
+		assert.Equal(t, "tcp port 443", update.Filter.Pattern)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for UPDATE filter update")
 	}
 
 	// 3. Remove filter
-	removeResp, err := mgmtClient.RemoveFilter(ctx, &management.FilterRemovalRequest{
-		FilterId:      "dynamic-filter",
-		TargetHunters: []string{hunterID},
+	removeResp, err := mgmtClient.DeleteFilter(ctx, &management.FilterDeleteRequest{
+		FilterId: "dynamic-filter",
 	})
 	require.NoError(t, err)
 	assert.Greater(t, removeResp.HuntersUpdated, uint32(0))
@@ -343,7 +334,7 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 	// Verify REMOVE operation
 	select {
 	case update := <-filterReceived:
-		assert.Equal(t, "remove", update.Operation)
+		assert.Equal(t, management.FilterUpdateType_UPDATE_DELETE, update.UpdateType)
 		assert.Equal(t, "dynamic-filter", update.Filter.Id)
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for REMOVE filter update")
@@ -365,7 +356,7 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 	processorAddr := "127.0.0.1:50067"
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
-	proc, err := startTestProcessor(procCtx, processorAddr)
+	_, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err)
 
 	time.Sleep(500 * time.Millisecond)
@@ -397,7 +388,7 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 	assert.True(t, regResp.Accepted)
 
 	// Subscribe to filters
-	filterStream1, err := mgmtClient1.SubscribeToFilters(ctx, &management.FilterSubscription{
+	filterStream1, err := mgmtClient1.SubscribeFilters(ctx, &management.FilterRequest{
 		HunterId: hunterID1,
 	})
 	require.NoError(t, err)
@@ -432,7 +423,7 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, regResp.Accepted)
 
-	filterStream2, err := mgmtClient2.SubscribeToFilters(ctx, &management.FilterSubscription{
+	filterStream2, err := mgmtClient2.SubscribeFilters(ctx, &management.FilterRequest{
 		HunterId: hunterID2,
 	})
 	require.NoError(t, err)
@@ -449,14 +440,12 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 	}()
 
 	// Push filter to both hunters (one failed, one healthy)
-	filterResp, err := mgmtClient2.PushFilter(ctx, &management.FilterRequest{
-		Filter: &management.Filter{
-			Id:         "circuit-breaker-test",
-			Type:       "bpf",
-			Expression: "tcp port 22",
-			Priority:   100,
-		},
+	filterResp, err := mgmtClient2.UpdateFilter(ctx, &management.Filter{
+		Id:            "circuit-breaker-test",
+		Type:          management.FilterType_FILTER_SIP_USER,
+		Pattern:       "tcp port 22",
 		TargetHunters: []string{hunterID1, hunterID2},
+		Enabled:       true,
 	})
 	require.NoError(t, err)
 
@@ -467,7 +456,7 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 	select {
 	case update := <-filterReceived:
 		assert.NotNil(t, update)
-		assert.Equal(t, "add", update.Operation)
+		assert.Equal(t, management.FilterUpdateType_UPDATE_ADD, update.UpdateType)
 		t.Logf("✓ Circuit breaker test: Healthy hunter received filter, failed hunter skipped")
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for filter on healthy hunter")
@@ -491,7 +480,7 @@ func TestIntegration_FilterDistribution_Priority(t *testing.T) {
 	processorAddr := "127.0.0.1:50068"
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
-	proc, err := startTestProcessor(procCtx, processorAddr)
+	_, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err)
 
 	time.Sleep(500 * time.Millisecond)
@@ -523,7 +512,7 @@ func TestIntegration_FilterDistribution_Priority(t *testing.T) {
 	assert.True(t, regResp.Accepted)
 
 	// Subscribe to filter updates
-	filterStream, err := mgmtClient.SubscribeToFilters(ctx, &management.FilterSubscription{
+	filterStream, err := mgmtClient.SubscribeFilters(ctx, &management.FilterRequest{
 		HunterId: hunterID,
 	})
 	require.NoError(t, err)
@@ -550,14 +539,12 @@ func TestIntegration_FilterDistribution_Priority(t *testing.T) {
 	}
 
 	for _, f := range filters {
-		_, err := mgmtClient.PushFilter(ctx, &management.FilterRequest{
-			Filter: &management.Filter{
-				Id:         f.id,
-				Type:       "bpf",
-				Expression: fmt.Sprintf("tcp port %d", f.priority),
-				Priority:   f.priority,
-			},
+		_, err := mgmtClient.UpdateFilter(ctx, &management.Filter{
+			Id:            f.id,
+			Type:          management.FilterType_FILTER_SIP_USER,
+			Pattern:       fmt.Sprintf("tcp port %d", f.priority),
 			TargetHunters: []string{hunterID},
+			Enabled:       true,
 		})
 		require.NoError(t, err)
 	}

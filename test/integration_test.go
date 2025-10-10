@@ -552,12 +552,12 @@ func createTestBatch(hunterID string, sequence uint64, numPackets int) *data.Pac
 func createTestPackets(count int) []gopacket.Packet {
 	packets := make([]gopacket.Packet, count)
 	for i := 0; i < count; i++ {
-		packets[i] = createSyntheticPacket(i)
+		packets[i] = createSyntheticGoPacket(i)
 	}
 	return packets
 }
 
-func createSyntheticPacket(index int) gopacket.Packet {
+func createSyntheticGoPacket(index int) gopacket.Packet {
 	// Create a simple UDP packet
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -593,7 +593,7 @@ func createSyntheticPacket(index int) gopacket.Packet {
 }
 
 func createTestPacketData(index int) []byte {
-	return createSyntheticPacket(index).Data()
+	return createSyntheticGoPacket(index).Data()
 }
 
 func createJumboPackets(count int, size int) []*data.CapturedPacket {

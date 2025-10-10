@@ -10,8 +10,6 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -102,7 +100,9 @@ func BenchmarkProcessorPacketThroughput(b *testing.B) {
 	// Report throughput metrics
 	stats := proc.GetStats()
 	b.ReportMetric(float64(stats.TotalPacketsReceived)/b.Elapsed().Seconds(), "packets/sec")
-	b.ReportMetric(float64(stats.TotalBytesReceived)/b.Elapsed().Seconds()/(1024*1024), "MB/sec")
+	// Estimate bytes (assuming ~1500 byte average packet size for Ethernet)
+	estimatedBytes := stats.TotalPacketsReceived * 1500
+	b.ReportMetric(float64(estimatedBytes)/b.Elapsed().Seconds()/(1024*1024), "MB/sec")
 }
 
 // BenchmarkHunterToProcessorLatency measures end-to-end latency
@@ -237,20 +237,18 @@ func BenchmarkFilterDistribution(b *testing.B) {
 
 	// Benchmark filter distribution to all hunters
 	for i := 0; i < b.N; i++ {
-		filterReq := &management.FilterRequest{
-			Filter: &management.Filter{
-				Id:         fmt.Sprintf("bench-filter-%d", i),
-				Type:       "bpf",
-				Expression: "tcp port 5060",
-				Priority:   100,
-			},
+		filter := &management.Filter{
+			Id:            fmt.Sprintf("bench-filter-%d", i),
+			Type:          management.FilterType_FILTER_SIP_USER,
+			Pattern:       "alice@example.com",
 			TargetHunters: hunterIDs,
+			Enabled:       true,
 		}
 
 		start := time.Now()
-		resp, err := mgmtClient.PushFilter(ctx, filterReq)
+		resp, err := mgmtClient.UpdateFilter(ctx, filter)
 		if err != nil {
-			b.Fatalf("Failed to push filter: %v", err)
+			b.Fatalf("Failed to update filter: %v", err)
 		}
 		distributionTime := time.Since(start)
 
@@ -317,7 +315,7 @@ func BenchmarkConcurrentHunters(b *testing.B) {
 				return
 			}
 
-			stream, err := dataClient.StreamPackets(ctx)
+			_, err = dataClient.StreamPackets(ctx)
 			if err != nil {
 				b.Errorf("Failed to create stream for hunter %d: %v", hunterIdx, err)
 				return
@@ -365,69 +363,4 @@ func BenchmarkProtocolDetection(b *testing.B) {
 	}
 }
 
-// Helper functions for benchmark
-
-func createSyntheticPacket(index int) *data.CapturedPacket {
-	// Create simple UDP packet
-	payload := []byte(fmt.Sprintf("test packet %d", index))
-
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{
-		ComputeChecksums: true,
-		FixLengths:       true,
-	}
-
-	eth := &layers.Ethernet{
-		SrcMAC:       []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x01},
-		DstMAC:       []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x02},
-		EthernetType: layers.EthernetTypeIPv4,
-	}
-
-	ip := &layers.IPv4{
-		Version:  4,
-		TTL:      64,
-		Protocol: layers.IPProtocolUDP,
-		SrcIP:    []byte{192, 168, 1, 1},
-		DstIP:    []byte{192, 168, 1, 2},
-	}
-
-	udp := &layers.UDP{
-		SrcPort: 5060,
-		DstPort: 5060,
-	}
-	udp.SetNetworkLayerForChecksum(ip)
-
-	gopacket.SerializeLayers(buf, opts, eth, ip, udp, gopacket.Payload(payload))
-
-	return &data.CapturedPacket{
-		TimestampNs: time.Now().UnixNano(),
-		Data:        buf.Bytes(),
-		Length:      uint32(len(buf.Bytes())),
-		Protocol:    "UDP",
-	}
-}
-
-func createSIPInvitePacket() []byte {
-	sipInvite := "INVITE sip:bob@example.com SIP/2.0\r\n"
-	return []byte(sipInvite)
-}
-
-func createHTTPPacket() []byte {
-	httpReq := "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"
-	return []byte(httpReq)
-}
-
-func createDNSPacket() []byte {
-	// Simplified DNS query packet
-	return []byte{0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00}
-}
-
-func createTLSClientHello() []byte {
-	// Simplified TLS ClientHello
-	return []byte{0x16, 0x03, 0x01, 0x00, 0x00}
-}
-
-func detectProtocol(packet []byte) string {
-	// Placeholder for protocol detection
-	return "unknown"
-}
+// Helper functions for benchmark are now in testhelpers.go

@@ -360,11 +360,13 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 		TLSEnabled:       false, // Insecure in production
 		MaxHunters:       10,
 		MaxSubscribers:   5,
-		PacketBufferSize: 1000,
 	}
 
-	proc := processor.New(config)
-	err := proc.Start(ctx)
+	proc, err := processor.New(*config)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
+	err = proc.Start(ctx)
 
 	// Should fail in production mode without TLS
 	if err == nil {
@@ -392,10 +394,12 @@ func startTLSProcessor(ctx context.Context, addr, certsDir string, requireClient
 		TLSClientAuth:    requireClientAuth,
 		MaxHunters:       10,
 		MaxSubscribers:   5,
-		PacketBufferSize: 1000,
 	}
 
-	proc := processor.New(config)
+	proc, err := processor.New(*config)
+	if err != nil {
+		return nil, err
+	}
 	if err := proc.Start(ctx); err != nil {
 		return nil, fmt.Errorf("failed to start processor: %w", err)
 	}

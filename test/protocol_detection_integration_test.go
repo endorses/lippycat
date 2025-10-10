@@ -67,9 +67,9 @@ func TestIntegration_MultiProtocolFlows(t *testing.T) {
 			name: "VPN over HTTP",
 			createPackets: func() []gopacket.Packet {
 				return []gopacket.Packet{
-					createHTTPPacket("GET /api/vpn HTTP/1.1\r\nHost: vpn.example.com\r\n\r\n"),
+					createHTTPGoPacket("GET /api/vpn HTTP/1.1\r\nHost: vpn.example.com\r\n\r\n"),
 					createOpenVPNPacket(),
-					createHTTPPacket("POST /vpn/data HTTP/1.1\r\nHost: vpn.example.com\r\n\r\n"),
+					createHTTPGoPacket("POST /vpn/data HTTP/1.1\r\nHost: vpn.example.com\r\n\r\n"),
 				}
 			},
 			expectedProtocols: []string{"HTTP", "OpenVPN"},
@@ -92,7 +92,7 @@ func TestIntegration_MultiProtocolFlows(t *testing.T) {
 			name: "TLS encrypted database",
 			createPackets: func() []gopacket.Packet {
 				return []gopacket.Packet{
-					createTLSClientHello("db.example.com"),
+					createTLSClientHelloGoPacket("db.example.com"),
 					createTLSServerHello(),
 					createEncryptedDatabasePacket("MySQL", 3306),
 				}
@@ -115,8 +115,8 @@ func TestIntegration_MultiProtocolFlows(t *testing.T) {
 			name: "Mixed protocols in sequence",
 			createPackets: func() []gopacket.Packet {
 				return []gopacket.Packet{
-					createDNSPacket("example.com"),
-					createHTTPPacket("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"),
+					createDNSGoPacket("example.com"),
+					createHTTPGoPacket("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"),
 					createSSHPacket(),
 					createSIPPacket("REGISTER"),
 					createPostgreSQLPacket(),
@@ -190,7 +190,7 @@ func TestIntegration_MalformedPackets(t *testing.T) {
 		{
 			name:        "Malformed HTTP header",
 			createPacket: func() gopacket.Packet {
-				return createHTTPPacket("GET HTTP/1.1\r\nMalformed Header\r\n\r\n")
+				return createHTTPGoPacket("GET HTTP/1.1\r\nMalformed Header\r\n\r\n")
 			},
 			description: "HTTP packet with malformed headers",
 		},
@@ -283,7 +283,7 @@ func TestIntegration_ProtocolDetectionAccuracy(t *testing.T) {
 		{
 			name: "HTTP GET",
 			createPackets: func() []gopacket.Packet {
-				return []gopacket.Packet{createHTTPPacket("GET /index.html HTTP/1.1\r\nHost: example.com\r\n\r\n")}
+				return []gopacket.Packet{createHTTPGoPacket("GET /index.html HTTP/1.1\r\nHost: example.com\r\n\r\n")}
 			},
 			expectedProtocol: "HTTP",
 			minConfidence:    0.9,
@@ -291,7 +291,7 @@ func TestIntegration_ProtocolDetectionAccuracy(t *testing.T) {
 		{
 			name: "TLS ClientHello",
 			createPackets: func() []gopacket.Packet {
-				return []gopacket.Packet{createTLSClientHello("example.com")}
+				return []gopacket.Packet{createTLSClientHelloGoPacket("example.com")}
 			},
 			expectedProtocol: "TLS",
 			minConfidence:    0.9,
@@ -299,7 +299,7 @@ func TestIntegration_ProtocolDetectionAccuracy(t *testing.T) {
 		{
 			name: "DNS Query",
 			createPackets: func() []gopacket.Packet {
-				return []gopacket.Packet{createDNSPacket("google.com")}
+				return []gopacket.Packet{createDNSGoPacket("google.com")}
 			},
 			expectedProtocol: "DNS",
 			minConfidence:    0.8,
@@ -405,7 +405,7 @@ func createUDPPacketWithPayload(srcPort, dstPort int, payload []byte) gopacket.P
 	return gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 }
 
-func createHTTPPacket(request string) gopacket.Packet {
+func createHTTPGoPacket(request string) gopacket.Packet {
 	return createTCPPacketWithPayload(8080, 80, []byte(request))
 }
 
@@ -435,7 +435,7 @@ func createRTPPacket(payloadType byte, sequence uint16) gopacket.Packet {
 	return createUDPPacketWithPayload(10000, 20000, rtpData)
 }
 
-func createDNSPacket(domain string) gopacket.Packet {
+func createDNSGoPacket(domain string) gopacket.Packet {
 	// Simplified DNS query packet
 	dnsQuery := []byte{
 		0x00, 0x01, // Transaction ID
@@ -463,7 +463,7 @@ func createSSHPacket() gopacket.Packet {
 	return createTCPPacketWithPayload(22, 54321, sshBanner)
 }
 
-func createTLSClientHello(serverName string) gopacket.Packet {
+func createTLSClientHelloGoPacket(serverName string) gopacket.Packet {
 	// Simplified TLS ClientHello
 	clientHello := []byte{
 		0x16,       // Content Type: Handshake

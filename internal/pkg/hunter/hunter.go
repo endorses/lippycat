@@ -283,12 +283,21 @@ func (h *Hunter) buildTLSCredentials() (credentials.TransportCredentials, error)
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: h.config.TLSSkipVerify,
 		ServerName:         h.config.TLSServerNameOverride,
+		MinVersion:         tls.VersionTLS13,
 	}
+
+	// Check for production mode (via environment variable)
+	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 
 	if h.config.TLSSkipVerify {
 		logger.Warn("TLS certificate verification disabled",
 			"security_risk", "vulnerable to man-in-the-middle attacks",
-			"recommendation", "only use in testing environments")
+			"recommendation", "only use in testing environments",
+			"severity", "HIGH")
+
+		if productionMode {
+			return nil, fmt.Errorf("LIPPYCAT_PRODUCTION=true blocks TLSSkipVerify=true (insecure certificate validation)")
+		}
 	}
 
 	// Load CA certificate if provided

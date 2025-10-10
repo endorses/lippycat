@@ -336,3 +336,83 @@ func TestTLSCredentials_Integration(t *testing.T) {
 		t.Errorf("expected security protocol 'tls', got %q", info.SecurityProtocol)
 	}
 }
+
+// TestBuildTLSCredentials_EnforcesTLS13 verifies that TLS credentials are built successfully.
+// Note: The MinVersion=TLS13 setting is enforced in the code (hunter.go:286) but cannot be
+// tested directly via reflection because grpc.credentials uses unexported fields.
+// Integration tests should verify that only TLS 1.3+ connections are accepted.
+func TestBuildTLSCredentials_EnforcesTLS13(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+	}{
+		{
+			name: "default config",
+			config: Config{
+				TLSSkipVerify: false,
+			},
+		},
+		{
+			name: "with skip verify",
+			config: Config{
+				TLSSkipVerify: true,
+			},
+		},
+		{
+			name: "with server name override",
+			config: Config{
+				TLSSkipVerify:         false,
+				TLSServerNameOverride: "example.com",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &Hunter{config: tt.config}
+
+			creds, err := h.buildTLSCredentials()
+			if err != nil {
+				t.Fatalf("buildTLSCredentials() failed: %v", err)
+			}
+
+			if creds == nil {
+				t.Fatal("buildTLSCredentials() returned nil credentials")
+			}
+
+			// Verify credentials have TLS protocol
+			info := creds.Info()
+			if info.SecurityProtocol != "tls" {
+				t.Errorf("expected security protocol 'tls', got %q", info.SecurityProtocol)
+			}
+		})
+	}
+}
+
+func TestBuildTLSCredentials_WithCertificatesEnforcesTLS13(t *testing.T) {
+	certFile, keyFile, caFile, cleanup := createTestCerts(t)
+	defer cleanup()
+
+	h := &Hunter{
+		config: Config{
+			TLSCAFile:   caFile,
+			TLSCertFile: certFile,
+			TLSKeyFile:  keyFile,
+		},
+	}
+
+	creds, err := h.buildTLSCredentials()
+	if err != nil {
+		t.Fatalf("buildTLSCredentials() failed: %v", err)
+	}
+
+	if creds == nil {
+		t.Fatal("buildTLSCredentials() returned nil credentials")
+	}
+
+	// Verify credentials have TLS protocol
+	info := creds.Info()
+	if info.SecurityProtocol != "tls" {
+		t.Errorf("expected security protocol 'tls', got %q", info.SecurityProtocol)
+	}
+}

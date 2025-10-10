@@ -18,6 +18,7 @@ type BatchProcessor struct {
 	callInfoPool *CallInfoPool
 	stats        BatchStats
 	running      PaddedBool
+	workersWg    sync.WaitGroup
 }
 
 // BatchConfig configures batch processing
@@ -122,6 +123,7 @@ func NewBatchProcessor(config *BatchConfig) *BatchProcessor {
 
 	// Start workers
 	for _, worker := range bp.workers {
+		bp.workersWg.Add(1)
 		go worker.run()
 	}
 
@@ -174,7 +176,13 @@ func (bp *BatchProcessor) Stop() {
 		return
 	}
 
+	// Close input queue to signal workers to stop
 	close(bp.inputQueue)
+
+	// Wait for all workers to finish processing
+	bp.workersWg.Wait()
+
+	// Now safe to close result queue - no workers running
 	close(bp.resultQueue)
 
 	logger.Info("Batch processor stopped",
@@ -184,6 +192,8 @@ func (bp *BatchProcessor) Stop() {
 
 // run is the worker processing loop
 func (bw *BatchWorker) run() {
+	defer bw.processor.workersWg.Done()
+
 	// Pin to CPU if affinity is enabled (skip in tests to avoid hangs)
 	if bw.processor.config.WorkerAffinity && bw.cpuID >= 0 {
 		// Affinity pinning is optional and may fail in test environments

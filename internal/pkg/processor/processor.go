@@ -200,17 +200,38 @@ func (p *Processor) Start(ctx context.Context) error {
 		grpc.MaxRecvMsgSize(constants.MaxGRPCMessageSize),
 	}
 
+	// Check for production mode (via environment variable)
+	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
+
 	if p.config.TLSEnabled {
 		tlsCreds, err := p.buildTLSCredentials()
 		if err != nil {
 			return fmt.Errorf("failed to build TLS credentials: %w", err)
 		}
 		serverOpts = append(serverOpts, grpc.Creds(tlsCreds))
-		logger.Info("gRPC server using TLS", "client_auth", p.config.TLSClientAuth)
+
+		if p.config.TLSClientAuth {
+			logger.Info("gRPC server using TLS with mutual authentication (mTLS)",
+				"security", "strong authentication via client certificates")
+		} else {
+			logger.Warn("gRPC server using TLS WITHOUT mutual authentication",
+				"security_risk", "hunters can connect without authentication",
+				"recommendation", "enable TLSClientAuth for production deployments",
+				"impact", "any network client can register as hunter and access packet data")
+
+			if productionMode {
+				return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLSClientAuth=true for mutual TLS authentication")
+			}
+		}
 	} else {
 		logger.Warn("gRPC server using insecure connection (no TLS)",
-			"security_risk", "packet data transmitted in cleartext",
-			"recommendation", "enable TLS for production deployments")
+			"security_risk", "packet data transmitted in cleartext, no authentication",
+			"recommendation", "enable TLS with mutual authentication for production deployments",
+			"severity", "CRITICAL")
+
+		if productionMode {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS to be enabled")
+		}
 	}
 
 	p.grpcServer = grpc.NewServer(serverOpts...)
@@ -419,7 +440,16 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	p.broadcastToSubscribers(batch)
 }
 
-// RegisterHunter handles hunter registration (Management Service)
+// RegisterHunter registers a hunter node with the processor (Management Service).
+//
+// SECURITY NOTE: Hunter authentication relies on the gRPC server's TLS configuration.
+// - When TLSClientAuth=true (mutual TLS): Hunters must present valid client certificates.
+//   This provides strong authentication and is REQUIRED for production deployments.
+// - When TLSClientAuth=false: Any network client can register as a hunter with any ID.
+//   This is INSECURE - malicious clients can impersonate legitimate hunters.
+// - When TLSEnabled=false: All traffic is unencrypted and unauthenticated (CRITICAL risk).
+//
+// For production deployments, set LIPPYCAT_PRODUCTION=true to enforce mutual TLS.
 func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRegistration) (*management.RegistrationResponse, error) {
 	hunterID := req.HunterId
 
@@ -1307,7 +1337,16 @@ func (p *Processor) receiveUpstreamAcks() {
 	}
 }
 
-// SubscribePackets allows monitoring clients (TUI) to receive packet stream (Data Service)
+// SubscribePackets allows TUI/monitoring clients to subscribe to packet streams.
+//
+// SECURITY NOTE: Subscriber authentication relies on the gRPC server's TLS configuration.
+// - When TLSClientAuth=true (mutual TLS): Subscribers must present valid client certificates.
+//   This provides strong authentication and is REQUIRED for production deployments.
+// - When TLSClientAuth=false: Any network client can subscribe and view packet data.
+//   This is INSECURE and should only be used in trusted development environments.
+// - When TLSEnabled=false: All traffic is unencrypted and unauthenticated (CRITICAL risk).
+//
+// For production deployments, set LIPPYCAT_PRODUCTION=true to enforce mutual TLS.
 func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.DataService_SubscribePacketsServer) error {
 	clientID := req.ClientId
 	if clientID == "" {

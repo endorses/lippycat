@@ -655,10 +655,18 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 		MinVersion:         tls.VersionTLS13,
 	}
 
+	// Check for production mode (via environment variable)
+	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
+
 	if config.TLSSkipVerify {
 		logger.Warn("TLS certificate verification disabled",
 			"security_risk", "vulnerable to man-in-the-middle attacks",
-			"recommendation", "only use in testing environments")
+			"recommendation", "only use in testing environments",
+			"severity", "HIGH")
+
+		if productionMode {
+			return nil, fmt.Errorf("LIPPYCAT_PRODUCTION=true blocks TLSSkipVerify=true (insecure certificate validation)")
+		}
 	}
 
 	// Load CA certificate if provided

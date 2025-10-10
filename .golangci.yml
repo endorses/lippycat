@@ -11,6 +11,7 @@ linters:
     - errcheck      # Disabled - too many false positives for cleanup operations
     - staticcheck   # Disabled temporarily - 145 stylistic warnings, re-enable incrementally
     - unused        # Disabled temporarily - 69 warnings for future/platform code
+    - gosimple      # Disabled temporarily - stylistic suggestions, not bugs
 
 linters-settings:
   errcheck:

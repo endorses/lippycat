@@ -73,10 +73,8 @@ cat upstream-cert.pem upstream-key.pem > upstream-combined.pem
 rm -f *.csr *.srl *.cnf
 
 # Set permissions readable by container (these are test certs, not production)
-# Private keys and combined files should be restrictive
-chmod 600 *-key.pem *-combined.pem
-# Certificate and CA files can be world-readable
-chmod 644 *-cert.pem ca-*.pem
+# For Docker containers running as non-root, all files need to be world-readable
+chmod 644 *.pem
 
 echo
 echo "✅ Test certificates generated successfully!"

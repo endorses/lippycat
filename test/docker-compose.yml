@@ -36,7 +36,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
-    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/processor.pcap"]
+    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/processor.pcap", "--tls", "--tls-cert", "/certs/processor-cert.pem", "--tls-key", "/certs/processor-key.pem", "--tls-ca", "/certs/ca-cert.pem", "--tls-client-auth"]
 
   # Upstream processor (for hierarchical testing)
   upstream-processor:
@@ -65,7 +65,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
-    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/upstream.pcap"]
+    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/upstream.pcap", "--tls", "--tls-cert", "/certs/upstream-cert.pem", "--tls-key", "/certs/upstream-key.pem", "--tls-ca", "/certs/ca-cert.pem", "--tls-client-auth"]
 
   # Hunter node 1
   hunter1:
@@ -90,7 +90,7 @@ services:
     depends_on:
       processor:
         condition: service_healthy
-    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter1"]
+    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter1", "--tls", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
 
   # Hunter node 2
   hunter2:
@@ -115,7 +115,7 @@ services:
     depends_on:
       processor:
         condition: service_healthy
-    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter2"]
+    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter2", "--tls", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
 
   # Hunter node 3 (connects to upstream processor for hierarchical testing)
   hunter3:
@@ -140,7 +140,7 @@ services:
     depends_on:
       upstream-processor:
         condition: service_healthy
-    command: ["hunt", "--interface", "any", "--processor", "upstream.test.local:50051", "--hunter-id", "hunter3"]
+    command: ["hunt", "--interface", "any", "--processor", "upstream.test.local:50051", "--hunter-id", "hunter3", "--tls", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
 
   # Packet generator for testing
   packet-generator:

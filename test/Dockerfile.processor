@@ -23,7 +23,7 @@ FROM alpine:latest
 RUN apk add --no-cache libpcap ca-certificates netcat-openbsd
 
 # Copy binary from builder
-COPY --from=builder /build/bin/lc-processor /usr/local/bin/lc
+COPY --from=builder /build/bin/lc-process /usr/local/bin/lc
 
 # Create directories
 RUN mkdir -p /certs /output /testdata

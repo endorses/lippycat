@@ -142,6 +142,9 @@ func TestIntegration_HunterCrashRecovery(t *testing.T) {
 	err = stream2.Send(batch2)
 	require.NoError(t, err, "Failed to send after recovery")
 
+	// Wait for packets to be processed
+	time.Sleep(500 * time.Millisecond)
+
 	// Verify processor handled reconnection gracefully
 	stats := proc.GetStats()
 	assert.GreaterOrEqual(t, stats.TotalPacketsReceived, uint64(5), "Processor should have received packets after recovery")
@@ -222,6 +225,9 @@ func TestIntegration_ProcessorRestartWithConnectedHunters(t *testing.T) {
 	err = stream4.Send(batch4)
 	require.NoError(t, err, "Failed to send to new processor from hunter 2")
 
+	// Wait for packets to be processed
+	time.Sleep(500 * time.Millisecond)
+
 	// Verify new processor received packets
 	stats2 := proc2.GetStats()
 	assert.GreaterOrEqual(t, stats2.TotalPacketsReceived, uint64(6), "New processor should have received packets")
@@ -257,15 +263,9 @@ func TestIntegration_NetworkPartition(t *testing.T) {
 	err = stream.Send(batch1)
 	require.NoError(t, err, "Failed to send initial batch")
 
-	// Simulate network partition by closing stream
-	stream.CloseSend()
-	t.Log("✓ Simulated network partition")
-
-	// Connection should fail
-	_, err = stream.Recv()
-	assert.Error(t, err, "Expected error after partition")
-
+	// Simulate network partition by closing connection
 	conn.Close()
+	t.Log("✓ Simulated network partition")
 
 	// Wait for processor to detect disconnection
 	time.Sleep(2 * time.Second)

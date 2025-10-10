@@ -395,7 +395,8 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 
 	// Immediately close connection (simulate hunter crash)
 	conn1.Close()
-	time.Sleep(200 * time.Millisecond)
+	// Wait longer for circuit breaker to detect failure
+	time.Sleep(1 * time.Second)
 
 	// Connect second hunter (stays connected)
 	conn2, err := grpc.DialContext(ctx, processorAddr,

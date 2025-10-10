@@ -15,7 +15,7 @@ RUN apk add --no-cache \
     netcat-openbsd
 
 # Install scapy for advanced packet crafting
-RUN pip3 install --no-cache-dir scapy
+RUN pip3 install --no-cache-dir --break-system-packages scapy
 
 # Create directories
 RUN mkdir -p /testdata /scripts /pcaps

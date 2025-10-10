@@ -9,3 +9,8 @@ nodes.yaml
 testdata/pcaps/*
 scripts/*
 bin/
+
+# Test coverage artifacts
+*.out
+coverage.html
+coverage.txt

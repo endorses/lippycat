@@ -97,6 +97,18 @@ func init() {
 func runProcess(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting lippycat in processor mode")
 
+	// Production mode enforcement: check early before creating config
+	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
+	if productionMode {
+		if !tlsEnabled && !viper.GetBool("processor.tls.enabled") {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		}
+		if !tlsClientAuth && !viper.GetBool("processor.tls.client_auth") {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)")
+		}
+		logger.Info("Production mode: TLS mutual authentication enforced")
+	}
+
 	// Get configuration (flags override config file)
 	config := processor.Config{
 		ListenAddr:      getStringConfig("processor.listen_addr", listenAddr),

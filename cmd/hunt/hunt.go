@@ -107,6 +107,15 @@ func init() {
 func runHunt(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting lippycat in hunter mode")
 
+	// Production mode enforcement: check early before creating config
+	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
+	if productionMode {
+		if !tlsEnabled && !viper.GetBool("hunter.tls.enabled") {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		}
+		logger.Info("Production mode: TLS encryption enforced")
+	}
+
 	// Get configuration (flags override config file)
 	config := hunter.Config{
 		ProcessorAddr:    getStringConfig("hunter.processor_addr", processorAddr),

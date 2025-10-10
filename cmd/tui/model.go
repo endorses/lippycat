@@ -13,10 +13,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/cmd/tui/config"
 	"github.com/endorses/lippycat/cmd/tui/filters"
+	"github.com/endorses/lippycat/cmd/tui/store"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -70,92 +70,25 @@ func cleanupProcessorsCmd() tea.Cmd {
 	})
 }
 
-// ProcessorState represents the connection state of a processor
-type ProcessorState int
-
-const (
-	ProcessorStateDisconnected ProcessorState = iota
-	ProcessorStateConnecting
-	ProcessorStateConnected
-	ProcessorStateFailed
-)
-
-// ProcessorConnection tracks a configured processor and its connection state
-type ProcessorConnection struct {
-	Address            string
-	ProcessorID        string                 // ID of the processor (from ProcessorHeartbeat)
-	Status             management.ProcessorStatus // Status of the processor
-	State              ProcessorState
-	Client             interface{ Close() }
-	LastAttempt        time.Time
-	LastDisconnectedAt time.Time // Time when processor was last disconnected (for cleanup)
-	FailureCount       int
-	ReconnectTimer     *time.Timer
-}
-
 // Model represents the TUI application state
+// Data management is delegated to specialized stores
 type Model struct {
-	packets         []components.PacketDisplay // Ring buffer of packets (all captured)
-	packetsHead     int                        // Head index for circular buffer
-	packetsCount    int                        // Current number of packets in buffer
-	filteredPackets []components.PacketDisplay // Filtered packets for display
-	maxPackets      int                        // Maximum packets to keep in memory
-	packetList      components.PacketList      // Packet list component
-	detailsPanel    components.DetailsPanel    // Details panel component
-	remoteClients   map[string]interface{ Close() } // DEPRECATED: use processors instead
-	processors      map[string]*ProcessorConnection // Configured processors and their connection state
-	huntersByProcessor map[string][]components.HunterInfo // Hunters grouped by processor address
-	hexDumpView     components.HexDumpView     // Hex dump component
-	header          components.Header          // Header component
-	footer          components.Footer          // Footer component
-	tabs            components.Tabs              // Tabs component
-	nodesView       *components.NodesView        // Nodes view component (pointer so View() changes persist)
-	statisticsView  components.StatisticsView    // Statistics view component
-	settingsView    components.SettingsView      // Settings view component
-	callsView       components.CallsView         // VoIP calls view component
-	protocolSelector components.ProtocolSelector // Protocol selector component
-	statistics      *components.Statistics       // Statistics data
-	capturing       bool                         // Whether capture is active
-	paused          bool                       // Whether display is paused
-	totalPackets    int                        // Total packets seen
-	matchedPackets  int                        // Packets matching filter
-	width           int                        // Terminal width
-	height          int                        // Terminal height
-	quitting        bool                       // Whether we're quitting
-	theme           themes.Theme               // Current color theme
-	filterInput     components.FilterInput     // Filter input component
-	filterChain     *filters.FilterChain       // Active filters
-	filterMode      bool                       // Whether in filter input mode
-	showDetails     bool                       // Whether to show details pane
-	focusedPane     string                     // "left" (packet list) or "right" (details/hex)
-	interfaceName   string                     // Capture interface name
-	needsUIUpdate   bool                       // Flag to indicate UI needs refresh
-	bpfFilter       string                     // Current BPF filter
-	captureMode     components.CaptureMode     // Current capture mode (live or offline)
-	nodesFilePath   string                     // Path to nodes YAML file for remote mode
-	selectedProtocol components.Protocol       // Currently selected protocol
-	viewMode        string                     // "packets" or "calls" (for VoIP)
-	lastClickTime   time.Time                  // Time of last mouse click for double-click detection
-	lastClickPacket int                        // Index of packet clicked for double-click detection
+	// Data stores (thread-safe)
+	packetStore   *store.PacketStore
+	connectionMgr *store.ConnectionManager
+	uiState       *store.UIState
+
+	// High-level application state
+	statistics    *components.Statistics     // Statistics data
+	interfaceName string                     // Capture interface name
+	bpfFilter     string                     // Current BPF filter
+	captureMode   components.CaptureMode     // Current capture mode (live or offline)
+	nodesFilePath string                     // Path to nodes YAML file for remote mode
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
 func (m *Model) getPacketsInOrder() []components.PacketDisplay {
-	if m.packetsCount == 0 {
-		return nil
-	}
-
-	if m.packetsCount < m.maxPackets {
-		// Buffer not full yet, packets are in order from index 0
-		return m.packets[:m.packetsCount]
-	}
-
-	// Buffer is full, need to reorder starting from head
-	result := make([]components.PacketDisplay, m.maxPackets)
-	for i := 0; i < m.maxPackets; i++ {
-		result[i] = m.packets[(m.packetsHead+i)%m.maxPackets]
-	}
-	return result
+	return m.packetStore.GetPacketsInOrder()
 }
 
 // NewModel creates a new TUI model
@@ -167,55 +100,13 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 	}
 	theme := themes.GetTheme(themeName)
 
-	packetList := components.NewPacketList()
-	packetList.SetTheme(theme)
+	// Initialize data stores
+	packetStore := store.NewPacketStore(bufferSize)
+	connectionMgr := store.NewConnectionManager()
+	uiState := store.NewUIState(theme)
 
-	detailsPanel := components.NewDetailsPanel()
-	detailsPanel.SetTheme(theme)
-
-	hexDumpView := components.NewHexDumpView()
-	hexDumpView.SetTheme(theme)
-
-	header := components.NewHeader()
-	header.SetTheme(theme)
-
-	footer := components.NewFooter()
-	footer.SetTheme(theme)
-
-	tabs := components.NewTabs([]components.Tab{
-		{Label: "Live Capture", Icon: "📡"},
-		{Label: "Nodes", Icon: "🔗"},
-		{Label: "Statistics", Icon: "📊"},
-		{Label: "Settings", Icon: "⚙"},
-	})
-	tabs.SetTheme(theme)
-
-	nodesView := components.NewNodesView()
-	nodesView.SetTheme(theme)
-	nodesViewPtr := &nodesView
-
-	statisticsView := components.NewStatisticsView()
-	statisticsView.SetTheme(theme)
-
-	callsView := components.NewCallsView()
-	callsView.SetTheme(theme)
-
-	protocolSelector := components.NewProtocolSelector()
-	protocolSelector.SetTheme(theme)
-
-	// Initialize statistics with bounded counters to prevent memory growth
-	statistics := &components.Statistics{
-		ProtocolCounts: components.NewBoundedCounter(1000),   // Max 1000 unique protocols
-		SourceCounts:   components.NewBoundedCounter(10000),  // Max 10000 unique source IPs
-		DestCounts:     components.NewBoundedCounter(10000),  // Max 10000 unique dest IPs
-		MinPacketSize:  999999,
-		MaxPacketSize:  0,
-	}
-
-	filterInput := components.NewFilterInput("/")
-	filterInput.SetTheme(theme)
 	// Load filter history from config
-	loadFilterHistory(&filterInput)
+	loadFilterHistory(&uiState.FilterInput)
 
 	// Determine initial capture mode and interface name
 	initialMode := components.CaptureModeLive
@@ -225,7 +116,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		initialMode = components.CaptureModeOffline
 		initialInterfaceName = pcapFile
 		// Update first tab for offline mode
-		tabs.UpdateTab(0, "Offline Capture", "📄")
+		uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
 	} else if startInRemoteMode {
 		initialMode = components.CaptureModeRemote
 		// Set interface name to nodes file or look for default
@@ -252,59 +143,39 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		// Clear pcapFile and interface for remote mode
 		initialPCAPFile = ""
 		// Update first tab for remote mode
-		tabs.UpdateTab(0, "Remote Capture", "🌐")
+		uiState.Tabs.UpdateTab(0, "Remote Capture", "🌐")
 		// Switch to Nodes tab when starting in remote mode
-		tabs.SetActive(1)
+		uiState.Tabs.SetActive(1)
 	}
 
 	// Create settings view with correct initial mode
-	settingsView := components.NewSettingsView(interfaceName, bufferSize, promiscuous, bpfFilter, initialPCAPFile)
-	settingsView.SetTheme(theme)
+	uiState.SettingsView = components.NewSettingsView(interfaceName, bufferSize, promiscuous, bpfFilter, initialPCAPFile)
+	uiState.SettingsView.SetTheme(theme)
 	// Set the correct capture mode in settings
-	settingsView.SetCaptureMode(initialMode)
+	uiState.SettingsView.SetCaptureMode(initialMode)
 	// Set nodes file if in remote mode
 	if startInRemoteMode && nodesFilePath != "" {
-		settingsView.SetNodesFile(nodesFilePath)
+		uiState.SettingsView.SetNodesFile(nodesFilePath)
+	}
+
+	// Initialize statistics with bounded counters to prevent memory growth
+	uiState.Statistics = &components.Statistics{
+		ProtocolCounts: components.NewBoundedCounter(1000),  // Max 1000 unique protocols
+		SourceCounts:   components.NewBoundedCounter(10000), // Max 10000 unique source IPs
+		DestCounts:     components.NewBoundedCounter(10000), // Max 10000 unique dest IPs
+		MinPacketSize:  999999,
+		MaxPacketSize:  0,
 	}
 
 	return Model{
-		packets:         make([]components.PacketDisplay, 0, bufferSize),
-		filteredPackets: make([]components.PacketDisplay, 0, bufferSize),
-		maxPackets:      bufferSize,
-		packetList:      packetList,
-		detailsPanel:    detailsPanel,
-		remoteClients:   make(map[string]interface{ Close() }), // DEPRECATED
-		processors:      make(map[string]*ProcessorConnection),  // Track processors with state
-		huntersByProcessor: make(map[string][]components.HunterInfo), // Initialize hunters map
-		hexDumpView:     hexDumpView,
-		header:          header,
-		footer:          footer,
-		tabs:            tabs,
-		nodesView:       nodesViewPtr,
-		statisticsView:  statisticsView,
-		settingsView:    settingsView,
-		callsView:       callsView,
-		protocolSelector: protocolSelector,
-		statistics:      statistics,
-		capturing:       true,
-		paused:          false,
-		totalPackets:    0,
-		matchedPackets:  0,
-		width:           80,
-		height:          24,
-		quitting:        false,
-		theme:           theme,
-		filterInput:     filterInput,
-		filterChain:     filters.NewFilterChain(),
-		filterMode:      false,
-		showDetails:     true,
-		focusedPane:     "left", // Start with packet list focused
-		interfaceName:   initialInterfaceName,
-		bpfFilter:       bpfFilter,
-		captureMode:     initialMode,
-		nodesFilePath:   nodesFilePath,
-		selectedProtocol: components.Protocol{Name: "All", BPFFilter: ""}, // Default to "All"
-		viewMode:        "packets", // Default to packet view
+		packetStore:   packetStore,
+		connectionMgr: connectionMgr,
+		uiState:       uiState,
+		statistics:    uiState.Statistics, // Reference to same statistics
+		interfaceName: initialInterfaceName,
+		bpfFilter:     bpfFilter,
+		captureMode:   initialMode,
+		nodesFilePath: nodesFilePath,
 	}
 }
 
@@ -322,7 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// If settings tab is active and editing interface, pass messages to settings
 	// (this is needed for list filtering to work properly)
 	// BUT: Don't intercept PacketMsg, TickMsg, or RestartCaptureMsg - those need to be handled by the main model
-	if m.tabs.GetActive() == 3 && m.settingsView.IsEditingInterface() {
+	if m.uiState.Tabs.GetActive() == 3 && m.uiState.SettingsView.IsEditingInterface() {
 		switch msg.(type) {
 		case PacketMsg, TickMsg, components.RestartCaptureMsg:
 			// Let these fall through to normal handling
@@ -331,7 +202,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
 				case "q", "ctrl+c":
-					m.quitting = true
+					m.uiState.Quitting = true
 					return m, tea.Quit
 				case "ctrl+z":
 					// Suspend the process
@@ -339,7 +210,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			// Pass all other messages to settings view
-			cmd := m.settingsView.Update(msg)
+			cmd := m.uiState.SettingsView.Update(msg)
 			return m, cmd
 		}
 	}
@@ -350,37 +221,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// Handle protocol selector mode
-		if m.protocolSelector.IsActive() {
-			cmd := m.protocolSelector.Update(msg)
+		if m.uiState.ProtocolSelector.IsActive() {
+			cmd := m.uiState.ProtocolSelector.Update(msg)
 			return m, cmd
 		}
 
 		// Handle add node modal (highest priority after protocol selector)
-		if m.nodesView.IsModalOpen() {
-			cmd := m.nodesView.Update(msg)
+		if m.uiState.NodesView.IsModalOpen() {
+			cmd := m.uiState.NodesView.Update(msg)
 			return m, cmd
 		}
 
 		// Handle filter input mode
-		if m.filterMode {
+		if m.uiState.FilterMode {
 			return m.handleFilterInput(msg)
 		}
 
 		// Settings tab gets priority for most keys (except q, ctrl+c, ctrl+z, space, tab/shift+tab)
-		if m.tabs.GetActive() == 3 {
+		if m.uiState.Tabs.GetActive() == 3 {
 			// If actively editing ANY field, pass ALL keys to settings view
 			// (except quit/suspend keys) to prevent global shortcuts from interfering with text input
-			if m.settingsView.IsEditing() {
+			if m.uiState.SettingsView.IsEditing() {
 				switch msg.String() {
 				case "q", "ctrl+c":
-					m.quitting = true
+					m.uiState.Quitting = true
 					return m, tea.Quit
 				case "ctrl+z":
 					// Suspend the process
 					return m, tea.Suspend
 				default:
 					// Pass everything to settings view including t, space, etc.
-					cmd := m.settingsView.Update(msg)
+					cmd := m.uiState.SettingsView.Update(msg)
 					return m, cmd
 				}
 			}
@@ -388,39 +259,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Normal settings tab key handling (when NOT editing)
 			switch msg.String() {
 			case "q", "ctrl+c":
-				m.quitting = true
+				m.uiState.Quitting = true
 				return m, tea.Quit
 			case "ctrl+z":
 				// Suspend the process
 				return m, tea.Suspend
 			case " ": // Allow space to pause/resume capture
-				m.paused = !m.paused
+				m.uiState.Paused = !m.uiState.Paused
 				// Resume ticking when unpausing
-				if !m.paused {
+				if !m.uiState.Paused {
 					return m, tickCmd()
 				}
 				return m, nil
 			case "t": // Allow theme toggle
 				// For future: add theme cycling logic here
 				// Currently only Solarized theme available
-				m.theme = themes.Solarized()
+				m.uiState.Theme = themes.Solarized()
 				// Update all components with new theme
-				m.packetList.SetTheme(m.theme)
-				m.detailsPanel.SetTheme(m.theme)
-				m.hexDumpView.SetTheme(m.theme)
-				m.header.SetTheme(m.theme)
-				m.footer.SetTheme(m.theme)
-				m.tabs.SetTheme(m.theme)
-				m.statisticsView.SetTheme(m.theme)
-				m.settingsView.SetTheme(m.theme)
-				m.filterInput.SetTheme(m.theme)
-				saveThemePreference(m.theme)
+				m.uiState.PacketList.SetTheme(m.uiState.Theme)
+				m.uiState.DetailsPanel.SetTheme(m.uiState.Theme)
+				m.uiState.HexDumpView.SetTheme(m.uiState.Theme)
+				m.uiState.Header.SetTheme(m.uiState.Theme)
+				m.uiState.Footer.SetTheme(m.uiState.Theme)
+				m.uiState.Tabs.SetTheme(m.uiState.Theme)
+				m.uiState.StatisticsView.SetTheme(m.uiState.Theme)
+				m.uiState.SettingsView.SetTheme(m.uiState.Theme)
+				m.uiState.FilterInput.SetTheme(m.uiState.Theme)
+				saveThemePreference(m.uiState.Theme)
 				return m, nil
 			case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "n":
 				// Let these fall through to normal tab switching and global key handling
 			default:
 				// Forward everything else to settings view
-				cmd := m.settingsView.Update(msg)
+				cmd := m.uiState.SettingsView.Update(msg)
 				// Update interface name in header when it changes (for display only)
 				// Actual capture interface doesn't change until restart
 				return m, cmd
@@ -428,9 +299,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Nodes tab gets priority for certain keys (navigation, etc.)
-		if m.tabs.GetActive() == 1 {
+		if m.uiState.Tabs.GetActive() == 1 {
 			// Forward message to NodesView for handling (modal is handled globally above)
-			if cmd := m.nodesView.Update(msg); cmd != nil {
+			if cmd := m.uiState.NodesView.Update(msg); cmd != nil {
 				return m, cmd
 			}
 			// If NodesView didn't handle it, fall through to normal handling
@@ -443,32 +314,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Suspend
 
 		case "q", "ctrl+c":
-			m.quitting = true
+			m.uiState.Quitting = true
 			return m, tea.Quit
 
 		case "/": // Enter filter mode
-			m.filterMode = true
-			m.filterInput.Activate()
-			m.filterInput.Clear()
+			m.uiState.FilterMode = true
+			m.uiState.FilterInput.Activate()
+			m.uiState.FilterInput.Clear()
 			return m, nil
 
 		case "c": // Clear filters
-			if !m.filterChain.IsEmpty() {
-				m.filterChain.Clear()
-				m.filteredPackets = make([]components.PacketDisplay, 0)
-				m.matchedPackets = m.packetsCount
-				m.packetList.SetPackets(m.getPacketsInOrder())
+			if m.packetStore.HasFilter() {
+				m.packetStore.ClearFilter()
+				m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
+				m.packetStore.MatchedPackets = m.packetStore.PacketsCount
+				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 			}
 			return m, nil
 
 		case "x": // Clear/flush packets
-			m.packets = make([]components.PacketDisplay, 0, m.maxPackets)
-			m.packetsHead = 0
-			m.packetsCount = 0
-			m.filteredPackets = make([]components.PacketDisplay, 0)
-			m.totalPackets = 0
-			m.matchedPackets = 0
-			m.packetList.SetPackets(m.getPacketsInOrder())
+			m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
+			m.packetStore.PacketsHead = 0
+			m.packetStore.PacketsCount = 0
+			m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
+			m.packetStore.TotalPackets = 0
+			m.packetStore.MatchedPackets = 0
+			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 			// Reset bounded counters
 			m.statistics.ProtocolCounts.Clear()
 			m.statistics.SourceCounts.Clear()
@@ -477,219 +348,219 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statistics.TotalPackets = 0
 			m.statistics.MinPacketSize = 999999
 			m.statistics.MaxPacketSize = 0
-			m.statisticsView.SetStatistics(m.statistics)
+			m.uiState.StatisticsView.SetStatistics(m.statistics)
 			return m, nil
 
 		case " ": // Space to pause/resume
-			m.paused = !m.paused
+			m.uiState.Paused = !m.uiState.Paused
 			// Resume ticking when unpausing
-			if !m.paused {
+			if !m.uiState.Paused {
 				return m, tickCmd()
 			}
 			return m, nil
 
 		case "d": // Toggle details panel
-			m.showDetails = !m.showDetails
+			m.uiState.ShowDetails = !m.uiState.ShowDetails
 			// Recalculate packet list size based on new showDetails state
 			headerHeight := 2
 			tabsHeight := 4
 			bottomHeight := 4
-			contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+			contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 			minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-			if m.showDetails && m.width >= minWidthForDetails {
+			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
 				// Details panel gets exactly what it needs for hex dump, packet list gets the rest
 				detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-				listWidth := m.width - detailsWidth
-				m.packetList.SetSize(listWidth, contentHeight)
-				m.detailsPanel.SetSize(detailsWidth, contentHeight)
+				listWidth := m.uiState.Width - detailsWidth
+				m.uiState.PacketList.SetSize(listWidth, contentHeight)
+				m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
 			} else {
 				// Full width for packet list
-				m.packetList.SetSize(m.width, contentHeight)
-				m.detailsPanel.SetSize(0, contentHeight)
+				m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
+				m.uiState.DetailsPanel.SetSize(0, contentHeight)
 			}
 			return m, nil
 
 		case "p": // Open protocol selector
-			m.protocolSelector.Activate()
-			m.protocolSelector.SetSize(m.width, m.height)
+			m.uiState.ProtocolSelector.Activate()
+			m.uiState.ProtocolSelector.SetSize(m.uiState.Width, m.uiState.Height)
 			return m, nil
 
 		case "v": // Toggle view mode
 			// On capture tab: toggle between packets and calls for VoIP
-			if m.tabs.GetActive() == 0 {
-				if m.selectedProtocol.Name == "VoIP (SIP/RTP)" {
-					if m.viewMode == "packets" {
-						m.viewMode = "calls"
+			if m.uiState.Tabs.GetActive() == 0 {
+				if m.uiState.SelectedProtocol.Name == "VoIP (SIP/RTP)" {
+					if m.uiState.ViewMode == "packets" {
+						m.uiState.ViewMode = "calls"
 					} else {
-						m.viewMode = "packets"
+						m.uiState.ViewMode = "packets"
 					}
 				}
-			} else if m.tabs.GetActive() == 1 {
+			} else if m.uiState.Tabs.GetActive() == 1 {
 				// On nodes tab: toggle between table and graph view
-				m.nodesView.ToggleView()
+				m.uiState.NodesView.ToggleView()
 			}
 			return m, nil
 
 		case "h", "left": // Focus left pane (packet list)
-			m.focusedPane = "left"
+			m.uiState.FocusedPane = "left"
 			return m, nil
 
 		case "l", "right": // Focus right pane (details/hex)
-			if m.showDetails {
-				m.focusedPane = "right"
+			if m.uiState.ShowDetails {
+				m.uiState.FocusedPane = "right"
 			}
 			return m, nil
 
 		case "tab": // Switch tabs
-			m.tabs.Next()
+			m.uiState.Tabs.Next()
 			return m, nil
 
 		case "shift+tab": // Switch tabs backward
-			m.tabs.Previous()
+			m.uiState.Tabs.Previous()
 			return m, nil
 
 		case "alt+1": // Switch to Capture tab
-			m.tabs.SetActive(0)
+			m.uiState.Tabs.SetActive(0)
 			return m, nil
 
 		case "alt+2": // Switch to Nodes tab
-			m.tabs.SetActive(1)
+			m.uiState.Tabs.SetActive(1)
 			return m, nil
 
 		case "alt+3": // Switch to Statistics tab
-			m.tabs.SetActive(2)
+			m.uiState.Tabs.SetActive(2)
 			return m, nil
 
 		case "alt+4": // Switch to Settings tab
-			m.tabs.SetActive(3)
+			m.uiState.Tabs.SetActive(3)
 			return m, nil
 
 		case "n": // Add node (open modal)
-			m.nodesView.ShowAddNodeModal()
+			m.uiState.NodesView.ShowAddNodeModal()
 			return m, nil
 
 		case "t": // Toggle theme
 			// For future: add theme cycling logic here
 			// Currently only Solarized theme available
-			m.theme = themes.Solarized()
+			m.uiState.Theme = themes.Solarized()
 			// Update all components with new theme
-			m.packetList.SetTheme(m.theme)
-			m.detailsPanel.SetTheme(m.theme)
-			m.hexDumpView.SetTheme(m.theme)
-			m.header.SetTheme(m.theme)
-			m.footer.SetTheme(m.theme)
-			m.tabs.SetTheme(m.theme)
-			m.statisticsView.SetTheme(m.theme)
-			m.settingsView.SetTheme(m.theme)
-			m.callsView.SetTheme(m.theme)
-			m.protocolSelector.SetTheme(m.theme)
-			m.filterInput.SetTheme(m.theme)
+			m.uiState.PacketList.SetTheme(m.uiState.Theme)
+			m.uiState.DetailsPanel.SetTheme(m.uiState.Theme)
+			m.uiState.HexDumpView.SetTheme(m.uiState.Theme)
+			m.uiState.Header.SetTheme(m.uiState.Theme)
+			m.uiState.Footer.SetTheme(m.uiState.Theme)
+			m.uiState.Tabs.SetTheme(m.uiState.Theme)
+			m.uiState.StatisticsView.SetTheme(m.uiState.Theme)
+			m.uiState.SettingsView.SetTheme(m.uiState.Theme)
+			m.uiState.CallsView.SetTheme(m.uiState.Theme)
+			m.uiState.ProtocolSelector.SetTheme(m.uiState.Theme)
+			m.uiState.FilterInput.SetTheme(m.uiState.Theme)
 			// Save theme preference
-			saveThemePreference(m.theme)
+			saveThemePreference(m.uiState.Theme)
 			return m, nil
 
 		case "up", "k":
-			if m.tabs.GetActive() == 1 { // Nodes tab
-				m.nodesView.SelectPrevious()
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				m.uiState.NodesView.SelectPrevious()
 				return m, nil
 			}
-			if m.tabs.GetActive() == 2 { // Statistics tab
-				cmd := m.statisticsView.Update(msg)
+			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(msg)
 				return m, cmd
 			}
-			if m.tabs.GetActive() == 0 && m.focusedPane == "right" && m.showDetails {
+			if m.uiState.Tabs.GetActive() == 0 && m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
 				// Scroll details panel
-				cmd := m.detailsPanel.Update(msg)
+				cmd := m.uiState.DetailsPanel.Update(msg)
 				return m, cmd
 			}
-			m.packetList.CursorUp()
+			m.uiState.PacketList.CursorUp()
 			m.updateDetailsPanel()
 			return m, nil
 
 		case "down", "j":
-			if m.tabs.GetActive() == 1 { // Nodes tab
-				m.nodesView.SelectNext()
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				m.uiState.NodesView.SelectNext()
 				return m, nil
 			}
-			if m.tabs.GetActive() == 2 { // Statistics tab
-				cmd := m.statisticsView.Update(msg)
+			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(msg)
 				return m, cmd
 			}
-			if m.tabs.GetActive() == 0 && m.focusedPane == "right" && m.showDetails {
+			if m.uiState.Tabs.GetActive() == 0 && m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
 				// Scroll details panel
-				cmd := m.detailsPanel.Update(msg)
+				cmd := m.uiState.DetailsPanel.Update(msg)
 				return m, cmd
 			}
-			m.packetList.CursorDown()
+			m.uiState.PacketList.CursorDown()
 			m.updateDetailsPanel()
 			return m, nil
 
 		case "home":
-			if m.tabs.GetActive() == 2 { // Statistics tab
-				cmd := m.statisticsView.Update(msg)
+			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(msg)
 				return m, cmd
 			}
-			if m.tabs.GetActive() == 0 && m.focusedPane == "right" && m.showDetails {
+			if m.uiState.Tabs.GetActive() == 0 && m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
 				// Scroll details panel
-				cmd := m.detailsPanel.Update(msg)
+				cmd := m.uiState.DetailsPanel.Update(msg)
 				return m, cmd
 			}
-			m.packetList.GotoTop()
+			m.uiState.PacketList.GotoTop()
 			m.updateDetailsPanel()
 			return m, nil
 
 		case "end":
-			if m.tabs.GetActive() == 2 { // Statistics tab
-				cmd := m.statisticsView.Update(msg)
+			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(msg)
 				return m, cmd
 			}
-			if m.tabs.GetActive() == 0 && m.focusedPane == "right" && m.showDetails {
+			if m.uiState.Tabs.GetActive() == 0 && m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
 				// Scroll details panel
-				cmd := m.detailsPanel.Update(msg)
+				cmd := m.uiState.DetailsPanel.Update(msg)
 				return m, cmd
 			}
-			m.packetList.GotoBottom()
+			m.uiState.PacketList.GotoBottom()
 			m.updateDetailsPanel()
 			return m, nil
 
 		case "pgup":
-			if m.tabs.GetActive() == 2 { // Statistics tab
-				cmd := m.statisticsView.Update(msg)
+			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(msg)
 				return m, cmd
 			}
-			if m.tabs.GetActive() == 0 && m.focusedPane == "right" && m.showDetails {
+			if m.uiState.Tabs.GetActive() == 0 && m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
 				// Scroll details panel
-				cmd := m.detailsPanel.Update(msg)
+				cmd := m.uiState.DetailsPanel.Update(msg)
 				return m, cmd
 			}
-			m.packetList.PageUp()
+			m.uiState.PacketList.PageUp()
 			m.updateDetailsPanel()
 			return m, nil
 
 		case "pgdown":
-			if m.tabs.GetActive() == 2 { // Statistics tab
-				cmd := m.statisticsView.Update(msg)
+			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(msg)
 				return m, cmd
 			}
-			if m.tabs.GetActive() == 0 && m.focusedPane == "right" && m.showDetails {
+			if m.uiState.Tabs.GetActive() == 0 && m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
 				// Scroll details panel
-				cmd := m.detailsPanel.Update(msg)
+				cmd := m.uiState.DetailsPanel.Update(msg)
 				return m, cmd
 			}
-			m.packetList.PageDown()
+			m.uiState.PacketList.PageDown()
 			m.updateDetailsPanel()
 			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.uiState.Width = msg.Width
+		m.uiState.Height = msg.Height
 
 		// Update all component sizes
-		m.header.SetWidth(msg.Width)
-		m.footer.SetWidth(msg.Width)
-		m.tabs.SetWidth(msg.Width)
-		m.filterInput.SetWidth(msg.Width)
+		m.uiState.Header.SetWidth(msg.Width)
+		m.uiState.Footer.SetWidth(msg.Width)
+		m.uiState.Tabs.SetWidth(msg.Width)
+		m.uiState.FilterInput.SetWidth(msg.Width)
 
 		// Calculate available space for main content
 		headerHeight := 2 // header (2 lines: text + border)
@@ -699,26 +570,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		contentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
 
 		// Set nodes view size
-		m.nodesView.SetSize(msg.Width, contentHeight)
+		m.uiState.NodesView.SetSize(msg.Width, contentHeight)
 
 		// Set statistics view size
-		m.statisticsView.SetSize(msg.Width, contentHeight)
+		m.uiState.StatisticsView.SetSize(msg.Width, contentHeight)
 
 		// Set settings view size
-		m.settingsView.SetSize(msg.Width, contentHeight)
+		m.uiState.SettingsView.SetSize(msg.Width, contentHeight)
 
 		// Auto-hide details panel if terminal is too narrow or if details are toggled off
 		minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-		if m.showDetails && msg.Width >= minWidthForDetails {
+		if m.uiState.ShowDetails && msg.Width >= minWidthForDetails {
 			// Details panel gets exactly what it needs for hex dump, packet list gets the rest
 			detailsWidth := 77 // Hex dump (72) + borders/padding (5)
 			listWidth := msg.Width - detailsWidth
-			m.packetList.SetSize(listWidth, contentHeight)
-			m.detailsPanel.SetSize(detailsWidth, contentHeight)
+			m.uiState.PacketList.SetSize(listWidth, contentHeight)
+			m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
 		} else {
 			// Full width for packet list (details hidden or terminal too narrow)
-			m.packetList.SetSize(msg.Width, contentHeight)
-			m.detailsPanel.SetSize(0, contentHeight) // Set to 0 when hidden
+			m.uiState.PacketList.SetSize(msg.Width, contentHeight)
+			m.uiState.DetailsPanel.SetSize(0, contentHeight) // Set to 0 when hidden
 		}
 
 		return m, nil
@@ -731,30 +602,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.EnableMouseAllMotion,
 			tea.EnterAltScreen,
 		)
-		if !m.paused && m.capturing {
+		if !m.uiState.Paused && m.uiState.Capturing {
 			cmd = tea.Batch(cmd, tickCmd())
 		}
 		return m, cmd
 
 	case TickMsg:
 		// Only run tick when capturing and not paused
-		if !m.paused && m.capturing {
+		if !m.uiState.Paused && m.uiState.Capturing {
 			// Periodic UI refresh (10 times per second)
-			if m.needsUIUpdate {
+			if m.uiState.NeedsUIUpdate {
 				// Update packet list component with filtered packets
 				// No need to reapply filters - they're applied per-packet now
-				if m.filterChain.IsEmpty() {
-					m.packetList.SetPackets(m.getPacketsInOrder())
+				if !m.packetStore.HasFilter() {
+					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 				} else {
-					m.packetList.SetPackets(m.filteredPackets)
+					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 				}
 
 				// Update details panel if showing details
-				if m.showDetails {
+				if m.uiState.ShowDetails {
 					m.updateDetailsPanel()
 				}
 
-				m.needsUIUpdate = false
+				m.uiState.NeedsUIUpdate = false
 			}
 			return m, tickCmd()
 		}
@@ -763,111 +634,87 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PacketBatchMsg:
 		// Handle batch of packets more efficiently
-		if !m.paused {
+		if !m.uiState.Paused {
 			for _, packet := range msg.Packets {
 				// Set NodeID to "Local" if not already set (for local/offline capture)
 				if packet.NodeID == "" {
 					packet.NodeID = "Local"
 				}
 
-				// Add packet to circular ring buffer
-				if m.packetsCount < m.maxPackets {
-					// Buffer not full yet - append
-					m.packets = append(m.packets, packet)
-					m.packetsCount++
+				// Only process packets that match current capture mode
+				// Live/Offline mode: only accept local packets
+				// Remote mode: only accept remote packets
+				if m.captureMode == components.CaptureModeRemote {
+					// In remote mode, skip local packets
+					if packet.NodeID == "Local" {
+						continue
+					}
 				} else {
-					// Buffer full - overwrite oldest (at head)
-					m.packets[m.packetsHead] = packet
-					m.packetsHead = (m.packetsHead + 1) % m.maxPackets
-
-					// Also remove oldest from filtered if buffer full
-					if len(m.filteredPackets) >= m.maxPackets {
-						m.filteredPackets = m.filteredPackets[1:]
+					// In live/offline mode, skip remote packets
+					if packet.NodeID != "Local" {
+						continue
 					}
 				}
-				m.totalPackets++
+
+				// Add packet using PacketStore method
+				m.packetStore.AddPacket(packet)
 
 				// Update statistics (lightweight)
 				m.updateStatistics(packet)
-
-				// Apply filter to this single packet immediately
-				if !m.filterChain.IsEmpty() {
-					if m.filterChain.Match(packet) {
-						m.filteredPackets = append(m.filteredPackets, packet)
-					}
-				}
-			}
-
-			// Update matched count once per batch
-			if m.filterChain.IsEmpty() {
-				m.matchedPackets = m.packetsCount
-			} else {
-				m.matchedPackets = len(m.filteredPackets)
 			}
 
 			// Update packet list immediately for smooth streaming
-			if m.filterChain.IsEmpty() {
-				m.packetList.SetPackets(m.getPacketsInOrder())
+			if !m.packetStore.HasFilter() {
+				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 			} else {
-				m.packetList.SetPackets(m.filteredPackets)
+				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 			}
 
 			// Update details panel if showing details
-			if m.showDetails {
+			if m.uiState.ShowDetails {
 				m.updateDetailsPanel()
 			}
 		}
 		return m, nil
 
 	case PacketMsg:
-		if !m.paused {
+		if !m.uiState.Paused {
 			// Set NodeID to "Local" if not already set (for local/offline capture)
 			packet := msg.Packet
 			if packet.NodeID == "" {
 				packet.NodeID = "Local"
 			}
 
-			// Add packet to circular ring buffer
-			if m.packetsCount < m.maxPackets {
-				// Buffer not full yet - append
-				m.packets = append(m.packets, packet)
-				m.packetsCount++
+			// Only process packets that match current capture mode
+			// Live/Offline mode: only accept local packets
+			// Remote mode: only accept remote packets
+			if m.captureMode == components.CaptureModeRemote {
+				// In remote mode, skip local packets
+				if packet.NodeID == "Local" {
+					return m, nil
+				}
 			} else {
-				// Buffer full - overwrite oldest (at head)
-				m.packets[m.packetsHead] = packet
-				m.packetsHead = (m.packetsHead + 1) % m.maxPackets
-
-				// Also remove oldest from filtered if buffer full
-				if len(m.filteredPackets) >= m.maxPackets {
-					// Simple approach: rebuild filtered list
-					// This is still O(n) but happens less frequently than every packet
-					m.filteredPackets = m.filteredPackets[1:]
+				// In live/offline mode, skip remote packets
+				if packet.NodeID != "Local" {
+					return m, nil
 				}
 			}
-			m.totalPackets++
+
+			// Add packet using PacketStore method
+			m.packetStore.AddPacket(packet)
 
 			// Update statistics (lightweight)
 			m.updateStatistics(packet)
 
-			// Apply filter to this single packet immediately to avoid race condition
-			if !m.filterChain.IsEmpty() {
-				if m.filterChain.Match(packet) {
-					m.filteredPackets = append(m.filteredPackets, packet)
-					m.matchedPackets = len(m.filteredPackets)
-				}
-			} else {
-				m.matchedPackets = m.packetsCount
-			}
-
 			// Update packet list immediately for smooth streaming
-			if m.filterChain.IsEmpty() {
-				m.packetList.SetPackets(m.getPacketsInOrder())
+			if !m.packetStore.HasFilter() {
+				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 			} else {
-				m.packetList.SetPackets(m.filteredPackets)
+				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 			}
 
 			// Update details panel if showing details
-			if m.showDetails {
+			if m.uiState.ShowDetails {
 				m.updateDetailsPanel()
 			}
 		}
@@ -890,41 +737,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update processor ID and status if provided
 		if msg.ProcessorID != "" && processorAddr != "" && processorAddr != "Direct" {
-			if proc, exists := m.processors[processorAddr]; exists {
+			if proc, exists := m.connectionMgr.Processors[processorAddr]; exists {
 				proc.ProcessorID = msg.ProcessorID
 				proc.Status = msg.ProcessorStatus
 			}
 		}
 
 		// Update hunters for this processor
-		m.huntersByProcessor[processorAddr] = msg.Hunters
+		m.connectionMgr.HuntersByProcessor[processorAddr] = msg.Hunters
 
 		// Update NodesView with processor info (includes processor IDs and status)
-		m.nodesView.SetProcessors(m.getProcessorInfoList())
+		m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
 		return m, nil
 
 	case components.UpdateBufferSizeMsg:
 		// Update buffer size on-the-fly without restarting capture
-		m.maxPackets = msg.Size
+		m.packetStore.MaxPackets = msg.Size
 
 		// If current packets exceed new buffer size, rebuild buffer keeping newest packets
-		if m.packetsCount > m.maxPackets {
+		if m.packetStore.PacketsCount > m.packetStore.MaxPackets {
 			// Extract packets in order (handling circular buffer)
 			orderedPackets := m.getPacketsInOrder()
 
 			// Keep only the newest maxPackets
-			if len(orderedPackets) > m.maxPackets {
-				orderedPackets = orderedPackets[len(orderedPackets)-m.maxPackets:]
+			if len(orderedPackets) > m.packetStore.MaxPackets {
+				orderedPackets = orderedPackets[len(orderedPackets)-m.packetStore.MaxPackets:]
 			}
 
 			// Reset circular buffer with new data
-			m.packets = orderedPackets
-			m.packetsHead = 0
-			m.packetsCount = len(orderedPackets)
+			m.packetStore.Packets = orderedPackets
+			m.packetStore.PacketsHead = 0
+			m.packetStore.PacketsCount = len(orderedPackets)
 		}
 
 		// Save to config file
-		m.settingsView.SaveBufferSize()
+		m.uiState.SettingsView.SaveBufferSize()
 
 		return m, nil
 
@@ -948,29 +795,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Mode {
 		case components.CaptureModeLive:
 			m.interfaceName = msg.Interface
-			m.tabs.UpdateTab(0, "Live Capture", "📡")
+			m.uiState.Tabs.UpdateTab(0, "Live Capture", "📡")
 		case components.CaptureModeOffline:
 			m.interfaceName = msg.PCAPFile
-			m.tabs.UpdateTab(0, "Offline Capture", "📄")
+			m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
 		case components.CaptureModeRemote:
 			m.interfaceName = msg.NodesFile
-			m.tabs.UpdateTab(0, "Remote Capture", "🌐")
+			m.uiState.Tabs.UpdateTab(0, "Remote Capture", "🌐")
 		}
 		m.bpfFilter = msg.Filter
 
 		// Update mode BEFORE starting new capture so packet handlers check the right mode
 		m.captureMode = msg.Mode
-		m.maxPackets = msg.BufferSize // Apply the new buffer size
-		m.paused = false              // Unpause when restarting capture
+		m.packetStore.MaxPackets = msg.BufferSize // Apply the new buffer size
+		m.uiState.Paused = false              // Unpause when restarting capture
 
 		// Clear old packets with new buffer size
-		m.packets = make([]components.PacketDisplay, 0, m.maxPackets)
-		m.packetsHead = 0
-		m.packetsCount = 0
-		m.filteredPackets = make([]components.PacketDisplay, 0)
-		m.totalPackets = 0
-		m.matchedPackets = 0
-		m.packetList.Reset() // Reset packet list including autoscroll state
+		m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
+		m.packetStore.PacketsHead = 0
+		m.packetStore.PacketsCount = 0
+		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
+		m.packetStore.TotalPackets = 0
+		m.packetStore.MatchedPackets = 0
+		m.uiState.PacketList.Reset() // Reset packet list including autoscroll state
 
 		// Reset statistics (bounded counters)
 		m.statistics.ProtocolCounts.Clear()
@@ -980,7 +827,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statistics.TotalPackets = 0
 		m.statistics.MinPacketSize = 999999
 		m.statistics.MaxPacketSize = 0
-		m.statisticsView.SetStatistics(m.statistics)
+		m.uiState.StatisticsView.SetStatistics(m.statistics)
 
 		// Start new capture in background using global program reference
 		if currentProgram != nil {
@@ -1017,20 +864,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// User wants to add a remote node
 		if msg.Address != "" {
 			// Add processor to tracking if not already present
-			if _, exists := m.processors[msg.Address]; !exists {
-				m.processors[msg.Address] = &ProcessorConnection{
+			if _, exists := m.connectionMgr.Processors[msg.Address]; !exists {
+				m.connectionMgr.Processors[msg.Address] = &store.ProcessorConnection{
 					Address:      msg.Address,
-					State:        ProcessorStateDisconnected,
+					State:        store.ProcessorStateDisconnected,
 					FailureCount: 0,
 				}
 
 				// Update nodes view to show the new processor immediately
 				// Merge all hunters from all processors for display
 				allHunters := make([]components.HunterInfo, 0)
-				for _, hunters := range m.huntersByProcessor {
+				for _, hunters := range m.connectionMgr.HuntersByProcessor {
 					allHunters = append(allHunters, hunters...)
 				}
-				m.nodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
+				m.uiState.NodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
 			}
 			// Trigger connection attempt
 			return m, func() tea.Msg {
@@ -1048,42 +895,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case components.ProtocolSelectedMsg:
 		// User selected a protocol from the protocol selector
-		m.selectedProtocol = msg.Protocol
+		m.uiState.SelectedProtocol = msg.Protocol
 
 		// Apply BPF filter if protocol has one
 		if msg.Protocol.BPFFilter != "" {
 			m.parseAndApplyFilter(msg.Protocol.BPFFilter)
 		} else {
 			// "All" protocol - clear filters
-			m.filterChain.Clear()
-			m.filteredPackets = make([]components.PacketDisplay, 0)
-			m.matchedPackets = m.packetsCount
-			m.packetList.SetPackets(m.getPacketsInOrder())
+			m.packetStore.ClearFilter()
+			m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
+			m.packetStore.MatchedPackets = m.packetStore.PacketsCount
+			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 		}
 
 		// Switch to calls view if VoIP protocol selected
 		if msg.Protocol.Name == "VoIP (SIP/RTP)" {
-			m.viewMode = "calls"
+			m.uiState.ViewMode = "calls"
 		} else {
-			m.viewMode = "packets"
+			m.uiState.ViewMode = "packets"
 		}
 
 		return m, nil
 
 	case ProcessorReconnectMsg:
 		// Attempt to connect/reconnect to a processor
-		proc, exists := m.processors[msg.Address]
+		proc, exists := m.connectionMgr.Processors[msg.Address]
 		if !exists {
 			return m, nil
 		}
 
 		// Don't reconnect if already connecting or connected
-		if proc.State == ProcessorStateConnecting || proc.State == ProcessorStateConnected {
+		if proc.State == store.ProcessorStateConnecting || proc.State == store.ProcessorStateConnected {
 			return m, nil
 		}
 
 		// Update state to connecting
-		proc.State = ProcessorStateConnecting
+		proc.State = store.ProcessorStateConnecting
 		proc.LastAttempt = time.Now()
 
 		// Attempt connection in background
@@ -1126,19 +973,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ProcessorConnectedMsg:
 		// Processor connection established successfully
-		if proc, exists := m.processors[msg.Address]; exists {
-			proc.State = ProcessorStateConnected
+		if proc, exists := m.connectionMgr.Processors[msg.Address]; exists {
+			proc.State = store.ProcessorStateConnected
 			proc.Client = msg.Client
 			proc.FailureCount = 0
 			// Also store in deprecated map for compatibility
-			m.remoteClients[msg.Address] = msg.Client
+			m.connectionMgr.RemoteClients[msg.Address] = msg.Client
 		}
 		return m, nil
 
 	case ProcessorDisconnectedMsg:
 		// Processor connection lost or failed
-		if proc, exists := m.processors[msg.Address]; exists {
-			proc.State = ProcessorStateFailed
+		if proc, exists := m.connectionMgr.Processors[msg.Address]; exists {
+			proc.State = store.ProcessorStateFailed
 			proc.FailureCount++
 			proc.LastDisconnectedAt = time.Now() // Track when disconnected for cleanup
 
@@ -1147,7 +994,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				proc.Client.Close()
 				proc.Client = nil
 			}
-			delete(m.remoteClients, msg.Address)
+			delete(m.connectionMgr.RemoteClients, msg.Address)
 
 			// Schedule reconnection with exponential backoff
 			backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 6))) * time.Second
@@ -1166,12 +1013,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		const cleanupTimeout = 30 * time.Minute
 		now := time.Now()
 
-		for addr, proc := range m.processors {
+		for addr, proc := range m.connectionMgr.Processors {
 			// Only clean up processors that are:
 			// 1. In failed/disconnected state
 			// 2. Have been disconnected for > 30 minutes
 			// 3. Have a non-zero LastDisconnectedAt time
-			if (proc.State == ProcessorStateFailed || proc.State == ProcessorStateDisconnected) &&
+			if (proc.State == store.ProcessorStateFailed || proc.State == store.ProcessorStateDisconnected) &&
 				!proc.LastDisconnectedAt.IsZero() &&
 				now.Sub(proc.LastDisconnectedAt) > cleanupTimeout {
 
@@ -1181,9 +1028,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				// Remove from maps
-				delete(m.processors, addr)
-				delete(m.remoteClients, addr)
-				delete(m.huntersByProcessor, addr)
+				delete(m.connectionMgr.Processors, addr)
+				delete(m.connectionMgr.RemoteClients, addr)
+				delete(m.connectionMgr.HuntersByProcessor, addr)
 			}
 		}
 
@@ -1199,7 +1046,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// DEBUG: Uncomment to log mouse events to /tmp/lippycat-mouse-debug.log for troubleshooting
 	// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 	// 	fmt.Fprintf(f, "handleMouse: Y=%d Type=%v Action=%v Button=%v ActiveTab=%d\n",
-	// 		msg.Y, msg.Type, msg.Action, msg.Button, m.tabs.GetActive())
+	// 		msg.Y, msg.Type, msg.Action, msg.Button, m.uiState.Tabs.GetActive())
 	// 	f.Close()
 	// }
 
@@ -1208,18 +1055,18 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	tabsHeight := 4    // Tabs take 4 lines
 	bottomHeight := 4  // Footer/filter area
 	contentStartY := headerHeight + tabsHeight // Y=6
-	contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 
 	// Handle mouse wheel scrolling
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
-		if m.tabs.GetActive() == 0 {
+		if m.uiState.Tabs.GetActive() == 0 {
 			// On capture tab - scroll packet list if focused on left
-			if m.focusedPane == "left" {
-				m.packetList.CursorUp()
+			if m.uiState.FocusedPane == "left" {
+				m.uiState.PacketList.CursorUp()
 				m.updateDetailsPanel()
-			} else if m.focusedPane == "right" {
+			} else if m.uiState.FocusedPane == "right" {
 				// Scroll details panel viewport
-				cmd := m.detailsPanel.Update(tea.KeyMsg{Type: tea.KeyUp})
+				cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyUp})
 				return m, cmd
 			}
 		}
@@ -1227,14 +1074,14 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	}
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
-		if m.tabs.GetActive() == 0 {
+		if m.uiState.Tabs.GetActive() == 0 {
 			// On capture tab - scroll packet list if focused on left
-			if m.focusedPane == "left" {
-				m.packetList.CursorDown()
+			if m.uiState.FocusedPane == "left" {
+				m.uiState.PacketList.CursorDown()
 				m.updateDetailsPanel()
-			} else if m.focusedPane == "right" {
+			} else if m.uiState.FocusedPane == "right" {
 				// Scroll details panel viewport
-				cmd := m.detailsPanel.Update(tea.KeyMsg{Type: tea.KeyDown})
+				cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyDown})
 				return m, cmd
 			}
 		}
@@ -1250,30 +1097,30 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// Clickable area is Y=2-4 (bottom extends one row too much at Y=5)
 	if msg.Y >= 2 && msg.Y <= 4 {
 		// Use the tab component's method to get the clicked tab
-		clickedTab := m.tabs.GetTabAtX(msg.X)
+		clickedTab := m.uiState.Tabs.GetTabAtX(msg.X)
 		if clickedTab >= 0 {
-			m.tabs.SetActive(clickedTab)
+			m.uiState.Tabs.SetActive(clickedTab)
 		}
 		return m, nil
 	}
 
 	// Only handle clicks in content area for capture tab
 	// (Nodes and Settings tabs handle their own bounds checking)
-	if m.tabs.GetActive() == 0 {
+	if m.uiState.Tabs.GetActive() == 0 {
 		if msg.Y < contentStartY || msg.Y >= contentStartY+contentHeight {
 			return m, nil
 		}
 	}
 
 	// Packet list clicks (only on first tab - capture tab)
-	if m.tabs.GetActive() == 0 {
+	if m.uiState.Tabs.GetActive() == 0 {
 		minWidthForDetails := 120
 
 		// Check if we're in split pane mode
-		if m.showDetails && m.width >= minWidthForDetails {
+		if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
 			// Split pane: packet list on left (65%), details on right (35%)
 			// Both panels have borders and padding, so calculate actual widths
-			listWidth := m.width * 65 / 100
+			listWidth := m.uiState.Width * 65 / 100
 
 			// The packet list renders at full listWidth
 			// The details panel starts immediately after the packet list
@@ -1285,7 +1132,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 			if msg.X < detailsContentStart {
 				// Click in packet list area - switch focus to left pane
-				m.focusedPane = "left"
+				m.uiState.FocusedPane = "left"
 
 				// First line of data is at contentStartY + 1 (after table header)
 				tableHeaderY := contentStartY + 1
@@ -1293,52 +1140,52 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 					// Calculate which row was clicked (relative to visible area)
 					visibleRow := msg.Y - tableHeaderY - 1 // -1 for separator line
 
-					packets := m.packets
-					if !m.filterChain.IsEmpty() {
-						packets = m.filteredPackets
+					packets := m.packetStore.Packets
+					if m.packetStore.HasFilter() {
+						packets = m.packetStore.FilteredPackets
 					}
 
 					// Add scroll offset to get actual packet index
-					actualPacketIndex := m.packetList.GetOffset() + visibleRow
+					actualPacketIndex := m.uiState.PacketList.GetOffset() + visibleRow
 
 					if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
 						// Check for double-click (same packet clicked within 500ms)
 						now := time.Now()
-						isDoubleClick := actualPacketIndex == m.lastClickPacket &&
-							now.Sub(m.lastClickTime) < 500*time.Millisecond
+						isDoubleClick := actualPacketIndex == m.uiState.LastClickPacket &&
+							now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
 
 						// Update last click tracking
-						m.lastClickTime = now
-						m.lastClickPacket = actualPacketIndex
+						m.uiState.LastClickTime = now
+						m.uiState.LastClickPacket = actualPacketIndex
 
 						// Set cursor directly without scrolling
-						m.packetList.SetCursor(actualPacketIndex)
-						m.detailsPanel.SetPacket(&packets[actualPacketIndex])
+						m.uiState.PacketList.SetCursor(actualPacketIndex)
+						m.uiState.DetailsPanel.SetPacket(&packets[actualPacketIndex])
 
 						// Toggle details panel on double-click
 						if isDoubleClick {
-							m.showDetails = !m.showDetails
+							m.uiState.ShowDetails = !m.uiState.ShowDetails
 							// Recalculate sizes when toggling details
 							headerHeight := 2
 							tabsHeight := 4
 							bottomHeight := 4
-							contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+							contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 							minWidthForDetails := 160
-							if m.showDetails && m.width >= minWidthForDetails {
+							if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
 								detailsWidth := 77
-								listWidth := m.width - detailsWidth
-								m.packetList.SetSize(listWidth, contentHeight)
-								m.detailsPanel.SetSize(detailsWidth, contentHeight)
+								listWidth := m.uiState.Width - detailsWidth
+								m.uiState.PacketList.SetSize(listWidth, contentHeight)
+								m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
 							} else {
-								m.packetList.SetSize(m.width, contentHeight)
-								m.detailsPanel.SetSize(0, contentHeight)
+								m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
+								m.uiState.DetailsPanel.SetSize(0, contentHeight)
 							}
 						}
 					}
 				}
 			} else {
 				// Click inside details panel content - switch focus to right pane
-				m.focusedPane = "right"
+				m.uiState.FocusedPane = "right"
 			}
 		} else {
 			// Full width packet list
@@ -1347,46 +1194,46 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				// Calculate which row was clicked (relative to visible area)
 				visibleRow := msg.Y - tableHeaderY - 1
 
-				packets := m.packets
-				if !m.filterChain.IsEmpty() {
-					packets = m.filteredPackets
+				packets := m.packetStore.Packets
+				if m.packetStore.HasFilter() {
+					packets = m.packetStore.FilteredPackets
 				}
 
 				// Add scroll offset to get actual packet index
-				actualPacketIndex := m.packetList.GetOffset() + visibleRow
+				actualPacketIndex := m.uiState.PacketList.GetOffset() + visibleRow
 
 				if actualPacketIndex >= 0 && actualPacketIndex < len(packets) {
 					// Check for double-click (same packet clicked within 500ms)
 					now := time.Now()
-					isDoubleClick := actualPacketIndex == m.lastClickPacket &&
-						now.Sub(m.lastClickTime) < 500*time.Millisecond
+					isDoubleClick := actualPacketIndex == m.uiState.LastClickPacket &&
+						now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
 
 					// Update last click tracking
-					m.lastClickTime = now
-					m.lastClickPacket = actualPacketIndex
+					m.uiState.LastClickTime = now
+					m.uiState.LastClickPacket = actualPacketIndex
 
 					// Set cursor directly without scrolling
-					m.packetList.SetCursor(actualPacketIndex)
-					m.detailsPanel.SetPacket(&packets[actualPacketIndex])
-					m.focusedPane = "left"
+					m.uiState.PacketList.SetCursor(actualPacketIndex)
+					m.uiState.DetailsPanel.SetPacket(&packets[actualPacketIndex])
+					m.uiState.FocusedPane = "left"
 
 					// Toggle details panel on double-click
 					if isDoubleClick {
-						m.showDetails = !m.showDetails
+						m.uiState.ShowDetails = !m.uiState.ShowDetails
 						// Recalculate sizes when toggling details
 						headerHeight := 2
 						tabsHeight := 4
 						bottomHeight := 4
-						contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+						contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 						minWidthForDetails := 160
-						if m.showDetails && m.width >= minWidthForDetails {
+						if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
 							detailsWidth := 77
-							listWidth := m.width - detailsWidth
-							m.packetList.SetSize(listWidth, contentHeight)
-							m.detailsPanel.SetSize(detailsWidth, contentHeight)
+							listWidth := m.uiState.Width - detailsWidth
+							m.uiState.PacketList.SetSize(listWidth, contentHeight)
+							m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
 						} else {
-							m.packetList.SetSize(m.width, contentHeight)
-							m.detailsPanel.SetSize(0, contentHeight)
+							m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
+							m.uiState.DetailsPanel.SetSize(0, contentHeight)
 						}
 					}
 				}
@@ -1396,21 +1243,21 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	}
 
 	// Nodes tab clicks (tab 1)
-	if m.tabs.GetActive() == 1 {
+	if m.uiState.Tabs.GetActive() == 1 {
 		// DEBUG: Uncomment to trace mouse event forwarding
 		// if f, err := os.OpenFile("/tmp/lippycat-mouse-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		// 	fmt.Fprintf(f, "  -> Forwarding to NodesView.Update\n")
 		// 	f.Close()
 		// }
 		// Forward mouse events to the nodes view (like settings tab, let it handle coordinate adjustment)
-		cmd := m.nodesView.Update(msg)
+		cmd := m.uiState.NodesView.Update(msg)
 		return m, cmd
 	}
 
 	// Settings tab clicks (tab 3)
-	if m.tabs.GetActive() == 3 {
+	if m.uiState.Tabs.GetActive() == 3 {
 		// Forward mouse events to the settings view
-		cmd := m.settingsView.Update(msg)
+		cmd := m.uiState.SettingsView.Update(msg)
 		return m, cmd
 	}
 
@@ -1419,27 +1266,27 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 // View renders the TUI
 func (m Model) View() string {
-	if m.quitting {
+	if m.uiState.Quitting {
 		return "Goodbye!\n"
 	}
 
 	// Update header state
-	m.header.SetState(m.capturing, m.paused)
-	m.header.SetPacketCount(m.totalPackets)
-	m.header.SetInterface(m.interfaceName)
-	m.header.SetCaptureMode(m.captureMode)
+	m.uiState.Header.SetState(m.uiState.Capturing, m.uiState.Paused)
+	m.uiState.Header.SetPacketCount(m.packetStore.TotalPackets)
+	m.uiState.Header.SetInterface(m.interfaceName)
+	m.uiState.Header.SetCaptureMode(m.captureMode)
 	// Use hunter count (not remote client count) for accurate node display
-	m.header.SetNodeCount(m.nodesView.GetHunterCount())
-	m.header.SetProcessorCount(m.nodesView.GetProcessorCount())
+	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
+	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())
 
 	// Update footer state
-	m.footer.SetFilterMode(m.filterMode)
-	m.footer.SetHasFilter(!m.filterChain.IsEmpty())
+	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)
+	m.uiState.Footer.SetHasFilter(m.packetStore.HasFilter())
 
 	// Render components
-	headerView := m.header.View()
-	tabsView := m.tabs.View()
-	footerView := m.footer.View()
+	headerView := m.uiState.Header.View()
+	tabsView := m.uiState.Tabs.View()
+	footerView := m.uiState.Footer.View()
 
 	var mainContent string
 
@@ -1447,49 +1294,49 @@ func (m Model) View() string {
 	headerHeight := 2
 	tabsHeight := 4
 	bottomHeight := 4
-	contentHeight := m.height - headerHeight - tabsHeight - bottomHeight
+	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 
 	// Render main content based on active tab
-	switch m.tabs.GetActive() {
+	switch m.uiState.Tabs.GetActive() {
 	case 0: // Live/Remote/Offline Capture
 		// Check if we should display calls view or packets view
-		if m.viewMode == "calls" {
+		if m.uiState.ViewMode == "calls" {
 			// Render calls view
-			m.callsView.SetSize(m.width, contentHeight)
-			mainContent = m.callsView.View()
+			m.uiState.CallsView.SetSize(m.uiState.Width, contentHeight)
+			mainContent = m.uiState.CallsView.View()
 		} else {
 			// Render packets view
 			minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-			detailsVisible := m.showDetails && m.width >= minWidthForDetails
+			detailsVisible := m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails
 			if detailsVisible {
 				// Split pane layout
-				leftFocused := m.focusedPane == "left"
-				rightFocused := m.focusedPane == "right"
+				leftFocused := m.uiState.FocusedPane == "left"
+				rightFocused := m.uiState.FocusedPane == "right"
 
 				detailsWidth := 77 // Hex dump (72) + borders/padding (5)
 
 				// Ensure details panel has the right size set
-				m.detailsPanel.SetSize(detailsWidth, contentHeight)
+				m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
 
-				packetListView := m.packetList.View(leftFocused, true)
-				detailsPanelView := m.detailsPanel.View(rightFocused)
+				packetListView := m.uiState.PacketList.View(leftFocused, true)
+				detailsPanelView := m.uiState.DetailsPanel.View(rightFocused)
 
 				mainContent = lipgloss.JoinHorizontal(lipgloss.Top, packetListView, detailsPanelView)
 			} else {
 				// Full width packet list - always show unfocused when details are hidden
-				mainContent = m.packetList.View(false, false)
+				mainContent = m.uiState.PacketList.View(false, false)
 			}
 		}
 	case 1: // Nodes
 		// Render nodes view
-		mainContent = m.nodesView.View()
+		mainContent = m.uiState.NodesView.View()
 
 	case 2: // Statistics
 		// Render statistics view (content is updated via updateStatistics)
-		mainContent = m.statisticsView.View()
+		mainContent = m.uiState.StatisticsView.View()
 	case 3: // Settings
 		// Render settings view
-		mainContent = m.settingsView.View()
+		mainContent = m.uiState.SettingsView.View()
 	}
 
 	// Combine main views (header + tabs + content)
@@ -1502,9 +1349,9 @@ func (m Model) View() string {
 
 	// Create the bottom area - always 4 lines total
 	var bottomArea string
-	if m.filterMode {
+	if m.uiState.FilterMode {
 		// Filter (3 lines) + footer (1 line) = 4 lines
-		filterView := m.filterInput.View()
+		filterView := m.uiState.FilterInput.View()
 		bottomArea = filterView + "\n" + footerView
 	} else {
 		// 3 blank lines + footer (1 line) = 4 lines
@@ -1514,20 +1361,20 @@ func (m Model) View() string {
 	fullView := lipgloss.JoinVertical(lipgloss.Left, mainView, bottomArea)
 
 	// Overlay protocol selector if active - render it centered over a semi-transparent background
-	if m.protocolSelector.IsActive() {
-		selectorView := m.protocolSelector.View()
+	if m.uiState.ProtocolSelector.IsActive() {
+		selectorView := m.uiState.ProtocolSelector.View()
 
 		// Simply place the selector in the center with background filling
 		return lipgloss.Place(
-			m.width, m.height,
+			m.uiState.Width, m.uiState.Height,
 			lipgloss.Center, lipgloss.Center,
 			selectorView,
 		)
 	}
 
 	// Overlay add node modal if active
-	if m.nodesView.IsModalOpen() {
-		modalView := m.nodesView.RenderModal(m.width, m.height)
+	if m.uiState.NodesView.IsModalOpen() {
+		modalView := m.uiState.NodesView.RenderModal(m.uiState.Width, m.uiState.Height)
 		return modalView
 	}
 
@@ -1558,27 +1405,27 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 	}
 
 	// Update statistics view with new data
-	m.statisticsView.SetStatistics(m.statistics)
+	m.uiState.StatisticsView.SetStatistics(m.statistics)
 }
 
 // updateDetailsPanel updates the details panel with the currently selected packet
 func (m *Model) updateDetailsPanel() {
-	packets := m.packets
-	if !m.filterChain.IsEmpty() {
-		packets = m.filteredPackets
+	packets := m.packetStore.Packets
+	if m.packetStore.HasFilter() {
+		packets = m.packetStore.FilteredPackets
 	}
 
 	if len(packets) == 0 {
-		m.detailsPanel.SetPacket(nil)
+		m.uiState.DetailsPanel.SetPacket(nil)
 		return
 	}
 
-	selectedIdx := m.packetList.GetCursor()
+	selectedIdx := m.uiState.PacketList.GetCursor()
 	if selectedIdx >= 0 && selectedIdx < len(packets) {
 		pkt := packets[selectedIdx]
-		m.detailsPanel.SetPacket(&pkt)
+		m.uiState.DetailsPanel.SetPacket(&pkt)
 	} else {
-		m.detailsPanel.SetPacket(nil)
+		m.uiState.DetailsPanel.SetPacket(nil)
 	}
 }
 
@@ -1587,74 +1434,74 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		// Apply the filter
-		filterValue := m.filterInput.Value()
+		filterValue := m.uiState.FilterInput.Value()
 		if filterValue != "" {
 			m.parseAndApplyFilter(filterValue)
-			m.filterInput.AddToHistory(filterValue)
+			m.uiState.FilterInput.AddToHistory(filterValue)
 			// Save filter history to config
-			saveFilterHistory(&m.filterInput)
+			saveFilterHistory(&m.uiState.FilterInput)
 		} else {
 			// Empty filter = clear all filters
-			m.filterChain.Clear()
-			m.filteredPackets = make([]components.PacketDisplay, 0)
-			m.matchedPackets = m.packetsCount
-			m.packetList.SetPackets(m.getPacketsInOrder())
+			m.packetStore.ClearFilter()
+			m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
+			m.packetStore.MatchedPackets = m.packetStore.PacketsCount
+			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 		}
-		m.filterMode = false
-		m.filterInput.Deactivate()
+		m.uiState.FilterMode = false
+		m.uiState.FilterInput.Deactivate()
 		return m, nil
 
 	case "esc", "ctrl+c":
 		// Cancel filter input
-		m.filterMode = false
-		m.filterInput.Deactivate()
+		m.uiState.FilterMode = false
+		m.uiState.FilterInput.Deactivate()
 		return m, nil
 
 	case "up", "ctrl+p":
-		m.filterInput.HistoryUp()
+		m.uiState.FilterInput.HistoryUp()
 		return m, nil
 
 	case "down", "ctrl+n":
-		m.filterInput.HistoryDown()
+		m.uiState.FilterInput.HistoryDown()
 		return m, nil
 
 	case "left", "ctrl+b":
-		m.filterInput.CursorLeft()
+		m.uiState.FilterInput.CursorLeft()
 		return m, nil
 
 	case "right", "ctrl+f":
-		m.filterInput.CursorRight()
+		m.uiState.FilterInput.CursorRight()
 		return m, nil
 
 	case "home", "ctrl+a":
-		m.filterInput.CursorHome()
+		m.uiState.FilterInput.CursorHome()
 		return m, nil
 
 	case "end", "ctrl+e":
-		m.filterInput.CursorEnd()
+		m.uiState.FilterInput.CursorEnd()
 		return m, nil
 
 	case "backspace":
-		m.filterInput.Backspace()
+		m.uiState.FilterInput.Backspace()
 		return m, nil
 
 	case "delete", "ctrl+d":
-		m.filterInput.Delete()
+		m.uiState.FilterInput.Delete()
 		return m, nil
 
 	case "ctrl+u":
-		m.filterInput.DeleteToBeginning()
+		m.uiState.FilterInput.DeleteToBeginning()
 		return m, nil
 
 	case "ctrl+k":
-		m.filterInput.DeleteToEnd()
+		m.uiState.FilterInput.DeleteToEnd()
 		return m, nil
 
 	default:
 		// Insert character(s) - handles both single keypress and paste
 		if len(msg.Runes) > 0 {
 			for _, r := range msg.Runes {
-				m.filterInput.InsertRune(r)
+				m.uiState.FilterInput.InsertRune(r)
 			}
 		}
 		return m, nil
@@ -1664,7 +1511,7 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // parseAndApplyFilter parses a filter string and applies it
 func (m *Model) parseAndApplyFilter(filterStr string) {
 	// Clear existing filters
-	m.filterChain.Clear()
+	m.packetStore.ClearFilter()
 
 	if filterStr == "" {
 		return
@@ -1673,17 +1520,17 @@ func (m *Model) parseAndApplyFilter(filterStr string) {
 	// Try to parse as boolean expression first
 	filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
 	if err == nil && filter != nil {
-		m.filterChain.Add(filter)
+		m.packetStore.AddFilter(filter)
 	}
 
 	// Reapply filters to all packets
 	m.applyFilters()
 
 	// Update display
-	if m.filterChain.IsEmpty() {
-		m.packetList.SetPackets(m.getPacketsInOrder())
+	if !m.packetStore.HasFilter() {
+		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 	} else {
-		m.packetList.SetPackets(m.filteredPackets)
+		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 	}
 }
 
@@ -1736,8 +1583,8 @@ func isBPFExpression(s string) bool {
 // getConnectedProcessors returns a list of all configured processor addresses
 // This includes both connected and disconnected processors
 func (m *Model) getConnectedProcessors() []string {
-	processors := make([]string, 0, len(m.processors))
-	for addr := range m.processors {
+	processors := make([]string, 0, len(m.connectionMgr.Processors))
+	for addr := range m.connectionMgr.Processors {
 		processors = append(processors, addr)
 	}
 	return processors
@@ -1745,18 +1592,18 @@ func (m *Model) getConnectedProcessors() []string {
 
 // getProcessorInfoList returns ProcessorInfo for all configured processors
 func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
-	procInfos := make([]components.ProcessorInfo, 0, len(m.processors))
-	for addr, proc := range m.processors {
-		// Convert model ProcessorState to components.ProcessorConnectionState
+	procInfos := make([]components.ProcessorInfo, 0, len(m.connectionMgr.Processors))
+	for addr, proc := range m.connectionMgr.Processors {
+		// Convert model store.ProcessorState to components.ProcessorConnectionState
 		var connState components.ProcessorConnectionState
 		switch proc.State {
-		case ProcessorStateDisconnected:
+		case store.ProcessorStateDisconnected:
 			connState = components.ProcessorConnectionStateDisconnected
-		case ProcessorStateConnecting:
+		case store.ProcessorStateConnecting:
 			connState = components.ProcessorConnectionStateConnecting
-		case ProcessorStateConnected:
+		case store.ProcessorStateConnected:
 			connState = components.ProcessorConnectionStateConnected
-		case ProcessorStateFailed:
+		case store.ProcessorStateFailed:
 			connState = components.ProcessorConnectionStateFailed
 		default:
 			connState = components.ProcessorConnectionStateDisconnected
@@ -1767,7 +1614,7 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			ProcessorID:     proc.ProcessorID,
 			Status:          proc.Status,
 			ConnectionState: connState,
-			Hunters:         m.huntersByProcessor[addr],
+			Hunters:         m.connectionMgr.HuntersByProcessor[addr],
 		})
 	}
 	return procInfos
@@ -1800,20 +1647,20 @@ func loadNodesFile(filePath string) tea.Cmd {
 // applyFilters applies the filter chain to all packets
 // This is only called when filters change, not on every packet
 func (m *Model) applyFilters() {
-	if m.filterChain.IsEmpty() {
-		m.matchedPackets = m.packetsCount
-		m.filteredPackets = make([]components.PacketDisplay, 0)
+	if !m.packetStore.HasFilter() {
+		m.packetStore.MatchedPackets = m.packetStore.PacketsCount
+		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 		return
 	}
 
 	orderedPackets := m.getPacketsInOrder()
-	m.filteredPackets = make([]components.PacketDisplay, 0, len(orderedPackets))
+	m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0, len(orderedPackets))
 	for _, pkt := range orderedPackets {
-		if m.filterChain.Match(pkt) {
-			m.filteredPackets = append(m.filteredPackets, pkt)
+		if m.packetStore.MatchFilter(pkt) {
+			m.packetStore.FilteredPackets = append(m.packetStore.FilteredPackets, pkt)
 		}
 	}
-	m.matchedPackets = len(m.filteredPackets)
+	m.packetStore.MatchedPackets = len(m.packetStore.FilteredPackets)
 }
 
 // saveThemePreference saves the current theme preference to config file

@@ -272,7 +272,7 @@ func TestAsyncWriterPool_ErrorHandler(t *testing.T) {
 	callID := "test-call-error"
 
 	// Test write with non-existent call (should trigger error)
-	pool.WritePacketSync(callID, packet, PacketTypeSIP)
+	_ = pool.WritePacketSync(callID, packet, PacketTypeSIP)
 
 	// Wait for error handling
 	time.Sleep(100 * time.Millisecond)
@@ -379,7 +379,7 @@ func createTestPacketForAsync(t *testing.T) gopacket.Packet {
 		SrcPort: 5060,
 		DstPort: 5060,
 	}
-	udp.SetNetworkLayerForChecksum(ip)
+	_ = udp.SetNetworkLayerForChecksum(ip)
 
 	payload := []byte("INVITE sip:test@example.com SIP/2.0\r\nCall-ID: test-call\r\n\r\n")
 
@@ -455,7 +455,7 @@ func cleanupTestCall(callID string) {
 func BenchmarkAsyncWriterPool_WritePacketAsync(b *testing.B) {
 	ResetConfigOnce()
 	pool := NewAsyncWriterPool(4, 1000)
-	pool.Start()
+	_ = pool.Start()
 	defer pool.Stop()
 
 	packet := createTestPacketForAsync(&testing.T{})
@@ -464,14 +464,14 @@ func BenchmarkAsyncWriterPool_WritePacketAsync(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.WritePacketAsync(callID, packet, PacketTypeSIP)
+		_ = pool.WritePacketAsync(callID, packet, PacketTypeSIP)
 	}
 }
 
 func BenchmarkAsyncWriterPool_WritePacketSync(b *testing.B) {
 	ResetConfigOnce()
 	pool := NewAsyncWriterPool(4, 1000)
-	pool.Start()
+	_ = pool.Start()
 	defer pool.Stop()
 
 	packet := createTestPacketForAsync(&testing.T{})
@@ -480,6 +480,6 @@ func BenchmarkAsyncWriterPool_WritePacketSync(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.WritePacketSync(callID, packet, PacketTypeSIP)
+		_ = pool.WritePacketSync(callID, packet, PacketTypeSIP)
 	}
 }

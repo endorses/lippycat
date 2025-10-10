@@ -368,7 +368,7 @@ func BenchmarkMonitorRecordPacket(b *testing.B) {
 		TracingEnabled: true,
 	}
 	monitor := NewMonitor(config)
-	monitor.Enable(config)
+	_ = monitor.Enable(config)
 
 	ctx := context.Background()
 
@@ -377,5 +377,5 @@ func BenchmarkMonitorRecordPacket(b *testing.B) {
 		monitor.RecordPacketProcessing(ctx, "sip", "inbound", 10*time.Millisecond)
 	}
 
-	monitor.Disable()
+	_ = monitor.Disable()
 }

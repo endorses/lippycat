@@ -449,7 +449,7 @@ func createMockPacketWithPorts(payload []byte, srcPort, dstPort uint16) gopacket
 // Benchmark tests
 func BenchmarkSIPPluginProcessPacket(b *testing.B) {
 	plugin := NewSIPPlugin()
-	plugin.Initialize(map[string]interface{}{})
+	_ = plugin.Initialize(map[string]interface{}{})
 
 	sipPayload := `INVITE sip:test@example.com SIP/2.0
 Call-ID: test-123`
@@ -467,7 +467,7 @@ Call-ID: test-123`
 
 func BenchmarkRTPPluginProcessPacket(b *testing.B) {
 	plugin := NewRTPPlugin()
-	plugin.Initialize(map[string]interface{}{})
+	_ = plugin.Initialize(map[string]interface{}{})
 
 	rtpPayload := []byte{0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x64, 0x12, 0x34, 0x56, 0x78}
 	rtpPayload = append(rtpPayload, make([]byte, 160)...) // Add payload

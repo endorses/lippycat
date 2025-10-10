@@ -30,7 +30,7 @@ func createTestPacket() PacketInfo {
 		SrcPort: 5060,
 		DstPort: 5060,
 	}
-	udp.SetNetworkLayerForChecksum(ip)
+	_ = udp.SetNetworkLayerForChecksum(ip)
 
 	payload := []byte("test packet data")
 

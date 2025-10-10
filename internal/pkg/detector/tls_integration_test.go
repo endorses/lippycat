@@ -54,7 +54,7 @@ func TestTLSDetectionIntegration(t *testing.T) {
 		ACK:     true,
 		Window:  65535,
 	}
-	tcp.SetNetworkLayerForChecksum(ip)
+	_ = tcp.SetNetworkLayerForChecksum(ip)
 
 	// Serialize with TLS payload
 	err := gopacket.SerializeLayers(buf, opts,

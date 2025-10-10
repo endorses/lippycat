@@ -1,0 +1,95 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - all
+
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+  disable:
+    - errcheck  # Disabled for now - too many false positives for cleanup operations
+
+linters-settings:
+  errcheck:
+    # Check for unchecked errors in type assertions
+    check-type-assertions: false
+    # Check for blank assignments of errors
+    check-blank: false
+    # Exclude functions where we don't want to check errors
+    exclude-functions:
+      - (io.Closer).Close
+      - (*os.File).Close
+      - (*database/sql.DB).Close
+      - (*database/sql.Rows).Close
+      - (*database/sql.Stmt).Close
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - fmt.Fprint
+      - (github.com/spf13/viper.Viper).BindPFlag
+      - (*github.com/spf13/viper.Viper).BindPFlag
+
+issues:
+  # Exclude some linters from running on tests files
+  exclude-rules:
+    # Exclude errcheck for defer statements (cleanup operations)
+    - linters:
+        - errcheck
+      text: "Error return value of.*defer"
+
+    # Exclude errcheck for common cleanup operations
+    - linters:
+        - errcheck
+      text: "Error return value of `.*\\.(Close|Stop|Flush|Shutdown|MarkFlagRequired)`"
+
+    # Exclude errcheck for viper configuration binding
+    - linters:
+        - errcheck
+      text: "Error return value of `viper\\.BindPFlag`"
+
+    # Exclude errcheck for fmt print functions
+    - linters:
+        - errcheck
+      text: "Error return value of `fmt\\.(Fprintf|Fprintln|Fprint)`"
+
+    # Exclude errcheck for environment operations in test files
+    - path: _test\.go
+      linters:
+        - errcheck
+      text: "Error return value of `os\\.(Remove|RemoveAll|Chmod|Setenv|Unsetenv|WriteFile)`"
+
+    # Exclude unused code warnings for test files
+    - path: _test\.go
+      linters:
+        - unused
+
+    # Exclude unused warnings for GPU/CUDA code (future implementation)
+    - linters:
+        - unused
+      path: "(gpu_|cuda_|opencl_)"
+
+    # Exclude unused warnings for theme definitions
+    - linters:
+        - unused
+      path: "themes\\.go"
+
+    # Exclude unused for XDP definitions (Linux specific)
+    - linters:
+        - unused
+      path: "xdp_"
+
+    # Exclude ineffassign for test variables that are intentionally overwritten
+    - path: _test\.go
+      linters:
+        - ineffassign
+
+  # Maximum issues count per linter
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text
+  max-same-issues: 0
+  # Show all issues from a linter
+  new: false

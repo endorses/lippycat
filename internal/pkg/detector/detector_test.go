@@ -306,7 +306,7 @@ func createTestPacket(payload []byte) gopacket.Packet {
 		SrcPort: 12345,
 		DstPort: 5060,
 	}
-	udp.SetNetworkLayerForChecksum(ip)
+	_ = udp.SetNetworkLayerForChecksum(ip)
 
 	// Serialize layers with payload
 	err := gopacket.SerializeLayers(buf, opts, eth, ip, udp, gopacket.Payload(payload))

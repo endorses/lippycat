@@ -168,11 +168,11 @@ func TestInterface_Consistency(t *testing.T) {
 
 	// SetHandle should not panic (actual functionality requires root/valid files)
 	assert.NotPanics(t, func() {
-		liveIface.SetHandle() // Will likely fail but shouldn't panic
+		_ = liveIface.SetHandle() // Will likely fail but shouldn't panic
 	}, "Live interface SetHandle should not panic")
 
 	assert.NotPanics(t, func() {
-		offlineIface.SetHandle() // Will likely fail with empty file but shouldn't panic
+		_ = offlineIface.SetHandle() // Will likely fail with empty file but shouldn't panic
 	}, "Offline interface SetHandle should not panic")
 }
 

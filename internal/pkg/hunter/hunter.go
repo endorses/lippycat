@@ -645,9 +645,12 @@ func (h *Hunter) sendBatch() {
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets))
 		h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
-		// Note: The goroutine will eventually complete when stream.Send returns
-		// or when connCtx is cancelled. We can't force-kill it, but at least
-		// the timeout doesn't leak the goroutine indefinitely.
+		// Note: The spawned goroutine will continue until stream.Send returns or
+		// connCtx is cancelled (during reconnect). This is acceptable because:
+		// 1. The goroutine will be cleaned up when the stream is closed during reconnection
+		// 2. The buffered channel prevents blocking the goroutine indefinitely
+		// 3. We can't force-kill goroutines in Go, this is the standard pattern
+		return
 	}
 }
 

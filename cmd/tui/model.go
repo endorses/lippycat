@@ -167,6 +167,13 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		MaxPacketSize:  0,
 	}
 
+	// Set initial capturing state
+	// For live/offline modes, capture will auto-start in tui.go
+	// For remote mode, capturing will be set when nodes connect
+	if initialMode == components.CaptureModeLive || initialMode == components.CaptureModeOffline {
+		uiState.SetCapturing(true)
+	}
+
 	return Model{
 		packetStore:   packetStore,
 		connectionMgr: connectionMgr,
@@ -844,6 +851,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case components.CaptureModeOffline:
 					go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram, done)
 				}
+
+				// Mark capture as active for live/offline modes
+				m.uiState.SetCapturing(true)
 			} else if msg.Mode == components.CaptureModeRemote {
 				// Remote mode: set capture handle to nil since we're not running local capture
 				currentCaptureHandle = nil
@@ -855,6 +865,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// If no nodes file, remote mode is active but no nodes connected yet
 				// User can add nodes via Nodes tab
+				// Capturing will be marked active when nodes connect successfully
 			}
 		}
 
@@ -979,6 +990,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			proc.FailureCount = 0
 			// Also store in deprecated map for compatibility
 			m.connectionMgr.RemoteClients[msg.Address] = msg.Client
+
+			// If in remote mode, mark capturing as active when we have at least one connected processor
+			if m.captureMode == components.CaptureModeRemote {
+				m.uiState.SetCapturing(true)
+			}
 		}
 		return m, nil
 
@@ -995,6 +1011,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				proc.Client = nil
 			}
 			delete(m.connectionMgr.RemoteClients, msg.Address)
+
+			// If in remote mode, check if all processors are now disconnected
+			if m.captureMode == components.CaptureModeRemote {
+				allDisconnected := true
+				for _, p := range m.connectionMgr.Processors {
+					if p.State == store.ProcessorStateConnected {
+						allDisconnected = false
+						break
+					}
+				}
+				// If all processors are disconnected, mark capturing as inactive
+				if allDisconnected {
+					m.uiState.SetCapturing(false)
+				}
+			}
 
 			// Schedule reconnection with exponential backoff
 			backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 6))) * time.Second

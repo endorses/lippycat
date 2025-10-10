@@ -19,29 +19,63 @@ const (
 )
 
 // Channel buffer sizes
+//
+// Buffer Sizing Strategy:
+//
+// 1. Single-item buffers (size = 1):
+//    - Used for signals and errors that should never block the sender
+//    - Examples: OS signals, error channels
+//    - Rationale: These are infrequent events that must be handled immediately
+//
+// 2. Small buffers (size = 10):
+//    - Used for control plane operations with low frequency
+//    - Examples: Filter updates, batch queues
+//    - Rationale: Control operations are rare but should not block; small buffer
+//      provides cushion without excessive memory overhead
+//
+// 3. Medium buffers (size = 100):
+//    - Used for moderate-throughput data plane operations
+//    - Examples: Subscriber channels, general packet processing
+//    - Rationale: Balance between latency and memory; suitable for operations
+//      processing hundreds to low thousands of items per second
+//
+// 4. Large buffers (size = 1000):
+//    - Used for high-throughput data plane operations
+//    - Examples: PCAP writer queue, VoIP analyzer queues
+//    - Rationale: High packet rates (10K+ pps) require larger buffers to absorb
+//      bursts and prevent drops during GC pauses; memory cost justified by criticality
+//
+// Note: These are default sizes. Critical buffers can be made configurable via
+// Config structs if deployment-specific tuning is needed.
 const (
-	// SignalChannelBuffer is the buffer size for OS signal channels
+	// SignalChannelBuffer is the buffer size for OS signal channels (strategy: single-item)
 	SignalChannelBuffer = 1
 
-	// ErrorChannelBuffer is the buffer size for error reporting channels
+	// ErrorChannelBuffer is the buffer size for error reporting channels (strategy: single-item)
 	ErrorChannelBuffer = 1
 
-	// FilterUpdateChannelBuffer is the buffer size for filter update channels
+	// FilterUpdateChannelBuffer is the buffer size for filter update channels (strategy: small)
+	// Provides cushion for control plane operations without excessive memory
 	FilterUpdateChannelBuffer = 10
 
-	// SubscriberChannelBuffer is the buffer size for subscriber packet channels
+	// SubscriberChannelBuffer is the buffer size for subscriber packet channels (strategy: medium)
+	// Balances latency and memory for moderate packet throughput
 	SubscriberChannelBuffer = 100
 
-	// VoIPAnalyzerQueueBuffer is the buffer size for VoIP analyzer queues
+	// VoIPAnalyzerQueueBuffer is the buffer size for VoIP analyzer queues (strategy: large)
+	// Handles high packet rates and absorbs bursts during GC pauses
 	VoIPAnalyzerQueueBuffer = 1000
 
-	// PCAPWriteQueueBuffer is the buffer size for PCAP writer queue
+	// PCAPWriteQueueBuffer is the buffer size for PCAP writer queue (strategy: large)
+	// Critical path for packet capture; large buffer prevents drops at high rates
 	PCAPWriteQueueBuffer = 1000
 
-	// PacketChannelBuffer is the standard buffer for packet processing channels
+	// PacketChannelBuffer is the standard buffer for packet processing channels (strategy: medium)
+	// General-purpose packet channel for moderate throughput scenarios
 	PacketChannelBuffer = 100
 
-	// BatchQueueBuffer is the buffer size for batch processing queues
+	// BatchQueueBuffer is the buffer size for batch processing queues (strategy: small)
+	// Batches are larger units than individual packets; smaller buffer sufficient
 	BatchQueueBuffer = 10
 )
 

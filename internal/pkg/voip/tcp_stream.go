@@ -252,7 +252,7 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to read SIP message line from TCP stream: %w", err)
 		}
 
 		message.WriteString(line)
@@ -285,7 +285,7 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 			content := make([]byte, contentLength)
 			_, err := io.ReadFull(reader, content)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to read SIP message content (%d bytes) from TCP stream: %w", contentLength, err)
 			}
 			message.Write(content)
 			break

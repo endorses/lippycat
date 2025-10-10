@@ -17,6 +17,7 @@ import (
 // Detector is the central protocol detection service
 type Detector struct {
 	signatures []signatures.Signature
+	portMap    map[uint16]signatures.Signature // Port → signature fast lookup
 	cache      *DetectionCache
 	flows      *FlowTracker
 	mu         sync.RWMutex
@@ -26,6 +27,7 @@ type Detector struct {
 func New() *Detector {
 	return &Detector{
 		signatures: make([]signatures.Signature, 0),
+		portMap:    make(map[uint16]signatures.Signature),
 		cache:      NewDetectionCache(5 * time.Minute),
 		flows:      NewFlowTracker(10 * time.Minute),
 	}
@@ -48,11 +50,71 @@ func (d *Detector) RegisterSignature(sig signatures.Signature) {
 		return d.signatures[i].Priority() > d.signatures[j].Priority()
 	})
 
+	// Build port → signature mapping for fast lookup
+	// This eliminates O(n) linear search through all signatures
+	ports := d.getSignaturePorts(sig)
+	for _, port := range ports {
+		// Only add if port not already mapped (first registered signature wins)
+		if _, exists := d.portMap[port]; !exists {
+			d.portMap[port] = sig
+		}
+	}
+
 	logger.Debug("Registered protocol signature",
 		"name", sig.Name(),
 		"protocols", sig.Protocols(),
 		"priority", sig.Priority(),
-		"layer", sig.Layer())
+		"layer", sig.Layer(),
+		"ports", ports)
+}
+
+// getSignaturePorts returns the well-known ports for a signature
+// This centralizes port knowledge that was previously scattered in getPortHint
+func (d *Detector) getSignaturePorts(sig signatures.Signature) []uint16 {
+	name := sig.Name()
+	switch name {
+	case "DNS Detector":
+		return []uint16{53}
+	case "HTTP Detector":
+		return []uint16{80, 8080}
+	case "TLS/SSL Detector":
+		return []uint16{443, 8443}
+	case "SSH Detector":
+		return []uint16{22}
+	case "gRPC/HTTP2 Detector":
+		return []uint16{50051}
+	case "FTP Detector":
+		return []uint16{21, 20} // Control and data
+	case "SMTP Detector":
+		return []uint16{25, 587}
+	case "POP3 Detector":
+		return []uint16{110, 995} // POP3 and POP3S
+	case "IMAP Detector":
+		return []uint16{143, 993} // IMAP and IMAPS
+	case "MySQL Detector":
+		return []uint16{3306}
+	case "PostgreSQL Detector":
+		return []uint16{5432}
+	case "Redis Detector":
+		return []uint16{6379}
+	case "MongoDB Detector":
+		return []uint16{27017}
+	case "SIP Detector":
+		return []uint16{5060, 5061} // SIP and SIPS
+	case "RTP Detector":
+		// RTP uses dynamic ports, no well-known port
+		return nil
+	case "Telnet Detector":
+		return []uint16{23}
+	case "SNMP Detector":
+		return []uint16{161, 162}
+	case "NTP Detector":
+		return []uint16{123}
+	case "DHCP Detector":
+		return []uint16{67, 68}
+	default:
+		return nil
+	}
 }
 
 // GetSignatures returns all registered signatures
@@ -135,37 +197,13 @@ func (d *Detector) cacheAndUpdateFlow(ctx *signatures.DetectionContext, result *
 }
 
 // getPortHint returns a signature hint based on well-known port
+// Uses O(1) map lookup instead of O(n) linear search
 func (d *Detector) getPortHint(port uint16) signatures.Signature {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	// Map of well-known ports to signature indices (built at registration)
-	// For now, linear search through signatures checking their typical ports
-	for _, sig := range d.signatures {
-		switch sig.Name() {
-		case "DNS Detector":
-			if port == 53 {
-				return sig
-			}
-		case "HTTP Detector":
-			if port == 80 || port == 8080 {
-				return sig
-			}
-		case "TLS/SSL Detector":
-			if port == 443 || port == 8443 {
-				return sig
-			}
-		case "SSH Detector":
-			if port == 22 {
-				return sig
-			}
-		case "gRPC/HTTP2 Detector":
-			if port == 50051 {
-				return sig
-			}
-		}
-	}
-	return nil
+	// Fast O(1) lookup in port map built at registration time
+	return d.portMap[port] // Returns nil if port not found
 }
 
 // isWellKnownPort checks if a port is a well-known port where protocols

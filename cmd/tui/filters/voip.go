@@ -109,6 +109,12 @@ func (f *VoIPFilter) Type() string {
 	return "voip"
 }
 
+// Selectivity returns how selective this filter is (0.0-1.0)
+// VoIP filters are moderately selective - they pre-filter by SIP protocol
+func (f *VoIPFilter) Selectivity() float64 {
+	return 0.7 // Moderately selective - only applies to SIP packets
+}
+
 // extractSIPField extracts a SIP field value from a string
 func extractSIPField(s string) string {
 	// Simple extraction - get everything up to the next space or special char

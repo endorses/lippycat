@@ -15,6 +15,9 @@ type Filter interface {
 	String() string
 	// Type returns the filter type (bpf, voip, etc.)
 	Type() string
+	// Selectivity returns how selective this filter is (0.0 = least selective, 1.0 = most selective)
+	// More selective filters reject packets faster and should run first
+	Selectivity() float64
 }
 
 // FilterChain combines multiple filters
@@ -29,9 +32,23 @@ func NewFilterChain() *FilterChain {
 	}
 }
 
-// Add adds a filter to the chain
+// Add adds a filter to the chain and sorts by selectivity (most selective first)
 func (fc *FilterChain) Add(filter Filter) {
 	fc.filters = append(fc.filters, filter)
+	fc.sortBySelectivity()
+}
+
+// sortBySelectivity sorts filters by selectivity (descending)
+// Most selective filters run first to reject packets earlier
+func (fc *FilterChain) sortBySelectivity() {
+	// Simple insertion sort - filter chains are typically small (1-5 filters)
+	for i := 1; i < len(fc.filters); i++ {
+		j := i
+		for j > 0 && fc.filters[j].Selectivity() > fc.filters[j-1].Selectivity() {
+			fc.filters[j], fc.filters[j-1] = fc.filters[j-1], fc.filters[j]
+			j--
+		}
+	}
 }
 
 // Clear removes all filters

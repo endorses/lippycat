@@ -107,3 +107,13 @@ func (f *TextFilter) String() string {
 func (f *TextFilter) Type() string {
 	return "text"
 }
+
+// Selectivity returns how selective this filter is (0.0-1.0)
+// Text filters vary in selectivity based on fields searched
+func (f *TextFilter) Selectivity() float64 {
+	if f.searchAll {
+		return 0.3 // Least selective - searches all fields
+	}
+	// Searching specific fields is more selective
+	return 0.6
+}

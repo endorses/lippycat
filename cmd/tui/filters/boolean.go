@@ -73,6 +73,38 @@ func (bf *BooleanFilter) Type() string {
 	return "boolean"
 }
 
+// Selectivity returns how selective this filter is (0.0-1.0)
+// Boolean selectivity depends on the operator and child selectivity
+func (bf *BooleanFilter) Selectivity() float64 {
+	switch bf.operator {
+	case OpAND:
+		// AND: average of children (both must match)
+		if bf.left != nil && bf.right != nil {
+			return (bf.left.Selectivity() + bf.right.Selectivity()) / 2.0
+		}
+		return 0.5
+	case OpOR:
+		// OR: minimum of children (least selective child determines)
+		if bf.left != nil && bf.right != nil {
+			leftSel := bf.left.Selectivity()
+			rightSel := bf.right.Selectivity()
+			if leftSel < rightSel {
+				return leftSel
+			}
+			return rightSel
+		}
+		return 0.5
+	case OpNOT:
+		// NOT: inverse of child selectivity
+		if bf.left != nil {
+			return 1.0 - bf.left.Selectivity()
+		}
+		return 0.5
+	default:
+		return 0.5
+	}
+}
+
 // ParseBooleanExpression parses a filter expression with boolean operators
 // Supported syntax:
 //   - "expr1 AND expr2" - both must match

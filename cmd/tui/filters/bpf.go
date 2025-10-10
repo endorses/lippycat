@@ -147,6 +147,23 @@ func (f *BPFFilter) Match(packet components.PacketDisplay) bool {
 	}
 }
 
+// Selectivity returns how selective this filter is (0.0-1.0)
+// More selective filters reject packets faster
+func (f *BPFFilter) Selectivity() float64 {
+	switch f.matchType {
+	case "protocol":
+		return 0.9 // Very selective - most packets are a specific protocol
+	case "port":
+		return 0.85 // Highly selective - specific port number
+	case "host":
+		return 0.85 // Highly selective - specific IP address
+	case "net":
+		return 0.75 // Moderately selective - network range
+	default:
+		return 0.1 // Unknown expressions match everything
+	}
+}
+
 // String returns the BPF expression
 func (f *BPFFilter) String() string {
 	return f.expression

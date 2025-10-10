@@ -285,7 +285,7 @@ func NewVectorizedCallIDExtractor(numLanes int) *VectorizedCallIDExtractor {
 
 // ExtractCallIDs extracts Call-IDs from a batch of packets
 func (ve *VectorizedCallIDExtractor) ExtractCallIDs(packets [][]byte) []string {
-	callIDs := make([]string, 0, len(packets))
+	var callIDs []string
 
 	if ve.simdOps && len(packets) >= ve.numLanes {
 		// Use SIMD-optimized extraction

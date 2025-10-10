@@ -163,7 +163,7 @@ func (ga *GPUAccelerator) initializeBackend() error {
 	}
 
 	// Try backends in order of preference
-	backends := []string{}
+	var backends []string
 
 	if ga.config.Backend == "auto" {
 		backends = []string{"cuda", "opencl", "cpu-simd"}

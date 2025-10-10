@@ -206,9 +206,8 @@ func TestBufferPool_OversizedBuffer(t *testing.T) {
 
 	pool := NewBufferPool(config)
 
-	// Get a buffer and make it oversized
-	buf := pool.Get(512)
-	buf = make([]byte, 0, 2048)
+	// Make an oversized buffer
+	buf := make([]byte, 0, 2048)
 
 	pool.Put(buf)
 

@@ -209,11 +209,11 @@ func (f *FilterInput) View() string {
 		Bold(true)
 
 	// Build the input line with cursor
-	displayValue := f.value
 	cursorStyle := lipgloss.NewStyle().
 		Foreground(f.theme.CursorFg).
 		Background(f.theme.CursorBg)
 
+	var displayValue string
 	if f.cursor < len(f.value) {
 		// Show cursor in the middle of text
 		before := f.value[:f.cursor]

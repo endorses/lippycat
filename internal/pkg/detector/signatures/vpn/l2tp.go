@@ -113,7 +113,6 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	tunnelID := binary.BigEndian.Uint16(payload[offset : offset+2])
 	metadata["tunnel_id"] = tunnelID
 	offset += 2
-	minLength += 2
 
 	// Session ID (2 bytes)
 	if len(payload) < offset+2 {
@@ -122,7 +121,6 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	sessionID := binary.BigEndian.Uint16(payload[offset : offset+2])
 	metadata["session_id"] = sessionID
 	offset += 2
-	minLength += 2
 
 	// For control messages, tunnel and session can be 0 during setup
 	if typeFlag {
@@ -141,7 +139,6 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		metadata["sequence_ns"] = ns
 		metadata["sequence_nr"] = nr
 		offset += 4
-		minLength += 4
 	}
 
 	// Offset size and padding (if O bit is set)
@@ -152,7 +149,6 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		offsetSize := binary.BigEndian.Uint16(payload[offset : offset+2])
 		metadata["offset_size"] = offsetSize
 		offset += 2
-		minLength += 2
 	}
 
 	// For control messages, check for AVPs (Attribute-Value Pairs)

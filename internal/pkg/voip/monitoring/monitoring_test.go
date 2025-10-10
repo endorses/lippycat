@@ -239,33 +239,33 @@ func TestConvenienceFunctions(t *testing.T) {
 	// Test tracing convenience functions
 	ctx := context.Background()
 
-	span, newCtx, finish := TraceFunction(ctx, "test_func", "test_component")
+	span, _, finish := TraceFunction(ctx, "test_func", "test_component")
 	if span != nil {
 		span.AddTag("test", true)
 		finish()
 	}
 
-	span, newCtx, finish = TracePacketProcessing(ctx, "sip")
+	span, _, finish = TracePacketProcessing(ctx, "sip")
 	if span != nil {
 		finish()
 	}
 
-	span, newCtx, finish = TraceCallProcessing(ctx, "call123", "create")
+	span, _, finish = TraceCallProcessing(ctx, "call123", "create")
 	if span != nil {
 		finish()
 	}
 
-	span, newCtx, finish = TracePluginExecution(ctx, "sip_plugin", "sip")
+	span, _, finish = TracePluginExecution(ctx, "sip_plugin", "sip")
 	if span != nil {
 		finish()
 	}
 
-	span, newCtx, finish = TraceTCPStreamProcessing(ctx, "stream123")
+	span, _, finish = TraceTCPStreamProcessing(ctx, "stream123")
 	if span != nil {
 		finish()
 	}
 
-	span, newCtx, finish = TraceFileWrite(ctx, "test.pcap", "pcap")
+	span, newCtx, finish := TraceFileWrite(ctx, "test.pcap", "pcap")
 	if span != nil {
 		finish()
 	}

@@ -18,9 +18,9 @@ var (
 func AddSipUser(username string, newSipUser *SipUser) {
 	muSu.Lock()
 	defer muSu.Unlock()
-	su, exists := sipUserMap[username]
+	_, exists := sipUserMap[username]
 	if !exists {
-		su = &SipUser{ExpirationDate: newSipUser.ExpirationDate}
+		su := &SipUser{ExpirationDate: newSipUser.ExpirationDate}
 		sipUserMap[username] = su
 	}
 }

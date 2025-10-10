@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -206,12 +207,12 @@ func (ce *CaptureEngine) captureLoopXDP() {
 		if err != nil {
 			ce.stats.Errors.Add(1)
 			logger.Debug("XDP receive error", "error", err)
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(constants.PollingInterval)
 			continue
 		}
 
 		if len(packets) == 0 {
-			time.Sleep(1 * time.Millisecond)
+			time.Sleep(constants.IdleLoopDelay)
 			continue
 		}
 
@@ -320,7 +321,7 @@ func (ce *CaptureEngine) Stop() error {
 
 	// Wait for capture loop to finish
 	for ce.running.Load() {
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(constants.PollingInterval)
 	}
 
 	return nil

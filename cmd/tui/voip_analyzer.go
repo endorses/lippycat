@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/cmd/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
@@ -49,8 +50,8 @@ func NewVoIPAnalyzer(config *voip.GPUConfig, program *tea.Program) (*VoIPAnalyze
 		config:       config,
 		batchSize:    100, // Default batch size
 		batchTimeout: 10 * time.Millisecond,
-		packetQueue:  make(chan analyzeRequest, 1000),
-		resultQueue:  make(chan analyzeResult, 1000),
+		packetQueue:  make(chan analyzeRequest, constants.VoIPAnalyzerQueueBuffer),
+		resultQueue:  make(chan analyzeResult, constants.VoIPAnalyzerQueueBuffer),
 		ctx:          ctx,
 		cancel:       cancel,
 		enabled:      config != nil && config.Enabled,

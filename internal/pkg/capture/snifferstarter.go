@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/google/gopacket"
@@ -87,7 +88,7 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 	<-ctx.Done()
 
 	// Give a brief moment for graceful cleanup (like hunt nodes do)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(constants.SnifferCleanupTimeout)
 }
 
 func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {

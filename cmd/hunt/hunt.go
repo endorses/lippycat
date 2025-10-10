@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
@@ -186,7 +187,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	// Start hunter in background
-	errChan := make(chan error, 1)
+	errChan := make(chan error, constants.ErrorChannelBuffer)
 	go func() {
 		if err := h.Start(ctx); err != nil {
 			errChan <- err
@@ -201,7 +202,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	select {
 	case <-ctx.Done():
 		// Signal received, give some time for graceful shutdown
-		time.Sleep(2 * time.Second)
+		time.Sleep(constants.GracefulShutdownTimeout)
 	case err := <-errChan:
 		logger.Error("Hunter failed", "error", err)
 		return err

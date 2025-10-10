@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/signals"
@@ -187,7 +188,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	// Start processor in background
-	errChan := make(chan error, 1)
+	errChan := make(chan error, constants.ErrorChannelBuffer)
 	go func() {
 		if err := p.Start(ctx); err != nil {
 			errChan <- err
@@ -220,7 +221,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	select {
 	case <-ctx.Done():
 		// Signal received, give some time for graceful shutdown
-		time.Sleep(2 * time.Second)
+		time.Sleep(constants.GracefulShutdownTimeout)
 	case err := <-errChan:
 		logger.Error("Processor failed", "error", err)
 		return err

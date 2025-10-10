@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket/tcpassembly"
@@ -239,7 +240,7 @@ func (h *Hunter) connectToProcessor() error {
 	logger.Info("Connecting to processor", "addr", h.config.ProcessorAddr)
 
 	opts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10 * 1024 * 1024)), // 10MB
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constants.MaxGRPCMessageSize)),
 	}
 
 	// Configure TLS or insecure credentials
@@ -608,7 +609,7 @@ func (h *Hunter) sendBatch() {
 	defer sendCancel()
 
 	// Create a channel to receive the result
-	sendDone := make(chan error, 1)
+	sendDone := make(chan error, constants.ErrorChannelBuffer)
 	go func() {
 		sendDone <- stream.Send(batch)
 	}()
@@ -803,8 +804,8 @@ func (h *Hunter) subscribeToFilters() {
 	logger.Info("Filter subscription established")
 
 	// Use a channel with timeout to prevent goroutine leak
-	updateCh := make(chan *management.FilterUpdate, 1)
-	errCh := make(chan error, 1)
+	updateCh := make(chan *management.FilterUpdate, constants.ErrorChannelBuffer)
+	errCh := make(chan error, constants.ErrorChannelBuffer)
 
 	go func() {
 		for {
@@ -914,8 +915,8 @@ func (h *Hunter) sendHeartbeats() {
 	logger.Info("Heartbeat stream established")
 
 	// Separate goroutine for receiving responses to prevent blocking
-	respCh := make(chan *management.ProcessorHeartbeat, 1)
-	respErrCh := make(chan error, 1)
+	respCh := make(chan *management.ProcessorHeartbeat, constants.ErrorChannelBuffer)
+	respErrCh := make(chan error, constants.ErrorChannelBuffer)
 
 	go func() {
 		for {

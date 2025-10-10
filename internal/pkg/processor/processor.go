@@ -13,6 +13,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
@@ -196,7 +197,7 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	// Create gRPC server with TLS if configured
 	serverOpts := []grpc.ServerOption{
-		grpc.MaxRecvMsgSize(10 * 1024 * 1024), // 10MB
+		grpc.MaxRecvMsgSize(constants.MaxGRPCMessageSize),
 	}
 
 	if p.config.TLSEnabled {
@@ -534,7 +535,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	logger.Info("Filter subscription started", "hunter_id", hunterID)
 
 	// Create filter update channel for this hunter
-	filterChan := make(chan *management.FilterUpdate, 10)
+	filterChan := make(chan *management.FilterUpdate, constants.FilterUpdateChannelBuffer)
 
 	p.filtersMu.Lock()
 	p.filterChannels[hunterID] = filterChan
@@ -772,7 +773,7 @@ func (p *Processor) initPCAPWriter() error {
 	}
 
 	// Create write queue (buffered channel)
-	p.pcapWriteQueue = make(chan []*data.CapturedPacket, 1000)
+	p.pcapWriteQueue = make(chan []*data.CapturedPacket, constants.PCAPWriteQueueBuffer)
 
 	// Start single writer goroutine
 	// Note: PCAP writes are inherently serial (file format requires sequential writes)
@@ -1188,7 +1189,7 @@ func (p *Processor) connectToUpstream() error {
 
 	// Create gRPC connection with TLS if enabled
 	opts := []grpc.DialOption{
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10 * 1024 * 1024)), // 10MB
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constants.MaxGRPCMessageSize)),
 	}
 
 	if p.config.TLSEnabled {
@@ -1335,7 +1336,7 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 	logger.Info("New packet subscriber", "client_id", clientID)
 
 	// Create channel for this subscriber
-	subChan := make(chan *data.PacketBatch, 100)
+	subChan := make(chan *data.PacketBatch, constants.SubscriberChannelBuffer)
 
 	// Add subscriber using copy-on-write
 	p.addSubscriber(clientID, subChan)

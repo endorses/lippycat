@@ -21,6 +21,12 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	// maxSanitizationIterations limits the number of sanitization passes to prevent
+	// infinite loops from adversarial inputs with recursive dangerous patterns
+	maxSanitizationIterations = 10
+)
+
 type CallInfo struct {
 	CallID      string
 	State       string
@@ -250,8 +256,7 @@ func sanitize(id string) string {
 	cleaned := normalizeUnicode(id)
 
 	// Iteratively clean dangerous patterns until no more changes occur
-	maxIterations := 10 // Prevent infinite loops
-	for i := 0; i < maxIterations; i++ {
+	for i := 0; i < maxSanitizationIterations; i++ {
 		previous := cleaned
 
 		// Replace ".." sequences first (before individual dots)

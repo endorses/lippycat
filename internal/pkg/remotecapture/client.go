@@ -689,11 +689,3 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 
 	return credentials.NewTLS(tlsConfig), nil
 }
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

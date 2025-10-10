@@ -334,7 +334,8 @@ func compareHeaderCI(a, b string) bool {
 }
 
 // parseContentLength safely parses the Content-Length header value
-func parseContentLength(value string) (int, error) {
+// Returns 0 for invalid or empty values
+func parseContentLength(value string) int {
 	// Trim whitespace and parse numeric portion
 	trimmed := strings.TrimSpace(value)
 	length := 0
@@ -348,7 +349,7 @@ func parseContentLength(value string) (int, error) {
 		}
 	}
 
-	return length, nil
+	return length
 }
 
 // detectCallIDHeader robustly parses Call-ID headers in both full and compact form

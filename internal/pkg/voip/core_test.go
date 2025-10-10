@@ -64,6 +64,7 @@ func TestStartProcessor_UDPHandling(t *testing.T) {
 	// Create assembler for TCP processing
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx)
+	defer streamFactory.(*sipStreamFactory).Shutdown()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
@@ -125,6 +126,7 @@ func TestStartProcessor_TCPHandling(t *testing.T) {
 	// Create assembler for TCP processing
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx)
+	defer streamFactory.(*sipStreamFactory).Shutdown()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
@@ -150,6 +152,7 @@ func TestStartProcessor_InvalidPackets(t *testing.T) {
 
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx)
+	defer streamFactory.(*sipStreamFactory).Shutdown()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
@@ -220,6 +223,7 @@ func TestProcessorChannelClosure(t *testing.T) {
 
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx)
+	defer streamFactory.(*sipStreamFactory).Shutdown()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 

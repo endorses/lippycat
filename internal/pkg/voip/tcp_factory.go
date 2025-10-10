@@ -68,6 +68,25 @@ func NewSipStreamFactory(ctx context.Context) tcpassembly.StreamFactory {
 	return factory
 }
 
+// Shutdown gracefully shuts down the stream factory and waits for all goroutines to complete
+func (f *sipStreamFactory) Shutdown() {
+	// Mark as closed
+	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
+		return // Already closed
+	}
+
+	// Cancel context to signal goroutines to stop
+	f.cancel()
+
+	// Stop cleanup ticker
+	if f.cleanupTicker != nil {
+		f.cleanupTicker.Stop()
+	}
+
+	// Wait for all background goroutines to complete
+	f.allWorkers.Wait()
+}
+
 // applyPerformanceModeOptimizations adjusts configuration based on performance mode
 func applyPerformanceModeOptimizations(config *Config) {
 	switch config.TCPPerformanceMode {

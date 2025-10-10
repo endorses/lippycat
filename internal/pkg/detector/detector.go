@@ -405,6 +405,16 @@ func (d *Detector) ClearFlows() {
 	d.flows.Clear()
 }
 
+// Shutdown stops all background goroutines and cleans up resources
+func (d *Detector) Shutdown() {
+	if d.cache != nil {
+		d.cache.Close()
+	}
+	if d.flows != nil {
+		d.flows.Close()
+	}
+}
+
 // Helper function
 func contains(slice []string, item string) bool {
 	for _, s := range slice {

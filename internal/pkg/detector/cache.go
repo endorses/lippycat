@@ -18,6 +18,7 @@ type DetectionCache struct {
 	entries map[string]*cacheEntry
 	ttl     time.Duration
 	mu      sync.RWMutex
+	done    chan struct{}
 }
 
 // NewDetectionCache creates a new detection cache
@@ -25,6 +26,7 @@ func NewDetectionCache(ttl time.Duration) *DetectionCache {
 	cache := &DetectionCache{
 		entries: make(map[string]*cacheEntry),
 		ttl:     ttl,
+		done:    make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -91,14 +93,30 @@ func (c *DetectionCache) cleanup() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.mu.Lock()
-		now := time.Now()
-		for flowID, entry := range c.entries {
-			if now.After(entry.expiresAt) {
-				delete(c.entries, flowID)
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.Lock()
+			now := time.Now()
+			for flowID, entry := range c.entries {
+				if now.After(entry.expiresAt) {
+					delete(c.entries, flowID)
+				}
 			}
+			c.mu.Unlock()
+		case <-c.done:
+			return
 		}
-		c.mu.Unlock()
+	}
+}
+
+// Close stops the cleanup goroutine
+func (c *DetectionCache) Close() {
+	select {
+	case <-c.done:
+		// Already closed
+		return
+	default:
+		close(c.done)
 	}
 }

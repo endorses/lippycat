@@ -287,8 +287,15 @@ func (p *Processor) Start(ctx context.Context) error {
 // Shutdown gracefully shuts down the processor
 // This method is primarily used for testing and programmatic shutdown
 func (p *Processor) Shutdown() error {
+	logger.Info("Shutting down processor")
+
 	if p.cancel != nil {
 		p.cancel()
+	}
+
+	// Shutdown detector to stop background goroutines
+	if p.detector != nil {
+		p.detector.Shutdown()
 	}
 
 	// Give time for graceful shutdown

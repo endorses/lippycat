@@ -12,6 +12,7 @@ type FlowTracker struct {
 	flows map[string]*signatures.FlowContext
 	ttl   time.Duration
 	mu    sync.RWMutex
+	done  chan struct{}
 }
 
 // NewFlowTracker creates a new flow tracker
@@ -19,6 +20,7 @@ func NewFlowTracker(ttl time.Duration) *FlowTracker {
 	tracker := &FlowTracker{
 		flows: make(map[string]*signatures.FlowContext),
 		ttl:   ttl,
+		done:  make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -84,14 +86,30 @@ func (f *FlowTracker) cleanup() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		f.mu.Lock()
-		now := time.Now()
-		for flowID, flow := range f.flows {
-			if now.Sub(flow.LastSeen) > f.ttl {
-				delete(f.flows, flowID)
+	for {
+		select {
+		case <-ticker.C:
+			f.mu.Lock()
+			now := time.Now()
+			for flowID, flow := range f.flows {
+				if now.Sub(flow.LastSeen) > f.ttl {
+					delete(f.flows, flowID)
+				}
 			}
+			f.mu.Unlock()
+		case <-f.done:
+			return
 		}
-		f.mu.Unlock()
+	}
+}
+
+// Close stops the cleanup goroutine
+func (f *FlowTracker) Close() {
+	select {
+	case <-f.done:
+		// Already closed
+		return
+	default:
+		close(f.done)
 	}
 }

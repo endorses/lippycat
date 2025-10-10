@@ -31,7 +31,7 @@ type LockFreeCallTracker struct {
 	// Lifecycle management
 	janitorCtx    context.Context
 	janitorCancel context.CancelFunc
-	janitorDone   atomic.Bool
+	janitorDone   chan struct{} // Closed when janitor goroutine exits
 	shutdownOnce  sync.Once
 
 	// Configuration
@@ -44,6 +44,7 @@ func NewLockFreeCallTracker() *LockFreeCallTracker {
 	tracker := &LockFreeCallTracker{
 		janitorCtx:    ctx,
 		janitorCancel: cancel,
+		janitorDone:   make(chan struct{}),
 		config:        GetConfig(),
 	}
 
@@ -223,13 +224,13 @@ func (lf *LockFreeCallTracker) removePortMappingsForCall(callID string) {
 // startJanitor starts the background cleanup goroutine
 func (lf *LockFreeCallTracker) startJanitor() {
 	go func() {
+		defer close(lf.janitorDone) // Signal completion when goroutine exits
 		ticker := time.NewTicker(lf.config.JanitorCleanupInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-lf.janitorCtx.Done():
-				lf.janitorDone.Store(true)
 				return
 			case <-ticker.C:
 				cleaned := lf.CleanupExpiredCalls()
@@ -250,10 +251,8 @@ func (lf *LockFreeCallTracker) Shutdown() {
 
 		lf.janitorCancel()
 
-		// Wait for janitor to finish
-		for !lf.janitorDone.Load() {
-			time.Sleep(10 * time.Millisecond)
-		}
+		// Wait for janitor goroutine to exit
+		<-lf.janitorDone
 
 		// Close all calls
 		lf.callMap.Range(func(key, value interface{}) bool {

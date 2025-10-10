@@ -85,8 +85,7 @@ func parseSipHeaders(data []byte) (map[string]string, string) {
 	}
 
 	headers := make(map[string]string)
-	text := string(data)
-	lines := strings.Split(text, "\n")
+	lines := bytes.Split(data, []byte("\n"))
 
 	var bodyStart bool
 	var bodyBuilder strings.Builder
@@ -95,8 +94,8 @@ func parseSipHeaders(data []byte) (map[string]string, string) {
 	const maxHeaders = 100 // Reasonable limit for SIP headers
 
 	for _, line := range lines {
-		str := strings.TrimSpace(string(line))
-		if str == "" {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
 			bodyStart = true
 			continue
 		}
@@ -115,13 +114,15 @@ func parseSipHeaders(data []byte) (map[string]string, string) {
 				break
 			}
 
-			key, val := parseHeaderLine(str)
+			key, val := parseHeaderLineBytes(trimmed)
 			if key != "" {
 				headers[key] = val
 				headerCount++
 			}
 		} else {
-			bodyBuilder.WriteString(str + "\n")
+			// Convert to string only when building body
+			bodyBuilder.Write(trimmed)
+			bodyBuilder.WriteByte('\n')
 		}
 	}
 
@@ -142,6 +143,29 @@ func parseHeaderLine(line string) (string, string) {
 	key = normalizeHeaderName(key)
 
 	return key, strings.TrimSpace(parts[1])
+}
+
+// parseHeaderLineBytes parses a header line from bytes without intermediate string allocations
+func parseHeaderLineBytes(line []byte) (string, string) {
+	idx := bytes.IndexByte(line, ':')
+	if idx == -1 {
+		return "", ""
+	}
+
+	keyBytes := bytes.TrimSpace(line[:idx])
+	if len(keyBytes) == 0 {
+		return "", ""
+	}
+
+	// Convert to lowercase for key (unavoidable allocation for map key)
+	key := strings.ToLower(string(keyBytes))
+
+	// Normalize compact form headers to full form
+	key = normalizeHeaderName(key)
+
+	// Trim value bytes and convert to string (unavoidable allocation for map value)
+	valBytes := bytes.TrimSpace(line[idx+1:])
+	return key, string(valBytes)
 }
 
 // normalizeHeaderName converts SIP compact header names to their full form

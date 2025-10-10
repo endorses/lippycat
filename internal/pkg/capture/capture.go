@@ -56,7 +56,14 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 		return false
 	}
 
-	// Single select with all cases - more efficient
+	// Check context cancellation first with higher priority
+	select {
+	case <-pb.ctx.Done():
+		return false
+	default:
+	}
+
+	// Now attempt send with context check
 	select {
 	case pb.ch <- pkt:
 		return true

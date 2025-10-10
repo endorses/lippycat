@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
@@ -76,19 +75,16 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 	defer cancel()
 
 	// Set up signal handler for graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	defer signal.Stop(sigCh)
+	cleanup := signals.SetupHandler(ctx, cancel)
+	defer cleanup()
 
 	// Run capture in background (like hunter nodes do)
 	go func() {
 		InitWithContext(ctx, devices, filter, processor, assembler)
 	}()
 
-	// Wait for signal
-	sig := <-sigCh
-	logger.Info("Received signal, shutting down gracefully", "signal", sig.String())
-	cancel()
+	// Wait for signal (blocks until context is cancelled)
+	<-ctx.Done()
 
 	// Give a brief moment for graceful cleanup (like hunt nodes do)
 	time.Sleep(500 * time.Millisecond)

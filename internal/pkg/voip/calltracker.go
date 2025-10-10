@@ -5,17 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
@@ -97,21 +96,7 @@ func (ct *CallTracker) startJanitor() {
 // setupSignalHandler handles cleanup on process termination
 func (ct *CallTracker) setupSignalHandler() {
 	ct.signalHandlerOnce.Do(func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-		go func() {
-			select {
-			case <-sigCh:
-				// Signal received, initiate shutdown
-				ct.Shutdown()
-			case <-ct.janitorCtx.Done():
-				// Context cancelled (Shutdown called), clean up signal handler
-				signal.Stop(sigCh)
-				close(sigCh)
-				return
-			}
-		}()
+		_ = signals.SetupHandlerWithCallback(ct.janitorCtx, ct.Shutdown)
 	})
 }
 

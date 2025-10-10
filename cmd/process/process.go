@@ -7,12 +7,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
+	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -184,8 +183,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	// Handle signals for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	cleanup := signals.SetupHandler(ctx, cancel)
+	defer cleanup()
 
 	// Start processor in background
 	errChan := make(chan error, 1)
@@ -219,10 +218,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Wait for shutdown signal or error
 	select {
-	case sig := <-sigChan:
-		logger.Info("Received shutdown signal", "signal", sig)
-		cancel()
-		// Give some time for graceful shutdown
+	case <-ctx.Done():
+		// Signal received, give some time for graceful shutdown
 		time.Sleep(2 * time.Second)
 	case err := <-errChan:
 		logger.Error("Processor failed", "error", err)

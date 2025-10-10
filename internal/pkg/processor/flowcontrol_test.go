@@ -332,3 +332,101 @@ func TestFlowControl_Integration(t *testing.T) {
 		})
 	}
 }
+func TestDetermineFlowControl_SubscriberBackpressure_LowDropRate(t *testing.T) {
+	p := &Processor{
+		config: Config{},
+	}
+
+	// Simulate 200 broadcasts with 20 drops (10% drop rate)
+	p.subscriberBroadcasts.Store(200)
+	p.subscriberDrops.Store(20)
+
+	flowControl := p.determineFlowControl()
+	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, flowControl,
+		"should return CONTINUE when subscriber drop rate is low (10% < 25% threshold)")
+}
+
+func TestDetermineFlowControl_SubscriberBackpressure_MediumDropRate(t *testing.T) {
+	p := &Processor{
+		config: Config{},
+	}
+
+	// Simulate 200 broadcasts with 60 drops (30% drop rate)
+	p.subscriberBroadcasts.Store(200)
+	p.subscriberDrops.Store(60)
+
+	flowControl := p.determineFlowControl()
+	assert.Equal(t, data.FlowControl_FLOW_SLOW, flowControl,
+		"should return SLOW when subscriber drop rate is medium (30% > 25%, < 50%)")
+}
+
+func TestDetermineFlowControl_SubscriberBackpressure_HighDropRate(t *testing.T) {
+	p := &Processor{
+		config: Config{},
+	}
+
+	// Simulate 200 broadcasts with 120 drops (60% drop rate)
+	p.subscriberBroadcasts.Store(200)
+	p.subscriberDrops.Store(120)
+
+	flowControl := p.determineFlowControl()
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, flowControl,
+		"should return PAUSE when subscriber drop rate is high (60% > 50%)")
+}
+
+func TestDetermineFlowControl_SubscriberBackpressure_InsufficientSampleSize(t *testing.T) {
+	p := &Processor{
+		config: Config{},
+	}
+
+	// Simulate only 50 broadcasts (below 100 minimum sample size)
+	// Even with 100% drop rate, should not trigger backpressure
+	p.subscriberBroadcasts.Store(50)
+	p.subscriberDrops.Store(50)
+
+	flowControl := p.determineFlowControl()
+	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, flowControl,
+		"should return CONTINUE when sample size is insufficient (50 < 100 minimum)")
+}
+
+func TestDetermineFlowControl_SubscriberBackpressure_TakesPriority(t *testing.T) {
+	queueSize := 100
+	p := &Processor{
+		config:         Config{},
+		pcapWriteQueue: make(chan []*data.CapturedPacket, queueSize),
+	}
+
+	// Fill PCAP queue to 80% (would normally trigger SLOW)
+	for i := 0; i < 80; i++ {
+		p.pcapWriteQueue <- []*data.CapturedPacket{{Data: []byte("test")}}
+	}
+
+	// But subscriber backpressure is critical (60% drop rate)
+	p.subscriberBroadcasts.Store(200)
+	p.subscriberDrops.Store(120)
+
+	flowControl := p.determineFlowControl()
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, flowControl,
+		"subscriber backpressure PAUSE should take priority over PCAP queue SLOW")
+}
+
+func TestDetermineFlowControl_SubscriberBackpressure_Combined(t *testing.T) {
+	queueSize := 100
+	p := &Processor{
+		config:         Config{},
+		pcapWriteQueue: make(chan []*data.CapturedPacket, queueSize),
+	}
+
+	// Fill PCAP queue to 95% (triggers PAUSE)
+	for i := 0; i < 95; i++ {
+		p.pcapWriteQueue <- []*data.CapturedPacket{{Data: []byte("test")}}
+	}
+
+	// Subscriber backpressure is moderate (30% drop rate, would trigger SLOW)
+	p.subscriberBroadcasts.Store(200)
+	p.subscriberDrops.Store(60)
+
+	flowControl := p.determineFlowControl()
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, flowControl,
+		"PCAP queue PAUSE takes priority when both PCAP and subscriber pressure exist")
+}

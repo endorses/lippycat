@@ -76,6 +76,10 @@ type Processor struct {
 	packetsReceived      atomic.Uint64 // incremental counter
 	packetsForwarded     atomic.Uint64 // incremental counter
 
+	// Subscriber backpressure tracking
+	subscriberBroadcasts atomic.Uint64 // total broadcast attempts
+	subscriberDrops      atomic.Uint64 // drops due to full channels
+
 	// Filters
 	filtersMu      sync.RWMutex
 	filters        map[string]*management.Filter
@@ -289,7 +293,10 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 }
 
 // determineFlowControl determines appropriate flow control signal based on processor load
+// Checks all pressure sources and returns the most severe signal (PAUSE > SLOW > RESUME > CONTINUE)
 func (p *Processor) determineFlowControl() data.FlowControl {
+	mostSevere := data.FlowControl_FLOW_CONTINUE
+
 	// Check PCAP write queue depth if configured
 	if p.pcapWriteQueue != nil {
 		queueDepth := len(p.pcapWriteQueue)
@@ -303,21 +310,47 @@ func (p *Processor) determineFlowControl() data.FlowControl {
 				"queue_depth", queueDepth,
 				"capacity", queueCapacity,
 				"utilization", utilizationPct)
-			return data.FlowControl_FLOW_PAUSE
-		}
-
-		// Slow down if queue is getting full (>70%)
-		if utilizationPct > 70 {
+			mostSevere = data.FlowControl_FLOW_PAUSE
+		} else if utilizationPct > 70 {
+			// Slow down if queue is getting full (>70%)
 			logger.Debug("PCAP write queue filling - requesting slowdown",
 				"queue_depth", queueDepth,
 				"capacity", queueCapacity,
 				"utilization", utilizationPct)
-			return data.FlowControl_FLOW_SLOW
+			if mostSevere < data.FlowControl_FLOW_SLOW {
+				mostSevere = data.FlowControl_FLOW_SLOW
+			}
+		} else if utilizationPct < 30 {
+			// Resume if queue has drained (< 30%)
+			if mostSevere < data.FlowControl_FLOW_RESUME {
+				mostSevere = data.FlowControl_FLOW_RESUME
+			}
 		}
+	}
 
-		// Resume if queue has drained (< 30% and was previously paused)
-		if utilizationPct < 30 {
-			return data.FlowControl_FLOW_RESUME
+	// Check subscriber backpressure (slow TUI clients should trigger hunter slowdown)
+	broadcasts := p.subscriberBroadcasts.Load()
+	drops := p.subscriberDrops.Load()
+
+	if broadcasts > 100 { // Only check after sufficient sample size
+		dropRate := float64(drops) / float64(broadcasts) * 100
+
+		// Pause if subscribers are dropping >50% of batches
+		if dropRate > 50 {
+			logger.Warn("Subscriber backpressure critical - requesting pause",
+				"drop_rate_pct", dropRate,
+				"total_broadcasts", broadcasts,
+				"total_drops", drops)
+			mostSevere = data.FlowControl_FLOW_PAUSE
+		} else if dropRate > 25 {
+			// Slow down if subscribers are dropping >25% of batches
+			logger.Debug("Subscriber backpressure detected - requesting slowdown",
+				"drop_rate_pct", dropRate,
+				"total_broadcasts", broadcasts,
+				"total_drops", drops)
+			if mostSevere < data.FlowControl_FLOW_SLOW {
+				mostSevere = data.FlowControl_FLOW_SLOW
+			}
 		}
 	}
 
@@ -331,12 +364,13 @@ func (p *Processor) determineFlowControl() data.FlowControl {
 		if backlog > 10000 {
 			logger.Warn("Large packet backlog detected - requesting slowdown",
 				"backlog", backlog)
-			return data.FlowControl_FLOW_SLOW
+			if mostSevere < data.FlowControl_FLOW_SLOW {
+				mostSevere = data.FlowControl_FLOW_SLOW
+			}
 		}
 	}
 
-	// Normal operation
-	return data.FlowControl_FLOW_CONTINUE
+	return mostSevere
 }
 
 // processBatch processes a received packet batch
@@ -1367,16 +1401,20 @@ func (p *Processor) removeSubscriber(clientID string) {
 
 // broadcastToSubscribers broadcasts a packet batch to all monitoring subscribers
 // Uses sync.Map for lock-free concurrent iteration
+// Tracks broadcast attempts and drops for backpressure calculation
 func (p *Processor) broadcastToSubscribers(batch *data.PacketBatch) {
 	// Lock-free iteration over subscribers
 	p.subscribers.Range(func(key, value interface{}) bool {
 		clientID := key.(string)
 		ch := value.(chan *data.PacketBatch)
 
+		p.subscriberBroadcasts.Add(1)
+
 		select {
 		case ch <- batch:
 			logger.Debug("Broadcasted batch to subscriber", "client_id", clientID, "packets", len(batch.Packets))
 		default:
+			p.subscriberDrops.Add(1)
 			logger.Warn("Subscriber channel full, dropping batch", "client_id", clientID)
 		}
 		return true // Continue iteration

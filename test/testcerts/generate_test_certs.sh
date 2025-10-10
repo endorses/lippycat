@@ -72,8 +72,11 @@ cat upstream-cert.pem upstream-key.pem > upstream-combined.pem
 # Clean up intermediate files
 rm -f *.csr *.srl *.cnf
 
-# Set restrictive permissions
-chmod 600 *.pem
+# Set permissions readable by container (these are test certs, not production)
+# Private keys and combined files should be restrictive
+chmod 600 *-key.pem *-combined.pem
+# Certificate and CA files can be world-readable
+chmod 644 *-cert.pem ca-*.pem
 
 echo
 echo "✅ Test certificates generated successfully!"

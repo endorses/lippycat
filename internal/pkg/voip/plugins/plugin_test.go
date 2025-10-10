@@ -336,6 +336,7 @@ func TestDetectProtocols(t *testing.T) {
 		0x00, 0x01, // Sequence number 1
 		0x00, 0x00, 0x00, 0x64, // Timestamp 100
 		0x12, 0x34, 0x56, 0x78, // SSRC
+		0x00, 0x00, 0x00, 0x00, // Add some payload data (at least 16 bytes total)
 	}
 	packet = createMockPacketWithPorts(rtpPayload, 10000, 10000) // RTP typically uses high ports
 	protocols = registry.detectProtocols(packet)

@@ -99,11 +99,7 @@ a=rtpmap:0 PCMU/8000
 			defer cancel()
 
 			factory := NewSipStreamFactory(ctx)
-			defer func() {
-				if closer, ok := factory.(*sipStreamFactory); ok {
-					closer.Close()
-				}
-			}()
+			defer factory.(*sipStreamFactory).Shutdown()
 
 			streamPool := tcpassembly.NewStreamPool(factory)
 			assembler := tcpassembly.NewAssembler(streamPool)
@@ -316,11 +312,7 @@ Content-Length: 0
 			defer cancel()
 
 			factory := NewSipStreamFactory(ctx)
-			defer func() {
-				if closer, ok := factory.(*sipStreamFactory); ok {
-					closer.Close()
-				}
-			}()
+			defer factory.(*sipStreamFactory).Shutdown()
 
 			streamPool := tcpassembly.NewStreamPool(factory)
 			assembler := tcpassembly.NewAssembler(streamPool)
@@ -468,11 +460,7 @@ Content-Length: 0
 			defer cancel()
 
 			factory := NewSipStreamFactory(ctx)
-			defer func() {
-				if closer, ok := factory.(*sipStreamFactory); ok {
-					closer.Close()
-				}
-			}()
+			defer factory.(*sipStreamFactory).Shutdown()
 
 			streamPool := tcpassembly.NewStreamPool(factory)
 			assembler := tcpassembly.NewAssembler(streamPool)

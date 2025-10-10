@@ -138,8 +138,8 @@ func TestCallIDDetector_EdgeCases(t *testing.T) {
 
 func TestSIPStream_PanicRecovery(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
-	defer factory.Close()
+	factory := NewSipStreamFactory(ctx)
+	defer factory.(*sipStreamFactory).Shutdown()
 
 	t.Run("Panic in run() method", func(t *testing.T) {
 		// Create a mock reader that will cause panic
@@ -177,8 +177,8 @@ func TestSIPStream_PanicRecovery(t *testing.T) {
 func TestSIPStream_ContextCancellation(t *testing.T) {
 	t.Run("Stream shutdown on context cancel", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
-		defer factory.Close()
+		factory := NewSipStreamFactory(ctx)
+		defer factory.(*sipStreamFactory).Shutdown()
 
 		// Create a mock reader that blocks
 		detector := NewCallIDDetector()
@@ -342,7 +342,8 @@ func TestHandleTcpPackets_PortFiltering(t *testing.T) {
 func TestSipStreamFactory_ResourceManagement(t *testing.T) {
 	t.Run("Factory cleanup", func(t *testing.T) {
 		ctx := context.Background()
-		factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+		factory := NewSipStreamFactory(ctx)
+		defer factory.(*sipStreamFactory).Shutdown()
 
 		// Create multiple streams
 		net := gopacket.NewFlow(layers.EndpointIPv4, []byte{192, 168, 1, 1}, []byte{192, 168, 1, 2})

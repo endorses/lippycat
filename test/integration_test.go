@@ -35,6 +35,7 @@ func TestIntegration_HunterProcessorBasicFlow(t *testing.T) {
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err, "Failed to start processor")
+	defer proc.Shutdown()
 
 	// Wait for processor to be ready
 	time.Sleep(500 * time.Millisecond)
@@ -108,11 +109,12 @@ func TestIntegration_HunterCrashRecovery(t *testing.T) {
 	defer cancel()
 
 	// Start processor
-	processorAddr := "127.0.0.1:50052"
+	processorAddr := "127.0.0.1:50099"
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err, "Failed to start processor")
+	defer proc.Shutdown()
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -172,6 +174,7 @@ func TestIntegration_ProcessorRestartWithConnectedHunters(t *testing.T) {
 	defer proc1Cancel()
 	proc1, err := startTestProcessor(proc1Ctx, processorAddr)
 	require.NoError(t, err, "Failed to start processor")
+	defer proc1.Shutdown()
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -207,6 +210,7 @@ func TestIntegration_ProcessorRestartWithConnectedHunters(t *testing.T) {
 	defer proc2Cancel()
 	proc2, err := startTestProcessor(proc2Ctx, processorAddr)
 	require.NoError(t, err, "Failed to restart processor")
+	defer proc2.Shutdown()
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -260,6 +264,7 @@ func TestIntegration_NetworkPartition(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
+	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
 
 	time.Sleep(500 * time.Millisecond)
@@ -319,6 +324,7 @@ func TestIntegration_HighVolume(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
+	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
 
 	time.Sleep(500 * time.Millisecond)
@@ -379,6 +385,7 @@ func TestIntegration_MultipleHuntersSimultaneous(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
+	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
 
 	time.Sleep(500 * time.Millisecond)
@@ -443,6 +450,7 @@ func TestIntegration_JumboFrames(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
+	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
 
 	time.Sleep(500 * time.Millisecond)
@@ -498,12 +506,27 @@ func startTestProcessor(ctx context.Context, addr string) (*processor.Processor,
 		return nil, err
 	}
 
+	// Channel to receive startup errors
+	errChan := make(chan error, 1)
+
 	// Start processor in background
 	go func() {
 		if err := proc.Start(ctx); err != nil {
-			// Log error but don't fail test - processor might be shutting down
+			// Send error to channel for debugging
+			select {
+			case errChan <- err:
+			default:
+			}
 		}
 	}()
+
+	// Wait a bit and check for startup errors
+	select {
+	case err := <-errChan:
+		return nil, fmt.Errorf("processor failed to start: %w", err)
+	case <-time.After(100 * time.Millisecond):
+		// Processor started successfully
+	}
 
 	return proc, nil
 }

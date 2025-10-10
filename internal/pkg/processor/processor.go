@@ -1092,7 +1092,7 @@ func (p *Processor) buildTLSCredentials() (credentials.TransportCredentials, err
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+		MinVersion:   tls.VersionTLS13,
 	}
 
 	// Configure client certificate authentication if enabled
@@ -1122,7 +1122,7 @@ func (p *Processor) buildTLSCredentials() (credentials.TransportCredentials, err
 	logger.Info("TLS credentials loaded",
 		"cert", p.config.TLSCertFile,
 		"key", p.config.TLSKeyFile,
-		"min_version", "TLS 1.2")
+		"min_version", "TLS 1.3")
 
 	return credentials.NewTLS(tlsConfig), nil
 }
@@ -1130,7 +1130,7 @@ func (p *Processor) buildTLSCredentials() (credentials.TransportCredentials, err
 // buildClientTLSCredentials creates TLS credentials for gRPC client (upstream connection)
 func (p *Processor) buildClientTLSCredentials() (credentials.TransportCredentials, error) {
 	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	// Load CA certificate if provided

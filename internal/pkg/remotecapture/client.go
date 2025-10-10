@@ -652,7 +652,7 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: config.TLSSkipVerify,
 		ServerName:         config.TLSServerNameOverride,
-		MinVersion:         tls.VersionTLS12,
+		MinVersion:         tls.VersionTLS13,
 	}
 
 	if config.TLSSkipVerify {

@@ -355,4 +355,3 @@ func UpdateActiveCalls(count int, protocol string) {
 func RecordVoIPEvent(ctx context.Context, eventType string, metadata map[string]interface{}) {
 	GetGlobalMonitor().RecordVoIPEvent(ctx, eventType, metadata)
 }
-

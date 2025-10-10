@@ -58,10 +58,10 @@ type GPUBackend interface {
 
 // GPUPattern represents a pattern to match on GPU
 type GPUPattern struct {
-	ID          int
-	Pattern     []byte
-	PatternLen  int
-	Type        PatternType
+	ID            int
+	Pattern       []byte
+	PatternLen    int
+	Type          PatternType
 	CaseSensitive bool
 }
 
@@ -69,10 +69,10 @@ type GPUPattern struct {
 type PatternType int
 
 const (
-	PatternTypeLiteral PatternType = iota // Exact string match
-	PatternTypePrefix                     // Prefix match
-	PatternTypeContains                   // Contains substring
-	PatternTypeRegex                      // Regular expression (complex)
+	PatternTypeLiteral  PatternType = iota // Exact string match
+	PatternTypePrefix                      // Prefix match
+	PatternTypeContains                    // Contains substring
+	PatternTypeRegex                       // Regular expression (complex)
 )
 
 // GPUResult represents a pattern match result from GPU
@@ -105,17 +105,17 @@ type GPUResultBuffers struct {
 
 // GPUStats holds GPU acceleration statistics
 type GPUStats struct {
-	_                   CachePadding
-	BatchesProcessed    PaddedCounter
-	PacketsProcessed    PaddedCounter
-	PatternsMatched     PaddedCounter
-	TransferToGPUNS     PaddedCounter
-	KernelExecutionNS   PaddedCounter
-	TransferFromGPUNS   PaddedCounter
-	TotalProcessingNS   PaddedCounter
-	GPUMemoryUsed       PaddedCounter
-	FallbackToCPU       PaddedCounter
-	_                   CachePadding
+	_                 CachePadding
+	BatchesProcessed  PaddedCounter
+	PacketsProcessed  PaddedCounter
+	PatternsMatched   PaddedCounter
+	TransferToGPUNS   PaddedCounter
+	KernelExecutionNS PaddedCounter
+	TransferFromGPUNS PaddedCounter
+	TotalProcessingNS PaddedCounter
+	GPUMemoryUsed     PaddedCounter
+	FallbackToCPU     PaddedCounter
+	_                 CachePadding
 }
 
 // DefaultGPUConfig returns default GPU configuration
@@ -395,7 +395,12 @@ func (ga *GPUAccelerator) Close() error {
 }
 
 // ConfigFromViper creates a GPU config from viper settings
-func ConfigFromViper(v interface{ GetBool(string) bool; GetString(string) string; GetInt(string) int; GetInt64(string) int64 }) *GPUConfig {
+func ConfigFromViper(v interface {
+	GetBool(string) bool
+	GetString(string) string
+	GetInt(string) int
+	GetInt64(string) int64
+}) *GPUConfig {
 	config := DefaultGPUConfig()
 
 	// Check if explicitly disabled
@@ -427,9 +432,9 @@ func ConfigFromViper(v interface{ GetBool(string) bool; GetString(string) string
 
 // Common errors
 var (
-	ErrGPUNotAvailable    = errors.New("GPU not available")
-	ErrGPUOutOfMemory     = errors.New("GPU out of memory")
-	ErrGPUTransferFailed  = errors.New("GPU transfer failed")
-	ErrGPUKernelFailed    = errors.New("GPU kernel execution failed")
-	ErrInvalidBackend     = errors.New("invalid GPU backend")
+	ErrGPUNotAvailable   = errors.New("GPU not available")
+	ErrGPUOutOfMemory    = errors.New("GPU out of memory")
+	ErrGPUTransferFailed = errors.New("GPU transfer failed")
+	ErrGPUKernelFailed   = errors.New("GPU kernel execution failed")
+	ErrInvalidBackend    = errors.New("invalid GPU backend")
 )

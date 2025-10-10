@@ -12,7 +12,8 @@ func TestSipStreamFactoryGoroutineMonitoring(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		factory := NewSipStreamFactory(ctx); defer factory.(*sipStreamFactory).Shutdown()
+		factory := NewSipStreamFactory(ctx)
+		defer factory.(*sipStreamFactory).Shutdown()
 		sipFactory, ok := factory.(*sipStreamFactory)
 		assert.True(t, ok, "Factory should be of correct type")
 
@@ -31,7 +32,8 @@ func TestSipStreamFactoryGoroutineMonitoring(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		factory := NewSipStreamFactory(ctx); defer factory.(*sipStreamFactory).Shutdown()
+		factory := NewSipStreamFactory(ctx)
+		defer factory.(*sipStreamFactory).Shutdown()
 		sipFactory, ok := factory.(*sipStreamFactory)
 		assert.True(t, ok, "Factory should be of correct type")
 

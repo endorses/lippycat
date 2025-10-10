@@ -23,11 +23,11 @@ type GenericPlugin struct {
 // GenericMetrics tracks generic plugin metrics
 type GenericMetrics struct {
 	PacketsProcessed atomic.Int64
-	UDPPackets      atomic.Int64
-	TCPPackets      atomic.Int64
-	UnknownPackets  atomic.Int64
-	ProcessingTime  atomic.Int64
-	ErrorCount      atomic.Int64
+	UDPPackets       atomic.Int64
+	TCPPackets       atomic.Int64
+	UnknownPackets   atomic.Int64
+	ProcessingTime   atomic.Int64
+	ErrorCount       atomic.Int64
 }
 
 // NewGenericPlugin creates a new generic protocol plugin

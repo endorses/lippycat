@@ -67,12 +67,12 @@ type PoolStats struct {
 
 // PoolConfig contains configuration for memory pools
 type PoolConfig struct {
-	InitialSize     int    // Initial pool size
-	MaxSize         int    // Maximum pool size (0 = unlimited)
-	MaxObjectSize   int    // Maximum size of pooled objects
-	EnableMetrics   bool   // Enable metrics tracking
-	DrainOnPressure bool   // Drain pool under memory pressure
-	GrowthFactor    int    // Growth factor when expanding pool
+	InitialSize     int  // Initial pool size
+	MaxSize         int  // Maximum pool size (0 = unlimited)
+	MaxObjectSize   int  // Maximum size of pooled objects
+	EnableMetrics   bool // Enable metrics tracking
+	DrainOnPressure bool // Drain pool under memory pressure
+	GrowthFactor    int  // Growth factor when expanding pool
 }
 
 var defaultPoolConfig = PoolConfig{

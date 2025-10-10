@@ -37,7 +37,7 @@ const (
 // ProcessorInfo represents a processor node
 type ProcessorInfo struct {
 	Address         string
-	ProcessorID     string // ID of the processor
+	ProcessorID     string                     // ID of the processor
 	Status          management.ProcessorStatus // Status of the processor (when connected)
 	ConnectionState ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
 	Hunters         []HunterInfo
@@ -56,16 +56,16 @@ type NodesView struct {
 	selectedProcessorAddr string          // Non-empty means a processor is selected (instead of hunter)
 	width                 int
 	height                int
-	theme         themes.Theme
-	nodeInput     textinput.Model // Input field for node address (used in modal)
-	showModal     bool            // Whether add node modal is visible
-	viewport      viewport.Model  // Viewport for scrolling
-	ready         bool            // Whether viewport is initialized
-	viewMode      string          // "table" or "graph" - current view mode
+	theme                 themes.Theme
+	nodeInput             textinput.Model // Input field for node address (used in modal)
+	showModal             bool            // Whether add node modal is visible
+	viewport              viewport.Model  // Viewport for scrolling
+	ready                 bool            // Whether viewport is initialized
+	viewMode              string          // "table" or "graph" - current view mode
 
 	// Mouse click regions
-	hunterLines     map[int]int // Map of line number -> hunter index (for table view)
-	processorLines  map[int]int // Map of line number -> processor index (for table view)
+	hunterLines    map[int]int // Map of line number -> hunter index (for table view)
+	processorLines map[int]int // Map of line number -> processor index (for table view)
 
 	// Graph view click regions
 	hunterBoxRegions []struct {
@@ -76,11 +76,11 @@ type NodesView struct {
 		hunterIndex int
 	}
 	processorBoxRegions []struct {
-		startLine       int
-		endLine         int
-		startCol        int
-		endCol          int
-		processorAddr   string
+		startLine     int
+		endLine       int
+		startCol      int
+		endCol        int
+		processorAddr string
 	}
 }
 
@@ -646,13 +646,13 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 		// First check connection state (takes precedence)
 		switch proc.ConnectionState {
 		case ProcessorConnectionStateDisconnected:
-			statusIcon = "○" // Empty circle for disconnected
+			statusIcon = "○"                    // Empty circle for disconnected
 			statusColor = lipgloss.Color("240") // Gray
 		case ProcessorConnectionStateConnecting:
-			statusIcon = "◐" // Half-filled circle for connecting
+			statusIcon = "◐"                   // Half-filled circle for connecting
 			statusColor = lipgloss.Color("11") // Cyan/blue
 		case ProcessorConnectionStateFailed:
-			statusIcon = "✗" // X for failed
+			statusIcon = "✗"                 // X for failed
 			statusColor = n.theme.ErrorColor // Red
 		case ProcessorConnectionStateConnected:
 			// When connected, use the processor's reported status
@@ -1206,7 +1206,7 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 
 				// Body content - use condensed format for narrow boxes, labeled format for wider boxes
 				const minWidthForLabels = 26 // Minimum width needed for labels
-				const labelWidth = 10         // Width for label column when labels are shown
+				const labelWidth = 10        // Width for label column when labels are shown
 
 				// Interface(s) - show all interfaces
 				iface := "any"
@@ -1795,7 +1795,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 				// }
 				// Select this processor
 				n.selectedProcessorAddr = region.processorAddr
-				n.selectedIndex = -1 // Deselect hunters
+				n.selectedIndex = -1      // Deselect hunters
 				n.updateViewportContent() // Refresh to show selection
 				return nil
 			}
@@ -1813,7 +1813,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 				// Select this hunter
 				n.selectedIndex = region.hunterIndex
 				n.selectedProcessorAddr = "" // Deselect processors
-				n.updateViewportContent() // Refresh to show selection
+				n.updateViewportContent()    // Refresh to show selection
 				return nil
 			}
 		}
@@ -1828,7 +1828,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		// }
 		// Select this processor
 		n.selectedProcessorAddr = n.processors[procIdx].Address
-		n.selectedIndex = -1 // Deselect hunters
+		n.selectedIndex = -1      // Deselect hunters
 		n.updateViewportContent() // Refresh to show selection
 		return nil
 	}
@@ -1843,7 +1843,7 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 		// Select this hunter
 		n.selectedIndex = hunterIndex
 		n.selectedProcessorAddr = "" // Deselect processors
-		n.updateViewportContent() // Refresh to show selection
+		n.updateViewportContent()    // Refresh to show selection
 		return nil
 	}
 

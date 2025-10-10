@@ -164,8 +164,8 @@ func TestBooleanFilter_SelectivityNOT(t *testing.T) {
 // TestBPFFilter_Selectivity verifies BPF selectivity values
 func TestBPFFilter_Selectivity(t *testing.T) {
 	tests := []struct {
-		name       string
-		expr       string
+		name        string
+		expr        string
 		selectivity float64
 	}{
 		{"protocol", "tcp", 0.9},

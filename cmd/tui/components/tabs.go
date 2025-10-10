@@ -247,4 +247,3 @@ func (t *Tabs) View() string {
 
 	return result.String()
 }
-

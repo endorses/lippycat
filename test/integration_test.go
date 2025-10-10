@@ -53,14 +53,14 @@ func TestIntegration_HunterProcessorBasicFlow(t *testing.T) {
 
 	// Register hunter
 	regResp, err := mgmtClient.RegisterHunter(ctx, &management.HunterRegistration{
-		HunterId: "test-hunter-basic",
-		Hostname: "test-host",
+		HunterId:   "test-hunter-basic",
+		Hostname:   "test-host",
 		Interfaces: []string{"mock0"},
-		Version: "test-1.0.0",
+		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:      []string{"bpf"},
-			MaxBufferSize:    8192,
-			GpuAcceleration:  false,
+			FilterTypes:     []string{"bpf"},
+			MaxBufferSize:   8192,
+			GpuAcceleration: false,
 			AfXdp:           false,
 		},
 	})
@@ -551,7 +551,7 @@ func connectHunter(ctx context.Context, addr string, hunterID string) (*grpc.Cli
 			FilterTypes:     []string{"bpf"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
-			AfXdp:          false,
+			AfXdp:           false,
 		},
 	})
 	if err != nil {

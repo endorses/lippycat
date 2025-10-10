@@ -28,20 +28,20 @@ type UIState struct {
 	Statistics       *components.Statistics
 
 	// UI State
-	Capturing       bool
-	Paused          bool
-	Width           int
-	Height          int
-	Quitting        bool
-	Theme           themes.Theme
-	FilterMode      bool
-	ShowDetails     bool
-	FocusedPane     string // "left" (packet list) or "right" (details/hex)
-	NeedsUIUpdate   bool
+	Capturing        bool
+	Paused           bool
+	Width            int
+	Height           int
+	Quitting         bool
+	Theme            themes.Theme
+	FilterMode       bool
+	ShowDetails      bool
+	FocusedPane      string // "left" (packet list) or "right" (details/hex)
+	NeedsUIUpdate    bool
 	SelectedProtocol components.Protocol
-	ViewMode        string // "packets" or "calls" (for VoIP)
-	LastClickTime   time.Time
-	LastClickPacket int
+	ViewMode         string // "packets" or "calls" (for VoIP)
+	LastClickTime    time.Time
+	LastClickPacket  int
 }
 
 // NewUIState creates a new UI state with default components

@@ -79,11 +79,11 @@ type Model struct {
 	uiState       *store.UIState
 
 	// High-level application state
-	statistics    *components.Statistics     // Statistics data
-	interfaceName string                     // Capture interface name
-	bpfFilter     string                     // Current BPF filter
-	captureMode   components.CaptureMode     // Current capture mode (live or offline)
-	nodesFilePath string                     // Path to nodes YAML file for remote mode
+	statistics    *components.Statistics // Statistics data
+	interfaceName string                 // Capture interface name
+	bpfFilter     string                 // Current BPF filter
+	captureMode   components.CaptureMode // Current capture mode (live or offline)
+	nodesFilePath string                 // Path to nodes YAML file for remote mode
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
@@ -815,7 +815,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update mode BEFORE starting new capture so packet handlers check the right mode
 		m.captureMode = msg.Mode
 		m.packetStore.MaxPackets = msg.BufferSize // Apply the new buffer size
-		m.uiState.Paused = false              // Unpause when restarting capture
+		m.uiState.Paused = false                  // Unpause when restarting capture
 
 		// Clear old packets with new buffer size
 		m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
@@ -1082,9 +1082,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// }
 
 	// Layout constants
-	headerHeight := 2  // Header takes 2 lines (text + border)
-	tabsHeight := 4    // Tabs take 4 lines
-	bottomHeight := 4  // Footer/filter area
+	headerHeight := 2                          // Header takes 2 lines (text + border)
+	tabsHeight := 4                            // Tabs take 4 lines
+	bottomHeight := 4                          // Footer/filter area
 	contentStartY := headerHeight + tabsHeight // Y=6
 	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 
@@ -1786,4 +1786,3 @@ func saveFilterHistory(filterInput *components.FilterInput) {
 		}
 	}
 }
-

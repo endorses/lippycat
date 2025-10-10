@@ -67,7 +67,7 @@ type DetectionContext struct {
 type CacheStrategy int
 
 const (
-	CacheNever  CacheStrategy = iota // Never cache (e.g., DNS queries, HTTP GET)
+	CacheNever   CacheStrategy = iota // Never cache (e.g., DNS queries, HTTP GET)
 	CacheFlow                         // Cache for multi-packet flows (e.g., SIP→RTP)
 	CacheSession                      // Cache for sessions (e.g., TLS connections)
 )

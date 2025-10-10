@@ -28,13 +28,13 @@ type MmapWriterV2 struct {
 	fallbackMode atomic.Bool
 
 	// Ring buffer support
-	ringBuffer   bool
-	ringStart    int64
-	ringEnd      int64
+	ringBuffer bool
+	ringStart  int64
+	ringEnd    int64
 
 	// Concurrency control
-	mu           sync.RWMutex // For structural changes only
-	writerPool   *BufferPool  // Reuse write buffers
+	mu         sync.RWMutex // For structural changes only
+	writerPool *BufferPool  // Reuse write buffers
 
 	// Rotation support
 	rotationSize int64
@@ -50,13 +50,13 @@ type MmapWriterV2 struct {
 
 // MmapWriterV2Config configures enhanced memory-mapped writer
 type MmapWriterV2Config struct {
-	MaxFileSize   int64                           // Max file size before rotation
-	EnableMmap    bool                            // Enable memory mapping
-	PreallocSize  int64                           // Preallocate size
-	FallbackOnErr bool                            // Fallback to regular I/O on errors
-	RingBuffer    bool                            // Use ring buffer mode
-	RotationSize  int64                           // Rotate at this size (0 = no rotation)
-	RotationCb    func(oldPath, newPath string)  // Callback on rotation
+	MaxFileSize   int64                         // Max file size before rotation
+	EnableMmap    bool                          // Enable memory mapping
+	PreallocSize  int64                         // Preallocate size
+	FallbackOnErr bool                          // Fallback to regular I/O on errors
+	RingBuffer    bool                          // Use ring buffer mode
+	RotationSize  int64                         // Rotate at this size (0 = no rotation)
+	RotationCb    func(oldPath, newPath string) // Callback on rotation
 }
 
 // DefaultMmapV2Config returns default configuration
@@ -64,7 +64,7 @@ func DefaultMmapV2Config() *MmapWriterV2Config {
 	return &MmapWriterV2Config{
 		MaxFileSize:   1024 * 1024 * 1024, // 1GB
 		EnableMmap:    true,
-		PreallocSize:  100 * 1024 * 1024,  // 100MB
+		PreallocSize:  100 * 1024 * 1024, // 100MB
 		FallbackOnErr: true,
 		RingBuffer:    false,
 		RotationSize:  0, // No rotation by default

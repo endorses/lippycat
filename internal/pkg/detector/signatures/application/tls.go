@@ -97,8 +97,8 @@ func (t *TLSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	version := t.getVersionString(majorVersion, minorVersion)
 
 	metadata := map[string]interface{}{
-		"version":      version,
-		"content_type": contentTypeName,
+		"version":       version,
+		"content_type":  contentTypeName,
 		"record_length": int(length),
 	}
 

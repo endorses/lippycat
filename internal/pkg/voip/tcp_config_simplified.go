@@ -12,9 +12,9 @@ type SimplifiedTCPConfig struct {
 	PerformanceProfile string `mapstructure:"performance_profile" yaml:"performance_profile"`
 
 	// Essential Resource Limits
-	MaxMemoryMB     int           `mapstructure:"max_memory_mb" yaml:"max_memory_mb"`
+	MaxMemoryMB      int           `mapstructure:"max_memory_mb" yaml:"max_memory_mb"`
 	MaxActiveStreams int           `mapstructure:"max_active_streams" yaml:"max_active_streams"`
-	StreamTimeout   time.Duration `mapstructure:"stream_timeout" yaml:"stream_timeout"`
+	StreamTimeout    time.Duration `mapstructure:"stream_timeout" yaml:"stream_timeout"`
 
 	// Core Processing Settings
 	WorkerThreads int  `mapstructure:"worker_threads" yaml:"worker_threads"`
@@ -22,7 +22,7 @@ type SimplifiedTCPConfig struct {
 
 	// Advanced Settings (for power users)
 	CustomBufferSize int  `mapstructure:"custom_buffer_size" yaml:"custom_buffer_size"`
-	DebugMode       bool `mapstructure:"debug_mode" yaml:"debug_mode"`
+	DebugMode        bool `mapstructure:"debug_mode" yaml:"debug_mode"`
 }
 
 // PerformanceProfile determines optimal settings for different use cases
@@ -254,15 +254,15 @@ func ValidateSimplifiedConfig(config *SimplifiedTCPConfig) error {
 // GetConfigurationSummary returns a human-readable summary of the simplified config
 func GetConfigurationSummary(config SimplifiedTCPConfig) map[string]interface{} {
 	return map[string]interface{}{
-		"profile":             config.PerformanceProfile,
-		"memory_limit_mb":     config.MaxMemoryMB,
-		"max_active_streams":  config.MaxActiveStreams,
-		"stream_timeout":      config.StreamTimeout.String(),
-		"worker_threads":      config.WorkerThreads,
-		"metrics_enabled":     config.EnableMetrics,
-		"custom_buffer_size":  config.CustomBufferSize,
-		"debug_mode":          config.DebugMode,
-		"auto_tuned_params":   getAutoTunedParamsCount(config.PerformanceProfile),
+		"profile":            config.PerformanceProfile,
+		"memory_limit_mb":    config.MaxMemoryMB,
+		"max_active_streams": config.MaxActiveStreams,
+		"stream_timeout":     config.StreamTimeout.String(),
+		"worker_threads":     config.WorkerThreads,
+		"metrics_enabled":    config.EnableMetrics,
+		"custom_buffer_size": config.CustomBufferSize,
+		"debug_mode":         config.DebugMode,
+		"auto_tuned_params":  getAutoTunedParamsCount(config.PerformanceProfile),
 	}
 }
 

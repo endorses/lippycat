@@ -18,6 +18,7 @@ type EventHandler interface {
 // NoopEventHandler is a no-op implementation of EventHandler for testing
 type NoopEventHandler struct{}
 
-func (n *NoopEventHandler) OnPacketBatch(packets []PacketDisplay)                      {}
-func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus)    {}
-func (n *NoopEventHandler) OnDisconnect(address string, err error)                     {}
+func (n *NoopEventHandler) OnPacketBatch(packets []PacketDisplay) {}
+func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus) {
+}
+func (n *NoopEventHandler) OnDisconnect(address string, err error) {}

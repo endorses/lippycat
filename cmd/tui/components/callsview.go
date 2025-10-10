@@ -40,30 +40,30 @@ func (cs CallState) String() string {
 
 // Call represents a tracked VoIP call
 type Call struct {
-	CallID       string
-	From         string
-	To           string
-	State        CallState
-	StartTime    time.Time
-	EndTime      time.Time
-	Duration     time.Duration
-	Codec        string
-	PacketCount  int
-	PacketLoss   float64
-	Jitter       float64
-	MOS          float64 // Mean Opinion Score
-	NodeID       string  // Which hunter/processor captured this
+	CallID      string
+	From        string
+	To          string
+	State       CallState
+	StartTime   time.Time
+	EndTime     time.Time
+	Duration    time.Duration
+	Codec       string
+	PacketCount int
+	PacketLoss  float64
+	Jitter      float64
+	MOS         float64 // Mean Opinion Score
+	NodeID      string  // Which hunter/processor captured this
 }
 
 // CallsView displays active VoIP calls
 type CallsView struct {
-	calls         []Call
-	selected      int
-	offset        int
-	width         int
-	height        int
-	theme         themes.Theme
-	showDetails   bool
+	calls       []Call
+	selected    int
+	offset      int
+	width       int
+	height      int
+	theme       themes.Theme
+	showDetails bool
 }
 
 // NewCallsView creates a new calls view

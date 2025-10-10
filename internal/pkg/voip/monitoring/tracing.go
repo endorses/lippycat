@@ -24,18 +24,18 @@ type TracingExporter struct {
 
 // Span represents a distributed tracing span
 type Span struct {
-	TraceID    string                 `json:"trace_id"`
-	SpanID     string                 `json:"span_id"`
-	ParentID   string                 `json:"parent_id,omitempty"`
-	Operation  string                 `json:"operation"`
-	StartTime  time.Time              `json:"start_time"`
-	EndTime    time.Time              `json:"end_time"`
-	Duration   time.Duration          `json:"duration"`
-	Tags       map[string]interface{} `json:"tags"`
-	Logs       []SpanLog              `json:"logs"`
-	Status     SpanStatus             `json:"status"`
-	Component  string                 `json:"component"`
-	finished   atomic.Bool
+	TraceID   string                 `json:"trace_id"`
+	SpanID    string                 `json:"span_id"`
+	ParentID  string                 `json:"parent_id,omitempty"`
+	Operation string                 `json:"operation"`
+	StartTime time.Time              `json:"start_time"`
+	EndTime   time.Time              `json:"end_time"`
+	Duration  time.Duration          `json:"duration"`
+	Tags      map[string]interface{} `json:"tags"`
+	Logs      []SpanLog              `json:"logs"`
+	Status    SpanStatus             `json:"status"`
+	Component string                 `json:"component"`
+	finished  atomic.Bool
 }
 
 // SpanLog represents a log entry within a span

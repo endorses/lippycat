@@ -101,16 +101,16 @@ func (a *ARPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	targetIP := payload[addrStart+int(hlen)*2+int(plen) : addrStart+int(hlen)*2+int(plen)*2]
 
 	metadata := map[string]interface{}{
-		"operation":        a.operationToString(operation),
-		"hardware_type":    htype,
+		"operation":          a.operationToString(operation),
+		"hardware_type":      htype,
 		"hardware_type_name": a.hardwareTypeToString(htype),
-		"protocol_type":    ptype,
-		"hardware_length":  hlen,
-		"protocol_length":  plen,
-		"sender_hw":        a.hwAddrToString(senderHW, htype),
-		"sender_ip":        a.ipToString(senderIP),
-		"target_hw":        a.hwAddrToString(targetHW, htype),
-		"target_ip":        a.ipToString(targetIP),
+		"protocol_type":      ptype,
+		"hardware_length":    hlen,
+		"protocol_length":    plen,
+		"sender_hw":          a.hwAddrToString(senderHW, htype),
+		"sender_ip":          a.ipToString(senderIP),
+		"target_hw":          a.hwAddrToString(targetHW, htype),
+		"target_ip":          a.ipToString(targetIP),
 	}
 
 	// Detect gratuitous ARP (sender IP == target IP)

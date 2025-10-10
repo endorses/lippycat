@@ -163,7 +163,7 @@ func putByteBuffer(buf *[]byte) {
 // Uses intelligent sampling and throttling to handle high packet rates
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program) {
 	const (
-		targetPacketsPerSecond = 200              // Target display rate
+		targetPacketsPerSecond = 200                    // Target display rate
 		batchInterval          = 100 * time.Millisecond // Batch interval
 	)
 

@@ -24,11 +24,11 @@ type BPFFilter struct {
 	expression string
 
 	// Pre-parsed fields for fast matching
-	matchType  string // "protocol", "port", "host", "net", "unknown"
-	protocol   string // for protocol filters
-	direction  string // "src", "dst", "" (both)
-	value      string // port number, IP, or network
-	ipnet      *net.IPNet // parsed CIDR for network filters
+	matchType string     // "protocol", "port", "host", "net", "unknown"
+	protocol  string     // for protocol filters
+	direction string     // "src", "dst", "" (both)
+	value     string     // port number, IP, or network
+	ipnet     *net.IPNet // parsed CIDR for network filters
 }
 
 // NewBPFFilter creates a new BPF filter

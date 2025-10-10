@@ -22,22 +22,22 @@ type (
 
 // PacketList is a component that displays a list of packets
 type PacketList struct {
-	packets      []PacketDisplay
-	cursor       int // Currently selected packet
-	offset       int // Scroll offset
-	width        int
-	height       int
-	headerHeight int
-	autoScroll   bool         // Whether to auto-scroll to bottom (like chat)
-	theme        themes.Theme // Color theme
-	detailsVisible bool       // Whether details panel is visible (affects column widths)
+	packets        []PacketDisplay
+	cursor         int // Currently selected packet
+	offset         int // Scroll offset
+	width          int
+	height         int
+	headerHeight   int
+	autoScroll     bool         // Whether to auto-scroll to bottom (like chat)
+	theme          themes.Theme // Color theme
+	detailsVisible bool         // Whether details panel is visible (affects column widths)
 
 	// Cached rendering state (invalidated on size/theme change)
-	cachedStyles     map[string]lipgloss.Style // protocol -> style
-	cachedColWidths  [7]int                    // column widths cache
+	cachedStyles      map[string]lipgloss.Style // protocol -> style
+	cachedColWidths   [7]int                    // column widths cache
 	cachedBorderStyle lipgloss.Style            // border style cache
 	cachedHeaderStyle lipgloss.Style            // header style cache
-	sizeChanged      bool                       // flag to recalculate caches
+	sizeChanged       bool                      // flag to recalculate caches
 }
 
 // NewPacketList creates a new packet list component
@@ -48,8 +48,8 @@ func NewPacketList() PacketList {
 		offset:       0,
 		width:        80,
 		height:       20,
-		headerHeight: 2,                      // Header + separator
-		autoScroll:   true,                   // Start with auto-scroll enabled
+		headerHeight: 2,                  // Header + separator
+		autoScroll:   true,               // Start with auto-scroll enabled
 		theme:        themes.Solarized(), // Default theme
 		cachedStyles: make(map[string]lipgloss.Style),
 		sizeChanged:  true, // Force initial cache build
@@ -315,7 +315,7 @@ func (p *PacketList) View(focused bool, detailsVisible bool) string {
 	borderColor := p.theme.BorderColor
 	borderType := lipgloss.RoundedBorder()
 	if focused && detailsVisible {
-		borderColor = p.theme.SelectionBg // Cyan when focused
+		borderColor = p.theme.SelectionBg   // Cyan when focused
 		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
 	}
 

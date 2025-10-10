@@ -23,27 +23,27 @@ const (
 // Buffer Sizing Strategy:
 //
 // 1. Single-item buffers (size = 1):
-//    - Used for signals and errors that should never block the sender
-//    - Examples: OS signals, error channels
-//    - Rationale: These are infrequent events that must be handled immediately
+//   - Used for signals and errors that should never block the sender
+//   - Examples: OS signals, error channels
+//   - Rationale: These are infrequent events that must be handled immediately
 //
 // 2. Small buffers (size = 10):
-//    - Used for control plane operations with low frequency
-//    - Examples: Filter updates, batch queues
-//    - Rationale: Control operations are rare but should not block; small buffer
-//      provides cushion without excessive memory overhead
+//   - Used for control plane operations with low frequency
+//   - Examples: Filter updates, batch queues
+//   - Rationale: Control operations are rare but should not block; small buffer
+//     provides cushion without excessive memory overhead
 //
 // 3. Medium buffers (size = 100):
-//    - Used for moderate-throughput data plane operations
-//    - Examples: Subscriber channels, general packet processing
-//    - Rationale: Balance between latency and memory; suitable for operations
-//      processing hundreds to low thousands of items per second
+//   - Used for moderate-throughput data plane operations
+//   - Examples: Subscriber channels, general packet processing
+//   - Rationale: Balance between latency and memory; suitable for operations
+//     processing hundreds to low thousands of items per second
 //
 // 4. Large buffers (size = 1000):
-//    - Used for high-throughput data plane operations
-//    - Examples: PCAP writer queue, VoIP analyzer queues
-//    - Rationale: High packet rates (10K+ pps) require larger buffers to absorb
-//      bursts and prevent drops during GC pauses; memory cost justified by criticality
+//   - Used for high-throughput data plane operations
+//   - Examples: PCAP writer queue, VoIP analyzer queues
+//   - Rationale: High packet rates (10K+ pps) require larger buffers to absorb
+//     bursts and prevent drops during GC pauses; memory cost justified by criticality
 //
 // Note: These are default sizes. Critical buffers can be made configurable via
 // Config structs if deployment-specific tuning is needed.

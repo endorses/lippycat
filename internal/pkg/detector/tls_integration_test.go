@@ -18,7 +18,7 @@ func TestTLSDetectionIntegration(t *testing.T) {
 		0x16,       // Handshake
 		0x03, 0x03, // TLS 1.2
 		0x00, 0x05, // Length: 5 bytes
-		0x01,       // ClientHello
+		0x01,             // ClientHello
 		0x00, 0x00, 0x01, // Handshake length
 		0x03, 0x03, // TLS 1.2 in handshake
 	}

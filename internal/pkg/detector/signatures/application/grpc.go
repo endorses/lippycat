@@ -45,8 +45,8 @@ func (g *GRPCSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		preface := string(payload[:24])
 		if preface == "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" {
 			return &signatures.DetectionResult{
-				Protocol:    "gRPC",
-				Confidence:  signatures.ConfidenceDefinite,
+				Protocol:   "gRPC",
+				Confidence: signatures.ConfidenceDefinite,
 				Metadata: map[string]interface{}{
 					"type": "connection_preface",
 				},

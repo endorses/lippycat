@@ -13,38 +13,38 @@ import (
 // CaptureEngine provides unified packet capture with automatic fallback
 // Tries AF_XDP first, falls back to standard capture if unavailable
 type CaptureEngine struct {
-	config       *CaptureConfig
-	mode         CaptureMode
-	xdpSocket    *XDPSocket
-	packetChan   chan []byte
-	ctx          context.Context
-	cancel       context.CancelFunc
-	stats        CaptureStats
-	running      atomic.Bool
-	bufferPool   *BufferPool
+	config     *CaptureConfig
+	mode       CaptureMode
+	xdpSocket  *XDPSocket
+	packetChan chan []byte
+	ctx        context.Context
+	cancel     context.CancelFunc
+	stats      CaptureStats
+	running    atomic.Bool
+	bufferPool *BufferPool
 }
 
 // CaptureConfig configures the capture engine
 type CaptureConfig struct {
-	Interface      string
-	UseXDP         bool   // Try to use XDP if available
-	XDPQueueID     int    // XDP queue ID
-	SnapLen        int    // Snapshot length
-	Promiscuous    bool   // Promiscuous mode
-	BufferSize     int    // Channel buffer size
-	BatchSize      int    // Batch processing size
-	Timeout        time.Duration
-	EnableStats    bool
-	StatsInterval  time.Duration
+	Interface     string
+	UseXDP        bool // Try to use XDP if available
+	XDPQueueID    int  // XDP queue ID
+	SnapLen       int  // Snapshot length
+	Promiscuous   bool // Promiscuous mode
+	BufferSize    int  // Channel buffer size
+	BatchSize     int  // Batch processing size
+	Timeout       time.Duration
+	EnableStats   bool
+	StatsInterval time.Duration
 }
 
 // CaptureMode indicates which capture method is active
 type CaptureMode int
 
 const (
-	CaptureModeUnknown CaptureMode = iota
-	CaptureModeXDP                 // Using AF_XDP
-	CaptureModeStandard            // Using standard pcap
+	CaptureModeUnknown  CaptureMode = iota
+	CaptureModeXDP                  // Using AF_XDP
+	CaptureModeStandard             // Using standard pcap
 )
 
 func (m CaptureMode) String() string {

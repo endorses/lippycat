@@ -15,11 +15,11 @@ import (
 
 // FalsePositiveResult contains the results of false positive testing
 type FalsePositiveResult struct {
-	Protocol         string
-	TotalTests       int
-	FalsePositives   int
+	Protocol          string
+	TotalTests        int
+	FalsePositives    int
 	FalsePositiveRate float64
-	Duration         time.Duration
+	Duration          time.Duration
 }
 
 // FalsePositiveTester tests signatures against random data to measure false positive rates

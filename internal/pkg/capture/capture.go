@@ -26,7 +26,7 @@ type PacketBuffer struct {
 	cancel     context.CancelFunc
 	dropped    int64
 	bufferSize int
-	closed     int32       // atomic flag: 0 = open, 1 = closed
+	closed     int32          // atomic flag: 0 = open, 1 = closed
 	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
 }
 
@@ -214,8 +214,8 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	defer ticker.Stop()
 
 	// Batched atomic updates: use local counter and periodically sync to atomic
-	var packetCount int64 // shared atomic counter
-	var localCount int64  // goroutine-local counter (no atomic needed)
+	var packetCount int64      // shared atomic counter
+	var localCount int64       // goroutine-local counter (no atomic needed)
 	const batchThreshold = 100 // flush to atomic every N packets
 
 	go func() {

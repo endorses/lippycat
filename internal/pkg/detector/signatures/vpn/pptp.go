@@ -102,12 +102,12 @@ func (p *PPTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	reserved := binary.BigEndian.Uint16(payload[10:12])
 
 	metadata := map[string]interface{}{
-		"length":              length,
-		"pptp_message_type":   pptpMsgType,
-		"magic_cookie":        "0x1A2B3C4D",
-		"control_type":        controlMsgType,
-		"control_type_name":   p.controlTypeToString(controlMsgType),
-		"packet_type":         "control",
+		"length":            length,
+		"pptp_message_type": pptpMsgType,
+		"magic_cookie":      "0x1A2B3C4D",
+		"control_type":      controlMsgType,
+		"control_type_name": p.controlTypeToString(controlMsgType),
+		"packet_type":       "control",
 	}
 
 	// Reserved field should typically be 0

@@ -111,7 +111,7 @@ func (o *OpenVPNSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 			if len(payload) >= 13 {
 				// Packet ID should be small for initial packets
 				packetID := uint32(payload[9])<<24 | uint32(payload[10])<<16 |
-				           uint32(payload[11])<<8 | uint32(payload[12])
+					uint32(payload[11])<<8 | uint32(payload[12])
 				// Reject if packet ID is too large (likely random data)
 				if packetID > 1000000 {
 					return nil

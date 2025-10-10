@@ -1,3 +1,4 @@
+//go:build cuda
 // +build cuda
 
 package voip
@@ -78,18 +79,18 @@ import (
 
 // CUDABackendImpl is the real CUDA implementation
 type CUDABackendImpl struct {
-	config          *GPUConfig
-	deviceID        int
-	devicePtr       unsafe.Pointer
-	packetBuffer    unsafe.Pointer
-	patternBuffer   unsafe.Pointer
-	resultBuffer    unsafe.Pointer
-	offsetBuffer    unsafe.Pointer
-	stream          C.cudaStream_t
-	deviceProps     C.struct_cudaDeviceProp
-	maxPacketSize   int
-	maxBatchSize    int
-	initialized     bool
+	config        *GPUConfig
+	deviceID      int
+	devicePtr     unsafe.Pointer
+	packetBuffer  unsafe.Pointer
+	patternBuffer unsafe.Pointer
+	resultBuffer  unsafe.Pointer
+	offsetBuffer  unsafe.Pointer
+	stream        C.cudaStream_t
+	deviceProps   C.struct_cudaDeviceProp
+	maxPacketSize int
+	maxBatchSize  int
+	initialized   bool
 }
 
 // NewCUDABackendImpl creates a real CUDA backend implementation

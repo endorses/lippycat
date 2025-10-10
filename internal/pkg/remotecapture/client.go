@@ -26,9 +26,9 @@ import (
 type NodeType int
 
 const (
-	NodeTypeUnknown NodeType = iota
-	NodeTypeHunter           // Direct hunter connection
-	NodeTypeProcessor        // Processor (aggregates hunters)
+	NodeTypeUnknown   NodeType = iota
+	NodeTypeHunter             // Direct hunter connection
+	NodeTypeProcessor          // Processor (aggregates hunters)
 )
 
 // ClientConfig holds configuration for remote capture client
@@ -37,11 +37,11 @@ type ClientConfig struct {
 	Address string
 
 	// TLS settings
-	TLSEnabled           bool   // Enable TLS encryption
-	TLSCAFile            string // Path to CA certificate file
-	TLSCertFile          string // Path to client certificate file (for mutual TLS)
-	TLSKeyFile           string // Path to client key file (for mutual TLS)
-	TLSSkipVerify        bool   // Skip certificate verification (insecure, for testing only)
+	TLSEnabled            bool   // Enable TLS encryption
+	TLSCAFile             string // Path to CA certificate file
+	TLSCertFile           string // Path to client certificate file (for mutual TLS)
+	TLSKeyFile            string // Path to client key file (for mutual TLS)
+	TLSSkipVerify         bool   // Skip certificate verification (insecure, for testing only)
 	TLSServerNameOverride string // Override server name for certificate verification
 }
 

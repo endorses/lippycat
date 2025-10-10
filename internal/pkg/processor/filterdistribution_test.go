@@ -22,8 +22,8 @@ func TestPushFilterUpdate_SingleHunter(t *testing.T) {
 	filterChan := make(chan *management.FilterUpdate, 10)
 	p.filterChannels[hunterID] = filterChan
 	p.hunters[hunterID] = &ConnectedHunter{
-		ID: hunterID,
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     hunterID,
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	filter := &management.Filter{
@@ -66,8 +66,8 @@ func TestPushFilterUpdate_MultipleHunters(t *testing.T) {
 		filterChan := make(chan *management.FilterUpdate, 10)
 		p.filterChannels[hunterID] = filterChan
 		p.hunters[hunterID] = &ConnectedHunter{
-			ID: hunterID,
-			Status:   management.HunterStatus_STATUS_HEALTHY,
+			ID:     hunterID,
+			Status: management.HunterStatus_STATUS_HEALTHY,
 		}
 	}
 
@@ -122,8 +122,8 @@ func TestPushFilterUpdate_UpdateTypes(t *testing.T) {
 			filterChan := make(chan *management.FilterUpdate, 10)
 			p.filterChannels[hunterID] = filterChan
 			p.hunters[hunterID] = &ConnectedHunter{
-				ID: hunterID,
-				Status:   management.HunterStatus_STATUS_HEALTHY,
+				ID:     hunterID,
+				Status: management.HunterStatus_STATUS_HEALTHY,
 			}
 
 			filter := &management.Filter{
@@ -165,8 +165,8 @@ func TestPushFilterUpdate_ChannelFull(t *testing.T) {
 	filterChan := make(chan *management.FilterUpdate, 1)
 	p.filterChannels[hunterID] = filterChan
 	p.hunters[hunterID] = &ConnectedHunter{
-		ID: hunterID,
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     hunterID,
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	filter := &management.Filter{
@@ -212,8 +212,8 @@ func TestPushFilterUpdate_CircuitBreaker(t *testing.T) {
 	filterChan := make(chan *management.FilterUpdate)
 	p.filterChannels[hunterID] = filterChan
 	p.hunters[hunterID] = &ConnectedHunter{
-		ID: hunterID,
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     hunterID,
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	filter := &management.Filter{
@@ -256,8 +256,8 @@ func TestPushFilterUpdate_ConcurrentSends(t *testing.T) {
 		filterChan := make(chan *management.FilterUpdate, 100)
 		p.filterChannels[hunterID] = filterChan
 		p.hunters[hunterID] = &ConnectedHunter{
-			ID: hunterID,
-			Status:   management.HunterStatus_STATUS_HEALTHY,
+			ID:     hunterID,
+			Status: management.HunterStatus_STATUS_HEALTHY,
 		}
 	}
 
@@ -305,7 +305,7 @@ func TestPushFilterUpdate_SuccessResetsFailureCounter(t *testing.T) {
 	filterChan := make(chan *management.FilterUpdate, 10)
 	p.filterChannels[hunterID] = filterChan
 	p.hunters[hunterID] = &ConnectedHunter{
-		ID:             hunterID,
+		ID:                   hunterID,
 		Status:               management.HunterStatus_STATUS_HEALTHY,
 		FilterUpdateFailures: 5, // Pre-existing failures
 	}
@@ -370,8 +370,8 @@ func TestPushFilterUpdate_TargetedFilter(t *testing.T) {
 		filterChan := make(chan *management.FilterUpdate, 10)
 		p.filterChannels[hunterID] = filterChan
 		p.hunters[hunterID] = &ConnectedHunter{
-			ID: hunterID,
-			Status:   management.HunterStatus_STATUS_HEALTHY,
+			ID:     hunterID,
+			Status: management.HunterStatus_STATUS_HEALTHY,
 		}
 	}
 
@@ -425,24 +425,24 @@ func TestPushFilterUpdate_PartialFailure(t *testing.T) {
 	filterChan1 := make(chan *management.FilterUpdate, 10)
 	p.filterChannels["hunter-1"] = filterChan1
 	p.hunters["hunter-1"] = &ConnectedHunter{
-		ID: "hunter-1",
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     "hunter-1",
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	// Hunter 2: full channel (will timeout)
 	filterChan2 := make(chan *management.FilterUpdate)
 	p.filterChannels["hunter-2"] = filterChan2
 	p.hunters["hunter-2"] = &ConnectedHunter{
-		ID: "hunter-2",
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     "hunter-2",
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	// Hunter 3: good channel
 	filterChan3 := make(chan *management.FilterUpdate, 10)
 	p.filterChannels["hunter-3"] = filterChan3
 	p.hunters["hunter-3"] = &ConnectedHunter{
-		ID: "hunter-3",
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     "hunter-3",
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	filter := &management.Filter{
@@ -484,8 +484,8 @@ func TestPushFilterUpdate_RaceCondition(t *testing.T) {
 	filterChan := make(chan *management.FilterUpdate, 100)
 	p.filterChannels[hunterID] = filterChan
 	p.hunters[hunterID] = &ConnectedHunter{
-		ID: hunterID,
-		Status:   management.HunterStatus_STATUS_HEALTHY,
+		ID:     hunterID,
+		Status: management.HunterStatus_STATUS_HEALTHY,
 	}
 
 	filter := &management.Filter{

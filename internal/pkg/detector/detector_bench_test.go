@@ -213,12 +213,12 @@ func createRTPPacket() gopacket.Packet {
 func createTLSPacket() gopacket.Packet {
 	// TLS ClientHello
 	payload := []byte{
-		0x16,                   // Content Type: Handshake
-		0x03, 0x01,             // Version: TLS 1.0
-		0x00, 0x10,             // Length
-		0x01,                   // Handshake Type: ClientHello
-		0x00, 0x00, 0x0C,       // Length
-		0x03, 0x03,             // Version: TLS 1.2
+		0x16,       // Content Type: Handshake
+		0x03, 0x01, // Version: TLS 1.0
+		0x00, 0x10, // Length
+		0x01,             // Handshake Type: ClientHello
+		0x00, 0x00, 0x0C, // Length
+		0x03, 0x03, // Version: TLS 1.2
 		0x00, 0x00, 0x00, 0x00, // Timestamp
 		0x00, 0x00, 0x00, 0x00, // Random (partial)
 	}

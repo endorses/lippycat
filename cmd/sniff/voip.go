@@ -26,10 +26,10 @@ var (
 	writeVoip bool
 
 	// GPU acceleration flags
-	gpuBackend         string
-	gpuBatchSize       int
-	gpuMaxMemory       int64
-	gpuEnable          bool
+	gpuBackend   string
+	gpuBatchSize int
+	gpuMaxMemory int64
+	gpuEnable    bool
 
 	// TCP-specific configuration flags
 	tcpMaxGoroutines      int

@@ -20,10 +20,10 @@ type LockFreeCallTracker struct {
 	portToCallID sync.Map // map[string]string
 
 	// Atomic counters for statistics
-	totalCalls    atomic.Int64
-	activeCalls   atomic.Int64
-	droppedCalls  atomic.Int64
-	lastCleanup   atomic.Int64 // Unix timestamp
+	totalCalls   atomic.Int64
+	activeCalls  atomic.Int64
+	droppedCalls atomic.Int64
+	lastCleanup  atomic.Int64 // Unix timestamp
 
 	// Traditional locking for complex operations
 	complexOpsMu sync.RWMutex
@@ -57,7 +57,9 @@ func NewLockFreeCallTracker() *LockFreeCallTracker {
 // GetCall retrieves a call by ID (lock-free read)
 func (lf *LockFreeCallTracker) GetCall(callID string) (*CallInfo, error) {
 	if value, ok := lf.callMap.Load(callID); ok {
-		return value.(*LockFreeCallInfo).CallInfo, nil
+		lockFreeCall := value.(*LockFreeCallInfo)
+		// Return a snapshot copy to avoid data races
+		return lockFreeCall.getSnapshot(), nil
 	}
 	return nil, errors.New("the CallID does not exist")
 }
@@ -66,7 +68,9 @@ func (lf *LockFreeCallTracker) GetCall(callID string) (*CallInfo, error) {
 func (lf *LockFreeCallTracker) GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 	// Fast path: try to load existing call (lock-free)
 	if value, ok := lf.callMap.Load(callID); ok {
-		return value.(*LockFreeCallInfo).CallInfo
+		lockFreeCall := value.(*LockFreeCallInfo)
+		// Return a snapshot copy to avoid data races
+		return lockFreeCall.getSnapshot()
 	}
 
 	// Slow path: need to create new call
@@ -282,8 +286,8 @@ type CallTrackerStats struct {
 // LockFreeCallInfo extends CallInfo with lock-free state management
 type LockFreeCallInfo struct {
 	*CallInfo
-	stateAtomic   atomic.Value // stores string
-	lastUpdated   atomic.Int64 // stores Unix nanoseconds
+	stateAtomic atomic.Value // stores string
+	lastUpdated atomic.Int64 // stores Unix nanoseconds
 }
 
 // newLockFreeCallInfo creates a new lock-free call info wrapper
@@ -301,9 +305,9 @@ func (lf *LockFreeCallInfo) setStateLockFree(newState string) {
 	lf.stateAtomic.Store(newState)
 	lf.lastUpdated.Store(time.Now().UnixNano())
 
-	// Also update the underlying CallInfo for compatibility
-	lf.CallInfo.State = newState
-	lf.CallInfo.LastUpdated = time.Unix(0, lf.lastUpdated.Load())
+	// Note: We do NOT update lf.CallInfo.State and lf.CallInfo.LastUpdated here
+	// because that would cause data races. Use getStateLockFree() instead to read state.
+	// The underlying CallInfo fields are only synchronized when accessed through lock-free methods.
 }
 
 // getStateLockFree gets the current state atomically
@@ -317,14 +321,34 @@ func (lf *LockFreeCallInfo) getLastUpdatedLockFree() time.Time {
 	return time.Unix(0, nanos)
 }
 
+// getSnapshot returns a copy of the CallInfo with current atomic values
+// This prevents data races when multiple readers access the same call
+func (lf *LockFreeCallInfo) getSnapshot() *CallInfo {
+	// Create a new CallInfo with safe-to-copy fields only (no mutexes)
+	snapshot := &CallInfo{
+		CallID:      lf.CallInfo.CallID,
+		State:       lf.getStateLockFree(),
+		Created:     lf.CallInfo.Created,
+		LastUpdated: lf.getLastUpdatedLockFree(),
+		LinkType:    lf.CallInfo.LinkType,
+		SIPWriter:   lf.CallInfo.SIPWriter,
+		RTPWriter:   lf.CallInfo.RTPWriter,
+		sipFile:     lf.CallInfo.sipFile,
+		rtpFile:     lf.CallInfo.rtpFile,
+		// Note: We intentionally don't copy sipWriterMu and rtpWriterMu
+		// as mutexes should never be copied. These fields will be zero-valued.
+	}
+	return snapshot
+}
+
 // Lock-free metric operations
 type LockFreeMetrics struct {
-	reads          atomic.Int64
-	writes         atomic.Int64
-	lookupMisses   atomic.Int64
-	creations      atomic.Int64
-	cleanups       atomic.Int64
-	avgLookupTime  atomic.Int64 // nanoseconds
+	reads         atomic.Int64
+	writes        atomic.Int64
+	lookupMisses  atomic.Int64
+	creations     atomic.Int64
+	cleanups      atomic.Int64
+	avgLookupTime atomic.Int64 // nanoseconds
 }
 
 var globalLockFreeMetrics LockFreeMetrics
@@ -380,10 +404,10 @@ func (m *LockFreeMetrics) GetMetrics() map[string]int64 {
 
 // Global lock-free tracker instance
 var (
-	globalLockFreeTracker     *LockFreeCallTracker
-	lockFreeTrackerOnce       sync.Once
-	lockFreeModeEnabled       atomic.Bool
-	lockFreePerformanceGains  atomic.Int64
+	globalLockFreeTracker    *LockFreeCallTracker
+	lockFreeTrackerOnce      sync.Once
+	lockFreeModeEnabled      atomic.Bool
+	lockFreePerformanceGains atomic.Int64
 )
 
 // GetLockFreeTracker returns the global lock-free tracker instance

@@ -69,10 +69,10 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	}
 
 	// Extract flags
-	typeFlag := (flagsAndVer & 0x8000) != 0  // T bit
-	lengthFlag := (flagsAndVer & 0x4000) != 0 // L bit
-	seqFlag := (flagsAndVer & 0x0800) != 0   // S bit
-	offsetFlag := (flagsAndVer & 0x0200) != 0 // O bit
+	typeFlag := (flagsAndVer & 0x8000) != 0     // T bit
+	lengthFlag := (flagsAndVer & 0x4000) != 0   // L bit
+	seqFlag := (flagsAndVer & 0x0800) != 0      // S bit
+	offsetFlag := (flagsAndVer & 0x0200) != 0   // O bit
 	priorityFlag := (flagsAndVer & 0x0100) != 0 // P bit
 
 	metadata := map[string]interface{}{

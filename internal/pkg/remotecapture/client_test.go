@@ -61,9 +61,9 @@ func TestClientConfig_Defaults(t *testing.T) {
 
 func TestClientConfig_WithTLS(t *testing.T) {
 	config := &ClientConfig{
-		Address:    "processor.example.com:50051",
-		TLSEnabled: true,
-		TLSCAFile:  "/path/to/ca.pem",
+		Address:     "processor.example.com:50051",
+		TLSEnabled:  true,
+		TLSCAFile:   "/path/to/ca.pem",
 		TLSCertFile: "/path/to/cert.pem",
 		TLSKeyFile:  "/path/to/key.pem",
 	}
@@ -309,16 +309,16 @@ func TestConvertToPacketDisplay_BasicFields(t *testing.T) {
 	// but we can test the data structure
 
 	display := types.PacketDisplay{
-		Protocol:   "TCP",
-		SrcIP:      "192.168.1.100",
-		DstIP:      "192.168.1.200",
-		SrcPort:    "12345",
-		DstPort:    "80",
-		Length:     1500,
-		Info:       "HTTP Request",
-		Timestamp:  time.Now(),
-		NodeID:     "hunter-1",
-		Interface:  "eth0",
+		Protocol:  "TCP",
+		SrcIP:     "192.168.1.100",
+		DstIP:     "192.168.1.200",
+		SrcPort:   "12345",
+		DstPort:   "80",
+		Length:    1500,
+		Info:      "HTTP Request",
+		Timestamp: time.Now(),
+		NodeID:    "hunter-1",
+		Interface: "eth0",
 	}
 
 	assert.Equal(t, "TCP", display.Protocol)

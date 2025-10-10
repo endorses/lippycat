@@ -210,11 +210,11 @@ func FuzzDetector_AllSignatures(f *testing.F) {
 // FuzzDetector_EdgeCases fuzzes edge cases
 func FuzzDetector_EdgeCases(f *testing.F) {
 	// Add edge case seeds
-	f.Add([]byte{})                  // Empty
-	f.Add([]byte{0x00})             // Single byte
-	f.Add([]byte{0xFF, 0xFF})       // Two 0xFF bytes
-	f.Add(make([]byte, 1500))       // Max Ethernet frame
-	f.Add(make([]byte, 9000))       // Jumbo frame
+	f.Add([]byte{})           // Empty
+	f.Add([]byte{0x00})       // Single byte
+	f.Add([]byte{0xFF, 0xFF}) // Two 0xFF bytes
+	f.Add(make([]byte, 1500)) // Max Ethernet frame
+	f.Add(make([]byte, 9000)) // Jumbo frame
 
 	det := detector.NewDetector()
 	det.RegisterSignature(application.NewDNSSignature())

@@ -11,13 +11,13 @@ import (
 
 // SIMDBackend implements GPU backend interface using CPU SIMD instructions
 type SIMDBackend struct {
-	config        *GPUConfig
-	packets       [][]byte
-	results       []GPUResult
-	patterns      []GPUPattern
-	numWorkers    int
-	mu            sync.Mutex
-	stats         SIMDBackendStats
+	config     *GPUConfig
+	packets    [][]byte
+	results    []GPUResult
+	patterns   []GPUPattern
+	numWorkers int
+	mu         sync.Mutex
+	stats      SIMDBackendStats
 }
 
 // SIMDBackendStats holds SIMD backend statistics
@@ -284,9 +284,9 @@ func (sb *SIMDBackend) GetStats() SIMDBackendStats {
 
 // SIMDPatternMatcher provides vectorized pattern matching
 type SIMDPatternMatcher struct {
-	patterns     []GPUPattern
-	numLanes     int
-	useAVX2      bool
+	patterns []GPUPattern
+	numLanes int
+	useAVX2  bool
 }
 
 // NewSIMDPatternMatcher creates a new SIMD pattern matcher
@@ -356,8 +356,8 @@ func (mps *MultiPatternSearch) Search(data []byte) []GPUResult {
 
 // SIMDCallIDExtractor extracts Call-IDs using SIMD acceleration
 type SIMDCallIDExtractor struct {
-	backend    *SIMDBackend
-	patterns   []GPUPattern
+	backend  *SIMDBackend
+	patterns []GPUPattern
 }
 
 // NewSIMDCallIDExtractor creates a SIMD-accelerated Call-ID extractor

@@ -28,7 +28,10 @@ func TestLockFreeCallTracker_BasicOperations(t *testing.T) {
 	// Test GetCall
 	call2, err := tracker.GetCall(callID)
 	require.NoError(t, err)
-	assert.Equal(t, call1, call2)
+	// Compare fields individually since lock-free tracker returns snapshots
+	assert.Equal(t, call1.CallID, call2.CallID)
+	assert.Equal(t, call1.State, call2.State)
+	assert.Equal(t, call1.LinkType, call2.LinkType)
 
 	// Test SetCallState
 	tracker.SetCallState(callID, "RINGING")

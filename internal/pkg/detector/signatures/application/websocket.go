@@ -253,10 +253,10 @@ func (w *WebSocketSignature) detectFrame(ctx *signatures.DetectionContext) *sign
 	}
 
 	metadata := map[string]interface{}{
-		"type":     "frame",
-		"fin":      fin == 1,
-		"opcode":   opcode,
-		"masked":   mask == 1,
+		"type":   "frame",
+		"fin":    fin == 1,
+		"opcode": opcode,
+		"masked": mask == 1,
 	}
 
 	if opcodeName != "" {

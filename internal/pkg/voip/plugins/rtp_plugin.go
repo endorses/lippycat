@@ -335,10 +335,10 @@ func (r *RTPPlugin) HealthCheck() HealthStatus {
 // Metrics returns current plugin metrics
 func (r *RTPPlugin) Metrics() PluginMetrics {
 	customMetrics := map[string]interface{}{
-		"audio_packets":    r.metrics.AudioPackets.Load(),
-		"video_packets":    r.metrics.VideoPackets.Load(),
-		"sequence_errors":  r.metrics.SequenceErrors.Load(),
-		"payload_types":    make(map[string]int64),
+		"audio_packets":   r.metrics.AudioPackets.Load(),
+		"video_packets":   r.metrics.VideoPackets.Load(),
+		"sequence_errors": r.metrics.SequenceErrors.Load(),
+		"payload_types":   make(map[string]int64),
 	}
 
 	// Add payload type statistics

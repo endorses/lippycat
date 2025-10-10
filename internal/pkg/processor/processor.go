@@ -32,7 +32,7 @@ type Config struct {
 	ProcessorID      string
 	UpstreamAddr     string
 	MaxHunters       int
-	MaxSubscribers   int    // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
+	MaxSubscribers   int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
 	WriteFile        string
 	DisplayStats     bool
 	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration
@@ -67,15 +67,15 @@ type Processor struct {
 	pcapWriteQueue      chan []*data.CapturedPacket
 	pcapWriterWg        sync.WaitGroup
 	perCallPcapWriter   *PcapWriterManager // Per-call PCAP writer
-	pcapWriteErrors     atomic.Uint64  // Track total write errors
-	pcapConsecErrors    atomic.Uint64  // Track consecutive write errors
-	pcapLastErrorLogged atomic.Int64   // Timestamp of last error log
+	pcapWriteErrors     atomic.Uint64      // Track total write errors
+	pcapConsecErrors    atomic.Uint64      // Track consecutive write errors
+	pcapLastErrorLogged atomic.Int64       // Timestamp of last error log
 
 	// Statistics - use atomic.Value for lock-free reads
-	statsCache           atomic.Value  // stores *cachedStats
-	statsUpdates         atomic.Uint64 // incremented on every stats change
-	packetsReceived      atomic.Uint64 // incremental counter
-	packetsForwarded     atomic.Uint64 // incremental counter
+	statsCache       atomic.Value  // stores *cachedStats
+	statsUpdates     atomic.Uint64 // incremented on every stats change
+	packetsReceived  atomic.Uint64 // incremental counter
+	packetsForwarded atomic.Uint64 // incremental counter
 
 	// Subscriber backpressure tracking
 	subscriberBroadcasts atomic.Uint64 // total broadcast attempts
@@ -122,13 +122,13 @@ type ConnectedHunter struct {
 
 // Stats contains processor statistics
 type Stats struct {
-	TotalHunters           uint32
-	HealthyHunters         uint32
-	WarningHunters         uint32
-	ErrorHunters           uint32
-	TotalPacketsReceived   uint64
-	TotalPacketsForwarded  uint64
-	TotalFilters           uint32
+	TotalHunters          uint32
+	HealthyHunters        uint32
+	WarningHunters        uint32
+	ErrorHunters          uint32
+	TotalPacketsReceived  uint64
+	TotalPacketsForwarded uint64
+	TotalFilters          uint32
 }
 
 // cachedStats holds incrementally updated statistics
@@ -469,11 +469,11 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 // RegisterHunter registers a hunter node with the processor (Management Service).
 //
 // SECURITY NOTE: Hunter authentication relies on the gRPC server's TLS configuration.
-// - When TLSClientAuth=true (mutual TLS): Hunters must present valid client certificates.
-//   This provides strong authentication and is REQUIRED for production deployments.
-// - When TLSClientAuth=false: Any network client can register as a hunter with any ID.
-//   This is INSECURE - malicious clients can impersonate legitimate hunters.
-// - When TLSEnabled=false: All traffic is unencrypted and unauthenticated (CRITICAL risk).
+//   - When TLSClientAuth=true (mutual TLS): Hunters must present valid client certificates.
+//     This provides strong authentication and is REQUIRED for production deployments.
+//   - When TLSClientAuth=false: Any network client can register as a hunter with any ID.
+//     This is INSECURE - malicious clients can impersonate legitimate hunters.
+//   - When TLSEnabled=false: All traffic is unencrypted and unauthenticated (CRITICAL risk).
 //
 // For production deployments, set LIPPYCAT_PRODUCTION=true to enforce mutual TLS.
 func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRegistration) (*management.RegistrationResponse, error) {
@@ -528,11 +528,11 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 		AssignedId: hunterID,
 		Filters:    filters,
 		Config: &management.ProcessorConfig{
-			BatchSize:             64,
-			BatchTimeoutMs:        100,
-			ReconnectIntervalSec:  5,
-			MaxReconnectAttempts:  0, // infinite
-			ProcessorId:           p.config.ProcessorID,
+			BatchSize:            64,
+			BatchTimeoutMs:       100,
+			ReconnectIntervalSec: 5,
+			MaxReconnectAttempts: 0, // infinite
+			ProcessorId:          p.config.ProcessorID,
 		},
 	}, nil
 }
@@ -563,10 +563,10 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 		// Send response
 		stats := p.GetStats()
 		resp := &management.ProcessorHeartbeat{
-			TimestampNs:       hb.TimestampNs,
-			Status:            management.ProcessorStatus_PROCESSOR_HEALTHY,
-			HuntersConnected:  stats.TotalHunters,
-			ProcessorId:       p.config.ProcessorID,
+			TimestampNs:      hb.TimestampNs,
+			Status:           management.ProcessorStatus_PROCESSOR_HEALTHY,
+			HuntersConnected: stats.TotalHunters,
+			ProcessorId:      p.config.ProcessorID,
 		}
 
 		if err := stream.Send(resp); err != nil {
@@ -681,14 +681,14 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 	return &management.StatusResponse{
 		Hunters: connectedHunters,
 		ProcessorStats: &management.ProcessorStats{
-			TotalHunters:           stats.TotalHunters,
-			HealthyHunters:         stats.HealthyHunters,
-			WarningHunters:         stats.WarningHunters,
-			ErrorHunters:           stats.ErrorHunters,
-			TotalPacketsReceived:   stats.TotalPacketsReceived,
-			TotalPacketsForwarded:  stats.TotalPacketsForwarded,
-			TotalFilters:           stats.TotalFilters,
-			ProcessorId:            p.config.ProcessorID,
+			TotalHunters:          stats.TotalHunters,
+			HealthyHunters:        stats.HealthyHunters,
+			WarningHunters:        stats.WarningHunters,
+			ErrorHunters:          stats.ErrorHunters,
+			TotalPacketsReceived:  stats.TotalPacketsReceived,
+			TotalPacketsForwarded: stats.TotalPacketsForwarded,
+			TotalFilters:          stats.TotalFilters,
+			ProcessorId:           p.config.ProcessorID,
 		},
 	}, nil
 }
@@ -1366,11 +1366,11 @@ func (p *Processor) receiveUpstreamAcks() {
 // SubscribePackets allows TUI/monitoring clients to subscribe to packet streams.
 //
 // SECURITY NOTE: Subscriber authentication relies on the gRPC server's TLS configuration.
-// - When TLSClientAuth=true (mutual TLS): Subscribers must present valid client certificates.
-//   This provides strong authentication and is REQUIRED for production deployments.
-// - When TLSClientAuth=false: Any network client can subscribe and view packet data.
-//   This is INSECURE and should only be used in trusted development environments.
-// - When TLSEnabled=false: All traffic is unencrypted and unauthenticated (CRITICAL risk).
+//   - When TLSClientAuth=true (mutual TLS): Subscribers must present valid client certificates.
+//     This provides strong authentication and is REQUIRED for production deployments.
+//   - When TLSClientAuth=false: Any network client can subscribe and view packet data.
+//     This is INSECURE and should only be used in trusted development environments.
+//   - When TLSEnabled=false: All traffic is unencrypted and unauthenticated (CRITICAL risk).
 //
 // For production deployments, set LIPPYCAT_PRODUCTION=true to enforce mutual TLS.
 func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.DataService_SubscribePacketsServer) error {

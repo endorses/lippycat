@@ -171,16 +171,16 @@ func (i *IKEv2Signature) Detect(ctx *signatures.DetectionContext) *signatures.De
 	}
 
 	metadata := map[string]interface{}{
-		"version":        float64(majorVersion) + float64(minorVersion)/10.0,
-		"major_version":  majorVersion,
-		"minor_version":  minorVersion,
-		"exchange_type":  exchangeType,
-		"exchange_name":  i.exchangeTypeToString(exchangeType, majorVersion),
-		"next_payload":   nextPayload,
-		"message_id":     messageID,
-		"length":         length,
-		"is_response":    responseFlag,
-		"is_initiator":   initiatorFlag,
+		"version":       float64(majorVersion) + float64(minorVersion)/10.0,
+		"major_version": majorVersion,
+		"minor_version": minorVersion,
+		"exchange_type": exchangeType,
+		"exchange_name": i.exchangeTypeToString(exchangeType, majorVersion),
+		"next_payload":  nextPayload,
+		"message_id":    messageID,
+		"length":        length,
+		"is_response":   responseFlag,
+		"is_initiator":  initiatorFlag,
 	}
 
 	// Categorize based on exchange type (IKEv2)

@@ -18,27 +18,27 @@ type CPUAffinityManager struct {
 
 // CPUTopology represents the CPU topology of the system
 type CPUTopology struct {
-	NumCPUs       int
-	NumNUMANodes  int
-	CoresPerNUMA  int
-	SMTEnabled    bool
-	CPUList       []CPUInfo
+	NumCPUs      int
+	NumNUMANodes int
+	CoresPerNUMA int
+	SMTEnabled   bool
+	CPUList      []CPUInfo
 }
 
 // CPUInfo represents information about a single CPU core
 type CPUInfo struct {
-	ID         int
-	NUMANode   int
-	CoreID     int
-	ThreadID   int
-	Isolated   bool
+	ID       int
+	NUMANode int
+	CoreID   int
+	ThreadID int
+	Isolated bool
 }
 
 // NUMAAffinity provides NUMA-aware memory and CPU binding
 type NUMAAffinity struct {
-	node       int
-	cpuMask    unix.CPUSet
-	memPolicy  int
+	node      int
+	cpuMask   unix.CPUSet
+	memPolicy int
 }
 
 // NewCPUAffinityManager creates a new CPU affinity manager
@@ -54,8 +54,8 @@ func GetTopology() (*CPUTopology, error) {
 	numCPUs := runtime.NumCPU()
 
 	topo := &CPUTopology{
-		NumCPUs:  numCPUs,
-		CPUList:  make([]CPUInfo, numCPUs),
+		NumCPUs: numCPUs,
+		CPUList: make([]CPUInfo, numCPUs),
 	}
 
 	// Detect NUMA nodes

@@ -17,10 +17,10 @@ import (
 // are correctly detected even in the fast conversion path
 func TestConvertPacketFast_SIPDetection(t *testing.T) {
 	tests := []struct {
-		name           string
-		sipPayload     []byte
-		expectedProto  string
-		useTCP         bool
+		name          string
+		sipPayload    []byte
+		expectedProto string
+		useTCP        bool
 	}{
 		{
 			name:          "UDP SIP INVITE",
@@ -76,11 +76,11 @@ func TestConvertPacketFast_SIPDetection(t *testing.T) {
 			}
 
 			ip := &layers.IPv4{
-				Version:  4,
-				TTL:      64,
-				IHL:      5,
-				SrcIP:    net.IP{192, 168, 1, 1},
-				DstIP:    net.IP{192, 168, 1, 2},
+				Version: 4,
+				TTL:     64,
+				IHL:     5,
+				SrcIP:   net.IP{192, 168, 1, 1},
+				DstIP:   net.IP{192, 168, 1, 2},
 			}
 
 			var packet gopacket.Packet

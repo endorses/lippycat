@@ -43,11 +43,11 @@ type Config struct {
 	GPUBackend       string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
 	GPUBatchSize     int    // Batch size for GPU processing
 	// TLS settings
-	TLSEnabled         bool   // Enable TLS encryption for gRPC connections
-	TLSCertFile        string // Path to TLS certificate file (for server verification)
-	TLSKeyFile         string // Path to TLS key file (for mutual TLS)
-	TLSCAFile          string // Path to CA certificate file
-	TLSSkipVerify      bool   // Skip certificate verification (insecure, for testing only)
+	TLSEnabled            bool   // Enable TLS encryption for gRPC connections
+	TLSCertFile           string // Path to TLS certificate file (for server verification)
+	TLSKeyFile            string // Path to TLS key file (for mutual TLS)
+	TLSCAFile             string // Path to CA certificate file
+	TLSSkipVerify         bool   // Skip certificate verification (insecure, for testing only)
 	TLSServerNameOverride string // Override server name for TLS verification (testing only)
 }
 
@@ -67,8 +67,8 @@ type Hunter struct {
 	captureCancel context.CancelFunc
 
 	// Packet streaming
-	stream         data.DataService_StreamPacketsClient
-	streamMu       sync.Mutex
+	stream   data.DataService_StreamPacketsClient
+	streamMu sync.Mutex
 
 	// Packet batching
 	batchMu       sync.Mutex
@@ -78,8 +78,8 @@ type Hunter struct {
 	// Flow control
 	batchQueue       chan []*data.CapturedPacket
 	batchQueueSize   atomic.Int32
-	flowControlState atomic.Int32  // FlowControl enum value
-	paused           atomic.Bool    // Whether sending is paused
+	flowControlState atomic.Int32 // FlowControl enum value
+	paused           atomic.Bool  // Whether sending is paused
 
 	// Statistics
 	stats Stats
@@ -90,10 +90,10 @@ type Hunter struct {
 	voipFilter *VoIPFilter // GPU-accelerated VoIP filter
 
 	// Reconnection
-	reconnectAttempts int
+	reconnectAttempts    int
 	maxReconnectAttempts int
-	reconnecting     bool
-	reconnectMu      sync.Mutex
+	reconnecting         bool
+	reconnectMu          sync.Mutex
 
 	// Control
 	ctx    context.Context
@@ -1136,7 +1136,6 @@ func min(a, b int) int {
 	}
 	return b
 }
-
 
 // markDisconnected marks the hunter as disconnected and triggers reconnection
 func (h *Hunter) markDisconnected() {

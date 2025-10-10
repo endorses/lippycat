@@ -120,10 +120,10 @@ func TestExpandSimplifiedConfig(t *testing.T) {
 
 func TestValidateSimplifiedConfig(t *testing.T) {
 	testCases := []struct {
-		name           string
-		input          SimplifiedTCPConfig
+		name            string
+		input           SimplifiedTCPConfig
 		expectedProfile string
-		expectedMemory int
+		expectedMemory  int
 		expectedStreams int
 		expectedTimeout time.Duration
 		expectedThreads int

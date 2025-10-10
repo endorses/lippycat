@@ -77,10 +77,10 @@ func (s *SSHSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	}
 
 	metadata := map[string]interface{}{
-		"type":            "protocol_version",
-		"version_string":  versionLine,
-		"proto_version":   protoVersion,
-		"software":        software,
+		"type":           "protocol_version",
+		"version_string": versionLine,
+		"proto_version":  protoVersion,
+		"software":       software,
 	}
 
 	if comments != "" {

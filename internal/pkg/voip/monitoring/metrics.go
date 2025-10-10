@@ -244,14 +244,14 @@ func (h *Histogram) Record(value float64) {
 
 // HistogramStats contains histogram statistics
 type HistogramStats struct {
-	Count      int64                `json:"count"`
-	Sum        float64              `json:"sum"`
-	Average    float64              `json:"average"`
-	Min        float64              `json:"min"`
-	Max        float64              `json:"max"`
-	Buckets    []float64            `json:"buckets"`
+	Count        int64              `json:"count"`
+	Sum          float64            `json:"sum"`
+	Average      float64            `json:"average"`
+	Min          float64            `json:"min"`
+	Max          float64            `json:"max"`
+	Buckets      []float64          `json:"buckets"`
 	BucketCounts []int64            `json:"bucket_counts"`
-	Percentiles map[string]float64  `json:"percentiles"`
+	Percentiles  map[string]float64 `json:"percentiles"`
 }
 
 // Stats returns current histogram statistics
@@ -331,7 +331,7 @@ func (h *Histogram) calculatePercentiles(bucketCounts []int64, totalCount int64)
 // Global metrics collector instance
 var (
 	globalMetricsCollector *MetricsCollector
-	metricsOnce           sync.Once
+	metricsOnce            sync.Once
 )
 
 // GetGlobalMetricsCollector returns the global metrics collector

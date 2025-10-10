@@ -133,8 +133,8 @@ func TestMmapWriterV2_Rotation(t *testing.T) {
 	filename := filepath.Join(tempDir, "rotate.pcap")
 
 	config := DefaultMmapV2Config()
-	config.PreallocSize = 1024 * 1024    // 1MB
-	config.RotationSize = 100 * 1024     // Rotate at 100KB
+	config.PreallocSize = 1024 * 1024 // 1MB
+	config.RotationSize = 100 * 1024  // Rotate at 100KB
 
 	rotated := make(chan bool, 1)
 	config.RotationCb = func(old, new string) {

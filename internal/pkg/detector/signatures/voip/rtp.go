@@ -340,7 +340,7 @@ func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 	if inTypicalRange {
 		indicators = append(indicators, signatures.Indicator{
 			Name:       "typical_port_range",
-			Weight:     0.15, // Increased from 0.1
+			Weight:     0.15,                        // Increased from 0.1
 			Confidence: signatures.ConfidenceMedium, // Upgraded from Low
 		})
 	}
@@ -358,45 +358,45 @@ type SIPFlowState struct {
 // RTPFlowState holds RTP flow state for SSRC and sequence validation
 // Supports bidirectional flows with different SSRCs
 type RTPFlowState struct {
-	SSRCForward     uint32 // SSRC for forward direction
-	SSRCReverse     uint32 // SSRC for reverse direction
-	LastSeqForward  uint16 // Last sequence number in forward direction
-	LastSeqReverse  uint16 // Last sequence number in reverse direction
-	PacketCount     int
-	FirstSrcPort    uint16 // Port of first packet to determine direction
+	SSRCForward    uint32 // SSRC for forward direction
+	SSRCReverse    uint32 // SSRC for reverse direction
+	LastSeqForward uint16 // Last sequence number in forward direction
+	LastSeqReverse uint16 // Last sequence number in reverse direction
+	PacketCount    int
+	FirstSrcPort   uint16 // Port of first packet to determine direction
 }
 
 // payloadTypeToCodec maps RTP payload type to codec name
 func payloadTypeToCodec(pt uint8) string {
 	codecs := map[uint8]string{
-		0:  "G.711 µ-law (PCMU)",
-		3:  "GSM",
-		4:  "G.723",
-		5:  "DVI4 8kHz",
-		6:  "DVI4 16kHz",
-		7:  "LPC",
-		8:  "G.711 A-law (PCMA)",
-		9:  "G.722",
-		10: "L16 Stereo",
-		11: "L16 Mono",
-		12: "QCELP",
-		13: "Comfort Noise",
-		14: "MPA",
-		15: "G.728",
-		16: "DVI4 11kHz",
-		17: "DVI4 22kHz",
-		18: "G.729",
-		25: "CelB",
-		26: "JPEG",
-		28: "nv",
-		31: "H.261",
-		32: "MPV",
-		33: "MP2T",
-		34: "H.263",
-		96: "Dynamic",
-		97: "Dynamic",
-		98: "Dynamic",
-		99: "Dynamic",
+		0:   "G.711 µ-law (PCMU)",
+		3:   "GSM",
+		4:   "G.723",
+		5:   "DVI4 8kHz",
+		6:   "DVI4 16kHz",
+		7:   "LPC",
+		8:   "G.711 A-law (PCMA)",
+		9:   "G.722",
+		10:  "L16 Stereo",
+		11:  "L16 Mono",
+		12:  "QCELP",
+		13:  "Comfort Noise",
+		14:  "MPA",
+		15:  "G.728",
+		16:  "DVI4 11kHz",
+		17:  "DVI4 22kHz",
+		18:  "G.729",
+		25:  "CelB",
+		26:  "JPEG",
+		28:  "nv",
+		31:  "H.261",
+		32:  "MPV",
+		33:  "MP2T",
+		34:  "H.263",
+		96:  "Dynamic",
+		97:  "Dynamic",
+		98:  "Dynamic",
+		99:  "Dynamic",
 		100: "Dynamic",
 		101: "Dynamic (often telephone-event)",
 		102: "Dynamic",

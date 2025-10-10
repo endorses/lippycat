@@ -64,21 +64,21 @@ type BatchWorker struct {
 
 // WorkerStats holds per-worker statistics
 type WorkerStats struct {
-	_               CachePadding
-	BatchesProcessed PaddedCounter
-	PacketsProcessed PaddedCounter
+	_                 CachePadding
+	BatchesProcessed  PaddedCounter
+	PacketsProcessed  PaddedCounter
 	ErrorsEncountered PaddedCounter
-	ProcessingTimeNS PaddedCounter
-	_               CachePadding
+	ProcessingTimeNS  PaddedCounter
+	_                 CachePadding
 }
 
 // BatchStats holds aggregate batch processing statistics
 type BatchStats struct {
-	TotalBatches     PaddedCounter
-	TotalPackets     PaddedCounter
-	BatchesDropped   PaddedCounter
-	AvgBatchSize     PaddedCounter
-	AvgProcessingNS  PaddedCounter
+	TotalBatches    PaddedCounter
+	TotalPackets    PaddedCounter
+	BatchesDropped  PaddedCounter
+	AvgBatchSize    PaddedCounter
+	AvgProcessingNS PaddedCounter
 }
 
 // DefaultBatchConfig returns default batch configuration
@@ -271,7 +271,7 @@ func (bw *BatchWorker) parsePacket(pkt *PacketBuffer, metadata PacketMetadata) (
 
 // VectorizedCallIDExtractor extracts Call-IDs from multiple packets in parallel
 type VectorizedCallIDExtractor struct {
-	numLanes int // Number of parallel processing lanes
+	numLanes int  // Number of parallel processing lanes
 	simdOps  bool // Use SIMD operations
 }
 
@@ -388,11 +388,11 @@ func extractCallIDFast(data []byte) string {
 
 // BatchCollector collects packets into batches
 type BatchCollector struct {
-	config      *BatchConfig
+	config       *BatchConfig
 	currentBatch *PacketBatch
-	mu          sync.Mutex
-	flushTimer  *time.Timer
-	processor   *BatchProcessor
+	mu           sync.Mutex
+	flushTimer   *time.Timer
+	processor    *BatchProcessor
 }
 
 // NewBatchCollector creates a new batch collector

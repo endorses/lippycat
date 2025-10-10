@@ -16,14 +16,14 @@ import (
 
 // PluginRegistry manages all loaded plugins
 type PluginRegistry struct {
-	plugins        map[string]ProtocolHandler
-	pluginConfigs  map[string]PluginConfig
-	pluginInfos    map[string]PluginInfo
-	protocolMap    map[string][]string // protocol -> plugin names
-	eventHandlers  []EventHandler
-	mu             sync.RWMutex
-	enabled        atomic.Bool
-	stats          RegistryStats
+	plugins       map[string]ProtocolHandler
+	pluginConfigs map[string]PluginConfig
+	pluginInfos   map[string]PluginInfo
+	protocolMap   map[string][]string // protocol -> plugin names
+	eventHandlers []EventHandler
+	mu            sync.RWMutex
+	enabled       atomic.Bool
+	stats         RegistryStats
 }
 
 // RegistryStats contains statistics about the plugin registry
@@ -33,8 +33,8 @@ type RegistryStats struct {
 	PacketsProcessed atomic.Int64
 	ProcessingTime   atomic.Int64 // nanoseconds
 	ErrorCount       atomic.Int64
-	LastError        atomic.Value  // string
-	LastErrorTime    atomic.Int64  // unix timestamp
+	LastError        atomic.Value // string
+	LastErrorTime    atomic.Int64 // unix timestamp
 }
 
 // NewPluginRegistry creates a new plugin registry

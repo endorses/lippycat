@@ -89,8 +89,8 @@ func (m *Modal) View(underlayContent string) string {
 		BorderForeground(m.theme.InfoColor).
 		Background(m.theme.Background).
 		Foreground(m.theme.Foreground).
-		Width(modalWidth - 4).
-		Height(modalHeight - 4).
+		Width(modalWidth-4).
+		Height(modalHeight-4).
 		Padding(1, 2)
 
 	// Title bar

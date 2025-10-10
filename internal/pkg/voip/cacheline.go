@@ -13,9 +13,9 @@ type CachePadding [CacheLineSize]byte
 
 // Padded wraps a value with cache line padding
 type Padded[T any] struct {
-	_       CachePadding
-	Value   T
-	_       CachePadding
+	_     CachePadding
+	Value T
+	_     CachePadding
 }
 
 // NewPadded creates a new cache-line padded value

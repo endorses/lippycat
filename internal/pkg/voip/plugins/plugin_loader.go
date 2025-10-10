@@ -343,10 +343,10 @@ func (pl *PluginLoader) GetPluginStats() map[string]interface{} {
 	defer pl.mu.RUnlock()
 
 	stats := map[string]interface{}{
-		"total_factories":   len(pl.factories),
-		"loaded_paths":      len(pl.loadedPaths),
-		"watch_enabled":     pl.watchEnabled,
-		"plugin_paths":      len(pl.pluginPaths),
+		"total_factories": len(pl.factories),
+		"loaded_paths":    len(pl.loadedPaths),
+		"watch_enabled":   pl.watchEnabled,
+		"plugin_paths":    len(pl.pluginPaths),
 	}
 
 	// Add per-plugin statistics
@@ -355,10 +355,10 @@ func (pl *PluginLoader) GetPluginStats() map[string]interface{} {
 		if pluginInfo := pl.registry.ListPlugins(); pluginInfo != nil {
 			if info, exists := pluginInfo[name]; exists {
 				pluginStats[name] = map[string]interface{}{
-					"version":    info.Version,
-					"protocols":  info.Protocols,
-					"load_time":  info.LoadTime,
-					"enabled":    info.Config.Enabled,
+					"version":   info.Version,
+					"protocols": info.Protocols,
+					"load_time": info.LoadTime,
+					"enabled":   info.Config.Enabled,
 				}
 			}
 		}

@@ -39,13 +39,13 @@ func TestHTTPSignature_DetectRequest(t *testing.T) {
 			minConf:    0.7,
 		},
 		{
-			name:    "Invalid - too short",
-			payload: []byte("GET /"),
+			name:      "Invalid - too short",
+			payload:   []byte("GET /"),
 			wantProto: "",
 		},
 		{
-			name:    "Invalid - not HTTP",
-			payload: []byte("INVITE sip:user@example.com SIP/2.0\r\n"),
+			name:      "Invalid - not HTTP",
+			payload:   []byte("INVITE sip:user@example.com SIP/2.0\r\n"),
 			wantProto: "",
 		},
 	}

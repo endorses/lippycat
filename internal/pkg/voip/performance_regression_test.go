@@ -12,13 +12,13 @@ import (
 
 // PerformanceBenchmark represents a performance benchmark result
 type PerformanceBenchmark struct {
-	Name           string        `json:"name"`
-	NsPerOp        float64       `json:"ns_per_op"`
-	BytesPerOp     int64         `json:"bytes_per_op"`
-	AllocsPerOp    int64         `json:"allocs_per_op"`
-	Timestamp      time.Time     `json:"timestamp"`
-	GitCommit      string        `json:"git_commit,omitempty"`
-	BuildInfo      string        `json:"build_info,omitempty"`
+	Name        string    `json:"name"`
+	NsPerOp     float64   `json:"ns_per_op"`
+	BytesPerOp  int64     `json:"bytes_per_op"`
+	AllocsPerOp int64     `json:"allocs_per_op"`
+	Timestamp   time.Time `json:"timestamp"`
+	GitCommit   string    `json:"git_commit,omitempty"`
+	BuildInfo   string    `json:"build_info,omitempty"`
 }
 
 // PerformanceBaseline stores baseline performance metrics
@@ -59,6 +59,12 @@ var performanceTargets = map[string]PerformanceBenchmark{
 func TestPerformanceRegression(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping performance regression tests in short mode")
+	}
+
+	// Skip performance tests when race detector is enabled
+	// Race detector adds 10-100x overhead, making performance measurements meaningless
+	if raceDetectorEnabled {
+		t.Skip("Skipping performance regression tests with race detector enabled")
 	}
 
 	results := runPerformanceBenchmarks(t)
@@ -270,17 +276,17 @@ type testPacket struct {
 	ci   gopacket.CaptureInfo
 }
 
-func (p *testPacket) Data() []byte                   { return p.data }
+func (p *testPacket) Data() []byte { return p.data }
 func (p *testPacket) Metadata() *gopacket.PacketMetadata {
 	return &gopacket.PacketMetadata{CaptureInfo: p.ci}
 }
-func (p *testPacket) Layers() []gopacket.Layer      { return nil }
-func (p *testPacket) Layer(gopacket.LayerType) gopacket.Layer { return nil }
+func (p *testPacket) Layers() []gopacket.Layer                      { return nil }
+func (p *testPacket) Layer(gopacket.LayerType) gopacket.Layer       { return nil }
 func (p *testPacket) LayerClass(gopacket.LayerClass) gopacket.Layer { return nil }
-func (p *testPacket) LinkLayer() gopacket.LinkLayer { return nil }
-func (p *testPacket) NetworkLayer() gopacket.NetworkLayer { return nil }
-func (p *testPacket) TransportLayer() gopacket.TransportLayer { return nil }
-func (p *testPacket) ApplicationLayer() gopacket.ApplicationLayer { return nil }
-func (p *testPacket) ErrorLayer() gopacket.ErrorLayer { return nil }
-func (p *testPacket) String() string { return "test packet" }
-func (p *testPacket) Dump() string { return "test packet dump" }
+func (p *testPacket) LinkLayer() gopacket.LinkLayer                 { return nil }
+func (p *testPacket) NetworkLayer() gopacket.NetworkLayer           { return nil }
+func (p *testPacket) TransportLayer() gopacket.TransportLayer       { return nil }
+func (p *testPacket) ApplicationLayer() gopacket.ApplicationLayer   { return nil }
+func (p *testPacket) ErrorLayer() gopacket.ErrorLayer               { return nil }
+func (p *testPacket) String() string                                { return "test packet" }
+func (p *testPacket) Dump() string                                  { return "test packet dump" }

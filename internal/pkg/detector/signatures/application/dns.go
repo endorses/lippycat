@@ -52,14 +52,14 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	additionalCount := uint16(payload[10])<<8 | uint16(payload[11])
 
 	// Extract flag components
-	qr := (flags >> 15) & 0x01        // Query/Response bit
-	opcode := (flags >> 11) & 0x0F    // Opcode (4 bits)
-	aa := (flags >> 10) & 0x01        // Authoritative Answer
-	tc := (flags >> 9) & 0x01         // Truncation
-	rd := (flags >> 8) & 0x01         // Recursion Desired
-	ra := (flags >> 7) & 0x01         // Recursion Available
-	z := (flags >> 4) & 0x07          // Reserved (must be 0)
-	rcode := flags & 0x0F             // Response code
+	qr := (flags >> 15) & 0x01     // Query/Response bit
+	opcode := (flags >> 11) & 0x0F // Opcode (4 bits)
+	aa := (flags >> 10) & 0x01     // Authoritative Answer
+	tc := (flags >> 9) & 0x01      // Truncation
+	rd := (flags >> 8) & 0x01      // Recursion Desired
+	ra := (flags >> 7) & 0x01      // Recursion Available
+	z := (flags >> 4) & 0x07       // Reserved (must be 0)
+	rcode := flags & 0x0F          // Response code
 
 	// Validation checks
 
@@ -96,7 +96,7 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 
 	// 6. Check total record count is reasonable
 	totalRecords := uint32(questionCount) + uint32(answerCount) +
-	                uint32(authorityCount) + uint32(additionalCount)
+		uint32(authorityCount) + uint32(additionalCount)
 	if totalRecords > 200 {
 		return nil
 	}
@@ -108,18 +108,18 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 
 	// Extract metadata
 	metadata := map[string]interface{}{
-		"transaction_id":    uint16(payload[0])<<8 | uint16(payload[1]),
-		"is_response":       qr == 1,
-		"opcode":            d.opcodeToString(opcode),
-		"authoritative":     aa == 1,
-		"truncated":         tc == 1,
-		"recursion_desired": rd == 1,
+		"transaction_id":      uint16(payload[0])<<8 | uint16(payload[1]),
+		"is_response":         qr == 1,
+		"opcode":              d.opcodeToString(opcode),
+		"authoritative":       aa == 1,
+		"truncated":           tc == 1,
+		"recursion_desired":   rd == 1,
 		"recursion_available": ra == 1,
-		"rcode":             d.rcodeToString(rcode),
-		"questions":         questionCount,
-		"answers":           answerCount,
-		"authority":         authorityCount,
-		"additional":        additionalCount,
+		"rcode":               d.rcodeToString(rcode),
+		"questions":           questionCount,
+		"answers":             answerCount,
+		"authority":           authorityCount,
+		"additional":          additionalCount,
 	}
 
 	// Store query or correlate response

@@ -43,19 +43,19 @@ type Config struct {
 	MemoryOptimization bool   `mapstructure:"memory_optimization"`
 
 	// Performance tuning parameters
-	TCPBufferPoolSize      int   `mapstructure:"tcp_buffer_pool_size"`
-	TCPBatchSize           int   `mapstructure:"tcp_batch_size"`
-	TCPIOThreads           int   `mapstructure:"tcp_io_threads"`
-	TCPCompressionLevel    int   `mapstructure:"tcp_compression_level"`
-	TCPMemoryLimit         int64 `mapstructure:"tcp_memory_limit"`
+	TCPBufferPoolSize   int   `mapstructure:"tcp_buffer_pool_size"`
+	TCPBatchSize        int   `mapstructure:"tcp_batch_size"`
+	TCPIOThreads        int   `mapstructure:"tcp_io_threads"`
+	TCPCompressionLevel int   `mapstructure:"tcp_compression_level"`
+	TCPMemoryLimit      int64 `mapstructure:"tcp_memory_limit"`
 
 	// Plugin system configurations
-	PluginsEnabled         bool     `mapstructure:"plugins_enabled"`
-	PluginPaths           []string `mapstructure:"plugin_paths"`
-	PluginWatchEnabled    bool     `mapstructure:"plugin_watch_enabled"`
-	PluginSIPEnabled      bool     `mapstructure:"plugin_sip_enabled"`
-	PluginRTPEnabled      bool     `mapstructure:"plugin_rtp_enabled"`
-	PluginGenericEnabled  bool     `mapstructure:"plugin_generic_enabled"`
+	PluginsEnabled       bool     `mapstructure:"plugins_enabled"`
+	PluginPaths          []string `mapstructure:"plugin_paths"`
+	PluginWatchEnabled   bool     `mapstructure:"plugin_watch_enabled"`
+	PluginSIPEnabled     bool     `mapstructure:"plugin_sip_enabled"`
+	PluginRTPEnabled     bool     `mapstructure:"plugin_rtp_enabled"`
+	PluginGenericEnabled bool     `mapstructure:"plugin_generic_enabled"`
 
 	// Monitoring configurations - disabled by default
 	MonitoringEnabled        bool          `mapstructure:"monitoring_enabled"`
@@ -180,7 +180,7 @@ func GetConfig() *Config {
 		TCPLatencyOptimization: viper.GetBool("voip.tcp_latency_optimization"),
 
 		// Plugin system configurations
-		PluginsEnabled:        viper.GetBool("voip.plugins_enabled"),
+		PluginsEnabled:       viper.GetBool("voip.plugins_enabled"),
 		PluginPaths:          viper.GetStringSlice("voip.plugin_paths"),
 		PluginWatchEnabled:   viper.GetBool("voip.plugin_watch_enabled"),
 		PluginSIPEnabled:     viper.GetBool("voip.plugin_sip_enabled"),

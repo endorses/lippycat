@@ -136,7 +136,7 @@ func (h *HexDumpView) View(focused bool) string {
 	borderColor := h.theme.BorderColor
 	borderType := lipgloss.RoundedBorder()
 	if focused {
-		borderColor = h.theme.SelectionBg // Cyan when focused
+		borderColor = h.theme.SelectionBg   // Cyan when focused
 		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
 	}
 

@@ -25,17 +25,17 @@ var TuiCmd = &cobra.Command{
 }
 
 var (
-	interfaces    string
-	filter        string
-	readFile      string
-	bufferSize    int
-	promiscuous   bool
-	themeName     string
-	remoteMode    bool
-	nodesFile     string
-	enableGPU     bool
-	gpuBackend    string
-	gpuBatchSize  int
+	interfaces   string
+	filter       string
+	readFile     string
+	bufferSize   int
+	promiscuous  bool
+	themeName    string
+	remoteMode   bool
+	nodesFile    string
+	enableGPU    bool
+	gpuBackend   string
+	gpuBatchSize int
 )
 
 func runTUI(cmd *cobra.Command, args []string) {

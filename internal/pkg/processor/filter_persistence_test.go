@@ -185,10 +185,10 @@ func TestFilterPersistence(t *testing.T) {
 
 func TestFilterTypeConversion(t *testing.T) {
 	tests := []struct {
-		name       string
-		yamlType   string
-		protoType  management.FilterType
-		expectErr  bool
+		name      string
+		yamlType  string
+		protoType management.FilterType
+		expectErr bool
 	}{
 		{"SIPUser", "sip_user", management.FilterType_FILTER_SIP_USER, false},
 		{"SIPUserUpper", "FILTER_SIP_USER", management.FilterType_FILTER_SIP_USER, false},

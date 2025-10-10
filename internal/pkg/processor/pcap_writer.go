@@ -15,13 +15,13 @@ import (
 
 // PcapWriterConfig configures per-call PCAP writing
 type PcapWriterConfig struct {
-	Enabled       bool   // Enable per-call PCAP writing
-	OutputDir     string // Directory for PCAP files
-	FilePattern   string // File naming pattern (supports {callid}, {from}, {to}, {timestamp})
-	MaxFileSize   int64  // Max PCAP file size in bytes (0 = unlimited)
-	MaxFilesPerCall int  // Max number of PCAP files per call (for rotation)
-	BufferSize    int    // Write buffer size
-	SyncInterval  time.Duration // How often to sync to disk
+	Enabled         bool          // Enable per-call PCAP writing
+	OutputDir       string        // Directory for PCAP files
+	FilePattern     string        // File naming pattern (supports {callid}, {from}, {to}, {timestamp})
+	MaxFileSize     int64         // Max PCAP file size in bytes (0 = unlimited)
+	MaxFilesPerCall int           // Max number of PCAP files per call (for rotation)
+	BufferSize      int           // Write buffer size
+	SyncInterval    time.Duration // How often to sync to disk
 }
 
 // DefaultPcapWriterConfig returns default configuration
@@ -39,19 +39,19 @@ func DefaultPcapWriterConfig() *PcapWriterConfig {
 
 // CallPcapWriter writes packets for a specific call to PCAP file
 type CallPcapWriter struct {
-	config       *PcapWriterConfig
-	callID       string
-	from         string
-	to           string
-	startTime    time.Time
-	file         *os.File
-	writer       *pcapgo.Writer
-	currentSize  int64
-	fileIndex    int
-	packetCount  int
-	mu           sync.Mutex
-	syncTicker   *time.Ticker
-	stopSync     chan struct{}
+	config      *PcapWriterConfig
+	callID      string
+	from        string
+	to          string
+	startTime   time.Time
+	file        *os.File
+	writer      *pcapgo.Writer
+	currentSize int64
+	fileIndex   int
+	packetCount int
+	mu          sync.Mutex
+	syncTicker  *time.Ticker
+	stopSync    chan struct{}
 }
 
 // PcapWriterManager manages PCAP writers for multiple calls

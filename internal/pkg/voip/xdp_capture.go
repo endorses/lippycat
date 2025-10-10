@@ -16,19 +16,19 @@ import (
 
 // XDPConfig configures AF_XDP socket behavior
 type XDPConfig struct {
-	Interface     string // Network interface name (e.g., "eth0")
-	QueueID       int    // Queue ID to bind to
-	UMEMSize      int    // UMEM area size in bytes (default: 4MB)
-	NumFrames     int    // Number of frames (default: 4096)
-	FrameSize     int    // Size of each frame (default: 2048)
-	FillRingSize  int    // Fill ring size (default: 2048)
-	CompRingSize  int    // Completion ring size (default: 2048)
-	RXRingSize    int    // RX ring size (default: 2048)
-	TXRingSize    int    // TX ring size (default: 2048)
-	Flags         uint32 // XDP flags (XDP_ZEROCOPY, XDP_COPY)
-	BindFlags     uint32 // Bind flags (XDP_SHARED_UMEM, etc.)
-	EnableStats   bool   // Enable statistics collection
-	BatchSize     int    // Batch processing size (default: 64)
+	Interface    string // Network interface name (e.g., "eth0")
+	QueueID      int    // Queue ID to bind to
+	UMEMSize     int    // UMEM area size in bytes (default: 4MB)
+	NumFrames    int    // Number of frames (default: 4096)
+	FrameSize    int    // Size of each frame (default: 2048)
+	FillRingSize int    // Fill ring size (default: 2048)
+	CompRingSize int    // Completion ring size (default: 2048)
+	RXRingSize   int    // RX ring size (default: 2048)
+	TXRingSize   int    // TX ring size (default: 2048)
+	Flags        uint32 // XDP flags (XDP_ZEROCOPY, XDP_COPY)
+	BindFlags    uint32 // Bind flags (XDP_SHARED_UMEM, etc.)
+	EnableStats  bool   // Enable statistics collection
+	BatchSize    int    // Batch processing size (default: 64)
 }
 
 // DefaultXDPConfig returns sensible defaults
@@ -233,11 +233,11 @@ func (u *UMEM) GetFrame(idx uint64) []byte {
 func (xs *XDPSocket) registerUMEM() error {
 	// XDP_UMEM_REG structure
 	type xdpUmemReg struct {
-		addr     uint64
-		len      uint64
+		addr      uint64
+		len       uint64
 		chunkSize uint32
-		headroom uint32
-		flags    uint32
+		headroom  uint32
+		flags     uint32
 	}
 
 	reg := xdpUmemReg{
@@ -334,10 +334,10 @@ func (xs *XDPSocket) setupRings() error {
 func (xs *XDPSocket) bind() error {
 	// XDP sockaddr_xdp structure
 	type sockaddrXDP struct {
-		family    uint16
-		flags     uint16
-		ifindex   uint32
-		queueID   uint32
+		family       uint16
+		flags        uint16
+		ifindex      uint32
+		queueID      uint32
 		sharedUmemFD uint32
 	}
 
@@ -410,7 +410,7 @@ func (xs *XDPSocket) ReceiveBatch(maxPackets int) ([][]byte, error) {
 		desc := xs.rxRing.ring[idx]
 
 		// Extract frame address and length from descriptor
-		frameAddr := desc & 0xFFFFFFFFFFFF       // Lower 48 bits: address
+		frameAddr := desc & 0xFFFFFFFFFFFF        // Lower 48 bits: address
 		frameLen := uint32((desc >> 48) & 0xFFFF) // Upper 16 bits: length
 
 		// Get packet data from UMEM

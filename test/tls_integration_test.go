@@ -460,10 +460,10 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 	// Try to start processor without TLS in production mode
 	processorAddr := "127.0.0.1:50063"
 	config := &processor.Config{
-		ListenAddr:       processorAddr,
-		TLSEnabled:       false, // Insecure in production
-		MaxHunters:       10,
-		MaxSubscribers:   5,
+		ListenAddr:     processorAddr,
+		TLSEnabled:     false, // Insecure in production
+		MaxHunters:     10,
+		MaxSubscribers: 5,
 	}
 
 	proc, err := processor.New(*config)
@@ -490,14 +490,14 @@ func startTLSProcessor(ctx context.Context, addr, certsDir string, requireClient
 	caCert := filepath.Join(certsDir, "ca-cert.pem")
 
 	config := &processor.Config{
-		ListenAddr:       addr,
-		TLSEnabled:       true,
-		TLSCertFile:      serverCert,
-		TLSKeyFile:       serverKey,
-		TLSCAFile:        caCert,
-		TLSClientAuth:    requireClientAuth,
-		MaxHunters:       10,
-		MaxSubscribers:   5,
+		ListenAddr:     addr,
+		TLSEnabled:     true,
+		TLSCertFile:    serverCert,
+		TLSKeyFile:     serverKey,
+		TLSCAFile:      caCert,
+		TLSClientAuth:  requireClientAuth,
+		MaxHunters:     10,
+		MaxSubscribers: 5,
 	}
 
 	proc, err := processor.New(*config)

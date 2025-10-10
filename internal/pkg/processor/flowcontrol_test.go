@@ -118,11 +118,11 @@ func TestDetermineFlowControl_QueueDraining(t *testing.T) {
 
 func TestDetermineFlowControl_QueueThresholds(t *testing.T) {
 	testCases := []struct {
-		name             string
-		queueSize        int
-		fillPercentage   int
-		expectedControl  data.FlowControl
-		description      string
+		name            string
+		queueSize       int
+		fillPercentage  int
+		expectedControl data.FlowControl
+		description     string
 	}{
 		{
 			name:            "Empty queue",

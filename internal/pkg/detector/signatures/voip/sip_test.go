@@ -12,10 +12,10 @@ func TestSIPSignature_Detect(t *testing.T) {
 	sig := NewSIPSignature()
 
 	tests := []struct {
-		name       string
-		payload    string
+		name         string
+		payload      string
 		shouldDetect bool
-		confidence float64
+		confidence   float64
 	}{
 		{
 			name: "SIP INVITE request",

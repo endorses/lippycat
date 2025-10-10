@@ -23,7 +23,7 @@ func TestTLSSignature_Detect(t *testing.T) {
 				0x16,       // Handshake
 				0x03, 0x03, // TLS 1.2
 				0x00, 0x05, // Length: 5 bytes
-				0x01,       // ClientHello
+				0x01,             // ClientHello
 				0x00, 0x00, 0x01, // Handshake length
 				0x03, 0x03, // TLS 1.2 in handshake
 			},
@@ -37,7 +37,7 @@ func TestTLSSignature_Detect(t *testing.T) {
 				0x16,       // Handshake
 				0x03, 0x03, // TLS 1.2 (compatibility)
 				0x00, 0x05, // Length: 5 bytes
-				0x02,       // ServerHello
+				0x02, // ServerHello
 				0x00, 0x00, 0x01,
 				0x03, 0x04, // TLS 1.3
 			},

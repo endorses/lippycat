@@ -12,11 +12,11 @@ import (
 
 // PacketWriteRequest represents a packet write operation
 type PacketWriteRequest struct {
-	CallID      string
-	Packet      gopacket.Packet
-	PacketType  PacketType
-	Timestamp   time.Time
-	ResultChan  chan<- error // Optional channel to receive write result
+	CallID     string
+	Packet     gopacket.Packet
+	PacketType PacketType
+	Timestamp  time.Time
+	ResultChan chan<- error // Optional channel to receive write result
 }
 
 // PacketType indicates whether this is SIP or RTP packet

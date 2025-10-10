@@ -13,14 +13,14 @@ import (
 
 // Header displays the top header bar
 type Header struct {
-	width         int
-	theme         themes.Theme
-	capturing     bool
-	paused        bool
-	iface         string
-	packets       int
-	captureMode   CaptureMode
-	nodeCount     int // Number of connected remote nodes (hunters)
+	width          int
+	theme          themes.Theme
+	capturing      bool
+	paused         bool
+	iface          string
+	packets        int
+	captureMode    CaptureMode
+	nodeCount      int // Number of connected remote nodes (hunters)
 	processorCount int // Number of connected processors
 }
 

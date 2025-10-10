@@ -134,4 +134,3 @@ func (f *Footer) View() string {
 
 	return footer
 }
-

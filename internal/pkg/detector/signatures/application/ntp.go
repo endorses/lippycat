@@ -48,9 +48,9 @@ func (n *NTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	firstByte := payload[0]
 
 	// Extract fields from first byte
-	li := (firstByte >> 6) & 0x03     // Leap Indicator (bits 0-1)
-	vn := (firstByte >> 3) & 0x07     // Version Number (bits 2-4)
-	mode := firstByte & 0x07          // Mode (bits 5-7)
+	li := (firstByte >> 6) & 0x03 // Leap Indicator (bits 0-1)
+	vn := (firstByte >> 3) & 0x07 // Version Number (bits 2-4)
+	mode := firstByte & 0x07      // Mode (bits 5-7)
 
 	// Validate version (1-4 are valid NTP versions)
 	if vn == 0 || vn > 4 {
@@ -87,11 +87,11 @@ func (n *NTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	}
 
 	metadata := map[string]interface{}{
-		"version":       vn,
-		"mode":          n.modeToString(mode),
-		"stratum":       stratum,
-		"poll":          poll,
-		"precision":     precision,
+		"version":        vn,
+		"mode":           n.modeToString(mode),
+		"stratum":        stratum,
+		"poll":           poll,
+		"precision":      precision,
 		"leap_indicator": n.leapIndicatorToString(li),
 	}
 

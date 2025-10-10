@@ -112,7 +112,7 @@ func (d *DetailsPanel) View(focused bool) string {
 	borderColor := d.theme.BorderColor
 	borderType := lipgloss.RoundedBorder()
 	if focused {
-		borderColor = d.theme.SelectionBg // Cyan when focused
+		borderColor = d.theme.SelectionBg   // Cyan when focused
 		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
 	}
 

@@ -94,14 +94,14 @@ func (h HealthLevel) String() string {
 
 // PluginMetrics contains metrics collected by a plugin
 type PluginMetrics struct {
-	PacketsProcessed   int64
-	ProcessingTime     time.Duration
-	ErrorCount         int64
-	LastError          string
-	LastErrorTime      time.Time
-	MemoryUsage        int64
-	GoroutineCount     int
-	CustomMetrics      map[string]interface{}
+	PacketsProcessed int64
+	ProcessingTime   time.Duration
+	ErrorCount       int64
+	LastError        string
+	LastErrorTime    time.Time
+	MemoryUsage      int64
+	GoroutineCount   int
+	CustomMetrics    map[string]interface{}
 }
 
 // PluginInfo contains metadata about a plugin
@@ -118,11 +118,11 @@ type PluginInfo struct {
 
 // PluginConfig contains configuration for a plugin
 type PluginConfig struct {
-	Enabled     bool                   `yaml:"enabled"`
-	Priority    int                    `yaml:"priority"`
-	Timeout     time.Duration          `yaml:"timeout"`
-	MaxMemory   int64                  `yaml:"max_memory"`
-	Settings    map[string]interface{} `yaml:"settings"`
+	Enabled   bool                   `yaml:"enabled"`
+	Priority  int                    `yaml:"priority"`
+	Timeout   time.Duration          `yaml:"timeout"`
+	MaxMemory int64                  `yaml:"max_memory"`
+	Settings  map[string]interface{} `yaml:"settings"`
 }
 
 // PluginError represents an error from a plugin
@@ -149,10 +149,10 @@ type PacketContext struct {
 
 // PluginEvent represents events from plugins
 type PluginEvent struct {
-	Type      EventType
+	Type       EventType
 	PluginName string
-	Timestamp time.Time
-	Data      interface{}
+	Timestamp  time.Time
+	Data       interface{}
 }
 
 // EventType represents different types of plugin events

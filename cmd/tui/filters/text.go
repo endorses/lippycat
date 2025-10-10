@@ -12,13 +12,13 @@ import (
 
 // TextFilter filters packets by text content
 type TextFilter struct {
-	searchText   string
-	fields       []string // which fields to search: "all", "src", "dst", "info", "protocol"
-	searchAll    bool     // optimized flag for "all" field search
-	searchSrc    bool
-	searchDst    bool
-	searchInfo   bool
-	searchProto  bool
+	searchText  string
+	fields      []string // which fields to search: "all", "src", "dst", "info", "protocol"
+	searchAll   bool     // optimized flag for "all" field search
+	searchSrc   bool
+	searchDst   bool
+	searchInfo  bool
+	searchProto bool
 }
 
 // NewTextFilter creates a new text filter

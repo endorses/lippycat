@@ -57,11 +57,11 @@ func (i *ICMPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	}
 
 	metadata := map[string]interface{}{
-		"type":        icmpType,
-		"code":        icmpCode,
-		"type_name":   i.typeToString(icmpType),
-		"code_name":   i.codeToString(icmpType, icmpCode),
-		"checksum":    checksum,
+		"type":      icmpType,
+		"code":      icmpCode,
+		"type_name": i.typeToString(icmpType),
+		"code_name": i.codeToString(icmpType, icmpCode),
+		"checksum":  checksum,
 	}
 
 	// Extract additional fields based on ICMP type

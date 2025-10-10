@@ -10,9 +10,9 @@ import (
 
 // HTTPSignature detects HTTP protocol
 type HTTPSignature struct {
-	methods         []string
-	methodsBytes    [][]byte
-	statusPrefixes  []string
+	methods           []string
+	methodsBytes      [][]byte
+	statusPrefixes    []string
 	statusPrefixBytes [][]byte
 }
 

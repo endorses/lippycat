@@ -47,10 +47,10 @@ const (
 
 // PerCPUQueueConfig configures per-CPU queues
 type PerCPUQueueConfig struct {
-	NumQueues    int
-	QueueSize    int
-	Strategy     DistributionStrategy
-	EnableStats  bool
+	NumQueues   int
+	QueueSize   int
+	Strategy    DistributionStrategy
+	EnableStats bool
 }
 
 // NewPerCPUQueue creates a new per-CPU queue system
@@ -230,9 +230,9 @@ func (pcq *PerCPUQueue) Close() {
 
 // WorkStealingQueue implements work-stealing for load balancing
 type WorkStealingQueue struct {
-	queues      []CPUQueue
-	numCPUs     int
-	stealStats  []PaddedCounter // Steal attempts per CPU
+	queues     []CPUQueue
+	numCPUs    int
+	stealStats []PaddedCounter // Steal attempts per CPU
 }
 
 // NewWorkStealingQueue creates a work-stealing queue system

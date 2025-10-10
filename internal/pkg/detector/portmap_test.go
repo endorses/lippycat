@@ -124,7 +124,7 @@ func TestGetSignaturePorts_AllKnownSignatures(t *testing.T) {
 	d := New()
 
 	testCases := []struct {
-		sigName      string
+		sigName       string
 		expectedPorts []uint16
 	}{
 		{"DNS Detector", []uint16{53}},

@@ -171,57 +171,57 @@ func TestIntegration_MalformedPackets(t *testing.T) {
 	det := createFullDetector()
 
 	tests := []struct {
-		name        string
+		name         string
 		createPacket func() gopacket.Packet
-		description string
+		description  string
 	}{
 		{
-			name:        "Truncated IP header",
+			name:         "Truncated IP header",
 			createPacket: createTruncatedIPPacket,
-			description: "IP packet with incomplete header",
+			description:  "IP packet with incomplete header",
 		},
 		{
-			name:        "Invalid SIP method",
+			name: "Invalid SIP method",
 			createPacket: func() gopacket.Packet {
 				return createMalformedSIPPacket("INVALID_METHOD")
 			},
 			description: "SIP packet with invalid method",
 		},
 		{
-			name:        "Malformed HTTP header",
+			name: "Malformed HTTP header",
 			createPacket: func() gopacket.Packet {
 				return createHTTPGoPacket("GET HTTP/1.1\r\nMalformed Header\r\n\r\n")
 			},
 			description: "HTTP packet with malformed headers",
 		},
 		{
-			name:        "Truncated TLS handshake",
+			name:         "Truncated TLS handshake",
 			createPacket: createTruncatedTLSPacket,
-			description: "TLS handshake with truncated data",
+			description:  "TLS handshake with truncated data",
 		},
 		{
-			name:        "Invalid RTP version",
+			name: "Invalid RTP version",
 			createPacket: func() gopacket.Packet {
 				return createInvalidRTPPacket()
 			},
 			description: "RTP packet with invalid version field",
 		},
 		{
-			name:        "Oversized DNS query",
+			name: "Oversized DNS query",
 			createPacket: func() gopacket.Packet {
 				return createOversizedDNSPacket()
 			},
 			description: "DNS packet exceeding size limits",
 		},
 		{
-			name:        "Zero-length payload",
+			name:         "Zero-length payload",
 			createPacket: createZeroLengthPacket,
-			description: "Packet with no payload",
+			description:  "Packet with no payload",
 		},
 		{
-			name:        "Corrupted checksum",
+			name:         "Corrupted checksum",
 			createPacket: createCorruptedChecksumPacket,
-			description: "Packet with invalid checksum",
+			description:  "Packet with invalid checksum",
 		},
 	}
 
@@ -254,10 +254,10 @@ func TestIntegration_ProtocolDetectionAccuracy(t *testing.T) {
 	det := createFullDetector()
 
 	tests := []struct {
-		name            string
-		createPackets   func() []gopacket.Packet
+		name             string
+		createPackets    func() []gopacket.Packet
 		expectedProtocol string
-		minConfidence   float64
+		minConfidence    float64
 	}{
 		{
 			name: "SIP INVITE",
@@ -371,7 +371,7 @@ func createRandomPacket(seed int) gopacket.Packet {
 	// Create packet with random-looking payload
 	payload := make([]byte, 100+seed%400)
 	for i := range payload {
-		payload[i] = byte((seed * 7 + i*13) % 256)
+		payload[i] = byte((seed*7 + i*13) % 256)
 	}
 
 	return createUDPPacketWithPayload(8000+seed%1000, 9000+seed%1000, payload)
@@ -423,7 +423,7 @@ func createSIPPacket(method string) gopacket.Packet {
 
 func createRTPPacket(payloadType byte, sequence uint16) gopacket.Packet {
 	rtpHeader := make([]byte, 12)
-	rtpHeader[0] = 0x80         // Version 2
+	rtpHeader[0] = 0x80 // Version 2
 	rtpHeader[1] = payloadType
 	rtpHeader[2] = byte(sequence >> 8)
 	rtpHeader[3] = byte(sequence & 0xff)
@@ -451,7 +451,7 @@ func createDNSGoPacket(domain string) gopacket.Packet {
 		dnsQuery = append(dnsQuery, byte(len(part)))
 		dnsQuery = append(dnsQuery, part...)
 	}
-	dnsQuery = append(dnsQuery, 0x00) // End of name
+	dnsQuery = append(dnsQuery, 0x00)       // End of name
 	dnsQuery = append(dnsQuery, 0x00, 0x01) // Type A
 	dnsQuery = append(dnsQuery, 0x00, 0x01) // Class IN
 
@@ -469,13 +469,13 @@ func createTLSClientHelloGoPacket(serverName string) gopacket.Packet {
 		0x16,       // Content Type: Handshake
 		0x03, 0x01, // Version: TLS 1.0
 		0x00, 0x40, // Length
-		0x01,       // Handshake Type: ClientHello
+		0x01,             // Handshake Type: ClientHello
 		0x00, 0x00, 0x3c, // Length
 		0x03, 0x03, // Version: TLS 1.2
 	}
 	// Add random bytes
 	clientHello = append(clientHello, make([]byte, 32)...) // Random
-	clientHello = append(clientHello, 0x00) // Session ID length
+	clientHello = append(clientHello, 0x00)                // Session ID length
 
 	return createTCPPacketWithPayload(443, 54321, clientHello)
 }
@@ -485,7 +485,7 @@ func createTLSServerHello() gopacket.Packet {
 		0x16,       // Content Type: Handshake
 		0x03, 0x03, // Version: TLS 1.2
 		0x00, 0x40, // Length
-		0x02,       // Handshake Type: ServerHello
+		0x02,             // Handshake Type: ServerHello
 		0x00, 0x00, 0x3c, // Length
 		0x03, 0x03, // Version: TLS 1.2
 	}
@@ -497,7 +497,7 @@ func createTLSServerHello() gopacket.Packet {
 func createOpenVPNPacket() gopacket.Packet {
 	// OpenVPN packet structure
 	ovpnData := []byte{
-		0x38, // Opcode
+		0x38,                                           // Opcode
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // Session ID
 	}
 	return createUDPPacketWithPayload(1194, 54321, ovpnData)
@@ -590,7 +590,7 @@ func createTruncatedTLSPacket() gopacket.Packet {
 		0x16,       // Content Type: Handshake
 		0x03, 0x01, // Version
 		0x00, 0xFF, // Length says 255 bytes
-		0x01,       // ClientHello
+		0x01, // ClientHello
 		// But payload is truncated
 	}
 	return createTCPPacketWithPayload(443, 54321, tlsData)
@@ -599,8 +599,8 @@ func createTruncatedTLSPacket() gopacket.Packet {
 func createInvalidRTPPacket() gopacket.Packet {
 	// RTP with invalid version
 	rtpData := []byte{
-		0x00, // Invalid version (should be 0x80)
-		0x60, // Payload type
+		0x00,       // Invalid version (should be 0x80)
+		0x60,       // Payload type
 		0x00, 0x01, // Sequence
 		0x00, 0x00, 0x00, 0x00, // Timestamp
 		0x00, 0x00, 0x00, 0x00, // SSRC

@@ -19,17 +19,17 @@ import (
 
 // VoIPAnalyzer handles GPU-accelerated VoIP packet analysis
 type VoIPAnalyzer struct {
-	gpuAccel      *voip.GPUAccelerator
-	config        *voip.GPUConfig
-	batchSize     int
-	batchTimeout  time.Duration
-	packetQueue   chan analyzeRequest
-	resultQueue   chan analyzeResult
-	wg            sync.WaitGroup
-	ctx           context.Context
-	cancel        context.CancelFunc
-	enabled       bool
-	program       *tea.Program
+	gpuAccel     *voip.GPUAccelerator
+	config       *voip.GPUConfig
+	batchSize    int
+	batchTimeout time.Duration
+	packetQueue  chan analyzeRequest
+	resultQueue  chan analyzeResult
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	enabled      bool
+	program      *tea.Program
 }
 
 type analyzeRequest struct {

@@ -126,10 +126,10 @@ func TestIntegration_ConfidenceScoring(t *testing.T) {
 	testdataDir := findTestdataDir(t)
 
 	tests := []struct {
-		name           string
-		pcapFile       string
-		protocol       string
-		minConfidence  float64
+		name          string
+		pcapFile      string
+		protocol      string
+		minConfidence float64
 	}{
 		{
 			name:          "DNS High Confidence",
@@ -250,10 +250,10 @@ func TestIntegration_FlowTracking(t *testing.T) {
 func findTestdataDir(t *testing.T) string {
 	// Try to find testdata directory
 	candidates := []string{
-		"../../../testdata",        // From internal/pkg/detector
-		"../../testdata",           // Alternative
-		"testdata",                 // Root level
-		"./testdata",               // Current dir
+		"../../../testdata", // From internal/pkg/detector
+		"../../testdata",    // Alternative
+		"testdata",          // Root level
+		"./testdata",        // Current dir
 	}
 
 	for _, candidate := range candidates {

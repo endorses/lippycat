@@ -25,11 +25,17 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	// Load test certificates
+	certsDir := filepath.Join("testcerts")
+
+	// Skip if certificates don't exist (not in integration test environment)
+	if _, err := os.Stat(filepath.Join(certsDir, "ca-cert.pem")); os.IsNotExist(err) {
+		t.Skip("Skipping TLS test: certificates not found (run in integration test environment with generated certs)")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Load test certificates
-	certsDir := filepath.Join("testcerts")
 	caCert, err := os.ReadFile(filepath.Join(certsDir, "ca-cert.pem"))
 	require.NoError(t, err, "Failed to read CA certificate")
 
@@ -126,11 +132,17 @@ func TestIntegration_TLS_ClientAuthRequired(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	// Load CA certificate
+	certsDir := filepath.Join("testcerts")
+
+	// Skip if certificates don't exist (not in integration test environment)
+	if _, err := os.Stat(filepath.Join(certsDir, "ca-cert.pem")); os.IsNotExist(err) {
+		t.Skip("Skipping TLS test: certificates not found (run in integration test environment with generated certs)")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Load CA certificate
-	certsDir := filepath.Join("testcerts")
 	caCert, err := os.ReadFile(filepath.Join(certsDir, "ca-cert.pem"))
 	require.NoError(t, err, "Failed to read CA certificate")
 
@@ -178,10 +190,16 @@ func TestIntegration_TLS_TLS13Enforcement(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	certsDir := filepath.Join("testcerts")
+
+	// Skip if certificates don't exist (not in integration test environment)
+	if _, err := os.Stat(filepath.Join(certsDir, "ca-cert.pem")); os.IsNotExist(err) {
+		t.Skip("Skipping TLS test: certificates not found (run in integration test environment with generated certs)")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	certsDir := filepath.Join("testcerts")
 	caCert, err := os.ReadFile(filepath.Join(certsDir, "ca-cert.pem"))
 	require.NoError(t, err)
 
@@ -236,10 +254,15 @@ func TestIntegration_TLS_InvalidCertificate(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	certsDir := filepath.Join("testcerts")
+
+	// Skip if certificates don't exist (not in integration test environment)
+	if _, err := os.Stat(filepath.Join(certsDir, "ca-cert.pem")); os.IsNotExist(err) {
+		t.Skip("Skipping TLS test: certificates not found (run in integration test environment with generated certs)")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	certsDir := filepath.Join("testcerts")
 
 	// Start processor with TLS
 	processorAddr := "127.0.0.1:50061"
@@ -289,10 +312,16 @@ func TestIntegration_TLS_ServerNameVerification(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	certsDir := filepath.Join("testcerts")
+
+	// Skip if certificates don't exist (not in integration test environment)
+	if _, err := os.Stat(filepath.Join(certsDir, "ca-cert.pem")); os.IsNotExist(err) {
+		t.Skip("Skipping TLS test: certificates not found (run in integration test environment with generated certs)")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	certsDir := filepath.Join("testcerts")
 	caCert, err := os.ReadFile(filepath.Join(certsDir, "ca-cert.pem"))
 	require.NoError(t, err)
 
@@ -343,6 +372,13 @@ func TestIntegration_TLS_ServerNameVerification(t *testing.T) {
 func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
+	}
+
+	certsDir := filepath.Join("testcerts")
+
+	// Skip if certificates don't exist (not in integration test environment)
+	if _, err := os.Stat(filepath.Join(certsDir, "ca-cert.pem")); os.IsNotExist(err) {
+		t.Skip("Skipping TLS test: certificates not found (run in integration test environment with generated certs)")
 	}
 
 	// Set production mode

@@ -87,10 +87,9 @@ type Processor struct {
 	upstreamStream data.DataService_StreamPacketsClient
 	upstreamMu     sync.Mutex
 
-	// Monitoring subscribers (TUI clients) - uses copy-on-write for lock-free reads
-	subscribersMu    sync.Mutex
-	subscribersAtomic atomic.Value // stores *subscriberMap
-	nextSubID         atomic.Uint64
+	// Monitoring subscribers (TUI clients) - uses sync.Map for efficient concurrent access
+	subscribers sync.Map // map[string]chan *data.PacketBatch
+	nextSubID   atomic.Uint64
 
 	// Control
 	ctx    context.Context
@@ -133,12 +132,6 @@ type cachedStats struct {
 	lastUpdate int64 // Unix timestamp
 }
 
-// subscriberMap holds the current set of subscribers
-// Used with atomic.Value for copy-on-write pattern
-type subscriberMap struct {
-	subscribers map[string]chan *data.PacketBatch
-}
-
 // New creates a new processor instance
 func New(config Config) (*Processor, error) {
 	if config.ListenAddr == "" {
@@ -158,10 +151,7 @@ func New(config Config) (*Processor, error) {
 		logger.Info("Protocol detection enabled on processor")
 	}
 
-	// Initialize subscriber map with copy-on-write
-	p.subscribersAtomic.Store(&subscriberMap{
-		subscribers: make(map[string]chan *data.PacketBatch),
-	})
+	// Note: subscribers sync.Map requires no initialization
 
 	// Initialize stats cache
 	p.statsCache.Store(&cachedStats{
@@ -1296,11 +1286,16 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 
 	// Check subscriber limit to prevent DoS
 	if p.config.MaxSubscribers > 0 {
-		currentMap := p.subscribersAtomic.Load().(*subscriberMap)
-		if len(currentMap.subscribers) >= p.config.MaxSubscribers {
+		// Count current subscribers
+		count := 0
+		p.subscribers.Range(func(key, value interface{}) bool {
+			count++
+			return true
+		})
+		if count >= p.config.MaxSubscribers {
 			logger.Warn("Subscriber limit reached, rejecting new subscriber",
 				"client_id", clientID,
-				"current_subscribers", len(currentMap.subscribers),
+				"current_subscribers", count,
 				"max_subscribers", p.config.MaxSubscribers)
 			return status.Errorf(codes.ResourceExhausted,
 				"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
@@ -1360,60 +1355,32 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 	}
 }
 
-// addSubscriber adds a subscriber using copy-on-write
+// addSubscriber adds a subscriber using sync.Map (O(1) operation)
 func (p *Processor) addSubscriber(clientID string, ch chan *data.PacketBatch) {
-	p.subscribersMu.Lock()
-	defer p.subscribersMu.Unlock()
-
-	// Get current map
-	oldMap := p.subscribersAtomic.Load().(*subscriberMap)
-
-	// Create new map with added subscriber
-	newSubs := make(map[string]chan *data.PacketBatch, len(oldMap.subscribers)+1)
-	for k, v := range oldMap.subscribers {
-		newSubs[k] = v
-	}
-	newSubs[clientID] = ch
-
-	// Atomically replace the map
-	p.subscribersAtomic.Store(&subscriberMap{subscribers: newSubs})
+	p.subscribers.Store(clientID, ch)
 }
 
-// removeSubscriber removes a subscriber using copy-on-write
+// removeSubscriber removes a subscriber using sync.Map (O(1) operation)
 func (p *Processor) removeSubscriber(clientID string) {
-	p.subscribersMu.Lock()
-	defer p.subscribersMu.Unlock()
-
-	// Get current map
-	oldMap := p.subscribersAtomic.Load().(*subscriberMap)
-
-	// Create new map without the subscriber
-	newSubs := make(map[string]chan *data.PacketBatch, len(oldMap.subscribers)-1)
-	for k, v := range oldMap.subscribers {
-		if k != clientID {
-			newSubs[k] = v
-		}
-	}
-
-	// Atomically replace the map
-	p.subscribersAtomic.Store(&subscriberMap{subscribers: newSubs})
+	p.subscribers.Delete(clientID)
 }
 
 // broadcastToSubscribers broadcasts a packet batch to all monitoring subscribers
-// Uses lock-free read from atomic value
+// Uses sync.Map for lock-free concurrent iteration
 func (p *Processor) broadcastToSubscribers(batch *data.PacketBatch) {
-	// Lock-free read of subscriber map
-	subMap := p.subscribersAtomic.Load().(*subscriberMap)
+	// Lock-free iteration over subscribers
+	p.subscribers.Range(func(key, value interface{}) bool {
+		clientID := key.(string)
+		ch := value.(chan *data.PacketBatch)
 
-	// Iterate over snapshot - no locks needed
-	for clientID, ch := range subMap.subscribers {
 		select {
 		case ch <- batch:
 			logger.Debug("Broadcasted batch to subscriber", "client_id", clientID, "packets", len(batch.Packets))
 		default:
 			logger.Warn("Subscriber channel full, dropping batch", "client_id", clientID)
 		}
-	}
+		return true // Continue iteration
+	})
 }
 
 // enrichPackets performs centralized protocol detection and enriches packet metadata

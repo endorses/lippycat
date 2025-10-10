@@ -357,16 +357,16 @@ func TestSipStreamFactory_ResourceManagement(t *testing.T) {
 		assert.NotNil(t, stream2, "Should create second stream")
 		assert.NotNil(t, stream3, "Should create third stream")
 
-		// Close factory
+		// Shutdown factory
 		assert.NotPanics(t, func() {
-			factory.Close()
-		}, "Factory close should not panic")
+			factory.(*sipStreamFactory).Shutdown()
+		}, "Factory shutdown should not panic")
 
-		// Multiple closes should not panic
+		// Multiple shutdowns should not panic (second one is no-op)
 		assert.NotPanics(t, func() {
-			factory.Close()
-			factory.Close()
-		}, "Multiple factory closes should not panic")
+			factory.(*sipStreamFactory).Shutdown()
+			factory.(*sipStreamFactory).Shutdown()
+		}, "Multiple factory shutdowns should not panic")
 	})
 }
 

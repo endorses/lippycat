@@ -51,6 +51,10 @@ func (h *HybridCallTracker) GetCall(callID string) (*CallInfo, error) {
 		globalLockFreeMetrics.IncrementReads()
 		if err != nil {
 			globalLockFreeMetrics.IncrementLookupMisses()
+			// Check traditional tracker as fallback for calls created before mode switch
+			if traditionalCall, traditionalErr := getCall(callID); traditionalErr == nil {
+				return traditionalCall, nil
+			}
 		}
 		return result, err
 	}
@@ -103,7 +107,15 @@ func (h *HybridCallTracker) AddPortMapping(port, callID string) {
 func (h *HybridCallTracker) GetCallIDByPort(port string) (string, bool) {
 	if h.enabled.Load() {
 		globalLockFreeMetrics.IncrementReads()
-		return h.lockFree.GetCallIDByPort(port)
+		callID, found := h.lockFree.GetCallIDByPort(port)
+		if !found {
+			// Check traditional tracker as fallback for mappings created before mode switch
+			tracker := getTracker()
+			tracker.mu.RLock()
+			callID, found = tracker.portToCallID[port]
+			tracker.mu.RUnlock()
+		}
+		return callID, found
 	}
 
 	// Traditional method

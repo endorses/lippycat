@@ -108,6 +108,7 @@ func applyPerformanceModeOptimizations(config *Config) {
 			config.MaxGoroutines = 500
 		}
 		config.TCPBufferStrategy = "fixed"
+		config.TCPLatencyOptimization = true
 
 	case "memory":
 		// Optimize for memory usage
@@ -293,10 +294,10 @@ func (f *sipStreamFactory) GetActiveGoroutines() int64 {
 }
 
 // GetMaxGoroutines returns the maximum number of goroutines allowed
-func (f *sipStreamFactory) GetMaxGoroutines() int {
+func (f *sipStreamFactory) GetMaxGoroutines() int64 {
 	f.configMutex.RLock()
 	defer f.configMutex.RUnlock()
-	return f.config.MaxGoroutines
+	return int64(f.config.MaxGoroutines)
 }
 
 func (f *sipStreamFactory) Close() {

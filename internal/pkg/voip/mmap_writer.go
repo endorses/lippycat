@@ -66,6 +66,7 @@ func NewMmapWriter(filename string, config *MmapWriterConfig) (*MmapWriter, erro
 		return nil, fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 	writer.writer = pcapWriter
+	writer.currentPos = 24 // PCAP header was written
 
 	// Set up memory mapping if enabled and file is large enough
 	if config.EnableMmap && config.PreallocSize > 0 {
@@ -116,7 +117,12 @@ func (w *MmapWriter) setupMmap(size int64) error {
 func (w *MmapWriter) WritePacket(ci gopacket.CaptureInfo, data []byte) error {
 	if w.fallbackMode || w.mmapData == nil {
 		// Use regular writer
-		return w.writer.WritePacket(ci, data)
+		err := w.writer.WritePacket(ci, data)
+		if err == nil {
+			// Update currentPos to track bytes written in fallback mode (16-byte header + data)
+			w.currentPos += int64(16 + len(data))
+		}
+		return err
 	}
 
 	// Calculate packet record size (16-byte header + data)

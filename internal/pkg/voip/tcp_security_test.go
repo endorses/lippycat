@@ -220,37 +220,37 @@ func TestSIPStream_CallIDParsing(t *testing.T) {
 	}{
 		{
 			name:           "Standard Call-ID header",
-			input:          "Call-ID: abc123@example.com\r\n",
+			input:          "Call-ID: abc123@example.com\r\n\r\n",
 			expectedCallID: "abc123@example.com",
 			description:    "Standard Call-ID should be parsed",
 		},
 		{
 			name:           "Short form Call-ID (i:)",
-			input:          "i: short-call-id\r\n",
+			input:          "i: short-call-id\r\n\r\n",
 			expectedCallID: "short-call-id",
 			description:    "Short form Call-ID should be parsed",
 		},
 		{
 			name:           "Call-ID with extra whitespace",
-			input:          "Call-ID:   whitespace-call-id   \r\n",
+			input:          "Call-ID:   whitespace-call-id   \r\n\r\n",
 			expectedCallID: "whitespace-call-id",
 			description:    "Whitespace should be trimmed",
 		},
 		{
 			name:           "Call-ID with special characters",
-			input:          "Call-ID: call-id-with-@#$%^&*()_+\r\n",
+			input:          "Call-ID: call-id-with-@#$%^&*()_+\r\n\r\n",
 			expectedCallID: "call-id-with-@#$%^&*()_+",
 			description:    "Special characters should be preserved",
 		},
 		{
 			name:           "Empty Call-ID",
-			input:          "Call-ID: \r\n",
+			input:          "Call-ID: \r\n\r\n",
 			expectedCallID: "",
 			description:    "Empty Call-ID should be handled",
 		},
 		{
 			name:           "Non-Call-ID line",
-			input:          "From: user@example.com\r\n",
+			input:          "From: user@example.com\r\n\r\n",
 			expectedCallID: "",
 			description:    "Non-Call-ID lines should be ignored",
 		},
@@ -266,11 +266,9 @@ func TestSIPStream_CallIDParsing(t *testing.T) {
 			// Create a mock ReaderStream
 			readerStream := tcpreader.NewReaderStream()
 
-			// Create a minimal factory for testing
-			config := GetConfig()
-			mockFactory := &sipStreamFactory{
-				config: config,
-			}
+			// Create a properly initialized factory for testing
+			mockFactory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+			defer mockFactory.Shutdown()
 
 			stream := &SIPStream{
 				reader:         &readerStream,

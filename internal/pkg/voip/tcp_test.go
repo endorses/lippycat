@@ -326,6 +326,10 @@ func TestTCPBufferStats(t *testing.T) {
 	tcpBufferStats = &tcpBufferStatsInternal{
 		lastStatsUpdate: time.Now(),
 	}
+	// Also clear the buffer map
+	tcpPacketBuffersMu.Lock()
+	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffersMu.Unlock()
 
 	stats := GetTCPBufferStats()
 	assert.Equal(t, int64(0), stats.TotalBuffers)
@@ -439,6 +443,11 @@ func TestTCPBufferPool(t *testing.T) {
 		buffers: make([]*TCPPacketBuffer, 0, 10),
 		maxSize: 10,
 	}
+
+	// Reset atomic counters
+	atomic.StoreInt64(&bufferCreationCount, 0)
+	atomic.StoreInt64(&bufferReuseCount, 0)
+	atomic.StoreInt64(&bufferReleaseCount, 0)
 
 	// Test buffer creation
 	buffer1 := getOrCreateBuffer("adaptive", 100)

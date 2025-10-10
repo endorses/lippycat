@@ -244,6 +244,22 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 	headersDone := false
 
 	for {
+		// If headers are done and no content-length, we're done
+		if headersDone && contentLength == 0 {
+			break
+		}
+
+		// If headers are done and we have content to read
+		if headersDone && contentLength > 0 {
+			content := make([]byte, contentLength)
+			_, err := io.ReadFull(reader, content)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read SIP message content (%d bytes) from TCP stream: %w", contentLength, err)
+			}
+			message.Write(content)
+			break
+		}
+
 		select {
 		case <-s.ctx.Done():
 			return nil, s.ctx.Err()
@@ -278,22 +294,6 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 					return nil, fmt.Errorf("invalid Content-Length: %w", parseErr)
 				}
 			}
-		}
-
-		// If we've finished headers and have content to read
-		if headersDone && contentLength > 0 {
-			content := make([]byte, contentLength)
-			_, err := io.ReadFull(reader, content)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read SIP message content (%d bytes) from TCP stream: %w", contentLength, err)
-			}
-			message.Write(content)
-			break
-		}
-
-		// If headers are done and no content-length, we're done
-		if headersDone && contentLength == 0 {
-			break
 		}
 	}
 
@@ -379,7 +379,12 @@ func detectCallIDHeader(line string, callID *string) bool {
 		for valueStart < len(trimmed) && (trimmed[valueStart] == ' ' || trimmed[valueStart] == '\t') {
 			valueStart++
 		}
-		extractedCallID = trimmed[valueStart:]
+		// Trim trailing whitespace from value
+		valueEnd := len(trimmed)
+		for valueEnd > valueStart && (trimmed[valueEnd-1] == ' ' || trimmed[valueEnd-1] == '\t') {
+			valueEnd--
+		}
+		extractedCallID = trimmed[valueStart:valueEnd]
 	} else if len(trimmed) >= 2 && compareHeaderCI(trimmed[:2], "i:") {
 		// Check for compact "i:" header
 		valueStart := 2
@@ -387,7 +392,12 @@ func detectCallIDHeader(line string, callID *string) bool {
 		for valueStart < len(trimmed) && (trimmed[valueStart] == ' ' || trimmed[valueStart] == '\t') {
 			valueStart++
 		}
-		extractedCallID = trimmed[valueStart:]
+		// Trim trailing whitespace from value
+		valueEnd := len(trimmed)
+		for valueEnd > valueStart && (trimmed[valueEnd-1] == ' ' || trimmed[valueEnd-1] == '\t') {
+			valueEnd--
+		}
+		extractedCallID = trimmed[valueStart:valueEnd]
 	} else {
 		return false
 	}

@@ -22,6 +22,17 @@ func handleSipMessage(data []byte) bool {
 	if containsUserInHeaders(headers) {
 		callID := headers["call-id"]
 		if callID != "" {
+			// Truncate excessively long Call-IDs (for DoS protection)
+			const maxCallIDLength = 1024
+			if len(callID) > maxCallIDLength {
+				logger.Warn("Truncating excessively long Call-ID",
+					"original_length", len(callID),
+					"truncated_length", maxCallIDLength,
+					"source", "sip_processing")
+				callID = callID[:maxCallIDLength]
+				headers["call-id"] = callID
+			}
+
 			// Validate the Call-ID for security
 			if err := ValidateCallIDForSecurity(callID); err != nil {
 				logger.Warn("Malicious Call-ID detected and rejected",

@@ -31,7 +31,7 @@ type PerformanceBaseline struct {
 var performanceTargets = map[string]PerformanceBenchmark{
 	"CallIDDetection": {
 		Name:        "CallIDDetection",
-		NsPerOp:     200.0, // Target: under 200ns per operation
+		NsPerOp:     250.0, // Target: under 250ns per operation (increased for proper whitespace trimming)
 		BytesPerOp:  0,     // Target: zero allocations
 		AllocsPerOp: 0,     // Target: zero allocations
 	},

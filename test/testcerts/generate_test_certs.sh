@@ -73,7 +73,7 @@ cat upstream-cert.pem upstream-key.pem > upstream-combined.pem
 rm -f *.csr *.srl *.cnf
 
 # Set restrictive permissions
-chmod 600 *.key *.pem
+chmod 600 *.pem
 
 echo
 echo "✅ Test certificates generated successfully!"

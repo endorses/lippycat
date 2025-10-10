@@ -100,35 +100,35 @@ jobs:
       - name: Build Docker images
         run: |
           cd test
-          docker-compose build
+          docker compose build
 
       - name: Start services
         run: |
           cd test
-          docker-compose up -d processor hunter1 hunter2
+          docker compose up -d processor hunter1 hunter2
 
       - name: Wait for services to be healthy
         run: |
           cd test
-          timeout 60 bash -c 'until docker-compose ps processor | grep -q "healthy"; do sleep 2; done'
+          timeout 60 bash -c 'until docker compose ps processor | grep -q "healthy"; do sleep 2; done'
           echo "Processor is healthy"
 
       - name: Check service logs
         run: |
           cd test
-          docker-compose logs processor
-          docker-compose logs hunter1
+          docker compose logs processor
+          docker compose logs hunter1
 
       - name: Run Docker-based tests
         run: |
           cd test
-          docker-compose exec -T processor lc debug stats || true
-          docker-compose exec -T hunter1 lc debug stats || true
+          docker compose exec -T processor lc debug stats || true
+          docker compose exec -T hunter1 lc debug stats || true
 
       - name: Test TLS connectivity
         run: |
           cd test
-          docker-compose exec -T client openssl s_client -connect processor.test.local:50051 \
+          docker compose exec -T client openssl s_client -connect processor.test.local:50051 \
             -cert /certs/client-cert.pem \
             -key /certs/client-key.pem \
             -CAfile /certs/ca-cert.pem \
@@ -138,7 +138,7 @@ jobs:
         if: always()
         run: |
           cd test
-          docker-compose logs > docker-integration-logs.txt
+          docker compose logs > docker-integration-logs.txt
 
       - name: Upload Docker logs
         if: always()
@@ -152,7 +152,7 @@ jobs:
         if: always()
         run: |
           cd test
-          docker-compose down -v
+          docker compose down -v
 
   benchmark-tests:
     name: Performance Benchmarks

@@ -149,6 +149,7 @@ func TestSIPStream_PanicRecovery(t *testing.T) {
 			reader:         nil, // This will cause panic when accessed
 			callIDDetector: detector,
 			ctx:            ctx,
+			factory:        factory.(*sipStreamFactory),
 		}
 
 		// Mock the reader to panic
@@ -187,6 +188,7 @@ func TestSIPStream_ContextCancellation(t *testing.T) {
 			reader:         nil, // We'll test the context cancellation path
 			callIDDetector: detector,
 			ctx:            ctx,
+			factory:        factory.(*sipStreamFactory),
 		}
 
 		done := make(chan bool, 1)

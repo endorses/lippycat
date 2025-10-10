@@ -30,7 +30,8 @@ RUN mkdir -p /certs
 
 # Non-root user
 RUN addgroup -g 1000 lippycat && \
-    adduser -D -u 1000 -G lippycat lippycat
+    adduser -D -u 1000 -G lippycat lippycat && \
+    chown -R lippycat:lippycat /certs
 
 USER lippycat
 

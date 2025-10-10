@@ -24,9 +24,15 @@ import (
 	"github.com/spf13/viper"
 )
 
+// captureHandle holds cancellation and completion signaling for a capture session
+type captureHandle struct {
+	cancel context.CancelFunc
+	done   chan struct{} // Closed when capture goroutine exits
+}
+
 // Global state for capture management (shared with tui.go)
 var (
-	currentCaptureCancel context.CancelFunc
+	currentCaptureHandle *captureHandle
 	currentProgram       *tea.Program
 )
 
@@ -923,17 +929,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case components.RestartCaptureMsg:
-		// Stop current capture using global cancel function
-		if currentCaptureCancel != nil {
-			// Cancel the old capture and wait briefly for cleanup
-			// This prevents the old and new captures from running simultaneously
-			cancelFunc := currentCaptureCancel
-			currentCaptureCancel = nil // Clear immediately to prevent double-cancellation
+		// Stop current capture and wait for it to finish
+		if currentCaptureHandle != nil {
+			// Cancel the old capture and wait for completion
+			// This ensures old and new captures don't run simultaneously
+			handle := currentCaptureHandle
+			currentCaptureHandle = nil // Clear immediately to prevent double-cancellation
 
-			cancelFunc()
-			// Give old capture a moment to stop sending packets
-			// (most captures stop immediately, offline captures may take slightly longer)
-			time.Sleep(100 * time.Millisecond)
+			handle.cancel()
+			// Wait for capture goroutine to finish (deterministic, no race conditions)
+			<-handle.done
 		}
 
 		// Keep all remote clients connected regardless of mode
@@ -983,17 +988,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Remote mode doesn't need a capture context since it uses gRPC clients
 			if msg.Mode == components.CaptureModeLive || msg.Mode == components.CaptureModeOffline {
 				ctx, cancel := context.WithCancel(context.Background())
-				currentCaptureCancel = cancel
+				done := make(chan struct{})
+				currentCaptureHandle = &captureHandle{cancel: cancel, done: done}
 
 				switch msg.Mode {
 				case components.CaptureModeLive:
-					go startLiveCapture(ctx, msg.Interface, m.bpfFilter, currentProgram)
+					go startLiveCapture(ctx, msg.Interface, m.bpfFilter, currentProgram, done)
 				case components.CaptureModeOffline:
-					go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram)
+					go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram, done)
 				}
 			} else if msg.Mode == components.CaptureModeRemote {
-				// Remote mode: set capture cancel to nil since we're not running local capture
-				currentCaptureCancel = nil
+				// Remote mode: set capture handle to nil since we're not running local capture
+				currentCaptureHandle = nil
 
 				// Load and connect to nodes from YAML file (if provided)
 				if msg.NodesFile != "" {
@@ -1849,14 +1855,16 @@ func saveThemePreference(theme themes.Theme) {
 }
 
 // startLiveCapture starts packet capture on the specified interface
-func startLiveCapture(ctx context.Context, interfaceName string, filter string, program *tea.Program) {
+func startLiveCapture(ctx context.Context, interfaceName string, filter string, program *tea.Program, done chan struct{}) {
+	defer close(done) // Signal completion when capture goroutine exits
 	capture.StartLiveSniffer(interfaceName, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTUISniffer(ctx, devices, filter, program)
 	})
 }
 
 // startOfflineCapture starts packet capture from a PCAP file
-func startOfflineCapture(ctx context.Context, pcapFile string, filter string, program *tea.Program) {
+func startOfflineCapture(ctx context.Context, pcapFile string, filter string, program *tea.Program, done chan struct{}) {
+	defer close(done) // Signal completion when capture goroutine exits
 	capture.StartOfflineSniffer(pcapFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTUISniffer(ctx, devices, filter, program)
 	})

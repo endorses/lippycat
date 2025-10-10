@@ -64,9 +64,11 @@ func runTUI(cmd *cobra.Command, args []string) {
 	// Start packet capture in background (skip if starting in remote mode)
 	if !remoteMode {
 		ctx, cancel := context.WithCancel(context.Background())
-		currentCaptureCancel = cancel
+		done := make(chan struct{})
+		currentCaptureHandle = &captureHandle{cancel: cancel, done: done}
 
 		go func() {
+			defer close(done) // Signal completion when capture exits
 			if readFile != "" {
 				capture.StartOfflineSniffer(readFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 					startTUISniffer(ctx, devices, filter, p)

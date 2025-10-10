@@ -209,20 +209,25 @@ func TestInitWriters_ErrorHandling(t *testing.T) {
 					t.Skip("Cannot test permission denied as root")
 				}
 
-				// Create a directory without write permissions
+				// Create a read-only parent directory
 				tmpDir := t.TempDir()
-				noWriteDir := filepath.Join(tmpDir, "nowrite")
-				err := os.Mkdir(noWriteDir, 0555) // Read and execute, but no write
+				noWriteParent := filepath.Join(tmpDir, "nowrite")
+				err := os.Mkdir(noWriteParent, 0555) // Read and execute, but no write
 				require.NoError(t, err)
 
-				// Change to this directory for the test
-				oldPwd, _ := os.Getwd()
-				err = os.Chdir(noWriteDir)
-				require.NoError(t, err)
+				// Point XDG_DATA_HOME to a subdirectory that can't be created
+				oldXDG := os.Getenv("XDG_DATA_HOME")
+				os.Setenv("XDG_DATA_HOME", noWriteParent)
 
 				return "test-call-456", func() {
-					os.Chdir(oldPwd)
-					os.Chmod(noWriteDir, 0755) // Restore permissions for cleanup
+					// Restore environment
+					if oldXDG != "" {
+						os.Setenv("XDG_DATA_HOME", oldXDG)
+					} else {
+						os.Unsetenv("XDG_DATA_HOME")
+					}
+					// Restore permissions for cleanup
+					os.Chmod(noWriteParent, 0755)
 				}
 			},
 			expectError: true,

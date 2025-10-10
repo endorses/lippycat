@@ -1,0 +1,31 @@
+# Dockerfile for packet generator (integration testing)
+# Generates synthetic traffic for testing hunters and processors
+
+FROM alpine:latest
+
+# Install packet generation tools
+RUN apk add --no-cache \
+    tcpreplay \
+    tcpdump \
+    python3 \
+    py3-pip \
+    bash \
+    curl \
+    nmap \
+    netcat-openbsd
+
+# Install scapy for advanced packet crafting
+RUN pip3 install --no-cache-dir scapy
+
+# Create directories
+RUN mkdir -p /testdata /scripts /pcaps
+
+# Copy packet generation scripts
+COPY test/scripts/generate_traffic.sh /scripts/
+COPY test/scripts/generate_voip_traffic.py /scripts/
+RUN chmod +x /scripts/*.sh /scripts/*.py
+
+WORKDIR /scripts
+
+ENTRYPOINT ["/bin/bash"]
+CMD ["/scripts/generate_traffic.sh"]

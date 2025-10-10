@@ -74,6 +74,8 @@ go build -tags cli -o lc-cli
 go build -tags tui -o lc-tui
 ```
 
+**Note on Build Tags:** If you run `go build ./...` without specifying tags, you may see warnings about build constraints excluding files in the `cmd/` directory. This is expected behavior - the build system uses tags to exclude unused code paths for each specialized binary. Always use `make build` or specify a tag explicitly (e.g., `-tags all`) to build successfully.
+
 #### Installing system-wide
 ```bash
 # Install to $GOPATH/bin as 'lc'

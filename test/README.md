@@ -195,9 +195,12 @@ These integration tests implement recommendation 20 from the code review:
 
 - **Hunter/Processor Tests**: 7 test cases
 - **Protocol Detection Tests**: 4 test cases
-- **Total Assertions**: 50+
-- **Failure Scenarios**: 8 (crashes, partitions, restarts)
-- **Performance Tests**: 2 (high volume, concurrent hunters)
+- **TLS Integration Tests**: 6 test cases (NEW)
+- **Filter Distribution Tests**: 5 test cases (NEW)
+- **Performance Benchmarks**: 5 benchmarks (NEW)
+- **Total Assertions**: 100+
+- **Failure Scenarios**: 10+ (crashes, partitions, restarts, TLS failures, filter distribution failures)
+- **Docker Compose Services**: 7 (processors, hunters, generator, client)
 
 ## Known Limitations
 
@@ -206,15 +209,92 @@ These integration tests implement recommendation 20 from the code review:
 3. **RTP Detection**: Synthetic RTP packets may not match detector expectations (test disabled)
 4. **Real Traffic**: Tests use synthetic packets, not real network captures
 
-## Future Improvements
+## New Features (2025-10-10)
 
-1. **PCAP Replay**: Use real PCAP files for more realistic testing
+### ✅ TLS Integration Tests (`tls_integration_test.go`)
+Comprehensive TLS security testing:
+- **Mutual TLS Authentication**: Full mTLS with client certificates
+- **TLS 1.3 Enforcement**: Validates TLS version requirements
+- **Certificate Validation**: Tests invalid/self-signed cert rejection
+- **Server Name Verification**: SNI validation testing
+- **Production Mode Enforcement**: Tests security guards
+
+**Run TLS tests:**
+```bash
+go test -v ./test/ -run TestIntegration_TLS
+```
+
+### ✅ Filter Distribution Tests (`filter_distribution_integration_test.go`)
+Dynamic filter management testing:
+- **Single Hunter**: Filter push to individual hunter
+- **Multiple Hunters**: Broadcast filters to hunter groups
+- **Update/Remove**: Filter lifecycle management
+- **Circuit Breaker**: Failed hunter handling
+- **Priority Ordering**: Filter priority enforcement
+
+**Run filter tests:**
+```bash
+go test -v ./test/ -run TestIntegration_FilterDistribution
+```
+
+### ✅ Docker Compose Environment (`docker-compose.yml`)
+Isolated multi-node testing infrastructure:
+- **Multiple Processors**: Primary + upstream hierarchical setup
+- **Multiple Hunters**: 3 hunter nodes with TLS
+- **Packet Generator**: Synthetic traffic generation
+- **TUI/CLI Client**: Interactive testing interface
+- **Network Isolation**: Dedicated test network
+
+**Quick start:**
+```bash
+cd test
+./testcerts/generate_test_certs.sh
+docker-compose up --build
+```
+
+See [DOCKER_TESTING.md](DOCKER_TESTING.md) for detailed Docker Compose usage.
+
+### ✅ Performance Benchmarks (`benchmark_test.go`)
+Comprehensive performance testing:
+- **Packet Throughput**: Measures packets/sec and MB/sec
+- **End-to-End Latency**: Measures µs per packet
+- **Filter Distribution**: Measures distribution speed
+- **Concurrent Hunters**: Tests scalability
+- **Protocol Detection**: Detection performance
+
+**Run benchmarks:**
+```bash
+go test -v ./test/ -bench=. -benchmem -benchtime=10s
+```
+
+### ✅ CI/CD Integration (`.github/workflows/integration-tests.yml`)
+Automated testing pipeline:
+- **Unit Tests**: With race detection and coverage
+- **Integration Tests**: All TestIntegration_* tests
+- **Docker Integration**: Multi-node Docker testing
+- **Benchmarks**: Performance regression detection
+- **Security Scan**: gosec + govulncheck
+- **Lint**: golangci-lint + gofmt checks
+
+### ✅ Test Certificate Generation (`testcerts/`)
+Automated TLS certificate generation:
+- **CA Certificate**: Test certificate authority
+- **Server Certificates**: Processor + upstream
+- **Client Certificates**: Hunter + TUI client
+- **10-Year Validity**: Long-lived test certs
+
+**Generate certificates:**
+```bash
+cd test/testcerts
+./generate_test_certs.sh
+```
+
+## Future Enhancements
+
+1. **PCAP Replay**: Use real PCAP files for more realistic testing (partially implemented via Docker generator)
 2. **Chaos Engineering**: Add deliberate failures (network delays, packet loss)
 3. **Load Testing**: Extend high-volume tests to longer durations
-4. **Filter Distribution**: Test dynamic filter updates to hunters
-5. **TLS Tests**: Add TLS-enabled hunter/processor communication tests
-6. **Metrics Validation**: Verify flow control metrics and backpressure signals
-7. **Multi-Processor**: Test hierarchical processor configurations
+4. **Metrics Validation**: Prometheus/OpenTelemetry metrics testing
 
 ## Debugging
 
@@ -259,4 +339,44 @@ When adding integration tests:
 
 - [Code Review](../CODE_REVIEW.md) - Original integration test requirements
 - [Architecture](../CLAUDE.md) - System architecture overview
+- [Docker Testing](DOCKER_TESTING.md) - Docker Compose multi-node testing guide
+- [Test Certificates](testcerts/README.md) - TLS certificate generation
 - [Unit Tests](../internal/pkg/*/README.md) - Package-specific unit tests
+- [Security](../docs/SECURITY.md) - Production TLS setup
+
+## Test Coverage Matrix
+
+| Test Category | Test Files | Coverage |
+|---------------|-----------|----------|
+| Hunter/Processor Integration | `integration_test.go` | Basic flow, crash recovery, network partition, high volume, multiple hunters, jumbo frames |
+| Protocol Detection | `protocol_detection_integration_test.go` | False positives, multi-protocol, malformed packets, accuracy |
+| TLS Security | `tls_integration_test.go` | mTLS, TLS 1.3, cert validation, SNI, production mode |
+| Filter Distribution | `filter_distribution_integration_test.go` | Single/multi-hunter, update/remove, circuit breaker, priority |
+| Performance | `benchmark_test.go` | Throughput, latency, filter distribution, concurrent hunters |
+| Docker Multi-Node | `docker-compose.yml` | Hierarchical processors, TLS-enabled, packet generation |
+
+## Quick Reference Commands
+
+```bash
+# Run all integration tests
+go test -v ./test/... -run TestIntegration
+
+# Run specific category
+go test -v ./test/ -run TestIntegration_TLS
+go test -v ./test/ -run TestIntegration_FilterDistribution
+
+# Run with race detector
+go test -v -race ./test/... -run TestIntegration
+
+# Run benchmarks
+go test -v ./test/ -bench=. -benchmem -benchtime=10s
+
+# Docker Compose quick start
+cd test
+./testcerts/generate_test_certs.sh
+docker-compose up --build
+
+# Docker Compose cleanup
+cd test
+docker-compose down -v
+```

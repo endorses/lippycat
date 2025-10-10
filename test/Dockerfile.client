@@ -1,0 +1,38 @@
+# Dockerfile for lippycat TUI/CLI client (integration testing)
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git make gcc musl-dev libpcap-dev linux-headers
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build TUI variant
+RUN make tui
+
+# Runtime image
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache libpcap ca-certificates
+
+# Copy binary from builder
+COPY --from=builder /build/bin/lc-tui /usr/local/bin/lc
+
+# Create directories
+RUN mkdir -p /certs
+
+# Non-root user
+RUN addgroup -g 1000 lippycat && \
+    adduser -D -u 1000 -G lippycat lippycat
+
+USER lippycat
+
+ENTRYPOINT ["/usr/local/bin/lc"]
+CMD ["tui", "--remote"]

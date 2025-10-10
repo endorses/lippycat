@@ -1,0 +1,10 @@
+# Test certificates - regenerate with generate_test_certs.sh
+*.pem
+*.key
+*.csr
+*.srl
+*.cnf
+
+# But keep the generation script
+!generate_test_certs.sh
+!README.md

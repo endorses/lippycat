@@ -1,0 +1,37 @@
+# Dockerfile for lippycat hunter node (integration testing)
+FROM golang:1.24-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git make gcc musl-dev libpcap-dev linux-headers
+
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build hunter variant
+RUN make hunter
+
+# Runtime image
+FROM alpine:latest
+
+# Install runtime dependencies
+RUN apk add --no-cache libpcap ca-certificates tcpdump
+
+# Copy binary from builder
+COPY --from=builder /build/bin/lc-hunter /usr/local/bin/lc
+
+# Create directories
+RUN mkdir -p /certs
+
+# Hunter needs elevated privileges for packet capture
+# Will run as root in container (isolated environment)
+
+EXPOSE 50051
+
+ENTRYPOINT ["/usr/local/bin/lc"]
+CMD ["hunt", "--interface", "any"]

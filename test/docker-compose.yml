@@ -1,0 +1,192 @@
+version: '3.8'
+
+# Docker Compose setup for lippycat integration testing
+# This provides isolated multi-node testing with:
+# - Multiple processor nodes (including hierarchical setup)
+# - Multiple hunter nodes
+# - TLS-enabled communication
+# - Network isolation and simulation
+
+services:
+  # Primary processor node
+  processor:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.processor
+    container_name: lippycat-test-processor
+    hostname: processor.test.local
+    ports:
+      - "50051:50051"
+    environment:
+      - LIPPYCAT_LOG_LEVEL=debug
+      - LIPPYCAT_TLS_ENABLED=true
+      - LIPPYCAT_TLS_CERT=/certs/processor-cert.pem
+      - LIPPYCAT_TLS_KEY=/certs/processor-key.pem
+      - LIPPYCAT_TLS_CA=/certs/ca-cert.pem
+      - LIPPYCAT_TLS_CLIENT_AUTH=true
+      - LIPPYCAT_PRODUCTION=false  # Test mode
+    volumes:
+      - ./testcerts:/certs:ro
+      - ./testdata:/testdata:ro
+      - processor-pcaps:/output
+    networks:
+      - lippycat-test
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/processor.pcap"]
+
+  # Upstream processor (for hierarchical testing)
+  upstream-processor:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.processor
+    container_name: lippycat-test-upstream
+    hostname: upstream.test.local
+    ports:
+      - "50052:50051"
+    environment:
+      - LIPPYCAT_LOG_LEVEL=debug
+      - LIPPYCAT_TLS_ENABLED=true
+      - LIPPYCAT_TLS_CERT=/certs/upstream-cert.pem
+      - LIPPYCAT_TLS_KEY=/certs/upstream-key.pem
+      - LIPPYCAT_TLS_CA=/certs/ca-cert.pem
+      - LIPPYCAT_TLS_CLIENT_AUTH=true
+      - LIPPYCAT_PRODUCTION=false
+    volumes:
+      - ./testcerts:/certs:ro
+      - upstream-pcaps:/output
+    networks:
+      - lippycat-test
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/upstream.pcap"]
+
+  # Hunter node 1
+  hunter1:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.hunter
+    container_name: lippycat-test-hunter1
+    hostname: hunter1.test.local
+    cap_add:
+      - NET_ADMIN  # Required for packet capture
+    environment:
+      - LIPPYCAT_LOG_LEVEL=debug
+      - LIPPYCAT_TLS_ENABLED=true
+      - LIPPYCAT_TLS_CERT=/certs/hunter-cert.pem
+      - LIPPYCAT_TLS_KEY=/certs/hunter-key.pem
+      - LIPPYCAT_TLS_CA=/certs/ca-cert.pem
+      - LIPPYCAT_PRODUCTION=false
+    volumes:
+      - ./testcerts:/certs:ro
+    networks:
+      - lippycat-test
+    depends_on:
+      processor:
+        condition: service_healthy
+    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter1"]
+
+  # Hunter node 2
+  hunter2:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.hunter
+    container_name: lippycat-test-hunter2
+    hostname: hunter2.test.local
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - LIPPYCAT_LOG_LEVEL=debug
+      - LIPPYCAT_TLS_ENABLED=true
+      - LIPPYCAT_TLS_CERT=/certs/hunter-cert.pem
+      - LIPPYCAT_TLS_KEY=/certs/hunter-key.pem
+      - LIPPYCAT_TLS_CA=/certs/ca-cert.pem
+      - LIPPYCAT_PRODUCTION=false
+    volumes:
+      - ./testcerts:/certs:ro
+    networks:
+      - lippycat-test
+    depends_on:
+      processor:
+        condition: service_healthy
+    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter2"]
+
+  # Hunter node 3 (connects to upstream processor for hierarchical testing)
+  hunter3:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.hunter
+    container_name: lippycat-test-hunter3
+    hostname: hunter3.test.local
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - LIPPYCAT_LOG_LEVEL=debug
+      - LIPPYCAT_TLS_ENABLED=true
+      - LIPPYCAT_TLS_CERT=/certs/hunter-cert.pem
+      - LIPPYCAT_TLS_KEY=/certs/hunter-key.pem
+      - LIPPYCAT_TLS_CA=/certs/ca-cert.pem
+      - LIPPYCAT_PRODUCTION=false
+    volumes:
+      - ./testcerts:/certs:ro
+    networks:
+      - lippycat-test
+    depends_on:
+      upstream-processor:
+        condition: service_healthy
+    command: ["hunt", "--interface", "any", "--processor", "upstream.test.local:50051", "--hunter-id", "hunter3"]
+
+  # Packet generator for testing
+  packet-generator:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.generator
+    container_name: lippycat-test-generator
+    hostname: generator.test.local
+    networks:
+      - lippycat-test
+    volumes:
+      - ./testdata:/testdata:ro
+      - ./scripts:/scripts:ro
+    command: ["sleep", "infinity"]  # Keep alive for manual packet injection
+
+  # TUI/CLI client for manual testing
+  client:
+    build:
+      context: ..
+      dockerfile: test/Dockerfile.client
+    container_name: lippycat-test-client
+    hostname: client.test.local
+    environment:
+      - LIPPYCAT_LOG_LEVEL=info
+      - LIPPYCAT_TLS_ENABLED=true
+      - LIPPYCAT_TLS_CERT=/certs/client-cert.pem
+      - LIPPYCAT_TLS_KEY=/certs/client-key.pem
+      - LIPPYCAT_TLS_CA=/certs/ca-cert.pem
+    volumes:
+      - ./testcerts:/certs:ro
+    networks:
+      - lippycat-test
+    depends_on:
+      processor:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+    command: ["sh"]
+
+networks:
+  lippycat-test:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  processor-pcaps:
+  upstream-pcaps:

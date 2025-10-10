@@ -11,7 +11,7 @@ import (
 func TestDefaultGPUConfig(t *testing.T) {
 	config := DefaultGPUConfig()
 
-	assert.False(t, config.Enabled) // Disabled by default
+	assert.True(t, config.Enabled) // Enabled by default for pattern matching
 	assert.Equal(t, 0, config.DeviceID)
 	assert.Equal(t, "auto", config.Backend)
 	assert.Equal(t, 1024, config.MaxBatchSize)

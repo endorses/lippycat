@@ -1,10 +1,8 @@
-# Test certificates - regenerate with generate_test_certs.sh
-*.pem
-*.key
+# Test certificates are committed to git for convenience
+# This allows immediate test execution without a setup step
+# Security scanners are configured to ignore this directory (see .gitguardian.yaml)
+
+# Only ignore intermediate certificate generation files (not needed in git)
 *.csr
 *.srl
 *.cnf
-
-# But keep the generation script
-!generate_test_certs.sh
-!README.md

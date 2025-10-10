@@ -8,14 +8,25 @@ This directory contains test TLS certificates for integration testing of lippyca
 
 These certificates are:
 - Generated with predictable keys
-- Committed to version control (when needed)
+- **Committed to version control** for convenience and reproducibility
 - Valid for 10 years (excessive for production)
 - Not rotated regularly
 - Used for automated testing only
+- Excluded from security scanners (see `.gitguardian.yaml`)
+
+## Why Are Test Certificates Committed?
+
+Test certificates are committed to version control for developer convenience:
+- ✅ **Immediate test execution**: TLS integration tests run without setup
+- ✅ **Reproducible tests**: Everyone uses identical certificates
+- ✅ **CI/CD simplicity**: No certificate generation step required
+- ✅ **No security risk**: Clearly marked as test-only, excluded from scanners
+
+This is a common practice in open-source projects (Kubernetes, Istio, etc.).
 
 ## Generating Test Certificates
 
-Run the generation script:
+The certificates are already generated and committed. To regenerate them:
 
 ```bash
 cd test/testcerts

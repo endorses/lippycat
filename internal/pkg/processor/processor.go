@@ -439,10 +439,8 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 		if len(p.hunters) >= p.config.MaxHunters {
 			p.huntersMu.Unlock()
 			logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)
-			return &management.RegistrationResponse{
-				Accepted: false,
-				Error:    "maximum number of hunters reached",
-			}, nil
+			return nil, status.Errorf(codes.ResourceExhausted,
+				"maximum number of hunters reached: limit %d", p.config.MaxHunters)
 		}
 	}
 
@@ -686,10 +684,8 @@ func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDele
 	filter, exists := p.filters[req.FilterId]
 	if !exists {
 		p.filtersMu.Unlock()
-		return &management.FilterUpdateResult{
-			Success: false,
-			Error:   "filter not found",
-		}, nil
+		return nil, status.Errorf(codes.NotFound,
+			"filter not found: %s", req.FilterId)
 	}
 	delete(p.filters, req.FilterId)
 	p.filtersMu.Unlock()

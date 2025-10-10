@@ -1,0 +1,138 @@
+package processor
+
+import (
+	"context"
+	"testing"
+
+	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+func TestRegisterHunter_MaxHuntersExceeded(t *testing.T) {
+	p := &Processor{
+		config: Config{
+			MaxHunters: 2,
+		},
+		hunters:        make(map[string]*ConnectedHunter),
+		filterChannels: make(map[string]chan *management.FilterUpdate),
+	}
+
+	// Initialize stats cache (required by updateHealthStats)
+	p.statsCache.Store(&cachedStats{
+		stats:      Stats{},
+		lastUpdate: 0,
+	})
+
+	// Register 2 hunters (fill to capacity)
+	_, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-1",
+		Hostname: "host1",
+	})
+	assert.NoError(t, err)
+
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-2",
+		Hostname: "host2",
+	})
+	assert.NoError(t, err)
+
+	// Try to register 3rd hunter (should fail with ResourceExhausted)
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-3",
+		Hostname: "host3",
+	})
+
+	assert.Error(t, err, "should return error when max hunters exceeded")
+
+	// Verify it's the correct gRPC status code
+	st, ok := status.FromError(err)
+	assert.True(t, ok, "error should be a gRPC status error")
+	assert.Equal(t, codes.ResourceExhausted, st.Code(),
+		"should return ResourceExhausted status code")
+	assert.Contains(t, st.Message(), "maximum number of hunters reached",
+		"error message should explain the limit")
+}
+
+func TestRegisterHunter_AllowsReregistration(t *testing.T) {
+	p := &Processor{
+		config: Config{
+			MaxHunters: 2,
+		},
+		hunters:        make(map[string]*ConnectedHunter),
+		filterChannels: make(map[string]chan *management.FilterUpdate),
+	}
+
+	// Initialize stats cache (required by updateHealthStats)
+	p.statsCache.Store(&cachedStats{
+		stats:      Stats{},
+		lastUpdate: 0,
+	})
+
+	// Register hunter
+	_, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-1",
+		Hostname: "host1",
+	})
+	assert.NoError(t, err)
+
+	// Re-register same hunter (should succeed even at capacity)
+	_, err = p.RegisterHunter(context.Background(), &management.HunterRegistration{
+		HunterId: "hunter-1",
+		Hostname: "host1-updated",
+	})
+	assert.NoError(t, err, "should allow re-registration of existing hunter")
+}
+
+func TestDeleteFilter_NotFound(t *testing.T) {
+	p := &Processor{
+		config:  Config{},
+		filters: make(map[string]*management.Filter),
+	}
+
+	// Try to delete non-existent filter
+	_, err := p.DeleteFilter(context.Background(), &management.FilterDeleteRequest{
+		FilterId: "non-existent-filter",
+	})
+
+	assert.Error(t, err, "should return error when filter not found")
+
+	// Verify it's the correct gRPC status code
+	st, ok := status.FromError(err)
+	assert.True(t, ok, "error should be a gRPC status error")
+	assert.Equal(t, codes.NotFound, st.Code(),
+		"should return NotFound status code")
+	assert.Contains(t, st.Message(), "filter not found",
+		"error message should indicate filter not found")
+	assert.Contains(t, st.Message(), "non-existent-filter",
+		"error message should include filter ID")
+}
+
+func TestDeleteFilter_Success(t *testing.T) {
+	p := &Processor{
+		config:  Config{},
+		filters: make(map[string]*management.Filter),
+	}
+
+	// Add a filter
+	testFilter := &management.Filter{
+		Id:      "test-filter",
+		Type:    management.FilterType_FILTER_SIP_USER,
+		Pattern: "alice",
+	}
+	p.filters["test-filter"] = testFilter
+
+	// Delete it
+	result, err := p.DeleteFilter(context.Background(), &management.FilterDeleteRequest{
+		FilterId: "test-filter",
+	})
+
+	assert.NoError(t, err, "should successfully delete existing filter")
+	assert.NotNil(t, result, "should return result")
+	assert.True(t, result.Success, "result should indicate success")
+
+	// Verify filter was removed
+	_, exists := p.filters["test-filter"]
+	assert.False(t, exists, "filter should be removed from map")
+}

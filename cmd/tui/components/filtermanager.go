@@ -729,11 +729,11 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		fm.mode = ModeList
 		return nil
 
-	case "ctrl+s":
+	case "enter", "ctrl+s":
 		// Save filter
 		return fm.saveFilter()
 
-	case "tab":
+	case "down", "tab":
 		// Move to next field
 		if fm.formState != nil {
 			fm.formState.activeField = (fm.formState.activeField + 1) % 5 // 5 fields total
@@ -741,7 +741,7 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
-	case "shift+tab":
+	case "up", "shift+tab":
 		// Move to previous field
 		if fm.formState != nil {
 			fm.formState.activeField = (fm.formState.activeField - 1 + 5) % 5
@@ -1085,10 +1085,10 @@ func (fm *FilterManager) renderFilterForm() string {
 	var title, footer string
 	if fm.mode == ModeAdd {
 		title = "➕ Add Filter"
-		footer = "Tab/Shift+Tab: Navigate  Ctrl+S: Save  Esc: Cancel"
+		footer = "↑/↓/Tab: Navigate  Enter: Save  Esc: Cancel"
 	} else {
 		title = "✏️  Edit Filter"
-		footer = "Tab/Shift+Tab: Navigate  Ctrl+S: Save  Esc: Cancel"
+		footer = "↑/↓/Tab: Navigate  Enter: Save  Esc: Cancel"
 	}
 
 	return RenderModal(ModalRenderOptions{

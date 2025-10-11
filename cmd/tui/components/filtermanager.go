@@ -999,14 +999,17 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		fm.mode = ModeList
 		return nil
 
-	case "enter", "ctrl+s":
-		// If on targets field, enter hunter selection mode
+	case "s":
+		// If on targets field, open hunter selection mode
 		if fm.formState != nil && fm.formState.activeField == 4 {
 			fm.selectingHunters = true
 			fm.formState.activeField = 0 // Reset cursor for hunter list
 			return nil
 		}
-		// Otherwise save filter
+		return nil
+
+	case "enter", "ctrl+s":
+		// Save filter
 		return fm.saveFilter()
 
 	case "down", "tab":
@@ -1488,7 +1491,7 @@ func (fm *FilterManager) renderFilterForm() string {
 	}
 	targetHint := ""
 	if fm.formState.activeField == 4 {
-		targetHint = " (Enter to select)"
+		targetHint = " (press s to select)"
 	}
 	content.WriteString(fmt.Sprintf("%s %s %s\n",
 		indicator,
@@ -1500,14 +1503,14 @@ func (fm *FilterManager) renderFilterForm() string {
 	if fm.mode == ModeAdd {
 		title = "➕ Add Filter"
 		if fm.formState.activeField == 4 {
-			footer = "↑/↓/Tab: Navigate  Enter: Select hunters  Esc: Cancel"
+			footer = "↑/↓/Tab: Navigate  s: Select hunters  Enter: Save  Esc: Cancel"
 		} else {
 			footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
 		}
 	} else {
 		title = "✏️  Edit Filter"
 		if fm.formState.activeField == 4 {
-			footer = "↑/↓/Tab: Navigate  Enter: Select hunters  Esc: Cancel"
+			footer = "↑/↓/Tab: Navigate  s: Select hunters  Enter: Save  Esc: Cancel"
 		} else {
 			footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
 		}

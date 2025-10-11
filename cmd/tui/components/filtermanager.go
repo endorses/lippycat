@@ -476,6 +476,11 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 			return fm.handleDeleteConfirmMode(msg)
 		}
 
+		// Handle add/edit form mode
+		if fm.mode == ModeAdd || fm.mode == ModeEdit {
+			return fm.handleFormMode(msg)
+		}
+
 		// Handle search mode
 		if fm.searchMode {
 			return fm.handleSearchMode(msg)
@@ -542,11 +547,16 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "n":
-		// New filter (TODO: Phase 5)
+		// New filter
+		fm.initializeAddForm()
 		return nil
 
 	case "enter":
-		// Edit filter (TODO: Phase 5)
+		// Edit filter
+		selectedFilter := fm.GetSelectedFilter()
+		if selectedFilter != nil {
+			fm.initializeEditForm(selectedFilter)
+		}
 		return nil
 
 	case "d":
@@ -623,6 +633,207 @@ func (fm *FilterManager) deleteFilter() tea.Cmd {
 	return nil
 }
 
+// initializeAddForm initializes the form for adding a new filter
+func (fm *FilterManager) initializeAddForm() {
+	patternInput := textinput.New()
+	patternInput.Placeholder = "e.g., alice@example.com"
+	patternInput.CharLimit = 200
+	patternInput.Focus()
+
+	descInput := textinput.New()
+	descInput.Placeholder = "Optional description"
+	descInput.CharLimit = 500
+
+	fm.formState = &FilterFormState{
+		filterID:      "", // Empty for new filter
+		filterType:    management.FilterType_FILTER_SIP_USER,
+		patternInput:  patternInput,
+		descInput:     descInput,
+		enabled:       true,
+		targetHunters: []string{}, // Empty means all hunters
+		activeField:   0,          // Start with pattern field
+	}
+
+	fm.mode = ModeAdd
+}
+
+// initializeEditForm initializes the form for editing an existing filter
+func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
+	patternInput := textinput.New()
+	patternInput.SetValue(filter.Pattern)
+	patternInput.CharLimit = 200
+	patternInput.Focus()
+
+	descInput := textinput.New()
+	descInput.SetValue(filter.Description)
+	descInput.CharLimit = 500
+
+	fm.formState = &FilterFormState{
+		filterID:      filter.Id,
+		filterType:    filter.Type,
+		patternInput:  patternInput,
+		descInput:     descInput,
+		enabled:       filter.Enabled,
+		targetHunters: append([]string{}, filter.TargetHunters...), // Copy slice
+		activeField:   0,
+	}
+
+	fm.mode = ModeEdit
+}
+
+// handleFormMode handles keyboard input in add/edit form mode
+func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		// Cancel form
+		fm.formState = nil
+		fm.mode = ModeList
+		return nil
+
+	case "ctrl+s":
+		// Save filter
+		return fm.saveFilter()
+
+	case "tab":
+		// Move to next field
+		if fm.formState != nil {
+			fm.formState.activeField = (fm.formState.activeField + 1) % 5 // 5 fields total
+			fm.updateFormFieldFocus()
+		}
+		return nil
+
+	case "shift+tab":
+		// Move to previous field
+		if fm.formState != nil {
+			fm.formState.activeField = (fm.formState.activeField - 1 + 5) % 5
+			fm.updateFormFieldFocus()
+		}
+		return nil
+
+	case "ctrl+t":
+		// Cycle filter type
+		if fm.formState != nil {
+			fm.formState.filterType = fm.cycleFilterType(fm.formState.filterType)
+		}
+		return nil
+
+	case "ctrl+e":
+		// Toggle enabled
+		if fm.formState != nil {
+			fm.formState.enabled = !fm.formState.enabled
+		}
+		return nil
+
+	default:
+		// Update active input field
+		if fm.formState != nil {
+			var cmd tea.Cmd
+			switch fm.formState.activeField {
+			case 0: // Pattern field
+				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
+			case 1: // Description field
+				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
+				// Fields 2-4 are type, enabled, and targets - handled by special keys
+			}
+			return cmd
+		}
+		return nil
+	}
+}
+
+// updateFormFieldFocus updates which form field is focused
+func (fm *FilterManager) updateFormFieldFocus() {
+	if fm.formState == nil {
+		return
+	}
+
+	fm.formState.patternInput.Blur()
+	fm.formState.descInput.Blur()
+
+	switch fm.formState.activeField {
+	case 0:
+		fm.formState.patternInput.Focus()
+	case 1:
+		fm.formState.descInput.Focus()
+		// Fields 2-4 don't need focus (toggle/select fields)
+	}
+}
+
+// cycleFilterType cycles to the next filter type
+func (fm *FilterManager) cycleFilterType(current management.FilterType) management.FilterType {
+	switch current {
+	case management.FilterType_FILTER_SIP_USER:
+		return management.FilterType_FILTER_PHONE_NUMBER
+	case management.FilterType_FILTER_PHONE_NUMBER:
+		return management.FilterType_FILTER_IP_ADDRESS
+	case management.FilterType_FILTER_IP_ADDRESS:
+		return management.FilterType_FILTER_CALL_ID
+	case management.FilterType_FILTER_CALL_ID:
+		return management.FilterType_FILTER_CODEC
+	case management.FilterType_FILTER_CODEC:
+		return management.FilterType_FILTER_BPF
+	case management.FilterType_FILTER_BPF:
+		return management.FilterType_FILTER_SIP_USER
+	default:
+		return management.FilterType_FILTER_SIP_USER
+	}
+}
+
+// saveFilter saves the current form (add or update)
+func (fm *FilterManager) saveFilter() tea.Cmd {
+	if fm.formState == nil {
+		fm.mode = ModeList
+		return nil
+	}
+
+	// Validate pattern is not empty
+	pattern := strings.TrimSpace(fm.formState.patternInput.Value())
+	if pattern == "" {
+		fm.filterList.NewStatusMessage("Pattern cannot be empty")
+		return nil
+	}
+
+	if fm.mode == ModeAdd {
+		// Create new filter
+		newFilter := &management.Filter{
+			Id:            fmt.Sprintf("filter-%d", len(fm.allFilters)+1), // Mock ID
+			Pattern:       pattern,
+			Description:   strings.TrimSpace(fm.formState.descInput.Value()),
+			Type:          fm.formState.filterType,
+			Enabled:       fm.formState.enabled,
+			TargetHunters: fm.formState.targetHunters,
+		}
+
+		fm.allFilters = append(fm.allFilters, newFilter)
+		fm.filterList.NewStatusMessage(fmt.Sprintf("Filter '%s' created", fm.truncatePattern(pattern, 30)))
+
+		// TODO: Phase 6 - Call gRPC CreateFilter RPC
+	} else if fm.mode == ModeEdit {
+		// Update existing filter
+		for _, filter := range fm.allFilters {
+			if filter.Id == fm.formState.filterID {
+				filter.Pattern = pattern
+				filter.Description = strings.TrimSpace(fm.formState.descInput.Value())
+				filter.Type = fm.formState.filterType
+				filter.Enabled = fm.formState.enabled
+				filter.TargetHunters = fm.formState.targetHunters
+				break
+			}
+		}
+
+		fm.filterList.NewStatusMessage(fmt.Sprintf("Filter '%s' updated", fm.truncatePattern(pattern, 30)))
+
+		// TODO: Phase 6 - Call gRPC UpdateFilter RPC
+	}
+
+	// Return to list mode
+	fm.formState = nil
+	fm.mode = ModeList
+	fm.applyFilters()
+
+	return nil
+}
+
 // View renders the filter manager using unified modal
 func (fm *FilterManager) View() string {
 	if !fm.active {
@@ -632,6 +843,11 @@ func (fm *FilterManager) View() string {
 	// Show delete confirmation dialog if in delete confirmation mode
 	if fm.mode == ModeDeleteConfirm {
 		return fm.renderDeleteConfirmation()
+	}
+
+	// Show add/edit form if in form mode
+	if fm.mode == ModeAdd || fm.mode == ModeEdit {
+		return fm.renderFilterForm()
 	}
 
 	var content strings.Builder
@@ -719,6 +935,102 @@ func (fm *FilterManager) renderDeleteConfirmation() string {
 		Height:     fm.height,
 		Theme:      fm.theme,
 		ModalWidth: 60,
+	})
+}
+
+// renderFilterForm renders the add/edit filter form
+func (fm *FilterManager) renderFilterForm() string {
+	if fm.formState == nil {
+		return ""
+	}
+
+	var content strings.Builder
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.HeaderBg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.Foreground)
+	activeIndicator := lipgloss.NewStyle().
+		Foreground(fm.theme.SelectionBg).
+		Bold(true).
+		Render("→")
+	inactiveIndicator := " "
+
+	// Pattern field
+	indicator := inactiveIndicator
+	if fm.formState.activeField == 0 {
+		indicator = activeIndicator
+	}
+	content.WriteString(fmt.Sprintf("%s %s\n", indicator, labelStyle.Render("Pattern:")))
+	content.WriteString("  " + fm.formState.patternInput.View() + "\n\n")
+
+	// Description field
+	indicator = inactiveIndicator
+	if fm.formState.activeField == 1 {
+		indicator = activeIndicator
+	}
+	content.WriteString(fmt.Sprintf("%s %s\n", indicator, labelStyle.Render("Description:")))
+	content.WriteString("  " + fm.formState.descInput.View() + "\n\n")
+
+	// Filter type field
+	indicator = inactiveIndicator
+	if fm.formState.activeField == 2 {
+		indicator = activeIndicator
+	}
+	delegate := NewFilterDelegate(fm.theme)
+	typeStr := delegate.abbreviateType(fm.formState.filterType)
+	content.WriteString(fmt.Sprintf("%s %s %s\n\n",
+		indicator,
+		labelStyle.Render("Type:"),
+		valueStyle.Render(typeStr+" (Ctrl+T to cycle)")))
+
+	// Enabled field
+	indicator = inactiveIndicator
+	if fm.formState.activeField == 3 {
+		indicator = activeIndicator
+	}
+	enabledStr := "✗ Disabled"
+	if fm.formState.enabled {
+		enabledStr = "✓ Enabled"
+	}
+	content.WriteString(fmt.Sprintf("%s %s %s\n\n",
+		indicator,
+		labelStyle.Render("Status:"),
+		valueStyle.Render(enabledStr+" (Ctrl+E to toggle)")))
+
+	// Target hunters field
+	indicator = inactiveIndicator
+	if fm.formState.activeField == 4 {
+		indicator = activeIndicator
+	}
+	targetStr := "All hunters"
+	if len(fm.formState.targetHunters) > 0 {
+		targetStr = strings.Join(fm.formState.targetHunters, ", ")
+	}
+	content.WriteString(fmt.Sprintf("%s %s %s\n",
+		indicator,
+		labelStyle.Render("Targets:"),
+		valueStyle.Render(targetStr+" (not editable yet)")))
+
+	// Determine title and footer
+	var title, footer string
+	if fm.mode == ModeAdd {
+		title = "➕ Add Filter"
+		footer = "Tab/Shift+Tab: Navigate  Ctrl+S: Save  Esc: Cancel"
+	} else {
+		title = "✏️  Edit Filter"
+		footer = "Tab/Shift+Tab: Navigate  Ctrl+S: Save  Esc: Cancel"
+	}
+
+	return RenderModal(ModalRenderOptions{
+		Title:      title,
+		Content:    content.String(),
+		Footer:     footer,
+		Width:      fm.width,
+		Height:     fm.height,
+		Theme:      fm.theme,
+		ModalWidth: 70,
 	})
 }
 

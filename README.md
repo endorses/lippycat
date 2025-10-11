@@ -2,7 +2,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Currently focused on VoIP (SIP/RTP) analysis with plans for multi-protocol support.
 
-**Status:** v0.2.3 - Early development. Expect breaking changes.
+**Status:** v0.2.4 - Early development. Expect breaking changes.
 
 ## Features
 
@@ -218,14 +218,32 @@ go test ./...
 - gRPC for node communication
 - Cobra CLI + Bubbletea TUI
 
-## Roadmap
+## Changelog
 
-### Current (v0.2.3)
+### v0.2.4
+- **Fix**: Resolved packet subscription and protobuf serialization issues
+  - Fixed Proto3 empty list serialization with `has_hunter_filter` field
+  - Fixed concurrent protobuf serialization race condition
+  - Unsubscribe from hunters now works correctly
+- **Fix**: Improved hunter reconnection resilience
+  - Hunter reconnects within ~100ms when processor restarts
+  - Added cleanup timeout to prevent deadlock
+  - Fixed packet buffer preservation on reconnection
+- **Feature**: Hunter subscription management in TUI
+  - Press 's' to select specific hunters to subscribe to
+  - Press 'd' to unsubscribe from hunters or remove processors
+  - Multi-select interface with visual feedback
+- **Feature**: ListAvailableHunters management API
+- **Docs**: Improved TLS certificate generation documentation with SAN requirements
+
+### v0.2.3
 - VoIP/SIP analysis (UDP and TCP)
 - Distributed capture architecture with build-tagged specialized binaries
 - SIMD optimizations and optional GPU acceleration
 - TUI and CLI interfaces
 - Protocol detection with signature-based matching
+
+## Roadmap
 
 ### Planned
 - HTTP/HTTPS protocol support

@@ -1,4 +1,4 @@
-# lippycat Nodes Configuration
+# lippycat Nodes Configuration (v0.2.4+)
 # This file defines remote hunter and processor nodes for distributed capture
 
 # Processor nodes (collect traffic from hunters)
@@ -11,16 +11,30 @@ processors:
       ca_file: /path/to/ca.crt
       cert_file: /path/to/client.crt
       key_file: /path/to/client.key
-      skip_verify: false  # Set to true to skip cert verification (insecure)
-    # Optional: Subscribe to specific hunters only (empty = all)
+      skip_verify: false  # Set to true ONLY for testing (insecure!)
+    # Optional: Subscribe to specific hunters only (empty = no hunters, omit = all hunters)
+    # This can be changed interactively in TUI with 's' key
     subscribed_hunters:
-      - hunter-01
-      - hunter-02
+      - edge-hunter-01
+      - edge-hunter-02
 
   - name: backup-processor
     address: processor2.local:50051
+    # No TLS configured - will use plaintext connection
+
+  - name: secure-processor
+    address: secure.example.com:50051
+    tls:
+      enabled: true
+      ca_file: /etc/lippycat/certs/ca.crt
+      cert_file: /etc/lippycat/certs/tui-client.crt
+      key_file: /etc/lippycat/certs/tui-client.key
+      skip_verify: false
+    # Subscribe to all hunters (subscribed_hunters omitted)
 
 # Hunter nodes (capture packets on network interfaces)
+# Note: These are listed for reference but TUI connects to processors,
+# not directly to hunters. Hunters are discovered via processor.
 hunters:
   - name: edge-hunter-01
     address: 192.168.1.10:50051
@@ -31,10 +45,24 @@ hunters:
   - name: datacenter-hunter
     address: dc-hunter.example.com:50051
 
+# TLS Certificate Requirements:
+# - Certificates MUST include Subject Alternative Name (SAN) matching hostname/IP
+# - CN field is deprecated and no longer sufficient
+# - See test/testcerts/generate_test_certs.sh for example certificate generation
+#
+# Hunter Subscription (v0.2.4+):
+# - Press 's' on a processor in TUI to select hunters interactively
+# - Press 'd' on a hunter to unsubscribe
+# - Empty subscribed_hunters list = subscribe to no hunters
+# - Omit subscribed_hunters field = subscribe to all hunters
+#
 # Usage:
 # 1. Copy this file to ~/.config/lippycat/nodes.yaml or ./nodes.yaml
-# 2. In the TUI, go to Settings tab
-# 3. Set "Nodes File" to the path of this file
-# 4. Apply settings to load and connect to all configured nodes
+# 2. Update addresses and TLS paths for your environment
+# 3. Run: lippycat tui --remote
+# 4. Or specify custom path: lippycat tui --remote --nodes-file /path/to/nodes.yaml
 #
-# Or use the Nodes tab to add individual nodes with the "Add Node" button
+# Interactive Management:
+# - Press 's' to select hunters to subscribe to
+# - Press 'd' to unsubscribe from hunter or remove processor
+# - Use Settings tab to change nodes file path

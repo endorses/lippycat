@@ -7,9 +7,11 @@ The lippycat TUI supports **remote capture mode**, allowing you to monitor distr
 ## Features
 
 - **Multi-Node Monitoring**: Connect to and monitor multiple hunter/processor nodes simultaneously
+- **Hunter Subscription** (v0.2.4+): Selectively subscribe to specific hunters for targeted monitoring
+- **TLS/mTLS Security** (v0.2.4+): Encrypted connections with mutual authentication
 - **Real-Time Statistics**: View live packet counts, bandwidth, and node health metrics
 - **Node Management**: Add, remove, and manage remote nodes via the TUI
-- **YAML Configuration**: Define node connections in a configuration file
+- **YAML Configuration**: Define node connections in a configuration file with per-node TLS
 - **Visual Node Tree**: Hunters grouped by processor in an intuitive tree view
 - **Status Indicators**: Visual indicators for node connection status and health
 
@@ -74,11 +76,20 @@ Create a `nodes.yaml` file with the following structure:
 processors:
   - name: main-processor
     address: 192.168.1.100:50051
+    # Optional: Per-node TLS configuration
+    tls:
+      enabled: true
+      ca_file: /path/to/ca.crt
+      cert_file: /path/to/client.crt
+      key_file: /path/to/client.key
+      skip_verify: false  # Only true for testing!
 
   - name: backup-processor
     address: 192.168.1.101:50051
 
 # Hunter nodes (capture packets on network interfaces)
+# Note: Hunters connect to processors, not directly to TUI
+# TUI connects to processors to monitor hunters
 hunters:
   - name: edge-hunter-01
     address: 192.168.1.10:50051
@@ -96,6 +107,12 @@ hunters:
 |-------|-------------|----------|---------|
 | `name` | Friendly display name for the node | Yes | `edge-hunter-01` |
 | `address` | Network address in `host:port` format | Yes | `192.168.1.10:50051` |
+| `tls.enabled` | Enable TLS for this node | No | `true` |
+| `tls.ca_file` | Path to CA certificate | No | `/certs/ca.crt` |
+| `tls.cert_file` | Path to client certificate | No | `/certs/client.crt` |
+| `tls.key_file` | Path to client key | No | `/certs/client.key` |
+| `tls.skip_verify` | Skip certificate verification (insecure!) | No | `false` |
+| `subscribed_hunters` | List of hunter IDs to subscribe to | No | `["hunter-01", "hunter-02"]` |
 
 **Note**: The TUI will automatically combine both `hunters` and `processors` sections into a unified node list.
 
@@ -152,11 +169,37 @@ The TUI will attempt to connect and display connection status.
 |-----|--------|
 | `Tab` | Switch between tabs |
 | `1-6` | Jump directly to tab (1=Packets, 2=Details, 3=Nodes, etc.) |
-| `Enter` | Focus/edit node input field |
-| `Esc` | Exit input field or quit TUI |
-| `↑`/`↓` | Navigate node list |
+| `s` | Select hunters to subscribe to (when focused on processor) |
+| `d` | Unsubscribe from hunter or remove processor |
+| `Enter` | Focus/edit node input field, or toggle hunter selection in modal |
+| `Esc` | Exit input field, close modal, or quit TUI |
+| `↑`/`↓` or `j`/`k` | Navigate node/hunter list |
 | `Space` | Pause/resume packet capture |
 | `q` | Quit application |
+
+### Hunter Subscription Controls (v0.2.4+)
+
+**To selectively monitor hunters:**
+1. Navigate to a processor in the Nodes tab
+2. Press `s` to open the hunter selector modal
+3. Use arrow keys (`↑`/`↓`) or vim keys (`j`/`k`) to navigate
+4. Press `Enter` to toggle hunter selection (cyan highlight)
+5. Press `Enter` again on "Confirm Selection" to apply
+6. Press `Esc` to cancel
+
+**To unsubscribe from a hunter:**
+1. Navigate to the hunter in the Nodes tab
+2. Press `d` to unsubscribe (stops receiving packets)
+
+**To unsubscribe from all hunters on a processor:**
+1. Navigate to the processor
+2. Press `s` to open hunter selector
+3. Deselect all hunters and confirm
+
+**Benefits:**
+- Reduces network bandwidth by filtering at processor
+- Focus on specific network segments
+- Multiple TUI clients can have different subscriptions
 
 ### Settings Tab
 
@@ -189,21 +232,47 @@ The **Settings** tab allows you to configure the nodes file path:
 
 ### Security Considerations
 
-⚠️ **Current Limitations**:
-- No authentication between TUI and nodes
-- No encryption of packet data in transit
-- No authorization/access control
+✅ **Security Features (v0.2.4+)**:
+- TLS/mTLS encryption for all gRPC connections
+- Mutual authentication with client certificates
+- Per-node TLS configuration
+- Certificate verification (skip_verify only for testing)
 
-**Mitigation Strategies**:
-- Deploy in trusted networks only
-- Use firewall rules to restrict node port access
-- Consider network segmentation (VLANs, VPCs)
-- Monitor node connection logs
+⚠️ **Current Limitations**:
+- No role-based access control (RBAC)
+- No token-based authentication
+- Certificate-based auth only
+
+**Best Practices**:
+- Always enable TLS in production (`tls.enabled: true`)
+- Never use `skip_verify: true` in production
+- Use proper CA-signed certificates with SAN fields
+- Deploy in trusted networks with firewall rules
+- Monitor connection logs for unauthorized access
+- Rotate certificates regularly
+
+**TLS Configuration Example:**
+```yaml
+processors:
+  - name: production-processor
+    address: processor.prod.local:50051
+    tls:
+      enabled: true
+      ca_file: /etc/lippycat/certs/ca.crt
+      cert_file: /etc/lippycat/certs/tui-client.crt
+      key_file: /etc/lippycat/certs/tui-client.key
+      skip_verify: false
+```
+
+**Certificate Requirements:**
+- Must include Subject Alternative Name (SAN) matching hostname/IP
+- CN field is deprecated and insufficient
+- See `test/testcerts/generate_test_certs.sh` for examples
 
 **Future Enhancements**:
-- TLS/mTLS support for encrypted communication
 - Token-based authentication
 - Role-based access control (RBAC)
+- Session management and audit logging
 
 ## Troubleshooting
 
@@ -483,6 +552,13 @@ For issues with remote capture mode:
 
 ---
 
-**Last Updated**: 2025-10-03
-**Version**: 1.0
-**Compatibility**: lippycat v0.1.0+
+**Last Updated**: 2025-10-11
+**Version**: 2.0
+**Compatibility**: lippycat v0.2.4+
+
+**New in v0.2.4:**
+- Hunter subscription management (selective monitoring)
+- TLS/mTLS support for encrypted connections
+- Per-node TLS configuration in nodes.yaml
+- Improved reconnection resilience (~100ms)
+- Visual hunter selector modal with multi-select

@@ -8,8 +8,9 @@ Lippycat supports a fully distributed packet capture architecture that allows yo
 
 - **Multi-node capture** across network segments
 - **Hierarchical aggregation** (edge → regional → central)
-- **Real-time monitoring** via TUI
-- **Automatic fault recovery** with reconnection logic
+- **Real-time monitoring** via TUI with selective hunter subscription
+- **TLS/mTLS security** for encrypted node communication
+- **Automatic fault recovery** with fast reconnection (<100ms)
 - **Filter distribution** from processor to hunters
 - **Health monitoring** with heartbeat streaming
 - **Scalable** to hundreds of capture nodes
@@ -785,6 +786,70 @@ service ManagementService {
 
 ---
 
+## Security Features (v0.2.4+)
+
+### TLS/mTLS Support
+
+All gRPC connections support TLS encryption with mutual authentication:
+
+**Command Line Flags:**
+```bash
+# Processor with TLS
+lc process --listen :50051 \
+  --tls-cert /path/to/server.crt \
+  --tls-key /path/to/server.key \
+  --tls-ca /path/to/ca.crt
+
+# Hunter with TLS
+sudo lc hunt --processor processor.example.com:50051 \
+  --tls-cert /path/to/client.crt \
+  --tls-key /path/to/client.key \
+  --tls-ca /path/to/ca.crt
+```
+
+**Configuration File:**
+```yaml
+# Global TLS config
+tls:
+  enabled: true
+  ca_file: /etc/lippycat/certs/ca.crt
+  cert_file: /etc/lippycat/certs/node.crt
+  key_file: /etc/lippycat/certs/node.key
+  skip_verify: false  # Only set to true for testing!
+
+# Per-node TLS in nodes.yaml
+processors:
+  - name: secure-processor
+    address: processor.local:50051
+    tls:
+      enabled: true
+      ca_file: /certs/ca.crt
+      cert_file: /certs/client.crt
+      key_file: /certs/client.key
+```
+
+**Certificate Generation:**
+See `test/testcerts/generate_test_certs.sh` for example certificate generation with proper SAN fields.
+
+**Important:** Certificates MUST include Subject Alternative Name (SAN) matching the hostname/IP. The CN field is deprecated and no longer sufficient.
+
+### Hunter Subscription (v0.2.4+)
+
+TUI clients can selectively subscribe to specific hunters:
+
+**Usage:**
+1. Connect to a processor in TUI remote mode
+2. Press `s` on a processor to open hunter selector
+3. Use arrow keys to navigate, Enter to toggle selection
+4. Selected hunters highlighted in cyan
+5. Press Enter again to confirm subscription
+6. Press `d` on a hunter to unsubscribe
+
+**Benefits:**
+- Reduce bandwidth by only receiving packets from relevant hunters
+- Focus monitoring on specific network segments
+- Multiple TUI clients can subscribe to different hunters independently
+
 ## Known Limitations
 
 1. **No Packet Buffering During Disconnect**
@@ -797,20 +862,11 @@ service ManagementService {
    - Mitigation: Use BPF filter on hunter
    - Future: Implement SIP/RTP metadata filtering
 
-3. **No TLS/Encryption**
-   - Connections are plaintext gRPC
-   - Mitigation: Use trusted network or VPN
-   - Future: Add TLS/mTLS support
-
-4. **No Authentication**
-   - No auth/authz between nodes
-   - Mitigation: Firewall rules, network segmentation
-   - Future: Add token-based authentication
-
-5. **TUI Remote Mode Available**
-   - Remote monitoring via `--remote` and `--nodes-file` flags
-   - Real-time node status and packet statistics
-   - See TUI_REMOTE_CAPTURE.md for setup details
+3. **No Token-Based Authentication**
+   - TLS provides encryption and certificate-based auth
+   - No role-based access control (RBAC)
+   - Mitigation: Network segmentation, firewall rules
+   - Future: Add token-based authentication and RBAC
 
 ---
 
@@ -822,13 +878,13 @@ service ManagementService {
 - Persistent packet buffering during disconnect
 - Sequence tracking and batch resume
 - Filter application (SIP user, phone number matching)
-- TLS/mTLS support
+- Role-based access control (RBAC)
 
 **Medium Priority:**
-- Authentication and authorization
-- Enhanced TUI remote mode features
+- Token-based authentication
 - Compression (zstd/lz4)
 - Metrics export (Prometheus)
+- Enhanced filtering capabilities
 
 **Low Priority:**
 - Web dashboard

@@ -211,6 +211,80 @@ Each command has build-tagged root files:
 
 Commands register themselves in their respective root files, allowing the compiler to exclude unused code paths.
 
+### Flow Control Architecture
+Flow control in the distributed system follows a hierarchical principle:
+
+**Processor-Level Flow Control:**
+- Hunters respond to processor-level overload (PCAP write queue, upstream backlog)
+- Flow control states: CONTINUE, SLOW, PAUSE, RESUME
+- Based on queue utilization thresholds (30%, 70%, 90%)
+
+**Critical Architectural Decision (v0.2.4):**
+TUI client drops do NOT affect hunter flow control because:
+1. Multiple TUI clients may be connected simultaneously
+2. Processor may be writing to PCAP files or forwarding upstream
+3. There may be multiple downstream consumers
+4. Slow clients are handled by per-subscriber channel buffering and selective drops
+
+**Implementation:**
+- `internal/pkg/processor/processor.go`: `determineFlowControl()` only checks PCAP queue
+- Per-subscriber buffering prevents slow clients from blocking others
+- Packet batches are cloned before broadcasting to prevent concurrent serialization races
+
+### TLS/mTLS Security
+The distributed system supports TLS encryption with mutual authentication:
+
+**Features:**
+- Optional TLS for all gRPC connections (hunter→processor, processor→processor, TUI→processor)
+- Mutual TLS (mTLS) with client certificate verification
+- Per-node TLS configuration in nodes.yaml
+- Self-signed certificate generation scripts for testing
+
+**Configuration:**
+```yaml
+# Global TLS config
+tls:
+  enabled: true
+  ca_file: /path/to/ca.crt
+  cert_file: /path/to/server.crt
+  key_file: /path/to/server.key
+  skip_verify: false  # Set to true only for testing
+
+# Per-node TLS override in nodes.yaml
+processors:
+  - name: secure-processor
+    address: processor.local:50051
+    tls:
+      enabled: true
+      ca_file: /path/to/ca.crt
+      cert_file: /path/to/client.crt
+      key_file: /path/to/client.key
+```
+
+**Certificate Requirements:**
+- Subject Alternative Name (SAN) must match hostname/IP
+- CN field no longer sufficient (deprecated in Go 1.15+)
+- See `test/testcerts/generate_test_certs.sh` for examples
+
+### Hunter Subscription Management (v0.2.4)
+TUI clients can selectively subscribe to specific hunters on a processor:
+
+**Features:**
+- Subscribe to all hunters on a processor (default)
+- Subscribe to specific hunters by ID (selective monitoring)
+- Unsubscribe from hunters to stop receiving packets
+- Multi-select interface with visual feedback
+
+**TUI Controls:**
+- Press `s` on a processor to select hunters to subscribe to
+- Press `d` on a hunter to unsubscribe or on a processor to remove it
+- Multi-select with arrow keys and Enter to confirm
+
+**Implementation Details:**
+- Uses `has_hunter_filter` boolean to distinguish empty list from nil (Proto3 serialization)
+- Prevents subscriber backpressure from affecting hunter flow control
+- Packets are filtered at the processor before being sent to TUI clients
+
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.
 

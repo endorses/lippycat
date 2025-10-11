@@ -8,8 +8,10 @@ Network traffic sniffer and protocol analyzer built with Go. Currently focused o
 
 - **VoIP Analysis**: SIP/RTP traffic capture, call tracking, user targeting
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
+- **TLS/mTLS Security**: Encrypted gRPC connections with mutual authentication
+- **Hunter Subscription**: Selective monitoring of specific hunters via TUI
 - **Performance**: SIMD optimizations, optional GPU acceleration, AF_XDP support
-- **TUI & CLI**: Terminal UI and command-line interfaces
+- **TUI & CLI**: Terminal UI with remote monitoring and command-line interfaces
 - **Flexible Output**: PCAP files, structured logging
 
 ## Installation
@@ -164,14 +166,18 @@ Kernel-bypass packet capture on Linux 4.18+ with XDP-capable NICs. See [docs/AF_
 Deploy hunters across network segments and aggregate to central processors.
 
 ```bash
-# Processor
-lc process --listen :50051 --write-file capture.pcap
+# Processor (with TLS)
+lc process --listen :50051 --write-file capture.pcap \
+  --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
 
-# Hunter
-sudo lc hunt --interface eth0 --processor processor:50051
+# Hunter (with TLS)
+sudo lc hunt --interface eth0 --processor processor:50051 \
+  --tls-cert client.crt --tls-key client.key --tls-ca ca.crt
 
-# TUI monitoring
+# TUI monitoring with selective hunter subscription
 lc tui --remote --nodes-file nodes.yaml
+# Press 's' to select specific hunters to monitor
+# Press 'd' to unsubscribe from hunters
 ```
 
 See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
@@ -198,7 +204,14 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 
 Requires root privileges for packet capture. Use responsibly and legally.
 
-See [docs/SECURITY.md](docs/SECURITY.md) for security features (Call-ID sanitization, PCAP encryption, DoS protection).
+**Security Features:**
+- TLS/mTLS encryption for all distributed connections
+- Call-ID sanitization for privacy
+- PCAP file encryption support
+- DoS protection with rate limiting
+- Per-node certificate authentication
+
+See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
 
 ## Development
 
@@ -220,21 +233,40 @@ go test ./...
 
 ## Changelog
 
-### v0.2.4
+### v0.2.4 (2025-10-11)
+- **Feature**: Hunter subscription management in TUI
+  - Press 's' to select specific hunters to subscribe to
+  - Press 'd' to unsubscribe from hunters or remove processors
+  - Multi-select interface with visual feedback
+  - Selective packet filtering at processor level
+- **Feature**: TLS/mTLS support for distributed mode
+  - Encrypted gRPC connections between all nodes
+  - Mutual authentication with client certificates
+  - Per-node TLS configuration in nodes.yaml
+  - Self-signed certificate generation for testing
+- **Feature**: ListAvailableHunters management API
+  - Query processor for connected hunters
+  - Used by TUI hunter selector modal
 - **Fix**: Resolved packet subscription and protobuf serialization issues
   - Fixed Proto3 empty list serialization with `has_hunter_filter` field
-  - Fixed concurrent protobuf serialization race condition
+  - Fixed concurrent protobuf serialization race condition with `proto.Clone()`
   - Unsubscribe from hunters now works correctly
 - **Fix**: Improved hunter reconnection resilience
   - Hunter reconnects within ~100ms when processor restarts
   - Added cleanup timeout to prevent deadlock
   - Fixed packet buffer preservation on reconnection
-- **Feature**: Hunter subscription management in TUI
-  - Press 's' to select specific hunters to subscribe to
-  - Press 'd' to unsubscribe from hunters or remove processors
-  - Multi-select interface with visual feedback
-- **Feature**: ListAvailableHunters management API
+  - Reduced connection monitoring interval from 10s to 100ms
+- **Architecture**: Flow control improvements
+  - Removed subscriber backpressure from affecting hunters
+  - TUI client drops no longer pause hunter packet capture
+  - Per-subscriber buffering for slow clients
+- **UI**: TUI visual improvements
+  - Fixed hunter selector modal styling
+  - Prevented cursor drift in scrolling
+  - Added vim-style navigation (j/k)
+  - Hover-based mouse scrolling
 - **Docs**: Improved TLS certificate generation documentation with SAN requirements
+- **Tests**: Removed obsolete subscriber backpressure tests
 
 ### v0.2.3
 - VoIP/SIP analysis (UDP and TCP)

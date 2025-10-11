@@ -267,9 +267,32 @@ func (n *NodesView) SetProcessors(processors []ProcessorInfo) {
 	}
 	n.hunters = allHunters
 
-	// Reset selection if out of bounds
-	if n.selectedIndex >= len(n.hunters) {
-		n.selectedIndex = 0
+	// Validate and adjust selection after update
+	if n.selectedIndex >= 0 {
+		// A hunter was selected - check if it still exists
+		if n.selectedIndex >= len(n.hunters) {
+			// Selected hunter disappeared - move selection to first processor
+			n.selectedIndex = -1
+			if len(n.processors) > 0 {
+				n.selectedProcessorAddr = n.processors[0].Address
+			} else {
+				n.selectedProcessorAddr = ""
+			}
+		}
+	} else if n.selectedProcessorAddr != "" {
+		// Processor selected - verify it still exists
+		found := false
+		for _, proc := range n.processors {
+			if proc.Address == n.selectedProcessorAddr {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// Selected processor disappeared
+			n.selectedProcessorAddr = ""
+			n.selectedIndex = -1
+		}
 	}
 
 	// Update viewport content
@@ -569,6 +592,11 @@ func (n *NodesView) GetSelectedHunter() *HunterInfo {
 		return &n.hunters[n.selectedIndex]
 	}
 	return nil
+}
+
+// GetSelectedProcessorAddr returns the address of the currently selected processor (or empty if hunter selected)
+func (n *NodesView) GetSelectedProcessorAddr() string {
+	return n.selectedProcessorAddr
 }
 
 // updateViewportContent updates the viewport with current content

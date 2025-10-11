@@ -5,7 +5,7 @@ package tui
 
 import (
 	"context"
-	// "fmt" // Only needed for debug logging - uncomment if enabling DEBUG logs
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/cmd/tui/config"
 	"github.com/endorses/lippycat/cmd/tui/filters"
@@ -20,6 +21,7 @@ import (
 	"github.com/endorses/lippycat/cmd/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/remotecapture"
 	"github.com/spf13/viper"
 )
@@ -49,7 +51,8 @@ type ProcessorConnectedMsg struct {
 
 // ProcessorReconnectMsg is sent to trigger a reconnection attempt
 type ProcessorReconnectMsg struct {
-	Address string
+	Address   string
+	HunterIDs []string // Optional: specific hunters to subscribe to (empty = all)
 }
 
 // TickMsg is sent periodically to trigger UI updates
@@ -233,6 +236,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Handle hunter selector modal
+		if m.uiState.HunterSelector.IsActive() {
+			cmd := m.uiState.HunterSelector.Update(msg)
+			return m, cmd
+		}
+
 		// Handle add node modal (highest priority after protocol selector)
 		if m.uiState.NodesView.IsModalOpen() {
 			cmd := m.uiState.NodesView.Update(msg)
@@ -305,15 +314,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Nodes tab gets priority for certain keys (navigation, etc.)
-		if m.uiState.Tabs.GetActive() == 1 {
-			// Forward message to NodesView for handling (modal is handled globally above)
-			if cmd := m.uiState.NodesView.Update(msg); cmd != nil {
-				return m, cmd
-			}
-			// If NodesView didn't handle it, fall through to normal handling
-		}
-
 		// Normal mode key handling
 		switch msg.String() {
 		case "ctrl+z":
@@ -366,26 +366,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "d": // Toggle details panel
-			m.uiState.ShowDetails = !m.uiState.ShowDetails
-			// Recalculate packet list size based on new showDetails state
-			headerHeight := 2
-			tabsHeight := 4
-			bottomHeight := 4
-			contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
-			minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
-			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
-				// Details panel gets exactly what it needs for hex dump, packet list gets the rest
-				detailsWidth := 77 // Hex dump (72) + borders/padding (5)
-				listWidth := m.uiState.Width - detailsWidth
-				m.uiState.PacketList.SetSize(listWidth, contentHeight)
-				m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
-			} else {
-				// Full width for packet list
-				m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
-				m.uiState.DetailsPanel.SetSize(0, contentHeight)
+		case "d":
+			// Context-sensitive: toggle details on Capture tab, delete node on Nodes tab
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				return m, m.handleDeleteNode()
+			} else { // Other tabs: toggle details panel
+				m.uiState.ShowDetails = !m.uiState.ShowDetails
+				// Recalculate packet list size based on new showDetails state
+				headerHeight := 2
+				tabsHeight := 4
+				bottomHeight := 4
+				contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
+				minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
+				if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
+					// Details panel gets exactly what it needs for hex dump, packet list gets the rest
+					detailsWidth := 77 // Hex dump (72) + borders/padding (5)
+					listWidth := m.uiState.Width - detailsWidth
+					m.uiState.PacketList.SetSize(listWidth, contentHeight)
+					m.uiState.DetailsPanel.SetSize(detailsWidth, contentHeight)
+				} else {
+					// Full width for packet list
+					m.uiState.PacketList.SetSize(m.uiState.Width, contentHeight)
+					m.uiState.DetailsPanel.SetSize(0, contentHeight)
+				}
+				return m, nil
 			}
-			return m, nil
 
 		case "p": // Open protocol selector
 			m.uiState.ProtocolSelector.Activate()
@@ -446,6 +451,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.NodesView.ShowAddNodeModal()
 			return m, nil
 
+		case "s": // Subscribe to hunters (on nodes tab)
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				return m, m.handleOpenHunterSelector()
+			}
+			return m, nil
+
 		case "t": // Toggle theme
 			// For future: add theme cycling logic here
 			// Currently only Solarized theme available
@@ -461,6 +472,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.SettingsView.SetTheme(m.uiState.Theme)
 			m.uiState.CallsView.SetTheme(m.uiState.Theme)
 			m.uiState.ProtocolSelector.SetTheme(m.uiState.Theme)
+			m.uiState.HunterSelector.SetTheme(m.uiState.Theme)
 			m.uiState.FilterInput.SetTheme(m.uiState.Theme)
 			// Save theme preference
 			saveThemePreference(m.uiState.Theme)
@@ -515,6 +527,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "up", "k":
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				// NodesView handles selection with SelectPrevious
 				m.uiState.NodesView.SelectPrevious()
 				return m, nil
 			}
@@ -533,6 +546,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				// NodesView handles selection with SelectNext
 				m.uiState.NodesView.SelectNext()
 				return m, nil
 			}
@@ -987,9 +1001,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		go func() {
 			// Create TUI event handler adapter
 			handler := NewTUIEventHandler(currentProgram)
-			client, err := remotecapture.NewClient(msg.Address, handler)
+
+			// Build client config with TLS settings from viper
+			clientConfig := &remotecapture.ClientConfig{
+				Address:               msg.Address,
+				TLSEnabled:            viper.GetBool("tui.tls.enabled"),
+				TLSCAFile:             viper.GetString("tui.tls.ca_file"),
+				TLSCertFile:           viper.GetString("tui.tls.cert_file"),
+				TLSKeyFile:            viper.GetString("tui.tls.key_file"),
+				TLSSkipVerify:         viper.GetBool("tui.tls.skip_verify"),
+				TLSServerNameOverride: viper.GetString("tui.tls.server_name_override"),
+			}
+
+			client, err := remotecapture.NewClientWithConfig(clientConfig, handler)
 			if err != nil {
 				// Connection failed
+				logger.Error("Failed to connect to processor", "address", msg.Address, "error", err)
 				currentProgram.Send(ProcessorDisconnectedMsg{
 					Address: msg.Address,
 					Error:   err,
@@ -997,8 +1024,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return
 			}
 
-			// Start packet stream
-			if err := client.StreamPackets(); err != nil {
+			// Start packet stream with hunter filter (if specified)
+			if err := client.StreamPacketsWithFilter(msg.HunterIDs); err != nil {
 				client.Close()
 				currentProgram.Send(ProcessorDisconnectedMsg{
 					Address: msg.Address,
@@ -1030,6 +1057,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Also store in deprecated map for compatibility
 			m.connectionMgr.RemoteClients[msg.Address] = msg.Client
 
+			// Update NodesView to reflect connection state change
+			procInfos := m.getProcessorInfoList()
+			m.uiState.NodesView.SetProcessors(procInfos)
+
 			// If in remote mode, mark capturing as active when we have at least one connected processor
 			if m.captureMode == components.CaptureModeRemote {
 				m.uiState.SetCapturing(true)
@@ -1050,6 +1081,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				proc.Client = nil
 			}
 			delete(m.connectionMgr.RemoteClients, msg.Address)
+
+			// Update NodesView to reflect disconnection
+			procInfos := m.getProcessorInfoList()
+			m.uiState.NodesView.SetProcessors(procInfos)
 
 			// If in remote mode, check if all processors are now disconnected
 			if m.captureMode == components.CaptureModeRemote {
@@ -1106,6 +1141,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Schedule next cleanup
 		return m, cleanupProcessorsCmd()
+
+	case components.HunterSelectionConfirmedMsg:
+		// User confirmed hunter selection - reconnect with new hunter filter
+		return m, m.handleHunterSelectionConfirmed(msg)
+
+	case components.LoadHuntersFromProcessorMsg:
+		// Load hunters from processor for hunter selector
+		return m, m.loadHuntersFromProcessor(msg.ProcessorAddr)
+
+	case components.HuntersLoadedMsg:
+		// Hunters loaded - update hunter selector
+		m.uiState.HunterSelector.SetHunters(msg.Hunters)
+		return m, nil
 	}
 
 	return m, nil
@@ -1464,6 +1512,18 @@ func (m Model) View() string {
 		)
 	}
 
+	// Overlay hunter selector modal if active
+	if m.uiState.HunterSelector.IsActive() {
+		selectorView := m.uiState.HunterSelector.View()
+
+		// Place the selector in the center
+		return lipgloss.Place(
+			m.uiState.Width, m.uiState.Height,
+			lipgloss.Center, lipgloss.Center,
+			selectorView,
+		)
+	}
+
 	// Overlay add node modal if active
 	if m.uiState.NodesView.IsModalOpen() {
 		modalView := m.uiState.NodesView.RenderModal(m.uiState.Width, m.uiState.Height)
@@ -1700,12 +1760,40 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			connState = components.ProcessorConnectionStateDisconnected
 		}
 
+		// Filter hunters based on subscription list
+		// - nil = never configured, show all hunters (default)
+		// - empty slice [] = explicitly subscribed to none, show no hunters
+		// - non-empty slice = show only subscribed hunters
+		allHunters := m.connectionMgr.HuntersByProcessor[addr]
+		var displayHunters []components.HunterInfo
+
+		if proc.SubscribedHunters == nil {
+			// Never configured - show all hunters (default behavior)
+			displayHunters = allHunters
+		} else if len(proc.SubscribedHunters) == 0 {
+			// Explicitly subscribed to no hunters - show nothing
+			displayHunters = []components.HunterInfo{}
+		} else {
+			// Filter to show only subscribed hunters
+			subscribedSet := make(map[string]bool)
+			for _, hunterID := range proc.SubscribedHunters {
+				subscribedSet[hunterID] = true
+			}
+
+			displayHunters = make([]components.HunterInfo, 0)
+			for _, hunter := range allHunters {
+				if subscribedSet[hunter.ID] {
+					displayHunters = append(displayHunters, hunter)
+				}
+			}
+		}
+
 		procInfos = append(procInfos, components.ProcessorInfo{
 			Address:         addr,
 			ProcessorID:     proc.ProcessorID,
 			Status:          proc.Status,
 			ConnectionState: connState,
-			Hunters:         m.connectionMgr.HuntersByProcessor[addr],
+			Hunters:         displayHunters,
 		})
 	}
 	return procInfos
@@ -1843,6 +1931,202 @@ func saveFilterHistory(filterInput *components.FilterInput) {
 				// Silently ignore errors - history will still work for this session
 				return
 			}
+		}
+	}
+}
+
+// handleDeleteNode handles deletion/unsubscription of a selected node
+func (m *Model) handleDeleteNode() tea.Cmd {
+	// Check what's selected in the nodes view
+	selectedHunter := m.uiState.NodesView.GetSelectedHunter()
+	selectedProcessorAddr := m.uiState.NodesView.GetSelectedProcessorAddr()
+
+	if selectedProcessorAddr != "" {
+		// Processor is selected - fully disconnect and remove
+		if proc, exists := m.connectionMgr.Processors[selectedProcessorAddr]; exists {
+			// Close client connection
+			if proc.Client != nil {
+				proc.Client.Close()
+			}
+			// Remove from connection manager (also removes hunters)
+			m.connectionMgr.RemoveProcessor(selectedProcessorAddr)
+
+			// Update NodesView to reflect removal
+			procInfos := m.getProcessorInfoList()
+			m.uiState.NodesView.SetProcessors(procInfos)
+		}
+		return nil
+	} else if selectedHunter != nil {
+		// Hunter is selected - unsubscribe from it
+		processorAddr := selectedHunter.ProcessorAddr
+
+		if processorAddr == "" {
+			return nil
+		}
+
+		proc, exists := m.connectionMgr.Processors[processorAddr]
+		if !exists {
+			return nil
+		}
+
+		// Get current subscription list (not all available hunters!)
+		// - nil = subscribed to all hunters (never configured)
+		// - empty [] = subscribed to no hunters
+		// - non-empty = subscribed to specific hunters
+		var currentSubscription []string
+		if proc.SubscribedHunters == nil {
+			// Never configured - currently subscribed to all hunters
+			// Get list of all hunters and remove the selected one
+			allHunters := m.connectionMgr.GetHunters(processorAddr)
+			currentSubscription = make([]string, 0, len(allHunters))
+			for _, h := range allHunters {
+				currentSubscription = append(currentSubscription, h.ID)
+			}
+		} else {
+			// Already configured - use existing subscription list
+			currentSubscription = proc.SubscribedHunters
+		}
+
+		// Build new list excluding the hunter to remove
+		newHunterIDs := make([]string, 0)
+		for _, hunterID := range currentSubscription {
+			if hunterID != selectedHunter.ID {
+				newHunterIDs = append(newHunterIDs, hunterID)
+			}
+		}
+
+		// Reconnect with new subscription list
+		return m.reconnectWithHunterFilter(processorAddr, newHunterIDs)
+	}
+	return nil
+}
+
+// handleOpenHunterSelector opens the hunter selector modal for the selected processor
+func (m *Model) handleOpenHunterSelector() tea.Cmd {
+	// Get selected processor from nodes view
+	selectedProcessorAddr := m.uiState.NodesView.GetSelectedProcessorAddr()
+
+	if selectedProcessorAddr == "" {
+		// Check if a hunter is selected, and get its processor
+		if hunter := m.uiState.NodesView.GetSelectedHunter(); hunter != nil {
+			selectedProcessorAddr = hunter.ProcessorAddr
+		}
+	}
+
+	if selectedProcessorAddr != "" {
+		// Open hunter selector and load hunters
+		m.uiState.HunterSelector.Activate(selectedProcessorAddr)
+		m.uiState.HunterSelector.SetSize(m.uiState.Width, m.uiState.Height)
+
+		// Trigger loading hunters from processor
+		return func() tea.Msg {
+			return components.LoadHuntersFromProcessorMsg{ProcessorAddr: selectedProcessorAddr}
+		}
+	}
+	return nil
+}
+
+// handleHunterSelectionConfirmed handles confirmed hunter selection from modal
+func (m *Model) handleHunterSelectionConfirmed(msg components.HunterSelectionConfirmedMsg) tea.Cmd {
+	// Reconnect with new hunter filter
+	return m.reconnectWithHunterFilter(msg.ProcessorAddr, msg.SelectedHunterIDs)
+}
+
+// reconnectWithHunterFilter reconnects to a processor with a new hunter subscription filter
+func (m *Model) reconnectWithHunterFilter(processorAddr string, hunterIDs []string) tea.Cmd {
+	// Close existing connection
+	if proc, exists := m.connectionMgr.Processors[processorAddr]; exists {
+		if proc.Client != nil {
+			proc.Client.Close()
+		}
+		proc.State = store.ProcessorStateDisconnected
+		// Store the subscription list so we can restore it after reconnection
+		proc.SubscribedHunters = hunterIDs
+	}
+
+	// Reconnect with new hunter filter
+	return func() tea.Msg {
+		return ProcessorReconnectMsg{
+			Address:   processorAddr,
+			HunterIDs: hunterIDs,
+		}
+	}
+}
+
+// loadHuntersFromProcessor loads the list of hunters from a processor
+func (m *Model) loadHuntersFromProcessor(processorAddr string) tea.Cmd {
+	return func() tea.Msg {
+		// Get the client for this processor
+		proc, exists := m.connectionMgr.Processors[processorAddr]
+		if !exists || proc.Client == nil {
+			return components.HuntersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Hunters:       []components.HunterSelectorItem{},
+			}
+		}
+
+		// Cast client to remotecapture.Client
+		client, ok := proc.Client.(*remotecapture.Client)
+		if !ok {
+			return components.HuntersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Hunters:       []components.HunterSelectorItem{},
+			}
+		}
+
+		// Call ListAvailableHunters RPC
+		mgmtClient := management.NewManagementServiceClient(client.GetConn())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		resp, err := mgmtClient.ListAvailableHunters(ctx, &management.ListHuntersRequest{})
+		if err != nil {
+			logger.Error("Failed to load hunters from processor",
+				"error", err,
+				"processor", processorAddr,
+				"error_type", fmt.Sprintf("%T", err))
+			return components.HuntersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Hunters:       []components.HunterSelectorItem{},
+			}
+		}
+
+		// Convert to HunterSelectorItem and mark currently subscribed hunters as selected
+		// Use the stored subscription list, not the connected hunters list
+		// - nil = never configured, all hunters selected (default)
+		// - empty slice [] = explicitly subscribed to none, no hunters selected
+		// - non-empty slice = only those hunters selected
+		subscribedIDs := make(map[string]bool)
+		if proc.SubscribedHunters == nil {
+			// Never configured - pre-select all hunters (default)
+			for _, h := range resp.Hunters {
+				subscribedIDs[h.HunterId] = true
+			}
+		} else if len(proc.SubscribedHunters) == 0 {
+			// Explicitly subscribed to no hunters - select none
+			// subscribedIDs remains empty
+		} else {
+			// We have a specific subscription list - only these are selected
+			for _, hunterID := range proc.SubscribedHunters {
+				subscribedIDs[hunterID] = true
+			}
+		}
+
+		items := make([]components.HunterSelectorItem, len(resp.Hunters))
+		for i, h := range resp.Hunters {
+			items[i] = components.HunterSelectorItem{
+				HunterID:   h.HunterId,
+				Hostname:   h.Hostname,
+				Interfaces: h.Interfaces,
+				Status:     h.Status,
+				RemoteAddr: h.RemoteAddr,
+				Selected:   subscribedIDs[h.HunterId], // Pre-select currently subscribed hunters
+			}
+		}
+
+		return components.HuntersLoadedMsg{
+			ProcessorAddr: processorAddr,
+			Hunters:       items,
 		}
 	}
 }

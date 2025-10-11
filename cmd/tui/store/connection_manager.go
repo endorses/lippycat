@@ -30,6 +30,7 @@ type ProcessorConnection struct {
 	LastDisconnectedAt time.Time // Time when processor was last disconnected (for cleanup)
 	FailureCount       int
 	ReconnectTimer     *time.Timer
+	SubscribedHunters  []string // Hunter IDs we're subscribed to (empty = all hunters)
 }
 
 // ConnectionManager manages remote processor connections

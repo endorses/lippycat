@@ -39,11 +39,13 @@ var (
 )
 
 func runTUI(cmd *cobra.Command, args []string) {
-	// Disable logging to prevent stdout pollution in TUI mode
-	logger.Disable()
+	// TEMPORARY: Enable stderr logging for debugging
+	logger.UseStderr()
+	logger.Info("TUI starting with debug logging")
 
-	// Re-enable logging on exit
-	defer logger.Enable()
+	// TODO: Re-enable after debugging:
+	// logger.Disable()
+	// defer logger.Enable()
 
 	// Load buffer size from config, use flag value as fallback
 	configBufferSize := viper.GetInt("tui.buffer_size")

@@ -24,6 +24,7 @@ type UIState struct {
 	SettingsView     components.SettingsView
 	CallsView        components.CallsView
 	ProtocolSelector components.ProtocolSelector
+	HunterSelector   components.HunterSelector
 	FilterInput      components.FilterInput
 	Statistics       *components.Statistics
 
@@ -88,6 +89,9 @@ func NewUIState(theme themes.Theme) *UIState {
 	protocolSelector := components.NewProtocolSelector()
 	protocolSelector.SetTheme(theme)
 
+	hunterSelector := components.NewHunterSelector()
+	hunterSelector.SetTheme(theme)
+
 	filterInput := components.NewFilterInput("/")
 	filterInput.SetTheme(theme)
 
@@ -105,6 +109,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		SettingsView:     settingsView,
 		CallsView:        callsView,
 		ProtocolSelector: protocolSelector,
+		HunterSelector:   hunterSelector,
 		FilterInput:      filterInput,
 		Statistics:       nil, // Initialized separately by caller
 		Capturing:        false,

@@ -242,6 +242,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Handle filter manager modal
+		if m.uiState.FilterManager.IsActive() {
+			cmd := m.uiState.FilterManager.Update(msg)
+			return m, cmd
+		}
+
 		// Handle add node modal (highest priority after protocol selector)
 		if m.uiState.NodesView.IsModalOpen() {
 			cmd := m.uiState.NodesView.Update(msg)
@@ -457,6 +463,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "f": // Manage filters (on nodes tab)
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				return m, m.handleOpenFilterManager()
+			}
+			return m, nil
+
 		case "t": // Toggle theme
 			// For future: add theme cycling logic here
 			// Currently only Solarized theme available
@@ -473,6 +485,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.CallsView.SetTheme(m.uiState.Theme)
 			m.uiState.ProtocolSelector.SetTheme(m.uiState.Theme)
 			m.uiState.HunterSelector.SetTheme(m.uiState.Theme)
+			m.uiState.FilterManager.SetTheme(m.uiState.Theme)
 			m.uiState.FilterInput.SetTheme(m.uiState.Theme)
 			// Save theme preference
 			saveThemePreference(m.uiState.Theme)
@@ -1154,6 +1167,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Hunters loaded - update hunter selector
 		m.uiState.HunterSelector.SetHunters(msg.Hunters)
 		return m, nil
+
+	case components.FiltersLoadedMsg:
+		// Filters loaded from processor - update filter manager
+		if msg.Err != nil {
+			logger.Error("Failed to load filters", "error", msg.Err)
+			m.uiState.FilterManager.SetFilters([]*management.Filter{})
+		} else {
+			m.uiState.FilterManager.SetFilters(msg.Filters)
+		}
+		return m, nil
+
+	case components.FilterOperationMsg:
+		// Execute filter operation via gRPC
+		return m, m.executeFilterOperation(msg)
 	}
 
 	return m, nil
@@ -1521,6 +1548,18 @@ func (m Model) View() string {
 			m.uiState.Width, m.uiState.Height,
 			lipgloss.Center, lipgloss.Center,
 			selectorView,
+		)
+	}
+
+	// Overlay filter manager modal if active
+	if m.uiState.FilterManager.IsActive() {
+		filterManagerView := m.uiState.FilterManager.View()
+
+		// Place the filter manager in the center
+		return lipgloss.Place(
+			m.uiState.Width, m.uiState.Height,
+			lipgloss.Center, lipgloss.Center,
+			filterManagerView,
 		)
 	}
 
@@ -2024,6 +2063,186 @@ func (m *Model) handleOpenHunterSelector() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// handleOpenFilterManager opens the filter manager modal for the selected node
+func (m *Model) handleOpenFilterManager() tea.Cmd {
+	// Get selected processor or hunter from nodes view
+	selectedProcessorAddr := m.uiState.NodesView.GetSelectedProcessorAddr()
+	selectedHunter := m.uiState.NodesView.GetSelectedHunter()
+
+	if selectedProcessorAddr != "" {
+		// Open for processor (affects all hunters)
+		m.uiState.FilterManager.Activate(selectedProcessorAddr, selectedProcessorAddr, components.NodeTypeProcessor)
+		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
+
+		// Load filters from processor via gRPC
+		return m.loadFiltersFromProcessor(selectedProcessorAddr, "")
+	} else if selectedHunter != nil {
+		// Open for specific hunter
+		m.uiState.FilterManager.Activate(selectedHunter.ID, selectedHunter.ProcessorAddr, components.NodeTypeHunter)
+		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
+
+		// Load filters from processor (filtered by hunter ID) via gRPC
+		// Note: selectedHunter.ProcessorAddr contains the processor address
+		return m.loadFiltersFromProcessor(selectedHunter.ProcessorAddr, selectedHunter.ID)
+	}
+	return nil
+}
+
+// loadFiltersFromProcessor loads filters from a processor via gRPC
+func (m *Model) loadFiltersFromProcessor(processorAddr string, hunterID string) tea.Cmd {
+	return func() tea.Msg {
+		// Get processor from connection manager
+		proc, exists := m.connectionMgr.Processors[processorAddr]
+		if !exists || proc.Client == nil {
+			return components.FiltersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Filters:       []*management.Filter{},
+				Err:           fmt.Errorf("processor not connected"),
+			}
+		}
+
+		// Cast client to remotecapture.Client
+		client, ok := proc.Client.(*remotecapture.Client)
+		if !ok {
+			return components.FiltersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Filters:       []*management.Filter{},
+				Err:           fmt.Errorf("invalid client type"),
+			}
+		}
+
+		// Call GetFilters RPC
+		mgmtClient := management.NewManagementServiceClient(client.GetConn())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		resp, err := mgmtClient.GetFilters(ctx, &management.FilterRequest{
+			HunterId: hunterID, // Empty string means all filters
+		})
+		if err != nil {
+			logger.Error("Failed to load filters from processor",
+				"error", err,
+				"processor", processorAddr,
+				"hunter_id", hunterID)
+			return components.FiltersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Filters:       []*management.Filter{},
+				Err:           err,
+			}
+		}
+
+		return components.FiltersLoadedMsg{
+			ProcessorAddr: processorAddr,
+			Filters:       resp.Filters,
+			Err:           nil,
+		}
+	}
+}
+
+// executeFilterOperation executes a filter create/update/delete operation via gRPC
+func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cmd {
+	return func() tea.Msg {
+		// Get processor from connection manager
+		proc, exists := m.connectionMgr.Processors[msg.ProcessorAddr]
+		if !exists || proc.Client == nil {
+			return components.FilterOperationResultMsg{
+				Success:       false,
+				Operation:     msg.Operation,
+				FilterPattern: "",
+				Error:         "processor not connected",
+			}
+		}
+
+		// Cast client to remotecapture.Client
+		client, ok := proc.Client.(*remotecapture.Client)
+		if !ok {
+			return components.FilterOperationResultMsg{
+				Success:       false,
+				Operation:     msg.Operation,
+				FilterPattern: "",
+				Error:         "invalid client type",
+			}
+		}
+
+		// Create management client
+		mgmtClient := management.NewManagementServiceClient(client.GetConn())
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		var result *management.FilterUpdateResult
+		var err error
+		var filterPattern string
+
+		switch msg.Operation {
+		case "create", "update", "toggle":
+			// UpdateFilter handles both create and update
+			if msg.Filter == nil {
+				return components.FilterOperationResultMsg{
+					Success:       false,
+					Operation:     msg.Operation,
+					FilterPattern: "",
+					Error:         "filter is nil",
+				}
+			}
+			filterPattern = msg.Filter.Pattern
+			result, err = mgmtClient.UpdateFilter(ctx, msg.Filter)
+
+		case "delete":
+			// DeleteFilter
+			if msg.FilterID == "" {
+				return components.FilterOperationResultMsg{
+					Success:       false,
+					Operation:     msg.Operation,
+					FilterPattern: "",
+					Error:         "filter ID is empty",
+				}
+			}
+			filterPattern = msg.FilterID
+			result, err = mgmtClient.DeleteFilter(ctx, &management.FilterDeleteRequest{
+				FilterId: msg.FilterID,
+			})
+
+		default:
+			return components.FilterOperationResultMsg{
+				Success:       false,
+				Operation:     msg.Operation,
+				FilterPattern: "",
+				Error:         fmt.Sprintf("unknown operation: %s", msg.Operation),
+			}
+		}
+
+		if err != nil {
+			logger.Error("Filter operation failed",
+				"operation", msg.Operation,
+				"error", err,
+				"processor", msg.ProcessorAddr)
+			return components.FilterOperationResultMsg{
+				Success:       false,
+				Operation:     msg.Operation,
+				FilterPattern: filterPattern,
+				Error:         err.Error(),
+			}
+		}
+
+		if !result.Success {
+			return components.FilterOperationResultMsg{
+				Success:       false,
+				Operation:     msg.Operation,
+				FilterPattern: filterPattern,
+				Error:         result.Error,
+			}
+		}
+
+		return components.FilterOperationResultMsg{
+			Success:        true,
+			Operation:      msg.Operation,
+			FilterPattern:  filterPattern,
+			Error:          "",
+			HuntersUpdated: result.HuntersUpdated,
+		}
+	}
 }
 
 // handleHunterSelectionConfirmed handles confirmed hunter selection from modal

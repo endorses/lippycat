@@ -157,6 +157,11 @@ func (hs *HunterSelector) View() string {
 		modalWidth = 60
 	}
 
+	// Modal has padding(1,2) = 4 chars, content uses Width(modalWidth-4)
+	// So items should be (modalWidth - 4) minus our own padding (2 chars)
+	contentWidth := modalWidth - 4
+	itemWidth := contentWidth - 2 // Account for padding(0, 1) = 2 chars
+
 	// Content styles
 	itemStyle := lipgloss.NewStyle().
 		Foreground(hs.theme.Foreground).
@@ -166,7 +171,8 @@ func (hs *HunterSelector) View() string {
 		Foreground(hs.theme.SelectionFg).
 		Background(hs.theme.SelectionBg).
 		Bold(true).
-		Padding(0, 1)
+		Padding(0, 1).
+		Width(itemWidth)
 
 	descStyle := lipgloss.NewStyle().
 		Foreground(hs.theme.StatusBarFg).

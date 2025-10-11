@@ -375,7 +375,9 @@ func (h *Hunter) register() error {
 		"initial_filters", len(resp.Filters))
 
 	// Store initial filters
+	h.mu.Lock()
 	h.filters = resp.Filters
+	h.mu.Unlock()
 
 	return nil
 }
@@ -475,15 +477,22 @@ func (h *Hunter) handleFlowControl(ctrl *data.StreamControl) {
 
 // startCapture begins packet capture
 func (h *Hunter) startCapture() error {
+	// Build combined BPF filter from config and dynamic filters
+	bpfFilter := h.buildCombinedBPFFilter()
+
 	logger.Info("Starting packet capture",
 		"interfaces", h.config.Interfaces,
-		"filter", h.config.BPFFilter)
+		"filter", bpfFilter)
 
 	// Create capture context
 	h.captureCtx, h.captureCancel = context.WithCancel(h.ctx)
 
-	// Create packet buffer
-	h.packetBuffer = capture.NewPacketBuffer(h.captureCtx, h.config.BufferSize)
+	// Create packet buffer ONLY on first start
+	// Don't recreate on restart - forwardPackets() is already reading from it
+	// IMPORTANT: Use h.ctx (main context) not h.captureCtx, so buffer survives capture restarts
+	if h.packetBuffer == nil {
+		h.packetBuffer = capture.NewPacketBuffer(h.ctx, h.config.BufferSize)
+	}
 
 	// Create PCAP interfaces
 	var devices []pcaptypes.PcapInterface
@@ -503,11 +512,73 @@ func (h *Hunter) startCapture() error {
 			}
 		}
 
-		capture.InitWithContext(h.captureCtx, devices, h.config.BPFFilter, processor, nil)
+		capture.InitWithContext(h.captureCtx, devices, bpfFilter, processor, nil)
 	}()
 
 	logger.Info("Packet capture started", "interfaces", h.config.Interfaces)
 	return nil
+}
+
+// restartCapture stops and restarts packet capture with updated filters
+func (h *Hunter) restartCapture() error {
+	logger.Info("Restarting packet capture to apply filter changes")
+
+	// Cancel current capture
+	if h.captureCancel != nil {
+		h.captureCancel()
+	}
+
+	// Wait a moment for capture to clean up
+	time.Sleep(100 * time.Millisecond)
+
+	// Start new capture with updated filters
+	return h.startCapture()
+}
+
+// buildCombinedBPFFilter builds a combined BPF filter from config and dynamic filters
+func (h *Hunter) buildCombinedBPFFilter() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	var dynamicFilters []string
+
+	// Collect dynamic BPF filters (only enabled ones)
+	for _, filter := range h.filters {
+		if !filter.Enabled {
+			continue
+		}
+
+		// Only BPF type filters are applied directly
+		// Other filter types (SIP user, phone, IP, etc.) would need different handling
+		if filter.Type == management.FilterType_FILTER_BPF {
+			if filter.Pattern != "" {
+				dynamicFilters = append(dynamicFilters, fmt.Sprintf("(%s)", filter.Pattern))
+			}
+		}
+	}
+
+	// Build final filter
+	var finalFilter string
+
+	if len(dynamicFilters) == 0 {
+		// No dynamic filters - use base config filter only
+		finalFilter = h.config.BPFFilter
+	} else {
+		// Combine dynamic filters with OR (capture matching ANY dynamic filter)
+		dynamicPart := strings.Join(dynamicFilters, " or ")
+
+		if h.config.BPFFilter != "" {
+			// Combine with base filter using AND
+			// Logic: (dynamic filters) AND (base exclusions)
+			// Example: (port 443) and (not port 50051 and not port 50052)
+			finalFilter = fmt.Sprintf("(%s) and (%s)", dynamicPart, h.config.BPFFilter)
+		} else {
+			// No base filter - just use dynamic filters
+			finalFilter = dynamicPart
+		}
+	}
+
+	return finalFilter
 }
 
 // forwardPackets reads from packet buffer and forwards batches to processor
@@ -883,44 +954,70 @@ func (h *Hunter) handleFilterUpdate(update *management.FilterUpdate) {
 		"filter_type", update.Filter.Type)
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	filtersChanged := false
 
 	switch update.UpdateType {
 	case management.FilterUpdateType_UPDATE_ADD:
-		// Add new filter
-		h.filters = append(h.filters, update.Filter)
-		logger.Info("Filter added",
-			"filter_id", update.Filter.Id,
-			"pattern", update.Filter.Pattern)
+		// Check if filter already exists (prevent duplicates)
+		exists := false
+		for _, f := range h.filters {
+			if f.Id == update.Filter.Id {
+				exists = true
+				logger.Debug("Filter already exists, skipping duplicate add",
+					"filter_id", update.Filter.Id)
+				break
+			}
+		}
+
+		if !exists {
+			// Add new filter
+			h.filters = append(h.filters, update.Filter)
+			filtersChanged = true
+			logger.Info("Filter added",
+				"filter_id", update.Filter.Id,
+				"pattern", update.Filter.Pattern)
+		}
 
 	case management.FilterUpdateType_UPDATE_MODIFY:
 		// Modify existing filter
 		for i, f := range h.filters {
 			if f.Id == update.Filter.Id {
 				h.filters[i] = update.Filter
+				filtersChanged = true
 				logger.Info("Filter modified",
 					"filter_id", update.Filter.Id,
 					"pattern", update.Filter.Pattern)
-				return
+				break
 			}
 		}
-		logger.Warn("Filter to modify not found", "filter_id", update.Filter.Id)
+		if !filtersChanged {
+			logger.Warn("Filter to modify not found", "filter_id", update.Filter.Id)
+		}
 
 	case management.FilterUpdateType_UPDATE_DELETE:
 		// Delete filter
 		for i, f := range h.filters {
 			if f.Id == update.Filter.Id {
 				h.filters = append(h.filters[:i], h.filters[i+1:]...)
+				filtersChanged = true
 				logger.Info("Filter deleted", "filter_id", update.Filter.Id)
-				return
+				break
 			}
 		}
-		logger.Warn("Filter to delete not found", "filter_id", update.Filter.Id)
+		if !filtersChanged {
+			logger.Warn("Filter to delete not found", "filter_id", update.Filter.Id)
+		}
 	}
 
-	// TODO: Apply filters to packet processing logic
-	// For now, filters are just stored and logged
-	logger.Debug("Active filters count", "count", len(h.filters))
+	h.mu.Unlock()
+
+	// Apply filters by restarting capture with new BPF filter
+	if filtersChanged {
+		logger.Info("Filters changed, restarting capture", "active_filters", len(h.filters))
+		if err := h.restartCapture(); err != nil {
+			logger.Error("Failed to restart capture with new filters", "error", err)
+		}
+	}
 }
 
 // sendHeartbeats sends periodic heartbeat to processor
@@ -974,6 +1071,16 @@ func (h *Hunter) sendHeartbeats() {
 			status := h.calculateStatus()
 
 			// Send heartbeat
+			// Get filter count with lock
+			h.mu.RLock()
+			activeFilters := uint32(len(h.filters))
+			h.mu.RUnlock()
+
+			logger.Debug("Sending heartbeat",
+				"hunter_id", h.config.HunterID,
+				"active_filters", activeFilters,
+				"status", status)
+
 			hb := &management.HunterHeartbeat{
 				HunterId:    h.config.HunterID,
 				TimestampNs: time.Now().UnixNano(),
@@ -984,7 +1091,7 @@ func (h *Hunter) sendHeartbeats() {
 					PacketsForwarded: h.stats.PacketsForwarded.Load(),
 					PacketsDropped:   h.stats.PacketsDropped.Load(),
 					BufferBytes:      h.stats.BufferBytes.Load(),
-					ActiveFilters:    uint32(len(h.filters)),
+					ActiveFilters:    activeFilters,
 				},
 			}
 

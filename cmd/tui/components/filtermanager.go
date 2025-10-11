@@ -433,11 +433,8 @@ func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
 		return nil
 	}
 
-	// Toggle the enabled state
+	// Toggle the enabled state locally
 	selectedFilter.Enabled = !selectedFilter.Enabled
-
-	// TODO: Phase 6 - Call gRPC UpdateFilter RPC to persist change
-	// For now, just update local state
 
 	// Show status message
 	status := "disabled"
@@ -449,7 +446,15 @@ func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
 	// Refresh the view to update checkbox display
 	fm.applyFilters()
 
-	return nil
+	// Return command to persist change via gRPC
+	return func() tea.Msg {
+		return FilterOperationMsg{
+			Operation:      "toggle",
+			ProcessorAddr:  fm.targetNode,
+			Filter:         selectedFilter,
+			TargetNodeType: fm.targetType,
+		}
+	}
 }
 
 // truncatePattern truncates a pattern for display in status messages
@@ -463,7 +468,7 @@ func (fm *FilterManager) truncatePattern(pattern string, max int) string {
 	return pattern[:max-3] + "..."
 }
 
-// Update handles key events
+// Update handles key events and messages
 func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 	if !fm.active {
 		return nil
@@ -488,6 +493,35 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 
 		// Handle list mode
 		return fm.handleListMode(msg)
+
+	case FilterOperationResultMsg:
+		// Handle gRPC operation results
+		return fm.handleOperationResult(msg)
+	}
+
+	return nil
+}
+
+// handleOperationResult handles the result of a filter operation
+func (fm *FilterManager) handleOperationResult(msg FilterOperationResultMsg) tea.Cmd {
+	if msg.Success {
+		var statusMsg string
+		switch msg.Operation {
+		case "create":
+			statusMsg = fmt.Sprintf("Filter '%s' created (%d hunter(s) updated)", msg.FilterPattern, msg.HuntersUpdated)
+		case "update", "toggle":
+			statusMsg = fmt.Sprintf("Filter '%s' updated (%d hunter(s) updated)", msg.FilterPattern, msg.HuntersUpdated)
+		case "delete":
+			statusMsg = fmt.Sprintf("Filter '%s' deleted (%d hunter(s) updated)", msg.FilterPattern, msg.HuntersUpdated)
+		default:
+			statusMsg = fmt.Sprintf("Filter operation completed (%d hunter(s) updated)", msg.HuntersUpdated)
+		}
+		fm.filterList.NewStatusMessage(statusMsg)
+	} else {
+		// Operation failed - show error
+		errorMsg := fmt.Sprintf("Failed to %s filter: %s", msg.Operation, msg.Error)
+		fm.filterList.NewStatusMessage(errorMsg)
+		// TODO: Consider reverting optimistic local changes on failure
 	}
 
 	return nil
@@ -605,7 +639,7 @@ func (fm *FilterManager) deleteFilter() tea.Cmd {
 		return nil
 	}
 
-	// Find and remove the filter from allFilters
+	// Find and remove the filter from allFilters locally
 	filterID := fm.deleteCandidate.Id
 	patternForMsg := fm.deleteCandidate.Pattern
 
@@ -617,9 +651,6 @@ func (fm *FilterManager) deleteFilter() tea.Cmd {
 		}
 	}
 
-	// TODO: Phase 6 - Call gRPC DeleteFilter RPC to persist deletion
-	// For now, just update local state
-
 	// Clear delete candidate and return to list mode
 	fm.deleteCandidate = nil
 	fm.mode = ModeList
@@ -630,7 +661,15 @@ func (fm *FilterManager) deleteFilter() tea.Cmd {
 	// Refresh the view
 	fm.applyFilters()
 
-	return nil
+	// Return command to persist deletion via gRPC
+	return func() tea.Msg {
+		return FilterOperationMsg{
+			Operation:      "delete",
+			ProcessorAddr:  fm.targetNode,
+			FilterID:       filterID,
+			TargetNodeType: fm.targetType,
+		}
+	}
 }
 
 // initializeAddForm initializes the form for adding a new filter
@@ -793,10 +832,14 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 		return nil
 	}
 
+	var operation string
+	var filter *management.Filter
+
 	if fm.mode == ModeAdd {
 		// Create new filter
-		newFilter := &management.Filter{
-			Id:            fmt.Sprintf("filter-%d", len(fm.allFilters)+1), // Mock ID
+		operation = "create"
+		filter = &management.Filter{
+			Id:            "", // Server will assign ID
 			Pattern:       pattern,
 			Description:   strings.TrimSpace(fm.formState.descInput.Value()),
 			Type:          fm.formState.filterType,
@@ -804,26 +847,43 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 			TargetHunters: fm.formState.targetHunters,
 		}
 
-		fm.allFilters = append(fm.allFilters, newFilter)
-		fm.filterList.NewStatusMessage(fmt.Sprintf("Filter '%s' created", fm.truncatePattern(pattern, 30)))
+		// Add to local state optimistically
+		tempFilter := &management.Filter{
+			Id:            fmt.Sprintf("filter-%d", len(fm.allFilters)+1), // Temporary local ID
+			Pattern:       filter.Pattern,
+			Description:   filter.Description,
+			Type:          filter.Type,
+			Enabled:       filter.Enabled,
+			TargetHunters: append([]string{}, filter.TargetHunters...),
+		}
+		fm.allFilters = append(fm.allFilters, tempFilter)
+		fm.filterList.NewStatusMessage(fmt.Sprintf("Creating filter '%s'...", fm.truncatePattern(pattern, 30)))
 
-		// TODO: Phase 6 - Call gRPC CreateFilter RPC
 	} else if fm.mode == ModeEdit {
 		// Update existing filter
-		for _, filter := range fm.allFilters {
-			if filter.Id == fm.formState.filterID {
-				filter.Pattern = pattern
-				filter.Description = strings.TrimSpace(fm.formState.descInput.Value())
-				filter.Type = fm.formState.filterType
-				filter.Enabled = fm.formState.enabled
-				filter.TargetHunters = fm.formState.targetHunters
+		operation = "update"
+		for _, f := range fm.allFilters {
+			if f.Id == fm.formState.filterID {
+				// Update local state optimistically
+				f.Pattern = pattern
+				f.Description = strings.TrimSpace(fm.formState.descInput.Value())
+				f.Type = fm.formState.filterType
+				f.Enabled = fm.formState.enabled
+				f.TargetHunters = fm.formState.targetHunters
+
+				filter = f
 				break
 			}
 		}
 
-		fm.filterList.NewStatusMessage(fmt.Sprintf("Filter '%s' updated", fm.truncatePattern(pattern, 30)))
+		if filter == nil {
+			fm.formState = nil
+			fm.mode = ModeList
+			fm.filterList.NewStatusMessage("Error: filter not found")
+			return nil
+		}
 
-		// TODO: Phase 6 - Call gRPC UpdateFilter RPC
+		fm.filterList.NewStatusMessage(fmt.Sprintf("Updating filter '%s'...", fm.truncatePattern(pattern, 30)))
 	}
 
 	// Return to list mode
@@ -831,7 +891,15 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 	fm.mode = ModeList
 	fm.applyFilters()
 
-	return nil
+	// Return command to persist via gRPC
+	return func() tea.Msg {
+		return FilterOperationMsg{
+			Operation:      operation,
+			ProcessorAddr:  fm.targetNode,
+			Filter:         filter,
+			TargetNodeType: fm.targetType,
+		}
+	}
 }
 
 // View renders the filter manager using unified modal
@@ -1085,4 +1153,23 @@ type FilterManagerOpenMsg struct {
 type FiltersLoadedMsg struct {
 	ProcessorAddr string
 	Filters       []*management.Filter
+	Err           error
+}
+
+// FilterOperationMsg is sent to request a filter operation (create/update/delete)
+type FilterOperationMsg struct {
+	Operation      string // "create", "update", "delete", "toggle"
+	ProcessorAddr  string
+	Filter         *management.Filter
+	FilterID       string // For delete operations
+	TargetNodeType NodeType
+}
+
+// FilterOperationResultMsg is sent when a filter operation completes
+type FilterOperationResultMsg struct {
+	Success        bool
+	Operation      string
+	FilterPattern  string
+	Error          string
+	HuntersUpdated uint32
 }

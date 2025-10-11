@@ -82,6 +82,9 @@ type NodesView struct {
 		endCol        int
 		processorAddr string
 	}
+
+	// Graph view navigation memory
+	lastSelectedHunterIndex map[string]int // Map of processor address -> last selected hunter index (0-based within that processor)
 }
 
 // NewNodesView creates a new nodes view component
@@ -92,18 +95,19 @@ func NewNodesView() NodesView {
 	ti.Width = 50
 
 	return NodesView{
-		hunters:               []HunterInfo{},
-		selectedIndex:         -1, // Start with nothing selected
-		selectedProcessorAddr: "",
-		width:                 80,
-		height:                20,
-		theme:                 themes.Solarized(),
-		nodeInput:             ti,
-		showModal:             false,
-		ready:                 false,
-		viewMode:              "table", // Start with table view
-		hunterLines:           make(map[int]int),
-		processorLines:        make(map[int]int),
+		hunters:                 []HunterInfo{},
+		selectedIndex:           -1, // Start with nothing selected
+		selectedProcessorAddr:   "",
+		width:                   80,
+		height:                  20,
+		theme:                   themes.Solarized(),
+		nodeInput:               ti,
+		showModal:               false,
+		ready:                   false,
+		viewMode:                "table", // Start with table view
+		hunterLines:             make(map[int]int),
+		processorLines:          make(map[int]int),
+		lastSelectedHunterIndex: make(map[string]int),
 	}
 }
 
@@ -464,6 +468,192 @@ func (n *NodesView) SelectPrevious() {
 			}
 		}
 	}
+}
+
+// GetViewMode returns the current view mode ("table" or "graph")
+func (n *NodesView) GetViewMode() string {
+	return n.viewMode
+}
+
+// SelectUp moves selection up in graph mode (vertical navigation through hierarchy)
+func (n *NodesView) SelectUp() {
+	// If nothing selected, do nothing
+	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
+		return
+	}
+
+	// If a hunter is selected, move up to its parent processor
+	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+		currentHunter := n.hunters[n.selectedIndex]
+
+		// Find which processor this hunter belongs to and the hunter's local index
+		for _, proc := range n.processors {
+			for hunterIdx, hunter := range proc.Hunters {
+				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
+					// Remember this hunter's position for this processor
+					n.lastSelectedHunterIndex[proc.Address] = hunterIdx
+
+					// Move to the parent processor
+					n.selectedIndex = -1
+					n.selectedProcessorAddr = proc.Address
+					n.updateViewportContent()
+					return
+				}
+			}
+		}
+	}
+
+	// If a processor is selected, move up to the previous processor's last selected hunter (or the processor itself if no hunters)
+	if n.selectedProcessorAddr != "" {
+		// Find current processor index
+		currentProcIdx := -1
+		for i, proc := range n.processors {
+			if proc.Address == n.selectedProcessorAddr {
+				currentProcIdx = i
+				break
+			}
+		}
+
+		if currentProcIdx > 0 {
+			// Move to previous processor's hunters (using remembered index) or processor itself
+			prevProc := n.processors[currentProcIdx-1]
+			if len(prevProc.Hunters) > 0 {
+				// Check if we have a remembered hunter index for this processor
+				hunterIdx, exists := n.lastSelectedHunterIndex[prevProc.Address]
+				if !exists || hunterIdx >= len(prevProc.Hunters) {
+					hunterIdx = 0 // Default to first hunter
+				}
+				n.selectedProcessorAddr = ""
+				n.selectedIndex = n.getGlobalHunterIndex(prevProc.Hunters[hunterIdx].ID, prevProc.Address)
+			} else {
+				// Previous processor has no hunters, select the processor itself
+				n.selectedProcessorAddr = prevProc.Address
+			}
+			n.updateViewportContent()
+		}
+		return
+	}
+}
+
+// SelectDown moves selection down in graph mode (vertical navigation through hierarchy)
+func (n *NodesView) SelectDown() {
+	// If nothing selected, select first processor
+	if n.selectedIndex == -1 && n.selectedProcessorAddr == "" {
+		if len(n.processors) > 0 {
+			n.selectedProcessorAddr = n.processors[0].Address
+		}
+		n.updateViewportContent()
+		return
+	}
+
+	// If a processor is selected, move down to its hunters (using remembered index) or next processor
+	if n.selectedProcessorAddr != "" {
+		// Find current processor
+		currentProcIdx := -1
+		var currentProc *ProcessorInfo
+		for i, proc := range n.processors {
+			if proc.Address == n.selectedProcessorAddr {
+				currentProcIdx = i
+				currentProc = &n.processors[i]
+				break
+			}
+		}
+
+		if currentProc != nil {
+			if len(currentProc.Hunters) > 0 {
+				// Move to remembered hunter (or first hunter if not remembered)
+				hunterIdx, exists := n.lastSelectedHunterIndex[currentProc.Address]
+				if !exists || hunterIdx >= len(currentProc.Hunters) {
+					hunterIdx = 0 // Default to first hunter
+				}
+				n.selectedProcessorAddr = ""
+				n.selectedIndex = n.getGlobalHunterIndex(currentProc.Hunters[hunterIdx].ID, currentProc.Address)
+				n.updateViewportContent()
+				return
+			}
+			// Current processor has no hunters, move to next processor
+			if currentProcIdx < len(n.processors)-1 {
+				n.selectedProcessorAddr = n.processors[currentProcIdx+1].Address
+				n.updateViewportContent()
+			}
+		}
+		return
+	}
+
+	// If a hunter is selected, move down to next processor
+	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+		currentHunter := n.hunters[n.selectedIndex]
+
+		// Find which processor this hunter belongs to and save the hunter's position
+		for procIdx, proc := range n.processors {
+			for hunterIdx, hunter := range proc.Hunters {
+				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
+					// Remember this hunter's position
+					n.lastSelectedHunterIndex[proc.Address] = hunterIdx
+
+					// Move to next processor
+					if procIdx < len(n.processors)-1 {
+						n.selectedIndex = -1
+						n.selectedProcessorAddr = n.processors[procIdx+1].Address
+						n.updateViewportContent()
+					}
+					return
+				}
+			}
+		}
+	}
+}
+
+// SelectLeft moves selection left in graph mode (horizontal navigation within same processor)
+func (n *NodesView) SelectLeft() {
+	// Only works on hunters (horizontal navigation between hunters of same processor)
+	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+		currentHunter := n.hunters[n.selectedIndex]
+
+		// Find which processor this hunter belongs to and its position
+		for _, proc := range n.processors {
+			for hunterIdx, hunter := range proc.Hunters {
+				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
+					if hunterIdx > 0 {
+						// Move to previous hunter in same processor
+						newHunterIdx := hunterIdx - 1
+						n.selectedIndex = n.getGlobalHunterIndex(proc.Hunters[newHunterIdx].ID, proc.Address)
+						// Remember this new position
+						n.lastSelectedHunterIndex[proc.Address] = newHunterIdx
+						n.updateViewportContent()
+					}
+					return
+				}
+			}
+		}
+	}
+	// Do nothing for processors or empty selection
+}
+
+// SelectRight moves selection right in graph mode (horizontal navigation within same processor)
+func (n *NodesView) SelectRight() {
+	// Only works on hunters (horizontal navigation between hunters of same processor)
+	if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+		currentHunter := n.hunters[n.selectedIndex]
+
+		// Find which processor this hunter belongs to and its position
+		for _, proc := range n.processors {
+			for hunterIdx, hunter := range proc.Hunters {
+				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
+					if hunterIdx < len(proc.Hunters)-1 {
+						// Move to next hunter in same processor
+						newHunterIdx := hunterIdx + 1
+						n.selectedIndex = n.getGlobalHunterIndex(proc.Hunters[newHunterIdx].ID, proc.Address)
+						// Remember this new position
+						n.lastSelectedHunterIndex[proc.Address] = newHunterIdx
+						n.updateViewportContent()
+					}
+					return
+				}
+			}
+		}
+	}
+	// Do nothing for processors or empty selection
 }
 
 // Update handles key presses and mouse events

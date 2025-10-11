@@ -420,10 +420,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "h", "left": // Focus left pane (packet list)
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				// Use spatial navigation in graph mode
+				if m.uiState.NodesView.GetViewMode() == "graph" {
+					m.uiState.NodesView.SelectLeft()
+					return m, nil
+				}
+			}
 			m.uiState.FocusedPane = "left"
 			return m, nil
 
 		case "l", "right": // Focus right pane (details/hex)
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				// Use spatial navigation in graph mode
+				if m.uiState.NodesView.GetViewMode() == "graph" {
+					m.uiState.NodesView.SelectRight()
+					return m, nil
+				}
+			}
 			if m.uiState.ShowDetails {
 				m.uiState.FocusedPane = "right"
 			}
@@ -540,8 +554,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "up", "k":
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
-				// NodesView handles selection with SelectPrevious
-				m.uiState.NodesView.SelectPrevious()
+				// Use spatial navigation for graph mode, tree navigation for table mode
+				if m.uiState.NodesView.GetViewMode() == "graph" {
+					m.uiState.NodesView.SelectUp()
+				} else {
+					m.uiState.NodesView.SelectPrevious()
+				}
 				return m, nil
 			}
 			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
@@ -559,8 +577,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
-				// NodesView handles selection with SelectNext
-				m.uiState.NodesView.SelectNext()
+				// Use spatial navigation for graph mode, tree navigation for table mode
+				if m.uiState.NodesView.GetViewMode() == "graph" {
+					m.uiState.NodesView.SelectDown()
+				} else {
+					m.uiState.NodesView.SelectNext()
+				}
 				return m, nil
 			}
 			if m.uiState.Tabs.GetActive() == 2 { // Statistics tab

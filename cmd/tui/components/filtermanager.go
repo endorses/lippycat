@@ -1340,7 +1340,6 @@ func (fm *FilterManager) renderSearchBar() string {
 	// Search input
 	searchLabel := "Search: "
 	if fm.searchMode {
-		searchLabel = "Search: "
 		parts = append(parts, searchLabel+fm.searchInput.View())
 	} else {
 		// Show current search value if any

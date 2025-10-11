@@ -2,7 +2,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Currently focused on VoIP (SIP/RTP) analysis with plans for multi-protocol support.
 
-**Status:** v0.2.4 - Early development. Expect breaking changes.
+**Status:** v0.2.5 - Early development. Expect breaking changes.
 
 ## Features
 
@@ -232,6 +232,22 @@ go test ./...
 - Cobra CLI + Bubbletea TUI
 
 ## Changelog
+
+### v0.2.5 (2025-10-12)
+- **Feature**: Dynamic filter management with hunter target selection
+  - Multi-select modal for choosing which hunters a filter applies to
+  - Press 's' on Targets field to open hunter selector
+  - Keyboard shortcuts: Space (toggle), 'a' (all), 'n' (none)
+  - Filters can target all hunters or specific subset
+- **UX**: Improved filter form consistency
+  - Enter key always saves the form (consistent behavior)
+  - Separate 's' key for opening hunter selector
+  - Clear hints and footer instructions
+- **Fix**: Makefile test targets now include `-tags all` flag
+  - Required for project's build tag architecture
+  - Tests now pass reliably with `make test`
+- **Fix**: TCP security tests no longer flaky with `-count=3`
+  - Reset global metrics state for clean test isolation
 
 ### v0.2.4 (2025-10-11)
 - **Feature**: Hunter subscription management in TUI

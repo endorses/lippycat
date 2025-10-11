@@ -489,8 +489,9 @@ func (h *Hunter) startCapture() error {
 
 	// Create packet buffer ONLY on first start
 	// Don't recreate on restart - forwardPackets() is already reading from it
+	// IMPORTANT: Use h.ctx (main context) not h.captureCtx, so buffer survives capture restarts
 	if h.packetBuffer == nil {
-		h.packetBuffer = capture.NewPacketBuffer(h.captureCtx, h.config.BufferSize)
+		h.packetBuffer = capture.NewPacketBuffer(h.ctx, h.config.BufferSize)
 	}
 
 	// Create PCAP interfaces

@@ -117,6 +117,7 @@ type ConnectedHunter struct {
 	ConnectedAt             int64
 	LastHeartbeat           int64
 	PacketsReceived         uint64
+	ActiveFilters           uint32 // Active filter count from hunter stats
 	Status                  management.HunterStatus
 	FilterUpdateFailures    uint32 // Consecutive filter update send failures
 	LastFilterUpdateFailure int64  // Timestamp of last filter update failure
@@ -540,15 +541,36 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 
 		hunterID := hb.HunterId
 
-		// Update hunter status
+		// Update hunter status and stats
 		p.huntersMu.Lock()
+		statsChanged := false
 		if hunter, exists := p.hunters[hunterID]; exists {
 			hunter.LastHeartbeat = hb.TimestampNs
 			hunter.Status = hb.Status
+			if hb.Stats != nil {
+				// Check if filter count changed
+				if hunter.ActiveFilters != hb.Stats.ActiveFilters {
+					hunter.ActiveFilters = hb.Stats.ActiveFilters
+					statsChanged = true
+				}
+			}
+		}
+		// Update aggregated stats immediately if filter count changed
+		if statsChanged {
+			p.updateHealthStats()
 		}
 		p.huntersMu.Unlock()
 
-		logger.Debug("Heartbeat received", "hunter_id", hunterID)
+		// Log heartbeat with stats (INFO level for debugging)
+		if hb.Stats != nil {
+			logger.Info("Heartbeat received with stats",
+				"hunter_id", hunterID,
+				"active_filters", hb.Stats.ActiveFilters,
+				"stats_changed", statsChanged)
+		} else {
+			logger.Warn("Heartbeat received WITHOUT stats",
+				"hunter_id", hunterID)
+		}
 
 		// Send response
 		stats := p.GetStats()
@@ -661,6 +683,7 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			Stats: &management.HunterStats{
 				PacketsCaptured:  hunter.PacketsReceived,
 				PacketsForwarded: hunter.PacketsReceived,
+				ActiveFilters:    hunter.ActiveFilters,
 			},
 			Interfaces: hunter.Interfaces,
 		})
@@ -1096,6 +1119,7 @@ func (p *Processor) monitorHeartbeats() {
 // Assumes huntersMu is already locked by caller
 func (p *Processor) updateHealthStats() {
 	var healthy, warning, errCount uint32
+	var totalFilters uint32
 
 	for _, hunter := range p.hunters {
 		switch hunter.Status {
@@ -1106,6 +1130,8 @@ func (p *Processor) updateHealthStats() {
 		case management.HunterStatus_STATUS_ERROR:
 			errCount++
 		}
+		// Aggregate active filters from all hunters
+		totalFilters += hunter.ActiveFilters
 	}
 
 	// Get current cache, update, and store back (copy-on-write)
@@ -1117,6 +1143,7 @@ func (p *Processor) updateHealthStats() {
 	newStats.HealthyHunters = healthy
 	newStats.WarningHunters = warning
 	newStats.ErrorHunters = errCount
+	newStats.TotalFilters = totalFilters
 
 	// Store updated cache
 	p.statsCache.Store(&cachedStats{

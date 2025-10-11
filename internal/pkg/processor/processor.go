@@ -716,16 +716,22 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
 	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
 
-	// Determine if this is add or modify
+	// Generate ID for new filters
 	p.filtersMu.Lock()
+	if filter.Id == "" {
+		filter.Id = fmt.Sprintf("filter-%d", time.Now().UnixNano())
+		logger.Info("Generated filter ID", "filter_id", filter.Id)
+	}
+
+	// Determine if this is add or modify
 	_, exists := p.filters[filter.Id]
 	p.filters[filter.Id] = filter
-	p.filtersMu.Unlock()
 
 	updateType := management.FilterUpdateType_UPDATE_ADD
 	if exists {
 		updateType = management.FilterUpdateType_UPDATE_MODIFY
 	}
+	p.filtersMu.Unlock()
 
 	// Push filter update to affected hunters
 	update := &management.FilterUpdate{

@@ -204,17 +204,23 @@ func (hs *HunterSelector) View() string {
 				checkbox = "[✓] "
 			}
 
-			// Status icon with color
+			// Status icon - only apply color if NOT cursor-selected (to avoid breaking background)
 			var statusIcon string
-			switch hunter.Status {
-			case management.HunterStatus_STATUS_HEALTHY:
-				statusIcon = lipgloss.NewStyle().Foreground(hs.theme.SuccessColor).Render("●")
-			case management.HunterStatus_STATUS_WARNING:
-				statusIcon = lipgloss.NewStyle().Foreground(hs.theme.WarningColor).Render("●")
-			case management.HunterStatus_STATUS_ERROR:
-				statusIcon = lipgloss.NewStyle().Foreground(hs.theme.ErrorColor).Render("●")
-			default:
-				statusIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("●")
+			if i == hs.cursorIndex {
+				// When selected, use plain icon without color styling
+				statusIcon = "●"
+			} else {
+				// When not selected, apply status color
+				switch hunter.Status {
+				case management.HunterStatus_STATUS_HEALTHY:
+					statusIcon = lipgloss.NewStyle().Foreground(hs.theme.SuccessColor).Render("●")
+				case management.HunterStatus_STATUS_WARNING:
+					statusIcon = lipgloss.NewStyle().Foreground(hs.theme.WarningColor).Render("●")
+				case management.HunterStatus_STATUS_ERROR:
+					statusIcon = lipgloss.NewStyle().Foreground(hs.theme.ErrorColor).Render("●")
+				default:
+					statusIcon = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("●")
+				}
 			}
 
 			// Build single-line display: [✓] ● hunter-id (hostname)

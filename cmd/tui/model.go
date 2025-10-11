@@ -242,6 +242,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// Handle filter manager modal
+		if m.uiState.FilterManager.IsActive() {
+			cmd := m.uiState.FilterManager.Update(msg)
+			return m, cmd
+		}
+
 		// Handle add node modal (highest priority after protocol selector)
 		if m.uiState.NodesView.IsModalOpen() {
 			cmd := m.uiState.NodesView.Update(msg)
@@ -457,6 +463,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "f": // Manage filters (on nodes tab)
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				return m, m.handleOpenFilterManager()
+			}
+			return m, nil
+
 		case "t": // Toggle theme
 			// For future: add theme cycling logic here
 			// Currently only Solarized theme available
@@ -473,6 +485,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.CallsView.SetTheme(m.uiState.Theme)
 			m.uiState.ProtocolSelector.SetTheme(m.uiState.Theme)
 			m.uiState.HunterSelector.SetTheme(m.uiState.Theme)
+			m.uiState.FilterManager.SetTheme(m.uiState.Theme)
 			m.uiState.FilterInput.SetTheme(m.uiState.Theme)
 			// Save theme preference
 			saveThemePreference(m.uiState.Theme)
@@ -1524,6 +1537,18 @@ func (m Model) View() string {
 		)
 	}
 
+	// Overlay filter manager modal if active
+	if m.uiState.FilterManager.IsActive() {
+		filterManagerView := m.uiState.FilterManager.View()
+
+		// Place the filter manager in the center
+		return lipgloss.Place(
+			m.uiState.Width, m.uiState.Height,
+			lipgloss.Center, lipgloss.Center,
+			filterManagerView,
+		)
+	}
+
 	// Overlay add node modal if active
 	if m.uiState.NodesView.IsModalOpen() {
 		modalView := m.uiState.NodesView.RenderModal(m.uiState.Width, m.uiState.Height)
@@ -2022,6 +2047,34 @@ func (m *Model) handleOpenHunterSelector() tea.Cmd {
 		return func() tea.Msg {
 			return components.LoadHuntersFromProcessorMsg{ProcessorAddr: selectedProcessorAddr}
 		}
+	}
+	return nil
+}
+
+// handleOpenFilterManager opens the filter manager modal for the selected node
+func (m *Model) handleOpenFilterManager() tea.Cmd {
+	// Get selected processor or hunter from nodes view
+	selectedProcessorAddr := m.uiState.NodesView.GetSelectedProcessorAddr()
+	selectedHunter := m.uiState.NodesView.GetSelectedHunter()
+
+	if selectedProcessorAddr != "" {
+		// Open for processor (affects all hunters)
+		m.uiState.FilterManager.Activate(selectedProcessorAddr, components.NodeTypeProcessor)
+		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
+
+		// TODO: Load filters from processor via gRPC
+		// For now, show empty state
+		m.uiState.FilterManager.SetFilters([]*management.Filter{})
+		return nil
+	} else if selectedHunter != nil {
+		// Open for specific hunter
+		m.uiState.FilterManager.Activate(selectedHunter.ID, components.NodeTypeHunter)
+		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
+
+		// TODO: Load filters from processor (filtered by hunter ID) via gRPC
+		// For now, show empty state
+		m.uiState.FilterManager.SetFilters([]*management.Filter{})
+		return nil
 	}
 	return nil
 }

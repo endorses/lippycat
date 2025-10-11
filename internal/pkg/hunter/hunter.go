@@ -773,14 +773,28 @@ func (h *Hunter) cleanup() {
 		h.connCancel()
 	}
 
-	// Wait for all connection-scoped goroutines to finish
+	// Wait for all connection-scoped goroutines to finish with timeout
 	logger.Debug("Waiting for connection goroutines to finish...")
-	h.connWg.Wait()
-	logger.Debug("All connection goroutines finished")
 
-	if h.packetBuffer != nil {
-		h.packetBuffer.Close()
+	done := make(chan struct{})
+	go func() {
+		h.connWg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Debug("All connection goroutines finished")
+	case <-time.After(10 * time.Second):
+		logger.Warn("Cleanup timeout - some goroutines may still be running, proceeding anyway")
 	}
+
+	// NOTE: Do NOT close packetBuffer here!
+	// The packet buffer is for capturing packets, which should continue
+	// even when disconnected from the processor. If we close it here,
+	// the new forwardPackets() goroutine after reconnection will read
+	// from a closed channel and immediately exit, causing packets to stop flowing.
+	// The buffer will be cleaned up when the hunter stops completely (h.ctx canceled).
 
 	h.streamMu.Lock()
 	if h.stream != nil {
@@ -1049,6 +1063,12 @@ func (h *Hunter) connectionManager() {
 			// Successfully connected
 			logger.Info("Connected to processor")
 
+			// Reset reconnection state
+			h.reconnectMu.Lock()
+			h.reconnecting = false
+			h.reconnectAttempts = 0
+			h.reconnectMu.Unlock()
+
 			// Create connection-scoped context for this connection's goroutines
 			h.connCtx, h.connCancel = context.WithCancel(h.ctx)
 
@@ -1105,7 +1125,8 @@ func (h *Hunter) connectionManager() {
 
 // monitorConnection monitors for disconnections
 func (h *Hunter) monitorConnection() {
-	ticker := time.NewTicker(10 * time.Second)
+	// Check frequently for faster reconnection (100ms polling)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
@@ -1120,9 +1141,8 @@ func (h *Hunter) monitorConnection() {
 			h.reconnectMu.Unlock()
 
 			if needsReconnect {
-				// Cleanup old connections
-				h.cleanup()
 				// Return to let connectionManager retry
+				// (cleanup will be called by connectionManager at line 1071)
 				return
 			}
 		}

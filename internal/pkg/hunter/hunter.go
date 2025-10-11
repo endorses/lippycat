@@ -375,7 +375,9 @@ func (h *Hunter) register() error {
 		"initial_filters", len(resp.Filters))
 
 	// Store initial filters
+	h.mu.Lock()
 	h.filters = resp.Filters
+	h.mu.Unlock()
 
 	return nil
 }
@@ -952,12 +954,25 @@ func (h *Hunter) handleFilterUpdate(update *management.FilterUpdate) {
 
 	switch update.UpdateType {
 	case management.FilterUpdateType_UPDATE_ADD:
-		// Add new filter
-		h.filters = append(h.filters, update.Filter)
-		filtersChanged = true
-		logger.Info("Filter added",
-			"filter_id", update.Filter.Id,
-			"pattern", update.Filter.Pattern)
+		// Check if filter already exists (prevent duplicates)
+		exists := false
+		for _, f := range h.filters {
+			if f.Id == update.Filter.Id {
+				exists = true
+				logger.Debug("Filter already exists, skipping duplicate add",
+					"filter_id", update.Filter.Id)
+				break
+			}
+		}
+
+		if !exists {
+			// Add new filter
+			h.filters = append(h.filters, update.Filter)
+			filtersChanged = true
+			logger.Info("Filter added",
+				"filter_id", update.Filter.Id,
+				"pattern", update.Filter.Pattern)
+		}
 
 	case management.FilterUpdateType_UPDATE_MODIFY:
 		// Modify existing filter

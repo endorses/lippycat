@@ -1200,18 +1200,23 @@ func (fm *FilterManager) renderDeleteConfirmation() string {
 	content.WriteString(warningStyle.Render("⚠️  Delete Filter"))
 	content.WriteString("\n\n")
 
-	// Filter details
+	// Question
 	content.WriteString("Are you sure you want to delete this filter?\n\n")
+
+	// Filter details - build as single block for consistent alignment
+	var details strings.Builder
+	details.WriteString(fmt.Sprintf("Pattern: %s\n", fm.deleteCandidate.Pattern))
+	details.WriteString(fmt.Sprintf("Type: %s", fm.deleteCandidate.Type.String()))
+	if fm.deleteCandidate.Description != "" {
+		details.WriteString(fmt.Sprintf("\nDescription: %s", fm.deleteCandidate.Description))
+	}
 
 	detailStyle := lipgloss.NewStyle().
 		Foreground(fm.theme.Foreground)
-	content.WriteString(detailStyle.Render(fmt.Sprintf("Pattern: %s\n", fm.deleteCandidate.Pattern)))
-	content.WriteString(detailStyle.Render(fmt.Sprintf("Type: %s\n", fm.deleteCandidate.Type.String())))
-	if fm.deleteCandidate.Description != "" {
-		content.WriteString(detailStyle.Render(fmt.Sprintf("Description: %s\n", fm.deleteCandidate.Description)))
-	}
+	content.WriteString(detailStyle.Render(details.String()))
 
-	content.WriteString("\n")
+	// Warning emphasis
+	content.WriteString("\n\n")
 	emphasisStyle := lipgloss.NewStyle().
 		Foreground(fm.theme.ErrorColor).
 		Italic(true)

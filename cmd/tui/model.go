@@ -806,22 +806,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case components.UpdateBufferSizeMsg:
 		// Update buffer size on-the-fly without restarting capture
-		m.packetStore.MaxPackets = msg.Size
+		// ResizeBuffer handles the resize atomically to prevent races with AddPacket
+		m.packetStore.ResizeBuffer(msg.Size)
 
-		// If current packets exceed new buffer size, rebuild buffer keeping newest packets
-		if m.packetStore.PacketsCount > m.packetStore.MaxPackets {
-			// Extract packets in order (handling circular buffer)
-			orderedPackets := m.getPacketsInOrder()
-
-			// Keep only the newest maxPackets
-			if len(orderedPackets) > m.packetStore.MaxPackets {
-				orderedPackets = orderedPackets[len(orderedPackets)-m.packetStore.MaxPackets:]
-			}
-
-			// Reset circular buffer with new data
-			m.packetStore.Packets = orderedPackets
-			m.packetStore.PacketsHead = 0
-			m.packetStore.PacketsCount = len(orderedPackets)
+		// Update packet list display
+		if !m.packetStore.HasFilter() {
+			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		} else {
+			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 		}
 
 		// Save to config file
@@ -1244,10 +1236,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 					// Calculate which row was clicked (relative to visible area)
 					visibleRow := msg.Y - tableHeaderY - 1 // -1 for separator line
 
-					packets := m.packetStore.Packets
-					if m.packetStore.HasFilter() {
-						packets = m.packetStore.FilteredPackets
-					}
+					// Use the packet list from the PacketList component (matches what's displayed)
+					packets := m.uiState.PacketList.GetPackets()
 
 					// Add scroll offset to get actual packet index
 					actualPacketIndex := m.uiState.PacketList.GetOffset() + visibleRow
@@ -1298,10 +1288,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				// Calculate which row was clicked (relative to visible area)
 				visibleRow := msg.Y - tableHeaderY - 1
 
-				packets := m.packetStore.Packets
-				if m.packetStore.HasFilter() {
-					packets = m.packetStore.FilteredPackets
-				}
+				// Use the packet list from the PacketList component (matches what's displayed)
+				packets := m.uiState.PacketList.GetPackets()
 
 				// Add scroll offset to get actual packet index
 				actualPacketIndex := m.uiState.PacketList.GetOffset() + visibleRow
@@ -1514,10 +1502,9 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 
 // updateDetailsPanel updates the details panel with the currently selected packet
 func (m *Model) updateDetailsPanel() {
-	packets := m.packetStore.Packets
-	if m.packetStore.HasFilter() {
-		packets = m.packetStore.FilteredPackets
-	}
+	// Use the packet list that's already loaded in the PacketList component
+	// This ensures we're working with the exact same list that's displayed
+	packets := m.uiState.PacketList.GetPackets()
 
 	if len(packets) == 0 {
 		m.uiState.DetailsPanel.SetPacket(nil)

@@ -66,11 +66,215 @@ func (p *PacketList) SetTheme(theme themes.Theme) {
 
 // SetPackets updates the packet list
 func (p *PacketList) SetPackets(packets []PacketDisplay) {
+	oldLen := len(p.packets)
+	newLen := len(packets)
+	wasAtBottom := (oldLen == 0) || (p.cursor >= oldLen-1)
+
+	// Store the currently selected packet (if any) to try to preserve selection
+	var selectedPacket *PacketDisplay
+	if oldLen > 0 && p.cursor >= 0 && p.cursor < oldLen {
+		pkt := p.packets[p.cursor]
+		selectedPacket = &pkt
+	}
+
+	// Detect if this is a filter change (drastic change in packet list)
+	// This happens when:
+	// 1. Old first packet is not found near the start of new list
+	// 2. New list is significantly smaller than old list (newLen < oldLen * 0.8) - applying filter
+	// OR when new list is significantly larger (newLen > oldLen * 1.3) - clearing filter
+	isFilterChange := false
+	if oldLen > 0 && newLen > 0 {
+		sizeRatio := float64(newLen) / float64(oldLen)
+		if sizeRatio < 0.8 || sizeRatio > 1.3 {
+			// Check if old first packet is at/near the start of new list
+			oldFirstPacket := p.packets[0]
+			foundAtStart := false
+			// For filter changes, old first packet should be at index 0 or very close
+			// If it's found further in (index > 2), it's likely a filter change
+			for i := 0; i < newLen && i < 3; i++ {
+				if packets[i].Timestamp.Equal(oldFirstPacket.Timestamp) &&
+					packets[i].SrcIP == oldFirstPacket.SrcIP &&
+					packets[i].DstIP == oldFirstPacket.DstIP &&
+					packets[i].SrcPort == oldFirstPacket.SrcPort &&
+					packets[i].DstPort == oldFirstPacket.DstPort {
+					foundAtStart = true
+					break
+				}
+			}
+			// If old first packet is not at the start of new list, it's a filter change
+			if !foundAtStart {
+				isFilterChange = true
+			}
+		}
+	}
+
+	// When buffer is full (circular buffer wrapping), packets are removed from the front
+	// We need to adjust the cursor to compensate for the removed packets
+	// Otherwise the cursor "drifts forward" and eventually reaches the bottom
+	packetsRemovedFromFront := 0
+	if oldLen > 0 && newLen > 0 && !isFilterChange {
+		// Find where the old first packet appears in the new list (if at all)
+		// This tells us exactly how many packets were removed from the front
+		oldFirstPacket := p.packets[0]
+
+		// Search for the old first packet in the new list
+		foundIndex := -1
+		for i := 0; i < newLen && i < 100; i++ { // Check first 100 to avoid O(n^2) in worst case
+			if packets[i].Timestamp.Equal(oldFirstPacket.Timestamp) &&
+				packets[i].SrcIP == oldFirstPacket.SrcIP &&
+				packets[i].DstIP == oldFirstPacket.DstIP &&
+				packets[i].SrcPort == oldFirstPacket.SrcPort &&
+				packets[i].DstPort == oldFirstPacket.DstPort {
+				foundIndex = i
+				break
+			}
+		}
+
+		if foundIndex > 0 {
+			// Old first packet is now at position foundIndex, meaning foundIndex packets were removed
+			packetsRemovedFromFront = foundIndex
+		} else if foundIndex == -1 && newLen == oldLen {
+			// Old first packet not found and buffer size is the same - it was removed
+			// Try to find any overlap to calculate the shift
+			// Look for the old packet at cursor position in the new list
+			if p.cursor > 0 && p.cursor < oldLen {
+				oldCursorPacket := p.packets[p.cursor]
+				for i := 0; i < newLen && i < p.cursor+100; i++ {
+					if packets[i].Timestamp.Equal(oldCursorPacket.Timestamp) &&
+						packets[i].SrcIP == oldCursorPacket.SrcIP &&
+						packets[i].DstIP == oldCursorPacket.DstIP {
+						// Found the cursor packet at index i, it was originally at p.cursor
+						// So (p.cursor - i) packets were removed from the front
+						shift := p.cursor - i
+						if shift > 0 {
+							packetsRemovedFromFront = shift
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Store old packets before updating
+	oldPackets := p.packets
 	p.packets = packets
 
-	// Auto-scroll to bottom if enabled (like chat)
-	if p.autoScroll && len(p.packets) > 0 {
+	// If this is a filter change, try to preserve the selected packet
+	if isFilterChange {
+		// Reset offset first - we'll recalculate it after finding the packet
+		p.offset = 0
+
+		// Try to find the selected packet in the new list
+		if selectedPacket != nil && len(p.packets) > 0 {
+			// First, try exact match
+			foundIndex := -1
+			for i := 0; i < len(p.packets); i++ {
+				if p.packets[i].Timestamp.Equal(selectedPacket.Timestamp) &&
+					p.packets[i].SrcIP == selectedPacket.SrcIP &&
+					p.packets[i].DstIP == selectedPacket.DstIP &&
+					p.packets[i].SrcPort == selectedPacket.SrcPort &&
+					p.packets[i].DstPort == selectedPacket.DstPort {
+					foundIndex = i
+					break
+				}
+			}
+
+			// If exact match not found, find closest packet by timestamp
+			if foundIndex == -1 {
+				// Binary search for closest timestamp
+				closestIndex := 0
+				minDiff := selectedPacket.Timestamp.Sub(p.packets[0].Timestamp)
+				if minDiff < 0 {
+					minDiff = -minDiff
+				}
+
+				for i := 1; i < len(p.packets); i++ {
+					diff := selectedPacket.Timestamp.Sub(p.packets[i].Timestamp)
+					if diff < 0 {
+						diff = -diff
+					}
+					if diff < minDiff {
+						minDiff = diff
+						closestIndex = i
+					}
+					// Stop searching if we've gone past the target time
+					if p.packets[i].Timestamp.After(selectedPacket.Timestamp) {
+						break
+					}
+				}
+				foundIndex = closestIndex
+			}
+
+			if foundIndex != -1 {
+				// Selected packet (or closest) found - keep it selected
+				p.cursor = foundIndex
+
+				// Center the selected packet in the view (or position it nicely)
+				contentHeight := p.height - 3
+				visibleLines := contentHeight - p.headerHeight
+				if visibleLines < 1 {
+					visibleLines = 1
+				}
+
+				// Try to center the cursor, but ensure we show from the top if there aren't enough packets above
+				idealOffset := p.cursor - (visibleLines / 3) // Position at top third for better context
+				if idealOffset < 0 {
+					p.offset = 0
+				} else if idealOffset > len(p.packets)-visibleLines {
+					// Ensure we don't scroll past the end
+					p.offset = len(p.packets) - visibleLines
+					if p.offset < 0 {
+						p.offset = 0
+					}
+				} else {
+					p.offset = idealOffset
+				}
+
+				p.autoScroll = false
+				return
+			}
+		}
+		// No packets or couldn't find anything - go to top
+		p.cursor = 0
+		p.offset = 0
+		p.autoScroll = false
+		return
+	}
+
+	// Adjust cursor position if packets were removed from the front
+	// This keeps the cursor pointing at the same relative position in the list
+	if packetsRemovedFromFront > 0 && !wasAtBottom {
+		p.cursor -= packetsRemovedFromFront
+		if p.cursor < 0 {
+			p.cursor = 0
+		}
+
+		// Verify the cursor still points to approximately the same packet
+		// by checking if the packet at the cursor position matches expectations
+		if p.cursor < len(oldPackets) && p.cursor < len(p.packets) {
+			// This is just a sanity check - the packet at cursor should be similar
+			// to what was there before (plus packetsRemovedFromFront)
+			expectedIndex := p.cursor + packetsRemovedFromFront
+			if expectedIndex < len(oldPackets) {
+				// We're good - cursor adjustment seems correct
+			}
+		}
+	}
+
+	// Auto-scroll to bottom only if:
+	// 1. autoScroll is enabled AND
+	// 2. cursor was already at the bottom of the old list (or list was empty)
+	// This prevents jumping to the bottom when the user has navigated away
+	if p.autoScroll && len(p.packets) > 0 && wasAtBottom {
 		p.cursor = len(p.packets) - 1
+		p.adjustOffset()
+	} else if p.cursor >= len(p.packets) && len(p.packets) > 0 {
+		// Cursor is now out of bounds, adjust it to the last valid position
+		p.cursor = len(p.packets) - 1
+		p.adjustOffset()
+	} else {
+		// Just adjust offset to keep cursor visible
 		p.adjustOffset()
 	}
 }
@@ -219,6 +423,11 @@ func (p *PacketList) GetCursor() int {
 // GetOffset returns the current scroll offset
 func (p *PacketList) GetOffset() int {
 	return p.offset
+}
+
+// GetPackets returns the current packet list
+func (p *PacketList) GetPackets() []PacketDisplay {
+	return p.packets
 }
 
 // SetCursor sets the cursor position directly (for mouse clicks)

@@ -65,17 +65,29 @@ func (ps *PacketStore) GetPacketsInOrder() []components.PacketDisplay {
 		return nil
 	}
 
-	if ps.PacketsCount < ps.MaxPackets {
+	// Get the actual number of packets we can safely access
+	// This handles cases where MaxPackets was increased but Packets slice hasn't been resized yet
+	actualPacketCount := ps.PacketsCount
+	if actualPacketCount > len(ps.Packets) {
+		actualPacketCount = len(ps.Packets)
+	}
+
+	if ps.PacketsCount < ps.MaxPackets && ps.PacketsCount <= len(ps.Packets) {
 		// Buffer not full yet, packets are in order from index 0
-		result := make([]components.PacketDisplay, ps.PacketsCount)
-		copy(result, ps.Packets[:ps.PacketsCount])
+		result := make([]components.PacketDisplay, actualPacketCount)
+		copy(result, ps.Packets[:actualPacketCount])
 		return result
 	}
 
 	// Buffer is full, need to reorder starting from head
-	result := make([]components.PacketDisplay, ps.MaxPackets)
-	for i := 0; i < ps.MaxPackets; i++ {
-		result[i] = ps.Packets[(ps.PacketsHead+i)%ps.MaxPackets]
+	// Use the actual capacity of the Packets slice, not MaxPackets
+	bufferSize := len(ps.Packets)
+	if bufferSize == 0 {
+		return nil
+	}
+	result := make([]components.PacketDisplay, bufferSize)
+	for i := 0; i < bufferSize; i++ {
+		result[i] = ps.Packets[(ps.PacketsHead+i)%bufferSize]
 	}
 	return result
 }
@@ -88,6 +100,68 @@ func (ps *PacketStore) GetFilteredPackets() []components.PacketDisplay {
 	result := make([]components.PacketDisplay, len(ps.FilteredPackets))
 	copy(result, ps.FilteredPackets)
 	return result
+}
+
+// ResizeBuffer atomically resizes the packet buffer
+// Returns the ordered packets after resize for display update
+func (ps *PacketStore) ResizeBuffer(newSize int) []components.PacketDisplay {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	oldMaxPackets := ps.MaxPackets
+	oldPackets := ps.Packets
+	oldPacketsCount := ps.PacketsCount
+	oldPacketsHead := ps.PacketsHead
+
+	// Extract current packets in order (handling circular buffer)
+	var orderedPackets []components.PacketDisplay
+	if oldPacketsCount == 0 {
+		orderedPackets = nil
+	} else if oldPacketsCount < len(oldPackets) {
+		// Buffer not full yet, packets are in order from index 0
+		orderedPackets = make([]components.PacketDisplay, oldPacketsCount)
+		copy(orderedPackets, oldPackets[:oldPacketsCount])
+	} else {
+		// Buffer is full, need to reorder starting from head
+		orderedPackets = make([]components.PacketDisplay, len(oldPackets))
+		for i := 0; i < len(oldPackets); i++ {
+			orderedPackets[i] = oldPackets[(oldPacketsHead+i)%len(oldPackets)]
+		}
+	}
+
+	// Now update the buffer atomically
+	ps.MaxPackets = newSize
+
+	if newSize > oldMaxPackets {
+		// Buffer size increased - create new larger slice and copy existing packets
+		newPackets := make([]components.PacketDisplay, newSize)
+		copy(newPackets, orderedPackets)
+		ps.Packets = newPackets
+		// Next packet goes after existing ones (or wraps to 0 if at capacity)
+		ps.PacketsHead = len(orderedPackets) % newSize
+		ps.PacketsCount = len(orderedPackets)
+	} else {
+		// Buffer size decreased - keep only the newest maxPackets
+		if len(orderedPackets) > newSize {
+			orderedPackets = orderedPackets[len(orderedPackets)-newSize:]
+		}
+
+		// Reset circular buffer with new data
+		newPackets := make([]components.PacketDisplay, newSize)
+		copy(newPackets, orderedPackets)
+		ps.Packets = newPackets
+		// If buffer is full after copying, head wraps to 0; otherwise it's at the end
+		if len(orderedPackets) >= newSize {
+			ps.PacketsHead = 0
+			ps.PacketsCount = newSize
+		} else {
+			ps.PacketsHead = len(orderedPackets)
+			ps.PacketsCount = len(orderedPackets)
+		}
+	}
+
+	// Return the packets for display update
+	return orderedPackets
 }
 
 // SetFilter sets the active filter chain and reapplies to all packets

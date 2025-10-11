@@ -1,0 +1,17 @@
+# Gitleaks configuration for lippycat
+# https://github.com/gitleaks/gitleaks
+
+title = "lippycat gitleaks config"
+
+# Exclude test certificates and test files from secret scanning
+[allowlist]
+description = "Allowlist for test certificates and test data"
+paths = [
+    '''test/testcerts/.*''',
+    '''testdata/pcaps/.*\.key$''',
+    '''.*_test\.go$''',
+]
+
+regexes = [
+    '''-----BEGIN (EC |RSA )?PRIVATE KEY-----''',  # Allow private keys in test files
+]

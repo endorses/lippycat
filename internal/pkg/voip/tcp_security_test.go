@@ -137,6 +137,11 @@ func TestCallIDDetector_EdgeCases(t *testing.T) {
 }
 
 func TestSIPStream_PanicRecovery(t *testing.T) {
+	// Reset metrics for clean test state
+	tcpStreamMetrics = &tcpStreamMetricsInternal{
+		lastMetricsUpdate: time.Now(),
+	}
+
 	ctx := context.Background()
 	factory := NewSipStreamFactory(ctx)
 	defer factory.(*sipStreamFactory).Shutdown()
@@ -176,6 +181,11 @@ func TestSIPStream_PanicRecovery(t *testing.T) {
 }
 
 func TestSIPStream_ContextCancellation(t *testing.T) {
+	// Reset metrics for clean test state
+	tcpStreamMetrics = &tcpStreamMetricsInternal{
+		lastMetricsUpdate: time.Now(),
+	}
+
 	t.Run("Stream shutdown on context cancel", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		factory := NewSipStreamFactory(ctx)

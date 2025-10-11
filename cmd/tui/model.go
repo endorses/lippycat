@@ -2073,14 +2073,14 @@ func (m *Model) handleOpenFilterManager() tea.Cmd {
 
 	if selectedProcessorAddr != "" {
 		// Open for processor (affects all hunters)
-		m.uiState.FilterManager.Activate(selectedProcessorAddr, components.NodeTypeProcessor)
+		m.uiState.FilterManager.Activate(selectedProcessorAddr, selectedProcessorAddr, components.NodeTypeProcessor)
 		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
 
 		// Load filters from processor via gRPC
 		return m.loadFiltersFromProcessor(selectedProcessorAddr, "")
 	} else if selectedHunter != nil {
 		// Open for specific hunter
-		m.uiState.FilterManager.Activate(selectedHunter.ID, components.NodeTypeHunter)
+		m.uiState.FilterManager.Activate(selectedHunter.ID, selectedHunter.ProcessorAddr, components.NodeTypeHunter)
 		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
 
 		// Load filters from processor (filtered by hunter ID) via gRPC

@@ -186,7 +186,8 @@ type FilterManager struct {
 	// State
 	active          bool
 	mode            FilterManagerMode
-	targetNode      string // processor addr or hunter ID
+	targetNode      string // processor addr or hunter ID (for display)
+	processorAddr   string // actual processor address (for gRPC calls)
 	targetType      NodeType
 	searchMode      bool
 	filterByType    *management.FilterType
@@ -281,9 +282,10 @@ func (fm *FilterManager) SetSize(width, height int) {
 }
 
 // Activate shows the filter manager for a specific node
-func (fm *FilterManager) Activate(targetNode string, targetType NodeType) {
+func (fm *FilterManager) Activate(targetNode string, processorAddr string, targetType NodeType) {
 	fm.active = true
 	fm.targetNode = targetNode
+	fm.processorAddr = processorAddr
 	fm.targetType = targetType
 	fm.mode = ModeList
 	fm.searchMode = false
@@ -586,7 +588,7 @@ func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
 	return func() tea.Msg {
 		return FilterOperationMsg{
 			Operation:      "toggle",
-			ProcessorAddr:  fm.targetNode,
+			ProcessorAddr:  fm.processorAddr,
 			Filter:         selectedFilter,
 			TargetNodeType: fm.targetType,
 		}
@@ -841,7 +843,7 @@ func (fm *FilterManager) deleteFilter() tea.Cmd {
 	return func() tea.Msg {
 		return FilterOperationMsg{
 			Operation:      "delete",
-			ProcessorAddr:  fm.targetNode,
+			ProcessorAddr:  fm.processorAddr,
 			FilterID:       filterID,
 			TargetNodeType: fm.targetType,
 		}
@@ -1119,7 +1121,7 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 	return func() tea.Msg {
 		return FilterOperationMsg{
 			Operation:      operation,
-			ProcessorAddr:  fm.targetNode,
+			ProcessorAddr:  fm.processorAddr,
 			Filter:         filter,
 			TargetNodeType: fm.targetType,
 		}

@@ -1,0 +1,55 @@
+#!/bin/bash
+#
+# Pre-commit hook for lippycat
+# - Checks code formatting with gofmt
+# - Runs go vet to catch common errors
+#
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo "Running pre-commit checks..."
+
+# Check if gofmt would make any changes
+UNFORMATTED=$(gofmt -s -l . 2>&1 | grep -v '^vendor/' || true)
+if [ -n "$UNFORMATTED" ]; then
+    echo -e "${RED}✗ Code formatting check failed${NC}"
+    echo -e "${YELLOW}The following files need formatting:${NC}"
+    echo "$UNFORMATTED"
+    echo ""
+    echo -e "${YELLOW}Run 'gofmt -s -w .' to fix formatting${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Code formatting check passed${NC}"
+
+# Run gitleaks to detect secrets
+if command -v gitleaks &> /dev/null; then
+    echo "Running gitleaks..."
+    if ! gitleaks protect --staged --verbose 2>&1; then
+        echo -e "${RED}✗ gitleaks detected secrets in staged files${NC}"
+        echo -e "${YELLOW}Remove sensitive data before committing${NC}"
+        echo -e "${YELLOW}To bypass this check (not recommended): git commit --no-verify${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ gitleaks check passed${NC}"
+else
+    echo -e "${YELLOW}⚠ gitleaks not found - skipping secret detection${NC}"
+    echo -e "${YELLOW}Install gitleaks for better security: https://github.com/gitleaks/gitleaks${NC}"
+fi
+
+# Run go vet with build tags
+echo "Running go vet..."
+if ! go vet -tags=all ./... 2>&1; then
+    echo -e "${RED}✗ go vet check failed${NC}"
+    echo -e "${YELLOW}Fix the issues reported by go vet before committing${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ go vet check passed${NC}"
+
+echo -e "${GREEN}✓ All pre-commit checks passed!${NC}"
+exit 0

@@ -466,6 +466,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			saveThemePreference(m.uiState.Theme)
 			return m, nil
 
+		case "g": // Vim-style navigation: gg to go to top
+			now := time.Now()
+			// Check if this is the second 'g' within 500ms
+			if m.uiState.LastKeyPress == "g" && now.Sub(m.uiState.LastKeyPressTime) < 500*time.Millisecond {
+				// This is 'gg' - jump to top
+				if m.uiState.Tabs.GetActive() == 0 { // Capture tab
+					if m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
+						// Jump to top of details panel
+						cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyHome})
+						return m, cmd
+					} else {
+						// Jump to top of packet list
+						m.uiState.PacketList.GotoTop()
+						m.updateDetailsPanel()
+						return m, nil
+					}
+				} else if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+					cmd := m.uiState.StatisticsView.Update(tea.KeyMsg{Type: tea.KeyHome})
+					return m, cmd
+				}
+				// Clear the last key press after handling gg
+				m.uiState.LastKeyPress = ""
+				return m, nil
+			}
+			// First 'g' - just record it
+			m.uiState.LastKeyPress = "g"
+			m.uiState.LastKeyPressTime = now
+			return m, nil
+
+		case "G": // Vim-style navigation: G to go to bottom (shift+g)
+			if m.uiState.Tabs.GetActive() == 0 { // Capture tab
+				if m.uiState.FocusedPane == "right" && m.uiState.ShowDetails {
+					// Jump to bottom of details panel
+					cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyEnd})
+					return m, cmd
+				} else {
+					// Jump to bottom of packet list
+					m.uiState.PacketList.GotoBottom()
+					m.updateDetailsPanel()
+					return m, nil
+				}
+			} else if m.uiState.Tabs.GetActive() == 2 { // Statistics tab
+				cmd := m.uiState.StatisticsView.Update(tea.KeyMsg{Type: tea.KeyEnd})
+				return m, cmd
+			}
+			return m, nil
+
 		case "up", "k":
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
 				m.uiState.NodesView.SelectPrevious()
@@ -1088,17 +1135,30 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	contentStartY := headerHeight + tabsHeight // Y=6
 	contentHeight := m.uiState.Height - headerHeight - tabsHeight - bottomHeight
 
-	// Handle mouse wheel scrolling
+	// Handle mouse wheel scrolling - based on hover position, not focus
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
 		if m.uiState.Tabs.GetActive() == 0 {
-			// On capture tab - scroll packet list if focused on left
-			if m.uiState.FocusedPane == "left" {
+			// On capture tab - determine which pane we're hovering over
+			minWidthForDetails := 160
+			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
+				// Split pane mode - check X position to determine which pane
+				detailsWidth := 77
+				listWidth := m.uiState.Width - detailsWidth
+				detailsContentStart := listWidth - 2
+
+				if msg.X < detailsContentStart {
+					// Hovering over packet list - scroll it
+					m.uiState.PacketList.CursorUp()
+					m.updateDetailsPanel()
+				} else {
+					// Hovering over details panel - scroll it
+					cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyUp})
+					return m, cmd
+				}
+			} else {
+				// Full width packet list - just scroll it
 				m.uiState.PacketList.CursorUp()
 				m.updateDetailsPanel()
-			} else if m.uiState.FocusedPane == "right" {
-				// Scroll details panel viewport
-				cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyUp})
-				return m, cmd
 			}
 		}
 		return m, nil
@@ -1106,14 +1166,27 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
 		if m.uiState.Tabs.GetActive() == 0 {
-			// On capture tab - scroll packet list if focused on left
-			if m.uiState.FocusedPane == "left" {
+			// On capture tab - determine which pane we're hovering over
+			minWidthForDetails := 160
+			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
+				// Split pane mode - check X position to determine which pane
+				detailsWidth := 77
+				listWidth := m.uiState.Width - detailsWidth
+				detailsContentStart := listWidth - 2
+
+				if msg.X < detailsContentStart {
+					// Hovering over packet list - scroll it
+					m.uiState.PacketList.CursorDown()
+					m.updateDetailsPanel()
+				} else {
+					// Hovering over details panel - scroll it
+					cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyDown})
+					return m, cmd
+				}
+			} else {
+				// Full width packet list - just scroll it
 				m.uiState.PacketList.CursorDown()
 				m.updateDetailsPanel()
-			} else if m.uiState.FocusedPane == "right" {
-				// Scroll details panel viewport
-				cmd := m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyDown})
-				return m, cmd
 			}
 		}
 		return m, nil

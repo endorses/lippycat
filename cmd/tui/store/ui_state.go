@@ -42,6 +42,8 @@ type UIState struct {
 	ViewMode         string // "packets" or "calls" (for VoIP)
 	LastClickTime    time.Time
 	LastClickPacket  int
+	LastKeyPress     string    // Track last key for vim-style navigation (gg)
+	LastKeyPressTime time.Time // Timestamp of last key press
 }
 
 // NewUIState creates a new UI state with default components

@@ -534,14 +534,9 @@ func (h *Hunter) buildCombinedBPFFilter() string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	var bpfParts []string
+	var dynamicFilters []string
 
-	// Add base config filter if present
-	if h.config.BPFFilter != "" {
-		bpfParts = append(bpfParts, fmt.Sprintf("(%s)", h.config.BPFFilter))
-	}
-
-	// Add dynamic BPF filters (only enabled ones)
+	// Collect dynamic BPF filters (only enabled ones)
 	for _, filter := range h.filters {
 		if !filter.Enabled {
 			continue
@@ -551,21 +546,33 @@ func (h *Hunter) buildCombinedBPFFilter() string {
 		// Other filter types (SIP user, phone, IP, etc.) would need different handling
 		if filter.Type == management.FilterType_FILTER_BPF {
 			if filter.Pattern != "" {
-				bpfParts = append(bpfParts, fmt.Sprintf("(%s)", filter.Pattern))
+				dynamicFilters = append(dynamicFilters, fmt.Sprintf("(%s)", filter.Pattern))
 			}
 		}
 	}
 
-	// Combine with OR logic - capture packets matching ANY filter
-	if len(bpfParts) == 0 {
-		return "" // No filter = capture all
+	// Build final filter
+	var finalFilter string
+
+	if len(dynamicFilters) == 0 {
+		// No dynamic filters - use base config filter only
+		finalFilter = h.config.BPFFilter
+	} else {
+		// Combine dynamic filters with OR (capture matching ANY dynamic filter)
+		dynamicPart := strings.Join(dynamicFilters, " or ")
+
+		if h.config.BPFFilter != "" {
+			// Combine with base filter using AND
+			// Logic: (dynamic filters) AND (base exclusions)
+			// Example: (port 443) and (not port 50051 and not port 50052)
+			finalFilter = fmt.Sprintf("(%s) and (%s)", dynamicPart, h.config.BPFFilter)
+		} else {
+			// No base filter - just use dynamic filters
+			finalFilter = dynamicPart
+		}
 	}
 
-	if len(bpfParts) == 1 {
-		return bpfParts[0]
-	}
-
-	return strings.Join(bpfParts, " or ")
+	return finalFilter
 }
 
 // forwardPackets reads from packet buffer and forwards batches to processor
@@ -1045,6 +1052,11 @@ func (h *Hunter) sendHeartbeats() {
 			status := h.calculateStatus()
 
 			// Send heartbeat
+			// Get filter count with lock
+			h.mu.RLock()
+			activeFilters := uint32(len(h.filters))
+			h.mu.RUnlock()
+
 			hb := &management.HunterHeartbeat{
 				HunterId:    h.config.HunterID,
 				TimestampNs: time.Now().UnixNano(),
@@ -1055,7 +1067,7 @@ func (h *Hunter) sendHeartbeats() {
 					PacketsForwarded: h.stats.PacketsForwarded.Load(),
 					PacketsDropped:   h.stats.PacketsDropped.Load(),
 					BufferBytes:      h.stats.BufferBytes.Load(),
-					ActiveFilters:    uint32(len(h.filters)),
+					ActiveFilters:    activeFilters,
 				},
 			}
 

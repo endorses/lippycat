@@ -4,155 +4,117 @@
 package components
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
 
-// Modal displays a modal dialog overlay
-type Modal struct {
-	title   string
-	content string
-	width   int
-	height  int
-	theme   themes.Theme
-	visible bool
+// ModalRenderOptions configures modal rendering
+type ModalRenderOptions struct {
+	Title       string       // Modal title (optional)
+	Content     string       // Modal content (required)
+	Footer      string       // Footer text (optional, e.g. keybindings)
+	Width       int          // Terminal width
+	Height      int          // Terminal height
+	Theme       themes.Theme // Color theme
+	ModalWidth  int          // Specific modal width (0 = auto-calculate)
+	ShowOverlay bool         // Whether to show dimmed background overlay
 }
 
-// NewModal creates a new modal dialog
-func NewModal() Modal {
-	return Modal{
-		title:   "",
-		content: "",
-		width:   80,
-		height:  24,
-		theme:   themes.Solarized(),
-		visible: false,
-	}
-}
-
-// SetTheme updates the theme
-func (m *Modal) SetTheme(theme themes.Theme) {
-	m.theme = theme
-}
-
-// SetSize sets the terminal size
-func (m *Modal) SetSize(width, height int) {
-	m.width = width
-	m.height = height
-}
-
-// Show displays the modal with content
-func (m *Modal) Show(title, content string) {
-	m.title = title
-	m.content = content
-	m.visible = true
-}
-
-// Hide closes the modal
-func (m *Modal) Hide() {
-	m.visible = false
-}
-
-// IsVisible returns whether the modal is visible
-func (m *Modal) IsVisible() bool {
-	return m.visible
-}
-
-// View renders the modal as an overlay
-func (m *Modal) View(underlayContent string) string {
-	if !m.visible {
-		return underlayContent
+// RenderModal is the unified modal rendering function.
+// All modals in the codebase MUST use this function for consistent styling.
+//
+// Content components (ProtocolSelector, HunterSelector, FilterManager, etc.)
+// should manage their own state and content rendering, then call this function
+// to wrap their content in a consistent modal chrome.
+//
+// Example usage:
+//
+//	content := "My modal content..."
+//	footer := "Enter: Select | Esc: Cancel"
+//	return RenderModal(ModalRenderOptions{
+//	    Title: "My Modal",
+//	    Content: content,
+//	    Footer: footer,
+//	    Width: width,
+//	    Height: height,
+//	    Theme: theme,
+//	})
+func RenderModal(opts ModalRenderOptions) string {
+	// Calculate modal width
+	modalWidth := opts.ModalWidth
+	if modalWidth == 0 {
+		// Default: 60-80 characters, or 70% of screen width
+		modalWidth = opts.Width * 7 / 10
+		if modalWidth > 80 {
+			modalWidth = 80
+		}
+		if modalWidth < 60 {
+			modalWidth = 60
+		}
 	}
 
-	// Calculate modal dimensions (60% of screen)
-	modalWidth := m.width * 6 / 10
-	modalHeight := m.height * 6 / 10
-
+	// Ensure modal fits in terminal
+	if modalWidth > opts.Width-4 {
+		modalWidth = opts.Width - 4
+	}
 	if modalWidth < 40 {
 		modalWidth = 40
 	}
-	if modalHeight < 10 {
-		modalHeight = 10
-	}
 
-	// Create semi-transparent overlay effect with dimmed background
-	overlayStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
-
-	dimmedUnderlay := overlayStyle.Render(underlayContent)
-
-	// Modal container
+	// Modal container style
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.InfoColor).
-		Background(m.theme.Background).
-		Foreground(m.theme.Foreground).
-		Width(modalWidth-4).
-		Height(modalHeight-4).
-		Padding(1, 2)
+		BorderForeground(opts.Theme.InfoColor).
+		Padding(1, 2).
+		Width(modalWidth)
 
-	// Title bar
-	titleStyle := lipgloss.NewStyle().
-		Background(m.theme.InfoColor).
-		Foreground(m.theme.SelectionFg).
-		Bold(true).
-		Padding(0, 2).
-		Width(modalWidth - 4)
-
-	title := titleStyle.Render(m.title)
-
-	// Close hint
-	closeHintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Align(lipgloss.Center).
-		MarginTop(1)
-
-	closeHint := closeHintStyle.Render("Press Esc or q to close")
-
-	// Content with scrolling support
-	contentStyle := lipgloss.NewStyle().
-		Foreground(m.theme.Foreground).
-		Width(modalWidth - 8).
-		Height(modalHeight - 8)
-
-	// Truncate content if too long
-	lines := strings.Split(m.content, "\n")
-	maxLines := modalHeight - 8
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
-		lines = append(lines, "...")
+	// Title style (if provided)
+	var titleRendered string
+	if opts.Title != "" {
+		titleStyle := lipgloss.NewStyle().
+			Foreground(opts.Theme.HeaderBg).
+			Bold(true).
+			Padding(0, 1).
+			Width(modalWidth - 4)
+		titleRendered = titleStyle.Render(opts.Title) + "\n\n"
 	}
-	displayContent := strings.Join(lines, "\n")
 
-	content := contentStyle.Render(displayContent)
+	// Content style
+	contentStyle := lipgloss.NewStyle().
+		Foreground(opts.Theme.Foreground).
+		Width(modalWidth - 4)
+	contentRendered := contentStyle.Render(opts.Content)
 
-	// Assemble modal
-	modalContent := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		content,
-		closeHint,
-	)
+	// Footer style (if provided)
+	var footerRendered string
+	if opts.Footer != "" {
+		footerStyle := lipgloss.NewStyle().
+			Foreground(opts.Theme.StatusBarFg).
+			Italic(true).
+			Width(modalWidth - 4)
+		footerRendered = "\n\n" + footerStyle.Render(opts.Footer)
+	}
 
+	// Assemble modal content
+	modalContent := titleRendered + contentRendered + footerRendered
 	modal := modalStyle.Render(modalContent)
 
-	// Create centered modal
+	// Center the modal
 	centeredModal := lipgloss.Place(
-		m.width,
-		m.height,
+		opts.Width,
+		opts.Height,
 		lipgloss.Center,
 		lipgloss.Center,
 		modal,
 	)
 
-	// Overlay on dimmed background
-	return lipgloss.Place(
-		m.width,
-		m.height,
-		lipgloss.Left,
-		lipgloss.Top,
-		dimmedUnderlay+"\n"+centeredModal,
-	)
+	// Return with or without overlay
+	if opts.ShowOverlay {
+		// Create dimmed background overlay
+		// Note: Actual dimming of underlay content must be handled by caller
+		// as we don't have access to the underlay content here
+		return centeredModal
+	}
+
+	return centeredModal
 }

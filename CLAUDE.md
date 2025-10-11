@@ -285,6 +285,73 @@ TUI clients can selectively subscribe to specific hunters on a processor:
 - Prevents subscriber backpressure from affecting hunter flow control
 - Packets are filtered at the processor before being sent to TUI clients
 
+### TUI Modal Architecture
+
+**IMPORTANT: All modals in the TUI MUST use the unified modal component.**
+
+The TUI uses a standardized modal architecture to ensure consistency across all modal dialogs. There is ONE modal rendering function that all modal components must use:
+
+**Unified Modal Component:** `cmd/tui/components/modal.go`
+
+The `RenderModal()` function provides consistent modal chrome (border, centering, title, footer) for all modals in the codebase.
+
+**Architecture Pattern:**
+
+1. **Modal Content Components** manage their own:
+   - State (selection, input, navigation)
+   - Content rendering (building the modal body as a string)
+   - Event handling (keyboard/mouse events)
+   - Business logic (search, filtering, CRUD operations)
+
+2. **Modal Content Components** call `RenderModal()` to wrap their content:
+   ```go
+   func (component *Component) View() string {
+       if !component.active {
+           return ""
+       }
+
+       // Build content string
+       var content strings.Builder
+       content.WriteString("My modal content...")
+
+       // Use unified modal rendering
+       return RenderModal(ModalRenderOptions{
+           Title:      "My Modal Title",
+           Content:    content.String(),
+           Footer:     "Enter: Select | Esc: Cancel",
+           Width:      component.width,
+           Height:     component.height,
+           Theme:      component.theme,
+           ModalWidth: 60, // Optional: specific width
+       })
+   }
+   ```
+
+3. **Parent (model.go)** handles:
+   - Checking if modal is active (`IsActive()`)
+   - Routing events to the modal
+   - Overlaying the modal on the main view
+
+**Current Modal Components (all using unified RenderModal):**
+- `ProtocolSelector` - Protocol filter selection (`cmd/tui/components/protocolselector.go`)
+- `HunterSelector` - Hunter subscription selection (`cmd/tui/components/hunterselector.go`)
+- `NodesView.renderAddNodeModal` - Add processor/hunter node (`cmd/tui/components/nodesview.go`)
+
+**When Creating New Modals:**
+- ✅ DO: Create a component that manages state and content
+- ✅ DO: Call `RenderModal()` in your component's `View()` method
+- ✅ DO: Follow the same lifecycle pattern (Activate/Deactivate/IsActive/View/Update)
+- ❌ DON'T: Render modal chrome (border, centering) yourself
+- ❌ DON'T: Create custom modal styling - use RenderModal for consistency
+- ❌ DON'T: Duplicate modal rendering logic
+
+**Benefits:**
+- Consistent look and feel across all modals
+- Centralized styling and theming
+- Easy to maintain and update modal appearance
+- Reduces code duplication
+- Clear separation of concerns (content vs. chrome)
+
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.
 

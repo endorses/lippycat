@@ -142,13 +142,13 @@ func (hs *HunterSelector) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// View renders the hunter selector
+// View renders the hunter selector using the unified modal component
 func (hs *HunterSelector) View() string {
 	if !hs.active {
 		return ""
 	}
 
-	// Modal dimensions
+	// Calculate modal width
 	modalWidth := 80
 	if modalWidth > hs.width-4 {
 		modalWidth = hs.width - 4
@@ -157,40 +157,23 @@ func (hs *HunterSelector) View() string {
 		modalWidth = 60
 	}
 
-	// Modal styles
-	titleStyle := lipgloss.NewStyle().
-		Foreground(hs.theme.HeaderBg).
-		Bold(true).
-		Padding(0, 1).
-		Width(modalWidth - 4)
-
+	// Content styles
 	itemStyle := lipgloss.NewStyle().
 		Foreground(hs.theme.Foreground).
-		Padding(0, 1).
-		Width(modalWidth - 4)
+		Padding(0, 1)
 
 	selectedStyle := lipgloss.NewStyle().
 		Foreground(hs.theme.SelectionFg).
 		Background(hs.theme.SelectionBg).
 		Bold(true).
-		Padding(0, 1).
-		Width(modalWidth - 4)
+		Padding(0, 1)
 
 	descStyle := lipgloss.NewStyle().
 		Foreground(hs.theme.StatusBarFg).
-		Italic(true).
-		Width(modalWidth - 4)
-
-	modalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(hs.theme.InfoColor).
-		Padding(1, 2).
-		Width(modalWidth)
+		Italic(true)
 
 	// Build content
 	var content strings.Builder
-	content.WriteString(titleStyle.Render("Select Hunters to Subscribe"))
-	content.WriteString("\n\n")
 
 	if hs.loading {
 		content.WriteString(itemStyle.Render("Loading hunters..."))
@@ -224,7 +207,6 @@ func (hs *HunterSelector) View() string {
 			}
 
 			// Build single-line display: [✓] ● hunter-id (hostname)
-			// Keep it simple and on one line
 			line := checkbox + statusIcon + " " + hunter.HunterID
 			if hunter.Hostname != "" && hunter.Hostname != hunter.RemoteAddr {
 				line += " (" + hunter.Hostname + ")"
@@ -248,10 +230,16 @@ func (hs *HunterSelector) View() string {
 		}
 	}
 
-	content.WriteString("\n")
-	content.WriteString(descStyle.Render("↑/↓: Navigate  Space: Toggle  a: All  n: None  Enter: Confirm  Esc: Cancel"))
-
-	return modalStyle.Render(content.String())
+	// Use unified modal rendering
+	return RenderModal(ModalRenderOptions{
+		Title:      "Select Hunters to Subscribe",
+		Content:    content.String(),
+		Footer:     "↑/↓: Navigate  Space: Toggle  a: All  n: None  Enter: Confirm  Esc: Cancel",
+		Width:      hs.width,
+		Height:     hs.height,
+		Theme:      hs.theme,
+		ModalWidth: modalWidth,
+	})
 }
 
 // HunterSelectionConfirmedMsg is sent when user confirms hunter selection

@@ -19,13 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagementService_RegisterHunter_FullMethodName   = "/lippycat.management.ManagementService/RegisterHunter"
-	ManagementService_Heartbeat_FullMethodName        = "/lippycat.management.ManagementService/Heartbeat"
-	ManagementService_GetFilters_FullMethodName       = "/lippycat.management.ManagementService/GetFilters"
-	ManagementService_SubscribeFilters_FullMethodName = "/lippycat.management.ManagementService/SubscribeFilters"
-	ManagementService_GetHunterStatus_FullMethodName  = "/lippycat.management.ManagementService/GetHunterStatus"
-	ManagementService_UpdateFilter_FullMethodName     = "/lippycat.management.ManagementService/UpdateFilter"
-	ManagementService_DeleteFilter_FullMethodName     = "/lippycat.management.ManagementService/DeleteFilter"
+	ManagementService_RegisterHunter_FullMethodName       = "/lippycat.management.ManagementService/RegisterHunter"
+	ManagementService_Heartbeat_FullMethodName            = "/lippycat.management.ManagementService/Heartbeat"
+	ManagementService_GetFilters_FullMethodName           = "/lippycat.management.ManagementService/GetFilters"
+	ManagementService_SubscribeFilters_FullMethodName     = "/lippycat.management.ManagementService/SubscribeFilters"
+	ManagementService_GetHunterStatus_FullMethodName      = "/lippycat.management.ManagementService/GetHunterStatus"
+	ManagementService_UpdateFilter_FullMethodName         = "/lippycat.management.ManagementService/UpdateFilter"
+	ManagementService_DeleteFilter_FullMethodName         = "/lippycat.management.ManagementService/DeleteFilter"
+	ManagementService_ListAvailableHunters_FullMethodName = "/lippycat.management.ManagementService/ListAvailableHunters"
 )
 
 // ManagementServiceClient is the client API for ManagementService service.
@@ -48,6 +49,8 @@ type ManagementServiceClient interface {
 	UpdateFilter(ctx context.Context, in *Filter, opts ...grpc.CallOption) (*FilterUpdateResult, error)
 	// DeleteFilter removes a filter (processor only)
 	DeleteFilter(ctx context.Context, in *FilterDeleteRequest, opts ...grpc.CallOption) (*FilterUpdateResult, error)
+	// ListAvailableHunters retrieves list of all hunters connected to processor (for TUI hunter selection)
+	ListAvailableHunters(ctx context.Context, in *ListHuntersRequest, opts ...grpc.CallOption) (*ListHuntersResponse, error)
 }
 
 type managementServiceClient struct {
@@ -140,6 +143,16 @@ func (c *managementServiceClient) DeleteFilter(ctx context.Context, in *FilterDe
 	return out, nil
 }
 
+func (c *managementServiceClient) ListAvailableHunters(ctx context.Context, in *ListHuntersRequest, opts ...grpc.CallOption) (*ListHuntersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListHuntersResponse)
+	err := c.cc.Invoke(ctx, ManagementService_ListAvailableHunters_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagementServiceServer is the server API for ManagementService service.
 // All implementations must embed UnimplementedManagementServiceServer
 // for forward compatibility.
@@ -160,6 +173,8 @@ type ManagementServiceServer interface {
 	UpdateFilter(context.Context, *Filter) (*FilterUpdateResult, error)
 	// DeleteFilter removes a filter (processor only)
 	DeleteFilter(context.Context, *FilterDeleteRequest) (*FilterUpdateResult, error)
+	// ListAvailableHunters retrieves list of all hunters connected to processor (for TUI hunter selection)
+	ListAvailableHunters(context.Context, *ListHuntersRequest) (*ListHuntersResponse, error)
 	mustEmbedUnimplementedManagementServiceServer()
 }
 
@@ -190,6 +205,9 @@ func (UnimplementedManagementServiceServer) UpdateFilter(context.Context, *Filte
 }
 func (UnimplementedManagementServiceServer) DeleteFilter(context.Context, *FilterDeleteRequest) (*FilterUpdateResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteFilter not implemented")
+}
+func (UnimplementedManagementServiceServer) ListAvailableHunters(context.Context, *ListHuntersRequest) (*ListHuntersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAvailableHunters not implemented")
 }
 func (UnimplementedManagementServiceServer) mustEmbedUnimplementedManagementServiceServer() {}
 func (UnimplementedManagementServiceServer) testEmbeddedByValue()                           {}
@@ -320,6 +338,24 @@ func _ManagementService_DeleteFilter_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagementService_ListAvailableHunters_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListHuntersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).ListAvailableHunters(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_ListAvailableHunters_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).ListAvailableHunters(ctx, req.(*ListHuntersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagementService_ServiceDesc is the grpc.ServiceDesc for ManagementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -346,6 +382,10 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteFilter",
 			Handler:    _ManagementService_DeleteFilter_Handler,
+		},
+		{
+			MethodName: "ListAvailableHunters",
+			Handler:    _ManagementService_ListAvailableHunters_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

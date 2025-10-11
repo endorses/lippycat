@@ -1490,6 +1490,180 @@ func (x *ProcessorStats) GetStatus() ProcessorStatus {
 	return ProcessorStatus_PROCESSOR_HEALTHY
 }
 
+// ListHuntersRequest to retrieve available hunters
+type ListHuntersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListHuntersRequest) Reset() {
+	*x = ListHuntersRequest{}
+	mi := &file_management_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListHuntersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListHuntersRequest) ProtoMessage() {}
+
+func (x *ListHuntersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListHuntersRequest.ProtoReflect.Descriptor instead.
+func (*ListHuntersRequest) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{17}
+}
+
+// ListHuntersResponse contains list of available hunters
+type ListHuntersResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Available hunters on this processor
+	Hunters       []*AvailableHunter `protobuf:"bytes,1,rep,name=hunters,proto3" json:"hunters,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListHuntersResponse) Reset() {
+	*x = ListHuntersResponse{}
+	mi := &file_management_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListHuntersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListHuntersResponse) ProtoMessage() {}
+
+func (x *ListHuntersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListHuntersResponse.ProtoReflect.Descriptor instead.
+func (*ListHuntersResponse) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListHuntersResponse) GetHunters() []*AvailableHunter {
+	if x != nil {
+		return x.Hunters
+	}
+	return nil
+}
+
+// AvailableHunter represents a hunter available for subscription
+type AvailableHunter struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Hunter identifier
+	HunterId string `protobuf:"bytes,1,opt,name=hunter_id,json=hunterId,proto3" json:"hunter_id,omitempty"`
+	// Hostname
+	Hostname string `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	// Network interfaces being captured
+	Interfaces []string `protobuf:"bytes,3,rep,name=interfaces,proto3" json:"interfaces,omitempty"`
+	// Current status
+	Status HunterStatus `protobuf:"varint,4,opt,name=status,proto3,enum=lippycat.management.HunterStatus" json:"status,omitempty"`
+	// Remote address
+	RemoteAddr string `protobuf:"bytes,5,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"`
+	// Connected duration (seconds)
+	ConnectedDurationSec uint64 `protobuf:"varint,6,opt,name=connected_duration_sec,json=connectedDurationSec,proto3" json:"connected_duration_sec,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *AvailableHunter) Reset() {
+	*x = AvailableHunter{}
+	mi := &file_management_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AvailableHunter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AvailableHunter) ProtoMessage() {}
+
+func (x *AvailableHunter) ProtoReflect() protoreflect.Message {
+	mi := &file_management_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AvailableHunter.ProtoReflect.Descriptor instead.
+func (*AvailableHunter) Descriptor() ([]byte, []int) {
+	return file_management_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AvailableHunter) GetHunterId() string {
+	if x != nil {
+		return x.HunterId
+	}
+	return ""
+}
+
+func (x *AvailableHunter) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *AvailableHunter) GetInterfaces() []string {
+	if x != nil {
+		return x.Interfaces
+	}
+	return nil
+}
+
+func (x *AvailableHunter) GetStatus() HunterStatus {
+	if x != nil {
+		return x.Status
+	}
+	return HunterStatus_STATUS_HEALTHY
+}
+
+func (x *AvailableHunter) GetRemoteAddr() string {
+	if x != nil {
+		return x.RemoteAddr
+	}
+	return ""
+}
+
+func (x *AvailableHunter) GetConnectedDurationSec() uint64 {
+	if x != nil {
+		return x.ConnectedDurationSec
+	}
+	return 0
+}
+
 var File_management_proto protoreflect.FileDescriptor
 
 const file_management_proto_rawDesc = "" +
@@ -1587,7 +1761,20 @@ const file_management_proto_rawDesc = "" +
 	"\x17total_packets_forwarded\x18\x06 \x01(\x04R\x15totalPacketsForwarded\x12#\n" +
 	"\rtotal_filters\x18\a \x01(\rR\ftotalFilters\x12!\n" +
 	"\fprocessor_id\x18\b \x01(\tR\vprocessorId\x12<\n" +
-	"\x06status\x18\t \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status*]\n" +
+	"\x06status\x18\t \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\"\x14\n" +
+	"\x12ListHuntersRequest\"U\n" +
+	"\x13ListHuntersResponse\x12>\n" +
+	"\ahunters\x18\x01 \x03(\v2$.lippycat.management.AvailableHunterR\ahunters\"\xfc\x01\n" +
+	"\x0fAvailableHunter\x12\x1b\n" +
+	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1e\n" +
+	"\n" +
+	"interfaces\x18\x03 \x03(\tR\n" +
+	"interfaces\x129\n" +
+	"\x06status\x18\x04 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x12\x1f\n" +
+	"\vremote_addr\x18\x05 \x01(\tR\n" +
+	"remoteAddr\x124\n" +
+	"\x16connected_duration_sec\x18\x06 \x01(\x04R\x14connectedDurationSec*]\n" +
 	"\fHunterStatus\x12\x12\n" +
 	"\x0eSTATUS_HEALTHY\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_WARNING\x10\x01\x12\x10\n" +
@@ -1610,7 +1797,7 @@ const file_management_proto_rawDesc = "" +
 	"\n" +
 	"UPDATE_ADD\x10\x00\x12\x11\n" +
 	"\rUPDATE_MODIFY\x10\x01\x12\x11\n" +
-	"\rUPDATE_DELETE\x10\x022\xa2\x05\n" +
+	"\rUPDATE_DELETE\x10\x022\x8d\x06\n" +
 	"\x11ManagementService\x12d\n" +
 	"\x0eRegisterHunter\x12'.lippycat.management.HunterRegistration\x1a).lippycat.management.RegistrationResponse\x12^\n" +
 	"\tHeartbeat\x12$.lippycat.management.HunterHeartbeat\x1a'.lippycat.management.ProcessorHeartbeat(\x010\x01\x12U\n" +
@@ -1619,7 +1806,8 @@ const file_management_proto_rawDesc = "" +
 	"\x10SubscribeFilters\x12\".lippycat.management.FilterRequest\x1a!.lippycat.management.FilterUpdate0\x01\x12Z\n" +
 	"\x0fGetHunterStatus\x12\".lippycat.management.StatusRequest\x1a#.lippycat.management.StatusResponse\x12T\n" +
 	"\fUpdateFilter\x12\x1b.lippycat.management.Filter\x1a'.lippycat.management.FilterUpdateResult\x12a\n" +
-	"\fDeleteFilter\x12(.lippycat.management.FilterDeleteRequest\x1a'.lippycat.management.FilterUpdateResultB1Z/github.com/endorses/lippycat/api/gen/managementb\x06proto3"
+	"\fDeleteFilter\x12(.lippycat.management.FilterDeleteRequest\x1a'.lippycat.management.FilterUpdateResult\x12i\n" +
+	"\x14ListAvailableHunters\x12'.lippycat.management.ListHuntersRequest\x1a(.lippycat.management.ListHuntersResponseB1Z/github.com/endorses/lippycat/api/gen/managementb\x06proto3"
 
 var (
 	file_management_proto_rawDescOnce sync.Once
@@ -1634,7 +1822,7 @@ func file_management_proto_rawDescGZIP() []byte {
 }
 
 var file_management_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_management_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_management_proto_goTypes = []any{
 	(HunterStatus)(0),            // 0: lippycat.management.HunterStatus
 	(ProcessorStatus)(0),         // 1: lippycat.management.ProcessorStatus
@@ -1657,6 +1845,9 @@ var file_management_proto_goTypes = []any{
 	(*StatusResponse)(nil),       // 18: lippycat.management.StatusResponse
 	(*ConnectedHunter)(nil),      // 19: lippycat.management.ConnectedHunter
 	(*ProcessorStats)(nil),       // 20: lippycat.management.ProcessorStats
+	(*ListHuntersRequest)(nil),   // 21: lippycat.management.ListHuntersRequest
+	(*ListHuntersResponse)(nil),  // 22: lippycat.management.ListHuntersResponse
+	(*AvailableHunter)(nil),      // 23: lippycat.management.AvailableHunter
 }
 var file_management_proto_depIdxs = []int32{
 	5,  // 0: lippycat.management.HunterRegistration.capabilities:type_name -> lippycat.management.HunterCapabilities
@@ -1675,25 +1866,29 @@ var file_management_proto_depIdxs = []int32{
 	9,  // 13: lippycat.management.ConnectedHunter.stats:type_name -> lippycat.management.HunterStats
 	13, // 14: lippycat.management.ConnectedHunter.filters:type_name -> lippycat.management.Filter
 	1,  // 15: lippycat.management.ProcessorStats.status:type_name -> lippycat.management.ProcessorStatus
-	4,  // 16: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
-	8,  // 17: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
-	11, // 18: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
-	11, // 19: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
-	17, // 20: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
-	13, // 21: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
-	16, // 22: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
-	6,  // 23: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
-	10, // 24: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
-	12, // 25: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
-	14, // 26: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
-	18, // 27: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
-	15, // 28: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
-	15, // 29: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
-	23, // [23:30] is the sub-list for method output_type
-	16, // [16:23] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	23, // 16: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
+	0,  // 17: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
+	4,  // 18: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
+	8,  // 19: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
+	11, // 20: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
+	11, // 21: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
+	17, // 22: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
+	13, // 23: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
+	16, // 24: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
+	21, // 25: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
+	6,  // 26: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
+	10, // 27: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
+	12, // 28: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
+	14, // 29: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
+	18, // 30: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
+	15, // 31: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
+	15, // 32: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
+	22, // 33: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
+	26, // [26:34] is the sub-list for method output_type
+	18, // [18:26] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_management_proto_init() }
@@ -1707,7 +1902,7 @@ func file_management_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_management_proto_rawDesc), len(file_management_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   17,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

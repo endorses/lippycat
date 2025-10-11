@@ -5,6 +5,17 @@
 processors:
   - name: main-processor
     address: processor.local:50051
+    # Optional: Per-node TLS configuration (overrides global config)
+    tls:
+      enabled: true
+      ca_file: /path/to/ca.crt
+      cert_file: /path/to/client.crt
+      key_file: /path/to/client.key
+      skip_verify: false  # Set to true to skip cert verification (insecure)
+    # Optional: Subscribe to specific hunters only (empty = all)
+    subscribed_hunters:
+      - hunter-01
+      - hunter-02
 
   - name: backup-processor
     address: processor2.local:50051

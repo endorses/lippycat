@@ -51,6 +51,15 @@ func Enable() {
 	defaultLogger = slog.New(handler)
 }
 
+// UseStderr reconfigures the logger to write to stderr (useful for TUI debug mode)
+func UseStderr() {
+	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level:     slog.LevelInfo,
+		AddSource: false,
+	})
+	defaultLogger = slog.New(handler)
+}
+
 // IsDisabled returns whether logging is disabled
 func IsDisabled() bool {
 	disabledMux.RLock()

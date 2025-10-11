@@ -26,6 +26,9 @@ service ManagementService {
 
     // DeleteFilter removes a filter (processor only)
     rpc DeleteFilter(FilterDeleteRequest) returns (FilterUpdateResult);
+
+    // ListAvailableHunters retrieves list of all hunters connected to processor (for TUI hunter selection)
+    rpc ListAvailableHunters(ListHuntersRequest) returns (ListHuntersResponse);
 }
 
 // HunterRegistration sent when hunter first connects
@@ -341,4 +344,36 @@ message ProcessorStats {
 
     // Processor status
     ProcessorStatus status = 9;
+}
+
+// ListHuntersRequest to retrieve available hunters
+message ListHuntersRequest {
+    // No parameters needed - returns all available hunters
+}
+
+// ListHuntersResponse contains list of available hunters
+message ListHuntersResponse {
+    // Available hunters on this processor
+    repeated AvailableHunter hunters = 1;
+}
+
+// AvailableHunter represents a hunter available for subscription
+message AvailableHunter {
+    // Hunter identifier
+    string hunter_id = 1;
+
+    // Hostname
+    string hostname = 2;
+
+    // Network interfaces being captured
+    repeated string interfaces = 3;
+
+    // Current status
+    HunterStatus status = 4;
+
+    // Remote address
+    string remote_addr = 5;
+
+    // Connected duration (seconds)
+    uint64 connected_duration_sec = 6;
 }

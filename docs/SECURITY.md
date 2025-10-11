@@ -70,10 +70,16 @@ openssl genrsa -out server-key.pem 4096
 openssl req -new -key server-key.pem -out server-req.pem \
   -subj "/CN=processor.example.com"
 
-# Sign server certificate with CA
+# Create server certificate extensions with SANs (REQUIRED)
+cat > server-cert.conf <<EOF
+subjectAltName = DNS:processor.example.com,DNS:localhost,IP:127.0.0.1
+extendedKeyUsage = serverAuth
+EOF
+
+# Sign server certificate with CA and SANs
 openssl x509 -req -in server-req.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
-  -out server-cert.pem
+  -out server-cert.pem -extfile server-cert.conf
 
 # Generate client private key (for mutual TLS)
 openssl genrsa -out client-key.pem 4096
@@ -82,15 +88,29 @@ openssl genrsa -out client-key.pem 4096
 openssl req -new -key client-key.pem -out client-req.pem \
   -subj "/CN=hunter-01.example.com"
 
+# Create client certificate extensions
+cat > client-cert.conf <<EOF
+extendedKeyUsage = clientAuth
+EOF
+
 # Sign client certificate with CA
 openssl x509 -req -in client-req.pem -days 365 \
   -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
-  -out client-cert.pem
+  -out client-cert.pem -extfile client-cert.conf
+
+# Clean up intermediate files
+rm -f *.conf server-req.pem client-req.pem
 
 # Set restrictive permissions
 chmod 600 *-key.pem
 chmod 644 *-cert.pem
 ```
+
+**Important Notes:**
+- **Subject Alternative Names (SANs) are required** - Modern Go versions reject certificates using only Common Name (CN)
+- Replace `processor.example.com` with your actual processor hostname or IP address
+- Add multiple SANs if needed: `DNS:processor,DNS:processor.local,IP:10.0.1.100`
+- For IP-only access, use: `subjectAltName = IP:192.168.1.100,IP:127.0.0.1`
 
 #### 2. Start Processor with TLS
 
@@ -384,6 +404,38 @@ lippycat hunt --tls --tls-ca ca.crt --processor host:50051
 lippycat hunt --insecure --processor host:50051
 ```
 
+#### "certificate relies on legacy Common Name field, use SANs instead"
+
+**Cause:** Certificate was generated without Subject Alternative Names (SANs). Modern Go versions require SANs and reject certificates using only Common Name (CN).
+
+**Solution:**
+```bash
+# Regenerate certificate with SANs
+cd /etc/lippycat/certs
+
+# Create config with SANs
+cat > server-cert.conf <<EOF
+subjectAltName = DNS:your-processor-hostname,DNS:localhost,IP:127.0.0.1
+extendedKeyUsage = serverAuth
+EOF
+
+# Generate new server certificate
+openssl genrsa -out server-key-new.pem 4096
+openssl req -new -key server-key-new.pem -out server-req.pem \
+  -subj "/CN=your-processor-hostname"
+openssl x509 -req -in server-req.pem -days 365 \
+  -CA ca-cert.pem -CAkey ca-key.pem \
+  -out server-cert-new.pem -extfile server-cert.conf
+
+# Replace old certificate
+mv server-cert-new.pem server-cert.pem
+mv server-key-new.pem server-key.pem
+rm server-req.pem server-cert.conf
+
+# Verify SANs are present
+openssl x509 -in server-cert.pem -noout -text | grep -A1 "Subject Alternative Name"
+```
+
 #### "Failed to verify certificate"
 
 **Cause:** Certificate validation failed (wrong CA, hostname mismatch, expired)
@@ -395,6 +447,9 @@ openssl x509 -in server-cert.pem -noout -text
 
 # Verify hostname matches
 openssl x509 -in server-cert.pem -noout -subject
+
+# Check for SANs (required)
+openssl x509 -in server-cert.pem -noout -text | grep -A1 "Subject Alternative Name"
 
 # For testing, skip verification (INSECURE)
 lippycat hunt --tls --tls-skip-verify --processor host:50051

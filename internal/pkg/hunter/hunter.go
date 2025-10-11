@@ -487,8 +487,11 @@ func (h *Hunter) startCapture() error {
 	// Create capture context
 	h.captureCtx, h.captureCancel = context.WithCancel(h.ctx)
 
-	// Create packet buffer
-	h.packetBuffer = capture.NewPacketBuffer(h.captureCtx, h.config.BufferSize)
+	// Create packet buffer ONLY on first start
+	// Don't recreate on restart - forwardPackets() is already reading from it
+	if h.packetBuffer == nil {
+		h.packetBuffer = capture.NewPacketBuffer(h.captureCtx, h.config.BufferSize)
+	}
 
 	// Create PCAP interfaces
 	var devices []pcaptypes.PcapInterface
@@ -1071,6 +1074,11 @@ func (h *Hunter) sendHeartbeats() {
 			h.mu.RLock()
 			activeFilters := uint32(len(h.filters))
 			h.mu.RUnlock()
+
+			logger.Debug("Sending heartbeat",
+				"hunter_id", h.config.HunterID,
+				"active_filters", activeFilters,
+				"status", status)
 
 			hb := &management.HunterHeartbeat{
 				HunterId:    h.config.HunterID,

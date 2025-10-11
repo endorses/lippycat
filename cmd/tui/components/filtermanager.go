@@ -33,35 +33,43 @@ func (i FilterItem) FilterValue() string {
 	return strings.ToLower(strings.Join(searchable, " "))
 }
 
-// Title implements list.DefaultItem
-func (i FilterItem) Title() string {
-	return i.filter.Pattern
-}
-
-// Description implements list.DefaultItem
-func (i FilterItem) Description() string {
-	return i.filter.Description
-}
+// NOTE: We do NOT implement Title() and Description() from list.DefaultItem
+// because that would cause DefaultDelegate to use its built-in rendering
+// instead of our custom Render() method.
 
 // FilterDelegate is a custom delegate for rendering filter items
+// NOTE: We do NOT embed DefaultDelegate because it interferes with custom rendering
 type FilterDelegate struct {
-	list.DefaultDelegate
 	theme themes.Theme
 }
 
 // NewFilterDelegate creates a new filter delegate
 func NewFilterDelegate(theme themes.Theme) FilterDelegate {
 	return FilterDelegate{
-		DefaultDelegate: list.NewDefaultDelegate(),
-		theme:           theme,
+		theme: theme,
 	}
+}
+
+// Height returns the height of a list item
+func (d FilterDelegate) Height() int {
+	return 1
+}
+
+// Spacing returns the spacing between list items
+func (d FilterDelegate) Spacing() int {
+	return 0
+}
+
+// Update handles updates for the delegate
+func (d FilterDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
+	return nil
 }
 
 // Render renders a filter item
 func (d FilterDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	filterItem, ok := item.(FilterItem)
 	if !ok {
-		d.DefaultDelegate.Render(w, m, index, item)
+		// Not a FilterItem, render nothing
 		return
 	}
 
@@ -95,20 +103,25 @@ func (d FilterDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 		d.truncate(targets, 20),
 	)
 
-	var str string
+	// Get available width
+	availableWidth := m.Width()
+	if availableWidth <= 0 {
+		availableWidth = 80 // fallback
+	}
+
 	if isSelected {
 		selectedStyle := lipgloss.NewStyle().
 			Foreground(d.theme.SelectionFg).
 			Background(d.theme.SelectionBg).
-			Bold(true)
-		str = selectedStyle.Render(row)
+			Bold(true).
+			Width(availableWidth)
+		fmt.Fprint(w, selectedStyle.Render(row))
 	} else {
 		normalStyle := lipgloss.NewStyle().
-			Foreground(d.theme.Foreground)
-		str = normalStyle.Render(row)
+			Foreground(d.theme.Foreground).
+			Width(availableWidth)
+		fmt.Fprint(w, normalStyle.Render(row))
 	}
-
-	fmt.Fprint(w, str)
 }
 
 // abbreviateType returns abbreviated filter type name
@@ -241,8 +254,24 @@ func (fm *FilterManager) SetSize(width, height int) {
 	fm.width = width
 	fm.height = height
 
-	// Reserve space for modal chrome and headers
-	listWidth := width - 10   // Account for padding
+	// Calculate modal width (same logic as RenderModal)
+	modalWidth := width * 7 / 10
+	if modalWidth > 80 {
+		modalWidth = 80
+	}
+	if modalWidth < 60 {
+		modalWidth = 60
+	}
+	if modalWidth > width-4 {
+		modalWidth = width - 4
+	}
+
+	// Modal has padding(1,2) = 4 chars, and content uses Width(modalWidth-4)
+	// So actual content area is modalWidth - 4
+	contentWidth := modalWidth - 4
+
+	// List takes the full content width
+	listWidth := contentWidth
 	listHeight := height - 15 // Account for title, search bar, footer
 	if listHeight < 5 {
 		listHeight = 5
@@ -364,52 +393,159 @@ func (fm *FilterManager) ExitSearchMode() {
 
 // CycleTypeFilter cycles through filter type options
 func (fm *FilterManager) CycleTypeFilter() {
-	if fm.filterByType == nil {
-		// All → SIP User
-		t := management.FilterType_FILTER_SIP_USER
-		fm.filterByType = &t
+	fm.cycleTypeFilterDirection(true)
+}
+
+// CycleTypeFilterBackward cycles through filter type options (backward)
+func (fm *FilterManager) CycleTypeFilterBackward() {
+	fm.cycleTypeFilterDirection(false)
+}
+
+// cycleTypeFilterDirection cycles through filter types in specified direction
+func (fm *FilterManager) cycleTypeFilterDirection(forward bool) {
+	if forward {
+		// Forward: All → SIP User → Phone → IP → Call-ID → Codec → BPF → All
+		if fm.filterByType == nil {
+			t := management.FilterType_FILTER_SIP_USER
+			fm.filterByType = &t
+		} else {
+			switch *fm.filterByType {
+			case management.FilterType_FILTER_SIP_USER:
+				t := management.FilterType_FILTER_PHONE_NUMBER
+				fm.filterByType = &t
+			case management.FilterType_FILTER_PHONE_NUMBER:
+				t := management.FilterType_FILTER_IP_ADDRESS
+				fm.filterByType = &t
+			case management.FilterType_FILTER_IP_ADDRESS:
+				t := management.FilterType_FILTER_CALL_ID
+				fm.filterByType = &t
+			case management.FilterType_FILTER_CALL_ID:
+				t := management.FilterType_FILTER_CODEC
+				fm.filterByType = &t
+			case management.FilterType_FILTER_CODEC:
+				t := management.FilterType_FILTER_BPF
+				fm.filterByType = &t
+			case management.FilterType_FILTER_BPF:
+				fm.filterByType = nil
+			default:
+				fm.filterByType = nil
+			}
+		}
 	} else {
-		switch *fm.filterByType {
-		case management.FilterType_FILTER_SIP_USER:
-			t := management.FilterType_FILTER_PHONE_NUMBER
-			fm.filterByType = &t
-		case management.FilterType_FILTER_PHONE_NUMBER:
-			t := management.FilterType_FILTER_IP_ADDRESS
-			fm.filterByType = &t
-		case management.FilterType_FILTER_IP_ADDRESS:
-			t := management.FilterType_FILTER_CALL_ID
-			fm.filterByType = &t
-		case management.FilterType_FILTER_CALL_ID:
-			t := management.FilterType_FILTER_CODEC
-			fm.filterByType = &t
-		case management.FilterType_FILTER_CODEC:
+		// Backward: All → BPF → Codec → Call-ID → IP → Phone → SIP User → All
+		if fm.filterByType == nil {
 			t := management.FilterType_FILTER_BPF
 			fm.filterByType = &t
-		case management.FilterType_FILTER_BPF:
-			// BPF → All
-			fm.filterByType = nil
-		default:
-			fm.filterByType = nil
+		} else {
+			switch *fm.filterByType {
+			case management.FilterType_FILTER_BPF:
+				t := management.FilterType_FILTER_CODEC
+				fm.filterByType = &t
+			case management.FilterType_FILTER_CODEC:
+				t := management.FilterType_FILTER_CALL_ID
+				fm.filterByType = &t
+			case management.FilterType_FILTER_CALL_ID:
+				t := management.FilterType_FILTER_IP_ADDRESS
+				fm.filterByType = &t
+			case management.FilterType_FILTER_IP_ADDRESS:
+				t := management.FilterType_FILTER_PHONE_NUMBER
+				fm.filterByType = &t
+			case management.FilterType_FILTER_PHONE_NUMBER:
+				t := management.FilterType_FILTER_SIP_USER
+				fm.filterByType = &t
+			case management.FilterType_FILTER_SIP_USER:
+				fm.filterByType = nil
+			default:
+				fm.filterByType = nil
+			}
 		}
 	}
 	fm.applyFilters()
 }
 
-// CycleEnabledFilter cycles through enabled filter options
+// CycleEnabledFilter cycles through enabled filter options (forward)
 func (fm *FilterManager) CycleEnabledFilter() {
-	if fm.filterByEnabled == nil {
-		// All → Enabled Only
-		t := true
-		fm.filterByEnabled = &t
-	} else if *fm.filterByEnabled {
-		// Enabled Only → Disabled Only
-		f := false
-		fm.filterByEnabled = &f
+	fm.cycleEnabledFilterDirection(true)
+}
+
+// CycleEnabledFilterBackward cycles through enabled filter options (backward)
+func (fm *FilterManager) CycleEnabledFilterBackward() {
+	fm.cycleEnabledFilterDirection(false)
+}
+
+// cycleEnabledFilterDirection cycles through enabled states in specified direction
+func (fm *FilterManager) cycleEnabledFilterDirection(forward bool) {
+	if forward {
+		// Forward: All → Enabled Only → Disabled Only → All
+		if fm.filterByEnabled == nil {
+			t := true
+			fm.filterByEnabled = &t
+		} else if *fm.filterByEnabled {
+			f := false
+			fm.filterByEnabled = &f
+		} else {
+			fm.filterByEnabled = nil
+		}
 	} else {
-		// Disabled Only → All
-		fm.filterByEnabled = nil
+		// Backward: All → Disabled Only → Enabled Only → All
+		if fm.filterByEnabled == nil {
+			f := false
+			fm.filterByEnabled = &f
+		} else if !*fm.filterByEnabled {
+			t := true
+			fm.filterByEnabled = &t
+		} else {
+			fm.filterByEnabled = nil
+		}
 	}
 	fm.applyFilters()
+}
+
+// JumpToTop jumps to the first filter in the list
+func (fm *FilterManager) JumpToTop() {
+	if len(fm.filteredFilters) > 0 {
+		fm.filterList.Select(0)
+	}
+}
+
+// JumpToBottom jumps to the last filter in the list
+func (fm *FilterManager) JumpToBottom() {
+	if len(fm.filteredFilters) > 0 {
+		fm.filterList.Select(len(fm.filteredFilters) - 1)
+	}
+}
+
+// PageUp moves up one page in the list
+func (fm *FilterManager) PageUp() {
+	// Get current height to determine page size
+	pageSize := fm.filterList.Height()
+	if pageSize <= 0 {
+		pageSize = 10 // Default page size
+	}
+
+	currentIndex := fm.filterList.Index()
+	newIndex := currentIndex - pageSize
+	if newIndex < 0 {
+		newIndex = 0
+	}
+	fm.filterList.Select(newIndex)
+}
+
+// PageDown moves down one page in the list
+func (fm *FilterManager) PageDown() {
+	// Get current height to determine page size
+	pageSize := fm.filterList.Height()
+	if pageSize <= 0 {
+		pageSize = 10 // Default page size
+	}
+
+	currentIndex := fm.filterList.Index()
+	newIndex := currentIndex + pageSize
+	maxIndex := len(fm.filteredFilters) - 1
+	if newIndex > maxIndex {
+		newIndex = maxIndex
+	}
+	fm.filterList.Select(newIndex)
 }
 
 // GetSelectedFilter returns the currently selected filter
@@ -571,13 +707,53 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "t":
-		// Cycle type filter
+		// Cycle type filter (keep for backwards compatibility)
 		fm.CycleTypeFilter()
 		return nil
 
 	case "e":
-		// Cycle enabled filter
+		// Cycle enabled filter (keep for backwards compatibility)
 		fm.CycleEnabledFilter()
+		return nil
+
+	case "left":
+		// Cycle type filter backward (left arrow)
+		fm.CycleTypeFilterBackward()
+		return nil
+
+	case "right":
+		// Cycle type filter forward (right arrow)
+		fm.CycleTypeFilter()
+		return nil
+
+	case "shift+left":
+		// Cycle enabled filter backward (shift+left arrow)
+		fm.CycleEnabledFilterBackward()
+		return nil
+
+	case "shift+right":
+		// Cycle enabled filter forward (shift+right arrow)
+		fm.CycleEnabledFilter()
+		return nil
+
+	case "g":
+		// Jump to top (vim-style)
+		fm.JumpToTop()
+		return nil
+
+	case "G":
+		// Jump to bottom (vim-style)
+		fm.JumpToBottom()
+		return nil
+
+	case "pgup":
+		// Page up
+		fm.PageUp()
+		return nil
+
+	case "pgdown":
+		// Page down
+		fm.PageDown()
 		return nil
 
 	case "n":
@@ -677,11 +853,13 @@ func (fm *FilterManager) initializeAddForm() {
 	patternInput := textinput.New()
 	patternInput.Placeholder = "e.g., alice@example.com"
 	patternInput.CharLimit = 200
+	patternInput.Width = 50
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.Placeholder = "Optional description"
 	descInput.CharLimit = 500
+	descInput.Width = 50
 
 	fm.formState = &FilterFormState{
 		filterID:      "", // Empty for new filter
@@ -701,11 +879,13 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 	patternInput := textinput.New()
 	patternInput.SetValue(filter.Pattern)
 	patternInput.CharLimit = 200
+	patternInput.Width = 50
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.SetValue(filter.Description)
 	descInput.CharLimit = 500
+	descInput.Width = 50
 
 	fm.formState = &FilterFormState{
 		filterID:      filter.Id,
@@ -749,15 +929,39 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 
+	case "left":
+		// Handle left arrow based on active field
+		if fm.formState != nil {
+			switch fm.formState.activeField {
+			case 2: // Type field - cycle backward
+				fm.formState.filterType = fm.cycleFilterTypeBackward(fm.formState.filterType)
+			case 3: // Status field - toggle
+				fm.formState.enabled = !fm.formState.enabled
+			}
+		}
+		return nil
+
+	case "right":
+		// Handle right arrow based on active field
+		if fm.formState != nil {
+			switch fm.formState.activeField {
+			case 2: // Type field - cycle forward
+				fm.formState.filterType = fm.cycleFilterType(fm.formState.filterType)
+			case 3: // Status field - toggle
+				fm.formState.enabled = !fm.formState.enabled
+			}
+		}
+		return nil
+
 	case "ctrl+t":
-		// Cycle filter type
+		// Cycle filter type (alternative)
 		if fm.formState != nil {
 			fm.formState.filterType = fm.cycleFilterType(fm.formState.filterType)
 		}
 		return nil
 
 	case "ctrl+e":
-		// Toggle enabled
+		// Toggle enabled (alternative)
 		if fm.formState != nil {
 			fm.formState.enabled = !fm.formState.enabled
 		}
@@ -812,6 +1016,26 @@ func (fm *FilterManager) cycleFilterType(current management.FilterType) manageme
 	case management.FilterType_FILTER_CODEC:
 		return management.FilterType_FILTER_BPF
 	case management.FilterType_FILTER_BPF:
+		return management.FilterType_FILTER_SIP_USER
+	default:
+		return management.FilterType_FILTER_SIP_USER
+	}
+}
+
+// cycleFilterTypeBackward cycles through filter types in reverse order
+func (fm *FilterManager) cycleFilterTypeBackward(current management.FilterType) management.FilterType {
+	switch current {
+	case management.FilterType_FILTER_SIP_USER:
+		return management.FilterType_FILTER_BPF
+	case management.FilterType_FILTER_BPF:
+		return management.FilterType_FILTER_CODEC
+	case management.FilterType_FILTER_CODEC:
+		return management.FilterType_FILTER_CALL_ID
+	case management.FilterType_FILTER_CALL_ID:
+		return management.FilterType_FILTER_IP_ADDRESS
+	case management.FilterType_FILTER_IP_ADDRESS:
+		return management.FilterType_FILTER_PHONE_NUMBER
+	case management.FilterType_FILTER_PHONE_NUMBER:
 		return management.FilterType_FILTER_SIP_USER
 	default:
 		return management.FilterType_FILTER_SIP_USER
@@ -939,7 +1163,7 @@ func (fm *FilterManager) View() string {
 	if fm.searchMode {
 		footer = "Type to search  ↑/↓: Navigate  Enter: Keep search  Esc: Clear"
 	} else {
-		footer = "/: Search  t: Type filter  e: Enabled filter  Space: Toggle  n: New  Enter: Edit  d: Delete  Esc: Close"
+		footer = "/: Search  ←/→: Type  ⇧←/⇧→: Status  g/G: Top/Bottom  PgUp/PgDn: Page  Space: Toggle  n: New  Enter: Edit  d: Delete  Esc: Close"
 	}
 
 	// Build title
@@ -1085,10 +1309,10 @@ func (fm *FilterManager) renderFilterForm() string {
 	var title, footer string
 	if fm.mode == ModeAdd {
 		title = "➕ Add Filter"
-		footer = "↑/↓/Tab: Navigate  Enter: Save  Esc: Cancel"
+		footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
 	} else {
 		title = "✏️  Edit Filter"
-		footer = "↑/↓/Tab: Navigate  Enter: Save  Esc: Cancel"
+		footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
 	}
 
 	return RenderModal(ModalRenderOptions{

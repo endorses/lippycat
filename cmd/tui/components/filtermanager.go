@@ -1505,14 +1505,14 @@ func (fm *FilterManager) renderFilterForm() string {
 		if fm.formState.activeField == 4 {
 			footer = "↑/↓/Tab: Navigate  s: Select hunters  Enter: Save  Esc: Cancel"
 		} else {
-			footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
+			footer = "↑/↓/Tab: Navigate  ←/→: Change Setting  Enter: Save  Esc: Cancel"
 		}
 	} else {
 		title = "✏️  Edit Filter"
 		if fm.formState.activeField == 4 {
 			footer = "↑/↓/Tab: Navigate  s: Select hunters  Enter: Save  Esc: Cancel"
 		} else {
-			footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
+			footer = "↑/↓/Tab: Navigate  ←/→: Change Setting  Enter: Save  Esc: Cancel"
 		}
 	}
 

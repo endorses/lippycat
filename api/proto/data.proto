@@ -168,7 +168,10 @@ enum FlowControl {
 
 // SubscribeRequest for monitoring clients to subscribe to packet stream
 message SubscribeRequest {
-    // Optional: Filter by specific hunter IDs (empty = all hunters)
+    // Optional: Filter by specific hunter IDs
+    // If has_hunter_filter = false: subscribe to all hunters (default)
+    // If has_hunter_filter = true and hunter_ids is empty: subscribe to no hunters
+    // If has_hunter_filter = true and hunter_ids is non-empty: subscribe to specific hunters
     repeated string hunter_ids = 1;
 
     // Optional: BPF filter to apply on server side
@@ -176,4 +179,8 @@ message SubscribeRequest {
 
     // Client identifier for logging/tracking
     string client_id = 3;
+
+    // Explicitly indicates whether hunter_ids filter is set
+    // This distinguishes between "not set" (subscribe to all) and "empty list" (subscribe to none)
+    bool has_hunter_filter = 4;
 }

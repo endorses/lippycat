@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Config contains processor configuration
@@ -93,8 +94,9 @@ type Processor struct {
 	upstreamMu     sync.Mutex
 
 	// Monitoring subscribers (TUI clients) - uses sync.Map for efficient concurrent access
-	subscribers sync.Map // map[string]chan *data.PacketBatch
-	nextSubID   atomic.Uint64
+	subscribers      sync.Map // map[string]chan *data.PacketBatch
+	subscriberFilter sync.Map // map[string][]string (clientID -> hunterIDs subscription list)
+	nextSubID        atomic.Uint64
 
 	// Control
 	ctx    context.Context
@@ -376,44 +378,28 @@ func (p *Processor) determineFlowControl() data.FlowControl {
 		}
 	}
 
-	// Check subscriber backpressure (slow TUI clients should trigger hunter slowdown)
-	broadcasts := p.subscriberBroadcasts.Load()
-	drops := p.subscriberDrops.Load()
+	// NOTE: We do NOT check subscriber backpressure here!
+	// TUI client drops should NOT pause hunters because:
+	// 1. Hunters serve multiple consumers (other TUI clients, file writes, upstream processors)
+	// 2. TUI disconnects/reconnects cause temporary drops that shouldn't affect hunters
+	// 3. Slow TUI clients are already handled by per-subscriber channel buffering & drops
+	// Hunters should only pause for processor-level overload (PCAP write queue, upstream backlog)
 
-	if broadcasts > 100 { // Only check after sufficient sample size
-		dropRate := float64(drops) / float64(broadcasts) * 100
+	// Check overall packet processing load (only if upstream forwarding is configured)
+	// If no upstream processor, packets are only consumed by TUI subscribers, not forwarded
+	if p.config.UpstreamAddr != "" {
+		packetsReceived := p.packetsReceived.Load()
+		packetsForwarded := p.packetsForwarded.Load()
 
-		// Pause if subscribers are dropping >50% of batches
-		if dropRate > 50 {
-			logger.Warn("Subscriber backpressure critical - requesting pause",
-				"drop_rate_pct", dropRate,
-				"total_broadcasts", broadcasts,
-				"total_drops", drops)
-			mostSevere = data.FlowControl_FLOW_PAUSE
-		} else if dropRate > 25 {
-			// Slow down if subscribers are dropping >25% of batches
-			logger.Debug("Subscriber backpressure detected - requesting slowdown",
-				"drop_rate_pct", dropRate,
-				"total_broadcasts", broadcasts,
-				"total_drops", drops)
-			if mostSevere < data.FlowControl_FLOW_SLOW {
-				mostSevere = data.FlowControl_FLOW_SLOW
-			}
-		}
-	}
-
-	// Check overall packet processing load
-	packetsReceived := p.packetsReceived.Load()
-	packetsForwarded := p.packetsForwarded.Load()
-
-	// If we're significantly behind in forwarding, slow down
-	if packetsReceived > packetsForwarded {
-		backlog := packetsReceived - packetsForwarded
-		if backlog > 10000 {
-			logger.Warn("Large packet backlog detected - requesting slowdown",
-				"backlog", backlog)
-			if mostSevere < data.FlowControl_FLOW_SLOW {
-				mostSevere = data.FlowControl_FLOW_SLOW
+		// If we're significantly behind in forwarding, slow down
+		if packetsReceived > packetsForwarded {
+			backlog := packetsReceived - packetsForwarded
+			if backlog > 10000 {
+				logger.Warn("Large packet backlog detected - requesting slowdown",
+					"backlog", backlog)
+				if mostSevere < data.FlowControl_FLOW_SLOW {
+					mostSevere = data.FlowControl_FLOW_SLOW
+				}
 			}
 		}
 	}
@@ -463,7 +449,11 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	}
 
 	// Broadcast to monitoring subscribers (TUI clients)
-	p.broadcastToSubscribers(batch)
+	// IMPORTANT: Make a copy of the batch before broadcasting to avoid race conditions
+	// The same batch structure will be serialized by multiple goroutines concurrently
+	// (one per TUI client), which can corrupt the protobuf wire format
+	batchCopy := proto.Clone(batch).(*data.PacketBatch)
+	p.broadcastToSubscribers(batchCopy)
 }
 
 // RegisterHunter registers a hunter node with the processor (Management Service).
@@ -690,6 +680,35 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			TotalFilters:          stats.TotalFilters,
 			ProcessorId:           p.config.ProcessorID,
 		},
+	}, nil
+}
+
+// ListAvailableHunters returns list of all hunters connected to this processor (for TUI hunter selection)
+func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.ListHuntersRequest) (*management.ListHuntersResponse, error) {
+	p.huntersMu.RLock()
+	defer p.huntersMu.RUnlock()
+
+	hunters := make([]*management.AvailableHunter, 0, len(p.hunters))
+
+	for _, hunter := range p.hunters {
+		// Calculate connection duration
+		durationNs := time.Now().UnixNano() - hunter.ConnectedAt
+		durationSec := uint64(durationNs / 1e9)
+
+		hunters = append(hunters, &management.AvailableHunter{
+			HunterId:             hunter.ID,
+			Hostname:             hunter.Hostname,
+			Interfaces:           hunter.Interfaces,
+			Status:               hunter.Status,
+			RemoteAddr:           hunter.RemoteAddr,
+			ConnectedDurationSec: durationSec,
+		})
+	}
+
+	logger.Debug("ListAvailableHunters request", "hunter_count", len(hunters))
+
+	return &management.ListHuntersResponse{
+		Hunters: hunters,
 	}, nil
 }
 
@@ -1398,7 +1417,23 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 		}
 	}
 
-	logger.Info("New packet subscriber", "client_id", clientID)
+	// Store hunter subscription filter for this client
+	// has_hunter_filter = false: subscribe to all hunters (default/backward compatibility)
+	// has_hunter_filter = true + empty list: subscribe to no hunters (explicit opt-out)
+	// has_hunter_filter = true + non-empty list: subscribe to specified hunters only
+	if req.HasHunterFilter {
+		p.subscriberFilter.Store(clientID, req.HunterIds)
+		if len(req.HunterIds) > 0 {
+			logger.Info("New packet subscriber with hunter filter",
+				"client_id", clientID,
+				"subscribed_hunters", req.HunterIds)
+		} else {
+			logger.Info("New packet subscriber (no hunters - empty filter)",
+				"client_id", clientID)
+		}
+	} else {
+		logger.Info("New packet subscriber (all hunters - no filter)", "client_id", clientID)
+	}
 
 	// Create channel for this subscriber
 	subChan := make(chan *data.PacketBatch, constants.SubscriberChannelBuffer)
@@ -1409,6 +1444,7 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 	// Cleanup on disconnect
 	defer func() {
 		p.removeSubscriber(clientID)
+		p.subscriberFilter.Delete(clientID) // Clean up filter
 		close(subChan)
 		logger.Info("Packet subscriber disconnected", "client_id", clientID)
 	}()
@@ -1429,8 +1465,17 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 				// For now, send all packets
 			}
 
-			// Filter by hunter IDs if specified
-			if len(req.HunterIds) > 0 {
+			// Filter by hunter IDs if filter is explicitly set
+			// has_hunter_filter = false: send all packets (no filter)
+			// has_hunter_filter = true + empty list: send no packets (explicit opt-out)
+			// has_hunter_filter = true + non-empty list: send only matching packets
+			if req.HasHunterFilter {
+				if len(req.HunterIds) == 0 {
+					// Empty filter = subscribe to no hunters, don't send this packet
+					continue
+				}
+
+				// Non-empty filter = check if this hunter matches
 				found := false
 				for _, hunterID := range req.HunterIds {
 					if batch.HunterId == hunterID {

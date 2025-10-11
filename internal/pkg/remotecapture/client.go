@@ -18,7 +18,6 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
-	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -99,14 +98,8 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 			return nil, fmt.Errorf("failed to build TLS credentials: %w", err)
 		}
 		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
-		logger.Info("Using TLS for remote capture connection",
-			"addr", config.Address,
-			"skip_verify", config.TLSSkipVerify)
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		logger.Warn("Using insecure remote capture connection (no TLS)",
-			"addr", config.Address,
-			"security_risk", "packet data transmitted in cleartext")
 	}
 
 	conn, err := grpc.DialContext(ctx, config.Address, opts...)
@@ -160,11 +153,24 @@ func (c *Client) GetAddr() string {
 	return c.addr
 }
 
+// GetConn returns the gRPC connection for direct RPC calls
+func (c *Client) GetConn() *grpc.ClientConn {
+	return c.conn
+}
+
 // StreamPackets starts receiving packet stream from remote node
 func (c *Client) StreamPackets() error {
+	return c.StreamPacketsWithFilter(nil)
+}
+
+// StreamPacketsWithFilter starts receiving packet stream from remote node with hunter filter
+func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 	// Subscribe to packet stream using the new SubscribePackets RPC
 	// ClientId is omitted - processor will auto-generate a unique ID
-	req := &data.SubscribeRequest{}
+	req := &data.SubscribeRequest{
+		HunterIds:       hunterIDs,        // Filter by specific hunters
+		HasHunterFilter: hunterIDs != nil, // Set flag to distinguish nil from []
+	}
 
 	stream, err := c.dataClient.SubscribePackets(c.ctx, req)
 	if err != nil {
@@ -659,11 +665,6 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 
 	if config.TLSSkipVerify {
-		logger.Warn("TLS certificate verification disabled",
-			"security_risk", "vulnerable to man-in-the-middle attacks",
-			"recommendation", "only use in testing environments",
-			"severity", "HIGH")
-
 		if productionMode {
 			return nil, fmt.Errorf("LIPPYCAT_PRODUCTION=true blocks TLSSkipVerify=true (insecure certificate validation)")
 		}
@@ -680,7 +681,6 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 			return nil, fmt.Errorf("failed to parse CA certificate")
 		}
 		tlsConfig.RootCAs = certPool
-		logger.Info("Loaded CA certificate for remote capture", "file", config.TLSCAFile)
 	}
 
 	// Load client certificate for mutual TLS if provided
@@ -690,9 +690,6 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
-		logger.Info("Loaded client certificate for mutual TLS",
-			"cert", config.TLSCertFile,
-			"key", config.TLSKeyFile)
 	}
 
 	return credentials.NewTLS(tlsConfig), nil

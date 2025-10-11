@@ -149,6 +149,7 @@ const (
 	ModeList FilterManagerMode = iota
 	ModeAdd
 	ModeEdit
+	ModeDeleteConfirm
 )
 
 // NodeType represents the type of node (processor or hunter)
@@ -178,6 +179,7 @@ type FilterManager struct {
 	filterByType    *management.FilterType
 	filterByEnabled *bool
 	loading         bool
+	deleteCandidate *management.Filter // Filter pending deletion confirmation
 
 	// Form state (for Add/Edit mode)
 	formState *FilterFormState
@@ -469,6 +471,11 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle delete confirmation mode
+		if fm.mode == ModeDeleteConfirm {
+			return fm.handleDeleteConfirmMode(msg)
+		}
+
 		// Handle search mode
 		if fm.searchMode {
 			return fm.handleSearchMode(msg)
@@ -543,7 +550,12 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "d":
-		// Delete filter (TODO: Phase 4)
+		// Delete filter (show confirmation)
+		selectedFilter := fm.GetSelectedFilter()
+		if selectedFilter != nil {
+			fm.deleteCandidate = selectedFilter
+			fm.mode = ModeDeleteConfirm
+		}
 		return nil
 
 	case " ":
@@ -558,10 +570,68 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
+// handleDeleteConfirmMode handles keyboard input in delete confirmation mode
+func (fm *FilterManager) handleDeleteConfirmMode(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "y", "Y":
+		// Confirm delete
+		return fm.deleteFilter()
+
+	case "n", "N", "esc":
+		// Cancel delete
+		fm.deleteCandidate = nil
+		fm.mode = ModeList
+		return nil
+
+	default:
+		return nil
+	}
+}
+
+// deleteFilter deletes the filter pending deletion
+func (fm *FilterManager) deleteFilter() tea.Cmd {
+	if fm.deleteCandidate == nil {
+		fm.mode = ModeList
+		return nil
+	}
+
+	// Find and remove the filter from allFilters
+	filterID := fm.deleteCandidate.Id
+	patternForMsg := fm.deleteCandidate.Pattern
+
+	for i, filter := range fm.allFilters {
+		if filter.Id == filterID {
+			// Remove from slice
+			fm.allFilters = append(fm.allFilters[:i], fm.allFilters[i+1:]...)
+			break
+		}
+	}
+
+	// TODO: Phase 6 - Call gRPC DeleteFilter RPC to persist deletion
+	// For now, just update local state
+
+	// Clear delete candidate and return to list mode
+	fm.deleteCandidate = nil
+	fm.mode = ModeList
+
+	// Show status message
+	fm.filterList.NewStatusMessage(fmt.Sprintf("Filter '%s' deleted", fm.truncatePattern(patternForMsg, 30)))
+
+	// Refresh the view
+	fm.applyFilters()
+
+	return nil
+}
+
 // View renders the filter manager using unified modal
 func (fm *FilterManager) View() string {
 	if !fm.active {
 		return ""
+	}
+
+	// Show delete confirmation dialog if in delete confirmation mode
+	if fm.mode == ModeDeleteConfirm {
+		return fm.renderDeleteConfirmation()
 	}
 
 	var content strings.Builder
@@ -604,6 +674,51 @@ func (fm *FilterManager) View() string {
 		Height:     fm.height,
 		Theme:      fm.theme,
 		ModalWidth: 0, // Auto-calculate
+	})
+}
+
+// renderDeleteConfirmation renders the delete confirmation dialog
+func (fm *FilterManager) renderDeleteConfirmation() string {
+	if fm.deleteCandidate == nil {
+		return ""
+	}
+
+	var content strings.Builder
+
+	// Warning message
+	warningStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.ErrorColor).
+		Bold(true)
+	content.WriteString(warningStyle.Render("⚠️  Delete Filter"))
+	content.WriteString("\n\n")
+
+	// Filter details
+	content.WriteString("Are you sure you want to delete this filter?\n\n")
+
+	detailStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.Foreground)
+	content.WriteString(detailStyle.Render(fmt.Sprintf("Pattern: %s\n", fm.deleteCandidate.Pattern)))
+	content.WriteString(detailStyle.Render(fmt.Sprintf("Type: %s\n", fm.deleteCandidate.Type.String())))
+	if fm.deleteCandidate.Description != "" {
+		content.WriteString(detailStyle.Render(fmt.Sprintf("Description: %s\n", fm.deleteCandidate.Description)))
+	}
+
+	content.WriteString("\n")
+	emphasisStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.ErrorColor).
+		Italic(true)
+	content.WriteString(emphasisStyle.Render("This action cannot be undone."))
+
+	footer := "y: Confirm delete  n/Esc: Cancel"
+
+	return RenderModal(ModalRenderOptions{
+		Title:      "🗑️  Confirm Deletion",
+		Content:    content.String(),
+		Footer:     footer,
+		Width:      fm.width,
+		Height:     fm.height,
+		Theme:      fm.theme,
+		ModalWidth: 60,
 	})
 }
 

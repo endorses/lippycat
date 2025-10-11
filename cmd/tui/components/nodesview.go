@@ -1659,11 +1659,10 @@ func (n *NodesView) RenderModal(width, height int) string {
 	return n.renderAddNodeModal(width, height)
 }
 
-// renderAddNodeModal renders the add node modal overlay
+// renderAddNodeModal renders the add node modal using the unified modal component
 func (n *NodesView) renderAddNodeModal(width, height int) string {
-	// Calculate modal dimensions (smaller than default modal)
+	// Calculate modal dimensions
 	modalWidth := 60
-
 	if modalWidth > width-4 {
 		modalWidth = width - 4
 	}
@@ -1671,68 +1670,32 @@ func (n *NodesView) renderAddNodeModal(width, height int) string {
 		modalWidth = 40
 	}
 
-	// Modal container - NO background color (uses terminal background like protocol selector)
-	modalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(n.theme.InfoColor).
-		Width(modalWidth).
-		Padding(1, 2)
-
-	// Title style (matches protocol selector)
-	titleStyle := lipgloss.NewStyle().
-		Foreground(n.theme.HeaderBg).
-		Bold(true).
-		Padding(0, 1).
-		Width(modalWidth - 4)
-
-	title := titleStyle.Render("Add Node")
+	// Build content
+	var content strings.Builder
 
 	// Input label
 	labelStyle := lipgloss.NewStyle().
 		Foreground(n.theme.Foreground).
 		Padding(0, 1).
 		MarginTop(1)
-
-	label := labelStyle.Render("Address (host:port):")
+	content.WriteString(labelStyle.Render("Address (host:port):"))
+	content.WriteString("\n")
 
 	// Input field
 	inputStyle := lipgloss.NewStyle().
 		Padding(0, 1)
+	content.WriteString(inputStyle.Render(n.nodeInput.View()))
 
-	input := inputStyle.Render(n.nodeInput.View())
-
-	// Instructions (matches protocol selector)
-	instructionStyle := lipgloss.NewStyle().
-		Foreground(n.theme.StatusBarFg).
-		Italic(true).
-		Padding(0, 1).
-		MarginTop(1)
-
-	instructions := instructionStyle.Render("Enter: confirm | Esc: cancel")
-
-	// Assemble modal content
-	modalContent := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		"",
-		label,
-		input,
-		"",
-		instructions,
-	)
-
-	modal := modalStyle.Render(modalContent)
-
-	// Center the modal (no dimming to match protocol selector)
-	centeredModal := lipgloss.Place(
-		width,
-		height,
-		lipgloss.Center,
-		lipgloss.Center,
-		modal,
-	)
-
-	return centeredModal
+	// Use unified modal rendering
+	return RenderModal(ModalRenderOptions{
+		Title:      "Add Node",
+		Content:    content.String(),
+		Footer:     "Enter: confirm | Esc: cancel",
+		Width:      width,
+		Height:     height,
+		Theme:      n.theme,
+		ModalWidth: modalWidth,
+	})
 }
 
 func truncateString(s string, maxLen int) string {

@@ -117,49 +117,29 @@ func (ps *ProtocolSelector) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// View renders the protocol selector (positioning handled by parent)
+// View renders the protocol selector using the unified modal component
 func (ps *ProtocolSelector) View() string {
 	if !ps.active {
 		return ""
 	}
 
-	// Modal dimensions
-	modalWidth := 60
-
-	// Modal styles - use theme colors that match the rest of the TUI
-	titleStyle := lipgloss.NewStyle().
-		Foreground(ps.theme.HeaderBg).
-		Bold(true).
-		Padding(0, 1).
-		Width(modalWidth - 4)
-
+	// Styles for content
 	itemStyle := lipgloss.NewStyle().
 		Foreground(ps.theme.Foreground).
-		Padding(0, 1).
-		Width(modalWidth - 4)
+		Padding(0, 1)
 
 	selectedStyle := lipgloss.NewStyle().
 		Foreground(ps.theme.SelectionFg).
 		Background(ps.theme.SelectionBg).
 		Bold(true).
-		Padding(0, 1).
-		Width(modalWidth - 4)
+		Padding(0, 1)
 
 	descStyle := lipgloss.NewStyle().
 		Foreground(ps.theme.StatusBarFg).
-		Italic(true).
-		Width(modalWidth - 4)
-
-	modalStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ps.theme.InfoColor).
-		Padding(1, 2).
-		Width(modalWidth)
+		Italic(true)
 
 	// Build content
 	var content strings.Builder
-	content.WriteString(titleStyle.Render("Select Protocol"))
-	content.WriteString("\n\n")
 
 	for i, proto := range ps.protocols {
 		var line string
@@ -175,10 +155,16 @@ func (ps *ProtocolSelector) View() string {
 		content.WriteString("\n")
 	}
 
-	content.WriteString("\n")
-	content.WriteString(descStyle.Render("↑/↓: Navigate  Enter: Select  Esc: Cancel"))
-
-	return modalStyle.Render(content.String())
+	// Use unified modal rendering
+	return RenderModal(ModalRenderOptions{
+		Title:      "Select Protocol",
+		Content:    content.String(),
+		Footer:     "↑/↓: Navigate  Enter: Select  Esc: Cancel",
+		Width:      ps.width,
+		Height:     ps.height,
+		Theme:      ps.theme,
+		ModalWidth: 60,
+	})
 }
 
 // ProtocolSelectedMsg is sent when a protocol is selected

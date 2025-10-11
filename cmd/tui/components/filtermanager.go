@@ -424,6 +424,43 @@ func (fm *FilterManager) GetSelectedFilter() *management.Filter {
 	return fm.filteredFilters[index]
 }
 
+// toggleFilterEnabled toggles the enabled state of the selected filter
+func (fm *FilterManager) toggleFilterEnabled() tea.Cmd {
+	selectedFilter := fm.GetSelectedFilter()
+	if selectedFilter == nil {
+		return nil
+	}
+
+	// Toggle the enabled state
+	selectedFilter.Enabled = !selectedFilter.Enabled
+
+	// TODO: Phase 6 - Call gRPC UpdateFilter RPC to persist change
+	// For now, just update local state
+
+	// Show status message
+	status := "disabled"
+	if selectedFilter.Enabled {
+		status = "enabled"
+	}
+	fm.filterList.NewStatusMessage(fmt.Sprintf("Filter '%s' %s", fm.truncatePattern(selectedFilter.Pattern, 30), status))
+
+	// Refresh the view to update checkbox display
+	fm.applyFilters()
+
+	return nil
+}
+
+// truncatePattern truncates a pattern for display in status messages
+func (fm *FilterManager) truncatePattern(pattern string, max int) string {
+	if len(pattern) <= max {
+		return pattern
+	}
+	if max <= 3 {
+		return pattern[:max]
+	}
+	return pattern[:max-3] + "..."
+}
+
 // Update handles key events
 func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 	if !fm.active {
@@ -510,8 +547,8 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case " ":
-		// Toggle enabled (TODO: Phase 3)
-		return nil
+		// Toggle enabled
+		return fm.toggleFilterEnabled()
 
 	default:
 		// Pass to list for navigation
@@ -548,7 +585,7 @@ func (fm *FilterManager) View() string {
 	if fm.searchMode {
 		footer = "Type to search  ↑/↓: Navigate  Enter: Keep search  Esc: Clear"
 	} else {
-		footer = "/: Search  t: Type filter  e: Enabled filter  n: New  Enter: Edit  d: Delete  Esc: Close"
+		footer = "/: Search  t: Type filter  e: Enabled filter  Space: Toggle  n: New  Enter: Edit  d: Delete  Esc: Close"
 	}
 
 	// Build title

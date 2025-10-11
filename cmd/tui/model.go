@@ -552,6 +552,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "shift+up":
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				// Manual viewport scrolling
+				cmd := m.uiState.NodesView.Update(tea.KeyMsg{Type: tea.KeyUp})
+				return m, cmd
+			}
+			// Fall through to other tabs
+
+		case "shift+down":
+			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+				// Manual viewport scrolling
+				cmd := m.uiState.NodesView.Update(tea.KeyMsg{Type: tea.KeyDown})
+				return m, cmd
+			}
+			// Fall through to other tabs
+
 		case "up", "k":
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
 				// Use spatial navigation for graph mode, tree navigation for table mode
@@ -1249,6 +1265,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				m.uiState.PacketList.CursorUp()
 				m.updateDetailsPanel()
 			}
+		} else if m.uiState.Tabs.GetActive() == 1 {
+			// On nodes tab - pass to NodesView
+			cmd := m.uiState.NodesView.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	}
@@ -1277,6 +1297,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 				m.uiState.PacketList.CursorDown()
 				m.updateDetailsPanel()
 			}
+		} else if m.uiState.Tabs.GetActive() == 1 {
+			// On nodes tab - pass to NodesView
+			cmd := m.uiState.NodesView.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	}

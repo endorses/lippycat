@@ -85,6 +85,9 @@ type NodesView struct {
 
 	// Graph view navigation memory
 	lastSelectedHunterIndex map[string]int // Map of processor address -> last selected hunter index (0-based within that processor)
+
+	// Viewport scrolling
+	selectedNodeLine int // Line position of currently selected node in rendered content (-1 if no selection)
 }
 
 // NewNodesView creates a new nodes view component
@@ -108,6 +111,7 @@ func NewNodesView() NodesView {
 		hunterLines:             make(map[int]int),
 		processorLines:          make(map[int]int),
 		lastSelectedHunterIndex: make(map[string]int),
+		selectedNodeLine:        -1,
 	}
 }
 
@@ -805,15 +809,64 @@ func (n *NodesView) updateViewportContent() {
 		return
 	}
 	n.viewport.SetContent(n.renderContent())
+	n.scrollToSelection()
+}
+
+// scrollToSelection scrolls the viewport to keep the selected node visible
+func (n *NodesView) scrollToSelection() {
+	if n.selectedNodeLine < 0 {
+		return // No selection
+	}
+
+	viewportHeight := n.viewport.Height
+	if viewportHeight <= 0 {
+		return
+	}
+
+	if n.viewMode == "graph" {
+		// Graph mode: center the selected node vertically
+		targetOffset := n.selectedNodeLine - viewportHeight/2
+		if targetOffset < 0 {
+			targetOffset = 0
+		}
+		// Don't scroll past the end of content
+		maxOffset := n.viewport.TotalLineCount() - viewportHeight
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+		if targetOffset > maxOffset {
+			targetOffset = maxOffset
+		}
+		n.viewport.SetYOffset(targetOffset)
+	} else {
+		// Table mode: minimal scrolling - just keep selection visible
+		currentOffset := n.viewport.YOffset
+		visibleStart := currentOffset
+		visibleEnd := currentOffset + viewportHeight - 1
+
+		// If selection is above visible area, scroll up to show it
+		if n.selectedNodeLine < visibleStart {
+			n.viewport.SetYOffset(n.selectedNodeLine)
+		} else if n.selectedNodeLine > visibleEnd {
+			// If selection is below visible area, scroll down to show it
+			newOffset := n.selectedNodeLine - viewportHeight + 1
+			if newOffset < 0 {
+				newOffset = 0
+			}
+			n.viewport.SetYOffset(newOffset)
+		}
+		// Otherwise, selection is already visible - don't scroll
+	}
 }
 
 // renderContent renders the tree view content as a string for the viewport
 func (n *NodesView) renderContent() string {
 	var b strings.Builder
 
-	// Reset mouse click regions
+	// Reset mouse click regions and selection tracking
 	n.hunterLines = make(map[int]int)
 	n.processorLines = make(map[int]int)
+	n.selectedNodeLine = -1
 
 	if len(n.processors) == 0 && len(n.hunters) == 0 {
 		// Empty state - no processors and no hunters
@@ -914,6 +967,7 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 
 		// Apply selection styling if this processor is selected
 		if n.selectedProcessorAddr == proc.Address {
+			n.selectedNodeLine = linesRendered
 			b.WriteString(selectedStyle.Width(n.width).Render(procLine) + "\n")
 		} else {
 			// Style the status icon with color, then the rest with processor style
@@ -1023,6 +1077,7 @@ func (n *NodesView) renderTreeView(b *strings.Builder) {
 
 			// Build the line differently based on selection
 			if globalIndex == n.selectedIndex {
+				n.selectedNodeLine = linesRendered
 				// For selected row: build plain text line, then apply full-width background
 				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s",
 					treeCol, prefix,
@@ -1296,6 +1351,11 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 		// Track click region for processor box
 		processorStartLine := currentLine
 		processorBoxLines := strings.Split(processorBox, "\n")
+
+		// Track selected processor line for scrolling (use middle of box)
+		if isProcessorSelected {
+			n.selectedNodeLine = processorStartLine + len(processorBoxLines)/2
+		}
 		n.processorBoxRegions = append(n.processorBoxRegions, struct {
 			startLine     int
 			endLine       int
@@ -1539,6 +1599,11 @@ func (n *NodesView) renderGraphView(b *strings.Builder) {
 					if found {
 						break
 					}
+				}
+
+				// Track selected hunter line for scrolling (use middle of box)
+				if globalIndex == n.selectedIndex {
+					n.selectedNodeLine = hunterStartLine + maxBoxLines/2
 				}
 
 				// Calculate horizontal position

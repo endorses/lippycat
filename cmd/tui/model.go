@@ -2076,12 +2076,40 @@ func (m *Model) handleOpenFilterManager() tea.Cmd {
 		m.uiState.FilterManager.Activate(selectedProcessorAddr, selectedProcessorAddr, components.NodeTypeProcessor)
 		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
 
+		// Set available hunters from the processor
+		hunters := m.uiState.NodesView.GetHuntersForProcessor(selectedProcessorAddr)
+		hunterItems := make([]components.HunterSelectorItem, 0, len(hunters))
+		for _, h := range hunters {
+			hunterItems = append(hunterItems, components.HunterSelectorItem{
+				HunterID:   h.ID,
+				Hostname:   h.Hostname,
+				Interfaces: h.Interfaces,
+				Status:     h.Status,
+				RemoteAddr: h.RemoteAddr,
+			})
+		}
+		m.uiState.FilterManager.SetAvailableHunters(hunterItems)
+
 		// Load filters from processor via gRPC
 		return m.loadFiltersFromProcessor(selectedProcessorAddr, "")
 	} else if selectedHunter != nil {
 		// Open for specific hunter
 		m.uiState.FilterManager.Activate(selectedHunter.ID, selectedHunter.ProcessorAddr, components.NodeTypeHunter)
 		m.uiState.FilterManager.SetSize(m.uiState.Width, m.uiState.Height)
+
+		// Set available hunters from the processor
+		hunters := m.uiState.NodesView.GetHuntersForProcessor(selectedHunter.ProcessorAddr)
+		hunterItems := make([]components.HunterSelectorItem, 0, len(hunters))
+		for _, h := range hunters {
+			hunterItems = append(hunterItems, components.HunterSelectorItem{
+				HunterID:   h.ID,
+				Hostname:   h.Hostname,
+				Interfaces: h.Interfaces,
+				Status:     h.Status,
+				RemoteAddr: h.RemoteAddr,
+			})
+		}
+		m.uiState.FilterManager.SetAvailableHunters(hunterItems)
 
 		// Load filters from processor (filtered by hunter ID) via gRPC
 		// Note: selectedHunter.ProcessorAddr contains the processor address

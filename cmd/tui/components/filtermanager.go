@@ -184,16 +184,18 @@ type FilterManager struct {
 	searchInput textinput.Model
 
 	// State
-	active          bool
-	mode            FilterManagerMode
-	targetNode      string // processor addr or hunter ID (for display)
-	processorAddr   string // actual processor address (for gRPC calls)
-	targetType      NodeType
-	searchMode      bool
-	filterByType    *management.FilterType
-	filterByEnabled *bool
-	loading         bool
-	deleteCandidate *management.Filter // Filter pending deletion confirmation
+	active           bool
+	mode             FilterManagerMode
+	targetNode       string // processor addr or hunter ID (for display)
+	processorAddr    string // actual processor address (for gRPC calls)
+	targetType       NodeType
+	searchMode       bool
+	filterByType     *management.FilterType
+	filterByEnabled  *bool
+	loading          bool
+	deleteCandidate  *management.Filter   // Filter pending deletion confirmation
+	availableHunters []HunterSelectorItem // Available hunters for target selection
+	selectingHunters bool                 // Whether we're in hunter selection mode
 
 	// Form state (for Add/Edit mode)
 	formState *FilterFormState
@@ -315,6 +317,11 @@ func (fm *FilterManager) SetFilters(filters []*management.Filter) {
 	fm.allFilters = filters
 	fm.loading = false
 	fm.applyFilters()
+}
+
+// SetAvailableHunters sets the list of available hunters for target selection
+func (fm *FilterManager) SetAvailableHunters(hunters []HunterSelectorItem) {
+	fm.availableHunters = hunters
 }
 
 // applyFilters applies search and filter criteria
@@ -614,6 +621,11 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle hunter selection mode
+		if fm.selectingHunters {
+			return fm.handleHunterSelectionMode(msg)
+		}
+
 		// Handle delete confirmation mode
 		if fm.mode == ModeDeleteConfirm {
 			return fm.handleDeleteConfirmMode(msg)
@@ -792,6 +804,82 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
+// handleHunterSelectionMode handles keyboard input in hunter selection mode
+func (fm *FilterManager) handleHunterSelectionMode(msg tea.KeyMsg) tea.Cmd {
+	if fm.formState == nil {
+		fm.selectingHunters = false
+		return nil
+	}
+
+	switch msg.String() {
+	case "up", "k":
+		// Move cursor up
+		if len(fm.availableHunters) > 0 {
+			currentIdx := fm.formState.activeField // reuse activeField as cursor
+			if currentIdx > 0 {
+				fm.formState.activeField--
+			}
+		}
+		return nil
+
+	case "down", "j":
+		// Move cursor down
+		if len(fm.availableHunters) > 0 {
+			currentIdx := fm.formState.activeField
+			if currentIdx < len(fm.availableHunters)-1 {
+				fm.formState.activeField++
+			}
+		}
+		return nil
+
+	case " ": // Space to toggle
+		if len(fm.availableHunters) > 0 {
+			hunterID := fm.availableHunters[fm.formState.activeField].HunterID
+			// Check if already selected
+			found := false
+			for i, id := range fm.formState.targetHunters {
+				if id == hunterID {
+					// Remove it
+					fm.formState.targetHunters = append(fm.formState.targetHunters[:i], fm.formState.targetHunters[i+1:]...)
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Add it
+				fm.formState.targetHunters = append(fm.formState.targetHunters, hunterID)
+			}
+		}
+		return nil
+
+	case "a": // Select all
+		fm.formState.targetHunters = make([]string, 0, len(fm.availableHunters))
+		for _, hunter := range fm.availableHunters {
+			fm.formState.targetHunters = append(fm.formState.targetHunters, hunter.HunterID)
+		}
+		return nil
+
+	case "n": // Select none
+		fm.formState.targetHunters = []string{}
+		return nil
+
+	case "enter":
+		// Confirm selection and return to form
+		fm.selectingHunters = false
+		fm.formState.activeField = 4 // Back to targets field
+		return nil
+
+	case "esc":
+		// Cancel and return to form without changes
+		fm.selectingHunters = false
+		fm.formState.activeField = 4 // Back to targets field
+		return nil
+
+	default:
+		return nil
+	}
+}
+
 // handleDeleteConfirmMode handles keyboard input in delete confirmation mode
 func (fm *FilterManager) handleDeleteConfirmMode(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
@@ -912,7 +1000,13 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "enter", "ctrl+s":
-		// Save filter
+		// If on targets field, enter hunter selection mode
+		if fm.formState != nil && fm.formState.activeField == 4 {
+			fm.selectingHunters = true
+			fm.formState.activeField = 0 // Reset cursor for hunter list
+			return nil
+		}
+		// Otherwise save filter
 		return fm.saveFilter()
 
 	case "down", "tab":
@@ -1134,6 +1228,11 @@ func (fm *FilterManager) View() string {
 		return ""
 	}
 
+	// Show hunter selection if in that mode
+	if fm.selectingHunters {
+		return fm.renderHunterSelection()
+	}
+
 	// Show delete confirmation dialog if in delete confirmation mode
 	if fm.mode == ModeDeleteConfirm {
 		return fm.renderDeleteConfirmation()
@@ -1237,6 +1336,86 @@ func (fm *FilterManager) renderDeleteConfirmation() string {
 	})
 }
 
+// renderHunterSelection renders the hunter selection UI
+func (fm *FilterManager) renderHunterSelection() string {
+	if fm.formState == nil {
+		return ""
+	}
+
+	var content strings.Builder
+
+	// Calculate modal width
+	modalWidth := 70
+	if modalWidth > fm.width-4 {
+		modalWidth = fm.width - 4
+	}
+
+	// Modal has padding(1,2) = 4 chars, content uses Width(modalWidth-4)
+	contentWidth := modalWidth - 4
+	itemWidth := contentWidth - 2 // Account for padding
+
+	// Styles
+	itemStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.Foreground).
+		Padding(0, 1)
+
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(fm.theme.SelectionFg).
+		Background(fm.theme.SelectionBg).
+		Bold(true).
+		Padding(0, 1).
+		Width(itemWidth)
+
+	if len(fm.availableHunters) == 0 {
+		content.WriteString(itemStyle.Render("No hunters available"))
+	} else {
+		// Reuse activeField as cursor position
+		cursorIdx := fm.formState.activeField
+		if cursorIdx >= len(fm.availableHunters) {
+			cursorIdx = 0
+			fm.formState.activeField = 0
+		}
+
+		for i, hunter := range fm.availableHunters {
+			// Check if this hunter is selected
+			isSelected := false
+			for _, id := range fm.formState.targetHunters {
+				if id == hunter.HunterID {
+					isSelected = true
+					break
+				}
+			}
+
+			// Checkbox
+			checkbox := "[ ] "
+			if isSelected {
+				checkbox = "[✓] "
+			}
+
+			// Build row
+			row := fmt.Sprintf("%s%s (%s)", checkbox, hunter.HunterID, hunter.Hostname)
+
+			// Apply cursor style
+			if i == cursorIdx {
+				content.WriteString(selectedStyle.Render(row))
+			} else {
+				content.WriteString(itemStyle.Render(row))
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	return RenderModal(ModalRenderOptions{
+		Title:      "Select Target Hunters",
+		Content:    content.String(),
+		Footer:     "↑/↓: Navigate  Space: Toggle  a: All  n: None  Enter: Confirm  Esc: Cancel",
+		Width:      fm.width,
+		Height:     fm.height,
+		Theme:      fm.theme,
+		ModalWidth: modalWidth,
+	})
+}
+
 // renderFilterForm renders the add/edit filter form
 func (fm *FilterManager) renderFilterForm() string {
 	if fm.formState == nil {
@@ -1307,19 +1486,31 @@ func (fm *FilterManager) renderFilterForm() string {
 	if len(fm.formState.targetHunters) > 0 {
 		targetStr = strings.Join(fm.formState.targetHunters, ", ")
 	}
+	targetHint := ""
+	if fm.formState.activeField == 4 {
+		targetHint = " (Enter to select)"
+	}
 	content.WriteString(fmt.Sprintf("%s %s %s\n",
 		indicator,
 		labelStyle.Render("Targets:"),
-		valueStyle.Render(targetStr+" (not editable yet)")))
+		valueStyle.Render(targetStr+targetHint)))
 
 	// Determine title and footer
 	var title, footer string
 	if fm.mode == ModeAdd {
 		title = "➕ Add Filter"
-		footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
+		if fm.formState.activeField == 4 {
+			footer = "↑/↓/Tab: Navigate  Enter: Select hunters  Esc: Cancel"
+		} else {
+			footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
+		}
 	} else {
 		title = "✏️  Edit Filter"
-		footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
+		if fm.formState.activeField == 4 {
+			footer = "↑/↓/Tab: Navigate  Enter: Select hunters  Esc: Cancel"
+		} else {
+			footer = "↑/↓/Tab: Navigate  ←/→: Change Type/Status  Enter: Save  Esc: Cancel"
+		}
 	}
 
 	return RenderModal(ModalRenderOptions{

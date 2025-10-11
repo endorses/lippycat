@@ -599,6 +599,16 @@ func (n *NodesView) GetSelectedProcessorAddr() string {
 	return n.selectedProcessorAddr
 }
 
+// GetHuntersForProcessor returns the list of hunters for a given processor address
+func (n *NodesView) GetHuntersForProcessor(processorAddr string) []HunterInfo {
+	for _, proc := range n.processors {
+		if proc.Address == processorAddr {
+			return proc.Hunters
+		}
+	}
+	return []HunterInfo{}
+}
+
 // updateViewportContent updates the viewport with current content
 func (n *NodesView) updateViewportContent() {
 	if !n.ready {

@@ -289,10 +289,26 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 
 	var sb strings.Builder
 
-	// Style for hex bytes
-	hexStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg)
+	// Solarized color palette for hex columns
+	columnColors := []lipgloss.Color{
+		lipgloss.Color("#b58900"), // yellow
+		lipgloss.Color("#cb4b16"), // orange
+		lipgloss.Color("#dc322f"), // red
+		lipgloss.Color("#d33682"), // magenta
+		lipgloss.Color("#6c71c4"), // violet
+		lipgloss.Color("#268bd2"), // blue
+		lipgloss.Color("#2aa198"), // cyan
+		lipgloss.Color("#859900"), // green
+	}
+
+	// Create styles for each column
+	var columnStyles [8]lipgloss.Style
+	for i := 0; i < 8; i++ {
+		columnStyles[i] = lipgloss.NewStyle().Foreground(columnColors[i])
+	}
+
 	// Style for ASCII
-	asciiStyle := lipgloss.NewStyle().Foreground(d.theme.SuccessColor)
+	asciiStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg)
 	// Style for offset
 	offsetStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg).Bold(true)
 
@@ -302,12 +318,15 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 		sb.WriteString("  ")
 
 		// Hex column (16 bytes per line)
-		hexPart := ""
 		asciiPart := ""
 		for i := 0; i < 16; i++ {
 			if offset+i < len(data) {
 				b := data[offset+i]
-				hexPart += fmt.Sprintf("%02x ", b)
+
+				// Apply color based on column (repeating pattern every 8 bytes)
+				colorIndex := i % 8
+				hexByte := fmt.Sprintf("%02x ", b)
+				sb.WriteString(columnStyles[colorIndex].Render(hexByte))
 
 				// ASCII representation
 				if b >= 32 && b <= 126 {
@@ -316,17 +335,16 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 					asciiPart += "."
 				}
 			} else {
-				hexPart += "   "
+				sb.WriteString("   ")
 				asciiPart += " "
 			}
 
 			// Add extra space after 8 bytes for readability
 			if i == 7 {
-				hexPart += " "
+				sb.WriteString(" ")
 			}
 		}
 
-		sb.WriteString(hexStyle.Render(hexPart))
 		sb.WriteString(" ")
 		sb.WriteString(asciiStyle.Render(asciiPart))
 		sb.WriteString("\n")

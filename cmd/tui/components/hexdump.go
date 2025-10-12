@@ -171,10 +171,26 @@ func (h *HexDumpView) renderContent() string {
 
 	var sb strings.Builder
 
-	// Style for hex bytes
-	hexStyle := lipgloss.NewStyle().Foreground(h.theme.Foreground)
+	// Solarized color palette for hex columns
+	columnColors := []lipgloss.Color{
+		lipgloss.Color("#b58900"), // yellow
+		lipgloss.Color("#cb4b16"), // orange
+		lipgloss.Color("#dc322f"), // red
+		lipgloss.Color("#d33682"), // magenta
+		lipgloss.Color("#6c71c4"), // violet
+		lipgloss.Color("#268bd2"), // blue
+		lipgloss.Color("#2aa198"), // cyan
+		lipgloss.Color("#859900"), // green
+	}
+
+	// Create styles for each column
+	var columnStyles [8]lipgloss.Style
+	for i := 0; i < 8; i++ {
+		columnStyles[i] = lipgloss.NewStyle().Foreground(columnColors[i])
+	}
+
 	// Style for ASCII
-	asciiStyle := lipgloss.NewStyle().Foreground(h.theme.SuccessColor)
+	asciiStyle := lipgloss.NewStyle().Foreground(h.theme.Foreground)
 	// Style for offset
 	offsetStyle := lipgloss.NewStyle().Foreground(h.theme.HeaderFg).Bold(true)
 	// Style for selected line
@@ -196,12 +212,20 @@ func (h *HexDumpView) renderContent() string {
 		sb.WriteString("  ")
 
 		// Hex column (16 bytes per line)
-		hexPart := ""
 		asciiPart := ""
 		for i := 0; i < 16; i++ {
 			if offset+i < len(h.data) {
 				b := h.data[offset+i]
-				hexPart += fmt.Sprintf("%02x ", b)
+
+				// Apply color based on column (repeating pattern every 8 bytes)
+				colorIndex := i % 8
+				hexByte := fmt.Sprintf("%02x ", b)
+
+				if isSelected {
+					sb.WriteString(selectedStyle.Render(hexByte))
+				} else {
+					sb.WriteString(columnStyles[colorIndex].Render(hexByte))
+				}
 
 				// ASCII representation
 				if b >= 32 && b <= 126 {
@@ -210,22 +234,20 @@ func (h *HexDumpView) renderContent() string {
 					asciiPart += "."
 				}
 			} else {
-				hexPart += "   "
+				sb.WriteString("   ")
 				asciiPart += " "
 			}
 
 			// Add extra space after 8 bytes for readability
 			if i == 7 {
-				hexPart += " "
+				sb.WriteString(" ")
 			}
 		}
 
 		if isSelected {
-			sb.WriteString(selectedStyle.Render(hexPart))
 			sb.WriteString(" ")
 			sb.WriteString(selectedStyle.Render(asciiPart))
 		} else {
-			sb.WriteString(hexStyle.Render(hexPart))
 			sb.WriteString(" ")
 			sb.WriteString(asciiStyle.Render(asciiPart))
 		}

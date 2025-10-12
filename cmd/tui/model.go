@@ -1062,7 +1062,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.CaptureModeLive:
 			m.interfaceName = msg.Interface
 			m.uiState.Tabs.UpdateTab(0, "Live Capture", "📡")
-			m.uiState.Tabs.SetActive(0) // Switch to Live Capture tab
 			toastCmd = m.uiState.Toast.Show(
 				fmt.Sprintf("Switched to live capture on %s", msg.Interface),
 				components.ToastInfo,
@@ -1071,7 +1070,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.CaptureModeOffline:
 			m.interfaceName = msg.PCAPFile
 			m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
-			m.uiState.Tabs.SetActive(0) // Switch to Offline Capture tab
 			toastCmd = m.uiState.Toast.Show(
 				fmt.Sprintf("Opening %s...", filepath.Base(msg.PCAPFile)),
 				components.ToastInfo,
@@ -1080,7 +1078,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.CaptureModeRemote:
 			m.interfaceName = msg.NodesFile
 			m.uiState.Tabs.UpdateTab(0, "Remote Capture", "🌐")
-			m.uiState.Tabs.SetActive(0) // Switch to Remote Capture tab
 			toastCmd = m.uiState.Toast.Show(
 				"Switched to remote capture mode",
 				components.ToastInfo,
@@ -1972,14 +1969,19 @@ func (m Model) View() string {
 		)
 	}
 
-	// Overlay settings file dialog (for opening PCAP files) if active
+	// Overlay settings file dialogs (for opening PCAP or nodes files) if active
 	if m.uiState.SettingsView.IsFileDialogActive() {
 		// Set full window dimensions for proper centering (not just content area)
-		fileDialog := m.uiState.SettingsView.GetFileDialog()
-		fileDialog.SetSize(m.uiState.Width, m.uiState.Height)
-		fileDialogView := fileDialog.View()
-		// FileDialog uses RenderModal internally which centers it
-		return fileDialogView
+		// Check which dialog is active and render it
+		if m.uiState.SettingsView.GetPcapFileDialog().IsActive() {
+			pcapDialog := m.uiState.SettingsView.GetPcapFileDialog()
+			pcapDialog.SetSize(m.uiState.Width, m.uiState.Height)
+			return pcapDialog.View()
+		} else if m.uiState.SettingsView.GetNodesFileDialog().IsActive() {
+			nodesDialog := m.uiState.SettingsView.GetNodesFileDialog()
+			nodesDialog.SetSize(m.uiState.Width, m.uiState.Height)
+			return nodesDialog.View()
+		}
 	}
 
 	// Overlay file dialog modal (for saving packets) if active

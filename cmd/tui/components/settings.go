@@ -123,7 +123,8 @@ type SettingsView struct {
 	errorMessage         string // Error message to display
 	viewport             viewport.Model
 	viewportReady        bool
-	fileDialog           FileDialog // Generic file dialog for PCAP file selection
+	pcapFileDialog       FileDialog // File dialog for PCAP file selection (offline mode)
+	nodesFileDialog      FileDialog // File dialog for nodes YAML file selection (remote mode)
 	lastClickField       int        // Track which field was last clicked for double-click detection
 	lastClickTime        time.Time  // Track when field was last clicked
 }
@@ -231,14 +232,28 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 	vp := viewport.New(80, 24)
 	vp.Style = lipgloss.NewStyle()
 
-	// Initialize file dialog - start in ./captures if it exists, otherwise current dir
-	startDir := "./captures"
-	if _, err := os.Stat(startDir); os.IsNotExist(err) {
-		startDir, _ = os.Getwd()
+	// Initialize PCAP file dialog - start in ./captures if it exists, otherwise current dir
+	pcapStartDir := "./captures"
+	if _, err := os.Stat(pcapStartDir); os.IsNotExist(err) {
+		pcapStartDir, _ = os.Getwd()
 	}
 
 	// Create file dialog for PCAP file selection (open mode)
-	fileDialog := NewOpenFileDialog(startDir, []string{".pcap", ".pcapng"}, false)
+	pcapFileDialog := NewOpenFileDialog(pcapStartDir, []string{".pcap", ".pcapng"}, false)
+
+	// Initialize nodes file dialog - start in ~/.config/lippycat if it exists, otherwise current dir
+	nodesStartDir, _ := os.UserHomeDir()
+	if nodesStartDir != "" {
+		nodesStartDir = filepath.Join(nodesStartDir, ".config", "lippycat")
+		if _, err := os.Stat(nodesStartDir); os.IsNotExist(err) {
+			nodesStartDir, _ = os.Getwd()
+		}
+	} else {
+		nodesStartDir, _ = os.Getwd()
+	}
+
+	// Create file dialog for nodes YAML file selection (open mode)
+	nodesFileDialog := NewOpenFileDialog(nodesStartDir, []string{".yaml", ".yml"}, false)
 
 	return SettingsView{
 		width:           80,
@@ -255,7 +270,8 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 		errorMessage:    "",
 		viewport:        vp,
 		viewportReady:   false,
-		fileDialog:      fileDialog,
+		pcapFileDialog:  pcapFileDialog,
+		nodesFileDialog: nodesFileDialog,
 	}
 }
 
@@ -265,8 +281,9 @@ func (s *SettingsView) SetTheme(theme themes.Theme) {
 	// Update list delegate with new theme
 	delegate := newInterfaceDelegate(s.selectedIfaces, theme)
 	s.interfaceList.SetDelegate(delegate)
-	// Update file dialog theme
-	s.fileDialog.SetTheme(theme)
+	// Update file dialogs theme
+	s.pcapFileDialog.SetTheme(theme)
+	s.nodesFileDialog.SetTheme(theme)
 }
 
 // SetCaptureMode sets the capture mode
@@ -286,8 +303,9 @@ func (s *SettingsView) SetSize(width, height int) {
 	// Account for border and padding (4 for outer margin, 2 for border, 2 for padding)
 	s.interfaceList.SetSize(width-8, height/3)
 
-	// Update file dialog size
-	s.fileDialog.SetSize(width, height)
+	// Update file dialogs size
+	s.pcapFileDialog.SetSize(width, height)
+	s.nodesFileDialog.SetSize(width, height)
 
 	// Update viewport size
 	s.viewport.Width = width
@@ -501,21 +519,35 @@ func (s *SettingsView) getMaxFocusIndex() int {
 func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
-	// Handle FileSelectedMsg from file dialog
+	// Handle FileSelectedMsg from file dialogs
 	if fileMsg, ok := msg.(FileSelectedMsg); ok {
-		// Store the selected file path
 		fullPath := fileMsg.Path()
-		s.inputs[inputPCAPFile].SetValue(fullPath)
 		s.errorMessage = ""
-		// Switch to offline mode when file is selected
-		s.captureMode = CaptureModeOffline
-		// Trigger restart with the new file
+
+		// Determine which dialog sent this based on current capture mode
+		if s.captureMode == CaptureModeOffline || s.pcapFileDialog.IsActive() {
+			// PCAP file selected - switch to offline mode
+			s.inputs[inputPCAPFile].SetValue(fullPath)
+			s.captureMode = CaptureModeOffline
+		} else if s.captureMode == CaptureModeRemote || s.nodesFileDialog.IsActive() {
+			// Nodes YAML file selected - switch to remote mode
+			s.inputs[inputNodesFile].SetValue(fullPath)
+			s.captureMode = CaptureModeRemote
+		}
+
+		// Trigger restart with the new settings
 		return s.restartCapture()
 	}
 
-	// Route messages to file dialog if active
-	if s.fileDialog.IsActive() {
-		cmd = s.fileDialog.Update(msg)
+	// Route messages to PCAP file dialog if active
+	if s.pcapFileDialog.IsActive() {
+		cmd = s.pcapFileDialog.Update(msg)
+		return cmd
+	}
+
+	// Route messages to nodes file dialog if active
+	if s.nodesFileDialog.IsActive() {
+		cmd = s.nodesFileDialog.Update(msg)
 		return cmd
 	}
 
@@ -763,7 +795,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				case CaptureModeOffline:
 					if clickedField == 1 {
 						// Open file dialog modal for PCAP file selection
-						s.fileDialog.Activate()
+						s.pcapFileDialog.Activate()
 						return nil
 					} else if clickedField == 2 {
 						s.editing = true
@@ -774,16 +806,9 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					}
 				case CaptureModeRemote:
 					if clickedField == 1 {
-						s.editing = true
-						s.errorMessage = ""
-						currentVal := s.inputs[inputNodesFile].Value()
-						if currentVal == "" {
-							s.inputs[inputNodesFile].Placeholder = ""
-						}
-						s.inputs[inputNodesFile].SetValue("")
-						s.inputs[inputNodesFile].SetValue(currentVal)
-						s.inputs[inputNodesFile].SetCursor(len(currentVal))
-						s.inputs[inputNodesFile].Focus()
+						// Open file dialog modal for nodes YAML file selection
+						s.nodesFileDialog.Activate()
+						return nil
 					} else if clickedField == 2 {
 						s.editing = true
 						s.inputs[inputBufferSize].Focus()
@@ -879,39 +904,20 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				}
 			} else if s.captureMode == CaptureModeRemote {
 				// In remote mode: nodes file (1), buffer (2) - no filter
-				if s.focusIndex == 1 || s.focusIndex == 2 {
+				switch s.focusIndex {
+				case 1:
+					// Open file dialog modal for nodes YAML file selection
+					return s.nodesFileDialog.Activate()
+				case 2:
 					s.editing = !s.editing
 					if s.editing {
 						s.errorMessage = "" // Clear error when editing
-						switch s.focusIndex {
-						case 1:
-							// Ensure clean state before focusing
-							currentVal := s.inputs[inputNodesFile].Value()
-							// Temporarily clear placeholder to avoid rendering bug
-							if currentVal == "" {
-								s.inputs[inputNodesFile].Placeholder = ""
-							}
-							s.inputs[inputNodesFile].SetValue("")
-							s.inputs[inputNodesFile].SetValue(currentVal)
-							s.inputs[inputNodesFile].SetCursor(len(currentVal))
-							s.inputs[inputNodesFile].Focus()
-						case 2:
-							s.inputs[inputBufferSize].Focus()
-						}
+						s.inputs[inputBufferSize].Focus()
 					} else {
-						// Exiting edit mode
-						switch s.focusIndex {
-						case 1:
-							// Nodes file changed - trigger restart to load nodes
-							s.inputs[inputNodesFile].Placeholder = "nodes.yaml or ~/.config/lippycat/nodes.yaml"
-							s.inputs[inputNodesFile].Blur()
-							return s.restartCapture()
-						case 2:
-							// Send buffer size update when exiting edit mode
-							s.inputs[inputBufferSize].Blur()
-							return func() tea.Msg {
-								return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
-							}
+						// Send buffer size update when exiting edit mode
+						s.inputs[inputBufferSize].Blur()
+						return func() tea.Msg {
+							return UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 						}
 					}
 					return nil
@@ -921,7 +927,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				switch s.focusIndex {
 				case 1:
 					// Open file dialog modal for PCAP file selection
-					return s.fileDialog.Activate()
+					return s.pcapFileDialog.Activate()
 				case 2, 3:
 					inputIdx := s.focusIndex - 2 // Map to inputBufferSize or inputBPFFilter
 					s.editing = !s.editing
@@ -1225,7 +1231,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 		s.height = windowMsg.Height
 		s.interfaceList.SetWidth(windowMsg.Width - 4)
 		s.interfaceList.SetHeight(windowMsg.Height - 10)
-		s.fileDialog.SetSize(windowMsg.Width, windowMsg.Height)
+		s.pcapFileDialog.SetSize(windowMsg.Width, windowMsg.Height)
+		s.nodesFileDialog.SetSize(windowMsg.Width, windowMsg.Height)
 		s.viewport.Width = windowMsg.Width - 4
 		s.viewport.Height = windowMsg.Height - 10
 	}
@@ -1492,14 +1499,19 @@ func (s *SettingsView) View() string {
 	return content
 }
 
-// IsFileDialogActive returns whether the file dialog is currently shown
+// IsFileDialogActive returns whether any file dialog is currently shown
 func (s *SettingsView) IsFileDialogActive() bool {
-	return s.fileDialog.IsActive()
+	return s.pcapFileDialog.IsActive() || s.nodesFileDialog.IsActive()
 }
 
-// GetFileDialog returns the file dialog for rendering at the top level
-func (s *SettingsView) GetFileDialog() *FileDialog {
-	return &s.fileDialog
+// GetPcapFileDialog returns the PCAP file dialog for rendering at the top level
+func (s *SettingsView) GetPcapFileDialog() *FileDialog {
+	return &s.pcapFileDialog
+}
+
+// GetNodesFileDialog returns the nodes file dialog for rendering at the top level
+func (s *SettingsView) GetNodesFileDialog() *FileDialog {
+	return &s.nodesFileDialog
 }
 
 // scrollToFocusedField adjusts viewport to keep focused field visible

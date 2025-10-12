@@ -2,7 +2,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Currently focused on VoIP (SIP/RTP) analysis with plans for multi-protocol support.
 
-**Status:** v0.2.5 - Early development. Expect breaking changes.
+**Status:** v0.2.6 - Early development. Expect breaking changes.
 
 ## Features
 
@@ -232,6 +232,21 @@ go test ./...
 - Cobra CLI + Bubbletea TUI
 
 ## Changelog
+
+### v0.2.6 (2025-10-12)
+- **Feature**: FileDialog modal component for file/directory operations
+  - Unified file picker for PCAP save and nodes YAML selection
+  - Vim-style navigation with real-time filtering
+  - Inline folder creation and details toggle
+  - Four input modes: Navigation, Filename, Filter, CreateFolder
+- **Feature**: Toast notification system
+  - Non-blocking queue-based notifications
+  - Four types: Success, Error, Info, Warning
+  - Auto-dismiss with configurable durations
+  - Click-to-dismiss functionality
+- **Docs**: Added TUI architecture documentation to CLAUDE.md
+  - FileDialog and Toast design principles
+  - Version management instructions
 
 ### v0.2.5 (2025-10-12)
 - **Feature**: Dynamic filter management with hunter target selection

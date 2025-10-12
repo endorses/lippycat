@@ -13,10 +13,11 @@ import (
 
 // Footer displays the bottom footer bar with keybindings
 type Footer struct {
-	width      int
-	theme      themes.Theme
-	filterMode bool
-	hasFilter  bool
+	width         int
+	theme         themes.Theme
+	filterMode    bool
+	hasFilter     bool
+	streamingSave bool // True when streaming save is active
 }
 
 // NewFooter creates a new footer component
@@ -47,6 +48,11 @@ func (f *Footer) SetFilterMode(active bool) {
 // SetHasFilter sets whether filters are currently applied
 func (f *Footer) SetHasFilter(hasFilter bool) {
 	f.hasFilter = hasFilter
+}
+
+// SetStreamingSave sets whether a streaming save is currently active
+func (f *Footer) SetStreamingSave(active bool) {
+	f.streamingSave = active
 }
 
 // View renders the footer
@@ -80,14 +86,28 @@ func (f *Footer) View() string {
 		// Normal mode keybindings
 		bindings = []string{
 			keyStyle.Render("/") + descStyle.Render(": filter"),
-			keyStyle.Render("w") + descStyle.Render(": save"),
-			keyStyle.Render("n") + descStyle.Render(": add node"),
-			keyStyle.Render("Space") + descStyle.Render(": pause"),
-			keyStyle.Render("x") + descStyle.Render(": flush"),
-			// keyStyle.Render("t") + descStyle.Render(": theme"),  // Commented out for now
-			keyStyle.Render("Alt+1-4") + descStyle.Render(": tabs"),
-			keyStyle.Render("←↓↑→/hjkl") + descStyle.Render(": nav"),
 		}
+
+		// Save keybind changes based on streaming save state
+		if f.streamingSave {
+			// Show "stop save" in red/orange when streaming save is active
+			stopSaveStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#cb4b16")). // Solarized orange
+				Bold(true)
+			bindings = append(bindings, stopSaveStyle.Render("w: stop save"))
+		} else {
+			bindings = append(bindings, keyStyle.Render("w")+descStyle.Render(": save"))
+		}
+
+		// Add remaining bindings
+		bindings = append(bindings,
+			keyStyle.Render("n")+descStyle.Render(": add node"),
+			keyStyle.Render("Space")+descStyle.Render(": pause"),
+			keyStyle.Render("x")+descStyle.Render(": flush"),
+			// keyStyle.Render("t") + descStyle.Render(": theme"),  // Commented out for now
+			keyStyle.Render("Alt+1-4")+descStyle.Render(": tabs"),
+			keyStyle.Render("←↓↑→/hjkl")+descStyle.Render(": nav"),
+		)
 
 		if f.hasFilter {
 			bindings = append(bindings, keyStyle.Render("c")+descStyle.Render(": clear filter"))

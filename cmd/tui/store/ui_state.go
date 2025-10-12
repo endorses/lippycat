@@ -29,6 +29,8 @@ type UIState struct {
 	FilterManager    components.FilterManager
 	FilterInput      components.FilterInput
 	FileDialog       components.FileDialog
+	ConfirmDialog    components.ConfirmDialog
+	Toast            components.Toast
 	Statistics       *components.Statistics
 
 	// UI State
@@ -48,6 +50,10 @@ type UIState struct {
 	LastClickPacket  int
 	LastKeyPress     string    // Track last key for vim-style navigation (gg)
 	LastKeyPressTime time.Time // Timestamp of last key press
+
+	// Save State
+	SaveInProgress bool // One-shot save in progress
+	StreamingSave  bool // Streaming save active
 }
 
 // NewUIState creates a new UI state with default components
@@ -102,15 +108,21 @@ func NewUIState(theme themes.Theme) *UIState {
 	filterInput.SetTheme(theme)
 
 	// Initialize FileDialog for saving PCAP files
-	// Use absolute path to user's home directory
+	// Use current working directory
 	var initialPath string
-	if home, err := os.UserHomeDir(); err == nil {
-		initialPath = home
+	if cwd, err := os.Getwd(); err == nil {
+		initialPath = cwd
 	} else {
 		initialPath = "."
 	}
 	fileDialog := components.NewSaveFileDialog(initialPath, "", []string{".pcap", ".pcapng"})
 	fileDialog.SetTheme(theme)
+
+	toast := components.NewToast()
+	toast.SetTheme(theme)
+
+	confirmDialog := components.NewConfirmDialog()
+	confirmDialog.SetTheme(theme)
 
 	nodesViewPtr := &nodesView
 
@@ -130,6 +142,8 @@ func NewUIState(theme themes.Theme) *UIState {
 		FilterManager:    filterManager,
 		FilterInput:      filterInput,
 		FileDialog:       fileDialog,
+		ConfirmDialog:    confirmDialog,
+		Toast:            toast,
 		Statistics:       nil, // Initialized separately by caller
 		Capturing:        false,
 		Paused:           false,
@@ -164,6 +178,7 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.CallsView.SetTheme(theme)
 	ui.ProtocolSelector.SetTheme(theme)
 	ui.FilterInput.SetTheme(theme)
+	ui.Toast.SetTheme(theme)
 }
 
 // SetSize updates terminal dimensions

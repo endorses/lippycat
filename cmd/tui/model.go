@@ -22,7 +22,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pcap"
 	"github.com/endorses/lippycat/internal/pkg/remotecapture"
+	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
 )
 
@@ -73,6 +75,15 @@ func cleanupProcessorsCmd() tea.Cmd {
 	})
 }
 
+// SaveCompleteMsg is sent when a save operation completes
+type SaveCompleteMsg struct {
+	Success      bool
+	Path         string
+	Error        error
+	PacketsSaved int
+	Streaming    bool // True if this was a streaming save stop
+}
+
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
@@ -87,6 +98,15 @@ type Model struct {
 	bpfFilter     string                 // Current BPF filter
 	captureMode   components.CaptureMode // Current capture mode (live or offline)
 	nodesFilePath string                 // Path to nodes YAML file for remote mode
+
+	// Save state
+	activeWriter    pcap.PcapWriter // Active streaming writer (nil if not saving)
+	savePath        string          // Path being written to (for streaming save)
+	pendingSavePath string          // Path pending confirmation (for overwrite dialog)
+	captureLinkType layers.LinkType // Link type from capture source (for PCAP writing)
+
+	// Test state
+	testToastCycle int // Cycles through toast types for testing
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
@@ -225,37 +245,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Handle toast messages FIRST (even when modals are active)
+	// This ensures toast auto-dismiss timer continues working
+	var toastCmd tea.Cmd
+	if m.uiState.Toast.IsActive() {
+		toastCmd = m.uiState.Toast.Update(msg)
+	}
+
 	// Handle modals BEFORE type switch so they can receive ALL message types
 	// (including internal messages from Init() commands like readDirMsg)
 
 	// Protocol selector modal
 	if m.uiState.ProtocolSelector.IsActive() {
 		cmd := m.uiState.ProtocolSelector.Update(msg)
-		return m, cmd
+		return m, tea.Batch(toastCmd, cmd)
 	}
 
 	// Hunter selector modal
 	if m.uiState.HunterSelector.IsActive() {
 		cmd := m.uiState.HunterSelector.Update(msg)
-		return m, cmd
+		return m, tea.Batch(toastCmd, cmd)
 	}
 
 	// Filter manager modal
 	if m.uiState.FilterManager.IsActive() {
 		cmd := m.uiState.FilterManager.Update(msg)
-		return m, cmd
+		return m, tea.Batch(toastCmd, cmd)
 	}
 
 	// File dialog modal
 	if m.uiState.FileDialog.IsActive() {
 		cmd := m.uiState.FileDialog.Update(msg)
-		return m, cmd
+		return m, tea.Batch(toastCmd, cmd)
+	}
+
+	// Confirm dialog modal
+	if m.uiState.ConfirmDialog.IsActive() {
+		cmd := m.uiState.ConfirmDialog.Update(msg)
+		return m, tea.Batch(toastCmd, cmd)
 	}
 
 	// Add node modal
 	if m.uiState.NodesView.IsModalOpen() {
 		cmd := m.uiState.NodesView.Update(msg)
-		return m, cmd
+		return m, tea.Batch(toastCmd, cmd)
 	}
 
 	switch msg := msg.(type) {
@@ -298,11 +331,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Suspend
 			case " ": // Allow space to pause/resume capture
 				m.uiState.Paused = !m.uiState.Paused
-				// Resume ticking when unpausing
+				// Show toast and resume ticking when unpausing
 				if !m.uiState.Paused {
-					return m, tickCmd()
+					toastCmd := m.uiState.Toast.Show(
+						"Capture resumed",
+						components.ToastSuccess,
+						components.ToastDurationShort,
+					)
+					return m, tea.Batch(toastCmd, tickCmd())
 				}
-				return m, nil
+				// Show toast for pause
+				return m, m.uiState.Toast.Show(
+					"Capture paused",
+					components.ToastInfo,
+					components.ToastDurationShort,
+				)
 			case "t": // Allow theme toggle
 				// For future: add theme cycling logic here
 				// Currently only Solarized theme available
@@ -352,10 +395,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 				m.packetStore.MatchedPackets = m.packetStore.PacketsCount
 				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+
+				// Show toast notification
+				return m, m.uiState.Toast.Show(
+					"Filter cleared",
+					components.ToastInfo,
+					components.ToastDurationShort,
+				)
 			}
 			return m, nil
 
 		case "x": // Clear/flush packets
+			// Store count before clearing
+			packetCount := m.packetStore.PacketsCount
+
 			m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
 			m.packetStore.PacketsHead = 0
 			m.packetStore.PacketsCount = 0
@@ -372,15 +425,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statistics.MinPacketSize = 999999
 			m.statistics.MaxPacketSize = 0
 			m.uiState.StatisticsView.SetStatistics(m.statistics)
-			return m, nil
+
+			// Show toast notification
+			return m, m.uiState.Toast.Show(
+				fmt.Sprintf("Cleared %d packet(s)", packetCount),
+				components.ToastInfo,
+				components.ToastDurationShort,
+			)
 
 		case " ": // Space to pause/resume
 			m.uiState.Paused = !m.uiState.Paused
-			// Resume ticking when unpausing
+			// Show toast and resume ticking when unpausing
 			if !m.uiState.Paused {
-				return m, tickCmd()
+				toastCmd := m.uiState.Toast.Show(
+					"Capture resumed",
+					components.ToastSuccess,
+					components.ToastDurationShort,
+				)
+				return m, tea.Batch(toastCmd, tickCmd())
 			}
-			return m, nil
+			// Show toast for pause
+			return m, m.uiState.Toast.Show(
+				"Capture paused",
+				components.ToastInfo,
+				components.ToastDurationShort,
+			)
 
 		case "d":
 			// Context-sensitive: toggle details on Capture tab, delete node on Nodes tab
@@ -429,13 +498,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "w": // Save packets to file
+		case "w": // Save packets to file (or stop streaming save)
 			// Only on capture tab (tab 0)
 			if m.uiState.Tabs.GetActive() == 0 {
+				// Check if streaming save is active
+				if m.uiState.StreamingSave {
+					// Stop streaming save
+					cmd := m.stopStreamingSave()
+					// Clear streaming save state
+					m.activeWriter = nil
+					m.savePath = ""
+					m.uiState.StreamingSave = false
+					m.uiState.Footer.SetStreamingSave(false) // Update footer hint
+					return m, cmd
+				}
+				// Open file dialog to start new save
 				cmd := m.uiState.FileDialog.Activate()
 				return m, cmd
 			}
 			return m, nil
+
+		case "T": // TEST: Show test toast notification (cycles through types)
+			// Cycle through all toast types: Success -> Error -> Info -> Warning
+			toastTypes := []components.ToastType{
+				components.ToastSuccess,
+				components.ToastError,
+				components.ToastInfo,
+				components.ToastWarning,
+			}
+			typeNames := []string{"Success", "Error", "Info", "Warning"}
+
+			toastType := toastTypes[m.testToastCycle%4]
+			typeName := typeNames[m.testToastCycle%4]
+
+			cmd := m.uiState.Toast.Show(
+				"Test notification - "+typeName+" toast message!",
+				toastType,
+				components.ToastDurationShort,
+			)
+
+			m.testToastCycle++ // Increment for next test
+			return m, cmd
 
 		case "h", "left": // Focus left pane (packet list)
 			if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
@@ -699,6 +802,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.uiState.Tabs.SetWidth(msg.Width)
 		m.uiState.FilterInput.SetWidth(msg.Width)
 		m.uiState.FileDialog.SetSize(msg.Width, msg.Height)
+		m.uiState.ConfirmDialog.SetSize(msg.Width, msg.Height)
+		m.uiState.Toast.SetSize(msg.Width, msg.Height)
 
 		// Calculate available space for main content
 		headerHeight := 2 // header (2 lines: text + border)
@@ -707,8 +812,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		contentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
 
-		// Set nodes view size (nodes tab only needs 2 lines at bottom: hints already part of view + 1 blank + footer)
-		nodesContentHeight := msg.Height - headerHeight - tabsHeight - 2
+		// Set nodes view size (consistent bottom spacing across all tabs)
+		// Hints bar is part of the nodes view content, not bottom area
+		nodesContentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
 		m.uiState.NodesView.SetSize(msg.Width, nodesContentHeight)
 
 		// Set statistics view size
@@ -842,6 +948,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Add packet using PacketStore method
 			m.packetStore.AddPacket(packet)
 
+			// Write to streaming save if active
+			if m.activeWriter != nil {
+				// WritePacket will apply filter internally if configured
+				m.activeWriter.WritePacket(packet)
+			}
+
 			// Update statistics (lightweight)
 			m.updateStatistics(packet)
 
@@ -907,6 +1019,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case components.RestartCaptureMsg:
+		// Stop any active streaming save before switching modes
+		if m.activeWriter != nil {
+			// Close writer synchronously (must complete before mode switch)
+			if err := m.activeWriter.Close(); err != nil {
+				// Log error but continue with mode switch
+				logger.Warn("Failed to close streaming writer during mode switch",
+					"error", err,
+					"path", m.savePath)
+			}
+			// Clear streaming save state
+			m.activeWriter = nil
+			m.savePath = ""
+			m.uiState.StreamingSave = false
+			m.uiState.Footer.SetStreamingSave(false) // Update footer hint
+		}
+
 		// Stop current capture and wait for it to finish
 		if currentCaptureHandle != nil {
 			// Cancel the old capture and wait for completion
@@ -922,17 +1050,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Keep all remote clients connected regardless of mode
 		// Users can switch between modes without losing node connections
 
-		// Update settings based on mode
+		// Update settings based on mode and show toast
+		var toastCmd tea.Cmd
 		switch msg.Mode {
 		case components.CaptureModeLive:
 			m.interfaceName = msg.Interface
 			m.uiState.Tabs.UpdateTab(0, "Live Capture", "📡")
+			toastCmd = m.uiState.Toast.Show(
+				fmt.Sprintf("Switched to live capture on %s", msg.Interface),
+				components.ToastInfo,
+				components.ToastDurationShort,
+			)
 		case components.CaptureModeOffline:
 			m.interfaceName = msg.PCAPFile
 			m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
+			toastCmd = m.uiState.Toast.Show(
+				fmt.Sprintf("Opening %s...", filepath.Base(msg.PCAPFile)),
+				components.ToastInfo,
+				components.ToastDurationShort,
+			)
 		case components.CaptureModeRemote:
 			m.interfaceName = msg.NodesFile
 			m.uiState.Tabs.UpdateTab(0, "Remote Capture", "🌐")
+			toastCmd = m.uiState.Toast.Show(
+				"Switched to remote capture mode",
+				components.ToastInfo,
+				components.ToastDurationShort,
+			)
 		}
 		m.bpfFilter = msg.Filter
 
@@ -985,7 +1129,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Load and connect to nodes from YAML file (if provided)
 				if msg.NodesFile != "" {
 					m.nodesFilePath = msg.NodesFile
-					return m, loadNodesFile(msg.NodesFile)
+					return m, tea.Batch(toastCmd, loadNodesFile(msg.NodesFile))
 				}
 				// If no nodes file, remote mode is active but no nodes connected yet
 				// User can add nodes via Nodes tab
@@ -993,7 +1137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		return m, nil
+		return m, toastCmd
 
 	case components.AddNodeMsg:
 		// User wants to add a remote node
@@ -1013,10 +1157,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					allHunters = append(allHunters, hunters...)
 				}
 				m.uiState.NodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
-			}
-			// Trigger connection attempt
-			return m, func() tea.Msg {
-				return ProcessorReconnectMsg{Address: msg.Address}
+
+				// Trigger connection attempt
+				return m, func() tea.Msg {
+					return ProcessorReconnectMsg{Address: msg.Address}
+				}
+			} else {
+				// Processor already exists - show warning toast
+				return m, m.uiState.Toast.Show(
+					fmt.Sprintf("%s is already connected", msg.Address),
+					components.ToastWarning,
+					components.ToastDurationNormal,
+				)
 			}
 		}
 		return m, nil
@@ -1028,13 +1180,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case NodesLoadedMsg:
+		// Nodes loaded successfully from YAML file
+		return m, m.uiState.Toast.Show(
+			fmt.Sprintf("Loaded %d node(s) from %s", msg.NodeCount, filepath.Base(msg.FilePath)),
+			components.ToastSuccess,
+			components.ToastDurationShort,
+		)
+
+	case NodesLoadFailedMsg:
+		// Failed to load nodes from YAML file
+		return m, m.uiState.Toast.Show(
+			fmt.Sprintf("Failed to load %s: %s", filepath.Base(msg.FilePath), msg.Error.Error()),
+			components.ToastError,
+			components.ToastDurationLong,
+		)
+
 	case components.ProtocolSelectedMsg:
 		// User selected a protocol from the protocol selector
 		m.uiState.SelectedProtocol = msg.Protocol
 
 		// Apply BPF filter if protocol has one
+		var filterErrorCmd tea.Cmd
 		if msg.Protocol.BPFFilter != "" {
-			m.parseAndApplyFilter(msg.Protocol.BPFFilter)
+			filterErrorCmd = m.parseAndApplyFilter(msg.Protocol.BPFFilter)
 		} else {
 			// "All" protocol - clear filters
 			m.packetStore.ClearFilter()
@@ -1050,15 +1219,102 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.ViewMode = "packets"
 		}
 
-		return m, nil
+		// Show toast notification (only if no filter error)
+		if filterErrorCmd != nil {
+			return m, filterErrorCmd
+		}
+
+		var toastMsg string
+		if msg.Protocol.Name == "All" {
+			toastMsg = "Showing all protocols"
+		} else {
+			toastMsg = fmt.Sprintf("Filtering: %s", msg.Protocol.Name)
+		}
+		return m, m.uiState.Toast.Show(
+			toastMsg,
+			components.ToastInfo,
+			components.ToastDurationShort,
+		)
 
 	case components.FileSelectedMsg:
 		// User selected a file path to save packets
-		// TODO: Phase 3 - Implement actual save logic
-		// For now, just log that we received the path(s)
-		_ = msg.Path() // Use Path() method for backwards compatibility
-		// Future: Trigger save action based on capture mode (streaming vs one-shot)
-		// For multiple file selection (open mode), use msg.Paths directly
+		filePath := msg.Path()
+
+		// Check if file exists
+		if _, err := os.Stat(filePath); err == nil {
+			// File exists - show confirmation dialog
+			m.pendingSavePath = filePath
+			cmd := m.uiState.ConfirmDialog.Activate(
+				fmt.Sprintf("File '%s' already exists. Overwrite?", filepath.Base(filePath)),
+			)
+			return m, cmd
+		}
+
+		// File doesn't exist, proceed with save
+		return m, m.proceedWithSave(filePath)
+
+	case components.ConfirmDialogResult:
+		// User responded to file overwrite confirmation
+		if msg.Confirmed && m.pendingSavePath != "" {
+			// User confirmed overwrite, proceed with save
+			filePath := m.pendingSavePath
+			m.pendingSavePath = "" // Clear pending path
+			return m, m.proceedWithSave(filePath)
+		} else {
+			// User cancelled or no pending path
+			m.pendingSavePath = "" // Clear pending path
+			return m, nil
+		}
+
+	case SaveCompleteMsg:
+		// Save operation completed
+		m.uiState.SaveInProgress = false
+
+		// If this was a streaming save completion, update footer
+		if msg.Streaming {
+			m.uiState.Footer.SetStreamingSave(false)
+		}
+
+		if msg.Success {
+			// Show success toast
+			toastMsg := fmt.Sprintf("Saved %d packets to %s", msg.PacketsSaved, filepath.Base(msg.Path))
+			cmd := m.uiState.Toast.Show(
+				toastMsg,
+				components.ToastSuccess,
+				components.ToastDurationLong,
+			)
+			return m, cmd
+		} else {
+			// Show error toast
+			toastMsg := fmt.Sprintf("Failed to save: %s", msg.Error.Error())
+			cmd := m.uiState.Toast.Show(
+				toastMsg,
+				components.ToastError,
+				components.ToastDurationLong,
+			)
+			return m, cmd
+		}
+
+	case components.FilterOperationResultMsg:
+		// Filter operation completed (create/update/delete)
+		if msg.Success {
+			var toastMsg string
+			switch msg.Operation {
+			case "create":
+				toastMsg = fmt.Sprintf("Filter '%s' created", msg.FilterPattern)
+			case "update", "toggle":
+				toastMsg = fmt.Sprintf("Filter '%s' updated", msg.FilterPattern)
+			case "delete":
+				toastMsg = fmt.Sprintf("Filter '%s' deleted", msg.FilterPattern)
+			default:
+				toastMsg = fmt.Sprintf("Filter operation completed")
+			}
+			return m, m.uiState.Toast.Show(
+				toastMsg,
+				components.ToastSuccess,
+				components.ToastDurationShort,
+			)
+		}
 		return m, nil
 
 	case ProcessorReconnectMsg:
@@ -1076,6 +1332,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update state to connecting
 		proc.State = store.ProcessorStateConnecting
 		proc.LastAttempt = time.Now()
+
+		// Show connecting toast (distinguish reconnection from initial connection)
+		var toastMsg string
+		if proc.FailureCount > 0 {
+			toastMsg = fmt.Sprintf("Reconnecting to %s...", msg.Address)
+		} else {
+			toastMsg = fmt.Sprintf("Connecting to %s...", msg.Address)
+		}
+		toastCmd := m.uiState.Toast.Show(
+			toastMsg,
+			components.ToastInfo,
+			components.ToastDurationShort,
+		)
 
 		// Attempt connection in background
 		go func() {
@@ -1126,7 +1395,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}()
 
-		return m, nil
+		return m, toastCmd
 
 	case ProcessorConnectedMsg:
 		// Processor connection established successfully
@@ -1145,6 +1414,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.captureMode == components.CaptureModeRemote {
 				m.uiState.SetCapturing(true)
 			}
+
+			// Show success toast
+			return m, m.uiState.Toast.Show(
+				fmt.Sprintf("Connected to %s", msg.Address),
+				components.ToastSuccess,
+				components.ToastDurationShort,
+			)
 		}
 		return m, nil
 
@@ -1167,6 +1443,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.NodesView.SetProcessors(procInfos)
 
 			// If in remote mode, check if all processors are now disconnected
+			var allDisconnectedToast tea.Cmd
 			if m.captureMode == components.CaptureModeRemote {
 				allDisconnected := true
 				for _, p := range m.connectionMgr.Processors {
@@ -1178,8 +1455,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If all processors are disconnected, mark capturing as inactive
 				if allDisconnected {
 					m.uiState.SetCapturing(false)
+					// Show warning toast for all processors disconnected
+					allDisconnectedToast = m.uiState.Toast.Show(
+						"All processors disconnected",
+						components.ToastWarning,
+						components.ToastDurationNormal,
+					)
 				}
 			}
+
+			// Show error toast
+			toastCmd := m.uiState.Toast.Show(
+				fmt.Sprintf("Disconnected from %s", msg.Address),
+				components.ToastError,
+				components.ToastDurationNormal,
+			)
 
 			// Schedule reconnection with exponential backoff
 			backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 6))) * time.Second
@@ -1187,9 +1477,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				backoff = 60 * time.Second
 			}
 
-			return m, tea.Tick(backoff, func(t time.Time) tea.Msg {
+			reconnectCmd := tea.Tick(backoff, func(t time.Time) tea.Msg {
 				return ProcessorReconnectMsg{Address: msg.Address}
 			})
+
+			// Batch commands (including allDisconnectedToast if set)
+			if allDisconnectedToast != nil {
+				return m, tea.Batch(toastCmd, allDisconnectedToast, reconnectCmd)
+			}
+			return m, tea.Batch(toastCmd, reconnectCmd)
 		}
 		return m, nil
 
@@ -1250,6 +1546,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.executeFilterOperation(msg)
 	}
 
+	// Return toast command if active
+	if toastCmd != nil {
+		return m, toastCmd
+	}
 	return m, nil
 }
 
@@ -1589,17 +1889,29 @@ func (m Model) View() string {
 	}
 	mainView := lipgloss.JoinVertical(lipgloss.Left, mainViews...)
 
-	// Create the bottom area
+	// Create the bottom area (always 4 lines for consistent spacing)
 	var bottomArea string
+
+	// Check if any modal is active (hide toast when modal is open)
+	modalActive := m.uiState.ProtocolSelector.IsActive() ||
+		m.uiState.HunterSelector.IsActive() ||
+		m.uiState.FilterManager.IsActive() ||
+		m.uiState.FileDialog.IsActive() ||
+		m.uiState.ConfirmDialog.IsActive() ||
+		m.uiState.NodesView.IsModalOpen()
+
 	if m.uiState.FilterMode {
 		// Filter (3 lines) + footer (1 line) = 4 lines
 		filterView := m.uiState.FilterInput.View()
 		bottomArea = filterView + "\n" + footerView
-	} else if m.uiState.Tabs.GetActive() == 1 {
-		// Nodes tab: 1 blank line + footer = 2 lines (hints bar is part of mainContent)
-		bottomArea = "\n" + footerView
+	} else if m.uiState.Toast.IsActive() && !modalActive {
+		// Toast notification (3 lines with padding) + footer (1 line) = 4 lines
+		// Hidden when modal is active
+		toastView := m.uiState.Toast.View()
+		bottomArea = toastView + "\n" + footerView
 	} else {
-		// Other tabs: 3 blank lines + footer (1 line) = 4 lines
+		// All tabs: 3 blank lines + footer (1 line) = 4 lines
+		// (Nodes tab hints bar is part of mainContent, not bottomArea)
 		bottomArea = "\n\n\n" + footerView
 	}
 
@@ -1646,6 +1958,13 @@ func (m Model) View() string {
 		fileDialogView := m.uiState.FileDialog.View()
 		// FileDialog uses RenderModal internally which centers it
 		return fileDialogView
+	}
+
+	// Overlay confirm dialog modal if active
+	if m.uiState.ConfirmDialog.IsActive() {
+		confirmDialogView := m.uiState.ConfirmDialog.View()
+		// ConfirmDialog uses RenderModal internally which centers it
+		return confirmDialogView
 	}
 
 	// Overlay add node modal if active
@@ -1710,8 +2029,9 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		// Apply the filter
 		filterValue := m.uiState.FilterInput.Value()
+		var filterCmd tea.Cmd
 		if filterValue != "" {
-			m.parseAndApplyFilter(filterValue)
+			filterCmd = m.parseAndApplyFilter(filterValue)
 			m.uiState.FilterInput.AddToHistory(filterValue)
 			// Save filter history to config
 			saveFilterHistory(&m.uiState.FilterInput)
@@ -1724,7 +2044,7 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.uiState.FilterMode = false
 		m.uiState.FilterInput.Deactivate()
-		return m, nil
+		return m, filterCmd
 
 	case "esc", "ctrl+c":
 		// Cancel filter input
@@ -1784,18 +2104,34 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // parseAndApplyFilter parses a filter string and applies it
-func (m *Model) parseAndApplyFilter(filterStr string) {
+// Returns a tea.Cmd for showing toast notifications on error
+func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 	// Clear existing filters
 	m.packetStore.ClearFilter()
 
 	if filterStr == "" {
-		return
+		return nil
 	}
 
 	// Try to parse as boolean expression first
 	filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
 	if err == nil && filter != nil {
 		m.packetStore.AddFilter(filter)
+	} else if err != nil {
+		// Show error toast for invalid filter
+		toastCmd := m.uiState.Toast.Show(
+			fmt.Sprintf("Invalid filter: %s", err.Error()),
+			components.ToastError,
+			components.ToastDurationLong,
+		)
+
+		// Reapply filters to all packets (will show unfiltered since we cleared)
+		m.applyFilters()
+
+		// Update display
+		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+
+		return toastCmd
 	}
 
 	// Reapply filters to all packets
@@ -1807,6 +2143,8 @@ func (m *Model) parseAndApplyFilter(filterStr string) {
 	} else {
 		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 	}
+
+	return nil
 }
 
 // parseSimpleFilter parses a simple (non-boolean) filter expression
@@ -1923,6 +2261,18 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 	return procInfos
 }
 
+// NodesLoadedMsg is sent when nodes are loaded successfully from YAML
+type NodesLoadedMsg struct {
+	NodeCount int
+	FilePath  string
+}
+
+// NodesLoadFailedMsg is sent when loading nodes from YAML fails
+type NodesLoadFailedMsg struct {
+	Error    error
+	FilePath string
+}
+
 // loadNodesFile loads processors from a YAML file and adds them for connection
 // This is the single consolidated function for loading nodes from YAML
 func loadNodesFile(filePath string) tea.Cmd {
@@ -1930,16 +2280,25 @@ func loadNodesFile(filePath string) tea.Cmd {
 		// Load nodes in background
 		nodes, err := config.LoadNodesFromYAML(filePath)
 		if err != nil {
-			// TODO: Show error in UI
-			return nil
+			return NodesLoadFailedMsg{
+				Error:    err,
+				FilePath: filePath,
+			}
 		}
 
-		// Return a batch of AddNodeMsg for each node
-		cmds := make([]tea.Cmd, len(nodes))
+		// Create AddNodeMsg commands for each node
+		cmds := make([]tea.Cmd, len(nodes)+1) // +1 for success message
 		for i, node := range nodes {
 			addr := node.Address
 			cmds[i] = func() tea.Msg {
 				return components.AddNodeMsg{Address: addr}
+			}
+		}
+		// Add success message
+		cmds[len(nodes)] = func() tea.Msg {
+			return NodesLoadedMsg{
+				NodeCount: len(nodes),
+				FilePath:  filePath,
 			}
 		}
 
@@ -2078,6 +2437,13 @@ func (m *Model) handleDeleteNode() tea.Cmd {
 			// Update NodesView to reflect removal
 			procInfos := m.getProcessorInfoList()
 			m.uiState.NodesView.SetProcessors(procInfos)
+
+			// Show success toast
+			return m.uiState.Toast.Show(
+				fmt.Sprintf("Removed %s", selectedProcessorAddr),
+				components.ToastSuccess,
+				components.ToastDurationShort,
+			)
 		}
 		return nil
 	} else if selectedHunter != nil {
@@ -2119,8 +2485,16 @@ func (m *Model) handleDeleteNode() tea.Cmd {
 			}
 		}
 
+		// Show toast notification
+		toastCmd := m.uiState.Toast.Show(
+			fmt.Sprintf("Unsubscribed from %s", selectedHunter.ID),
+			components.ToastInfo,
+			components.ToastDurationShort,
+		)
+
 		// Reconnect with new subscription list
-		return m.reconnectWithHunterFilter(processorAddr, newHunterIDs)
+		reconnectCmd := m.reconnectWithHunterFilter(processorAddr, newHunterIDs)
+		return tea.Batch(toastCmd, reconnectCmd)
 	}
 	return nil
 }
@@ -2360,8 +2734,24 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 
 // handleHunterSelectionConfirmed handles confirmed hunter selection from modal
 func (m *Model) handleHunterSelectionConfirmed(msg components.HunterSelectionConfirmedMsg) tea.Cmd {
+	// Show toast notification
+	var toastMsg string
+	if len(msg.SelectedHunterIDs) == 0 {
+		toastMsg = "Subscribed to all hunters"
+	} else if len(msg.SelectedHunterIDs) == 1 {
+		toastMsg = "Subscribed to 1 hunter"
+	} else {
+		toastMsg = fmt.Sprintf("Subscribed to %d hunters", len(msg.SelectedHunterIDs))
+	}
+	toastCmd := m.uiState.Toast.Show(
+		toastMsg,
+		components.ToastSuccess,
+		components.ToastDurationShort,
+	)
+
 	// Reconnect with new hunter filter
-	return m.reconnectWithHunterFilter(msg.ProcessorAddr, msg.SelectedHunterIDs)
+	reconnectCmd := m.reconnectWithHunterFilter(msg.ProcessorAddr, msg.SelectedHunterIDs)
+	return tea.Batch(toastCmd, reconnectCmd)
 }
 
 // reconnectWithHunterFilter reconnects to a processor with a new hunter subscription filter
@@ -2459,6 +2849,210 @@ func (m *Model) loadHuntersFromProcessor(processorAddr string) tea.Cmd {
 		return components.HuntersLoadedMsg{
 			ProcessorAddr: processorAddr,
 			Hunters:       items,
+		}
+	}
+}
+
+// determineSaveMode determines whether to use one-shot or streaming save
+func (m *Model) determineSaveMode() string {
+	if m.captureMode == components.CaptureModeOffline {
+		return "oneshot"
+	}
+	if m.uiState.IsPaused() {
+		return "oneshot"
+	}
+	return "streaming"
+}
+
+// proceedWithSave starts the save operation for the given file path
+func (m *Model) proceedWithSave(filePath string) tea.Cmd {
+	// Determine save mode and start save
+	mode := m.determineSaveMode()
+
+	if mode == "oneshot" {
+		// One-shot save (offline or paused)
+		m.uiState.SaveInProgress = true
+		// Show info toast
+		toastCmd := m.uiState.Toast.Show(
+			"Saving packets...",
+			components.ToastInfo,
+			0, // Will be replaced when complete
+		)
+		// Start save
+		saveCmd := m.startOneShotSave(filePath)
+		return tea.Batch(toastCmd, saveCmd)
+	} else {
+		// Streaming save (live/remote)
+		return m.startStreamingSave(filePath)
+	}
+}
+
+// getPacketsToSave returns packets to save based on filter state
+func (m *Model) getPacketsToSave() []components.PacketDisplay {
+	if m.packetStore.HasFilter() {
+		return m.packetStore.GetFilteredPackets()
+	}
+	return m.packetStore.GetPacketsInOrder()
+}
+
+// getFilterFunction returns a filter function for the streaming writer
+func (m *Model) getFilterFunction() func(components.PacketDisplay) bool {
+	if !m.packetStore.HasFilter() {
+		return nil // No filter, save everything
+	}
+
+	// Return filter function that checks if packet matches
+	filterChain := m.packetStore.FilterChain
+	return func(pkt components.PacketDisplay) bool {
+		if filterChain == nil {
+			return true
+		}
+		return filterChain.Match(pkt)
+	}
+}
+
+// startOneShotSave starts a one-shot save operation (offline/paused mode)
+func (m *Model) startOneShotSave(filePath string) tea.Cmd {
+	return func() tea.Msg {
+		// Get packets to save
+		packets := m.getPacketsToSave()
+
+		if len(packets) == 0 {
+			return SaveCompleteMsg{
+				Success: false,
+				Path:    filePath,
+				Error:   fmt.Errorf("no packets to save"),
+			}
+		}
+
+		// Get link type from first packet (default to Ethernet if not set)
+		linkType := layers.LinkTypeEthernet
+		if packets[0].LinkType != 0 {
+			linkType = packets[0].LinkType
+		}
+
+		// Create one-shot writer
+		writer, err := pcap.NewOneShotWriter(pcap.Config{
+			FilePath: filePath,
+			LinkType: linkType,
+			Snaplen:  65536,
+		})
+		if err != nil {
+			return SaveCompleteMsg{
+				Success: false,
+				Path:    filePath,
+				Error:   fmt.Errorf("failed to create writer: %w", err),
+			}
+		}
+
+		// Write all packets
+		for _, pkt := range packets {
+			if err := writer.WritePacket(pkt); err != nil {
+				writer.Close()
+				return SaveCompleteMsg{
+					Success: false,
+					Path:    filePath,
+					Error:   fmt.Errorf("failed to write packet: %w", err),
+				}
+			}
+		}
+
+		// Close and get final count
+		if err := writer.Close(); err != nil {
+			return SaveCompleteMsg{
+				Success: false,
+				Path:    filePath,
+				Error:   fmt.Errorf("failed to close file: %w", err),
+			}
+		}
+
+		return SaveCompleteMsg{
+			Success:      true,
+			Path:         filePath,
+			PacketsSaved: writer.PacketCount(),
+			Streaming:    false,
+		}
+	}
+}
+
+// startStreamingSave starts a streaming save operation (live/remote mode)
+func (m *Model) startStreamingSave(filePath string) tea.Cmd {
+	// Get filter function
+	filterFunc := m.getFilterFunction()
+
+	// Get link type from existing packets (default to Ethernet if not set)
+	linkType := layers.LinkTypeEthernet
+	packets := m.getPacketsToSave()
+	if len(packets) > 0 && packets[0].LinkType != 0 {
+		linkType = packets[0].LinkType
+	}
+
+	// Create streaming writer
+	writer, err := pcap.NewStreamingWriter(pcap.Config{
+		FilePath:     filePath,
+		LinkType:     linkType,
+		Snaplen:      65536,
+		SyncInterval: 5 * time.Second,
+	}, filterFunc)
+
+	if err != nil {
+		// Return error immediately
+		return func() tea.Msg {
+			return SaveCompleteMsg{
+				Success: false,
+				Path:    filePath,
+				Error:   fmt.Errorf("failed to create streaming writer: %w", err),
+			}
+		}
+	}
+
+	// Store writer in model
+	m.activeWriter = writer
+	m.savePath = filePath
+	m.uiState.StreamingSave = true
+	m.uiState.Footer.SetStreamingSave(true) // Update footer hint
+
+	// Write existing packets immediately (reuse packets from link type check)
+	for _, pkt := range packets {
+		writer.WritePacket(pkt)
+	}
+
+	// Show toast notification
+	return m.uiState.Toast.Show(
+		fmt.Sprintf("Recording to %s...", filepath.Base(filePath)),
+		components.ToastInfo,
+		components.ToastDurationNormal, // Show for 3 seconds to notify user streaming has started
+	)
+}
+
+// stopStreamingSave stops the active streaming save
+func (m *Model) stopStreamingSave() tea.Cmd {
+	if m.activeWriter == nil {
+		return nil
+	}
+
+	writer := m.activeWriter
+	path := m.savePath
+
+	// Close writer in goroutine
+	return func() tea.Msg {
+		count := writer.PacketCount()
+		err := writer.Close()
+
+		if err != nil {
+			return SaveCompleteMsg{
+				Success:   false,
+				Path:      path,
+				Error:     fmt.Errorf("failed to close file: %w", err),
+				Streaming: true,
+			}
+		}
+
+		return SaveCompleteMsg{
+			Success:      true,
+			Path:         path,
+			PacketsSaved: count,
+			Streaming:    true,
 		}
 	}
 }

@@ -123,12 +123,9 @@ type SettingsView struct {
 	errorMessage         string // Error message to display
 	viewport             viewport.Model
 	viewportReady        bool
-	fileList             list.Model // File list for PCAP file selection
-	fileListActive       bool
-	currentDirectory     string // Current directory being browsed
-	selectedFile         string
-	lastClickField       int       // Track which field was last clicked for double-click detection
-	lastClickTime        time.Time // Track when field was last clicked
+	fileDialog           FileDialog // Generic file dialog for PCAP file selection
+	lastClickField       int        // Track which field was last clicked for double-click detection
+	lastClickTime        time.Time  // Track when field was last clicked
 }
 
 const (
@@ -138,78 +135,6 @@ const (
 	inputNodesFile // Path to nodes YAML file for remote mode
 	inputCount
 )
-
-// populateFileList creates list items for files/directories in the given path
-func populateFileList(dirPath string) []list.Item {
-	var items []list.Item
-
-	// Add parent directory entry
-	absPath, _ := filepath.Abs(dirPath)
-	parent := filepath.Dir(absPath)
-	if parent != absPath {
-		items = append(items, settingItem{
-			title: "..",
-			desc:  "Parent directory",
-		})
-	}
-
-	// Read directory contents
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return items
-	}
-
-	// Count how many items we'll have
-	dirCount := 0
-	fileCount := 0
-	for _, entry := range entries {
-		if entry.IsDir() {
-			dirCount++
-		} else if strings.HasSuffix(entry.Name(), ".pcap") || strings.HasSuffix(entry.Name(), ".pcapng") {
-			fileCount++
-		}
-	}
-
-	// Pre-allocate the slice (similar to interface list pattern)
-	totalCount := len(items) + dirCount + fileCount
-	result := make([]list.Item, 0, totalCount)
-	result = append(result, items...)
-
-	// Add directories first
-	for _, entry := range entries {
-		if entry.IsDir() {
-			result = append(result, settingItem{
-				title: entry.Name() + "/",
-				desc:  "Directory",
-			})
-		}
-	}
-
-	// Then add .pcap/.pcapng files
-	for _, entry := range entries {
-		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".pcap") || strings.HasSuffix(entry.Name(), ".pcapng")) {
-			// Get file size
-			info, err := entry.Info()
-			sizeDesc := "File"
-			if err == nil {
-				size := info.Size()
-				if size < 1024 {
-					sizeDesc = fmt.Sprintf("%d B", size)
-				} else if size < 1024*1024 {
-					sizeDesc = fmt.Sprintf("%.1f KB", float64(size)/1024)
-				} else {
-					sizeDesc = fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
-				}
-			}
-			result = append(result, settingItem{
-				title: entry.Name(),
-				desc:  sizeDesc,
-			})
-		}
-	}
-
-	return result
-}
 
 // NewSettingsView creates a new settings view component
 func NewSettingsView(currentInterface string, currentBufferSize int, currentPromiscuous bool, currentFilter string, currentPCAPFile string) SettingsView {
@@ -306,41 +231,31 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 	vp := viewport.New(80, 24)
 	vp.Style = lipgloss.NewStyle()
 
-	// Initialize file list - start in ./captures if it exists, otherwise current dir
+	// Initialize file dialog - start in ./captures if it exists, otherwise current dir
 	startDir := "./captures"
 	if _, err := os.Stat(startDir); os.IsNotExist(err) {
 		startDir, _ = os.Getwd()
 	}
-	startDir, _ = filepath.Abs(startDir)
 
-	fileItems := populateFileList(startDir)
-	fileDelegate := list.NewDefaultDelegate()
-	fileList := list.New(fileItems, fileDelegate, 80, 20)
-	fileList.Title = "Select PCAP File"
-	fileList.SetShowStatusBar(false)
-	fileList.SetFilteringEnabled(true)
-	fileList.SetShowFilter(true)
-	fileList.DisableQuitKeybindings()
+	// Create file dialog for PCAP file selection (open mode)
+	fileDialog := NewOpenFileDialog(startDir, []string{".pcap", ".pcapng"}, false)
 
 	return SettingsView{
-		width:            80,
-		height:           24,
-		theme:            themes.Solarized(),
-		interfaceList:    interfaceList,
-		inputs:           inputs,
-		focusIndex:       0,
-		promiscuous:      currentPromiscuous,
-		availableIfaces:  availableIfaces,
-		selectedIfaces:   selectedIfaces,
-		editing:          false,
-		captureMode:      mode,
-		errorMessage:     "",
-		viewport:         vp,
-		viewportReady:    false,
-		fileList:         fileList,
-		fileListActive:   false,
-		currentDirectory: startDir,
-		selectedFile:     currentPCAPFile,
+		width:           80,
+		height:          24,
+		theme:           themes.Solarized(),
+		interfaceList:   interfaceList,
+		inputs:          inputs,
+		focusIndex:      0,
+		promiscuous:     currentPromiscuous,
+		availableIfaces: availableIfaces,
+		selectedIfaces:  selectedIfaces,
+		editing:         false,
+		captureMode:     mode,
+		errorMessage:    "",
+		viewport:        vp,
+		viewportReady:   false,
+		fileDialog:      fileDialog,
 	}
 }
 
@@ -350,6 +265,8 @@ func (s *SettingsView) SetTheme(theme themes.Theme) {
 	// Update list delegate with new theme
 	delegate := newInterfaceDelegate(s.selectedIfaces, theme)
 	s.interfaceList.SetDelegate(delegate)
+	// Update file dialog theme
+	s.fileDialog.SetTheme(theme)
 }
 
 // SetCaptureMode sets the capture mode
@@ -368,7 +285,9 @@ func (s *SettingsView) SetSize(width, height int) {
 	s.height = height
 	// Account for border and padding (4 for outer margin, 2 for border, 2 for padding)
 	s.interfaceList.SetSize(width-8, height/3)
-	s.fileList.SetSize(width-8, height/3)
+
+	// Update file dialog size
+	s.fileDialog.SetSize(width, height)
 
 	// Update viewport size
 	s.viewport.Width = width
@@ -393,10 +312,6 @@ func (s *SettingsView) GetBPFFilter() string {
 
 // GetPCAPFile returns the configured PCAP file path
 func (s *SettingsView) GetPCAPFile() string {
-	// Use selectedFile if it's set (from filepicker), otherwise fall back to text input
-	if s.selectedFile != "" {
-		return s.selectedFile
-	}
 	return s.inputs[inputPCAPFile].Value()
 }
 
@@ -586,61 +501,21 @@ func (s *SettingsView) getMaxFocusIndex() int {
 func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
-	// Handle file list if active (similar to interface list handling)
-	if s.fileListActive {
-		// Handle certain keys ourselves first
-		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			switch keyMsg.String() {
-			case "enter":
-				// Only handle enter for navigation/selection when NOT setting filter
-				if !s.fileList.SettingFilter() {
-					if item, ok := s.fileList.SelectedItem().(settingItem); ok {
-						// Check if it's a directory
-						if strings.HasSuffix(item.title, "/") {
-							// Navigate into directory
-							dirName := strings.TrimSuffix(item.title, "/")
-							s.currentDirectory = filepath.Join(s.currentDirectory, dirName)
-							items := populateFileList(s.currentDirectory)
-							s.fileList.SetItems(items)
-							s.fileList.Select(0)
-							// Update title to show current path
-							s.fileList.Title = "Select PCAP File: " + s.currentDirectory
-							return nil
-						} else if item.title == ".." {
-							// Navigate to parent directory
-							s.currentDirectory = filepath.Dir(s.currentDirectory)
-							items := populateFileList(s.currentDirectory)
-							s.fileList.SetItems(items)
-							s.fileList.Select(0)
-							// Update title to show current path
-							s.fileList.Title = "Select PCAP File: " + s.currentDirectory
-							return nil
-						} else {
-							// Select the file
-							fullPath := filepath.Join(s.currentDirectory, item.title)
-							s.selectedFile = fullPath
-							s.fileListActive = false
-							s.editing = false
-							s.inputs[inputPCAPFile].SetValue(item.title) // Just filename in input
-							return s.restartCapture()
-						}
-					}
-				}
-			case "esc":
-				// First ESC clears filter, second ESC exits
-				// Pass ESC to list first to see if it handles it (clearing filter)
-				s.fileList, cmd = s.fileList.Update(msg)
+	// Handle FileSelectedMsg from file dialog
+	if fileMsg, ok := msg.(FileSelectedMsg); ok {
+		// Store the selected file path
+		fullPath := fileMsg.Path()
+		s.inputs[inputPCAPFile].SetValue(fullPath)
+		s.errorMessage = ""
+		// Switch to offline mode when file is selected
+		s.captureMode = CaptureModeOffline
+		// Trigger restart with the new file
+		return s.restartCapture()
+	}
 
-				// Check if list is still filtering - if not, we can exit
-				if !s.fileList.SettingFilter() && !s.fileList.IsFiltered() {
-					s.fileListActive = false
-					s.editing = false
-				}
-				return cmd
-			}
-		}
-		// Pass all other messages to the list (needed for filtering to work)
-		s.fileList, cmd = s.fileList.Update(msg)
+	// Route messages to file dialog if active
+	if s.fileDialog.IsActive() {
+		cmd = s.fileDialog.Update(msg)
 		return cmd
 	}
 
@@ -741,7 +616,6 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				// If clicking on a different field (not empty space), exit edit mode
 				if clickedField >= 0 && clickedField != s.focusIndex {
 					s.editing = false
-					s.fileListActive = false
 					s.inputs[inputBufferSize].Blur()
 					s.inputs[inputBPFFilter].Blur()
 					s.inputs[inputPCAPFile].Blur()
@@ -888,10 +762,9 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					}
 				case CaptureModeOffline:
 					if clickedField == 1 {
-						s.editing = true
-						s.fileListActive = true
-						s.errorMessage = ""
-						s.fileList.Title = "Select PCAP File: " + s.currentDirectory
+						// Open file dialog modal for PCAP file selection
+						s.fileDialog.Activate()
+						return nil
 					} else if clickedField == 2 {
 						s.editing = true
 						s.inputs[inputBufferSize].Focus()
@@ -1047,20 +920,8 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				// In offline mode: pcap file (1), buffer (2), filter (3)
 				switch s.focusIndex {
 				case 1:
-					if !s.editing {
-						// Show file list when entering edit mode
-						s.editing = true
-						s.fileListActive = true
-						s.errorMessage = ""
-						// Update title to show current directory
-						s.fileList.Title = "Select PCAP File: " + s.currentDirectory
-						return nil
-					} else {
-						// Exit editing
-						s.editing = false
-						s.fileListActive = false
-						s.inputs[inputPCAPFile].Blur()
-					}
+					// Open file dialog modal for PCAP file selection
+					return s.fileDialog.Activate()
 				case 2, 3:
 					inputIdx := s.focusIndex - 2 // Map to inputBufferSize or inputBPFFilter
 					s.editing = !s.editing
@@ -1364,8 +1225,7 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 		s.height = windowMsg.Height
 		s.interfaceList.SetWidth(windowMsg.Width - 4)
 		s.interfaceList.SetHeight(windowMsg.Height - 10)
-		s.fileList.SetWidth(windowMsg.Width - 4)
-		s.fileList.SetHeight(windowMsg.Height - 6) // More space for file list
+		s.fileDialog.SetSize(windowMsg.Width, windowMsg.Height)
 		s.viewport.Width = windowMsg.Width - 4
 		s.viewport.Height = windowMsg.Height - 10
 	}
@@ -1506,29 +1366,14 @@ func (s *SettingsView) View() string {
 			}
 		}
 
-		// Show file list if active, otherwise show file path
-		if s.fileListActive {
-			// Calculate available height for file list
-			// Reserve space for: title (3), mode selector (3), buffer size (3), filter (3), footer (2) = ~14 lines
-			availableHeight := s.height - 14
-			if availableHeight < 5 {
-				availableHeight = 5 // Minimum height
-			}
-			if availableHeight > 20 {
-				availableHeight = 20 // Maximum height
-			}
-			s.fileList.SetHeight(availableHeight)
-			sections = append(sections, editingStyle.Width(s.width-4).Render(s.fileList.View()))
-		} else {
-			// Show just the filename if a file is selected, otherwise show the input
-			displayValue := s.inputs[inputPCAPFile].Value()
-			if displayValue == "" && s.selectedFile != "" {
-				displayValue = filepath.Base(s.selectedFile)
-			}
-			sections = append(sections, fileStyle.Width(s.width-4).Render(
-				labelStyle.Render("PCAP File:")+" "+displayValue,
-			))
+		// Show file path (file dialog opens as modal on Enter/double-click)
+		displayValue := s.inputs[inputPCAPFile].Value()
+		if displayValue == "" {
+			displayValue = "Click or press Enter to select file..."
 		}
+		sections = append(sections, fileStyle.Width(s.width-4).Render(
+			labelStyle.Render("PCAP File:")+" "+displayValue,
+		))
 	} else if s.captureMode == CaptureModeRemote {
 		// Nodes File input
 		fileStyle := unfocusedStyle
@@ -1645,6 +1490,16 @@ func (s *SettingsView) View() string {
 	}
 
 	return content
+}
+
+// IsFileDialogActive returns whether the file dialog is currently shown
+func (s *SettingsView) IsFileDialogActive() bool {
+	return s.fileDialog.IsActive()
+}
+
+// GetFileDialog returns the file dialog for rendering at the top level
+func (s *SettingsView) GetFileDialog() *FileDialog {
+	return &s.fileDialog
 }
 
 // scrollToFocusedField adjusts viewport to keep focused field visible

@@ -273,7 +273,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(toastCmd, cmd)
 	}
 
-	// File dialog modal
+	// Settings file dialog modal (for opening PCAP files)
+	if m.uiState.SettingsView.IsFileDialogActive() {
+		cmd := m.uiState.SettingsView.Update(msg)
+		return m, tea.Batch(toastCmd, cmd)
+	}
+
+	// File dialog modal (for saving packets)
 	if m.uiState.FileDialog.IsActive() {
 		cmd := m.uiState.FileDialog.Update(msg)
 		return m, tea.Batch(toastCmd, cmd)
@@ -1056,6 +1062,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.CaptureModeLive:
 			m.interfaceName = msg.Interface
 			m.uiState.Tabs.UpdateTab(0, "Live Capture", "📡")
+			m.uiState.Tabs.SetActive(0) // Switch to Live Capture tab
 			toastCmd = m.uiState.Toast.Show(
 				fmt.Sprintf("Switched to live capture on %s", msg.Interface),
 				components.ToastInfo,
@@ -1064,6 +1071,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.CaptureModeOffline:
 			m.interfaceName = msg.PCAPFile
 			m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
+			m.uiState.Tabs.SetActive(0) // Switch to Offline Capture tab
 			toastCmd = m.uiState.Toast.Show(
 				fmt.Sprintf("Opening %s...", filepath.Base(msg.PCAPFile)),
 				components.ToastInfo,
@@ -1072,6 +1080,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case components.CaptureModeRemote:
 			m.interfaceName = msg.NodesFile
 			m.uiState.Tabs.UpdateTab(0, "Remote Capture", "🌐")
+			m.uiState.Tabs.SetActive(0) // Switch to Remote Capture tab
 			toastCmd = m.uiState.Toast.Show(
 				"Switched to remote capture mode",
 				components.ToastInfo,
@@ -1237,7 +1246,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case components.FileSelectedMsg:
-		// User selected a file path to save packets
+		// Check if this is from Settings tab (opening file for reading)
+		// vs from save dialog (writing file)
+		if m.uiState.Tabs.GetActive() == 3 {
+			// Settings tab - this is for opening a PCAP file to read
+			// Forward the message to Settings view to handle it
+			cmd := m.uiState.SettingsView.Update(msg)
+			return m, cmd
+		}
+
+		// Otherwise, this is from save dialog - user wants to save packets
 		filePath := msg.Path()
 
 		// Check if file exists
@@ -1896,6 +1914,7 @@ func (m Model) View() string {
 	modalActive := m.uiState.ProtocolSelector.IsActive() ||
 		m.uiState.HunterSelector.IsActive() ||
 		m.uiState.FilterManager.IsActive() ||
+		m.uiState.SettingsView.IsFileDialogActive() ||
 		m.uiState.FileDialog.IsActive() ||
 		m.uiState.ConfirmDialog.IsActive() ||
 		m.uiState.NodesView.IsModalOpen()
@@ -1953,7 +1972,17 @@ func (m Model) View() string {
 		)
 	}
 
-	// Overlay file dialog modal if active
+	// Overlay settings file dialog (for opening PCAP files) if active
+	if m.uiState.SettingsView.IsFileDialogActive() {
+		// Set full window dimensions for proper centering (not just content area)
+		fileDialog := m.uiState.SettingsView.GetFileDialog()
+		fileDialog.SetSize(m.uiState.Width, m.uiState.Height)
+		fileDialogView := fileDialog.View()
+		// FileDialog uses RenderModal internally which centers it
+		return fileDialogView
+	}
+
+	// Overlay file dialog modal (for saving packets) if active
 	if m.uiState.FileDialog.IsActive() {
 		fileDialogView := m.uiState.FileDialog.View()
 		// FileDialog uses RenderModal internally which centers it

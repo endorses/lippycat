@@ -254,11 +254,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpcap-dev
 
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.5.0
+
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: v2.5.0
-          args: --timeout=5m --build-tags=all
+        run: golangci-lint run --timeout=5m --build-tags=all
 
       - name: Check go fmt
         run: |

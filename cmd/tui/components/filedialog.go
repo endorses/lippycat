@@ -844,14 +844,8 @@ func (fd *FileDialog) renderFileList() string {
 
 	var listBuilder strings.Builder
 
-	// Calculate visible range
-	start := fd.viewOffset
-	end := fd.viewOffset + fd.listHeight
-	if end > len(fd.filteredFiles) {
-		end = len(fd.filteredFiles)
-	}
-
 	// Render visible entries (always render exactly fd.listHeight lines for fixed height)
+	start := fd.viewOffset
 	for i := start; i < start+fd.listHeight; i++ {
 		// Check if we have an entry to display
 		if i >= len(fd.filteredFiles) {

@@ -2,6 +2,7 @@ package capture
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -256,7 +257,7 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			pktInfo := PacketInfo{
 				LinkType:  handle.LinkType(),
 				Packet:    packet,
-				Interface: iface.Name(),
+				Interface: filepath.Base(iface.Name()), // Use basename for display (removes path for PCAP files)
 			}
 			buffer.Send(pktInfo)
 

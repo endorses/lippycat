@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ type UIState struct {
 	HunterSelector   components.HunterSelector
 	FilterManager    components.FilterManager
 	FilterInput      components.FilterInput
+	FileDialog       components.FileDialog
 	Statistics       *components.Statistics
 
 	// UI State
@@ -99,6 +101,17 @@ func NewUIState(theme themes.Theme) *UIState {
 	filterInput := components.NewFilterInput("/")
 	filterInput.SetTheme(theme)
 
+	// Initialize FileDialog for saving PCAP files
+	// Use absolute path to user's home directory
+	var initialPath string
+	if home, err := os.UserHomeDir(); err == nil {
+		initialPath = home
+	} else {
+		initialPath = "."
+	}
+	fileDialog := components.NewSaveFileDialog(initialPath, "", []string{".pcap", ".pcapng"})
+	fileDialog.SetTheme(theme)
+
 	nodesViewPtr := &nodesView
 
 	return &UIState{
@@ -116,6 +129,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		HunterSelector:   hunterSelector,
 		FilterManager:    filterManager,
 		FilterInput:      filterInput,
+		FileDialog:       fileDialog,
 		Statistics:       nil, // Initialized separately by caller
 		Capturing:        false,
 		Paused:           false,

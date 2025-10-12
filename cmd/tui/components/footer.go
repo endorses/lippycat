@@ -80,6 +80,7 @@ func (f *Footer) View() string {
 		// Normal mode keybindings
 		bindings = []string{
 			keyStyle.Render("/") + descStyle.Render(": filter"),
+			keyStyle.Render("w") + descStyle.Render(": save"),
 			keyStyle.Render("n") + descStyle.Render(": add node"),
 			keyStyle.Render("Space") + descStyle.Render(": pause"),
 			keyStyle.Render("x") + descStyle.Render(": flush"),

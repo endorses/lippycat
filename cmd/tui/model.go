@@ -225,34 +225,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Handle modals BEFORE type switch so they can receive ALL message types
+	// (including internal messages from Init() commands like readDirMsg)
+
+	// Protocol selector modal
+	if m.uiState.ProtocolSelector.IsActive() {
+		cmd := m.uiState.ProtocolSelector.Update(msg)
+		return m, cmd
+	}
+
+	// Hunter selector modal
+	if m.uiState.HunterSelector.IsActive() {
+		cmd := m.uiState.HunterSelector.Update(msg)
+		return m, cmd
+	}
+
+	// Filter manager modal
+	if m.uiState.FilterManager.IsActive() {
+		cmd := m.uiState.FilterManager.Update(msg)
+		return m, cmd
+	}
+
+	// File dialog modal
+	if m.uiState.FileDialog.IsActive() {
+		cmd := m.uiState.FileDialog.Update(msg)
+		return m, cmd
+	}
+
+	// Add node modal
+	if m.uiState.NodesView.IsModalOpen() {
+		cmd := m.uiState.NodesView.Update(msg)
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
 	case tea.KeyMsg:
-		// Handle protocol selector mode
-		if m.uiState.ProtocolSelector.IsActive() {
-			cmd := m.uiState.ProtocolSelector.Update(msg)
-			return m, cmd
-		}
-
-		// Handle hunter selector modal
-		if m.uiState.HunterSelector.IsActive() {
-			cmd := m.uiState.HunterSelector.Update(msg)
-			return m, cmd
-		}
-
-		// Handle filter manager modal
-		if m.uiState.FilterManager.IsActive() {
-			cmd := m.uiState.FilterManager.Update(msg)
-			return m, cmd
-		}
-
-		// Handle add node modal (highest priority after protocol selector)
-		if m.uiState.NodesView.IsModalOpen() {
-			cmd := m.uiState.NodesView.Update(msg)
-			return m, cmd
-		}
 
 		// Handle filter input mode
 		if m.uiState.FilterMode {
@@ -416,6 +426,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.uiState.Tabs.GetActive() == 1 {
 				// On nodes tab: toggle between table and graph view
 				m.uiState.NodesView.ToggleView()
+			}
+			return m, nil
+
+		case "w": // Save packets to file
+			// Only on capture tab (tab 0)
+			if m.uiState.Tabs.GetActive() == 0 {
+				cmd := m.uiState.FileDialog.Activate()
+				return m, cmd
 			}
 			return m, nil
 
@@ -680,6 +698,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.uiState.Footer.SetWidth(msg.Width)
 		m.uiState.Tabs.SetWidth(msg.Width)
 		m.uiState.FilterInput.SetWidth(msg.Width)
+		m.uiState.FileDialog.SetSize(msg.Width, msg.Height)
 
 		// Calculate available space for main content
 		headerHeight := 2 // header (2 lines: text + border)
@@ -1031,6 +1050,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.ViewMode = "packets"
 		}
 
+		return m, nil
+
+	case components.FileSelectedMsg:
+		// User selected a file path to save packets
+		// TODO: Phase 3 - Implement actual save logic
+		// For now, just log that we received the path(s)
+		_ = msg.Path() // Use Path() method for backwards compatibility
+		// Future: Trigger save action based on capture mode (streaming vs one-shot)
+		// For multiple file selection (open mode), use msg.Paths directly
 		return m, nil
 
 	case ProcessorReconnectMsg:
@@ -1611,6 +1639,13 @@ func (m Model) View() string {
 			lipgloss.Center, lipgloss.Center,
 			filterManagerView,
 		)
+	}
+
+	// Overlay file dialog modal if active
+	if m.uiState.FileDialog.IsActive() {
+		fileDialogView := m.uiState.FileDialog.View()
+		// FileDialog uses RenderModal internally which centers it
+		return fileDialogView
 	}
 
 	// Overlay add node modal if active

@@ -154,8 +154,8 @@ func (n *NodesView) SetSize(width, height int) {
 	n.width = width
 	n.height = height
 
-	// Viewport takes full height
-	viewportHeight := height
+	// Reserve 1 line for hints, rest for viewport
+	viewportHeight := height - 1
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -871,13 +871,47 @@ func (n *NodesView) renderContent() string {
 	if len(n.processors) == 0 && len(n.hunters) == 0 {
 		// Empty state - no processors and no hunters
 		emptyStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
-			Align(lipgloss.Center)
+			Foreground(lipgloss.Color("240"))
 
-		b.WriteString(emptyStyle.Render("No nodes connected") + "\n\n")
-		b.WriteString(emptyStyle.Render("Press 'n' to add a node") + "\n\n")
-		b.WriteString(emptyStyle.Render("Or start a hunter with:") + "\n")
-		b.WriteString(emptyStyle.Render("  lippycat hunt --processor <processor-addr>") + "\n")
+		// Create content block
+		var emptyContent strings.Builder
+		emptyContent.WriteString("No nodes connected\n\n")
+		emptyContent.WriteString("Press 'n' to add a node\n\n")
+		emptyContent.WriteString("Or start a hunter with:\n")
+		emptyContent.WriteString("  lippycat hunt --processor <processor-addr>")
+
+		content := emptyContent.String()
+
+		// Center the content block vertically and horizontally like graph view
+		lines := strings.Split(content, "\n")
+
+		// Calculate vertical centering
+		contentHeight := len(lines)
+		viewportHeight := n.viewport.Height
+		verticalPadding := (viewportHeight - contentHeight) / 2
+		if verticalPadding < 0 {
+			verticalPadding = 0
+		}
+
+		// Add vertical padding
+		for i := 0; i < verticalPadding; i++ {
+			b.WriteString("\n")
+		}
+
+		// Render each line centered horizontally
+		for _, line := range lines {
+			if line != "" {
+				lineWidth := len(line)
+				centerPos := (n.width - lineWidth) / 2
+				if centerPos < 0 {
+					centerPos = 0
+				}
+				b.WriteString(strings.Repeat(" ", centerPos))
+				b.WriteString(emptyStyle.Render(line))
+			}
+			b.WriteString("\n")
+		}
+
 		return b.String()
 	}
 
@@ -1960,8 +1994,28 @@ func (n *NodesView) View() string {
 		return ""
 	}
 
-	// Render main viewport content (modal is rendered at top level)
-	return n.viewport.View()
+	// Render hints bar
+	hintsStyle := lipgloss.NewStyle().
+		Foreground(n.theme.StatusBarFg).
+		Padding(0, 1)
+
+	keyStyle := lipgloss.NewStyle().
+		Foreground(n.theme.InfoColor).
+		Bold(true)
+
+	hints := fmt.Sprintf("%s %s  %s %s  %s %s",
+		keyStyle.Render("v:"),
+		"view",
+		keyStyle.Render("f:"),
+		"filters",
+		keyStyle.Render("s:"),
+		"hunters",
+	)
+
+	hintsBar := hintsStyle.Render(hints)
+
+	// Combine viewport and hints
+	return n.viewport.View() + "\n" + hintsBar
 }
 
 // RenderModal renders the add node modal if it's open (for top-level overlay)

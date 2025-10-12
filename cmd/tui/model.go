@@ -688,8 +688,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		contentHeight := msg.Height - headerHeight - tabsHeight - bottomHeight
 
-		// Set nodes view size
-		m.uiState.NodesView.SetSize(msg.Width, contentHeight)
+		// Set nodes view size (nodes tab only needs 2 lines at bottom: hints already part of view + 1 blank + footer)
+		nodesContentHeight := msg.Height - headerHeight - tabsHeight - 2
+		m.uiState.NodesView.SetSize(msg.Width, nodesContentHeight)
 
 		// Set statistics view size
 		m.uiState.StatisticsView.SetSize(msg.Width, contentHeight)
@@ -1560,14 +1561,17 @@ func (m Model) View() string {
 	}
 	mainView := lipgloss.JoinVertical(lipgloss.Left, mainViews...)
 
-	// Create the bottom area - always 4 lines total
+	// Create the bottom area
 	var bottomArea string
 	if m.uiState.FilterMode {
 		// Filter (3 lines) + footer (1 line) = 4 lines
 		filterView := m.uiState.FilterInput.View()
 		bottomArea = filterView + "\n" + footerView
+	} else if m.uiState.Tabs.GetActive() == 1 {
+		// Nodes tab: 1 blank line + footer = 2 lines (hints bar is part of mainContent)
+		bottomArea = "\n" + footerView
 	} else {
-		// 3 blank lines + footer (1 line) = 4 lines
+		// Other tabs: 3 blank lines + footer (1 line) = 4 lines
 		bottomArea = "\n\n\n" + footerView
 	}
 

@@ -28,9 +28,10 @@ const (
 type FileDialogInputMode int
 
 const (
-	ModeNavigation FileDialogInputMode = iota // Navigating directories
-	ModeFilename                              // Editing filename
-	ModeFilter                                // Filtering files
+	ModeNavigation   FileDialogInputMode = iota // Navigating directories
+	ModeFilename                                // Editing filename
+	ModeFilter                                  // Filtering files
+	ModeCreateFolder                            // Creating new folder
 )
 
 // FileDialogConfig holds configuration for the file dialog
@@ -49,6 +50,7 @@ type FileDialog struct {
 	config       FileDialogConfig
 	filename     textinput.Model
 	filterInput  textinput.Model
+	folderInput  textinput.Model
 	mode         FileDialogInputMode
 	theme        themes.Theme
 	width        int
@@ -146,11 +148,18 @@ func NewFileDialog(config FileDialogConfig) FileDialog {
 	filterInput.CharLimit = 100
 	filterInput.Width = 50
 
+	// Create folder input
+	folderInput := textinput.New()
+	folderInput.Placeholder = "New folder name..."
+	folderInput.CharLimit = 255
+	folderInput.Width = 50
+
 	return FileDialog{
 		active:        false,
 		config:        config,
 		filename:      filenameInput,
 		filterInput:   filterInput,
+		folderInput:   folderInput,
 		mode:          ModeNavigation,
 		theme:         themes.Solarized(),
 		currentDir:    initialPath,
@@ -301,6 +310,10 @@ func (fd *FileDialog) Activate() tea.Cmd {
 	fd.filterInput.SetValue("")
 	fd.filterInput.Blur()
 
+	// Clear folder input
+	fd.folderInput.SetValue("")
+	fd.folderInput.Blur()
+
 	// Read the directory
 	fd.readDirectory()
 
@@ -312,6 +325,7 @@ func (fd *FileDialog) Deactivate() {
 	fd.active = false
 	fd.filename.Blur()
 	fd.filterInput.Blur()
+	fd.folderInput.Blur()
 }
 
 // Navigation methods
@@ -441,6 +455,10 @@ func (fd *FileDialog) Update(msg tea.Msg) tea.Cmd {
 		// Filename editing mode (save mode only)
 		return fd.handleFilenameMode(msg)
 
+	case ModeCreateFolder:
+		// Create folder mode
+		return fd.handleCreateFolderMode(msg)
+
 	case ModeNavigation:
 		// Navigation mode
 		return fd.handleNavigationMode(msg)
@@ -460,6 +478,17 @@ func (fd *FileDialog) handleFilterMode(msg tea.Msg) tea.Cmd {
 			// Clear filter if it's empty
 			if fd.filterInput.Value() == "" {
 				fd.applyFilters()
+			}
+			return nil
+
+		case "tab":
+			// Exit filter mode and focus filename input (save mode only)
+			fd.filterInput.Blur()
+			if fd.config.Type == FileDialogTypeSave {
+				fd.mode = ModeFilename
+				fd.filename.Focus()
+			} else {
+				fd.mode = ModeNavigation
 			}
 			return nil
 
@@ -555,6 +584,68 @@ func (fd *FileDialog) handleFilenameMode(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
+// handleCreateFolderMode handles messages in folder creation mode
+func (fd *FileDialog) handleCreateFolderMode(msg tea.Msg) tea.Cmd {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			// Cancel folder creation
+			fd.mode = ModeNavigation
+			fd.folderInput.Blur()
+			fd.errorMessage = ""
+			return nil
+
+		case "enter":
+			// Create the folder
+			folderName := strings.TrimSpace(fd.folderInput.Value())
+
+			// Validate folder name
+			if folderName == "" {
+				fd.errorMessage = "Folder name cannot be empty"
+				return nil
+			}
+
+			// Check for invalid characters
+			invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+			for _, char := range invalidChars {
+				if strings.Contains(folderName, char) {
+					fd.errorMessage = fmt.Sprintf("Folder name contains invalid character: %s", char)
+					return nil
+				}
+			}
+
+			// Create the folder
+			newPath := filepath.Join(fd.currentDir, folderName)
+			if err := os.MkdirAll(newPath, 0755); err != nil {
+				fd.errorMessage = fmt.Sprintf("Failed to create folder: %s", err.Error())
+				return nil
+			}
+
+			// Success - return to navigation mode and refresh directory
+			fd.mode = ModeNavigation
+			fd.folderInput.Blur()
+			fd.errorMessage = ""
+			fd.readDirectory()
+
+			// Move cursor to the newly created folder
+			for i, entry := range fd.filteredFiles {
+				if entry.Name() == folderName {
+					fd.cursor = i
+					fd.adjustViewOffset()
+					break
+				}
+			}
+
+			return nil
+		}
+	}
+
+	// Update folder input
+	var cmd tea.Cmd
+	fd.folderInput, cmd = fd.folderInput.Update(msg)
+	return cmd
+}
+
 // handleNavigationMode handles messages in navigation mode
 func (fd *FileDialog) handleNavigationMode(msg tea.Msg) tea.Cmd {
 	if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -568,6 +659,13 @@ func (fd *FileDialog) handleNavigationMode(msg tea.Msg) tea.Cmd {
 			// Enter filter mode
 			fd.mode = ModeFilter
 			fd.filterInput.Focus()
+			return nil
+
+		case "n":
+			// Enter create folder mode
+			fd.mode = ModeCreateFolder
+			fd.folderInput.SetValue("")
+			fd.folderInput.Focus()
 			return nil
 
 		case "d":
@@ -659,6 +757,19 @@ func (fd *FileDialog) View() string {
 
 		content.WriteString(labelStyle.Render("Filter: "))
 		content.WriteString(inputStyle.Render(fd.filterInput.View()))
+		content.WriteString("\n")
+	}
+
+	// Folder input (if in create folder mode)
+	if fd.mode == ModeCreateFolder {
+		labelStyle := lipgloss.NewStyle().
+			Foreground(fd.theme.Foreground).
+			Bold(true)
+		inputStyle := lipgloss.NewStyle().
+			Foreground(fd.theme.Foreground)
+
+		content.WriteString(labelStyle.Render("New folder: "))
+		content.WriteString(inputStyle.Render(fd.folderInput.View()))
 		content.WriteString("\n")
 	}
 
@@ -846,16 +957,22 @@ func formatSize(size int64) string {
 func (fd *FileDialog) getFooter() string {
 	switch fd.mode {
 	case ModeFilter:
+		if fd.config.Type == FileDialogTypeSave {
+			return "↑/↓: Navigate | ←/→: Change Dir | Tab: Edit Filename | Enter: Apply | Esc: Cancel"
+		}
 		return "↑/↓: Navigate | ←/→: Change Dir | Enter: Apply | Esc: Cancel"
 
 	case ModeFilename:
 		return "Enter: Save | Tab/Esc: Cancel"
 
+	case ModeCreateFolder:
+		return "Enter: Create Folder | Esc: Cancel"
+
 	case ModeNavigation:
 		if fd.config.Type == FileDialogTypeSave {
-			return "↑/↓/hjkl: Navigate | Enter: Open Dir | /: Filter | d: Toggle Details | Tab: Edit Filename | q/Esc: Cancel"
+			return "↑/↓/hjkl: Navigate | Enter: Open Dir | /: Filter | n: New Folder | d: Toggle Details | Tab: Edit Filename | q/Esc: Cancel"
 		}
-		return "↑/↓/hjkl: Navigate | Enter: Select | /: Filter | d: Toggle Details | q/Esc: Cancel"
+		return "↑/↓/hjkl: Navigate | Enter: Select | /: Filter | n: New Folder | d: Toggle Details | q/Esc: Cancel"
 	}
 
 	return ""

@@ -105,8 +105,6 @@ func (f *Footer) View() string {
 			keyStyle.Render("Space")+descStyle.Render(": pause"),
 			keyStyle.Render("x")+descStyle.Render(": flush"),
 			// keyStyle.Render("t") + descStyle.Render(": theme"),  // Commented out for now
-			keyStyle.Render("Alt+1-4")+descStyle.Render(": tabs"),
-			keyStyle.Render("←↓↑→/hjkl")+descStyle.Render(": nav"),
 		)
 
 		if f.hasFilter {

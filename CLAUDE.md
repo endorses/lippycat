@@ -125,17 +125,24 @@ make clean-cuda     # Remove CUDA artifacts
 ### Version Management
 ```bash
 # Bump version (updates VERSION, README.md, creates changelog entry)
-./scripts/bump-version.sh <version> [changelog-message]
+./scripts/bump-version.sh [flags] <version> [changelog-message]
 
-# Examples
+# Flags:
+#   -y, --yes    Skip all prompts and auto-confirm (for automation/Claude Code)
+#   -t, --tag    Create git tag (only with -y flag)
+
+# Interactive mode (manual use)
 ./scripts/bump-version.sh 0.2.6 'Bug fixes and improvements'
-./scripts/bump-version.sh 0.3.0 'Major feature release'
+
+# Non-interactive mode (Claude Code/automation)
+./scripts/bump-version.sh -y 0.2.6 'Bug fixes and improvements'
+./scripts/bump-version.sh -y -t 0.3.0 'Major feature release'
 
 # The script will:
 # 1. Update VERSION file and README.md status line
 # 2. Add changelog entry (requires manual editing for details)
-# 3. Show diff and prompt to commit
-# 4. Optionally create git tag (v<version>)
+# 3. Show diff and commit (auto-commit with -y flag)
+# 4. Optionally create git tag (with -t flag)
 # 5. Remind to push: git push origin main && git push origin v<version>
 ```
 

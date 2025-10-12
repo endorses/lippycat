@@ -8,6 +8,7 @@ captures
 nodes.yaml
 testdata/pcaps/*
 scripts/*
+!scripts/bump-version.sh
 bin/
 
 # Test coverage artifacts

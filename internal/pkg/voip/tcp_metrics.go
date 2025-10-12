@@ -281,9 +281,9 @@ func (f *sipStreamFactory) performMemoryOptimization() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	// Convert bytes to MB for comparison
+	// Convert bytes to MB for comparison (safe: memory limit is positive config value)
 	currentMemoryMB := memStats.Alloc / (1024 * 1024)
-	memoryLimit := uint64(f.config.TCPMemoryLimit) / (1024 * 1024)
+	memoryLimit := uint64(f.config.TCPMemoryLimit) / (1024 * 1024) // #nosec G115
 
 	if currentMemoryMB > memoryLimit {
 		// Trigger aggressive cleanup

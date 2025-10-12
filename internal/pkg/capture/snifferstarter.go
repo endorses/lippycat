@@ -30,6 +30,7 @@ func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pca
 }
 
 func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
+	// #nosec G304 -- readFile is from CLI --read-file flag, intentional user-specified path
 	file, err := os.Open(readFile)
 	if err != nil {
 		logger.Error("Could not read file",

@@ -341,14 +341,14 @@ func (c *Client) SubscribeHunterStatus() error {
 func (c *Client) Close() {
 	c.cancel()
 	if c.conn != nil {
-		c.conn.Close()
+		_ = c.conn.Close()
 	}
 }
 
 // convertToPacketDisplay converts a CapturedPacket to PacketDisplay
 func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID string) types.PacketDisplay {
-	// Determine link type from packet metadata
-	linkType := layers.LinkType(pkt.LinkType)
+	// Determine link type from packet metadata (safe: link types are small enum values)
+	linkType := layers.LinkType(pkt.LinkType) // #nosec G115
 	if linkType == 0 {
 		// Default to Ethernet if not specified
 		linkType = layers.LinkTypeEthernet
@@ -527,9 +527,9 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 
 			case "RTP":
 				if pkt.Metadata.Rtp != nil {
-					// Derive codec name from payload type
+					// Derive codec name from payload type (safe: RTP payload type is 0-127)
 					if pkt.Metadata.Rtp.PayloadType > 0 {
-						codec := payloadTypeToCodec(uint8(pkt.Metadata.Rtp.PayloadType))
+						codec := payloadTypeToCodec(uint8(pkt.Metadata.Rtp.PayloadType)) // #nosec G115
 						info = codec
 					} else {
 						info = "RTP stream"
@@ -590,7 +590,8 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 
 // convertToHunterInfo converts ConnectedHunter to HunterInfo
 func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.HunterInfo {
-	connectedAt := time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9)
+	// Safe: duration seconds won't overflow int64 nanoseconds (would require ~292 years uptime)
+	connectedAt := time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9) // #nosec G115
 
 	return types.HunterInfo{
 		ID:               h.HunterId,
@@ -655,6 +656,7 @@ func formatTCPFlags(tcp *layers.TCP) string {
 
 // buildTLSCredentials creates TLS credentials for gRPC client
 func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials, error) {
+	// #nosec G402 -- InsecureSkipVerify is user-configurable, documented as testing-only
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: config.TLSSkipVerify,
 		ServerName:         config.TLSServerNameOverride,

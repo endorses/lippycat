@@ -367,17 +367,17 @@ func generateFlowID(srcIP, dstIP string, srcPort, dstPort uint16, transport stri
 	}
 
 	// Write to hash (no string concatenation allocations)
-	h.Write([]byte(ip1))
-	h.Write([]byte{':'})
-	h.Write([]byte(ip2))
-	h.Write([]byte{':'})
+	_, _ = h.Write([]byte(ip1))
+	_, _ = h.Write([]byte{':'})
+	_, _ = h.Write([]byte(ip2))
+	_, _ = h.Write([]byte{':'})
 
 	// Write ports as bytes
-	h.Write([]byte{byte(port1 >> 8), byte(port1)})
-	h.Write([]byte{':'})
-	h.Write([]byte{byte(port2 >> 8), byte(port2)})
-	h.Write([]byte{':'})
-	h.Write([]byte(transport))
+	_, _ = h.Write([]byte{byte(port1 >> 8), byte(port1)})
+	_, _ = h.Write([]byte{':'})
+	_, _ = h.Write([]byte{byte(port2 >> 8), byte(port2)})
+	_, _ = h.Write([]byte{':'})
+	_, _ = h.Write([]byte(transport))
 
 	// Return as string representation of hash (still need string for map key)
 	return fmt.Sprintf("%x", h.Sum64())

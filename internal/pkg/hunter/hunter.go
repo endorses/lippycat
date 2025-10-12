@@ -268,7 +268,7 @@ func (h *Hunter) connectToProcessor() error {
 	// Connect management channel (same address for now, different service)
 	mgmtConn, err := grpc.Dial(h.config.ProcessorAddr, opts...)
 	if err != nil {
-		dataConn.Close()
+		_ = dataConn.Close()
 		return fmt.Errorf("failed to dial processor management: %w", err)
 	}
 	h.managementConn = mgmtConn
@@ -280,6 +280,7 @@ func (h *Hunter) connectToProcessor() error {
 
 // buildTLSCredentials creates TLS credentials for gRPC client
 func (h *Hunter) buildTLSCredentials() (credentials.TransportCredentials, error) {
+	// #nosec G402 -- InsecureSkipVerify is user-configurable, documented as testing-only
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: h.config.TLSSkipVerify,
 		ServerName:         h.config.TLSServerNameOverride,
@@ -355,7 +356,7 @@ func (h *Hunter) register() error {
 		Version:    "0.1.0", // TODO: version from build
 		Capabilities: &management.HunterCapabilities{
 			FilterTypes:     []string{"sip_user", "phone_number", "ip_address"},
-			MaxBufferSize:   uint64(h.config.BufferSize * 2048), // Assume 2KB avg packet
+			MaxBufferSize:   uint64(h.config.BufferSize * 2048), // #nosec G115 - Assume 2KB avg packet
 			GpuAcceleration: false,                              // TODO: detect GPU
 			AfXdp:           false,                              // TODO: detect AF_XDP
 		},
@@ -665,7 +666,7 @@ func (h *Hunter) sendBatch() {
 			TotalCaptured:   h.stats.PacketsCaptured.Load(),
 			FilteredMatched: h.stats.PacketsMatched.Load(),
 			Dropped:         h.stats.PacketsDropped.Load(),
-			BufferUsage:     uint32(len(h.packetBuffer.Receive()) * 100 / h.config.BufferSize),
+			BufferUsage:     uint32(len(h.packetBuffer.Receive()) * 100 / h.config.BufferSize), // #nosec G115 - safe: percentage calculation
 		},
 	}
 
@@ -826,13 +827,14 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 		}
 	}
 
+	// Packet field conversions (safe: lengths are from pcap, LinkType is enum < 300)
 	return &data.CapturedPacket{
 		Data:           packetData,
 		TimestampNs:    time.Now().UnixNano(),
-		CaptureLength:  uint32(captureLen),
-		OriginalLength: uint32(originalLen),
+		CaptureLength:  uint32(captureLen),  // #nosec G115
+		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,
-		LinkType:       uint32(pktInfo.LinkType),
+		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
 		// TODO: Add metadata extraction (SIP, RTP, etc.)
 	}
 }
@@ -869,16 +871,16 @@ func (h *Hunter) cleanup() {
 
 	h.streamMu.Lock()
 	if h.stream != nil {
-		h.stream.CloseSend()
+		_ = h.stream.CloseSend()
 	}
 	h.streamMu.Unlock()
 
 	if h.dataConn != nil {
-		h.dataConn.Close()
+		_ = h.dataConn.Close()
 	}
 
 	if h.managementConn != nil {
-		h.managementConn.Close()
+		_ = h.managementConn.Close()
 	}
 }
 
@@ -1071,9 +1073,9 @@ func (h *Hunter) sendHeartbeats() {
 			status := h.calculateStatus()
 
 			// Send heartbeat
-			// Get filter count with lock
+			// Get filter count with lock (safe: filter count won't exceed uint32 max)
 			h.mu.RLock()
-			activeFilters := uint32(len(h.filters))
+			activeFilters := uint32(len(h.filters)) // #nosec G115
 			h.mu.RUnlock()
 
 			logger.Debug("Sending heartbeat",
@@ -1213,7 +1215,7 @@ func (h *Hunter) connectionManager() {
 			return
 		}
 
-		backoff := time.Duration(1<<uint(min(attempts-1, 6))) * time.Second
+		backoff := time.Duration(1<<uint(min(attempts-1, 6))) * time.Second // #nosec G115 - safe: exponential backoff, max 6
 		if backoff > 60*time.Second {
 			backoff = 60 * time.Second
 		}

@@ -113,6 +113,7 @@ func unsafeStringToBytes(s string) []byte {
 	if len(s) == 0 {
 		return nil
 	}
+	// #nosec G103 -- Audited: Zero-alloc conversion for SIMD operations, string data is never modified
 	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
 

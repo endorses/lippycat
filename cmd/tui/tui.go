@@ -111,9 +111,9 @@ func init() {
 	TuiCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	TuiCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
 
-	viper.BindPFlag("promiscuous", TuiCmd.Flags().Lookup("promiscuous"))
-	viper.BindPFlag("tui.theme", TuiCmd.Flags().Lookup("theme"))
-	viper.BindPFlag("tui.gpu.enabled", TuiCmd.Flags().Lookup("enable-gpu"))
-	viper.BindPFlag("tui.gpu.backend", TuiCmd.Flags().Lookup("gpu-backend"))
-	viper.BindPFlag("tui.gpu.batch_size", TuiCmd.Flags().Lookup("gpu-batch-size"))
+	_ = viper.BindPFlag("promiscuous", TuiCmd.Flags().Lookup("promiscuous"))
+	_ = viper.BindPFlag("tui.theme", TuiCmd.Flags().Lookup("theme"))
+	_ = viper.BindPFlag("tui.gpu.enabled", TuiCmd.Flags().Lookup("enable-gpu"))
+	_ = viper.BindPFlag("tui.gpu.backend", TuiCmd.Flags().Lookup("gpu-backend"))
+	_ = viper.BindPFlag("tui.gpu.batch_size", TuiCmd.Flags().Lookup("gpu-batch-size"))
 }

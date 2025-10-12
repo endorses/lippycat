@@ -106,10 +106,10 @@ func (lf *LockFreeCallTracker) createCallSafely(callID string, linkType layers.L
 	if actual, loaded := lf.callMap.LoadOrStore(callID, lockFreeCall); loaded {
 		// Close our writers since we're using the existing call
 		if call.sipFile != nil {
-			call.sipFile.Close()
+			_ = call.sipFile.Close()
 		}
 		if call.rtpFile != nil {
-			call.rtpFile.Close()
+			_ = call.rtpFile.Close()
 		}
 		return actual.(*LockFreeCallInfo).CallInfo
 	}
@@ -194,10 +194,10 @@ func (lf *LockFreeCallTracker) removeCall(callID string) bool {
 
 		// Close writers
 		if call.sipFile != nil {
-			call.sipFile.Close()
+			_ = call.sipFile.Close()
 		}
 		if call.rtpFile != nil {
-			call.rtpFile.Close()
+			_ = call.rtpFile.Close()
 		}
 
 		// Remove associated port mappings
@@ -263,10 +263,10 @@ func (lf *LockFreeCallTracker) Shutdown() {
 			lockFreeCall := value.(*LockFreeCallInfo)
 			call := lockFreeCall.CallInfo
 			if call.sipFile != nil {
-				call.sipFile.Close()
+				_ = call.sipFile.Close()
 			}
 			if call.rtpFile != nil {
-				call.rtpFile.Close()
+				_ = call.rtpFile.Close()
 			}
 			return true
 		})

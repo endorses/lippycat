@@ -326,7 +326,7 @@ func showAlerts(activeOnly, jsonOutput bool) {
 			levelIcon, level, alert.Component, status, timeStr, message)
 	}
 
-	w.Flush()
+	_ = w.Flush() // Best-effort flush for debug output
 	fmt.Println()
 }
 

@@ -72,6 +72,7 @@ func readOrGenerateKey(keyFile string) ([]byte, error) {
 
 	// Try to read existing key
 	if _, err := os.Stat(keyFile); err == nil {
+		// #nosec G304 -- keyFile is from config, not user input
 		key, err := os.ReadFile(keyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read key file %s: %w", keyFile, err)
@@ -143,6 +144,7 @@ func NewEncryptedPCAPWriter(filename string) (*EncryptedPCAPWriter, error) {
 	}
 
 	// Open output file
+	// #nosec G304 -- filename from internal call tracker, sanitized
 	file, err := os.Create(filename + ".enc")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create encrypted file: %w", err)
@@ -151,7 +153,7 @@ func NewEncryptedPCAPWriter(filename string) (*EncryptedPCAPWriter, error) {
 	// Generate initial nonce base
 	nonceBase := make([]byte, 8)
 	if _, err := rand.Read(nonceBase); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to generate nonce base: %w", err)
 	}
 
@@ -169,7 +171,7 @@ func NewEncryptedPCAPWriter(filename string) (*EncryptedPCAPWriter, error) {
 		config.Algorithm, config.KeyDerive)
 
 	if _, err := file.Write([]byte(header)); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to write encryption header: %w", err)
 	}
 
@@ -193,9 +195,11 @@ func (w *EncryptedPCAPWriter) WriteData(data []byte) error {
 	}
 
 	// Encrypt data
+	// #nosec G407 -- Nonce is dynamically generated: random base + atomic counter, not hardcoded
 	ciphertext := w.cipher.Seal(nil, w.nonce, data, nil)
 
 	// Write nonce + ciphertext length + ciphertext
+	// #nosec G115 - safe: ciphertext size bounded by packet size ~64KB
 	if err := w.writeUint32(uint32(len(ciphertext))); err != nil {
 		return fmt.Errorf("failed to write ciphertext length: %w", err)
 	}
@@ -256,6 +260,7 @@ func DecryptPCAPFile(encryptedFile, outputFile, keyFile string) error {
 	}
 
 	// Open encrypted file
+	// #nosec G304 -- encryptedFile from internal call tracker, sanitized
 	inFile, err := os.Open(encryptedFile)
 	if err != nil {
 		return fmt.Errorf("failed to open encrypted file: %w", err)
@@ -263,6 +268,7 @@ func DecryptPCAPFile(encryptedFile, outputFile, keyFile string) error {
 	defer inFile.Close()
 
 	// Create output file
+	// #nosec G304 -- outputFile from internal call tracker, sanitized
 	outFile, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)

@@ -97,6 +97,7 @@ func BytesHasPrefixString(data []byte, prefix string) bool {
 // WARNING: The returned string shares memory with the byte slice.
 // Only use when the byte slice won't be modified.
 func BytesToString(b []byte) string {
+	// #nosec G103 -- Audited: Zero-alloc conversion for performance, byte slice is immutable after conversion
 	return *(*string)(unsafe.Pointer(&b))
 }
 
@@ -104,6 +105,7 @@ func BytesToString(b []byte) string {
 // WARNING: The returned byte slice is read-only.
 // Modifying it will cause a panic.
 func StringToBytes(s string) []byte {
+	// #nosec G103 -- Audited: Zero-alloc conversion for performance, string data is never modified
 	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
 

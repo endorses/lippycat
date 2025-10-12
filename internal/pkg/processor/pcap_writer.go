@@ -69,7 +69,7 @@ func NewPcapWriterManager(config *PcapWriterConfig) (*PcapWriterManager, error) 
 
 	// Create output directory if it doesn't exist
 	if config.Enabled {
-		if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
+		if err := os.MkdirAll(config.OutputDir, 0750); err != nil {
 			return nil, fmt.Errorf("failed to create output directory: %w", err)
 		}
 	}
@@ -162,7 +162,7 @@ func (writer *CallPcapWriter) WritePacket(packet gopacket.Packet) error {
 func (writer *CallPcapWriter) rotateFile() error {
 	// Close existing file
 	if writer.file != nil {
-		writer.file.Close()
+		_ = writer.file.Close()
 	}
 
 	// Check file limit
@@ -175,6 +175,7 @@ func (writer *CallPcapWriter) rotateFile() error {
 	filepath := filepath.Join(writer.config.OutputDir, filename)
 
 	// Create file
+	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
 	file, err := os.Create(filepath)
 	if err != nil {
 		return fmt.Errorf("failed to create PCAP file: %w", err)
@@ -183,7 +184,7 @@ func (writer *CallPcapWriter) rotateFile() error {
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 
@@ -224,7 +225,7 @@ func (writer *CallPcapWriter) syncLoop() {
 		case <-writer.syncTicker.C:
 			writer.mu.Lock()
 			if writer.file != nil {
-				writer.file.Sync()
+				_ = writer.file.Sync()
 			}
 			writer.mu.Unlock()
 		case <-writer.stopSync:

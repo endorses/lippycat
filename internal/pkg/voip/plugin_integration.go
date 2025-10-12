@@ -169,11 +169,15 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 		switch result.Protocol {
 		case "sip":
 			if call.SIPWriter != nil {
-				call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				if err := call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+					logger.Error("Failed to write SIP packet", "error", err)
+				}
 			}
 		case "rtp":
 			if call.RTPWriter != nil {
-				call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				if err := call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+					logger.Error("Failed to write RTP packet", "error", err)
+				}
 			}
 		}
 	}

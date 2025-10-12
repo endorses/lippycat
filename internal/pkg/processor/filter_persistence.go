@@ -56,6 +56,7 @@ func (p *Processor) loadFilters() error {
 	}
 
 	// Read file
+	// #nosec G304 -- Path is from configuration file, not user input
 	data, err := os.ReadFile(filterFile)
 	if err != nil {
 		return fmt.Errorf("failed to read filter file: %w", err)
@@ -101,7 +102,7 @@ func (p *Processor) saveFilters() error {
 
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(filterFile)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return fmt.Errorf("failed to create filter directory: %w", err)
 	}
 
@@ -123,12 +124,12 @@ func (p *Processor) saveFilters() error {
 
 	// Atomic write: write to temp file, then rename
 	tempFile := filterFile + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0600); err != nil {
 		return fmt.Errorf("failed to write temp filter file: %w", err)
 	}
 
 	if err := os.Rename(tempFile, filterFile); err != nil {
-		os.Remove(tempFile) // Cleanup temp file on error
+		_ = os.Remove(tempFile) // Cleanup temp file on error
 		return fmt.Errorf("failed to rename temp filter file: %w", err)
 	}
 

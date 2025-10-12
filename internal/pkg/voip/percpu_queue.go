@@ -162,16 +162,17 @@ func (pcq *PerCPUQueue) GetQueue(cpuID int) <-chan []byte {
 
 // selectQueue selects the appropriate queue based on strategy
 func (pcq *PerCPUQueue) selectQueue(hash uint32) int {
+	// Safe: numCPUs is from runtime.NumCPU(), typically < 1024
 	switch pcq.strategy {
 	case StrategyRoundRobin:
 		// Use hash as pseudo-round-robin
-		return int(hash % uint32(pcq.numCPUs))
+		return int(hash % uint32(pcq.numCPUs)) // #nosec G115
 	case StrategyFlowHash, StrategyCallID:
 		// Hash-based distribution
-		return int(hash % uint32(pcq.numCPUs))
+		return int(hash % uint32(pcq.numCPUs)) // #nosec G115
 	case StrategyRandom:
 		// Use hash as random
-		return int(hash % uint32(pcq.numCPUs))
+		return int(hash % uint32(pcq.numCPUs)) // #nosec G115
 	default:
 		return 0
 	}

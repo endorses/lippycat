@@ -57,11 +57,11 @@ func (m *MongoDBSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 
 	payload := ctx.Payload
 
-	// Extract header fields (all little-endian)
-	messageLength := int32(binary.LittleEndian.Uint32(payload[0:4]))
-	requestID := int32(binary.LittleEndian.Uint32(payload[4:8]))
-	responseTo := int32(binary.LittleEndian.Uint32(payload[8:12]))
-	opCode := int32(binary.LittleEndian.Uint32(payload[12:16]))
+	// Extract header fields (all little-endian, safe: MongoDB protocol uses signed int32)
+	messageLength := int32(binary.LittleEndian.Uint32(payload[0:4])) // #nosec G115
+	requestID := int32(binary.LittleEndian.Uint32(payload[4:8]))     // #nosec G115
+	responseTo := int32(binary.LittleEndian.Uint32(payload[8:12]))   // #nosec G115
+	opCode := int32(binary.LittleEndian.Uint32(payload[12:16]))      // #nosec G115
 
 	// Validate message length (16 bytes to 48MB)
 	if messageLength < 16 || messageLength > 48*1024*1024 {

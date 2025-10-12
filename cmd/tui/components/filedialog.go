@@ -314,8 +314,8 @@ func (fd *FileDialog) Activate() tea.Cmd {
 	fd.folderInput.SetValue("")
 	fd.folderInput.Blur()
 
-	// Read the directory
-	fd.readDirectory()
+	// Read the directory (best-effort, errors shown in UI)
+	_ = fd.readDirectory()
 
 	return nil
 }
@@ -398,7 +398,7 @@ func (fd *FileDialog) enterDirectory(dir string) {
 		fd.viewOffset = 0
 		// Clear filter when entering a directory
 		fd.filterInput.SetValue("")
-		fd.readDirectory()
+		_ = fd.readDirectory() // Best-effort, errors shown in UI
 	}
 }
 
@@ -409,7 +409,7 @@ func (fd *FileDialog) goToParent() {
 		fd.currentDir = parent
 		fd.cursor = 0
 		fd.viewOffset = 0
-		fd.readDirectory()
+		_ = fd.readDirectory() // Best-effort, errors shown in UI
 	}
 }
 
@@ -616,7 +616,7 @@ func (fd *FileDialog) handleCreateFolderMode(msg tea.Msg) tea.Cmd {
 
 			// Create the folder
 			newPath := filepath.Join(fd.currentDir, folderName)
-			if err := os.MkdirAll(newPath, 0755); err != nil {
+			if err := os.MkdirAll(newPath, 0750); err != nil {
 				fd.errorMessage = fmt.Sprintf("Failed to create folder: %s", err.Error())
 				return nil
 			}
@@ -625,7 +625,7 @@ func (fd *FileDialog) handleCreateFolderMode(msg tea.Msg) tea.Cmd {
 			fd.mode = ModeNavigation
 			fd.folderInput.Blur()
 			fd.errorMessage = ""
-			fd.readDirectory()
+			_ = fd.readDirectory() // Best-effort, errors shown in UI
 
 			// Move cursor to the newly created folder
 			for i, entry := range fd.filteredFiles {

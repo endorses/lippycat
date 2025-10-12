@@ -110,10 +110,10 @@ func (ct *CallTracker) Shutdown() {
 		ct.mu.Lock()
 		for id, call := range ct.callMap {
 			if call.sipFile != nil {
-				call.sipFile.Close()
+				_ = call.sipFile.Close()
 			}
 			if call.rtpFile != nil {
-				call.rtpFile.Close()
+				_ = call.rtpFile.Close()
 			}
 			delete(ct.callMap, id)
 		}
@@ -184,7 +184,7 @@ func (c *CallInfo) initWriters() error {
 	}
 
 	// Create directory if it doesn't exist
-	if err := os.MkdirAll(capturesDir, 0o755); err != nil {
+	if err := os.MkdirAll(capturesDir, 0o750); err != nil {
 		return fmt.Errorf("failed to create captures directory: %w", err)
 	}
 
@@ -200,15 +200,17 @@ func (c *CallInfo) initWriters() error {
 	sipPath := filepath.Join(capturesDir, fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
 	rtpPath := filepath.Join(capturesDir, fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))
 
+	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked
 	c.sipFile, err = os.Create(sipPath)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP file %s: %w", sipPath, err)
 	}
 
+	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked
 	c.rtpFile, err = os.Create(rtpPath)
 	if err != nil {
 		if c.sipFile != nil {
-			c.sipFile.Close()
+			_ = c.sipFile.Close()
 		}
 		return fmt.Errorf("failed to create RTP file %s: %w", rtpPath, err)
 	}
@@ -217,14 +219,14 @@ func (c *CallInfo) initWriters() error {
 	c.RTPWriter = pcapgo.NewWriter(c.rtpFile)
 
 	if err := c.SIPWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, c.LinkType); err != nil {
-		c.sipFile.Close()
-		c.rtpFile.Close()
+		_ = c.sipFile.Close()
+		_ = c.rtpFile.Close()
 		return fmt.Errorf("failed to write SIP file header: %w", err)
 	}
 
 	if err := c.RTPWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, c.LinkType); err != nil {
-		c.sipFile.Close()
-		c.rtpFile.Close()
+		_ = c.sipFile.Close()
+		_ = c.rtpFile.Close()
 		return fmt.Errorf("failed to write RTP file header: %w", err)
 	}
 

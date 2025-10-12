@@ -66,7 +66,7 @@ func NewStreamingWriter(config Config, filterFunc FilterFunc) (*StreamingWriter,
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(config.Snaplen, config.LinkType); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 

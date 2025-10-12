@@ -956,8 +956,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Write to streaming save if active
 			if m.activeWriter != nil {
-				// WritePacket will apply filter internally if configured
-				m.activeWriter.WritePacket(packet)
+				// WritePacket will apply filter internally if configured (best-effort)
+				_ = m.activeWriter.WritePacket(packet)
 			}
 
 			// Update statistics (lightweight)
@@ -2379,7 +2379,7 @@ func saveThemePreference(theme themes.Theme) {
 
 			// Use ~/.config/lippycat/config.yaml as primary location
 			configDir := filepath.Join(home, ".config", "lippycat")
-			if err := os.MkdirAll(configDir, 0755); err != nil {
+			if err := os.MkdirAll(configDir, 0750); err != nil {
 				return
 			}
 
@@ -2434,7 +2434,7 @@ func saveFilterHistory(filterInput *components.FilterInput) {
 
 			// Use ~/.config/lippycat/config.yaml as primary location
 			configDir := filepath.Join(home, ".config", "lippycat")
-			if err := os.MkdirAll(configDir, 0755); err != nil {
+			if err := os.MkdirAll(configDir, 0750); err != nil {
 				return
 			}
 
@@ -2979,7 +2979,7 @@ func (m *Model) startOneShotSave(filePath string) tea.Cmd {
 		// Write all packets
 		for _, pkt := range packets {
 			if err := writer.WritePacket(pkt); err != nil {
-				writer.Close()
+				_ = writer.Close() // Best-effort cleanup on error path
 				return SaveCompleteMsg{
 					Success: false,
 					Path:    filePath,
@@ -3045,7 +3045,7 @@ func (m *Model) startStreamingSave(filePath string) tea.Cmd {
 
 	// Write existing packets immediately (reuse packets from link type check)
 	for _, pkt := range packets {
-		writer.WritePacket(pkt)
+		_ = writer.WritePacket(pkt) // Best-effort write, errors handled on subsequent writes
 	}
 
 	// Show toast notification

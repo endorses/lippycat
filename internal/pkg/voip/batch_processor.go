@@ -144,7 +144,7 @@ func (bp *BatchProcessor) SubmitBatch(batch *PacketBatch) error {
 	select {
 	case bp.inputQueue <- batch:
 		bp.stats.TotalBatches.Inc()
-		bp.stats.TotalPackets.Add(uint64(batch.Count))
+		bp.stats.TotalPackets.Add(uint64(batch.Count)) // #nosec G115 - safe: batch count is bounded
 		return nil
 	default:
 		bp.stats.BatchesDropped.Inc()
@@ -255,9 +255,10 @@ func (bw *BatchWorker) processBatch(batch *PacketBatch) *BatchResult {
 	processingTime := time.Since(startTime)
 	result.ProcessingNS = processingTime.Nanoseconds()
 
+	// Stats updates (safe: counts and durations won't overflow uint64)
 	bw.localStats.BatchesProcessed.Inc()
-	bw.localStats.PacketsProcessed.Add(uint64(batch.Count))
-	bw.localStats.ProcessingTimeNS.Add(uint64(result.ProcessingNS))
+	bw.localStats.PacketsProcessed.Add(uint64(batch.Count))         // #nosec G115
+	bw.localStats.ProcessingTimeNS.Add(uint64(result.ProcessingNS)) // #nosec G115
 
 	return result
 }

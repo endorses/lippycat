@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage bench fmt vet tidy version help all hunter processor cli tui binaries clean-binaries
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui binaries clean-binaries
 
 # Build variables
 BINARY_NAME=lc
@@ -138,6 +138,24 @@ fmt:
 vet:
 	$(GO) vet ./...
 
+# Security scanning with gosec (clean output, SSA errors filtered)
+# The Golang SSA analysis errors are expected - see .gosec.yaml for details
+lint: gosec
+
+gosec:
+	@echo "Running gosec security scan..."
+	@gosec -tags=all -exclude-generated -quiet ./... 2>&1 | grep -v "^Golang errors" | grep -v "^\s*>" | grep -v "could not import" | grep -v "undefined:" | grep -v "missing function body" || true
+	@echo ""
+	@gosec -tags=all -exclude-generated ./... 2>&1 | tail -7
+
+# Security scanning with full output (includes SSA analysis details)
+gosec-verbose:
+	@echo "Running gosec with full diagnostic output..."
+	@echo "Note: Golang import errors are from gosec's SSA type checker,"
+	@echo "      not actual build issues. See .gosec.yaml for details."
+	@echo ""
+	@gosec -tags=all -exclude-generated ./...
+
 # Tidy modules
 tidy:
 	$(GO) mod tidy
@@ -199,6 +217,8 @@ help:
 	@echo "  make bench          - Run benchmarks"
 	@echo "  make fmt            - Format code"
 	@echo "  make vet            - Run go vet"
+	@echo "  make lint / gosec   - Run gosec security scanner (clean output)"
+	@echo "  make gosec-verbose  - Run gosec with full diagnostic output"
 	@echo "  make tidy           - Tidy module dependencies"
 	@echo ""
 	@echo "PGO Workflow:"

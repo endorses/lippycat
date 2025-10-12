@@ -380,6 +380,6 @@ func GetAsyncWriter() *AsyncWriterPool {
 // Cleanup function for graceful shutdown
 func CloseAsyncWriter() {
 	if globalAsyncWriter != nil {
-		globalAsyncWriter.Stop()
+		_ = globalAsyncWriter.Stop()
 	}
 }

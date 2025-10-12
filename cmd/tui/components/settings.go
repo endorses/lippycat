@@ -485,7 +485,7 @@ func (s *SettingsView) SaveBufferSize() {
 
 			// Use ~/.config/lippycat/config.yaml as primary location
 			configDir := filepath.Join(home, ".config", "lippycat")
-			if err := os.MkdirAll(configDir, 0755); err != nil {
+			if err := os.MkdirAll(configDir, 0750); err != nil {
 				return
 			}
 

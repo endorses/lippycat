@@ -669,9 +669,9 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			continue
 		}
 
-		// Calculate connection duration
+		// Calculate connection duration (safe: duration won't overflow, max ~292 years)
 		durationNs := time.Now().UnixNano() - hunter.ConnectedAt
-		durationSec := uint64(durationNs / 1e9)
+		durationSec := uint64(durationNs / 1e9) // #nosec G115
 
 		connectedHunters = append(connectedHunters, &management.ConnectedHunter{
 			HunterId:             hunter.ID,
@@ -714,9 +714,9 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 	hunters := make([]*management.AvailableHunter, 0, len(p.hunters))
 
 	for _, hunter := range p.hunters {
-		// Calculate connection duration
+		// Calculate connection duration (safe: duration won't overflow, max ~292 years)
 		durationNs := time.Now().UnixNano() - hunter.ConnectedAt
-		durationSec := uint64(durationNs / 1e9)
+		durationSec := uint64(durationNs / 1e9) // #nosec G115
 
 		hunters = append(hunters, &management.AvailableHunter{
 			HunterId:             hunter.ID,
@@ -872,7 +872,7 @@ func (p *Processor) initPCAPWriter() error {
 
 	// Write PCAP header (Ethernet link type)
 	if err := p.pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		file.Close()
+		_ = file.Close()
 		return fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 
@@ -983,7 +983,7 @@ func (p *Processor) closePCAPWriter() {
 
 	// Close file
 	if p.pcapFile != nil {
-		p.pcapFile.Close()
+		_ = p.pcapFile.Close()
 		logger.Info("PCAP file closed", "file", p.config.WriteFile)
 	}
 }
@@ -1138,8 +1138,8 @@ func (p *Processor) updateHealthStats() {
 	oldCache := p.statsCache.Load().(*cachedStats)
 	newStats := oldCache.stats // Copy current stats
 
-	// Update hunter health stats
-	newStats.TotalHunters = uint32(len(p.hunters))
+	// Update hunter health stats (safe: hunter count won't exceed uint32 max)
+	newStats.TotalHunters = uint32(len(p.hunters)) // #nosec G115
 	newStats.HealthyHunters = healthy
 	newStats.WarningHunters = warning
 	newStats.ErrorHunters = errCount
@@ -1324,7 +1324,7 @@ func (p *Processor) connectToUpstream() error {
 	// Create streaming connection
 	stream, err := p.upstreamClient.StreamPackets(p.ctx)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return fmt.Errorf("failed to create upstream stream: %w", err)
 	}
 
@@ -1344,13 +1344,13 @@ func (p *Processor) connectToUpstream() error {
 func (p *Processor) disconnectUpstream() {
 	p.upstreamMu.Lock()
 	if p.upstreamStream != nil {
-		p.upstreamStream.CloseSend()
+		_ = p.upstreamStream.CloseSend()
 		p.upstreamStream = nil
 	}
 	p.upstreamMu.Unlock()
 
 	if p.upstreamConn != nil {
-		p.upstreamConn.Close()
+		_ = p.upstreamConn.Close()
 		p.upstreamConn = nil
 	}
 
@@ -1564,8 +1564,8 @@ func (p *Processor) broadcastToSubscribers(batch *data.PacketBatch) {
 // enrichPackets performs centralized protocol detection and enriches packet metadata
 func (p *Processor) enrichPackets(packets []*data.CapturedPacket) {
 	for _, pkt := range packets {
-		// Decode packet from raw bytes
-		goPacket := gopacket.NewPacket(pkt.Data, layers.LinkType(pkt.LinkType), gopacket.Default)
+		// Decode packet from raw bytes (safe: link type is small enum from proto, values < 300)
+		goPacket := gopacket.NewPacket(pkt.Data, layers.LinkType(pkt.LinkType), gopacket.Default) // #nosec G115
 
 		// Run centralized detection
 		result := p.detector.Detect(goPacket)

@@ -59,7 +59,7 @@ var (
 func init() {
 	// Required flags
 	HuntCmd.Flags().StringVar(&processorAddr, "processor", "", "Processor address (host:port)")
-	HuntCmd.MarkFlagRequired("processor")
+	_ = HuntCmd.MarkFlagRequired("processor") // Error only occurs with invalid flag name (hard-coded string)
 
 	// Hunter configuration
 	HuntCmd.Flags().StringVarP(&hunterID, "hunter-id", "", "", "Unique hunter identifier (default: hostname)")
@@ -86,22 +86,22 @@ func init() {
 	HuntCmd.Flags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 
 	// Bind to viper for config file support
-	viper.BindPFlag("hunter.processor_addr", HuntCmd.Flags().Lookup("processor"))
-	viper.BindPFlag("hunter.hunter_id", HuntCmd.Flags().Lookup("hunter-id"))
-	viper.BindPFlag("hunter.interfaces", HuntCmd.Flags().Lookup("interface"))
-	viper.BindPFlag("hunter.bpf_filter", HuntCmd.Flags().Lookup("filter"))
-	viper.BindPFlag("hunter.buffer_size", HuntCmd.Flags().Lookup("buffer-size"))
-	viper.BindPFlag("hunter.batch_size", HuntCmd.Flags().Lookup("batch-size"))
-	viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.Flags().Lookup("batch-timeout"))
-	viper.BindPFlag("promiscuous", HuntCmd.Flags().Lookup("promisc"))
-	viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.Flags().Lookup("enable-voip-filter"))
-	viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.Flags().Lookup("gpu-backend"))
-	viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.Flags().Lookup("gpu-batch-size"))
-	viper.BindPFlag("hunter.tls.enabled", HuntCmd.Flags().Lookup("tls"))
-	viper.BindPFlag("hunter.tls.cert_file", HuntCmd.Flags().Lookup("tls-cert"))
-	viper.BindPFlag("hunter.tls.key_file", HuntCmd.Flags().Lookup("tls-key"))
-	viper.BindPFlag("hunter.tls.ca_file", HuntCmd.Flags().Lookup("tls-ca"))
-	viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.Flags().Lookup("tls-skip-verify"))
+	_ = viper.BindPFlag("hunter.processor_addr", HuntCmd.Flags().Lookup("processor"))
+	_ = viper.BindPFlag("hunter.hunter_id", HuntCmd.Flags().Lookup("hunter-id"))
+	_ = viper.BindPFlag("hunter.interfaces", HuntCmd.Flags().Lookup("interface"))
+	_ = viper.BindPFlag("hunter.bpf_filter", HuntCmd.Flags().Lookup("filter"))
+	_ = viper.BindPFlag("hunter.buffer_size", HuntCmd.Flags().Lookup("buffer-size"))
+	_ = viper.BindPFlag("hunter.batch_size", HuntCmd.Flags().Lookup("batch-size"))
+	_ = viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.Flags().Lookup("batch-timeout"))
+	_ = viper.BindPFlag("promiscuous", HuntCmd.Flags().Lookup("promisc"))
+	_ = viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.Flags().Lookup("enable-voip-filter"))
+	_ = viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.Flags().Lookup("gpu-backend"))
+	_ = viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.Flags().Lookup("gpu-batch-size"))
+	_ = viper.BindPFlag("hunter.tls.enabled", HuntCmd.Flags().Lookup("tls"))
+	_ = viper.BindPFlag("hunter.tls.cert_file", HuntCmd.Flags().Lookup("tls-cert"))
+	_ = viper.BindPFlag("hunter.tls.key_file", HuntCmd.Flags().Lookup("tls-key"))
+	_ = viper.BindPFlag("hunter.tls.ca_file", HuntCmd.Flags().Lookup("tls-ca"))
+	_ = viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.Flags().Lookup("tls-skip-verify"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {

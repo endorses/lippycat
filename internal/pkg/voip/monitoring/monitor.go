@@ -152,17 +152,17 @@ func (m *Monitor) collectRuntimeMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	// Memory metrics
-	m.metricsCollector.SetGauge("runtime_alloc_bytes", int64(memStats.Alloc))
-	m.metricsCollector.SetGauge("runtime_total_alloc_bytes", int64(memStats.TotalAlloc))
-	m.metricsCollector.SetGauge("runtime_sys_bytes", int64(memStats.Sys))
-	m.metricsCollector.SetGauge("runtime_heap_alloc_bytes", int64(memStats.HeapAlloc))
-	m.metricsCollector.SetGauge("runtime_heap_inuse_bytes", int64(memStats.HeapInuse))
-	m.metricsCollector.SetGauge("runtime_heap_idle_bytes", int64(memStats.HeapIdle))
+	// Memory metrics (uint64 -> int64 conversions are safe: memory won't exceed 9 exabytes)
+	m.metricsCollector.SetGauge("runtime_alloc_bytes", int64(memStats.Alloc))            // #nosec G115
+	m.metricsCollector.SetGauge("runtime_total_alloc_bytes", int64(memStats.TotalAlloc)) // #nosec G115
+	m.metricsCollector.SetGauge("runtime_sys_bytes", int64(memStats.Sys))                // #nosec G115
+	m.metricsCollector.SetGauge("runtime_heap_alloc_bytes", int64(memStats.HeapAlloc))   // #nosec G115
+	m.metricsCollector.SetGauge("runtime_heap_inuse_bytes", int64(memStats.HeapInuse))   // #nosec G115
+	m.metricsCollector.SetGauge("runtime_heap_idle_bytes", int64(memStats.HeapIdle))     // #nosec G115
 
-	// GC metrics
-	m.metricsCollector.SetGauge("runtime_gc_cycles", int64(memStats.NumGC))
-	m.metricsCollector.SetGauge("runtime_gc_pause_ns", int64(memStats.PauseTotalNs))
+	// GC metrics (uint64/uint32 -> int64 conversions are safe: won't overflow in practice)
+	m.metricsCollector.SetGauge("runtime_gc_cycles", int64(memStats.NumGC))          // #nosec G115
+	m.metricsCollector.SetGauge("runtime_gc_pause_ns", int64(memStats.PauseTotalNs)) // #nosec G115
 
 	// Goroutine metrics
 	m.metricsCollector.SetGauge("runtime_goroutines", int64(runtime.NumGoroutine()))

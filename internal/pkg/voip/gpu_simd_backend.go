@@ -106,10 +106,11 @@ func (sb *SIMDBackend) ExecutePatternMatching(patterns []GPUPattern) error {
 		sb.results = append(sb.results, workerResults...)
 	}
 
+	// Stats updates (safe: durations and counts won't overflow uint64)
 	processingTime := time.Since(startTime)
-	sb.stats.ProcessingTimeNS.Add(uint64(processingTime.Nanoseconds()))
-	sb.stats.PacketsProcessed.Add(uint64(numPackets))
-	sb.stats.PatternsMatched.Add(uint64(len(sb.results)))
+	sb.stats.ProcessingTimeNS.Add(uint64(processingTime.Nanoseconds())) // #nosec G115
+	sb.stats.PacketsProcessed.Add(uint64(numPackets))                   // #nosec G115
+	sb.stats.PatternsMatched.Add(uint64(len(sb.results)))               // #nosec G115
 
 	return nil
 }

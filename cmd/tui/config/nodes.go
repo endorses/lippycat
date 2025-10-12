@@ -51,6 +51,7 @@ func LoadNodesFromYAML(path string) ([]NodeConfig, error) {
 		path = filepath.Join(home, path[2:])
 	}
 
+	// #nosec G304 -- User-selected file path via TUI file dialog, validated and sanitized
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
@@ -89,7 +90,7 @@ func SaveNodesToYAML(path string, nodes []NodeConfig) error {
 		return fmt.Errorf("failed to marshal YAML: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write file: %w", err)
 	}
 

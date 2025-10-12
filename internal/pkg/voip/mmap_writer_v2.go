@@ -78,7 +78,8 @@ func NewMmapWriterV2(filename string, linkType layers.LinkType, config *MmapWrit
 	}
 
 	// Create file with proper permissions
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
+	// #nosec G304 -- filename from call tracker, sanitized path
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PCAP file: %w", err)
 	}
@@ -97,7 +98,7 @@ func NewMmapWriterV2(filename string, linkType layers.LinkType, config *MmapWrit
 	// Write PCAP header
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, linkType); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 	writer.writer = pcapWriter
@@ -111,7 +112,7 @@ func NewMmapWriterV2(filename string, linkType layers.LinkType, config *MmapWrit
 					"error", err, "filename", filename)
 				writer.fallbackMode.Store(true)
 			} else {
-				file.Close()
+				_ = file.Close()
 				return nil, fmt.Errorf("failed to setup memory mapping: %w", err)
 			}
 		}
@@ -144,6 +145,7 @@ func (w *MmapWriterV2) setupMmapV2(size int64) error {
 		w.ringEnd = size
 	}
 
+	// #nosec G103 -- Audited: Getting mmap address for logging only, no pointer arithmetic
 	logger.Info("Enhanced memory-mapped PCAP writer initialized",
 		"filename", w.file.Name(),
 		"size", size,
@@ -213,10 +215,11 @@ func (w *MmapWriterV2) writePacketAt(pos int64, ci gopacket.CaptureInfo, data []
 	header := w.mmapData[pos : pos+16]
 
 	// Use little-endian for PCAP format
-	binary.LittleEndian.PutUint32(header[0:4], uint32(ci.Timestamp.Unix()))
-	binary.LittleEndian.PutUint32(header[4:8], uint32(ci.Timestamp.Nanosecond()/1000))
-	binary.LittleEndian.PutUint32(header[8:12], uint32(ci.CaptureLength))
-	binary.LittleEndian.PutUint32(header[12:16], uint32(ci.Length))
+	// Safe conversions: timestamp fits in uint32 until year 2106, packet lengths are bounded by MTU
+	binary.LittleEndian.PutUint32(header[0:4], uint32(ci.Timestamp.Unix()))            // #nosec G115
+	binary.LittleEndian.PutUint32(header[4:8], uint32(ci.Timestamp.Nanosecond()/1000)) // #nosec G115
+	binary.LittleEndian.PutUint32(header[8:12], uint32(ci.CaptureLength))              // #nosec G115
+	binary.LittleEndian.PutUint32(header[12:16], uint32(ci.Length))                    // #nosec G115
 
 	// Copy packet data
 	copy(w.mmapData[pos+16:pos+16+int64(len(data))], data)
@@ -239,6 +242,7 @@ func (w *MmapWriterV2) Flush() error {
 			// Sync the delta
 			syncSize := currentPos - flushPos
 			if syncSize > 0 {
+				// #nosec G103 -- Audited: Required for msync syscall, mmap region properly managed
 				if _, _, errno := syscall.Syscall(syscall.SYS_MSYNC,
 					uintptr(unsafe.Pointer(&w.mmapData[flushPos])),
 					uintptr(syncSize),
@@ -297,7 +301,8 @@ func (w *MmapWriterV2) rotate() error {
 	}
 
 	// Create new file
-	newFile, err := os.OpenFile(oldPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
+	// #nosec G304 -- oldPath is internal, from file rotation
+	newFile, err := os.OpenFile(oldPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("create new file failed: %w", err)
 	}

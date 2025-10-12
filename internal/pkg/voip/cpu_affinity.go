@@ -120,7 +120,7 @@ func (cam *CPUAffinityManager) PinCurrentThreadToCPU(cpuID int) error {
 
 // GetNextAvailableCPU returns the next available CPU for round-robin assignment
 func (cam *CPUAffinityManager) GetNextAvailableCPU() int {
-	return int(cam.nextCPU.Add(1) % uint32(cam.numCPUs))
+	return int(cam.nextCPU.Add(1) % uint32(cam.numCPUs)) // #nosec G115 - safe: numCPUs is from runtime.NumCPU()
 }
 
 // PinToNUMANode pins the current thread to a NUMA node

@@ -147,6 +147,7 @@ func AlignedAlloc(size int) []byte {
 	buf := make([]byte, size+CacheLineSize)
 
 	// Find aligned offset
+	// #nosec G103 -- Audited: Calculating cache-line alignment for performance, no pointer arithmetic beyond bounds
 	offset := uintptr(unsafe.Pointer(&buf[0])) % CacheLineSize
 	if offset != 0 {
 		offset = CacheLineSize - offset

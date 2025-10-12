@@ -45,6 +45,6 @@ func init() {
 	SniffCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "quiet mode - don't print packets (better performance)")
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
 
-	viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
-	viper.BindPFlag("sniff.quiet", SniffCmd.PersistentFlags().Lookup("quiet"))
+	_ = viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
+	_ = viper.BindPFlag("sniff.quiet", SniffCmd.PersistentFlags().Lookup("quiet"))
 }

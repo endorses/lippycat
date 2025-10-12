@@ -164,6 +164,7 @@ func (l *L2TPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 		}
 
 		// Validate AVP length
+		// #nosec G115 - safe: payload length is bounded by packet size (~64KB max)
 		if avpLength >= 6 && avpLength <= uint16(len(payload)-offset) {
 			metadata["has_valid_avp"] = true
 		}

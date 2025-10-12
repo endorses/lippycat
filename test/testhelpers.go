@@ -38,16 +38,17 @@ func createSyntheticPacket(index int) *data.CapturedPacket {
 		SrcPort: 5060,
 		DstPort: 5060,
 	}
-	udp.SetNetworkLayerForChecksum(ip)
+	_ = udp.SetNetworkLayerForChecksum(ip)
 
-	gopacket.SerializeLayers(buf, opts, eth, ip, udp, gopacket.Payload(payload))
+	_ = gopacket.SerializeLayers(buf, opts, eth, ip, udp, gopacket.Payload(payload))
 
+	// Test packet field conversions (safe: test packet size is small, LinkType is enum)
 	return &data.CapturedPacket{
 		TimestampNs:    time.Now().UnixNano(),
 		Data:           buf.Bytes(),
-		CaptureLength:  uint32(len(buf.Bytes())),
-		OriginalLength: uint32(len(buf.Bytes())),
-		LinkType:       uint32(layers.LinkTypeEthernet),
+		CaptureLength:  uint32(len(buf.Bytes())),        // #nosec G115
+		OriginalLength: uint32(len(buf.Bytes())),        // #nosec G115
+		LinkType:       uint32(layers.LinkTypeEthernet), // #nosec G115
 	}
 }
 

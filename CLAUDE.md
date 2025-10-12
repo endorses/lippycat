@@ -122,6 +122,23 @@ make clean-binaries # Remove all specialized binaries
 make clean-cuda     # Remove CUDA artifacts
 ```
 
+### Version Management
+```bash
+# Bump version (updates VERSION, README.md, creates changelog entry)
+./scripts/bump-version.sh <version> [changelog-message]
+
+# Examples
+./scripts/bump-version.sh 0.2.6 'Bug fixes and improvements'
+./scripts/bump-version.sh 0.3.0 'Major feature release'
+
+# The script will:
+# 1. Update VERSION file and README.md status line
+# 2. Add changelog entry (requires manual editing for details)
+# 3. Show diff and prompt to commit
+# 4. Optionally create git tag (v<version>)
+# 5. Remind to push: git push origin main && git push origin v<version>
+```
+
 ## Development Guidelines
 
 1. **Code Structure**: Follow Go module structure with internal packages
@@ -351,6 +368,61 @@ The `RenderModal()` function provides consistent modal chrome (border, centering
 - Easy to maintain and update modal appearance
 - Reduces code duplication
 - Clear separation of concerns (content vs. chrome)
+
+### FileDialog Component
+
+`FileDialog` (`cmd/tui/components/filedialog.go`) - Modal for file/directory operations with navigation and filtering.
+
+**Architecture:**
+- Uses unified `RenderModal()` for consistent chrome
+- Returns `FileSelectedMsg` on confirmation
+- Four input modes: Navigation, Filename (save), Filter, CreateFolder
+- Supports save/open modes with single/multiple file selection
+
+**Key Features:**
+- Vim-style navigation (hjkl) + arrow keys + home/end/pgup/pgdown
+- Real-time filtering (press `/`) with file type and text matching
+- Inline folder creation (press `n`)
+- Details toggle (press `d`) - permissions and file sizes
+- Filename validation and extension enforcement
+- Fixed-height scrollable viewport
+
+**Usage:**
+```go
+// Create dialog
+dialog := NewSaveFileDialog("~/captures", "capture.pcap", []string{".pcap"})
+dialog := NewOpenFileDialog("~/captures", []string{".yaml"}, allowMultiple)
+
+// Handle selection
+case FileSelectedMsg:
+    path := msg.Path()  // Single file
+```
+
+### Toast Notifications
+
+`Toast` (`cmd/tui/components/toast.go`) - Non-blocking temporary notifications at bottom-center of screen.
+
+**Architecture:**
+- Overlay component (NOT a modal)
+- Queue-based: only one toast visible at a time
+- Auto-dismiss with `ToastTickMsg` lifecycle
+- Click-to-dismiss functionality
+- Types: Success (✓), Error (✗), Info (ℹ), Warning (⚠)
+- Durations: Short (2s), Normal (3s), Long (5s)
+
+**Usage:**
+```go
+// Show toast
+cmd := toast.Show("File saved!", ToastSuccess, ToastDurationLong)
+
+// Always update in parent's Update()
+cmd := m.toast.Update(msg)
+```
+
+**Best Practices:**
+- Use for transient status, not critical errors requiring action
+- Keep messages concise (one line)
+- Let queue handle multiple toasts - don't show simultaneously
 
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.

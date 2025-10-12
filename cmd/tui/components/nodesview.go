@@ -895,7 +895,55 @@ func (n *NodesView) renderContent() string {
 		}
 	}
 
-	return b.String()
+	content := b.String()
+
+	// In graph mode, center the content vertically if it's shorter than viewport
+	if n.viewMode == "graph" && n.ready {
+		contentLines := strings.Count(content, "\n")
+		viewportHeight := n.viewport.Height
+
+		if viewportHeight > 0 && contentLines < viewportHeight {
+			// Calculate top padding to center content
+			topPadding := (viewportHeight - contentLines) / 2
+
+			// Prepend empty lines
+			paddingStr := strings.Repeat("\n", topPadding)
+			content = paddingStr + content
+
+			// Adjust all line tracking by the padding offset
+			if n.selectedNodeLine >= 0 {
+				n.selectedNodeLine += topPadding
+			}
+
+			// Adjust hunter lines map
+			newHunterLines := make(map[int]int)
+			for line, hunterIdx := range n.hunterLines {
+				newHunterLines[line+topPadding] = hunterIdx
+			}
+			n.hunterLines = newHunterLines
+
+			// Adjust processor lines map
+			newProcessorLines := make(map[int]int)
+			for line, procIdx := range n.processorLines {
+				newProcessorLines[line+topPadding] = procIdx
+			}
+			n.processorLines = newProcessorLines
+
+			// Adjust hunter box regions
+			for i := range n.hunterBoxRegions {
+				n.hunterBoxRegions[i].startLine += topPadding
+				n.hunterBoxRegions[i].endLine += topPadding
+			}
+
+			// Adjust processor box regions
+			for i := range n.processorBoxRegions {
+				n.processorBoxRegions[i].startLine += topPadding
+				n.processorBoxRegions[i].endLine += topPadding
+			}
+		}
+	}
+
+	return content
 }
 
 // renderTreeView renders the processors and hunters in a tree structure with table columns

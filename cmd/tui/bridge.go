@@ -260,6 +260,7 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 		Info:      "",
 		RawData:   nil, // Don't copy raw data for performance
 		Interface: pktInfo.Interface,
+		LinkType:  pktInfo.LinkType,
 	}
 
 	// Check for ARP (common link-layer protocol)
@@ -375,6 +376,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		Info:      "",
 		RawData:   rawData, // Use pooled buffer
 		Interface: pktInfo.Interface,
+		LinkType:  pktInfo.LinkType,
 	}
 
 	// Check for link-layer protocols first (ARP, etc.)

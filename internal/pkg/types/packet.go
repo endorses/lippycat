@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/google/gopacket/layers"
 )
 
 // PacketDisplay represents a packet for display purposes.
@@ -17,10 +18,11 @@ type PacketDisplay struct {
 	Protocol  string
 	Length    int
 	Info      string
-	RawData   []byte        // Raw packet bytes for hex dump
-	NodeID    string        // Source node identifier: "Local", hunter_id, or processor_id
-	Interface string        // Network interface where packet was captured
-	VoIPData  *VoIPMetadata // Parsed VoIP metadata (nil if not VoIP)
+	RawData   []byte          // Raw packet bytes for hex dump
+	NodeID    string          // Source node identifier: "Local", hunter_id, or processor_id
+	Interface string          // Network interface where packet was captured
+	VoIPData  *VoIPMetadata   // Parsed VoIP metadata (nil if not VoIP)
+	LinkType  layers.LinkType // Link layer type for PCAP writing
 }
 
 // VoIPMetadata contains parsed VoIP protocol information.

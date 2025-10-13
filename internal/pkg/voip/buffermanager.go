@@ -245,8 +245,15 @@ func (bm *BufferManager) cleanupOldBuffers() {
 }
 
 // Close stops the buffer manager
+// Safe to call multiple times (idempotent)
 func (bm *BufferManager) Close() {
-	close(bm.stopCh)
+	select {
+	case <-bm.stopCh:
+		// Already closed
+		return
+	default:
+		close(bm.stopCh)
+	}
 }
 
 // extractRTPPortsFromSDP extracts RTP ports from SDP body

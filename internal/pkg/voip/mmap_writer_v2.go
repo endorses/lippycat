@@ -1,3 +1,6 @@
+//go:build cli || all
+// +build cli all
+
 package voip
 
 import (

@@ -1,21 +1,17 @@
+//go:build cli || all
+// +build cli all
+
 package voip
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
-)
-
-var (
-	globalBufferMgr *BufferManager
-	bufferOnce      sync.Once
 )
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
@@ -68,14 +64,4 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 			handleUdpPackets(pkt, layer)
 		}
 	}
-}
-
-func containsUserInHeaders(headers map[string]string) bool {
-	for _, field := range []string{"from", "to", "p-asserted-identity"} {
-		val := headers[field]
-		if sipusers.IsSurveiled(val) {
-			return true
-		}
-	}
-	return false
 }

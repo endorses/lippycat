@@ -1,3 +1,6 @@
+//go:build hunter || all
+// +build hunter all
+
 package voip
 
 import (

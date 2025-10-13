@@ -182,15 +182,29 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 
 	// Start goroutine to receive packets
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Notify handler of disconnection after panic
+				if c.handler != nil {
+					c.handler.OnDisconnect(c.addr, fmt.Errorf("panic in packet receiver: %v", r))
+				}
+			}
+		}()
+
 		for {
 			select {
 			case <-c.ctx.Done():
+				// Context cancelled, normal shutdown
 				return
 			default:
 				batch, err := stream.Recv()
 				if err != nil {
 					// Don't report error if context was cancelled (normal shutdown)
-					if c.ctx.Err() == nil && c.handler != nil {
+					if c.ctx.Err() != nil {
+						// Shutdown in progress, exit gracefully
+						return
+					}
+					if c.handler != nil {
 						// Notify handler of disconnection
 						c.handler.OnDisconnect(c.addr, fmt.Errorf("stream error: %w", err))
 					}

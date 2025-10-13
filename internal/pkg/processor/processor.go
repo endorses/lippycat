@@ -1386,6 +1386,11 @@ func (p *Processor) forwardToUpstream(batch *data.PacketBatch) {
 // receiveUpstreamAcks receives acknowledgments from upstream
 func (p *Processor) receiveUpstreamAcks() {
 	defer p.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Recovered from panic in receiveUpstreamAcks", "panic", r)
+		}
+	}()
 
 	p.upstreamMu.Lock()
 	stream := p.upstreamStream
@@ -1397,10 +1402,19 @@ func (p *Processor) receiveUpstreamAcks() {
 	}
 
 	for {
+		// Check context before each Recv to avoid blocking on closed stream
+		select {
+		case <-p.ctx.Done():
+			logger.Debug("receiveUpstreamAcks: context cancelled, exiting")
+			return
+		default:
+		}
+
 		ack, err := stream.Recv()
 		if err != nil {
+			// Check if we're shutting down
 			if p.ctx.Err() != nil {
-				logger.Info("Upstream ack receiver closed")
+				logger.Debug("receiveUpstreamAcks: error during shutdown, exiting gracefully", "error", err)
 				return
 			}
 			logger.Error("Upstream ack receive error", "error", err)

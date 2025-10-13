@@ -2,6 +2,8 @@ package voip
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -9,6 +11,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
+)
+
+var (
+	globalBufferMgr *BufferManager
+	bufferOnce      sync.Once
 )
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
@@ -35,6 +42,18 @@ func StartOfflineVoipSniffer(interfaces, filter string) {
 
 func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 	defer CloseWriters()
+
+	// Initialize buffer manager (5 second timeout, 200 packet max per call)
+	bufferOnce.Do(func() {
+		globalBufferMgr = NewBufferManager(5*time.Second, 200)
+		logger.Info("Initialized VoIP buffer manager", "max_age", "5s", "max_size", 200)
+	})
+	defer func() {
+		if globalBufferMgr != nil {
+			globalBufferMgr.Close()
+		}
+	}()
+
 	for pkt := range ch {
 		packet := pkt.Packet
 		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {

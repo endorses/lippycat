@@ -43,14 +43,14 @@ func main() {
 }
 
 func createPCAPWriter(filename string) (*os.File, *pcapgo.Writer, error) {
-	f, err := os.Create(filename)
+	f, err := os.Create(filename) // #nosec G304 - test script, filename is controlled by main()
 	if err != nil {
 		return nil, nil, err
 	}
 
 	w := pcapgo.NewWriter(f)
 	if err := w.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		f.Close()
+		_ = f.Close() // #nosec G104 - best effort close on error path
 		return nil, nil, err
 	}
 
@@ -121,15 +121,20 @@ func createTCPPacket(srcIP, dstIP string, srcPort, dstPort uint16, seq, ack uint
 		}
 	}
 
-	tcp.SetNetworkLayerForChecksum(ip)
+	_ = tcp.SetNetworkLayerForChecksum(ip) // #nosec G104 - always succeeds for IPv4
 
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{ComputeChecksums: true}
 
+	var err error
 	if payload != nil {
-		gopacket.SerializeLayers(buffer, opts, eth, ip, tcp, gopacket.Payload(payload))
+		err = gopacket.SerializeLayers(buffer, opts, eth, ip, tcp, gopacket.Payload(payload))
 	} else {
-		gopacket.SerializeLayers(buffer, opts, eth, ip, tcp)
+		err = gopacket.SerializeLayers(buffer, opts, eth, ip, tcp)
+	}
+	// Serialization errors should never happen with valid layers, but check anyway
+	if err != nil {
+		panic(fmt.Sprintf("Failed to serialize packet: %v", err))
 	}
 
 	return buffer.Bytes()
@@ -137,7 +142,7 @@ func createTCPPacket(srcIP, dstIP string, srcPort, dstPort uint16, seq, ack uint
 
 func parseIP(ip string) []byte {
 	var result [4]byte
-	fmt.Sscanf(ip, "%d.%d.%d.%d", &result[0], &result[1], &result[2], &result[3])
+	_, _ = fmt.Sscanf(ip, "%d.%d.%d.%d", &result[0], &result[1], &result[2], &result[3]) // #nosec G104 - test data, parsing always succeeds
 	return result[:]
 }
 
@@ -180,6 +185,7 @@ a=rtpmap:0 PCMU/8000
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(pkt), Length: len(pkt)}, pkt); err != nil {
 		return err
 	}
+	// #nosec G115 - SIP message size is always < 4GB
 	srcSeq += uint32(len(invite))
 	ts = ts.Add(time.Millisecond)
 
@@ -214,6 +220,7 @@ a=rtpmap:0 PCMU/8000
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(pkt), Length: len(pkt)}, pkt); err != nil {
 		return err
 	}
+	// #nosec G115 - SIP message size is always < 4GB
 	dstSeq += uint32(len(ok))
 	ts = ts.Add(time.Millisecond)
 
@@ -240,6 +247,7 @@ Content-Length: 0
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(pkt), Length: len(pkt)}, pkt); err != nil {
 		return err
 	}
+	// #nosec G115 - SIP message size is always < 4GB
 	srcSeq += uint32(len(ackSip))
 	ts = ts.Add(time.Millisecond)
 
@@ -259,6 +267,7 @@ Content-Length: 0
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(pkt), Length: len(pkt)}, pkt); err != nil {
 		return err
 	}
+	// #nosec G115 - SIP message size is always < 4GB
 	srcSeq += uint32(len(bye))
 	ts = ts.Add(time.Millisecond)
 
@@ -313,6 +322,7 @@ Content-Length: 0
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(pkt), Length: len(pkt)}, pkt); err != nil {
 		return err
 	}
+	// #nosec G115 - SIP message size is always < 4GB
 	srcSeq += uint32(len(invite))
 	ts = ts.Add(time.Millisecond)
 

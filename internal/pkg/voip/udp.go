@@ -151,41 +151,35 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 			// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 			bodyBytes := StringToBytes(body)
 			if BytesContains(bodyBytes, []byte("m=audio")) {
-				matched, bufferedPackets := globalBufferMgr.CheckFilter(callID, func(m *CallMetadata) bool {
-					// Check if From, To, or P-Asserted-Identity matches tracked users
-					return containsUserInHeaders(map[string]string{
-						"from":                m.From,
-						"to":                  m.To,
-						"p-asserted-identity": m.PAssertedIdentity,
-					})
-				})
-
-				if matched {
-					// Create call tracker entry
-					call := GetOrCreateCall(callID, pkt.LinkType)
-					if call != nil {
-						monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
-							"from": metadata.From,
-							"to":   metadata.To,
+				// Use callback-based filter check for flexible handling
+				matched := globalBufferMgr.CheckFilterWithCallback(
+					callID,
+					func(m *CallMetadata) bool {
+						// Check if From, To, or P-Asserted-Identity matches tracked users
+						return containsUserInHeaders(map[string]string{
+							"from":                m.From,
+							"to":                  m.To,
+							"p-asserted-identity": m.PAssertedIdentity,
 						})
-					}
-
-					// Write all buffered packets to file
-					if viper.GetViper().GetBool("writeVoip") {
-						for _, buffPkt := range bufferedPackets {
-							// Determine if packet is SIP or RTP and write accordingly
-							if isSIPPacket(buffPkt) {
-								WriteSIP(callID, buffPkt)
-							} else {
-								WriteRTP(callID, buffPkt)
-							}
+					},
+					func(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
+						// Create call tracker entry
+						call := GetOrCreateCall(callID, pkt.LinkType)
+						if call != nil {
+							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
+								"from": metadata.From,
+								"to":   metadata.To,
+							})
 						}
-					}
 
-					// Extract RTP ports from SDP for future RTP association
-					ExtractPortFromSdp(body, callID)
-				}
-				// If not matched, buffer is automatically discarded by CheckFilter
+						// Write all buffered packets using helper
+						handleMatchedCallForFileWrite(callID, packets, metadata)
+
+						// Extract RTP ports from SDP for future RTP association
+						ExtractPortFromSdp(body, callID)
+					},
+				)
+				_ = matched // Callback already handled everything
 			}
 		}
 	} else {
@@ -232,4 +226,20 @@ func isSIPPacket(packet gopacket.Packet) bool {
 		}
 	}
 	return false
+}
+
+// handleMatchedCallForFileWrite is a callback for BufferManager that writes packets to files
+func handleMatchedCallForFileWrite(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
+	if !viper.GetViper().GetBool("writeVoip") {
+		return
+	}
+
+	// Write all buffered packets
+	for _, packet := range packets {
+		if isSIPPacket(packet) {
+			WriteSIP(callID, packet)
+		} else {
+			WriteRTP(callID, packet)
+		}
+	}
 }

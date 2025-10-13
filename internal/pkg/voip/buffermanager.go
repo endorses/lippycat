@@ -129,6 +129,49 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 	return matched, packets
 }
 
+// CheckFilterWithCallback evaluates filter and calls callback for each packet if matched
+// This allows different handling strategies (file write, gRPC forward, etc.)
+func (bm *BufferManager) CheckFilterWithCallback(
+	callID string,
+	filterFunc func(*CallMetadata) bool,
+	onMatch func(callID string, packets []gopacket.Packet, metadata *CallMetadata),
+) bool {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	buffer, exists := bm.buffers[callID]
+	if !exists || buffer.GetMetadata() == nil {
+		return false
+	}
+
+	// Check filter
+	matched := filterFunc(buffer.GetMetadata())
+	buffer.SetFilterResult(matched)
+
+	if matched {
+		// Get all buffered packets
+		packets := buffer.GetAllPackets()
+		logger.Info("Call matched filter, invoking callback",
+			"call_id", SanitizeCallIDForLogging(callID),
+			"packet_count", len(packets),
+			"from", buffer.GetMetadata().From,
+			"to", buffer.GetMetadata().To)
+
+		// Call the handler callback
+		if onMatch != nil {
+			onMatch(callID, packets, buffer.GetMetadata())
+		}
+	} else {
+		// Discard buffer
+		delete(bm.buffers, callID)
+		logger.Debug("Call did not match filter, discarding buffer",
+			"call_id", SanitizeCallIDForLogging(callID),
+			"packet_count", buffer.GetPacketCount())
+	}
+
+	return matched
+}
+
 // IsCallMatched checks if a call has been evaluated and matched the filter
 func (bm *BufferManager) IsCallMatched(callID string) bool {
 	bm.mu.RLock()

@@ -407,17 +407,29 @@ func (h *Hunter) startStreaming() error {
 // receiveStreamControl receives and processes flow control messages from processor
 func (h *Hunter) receiveStreamControl(stream data.DataService_StreamPacketsClient) {
 	defer h.connWg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Recovered from panic in receiveStreamControl", "panic", r)
+		}
+	}()
 
 	for {
 		select {
 		case <-h.connCtx.Done():
+			logger.Debug("receiveStreamControl: connection context cancelled, exiting")
+			return
+		case <-h.ctx.Done():
+			logger.Debug("receiveStreamControl: context cancelled, exiting")
 			return
 		default:
 			ctrl, err := stream.Recv()
 			if err != nil {
-				if h.ctx.Err() == nil {
-					logger.Error("Stream control receive error", "error", err)
+				// Check if we're shutting down
+				if h.ctx.Err() != nil || h.connCtx.Err() != nil {
+					logger.Debug("receiveStreamControl: error during shutdown, exiting gracefully", "error", err)
+					return
 				}
+				logger.Error("Stream control receive error", "error", err)
 				return
 			}
 
@@ -772,6 +784,11 @@ func (h *Hunter) batchSender() {
 // handleStreamControl receives flow control messages from processor
 func (h *Hunter) handleStreamControl() {
 	defer h.connWg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Recovered from panic in handleStreamControl", "panic", r)
+		}
+	}()
 
 	h.streamMu.Lock()
 	stream := h.stream
@@ -783,6 +800,17 @@ func (h *Hunter) handleStreamControl() {
 	}
 
 	for {
+		// Check context before each Recv to avoid blocking on closed stream
+		select {
+		case <-h.ctx.Done():
+			logger.Debug("handleStreamControl: context cancelled, exiting")
+			return
+		case <-h.connCtx.Done():
+			logger.Debug("handleStreamControl: connection context cancelled, exiting")
+			return
+		default:
+		}
+
 		ctrl, err := stream.Recv()
 		if err == io.EOF {
 			logger.Info("Stream closed by processor")
@@ -790,8 +818,10 @@ func (h *Hunter) handleStreamControl() {
 			return
 		}
 		if err != nil {
-			if h.ctx.Err() != nil {
+			// Check if we're shutting down
+			if h.ctx.Err() != nil || h.connCtx.Err() != nil {
 				// Context canceled, normal shutdown
+				logger.Debug("handleStreamControl: error during shutdown, exiting gracefully", "error", err)
 				return
 			}
 			logger.Error("Stream control error", "error", err)
@@ -907,13 +937,36 @@ func (h *Hunter) subscribeToFilters() {
 	errCh := make(chan error, constants.ErrorChannelBuffer)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Recovered from panic in filter subscription receiver", "panic", r)
+			}
+		}()
 		for {
+			// Check context before Recv
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-h.connCtx.Done():
+				return
+			default:
+			}
+
 			update, err := stream.Recv()
 			if err != nil {
-				errCh <- err
+				// Only send error if not shutting down
+				if h.ctx.Err() == nil && h.connCtx.Err() == nil {
+					errCh <- err
+				}
 				return
 			}
-			updateCh <- update
+			select {
+			case updateCh <- update:
+			case <-h.ctx.Done():
+				return
+			case <-h.connCtx.Done():
+				return
+			}
 		}
 	}()
 
@@ -1044,13 +1097,36 @@ func (h *Hunter) sendHeartbeats() {
 	respErrCh := make(chan error, constants.ErrorChannelBuffer)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("Recovered from panic in heartbeat receiver", "panic", r)
+			}
+		}()
 		for {
+			// Check context before Recv
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-h.connCtx.Done():
+				return
+			default:
+			}
+
 			resp, err := stream.Recv()
 			if err != nil {
-				respErrCh <- err
+				// Only send error if not shutting down
+				if h.ctx.Err() == nil && h.connCtx.Err() == nil {
+					respErrCh <- err
+				}
 				return
 			}
-			respCh <- resp
+			select {
+			case respCh <- resp:
+			case <-h.ctx.Done():
+				return
+			case <-h.connCtx.Done():
+				return
+			}
 		}
 	}()
 

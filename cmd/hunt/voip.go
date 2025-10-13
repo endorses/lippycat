@@ -164,19 +164,28 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 // runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly
 func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager) error {
 	// Create TCP SIP handler for hunter mode
-	handler := voip.NewHunterForwardHandler(h, bufferMgr)
+	tcpHandler := voip.NewHunterForwardHandler(h, bufferMgr)
 
 	// Create TCP stream factory with hunter handler
 	// The factory will be automatically cleaned up when context is cancelled
-	_ = voip.NewSipStreamFactory(ctx, handler)
+	_ = voip.NewSipStreamFactory(ctx, tcpHandler)
 
-	logger.Info("VoIP hunter initialized with TCP SIP support",
-		"handler", "HunterForwardHandler",
-		"buffer_manager", "enabled")
+	// Create VoIP packet processor for UDP buffering
+	// This handles UDP SIP/RTP packets with buffering and filtering
+	processor := voip.NewVoIPPacketProcessor(h, bufferMgr)
+	h.SetPacketProcessor(processor)
+
+	logger.Info("VoIP hunter initialized with complete buffering support",
+		"tcp_handler", "HunterForwardHandler",
+		"udp_handler", "UDPPacketHandler",
+		"buffer_manager", "enabled",
+		"features", "TCP SIP reassembly, UDP SIP buffering, UDP RTP buffering")
 
 	// Start the hunter's normal operation
-	// The hunter will capture packets and forward them via its existing pipeline
-	// TCP SIP packets will be reassembled, filtered, and forwarded with metadata via the handler
+	// The hunter will capture packets and forward them via its existing pipeline:
+	// - TCP SIP packets: reassembled by tcpassembly, filtered by HunterForwardHandler
+	// - UDP SIP packets: buffered by UDPPacketHandler until filter decision
+	// - UDP RTP packets: buffered by UDPPacketHandler, associated with SIP calls
 	if err := h.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start hunter: %w", err)
 	}

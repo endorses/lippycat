@@ -27,6 +27,15 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// PacketProcessor is an optional interface for custom packet processing
+// before packets are forwarded to the processor. This allows VoIP mode
+// to buffer and filter packets based on call state.
+type PacketProcessor interface {
+	// ProcessPacket processes a packet and returns true if it should be forwarded immediately.
+	// If false, the packet may be buffered or dropped by the processor.
+	ProcessPacket(pktInfo capture.PacketInfo) bool
+}
+
 // Config contains hunter configuration
 type Config struct {
 	ProcessorAddr string
@@ -90,6 +99,9 @@ type Hunter struct {
 	filters    []*management.Filter
 	voipFilter *VoIPFilter // GPU-accelerated VoIP filter
 
+	// Custom packet processing
+	packetProcessor PacketProcessor // Optional custom processor for VoIP buffering, etc.
+
 	// Reconnection
 	reconnectAttempts    int
 	maxReconnectAttempts int
@@ -145,6 +157,12 @@ func New(config Config) (*Hunter, error) {
 	}
 
 	return h, nil
+}
+
+// SetPacketProcessor sets a custom packet processor for this hunter.
+// This should be called before Start() to enable custom packet handling.
+func (h *Hunter) SetPacketProcessor(processor PacketProcessor) {
+	h.packetProcessor = processor
 }
 
 // Start begins hunter operation
@@ -623,8 +641,17 @@ func (h *Hunter) forwardPackets() {
 			// Use atomic increment - no mutex needed
 			h.stats.PacketsCaptured.Add(1)
 
-			// Apply VoIP filter if enabled
-			if h.voipFilter != nil {
+			// Apply custom packet processor if set (for VoIP buffering, etc.)
+			// The processor returns true if packet should be forwarded immediately
+			if h.packetProcessor != nil {
+				if !h.packetProcessor.ProcessPacket(pktInfo) {
+					// Packet was buffered or filtered out by processor
+					continue
+				}
+				// Packet should be forwarded - count it as matched
+				h.stats.PacketsMatched.Add(1)
+			} else if h.voipFilter != nil {
+				// Fall back to simple VoIP filter if no custom processor
 				if !h.voipFilter.MatchPacket(pktInfo.Packet) {
 					// Packet didn't match VoIP filter - skip it
 					continue

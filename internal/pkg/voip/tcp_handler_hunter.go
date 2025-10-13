@@ -66,13 +66,13 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 		"buffered_packets", len(bufferedPackets))
 
 	// Create protobuf metadata for SIP
-	// Note: P-Asserted-Identity not yet in protobuf definition
 	pbMetadata := &data.PacketMetadata{
 		Sip: &data.SIPMetadata{
-			CallId:   callID,
-			FromUser: metadata.From,
-			ToUser:   metadata.To,
-			Method:   metadata.Method,
+			CallId:            callID,
+			FromUser:          metadata.From,
+			ToUser:            metadata.To,
+			Method:            metadata.Method,
+			PAssertedIdentity: metadata.PAssertedIdentity,
 		},
 	}
 

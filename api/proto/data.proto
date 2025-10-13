@@ -107,6 +107,9 @@ message SIPMetadata {
 
     // Response code (for responses)
     uint32 response_code = 5;
+
+    // P-Asserted-Identity header (RFC 3325)
+    string p_asserted_identity = 6;
 }
 
 // RTPMetadata for RTP packets

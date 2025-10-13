@@ -263,14 +263,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Hunter selector modal
 	if m.uiState.HunterSelector.IsActive() {
-		cmd := m.uiState.HunterSelector.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		// Only intercept user input (KeyMsg, MouseMsg), let internal messages pass through
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.HunterSelector.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (HuntersLoadedMsg, LoadHuntersFromProcessorMsg, etc.)
 	}
 
 	// Filter manager modal
 	if m.uiState.FilterManager.IsActive() {
-		cmd := m.uiState.FilterManager.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		// Only intercept user input (KeyMsg, MouseMsg), let internal messages pass through
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.FilterManager.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (FiltersLoadedMsg, FilterOperationMsg, etc.)
 	}
 
 	// Settings file dialog modal (for opening PCAP files)

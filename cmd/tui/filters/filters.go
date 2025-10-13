@@ -81,3 +81,27 @@ func (fc *FilterChain) GetFilters() []Filter {
 func (fc *FilterChain) IsEmpty() bool {
 	return len(fc.filters) == 0
 }
+
+// Count returns the number of filters in the chain
+func (fc *FilterChain) Count() int {
+	return len(fc.filters)
+}
+
+// RemoveLast removes the last filter from the chain
+// Returns true if a filter was removed, false if the chain was empty
+func (fc *FilterChain) RemoveLast() bool {
+	if len(fc.filters) == 0 {
+		return false
+	}
+	fc.filters = fc.filters[:len(fc.filters)-1]
+	return true
+}
+
+// GetFilterDescriptions returns human-readable descriptions of all filters
+func (fc *FilterChain) GetFilterDescriptions() []string {
+	descriptions := make([]string, len(fc.filters))
+	for i, filter := range fc.filters {
+		descriptions[i] = filter.String()
+	}
+	return descriptions
+}

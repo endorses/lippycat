@@ -403,21 +403,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.uiState.FilterMode = true
 			m.uiState.FilterInput.Activate()
 			m.uiState.FilterInput.Clear()
+			// Update filter input with current active filters
+			filterCount := m.packetStore.FilterChain.Count()
+			filterDescs := m.packetStore.FilterChain.GetFilterDescriptions()
+			m.uiState.FilterInput.SetActiveFilters(filterCount, filterDescs)
 			return m, nil
 
-		case "c": // Clear filters
+		case "c": // Clear all filters
 			if m.packetStore.HasFilter() {
+				filterCount := m.packetStore.FilterChain.Count()
 				m.packetStore.ClearFilter()
 				m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 				m.packetStore.MatchedPackets = m.packetStore.PacketsCount
 				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 
-				// Show toast notification
+				// Show toast notification with count
+				msg := fmt.Sprintf("All filters cleared (%d removed)", filterCount)
+				if filterCount == 1 {
+					msg = "Filter cleared"
+				}
 				return m, m.uiState.Toast.Show(
-					"Filter cleared",
+					msg,
 					components.ToastInfo,
 					components.ToastDurationShort,
 				)
+			}
+			return m, nil
+
+		case "C": // Remove last filter (Shift+C)
+			if m.packetStore.HasFilter() {
+				filterCount := m.packetStore.FilterChain.Count()
+				if m.packetStore.FilterChain.RemoveLast() {
+					// Reapply remaining filters
+					m.applyFilters()
+
+					// Update display
+					if !m.packetStore.HasFilter() {
+						m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+					} else {
+						m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+					}
+
+					// Show toast notification
+					remainingCount := filterCount - 1
+					msg := "Last filter removed"
+					if remainingCount > 0 {
+						msg = fmt.Sprintf("Last filter removed (%d remaining)", remainingCount)
+					}
+					return m, m.uiState.Toast.Show(
+						msg,
+						components.ToastInfo,
+						components.ToastDurationShort,
+					)
+				}
 			}
 			return m, nil
 
@@ -1872,6 +1910,7 @@ func (m Model) View() string {
 	// Update footer state
 	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)
 	m.uiState.Footer.SetHasFilter(m.packetStore.HasFilter())
+	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())
 
 	// Render components
 	headerView := m.uiState.Header.View()
@@ -2167,11 +2206,12 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// parseAndApplyFilter parses a filter string and applies it
+// parseAndApplyFilter parses a filter string and adds it to the filter chain
+// This enables progressive/stacked filtering - each new filter narrows down the results
 // Returns a tea.Cmd for showing toast notifications on error
 func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
-	// Clear existing filters
-	m.packetStore.ClearFilter()
+	// NOTE: We do NOT clear existing filters - this allows filter stacking
+	// Use 'c' to clear all filters or 'C' to remove the last filter
 
 	if filterStr == "" {
 		return nil
@@ -2189,11 +2229,15 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 			components.ToastDurationLong,
 		)
 
-		// Reapply filters to all packets (will show unfiltered since we cleared)
+		// Reapply filters to all packets (don't clear - keep existing filters)
 		m.applyFilters()
 
 		// Update display
-		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		if !m.packetStore.HasFilter() {
+			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		} else {
+			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+		}
 
 		return toastCmd
 	}
@@ -2206,6 +2250,16 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 	} else {
 		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+	}
+
+	// Show toast with filter count
+	filterCount := m.packetStore.FilterChain.Count()
+	if filterCount > 1 {
+		return m.uiState.Toast.Show(
+			fmt.Sprintf("Filter added (%d filters active)", filterCount),
+			components.ToastSuccess,
+			components.ToastDurationShort,
+		)
 	}
 
 	return nil

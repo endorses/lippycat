@@ -4,20 +4,24 @@
 package components
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
 
 // FilterInput is a simple text input for filters
 type FilterInput struct {
-	value      string
-	cursor     int
-	prompt     string // "/" for filter, "?" for search
-	theme      themes.Theme
-	width      int
-	active     bool
-	history    []string
-	historyIdx int
+	value             string
+	cursor            int
+	prompt            string // "/" for filter, "?" for search
+	theme             themes.Theme
+	width             int
+	active            bool
+	history           []string
+	historyIdx        int
+	activeFilters     []string // Active filter descriptions (for stacking display)
+	activeFilterCount int      // Number of active filters
 }
 
 // NewFilterInput creates a new filter input
@@ -185,6 +189,12 @@ func (f *FilterInput) DeleteToEnd() {
 	f.value = f.value[:f.cursor]
 }
 
+// SetActiveFilters sets the active filter information for display
+func (f *FilterInput) SetActiveFilters(count int, descriptions []string) {
+	f.activeFilterCount = count
+	f.activeFilters = descriptions
+}
+
 // View renders the filter input
 func (f *FilterInput) View() string {
 	if !f.active {
@@ -229,6 +239,27 @@ func (f *FilterInput) View() string {
 	}
 
 	input := promptStyle.Render(f.prompt) + " " + inputStyle.Render(displayValue)
+
+	// Show active filter count if there are any
+	if f.activeFilterCount > 0 {
+		filterInfoStyle := lipgloss.NewStyle().
+			Foreground(f.theme.InfoColor).
+			Italic(true)
+
+		filterCountInfo := filterInfoStyle.Render(
+			fmt.Sprintf("  [%d filter%s active - will stack with new filter]",
+				f.activeFilterCount,
+				func() string {
+					if f.activeFilterCount == 1 {
+						return ""
+					} else {
+						return "s"
+					}
+				}(),
+			),
+		)
+		input = input + filterCountInfo
+	}
 
 	return containerStyle.Render(input)
 }

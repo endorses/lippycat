@@ -17,6 +17,7 @@ type Footer struct {
 	theme         themes.Theme
 	filterMode    bool
 	hasFilter     bool
+	filterCount   int  // Number of stacked filters
 	streamingSave bool // True when streaming save is active
 }
 
@@ -48,6 +49,11 @@ func (f *Footer) SetFilterMode(active bool) {
 // SetHasFilter sets whether filters are currently applied
 func (f *Footer) SetHasFilter(hasFilter bool) {
 	f.hasFilter = hasFilter
+}
+
+// SetFilterCount sets the number of stacked filters
+func (f *Footer) SetFilterCount(count int) {
+	f.filterCount = count
 }
 
 // SetStreamingSave sets whether a streaming save is currently active
@@ -108,7 +114,17 @@ func (f *Footer) View() string {
 		)
 
 		if f.hasFilter {
-			bindings = append(bindings, keyStyle.Render("c")+descStyle.Render(": clear filter"))
+			// Show filter count and clear options
+			clearText := "clear filter"
+			if f.filterCount > 1 {
+				clearText = fmt.Sprintf("clear %d filters", f.filterCount)
+			}
+			bindings = append(bindings, keyStyle.Render("c")+descStyle.Render(": "+clearText))
+
+			// Show "remove last" option if multiple filters
+			if f.filterCount > 1 {
+				bindings = append(bindings, keyStyle.Render("C")+descStyle.Render(": remove last"))
+			}
 		}
 
 		bindings = append(bindings, keyStyle.Render("q")+descStyle.Render(": quit"))

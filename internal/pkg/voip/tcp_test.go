@@ -19,13 +19,13 @@ import (
 
 func TestNewSipStreamFactory(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	assert.NotNil(t, factory, "NewSipStreamFactory should return a non-nil factory")
 }
 
 func TestSipStreamFactoryNew(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 
 	// Create mock network and transport flows
 	var netFlow, transportFlow gopacket.Flow
@@ -153,7 +153,7 @@ func TestCallIDDetector_Close_Before_Set(t *testing.T) {
 
 func TestSipStreamFactory_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	factory := NewSipStreamFactory(ctx)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 
 	// Create a stream
 	var netFlow, transportFlow gopacket.Flow
@@ -176,7 +176,7 @@ func TestSipStreamFactory_ContextCancellation(t *testing.T) {
 
 func TestSipStreamFactory_MultipleStreams(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer func() {
 		if closer, ok := factory.(*sipStreamFactory); ok {
 			closer.Close()
@@ -247,7 +247,7 @@ func TestHandleTcpPackets_Integration(t *testing.T) {
 
 	// Create assembler
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx)
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
@@ -303,7 +303,7 @@ func TestHandleTcpPackets_NonSipPort(t *testing.T) {
 
 	// Create assembler
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx)
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
@@ -634,7 +634,7 @@ func TestSipStreamFactoryHealthChecks(t *testing.T) {
 	config.StreamQueueBuffer = 5
 	config.TCPCleanupInterval = 100 * time.Millisecond
 
-	factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler()).(*sipStreamFactory)
 	defer factory.Close()
 
 	// Test initial healthy state
@@ -674,7 +674,7 @@ func TestGlobalTCPAssemblerMonitoring(t *testing.T) {
 	assert.False(t, healthy)
 
 	// Register a factory
-	factory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler()).(*sipStreamFactory)
 	defer factory.Close()
 
 	// Now health should be available

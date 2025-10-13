@@ -180,6 +180,48 @@ func flushTCPPacketsToCall(flow gopacket.Flow, callID string, writeVoip bool) {
 	releaseBuffer(buffer)
 }
 
+// getTCPBufferedPackets returns buffered packets for a flow without clearing them
+// Used by hunter mode to forward packets to processor
+func getTCPBufferedPackets(flow gopacket.Flow) []gopacket.Packet {
+	tcpPacketBuffersMu.Lock()
+	defer tcpPacketBuffersMu.Unlock()
+
+	buffer, exists := tcpPacketBuffers[flow]
+	if !exists || len(buffer.packets) == 0 {
+		return nil
+	}
+
+	// Copy packets to return slice
+	packets := make([]gopacket.Packet, len(buffer.packets))
+	for i, pkt := range buffer.packets {
+		packets[i] = pkt.Packet
+	}
+
+	// Clear and release buffer
+	buffer.packets = buffer.packets[:0]
+	delete(tcpPacketBuffers, flow)
+	releaseBuffer(buffer)
+
+	return packets
+}
+
+// discardTCPBufferedPackets removes buffered packets for a flow without writing them
+// Used when SIP message doesn't match filter
+func discardTCPBufferedPackets(flow gopacket.Flow) {
+	tcpPacketBuffersMu.Lock()
+	defer tcpPacketBuffersMu.Unlock()
+
+	buffer, exists := tcpPacketBuffers[flow]
+	if !exists {
+		return
+	}
+
+	// Clear and release buffer
+	buffer.packets = buffer.packets[:0]
+	delete(tcpPacketBuffers, flow)
+	releaseBuffer(buffer)
+}
+
 // TCP buffer statistics
 type tcpBufferStatsInternal struct {
 	mu                   sync.RWMutex

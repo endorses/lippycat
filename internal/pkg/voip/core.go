@@ -24,7 +24,9 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		"device_count", len(devices),
 		"filter", filter)
 
-	streamFactory := NewSipStreamFactory(ctx)
+	// Create handler for local file writing
+	handler := NewLocalFileHandler()
+	streamFactory := NewSipStreamFactory(ctx, handler)
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 

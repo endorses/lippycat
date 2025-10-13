@@ -23,7 +23,8 @@ type sipStreamFactory struct {
 	streamQueue      chan *queuedStream
 	allWorkers       sync.WaitGroup // tracks all background goroutines
 	cleanupTicker    *time.Ticker
-	closed           int32 // atomic flag to track if factory is closed
+	closed           int32             // atomic flag to track if factory is closed
+	handler          SIPMessageHandler // handler for processing complete SIP messages
 }
 
 type queuedStream struct {
@@ -33,7 +34,7 @@ type queuedStream struct {
 	createdAt time.Time
 }
 
-func NewSipStreamFactory(ctx context.Context) tcpassembly.StreamFactory {
+func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) tcpassembly.StreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 	config := GetConfig()
 
@@ -44,6 +45,7 @@ func NewSipStreamFactory(ctx context.Context) tcpassembly.StreamFactory {
 		ctx:           ctx,
 		cancel:        cancel,
 		config:        config,
+		handler:       handler,
 		streamQueue:   make(chan *queuedStream, config.StreamQueueBuffer),
 		cleanupTicker: time.NewTicker(config.TCPCleanupInterval),
 	}

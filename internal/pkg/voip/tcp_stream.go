@@ -16,6 +16,18 @@ import (
 	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
+// SIPMessageHandler processes complete SIP messages after TCP reassembly
+type SIPMessageHandler interface {
+	// HandleSIPMessage is called when a complete SIP message has been reassembled from TCP stream
+	// Parameters:
+	//   - sipMessage: complete SIP message bytes (headers + body)
+	//   - callID: extracted Call-ID from message headers
+	//   - flow: network flow identifier (for associating with buffered TCP packets)
+	// Returns:
+	//   - bool: true if message was accepted/matched filter (for metrics)
+	HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool
+}
+
 // CallIDDetector manages Call-ID detection with timeout support
 type CallIDDetector struct {
 	callID   string
@@ -428,16 +440,15 @@ func (s *SIPStream) processSipMessage(sipMessage []byte) {
 	}
 
 	if callID != "" {
-		// Flush any buffered TCP packets to this call
-		flushTCPPacketsToCall(s.flow, callID, true)
-
 		// Notify the Call-ID detector
 		if s.callIDDetector != nil {
 			s.callIDDetector.SetCallID(callID)
 		}
 
-		// Process the SIP message through the VoIP handler
-		handleSipMessage(sipMessage)
+		// Delegate to the message handler
+		if s.factory != nil && s.factory.handler != nil {
+			s.factory.handler.HandleSIPMessage(sipMessage, callID, s.flow)
+		}
 	}
 }
 

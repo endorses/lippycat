@@ -20,6 +20,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -867,6 +868,56 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
 		// TODO: Add metadata extraction (SIP, RTP, etc.)
 	}
+}
+
+// ForwardPacketWithMetadata forwards a packet with embedded metadata to the processor
+// This is used by TCP SIP handler to forward reassembled packets with extracted metadata
+func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata) error {
+	if packet == nil {
+		return fmt.Errorf("cannot forward nil packet")
+	}
+
+	captureLen := 0
+	originalLen := 0
+	var packetData []byte
+	linkType := uint32(1) // Default to Ethernet (LinkTypeEthernet = 1)
+
+	if packet.Data() != nil {
+		packetData = packet.Data()
+		captureLen = len(packetData)
+	}
+	if meta := packet.Metadata(); meta != nil {
+		captureLen = meta.CaptureLength
+		originalLen = meta.Length
+	}
+	// Get LinkType from link layer if available
+	if linkLayer := packet.LinkLayer(); linkLayer != nil {
+		linkType = uint32(linkLayer.LayerType()) // #nosec G115
+	}
+
+	// Create protobuf packet with embedded metadata
+	pbPkt := &data.CapturedPacket{
+		Data:           packetData,
+		TimestampNs:    time.Now().UnixNano(),
+		CaptureLength:  uint32(captureLen),  // #nosec G115
+		OriginalLength: uint32(originalLen), // #nosec G115
+		InterfaceIndex: 0,
+		LinkType:       linkType,
+		Metadata:       metadata, // Embedded metadata from TCP SIP handler
+	}
+
+	// Add to current batch
+	h.batchMu.Lock()
+	h.currentBatch = append(h.currentBatch, pbPkt)
+	batchLen := len(h.currentBatch)
+	h.batchMu.Unlock()
+
+	// Send batch if full
+	if batchLen >= h.config.BatchSize {
+		h.sendBatch()
+	}
+
+	return nil
 }
 
 // cleanup closes connections

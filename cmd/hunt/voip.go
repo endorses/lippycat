@@ -161,28 +161,25 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering
+// runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly
 func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager) error {
+	// Create TCP SIP handler for hunter mode
+	handler := voip.NewHunterForwardHandler(h, bufferMgr)
+
+	// Create TCP stream factory with hunter handler
+	// The factory will be automatically cleaned up when context is cancelled
+	_ = voip.NewSipStreamFactory(ctx, handler)
+
+	logger.Info("VoIP hunter initialized with TCP SIP support",
+		"handler", "HunterForwardHandler",
+		"buffer_manager", "enabled")
+
 	// Start the hunter's normal operation
+	// The hunter will capture packets and forward them via its existing pipeline
+	// TCP SIP packets will be reassembled, filtered, and forwarded with metadata via the handler
 	if err := h.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start hunter: %w", err)
 	}
-
-	// TODO: This is a placeholder. The actual implementation would require:
-	// 1. Hooking into hunter's packet processing pipeline
-	// 2. Intercepting packets before forwarding
-	// 3. Buffering SIP/RTP packets
-	// 4. Checking filter and forwarding only matched calls
-	//
-	// This requires refactoring hunter's internal packet loop to support
-	// packet interception callbacks, which is beyond the current scope.
-	//
-	// For now, this creates the command structure. The full implementation
-	// would follow the same pattern as handleUdpPacketsWithBuffer but with
-	// h.ForwardPacket() instead of WriteSIP/WriteRTP.
-
-	logger.Warn("VoIP buffering integration with hunter requires additional refactoring")
-	logger.Warn("For now, using standard hunter mode with VoIP filter flag")
 
 	// Block until context is done
 	<-ctx.Done()

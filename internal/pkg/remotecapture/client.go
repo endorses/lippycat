@@ -63,6 +63,12 @@ type Client struct {
 	// Stream health monitoring
 	lastPacketTime time.Time
 	healthMu       sync.RWMutex
+
+	// Call aggregation for VoIP monitoring
+	callsMu         sync.RWMutex
+	calls           map[string]*types.CallInfo // callID -> call state
+	lastCallUpdate  time.Time
+	callUpdateTimer *time.Timer
 }
 
 // NewClient creates a new remote capture client (deprecated, use NewClientWithConfig)
@@ -118,6 +124,7 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 		addr:           config.Address,
 		interfaces:     make(map[string][]string),
 		lastPacketTime: time.Now(),
+		calls:          make(map[string]*types.CallInfo),
 	}
 
 	// Detect node type by checking if GetHunterStatus is available
@@ -222,9 +229,17 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 					for _, pkt := range batch.Packets {
 						display := c.convertToPacketDisplay(pkt, batch.HunterId)
 						displays = append(displays, display)
+
+						// Update call state from VoIP metadata
+						if pkt.Metadata != nil && pkt.Metadata.Sip != nil {
+							c.updateCallState(pkt, batch.HunterId)
+						}
 					}
 					// Send entire batch to handler
 					c.handler.OnPacketBatch(displays)
+
+					// Periodically notify handler of call updates
+					c.maybeNotifyCallUpdates()
 				}
 			}
 		}
@@ -709,4 +724,120 @@ func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials
 	}
 
 	return credentials.NewTLS(tlsConfig), nil
+}
+
+// updateCallState updates call state from SIP packet metadata
+func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
+	sip := pkt.Metadata.Sip
+	if sip == nil || sip.CallId == "" {
+		return
+	}
+
+	c.callsMu.Lock()
+	defer c.callsMu.Unlock()
+
+	call, exists := c.calls[sip.CallId]
+	if !exists {
+		// New call
+		call = &types.CallInfo{
+			CallID:    sip.CallId,
+			From:      sip.FromUser,
+			To:        sip.ToUser,
+			State:     "NEW",
+			StartTime: time.Unix(0, pkt.TimestampNs),
+			NodeID:    c.nodeID,
+			Hunters:   []string{hunterID},
+		}
+		c.calls[sip.CallId] = call
+	} else {
+		// Update existing call
+		if !contains(call.Hunters, hunterID) {
+			call.Hunters = append(call.Hunters, hunterID)
+		}
+	}
+
+	// Update state based on SIP method and response code
+	call.PacketCount++
+	deriveSIPState(call, sip.Method, sip.ResponseCode)
+}
+
+// deriveSIPState updates call state based on SIP message
+func deriveSIPState(call *types.CallInfo, method string, responseCode uint32) {
+	switch method {
+	case "INVITE":
+		if call.State == "NEW" {
+			call.State = "RINGING"
+		}
+	case "ACK":
+		if call.State == "RINGING" {
+			call.State = "ACTIVE"
+		}
+	case "BYE":
+		call.State = "ENDED"
+		if call.EndTime.IsZero() {
+			call.EndTime = time.Now()
+		}
+	case "CANCEL":
+		call.State = "FAILED"
+		if call.EndTime.IsZero() {
+			call.EndTime = time.Now()
+		}
+	}
+
+	// Handle response codes
+	if responseCode >= 200 && responseCode < 300 {
+		// 2xx Success
+		if call.State == "RINGING" {
+			call.State = "ACTIVE"
+		}
+	} else if responseCode >= 400 {
+		// 4xx/5xx/6xx Error
+		call.State = "FAILED"
+		if call.EndTime.IsZero() {
+			call.EndTime = time.Now()
+		}
+	}
+}
+
+// maybeNotifyCallUpdates periodically notifies handler of call state updates
+func (c *Client) maybeNotifyCallUpdates() {
+	// Throttle updates to max every 500ms
+	c.callsMu.RLock()
+	lastUpdate := c.lastCallUpdate
+	c.callsMu.RUnlock()
+
+	if time.Since(lastUpdate) < 500*time.Millisecond {
+		return
+	}
+
+	c.callsMu.Lock()
+	c.lastCallUpdate = time.Now()
+
+	// Copy calls to slice for notification
+	calls := make([]types.CallInfo, 0, len(c.calls))
+	for _, call := range c.calls {
+		// Calculate duration for active calls
+		if call.State == "ACTIVE" && call.EndTime.IsZero() {
+			call.Duration = time.Since(call.StartTime)
+		} else if !call.EndTime.IsZero() {
+			call.Duration = call.EndTime.Sub(call.StartTime)
+		}
+		calls = append(calls, *call)
+	}
+	c.callsMu.Unlock()
+
+	// Notify handler
+	if c.handler != nil && len(calls) > 0 {
+		c.handler.OnCallUpdate(calls)
+	}
+}
+
+// contains checks if a string slice contains a specific string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

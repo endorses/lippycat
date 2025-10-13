@@ -1001,10 +1001,22 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 
 	case "s":
 		// If on targets field, open hunter selection mode
+		// IMPORTANT: Only intercept 's' if we're NOT in a text input field (0 or 1)
 		if fm.formState != nil && fm.formState.activeField == 4 {
 			fm.selectingHunters = true
 			fm.formState.activeField = 0 // Reset cursor for hunter list
 			return nil
+		}
+		// If we're in a text input field (pattern or description), pass through to input
+		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
+			var cmd tea.Cmd
+			switch fm.formState.activeField {
+			case 0: // Pattern field
+				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
+			case 1: // Description field
+				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
+			}
+			return cmd
 		}
 		return nil
 
@@ -1029,6 +1041,17 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "left":
+		// If in text input field (0 or 1), pass through to input for cursor movement
+		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
+			var cmd tea.Cmd
+			switch fm.formState.activeField {
+			case 0: // Pattern field
+				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
+			case 1: // Description field
+				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
+			}
+			return cmd
+		}
 		// Handle left arrow based on active field
 		if fm.formState != nil {
 			switch fm.formState.activeField {
@@ -1041,6 +1064,17 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "right":
+		// If in text input field (0 or 1), pass through to input for cursor movement
+		if fm.formState != nil && (fm.formState.activeField == 0 || fm.formState.activeField == 1) {
+			var cmd tea.Cmd
+			switch fm.formState.activeField {
+			case 0: // Pattern field
+				fm.formState.patternInput, cmd = fm.formState.patternInput.Update(msg)
+			case 1: // Description field
+				fm.formState.descInput, cmd = fm.formState.descInput.Update(msg)
+			}
+			return cmd
+		}
 		// Handle right arrow based on active field
 		if fm.formState != nil {
 			switch fm.formState.activeField {

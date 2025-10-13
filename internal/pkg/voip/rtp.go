@@ -10,28 +10,53 @@ import (
 
 // portToCallID is now managed by the CallTracker
 
-func ExtractPortFromSdp(line string, callID string) {
-	_, partThatContainsPort, hasPort := strings.Cut(line, "m=audio")
-	if !hasPort {
+func ExtractPortFromSdp(sdpBody string, callID string) {
+	// Extract all RTP ports from SDP body (supports multi-stream calls)
+	ports := extractAllRTPPorts(sdpBody)
+
+	if len(ports) == 0 {
 		return
 	}
-	parts := strings.Fields(partThatContainsPort)
-	if len(parts) >= 1 {
-		port := strings.TrimSpace(parts[0])
 
-		// Validate port number to prevent integer overflow and invalid mappings
-		if !isValidPort(port) {
-			logger.Debug("Invalid port number in SDP",
-				"port", port,
-				"call_id", callID)
-			return
-		}
+	// Register all ports with the CallTracker
+	tracker := getTracker()
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
 
-		tracker := getTracker()
-		tracker.mu.Lock()
-		defer tracker.mu.Unlock()
+	for _, port := range ports {
 		tracker.portToCallID[port] = callID
+		logger.Debug("Registered RTP port mapping",
+			"port", port,
+			"call_id", SanitizeCallIDForLogging(callID))
 	}
+}
+
+// extractAllRTPPorts extracts all RTP ports from SDP body
+// Supports multi-stream calls (conference calls, multiple audio streams)
+func extractAllRTPPorts(sdp string) []string {
+	ports := make([]string, 0, 2)
+
+	// Look for m=audio lines
+	// Format: m=audio <port> RTP/AVP <payload_types>
+	lines := strings.Split(sdp, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Check for m=audio
+		if strings.HasPrefix(line, "m=audio ") {
+			// Extract port (second field)
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				port := fields[1]
+				// Validate port
+				if isValidPort(port) {
+					ports = append(ports, port)
+				}
+			}
+		}
+	}
+
+	return ports
 }
 
 func IsTracked(packet gopacket.Packet) bool {

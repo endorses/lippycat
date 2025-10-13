@@ -98,7 +98,7 @@ a=rtpmap:0 PCMU/8000
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			factory := NewSipStreamFactory(ctx)
+			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 			defer factory.(*sipStreamFactory).Shutdown()
 
 			streamPool := tcpassembly.NewStreamPool(factory)
@@ -311,7 +311,7 @@ Content-Length: 0
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			factory := NewSipStreamFactory(ctx)
+			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 			defer factory.(*sipStreamFactory).Shutdown()
 
 			streamPool := tcpassembly.NewStreamPool(factory)
@@ -459,7 +459,7 @@ Content-Length: 0
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			factory := NewSipStreamFactory(ctx)
+			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 			defer factory.(*sipStreamFactory).Shutdown()
 
 			streamPool := tcpassembly.NewStreamPool(factory)

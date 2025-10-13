@@ -98,6 +98,9 @@ type Processor struct {
 	subscriberFilter sync.Map // map[string][]string (clientID -> hunterIDs subscription list)
 	nextSubID        atomic.Uint64
 
+	// Protocol aggregators
+	callAggregator *CallAggregator // VoIP call state aggregation
+
 	// Control
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -151,6 +154,7 @@ func New(config Config) (*Processor, error) {
 		hunters:        make(map[string]*ConnectedHunter),
 		filters:        make(map[string]*management.Filter),
 		filterChannels: make(map[string]chan *management.FilterUpdate),
+		callAggregator: NewCallAggregator(), // Initialize call aggregator
 	}
 
 	// Initialize protocol detector if enabled
@@ -442,6 +446,15 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	// Enrich packets with protocol detection if enabled
 	if p.config.EnableDetection && p.detector != nil {
 		p.enrichPackets(batch.Packets)
+	}
+
+	// Aggregate VoIP call state from packet metadata
+	if p.callAggregator != nil {
+		for _, packet := range batch.Packets {
+			if packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil) {
+				p.callAggregator.ProcessPacket(packet, hunterID)
+			}
+		}
 	}
 
 	// Forward to upstream in hierarchical mode

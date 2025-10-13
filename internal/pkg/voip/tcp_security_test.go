@@ -143,7 +143,7 @@ func TestSIPStream_PanicRecovery(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer factory.(*sipStreamFactory).Shutdown()
 
 	t.Run("Panic in run() method", func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestSIPStream_ContextCancellation(t *testing.T) {
 
 	t.Run("Stream shutdown on context cancel", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		factory := NewSipStreamFactory(ctx)
+		factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 		defer factory.(*sipStreamFactory).Shutdown()
 
 		// Create a mock reader that blocks
@@ -279,7 +279,7 @@ func TestSIPStream_CallIDParsing(t *testing.T) {
 			readerStream := tcpreader.NewReaderStream()
 
 			// Create a properly initialized factory for testing
-			mockFactory := NewSipStreamFactory(ctx).(*sipStreamFactory)
+			mockFactory := NewSipStreamFactory(ctx, NewLocalFileHandler()).(*sipStreamFactory)
 			defer mockFactory.Shutdown()
 
 			stream := &SIPStream{
@@ -352,7 +352,7 @@ func TestHandleTcpPackets_PortFiltering(t *testing.T) {
 func TestSipStreamFactory_ResourceManagement(t *testing.T) {
 	t.Run("Factory cleanup", func(t *testing.T) {
 		ctx := context.Background()
-		factory := NewSipStreamFactory(ctx)
+		factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 		defer factory.(*sipStreamFactory).Shutdown()
 
 		// Create multiple streams

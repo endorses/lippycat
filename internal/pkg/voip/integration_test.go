@@ -41,7 +41,7 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 	// Create packet channel and assembler
 	packetCh := make(chan capture.PacketInfo, 100)
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx)
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
@@ -238,7 +238,7 @@ func TestStreamFactoryIntegration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamFactory := NewSipStreamFactory(ctx)
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assert.NotNil(t, streamFactory, "Stream factory should be created")
 
@@ -291,7 +291,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx)
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)

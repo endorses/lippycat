@@ -20,11 +20,21 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// PacketProcessor is an optional interface for custom packet processing
+// before packets are forwarded to the processor. This allows VoIP mode
+// to buffer and filter packets based on call state.
+type PacketProcessor interface {
+	// ProcessPacket processes a packet and returns true if it should be forwarded immediately.
+	// If false, the packet may be buffered or dropped by the processor.
+	ProcessPacket(pktInfo capture.PacketInfo) bool
+}
 
 // Config contains hunter configuration
 type Config struct {
@@ -89,6 +99,9 @@ type Hunter struct {
 	filters    []*management.Filter
 	voipFilter *VoIPFilter // GPU-accelerated VoIP filter
 
+	// Custom packet processing
+	packetProcessor PacketProcessor // Optional custom processor for VoIP buffering, etc.
+
 	// Reconnection
 	reconnectAttempts    int
 	maxReconnectAttempts int
@@ -144,6 +157,12 @@ func New(config Config) (*Hunter, error) {
 	}
 
 	return h, nil
+}
+
+// SetPacketProcessor sets a custom packet processor for this hunter.
+// This should be called before Start() to enable custom packet handling.
+func (h *Hunter) SetPacketProcessor(processor PacketProcessor) {
+	h.packetProcessor = processor
 }
 
 // Start begins hunter operation
@@ -622,8 +641,17 @@ func (h *Hunter) forwardPackets() {
 			// Use atomic increment - no mutex needed
 			h.stats.PacketsCaptured.Add(1)
 
-			// Apply VoIP filter if enabled
-			if h.voipFilter != nil {
+			// Apply custom packet processor if set (for VoIP buffering, etc.)
+			// The processor returns true if packet should be forwarded immediately
+			if h.packetProcessor != nil {
+				if !h.packetProcessor.ProcessPacket(pktInfo) {
+					// Packet was buffered or filtered out by processor
+					continue
+				}
+				// Packet should be forwarded - count it as matched
+				h.stats.PacketsMatched.Add(1)
+			} else if h.voipFilter != nil {
+				// Fall back to simple VoIP filter if no custom processor
 				if !h.voipFilter.MatchPacket(pktInfo.Packet) {
 					// Packet didn't match VoIP filter - skip it
 					continue
@@ -867,6 +895,56 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
 		// TODO: Add metadata extraction (SIP, RTP, etc.)
 	}
+}
+
+// ForwardPacketWithMetadata forwards a packet with embedded metadata to the processor
+// This is used by TCP SIP handler to forward reassembled packets with extracted metadata
+func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata) error {
+	if packet == nil {
+		return fmt.Errorf("cannot forward nil packet")
+	}
+
+	captureLen := 0
+	originalLen := 0
+	var packetData []byte
+	linkType := uint32(1) // Default to Ethernet (LinkTypeEthernet = 1)
+
+	if packet.Data() != nil {
+		packetData = packet.Data()
+		captureLen = len(packetData)
+	}
+	if meta := packet.Metadata(); meta != nil {
+		captureLen = meta.CaptureLength
+		originalLen = meta.Length
+	}
+	// Get LinkType from link layer if available
+	if linkLayer := packet.LinkLayer(); linkLayer != nil {
+		linkType = uint32(linkLayer.LayerType()) // #nosec G115
+	}
+
+	// Create protobuf packet with embedded metadata
+	pbPkt := &data.CapturedPacket{
+		Data:           packetData,
+		TimestampNs:    time.Now().UnixNano(),
+		CaptureLength:  uint32(captureLen),  // #nosec G115
+		OriginalLength: uint32(originalLen), // #nosec G115
+		InterfaceIndex: 0,
+		LinkType:       linkType,
+		Metadata:       metadata, // Embedded metadata from TCP SIP handler
+	}
+
+	// Add to current batch
+	h.batchMu.Lock()
+	h.currentBatch = append(h.currentBatch, pbPkt)
+	batchLen := len(h.currentBatch)
+	h.batchMu.Unlock()
+
+	// Send batch if full
+	if batchLen >= h.config.BatchSize {
+		h.sendBatch()
+	}
+
+	return nil
 }
 
 // cleanup closes connections

@@ -237,6 +237,172 @@ func TestRTPPortTracking_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestExtractPortFromSdp_MultiStream(t *testing.T) {
+	// Test multi-stream call support (conference calls, multiple audio streams)
+	tracker := getTracker()
+	tracker.mu.Lock()
+	tracker.portToCallID = make(map[string]string)
+	tracker.mu.Unlock()
+
+	tests := []struct {
+		name          string
+		sdpBody       string
+		callID        string
+		expectedPorts []string
+	}{
+		{
+			name: "Single audio stream",
+			sdpBody: `v=0
+o=user1 53655765 2353687637 IN IP4 192.168.1.100
+s=-
+c=IN IP4 192.168.1.100
+t=0 0
+m=audio 10000 RTP/AVP 0 8 101
+a=rtpmap:0 PCMU/8000`,
+			callID:        "single-stream-call",
+			expectedPorts: []string{"10000"},
+		},
+		{
+			name: "Multiple audio streams (conference call)",
+			sdpBody: `v=0
+o=conf 2890844526 2890844527 IN IP4 conference.example.com
+s=Conference
+c=IN IP4 conference.example.com
+t=0 0
+m=audio 49170 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+m=audio 49172 RTP/AVP 0
+a=rtpmap:0 PCMU/8000`,
+			callID:        "multi-stream-call",
+			expectedPorts: []string{"49170", "49172"},
+		},
+		{
+			name: "Audio and video (only audio ports extracted)",
+			sdpBody: `v=0
+o=alice 2890844526 2890844527 IN IP4 client.example.com
+s=Session SDP
+c=IN IP4 client.example.com
+t=0 0
+m=audio 49170 RTP/AVP 0 8 97
+a=rtpmap:0 PCMU/8000
+m=video 51372 RTP/AVP 31 32
+a=rtpmap:31 H261/90000`,
+			callID:        "audio-video-call",
+			expectedPorts: []string{"49170"},
+		},
+		{
+			name: "Three audio streams (multi-party conference)",
+			sdpBody: `v=0
+o=conf 123 456 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 8000 RTP/AVP 0
+m=audio 8002 RTP/AVP 0
+m=audio 8004 RTP/AVP 0`,
+			callID:        "three-stream-call",
+			expectedPorts: []string{"8000", "8002", "8004"},
+		},
+		{
+			name: "Mixed valid and inactive streams",
+			sdpBody: `v=0
+o=user 123 456 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 8000 RTP/AVP 0
+a=sendrecv
+m=audio 0 RTP/AVP 0
+a=inactive`,
+			callID:        "mixed-streams-call",
+			expectedPorts: []string{"8000"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear tracker before each test
+			tracker.mu.Lock()
+			tracker.portToCallID = make(map[string]string)
+			tracker.mu.Unlock()
+
+			// Extract ports from SDP
+			ExtractPortFromSdp(tt.sdpBody, tt.callID)
+
+			// Verify all expected ports are registered
+			tracker.mu.RLock()
+			defer tracker.mu.RUnlock()
+
+			for _, expectedPort := range tt.expectedPorts {
+				registeredCallID, exists := tracker.portToCallID[expectedPort]
+				assert.True(t, exists, "Port %s should be registered", expectedPort)
+				assert.Equal(t, tt.callID, registeredCallID, "Port %s should map to correct call ID", expectedPort)
+			}
+
+			// Verify no extra ports were registered
+			assert.Equal(t, len(tt.expectedPorts), len(tracker.portToCallID),
+				"Should register exactly %d ports", len(tt.expectedPorts))
+		})
+	}
+}
+
+func TestExtractAllRTPPorts(t *testing.T) {
+	// Test the extractAllRTPPorts helper function directly
+	tests := []struct {
+		name     string
+		sdpBody  string
+		expected []string
+	}{
+		{
+			name:     "Empty SDP",
+			sdpBody:  "",
+			expected: []string{},
+		},
+		{
+			name:     "SDP with no audio",
+			sdpBody:  "v=0\no=user 123 456 IN IP4 10.0.0.1\ns=-",
+			expected: []string{},
+		},
+		{
+			name:     "Single audio line",
+			sdpBody:  "m=audio 8000 RTP/AVP 0",
+			expected: []string{"8000"},
+		},
+		{
+			name: "Multiple audio lines",
+			sdpBody: `m=audio 8000 RTP/AVP 0
+m=audio 8002 RTP/AVP 8
+m=audio 8004 RTP/AVP 0`,
+			expected: []string{"8000", "8002", "8004"},
+		},
+		{
+			name: "Audio with invalid port (should be skipped)",
+			sdpBody: `m=audio 8000 RTP/AVP 0
+m=audio 99999 RTP/AVP 0
+m=audio 8002 RTP/AVP 0`,
+			expected: []string{"8000", "8002"},
+		},
+		{
+			name:     "Port 0 (inactive stream) - should be skipped by validation",
+			sdpBody:  "m=audio 0 RTP/AVP 0",
+			expected: []string{}, // Port 0 is invalid per isValidPort()
+		},
+		{
+			name: "Audio with leading/trailing whitespace",
+			sdpBody: `  m=audio 8000 RTP/AVP 0
+	m=audio 8002 RTP/AVP 0	`,
+			expected: []string{"8000", "8002"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractAllRTPPorts(tt.sdpBody)
+			assert.Equal(t, tt.expected, result, "Extracted ports should match expected")
+		})
+	}
+}
+
 // Helper function to create RTP packets for testing
 func createRTPPacket(srcPort, dstPort uint16) capture.PacketInfo {
 	eth := &layers.Ethernet{

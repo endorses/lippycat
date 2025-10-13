@@ -294,5 +294,5 @@ func (cv *CallsView) renderSplitView() string {
 	return cv.renderTable()
 }
 
-// Helper functions - use truncate and formatDuration from other components
-// (defined in nodesview.go and packetlist.go)
+// Note: truncate() and formatDuration() helper functions are defined
+// in nodesview.go and packetlist.go and will be available via shared package

@@ -938,6 +938,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case CallUpdateMsg:
+		// Handle VoIP call state updates
+		tuiCalls := make([]components.Call, len(msg.Calls))
+		for i, call := range msg.Calls {
+			tuiCalls[i] = components.Call{
+				CallID:      call.CallID,
+				From:        call.From,
+				To:          call.To,
+				State:       mapCallState(call.State),
+				StartTime:   call.StartTime,
+				EndTime:     call.EndTime,
+				Duration:    call.Duration,
+				Codec:       call.Codec,
+				PacketCount: call.PacketCount,
+				PacketLoss:  call.PacketLoss,
+				Jitter:      call.Jitter,
+				MOS:         call.MOS,
+				NodeID:      call.NodeID,
+			}
+		}
+		m.uiState.CallsView.SetCalls(tuiCalls)
+		return m, nil
+
 	case PacketMsg:
 		if !m.uiState.Paused {
 			// Set NodeID to "Local" if not already set (for local/offline capture)
@@ -3095,5 +3118,21 @@ func (m *Model) stopStreamingSave() tea.Cmd {
 			PacketsSaved: count,
 			Streaming:    true,
 		}
+	}
+}
+
+// mapCallState converts string state to components.CallState
+func mapCallState(state string) components.CallState {
+	switch state {
+	case "RINGING":
+		return components.CallStateRinging
+	case "ACTIVE":
+		return components.CallStateActive
+	case "ENDED":
+		return components.CallStateEnded
+	case "FAILED":
+		return components.CallStateFailed
+	default:
+		return components.CallStateRinging
 	}
 }

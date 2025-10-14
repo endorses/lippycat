@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,7 +15,6 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/cmd/tui/config"
-	"github.com/endorses/lippycat/cmd/tui/filters"
 	"github.com/endorses/lippycat/cmd/tui/store"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -1958,110 +1956,6 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // parseAndApplyFilter parses a filter string and adds it to the filter chain
 // This enables progressive/stacked filtering - each new filter narrows down the results
 // Returns a tea.Cmd for showing toast notifications on error
-func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
-	// NOTE: We do NOT clear existing filters - this allows filter stacking
-	// Use 'c' to clear all filters or 'C' to remove the last filter
-
-	if filterStr == "" {
-		return nil
-	}
-
-	// Try to parse as boolean expression first
-	filter, err := filters.ParseBooleanExpression(filterStr, m.parseSimpleFilter)
-	if err == nil && filter != nil {
-		m.packetStore.AddFilter(filter)
-	} else if err != nil {
-		// Show error toast for invalid filter
-		toastCmd := m.uiState.Toast.Show(
-			fmt.Sprintf("Invalid filter: %s", err.Error()),
-			components.ToastError,
-			components.ToastDurationLong,
-		)
-
-		// Reapply filters to all packets (don't clear - keep existing filters)
-		m.applyFilters()
-
-		// Update display
-		if !m.packetStore.HasFilter() {
-			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-		} else {
-			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-		}
-
-		return toastCmd
-	}
-
-	// Reapply filters to all packets
-	m.applyFilters()
-
-	// Update display
-	if !m.packetStore.HasFilter() {
-		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-	} else {
-		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-	}
-
-	// Show toast with filter count
-	filterCount := m.packetStore.FilterChain.Count()
-	if filterCount > 1 {
-		return m.uiState.Toast.Show(
-			fmt.Sprintf("Filter added (%d filters active)", filterCount),
-			components.ToastSuccess,
-			components.ToastDurationShort,
-		)
-	}
-
-	return nil
-}
-
-// parseSimpleFilter parses a simple (non-boolean) filter expression
-func (m *Model) parseSimpleFilter(filterStr string) filters.Filter {
-	filterStr = strings.TrimSpace(filterStr)
-
-	// Detect filter type based on syntax
-	if strings.Contains(filterStr, "sip.") {
-		// VoIP filter: sip.user:alice, sip.from:555*, etc.
-		parts := strings.SplitN(filterStr, ":", 2)
-		if len(parts) == 2 {
-			field := strings.TrimPrefix(parts[0], "sip.")
-			value := parts[1]
-			return filters.NewVoIPFilter(field, value)
-		}
-	} else if isBPFExpression(filterStr) {
-		// BPF filter: port 5060, host 192.168.1.1, tcp, udp, etc.
-		filter, err := filters.NewBPFFilter(filterStr)
-		if err == nil {
-			return filter
-		}
-		// Fall back to text filter if BPF parse fails
-	}
-
-	// Simple text filter for anything else
-	return filters.NewTextFilter(filterStr, []string{"all"})
-}
-
-// isBPFExpression checks if a string looks like a BPF expression
-func isBPFExpression(s string) bool {
-	s = strings.ToLower(strings.TrimSpace(s))
-
-	// Protocol keywords
-	if s == "tcp" || s == "udp" || s == "icmp" || s == "ip" {
-		return true
-	}
-
-	// BPF keywords
-	bpfKeywords := []string{"port", "host", "net", "src", "dst", "and", "or", "not"}
-	for _, keyword := range bpfKeywords {
-		if strings.Contains(s, keyword+" ") || strings.HasPrefix(s, keyword+" ") {
-			return true
-		}
-	}
-
-	return false
-}
-
-// getConnectedProcessors returns a list of all configured processor addresses
-// This includes both connected and disconnected processors
 func (m *Model) getConnectedProcessors() []string {
 	processors := make([]string, 0, len(m.connectionMgr.Processors))
 	for addr := range m.connectionMgr.Processors {
@@ -2175,22 +2069,6 @@ func loadNodesFile(filePath string) tea.Cmd {
 
 // applyFilters applies the filter chain to all packets
 // This is only called when filters change, not on every packet
-func (m *Model) applyFilters() {
-	if !m.packetStore.HasFilter() {
-		m.packetStore.MatchedPackets = m.packetStore.PacketsCount
-		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
-		return
-	}
-
-	orderedPackets := m.getPacketsInOrder()
-	m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0, len(orderedPackets))
-	for _, pkt := range orderedPackets {
-		if m.packetStore.MatchFilter(pkt) {
-			m.packetStore.FilteredPackets = append(m.packetStore.FilteredPackets, pkt)
-		}
-	}
-	m.packetStore.MatchedPackets = len(m.packetStore.FilteredPackets)
-}
 
 // saveThemePreference saves the current theme preference to config file
 func saveThemePreference(theme themes.Theme) {

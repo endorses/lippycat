@@ -366,9 +366,23 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 		return cmd
 	}
 
-	// Route to mode if it's editing (e.g., interface list)
+	// Route to mode if it's editing (e.g., interface list, text inputs)
 	if s.editing {
-		// Update mode state first
+		// Special handling for LiveSettings interface list editing (focusIndex 1)
+		if s.modeType == settings.CaptureModeLive && s.focusIndex == 1 {
+			// Type assert to LiveSettings to call UpdateInterfaceList
+			if liveMode, ok := s.currentMode.(*settings.LiveSettings); ok {
+				shouldExit, cmd := liveMode.UpdateInterfaceList(msg, s.theme)
+				if shouldExit {
+					s.editing = false
+					// Trigger restart when exiting interface editing
+					return s.restartCapture()
+				}
+				return cmd
+			}
+		}
+
+		// For other editing cases, use standard Update
 		cmd = s.currentMode.Update(msg, s.focusIndex)
 		return cmd
 	}

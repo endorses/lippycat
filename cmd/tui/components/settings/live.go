@@ -398,3 +398,51 @@ func (ls *LiveSettings) Update(msg tea.Msg, focusIndex int) tea.Cmd {
 	}
 	return cmd
 }
+
+// UpdateInterfaceList handles updates for the interface list during editing
+// This is separate because it requires theme access for delegate updates
+// Returns (shouldExitEditing bool, cmd tea.Cmd)
+func (ls *LiveSettings) UpdateInterfaceList(msg tea.Msg, theme themes.Theme) (bool, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case " ": // Toggle interface
+			if item, ok := ls.interfaceList.SelectedItem().(*settingItem); ok {
+				if item.title == "any" {
+					ls.selectedIfaces = map[string]bool{"any": true}
+					ls.promiscuous = false
+				} else {
+					delete(ls.selectedIfaces, "any")
+					if ls.selectedIfaces[item.title] {
+						delete(ls.selectedIfaces, item.title)
+					} else {
+						ls.selectedIfaces[item.title] = true
+					}
+				}
+				delegate := newInterfaceDelegate(ls.selectedIfaces, theme)
+				ls.interfaceList.SetDelegate(delegate)
+			}
+			return false, nil
+
+		case "enter": // Confirm selection and exit editing
+			return true, nil
+
+		case "esc": // Cancel or clear filter
+			var cmd tea.Cmd
+			ls.interfaceList, cmd = ls.interfaceList.Update(msg)
+			// Check if we cleared the filter or should exit editing
+			if !ls.interfaceList.SettingFilter() && !ls.interfaceList.IsFiltered() {
+				// Revert to saved state and exit
+				ls.selectedIfaces = ls.savedSelectedIfaces
+				delegate := newInterfaceDelegate(ls.selectedIfaces, theme)
+				ls.interfaceList.SetDelegate(delegate)
+				ls.interfaceList.Select(ls.savedInterfaceIndex)
+				return true, cmd
+			}
+			return false, cmd
+		}
+	}
+	// Pass all other messages to list
+	var cmd tea.Cmd
+	ls.interfaceList, cmd = ls.interfaceList.Update(msg)
+	return false, cmd
+}

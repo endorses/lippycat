@@ -130,7 +130,12 @@ func NewSettingsView(currentInterface string, currentBufferSize int, currentProm
 // SetTheme updates the theme
 func (s *SettingsView) SetTheme(theme themes.Theme) {
 	s.theme = theme
-	s.currentMode.UpdateTheme(theme)
+	if s.currentMode != nil {
+		s.currentMode.UpdateTheme(theme)
+	}
+	if s.factory != nil {
+		s.factory.UpdateTheme(theme)
+	}
 	s.pcapFileDialog.SetTheme(theme)
 	s.nodesFileDialog.SetTheme(theme)
 }

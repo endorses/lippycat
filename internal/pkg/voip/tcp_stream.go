@@ -250,6 +250,11 @@ func (s *SIPStream) processBatched(batchSize int) {
 
 // readCompleteSipMessage reads a complete SIP message from the TCP stream
 func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
+	// Check if reader is nil (defensive check for abnormal conditions)
+	if s.reader == nil {
+		return nil, fmt.Errorf("TCP stream reader is nil")
+	}
+
 	reader := bufio.NewReader(s.reader)
 	var message strings.Builder
 	var contentLength int

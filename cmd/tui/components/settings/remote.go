@@ -4,7 +4,6 @@
 package settings
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -37,9 +36,8 @@ func NewRemoteSettings(nodesFile string, bufferSize int, theme themes.Theme) *Re
 
 // Validate checks if remote settings are valid
 func (rs *RemoteSettings) Validate() error {
-	if rs.nodesFileInput.Value() == "" {
-		return fmt.Errorf("nodes file path required for remote capture")
-	}
+	// Nodes file is optional - users can add processors manually via Nodes tab
+	// No validation error if nodes file is empty
 	return nil
 }
 

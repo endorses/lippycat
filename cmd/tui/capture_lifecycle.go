@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/cmd/tui/components"
+	"github.com/endorses/lippycat/cmd/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -129,9 +130,20 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				m.nodesFilePath = msg.NodesFile
 				return m, tea.Batch(toastCmd, loadNodesFile(msg.NodesFile))
 			}
-			// If no nodes file, remote mode is active but no nodes connected yet
-			// User can add nodes via Nodes tab
-			// Capturing will be marked active when nodes connect successfully
+			// If no nodes file, check if we have connected processors already
+			// (user may have added nodes via Nodes tab before switching to remote mode)
+			hasConnectedProcessor := false
+			for _, proc := range m.connectionMgr.Processors {
+				if proc.State == store.ProcessorStateConnected {
+					hasConnectedProcessor = true
+					break
+				}
+			}
+			// Mark capturing as active if we have at least one connected processor
+			if hasConnectedProcessor {
+				m.uiState.SetCapturing(true)
+			}
+			// If no nodes connected yet, capturing will be marked active when nodes connect successfully
 		}
 	}
 

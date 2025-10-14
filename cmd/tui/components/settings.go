@@ -709,15 +709,14 @@ func (s *SettingsView) determineClickedField(relativeY, x int) int {
 
 // View renders the settings view
 func (s *SettingsView) View() string {
-	titleStyle := lipgloss.NewStyle().
+	noteStyle := lipgloss.NewStyle().
 		Foreground(s.theme.InfoColor).
-		Bold(true).
 		Padding(1, 2)
 
 	var sections []string
 
-	// Title
-	sections = append(sections, titleStyle.Render("🔧 Settings"))
+	// Note about changes triggering restart
+	sections = append(sections, noteStyle.Render("Note: Changes to mode, interface, PCAP file, or BPF filter trigger capture restart"))
 
 	// Capture Mode Selector (tab-style)
 	sections = append(sections, s.renderModeSelector())
@@ -774,14 +773,6 @@ func (s *SettingsView) View() string {
 
 	helpText := "j/k: navigate • h/l: switch mode • Enter: edit/toggle • Tab: switch tabs"
 	sections = append(sections, helpStyle.Render(helpText))
-
-	// Note about applying settings
-	noteStyle := lipgloss.NewStyle().
-		Foreground(s.theme.InfoColor).
-		Padding(0, 2)
-
-	noteText := "Note: Changes to mode, interface, PCAP file, or BPF filter trigger capture restart"
-	sections = append(sections, noteStyle.Render(noteText))
 
 	// Additional help text explaining filters
 	helpTextStyle := lipgloss.NewStyle().

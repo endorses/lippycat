@@ -86,7 +86,7 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 		}
 	}
 	sections = append(sections, nodesStyle.Width(params.Width-4).Render(
-		params.LabelStyle.Render("Nodes File:")+"\n"+rs.nodesFileInput.View(),
+		params.LabelStyle.Render("Nodes File:")+" "+rs.nodesFileInput.View(),
 	))
 
 	// Buffer field (focus index 2)
@@ -99,7 +99,7 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 		}
 	}
 	sections = append(sections, bufferStyle.Width(params.Width-4).Render(
-		params.LabelStyle.Render("Buffer Size:")+"\n"+rs.bufferInput.View(),
+		params.LabelStyle.Render("Buffer Size:")+" "+rs.bufferInput.View(),
 	))
 
 	// Add note about filtering

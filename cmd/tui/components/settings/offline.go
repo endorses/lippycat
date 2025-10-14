@@ -88,7 +88,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 		}
 	}
 	sections = append(sections, pcapStyle.Width(params.Width-4).Render(
-		params.LabelStyle.Render("PCAP File:")+"\n"+os.pcapFileInput.View(),
+		params.LabelStyle.Render("PCAP File:")+" "+os.pcapFileInput.View(),
 	))
 
 	// Buffer field (focus index 2)
@@ -101,7 +101,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 		}
 	}
 	sections = append(sections, bufferStyle.Width(params.Width-4).Render(
-		params.LabelStyle.Render("Buffer Size:")+"\n"+os.bufferInput.View(),
+		params.LabelStyle.Render("Buffer Size:")+" "+os.bufferInput.View(),
 	))
 
 	// Filter field (focus index 3)
@@ -114,7 +114,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 		}
 	}
 	sections = append(sections, filterStyle.Width(params.Width-4).Render(
-		params.LabelStyle.Render("Capture Filter:")+"\n"+os.filterInput.View(),
+		params.LabelStyle.Render("Capture Filter:")+" "+os.filterInput.View(),
 	))
 
 	return sections

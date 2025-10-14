@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/cmd/tui/components/nodesview"
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
 
@@ -252,14 +253,14 @@ func (cv *CallsView) renderTable() string {
 		state := call.State.String()
 
 		row := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-			callIDWidth, truncate(call.CallID, callIDWidth),
-			fromWidth, truncate(call.From, fromWidth),
-			toWidth, truncate(call.To, toWidth),
+			callIDWidth, nodesview.TruncateString(call.CallID, callIDWidth),
+			fromWidth, nodesview.TruncateString(call.From, fromWidth),
+			toWidth, nodesview.TruncateString(call.To, toWidth),
 			stateWidth, state,
-			durationWidth, formatDuration(int64(duration)),
-			codecWidth, truncate(call.Codec, codecWidth),
+			durationWidth, nodesview.FormatDuration(int64(duration)),
+			codecWidth, nodesview.TruncateString(call.Codec, codecWidth),
 			qualityWidth, quality,
-			nodeWidth, truncate(call.NodeID, nodeWidth))
+			nodeWidth, nodesview.TruncateString(call.NodeID, nodeWidth))
 
 		if i == cv.selected {
 			rows = append(rows, selectedStyle.Render(row))
@@ -294,5 +295,5 @@ func (cv *CallsView) renderSplitView() string {
 	return cv.renderTable()
 }
 
-// Note: truncate() and formatDuration() helper functions are defined
-// in nodesview.go and packetlist.go and will be available via shared package
+// Note: TruncateString() and FormatDuration() helper functions are now
+// imported from cmd/tui/components/nodesview package

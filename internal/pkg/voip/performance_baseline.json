@@ -2,25 +2,25 @@
   "benchmarks": [
     {
       "name": "CallIDDetection",
-      "ns_per_op": 232,
+      "ns_per_op": 224,
       "bytes_per_op": 0,
       "allocs_per_op": 0,
-      "timestamp": "2025-10-13T20:49:36.737098916+02:00"
+      "timestamp": "2025-10-14T19:54:12.797274714+02:00"
     },
     {
       "name": "ContentLengthParsing",
       "ns_per_op": 3,
       "bytes_per_op": 0,
       "allocs_per_op": 0,
-      "timestamp": "2025-10-13T20:49:38.298609308+02:00"
+      "timestamp": "2025-10-14T19:54:14.425960666+02:00"
     },
     {
       "name": "AsyncWriting",
-      "ns_per_op": 35,
+      "ns_per_op": 34,
       "bytes_per_op": 0,
       "allocs_per_op": 0,
-      "timestamp": "2025-10-13T20:49:39.527562715+02:00"
+      "timestamp": "2025-10-14T19:54:15.635905205+02:00"
     }
   ],
-  "updated": "2025-10-13T20:49:39.527726134+02:00"
+  "updated": "2025-10-14T19:54:15.636073331+02:00"
 }

@@ -57,26 +57,19 @@ func (f *ModeFactory) CreateMode(
 	pcapFile string,
 	nodesFile string,
 ) ModeSettings {
-	// Note: Actual mode implementations will be created in Phase 1.5
-	// For now, this documents the factory pattern and interface
-
 	switch mode {
 	case CaptureModeLive:
-		// return NewLiveSettings(interfaceStr, bufferSize, promiscuous, filter, f.theme)
-		return nil // To be implemented in Phase 1.5
+		return NewLiveSettings(interfaceStr, bufferSize, promiscuous, filter, f.theme)
 
 	case CaptureModeOffline:
-		// return NewOfflineSettings(pcapFile, bufferSize, filter, f.theme)
-		return nil // To be implemented in Phase 1.5
+		return NewOfflineSettings(pcapFile, bufferSize, filter, f.theme)
 
 	case CaptureModeRemote:
-		// return NewRemoteSettings(nodesFile, bufferSize, f.theme)
-		return nil // To be implemented in Phase 1.5
+		return NewRemoteSettings(nodesFile, bufferSize, f.theme)
 
 	default:
 		// Default to live mode
-		// return NewLiveSettings(interfaceStr, bufferSize, promiscuous, filter, f.theme)
-		return nil // To be implemented in Phase 1.5
+		return NewLiveSettings(interfaceStr, bufferSize, promiscuous, filter, f.theme)
 	}
 }
 

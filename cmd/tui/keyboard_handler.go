@@ -130,11 +130,17 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "k", "up": // Move up
 		return m.handleMoveUp()
 
-	case "g": // Jump to top
+	case "g", "home": // Jump to top
 		return m.handleJumpToTop()
 
-	case "G": // Jump to bottom (Shift+G)
+	case "G", "end": // Jump to bottom (Shift+G)
 		return m.handleJumpToBottom()
+
+	case "pgup": // Page up
+		return m.handlePageUp()
+
+	case "pgdown": // Page down
+		return m.handlePageDown()
 
 	case "tab": // Switch to next tab
 		return m.handleNextTab()

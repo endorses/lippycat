@@ -112,6 +112,38 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 	return m, nil
 }
 
+// handlePageUp moves up one page in the current list
+func (m Model) handlePageUp() (Model, tea.Cmd) {
+	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
+		if m.uiState.FocusedPane == "left" {
+			m.uiState.PacketList.PageUp()
+			m.updateDetailsPanel()
+		} else if m.uiState.FocusedPane == "right" {
+			return m, m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		}
+	} else if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+		cmd := m.uiState.NodesView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		return m, cmd
+	}
+	return m, nil
+}
+
+// handlePageDown moves down one page in the current list
+func (m Model) handlePageDown() (Model, tea.Cmd) {
+	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
+		if m.uiState.FocusedPane == "left" {
+			m.uiState.PacketList.PageDown()
+			m.updateDetailsPanel()
+		} else if m.uiState.FocusedPane == "right" {
+			return m, m.uiState.DetailsPanel.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		}
+	} else if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
+		cmd := m.uiState.NodesView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		return m, cmd
+	}
+	return m, nil
+}
+
 // handleNextTab switches to the next tab
 func (m Model) handleNextTab() (Model, tea.Cmd) {
 	currentTab := m.uiState.Tabs.GetActive()

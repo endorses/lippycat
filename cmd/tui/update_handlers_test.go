@@ -18,6 +18,8 @@ func TestHandleWindowSizeMsg(t *testing.T) {
 	m := Model{
 		uiState: store.NewUIState(theme),
 	}
+	// Initialize SettingsView (required for SetSize)
+	m.uiState.SettingsView = components.NewSettingsView("", 100, false, "", "")
 
 	// Test window resize
 	msg := tea.WindowSizeMsg{

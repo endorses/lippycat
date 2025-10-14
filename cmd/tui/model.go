@@ -108,11 +108,6 @@ type Model struct {
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
-func (m *Model) getPacketsInOrder() []components.PacketDisplay {
-	return m.packetStore.GetPacketsInOrder()
-}
-
-// NewModel creates a new TUI model
 func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile string, promiscuous bool, startInRemoteMode bool, nodesFilePath string) Model {
 	// Load theme from config, default to Solarized Dark
 	themeName := viper.GetString("tui.theme")
@@ -1827,51 +1822,6 @@ func (m Model) View() string {
 }
 
 // updateStatistics updates statistics with new packet data
-func (m *Model) updateStatistics(pkt components.PacketDisplay) {
-	// Update protocol counts (bounded - evicts lowest count when full)
-	m.statistics.ProtocolCounts.Increment(pkt.Protocol)
-
-	// Update source counts (bounded - evicts lowest count when full)
-	m.statistics.SourceCounts.Increment(pkt.SrcIP)
-
-	// Update destination counts (bounded - evicts lowest count when full)
-	m.statistics.DestCounts.Increment(pkt.DstIP)
-
-	// Update total bytes and packets
-	m.statistics.TotalBytes += int64(pkt.Length)
-	m.statistics.TotalPackets++
-
-	// Update min/max packet size
-	if pkt.Length < m.statistics.MinPacketSize {
-		m.statistics.MinPacketSize = pkt.Length
-	}
-	if pkt.Length > m.statistics.MaxPacketSize {
-		m.statistics.MaxPacketSize = pkt.Length
-	}
-
-	// Update statistics view with new data
-	m.uiState.StatisticsView.SetStatistics(m.statistics)
-}
-
-// updateDetailsPanel updates the details panel with the currently selected packet
-func (m *Model) updateDetailsPanel() {
-	// Use the packet list that's already loaded in the PacketList component
-	// This ensures we're working with the exact same list that's displayed
-	packets := m.uiState.PacketList.GetPackets()
-
-	if len(packets) == 0 {
-		m.uiState.DetailsPanel.SetPacket(nil)
-		return
-	}
-
-	selectedIdx := m.uiState.PacketList.GetCursor()
-	if selectedIdx >= 0 && selectedIdx < len(packets) {
-		pkt := packets[selectedIdx]
-		m.uiState.DetailsPanel.SetPacket(&pkt)
-	} else {
-		m.uiState.DetailsPanel.SetPacket(nil)
-	}
-}
 
 // handleFilterInput handles key input when in filter mode
 func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

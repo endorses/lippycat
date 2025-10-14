@@ -774,14 +774,6 @@ func (s *SettingsView) View() string {
 	helpText := "j/k: navigate • h/l: switch mode • Enter: edit/toggle • Tab: switch tabs"
 	sections = append(sections, helpStyle.Render(helpText))
 
-	// Additional help text explaining filters
-	helpTextStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Padding(0, 2)
-
-	filterHelp := "Capture Filter (BPF): Kernel-level filtering, only matching packets captured\nDisplay Filter (/): Application-level filtering, all packets captured but filtered in view"
-	sections = append(sections, helpTextStyle.Render(filterHelp))
-
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	// Use viewport for scrolling if content is too tall

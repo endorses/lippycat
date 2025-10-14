@@ -619,12 +619,27 @@ func createTCPPacketWithPayload(t *testing.T, payload []byte, seqNum uint32, lin
 func resetGlobalStateForTest() {
 	// Reset TCP buffer state
 	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
-	tcpBufferStats = &tcpBufferStatsInternal{
-		lastStatsUpdate: time.Now(),
-	}
-	tcpStreamMetrics = &tcpStreamMetricsInternal{
-		lastMetricsUpdate: time.Now(),
-	}
+
+	// Reset buffer stats with proper locking (don't replace pointer)
+	tcpBufferStats.mu.Lock()
+	tcpBufferStats.totalBuffersCreated = 0
+	tcpBufferStats.totalBuffersReleased = 0
+	tcpBufferStats.activeBuffers = 0
+	tcpBufferStats.totalPacketsBuffered = 0
+	tcpBufferStats.totalPacketsFlushed = 0
+	tcpBufferStats.lastStatsUpdate = time.Now()
+	tcpBufferStats.mu.Unlock()
+
+	// Reset stream metrics with proper locking (don't replace pointer)
+	tcpStreamMetrics.mu.Lock()
+	tcpStreamMetrics.activeStreams = 0
+	tcpStreamMetrics.totalStreamsCreated = 0
+	tcpStreamMetrics.totalStreamsCompleted = 0
+	tcpStreamMetrics.totalStreamsFailed = 0
+	tcpStreamMetrics.queuedStreams = 0
+	tcpStreamMetrics.droppedStreams = 0
+	tcpStreamMetrics.lastMetricsUpdate = time.Now()
+	tcpStreamMetrics.mu.Unlock()
 
 	// Reset buffer pool
 	tcpBufferPool = &TCPBufferPool{

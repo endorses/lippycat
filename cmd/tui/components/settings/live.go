@@ -308,14 +308,14 @@ func (ls *LiveSettings) HandleKey(key string, params KeyHandlerParams) KeyHandle
 	case "esc":
 		if params.Editing {
 			switch params.FocusIndex {
-			case 3: // Buffer
+			case 3: // Buffer - cancel edit, don't save
 				ls.bufferInput.Blur()
 				result.Editing = false
-				result.TriggerBufferUpdate = true
-			case 4: // Filter
+				// Don't trigger update - cancel the edit
+			case 4: // Filter - cancel edit, don't save
 				ls.filterInput.Blur()
 				result.Editing = false
-				result.TriggerRestart = true
+				// Don't trigger restart - cancel the edit
 			}
 		}
 	}

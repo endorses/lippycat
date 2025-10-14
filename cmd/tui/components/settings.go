@@ -382,7 +382,39 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 
-		// For other editing cases, use standard Update
+		// Check for Enter/Esc keys - these need special handling via HandleKey
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			switch keyMsg.String() {
+			case "enter", "esc":
+				// Handle via mode's HandleKey method
+				result := s.currentMode.HandleKey(keyMsg.String(), settings.KeyHandlerParams{
+					FocusIndex: s.focusIndex,
+					Editing:    s.editing,
+				})
+
+				// Update editing state
+				s.editing = result.Editing
+
+				// Handle special actions
+				if result.TriggerRestart {
+					return s.restartCapture()
+				}
+				if result.TriggerBufferUpdate {
+					return func() tea.Msg {
+						return settings.UpdateBufferSizeMsg{Size: s.GetBufferSize()}
+					}
+				}
+				if result.ErrorMessage != "" {
+					s.errorMessage = result.ErrorMessage
+				}
+				if result.Cmd != nil {
+					return result.Cmd
+				}
+				return nil
+			}
+		}
+
+		// For other keys, use standard Update to pass to text inputs
 		cmd = s.currentMode.Update(msg, s.focusIndex)
 		return cmd
 	}
@@ -489,35 +521,38 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 
-			// Handle Enter on specific fields based on mode
-			if s.focusIndex == 1 {
-				// Field 1: varies by mode
+			// For mode-specific fields, delegate to mode's HandleKey
+			result := s.currentMode.HandleKey("enter", settings.KeyHandlerParams{
+				FocusIndex: s.focusIndex,
+				Editing:    s.editing,
+			})
+
+			// Update editing state
+			s.editing = result.Editing
+
+			// Handle special actions
+			if result.OpenFileDialog {
 				if s.modeType == settings.CaptureModeOffline {
-					// PCAP file - open dialog
 					return s.pcapFileDialog.Activate()
 				} else if s.modeType == settings.CaptureModeRemote {
-					// Nodes file - open dialog
 					return s.nodesFileDialog.Activate()
-				} else {
-					// Live mode: interface - enter edit mode
-					s.editing = !s.editing
 				}
-			} else if s.focusIndex >= 2 {
-				// Other fields: toggle edit mode
-				s.editing = !s.editing
-				if !s.editing {
-					// Exiting edit mode - send update message if buffer size field
-					// Buffer is field 3 in live, field 2 in offline/remote
-					bufferField := 3
-					if s.modeType != settings.CaptureModeLive {
-						bufferField = 2
-					}
-					if s.focusIndex == bufferField {
-						return func() tea.Msg {
-							return settings.UpdateBufferSizeMsg{Size: s.GetBufferSize()}
-						}
-					}
+			}
+			if result.ErrorMessage != "" {
+				s.errorMessage = result.ErrorMessage
+			} else if result.ErrorMessage == "" {
+				s.errorMessage = ""
+			}
+			if result.TriggerRestart {
+				return s.restartCapture()
+			}
+			if result.TriggerBufferUpdate {
+				return func() tea.Msg {
+					return settings.UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 				}
+			}
+			if result.Cmd != nil {
+				return result.Cmd
 			}
 			return nil
 
@@ -598,18 +633,26 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 			return nil
 
 		case "esc":
-			if s.editing {
-				s.editing = false
-				// Send buffer update when exiting buffer field
-				bufferField := 3
-				if s.modeType != settings.CaptureModeLive {
-					bufferField = 2
+			// Delegate to mode's HandleKey
+			result := s.currentMode.HandleKey("esc", settings.KeyHandlerParams{
+				FocusIndex: s.focusIndex,
+				Editing:    s.editing,
+			})
+
+			// Update editing state
+			s.editing = result.Editing
+
+			// Handle special actions
+			if result.TriggerRestart {
+				return s.restartCapture()
+			}
+			if result.TriggerBufferUpdate {
+				return func() tea.Msg {
+					return settings.UpdateBufferSizeMsg{Size: s.GetBufferSize()}
 				}
-				if s.focusIndex == bufferField {
-					return func() tea.Msg {
-						return settings.UpdateBufferSizeMsg{Size: s.GetBufferSize()}
-					}
-				}
+			}
+			if result.Cmd != nil {
+				return result.Cmd
 			}
 			return nil
 		}

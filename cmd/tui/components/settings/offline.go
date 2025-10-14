@@ -164,18 +164,18 @@ func (os *OfflineSettings) HandleKey(key string, params KeyHandlerParams) KeyHan
 	case "esc":
 		if params.Editing {
 			switch params.FocusIndex {
-			case 1: // PCAP File
+			case 1: // PCAP File - cancel edit, don't save
 				os.pcapFileInput.Blur()
 				result.Editing = false
-				result.TriggerRestart = true
-			case 2: // Buffer
+				// Don't trigger restart - cancel the edit
+			case 2: // Buffer - cancel edit, don't save
 				os.bufferInput.Blur()
 				result.Editing = false
-				result.TriggerBufferUpdate = true
-			case 3: // Filter
+				// Don't trigger update - cancel the edit
+			case 3: // Filter - cancel edit, don't save
 				os.filterInput.Blur()
 				result.Editing = false
-				result.TriggerRestart = true
+				// Don't trigger restart - cancel the edit
 			}
 		}
 	}

@@ -77,7 +77,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		{Label: "Live Capture", Icon: "📡"},
 		{Label: "Nodes", Icon: "🔗"},
 		{Label: "Statistics", Icon: "📊"},
-		{Label: "Settings", Icon: "⚙"},
+		{Label: "Settings", Icon: "🔧"}, // Wrench emoji (U+1F527)
 	})
 	tabs.SetTheme(theme)
 

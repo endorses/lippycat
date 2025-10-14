@@ -98,7 +98,7 @@ func (h *Header) View() string {
 	var statusText string
 	var statusColor lipgloss.Color
 	if h.paused {
-		statusText = "⏸ PAUSED"
+		statusText = "|| PAUSED"
 		statusColor = h.theme.SuccessColor // Green for paused
 	} else if h.capturing {
 		switch h.captureMode {

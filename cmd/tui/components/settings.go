@@ -1272,7 +1272,7 @@ func (s *SettingsView) View() string {
 	var sections []string
 
 	// Title
-	sections = append(sections, titleStyle.Render("⚙ Settings"))
+	sections = append(sections, titleStyle.Render("🔧 Settings")) // Wrench emoji (U+1F527)
 
 	// Capture Mode Selector (tab-style)
 	modeStyle := unfocusedStyle

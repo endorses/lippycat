@@ -178,11 +178,11 @@ func (t *Toast) getIcon() string {
 	case ToastError:
 		return "✗"
 	case ToastInfo:
-		return "ℹ"
+		return "ⓘ" // Circled lowercase i (U+24D8)
 	case ToastWarning:
-		return "⚠"
+		return "‼" // Double exclamation mark (U+203C)
 	default:
-		return "ℹ"
+		return "ⓘ"
 	}
 }
 

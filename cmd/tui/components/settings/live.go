@@ -407,6 +407,11 @@ func (ls *LiveSettings) UpdateInterfaceList(msg tea.Msg, theme themes.Theme) (bo
 		switch keyMsg.String() {
 		case " ": // Toggle interface
 			if item, ok := ls.interfaceList.SelectedItem().(*settingItem); ok {
+				// Initialize map if nil
+				if ls.selectedIfaces == nil {
+					ls.selectedIfaces = make(map[string]bool)
+				}
+
 				if item.title == "any" {
 					ls.selectedIfaces = map[string]bool{"any": true}
 					ls.promiscuous = false

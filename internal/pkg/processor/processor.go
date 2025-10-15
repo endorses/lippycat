@@ -443,15 +443,19 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 		// Update hunter status and stats
 		statsChanged := p.hunterManager.UpdateHeartbeat(hunterID, hb.TimestampNs, hb.Status, hb.Stats)
 
-		// Log heartbeat with stats (INFO level for debugging)
+		// Log heartbeat with stats (DEBUG level for normal operation, WARN if missing)
 		if hb.Stats != nil {
-			logger.Info("Heartbeat received with stats",
+			logger.Debug("Heartbeat received with stats",
 				"hunter_id", hunterID,
 				"active_filters", hb.Stats.ActiveFilters,
+				"packets_captured", hb.Stats.PacketsCaptured,
+				"packets_forwarded", hb.Stats.PacketsForwarded,
 				"stats_changed", statsChanged)
 		} else {
-			logger.Warn("Heartbeat received WITHOUT stats",
-				"hunter_id", hunterID)
+			logger.Warn("Heartbeat received WITHOUT stats (proto3 issue?)",
+				"hunter_id", hunterID,
+				"timestamp_ns", hb.TimestampNs,
+				"status", hb.Status)
 		}
 
 		// Send response

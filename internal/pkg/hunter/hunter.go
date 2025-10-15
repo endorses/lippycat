@@ -1189,9 +1189,15 @@ func (h *Hunter) sendHeartbeats() {
 			activeFilters := uint32(len(h.filters)) // #nosec G115
 			h.mu.RUnlock()
 
+			// Collect stats for heartbeat
+			packetsCaptured := h.stats.PacketsCaptured.Load()
+			packetsForwarded := h.stats.PacketsForwarded.Load()
+
 			logger.Debug("Sending heartbeat",
 				"hunter_id", h.config.HunterID,
 				"active_filters", activeFilters,
+				"packets_captured", packetsCaptured,
+				"packets_forwarded", packetsForwarded,
 				"status", status)
 
 			hb := &management.HunterHeartbeat{
@@ -1199,9 +1205,9 @@ func (h *Hunter) sendHeartbeats() {
 				TimestampNs: time.Now().UnixNano(),
 				Status:      status,
 				Stats: &management.HunterStats{
-					PacketsCaptured:  h.stats.PacketsCaptured.Load(),
+					PacketsCaptured:  packetsCaptured,
 					PacketsMatched:   h.stats.PacketsMatched.Load(),
-					PacketsForwarded: h.stats.PacketsForwarded.Load(),
+					PacketsForwarded: packetsForwarded,
 					PacketsDropped:   h.stats.PacketsDropped.Load(),
 					BufferBytes:      h.stats.BufferBytes.Load(),
 					ActiveFilters:    activeFilters,

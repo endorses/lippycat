@@ -89,7 +89,6 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string) (*Con
 // Returns true if stats changed (e.g., filter count changed)
 func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status management.HunterStatus, stats *management.HunterStats) bool {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	statsChanged := false
 	if hunter, exists := m.hunters[hunterID]; exists {
@@ -97,14 +96,26 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 		hunter.Status = status
 		if stats != nil {
 			// Check if filter count changed
+			oldFilters := hunter.ActiveFilters
 			if hunter.ActiveFilters != stats.ActiveFilters {
 				hunter.ActiveFilters = stats.ActiveFilters
 				statsChanged = true
+				logger.Info("Hunter filter count changed",
+					"hunter_id", hunterID,
+					"old_filters", oldFilters,
+					"new_filters", stats.ActiveFilters)
 			}
+		} else {
+			logger.Warn("Received heartbeat with nil stats",
+				"hunter_id", hunterID)
 		}
 	}
 
+	m.mu.Unlock() // Release lock BEFORE calling callback to avoid deadlock
+
 	// Update aggregated stats immediately if filter count changed
+	// IMPORTANT: Callback is called AFTER releasing the lock because it may
+	// call back into GetHealthStats() which needs to acquire the read lock.
 	if statsChanged && m.onStatsChanged != nil {
 		m.onStatsChanged()
 	}

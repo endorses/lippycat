@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 )
 
 // Test helper: create temporary certificate files
@@ -177,21 +179,17 @@ func TestBuildClientTLSCredentials_Success(t *testing.T) {
 	certFile, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	p := &Processor{
-		config: Config{
-			TLSCertFile: certFile,
-			TLSKeyFile:  keyFile,
-			TLSCAFile:   caFile,
-		},
-	}
-
-	creds, err := p.buildClientTLSCredentials()
+	creds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CertFile: certFile,
+		KeyFile:  keyFile,
+		CAFile:   caFile,
+	})
 	if err != nil {
-		t.Fatalf("buildClientTLSCredentials() failed: %v", err)
+		t.Fatalf("BuildClientCredentials() failed: %v", err)
 	}
 
 	if creds == nil {
-		t.Fatal("buildClientTLSCredentials() returned nil credentials")
+		t.Fatal("BuildClientCredentials() returned nil credentials")
 	}
 
 	info := creds.Info()
@@ -201,47 +199,35 @@ func TestBuildClientTLSCredentials_Success(t *testing.T) {
 }
 
 func TestBuildClientTLSCredentials_WithoutCA(t *testing.T) {
-	p := &Processor{
-		config: Config{
-			TLSCAFile: "",
-		},
-	}
-
-	creds, err := p.buildClientTLSCredentials()
+	creds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CAFile: "",
+	})
 	if err != nil {
-		t.Fatalf("buildClientTLSCredentials() should succeed without CA: %v", err)
+		t.Fatalf("BuildClientCredentials() should succeed without CA: %v", err)
 	}
 
 	if creds == nil {
-		t.Fatal("buildClientTLSCredentials() returned nil credentials")
+		t.Fatal("BuildClientCredentials() returned nil credentials")
 	}
 }
 
 func TestBuildClientTLSCredentials_MinVersion(t *testing.T) {
-	p := &Processor{
-		config: Config{},
-	}
-
-	creds, err := p.buildClientTLSCredentials()
+	creds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{})
 	if err != nil {
-		t.Fatalf("buildClientTLSCredentials() failed: %v", err)
+		t.Fatalf("BuildClientCredentials() failed: %v", err)
 	}
 
 	// Verify TLS version through reflection or by checking the implementation
 	// This is a basic sanity check
 	if creds == nil {
-		t.Fatal("buildClientTLSCredentials() returned nil credentials")
+		t.Fatal("BuildClientCredentials() returned nil credentials")
 	}
 }
 
 func TestBuildClientTLSCredentials_InvalidCA(t *testing.T) {
-	p := &Processor{
-		config: Config{
-			TLSCAFile: "/nonexistent/ca.pem",
-		},
-	}
-
-	_, err := p.buildClientTLSCredentials()
+	_, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CAFile: "/nonexistent/ca.pem",
+	})
 	if err == nil {
 		t.Fatal("expected error when CA file doesn't exist, got nil")
 	}
@@ -251,21 +237,17 @@ func TestBuildClientTLSCredentials_WithMutualTLS(t *testing.T) {
 	certFile, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	p := &Processor{
-		config: Config{
-			TLSCertFile: certFile,
-			TLSKeyFile:  keyFile,
-			TLSCAFile:   caFile,
-		},
-	}
-
-	creds, err := p.buildClientTLSCredentials()
+	creds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CertFile: certFile,
+		KeyFile:  keyFile,
+		CAFile:   caFile,
+	})
 	if err != nil {
-		t.Fatalf("buildClientTLSCredentials() failed: %v", err)
+		t.Fatalf("BuildClientCredentials() failed: %v", err)
 	}
 
 	if creds == nil {
-		t.Fatal("buildClientTLSCredentials() returned nil credentials")
+		t.Fatal("BuildClientCredentials() returned nil credentials")
 	}
 }
 
@@ -322,17 +304,13 @@ func TestTLSConfig_InvalidCAFile(t *testing.T) {
 
 func TestTLSCredentials_UseSystemCertPool(t *testing.T) {
 	// Test that client credentials can use system cert pool when no CA specified
-	p := &Processor{
-		config: Config{},
-	}
-
-	creds, err := p.buildClientTLSCredentials()
+	creds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{})
 	if err != nil {
-		t.Fatalf("buildClientTLSCredentials() failed: %v", err)
+		t.Fatalf("BuildClientCredentials() failed: %v", err)
 	}
 
 	if creds == nil {
-		t.Fatal("buildClientTLSCredentials() returned nil credentials")
+		t.Fatal("BuildClientCredentials() returned nil credentials")
 	}
 
 	// Should succeed and use system cert pool

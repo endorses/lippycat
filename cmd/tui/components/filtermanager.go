@@ -650,13 +650,13 @@ func (fm *FilterManager) initializeAddForm() {
 	patternInput := textinput.New()
 	patternInput.Placeholder = "e.g., alice@example.com"
 	patternInput.CharLimit = 200
-	patternInput.Width = 50
+	patternInput.Width = 60
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.Placeholder = "Optional description"
 	descInput.CharLimit = 500
-	descInput.Width = 50
+	descInput.Width = 60
 
 	fm.formState = &FilterFormState{
 		filterID:      "",
@@ -676,13 +676,13 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 	patternInput := textinput.New()
 	patternInput.SetValue(filter.Pattern)
 	patternInput.CharLimit = 200
-	patternInput.Width = 50
+	patternInput.Width = 60
 	patternInput.Focus()
 
 	descInput := textinput.New()
 	descInput.SetValue(filter.Description)
 	descInput.CharLimit = 500
-	descInput.Width = 50
+	descInput.Width = 60
 
 	fm.formState = &FilterFormState{
 		filterID:      filter.Id,

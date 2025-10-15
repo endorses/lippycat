@@ -1,5 +1,5 @@
-//go:build cli || tui || all
-// +build cli tui all
+//go:build cli || tui || hunter || all
+// +build cli tui hunter all
 
 package cmd
 

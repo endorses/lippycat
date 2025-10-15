@@ -22,7 +22,6 @@ const (
 	ModeList FilterManagerMode = iota
 	ModeAdd
 	ModeEdit
-	ModeDeleteConfirm
 )
 
 // NodeType represents the type of node (processor or hunter)
@@ -40,8 +39,9 @@ type FilterManager struct {
 	filteredFilters []*management.Filter
 
 	// UI components
-	filterList  list.Model
-	searchInput textinput.Model
+	filterList    list.Model
+	searchInput   textinput.Model
+	confirmDialog ConfirmDialog
 
 	// State
 	active           bool
@@ -53,7 +53,6 @@ type FilterManager struct {
 	filterByType     *management.FilterType
 	filterByEnabled  *bool
 	loading          bool
-	deleteCandidate  *management.Filter                 // Filter pending deletion confirmation
 	availableHunters []filtermanager.HunterSelectorItem // Available hunters for target selection
 	selectingHunters bool                               // Whether we're in hunter selection mode
 
@@ -92,11 +91,14 @@ func NewFilterManager() FilterManager {
 	filterList.SetShowHelp(false)
 	filterList.SetFilteringEnabled(false) // We handle filtering ourselves
 
+	confirmDialog := NewConfirmDialog()
+
 	return FilterManager{
 		allFilters:      make([]*management.Filter, 0),
 		filteredFilters: make([]*management.Filter, 0),
 		filterList:      filterList,
 		searchInput:     searchInput,
+		confirmDialog:   confirmDialog,
 		active:          false,
 		mode:            ModeList,
 		searchMode:      false,
@@ -110,6 +112,8 @@ func (fm *FilterManager) SetTheme(theme themes.Theme) {
 	// Update delegate theme
 	delegate := filtermanager.NewFilterDelegate(theme)
 	fm.filterList.SetDelegate(delegate)
+	// Update confirm dialog theme
+	fm.confirmDialog.SetTheme(theme)
 }
 
 // SetSize updates the size
@@ -141,6 +145,7 @@ func (fm *FilterManager) SetSize(width, height int) {
 	}
 
 	fm.filterList.SetSize(listWidth, listHeight)
+	fm.confirmDialog.SetSize(width, height)
 }
 
 // Activate shows the filter manager for a specific node
@@ -377,16 +382,16 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
+	// Check if confirm dialog is active first
+	if fm.confirmDialog.IsActive() {
+		return fm.confirmDialog.Update(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle hunter selection mode
 		if fm.selectingHunters {
 			return fm.handleHunterSelectionMode(msg)
-		}
-
-		// Handle delete confirmation mode
-		if fm.mode == ModeDeleteConfirm {
-			return fm.handleDeleteConfirmMode(msg)
 		}
 
 		// Handle add/edit form mode
@@ -401,6 +406,10 @@ func (fm *FilterManager) Update(msg tea.Msg) tea.Cmd {
 
 		// Handle list mode
 		return fm.handleListMode(msg)
+
+	case ConfirmDialogResult:
+		// Handle confirmation dialog result
+		return fm.handleConfirmResult(msg)
 
 	case FilterOperationResultMsg:
 		// Handle gRPC operation results
@@ -514,8 +523,25 @@ func (fm *FilterManager) handleListMode(msg tea.KeyMsg) tea.Cmd {
 	case "d":
 		selectedFilter := fm.GetSelectedFilter()
 		if selectedFilter != nil {
-			fm.deleteCandidate = selectedFilter
-			fm.mode = ModeDeleteConfirm
+			// Build details for confirmation
+			details := []string{
+				"Pattern: " + selectedFilter.Pattern,
+				"Type: " + selectedFilter.Type.String(),
+			}
+			if selectedFilter.Description != "" {
+				details = append(details, "Description: "+selectedFilter.Description)
+			}
+
+			// Show confirmation dialog
+			fm.confirmDialog.Show(ConfirmDialogOptions{
+				Type:        ConfirmDialogDanger,
+				Title:       "Delete Filter",
+				Message:     "Are you sure you want to delete this filter?",
+				Details:     details,
+				ConfirmText: "y",
+				CancelText:  "n",
+				UserData:    selectedFilter,
+			})
 		}
 		return nil
 
@@ -598,39 +624,38 @@ func (fm *FilterManager) handleHunterSelectionMode(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
-// handleDeleteConfirmMode handles keyboard input in delete confirmation mode
-func (fm *FilterManager) handleDeleteConfirmMode(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
-	case "y", "Y":
-		return fm.deleteFilter()
-
-	case "n", "N", "esc":
-		fm.deleteCandidate = nil
-		fm.mode = ModeList
-		return nil
-
-	default:
+// handleConfirmResult handles the result from the confirmation dialog
+func (fm *FilterManager) handleConfirmResult(msg ConfirmDialogResult) tea.Cmd {
+	if !msg.Confirmed {
+		// User cancelled
 		return nil
 	}
+
+	// User confirmed - check what action we're confirming
+	if msg.UserData != nil {
+		if filter, ok := msg.UserData.(*management.Filter); ok {
+			// Delete the filter
+			return fm.deleteFilter(filter)
+		}
+	}
+
+	return nil
 }
 
-// deleteFilter deletes the filter pending deletion
-func (fm *FilterManager) deleteFilter() tea.Cmd {
-	if fm.deleteCandidate == nil {
-		fm.mode = ModeList
+// deleteFilter deletes the specified filter
+func (fm *FilterManager) deleteFilter(filter *management.Filter) tea.Cmd {
+	if filter == nil {
 		return nil
 	}
 
 	// Use pure function to delete filter
 	result := filtermanager.DeleteFilter(filtermanager.DeleteFilterParams{
-		Filter:     fm.deleteCandidate,
+		Filter:     filter,
 		AllFilters: fm.allFilters,
 	})
 
-	filterID := fm.deleteCandidate.Id
+	filterID := filter.Id
 	fm.allFilters = result.UpdatedFilters
-	fm.deleteCandidate = nil
-	fm.mode = ModeList
 	fm.filterList.NewStatusMessage(result.StatusMessage)
 	fm.applyFilters()
 
@@ -912,14 +937,14 @@ func (fm *FilterManager) View() string {
 		return ""
 	}
 
+	// Show confirm dialog if active
+	if fm.confirmDialog.IsActive() {
+		return fm.confirmDialog.View()
+	}
+
 	// Show hunter selection if in that mode
 	if fm.selectingHunters {
 		return fm.renderHunterSelection()
-	}
-
-	// Show delete confirmation dialog if in delete confirmation mode
-	if fm.mode == ModeDeleteConfirm {
-		return fm.renderDeleteConfirmation()
 	}
 
 	// Show add/edit form if in form mode
@@ -980,32 +1005,6 @@ func (fm *FilterManager) View() string {
 		Height:     fm.height,
 		Theme:      fm.theme,
 		ModalWidth: 0,
-	})
-}
-
-// renderDeleteConfirmation renders the delete confirmation dialog
-func (fm *FilterManager) renderDeleteConfirmation() string {
-	if fm.deleteCandidate == nil {
-		return ""
-	}
-
-	content := filtermanager.RenderDeleteConfirm(filtermanager.RenderDeleteConfirmParams{
-		FilterPattern:     fm.deleteCandidate.Pattern,
-		FilterType:        fm.deleteCandidate.Type,
-		FilterDescription: fm.deleteCandidate.Description,
-		Theme:             fm.theme,
-	})
-
-	footer := "y: Confirm delete  n/Esc: Cancel"
-
-	return RenderModal(ModalRenderOptions{
-		Title:      "🗑️  Confirm Deletion",
-		Content:    content,
-		Footer:     footer,
-		Width:      fm.width,
-		Height:     fm.height,
-		Theme:      fm.theme,
-		ModalWidth: 60,
 	})
 }
 

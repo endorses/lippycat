@@ -261,6 +261,16 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 
 // handleConfirmDialogResult handles confirmation dialog responses
 func (m Model) handleConfirmDialogResult(msg components.ConfirmDialogResult) (Model, tea.Cmd) {
+	// Check if this is a node deletion confirmation
+	if nodeDeletion, ok := msg.UserData.(NodeDeletionData); ok {
+		if msg.Confirmed {
+			// User confirmed deletion, perform it
+			return m, m.performNodeDeletion(nodeDeletion)
+		}
+		// User cancelled, do nothing
+		return m, nil
+	}
+
 	// User responded to file overwrite confirmation
 	if msg.Confirmed && m.pendingSavePath != "" {
 		// User confirmed overwrite, proceed with save

@@ -261,7 +261,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.uiState.FilterManager.IsActive() {
 		// Only intercept user input (KeyMsg, MouseMsg), let internal messages pass through
 		switch msg.(type) {
-		case tea.KeyMsg, tea.MouseMsg:
+		case tea.KeyMsg, tea.MouseMsg, components.ConfirmDialogResult:
 			cmd := m.uiState.FilterManager.Update(msg)
 			return m, tea.Batch(toastCmd, cmd)
 		}

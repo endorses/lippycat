@@ -29,6 +29,13 @@ type NodesLoadFailedMsg struct {
 	FilePath string
 }
 
+// NodeDeletionData holds information about a node pending deletion
+type NodeDeletionData struct {
+	ProcessorAddr string // Non-empty if deleting a processor
+	HunterID      string // Non-empty if unsubscribing from a hunter
+	ProcessorID   string // For display purposes
+}
+
 // getConnectedProcessors returns a list of connected processor addresses
 func (m *Model) getConnectedProcessors() []string {
 	processors := make([]string, 0, len(m.connectionMgr.Processors))
@@ -129,20 +136,74 @@ func loadNodesFile(filePath string) tea.Cmd {
 }
 
 // handleDeleteNode handles deletion/unsubscription of a selected node
+// Shows a confirmation dialog before performing the action
 func (m *Model) handleDeleteNode() tea.Cmd {
 	// Check what's selected in the nodes view
 	selectedHunter := m.uiState.NodesView.GetSelectedHunter()
 	selectedProcessorAddr := m.uiState.NodesView.GetSelectedProcessorAddr()
 
 	if selectedProcessorAddr != "" {
-		// Processor is selected - fully disconnect and remove
-		if proc, exists := m.connectionMgr.Processors[selectedProcessorAddr]; exists {
+		// Processor is selected - show confirmation dialog
+		proc, exists := m.connectionMgr.Processors[selectedProcessorAddr]
+		if !exists {
+			return nil
+		}
+
+		details := []string{
+			"Address: " + selectedProcessorAddr,
+		}
+		if proc.ProcessorID != "" {
+			details = append(details, "ID: "+proc.ProcessorID)
+		}
+
+		// Show confirmation dialog with processor info
+		return m.uiState.ConfirmDialog.Show(components.ConfirmDialogOptions{
+			Type:        components.ConfirmDialogDanger,
+			Title:       "Remove Processor",
+			Message:     "Are you sure you want to remove this processor?",
+			Details:     details,
+			ConfirmText: "y",
+			CancelText:  "n",
+			UserData: NodeDeletionData{
+				ProcessorAddr: selectedProcessorAddr,
+				ProcessorID:   proc.ProcessorID,
+			},
+		})
+	} else if selectedHunter != nil {
+		// Hunter is selected - show confirmation dialog for unsubscription
+		details := []string{
+			"Hunter ID: " + selectedHunter.ID,
+			"Hostname: " + selectedHunter.Hostname,
+		}
+
+		// Show confirmation dialog with hunter info
+		return m.uiState.ConfirmDialog.Show(components.ConfirmDialogOptions{
+			Type:        components.ConfirmDialogWarning,
+			Title:       "Unsubscribe from Hunter",
+			Message:     "Are you sure you want to unsubscribe from this hunter?",
+			Details:     details,
+			ConfirmText: "y",
+			CancelText:  "n",
+			UserData: NodeDeletionData{
+				ProcessorAddr: selectedHunter.ProcessorAddr,
+				HunterID:      selectedHunter.ID,
+			},
+		})
+	}
+	return nil
+}
+
+// performNodeDeletion performs the actual deletion/unsubscription after confirmation
+func (m *Model) performNodeDeletion(data NodeDeletionData) tea.Cmd {
+	if data.ProcessorAddr != "" && data.HunterID == "" {
+		// Delete processor
+		if proc, exists := m.connectionMgr.Processors[data.ProcessorAddr]; exists {
 			// Close client connection
 			if proc.Client != nil {
 				proc.Client.Close()
 			}
 			// Remove from connection manager (also removes hunters)
-			m.connectionMgr.RemoveProcessor(selectedProcessorAddr)
+			m.connectionMgr.RemoveProcessor(data.ProcessorAddr)
 
 			// Update NodesView to reflect removal
 			procInfos := m.getProcessorInfoList()
@@ -150,19 +211,14 @@ func (m *Model) handleDeleteNode() tea.Cmd {
 
 			// Show success toast
 			return m.uiState.Toast.Show(
-				fmt.Sprintf("Removed %s", selectedProcessorAddr),
+				fmt.Sprintf("Removed %s", data.ProcessorAddr),
 				components.ToastSuccess,
 				components.ToastDurationShort,
 			)
 		}
-		return nil
-	} else if selectedHunter != nil {
-		// Hunter is selected - unsubscribe from it
-		processorAddr := selectedHunter.ProcessorAddr
-
-		if processorAddr == "" {
-			return nil
-		}
+	} else if data.HunterID != "" {
+		// Unsubscribe from hunter
+		processorAddr := data.ProcessorAddr
 
 		proc, exists := m.connectionMgr.Processors[processorAddr]
 		if !exists {
@@ -187,14 +243,14 @@ func (m *Model) handleDeleteNode() tea.Cmd {
 		// Build new list excluding the hunter to remove
 		newHunterIDs := make([]string, 0)
 		for _, hunterID := range currentSubscription {
-			if hunterID != selectedHunter.ID {
+			if hunterID != data.HunterID {
 				newHunterIDs = append(newHunterIDs, hunterID)
 			}
 		}
 
 		// Show toast notification
 		toastCmd := m.uiState.Toast.Show(
-			fmt.Sprintf("Unsubscribed from %s", selectedHunter.ID),
+			fmt.Sprintf("Unsubscribed from %s", data.HunterID),
 			components.ToastInfo,
 			components.ToastDurationShort,
 		)

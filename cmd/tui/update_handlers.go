@@ -15,6 +15,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
+// FileOverwriteData holds information about a file pending overwrite confirmation
+type FileOverwriteData struct {
+	FilePath string
+}
+
 // handleWindowSizeMsg handles terminal window resize events
 func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.uiState.Width = msg.Width
@@ -248,10 +253,18 @@ func (m Model) handleFileSelectedMsg(msg components.FileSelectedMsg) (Model, tea
 	// Check if file exists
 	if _, err := os.Stat(filePath); err == nil {
 		// File exists - show confirmation dialog
-		m.pendingSavePath = filePath
-		cmd := m.uiState.ConfirmDialog.Activate(
-			fmt.Sprintf("File '%s' already exists. Overwrite?", filepath.Base(filePath)),
-		)
+		fileName := filepath.Base(filePath)
+		cmd := m.uiState.ConfirmDialog.Show(components.ConfirmDialogOptions{
+			Type:        components.ConfirmDialogWarning,
+			Title:       "File Already Exists",
+			Message:     fmt.Sprintf("File '%s' already exists. Overwrite?", fileName),
+			Details:     []string{"Path: " + filePath},
+			ConfirmText: "y",
+			CancelText:  "n",
+			UserData: FileOverwriteData{
+				FilePath: filePath,
+			},
+		})
 		return m, cmd
 	}
 
@@ -271,17 +284,29 @@ func (m Model) handleConfirmDialogResult(msg components.ConfirmDialogResult) (Mo
 		return m, nil
 	}
 
-	// User responded to file overwrite confirmation
+	// Check if this is a file overwrite confirmation
+	if fileOverwrite, ok := msg.UserData.(FileOverwriteData); ok {
+		if msg.Confirmed {
+			// User confirmed overwrite, proceed with save
+			return m, m.proceedWithSave(fileOverwrite.FilePath)
+		}
+		// User cancelled, do nothing
+		return m, nil
+	}
+
+	// Legacy fallback: User responded to file overwrite confirmation (for backward compatibility)
 	if msg.Confirmed && m.pendingSavePath != "" {
 		// User confirmed overwrite, proceed with save
 		filePath := m.pendingSavePath
 		m.pendingSavePath = "" // Clear pending path
 		return m, m.proceedWithSave(filePath)
-	} else {
-		// User cancelled or no pending path
+	} else if m.pendingSavePath != "" {
+		// User cancelled
 		m.pendingSavePath = "" // Clear pending path
 		return m, nil
 	}
+
+	return m, nil
 }
 
 // handleSaveCompleteMsg handles save operation completion

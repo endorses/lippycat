@@ -207,6 +207,13 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// If settings tab is active and editing interface, pass messages to settings
 	// (this is needed for list filtering to work properly)
+	// Handle toast messages FIRST (even when modals are active)
+	// This ensures toast auto-dismiss timer continues working
+	var toastCmd tea.Cmd
+	if m.uiState.Toast.IsActive() {
+		toastCmd = m.uiState.Toast.Update(msg)
+	}
+
 	// BUT: Don't intercept PacketMsg, TickMsg, or RestartCaptureMsg - those need to be handled by the main model
 	if m.uiState.Tabs.GetActive() == 3 && m.uiState.SettingsView.IsEditingInterface() {
 		switch msg.(type) {
@@ -224,17 +231,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Suspend
 				}
 			}
-			// Pass all other messages to settings view
+			// Pass all other messages to settings view, but batch with toast command
 			cmd := m.uiState.SettingsView.Update(msg)
-			return m, cmd
+			return m, tea.Batch(toastCmd, cmd)
 		}
-	}
-
-	// Handle toast messages FIRST (even when modals are active)
-	// This ensures toast auto-dismiss timer continues working
-	var toastCmd tea.Cmd
-	if m.uiState.Toast.IsActive() {
-		toastCmd = m.uiState.Toast.Update(msg)
 	}
 
 	// Handle modals BEFORE type switch so they can receive ALL message types

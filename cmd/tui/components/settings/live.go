@@ -111,8 +111,14 @@ type interfaceDelegate struct {
 }
 
 func newInterfaceDelegate(selectedIfaces map[string]bool, theme themes.Theme) interfaceDelegate {
+	delegate := list.NewDefaultDelegate()
+	// Set item height to 1 to fit more interfaces per page
+	delegate.SetHeight(1)
+	// Disable spacing between items to maximize visible items
+	delegate.SetSpacing(0)
+
 	return interfaceDelegate{
-		DefaultDelegate: list.NewDefaultDelegate(),
+		DefaultDelegate: delegate,
 		selectedIfaces:  selectedIfaces,
 		theme:           theme,
 	}
@@ -384,7 +390,13 @@ func (ls *LiveSettings) UpdateTheme(theme themes.Theme) {
 
 // SetSize updates sizes for the interface list
 func (ls *LiveSettings) SetSize(width, height int) {
-	ls.interfaceList.SetSize(width-8, height/3)
+	// Use about 2/3 of available height for better interface visibility
+	// Subtract some space for header, footer, and other UI elements
+	listHeight := (height * 2) / 3
+	if listHeight < 10 {
+		listHeight = 10 // Minimum height
+	}
+	ls.interfaceList.SetSize(width-8, listHeight)
 }
 
 // Update passes bubbletea messages to inputs when editing

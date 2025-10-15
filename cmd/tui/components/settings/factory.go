@@ -29,11 +29,18 @@ const (
 // - Add new capture modes without changing client code
 type ModeFactory struct {
 	theme themes.Theme
+	// Cached live mode settings to preserve across mode switches
+	lastInterface   string
+	lastPromiscuous bool
+	lastFilter      string
 }
 
 // NewModeFactory creates a new mode factory with the given theme.
 func NewModeFactory(theme themes.Theme) *ModeFactory {
-	return &ModeFactory{theme: theme}
+	return &ModeFactory{
+		theme:         theme,
+		lastInterface: "any",
+	}
 }
 
 // CreateMode creates a mode instance based on the given mode type and parameters.
@@ -59,6 +66,12 @@ func (f *ModeFactory) CreateMode(
 ) ModeSettings {
 	switch mode {
 	case CaptureModeLive:
+		// Cache live mode settings for later restoration
+		if interfaceStr != "" {
+			f.lastInterface = interfaceStr
+		}
+		f.lastPromiscuous = promiscuous
+		f.lastFilter = filter
 		return NewLiveSettings(interfaceStr, bufferSize, promiscuous, filter, f.theme)
 
 	case CaptureModeOffline:
@@ -77,8 +90,9 @@ func (f *ModeFactory) CreateMode(
 //
 // This is used when the user switches between capture modes. It:
 // 1. Extracts common settings (buffer size) from the current mode
-// 2. Creates a new mode instance with those settings
-// 3. Resets mode-specific settings to defaults
+// 2. Caches live mode settings (interface, promiscuous) when switching away from live
+// 3. Restores live mode settings when switching back to live
+// 4. Creates a new mode instance with those settings
 //
 // Parameters:
 //   - newMode: The mode type to switch to
@@ -90,17 +104,47 @@ func (f *ModeFactory) SwitchMode(newMode CaptureMode, currentMode ModeSettings) 
 	bufferSize := 10000 // default
 	if currentMode != nil {
 		bufferSize = currentMode.GetBufferSize()
+
+		// Cache live mode settings when switching away from live mode
+		msg := currentMode.ToRestartMsg()
+		if msg.Mode == 0 { // CaptureModeLive
+			if msg.Interface != "" {
+				f.lastInterface = msg.Interface
+			}
+			f.lastPromiscuous = msg.Promiscuous
+			if msg.Filter != "" {
+				f.lastFilter = msg.Filter
+			}
+		}
+	}
+
+	// When switching to live mode, use cached settings
+	// When switching to other modes, reset mode-specific fields
+	interfaceStr := "any"
+	promiscuous := false
+	filter := ""
+
+	if newMode == CaptureModeLive {
+		// Restore cached live mode settings
+		interfaceStr = f.lastInterface
+		promiscuous = f.lastPromiscuous
+		filter = f.lastFilter
+	} else {
+		// For offline mode, preserve filter from current mode if available
+		if currentMode != nil {
+			filter = currentMode.GetBPFFilter()
+		}
 	}
 
 	// Create new mode with preserved settings
 	return f.CreateMode(
 		newMode,
 		bufferSize,
-		"",    // filter (reset)
-		"any", // interface (reset to default)
-		false, // promiscuous (reset)
-		"",    // pcapFile (reset)
-		"",    // nodesFile (reset)
+		filter,       // preserved or reset depending on mode
+		interfaceStr, // restored from cache for live mode
+		promiscuous,  // restored from cache for live mode
+		"",           // pcapFile (reset)
+		"",           // nodesFile (reset)
 	)
 }
 

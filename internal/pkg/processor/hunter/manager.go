@@ -46,7 +46,6 @@ func NewManager(maxHunters int, onStatsChanged func()) *Manager {
 // Register registers or re-registers a hunter
 func (m *Manager) Register(hunterID, hostname string, interfaces []string) (*ConnectedHunter, bool, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	isReconnect := false
 	if _, exists := m.hunters[hunterID]; exists {
@@ -57,6 +56,7 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string) (*Con
 		// Check max hunters limit (only for new hunters)
 		if len(m.hunters) >= m.maxHunters {
 			logger.Warn("Max hunters limit reached", "limit", m.maxHunters)
+			m.mu.Unlock()
 			return nil, false, ErrMaxHuntersReached
 		}
 	}
@@ -71,8 +71,14 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string) (*Con
 	}
 	m.hunters[hunterID] = hunter
 
+	// Note: We need to trigger stats callback after releasing lock to avoid deadlock
+	// since the callback might call GetHealthStats() which needs a read lock
+	shouldTriggerCallback := !isReconnect && m.onStatsChanged != nil
+
+	m.mu.Unlock() // Release lock before callback
+
 	// Trigger stats update for new registrations
-	if !isReconnect && m.onStatsChanged != nil {
+	if shouldTriggerCallback {
 		m.onStatsChanged()
 	}
 

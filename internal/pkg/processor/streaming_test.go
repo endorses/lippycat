@@ -1,10 +1,3 @@
-//go:build skip_until_refactored
-
-// TODO: This test file needs refactoring to work with the new manager architecture.
-// Tests directly access old processor.hunters, processor.filters fields.
-// Should be refactored to test through public Processor API or moved to manager packages.
-// See REFACTOR.md Phase 2.1 for details.
-
 package processor
 
 import (
@@ -15,19 +8,16 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestProcessBatch tests batch processing
 func TestProcessBatch(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Create a test batch
 	batch := &data.PacketBatch{
@@ -66,15 +56,11 @@ func TestProcessBatch(t *testing.T) {
 
 // TestProcessBatch_EmptyBatch tests processing empty batch
 func TestProcessBatch_EmptyBatch(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Create an empty batch
 	batch := &data.PacketBatch{
@@ -103,93 +89,65 @@ func TestProcessBatch_NilBatch(t *testing.T) {
 
 // TestHunterRegistration tests hunter registration and tracking
 func TestHunterRegistration(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+
+	// Register a hunter using the manager
+	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0", "wlan0"})
+	require.NoError(t, err)
+
+	// Verify hunter was registered by getting all hunters
+	hunters := processor.hunterManager.GetAll("")
+	assert.Equal(t, 1, len(hunters), "should have 1 hunter registered")
+
+	// Find our hunter
+	found := false
+	for _, h := range hunters {
+		if h.ID == "hunter-1" {
+			found = true
+			assert.Equal(t, []string{"eth0", "wlan0"}, h.Interfaces)
+			assert.Equal(t, management.HunterStatus_STATUS_HEALTHY, h.Status)
+			break
+		}
 	}
-
-	// Simulate hunter connection
-	now := time.Now().Unix()
-	hunter := &ConnectedHunter{
-		ID:              "hunter-1",
-		Interfaces:      []string{"eth0", "wlan0"},
-		RemoteAddr:      "192.168.1.100:12345",
-		ConnectedAt:     now,
-		LastHeartbeat:   now,
-		PacketsReceived: 0,
-		Status:          management.HunterStatus_STATUS_HEALTHY,
-	}
-
-	processor.huntersMu.Lock()
-	processor.hunters["hunter-1"] = hunter
-	processor.huntersMu.Unlock()
-
-	// Verify hunter was registered
-	processor.huntersMu.RLock()
-	retrieved, exists := processor.hunters["hunter-1"]
-	processor.huntersMu.RUnlock()
-
-	assert.True(t, exists, "hunter should be registered")
-	assert.Equal(t, "hunter-1", retrieved.ID)
-	assert.Equal(t, []string{"eth0", "wlan0"}, retrieved.Interfaces)
-	assert.Equal(t, management.HunterStatus_STATUS_HEALTHY, retrieved.Status)
+	assert.True(t, found, "hunter-1 should be registered")
 }
 
 // TestMultipleHunters tests managing multiple hunters
 func TestMultipleHunters(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
 
-	// Add multiple hunters
-	now := time.Now().Unix()
+	// Add multiple hunters using the manager
 	for i := 1; i <= 5; i++ {
-		hunter := &ConnectedHunter{
-			ID:            string(rune('h') + rune(i)),
-			Interfaces:    []string{"eth0"},
-			ConnectedAt:   now,
-			LastHeartbeat: now,
-			Status:        management.HunterStatus_STATUS_HEALTHY,
-		}
-		processor.huntersMu.Lock()
-		processor.hunters[hunter.ID] = hunter
-		processor.huntersMu.Unlock()
+		hunterID := string(rune('h') + rune(i))
+		_, _, err := processor.hunterManager.Register(hunterID, "host"+hunterID, []string{"eth0"})
+		require.NoError(t, err)
 	}
 
 	// Verify all hunters were registered
-	processor.huntersMu.RLock()
-	hunterCount := len(processor.hunters)
-	processor.huntersMu.RUnlock()
-
-	assert.Equal(t, 5, hunterCount, "should have 5 hunters registered")
+	hunters := processor.hunterManager.GetAll("")
+	assert.Equal(t, 5, len(hunters), "should have 5 hunters registered")
 }
 
 // TestBroadcastToSubscribers tests packet broadcasting
 func TestBroadcastToSubscribers(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
-	// Add a subscriber using sync.Map
-	subscriberCh := make(chan *data.PacketBatch, 10)
-	processor.addSubscriber("subscriber-1", subscriberCh)
+	// Add a subscriber using the manager
+	subscriberCh := processor.subscriberManager.Add("subscriber-1")
 
 	// Create a test batch
 	batch := &data.PacketBatch{
@@ -202,7 +160,7 @@ func TestBroadcastToSubscribers(t *testing.T) {
 	}
 
 	// Broadcast to subscribers
-	processor.broadcastToSubscribers(batch)
+	processor.subscriberManager.Broadcast(batch)
 
 	// Verify subscriber received the batch
 	select {
@@ -217,24 +175,19 @@ func TestBroadcastToSubscribers(t *testing.T) {
 
 // TestBroadcastToSubscribers_MultipleSubscribers tests broadcasting to multiple subscribers
 func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
-	// Add multiple subscribers using sync.Map
+	// Add multiple subscribers using the manager
 	numSubscribers := 3
 	subscribers := make([]chan *data.PacketBatch, numSubscribers)
 	for i := 0; i < numSubscribers; i++ {
-		ch := make(chan *data.PacketBatch, 10)
-		subscribers[i] = ch
 		clientID := string(rune('a') + rune(i))
-		processor.addSubscriber(clientID, ch)
+		ch := processor.subscriberManager.Add(clientID)
+		subscribers[i] = ch
 	}
 
 	// Create a test batch
@@ -248,7 +201,7 @@ func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
 	}
 
 	// Broadcast to all subscribers
-	processor.broadcastToSubscribers(batch)
+	processor.subscriberManager.Broadcast(batch)
 
 	// Verify all subscribers received the batch
 	for i, ch := range subscribers {
@@ -264,65 +217,67 @@ func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
 
 // TestAddSubscriber tests adding a subscriber
 func TestAddSubscriber(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Add a subscriber
-	ch := make(chan *data.PacketBatch, 10)
-	processor.addSubscriber("subscriber-1", ch)
+	ch := processor.subscriberManager.Add("subscriber-1")
 
-	// Verify subscriber was added using sync.Map
-	value, exists := processor.subscribers.Load("subscriber-1")
-	assert.True(t, exists, "subscriber should be added")
+	// Verify subscriber was added by checking count
+	// Since SubscriberManager doesn't expose direct access, we verify by broadcasting
+	batch := &data.PacketBatch{
+		HunterId: "test",
+		Packets:  []*data.CapturedPacket{{Data: []byte("test")}},
+	}
+	processor.subscriberManager.Broadcast(batch)
 
-	if exists {
-		subscriberCh := value.(chan *data.PacketBatch)
-		assert.Equal(t, ch, subscriberCh, "channel should match")
+	select {
+	case <-ch:
+		// Success - subscriber is active
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("subscriber not receiving broadcasts")
 	}
 }
 
 // TestRemoveSubscriber tests removing a subscriber
 func TestRemoveSubscriber(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Add a subscriber
-	ch := make(chan *data.PacketBatch, 10)
-	processor.addSubscriber("subscriber-1", ch)
+	ch := processor.subscriberManager.Add("subscriber-1")
 
 	// Remove the subscriber
-	processor.removeSubscriber("subscriber-1")
+	processor.subscriberManager.Remove("subscriber-1")
 
-	// Verify subscriber was removed using sync.Map
-	_, exists := processor.subscribers.Load("subscriber-1")
-	assert.False(t, exists, "subscriber should be removed")
+	// Verify subscriber was removed by broadcasting (channel should not receive)
+	batch := &data.PacketBatch{
+		HunterId: "test",
+		Packets:  []*data.CapturedPacket{{Data: []byte("test")}},
+	}
+	processor.subscriberManager.Broadcast(batch)
+
+	select {
+	case <-ch:
+		t.Fatal("removed subscriber should not receive broadcasts")
+	case <-time.After(100 * time.Millisecond):
+		// Success - subscriber not receiving
+	}
 }
 
 // TestConcurrentBatchProcessing tests concurrent batch processing
 func TestConcurrentBatchProcessing(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Process batches concurrently
 	var wg sync.WaitGroup
@@ -365,15 +320,11 @@ func TestConcurrentBatchProcessing(t *testing.T) {
 
 // TestStatsAtomic tests atomic stats operations
 func TestStatsAtomic(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Increment stats from multiple goroutines
 	var wg sync.WaitGroup
@@ -400,25 +351,16 @@ func TestStatsAtomic(t *testing.T) {
 
 // TestHunterPacketCounting tests per-hunter packet counting
 func TestHunterPacketCounting(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
 
 	// Register a hunter
-	hunter := &ConnectedHunter{
-		ID:              "hunter-1",
-		PacketsReceived: 0,
-		Status:          management.HunterStatus_STATUS_HEALTHY,
-	}
-	processor.huntersMu.Lock()
-	processor.hunters["hunter-1"] = hunter
-	processor.huntersMu.Unlock()
+	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0"})
+	require.NoError(t, err)
 
 	// Process a batch from this hunter
 	batch := &data.PacketBatch{
@@ -435,25 +377,25 @@ func TestHunterPacketCounting(t *testing.T) {
 	processor.processBatch(batch)
 
 	// Verify hunter's packet count was updated
-	processor.huntersMu.RLock()
-	retrievedHunter := processor.hunters["hunter-1"]
-	packetCount := retrievedHunter.PacketsReceived
-	processor.huntersMu.RUnlock()
-
-	assert.Equal(t, uint64(3), packetCount, "hunter should have 3 packets received")
+	hunters := processor.hunterManager.GetAll("")
+	found := false
+	for _, h := range hunters {
+		if h.ID == "hunter-1" {
+			found = true
+			assert.Equal(t, uint64(3), h.PacketsReceived, "hunter should have 3 packets received")
+			break
+		}
+	}
+	assert.True(t, found, "hunter-1 should be in list")
 }
 
 // TestProcessorStatsConcurrent tests concurrent stats updates
 func TestProcessorStatsConcurrent(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
-	}
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+	})
+	require.NoError(t, err)
 
 	// Update stats concurrently
 	var wg sync.WaitGroup

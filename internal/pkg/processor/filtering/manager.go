@@ -260,3 +260,15 @@ func (m *Manager) Count() int {
 
 	return len(m.filters)
 }
+
+// GetAll returns all filters
+func (m *Manager) GetAll() []*management.Filter {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	filters := make([]*management.Filter, 0, len(m.filters))
+	for _, filter := range m.filters {
+		filters = append(filters, filter)
+	}
+	return filters
+}

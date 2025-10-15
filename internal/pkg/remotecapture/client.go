@@ -2,10 +2,7 @@ package remotecapture
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -18,6 +15,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -685,45 +683,13 @@ func formatTCPFlags(tcp *layers.TCP) string {
 
 // buildTLSCredentials creates TLS credentials for gRPC client
 func buildTLSCredentials(config *ClientConfig) (credentials.TransportCredentials, error) {
-	// #nosec G402 -- InsecureSkipVerify is user-configurable, documented as testing-only
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: config.TLSSkipVerify,
-		ServerName:         config.TLSServerNameOverride,
-		MinVersion:         tls.VersionTLS13,
-	}
-
-	// Check for production mode (via environment variable)
-	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
-
-	if config.TLSSkipVerify {
-		if productionMode {
-			return nil, fmt.Errorf("LIPPYCAT_PRODUCTION=true blocks TLSSkipVerify=true (insecure certificate validation)")
-		}
-	}
-
-	// Load CA certificate if provided
-	if config.TLSCAFile != "" {
-		caCert, err := os.ReadFile(config.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-		tlsConfig.RootCAs = certPool
-	}
-
-	// Load client certificate for mutual TLS if provided
-	if config.TLSCertFile != "" && config.TLSKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(config.TLSCertFile, config.TLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load client certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-	}
-
-	return credentials.NewTLS(tlsConfig), nil
+	return tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CAFile:             config.TLSCAFile,
+		CertFile:           config.TLSCertFile,
+		KeyFile:            config.TLSKeyFile,
+		SkipVerify:         config.TLSSkipVerify,
+		ServerNameOverride: config.TLSServerNameOverride,
+	})
 }
 
 // updateCallState updates call state from SIP packet metadata

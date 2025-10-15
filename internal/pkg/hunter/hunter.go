@@ -2,12 +2,9 @@ package hunter
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/tcpassembly"
@@ -299,54 +297,13 @@ func (h *Hunter) connectToProcessor() error {
 
 // buildTLSCredentials creates TLS credentials for gRPC client
 func (h *Hunter) buildTLSCredentials() (credentials.TransportCredentials, error) {
-	// #nosec G402 -- InsecureSkipVerify is user-configurable, documented as testing-only
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: h.config.TLSSkipVerify,
-		ServerName:         h.config.TLSServerNameOverride,
-		MinVersion:         tls.VersionTLS13,
-	}
-
-	// Check for production mode (via environment variable)
-	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
-
-	if h.config.TLSSkipVerify {
-		logger.Warn("TLS certificate verification disabled",
-			"security_risk", "vulnerable to man-in-the-middle attacks",
-			"recommendation", "only use in testing environments",
-			"severity", "HIGH")
-
-		if productionMode {
-			return nil, fmt.Errorf("LIPPYCAT_PRODUCTION=true blocks TLSSkipVerify=true (insecure certificate validation)")
-		}
-	}
-
-	// Load CA certificate if provided
-	if h.config.TLSCAFile != "" {
-		caCert, err := os.ReadFile(h.config.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-		tlsConfig.RootCAs = certPool
-		logger.Info("Loaded CA certificate", "file", h.config.TLSCAFile)
-	}
-
-	// Load client certificate for mutual TLS if provided
-	if h.config.TLSCertFile != "" && h.config.TLSKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(h.config.TLSCertFile, h.config.TLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load client certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-		logger.Info("Loaded client certificate for mutual TLS",
-			"cert", h.config.TLSCertFile,
-			"key", h.config.TLSKeyFile)
-	}
-
-	return credentials.NewTLS(tlsConfig), nil
+	return tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CAFile:             h.config.TLSCAFile,
+		CertFile:           h.config.TLSCertFile,
+		KeyFile:            h.config.TLSKeyFile,
+		SkipVerify:         h.config.TLSSkipVerify,
+		ServerNameOverride: h.config.TLSServerNameOverride,
+	})
 }
 
 // register registers hunter with processor

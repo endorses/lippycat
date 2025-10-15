@@ -2,8 +2,6 @@ package processor
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net"
 	"os"
@@ -16,15 +14,20 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
+	"github.com/endorses/lippycat/internal/pkg/processor/flow"
+	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
+	"github.com/endorses/lippycat/internal/pkg/processor/pcap"
+	"github.com/endorses/lippycat/internal/pkg/processor/stats"
+	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
+	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 // Config contains processor configuration
@@ -58,45 +61,27 @@ type Processor struct {
 	grpcServer *grpc.Server
 	listener   net.Listener
 
-	// Connected hunters
-	huntersMu sync.RWMutex
-	hunters   map[string]*ConnectedHunter
+	// Extracted managers
+	hunterManager     *hunter.Manager
+	hunterMonitor     *hunter.Monitor
+	filterManager     *filtering.Manager
+	pcapWriter        *pcap.Writer
+	flowController    *flow.Controller
+	statsCollector    *stats.Collector
+	subscriberManager *subscriber.Manager
 
-	// PCAP writer (async with single writer goroutine)
-	pcapFile            *os.File
-	pcapWriter          *pcapgo.Writer
-	pcapWriteQueue      chan []*data.CapturedPacket
-	pcapWriterWg        sync.WaitGroup
-	perCallPcapWriter   *PcapWriterManager // Per-call PCAP writer
-	pcapWriteErrors     atomic.Uint64      // Track total write errors
-	pcapConsecErrors    atomic.Uint64      // Track consecutive write errors
-	pcapLastErrorLogged atomic.Int64       // Timestamp of last error log
+	// Packet counters (shared with stats collector and flow controller)
+	packetsReceived  atomic.Uint64
+	packetsForwarded atomic.Uint64
 
-	// Statistics - use atomic.Value for lock-free reads
-	statsCache       atomic.Value  // stores *cachedStats
-	statsUpdates     atomic.Uint64 // incremented on every stats change
-	packetsReceived  atomic.Uint64 // incremental counter
-	packetsForwarded atomic.Uint64 // incremental counter
-
-	// Subscriber backpressure tracking
-	subscriberBroadcasts atomic.Uint64 // total broadcast attempts
-	subscriberDrops      atomic.Uint64 // drops due to full channels
-
-	// Filters
-	filtersMu      sync.RWMutex
-	filters        map[string]*management.Filter
-	filterChannels map[string]chan *management.FilterUpdate // hunterID -> channel
+	// Per-call PCAP writer (separate from main PCAP writer)
+	perCallPcapWriter *PcapWriterManager
 
 	// Upstream connection (hierarchical mode)
 	upstreamConn   *grpc.ClientConn
 	upstreamClient data.DataServiceClient
 	upstreamStream data.DataService_StreamPacketsClient
 	upstreamMu     sync.Mutex
-
-	// Monitoring subscribers (TUI clients) - uses sync.Map for efficient concurrent access
-	subscribers      sync.Map // map[string]chan *data.PacketBatch
-	subscriberFilter sync.Map // map[string][]string (clientID -> hunterIDs subscription list)
-	nextSubID        atomic.Uint64
 
 	// Protocol aggregators
 	callAggregator *CallAggregator // VoIP call state aggregation
@@ -111,38 +96,6 @@ type Processor struct {
 	management.UnimplementedManagementServiceServer
 }
 
-// ConnectedHunter represents a connected hunter node
-type ConnectedHunter struct {
-	ID                      string
-	Hostname                string
-	RemoteAddr              string
-	Interfaces              []string
-	ConnectedAt             int64
-	LastHeartbeat           int64
-	PacketsReceived         uint64
-	ActiveFilters           uint32 // Active filter count from hunter stats
-	Status                  management.HunterStatus
-	FilterUpdateFailures    uint32 // Consecutive filter update send failures
-	LastFilterUpdateFailure int64  // Timestamp of last filter update failure
-}
-
-// Stats contains processor statistics
-type Stats struct {
-	TotalHunters          uint32
-	HealthyHunters        uint32
-	WarningHunters        uint32
-	ErrorHunters          uint32
-	TotalPacketsReceived  uint64
-	TotalPacketsForwarded uint64
-	TotalFilters          uint32
-}
-
-// cachedStats holds incrementally updated statistics
-type cachedStats struct {
-	stats      Stats
-	lastUpdate int64 // Unix timestamp
-}
-
 // New creates a new processor instance
 func New(config Config) (*Processor, error) {
 	if config.ListenAddr == "" {
@@ -151,9 +104,6 @@ func New(config Config) (*Processor, error) {
 
 	p := &Processor{
 		config:         config,
-		hunters:        make(map[string]*ConnectedHunter),
-		filters:        make(map[string]*management.Filter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
 		callAggregator: NewCallAggregator(), // Initialize call aggregator
 	}
 
@@ -163,13 +113,36 @@ func New(config Config) (*Processor, error) {
 		logger.Info("Protocol detection enabled on processor")
 	}
 
-	// Note: subscribers sync.Map requires no initialization
+	// Initialize stats collector (needs to be created first as it's used by other managers)
+	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
 
-	// Initialize stats cache
-	p.statsCache.Store(&cachedStats{
-		stats:      Stats{},
-		lastUpdate: time.Now().Unix(),
-	})
+	// Create callback for stats updates (called when hunter health changes)
+	onStatsChanged := func() {
+		total, healthy, warning, errCount, totalFilters := p.hunterManager.GetHealthStats()
+		p.statsCollector.UpdateHealthStats(total, healthy, warning, errCount, totalFilters)
+	}
+
+	// Initialize hunter manager
+	p.hunterManager = hunter.NewManager(config.MaxHunters, onStatsChanged)
+
+	// Initialize hunter monitor (will be started in Start())
+	p.hunterMonitor = hunter.NewMonitor(p.hunterManager)
+
+	// Create callbacks for filter manager
+	onFilterFailure := func(hunterID string, failed bool) {
+		p.hunterManager.UpdateFilterFailure(hunterID, failed)
+	}
+
+	// Initialize filter manager
+	persistence := filtering.NewYAMLPersistence()
+	p.filterManager = filtering.NewManager(config.FilterFile, persistence, onFilterFailure, nil)
+
+	// Initialize flow controller
+	hasUpstream := config.UpstreamAddr != ""
+	p.flowController = flow.NewController(&p.packetsReceived, &p.packetsForwarded, hasUpstream)
+
+	// Initialize subscriber manager
+	p.subscriberManager = subscriber.NewManager(config.MaxSubscribers)
 
 	return p, nil
 }
@@ -182,17 +155,24 @@ func (p *Processor) Start(ctx context.Context) error {
 	logger.Info("Processor starting", "processor_id", p.config.ProcessorID, "listen_addr", p.config.ListenAddr)
 
 	// Load filters from persistence file
-	if err := p.loadFilters(); err != nil {
+	if err := p.filterManager.Load(); err != nil {
 		logger.Warn("Failed to load filters from file", "error", err)
 		// Continue anyway - not a fatal error
 	}
 
 	// Initialize PCAP writer if configured
 	if p.config.WriteFile != "" {
-		if err := p.initPCAPWriter(); err != nil {
+		writer, err := pcap.NewWriter(p.config.WriteFile)
+		if err != nil {
 			return fmt.Errorf("failed to initialize PCAP writer: %w", err)
 		}
-		defer p.closePCAPWriter()
+		p.pcapWriter = writer
+		p.pcapWriter.Start(p.ctx)
+
+		// Configure flow controller with PCAP queue metrics
+		p.flowController.SetPCAPQueue(p.pcapWriter.QueueDepth, p.pcapWriter.QueueCapacity)
+
+		defer p.pcapWriter.Stop()
 	}
 
 	// Create listener
@@ -269,13 +249,8 @@ func (p *Processor) Start(ctx context.Context) error {
 		defer p.disconnectUpstream()
 	}
 
-	// Start heartbeat monitor
-	p.wg.Add(1)
-	go p.monitorHeartbeats()
-
-	// Start hunter cleanup janitor
-	p.wg.Add(1)
-	go p.cleanupStaleHunters()
+	// Start hunter monitor (heartbeat monitoring and cleanup)
+	p.hunterMonitor.Start(p.ctx)
 
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
 
@@ -285,6 +260,10 @@ func (p *Processor) Start(ctx context.Context) error {
 	// Graceful shutdown
 	logger.Info("Shutting down processor")
 	p.grpcServer.GracefulStop()
+
+	// Stop hunter monitor
+	p.hunterMonitor.Stop()
+
 	p.wg.Wait()
 
 	logger.Info("Processor stopped")
@@ -332,7 +311,7 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		p.processBatch(batch)
 
 		// Determine flow control state based on processor load
-		flowControl := p.determineFlowControl()
+		flowControl := p.flowController.Determine()
 
 		// Send acknowledgment with flow control signal
 		ack := &data.StreamControl{
@@ -347,71 +326,6 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 	}
 }
 
-// determineFlowControl determines appropriate flow control signal based on processor load
-// Checks all pressure sources and returns the most severe signal (PAUSE > SLOW > RESUME > CONTINUE)
-func (p *Processor) determineFlowControl() data.FlowControl {
-	mostSevere := data.FlowControl_FLOW_CONTINUE
-
-	// Check PCAP write queue depth if configured
-	if p.pcapWriteQueue != nil {
-		queueDepth := len(p.pcapWriteQueue)
-		queueCapacity := cap(p.pcapWriteQueue)
-
-		utilizationPct := float64(queueDepth) / float64(queueCapacity) * 100
-
-		// Pause if queue is critically full (>90%)
-		if utilizationPct > 90 {
-			logger.Warn("PCAP write queue critically full - requesting pause",
-				"queue_depth", queueDepth,
-				"capacity", queueCapacity,
-				"utilization", utilizationPct)
-			mostSevere = data.FlowControl_FLOW_PAUSE
-		} else if utilizationPct > 70 {
-			// Slow down if queue is getting full (>70%)
-			logger.Debug("PCAP write queue filling - requesting slowdown",
-				"queue_depth", queueDepth,
-				"capacity", queueCapacity,
-				"utilization", utilizationPct)
-			if mostSevere < data.FlowControl_FLOW_SLOW {
-				mostSevere = data.FlowControl_FLOW_SLOW
-			}
-		} else if utilizationPct < 30 {
-			// Resume if queue has drained (< 30%)
-			if mostSevere < data.FlowControl_FLOW_RESUME {
-				mostSevere = data.FlowControl_FLOW_RESUME
-			}
-		}
-	}
-
-	// NOTE: We do NOT check subscriber backpressure here!
-	// TUI client drops should NOT pause hunters because:
-	// 1. Hunters serve multiple consumers (other TUI clients, file writes, upstream processors)
-	// 2. TUI disconnects/reconnects cause temporary drops that shouldn't affect hunters
-	// 3. Slow TUI clients are already handled by per-subscriber channel buffering & drops
-	// Hunters should only pause for processor-level overload (PCAP write queue, upstream backlog)
-
-	// Check overall packet processing load (only if upstream forwarding is configured)
-	// If no upstream processor, packets are only consumed by TUI subscribers, not forwarded
-	if p.config.UpstreamAddr != "" {
-		packetsReceived := p.packetsReceived.Load()
-		packetsForwarded := p.packetsForwarded.Load()
-
-		// If we're significantly behind in forwarding, slow down
-		if packetsReceived > packetsForwarded {
-			backlog := packetsReceived - packetsForwarded
-			if backlog > 10000 {
-				logger.Warn("Large packet backlog detected - requesting slowdown",
-					"backlog", backlog)
-				if mostSevere < data.FlowControl_FLOW_SLOW {
-					mostSevere = data.FlowControl_FLOW_SLOW
-				}
-			}
-		}
-	}
-
-	return mostSevere
-}
-
 // processBatch processes a received packet batch
 func (p *Processor) processBatch(batch *data.PacketBatch) {
 	hunterID := batch.HunterId
@@ -422,22 +336,11 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 		"packets", len(batch.Packets))
 
 	// Update hunter statistics
-	p.huntersMu.Lock()
-	if hunter, exists := p.hunters[hunterID]; exists {
-		hunter.PacketsReceived += uint64(len(batch.Packets))
-		hunter.LastHeartbeat = batch.TimestampNs
-	}
-	p.huntersMu.Unlock()
+	p.hunterManager.UpdatePacketStats(hunterID, uint64(len(batch.Packets)), batch.TimestampNs)
 
 	// Queue packets for async PCAP write if configured
-	if p.pcapWriteQueue != nil {
-		select {
-		case p.pcapWriteQueue <- batch.Packets:
-			// Queued successfully
-		default:
-			// Queue full - log warning but don't block
-			logger.Warn("PCAP write queue full, dropping batch", "packets", len(batch.Packets))
-		}
+	if p.pcapWriter != nil {
+		p.pcapWriter.QueuePackets(batch.Packets)
 	}
 
 	// Update processor statistics (atomic increment)
@@ -463,11 +366,7 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	}
 
 	// Broadcast to monitoring subscribers (TUI clients)
-	// IMPORTANT: Make a copy of the batch before broadcasting to avoid race conditions
-	// The same batch structure will be serialized by multiple goroutines concurrently
-	// (one per TUI client), which can corrupt the protobuf wire format
-	batchCopy := proto.Clone(batch).(*data.PacketBatch)
-	p.broadcastToSubscribers(batchCopy)
+	p.subscriberManager.Broadcast(batch)
 }
 
 // RegisterHunter registers a hunter node with the processor (Management Service).
@@ -488,44 +387,21 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 		"hostname", req.Hostname,
 		"interfaces", req.Interfaces)
 
-	// Check if hunter already exists
-	p.huntersMu.Lock()
-	isReconnect := false
-	if _, exists := p.hunters[hunterID]; exists {
-		logger.Info("Hunter re-registering (replacing old connection)", "hunter_id", hunterID)
-		isReconnect = true
-		// Allow re-registration (old connection will be replaced)
-	} else {
-		// Check max hunters limit (only for new hunters)
-		if len(p.hunters) >= p.config.MaxHunters {
-			p.huntersMu.Unlock()
+	// Register hunter with manager
+	_, isReconnect, err := p.hunterManager.Register(hunterID, req.Hostname, req.Interfaces)
+	if err != nil {
+		if err == hunter.ErrMaxHuntersReached {
 			logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)
 			return nil, status.Errorf(codes.ResourceExhausted,
 				"maximum number of hunters reached: limit %d", p.config.MaxHunters)
 		}
+		return nil, status.Errorf(codes.Internal, "failed to register hunter: %v", err)
 	}
 
-	// Register/re-register hunter
-	hunter := &ConnectedHunter{
-		ID:          hunterID,
-		Hostname:    req.Hostname,
-		Interfaces:  req.Interfaces,
-		ConnectedAt: time.Now().UnixNano(),
-		Status:      management.HunterStatus_STATUS_HEALTHY,
-	}
-	p.hunters[hunterID] = hunter
-
-	// Update stats cache (while still holding huntersMu)
-	if !isReconnect {
-		p.updateHealthStats()
-	}
-
-	p.huntersMu.Unlock()
-
-	logger.Info("Hunter registered successfully", "hunter_id", hunterID)
+	logger.Info("Hunter registered successfully", "hunter_id", hunterID, "reconnect", isReconnect)
 
 	// Get applicable filters for this hunter
-	filters := p.getFiltersForHunter(hunterID)
+	filters := p.filterManager.GetForHunter(hunterID)
 
 	return &management.RegistrationResponse{
 		Accepted:   true,
@@ -555,24 +431,7 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 		hunterID := hb.HunterId
 
 		// Update hunter status and stats
-		p.huntersMu.Lock()
-		statsChanged := false
-		if hunter, exists := p.hunters[hunterID]; exists {
-			hunter.LastHeartbeat = hb.TimestampNs
-			hunter.Status = hb.Status
-			if hb.Stats != nil {
-				// Check if filter count changed
-				if hunter.ActiveFilters != hb.Stats.ActiveFilters {
-					hunter.ActiveFilters = hb.Stats.ActiveFilters
-					statsChanged = true
-				}
-			}
-		}
-		// Update aggregated stats immediately if filter count changed
-		if statsChanged {
-			p.updateHealthStats()
-		}
-		p.huntersMu.Unlock()
+		statsChanged := p.hunterManager.UpdateHeartbeat(hunterID, hb.TimestampNs, hb.Status, hb.Stats)
 
 		// Log heartbeat with stats (INFO level for debugging)
 		if hb.Stats != nil {
@@ -586,11 +445,11 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 		}
 
 		// Send response
-		stats := p.GetStats()
+		processorStats := p.statsCollector.GetProto()
 		resp := &management.ProcessorHeartbeat{
 			TimestampNs:      hb.TimestampNs,
 			Status:           management.ProcessorStatus_PROCESSOR_HEALTHY,
-			HuntersConnected: stats.TotalHunters,
+			HuntersConnected: processorStats.TotalHunters,
 			ProcessorId:      p.config.ProcessorID,
 		}
 
@@ -603,7 +462,7 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 
 // GetFilters retrieves filters for a hunter (Management Service)
 func (p *Processor) GetFilters(ctx context.Context, req *management.FilterRequest) (*management.FilterResponse, error) {
-	filters := p.getFiltersForHunter(req.HunterId)
+	filters := p.filterManager.GetForHunter(req.HunterId)
 
 	return &management.FilterResponse{
 		Filters: filters,
@@ -616,23 +475,16 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	logger.Info("Filter subscription started", "hunter_id", hunterID)
 
 	// Create filter update channel for this hunter
-	filterChan := make(chan *management.FilterUpdate, constants.FilterUpdateChannelBuffer)
-
-	p.filtersMu.Lock()
-	p.filterChannels[hunterID] = filterChan
-	p.filtersMu.Unlock()
+	filterChan := p.filterManager.AddChannel(hunterID)
 
 	// Cleanup on disconnect
 	defer func() {
-		p.filtersMu.Lock()
-		delete(p.filterChannels, hunterID)
-		close(filterChan)
-		p.filtersMu.Unlock()
+		p.filterManager.RemoveChannel(hunterID)
 		logger.Info("Filter subscription ended", "hunter_id", hunterID)
 	}()
 
 	// Send current filters immediately
-	currentFilters := p.getFiltersForHunter(hunterID)
+	currentFilters := p.filterManager.GetForHunter(hunterID)
 	for _, filter := range currentFilters {
 		update := &management.FilterUpdate{
 			UpdateType: management.FilterUpdateType_UPDATE_ADD,
@@ -671,80 +523,62 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 
 // GetHunterStatus retrieves status of connected hunters (Management Service)
 func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusRequest) (*management.StatusResponse, error) {
-	p.huntersMu.RLock()
-	defer p.huntersMu.RUnlock()
+	hunters := p.hunterManager.GetAll(req.HunterId)
 
-	connectedHunters := make([]*management.ConnectedHunter, 0, len(p.hunters))
-
-	for _, hunter := range p.hunters {
-		// Skip if filtering by hunter ID
-		if req.HunterId != "" && hunter.ID != req.HunterId {
-			continue
-		}
-
+	connectedHunters := make([]*management.ConnectedHunter, 0, len(hunters))
+	for _, h := range hunters {
 		// Calculate connection duration (safe: duration won't overflow, max ~292 years)
-		durationNs := time.Now().UnixNano() - hunter.ConnectedAt
+		durationNs := time.Now().UnixNano() - h.ConnectedAt
 		durationSec := uint64(durationNs / 1e9) // #nosec G115
 
 		connectedHunters = append(connectedHunters, &management.ConnectedHunter{
-			HunterId:             hunter.ID,
-			Hostname:             hunter.Hostname,
-			RemoteAddr:           hunter.RemoteAddr,
-			Status:               hunter.Status,
+			HunterId:             h.ID,
+			Hostname:             h.Hostname,
+			RemoteAddr:           h.RemoteAddr,
+			Status:               h.Status,
 			ConnectedDurationSec: durationSec,
-			LastHeartbeatNs:      hunter.LastHeartbeat,
+			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
-				PacketsCaptured:  hunter.PacketsReceived,
-				PacketsForwarded: hunter.PacketsReceived,
-				ActiveFilters:    hunter.ActiveFilters,
+				PacketsCaptured:  h.PacketsReceived,
+				PacketsForwarded: h.PacketsReceived,
+				ActiveFilters:    h.ActiveFilters,
 			},
-			Interfaces: hunter.Interfaces,
+			Interfaces: h.Interfaces,
 		})
 	}
 
-	stats := p.GetStats()
+	processorStats := p.statsCollector.GetProto()
 
 	return &management.StatusResponse{
-		Hunters: connectedHunters,
-		ProcessorStats: &management.ProcessorStats{
-			TotalHunters:          stats.TotalHunters,
-			HealthyHunters:        stats.HealthyHunters,
-			WarningHunters:        stats.WarningHunters,
-			ErrorHunters:          stats.ErrorHunters,
-			TotalPacketsReceived:  stats.TotalPacketsReceived,
-			TotalPacketsForwarded: stats.TotalPacketsForwarded,
-			TotalFilters:          stats.TotalFilters,
-			ProcessorId:           p.config.ProcessorID,
-		},
+		Hunters:        connectedHunters,
+		ProcessorStats: processorStats,
 	}, nil
 }
 
 // ListAvailableHunters returns list of all hunters connected to this processor (for TUI hunter selection)
 func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.ListHuntersRequest) (*management.ListHuntersResponse, error) {
-	p.huntersMu.RLock()
-	defer p.huntersMu.RUnlock()
+	hunters := p.hunterManager.GetAll("")
 
-	hunters := make([]*management.AvailableHunter, 0, len(p.hunters))
-
-	for _, hunter := range p.hunters {
+	availableHunters := make([]*management.AvailableHunter, 0, len(hunters))
+	for _, h := range hunters {
 		// Calculate connection duration (safe: duration won't overflow, max ~292 years)
-		durationNs := time.Now().UnixNano() - hunter.ConnectedAt
+		durationNs := time.Now().UnixNano() - h.ConnectedAt
 		durationSec := uint64(durationNs / 1e9) // #nosec G115
 
-		hunters = append(hunters, &management.AvailableHunter{
-			HunterId:             hunter.ID,
-			Hostname:             hunter.Hostname,
-			Interfaces:           hunter.Interfaces,
-			Status:               hunter.Status,
-			RemoteAddr:           hunter.RemoteAddr,
+		availableHunters = append(availableHunters, &management.AvailableHunter{
+			HunterId:             h.ID,
+			Hostname:             h.Hostname,
+			Interfaces:           h.Interfaces,
+			Status:               h.Status,
+			RemoteAddr:           h.RemoteAddr,
 			ConnectedDurationSec: durationSec,
 		})
 	}
 
-	logger.Debug("ListAvailableHunters request", "hunter_count", len(hunters))
+	logger.Debug("ListAvailableHunters request", "hunter_count", len(availableHunters))
 
 	return &management.ListHuntersResponse{
-		Hunters: hunters,
+		Hunters: availableHunters,
 	}, nil
 }
 
@@ -752,41 +586,14 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter) (*management.FilterUpdateResult, error) {
 	logger.Info("Update filter request", "filter_id", filter.Id, "type", filter.Type, "pattern", filter.Pattern)
 
-	// Generate ID for new filters
-	p.filtersMu.Lock()
-	if filter.Id == "" {
-		filter.Id = fmt.Sprintf("filter-%d", time.Now().UnixNano())
-		logger.Info("Generated filter ID", "filter_id", filter.Id)
-	}
-
-	// Determine if this is add or modify
-	_, exists := p.filters[filter.Id]
-	p.filters[filter.Id] = filter
-
-	updateType := management.FilterUpdateType_UPDATE_ADD
-	if exists {
-		updateType = management.FilterUpdateType_UPDATE_MODIFY
-	}
-	p.filtersMu.Unlock()
-
-	// Push filter update to affected hunters
-	update := &management.FilterUpdate{
-		UpdateType: updateType,
-		Filter:     filter,
-	}
-
-	huntersUpdated := p.pushFilterUpdate(filter, update)
-
-	// Persist filters to disk
-	if err := p.saveFilters(); err != nil {
-		logger.Error("Failed to save filters to disk", "error", err)
-		// Don't fail the request - filter is already in memory
+	huntersUpdated, err := p.filterManager.Update(filter)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update filter: %v", err)
 	}
 
 	logger.Info("Filter updated",
 		"filter_id", filter.Id,
-		"hunters_updated", huntersUpdated,
-		"update_type", updateType)
+		"hunters_updated", huntersUpdated)
 
 	return &management.FilterUpdateResult{
 		Success:        true,
@@ -798,28 +605,9 @@ func (p *Processor) UpdateFilter(ctx context.Context, filter *management.Filter)
 func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDeleteRequest) (*management.FilterUpdateResult, error) {
 	logger.Info("Delete filter request", "filter_id", req.FilterId)
 
-	p.filtersMu.Lock()
-	filter, exists := p.filters[req.FilterId]
-	if !exists {
-		p.filtersMu.Unlock()
-		return nil, status.Errorf(codes.NotFound,
-			"filter not found: %s", req.FilterId)
-	}
-	delete(p.filters, req.FilterId)
-	p.filtersMu.Unlock()
-
-	// Push filter deletion to affected hunters
-	update := &management.FilterUpdate{
-		UpdateType: management.FilterUpdateType_UPDATE_DELETE,
-		Filter:     filter,
-	}
-
-	huntersUpdated := p.pushFilterUpdate(filter, update)
-
-	// Persist filters to disk
-	if err := p.saveFilters(); err != nil {
-		logger.Error("Failed to save filters to disk", "error", err)
-		// Don't fail the request - filter is already removed from memory
+	huntersUpdated, err := p.filterManager.Delete(req.FilterId)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "filter not found: %s", req.FilterId)
 	}
 
 	logger.Info("Filter deleted",
@@ -832,476 +620,28 @@ func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDele
 	}, nil
 }
 
-// getFiltersForHunter returns filters applicable to a hunter
-func (p *Processor) getFiltersForHunter(hunterID string) []*management.Filter {
-	p.filtersMu.RLock()
-	defer p.filtersMu.RUnlock()
-
-	filters := make([]*management.Filter, 0)
-
-	for _, filter := range p.filters {
-		// If no target hunters specified, apply to all
-		if len(filter.TargetHunters) == 0 {
-			filters = append(filters, filter)
-			continue
-		}
-
-		// Check if this hunter is targeted
-		for _, target := range filter.TargetHunters {
-			if target == hunterID {
-				filters = append(filters, filter)
-				break
-			}
-		}
-	}
-
-	return filters
-}
-
 // GetStats returns current statistics
-func (p *Processor) GetStats() Stats {
-	// Lock-free read from cache (hunter health stats)
-	cached := p.statsCache.Load().(*cachedStats)
-	stats := cached.stats
-
-	// Add atomic packet counters
-	stats.TotalPacketsReceived = p.packetsReceived.Load()
-	stats.TotalPacketsForwarded = p.packetsForwarded.Load()
-
-	return stats
-}
-
-// initPCAPWriter initializes PCAP file writer with async worker pool
-func (p *Processor) initPCAPWriter() error {
-	logger.Info("Initializing async PCAP writer", "file", p.config.WriteFile)
-
-	file, err := os.Create(p.config.WriteFile)
-	if err != nil {
-		return fmt.Errorf("failed to create PCAP file: %w", err)
-	}
-
-	p.pcapFile = file
-	p.pcapWriter = pcapgo.NewWriter(file)
-
-	// Write PCAP header (Ethernet link type)
-	if err := p.pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("failed to write PCAP header: %w", err)
-	}
-
-	// Create write queue (buffered channel)
-	p.pcapWriteQueue = make(chan []*data.CapturedPacket, constants.PCAPWriteQueueBuffer)
-
-	// Start single writer goroutine
-	// Note: PCAP writes are inherently serial (file format requires sequential writes)
-	// Multiple workers would just compete for mutex with no benefit
-	p.pcapWriterWg.Add(1)
-	go p.pcapWriteWorker()
-
-	logger.Info("Async PCAP writer initialized", "file", p.config.WriteFile)
-	return nil
-}
-
-// pcapWriteWorker processes PCAP write queue asynchronously (single writer)
-func (p *Processor) pcapWriteWorker() {
-	defer p.pcapWriterWg.Done()
-
-	logger.Debug("PCAP write worker started")
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			logger.Debug("PCAP write worker stopping")
-			return
-
-		case packets, ok := <-p.pcapWriteQueue:
-			if !ok {
-				logger.Debug("PCAP write queue closed")
-				return
-			}
-
-			// Write batch to PCAP file (single writer - no mutex needed)
-			p.writePacketBatchToPCAP(packets)
-		}
-	}
-}
-
-// writePacketBatchToPCAP writes a batch of packets to PCAP file (called by single writer)
-func (p *Processor) writePacketBatchToPCAP(packets []*data.CapturedPacket) {
-	// No mutex needed - single writer goroutine ensures serial access
-
-	batchErrors := 0
-	for _, pkt := range packets {
-		// Convert timestamp
-		timestamp := time.Unix(0, pkt.TimestampNs)
-
-		// Create capture info
-		ci := gopacket.CaptureInfo{
-			Timestamp:     timestamp,
-			CaptureLength: int(pkt.CaptureLength),
-			Length:        int(pkt.OriginalLength),
-		}
-
-		// Write packet
-		if err := p.pcapWriter.WritePacket(ci, pkt.Data); err != nil {
-			batchErrors++
-			p.pcapWriteErrors.Add(1)
-			consecErrors := p.pcapConsecErrors.Add(1)
-
-			// Log errors with rate limiting (max once per 10 seconds)
-			now := time.Now().Unix()
-			lastLogged := p.pcapLastErrorLogged.Load()
-			if now-lastLogged >= 10 {
-				if p.pcapLastErrorLogged.CompareAndSwap(lastLogged, now) {
-					logger.Error("Failed to write packet to PCAP",
-						"error", err,
-						"consecutive_errors", consecErrors,
-						"total_errors", p.pcapWriteErrors.Load())
-
-					// Emit critical warning if many consecutive failures
-					if consecErrors >= 100 {
-						logger.Warn("PCAP writing may be failing due to disk full or permissions",
-							"consecutive_errors", consecErrors,
-							"recommendation", "check disk space and file permissions")
-					}
-				}
-			}
-		} else {
-			// Successful write - reset consecutive error counter
-			if p.pcapConsecErrors.Load() > 0 {
-				p.pcapConsecErrors.Store(0)
-			}
-		}
-	}
-
-	// Log batch summary if there were errors
-	if batchErrors > 0 && len(packets) > 0 {
-		logger.Warn("PCAP batch write completed with errors",
-			"batch_size", len(packets),
-			"errors", batchErrors,
-			"success_rate", float64(len(packets)-batchErrors)/float64(len(packets))*100)
-	}
-}
-
-// closePCAPWriter closes PCAP file and waits for workers
-func (p *Processor) closePCAPWriter() {
-	// Close queue to signal workers
-	if p.pcapWriteQueue != nil {
-		close(p.pcapWriteQueue)
-	}
-
-	// Wait for all workers to finish
-	logger.Info("Waiting for PCAP writers to finish")
-	p.pcapWriterWg.Wait()
-
-	// Close file
-	if p.pcapFile != nil {
-		_ = p.pcapFile.Close()
-		logger.Info("PCAP file closed", "file", p.config.WriteFile)
-	}
-}
-
-// pushFilterUpdate sends filter update to affected hunters
-func (p *Processor) pushFilterUpdate(filter *management.Filter, update *management.FilterUpdate) uint32 {
-	p.filtersMu.RLock()
-	defer p.filtersMu.RUnlock()
-
-	var huntersUpdated uint32
-	const sendTimeout = 2 * time.Second
-	const maxConsecutiveFailures = 5
-	const circuitBreakerThreshold = 10 // Disconnect after this many failures
-
-	// Helper to send with timeout and track failures
-	sendUpdate := func(hunterID string, ch chan *management.FilterUpdate) bool {
-		timer := time.NewTimer(sendTimeout)
-		defer timer.Stop()
-
-		select {
-		case ch <- update:
-			// Success - reset failure counter
-			p.huntersMu.Lock()
-			if hunter, exists := p.hunters[hunterID]; exists {
-				hunter.FilterUpdateFailures = 0
-			}
-			p.huntersMu.Unlock()
-			logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", filter.Id)
-			return true
-
-		case <-timer.C:
-			// Timeout - track failure
-			p.huntersMu.Lock()
-			if hunter, exists := p.hunters[hunterID]; exists {
-				hunter.FilterUpdateFailures++
-				hunter.LastFilterUpdateFailure = time.Now().UnixNano()
-
-				if hunter.FilterUpdateFailures >= circuitBreakerThreshold {
-					// Circuit breaker: disconnect permanently failed hunter
-					logger.Error("Circuit breaker triggered - disconnecting hunter",
-						"hunter_id", hunterID,
-						"consecutive_failures", hunter.FilterUpdateFailures,
-						"threshold", circuitBreakerThreshold,
-						"action", "removing hunter from processor")
-					hunter.Status = management.HunterStatus_STATUS_ERROR
-
-					// Schedule immediate removal (will be picked up by cleanup)
-					hunter.LastHeartbeat = time.Now().Add(-60 * time.Minute).UnixNano()
-				} else if hunter.FilterUpdateFailures >= maxConsecutiveFailures {
-					logger.Error("Hunter not receiving filter updates - marking as error",
-						"hunter_id", hunterID,
-						"consecutive_failures", hunter.FilterUpdateFailures,
-						"recommendation", "hunter may be overloaded or network issue")
-					hunter.Status = management.HunterStatus_STATUS_ERROR
-				} else {
-					logger.Warn("Filter update send timeout",
-						"hunter_id", hunterID,
-						"consecutive_failures", hunter.FilterUpdateFailures,
-						"max_failures", maxConsecutiveFailures)
-				}
-			}
-			p.huntersMu.Unlock()
-			return false
-		}
-	}
-
-	// If no target hunters specified, send to all
-	if len(filter.TargetHunters) == 0 {
-		for hunterID, ch := range p.filterChannels {
-			if sendUpdate(hunterID, ch) {
-				huntersUpdated++
-			}
-		}
-		return huntersUpdated
-	}
-
-	// Send to specific hunters
-	for _, targetID := range filter.TargetHunters {
-		if ch, exists := p.filterChannels[targetID]; exists {
-			if sendUpdate(targetID, ch) {
-				huntersUpdated++
-			}
-		}
-	}
-
-	return huntersUpdated
-}
-
-// monitorHeartbeats monitors hunter heartbeats and marks stale hunters
-func (p *Processor) monitorHeartbeats() {
-	defer p.wg.Done()
-
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	logger.Info("Heartbeat monitor started")
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			logger.Info("Heartbeat monitor stopped")
-			return
-
-		case <-ticker.C:
-			p.huntersMu.Lock()
-			now := time.Now().UnixNano()
-			staleThreshold := int64(30 * time.Second) // 30 seconds without heartbeat
-
-			for hunterID, hunter := range p.hunters {
-				if hunter.LastHeartbeat > 0 {
-					timeSinceHeartbeat := now - hunter.LastHeartbeat
-
-					if timeSinceHeartbeat > staleThreshold {
-						if hunter.Status != management.HunterStatus_STATUS_ERROR {
-							logger.Warn("Hunter heartbeat timeout",
-								"hunter_id", hunterID,
-								"last_heartbeat_sec", timeSinceHeartbeat/int64(time.Second))
-							hunter.Status = management.HunterStatus_STATUS_ERROR
-						}
-					}
-				}
-			}
-
-			// Update stats based on hunter statuses
-			p.updateHealthStats()
-
-			p.huntersMu.Unlock()
-		}
-	}
-}
-
-// updateHealthStats updates processor health statistics based on hunter statuses
-// Assumes huntersMu is already locked by caller
-func (p *Processor) updateHealthStats() {
-	var healthy, warning, errCount uint32
-	var totalFilters uint32
-
-	for _, hunter := range p.hunters {
-		switch hunter.Status {
-		case management.HunterStatus_STATUS_HEALTHY:
-			healthy++
-		case management.HunterStatus_STATUS_WARNING:
-			warning++
-		case management.HunterStatus_STATUS_ERROR:
-			errCount++
-		}
-		// Aggregate active filters from all hunters
-		totalFilters += hunter.ActiveFilters
-	}
-
-	// Get current cache, update, and store back (copy-on-write)
-	oldCache := p.statsCache.Load().(*cachedStats)
-	newStats := oldCache.stats // Copy current stats
-
-	// Update hunter health stats (safe: hunter count won't exceed uint32 max)
-	newStats.TotalHunters = uint32(len(p.hunters)) // #nosec G115
-	newStats.HealthyHunters = healthy
-	newStats.WarningHunters = warning
-	newStats.ErrorHunters = errCount
-	newStats.TotalFilters = totalFilters
-
-	// Store updated cache
-	p.statsCache.Store(&cachedStats{
-		stats:      newStats,
-		lastUpdate: time.Now().Unix(),
-	})
-	p.statsUpdates.Add(1)
-}
-
-// cleanupStaleHunters periodically removes hunters that have been in ERROR state for too long
-func (p *Processor) cleanupStaleHunters() {
-	defer p.wg.Done()
-
-	// Cleanup interval: check every 5 minutes
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	// Grace period: remove hunters that have been in ERROR state for 30 minutes
-	const gracePeriod = 30 * time.Minute
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		case <-ticker.C:
-			now := time.Now()
-			p.huntersMu.Lock()
-
-			var toRemove []string
-			for hunterID, hunter := range p.hunters {
-				if hunter.Status == management.HunterStatus_STATUS_ERROR {
-					// Check how long it's been in ERROR state
-					lastHeartbeat := time.Unix(0, hunter.LastHeartbeat)
-					timeSinceError := now.Sub(lastHeartbeat)
-
-					if timeSinceError > gracePeriod {
-						toRemove = append(toRemove, hunterID)
-					}
-				}
-			}
-
-			// Remove stale hunters
-			for _, hunterID := range toRemove {
-				logger.Info("Removing stale hunter from map",
-					"hunter_id", hunterID,
-					"reason", "in ERROR state beyond grace period")
-				delete(p.hunters, hunterID)
-
-				// Also remove from filter channels
-				delete(p.filterChannels, hunterID)
-			}
-
-			p.huntersMu.Unlock()
-
-			if len(toRemove) > 0 {
-				logger.Info("Cleaned up stale hunters",
-					"count", len(toRemove),
-					"grace_period", gracePeriod)
-			}
-		}
-	}
+func (p *Processor) GetStats() stats.Stats {
+	return p.statsCollector.Get()
 }
 
 // buildTLSCredentials creates TLS credentials for gRPC server
 func (p *Processor) buildTLSCredentials() (credentials.TransportCredentials, error) {
-	if p.config.TLSCertFile == "" || p.config.TLSKeyFile == "" {
-		return nil, fmt.Errorf("TLS enabled but certificate or key file not specified")
-	}
-
-	// Load server certificate and key
-	cert, err := tls.LoadX509KeyPair(p.config.TLSCertFile, p.config.TLSKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load server certificate: %w", err)
-	}
-
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS13,
-	}
-
-	// Configure client certificate authentication if enabled
-	if p.config.TLSClientAuth {
-		if p.config.TLSCAFile == "" {
-			return nil, fmt.Errorf("client auth enabled but CA file not specified")
-		}
-
-		// Load CA certificate for verifying client certificates
-		caCert, err := os.ReadFile(p.config.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
-
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-
-		tlsConfig.ClientCAs = certPool
-		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-
-		logger.Info("Mutual TLS enabled - requiring client certificates",
-			"ca_file", p.config.TLSCAFile)
-	}
-
-	logger.Info("TLS credentials loaded",
-		"cert", p.config.TLSCertFile,
-		"key", p.config.TLSKeyFile,
-		"min_version", "TLS 1.3")
-
-	return credentials.NewTLS(tlsConfig), nil
+	return tlsutil.BuildServerCredentials(tlsutil.ServerConfig{
+		CertFile:   p.config.TLSCertFile,
+		KeyFile:    p.config.TLSKeyFile,
+		CAFile:     p.config.TLSCAFile,
+		ClientAuth: p.config.TLSClientAuth,
+	})
 }
 
 // buildClientTLSCredentials creates TLS credentials for gRPC client (upstream connection)
 func (p *Processor) buildClientTLSCredentials() (credentials.TransportCredentials, error) {
-	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-	}
-
-	// Load CA certificate if provided
-	if p.config.TLSCAFile != "" {
-		caCert, err := os.ReadFile(p.config.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-		tlsConfig.RootCAs = certPool
-		logger.Info("Loaded CA certificate for upstream connection", "file", p.config.TLSCAFile)
-	}
-
-	// Load client certificate for mutual TLS if provided
-	if p.config.TLSCertFile != "" && p.config.TLSKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(p.config.TLSCertFile, p.config.TLSKeyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load client certificate: %w", err)
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-		logger.Info("Loaded client certificate for mutual TLS to upstream",
-			"cert", p.config.TLSCertFile,
-			"key", p.config.TLSKeyFile)
-	}
-
-	return credentials.NewTLS(tlsConfig), nil
+	return tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+		CAFile:   p.config.TLSCAFile,
+		CertFile: p.config.TLSCertFile,
+		KeyFile:  p.config.TLSKeyFile,
+	})
 }
 
 // connectToUpstream establishes connection to upstream processor
@@ -1455,26 +795,19 @@ func (p *Processor) receiveUpstreamAcks() {
 func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.DataService_SubscribePacketsServer) error {
 	clientID := req.ClientId
 	if clientID == "" {
-		nextID := p.nextSubID.Add(1)
+		nextID := p.subscriberManager.NextID()
 		clientID = fmt.Sprintf("subscriber-%d", nextID)
 	}
 
 	// Check subscriber limit to prevent DoS
-	if p.config.MaxSubscribers > 0 {
-		// Count current subscribers
-		count := 0
-		p.subscribers.Range(func(key, value interface{}) bool {
-			count++
-			return true
-		})
-		if count >= p.config.MaxSubscribers {
-			logger.Warn("Subscriber limit reached, rejecting new subscriber",
-				"client_id", clientID,
-				"current_subscribers", count,
-				"max_subscribers", p.config.MaxSubscribers)
-			return status.Errorf(codes.ResourceExhausted,
-				"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
-		}
+	if p.subscriberManager.CheckLimit() {
+		count := p.subscriberManager.Count()
+		logger.Warn("Subscriber limit reached, rejecting new subscriber",
+			"client_id", clientID,
+			"current_subscribers", count,
+			"max_subscribers", p.config.MaxSubscribers)
+		return status.Errorf(codes.ResourceExhausted,
+			"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
 	}
 
 	// Store hunter subscription filter for this client
@@ -1482,7 +815,7 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 	// has_hunter_filter = true + empty list: subscribe to no hunters (explicit opt-out)
 	// has_hunter_filter = true + non-empty list: subscribe to specified hunters only
 	if req.HasHunterFilter {
-		p.subscriberFilter.Store(clientID, req.HunterIds)
+		p.subscriberManager.SetFilter(clientID, req.HunterIds)
 		if len(req.HunterIds) > 0 {
 			logger.Info("New packet subscriber with hunter filter",
 				"client_id", clientID,
@@ -1496,16 +829,11 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 	}
 
 	// Create channel for this subscriber
-	subChan := make(chan *data.PacketBatch, constants.SubscriberChannelBuffer)
-
-	// Add subscriber using copy-on-write
-	p.addSubscriber(clientID, subChan)
+	subChan := p.subscriberManager.Add(clientID)
 
 	// Cleanup on disconnect
 	defer func() {
-		p.removeSubscriber(clientID)
-		p.subscriberFilter.Delete(clientID) // Clean up filter
-		close(subChan)
+		p.subscriberManager.Remove(clientID)
 		logger.Info("Packet subscriber disconnected", "client_id", clientID)
 	}()
 
@@ -1554,38 +882,6 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 			}
 		}
 	}
-}
-
-// addSubscriber adds a subscriber using sync.Map (O(1) operation)
-func (p *Processor) addSubscriber(clientID string, ch chan *data.PacketBatch) {
-	p.subscribers.Store(clientID, ch)
-}
-
-// removeSubscriber removes a subscriber using sync.Map (O(1) operation)
-func (p *Processor) removeSubscriber(clientID string) {
-	p.subscribers.Delete(clientID)
-}
-
-// broadcastToSubscribers broadcasts a packet batch to all monitoring subscribers
-// Uses sync.Map for lock-free concurrent iteration
-// Tracks broadcast attempts and drops for backpressure calculation
-func (p *Processor) broadcastToSubscribers(batch *data.PacketBatch) {
-	// Lock-free iteration over subscribers
-	p.subscribers.Range(func(key, value interface{}) bool {
-		clientID := key.(string)
-		ch := value.(chan *data.PacketBatch)
-
-		p.subscriberBroadcasts.Add(1)
-
-		select {
-		case ch <- batch:
-			logger.Debug("Broadcasted batch to subscriber", "client_id", clientID, "packets", len(batch.Packets))
-		default:
-			p.subscriberDrops.Add(1)
-			logger.Warn("Subscriber channel full, dropping batch", "client_id", clientID)
-		}
-		return true // Continue iteration
-	})
 }
 
 // enrichPackets performs centralized protocol detection and enriches packet metadata

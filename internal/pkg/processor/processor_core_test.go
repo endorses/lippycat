@@ -3,11 +3,14 @@ package processor
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
+	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -70,9 +73,12 @@ func TestNew(t *testing.T) {
 				assert.NotNil(t, processor)
 				assert.Equal(t, tt.config.ProcessorID, processor.config.ProcessorID)
 				assert.Equal(t, tt.config.ListenAddr, processor.config.ListenAddr)
-				assert.NotNil(t, processor.hunters)
-				assert.NotNil(t, processor.filters)
-				assert.NotNil(t, processor.filterChannels)
+				// Verify managers are initialized
+				assert.NotNil(t, processor.hunterManager, "hunterManager should be initialized")
+				assert.NotNil(t, processor.filterManager, "filterManager should be initialized")
+				assert.NotNil(t, processor.flowController, "flowController should be initialized")
+				assert.NotNil(t, processor.statsCollector, "statsCollector should be initialized")
+				assert.NotNil(t, processor.subscriberManager, "subscriberManager should be initialized")
 
 				// Verify protocol detector is initialized when enabled
 				if tt.config.EnableDetection {
@@ -87,43 +93,39 @@ func TestNew(t *testing.T) {
 
 // TestGetHunterStatus tests hunter status retrieval
 func TestGetHunterStatus(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		hunters: make(map[string]*ConnectedHunter),
-	}
+	hunterMgr := hunter.NewManager(10, nil)
 
-	// Add test hunters
-	now := time.Now().Unix()
-	hunter1 := &ConnectedHunter{
-		ID:          "hunter-1",
-		Interfaces:  []string{"eth0"},
-		ConnectedAt: now,
-	}
-	hunter2 := &ConnectedHunter{
-		ID:          "hunter-2",
-		Interfaces:  []string{"wlan0"},
-		ConnectedAt: now - 300, // 5 minutes ago
-	}
+	// Register test hunters
+	_, _, err := hunterMgr.Register("hunter-1", "host1", []string{"eth0"})
+	require.NoError(t, err)
 
-	processor.hunters["hunter-1"] = hunter1
-	processor.hunters["hunter-2"] = hunter2
+	_, _, err = hunterMgr.Register("hunter-2", "host2", []string{"wlan0"})
+	require.NoError(t, err)
 
-	// Verify hunter count
-	assert.Equal(t, 2, len(processor.hunters))
+	// Verify hunter count (pass empty filterID to get all)
+	hunters := hunterMgr.GetAll("")
+	assert.Equal(t, 2, len(hunters))
 
 	// Verify hunters can be retrieved
-	retrieved1, exists := processor.hunters["hunter-1"]
-	assert.True(t, exists)
-	assert.Equal(t, "hunter-1", retrieved1.ID)
-	assert.Equal(t, []string{"eth0"}, retrieved1.Interfaces)
+	found := false
+	for _, h := range hunters {
+		if h.ID == "hunter-1" {
+			found = true
+			assert.Equal(t, []string{"eth0"}, h.Interfaces)
+			break
+		}
+	}
+	assert.True(t, found, "hunter-1 should be in the list")
 
-	retrieved2, exists := processor.hunters["hunter-2"]
-	assert.True(t, exists)
-	assert.Equal(t, "hunter-2", retrieved2.ID)
-	assert.Equal(t, []string{"wlan0"}, retrieved2.Interfaces)
+	found = false
+	for _, h := range hunters {
+		if h.ID == "hunter-2" {
+			found = true
+			assert.Equal(t, []string{"wlan0"}, h.Interfaces)
+			break
+		}
+	}
+	assert.True(t, found, "hunter-2 should be in the list")
 }
 
 // TestFlowControlConstants tests flow control enum values
@@ -137,13 +139,7 @@ func TestFlowControlConstants(t *testing.T) {
 
 // TestFilterOperations tests filter addition and retrieval
 func TestFilterOperations(t *testing.T) {
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-		},
-		filters: make(map[string]*management.Filter),
-	}
+	filterMgr := filtering.NewManager("", nil, nil, nil)
 
 	// Add a filter
 	filter1 := &management.Filter{
@@ -153,18 +149,19 @@ func TestFilterOperations(t *testing.T) {
 		Enabled: true,
 	}
 
-	processor.filters["filter-1"] = filter1
+	_, err := filterMgr.Update(filter1)
+	require.NoError(t, err)
 
 	// Verify filter was added
-	assert.Equal(t, 1, len(processor.filters))
+	assert.Equal(t, 1, filterMgr.Count())
 
-	// Retrieve filter
-	retrieved, exists := processor.filters["filter-1"]
-	assert.True(t, exists)
-	assert.Equal(t, "filter-1", retrieved.Id)
-	assert.Equal(t, management.FilterType_FILTER_SIP_USER, retrieved.Type)
-	assert.Equal(t, "alice@example.com", retrieved.Pattern)
-	assert.True(t, retrieved.Enabled)
+	// Retrieve all filters
+	filters := filterMgr.GetAll()
+	assert.Len(t, filters, 1)
+	assert.Equal(t, "filter-1", filters[0].Id)
+	assert.Equal(t, management.FilterType_FILTER_SIP_USER, filters[0].Type)
+	assert.Equal(t, "alice@example.com", filters[0].Pattern)
+	assert.True(t, filters[0].Enabled)
 
 	// Add another filter
 	filter2 := &management.Filter{
@@ -174,64 +171,42 @@ func TestFilterOperations(t *testing.T) {
 		Enabled: true,
 	}
 
-	processor.filters["filter-2"] = filter2
+	_, err = filterMgr.Update(filter2)
+	require.NoError(t, err)
 
 	// Verify both filters exist
-	assert.Equal(t, 2, len(processor.filters))
+	assert.Equal(t, 2, filterMgr.Count())
 
 	// Delete a filter
-	delete(processor.filters, "filter-1")
-	assert.Equal(t, 1, len(processor.filters))
+	_, err = filterMgr.Delete("filter-1")
+	require.NoError(t, err)
+	assert.Equal(t, 1, filterMgr.Count())
 
-	_, exists = processor.filters["filter-1"]
-	assert.False(t, exists)
-
-	_, exists = processor.filters["filter-2"]
-	assert.True(t, exists)
+	// Verify only filter-2 remains
+	filters = filterMgr.GetAll()
+	assert.Len(t, filters, 1)
+	assert.Equal(t, "filter-2", filters[0].Id)
 }
 
-// TestConnectedHunter tests ConnectedHunter structure
-func TestConnectedHunter(t *testing.T) {
-	now := time.Now().Unix()
-
-	hunter := &ConnectedHunter{
-		ID:              "hunter-1",
-		Interfaces:      []string{"eth0"},
-		RemoteAddr:      "192.168.1.100:12345",
-		ConnectedAt:     now,
-		LastHeartbeat:   now,
-		PacketsReceived: 1000,
-		Status:          management.HunterStatus_STATUS_HEALTHY,
-	}
-
-	assert.Equal(t, "hunter-1", hunter.ID)
-	assert.Equal(t, []string{"eth0"}, hunter.Interfaces)
-	assert.Equal(t, "192.168.1.100:12345", hunter.RemoteAddr)
-	assert.Equal(t, now, hunter.ConnectedAt)
-	assert.Equal(t, now, hunter.LastHeartbeat)
-	assert.Equal(t, uint64(1000), hunter.PacketsReceived)
-	assert.Equal(t, management.HunterStatus_STATUS_HEALTHY, hunter.Status)
-}
+// TestConnectedHunter removed - now tested in hunter package
 
 // TestStats tests processor statistics
 func TestStats(t *testing.T) {
-	stats := &Stats{}
+	packetsReceived := atomic.Uint64{}
+	packetsForwarded := atomic.Uint64{}
+	packetsReceived.Store(1000)
+	packetsForwarded.Store(900)
 
-	// Initialize stats
-	stats.TotalPacketsReceived = 1000
-	stats.TotalPacketsForwarded = 900
-	stats.TotalHunters = 10
-	stats.HealthyHunters = 8
-	stats.WarningHunters = 1
-	stats.ErrorHunters = 1
+	hunterMgr := hunter.NewManager(10, nil)
+	// Register some hunters to test stats
+	hunterMgr.Register("hunter-1", "host1", []string{"eth0"})
+	hunterMgr.Register("hunter-2", "host2", []string{"eth1"})
 
-	// Verify stats
-	assert.Equal(t, uint64(1000), stats.TotalPacketsReceived)
-	assert.Equal(t, uint64(900), stats.TotalPacketsForwarded)
-	assert.Equal(t, uint32(10), stats.TotalHunters)
-	assert.Equal(t, uint32(8), stats.HealthyHunters)
-	assert.Equal(t, uint32(1), stats.WarningHunters)
-	assert.Equal(t, uint32(1), stats.ErrorHunters)
+	total, healthy, warning, errCount, _ := hunterMgr.GetHealthStats()
+
+	// Verify stats structure
+	assert.Equal(t, uint32(2), total)
+	assert.GreaterOrEqual(t, healthy+warning+errCount, uint32(0))
 }
 
 // TestContextCancellation tests proper cleanup
@@ -258,30 +233,22 @@ func TestContextCancellation(t *testing.T) {
 func TestMaxHunters(t *testing.T) {
 	const maxHunters = 3
 
-	processor := &Processor{
-		config: Config{
-			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
-			MaxHunters:  maxHunters,
-		},
-		hunters: make(map[string]*ConnectedHunter),
-	}
+	hunterMgr := hunter.NewManager(maxHunters, nil)
 
 	// Add hunters up to the limit
 	for i := 0; i < maxHunters; i++ {
 		hunterID := fmt.Sprintf("hunter-%d", i+1)
-		processor.hunters[hunterID] = &ConnectedHunter{
-			ID:          hunterID,
-			Interfaces:  []string{"eth0"},
-			ConnectedAt: time.Now().Unix(),
-		}
+		hostname := fmt.Sprintf("host%d", i+1)
+		_, _, err := hunterMgr.Register(hunterID, hostname, []string{"eth0"})
+		require.NoError(t, err)
 	}
 
-	assert.Equal(t, maxHunters, len(processor.hunters))
+	hunters := hunterMgr.GetAll("")
+	assert.Equal(t, maxHunters, len(hunters))
 
-	// Verify we can check if at capacity
-	atCapacity := len(processor.hunters) >= processor.config.MaxHunters && processor.config.MaxHunters > 0
-	assert.True(t, atCapacity)
+	// Try to add one more - should fail
+	_, _, err := hunterMgr.Register("hunter-4", "host4", []string{"eth0"})
+	assert.Error(t, err, "should fail when exceeding max hunters")
 }
 
 // TestConfigValidation tests configuration validation

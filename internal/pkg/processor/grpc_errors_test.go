@@ -2,28 +2,33 @@ package processor
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
+	"github.com/endorses/lippycat/internal/pkg/processor/flow"
+	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
+	"github.com/endorses/lippycat/internal/pkg/processor/stats"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 func TestRegisterHunter_MaxHuntersExceeded(t *testing.T) {
+	// Create minimal processor for testing
+	packetsReceived := atomic.Uint64{}
+	packetsForwarded := atomic.Uint64{}
+
 	p := &Processor{
 		config: Config{
 			MaxHunters: 2,
 		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
+		hunterManager:  hunter.NewManager(2, nil),
+		filterManager:  filtering.NewManager("", nil, nil, nil),
+		flowController: flow.NewController(&packetsReceived, &packetsForwarded, false),
+		statsCollector: stats.NewCollector("test-processor", &packetsReceived, &packetsForwarded),
 	}
-
-	// Initialize stats cache (required by updateHealthStats)
-	p.statsCache.Store(&cachedStats{
-		stats:      Stats{},
-		lastUpdate: 0,
-	})
 
 	// Register 2 hunters (fill to capacity)
 	_, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
@@ -56,19 +61,19 @@ func TestRegisterHunter_MaxHuntersExceeded(t *testing.T) {
 }
 
 func TestRegisterHunter_AllowsReregistration(t *testing.T) {
+	// Create minimal processor for testing
+	packetsReceived := atomic.Uint64{}
+	packetsForwarded := atomic.Uint64{}
+
 	p := &Processor{
 		config: Config{
 			MaxHunters: 2,
 		},
-		hunters:        make(map[string]*ConnectedHunter),
-		filterChannels: make(map[string]chan *management.FilterUpdate),
+		hunterManager:  hunter.NewManager(2, nil),
+		filterManager:  filtering.NewManager("", nil, nil, nil),
+		flowController: flow.NewController(&packetsReceived, &packetsForwarded, false),
+		statsCollector: stats.NewCollector("test-processor", &packetsReceived, &packetsForwarded),
 	}
-
-	// Initialize stats cache (required by updateHealthStats)
-	p.statsCache.Store(&cachedStats{
-		stats:      Stats{},
-		lastUpdate: 0,
-	})
 
 	// Register hunter
 	_, err := p.RegisterHunter(context.Background(), &management.HunterRegistration{
@@ -87,8 +92,8 @@ func TestRegisterHunter_AllowsReregistration(t *testing.T) {
 
 func TestDeleteFilter_NotFound(t *testing.T) {
 	p := &Processor{
-		config:  Config{},
-		filters: make(map[string]*management.Filter),
+		config:        Config{},
+		filterManager: filtering.NewManager("", nil, nil, nil),
 	}
 
 	// Try to delete non-existent filter
@@ -111,8 +116,8 @@ func TestDeleteFilter_NotFound(t *testing.T) {
 
 func TestDeleteFilter_Success(t *testing.T) {
 	p := &Processor{
-		config:  Config{},
-		filters: make(map[string]*management.Filter),
+		config:        Config{},
+		filterManager: filtering.NewManager("", nil, nil, nil),
 	}
 
 	// Add a filter
@@ -121,7 +126,7 @@ func TestDeleteFilter_Success(t *testing.T) {
 		Type:    management.FilterType_FILTER_SIP_USER,
 		Pattern: "alice",
 	}
-	p.filters["test-filter"] = testFilter
+	p.filterManager.Update(testFilter)
 
 	// Delete it
 	result, err := p.DeleteFilter(context.Background(), &management.FilterDeleteRequest{
@@ -133,6 +138,5 @@ func TestDeleteFilter_Success(t *testing.T) {
 	assert.True(t, result.Success, "result should indicate success")
 
 	// Verify filter was removed
-	_, exists := p.filters["test-filter"]
-	assert.False(t, exists, "filter should be removed from map")
+	assert.Equal(t, 0, p.filterManager.Count(), "filter should be removed")
 }

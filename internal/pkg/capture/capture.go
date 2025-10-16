@@ -131,6 +131,15 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
 	defer packetBuffer.Close()
 
+	InitWithBuffer(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler)
+}
+
+// InitWithBuffer starts packet capture with an external PacketBuffer
+// This allows the caller to own the buffer and read from it directly, avoiding
+// double-buffering when the processor would just copy packets to another buffer.
+func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+	packetBuffer := buffer
+
 	var wg sync.WaitGroup
 	var processorWg sync.WaitGroup
 	processorWg.Add(1)
@@ -158,22 +167,31 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 		}(iface)
 	}
 
+	// If packetProcessor is provided, start it in a goroutine
+	// If nil, the caller is responsible for reading from buffer.Receive()
+	if packetProcessor != nil {
+		go func() {
+			defer processorWg.Done()
+			packetProcessor(packetBuffer.Receive(), assembler)
+		}()
+	} else {
+		// No processor - caller will read directly from buffer
+		processorWg.Done()
+	}
+
 	shutdownCh := make(chan struct{})
 	go func() {
 		<-ctx.Done()
 		// Context cancelled, wait for capture goroutines to stop
 		wg.Wait()
-		// Close the buffer which will cause the processor to exit
-		packetBuffer.Close()
+		// If we own the buffer (packetProcessor != nil), close it
+		// Otherwise, the caller owns it and will close it
+		if packetProcessor != nil {
+			// Close the buffer which will cause the processor to exit
+			packetBuffer.Close()
+		}
 		// Signal that shutdown has started
 		close(shutdownCh)
-	}()
-
-	// Start a single goroutine that calls the user-provided packet processor
-	// The packet processor is responsible for reading from the channel
-	go func() {
-		defer processorWg.Done()
-		packetProcessor(packetBuffer.Receive(), assembler)
 	}()
 
 	// Wait for processor to complete or timeout after shutdown
@@ -196,7 +214,9 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 			return
 		case <-time.After(2 * time.Second):
 			// Force exit after timeout
-			logger.Warn("Forcing shutdown after drain timeout", "timeout", "2s")
+			if packetProcessor != nil {
+				logger.Warn("Forcing shutdown after drain timeout", "timeout", "2s")
+			}
 			return
 		}
 	}

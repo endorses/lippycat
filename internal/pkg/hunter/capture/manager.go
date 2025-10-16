@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // Manager handles packet capture lifecycle
@@ -82,15 +81,14 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 
 	// Start capture in background
 	go func() {
-		// Use simplified packet processor
-		processor := func(ch <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
-			for pkt := range ch {
-				// Forward to packet buffer
-				m.packetBuffer.Send(pkt)
-			}
-		}
-
-		capture.InitWithContext(m.captureCtx, devices, bpfFilter, processor, nil)
+		// Use InitWithBuffer to avoid double-buffering. We pass m.packetBuffer
+		// directly so capture goroutines write to it, eliminating the intermediate
+		// copy that was causing packet drops. The forwarding manager reads directly
+		// from this buffer.
+		//
+		// By passing nil as the processor, we indicate that we own the buffer and
+		// will read from it externally (via the forwarding manager).
+		capture.InitWithBuffer(m.captureCtx, devices, bpfFilter, m.packetBuffer, nil, nil)
 	}()
 
 	logger.Info("Packet capture started", "interfaces", m.interfaces)

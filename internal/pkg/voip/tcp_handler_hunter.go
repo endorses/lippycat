@@ -39,6 +39,59 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	// Parse SIP headers
 	headers, body := parseSipHeaders(sipMessage)
 
+	// Detect SIP method
+	method := detectSipMethod(string(sipMessage))
+
+	// Check if this is a call termination message (BYE or CANCEL)
+	if method == "BYE" || method == "CANCEL" {
+		// For termination messages, only forward if call is already tracked
+		if h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID) {
+			metadata := &CallMetadata{
+				CallID:            callID,
+				From:              extractUserFromSIPURI(headers["from"]),
+				To:                extractUserFromSIPURI(headers["to"]),
+				PAssertedIdentity: headers["p-asserted-identity"],
+				Method:            method,
+				ResponseCode:      extractSipResponseCode(sipMessage),
+				SDPBody:           body,
+			}
+
+			// Get buffered TCP packets for this message
+			bufferedPackets := getTCPBufferedPackets(flow)
+
+			pbMetadata := &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:            callID,
+					FromUser:          metadata.From, // username only
+					ToUser:            metadata.To,   // username only
+					FromUri:           extractFullSIPURI(headers["from"]),
+					ToUri:             extractFullSIPURI(headers["to"]),
+					Method:            metadata.Method,
+					ResponseCode:      metadata.ResponseCode,
+					PAssertedIdentity: metadata.PAssertedIdentity,
+				},
+			}
+
+			// Forward termination message
+			for _, pkt := range bufferedPackets {
+				if err := h.forwarder.ForwardPacketWithMetadata(pkt, pbMetadata); err != nil {
+					logger.Error("Failed to forward TCP call termination packet",
+						"call_id", SanitizeCallIDForLogging(callID),
+						"method", method,
+						"error", err)
+				}
+			}
+
+			logger.Info("Forwarded TCP call termination packet",
+				"call_id", SanitizeCallIDForLogging(callID),
+				"method", method)
+			return true
+		}
+		// Call not tracked, discard
+		discardTCPBufferedPackets(flow)
+		return false
+	}
+
 	// Check if this call matches tracked users
 	if !containsUserInHeaders(headers) {
 		// Call doesn't match filter - discard buffered TCP packets
@@ -52,10 +105,11 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	// Call matched! Extract metadata
 	metadata := &CallMetadata{
 		CallID:            callID,
-		From:              headers["from"],
-		To:                headers["to"],
+		From:              extractUserFromSIPURI(headers["from"]),
+		To:                extractUserFromSIPURI(headers["to"]),
 		PAssertedIdentity: headers["p-asserted-identity"],
-		Method:            detectSipMethod(string(sipMessage)),
+		Method:            method,
+		ResponseCode:      extractSipResponseCode(sipMessage),
 		SDPBody:           body,
 	}
 
@@ -72,9 +126,12 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	pbMetadata := &data.PacketMetadata{
 		Sip: &data.SIPMetadata{
 			CallId:            callID,
-			FromUser:          metadata.From,
-			ToUser:            metadata.To,
+			FromUser:          metadata.From, // username only
+			ToUser:            metadata.To,   // username only
+			FromUri:           extractFullSIPURI(headers["from"]),
+			ToUri:             extractFullSIPURI(headers["to"]),
 			Method:            metadata.Method,
+			ResponseCode:      metadata.ResponseCode,
 			PAssertedIdentity: metadata.PAssertedIdentity,
 		},
 	}

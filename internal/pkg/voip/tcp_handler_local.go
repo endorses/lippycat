@@ -25,7 +25,8 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, fl
 
 	// Process the SIP message through the existing handler
 	// This checks sipusers filter, creates call writers, extracts RTP ports
-	matched := handleSipMessage(sipMessage)
+	linkType := getCurrentLinkType() // Use global link type set by TCP stream processor
+	matched := handleSipMessage(sipMessage, linkType)
 
 	if matched {
 		logger.Debug("TCP SIP message matched filter",

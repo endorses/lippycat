@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 )
 
 // CaptureRestarter is an interface for restarting capture with new filters
@@ -65,8 +66,11 @@ func (m *Manager) GetFilterCount() int {
 // SetInitialFilters sets the initial filters from registration response
 func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.filters = filters
+	m.mu.Unlock()
+
+	// Sync SIP user filters to sipusers package
+	m.syncSIPUserFilters(filters)
 }
 
 // Subscribe subscribes to filter updates from processor
@@ -224,8 +228,34 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	// Apply filters by restarting capture with new BPF filter
 	if filtersChanged {
 		logger.Info("Filters changed, restarting capture", "active_filters", len(currentFilters))
+
+		// Sync SIP user filters to sipusers package for application-level filtering
+		m.syncSIPUserFilters(currentFilters)
+
 		if err := m.captureRestarter.Restart(currentFilters); err != nil {
 			logger.Error("Failed to restart capture with new filters", "error", err)
 		}
 	}
+}
+
+// syncSIPUserFilters synchronizes FILTER_SIP_USER filters to the sipusers package
+// This allows application-level filtering to work correctly in hunter mode
+func (m *Manager) syncSIPUserFilters(filters []*management.Filter) {
+	// Build map of SIP users from filters
+	sipUsers := make(map[string]*sipusers.SipUser)
+	for _, filter := range filters {
+		if filter.Type == management.FilterType_FILTER_SIP_USER {
+			// Use a far-future expiration date since processor manages filter lifetime
+			sipUsers[filter.Pattern] = &sipusers.SipUser{
+				ExpirationDate: time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC),
+			}
+		}
+	}
+
+	// Clear existing SIP users and add new ones
+	// Note: This is safe because in hunter mode, sipusers are ONLY managed by filter updates
+	sipusers.ClearAll()
+	sipusers.AddMultipleSipUsers(sipUsers)
+
+	logger.Debug("Synchronized SIP user filters", "sip_user_count", len(sipUsers))
 }

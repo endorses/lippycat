@@ -185,6 +185,7 @@ func (s *SIPSignature) extractMetadata(payload string) map[string]interface{} {
 				metadata["from_user"] = extractUserFromURI(value)
 			case "To", "t":
 				metadata["to"] = value
+				metadata["to_user"] = extractUserFromURI(value)
 			case "Call-ID", "i":
 				metadata["call_id"] = value
 			case "CSeq":

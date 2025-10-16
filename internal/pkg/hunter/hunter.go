@@ -282,7 +282,6 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 	captureLen := 0
 	originalLen := 0
 	var packetData []byte
-	linkType := uint32(1) // Default to Ethernet (LinkTypeEthernet = 1)
 
 	if packet.Data() != nil {
 		packetData = packet.Data()
@@ -292,10 +291,11 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 		captureLen = meta.CaptureLength
 		originalLen = meta.Length
 	}
-	// Get LinkType from link layer if available
-	if linkLayer := packet.LinkLayer(); linkLayer != nil {
-		linkType = uint32(linkLayer.LayerType()) // #nosec G115
-	}
+
+	// For packets with embedded metadata (already analyzed VoIP packets),
+	// default to Ethernet LinkType (1) since the TUI will use metadata fields
+	// instead of re-parsing the packet
+	linkType := uint32(1) // LinkTypeEthernet
 
 	// Create protobuf packet with embedded metadata
 	pbPkt := &data.CapturedPacket{

@@ -25,7 +25,7 @@ usage() {
     echo "The script will:"
     echo "  1. Update VERSION file"
     echo "  2. Update README.md status line"
-    echo "  3. Add basic changelog entry in README.md"
+    echo "  3. Add basic changelog entry in CHANGELOG.md"
     echo "  4. Show diff and prompt for commit (or auto-commit with -y)"
     echo "  5. Optionally create git tag (with -t)"
     exit 1
@@ -93,27 +93,36 @@ echo -e "${YELLOW}Updating files...${NC}"
 echo "$NEW_VERSION" > VERSION
 echo -e "${GREEN}✓${NC} Updated VERSION file"
 
-# Update README.md status line
+# Update README.md status line and version badge
 sed -i "s/^**Status:** v[0-9.]*/**Status:** v$NEW_VERSION/" README.md
-echo -e "${GREEN}✓${NC} Updated README.md status line"
+sed -i "s|https://img.shields.io/badge/version-[0-9.]*-blue|https://img.shields.io/badge/version-$NEW_VERSION-blue|" README.md
+echo -e "${GREEN}✓${NC} Updated README.md status line and version badge"
 
 # Add changelog entry (user should edit this to add proper details)
-# Find the line with "## Changelog" and add new version after it
-sed -i "/## Changelog/a\\
+# Find the first version entry and add new version before it
+sed -i "/^## \\[/i\\
+## [$NEW_VERSION] - $DATE\\
 \\
-### v$NEW_VERSION ($DATE)\\
+### Added\\
 - $CHANGELOG_MSG\\
-- TODO: Add detailed changelog entries" README.md
-echo -e "${GREEN}✓${NC} Added changelog entry in README.md"
+\\
+### Changed\\
+- TODO: Add detailed changelog entries\\
+\\
+### Fixed\\
+- TODO: Add fixed items\\
+\\
+" CHANGELOG.md
+echo -e "${GREEN}✓${NC} Added changelog entry in CHANGELOG.md"
 
 echo ""
-echo -e "${YELLOW}⚠️  IMPORTANT: Edit README.md to add detailed changelog entries!${NC}"
+echo -e "${YELLOW}⚠️  IMPORTANT: Edit CHANGELOG.md to add detailed changelog entries!${NC}"
 echo ""
 
 # Show diff
 echo -e "${BLUE}Changes:${NC}"
 echo "----------------------------------------"
-git diff VERSION README.md
+git diff VERSION README.md CHANGELOG.md
 echo "----------------------------------------"
 echo ""
 
@@ -127,7 +136,7 @@ else
 fi
 
 if [[ $SHOULD_COMMIT =~ ^[Yy]$ ]]; then
-    git add VERSION README.md
+    git add VERSION README.md CHANGELOG.md
     git commit -m "chore: bump version to $NEW_VERSION
 
 Release $NEW_VERSION includes:
@@ -163,7 +172,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 else
     echo ""
     echo -e "${YELLOW}Changes not committed. You can review and commit manually:${NC}"
-    echo "  git add VERSION README.md"
+    echo "  git add VERSION README.md CHANGELOG.md"
     echo "  git commit -m 'chore: bump version to $NEW_VERSION'"
     echo "  git tag -a v$NEW_VERSION -m 'Release version $NEW_VERSION'"
 fi

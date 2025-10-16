@@ -5,6 +5,7 @@ captures
 !docs/*.md
 !README.md
 !CLAUDE.md
+!CHANGELOG.md
 nodes.yaml
 testdata/pcaps/*
 scripts/*

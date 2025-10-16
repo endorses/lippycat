@@ -1,8 +1,18 @@
 # lippycat 🫦🐱
 
+[![Version](https://img.shields.io/badge/version-0.2.7-blue)](CHANGELOG.md)
+[![Go Version](https://img.shields.io/badge/go-1.24%2B-00ADD8?logo=go)](go.mod)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
+
+[![VoIP](https://img.shields.io/badge/VoIP-SIP%2FRTP-purple)](#features)
+[![GPU](https://img.shields.io/badge/GPU-CUDA%20%7C%20SIMD-green)](docs/GPU_ACCELERATION.md)
+[![TLS/mTLS](https://img.shields.io/badge/TLS%2FmTLS-supported-success)](docs/SECURITY.md)
+[![Distributed](https://img.shields.io/badge/architecture-distributed-blue)](docs/DISTRIBUTED_MODE.md)
+
 Network traffic sniffer and protocol analyzer built with Go. Currently focused on VoIP (SIP/RTP) analysis with plans for multi-protocol support.
 
-**Status:** v0.2.6 - Early development. Expect breaking changes.
+**Status:** v0.2.7 - Early development. Expect breaking changes.
 
 ## Features
 
@@ -233,78 +243,7 @@ go test ./...
 
 ## Changelog
 
-### v0.2.6 (2025-10-12)
-- **Feature**: FileDialog modal component for file/directory operations
-  - Unified file picker for PCAP save and nodes YAML selection
-  - Vim-style navigation with real-time filtering
-  - Inline folder creation and details toggle
-  - Four input modes: Navigation, Filename, Filter, CreateFolder
-- **Feature**: Toast notification system
-  - Non-blocking queue-based notifications
-  - Four types: Success, Error, Info, Warning
-  - Auto-dismiss with configurable durations
-  - Click-to-dismiss functionality
-- **Docs**: Added TUI architecture documentation to CLAUDE.md
-  - FileDialog and Toast design principles
-  - Version management instructions
-
-### v0.2.5 (2025-10-12)
-- **Feature**: Dynamic filter management with hunter target selection
-  - Multi-select modal for choosing which hunters a filter applies to
-  - Press 's' on Targets field to open hunter selector
-  - Keyboard shortcuts: Space (toggle), 'a' (all), 'n' (none)
-  - Filters can target all hunters or specific subset
-- **UX**: Improved filter form consistency
-  - Enter key always saves the form (consistent behavior)
-  - Separate 's' key for opening hunter selector
-  - Clear hints and footer instructions
-- **Fix**: Makefile test targets now include `-tags all` flag
-  - Required for project's build tag architecture
-  - Tests now pass reliably with `make test`
-- **Fix**: TCP security tests no longer flaky with `-count=3`
-  - Reset global metrics state for clean test isolation
-
-### v0.2.4 (2025-10-11)
-- **Feature**: Hunter subscription management in TUI
-  - Press 's' to select specific hunters to subscribe to
-  - Press 'd' to unsubscribe from hunters or remove processors
-  - Multi-select interface with visual feedback
-  - Selective packet filtering at processor level
-- **Feature**: TLS/mTLS support for distributed mode
-  - Encrypted gRPC connections between all nodes
-  - Mutual authentication with client certificates
-  - Per-node TLS configuration in nodes.yaml
-  - Self-signed certificate generation for testing
-- **Feature**: ListAvailableHunters management API
-  - Query processor for connected hunters
-  - Used by TUI hunter selector modal
-- **Fix**: Resolved packet subscription and protobuf serialization issues
-  - Fixed Proto3 empty list serialization with `has_hunter_filter` field
-  - Fixed concurrent protobuf serialization race condition with `proto.Clone()`
-  - Unsubscribe from hunters now works correctly
-- **Fix**: Improved hunter reconnection resilience
-  - Hunter reconnects within ~100ms when processor restarts
-  - Added cleanup timeout to prevent deadlock
-  - Fixed packet buffer preservation on reconnection
-  - Reduced connection monitoring interval from 10s to 100ms
-- **Architecture**: Flow control improvements
-  - Removed subscriber backpressure from affecting hunters
-  - TUI client drops no longer pause hunter packet capture
-  - Per-subscriber buffering for slow clients
-- **UI**: TUI visual improvements
-  - Fixed hunter selector modal styling
-  - Prevented cursor drift in scrolling
-  - Added vim-style navigation (j/k)
-  - Hover-based mouse scrolling
-- **Docs**: Improved TLS certificate generation documentation with SAN requirements
-- **Tests**: Removed obsolete subscriber backpressure tests
-
-### v0.2.3
-- VoIP/SIP analysis (UDP and TCP)
-- Distributed capture architecture with build-tagged specialized binaries
-- SIMD optimizations and optional GPU acceleration
-- TUI and CLI interfaces
-- Protocol detection with signature-based matching
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ## Roadmap
 

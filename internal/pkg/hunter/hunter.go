@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -15,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/filtering"
+	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -24,15 +24,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
-
-// PacketProcessor is an optional interface for custom packet processing
-// before packets are forwarded to the processor. This allows VoIP mode
-// to buffer and filter packets based on call state.
-type PacketProcessor interface {
-	// ProcessPacket processes a packet and returns true if it should be forwarded immediately.
-	// If false, the packet may be buffered or dropped by the processor.
-	ProcessPacket(pktInfo capture.PacketInfo) bool
-}
 
 // Config contains hunter configuration
 type Config struct {
@@ -75,20 +66,12 @@ type Hunter struct {
 	// Filter management
 	filterManager *filtering.Manager
 
+	// Packet forwarding
+	forwardingManager *forwarding.Manager
+
 	// Packet streaming
 	stream   data.DataService_StreamPacketsClient
 	streamMu sync.Mutex
-
-	// Packet batching
-	batchMu       sync.Mutex
-	currentBatch  []*data.CapturedPacket
-	batchSequence uint64
-
-	// Flow control
-	batchQueue       chan []*data.CapturedPacket
-	batchQueueSize   atomic.Int32
-	flowControlState atomic.Int32 // FlowControl enum value
-	paused           atomic.Bool  // Whether sending is paused
 
 	// Statistics
 	statsCollector *stats.Collector
@@ -98,7 +81,7 @@ type Hunter struct {
 	voipFilter *VoIPFilter
 
 	// Custom packet processing
-	packetProcessor PacketProcessor // Optional custom processor for VoIP buffering, etc.
+	packetProcessor forwarding.PacketProcessor // Optional custom processor for VoIP buffering, etc.
 
 	// Reconnection
 	reconnectAttempts    int
@@ -148,11 +131,9 @@ func New(config Config) (*Hunter, error) {
 
 	h := &Hunter{
 		config:               config,
-		currentBatch:         make([]*data.CapturedPacket, 0, config.BatchSize),
 		maxReconnectAttempts: 0, // 0 = infinite reconnect attempts
 		reconnectAttempts:    0,
 		reconnecting:         false,
-		batchQueue:           make(chan []*data.CapturedPacket, config.MaxBufferedBatches),
 		statsCollector:       stats.New(),
 		captureManager:       captureManager,
 	}
@@ -165,7 +146,7 @@ func New(config Config) (*Hunter, error) {
 
 // SetPacketProcessor sets a custom packet processor for this hunter.
 // This should be called before Start() to enable custom packet handling.
-func (h *Hunter) SetPacketProcessor(processor PacketProcessor) {
+func (h *Hunter) SetPacketProcessor(processor forwarding.PacketProcessor) {
 	h.packetProcessor = processor
 }
 
@@ -425,244 +406,8 @@ func (h *Hunter) receiveStreamControl(stream data.DataService_StreamPacketsClien
 
 // handleFlowControl processes flow control signals from processor
 func (h *Hunter) handleFlowControl(ctrl *data.StreamControl) {
-	oldState := data.FlowControl(h.flowControlState.Load())
-	newState := ctrl.FlowControl
-
-	// Update flow control state
-	h.flowControlState.Store(int32(newState))
-
-	// Log state changes
-	if oldState != newState {
-		logger.Info("Flow control state changed",
-			"old_state", oldState,
-			"new_state", newState,
-			"ack_sequence", ctrl.AckSequence)
-	}
-
-	// Handle specific flow control actions
-	switch newState {
-	case data.FlowControl_FLOW_PAUSE:
-		if !h.paused.Load() {
-			h.paused.Store(true)
-			logger.Warn("Processor requested pause - buffering packets",
-				"recommendation", "processor may be overloaded")
-		}
-
-	case data.FlowControl_FLOW_RESUME:
-		if h.paused.Load() {
-			h.paused.Store(false)
-			logger.Info("Processor requested resume - sending packets")
-		}
-
-	case data.FlowControl_FLOW_SLOW:
-		logger.Debug("Processor requested slow down",
-			"current_queue_size", h.batchQueueSize.Load())
-
-	case data.FlowControl_FLOW_CONTINUE:
-		// Normal operation - no action needed
-		logger.Debug("Flow control: continue",
-			"ack_sequence", ctrl.AckSequence)
-	}
-
-	// Log errors if any
-	if ctrl.Error != "" {
-		logger.Error("Processor reported error",
-			"error", ctrl.Error,
-			"ack_sequence", ctrl.AckSequence)
-	}
-}
-
-// forwardPackets reads from packet buffer and forwards batches to processor
-func (h *Hunter) forwardPackets() {
-	defer h.connWg.Done()
-
-	ticker := time.NewTicker(h.config.BatchTimeout)
-	defer ticker.Stop()
-
-	logger.Info("Packet forwarding started",
-		"batch_size", h.config.BatchSize,
-		"batch_timeout", h.config.BatchTimeout)
-
-	for {
-		select {
-		case <-h.connCtx.Done():
-			// Send remaining batch before shutdown
-			h.sendBatch()
-			return
-
-		case pktInfo, ok := <-h.captureManager.GetPacketBuffer().Receive():
-			if !ok {
-				// Channel closed
-				h.sendBatch()
-				return
-			}
-
-			// Increment captured counter
-			h.statsCollector.IncrementCaptured()
-
-			// Apply custom packet processor if set (for VoIP buffering, etc.)
-			// The processor returns true if packet should be forwarded immediately
-			if h.packetProcessor != nil {
-				if !h.packetProcessor.ProcessPacket(pktInfo) {
-					// Packet was buffered or filtered out by processor
-					continue
-				}
-				// Packet should be forwarded - count it as matched
-				h.statsCollector.IncrementMatched()
-			} else if h.voipFilter != nil {
-				// Fall back to simple VoIP filter if no custom processor
-				if !h.voipFilter.MatchPacket(pktInfo.Packet) {
-					// Packet didn't match VoIP filter - skip it
-					continue
-				}
-				// Packet matched - count it
-				h.statsCollector.IncrementMatched()
-			}
-
-			// Convert to protobuf packet
-			pbPkt := h.convertPacket(pktInfo)
-
-			// Add to current batch with minimal lock duration
-			h.batchMu.Lock()
-			h.currentBatch = append(h.currentBatch, pbPkt)
-			batchLen := len(h.currentBatch)
-			h.batchMu.Unlock()
-
-			// Check size outside lock
-			if batchLen >= h.config.BatchSize {
-				h.sendBatch()
-			}
-
-		case <-ticker.C:
-			// Send batch on timeout
-			h.sendBatch()
-		}
-	}
-}
-
-// sendBatch sends the current batch to processor
-func (h *Hunter) sendBatch() {
-	// Check if paused by processor
-	if h.paused.Load() {
-		logger.Debug("Skipping batch send - paused by processor")
-		return
-	}
-
-	h.batchMu.Lock()
-	if len(h.currentBatch) == 0 {
-		h.batchMu.Unlock()
-		return
-	}
-
-	// Create batch message
-	h.batchSequence++
-	batch := &data.PacketBatch{
-		HunterId:    h.config.HunterID,
-		Sequence:    h.batchSequence,
-		TimestampNs: time.Now().UnixNano(),
-		Packets:     h.currentBatch,
-		Stats: &data.BatchStats{
-			TotalCaptured:   h.statsCollector.GetCaptured(),
-			FilteredMatched: h.statsCollector.GetMatched(),
-			Dropped:         h.statsCollector.GetDropped(),
-			BufferUsage:     uint32(len(h.captureManager.GetPacketBuffer().Receive()) * 100 / h.config.BufferSize), // #nosec G115 - safe: percentage calculation
-		},
-	}
-
-	// Reset batch
-	h.currentBatch = make([]*data.CapturedPacket, 0, h.config.BatchSize)
-	h.batchMu.Unlock()
-
-	// Send via stream
-	h.streamMu.Lock()
-	stream := h.stream
-	h.streamMu.Unlock()
-
-	if stream == nil {
-		logger.Warn("Stream not available, dropping batch")
-		return
-	}
-
-	// Send with context timeout to prevent blocking indefinitely
-	// This avoids goroutine leak that would occur with timeout in select
-	sendCtx, sendCancel := context.WithTimeout(h.connCtx, 5*time.Second)
-	defer sendCancel()
-
-	// Create a channel to receive the result
-	sendDone := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		sendDone <- stream.Send(batch)
-	}()
-
-	select {
-	case err := <-sendDone:
-		if err != nil {
-			logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
-			h.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-			return
-		}
-
-		logger.Debug("Sent packet batch",
-			"sequence", batch.Sequence,
-			"packets", len(batch.Packets))
-
-		h.statsCollector.IncrementForwarded(uint64(len(batch.Packets)))
-
-	case <-sendCtx.Done():
-		// Context cancelled or timed out
-		logger.Error("Batch send timeout - processor may be unresponsive",
-			"sequence", batch.Sequence,
-			"packets", len(batch.Packets))
-		h.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-		// Note: The spawned goroutine will continue until stream.Send returns or
-		// connCtx is cancelled (during reconnect). This is acceptable because:
-		// 1. The goroutine will be cleaned up when the stream is closed during reconnection
-		// 2. The buffered channel prevents blocking the goroutine indefinitely
-		// 3. We can't force-kill goroutines in Go, this is the standard pattern
-		return
-	}
-}
-
-// batchSender sends queued batches to the processor with flow control
-func (h *Hunter) batchSender() {
-	defer h.connWg.Done()
-
-	for {
-		select {
-		case <-h.connCtx.Done():
-			return
-
-		case packets := <-h.batchQueue:
-			h.batchQueueSize.Add(-1)
-
-			// Get stream
-			h.streamMu.Lock()
-			stream := h.stream
-			h.streamMu.Unlock()
-
-			if stream == nil {
-				logger.Warn("Stream not available, dropping queued batch")
-				h.statsCollector.IncrementDropped(uint64(len(packets)))
-				continue
-			}
-
-			// Build batch for sending
-			batch := &data.PacketBatch{
-				HunterId:    h.config.HunterID,
-				Sequence:    h.batchSequence,
-				TimestampNs: time.Now().UnixNano(),
-				Packets:     packets,
-			}
-
-			if err := stream.Send(batch); err != nil {
-				logger.Error("Failed to send batch", "error", err)
-				h.statsCollector.IncrementDropped(uint64(len(packets)))
-				continue
-			}
-
-			logger.Debug("Sent packet batch", "packets", len(packets))
-			h.statsCollector.IncrementForwarded(uint64(len(packets)))
-		}
+	if h.forwardingManager != nil {
+		h.forwardingManager.HandleFlowControl(ctrl)
 	}
 }
 
@@ -761,6 +506,10 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 		return fmt.Errorf("cannot forward nil packet")
 	}
 
+	if h.forwardingManager == nil {
+		return fmt.Errorf("forwarding manager not initialized")
+	}
+
 	captureLen := 0
 	originalLen := 0
 	var packetData []byte
@@ -790,15 +539,9 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 		Metadata:       metadata, // Embedded metadata from TCP SIP handler
 	}
 
-	// Add to current batch
-	h.batchMu.Lock()
-	h.currentBatch = append(h.currentBatch, pbPkt)
-	batchLen := len(h.currentBatch)
-	h.batchMu.Unlock()
-
-	// Send batch if full
-	if batchLen >= h.config.BatchSize {
-		h.sendBatch()
+	// Add to current batch and send if full
+	if h.forwardingManager.AddPacketToBatch(pbPkt) {
+		h.forwardingManager.SendBatch()
 	}
 
 	return nil
@@ -1034,13 +777,32 @@ func (h *Hunter) connectionManager() {
 			// Create connection-scoped context for this connection's goroutines
 			h.connCtx, h.connCancel = context.WithCancel(h.ctx)
 
+			// Create forwarding manager for this connection
+			h.forwardingManager = forwarding.New(
+				forwarding.Config{
+					HunterID:     h.config.HunterID,
+					BatchSize:    h.config.BatchSize,
+					BatchTimeout: h.config.BatchTimeout,
+					BufferSize:   h.config.BufferSize,
+				},
+				h.statsCollector,
+				h.captureManager,
+				h.connCtx,
+			)
+			h.forwardingManager.SetStream(h.stream)
+			if h.packetProcessor != nil {
+				h.forwardingManager.SetPacketProcessor(h.packetProcessor)
+			}
+			if h.voipFilter != nil {
+				h.forwardingManager.SetVoIPFilter(h.voipFilter)
+			}
+
 			// Start connection-dependent goroutines with connection-scoped waitgroup
-			h.connWg.Add(5)
-			go h.forwardPackets()
+			h.connWg.Add(4)
+			go h.forwardingManager.ForwardPackets(&h.connWg)
 			go h.handleStreamControl()
 			go h.subscribeToFilters()
 			go h.sendHeartbeats()
-			go h.batchSender() // Flow-controlled batch sender
 
 			// Monitor for disconnection
 			h.monitorConnection()

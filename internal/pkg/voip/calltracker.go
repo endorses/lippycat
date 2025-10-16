@@ -203,10 +203,14 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 			// Clean up the old call's resources
 			if oldCall != nil {
 				if oldCall.sipFile != nil {
-					oldCall.sipFile.Close()
+					if err := oldCall.sipFile.Close(); err != nil {
+						logger.Error("Error closing SIP file", "error", err)
+					}
 				}
 				if oldCall.rtpFile != nil {
-					oldCall.rtpFile.Close()
+					if err := oldCall.rtpFile.Close(); err != nil {
+						logger.Error("Error closing RTP file", "error", err)
+					}
 				}
 				// Remove from port mapping
 				for port, cid := range tracker.portToCallID {

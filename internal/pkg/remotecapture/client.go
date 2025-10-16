@@ -647,8 +647,8 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		if pkt.Metadata.Rtp != nil {
 			voipData.IsRTP = true
 			voipData.SSRC = pkt.Metadata.Rtp.Ssrc
-			voipData.PayloadType = uint8(pkt.Metadata.Rtp.PayloadType)
-			voipData.SequenceNum = uint16(pkt.Metadata.Rtp.Sequence)
+			voipData.PayloadType = uint8(pkt.Metadata.Rtp.PayloadType) // #nosec G115 - RTP payload type is 7 bits (0-127)
+			voipData.SequenceNum = uint16(pkt.Metadata.Rtp.Sequence)   // #nosec G115 - RTP sequence is 16 bits
 			voipData.Timestamp = pkt.Metadata.Rtp.Timestamp
 			// ALWAYS mark as RTP if we have RTP metadata from hunter
 			// Trust the hunter's analysis even if TUI parsing failed
@@ -950,7 +950,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 				}
 				return ""
 			}())
-		f.Close()
+		_ = f.Close() // Debug file, ignore close errors
 	}
 
 	if rtp == nil || sip == nil || sip.CallId == "" {
@@ -973,7 +973,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 	stats, exists := c.rtpStats[callID]
 	if !exists {
 		stats = &rtpQualityStats{
-			lastSeqNum:    uint16(rtp.Sequence),
+			lastSeqNum:    uint16(rtp.Sequence), // #nosec G115 - RTP sequence is 16 bits
 			lastTimestamp: rtp.Timestamp,
 			totalPackets:  0,
 			lostPackets:   0,
@@ -981,21 +981,21 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 		c.rtpStats[callID] = stats
 
 		// Extract codec from payload type (first RTP packet)
-		call.Codec = payloadTypeToCodec(uint8(rtp.PayloadType))
+		call.Codec = payloadTypeToCodec(uint8(rtp.PayloadType)) // #nosec G115 - RTP payload type is 7 bits (0-127)
 
 		// Debug: write to file
 		f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if f != nil {
 			fmt.Fprintf(f, "[%s] First RTP packet for call %s: payload_type=%d codec=%s\n",
 				time.Now().Format("15:04:05"), callID, rtp.PayloadType, call.Codec)
-			f.Close()
+			_ = f.Close() // Debug file, ignore close errors
 		}
 	}
 
 	// Detect packet loss from sequence number gaps
 	if stats.totalPackets > 0 {
 		expectedSeq := stats.lastSeqNum + 1
-		actualSeq := uint16(rtp.Sequence)
+		actualSeq := uint16(rtp.Sequence) // #nosec G115 - RTP sequence is 16 bits
 
 		// Handle sequence number wraparound (uint16 overflow)
 		var gap int
@@ -1014,7 +1014,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 		}
 	}
 
-	stats.lastSeqNum = uint16(rtp.Sequence)
+	stats.lastSeqNum = uint16(rtp.Sequence) // #nosec G115 - RTP sequence is 16 bits
 	stats.totalPackets++
 
 	// Calculate packet loss percentage

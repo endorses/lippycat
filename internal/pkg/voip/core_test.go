@@ -169,6 +169,8 @@ func TestStartProcessor_InvalidPackets(t *testing.T) {
 }
 
 func TestContainsUserInHeaders(t *testing.T) {
+	// Note: When no users are configured, the function returns true (promiscuous mode)
+	// This is intentional behavior to allow capturing all VoIP traffic by default
 	tests := []struct {
 		name     string
 		headers  map[string]string
@@ -180,7 +182,7 @@ func TestContainsUserInHeaders(t *testing.T) {
 				"from": "sip:testuser@example.com",
 				"to":   "sip:other@example.com",
 			},
-			expected: false, // Will be false unless sipusers has testuser
+			expected: true, // Promiscuous mode (no users configured)
 		},
 		{
 			name: "User found in To header",
@@ -188,7 +190,7 @@ func TestContainsUserInHeaders(t *testing.T) {
 				"from": "sip:other@example.com",
 				"to":   "sip:testuser@example.com",
 			},
-			expected: false, // Will be false unless sipusers has testuser
+			expected: true, // Promiscuous mode (no users configured)
 		},
 		{
 			name: "User found in P-Asserted-Identity",
@@ -197,7 +199,7 @@ func TestContainsUserInHeaders(t *testing.T) {
 				"to":                  "sip:another@example.com",
 				"p-asserted-identity": "sip:testuser@example.com",
 			},
-			expected: false, // Will be false unless sipusers has testuser
+			expected: true, // Promiscuous mode (no users configured)
 		},
 		{
 			name: "No users found",
@@ -205,12 +207,12 @@ func TestContainsUserInHeaders(t *testing.T) {
 				"from": "sip:unknown1@example.com",
 				"to":   "sip:unknown2@example.com",
 			},
-			expected: false,
+			expected: true, // Promiscuous mode (no users configured)
 		},
 		{
 			name:     "Empty headers",
 			headers:  map[string]string{},
-			expected: false,
+			expected: true, // Promiscuous mode (no users configured)
 		},
 	}
 

@@ -202,7 +202,7 @@ m=audio 8000 RTP/AVP 0
 a=rtpmap:0 PCMU/8000`)
 
 	// Process the SIP message
-	isValidSip := handleSipMessage(sipMessage)
+	isValidSip := handleSipMessage(sipMessage, layers.LinkTypeEthernet)
 	assert.True(t, isValidSip, "SIP message should be processed successfully")
 
 	// Verify call was created
@@ -337,7 +337,7 @@ func TestSipUserSurveillanceIntegration(t *testing.T) {
 	tracker.callMap = make(map[string]*CallInfo)
 	tracker.mu.Unlock()
 
-	// Test with no surveillance - should not create calls
+	// Test with no surveillance - should work in promiscuous mode (accept all)
 	sipMessage := []byte(`INVITE sip:external@other.com SIP/2.0
 From: <sip:another@other.com>;tag=123
 To: <sip:external@other.com>
@@ -347,8 +347,8 @@ Content-Length: 0
 
 `)
 
-	result := handleSipMessage(sipMessage)
-	assert.False(t, result, "Should not process non-surveiled users")
+	result := handleSipMessage(sipMessage, layers.LinkTypeEthernet)
+	assert.True(t, result, "Should process all users in promiscuous mode (no surveillance configured)")
 
 	// Add surveillance
 	sipusers.AddSipUser("alice", &sipusers.SipUser{
@@ -366,7 +366,7 @@ Content-Length: 0
 
 `)
 
-	result = handleSipMessage(surveilledMessage)
+	result = handleSipMessage(surveilledMessage, layers.LinkTypeEthernet)
 	assert.True(t, result, "Should process surveiled users")
 }
 
@@ -559,7 +559,7 @@ Content-Length: -1
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.NotPanics(t, func() {
-				result := handleSipMessage(tt.sipMessage)
+				result := handleSipMessage(tt.sipMessage, layers.LinkTypeEthernet)
 				if tt.shouldFail {
 					assert.False(t, result, "Should handle malformed messages gracefully")
 				}

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -381,7 +382,7 @@ Not a valid SIP message`),
 		t.Run(tt.name, func(t *testing.T) {
 			// This test verifies that handleSipMessage processes messages without panicking
 			assert.NotPanics(t, func() {
-				handleSipMessage(tt.sipMessage)
+				handleSipMessage(tt.sipMessage, layers.LinkTypeEthernet)
 			}, "handleSipMessage should not panic with message: %s", tt.name)
 		})
 	}
@@ -413,7 +414,7 @@ m=audio 8000 RTP/AVP 0
 a=rtpmap:0 PCMU/8000`)
 
 	// Process the SIP message
-	handleSipMessage(sipInvite)
+	handleSipMessage(sipInvite, layers.LinkTypeEthernet)
 
 	// The exact behavior depends on implementation details
 	// At minimum, the function should not crash

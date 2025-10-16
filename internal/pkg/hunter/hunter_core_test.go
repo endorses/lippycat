@@ -106,28 +106,38 @@ func TestCapturedPacket(t *testing.T) {
 	assert.Equal(t, uint32(3), packet.OriginalLength)
 }
 
-// TestGetStats tests statistics retrieval
-func TestGetStats(t *testing.T) {
-	hunter := &Hunter{}
+// TestGetStatsCollector tests statistics collector retrieval
+func TestGetStatsCollector(t *testing.T) {
+	hunter, err := New(Config{
+		ProcessorAddr: "localhost:50051",
+		HunterID:      "test-hunter",
+		Interfaces:    []string{"eth0"},
+		BatchSize:     10,
+		BufferSize:    100,
+	})
+	require.NoError(t, err)
 
-	// Initialize stats
-	hunter.stats.PacketsCaptured.Store(100)
-	hunter.stats.PacketsMatched.Store(95)
-	hunter.stats.PacketsForwarded.Store(90)
-	hunter.stats.PacketsDropped.Store(5)
-	hunter.stats.BufferBytes.Store(10000)
+	statsCollector := hunter.GetStatsCollector()
+	assert.NotNil(t, statsCollector)
 
-	// Verify stats can be read
-	assert.Equal(t, uint64(100), hunter.stats.PacketsCaptured.Load())
-	assert.Equal(t, uint64(95), hunter.stats.PacketsMatched.Load())
-	assert.Equal(t, uint64(90), hunter.stats.PacketsForwarded.Load())
-	assert.Equal(t, uint64(5), hunter.stats.PacketsDropped.Load())
-	assert.Equal(t, uint64(10000), hunter.stats.BufferBytes.Load())
+	// Initially all stats should be zero
+	assert.Equal(t, uint64(0), statsCollector.GetCaptured())
+	assert.Equal(t, uint64(0), statsCollector.GetMatched())
+	assert.Equal(t, uint64(0), statsCollector.GetForwarded())
+	assert.Equal(t, uint64(0), statsCollector.GetDropped())
+	assert.Equal(t, uint64(0), statsCollector.GetBufferBytes())
 }
 
 // TestStatsAtomic tests that stats can be safely updated from multiple goroutines
 func TestStatsAtomic(t *testing.T) {
-	hunter := &Hunter{}
+	hunter, err := New(Config{
+		ProcessorAddr: "localhost:50051",
+		HunterID:      "test-hunter",
+		Interfaces:    []string{"eth0"},
+		BatchSize:     10,
+		BufferSize:    100,
+	})
+	require.NoError(t, err)
 
 	// Increment stats from multiple goroutines
 	const numGoroutines = 10
@@ -137,9 +147,9 @@ func TestStatsAtomic(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			for j := 0; j < incrementsPerGoroutine; j++ {
-				hunter.stats.PacketsCaptured.Add(1)
-				hunter.stats.PacketsMatched.Add(1)
-				hunter.stats.PacketsForwarded.Add(1)
+				hunter.statsCollector.IncrementCaptured()
+				hunter.statsCollector.IncrementMatched()
+				hunter.statsCollector.IncrementForwarded(1)
 			}
 			done <- struct{}{}
 		}()
@@ -151,9 +161,9 @@ func TestStatsAtomic(t *testing.T) {
 	}
 
 	expected := uint64(numGoroutines * incrementsPerGoroutine)
-	assert.Equal(t, expected, hunter.stats.PacketsCaptured.Load())
-	assert.Equal(t, expected, hunter.stats.PacketsMatched.Load())
-	assert.Equal(t, expected, hunter.stats.PacketsForwarded.Load())
+	assert.Equal(t, expected, hunter.statsCollector.GetCaptured())
+	assert.Equal(t, expected, hunter.statsCollector.GetMatched())
+	assert.Equal(t, expected, hunter.statsCollector.GetForwarded())
 }
 
 // TestMin tests the min helper function

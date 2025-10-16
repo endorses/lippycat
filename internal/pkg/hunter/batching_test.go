@@ -2,12 +2,12 @@ package hunter
 
 import (
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -22,21 +22,15 @@ func TestSendBatch_EmptyBatch(t *testing.T) {
 			BatchSize:  10,
 			BufferSize: 100,
 		},
-		currentBatch: make([]*data.CapturedPacket, 0),
-		stats: Stats{
-			PacketsCaptured:  atomic.Uint64{},
-			PacketsMatched:   atomic.Uint64{},
-			PacketsForwarded: atomic.Uint64{},
-			PacketsDropped:   atomic.Uint64{},
-			BufferBytes:      atomic.Uint64{},
-		},
+		currentBatch:   make([]*data.CapturedPacket, 0),
+		statsCollector: stats.New(),
 	}
 
 	// Send empty batch
 	hunter.sendBatch()
 
 	// Verify no packets were forwarded
-	assert.Equal(t, uint64(0), hunter.stats.PacketsForwarded.Load())
+	assert.Equal(t, uint64(0), hunter.statsCollector.GetForwarded())
 }
 
 // TestSendBatch_WhenPaused tests that batches are not sent when paused
@@ -47,15 +41,9 @@ func TestSendBatch_WhenPaused(t *testing.T) {
 			BatchSize:  10,
 			BufferSize: 100,
 		},
+		statsCollector: stats.New(),
 		currentBatch: []*data.CapturedPacket{
 			{Data: []byte("test packet")},
-		},
-		stats: Stats{
-			PacketsCaptured:  atomic.Uint64{},
-			PacketsMatched:   atomic.Uint64{},
-			PacketsForwarded: atomic.Uint64{},
-			PacketsDropped:   atomic.Uint64{},
-			BufferBytes:      atomic.Uint64{},
 		},
 	}
 
@@ -67,7 +55,7 @@ func TestSendBatch_WhenPaused(t *testing.T) {
 
 	// Verify batch was not sent (still in currentBatch)
 	assert.Equal(t, 1, len(hunter.currentBatch))
-	assert.Equal(t, uint64(0), hunter.stats.PacketsForwarded.Load())
+	assert.Equal(t, uint64(0), hunter.statsCollector.GetForwarded())
 }
 
 // TestBatchSequenceIncrement tests that batch sequence increments
@@ -82,13 +70,7 @@ func TestBatchSequenceIncrement(t *testing.T) {
 		currentBatch: []*data.CapturedPacket{
 			{Data: []byte("test packet 1")},
 		},
-		stats: Stats{
-			PacketsCaptured:  atomic.Uint64{},
-			PacketsMatched:   atomic.Uint64{},
-			PacketsForwarded: atomic.Uint64{},
-			PacketsDropped:   atomic.Uint64{},
-			BufferBytes:      atomic.Uint64{},
-		},
+		statsCollector: stats.New(),
 	}
 
 	initialSeq := hunter.batchSequence
@@ -231,13 +213,18 @@ func TestBatchStatsIncluded(t *testing.T) {
 			BatchSize:  10,
 			BufferSize: 100,
 		},
-		stats: Stats{},
+		statsCollector: stats.New(),
 	}
 
 	// Set some stats
-	hunter.stats.PacketsCaptured.Store(1000)
-	hunter.stats.PacketsMatched.Store(950)
-	hunter.stats.PacketsDropped.Store(50)
+	hunter.statsCollector.IncrementCaptured()
+	for i := 0; i < 999; i++ {
+		hunter.statsCollector.IncrementCaptured()
+	}
+	for i := 0; i < 950; i++ {
+		hunter.statsCollector.IncrementMatched()
+	}
+	hunter.statsCollector.IncrementDropped(50)
 
 	// Create a batch manually (simulating what sendBatch does)
 	hunter.batchMu.Lock()
@@ -248,9 +235,9 @@ func TestBatchStatsIncluded(t *testing.T) {
 		TimestampNs: time.Now().UnixNano(),
 		Packets:     []*data.CapturedPacket{{Data: []byte("test")}},
 		Stats: &data.BatchStats{
-			TotalCaptured:   hunter.stats.PacketsCaptured.Load(),
-			FilteredMatched: hunter.stats.PacketsMatched.Load(),
-			Dropped:         hunter.stats.PacketsDropped.Load(),
+			TotalCaptured:   hunter.statsCollector.GetCaptured(),
+			FilteredMatched: hunter.statsCollector.GetMatched(),
+			Dropped:         hunter.statsCollector.GetDropped(),
 			BufferUsage:     0,
 		},
 	}
@@ -271,8 +258,8 @@ func TestBatchConcurrentAccess(t *testing.T) {
 			BatchSize:  1000,
 			BufferSize: 1000,
 		},
-		currentBatch: make([]*data.CapturedPacket, 0, 1000),
-		stats:        Stats{},
+		currentBatch:   make([]*data.CapturedPacket, 0, 1000),
+		statsCollector: stats.New(),
 	}
 
 	var wg sync.WaitGroup
@@ -319,7 +306,7 @@ func TestBatchReset(t *testing.T) {
 			{Data: []byte("packet 2")},
 			{Data: []byte("packet 3")},
 		},
-		stats: Stats{},
+		statsCollector: stats.New(),
 	}
 
 	// Manually simulate batch reset (as done in sendBatch)

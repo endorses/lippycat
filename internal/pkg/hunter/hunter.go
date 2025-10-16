@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,13 +12,13 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
-	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
+	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -70,9 +69,7 @@ type Hunter struct {
 	mgmtClient     management.ManagementServiceClient
 
 	// Packet capture
-	packetBuffer  *capture.PacketBuffer
-	captureCtx    context.Context
-	captureCancel context.CancelFunc
+	captureManager *huntercapture.Manager
 
 	// Packet streaming
 	stream   data.DataService_StreamPacketsClient
@@ -90,8 +87,8 @@ type Hunter struct {
 	paused           atomic.Bool  // Whether sending is paused
 
 	// Statistics
-	stats Stats
-	mu    sync.RWMutex
+	statsCollector *stats.Collector
+	mu             sync.RWMutex
 
 	// Filters
 	filters    []*management.Filter
@@ -117,16 +114,6 @@ type Hunter struct {
 	connWg     sync.WaitGroup
 }
 
-// Stats contains hunter statistics
-// All fields use atomic operations - no mutex required
-type Stats struct {
-	PacketsCaptured  atomic.Uint64
-	PacketsMatched   atomic.Uint64
-	PacketsForwarded atomic.Uint64
-	PacketsDropped   atomic.Uint64
-	BufferBytes      atomic.Uint64
-}
-
 // New creates a new hunter instance
 func New(config Config) (*Hunter, error) {
 	if config.ProcessorAddr == "" {
@@ -145,6 +132,10 @@ func New(config Config) (*Hunter, error) {
 		config.SendTimeout = 5 * time.Second // Default: 5s timeout
 	}
 
+	// Create main context for initialization (will be replaced in Start())
+	// This is just for the capture manager constructor
+	ctx := context.Background()
+
 	h := &Hunter{
 		config:               config,
 		currentBatch:         make([]*data.CapturedPacket, 0, config.BatchSize),
@@ -152,6 +143,12 @@ func New(config Config) (*Hunter, error) {
 		reconnectAttempts:    0,
 		reconnecting:         false,
 		batchQueue:           make(chan []*data.CapturedPacket, config.MaxBufferedBatches),
+		statsCollector:       stats.New(),
+		captureManager: huntercapture.New(huntercapture.Config{
+			Interfaces: config.Interfaces,
+			BaseFilter: config.BPFFilter,
+			BufferSize: config.BufferSize,
+		}, ctx),
 	}
 
 	return h, nil
@@ -197,15 +194,21 @@ func (h *Hunter) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Update capture manager's main context (now that we have the real one)
+	h.captureManager = huntercapture.New(huntercapture.Config{
+		Interfaces: h.config.Interfaces,
+		BaseFilter: h.config.BPFFilter,
+		BufferSize: h.config.BufferSize,
+	}, h.ctx)
+
 	// Start packet capture first (works independently of processor connection)
-	if err := h.startCapture(); err != nil {
+	h.mu.RLock()
+	filters := h.filters
+	h.mu.RUnlock()
+	if err := h.captureManager.Start(filters); err != nil {
 		return fmt.Errorf("failed to start capture: %w", err)
 	}
-	defer func() {
-		if h.captureCancel != nil {
-			h.captureCancel()
-		}
-	}()
+	defer h.captureManager.Stop()
 
 	// Start connection manager (handles initial connect and reconnections)
 	h.wg.Add(1)
@@ -464,112 +467,6 @@ func (h *Hunter) handleFlowControl(ctrl *data.StreamControl) {
 	}
 }
 
-// startCapture begins packet capture
-func (h *Hunter) startCapture() error {
-	// Build combined BPF filter from config and dynamic filters
-	bpfFilter := h.buildCombinedBPFFilter()
-
-	logger.Info("Starting packet capture",
-		"interfaces", h.config.Interfaces,
-		"filter", bpfFilter)
-
-	// Create capture context
-	h.captureCtx, h.captureCancel = context.WithCancel(h.ctx)
-
-	// Create packet buffer ONLY on first start
-	// Don't recreate on restart - forwardPackets() is already reading from it
-	// IMPORTANT: Use h.ctx (main context) not h.captureCtx, so buffer survives capture restarts
-	if h.packetBuffer == nil {
-		h.packetBuffer = capture.NewPacketBuffer(h.ctx, h.config.BufferSize)
-	}
-
-	// Create PCAP interfaces
-	var devices []pcaptypes.PcapInterface
-	for _, iface := range h.config.Interfaces {
-		for _, device := range strings.Split(iface, ",") {
-			devices = append(devices, pcaptypes.CreateLiveInterface(device))
-		}
-	}
-
-	// Start capture in background
-	go func() {
-		// Use simplified packet processor
-		processor := func(ch <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
-			for pkt := range ch {
-				// Forward to packet buffer
-				h.packetBuffer.Send(pkt)
-			}
-		}
-
-		capture.InitWithContext(h.captureCtx, devices, bpfFilter, processor, nil)
-	}()
-
-	logger.Info("Packet capture started", "interfaces", h.config.Interfaces)
-	return nil
-}
-
-// restartCapture stops and restarts packet capture with updated filters
-func (h *Hunter) restartCapture() error {
-	logger.Info("Restarting packet capture to apply filter changes")
-
-	// Cancel current capture
-	if h.captureCancel != nil {
-		h.captureCancel()
-	}
-
-	// Wait a moment for capture to clean up
-	time.Sleep(100 * time.Millisecond)
-
-	// Start new capture with updated filters
-	return h.startCapture()
-}
-
-// buildCombinedBPFFilter builds a combined BPF filter from config and dynamic filters
-func (h *Hunter) buildCombinedBPFFilter() string {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	var dynamicFilters []string
-
-	// Collect dynamic BPF filters (only enabled ones)
-	for _, filter := range h.filters {
-		if !filter.Enabled {
-			continue
-		}
-
-		// Only BPF type filters are applied directly
-		// Other filter types (SIP user, phone, IP, etc.) would need different handling
-		if filter.Type == management.FilterType_FILTER_BPF {
-			if filter.Pattern != "" {
-				dynamicFilters = append(dynamicFilters, fmt.Sprintf("(%s)", filter.Pattern))
-			}
-		}
-	}
-
-	// Build final filter
-	var finalFilter string
-
-	if len(dynamicFilters) == 0 {
-		// No dynamic filters - use base config filter only
-		finalFilter = h.config.BPFFilter
-	} else {
-		// Combine dynamic filters with OR (capture matching ANY dynamic filter)
-		dynamicPart := strings.Join(dynamicFilters, " or ")
-
-		if h.config.BPFFilter != "" {
-			// Combine with base filter using AND
-			// Logic: (dynamic filters) AND (base exclusions)
-			// Example: (port 443) and (not port 50051 and not port 50052)
-			finalFilter = fmt.Sprintf("(%s) and (%s)", dynamicPart, h.config.BPFFilter)
-		} else {
-			// No base filter - just use dynamic filters
-			finalFilter = dynamicPart
-		}
-	}
-
-	return finalFilter
-}
-
 // forwardPackets reads from packet buffer and forwards batches to processor
 func (h *Hunter) forwardPackets() {
 	defer h.connWg.Done()
@@ -588,15 +485,15 @@ func (h *Hunter) forwardPackets() {
 			h.sendBatch()
 			return
 
-		case pktInfo, ok := <-h.packetBuffer.Receive():
+		case pktInfo, ok := <-h.captureManager.GetPacketBuffer().Receive():
 			if !ok {
 				// Channel closed
 				h.sendBatch()
 				return
 			}
 
-			// Use atomic increment - no mutex needed
-			h.stats.PacketsCaptured.Add(1)
+			// Increment captured counter
+			h.statsCollector.IncrementCaptured()
 
 			// Apply custom packet processor if set (for VoIP buffering, etc.)
 			// The processor returns true if packet should be forwarded immediately
@@ -606,7 +503,7 @@ func (h *Hunter) forwardPackets() {
 					continue
 				}
 				// Packet should be forwarded - count it as matched
-				h.stats.PacketsMatched.Add(1)
+				h.statsCollector.IncrementMatched()
 			} else if h.voipFilter != nil {
 				// Fall back to simple VoIP filter if no custom processor
 				if !h.voipFilter.MatchPacket(pktInfo.Packet) {
@@ -614,7 +511,7 @@ func (h *Hunter) forwardPackets() {
 					continue
 				}
 				// Packet matched - count it
-				h.stats.PacketsMatched.Add(1)
+				h.statsCollector.IncrementMatched()
 			}
 
 			// Convert to protobuf packet
@@ -660,10 +557,10 @@ func (h *Hunter) sendBatch() {
 		TimestampNs: time.Now().UnixNano(),
 		Packets:     h.currentBatch,
 		Stats: &data.BatchStats{
-			TotalCaptured:   h.stats.PacketsCaptured.Load(),
-			FilteredMatched: h.stats.PacketsMatched.Load(),
-			Dropped:         h.stats.PacketsDropped.Load(),
-			BufferUsage:     uint32(len(h.packetBuffer.Receive()) * 100 / h.config.BufferSize), // #nosec G115 - safe: percentage calculation
+			TotalCaptured:   h.statsCollector.GetCaptured(),
+			FilteredMatched: h.statsCollector.GetMatched(),
+			Dropped:         h.statsCollector.GetDropped(),
+			BufferUsage:     uint32(len(h.captureManager.GetPacketBuffer().Receive()) * 100 / h.config.BufferSize), // #nosec G115 - safe: percentage calculation
 		},
 	}
 
@@ -696,8 +593,7 @@ func (h *Hunter) sendBatch() {
 	case err := <-sendDone:
 		if err != nil {
 			logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
-			// Use atomic add - no mutex needed
-			h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
+			h.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
 			return
 		}
 
@@ -705,15 +601,14 @@ func (h *Hunter) sendBatch() {
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets))
 
-		// Use atomic add - no mutex needed
-		h.stats.PacketsForwarded.Add(uint64(len(batch.Packets)))
+		h.statsCollector.IncrementForwarded(uint64(len(batch.Packets)))
 
 	case <-sendCtx.Done():
 		// Context cancelled or timed out
 		logger.Error("Batch send timeout - processor may be unresponsive",
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets))
-		h.stats.PacketsDropped.Add(uint64(len(batch.Packets)))
+		h.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
 		// Note: The spawned goroutine will continue until stream.Send returns or
 		// connCtx is cancelled (during reconnect). This is acceptable because:
 		// 1. The goroutine will be cleaned up when the stream is closed during reconnection
@@ -742,7 +637,7 @@ func (h *Hunter) batchSender() {
 
 			if stream == nil {
 				logger.Warn("Stream not available, dropping queued batch")
-				h.stats.PacketsDropped.Add(uint64(len(packets)))
+				h.statsCollector.IncrementDropped(uint64(len(packets)))
 				continue
 			}
 
@@ -756,12 +651,12 @@ func (h *Hunter) batchSender() {
 
 			if err := stream.Send(batch); err != nil {
 				logger.Error("Failed to send batch", "error", err)
-				h.stats.PacketsDropped.Add(uint64(len(packets)))
+				h.statsCollector.IncrementDropped(uint64(len(packets)))
 				continue
 			}
 
 			logger.Debug("Sent packet batch", "packets", len(packets))
-			h.stats.PacketsForwarded.Add(uint64(len(packets)))
+			h.statsCollector.IncrementForwarded(uint64(len(packets)))
 		}
 	}
 }
@@ -1104,7 +999,11 @@ func (h *Hunter) handleFilterUpdate(update *management.FilterUpdate) {
 	// Apply filters by restarting capture with new BPF filter
 	if filtersChanged {
 		logger.Info("Filters changed, restarting capture", "active_filters", len(h.filters))
-		if err := h.restartCapture(); err != nil {
+		// Get current filters for restart
+		h.mu.RLock()
+		currentFilters := h.filters
+		h.mu.RUnlock()
+		if err := h.captureManager.Restart(currentFilters); err != nil {
 			logger.Error("Failed to restart capture with new filters", "error", err)
 		}
 	}
@@ -1190,8 +1089,8 @@ func (h *Hunter) sendHeartbeats() {
 			h.mu.RUnlock()
 
 			// Collect stats for heartbeat
-			packetsCaptured := h.stats.PacketsCaptured.Load()
-			packetsForwarded := h.stats.PacketsForwarded.Load()
+			packetsCaptured := h.statsCollector.GetCaptured()
+			packetsForwarded := h.statsCollector.GetForwarded()
 
 			logger.Debug("Sending heartbeat",
 				"hunter_id", h.config.HunterID,
@@ -1204,14 +1103,7 @@ func (h *Hunter) sendHeartbeats() {
 				HunterId:    h.config.HunterID,
 				TimestampNs: time.Now().UnixNano(),
 				Status:      status,
-				Stats: &management.HunterStats{
-					PacketsCaptured:  packetsCaptured,
-					PacketsMatched:   h.stats.PacketsMatched.Load(),
-					PacketsForwarded: packetsForwarded,
-					PacketsDropped:   h.stats.PacketsDropped.Load(),
-					BufferBytes:      h.stats.BufferBytes.Load(),
-					ActiveFilters:    activeFilters,
-				},
+				Stats:       h.statsCollector.ToProto(activeFilters),
 			}
 
 			if err := stream.Send(hb); err != nil {
@@ -1242,8 +1134,8 @@ func (h *Hunter) calculateStatus() management.HunterStatus {
 	}
 
 	// Check buffer usage
-	if h.packetBuffer != nil {
-		bufferChan := h.packetBuffer.Receive()
+	if h.captureManager.GetPacketBuffer() != nil {
+		bufferChan := h.captureManager.GetPacketBuffer().Receive()
 		bufferUsage := len(bufferChan)
 		bufferCapacity := cap(bufferChan)
 
@@ -1258,9 +1150,9 @@ func (h *Hunter) calculateStatus() management.HunterStatus {
 	}
 
 	// Check for excessive drops
-	captured := h.stats.PacketsCaptured.Load()
+	captured := h.statsCollector.GetCaptured()
 	if captured > 0 {
-		dropped := h.stats.PacketsDropped.Load()
+		dropped := h.statsCollector.GetDropped()
 		dropRate := (dropped * 100) / captured
 		if dropRate > 10 {
 			return management.HunterStatus_STATUS_WARNING
@@ -1397,26 +1289,14 @@ func (h *Hunter) markDisconnected() {
 	logger.Warn("Connection lost, will attempt reconnection")
 }
 
-// GetStats returns current statistics snapshot
-func (h *Hunter) GetStats() Stats {
-	// No mutex needed - atomic loads are safe
-	// Return a snapshot with current values
-	return Stats{
-		PacketsCaptured:  atomic.Uint64{},
-		PacketsMatched:   atomic.Uint64{},
-		PacketsForwarded: atomic.Uint64{},
-		PacketsDropped:   atomic.Uint64{},
-		BufferBytes:      atomic.Uint64{},
-	}
+// GetStatsCollector returns the statistics collector
+func (h *Hunter) GetStatsCollector() *stats.Collector {
+	return h.statsCollector
 }
 
 // GetStatsValues returns current statistics as plain uint64 values
 func (h *Hunter) GetStatsValues() (captured, matched, forwarded, dropped, bufferBytes uint64) {
-	return h.stats.PacketsCaptured.Load(),
-		h.stats.PacketsMatched.Load(),
-		h.stats.PacketsForwarded.Load(),
-		h.stats.PacketsDropped.Load(),
-		h.stats.BufferBytes.Load()
+	return h.statsCollector.GetAll()
 }
 
 // getConnectionLocalIP returns the local IP address used for the gRPC connection

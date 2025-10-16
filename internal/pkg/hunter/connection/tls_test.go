@@ -1,4 +1,4 @@
-package hunter
+package connection
 
 import (
 	"crypto/tls"
@@ -58,7 +58,7 @@ func TestBuildTLSCredentials_Success(t *testing.T) {
 	certFile, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:   caFile,
 			TLSCertFile: certFile,
@@ -66,7 +66,7 @@ func TestBuildTLSCredentials_Success(t *testing.T) {
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}
@@ -82,13 +82,13 @@ func TestBuildTLSCredentials_Success(t *testing.T) {
 }
 
 func TestBuildTLSCredentials_WithoutCertificates(t *testing.T) {
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSSkipVerify: false,
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}
@@ -101,13 +101,13 @@ func TestBuildTLSCredentials_WithoutCertificates(t *testing.T) {
 }
 
 func TestBuildTLSCredentials_SkipVerify(t *testing.T) {
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSSkipVerify: true,
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}
@@ -121,13 +121,13 @@ func TestBuildTLSCredentials_WithCA(t *testing.T) {
 	_, _, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile: caFile,
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}
@@ -138,13 +138,13 @@ func TestBuildTLSCredentials_WithCA(t *testing.T) {
 }
 
 func TestBuildTLSCredentials_InvalidCAFile(t *testing.T) {
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile: "/nonexistent/ca.pem",
 		},
 	}
 
-	_, err := h.buildTLSCredentials()
+	_, err := m.buildTLSCredentials()
 	if err == nil {
 		t.Fatal("expected error when CA file doesn't exist, got nil")
 	}
@@ -157,13 +157,13 @@ func TestBuildTLSCredentials_InvalidCAData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile: invalidCA,
 		},
 	}
 
-	_, err := h.buildTLSCredentials()
+	_, err := m.buildTLSCredentials()
 	if err == nil {
 		t.Fatal("expected error when CA file contains invalid data, got nil")
 	}
@@ -173,7 +173,7 @@ func TestBuildTLSCredentials_WithClientCert(t *testing.T) {
 	certFile, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:   caFile,
 			TLSCertFile: certFile,
@@ -181,7 +181,7 @@ func TestBuildTLSCredentials_WithClientCert(t *testing.T) {
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestBuildTLSCredentials_InvalidClientCert(t *testing.T) {
 	_, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:   caFile,
 			TLSCertFile: "/nonexistent/cert.pem",
@@ -203,7 +203,7 @@ func TestBuildTLSCredentials_InvalidClientCert(t *testing.T) {
 		},
 	}
 
-	_, err := h.buildTLSCredentials()
+	_, err := m.buildTLSCredentials()
 	if err == nil {
 		t.Fatal("expected error when cert file doesn't exist, got nil")
 	}
@@ -213,7 +213,7 @@ func TestBuildTLSCredentials_CertWithoutKey(t *testing.T) {
 	certFile, _, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:   caFile,
 			TLSCertFile: certFile,
@@ -221,14 +221,10 @@ func TestBuildTLSCredentials_CertWithoutKey(t *testing.T) {
 		},
 	}
 
-	// Should succeed - partial cert/key is ignored
-	creds, err := h.buildTLSCredentials()
-	if err != nil {
-		t.Fatalf("buildTLSCredentials() failed: %v", err)
-	}
-
-	if creds == nil {
-		t.Fatal("buildTLSCredentials() returned nil credentials")
+	// Should fail - partial cert/key configuration is an error
+	_, err := m.buildTLSCredentials()
+	if err == nil {
+		t.Fatal("expected error when only cert file is provided, got nil")
 	}
 }
 
@@ -236,7 +232,7 @@ func TestBuildTLSCredentials_KeyWithoutCert(t *testing.T) {
 	_, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:   caFile,
 			TLSCertFile: "",
@@ -244,25 +240,21 @@ func TestBuildTLSCredentials_KeyWithoutCert(t *testing.T) {
 		},
 	}
 
-	// Should succeed - partial cert/key is ignored
-	creds, err := h.buildTLSCredentials()
-	if err != nil {
-		t.Fatalf("buildTLSCredentials() failed: %v", err)
-	}
-
-	if creds == nil {
-		t.Fatal("buildTLSCredentials() returned nil credentials")
+	// Should fail - partial cert/key configuration is an error
+	_, err := m.buildTLSCredentials()
+	if err == nil {
+		t.Fatal("expected error when only key file is provided, got nil")
 	}
 }
 
 func TestBuildTLSCredentials_ServerNameOverride(t *testing.T) {
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSServerNameOverride: "custom.example.com",
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}
@@ -312,7 +304,7 @@ func TestTLSCredentials_Integration(t *testing.T) {
 	defer cleanup()
 
 	// Test complete configuration
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:             caFile,
 			TLSCertFile:           certFile,
@@ -322,7 +314,7 @@ func TestTLSCredentials_Integration(t *testing.T) {
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() with full config failed: %v", err)
 	}
@@ -369,9 +361,9 @@ func TestBuildTLSCredentials_EnforcesTLS13(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &Hunter{config: tt.config}
+			m := &Manager{config: tt.config}
 
-			creds, err := h.buildTLSCredentials()
+			creds, err := m.buildTLSCredentials()
 			if err != nil {
 				t.Fatalf("buildTLSCredentials() failed: %v", err)
 			}
@@ -393,7 +385,7 @@ func TestBuildTLSCredentials_WithCertificatesEnforcesTLS13(t *testing.T) {
 	certFile, keyFile, caFile, cleanup := createTestCerts(t)
 	defer cleanup()
 
-	h := &Hunter{
+	m := &Manager{
 		config: Config{
 			TLSCAFile:   caFile,
 			TLSCertFile: certFile,
@@ -401,7 +393,7 @@ func TestBuildTLSCredentials_WithCertificatesEnforcesTLS13(t *testing.T) {
 		},
 	}
 
-	creds, err := h.buildTLSCredentials()
+	creds, err := m.buildTLSCredentials()
 	if err != nil {
 		t.Fatalf("buildTLSCredentials() failed: %v", err)
 	}

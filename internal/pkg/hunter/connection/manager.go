@@ -12,6 +12,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -57,15 +58,9 @@ type FilterManager interface {
 	Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient)
 }
 
-// PacketBuffer provides access to captured packets
-type PacketBuffer interface {
-	Len() int
-	Cap() int
-}
-
 // CaptureManager interface for capture management
 type CaptureManager interface {
-	GetPacketBuffer() PacketBuffer
+	GetPacketBuffer() *capture.PacketBuffer
 }
 
 // ForwardingManagerFactory creates forwarding managers for new connections
@@ -158,6 +153,11 @@ func (m *Manager) GetStream() data.DataService_StreamPacketsClient {
 	m.streamMu.Lock()
 	defer m.streamMu.Unlock()
 	return m.stream
+}
+
+// GetForwardingManager returns the current forwarding manager (nil if not connected)
+func (m *Manager) GetForwardingManager() *forwarding.Manager {
+	return m.forwardingManager
 }
 
 // MarkDisconnected marks the connection as disconnected and triggers reconnection

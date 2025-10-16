@@ -337,7 +337,9 @@ func TestCallAggregator_CallDuration(t *testing.T) {
 	callID := "test-call-123"
 
 	// INVITE
+	inviteTime := time.Now()
 	invitePacket := &data.CapturedPacket{
+		TimestampNs: inviteTime.UnixNano(),
 		Metadata: &data.PacketMetadata{
 			Sip: &data.SIPMetadata{
 				CallId:   callID,
@@ -356,7 +358,9 @@ func TestCallAggregator_CallDuration(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// BYE
+	byeTime := time.Now()
 	byePacket := &data.CapturedPacket{
+		TimestampNs: byeTime.UnixNano(),
 		Metadata: &data.PacketMetadata{
 			Sip: &data.SIPMetadata{
 				CallId: callID,

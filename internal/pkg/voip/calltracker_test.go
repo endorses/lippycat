@@ -108,7 +108,7 @@ func TestJanitorLoopCleanup(t *testing.T) {
 	oldCallID := "old-call-to-cleanup"
 	recentCallID := "recent-call-to-keep"
 
-	// Create an old call that should be cleaned up
+	// Create an old call
 	oldCall := &CallInfo{
 		CallID:      oldCallID,
 		State:       "NEW",
@@ -117,7 +117,7 @@ func TestJanitorLoopCleanup(t *testing.T) {
 		LinkType:    layers.LinkTypeEthernet,
 	}
 
-	// Create a recent call that should be kept
+	// Create a recent call
 	recentCall := &CallInfo{
 		CallID:      recentCallID,
 		State:       "NEW",
@@ -138,12 +138,12 @@ func TestJanitorLoopCleanup(t *testing.T) {
 	assert.Contains(t, tracker.callMap, recentCallID)
 	tracker.mu.RUnlock()
 
-	// Test cleanup directly
+	// Test cleanup directly - this is now a no-op since cleanup is handled by ring buffer
 	tracker.cleanupOldCalls()
 
-	// Verify old call was removed and recent call remains
+	// Verify both calls remain (cleanup is now handled by ring buffer, not time-based expiry)
 	tracker.mu.RLock()
-	assert.NotContains(t, tracker.callMap, oldCallID, "Old call should have been cleaned up")
+	assert.Contains(t, tracker.callMap, oldCallID, "Call should remain (cleanup is ring buffer based)")
 	assert.Contains(t, tracker.callMap, recentCallID, "Recent call should still exist")
 	tracker.mu.RUnlock()
 }

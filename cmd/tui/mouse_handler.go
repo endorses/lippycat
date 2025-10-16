@@ -28,6 +28,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// Handle mouse wheel scrolling - based on hover position, not focus
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelUp {
 		if m.uiState.Tabs.GetActive() == 0 {
+			// On capture tab - check if we're in calls view or packet list
+			if m.uiState.ViewMode == "calls" {
+				m.uiState.CallsView.SelectPrevious()
+				return m, nil
+			}
+
 			// On capture tab - determine which pane we're hovering over
 			minWidthForDetails := 160
 			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
@@ -60,6 +66,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonWheelDown {
 		if m.uiState.Tabs.GetActive() == 0 {
+			// On capture tab - check if we're in calls view or packet list
+			if m.uiState.ViewMode == "calls" {
+				m.uiState.CallsView.SelectNext()
+				return m, nil
+			}
+
 			// On capture tab - determine which pane we're hovering over
 			minWidthForDetails := 160
 			if m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails {
@@ -114,8 +126,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	// Packet list clicks (only on first tab - capture tab)
+	// Capture tab clicks (tab 0 - can be packet list or calls view)
 	if m.uiState.Tabs.GetActive() == 0 {
+		if m.uiState.ViewMode == "calls" {
+			// Forward to calls view
+			cmd := m.uiState.CallsView.Update(msg)
+			return m, cmd
+		}
 		return m.handlePacketListClick(msg, contentStartY, contentHeight)
 	}
 

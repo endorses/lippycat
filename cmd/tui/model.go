@@ -79,6 +79,7 @@ type SaveCompleteMsg struct {
 type Model struct {
 	// Data stores (thread-safe)
 	packetStore   *store.PacketStore
+	callStore     *store.CallStore
 	connectionMgr *store.ConnectionManager
 	uiState       *store.UIState
 
@@ -99,6 +100,9 @@ type Model struct {
 	lastDetailsPanelUpdate     time.Time     // Last time details panel was updated
 	detailsPanelUpdateInterval time.Duration // Minimum interval between updates (e.g., 50ms = 20 Hz)
 
+	// Offline call aggregation
+	offlineCallAggregator *OfflineCallAggregator // Call aggregator for offline PCAP analysis
+
 	// Test state
 	testToastCycle int // Cycles through toast types for testing
 }
@@ -114,6 +118,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 
 	// Initialize data stores
 	packetStore := store.NewPacketStore(bufferSize)
+	callStore := store.NewCallStore(1000) // Keep 1000 calls in history
 	connectionMgr := store.NewConnectionManager()
 	uiState := store.NewUIState(theme)
 
@@ -188,6 +193,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 
 	return Model{
 		packetStore:                packetStore,
+		callStore:                  callStore,
 		connectionMgr:              connectionMgr,
 		uiState:                    uiState,
 		statistics:                 uiState.Statistics, // Reference to same statistics

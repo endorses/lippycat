@@ -34,6 +34,10 @@ var (
 		},
 	}
 
+	// Offline call tracker for RTP-to-CallID mapping in offline mode
+	offlineCallTracker *OfflineCallTracker
+	offlineTrackerMu   sync.RWMutex
+
 	// String interning for protocol names (reduce memory footprint)
 	protocolStrings = map[string]string{
 		"TCP":       "TCP",
@@ -132,6 +136,30 @@ func isSIPBytes(payload []byte) bool {
 	}
 
 	return false
+}
+
+// SetOfflineCallTracker sets the offline call tracker for use during offline mode
+func SetOfflineCallTracker(tracker *OfflineCallTracker) {
+	offlineTrackerMu.Lock()
+	defer offlineTrackerMu.Unlock()
+	offlineCallTracker = tracker
+}
+
+// GetOfflineCallTracker returns the current offline call tracker
+func GetOfflineCallTracker() *OfflineCallTracker {
+	offlineTrackerMu.RLock()
+	defer offlineTrackerMu.RUnlock()
+	return offlineCallTracker
+}
+
+// ClearOfflineCallTracker clears the offline call tracker
+func ClearOfflineCallTracker() {
+	offlineTrackerMu.Lock()
+	defer offlineTrackerMu.Unlock()
+	if offlineCallTracker != nil {
+		offlineCallTracker.Clear()
+		offlineCallTracker = nil
+	}
 }
 
 // getPacketDisplay acquires a PacketDisplay from the pool
@@ -545,6 +573,15 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 			// Convert metadata to VoIPData for compatibility
 			display.VoIPData = metadataToVoIPData(detectionResult.Metadata)
 
+			// Feed SIP packet to offline tracker for RTP-to-CallID mapping
+			if tracker := GetOfflineCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
+				// Get payload for SDP parsing
+				if appLayer := pkt.ApplicationLayer(); appLayer != nil {
+					payload := string(appLayer.Payload())
+					tracker.ProcessSIPPacket(display.VoIPData.CallID, display.SrcIP, display.DstIP, payload)
+				}
+			}
+
 		case "RTP":
 			if codec, ok := detectionResult.Metadata["codec"].(string); ok {
 				display.Info = codec
@@ -553,6 +590,14 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 			}
 			// Convert metadata to VoIPData for compatibility
 			display.VoIPData = metadataToVoIPData(detectionResult.Metadata)
+
+			// Query offline tracker for CallID based on IP/port
+			if tracker := GetOfflineCallTracker(); tracker != nil && display.VoIPData != nil {
+				callID := tracker.GetCallIDForRTPPacket(display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
+				if callID != "" {
+					display.VoIPData.CallID = callID
+				}
+			}
 
 		case "DNS":
 			display.Info = "DNS Query/Response"

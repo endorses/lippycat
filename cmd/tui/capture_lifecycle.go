@@ -46,6 +46,15 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 		<-handle.done
 	}
 
+	// Stop offline call aggregator if switching away from offline mode
+	if m.offlineCallAggregator != nil {
+		m.offlineCallAggregator.Stop()
+		m.offlineCallAggregator = nil
+	}
+
+	// Clear offline call tracker
+	ClearOfflineCallTracker()
+
 	// Keep all remote clients connected regardless of mode
 	// Users can switch between modes without losing node connections
 
@@ -116,6 +125,14 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			case components.CaptureModeLive:
 				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, currentProgram, done)
 			case components.CaptureModeOffline:
+				// Initialize offline call aggregator for VoIP analysis
+				m.offlineCallAggregator = NewOfflineCallAggregator(currentProgram)
+				m.offlineCallAggregator.Start()
+
+				// Initialize offline call tracker for RTP-to-CallID mapping
+				offlineTracker := NewOfflineCallTracker()
+				SetOfflineCallTracker(offlineTracker)
+
 				go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram, done)
 			}
 

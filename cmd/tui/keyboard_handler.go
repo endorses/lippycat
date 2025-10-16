@@ -335,6 +335,13 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 				m.uiState.ViewMode = "calls"
 			} else {
 				m.uiState.ViewMode = "packets"
+				// Refresh packet list when switching to packets view
+				// This ensures packets that arrived while in calls view are displayed
+				if !m.packetStore.HasFilter() {
+					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+				} else {
+					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+				}
 			}
 		}
 	} else if m.uiState.Tabs.GetActive() == 1 {

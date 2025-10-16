@@ -208,7 +208,7 @@ func (h *UDPPacketHandler) handleRTPPacket(packet gopacket.Packet, layer *layers
 // forwardBufferedPackets forwards all buffered packets for a matched call
 func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
 	// Debug logging
-	f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if f != nil {
 		fmt.Fprintf(f, "[%s] forwardBufferedPackets: call_id=%s packet_count=%d\n",
 			time.Now().Format("15:04:05"), callID, len(packets))
@@ -247,14 +247,14 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 					}
 
 					// Debug
-					if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+					if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); f != nil {
 						fmt.Fprintf(f, "[%s]   Packet %d: RTP detected, payload_type=%d seq=%d ssrc=%d\n",
 							time.Now().Format("15:04:05"), i, payloadType, sequence, ssrc)
 						f.Close()
 					}
 				} else {
 					// Debug
-					if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+					if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); f != nil {
 						fmt.Fprintf(f, "[%s]   Packet %d: Not RTP (version=%d)\n",
 							time.Now().Format("15:04:05"), i, version)
 						f.Close()
@@ -262,7 +262,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 				}
 			} else {
 				// Debug
-				if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+				if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); f != nil {
 					fmt.Fprintf(f, "[%s]   Packet %d: UDP payload too short (%d bytes)\n",
 						time.Now().Format("15:04:05"), i, len(payload))
 					f.Close()
@@ -270,7 +270,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			}
 		} else {
 			// Debug
-			if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+			if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600); f != nil {
 				fmt.Fprintf(f, "[%s]   Packet %d: No UDP layer\n",
 					time.Now().Format("15:04:05"), i)
 				f.Close()
@@ -335,7 +335,7 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 			}
 
 			// Debug: log what we're sending
-			f, _ := os.OpenFile("/tmp/lippycat-hunter-rtp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			f, _ := os.OpenFile("/tmp/lippycat-hunter-rtp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 			if f != nil {
 				fmt.Fprintf(f, "[%s] forwardRTPPacket: call_id=%s has_sip=%v has_rtp=%v pt=%d seq=%d\n",
 					time.Now().Format("15:04:05"), callID, pbMetadata.Sip != nil, pbMetadata.Rtp != nil,

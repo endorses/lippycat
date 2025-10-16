@@ -940,7 +940,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 	sip := pkt.Metadata.Sip
 
 	// Debug: log entry
-	f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if f != nil {
 		fmt.Fprintf(f, "[%s] updateRTPQuality called: has_rtp=%v has_sip=%v call_id=%s\n",
 			time.Now().Format("15:04:05"), rtp != nil, sip != nil,
@@ -984,7 +984,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 		call.Codec = payloadTypeToCodec(uint8(rtp.PayloadType))
 
 		// Debug: write to file
-		f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 		if f != nil {
 			fmt.Fprintf(f, "[%s] First RTP packet for call %s: payload_type=%d codec=%s\n",
 				time.Now().Format("15:04:05"), callID, rtp.PayloadType, call.Codec)

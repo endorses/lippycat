@@ -15,6 +15,40 @@ import (
 	"github.com/endorses/lippycat/cmd/tui/themes"
 )
 
+// extractSIPURI extracts the SIP URI from a header value, removing display names and parameters
+// Example: "Alice <sip:alice@domain.com>;tag=123" -> "sip:alice@domain.com"
+// Example: "<sip:bob@example.org>;tag=456" -> "sip:bob@example.org"
+// Example: "sip:bob@example.org;tag=456" -> "sip:bob@example.org"
+func extractSIPURI(header string) string {
+	// Find the URI between < and > if present
+	start := strings.Index(header, "<")
+	if start != -1 {
+		end := strings.Index(header[start:], ">")
+		if end != -1 {
+			return header[start+1 : start+end]
+		}
+	}
+
+	// No angle brackets, find sip: or sips: prefix
+	sipStart := strings.Index(header, "sip:")
+	if sipStart == -1 {
+		sipStart = strings.Index(header, "sips:")
+		if sipStart == -1 {
+			return header // Return original if no SIP URI found
+		}
+	}
+
+	// Find the end of the URI (space, semicolon, or newline)
+	uri := header[sipStart:]
+	for i, ch := range uri {
+		if ch == ' ' || ch == ';' || ch == '\r' || ch == '\n' || ch == '>' {
+			return uri[:i]
+		}
+	}
+
+	return uri
+}
+
 // CallState represents the state of a VoIP call
 type CallState int
 
@@ -281,38 +315,40 @@ func (cv *CallsView) renderEmpty() string {
 // renderTable shows the calls table
 func (cv *CallsView) renderTable() string {
 	// Calculate responsive column widths based on available width
-	// Match packet list calculation for full-width mode (no split view)
-	// Border width: cv.width - 2
-	// Content width = (cv.width - 2) - 4 (padding) - 2 (border) = cv.width - 8
-	// Add 1 back for better spacing = cv.width - 7
-	availableWidth := cv.width - 7
+	// Match packet list calculation exactly
+	// Border width is adaptive: cv.width - 2 when details hidden, cv.width - 4 when details visible
+	// Content width = box_width - padding - border
+	// Details hidden: (cv.width - 2) - 4 (padding) - 2 (border) = cv.width - 8
+	// Details visible: (cv.width - 4) - 4 (padding) - 2 (border) = cv.width - 10
+	// We add 1 char back for better spacing
+	// CallsView is always full-width (no split view), so always use the "details hidden" calculation
+	availableWidth := cv.width - 6
 
 	// Define column width ranges
 	const (
 		startTimeMin = 12 // HH:MM:SS.ms
 		endTimeMin   = 12
-		fromMin      = 10
-		fromMax      = 20
-		toMin        = 10
-		toMax        = 20
-		stateMin     = 7
+		fromMin      = 15
+		fromMax      = 40
+		toMin        = 15
+		toMax        = 40
+		stateMin     = 10
 		durationMin  = 8
-		codecMin     = 10
-		qualityMin   = 10
+		codecMin     = 9
+		qualityMin   = 8
 		nodeMin      = 10
-		nodeMax      = 25
+		nodeMax      = 20
 		callIDMin    = 20
 		callIDMax    = 40
 	)
 
 	// Calculate total minimum width needed
-	minTotal := callIDMin + startTimeMin + endTimeMin + fromMin + toMin + stateMin + durationMin + codecMin + qualityMin + nodeMin + 9
+	minTotal := callIDMin + startTimeMin + endTimeMin + fromMin + toMin + stateMin + durationMin + codecMin + qualityMin + nodeMin // + 9
 
 	var callIDWidth, startTimeWidth, endTimeWidth, fromWidth, toWidth, stateWidth, durationWidth, codecWidth, qualityWidth, nodeWidth int
 
 	if availableWidth < minTotal {
-		// Very narrow terminal - use absolute minimums and truncate aggressively
-		callIDWidth = 15
+		// Very narrow terminal - use absolute minimums and give remaining to CallID
 		startTimeWidth = 8 // HH:MM:SS
 		endTimeWidth = 8
 		fromWidth = 8
@@ -322,9 +358,14 @@ func (cv *CallsView) renderTable() string {
 		codecWidth = 4
 		qualityWidth = 3
 		nodeWidth = 8
+		// Give all remaining space to CallID
+		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + 9
+		callIDWidth = availableWidth - fixedNarrow
+		if callIDWidth < 10 {
+			callIDWidth = 10 // Minimum for CallID
+		}
 	} else if availableWidth < minTotal+40 {
-		// Narrow terminal - use minimums
-		callIDWidth = callIDMin
+		// Narrow terminal - use minimums and give remaining to CallID
 		startTimeWidth = startTimeMin
 		endTimeWidth = endTimeMin
 		fromWidth = fromMin
@@ -334,6 +375,12 @@ func (cv *CallsView) renderTable() string {
 		codecWidth = codecMin
 		qualityWidth = qualityMin
 		nodeWidth = nodeMin
+		// Give all remaining space to CallID
+		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + 9
+		callIDWidth = availableWidth - fixedNarrow
+		if callIDWidth < callIDMin {
+			callIDWidth = callIDMin
+		}
 	} else {
 		// Wide terminal - distribute extra space
 		// Fixed columns that don't expand
@@ -344,28 +391,34 @@ func (cv *CallsView) renderTable() string {
 		codecWidth = codecMin
 		qualityWidth = qualityMin
 
-		// Calculate remaining space for flexible columns (CallID, From, To, Node)
-		fixedWidth := startTimeWidth + endTimeWidth + stateWidth + durationWidth + codecWidth + qualityWidth + 9
-		remaining := availableWidth - fixedWidth
+		// First, try to expand flexible columns up to their max
+		// Then give ALL remaining space to CallID (like Info column in PacketList)
+		callIDWidth = callIDMin
+		fromWidth = fromMin
+		toWidth = toMin
+		nodeWidth = nodeMin
 
-		// Distribute remaining space: 30% CallID, 20% From, 20% To, 30% Node
-		callIDWidth = callIDMin + int(float64(remaining-callIDMin-fromMin-toMin-nodeMin)*0.30)
-		fromWidth = fromMin + int(float64(remaining-callIDMin-fromMin-toMin-nodeMin)*0.20)
-		toWidth = toMin + int(float64(remaining-callIDMin-fromMin-toMin-nodeMin)*0.20)
-		nodeWidth = nodeMin + int(float64(remaining-callIDMin-fromMin-toMin-nodeMin)*0.30)
+		// Calculate what's left after fixed columns and minimums of flexible columns
+		fixedTotal := startTimeWidth + endTimeWidth + stateWidth + durationWidth + codecWidth + qualityWidth + 9
+		flexibleTotal := callIDWidth + fromWidth + toWidth + nodeWidth
+		remaining := availableWidth - fixedTotal - flexibleTotal
 
-		// Apply maximums
-		if callIDWidth > callIDMax {
-			callIDWidth = callIDMax
-		}
-		if fromWidth > fromMax {
-			fromWidth = fromMax
-		}
-		if toWidth > toMax {
-			toWidth = toMax
-		}
-		if nodeWidth > nodeMax {
-			nodeWidth = nodeMax
+		if remaining > 0 {
+			// Expand flexible columns toward max, but keep track of unused space
+			fromExtra := min(remaining, fromMax-fromMin)
+			remaining -= fromExtra
+			fromWidth += fromExtra
+
+			toExtra := min(remaining, toMax-toMin)
+			remaining -= toExtra
+			toWidth += toExtra
+
+			nodeExtra := min(remaining, nodeMax-nodeMin)
+			remaining -= nodeExtra
+			nodeWidth += nodeExtra
+
+			// Give ALL remaining space to CallID (no max limit)
+			callIDWidth += remaining
 		}
 	}
 
@@ -399,8 +452,8 @@ func (cv *CallsView) renderTable() string {
 		qualityWidth, truncateCallsView("Quality", qualityWidth),
 		nodeWidth, truncateCallsView("Node", nodeWidth))
 
-	// Calculate actual border width based on content
-	// Border (2) + Padding left/right (2+2) = 6
+	// Border width for full-width mode (no split view)
+	// Match packet list: width - 2 when details hidden
 	borderWidth := cv.width - 2
 
 	borderStyle := lipgloss.NewStyle().
@@ -453,10 +506,14 @@ func (cv *CallsView) renderTable() string {
 		// State string
 		state := call.State.String()
 
+		// Extract clean SIP URIs (remove display names and tag parameters)
+		fromURI := extractSIPURI(call.From)
+		toURI := extractSIPURI(call.To)
+
 		row := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 			callIDWidth, truncateCallsView(call.CallID, callIDWidth),
-			fromWidth, truncateCallsView(call.From, fromWidth),
-			toWidth, truncateCallsView(call.To, toWidth),
+			fromWidth, truncateCallsView(fromURI, fromWidth),
+			toWidth, truncateCallsView(toURI, toWidth),
 			startTimeWidth, truncateCallsView(startTime, startTimeWidth),
 			endTimeWidth, truncateCallsView(endTime, endTimeWidth),
 			stateWidth, truncateCallsView(state, stateWidth),
@@ -494,7 +551,7 @@ func (cv *CallsView) renderTable() string {
 		}
 	}
 
-	return borderStyle.Width(cv.width - 4).Height(contentHeight).Render(content.String())
+	return borderStyle.Height(contentHeight).Render(content.String())
 }
 
 // sanitizeCallString removes problematic characters that can break terminal rendering

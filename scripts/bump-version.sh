@@ -100,19 +100,25 @@ echo -e "${GREEN}✓${NC} Updated README.md status line and version badge"
 
 # Add changelog entry (user should edit this to add proper details)
 # Find the first version entry and add new version before it
-sed -i "/^## \\[/i\\
-## [$NEW_VERSION] - $DATE\\
-\\
-### Added\\
-- $CHANGELOG_MSG\\
-\\
-### Changed\\
-- TODO: Add detailed changelog entries\\
-\\
-### Fixed\\
-- TODO: Add fixed items\\
-\\
-" CHANGELOG.md
+# Use a temporary file to avoid sed regex complexity with brackets
+tmpfile=$(mktemp)
+awk -v version="$NEW_VERSION" -v date="$DATE" -v msg="$CHANGELOG_MSG" '
+/^## \[/ && !inserted {
+    print "## [" version "] - " date
+    print ""
+    print "### Added"
+    print "- " msg
+    print ""
+    print "### Changed"
+    print "- TODO: Add detailed changelog entries"
+    print ""
+    print "### Fixed"
+    print "- TODO: Add fixed items"
+    print ""
+    inserted = 1
+}
+{ print }
+' CHANGELOG.md > "$tmpfile" && mv "$tmpfile" CHANGELOG.md
 echo -e "${GREEN}✓${NC} Added changelog entry in CHANGELOG.md"
 
 echo ""

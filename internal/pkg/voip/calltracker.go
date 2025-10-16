@@ -31,6 +31,7 @@ type CallInfo struct {
 	State       string
 	Created     time.Time
 	LastUpdated time.Time
+	EndTime     *time.Time // Set when BYE/CANCEL is detected
 	LinkType    layers.LinkType
 	SIPWriter   *pcapgo.Writer
 	RTPWriter   *pcapgo.Writer
@@ -43,6 +44,10 @@ type CallInfo struct {
 type CallTracker struct {
 	callMap           map[string]*CallInfo
 	portToCallID      map[string]string // key = port, value = CallID
+	callRing          []string          // Ring buffer of CallIDs in chronological order
+	ringHead          int               // Current position in ring buffer
+	ringCount         int               // Number of calls in ring buffer
+	maxCalls          int               // Maximum calls to keep (ring buffer size)
 	mu                sync.RWMutex
 	janitorCtx        context.Context
 	janitorCancel     context.CancelFunc
@@ -66,9 +71,14 @@ func getTracker() *CallTracker {
 
 func NewCallTracker() *CallTracker {
 	ctx, cancel := context.WithCancel(context.Background())
+	maxCalls := DefaultMaxCalls
 	tracker := &CallTracker{
 		callMap:        make(map[string]*CallInfo),
 		portToCallID:   make(map[string]string),
+		callRing:       make([]string, maxCalls),
+		ringHead:       0,
+		ringCount:      0,
+		maxCalls:       maxCalls,
 		janitorCtx:     ctx,
 		janitorCancel:  cancel,
 		janitorStarted: false,
@@ -133,6 +143,18 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 
 	c.State = newState
 	c.LastUpdated = time.Now()
+
+	// If this is a call termination message (BYE or CANCEL), set EndTime
+	if newState == "BYE" || newState == "CANCEL" {
+		if c.EndTime == nil {
+			now := time.Now()
+			c.EndTime = &now
+			logger.Debug("Call terminated",
+				"call_id", SanitizeCallIDForLogging(c.CallID),
+				"method", newState,
+				"duration", now.Sub(c.Created))
+		}
+	}
 }
 
 func getCall(callID string) (*CallInfo, error) {
@@ -171,6 +193,36 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 				return nil
 			}
 		}
+
+		// Add to ring buffer (FIFO)
+		if tracker.ringCount >= tracker.maxCalls {
+			// Ring buffer is full, remove oldest call
+			oldestCallID := tracker.callRing[tracker.ringHead]
+			oldCall := tracker.callMap[oldestCallID]
+
+			// Clean up the old call's resources
+			if oldCall != nil {
+				if oldCall.sipFile != nil {
+					oldCall.sipFile.Close()
+				}
+				if oldCall.rtpFile != nil {
+					oldCall.rtpFile.Close()
+				}
+				// Remove from port mapping
+				for port, cid := range tracker.portToCallID {
+					if cid == oldestCallID {
+						delete(tracker.portToCallID, port)
+					}
+				}
+				delete(tracker.callMap, oldestCallID)
+			}
+		} else {
+			tracker.ringCount++
+		}
+
+		// Add new call to ring buffer
+		tracker.callRing[tracker.ringHead] = callID
+		tracker.ringHead = (tracker.ringHead + 1) % tracker.maxCalls
 		tracker.callMap[callID] = call
 	}
 	return call
@@ -339,35 +391,9 @@ func (ct *CallTracker) janitorLoop() {
 }
 
 func (ct *CallTracker) cleanupOldCalls() {
-	ct.mu.Lock()
-	defer ct.mu.Unlock()
-
-	expireAfter := ct.config.CallExpirationTime
-	now := time.Now()
-
-	for id, call := range ct.callMap {
-		if now.Sub(call.LastUpdated) > expireAfter {
-			logger.Info("Cleaning up expired call",
-				"call_id", SanitizeCallIDForLogging(id),
-				"last_updated", call.LastUpdated,
-				"age_seconds", int(now.Sub(call.LastUpdated).Seconds()))
-			if call.sipFile != nil {
-				if err := call.sipFile.Close(); err != nil {
-					logger.Error("Error closing SIP file for call",
-						"call_id", SanitizeCallIDForLogging(id),
-						"error", err)
-				}
-			}
-			if call.rtpFile != nil {
-				if err := call.rtpFile.Close(); err != nil {
-					logger.Error("Error closing RTP file for call",
-						"call_id", SanitizeCallIDForLogging(id),
-						"error", err)
-				}
-			}
-			delete(ct.callMap, id)
-		}
-	}
+	// Ring buffer now handles call cleanup (FIFO when buffer is full)
+	// This function is kept for potential future maintenance tasks
+	// but does not expire calls based on time anymore
 }
 
 // getCapturesDir returns a safe absolute path for the captures directory

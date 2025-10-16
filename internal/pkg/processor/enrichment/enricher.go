@@ -1,6 +1,8 @@
 package enrichment
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/google/gopacket"
@@ -192,7 +194,67 @@ func buildInfoString(protocol string, metadata map[string]interface{}) string {
 		}
 		return protocol
 
+	case "SIP":
+		// Check for SIP method (request) first
+		if method, ok := metadata["method"].(string); ok && method != "" {
+			return method
+		}
+		// Check for response code
+		if respCode, ok := metadata["response_code"].(uint32); ok && respCode > 0 {
+			return fmt.Sprintf("%d", respCode)
+		}
+		// Fallback to generic SIP
+		return "SIP"
+
+	case "RTP":
+		// Show codec for RTP packets
+		if payloadType, ok := metadata["payload_type"].(uint8); ok {
+			codec := payloadTypeToCodec(payloadType)
+			return codec
+		}
+		return "RTP stream"
+
 	default:
 		return protocol
 	}
+}
+
+// payloadTypeToCodec maps RTP payload types to codec names
+func payloadTypeToCodec(pt uint8) string {
+	// Static payload types (0-95)
+	staticCodecs := map[uint8]string{
+		0:  "PCMU",
+		3:  "GSM",
+		4:  "G723",
+		5:  "DVI4-8k",
+		6:  "DVI4-16k",
+		7:  "LPC",
+		8:  "PCMA",
+		9:  "G722",
+		10: "L16-stereo",
+		11: "L16-mono",
+		12: "QCELP",
+		13: "CN",
+		14: "MPA",
+		15: "G728",
+		16: "DVI4-11k",
+		17: "DVI4-22k",
+		18: "G729",
+		26: "JPEG",
+		31: "H261",
+		32: "MPV",
+		33: "MP2T",
+		34: "H263",
+	}
+
+	if codec, ok := staticCodecs[pt]; ok {
+		return codec
+	}
+
+	// Dynamic payload types (96-127)
+	if pt >= 96 && pt <= 127 {
+		return fmt.Sprintf("Dynamic-%d", pt)
+	}
+
+	return fmt.Sprintf("PT-%d", pt)
 }

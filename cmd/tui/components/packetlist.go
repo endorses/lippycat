@@ -781,13 +781,38 @@ func sanitizeString(s string) string {
 	return string(runes)
 }
 
+// isASCII checks if a string contains only ASCII characters
+// Fast check to enable optimized truncation path for packet data
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 {
+			return false
+		}
+	}
+	return true
+}
+
 // truncate truncates a string to fit width with ellipsis if needed
 // Uses lipgloss.Width() to properly handle Unicode and multi-width characters
-// Optimized with strings.Builder to reduce allocations
+// Optimized with ASCII fast-path since packet data is typically ASCII
 func truncate(s string, width int) string {
 	// Sanitize first to remove problematic characters
 	s = sanitizeString(s)
 
+	// Fast path for ASCII strings (common case for IPs, ports, protocols)
+	if isASCII(s) {
+		if len(s) <= width {
+			return s
+		}
+		if width <= 3 {
+			// Too narrow for ellipsis, just truncate
+			return s[:width]
+		}
+		// Truncate with ellipsis
+		return s[:width-3] + "..."
+	}
+
+	// Slow path for Unicode (rare in packet data)
 	currentWidth := lipgloss.Width(s)
 	if currentWidth <= width {
 		return s

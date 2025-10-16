@@ -54,9 +54,15 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 		}
 
-		// Update details panel if showing details
+		// Update details panel if showing details (throttled to reduce CPU usage)
+		// Only update at configured interval (default 20 Hz) to avoid rendering
+		// expensive hex dumps on every packet during high packet rate
 		if m.uiState.ShowDetails {
-			m.updateDetailsPanel()
+			now := time.Now()
+			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
+				m.updateDetailsPanel()
+				m.lastDetailsPanelUpdate = now
+			}
 		}
 	}
 	return m, nil
@@ -105,9 +111,15 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 		}
 
-		// Update details panel if showing details
+		// Update details panel if showing details (throttled to reduce CPU usage)
+		// Only update at configured interval (default 20 Hz) to avoid rendering
+		// expensive hex dumps on every packet during high packet rate
 		if m.uiState.ShowDetails {
-			m.updateDetailsPanel()
+			now := time.Now()
+			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
+				m.updateDetailsPanel()
+				m.lastDetailsPanelUpdate = now
+			}
 		}
 	}
 	return m, nil

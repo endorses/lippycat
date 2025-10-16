@@ -172,7 +172,6 @@ func (m Model) handleThemeToggle() (Model, tea.Cmd) {
 	// Update all components with new theme
 	m.uiState.PacketList.SetTheme(m.uiState.Theme)
 	m.uiState.DetailsPanel.SetTheme(m.uiState.Theme)
-	m.uiState.HexDumpView.SetTheme(m.uiState.Theme)
 	m.uiState.Header.SetTheme(m.uiState.Theme)
 	m.uiState.Footer.SetTheme(m.uiState.Theme)
 	m.uiState.Tabs.SetTheme(m.uiState.Theme)

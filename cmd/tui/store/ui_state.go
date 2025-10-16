@@ -16,7 +16,6 @@ type UIState struct {
 	// UI Components
 	PacketList       components.PacketList
 	DetailsPanel     components.DetailsPanel
-	HexDumpView      components.HexDumpView
 	Header           components.Header
 	Footer           components.Footer
 	Tabs             components.Tabs
@@ -63,9 +62,6 @@ func NewUIState(theme themes.Theme) *UIState {
 
 	detailsPanel := components.NewDetailsPanel()
 	detailsPanel.SetTheme(theme)
-
-	hexDumpView := components.NewHexDumpView()
-	hexDumpView.SetTheme(theme)
 
 	header := components.NewHeader()
 	header.SetTheme(theme)
@@ -129,7 +125,6 @@ func NewUIState(theme themes.Theme) *UIState {
 	return &UIState{
 		PacketList:       packetList,
 		DetailsPanel:     detailsPanel,
-		HexDumpView:      hexDumpView,
 		Header:           header,
 		Footer:           footer,
 		Tabs:             tabs,
@@ -168,7 +163,6 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.Theme = theme
 	ui.PacketList.SetTheme(theme)
 	ui.DetailsPanel.SetTheme(theme)
-	ui.HexDumpView.SetTheme(theme)
 	ui.Header.SetTheme(theme)
 	ui.Footer.SetTheme(theme)
 	ui.Tabs.SetTheme(theme)

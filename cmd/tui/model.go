@@ -95,6 +95,10 @@ type Model struct {
 	pendingSavePath string          // Path pending confirmation (for overwrite dialog)
 	captureLinkType layers.LinkType // Link type from capture source (for PCAP writing)
 
+	// Performance optimization - throttle details panel updates during high packet rate
+	lastDetailsPanelUpdate     time.Time     // Last time details panel was updated
+	detailsPanelUpdateInterval time.Duration // Minimum interval between updates (e.g., 50ms = 20 Hz)
+
 	// Test state
 	testToastCycle int // Cycles through toast types for testing
 }
@@ -183,14 +187,15 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 	}
 
 	return Model{
-		packetStore:   packetStore,
-		connectionMgr: connectionMgr,
-		uiState:       uiState,
-		statistics:    uiState.Statistics, // Reference to same statistics
-		interfaceName: initialInterfaceName,
-		bpfFilter:     bpfFilter,
-		captureMode:   initialMode,
-		nodesFilePath: nodesFilePath,
+		packetStore:                packetStore,
+		connectionMgr:              connectionMgr,
+		uiState:                    uiState,
+		statistics:                 uiState.Statistics, // Reference to same statistics
+		interfaceName:              initialInterfaceName,
+		bpfFilter:                  bpfFilter,
+		captureMode:                initialMode,
+		nodesFilePath:              nodesFilePath,
+		detailsPanelUpdateInterval: 50 * time.Millisecond, // 20 Hz throttle (imperceptible to user)
 	}
 }
 

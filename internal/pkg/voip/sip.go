@@ -5,9 +5,68 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/google/gopacket/layers"
 )
 
-func handleSipMessage(data []byte) bool {
+// extractUserFromSIPURI extracts the username from a SIP URI
+// Example: "Alice <sip:alice@domain.com>" -> "alice"
+// Example: "sip:bob@example.org" -> "bob"
+func extractUserFromSIPURI(uri string) string {
+	// Find "sip:" or "sips:" prefix
+	start := strings.Index(uri, "sip:")
+	if start == -1 {
+		start = strings.Index(uri, "sips:")
+		if start == -1 {
+			return ""
+		}
+		start += 5 // len("sips:")
+	} else {
+		start += 4 // len("sip:")
+	}
+
+	// Find the @ symbol
+	end := strings.Index(uri[start:], "@")
+	if end == -1 {
+		return ""
+	}
+
+	return uri[start : start+end]
+}
+
+// extractFullSIPURI extracts the full SIP URI from a header value
+// Example: "Alice <sip:alice@domain.com>;tag=123" -> "sip:alice@domain.com"
+// Example: "sip:bob@example.org" -> "sip:bob@example.org"
+func extractFullSIPURI(header string) string {
+	// Find the URI between < and > if present
+	start := strings.Index(header, "<")
+	if start != -1 {
+		end := strings.Index(header[start:], ">")
+		if end != -1 {
+			return header[start+1 : start+end]
+		}
+	}
+
+	// No angle brackets, find sip: or sips: prefix
+	sipStart := strings.Index(header, "sip:")
+	if sipStart == -1 {
+		sipStart = strings.Index(header, "sips:")
+		if sipStart == -1 {
+			return ""
+		}
+	}
+
+	// Find the end of the URI (space, semicolon, or newline)
+	uri := header[sipStart:]
+	for i, ch := range uri {
+		if ch == ' ' || ch == ';' || ch == '\r' || ch == '\n' || ch == '>' {
+			return uri[:i]
+		}
+	}
+
+	return uri
+}
+
+func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 	lines := bytes.Split(data, []byte("\n"))
 	if len(lines) == 0 {
 		return false
@@ -41,13 +100,20 @@ func handleSipMessage(data []byte) bool {
 					"source", "sip_processing")
 				return false
 			}
+
+			// Detect SIP method for state tracking
+			method := detectSipMethod(startLine)
+
+			// Update call state if call already exists
+			// Note: In hunter mode, calls should be created separately for local tracking
+			call, err := getCall(callID)
+			if err == nil {
+				call.SetCallInfoState(method)
+			}
+
+			// Extract RTP ports from SDP if present
 			bodyBytes := StringToBytes(body)
 			if BytesContains(bodyBytes, []byte("m=audio")) {
-				method := detectSipMethod(startLine)
-				call, err := getCall(callID)
-				if err == nil {
-					call.SetCallInfoState(method)
-				}
 				ExtractPortFromSdp(body, callID)
 			}
 		}
@@ -61,6 +127,41 @@ func detectSipMethod(line string) string {
 
 	// Use SIMD-optimized method matching if available
 	return SIPMethodMatchSIMD(lineBytes)
+}
+
+// extractSipResponseCode extracts the response code from a SIP response message.
+// Returns 0 if this is not a response or if the response code cannot be parsed.
+// Example: "SIP/2.0 200 OK" returns 200
+func extractSipResponseCode(payload []byte) uint32 {
+	// SIP responses start with "SIP/2.0 <code>"
+	// Minimum: "SIP/2.0 100" = 12 bytes
+	if len(payload) < 12 {
+		return 0
+	}
+
+	// Check if this is a SIP response (starts with "SIP/2.0 ")
+	if !BytesHasPrefixString(payload, "SIP/2.0 ") {
+		return 0
+	}
+
+	// Extract the status code (3 digits after "SIP/2.0 ")
+	// Format: "SIP/2.0 <code> <reason>"
+	codeStart := 8 // Length of "SIP/2.0 "
+	if len(payload) < codeStart+3 {
+		return 0
+	}
+
+	// Parse 3-digit response code
+	code := uint32(0)
+	for i := 0; i < 3; i++ {
+		digit := payload[codeStart+i]
+		if digit < '0' || digit > '9' {
+			return 0 // Invalid response code
+		}
+		code = code*10 + uint32(digit-'0')
+	}
+
+	return code
 }
 
 func isSipStartLine(line string) bool {

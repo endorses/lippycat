@@ -5,6 +5,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/cmd/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/remotecapture"
+	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/spf13/viper"
 )
 
@@ -42,6 +44,13 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 
 			// Add packet using PacketStore method
 			m.packetStore.AddPacket(packet)
+
+			// Process packet through offline call aggregator (offline mode only)
+			if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
+				// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
+				typesPacket := types.PacketDisplay(packet)
+				m.offlineCallAggregator.ProcessPacket(&typesPacket)
+			}
 
 			// Update statistics (lightweight)
 			m.updateStatistics(packet)
@@ -95,6 +104,13 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		// Add packet using PacketStore method
 		m.packetStore.AddPacket(packet)
 
+		// Process packet through offline call aggregator (offline mode only)
+		if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
+			// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
+			typesPacket := types.PacketDisplay(packet)
+			m.offlineCallAggregator.ProcessPacket(&typesPacket)
+		}
+
 		// Write to streaming save if active
 		if m.activeWriter != nil {
 			// WritePacket will apply filter internally if configured (best-effort)
@@ -127,9 +143,24 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 
 // handleCallUpdateMsg processes VoIP call state updates
 func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
-	// Handle VoIP call state updates
+	// Add or update calls in the call store (maintains history across processor restarts)
 	tuiCalls := make([]components.Call, len(msg.Calls))
 	for i, call := range msg.Calls {
+		// Debug logging to see what data we're receiving
+		logger.Debug("Processing call update",
+			"call_id", call.CallID,
+			"node_id", call.NodeID,
+			"hunters", call.Hunters,
+			"hunters_count", len(call.Hunters))
+
+		// Use hunter IDs as the node identifier (comma-separated if multiple hunters)
+		nodeID := call.NodeID // Default to processor ID if no hunters
+		if len(call.Hunters) > 0 {
+			nodeID = strings.Join(call.Hunters, ",")
+		} else {
+			logger.Warn("Call has no hunter IDs", "call_id", call.CallID, "node_id", call.NodeID)
+		}
+
 		tuiCalls[i] = components.Call{
 			CallID:      call.CallID,
 			From:        call.From,
@@ -143,10 +174,17 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 			PacketLoss:  call.PacketLoss,
 			Jitter:      call.Jitter,
 			MOS:         call.MOS,
-			NodeID:      call.NodeID,
+			NodeID:      nodeID,
 		}
 	}
-	m.uiState.CallsView.SetCalls(tuiCalls)
+
+	// Add/update calls in the store (doesn't replace entire list)
+	m.callStore.AddOrUpdateCalls(tuiCalls)
+
+	// Update the CallsView with all calls from the store
+	allCalls := m.callStore.GetCallsInOrder()
+	m.uiState.CallsView.SetCalls(allCalls)
+
 	return m, nil
 }
 

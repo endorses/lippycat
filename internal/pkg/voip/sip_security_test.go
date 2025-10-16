@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -133,7 +134,7 @@ a=sendrecv malformed`,
 		t.Run(tt.name, func(t *testing.T) {
 			// Test should not panic
 			assert.NotPanics(t, func() {
-				result := handleSipMessage([]byte(tt.sipMessage))
+				result := handleSipMessage([]byte(tt.sipMessage), layers.LinkTypeEthernet)
 				assert.Equal(t, tt.expectedResult, result, tt.description)
 			})
 		})
@@ -477,7 +478,7 @@ m=audio 5004 RTP/AVP 0`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := handleSipMessage([]byte(tt.sipMessage))
+			result := handleSipMessage([]byte(tt.sipMessage), layers.LinkTypeEthernet)
 			assert.Equal(t, tt.expectedResult, result, tt.description)
 		})
 	}

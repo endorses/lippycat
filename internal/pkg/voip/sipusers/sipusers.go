@@ -47,6 +47,18 @@ func DeleteMultipleSipUsers(usernames []string) {
 	}
 }
 
+func ClearAll() {
+	muSu.Lock()
+	defer muSu.Unlock()
+	sipUserMap = make(map[string]*SipUser)
+}
+
+func HasSurveiled() bool {
+	muSu.Lock()
+	defer muSu.Unlock()
+	return len(sipUserMap) > 0
+}
+
 func IsSurveiled(sipHeader string) bool {
 	muSu.Lock()
 	defer muSu.Unlock()

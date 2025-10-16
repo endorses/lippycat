@@ -23,9 +23,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
 
@@ -79,7 +81,7 @@ type Processor struct {
 	perCallPcapWriter *PcapWriterManager
 
 	// Protocol aggregators
-	callAggregator *CallAggregator // VoIP call state aggregation
+	callAggregator *voip.CallAggregator // VoIP call state aggregation
 
 	// Control
 	ctx    context.Context
@@ -99,7 +101,7 @@ func New(config Config) (*Processor, error) {
 
 	p := &Processor{
 		config:         config,
-		callAggregator: NewCallAggregator(), // Initialize call aggregator
+		callAggregator: voip.NewCallAggregator(), // Initialize call aggregator
 	}
 
 	// Initialize protocol detector and enricher if enabled
@@ -195,6 +197,16 @@ func (p *Processor) Start(ctx context.Context) error {
 	// Create gRPC server with TLS if configured
 	serverOpts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(constants.MaxGRPCMessageSize),
+		// Configure server-side keepalive enforcement
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second, // Minimum time between client pings
+			PermitWithoutStream: true,            // Allow pings without active streams
+		}),
+		// Configure server keepalive parameters
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    20 * time.Second, // Send ping if no activity for 20s
+			Timeout: 3 * time.Second,  // Wait 3s for ping ack before closing connection
+		}),
 	}
 
 	// Check for production mode (via environment variable)

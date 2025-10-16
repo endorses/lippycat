@@ -25,6 +25,7 @@ type CallMetadata struct {
 	PAssertedIdentity string
 	CallID            string
 	Method            string
+	ResponseCode      uint32 // SIP response code (e.g., 200, 180, 486)
 	SDPBody           string // For RTP port extraction
 }
 

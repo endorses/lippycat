@@ -33,7 +33,7 @@ type ProtocolSelector struct {
 func NewProtocolSelector() ProtocolSelector {
 	protocols := []Protocol{
 		{Name: "All", BPFFilter: "", Description: "Show all protocols", Icon: "🌐"},
-		{Name: "VoIP (SIP/RTP)", BPFFilter: "port 5060 or (udp and portrange 10000-20000)", Description: "SIP signaling and RTP media", Icon: "📞"},
+		{Name: "VoIP (SIP/RTP)", BPFFilter: "has:voip", Description: "SIP signaling and RTP media", Icon: "📞"},
 		{Name: "DNS", BPFFilter: "port 53", Description: "Domain name system", Icon: "🔍"},
 		{Name: "HTTP", BPFFilter: "port 80 or port 8080", Description: "Hypertext transfer protocol", Icon: "🌐"},
 		{Name: "HTTPS/TLS", BPFFilter: "port 443", Description: "Encrypted HTTP traffic", Icon: "🔒"},

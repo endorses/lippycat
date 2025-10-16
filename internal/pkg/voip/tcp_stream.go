@@ -3,6 +3,7 @@ package voip
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"runtime/debug"
@@ -188,7 +189,7 @@ func (s *SIPStream) processSingle() {
 	// Read and buffer the complete SIP message
 	sipMessage, err := s.readCompleteSipMessage()
 	if err != nil {
-		if err != io.EOF {
+		if !errors.Is(err, io.EOF) {
 			logger.Error("Error reading complete SIP message", "error", err)
 		}
 		return
@@ -228,7 +229,7 @@ func (s *SIPStream) processBatched(batchSize int) {
 
 		sipMessage, err := s.readCompleteSipMessage()
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				logger.Error("Error reading SIP message in batch", "error", err)
 			}
 			break

@@ -64,6 +64,10 @@ type Manager struct {
 	currentBatch  []*data.CapturedPacket
 	batchSequence uint64
 
+	// Batch sending (async)
+	batchQueue chan *data.PacketBatch
+	senderWg   sync.WaitGroup // tracks batch sender goroutine
+
 	// Flow control
 	flowControlState atomic.Int32 // FlowControl enum value
 	paused           atomic.Bool  // Whether sending is paused
@@ -82,13 +86,20 @@ type Manager struct {
 
 // New creates a new forwarding manager
 func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context) *Manager {
-	return &Manager{
+	m := &Manager{
 		config:           config,
 		currentBatch:     make([]*data.CapturedPacket, 0, config.BatchSize),
 		statsCollector:   statsCollector,
 		packetBufferProv: packetBufferProv,
 		connCtx:          connCtx,
+		batchQueue:       make(chan *data.PacketBatch, 10), // Buffer up to 10 batches
 	}
+
+	// Start async batch sender goroutine
+	m.senderWg.Add(1)
+	go m.batchSender()
+
+	return m
 }
 
 // SetStream sets the active data stream for forwarding
@@ -223,7 +234,7 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 	}
 }
 
-// SendBatch sends the current batch to processor
+// SendBatch queues the current batch for async sending
 func (m *Manager) SendBatch() {
 	// Check if paused by processor
 	if m.paused.Load() {
@@ -256,13 +267,53 @@ func (m *Manager) SendBatch() {
 	m.currentBatch = make([]*data.CapturedPacket, 0, m.config.BatchSize)
 	m.batchMu.Unlock()
 
-	// Send via stream
+	// Queue batch for async sending (non-blocking)
+	select {
+	case m.batchQueue <- batch:
+		// Successfully queued
+	default:
+		// Queue full - drop batch and log warning
+		logger.Warn("Batch queue full, dropping batch",
+			"sequence", batch.Sequence,
+			"packets", len(batch.Packets))
+		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+	}
+}
+
+// batchSender goroutine sends batches from queue asynchronously
+func (m *Manager) batchSender() {
+	defer m.senderWg.Done()
+
+	for {
+		select {
+		case <-m.connCtx.Done():
+			// Drain remaining batches on shutdown
+			for {
+				select {
+				case batch := <-m.batchQueue:
+					m.sendBatchToStream(batch)
+				default:
+					return
+				}
+			}
+
+		case batch := <-m.batchQueue:
+			m.sendBatchToStream(batch)
+		}
+	}
+}
+
+// sendBatchToStream sends a single batch via gRPC stream
+func (m *Manager) sendBatchToStream(batch *data.PacketBatch) {
+	// Get stream
 	m.streamMu.Lock()
 	stream := m.stream
 	m.streamMu.Unlock()
 
 	if stream == nil {
-		logger.Warn("Stream not available, dropping batch")
+		logger.Warn("Stream not available, dropping batch",
+			"sequence", batch.Sequence)
+		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
 		return
 	}
 

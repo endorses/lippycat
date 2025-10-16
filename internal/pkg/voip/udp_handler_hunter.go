@@ -4,6 +4,10 @@
 package voip
 
 import (
+	"fmt"
+	"os"
+	"time"
+
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -29,8 +33,9 @@ func NewUDPPacketHandler(forwarder PacketForwarder, bufferMgr *BufferManager) *U
 func (h *UDPPacketHandler) HandleUDPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
 	packet := pkt.Packet
 
-	// Handle SIP packets (port 5060)
-	if layer.SrcPort == SIPPort || layer.DstPort == SIPPort {
+	// Handle SIP packets (port 5060 or 5061)
+	if layer.SrcPort == SIPPort || layer.DstPort == SIPPort ||
+		layer.SrcPort == SIPPortTLS || layer.DstPort == SIPPortTLS {
 		return h.handleSIPPacket(packet, layer)
 	}
 
@@ -41,10 +46,14 @@ func (h *UDPPacketHandler) HandleUDPPacket(pkt capture.PacketInfo, layer *layers
 // handleSIPPacket processes a SIP packet with buffering
 func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers.UDP) bool {
 	payload := layer.Payload
-	if !handleSipMessage(payload) {
-		return false
+
+	// Get LinkType from the packet
+	linkType := layers.LinkTypeEthernet // Default
+	if linkLayer := packet.LinkLayer(); linkLayer != nil {
+		linkType = layers.LinkType(linkLayer.LayerType())
 	}
 
+	// Parse headers for metadata first
 	headers, body := parseSipHeaders(payload)
 	callID := headers["call-id"]
 	if callID == "" {
@@ -60,6 +69,20 @@ func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers
 		return false
 	}
 
+	// Create call locally for TUI display (before filter check)
+	// This ensures the TUI shows all calls, not just matched ones
+	call := GetOrCreateCall(callID, linkType)
+	if call != nil {
+		// Update call state based on SIP method
+		method := detectSipMethod(string(payload))
+		call.SetCallInfoState(method)
+	}
+
+	// Check if the SIP message matches our filter (for forwarding decision)
+	if !handleSipMessage(payload, linkType) {
+		return false
+	}
+
 	// Extract SIP metadata
 	metadata := &CallMetadata{
 		CallID:            callID,
@@ -67,11 +90,51 @@ func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers
 		To:                headers["to"],
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            detectSipMethod(string(payload)),
+		ResponseCode:      extractSipResponseCode(payload),
 		SDPBody:           body,
 	}
 
 	// Buffer the SIP packet
 	h.bufferMgr.AddSIPPacket(callID, packet, metadata)
+
+	// Check if this is a call termination message (BYE or CANCEL)
+	method := metadata.Method
+	if method == "BYE" || method == "CANCEL" {
+		// For termination messages, only forward if call is already tracked
+		if h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID) {
+			// Create protobuf metadata for termination message
+			pbMetadata := &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:            callID,
+					FromUser:          extractUserFromSIPURI(metadata.From),
+					ToUser:            extractUserFromSIPURI(metadata.To),
+					FromUri:           extractFullSIPURI(metadata.From),
+					ToUri:             extractFullSIPURI(metadata.To),
+					Method:            metadata.Method,
+					ResponseCode:      metadata.ResponseCode,
+					PAssertedIdentity: metadata.PAssertedIdentity,
+				},
+			}
+
+			// Forward termination message immediately
+			if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata); err != nil {
+				logger.Error("Failed to forward UDP call termination packet",
+					"call_id", SanitizeCallIDForLogging(callID),
+					"method", method,
+					"error", err)
+			} else {
+				logger.Info("Forwarded UDP call termination packet",
+					"call_id", SanitizeCallIDForLogging(callID),
+					"method", method)
+			}
+			return true
+		}
+		// Call not tracked, discard termination message
+		logger.Debug("UDP call termination message for untracked call, discarding",
+			"call_id", SanitizeCallIDForLogging(callID),
+			"method", method)
+		return false
+	}
 
 	// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 	bodyBytes := StringToBytes(body)
@@ -144,20 +207,93 @@ func (h *UDPPacketHandler) handleRTPPacket(packet gopacket.Packet, layer *layers
 
 // forwardBufferedPackets forwards all buffered packets for a matched call
 func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
-	// Create protobuf metadata for SIP
-	pbMetadata := &data.PacketMetadata{
-		Sip: &data.SIPMetadata{
-			CallId:            callID,
-			FromUser:          metadata.From,
-			ToUser:            metadata.To,
-			Method:            metadata.Method,
-			PAssertedIdentity: metadata.PAssertedIdentity,
-		},
+	// Debug logging
+	f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if f != nil {
+		fmt.Fprintf(f, "[%s] forwardBufferedPackets: call_id=%s packet_count=%d\n",
+			time.Now().Format("15:04:05"), callID, len(packets))
+		f.Close()
 	}
 
-	// Forward all buffered packets (SIP + RTP) with metadata
-	for _, pkt := range packets {
-		if err := h.forwarder.ForwardPacketWithMetadata(pkt, pbMetadata); err != nil {
+	// Forward all buffered packets (SIP + RTP) with appropriate metadata
+	for i, pkt := range packets {
+		// Check if this is an RTP packet by looking for UDP layer
+		var packetMetadata *data.PacketMetadata
+
+		if udpLayer := pkt.Layer(layers.LayerTypeUDP); udpLayer != nil {
+			udp := udpLayer.(*layers.UDP)
+			payload := udp.Payload
+
+			// Try to parse as RTP (minimum 12 bytes, version 2)
+			if len(payload) >= 12 {
+				version := (payload[0] >> 6) & 0x03
+				if version == 2 {
+					// This is an RTP packet - extract RTP metadata
+					payloadType := payload[1] & 0x7F
+					sequence := uint32(payload[2])<<8 | uint32(payload[3])
+					timestamp := uint32(payload[4])<<24 | uint32(payload[5])<<16 | uint32(payload[6])<<8 | uint32(payload[7])
+					ssrc := uint32(payload[8])<<24 | uint32(payload[9])<<16 | uint32(payload[10])<<8 | uint32(payload[11])
+
+					packetMetadata = &data.PacketMetadata{
+						Sip: &data.SIPMetadata{
+							CallId: callID,
+						},
+						Rtp: &data.RTPMetadata{
+							Ssrc:        ssrc,
+							PayloadType: uint32(payloadType),
+							Sequence:    sequence,
+							Timestamp:   timestamp,
+						},
+					}
+
+					// Debug
+					if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+						fmt.Fprintf(f, "[%s]   Packet %d: RTP detected, payload_type=%d seq=%d ssrc=%d\n",
+							time.Now().Format("15:04:05"), i, payloadType, sequence, ssrc)
+						f.Close()
+					}
+				} else {
+					// Debug
+					if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+						fmt.Fprintf(f, "[%s]   Packet %d: Not RTP (version=%d)\n",
+							time.Now().Format("15:04:05"), i, version)
+						f.Close()
+					}
+				}
+			} else {
+				// Debug
+				if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+					fmt.Fprintf(f, "[%s]   Packet %d: UDP payload too short (%d bytes)\n",
+						time.Now().Format("15:04:05"), i, len(payload))
+					f.Close()
+				}
+			}
+		} else {
+			// Debug
+			if f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
+				fmt.Fprintf(f, "[%s]   Packet %d: No UDP layer\n",
+					time.Now().Format("15:04:05"), i)
+				f.Close()
+			}
+		}
+
+		// If not RTP, use SIP metadata only
+		if packetMetadata == nil {
+			packetMetadata = &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:            callID,
+					FromUser:          extractUserFromSIPURI(metadata.From),
+					ToUser:            extractUserFromSIPURI(metadata.To),
+					FromUri:           extractFullSIPURI(metadata.From),
+					ToUri:             extractFullSIPURI(metadata.To),
+					Method:            metadata.Method,
+					ResponseCode:      metadata.ResponseCode,
+					PAssertedIdentity: metadata.PAssertedIdentity,
+				},
+			}
+		}
+
+		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata); err != nil {
 			logger.Error("Failed to forward buffered UDP packet",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
@@ -185,12 +321,26 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 			ssrc := uint32(payload[8])<<24 | uint32(payload[9])<<16 | uint32(payload[10])<<8 | uint32(payload[11])
 
 			pbMetadata = &data.PacketMetadata{
+				// Include SIP metadata with CallID so processor can associate RTP with call
+				Sip: &data.SIPMetadata{
+					CallId: callID,
+				},
+				// Include RTP metadata for quality calculations
 				Rtp: &data.RTPMetadata{
 					Ssrc:        ssrc,
 					PayloadType: uint32(payloadType),
 					Sequence:    sequence,
 					Timestamp:   timestamp,
 				},
+			}
+
+			// Debug: log what we're sending
+			f, _ := os.OpenFile("/tmp/lippycat-hunter-rtp.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if f != nil {
+				fmt.Fprintf(f, "[%s] forwardRTPPacket: call_id=%s has_sip=%v has_rtp=%v pt=%d seq=%d\n",
+					time.Now().Format("15:04:05"), callID, pbMetadata.Sip != nil, pbMetadata.Rtp != nil,
+					payloadType, sequence)
+				f.Close()
 			}
 		}
 	}

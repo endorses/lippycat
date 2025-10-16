@@ -14,7 +14,14 @@ var (
 )
 
 // containsUserInHeaders checks if any of the SIP headers contain a surveiled user
+// Returns true if there are NO filters configured (promiscuous mode) OR if a match is found
 func containsUserInHeaders(headers map[string]string) bool {
+	// If no SIP users are configured, accept all VoIP traffic (promiscuous/testing mode)
+	if !sipusers.HasSurveiled() {
+		return true
+	}
+
+	// Check if any header matches a surveiled user
 	for _, field := range []string{"from", "to", "p-asserted-identity"} {
 		val := headers[field]
 		if sipusers.IsSurveiled(val) {

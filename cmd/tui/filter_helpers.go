@@ -82,6 +82,30 @@ func (m *Model) parseSimpleFilter(filterStr string) filters.Filter {
 			value := parts[1]
 			return filters.NewVoIPFilter(field, value)
 		}
+	} else if strings.HasPrefix(strings.ToLower(filterStr), "has:") {
+		// Metadata filter: has:voip (checks for presence of metadata)
+		metadataType := strings.TrimPrefix(strings.ToLower(filterStr), "has:")
+		return filters.NewMetadataFilter(metadataType)
+	} else if strings.Contains(filterStr, ":") && !isBPFExpression(filterStr) {
+		// Field-specific filter: field:value
+		// Supported fields: protocol, src, dst, info
+		parts := strings.SplitN(filterStr, ":", 2)
+		if len(parts) == 2 {
+			field := strings.ToLower(strings.TrimSpace(parts[0]))
+			value := strings.TrimSpace(parts[1])
+
+			// Map field names to text filter fields
+			validFields := map[string]bool{
+				"protocol": true,
+				"src":      true,
+				"dst":      true,
+				"info":     true,
+			}
+
+			if validFields[field] {
+				return filters.NewTextFilter(value, []string{field})
+			}
+		}
 	} else if isBPFExpression(filterStr) {
 		// BPF filter: port 5060, host 192.168.1.1, tcp, udp, etc.
 		filter, err := filters.NewBPFFilter(filterStr)

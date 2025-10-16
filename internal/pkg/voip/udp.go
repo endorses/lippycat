@@ -58,7 +58,7 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 				return
 			}
 			payload := udp.Payload
-			if !handleSipMessage(payload) {
+			if !handleSipMessage(payload, pkt.LinkType) {
 				return
 			}
 			headers, body := parseSipHeaders(payload)
@@ -72,7 +72,7 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 						"source", "udp_processing")
 					return
 				}
-				call := GetOrCreateCall(callID, pkt.LinkType)
+				call, _ := getCall(callID) // Call already created by handleSipMessage
 				if call != nil {
 					// Record call tracking event
 					monitoring.RecordCallEvent(tracingCtx, callID, "sip_packet", map[string]interface{}{
@@ -117,7 +117,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				return
 			}
 			payload := udp.Payload
-			if !handleSipMessage(payload) {
+			if !handleSipMessage(payload, pkt.LinkType) {
 				return
 			}
 			headers, body := parseSipHeaders(payload)

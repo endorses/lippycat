@@ -12,6 +12,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+	"time"
 )
 
 // Config contains upstream connection configuration
@@ -64,6 +66,12 @@ func (m *Manager) Connect() error {
 	// Create gRPC connection with TLS if enabled
 	opts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constants.MaxGRPCMessageSize)),
+		// Configure keepalive to detect broken connections quickly
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second, // Send ping every 10s
+			Timeout:             3 * time.Second,  // Wait 3s for ping ack
+			PermitWithoutStream: true,             // Send pings even without active streams
+		}),
 	}
 
 	if m.config.TLSEnabled {

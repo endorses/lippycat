@@ -37,7 +37,9 @@ func (m Model) handleFocusRight() (Model, tea.Cmd) {
 func (m Model) handleMoveDown() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
-		if m.uiState.FocusedPane == "left" {
+		if m.uiState.ViewMode == "calls" {
+			m.uiState.CallsView.SelectNext()
+		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.CursorDown()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -59,7 +61,9 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 func (m Model) handleMoveUp() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
-		if m.uiState.FocusedPane == "left" {
+		if m.uiState.ViewMode == "calls" {
+			m.uiState.CallsView.SelectPrevious()
+		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.CursorUp()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -80,7 +84,9 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 // handleJumpToTop jumps to the top of the current list
 func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.FocusedPane == "left" {
+		if m.uiState.ViewMode == "calls" {
+			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyHome})
+		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.SetCursor(0)
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -96,7 +102,9 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 // handleJumpToBottom jumps to the bottom of the current list
 func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.FocusedPane == "left" {
+		if m.uiState.ViewMode == "calls" {
+			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyEnd})
+		} else if m.uiState.FocusedPane == "left" {
 			packets := m.uiState.PacketList.GetPackets()
 			if len(packets) > 0 {
 				m.uiState.PacketList.SetCursor(len(packets) - 1)
@@ -115,7 +123,9 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 // handlePageUp moves up one page in the current list
 func (m Model) handlePageUp() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.FocusedPane == "left" {
+		if m.uiState.ViewMode == "calls" {
+			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.PageUp()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {
@@ -131,7 +141,9 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 // handlePageDown moves down one page in the current list
 func (m Model) handlePageDown() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
-		if m.uiState.FocusedPane == "left" {
+		if m.uiState.ViewMode == "calls" {
+			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.PageDown()
 			m.updateDetailsPanel()
 		} else if m.uiState.FocusedPane == "right" {

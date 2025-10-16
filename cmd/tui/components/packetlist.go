@@ -560,9 +560,9 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	// Details hidden: (p.width - 2) - 4 (padding) - 2 (border) = p.width - 8
 	// Details visible: (p.width - 4) - 4 (padding) - 2 (border) = p.width - 10
 	// We add 1 char back for better spacing
-	availableWidth := p.width - 9
+	availableWidth := p.width - 8
 	if !p.detailsVisible { // Full-width mode (details hidden)
-		availableWidth = p.width - 7
+		availableWidth = p.width - 6
 	}
 
 	// Define minimum, preferred, and maximum widths

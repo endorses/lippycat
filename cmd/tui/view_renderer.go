@@ -77,8 +77,7 @@ func (m Model) View() string {
 func (m Model) renderCaptureTab(contentHeight int) string {
 	// Check if we should display calls view or packets view
 	if m.uiState.ViewMode == "calls" {
-		// Render calls view
-		m.uiState.CallsView.SetSize(m.uiState.Width, contentHeight)
+		// Render calls view (size is set in handleWindowSizeMsg)
 		return m.uiState.CallsView.View()
 	}
 

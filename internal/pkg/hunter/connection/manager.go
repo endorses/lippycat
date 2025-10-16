@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 // Config contains connection manager configuration
@@ -287,6 +288,12 @@ func (m *Manager) connectToProcessor() error {
 
 	opts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constants.MaxGRPCMessageSize)),
+		// Configure keepalive to detect broken connections quickly
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                10 * time.Second, // Send ping every 10s
+			Timeout:             3 * time.Second,  // Wait 3s for ping ack
+			PermitWithoutStream: true,             // Send pings even without active streams
+		}),
 	}
 
 	// Configure TLS or insecure credentials

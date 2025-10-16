@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
+	"github.com/endorses/lippycat/internal/pkg/hunter/filtering"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -71,6 +72,9 @@ type Hunter struct {
 	// Packet capture
 	captureManager *huntercapture.Manager
 
+	// Filter management
+	filterManager *filtering.Manager
+
 	// Packet streaming
 	stream   data.DataService_StreamPacketsClient
 	streamMu sync.Mutex
@@ -90,9 +94,8 @@ type Hunter struct {
 	statsCollector *stats.Collector
 	mu             sync.RWMutex
 
-	// Filters
-	filters    []*management.Filter
-	voipFilter *VoIPFilter // GPU-accelerated VoIP filter
+	// VoIP filtering (GPU-accelerated)
+	voipFilter *VoIPFilter
 
 	// Custom packet processing
 	packetProcessor PacketProcessor // Optional custom processor for VoIP buffering, etc.
@@ -136,6 +139,13 @@ func New(config Config) (*Hunter, error) {
 	// This is just for the capture manager constructor
 	ctx := context.Background()
 
+	// Create capture manager (will be recreated with proper context in Start())
+	captureManager := huntercapture.New(huntercapture.Config{
+		Interfaces: config.Interfaces,
+		BaseFilter: config.BPFFilter,
+		BufferSize: config.BufferSize,
+	}, ctx)
+
 	h := &Hunter{
 		config:               config,
 		currentBatch:         make([]*data.CapturedPacket, 0, config.BatchSize),
@@ -144,12 +154,11 @@ func New(config Config) (*Hunter, error) {
 		reconnecting:         false,
 		batchQueue:           make(chan []*data.CapturedPacket, config.MaxBufferedBatches),
 		statsCollector:       stats.New(),
-		captureManager: huntercapture.New(huntercapture.Config{
-			Interfaces: config.Interfaces,
-			BaseFilter: config.BPFFilter,
-			BufferSize: config.BufferSize,
-		}, ctx),
+		captureManager:       captureManager,
 	}
+
+	// Create filter manager with capture restarter interface
+	h.filterManager = filtering.New(config.HunterID, captureManager, h)
 
 	return h, nil
 }
@@ -202,9 +211,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 	}, h.ctx)
 
 	// Start packet capture first (works independently of processor connection)
-	h.mu.RLock()
-	filters := h.filters
-	h.mu.RUnlock()
+	filters := h.filterManager.GetFilters()
 	if err := h.captureManager.Start(filters); err != nil {
 		return fmt.Errorf("failed to start capture: %w", err)
 	}
@@ -354,10 +361,8 @@ func (h *Hunter) register() error {
 		"assigned_id", resp.AssignedId,
 		"initial_filters", len(resp.Filters))
 
-	// Store initial filters
-	h.mu.Lock()
-	h.filters = resp.Filters
-	h.mu.Unlock()
+	// Store initial filters in filter manager
+	h.filterManager.SetInitialFilters(resp.Filters)
 
 	return nil
 }
@@ -694,7 +699,7 @@ func (h *Hunter) handleStreamControl() {
 		ctrl, err := stream.Recv()
 		if err == io.EOF {
 			logger.Info("Stream closed by processor")
-			h.markDisconnected()
+			h.MarkDisconnected()
 			return
 		}
 		if err != nil {
@@ -705,7 +710,7 @@ func (h *Hunter) handleStreamControl() {
 				return
 			}
 			logger.Error("Stream control error", "error", err)
-			h.markDisconnected()
+			h.MarkDisconnected()
 			return
 		}
 
@@ -847,166 +852,7 @@ func (h *Hunter) cleanup() {
 // subscribeToFilters subscribes to filter updates from processor
 func (h *Hunter) subscribeToFilters() {
 	defer h.connWg.Done()
-
-	logger.Info("Subscribing to filter updates")
-
-	req := &management.FilterRequest{
-		HunterId: h.config.HunterID,
-	}
-
-	stream, err := h.mgmtClient.SubscribeFilters(h.ctx, req)
-	if err != nil {
-		logger.Error("Failed to subscribe to filters", "error", err)
-		return
-	}
-
-	logger.Info("Filter subscription established")
-
-	// Use a channel with timeout to prevent goroutine leak
-	updateCh := make(chan *management.FilterUpdate, constants.ErrorChannelBuffer)
-	errCh := make(chan error, constants.ErrorChannelBuffer)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error("Recovered from panic in filter subscription receiver", "panic", r)
-			}
-		}()
-		for {
-			// Check context before Recv
-			select {
-			case <-h.ctx.Done():
-				return
-			case <-h.connCtx.Done():
-				return
-			default:
-			}
-
-			update, err := stream.Recv()
-			if err != nil {
-				// Only send error if not shutting down
-				if h.ctx.Err() == nil && h.connCtx.Err() == nil {
-					errCh <- err
-				}
-				return
-			}
-			select {
-			case updateCh <- update:
-			case <-h.ctx.Done():
-				return
-			case <-h.connCtx.Done():
-				return
-			}
-		}
-	}()
-
-	// Read with periodic timeout check
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-h.connCtx.Done():
-			logger.Info("Filter subscription closed (context)")
-			return
-
-		case err := <-errCh:
-			if err == io.EOF {
-				logger.Info("Filter subscription closed by processor")
-			} else {
-				logger.Error("Filter subscription error", "error", err)
-			}
-			h.markDisconnected()
-			return
-
-		case update := <-updateCh:
-			h.handleFilterUpdate(update)
-
-		case <-ticker.C:
-			// Periodic keepalive check
-			if h.ctx.Err() != nil {
-				return
-			}
-		}
-	}
-}
-
-// handleFilterUpdate applies filter updates from processor
-func (h *Hunter) handleFilterUpdate(update *management.FilterUpdate) {
-	logger.Info("Received filter update",
-		"type", update.UpdateType,
-		"filter_id", update.Filter.Id,
-		"filter_type", update.Filter.Type)
-
-	h.mu.Lock()
-	filtersChanged := false
-
-	switch update.UpdateType {
-	case management.FilterUpdateType_UPDATE_ADD:
-		// Check if filter already exists (prevent duplicates)
-		exists := false
-		for _, f := range h.filters {
-			if f.Id == update.Filter.Id {
-				exists = true
-				logger.Debug("Filter already exists, skipping duplicate add",
-					"filter_id", update.Filter.Id)
-				break
-			}
-		}
-
-		if !exists {
-			// Add new filter
-			h.filters = append(h.filters, update.Filter)
-			filtersChanged = true
-			logger.Info("Filter added",
-				"filter_id", update.Filter.Id,
-				"pattern", update.Filter.Pattern)
-		}
-
-	case management.FilterUpdateType_UPDATE_MODIFY:
-		// Modify existing filter
-		for i, f := range h.filters {
-			if f.Id == update.Filter.Id {
-				h.filters[i] = update.Filter
-				filtersChanged = true
-				logger.Info("Filter modified",
-					"filter_id", update.Filter.Id,
-					"pattern", update.Filter.Pattern)
-				break
-			}
-		}
-		if !filtersChanged {
-			logger.Warn("Filter to modify not found", "filter_id", update.Filter.Id)
-		}
-
-	case management.FilterUpdateType_UPDATE_DELETE:
-		// Delete filter
-		for i, f := range h.filters {
-			if f.Id == update.Filter.Id {
-				h.filters = append(h.filters[:i], h.filters[i+1:]...)
-				filtersChanged = true
-				logger.Info("Filter deleted", "filter_id", update.Filter.Id)
-				break
-			}
-		}
-		if !filtersChanged {
-			logger.Warn("Filter to delete not found", "filter_id", update.Filter.Id)
-		}
-	}
-
-	h.mu.Unlock()
-
-	// Apply filters by restarting capture with new BPF filter
-	if filtersChanged {
-		logger.Info("Filters changed, restarting capture", "active_filters", len(h.filters))
-		// Get current filters for restart
-		h.mu.RLock()
-		currentFilters := h.filters
-		h.mu.RUnlock()
-		if err := h.captureManager.Restart(currentFilters); err != nil {
-			logger.Error("Failed to restart capture with new filters", "error", err)
-		}
-	}
+	h.filterManager.Subscribe(h.ctx, h.connCtx, h.mgmtClient)
 }
 
 // sendHeartbeats sends periodic heartbeat to processor
@@ -1075,7 +921,7 @@ func (h *Hunter) sendHeartbeats() {
 				return
 			}
 			logger.Error("Heartbeat stream error", "error", err)
-			h.markDisconnected()
+			h.MarkDisconnected()
 			return
 
 		case <-ticker.C:
@@ -1083,10 +929,8 @@ func (h *Hunter) sendHeartbeats() {
 			status := h.calculateStatus()
 
 			// Send heartbeat
-			// Get filter count with lock (safe: filter count won't exceed uint32 max)
-			h.mu.RLock()
-			activeFilters := uint32(len(h.filters)) // #nosec G115
-			h.mu.RUnlock()
+			// Get filter count (safe: filter count won't exceed uint32 max)
+			activeFilters := uint32(h.filterManager.GetFilterCount()) // #nosec G115
 
 			// Collect stats for heartbeat
 			packetsCaptured := h.statsCollector.GetCaptured()
@@ -1111,7 +955,7 @@ func (h *Hunter) sendHeartbeats() {
 					return
 				}
 				logger.Error("Failed to send heartbeat", "error", err)
-				h.markDisconnected()
+				h.MarkDisconnected()
 				return
 			}
 
@@ -1275,8 +1119,9 @@ func min(a, b int) int {
 	return b
 }
 
-// markDisconnected marks the hunter as disconnected and triggers reconnection
-func (h *Hunter) markDisconnected() {
+// MarkDisconnected marks the hunter as disconnected and triggers reconnection
+// This method is exported so the filter manager can call it when connection is lost
+func (h *Hunter) MarkDisconnected() {
 	h.reconnectMu.Lock()
 	defer h.reconnectMu.Unlock()
 

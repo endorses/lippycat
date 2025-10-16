@@ -399,49 +399,12 @@ func (m *Manager) startStreaming() error {
 	m.stream = stream
 	m.streamMu.Unlock()
 
-	// Start goroutine to receive flow control messages from processor
-	m.connWg.Add(1)
-	go m.receiveStreamControl(stream)
+	// NOTE: Do NOT start receiveStreamControl here - handleStreamControl is started
+	// in connectionManager() and will handle receiving flow control messages.
+	// Having two goroutines calling stream.Recv() causes race conditions and deadlocks.
 
 	logger.Info("Packet stream established with flow control")
 	return nil
-}
-
-// receiveStreamControl receives and processes flow control messages from processor
-func (m *Manager) receiveStreamControl(stream data.DataService_StreamPacketsClient) {
-	defer m.connWg.Done()
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error("Recovered from panic in receiveStreamControl", "panic", r)
-		}
-	}()
-
-	for {
-		select {
-		case <-m.connCtx.Done():
-			logger.Debug("receiveStreamControl: connection context cancelled, exiting")
-			return
-		case <-m.ctx.Done():
-			logger.Debug("receiveStreamControl: context cancelled, exiting")
-			return
-		default:
-			ctrl, err := stream.Recv()
-			if err != nil {
-				// Check if we're shutting down
-				if m.ctx.Err() != nil || m.connCtx.Err() != nil {
-					logger.Debug("receiveStreamControl: error during shutdown, exiting gracefully", "error", err)
-					return
-				}
-				logger.Error("Stream control receive error", "error", err)
-				return
-			}
-
-			// Process flow control signal
-			if m.flowControlHandler != nil {
-				m.flowControlHandler(ctrl)
-			}
-		}
-	}
 }
 
 // handleStreamControl receives flow control messages from processor

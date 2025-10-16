@@ -377,3 +377,244 @@ func TestManager_Count(t *testing.T) {
 	manager.Delete("filter-1")
 	assert.Equal(t, 1, manager.Count(), "should have 1 filter after deletion")
 }
+
+func TestManager_Update_ScopeChange_AllToSpecific(t *testing.T) {
+	manager := NewManager("", nil, nil, nil)
+
+	// Setup 3 hunters
+	channels := make(map[string]chan *management.FilterUpdate)
+	for i := 1; i <= 3; i++ {
+		hunterID := "hunter-" + string(rune('0'+i))
+		channels[hunterID] = manager.AddChannel(hunterID)
+	}
+
+	// Step 1: Add filter targeting ALL hunters (empty TargetHunters)
+	globalFilter := &management.Filter{
+		Id:            "filter-scope",
+		Pattern:       "192.168.*",
+		Type:          management.FilterType_FILTER_IP_ADDRESS,
+		Enabled:       true,
+		TargetHunters: []string{}, // All hunters
+	}
+
+	huntersUpdated, err := manager.Update(globalFilter)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(3), huntersUpdated, "should update all 3 hunters")
+
+	// Verify all hunters received the ADD update
+	for hunterID, filterChan := range channels {
+		select {
+		case receivedUpdate := <-filterChan:
+			assert.Equal(t, management.FilterUpdateType_UPDATE_ADD, receivedUpdate.UpdateType,
+				"hunter %s should receive ADD", hunterID)
+			assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+		case <-time.After(time.Second):
+			t.Fatalf("hunter %s did not receive initial ADD", hunterID)
+		}
+	}
+
+	// Step 2: Update filter to target ONLY hunter-1 (scope change)
+	specificFilter := &management.Filter{
+		Id:            "filter-scope",
+		Pattern:       "192.168.*",
+		Type:          management.FilterType_FILTER_IP_ADDRESS,
+		Enabled:       true,
+		TargetHunters: []string{"hunter-1"}, // Only hunter-1
+	}
+
+	huntersUpdated, err = manager.Update(specificFilter)
+	assert.NoError(t, err)
+	// Should send MODIFY to hunter-1 and DELETE to hunter-2, hunter-3
+	// Only MODIFY counts as "updated", DELETE is a separate operation
+	assert.Equal(t, uint32(1), huntersUpdated, "should update 1 hunter (hunter-1)")
+
+	// Step 3: Verify update delivery
+	// hunter-1 should receive MODIFY
+	select {
+	case receivedUpdate := <-channels["hunter-1"]:
+		assert.Equal(t, management.FilterUpdateType_UPDATE_MODIFY, receivedUpdate.UpdateType,
+			"hunter-1 should receive MODIFY")
+		assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+	case <-time.After(time.Second):
+		t.Fatal("hunter-1 did not receive MODIFY")
+	}
+
+	// hunter-2 and hunter-3 should receive DELETE
+	for _, hunterID := range []string{"hunter-2", "hunter-3"} {
+		select {
+		case receivedUpdate := <-channels[hunterID]:
+			assert.Equal(t, management.FilterUpdateType_UPDATE_DELETE, receivedUpdate.UpdateType,
+				"%s should receive DELETE to remove filter", hunterID)
+			assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not receive DELETE", hunterID)
+		}
+	}
+
+	// Step 4: Verify GetForHunter reflects new scope
+	hunter1Filters := manager.GetForHunter("hunter-1")
+	assert.Len(t, hunter1Filters, 1, "hunter-1 should have 1 filter")
+
+	hunter2Filters := manager.GetForHunter("hunter-2")
+	assert.Len(t, hunter2Filters, 0, "hunter-2 should have 0 filters")
+
+	hunter3Filters := manager.GetForHunter("hunter-3")
+	assert.Len(t, hunter3Filters, 0, "hunter-3 should have 0 filters")
+}
+
+func TestManager_Update_ScopeChange_SpecificToAll(t *testing.T) {
+	manager := NewManager("", nil, nil, nil)
+
+	// Setup 3 hunters
+	channels := make(map[string]chan *management.FilterUpdate)
+	for i := 1; i <= 3; i++ {
+		hunterID := "hunter-" + string(rune('0'+i))
+		channels[hunterID] = manager.AddChannel(hunterID)
+	}
+
+	// Step 1: Add filter targeting ONLY hunter-1
+	specificFilter := &management.Filter{
+		Id:            "filter-scope",
+		Pattern:       "tcp",
+		Type:          management.FilterType_FILTER_BPF,
+		Enabled:       true,
+		TargetHunters: []string{"hunter-1"},
+	}
+
+	huntersUpdated, err := manager.Update(specificFilter)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(1), huntersUpdated, "should update 1 hunter")
+
+	// Drain the channel
+	<-channels["hunter-1"]
+
+	// Step 2: Update filter to target ALL hunters (expand scope)
+	globalFilter := &management.Filter{
+		Id:            "filter-scope",
+		Pattern:       "tcp",
+		Type:          management.FilterType_FILTER_BPF,
+		Enabled:       true,
+		TargetHunters: []string{}, // All hunters
+	}
+
+	huntersUpdated, err = manager.Update(globalFilter)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(3), huntersUpdated, "should update all 3 hunters")
+
+	// Step 3: Verify all hunters received MODIFY (no DELETE sent when expanding)
+	for hunterID, filterChan := range channels {
+		select {
+		case receivedUpdate := <-filterChan:
+			assert.Equal(t, management.FilterUpdateType_UPDATE_MODIFY, receivedUpdate.UpdateType,
+				"%s should receive MODIFY", hunterID)
+			assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not receive MODIFY", hunterID)
+		}
+	}
+
+	// Step 4: Verify GetForHunter reflects new scope
+	for i := 1; i <= 3; i++ {
+		hunterID := "hunter-" + string(rune('0'+i))
+		filters := manager.GetForHunter(hunterID)
+		assert.Len(t, filters, 1, "%s should have 1 filter", hunterID)
+	}
+}
+
+func TestManager_Update_ScopeChange_SpecificToSpecific(t *testing.T) {
+	manager := NewManager("", nil, nil, nil)
+
+	// Setup 4 hunters
+	channels := make(map[string]chan *management.FilterUpdate)
+	for i := 1; i <= 4; i++ {
+		hunterID := "hunter-" + string(rune('0'+i))
+		channels[hunterID] = manager.AddChannel(hunterID)
+	}
+
+	// Step 1: Add filter targeting hunter-1 and hunter-2
+	filter := &management.Filter{
+		Id:            "filter-scope",
+		Pattern:       "udp",
+		Type:          management.FilterType_FILTER_BPF,
+		Enabled:       true,
+		TargetHunters: []string{"hunter-1", "hunter-2"},
+	}
+
+	huntersUpdated, err := manager.Update(filter)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(2), huntersUpdated, "should update 2 hunters")
+
+	// Drain channels
+	<-channels["hunter-1"]
+	<-channels["hunter-2"]
+
+	// Step 2: Update filter to target hunter-2 and hunter-3
+	// This should:
+	// - Send DELETE to hunter-1 (removed)
+	// - Send MODIFY to hunter-2 (still targeted)
+	// - Send MODIFY to hunter-3 (added)
+	// - Send nothing to hunter-4 (not targeted)
+	updatedFilter := &management.Filter{
+		Id:            "filter-scope",
+		Pattern:       "udp",
+		Type:          management.FilterType_FILTER_BPF,
+		Enabled:       true,
+		TargetHunters: []string{"hunter-2", "hunter-3"},
+	}
+
+	huntersUpdated, err = manager.Update(updatedFilter)
+	assert.NoError(t, err)
+	assert.Equal(t, uint32(2), huntersUpdated, "should update 2 hunters (hunter-2, hunter-3)")
+
+	// Step 3: Verify updates
+	// hunter-1 should receive DELETE
+	select {
+	case receivedUpdate := <-channels["hunter-1"]:
+		assert.Equal(t, management.FilterUpdateType_UPDATE_DELETE, receivedUpdate.UpdateType,
+			"hunter-1 should receive DELETE")
+		assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+	case <-time.After(time.Second):
+		t.Fatal("hunter-1 did not receive DELETE")
+	}
+
+	// hunter-2 should receive MODIFY
+	select {
+	case receivedUpdate := <-channels["hunter-2"]:
+		assert.Equal(t, management.FilterUpdateType_UPDATE_MODIFY, receivedUpdate.UpdateType,
+			"hunter-2 should receive MODIFY")
+		assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+	case <-time.After(time.Second):
+		t.Fatal("hunter-2 did not receive MODIFY")
+	}
+
+	// hunter-3 should receive MODIFY
+	select {
+	case receivedUpdate := <-channels["hunter-3"]:
+		assert.Equal(t, management.FilterUpdateType_UPDATE_MODIFY, receivedUpdate.UpdateType,
+			"hunter-3 should receive MODIFY")
+		assert.Equal(t, "filter-scope", receivedUpdate.Filter.Id)
+	case <-time.After(time.Second):
+		t.Fatal("hunter-3 did not receive MODIFY")
+	}
+
+	// hunter-4 should receive nothing
+	select {
+	case <-channels["hunter-4"]:
+		t.Fatal("hunter-4 should not receive any update")
+	case <-time.After(100 * time.Millisecond):
+		// Expected - no update
+	}
+
+	// Step 4: Verify GetForHunter reflects new scope
+	hunter1Filters := manager.GetForHunter("hunter-1")
+	assert.Len(t, hunter1Filters, 0, "hunter-1 should have 0 filters")
+
+	hunter2Filters := manager.GetForHunter("hunter-2")
+	assert.Len(t, hunter2Filters, 1, "hunter-2 should have 1 filter")
+
+	hunter3Filters := manager.GetForHunter("hunter-3")
+	assert.Len(t, hunter3Filters, 1, "hunter-3 should have 1 filter")
+
+	hunter4Filters := manager.GetForHunter("hunter-4")
+	assert.Len(t, hunter4Filters, 0, "hunter-4 should have 0 filters")
+}

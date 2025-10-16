@@ -115,8 +115,8 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 		logger.Info("Generated filter ID", "filter_id", filter.Id)
 	}
 
-	// Determine if this is add or modify
-	_, exists := m.filters[filter.Id]
+	// Determine if this is add or modify, and get old filter for scope comparison
+	oldFilter, exists := m.filters[filter.Id]
 	m.filters[filter.Id] = filter
 
 	updateType := management.FilterUpdateType_UPDATE_ADD
@@ -124,6 +124,19 @@ func (m *Manager) Update(filter *management.Filter) (uint32, error) {
 		updateType = management.FilterUpdateType_UPDATE_MODIFY
 	}
 	m.mu.Unlock()
+
+	// If modifying an existing filter, check if scope changed
+	// and send DELETE to hunters that are no longer targeted
+	if exists {
+		huntersToRemove := m.getHuntersToRemove(oldFilter, filter)
+		if len(huntersToRemove) > 0 {
+			deleteUpdate := &management.FilterUpdate{
+				UpdateType: management.FilterUpdateType_UPDATE_DELETE,
+				Filter:     filter, // Use new filter but with DELETE type
+			}
+			m.pushFilterUpdateToSpecificHunters(huntersToRemove, deleteUpdate)
+		}
+	}
 
 	// Push filter update to affected hunters
 	update := &management.FilterUpdate{
@@ -189,6 +202,91 @@ func (m *Manager) RemoveChannel(hunterID string) {
 		close(ch)
 	}
 	m.channelsMu.Unlock()
+}
+
+// getHuntersToRemove determines which hunters should receive DELETE when filter scope changes
+func (m *Manager) getHuntersToRemove(oldFilter, newFilter *management.Filter) []string {
+	m.channelsMu.RLock()
+	defer m.channelsMu.RUnlock()
+
+	// Build set of hunters that should receive the new filter
+	newTargets := make(map[string]bool)
+	if len(newFilter.TargetHunters) == 0 {
+		// New filter applies to all hunters - no one needs DELETE
+		return nil
+	}
+	for _, hunterID := range newFilter.TargetHunters {
+		newTargets[hunterID] = true
+	}
+
+	// Find hunters that were receiving the old filter but won't receive new one
+	var huntersToRemove []string
+
+	if len(oldFilter.TargetHunters) == 0 {
+		// Old filter applied to all hunters - remove from all except new targets
+		for hunterID := range m.channels {
+			if !newTargets[hunterID] {
+				huntersToRemove = append(huntersToRemove, hunterID)
+			}
+		}
+	} else {
+		// Old filter applied to specific hunters - remove from old targets not in new targets
+		for _, hunterID := range oldFilter.TargetHunters {
+			if !newTargets[hunterID] {
+				huntersToRemove = append(huntersToRemove, hunterID)
+			}
+		}
+	}
+
+	return huntersToRemove
+}
+
+// pushFilterUpdateToSpecificHunters sends filter update to a specific list of hunters
+func (m *Manager) pushFilterUpdateToSpecificHunters(hunterIDs []string, update *management.FilterUpdate) uint32 {
+	m.channelsMu.RLock()
+	defer m.channelsMu.RUnlock()
+
+	var huntersUpdated uint32
+	const sendTimeout = 2 * time.Second
+
+	// Helper to send with timeout and track failures
+	sendUpdate := func(hunterID string, ch chan *management.FilterUpdate) bool {
+		timer := time.NewTimer(sendTimeout)
+		defer timer.Stop()
+
+		select {
+		case ch <- update:
+			// Success - reset failure counter
+			if m.onFilterFailure != nil {
+				m.onFilterFailure(hunterID, false)
+			}
+			logger.Debug("Sent filter update", "hunter_id", hunterID, "filter_id", update.Filter.Id, "update_type", update.UpdateType)
+			return true
+
+		case <-timer.C:
+			// Timeout - track failure
+			if m.onFilterFailure != nil {
+				m.onFilterFailure(hunterID, true)
+			}
+
+			logger.Warn("Filter update send timeout",
+				"hunter_id", hunterID,
+				"filter_id", update.Filter.Id,
+				"update_type", update.UpdateType)
+			return false
+		}
+	}
+
+	// Send to specific hunters
+	for _, hunterID := range hunterIDs {
+		if ch, exists := m.channels[hunterID]; exists {
+			if sendUpdate(hunterID, ch) {
+				huntersUpdated++
+			}
+		}
+	}
+
+	return huntersUpdated
 }
 
 // pushFilterUpdate sends filter update to affected hunters

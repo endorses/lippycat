@@ -85,6 +85,16 @@ func (pb *PacketBuffer) Receive() <-chan PacketInfo {
 	return pb.ch
 }
 
+// Len returns the current number of buffered packets
+func (pb *PacketBuffer) Len() int {
+	return len(pb.ch)
+}
+
+// Cap returns the capacity of the packet buffer
+func (pb *PacketBuffer) Cap() int {
+	return cap(pb.ch)
+}
+
 func (pb *PacketBuffer) Close() {
 	// Set closed flag atomically before closing channel
 	if !atomic.CompareAndSwapInt32(&pb.closed, 0, 1) {

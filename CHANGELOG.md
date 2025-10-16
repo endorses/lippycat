@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2025-10-16
+
+### Added
+- **Enhanced TUI call view navigation**
+  - Added mouse click support for call selection
+  - Added keyboard shortcuts: home/end (g/G), page up/down for navigation
+  - Improved call sorting by timestamp and call ID
+
+### Changed
+- **TUI calls view improvements**
+  - Extract clean SIP URIs (remove display names and tag parameters)
+  - Improved column width allocation for better readability
+  - From/To columns now 15-40 chars (was 10-20)
+  - CallID column dynamically expands to use available space
+  - Consistent layout calculations with packet list component
+
+### Fixed
+- **Test suite stability**
+  - Fixed `TestCallAggregator_CallDuration` by adding packet timestamps
+  - Updated `TestJanitorLoopCleanup` for ring-buffer-based cleanup
+- **Security hardening**
+  - Changed debug log file permissions from 0644 to 0600
+  - Added error handling for file close operations
+  - Added validation for safe RTP integer conversions
+  - Reduced gosec security issues from 21 to 8 (remaining are in generated code)
+
 ## [0.2.7] - 2025-10-16
 
 ### Added

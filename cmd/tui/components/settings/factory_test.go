@@ -89,9 +89,6 @@ func TestModeFactory_CreateMode(t *testing.T) {
 }
 
 func TestModeFactory_SwitchMode(t *testing.T) {
-	theme := themes.Solarized()
-	factory := NewModeFactory(theme)
-
 	tests := []struct {
 		name              string
 		currentMode       CaptureMode
@@ -130,6 +127,10 @@ func TestModeFactory_SwitchMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Create a fresh factory for each test case to avoid shared state
+			theme := themes.Solarized()
+			factory := NewModeFactory(theme)
+
 			// Create initial mode
 			currentMode := factory.CreateMode(
 				tt.currentMode,

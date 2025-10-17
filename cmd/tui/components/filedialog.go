@@ -1012,9 +1012,10 @@ func (fd *FileDialog) getFooter() string {
 	switch fd.mode {
 	case ModeFilter:
 		if fd.config.Type == FileDialogTypeSave {
-			return "↑/↓: Navigate | ←/→: Change Dir | Tab: Edit Filename | Enter: Apply | Esc: Cancel"
+			return "Tab: Edit Filename | Enter: Apply | Esc: Cancel"
+			// return "↑/↓: Navigate | ←/→: Change Dir | Tab: Edit Filename | Enter: Apply | Esc: Cancel"
 		}
-		return "↑/↓: Navigate | ←/→: Change Dir | Enter: Apply | Esc: Cancel"
+		return "Enter: Apply | Esc: Cancel"
 
 	case ModeFilename:
 		return "Enter: Save | Tab/Esc: Cancel"
@@ -1024,9 +1025,9 @@ func (fd *FileDialog) getFooter() string {
 
 	case ModeNavigation:
 		if fd.config.Type == FileDialogTypeSave {
-			return "↑/↓/hjkl: Navigate | Enter: Open Dir | /: Filter | n: New Folder | d: Toggle Details | Tab: Edit Filename | q/Esc: Cancel"
+			return "/: Filter | n: New Folder | d: Details | Tab: Edit Filename | Esc: Cancel"
 		}
-		return "↑/↓/hjkl: Navigate | Enter: Select | /: Filter | n: New Folder | d: Toggle Details | q/Esc: Cancel"
+		return "/: Filter | n: New Folder | d: Details | Esc: Cancel"
 	}
 
 	return ""

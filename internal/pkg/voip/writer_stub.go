@@ -1,5 +1,5 @@
-//go:build hunter || processor || tui
-// +build hunter processor tui
+//go:build !(cli || all)
+// +build !cli,!all
 
 package voip
 

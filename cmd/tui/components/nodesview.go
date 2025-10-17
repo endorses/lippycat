@@ -329,11 +329,6 @@ func (n *NodesView) SelectNext() {
 	n.updateViewportContent()
 }
 
-// getGlobalHunterIndex finds the global index of a hunter by ID and processor address
-func (n *NodesView) getGlobalHunterIndex(hunterID string, processorAddr string) int {
-	return nodesview.GetGlobalHunterIndex(n.hunters, hunterID, processorAddr)
-}
-
 // SelectPrevious moves selection following tree structure in reverse: hunters ← processor ← previous processor
 func (n *NodesView) SelectPrevious() {
 	params := nodesview.NavigationParams{

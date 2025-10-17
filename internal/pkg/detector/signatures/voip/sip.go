@@ -285,13 +285,6 @@ func extractUserFromURI(uri string) string {
 	return uri[start : start+end]
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // extractSDPMediaPorts extracts RTP media ports from SDP (Session Description Protocol)
 // embedded in SIP messages
 func (s *SIPSignature) extractSDPMediaPorts(payload string) []uint16 {

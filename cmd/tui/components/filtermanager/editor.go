@@ -117,42 +117,6 @@ type RenderDeleteConfirmParams struct {
 	Theme             themes.Theme
 }
 
-// RenderDeleteConfirm renders the delete confirmation dialog content
-func RenderDeleteConfirm(params RenderDeleteConfirmParams) string {
-	var content strings.Builder
-
-	// Warning message
-	warningStyle := lipgloss.NewStyle().
-		Foreground(params.Theme.ErrorColor).
-		Bold(true)
-	content.WriteString(warningStyle.Render("⚠️  Delete Filter"))
-	content.WriteString("\n\n")
-
-	// Question
-	content.WriteString("Are you sure you want to delete this filter?\n\n")
-
-	// Filter details - build as single block for consistent alignment
-	var details strings.Builder
-	details.WriteString(fmt.Sprintf("Pattern: %s\n", params.FilterPattern))
-	details.WriteString(fmt.Sprintf("Type: %s", params.FilterType.String()))
-	if params.FilterDescription != "" {
-		details.WriteString(fmt.Sprintf("\nDescription: %s", params.FilterDescription))
-	}
-
-	detailStyle := lipgloss.NewStyle().
-		Foreground(params.Theme.Foreground)
-	content.WriteString(detailStyle.Render(details.String()))
-
-	// Warning emphasis
-	content.WriteString("\n\n")
-	emphasisStyle := lipgloss.NewStyle().
-		Foreground(params.Theme.ErrorColor).
-		Italic(true)
-	content.WriteString(emphasisStyle.Render("This action cannot be undone."))
-
-	return content.String()
-}
-
 // RenderHunterSelectionParams holds input parameters for rendering hunter selection
 type RenderHunterSelectionParams struct {
 	AvailableHunters []HunterSelectorItem

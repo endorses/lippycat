@@ -857,18 +857,27 @@ func (fd *FileDialog) renderFileList() string {
 		entry := fd.filteredFiles[i]
 		name := entry.Name()
 
-		// Get file info for size/perms (only if showing details)
-		var sizeStr string
+		// Get file info for mod time, numeric perms, size (only if showing details)
+		var modTimeStr string
 		var permStr string
+		var sizeStr string
 		if fd.showDetails {
 			info, err := entry.Info()
 			if err == nil {
+				// Format modification time (e.g., "2025-10-17 14:30")
+				modTimeStr = info.ModTime().Format("2006-01-02 15:04")
+
+				// Format permissions as numeric (e.g., "755")
+				mode := info.Mode()
+				perm := mode.Perm()
+				permStr = fmt.Sprintf("%03o", perm)
+
+				// Format file size
 				if entry.IsDir() {
-					sizeStr = "DIR   "
+					sizeStr = "DIR"
 				} else {
 					sizeStr = formatSize(info.Size())
 				}
-				permStr = info.Mode().String()
 			}
 		}
 
@@ -883,21 +892,22 @@ func (fd *FileDialog) renderFileList() string {
 
 		var line string
 		if fd.showDetails {
-			// With details
+			// With details: <mod time> <numeric perms> <size> <name>
+			// Use tab spacing between fields, right-align file size
 			if isSelected {
 				// Selected: don't apply any color styling to name, let highlight handle it
-				line = fmt.Sprintf("%s %s  %s %s", cursor, permStr, sizeStr, name)
+				line = fmt.Sprintf("%s %-16s\t%s\t%8s\t%s", cursor, modTimeStr, permStr, sizeStr, name)
 			} else if entry.IsDir() {
 				// Non-selected directory: blue
 				dirStyle := lipgloss.NewStyle().
 					Foreground(fd.theme.InfoColor).
 					Bold(true)
-				line = fmt.Sprintf("%s %s  %s %s", cursor, permStr, sizeStr, dirStyle.Render(name))
+				line = fmt.Sprintf("%s %-16s\t%s\t%8s\t%s", cursor, modTimeStr, permStr, sizeStr, dirStyle.Render(name))
 			} else {
 				// Non-selected file: grey
 				fileStyle := lipgloss.NewStyle().
 					Foreground(fd.theme.Foreground)
-				line = fmt.Sprintf("%s %s  %s %s", cursor, permStr, sizeStr, fileStyle.Render(name))
+				line = fmt.Sprintf("%s %-16s\t%s\t%8s\t%s", cursor, modTimeStr, permStr, sizeStr, fileStyle.Render(name))
 			}
 		} else {
 			// Without details - just name

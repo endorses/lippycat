@@ -416,7 +416,7 @@ Capture from both DMZ and internal networks:
 
 ```
 DMZ Hunters → DMZ Processor ────┐
-                                 ├→ Internal Processor → PCAP
+                                ├→ Internal Processor → PCAP
 Internal Hunters → Internal Processor
 ```
 

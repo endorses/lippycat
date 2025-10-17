@@ -148,6 +148,9 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 		wg.Add(1)
 		go func(pif pcaptypes.PcapInterface) {
 			defer wg.Done()
+			logger.Debug("Capture goroutine starting", "interface", pif.Name())
+			defer logger.Debug("Capture goroutine exiting", "interface", pif.Name())
+
 			err := pif.SetHandle()
 			if err != nil {
 				logger.Error("Error setting pcap handle",
@@ -163,6 +166,15 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 				return
 			}
 			defer handle.Close()
+
+			// Close handle when context is cancelled to unblock packet reads
+			// This ensures captureFromInterface exits promptly on context cancellation
+			go func() {
+				<-ctx.Done()
+				logger.Debug("Context cancelled, closing pcap handle", "interface", pif.Name())
+				handle.Close() // This will cause packetSource.Packets() channel to close
+			}()
+
 			captureFromInterface(ctx, pif, filter, packetBuffer)
 		}(iface)
 	}
@@ -223,6 +235,9 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 }
 
 func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer) {
+	logger.Debug("captureFromInterface starting", "interface", iface.Name())
+	defer logger.Debug("captureFromInterface exiting", "interface", iface.Name())
+
 	handle, err := iface.Handle()
 	if err != nil || handle == nil {
 		logger.Error("Unable to get interface handle",
@@ -250,9 +265,12 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	const batchThreshold = 100 // flush to atomic every N packets
 
 	go func() {
+		logger.Debug("Stats logging goroutine starting", "interface", iface.Name())
+		defer logger.Debug("Stats logging goroutine exiting", "interface", iface.Name())
 		for {
 			select {
 			case <-ctx.Done():
+				logger.Debug("Stats goroutine received context cancellation", "interface", iface.Name())
 				return
 			case <-ticker.C:
 				count := atomic.LoadInt64(&packetCount)
@@ -269,8 +287,23 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	packetCh := packetSource.Packets()
 
 	for {
+		// Check context cancellation with priority BEFORE attempting to read packets
+		// This ensures we exit promptly when Restart() is called
 		select {
 		case <-ctx.Done():
+			logger.Debug("Packet loop received context cancellation (priority check)", "interface", iface.Name())
+			// Flush remaining local count before exit
+			if localCount > 0 {
+				atomic.AddInt64(&packetCount, localCount)
+			}
+			return
+		default:
+		}
+
+		// Now read packets (non-blocking select to ensure ctx.Done() is checked frequently)
+		select {
+		case <-ctx.Done():
+			logger.Debug("Packet loop received context cancellation (select check)", "interface", iface.Name())
 			// Flush remaining local count before exit
 			if localCount > 0 {
 				atomic.AddInt64(&packetCount, localCount)
@@ -278,6 +311,7 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			return
 		case packet, ok := <-packetCh:
 			if !ok {
+				logger.Debug("Packet channel closed", "interface", iface.Name())
 				// Channel closed, flush and exit
 				if localCount > 0 {
 					atomic.AddInt64(&packetCount, localCount)

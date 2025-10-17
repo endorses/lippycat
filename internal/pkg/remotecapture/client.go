@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/gopacket"
@@ -61,8 +62,9 @@ type Client struct {
 	interfaces   map[string][]string
 
 	// Stream health monitoring
-	lastPacketTime time.Time
-	healthMu       sync.RWMutex
+	lastPacketTime   time.Time
+	healthMu         sync.RWMutex
+	healthMonRunning atomic.Bool // Track if health monitor is already running
 
 	// Call aggregation for VoIP monitoring
 	callsMu         sync.RWMutex
@@ -194,8 +196,11 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 		return fmt.Errorf("failed to subscribe to packets: %w", err)
 	}
 
-	// Start health monitor to detect stalled streams
-	go c.monitorStreamHealth()
+	// Start health monitor to detect stalled streams (only if not already running)
+	if !c.healthMonRunning.Load() {
+		c.healthMonRunning.Store(true)
+		go c.monitorStreamHealth()
+	}
 
 	// Start goroutine to receive packets
 	go func() {
@@ -266,6 +271,8 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 
 // monitorStreamHealth periodically checks if stream is still receiving data
 func (c *Client) monitorStreamHealth() {
+	defer c.healthMonRunning.Store(false) // Clear flag when monitor exits
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

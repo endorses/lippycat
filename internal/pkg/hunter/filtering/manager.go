@@ -75,6 +75,7 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 
 // Subscribe subscribes to filter updates from processor
 func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.ManagementServiceClient) {
+	logger.Debug("Subscribe() called", "hunter_id", m.hunterID)
 	logger.Info("Subscribing to filter updates")
 
 	req := &management.FilterRequest{
@@ -84,6 +85,7 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 	stream, err := mgmtClient.SubscribeFilters(ctx, req)
 	if err != nil {
 		logger.Error("Failed to subscribe to filters", "error", err)
+		m.disconnectMarker.MarkDisconnected()
 		return
 	}
 
@@ -134,24 +136,29 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 	for {
 		select {
 		case <-connCtx.Done():
+			logger.Debug("Filter subscription: connCtx cancelled", "hunter_id", m.hunterID, "error", connCtx.Err())
 			logger.Info("Filter subscription closed (context)")
 			return
 
 		case err := <-errCh:
 			if err == io.EOF {
-				logger.Info("Filter subscription closed by processor")
+				logger.Info("Filter subscription closed by processor (EOF)", "hunter_id", m.hunterID)
 			} else {
-				logger.Error("Filter subscription error", "error", err)
+				logger.Error("Filter subscription error", "hunter_id", m.hunterID, "error", err)
 			}
+			logger.Debug("Filter subscription: calling MarkDisconnected()", "hunter_id", m.hunterID)
 			m.disconnectMarker.MarkDisconnected()
 			return
 
 		case update := <-updateCh:
+			logger.Debug("Filter subscription: received update", "hunter_id", m.hunterID, "update_type", update.UpdateType)
 			m.handleUpdate(update)
 
 		case <-ticker.C:
 			// Periodic keepalive check
+			logger.Debug("Filter subscription: periodic check", "hunter_id", m.hunterID)
 			if ctx.Err() != nil {
+				logger.Debug("Filter subscription: main ctx cancelled", "hunter_id", m.hunterID, "error", ctx.Err())
 				return
 			}
 		}

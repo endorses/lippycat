@@ -22,13 +22,14 @@ import (
 
 // Config contains hunter configuration
 type Config struct {
-	ProcessorAddr string
-	HunterID      string
-	Interfaces    []string
-	BPFFilter     string
-	BufferSize    int
-	BatchSize     int
-	BatchTimeout  time.Duration
+	ProcessorAddr  string
+	HunterID       string
+	Interfaces     []string
+	BPFFilter      string
+	BufferSize     int
+	BatchSize      int
+	BatchTimeout   time.Duration
+	BatchQueueSize int // Number of batches to buffer for async sending (0 = default: 1000)
 	// Flow control settings
 	MaxBufferedBatches int           // Max batches to buffer before blocking (0 = unlimited)
 	SendTimeout        time.Duration // Timeout for sending batches (0 = no timeout)
@@ -148,12 +149,9 @@ func (h *Hunter) Start(ctx context.Context) error {
 		}
 	}()
 
-	// Update capture manager's main context (now that we have the real one)
-	h.captureManager = huntercapture.New(huntercapture.Config{
-		Interfaces: h.config.Interfaces,
-		BaseFilter: h.config.BPFFilter,
-		BufferSize: h.config.BufferSize,
-	}, h.ctx)
+	// Note: We use the capture manager created in New() constructor.
+	// It was created with a background context, but that's fine - it will create
+	// its own child context in Start() anyway. No need to recreate the manager here.
 
 	// Start packet capture first (works independently of processor connection)
 	filters := h.filterManager.GetFilters()
@@ -203,10 +201,11 @@ func (h *Hunter) Start(ctx context.Context) error {
 func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.DataService_StreamPacketsClient) *forwarding.Manager {
 	fwdMgr := forwarding.New(
 		forwarding.Config{
-			HunterID:     h.config.HunterID,
-			BatchSize:    h.config.BatchSize,
-			BatchTimeout: h.config.BatchTimeout,
-			BufferSize:   h.config.BufferSize,
+			HunterID:       h.config.HunterID,
+			BatchSize:      h.config.BatchSize,
+			BatchTimeout:   h.config.BatchTimeout,
+			BufferSize:     h.config.BufferSize,
+			BatchQueueSize: h.config.BatchQueueSize,
 		},
 		h.statsCollector,
 		h.captureManager,

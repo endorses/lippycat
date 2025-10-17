@@ -27,6 +27,7 @@ type Manager struct {
 	// Capture lifecycle
 	captureCtx    context.Context
 	captureCancel context.CancelFunc
+	captureDone   chan struct{}   // Signals when capture goroutines have exited
 	mainCtx       context.Context // Main hunter context (for buffer lifetime)
 }
 
@@ -79,8 +80,14 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 		}
 	}
 
+	// Create done channel to signal when capture goroutines exit
+	m.captureDone = make(chan struct{})
+	logger.Debug("Created new captureDone channel")
+
 	// Start capture in background
 	go func() {
+		defer close(m.captureDone) // Signal completion when all capture goroutines exit
+
 		// Use InitWithBuffer to avoid double-buffering. We pass m.packetBuffer
 		// directly so capture goroutines write to it, eliminating the intermediate
 		// copy that was causing packet drops. The forwarding manager reads directly
@@ -99,16 +106,39 @@ func (m *Manager) Start(dynamicFilters []*management.Filter) error {
 func (m *Manager) Restart(dynamicFilters []*management.Filter) error {
 	logger.Info("Restarting packet capture to apply filter changes")
 
-	// Cancel current capture
-	if m.captureCancel != nil {
-		m.captureCancel()
+	// Save references to old capture state BEFORE Start() overwrites them
+	oldCaptureDone := m.captureDone
+	oldCaptureCancel := m.captureCancel
+	logger.Debug("Saved old capture state", "has_done_channel", oldCaptureDone != nil, "has_cancel_func", oldCaptureCancel != nil)
+
+	// Start new capture first (this creates new context and cancel function)
+	// We do this BEFORE cancelling the old one so we don't lose the cancel function
+	logger.Debug("Starting new capture with updated filters")
+	if err := m.Start(dynamicFilters); err != nil {
+		return err
 	}
 
-	// Wait a moment for capture to clean up
-	time.Sleep(100 * time.Millisecond)
+	// Now cancel the OLD capture context (after Start() created the new one)
+	if oldCaptureCancel != nil {
+		logger.Debug("Cancelling old capture context")
+		oldCaptureCancel()
+	}
 
-	// Start new capture with updated filters
-	return m.Start(dynamicFilters)
+	// Wait for old capture goroutines to fully exit
+	// This prevents race conditions where both old and new goroutines write to the buffer
+	if oldCaptureDone != nil {
+		logger.Debug("Waiting for old capture goroutines to exit...")
+		select {
+		case <-oldCaptureDone:
+			logger.Debug("Old capture goroutines exited cleanly")
+		case <-time.After(5 * time.Second):
+			logger.Warn("Timeout waiting for old capture to stop, proceeding anyway")
+		}
+	} else {
+		logger.Debug("No old capture to wait for (first start)")
+	}
+
+	return nil
 }
 
 // Stop stops packet capture

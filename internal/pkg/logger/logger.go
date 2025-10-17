@@ -18,9 +18,24 @@ var (
 // Initialize sets up the structured logger
 func Initialize() {
 	once.Do(func() {
+		// Determine log level from environment variable
+		level := slog.LevelInfo
+		if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
+			switch logLevel {
+			case "DEBUG":
+				level = slog.LevelDebug
+			case "INFO":
+				level = slog.LevelInfo
+			case "WARN":
+				level = slog.LevelWarn
+			case "ERROR":
+				level = slog.LevelError
+			}
+		}
+
 		// Create a JSON handler for production use
 		handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level:     slog.LevelInfo,
+			Level:     level,
 			AddSource: false,
 		})
 		defaultLogger = slog.New(handler)

@@ -43,6 +43,7 @@ var (
 	bufferSize       int
 	batchSize        int
 	batchTimeout     int
+	batchQueueSize   int
 	promiscuous      bool
 	enableVoIPFilter bool
 	gpuBackend       string
@@ -71,6 +72,7 @@ func init() {
 	HuntCmd.PersistentFlags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
 	HuntCmd.PersistentFlags().IntVarP(&batchSize, "batch-size", "", 64, "Packets per batch sent to processor")
 	HuntCmd.PersistentFlags().IntVarP(&batchTimeout, "batch-timeout", "", 100, "Batch timeout in milliseconds")
+	HuntCmd.PersistentFlags().IntVarP(&batchQueueSize, "batch-queue-size", "", 0, "Batch queue buffer size (0 = default: 1000)")
 
 	// VoIP filtering with GPU acceleration (persistent for subcommands)
 	HuntCmd.PersistentFlags().BoolVar(&enableVoIPFilter, "enable-voip-filter", false, "Enable GPU-accelerated VoIP filtering")
@@ -93,6 +95,7 @@ func init() {
 	_ = viper.BindPFlag("hunter.buffer_size", HuntCmd.PersistentFlags().Lookup("buffer-size"))
 	_ = viper.BindPFlag("hunter.batch_size", HuntCmd.PersistentFlags().Lookup("batch-size"))
 	_ = viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.PersistentFlags().Lookup("batch-timeout"))
+	_ = viper.BindPFlag("hunter.batch_queue_size", HuntCmd.PersistentFlags().Lookup("batch-queue-size"))
 	_ = viper.BindPFlag("promiscuous", HuntCmd.PersistentFlags().Lookup("promisc"))
 	_ = viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.PersistentFlags().Lookup("enable-voip-filter"))
 	_ = viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.PersistentFlags().Lookup("gpu-backend"))
@@ -125,6 +128,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		BufferSize:       getIntConfig("hunter.buffer_size", bufferSize),
 		BatchSize:        getIntConfig("hunter.batch_size", batchSize),
 		BatchTimeout:     time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BatchQueueSize:   getIntConfig("hunter.batch_queue_size", batchQueueSize),
 		EnableVoIPFilter: getBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
 		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
 		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),

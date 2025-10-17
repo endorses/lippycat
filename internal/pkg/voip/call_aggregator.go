@@ -119,10 +119,21 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 	// Handle SIP packets
 	if voip.CallID != "" && (voip.Method != "" || voip.Status > 0) {
 		// Convert types.VoIPMetadata to data.SIPMetadata format
+		// Validate Status can fit in uint32 (int is either 32 or 64 bit depending on platform)
+		var responseCode uint32
+		if voip.Status < 0 || (uint64(voip.Status) > uint64(^uint32(0))) {
+			logger.Warn("SIP response code out of uint32 range, clamping",
+				"original_status", voip.Status,
+				"clamped_to", 0)
+			responseCode = 0
+		} else {
+			responseCode = uint32(voip.Status)
+		}
+
 		sipMeta := &data.SIPMetadata{
 			CallId:       voip.CallID,
 			Method:       voip.Method,
-			ResponseCode: uint32(voip.Status),
+			ResponseCode: responseCode,
 			FromUser:     voip.From,
 			ToUser:       voip.To,
 			FromUri:      voip.From, // VoIPMetadata doesn't distinguish between user and URI
@@ -324,14 +335,25 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 
 	// Initialize RTP stats if not already done
 	if call.RTPStats == nil {
+		// Validate RTP sequence number fits in uint16
+		var lastSeq uint16
+		if rtp.Sequence > uint32(^uint16(0)) {
+			logger.Warn("RTP sequence number out of uint16 range, truncating",
+				"original_seq", rtp.Sequence,
+				"truncated_to", uint16(rtp.Sequence))
+			lastSeq = uint16(rtp.Sequence) // Truncate to lower 16 bits
+		} else {
+			lastSeq = uint16(rtp.Sequence)
+		}
+
 		call.RTPStats = &RTPQualityStats{
 			Codec:         "Unknown",
-			LastSeqNum:    uint16(rtp.Sequence),
+			LastSeqNum:    lastSeq,
 			LastTimestamp: rtp.Timestamp,
 		}
 		logger.Debug("Initialized RTP stats for call",
 			"call_id", callID,
-			"initial_seq", rtp.Sequence)
+			"initial_seq", lastSeq)
 	}
 
 	stats := call.RTPStats
@@ -344,18 +366,37 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 				"call_id", callID,
 				"codec", stats.Codec)
 		} else {
-			stats.Codec = payloadTypeToCodec(uint8(rtp.PayloadType))
+			// Validate payload type fits in uint8
+			var payloadType uint8
+			if rtp.PayloadType > uint32(^uint8(0)) {
+				logger.Warn("RTP payload type out of uint8 range, setting to Unknown",
+					"original_type", rtp.PayloadType)
+				payloadType = 255 // Use max uint8 value for unknown
+			} else {
+				payloadType = uint8(rtp.PayloadType)
+			}
+			stats.Codec = payloadTypeToCodec(payloadType)
 			logger.Debug("Detected codec from RTP payload type",
 				"call_id", callID,
-				"payload_type", rtp.PayloadType,
+				"payload_type", payloadType,
 				"codec", stats.Codec)
 		}
 	}
 
 	// Detect packet loss from sequence number gaps
 	if stats.TotalPackets > 0 {
+		// Validate RTP sequence number fits in uint16
+		var actualSeq uint16
+		if rtp.Sequence > uint32(^uint16(0)) {
+			logger.Warn("RTP sequence number out of uint16 range, truncating for gap detection",
+				"original_seq", rtp.Sequence,
+				"truncated_to", uint16(rtp.Sequence))
+			actualSeq = uint16(rtp.Sequence) // Truncate to lower 16 bits
+		} else {
+			actualSeq = uint16(rtp.Sequence)
+		}
+
 		expectedSeq := stats.LastSeqNum + 1
-		actualSeq := uint16(rtp.Sequence)
 
 		// Handle sequence number wraparound (uint16 overflow)
 		var gap int
@@ -378,9 +419,21 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 					"total_lost", stats.LostPackets)
 			}
 		}
+
+		// Update LastSeqNum for next comparison
+		stats.LastSeqNum = actualSeq
+	} else {
+		// First packet - just initialize LastSeqNum
+		if rtp.Sequence > uint32(^uint16(0)) {
+			logger.Warn("RTP sequence number out of uint16 range, truncating",
+				"original_seq", rtp.Sequence,
+				"truncated_to", uint16(rtp.Sequence))
+			stats.LastSeqNum = uint16(rtp.Sequence) // Truncate to lower 16 bits
+		} else {
+			stats.LastSeqNum = uint16(rtp.Sequence)
+		}
 	}
 
-	stats.LastSeqNum = uint16(rtp.Sequence)
 	stats.TotalPackets++
 
 	// Calculate packet loss percentage

@@ -45,10 +45,11 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
-	HunterID     string
-	BatchSize    int
-	BatchTimeout time.Duration
-	BufferSize   int
+	HunterID       string
+	BatchSize      int
+	BatchTimeout   time.Duration
+	BufferSize     int
+	BatchQueueSize int // Number of batches to buffer for async sending (0 = default)
 }
 
 // Manager handles packet batching and forwarding to processor
@@ -86,13 +87,22 @@ type Manager struct {
 
 // New creates a new forwarding manager
 func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context) *Manager {
+	// Set default batch queue size if not configured
+	batchQueueSize := config.BatchQueueSize
+	if batchQueueSize == 0 {
+		// Default: 1000 batches (with 64 packet batches = 64,000 packets buffered)
+		// This provides substantial buffering for network latency and processor slowdowns
+		// while matching the 100,000 packet buffer capacity better
+		batchQueueSize = 1000
+	}
+
 	m := &Manager{
 		config:           config,
 		currentBatch:     make([]*data.CapturedPacket, 0, config.BatchSize),
 		statsCollector:   statsCollector,
 		packetBufferProv: packetBufferProv,
 		connCtx:          connCtx,
-		batchQueue:       make(chan *data.PacketBatch, 10), // Buffer up to 10 batches
+		batchQueue:       make(chan *data.PacketBatch, batchQueueSize),
 	}
 
 	// Start async batch sender goroutine

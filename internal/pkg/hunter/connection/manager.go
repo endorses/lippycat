@@ -166,8 +166,11 @@ func (m *Manager) MarkDisconnected() {
 	m.reconnectMu.Lock()
 	defer m.reconnectMu.Unlock()
 
+	logger.Debug("MarkDisconnected() called", "already_reconnecting", m.reconnecting)
+
 	if m.reconnecting {
 		// Already reconnecting
+		logger.Debug("MarkDisconnected: already reconnecting, ignoring")
 		return
 	}
 
@@ -417,6 +420,8 @@ func (m *Manager) startStreaming() error {
 // handleStreamControl receives flow control messages from processor
 func (m *Manager) handleStreamControl() {
 	defer m.connWg.Done()
+	logger.Debug("handleStreamControl goroutine starting")
+	defer logger.Debug("handleStreamControl goroutine exiting")
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Recovered from panic in handleStreamControl", "panic", r)
@@ -474,12 +479,16 @@ func (m *Manager) handleStreamControl() {
 // subscribeToFilters subscribes to filter updates from processor
 func (m *Manager) subscribeToFilters() {
 	defer m.connWg.Done()
+	logger.Debug("subscribeToFilters goroutine starting")
+	defer logger.Debug("subscribeToFilters goroutine exiting")
 	m.filterManager.Subscribe(m.ctx, m.connCtx, m.mgmtClient)
 }
 
 // sendHeartbeats sends periodic heartbeat to processor
 func (m *Manager) sendHeartbeats() {
 	defer m.connWg.Done()
+	logger.Debug("sendHeartbeats goroutine starting")
+	defer logger.Debug("sendHeartbeats goroutine exiting")
 
 	logger.Info("Starting heartbeat stream to processor")
 

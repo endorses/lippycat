@@ -498,6 +498,7 @@ func (p *Processor) GetFilters(ctx context.Context, req *management.FilterReques
 // SubscribeFilters streams filter updates to hunters (Management Service)
 func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream management.ManagementService_SubscribeFiltersServer) error {
 	hunterID := req.HunterId
+	logger.Debug("SubscribeFilters called", "hunter_id", hunterID, "stream_context", stream.Context().Err())
 	logger.Info("Filter subscription started", "hunter_id", hunterID)
 
 	// Create filter update channel for this hunter
@@ -506,6 +507,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	// Cleanup on disconnect
 	defer func() {
 		p.filterManager.RemoveChannel(hunterID)
+		logger.Debug("SubscribeFilters exiting", "hunter_id", hunterID, "stream_context", stream.Context().Err())
 		logger.Info("Filter subscription ended", "hunter_id", hunterID)
 	}()
 
@@ -528,9 +530,11 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 	for {
 		select {
 		case <-stream.Context().Done():
+			logger.Debug("SubscribeFilters: stream context cancelled", "hunter_id", hunterID, "error", stream.Context().Err())
 			return nil
 		case update, ok := <-filterChan:
 			if !ok {
+				logger.Debug("SubscribeFilters: filter channel closed", "hunter_id", hunterID)
 				return nil
 			}
 
@@ -540,9 +544,10 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 				"filter_id", update.Filter.Id)
 
 			if err := stream.Send(update); err != nil {
-				logger.Error("Failed to send filter update", "error", err)
+				logger.Error("Failed to send filter update", "hunter_id", hunterID, "error", err)
 				return err
 			}
+			logger.Debug("Filter update sent successfully", "hunter_id", hunterID, "update_type", update.UpdateType)
 		}
 	}
 }

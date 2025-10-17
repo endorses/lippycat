@@ -10,7 +10,7 @@ lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It i
 ### Distributed Architecture
 lippycat supports a distributed capture architecture with two node types:
 
-- **Hunter Nodes**: Lightweight capture agents that sniff packets on network interfaces and forward them to processor nodes for analysis. Hunters can be deployed across multiple network segments or hosts.
+- **Hunter Nodes**: Lightweight capture agents that sniff and filter packets on network interfaces and forward them to processor nodes for analysis. Hunters can be deployed across multiple network segments or hosts.
 - **Processor Nodes**: Central analysis nodes that receive packets from multiple hunters, perform protocol analysis, and provide the TUI/CLI interface for monitoring and analysis.
 
 This architecture allows for:
@@ -163,42 +163,87 @@ make clean-cuda     # Remove CUDA artifacts
 ## CLI Usage
 
 ### Available Commands
-- `lc sniff`: CLI mode for packet capture with various output formats
-- `lc sniff voip`: VoIP-specific packet capture with SIP/RTP analysis
-- `lc tui`: TUI mode for interactive real-time packet monitoring on local interface
-- `lc hunt`: Hunter node for distributed capture (forwards packets to processor)
-- `lc process`: Processor node for distributed analysis (receives from hunters)
-- `lc interfaces`: List available network interfaces
-- `lc debug`: Debug and inspect TCP SIP processing components
 
-### Standalone Mode
+lippycat provides several commands for different deployment modes:
+
+- **`lc sniff`** - CLI mode packet capture ([docs](cmd/sniff/CLAUDE.md))
+- **`lc sniff voip`** - VoIP-specific capture with SIP/RTP analysis, GPU acceleration, TCP performance tuning ([docs](cmd/sniff/CLAUDE.md))
+- **`lc tui`** - Interactive TUI for local or remote monitoring ([docs](cmd/tui/CLAUDE.md))
+- **`lc hunt`** - Hunter node for distributed edge capture ([docs](cmd/hunt/CLAUDE.md))
+- **`lc hunt voip`** - VoIP hunter with call buffering and filtering ([docs](cmd/hunt/CLAUDE.md))
+- **`lc process`** - Processor node for central aggregation and analysis ([docs](cmd/process/CLAUDE.md))
+- **`lc debug`** - TCP SIP diagnostics and troubleshooting ([docs](cmd/debug/CLAUDE.md))
+  - `debug health` - Health status
+  - `debug metrics` - Comprehensive metrics
+  - `debug alerts` - Active alerts
+  - `debug buffers` - Buffer statistics
+  - `debug streams` - Stream metrics
+  - `debug config` - Configuration display
+  - `debug summary` - System summary
+- **`lc interfaces`** - List available network interfaces
+
+### Quick Start Examples
+
+**Standalone VoIP Capture:**
 ```bash
-# General packet capture
-sudo lc sniff --interface eth0 --filter "port 80"
-
-# VoIP-specific capture
+# VoIP capture with balanced performance
 sudo lc sniff voip --interface eth0 --sipuser alice
 
-# Interactive TUI
-sudo lc tui
+# High-performance VoIP capture with GPU acceleration
+sudo lc sniff voip -i eth0 \
+  --tcp-performance-mode high_performance \
+  --gpu-backend auto
 ```
 
-### Distributed Mode
+**Distributed Capture:**
 ```bash
-# Start processor node (receives packets from hunters)
-lc process --listen 0.0.0.0:50051
+# Processor (central aggregation)
+lc process --listen 0.0.0.0:50051 \
+  --tls --tls-cert server.crt --tls-key server.key
 
-# Start hunter node (captures and forwards packets)
-sudo lc hunt --interface eth0 --processor processor-host:50051
+# Hunter (edge capture)
+sudo lc hunt --processor processor:50051 \
+  --interface eth0 \
+  --tls --tls-ca ca.crt
 
-# Monitor remote nodes via TUI
+# VoIP hunter with call filtering
+sudo lc hunt voip --processor processor:50051 --tls --tls-ca ca.crt
+```
+
+**Interactive Monitoring:**
+```bash
+# Local TUI
+sudo lc tui
+
+# Remote TUI (monitor distributed nodes)
 lc tui --remote --nodes-file nodes.yaml
 ```
+
+### Environment Variables
+
+- `LIPPYCAT_PRODUCTION=true` - Enforces TLS encryption (hunters and processors require `--tls`)
+
+### Configuration
 
 Configuration via YAML file (in priority order):
 1. `$HOME/.config/lippycat/config.yaml` (preferred)
 2. `$HOME/.config/lippycat.yaml` (XDG standard)
 3. `$HOME/.lippycat.yaml` (legacy)
+
+**See command-specific documentation:**
+- User Documentation (README.md files):
+  - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage
+  - [cmd/hunt/README.md](cmd/hunt/README.md) - Hunter node usage
+  - [cmd/process/README.md](cmd/process/README.md) - Processor node usage
+  - [cmd/debug/README.md](cmd/debug/README.md) - Debug commands usage
+  - [cmd/tui/README.md](cmd/tui/README.md) - TUI usage
+
+- Architecture Documentation (CLAUDE.md files for AI assistants):
+  - [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture & patterns
+  - [cmd/hunt/CLAUDE.md](cmd/hunt/CLAUDE.md) - Hunter architecture & patterns
+  - [cmd/process/CLAUDE.md](cmd/process/CLAUDE.md) - Processor architecture & patterns
+  - [cmd/debug/CLAUDE.md](cmd/debug/CLAUDE.md) - Debug command architecture
+  - [cmd/tui/CLAUDE.md](cmd/tui/CLAUDE.md) - TUI architecture & Bubbletea patterns
 
 ## Architecture Patterns
 
@@ -256,182 +301,50 @@ TUI client drops do NOT affect hunter flow control because:
 - Packet batches are cloned before broadcasting to prevent concurrent serialization races
 
 ### TLS/mTLS Security
-The distributed system supports TLS encryption with mutual authentication:
+The distributed system supports TLS encryption with mutual authentication for all gRPC connections (hunter→processor, processor→processor, TUI→processor).
 
-**Features:**
-- Optional TLS for all gRPC connections (hunter→processor, processor→processor, TUI→processor)
-- Mutual TLS (mTLS) with client certificate verification
-- Per-node TLS configuration in nodes.yaml
-- Self-signed certificate generation scripts for testing
+**See [docs/SECURITY.md](docs/SECURITY.md#tls-transport-encryption) for complete TLS/mTLS configuration, certificate requirements, and troubleshooting.**
 
-**Configuration:**
-```yaml
-# Global TLS config
-tls:
-  enabled: true
-  ca_file: /path/to/ca.crt
-  cert_file: /path/to/server.crt
-  key_file: /path/to/server.key
-  skip_verify: false  # Set to true only for testing
+### TUI Architecture
+The TUI (Terminal User Interface) provides interactive real-time packet monitoring with support for:
+- Hunter subscription management (selective monitoring of specific hunters)
+- Unified modal architecture for consistent dialogs
+- FileDialog component for file operations
+- Toast notifications for transient status messages
 
-# Per-node TLS override in nodes.yaml
-processors:
-  - name: secure-processor
-    address: processor.local:50051
-    tls:
-      enabled: true
-      ca_file: /path/to/ca.crt
-      cert_file: /path/to/client.crt
-      key_file: /path/to/client.key
-```
-
-**Certificate Requirements:**
-- Subject Alternative Name (SAN) must match hostname/IP
-- CN field no longer sufficient (deprecated in Go 1.15+)
-- See `test/testcerts/generate_test_certs.sh` for examples
-
-### Hunter Subscription Management (v0.2.4)
-TUI clients can selectively subscribe to specific hunters on a processor:
-
-**Features:**
-- Subscribe to all hunters on a processor (default)
-- Subscribe to specific hunters by ID (selective monitoring)
-- Unsubscribe from hunters to stop receiving packets
-- Multi-select interface with visual feedback
-
-**TUI Controls:**
-- Press `s` on a processor to select hunters to subscribe to
-- Press `d` on a hunter to unsubscribe or on a processor to remove it
-- Multi-select with arrow keys and Enter to confirm
-
-**Implementation Details:**
-- Uses `has_hunter_filter` boolean to distinguish empty list from nil (Proto3 serialization)
-- Prevents subscriber backpressure from affecting hunter flow control
-- Packets are filtered at the processor before being sent to TUI clients
-
-### TUI Modal Architecture
-
-**IMPORTANT: All modals in the TUI MUST use the unified modal component.**
-
-The TUI uses a standardized modal architecture to ensure consistency across all modal dialogs. There is ONE modal rendering function that all modal components must use:
-
-**Unified Modal Component:** `cmd/tui/components/modal.go`
-
-The `RenderModal()` function provides consistent modal chrome (border, centering, title, footer) for all modals in the codebase.
-
-**Architecture Pattern:**
-
-1. **Modal Content Components** manage their own:
-   - State (selection, input, navigation)
-   - Content rendering (building the modal body as a string)
-   - Event handling (keyboard/mouse events)
-   - Business logic (search, filtering, CRUD operations)
-
-2. **Modal Content Components** call `RenderModal()` to wrap their content:
-   ```go
-   func (component *Component) View() string {
-       if !component.active {
-           return ""
-       }
-
-       // Build content string
-       var content strings.Builder
-       content.WriteString("My modal content...")
-
-       // Use unified modal rendering
-       return RenderModal(ModalRenderOptions{
-           Title:      "My Modal Title",
-           Content:    content.String(),
-           Footer:     "Enter: Select | Esc: Cancel",
-           Width:      component.width,
-           Height:     component.height,
-           Theme:      component.theme,
-           ModalWidth: 60, // Optional: specific width
-       })
-   }
-   ```
-
-3. **Parent (model.go)** handles:
-   - Checking if modal is active (`IsActive()`)
-   - Routing events to the modal
-   - Overlaying the modal on the main view
-
-**Current Modal Components (all using unified RenderModal):**
-- `ProtocolSelector` - Protocol filter selection (`cmd/tui/components/protocolselector.go`)
-- `HunterSelector` - Hunter subscription selection (`cmd/tui/components/hunterselector.go`)
-- `NodesView.renderAddNodeModal` - Add processor/hunter node (`cmd/tui/components/nodesview.go`)
-
-**When Creating New Modals:**
-- ✅ DO: Create a component that manages state and content
-- ✅ DO: Call `RenderModal()` in your component's `View()` method
-- ✅ DO: Follow the same lifecycle pattern (Activate/Deactivate/IsActive/View/Update)
-- ❌ DON'T: Render modal chrome (border, centering) yourself
-- ❌ DON'T: Create custom modal styling - use RenderModal for consistency
-- ❌ DON'T: Duplicate modal rendering logic
-
-**Benefits:**
-- Consistent look and feel across all modals
-- Centralized styling and theming
-- Easy to maintain and update modal appearance
-- Reduces code duplication
-- Clear separation of concerns (content vs. chrome)
-
-### FileDialog Component
-
-`FileDialog` (`cmd/tui/components/filedialog.go`) - Modal for file/directory operations with navigation and filtering.
-
-**Architecture:**
-- Uses unified `RenderModal()` for consistent chrome
-- Returns `FileSelectedMsg` on confirmation
-- Four input modes: Navigation, Filename (save), Filter, CreateFolder
-- Supports save/open modes with single/multiple file selection
-
-**Key Features:**
-- Vim-style navigation (hjkl) + arrow keys + home/end/pgup/pgdown
-- Real-time filtering (press `/`) with file type and text matching
-- Inline folder creation (press `n`)
-- Details toggle (press `d`) - permissions and file sizes
-- Filename validation and extension enforcement
-- Fixed-height scrollable viewport
-
-**Usage:**
-```go
-// Create dialog
-dialog := NewSaveFileDialog("~/captures", "capture.pcap", []string{".pcap"})
-dialog := NewOpenFileDialog("~/captures", []string{".yaml"}, allowMultiple)
-
-// Handle selection
-case FileSelectedMsg:
-    path := msg.Path()  // Single file
-```
-
-### Toast Notifications
-
-`Toast` (`cmd/tui/components/toast.go`) - Non-blocking temporary notifications at bottom-center of screen.
-
-**Architecture:**
-- Overlay component (NOT a modal)
-- Queue-based: only one toast visible at a time
-- Auto-dismiss with `ToastTickMsg` lifecycle
-- Click-to-dismiss functionality
-- Types: Success (✓), Error (✗), Info (ℹ), Warning (⚠)
-- Durations: Short (2s), Normal (3s), Long (5s)
-
-**Usage:**
-```go
-// Show toast
-cmd := toast.Show("File saved!", ToastSuccess, ToastDurationLong)
-
-// Always update in parent's Update()
-cmd := m.toast.Update(msg)
-```
-
-**Best Practices:**
-- Use for transient status, not critical errors requiring action
-- Keep messages concise (one line)
-- Let queue handle multiple toasts - don't show simultaneously
+**For TUI architecture and development, see [cmd/tui/CLAUDE.md](cmd/tui/CLAUDE.md) (Bubbletea patterns, EventHandler integration, component architecture).**
 
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.
 
 The hunter node includes protocol detection for multiple protocols (HTTP, DNS, TLS, MySQL, PostgreSQL, VoIP, VPN) with signature-based matching and GPU acceleration support for filtering at the edge.
+
+## Documentation Index
+
+### User Documentation (README.md)
+- [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage, flags, examples
+- [cmd/hunt/README.md](cmd/hunt/README.md) - Hunter node setup and configuration
+- [cmd/process/README.md](cmd/process/README.md) - Processor node setup and management
+- [cmd/debug/README.md](cmd/debug/README.md) - Debug command usage and troubleshooting
+- [cmd/tui/README.md](cmd/tui/README.md) - TUI user guide and keybindings
+
+### Architecture Documentation (CLAUDE.md - for AI assistants)
+- [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture, Viper patterns, TCP reassembly
+- [cmd/hunt/CLAUDE.md](cmd/hunt/CLAUDE.md) - Hunter architecture, gRPC client, VoIP buffering
+- [cmd/process/CLAUDE.md](cmd/process/CLAUDE.md) - Processor architecture, gRPC server, broadcasting
+- [cmd/debug/CLAUDE.md](cmd/debug/CLAUDE.md) - Debug command patterns, metrics collection
+- [cmd/tui/CLAUDE.md](cmd/tui/CLAUDE.md) - TUI architecture, Bubbletea, EventHandler pattern
+
+### Operational Guides
+- [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) - Complete distributed architecture guide (hub-and-spoke, hierarchical)
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Performance tuning, TCP profiles, GPU optimization
+- [docs/SECURITY.md](docs/SECURITY.md) - TLS/mTLS setup, certificate management, security features
+- [docs/operational-procedures.md](docs/operational-procedures.md) - Production operations and procedures
+
+### Specialized Topics
+- [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md) - GPU backends (CUDA, OpenCL, SIMD), benchmarks
+- [docs/GPU_TROUBLESHOOTING.md](docs/GPU_TROUBLESHOOTING.md) - GPU-specific troubleshooting
+- [docs/tcp-troubleshooting.md](docs/tcp-troubleshooting.md) - TCP SIP capture troubleshooting
+- [docs/TUI_REMOTE_CAPTURE.md](docs/TUI_REMOTE_CAPTURE.md) - Remote capture with TUI
+- [docs/AF_XDP_SETUP.md](docs/AF_XDP_SETUP.md) - AF_XDP high-performance capture setup
+- [docs/voip-build-tag-optimization.md](docs/voip-build-tag-optimization.md) - VoIP build tag optimization

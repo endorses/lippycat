@@ -15,7 +15,7 @@ func (m Model) View() string {
 
 	// Update header state
 	m.uiState.Header.SetState(m.uiState.Capturing, m.uiState.Paused)
-	m.uiState.Header.SetPacketCount(m.packetStore.TotalPackets)
+	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
 	m.uiState.Header.SetInterface(m.interfaceName)
 	m.uiState.Header.SetCaptureMode(m.captureMode)
 	// Use hunter count (not remote client count) for accurate node display

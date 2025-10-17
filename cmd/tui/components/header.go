@@ -19,6 +19,7 @@ type Header struct {
 	paused         bool
 	iface          string
 	packets        int
+	bufferSize     int // Maximum buffer capacity
 	captureMode    CaptureMode
 	nodeCount      int // Number of connected remote nodes (hunters)
 	processorCount int // Number of connected processors
@@ -58,9 +59,10 @@ func (h *Header) SetInterface(ifaceName string) {
 	h.iface = ifaceName
 }
 
-// SetPacketCount sets the packet count
-func (h *Header) SetPacketCount(count int) {
+// SetPacketCount sets the packet count and buffer size
+func (h *Header) SetPacketCount(count, bufferSize int) {
 	h.packets = count
+	h.bufferSize = bufferSize
 }
 
 // SetCaptureMode sets the capture mode
@@ -170,9 +172,29 @@ func (h *Header) View() string {
 	}
 	middlePart := middleStyle.Copy().Width(middleWidth).Align(lipgloss.Center).Render(middleText)
 
-	// Right part - packet count (fixed width)
+	// Right part - packet count (fixed width) with color based on buffer utilization
 	rightText := fmt.Sprintf("Packets: %s", formatNumber(h.packets))
-	rightPart := rightStyle.Copy().Width(rightWidth).Align(lipgloss.Right).Render(rightText)
+
+	// Calculate buffer utilization percentage and select color
+	var packetCountColor lipgloss.Color
+	if h.bufferSize > 0 {
+		utilization := float64(h.packets) / float64(h.bufferSize) * 100.0
+		switch {
+		case utilization >= 100.0:
+			packetCountColor = h.theme.ErrorColor // Red (solarizedRed)
+		case utilization >= 66.0:
+			packetCountColor = h.theme.WarningColor // Orange (solarizedOrange)
+		case utilization >= 33.0:
+			packetCountColor = h.theme.DNSColor // Yellow (solarizedYellow)
+		default:
+			packetCountColor = h.theme.SuccessColor // Green (solarizedGreen)
+		}
+	} else {
+		// No buffer size set, use default foreground color
+		packetCountColor = h.theme.Foreground
+	}
+
+	rightPart := rightStyle.Copy().Foreground(packetCountColor).Width(rightWidth).Align(lipgloss.Right).Render(rightText)
 
 	// Join parts
 	header := lipgloss.JoinHorizontal(

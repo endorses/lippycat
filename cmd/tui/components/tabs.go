@@ -109,61 +109,87 @@ func (t *Tabs) UpdateTab(index int, label string, icon string) {
 
 // View renders the tabs
 func (t *Tabs) View() string {
-	// Active tab: no bottom border, sides extend down with one extra line, heavy box characters
-	activeStyle := lipgloss.NewStyle().
-		Foreground(t.theme.InfoColor).
-		Bold(true).
-		Padding(0, 3, 1, 3).
-		Border(lipgloss.Border{
-			Top:         "━",
-			Bottom:      "",
-			Left:        "┃",
-			Right:       "┃",
-			TopLeft:     "┏",
-			TopRight:    "┓",
-			BottomLeft:  "",
-			BottomRight: "",
-		}).
-		BorderTop(true).
-		BorderLeft(true).
-		BorderRight(true).
-		BorderBottom(false).
-		BorderForeground(t.theme.InfoColor)
+	// Define tab colors: red, yellow, green, blue
+	tabColors := []lipgloss.Color{
+		t.theme.ErrorColor,   // Tab 0 (Live Capture): red
+		t.theme.DNSColor,     // Tab 1 (Nodes): yellow
+		t.theme.SuccessColor, // Tab 2 (Statistics): green
+		t.theme.InfoColor,    // Tab 3 (Settings): blue
+	}
 
-	// Inactive tab: no background, muted, with visible bottom border
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(t.theme.StatusBarFg).
-		Padding(0, 3).
-		Border(lipgloss.Border{
-			Top:         "─",
-			Bottom:      "─",
-			Left:        "│",
-			Right:       "│",
-			TopLeft:     "╭",
-			TopRight:    "╮",
-			BottomLeft:  "╰",
-			BottomRight: "╯",
-		}).
-		BorderTop(true).
-		BorderLeft(true).
-		BorderRight(true).
-		BorderBottom(true).
-		BorderForeground(t.theme.BorderColor)
+	// Get the active tab's color for the horizontal line
+	activeTabColor := tabColors[t.active]
+
+	// Active tab style (will be customized per tab)
+	getActiveStyle := func(tabIndex int) lipgloss.Style {
+		borderColor := tabColors[tabIndex]
+		return lipgloss.NewStyle().
+			Foreground(t.theme.StatusBarFg).
+			Bold(true).
+			Padding(0, 3, 1, 3).
+			Border(lipgloss.Border{
+				Top:         "━",
+				Bottom:      "",
+				Left:        "┃",
+				Right:       "┃",
+				TopLeft:     "┏",
+				TopRight:    "┓",
+				BottomLeft:  "",
+				BottomRight: "",
+			}).
+			BorderTop(true).
+			BorderLeft(true).
+			BorderRight(true).
+			BorderBottom(false).
+			BorderForeground(borderColor)
+	}
+
+	// Inactive tab style (will be customized per tab)
+	getInactiveStyle := func(tabIndex int) lipgloss.Style {
+		borderColor := tabColors[tabIndex]
+		return lipgloss.NewStyle().
+			Foreground(t.theme.StatusBarFg).
+			Padding(0, 3).
+			Border(lipgloss.Border{
+				Top:         "─",
+				Bottom:      "─",
+				Left:        "│",
+				Right:       "│",
+				TopLeft:     "╭",
+				TopRight:    "╮",
+				BottomLeft:  "╰",
+				BottomRight: "╯",
+			}).
+			BorderTop(true).
+			BorderLeft(true).
+			BorderRight(true).
+			BorderBottom(true).
+			BorderForeground(borderColor)
+	}
 
 	var tabParts []string
 
 	for i, tab := range t.tabs {
-		label := tab.Icon + " " + tab.Label
+		var content string
 		if i == t.active {
-			tabParts = append(tabParts, activeStyle.Render(label))
+			// For active tab: icon (no underline) + space + label (underlined)
+			// Underline style must match the active style's foreground and bold
+			underlineStyle := lipgloss.NewStyle().
+				Underline(true).
+				Bold(true).
+				Foreground(t.theme.StatusBarFg)
+			content = tab.Icon + " " + underlineStyle.Render(tab.Label)
+			tabParts = append(tabParts, getActiveStyle(i).Render(content))
 		} else {
-			tabParts = append(tabParts, inactiveStyle.Render(label))
+			// For inactive tab: icon + space + label (no underline)
+			content = tab.Icon + " " + tab.Label
+			tabParts = append(tabParts, getInactiveStyle(i).Render(content))
 		}
 	}
 
 	// Join tabs - we'll manually modify the last line to add corners
-	borderStyle := lipgloss.NewStyle().Foreground(t.theme.InfoColor)
-	activeCornerStyle := lipgloss.NewStyle().Foreground(t.theme.InfoColor)
+	borderStyle := lipgloss.NewStyle().Foreground(activeTabColor)
+	activeCornerStyle := lipgloss.NewStyle().Foreground(activeTabColor)
 	activeBorderChar := "━" // Heavy horizontal line for entire bottom border
 
 	// Split each tab into lines (now indices match t.tabs)
@@ -183,7 +209,7 @@ func (t *Tabs) View() string {
 	var result strings.Builder
 
 	// Render all lines except the last
-	for lineNum := 0; lineNum < maxLines-1; lineNum++ {
+	for lineNum := range maxLines - 1 {
 		for i := range t.tabs {
 			if lineNum < len(tabLines[i])-1 {
 				result.WriteString(tabLines[i][lineNum])

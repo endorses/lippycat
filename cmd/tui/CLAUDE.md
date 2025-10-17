@@ -21,6 +21,7 @@ The TUI provides **interactive real-time monitoring** in three modes:
 │    ├── view_renderer.go - Main view rendering                    │
 │    └── components/      - Reusable UI components                 │
 │         ├── header.go      - Header bar                          │
+│         ├── footer.go      - Context-aware footer                │
 │         ├── modal.go       - Unified modal chrome                │
 │         ├── toast.go       - Toast notifications                 │
 │         ├── filedialog.go  - File picker                         │
@@ -249,6 +250,53 @@ toast.Update(ToastTickMsg{})  // Decrements timer
 ```
 
 **NOT a modal** - overlay at bottom of screen.
+
+### Context-Aware Footer
+
+**File:** `cmd/tui/components/footer.go`
+
+**Pattern:** Tab-specific keybindings with two sections
+
+```go
+type Footer struct {
+    activeTab            int
+    hasProtocolSelection bool
+    filterMode           bool
+    hasFilter            bool
+    // ...
+}
+```
+
+**Architecture:** Two-section layout
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ [Tab-specific keybinds]  [General keybinds]  [Version]     │
+│  (colored background)      (violet keys)                   │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Tab-specific keybinds:**
+- Tab 0 (Capture): `/` filter, `w` save, `d` toggle details
+- Tab 1 (Nodes): `f` filters, `s` hunters, `v` view
+- Tab 2 (Statistics): `v` view
+- Tab 3 (Settings): `Enter` edit/toggle, `Esc` cancel, `←/→` switch mode
+
+**General keybinds:** Always visible (Space, n, p, q)
+
+**Color-coding:** Each tab has its own background color matching tab theme:
+```go
+func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
+    tabColors := []lipgloss.Color{
+        f.theme.ErrorColor,   // Tab 0: Capture (red)
+        f.theme.DNSColor,     // Tab 1: Nodes (yellow)
+        f.theme.SuccessColor, // Tab 2: Statistics (green)
+        f.theme.InfoColor,    // Tab 3: Settings (blue)
+    }
+}
+```
+
+**Responsive layout:** Gracefully degrades when terminal width is limited (version → general → tab-specific).
 
 ## Message Flow Pattern
 

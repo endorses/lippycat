@@ -712,15 +712,11 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.Hunter
 // MOS scale: 1.0 (bad) to 5.0 (excellent)
 func calculateMOS(packetLoss, jitter float64) float64 {
 	// Clamp inputs to reasonable ranges
-	if packetLoss < 0 {
-		packetLoss = 0
-	}
+	packetLoss = max(0, packetLoss)
 	if packetLoss > 100 {
 		packetLoss = 100
 	}
-	if jitter < 0 {
-		jitter = 0
-	}
+	jitter = max(0, jitter)
 
 	// Calculate R-factor (transmission rating factor)
 	// R = R0 - Is - Id - Ie + A
@@ -748,9 +744,7 @@ func calculateMOS(packetLoss, jitter float64) float64 {
 	rFactor := 93.2 - delayImpairment - equipmentImpairment
 
 	// Clamp R-factor to valid range (0-100)
-	if rFactor < 0 {
-		rFactor = 0
-	}
+	rFactor = max(0, rFactor)
 	if rFactor > 100 {
 		rFactor = 100
 	}
@@ -1034,9 +1028,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 		// Calculate inter-arrival jitter
 		// J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
 		timestampDiff := int64(rtp.Timestamp) - int64(stats.lastTimestamp)
-		if timestampDiff < 0 {
-			timestampDiff = -timestampDiff
-		}
+		timestampDiff = max(-timestampDiff, timestampDiff)
 
 		// Convert to milliseconds (assuming 8kHz clock rate for most codecs)
 		timestampDiffMs := float64(timestampDiff) / 8.0

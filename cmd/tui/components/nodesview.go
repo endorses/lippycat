@@ -154,10 +154,7 @@ func (n *NodesView) SetSize(width, height int) {
 	n.height = height
 
 	// Use full height for viewport (hints moved to context-aware footer)
-	viewportHeight := height
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
+	viewportHeight := max(1, height)
 
 	if !n.ready {
 		n.viewport = viewport.New(width, viewportHeight)
@@ -531,15 +528,9 @@ func (n *NodesView) scrollToSelection() {
 
 	if n.viewMode == "graph" {
 		// Graph mode: center the selected node vertically
-		targetOffset := n.selectedNodeLine - viewportHeight/2
-		if targetOffset < 0 {
-			targetOffset = 0
-		}
+		targetOffset := max(0, n.selectedNodeLine-viewportHeight/2)
 		// Don't scroll past the end of content
-		maxOffset := n.viewport.TotalLineCount() - viewportHeight
-		if maxOffset < 0 {
-			maxOffset = 0
-		}
+		maxOffset := max(0, n.viewport.TotalLineCount()-viewportHeight)
 		if targetOffset > maxOffset {
 			targetOffset = maxOffset
 		}
@@ -555,10 +546,7 @@ func (n *NodesView) scrollToSelection() {
 			n.viewport.SetYOffset(n.selectedNodeLine)
 		} else if n.selectedNodeLine > visibleEnd {
 			// If selection is below visible area, scroll down to show it
-			newOffset := n.selectedNodeLine - viewportHeight + 1
-			if newOffset < 0 {
-				newOffset = 0
-			}
+			newOffset := max(0, n.selectedNodeLine-viewportHeight+1)
 			n.viewport.SetYOffset(newOffset)
 		}
 		// Otherwise, selection is already visible - don't scroll
@@ -609,10 +597,7 @@ func (n *NodesView) renderContent() string {
 		// Calculate vertical centering
 		contentHeight := len(lines)
 		viewportHeight := n.viewport.Height
-		verticalPadding := (viewportHeight - contentHeight) / 2
-		if verticalPadding < 0 {
-			verticalPadding = 0
-		}
+		verticalPadding := max(0, (viewportHeight-contentHeight)/2)
 
 		// Add vertical padding
 		for i := 0; i < verticalPadding; i++ {
@@ -623,10 +608,7 @@ func (n *NodesView) renderContent() string {
 		for _, line := range lines {
 			if line != "" {
 				lineWidth := len(line)
-				centerPos := (n.width - lineWidth) / 2
-				if centerPos < 0 {
-					centerPos = 0
-				}
+				centerPos := max(0, (n.width-lineWidth)/2)
 				b.WriteString(strings.Repeat(" ", centerPos))
 				b.WriteString(emptyStyle.Render(line))
 			}

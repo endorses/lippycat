@@ -448,9 +448,7 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 		// where D is the difference in packet spacing
 
 		timestampDiff := int64(rtp.Timestamp) - int64(stats.LastTimestamp)
-		if timestampDiff < 0 {
-			timestampDiff = -timestampDiff
-		}
+		timestampDiff = max(-timestampDiff, timestampDiff)
 
 		// Convert to milliseconds (assuming 8kHz clock rate for most codecs)
 		timestampDiffMs := float64(timestampDiff) / 8.0
@@ -594,15 +592,11 @@ func payloadTypeToCodec(pt uint8) string {
 // MOS scale: 1.0 (bad) to 5.0 (excellent)
 func calculateMOS(packetLoss, jitter float64) float64 {
 	// Clamp inputs to reasonable ranges
-	if packetLoss < 0 {
-		packetLoss = 0
-	}
+	packetLoss = max(0, packetLoss)
 	if packetLoss > 100 {
 		packetLoss = 100
 	}
-	if jitter < 0 {
-		jitter = 0
-	}
+	jitter = max(0, jitter)
 
 	// Calculate R-factor (transmission rating factor)
 	// R = R0 - Is - Id - Ie + A
@@ -630,9 +624,7 @@ func calculateMOS(packetLoss, jitter float64) float64 {
 	rFactor := 93.2 - delayImpairment - equipmentImpairment
 
 	// Clamp R-factor to valid range (0-100)
-	if rFactor < 0 {
-		rFactor = 0
-	}
+	rFactor = max(0, rFactor)
 	if rFactor > 100 {
 		rFactor = 100
 	}

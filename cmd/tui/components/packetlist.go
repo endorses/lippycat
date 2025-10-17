@@ -185,15 +185,11 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 				// Binary search for closest timestamp
 				closestIndex := 0
 				minDiff := selectedPacket.Timestamp.Sub(p.packets[0].Timestamp)
-				if minDiff < 0 {
-					minDiff = -minDiff
-				}
+				minDiff = max(-minDiff, minDiff)
 
 				for i := 1; i < len(p.packets); i++ {
 					diff := selectedPacket.Timestamp.Sub(p.packets[i].Timestamp)
-					if diff < 0 {
-						diff = -diff
-					}
+					diff = max(-diff, diff)
 					if diff < minDiff {
 						minDiff = diff
 						closestIndex = i
@@ -223,10 +219,7 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 					p.offset = 0
 				} else if idealOffset > len(p.packets)-visibleLines {
 					// Ensure we don't scroll past the end
-					p.offset = len(p.packets) - visibleLines
-					if p.offset < 0 {
-						p.offset = 0
-					}
+					p.offset = max(0, len(p.packets)-visibleLines)
 				} else {
 					p.offset = idealOffset
 				}
@@ -432,15 +425,11 @@ func (p *PacketList) GetPackets() []PacketDisplay {
 
 // SetCursor sets the cursor position directly (for mouse clicks)
 func (p *PacketList) SetCursor(position int) {
-	if position < 0 {
-		position = 0
-	}
+	position = max(0, position)
 	if position >= len(p.packets) {
 		position = len(p.packets) - 1
 	}
-	if position < 0 {
-		position = 0
-	}
+	position = max(0, position)
 	p.cursor = position
 	p.adjustOffset()
 	// Disable auto-scroll when manually selecting a packet

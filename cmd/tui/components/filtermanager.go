@@ -311,10 +311,7 @@ func (fm *FilterManager) PageUp() {
 	}
 
 	currentIndex := fm.filterList.Index()
-	newIndex := currentIndex - pageSize
-	if newIndex < 0 {
-		newIndex = 0
-	}
+	newIndex := max(0, currentIndex-pageSize)
 	fm.filterList.Select(newIndex)
 }
 

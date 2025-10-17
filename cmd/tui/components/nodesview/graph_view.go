@@ -177,10 +177,7 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 		processorBox := RenderProcessorBox(procLines, processorBoxWidth, processorStyle, isProcessorSelected, proc.ConnectionState, proc.Status, params.Theme)
 
 		// Center the processor box
-		centerPos := (renderWidth - processorBoxWidth) / 2
-		if centerPos < 0 {
-			centerPos = 0
-		}
+		centerPos := max(0, (renderWidth-processorBoxWidth)/2)
 
 		// Track click region for processor box
 		processorStartLine := currentLine
@@ -215,10 +212,7 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 
 			// Calculate positions for hunters (distribute horizontally)
 			totalHuntersWidth := len(proc.Hunters)*hunterBoxWidth + (len(proc.Hunters)-1)*hunterSpacing
-			startPos := (renderWidth - totalHuntersWidth) / 2
-			if startPos < 0 {
-				startPos = 0
-			}
+			startPos := max(0, (renderWidth-totalHuntersWidth)/2)
 
 			// Draw horizontal line connecting to hunters
 			if len(proc.Hunters) > 1 {

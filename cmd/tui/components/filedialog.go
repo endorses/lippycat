@@ -331,17 +331,29 @@ func (fd *FileDialog) Deactivate() {
 // Navigation methods
 
 func (fd *FileDialog) cursorUp() {
+	if len(fd.filteredFiles) == 0 {
+		return
+	}
 	if fd.cursor > 0 {
 		fd.cursor--
-		fd.adjustViewOffset()
+	} else {
+		// Wrap around to bottom
+		fd.cursor = len(fd.filteredFiles) - 1
 	}
+	fd.adjustViewOffset()
 }
 
 func (fd *FileDialog) cursorDown() {
+	if len(fd.filteredFiles) == 0 {
+		return
+	}
 	if fd.cursor < len(fd.filteredFiles)-1 {
 		fd.cursor++
-		fd.adjustViewOffset()
+	} else {
+		// Wrap around to top
+		fd.cursor = 0
 	}
+	fd.adjustViewOffset()
 }
 
 func (fd *FileDialog) pageUp() {
@@ -507,6 +519,26 @@ func (fd *FileDialog) handleFilterMode(msg tea.Msg) tea.Cmd {
 		case "down":
 			// Navigate down in file list (stay in filter mode)
 			fd.cursorDown()
+			return nil
+
+		case "pgup":
+			// Page up in file list (stay in filter mode)
+			fd.pageUp()
+			return nil
+
+		case "pgdown":
+			// Page down in file list (stay in filter mode)
+			fd.pageDown()
+			return nil
+
+		case "home":
+			// Go to top of file list (stay in filter mode)
+			fd.gotoTop()
+			return nil
+
+		case "end":
+			// Go to bottom of file list (stay in filter mode)
+			fd.gotoBottom()
 			return nil
 
 		case "left":

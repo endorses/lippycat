@@ -186,7 +186,7 @@ func newUMEM(size, frameSize, numFrames int) (*UMEM, error) {
 
 	// Initialize frames
 	// Initialize frame descriptors (safe: i and offset are bounded by numFrames and buffer size)
-	for i := 0; i < numFrames; i++ {
+	for i := range numFrames {
 		offset := i * frameSize
 		umem.frames[i] = Frame{
 			addr: uint64(offset), // #nosec G115
@@ -320,7 +320,8 @@ func (xs *XDPSocket) setupRings() error {
 	}
 
 	// Pre-fill the fill ring with available frames (safe: i is bounded by config values)
-	for i := 0; i < xs.umem.numFrames && i < xs.config.FillRingSize; i++ {
+	maxFrames := min(xs.umem.numFrames, xs.config.FillRingSize)
+	for i := range maxFrames {
 		xs.fillRing.ring[i] = uint64(i * xs.config.FrameSize) // #nosec G115
 		*xs.fillRing.producer++
 		xs.stats.FillEnqueued.Add(1)

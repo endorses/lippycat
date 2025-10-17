@@ -79,7 +79,7 @@ func (sb *SIMDBackend) ExecutePatternMatching(patterns []GPUPattern) error {
 	var wg sync.WaitGroup
 	resultsChan := make(chan []GPUResult, sb.numWorkers)
 
-	for workerID := 0; workerID < sb.numWorkers; workerID++ {
+	for workerID := range sb.numWorkers {
 		wg.Add(1)
 		go func(wid int) {
 			defer wg.Done()

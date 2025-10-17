@@ -86,7 +86,7 @@ func (ps *PacketStore) GetPacketsInOrder() []components.PacketDisplay {
 		return nil
 	}
 	result := make([]components.PacketDisplay, bufferSize)
-	for i := 0; i < bufferSize; i++ {
+	for i := range bufferSize {
 		result[i] = ps.Packets[(ps.PacketsHead+i)%bufferSize]
 	}
 	return result
@@ -209,7 +209,7 @@ func (ps *PacketStore) getPacketsInOrderLocked() []components.PacketDisplay {
 	}
 
 	result := make([]components.PacketDisplay, ps.MaxPackets)
-	for i := 0; i < ps.MaxPackets; i++ {
+	for i := range ps.MaxPackets {
 		result[i] = ps.Packets[(ps.PacketsHead+i)%ps.MaxPackets]
 	}
 	return result

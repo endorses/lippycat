@@ -120,7 +120,7 @@ func (pcc *PerCPUCounter) Add(cpuID int, n uint64) {
 // Sum returns the total across all CPUs
 func (pcc *PerCPUCounter) Sum() uint64 {
 	var total uint64
-	for i := 0; i < pcc.numCPUs; i++ {
+	for i := range pcc.numCPUs {
 		total += pcc.counters[i].Get()
 	}
 	return total
@@ -136,7 +136,7 @@ func (pcc *PerCPUCounter) GetCPU(cpuID int) uint64 {
 
 // Reset resets all CPU counters
 func (pcc *PerCPUCounter) Reset() {
-	for i := 0; i < pcc.numCPUs; i++ {
+	for i := range pcc.numCPUs {
 		pcc.counters[i].Reset()
 	}
 }

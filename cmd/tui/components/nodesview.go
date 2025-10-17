@@ -595,7 +595,7 @@ func (n *NodesView) renderContent() string {
 		verticalPadding := max(0, (viewportHeight-contentHeight)/2)
 
 		// Add vertical padding
-		for i := 0; i < verticalPadding; i++ {
+		for range verticalPadding {
 			b.WriteString("\n")
 		}
 

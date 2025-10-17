@@ -73,7 +73,7 @@ func (cs *CallStore) GetCallsInOrder() []components.Call {
 
 	if cs.ringCount < cs.maxCalls {
 		// Buffer not full yet, calls are in order from ring start
-		for i := 0; i < cs.ringCount; i++ {
+		for i := range cs.ringCount {
 			callID := cs.callRing[i]
 			if call, exists := cs.calls[callID]; exists {
 				result = append(result, *call)
@@ -81,7 +81,7 @@ func (cs *CallStore) GetCallsInOrder() []components.Call {
 		}
 	} else {
 		// Buffer is full, need to wrap around from ringHead
-		for i := 0; i < cs.maxCalls; i++ {
+		for i := range cs.maxCalls {
 			idx := (cs.ringHead + i) % cs.maxCalls
 			callID := cs.callRing[idx]
 			if call, exists := cs.calls[callID]; exists {

@@ -72,7 +72,7 @@ func GetTopology() (*CPUTopology, error) {
 	}
 
 	// Populate CPU info
-	for i := 0; i < numCPUs; i++ {
+	for i := range numCPUs {
 		topo.CPUList[i] = CPUInfo{
 			ID:       i,
 			NUMANode: i / topo.CoresPerNUMA,
@@ -247,12 +247,12 @@ func DistributeCPUs(numWorkers int) []int {
 
 	if topo.SMTEnabled && numWorkers <= topo.NumCPUs/2 {
 		// Prefer physical cores over hyperthreads
-		for i := 0; i < numWorkers; i++ {
+		for i := range numWorkers {
 			cpus[i] = i * 2 // Every other CPU (physical cores)
 		}
 	} else {
 		// Use all CPUs
-		for i := 0; i < numWorkers; i++ {
+		for i := range numWorkers {
 			cpus[i] = i % topo.NumCPUs
 		}
 	}

@@ -71,7 +71,7 @@ func NewPerCPUQueue(config *PerCPUQueueConfig) *PerCPUQueue {
 	}
 
 	// Initialize per-CPU queues
-	for i := 0; i < numCPUs; i++ {
+	for i := range numCPUs {
 		pcq.queues[i] = CPUQueue{
 			packets: make(chan []byte, config.QueueSize),
 			cpuID:   i,
@@ -190,7 +190,7 @@ func (pcq *PerCPUQueue) GetStats(cpuID int) *QueueStats {
 func (pcq *PerCPUQueue) GetTotalStats() *QueueStats {
 	total := &QueueStats{}
 
-	for i := 0; i < pcq.numCPUs; i++ {
+	for i := range pcq.numCPUs {
 		stats := &pcq.queues[i].stats
 		total.Enqueued.Add(stats.Enqueued.Get())
 		total.Dequeued.Add(stats.Dequeued.Get())
@@ -205,7 +205,7 @@ func (pcq *PerCPUQueue) GetTotalStats() *QueueStats {
 func (pcq *PerCPUQueue) GetLoad() []float64 {
 	loads := make([]float64, pcq.numCPUs)
 
-	for i := 0; i < pcq.numCPUs; i++ {
+	for i := range pcq.numCPUs {
 		queue := &pcq.queues[i]
 		queueLen := len(queue.packets)
 		queueCap := cap(queue.packets)
@@ -224,7 +224,7 @@ func (pcq *PerCPUQueue) NumQueues() int {
 
 // Close closes all queues
 func (pcq *PerCPUQueue) Close() {
-	for i := 0; i < pcq.numCPUs; i++ {
+	for i := range pcq.numCPUs {
 		close(pcq.queues[i].packets)
 	}
 }
@@ -253,7 +253,7 @@ func NewWorkStealingQueue(config *PerCPUQueueConfig) *WorkStealingQueue {
 		stealStats: make([]PaddedCounter, numCPUs),
 	}
 
-	for i := 0; i < numCPUs; i++ {
+	for i := range numCPUs {
 		wsq.queues[i] = CPUQueue{
 			packets: make(chan []byte, config.QueueSize),
 			cpuID:   i,
@@ -327,7 +327,7 @@ func (wsq *WorkStealingQueue) GetStealStats(cpuID int) uint64 {
 
 // Close closes all queues
 func (wsq *WorkStealingQueue) Close() {
-	for i := 0; i < wsq.numCPUs; i++ {
+	for i := range wsq.numCPUs {
 		close(wsq.queues[i].packets)
 	}
 }

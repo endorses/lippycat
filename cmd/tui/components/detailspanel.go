@@ -303,7 +303,7 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 
 	// Create styles for each column
 	var columnStyles [8]lipgloss.Style
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		columnStyles[i] = lipgloss.NewStyle().Foreground(columnColors[i])
 	}
 

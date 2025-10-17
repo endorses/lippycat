@@ -5,6 +5,7 @@ package components
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
@@ -84,7 +85,7 @@ func (f *FilterInput) AddToHistory(value string) {
 	for i, h := range f.history {
 		if h == value {
 			// Move to front
-			f.history = append(f.history[:i], f.history[i+1:]...)
+			f.history = slices.Delete(f.history, i, i+1)
 			break
 		}
 	}

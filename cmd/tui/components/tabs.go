@@ -172,13 +172,14 @@ func (t *Tabs) View() string {
 	for i, tab := range t.tabs {
 		var content string
 		if i == t.active {
-			// For active tab: icon (no underline) + space + label (underlined)
-			// Underline style must match the active style's foreground and bold
-			underlineStyle := lipgloss.NewStyle().
+			// For active tab: icon (no underline) + space + label (underlined with background)
+			// Label gets the tab-specific color as background with Solarized Base3 text
+			labelStyle := lipgloss.NewStyle().
 				Underline(true).
 				Bold(true).
-				Foreground(t.theme.StatusBarFg)
-			content = tab.Icon + " " + underlineStyle.Render(tab.Label)
+				Foreground(tabColors[i]) // Solarized Base3
+				// Background()
+			content = tab.Icon + " " + labelStyle.Render(tab.Label)
 			tabParts = append(tabParts, getActiveStyle(i).Render(content))
 		} else {
 			// For inactive tab: icon + space + label (no underline)

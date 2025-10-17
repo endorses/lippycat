@@ -119,7 +119,7 @@ func (h *Header) View() string {
 		statusColor = lipgloss.Color("240")
 	}
 
-	statusStyle := leftStyle.Copy().Foreground(statusColor)
+	statusStyle := leftStyle.Foreground(statusColor)
 
 	// Fixed width sections to prevent shifting
 	// Account for padding (0,1) = 2 chars per section = 6 total
@@ -130,7 +130,7 @@ func (h *Header) View() string {
 
 	// Create fixed-width left section (status)
 	leftContent := statusStyle.Render(statusText)
-	leftPart := leftStyle.Copy().Width(leftWidth).Render(leftContent)
+	leftPart := leftStyle.Width(leftWidth).Render(leftContent)
 
 	// Middle part - interface, file, or remote address (takes remaining space)
 	var middleText string
@@ -170,7 +170,7 @@ func (h *Header) View() string {
 	if middleWidth < 10 {
 		middleWidth = 10 // Minimum width
 	}
-	middlePart := middleStyle.Copy().Width(middleWidth).Align(lipgloss.Center).Render(middleText)
+	middlePart := middleStyle.Width(middleWidth).Align(lipgloss.Center).Render(middleText)
 
 	// Right part - packet count (fixed width) with color based on buffer utilization
 	rightText := fmt.Sprintf("Packets: %s", formatNumber(h.packets))
@@ -194,7 +194,7 @@ func (h *Header) View() string {
 		packetCountColor = h.theme.Foreground
 	}
 
-	rightPart := rightStyle.Copy().Foreground(packetCountColor).Width(rightWidth).Align(lipgloss.Right).Render(rightText)
+	rightPart := rightStyle.Foreground(packetCountColor).Width(rightWidth).Align(lipgloss.Right).Render(rightText)
 
 	// Join parts
 	header := lipgloss.JoinHorizontal(

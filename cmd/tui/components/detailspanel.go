@@ -167,7 +167,7 @@ func (d *DetailsPanel) renderContent() string {
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Protocol: "))
-	protocolStyle := valueStyle.Copy().Foreground(d.getProtocolColor(d.packet.Protocol))
+	protocolStyle := valueStyle.Foreground(d.getProtocolColor(d.packet.Protocol))
 	content.WriteString(protocolStyle.Render(d.packet.Protocol))
 	content.WriteString("\n")
 

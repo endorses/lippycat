@@ -103,7 +103,7 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		keybinds := []TabKeybind{
 			{Key: "/", Description: "filter"},
 			{Key: "w", Description: "save"},
-			{Key: "d", Description: "toggle details"},
+			{Key: "d", Description: "details"},
 		}
 		// Conditional keybinds
 		if f.hasFilter {
@@ -120,6 +120,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	case 1: // Nodes tab
 		keybinds := []TabKeybind{
 			{Key: "f", Description: "filters"},
+			{Key: "n", Description: "add node"},
+			{Key: "d", Description: "delete"},
 			{Key: "s", Description: "hunters"},
 			{Key: "v", Description: "view"},
 		}
@@ -158,9 +160,9 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 		Background(bgColor)
 
 	// Styles for keys and descriptions (inherit background)
-	keyStyle := baseStyle.Copy().Bold(true)
-	descStyle := baseStyle.Copy()
-	separatorStyle := baseStyle.Copy()
+	keyStyle := baseStyle.Bold(true)
+	descStyle := baseStyle
+	separatorStyle := baseStyle
 
 	// Build keybinds string with styled components
 	var parts []string
@@ -178,7 +180,7 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 	}
 
 	// Wrap with padding (background will extend through padding)
-	containerStyle := baseStyle.Copy().Padding(0, 1)
+	containerStyle := baseStyle.Padding(0, 1)
 
 	//return containerStyle.Render(content)
 	// Add manual padding with terminal background (not tab background)
@@ -203,7 +205,6 @@ func (f *Footer) renderGeneralSection() string {
 	// General keybinds (work on all tabs)
 	bindings := []string{
 		keyStyle.Render("Space") + descStyle.Render(": pause"),
-		keyStyle.Render("n") + descStyle.Render(": add node"),
 		keyStyle.Render("p") + descStyle.Render(": protocol"),
 		keyStyle.Render("q") + descStyle.Render(": quit"),
 	}
@@ -236,7 +237,7 @@ func (f *Footer) View() string {
 	generalSection := f.renderGeneralSection()
 
 	// Version info for far right (only show if enough space)
-	versionText := fmt.Sprintf("🫦🐱 %s", version.GetVersion())
+	versionText := fmt.Sprintf("🫦🐱 %s ", version.GetVersion())
 	versionStyle := lipgloss.NewStyle().
 		Foreground(f.theme.BorderColor)
 	versionRendered := versionStyle.Render(versionText)

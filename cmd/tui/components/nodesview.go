@@ -4,7 +4,6 @@
 package components
 
 import (
-	"fmt"
 	"sort"
 
 	// "os" // Only needed for debug logging - uncomment if enabling DEBUG logs
@@ -154,8 +153,8 @@ func (n *NodesView) SetSize(width, height int) {
 	n.width = width
 	n.height = height
 
-	// Reserve 1 line for hints, rest for viewport
-	viewportHeight := height - 1
+	// Use full height for viewport (hints moved to context-aware footer)
+	viewportHeight := height
 	if viewportHeight < 1 {
 		viewportHeight = 1
 	}
@@ -791,28 +790,8 @@ func (n *NodesView) View() string {
 		return ""
 	}
 
-	// Render hints bar
-	hintsStyle := lipgloss.NewStyle().
-		Foreground(n.theme.StatusBarFg).
-		Padding(0, 1)
-
-	keyStyle := lipgloss.NewStyle().
-		Foreground(n.theme.InfoColor).
-		Bold(true)
-
-	hints := fmt.Sprintf("%s %s  %s %s  %s %s",
-		keyStyle.Render("v:"),
-		"view",
-		keyStyle.Render("f:"),
-		"filters",
-		keyStyle.Render("s:"),
-		"hunters",
-	)
-
-	hintsBar := hintsStyle.Render(hints)
-
-	// Combine viewport and hints
-	return n.viewport.View() + "\n" + hintsBar
+	// Just return viewport (hints now in context-aware footer)
+	return n.viewport.View()
 }
 
 // RenderModal renders the add node modal if it's open (for top-level overlay)

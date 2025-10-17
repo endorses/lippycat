@@ -710,7 +710,8 @@ func (s *SettingsView) determineClickedField(relativeY, x int) int {
 // View renders the settings view
 func (s *SettingsView) View() string {
 	noteStyle := lipgloss.NewStyle().
-		Foreground(s.theme.InfoColor).
+		Foreground(s.theme.StatusBarFg).
+		//Foreground(s.theme.InfoColor).
 		Padding(1, 2)
 
 	var sections []string
@@ -765,14 +766,14 @@ func (s *SettingsView) View() string {
 		sections = append(sections, errorStyle.Render("⚠ "+s.errorMessage))
 	}
 
-	// Help text
-	helpStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Italic(true).
-		Padding(1, 2)
-
-	helpText := "j/k: navigate • h/l: switch mode • Enter: edit/toggle • Tab: switch tabs"
-	sections = append(sections, helpStyle.Render(helpText))
+	// // Help text
+	// helpStyle := lipgloss.NewStyle().
+	// 	Foreground(lipgloss.Color("240")).
+	// 	Italic(true).
+	// 	Padding(1, 2)
+	//
+	// helpText := "j/k: navigate • h/l: switch mode • Enter: edit/toggle • Tab: switch tabs"
+	// sections = append(sections, helpStyle.Render(helpText))
 
 	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 

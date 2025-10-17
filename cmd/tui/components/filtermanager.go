@@ -4,6 +4,7 @@
 package components
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -139,10 +140,7 @@ func (fm *FilterManager) SetSize(width, height int) {
 
 	// List takes the full content width
 	listWidth := contentWidth
-	listHeight := height - 15 // Account for title, search bar, footer
-	if listHeight < 5 {
-		listHeight = 5
-	}
+	listHeight := max(height-15, 5) // Account for title, search bar, footer
 
 	fm.filterList.SetSize(listWidth, listHeight)
 	fm.confirmDialog.SetSize(width, height)
@@ -584,7 +582,7 @@ func (fm *FilterManager) handleHunterSelectionMode(msg tea.KeyMsg) tea.Cmd {
 			found := false
 			for i, id := range fm.formState.targetHunters {
 				if id == hunterID {
-					fm.formState.targetHunters = append(fm.formState.targetHunters[:i], fm.formState.targetHunters[i+1:]...)
+					fm.formState.targetHunters = slices.Delete(fm.formState.targetHunters, i, i+1)
 					found = true
 					break
 				}
@@ -712,7 +710,7 @@ func (fm *FilterManager) initializeEditForm(filter *management.Filter) {
 		patternInput:  patternInput,
 		descInput:     descInput,
 		enabled:       filter.Enabled,
-		targetHunters: append([]string{}, filter.TargetHunters...),
+		targetHunters: slices.Clone(filter.TargetHunters),
 		activeField:   0,
 	}
 

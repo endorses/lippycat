@@ -210,9 +210,27 @@ func (fd *FileDialog) SetSize(width, height int) {
 	fd.width = width
 	fd.height = height
 
-	// Use a fixed list height for consistent modal size
-	// The list will scroll if there are more files than fit
-	fd.listHeight = 15
+	// Calculate responsive list height based on terminal height
+	// Reserve space for: title (1), dir path (2), filename input (2-3),
+	// filter/folder input (1), footer (3), borders/padding (~6)
+	// Total reserved: ~14-15 lines
+	const (
+		minListHeight = 5  // Minimum visible files
+		maxListHeight = 20 // Maximum for very tall terminals
+		reservedLines = 15 // Lines used by other UI elements
+	)
+
+	// Calculate available height for file list
+	availableHeight := height - reservedLines
+
+	// Clamp to min/max bounds
+	if availableHeight < minListHeight {
+		fd.listHeight = minListHeight
+	} else if availableHeight > maxListHeight {
+		fd.listHeight = maxListHeight
+	} else {
+		fd.listHeight = availableHeight
+	}
 }
 
 // matchesAllowedType checks if a file matches the allowed types

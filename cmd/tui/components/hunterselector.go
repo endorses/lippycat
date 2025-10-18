@@ -14,12 +14,13 @@ import (
 
 // HunterSelectorItem represents a hunter available for subscription
 type HunterSelectorItem struct {
-	HunterID   string
-	Hostname   string
-	Interfaces []string
-	Status     management.HunterStatus
-	RemoteAddr string
-	Selected   bool // Whether this hunter is currently selected for subscription
+	HunterID     string
+	Hostname     string
+	Interfaces   []string
+	Status       management.HunterStatus
+	RemoteAddr   string
+	Selected     bool // Whether this hunter is currently selected for subscription
+	Capabilities *management.HunterCapabilities
 }
 
 // HunterSelector provides a UI for selecting which hunters to subscribe to

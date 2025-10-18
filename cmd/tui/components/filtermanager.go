@@ -188,8 +188,9 @@ func (fm *FilterManager) SetAvailableHunters(hunters []HunterSelectorItem) {
 	fmHunters := make([]filtermanager.HunterSelectorItem, len(hunters))
 	for i, h := range hunters {
 		fmHunters[i] = filtermanager.HunterSelectorItem{
-			HunterID: h.HunterID,
-			Hostname: h.Hostname,
+			HunterID:     h.HunterID,
+			Hostname:     h.Hostname,
+			Capabilities: h.Capabilities,
 		}
 	}
 	fm.availableHunters = fmHunters
@@ -1015,13 +1016,24 @@ func (fm *FilterManager) renderHunterSelection() string {
 		modalWidth = fm.width - 4
 	}
 
+	// Filter hunters based on filter type capabilities
+	compatibleHunters := filtermanager.FilterHuntersByCapability(fm.availableHunters, fm.formState.filterType)
+
+	// Add warning if no compatible hunters available
+	warning := ""
+	if len(compatibleHunters) == 0 && filtermanager.IsVoIPFilterType(fm.formState.filterType) {
+		warning = "\nWarning: No VoIP-capable hunters available. Start a VoIP hunter with 'lc hunt voip' to use this filter type."
+	}
+
 	content := filtermanager.RenderHunterSelection(filtermanager.RenderHunterSelectionParams{
-		AvailableHunters: fm.availableHunters,
+		AvailableHunters: compatibleHunters,
 		SelectedHunters:  fm.formState.targetHunters,
 		CursorIndex:      fm.formState.activeField,
 		ModalWidth:       modalWidth,
 		Theme:            fm.theme,
 	})
+
+	content += warning
 
 	return RenderModal(ModalRenderOptions{
 		Title:      "Select Target Hunters",

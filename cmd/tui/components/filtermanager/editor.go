@@ -15,8 +15,58 @@ import (
 
 // HunterSelectorItem represents a hunter for selection UI
 type HunterSelectorItem struct {
-	HunterID string
-	Hostname string
+	HunterID     string
+	Hostname     string
+	Capabilities *management.HunterCapabilities
+}
+
+// IsVoIPFilterType returns true if the filter type requires VoIP capabilities
+func IsVoIPFilterType(filterType management.FilterType) bool {
+	return filterType == management.FilterType_FILTER_SIP_USER ||
+		filterType == management.FilterType_FILTER_PHONE_NUMBER ||
+		filterType == management.FilterType_FILTER_CALL_ID ||
+		filterType == management.FilterType_FILTER_CODEC
+}
+
+// HunterSupportsFilterType checks if a hunter supports a given filter type based on capabilities
+func HunterSupportsFilterType(hunter HunterSelectorItem, filterType management.FilterType) bool {
+	// Non-VoIP filters (BPF, IP) are supported by all hunters
+	if !IsVoIPFilterType(filterType) {
+		return true
+	}
+
+	// VoIP filters require VoIP capabilities
+	if hunter.Capabilities == nil || len(hunter.Capabilities.FilterTypes) == 0 {
+		// No capabilities info - assume generic hunter (no VoIP support)
+		return false
+	}
+
+	// Check if hunter supports VoIP-specific filters (sip_user is the indicator)
+	for _, ft := range hunter.Capabilities.FilterTypes {
+		if ft == "sip_user" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// FilterHuntersByCapability filters hunters based on filter type capabilities
+func FilterHuntersByCapability(hunters []HunterSelectorItem, filterType management.FilterType) []HunterSelectorItem {
+	// Non-VoIP filters - all hunters compatible
+	if !IsVoIPFilterType(filterType) {
+		return hunters
+	}
+
+	// VoIP filters - only return VoIP-capable hunters
+	compatible := make([]HunterSelectorItem, 0)
+	for _, hunter := range hunters {
+		if HunterSupportsFilterType(hunter, filterType) {
+			compatible = append(compatible, hunter)
+		}
+	}
+
+	return compatible
 }
 
 // RenderFormParams holds input parameters for rendering the filter form

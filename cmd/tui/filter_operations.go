@@ -111,11 +111,12 @@ func (m *Model) handleOpenFilterManager() tea.Cmd {
 		hunterItems := make([]components.HunterSelectorItem, 0, len(hunters))
 		for _, h := range hunters {
 			hunterItems = append(hunterItems, components.HunterSelectorItem{
-				HunterID:   h.ID,
-				Hostname:   h.Hostname,
-				Interfaces: h.Interfaces,
-				Status:     h.Status,
-				RemoteAddr: h.RemoteAddr,
+				HunterID:     h.ID,
+				Hostname:     h.Hostname,
+				Interfaces:   h.Interfaces,
+				Status:       h.Status,
+				RemoteAddr:   h.RemoteAddr,
+				Capabilities: h.Capabilities,
 			})
 		}
 		m.uiState.FilterManager.SetAvailableHunters(hunterItems)
@@ -132,11 +133,12 @@ func (m *Model) handleOpenFilterManager() tea.Cmd {
 		hunterItems := make([]components.HunterSelectorItem, 0, len(hunters))
 		for _, h := range hunters {
 			hunterItems = append(hunterItems, components.HunterSelectorItem{
-				HunterID:   h.ID,
-				Hostname:   h.Hostname,
-				Interfaces: h.Interfaces,
-				Status:     h.Status,
-				RemoteAddr: h.RemoteAddr,
+				HunterID:     h.ID,
+				Hostname:     h.Hostname,
+				Interfaces:   h.Interfaces,
+				Status:       h.Status,
+				RemoteAddr:   h.RemoteAddr,
+				Capabilities: h.Capabilities,
 			})
 		}
 		m.uiState.FilterManager.SetAvailableHunters(hunterItems)

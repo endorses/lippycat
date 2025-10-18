@@ -69,8 +69,12 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	// Connect to processor with TLS
 	creds := credentials.NewTLS(hunterTLSConfig)
 
-	conn, err := grpc.Dial(processorAddr,
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	conn, err := grpc.DialContext(dialCtx, processorAddr,
 		grpc.WithTransportCredentials(creds),
+		grpc.WithBlock(),
 	)
 	require.NoError(t, err, "Failed to dial TLS processor")
 	defer conn.Close()

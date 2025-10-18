@@ -380,20 +380,40 @@ func (m Model) handleProcessorDisconnectedMsg(msg ProcessorDisconnectedMsg) (Mod
 		)
 
 		// Schedule reconnection with exponential backoff
-		backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 6))) * time.Second
-		if backoff > 60*time.Second {
-			backoff = 60 * time.Second
+		// Cap at 10 minutes to handle long network interruptions (e.g., laptop standby)
+		// Exponential backoff: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 512s, 600s (10 min max)
+		backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 9))) * time.Second
+		const maxBackoff = 10 * time.Minute
+		if backoff > maxBackoff {
+			backoff = maxBackoff
 		}
 
-		reconnectCmd := tea.Tick(backoff, func(t time.Time) tea.Msg {
-			return ProcessorReconnectMsg{Address: msg.Address}
-		})
+		// Don't retry indefinitely - stop after 10 attempts (roughly 17 minutes total)
+		// User can manually reconnect from the Nodes view if needed
+		const maxAttempts = 10
+		var reconnectCmd tea.Cmd
+		if proc.FailureCount < maxAttempts {
+			reconnectCmd = tea.Tick(backoff, func(t time.Time) tea.Msg {
+				return ProcessorReconnectMsg{Address: msg.Address}
+			})
+		} else {
+			// Max retries reached - show warning and stop auto-reconnect
+			toastCmd = m.uiState.Toast.Show(
+				fmt.Sprintf("Max reconnection attempts reached for %s - use Nodes view to manually reconnect", msg.Address),
+				components.ToastWarning,
+				components.ToastDurationLong,
+			)
+		}
 
 		// Batch commands (including allDisconnectedToast if set)
-		if allDisconnectedToast != nil {
+		if allDisconnectedToast != nil && reconnectCmd != nil {
 			return m, tea.Batch(toastCmd, allDisconnectedToast, reconnectCmd)
+		} else if allDisconnectedToast != nil {
+			return m, tea.Batch(toastCmd, allDisconnectedToast)
+		} else if reconnectCmd != nil {
+			return m, tea.Batch(toastCmd, reconnectCmd)
 		}
-		return m, tea.Batch(toastCmd, reconnectCmd)
+		return m, toastCmd
 	}
 	return m, nil
 }

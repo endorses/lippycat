@@ -3,10 +3,12 @@ package remotecapture
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
@@ -95,15 +97,51 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 	// Dial node (hunter or processor)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Configure keepalive to detect broken connections quickly
+	// Create custom dialer with TCP keepalive
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 10 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			err := c.Control(func(fd uintptr) {
+				// Enable TCP keepalive
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_KEEPALIVE, 1)
+				if opErr != nil {
+					return
+				}
+				// TCP_KEEPIDLE: 10s
+				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, 10)
+				if opErr != nil {
+					return
+				}
+				// TCP_KEEPINTVL: 5s
+				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, 5)
+				if opErr != nil {
+					return
+				}
+				// TCP_KEEPCNT: 3
+				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, 3)
+			})
+			if err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+
+	// Configure keepalive to survive long network interruptions (e.g., laptop standby)
+	// More lenient settings to handle temporary network disruptions
 	keepaliveParams := keepalive.ClientParameters{
-		Time:                10 * time.Second, // Send ping every 10s
-		Timeout:             3 * time.Second,  // Wait 3s for ping ack
+		Time:                30 * time.Second, // Send ping every 30s (less aggressive)
+		Timeout:             20 * time.Second, // Wait 20s for ping ack (tolerate delays)
 		PermitWithoutStream: true,             // Send pings even without active streams
 	}
 
 	// Build dial options
 	opts := []grpc.DialOption{
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp", addr)
+		}),
 		grpc.WithKeepaliveParams(keepaliveParams),
 	}
 

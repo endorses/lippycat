@@ -172,12 +172,11 @@ func (t *Tabs) View() string {
 	for i, tab := range t.tabs {
 		var content string
 		if i == t.active {
-			// For active tab: icon (no underline) + space + label (underlined with background)
-			// Label gets the tab-specific color as background with Solarized Base3 text
+			// For active tab: icon (no underline) + space + label (underlined)
 			labelStyle := lipgloss.NewStyle().
 				Underline(true).
 				Bold(true).
-				Foreground(tabColors[i]) // Solarized Base3
+				Foreground(t.theme.Foreground)
 				// Background()
 			content = tab.Icon + " " + labelStyle.Render(tab.Label)
 			tabParts = append(tabParts, getActiveStyle(i).Render(content))

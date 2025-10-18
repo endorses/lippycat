@@ -151,18 +151,19 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 		return "" // No keybinds for this tab
 	}
 
-	// Get tab color for background
-	bgColor := f.getTabColor(tabIndex)
+	// Get tab color for text (instead of background)
+	tabColor := f.getTabColor(tabIndex)
 
-	// Create a base style with background for content
-	baseStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#fdf6e3")). // Solarized Base3
-		Background(bgColor)
+	// Styles for keys and descriptions (no background, colored text for keys)
+	keyStyle := lipgloss.NewStyle().
+		Foreground(tabColor).
+		Bold(true)
 
-	// Styles for keys and descriptions (inherit background)
-	keyStyle := baseStyle.Bold(true)
-	descStyle := baseStyle
-	separatorStyle := baseStyle
+	descStyle := lipgloss.NewStyle().
+		Foreground(f.theme.Foreground)
+
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(f.theme.BorderColor)
 
 	// Build keybinds string with styled components
 	var parts []string
@@ -170,7 +171,7 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 		parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(": "+kb.Description))
 	}
 
-	// Join with separators that also have the background
+	// Join with separators
 	var content string
 	for i, part := range parts {
 		if i > 0 {
@@ -179,13 +180,10 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 		content += part
 	}
 
-	// Wrap with padding (background will extend through padding)
-	containerStyle := baseStyle.Padding(0, 1)
+	// Wrap with padding
+	containerStyle := lipgloss.NewStyle().Padding(0, 1)
 
-	//return containerStyle.Render(content)
-	// Add manual padding with terminal background (not tab background)
-	// Left padding: 2 spaces, right padding: 2 spaces
-	return " " + containerStyle.Render(content) + " "
+	return containerStyle.Render(content)
 }
 
 // renderGeneralSection renders the general keybinds section (right side)
@@ -236,6 +234,11 @@ func (f *Footer) View() string {
 	tabSection := f.renderTabSpecificSection(f.activeTab)
 	generalSection := f.renderGeneralSection()
 
+	// Separator between tab-specific and general sections
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(f.theme.BorderColor)
+	separator := separatorStyle.Render(" ║ ")
+
 	// Version info for far right (only show if enough space)
 	versionText := fmt.Sprintf("🫦🐱 %s ", version.GetVersion())
 	versionStyle := lipgloss.NewStyle().
@@ -244,22 +247,23 @@ func (f *Footer) View() string {
 
 	// Calculate widths
 	tabSectionWidth := lipgloss.Width(tabSection)
+	separatorWidth := lipgloss.Width(separator)
 	generalSectionWidth := lipgloss.Width(generalSection)
 	versionWidth := lipgloss.Width(versionRendered)
 
 	// Build footer with sections
 	var footer string
 
-	if tabSectionWidth+generalSectionWidth+versionWidth+4 <= f.width {
-		// Enough space for all three: tab section, general section, and version
-		spacerWidth := f.width - tabSectionWidth - generalSectionWidth - versionWidth
+	if tabSectionWidth+separatorWidth+generalSectionWidth+versionWidth <= f.width {
+		// Enough space for all: tab section, separator, general section, and version
+		spacerWidth := f.width - tabSectionWidth - separatorWidth - generalSectionWidth - versionWidth
 		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footer = tabSection + generalSection + spacer + versionRendered
-	} else if tabSectionWidth+generalSectionWidth+2 <= f.width {
-		// Enough space for both sections, skip version
-		spacerWidth := f.width - tabSectionWidth - generalSectionWidth
+		footer = tabSection + separator + generalSection + spacer + versionRendered
+	} else if tabSectionWidth+separatorWidth+generalSectionWidth <= f.width {
+		// Enough space for both sections with separator, skip version
+		spacerWidth := f.width - tabSectionWidth - separatorWidth - generalSectionWidth
 		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footer = tabSection + generalSection + spacer
+		footer = tabSection + separator + generalSection + spacer
 	} else {
 		// Not enough space - show tab section only and pad to width
 		spacerWidth := f.width - tabSectionWidth

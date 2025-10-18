@@ -343,8 +343,13 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		}
 
 		if err := stream.Send(ack); err != nil {
-			logger.Error("Failed to send acknowledgment", "error", err)
-			return err
+			// Log error but don't close stream - hunter may recover
+			// Closing stream would disconnect the hunter unnecessarily
+			logger.Warn("Failed to send flow control acknowledgment, continuing",
+				"error", err,
+				"sequence", batch.Sequence,
+				"hunter_id", batch.HunterId)
+			// Continue processing - don't return error
 		}
 	}
 }
@@ -571,8 +576,8 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
-				PacketsCaptured:  h.PacketsReceived,
-				PacketsForwarded: h.PacketsReceived,
+				PacketsCaptured:  h.PacketsCaptured,  // From hunter's heartbeat stats
+				PacketsForwarded: h.PacketsForwarded, // From hunter's heartbeat stats
 				ActiveFilters:    h.ActiveFilters,
 			},
 			Interfaces: h.Interfaces,

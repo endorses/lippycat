@@ -16,7 +16,9 @@ type ConnectedHunter struct {
 	Interfaces              []string
 	ConnectedAt             int64
 	LastHeartbeat           int64
-	PacketsReceived         uint64
+	PacketsReceived         uint64 // Packets received by processor from this hunter
+	PacketsCaptured         uint64 // Packets captured by hunter (from heartbeat stats)
+	PacketsForwarded        uint64 // Packets forwarded by hunter (from heartbeat stats)
 	ActiveFilters           uint32 // Active filter count from hunter stats
 	Status                  management.HunterStatus
 	FilterUpdateFailures    uint32 // Consecutive filter update send failures
@@ -95,6 +97,10 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 		hunter.LastHeartbeat = timestampNs
 		hunter.Status = status
 		if stats != nil {
+			// Update packet counts from hunter's reported stats
+			hunter.PacketsCaptured = stats.PacketsCaptured
+			hunter.PacketsForwarded = stats.PacketsForwarded
+
 			// Check if filter count changed
 			oldFilters := hunter.ActiveFilters
 			if hunter.ActiveFilters != stats.ActiveFilters {

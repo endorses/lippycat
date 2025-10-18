@@ -314,6 +314,9 @@ message ConnectedHunter {
 
     // Network interfaces being captured
     repeated string interfaces = 9;
+
+    // Hunter capabilities (filter types, GPU acceleration, etc.)
+    HunterCapabilities capabilities = 10;
 }
 
 // ProcessorStats for processor node

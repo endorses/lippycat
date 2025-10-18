@@ -314,6 +314,10 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 				}
 				headerLines = append(headerLines, ip)
 
+				// Mode badge (centered, bold)
+				modeBadge := GetHunterModeBadge(hunter.Capabilities, params.Theme)
+				headerLines = append(headerLines, modeBadge)
+
 				// Body content - use condensed format for narrow boxes, labeled format for wider boxes
 				const minWidthForLabels = 26 // Minimum width needed for labels
 				const labelWidth = 10        // Width for label column when labels are shown

@@ -64,6 +64,42 @@ func FormatDuration(ns int64) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
+// IsVoIPHunter determines if a hunter supports VoIP filters based on capabilities
+func IsVoIPHunter(capabilities *management.HunterCapabilities) bool {
+	if capabilities == nil || len(capabilities.FilterTypes) == 0 {
+		// No capabilities - assume generic (backward compatibility)
+		return false
+	}
+
+	// Check if hunter supports VoIP-specific filters (sip_user is the indicator)
+	for _, ft := range capabilities.FilterTypes {
+		if ft == "sip_user" {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetHunterModeBadge returns a styled badge for hunter mode
+func GetHunterModeBadge(capabilities *management.HunterCapabilities, theme themes.Theme) string {
+	if IsVoIPHunter(capabilities) {
+		// VoIP badge - use purple/magenta color
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("63")).
+			Padding(0, 1).
+			Render("VoIP")
+	}
+
+	// Generic badge - use gray color
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("240")).
+		Padding(0, 1).
+		Render("Generic")
+}
+
 // RenderBox renders a box with rounded corners around the given lines
 func RenderBox(lines []string, width int, style lipgloss.Style) string {
 	var b strings.Builder

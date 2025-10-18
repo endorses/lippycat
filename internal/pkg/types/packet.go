@@ -62,5 +62,6 @@ type HunterInfo struct {
 	PacketsDropped   uint64
 	ActiveFilters    uint32
 	Interfaces       []string
-	ProcessorAddr    string // Address of processor this hunter belongs to
+	ProcessorAddr    string                         // Address of processor this hunter belongs to
+	Capabilities     *management.HunterCapabilities // Hunter capabilities (filter types, etc.)
 }

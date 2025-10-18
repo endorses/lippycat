@@ -127,10 +127,11 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		// Table header for hunters under this processor
 		// Add tree structure continuation to header
 		treePrefix := "  │  "
-		headerLine := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+		headerLine := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 			treeCol, treePrefix,
 			1, "S", // Status
 			idCol, "Hunter ID",
+			8, "Mode", // Mode column (Generic/VoIP)
 			hostCol, "IP Address",
 			uptimeCol, "Uptime",
 			capturedCol, "Captured",
@@ -213,6 +214,12 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			forwardedStr := FormatPacketNumber(hunter.PacketsForwarded)
 			filtersStr := fmt.Sprintf("%d", hunter.ActiveFilters)
 
+			// Determine mode (VoIP or Generic)
+			modeStr := "Generic"
+			if IsVoIPHunter(hunter.Capabilities) {
+				modeStr = "VoIP"
+			}
+
 			// Track this hunter's line position for mouse clicks
 			// Current line is linesRendered (before we increment it)
 			params.HunterLines[linesRendered] = globalIndex
@@ -221,10 +228,11 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			if globalIndex == params.SelectedIndex {
 				selectedNodeLine = linesRendered
 				// For selected row: build plain text line, then apply full-width background
-				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s",
+				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 					treeCol, prefix,
 					statusIcon,
 					idCol, idStr,
+					8, modeStr,
 					hostCol, hostnameStr,
 					uptimeCol, uptimeStr,
 					capturedCol, capturedStr,
@@ -237,10 +245,11 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			} else {
 				// For non-selected: style the status icon separately
 				statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
-				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s",
+				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 					treeCol, prefix,
 					statusStyled,
 					idCol, idStr,
+					8, modeStr,
 					hostCol, hostnameStr,
 					uptimeCol, uptimeStr,
 					capturedCol, capturedStr,

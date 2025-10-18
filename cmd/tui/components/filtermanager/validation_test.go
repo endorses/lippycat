@@ -33,10 +33,22 @@ func TestValidateFilter_WhitespacePattern(t *testing.T) {
 }
 
 func TestValidateFilter_ValidPattern(t *testing.T) {
+	// Mock VoIP hunter to satisfy validation
+	mockHunters := []HunterSelectorItem{
+		{
+			HunterID: "hunter-1",
+			Hostname: "test-host",
+			Capabilities: &management.HunterCapabilities{
+				FilterTypes: []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
+			},
+		},
+	}
+
 	result := ValidateFilter(ValidateFilterParams{
-		Pattern:     "alice@example.com",
-		Description: "Test user",
-		Type:        management.FilterType_FILTER_SIP_USER,
+		Pattern:          "alicent@example.com",
+		Description:      "Test user",
+		Type:             management.FilterType_FILTER_SIP_USER,
+		AvailableHunters: mockHunters,
 	})
 
 	assert.True(t, result.Valid)

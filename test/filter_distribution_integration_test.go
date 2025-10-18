@@ -51,7 +51,7 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 		Interfaces: []string{"eth0"},
 		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"bpf"},
+			FilterTypes:     []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
 			AfXdp:           false,
@@ -149,7 +149,7 @@ func TestIntegration_FilterDistribution_MultipleHunters(t *testing.T) {
 			Interfaces: []string{"eth0"},
 			Version:    "test-1.0.0",
 			Capabilities: &management.HunterCapabilities{
-				FilterTypes:     []string{"bpf"},
+				FilterTypes:     []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
 				MaxBufferSize:   8192,
 				GpuAcceleration: false,
 				AfXdp:           false,
@@ -258,7 +258,7 @@ func TestIntegration_FilterDistribution_UpdateAndRemove(t *testing.T) {
 		Interfaces: []string{"eth0"},
 		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"bpf"},
+			FilterTypes:     []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
 			AfXdp:           false,
@@ -377,7 +377,7 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 		Interfaces: []string{"eth0"},
 		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"bpf"},
+			FilterTypes:     []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
 			AfXdp:           false,
@@ -414,7 +414,7 @@ func TestIntegration_FilterDistribution_CircuitBreaker(t *testing.T) {
 		Interfaces: []string{"eth0"},
 		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"bpf"},
+			FilterTypes:     []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
 			AfXdp:           false,
@@ -503,7 +503,7 @@ func TestIntegration_FilterDistribution_Priority(t *testing.T) {
 		Interfaces: []string{"eth0"},
 		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"bpf"},
+			FilterTypes:     []string{"bpf", "sip_user", "phone_number", "call_id", "codec"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
 			AfXdp:           false,

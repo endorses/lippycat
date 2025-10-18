@@ -2,6 +2,7 @@ package hunter
 
 import (
 	"bytes"
+	"net"
 	"strings"
 	"sync"
 
@@ -13,62 +14,80 @@ import (
 	"github.com/google/gopacket"
 )
 
-// VoIPFilter handles GPU-accelerated VoIP packet filtering
-type VoIPFilter struct {
-	gpuAccel     *voip.GPUAccelerator
-	detector     *detector.Detector // Protocol detector for accurate VoIP detection
-	config       *voip.GPUConfig
-	sipUsers     []string
-	phoneNumbers []string
-	patterns     []voip.GPUPattern
-	mu           sync.RWMutex
-	enabled      bool
+// ApplicationFilter handles GPU-accelerated application-layer packet filtering
+// Supports multiple protocols via the detector and can be extended with protocol-specific filters
+type ApplicationFilter struct {
+	gpuAccel       *voip.GPUAccelerator
+	detector       *detector.Detector // Protocol detector for accurate protocol detection
+	config         *voip.GPUConfig
+	sipUsers       []string
+	phoneNumbers   []string
+	ipAddresses    []string // IP addresses as strings (for display/logging)
+	ipAddressBytes [][]byte // Parsed IP addresses as bytes (for SIMD comparison)
+	patterns       []voip.GPUPattern
+	mu             sync.RWMutex
+	enabled        bool
 }
 
-// NewVoIPFilter creates a new VoIP filter with optional GPU acceleration
-func NewVoIPFilter(config *voip.GPUConfig) (*VoIPFilter, error) {
-	vf := &VoIPFilter{
-		config:       config,
-		detector:     detector.InitDefault(), // Use centralized detector for accurate VoIP detection
-		sipUsers:     make([]string, 0),
-		phoneNumbers: make([]string, 0),
-		patterns:     make([]voip.GPUPattern, 0),
-		enabled:      config != nil && config.Enabled,
+// NewApplicationFilter creates a new application-layer filter with optional GPU acceleration
+// This filter is protocol-agnostic and uses the detector to identify protocols
+func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
+	af := &ApplicationFilter{
+		config:         config,
+		detector:       detector.InitDefault(), // Use centralized detector for accurate protocol detection
+		sipUsers:       make([]string, 0),
+		phoneNumbers:   make([]string, 0),
+		ipAddresses:    make([]string, 0),
+		ipAddressBytes: make([][]byte, 0),
+		patterns:       make([]voip.GPUPattern, 0),
+		enabled:        config != nil && config.Enabled,
 	}
 
 	// Initialize GPU accelerator if enabled
-	if vf.enabled {
+	if af.enabled {
 		gpuAccel, err := voip.NewGPUAccelerator(config)
 		if err != nil {
-			logger.Warn("Failed to initialize GPU accelerator for VoIP filtering, falling back to CPU", "error", err)
-			vf.enabled = false
+			logger.Warn("Failed to initialize GPU accelerator for application-layer filtering, falling back to CPU", "error", err)
+			af.enabled = false
 		} else {
-			vf.gpuAccel = gpuAccel
+			af.gpuAccel = gpuAccel
 		}
 	}
 
-	logger.Info("VoIP filter initialized with centralized detector")
-	return vf, nil
+	logger.Info("Application filter initialized with centralized protocol detector")
+	return af, nil
+}
+
+// NewVoIPFilter is a deprecated alias for NewApplicationFilter
+// Maintained for backward compatibility
+func NewVoIPFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
+	logger.Warn("NewVoIPFilter is deprecated, use NewApplicationFilter instead")
+	return NewApplicationFilter(config)
 }
 
 // UpdateFilters updates the filter list from processor
-func (vf *VoIPFilter) UpdateFilters(filters []*management.Filter) {
-	vf.mu.Lock()
-	defer vf.mu.Unlock()
+// This method supports hot-reload without restarting capture for application-level filters
+func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
+	af.mu.Lock()
+	defer af.mu.Unlock()
 
 	// Clear existing
-	vf.sipUsers = vf.sipUsers[:0]
-	vf.phoneNumbers = vf.phoneNumbers[:0]
-	vf.patterns = vf.patterns[:0]
+	af.sipUsers = af.sipUsers[:0]
+	af.phoneNumbers = af.phoneNumbers[:0]
+	af.ipAddresses = af.ipAddresses[:0]
+	af.ipAddressBytes = af.ipAddressBytes[:0]
+	af.patterns = af.patterns[:0]
 
 	// Build new filter lists
+	// Note: BPF filters are NOT handled here - they require capture restart
+	// and are managed by filtering.Manager
 	for _, filter := range filters {
 		switch filter.Type {
 		case management.FilterType_FILTER_SIP_USER:
-			vf.sipUsers = append(vf.sipUsers, filter.Pattern)
-			// Create GPU pattern for SIP user matching
-			vf.patterns = append(vf.patterns, voip.GPUPattern{
-				ID:            len(vf.patterns),
+			af.sipUsers = append(af.sipUsers, filter.Pattern)
+			// Create GPU pattern for SIP user matching (payload scanning)
+			af.patterns = append(af.patterns, voip.GPUPattern{
+				ID:            len(af.patterns),
 				Pattern:       []byte(filter.Pattern),
 				PatternLen:    len(filter.Pattern),
 				Type:          voip.PatternTypeContains,
@@ -76,36 +95,69 @@ func (vf *VoIPFilter) UpdateFilters(filters []*management.Filter) {
 			})
 
 		case management.FilterType_FILTER_PHONE_NUMBER:
-			vf.phoneNumbers = append(vf.phoneNumbers, filter.Pattern)
-			// Create GPU pattern for phone number matching
-			vf.patterns = append(vf.patterns, voip.GPUPattern{
-				ID:            len(vf.patterns),
+			af.phoneNumbers = append(af.phoneNumbers, filter.Pattern)
+			// Create GPU pattern for phone number matching (payload scanning)
+			af.patterns = append(af.patterns, voip.GPUPattern{
+				ID:            len(af.patterns),
 				Pattern:       []byte(filter.Pattern),
 				PatternLen:    len(filter.Pattern),
 				Type:          voip.PatternTypeContains,
 				CaseSensitive: false,
 			})
+
+		case management.FilterType_FILTER_IP_ADDRESS:
+			af.ipAddresses = append(af.ipAddresses, filter.Pattern)
+			// Parse and normalize IP address to bytes for comparison
+			// IP addresses are matched at network layer (headers), not payload
+			// GPU acceleration doesn't apply here
+			if ip := net.ParseIP(filter.Pattern); ip != nil {
+				// Convert to 4-byte form for IPv4 (gopacket uses 4-byte representation)
+				// or 16-byte form for IPv6
+				if ipv4 := ip.To4(); ipv4 != nil {
+					af.ipAddressBytes = append(af.ipAddressBytes, []byte(ipv4))
+				} else {
+					af.ipAddressBytes = append(af.ipAddressBytes, []byte(ip))
+				}
+			} else {
+				logger.Warn("Failed to parse IP address filter", "pattern", filter.Pattern)
+			}
+
+			// Future: Add other protocol-specific filters here
+			// case management.FilterType_FILTER_HTTP_PATH:
+			// case management.FilterType_FILTER_DNS_QUERY:
 		}
 	}
 
-	logger.Info("Updated VoIP filters",
-		"sip_users", len(vf.sipUsers),
-		"phone_numbers", len(vf.phoneNumbers),
-		"gpu_enabled", vf.enabled)
+	logger.Info("Updated application-level filters (hot-reload, no restart)",
+		"sip_users", len(af.sipUsers),
+		"phone_numbers", len(af.phoneNumbers),
+		"ip_addresses", len(af.ipAddresses),
+		"gpu_enabled", af.enabled)
 }
 
 // MatchPacket checks if a packet matches any of the filters
-func (vf *VoIPFilter) MatchPacket(packet gopacket.Packet) bool {
-	vf.mu.RLock()
-	defer vf.mu.RUnlock()
+func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
+	af.mu.RLock()
+	defer af.mu.RUnlock()
 
 	// If no filters, match everything
-	if len(vf.sipUsers) == 0 && len(vf.phoneNumbers) == 0 {
+	if len(af.sipUsers) == 0 && len(af.phoneNumbers) == 0 && len(af.ipAddresses) == 0 {
 		return true
 	}
 
+	// Check IP addresses first (applies to all protocols)
+	if len(af.ipAddresses) > 0 {
+		if af.matchIPAddress(packet) {
+			return true
+		}
+		// If we have ONLY IP filters (no VoIP filters), don't continue to VoIP checks
+		if len(af.sipUsers) == 0 && len(af.phoneNumbers) == 0 {
+			return false
+		}
+	}
+
 	// Check if this is a SIP or RTP packet
-	if !vf.isVoIPPacket(packet) {
+	if !af.isVoIPPacket(packet) {
 		return false
 	}
 
@@ -119,23 +171,23 @@ func (vf *VoIPFilter) MatchPacket(packet gopacket.Packet) bool {
 	payload := appLayer.LayerContents()
 
 	// Use GPU if enabled and we have patterns
-	if vf.enabled && vf.gpuAccel != nil && len(vf.patterns) > 0 {
-		return vf.matchWithGPU([]byte(payload))
+	if af.enabled && af.gpuAccel != nil && len(af.patterns) > 0 {
+		return af.matchWithGPU([]byte(payload))
 	}
 
 	// CPU fallback
-	return vf.matchWithCPU(string(payload))
+	return af.matchWithCPU(string(payload))
 }
 
 // MatchBatch checks multiple packets using GPU acceleration
-func (vf *VoIPFilter) MatchBatch(packets []gopacket.Packet) []bool {
-	vf.mu.RLock()
-	defer vf.mu.RUnlock()
+func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
+	af.mu.RLock()
+	defer af.mu.RUnlock()
 
 	results := make([]bool, len(packets))
 
 	// If no filters, match everything
-	if len(vf.sipUsers) == 0 && len(vf.phoneNumbers) == 0 {
+	if len(af.sipUsers) == 0 && len(af.phoneNumbers) == 0 {
 		for i := range results {
 			results[i] = true
 		}
@@ -147,7 +199,7 @@ func (vf *VoIPFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	voipIndices := make([]int, 0, len(packets))
 
 	for i, packet := range packets {
-		if vf.isVoIPPacket(packet) {
+		if af.isVoIPPacket(packet) {
 			if appLayer := packet.ApplicationLayer(); appLayer != nil {
 				// Use LayerContents() to get full message with headers
 				voipPackets = append(voipPackets, appLayer.LayerContents())
@@ -157,8 +209,8 @@ func (vf *VoIPFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	}
 
 	// If we have GPU and multiple packets, use batch processing
-	if vf.enabled && vf.gpuAccel != nil && len(voipPackets) > 1 && len(vf.patterns) > 0 {
-		gpuResults, err := vf.gpuAccel.ProcessBatch(voipPackets, vf.patterns)
+	if af.enabled && af.gpuAccel != nil && len(voipPackets) > 1 && len(af.patterns) > 0 {
+		gpuResults, err := af.gpuAccel.ProcessBatch(voipPackets, af.patterns)
 		if err == nil {
 			// Map GPU results back to packet indices
 			matchedPackets := make(map[int]bool)
@@ -179,23 +231,23 @@ func (vf *VoIPFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	// CPU fallback
 	for _, idx := range voipIndices {
 		packet := packets[idx]
-		results[idx] = vf.MatchPacket(packet)
+		results[idx] = af.MatchPacket(packet)
 	}
 
 	return results
 }
 
 // matchWithGPU uses GPU acceleration for pattern matching
-func (vf *VoIPFilter) matchWithGPU(payload []byte) bool {
-	if vf.gpuAccel == nil || len(vf.patterns) == 0 {
+func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
+	if af.gpuAccel == nil || len(af.patterns) == 0 {
 		return false
 	}
 
 	// Process single packet as batch of 1
-	results, err := vf.gpuAccel.ProcessBatch([][]byte{payload}, vf.patterns)
+	results, err := af.gpuAccel.ProcessBatch([][]byte{payload}, af.patterns)
 	if err != nil {
 		// Fall back to CPU on error
-		return vf.matchWithCPU(string(payload))
+		return af.matchWithCPU(string(payload))
 	}
 
 	// Check if any pattern matched
@@ -209,7 +261,7 @@ func (vf *VoIPFilter) matchWithGPU(payload []byte) bool {
 }
 
 // matchWithCPU uses CPU for pattern matching with SIMD optimization
-func (vf *VoIPFilter) matchWithCPU(payload string) bool {
+func (af *ApplicationFilter) matchWithCPU(payload string) bool {
 	// Convert to bytes for SIMD operations (zero-copy)
 	payloadBytes := []byte(payload)
 
@@ -217,7 +269,7 @@ func (vf *VoIPFilter) matchWithCPU(payload string) bool {
 	sipHeaders := extractSIPHeaders(payloadBytes)
 
 	// Check SIP users in proper headers (From, To, P-Asserted-Identity)
-	for _, user := range vf.sipUsers {
+	for _, user := range af.sipUsers {
 		userBytes := []byte(strings.ToLower(user))
 
 		// Check in From header
@@ -246,7 +298,7 @@ func (vf *VoIPFilter) matchWithCPU(payload string) bool {
 	}
 
 	// Check phone numbers in proper headers
-	for _, number := range vf.phoneNumbers {
+	for _, number := range af.phoneNumbers {
 		numberBytes := []byte(number)
 
 		// Check in From header
@@ -349,11 +401,34 @@ func extractHeaderValue(line []byte) []byte {
 	return bytes.TrimSpace(value)
 }
 
+// matchIPAddress checks if packet source or destination IP matches any filter
+// Uses SIMD-optimized byte comparison for high-performance network layer filtering
+func (af *ApplicationFilter) matchIPAddress(packet gopacket.Packet) bool {
+	// Get network layer
+	if netLayer := packet.NetworkLayer(); netLayer != nil {
+		// Get raw IP bytes (4 bytes for IPv4, 16 bytes for IPv6)
+		// This avoids string conversion overhead
+		srcIPBytes := netLayer.NetworkFlow().Src().Raw()
+		dstIPBytes := netLayer.NetworkFlow().Dst().Raw()
+
+		// Check if source or destination matches any IP filter
+		// Use SIMD-optimized comparison (AVX2/SSE2) for maximum performance
+		for _, filterIPBytes := range af.ipAddressBytes {
+			// SIMD comparison is much faster than string comparison
+			// Especially for high packet rates
+			if simd.BytesEqual(srcIPBytes, filterIPBytes) || simd.BytesEqual(dstIPBytes, filterIPBytes) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isVoIPPacket checks if a packet is SIP or RTP using centralized detector
-func (vf *VoIPFilter) isVoIPPacket(packet gopacket.Packet) bool {
+func (af *ApplicationFilter) isVoIPPacket(packet gopacket.Packet) bool {
 	// Use centralized detector for accurate protocol detection
 	// This replaces unreliable port-based heuristics
-	result := vf.detector.Detect(packet)
+	result := af.detector.Detect(packet)
 	if result == nil {
 		return false
 	}
@@ -368,9 +443,9 @@ func (vf *VoIPFilter) isVoIPPacket(packet gopacket.Packet) bool {
 }
 
 // Close cleans up GPU resources
-func (vf *VoIPFilter) Close() {
-	if vf.gpuAccel != nil {
+func (af *ApplicationFilter) Close() {
+	if af.gpuAccel != nil {
 		// GPU cleanup would happen here
-		logger.Info("VoIP filter closed")
+		logger.Info("Application filter closed")
 	}
 }

@@ -60,8 +60,8 @@ type Hunter struct {
 	connectionManager *connection.Manager
 	statsCollector    *stats.Collector
 
-	// VoIP filtering (GPU-accelerated)
-	voipFilter *VoIPFilter
+	// Application-level filtering (GPU-accelerated, protocol-agnostic)
+	applicationFilter *ApplicationFilter
 
 	// Custom packet processing
 	packetProcessor forwarding.PacketProcessor // Optional custom processor for VoIP buffering, etc.
@@ -123,6 +123,9 @@ func New(config Config) (*Hunter, error) {
 	// Create filter manager with capture restarter interface
 	h.filterManager = filtering.New(config.HunterID, captureManager, h)
 
+	// Note: Application filter will be wired up in Start() after initialization
+	// This allows filter manager to hot-reload app-level filters without restart
+
 	return h, nil
 }
 
@@ -139,9 +142,11 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	logger.Info("Hunter starting", "hunter_id", h.config.HunterID)
 
-	// Initialize VoIP filter if enabled
+	// Initialize application filter (always, for hot-reload support)
+	// GPU acceleration is only enabled if VoIP filtering is enabled
+	var gpuConfig *voip.GPUConfig
 	if h.config.EnableVoIPFilter {
-		gpuConfig := &voip.GPUConfig{
+		gpuConfig = &voip.GPUConfig{
 			Enabled:      true,
 			DeviceID:     0,
 			Backend:      h.config.GPUBackend,
@@ -149,20 +154,30 @@ func (h *Hunter) Start(ctx context.Context) error {
 			PinnedMemory: true,
 			StreamCount:  4,
 		}
-
-		voipFilter, err := NewVoIPFilter(gpuConfig)
-		if err != nil {
-			logger.Warn("Failed to initialize VoIP filter, continuing without it", "error", err)
-		} else {
-			h.voipFilter = voipFilter
-			logger.Info("VoIP filter initialized",
-				"gpu_backend", h.config.GPUBackend,
-				"batch_size", h.config.GPUBatchSize)
+	} else {
+		// CPU-only mode (no GPU acceleration)
+		gpuConfig = &voip.GPUConfig{
+			Enabled: false,
 		}
 	}
+
+	appFilter, err := NewApplicationFilter(gpuConfig)
+	if err != nil {
+		logger.Warn("Failed to initialize application filter, continuing without it", "error", err)
+	} else {
+		h.applicationFilter = appFilter
+		logger.Info("Application filter initialized",
+			"gpu_enabled", h.config.EnableVoIPFilter,
+			"gpu_backend", h.config.GPUBackend,
+			"batch_size", h.config.GPUBatchSize)
+
+		// Wire up application filter to filter manager for hot-reload
+		h.filterManager.SetApplicationFilterUpdater(appFilter)
+		logger.Info("Application filter hot-reload enabled (filters update without restart)")
+	}
 	defer func() {
-		if h.voipFilter != nil {
-			h.voipFilter.Close()
+		if h.applicationFilter != nil {
+			h.applicationFilter.Close()
 		}
 	}()
 
@@ -304,8 +319,8 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 	if h.packetProcessor != nil {
 		fwdMgr.SetPacketProcessor(h.packetProcessor)
 	}
-	if h.voipFilter != nil {
-		fwdMgr.SetVoIPFilter(h.voipFilter)
+	if h.applicationFilter != nil {
+		fwdMgr.SetApplicationFilter(h.applicationFilter)
 	}
 	// Set disconnect callback to trigger reconnection on send failures
 	fwdMgr.SetDisconnectCallback(func() {

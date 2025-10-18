@@ -23,8 +23,8 @@ type PacketProcessor interface {
 	ProcessPacket(pktInfo capture.PacketInfo) bool
 }
 
-// VoIPFilter provides simple VoIP packet filtering
-type VoIPFilter interface {
+// ApplicationFilter provides application-layer packet filtering (protocol-agnostic)
+type ApplicationFilter interface {
 	MatchPacket(packet gopacket.Packet) bool
 }
 
@@ -87,8 +87,8 @@ type Manager struct {
 	disconnectCallback  func()       // Called when connection appears dead
 
 	// Optional packet processing
-	packetProcessor PacketProcessor
-	voipFilter      VoIPFilter
+	packetProcessor   PacketProcessor
+	applicationFilter ApplicationFilter
 
 	// Dependencies
 	statsCollector   StatsCollector
@@ -150,9 +150,15 @@ func (m *Manager) SetDisconnectCallback(callback func()) {
 	m.disconnectCallback = callback
 }
 
-// SetVoIPFilter sets an optional VoIP filter
-func (m *Manager) SetVoIPFilter(filter VoIPFilter) {
-	m.voipFilter = filter
+// SetApplicationFilter sets an optional application-layer filter
+func (m *Manager) SetApplicationFilter(filter ApplicationFilter) {
+	m.applicationFilter = filter
+}
+
+// SetVoIPFilter is a deprecated alias for SetApplicationFilter
+// Maintained for backward compatibility
+func (m *Manager) SetVoIPFilter(filter ApplicationFilter) {
+	m.SetApplicationFilter(filter)
 }
 
 // HandleFlowControl updates flow control state based on processor signals
@@ -239,10 +245,10 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				}
 				// Packet should be forwarded - count it as matched
 				m.statsCollector.IncrementMatched()
-			} else if m.voipFilter != nil {
-				// Fall back to simple VoIP filter if no custom processor
-				if !m.voipFilter.MatchPacket(pktInfo.Packet) {
-					// Packet didn't match VoIP filter - skip it
+			} else if m.applicationFilter != nil {
+				// Fall back to application-layer filter if no custom processor
+				if !m.applicationFilter.MatchPacket(pktInfo.Packet) {
+					// Packet didn't match application filter - skip it
 					continue
 				}
 				// Packet matched - count it

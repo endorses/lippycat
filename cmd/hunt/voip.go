@@ -72,6 +72,7 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		BatchSize:        getIntConfig("hunter.batch_size", batchSize),
 		BatchTimeout:     time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BatchQueueSize:   getIntConfig("hunter.batch_queue_size", batchQueueSize),
+		VoIPMode:         true, // VoIP hunter mode (with call buffering)
 		EnableVoIPFilter: true, // Always enable VoIP filtering in voip mode
 		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
 		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),

@@ -33,6 +33,7 @@ type Config struct {
 	BufferSize    int
 	BatchSize     int
 	BatchTimeout  time.Duration
+	VoIPMode      bool // Determines filter capabilities advertised to processor
 	// TLS settings
 	TLSEnabled            bool
 	TLSCertFile           string
@@ -419,13 +420,23 @@ func (m *Manager) register() error {
 		hostname = m.config.HunterID // Final fallback to hunter ID
 	}
 
+	// Determine filter capabilities based on hunter mode
+	var filterTypes []string
+	if m.config.VoIPMode {
+		// VoIP hunter - supports all filter types (call buffering + RTP association)
+		filterTypes = []string{"bpf", "ip_address", "sip_user", "phone_number", "call_id", "codec"}
+	} else {
+		// Generic hunter - only BPF and IP filters (no call buffering)
+		filterTypes = []string{"bpf", "ip_address"}
+	}
+
 	req := &management.HunterRegistration{
 		HunterId:   m.config.HunterID,
 		Hostname:   hostname,
 		Interfaces: m.config.Interfaces,
 		Version:    "0.1.0", // TODO: version from build
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"sip_user", "phone_number", "ip_address"},
+			FilterTypes:     filterTypes,
 			MaxBufferSize:   uint64(m.config.BufferSize * 2048), // #nosec G115 - Assume 2KB avg packet
 			GpuAcceleration: false,                              // TODO: detect GPU
 			AfXdp:           false,                              // TODO: detect AF_XDP

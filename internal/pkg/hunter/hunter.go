@@ -34,6 +34,7 @@ type Config struct {
 	MaxBufferedBatches int           // Max batches to buffer before blocking (0 = unlimited)
 	SendTimeout        time.Duration // Timeout for sending batches (0 = no timeout)
 	// VoIP filtering
+	VoIPMode         bool   // True for 'lc hunt voip' (with call buffering), false for generic hunt
 	EnableVoIPFilter bool   // Enable VoIP filtering with GPU acceleration
 	GPUBackend       string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
 	GPUBatchSize     int    // Batch size for GPU processing
@@ -201,6 +202,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			BufferSize:            h.config.BufferSize,
 			BatchSize:             h.config.BatchSize,
 			BatchTimeout:          h.config.BatchTimeout,
+			VoIPMode:              h.config.VoIPMode,
 			TLSEnabled:            h.config.TLSEnabled,
 			TLSCertFile:           h.config.TLSCertFile,
 			TLSKeyFile:            h.config.TLSKeyFile,

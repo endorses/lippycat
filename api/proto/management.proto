@@ -379,4 +379,7 @@ message AvailableHunter {
 
     // Connected duration (seconds)
     uint64 connected_duration_sec = 6;
+
+    // Hunter capabilities (filter types, GPU acceleration, etc.)
+    HunterCapabilities capabilities = 7;
 }

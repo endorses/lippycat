@@ -410,12 +410,13 @@ func (m *Model) loadHuntersFromProcessor(processorAddr string) tea.Cmd {
 		hunterItems := make([]components.HunterSelectorItem, 0, len(resp.Hunters))
 		for _, h := range resp.Hunters {
 			hunterItems = append(hunterItems, components.HunterSelectorItem{
-				HunterID:   h.HunterId,
-				Hostname:   h.Hostname,
-				Interfaces: h.Interfaces,
-				Status:     h.Status,
-				RemoteAddr: h.RemoteAddr,
-				Selected:   subscribedIDs[h.HunterId],
+				HunterID:     h.HunterId,
+				Hostname:     h.Hostname,
+				Interfaces:   h.Interfaces,
+				Status:       h.Status,
+				RemoteAddr:   h.RemoteAddr,
+				Selected:     subscribedIDs[h.HunterId],
+				Capabilities: h.Capabilities,
 			})
 		}
 

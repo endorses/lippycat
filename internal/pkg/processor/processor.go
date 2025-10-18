@@ -624,6 +624,7 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 			Status:               h.Status,
 			RemoteAddr:           h.RemoteAddr,
 			ConnectedDurationSec: durationSec,
+			Capabilities:         h.Capabilities, // Hunter capabilities (filter types, etc.)
 		})
 	}
 

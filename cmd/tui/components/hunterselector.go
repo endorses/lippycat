@@ -213,8 +213,33 @@ func (hs *HunterSelector) View() string {
 				}
 			}
 
-			// Build single-line display: [✓] ● hunter-id (hostname)
-			line := checkbox + statusIcon + " " + hunter.HunterID
+			// Determine mode (VoIP or Generic)
+			mode := "Generic"
+			if hunter.Capabilities != nil && len(hunter.Capabilities.FilterTypes) > 0 {
+				for _, ft := range hunter.Capabilities.FilterTypes {
+					if ft == "sip_user" {
+						mode = "VoIP"
+						break
+					}
+				}
+			}
+
+			// Mode badge
+			var modeBadge string
+			if mode == "VoIP" {
+				modeBadge = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("15")).
+					Background(lipgloss.Color("63")).
+					Render(" VoIP ")
+			} else {
+				modeBadge = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("15")).
+					Background(lipgloss.Color("240")).
+					Render(" Generic ")
+			}
+
+			// Build single-line display: [✓] ● hunter-id [Mode] (hostname)
+			line := checkbox + statusIcon + " " + hunter.HunterID + " " + modeBadge
 			if hunter.Hostname != "" && hunter.Hostname != hunter.RemoteAddr {
 				line += " (" + hunter.Hostname + ")"
 			} else if hunter.RemoteAddr != "" {

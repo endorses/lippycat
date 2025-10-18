@@ -1597,8 +1597,10 @@ type AvailableHunter struct {
 	RemoteAddr string `protobuf:"bytes,5,opt,name=remote_addr,json=remoteAddr,proto3" json:"remote_addr,omitempty"`
 	// Connected duration (seconds)
 	ConnectedDurationSec uint64 `protobuf:"varint,6,opt,name=connected_duration_sec,json=connectedDurationSec,proto3" json:"connected_duration_sec,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Hunter capabilities (filter types, GPU acceleration, etc.)
+	Capabilities  *HunterCapabilities `protobuf:"bytes,7,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AvailableHunter) Reset() {
@@ -1671,6 +1673,13 @@ func (x *AvailableHunter) GetConnectedDurationSec() uint64 {
 		return x.ConnectedDurationSec
 	}
 	return 0
+}
+
+func (x *AvailableHunter) GetCapabilities() *HunterCapabilities {
+	if x != nil {
+		return x.Capabilities
+	}
+	return nil
 }
 
 var File_management_proto protoreflect.FileDescriptor
@@ -1775,7 +1784,7 @@ const file_management_proto_rawDesc = "" +
 	"\x06status\x18\t \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\"\x14\n" +
 	"\x12ListHuntersRequest\"U\n" +
 	"\x13ListHuntersResponse\x12>\n" +
-	"\ahunters\x18\x01 \x03(\v2$.lippycat.management.AvailableHunterR\ahunters\"\xfc\x01\n" +
+	"\ahunters\x18\x01 \x03(\v2$.lippycat.management.AvailableHunterR\ahunters\"\xc9\x02\n" +
 	"\x0fAvailableHunter\x12\x1b\n" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1e\n" +
@@ -1785,7 +1794,8 @@ const file_management_proto_rawDesc = "" +
 	"\x06status\x18\x04 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x12\x1f\n" +
 	"\vremote_addr\x18\x05 \x01(\tR\n" +
 	"remoteAddr\x124\n" +
-	"\x16connected_duration_sec\x18\x06 \x01(\x04R\x14connectedDurationSec*]\n" +
+	"\x16connected_duration_sec\x18\x06 \x01(\x04R\x14connectedDurationSec\x12K\n" +
+	"\fcapabilities\x18\a \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities*]\n" +
 	"\fHunterStatus\x12\x12\n" +
 	"\x0eSTATUS_HEALTHY\x10\x00\x12\x12\n" +
 	"\x0eSTATUS_WARNING\x10\x01\x12\x10\n" +
@@ -1880,27 +1890,28 @@ var file_management_proto_depIdxs = []int32{
 	1,  // 16: lippycat.management.ProcessorStats.status:type_name -> lippycat.management.ProcessorStatus
 	23, // 17: lippycat.management.ListHuntersResponse.hunters:type_name -> lippycat.management.AvailableHunter
 	0,  // 18: lippycat.management.AvailableHunter.status:type_name -> lippycat.management.HunterStatus
-	4,  // 19: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
-	8,  // 20: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
-	11, // 21: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
-	11, // 22: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
-	17, // 23: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
-	13, // 24: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
-	16, // 25: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
-	21, // 26: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
-	6,  // 27: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
-	10, // 28: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
-	12, // 29: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
-	14, // 30: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
-	18, // 31: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
-	15, // 32: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
-	15, // 33: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
-	22, // 34: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
-	27, // [27:35] is the sub-list for method output_type
-	19, // [19:27] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	5,  // 19: lippycat.management.AvailableHunter.capabilities:type_name -> lippycat.management.HunterCapabilities
+	4,  // 20: lippycat.management.ManagementService.RegisterHunter:input_type -> lippycat.management.HunterRegistration
+	8,  // 21: lippycat.management.ManagementService.Heartbeat:input_type -> lippycat.management.HunterHeartbeat
+	11, // 22: lippycat.management.ManagementService.GetFilters:input_type -> lippycat.management.FilterRequest
+	11, // 23: lippycat.management.ManagementService.SubscribeFilters:input_type -> lippycat.management.FilterRequest
+	17, // 24: lippycat.management.ManagementService.GetHunterStatus:input_type -> lippycat.management.StatusRequest
+	13, // 25: lippycat.management.ManagementService.UpdateFilter:input_type -> lippycat.management.Filter
+	16, // 26: lippycat.management.ManagementService.DeleteFilter:input_type -> lippycat.management.FilterDeleteRequest
+	21, // 27: lippycat.management.ManagementService.ListAvailableHunters:input_type -> lippycat.management.ListHuntersRequest
+	6,  // 28: lippycat.management.ManagementService.RegisterHunter:output_type -> lippycat.management.RegistrationResponse
+	10, // 29: lippycat.management.ManagementService.Heartbeat:output_type -> lippycat.management.ProcessorHeartbeat
+	12, // 30: lippycat.management.ManagementService.GetFilters:output_type -> lippycat.management.FilterResponse
+	14, // 31: lippycat.management.ManagementService.SubscribeFilters:output_type -> lippycat.management.FilterUpdate
+	18, // 32: lippycat.management.ManagementService.GetHunterStatus:output_type -> lippycat.management.StatusResponse
+	15, // 33: lippycat.management.ManagementService.UpdateFilter:output_type -> lippycat.management.FilterUpdateResult
+	15, // 34: lippycat.management.ManagementService.DeleteFilter:output_type -> lippycat.management.FilterUpdateResult
+	22, // 35: lippycat.management.ManagementService.ListAvailableHunters:output_type -> lippycat.management.ListHuntersResponse
+	28, // [28:36] is the sub-list for method output_type
+	20, // [20:28] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_management_proto_init() }

@@ -210,8 +210,8 @@ func TestTruncatePattern(t *testing.T) {
 		expected string
 	}{
 		{"Shorter than max", "alicent", 10, "alicent"},
-		{"Exactly max", "alicent", 5, "alicent"},
-		{"Longer than max", "alicent@example.com", 10, "alicent@e..."},
+		{"Exactly max", "alicent", 7, "alicent"},
+		{"Longer than max", "alicent@example.com", 10, "alicent..."},
 		{"Max too small for ellipsis", "alicent", 2, "al"},
 		{"Empty string", "", 10, ""},
 	}

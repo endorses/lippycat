@@ -142,12 +142,12 @@ Call-ID: test123
 		{
 			name: "Case-insensitive user match",
 			payload: `INVITE sip:someone@example.com SIP/2.0
-From: <sip:ALICE@example.com>
+From: <sip:ALICENT@example.com>
 To: <sip:someone@example.com>
 Call-ID: test123
 `,
 			shouldMatch: true,
-			reason:      "ALICE (uppercase) should match alicent filter",
+			reason:      "ALICENT (uppercase) should match alicent filter",
 		},
 	}
 

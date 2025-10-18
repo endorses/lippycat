@@ -122,8 +122,8 @@ func TestIsSurveiled(t *testing.T) {
 		},
 		{
 			name:      "Header with case sensitivity",
-			sipHeader: "From: <sip:ALICE@example.com>", // Contains "ALICE" which matches "alicent" case-insensitively
-			expected:  true,                            // Matches because implementation is case-insensitive
+			sipHeader: "From: <sip:ALICENT@example.com>",
+			expected:  true,
 		},
 		{
 			name: "Complex SIP header with robb",
@@ -136,7 +136,7 @@ CSeq: 314159 INVITE`,
 		},
 		{
 			name:      "Header with username as substring",
-			sipHeader: "From: <sip:bobby@example.com>", // Contains "robb" as substring
+			sipHeader: "From: <sip:robby@example.com>",
 			expected:  true,
 		},
 	}

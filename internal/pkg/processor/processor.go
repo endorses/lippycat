@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -187,8 +188,8 @@ func (p *Processor) Start(ctx context.Context) error {
 		defer p.pcapWriter.Stop()
 	}
 
-	// Create listener
-	listener, err := net.Listen("tcp", p.config.ListenAddr)
+	// Create listener with SO_REUSEADDR for fast restarts
+	listener, err := createReuseAddrListener("tcp", p.config.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
@@ -784,4 +785,23 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 			}
 		}
 	}
+}
+
+// createReuseAddrListener creates a TCP listener with SO_REUSEADDR enabled
+// for fast restarts without waiting for TIME_WAIT
+func createReuseAddrListener(network, address string) (net.Listener, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var sockOptErr error
+			err := c.Control(func(fd uintptr) {
+				// Set SO_REUSEADDR to allow immediate rebind after restart
+				sockOptErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+			})
+			if err != nil {
+				return err
+			}
+			return sockOptErr
+		},
+	}
+	return lc.Listen(context.Background(), network, address)
 }

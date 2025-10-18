@@ -81,10 +81,16 @@ func (m *Manager) GetFilterCount() int {
 func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	m.mu.Lock()
 	m.filters = filters
+	appFilterUpdater := m.appFilterUpdater
 	m.mu.Unlock()
 
 	// Sync SIP user filters to sipusers package
 	m.syncSIPUserFilters(filters)
+
+	// Update application filter if configured (for hot-reload support)
+	if appFilterUpdater != nil {
+		appFilterUpdater.UpdateFilters(filters)
+	}
 }
 
 // Subscribe subscribes to filter updates from processor

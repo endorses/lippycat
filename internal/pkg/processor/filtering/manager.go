@@ -47,7 +47,7 @@ func NewManager(persistenceFile string, persistence PersistenceHandler, onFilter
 
 // Load loads filters from persistence file
 func (m *Manager) Load() error {
-	if m.persistenceFile == "" || m.persistence == nil {
+	if m.persistence == nil {
 		return nil
 	}
 
@@ -66,7 +66,7 @@ func (m *Manager) Load() error {
 
 // Save saves filters to persistence file
 func (m *Manager) Save() error {
-	if m.persistenceFile == "" || m.persistence == nil {
+	if m.persistence == nil {
 		return nil
 	}
 

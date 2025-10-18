@@ -134,7 +134,7 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize filter manager
 	persistence := filtering.NewYAMLPersistence()
-	p.filterManager = filtering.NewManager(config.FilterFile, persistence, onFilterFailure, nil)
+	p.filterManager = filtering.NewManager(config.FilterFile, persistence, p.hunterManager, onFilterFailure, nil)
 
 	// Initialize flow controller
 	hasUpstream := config.UpstreamAddr != ""
@@ -426,10 +426,11 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 	logger.Info("Hunter registration request",
 		"hunter_id", hunterID,
 		"hostname", req.Hostname,
-		"interfaces", req.Interfaces)
+		"interfaces", req.Interfaces,
+		"capabilities", req.Capabilities)
 
 	// Register hunter with manager
-	_, isReconnect, err := p.hunterManager.Register(hunterID, req.Hostname, req.Interfaces)
+	_, isReconnect, err := p.hunterManager.Register(hunterID, req.Hostname, req.Interfaces, req.Capabilities)
 	if err != nil {
 		if err == hunter.ErrMaxHuntersReached {
 			logger.Warn("Max hunters limit reached", "limit", p.config.MaxHunters)

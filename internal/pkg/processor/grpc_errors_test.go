@@ -20,12 +20,13 @@ func TestRegisterHunter_MaxHuntersExceeded(t *testing.T) {
 	packetsReceived := atomic.Uint64{}
 	packetsForwarded := atomic.Uint64{}
 
+	hunterMgr := hunter.NewManager(2, nil)
 	p := &Processor{
 		config: Config{
 			MaxHunters: 2,
 		},
-		hunterManager:  hunter.NewManager(2, nil),
-		filterManager:  filtering.NewManager("", nil, nil, nil),
+		hunterManager:  hunterMgr,
+		filterManager:  filtering.NewManager("", nil, hunterMgr, nil, nil),
 		flowController: flow.NewController(&packetsReceived, &packetsForwarded, false),
 		statsCollector: stats.NewCollector("test-processor", &packetsReceived, &packetsForwarded),
 	}
@@ -65,12 +66,13 @@ func TestRegisterHunter_AllowsReregistration(t *testing.T) {
 	packetsReceived := atomic.Uint64{}
 	packetsForwarded := atomic.Uint64{}
 
+	hunterMgr := hunter.NewManager(2, nil)
 	p := &Processor{
 		config: Config{
 			MaxHunters: 2,
 		},
-		hunterManager:  hunter.NewManager(2, nil),
-		filterManager:  filtering.NewManager("", nil, nil, nil),
+		hunterManager:  hunterMgr,
+		filterManager:  filtering.NewManager("", nil, hunterMgr, nil, nil),
 		flowController: flow.NewController(&packetsReceived, &packetsForwarded, false),
 		statsCollector: stats.NewCollector("test-processor", &packetsReceived, &packetsForwarded),
 	}
@@ -93,7 +95,7 @@ func TestRegisterHunter_AllowsReregistration(t *testing.T) {
 func TestDeleteFilter_NotFound(t *testing.T) {
 	p := &Processor{
 		config:        Config{},
-		filterManager: filtering.NewManager("", nil, nil, nil),
+		filterManager: filtering.NewManager("", nil, nil, nil, nil),
 	}
 
 	// Try to delete non-existent filter
@@ -117,7 +119,7 @@ func TestDeleteFilter_NotFound(t *testing.T) {
 func TestDeleteFilter_Success(t *testing.T) {
 	p := &Processor{
 		config:        Config{},
-		filterManager: filtering.NewManager("", nil, nil, nil),
+		filterManager: filtering.NewManager("", nil, nil, nil, nil),
 	}
 
 	// Add a filter

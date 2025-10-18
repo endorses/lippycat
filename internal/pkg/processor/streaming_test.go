@@ -97,7 +97,7 @@ func TestHunterRegistration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register a hunter using the manager
-	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0", "wlan0"})
+	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0", "wlan0"}, nil)
 	require.NoError(t, err)
 
 	// Verify hunter was registered by getting all hunters
@@ -129,7 +129,7 @@ func TestMultipleHunters(t *testing.T) {
 	// Add multiple hunters using the manager
 	for i := 1; i <= 5; i++ {
 		hunterID := string(rune('h') + rune(i))
-		_, _, err := processor.hunterManager.Register(hunterID, "host"+hunterID, []string{"eth0"})
+		_, _, err := processor.hunterManager.Register(hunterID, "host"+hunterID, []string{"eth0"}, nil)
 		require.NoError(t, err)
 	}
 
@@ -359,7 +359,7 @@ func TestHunterPacketCounting(t *testing.T) {
 	require.NoError(t, err)
 
 	// Register a hunter
-	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0"})
+	_, _, err = processor.hunterManager.Register("hunter-1", "host1", []string{"eth0"}, nil)
 	require.NoError(t, err)
 
 	// Process a batch from this hunter

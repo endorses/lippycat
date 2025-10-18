@@ -18,6 +18,9 @@ type Manager struct {
 	channelsMu sync.RWMutex
 	channels   map[string]chan *management.FilterUpdate // hunterID -> channel
 
+	// Capabilities
+	capabilityProvider CapabilityProvider
+
 	// Callbacks
 	onFilterFailure func(hunterID string, failed bool)
 	onFilterChange  func() // Called when filter count changes
@@ -33,15 +36,21 @@ type PersistenceHandler interface {
 	Save(file string, filters map[string]*management.Filter) error
 }
 
+// CapabilityProvider provides hunter capabilities for filtering
+type CapabilityProvider interface {
+	GetCapabilities(hunterID string) *management.HunterCapabilities
+}
+
 // NewManager creates a new filter manager
-func NewManager(persistenceFile string, persistence PersistenceHandler, onFilterFailure func(string, bool), onFilterChange func()) *Manager {
+func NewManager(persistenceFile string, persistence PersistenceHandler, capabilityProvider CapabilityProvider, onFilterFailure func(string, bool), onFilterChange func()) *Manager {
 	return &Manager{
-		filters:         make(map[string]*management.Filter),
-		channels:        make(map[string]chan *management.FilterUpdate),
-		onFilterFailure: onFilterFailure,
-		onFilterChange:  onFilterChange,
-		persistenceFile: persistenceFile,
-		persistence:     persistence,
+		filters:            make(map[string]*management.Filter),
+		channels:           make(map[string]chan *management.FilterUpdate),
+		capabilityProvider: capabilityProvider,
+		onFilterFailure:    onFilterFailure,
+		onFilterChange:     onFilterChange,
+		persistenceFile:    persistenceFile,
+		persistence:        persistence,
 	}
 }
 
@@ -80,14 +89,49 @@ func (m *Manager) Save() error {
 	return m.persistence.Save(m.persistenceFile, filters)
 }
 
+// hunterSupportsFilterType checks if a hunter supports a given filter type
+func hunterSupportsFilterType(capabilities *management.HunterCapabilities, filterType management.FilterType) bool {
+	if capabilities == nil || len(capabilities.FilterTypes) == 0 {
+		// No capabilities info - assume supports all (backward compatibility)
+		return true
+	}
+
+	// Map protobuf enum to string (using existing helper from persistence.go)
+	filterTypeStr := filterTypeToString(filterType)
+
+	// Check if hunter supports this filter type
+	for _, supportedType := range capabilities.FilterTypes {
+		if supportedType == filterTypeStr {
+			return true
+		}
+	}
+
+	return false
+}
+
 // GetForHunter returns filters applicable to a hunter
 func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// Get hunter capabilities from hunter manager
+	var hunterCaps *management.HunterCapabilities
+	if m.capabilityProvider != nil {
+		hunterCaps = m.capabilityProvider.GetCapabilities(hunterID)
+	}
+
 	filters := make([]*management.Filter, 0)
 
 	for _, filter := range m.filters {
+		// Check if hunter supports this filter type
+		if !hunterSupportsFilterType(hunterCaps, filter.Type) {
+			logger.Debug("Skipping filter incompatible with hunter capabilities",
+				"hunter_id", hunterID,
+				"filter_id", filter.Id,
+				"filter_type", filter.Type)
+			continue
+		}
+
 		// If no target hunters specified, apply to all
 		if len(filter.TargetHunters) == 0 {
 			filters = append(filters, filter)

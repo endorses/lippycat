@@ -96,10 +96,10 @@ func TestGetHunterStatus(t *testing.T) {
 	hunterMgr := hunter.NewManager(10, nil)
 
 	// Register test hunters
-	_, _, err := hunterMgr.Register("hunter-1", "host1", []string{"eth0"})
+	_, _, err := hunterMgr.Register("hunter-1", "host1", []string{"eth0"}, nil)
 	require.NoError(t, err)
 
-	_, _, err = hunterMgr.Register("hunter-2", "host2", []string{"wlan0"})
+	_, _, err = hunterMgr.Register("hunter-2", "host2", []string{"wlan0"}, nil)
 	require.NoError(t, err)
 
 	// Verify hunter count (pass empty filterID to get all)
@@ -139,7 +139,7 @@ func TestFlowControlConstants(t *testing.T) {
 
 // TestFilterOperations tests filter addition and retrieval
 func TestFilterOperations(t *testing.T) {
-	filterMgr := filtering.NewManager("", nil, nil, nil)
+	filterMgr := filtering.NewManager("", nil, nil, nil, nil)
 
 	// Add a filter
 	filter1 := &management.Filter{
@@ -199,8 +199,8 @@ func TestStats(t *testing.T) {
 
 	hunterMgr := hunter.NewManager(10, nil)
 	// Register some hunters to test stats
-	hunterMgr.Register("hunter-1", "host1", []string{"eth0"})
-	hunterMgr.Register("hunter-2", "host2", []string{"eth1"})
+	hunterMgr.Register("hunter-1", "host1", []string{"eth0"}, nil)
+	hunterMgr.Register("hunter-2", "host2", []string{"eth1"}, nil)
 
 	total, healthy, warning, errCount, _ := hunterMgr.GetHealthStats()
 
@@ -239,7 +239,7 @@ func TestMaxHunters(t *testing.T) {
 	for i := 0; i < maxHunters; i++ {
 		hunterID := fmt.Sprintf("hunter-%d", i+1)
 		hostname := fmt.Sprintf("host%d", i+1)
-		_, _, err := hunterMgr.Register(hunterID, hostname, []string{"eth0"})
+		_, _, err := hunterMgr.Register(hunterID, hostname, []string{"eth0"}, nil)
 		require.NoError(t, err)
 	}
 
@@ -247,7 +247,7 @@ func TestMaxHunters(t *testing.T) {
 	assert.Equal(t, maxHunters, len(hunters))
 
 	// Try to add one more - should fail
-	_, _, err := hunterMgr.Register("hunter-4", "host4", []string{"eth0"})
+	_, _, err := hunterMgr.Register("hunter-4", "host4", []string{"eth0"}, nil)
 	assert.Error(t, err, "should fail when exceeding max hunters")
 }
 

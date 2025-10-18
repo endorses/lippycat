@@ -14,6 +14,7 @@ type ConnectedHunter struct {
 	Hostname                string
 	RemoteAddr              string
 	Interfaces              []string
+	Capabilities            *management.HunterCapabilities // Filter capabilities advertised by hunter
 	ConnectedAt             int64
 	LastHeartbeat           int64
 	PacketsReceived         uint64 // Packets received by processor from this hunter
@@ -46,7 +47,7 @@ func NewManager(maxHunters int, onStatsChanged func()) *Manager {
 }
 
 // Register registers or re-registers a hunter
-func (m *Manager) Register(hunterID, hostname string, interfaces []string) (*ConnectedHunter, bool, error) {
+func (m *Manager) Register(hunterID, hostname string, interfaces []string, capabilities *management.HunterCapabilities) (*ConnectedHunter, bool, error) {
 	m.mu.Lock()
 
 	isReconnect := false
@@ -65,11 +66,12 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string) (*Con
 
 	// Register/re-register hunter
 	hunter := &ConnectedHunter{
-		ID:          hunterID,
-		Hostname:    hostname,
-		Interfaces:  interfaces,
-		ConnectedAt: time.Now().UnixNano(),
-		Status:      management.HunterStatus_STATUS_HEALTHY,
+		ID:           hunterID,
+		Hostname:     hostname,
+		Interfaces:   interfaces,
+		Capabilities: capabilities,
+		ConnectedAt:  time.Now().UnixNano(),
+		Status:       management.HunterStatus_STATUS_HEALTHY,
 	}
 	m.hunters[hunterID] = hunter
 
@@ -171,6 +173,19 @@ func (m *Manager) Count() int {
 	defer m.mu.RUnlock()
 
 	return len(m.hunters)
+}
+
+// GetCapabilities returns the capabilities for a hunter
+func (m *Manager) GetCapabilities(hunterID string) *management.HunterCapabilities {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	hunter, exists := m.hunters[hunterID]
+	if !exists {
+		return nil
+	}
+
+	return hunter.Capabilities
 }
 
 // MarkStale marks hunters as stale based on heartbeat timeout

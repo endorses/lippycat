@@ -11,7 +11,7 @@ import (
 )
 
 func TestManager_AddAndRemoveChannel(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	hunterID := "hunter-1"
 	ch := manager.AddChannel(hunterID)
@@ -50,7 +50,7 @@ func TestManager_Update_SingleHunter(t *testing.T) {
 		}
 	}
 
-	manager := NewManager("", nil, onFailure, nil)
+	manager := NewManager("", nil, nil, onFailure, nil)
 
 	hunterID := "hunter-1"
 	filterChan := manager.AddChannel(hunterID)
@@ -78,7 +78,7 @@ func TestManager_Update_SingleHunter(t *testing.T) {
 }
 
 func TestManager_Update_MultipleHunters(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Setup 3 hunters
 	channels := make(map[string]chan *management.FilterUpdate)
@@ -139,7 +139,7 @@ func TestManager_Update_UpdateTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			manager := NewManager("", nil, nil, nil)
+			manager := NewManager("", nil, nil, nil, nil)
 
 			hunterID := "hunter-test"
 			filterChan := manager.AddChannel(hunterID)
@@ -174,7 +174,7 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 		}
 	}
 
-	manager := NewManager("", nil, onFailure, nil)
+	manager := NewManager("", nil, nil, onFailure, nil)
 
 	hunterID := "hunter-slow"
 	// Create channel with capacity 1
@@ -215,7 +215,7 @@ func TestManager_Update_ChannelFull(t *testing.T) {
 }
 
 func TestManager_Update_ConcurrentSends(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	numHunters := 10
 	channels := make(map[string]chan *management.FilterUpdate)
@@ -252,7 +252,7 @@ func TestManager_Update_ConcurrentSends(t *testing.T) {
 }
 
 func TestManager_Update_NoHuntersConnected(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	filter := &management.Filter{
 		Id:      "filter-1",
@@ -268,7 +268,7 @@ func TestManager_Update_NoHuntersConnected(t *testing.T) {
 }
 
 func TestManager_Update_TargetedFilter(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Setup 3 hunters
 	channels := make(map[string]chan *management.FilterUpdate)
@@ -312,7 +312,7 @@ func TestManager_Update_TargetedFilter(t *testing.T) {
 }
 
 func TestManager_Delete_NotFound(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Try to delete non-existent filter
 	_, err := manager.Delete("non-existent-filter")
@@ -320,7 +320,7 @@ func TestManager_Delete_NotFound(t *testing.T) {
 }
 
 func TestManager_GetForHunter(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Add global filter (no target hunters)
 	globalFilter := &management.Filter{
@@ -352,7 +352,7 @@ func TestManager_GetForHunter(t *testing.T) {
 }
 
 func TestManager_Count(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	assert.Equal(t, 0, manager.Count(), "should start with 0 filters")
 
@@ -379,7 +379,7 @@ func TestManager_Count(t *testing.T) {
 }
 
 func TestManager_Update_ScopeChange_AllToSpecific(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Setup 3 hunters
 	channels := make(map[string]chan *management.FilterUpdate)
@@ -463,7 +463,7 @@ func TestManager_Update_ScopeChange_AllToSpecific(t *testing.T) {
 }
 
 func TestManager_Update_ScopeChange_SpecificToAll(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Setup 3 hunters
 	channels := make(map[string]chan *management.FilterUpdate)
@@ -522,7 +522,7 @@ func TestManager_Update_ScopeChange_SpecificToAll(t *testing.T) {
 }
 
 func TestManager_Update_ScopeChange_SpecificToSpecific(t *testing.T) {
-	manager := NewManager("", nil, nil, nil)
+	manager := NewManager("", nil, nil, nil, nil)
 
 	// Setup 4 hunters
 	channels := make(map[string]chan *management.FilterUpdate)

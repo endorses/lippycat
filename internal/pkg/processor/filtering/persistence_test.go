@@ -183,7 +183,7 @@ func TestManager_PersistenceIntegration(t *testing.T) {
 	// Test UpdateFilter persists to disk
 	t.Run("UpdateFilterPersistence", func(t *testing.T) {
 		persistence := NewYAMLPersistence()
-		manager := NewManager(filterFile, persistence, nil, nil)
+		manager := NewManager(filterFile, persistence, nil, nil, nil)
 
 		newFilter := &management.Filter{
 			Id:          "filter-3",
@@ -203,7 +203,7 @@ func TestManager_PersistenceIntegration(t *testing.T) {
 		assert.Contains(t, string(data), "G.711")
 
 		// Load in new manager and verify
-		manager2 := NewManager(filterFile, persistence, nil, nil)
+		manager2 := NewManager(filterFile, persistence, nil, nil, nil)
 		err = manager2.Load()
 		require.NoError(t, err, "should load filters")
 
@@ -216,7 +216,7 @@ func TestManager_PersistenceIntegration(t *testing.T) {
 	t.Run("DeleteFilterPersistence", func(t *testing.T) {
 		filterFile2 := filepath.Join(tempDir, "filters2.yaml")
 		persistence := NewYAMLPersistence()
-		manager := NewManager(filterFile2, persistence, nil, nil)
+		manager := NewManager(filterFile2, persistence, nil, nil, nil)
 
 		// Add initial filters
 		filter1 := &management.Filter{
@@ -248,7 +248,7 @@ func TestManager_PersistenceIntegration(t *testing.T) {
 		assert.Contains(t, string(data), "filter-2", "remaining filter should be in file")
 
 		// Load in new manager and verify
-		manager2 := NewManager(filterFile2, persistence, nil, nil)
+		manager2 := NewManager(filterFile2, persistence, nil, nil, nil)
 		err = manager2.Load()
 		require.NoError(t, err, "should load filters")
 

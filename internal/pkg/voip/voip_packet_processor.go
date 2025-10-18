@@ -26,20 +26,30 @@ func NewVoIPPacketProcessor(forwarder PacketForwarder, bufferMgr *BufferManager)
 func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 	packet := pktInfo.Packet
 
-	// Check if this is a network packet with transport layer
-	if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
-		// Not a network packet, forward as-is
-		return true
+	// Check if this is a network packet
+	if packet.NetworkLayer() == nil {
+		// Not a network packet, drop it
+		logger.Debug("Dropping non-network packet in VoIP mode")
+		return false
+	}
+
+	// Check if it has a transport layer
+	if packet.TransportLayer() == nil {
+		// No transport layer (e.g., ICMP, ARP) - drop in VoIP mode
+		// VoIP traffic is TCP or UDP only
+		logger.Debug("Dropping non-transport packet in VoIP mode",
+			"type", packet.NetworkLayer().LayerType())
+		return false
 	}
 
 	// Handle based on transport protocol
 	switch layer := packet.TransportLayer().(type) {
 	case *layers.TCP:
-		// TCP packets are handled by the TCP stream assembler
-		// which is set up separately via NewSipStreamFactory
-		// So we forward TCP packets immediately - they'll be
-		// reassembled and processed by HunterForwardHandler
-		return true
+		// TCP packets are handled by the TCP stream assembler (NewSipStreamFactory)
+		// which reassembles SIP messages and checks filters via HunterForwardHandler.
+		// Return false to let the assembler handle them - don't forward raw TCP packets.
+		// The assembler will forward complete, filtered SIP messages.
+		return false
 
 	case *layers.UDP:
 		// UDP packets (SIP/RTP) go through the buffer manager
@@ -52,7 +62,10 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 		return shouldForward
 
 	default:
-		// Unknown transport, forward as-is
-		return true
+		// Unknown transport (not TCP/UDP) - drop when in VoIP mode
+		// VoIP traffic is TCP or UDP only; other protocols should be filtered out
+		logger.Debug("Dropping non-TCP/UDP packet in VoIP mode",
+			"type", packet.TransportLayer().LayerType())
+		return false
 	}
 }

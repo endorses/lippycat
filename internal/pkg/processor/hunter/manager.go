@@ -177,7 +177,6 @@ func (m *Manager) Count() int {
 // Returns the number of hunters marked as stale
 func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	now := time.Now().UnixNano()
 	staleCount := 0
@@ -198,7 +197,11 @@ func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 		}
 	}
 
+	m.mu.Unlock() // Release lock BEFORE calling callback
+
 	// Update stats if any hunters were marked stale
+	// IMPORTANT: Callback is called AFTER releasing the lock because it may
+	// call back into GetHealthStats() which needs to acquire the read lock.
 	if staleCount > 0 && m.onStatsChanged != nil {
 		m.onStatsChanged()
 	}

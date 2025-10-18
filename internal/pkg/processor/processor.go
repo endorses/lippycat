@@ -321,13 +321,25 @@ func (p *Processor) Shutdown() error {
 
 // StreamPackets handles packet streaming from hunters (Data Service)
 func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) error {
-	logger.Info("New packet stream connection")
+	var hunterID string // Track which hunter this stream belongs to
+
+	defer func() {
+		if hunterID != "" {
+			logger.Info("Packet stream closed", "hunter_id", hunterID)
+		}
+	}()
 
 	for {
 		batch, err := stream.Recv()
 		if err != nil {
-			logger.Debug("Stream ended", "error", err)
+			logger.Debug("Stream ended", "error", err, "hunter_id", hunterID)
 			return err
+		}
+
+		// Track hunter ID from first batch
+		if hunterID == "" {
+			hunterID = batch.HunterId
+			logger.Info("Packet stream started", "hunter_id", hunterID)
 		}
 
 		// Process batch

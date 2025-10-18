@@ -222,6 +222,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 				stats := p.GetStats()
 				logger.Info("Processor stats",
 					"hunters_connected", stats.TotalHunters,
+					"hunters_healthy", stats.HealthyHunters,
+					"hunters_warning", stats.WarningHunters,
+					"hunters_error", stats.ErrorHunters,
 					"packets_received", stats.TotalPacketsReceived,
 					"packets_forwarded", stats.TotalPacketsForwarded,
 					"active_filters", stats.TotalFilters)

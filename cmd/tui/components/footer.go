@@ -27,6 +27,7 @@ type Footer struct {
 	streamingSave        bool // True when streaming save is active
 	activeTab            int  // Active tab index
 	hasProtocolSelection bool // True when a protocol is selected
+	paused               bool // True when capture is paused
 }
 
 // NewFooter creates a new footer component
@@ -77,6 +78,11 @@ func (f *Footer) SetActiveTab(index int) {
 // SetHasProtocolSelection sets whether a protocol is currently selected
 func (f *Footer) SetHasProtocolSelection(has bool) {
 	f.hasProtocolSelection = has
+}
+
+// SetPaused sets whether capture is currently paused
+func (f *Footer) SetPaused(paused bool) {
+	f.paused = paused
 }
 
 // getTabColor returns the background color for a given tab index
@@ -205,8 +211,12 @@ func (f *Footer) renderGeneralSection() string {
 		Render("│")
 
 	// General keybinds (work on all tabs)
+	pauseText := "pause"
+	if f.paused {
+		pauseText = "resume"
+	}
 	bindings := []string{
-		keyStyle.Render("Space") + descStyle.Render(": pause"),
+		keyStyle.Render("Space") + descStyle.Render(": "+pauseText),
 		keyStyle.Render("p") + descStyle.Render(": protocol"),
 		keyStyle.Render("q") + descStyle.Render(": quit"),
 	}

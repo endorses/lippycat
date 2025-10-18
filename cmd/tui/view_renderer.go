@@ -28,6 +28,7 @@ func (m Model) View() string {
 	m.uiState.Footer.SetFilterCount(m.packetStore.FilterChain.Count())
 	m.uiState.Footer.SetActiveTab(m.uiState.Tabs.GetActive())
 	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
+	m.uiState.Footer.SetPaused(m.uiState.Paused)
 
 	// Render components
 	headerView := m.uiState.Header.View()

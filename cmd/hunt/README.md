@@ -52,6 +52,11 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--gpu-backend` - GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd` (default: auto)
 - `--gpu-batch-size` - Batch size for GPU processing (default: 100)
 
+**Disk Buffer (Nuclear-Proof Resilience):**
+- `--disk-buffer` - Enable disk overflow buffer for extended disconnections
+- `--disk-buffer-dir` - Directory for buffer files (default: /var/tmp/lippycat-buffer)
+- `--disk-buffer-max-mb` - Maximum disk buffer size in MB (default: 1024)
+
 **TLS/Security:**
 - `--tls` - Enable TLS encryption (recommended for production)
 - `--tls-cert` - Path to client TLS certificate (for mutual TLS)
@@ -155,6 +160,40 @@ lc hunt --processor localhost:50051 --insecure
 **Security Warning:** Displays prominent banner when TLS is disabled.
 
 See [docs/SECURITY.md](../../docs/SECURITY.md#tls-transport-encryption) for complete TLS setup.
+
+## Resilience Features
+
+### Disk Overflow Buffer
+
+When enabled, hunters buffer packets to disk when the memory queue is full (during extended disconnections):
+
+```bash
+# Enable 2GB disk buffer
+lc hunt --processor processor:50051 \
+  --disk-buffer \
+  --disk-buffer-max-mb 2048
+```
+
+**Behavior:**
+- Memory queue holds ~64K packets (1000 batches × 64 packets)
+- When memory queue is full, batches overflow to disk
+- Disk buffer can hold millions of packets (1GB ≈ 15M packets)
+- Automatic refill: When connection restored, disk batches feed back to memory queue
+- FIFO ordering: Oldest packets sent first
+- Graceful degradation: If disk is full, oldest batches are dropped
+
+**Use Cases:**
+- Laptop sleep/resume scenarios
+- Extended network outages (hours/days)
+- Processor maintenance windows
+- Network partition recovery
+
+### Circuit Breaker
+
+Automatically prevents connection thrashing when processor is down:
+- Opens circuit after 5 consecutive connection failures
+- Waits 30s before retry (prevents resource exhaustion)
+- Half-open state: Limited test connections before full recovery
 
 ## Performance Tuning
 

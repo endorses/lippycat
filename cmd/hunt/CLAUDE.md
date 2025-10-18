@@ -253,7 +253,56 @@ case RESUME:
 }
 ```
 
-### 6. Security Patterns
+### 6. Resilience Patterns (Nuclear-Proof)
+
+#### Disk Overflow Buffer
+
+**Files:** `internal/pkg/hunter/buffer/disk_buffer.go`, `internal/pkg/hunter/forwarding/manager.go`
+
+**Problem:** Memory queue (1000 batches ≈ 64K packets) fills during extended disconnections.
+
+**Solution:** Overflow to disk when memory queue is full:
+
+```go
+// In forwarding/manager.go SendBatch()
+select {
+case m.batchQueue <- batch:
+    // Successfully queued to memory
+default:
+    // Memory queue full - try disk overflow buffer
+    if m.diskBuffer != nil {
+        m.diskBuffer.Write(batch)
+    }
+}
+```
+
+**Background Refill:** Disk batches automatically refill memory queue when space available (100ms polling).
+
+**Layout:** One protobuf batch per file, FIFO ordering, automatic cleanup.
+
+#### Circuit Breaker Pattern
+
+**File:** `internal/pkg/hunter/circuitbreaker/breaker.go`
+
+**Problem:** Repeated connection attempts to dead processor exhaust resources.
+
+**Solution:** Three-state circuit breaker wraps connection logic:
+
+```go
+// States: Closed (normal) → Open (failing) → Half-Open (testing) → Closed
+err := circuitBreaker.Call(func() error {
+    return connectAndRegister()
+})
+```
+
+**Behavior:**
+- **Closed:** Normal operation, all calls allowed
+- **Open:** After 5 failures, reject calls for 30s (prevents thrashing)
+- **Half-Open:** Allow 3 test calls, return to Closed on success or Open on failure
+
+**Integration:** `internal/pkg/hunter/connection/manager.go` wraps `connectAndRegister()` call.
+
+### 7. Security Patterns
 
 #### Production Mode Enforcement
 

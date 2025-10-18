@@ -24,6 +24,11 @@ type DisconnectMarker interface {
 	MarkDisconnected()
 }
 
+// ApplicationFilterUpdater is an interface for hot-reloading application-level filters
+type ApplicationFilterUpdater interface {
+	UpdateFilters(filters []*management.Filter)
+}
+
 // Manager handles filter subscription and updates from processor
 type Manager struct {
 	hunterID string
@@ -33,6 +38,7 @@ type Manager struct {
 	// Dependencies
 	captureRestarter CaptureRestarter
 	disconnectMarker DisconnectMarker
+	appFilterUpdater ApplicationFilterUpdater // Optional: for hot-reload of app-level filters
 }
 
 // New creates a new filter manager
@@ -43,6 +49,14 @@ func New(hunterID string, captureRestarter CaptureRestarter, disconnectMarker Di
 		captureRestarter: captureRestarter,
 		disconnectMarker: disconnectMarker,
 	}
+}
+
+// SetApplicationFilterUpdater sets the application filter updater for hot-reload support
+// This is optional - if not set, all filter updates will trigger capture restart
+func (m *Manager) SetApplicationFilterUpdater(updater ApplicationFilterUpdater) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.appFilterUpdater = updater
 }
 
 // GetFilters returns a copy of current filters (thread-safe)
@@ -166,6 +180,7 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 }
 
 // handleUpdate applies filter updates from processor
+// Routes updates by filter type: BPF filters require restart, app-level filters hot-reload
 func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 	logger.Info("Received filter update",
 		"type", update.UpdateType,
@@ -228,21 +243,54 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 		}
 	}
 
-	// Get current filters before unlocking
+	// Get current filters and appFilterUpdater before unlocking
 	currentFilters := m.filters
+	appFilterUpdater := m.appFilterUpdater
 	m.mu.Unlock()
 
-	// Apply filters by restarting capture with new BPF filter
+	// Apply filters based on type
 	if filtersChanged {
-		logger.Info("Filters changed, restarting capture", "active_filters", len(currentFilters))
+		// Check if this is a BPF filter change (requires capture restart)
+		needsRestart := m.containsBPFFilter(update.Filter)
 
-		// Sync SIP user filters to sipusers package for application-level filtering
-		m.syncSIPUserFilters(currentFilters)
+		if needsRestart {
+			// BPF filter changed - must restart capture
+			logger.Info("BPF filter changed, restarting capture", "active_filters", len(currentFilters))
 
-		if err := m.captureRestarter.Restart(currentFilters); err != nil {
-			logger.Error("Failed to restart capture with new filters", "error", err)
+			// Sync SIP user filters to sipusers package for application-level filtering
+			m.syncSIPUserFilters(currentFilters)
+
+			if err := m.captureRestarter.Restart(currentFilters); err != nil {
+				logger.Error("Failed to restart capture with new filters", "error", err)
+			}
+		} else if appFilterUpdater != nil {
+			// Application-level filter changed - hot-reload without restart
+			logger.Info("Application-level filter changed, hot-reloading (no restart)",
+				"active_filters", len(currentFilters))
+
+			// Sync SIP user filters to sipusers package for application-level filtering
+			m.syncSIPUserFilters(currentFilters)
+
+			// Update application filter without restarting capture
+			appFilterUpdater.UpdateFilters(currentFilters)
+		} else {
+			// No app filter updater - fall back to restart (backward compatibility)
+			logger.Info("Application-level filter changed but no updater set, restarting capture",
+				"active_filters", len(currentFilters))
+
+			// Sync SIP user filters to sipusers package for application-level filtering
+			m.syncSIPUserFilters(currentFilters)
+
+			if err := m.captureRestarter.Restart(currentFilters); err != nil {
+				logger.Error("Failed to restart capture with new filters", "error", err)
+			}
 		}
 	}
+}
+
+// containsBPFFilter checks if a filter is a BPF filter (requires capture restart)
+func (m *Manager) containsBPFFilter(filter *management.Filter) bool {
+	return filter.Type == management.FilterType_FILTER_BPF
 }
 
 // syncSIPUserFilters synchronizes FILTER_SIP_USER filters to the sipusers package

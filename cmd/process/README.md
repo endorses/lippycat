@@ -342,6 +342,27 @@ Processors automatically manage flow control with hunters:
 
 Flow control prevents memory exhaustion when processor cannot keep up with hunter traffic.
 
+## Resilience Features
+
+Processors are designed to survive network disruptions and temporary outages:
+
+### Network Interruption Tolerance
+
+**Lenient keepalive settings** tolerate temporary delays (laptop standby, network hiccups):
+- 30s ping interval (vs. aggressive 10s)
+- 20s timeout for acknowledgment
+- Combined with TCP keepalive on hunter connections
+
+**Benefit:** Hunters survive brief disconnections (<50s) without reconnecting.
+
+### Stale Hunter Detection
+
+**Fast cleanup** removes truly dead hunters while allowing recovery:
+- 2min cleanup interval (check for stale hunters)
+- 5min grace period (hunter must be unresponsive for 5min to be removed)
+
+**Benefit:** Dead hunters cleaned up quickly, live hunters with temporary issues aren't prematurely removed.
+
 ## Best Practices
 
 1. **Always use mutual TLS in production** - `--tls --tls-client-auth`

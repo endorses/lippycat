@@ -307,6 +307,47 @@ default:
 
 **Non-blocking:** Main processing never blocks on I/O.
 
+### 10. Resilience Patterns (Network Interruption Survival)
+
+**File:** `internal/pkg/processor/processor.go`
+
+#### Lenient Keepalive Settings
+
+To survive network interruptions like laptop standby:
+
+```go
+grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+    MinTime:             10 * time.Second, // Minimum time between client pings
+    PermitWithoutStream: true,             // Allow pings without active streams
+}),
+grpc.KeepaliveParams(keepalive.ServerParameters{
+    Time:    30 * time.Second, // Send ping if no activity for 30s
+    Timeout: 20 * time.Second, // Wait 20s for ping ack before closing connection
+}),
+```
+
+**Changed from:** 20s/3s → 30s/20s (more tolerant of delays)
+
+**Rationale:** Survive temporary network disruptions without closing connections.
+
+#### Stale Hunter Cleanup
+
+**File:** `internal/pkg/processor/hunter/monitor.go`
+
+Faster cleanup check with generous grace period:
+
+```go
+// Cleanup interval: check every 2 minutes (faster recovery)
+ticker := time.NewTicker(2 * time.Minute)
+
+// Grace period: 5 minutes since last heartbeat
+const graceperiod = 5 * time.Minute
+```
+
+**Changed from:** 5min cleanup interval → 2min interval
+
+**Benefit:** Faster detection and cleanup of truly dead hunters while maintaining 5min grace period for temporary disruptions.
+
 ## gRPC Server Implementation
 
 ### Packet Reception Service

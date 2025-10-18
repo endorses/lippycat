@@ -82,7 +82,7 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 	filter := &management.Filter{
 		Id:            "filter-1",
 		Type:          management.FilterType_FILTER_SIP_USER,
-		Pattern:       "alice@example.com",
+		Pattern:       "alicent@example.com",
 		TargetHunters: []string{hunterID},
 		Enabled:       true,
 	}
@@ -98,7 +98,7 @@ func TestIntegration_FilterDistribution_SingleHunter(t *testing.T) {
 		assert.NotNil(t, update)
 		assert.Equal(t, management.FilterUpdateType_UPDATE_ADD, update.UpdateType)
 		assert.Equal(t, "filter-1", update.Filter.Id)
-		assert.Equal(t, "alice@example.com", update.Filter.Pattern)
+		assert.Equal(t, "alicent@example.com", update.Filter.Pattern)
 		t.Logf("✓ Filter distribution test: Filter successfully distributed to hunter")
 	case <-time.After(3 * time.Second):
 		t.Fatal("Timeout waiting for filter update")

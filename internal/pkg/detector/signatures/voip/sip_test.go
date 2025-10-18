@@ -19,10 +19,10 @@ func TestSIPSignature_Detect(t *testing.T) {
 	}{
 		{
 			name: "SIP INVITE request",
-			payload: `INVITE sip:bob@example.com SIP/2.0
+			payload: `INVITE sip:robb@example.com SIP/2.0
 Via: SIP/2.0/UDP client.example.com:5060
-From: Alice <sip:alice@example.com>
-To: Bob <sip:bob@example.com>
+From: Alicent <sip:alicent@example.com>
+To: Robb <sip:robb@example.com>
 Call-ID: 12345@example.com
 CSeq: 1 INVITE
 
@@ -34,8 +34,8 @@ CSeq: 1 INVITE
 			name: "SIP 200 OK response",
 			payload: `SIP/2.0 200 OK
 Via: SIP/2.0/UDP client.example.com:5060
-From: Alice <sip:alice@example.com>
-To: Bob <sip:bob@example.com>
+From: Alicent <sip:alicent@example.com>
+To: Robb <sip:robb@example.com>
 Call-ID: 12345@example.com
 CSeq: 1 INVITE
 
@@ -80,9 +80,9 @@ CSeq: 1 INVITE
 func TestSIPSignature_ExtractMetadata(t *testing.T) {
 	sig := NewSIPSignature()
 
-	payload := `INVITE sip:bob@example.com SIP/2.0
-From: Alice <sip:alice@example.com>
-To: Bob <sip:bob@example.com>
+	payload := `INVITE sip:robb@example.com SIP/2.0
+From: Alicent <sip:alicent@example.com>
+To: Robb <sip:robb@example.com>
 Call-ID: abc123@example.com
 
 `
@@ -91,6 +91,6 @@ Call-ID: abc123@example.com
 
 	assert.Equal(t, "request", metadata["type"])
 	assert.Equal(t, "INVITE", metadata["method"])
-	assert.Equal(t, "alice", metadata["from_user"])
+	assert.Equal(t, "alicent", metadata["from_user"])
 	assert.Contains(t, metadata, "headers")
 }

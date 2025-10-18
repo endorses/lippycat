@@ -16,9 +16,9 @@ import (
 )
 
 // extractSIPURI extracts the SIP URI from a header value, removing display names and parameters
-// Example: "Alice <sip:alice@domain.com>;tag=123" -> "sip:alice@domain.com"
-// Example: "<sip:bob@example.org>;tag=456" -> "sip:bob@example.org"
-// Example: "sip:bob@example.org;tag=456" -> "sip:bob@example.org"
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "sip:alicent@domain.com"
+// Example: "<sip:robb@example.org>;tag=456" -> "sip:robb@example.org"
+// Example: "sip:robb@example.org;tag=456" -> "sip:robb@example.org"
 func extractSIPURI(header string) string {
 	// Find the URI between < and > if present
 	start := strings.Index(header, "<")

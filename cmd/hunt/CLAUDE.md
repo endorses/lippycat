@@ -184,7 +184,7 @@ Hunters subscribe to filter updates from processor:
 // Processor sends filter updates
 filterUpdate := &pb.FilterUpdate{
     Filters: []*pb.Filter{
-        {Type: "sipuser", Pattern: "alice@example.com"},
+        {Type: "sipuser", Pattern: "alicent@example.com"},
     },
 }
 

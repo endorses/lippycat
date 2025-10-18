@@ -9,8 +9,8 @@ import (
 )
 
 // extractUserFromSIPURI extracts the username from a SIP URI
-// Example: "Alice <sip:alice@domain.com>" -> "alice"
-// Example: "sip:bob@example.org" -> "bob"
+// Example: "Alicent <sip:alicent@domain.com>" -> "alicent"
+// Example: "sip:robb@example.org" -> "robb"
 func extractUserFromSIPURI(uri string) string {
 	// Find "sip:" or "sips:" prefix
 	start := strings.Index(uri, "sip:")
@@ -34,8 +34,8 @@ func extractUserFromSIPURI(uri string) string {
 }
 
 // extractFullSIPURI extracts the full SIP URI from a header value
-// Example: "Alice <sip:alice@domain.com>;tag=123" -> "sip:alice@domain.com"
-// Example: "sip:bob@example.org" -> "sip:bob@example.org"
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "sip:alicent@domain.com"
+// Example: "sip:robb@example.org" -> "sip:robb@example.org"
 func extractFullSIPURI(header string) string {
 	// Find the URI between < and > if present
 	start := strings.Index(header, "<")

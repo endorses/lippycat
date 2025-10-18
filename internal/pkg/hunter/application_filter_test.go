@@ -16,47 +16,47 @@ func TestExtractSIPHeaders(t *testing.T) {
 	}{
 		{
 			name: "Standard SIP INVITE",
-			payload: `INVITE sip:bob@example.com SIP/2.0
-From: Alice <sip:alice@example.com>;tag=123
-To: Bob <sip:bob@example.com>
+			payload: `INVITE sip:robb@example.com SIP/2.0
+From: Alicent <sip:alicent@example.com>;tag=123
+To: Robb <sip:robb@example.com>
 P-Asserted-Identity: <sip:+4415777@carrier.com>
 Call-ID: abc123
 `,
-			wantFrom: `Alice <sip:alice@example.com>;tag=123`,
-			wantTo:   `Bob <sip:bob@example.com>`,
+			wantFrom: `Alicent <sip:alicent@example.com>;tag=123`,
+			wantTo:   `Robb <sip:robb@example.com>`,
 			wantPAI:  `<sip:+4415777@carrier.com>`,
 		},
 		{
 			name: "Compact form headers",
-			payload: `INVITE sip:bob@example.com SIP/2.0
-f: <sip:alice@example.com>
-t: <sip:bob@example.com>
+			payload: `INVITE sip:robb@example.com SIP/2.0
+f: <sip:alicent@example.com>
+t: <sip:robb@example.com>
 Call-ID: xyz789
 `,
-			wantFrom: `<sip:alice@example.com>`,
-			wantTo:   `<sip:bob@example.com>`,
+			wantFrom: `<sip:alicent@example.com>`,
+			wantTo:   `<sip:robb@example.com>`,
 			wantPAI:  "",
 		},
 		{
 			name: "Case-insensitive headers",
-			payload: `INVITE sip:bob@example.com SIP/2.0
-FROM: <sip:alice@example.com>
-TO: <sip:bob@example.com>
+			payload: `INVITE sip:robb@example.com SIP/2.0
+FROM: <sip:alicent@example.com>
+TO: <sip:robb@example.com>
 p-asserted-identity: <sip:+1234567890@carrier.com>
 `,
-			wantFrom: `<sip:alice@example.com>`,
-			wantTo:   `<sip:bob@example.com>`,
+			wantFrom: `<sip:alicent@example.com>`,
+			wantTo:   `<sip:robb@example.com>`,
 			wantPAI:  `<sip:+1234567890@carrier.com>`,
 		},
 		{
 			name: "Headers with extra whitespace",
-			payload: `INVITE sip:bob@example.com SIP/2.0
-From:   Alice <sip:alice@example.com>
-To:  Bob <sip:bob@example.com>
+			payload: `INVITE sip:robb@example.com SIP/2.0
+From:   Alicent <sip:alicent@example.com>
+To:  Robb <sip:robb@example.com>
 P-Asserted-Identity:  <sip:+44123@carrier.com>
 `,
-			wantFrom: `Alice <sip:alice@example.com>`,
-			wantTo:   `Bob <sip:bob@example.com>`,
+			wantFrom: `Alicent <sip:alicent@example.com>`,
+			wantTo:   `Robb <sip:robb@example.com>`,
 			wantPAI:  `<sip:+44123@carrier.com>`,
 		},
 	}
@@ -74,7 +74,7 @@ P-Asserted-Identity:  <sip:+44123@carrier.com>
 
 func TestMatchWithCPU_ProperHeaderFiltering(t *testing.T) {
 	af := &ApplicationFilter{
-		sipUsers:     []string{"alice", "bob"},
+		sipUsers:     []string{"alicent", "robb"},
 		phoneNumbers: []string{"+4415777", "1234567890"},
 	}
 
@@ -86,23 +86,23 @@ func TestMatchWithCPU_ProperHeaderFiltering(t *testing.T) {
 	}{
 		{
 			name: "Match in From header",
-			payload: `INVITE sip:bob@example.com SIP/2.0
-From: Alice <sip:alice@example.com>
-To: Bob <sip:bob@example.com>
+			payload: `INVITE sip:robb@example.com SIP/2.0
+From: Alicent <sip:alicent@example.com>
+To: Robb <sip:robb@example.com>
 Call-ID: test123
 `,
 			shouldMatch: true,
-			reason:      "alice in From header",
+			reason:      "alicent in From header",
 		},
 		{
 			name: "Match in To header",
-			payload: `INVITE sip:alice@example.com SIP/2.0
+			payload: `INVITE sip:alicent@example.com SIP/2.0
 From: Charlie <sip:charlie@example.com>
-To: Bob <sip:bob@example.com>
+To: Robb <sip:robb@example.com>
 Call-ID: test123
 `,
 			shouldMatch: true,
-			reason:      "bob in To header",
+			reason:      "robb in To header",
 		},
 		{
 			name: "Match in P-Asserted-Identity",
@@ -123,11 +123,11 @@ To: <sip:someone@example.com>
 Call-ID: test123
 
 v=0
-o=alice 123 456 IN IP4 192.168.1.1
-s=Session with alice mentioned here
+o=alicent 123 456 IN IP4 192.168.1.1
+s=Session with alicent mentioned here
 `,
 			shouldMatch: false,
-			reason:      "alice only in SDP body, not in headers",
+			reason:      "alicent only in SDP body, not in headers",
 		},
 		{
 			name: "Phone number match",
@@ -147,7 +147,7 @@ To: <sip:someone@example.com>
 Call-ID: test123
 `,
 			shouldMatch: true,
-			reason:      "ALICE (uppercase) should match alice filter",
+			reason:      "ALICE (uppercase) should match alicent filter",
 		},
 	}
 

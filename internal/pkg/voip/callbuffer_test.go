@@ -27,7 +27,7 @@ func TestCallBuffer_AddSIPPacket(t *testing.T) {
 	buffer := NewCallBuffer("test-call")
 
 	// Create test SIP packet
-	packet := createTestBufferPacket(t, 5060, 5061, []byte("INVITE sip:bob@example.com SIP/2.0"))
+	packet := createTestBufferPacket(t, 5060, 5061, []byte("INVITE sip:robb@example.com SIP/2.0"))
 
 	buffer.AddSIPPacket(packet)
 
@@ -77,9 +77,9 @@ func TestCallBuffer_SetMetadata(t *testing.T) {
 
 	metadata := &CallMetadata{
 		CallID:            "test-call",
-		From:              "alice@example.com",
-		To:                "bob@example.com",
-		PAssertedIdentity: "alice@provider.com",
+		From:              "alicent@example.com",
+		To:                "robb@example.com",
+		PAssertedIdentity: "alicent@provider.com",
 		Method:            "INVITE",
 		SDPBody:           "m=audio 8000 RTP/AVP 0",
 	}
@@ -88,8 +88,8 @@ func TestCallBuffer_SetMetadata(t *testing.T) {
 
 	retrieved := buffer.GetMetadata()
 	assert.NotNil(t, retrieved, "Metadata should not be nil")
-	assert.Equal(t, "alice@example.com", retrieved.From)
-	assert.Equal(t, "bob@example.com", retrieved.To)
+	assert.Equal(t, "alicent@example.com", retrieved.From)
+	assert.Equal(t, "robb@example.com", retrieved.To)
 	assert.Equal(t, "INVITE", retrieved.Method)
 }
 

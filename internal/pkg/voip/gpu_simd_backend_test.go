@@ -46,7 +46,7 @@ func TestSIMDBackend_PatternMatching(t *testing.T) {
 	_ = backend.Initialize(config)
 
 	packets := [][]byte{
-		[]byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: test1\r\n"),
+		[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: test1\r\n"),
 		[]byte("200 OK\r\nCall-ID: test2\r\n"),
 		[]byte("No pattern here"),
 	}
@@ -87,7 +87,7 @@ func TestSIMDBackend_MultiplePatterns(t *testing.T) {
 	_ = backend.Initialize(config)
 
 	packets := [][]byte{
-		[]byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc\r\n"),
+		[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc\r\n"),
 	}
 
 	err := backend.TransferPacketsToGPU(packets)
@@ -225,7 +225,7 @@ func TestSIMDCallIDExtractor(t *testing.T) {
 	extractor := NewSIMDCallIDExtractor()
 
 	packets := [][]byte{
-		[]byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
+		[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
 		[]byte("200 OK\r\nCall-ID: xyz789\r\n"),
 		[]byte("REGISTER sip:proxy SIP/2.0\r\ni: short123\r\n"),
 		[]byte("No Call-ID here"),
@@ -327,7 +327,7 @@ func BenchmarkSIMDBackend_PatternMatching(b *testing.B) {
 
 	packets := make([][]byte, 64)
 	for i := 0; i < 64; i++ {
-		packets[i] = []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: test123\r\n")
+		packets[i] = []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: test123\r\n")
 	}
 
 	patterns := []GPUPattern{
@@ -354,7 +354,7 @@ func BenchmarkSIMDCallIDExtractor(b *testing.B) {
 
 	packets := make([][]byte, 64)
 	for i := 0; i < 64; i++ {
-		packets[i] = []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: test123@host\r\n")
+		packets[i] = []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: test123@host\r\n")
 	}
 
 	b.ResetTimer()
@@ -385,7 +385,7 @@ func BenchmarkSIMDPatternMatcher(b *testing.B) {
 
 	packets := make([][]byte, 64)
 	for i := 0; i < 64; i++ {
-		packets[i] = []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: test\r\n")
+		packets[i] = []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: test\r\n")
 	}
 
 	b.ResetTimer()
@@ -399,7 +399,7 @@ func BenchmarkSIMDPatternMatcher(b *testing.B) {
 func BenchmarkFindPatternOffset(b *testing.B) {
 	backend := NewSIMDBackend().(*SIMDBackend)
 
-	data := []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: test123@host\r\nFrom: alice\r\n")
+	data := []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: test123@host\r\nFrom: alicent\r\n")
 	pattern := []byte("Call-ID:")
 
 	b.ResetTimer()

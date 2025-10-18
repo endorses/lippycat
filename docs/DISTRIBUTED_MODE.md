@@ -262,7 +262,7 @@ grpcurl -plaintext -d '{
 grpcurl -plaintext -d '{
   "id": "filter-2",
   "type": "FILTER_SIP_USER",
-  "pattern": "alice@example.com",
+  "pattern": "alicent@example.com",
   "target_hunters": ["hunter-1"],
   "enabled": true
 }' localhost:50051 lippycat.management.ManagementService/UpdateFilter

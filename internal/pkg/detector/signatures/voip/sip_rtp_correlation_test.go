@@ -13,18 +13,18 @@ func TestSIPRTPCorrelation(t *testing.T) {
 	rtpSig := NewRTPSignature()
 
 	// SIP INVITE with SDP containing media port 49170
-	sipPayload := `INVITE sip:bob@biloxi.com SIP/2.0
+	sipPayload := `INVITE sip:robb@biloxi.com SIP/2.0
 Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776
-From: Alice <sip:alice@atlanta.com>;tag=1928301774
-To: Bob <sip:bob@biloxi.com>
+From: Alicent <sip:alicent@atlanta.com>;tag=1928301774
+To: Robb <sip:robb@biloxi.com>
 Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314159 INVITE
-Contact: <sip:alice@pc33.atlanta.com>
+Contact: <sip:alicent@pc33.atlanta.com>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 2890844526 2890844526 IN IP4 pc33.atlanta.com
+o=alicent 2890844526 2890844526 IN IP4 pc33.atlanta.com
 s=Session SDP
 c=IN IP4 pc33.atlanta.com
 t=0 0

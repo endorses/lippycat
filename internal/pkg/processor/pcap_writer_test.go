@@ -170,7 +170,7 @@ func TestGetOrCreateWriter_Disabled(t *testing.T) {
 	manager, err := NewPcapWriterManager(config)
 	require.NoError(t, err)
 
-	writer, err := manager.GetOrCreateWriter("test-call", "alice", "bob")
+	writer, err := manager.GetOrCreateWriter("test-call", "alicent", "robb")
 	assert.NoError(t, err)
 	assert.Nil(t, writer, "writer should be nil when disabled")
 }
@@ -206,7 +206,7 @@ func TestMultipleWriters(t *testing.T) {
 	require.NoError(t, err)
 
 	// Since disabled, all GetOrCreateWriter calls should return nil
-	writer1, err := manager.GetOrCreateWriter("call-1", "alice", "bob")
+	writer1, err := manager.GetOrCreateWriter("call-1", "alicent", "robb")
 	assert.NoError(t, err)
 	assert.Nil(t, writer1)
 
@@ -237,7 +237,7 @@ func TestPcapWriterConcurrency(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			callID := "call-" + string(rune('0'+id))
-			_, _ = manager.GetOrCreateWriter(callID, "alice", "bob")
+			_, _ = manager.GetOrCreateWriter(callID, "alicent", "robb")
 			done <- struct{}{}
 		}(i)
 	}

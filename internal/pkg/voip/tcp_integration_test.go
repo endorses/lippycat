@@ -20,19 +20,19 @@ import (
 
 func TestTCPSIPMessageProcessingIntegration(t *testing.T) {
 	// Create a complete TCP SIP INVITE message
-	sipInvite := `INVITE sip:alice@example.com SIP/2.0
+	sipInvite := `INVITE sip:alicent@example.com SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:5060;branch=z9hG4bK1234567890
 Max-Forwards: 70
-To: <sip:alice@example.com>
-From: Bob <sip:bob@example.com>;tag=1928301774
+To: <sip:alicent@example.com>
+From: Robb <sip:robb@example.com>;tag=1928301774
 Call-ID: integration-test-call-12345@example.com
 CSeq: 1 INVITE
-Contact: <sip:bob@192.168.1.100:5060;transport=tcp>
+Contact: <sip:robb@192.168.1.100:5060;transport=tcp>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=bob 2890844526 2890844526 IN IP4 192.168.1.100
+o=robb 2890844526 2890844526 IN IP4 192.168.1.100
 s=-
 c=IN IP4 192.168.1.100
 t=0 0
@@ -153,11 +153,11 @@ func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
 		description   string
 	}{
 		{
-			name:          "alice surveillance from invite",
+			name:          "alicent surveillance from invite",
 			pcapFile:      "../../../captures/tcp-sip-invite.pcap",
-			targetUsers:   []string{"alice"},
-			expectedUsers: []string{"alice"},
-			description:   "Should capture alice from INVITE call",
+			targetUsers:   []string{"alicent"},
+			expectedUsers: []string{"alicent"},
+			description:   "Should capture alicent from INVITE call",
 		},
 		{
 			name:          "testuser surveillance from register",
@@ -169,8 +169,8 @@ func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
 		{
 			name:          "multi-user surveillance",
 			pcapFile:      "../../../captures/tcp-sip-multiuser.pcap",
-			targetUsers:   []string{"alice", "testuser"},
-			expectedUsers: []string{"alice", "testuser"},
+			targetUsers:   []string{"alicent", "testuser"},
+			expectedUsers: []string{"alicent", "testuser"},
 			description:   "Should capture multiple targeted users",
 		},
 		{
@@ -220,12 +220,12 @@ func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
 			// These users are known to be in the test PCAP files based on their creation
 			switch tc.pcapFile {
 			case "../../../captures/tcp-sip-invite.pcap":
-				// Contains alice and bob
-				if contains(tc.targetUsers, "alice") {
-					capturedUsers["alice"] = true
+				// Contains alicent and robb
+				if contains(tc.targetUsers, "alicent") {
+					capturedUsers["alicent"] = true
 				}
-				if contains(tc.targetUsers, "bob") {
-					capturedUsers["bob"] = true
+				if contains(tc.targetUsers, "robb") {
+					capturedUsers["robb"] = true
 				}
 			case "../../../captures/tcp-sip-register.pcap":
 				// Contains testuser
@@ -233,12 +233,12 @@ func TestUserSurveillanceFilteringWithTCP(t *testing.T) {
 					capturedUsers["testuser"] = true
 				}
 			case "../../../captures/tcp-sip-multiuser.pcap":
-				// Contains alice, bob, and testuser
-				if contains(tc.targetUsers, "alice") {
-					capturedUsers["alice"] = true
+				// Contains alicent, robb, and testuser
+				if contains(tc.targetUsers, "alicent") {
+					capturedUsers["alicent"] = true
 				}
-				if contains(tc.targetUsers, "bob") {
-					capturedUsers["bob"] = true
+				if contains(tc.targetUsers, "robb") {
+					capturedUsers["robb"] = true
 				}
 				if contains(tc.targetUsers, "testuser") {
 					capturedUsers["testuser"] = true
@@ -259,10 +259,10 @@ func TestTCPPCAPFileCreation(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
 
-	sipMessage := `INVITE sip:alice@example.com SIP/2.0
+	sipMessage := `INVITE sip:alicent@example.com SIP/2.0
 Call-ID: pcap-test-call-98765@example.com
-From: <sip:bob@example.com>
-To: <sip:alice@example.com>
+From: <sip:robb@example.com>
+To: <sip:alicent@example.com>
 CSeq: 1 INVITE
 Content-Length: 0
 
@@ -364,17 +364,17 @@ func TestEndToEndTCPSIPCallScenario(t *testing.T) {
 	// Create a complete call scenario with INVITE, 200 OK, ACK, and BYE
 	callScenario := []string{
 		// INVITE
-		`INVITE sip:alice@example.com SIP/2.0
+		`INVITE sip:alicent@example.com SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:5060;branch=z9hG4bKINVITE
 Call-ID: end-to-end-call-999@example.com
-From: Bob <sip:bob@example.com>;tag=bob999
-To: <sip:alice@example.com>
+From: Robb <sip:robb@example.com>;tag=bob999
+To: <sip:alicent@example.com>
 CSeq: 1 INVITE
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=bob 2890844526 2890844526 IN IP4 192.168.1.100
+o=robb 2890844526 2890844526 IN IP4 192.168.1.100
 s=-
 c=IN IP4 192.168.1.100
 t=0 0
@@ -386,14 +386,14 @@ a=rtpmap:0 PCMU/8000
 		`SIP/2.0 200 OK
 Via: SIP/2.0/TCP 192.168.1.100:5060;branch=z9hG4bKINVITE
 Call-ID: end-to-end-call-999@example.com
-From: Bob <sip:bob@example.com>;tag=bob999
-To: <sip:alice@example.com>;tag=alice999
+From: Robb <sip:robb@example.com>;tag=bob999
+To: <sip:alicent@example.com>;tag=alice999
 CSeq: 1 INVITE
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 2890844527 2890844527 IN IP4 192.168.1.101
+o=alicent 2890844527 2890844527 IN IP4 192.168.1.101
 s=-
 c=IN IP4 192.168.1.101
 t=0 0
@@ -402,22 +402,22 @@ a=rtpmap:0 PCMU/8000
 `,
 
 		// ACK
-		`ACK sip:alice@example.com SIP/2.0
+		`ACK sip:alicent@example.com SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:5060;branch=z9hG4bKACK
 Call-ID: end-to-end-call-999@example.com
-From: Bob <sip:bob@example.com>;tag=bob999
-To: <sip:alice@example.com>;tag=alice999
+From: Robb <sip:robb@example.com>;tag=bob999
+To: <sip:alicent@example.com>;tag=alice999
 CSeq: 1 ACK
 Content-Length: 0
 
 `,
 
 		// BYE
-		`BYE sip:alice@example.com SIP/2.0
+		`BYE sip:alicent@example.com SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:5060;branch=z9hG4bKBYE
 Call-ID: end-to-end-call-999@example.com
-From: Bob <sip:bob@example.com>;tag=bob999
-To: <sip:alice@example.com>;tag=alice999
+From: Robb <sip:robb@example.com>;tag=bob999
+To: <sip:alicent@example.com>;tag=alice999
 CSeq: 2 BYE
 Content-Length: 0
 

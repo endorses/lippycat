@@ -31,7 +31,7 @@ func TestExtractPortFromSdp_ComprehensiveParsing(t *testing.T) {
 		{
 			name: "Standard SDP with audio",
 			sdpBody: `v=0
-o=alice 53655765 2353687637 IN IP4 client.atlanta.com
+o=alicent 53655765 2353687637 IN IP4 client.atlanta.com
 c=IN IP4 client.atlanta.com
 t=0 0
 m=audio 5004 RTP/AVP 0 8`,
@@ -43,7 +43,7 @@ m=audio 5004 RTP/AVP 0 8`,
 		{
 			name: "SDP with multiple media lines",
 			sdpBody: `v=0
-o=alice 53655765 2353687637 IN IP4 client.atlanta.com
+o=alicent 53655765 2353687637 IN IP4 client.atlanta.com
 c=IN IP4 client.atlanta.com
 t=0 0
 m=audio 5004 RTP/AVP 0 8
@@ -56,7 +56,7 @@ m=video 5006 RTP/AVP 96`,
 		{
 			name: "SDP with no audio line",
 			sdpBody: `v=0
-o=alice 53655765 2353687637 IN IP4 client.atlanta.com
+o=alicent 53655765 2353687637 IN IP4 client.atlanta.com
 c=IN IP4 client.atlanta.com
 t=0 0
 m=video 5006 RTP/AVP 96`,

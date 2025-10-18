@@ -16,7 +16,7 @@ func TestFilterChain_SortsBySelectivity(t *testing.T) {
 
 	// Add filters in random order (least to most selective)
 	textFilter := NewTextFilter("test", []string{"all"})         // 0.3
-	voipFilter := NewVoIPFilter("user", "alice")                 // 0.7
+	voipFilter := NewVoIPFilter("user", "alicent")               // 0.7
 	bpfFilter, _ := NewBPFFilter("tcp")                          // 0.9
 	specificTextFilter := NewTextFilter("test", []string{"src"}) // 0.6
 
@@ -115,7 +115,7 @@ func TestFilterChain_Clear(t *testing.T) {
 	fc := NewFilterChain()
 
 	fc.Add(NewTextFilter("test", []string{"all"}))
-	fc.Add(NewVoIPFilter("user", "alice"))
+	fc.Add(NewVoIPFilter("user", "alicent"))
 
 	assert.False(t, fc.IsEmpty())
 	assert.Equal(t, 2, len(fc.GetFilters()))
@@ -186,7 +186,7 @@ func TestBPFFilter_Selectivity(t *testing.T) {
 
 // TestVoIPFilter_Selectivity verifies VoIP selectivity
 func TestVoIPFilter_Selectivity(t *testing.T) {
-	filter := NewVoIPFilter("user", "alice")
+	filter := NewVoIPFilter("user", "alicent")
 	assert.Equal(t, 0.7, filter.Selectivity())
 }
 

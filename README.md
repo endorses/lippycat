@@ -109,7 +109,7 @@ lc interfaces
 sudo lc sniff voip --interface eth0
 
 # Target specific SIP users
-sudo lc sniff voip --sipuser alice,bob
+sudo lc sniff voip --sipuser alicent,robb
 
 # Interactive TUI
 sudo lc tui

@@ -279,7 +279,7 @@ a=rtpmap:0 PCMU/8000`,
 		{
 			name: "Audio and video (only audio ports extracted)",
 			sdpBody: `v=0
-o=alice 2890844526 2890844527 IN IP4 client.example.com
+o=alicent 2890844526 2890844527 IN IP4 client.example.com
 s=Session SDP
 c=IN IP4 client.example.com
 t=0 0

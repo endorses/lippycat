@@ -134,7 +134,7 @@ func TestVectorizedCallIDExtractor(t *testing.T) {
 		{
 			name: "packets with Call-ID",
 			packets: [][]byte{
-				[]byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
+				[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
 				[]byte("200 OK\r\nCall-ID: xyz789\r\n"),
 			},
 			expected: 2,
@@ -142,7 +142,7 @@ func TestVectorizedCallIDExtractor(t *testing.T) {
 		{
 			name: "short form Call-ID",
 			packets: [][]byte{
-				[]byte("INVITE sip:bob@example.com SIP/2.0\r\ni: shortform123\r\n"),
+				[]byte("INVITE sip:robb@example.com SIP/2.0\r\ni: shortform123\r\n"),
 			},
 			expected: 1,
 		},
@@ -164,22 +164,22 @@ func TestExtractCallIDFast(t *testing.T) {
 	}{
 		{
 			name:     "standard Call-ID",
-			data:     []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123@host\r\n"),
+			data:     []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123@host\r\n"),
 			expected: "abc123@host",
 		},
 		{
 			name:     "short form",
-			data:     []byte("INVITE sip:bob@example.com SIP/2.0\r\ni: xyz789\r\n"),
+			data:     []byte("INVITE sip:robb@example.com SIP/2.0\r\ni: xyz789\r\n"),
 			expected: "xyz789",
 		},
 		{
 			name:     "with whitespace",
-			data:     []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID:   padded123  \r\n"),
+			data:     []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID:   padded123  \r\n"),
 			expected: "padded123",
 		},
 		{
 			name:     "no Call-ID",
-			data:     []byte("INVITE sip:bob@example.com SIP/2.0\r\nFrom: alice\r\n"),
+			data:     []byte("INVITE sip:robb@example.com SIP/2.0\r\nFrom: alicent\r\n"),
 			expected: "",
 		},
 	}
@@ -322,7 +322,7 @@ func BenchmarkVectorizedCallIDExtractor(b *testing.B) {
 
 	packets := make([][]byte, 64)
 	for i := 0; i < 64; i++ {
-		packets[i] = []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123@host.example.com\r\nFrom: alice\r\n")
+		packets[i] = []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123@host.example.com\r\nFrom: alicent\r\n")
 	}
 
 	b.ResetTimer()
@@ -334,7 +334,7 @@ func BenchmarkVectorizedCallIDExtractor(b *testing.B) {
 }
 
 func BenchmarkExtractCallIDFast(b *testing.B) {
-	data := []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123@host.example.com\r\nFrom: alice\r\n")
+	data := []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123@host.example.com\r\nFrom: alicent\r\n")
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -390,7 +390,7 @@ func BenchmarkBatchProcessing_EndToEnd(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		pkt := GetPacketPool().Get()
-		pkt.Data = []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: bench123\r\n")
+		pkt.Data = []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: bench123\r\n")
 
 		ci := gopacket.CaptureInfo{
 			Timestamp:     time.Now(),

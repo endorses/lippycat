@@ -139,7 +139,7 @@ log.Printf("Using backend: %s", backend)
 
 // Extract Call-IDs from packet batch
 packets := [][]byte{
-    []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
+    []byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
     []byte("200 OK\r\nCall-ID: xyz789\r\n"),
 }
 

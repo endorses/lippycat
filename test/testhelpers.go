@@ -54,7 +54,7 @@ func createSyntheticPacket(index int) *data.CapturedPacket {
 
 // createSIPInvitePacket creates a SIP INVITE packet for testing
 func createSIPInvitePacket() []byte {
-	sipInvite := "INVITE sip:bob@example.com SIP/2.0\r\n"
+	sipInvite := "INVITE sip:robb@example.com SIP/2.0\r\n"
 	return []byte(sipInvite)
 }
 

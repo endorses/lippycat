@@ -75,7 +75,7 @@ func (m *Model) parseSimpleFilter(filterStr string) filters.Filter {
 
 	// Detect filter type based on syntax
 	if strings.Contains(filterStr, "sip.") {
-		// VoIP filter: sip.user:alice, sip.from:555*, etc.
+		// VoIP filter: sip.user:alicent, sip.from:555*, etc.
 		parts := strings.SplitN(filterStr, ":", 2)
 		if len(parts) == 2 {
 			field := strings.TrimPrefix(parts[0], "sip.")

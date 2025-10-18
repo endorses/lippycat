@@ -57,7 +57,7 @@ func TestValidateFilter_ValidPattern(t *testing.T) {
 
 func TestToggleFilterEnabled(t *testing.T) {
 	filter := &management.Filter{
-		Pattern: "alice",
+		Pattern: "alicent",
 		Enabled: true,
 	}
 
@@ -66,7 +66,7 @@ func TestToggleFilterEnabled(t *testing.T) {
 	})
 
 	assert.False(t, result.NewEnabled)
-	assert.Contains(t, result.StatusMessage, "alice")
+	assert.Contains(t, result.StatusMessage, "alicent")
 	assert.Contains(t, result.StatusMessage, "disabled")
 }
 
@@ -81,8 +81,8 @@ func TestToggleFilterEnabled_NilFilter(t *testing.T) {
 
 func TestDeleteFilter(t *testing.T) {
 	filters := []*management.Filter{
-		{Id: "1", Pattern: "alice"},
-		{Id: "2", Pattern: "bob"},
+		{Id: "1", Pattern: "alicent"},
+		{Id: "2", Pattern: "robb"},
 		{Id: "3", Pattern: "charlie"},
 	}
 
@@ -92,15 +92,15 @@ func TestDeleteFilter(t *testing.T) {
 	})
 
 	assert.Len(t, result.UpdatedFilters, 2)
-	assert.Equal(t, "alice", result.UpdatedFilters[0].Pattern)
+	assert.Equal(t, "alicent", result.UpdatedFilters[0].Pattern)
 	assert.Equal(t, "charlie", result.UpdatedFilters[1].Pattern)
-	assert.Contains(t, result.StatusMessage, "bob")
+	assert.Contains(t, result.StatusMessage, "robb")
 	assert.Contains(t, result.StatusMessage, "deleted")
 }
 
 func TestDeleteFilter_NilFilter(t *testing.T) {
 	filters := []*management.Filter{
-		{Id: "1", Pattern: "alice"},
+		{Id: "1", Pattern: "alicent"},
 	}
 
 	result := DeleteFilter(DeleteFilterParams{
@@ -114,11 +114,11 @@ func TestDeleteFilter_NilFilter(t *testing.T) {
 
 func TestCreateFilter(t *testing.T) {
 	existingFilters := []*management.Filter{
-		{Id: "1", Pattern: "alice"},
+		{Id: "1", Pattern: "alicent"},
 	}
 
 	result := CreateFilter(CreateFilterParams{
-		Pattern:       "bob@example.com",
+		Pattern:       "robb@example.com",
 		Description:   "Test user",
 		Type:          management.FilterType_FILTER_SIP_USER,
 		Enabled:       true,
@@ -127,25 +127,25 @@ func TestCreateFilter(t *testing.T) {
 	})
 
 	assert.NotNil(t, result.Filter)
-	assert.Equal(t, "bob@example.com", result.Filter.Pattern)
+	assert.Equal(t, "robb@example.com", result.Filter.Pattern)
 	assert.Equal(t, "Test user", result.Filter.Description)
 	assert.True(t, result.Filter.Enabled)
 	assert.Equal(t, []string{"hunter1"}, result.Filter.TargetHunters)
 
 	assert.Len(t, result.UpdatedFilters, 2)
 	assert.Contains(t, result.StatusMessage, "Creating")
-	assert.Contains(t, result.StatusMessage, "bob@example.com")
+	assert.Contains(t, result.StatusMessage, "robb@example.com")
 }
 
 func TestUpdateFilter(t *testing.T) {
 	filters := []*management.Filter{
-		{Id: "1", Pattern: "alice", Enabled: true},
-		{Id: "2", Pattern: "bob", Enabled: false},
+		{Id: "1", Pattern: "alicent", Enabled: true},
+		{Id: "2", Pattern: "robb", Enabled: false},
 	}
 
 	result := UpdateFilter(UpdateFilterParams{
 		FilterID:      "1",
-		Pattern:       "alice-updated",
+		Pattern:       "alicent-updated",
 		Description:   "Updated description",
 		Type:          management.FilterType_FILTER_PHONE_NUMBER,
 		Enabled:       false,
@@ -155,19 +155,19 @@ func TestUpdateFilter(t *testing.T) {
 
 	assert.True(t, result.Found)
 	assert.NotNil(t, result.Filter)
-	assert.Equal(t, "alice-updated", result.Filter.Pattern)
+	assert.Equal(t, "alicent-updated", result.Filter.Pattern)
 	assert.Equal(t, "Updated description", result.Filter.Description)
 	assert.Equal(t, management.FilterType_FILTER_PHONE_NUMBER, result.Filter.Type)
 	assert.False(t, result.Filter.Enabled)
 	assert.Equal(t, []string{"hunter1", "hunter2"}, result.Filter.TargetHunters)
 
 	assert.Contains(t, result.StatusMessage, "Updating")
-	assert.Contains(t, result.StatusMessage, "alice-updated")
+	assert.Contains(t, result.StatusMessage, "alicent-updated")
 }
 
 func TestUpdateFilter_NotFound(t *testing.T) {
 	filters := []*management.Filter{
-		{Id: "1", Pattern: "alice"},
+		{Id: "1", Pattern: "alicent"},
 	}
 
 	result := UpdateFilter(UpdateFilterParams{
@@ -192,16 +192,16 @@ func TestFormatOperationResult_Success(t *testing.T) {
 		{
 			name:      "Create operation",
 			operation: "create",
-			pattern:   "alice",
+			pattern:   "alicent",
 			hunters:   2,
-			expected:  "Filter 'alice' created (2 hunter(s) updated)",
+			expected:  "Filter 'alicent' created (2 hunter(s) updated)",
 		},
 		{
 			name:      "Update operation",
 			operation: "update",
-			pattern:   "bob",
+			pattern:   "robb",
 			hunters:   1,
-			expected:  "Filter 'bob' updated (1 hunter(s) updated)",
+			expected:  "Filter 'robb' updated (1 hunter(s) updated)",
 		},
 		{
 			name:      "Toggle operation",
@@ -237,7 +237,7 @@ func TestFormatOperationResult_Failure(t *testing.T) {
 	result := FormatOperationResult(FormatOperationResultParams{
 		Success:       false,
 		Operation:     "create",
-		FilterPattern: "alice",
+		FilterPattern: "alicent",
 		Error:         "connection timeout",
 	})
 

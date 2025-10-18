@@ -99,15 +99,15 @@ func TestVoipSnifferOfflineIntegration(t *testing.T) {
 
 func TestContainsUserInHeadersIntegration(t *testing.T) {
 	// Setup test users
-	sipusers.AddSipUser("alice", &sipusers.SipUser{
+	sipusers.AddSipUser("alicent", &sipusers.SipUser{
 		ExpirationDate: time.Now().Add(1 * time.Hour),
 	})
-	sipusers.AddSipUser("bob", &sipusers.SipUser{
+	sipusers.AddSipUser("robb", &sipusers.SipUser{
 		ExpirationDate: time.Now().Add(1 * time.Hour),
 	})
 	defer func() {
-		sipusers.DeleteSipUser("alice")
-		sipusers.DeleteSipUser("bob")
+		sipusers.DeleteSipUser("alicent")
+		sipusers.DeleteSipUser("robb")
 	}()
 
 	tests := []struct {
@@ -118,7 +118,7 @@ func TestContainsUserInHeadersIntegration(t *testing.T) {
 		{
 			name: "Contains surveiled user in from header",
 			headers: map[string]string{
-				"from":    "<sip:alice@example.com>;tag=123",
+				"from":    "<sip:alicent@example.com>;tag=123",
 				"to":      "<sip:external@other.com>",
 				"call-id": "test-call-1",
 			},
@@ -128,7 +128,7 @@ func TestContainsUserInHeadersIntegration(t *testing.T) {
 			name: "Contains surveiled user in to header",
 			headers: map[string]string{
 				"from":    "<sip:external@other.com>;tag=456",
-				"to":      "<sip:bob@example.com>",
+				"to":      "<sip:robb@example.com>",
 				"call-id": "test-call-2",
 			},
 			expected: true,
@@ -138,7 +138,7 @@ func TestContainsUserInHeadersIntegration(t *testing.T) {
 			headers: map[string]string{
 				"from":                "<sip:external@other.com>",
 				"to":                  "<sip:another@other.com>",
-				"p-asserted-identity": "<sip:alice@example.com>",
+				"p-asserted-identity": "<sip:alicent@example.com>",
 				"call-id":             "test-call-3",
 			},
 			expected: true,
@@ -178,23 +178,23 @@ func TestEndToEndSipCallProcessing(t *testing.T) {
 	tracker.mu.Unlock()
 
 	// Setup surveillance
-	sipusers.AddSipUser("alice", &sipusers.SipUser{
+	sipusers.AddSipUser("alicent", &sipusers.SipUser{
 		ExpirationDate: time.Now().Add(1 * time.Hour),
 	})
-	defer sipusers.DeleteSipUser("alice")
+	defer sipusers.DeleteSipUser("alicent")
 
 	// Create SIP INVITE message that should trigger call creation
-	sipMessage := []byte(`INVITE sip:alice@example.com SIP/2.0
-From: <sip:bob@example.com>;tag=123
-To: <sip:alice@example.com>
+	sipMessage := []byte(`INVITE sip:alicent@example.com SIP/2.0
+From: <sip:robb@example.com>;tag=123
+To: <sip:alicent@example.com>
 Call-ID: end-to-end-test-call@example.com
 CSeq: 1 INVITE
-Contact: <sip:bob@192.168.1.100:5060>
+Contact: <sip:robb@192.168.1.100:5060>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=bob 123456 789012 IN IP4 192.168.1.100
+o=robb 123456 789012 IN IP4 192.168.1.100
 s=-
 c=IN IP4 192.168.1.100
 t=0 0
@@ -274,17 +274,17 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	tracker.mu.Unlock()
 
 	// Setup surveillance
-	sipusers.AddSipUser("alice", &sipusers.SipUser{
+	sipusers.AddSipUser("alicent", &sipusers.SipUser{
 		ExpirationDate: time.Now().Add(1 * time.Hour),
 	})
-	defer sipusers.DeleteSipUser("alice")
+	defer sipusers.DeleteSipUser("alicent")
 
 	// Create packet sequence simulating a real VoIP call
 	packets := []struct {
 		name   string
 		packet capture.PacketInfo
 	}{
-		{"SIP INVITE", createSipInvitePacketInfo(t, "alice@example.com", "multi-protocol-test")},
+		{"SIP INVITE", createSipInvitePacketInfo(t, "alicent@example.com", "multi-protocol-test")},
 		{"SIP 180 Ringing", createSipResponsePacketInfo(t, "SIP/2.0 180 Ringing", "multi-protocol-test")},
 		{"SIP 200 OK with SDP", createSipOkWithSdpPacketInfo(t, "multi-protocol-test", 8000)},
 		{"RTP audio packet", createRtpPacketInfo(t, 10000, 8000)},
@@ -351,15 +351,15 @@ Content-Length: 0
 	assert.True(t, result, "Should process all users in promiscuous mode (no surveillance configured)")
 
 	// Add surveillance
-	sipusers.AddSipUser("alice", &sipusers.SipUser{
+	sipusers.AddSipUser("alicent", &sipusers.SipUser{
 		ExpirationDate: time.Now().Add(1 * time.Hour),
 	})
-	defer sipusers.DeleteSipUser("alice")
+	defer sipusers.DeleteSipUser("alicent")
 
 	// Now test with surveillance - should create calls
-	surveilledMessage := []byte(`INVITE sip:alice@example.com SIP/2.0
-From: <sip:bob@other.com>;tag=123
-To: <sip:alice@example.com>
+	surveilledMessage := []byte(`INVITE sip:alicent@example.com SIP/2.0
+From: <sip:robb@other.com>;tag=123
+To: <sip:alicent@example.com>
 Call-ID: surveillance-test
 CSeq: 1 INVITE
 Content-Length: 0
@@ -376,7 +376,7 @@ func createSipResponsePacketInfo(t *testing.T, response, callID string) capture.
 	sipData := []byte(response + "\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"From: <sip:caller@example.com>;tag=123\r\n" +
-		"To: <sip:alice@example.com>;tag=456\r\n" +
+		"To: <sip:alicent@example.com>;tag=456\r\n" +
 		"Content-Length: 0\r\n\r\n")
 
 	return createUdpPacketInfo(t, 5060, 5060, sipData)
@@ -386,11 +386,11 @@ func createSipOkWithSdpPacketInfo(t *testing.T, callID string, rtpPort uint16) c
 	sipData := []byte("SIP/2.0 200 OK\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"From: <sip:caller@example.com>;tag=123\r\n" +
-		"To: <sip:alice@example.com>;tag=456\r\n" +
+		"To: <sip:alicent@example.com>;tag=456\r\n" +
 		"Content-Type: application/sdp\r\n" +
 		"Content-Length: 100\r\n\r\n" +
 		"v=0\r\n" +
-		"o=alice 123456 789012 IN IP4 192.168.1.200\r\n" +
+		"o=alicent 123456 789012 IN IP4 192.168.1.200\r\n" +
 		"s=-\r\n" +
 		"c=IN IP4 192.168.1.200\r\n" +
 		"t=0 0\r\n" +
@@ -401,10 +401,10 @@ func createSipOkWithSdpPacketInfo(t *testing.T, callID string, rtpPort uint16) c
 }
 
 func createSipByePacketInfo(t *testing.T, callID string) capture.PacketInfo {
-	sipData := []byte("BYE sip:alice@example.com SIP/2.0\r\n" +
+	sipData := []byte("BYE sip:alicent@example.com SIP/2.0\r\n" +
 		"Call-ID: " + callID + "\r\n" +
 		"From: <sip:caller@example.com>;tag=123\r\n" +
-		"To: <sip:alice@example.com>;tag=456\r\n" +
+		"To: <sip:alicent@example.com>;tag=456\r\n" +
 		"Content-Length: 0\r\n\r\n")
 
 	return createUdpPacketInfo(t, 5060, 5060, sipData)

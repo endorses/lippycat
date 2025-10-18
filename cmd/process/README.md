@@ -93,13 +93,13 @@ Filters are stored in YAML format and automatically distributed to connected hun
 filters:
   - id: "filter-001"
     type: "sipuser"
-    pattern: "alice@example.com"
+    pattern: "alicent@example.com"
     action: "forward"
     enabled: true
 
   - id: "filter-002"
     type: "sipuser"
-    pattern: "bob@example.com"
+    pattern: "robb@example.com"
     action: "forward"
     enabled: true
 

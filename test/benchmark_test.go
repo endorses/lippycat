@@ -240,7 +240,7 @@ func BenchmarkFilterDistribution(b *testing.B) {
 		filter := &management.Filter{
 			Id:            fmt.Sprintf("bench-filter-%d", i),
 			Type:          management.FilterType_FILTER_SIP_USER,
-			Pattern:       "alice@example.com",
+			Pattern:       "alicent@example.com",
 			TargetHunters: hunterIDs,
 			Enabled:       true,
 		}

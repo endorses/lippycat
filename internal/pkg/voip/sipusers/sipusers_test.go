@@ -69,8 +69,8 @@ func TestIsSurveiled(t *testing.T) {
 
 	// Add test users
 	testUsers := map[string]*SipUser{
-		"alice":   {ExpirationDate: time.Now().Add(1 * time.Hour)},
-		"bob":     {ExpirationDate: time.Now().Add(2 * time.Hour)},
+		"alicent": {ExpirationDate: time.Now().Add(1 * time.Hour)},
+		"robb":    {ExpirationDate: time.Now().Add(2 * time.Hour)},
 		"charlie": {ExpirationDate: time.Now().Add(3 * time.Hour)},
 	}
 	AddMultipleSipUsers(testUsers)
@@ -81,13 +81,13 @@ func TestIsSurveiled(t *testing.T) {
 		expected  bool
 	}{
 		{
-			name:      "Header contains alice",
-			sipHeader: "From: <sip:alice@example.com>;tag=123",
+			name:      "Header contains alicent",
+			sipHeader: "From: <sip:alicent@example.com>;tag=123",
 			expected:  true,
 		},
 		{
-			name:      "Header contains bob",
-			sipHeader: "To: <sip:bob@company.org>",
+			name:      "Header contains robb",
+			sipHeader: "To: <sip:robb@company.org>",
 			expected:  true,
 		},
 		{
@@ -96,13 +96,13 @@ func TestIsSurveiled(t *testing.T) {
 			expected:  true,
 		},
 		{
-			name:      "Header contains alice in display name",
-			sipHeader: "From: Alice Smith <sip:asmith@example.com>",
-			expected:  true, // Case-insensitive matching finds "Alice" when checking for "alice"
+			name:      "Header contains alicent in display name",
+			sipHeader: "From: Alicent Smith <sip:asmith@example.com>",
+			expected:  true, // Case-insensitive matching finds "Alicent" when checking for "alicent"
 		},
 		{
-			name:      "Header with multiple users - alice",
-			sipHeader: "Route: <sip:alice@proxy1.example.com>, <sip:proxy2.example.com>",
+			name:      "Header with multiple users - alicent",
+			sipHeader: "Route: <sip:alicent@proxy1.example.com>, <sip:proxy2.example.com>",
 			expected:  true,
 		},
 		{
@@ -117,26 +117,26 @@ func TestIsSurveiled(t *testing.T) {
 		},
 		{
 			name:      "Header with partial match (should match)",
-			sipHeader: "From: <sip:alice-backup@example.com>", // Contains "alice"
+			sipHeader: "From: <sip:alicent-backup@example.com>", // Contains "alicent"
 			expected:  true,
 		},
 		{
 			name:      "Header with case sensitivity",
-			sipHeader: "From: <sip:ALICE@example.com>", // Contains "ALICE" which matches "alice" case-insensitively
+			sipHeader: "From: <sip:ALICE@example.com>", // Contains "ALICE" which matches "alicent" case-insensitively
 			expected:  true,                            // Matches because implementation is case-insensitive
 		},
 		{
-			name: "Complex SIP header with bob",
+			name: "Complex SIP header with robb",
 			sipHeader: `Via: SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK776asdhds
-From: "Bob Jones" <sip:bob@bigcompany.com>;tag=1928301774
-To: "Alice Smith" <sip:alice@atlanta.com>
+From: "Robb Jones" <sip:robb@bigcompany.com>;tag=1928301774
+To: "Alicent Smith" <sip:alicent@atlanta.com>
 Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314159 INVITE`,
-			expected: true, // Contains both "bob" and "alice"
+			expected: true, // Contains both "robb" and "alicent"
 		},
 		{
 			name:      "Header with username as substring",
-			sipHeader: "From: <sip:bobby@example.com>", // Contains "bob" as substring
+			sipHeader: "From: <sip:bobby@example.com>", // Contains "robb" as substring
 			expected:  true,
 		},
 	}

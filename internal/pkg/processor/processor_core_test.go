@@ -145,7 +145,7 @@ func TestFilterOperations(t *testing.T) {
 	filter1 := &management.Filter{
 		Id:      "filter-1",
 		Type:    management.FilterType_FILTER_SIP_USER,
-		Pattern: "alice@example.com",
+		Pattern: "alicent@example.com",
 		Enabled: true,
 	}
 
@@ -160,7 +160,7 @@ func TestFilterOperations(t *testing.T) {
 	assert.Len(t, filters, 1)
 	assert.Equal(t, "filter-1", filters[0].Id)
 	assert.Equal(t, management.FilterType_FILTER_SIP_USER, filters[0].Type)
-	assert.Equal(t, "alice@example.com", filters[0].Pattern)
+	assert.Equal(t, "alicent@example.com", filters[0].Pattern)
 	assert.True(t, filters[0].Enabled)
 
 	// Add another filter

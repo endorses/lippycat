@@ -13,12 +13,12 @@ import (
 // TestSipParsing_SecurityVulnerabilities tests SIP parsing against various attack vectors
 func TestSipParsing_SecurityVulnerabilities(t *testing.T) {
 	// Setup test environment with surveilled user
-	sipusers.DeleteMultipleSipUsers([]string{"alice", "testuser"})
+	sipusers.DeleteMultipleSipUsers([]string{"alicent", "testuser"})
 	testUsers := map[string]*sipusers.SipUser{
-		"alice": {ExpirationDate: time.Now().Add(1 * time.Hour)},
+		"alicent": {ExpirationDate: time.Now().Add(1 * time.Hour)},
 	}
 	sipusers.AddMultipleSipUsers(testUsers)
-	defer sipusers.DeleteMultipleSipUsers([]string{"alice"})
+	defer sipusers.DeleteMultipleSipUsers([]string{"alicent"})
 
 	tests := []struct {
 		name           string
@@ -30,7 +30,7 @@ func TestSipParsing_SecurityVulnerabilities(t *testing.T) {
 			name: "Header injection attack",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: normal-call-123
-From: alice@example.com
+From: alicent@example.com
 To: victim@example.com
 Malicious-Header: injected
 X-Evil: ` + strings.Repeat("A", 10000) + `
@@ -43,7 +43,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Missing colon in header",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-call-456
-From alice@example.com
+From alicent@example.com
 To: victim@example.com
 
 m=audio 5004 RTP/AVP 0`,
@@ -54,7 +54,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Empty header lines",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-call-789
-From: alice@example.com
+From: alicent@example.com
 
 To: victim@example.com
 
@@ -66,7 +66,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Unicode and special characters",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-call-unicode-123
-From: alice@™£¥€øπ∫∆.com
+From: alicent@™£¥€øπ∫∆.com
 To: victim@example.com
 Subject: 测试消息 ñoño 🚀
 
@@ -78,7 +78,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Null bytes in message",
 			sipMessage: "INVITE sip:user@example.com SIP/2.0\x00\r\n" +
 				"Call-ID: test-call-null-456\r\n" +
-				"From: alice@example.com\x00\r\n" +
+				"From: alicent@example.com\x00\r\n" +
 				"To: victim@example.com\r\n\r\n" +
 				"m=audio 5004 RTP/AVP 0\x00",
 			expectedResult: true,
@@ -88,7 +88,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Extremely long Call-ID",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: ` + strings.Repeat("very-long-call-id-", 1000) + `
-From: alice@example.com
+From: alicent@example.com
 To: victim@example.com
 
 m=audio 5004 RTP/AVP 0`,
@@ -99,7 +99,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Missing body separator",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-no-separator
-From: alice@example.com
+From: alicent@example.com
 To: victim@example.com
 m=audio 5004 RTP/AVP 0`,
 			expectedResult: true, // Should handle missing empty line separator
@@ -109,7 +109,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "CRLF vs LF line endings",
 			sipMessage: "INVITE sip:user@example.com SIP/2.0\r\n" +
 				"Call-ID: test-crlf-123\r\n" +
-				"From: alice@example.com\r\n" +
+				"From: alicent@example.com\r\n" +
 				"To: victim@example.com\r\n\r\n" +
 				"m=audio 5004 RTP/AVP 0",
 			expectedResult: true,
@@ -119,7 +119,7 @@ m=audio 5004 RTP/AVP 0`,
 			name: "Malformed SDP in body",
 			sipMessage: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-malformed-sdp-789
-From: alice@example.com
+From: alicent@example.com
 To: victim@example.com
 
 m=audio invalid_port RTP/AVP 0
@@ -169,13 +169,13 @@ body content`,
 			name: "Headers with excessive whitespace",
 			input: `INVITE sip:user@example.com SIP/2.0
 Call-ID:        test-call-123
-From:    alice@example.com
+From:    alicent@example.com
 To:user@example.com
 
 body content`,
 			expectedHeaders: map[string]string{
 				"call-id": "test-call-123",
-				"from":    "alice@example.com",
+				"from":    "alicent@example.com",
 				"to":      "user@example.com",
 			},
 			expectedBody: "body content\n",
@@ -185,14 +185,14 @@ body content`,
 			name: "Case insensitive headers",
 			input: `INVITE sip:user@example.com SIP/2.0
 CALL-ID: test-call-456
-From: alice@example.com
+From: alicent@example.com
 TO: user@example.com
 Content-Type: application/sdp
 
 body content`,
 			expectedHeaders: map[string]string{
 				"call-id":      "test-call-456",
-				"from":         "alice@example.com",
+				"from":         "alicent@example.com",
 				"to":           "user@example.com",
 				"content-type": "application/sdp",
 			},
@@ -210,11 +210,11 @@ body content`,
 			name: "Only headers, no body",
 			input: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-call-789
-From: alice@example.com
+From: alicent@example.com
 To: user@example.com`,
 			expectedHeaders: map[string]string{
 				"call-id": "test-call-789",
-				"from":    "alice@example.com",
+				"from":    "alicent@example.com",
 				"to":      "user@example.com",
 			},
 			expectedBody: "",
@@ -225,13 +225,13 @@ To: user@example.com`,
 			input: `INVITE sip:user@example.com SIP/2.0
 Call-ID: test-call-123
 Via: SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bKnashds8
-From: alice@example.com
+From: alicent@example.com
 
 body content`,
 			expectedHeaders: map[string]string{
 				"call-id": "test-call-123",
 				"via":     "SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bKnashds8",
-				"from":    "alice@example.com",
+				"from":    "alicent@example.com",
 			},
 			expectedBody: "body content\n",
 			description:  "Headers with multiple colons should preserve the value",
@@ -400,13 +400,13 @@ func TestIsSipStartLine_EdgeCases(t *testing.T) {
 
 func TestHandleSipMessage_CompleteFlow(t *testing.T) {
 	// Setup test users
-	sipusers.DeleteMultipleSipUsers([]string{"alice", "bob"})
+	sipusers.DeleteMultipleSipUsers([]string{"alicent", "robb"})
 	testUsers := map[string]*sipusers.SipUser{
-		"alice": {ExpirationDate: time.Now().Add(1 * time.Hour)},
-		"bob":   {ExpirationDate: time.Now().Add(1 * time.Hour)},
+		"alicent": {ExpirationDate: time.Now().Add(1 * time.Hour)},
+		"robb":    {ExpirationDate: time.Now().Add(1 * time.Hour)},
 	}
 	sipusers.AddMultipleSipUsers(testUsers)
-	defer sipusers.DeleteMultipleSipUsers([]string{"alice", "bob"})
+	defer sipusers.DeleteMultipleSipUsers([]string{"alicent", "robb"})
 
 	tests := []struct {
 		name           string
@@ -416,18 +416,18 @@ func TestHandleSipMessage_CompleteFlow(t *testing.T) {
 	}{
 		{
 			name: "Complete INVITE with audio",
-			sipMessage: `INVITE sip:bob@example.com SIP/2.0
+			sipMessage: `INVITE sip:robb@example.com SIP/2.0
 Via: SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bKnashds8
-From: alice@example.com;tag=1928301774
-To: bob@example.com
+From: alicent@example.com;tag=1928301774
+To: robb@example.com
 Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314159 INVITE
-Contact: <sip:alice@client.atlanta.com>
+Contact: <sip:alicent@client.atlanta.com>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 53655765 2353687637 IN IP4 client.atlanta.com
+o=alicent 53655765 2353687637 IN IP4 client.atlanta.com
 c=IN IP4 client.atlanta.com
 t=0 0
 m=audio 5004 RTP/AVP 0`,
@@ -436,10 +436,10 @@ m=audio 5004 RTP/AVP 0`,
 		},
 		{
 			name: "SIP message without audio",
-			sipMessage: `BYE sip:bob@example.com SIP/2.0
+			sipMessage: `BYE sip:robb@example.com SIP/2.0
 Via: SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bKnashds8
-From: alice@example.com;tag=1928301774
-To: bob@example.com
+From: alicent@example.com;tag=1928301774
+To: robb@example.com
 Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314160 BYE
 
@@ -464,10 +464,10 @@ m=audio 5004 RTP/AVP 0`,
 		},
 		{
 			name: "Missing Call-ID",
-			sipMessage: `INVITE sip:bob@example.com SIP/2.0
+			sipMessage: `INVITE sip:robb@example.com SIP/2.0
 Via: SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bKnashds8
-From: alice@example.com;tag=1928301774
-To: bob@example.com
+From: alicent@example.com;tag=1928301774
+To: robb@example.com
 CSeq: 314159 INVITE
 
 m=audio 5004 RTP/AVP 0`,

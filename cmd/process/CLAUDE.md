@@ -150,7 +150,7 @@ Filters loaded from YAML file and distributed to hunters:
 filters:
   - id: "filter-001"
     type: "sipuser"
-    pattern: "alice@example.com"
+    pattern: "alicent@example.com"
     enabled: true
 ```
 

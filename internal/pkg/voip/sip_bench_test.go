@@ -6,19 +6,19 @@ import (
 
 // BenchmarkParseSipHeaders benchmarks the optimized SIP header parsing
 func BenchmarkParseSipHeaders(b *testing.B) {
-	sipMessage := []byte(`INVITE sip:bob@biloxi.com SIP/2.0
+	sipMessage := []byte(`INVITE sip:robb@biloxi.com SIP/2.0
 Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds
 Max-Forwards: 70
-To: Bob <sip:bob@biloxi.com>
-From: Alice <sip:alice@atlanta.com>;tag=1928301774
+To: Robb <sip:robb@biloxi.com>
+From: Alicent <sip:alicent@atlanta.com>;tag=1928301774
 Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314159 INVITE
-Contact: <sip:alice@pc33.atlanta.com>
+Contact: <sip:alicent@pc33.atlanta.com>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 2890844526 2890844526 IN IP4 pc33.atlanta.com
+o=alicent 2890844526 2890844526 IN IP4 pc33.atlanta.com
 s=Session SDP
 c=IN IP4 pc33.atlanta.com
 t=0 0
@@ -35,14 +35,14 @@ a=rtpmap:0 PCMU/8000`)
 // BenchmarkParseSipHeaders_LargeMessage benchmarks parsing of large SIP messages
 func BenchmarkParseSipHeaders_LargeMessage(b *testing.B) {
 	// Build a large SIP message with many headers
-	base := `INVITE sip:bob@biloxi.com SIP/2.0
+	base := `INVITE sip:robb@biloxi.com SIP/2.0
 Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds
 Max-Forwards: 70
-To: Bob <sip:bob@biloxi.com>
-From: Alice <sip:alice@atlanta.com>;tag=1928301774
+To: Robb <sip:robb@biloxi.com>
+From: Alicent <sip:alicent@atlanta.com>;tag=1928301774
 Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314159 INVITE
-Contact: <sip:alice@pc33.atlanta.com>
+Contact: <sip:alicent@pc33.atlanta.com>
 Content-Type: application/sdp
 User-Agent: lippycat/1.0
 Allow: INVITE, ACK, CANCEL, BYE, OPTIONS
@@ -52,7 +52,7 @@ Min-SE: 90
 Accept: application/sdp
 Accept-Encoding: gzip
 Accept-Language: en
-P-Asserted-Identity: "Alice" <sip:alice@atlanta.com>
+P-Asserted-Identity: "Alicent" <sip:alicent@atlanta.com>
 Privacy: none
 Require: timer
 Proxy-Require: sec-agree
@@ -62,7 +62,7 @@ Security-Verify: digest
 Content-Length: 300
 
 v=0
-o=alice 2890844526 2890844526 IN IP4 pc33.atlanta.com
+o=alicent 2890844526 2890844526 IN IP4 pc33.atlanta.com
 s=Session SDP
 c=IN IP4 pc33.atlanta.com
 t=0 0

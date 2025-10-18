@@ -410,10 +410,10 @@ func createHTTPGoPacket(request string) gopacket.Packet {
 }
 
 func createSIPPacket(method string) gopacket.Packet {
-	sipMsg := fmt.Sprintf("%s sip:bob@example.com SIP/2.0\r\n"+
+	sipMsg := fmt.Sprintf("%s sip:robb@example.com SIP/2.0\r\n"+
 		"Via: SIP/2.0/UDP 192.168.1.10:5060\r\n"+
-		"From: <sip:alice@example.com>\r\n"+
-		"To: <sip:bob@example.com>\r\n"+
+		"From: <sip:alicent@example.com>\r\n"+
+		"To: <sip:robb@example.com>\r\n"+
 		"Call-ID: test-call-123@example.com\r\n"+
 		"CSeq: 1 %s\r\n"+
 		"Content-Length: 0\r\n\r\n", method, method)

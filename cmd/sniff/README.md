@@ -21,9 +21,9 @@ lc sniff --read-file capture.pcap
 ### VoIP-Specific Capture
 
 ```bash
-lc sniff voip --interface eth0 --sipuser alice
-lc sniff voip -i eth0 -u alice,bob --write-file
-lc sniff voip --read-file voip-capture.pcap --sipuser alice
+lc sniff voip --interface eth0 --sipuser alicent
+lc sniff voip -i eth0 -u alicent,robb --write-file
+lc sniff voip --read-file voip-capture.pcap --sipuser alicent
 ```
 
 The `sniff voip` subcommand provides SIP/RTP-specific capture with advanced filtering, TCP reassembly, and optional GPU acceleration.
@@ -36,13 +36,13 @@ The `sniff voip` subcommand provides SIP/RTP-specific capture with advanced filt
 
 ```bash
 # Single user
-lc sniff voip -i eth0 --sipuser alice@example.com
+lc sniff voip -i eth0 --sipuser alicent@example.com
 
 # Multiple users (comma-separated)
-lc sniff voip -i eth0 --sipuser alice,bob,charlie
+lc sniff voip -i eth0 --sipuser alicent,robb,charlie
 
 # User without domain
-lc sniff voip -i eth0 --sipuser alice
+lc sniff voip -i eth0 --sipuser alicent
 ```
 
 ### PCAP File Writing
@@ -52,7 +52,7 @@ lc sniff voip -i eth0 --sipuser alice
 Enables writing captured VoIP packets to PCAP files for later analysis.
 
 ```bash
-lc sniff voip -i eth0 -u alice --write-file
+lc sniff voip -i eth0 -u alicent --write-file
 ```
 
 ### GPU Acceleration

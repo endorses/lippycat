@@ -161,19 +161,19 @@ func generateCompleteTCPCall() error {
 	ts := time.Now().Add(5 * time.Millisecond)
 
 	// INVITE with SDP
-	invite := `INVITE sip:bob@192.168.1.101 SIP/2.0
+	invite := `INVITE sip:robb@192.168.1.101 SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:50000;branch=z9hG4bK776asdhds
 Max-Forwards: 70
-To: Bob <sip:bob@192.168.1.101>
-From: Alice <sip:alice@192.168.1.100>;tag=1928301774
+To: Robb <sip:robb@192.168.1.101>
+From: Alicent <sip:alicent@192.168.1.100>;tag=1928301774
 Call-ID: tcp-complete-call-12345@192.168.1.100
 CSeq: 314159 INVITE
-Contact: <sip:alice@192.168.1.100:50000;transport=tcp>
+Contact: <sip:alicent@192.168.1.100:50000;transport=tcp>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 53655765 2353687637 IN IP4 192.168.1.100
+o=alicent 53655765 2353687637 IN IP4 192.168.1.100
 s=Session SDP
 c=IN IP4 192.168.1.100
 t=0 0
@@ -189,7 +189,7 @@ a=rtpmap:0 PCMU/8000
 	srcSeq += uint32(len(invite))
 	ts = ts.Add(time.Millisecond)
 
-	// ACK from Bob
+	// ACK from Robb
 	ack := createTCPPacket("192.168.1.101", "192.168.1.100", 5060, 50000, dstSeq, srcSeq, "A", nil)
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(ack), Length: len(ack)}, ack); err != nil {
 		return err
@@ -199,16 +199,16 @@ a=rtpmap:0 PCMU/8000
 	// 200 OK with SDP
 	ok := `SIP/2.0 200 OK
 Via: SIP/2.0/TCP 192.168.1.100:50000;branch=z9hG4bK776asdhds
-To: Bob <sip:bob@192.168.1.101>;tag=a6c85cf
-From: Alice <sip:alice@192.168.1.100>;tag=1928301774
+To: Robb <sip:robb@192.168.1.101>;tag=a6c85cf
+From: Alicent <sip:alicent@192.168.1.100>;tag=1928301774
 Call-ID: tcp-complete-call-12345@192.168.1.100
 CSeq: 314159 INVITE
-Contact: <sip:bob@192.168.1.101:5060;transport=tcp>
+Contact: <sip:robb@192.168.1.101:5060;transport=tcp>
 Content-Type: application/sdp
 Content-Length: 138
 
 v=0
-o=bob 53655765 2353687638 IN IP4 192.168.1.101
+o=robb 53655765 2353687638 IN IP4 192.168.1.101
 s=Session SDP
 c=IN IP4 192.168.1.101
 t=0 0
@@ -224,7 +224,7 @@ a=rtpmap:0 PCMU/8000
 	dstSeq += uint32(len(ok))
 	ts = ts.Add(time.Millisecond)
 
-	// ACK from Alice
+	// ACK from Alicent
 	ack = createTCPPacket("192.168.1.100", "192.168.1.101", 50000, 5060, srcSeq, dstSeq, "A", nil)
 	if err := w.WritePacket(gopacket.CaptureInfo{Timestamp: ts, CaptureLength: len(ack), Length: len(ack)}, ack); err != nil {
 		return err
@@ -232,11 +232,11 @@ a=rtpmap:0 PCMU/8000
 	ts = ts.Add(time.Millisecond)
 
 	// ACK (confirming 200 OK)
-	ackSip := `ACK sip:bob@192.168.1.101:5060 SIP/2.0
+	ackSip := `ACK sip:robb@192.168.1.101:5060 SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:50000;branch=z9hG4bK776asdhds
 Max-Forwards: 70
-To: Bob <sip:bob@192.168.1.101>;tag=a6c85cf
-From: Alice <sip:alice@192.168.1.100>;tag=1928301774
+To: Robb <sip:robb@192.168.1.101>;tag=a6c85cf
+From: Alicent <sip:alicent@192.168.1.100>;tag=1928301774
 Call-ID: tcp-complete-call-12345@192.168.1.100
 CSeq: 314159 ACK
 Content-Length: 0
@@ -252,11 +252,11 @@ Content-Length: 0
 	ts = ts.Add(time.Millisecond)
 
 	// BYE
-	bye := `BYE sip:bob@192.168.1.101:5060 SIP/2.0
+	bye := `BYE sip:robb@192.168.1.101:5060 SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:50000;branch=z9hG4bK776bye
 Max-Forwards: 70
-To: Bob <sip:bob@192.168.1.101>;tag=a6c85cf
-From: Alice <sip:alice@192.168.1.100>;tag=1928301774
+To: Robb <sip:robb@192.168.1.101>;tag=a6c85cf
+From: Alicent <sip:alicent@192.168.1.100>;tag=1928301774
 Call-ID: tcp-complete-call-12345@192.168.1.100
 CSeq: 314160 BYE
 Content-Length: 0
@@ -274,8 +274,8 @@ Content-Length: 0
 	// 200 OK (BYE response)
 	okBye := `SIP/2.0 200 OK
 Via: SIP/2.0/TCP 192.168.1.100:50000;branch=z9hG4bK776bye
-To: Bob <sip:bob@192.168.1.101>;tag=a6c85cf
-From: Alice <sip:alice@192.168.1.100>;tag=1928301774
+To: Robb <sip:robb@192.168.1.101>;tag=a6c85cf
+From: Alicent <sip:alicent@192.168.1.100>;tag=1928301774
 Call-ID: tcp-complete-call-12345@192.168.1.100
 CSeq: 314160 BYE
 Content-Length: 0
@@ -306,14 +306,14 @@ func generateFailedTCPCall() error {
 	ts := time.Now().Add(5 * time.Millisecond)
 
 	// INVITE
-	invite := `INVITE sip:bob@192.168.1.101 SIP/2.0
+	invite := `INVITE sip:robb@192.168.1.101 SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:50001;branch=z9hG4bK123failed
 Max-Forwards: 70
-To: Bob <sip:bob@192.168.1.101>
-From: Alice <sip:alice@192.168.1.100>;tag=failed123
+To: Robb <sip:robb@192.168.1.101>
+From: Alicent <sip:alicent@192.168.1.100>;tag=failed123
 Call-ID: tcp-failed-call-99999@192.168.1.100
 CSeq: 1 INVITE
-Contact: <sip:alice@192.168.1.100:50001;transport=tcp>
+Contact: <sip:alicent@192.168.1.100:50001;transport=tcp>
 Content-Length: 0
 
 `
@@ -329,8 +329,8 @@ Content-Length: 0
 	// 486 Busy Here
 	busy := `SIP/2.0 486 Busy Here
 Via: SIP/2.0/TCP 192.168.1.100:50001;branch=z9hG4bK123failed
-To: Bob <sip:bob@192.168.1.101>;tag=busytag
-From: Alice <sip:alice@192.168.1.100>;tag=failed123
+To: Robb <sip:robb@192.168.1.101>;tag=busytag
+From: Alicent <sip:alicent@192.168.1.100>;tag=failed123
 Call-ID: tcp-failed-call-99999@192.168.1.100
 CSeq: 1 INVITE
 Content-Length: 0
@@ -361,20 +361,20 @@ func generatePAssertedIdentityCall() error {
 	ts := time.Now().Add(5 * time.Millisecond)
 
 	// INVITE with P-Asserted-Identity
-	invite := `INVITE sip:bob@192.168.1.101 SIP/2.0
+	invite := `INVITE sip:robb@192.168.1.101 SIP/2.0
 Via: SIP/2.0/TCP 192.168.1.100:50002;branch=z9hG4bKpai123
 Max-Forwards: 70
-To: Bob <sip:bob@192.168.1.101>
-From: Alice <sip:alice@192.168.1.100>;tag=pai789
+To: Robb <sip:robb@192.168.1.101>
+From: Alicent <sip:alicent@192.168.1.100>;tag=pai789
 Call-ID: tcp-pai-call-77777@192.168.1.100
 CSeq: 1 INVITE
-Contact: <sip:alice@192.168.1.100:50002;transport=tcp>
+Contact: <sip:alicent@192.168.1.100:50002;transport=tcp>
 P-Asserted-Identity: <sip:+14155551234@provider.com>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 53655765 2353687637 IN IP4 192.168.1.100
+o=alicent 53655765 2353687637 IN IP4 192.168.1.100
 s=Session SDP
 c=IN IP4 192.168.1.100
 t=0 0
@@ -410,15 +410,15 @@ func generateMultistreamCall() error {
 Via: SIP/2.0/TCP 192.168.1.100:50003;branch=z9hG4bKconf123
 Max-Forwards: 70
 To: Conference <sip:conference@192.168.1.200>
-From: Alice <sip:alice@192.168.1.100>;tag=conf456
+From: Alicent <sip:alicent@192.168.1.100>;tag=conf456
 Call-ID: tcp-multistream-88888@192.168.1.100
 CSeq: 1 INVITE
-Contact: <sip:alice@192.168.1.100:50003;transport=tcp>
+Contact: <sip:alicent@192.168.1.100:50003;transport=tcp>
 Content-Type: application/sdp
 Content-Length: 260
 
 v=0
-o=alice 53655765 2353687637 IN IP4 192.168.1.100
+o=alicent 53655765 2353687637 IN IP4 192.168.1.100
 s=Conference Call
 c=IN IP4 192.168.1.100
 t=0 0

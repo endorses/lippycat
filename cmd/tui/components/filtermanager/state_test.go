@@ -12,8 +12,8 @@ import (
 
 func TestApplyFilters_NoFilters(t *testing.T) {
 	filters := []*management.Filter{
-		{Pattern: "alice", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
-		{Pattern: "bob", Type: management.FilterType_FILTER_SIP_USER, Enabled: false},
+		{Pattern: "alicent", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "robb", Type: management.FilterType_FILTER_SIP_USER, Enabled: false},
 	}
 
 	result := ApplyFilters(StateParams{
@@ -29,28 +29,28 @@ func TestApplyFilters_NoFilters(t *testing.T) {
 
 func TestApplyFilters_SearchQuery(t *testing.T) {
 	filters := []*management.Filter{
-		{Pattern: "alice@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
-		{Pattern: "bob@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "alicent@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "robb@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
 		{Pattern: "192.168.1.1", Type: management.FilterType_FILTER_IP_ADDRESS, Enabled: true},
 	}
 
 	result := ApplyFilters(StateParams{
 		AllFilters:      filters,
-		SearchQuery:     "alice",
+		SearchQuery:     "alicent",
 		FilterByType:    nil,
 		FilterByEnabled: nil,
 	})
 
 	assert.Len(t, result.FilteredFilters, 1)
-	assert.Equal(t, "alice@example.com", result.FilteredFilters[0].Pattern)
+	assert.Equal(t, "alicent@example.com", result.FilteredFilters[0].Pattern)
 	assert.Equal(t, "Showing 1 of 3 filters", result.StatusMessage)
 }
 
 func TestApplyFilters_TypeFilter(t *testing.T) {
 	filters := []*management.Filter{
-		{Pattern: "alice", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "alicent", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
 		{Pattern: "192.168.1.1", Type: management.FilterType_FILTER_IP_ADDRESS, Enabled: true},
-		{Pattern: "bob", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "robb", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
 	}
 
 	filterType := management.FilterType_FILTER_SIP_USER
@@ -62,14 +62,14 @@ func TestApplyFilters_TypeFilter(t *testing.T) {
 	})
 
 	assert.Len(t, result.FilteredFilters, 2)
-	assert.Equal(t, "alice", result.FilteredFilters[0].Pattern)
-	assert.Equal(t, "bob", result.FilteredFilters[1].Pattern)
+	assert.Equal(t, "alicent", result.FilteredFilters[0].Pattern)
+	assert.Equal(t, "robb", result.FilteredFilters[1].Pattern)
 }
 
 func TestApplyFilters_EnabledFilter(t *testing.T) {
 	filters := []*management.Filter{
-		{Pattern: "alice", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
-		{Pattern: "bob", Type: management.FilterType_FILTER_SIP_USER, Enabled: false},
+		{Pattern: "alicent", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "robb", Type: management.FilterType_FILTER_SIP_USER, Enabled: false},
 		{Pattern: "charlie", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
 	}
 
@@ -82,14 +82,14 @@ func TestApplyFilters_EnabledFilter(t *testing.T) {
 	})
 
 	assert.Len(t, result.FilteredFilters, 2)
-	assert.Equal(t, "alice", result.FilteredFilters[0].Pattern)
+	assert.Equal(t, "alicent", result.FilteredFilters[0].Pattern)
 	assert.Equal(t, "charlie", result.FilteredFilters[1].Pattern)
 }
 
 func TestApplyFilters_CombinedFilters(t *testing.T) {
 	filters := []*management.Filter{
-		{Pattern: "alice@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
-		{Pattern: "bob@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: false},
+		{Pattern: "alicent@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
+		{Pattern: "robb@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: false},
 		{Pattern: "charlie@example.com", Type: management.FilterType_FILTER_SIP_USER, Enabled: true},
 		{Pattern: "192.168.1.1", Type: management.FilterType_FILTER_IP_ADDRESS, Enabled: true},
 	}
@@ -104,7 +104,7 @@ func TestApplyFilters_CombinedFilters(t *testing.T) {
 	})
 
 	assert.Len(t, result.FilteredFilters, 2)
-	assert.Equal(t, "alice@example.com", result.FilteredFilters[0].Pattern)
+	assert.Equal(t, "alicent@example.com", result.FilteredFilters[0].Pattern)
 	assert.Equal(t, "charlie@example.com", result.FilteredFilters[1].Pattern)
 }
 
@@ -209,10 +209,10 @@ func TestTruncatePattern(t *testing.T) {
 		max      int
 		expected string
 	}{
-		{"Shorter than max", "alice", 10, "alice"},
-		{"Exactly max", "alice", 5, "alice"},
-		{"Longer than max", "alice@example.com", 10, "alice@e..."},
-		{"Max too small for ellipsis", "alice", 2, "al"},
+		{"Shorter than max", "alicent", 10, "alicent"},
+		{"Exactly max", "alicent", 5, "alicent"},
+		{"Longer than max", "alicent@example.com", 10, "alicent@e..."},
+		{"Max too small for ellipsis", "alicent", 2, "al"},
 		{"Empty string", "", 10, ""},
 	}
 

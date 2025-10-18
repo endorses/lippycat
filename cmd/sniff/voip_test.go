@@ -30,7 +30,7 @@ func TestVoipCommand(t *testing.T) {
 		},
 		{
 			name:     "VoIP with sipuser flag",
-			args:     []string{"--sipuser", "alice"},
+			args:     []string{"--sipuser", "alicent"},
 			wantErr:  false,
 			contains: []string{},
 		},
@@ -42,13 +42,13 @@ func TestVoipCommand(t *testing.T) {
 		},
 		{
 			name:     "VoIP with short flags",
-			args:     []string{"-u", "bob,charlie", "-w"},
+			args:     []string{"-u", "robb,charlie", "-w"},
 			wantErr:  false,
 			contains: []string{},
 		},
 		{
 			name:     "VoIP with multiple users",
-			args:     []string{"--sipuser", "alice,bob,charlie"},
+			args:     []string{"--sipuser", "alicent,robb,charlie"},
 			wantErr:  false,
 			contains: []string{},
 		},
@@ -108,14 +108,14 @@ func TestVoipFlagParsing(t *testing.T) {
 		},
 		{
 			name:              "Single SIP user",
-			args:              []string{"--sipuser", "alice"},
-			expectedSipUser:   "alice",
+			args:              []string{"--sipuser", "alicent"},
+			expectedSipUser:   "alicent",
 			expectedWriteVoip: false,
 		},
 		{
 			name:              "Multiple SIP users",
-			args:              []string{"-u", "alice,bob,charlie"},
-			expectedSipUser:   "alice,bob,charlie",
+			args:              []string{"-u", "alicent,robb,charlie"},
+			expectedSipUser:   "alicent,robb,charlie",
 			expectedWriteVoip: false,
 		},
 		{
@@ -126,8 +126,8 @@ func TestVoipFlagParsing(t *testing.T) {
 		},
 		{
 			name:              "All flags combined",
-			args:              []string{"-u", "alice,bob", "-w"},
-			expectedSipUser:   "alice,bob",
+			args:              []string{"-u", "alicent,robb", "-w"},
+			expectedSipUser:   "alicent,robb",
 			expectedWriteVoip: true,
 		},
 		{
@@ -180,31 +180,31 @@ func TestVoipHandlerLogic(t *testing.T) {
 	}{
 		{
 			name:                "Single user live capture",
-			sipuserValue:        "alice",
+			sipuserValue:        "alicent",
 			readFileValue:       "",
 			interfaceValue:      "eth0",
 			filterValue:         "port 5060",
-			expectedUsers:       []string{"alice"},
+			expectedUsers:       []string{"alicent"},
 			expectedLiveCall:    true,
 			expectedOfflineCall: false,
 		},
 		{
 			name:                "Multiple users live capture",
-			sipuserValue:        "alice,bob,charlie",
+			sipuserValue:        "alicent,robb,charlie",
 			readFileValue:       "",
 			interfaceValue:      "any",
 			filterValue:         "",
-			expectedUsers:       []string{"alice", "bob", "charlie"},
+			expectedUsers:       []string{"alicent", "robb", "charlie"},
 			expectedLiveCall:    true,
 			expectedOfflineCall: false,
 		},
 		{
 			name:                "Single user offline capture",
-			sipuserValue:        "bob",
+			sipuserValue:        "robb",
 			readFileValue:       "/tmp/test.pcap",
 			interfaceValue:      "eth0",
 			filterValue:         "tcp",
-			expectedUsers:       []string{"bob"},
+			expectedUsers:       []string{"robb"},
 			expectedLiveCall:    false,
 			expectedOfflineCall: true,
 		},
@@ -220,11 +220,11 @@ func TestVoipHandlerLogic(t *testing.T) {
 		},
 		{
 			name:                "Empty user in list",
-			sipuserValue:        "alice,,bob",
+			sipuserValue:        "alicent,,robb",
 			readFileValue:       "",
 			interfaceValue:      "eth0",
 			filterValue:         "",
-			expectedUsers:       []string{"alice", "", "bob"},
+			expectedUsers:       []string{"alicent", "", "robb"},
 			expectedLiveCall:    true,
 			expectedOfflineCall: false,
 		},
@@ -350,18 +350,18 @@ func TestVoipUserListParsing(t *testing.T) {
 		},
 		{
 			name:          "Single user",
-			sipuserInput:  "alice",
-			expectedUsers: []string{"alice"},
+			sipuserInput:  "alicent",
+			expectedUsers: []string{"alicent"},
 		},
 		{
 			name:          "Multiple users",
-			sipuserInput:  "alice,bob,charlie",
-			expectedUsers: []string{"alice", "bob", "charlie"},
+			sipuserInput:  "alicent,robb,charlie",
+			expectedUsers: []string{"alicent", "robb", "charlie"},
 		},
 		{
 			name:          "Users with spaces",
-			sipuserInput:  "alice, bob , charlie",
-			expectedUsers: []string{"alice", " bob ", " charlie"},
+			sipuserInput:  "alicent, robb , charlie",
+			expectedUsers: []string{"alicent", " robb ", " charlie"},
 		},
 		{
 			name:          "Users with special characters",
@@ -370,8 +370,8 @@ func TestVoipUserListParsing(t *testing.T) {
 		},
 		{
 			name:          "Users with empty entries",
-			sipuserInput:  "alice,,bob,",
-			expectedUsers: []string{"alice", "", "bob", ""},
+			sipuserInput:  "alicent,,robb,",
+			expectedUsers: []string{"alicent", "", "robb", ""},
 		},
 		{
 			name:          "Single comma",
@@ -504,8 +504,8 @@ func TestVoipIntegrationWithParentFlags(t *testing.T) {
 
 	// Test with various flag combinations
 	testArgs := [][]string{
-		{"voip", "-u", "alice"},
-		{"voip", "-i", "eth0", "-u", "bob", "-w"},
+		{"voip", "-u", "alicent"},
+		{"voip", "-i", "eth0", "-u", "robb", "-w"},
 		{"voip", "-f", "port 5060", "-r", "test.pcap", "-u", "charlie"},
 	}
 

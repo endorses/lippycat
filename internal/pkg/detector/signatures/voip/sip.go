@@ -270,7 +270,7 @@ func splitLines(s string) []string {
 }
 
 func extractUserFromURI(uri string) string {
-	// Extract username from SIP URI: "Alice <sip:alice@domain.com>"
+	// Extract username from SIP URI: "Alicent <sip:alicent@domain.com>"
 	start := strings.Index(uri, "sip:")
 	if start == -1 {
 		return ""

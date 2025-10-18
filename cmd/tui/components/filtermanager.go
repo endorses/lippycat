@@ -669,7 +669,7 @@ func (fm *FilterManager) deleteFilter(filter *management.Filter) tea.Cmd {
 // initializeAddForm initializes the form for adding a new filter
 func (fm *FilterManager) initializeAddForm() {
 	patternInput := textinput.New()
-	patternInput.Placeholder = "e.g., alice@example.com"
+	patternInput.Placeholder = "e.g., alicent@example.com"
 	patternInput.CharLimit = 200
 	patternInput.Width = 60
 	patternInput.Focus()

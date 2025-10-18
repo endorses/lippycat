@@ -23,10 +23,10 @@ func TestYAMLPersistence_SaveAndLoad(t *testing.T) {
 			"filter-1": {
 				Id:            "filter-1",
 				Type:          management.FilterType_FILTER_SIP_USER,
-				Pattern:       "alice@example.com",
+				Pattern:       "alicent@example.com",
 				TargetHunters: []string{"hunter-1", "hunter-2"},
 				Enabled:       true,
-				Description:   "Alice's calls",
+				Description:   "Alicent's calls",
 			},
 			"filter-2": {
 				Id:          "filter-2",
@@ -48,7 +48,7 @@ func TestYAMLPersistence_SaveAndLoad(t *testing.T) {
 		data, err := os.ReadFile(filterFile)
 		require.NoError(t, err, "should be able to read filter file")
 		assert.Contains(t, string(data), "filter-1")
-		assert.Contains(t, string(data), "alice@example.com")
+		assert.Contains(t, string(data), "alicent@example.com")
 		assert.Contains(t, string(data), "filter-2")
 		assert.Contains(t, string(data), "192.168.1.0/24")
 	})
@@ -63,7 +63,7 @@ func TestYAMLPersistence_SaveAndLoad(t *testing.T) {
 
 		filter1 := filters["filter-1"]
 		require.NotNil(t, filter1, "filter-1 should exist")
-		assert.Equal(t, "alice@example.com", filter1.Pattern)
+		assert.Equal(t, "alicent@example.com", filter1.Pattern)
 		assert.Equal(t, management.FilterType_FILTER_SIP_USER, filter1.Type)
 		assert.Equal(t, []string{"hunter-1", "hunter-2"}, filter1.TargetHunters)
 		assert.True(t, filter1.Enabled)
@@ -222,7 +222,7 @@ func TestManager_PersistenceIntegration(t *testing.T) {
 		filter1 := &management.Filter{
 			Id:      "filter-1",
 			Type:    management.FilterType_FILTER_SIP_USER,
-			Pattern: "alice@example.com",
+			Pattern: "alicent@example.com",
 			Enabled: true,
 		}
 		filter2 := &management.Filter{

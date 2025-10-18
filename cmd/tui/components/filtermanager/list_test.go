@@ -71,12 +71,12 @@ func TestRenderSearchBar_NoSearch(t *testing.T) {
 func TestRenderSearchBar_WithSearch(t *testing.T) {
 	result := RenderSearchBar(RenderSearchBarParams{
 		SearchMode:      false,
-		SearchValue:     "alice",
+		SearchValue:     "alicent",
 		FilterByType:    nil,
 		FilterByEnabled: nil,
 	})
 
-	assert.Contains(t, result, "Search: alice")
+	assert.Contains(t, result, "Search: alicent")
 }
 
 func TestRenderSearchBar_WithTypeFilter(t *testing.T) {
@@ -115,7 +115,7 @@ func TestRenderSearchBar_WithEnabledFilter(t *testing.T) {
 
 func TestFilterItem_FilterValue(t *testing.T) {
 	filter := &management.Filter{
-		Pattern:       "alice@example.com",
+		Pattern:       "alicent@example.com",
 		Description:   "Test user",
 		Type:          management.FilterType_FILTER_SIP_USER,
 		TargetHunters: []string{"hunter1", "hunter2"},
@@ -125,7 +125,7 @@ func TestFilterItem_FilterValue(t *testing.T) {
 	filterValue := item.FilterValue()
 
 	// Should be lowercase and contain all searchable fields
-	assert.Contains(t, filterValue, "alice@example.com")
+	assert.Contains(t, filterValue, "alicent@example.com")
 	assert.Contains(t, filterValue, "test user")
 	assert.Contains(t, filterValue, "filter_sip_user")
 	assert.Contains(t, filterValue, "hunter1")

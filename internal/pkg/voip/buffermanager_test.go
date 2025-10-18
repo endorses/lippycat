@@ -29,8 +29,8 @@ func TestBufferManager_AddSIPPacket(t *testing.T) {
 	packet := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID: callID,
-		From:   "alice@example.com",
-		To:     "bob@example.com",
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
 		Method: "INVITE",
 	}
 
@@ -49,8 +49,8 @@ func TestBufferManager_AddRTPPacket(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID:  callID,
-		From:    "alice@example.com",
-		To:      "bob@example.com",
+		From:    "alicent@example.com",
+		To:      "robb@example.com",
 		Method:  "INVITE",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
@@ -74,8 +74,8 @@ func TestBufferManager_CheckFilter_Matched(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID:  callID,
-		From:    "alice@example.com",
-		To:      "bob@example.com",
+		From:    "alicent@example.com",
+		To:      "robb@example.com",
 		Method:  "INVITE",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
@@ -89,7 +89,7 @@ func TestBufferManager_CheckFilter_Matched(t *testing.T) {
 
 	// Check filter - should match
 	filterFunc := func(m *CallMetadata) bool {
-		return m.From == "alice@example.com"
+		return m.From == "alicent@example.com"
 	}
 
 	matched, packets := bm.CheckFilter(callID, filterFunc)
@@ -109,8 +109,8 @@ func TestBufferManager_CheckFilter_NotMatched(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID: callID,
-		From:   "alice@example.com",
-		To:     "bob@example.com",
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
 		Method: "INVITE",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
@@ -137,8 +137,8 @@ func TestBufferManager_CheckFilterWithCallback(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID:  callID,
-		From:    "alice@example.com",
-		To:      "bob@example.com",
+		From:    "alicent@example.com",
+		To:      "robb@example.com",
 		Method:  "INVITE",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
@@ -153,7 +153,7 @@ func TestBufferManager_CheckFilterWithCallback(t *testing.T) {
 	var receivedMetadata *CallMetadata
 
 	filterFunc := func(m *CallMetadata) bool {
-		return m.From == "alice@example.com"
+		return m.From == "alicent@example.com"
 	}
 
 	onMatch := func(cid string, packets []gopacket.Packet, meta *CallMetadata) {
@@ -167,7 +167,7 @@ func TestBufferManager_CheckFilterWithCallback(t *testing.T) {
 	assert.True(t, matched, "Should match filter")
 	assert.True(t, callbackCalled, "Callback should be called")
 	assert.Len(t, receivedPackets, 2, "Should receive 2 packets")
-	assert.Equal(t, "alice@example.com", receivedMetadata.From)
+	assert.Equal(t, "alicent@example.com", receivedMetadata.From)
 }
 
 func TestBufferManager_GetCallIDForRTPPort(t *testing.T) {
@@ -180,8 +180,8 @@ func TestBufferManager_GetCallIDForRTPPort(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID:  callID,
-		From:    "alice@example.com",
-		To:      "bob@example.com",
+		From:    "alicent@example.com",
+		To:      "robb@example.com",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
@@ -208,7 +208,7 @@ func TestBufferManager_MultipleCallBuffers(t *testing.T) {
 		metadata := &CallMetadata{
 			CallID: callID,
 			From:   "user" + string(rune('A'+i)) + "@example.com",
-			To:     "bob@example.com",
+			To:     "robb@example.com",
 		}
 		bm.AddSIPPacket(callID, sipPacket, metadata)
 	}
@@ -226,8 +226,8 @@ func TestBufferManager_DiscardBuffer(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID: callID,
-		From:   "alice@example.com",
-		To:     "bob@example.com",
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
 
@@ -249,8 +249,8 @@ func TestBufferManager_IsCallMatched(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID: callID,
-		From:   "alice@example.com",
-		To:     "bob@example.com",
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
 
@@ -277,8 +277,8 @@ func TestBufferManager_RTPAfterFilterMatch(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID:  callID,
-		From:    "alice@example.com",
-		To:      "bob@example.com",
+		From:    "alicent@example.com",
+		To:      "robb@example.com",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
@@ -307,8 +307,8 @@ func TestBufferManager_JanitorCleanup(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID: callID,
-		From:   "alice@example.com",
-		To:     "bob@example.com",
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
 
@@ -332,8 +332,8 @@ func TestBufferManager_CleanupOversizedBuffer(t *testing.T) {
 	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
 	metadata := &CallMetadata{
 		CallID:  callID,
-		From:    "alice@example.com",
-		To:      "bob@example.com",
+		From:    "alicent@example.com",
+		To:      "robb@example.com",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
 	bm.AddSIPPacket(callID, sipPacket, metadata)
@@ -427,7 +427,7 @@ func TestBufferManager_ConcurrentAccess(t *testing.T) {
 			metadata := &CallMetadata{
 				CallID: callID,
 				From:   "user@example.com",
-				To:     "bob@example.com",
+				To:     "robb@example.com",
 			}
 			bm.AddSIPPacket(callID, packet, metadata)
 			time.Sleep(1 * time.Millisecond)

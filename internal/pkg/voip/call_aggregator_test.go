@@ -24,8 +24,8 @@ func TestCallAggregator_ProcessSIPInvite(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:       "test-call-123",
 				Method:       "INVITE",
-				FromUser:     "alice@example.com",
-				ToUser:       "bob@example.com",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
 				ResponseCode: 0,
 			},
 		},
@@ -36,8 +36,8 @@ func TestCallAggregator_ProcessSIPInvite(t *testing.T) {
 	calls := ca.GetCalls()
 	assert.Len(t, calls, 1, "Should have 1 call")
 	assert.Equal(t, "test-call-123", calls[0].CallID)
-	assert.Equal(t, "alice@example.com", calls[0].From)
-	assert.Equal(t, "bob@example.com", calls[0].To)
+	assert.Equal(t, "alicent@example.com", calls[0].From)
+	assert.Equal(t, "robb@example.com", calls[0].To)
 	assert.Equal(t, CallStateRinging, calls[0].State)
 	assert.Contains(t, calls[0].Hunters, "hunter-1")
 }
@@ -85,8 +85,8 @@ func TestCallAggregator_CallStateTransitions(t *testing.T) {
 					Sip: &data.SIPMetadata{
 						CallId:       callID,
 						Method:       tt.method,
-						FromUser:     "alice@example.com",
-						ToUser:       "bob@example.com",
+						FromUser:     "alicent@example.com",
+						ToUser:       "robb@example.com",
 						ResponseCode: tt.responseCode,
 					},
 				},
@@ -142,8 +142,8 @@ func TestCallAggregator_FailedCallStates(t *testing.T) {
 					Sip: &data.SIPMetadata{
 						CallId:   callID,
 						Method:   "INVITE",
-						FromUser: "alice@example.com",
-						ToUser:   "bob@example.com",
+						FromUser: "alicent@example.com",
+						ToUser:   "robb@example.com",
 					},
 				},
 			}
@@ -179,8 +179,8 @@ func TestCallAggregator_MultipleHunters(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:   callID,
 				Method:   "INVITE",
-				FromUser: "alice@example.com",
-				ToUser:   "bob@example.com",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
 			},
 		},
 	}
@@ -192,8 +192,8 @@ func TestCallAggregator_MultipleHunters(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:   callID,
 				Method:   "ACK",
-				FromUser: "alice@example.com",
-				ToUser:   "bob@example.com",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
 			},
 		},
 	}
@@ -217,8 +217,8 @@ func TestCallAggregator_PacketCounting(t *testing.T) {
 				Sip: &data.SIPMetadata{
 					CallId:   callID,
 					Method:   "INVITE",
-					FromUser: "alice@example.com",
-					ToUser:   "bob@example.com",
+					FromUser: "alicent@example.com",
+					ToUser:   "robb@example.com",
 				},
 			},
 		}
@@ -250,7 +250,7 @@ func TestCallAggregator_MultipleCalls(t *testing.T) {
 					CallId:   callID,
 					Method:   "INVITE",
 					FromUser: "user" + string(rune('A'+i)) + "@example.com",
-					ToUser:   "bob@example.com",
+					ToUser:   "robb@example.com",
 				},
 			},
 		}
@@ -271,8 +271,8 @@ func TestCallAggregator_RTPProcessing(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:   callID,
 				Method:   "INVITE",
-				FromUser: "alice@example.com",
-				ToUser:   "bob@example.com",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
 			},
 		},
 	}
@@ -320,8 +320,8 @@ func TestCallAggregator_EmptyCallID(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:   "", // Empty call ID
 				Method:   "INVITE",
-				FromUser: "alice@example.com",
-				ToUser:   "bob@example.com",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
 			},
 		},
 	}
@@ -344,8 +344,8 @@ func TestCallAggregator_CallDuration(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:   callID,
 				Method:   "INVITE",
-				FromUser: "alice@example.com",
-				ToUser:   "bob@example.com",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
 			},
 		},
 	}
@@ -406,8 +406,8 @@ func TestCallAggregator_UpdateExistingCall(t *testing.T) {
 			Sip: &data.SIPMetadata{
 				CallId:   callID,
 				Method:   "INVITE",
-				FromUser: "alice@example.com",
-				ToUser:   "bob@example.com",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
 			},
 		},
 	}
@@ -431,8 +431,8 @@ func TestCallAggregator_UpdateExistingCall(t *testing.T) {
 	call2, _ := ca.GetCall(callID)
 	assert.Equal(t, CallStateActive, call2.State, "State should transition to ACTIVE")
 	assert.Equal(t, 2, call2.PacketCount, "Packet count should increment")
-	assert.Equal(t, "alice@example.com", call2.From, "From should be preserved")
-	assert.Equal(t, "bob@example.com", call2.To, "To should be preserved")
+	assert.Equal(t, "alicent@example.com", call2.From, "From should be preserved")
+	assert.Equal(t, "robb@example.com", call2.To, "To should be preserved")
 }
 
 func TestCallAggregator_ConcurrentAccess(t *testing.T) {
@@ -448,8 +448,8 @@ func TestCallAggregator_ConcurrentAccess(t *testing.T) {
 					Sip: &data.SIPMetadata{
 						CallId:   "call-" + string(rune('A'+i)),
 						Method:   "INVITE",
-						FromUser: "alice@example.com",
-						ToUser:   "bob@example.com",
+						FromUser: "alicent@example.com",
+						ToUser:   "robb@example.com",
 					},
 				},
 			}
@@ -527,8 +527,8 @@ func TestCallAggregator_ResponseCodesTransitions(t *testing.T) {
 					Sip: &data.SIPMetadata{
 						CallId:   callID,
 						Method:   "INVITE",
-						FromUser: "alice@example.com",
-						ToUser:   "bob@example.com",
+						FromUser: "alicent@example.com",
+						ToUser:   "robb@example.com",
 					},
 				},
 			}

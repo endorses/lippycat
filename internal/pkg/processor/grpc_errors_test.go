@@ -126,7 +126,7 @@ func TestDeleteFilter_Success(t *testing.T) {
 	testFilter := &management.Filter{
 		Id:      "test-filter",
 		Type:    management.FilterType_FILTER_SIP_USER,
-		Pattern: "alice",
+		Pattern: "alicent",
 	}
 	p.filterManager.Update(testFilter)
 

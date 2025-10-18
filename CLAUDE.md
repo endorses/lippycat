@@ -187,7 +187,7 @@ lippycat provides several commands for different deployment modes:
 **Standalone VoIP Capture:**
 ```bash
 # VoIP capture with balanced performance
-sudo lc sniff voip --interface eth0 --sipuser alice
+sudo lc sniff voip --interface eth0 --sipuser alicent
 
 # High-performance VoIP capture with GPU acceleration
 sudo lc sniff voip -i eth0 \

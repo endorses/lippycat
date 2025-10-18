@@ -26,18 +26,18 @@ func TestSIPPlugin(t *testing.T) {
 	assert.Contains(t, plugin.SupportedProtocols(), "sip")
 
 	// Create a mock SIP packet
-	sipPayload := `INVITE sip:bob@example.com SIP/2.0
+	sipPayload := `INVITE sip:robb@example.com SIP/2.0
 Via: SIP/2.0/UDP 192.168.1.100:5060;branch=z9hG4bK-123456
-From: Alice <sip:alice@example.com>;tag=abc123
-To: Bob <sip:bob@example.com>
+From: Alicent <sip:alicent@example.com>;tag=abc123
+To: Robb <sip:robb@example.com>
 Call-ID: test-call-123@example.com
 CSeq: 1 INVITE
-Contact: <sip:alice@192.168.1.100:5060>
+Contact: <sip:alicent@192.168.1.100:5060>
 Content-Type: application/sdp
 Content-Length: 142
 
 v=0
-o=alice 2890844526 2890844527 IN IP4 192.168.1.100
+o=alicent 2890844526 2890844527 IN IP4 192.168.1.100
 s=Session Description
 c=IN IP4 192.168.1.100
 t=0 0
@@ -324,7 +324,7 @@ func TestDetectProtocols(t *testing.T) {
 	registry := NewPluginRegistry()
 
 	// Test SIP detection
-	sipPayload := []byte("INVITE sip:test@example.com SIP/2.0\r\nFrom: <sip:alice@example.com>\r\nTo: <sip:bob@example.com>\r\nCall-ID: test123\r\n\r\n")
+	sipPayload := []byte("INVITE sip:test@example.com SIP/2.0\r\nFrom: <sip:alicent@example.com>\r\nTo: <sip:robb@example.com>\r\nCall-ID: test123\r\n\r\n")
 	packet := createMockPacket(sipPayload)
 	protocols := registry.detectProtocols(packet)
 	assert.Contains(t, protocols, "sip")

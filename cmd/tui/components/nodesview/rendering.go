@@ -81,23 +81,12 @@ func IsVoIPHunter(capabilities *management.HunterCapabilities) bool {
 	return false
 }
 
-// GetHunterModeBadge returns a styled badge for hunter mode
+// GetHunterModeBadge returns an unstyled badge text for hunter mode
 func GetHunterModeBadge(capabilities *management.HunterCapabilities, theme themes.Theme) string {
 	if IsVoIPHunter(capabilities) {
-		// VoIP badge - use purple/magenta color
-		return lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("63")).
-			Padding(0, 1).
-			Render("VoIP")
+		return "VoIP"
 	}
-
-	// Generic badge - use gray color
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		Background(lipgloss.Color("240")).
-		Padding(0, 1).
-		Render("Generic")
+	return "Generic"
 }
 
 // RenderBox renders a box with rounded corners around the given lines

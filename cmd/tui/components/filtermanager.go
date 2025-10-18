@@ -679,9 +679,15 @@ func (fm *FilterManager) initializeAddForm() {
 	descInput.CharLimit = 500
 	descInput.Width = 60
 
+	// Choose default filter type based on available hunters
+	defaultType := management.FilterType_FILTER_BPF
+	if filtermanager.HasVoIPHunters(fm.availableHunters) {
+		defaultType = management.FilterType_FILTER_SIP_USER
+	}
+
 	fm.formState = &FilterFormState{
 		filterID:      "",
-		filterType:    management.FilterType_FILTER_SIP_USER,
+		filterType:    defaultType,
 		patternInput:  patternInput,
 		descInput:     descInput,
 		enabled:       true,
@@ -775,7 +781,7 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		if fm.formState != nil {
 			switch fm.formState.activeField {
 			case 2:
-				fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, false)
+				fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, false, fm.availableHunters)
 			case 3:
 				fm.formState.enabled = !fm.formState.enabled
 			}
@@ -796,7 +802,7 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 		if fm.formState != nil {
 			switch fm.formState.activeField {
 			case 2:
-				fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true)
+				fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true, fm.availableHunters)
 			case 3:
 				fm.formState.enabled = !fm.formState.enabled
 			}
@@ -805,7 +811,7 @@ func (fm *FilterManager) handleFormMode(msg tea.KeyMsg) tea.Cmd {
 
 	case "ctrl+t":
 		if fm.formState != nil {
-			fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true)
+			fm.formState.filterType = filtermanager.CycleFormFilterType(fm.formState.filterType, true, fm.availableHunters)
 		}
 		return nil
 
@@ -857,9 +863,10 @@ func (fm *FilterManager) saveFilter() tea.Cmd {
 	// Validate pattern
 	pattern := strings.TrimSpace(fm.formState.patternInput.Value())
 	validationResult := filtermanager.ValidateFilter(filtermanager.ValidateFilterParams{
-		Pattern:     pattern,
-		Description: strings.TrimSpace(fm.formState.descInput.Value()),
-		Type:        fm.formState.filterType,
+		Pattern:          pattern,
+		Description:      strings.TrimSpace(fm.formState.descInput.Value()),
+		Type:             fm.formState.filterType,
+		AvailableHunters: fm.availableHunters,
 	})
 
 	if !validationResult.Valid {

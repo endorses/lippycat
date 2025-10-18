@@ -12,15 +12,17 @@ import (
 
 // ValidateFilterParams holds input parameters for filter validation
 type ValidateFilterParams struct {
-	Pattern     string
-	Description string
-	Type        management.FilterType
+	Pattern          string
+	Description      string
+	Type             management.FilterType
+	AvailableHunters []HunterSelectorItem
 }
 
 // ValidateFilterResult holds the result of filter validation
 type ValidateFilterResult struct {
 	Valid        bool
 	ErrorMessage string
+	Warning      string // Non-fatal warning message
 }
 
 // ValidateFilter validates a filter before saving
@@ -31,6 +33,14 @@ func ValidateFilter(params ValidateFilterParams) ValidateFilterResult {
 		return ValidateFilterResult{
 			Valid:        false,
 			ErrorMessage: "Pattern cannot be empty",
+		}
+	}
+
+	// Check if VoIP filter type is used without VoIP hunters
+	if IsVoIPFilterType(params.Type) && !HasVoIPHunters(params.AvailableHunters) {
+		return ValidateFilterResult{
+			Valid:        false,
+			ErrorMessage: "No VoIP-capable hunters available. Start a VoIP hunter with 'lc hunt voip' to use this filter type.",
 		}
 	}
 

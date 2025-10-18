@@ -34,14 +34,21 @@ func (i FilterItem) FilterValue() string {
 
 // FilterDelegate is a custom delegate for rendering filter items
 type FilterDelegate struct {
-	theme themes.Theme
+	theme              themes.Theme
+	hunterCapabilities *management.HunterCapabilities // nil for processor-level view
 }
 
 // NewFilterDelegate creates a new filter delegate
 func NewFilterDelegate(theme themes.Theme) FilterDelegate {
 	return FilterDelegate{
-		theme: theme,
+		theme:              theme,
+		hunterCapabilities: nil,
 	}
+}
+
+// SetHunterCapabilities sets the hunter capabilities for compatibility checking
+func (d *FilterDelegate) SetHunterCapabilities(caps *management.HunterCapabilities) {
+	d.hunterCapabilities = caps
 }
 
 // Height returns the height of a list item
@@ -79,6 +86,25 @@ func (d FilterDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	// Filter type (abbreviated)
 	filterType := AbbreviateType(filter.Type)
 
+	// Check compatibility if viewing hunter-specific filters
+	compatIndicator := " "
+	if d.hunterCapabilities != nil {
+		// Check if this filter type is compatible with the hunter
+		if IsVoIPFilterType(filter.Type) {
+			// This is a VoIP filter - check if hunter supports it
+			isCompatible := false
+			for _, ft := range d.hunterCapabilities.FilterTypes {
+				if ft == "sip_user" {
+					isCompatible = true
+					break
+				}
+			}
+			if !isCompatible {
+				compatIndicator = "⚠"
+			}
+		}
+	}
+
 	// Target hunters
 	targets := "All hunters"
 	if len(filter.TargetHunters) > 0 {
@@ -89,9 +115,10 @@ func (d FilterDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 		}
 	}
 
-	// Build row: [✓] | Type | Pattern | Targets
-	row := fmt.Sprintf(" %s │ %-12s │ %-25s │ %s",
+	// Build row: [✓] | Compat | Type | Pattern | Targets
+	row := fmt.Sprintf(" %s %s │ %-12s │ %-25s │ %s",
 		checkbox,
+		compatIndicator,
 		filterType,
 		TruncateString(filter.Pattern, 25),
 		TruncateString(targets, 20),

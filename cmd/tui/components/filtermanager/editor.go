@@ -238,46 +238,65 @@ func RenderHunterSelection(params RenderHunterSelectionParams) string {
 
 // CycleFormFilterTypeParams holds input parameters for cycling filter type in form
 type CycleFormFilterTypeParams struct {
-	CurrentType management.FilterType
-	Forward     bool
+	CurrentType      management.FilterType
+	Forward          bool
+	AvailableHunters []HunterSelectorItem
+}
+
+// HasVoIPHunters checks if any hunters support VoIP filters
+func HasVoIPHunters(hunters []HunterSelectorItem) bool {
+	for _, hunter := range hunters {
+		if HunterSupportsFilterType(hunter, management.FilterType_FILTER_SIP_USER) {
+			return true
+		}
+	}
+	return false
 }
 
 // CycleFormFilterType cycles to the next/previous filter type in the form
-func CycleFormFilterType(current management.FilterType, forward bool) management.FilterType {
-	if forward {
-		switch current {
-		case management.FilterType_FILTER_SIP_USER:
-			return management.FilterType_FILTER_PHONE_NUMBER
-		case management.FilterType_FILTER_PHONE_NUMBER:
-			return management.FilterType_FILTER_IP_ADDRESS
-		case management.FilterType_FILTER_IP_ADDRESS:
-			return management.FilterType_FILTER_CALL_ID
-		case management.FilterType_FILTER_CALL_ID:
-			return management.FilterType_FILTER_CODEC
-		case management.FilterType_FILTER_CODEC:
-			return management.FilterType_FILTER_BPF
-		case management.FilterType_FILTER_BPF:
-			return management.FilterType_FILTER_SIP_USER
-		default:
-			return management.FilterType_FILTER_SIP_USER
+// If no VoIP hunters are available, VoIP filter types are skipped
+func CycleFormFilterType(current management.FilterType, forward bool, availableHunters []HunterSelectorItem) management.FilterType {
+	hasVoIP := HasVoIPHunters(availableHunters)
+
+	// All available filter types in order
+	allTypes := []management.FilterType{
+		management.FilterType_FILTER_BPF,
+		management.FilterType_FILTER_IP_ADDRESS,
+		management.FilterType_FILTER_SIP_USER,
+		management.FilterType_FILTER_PHONE_NUMBER,
+		management.FilterType_FILTER_CALL_ID,
+		management.FilterType_FILTER_CODEC,
+	}
+
+	// Filter out VoIP types if no VoIP hunters available
+	availableTypes := make([]management.FilterType, 0, len(allTypes))
+	for _, t := range allTypes {
+		if !hasVoIP && IsVoIPFilterType(t) {
+			continue
 		}
-	} else {
-		// Backward
-		switch current {
-		case management.FilterType_FILTER_SIP_USER:
-			return management.FilterType_FILTER_BPF
-		case management.FilterType_FILTER_BPF:
-			return management.FilterType_FILTER_CODEC
-		case management.FilterType_FILTER_CODEC:
-			return management.FilterType_FILTER_CALL_ID
-		case management.FilterType_FILTER_CALL_ID:
-			return management.FilterType_FILTER_IP_ADDRESS
-		case management.FilterType_FILTER_IP_ADDRESS:
-			return management.FilterType_FILTER_PHONE_NUMBER
-		case management.FilterType_FILTER_PHONE_NUMBER:
-			return management.FilterType_FILTER_SIP_USER
-		default:
-			return management.FilterType_FILTER_SIP_USER
+		availableTypes = append(availableTypes, t)
+	}
+
+	// If no types available (shouldn't happen), return current
+	if len(availableTypes) == 0 {
+		return current
+	}
+
+	// Find current type index
+	currentIdx := 0
+	for i, t := range availableTypes {
+		if t == current {
+			currentIdx = i
+			break
 		}
 	}
+
+	// Cycle to next/previous
+	if forward {
+		currentIdx = (currentIdx + 1) % len(availableTypes)
+	} else {
+		currentIdx = (currentIdx - 1 + len(availableTypes)) % len(availableTypes)
+	}
+
+	return availableTypes[currentIdx]
 }

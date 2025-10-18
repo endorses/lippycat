@@ -91,9 +91,23 @@ func (m *Manager) Save() error {
 
 // hunterSupportsFilterType checks if a hunter supports a given filter type
 func hunterSupportsFilterType(capabilities *management.HunterCapabilities, filterType management.FilterType) bool {
-	if capabilities == nil || len(capabilities.FilterTypes) == 0 {
-		// No capabilities info - assume supports all (backward compatibility)
-		return true
+	if capabilities == nil {
+		// No capabilities info - this is a legacy hunter from before v0.2.8
+		// Assume it's a generic hunter (only supports BPF and IP filters)
+		logger.Debug("Hunter capabilities missing - treating as generic hunter (BPF/IP only)",
+			"filter_type", filterType)
+		// Only BPF and IP filters supported by legacy/generic hunters
+		return filterType == management.FilterType_FILTER_BPF ||
+			filterType == management.FilterType_FILTER_IP_ADDRESS
+	}
+
+	if len(capabilities.FilterTypes) == 0 {
+		// Empty capabilities - this shouldn't happen with current hunters
+		// Treat as generic hunter for safety
+		logger.Warn("Hunter has empty FilterTypes capability list - treating as generic hunter (BPF/IP only)",
+			"filter_type", filterType)
+		return filterType == management.FilterType_FILTER_BPF ||
+			filterType == management.FilterType_FILTER_IP_ADDRESS
 	}
 
 	// Map protobuf enum to string (using existing helper from persistence.go)
@@ -373,9 +387,23 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 		}
 	}
 
-	// If no target hunters specified, send to all
+	// If no target hunters specified, send to all COMPATIBLE hunters
 	if len(filter.TargetHunters) == 0 {
 		for hunterID, ch := range m.channels {
+			// Check if hunter supports this filter type
+			var hunterCaps *management.HunterCapabilities
+			if m.capabilityProvider != nil {
+				hunterCaps = m.capabilityProvider.GetCapabilities(hunterID)
+			}
+
+			if !hunterSupportsFilterType(hunterCaps, filter.Type) {
+				logger.Debug("Skipping filter update for incompatible hunter",
+					"hunter_id", hunterID,
+					"filter_id", filter.Id,
+					"filter_type", filter.Type)
+				continue
+			}
+
 			if sendUpdate(hunterID, ch) {
 				huntersUpdated++
 			}
@@ -383,9 +411,23 @@ func (m *Manager) pushFilterUpdate(filter *management.Filter, update *management
 		return huntersUpdated
 	}
 
-	// Send to specific hunters
+	// Send to specific hunters (still check capabilities)
 	for _, targetID := range filter.TargetHunters {
 		if ch, exists := m.channels[targetID]; exists {
+			// Check if hunter supports this filter type
+			var hunterCaps *management.HunterCapabilities
+			if m.capabilityProvider != nil {
+				hunterCaps = m.capabilityProvider.GetCapabilities(targetID)
+			}
+
+			if !hunterSupportsFilterType(hunterCaps, filter.Type) {
+				logger.Warn("Skipping filter update for targeted but incompatible hunter",
+					"hunter_id", targetID,
+					"filter_id", filter.Id,
+					"filter_type", filter.Type)
+				continue
+			}
+
 			if sendUpdate(targetID, ch) {
 				huntersUpdated++
 			}

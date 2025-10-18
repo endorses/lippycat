@@ -65,7 +65,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			)
 		case "t": // Allow theme toggle
 			return m.handleThemeToggle()
-		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "n":
+		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "p":
 			// Let these fall through to normal tab switching and global key handling
 		default:
 			// Forward everything else to settings view
@@ -89,10 +89,10 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "/": // Enter filter mode
 		return m.handleEnterFilterMode()
 
-	case "c": // Clear all filters
+	case "C": // Clear all filters (Shift+C)
 		return m.handleClearAllFilters()
 
-	case "C": // Remove last filter (Shift+C)
+	case "c": // Remove last filter
 		return m.handleRemoveLastFilter()
 
 	case "x": // Clear/flush packets
@@ -151,7 +151,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "alt+1", "alt+2", "alt+3", "alt+4":
 		return m.handleAltNumberKey(msg.String())
 
-	case "n": // Add node (only on Nodes tab)
+	case "a": // Add node (only on Nodes tab)
 		return m.handleAddNode()
 
 	case "s": // Subscribe to hunters (only on Nodes tab when processor selected)

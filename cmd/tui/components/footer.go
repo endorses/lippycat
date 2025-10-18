@@ -102,27 +102,31 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	case 0: // Capture tab
 		keybinds := []TabKeybind{
 			{Key: "/", Description: "filter"},
-			{Key: "w", Description: "save"},
-			{Key: "d", Description: "details"},
 		}
 		// Conditional keybinds
 		if f.hasFilter {
 			keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear"})
 			if f.filterCount > 1 {
-				keybinds = append(keybinds, TabKeybind{Key: "C", Description: "remove last"})
+				keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear all"})
 			}
 		}
+		keybinds = append(keybinds, TabKeybind{Key: "d", Description: "details"})
+
 		if f.hasProtocolSelection {
 			keybinds = append(keybinds, TabKeybind{Key: "v", Description: "view"})
 		}
+		keybinds = append(keybinds,
+			TabKeybind{Key: "w", Description: "save"},
+			TabKeybind{Key: "x", Description: "flush"},
+		)
 		return keybinds
 
 	case 1: // Nodes tab
 		keybinds := []TabKeybind{
 			{Key: "f", Description: "filters"},
-			{Key: "n", Description: "add node"},
+			{Key: "a", Description: "add"},
 			{Key: "d", Description: "delete"},
-			{Key: "s", Description: "hunters"},
+			{Key: "s", Description: "select"},
 			{Key: "v", Description: "view"},
 		}
 		return keybinds
@@ -136,7 +140,7 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		return []TabKeybind{
 			{Key: "Enter", Description: "edit/toggle"},
 			{Key: "Esc", Description: "cancel"},
-			{Key: "←/→", Description: "switch mode"},
+			{Key: "←/→", Description: "switch"},
 		}
 
 	default:

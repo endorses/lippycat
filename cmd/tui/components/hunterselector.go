@@ -224,18 +224,31 @@ func (hs *HunterSelector) View() string {
 				}
 			}
 
-			// Mode badge
+			// Mode badge (use Solarized colors)
+			// When cursor-selected, don't apply background to avoid breaking selected item's cyan background
 			var modeBadge string
-			if mode == "VoIP" {
-				modeBadge = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("15")).
-					Background(lipgloss.Color("63")).
-					Render(" VoIP ")
+			if i == hs.cursorIndex {
+				// Cursor selected - plain text badge without background
+				if mode == "VoIP" {
+					modeBadge = "[VoIP]"
+				} else {
+					modeBadge = "[Generic]"
+				}
 			} else {
-				modeBadge = lipgloss.NewStyle().
-					Foreground(lipgloss.Color("15")).
-					Background(lipgloss.Color("240")).
-					Render(" Generic ")
+				// Not selected - apply Solarized colored badges
+				if mode == "VoIP" {
+					// Solarized violet for VoIP, base3 for text
+					modeBadge = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#fdf6e3")).
+						Background(lipgloss.Color("#6c71c4")).
+						Render(" VoIP ")
+				} else {
+					// Solarized green for Generic, base3 for text
+					modeBadge = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#fdf6e3")).
+						Background(lipgloss.Color("#859900")).
+						Render(" Generic ")
+				}
 			}
 
 			// Build single-line display: [✓] ● hunter-id [Mode] (hostname)

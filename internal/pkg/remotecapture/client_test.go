@@ -283,30 +283,6 @@ func TestClient_ConnectionRefused(t *testing.T) {
 	client.Close()
 }
 
-func TestStreamHealthTimeout(t *testing.T) {
-	// Test that stream health monitoring detects timeouts
-	// This is a unit test of the timeout logic
-
-	lastPacketTime := time.Now().Add(-65 * time.Second) // 65 seconds ago
-	streamTimeout := 60 * time.Second
-
-	timeSinceLastPacket := time.Since(lastPacketTime)
-
-	assert.Greater(t, timeSinceLastPacket, streamTimeout,
-		"should detect timeout when last packet is > 60s old")
-}
-
-func TestStreamHealthNoTimeout(t *testing.T) {
-	// Test that recent packets don't trigger timeout
-	lastPacketTime := time.Now().Add(-30 * time.Second) // 30 seconds ago
-	streamTimeout := 60 * time.Second
-
-	timeSinceLastPacket := time.Since(lastPacketTime)
-
-	assert.Less(t, timeSinceLastPacket, streamTimeout,
-		"should not timeout when last packet is < 60s old")
-}
-
 func TestConvertToPacketDisplay_BasicFields(t *testing.T) {
 	// This tests the packet conversion logic
 	// We can't easily test the actual method without a Client instance,

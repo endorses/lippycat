@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -62,11 +61,6 @@ type Client struct {
 	// Interface mapping: hunterID -> []interfaceName (indexed by interface_index)
 	interfacesMu sync.RWMutex
 	interfaces   map[string][]string
-
-	// Stream health monitoring
-	lastPacketTime   time.Time
-	healthMu         sync.RWMutex
-	healthMonRunning atomic.Bool // Track if health monitor is already running
 
 	// Call aggregation for VoIP monitoring
 	callsMu         sync.RWMutex
@@ -164,17 +158,16 @@ func NewClientWithConfig(config *ClientConfig, handler types.EventHandler) (*Cli
 	}
 
 	client := &Client{
-		conn:           conn,
-		dataClient:     data.NewDataServiceClient(conn),
-		mgmtClient:     management.NewManagementServiceClient(conn),
-		handler:        handler,
-		ctx:            ctx,
-		cancel:         cancel,
-		addr:           config.Address,
-		interfaces:     make(map[string][]string),
-		lastPacketTime: time.Now(),
-		calls:          make(map[string]*types.CallInfo),
-		rtpStats:       make(map[string]*rtpQualityStats),
+		conn:       conn,
+		dataClient: data.NewDataServiceClient(conn),
+		mgmtClient: management.NewManagementServiceClient(conn),
+		handler:    handler,
+		ctx:        ctx,
+		cancel:     cancel,
+		addr:       config.Address,
+		interfaces: make(map[string][]string),
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
 	}
 
 	// Detect node type by checking if GetHunterStatus is available
@@ -234,13 +227,9 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 		return fmt.Errorf("failed to subscribe to packets: %w", err)
 	}
 
-	// Start health monitor to detect stalled streams (only if not already running)
-	if !c.healthMonRunning.Load() {
-		c.healthMonRunning.Store(true)
-		go c.monitorStreamHealth()
-	}
-
 	// Start goroutine to receive packets
+	// Note: gRPC keepalive (30s ping + 20s timeout) detects dead connections
+	// No additional health monitoring needed
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -271,11 +260,6 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 					return
 				}
 
-				// Update last packet time for health monitoring
-				c.healthMu.Lock()
-				c.lastPacketTime = time.Now()
-				c.healthMu.Unlock()
-
 				// Convert entire batch to PacketDisplay and send to handler
 				if c.handler != nil && len(batch.Packets) > 0 {
 					displays := make([]types.PacketDisplay, 0, len(batch.Packets))
@@ -305,38 +289,6 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 	}()
 
 	return nil
-}
-
-// monitorStreamHealth periodically checks if stream is still receiving data
-func (c *Client) monitorStreamHealth() {
-	defer c.healthMonRunning.Store(false) // Clear flag when monitor exits
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	const streamTimeout = 60 * time.Second // Alert if no packets for 60 seconds
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			c.healthMu.RLock()
-			lastPacket := c.lastPacketTime
-			c.healthMu.RUnlock()
-
-			timeSinceLastPacket := time.Since(lastPacket)
-
-			if timeSinceLastPacket > streamTimeout {
-				// Stream may be stalled - notify handler
-				if c.ctx.Err() == nil && c.handler != nil {
-					c.handler.OnDisconnect(c.addr,
-						fmt.Errorf("stream timeout: no packets received for %v", timeSinceLastPacket))
-				}
-				return
-			}
-		}
-	}
 }
 
 // SubscribeHunterStatus subscribes to hunter status updates

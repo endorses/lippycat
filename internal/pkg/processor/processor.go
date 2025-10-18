@@ -198,14 +198,15 @@ func (p *Processor) Start(ctx context.Context) error {
 	serverOpts := []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(constants.MaxGRPCMessageSize),
 		// Configure server-side keepalive enforcement
+		// Lenient settings to survive network interruptions (laptop standby, etc.)
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             5 * time.Second, // Minimum time between client pings
-			PermitWithoutStream: true,            // Allow pings without active streams
+			MinTime:             10 * time.Second, // Minimum time between client pings
+			PermitWithoutStream: true,             // Allow pings without active streams
 		}),
 		// Configure server keepalive parameters
 		grpc.KeepaliveParams(keepalive.ServerParameters{
-			Time:    20 * time.Second, // Send ping if no activity for 20s
-			Timeout: 3 * time.Second,  // Wait 3s for ping ack before closing connection
+			Time:    30 * time.Second, // Send ping if no activity for 30s
+			Timeout: 20 * time.Second, // Wait 20s for ping ack before closing connection
 		}),
 	}
 

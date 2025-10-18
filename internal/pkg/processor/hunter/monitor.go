@@ -74,14 +74,18 @@ func (m *Monitor) monitorHeartbeats() {
 func (m *Monitor) cleanupStaleHunters() {
 	defer m.wg.Done()
 
-	// Cleanup interval: check every 5 minutes
-	ticker := time.NewTicker(5 * time.Minute)
+	// Cleanup interval: check every 2 minutes (more frequent for faster recovery)
+	ticker := time.NewTicker(2 * time.Minute)
 	defer ticker.Stop()
 
-	// Grace period: remove hunters that have been in ERROR state for 30 minutes
-	const gracePeriod = 30 * time.Minute
+	// Grace period: remove hunters that have been in ERROR state for 5 minutes
+	// This allows hunters to reconnect quickly without being stuck in registry
+	// Hunters will re-register when they reconnect, so aggressive cleanup is safe
+	const gracePeriod = 5 * time.Minute
 
-	logger.Info("Stale hunter cleanup janitor started")
+	logger.Info("Stale hunter cleanup janitor started",
+		"cleanup_interval", "2m",
+		"grace_period", gracePeriod)
 
 	for {
 		select {
@@ -94,6 +98,7 @@ func (m *Monitor) cleanupStaleHunters() {
 			if len(removed) > 0 {
 				logger.Info("Cleaned up stale hunters",
 					"count", len(removed),
+					"hunter_ids", removed,
 					"grace_period", gracePeriod)
 			}
 		}

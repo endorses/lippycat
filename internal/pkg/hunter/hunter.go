@@ -44,6 +44,10 @@ type Config struct {
 	TLSCAFile             string // Path to CA certificate file
 	TLSSkipVerify         bool   // Skip certificate verification (insecure, for testing only)
 	TLSServerNameOverride string // Override server name for TLS verification (testing only)
+	// Disk overflow buffer
+	DiskBufferEnabled bool   // Enable disk overflow buffer for nuclear-proof resilience
+	DiskBufferDir     string // Directory for disk buffer (default: /var/tmp/lippycat-buffer)
+	DiskBufferMaxSize uint64 // Maximum disk buffer size in bytes (default: 1GB)
 }
 
 // Hunter represents a hunter node
@@ -61,6 +65,10 @@ type Hunter struct {
 
 	// Custom packet processing
 	packetProcessor forwarding.PacketProcessor // Optional custom processor for VoIP buffering, etc.
+
+	// Persistent batch queue (survives reconnections)
+	batchQueue     chan *data.PacketBatch
+	batchQueueSize int
 
 	// Control
 	ctx    context.Context
@@ -97,10 +105,19 @@ func New(config Config) (*Hunter, error) {
 		BufferSize: config.BufferSize,
 	}, ctx)
 
+	// Determine batch queue size (default or configured)
+	batchQueueSize := config.BatchQueueSize
+	if batchQueueSize == 0 {
+		// Default: 1000 batches (matches forwarding manager default)
+		batchQueueSize = 1000
+	}
+
 	h := &Hunter{
 		config:         config,
 		statsCollector: stats.New(),
 		captureManager: captureManager,
+		batchQueue:     make(chan *data.PacketBatch, batchQueueSize),
+		batchQueueSize: batchQueueSize,
 	}
 
 	// Create filter manager with capture restarter interface
@@ -190,6 +207,9 @@ func (h *Hunter) Start(ctx context.Context) error {
 	// Wait for shutdown
 	<-h.ctx.Done()
 
+	// Graceful shutdown: flush buffered batches
+	h.flushBatchQueue(30 * time.Second)
+
 	// Wait for goroutines
 	h.wg.Wait()
 
@@ -197,19 +217,88 @@ func (h *Hunter) Start(ctx context.Context) error {
 	return nil
 }
 
+// flushBatchQueue attempts to drain the batch queue before shutdown
+func (h *Hunter) flushBatchQueue(timeout time.Duration) {
+	queueDepth := len(h.batchQueue)
+	if queueDepth == 0 {
+		logger.Info("No buffered batches to flush")
+		return
+	}
+
+	logger.Info("Flushing batch queue before shutdown",
+		"queued_batches", queueDepth,
+		"estimated_packets", queueDepth*h.config.BatchSize,
+		"timeout", timeout)
+
+	deadline := time.Now().Add(timeout)
+	flushedCount := 0
+	droppedCount := 0
+
+	// Try to send all queued batches
+	for {
+		select {
+		case batch := <-h.batchQueue:
+			// Check if we've exceeded timeout
+			if time.Now().After(deadline) {
+				droppedCount++
+				logger.Warn("Flush timeout exceeded, dropping batch",
+					"sequence", batch.Sequence,
+					"packets", len(batch.Packets))
+				continue
+			}
+
+			// Try to send batch if we have a forwarding manager
+			if h.connectionManager != nil {
+				if fwdMgr := h.connectionManager.GetForwardingManager(); fwdMgr != nil {
+					// This will attempt to send - may fail if disconnected
+					// but that's OK, we're shutting down anyway
+					fwdMgr.SendBatchToStream(batch)
+					flushedCount++
+				} else {
+					droppedCount++
+				}
+			} else {
+				droppedCount++
+			}
+
+		default:
+			// Queue is empty
+			logger.Info("Batch queue flush complete",
+				"flushed", flushedCount,
+				"dropped", droppedCount,
+				"total_packets_flushed", flushedCount*h.config.BatchSize,
+				"total_packets_dropped", droppedCount*h.config.BatchSize)
+			return
+		}
+	}
+}
+
 // CreateForwardingManager implements ForwardingManagerFactory interface
 func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.DataService_StreamPacketsClient) *forwarding.Manager {
+	// Log queue depth on reconnection (shows buffered batches)
+	queueDepth := len(h.batchQueue)
+	if queueDepth > 0 {
+		logger.Info("Reconnected with buffered batches",
+			"queued_batches", queueDepth,
+			"estimated_packets", queueDepth*h.config.BatchSize,
+			"queue_capacity", h.batchQueueSize)
+	}
+
 	fwdMgr := forwarding.New(
 		forwarding.Config{
-			HunterID:       h.config.HunterID,
-			BatchSize:      h.config.BatchSize,
-			BatchTimeout:   h.config.BatchTimeout,
-			BufferSize:     h.config.BufferSize,
-			BatchQueueSize: h.config.BatchQueueSize,
+			HunterID:          h.config.HunterID,
+			BatchSize:         h.config.BatchSize,
+			BatchTimeout:      h.config.BatchTimeout,
+			BufferSize:        h.config.BufferSize,
+			DiskBufferEnabled: h.config.DiskBufferEnabled,
+			DiskBufferDir:     h.config.DiskBufferDir,
+			DiskBufferMaxSize: h.config.DiskBufferMaxSize,
+			// BatchQueueSize omitted - we pass the queue directly
 		},
 		h.statsCollector,
 		h.captureManager,
 		connCtx,
+		h.batchQueue, // Pass persistent queue (survives reconnections)
 	)
 	fwdMgr.SetStream(stream)
 	if h.packetProcessor != nil {
@@ -218,6 +307,10 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 	if h.voipFilter != nil {
 		fwdMgr.SetVoIPFilter(h.voipFilter)
 	}
+	// Set disconnect callback to trigger reconnection on send failures
+	fwdMgr.SetDisconnectCallback(func() {
+		h.MarkDisconnected()
+	})
 	return fwdMgr
 }
 

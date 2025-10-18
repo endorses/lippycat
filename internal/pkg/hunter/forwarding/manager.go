@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/hunter/buffer"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 )
@@ -50,6 +51,11 @@ type Config struct {
 	BatchTimeout   time.Duration
 	BufferSize     int
 	BatchQueueSize int // Number of batches to buffer for async sending (0 = default)
+
+	// Disk overflow buffer (optional)
+	DiskBufferEnabled bool   // Enable disk overflow buffer
+	DiskBufferDir     string // Directory for disk buffer (default: /var/tmp/lippycat-buffer)
+	DiskBufferMaxSize uint64 // Maximum disk buffer size in bytes (default: 1GB)
 }
 
 // Manager handles packet batching and forwarding to processor
@@ -69,9 +75,16 @@ type Manager struct {
 	batchQueue chan *data.PacketBatch
 	senderWg   sync.WaitGroup // tracks batch sender goroutine
 
+	// Disk overflow buffer (optional)
+	diskBuffer *buffer.DiskOverflowBuffer
+
 	// Flow control
 	flowControlState atomic.Int32 // FlowControl enum value
 	paused           atomic.Bool  // Whether sending is paused
+
+	// Connection health tracking
+	consecutiveFailures atomic.Int32 // Track consecutive send failures
+	disconnectCallback  func()       // Called when connection appears dead
 
 	// Optional packet processing
 	packetProcessor PacketProcessor
@@ -85,24 +98,32 @@ type Manager struct {
 	connCtx context.Context
 }
 
-// New creates a new forwarding manager
-func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context) *Manager {
-	// Set default batch queue size if not configured
-	batchQueueSize := config.BatchQueueSize
-	if batchQueueSize == 0 {
-		// Default: 1000 batches (with 64 packet batches = 64,000 packets buffered)
-		// This provides substantial buffering for network latency and processor slowdowns
-		// while matching the 100,000 packet buffer capacity better
-		batchQueueSize = 1000
-	}
-
+// New creates a new forwarding manager with a persistent batch queue
+// The queue is provided externally to survive reconnections
+func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context, batchQueue chan *data.PacketBatch) *Manager {
 	m := &Manager{
 		config:           config,
 		currentBatch:     make([]*data.CapturedPacket, 0, config.BatchSize),
 		statsCollector:   statsCollector,
 		packetBufferProv: packetBufferProv,
 		connCtx:          connCtx,
-		batchQueue:       make(chan *data.PacketBatch, batchQueueSize),
+		batchQueue:       batchQueue, // Use provided persistent queue
+	}
+
+	// Initialize disk overflow buffer if enabled
+	if config.DiskBufferEnabled {
+		diskBuf, err := buffer.New(buffer.Config{
+			Dir:          config.DiskBufferDir,
+			MaxDiskBytes: config.DiskBufferMaxSize,
+		})
+		if err != nil {
+			logger.Error("Failed to initialize disk overflow buffer", "error", err)
+		} else {
+			m.diskBuffer = diskBuf
+			logger.Info("Disk overflow buffer enabled",
+				"dir", config.DiskBufferDir,
+				"max_size_mb", config.DiskBufferMaxSize/(1024*1024))
+		}
 	}
 
 	// Start async batch sender goroutine
@@ -122,6 +143,11 @@ func (m *Manager) SetStream(stream data.DataService_StreamPacketsClient) {
 // SetPacketProcessor sets an optional packet processor for custom filtering
 func (m *Manager) SetPacketProcessor(processor PacketProcessor) {
 	m.packetProcessor = processor
+}
+
+// SetDisconnectCallback sets a callback to be invoked when connection appears dead
+func (m *Manager) SetDisconnectCallback(callback func()) {
+	m.disconnectCallback = callback
 }
 
 // SetVoIPFilter sets an optional VoIP filter
@@ -280,19 +306,44 @@ func (m *Manager) SendBatch() {
 	// Queue batch for async sending (non-blocking)
 	select {
 	case m.batchQueue <- batch:
-		// Successfully queued
+		// Successfully queued to memory
 	default:
-		// Queue full - drop batch and log warning
-		logger.Warn("Batch queue full, dropping batch",
-			"sequence", batch.Sequence,
-			"packets", len(batch.Packets))
-		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+		// Memory queue full - try disk overflow buffer
+		if m.diskBuffer != nil {
+			if err := m.diskBuffer.Write(batch); err != nil {
+				// Disk buffer also full or failed
+				logger.Warn("Batch queue and disk buffer full, dropping batch",
+					"sequence", batch.Sequence,
+					"packets", len(batch.Packets),
+					"error", err)
+				m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+			} else {
+				logger.Debug("Batch queued to disk overflow buffer",
+					"sequence", batch.Sequence,
+					"packets", len(batch.Packets))
+			}
+		} else {
+			// No disk buffer - drop batch
+			logger.Warn("Batch queue full, dropping batch (disk buffer disabled)",
+				"sequence", batch.Sequence,
+				"packets", len(batch.Packets))
+			m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+		}
 	}
 }
 
 // batchSender goroutine sends batches from queue asynchronously
 func (m *Manager) batchSender() {
 	defer m.senderWg.Done()
+
+	// Create ticker for checking disk buffer (only if enabled)
+	var diskCheckTicker *time.Ticker
+	var diskCheckChan <-chan time.Time
+	if m.diskBuffer != nil {
+		diskCheckTicker = time.NewTicker(100 * time.Millisecond) // Check disk every 100ms
+		defer diskCheckTicker.Stop()
+		diskCheckChan = diskCheckTicker.C
+	}
 
 	for {
 		select {
@@ -301,20 +352,45 @@ func (m *Manager) batchSender() {
 			for {
 				select {
 				case batch := <-m.batchQueue:
-					m.sendBatchToStream(batch)
+					m.SendBatchToStream(batch)
 				default:
 					return
 				}
 			}
 
 		case batch := <-m.batchQueue:
-			m.sendBatchToStream(batch)
+			m.SendBatchToStream(batch)
+
+		case <-diskCheckChan:
+			// Check if we have room in memory queue and batches on disk
+			if len(m.batchQueue) < cap(m.batchQueue)/2 { // Only refill if queue is less than half full
+				// Try to read from disk buffer
+				if batch, err := m.diskBuffer.Read(); err != nil {
+					logger.Error("Failed to read from disk buffer", "error", err)
+				} else if batch != nil {
+					// Successfully read batch from disk - queue it to memory
+					select {
+					case m.batchQueue <- batch:
+						logger.Debug("Loaded batch from disk to memory queue",
+							"sequence", batch.Sequence,
+							"packets", len(batch.Packets))
+					default:
+						// Memory queue full again - write back to disk
+						// This is rare but can happen if queue fills up between check and send
+						if err := m.diskBuffer.Write(batch); err != nil {
+							logger.Warn("Failed to write batch back to disk", "error", err)
+							m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+						}
+					}
+				}
+			}
 		}
 	}
 }
 
-// sendBatchToStream sends a single batch via gRPC stream
-func (m *Manager) sendBatchToStream(batch *data.PacketBatch) {
+// SendBatchToStream sends a single batch via gRPC stream
+// Exported for use during graceful shutdown to flush buffered batches
+func (m *Manager) SendBatchToStream(batch *data.PacketBatch) {
 	// Get stream
 	m.streamMu.Lock()
 	stream := m.stream
@@ -342,8 +418,12 @@ func (m *Manager) sendBatchToStream(batch *data.PacketBatch) {
 		if err != nil {
 			logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
 			m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+			m.recordSendFailure()
 			return
 		}
+
+		// Send succeeded - reset failure counter
+		m.consecutiveFailures.Store(0)
 
 		logger.Debug("Sent packet batch",
 			"sequence", batch.Sequence,
@@ -357,7 +437,31 @@ func (m *Manager) sendBatchToStream(batch *data.PacketBatch) {
 			"sequence", batch.Sequence,
 			"packets", len(batch.Packets))
 		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+		m.recordSendFailure()
 		return
+	}
+}
+
+// recordSendFailure tracks consecutive send failures and triggers disconnect if threshold exceeded
+func (m *Manager) recordSendFailure() {
+	// Increment failure counter
+	failures := m.consecutiveFailures.Add(1)
+
+	// After 3 consecutive failures, assume connection is dead
+	// This helps detect dead connections faster after laptop resume from standby
+	const maxConsecutiveFailures = 3
+	if failures >= maxConsecutiveFailures {
+		logger.Warn("Too many consecutive send failures, connection may be dead",
+			"consecutive_failures", failures,
+			"threshold", maxConsecutiveFailures)
+
+		// Trigger disconnect callback if set
+		if m.disconnectCallback != nil {
+			m.disconnectCallback()
+		}
+
+		// Reset counter to avoid repeated callbacks
+		m.consecutiveFailures.Store(0)
 	}
 }
 
@@ -411,4 +515,21 @@ func (m *Manager) GetFlowControlState() data.FlowControl {
 // IsPaused returns whether sending is currently paused
 func (m *Manager) IsPaused() bool {
 	return m.paused.Load()
+}
+
+// Close cleans up resources (disk buffer, etc.)
+func (m *Manager) Close() error {
+	if m.diskBuffer != nil {
+		return m.diskBuffer.Close()
+	}
+	return nil
+}
+
+// GetDiskBufferMetrics returns disk buffer metrics (if enabled)
+func (m *Manager) GetDiskBufferMetrics() *buffer.DiskBufferMetrics {
+	if m.diskBuffer == nil {
+		return nil
+	}
+	metrics := m.diskBuffer.GetMetrics()
+	return &metrics
 }

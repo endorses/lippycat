@@ -48,6 +48,10 @@ var (
 	enableVoIPFilter bool
 	gpuBackend       string
 	gpuBatchSize     int
+	// Disk buffer flags (nuclear-proof resilience)
+	diskBufferEnabled bool
+	diskBufferDir     string
+	diskBufferMaxSize int // MB
 	// TLS flags
 	tlsEnabled      bool
 	tlsCertFile     string
@@ -79,6 +83,11 @@ func init() {
 	HuntCmd.PersistentFlags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	HuntCmd.PersistentFlags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "Batch size for GPU processing")
 
+	// Disk overflow buffer (nuclear-proof resilience) - persistent for subcommands
+	HuntCmd.PersistentFlags().BoolVar(&diskBufferEnabled, "disk-buffer", false, "Enable disk overflow buffer (for extended disconnections)")
+	HuntCmd.PersistentFlags().StringVar(&diskBufferDir, "disk-buffer-dir", "/var/tmp/lippycat-buffer", "Directory for disk buffer files")
+	HuntCmd.PersistentFlags().IntVar(&diskBufferMaxSize, "disk-buffer-max-mb", 1024, "Maximum disk buffer size in megabytes")
+
 	// TLS configuration (security) - persistent for subcommands
 	HuntCmd.PersistentFlags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption (recommended for production)")
 	HuntCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert", "", "Path to client TLS certificate (for mutual TLS)")
@@ -100,6 +109,9 @@ func init() {
 	_ = viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.PersistentFlags().Lookup("enable-voip-filter"))
 	_ = viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.PersistentFlags().Lookup("gpu-backend"))
 	_ = viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.PersistentFlags().Lookup("gpu-batch-size"))
+	_ = viper.BindPFlag("hunter.disk_buffer.enabled", HuntCmd.PersistentFlags().Lookup("disk-buffer"))
+	_ = viper.BindPFlag("hunter.disk_buffer.dir", HuntCmd.PersistentFlags().Lookup("disk-buffer-dir"))
+	_ = viper.BindPFlag("hunter.disk_buffer.max_mb", HuntCmd.PersistentFlags().Lookup("disk-buffer-max-mb"))
 	_ = viper.BindPFlag("hunter.tls.enabled", HuntCmd.PersistentFlags().Lookup("tls"))
 	_ = viper.BindPFlag("hunter.tls.cert_file", HuntCmd.PersistentFlags().Lookup("tls-cert"))
 	_ = viper.BindPFlag("hunter.tls.key_file", HuntCmd.PersistentFlags().Lookup("tls-key"))
@@ -132,6 +144,10 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		EnableVoIPFilter: getBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
 		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
 		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
+		// Disk overflow buffer (nuclear-proof resilience)
+		DiskBufferEnabled: getBoolConfig("hunter.disk_buffer.enabled", diskBufferEnabled),
+		DiskBufferDir:     getStringConfig("hunter.disk_buffer.dir", diskBufferDir),
+		DiskBufferMaxSize: uint64(getIntConfig("hunter.disk_buffer.max_mb", diskBufferMaxSize)) * 1024 * 1024, // Convert MB to bytes
 		// TLS configuration
 		TLSEnabled:    getBoolConfig("hunter.tls.enabled", tlsEnabled),
 		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),

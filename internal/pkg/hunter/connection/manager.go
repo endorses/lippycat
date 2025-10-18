@@ -8,12 +8,14 @@ import (
 	"io"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/hunter/circuitbreaker"
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -95,6 +97,7 @@ type Manager struct {
 	reconnectAttempts int
 	reconnecting      bool
 	reconnectMu       sync.Mutex
+	circuitBreaker    *circuitbreaker.CircuitBreaker
 
 	// Control
 	ctx        context.Context
@@ -113,6 +116,14 @@ func New(
 	forwardingFactory ForwardingManagerFactory,
 	flowControlHandler func(*data.StreamControl),
 ) *Manager {
+	// Create circuit breaker for connection management
+	cb := circuitbreaker.New(circuitbreaker.Config{
+		Name:             "processor-connection",
+		MaxFailures:      5,                // Open after 5 consecutive failures
+		ResetTimeout:     30 * time.Second, // Try again after 30s
+		HalfOpenMaxCalls: 3,                // Allow 3 test calls in half-open
+	})
+
 	return &Manager{
 		config:             config,
 		statsCollector:     statsCollector,
@@ -122,6 +133,7 @@ func New(
 		flowControlHandler: flowControlHandler,
 		reconnectAttempts:  0,
 		reconnecting:       false,
+		circuitBreaker:     cb,
 	}
 }
 
@@ -192,7 +204,11 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 		default:
 		}
 
-		err := m.connectAndRegister()
+		// Use circuit breaker for connection attempts
+		err := m.circuitBreaker.Call(func() error {
+			return m.connectAndRegister()
+		})
+
 		if err == nil {
 			// Successfully connected
 			logger.Info("Connected to processor")
@@ -225,7 +241,7 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 			continue
 		}
 
-		// Connection failed
+		// Connection failed or circuit breaker open
 		logger.Error("Failed to connect to processor", "error", err)
 
 		// Exponential backoff
@@ -289,12 +305,50 @@ func (m *Manager) connectAndRegister() error {
 func (m *Manager) connectToProcessor() error {
 	logger.Info("Connecting to processor", "addr", m.config.ProcessorAddr)
 
+	// Create custom dialer with TCP keepalive
+	// This provides defense-in-depth with gRPC keepalive
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 10 * time.Second, // TCP keepalive every 10s
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			err := c.Control(func(fd uintptr) {
+				// Enable TCP keepalive at socket level
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_KEEPALIVE, 1)
+				if opErr != nil {
+					return
+				}
+				// TCP_KEEPIDLE: 10s before first probe
+				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, 10)
+				if opErr != nil {
+					return
+				}
+				// TCP_KEEPINTVL: 5s between probes
+				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, 5)
+				if opErr != nil {
+					return
+				}
+				// TCP_KEEPCNT: 3 probes before giving up
+				opErr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, 3)
+			})
+			if err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+
 	opts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(constants.MaxGRPCMessageSize)),
-		// Configure keepalive to detect broken connections quickly
+		// Use custom dialer with TCP keepalive
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp", addr)
+		}),
+		// Configure keepalive to survive long network interruptions (e.g., laptop standby)
+		// More lenient settings to handle temporary network disruptions
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second, // Send ping every 10s
-			Timeout:             3 * time.Second,  // Wait 3s for ping ack
+			Time:                30 * time.Second, // Send ping every 30s (less aggressive)
+			Timeout:             20 * time.Second, // Wait 20s for ping ack (tolerate delays)
 			PermitWithoutStream: true,             // Send pings even without active streams
 		}),
 	}
@@ -330,7 +384,8 @@ func (m *Manager) connectToProcessor() error {
 	m.managementConn = mgmtConn
 	m.mgmtClient = management.NewManagementServiceClient(mgmtConn)
 
-	logger.Info("Connected to processor", "addr", m.config.ProcessorAddr, "tls", m.config.TLSEnabled)
+	logger.Info("Connected to processor", "addr", m.config.ProcessorAddr, "tls", m.config.TLSEnabled,
+		"tcp_keepalive", "enabled")
 	return nil
 }
 

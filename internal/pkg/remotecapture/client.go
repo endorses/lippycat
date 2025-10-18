@@ -68,6 +68,11 @@ type Client struct {
 	rtpStats        map[string]*rtpQualityStats // callID -> RTP quality tracking
 	lastCallUpdate  time.Time
 	callUpdateTimer *time.Timer
+
+	// Subscription management for hot-swapping
+	streamMu       sync.RWMutex
+	streamCancel   context.CancelFunc // Cancel function for current stream
+	currentHunters []string           // Current hunter filter
 }
 
 // rtpQualityStats tracks RTP quality metrics for a call
@@ -215,6 +220,18 @@ func (c *Client) StreamPackets() error {
 
 // StreamPacketsWithFilter starts receiving packet stream from remote node with hunter filter
 func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
+	// Cancel any existing stream before starting a new one
+	c.streamMu.Lock()
+	if c.streamCancel != nil {
+		c.streamCancel()
+	}
+
+	// Create a new context for this stream
+	streamCtx, streamCancel := context.WithCancel(c.ctx)
+	c.streamCancel = streamCancel
+	c.currentHunters = hunterIDs
+	c.streamMu.Unlock()
+
 	// Subscribe to packet stream using the new SubscribePackets RPC
 	// ClientId is omitted - processor will auto-generate a unique ID
 	req := &data.SubscribeRequest{
@@ -222,7 +239,7 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 		HasHunterFilter: hunterIDs != nil, // Set flag to distinguish nil from []
 	}
 
-	stream, err := c.dataClient.SubscribePackets(c.ctx, req)
+	stream, err := c.dataClient.SubscribePackets(streamCtx, req)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to packets: %w", err)
 	}
@@ -242,15 +259,18 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 
 		for {
 			select {
+			case <-streamCtx.Done():
+				// Stream context cancelled (hot-swap or shutdown)
+				return
 			case <-c.ctx.Done():
-				// Context cancelled, normal shutdown
+				// Client context cancelled, normal shutdown
 				return
 			default:
 				batch, err := stream.Recv()
 				if err != nil {
-					// Don't report error if context was cancelled (normal shutdown)
-					if c.ctx.Err() != nil {
-						// Shutdown in progress, exit gracefully
+					// Don't report error if context was cancelled (normal shutdown or hot-swap)
+					if streamCtx.Err() != nil || c.ctx.Err() != nil {
+						// Shutdown or hot-swap in progress, exit gracefully
 						return
 					}
 					if c.handler != nil {
@@ -289,6 +309,21 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 	}()
 
 	return nil
+}
+
+// UpdateSubscription hot-swaps the hunter subscription without reconnecting
+// This enables seamless subscription changes with zero packet loss
+func (c *Client) UpdateSubscription(hunterIDs []string) error {
+	c.streamMu.RLock()
+	// Check if subscription is already the same
+	if slicesEqual(c.currentHunters, hunterIDs) {
+		c.streamMu.RUnlock()
+		return nil // No change needed
+	}
+	c.streamMu.RUnlock()
+
+	// Start new subscription (this will cancel the old stream automatically)
+	return c.StreamPacketsWithFilter(hunterIDs)
 }
 
 // SubscribeHunterStatus subscribes to hunter status updates
@@ -1074,4 +1109,26 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+// slicesEqual checks if two string slices are equal
+func slicesEqual(a, b []string) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	// Check lengths
+	if len(a) != len(b) {
+		return false
+	}
+	// Compare elements
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

@@ -309,19 +309,41 @@ func (m *Model) handleHunterSelectionConfirmed(msg components.HunterSelectionCon
 	return tea.Batch(toastCmd, reconnectCmd)
 }
 
-// reconnectWithHunterFilter reconnects to a processor with a new hunter subscription filter
+// reconnectWithHunterFilter hot-swaps the hunter subscription without reconnecting
 func (m *Model) reconnectWithHunterFilter(processorAddr string, hunterIDs []string) tea.Cmd {
-	// Close existing connection
-	if proc, exists := m.connectionMgr.Processors[processorAddr]; exists {
-		if proc.Client != nil {
-			proc.Client.Close()
-		}
-		proc.State = store.ProcessorStateDisconnected
-		// Store the subscription list so we can restore it after reconnection
-		proc.SubscribedHunters = hunterIDs
+	proc, exists := m.connectionMgr.Processors[processorAddr]
+	if !exists {
+		return nil
 	}
 
-	// Reconnect with new hunter filter
+	// Store the new subscription list
+	proc.SubscribedHunters = hunterIDs
+
+	// Hot-swap subscription if client is connected
+	if proc.Client != nil {
+		client, ok := proc.Client.(*remotecapture.Client)
+		if ok {
+			// Update subscription without disconnecting
+			return func() tea.Msg {
+				err := client.UpdateSubscription(hunterIDs)
+				if err != nil {
+					// Hot-swap failed, fall back to reconnection
+					logger.Error("Hot-swap subscription failed, reconnecting",
+						"processor", processorAddr,
+						"error", err)
+					return ProcessorReconnectMsg{
+						Address:   processorAddr,
+						HunterIDs: hunterIDs,
+					}
+				}
+				// Success - subscription updated seamlessly
+				return nil
+			}
+		}
+	}
+
+	// Client not available - do full reconnection
+	proc.State = store.ProcessorStateDisconnected
 	return func() tea.Msg {
 		return ProcessorReconnectMsg{
 			Address:   processorAddr,

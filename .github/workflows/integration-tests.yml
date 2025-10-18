@@ -119,11 +119,12 @@ jobs:
           docker compose logs processor
           docker compose logs hunter1
 
-      - name: Run Docker-based tests
+      - name: Verify services are running
         run: |
           cd test
-          docker compose exec -T processor lc debug stats || true
-          docker compose exec -T hunter1 lc debug stats || true
+          docker compose ps
+          docker compose exec -T processor lc process --help || true
+          docker compose exec -T hunter1 lc hunt --help || true
 
       - name: Test TLS connectivity
         run: |

@@ -463,6 +463,62 @@ var DefaultTheme = Theme{
 }
 ```
 
+### 6. Processor Reconnection Pattern
+
+**File:** `cmd/tui/capture_events.go`
+
+**Challenge:** Handle extended network outages (laptop standby, network interruptions) without exhausting resources.
+
+**Solution:** Exponential backoff with max retry limit.
+
+```go
+// Exponential backoff: 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 512s, 600s (10 min max)
+backoff := time.Duration(1<<uint(min(proc.FailureCount-1, 9))) * time.Second
+const maxBackoff = 10 * time.Minute
+if backoff > maxBackoff {
+    backoff = maxBackoff
+}
+
+// Stop auto-reconnect after 10 attempts (roughly 17 minutes total)
+const maxAttempts = 10
+if proc.FailureCount < maxAttempts {
+    reconnectCmd = tea.Tick(backoff, ...)
+} else {
+    // Show warning, user must manually reconnect from Nodes view
+    toast.Show("Max reconnection attempts reached - use Nodes view to manually reconnect", ToastWarning)
+}
+```
+
+**Behavior:**
+- First few attempts: Quick retries (2s, 4s, 8s) for transient issues
+- Extended outages: Longer waits (up to 10 minutes) to reduce resource usage
+- After 10 failures (~17 min): Stop auto-reconnect, require manual reconnection
+
+**Rationale:** Prevents infinite reconnection loops during extended outages while allowing recovery from brief interruptions.
+
+**Integration with RemoteCapture Client:**
+
+**File:** `internal/pkg/remotecapture/client.go`
+
+TUI uses remote capture client with lenient keepalive settings:
+
+```go
+// TCP keepalive (10s idle, 5s interval, 3 probes = 25s detection)
+dialer := &net.Dialer{
+    KeepAlive: 10 * time.Second,
+    Control: func(...) { /* Set TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT */ },
+}
+
+// gRPC keepalive (30s ping, 20s timeout)
+keepaliveParams := keepalive.ClientParameters{
+    Time:    30 * time.Second,
+    Timeout: 20 * time.Second,
+    PermitWithoutStream: true,
+}
+```
+
+**Benefit:** Combined TCP and gRPC keepalive survive network interruptions up to ~50s before triggering disconnect.
+
 ## State Management Patterns
 
 ### Packet Buffer Management

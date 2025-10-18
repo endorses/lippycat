@@ -31,6 +31,33 @@ TUI clients can selectively subscribe to specific hunters on a processor:
 - Prevents subscriber backpressure from affecting hunter flow control
 - Packets are filtered at the processor before being sent to TUI clients
 
+## Reconnection Resilience (v0.2.8)
+
+TUI survives network interruptions with intelligent reconnection:
+
+**Features:**
+- Exponential backoff prevents resource exhaustion during outages
+- Lenient keepalive settings tolerate temporary delays (laptop standby)
+- Max retry limit prevents infinite reconnection loops
+- Manual reconnection available after max retries
+
+**Behavior:**
+- First attempts: Quick retries (2s, 4s, 8s) for transient issues
+- Extended outages: Longer waits (up to 10 min) between attempts
+- After 10 failures (~17 min total): Stop auto-reconnect, show warning
+- User can manually reconnect from Nodes view (press `r` on processor)
+
+**Keepalive Settings:**
+- TCP keepalive: 10s idle, 5s interval, 3 probes (25s detection)
+- gRPC keepalive: 30s ping, 20s timeout
+- Combined tolerance: ~50s network interruption before disconnect
+
+**Use Cases:**
+- Laptop suspend/resume
+- Brief network outages (WiFi handoff, etc.)
+- Processor restarts
+- Network maintenance windows
+
 ## TUI Modal Architecture
 
 **IMPORTANT: All modals in the TUI MUST use the unified modal component.**

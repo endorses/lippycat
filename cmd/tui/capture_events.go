@@ -52,6 +52,12 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 				m.offlineCallAggregator.ProcessPacket(&typesPacket)
 			}
 
+			// Write to streaming save if active
+			if m.activeWriter != nil {
+				// WritePacket will apply filter internally if configured (best-effort)
+				_ = m.activeWriter.WritePacket(packet)
+			}
+
 			// Update statistics (lightweight)
 			m.updateStatistics(packet)
 		}

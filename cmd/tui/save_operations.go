@@ -173,10 +173,26 @@ func (m *Model) startStreamingSave(filePath string) tea.Cmd {
 	m.uiState.StreamingSave = true
 	m.uiState.Footer.SetStreamingSave(true) // Update footer hint
 
-	// Write existing packets immediately (reuse packets from link type check)
-	for _, pkt := range packets {
-		_ = writer.WritePacket(pkt) // Best-effort write, errors handled on subsequent writes
-	}
+	// Write existing packets in background to avoid blocking/dropping
+	// Channel buffer is 1000, so writing >1000 packets synchronously would drop packets
+	go func() {
+		for _, pkt := range packets {
+			// Block until packet can be written (don't drop buffered packets)
+			// This is OK because we're in a background goroutine
+			for {
+				err := writer.WritePacket(pkt)
+				if err == nil {
+					break // Success
+				}
+				// If writer is closed or context cancelled, stop trying
+				if err.Error() == "writer is closed" || err.Error() == "writer context cancelled" {
+					return
+				}
+				// If error is "buffer full", retry after short delay
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}()
 
 	// Show toast notification
 	return m.uiState.Toast.Show(

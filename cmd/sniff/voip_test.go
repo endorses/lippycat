@@ -264,7 +264,7 @@ func TestVoipHandlerLogic(t *testing.T) {
 			readFile = tt.readFileValue
 			interfaces = tt.interfaceValue
 			filter = tt.filterValue
-			writeVoip = true // Test write flag
+			writeVoipFile = "/tmp/test-voip" // Test write file prefix
 
 			// Create a mock version of voipHandler
 			mockVoipHandler := func(cmd *cobra.Command, args []string) {

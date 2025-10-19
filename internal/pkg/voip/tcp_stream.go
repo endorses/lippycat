@@ -139,6 +139,7 @@ type SIPStream struct {
 }
 
 func (s *SIPStream) run() {
+	logger.Debug("SIP stream starting", "flow", s.flow.String())
 	defer func() {
 		// Decrement goroutine counter
 		if s.factory != nil {
@@ -176,6 +177,7 @@ func (s *SIPStream) run() {
 
 	// Determine if batch processing should be used
 	batchSize := s.factory.getCurrentBatchSize()
+	logger.Debug("Stream processing mode", "batch_size", batchSize)
 
 	if batchSize > 1 {
 		s.processBatched(batchSize)
@@ -186,18 +188,24 @@ func (s *SIPStream) run() {
 
 // processSingle handles single message processing (latency optimized)
 func (s *SIPStream) processSingle() {
+	logger.Debug("processSingle starting")
 	// Read and buffer the complete SIP message
 	sipMessage, err := s.readCompleteSipMessage()
 	if err != nil {
 		if !errors.Is(err, io.EOF) {
 			logger.Error("Error reading complete SIP message", "error", err)
+		} else {
+			logger.Debug("EOF reading SIP message")
 		}
 		return
 	}
 
 	if len(sipMessage) == 0 {
+		logger.Debug("Empty SIP message read")
 		return
 	}
+
+	logger.Debug("Read complete SIP message", "bytes", len(sipMessage))
 
 	// Update processing statistics atomically
 	atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
@@ -215,6 +223,7 @@ type MessageBatch struct {
 
 // processBatched handles batch message processing (throughput optimized)
 func (s *SIPStream) processBatched(batchSize int) {
+	logger.Debug("processBatched starting", "batch_size", batchSize)
 	batch := &MessageBatch{
 		messages: make([][]byte, 0, batchSize),
 		maxSize:  batchSize,
@@ -223,19 +232,24 @@ func (s *SIPStream) processBatched(batchSize int) {
 	for batch.size < batchSize {
 		select {
 		case <-s.ctx.Done():
+			logger.Debug("Context done in batch loop")
 			return
 		default:
 		}
 
+		logger.Debug("About to read SIP message", "current_batch_size", batch.size)
 		sipMessage, err := s.readCompleteSipMessage()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				logger.Error("Error reading SIP message in batch", "error", err)
+			} else {
+				logger.Debug("EOF in batch read", "messages_read", batch.size)
 			}
 			break
 		}
 
 		if len(sipMessage) > 0 {
+			logger.Debug("Read SIP message in batch", "bytes", len(sipMessage), "batch_size", batch.size+1)
 			batch.messages = append(batch.messages, sipMessage)
 			batch.size++
 			atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
@@ -243,6 +257,7 @@ func (s *SIPStream) processBatched(batchSize int) {
 		}
 	}
 
+	logger.Debug("Processing batch", "messages", len(batch.messages))
 	// Process the entire batch
 	for _, message := range batch.messages {
 		s.processSipMessage(message)
@@ -452,8 +467,18 @@ func (s *SIPStream) processSipMessage(sipMessage []byte) {
 		}
 
 		// Delegate to the message handler
+		logger.Debug("About to call handler.HandleSIPMessage",
+			"call_id", callID,
+			"has_factory", s.factory != nil,
+			"has_handler", s.factory != nil && s.factory.handler != nil,
+			"message_len", len(sipMessage))
+
 		if s.factory != nil && s.factory.handler != nil {
 			s.factory.handler.HandleSIPMessage(sipMessage, callID, s.flow)
+		} else {
+			logger.Warn("No handler available for SIP message",
+				"call_id", callID,
+				"has_factory", s.factory != nil)
 		}
 	}
 }

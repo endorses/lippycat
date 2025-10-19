@@ -89,5 +89,19 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 			handleUdpPackets(pkt, layer)
 		}
 	}
+
+	// Flush and close all TCP streams
+	// This is critical for offline mode where streams may not be closed with FIN/RST
+	if assembler != nil {
+		logger.Debug("Flushing and closing TCP assembler streams")
+		// Use FlushOlderThan with time.Now() to close ALL streams regardless of age
+		// This signals EOF to all stream readers so they stop blocking and process their buffers
+		flushed, closed := assembler.FlushOlderThan(time.Now())
+		logger.Debug("TCP streams flushed", "flushed", flushed, "closed", closed)
+
+		// Give stream goroutines time to process and finish
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	logger.Info("VoIP processor finished", "total_packets", packetCount)
 }

@@ -34,7 +34,8 @@ func Initialize() {
 		}
 
 		// Create a JSON handler for production use
-		handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		// Use stderr by default so stdout can be used for data output (packets, etc.)
+		handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 			Level:     level,
 			AddSource: false,
 		})
@@ -59,7 +60,7 @@ func Enable() {
 	disabledMux.Lock()
 	defer disabledMux.Unlock()
 	disabled = false
-	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level:     slog.LevelInfo,
 		AddSource: false,
 	})

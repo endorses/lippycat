@@ -93,7 +93,7 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 }
 
 func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
-	fmt.Println("Starting Sniffer")
+	logger.Info("Starting packet sniffer")
 
 	// For basic sniffing, we don't need TCP stream reassembly
 	// Pass nil assembler to skip expensive TCP assembly

@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
 	"github.com/spf13/viper"
@@ -195,6 +196,7 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 	startTime := time.Now()
 	quietMode := viper.GetBool("sniff.quiet")
 	format := viper.GetString("sniff.format")
+	writeFile := viper.GetString("sniff.write_file")
 
 	// Create JSON encoder if using JSON format
 	var jsonEncoder *json.Encoder
@@ -202,8 +204,44 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 		jsonEncoder = json.NewEncoder(os.Stdout)
 	}
 
+	// Create PCAP writer if write_file is specified
+	var pcapWriter *pcapgo.Writer
+	var pcapFile *os.File
+	if writeFile != "" {
+		// #nosec G304 -- writeFile is from CLI --write-file flag, intentional user-specified path
+		f, err := os.Create(writeFile)
+		if err != nil {
+			logger.Error("Failed to create PCAP file", "file", writeFile, "error", err)
+		} else {
+			pcapFile = f
+			pcapWriter = pcapgo.NewWriter(pcapFile)
+			// Write PCAP header with snaplen of 65535 (max packet size)
+			if err := pcapWriter.WriteFileHeader(65535, layers.LinkTypeEthernet); err != nil {
+				logger.Error("Failed to write PCAP header", "error", err)
+				pcapFile.Close()
+				pcapWriter = nil
+				pcapFile = nil
+			} else {
+				logger.Info("Writing packets to PCAP file", "file", writeFile)
+				defer func() {
+					if pcapFile != nil {
+						pcapFile.Close()
+						logger.Info("PCAP file written successfully", "file", writeFile, "packets", packetCount)
+					}
+				}()
+			}
+		}
+	}
+
 	for p := range packetChan {
 		packetCount++
+
+		// Write to PCAP file if writer is available
+		if pcapWriter != nil {
+			if err := pcapWriter.WritePacket(p.Packet.Metadata().CaptureInfo, p.Packet.Data()); err != nil {
+				logger.Error("Failed to write packet to PCAP", "error", err)
+			}
+		}
 
 		// Print each packet unless in quiet mode
 		if !quietMode {

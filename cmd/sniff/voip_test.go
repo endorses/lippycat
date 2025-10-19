@@ -278,6 +278,8 @@ func TestVoipHandlerLogic(t *testing.T) {
 					}
 				}
 
+				// Set writeVoip based on whether --write-file was provided (matching voip.go logic)
+				writeVoip := writeVoipFile != ""
 				viper.Set("writeVoip", writeVoip)
 
 				if readFile == "" {
@@ -324,7 +326,7 @@ func TestVoipCommandStructure(t *testing.T) {
 		flagType  string
 	}{
 		{"sipuser", "u", "string"},
-		{"write-file", "w", "bool"},
+		{"write-file", "w", "string"},
 	}
 
 	for _, flag := range flags {
@@ -428,10 +430,15 @@ func TestVoipViperConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set the flag value
-			writeVoip = tt.writeVoipFlag
+			// Set the flag value (simulate setting writeVoipFile)
+			if tt.writeVoipFlag {
+				writeVoipFile = "/tmp/test-output"
+			} else {
+				writeVoipFile = ""
+			}
 
-			// Simulate the viper.Set call from voipHandler
+			// Simulate the logic from voipHandler
+			writeVoip := writeVoipFile != ""
 			viper.Set("writeVoip", writeVoip)
 
 			// Verify the value was set correctly

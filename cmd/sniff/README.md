@@ -7,16 +7,110 @@ The `sniff` command provides CLI-mode packet capture with support for general pa
 ### General Packet Capture
 
 ```bash
+# Live capture with JSON output (default)
 lc sniff --interface eth0 --filter "port 80"
 lc sniff -i eth0 -f "tcp and port 5060"
+
+# Read from PCAP file
 lc sniff --read-file capture.pcap
+
+# Text format output (legacy)
+lc sniff -i eth0 --format text
 ```
 
 **Common Flags:**
 - `-i, --interface` - Network interface to capture from
 - `-f, --filter` - BPF filter expression
 - `-r, --read-file` - Read from PCAP file instead of live capture
-- `--count` - Number of packets to capture (0 = unlimited)
+- `--format` - Output format: `json` (default), `text`
+- `-q, --quiet` - Quiet mode - don't print packets (only statistics to stderr)
+
+## Output Formats
+
+### JSON Format (Default)
+
+JSON Lines format - one JSON object per line, suitable for streaming and parsing:
+
+```bash
+# Capture to JSON (default)
+lc sniff -r testdata/pcaps/sip.pcap 2>/dev/null | head -1
+```
+
+**Output:**
+```json
+{"Timestamp":"2025-09-28T18:59:18.000001+02:00","SrcIP":"192.168.1.100","DstIP":"192.168.1.101","SrcPort":"5060","DstPort":"5060","Protocol":"TCP","Length":74,"Info":"Flags: [SYN]","RawData":null,"NodeID":"Local","Interface":"sip.pcap","VoIPData":null,"LinkType":1}
+```
+
+**Parse with jq:**
+```bash
+lc sniff -r capture.pcap 2>/dev/null | jq -r '"\(.Timestamp) \(.SrcIP):\(.SrcPort) → \(.DstIP):\(.DstPort) \(.Protocol) \(.Info)"'
+```
+
+**Output:**
+```
+2025-09-28T18:59:18.000001+02:00 192.168.1.100:5060 → 192.168.1.101:5060 TCP Flags: [SYN]
+```
+
+**Filter with jq:**
+```bash
+# Only TCP packets
+lc sniff -r capture.pcap 2>/dev/null | jq 'select(.Protocol == "TCP")'
+
+# Only packets to port 443
+lc sniff -r capture.pcap 2>/dev/null | jq 'select(.DstPort == "443")'
+
+# Extract specific fields
+lc sniff -r capture.pcap 2>/dev/null | jq '{time: .Timestamp, src: .SrcIP, dst: .DstIP, proto: .Protocol}'
+```
+
+### Text Format
+
+Legacy gopacket text representation:
+
+```bash
+lc sniff -r capture.pcap --format text 2>/dev/null | head -1
+```
+
+### stdout/stderr Separation
+
+Following Unix conventions:
+- **stdout**: Packet data only (JSON or text format)
+- **stderr**: Structured logs (JSON format)
+
+```bash
+# Redirect logs to file, packets to stdout
+lc sniff -i eth0 2>logs.json | process-packets.py
+
+# Suppress logs entirely
+lc sniff -i eth0 2>/dev/null | jq .
+
+# Only show statistics (quiet mode suppresses packet output)
+lc sniff -r capture.pcap --quiet
+```
+
+**Example stderr logs:**
+```json
+{"time":"2025-10-19T13:18:04.33104697+02:00","level":"INFO","msg":"Starting packet sniffer"}
+{"time":"2025-10-19T13:18:04.332556652+02:00","level":"INFO","msg":"Packet processing completed","total_packets":5}
+```
+
+## Offline Mode (PCAP Files)
+
+When reading from PCAP files (`--read-file`), the command automatically:
+- Exits cleanly when all packets are processed (no need for Ctrl+C)
+- Works with pipes and `head` commands
+- Processes at maximum speed (no rate limiting)
+
+```bash
+# Process entire file and exit
+lc sniff -r capture.pcap 2>/dev/null | wc -l
+
+# Process first 100 packets and exit
+lc sniff -r capture.pcap 2>/dev/null | head -100
+
+# Extract all SIP packets
+lc sniff -r capture.pcap -f "port 5060" 2>/dev/null | jq -c .
+```
 
 ### VoIP-Specific Capture
 

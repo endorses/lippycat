@@ -23,11 +23,13 @@ var (
 	writeFile   string
 	promiscuous bool
 	quiet       bool
+	format      string
 )
 
 func sniff(cmd *cobra.Command, args []string) {
 	// Set quiet mode in viper so it's accessible globally
 	viper.Set("sniff.quiet", quiet)
+	viper.Set("sniff.format", format)
 
 	if readFile == "" {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
@@ -43,8 +45,10 @@ func init() {
 	SniffCmd.PersistentFlags().StringVarP(&readFile, "read-file", "r", "", "read from pcap file")
 	SniffCmd.PersistentFlags().BoolVarP(&promiscuous, "promiscuous", "p", false, "use promiscuous mode (captures all network traffic - use with caution)")
 	SniffCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "quiet mode - don't print packets (better performance)")
+	SniffCmd.PersistentFlags().StringVar(&format, "format", "json", "output format: json, text")
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
 
 	_ = viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("sniff.quiet", SniffCmd.PersistentFlags().Lookup("quiet"))
+	_ = viper.BindPFlag("sniff.format", SniffCmd.PersistentFlags().Lookup("format"))
 }

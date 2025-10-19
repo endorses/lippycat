@@ -2,6 +2,7 @@ package capture
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -101,7 +102,82 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		processPacketSimple(ch)
 	}
 
-	RunWithSignalHandler(devices, filter, processor, nil)
+	// Check if this is offline mode (reading from PCAP file)
+	// Offline interfaces have filenames as their Name(), not network interface names
+	isOffline := false
+	for _, dev := range devices {
+		// Offline interfaces return the filename in Name()
+		// which will contain a path separator or .pcap extension
+		name := dev.Name()
+		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
+			isOffline = true
+			break
+		}
+	}
+
+	if isOffline {
+		// For offline mode, run until PCAP is fully read
+		RunOffline(devices, filter, processor, nil)
+	} else {
+		// For live mode, run with signal handler (waits for Ctrl+C)
+		RunWithSignalHandler(devices, filter, processor, nil)
+	}
+}
+
+// RunOffline runs the capture for offline PCAP files and exits when complete
+// Unlike RunWithSignalHandler, this cancels the context when all packets are read
+func RunOffline(devices []pcaptypes.PcapInterface, filter string,
+	processor func(ch <-chan PacketInfo, asm *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+
+	// For offline mode, we use a custom implementation that detects EOF
+	// and cancels the context to trigger cleanup
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create buffer
+	bufferSize := getPacketBufferSize()
+	packetBuffer := NewPacketBuffer(ctx, bufferSize)
+	defer packetBuffer.Close()
+
+	// Start capture goroutines
+	var captureWg sync.WaitGroup
+	for _, iface := range devices {
+		captureWg.Add(1)
+		go func(pif pcaptypes.PcapInterface) {
+			defer captureWg.Done()
+
+			err := pif.SetHandle()
+			if err != nil {
+				logger.Error("Error setting pcap handle", "error", err, "interface", pif.Name())
+				return
+			}
+			handle, err := pif.Handle()
+			if err != nil || handle == nil {
+				logger.Error("Error getting pcap handle", "error", err, "interface", pif.Name())
+				return
+			}
+			defer handle.Close()
+
+			captureFromInterface(ctx, pif, filter, packetBuffer)
+		}(iface)
+	}
+
+	// Start processor
+	var processorWg sync.WaitGroup
+	processorWg.Add(1)
+	go func() {
+		defer processorWg.Done()
+		processor(packetBuffer.Receive(), assembler)
+	}()
+
+	// Wait for all capture goroutines to finish (EOF reached)
+	captureWg.Wait()
+
+	// Close the buffer so processor can exit
+	packetBuffer.Close()
+
+	// Wait for processor to finish draining
+	processorWg.Wait()
 }
 
 // processPacketSimple is a lightweight processor without TCP reassembly
@@ -110,13 +186,29 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 	lastStatsTime := time.Now()
 	startTime := time.Now()
 	quietMode := viper.GetBool("sniff.quiet")
+	format := viper.GetString("sniff.format")
+
+	// Create JSON encoder if using JSON format
+	var jsonEncoder *json.Encoder
+	if format == "json" {
+		jsonEncoder = json.NewEncoder(os.Stdout)
+	}
 
 	for p := range packetChan {
 		packetCount++
 
-		// Print each packet (basic info) unless in quiet mode
+		// Print each packet unless in quiet mode
 		if !quietMode {
-			fmt.Printf("%s\n", p.Packet)
+			if format == "json" {
+				// Convert to structured PacketDisplay and output as JSON
+				display := ConvertPacketToDisplay(p)
+				if err := jsonEncoder.Encode(display); err != nil {
+					logger.Error("Failed to encode packet as JSON", "error", err)
+				}
+			} else {
+				// Default text format (gopacket's String() representation)
+				fmt.Printf("%s\n", p.Packet)
+			}
 		}
 
 		// Print statistics summary every second

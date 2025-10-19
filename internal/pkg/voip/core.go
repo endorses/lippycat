@@ -5,6 +5,7 @@ package voip
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -26,8 +27,26 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	streamPool := tcpassembly.NewStreamPool(streamFactory)
 	assembler := tcpassembly.NewAssembler(streamPool)
 
-	// Use common signal handler pattern (like hunt and sniff do)
-	capture.RunWithSignalHandler(devices, filter, startProcessor, assembler)
+	// Detect offline mode (reading from PCAP file)
+	// Offline interfaces have filenames as their Name(), not network interface names
+	isOffline := false
+	for _, dev := range devices {
+		// Offline interfaces return the filename in Name()
+		// which will contain a path separator or .pcap extension
+		name := dev.Name()
+		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
+			isOffline = true
+			break
+		}
+	}
+
+	if isOffline {
+		// For offline mode, run until PCAP is fully read
+		capture.RunOffline(devices, filter, startProcessor, assembler)
+	} else {
+		// For live mode, run with signal handler (waits for Ctrl+C)
+		capture.RunWithSignalHandler(devices, filter, startProcessor, assembler)
+	}
 }
 
 func StartLiveVoipSniffer(interfaces, filter string) {

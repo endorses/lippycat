@@ -17,6 +17,8 @@ func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 	packet := pkt.Packet
 	ctx := context.Background()
 
+	logger.Debug("handleUdpPackets called", "src_port", layer.SrcPort, "dst_port", layer.DstPort)
+
 	// Start tracing span for UDP packet processing
 	span, tracingCtx, finishTrace := monitoring.TracePacketProcessing(ctx, "udp")
 	defer finishTrace()
@@ -40,8 +42,10 @@ func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 
 	// Use buffering if buffer manager is initialized
 	if globalBufferMgr != nil {
+		logger.Debug("Using buffered UDP processing")
 		handleUdpPacketsWithBuffer(pkt, layer, tracingCtx)
 	} else {
+		logger.Debug("Using immediate UDP processing")
 		// Fallback to immediate processing (no buffering)
 		handleUdpPacketsImmediate(pkt, layer, tracingCtx)
 	}
@@ -50,17 +54,17 @@ func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
 	packet := pkt.Packet
 
-	if layer.SrcPort == SIPPort || layer.DstPort == SIPPort {
-		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-			udp, ok := udpLayer.(*layers.UDP)
-			if !ok {
-				logger.Debug("Failed to assert UDP layer type")
-				return
-			}
-			payload := udp.Payload
-			if !handleSipMessage(payload, pkt.LinkType) {
-				return
-			}
+	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		udp, ok := udpLayer.(*layers.UDP)
+		if !ok {
+			logger.Debug("Failed to assert UDP layer type")
+			return
+		}
+		payload := udp.Payload
+
+		// Try to parse as SIP message (content-based detection, not port-based)
+		if handleSipMessage(payload, pkt.LinkType) {
+			// It's a SIP packet - process it
 			headers, body := parseSipHeaders(payload)
 			callID := headers["call-id"]
 			if callID != "" {
@@ -93,8 +97,12 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 					ExtractPortFromSdp(body, callID)
 				}
 			}
+			return // SIP packet processed, done
 		}
-	} else if IsTracked(packet) {
+	}
+
+	// Not a SIP packet - check if it's RTP for a tracked call
+	if IsTracked(packet) {
 		callID := GetCallIDForPacket(packet)
 		if viper.GetViper().GetBool("writeVoip") {
 			WriteRTP(callID, packet)
@@ -108,18 +116,17 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
 	packet := pkt.Packet
 
-	// Handle SIP packets (port 5060)
-	if layer.SrcPort == SIPPort || layer.DstPort == SIPPort {
-		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-			udp, ok := udpLayer.(*layers.UDP)
-			if !ok {
-				logger.Debug("Failed to assert UDP layer type")
-				return
-			}
-			payload := udp.Payload
-			if !handleSipMessage(payload, pkt.LinkType) {
-				return
-			}
+	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		udp, ok := udpLayer.(*layers.UDP)
+		if !ok {
+			logger.Debug("Failed to assert UDP layer type")
+			return
+		}
+		payload := udp.Payload
+
+		// Try to parse as SIP message (content-based detection, not port-based)
+		if handleSipMessage(payload, pkt.LinkType) {
+			// It's a SIP packet - process it
 			headers, body := parseSipHeaders(payload)
 			callID := headers["call-id"]
 			if callID == "" {
@@ -181,8 +188,12 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				)
 				_ = matched // Callback already handled everything
 			}
+			return // SIP packet processed, done
 		}
-	} else {
+	}
+
+	// Not a SIP packet - check if it's RTP for a tracked call
+	{
 		// Potentially RTP packet - check if it belongs to a tracked call
 		callID := GetCallIDForPacket(packet)
 		if callID != "" {
@@ -217,12 +228,18 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 	}
 }
 
-// isSIPPacket checks if a packet is a SIP packet (port 5060)
+// isSIPPacket checks if a packet is a SIP packet using content-based detection
 func isSIPPacket(packet gopacket.Packet) bool {
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp, ok := udpLayer.(*layers.UDP)
 		if ok {
-			return udp.SrcPort == SIPPort || udp.DstPort == SIPPort
+			payload := udp.Payload
+			if len(payload) == 0 {
+				return false
+			}
+			// Use content-based SIP detection, not port-based
+			// Use Ethernet as default link type (most common case)
+			return handleSipMessage(payload, layers.LinkTypeEthernet)
 		}
 	}
 	return false

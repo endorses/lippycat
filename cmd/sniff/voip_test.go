@@ -98,43 +98,43 @@ func TestVoipFlagParsing(t *testing.T) {
 		name              string
 		args              []string
 		expectedSipUser   string
-		expectedWriteVoip bool
+		expectedWriteFile string
 	}{
 		{
 			name:              "Default values",
 			args:              []string{},
 			expectedSipUser:   "",
-			expectedWriteVoip: false,
+			expectedWriteFile: "",
 		},
 		{
 			name:              "Single SIP user",
 			args:              []string{"--sipuser", "alicent"},
 			expectedSipUser:   "alicent",
-			expectedWriteVoip: false,
+			expectedWriteFile: "",
 		},
 		{
 			name:              "Multiple SIP users",
 			args:              []string{"-u", "alicent,robb,charlie"},
 			expectedSipUser:   "alicent,robb,charlie",
-			expectedWriteVoip: false,
+			expectedWriteFile: "",
 		},
 		{
 			name:              "Write file enabled",
-			args:              []string{"--write-file"},
+			args:              []string{"--write-file", "/tmp/output"},
 			expectedSipUser:   "",
-			expectedWriteVoip: true,
+			expectedWriteFile: "/tmp/output",
 		},
 		{
 			name:              "All flags combined",
-			args:              []string{"-u", "alicent,robb", "-w"},
+			args:              []string{"-u", "alicent,robb", "-w", "/tmp/test"},
 			expectedSipUser:   "alicent,robb",
-			expectedWriteVoip: true,
+			expectedWriteFile: "/tmp/test",
 		},
 		{
 			name:              "SIP user with special characters",
 			args:              []string{"--sipuser", "user@domain.com,test-user_123"},
 			expectedSipUser:   "user@domain.com,test-user_123",
-			expectedWriteVoip: false,
+			expectedWriteFile: "",
 		},
 	}
 
@@ -142,27 +142,27 @@ func TestVoipFlagParsing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset module-level variables
 			sipuser = ""
-			writeVoip = false
+			writeVoipFile = ""
 
 			cmd := &cobra.Command{
 				Use: "voip",
 				RunE: func(cmd *cobra.Command, args []string) error {
 					// Extract flag values to module variables
 					sipuser, _ = cmd.Flags().GetString("sipuser")
-					writeVoip, _ = cmd.Flags().GetBool("write-file")
+					writeVoipFile, _ = cmd.Flags().GetString("write-file")
 					return nil
 				},
 			}
 
 			cmd.Flags().StringP("sipuser", "u", "", "SIP user to intercept")
-			cmd.Flags().BoolP("write-file", "w", false, "write to pcap file")
+			cmd.Flags().StringP("write-file", "w", "", "prefix for output pcap files")
 
 			cmd.SetArgs(tt.args)
 			err := cmd.Execute()
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.expectedSipUser, sipuser)
-			assert.Equal(t, tt.expectedWriteVoip, writeVoip)
+			assert.Equal(t, tt.expectedWriteFile, writeVoipFile)
 		})
 	}
 }

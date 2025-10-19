@@ -173,6 +173,14 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 	// Wait for all capture goroutines to finish (EOF reached)
 	captureWg.Wait()
 
+	// Flush TCP assembler if present (forces reassembly of any remaining streams)
+	if assembler != nil {
+		assembler.FlushAll()
+		// Give assembler time to process flushed streams
+		// This ensures SIP messages are extracted before we close the buffer
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	// Close the buffer so processor can exit
 	packetBuffer.Close()
 

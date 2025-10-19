@@ -233,36 +233,51 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 }
 
 func (c *CallInfo) initWriters() error {
-	// Use safe absolute path for captures directory
-	capturesDir, err := getCapturesDir()
-	if err != nil {
-		return fmt.Errorf("failed to get captures directory: %w", err)
+	// Check if user specified an output file
+	outputFile := viper.GetString("voip.output_file")
+
+	var sipPath, rtpPath string
+
+	if outputFile != "" {
+		// User specified output file - use it as base name
+		// Generate: <file>_sip_<callid>.pcap and <file>_rtp_<callid>.pcap
+		base := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
+		sipPath = fmt.Sprintf("%s_sip_%s.pcap", base, sanitize(c.CallID))
+		rtpPath = fmt.Sprintf("%s_rtp_%s.pcap", base, sanitize(c.CallID))
+	} else {
+		// No output file specified - use default directory
+		capturesDir, err := getCapturesDir()
+		if err != nil {
+			return fmt.Errorf("failed to get captures directory: %w", err)
+		}
+
+		// Create directory if it doesn't exist
+		if err := os.MkdirAll(capturesDir, 0o750); err != nil {
+			return fmt.Errorf("failed to create captures directory: %w", err)
+		}
+
+		// Verify directory is not a symlink to prevent symlink attacks
+		dirInfo, err := os.Lstat(capturesDir)
+		if err != nil {
+			return fmt.Errorf("failed to stat captures directory: %w", err)
+		}
+		if dirInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("captures directory is a symlink, refusing to use it for security")
+		}
+
+		sipPath = filepath.Join(capturesDir, fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
+		rtpPath = filepath.Join(capturesDir, fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))
 	}
 
-	// Create directory if it doesn't exist
-	if err := os.MkdirAll(capturesDir, 0o750); err != nil {
-		return fmt.Errorf("failed to create captures directory: %w", err)
-	}
+	var err error
 
-	// Verify directory is not a symlink to prevent symlink attacks
-	dirInfo, err := os.Lstat(capturesDir)
-	if err != nil {
-		return fmt.Errorf("failed to stat captures directory: %w", err)
-	}
-	if dirInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("captures directory is a symlink, refusing to use it for security")
-	}
-
-	sipPath := filepath.Join(capturesDir, fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
-	rtpPath := filepath.Join(capturesDir, fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))
-
-	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked
+	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked or user-specified
 	c.sipFile, err = os.Create(sipPath)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP file %s: %w", sipPath, err)
 	}
 
-	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked
+	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked or user-specified
 	c.rtpFile, err = os.Create(rtpPath)
 	if err != nil {
 		if c.sipFile != nil {

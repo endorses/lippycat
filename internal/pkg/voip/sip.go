@@ -67,17 +67,23 @@ func extractFullSIPURI(header string) string {
 }
 
 func handleSipMessage(data []byte, linkType layers.LinkType) bool {
+	logger.Debug("handleSipMessage called", "data_len", len(data))
 	lines := bytes.Split(data, []byte("\n"))
 	if len(lines) == 0 {
+		logger.Debug("handleSipMessage: no lines in data")
 		return false
 	}
 	startLine := strings.TrimSpace(string(lines[0]))
+	logger.Debug("handleSipMessage: checking start line", "start_line", startLine)
 	if !isSipStartLine(startLine) {
+		logger.Debug("handleSipMessage: not a SIP start line")
 		return false
 	}
 
+	logger.Debug("handleSipMessage: parsing SIP headers")
 	headers, body := parseSipHeaders(data)
 
+	logger.Debug("handleSipMessage: checking user filter", "call_id", headers["call-id"])
 	if containsUserInHeaders(headers) {
 		callID := headers["call-id"]
 		if callID != "" {

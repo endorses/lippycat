@@ -22,8 +22,8 @@ var voipCmd = &cobra.Command{
 }
 
 var (
-	sipuser   string
-	writeVoip bool
+	sipuser       string
+	writeVoipFile string
 
 	// GPU acceleration flags
 	gpuBackend   string
@@ -49,15 +49,29 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	expirationDate := time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)
 	su := sipusers.SipUser{ExpirationDate: expirationDate}
 
-	for _, user := range strings.Split(sipuser, ",") {
-		sipusers.AddSipUser(user, &su)
+	// Only add non-empty users to surveillance list
+	// If no users specified, promiscuous mode (accept all VoIP traffic)
+	if sipuser != "" {
+		for _, user := range strings.Split(sipuser, ",") {
+			user = strings.TrimSpace(user)
+			if user != "" {
+				sipusers.AddSipUser(user, &su)
+			}
+		}
 	}
+
+	// Set writeVoip based on whether --write-file was provided
+	writeVoip := writeVoipFile != ""
 
 	logger.Info("Starting VoIP sniffing",
 		"users", strings.Split(sipuser, ","),
 		"interfaces", interfaces,
-		"write_voip", writeVoip)
+		"write_voip", writeVoip,
+		"output_file", writeVoipFile)
 	viper.Set("writeVoip", writeVoip)
+	if writeVoipFile != "" {
+		viper.Set("voip.output_file", writeVoipFile)
+	}
 
 	// Set GPU configuration values
 	if cmd.Flags().Changed("gpu-enable") {
@@ -126,7 +140,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 
 func init() {
 	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")
-	voipCmd.Flags().BoolVarP(&writeVoip, "write-file", "w", false, "write to pcap file")
+	voipCmd.Flags().StringVarP(&writeVoipFile, "write-file", "w", "", "prefix for output pcap files (creates <prefix>_sip_<callid>.pcap and <prefix>_rtp_<callid>.pcap)")
 
 	// GPU Acceleration Flags
 	voipCmd.Flags().BoolVar(&gpuEnable, "gpu-enable", true, "Enable GPU acceleration for pattern matching (default: true)")

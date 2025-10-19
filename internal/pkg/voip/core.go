@@ -71,16 +71,23 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		}
 	}()
 
+	packetCount := 0
 	for pkt := range ch {
+		packetCount++
+		logger.Debug("VoIP processor received packet", "count", packetCount, "has_network", pkt.Packet.NetworkLayer() != nil, "has_transport", pkt.Packet.TransportLayer() != nil)
 		packet := pkt.Packet
 		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+			logger.Debug("Skipping packet - missing network or transport layer")
 			continue
 		}
 		switch layer := packet.TransportLayer().(type) {
 		case *layers.TCP:
+			logger.Debug("Processing TCP packet")
 			handleTcpPackets(pkt, layer, assembler)
 		case *layers.UDP:
+			logger.Debug("Processing UDP packet")
 			handleUdpPackets(pkt, layer)
 		}
 	}
+	logger.Info("VoIP processor finished", "total_packets", packetCount)
 }

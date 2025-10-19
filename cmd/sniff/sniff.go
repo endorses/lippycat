@@ -30,6 +30,7 @@ func sniff(cmd *cobra.Command, args []string) {
 	// Set quiet mode in viper so it's accessible globally
 	viper.Set("sniff.quiet", quiet)
 	viper.Set("sniff.format", format)
+	viper.Set("sniff.write_file", writeFile)
 
 	if readFile == "" {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)

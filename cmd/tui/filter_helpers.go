@@ -86,6 +86,11 @@ func (m *Model) parseSimpleFilter(filterStr string) filters.Filter {
 		// Metadata filter: has:voip (checks for presence of metadata)
 		metadataType := strings.TrimPrefix(strings.ToLower(filterStr), "has:")
 		return filters.NewMetadataFilter(metadataType)
+	} else if strings.HasPrefix(strings.ToLower(filterStr), "node:") {
+		// Node filter: node:hunter-kamailio, node:edge-*, node:* (filters by NodeID)
+		nodePattern := strings.TrimPrefix(filterStr, "node:")
+		nodePattern = strings.TrimPrefix(nodePattern, "node:") // handle case variations
+		return filters.NewNodeFilter(nodePattern)
 	} else if strings.Contains(filterStr, ":") && !isBPFExpression(filterStr) {
 		// Field-specific filter: field:value
 		// Supported fields: protocol, src, dst, info

@@ -66,6 +66,34 @@ func extractFullSIPURI(header string) string {
 	return uri
 }
 
+// extractTagFromHeader extracts the tag parameter from a SIP From/To header
+// Example: "Alicent <sip:alicent@domain.com>;tag=abc123" -> "abc123"
+// Example: "<sip:user@host>;tag=xyz789;other=param" -> "xyz789"
+// Returns empty string if no tag parameter found
+func extractTagFromHeader(header string) string {
+	// Look for ";tag=" parameter (case-insensitive)
+	tagStart := strings.Index(strings.ToLower(header), ";tag=")
+	if tagStart == -1 {
+		return ""
+	}
+
+	// Start after ";tag="
+	valueStart := tagStart + 5 // len(";tag=")
+	if valueStart >= len(header) {
+		return ""
+	}
+
+	// Find the end of the tag value (semicolon, space, or end of string)
+	value := header[valueStart:]
+	for i, ch := range value {
+		if ch == ';' || ch == ' ' || ch == '\r' || ch == '\n' || ch == '>' {
+			return value[:i]
+		}
+	}
+
+	return value
+}
+
 func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 	logger.Debug("handleSipMessage called", "data_len", len(data))
 	lines := bytes.Split(data, []byte("\n"))

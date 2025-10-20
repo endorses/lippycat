@@ -33,6 +33,8 @@ type VoIPMetadata struct {
 	Status      int               // SIP response code
 	From        string            // SIP From header
 	To          string            // SIP To header
+	FromTag     string            // SIP From tag parameter (for dialog correlation)
+	ToTag       string            // SIP To tag parameter (for dialog correlation)
 	User        string            // Username from URI
 	ContentType string            // Content-Type header
 	Headers     map[string]string // All SIP headers

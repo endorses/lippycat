@@ -210,6 +210,59 @@ func (d *DetailsPanel) renderContent() string {
 		content.WriteString(valueStyle.Render(line))
 	}
 
+	// VoIP Details Section (only for VoIP protocols)
+	if d.packet.VoIPData != nil {
+		content.WriteString("\n\n")
+		content.WriteString(sectionStyle.Render("📞 VoIP Details"))
+		content.WriteString("\n\n")
+
+		if d.packet.VoIPData.CallID != "" {
+			content.WriteString(labelStyle.Render("Call-ID: "))
+			content.WriteString(valueStyle.Render(d.packet.VoIPData.CallID))
+			content.WriteString("\n")
+		}
+
+		if d.packet.VoIPData.Method != "" {
+			content.WriteString(labelStyle.Render("Method: "))
+			content.WriteString(valueStyle.Render(d.packet.VoIPData.Method))
+			content.WriteString("\n")
+		}
+
+		if d.packet.VoIPData.User != "" {
+			content.WriteString(labelStyle.Render("User: "))
+			content.WriteString(valueStyle.Render(d.packet.VoIPData.User))
+			content.WriteString("\n")
+		}
+
+		if d.packet.VoIPData.FromTag != "" {
+			content.WriteString(labelStyle.Render("From-Tag: "))
+			content.WriteString(valueStyle.Render(d.packet.VoIPData.FromTag))
+			content.WriteString("\n")
+		}
+
+		if d.packet.VoIPData.ToTag != "" {
+			content.WriteString(labelStyle.Render("To-Tag: "))
+			content.WriteString(valueStyle.Render(d.packet.VoIPData.ToTag))
+			content.WriteString("\n")
+		}
+
+		if d.packet.VoIPData.IsRTP {
+			content.WriteString(labelStyle.Render("SSRC: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("0x%08x", d.packet.VoIPData.SSRC)))
+			content.WriteString("\n")
+
+			if d.packet.VoIPData.Codec != "" {
+				content.WriteString(labelStyle.Render("Codec: "))
+				content.WriteString(valueStyle.Render(d.packet.VoIPData.Codec))
+				content.WriteString("\n")
+			}
+
+			content.WriteString(labelStyle.Render("Seq: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("%d", d.packet.VoIPData.SeqNumber)))
+			content.WriteString("\n")
+		}
+	}
+
 	// Hex Dump Section
 	content.WriteString("\n\n")
 	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))

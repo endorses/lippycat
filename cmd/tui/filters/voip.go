@@ -12,7 +12,7 @@ import (
 
 // VoIPFilter filters based on VoIP-specific criteria
 type VoIPFilter struct {
-	field    string // "user", "from", "to", "method", "callid", "codec"
+	field    string // "user", "from", "to", "fromtag", "totag", "method", "callid", "codec"
 	value    string // value to match (supports wildcards like "555*")
 	wildcard bool   // whether value contains wildcards
 }
@@ -34,34 +34,53 @@ func (f *VoIPFilter) Match(packet components.PacketDisplay) bool {
 		return false
 	}
 
-	// Extract the field value from the packet info
+	// Prefer VoIPData when available (more reliable than parsing Info)
 	var fieldValue string
-	info := strings.ToLower(packet.Info)
-
-	switch f.field {
-	case "user", "from":
-		// Look for "From: " or "sip:" in the info
-		if idx := strings.Index(info, "from:"); idx != -1 {
-			fieldValue = extractSIPField(packet.Info[idx:])
-		} else if idx := strings.Index(info, "sip:"); idx != -1 {
-			fieldValue = extractSIPField(packet.Info[idx:])
+	if packet.VoIPData != nil {
+		switch f.field {
+		case "user", "from":
+			fieldValue = packet.VoIPData.User // Username from From header
+		case "to":
+			fieldValue = packet.VoIPData.To
+		case "fromtag":
+			fieldValue = packet.VoIPData.FromTag
+		case "totag":
+			fieldValue = packet.VoIPData.ToTag
+		case "method":
+			fieldValue = packet.VoIPData.Method
+		case "callid":
+			fieldValue = packet.VoIPData.CallID
 		}
+	}
 
-	case "to":
-		if idx := strings.Index(info, "to:"); idx != -1 {
-			fieldValue = extractSIPField(packet.Info[idx:])
-		}
+	// Fall back to parsing Info string if VoIPData not available
+	if fieldValue == "" {
+		info := strings.ToLower(packet.Info)
+		switch f.field {
+		case "user", "from":
+			// Look for "From: " or "sip:" in the info
+			if idx := strings.Index(info, "from:"); idx != -1 {
+				fieldValue = extractSIPField(packet.Info[idx:])
+			} else if idx := strings.Index(info, "sip:"); idx != -1 {
+				fieldValue = extractSIPField(packet.Info[idx:])
+			}
 
-	case "method":
-		// SIP methods appear at the start of the info
-		words := strings.Fields(packet.Info)
-		if len(words) > 0 {
-			fieldValue = words[0]
-		}
+		case "to":
+			if idx := strings.Index(info, "to:"); idx != -1 {
+				fieldValue = extractSIPField(packet.Info[idx:])
+			}
 
-	case "callid":
-		if idx := strings.Index(info, "call-id:"); idx != -1 {
-			fieldValue = extractSIPField(packet.Info[idx:])
+		case "method":
+			// SIP methods appear at the start of the info
+			words := strings.Fields(packet.Info)
+			if len(words) > 0 {
+				fieldValue = words[0]
+			}
+
+		case "callid":
+			if idx := strings.Index(info, "call-id:"); idx != -1 {
+				fieldValue = extractSIPField(packet.Info[idx:])
+			}
 		}
 	}
 

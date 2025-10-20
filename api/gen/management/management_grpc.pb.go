@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v6.32.1
-// source: management.proto
+// source: api/proto/management.proto
 
 package management
 
@@ -401,5 +401,5 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "management.proto",
+	Metadata: "api/proto/management.proto",
 }

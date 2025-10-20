@@ -22,6 +22,8 @@ type CallBuffer struct {
 type CallMetadata struct {
 	From              string
 	To                string
+	FromTag           string // SIP From tag parameter (for dialog correlation)
+	ToTag             string // SIP To tag parameter (for dialog correlation)
 	PAssertedIdentity string
 	CallID            string
 	Method            string

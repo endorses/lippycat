@@ -939,6 +939,12 @@ func metadataToVoIPData(metadata map[string]interface{}) *components.VoIPMetadat
 	if user, ok := metadata["from_user"].(string); ok {
 		voipData.User = user
 	}
+	if fromTag, ok := metadata["from_tag"].(string); ok {
+		voipData.FromTag = fromTag
+	}
+	if toTag, ok := metadata["to_tag"].(string); ok {
+		voipData.ToTag = toTag
+	}
 
 	// RTP-specific fields
 	if ssrc, ok := metadata["ssrc"].(uint32); ok {

@@ -662,6 +662,8 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 			voipData.Status = int(pkt.Metadata.Sip.ResponseCode)
 			voipData.From = pkt.Metadata.Sip.FromUser
 			voipData.To = pkt.Metadata.Sip.ToUser
+			voipData.FromTag = pkt.Metadata.Sip.FromTag
+			voipData.ToTag = pkt.Metadata.Sip.ToTag
 			// ALWAYS mark as SIP if we have SIP metadata from hunter
 			// Trust the hunter's analysis even if TUI parsing failed
 			protocol = "SIP"

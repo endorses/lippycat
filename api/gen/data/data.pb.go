@@ -394,18 +394,22 @@ type SIPMetadata struct {
 	Method string `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
 	// Call-ID
 	CallId string `protobuf:"bytes,2,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
-	// From user (username only, e.g., "alice")
+	// From user
 	FromUser string `protobuf:"bytes,3,opt,name=from_user,json=fromUser,proto3" json:"from_user,omitempty"`
-	// To user (username only, e.g., "bob")
+	// To user
 	ToUser string `protobuf:"bytes,4,opt,name=to_user,json=toUser,proto3" json:"to_user,omitempty"`
 	// Response code (for responses)
 	ResponseCode uint32 `protobuf:"varint,5,opt,name=response_code,json=responseCode,proto3" json:"response_code,omitempty"`
 	// P-Asserted-Identity header (RFC 3325)
 	PAssertedIdentity string `protobuf:"bytes,6,opt,name=p_asserted_identity,json=pAssertedIdentity,proto3" json:"p_asserted_identity,omitempty"`
-	// From URI (full SIP URI, e.g., "sip:alice@domain.com")
-	FromUri string `protobuf:"bytes,7,opt,name=from_uri,json=fromUri,proto3" json:"from_uri,omitempty"`
-	// To URI (full SIP URI, e.g., "sip:bob@domain.com")
-	ToUri         string `protobuf:"bytes,8,opt,name=to_uri,json=toUri,proto3" json:"to_uri,omitempty"`
+	// From tag parameter (for dialog correlation)
+	FromTag string `protobuf:"bytes,7,opt,name=from_tag,json=fromTag,proto3" json:"from_tag,omitempty"`
+	// To tag parameter (for dialog correlation)
+	ToTag string `protobuf:"bytes,8,opt,name=to_tag,json=toTag,proto3" json:"to_tag,omitempty"`
+	// Full From URI (for display)
+	FromUri string `protobuf:"bytes,9,opt,name=from_uri,json=fromUri,proto3" json:"from_uri,omitempty"`
+	// Full To URI (for display)
+	ToUri         string `protobuf:"bytes,10,opt,name=to_uri,json=toUri,proto3" json:"to_uri,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -478,6 +482,20 @@ func (x *SIPMetadata) GetResponseCode() uint32 {
 func (x *SIPMetadata) GetPAssertedIdentity() string {
 	if x != nil {
 		return x.PAssertedIdentity
+	}
+	return ""
+}
+
+func (x *SIPMetadata) GetFromTag() string {
+	if x != nil {
+		return x.FromTag
+	}
+	return ""
+}
+
+func (x *SIPMetadata) GetToTag() string {
+	if x != nil {
+		return x.ToTag
 	}
 	return ""
 }
@@ -816,7 +834,7 @@ const file_api_proto_data_proto_rawDesc = "" +
 	" \x03(\v2*.lippycat.data.PacketMetadata.DetailsEntryR\adetails\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xfb\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x02\n" +
 	"\vSIPMetadata\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x17\n" +
 	"\acall_id\x18\x02 \x01(\tR\x06callId\x12\x1b\n" +
@@ -824,8 +842,11 @@ const file_api_proto_data_proto_rawDesc = "" +
 	"\ato_user\x18\x04 \x01(\tR\x06toUser\x12#\n" +
 	"\rresponse_code\x18\x05 \x01(\rR\fresponseCode\x12.\n" +
 	"\x13p_asserted_identity\x18\x06 \x01(\tR\x11pAssertedIdentity\x12\x19\n" +
-	"\bfrom_uri\x18\a \x01(\tR\afromUri\x12\x15\n" +
-	"\x06to_uri\x18\b \x01(\tR\x05toUri\"~\n" +
+	"\bfrom_tag\x18\a \x01(\tR\afromTag\x12\x15\n" +
+	"\x06to_tag\x18\b \x01(\tR\x05toTag\x12\x19\n" +
+	"\bfrom_uri\x18\t \x01(\tR\afromUri\x12\x15\n" +
+	"\x06to_uri\x18\n" +
+	" \x01(\tR\x05toUri\"~\n" +
 	"\vRTPMetadata\x12\x12\n" +
 	"\x04ssrc\x18\x01 \x01(\rR\x04ssrc\x12!\n" +
 	"\fpayload_type\x18\x02 \x01(\rR\vpayloadType\x12\x1a\n" +

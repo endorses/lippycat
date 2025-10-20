@@ -110,6 +110,18 @@ message SIPMetadata {
 
     // P-Asserted-Identity header (RFC 3325)
     string p_asserted_identity = 6;
+
+    // From tag parameter (for dialog correlation)
+    string from_tag = 7;
+
+    // To tag parameter (for dialog correlation)
+    string to_tag = 8;
+
+    // Full From URI (for display)
+    string from_uri = 9;
+
+    // Full To URI (for display)
+    string to_uri = 10;
 }
 
 // RTPMetadata for RTP packets

@@ -147,6 +147,8 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				CallID:            callID,
 				From:              headers["from"],
 				To:                headers["to"],
+				FromTag:           extractTagFromHeader(headers["from"]),
+				ToTag:             extractTagFromHeader(headers["to"]),
 				PAssertedIdentity: headers["p-asserted-identity"],
 				Method:            detectSipMethod(string(payload)),
 				SDPBody:           body,

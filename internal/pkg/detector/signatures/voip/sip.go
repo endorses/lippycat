@@ -183,9 +183,11 @@ func (s *SIPSignature) extractMetadata(payload string) map[string]interface{} {
 			case "From", "f":
 				metadata["from"] = value
 				metadata["from_user"] = extractUserFromURI(value)
+				metadata["from_tag"] = extractTagFromHeader(value)
 			case "To", "t":
 				metadata["to"] = value
 				metadata["to_user"] = extractUserFromURI(value)
+				metadata["to_tag"] = extractTagFromHeader(value)
 			case "Call-ID", "i":
 				metadata["call_id"] = value
 			case "CSeq":
@@ -283,6 +285,29 @@ func extractUserFromURI(uri string) string {
 	}
 
 	return uri[start : start+end]
+}
+
+func extractTagFromHeader(header string) string {
+	// Extract tag parameter from SIP From/To header
+	// Example: "Alicent <sip:alicent@domain.com>;tag=abc123" -> "abc123"
+	tagStart := strings.Index(strings.ToLower(header), ";tag=")
+	if tagStart == -1 {
+		return ""
+	}
+
+	valueStart := tagStart + 5 // len(";tag=")
+	if valueStart >= len(header) {
+		return ""
+	}
+
+	// Find the end of the tag value
+	value := header[valueStart:]
+	for i, ch := range value {
+		if ch == ';' || ch == ' ' || ch == '\r' || ch == '\n' || ch == '>' {
+			return value[:i]
+		}
+	}
+	return value
 }
 
 // extractSDPMediaPorts extracts RTP media ports from SDP (Session Description Protocol)

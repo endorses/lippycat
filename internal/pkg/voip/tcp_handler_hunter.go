@@ -50,6 +50,8 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 				CallID:            callID,
 				From:              extractUserFromSIPURI(headers["from"]),
 				To:                extractUserFromSIPURI(headers["to"]),
+				FromTag:           extractTagFromHeader(headers["from"]),
+				ToTag:             extractTagFromHeader(headers["to"]),
 				PAssertedIdentity: headers["p-asserted-identity"],
 				Method:            method,
 				ResponseCode:      extractSipResponseCode(sipMessage),
@@ -64,6 +66,8 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 					CallId:            callID,
 					FromUser:          metadata.From, // username only
 					ToUser:            metadata.To,   // username only
+					FromTag:           metadata.FromTag,
+					ToTag:             metadata.ToTag,
 					FromUri:           extractFullSIPURI(headers["from"]),
 					ToUri:             extractFullSIPURI(headers["to"]),
 					Method:            metadata.Method,
@@ -107,6 +111,8 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 		CallID:            callID,
 		From:              extractUserFromSIPURI(headers["from"]),
 		To:                extractUserFromSIPURI(headers["to"]),
+		FromTag:           extractTagFromHeader(headers["from"]),
+		ToTag:             extractTagFromHeader(headers["to"]),
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            method,
 		ResponseCode:      extractSipResponseCode(sipMessage),
@@ -128,6 +134,8 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 			CallId:            callID,
 			FromUser:          metadata.From, // username only
 			ToUser:            metadata.To,   // username only
+			FromTag:           metadata.FromTag,
+			ToTag:             metadata.ToTag,
 			FromUri:           extractFullSIPURI(headers["from"]),
 			ToUri:             extractFullSIPURI(headers["to"]),
 			Method:            metadata.Method,

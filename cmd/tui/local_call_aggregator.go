@@ -13,8 +13,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 )
 
-// OfflineCallAggregator wraps voip.CallAggregator for TUI offline mode
-type OfflineCallAggregator struct {
+// LocalCallAggregator wraps voip.CallAggregator for TUI local capture modes (live and offline)
+type LocalCallAggregator struct {
 	aggregator      *voip.CallAggregator
 	program         *tea.Program
 	lastNotifyTime  time.Time
@@ -26,9 +26,9 @@ type OfflineCallAggregator struct {
 	wg              sync.WaitGroup
 }
 
-// NewOfflineCallAggregator creates a new offline call aggregator
-func NewOfflineCallAggregator(program *tea.Program) *OfflineCallAggregator {
-	return &OfflineCallAggregator{
+// NewLocalCallAggregator creates a new local call aggregator for live or offline mode
+func NewLocalCallAggregator(program *tea.Program) *LocalCallAggregator {
+	return &LocalCallAggregator{
 		aggregator:     voip.NewCallAggregator(),
 		program:        program,
 		notifyThrottle: 500 * time.Millisecond, // Throttle call updates
@@ -38,63 +38,63 @@ func NewOfflineCallAggregator(program *tea.Program) *OfflineCallAggregator {
 }
 
 // ProcessPacket processes a packet and updates call state
-func (oca *OfflineCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
+func (lca *LocalCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
 	if pkt.VoIPData == nil {
 		return
 	}
 
 	// Process the packet through the aggregator
-	oca.aggregator.ProcessPacketDisplay(pkt, "offline")
+	lca.aggregator.ProcessPacketDisplay(pkt, "offline")
 
 	// Schedule a call update notification
-	oca.scheduleCallUpdate()
+	lca.scheduleCallUpdate()
 }
 
 // scheduleCallUpdate schedules a throttled call update notification
-func (oca *OfflineCallAggregator) scheduleCallUpdate() {
-	oca.mu.Lock()
-	defer oca.mu.Unlock()
+func (lca *LocalCallAggregator) scheduleCallUpdate() {
+	lca.mu.Lock()
+	defer lca.mu.Unlock()
 
 	// Cancel existing timer if any
-	if oca.callUpdateTimer != nil {
-		oca.callUpdateTimer.Stop()
+	if lca.callUpdateTimer != nil {
+		lca.callUpdateTimer.Stop()
 	}
 
 	// Schedule new notification after throttle period
-	oca.callUpdateTimer = time.AfterFunc(oca.notifyThrottle, func() {
-		oca.notifyCallUpdates()
+	lca.callUpdateTimer = time.AfterFunc(lca.notifyThrottle, func() {
+		lca.notifyCallUpdates()
 	})
 }
 
 // notifyCallUpdates sends call updates to the TUI
-func (oca *OfflineCallAggregator) notifyCallUpdates() {
-	calls := oca.aggregator.GetCalls()
+func (lca *LocalCallAggregator) notifyCallUpdates() {
+	calls := lca.aggregator.GetCalls()
 
 	// Convert all calls to types.CallInfo and send in a single batch
 	callInfos := make([]types.CallInfo, 0, len(calls))
 	for _, call := range calls {
-		oca.mu.Lock()
+		lca.mu.Lock()
 		// Track known calls
-		if !oca.knownCalls[call.CallID] {
-			oca.knownCalls[call.CallID] = true
+		if !lca.knownCalls[call.CallID] {
+			lca.knownCalls[call.CallID] = true
 		}
-		oca.mu.Unlock()
+		lca.mu.Unlock()
 
 		// Convert voip.AggregatedCall to types.CallInfo
-		callInfo := oca.convertToTUICall(call)
+		callInfo := lca.convertToTUICall(call)
 		callInfos = append(callInfos, callInfo)
 	}
 
 	// Send all call updates in a single message
-	if oca.program != nil && len(callInfos) > 0 {
-		oca.program.Send(CallUpdateMsg{
+	if lca.program != nil && len(callInfos) > 0 {
+		lca.program.Send(CallUpdateMsg{
 			Calls: callInfos,
 		})
 	}
 }
 
 // convertToTUICall converts voip.AggregatedCall to types.CallInfo
-func (oca *OfflineCallAggregator) convertToTUICall(call voip.AggregatedCall) types.CallInfo {
+func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types.CallInfo {
 	// Calculate duration using actual packet timestamps
 	duration := time.Duration(0)
 	if !call.EndTime.IsZero() {
@@ -146,10 +146,10 @@ func (oca *OfflineCallAggregator) convertToTUICall(call voip.AggregatedCall) typ
 }
 
 // Start starts the background call update notifier
-func (oca *OfflineCallAggregator) Start() {
-	oca.wg.Add(1)
+func (lca *LocalCallAggregator) Start() {
+	lca.wg.Add(1)
 	go func() {
-		defer oca.wg.Done()
+		defer lca.wg.Done()
 
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -158,36 +158,36 @@ func (oca *OfflineCallAggregator) Start() {
 			select {
 			case <-ticker.C:
 				// Periodically check for call updates
-				oca.notifyCallUpdates()
-			case <-oca.stopCh:
+				lca.notifyCallUpdates()
+			case <-lca.stopCh:
 				return
 			}
 		}
 	}()
 
-	logger.Debug("Offline call aggregator started")
+	logger.Debug("Local call aggregator started")
 }
 
 // Stop stops the background call update notifier
-func (oca *OfflineCallAggregator) Stop() {
-	close(oca.stopCh)
-	oca.wg.Wait()
+func (lca *LocalCallAggregator) Stop() {
+	close(lca.stopCh)
+	lca.wg.Wait()
 
-	oca.mu.Lock()
-	if oca.callUpdateTimer != nil {
-		oca.callUpdateTimer.Stop()
+	lca.mu.Lock()
+	if lca.callUpdateTimer != nil {
+		lca.callUpdateTimer.Stop()
 	}
-	oca.mu.Unlock()
+	lca.mu.Unlock()
 
-	logger.Debug("Offline call aggregator stopped")
+	logger.Debug("Local call aggregator stopped")
 }
 
 // GetCalls returns all tracked calls
-func (oca *OfflineCallAggregator) GetCalls() []voip.AggregatedCall {
-	return oca.aggregator.GetCalls()
+func (lca *LocalCallAggregator) GetCalls() []voip.AggregatedCall {
+	return lca.aggregator.GetCalls()
 }
 
 // GetCallCount returns the number of tracked calls
-func (oca *OfflineCallAggregator) GetCallCount() int {
-	return oca.aggregator.GetCallCount()
+func (lca *LocalCallAggregator) GetCallCount() int {
+	return lca.aggregator.GetCallCount()
 }

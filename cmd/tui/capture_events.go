@@ -45,11 +45,15 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 			// Add packet using PacketStore method
 			m.packetStore.AddPacket(packet)
 
-			// Process packet through offline call aggregator (offline mode only)
+			// Process packet through call aggregator (live and offline modes)
 			if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
 				// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
 				typesPacket := types.PacketDisplay(packet)
 				m.offlineCallAggregator.ProcessPacket(&typesPacket)
+			} else if m.captureMode == components.CaptureModeLive && m.liveCallAggregator != nil {
+				// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
+				typesPacket := types.PacketDisplay(packet)
+				m.liveCallAggregator.ProcessPacket(&typesPacket)
 			}
 
 			// Write to streaming save if active
@@ -110,11 +114,15 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		// Add packet using PacketStore method
 		m.packetStore.AddPacket(packet)
 
-		// Process packet through offline call aggregator (offline mode only)
+		// Process packet through call aggregator (live and offline modes)
 		if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
 			// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
 			typesPacket := types.PacketDisplay(packet)
 			m.offlineCallAggregator.ProcessPacket(&typesPacket)
+		} else if m.captureMode == components.CaptureModeLive && m.liveCallAggregator != nil {
+			// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
+			typesPacket := types.PacketDisplay(packet)
+			m.liveCallAggregator.ProcessPacket(&typesPacket)
 		}
 
 		// Write to streaming save if active

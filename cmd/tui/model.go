@@ -100,8 +100,9 @@ type Model struct {
 	lastDetailsPanelUpdate     time.Time     // Last time details panel was updated
 	detailsPanelUpdateInterval time.Duration // Minimum interval between updates (e.g., 50ms = 20 Hz)
 
-	// Offline call aggregation
-	offlineCallAggregator *OfflineCallAggregator // Call aggregator for offline PCAP analysis
+	// Call aggregation (offline and live modes)
+	offlineCallAggregator *LocalCallAggregator // Call aggregator for offline PCAP analysis
+	liveCallAggregator    *LocalCallAggregator // Call aggregator for live capture
 
 	// Test state
 	testToastCycle int // Cycles through toast types for testing

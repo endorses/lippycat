@@ -37,6 +37,11 @@ var (
 	gpuBackend   string
 	gpuBatchSize int
 	insecure     bool
+	// TLS flags
+	tlsEnabled  bool
+	tlsCAFile   string
+	tlsCertFile string
+	tlsKeyFile  string
 )
 
 func runTUI(cmd *cobra.Command, args []string) {
@@ -47,6 +52,20 @@ func runTUI(cmd *cobra.Command, args []string) {
 	// If --insecure flag is set, override TLS config
 	if insecure {
 		viper.Set("tui.tls.enabled", false)
+	}
+
+	// Override TLS config with command-line flags if provided
+	if tlsEnabled {
+		viper.Set("tui.tls.enabled", true)
+	}
+	if tlsCAFile != "" {
+		viper.Set("tui.tls.ca_file", tlsCAFile)
+	}
+	if tlsCertFile != "" {
+		viper.Set("tui.tls.cert_file", tlsCertFile)
+	}
+	if tlsKeyFile != "" {
+		viper.Set("tui.tls.key_file", tlsKeyFile)
 	}
 
 	// Load buffer size from config, use flag value as fallback
@@ -118,9 +137,19 @@ func init() {
 	TuiCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
 	TuiCmd.Flags().BoolVar(&insecure, "insecure", false, "allow insecure connections (no TLS) for testing/development")
 
+	// TLS configuration (for remote mode)
+	TuiCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "enable TLS encryption for remote connections")
+	TuiCmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "path to CA certificate for server verification")
+	TuiCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "path to client TLS certificate (for mutual TLS)")
+	TuiCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "path to client TLS key (for mutual TLS)")
+
 	_ = viper.BindPFlag("promiscuous", TuiCmd.Flags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("tui.theme", TuiCmd.Flags().Lookup("theme"))
 	_ = viper.BindPFlag("tui.gpu.enabled", TuiCmd.Flags().Lookup("enable-gpu"))
 	_ = viper.BindPFlag("tui.gpu.backend", TuiCmd.Flags().Lookup("gpu-backend"))
 	_ = viper.BindPFlag("tui.gpu.batch_size", TuiCmd.Flags().Lookup("gpu-batch-size"))
+	_ = viper.BindPFlag("tui.tls.enabled", TuiCmd.Flags().Lookup("tls"))
+	_ = viper.BindPFlag("tui.tls.ca_file", TuiCmd.Flags().Lookup("tls-ca"))
+	_ = viper.BindPFlag("tui.tls.cert_file", TuiCmd.Flags().Lookup("tls-cert"))
+	_ = viper.BindPFlag("tui.tls.key_file", TuiCmd.Flags().Lookup("tls-key"))
 }

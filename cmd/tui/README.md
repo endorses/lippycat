@@ -12,21 +12,65 @@ The TUI provides an interactive real-time packet monitoring interface with suppo
 - Visual feedback through modals and toast notifications
 - Secure TLS connections or insecure mode for development/testing
 
-## Security: TLS and Insecure Mode
+## Security: TLS Configuration
 
-**TLS (Transport Layer Security)** is enabled by default for all remote processor connections. For development and testing, you can use the `--insecure` flag to disable TLS.
+**TLS (Transport Layer Security)** can be configured for remote processor connections using either:
+1. Command-line flags (override config file)
+2. Configuration file (`~/.config/lippycat/config.yaml`)
+3. The `--insecure` flag to explicitly disable TLS for testing/development
 
-### Secure Mode (Default)
+### Configuration Options
+
+#### Command-Line Flags
 ```bash
-lc tui --remote --nodes-file nodes.yaml
+# Enable TLS with CA certificate (server verification only)
+lc tui --remote --tls --tls-ca /path/to/ca.crt
+
+# Enable TLS with mutual authentication (client cert + CA)
+lc tui --remote --tls --tls-ca /path/to/ca.crt \
+  --tls-cert /path/to/client.crt --tls-key /path/to/client.key
 ```
-- Connections use TLS encryption
+
+#### Configuration File
+```yaml
+tui:
+  tls:
+    enabled: true
+    ca_file: "/etc/lippycat/certs/ca.crt"
+    cert_file: "/etc/lippycat/certs/client.crt"  # Optional: for mutual TLS
+    key_file: "/etc/lippycat/certs/client.key"   # Optional: for mutual TLS
+```
+
+#### Flag Priority
+Command-line flags override config file settings:
+- `--tls` enables TLS (overrides config)
+- `--tls-ca <path>` sets CA certificate path
+- `--tls-cert <path>` sets client certificate path (for mutual TLS)
+- `--tls-key <path>` sets client key path (for mutual TLS)
+- `--insecure` disables TLS (overrides all TLS settings)
+
+### Secure Mode Examples
+
+**Server verification only:**
+```bash
+lc tui --remote --tls --tls-ca ca.crt
+```
+- TUI verifies processor's certificate using CA
 - Processors shown with 🔒 icon in Nodes tab
 - Connection toast: "Connected to <address>"
 
-### Insecure Mode (Testing/Development)
+**Mutual TLS (recommended for production):**
 ```bash
-lc tui --remote --nodes-file nodes.yaml --insecure
+lc tui --remote --tls --tls-ca ca.crt \
+  --tls-cert client.crt --tls-key client.key
+```
+- Both TUI and processor verify each other's certificates
+- Highest security level
+- Prevents unauthorized TUI connections
+
+### Insecure Mode (Testing/Development Only)
+```bash
+lc tui --remote --insecure
 ```
 - Connections do NOT use TLS encryption
 - Processors shown with 🚫 icon in Nodes tab

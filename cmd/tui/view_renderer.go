@@ -80,7 +80,26 @@ func (m Model) View() string {
 func (m Model) renderCaptureTab(contentHeight int) string {
 	// Check if we should display calls view or packets view
 	if m.uiState.ViewMode == "calls" {
-		// Render calls view (size is set in handleWindowSizeMsg)
+		// Render calls view with optional details panel
+		minWidthForDetails := 120 // Need enough width for call details
+		showDetails := m.uiState.CallsView.IsShowingDetails()
+		detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
+
+		if detailsVisible {
+			// Split pane layout for calls
+			detailsWidth := 79 // Call details panel width
+
+			// Calculate available width for calls table
+			tableWidth := m.uiState.Width - detailsWidth
+
+			// Render calls table and details side by side
+			callsTableView := m.uiState.CallsView.RenderTable(tableWidth, contentHeight)
+			callDetailsView := m.uiState.CallsView.RenderDetails(detailsWidth, contentHeight)
+
+			return lipgloss.JoinHorizontal(lipgloss.Top, callsTableView, callDetailsView)
+		}
+
+		// Full width calls table (size is set in handleWindowSizeMsg)
 		return m.uiState.CallsView.View()
 	}
 

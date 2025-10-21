@@ -303,7 +303,17 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 	// Context-sensitive: toggle details on Capture tab, delete node on Nodes tab
 	if m.uiState.Tabs.GetActive() == 1 { // Nodes tab
 		return m, m.handleDeleteNode()
-	} else { // Other tabs: toggle details panel
+	}
+
+	// On Capture tab: check view mode
+	if m.uiState.Tabs.GetActive() == 0 {
+		// If in calls view mode, toggle CallsView details
+		if m.uiState.ViewMode == "calls" {
+			m.uiState.CallsView.ToggleDetails()
+			return m, nil
+		}
+
+		// Otherwise, toggle packet details panel
 		m.uiState.ShowDetails = !m.uiState.ShowDetails
 		// Recalculate packet list size based on new showDetails state
 		headerHeight := 2
@@ -324,6 +334,9 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+
+	// Other tabs: no action
+	return m, nil
 }
 
 // handleToggleView toggles between different view modes

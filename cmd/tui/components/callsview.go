@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/components/nodesview"
 	"github.com/endorses/lippycat/cmd/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
 // extractSIPURI extracts the SIP URI from a header value, removing display names and parameters
@@ -93,23 +95,51 @@ type Call struct {
 
 // CallsView displays active VoIP calls
 type CallsView struct {
-	calls       []Call
-	selected    int
-	offset      int
-	width       int
-	height      int
-	theme       themes.Theme
-	showDetails bool
+	calls            []Call
+	selected         int
+	offset           int
+	width            int
+	height           int
+	theme            themes.Theme
+	showDetails      bool
+	correlatedCalls  map[string]*CorrelatedCall // Map from Call-ID to correlated call data
+	correlatedCallMu sync.RWMutex               // Protect concurrent access to correlatedCalls
+}
+
+// CorrelatedCall represents a correlated call with multiple legs
+type CorrelatedCall struct {
+	CorrelationID string
+	TagPair       [2]string
+	FromUser      string
+	ToUser        string
+	Legs          []CallLeg
+	StartTime     time.Time
+	LastSeen      time.Time
+	State         string
+}
+
+// CallLeg represents one leg of a multi-hop call
+type CallLeg struct {
+	CallID       string
+	HunterID     string
+	SrcIP        string
+	DstIP        string
+	Method       string
+	ResponseCode uint32
+	PacketCount  int
+	StartTime    time.Time
+	LastSeen     time.Time
 }
 
 // NewCallsView creates a new calls view
 func NewCallsView() CallsView {
 	return CallsView{
-		calls:       make([]Call, 0),
-		selected:    0,
-		offset:      0,
-		showDetails: false,
-		theme:       themes.Solarized(),
+		calls:           make([]Call, 0),
+		selected:        0,
+		offset:          0,
+		showDetails:     false,
+		theme:           themes.Solarized(),
+		correlatedCalls: make(map[string]*CorrelatedCall),
 	}
 }
 
@@ -177,6 +207,50 @@ func (cv *CallsView) SelectPrevious() {
 // ToggleDetails toggles the details panel
 func (cv *CallsView) ToggleDetails() {
 	cv.showDetails = !cv.showDetails
+}
+
+// IsShowingDetails returns whether the details panel is visible
+func (cv *CallsView) IsShowingDetails() bool {
+	return cv.showDetails
+}
+
+// SetCorrelatedCalls updates the correlated calls data
+func (cv *CallsView) SetCorrelatedCalls(correlatedCallsInfo []types.CorrelatedCallInfo) {
+	cv.correlatedCallMu.Lock()
+	defer cv.correlatedCallMu.Unlock()
+
+	// Import types package at the top of the file
+	// Convert types.CorrelatedCallInfo to internal CorrelatedCall
+	for _, info := range correlatedCallsInfo {
+		cc := &CorrelatedCall{
+			CorrelationID: info.CorrelationID,
+			TagPair:       info.TagPair,
+			FromUser:      info.FromUser,
+			ToUser:        info.ToUser,
+			StartTime:     info.StartTime,
+			LastSeen:      info.LastSeen,
+			State:         info.State,
+			Legs:          make([]CallLeg, len(info.Legs)),
+		}
+
+		// Convert legs
+		for i, leg := range info.Legs {
+			cc.Legs[i] = CallLeg{
+				CallID:       leg.CallID,
+				HunterID:     leg.HunterID,
+				SrcIP:        leg.SrcIP,
+				DstIP:        leg.DstIP,
+				Method:       leg.Method,
+				ResponseCode: leg.ResponseCode,
+				PacketCount:  leg.PacketCount,
+				StartTime:    leg.StartTime,
+				LastSeen:     leg.LastSeen,
+			}
+
+			// Index by Call-ID for quick lookup
+			cv.correlatedCalls[leg.CallID] = cc
+		}
+	}
 }
 
 // Update handles messages
@@ -287,17 +361,48 @@ func (cv *CallsView) PageDown() {
 	cv.adjustOffset()
 }
 
-// View renders the calls view
+// View renders the calls view (full width)
 func (cv *CallsView) View() string {
 	if len(cv.calls) == 0 {
 		return cv.renderEmpty()
 	}
 
-	if cv.showDetails && cv.GetSelected() != nil {
-		return cv.renderSplitView()
+	// Full width table
+	return cv.RenderTable(cv.width, cv.height)
+}
+
+// RenderTable renders just the calls table with specified width and height
+func (cv *CallsView) RenderTable(width, height int) string {
+	if len(cv.calls) == 0 {
+		style := lipgloss.NewStyle().
+			Foreground(cv.theme.StatusBarFg).
+			Italic(true).
+			Width(width).
+			Height(height).
+			Align(lipgloss.Center, lipgloss.Center)
+
+		return style.Render("No active VoIP calls")
 	}
 
-	return cv.renderTable()
+	return cv.renderTableWithSize(width, height)
+}
+
+// RenderDetails renders the call details panel
+func (cv *CallsView) RenderDetails(width, height int) string {
+	selectedCall := cv.GetSelected()
+	if selectedCall == nil {
+		// No call selected
+		style := lipgloss.NewStyle().
+			Foreground(cv.theme.StatusBarFg).
+			Italic(true).
+			Width(width).
+			Height(height).
+			Align(lipgloss.Center, lipgloss.Center)
+
+		return style.Render("Select a call to view details")
+	}
+
+	return cv.renderCallDetails(selectedCall, width, height)
 }
 
 // renderEmpty shows a message when no calls are present
@@ -312,17 +417,16 @@ func (cv *CallsView) renderEmpty() string {
 	return style.Render("No active VoIP calls")
 }
 
-// renderTable shows the calls table
-func (cv *CallsView) renderTable() string {
+// renderTableWithSize shows the calls table with specified dimensions
+func (cv *CallsView) renderTableWithSize(width, height int) string {
 	// Calculate responsive column widths based on available width
 	// Match packet list calculation exactly
-	// Border width is adaptive: cv.width - 2 when details hidden, cv.width - 4 when details visible
+	// Border width is adaptive: width - 2 when details hidden, width - 4 when details visible
 	// Content width = box_width - padding - border
-	// Details hidden: (cv.width - 2) - 4 (padding) - 2 (border) = cv.width - 8
-	// Details visible: (cv.width - 4) - 4 (padding) - 2 (border) = cv.width - 10
+	// Details hidden: (width - 2) - 4 (padding) - 2 (border) = width - 8
+	// Details visible: (width - 4) - 4 (padding) - 2 (border) = width - 10
 	// We add 1 char back for better spacing
-	// CallsView is always full-width (no split view), so always use the "details hidden" calculation
-	availableWidth := cv.width - 6
+	availableWidth := width - 6
 
 	// Define column width ranges
 	const (
@@ -452,9 +556,10 @@ func (cv *CallsView) renderTable() string {
 		qualityWidth, truncateCallsView("Quality", qualityWidth),
 		nodeWidth, truncateCallsView("Node", nodeWidth))
 
-	// Border width for full-width mode (no split view)
-	// Match packet list: width - 2 when details hidden
-	borderWidth := cv.width - 2
+	// Border width depends on whether we're in split view or full width
+	// Full width: width - 2
+	// Split view: use passed width directly (already accounts for split)
+	borderWidth := width - 2
 
 	borderStyle := lipgloss.NewStyle().
 		Foreground(cv.theme.BorderColor).
@@ -467,7 +572,7 @@ func (cv *CallsView) renderTable() string {
 	content.WriteString("\n")
 
 	// Build rows
-	contentHeight := cv.height - 3    // Account for border overhead
+	contentHeight := height - 3       // Account for border overhead
 	visibleLines := contentHeight - 2 // Subtract header lines
 	if visibleLines < 1 {
 		visibleLines = 1
@@ -597,11 +702,129 @@ func truncateCallsView(s string, width int) string {
 	return s[:width-3] + "..."
 }
 
-// renderSplitView shows table + details
-func (cv *CallsView) renderSplitView() string {
-	// For now, just show the table
-	// TODO: Add split view with call details
-	return cv.renderTable()
+// renderCallDetails shows call details panel with correlation information
+func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) string {
+
+	// Look up correlated call data
+	cv.correlatedCallMu.RLock()
+	correlatedCall, hasCorrelation := cv.correlatedCalls[selectedCall.CallID]
+	cv.correlatedCallMu.RUnlock()
+
+	// Title style
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(cv.theme.InfoColor).
+		MarginBottom(1)
+
+	// Section header style
+	sectionHeaderStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(cv.theme.SuccessColor)
+
+	// Build details content
+	var content strings.Builder
+
+	// Call Details section
+	content.WriteString(titleStyle.Render("📞 Call Details"))
+	content.WriteString("\n")
+	content.WriteString(fmt.Sprintf("Call-ID: %s\n", selectedCall.CallID))
+	content.WriteString(fmt.Sprintf("From: %s\n", extractSIPURI(selectedCall.From)))
+	content.WriteString(fmt.Sprintf("To: %s\n", extractSIPURI(selectedCall.To)))
+	content.WriteString(fmt.Sprintf("State: %s\n", selectedCall.State.String()))
+
+	// Calculate duration
+	duration := selectedCall.Duration
+	if selectedCall.State == CallStateActive {
+		duration = time.Since(selectedCall.StartTime)
+	}
+	content.WriteString(fmt.Sprintf("Duration: %s\n", nodesview.FormatDuration(int64(duration))))
+
+	if selectedCall.Codec != "" {
+		content.WriteString(fmt.Sprintf("Codec: %s\n", selectedCall.Codec))
+	}
+	if selectedCall.MOS > 0 {
+		content.WriteString(fmt.Sprintf("Quality (MOS): %.1f\n", selectedCall.MOS))
+	}
+
+	// Correlation section (if available)
+	if hasCorrelation && correlatedCall != nil && len(correlatedCall.Legs) > 1 {
+		content.WriteString("\n")
+		content.WriteString(sectionHeaderStyle.Render(fmt.Sprintf("Correlation (%d legs across B2BUA hops):", len(correlatedCall.Legs))))
+		content.WriteString("\n\n")
+
+		// Sort legs by start time for chronological display
+		legs := make([]CallLeg, len(correlatedCall.Legs))
+		copy(legs, correlatedCall.Legs)
+		sort.Slice(legs, func(i, j int) bool {
+			return legs[i].StartTime.Before(legs[j].StartTime)
+		})
+
+		// Render each leg
+		for i, leg := range legs {
+			legStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(cv.theme.BorderColor).
+				Padding(0, 1).
+				MarginBottom(1).
+				Width(width - 6)
+
+			var legContent strings.Builder
+			legContent.WriteString(fmt.Sprintf("Leg %d: %s\n", i+1, leg.HunterID))
+			legContent.WriteString(fmt.Sprintf("  Call-ID: %s\n", leg.CallID))
+			legContent.WriteString(fmt.Sprintf("  Route: %s → %s\n", leg.SrcIP, leg.DstIP))
+			legContent.WriteString(fmt.Sprintf("  Packets: %d\n", leg.PacketCount))
+
+			// Calculate timing delta from first leg
+			if i == 0 {
+				legContent.WriteString(fmt.Sprintf("  Started: %s\n", leg.StartTime.Format("15:04:05.000")))
+			} else {
+				delta := leg.StartTime.Sub(legs[0].StartTime)
+				legContent.WriteString(fmt.Sprintf("  Started: %s (+%s)\n",
+					leg.StartTime.Format("15:04:05.000"),
+					formatMilliseconds(delta)))
+			}
+
+			if leg.Method != "" {
+				legContent.WriteString(fmt.Sprintf("  Method: %s\n", leg.Method))
+			}
+			if leg.ResponseCode > 0 {
+				legContent.WriteString(fmt.Sprintf("  Response: %d\n", leg.ResponseCode))
+			}
+
+			content.WriteString(legStyle.Render(legContent.String()))
+		}
+
+		// Add hint about graph view (for future implementation)
+		hintStyle := lipgloss.NewStyle().
+			Foreground(cv.theme.StatusBarFg).
+			Italic(true)
+		content.WriteString("\n")
+		content.WriteString(hintStyle.Render("Press 'g' to view call topology graph on Nodes tab (coming soon)"))
+	} else if hasCorrelation && correlatedCall != nil {
+		content.WriteString("\n")
+		content.WriteString(sectionHeaderStyle.Render("Correlation:"))
+		content.WriteString("\n")
+		content.WriteString("Single leg call (no B2BUA hops detected)\n")
+	}
+
+	// Wrap in border
+	borderStyle := lipgloss.NewStyle().
+		Foreground(cv.theme.BorderColor).
+		Border(lipgloss.RoundedBorder()).
+		Padding(1, 2).
+		Width(width - 2).
+		Height(height - 2)
+
+	return borderStyle.Render(content.String())
+}
+
+// formatMilliseconds formats a duration as milliseconds with unit
+func formatMilliseconds(d time.Duration) string {
+	ms := d.Milliseconds()
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return fmt.Sprintf("%.3fs", float64(ms)/1000.0)
 }
 
 // Note: TruncateString() and FormatDuration() helper functions are now

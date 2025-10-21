@@ -1104,6 +1104,76 @@ func (c *Client) maybeNotifyCallUpdates() {
 	}
 }
 
+// SubscribeCorrelatedCalls subscribes to correlated call updates from processor
+func (c *Client) SubscribeCorrelatedCalls() error {
+	// Only works for processors
+	if c.nodeType == NodeTypeHunter {
+		return fmt.Errorf("correlated calls are only available from processor nodes")
+	}
+
+	go func() {
+		// Subscribe to correlated calls stream
+		stream, err := c.dataClient.SubscribeCorrelatedCalls(c.ctx, &data.SubscribeRequest{})
+		if err != nil {
+			if c.handler != nil {
+				c.handler.OnDisconnect(c.addr, fmt.Errorf("failed to subscribe to correlated calls: %w", err))
+			}
+			return
+		}
+
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			default:
+				update, err := stream.Recv()
+				if err != nil {
+					if c.ctx.Err() == nil {
+						if c.handler != nil {
+							c.handler.OnDisconnect(c.addr, fmt.Errorf("correlated calls stream error: %w", err))
+						}
+					}
+					return
+				}
+
+				// Convert protobuf to types.CorrelatedCallInfo
+				correlatedCall := types.CorrelatedCallInfo{
+					CorrelationID: update.CorrelationId,
+					TagPair:       [2]string{update.TagPair[0], update.TagPair[1]},
+					FromUser:      update.FromUser,
+					ToUser:        update.ToUser,
+					StartTime:     time.Unix(0, update.StartTimeNs),
+					LastSeen:      time.Unix(0, update.LastSeenNs),
+					State:         update.State,
+				}
+
+				// Convert legs
+				correlatedCall.Legs = make([]types.CallLegInfo, len(update.Legs))
+				for i, leg := range update.Legs {
+					correlatedCall.Legs[i] = types.CallLegInfo{
+						CallID:       leg.CallId,
+						HunterID:     leg.HunterId,
+						SrcIP:        leg.SrcIp,
+						DstIP:        leg.DstIp,
+						Method:       leg.Method,
+						ResponseCode: leg.ResponseCode,
+						PacketCount:  int(leg.PacketCount),
+						StartTime:    time.Unix(0, leg.StartTimeNs),
+						LastSeen:     time.Unix(0, leg.LastSeenNs),
+					}
+				}
+
+				// Notify handler
+				if c.handler != nil {
+					c.handler.OnCorrelatedCallUpdate([]types.CorrelatedCallInfo{correlatedCall})
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
 // contains checks if a string slice contains a specific string
 func contains(slice []string, item string) bool {
 	for _, s := range slice {

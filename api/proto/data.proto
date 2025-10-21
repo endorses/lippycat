@@ -14,6 +14,10 @@ service DataService {
     // SubscribePackets allows monitoring clients (like TUI) to receive packet stream
     // Monitoring Client ← Processor/Hunter: Packet batches
     rpc SubscribePackets(SubscribeRequest) returns (stream PacketBatch);
+
+    // SubscribeCorrelatedCalls allows monitoring clients to receive call correlation updates
+    // Monitoring Client ← Processor: Correlated call updates
+    rpc SubscribeCorrelatedCalls(SubscribeRequest) returns (stream CorrelatedCallUpdate);
 }
 
 // PacketBatch contains multiple packets captured by a hunter
@@ -198,4 +202,61 @@ message SubscribeRequest {
     // Explicitly indicates whether hunter_ids filter is set
     // This distinguishes between "not set" (subscribe to all) and "empty list" (subscribe to none)
     bool has_hunter_filter = 4;
+}
+
+// CorrelatedCallUpdate contains information about a call correlated across B2BUA boundaries
+message CorrelatedCallUpdate {
+    // Correlation ID (hash of normalized tag pair)
+    string correlation_id = 1;
+
+    // Normalized tag pair [tag1, tag2] (sorted alphabetically)
+    repeated string tag_pair = 2;
+
+    // From user (participant A)
+    string from_user = 3;
+
+    // To user (participant B)
+    string to_user = 4;
+
+    // Call legs (one per B2BUA hop)
+    repeated CallLegInfo legs = 5;
+
+    // Start time (Unix nanoseconds)
+    int64 start_time_ns = 6;
+
+    // Last seen time (Unix nanoseconds)
+    int64 last_seen_ns = 7;
+
+    // Call state
+    string state = 8;
+}
+
+// CallLegInfo represents one leg of a multi-hop call
+message CallLegInfo {
+    // Call-ID for this leg
+    string call_id = 1;
+
+    // Hunter ID where this leg was observed
+    string hunter_id = 2;
+
+    // Source IP address
+    string src_ip = 3;
+
+    // Destination IP address
+    string dst_ip = 4;
+
+    // Last SIP method seen
+    string method = 5;
+
+    // Last response code seen
+    uint32 response_code = 6;
+
+    // Packet count for this leg
+    int32 packet_count = 7;
+
+    // Start time for this leg (Unix nanoseconds)
+    int64 start_time_ns = 8;
+
+    // Last seen time for this leg (Unix nanoseconds)
+    int64 last_seen_ns = 9;
 }

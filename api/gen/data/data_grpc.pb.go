@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v6.32.1
-// source: api/proto/data.proto
+// source: data.proto
 
 package data
 
@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	DataService_StreamPackets_FullMethodName    = "/lippycat.data.DataService/StreamPackets"
-	DataService_SubscribePackets_FullMethodName = "/lippycat.data.DataService/SubscribePackets"
+	DataService_StreamPackets_FullMethodName            = "/lippycat.data.DataService/StreamPackets"
+	DataService_SubscribePackets_FullMethodName         = "/lippycat.data.DataService/SubscribePackets"
+	DataService_SubscribeCorrelatedCalls_FullMethodName = "/lippycat.data.DataService/SubscribeCorrelatedCalls"
 )
 
 // DataServiceClient is the client API for DataService service.
@@ -36,6 +37,9 @@ type DataServiceClient interface {
 	// SubscribePackets allows monitoring clients (like TUI) to receive packet stream
 	// Monitoring Client ← Processor/Hunter: Packet batches
 	SubscribePackets(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PacketBatch], error)
+	// SubscribeCorrelatedCalls allows monitoring clients to receive call correlation updates
+	// Monitoring Client ← Processor: Correlated call updates
+	SubscribeCorrelatedCalls(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CorrelatedCallUpdate], error)
 }
 
 type dataServiceClient struct {
@@ -78,6 +82,25 @@ func (c *dataServiceClient) SubscribePackets(ctx context.Context, in *SubscribeR
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DataService_SubscribePacketsClient = grpc.ServerStreamingClient[PacketBatch]
 
+func (c *dataServiceClient) SubscribeCorrelatedCalls(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CorrelatedCallUpdate], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DataService_ServiceDesc.Streams[2], DataService_SubscribeCorrelatedCalls_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SubscribeRequest, CorrelatedCallUpdate]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DataService_SubscribeCorrelatedCallsClient = grpc.ServerStreamingClient[CorrelatedCallUpdate]
+
 // DataServiceServer is the server API for DataService service.
 // All implementations must embed UnimplementedDataServiceServer
 // for forward compatibility.
@@ -91,6 +114,9 @@ type DataServiceServer interface {
 	// SubscribePackets allows monitoring clients (like TUI) to receive packet stream
 	// Monitoring Client ← Processor/Hunter: Packet batches
 	SubscribePackets(*SubscribeRequest, grpc.ServerStreamingServer[PacketBatch]) error
+	// SubscribeCorrelatedCalls allows monitoring clients to receive call correlation updates
+	// Monitoring Client ← Processor: Correlated call updates
+	SubscribeCorrelatedCalls(*SubscribeRequest, grpc.ServerStreamingServer[CorrelatedCallUpdate]) error
 	mustEmbedUnimplementedDataServiceServer()
 }
 
@@ -106,6 +132,9 @@ func (UnimplementedDataServiceServer) StreamPackets(grpc.BidiStreamingServer[Pac
 }
 func (UnimplementedDataServiceServer) SubscribePackets(*SubscribeRequest, grpc.ServerStreamingServer[PacketBatch]) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribePackets not implemented")
+}
+func (UnimplementedDataServiceServer) SubscribeCorrelatedCalls(*SubscribeRequest, grpc.ServerStreamingServer[CorrelatedCallUpdate]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeCorrelatedCalls not implemented")
 }
 func (UnimplementedDataServiceServer) mustEmbedUnimplementedDataServiceServer() {}
 func (UnimplementedDataServiceServer) testEmbeddedByValue()                     {}
@@ -146,6 +175,17 @@ func _DataService_SubscribePackets_Handler(srv interface{}, stream grpc.ServerSt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type DataService_SubscribePacketsServer = grpc.ServerStreamingServer[PacketBatch]
 
+func _DataService_SubscribeCorrelatedCalls_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(SubscribeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DataServiceServer).SubscribeCorrelatedCalls(m, &grpc.GenericServerStream[SubscribeRequest, CorrelatedCallUpdate]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DataService_SubscribeCorrelatedCallsServer = grpc.ServerStreamingServer[CorrelatedCallUpdate]
+
 // DataService_ServiceDesc is the grpc.ServiceDesc for DataService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -165,6 +205,11 @@ var DataService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _DataService_SubscribePackets_Handler,
 			ServerStreams: true,
 		},
+		{
+			StreamName:    "SubscribeCorrelatedCalls",
+			Handler:       _DataService_SubscribeCorrelatedCalls_Handler,
+			ServerStreams: true,
+		},
 	},
-	Metadata: "api/proto/data.proto",
+	Metadata: "data.proto",
 }

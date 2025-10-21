@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.9
 // 	protoc        v6.32.1
-// source: api/proto/data.proto
+// source: data.proto
 
 package data
 
@@ -62,11 +62,11 @@ func (x FlowControl) String() string {
 }
 
 func (FlowControl) Descriptor() protoreflect.EnumDescriptor {
-	return file_api_proto_data_proto_enumTypes[0].Descriptor()
+	return file_data_proto_enumTypes[0].Descriptor()
 }
 
 func (FlowControl) Type() protoreflect.EnumType {
-	return &file_api_proto_data_proto_enumTypes[0]
+	return &file_data_proto_enumTypes[0]
 }
 
 func (x FlowControl) Number() protoreflect.EnumNumber {
@@ -75,7 +75,7 @@ func (x FlowControl) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FlowControl.Descriptor instead.
 func (FlowControl) EnumDescriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{0}
+	return file_data_proto_rawDescGZIP(), []int{0}
 }
 
 // PacketBatch contains multiple packets captured by a hunter
@@ -97,7 +97,7 @@ type PacketBatch struct {
 
 func (x *PacketBatch) Reset() {
 	*x = PacketBatch{}
-	mi := &file_api_proto_data_proto_msgTypes[0]
+	mi := &file_data_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -109,7 +109,7 @@ func (x *PacketBatch) String() string {
 func (*PacketBatch) ProtoMessage() {}
 
 func (x *PacketBatch) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[0]
+	mi := &file_data_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -122,7 +122,7 @@ func (x *PacketBatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PacketBatch.ProtoReflect.Descriptor instead.
 func (*PacketBatch) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{0}
+	return file_data_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *PacketBatch) GetHunterId() string {
@@ -183,7 +183,7 @@ type CapturedPacket struct {
 
 func (x *CapturedPacket) Reset() {
 	*x = CapturedPacket{}
-	mi := &file_api_proto_data_proto_msgTypes[1]
+	mi := &file_data_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -195,7 +195,7 @@ func (x *CapturedPacket) String() string {
 func (*CapturedPacket) ProtoMessage() {}
 
 func (x *CapturedPacket) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[1]
+	mi := &file_data_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -208,7 +208,7 @@ func (x *CapturedPacket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CapturedPacket.ProtoReflect.Descriptor instead.
 func (*CapturedPacket) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{1}
+	return file_data_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CapturedPacket) GetData() []byte {
@@ -289,7 +289,7 @@ type PacketMetadata struct {
 
 func (x *PacketMetadata) Reset() {
 	*x = PacketMetadata{}
-	mi := &file_api_proto_data_proto_msgTypes[2]
+	mi := &file_data_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -301,7 +301,7 @@ func (x *PacketMetadata) String() string {
 func (*PacketMetadata) ProtoMessage() {}
 
 func (x *PacketMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[2]
+	mi := &file_data_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -314,7 +314,7 @@ func (x *PacketMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PacketMetadata.ProtoReflect.Descriptor instead.
 func (*PacketMetadata) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{2}
+	return file_data_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *PacketMetadata) GetProtocol() string {
@@ -416,7 +416,7 @@ type SIPMetadata struct {
 
 func (x *SIPMetadata) Reset() {
 	*x = SIPMetadata{}
-	mi := &file_api_proto_data_proto_msgTypes[3]
+	mi := &file_data_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +428,7 @@ func (x *SIPMetadata) String() string {
 func (*SIPMetadata) ProtoMessage() {}
 
 func (x *SIPMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[3]
+	mi := &file_data_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +441,7 @@ func (x *SIPMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SIPMetadata.ProtoReflect.Descriptor instead.
 func (*SIPMetadata) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{3}
+	return file_data_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SIPMetadata) GetMethod() string {
@@ -531,7 +531,7 @@ type RTPMetadata struct {
 
 func (x *RTPMetadata) Reset() {
 	*x = RTPMetadata{}
-	mi := &file_api_proto_data_proto_msgTypes[4]
+	mi := &file_data_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -543,7 +543,7 @@ func (x *RTPMetadata) String() string {
 func (*RTPMetadata) ProtoMessage() {}
 
 func (x *RTPMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[4]
+	mi := &file_data_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -556,7 +556,7 @@ func (x *RTPMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RTPMetadata.ProtoReflect.Descriptor instead.
 func (*RTPMetadata) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{4}
+	return file_data_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RTPMetadata) GetSsrc() uint32 {
@@ -604,7 +604,7 @@ type BatchStats struct {
 
 func (x *BatchStats) Reset() {
 	*x = BatchStats{}
-	mi := &file_api_proto_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +616,7 @@ func (x *BatchStats) String() string {
 func (*BatchStats) ProtoMessage() {}
 
 func (x *BatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +629,7 @@ func (x *BatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchStats.ProtoReflect.Descriptor instead.
 func (*BatchStats) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{5}
+	return file_data_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *BatchStats) GetTotalCaptured() uint64 {
@@ -675,7 +675,7 @@ type StreamControl struct {
 
 func (x *StreamControl) Reset() {
 	*x = StreamControl{}
-	mi := &file_api_proto_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +687,7 @@ func (x *StreamControl) String() string {
 func (*StreamControl) ProtoMessage() {}
 
 func (x *StreamControl) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +700,7 @@ func (x *StreamControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamControl.ProtoReflect.Descriptor instead.
 func (*StreamControl) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{6}
+	return file_data_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *StreamControl) GetAckSequence() uint64 {
@@ -745,7 +745,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_api_proto_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -757,7 +757,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_proto_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -770,7 +770,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_api_proto_data_proto_rawDescGZIP(), []int{7}
+	return file_data_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SubscribeRequest) GetHunterIds() []string {
@@ -801,11 +801,239 @@ func (x *SubscribeRequest) GetHasHunterFilter() bool {
 	return false
 }
 
-var File_api_proto_data_proto protoreflect.FileDescriptor
+// CorrelatedCallUpdate contains information about a call correlated across B2BUA boundaries
+type CorrelatedCallUpdate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Correlation ID (hash of normalized tag pair)
+	CorrelationId string `protobuf:"bytes,1,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
+	// Normalized tag pair [tag1, tag2] (sorted alphabetically)
+	TagPair []string `protobuf:"bytes,2,rep,name=tag_pair,json=tagPair,proto3" json:"tag_pair,omitempty"`
+	// From user (participant A)
+	FromUser string `protobuf:"bytes,3,opt,name=from_user,json=fromUser,proto3" json:"from_user,omitempty"`
+	// To user (participant B)
+	ToUser string `protobuf:"bytes,4,opt,name=to_user,json=toUser,proto3" json:"to_user,omitempty"`
+	// Call legs (one per B2BUA hop)
+	Legs []*CallLegInfo `protobuf:"bytes,5,rep,name=legs,proto3" json:"legs,omitempty"`
+	// Start time (Unix nanoseconds)
+	StartTimeNs int64 `protobuf:"varint,6,opt,name=start_time_ns,json=startTimeNs,proto3" json:"start_time_ns,omitempty"`
+	// Last seen time (Unix nanoseconds)
+	LastSeenNs int64 `protobuf:"varint,7,opt,name=last_seen_ns,json=lastSeenNs,proto3" json:"last_seen_ns,omitempty"`
+	// Call state
+	State         string `protobuf:"bytes,8,opt,name=state,proto3" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_api_proto_data_proto_rawDesc = "" +
+func (x *CorrelatedCallUpdate) Reset() {
+	*x = CorrelatedCallUpdate{}
+	mi := &file_data_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CorrelatedCallUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CorrelatedCallUpdate) ProtoMessage() {}
+
+func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CorrelatedCallUpdate.ProtoReflect.Descriptor instead.
+func (*CorrelatedCallUpdate) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *CorrelatedCallUpdate) GetCorrelationId() string {
+	if x != nil {
+		return x.CorrelationId
+	}
+	return ""
+}
+
+func (x *CorrelatedCallUpdate) GetTagPair() []string {
+	if x != nil {
+		return x.TagPair
+	}
+	return nil
+}
+
+func (x *CorrelatedCallUpdate) GetFromUser() string {
+	if x != nil {
+		return x.FromUser
+	}
+	return ""
+}
+
+func (x *CorrelatedCallUpdate) GetToUser() string {
+	if x != nil {
+		return x.ToUser
+	}
+	return ""
+}
+
+func (x *CorrelatedCallUpdate) GetLegs() []*CallLegInfo {
+	if x != nil {
+		return x.Legs
+	}
+	return nil
+}
+
+func (x *CorrelatedCallUpdate) GetStartTimeNs() int64 {
+	if x != nil {
+		return x.StartTimeNs
+	}
+	return 0
+}
+
+func (x *CorrelatedCallUpdate) GetLastSeenNs() int64 {
+	if x != nil {
+		return x.LastSeenNs
+	}
+	return 0
+}
+
+func (x *CorrelatedCallUpdate) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+// CallLegInfo represents one leg of a multi-hop call
+type CallLegInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Call-ID for this leg
+	CallId string `protobuf:"bytes,1,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	// Hunter ID where this leg was observed
+	HunterId string `protobuf:"bytes,2,opt,name=hunter_id,json=hunterId,proto3" json:"hunter_id,omitempty"`
+	// Source IP address
+	SrcIp string `protobuf:"bytes,3,opt,name=src_ip,json=srcIp,proto3" json:"src_ip,omitempty"`
+	// Destination IP address
+	DstIp string `protobuf:"bytes,4,opt,name=dst_ip,json=dstIp,proto3" json:"dst_ip,omitempty"`
+	// Last SIP method seen
+	Method string `protobuf:"bytes,5,opt,name=method,proto3" json:"method,omitempty"`
+	// Last response code seen
+	ResponseCode uint32 `protobuf:"varint,6,opt,name=response_code,json=responseCode,proto3" json:"response_code,omitempty"`
+	// Packet count for this leg
+	PacketCount int32 `protobuf:"varint,7,opt,name=packet_count,json=packetCount,proto3" json:"packet_count,omitempty"`
+	// Start time for this leg (Unix nanoseconds)
+	StartTimeNs int64 `protobuf:"varint,8,opt,name=start_time_ns,json=startTimeNs,proto3" json:"start_time_ns,omitempty"`
+	// Last seen time for this leg (Unix nanoseconds)
+	LastSeenNs    int64 `protobuf:"varint,9,opt,name=last_seen_ns,json=lastSeenNs,proto3" json:"last_seen_ns,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CallLegInfo) Reset() {
+	*x = CallLegInfo{}
+	mi := &file_data_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CallLegInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CallLegInfo) ProtoMessage() {}
+
+func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CallLegInfo.ProtoReflect.Descriptor instead.
+func (*CallLegInfo) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *CallLegInfo) GetCallId() string {
+	if x != nil {
+		return x.CallId
+	}
+	return ""
+}
+
+func (x *CallLegInfo) GetHunterId() string {
+	if x != nil {
+		return x.HunterId
+	}
+	return ""
+}
+
+func (x *CallLegInfo) GetSrcIp() string {
+	if x != nil {
+		return x.SrcIp
+	}
+	return ""
+}
+
+func (x *CallLegInfo) GetDstIp() string {
+	if x != nil {
+		return x.DstIp
+	}
+	return ""
+}
+
+func (x *CallLegInfo) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *CallLegInfo) GetResponseCode() uint32 {
+	if x != nil {
+		return x.ResponseCode
+	}
+	return 0
+}
+
+func (x *CallLegInfo) GetPacketCount() int32 {
+	if x != nil {
+		return x.PacketCount
+	}
+	return 0
+}
+
+func (x *CallLegInfo) GetStartTimeNs() int64 {
+	if x != nil {
+		return x.StartTimeNs
+	}
+	return 0
+}
+
+func (x *CallLegInfo) GetLastSeenNs() int64 {
+	if x != nil {
+		return x.LastSeenNs
+	}
+	return 0
+}
+
+var File_data_proto protoreflect.FileDescriptor
+
+const file_data_proto_rawDesc = "" +
 	"\n" +
-	"\x14api/proto/data.proto\x12\rlippycat.data\"\xd3\x01\n" +
+	"\n" +
+	"data.proto\x12\rlippycat.data\"\xd3\x01\n" +
 	"\vPacketBatch\x12\x1b\n" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
@@ -868,83 +1096,110 @@ const file_api_proto_data_proto_rawDesc = "" +
 	"\n" +
 	"bpf_filter\x18\x02 \x01(\tR\tbpfFilter\x12\x1b\n" +
 	"\tclient_id\x18\x03 \x01(\tR\bclientId\x12*\n" +
-	"\x11has_hunter_filter\x18\x04 \x01(\bR\x0fhasHunterFilter*P\n" +
+	"\x11has_hunter_filter\x18\x04 \x01(\bR\x0fhasHunterFilter\"\x9a\x02\n" +
+	"\x14CorrelatedCallUpdate\x12%\n" +
+	"\x0ecorrelation_id\x18\x01 \x01(\tR\rcorrelationId\x12\x19\n" +
+	"\btag_pair\x18\x02 \x03(\tR\atagPair\x12\x1b\n" +
+	"\tfrom_user\x18\x03 \x01(\tR\bfromUser\x12\x17\n" +
+	"\ato_user\x18\x04 \x01(\tR\x06toUser\x12.\n" +
+	"\x04legs\x18\x05 \x03(\v2\x1a.lippycat.data.CallLegInfoR\x04legs\x12\"\n" +
+	"\rstart_time_ns\x18\x06 \x01(\x03R\vstartTimeNs\x12 \n" +
+	"\flast_seen_ns\x18\a \x01(\x03R\n" +
+	"lastSeenNs\x12\x14\n" +
+	"\x05state\x18\b \x01(\tR\x05state\"\x97\x02\n" +
+	"\vCallLegInfo\x12\x17\n" +
+	"\acall_id\x18\x01 \x01(\tR\x06callId\x12\x1b\n" +
+	"\thunter_id\x18\x02 \x01(\tR\bhunterId\x12\x15\n" +
+	"\x06src_ip\x18\x03 \x01(\tR\x05srcIp\x12\x15\n" +
+	"\x06dst_ip\x18\x04 \x01(\tR\x05dstIp\x12\x16\n" +
+	"\x06method\x18\x05 \x01(\tR\x06method\x12#\n" +
+	"\rresponse_code\x18\x06 \x01(\rR\fresponseCode\x12!\n" +
+	"\fpacket_count\x18\a \x01(\x05R\vpacketCount\x12\"\n" +
+	"\rstart_time_ns\x18\b \x01(\x03R\vstartTimeNs\x12 \n" +
+	"\flast_seen_ns\x18\t \x01(\x03R\n" +
+	"lastSeenNs*P\n" +
 	"\vFlowControl\x12\x11\n" +
 	"\rFLOW_CONTINUE\x10\x00\x12\r\n" +
 	"\tFLOW_SLOW\x10\x01\x12\x0e\n" +
 	"\n" +
 	"FLOW_PAUSE\x10\x02\x12\x0f\n" +
-	"\vFLOW_RESUME\x10\x032\xaf\x01\n" +
+	"\vFLOW_RESUME\x10\x032\x93\x02\n" +
 	"\vDataService\x12M\n" +
 	"\rStreamPackets\x12\x1a.lippycat.data.PacketBatch\x1a\x1c.lippycat.data.StreamControl(\x010\x01\x12Q\n" +
-	"\x10SubscribePackets\x12\x1f.lippycat.data.SubscribeRequest\x1a\x1a.lippycat.data.PacketBatch0\x01B+Z)github.com/endorses/lippycat/api/gen/datab\x06proto3"
+	"\x10SubscribePackets\x12\x1f.lippycat.data.SubscribeRequest\x1a\x1a.lippycat.data.PacketBatch0\x01\x12b\n" +
+	"\x18SubscribeCorrelatedCalls\x12\x1f.lippycat.data.SubscribeRequest\x1a#.lippycat.data.CorrelatedCallUpdate0\x01B+Z)github.com/endorses/lippycat/api/gen/datab\x06proto3"
 
 var (
-	file_api_proto_data_proto_rawDescOnce sync.Once
-	file_api_proto_data_proto_rawDescData []byte
+	file_data_proto_rawDescOnce sync.Once
+	file_data_proto_rawDescData []byte
 )
 
-func file_api_proto_data_proto_rawDescGZIP() []byte {
-	file_api_proto_data_proto_rawDescOnce.Do(func() {
-		file_api_proto_data_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_api_proto_data_proto_rawDesc), len(file_api_proto_data_proto_rawDesc)))
+func file_data_proto_rawDescGZIP() []byte {
+	file_data_proto_rawDescOnce.Do(func() {
+		file_data_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)))
 	})
-	return file_api_proto_data_proto_rawDescData
+	return file_data_proto_rawDescData
 }
 
-var file_api_proto_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_proto_data_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
-var file_api_proto_data_proto_goTypes = []any{
-	(FlowControl)(0),         // 0: lippycat.data.FlowControl
-	(*PacketBatch)(nil),      // 1: lippycat.data.PacketBatch
-	(*CapturedPacket)(nil),   // 2: lippycat.data.CapturedPacket
-	(*PacketMetadata)(nil),   // 3: lippycat.data.PacketMetadata
-	(*SIPMetadata)(nil),      // 4: lippycat.data.SIPMetadata
-	(*RTPMetadata)(nil),      // 5: lippycat.data.RTPMetadata
-	(*BatchStats)(nil),       // 6: lippycat.data.BatchStats
-	(*StreamControl)(nil),    // 7: lippycat.data.StreamControl
-	(*SubscribeRequest)(nil), // 8: lippycat.data.SubscribeRequest
-	nil,                      // 9: lippycat.data.PacketMetadata.DetailsEntry
+var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_data_proto_goTypes = []any{
+	(FlowControl)(0),             // 0: lippycat.data.FlowControl
+	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
+	(*CapturedPacket)(nil),       // 2: lippycat.data.CapturedPacket
+	(*PacketMetadata)(nil),       // 3: lippycat.data.PacketMetadata
+	(*SIPMetadata)(nil),          // 4: lippycat.data.SIPMetadata
+	(*RTPMetadata)(nil),          // 5: lippycat.data.RTPMetadata
+	(*BatchStats)(nil),           // 6: lippycat.data.BatchStats
+	(*StreamControl)(nil),        // 7: lippycat.data.StreamControl
+	(*SubscribeRequest)(nil),     // 8: lippycat.data.SubscribeRequest
+	(*CorrelatedCallUpdate)(nil), // 9: lippycat.data.CorrelatedCallUpdate
+	(*CallLegInfo)(nil),          // 10: lippycat.data.CallLegInfo
+	nil,                          // 11: lippycat.data.PacketMetadata.DetailsEntry
 }
-var file_api_proto_data_proto_depIdxs = []int32{
-	2, // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
-	6, // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
-	3, // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
-	4, // 3: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
-	5, // 4: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	9, // 5: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	0, // 6: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	1, // 7: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	8, // 8: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	7, // 9: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1, // 10: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	9, // [9:11] is the sub-list for method output_type
-	7, // [7:9] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+var file_data_proto_depIdxs = []int32{
+	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
+	6,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
+	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
+	4,  // 3: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
+	5,  // 4: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
+	11, // 5: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	0,  // 6: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	10, // 7: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	1,  // 8: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	8,  // 9: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	8,  // 10: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	7,  // 11: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	1,  // 12: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	9,  // 13: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	11, // [11:14] is the sub-list for method output_type
+	8,  // [8:11] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
-func init() { file_api_proto_data_proto_init() }
-func file_api_proto_data_proto_init() {
-	if File_api_proto_data_proto != nil {
+func init() { file_data_proto_init() }
+func file_data_proto_init() {
+	if File_data_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_proto_data_proto_rawDesc), len(file_api_proto_data_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_api_proto_data_proto_goTypes,
-		DependencyIndexes: file_api_proto_data_proto_depIdxs,
-		EnumInfos:         file_api_proto_data_proto_enumTypes,
-		MessageInfos:      file_api_proto_data_proto_msgTypes,
+		GoTypes:           file_data_proto_goTypes,
+		DependencyIndexes: file_data_proto_depIdxs,
+		EnumInfos:         file_data_proto_enumTypes,
+		MessageInfos:      file_data_proto_msgTypes,
 	}.Build()
-	File_api_proto_data_proto = out.File
-	file_api_proto_data_proto_goTypes = nil
-	file_api_proto_data_proto_depIdxs = nil
+	File_data_proto = out.File
+	file_data_proto_goTypes = nil
+	file_data_proto_depIdxs = nil
 }

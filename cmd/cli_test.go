@@ -170,7 +170,7 @@ func TestInitConfig(t *testing.T) {
 func TestCommandStructure(t *testing.T) {
 	// Test the overall command structure
 	assert.NotNil(t, rootCmd, "Root command should be initialized")
-	assert.Equal(t, "lippycat", rootCmd.Use, "Root command should have correct Use")
+	assert.Equal(t, "lc", rootCmd.Use, "Root command should have correct Use")
 	assert.Contains(t, rootCmd.Short, "lippycat sniffs for you", "Root command should have correct Short description")
 
 	// Check that subcommands are added

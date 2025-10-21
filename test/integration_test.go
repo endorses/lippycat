@@ -29,8 +29,10 @@ func TestIntegration_HunterProcessorBasicFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start processor
-	processorAddr := "127.0.0.1:50051"
+	// Start processor with dynamic port allocation
+	processorAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port")
+
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
@@ -492,6 +494,16 @@ func TestIntegration_JumboFrames(t *testing.T) {
 }
 
 // Helper functions
+
+// getFreePort returns an available port on localhost
+func getFreePort() (string, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer listener.Close()
+	return listener.Addr().String(), nil
+}
 
 func startTestProcessor(ctx context.Context, addr string) (*processor.Processor, error) {
 	config := processor.Config{

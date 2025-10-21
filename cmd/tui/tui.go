@@ -45,26 +45,25 @@ var (
 )
 
 func runTUI(cmd *cobra.Command, args []string) {
+	// Override TLS config with command-line flags ONLY if explicitly provided
+	// This allows config file settings to be used as defaults
+	if cmd.Flags().Changed("insecure") && insecure {
+		viper.Set("tui.tls.enabled", false)
+	}
+	if cmd.Flags().Changed("tls") {
+		viper.Set("tui.tls.enabled", tlsEnabled)
+	}
+
 	// Disable logging to prevent corrupting TUI display
 	logger.Disable()
 	defer logger.Enable()
-
-	// If --insecure flag is set, override TLS config
-	if insecure {
-		viper.Set("tui.tls.enabled", false)
-	}
-
-	// Override TLS config with command-line flags if provided
-	if tlsEnabled {
-		viper.Set("tui.tls.enabled", true)
-	}
-	if tlsCAFile != "" {
+	if cmd.Flags().Changed("tls-ca") {
 		viper.Set("tui.tls.ca_file", tlsCAFile)
 	}
-	if tlsCertFile != "" {
+	if cmd.Flags().Changed("tls-cert") {
 		viper.Set("tui.tls.cert_file", tlsCertFile)
 	}
-	if tlsKeyFile != "" {
+	if cmd.Flags().Changed("tls-key") {
 		viper.Set("tui.tls.key_file", tlsKeyFile)
 	}
 
@@ -148,8 +147,6 @@ func init() {
 	_ = viper.BindPFlag("tui.gpu.enabled", TuiCmd.Flags().Lookup("enable-gpu"))
 	_ = viper.BindPFlag("tui.gpu.backend", TuiCmd.Flags().Lookup("gpu-backend"))
 	_ = viper.BindPFlag("tui.gpu.batch_size", TuiCmd.Flags().Lookup("gpu-batch-size"))
-	_ = viper.BindPFlag("tui.tls.enabled", TuiCmd.Flags().Lookup("tls"))
-	_ = viper.BindPFlag("tui.tls.ca_file", TuiCmd.Flags().Lookup("tls-ca"))
-	_ = viper.BindPFlag("tui.tls.cert_file", TuiCmd.Flags().Lookup("tls-cert"))
-	_ = viper.BindPFlag("tui.tls.key_file", TuiCmd.Flags().Lookup("tls-key"))
+	// TLS flags are NOT bound to viper - they only override config when explicitly provided
+	// This allows config file settings to work as defaults (see runTUI for flag handling)
 }

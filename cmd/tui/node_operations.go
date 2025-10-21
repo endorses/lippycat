@@ -97,6 +97,7 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			ProcessorID:     proc.ProcessorID,
 			Status:          proc.Status,
 			ConnectionState: connState,
+			TLSInsecure:     proc.TLSInsecure,
 			Hunters:         displayHunters,
 		})
 	}

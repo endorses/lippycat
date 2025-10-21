@@ -10,6 +10,29 @@ The TUI provides an interactive real-time packet monitoring interface with suppo
 - Protocol filtering and hunter subscription management
 - File operations (save/open PCAP files, manage node configurations)
 - Visual feedback through modals and toast notifications
+- Secure TLS connections or insecure mode for development/testing
+
+## Security: TLS and Insecure Mode
+
+**TLS (Transport Layer Security)** is enabled by default for all remote processor connections. For development and testing, you can use the `--insecure` flag to disable TLS.
+
+### Secure Mode (Default)
+```bash
+lc tui --remote --nodes-file nodes.yaml
+```
+- Connections use TLS encryption
+- Processors shown with 🔒 icon in Nodes tab
+- Connection toast: "Connected to <address>"
+
+### Insecure Mode (Testing/Development)
+```bash
+lc tui --remote --nodes-file nodes.yaml --insecure
+```
+- Connections do NOT use TLS encryption
+- Processors shown with 🚫 icon in Nodes tab
+- Connection toast: "⚠ Connected to <address> (INSECURE - no TLS)"
+
+**IMPORTANT:** The `--insecure` flag should only be used for testing/development. Production deployments should always use TLS for security.
 
 ## Hunter Subscription Management (v0.2.4)
 

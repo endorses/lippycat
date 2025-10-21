@@ -20,6 +20,7 @@ type ProcessorInfo struct {
 	ProcessorID     string
 	Status          management.ProcessorStatus
 	ConnectionState ProcessorConnectionState
+	TLSInsecure     bool // True if connection is insecure (no TLS)
 	Hunters         []types.HunterInfo
 }
 
@@ -99,12 +100,20 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			statusColor = lipgloss.Color("240")
 		}
 
+		// Security indicator (🔒 for secure TLS, 🚫 for insecure)
+		var securityIcon string
+		if proc.TLSInsecure {
+			securityIcon = "🚫"
+		} else {
+			securityIcon = "🔒"
+		}
+
 		// Processor header with ID (if available)
 		var procLine string
 		if proc.ProcessorID != "" {
-			procLine = fmt.Sprintf("%s 📡 Processor: %s [%s] (%d hunters)", statusIcon, proc.Address, proc.ProcessorID, len(proc.Hunters))
+			procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, len(proc.Hunters))
 		} else {
-			procLine = fmt.Sprintf("%s 📡 Processor: %s (%d hunters)", statusIcon, proc.Address, len(proc.Hunters))
+			procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, len(proc.Hunters))
 		}
 
 		// Apply selection styling if this processor is selected
@@ -116,9 +125,9 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
 			// Remove the icon from procLine since we're rendering it separately
 			if proc.ProcessorID != "" {
-				procLine = fmt.Sprintf(" 📡 Processor: %s [%s] (%d hunters)", proc.Address, proc.ProcessorID, len(proc.Hunters))
+				procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, len(proc.Hunters))
 			} else {
-				procLine = fmt.Sprintf(" 📡 Processor: %s (%d hunters)", proc.Address, len(proc.Hunters))
+				procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, len(proc.Hunters))
 			}
 			b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 		}

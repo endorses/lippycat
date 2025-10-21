@@ -142,15 +142,11 @@ func (m Model) handleAddNodeMsg(msg components.AddNodeMsg) (Model, tea.Cmd) {
 				Address:      msg.Address,
 				State:        store.ProcessorStateDisconnected,
 				FailureCount: 0,
+				TLSInsecure:  m.insecure, // Set based on --insecure flag
 			}
 
 			// Update nodes view to show the new processor immediately
-			// Merge all hunters from all processors for display
-			allHunters := make([]components.HunterInfo, 0)
-			for _, hunters := range m.connectionMgr.HuntersByProcessor {
-				allHunters = append(allHunters, hunters...)
-			}
-			m.uiState.NodesView.SetHuntersAndProcessors(allHunters, m.getConnectedProcessors())
+			m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
 
 			// Trigger connection attempt
 			return m, func() tea.Msg {

@@ -275,15 +275,24 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		components.ToastDurationShort,
 	)
 
+	// Capture insecure flag for use in goroutine
+	insecure := m.insecure
+
 	// Attempt connection in background
 	go func() {
 		// Create TUI event handler adapter
 		handler := NewTUIEventHandler(currentProgram)
 
 		// Build client config with TLS settings from viper
+		// If --insecure flag is set, disable TLS entirely
+		tlsEnabled := viper.GetBool("tui.tls.enabled")
+		if insecure {
+			tlsEnabled = false
+		}
+
 		clientConfig := &remotecapture.ClientConfig{
 			Address:               msg.Address,
-			TLSEnabled:            viper.GetBool("tui.tls.enabled"),
+			TLSEnabled:            tlsEnabled,
 			TLSCAFile:             viper.GetString("tui.tls.ca_file"),
 			TLSCertFile:           viper.GetString("tui.tls.cert_file"),
 			TLSKeyFile:            viper.GetString("tui.tls.key_file"),
@@ -324,8 +333,9 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 
 		// Connection successful
 		currentProgram.Send(ProcessorConnectedMsg{
-			Address: msg.Address,
-			Client:  client,
+			Address:     msg.Address,
+			Client:      client,
+			TLSInsecure: !tlsEnabled, // Record if connection is insecure
 		})
 	}()
 
@@ -339,6 +349,8 @@ func (m Model) handleProcessorConnectedMsg(msg ProcessorConnectedMsg) (Model, te
 		proc.State = store.ProcessorStateConnected
 		proc.Client = msg.Client
 		proc.FailureCount = 0
+		proc.TLSInsecure = msg.TLSInsecure
+
 		// Also store in deprecated map for compatibility
 		m.connectionMgr.RemoteClients[msg.Address] = msg.Client
 
@@ -351,10 +363,20 @@ func (m Model) handleProcessorConnectedMsg(msg ProcessorConnectedMsg) (Model, te
 			m.uiState.SetCapturing(true)
 		}
 
-		// Show success toast
+		// Show success toast (with warning for insecure connections)
+		var toastMsg string
+		var toastType components.ToastType
+		if msg.TLSInsecure {
+			toastMsg = fmt.Sprintf("⚠ Connected to %s (INSECURE - no TLS)", msg.Address)
+			toastType = components.ToastWarning
+		} else {
+			toastMsg = fmt.Sprintf("Connected to %s", msg.Address)
+			toastType = components.ToastSuccess
+		}
+
 		return m, m.uiState.Toast.Show(
-			fmt.Sprintf("Connected to %s", msg.Address),
-			components.ToastSuccess,
+			toastMsg,
+			toastType,
 			components.ToastDurationShort,
 		)
 	}

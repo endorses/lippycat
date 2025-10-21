@@ -39,6 +39,7 @@ type ProcessorInfo struct {
 	ProcessorID     string                     // ID of the processor
 	Status          management.ProcessorStatus // Status of the processor (when connected)
 	ConnectionState ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
+	TLSInsecure     bool                       // True if connection is insecure (no TLS)
 	Hunters         []HunterInfo
 }
 
@@ -557,6 +558,7 @@ func convertProcessorInfos(procs []ProcessorInfo) []nodesview.ProcessorInfo {
 			ProcessorID:     proc.ProcessorID,
 			Status:          proc.Status,
 			ConnectionState: proc.ConnectionState,
+			TLSInsecure:     proc.TLSInsecure, // Preserve TLS security status
 			Hunters:         proc.Hunters,
 		}
 	}

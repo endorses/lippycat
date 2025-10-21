@@ -37,8 +37,9 @@ type PacketMsg struct {
 
 // ProcessorConnectedMsg is sent when a processor connection succeeds
 type ProcessorConnectedMsg struct {
-	Address string
-	Client  interface{ Close() }
+	Address     string
+	Client      interface{ Close() }
+	TLSInsecure bool // True if connection is insecure (no TLS)
 }
 
 // ProcessorReconnectMsg is sent to trigger a reconnection attempt
@@ -89,6 +90,7 @@ type Model struct {
 	bpfFilter     string                 // Current BPF filter
 	captureMode   components.CaptureMode // Current capture mode (live or offline)
 	nodesFilePath string                 // Path to nodes YAML file for remote mode
+	insecure      bool                   // Allow insecure connections (no TLS)
 
 	// Save state
 	activeWriter    pcap.PcapWriter // Active streaming writer (nil if not saving)
@@ -109,7 +111,7 @@ type Model struct {
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
-func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile string, promiscuous bool, startInRemoteMode bool, nodesFilePath string) Model {
+func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
 	// Load theme from config, default to Solarized Dark
 	themeName := viper.GetString("tui.theme")
 	if themeName == "" {
@@ -202,6 +204,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		bpfFilter:                  bpfFilter,
 		captureMode:                initialMode,
 		nodesFilePath:              nodesFilePath,
+		insecure:                   insecure,
 		detailsPanelUpdateInterval: 50 * time.Millisecond, // 20 Hz throttle (imperceptible to user)
 	}
 }

@@ -36,12 +36,18 @@ var (
 	enableGPU    bool
 	gpuBackend   string
 	gpuBatchSize int
+	insecure     bool
 )
 
 func runTUI(cmd *cobra.Command, args []string) {
 	// Disable logging to prevent corrupting TUI display
 	logger.Disable()
 	defer logger.Enable()
+
+	// If --insecure flag is set, override TLS config
+	if insecure {
+		viper.Set("tui.tls.enabled", false)
+	}
 
 	// Load buffer size from config, use flag value as fallback
 	configBufferSize := viper.GetInt("tui.buffer_size")
@@ -50,7 +56,7 @@ func runTUI(cmd *cobra.Command, args []string) {
 	}
 
 	// Create TUI model
-	model := NewModel(bufferSize, interfaces, filter, readFile, promiscuous, remoteMode, nodesFile)
+	model := NewModel(bufferSize, interfaces, filter, readFile, promiscuous, remoteMode, nodesFile, insecure)
 
 	// Start bubbletea program with mouse support
 	// Use WithMouseAllMotion for better mouse support that survives suspend/resume
@@ -110,6 +116,7 @@ func init() {
 	TuiCmd.Flags().BoolVar(&enableGPU, "enable-gpu", false, "enable GPU-accelerated VoIP parsing")
 	TuiCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	TuiCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
+	TuiCmd.Flags().BoolVar(&insecure, "insecure", false, "allow insecure connections (no TLS) for testing/development")
 
 	_ = viper.BindPFlag("promiscuous", TuiCmd.Flags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("tui.theme", TuiCmd.Flags().Lookup("theme"))

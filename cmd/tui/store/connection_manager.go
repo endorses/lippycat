@@ -31,6 +31,7 @@ type ProcessorConnection struct {
 	FailureCount       int
 	ReconnectTimer     *time.Timer
 	SubscribedHunters  []string // Hunter IDs we're subscribed to (empty = all hunters)
+	TLSInsecure        bool     // True if connection is insecure (no TLS)
 }
 
 // ConnectionManager manages remote processor connections

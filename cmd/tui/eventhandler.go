@@ -51,6 +51,13 @@ func (h *TUIEventHandler) OnCallUpdate(calls []types.CallInfo) {
 	}
 }
 
+// OnCorrelatedCallUpdate sends CorrelatedCallUpdateMsg to TUI
+func (h *TUIEventHandler) OnCorrelatedCallUpdate(correlatedCalls []types.CorrelatedCallInfo) {
+	if h.program != nil {
+		h.program.Send(CorrelatedCallUpdateMsg{CorrelatedCalls: correlatedCalls})
+	}
+}
+
 // OnDisconnect sends ProcessorDisconnectedMsg to TUI
 func (h *TUIEventHandler) OnDisconnect(address string, err error) {
 	if h.program != nil {
@@ -76,6 +83,11 @@ type HunterStatusMsg struct {
 // CallUpdateMsg is sent with updated call state
 type CallUpdateMsg struct {
 	Calls []types.CallInfo
+}
+
+// CorrelatedCallUpdateMsg is sent with correlated call updates
+type CorrelatedCallUpdateMsg struct {
+	CorrelatedCalls []types.CorrelatedCallInfo
 }
 
 // ProcessorDisconnectedMsg is sent when a processor connection is lost

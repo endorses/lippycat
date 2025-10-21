@@ -319,6 +319,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handlePacketBatchMsg(msg)
 	case CallUpdateMsg:
 		return m.handleCallUpdateMsg(msg)
+	case CorrelatedCallUpdateMsg:
+		return m.handleCorrelatedCallUpdateMsg(msg)
 	case PacketMsg:
 		return m.handlePacketMsg(msg)
 	case HunterStatusMsg:

@@ -194,6 +194,17 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleCorrelatedCallUpdateMsg processes correlated call updates from processor
+func (m Model) handleCorrelatedCallUpdateMsg(msg CorrelatedCallUpdateMsg) (Model, tea.Cmd) {
+	// Pass correlated calls to CallsView for display in detail panel
+	m.uiState.CallsView.SetCorrelatedCalls(msg.CorrelatedCalls)
+
+	logger.Debug("Received correlated call updates",
+		"count", len(msg.CorrelatedCalls))
+
+	return m, nil
+}
+
 // handleHunterStatusMsg processes hunter status updates from remote capture
 func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 	// Handle hunter status from remote capture client
@@ -296,6 +307,11 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		// Start hunter status subscription
 		if err := client.SubscribeHunterStatus(); err != nil {
 			// Non-fatal - continue anyway
+		}
+
+		// Start correlated calls subscription (for SIP call correlation across B2BUA)
+		if err := client.SubscribeCorrelatedCalls(); err != nil {
+			// Non-fatal - continue anyway (feature may not be available)
 		}
 
 		// Connection successful

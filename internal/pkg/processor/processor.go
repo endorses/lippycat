@@ -83,6 +83,7 @@ type Processor struct {
 
 	// Protocol aggregators
 	callAggregator *voip.CallAggregator // VoIP call state aggregation
+	callCorrelator *CallCorrelator      // Cross-B2BUA call correlation
 
 	// Control
 	ctx    context.Context
@@ -103,6 +104,7 @@ func New(config Config) (*Processor, error) {
 	p := &Processor{
 		config:         config,
 		callAggregator: voip.NewCallAggregator(), // Initialize call aggregator
+		callCorrelator: NewCallCorrelator(),      // Initialize call correlator
 	}
 
 	// Initialize protocol detector and enricher if enabled
@@ -308,6 +310,11 @@ func (p *Processor) Shutdown() error {
 		p.detector.Shutdown()
 	}
 
+	// Shutdown call correlator to stop cleanup goroutine
+	if p.callCorrelator != nil {
+		p.callCorrelator.Stop()
+	}
+
 	// Give time for graceful shutdown
 	if p.grpcServer != nil {
 		p.grpcServer.GracefulStop()
@@ -397,6 +404,15 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 		for _, packet := range batch.Packets {
 			if packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil) {
 				p.callAggregator.ProcessPacket(packet, hunterID)
+			}
+		}
+	}
+
+	// Correlate SIP calls across B2BUA boundaries
+	if p.callCorrelator != nil {
+		for _, packet := range batch.Packets {
+			if packet.Metadata != nil && packet.Metadata.Sip != nil {
+				p.callCorrelator.ProcessPacket(packet, hunterID)
 			}
 		}
 	}
@@ -787,6 +803,82 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 				return err
 			}
 		}
+	}
+}
+
+// SubscribeCorrelatedCalls streams correlated call updates to monitoring clients (Data Service)
+func (p *Processor) SubscribeCorrelatedCalls(req *data.SubscribeRequest, stream data.DataService_SubscribeCorrelatedCallsServer) error {
+	clientID := req.ClientId
+	if clientID == "" {
+		clientID = fmt.Sprintf("correlation-subscriber-%d", time.Now().UnixNano())
+	}
+
+	logger.Info("New correlated calls subscriber", "client_id", clientID)
+
+	// Create a ticker to send periodic updates
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	// Send initial snapshot of all correlated calls
+	calls := p.callCorrelator.GetCorrelatedCalls()
+	for _, call := range calls {
+		update := correlatedCallToProto(call)
+		if err := stream.Send(update); err != nil {
+			logger.Error("Failed to send initial correlated call", "client_id", clientID, "error", err)
+			return err
+		}
+	}
+
+	logger.Info("Sent initial correlated calls", "client_id", clientID, "count", len(calls))
+
+	// Stream periodic updates
+	for {
+		select {
+		case <-stream.Context().Done():
+			logger.Debug("SubscribeCorrelatedCalls: stream context cancelled", "client_id", clientID)
+			return nil
+		case <-ticker.C:
+			// Send updated state for all active calls
+			calls := p.callCorrelator.GetCorrelatedCalls()
+			for _, call := range calls {
+				update := correlatedCallToProto(call)
+				if err := stream.Send(update); err != nil {
+					logger.Error("Failed to send correlated call update", "client_id", clientID, "error", err)
+					return err
+				}
+			}
+		}
+	}
+}
+
+// correlatedCallToProto converts a CorrelatedCall to protobuf CorrelatedCallUpdate
+func correlatedCallToProto(call *CorrelatedCall) *data.CorrelatedCallUpdate {
+	// Convert call legs to protobuf
+	legs := make([]*data.CallLegInfo, 0, len(call.CallLegs))
+	for _, leg := range call.CallLegs {
+		legInfo := &data.CallLegInfo{
+			CallId:       leg.CallID,
+			HunterId:     leg.HunterID,
+			SrcIp:        leg.SrcIP,
+			DstIp:        leg.DstIP,
+			Method:       leg.Method,
+			ResponseCode: leg.ResponseCode,
+			PacketCount:  int32(leg.PacketCount),
+			StartTimeNs:  leg.StartTime.UnixNano(),
+			LastSeenNs:   leg.LastSeen.UnixNano(),
+		}
+		legs = append(legs, legInfo)
+	}
+
+	return &data.CorrelatedCallUpdate{
+		CorrelationId: call.CorrelationID,
+		TagPair:       call.TagPair[:],
+		FromUser:      call.FromUser,
+		ToUser:        call.ToUser,
+		Legs:          legs,
+		StartTimeNs:   call.StartTime.UnixNano(),
+		LastSeenNs:    call.LastSeen.UnixNano(),
+		State:         call.State.String(),
 	}
 }
 

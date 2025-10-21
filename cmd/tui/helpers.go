@@ -4,6 +4,9 @@
 package tui
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/endorses/lippycat/cmd/tui/components"
 )
 
@@ -57,4 +60,9 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 
 	// Update statistics view with new data
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
+}
+
+// generateDefaultFilename creates a timestamp-based filename for saving captures
+func (m *Model) generateDefaultFilename() string {
+	return fmt.Sprintf("capture_%s.pcap", time.Now().Format("20060102_150405"))
 }

@@ -20,17 +20,17 @@ import (
 var TuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Start lippycat in TUI mode",
-	Long:  `Start lippycat with an interactive terminal user interface for live packet monitoring.`,
+	Long:  `Start lippycat with an interactive terminal user interface for packet monitoring.`,
 	Run:   runTUI,
 }
 
 var (
-	interfaces   string
-	filter       string
-	readFile     string
-	bufferSize   int
-	promiscuous  bool
-	themeName    string
+	interfaces  string
+	filter      string
+	readFile    string
+	bufferSize  int
+	promiscuous bool
+	// themeName    string
 	remoteMode   bool
 	nodesFile    string
 	enableGPU    bool
@@ -104,7 +104,7 @@ func init() {
 	TuiCmd.Flags().StringVarP(&readFile, "read-file", "r", "", "read from pcap file")
 	TuiCmd.Flags().IntVar(&bufferSize, "buffer-size", 10000, "maximum number of packets to keep in memory")
 	TuiCmd.Flags().BoolVarP(&promiscuous, "promiscuous", "p", false, "use promiscuous mode")
-	TuiCmd.Flags().StringVar(&themeName, "theme", "", "color theme: 'dark', 'light', 'solarized-dark', 'solarized-light' (default: saved preference or dark)")
+	// TuiCmd.Flags().StringVar(&themeName, "theme", "", "color theme: 'dark', 'light', 'solarized-dark', 'solarized-light' (default: saved preference or dark)")
 	TuiCmd.Flags().BoolVar(&remoteMode, "remote", false, "start in remote capture mode")
 	TuiCmd.Flags().StringVar(&nodesFile, "nodes-file", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
 	TuiCmd.Flags().BoolVar(&enableGPU, "enable-gpu", false, "enable GPU-accelerated VoIP parsing")

@@ -379,6 +379,8 @@ func (m Model) handleSavePackets() (Model, tea.Cmd) {
 			m.uiState.Footer.SetStreamingSave(false) // Update footer hint
 			return m, cmd
 		}
+		// Update default filename with current timestamp before opening file dialog
+		m.uiState.FileDialog.SetDefaultFilename(m.generateDefaultFilename())
 		// Open file dialog to start new save
 		cmd := m.uiState.FileDialog.Activate()
 		return m, cmd

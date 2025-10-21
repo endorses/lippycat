@@ -43,6 +43,10 @@ func (m *MockEventHandler) OnCallUpdate(calls []types.CallInfo) {
 	// Mock implementation - calls not tracked in tests yet
 }
 
+func (m *MockEventHandler) OnCorrelatedCallUpdate(correlatedCalls []types.CorrelatedCallInfo) {
+	// Mock implementation - correlated calls not tracked in tests yet
+}
+
 func (m *MockEventHandler) OnDisconnect(address string, err error) {
 	m.Disconnects = append(m.Disconnects, MockDisconnect{
 		Address: address,

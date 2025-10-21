@@ -22,7 +22,7 @@ type UIState struct {
 	NodesView        *components.NodesView
 	StatisticsView   components.StatisticsView
 	SettingsView     components.SettingsView
-	CallsView        components.CallsView
+	CallsView        *components.CallsView
 	ProtocolSelector components.ProtocolSelector
 	HunterSelector   components.HunterSelector
 	FilterManager    components.FilterManager
@@ -131,7 +131,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		NodesView:        nodesViewPtr,
 		StatisticsView:   statisticsView,
 		SettingsView:     settingsView,
-		CallsView:        callsView,
+		CallsView:        &callsView, // Use pointer to avoid copying mutex
 		ProtocolSelector: protocolSelector,
 		HunterSelector:   hunterSelector,
 		FilterManager:    filterManager,

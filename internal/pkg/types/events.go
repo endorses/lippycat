@@ -18,6 +18,9 @@ type EventHandler interface {
 	// OnCallUpdate is called when call state is updated
 	OnCallUpdate(calls []CallInfo)
 
+	// OnCorrelatedCallUpdate is called when correlated call data is updated
+	OnCorrelatedCallUpdate(correlatedCalls []CorrelatedCallInfo)
+
 	// OnDisconnect is called when connection is lost
 	OnDisconnect(address string, err error)
 }
@@ -40,11 +43,37 @@ type CallInfo struct {
 	Hunters     []string
 }
 
+// CorrelatedCallInfo represents a correlated call across multiple hops/hunters
+type CorrelatedCallInfo struct {
+	CorrelationID string
+	TagPair       [2]string // Normalized [tag1, tag2]
+	FromUser      string
+	ToUser        string
+	Legs          []CallLegInfo
+	StartTime     time.Time
+	LastSeen      time.Time
+	State         string // "TRYING", "RINGING", "ESTABLISHED", "ENDED"
+}
+
+// CallLegInfo represents one leg of a multi-hop call
+type CallLegInfo struct {
+	CallID       string
+	HunterID     string
+	SrcIP        string
+	DstIP        string
+	Method       string
+	ResponseCode uint32
+	PacketCount  int
+	StartTime    time.Time
+	LastSeen     time.Time
+}
+
 // NoopEventHandler is a no-op implementation of EventHandler for testing
 type NoopEventHandler struct{}
 
 func (n *NoopEventHandler) OnPacketBatch(packets []PacketDisplay) {}
 func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus) {
 }
-func (n *NoopEventHandler) OnCallUpdate(calls []CallInfo)          {}
-func (n *NoopEventHandler) OnDisconnect(address string, err error) {}
+func (n *NoopEventHandler) OnCallUpdate(calls []CallInfo)                               {}
+func (n *NoopEventHandler) OnCorrelatedCallUpdate(correlatedCalls []CorrelatedCallInfo) {}
+func (n *NoopEventHandler) OnDisconnect(address string, err error)                      {}

@@ -8,13 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.9] - 2025-10-21
 
 ### Added
-- Feature enhancements and improvements
+- **SIP call correlation engine**: Track and correlate SIP messages across multiple transactions with Call-ID, tag, and Via branch tracking
+- **Correlated call details panel in TUI**: View all related SIP messages for a call with dialog state awareness
+- **VoIP call aggregation in live capture mode**: Real-time call state tracking in TUI
+- **PCAP file writing**: Add `--write-file` flag to sniff command for saving captured traffic
+- **Capability-based filter distribution**: Hunters advertise capabilities (VoIP, generic) for intelligent filter routing
+- **Hunter mode badges in TUI**: Visual indicators showing hunter capabilities in nodes view and subscription selector
+- **Hot-reload for application filters**: Update BPF filters without restarting packet capture
+- **Hot-swap for hunter subscriptions**: Switch monitored hunters without TUI reconnection
+- **Nuclear-proof resilience features**: Enhanced reconnection logic, keepalive tuning, and automatic retry mechanisms
+- **Context-aware tab-specific keybindings**: Dynamic footer shows relevant shortcuts based on active tab and state
+- **Color-coded tabs with active indicators**: Improved visual navigation in TUI
+- **File dialog enhancements**: Wraparound navigation, page keys, responsive height
+- **SIP tag tracking**: Enhanced filtering and correlation capabilities
 
 ### Changed
-- TODO: Add detailed changelog entries
+- Refactored VoIPFilter to ApplicationFilter for protocol-agnostic filtering
+- Improved TUI styling with Solarized colors and better readability
+- Optimized TUI styles and consolidated keybind hints
+- Modernized codebase using Go 1.24 builtins (max, slices.Delete)
+- Updated dependencies for improved resilience
+- Reorganized documentation structure
 
 ### Fixed
-- TODO: Add fixed items
+- **Streaming save**: Write both buffered and new packets correctly in TUI
+- **TCP stream handling**: Flush and close TCP streams in offline mode for proper SIP file writing
+- **Content-based SIP detection**: Per-call file output with accurate protocol detection
+- **Offline mode detection**: Use RunOffline for PCAP file processing
+- **Structured logging**: Send logs to stderr instead of stdout
+- **Hunter packet statistics**: Properly track packet counts in processor
+- **Processor deadlock**: Resolve heartbeat monitoring race condition
+- **Filter hot-reload**: Improve behavior during processor restart
+- **VoIP hunter mode**: Drop non-VoIP traffic appropriately
+- **Build tags**: Fix VoIP writer stub inclusion in tests
+- **Hunter shutdown**: Improve cleanup, reconnection, and type safety
+- **Version bump script**: Fix sed regex escaping for asterisks and special characters
 
 ## [0.2.8] - 2025-10-16
 

@@ -94,8 +94,8 @@ echo "$NEW_VERSION" > VERSION
 echo -e "${GREEN}✓${NC} Updated VERSION file"
 
 # Update README.md status line and version badge
-sed -i "s/^**Status:** v[0-9.]*/**Status:** v$NEW_VERSION/" README.md
-sed -i "s|https://img.shields.io/badge/version-[0-9.]*-blue|https://img.shields.io/badge/version-$NEW_VERSION-blue|" README.md
+sed -i "s/^\*\*Status:\*\* v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/\*\*Status:\*\* v$NEW_VERSION/" README.md
+sed -i "s|https://img\.shields\.io/badge/version-[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*-blue|https://img.shields.io/badge/version-$NEW_VERSION-blue|" README.md
 echo -e "${GREEN}✓${NC} Updated README.md status line and version badge"
 
 # Add changelog entry (user should edit this to add proper details)

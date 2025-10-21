@@ -39,8 +39,8 @@ the filter subscription mechanism. Use the processor's management API or
 filter file to configure which SIP users to track.
 
 Example:
-  lippycat hunt voip --processor processor:50051
-  lippycat hunt voip --processor 192.168.1.100:50051 --interface eth0`,
+  lc hunt voip --processor processor:50051
+  lc hunt voip --processor 192.168.1.100:50051 --interface eth0`,
 	RunE: runVoIPHunt,
 }
 

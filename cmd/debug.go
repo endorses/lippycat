@@ -22,13 +22,13 @@ var debugCmd = &cobra.Command{
 	Long: `Debug command provides tools for inspecting and troubleshooting TCP SIP capture.
 Use subcommands to inspect different aspects of the system:
 
-  lippycat debug health     - Show TCP assembler health status
-  lippycat debug metrics    - Display comprehensive TCP metrics
-  lippycat debug alerts     - Show active alerts and alert history
-  lippycat debug buffers    - Inspect TCP buffer statistics
-  lippycat debug streams    - Show TCP stream processing metrics
-  lippycat debug config     - Display current configuration
-  lippycat debug summary    - Show overall system status summary`,
+  lc debug health     - Show TCP assembler health status
+  lc debug metrics    - Display comprehensive TCP metrics
+  lc debug alerts     - Show active alerts and alert history
+  lc debug buffers    - Inspect TCP buffer statistics
+  lc debug streams    - Show TCP stream processing metrics
+  lc debug config     - Display current configuration
+  lc debug summary    - Show overall system status summary`,
 }
 
 var debugHealthCmd = &cobra.Command{
@@ -533,7 +533,7 @@ func showSummary() {
 	fmt.Printf("⚙️  Performance Mode: %s\n", config.TCPPerformanceMode)
 
 	fmt.Println()
-	fmt.Println("💡 Use 'lippycat debug <subcommand>' for detailed information:")
+	fmt.Println("💡 Use 'lc debug <subcommand>' for detailed information:")
 	fmt.Println("   health   - Detailed health status")
 	fmt.Println("   metrics  - Comprehensive metrics")
 	fmt.Println("   alerts   - Alert management")

@@ -30,9 +30,9 @@ Processors manage filter distribution to connected hunters and
 provide monitoring APIs for TUI clients.
 
 Example:
-  lippycat process --listen :50051
-  lippycat process --listen 0.0.0.0:50051 --upstream parent:50051
-  lippycat process --listen :50051 --max-hunters 100`,
+  lc process --listen :50051
+  lc process --listen 0.0.0.0:50051 --upstream parent:50051
+  lc process --listen :50051 --max-hunters 100`,
 	RunE: runProcess,
 }
 

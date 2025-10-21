@@ -29,9 +29,9 @@ Hunters apply local filters to reduce bandwidth and only send
 relevant packets upstream.
 
 Example:
-  lippycat hunt --processor processor.example.com:50051
-  lippycat hunt --processor 192.168.1.100:50051 --interface eth0
-  lippycat hunt --processor processor:50051 --hunter-id edge-01`,
+  lc hunt --processor processor.example.com:50051
+  lc hunt --processor 192.168.1.100:50051 --interface eth0
+  lc hunt --processor processor:50051 --hunter-id edge-01`,
 	RunE: runHunt,
 }
 

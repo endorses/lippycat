@@ -20,7 +20,7 @@ import (
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:     "lippycat",
+	Use:     "lc",
 	Short:   "lippycat sniffs for you",
 	Long:    fmt.Sprintf("lippycat %s - Network traffic sniffer and analyzer\n\n%s", version.GetVersion(), "http://🫦🐱.ws"),
 	Version: version.GetFullVersion(),

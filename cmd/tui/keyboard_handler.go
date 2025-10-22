@@ -359,7 +359,11 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 		}
 	} else if m.uiState.Tabs.GetActive() == 1 {
 		// On nodes tab: toggle between table and graph view
-		m.uiState.NodesView.ToggleView()
+		if !m.uiState.NodesView.ToggleView() {
+			// Toggle failed - show toast
+			cmd := m.uiState.Toast.Show("Select a processor to view graph", components.ToastWarning, components.ToastDurationShort)
+			return m, cmd
+		}
 	}
 	return m, nil
 }

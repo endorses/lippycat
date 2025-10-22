@@ -65,6 +65,7 @@ type NodesView struct {
 	viewport              viewport.Model  // Viewport for scrolling
 	ready                 bool            // Whether viewport is initialized
 	viewMode              string          // "table" or "graph" - current view mode
+	graphViewTargetAddr   string          // The processor address whose graph is being viewed (stays fixed in graph mode)
 
 	// Mouse click regions
 	hunterLines    map[int]int // Map of line number -> hunter index (for table view)
@@ -143,13 +144,30 @@ func (n *NodesView) IsModalOpen() bool {
 }
 
 // ToggleView switches between table and graph view modes
-func (n *NodesView) ToggleView() {
+// Returns true if the toggle was successful, false if a processor/hunter must be selected first
+func (n *NodesView) ToggleView() bool {
+	// Only allow switching to graph view if a processor or hunter is selected
 	if n.viewMode == "table" {
-		n.viewMode = "graph"
+		// Allow if processor is selected OR hunter is selected
+		if n.selectedProcessorAddr != "" || n.selectedIndex >= 0 {
+			n.viewMode = "graph"
+			// Remember which processor's graph we're viewing
+			if n.selectedProcessorAddr != "" {
+				n.graphViewTargetAddr = n.selectedProcessorAddr
+			} else if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+				n.graphViewTargetAddr = n.hunters[n.selectedIndex].ProcessorAddr
+			}
+			n.updateViewportContent()
+			return true
+		}
+		// If nothing selected, stay in table view and return false
+		return false
 	} else {
 		n.viewMode = "table"
+		n.graphViewTargetAddr = "" // Clear graph target when leaving graph mode
+		n.updateViewportContent()
+		return true
 	}
-	n.updateViewportContent()
 }
 
 // SetSize updates the view dimensions
@@ -321,15 +339,36 @@ func (n *NodesView) GetProcessorCount() int {
 
 // SelectNext moves selection following tree structure: processor → its hunters → next processor → its hunters
 func (n *NodesView) SelectNext() {
+	// In graph view, limit navigation to only the visible processor and its hunters
+	processors := n.processors
+	hunters := n.hunters
+	selectedIndex := n.selectedIndex
+
+	if n.viewMode == "graph" {
+		processors, hunters = n.getFilteredGraphData()
+		// Map global index to filtered index
+		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
+	} else {
+		// In tree view, sort processors hierarchically for navigation
+		processors = n.getHierarchicalProcessors()
+	}
+
 	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(n.processors),
-		Hunters:                 n.hunters,
-		SelectedIndex:           n.selectedIndex,
+		Processors:              convertProcessorInfos(processors),
+		Hunters:                 hunters,
+		SelectedIndex:           selectedIndex,
 		SelectedProcessorAddr:   n.selectedProcessorAddr,
 		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
 	}
 	result := nodesview.SelectNext(params)
-	n.selectedIndex = result.SelectedIndex
+
+	// Map filtered index back to global index if in graph view
+	if n.viewMode == "graph" {
+		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+	} else {
+		n.selectedIndex = result.SelectedIndex
+	}
+
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
@@ -337,18 +376,163 @@ func (n *NodesView) SelectNext() {
 
 // SelectPrevious moves selection following tree structure in reverse: hunters ← processor ← previous processor
 func (n *NodesView) SelectPrevious() {
+	// In graph view, limit navigation to only the visible processor and its hunters
+	processors := n.processors
+	hunters := n.hunters
+	selectedIndex := n.selectedIndex
+
+	if n.viewMode == "graph" {
+		processors, hunters = n.getFilteredGraphData()
+		// Map global index to filtered index
+		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
+	} else {
+		// In tree view, sort processors hierarchically for navigation
+		processors = n.getHierarchicalProcessors()
+	}
+
 	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(n.processors),
-		Hunters:                 n.hunters,
-		SelectedIndex:           n.selectedIndex,
+		Processors:              convertProcessorInfos(processors),
+		Hunters:                 hunters,
+		SelectedIndex:           selectedIndex,
 		SelectedProcessorAddr:   n.selectedProcessorAddr,
 		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
 	}
 	result := nodesview.SelectPrevious(params)
-	n.selectedIndex = result.SelectedIndex
+
+	// Map filtered index back to global index if in graph view
+	if n.viewMode == "graph" {
+		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+	} else {
+		n.selectedIndex = result.SelectedIndex
+	}
+
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
+}
+
+// mapGlobalToFilteredIndex converts a global hunter index to a filtered list index
+// Returns -1 if the hunter is not in the filtered list
+func (n *NodesView) mapGlobalToFilteredIndex(filteredHunters []HunterInfo, globalIndex int) int {
+	if globalIndex < 0 || globalIndex >= len(n.hunters) {
+		return -1
+	}
+	selectedHunter := n.hunters[globalIndex]
+	for i, hunter := range filteredHunters {
+		if hunter.ID == selectedHunter.ID && hunter.ProcessorAddr == selectedHunter.ProcessorAddr {
+			return i
+		}
+	}
+	return -1
+}
+
+// mapFilteredToGlobalIndex converts a filtered list index to a global hunter index
+// Returns -1 if the hunter is not found in the global list
+func (n *NodesView) mapFilteredToGlobalIndex(filteredHunters []HunterInfo, filteredIndex int) int {
+	if filteredIndex < 0 || filteredIndex >= len(filteredHunters) {
+		return -1
+	}
+	selectedHunter := filteredHunters[filteredIndex]
+	for i, hunter := range n.hunters {
+		if hunter.ID == selectedHunter.ID && hunter.ProcessorAddr == selectedHunter.ProcessorAddr {
+			return i
+		}
+	}
+	return -1
+}
+
+// getHierarchicalProcessors returns processors sorted in hierarchical tree order
+// (same order as displayed in tree view: roots first, then their children, recursively)
+func (n *NodesView) getHierarchicalProcessors() []ProcessorInfo {
+	if len(n.processors) == 0 {
+		return nil
+	}
+
+	// Build parent -> children map
+	childrenMap := make(map[string][]ProcessorInfo)
+	var roots []ProcessorInfo
+
+	for _, proc := range n.processors {
+		if proc.UpstreamAddr == "" {
+			roots = append(roots, proc)
+		} else {
+			childrenMap[proc.UpstreamAddr] = append(childrenMap[proc.UpstreamAddr], proc)
+		}
+	}
+
+	// Sort roots alphabetically
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].Address < roots[j].Address
+	})
+
+	// Sort children of each parent alphabetically
+	for parent := range childrenMap {
+		children := childrenMap[parent]
+		sort.Slice(children, func(i, j int) bool {
+			return children[i].Address < children[j].Address
+		})
+		childrenMap[parent] = children
+	}
+
+	// Recursively build hierarchy
+	var result []ProcessorInfo
+	var addProcessorWithChildren func(proc ProcessorInfo)
+	addProcessorWithChildren = func(proc ProcessorInfo) {
+		result = append(result, proc)
+		// Add children recursively
+		if children, hasChildren := childrenMap[proc.Address]; hasChildren {
+			for _, child := range children {
+				addProcessorWithChildren(child)
+			}
+		}
+	}
+
+	// Add all root processors and their children
+	for _, root := range roots {
+		addProcessorWithChildren(root)
+	}
+
+	return result
+}
+
+// getFilteredGraphData returns the filtered processors and hunters for graph view
+func (n *NodesView) getFilteredGraphData() ([]ProcessorInfo, []HunterInfo) {
+	var filteredProcessors []ProcessorInfo
+	var filteredHunters []HunterInfo
+
+	// Use the fixed graph target (set when entering graph view)
+	// This ensures the graph doesn't change as you navigate
+	targetProcessorAddr := n.graphViewTargetAddr
+
+	// Find the target processor
+	var selectedProc *ProcessorInfo
+	for i := range n.processors {
+		if n.processors[i].Address == targetProcessorAddr {
+			selectedProc = &n.processors[i]
+			filteredProcessors = append(filteredProcessors, n.processors[i])
+			break
+		}
+	}
+
+	// Add upstream processor if it exists
+	if selectedProc != nil && selectedProc.UpstreamAddr != "" {
+		for i := range n.processors {
+			if n.processors[i].Address == selectedProc.UpstreamAddr {
+				// Insert upstream at the beginning (so it renders first)
+				filteredProcessors = append([]ProcessorInfo{n.processors[i]}, filteredProcessors...)
+				break
+			}
+		}
+	}
+
+	// Filter hunters to only show those from the target processor
+	for _, hunter := range n.hunters {
+		if hunter.ProcessorAddr == targetProcessorAddr {
+			filteredHunters = append(filteredHunters, hunter)
+		}
+	}
+
+	return filteredProcessors, filteredHunters
 }
 
 // GetViewMode returns the current view mode ("table" or "graph")
@@ -358,15 +542,30 @@ func (n *NodesView) GetViewMode() string {
 
 // SelectUp moves selection up in graph mode (vertical navigation through hierarchy)
 func (n *NodesView) SelectUp() {
+	processors := n.processors
+	hunters := n.hunters
+	selectedIndex := n.selectedIndex
+
+	if n.viewMode == "graph" {
+		processors, hunters = n.getFilteredGraphData()
+		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
+	}
+
 	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(n.processors),
-		Hunters:                 n.hunters,
-		SelectedIndex:           n.selectedIndex,
+		Processors:              convertProcessorInfos(processors),
+		Hunters:                 hunters,
+		SelectedIndex:           selectedIndex,
 		SelectedProcessorAddr:   n.selectedProcessorAddr,
 		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
 	}
 	result := nodesview.SelectUp(params)
-	n.selectedIndex = result.SelectedIndex
+
+	if n.viewMode == "graph" {
+		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+	} else {
+		n.selectedIndex = result.SelectedIndex
+	}
+
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
@@ -374,15 +573,30 @@ func (n *NodesView) SelectUp() {
 
 // SelectDown moves selection down in graph mode (vertical navigation through hierarchy)
 func (n *NodesView) SelectDown() {
+	processors := n.processors
+	hunters := n.hunters
+	selectedIndex := n.selectedIndex
+
+	if n.viewMode == "graph" {
+		processors, hunters = n.getFilteredGraphData()
+		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
+	}
+
 	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(n.processors),
-		Hunters:                 n.hunters,
-		SelectedIndex:           n.selectedIndex,
+		Processors:              convertProcessorInfos(processors),
+		Hunters:                 hunters,
+		SelectedIndex:           selectedIndex,
 		SelectedProcessorAddr:   n.selectedProcessorAddr,
 		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
 	}
 	result := nodesview.SelectDown(params)
-	n.selectedIndex = result.SelectedIndex
+
+	if n.viewMode == "graph" {
+		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+	} else {
+		n.selectedIndex = result.SelectedIndex
+	}
+
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
@@ -390,15 +604,30 @@ func (n *NodesView) SelectDown() {
 
 // SelectLeft moves selection left in graph mode (horizontal navigation within same processor)
 func (n *NodesView) SelectLeft() {
+	processors := n.processors
+	hunters := n.hunters
+	selectedIndex := n.selectedIndex
+
+	if n.viewMode == "graph" {
+		processors, hunters = n.getFilteredGraphData()
+		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
+	}
+
 	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(n.processors),
-		Hunters:                 n.hunters,
-		SelectedIndex:           n.selectedIndex,
+		Processors:              convertProcessorInfos(processors),
+		Hunters:                 hunters,
+		SelectedIndex:           selectedIndex,
 		SelectedProcessorAddr:   n.selectedProcessorAddr,
 		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
 	}
 	result := nodesview.SelectLeft(params)
-	n.selectedIndex = result.SelectedIndex
+
+	if n.viewMode == "graph" {
+		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+	} else {
+		n.selectedIndex = result.SelectedIndex
+	}
+
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
@@ -406,15 +635,30 @@ func (n *NodesView) SelectLeft() {
 
 // SelectRight moves selection right in graph mode (horizontal navigation within same processor)
 func (n *NodesView) SelectRight() {
+	processors := n.processors
+	hunters := n.hunters
+	selectedIndex := n.selectedIndex
+
+	if n.viewMode == "graph" {
+		processors, hunters = n.getFilteredGraphData()
+		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
+	}
+
 	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(n.processors),
-		Hunters:                 n.hunters,
-		SelectedIndex:           n.selectedIndex,
+		Processors:              convertProcessorInfos(processors),
+		Hunters:                 hunters,
+		SelectedIndex:           selectedIndex,
 		SelectedProcessorAddr:   n.selectedProcessorAddr,
 		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
 	}
 	result := nodesview.SelectRight(params)
-	n.selectedIndex = result.SelectedIndex
+
+	if n.viewMode == "graph" {
+		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+	} else {
+		n.selectedIndex = result.SelectedIndex
+	}
+
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
@@ -624,12 +868,67 @@ func (n *NodesView) renderContent() string {
 
 	// Render based on view mode
 	if n.viewMode == "graph" {
-		// Graph view: Box drawing visualization
+		// Graph view: Only show the fixed target processor, its hunters, and its upstream
+		// Use graphViewTargetAddr which was set when entering graph view
+		var filteredProcessors []ProcessorInfo
+		var selectedProc *ProcessorInfo
+		targetProcessorAddr := n.graphViewTargetAddr
+
+		// Find the target processor
+		for i := range n.processors {
+			if n.processors[i].Address == targetProcessorAddr {
+				selectedProc = &n.processors[i]
+				filteredProcessors = append(filteredProcessors, n.processors[i])
+				break
+			}
+		}
+
+		// Add upstream processor if it exists
+		if selectedProc != nil && selectedProc.UpstreamAddr != "" {
+			for i := range n.processors {
+				if n.processors[i].Address == selectedProc.UpstreamAddr {
+					// Insert upstream at the beginning (so it renders first)
+					filteredProcessors = append([]ProcessorInfo{n.processors[i]}, filteredProcessors...)
+					break
+				}
+			}
+		}
+
+		// Filter hunters to only show those from the target processor
+		var filteredHunters []HunterInfo
+		for _, hunter := range n.hunters {
+			if hunter.ProcessorAddr == targetProcessorAddr {
+				filteredHunters = append(filteredHunters, hunter)
+			}
+		}
+
+		// Only pass selectedProcessorAddr if a processor is actually selected
+		// (not when showing a hunter's processor)
+		graphSelectedProcessorAddr := ""
+		if n.selectedProcessorAddr != "" {
+			graphSelectedProcessorAddr = n.selectedProcessorAddr
+		}
+
+		// Map global hunter index to filtered list index
+		// selectedIndex is an index into the full n.hunters list
+		// We need to find the corresponding index in filteredHunters
+		graphSelectedIndex := -1
+		if n.selectedIndex >= 0 && n.selectedIndex < len(n.hunters) {
+			selectedHunter := n.hunters[n.selectedIndex]
+			// Find this hunter in the filtered list
+			for i, hunter := range filteredHunters {
+				if hunter.ID == selectedHunter.ID && hunter.ProcessorAddr == selectedHunter.ProcessorAddr {
+					graphSelectedIndex = i
+					break
+				}
+			}
+		}
+
 		params := nodesview.GraphViewParams{
-			Processors:              convertProcessorInfos(n.processors),
-			Hunters:                 n.hunters,
-			SelectedIndex:           n.selectedIndex,
-			SelectedProcessorAddr:   n.selectedProcessorAddr,
+			Processors:              convertProcessorInfos(filteredProcessors),
+			Hunters:                 filteredHunters,
+			SelectedIndex:           graphSelectedIndex,
+			SelectedProcessorAddr:   graphSelectedProcessorAddr,
 			Width:                   n.width,
 			Height:                  n.height,
 			Theme:                   n.theme,

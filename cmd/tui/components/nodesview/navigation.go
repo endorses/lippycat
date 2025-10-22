@@ -71,7 +71,7 @@ func SelectNext(params NavigationParams) NavigationResult {
 					LastSelectedHunterIndex: params.LastSelectedHunterIndex,
 				}
 			} else {
-				// Last processor, wrap to nothing
+				// Last processor, wrap to nothing selected
 				return NavigationResult{
 					SelectedIndex:           -1,
 					SelectedProcessorAddr:   "",
@@ -99,7 +99,7 @@ func SelectNext(params NavigationParams) NavigationResult {
 							LastSelectedHunterIndex: params.LastSelectedHunterIndex,
 						}
 					} else {
-						// Last hunter of this processor, move to next processor or wrap
+						// Last hunter of this processor, move to next processor or wrap to nothing
 						if procIdx < len(params.Processors)-1 {
 							return NavigationResult{
 								SelectedIndex:           -1,
@@ -107,7 +107,7 @@ func SelectNext(params NavigationParams) NavigationResult {
 								LastSelectedHunterIndex: params.LastSelectedHunterIndex,
 							}
 						} else {
-							// Last processor, wrap to nothing
+							// Last processor, wrap to nothing selected
 							return NavigationResult{
 								SelectedIndex:           -1,
 								SelectedProcessorAddr:   "",
@@ -130,12 +130,12 @@ func SelectNext(params NavigationParams) NavigationResult {
 
 // SelectPrevious moves selection following tree structure in reverse: hunters ← processor ← previous processor
 func SelectPrevious(params NavigationParams) NavigationResult {
-	// If nothing selected, wrap to last hunter of last processor (or last processor if it has no hunters)
+	// If nothing selected, wrap to last processor's last hunter (or last processor if no hunters)
 	if params.SelectedIndex == -1 && params.SelectedProcessorAddr == "" {
 		if len(params.Processors) > 0 {
 			lastProc := params.Processors[len(params.Processors)-1]
+			// If last processor has hunters, select its last hunter
 			if len(lastProc.Hunters) > 0 {
-				// Move to last hunter of last processor
 				lastHunter := lastProc.Hunters[len(lastProc.Hunters)-1]
 				newIndex := GetGlobalHunterIndex(params.Hunters, lastHunter.ID, lastProc.Address)
 				return NavigationResult{
@@ -143,13 +143,12 @@ func SelectPrevious(params NavigationParams) NavigationResult {
 					SelectedProcessorAddr:   "",
 					LastSelectedHunterIndex: params.LastSelectedHunterIndex,
 				}
-			} else {
-				// Last processor has no hunters, select the processor itself
-				return NavigationResult{
-					SelectedIndex:           -1,
-					SelectedProcessorAddr:   lastProc.Address,
-					LastSelectedHunterIndex: params.LastSelectedHunterIndex,
-				}
+			}
+			// No hunters, select the processor itself
+			return NavigationResult{
+				SelectedIndex:           -1,
+				SelectedProcessorAddr:   lastProc.Address,
+				LastSelectedHunterIndex: params.LastSelectedHunterIndex,
 			}
 		}
 		return NavigationResult{
@@ -190,7 +189,7 @@ func SelectPrevious(params NavigationParams) NavigationResult {
 				}
 			}
 		} else {
-			// First processor, wrap to nothing
+			// First processor, wrap to nothing selected
 			return NavigationResult{
 				SelectedIndex:           -1,
 				SelectedProcessorAddr:   "",

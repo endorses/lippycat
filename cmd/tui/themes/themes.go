@@ -33,6 +33,9 @@ type Theme struct {
 	HTTPColor    lipgloss.Color
 	TLSColor     lipgloss.Color
 	ICMPColor    lipgloss.Color
+	ICMPv6Color  lipgloss.Color
+	ARPColor     lipgloss.Color
+	VPNColor     lipgloss.Color
 	UnknownColor lipgloss.Color
 	ErrorColor   lipgloss.Color
 
@@ -94,6 +97,9 @@ func Solarized() Theme {
 		HTTPColor:    solarizedViolet,
 		TLSColor:     solarizedMagenta,
 		ICMPColor:    solarizedOrange,
+		ICMPv6Color:  solarizedOrange,
+		ARPColor:     solarizedYellow,
+		VPNColor:     solarizedMagenta,
 		UnknownColor: solarizedBase0,
 		ErrorColor:   solarizedRed,
 

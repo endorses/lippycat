@@ -340,9 +340,9 @@ func (n *NodesView) GetProcessorCount() int {
 // SelectNext moves selection following tree structure: processor → its hunters → next processor → its hunters
 func (n *NodesView) SelectNext() {
 	// In graph view, limit navigation to only the visible processor and its hunters
-	processors := n.processors
-	hunters := n.hunters
-	selectedIndex := n.selectedIndex
+	var processors []ProcessorInfo
+	var hunters []HunterInfo
+	var selectedIndex int
 
 	if n.viewMode == "graph" {
 		processors, hunters = n.getFilteredGraphData()
@@ -351,6 +351,8 @@ func (n *NodesView) SelectNext() {
 	} else {
 		// In tree view, sort processors hierarchically for navigation
 		processors = n.getHierarchicalProcessors()
+		hunters = n.hunters
+		selectedIndex = n.selectedIndex
 	}
 
 	params := nodesview.NavigationParams{
@@ -377,9 +379,9 @@ func (n *NodesView) SelectNext() {
 // SelectPrevious moves selection following tree structure in reverse: hunters ← processor ← previous processor
 func (n *NodesView) SelectPrevious() {
 	// In graph view, limit navigation to only the visible processor and its hunters
-	processors := n.processors
-	hunters := n.hunters
-	selectedIndex := n.selectedIndex
+	var processors []ProcessorInfo
+	var hunters []HunterInfo
+	var selectedIndex int
 
 	if n.viewMode == "graph" {
 		processors, hunters = n.getFilteredGraphData()
@@ -388,6 +390,8 @@ func (n *NodesView) SelectPrevious() {
 	} else {
 		// In tree view, sort processors hierarchically for navigation
 		processors = n.getHierarchicalProcessors()
+		hunters = n.hunters
+		selectedIndex = n.selectedIndex
 	}
 
 	params := nodesview.NavigationParams{

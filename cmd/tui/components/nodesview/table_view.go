@@ -130,7 +130,7 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		}
 	}
 
-	for _, proc := range sortedProcs {
+	for procIdx, proc := range sortedProcs {
 		// Track this processor's line position for mouse clicks
 		// Find the original index in params.Processors for click mapping
 		originalIdx := 0
@@ -410,9 +410,21 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			linesRendered++
 		}
 
-		// Add blank line after processor group
-		b.WriteString("\n")
-		linesRendered++
+		// Add blank line after processor group, but not if the next processor is a child of this one
+		// Check if next processor in sorted list has this processor as upstream
+		addBlankLine := true
+		if procIdx+1 < len(sortedProcs) {
+			nextProc := sortedProcs[procIdx+1]
+			if nextProc.UpstreamAddr == proc.Address {
+				// Next processor is a child of this one - don't add blank line
+				addBlankLine = false
+			}
+		}
+
+		if addBlankLine {
+			b.WriteString("\n")
+			linesRendered++
+		}
 	}
 
 	return b.String(), selectedNodeLine

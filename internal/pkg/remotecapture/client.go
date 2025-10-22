@@ -352,7 +352,8 @@ func (c *Client) SubscribeHunterStatus() error {
 						},
 					}
 					if c.handler != nil {
-						c.handler.OnHunterStatus(hunters, "", management.ProcessorStatus_PROCESSOR_HEALTHY) // No processor for direct hunter connection
+						// Direct hunter: no processor ID or upstream
+						c.handler.OnHunterStatus(hunters, "", management.ProcessorStatus_PROCESSOR_HEALTHY, c.addr, "")
 					}
 				}
 			}
@@ -395,17 +396,19 @@ func (c *Client) SubscribeHunterStatus() error {
 					hunters[i] = c.convertToHunterInfo(h)
 				}
 
-				// Get processor ID and status from stats
+				// Get processor ID, status, and upstream from stats
 				processorID := ""
 				processorStatus := management.ProcessorStatus_PROCESSOR_HEALTHY
+				upstreamProcessor := ""
 				if resp.ProcessorStats != nil {
 					processorID = resp.ProcessorStats.ProcessorId
 					processorStatus = resp.ProcessorStats.Status
+					upstreamProcessor = resp.ProcessorStats.UpstreamProcessor
 				}
 
-				// Send to handler
+				// Send to handler with processor address and upstream info
 				if c.handler != nil {
-					c.handler.OnHunterStatus(hunters, processorID, processorStatus)
+					c.handler.OnHunterStatus(hunters, processorID, processorStatus, c.addr, upstreamProcessor)
 				}
 			}
 		}

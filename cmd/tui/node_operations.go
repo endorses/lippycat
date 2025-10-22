@@ -98,6 +98,7 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			Status:          proc.Status,
 			ConnectionState: connState,
 			TLSInsecure:     proc.TLSInsecure,
+			UpstreamAddr:    proc.UpstreamAddr, // Upstream processor (for hierarchy display)
 			Hunters:         displayHunters,
 			TotalHunters:    len(allHunters), // Total hunters connected to processor
 		})

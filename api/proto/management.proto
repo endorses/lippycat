@@ -347,6 +347,10 @@ message ProcessorStats {
 
     // Processor status
     ProcessorStatus status = 9;
+
+    // Upstream processor address (if forwarding to another processor)
+    // Empty if this is a leaf processor (no upstream)
+    string upstream_processor = 10;
 }
 
 // ListHuntersRequest to retrieve available hunters

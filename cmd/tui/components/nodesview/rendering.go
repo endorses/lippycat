@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/api/gen/management"
@@ -101,12 +102,16 @@ func RenderBox(lines []string, width int, style lipgloss.Style) string {
 
 	// Content lines
 	for _, line := range lines {
-		// Truncate or pad to fit width
+		// Truncate or pad to fit width (use rune count for proper Unicode character counting)
 		displayLine := line
-		if len(displayLine) > width-4 {
-			displayLine = displayLine[:width-7] + "..."
+		lineLen := utf8.RuneCountInString(displayLine)
+		if lineLen > width-4 {
+			// Truncate to fit with ellipsis
+			runes := []rune(displayLine)
+			displayLine = string(runes[:width-7]) + "..."
+			lineLen = width - 4
 		}
-		padding := width - len(displayLine) - 4
+		padding := width - lineLen - 4
 		leftPad := padding / 2
 		rightPad := padding - leftPad
 
@@ -194,12 +199,16 @@ func RenderProcessorBox(lines []string, width int, style lipgloss.Style, isSelec
 
 	// Content lines
 	for _, line := range lines {
-		// Truncate or pad to fit width
+		// Truncate or pad to fit width (use rune count for proper Unicode character counting)
 		displayLine := line
-		if len(displayLine) > width-4 {
-			displayLine = displayLine[:width-7] + "..."
+		lineLen := utf8.RuneCountInString(displayLine)
+		if lineLen > width-4 {
+			// Truncate to fit with ellipsis
+			runes := []rune(displayLine)
+			displayLine = string(runes[:width-7]) + "..."
+			lineLen = width - 4
 		}
-		padding := width - len(displayLine) - 4
+		padding := width - lineLen - 4
 		leftPad := padding / 2
 		rightPad := padding - leftPad
 

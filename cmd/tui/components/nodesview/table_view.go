@@ -20,7 +20,8 @@ type ProcessorInfo struct {
 	ProcessorID     string
 	Status          management.ProcessorStatus
 	ConnectionState ProcessorConnectionState
-	TLSInsecure     bool // True if connection is insecure (no TLS)
+	TLSInsecure     bool   // True if connection is insecure (no TLS)
+	UpstreamAddr    string // Address of upstream processor (if hierarchical)
 	Hunters         []types.HunterInfo
 	TotalHunters    int // Total hunters connected to this processor (all hunters)
 }
@@ -109,12 +110,22 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			securityIcon = "🔒"
 		}
 
-		// Processor header with ID (if available)
+		// Processor header with ID (if available) and upstream info
 		var procLine string
 		if proc.ProcessorID != "" {
-			procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+			if proc.UpstreamAddr != "" {
+				// Show hierarchy: this processor forwards to upstream
+				procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] → [upstream] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+			} else {
+				procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+			}
 		} else {
-			procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+			if proc.UpstreamAddr != "" {
+				// Show hierarchy even without processor ID
+				procLine = fmt.Sprintf("%s %s 📡 Processor: %s → [upstream] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+			} else {
+				procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+			}
 		}
 
 		// Apply selection styling if this processor is selected

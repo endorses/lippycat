@@ -12,7 +12,8 @@ import (
 type ProcessorState int
 
 const (
-	ProcessorStateDisconnected ProcessorState = iota
+	ProcessorStateUnknown ProcessorState = iota // Unknown state (not yet connected or discovered via hierarchy)
+	ProcessorStateDisconnected
 	ProcessorStateConnecting
 	ProcessorStateConnected
 	ProcessorStateFailed
@@ -32,6 +33,7 @@ type ProcessorConnection struct {
 	ReconnectTimer     *time.Timer
 	SubscribedHunters  []string // Hunter IDs we're subscribed to (empty = all hunters)
 	TLSInsecure        bool     // True if connection is insecure (no TLS)
+	UpstreamAddr       string   // Address of upstream processor (if this processor forwards to another)
 }
 
 // ConnectionManager manages remote processor connections

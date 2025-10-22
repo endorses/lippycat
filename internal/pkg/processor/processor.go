@@ -117,6 +117,11 @@ func New(config Config) (*Processor, error) {
 	// Initialize stats collector (needs to be created first as it's used by other managers)
 	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
 
+	// Set upstream processor address if configured (for hierarchy visualization)
+	if config.UpstreamAddr != "" {
+		p.statsCollector.SetUpstreamProcessor(config.UpstreamAddr)
+	}
+
 	// Create callback for stats updates (called when hunter health changes)
 	onStatsChanged := func() {
 		total, healthy, warning, errCount, totalFilters := p.hunterManager.GetHealthStats()

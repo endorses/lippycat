@@ -32,7 +32,8 @@ type Collector struct {
 	packetsReceived  *atomic.Uint64
 	packetsForwarded *atomic.Uint64
 
-	processorID string
+	processorID       string
+	upstreamProcessor string // Upstream processor address (if any)
 }
 
 // NewCollector creates a new stats collector
@@ -91,6 +92,11 @@ func (c *Collector) Get() Stats {
 	return stats
 }
 
+// SetUpstreamProcessor sets the upstream processor address
+func (c *Collector) SetUpstreamProcessor(upstreamAddr string) {
+	c.upstreamProcessor = upstreamAddr
+}
+
 // GetProto returns statistics as protobuf message
 func (c *Collector) GetProto() *management.ProcessorStats {
 	stats := c.Get()
@@ -104,5 +110,6 @@ func (c *Collector) GetProto() *management.ProcessorStats {
 		TotalPacketsForwarded: stats.TotalPacketsForwarded,
 		TotalFilters:          stats.TotalFilters,
 		ProcessorId:           c.processorID,
+		UpstreamProcessor:     c.upstreamProcessor,
 	}
 }

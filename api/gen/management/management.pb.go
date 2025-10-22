@@ -1401,9 +1401,12 @@ type ProcessorStats struct {
 	// Processor identifier
 	ProcessorId string `protobuf:"bytes,8,opt,name=processor_id,json=processorId,proto3" json:"processor_id,omitempty"`
 	// Processor status
-	Status        ProcessorStatus `protobuf:"varint,9,opt,name=status,proto3,enum=lippycat.management.ProcessorStatus" json:"status,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Status ProcessorStatus `protobuf:"varint,9,opt,name=status,proto3,enum=lippycat.management.ProcessorStatus" json:"status,omitempty"`
+	// Upstream processor address (if forwarding to another processor)
+	// Empty if this is a leaf processor (no upstream)
+	UpstreamProcessor string `protobuf:"bytes,10,opt,name=upstream_processor,json=upstreamProcessor,proto3" json:"upstream_processor,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ProcessorStats) Reset() {
@@ -1497,6 +1500,13 @@ func (x *ProcessorStats) GetStatus() ProcessorStatus {
 		return x.Status
 	}
 	return ProcessorStatus_PROCESSOR_HEALTHY
+}
+
+func (x *ProcessorStats) GetUpstreamProcessor() string {
+	if x != nil {
+		return x.UpstreamProcessor
+	}
+	return ""
 }
 
 // ListHuntersRequest to retrieve available hunters
@@ -1771,7 +1781,7 @@ const file_management_proto_rawDesc = "" +
 	"interfaces\x18\t \x03(\tR\n" +
 	"interfaces\x12K\n" +
 	"\fcapabilities\x18\n" +
-	" \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities\"\xa0\x03\n" +
+	" \x01(\v2'.lippycat.management.HunterCapabilitiesR\fcapabilities\"\xcf\x03\n" +
 	"\x0eProcessorStats\x12#\n" +
 	"\rtotal_hunters\x18\x01 \x01(\rR\ftotalHunters\x12'\n" +
 	"\x0fhealthy_hunters\x18\x02 \x01(\rR\x0ehealthyHunters\x12'\n" +
@@ -1781,7 +1791,9 @@ const file_management_proto_rawDesc = "" +
 	"\x17total_packets_forwarded\x18\x06 \x01(\x04R\x15totalPacketsForwarded\x12#\n" +
 	"\rtotal_filters\x18\a \x01(\rR\ftotalFilters\x12!\n" +
 	"\fprocessor_id\x18\b \x01(\tR\vprocessorId\x12<\n" +
-	"\x06status\x18\t \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\"\x14\n" +
+	"\x06status\x18\t \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12-\n" +
+	"\x12upstream_processor\x18\n" +
+	" \x01(\tR\x11upstreamProcessor\"\x14\n" +
 	"\x12ListHuntersRequest\"U\n" +
 	"\x13ListHuntersResponse\x12>\n" +
 	"\ahunters\x18\x01 \x03(\v2$.lippycat.management.AvailableHunterR\ahunters\"\xc9\x02\n" +

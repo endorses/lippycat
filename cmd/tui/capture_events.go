@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/cmd/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -216,31 +217,42 @@ func (m Model) handleCorrelatedCallUpdateMsg(msg CorrelatedCallUpdateMsg) (Model
 // handleHunterStatusMsg processes hunter status updates from remote capture
 func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 	// Handle hunter status from remote capture client
-	// Determine processor address from hunters or from the message source
-	var processorAddr string
-	if len(msg.Hunters) > 0 {
-		// Extract processor address from first hunter (all hunters in msg have same processor)
-		processorAddr = msg.Hunters[0].ProcessorAddr
-	} else {
-		// Empty hunter list - need to determine processor from remoteClients
-		// For now, we'll skip updating if we can't determine the processor
-		// This is a limitation but prevents incorrect state
-		// TODO: Add ProcessorAddr to HunterStatusMsg to handle empty hunter lists
-		return m, nil
-	}
+	// Now we have the processor address directly from the message
+	processorAddr := msg.ProcessorAddr
 
-	// Update processor ID and status if provided
-	if msg.ProcessorID != "" && processorAddr != "" && processorAddr != "Direct" {
+	// Update processor info if we have this processor in our connection manager
+	if processorAddr != "" {
 		if proc, exists := m.connectionMgr.Processors[processorAddr]; exists {
-			proc.ProcessorID = msg.ProcessorID
+			// Update processor ID and status if provided
+			if msg.ProcessorID != "" {
+				proc.ProcessorID = msg.ProcessorID
+			}
 			proc.Status = msg.ProcessorStatus
+
+			// Store upstream processor address for hierarchy display
+			// If this processor has an upstream, create/update it in the processor list
+			if msg.UpstreamProcessor != "" {
+				// Ensure upstream processor exists in our processor map
+				if _, exists := m.connectionMgr.Processors[msg.UpstreamProcessor]; !exists {
+					// Create upstream processor entry (will be populated by its own status updates)
+					m.connectionMgr.Processors[msg.UpstreamProcessor] = &store.ProcessorConnection{
+						Address:     msg.UpstreamProcessor,
+						State:       store.ProcessorStateUnknown,
+						ProcessorID: "", // Will be populated when we connect or it reports
+						Status:      management.ProcessorStatus_PROCESSOR_HEALTHY,
+					}
+				}
+
+				// Mark that this processor forwards to upstream
+				proc.UpstreamAddr = msg.UpstreamProcessor
+			}
 		}
 	}
 
 	// Update hunters for this processor
 	m.connectionMgr.HuntersByProcessor[processorAddr] = msg.Hunters
 
-	// Update NodesView with processor info (includes processor IDs and status)
+	// Update NodesView with processor info (includes processor IDs, status, and hierarchy)
 	m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
 	return m, nil
 }

@@ -40,6 +40,7 @@ type ProcessorInfo struct {
 	Status          management.ProcessorStatus // Status of the processor (when connected)
 	ConnectionState ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
 	TLSInsecure     bool                       // True if connection is insecure (no TLS)
+	UpstreamAddr    string                     // Address of upstream processor (if hierarchical)
 	Hunters         []HunterInfo               // Hunters subscribed to by this TUI client (filtered)
 	TotalHunters    int                        // Total hunters connected to this processor (all hunters)
 }
@@ -561,7 +562,8 @@ func convertProcessorInfos(procs []ProcessorInfo) []nodesview.ProcessorInfo {
 			ProcessorID:     proc.ProcessorID,
 			Status:          proc.Status,
 			ConnectionState: proc.ConnectionState,
-			TLSInsecure:     proc.TLSInsecure, // Preserve TLS security status
+			TLSInsecure:     proc.TLSInsecure,  // Preserve TLS security status
+			UpstreamAddr:    proc.UpstreamAddr, // Preserve upstream processor address
 			Hunters:         proc.Hunters,
 			TotalHunters:    proc.TotalHunters,
 		}

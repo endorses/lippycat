@@ -17,9 +17,11 @@ type MockEventHandler struct {
 }
 
 type MockHunterStatus struct {
-	Hunters         []types.HunterInfo
-	ProcessorID     string
-	ProcessorStatus management.ProcessorStatus
+	Hunters           []types.HunterInfo
+	ProcessorID       string
+	ProcessorStatus   management.ProcessorStatus
+	ProcessorAddr     string
+	UpstreamProcessor string
 }
 
 type MockDisconnect struct {
@@ -31,11 +33,13 @@ func (m *MockEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 	m.PacketBatches = append(m.PacketBatches, packets)
 }
 
-func (m *MockEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus) {
+func (m *MockEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {
 	m.HunterStatuses = append(m.HunterStatuses, MockHunterStatus{
-		Hunters:         hunters,
-		ProcessorID:     processorID,
-		ProcessorStatus: processorStatus,
+		Hunters:           hunters,
+		ProcessorID:       processorID,
+		ProcessorStatus:   processorStatus,
+		ProcessorAddr:     processorAddr,
+		UpstreamProcessor: upstreamProcessor,
 	})
 }
 
@@ -127,7 +131,7 @@ func TestMockEventHandler_HunterStatus(t *testing.T) {
 
 	processorStatus := management.ProcessorStatus_PROCESSOR_HEALTHY
 
-	handler.OnHunterStatus(hunters, "processor-1", processorStatus)
+	handler.OnHunterStatus(hunters, "processor-1", processorStatus, "localhost:50051", "")
 
 	assert.Len(t, handler.HunterStatuses, 1)
 	assert.Equal(t, hunters, handler.HunterStatuses[0].Hunters)
@@ -153,8 +157,8 @@ func TestMockEventHandler_MultipleEvents(t *testing.T) {
 	handler.OnPacketBatch([]types.PacketDisplay{{Protocol: "UDP"}})
 
 	// Multiple status updates
-	handler.OnHunterStatus([]types.HunterInfo{{ID: "h1"}}, "p1", management.ProcessorStatus_PROCESSOR_HEALTHY)
-	handler.OnHunterStatus([]types.HunterInfo{{ID: "h2"}}, "p2", management.ProcessorStatus_PROCESSOR_HEALTHY)
+	handler.OnHunterStatus([]types.HunterInfo{{ID: "h1"}}, "p1", management.ProcessorStatus_PROCESSOR_HEALTHY, "localhost:50051", "")
+	handler.OnHunterStatus([]types.HunterInfo{{ID: "h2"}}, "p2", management.ProcessorStatus_PROCESSOR_HEALTHY, "localhost:50052", "")
 
 	// Multiple disconnects
 	handler.OnDisconnect("addr1", assert.AnError)

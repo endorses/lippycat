@@ -32,14 +32,16 @@ func (h *TUIEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
 }
 
 // OnHunterStatus sends HunterStatusMsg to TUI
-func (h *TUIEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus) {
+func (h *TUIEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {
 	if h.program != nil {
 		// Convert to components.HunterInfo (which is now an alias)
 		// and send as HunterStatusMsg
 		h.program.Send(HunterStatusMsg{
-			Hunters:         hunters,
-			ProcessorID:     processorID,
-			ProcessorStatus: processorStatus,
+			Hunters:           hunters,
+			ProcessorID:       processorID,
+			ProcessorStatus:   processorStatus,
+			ProcessorAddr:     processorAddr,
+			UpstreamProcessor: upstreamProcessor,
 		})
 	}
 }
@@ -75,9 +77,11 @@ type PacketBatchMsg struct {
 
 // HunterStatusMsg is sent with hunter status updates from remote processor
 type HunterStatusMsg struct {
-	Hunters         []components.HunterInfo
-	ProcessorID     string
-	ProcessorStatus management.ProcessorStatus
+	Hunters           []components.HunterInfo
+	ProcessorID       string
+	ProcessorStatus   management.ProcessorStatus
+	ProcessorAddr     string // Address of the processor that sent this status
+	UpstreamProcessor string // Address of processor's upstream (if hierarchical)
 }
 
 // CallUpdateMsg is sent with updated call state

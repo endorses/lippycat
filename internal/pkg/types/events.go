@@ -13,7 +13,9 @@ type EventHandler interface {
 	OnPacketBatch(packets []PacketDisplay)
 
 	// OnHunterStatus is called when hunter status is updated
-	OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus)
+	// processorAddr is the address of the processor being queried
+	// upstreamProcessor is the address of that processor's upstream (if any)
+	OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string)
 
 	// OnCallUpdate is called when call state is updated
 	OnCallUpdate(calls []CallInfo)
@@ -72,7 +74,7 @@ type CallLegInfo struct {
 type NoopEventHandler struct{}
 
 func (n *NoopEventHandler) OnPacketBatch(packets []PacketDisplay) {}
-func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus) {
+func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus management.ProcessorStatus, processorAddr string, upstreamProcessor string) {
 }
 func (n *NoopEventHandler) OnCallUpdate(calls []CallInfo)                               {}
 func (n *NoopEventHandler) OnCorrelatedCallUpdate(correlatedCalls []CorrelatedCallInfo) {}

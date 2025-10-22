@@ -38,7 +38,8 @@ This architecture allows for:
   - `internal/pkg/simd/`: SIMD optimizations (AVX2/SSE4.2)
   - `internal/pkg/logger/`: Structured logging
   - `api/proto/`: gRPC protocol buffer definitions
-  - `api/gen/`: Generated gRPC code for data and management services
+  - `api/gen/data/`: Generated gRPC code for data services
+  - `api/gen/management/`: Generated gRPC code for management services
 
 ## Key Dependencies
 - `github.com/spf13/cobra`: CLI framework

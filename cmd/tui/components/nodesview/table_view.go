@@ -38,6 +38,64 @@ type TableViewParams struct {
 	ProcessorLines        map[int]int // Output: line -> processor index mapping
 }
 
+// buildProcessorHierarchy builds a hierarchical processor structure (upstream first, then downstream)
+// This matches the graph view's sorting algorithm
+func buildProcessorHierarchy(processors []ProcessorInfo) []ProcessorInfo {
+	if len(processors) == 0 {
+		return processors
+	}
+
+	processedAddrs := make(map[string]bool)
+	sortedProcs := make([]ProcessorInfo, 0, len(processors))
+
+	// Build address -> processor map for quick lookup
+	procMap := make(map[string]ProcessorInfo)
+	for _, proc := range processors {
+		procMap[proc.Address] = proc
+	}
+
+	// First pass: Add processors that have upstreams (leaf/intermediate processors)
+	var leafProcs []ProcessorInfo
+	for _, proc := range processors {
+		if proc.UpstreamAddr != "" {
+			leafProcs = append(leafProcs, proc)
+			processedAddrs[proc.Address] = true
+		}
+	}
+
+	// Second pass: For each leaf processor, add its upstream chain
+	for _, proc := range leafProcs {
+		upstream := proc.UpstreamAddr
+		upstreamChain := []ProcessorInfo{}
+		for upstream != "" {
+			if processedAddrs[upstream] {
+				break
+			}
+			if upstreamProc, exists := procMap[upstream]; exists {
+				upstreamChain = append(upstreamChain, upstreamProc)
+				processedAddrs[upstream] = true
+				upstream = upstreamProc.UpstreamAddr
+			} else {
+				break
+			}
+		}
+		// Add upstream chain in reverse order (top-level first)
+		for i := len(upstreamChain) - 1; i >= 0; i-- {
+			sortedProcs = append(sortedProcs, upstreamChain[i])
+		}
+		sortedProcs = append(sortedProcs, proc)
+	}
+
+	// Third pass: Add any remaining processors without upstream connections (standalone processors)
+	for _, proc := range processors {
+		if !processedAddrs[proc.Address] {
+			sortedProcs = append(sortedProcs, proc)
+		}
+	}
+
+	return sortedProcs
+}
+
 // RenderTreeView renders processors and hunters in a tree structure with table columns
 // Returns the rendered content and the line number where the selected node is rendered (-1 if none)
 func RenderTreeView(params TableViewParams) (string, int) {
@@ -61,9 +119,31 @@ func RenderTreeView(params TableViewParams) (string, int) {
 	// Tree prefix is fixed width
 	treeCol := 6 // "  ├─ " or "  └─ "
 
-	for procIdx, proc := range params.Processors {
+	// Build hierarchical processor structure (same as graph view)
+	sortedProcs := buildProcessorHierarchy(params.Processors)
+
+	// Build map to track which processors are parents (have downstream processors)
+	parentProcessors := make(map[string]bool)
+	for _, proc := range sortedProcs {
+		if proc.UpstreamAddr != "" {
+			parentProcessors[proc.UpstreamAddr] = true
+		}
+	}
+
+	for _, proc := range sortedProcs {
 		// Track this processor's line position for mouse clicks
-		params.ProcessorLines[linesRendered] = procIdx
+		// Find the original index in params.Processors for click mapping
+		originalIdx := 0
+		for i, p := range params.Processors {
+			if p.Address == proc.Address {
+				originalIdx = i
+				break
+			}
+		}
+		params.ProcessorLines[linesRendered] = originalIdx
+
+		// Determine if this processor is a child (has upstream)
+		isChildProcessor := proc.UpstreamAddr != ""
 
 		// Status indicator for processor - prioritize connection state over reported status
 		var statusIcon string
@@ -96,8 +176,12 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				statusIcon = "●"
 				statusColor = params.Theme.SuccessColor
 			}
+		case ProcessorConnectionStateUnknown:
+			// Unknown state (auto-discovered from hierarchy) - filled circle in Solarized base0
+			statusIcon = "●"
+			statusColor = lipgloss.Color("#839496") // Solarized base0
 		default:
-			// Unknown state - show as disconnected
+			// Fallback - empty circle
 			statusIcon = "○"
 			statusColor = lipgloss.Color("240")
 		}
@@ -110,76 +194,119 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			securityIcon = "🔒"
 		}
 
-		// Processor header with ID (if available) and upstream info
+		// Processor header with ID (if available) - add tree prefix for child processors
 		var procLine string
-		if proc.ProcessorID != "" {
-			if proc.UpstreamAddr != "" {
-				// Show hierarchy: this processor forwards to upstream
-				procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] → [upstream] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
-			} else {
-				procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
-			}
-		} else {
-			if proc.UpstreamAddr != "" {
-				// Show hierarchy even without processor ID
-				procLine = fmt.Sprintf("%s %s 📡 Processor: %s → [upstream] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
-			} else {
-				procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
-			}
-		}
+
+		// Gray style for tree prefix (matching hunter tree prefixes)
+		treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 		// Apply selection styling if this processor is selected
 		if params.SelectedProcessorAddr == proc.Address {
 			selectedNodeLine = linesRendered
+			if isChildProcessor {
+				// Child processor - show with tree branch (gray) before status icon
+				if proc.ProcessorID != "" {
+					procLine = fmt.Sprintf("  └─ %s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+				} else {
+					procLine = fmt.Sprintf("  └─ %s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+				}
+			} else {
+				// Root processor - no tree prefix
+				if proc.ProcessorID != "" {
+					procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+				} else {
+					procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+				}
+			}
 			b.WriteString(selectedStyle.Width(params.Width).Render(procLine) + "\n")
 		} else {
-			// Style the status icon with color, then the rest with processor style
+			// Style the status icon with color separately
 			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
-			// Remove the icon from procLine since we're rendering it separately
-			if proc.ProcessorID != "" {
-				procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+
+			if isChildProcessor {
+				// Child processor - gray tree prefix, then colored status icon
+				treePrefixRendered := treePrefixStyle.Render("  └─ ")
+				if proc.ProcessorID != "" {
+					procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+				} else {
+					procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, proc.TotalHunters)
+				}
+				b.WriteString(treePrefixRendered + statusStyled + processorStyle.Render(procLine) + "\n")
 			} else {
-				procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, proc.TotalHunters)
+				// Root processor - no tree prefix
+				if proc.ProcessorID != "" {
+					procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+				} else {
+					procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, proc.TotalHunters)
+				}
+				b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 			}
-			b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 		}
 		linesRendered++
 
-		// Table header for hunters under this processor
-		// Add tree structure continuation to header
-		treePrefix := "  │  "
-		headerLine := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-			treeCol, treePrefix,
-			1, "S", // Status
-			idCol, "Hunter ID",
-			8, "Mode", // Mode column (Generic/VoIP)
-			hostCol, "IP Address",
-			uptimeCol, "Uptime",
-			capturedCol, "Captured",
-			forwardedCol, "Forwarded",
-			filtersCol, "Filters",
-		)
-		headerStyle := lipgloss.NewStyle().
-			Foreground(params.Theme.Foreground).
-			Bold(true)
-		b.WriteString(headerStyle.Render(headerLine) + "\n")
-		linesRendered++
+		// Only show hunter table if this processor has hunters or is a parent with no downstream processors
+		hasHunters := len(proc.Hunters) > 0
+		isParent := parentProcessors[proc.Address]
 
-		// Render hunters under this processor in table format
-		if len(proc.Hunters) == 0 {
-			// No hunters for this processor - show empty state
-			emptyStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240"))
-			emptyLine := fmt.Sprintf("  └─  (no hunters connected)")
-			b.WriteString(emptyStyle.Render(emptyLine) + "\n")
+		if hasHunters || !isParent {
+			// Table header for hunters under this processor
+			// Add tree structure continuation to header with proper indentation
+			var headerTreePrefix string
+			if isChildProcessor {
+				headerTreePrefix = "     │  " // Indent under child processor
+			} else {
+				headerTreePrefix = "  │  " // No indent for root processor
+			}
+			headerLine := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				treeCol+2, headerTreePrefix,
+				1, "S", // Status
+				idCol, "Hunter ID",
+				8, "Mode", // Mode column (Generic/VoIP)
+				hostCol, "IP Address",
+				uptimeCol, "Uptime",
+				capturedCol, "Captured",
+				forwardedCol, "Forwarded",
+				filtersCol, "Filters",
+			)
+			headerStyle := lipgloss.NewStyle().
+				Foreground(params.Theme.Foreground).
+				Bold(true)
+			b.WriteString(headerStyle.Render(headerLine) + "\n")
 			linesRendered++
+
+			// Render hunters under this processor in table format
+			if len(proc.Hunters) == 0 {
+				// No hunters for this processor - show empty state only if not a parent
+				if !isParent {
+					emptyStyle := lipgloss.NewStyle().
+						Foreground(lipgloss.Color("240"))
+					var emptyLine string
+					if isChildProcessor {
+						emptyLine = fmt.Sprintf("     └─  (no hunters connected)")
+					} else {
+						emptyLine = fmt.Sprintf("  └─  (no hunters connected)")
+					}
+					b.WriteString(emptyStyle.Render(emptyLine) + "\n")
+					linesRendered++
+				}
+			}
 		}
 
 		for i, hunter := range proc.Hunters {
 			isLast := i == len(proc.Hunters)-1
-			prefix := "  ├─ "
-			if isLast {
-				prefix = "  └─ "
+			var prefix string
+			if isChildProcessor {
+				// Hunters under child processor - extra indentation
+				prefix = "     ├─ "
+				if isLast {
+					prefix = "     └─ "
+				}
+			} else {
+				// Hunters under root processor - normal indentation
+				prefix = "  ├─ "
+				if isLast {
+					prefix = "  └─ "
+				}
 			}
 
 			// Status indicator - use different icons for better visibility when selected

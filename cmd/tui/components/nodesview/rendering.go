@@ -18,7 +18,8 @@ import (
 type ProcessorConnectionState int
 
 const (
-	ProcessorConnectionStateDisconnected ProcessorConnectionState = iota
+	ProcessorConnectionStateUnknown ProcessorConnectionState = iota // Unknown state (discovered via hierarchy)
+	ProcessorConnectionStateDisconnected
 	ProcessorConnectionStateConnecting
 	ProcessorConnectionStateConnected
 	ProcessorConnectionStateFailed

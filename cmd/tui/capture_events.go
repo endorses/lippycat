@@ -235,11 +235,13 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 				// Ensure upstream processor exists in our processor map
 				if _, exists := m.connectionMgr.Processors[msg.UpstreamProcessor]; !exists {
 					// Create upstream processor entry (will be populated by its own status updates)
+					// Inherit TLS security status from the processor that reported this upstream
 					m.connectionMgr.Processors[msg.UpstreamProcessor] = &store.ProcessorConnection{
 						Address:     msg.UpstreamProcessor,
 						State:       store.ProcessorStateUnknown,
 						ProcessorID: "", // Will be populated when we connect or it reports
 						Status:      management.ProcessorStatus_PROCESSOR_HEALTHY,
+						TLSInsecure: proc.TLSInsecure, // Inherit TLS security status
 					}
 				}
 

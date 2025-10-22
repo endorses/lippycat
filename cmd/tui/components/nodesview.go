@@ -27,6 +27,7 @@ type HunterInfo = types.HunterInfo
 type ProcessorConnectionState = nodesview.ProcessorConnectionState
 
 const (
+	ProcessorConnectionStateUnknown      = nodesview.ProcessorConnectionStateUnknown
 	ProcessorConnectionStateDisconnected = nodesview.ProcessorConnectionStateDisconnected
 	ProcessorConnectionStateConnecting   = nodesview.ProcessorConnectionStateConnecting
 	ProcessorConnectionStateConnected    = nodesview.ProcessorConnectionStateConnected

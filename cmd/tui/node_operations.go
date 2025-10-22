@@ -52,6 +52,8 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 		// Convert model store.ProcessorState to components.ProcessorConnectionState
 		var connState components.ProcessorConnectionState
 		switch proc.State {
+		case store.ProcessorStateUnknown:
+			connState = components.ProcessorConnectionStateUnknown
 		case store.ProcessorStateDisconnected:
 			connState = components.ProcessorConnectionStateDisconnected
 		case store.ProcessorStateConnecting:

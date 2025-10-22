@@ -101,9 +101,10 @@ func New(config Config) (*Hunter, error) {
 
 	// Create capture manager (will be recreated with proper context in Start())
 	captureManager := huntercapture.New(huntercapture.Config{
-		Interfaces: config.Interfaces,
-		BaseFilter: config.BPFFilter,
-		BufferSize: config.BufferSize,
+		Interfaces:    config.Interfaces,
+		BaseFilter:    config.BPFFilter,
+		BufferSize:    config.BufferSize,
+		ProcessorAddr: config.ProcessorAddr,
 	}, ctx)
 
 	// Determine batch queue size (default or configured)

@@ -582,9 +582,9 @@ func (n *NodesView) renderContent() string {
 		// Create content block
 		var emptyContent strings.Builder
 		emptyContent.WriteString("No nodes connected\n\n")
-		emptyContent.WriteString("Press 'n' to add a node\n\n")
+		emptyContent.WriteString("Press 'a' to add a node\n\n")
 		emptyContent.WriteString("Or start a hunter with:\n")
-		emptyContent.WriteString("  lippycat hunt --processor <processor-addr>")
+		emptyContent.WriteString("lc hunt --processor <processor-addr>")
 
 		content := emptyContent.String()
 

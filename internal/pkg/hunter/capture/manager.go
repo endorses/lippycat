@@ -5,6 +5,7 @@ package capture
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -17,9 +18,10 @@ import (
 // Manager handles packet capture lifecycle
 type Manager struct {
 	// Configuration
-	interfaces []string
-	baseFilter string
-	bufferSize int
+	interfaces    []string
+	baseFilter    string
+	bufferSize    int
+	processorAddr string // Processor address (for automatic port exclusion)
 
 	// Packet buffer (shared with forwarding)
 	packetBuffer *capture.PacketBuffer
@@ -33,18 +35,20 @@ type Manager struct {
 
 // Config contains capture manager configuration
 type Config struct {
-	Interfaces []string // Network interfaces to capture on
-	BaseFilter string   // Base BPF filter
-	BufferSize int      // Packet buffer size
+	Interfaces    []string // Network interfaces to capture on
+	BaseFilter    string   // Base BPF filter
+	BufferSize    int      // Packet buffer size
+	ProcessorAddr string   // Processor address (for automatic port exclusion)
 }
 
 // New creates a new capture manager
 func New(config Config, mainCtx context.Context) *Manager {
 	return &Manager{
-		interfaces: config.Interfaces,
-		baseFilter: config.BaseFilter,
-		bufferSize: config.BufferSize,
-		mainCtx:    mainCtx,
+		interfaces:    config.Interfaces,
+		baseFilter:    config.BaseFilter,
+		bufferSize:    config.BufferSize,
+		processorAddr: config.ProcessorAddr,
+		mainCtx:       mainCtx,
 	}
 }
 
@@ -148,6 +152,41 @@ func (m *Manager) Stop() {
 	}
 }
 
+// extractPortFromAddr extracts the port from a "host:port" address string.
+// Returns empty string if the address is invalid or has no port.
+func extractPortFromAddr(addr string) string {
+	if addr == "" {
+		return ""
+	}
+
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// If parsing fails, log debug message but continue without port exclusion
+		logger.Debug("Failed to parse processor address for port extraction", "addr", addr, "error", err)
+		return ""
+	}
+
+	return port
+}
+
+// buildProcessorPortExclusionFilter builds a BPF filter to exclude the processor communication port.
+// This prevents the hunter from capturing its own gRPC traffic to the processor.
+// Returns empty string if no processor address is configured.
+func (m *Manager) buildProcessorPortExclusionFilter() string {
+	if m.processorAddr == "" {
+		return ""
+	}
+
+	port := extractPortFromAddr(m.processorAddr)
+	if port == "" {
+		return ""
+	}
+
+	// Build exclusion filter for the processor port
+	// Both data and management gRPC connections use the same port
+	return fmt.Sprintf("not port %s", port)
+}
+
 // buildCombinedBPFFilter builds a combined BPF filter from config and dynamic filters
 func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 	var dynamicFilters []string
@@ -167,23 +206,46 @@ func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 		}
 	}
 
+	// Build processor port exclusion filter (automatic)
+	processorExclusion := m.buildProcessorPortExclusionFilter()
+
 	// Build final filter
 	var finalFilter string
 
 	if len(dynamicFilters) == 0 {
-		// No dynamic filters - use base config filter only
-		finalFilter = m.baseFilter
+		// No dynamic filters - combine base filter with processor exclusion
+		if m.baseFilter != "" && processorExclusion != "" {
+			// Both base filter and processor exclusion
+			finalFilter = fmt.Sprintf("(%s) and (%s)", m.baseFilter, processorExclusion)
+		} else if m.baseFilter != "" {
+			// Only base filter
+			finalFilter = m.baseFilter
+		} else if processorExclusion != "" {
+			// Only processor exclusion
+			finalFilter = processorExclusion
+		}
+		// else: no filters at all, finalFilter stays empty
 	} else {
 		// Combine dynamic filters with OR (capture matching ANY dynamic filter)
 		dynamicPart := strings.Join(dynamicFilters, " or ")
 
-		if m.baseFilter != "" {
-			// Combine with base filter using AND
-			// Logic: (dynamic filters) AND (base exclusions)
-			// Example: (port 443) and (not port 50051 and not port 50052)
-			finalFilter = fmt.Sprintf("(%s) and (%s)", dynamicPart, m.baseFilter)
+		// Build combined filter with base filter and processor exclusion
+		var exclusionPart string
+		if m.baseFilter != "" && processorExclusion != "" {
+			exclusionPart = fmt.Sprintf("(%s) and (%s)", m.baseFilter, processorExclusion)
+		} else if m.baseFilter != "" {
+			exclusionPart = m.baseFilter
+		} else if processorExclusion != "" {
+			exclusionPart = processorExclusion
+		}
+
+		if exclusionPart != "" {
+			// Combine with base filter and processor exclusion using AND
+			// Logic: (dynamic filters) AND (base exclusions) AND (processor exclusion)
+			// Example: (port 443 or port 5060) and (not port 8080) and (not port 50051)
+			finalFilter = fmt.Sprintf("(%s) and (%s)", dynamicPart, exclusionPart)
 		} else {
-			// No base filter - just use dynamic filters
+			// No base filter or processor exclusion - just use dynamic filters
 			finalFilter = dynamicPart
 		}
 	}

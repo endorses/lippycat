@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -335,6 +336,26 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 			return
 		}
 
+		// Fetch topology to discover downstream processors and hunters
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			topology, err := client.GetTopology(ctx)
+			if err != nil {
+				logger.Warn("Failed to fetch topology from processor",
+					"address", msg.Address,
+					"error", err)
+				// Non-fatal - continue with regular hunter status
+			} else if topology != nil {
+				// Send topology to TUI for processing
+				currentProgram.Send(TopologyReceivedMsg{
+					Address:  msg.Address,
+					Topology: topology,
+				})
+			}
+		}()
+
 		// Start hunter status subscription
 		if err := client.SubscribeHunterStatus(); err != nil {
 			// Non-fatal - continue anyway
@@ -513,4 +534,104 @@ func (m Model) handleCleanupOldProcessorsMsg(msg CleanupOldProcessorsMsg) (Model
 
 	// Schedule next cleanup
 	return m, cleanupProcessorsCmd()
+}
+
+// handleTopologyReceivedMsg processes topology information from a processor
+func (m Model) handleTopologyReceivedMsg(msg TopologyReceivedMsg) (Model, tea.Cmd) {
+	logger.Info("Received topology from processor",
+		"address", msg.Address,
+		"processor_id", msg.Topology.ProcessorId)
+
+	// Recursively process the topology tree to discover all processors and hunters
+	m.processTopologyNode(msg.Topology, msg.Address, "")
+
+	// Update NodesView with the discovered topology
+	procInfos := m.getProcessorInfoList()
+	m.uiState.NodesView.SetProcessors(procInfos)
+
+	return m, nil
+}
+
+// processTopologyNode recursively processes a topology node and its children
+// The address parameter is the address of the processor we're directly connected to (for inheriting TLS settings)
+func (m Model) processTopologyNode(node *management.ProcessorNode, address string, parentAddr string) {
+	if node == nil {
+		return
+	}
+
+	// Use the address from the node if available, otherwise use provided address
+	nodeAddr := node.Address
+	if nodeAddr == "" {
+		nodeAddr = address
+	}
+
+	// Determine TLS security for this processor
+	// If we're directly connected to this processor, use its TLS settings
+	// Otherwise, inherit from the root processor we're connected to
+	var tlsInsecure bool
+	if connectedProc, exists := m.connectionMgr.Processors[address]; exists {
+		// Use the TLS setting from the processor we're connected to
+		tlsInsecure = connectedProc.TLSInsecure
+	}
+
+	// Create or update processor entry
+	if _, exists := m.connectionMgr.Processors[nodeAddr]; !exists {
+		// Discover this processor
+		m.connectionMgr.Processors[nodeAddr] = &store.ProcessorConnection{
+			Address:      nodeAddr,
+			State:        store.ProcessorStateUnknown,
+			ProcessorID:  node.ProcessorId,
+			Status:       node.Status,
+			TLSInsecure:  tlsInsecure, // Inherit TLS setting from connected processor
+			UpstreamAddr: parentAddr,  // Use parent from topology tree, not node.UpstreamProcessor
+		}
+		logger.Debug("Discovered processor from topology",
+			"address", nodeAddr,
+			"processor_id", node.ProcessorId,
+			"parent_in_tree", parentAddr,
+			"tls_insecure", tlsInsecure)
+	} else {
+		// Update existing entry
+		proc := m.connectionMgr.Processors[nodeAddr]
+		proc.ProcessorID = node.ProcessorId
+		proc.Status = node.Status
+		// Update UpstreamAddr based on topology tree structure
+		proc.UpstreamAddr = parentAddr
+		// Update TLS setting if this is a discovered processor
+		if proc.State == store.ProcessorStateUnknown {
+			proc.TLSInsecure = tlsInsecure
+		}
+	}
+
+	// Convert and store hunters for this processor
+	hunters := make([]components.HunterInfo, 0, len(node.Hunters))
+	for _, h := range node.Hunters {
+		hunters = append(hunters, components.HunterInfo{
+			ID:               h.HunterId,
+			Hostname:         h.Hostname,
+			RemoteAddr:       h.RemoteAddr,
+			Status:           h.Status,
+			ConnectedAt:      time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
+			LastHeartbeat:    h.LastHeartbeatNs,
+			PacketsCaptured:  h.Stats.PacketsCaptured,
+			PacketsMatched:   0, // Not provided in topology
+			PacketsForwarded: h.Stats.PacketsForwarded,
+			PacketsDropped:   0, // Not provided in topology
+			ActiveFilters:    h.Stats.ActiveFilters,
+			Interfaces:       h.Interfaces,
+			ProcessorAddr:    nodeAddr,
+			Capabilities:     h.Capabilities,
+		})
+	}
+	m.connectionMgr.HuntersByProcessor[nodeAddr] = hunters
+
+	logger.Debug("Discovered hunters from topology",
+		"processor", nodeAddr,
+		"hunter_count", len(hunters))
+
+	// Recursively process downstream processors
+	// Pass the same 'address' (our connected processor) to inherit TLS settings
+	for _, downstream := range node.DownstreamProcessors {
+		m.processTopologyNode(downstream, address, nodeAddr)
+	}
 }

@@ -99,3 +99,9 @@ type ProcessorDisconnectedMsg struct {
 	Address string
 	Error   error
 }
+
+// TopologyReceivedMsg is sent when topology is fetched from a processor
+type TopologyReceivedMsg struct {
+	Address  string
+	Topology *management.ProcessorNode
+}

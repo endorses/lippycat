@@ -5,6 +5,7 @@ package nodesview
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,62 +39,70 @@ type TableViewParams struct {
 	ProcessorLines        map[int]int // Output: line -> processor index mapping
 }
 
-// buildProcessorHierarchy builds a hierarchical processor structure (upstream first, then downstream)
-// This matches the graph view's sorting algorithm
-func buildProcessorHierarchy(processors []ProcessorInfo) []ProcessorInfo {
+// processorWithDepth annotates a processor with its depth and tree position info
+type processorWithDepth struct {
+	ProcessorInfo
+	Depth         int  // How deep in tree (0 = root)
+	IsLastSibling bool // Is this the last child of its parent?
+}
+
+// buildProcessorHierarchy builds a hierarchical processor structure with depth information
+func buildProcessorHierarchy(processors []ProcessorInfo) []processorWithDepth {
 	if len(processors) == 0 {
-		return processors
+		return nil
 	}
 
-	processedAddrs := make(map[string]bool)
-	sortedProcs := make([]ProcessorInfo, 0, len(processors))
+	// Build parent -> children map
+	childrenMap := make(map[string][]ProcessorInfo)
+	var roots []ProcessorInfo
 
-	// Build address -> processor map for quick lookup
-	procMap := make(map[string]ProcessorInfo)
 	for _, proc := range processors {
-		procMap[proc.Address] = proc
-	}
-
-	// First pass: Add processors that have upstreams (leaf/intermediate processors)
-	var leafProcs []ProcessorInfo
-	for _, proc := range processors {
-		if proc.UpstreamAddr != "" {
-			leafProcs = append(leafProcs, proc)
-			processedAddrs[proc.Address] = true
+		if proc.UpstreamAddr == "" {
+			roots = append(roots, proc)
+		} else {
+			childrenMap[proc.UpstreamAddr] = append(childrenMap[proc.UpstreamAddr], proc)
 		}
 	}
 
-	// Second pass: For each leaf processor, add its upstream chain
-	for _, proc := range leafProcs {
-		upstream := proc.UpstreamAddr
-		upstreamChain := []ProcessorInfo{}
-		for upstream != "" {
-			if processedAddrs[upstream] {
-				break
+	// Sort roots alphabetically
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].Address < roots[j].Address
+	})
+
+	// Sort children of each parent alphabetically
+	for parent := range childrenMap {
+		children := childrenMap[parent]
+		sort.Slice(children, func(i, j int) bool {
+			return children[i].Address < children[j].Address
+		})
+		childrenMap[parent] = children
+	}
+
+	// Recursively build hierarchy with depth tracking
+	var result []processorWithDepth
+	var addProcessorWithChildren func(proc ProcessorInfo, depth int, isLast bool)
+	addProcessorWithChildren = func(proc ProcessorInfo, depth int, isLast bool) {
+		result = append(result, processorWithDepth{
+			ProcessorInfo: proc,
+			Depth:         depth,
+			IsLastSibling: isLast,
+		})
+		// Add children recursively
+		if children, hasChildren := childrenMap[proc.Address]; hasChildren {
+			for i, child := range children {
+				isLastChild := (i == len(children)-1)
+				addProcessorWithChildren(child, depth+1, isLastChild)
 			}
-			if upstreamProc, exists := procMap[upstream]; exists {
-				upstreamChain = append(upstreamChain, upstreamProc)
-				processedAddrs[upstream] = true
-				upstream = upstreamProc.UpstreamAddr
-			} else {
-				break
-			}
-		}
-		// Add upstream chain in reverse order (top-level first)
-		for i := len(upstreamChain) - 1; i >= 0; i-- {
-			sortedProcs = append(sortedProcs, upstreamChain[i])
-		}
-		sortedProcs = append(sortedProcs, proc)
-	}
-
-	// Third pass: Add any remaining processors without upstream connections (standalone processors)
-	for _, proc := range processors {
-		if !processedAddrs[proc.Address] {
-			sortedProcs = append(sortedProcs, proc)
 		}
 	}
 
-	return sortedProcs
+	// Add all root processors and their children
+	for i, root := range roots {
+		isLastRoot := (i == len(roots)-1)
+		addProcessorWithChildren(root, 0, isLastRoot)
+	}
+
+	return result
 }
 
 // RenderTreeView renders processors and hunters in a tree structure with table columns
@@ -116,9 +125,6 @@ func RenderTreeView(params TableViewParams) (string, int) {
 	calc := ColumnWidthCalculator{Width: params.Width}
 	idCol, hostCol, _, uptimeCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
 
-	// Tree prefix is fixed width
-	treeCol := 6 // "  ├─ " or "  └─ "
-
 	// Build hierarchical processor structure (same as graph view)
 	sortedProcs := buildProcessorHierarchy(params.Processors)
 
@@ -130,7 +136,24 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		}
 	}
 
+	// Track which ancestors still have pending siblings (for tree lines)
+	// This is used to determine which vertical lines (│) need to be drawn
+	ancestorHasPendingSiblings := make(map[int]bool) // depth -> has pending siblings
+
 	for procIdx, proc := range sortedProcs {
+		// Update ancestor tracking - check if there are more siblings at this depth
+		if proc.Depth > 0 {
+			// Check if this processor's parent has more children after this one
+			hasSiblingAfter := false
+			for i := procIdx + 1; i < len(sortedProcs); i++ {
+				if sortedProcs[i].UpstreamAddr == proc.UpstreamAddr {
+					hasSiblingAfter = true
+					break
+				}
+			}
+			ancestorHasPendingSiblings[proc.Depth-1] = hasSiblingAfter || !proc.IsLastSibling
+		}
+
 		// Track this processor's line position for mouse clicks
 		// Find the original index in params.Processors for click mapping
 		originalIdx := 0
@@ -143,7 +166,7 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		params.ProcessorLines[linesRendered] = originalIdx
 
 		// Determine if this processor is a child (has upstream)
-		isChildProcessor := proc.UpstreamAddr != ""
+		isChildProcessor := proc.Depth > 0
 
 		// Status indicator for processor - prioritize connection state over reported status
 		var statusIcon string
@@ -200,16 +223,39 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		// Gray style for tree prefix (matching hunter tree prefixes)
 		treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
+		// Build tree prefix with proper depth and continuation lines
+		var treePrefix string
+		if proc.Depth > 0 {
+			// Build prefix with ancestor continuation lines
+			for d := 0; d < proc.Depth-1; d++ {
+				if ancestorHasPendingSiblings[d] {
+					treePrefix += "│ "
+				} else {
+					treePrefix += "  "
+				}
+			}
+			// Add branch connector
+			if proc.IsLastSibling {
+				treePrefix += "└─ "
+			} else {
+				treePrefix += "├─ "
+			}
+		}
+
 		// Apply selection styling if this processor is selected
 		if params.SelectedProcessorAddr == proc.Address {
 			selectedNodeLine = linesRendered
 			if isChildProcessor {
 				// Child processor - show with tree branch (gray) before status icon
+				// Even when selected, keep tree prefix gray
+				treePrefixRendered := treePrefixStyle.Render(treePrefix)
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("  └─ %s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf("  └─ %s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
 				}
+				// Combine gray prefix with selected line
+				b.WriteString(treePrefixRendered + selectedStyle.Render(procLine) + "\n")
 			} else {
 				// Root processor - no tree prefix
 				if proc.ProcessorID != "" {
@@ -217,15 +263,15 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				} else {
 					procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
 				}
+				b.WriteString(selectedStyle.Width(params.Width).Render(procLine) + "\n")
 			}
-			b.WriteString(selectedStyle.Width(params.Width).Render(procLine) + "\n")
 		} else {
 			// Style the status icon with color separately
 			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
 
 			if isChildProcessor {
 				// Child processor - gray tree prefix, then colored status icon
-				treePrefixRendered := treePrefixStyle.Render("  └─ ")
+				treePrefixRendered := treePrefixStyle.Render(treePrefix)
 				if proc.ProcessorID != "" {
 					procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
@@ -250,16 +296,29 @@ func RenderTreeView(params TableViewParams) (string, int) {
 
 		if hasHunters || !isParent {
 			// Table header for hunters under this processor
-			// Add tree structure continuation to header with proper indentation
+			// Build header prefix with proper depth and alignment
 			var headerTreePrefix string
-			if isChildProcessor {
-				headerTreePrefix = "     │  " // Indent under child processor
-			} else {
-				headerTreePrefix = "  │  " // No indent for root processor
+			for d := 0; d < proc.Depth; d++ {
+				if ancestorHasPendingSiblings[d] {
+					headerTreePrefix += "│ "
+				} else {
+					headerTreePrefix += "  "
+				}
 			}
-			headerLine := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-				treeCol+2, headerTreePrefix,
-				1, "S", // Status
+			// Align with the position of the processor's status icon
+			// For child processors, we have "├─ ●", so add "│" at the same indent level
+			// For root processors, we have "●" at position 0, so add "│  " directly
+			if proc.Depth > 0 {
+				headerTreePrefix += " │  " // 1 space to align after "├─ ", then "│  "
+			} else {
+				headerTreePrefix += "│  " // Root level: just vertical continuation
+			}
+
+			// Style the tree prefix in gray, rest of header in bold
+			treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+			headerTreePrefixStyled := treePrefixStyle.Render(headerTreePrefix)
+			headerLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				"S", // Status
 				idCol, "Hunter ID",
 				8, "Mode", // Mode column (Generic/VoIP)
 				hostCol, "IP Address",
@@ -271,7 +330,7 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			headerStyle := lipgloss.NewStyle().
 				Foreground(params.Theme.Foreground).
 				Bold(true)
-			b.WriteString(headerStyle.Render(headerLine) + "\n")
+			b.WriteString(headerTreePrefixStyled + headerStyle.Render(headerLine) + "\n")
 			linesRendered++
 
 			// Render hunters under this processor in table format
@@ -280,12 +339,22 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				if !isParent {
 					emptyStyle := lipgloss.NewStyle().
 						Foreground(lipgloss.Color("240"))
-					var emptyLine string
-					if isChildProcessor {
-						emptyLine = fmt.Sprintf("     └─  (no hunters connected)")
-					} else {
-						emptyLine = fmt.Sprintf("  └─  (no hunters connected)")
+					// Build empty line prefix with proper alignment
+					var emptyPrefix string
+					for d := 0; d < proc.Depth; d++ {
+						if ancestorHasPendingSiblings[d] {
+							emptyPrefix += "│ "
+						} else {
+							emptyPrefix += "  "
+						}
 					}
+					// Align with hunter position (1 space after depth prefix, then └─)
+					if proc.Depth > 0 {
+						emptyPrefix += " └─  "
+					} else {
+						emptyPrefix += "└─  "
+					}
+					emptyLine := fmt.Sprintf("%s(no hunters connected)", emptyPrefix)
 					b.WriteString(emptyStyle.Render(emptyLine) + "\n")
 					linesRendered++
 				}
@@ -294,19 +363,25 @@ func RenderTreeView(params TableViewParams) (string, int) {
 
 		for i, hunter := range proc.Hunters {
 			isLast := i == len(proc.Hunters)-1
+			// Build prefix with proper depth and ancestor lines, aligned with status icon
 			var prefix string
-			if isChildProcessor {
-				// Hunters under child processor - extra indentation
-				prefix = "     ├─ "
-				if isLast {
-					prefix = "     └─ "
+			for d := 0; d < proc.Depth; d++ {
+				if ancestorHasPendingSiblings[d] {
+					prefix += "│ "
+				} else {
+					prefix += "  "
 				}
+			}
+			// Add alignment spacing and branch connector for hunter
+			// Need to align with the processor's status icon position
+			if proc.Depth > 0 {
+				prefix += " " // 1 space to align after "├─ " (├ + ─ = 2 chars, then space)
+			}
+			// Add branch connector for hunter
+			if isLast {
+				prefix += "└─ "
 			} else {
-				// Hunters under root processor - normal indentation
-				prefix = "  ├─ "
-				if isLast {
-					prefix = "  └─ "
-				}
+				prefix += "├─ "
 			}
 
 			// Status indicator - use different icons for better visibility when selected
@@ -372,12 +447,16 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			// Current line is linesRendered (before we increment it)
 			params.HunterLines[linesRendered] = globalIndex
 
+			// Style tree prefix in gray
+			treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+			prefixStyled := treePrefixStyle.Render(prefix)
+
 			// Build the line differently based on selection
 			if globalIndex == params.SelectedIndex {
 				selectedNodeLine = linesRendered
 				// For selected row: build plain text line, then apply full-width background
-				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-					treeCol, prefix,
+				// Prefix is styled gray separately, status is 1 char, then space before next column
+				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 					statusIcon,
 					idCol, idStr,
 					8, modeStr,
@@ -387,14 +466,14 @@ func RenderTreeView(params TableViewParams) (string, int) {
 					forwardedCol, forwardedStr,
 					filtersCol, filtersStr,
 				)
-				// Render with full-width background
-				renderedRow := selectedStyle.Width(params.Width).Render(hunterLine)
+				// Combine gray prefix with selected line
+				renderedRow := prefixStyled + selectedStyle.Render(hunterLine)
 				b.WriteString(renderedRow + "\n")
 			} else {
-				// For non-selected: style the status icon separately
+				// For non-selected: style the status icon and prefix separately
 				statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
-				hunterLine := fmt.Sprintf("%-*s %s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
-					treeCol, prefix,
+				// Prefix is styled gray separately, status is colored, then space before next column
+				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 					statusStyled,
 					idCol, idStr,
 					8, modeStr,
@@ -404,24 +483,56 @@ func RenderTreeView(params TableViewParams) (string, int) {
 					forwardedCol, forwardedStr,
 					filtersCol, filtersStr,
 				)
-				b.WriteString(hunterLine + "\n")
+				b.WriteString(prefixStyled + hunterLine + "\n")
 			}
 
 			linesRendered++
 		}
 
-		// Add blank line after processor group, but not if the next processor is a child of this one
-		// Check if next processor in sorted list has this processor as upstream
-		addBlankLine := true
+		// Handle spacing after processor group
 		if procIdx+1 < len(sortedProcs) {
 			nextProc := sortedProcs[procIdx+1]
-			if nextProc.UpstreamAddr == proc.Address {
-				// Next processor is a child of this one - don't add blank line
-				addBlankLine = false
-			}
-		}
 
-		if addBlankLine {
+			if nextProc.UpstreamAddr == proc.Address {
+				// Next processor is a child of this one - add continuation line
+				var continuationLine string
+				// Build prefix up to this processor's level
+				for d := 0; d < proc.Depth; d++ {
+					if ancestorHasPendingSiblings[d] {
+						continuationLine += "│ "
+					} else {
+						continuationLine += "  "
+					}
+				}
+				// Add the vertical line at this processor's branch level
+				continuationLine += "│"
+				treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+				b.WriteString(treePrefixStyle.Render(continuationLine) + "\n")
+				linesRendered++
+			} else if !proc.IsLastSibling && proc.Depth > 0 {
+				// This processor has siblings - add vertical continuation line for the PARENT's level
+				// The line connects the parent to its next child (this proc's sibling)
+				var continuationLine string
+				// Build prefix up to parent's level (proc.Depth - 1)
+				for d := 0; d < proc.Depth-1; d++ {
+					if ancestorHasPendingSiblings[d] {
+						continuationLine += "│ "
+					} else {
+						continuationLine += "  "
+					}
+				}
+				// Add the vertical line at parent's branch level
+				continuationLine += "│"
+				treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+				b.WriteString(treePrefixStyle.Render(continuationLine) + "\n")
+				linesRendered++
+			} else {
+				// Add blank line between processor groups
+				b.WriteString("\n")
+				linesRendered++
+			}
+		} else {
+			// Last processor - add blank line
 			b.WriteString("\n")
 			linesRendered++
 		}

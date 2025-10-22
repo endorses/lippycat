@@ -213,6 +213,22 @@ func (c *Client) GetConn() *grpc.ClientConn {
 	return c.conn
 }
 
+// GetTopology fetches the complete downstream topology from this processor
+// Returns nil if the processor doesn't support topology queries
+func (c *Client) GetTopology(ctx context.Context) (*management.ProcessorNode, error) {
+	// Only works for processors
+	if c.nodeType == NodeTypeHunter {
+		return nil, fmt.Errorf("topology is only available from processor nodes")
+	}
+
+	resp, err := c.mgmtClient.GetTopology(ctx, &management.TopologyRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get topology: %w", err)
+	}
+
+	return resp.Processor, nil
+}
+
 // StreamPackets starts receiving packet stream from remote node
 func (c *Client) StreamPackets() error {
 	return c.StreamPacketsWithFilter(nil)

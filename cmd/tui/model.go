@@ -357,6 +357,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleProcessorConnectedMsg(msg)
 	case ProcessorDisconnectedMsg:
 		return m.handleProcessorDisconnectedMsg(msg)
+	case TopologyReceivedMsg:
+		return m.handleTopologyReceivedMsg(msg)
 	case CleanupOldProcessorsMsg:
 		return m.handleCleanupOldProcessorsMsg(msg)
 	case components.HunterSelectionConfirmedMsg:

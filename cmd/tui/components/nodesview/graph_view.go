@@ -76,61 +76,51 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 		Reverse(true).
 		Bold(true)
 
-	// Build hierarchical processor structure
-	// Map to track which processors have been placed
-	processedAddrs := make(map[string]bool)
-	sortedProcs := make([]ProcessorInfo, 0, len(params.Processors))
+	// Build hierarchical processor structure using proper tree algorithm
+	// Build parent -> children map
+	childrenMap := make(map[string][]ProcessorInfo)
+	var roots []ProcessorInfo
 
-	// Build address -> processor map for quick lookup
-	procMap := make(map[string]ProcessorInfo)
 	for _, proc := range params.Processors {
-		procMap[proc.Address] = proc
-	}
-
-	// First pass: Add processors that have upstreams (leaf/intermediate processors)
-	// These are the processors we're actively connected to
-	var leafProcs []ProcessorInfo
-	for _, proc := range params.Processors {
-		if proc.UpstreamAddr != "" {
-			leafProcs = append(leafProcs, proc)
-			processedAddrs[proc.Address] = true
+		if proc.UpstreamAddr == "" {
+			// Root processor (no upstream)
+			roots = append(roots, proc)
+		} else {
+			// Child processor - add to parent's children list
+			childrenMap[proc.UpstreamAddr] = append(childrenMap[proc.UpstreamAddr], proc)
 		}
 	}
-	// Sort leaf processors alphabetically for consistency
-	sort.Slice(leafProcs, func(i, j int) bool {
-		return leafProcs[i].Address < leafProcs[j].Address
+
+	// Sort roots alphabetically for consistent ordering
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].Address < roots[j].Address
 	})
 
-	// Second pass: For each leaf processor, add its upstream chain (if not already added)
-	for _, proc := range leafProcs {
-		// Walk up the upstream chain and collect processors
-		upstream := proc.UpstreamAddr
-		upstreamChain := []ProcessorInfo{}
-		for upstream != "" {
-			if processedAddrs[upstream] {
-				break // Already added
-			}
-			if upstreamProc, exists := procMap[upstream]; exists {
-				upstreamChain = append(upstreamChain, upstreamProc)
-				processedAddrs[upstream] = true
-				upstream = upstreamProc.UpstreamAddr
-			} else {
-				break // Upstream not in our list
-			}
-		}
-		// Add upstream chain in reverse order (top-level first)
-		for i := len(upstreamChain) - 1; i >= 0; i-- {
-			sortedProcs = append(sortedProcs, upstreamChain[i])
-		}
-		// Add the leaf processor
-		sortedProcs = append(sortedProcs, proc)
+	// Sort children of each parent alphabetically
+	for parent := range childrenMap {
+		children := childrenMap[parent]
+		sort.Slice(children, func(i, j int) bool {
+			return children[i].Address < children[j].Address
+		})
+		childrenMap[parent] = children
 	}
 
-	// Third pass: Add any remaining processors that weren't part of a hierarchy
-	for _, proc := range params.Processors {
-		if !processedAddrs[proc.Address] {
-			sortedProcs = append(sortedProcs, proc)
+	// Recursively build hierarchy using DFS
+	sortedProcs := make([]ProcessorInfo, 0, len(params.Processors))
+	var addProcessorWithChildren func(proc ProcessorInfo)
+	addProcessorWithChildren = func(proc ProcessorInfo) {
+		sortedProcs = append(sortedProcs, proc)
+		// Add children recursively
+		if children, hasChildren := childrenMap[proc.Address]; hasChildren {
+			for _, child := range children {
+				addProcessorWithChildren(child)
+			}
 		}
+	}
+
+	// Add all root processors and their children
+	for _, root := range roots {
+		addProcessorWithChildren(root)
 	}
 
 	// Track current line number for click region tracking
@@ -206,10 +196,10 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 		proc.Hunters = sortedHunters
 
 		// Draw connection to upstream processor if this processor has an upstream
-		if procIdx > 0 {
-			// Check if this processor should connect to the previous one (upstream)
-			if proc.UpstreamAddr != "" && sortedProcs[procIdx-1].Address == proc.UpstreamAddr {
-				// Draw connection line from previous processor (upstream) to this one
+		if procIdx > 0 && proc.UpstreamAddr != "" {
+			// Check if the immediate previous processor is the upstream
+			if sortedProcs[procIdx-1].Address == proc.UpstreamAddr {
+				// Direct child - draw vertical connection line
 				centerPos := max(0, (renderWidth-processorBoxWidth)/2)
 				arrowPos := centerPos + processorBoxWidth/2
 				b.WriteString(strings.Repeat(" ", arrowPos))
@@ -219,10 +209,34 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 				b.WriteString("│\n")
 				currentLine++
 			} else {
-				// No upstream connection - add spacing between processor groups
-				b.WriteString("\n\n")
-				currentLine += 2
+				// Sibling or more distant relationship - check if upstream exists earlier
+				upstreamExists := false
+				for i := 0; i < procIdx; i++ {
+					if sortedProcs[i].Address == proc.UpstreamAddr {
+						upstreamExists = true
+						break
+					}
+				}
+				if upstreamExists {
+					// Upstream exists earlier (this is a sibling) - draw vertical connection
+					centerPos := max(0, (renderWidth-processorBoxWidth)/2)
+					arrowPos := centerPos + processorBoxWidth/2
+					b.WriteString(strings.Repeat(" ", arrowPos))
+					b.WriteString("│\n")
+					currentLine++
+					b.WriteString(strings.Repeat(" ", arrowPos))
+					b.WriteString("│\n")
+					currentLine++
+				} else {
+					// No upstream found - separate group
+					b.WriteString("\n\n")
+					currentLine += 2
+				}
 			}
+		} else if procIdx > 0 {
+			// No upstream - add spacing between processor groups
+			b.WriteString("\n\n")
+			currentLine += 2
 		}
 
 		// Processor box

@@ -9,6 +9,9 @@ service ManagementService {
     // RegisterHunter is called when a hunter connects to a processor
     rpc RegisterHunter(HunterRegistration) returns (RegistrationResponse);
 
+    // RegisterProcessor is called when a processor connects to forward to upstream
+    rpc RegisterProcessor(ProcessorRegistration) returns (ProcessorRegistrationResponse);
+
     // Heartbeat maintains connection and reports hunter status
     rpc Heartbeat(stream HunterHeartbeat) returns (stream ProcessorHeartbeat);
 
@@ -29,6 +32,10 @@ service ManagementService {
 
     // ListAvailableHunters retrieves list of all hunters connected to processor (for TUI hunter selection)
     rpc ListAvailableHunters(ListHuntersRequest) returns (ListHuntersResponse);
+
+    // GetTopology retrieves the complete downstream topology (processors and hunters)
+    // Recursively queries downstream processors to build full hierarchy
+    rpc GetTopology(TopologyRequest) returns (TopologyResponse);
 }
 
 // HunterRegistration sent when hunter first connects
@@ -47,6 +54,27 @@ message HunterRegistration {
 
     // Capture capabilities
     HunterCapabilities capabilities = 5;
+}
+
+// ProcessorRegistration sent when a processor connects to forward upstream
+message ProcessorRegistration {
+    // Processor identifier
+    string processor_id = 1;
+
+    // Processor listen address (for upstream to query back)
+    string listen_address = 2;
+
+    // Processor version
+    string version = 3;
+}
+
+// ProcessorRegistrationResponse from upstream after processor registration
+message ProcessorRegistrationResponse {
+    // Registration accepted
+    bool accepted = 1;
+
+    // Error message if rejected
+    string error = 2;
 }
 
 // HunterCapabilities describes what a hunter can do
@@ -386,4 +414,36 @@ message AvailableHunter {
 
     // Hunter capabilities (filter types, GPU acceleration, etc.)
     HunterCapabilities capabilities = 7;
+}
+
+// TopologyRequest to retrieve topology
+message TopologyRequest {
+    // No parameters needed - returns full downstream topology
+}
+
+// TopologyResponse contains the complete topology
+message TopologyResponse {
+    // This processor's information
+    ProcessorNode processor = 1;
+}
+
+// ProcessorNode represents a processor in the topology tree
+message ProcessorNode {
+    // Processor address
+    string address = 1;
+
+    // Processor identifier
+    string processor_id = 2;
+
+    // Processor status
+    ProcessorStatus status = 3;
+
+    // Upstream processor address (empty if this is root)
+    string upstream_processor = 4;
+
+    // Hunters directly connected to this processor
+    repeated ConnectedHunter hunters = 5;
+
+    // Downstream processors forwarding to this processor
+    repeated ProcessorNode downstream_processors = 6;
 }

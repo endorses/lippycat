@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
@@ -18,11 +19,13 @@ import (
 
 // Config contains upstream connection configuration
 type Config struct {
-	Address     string // Upstream processor address
-	TLSEnabled  bool   // Enable TLS for upstream connection
-	TLSCAFile   string // CA certificate file
-	TLSCertFile string // Client certificate file
-	TLSKeyFile  string // Client key file
+	Address       string // Upstream processor address
+	TLSEnabled    bool   // Enable TLS for upstream connection
+	TLSCAFile     string // CA certificate file
+	TLSCertFile   string // Client certificate file
+	TLSKeyFile    string // Client key file
+	ProcessorID   string // This processor's ID (for registration)
+	ListenAddress string // This processor's listen address (for upstream to query back)
 }
 
 // Manager handles upstream processor connection and forwarding
@@ -30,10 +33,11 @@ type Manager struct {
 	config Config
 
 	// gRPC connection
-	conn   *grpc.ClientConn
-	client data.DataServiceClient
-	stream data.DataService_StreamPacketsClient
-	mu     sync.Mutex
+	conn       *grpc.ClientConn
+	dataClient data.DataServiceClient
+	mgmtClient management.ManagementServiceClient
+	stream     data.DataService_StreamPacketsClient
+	mu         sync.Mutex
 
 	// Packet forwarding stats
 	packetsForwarded *atomic.Uint64
@@ -97,10 +101,35 @@ func (m *Manager) Connect() error {
 	}
 
 	m.conn = conn
-	m.client = data.NewDataServiceClient(conn)
+	m.dataClient = data.NewDataServiceClient(conn)
+	m.mgmtClient = management.NewManagementServiceClient(conn)
+
+	// Register this processor with upstream
+	if m.config.ProcessorID != "" && m.config.ListenAddress != "" {
+		logger.Info("Registering processor with upstream",
+			"processor_id", m.config.ProcessorID,
+			"listen_address", m.config.ListenAddress)
+
+		regResp, err := m.mgmtClient.RegisterProcessor(m.ctx, &management.ProcessorRegistration{
+			ProcessorId:   m.config.ProcessorID,
+			ListenAddress: m.config.ListenAddress,
+			Version:       "dev", // TODO: Use actual version
+		})
+		if err != nil {
+			_ = conn.Close()
+			return fmt.Errorf("failed to register with upstream processor: %w", err)
+		}
+		if !regResp.Accepted {
+			_ = conn.Close()
+			return fmt.Errorf("upstream processor rejected registration: %s", regResp.Error)
+		}
+		logger.Info("Successfully registered with upstream processor")
+	} else {
+		logger.Warn("ProcessorID or ListenAddress not configured, skipping processor registration")
+	}
 
 	// Create streaming connection
-	stream, err := m.client.StreamPackets(m.ctx)
+	stream, err := m.dataClient.StreamPackets(m.ctx)
 	if err != nil {
 		_ = conn.Close()
 		return fmt.Errorf("failed to create upstream stream: %w", err)

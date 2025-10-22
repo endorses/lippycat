@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/enrichment"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/flow"
@@ -72,6 +73,7 @@ type Processor struct {
 	statsCollector    *stats.Collector
 	subscriberManager *subscriber.Manager
 	upstreamManager   *upstream.Manager
+	downstreamManager *downstream.Manager
 	enricher          *enrichment.Enricher
 
 	// Packet counters (shared with stats collector and flow controller)
@@ -154,15 +156,27 @@ func New(config Config) (*Processor, error) {
 	if config.UpstreamAddr != "" {
 		p.upstreamManager = upstream.NewManager(
 			upstream.Config{
-				Address:     config.UpstreamAddr,
-				TLSEnabled:  config.TLSEnabled,
-				TLSCAFile:   config.TLSCAFile,
-				TLSCertFile: config.TLSCertFile,
-				TLSKeyFile:  config.TLSKeyFile,
+				Address:       config.UpstreamAddr,
+				TLSEnabled:    config.TLSEnabled,
+				TLSCAFile:     config.TLSCAFile,
+				TLSCertFile:   config.TLSCertFile,
+				TLSKeyFile:    config.TLSKeyFile,
+				ProcessorID:   config.ProcessorID,
+				ListenAddress: config.ListenAddr, // Use the listen address so upstream can query back
 			},
 			&p.packetsForwarded,
 		)
 	}
+
+	// Initialize downstream manager (always, to track processors forwarding to us)
+	p.downstreamManager = downstream.NewManager(
+		!config.TLSEnabled, // tlsInsecure = !TLSEnabled
+		config.TLSCertFile,
+		config.TLSKeyFile,
+		config.TLSCAFile,
+		false, // tlsSkipVerify
+		"",    // tlsServerName
+	)
 
 	return p, nil
 }
@@ -653,6 +667,74 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 
 	return &management.ListHuntersResponse{
 		Hunters: availableHunters,
+	}, nil
+}
+
+// RegisterProcessor registers a downstream processor that forwards packets to this processor
+func (p *Processor) RegisterProcessor(ctx context.Context, req *management.ProcessorRegistration) (*management.ProcessorRegistrationResponse, error) {
+	logger.Info("Downstream processor registration",
+		"processor_id", req.ProcessorId,
+		"listen_address", req.ListenAddress,
+		"version", req.Version)
+
+	err := p.downstreamManager.Register(req.ProcessorId, req.ListenAddress, req.Version)
+	if err != nil {
+		return &management.ProcessorRegistrationResponse{
+			Accepted: false,
+			Error:    err.Error(),
+		}, nil
+	}
+
+	return &management.ProcessorRegistrationResponse{
+		Accepted: true,
+	}, nil
+}
+
+// GetTopology returns the complete downstream topology (processors and hunters)
+func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyRequest) (*management.TopologyResponse, error) {
+	logger.Debug("GetTopology request")
+
+	// Get hunters for this processor
+	hunters := p.hunterManager.GetAll("")
+	connectedHunters := make([]*management.ConnectedHunter, 0, len(hunters))
+	for _, h := range hunters {
+		durationNs := time.Now().UnixNano() - h.ConnectedAt
+		durationSec := uint64(durationNs / 1e9) // #nosec G115
+
+		connectedHunters = append(connectedHunters, &management.ConnectedHunter{
+			HunterId:             h.ID,
+			Hostname:             h.Hostname,
+			RemoteAddr:           h.RemoteAddr,
+			Status:               h.Status,
+			ConnectedDurationSec: durationSec,
+			LastHeartbeatNs:      h.LastHeartbeat,
+			Stats: &management.HunterStats{
+				PacketsCaptured:  h.PacketsCaptured,
+				PacketsForwarded: h.PacketsForwarded,
+				ActiveFilters:    h.ActiveFilters,
+			},
+			Interfaces:   h.Interfaces,
+			Capabilities: h.Capabilities,
+		})
+	}
+
+	// Get processor stats
+	processorStats := p.statsCollector.GetProto()
+
+	// Recursively query downstream processors
+	node, err := p.downstreamManager.GetTopology(
+		ctx,
+		p.config.ProcessorID,
+		processorStats.Status,
+		p.config.UpstreamAddr,
+		connectedHunters,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &management.TopologyResponse{
+		Processor: node,
 	}, nil
 }
 

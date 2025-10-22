@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v6.32.1
-// source: management.proto
+// source: api/proto/management.proto
 
 package management
 
@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ManagementService_RegisterHunter_FullMethodName       = "/lippycat.management.ManagementService/RegisterHunter"
+	ManagementService_RegisterProcessor_FullMethodName    = "/lippycat.management.ManagementService/RegisterProcessor"
 	ManagementService_Heartbeat_FullMethodName            = "/lippycat.management.ManagementService/Heartbeat"
 	ManagementService_GetFilters_FullMethodName           = "/lippycat.management.ManagementService/GetFilters"
 	ManagementService_SubscribeFilters_FullMethodName     = "/lippycat.management.ManagementService/SubscribeFilters"
@@ -27,6 +28,7 @@ const (
 	ManagementService_UpdateFilter_FullMethodName         = "/lippycat.management.ManagementService/UpdateFilter"
 	ManagementService_DeleteFilter_FullMethodName         = "/lippycat.management.ManagementService/DeleteFilter"
 	ManagementService_ListAvailableHunters_FullMethodName = "/lippycat.management.ManagementService/ListAvailableHunters"
+	ManagementService_GetTopology_FullMethodName          = "/lippycat.management.ManagementService/GetTopology"
 )
 
 // ManagementServiceClient is the client API for ManagementService service.
@@ -37,6 +39,8 @@ const (
 type ManagementServiceClient interface {
 	// RegisterHunter is called when a hunter connects to a processor
 	RegisterHunter(ctx context.Context, in *HunterRegistration, opts ...grpc.CallOption) (*RegistrationResponse, error)
+	// RegisterProcessor is called when a processor connects to forward to upstream
+	RegisterProcessor(ctx context.Context, in *ProcessorRegistration, opts ...grpc.CallOption) (*ProcessorRegistrationResponse, error)
 	// Heartbeat maintains connection and reports hunter status
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HunterHeartbeat, ProcessorHeartbeat], error)
 	// GetFilters retrieves current filter configuration for a hunter
@@ -51,6 +55,9 @@ type ManagementServiceClient interface {
 	DeleteFilter(ctx context.Context, in *FilterDeleteRequest, opts ...grpc.CallOption) (*FilterUpdateResult, error)
 	// ListAvailableHunters retrieves list of all hunters connected to processor (for TUI hunter selection)
 	ListAvailableHunters(ctx context.Context, in *ListHuntersRequest, opts ...grpc.CallOption) (*ListHuntersResponse, error)
+	// GetTopology retrieves the complete downstream topology (processors and hunters)
+	// Recursively queries downstream processors to build full hierarchy
+	GetTopology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
 }
 
 type managementServiceClient struct {
@@ -65,6 +72,16 @@ func (c *managementServiceClient) RegisterHunter(ctx context.Context, in *Hunter
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegistrationResponse)
 	err := c.cc.Invoke(ctx, ManagementService_RegisterHunter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managementServiceClient) RegisterProcessor(ctx context.Context, in *ProcessorRegistration, opts ...grpc.CallOption) (*ProcessorRegistrationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProcessorRegistrationResponse)
+	err := c.cc.Invoke(ctx, ManagementService_RegisterProcessor_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,6 +170,16 @@ func (c *managementServiceClient) ListAvailableHunters(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *managementServiceClient) GetTopology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TopologyResponse)
+	err := c.cc.Invoke(ctx, ManagementService_GetTopology_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagementServiceServer is the server API for ManagementService service.
 // All implementations must embed UnimplementedManagementServiceServer
 // for forward compatibility.
@@ -161,6 +188,8 @@ func (c *managementServiceClient) ListAvailableHunters(ctx context.Context, in *
 type ManagementServiceServer interface {
 	// RegisterHunter is called when a hunter connects to a processor
 	RegisterHunter(context.Context, *HunterRegistration) (*RegistrationResponse, error)
+	// RegisterProcessor is called when a processor connects to forward to upstream
+	RegisterProcessor(context.Context, *ProcessorRegistration) (*ProcessorRegistrationResponse, error)
 	// Heartbeat maintains connection and reports hunter status
 	Heartbeat(grpc.BidiStreamingServer[HunterHeartbeat, ProcessorHeartbeat]) error
 	// GetFilters retrieves current filter configuration for a hunter
@@ -175,6 +204,9 @@ type ManagementServiceServer interface {
 	DeleteFilter(context.Context, *FilterDeleteRequest) (*FilterUpdateResult, error)
 	// ListAvailableHunters retrieves list of all hunters connected to processor (for TUI hunter selection)
 	ListAvailableHunters(context.Context, *ListHuntersRequest) (*ListHuntersResponse, error)
+	// GetTopology retrieves the complete downstream topology (processors and hunters)
+	// Recursively queries downstream processors to build full hierarchy
+	GetTopology(context.Context, *TopologyRequest) (*TopologyResponse, error)
 	mustEmbedUnimplementedManagementServiceServer()
 }
 
@@ -187,6 +219,9 @@ type UnimplementedManagementServiceServer struct{}
 
 func (UnimplementedManagementServiceServer) RegisterHunter(context.Context, *HunterRegistration) (*RegistrationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterHunter not implemented")
+}
+func (UnimplementedManagementServiceServer) RegisterProcessor(context.Context, *ProcessorRegistration) (*ProcessorRegistrationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RegisterProcessor not implemented")
 }
 func (UnimplementedManagementServiceServer) Heartbeat(grpc.BidiStreamingServer[HunterHeartbeat, ProcessorHeartbeat]) error {
 	return status.Errorf(codes.Unimplemented, "method Heartbeat not implemented")
@@ -208,6 +243,9 @@ func (UnimplementedManagementServiceServer) DeleteFilter(context.Context, *Filte
 }
 func (UnimplementedManagementServiceServer) ListAvailableHunters(context.Context, *ListHuntersRequest) (*ListHuntersResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAvailableHunters not implemented")
+}
+func (UnimplementedManagementServiceServer) GetTopology(context.Context, *TopologyRequest) (*TopologyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTopology not implemented")
 }
 func (UnimplementedManagementServiceServer) mustEmbedUnimplementedManagementServiceServer() {}
 func (UnimplementedManagementServiceServer) testEmbeddedByValue()                           {}
@@ -244,6 +282,24 @@ func _ManagementService_RegisterHunter_Handler(srv interface{}, ctx context.Cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagementServiceServer).RegisterHunter(ctx, req.(*HunterRegistration))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagementService_RegisterProcessor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProcessorRegistration)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).RegisterProcessor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_RegisterProcessor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).RegisterProcessor(ctx, req.(*ProcessorRegistration))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -356,6 +412,24 @@ func _ManagementService_ListAvailableHunters_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagementService_GetTopology_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TopologyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).GetTopology(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_GetTopology_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).GetTopology(ctx, req.(*TopologyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagementService_ServiceDesc is the grpc.ServiceDesc for ManagementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -366,6 +440,10 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterHunter",
 			Handler:    _ManagementService_RegisterHunter_Handler,
+		},
+		{
+			MethodName: "RegisterProcessor",
+			Handler:    _ManagementService_RegisterProcessor_Handler,
 		},
 		{
 			MethodName: "GetFilters",
@@ -387,6 +465,10 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListAvailableHunters",
 			Handler:    _ManagementService_ListAvailableHunters_Handler,
 		},
+		{
+			MethodName: "GetTopology",
+			Handler:    _ManagementService_GetTopology_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -401,5 +483,5 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "management.proto",
+	Metadata: "api/proto/management.proto",
 }

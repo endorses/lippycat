@@ -99,6 +99,7 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			ConnectionState: connState,
 			TLSInsecure:     proc.TLSInsecure,
 			Hunters:         displayHunters,
+			TotalHunters:    len(allHunters), // Total hunters connected to processor
 		})
 	}
 	return procInfos

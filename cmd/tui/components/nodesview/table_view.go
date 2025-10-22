@@ -22,6 +22,7 @@ type ProcessorInfo struct {
 	ConnectionState ProcessorConnectionState
 	TLSInsecure     bool // True if connection is insecure (no TLS)
 	Hunters         []types.HunterInfo
+	TotalHunters    int // Total hunters connected to this processor (all hunters)
 }
 
 // TableViewParams contains all parameters needed for rendering table views
@@ -111,9 +112,9 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		// Processor header with ID (if available)
 		var procLine string
 		if proc.ProcessorID != "" {
-			procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, len(proc.Hunters))
+			procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
 		} else {
-			procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, len(proc.Hunters))
+			procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
 		}
 
 		// Apply selection styling if this processor is selected
@@ -125,9 +126,9 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
 			// Remove the icon from procLine since we're rendering it separately
 			if proc.ProcessorID != "" {
-				procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, len(proc.Hunters))
+				procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
 			} else {
-				procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, len(proc.Hunters))
+				procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, proc.TotalHunters)
 			}
 			b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 		}

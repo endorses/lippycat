@@ -40,7 +40,8 @@ type ProcessorInfo struct {
 	Status          management.ProcessorStatus // Status of the processor (when connected)
 	ConnectionState ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
 	TLSInsecure     bool                       // True if connection is insecure (no TLS)
-	Hunters         []HunterInfo
+	Hunters         []HunterInfo               // Hunters subscribed to by this TUI client (filtered)
+	TotalHunters    int                        // Total hunters connected to this processor (all hunters)
 }
 
 // AddNodeMsg is sent when user wants to add a node
@@ -186,8 +187,9 @@ func (n *NodesView) SetHunters(hunters []HunterInfo) {
 	n.processors = make([]ProcessorInfo, 0, len(processorMap))
 	for addr, hunterList := range processorMap {
 		n.processors = append(n.processors, ProcessorInfo{
-			Address: addr,
-			Hunters: hunterList,
+			Address:      addr,
+			Hunters:      hunterList,
+			TotalHunters: len(hunterList),
 		})
 	}
 
@@ -230,8 +232,9 @@ func (n *NodesView) SetHuntersAndProcessors(hunters []HunterInfo, processorAddrs
 		})
 
 		n.processors = append(n.processors, ProcessorInfo{
-			Address: addr,
-			Hunters: hunterList,
+			Address:      addr,
+			Hunters:      hunterList,
+			TotalHunters: len(hunterList),
 		})
 	}
 
@@ -560,6 +563,7 @@ func convertProcessorInfos(procs []ProcessorInfo) []nodesview.ProcessorInfo {
 			ConnectionState: proc.ConnectionState,
 			TLSInsecure:     proc.TLSInsecure, // Preserve TLS security status
 			Hunters:         proc.Hunters,
+			TotalHunters:    proc.TotalHunters,
 		}
 	}
 	return result

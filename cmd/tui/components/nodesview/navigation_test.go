@@ -29,6 +29,7 @@ func createTestProcessors(count int, huntersPerProc int) []ProcessorInfo {
 			Status:          management.ProcessorStatus_PROCESSOR_HEALTHY,
 			ConnectionState: ProcessorConnectionStateConnected,
 			Hunters:         hunters,
+			TotalHunters:    len(hunters),
 		}
 	}
 	return processors

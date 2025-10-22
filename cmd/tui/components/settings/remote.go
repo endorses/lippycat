@@ -106,14 +106,6 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 		params.LabelStyle.Render("Buffer Size:")+" "+rs.bufferInput.View(),
 	))
 
-	// Add note about filtering
-	noteStyle := params.UnfocusedStyle.
-		Foreground(params.Theme.WarningColor).
-		Italic(true)
-	sections = append(sections, noteStyle.Width(boxWidth).Render(
-		"Note: Packet filtering is configured on the remote nodes",
-	))
-
 	return sections
 }
 

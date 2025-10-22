@@ -4,7 +4,6 @@
 package components
 
 import (
-	"fmt"
 	"slices"
 
 	"github.com/charmbracelet/lipgloss"
@@ -241,25 +240,23 @@ func (f *FilterInput) View() string {
 
 	input := promptStyle.Render(f.prompt) + " " + inputStyle.Render(displayValue)
 
-	// Show active filter count if there are any
-	if f.activeFilterCount > 0 {
+	// Show active filters if there are any
+	if len(f.activeFilters) > 0 {
 		filterInfoStyle := lipgloss.NewStyle().
 			Foreground(f.theme.InfoColor).
 			Italic(true)
 
-		filterCountInfo := filterInfoStyle.Render(
-			fmt.Sprintf("  [%d filter%s active - will stack with new filter]",
-				f.activeFilterCount,
-				func() string {
-					if f.activeFilterCount == 1 {
-						return ""
-					} else {
-						return "s"
-					}
-				}(),
-			),
-		)
-		input = input + filterCountInfo
+		// Build filter list string
+		filterList := "  [Active filters (will stack): "
+		for i, desc := range f.activeFilters {
+			if i > 0 {
+				filterList += ", "
+			}
+			filterList += desc
+		}
+		filterList += "]"
+
+		input = input + filterInfoStyle.Render(filterList)
 	}
 
 	return containerStyle.Render(input)

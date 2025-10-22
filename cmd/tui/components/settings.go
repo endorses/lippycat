@@ -854,7 +854,13 @@ func (s *SettingsView) renderModeSelector() string {
 		remoteTabStyle.Render("Remote"),
 	)
 
-	return modeStyle.Width(s.width - 4).Render(
+	// Use consistent fixed width (110 chars), but not wider than terminal
+	boxWidth := 110
+	if s.width-4 < boxWidth {
+		boxWidth = s.width - 4
+	}
+
+	return modeStyle.Width(boxWidth).Render(
 		labelStyle.Render("Capture Mode:") + " " + modeSelector,
 	)
 }

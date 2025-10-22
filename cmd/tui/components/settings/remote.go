@@ -25,7 +25,7 @@ func NewRemoteSettings(nodesFile string, bufferSize int, theme themes.Theme) *Re
 	nodesFileInput := textinput.New()
 	nodesFileInput.Placeholder = "nodes.yaml or ~/.config/lippycat/nodes.yaml"
 	nodesFileInput.CharLimit = 512
-	nodesFileInput.Width = 50
+	nodesFileInput.Width = 80
 	nodesFileInput.SetValue(nodesFile)
 
 	return &RemoteSettings{
@@ -83,7 +83,13 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 			nodesStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, nodesStyle.Width(params.Width-4).Render(
+	// Use consistent fixed width (110 chars), but not wider than terminal
+	boxWidth := 110
+	if params.Width-4 < boxWidth {
+		boxWidth = params.Width - 4
+	}
+
+	sections = append(sections, nodesStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Nodes File:")+" "+rs.nodesFileInput.View(),
 	))
 
@@ -96,7 +102,7 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 			bufferStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, bufferStyle.Width(params.Width-4).Render(
+	sections = append(sections, bufferStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Buffer Size:")+" "+rs.bufferInput.View(),
 	))
 
@@ -104,7 +110,7 @@ func (rs *RemoteSettings) Render(params RenderParams) []string {
 	noteStyle := params.UnfocusedStyle.
 		Foreground(params.Theme.WarningColor).
 		Italic(true)
-	sections = append(sections, noteStyle.Width(params.Width-4).Render(
+	sections = append(sections, noteStyle.Width(boxWidth).Render(
 		"Note: Packet filtering is configured on the remote nodes",
 	))
 

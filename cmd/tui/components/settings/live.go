@@ -212,15 +212,22 @@ func (ls *LiveSettings) GetFocusableFieldCount() int {
 func (ls *LiveSettings) Render(params RenderParams) []string {
 	var sections []string
 
+	// Use consistent fixed width (110 chars), but not wider than terminal
+	boxWidth := 110
+	if params.Width-4 < boxWidth {
+		boxWidth = params.Width - 4
+	}
+
 	// Interface field (focus index 1)
 	if params.FocusIndex == 1 && params.Editing {
+		// Interface list needs full width for better UX
 		sections = append(sections, params.EditingStyle.Width(params.Width-4).Render(ls.interfaceList.View()))
 	} else if params.FocusIndex == 1 {
-		sections = append(sections, params.SelectedStyle.Width(params.Width-4).Render(
+		sections = append(sections, params.SelectedStyle.Width(boxWidth).Render(
 			params.LabelStyle.Render("Interfaces:")+" "+ls.GetInterface(),
 		))
 	} else {
-		sections = append(sections, params.UnfocusedStyle.Width(params.Width-4).Render(
+		sections = append(sections, params.UnfocusedStyle.Width(boxWidth).Render(
 			params.LabelStyle.Render("Interfaces:")+" "+ls.GetInterface(),
 		))
 	}
@@ -238,7 +245,7 @@ func (ls *LiveSettings) Render(params RenderParams) []string {
 	if ls.promiscuous {
 		promiscValue = "[✓]"
 	}
-	sections = append(sections, promiscStyle.Width(params.Width-4).Render(
+	sections = append(sections, promiscStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Promiscuous Mode:")+" "+promiscValue,
 	))
 
@@ -251,7 +258,7 @@ func (ls *LiveSettings) Render(params RenderParams) []string {
 			bufferStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, bufferStyle.Width(params.Width-4).Render(
+	sections = append(sections, bufferStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Buffer Size:")+" "+ls.bufferInput.View(),
 	))
 
@@ -264,7 +271,7 @@ func (ls *LiveSettings) Render(params RenderParams) []string {
 			filterStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, filterStyle.Width(params.Width-4).Render(
+	sections = append(sections, filterStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Capture Filter:")+" "+ls.filterInput.View(),
 	))
 

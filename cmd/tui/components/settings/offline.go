@@ -27,7 +27,7 @@ func NewOfflineSettings(pcapFile string, bufferSize int, filter string, theme th
 	pcapFileInput := textinput.New()
 	pcapFileInput.Placeholder = "/path/to/file.pcap"
 	pcapFileInput.CharLimit = 512
-	pcapFileInput.Width = 50
+	pcapFileInput.Width = 80
 	pcapFileInput.SetValue(pcapFile)
 
 	return &OfflineSettings{
@@ -87,7 +87,13 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 			pcapStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, pcapStyle.Width(params.Width-4).Render(
+	// Use consistent fixed width (110 chars), but not wider than terminal
+	boxWidth := 110
+	if params.Width-4 < boxWidth {
+		boxWidth = params.Width - 4
+	}
+
+	sections = append(sections, pcapStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("PCAP File:")+" "+os.pcapFileInput.View(),
 	))
 
@@ -100,7 +106,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 			bufferStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, bufferStyle.Width(params.Width-4).Render(
+	sections = append(sections, bufferStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Buffer Size:")+" "+os.bufferInput.View(),
 	))
 
@@ -113,7 +119,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 			filterStyle = params.SelectedStyle
 		}
 	}
-	sections = append(sections, filterStyle.Width(params.Width-4).Render(
+	sections = append(sections, filterStyle.Width(boxWidth).Render(
 		params.LabelStyle.Render("Capture Filter:")+" "+os.filterInput.View(),
 	))
 

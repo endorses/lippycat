@@ -116,6 +116,18 @@ func New(config Config) (*Processor, error) {
 		logger.Info("Protocol detection enabled on processor")
 	}
 
+	// Initialize per-call PCAP writer if configured
+	if config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled {
+		writer, err := NewPcapWriterManager(config.PcapWriterConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize per-call PCAP writer: %w", err)
+		}
+		p.perCallPcapWriter = writer
+		logger.Info("Per-call PCAP writing enabled",
+			"output_dir", config.PcapWriterConfig.OutputDir,
+			"pattern", config.PcapWriterConfig.FilePattern)
+	}
+
 	// Initialize stats collector (needs to be created first as it's used by other managers)
 	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
 
@@ -334,6 +346,13 @@ func (p *Processor) Shutdown() error {
 		p.callCorrelator.Stop()
 	}
 
+	// Close per-call PCAP writer
+	if p.perCallPcapWriter != nil {
+		if err := p.perCallPcapWriter.Close(); err != nil {
+			logger.Warn("Failed to close per-call PCAP writer", "error", err)
+		}
+	}
+
 	// Give time for graceful shutdown
 	if p.grpcServer != nil {
 		p.grpcServer.GracefulStop()
@@ -432,6 +451,50 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 		for _, packet := range batch.Packets {
 			if packet.Metadata != nil && packet.Metadata.Sip != nil {
 				p.callCorrelator.ProcessPacket(packet, hunterID)
+			}
+		}
+	}
+
+	// Write VoIP packets to per-call PCAP files if configured
+	// Writes separate SIP and RTP files for each call
+	if p.perCallPcapWriter != nil {
+		for _, packet := range batch.Packets {
+			// Check if packet has SIP metadata with call-id
+			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
+				callID := packet.Metadata.Sip.CallId
+				from := packet.Metadata.Sip.FromUser
+				to := packet.Metadata.Sip.ToUser
+
+				// Get or create writer for this call
+				writer, err := p.perCallPcapWriter.GetOrCreateWriter(callID, from, to)
+				if err != nil {
+					logger.Warn("Failed to get/create PCAP writer for call",
+						"call_id", callID,
+						"error", err)
+					continue
+				}
+
+				// Write packet to appropriate file (SIP or RTP) using raw packet data
+				if len(packet.Data) > 0 {
+					timestamp := time.Unix(0, packet.TimestampNs)
+
+					// Check if this is an RTP packet (has RTP metadata)
+					if packet.Metadata.Rtp != nil {
+						// Write to RTP PCAP file
+						if err := writer.WriteRTPPacket(timestamp, packet.Data); err != nil {
+							logger.Warn("Failed to write RTP packet to call PCAP",
+								"call_id", callID,
+								"error", err)
+						}
+					} else {
+						// Write to SIP PCAP file
+						if err := writer.WriteSIPPacket(timestamp, packet.Data); err != nil {
+							logger.Warn("Failed to write SIP packet to call PCAP",
+								"call_id", callID,
+								"error", err)
+						}
+					}
+				}
 			}
 		}
 	}

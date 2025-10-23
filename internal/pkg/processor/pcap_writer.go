@@ -37,21 +37,29 @@ func DefaultPcapWriterConfig() *PcapWriterConfig {
 	}
 }
 
-// CallPcapWriter writes packets for a specific call to PCAP file
+// CallPcapWriter writes packets for a specific call to separate SIP and RTP PCAP files
 type CallPcapWriter struct {
-	config      *PcapWriterConfig
-	callID      string
-	from        string
-	to          string
-	startTime   time.Time
-	file        *os.File
-	writer      *pcapgo.Writer
-	currentSize int64
-	fileIndex   int
-	packetCount int
-	mu          sync.Mutex
-	syncTicker  *time.Ticker
-	stopSync    chan struct{}
+	config    *PcapWriterConfig
+	callID    string
+	from      string
+	to        string
+	startTime time.Time
+	// SIP file
+	sipFile        *os.File
+	sipWriter      *pcapgo.Writer
+	sipSize        int64
+	sipFileIndex   int
+	sipPacketCount int
+	// RTP file
+	rtpFile        *os.File
+	rtpWriter      *pcapgo.Writer
+	rtpSize        int64
+	rtpFileIndex   int
+	rtpPacketCount int
+	// Synchronization
+	mu         sync.Mutex
+	syncTicker *time.Ticker
+	stopSync   chan struct{}
 }
 
 // PcapWriterManager manages PCAP writers for multiple calls
@@ -104,7 +112,7 @@ func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallP
 	return writer, nil
 }
 
-// createWriter creates a new PCAP writer for a call
+// createWriter creates a new PCAP writer for a call with separate SIP and RTP files
 func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWriter, error) {
 	writer := &CallPcapWriter{
 		config:    pwm.config,
@@ -112,12 +120,11 @@ func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWr
 		from:      from,
 		to:        to,
 		startTime: time.Now(),
-		fileIndex: 0,
 		stopSync:  make(chan struct{}),
 	}
 
-	// Create initial PCAP file
-	if err := writer.rotateFile(); err != nil {
+	// Create initial SIP and RTP PCAP files
+	if err := writer.createInitialFiles(); err != nil {
 		return nil, err
 	}
 
@@ -125,13 +132,24 @@ func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWr
 	writer.syncTicker = time.NewTicker(pwm.config.SyncInterval)
 	go writer.syncLoop()
 
-	logger.Info("Created PCAP writer for call", "call_id", callID, "from", from, "to", to)
+	logger.Info("Created PCAP writers for call", "call_id", callID, "from", from, "to", to)
 
 	return writer, nil
 }
 
-// WritePacket writes a packet to the call's PCAP file
-func (writer *CallPcapWriter) WritePacket(packet gopacket.Packet) error {
+// createInitialFiles creates both SIP and RTP PCAP files
+func (writer *CallPcapWriter) createInitialFiles() error {
+	if err := writer.rotateSIPFile(); err != nil {
+		return fmt.Errorf("failed to create SIP file: %w", err)
+	}
+	if err := writer.rotateRTPFile(); err != nil {
+		return fmt.Errorf("failed to create RTP file: %w", err)
+	}
+	return nil
+}
+
+// WriteSIPPacket writes a SIP packet to the SIP PCAP file
+func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte) error {
 	if writer == nil {
 		return nil
 	}
@@ -139,67 +157,147 @@ func (writer *CallPcapWriter) WritePacket(packet gopacket.Packet) error {
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
 
-	// Check if we need to rotate file
-	if writer.config.MaxFileSize > 0 && writer.currentSize >= writer.config.MaxFileSize {
-		if err := writer.rotateFile(); err != nil {
-			return fmt.Errorf("failed to rotate PCAP file: %w", err)
+	// Check if we need to rotate SIP file
+	if writer.config.MaxFileSize > 0 && writer.sipSize >= writer.config.MaxFileSize {
+		if err := writer.rotateSIPFile(); err != nil {
+			return fmt.Errorf("failed to rotate SIP PCAP file: %w", err)
 		}
 	}
 
-	// Write packet
-	ci := packet.Metadata().CaptureInfo
-	if err := writer.writer.WritePacket(ci, packet.Data()); err != nil {
-		return fmt.Errorf("failed to write packet: %w", err)
+	// Create CaptureInfo for raw packet
+	ci := gopacket.CaptureInfo{
+		Timestamp:     timestamp,
+		CaptureLength: len(data),
+		Length:        len(data),
 	}
 
-	writer.currentSize += int64(len(packet.Data()))
-	writer.packetCount++
+	// Write packet to SIP file
+	if err := writer.sipWriter.WritePacket(ci, data); err != nil {
+		return fmt.Errorf("failed to write SIP packet: %w", err)
+	}
+
+	writer.sipSize += int64(len(data))
+	writer.sipPacketCount++
 
 	return nil
 }
 
-// rotateFile creates a new PCAP file (called when size limit reached)
-func (writer *CallPcapWriter) rotateFile() error {
+// WriteRTPPacket writes an RTP packet to the RTP PCAP file
+func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte) error {
+	if writer == nil {
+		return nil
+	}
+
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+
+	// Check if we need to rotate RTP file
+	if writer.config.MaxFileSize > 0 && writer.rtpSize >= writer.config.MaxFileSize {
+		if err := writer.rotateRTPFile(); err != nil {
+			return fmt.Errorf("failed to rotate RTP PCAP file: %w", err)
+		}
+	}
+
+	// Create CaptureInfo for raw packet
+	ci := gopacket.CaptureInfo{
+		Timestamp:     timestamp,
+		CaptureLength: len(data),
+		Length:        len(data),
+	}
+
+	// Write packet to RTP file
+	if err := writer.rtpWriter.WritePacket(ci, data); err != nil {
+		return fmt.Errorf("failed to write RTP packet: %w", err)
+	}
+
+	writer.rtpSize += int64(len(data))
+	writer.rtpPacketCount++
+
+	return nil
+}
+
+// rotateSIPFile creates a new SIP PCAP file (called when size limit reached)
+func (writer *CallPcapWriter) rotateSIPFile() error {
 	// Close existing file
-	if writer.file != nil {
-		_ = writer.file.Close()
+	if writer.sipFile != nil {
+		_ = writer.sipFile.Close()
 	}
 
 	// Check file limit
-	if writer.config.MaxFilesPerCall > 0 && writer.fileIndex >= writer.config.MaxFilesPerCall {
-		return fmt.Errorf("max files per call reached: %d", writer.config.MaxFilesPerCall)
+	if writer.config.MaxFilesPerCall > 0 && writer.sipFileIndex >= writer.config.MaxFilesPerCall {
+		return fmt.Errorf("max SIP files per call reached: %d", writer.config.MaxFilesPerCall)
 	}
 
 	// Generate filename
-	filename := writer.generateFilename()
+	filename := writer.generateFilename("sip", writer.sipFileIndex)
 	filepath := filepath.Join(writer.config.OutputDir, filename)
 
 	// Create file
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
 	file, err := os.Create(filepath)
 	if err != nil {
-		return fmt.Errorf("failed to create PCAP file: %w", err)
+		return fmt.Errorf("failed to create SIP PCAP file: %w", err)
 	}
 
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("failed to write PCAP header: %w", err)
+		return fmt.Errorf("failed to write SIP PCAP header: %w", err)
 	}
 
-	writer.file = file
-	writer.writer = pcapWriter
-	writer.currentSize = 0
-	writer.fileIndex++
+	writer.sipFile = file
+	writer.sipWriter = pcapWriter
+	writer.sipSize = 0
+	writer.sipFileIndex++
 
-	logger.Info("Created PCAP file for call", "call_id", writer.callID, "file", filepath)
+	logger.Info("Created SIP PCAP file for call", "call_id", writer.callID, "file", filepath)
 
 	return nil
 }
 
-// generateFilename generates a filename for the PCAP file
-func (writer *CallPcapWriter) generateFilename() string {
+// rotateRTPFile creates a new RTP PCAP file (called when size limit reached)
+func (writer *CallPcapWriter) rotateRTPFile() error {
+	// Close existing file
+	if writer.rtpFile != nil {
+		_ = writer.rtpFile.Close()
+	}
+
+	// Check file limit
+	if writer.config.MaxFilesPerCall > 0 && writer.rtpFileIndex >= writer.config.MaxFilesPerCall {
+		return fmt.Errorf("max RTP files per call reached: %d", writer.config.MaxFilesPerCall)
+	}
+
+	// Generate filename
+	filename := writer.generateFilename("rtp", writer.rtpFileIndex)
+	filepath := filepath.Join(writer.config.OutputDir, filename)
+
+	// Create file
+	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
+	file, err := os.Create(filepath)
+	if err != nil {
+		return fmt.Errorf("failed to create RTP PCAP file: %w", err)
+	}
+
+	// Create PCAP writer
+	pcapWriter := pcapgo.NewWriter(file)
+	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("failed to write RTP PCAP header: %w", err)
+	}
+
+	writer.rtpFile = file
+	writer.rtpWriter = pcapWriter
+	writer.rtpSize = 0
+	writer.rtpFileIndex++
+
+	logger.Info("Created RTP PCAP file for call", "call_id", writer.callID, "file", filepath)
+
+	return nil
+}
+
+// generateFilename generates a filename for the PCAP file (SIP or RTP)
+func (writer *CallPcapWriter) generateFilename(packetType string, fileIndex int) string {
 	pattern := writer.config.FilePattern
 
 	// Replace placeholders
@@ -208,24 +306,32 @@ func (writer *CallPcapWriter) generateFilename() string {
 	pattern = replaceAll(pattern, "{to}", sanitizeFilename(writer.to))
 	pattern = replaceAll(pattern, "{timestamp}", writer.startTime.Format("20060102_150405"))
 
+	// Add packet type (sip or rtp) before extension
+	ext := filepath.Ext(pattern)
+	base := pattern[:len(pattern)-len(ext)]
+	pattern = fmt.Sprintf("%s_%s%s", base, packetType, ext)
+
 	// Add index suffix if rotating
-	if writer.fileIndex > 0 {
-		ext := filepath.Ext(pattern)
-		base := pattern[:len(pattern)-len(ext)]
-		pattern = fmt.Sprintf("%s_%d%s", base, writer.fileIndex, ext)
+	if fileIndex > 0 {
+		ext = filepath.Ext(pattern)
+		base = pattern[:len(pattern)-len(ext)]
+		pattern = fmt.Sprintf("%s_%d%s", base, fileIndex, ext)
 	}
 
 	return pattern
 }
 
-// syncLoop periodically syncs file to disk
+// syncLoop periodically syncs files to disk
 func (writer *CallPcapWriter) syncLoop() {
 	for {
 		select {
 		case <-writer.syncTicker.C:
 			writer.mu.Lock()
-			if writer.file != nil {
-				_ = writer.file.Sync()
+			if writer.sipFile != nil {
+				_ = writer.sipFile.Sync()
+			}
+			if writer.rtpFile != nil {
+				_ = writer.rtpFile.Sync()
 			}
 			writer.mu.Unlock()
 		case <-writer.stopSync:
@@ -234,7 +340,7 @@ func (writer *CallPcapWriter) syncLoop() {
 	}
 }
 
-// Close closes the writer and flushes data
+// Close closes the writer and flushes data for both SIP and RTP files
 func (writer *CallPcapWriter) Close() error {
 	if writer == nil {
 		return nil
@@ -247,21 +353,34 @@ func (writer *CallPcapWriter) Close() error {
 	close(writer.stopSync)
 	writer.syncTicker.Stop()
 
-	// Close file
-	if writer.file != nil {
-		if err := writer.file.Sync(); err != nil {
-			logger.Warn("Failed to sync PCAP file", "error", err)
+	// Close SIP file
+	if writer.sipFile != nil {
+		if err := writer.sipFile.Sync(); err != nil {
+			logger.Warn("Failed to sync SIP PCAP file", "error", err)
 		}
-		if err := writer.file.Close(); err != nil {
-			return err
+		if err := writer.sipFile.Close(); err != nil {
+			logger.Warn("Failed to close SIP PCAP file", "error", err)
 		}
-		writer.file = nil
+		writer.sipFile = nil
 	}
 
-	logger.Info("Closed PCAP writer for call",
+	// Close RTP file
+	if writer.rtpFile != nil {
+		if err := writer.rtpFile.Sync(); err != nil {
+			logger.Warn("Failed to sync RTP PCAP file", "error", err)
+		}
+		if err := writer.rtpFile.Close(); err != nil {
+			logger.Warn("Failed to close RTP PCAP file", "error", err)
+		}
+		writer.rtpFile = nil
+	}
+
+	logger.Info("Closed PCAP writers for call",
 		"call_id", writer.callID,
-		"packets", writer.packetCount,
-		"files", writer.fileIndex)
+		"sip_packets", writer.sipPacketCount,
+		"rtp_packets", writer.rtpPacketCount,
+		"sip_files", writer.sipFileIndex,
+		"rtp_files", writer.rtpFileIndex)
 
 	return nil
 }

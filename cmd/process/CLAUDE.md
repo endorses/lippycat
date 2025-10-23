@@ -307,7 +307,107 @@ default:
 
 **Non-blocking:** Main processing never blocks on I/O.
 
-### 10. Resilience Patterns (Network Interruption Survival)
+### 10. Per-Call PCAP Writing Pattern (VoIP)
+
+**Files:** `internal/pkg/processor/pcap_writer.go`, `internal/pkg/processor/processor.go`
+
+For VoIP traffic, processor can write separate SIP and RTP PCAP files per call:
+
+**Architecture:**
+
+```go
+type CallPcapWriter struct {
+    callID      string
+    from        string
+    to          string
+    startTime   time.Time
+    // SIP file
+    sipFile        *os.File
+    sipWriter      *pcapgo.Writer
+    sipSize        int64
+    sipFileIndex   int
+    sipPacketCount int
+    // RTP file
+    rtpFile        *os.File
+    rtpWriter      *pcapgo.Writer
+    rtpSize        int64
+    rtpFileIndex   int
+    rtpPacketCount int
+}
+```
+
+**Packet Routing Logic:**
+
+```go
+// In processor.go processBatch()
+if p.perCallPcapWriter != nil {
+    for _, packet := range batch.Packets {
+        if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
+            callID := packet.Metadata.Sip.CallId
+            writer, _ := p.perCallPcapWriter.GetOrCreateWriter(callID, from, to)
+
+            timestamp := time.Unix(0, packet.TimestampNs)
+
+            // Route based on packet type
+            if packet.Metadata.Rtp != nil {
+                writer.WriteRTPPacket(timestamp, packet.Data)  // → RTP file
+            } else {
+                writer.WriteSIPPacket(timestamp, packet.Data)  // → SIP file
+            }
+        }
+    }
+}
+```
+
+**Key Features:**
+
+1. **Separate Files:** Creates `{pattern}_sip.pcap` and `{pattern}_rtp.pcap` for each call
+2. **Automatic Call Detection:** Uses `packet.Metadata.Sip.CallId` (hunter includes this for both SIP and RTP packets)
+3. **File Rotation:** Each file rotates independently when reaching size limit (default: 100MB)
+4. **Rotation Limit:** Maximum files per call per type (default: 10)
+5. **Concurrent Writers:** Thread-safe management of multiple concurrent calls
+6. **Async Syncing:** Periodic `fsync()` every 5 seconds
+7. **Pattern Support:** Filename templates with `{callid}`, `{from}`, `{to}`, `{timestamp}` placeholders
+
+**File Naming Example:**
+
+```
+20250123_143022_abc123_sip.pcap       # SIP signaling
+20250123_143022_abc123_rtp.pcap       # RTP media
+20250123_143022_abc123_sip_1.pcap     # After rotation
+20250123_143022_abc123_rtp_1.pcap     # After rotation
+```
+
+**Configuration:**
+
+```bash
+# Enable per-call PCAP writing
+lc process --per-call-pcap \
+  --per-call-pcap-dir ./pcaps \
+  --per-call-pcap-pattern "{timestamp}_{callid}.pcap"
+```
+
+```yaml
+# In config file
+processor:
+  per_call_pcap:
+    enabled: true
+    output_dir: "./pcaps"
+    file_pattern: "{timestamp}_{callid}.pcap"
+```
+
+**Why Separate Files?**
+
+- **Analysis Tools:** Many VoIP analysis tools expect separate SIP/RTP files
+- **Wireshark:** Better filtering and analysis with protocol-specific files
+- **Call Recording:** Easy to extract just audio (RTP) or signaling (SIP)
+- **Storage:** Can archive/compress SIP and RTP separately based on retention policies
+
+**Critical Implementation Detail:**
+
+Hunter nodes running in VoIP mode include call-id in `packet.Metadata.Sip.CallId` for BOTH SIP and RTP packets (see `internal/pkg/voip/udp_handler_hunter.go:243-253`), enabling the processor to correlate RTP packets to their calls without additional state tracking.
+
+### 11. Resilience Patterns (Network Interruption Survival)
 
 **File:** `internal/pkg/processor/processor.go`
 

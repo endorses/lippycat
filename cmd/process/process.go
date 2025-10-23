@@ -53,6 +53,10 @@ var (
 	tlsCAFile       string
 	tlsClientAuth   bool
 	insecureAllowed bool
+	// Per-call PCAP flags
+	perCallPcapEnabled bool
+	perCallPcapDir     string
+	perCallPcapPattern string
 )
 
 func init() {
@@ -77,6 +81,11 @@ func init() {
 	ProcessCmd.Flags().BoolVar(&tlsClientAuth, "tls-client-auth", false, "Require client certificate authentication (mutual TLS)")
 	ProcessCmd.Flags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 
+	// Per-call PCAP writing
+	ProcessCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic")
+	ProcessCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
+	ProcessCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files (supports {callid}, {from}, {to}, {timestamp})")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
 	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
@@ -92,6 +101,9 @@ func init() {
 	_ = viper.BindPFlag("processor.tls.key_file", ProcessCmd.Flags().Lookup("tls-key"))
 	_ = viper.BindPFlag("processor.tls.ca_file", ProcessCmd.Flags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("processor.tls.client_auth", ProcessCmd.Flags().Lookup("tls-client-auth"))
+	_ = viper.BindPFlag("processor.per_call_pcap.enabled", ProcessCmd.Flags().Lookup("per-call-pcap"))
+	_ = viper.BindPFlag("processor.per_call_pcap.output_dir", ProcessCmd.Flags().Lookup("per-call-pcap-dir"))
+	_ = viper.BindPFlag("processor.per_call_pcap.file_pattern", ProcessCmd.Flags().Lookup("per-call-pcap-pattern"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -109,17 +121,32 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		logger.Info("Production mode: TLS mutual authentication enforced")
 	}
 
+	// Build per-call PCAP config if enabled
+	var pcapWriterConfig *processor.PcapWriterConfig
+	if getBoolConfig("processor.per_call_pcap.enabled", perCallPcapEnabled) {
+		pcapWriterConfig = &processor.PcapWriterConfig{
+			Enabled:         true,
+			OutputDir:       getStringConfig("processor.per_call_pcap.output_dir", perCallPcapDir),
+			FilePattern:     getStringConfig("processor.per_call_pcap.file_pattern", perCallPcapPattern),
+			MaxFileSize:     100 * 1024 * 1024, // 100MB default
+			MaxFilesPerCall: 10,
+			BufferSize:      4096,
+			SyncInterval:    5 * time.Second,
+		}
+	}
+
 	// Get configuration (flags override config file)
 	config := processor.Config{
-		ListenAddr:      getStringConfig("processor.listen_addr", listenAddr),
-		ProcessorID:     getStringConfig("processor.processor_id", processorID),
-		UpstreamAddr:    getStringConfig("processor.upstream_addr", upstreamAddr),
-		MaxHunters:      getIntConfig("processor.max_hunters", maxHunters),
-		MaxSubscribers:  getIntConfig("processor.max_subscribers", maxSubscribers),
-		WriteFile:       getStringConfig("processor.write_file", writeFile),
-		DisplayStats:    getBoolConfig("processor.display_stats", displayStats),
-		EnableDetection: getBoolConfig("processor.enable_detection", enableDetection),
-		FilterFile:      getStringConfig("processor.filter_file", filterFile),
+		ListenAddr:       getStringConfig("processor.listen_addr", listenAddr),
+		ProcessorID:      getStringConfig("processor.processor_id", processorID),
+		UpstreamAddr:     getStringConfig("processor.upstream_addr", upstreamAddr),
+		MaxHunters:       getIntConfig("processor.max_hunters", maxHunters),
+		MaxSubscribers:   getIntConfig("processor.max_subscribers", maxSubscribers),
+		WriteFile:        getStringConfig("processor.write_file", writeFile),
+		DisplayStats:     getBoolConfig("processor.display_stats", displayStats),
+		PcapWriterConfig: pcapWriterConfig,
+		EnableDetection:  getBoolConfig("processor.enable_detection", enableDetection),
+		FilterFile:       getStringConfig("processor.filter_file", filterFile),
 		// TLS configuration
 		TLSEnabled:    getBoolConfig("processor.tls.enabled", tlsEnabled),
 		TLSCertFile:   getStringConfig("processor.tls.cert_file", tlsCertFile),

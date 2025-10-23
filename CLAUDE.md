@@ -11,7 +11,7 @@ lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It i
 lippycat supports a distributed capture architecture with two node types:
 
 - **Hunter Nodes**: Lightweight capture agents that sniff and filter packets on network interfaces and forward them to processor nodes for analysis. Hunters can be deployed across multiple network segments or hosts.
-- **Processor Nodes**: Central analysis nodes that receive packets from multiple hunters, perform protocol analysis, and provide the TUI/CLI interface for monitoring and analysis.
+- **Processor Nodes**: Central analysis nodes that receive packets from multiple hunters, perform protocol analysis, write PCAP files (unified or per-call for VoIP), and provide the TUI/CLI interface for monitoring and analysis.
 
 This architecture allows for:
 - **Distributed packet capture** across multiple network segments
@@ -32,7 +32,7 @@ This architecture allows for:
   - `internal/pkg/capture/`: Network packet capture functionality using gopacket
   - `internal/pkg/voip/`: VoIP protocol plugin (SIP, RTP, call tracking)
   - `internal/pkg/hunter/`: Hunter node core logic and gRPC client
-  - `internal/pkg/processor/`: Processor node core logic and gRPC server
+  - `internal/pkg/processor/`: Processor node core logic, gRPC server, and per-call PCAP writing
   - `internal/pkg/remotecapture/`: Remote capture infrastructure with EventHandler pattern
   - `internal/pkg/detector/`: Protocol detection with signature-based matching
   - `internal/pkg/simd/`: SIMD optimizations (AVX2/SSE4.2)

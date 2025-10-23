@@ -47,23 +47,50 @@ lc process --listen :50051 --write-file /var/capture/packets.pcap
 
 ### PCAP File Writing
 
-Processors can write all received packets to PCAP files for forensics and compliance:
+Processors can write received packets to PCAP files in two modes:
 
-- `-w, --write-file` - Write received packets to PCAP file
+#### Unified PCAP Writing
 
-**Example:**
+Write all packets to a single file:
+
+- `-w, --write-file` - Write all received packets to one PCAP file
 
 ```bash
 lc process --listen :50051 --write-file /var/capture/packets.pcap
 ```
 
-**Use Cases:**
-- Compliance/audit trails
-- Forensic analysis
-- Traffic replay
-- Long-term storage
+**Use Cases:** Compliance/audit trails, forensic analysis, traffic replay, long-term storage.
 
-**Note:** PCAP writing is independent of hunter selection. The processor writes ALL packets received from all hunters, not just those displayed in the TUI.
+#### Per-Call PCAP Writing (VoIP)
+
+Write separate SIP and RTP PCAP files for each VoIP call:
+
+- `--per-call-pcap` - Enable per-call PCAP writing
+- `--per-call-pcap-dir` - Output directory (default: `./pcaps`)
+- `--per-call-pcap-pattern` - Filename pattern (default: `{timestamp}_{callid}.pcap`)
+
+```bash
+lc process --listen :50051 \
+  --per-call-pcap \
+  --per-call-pcap-dir /var/capture/calls \
+  --per-call-pcap-pattern "{timestamp}_{callid}.pcap"
+```
+
+**Output:** Creates `{pattern}_sip.pcap` and `{pattern}_rtp.pcap` for each call:
+```
+20250123_143022_abc123_sip.pcap   # SIP signaling
+20250123_143022_abc123_rtp.pcap   # RTP media
+```
+
+**Pattern Placeholders:**
+- `{callid}` - SIP Call-ID
+- `{from}` - SIP From user
+- `{to}` - SIP To user
+- `{timestamp}` - Call start time (YYYYMMDD_HHMMSS)
+
+**Use Cases:** VoIP call recording, per-call analysis, selective archival, call quality analysis.
+
+**Note:** Both modes are independent. You can enable unified PCAP (`-w`) and per-call PCAP (`--per-call-pcap`) simultaneously.
 
 ### Protocol Detection
 
@@ -256,6 +283,12 @@ processor:
   display_stats: true
   enable_detection: true
   filter_file: "~/.config/lippycat/filters.yaml"
+
+  # Per-call PCAP writing
+  per_call_pcap:
+    enabled: true
+    output_dir: "/var/capture/calls"
+    file_pattern: "{timestamp}_{callid}.pcap"
 
   # TLS security
   tls:

@@ -481,9 +481,9 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 			protocol = "ARP"
 			switch arp.Operation {
 			case 1:
-				info = "Request"
+				info = "Who has " + dstIP
 			case 2:
-				info = "Reply"
+				info = srcIP + " is at " + net.HardwareAddr(arp.SourceHwAddress).String()
 			}
 		} else if ethLayer := packet.Layer(layers.LayerTypeEthernet); ethLayer != nil {
 			eth, _ := ethLayer.(*layers.Ethernet)

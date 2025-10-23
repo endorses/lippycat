@@ -153,8 +153,25 @@ func buildInfoString(protocol string, metadata map[string]interface{}) string {
 		return "NTP"
 
 	case "ARP":
-		if op, ok := metadata["operation"].(string); ok {
-			return op
+		// Build full ARP info like local capture does
+		operation, _ := metadata["operation"].(string)
+		senderIP, _ := metadata["sender_ip"].(string)
+		targetIP, _ := metadata["target_ip"].(string)
+		senderHW, _ := metadata["sender_hw"].(string)
+
+		switch operation {
+		case "Request":
+			if targetIP != "" {
+				return "Who has " + targetIP
+			}
+		case "Reply":
+			if senderIP != "" && senderHW != "" {
+				return senderIP + " is at " + senderHW
+			}
+		}
+		// Fallback to operation name
+		if operation != "" {
+			return operation
 		}
 		return "ARP"
 

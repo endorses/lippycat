@@ -594,10 +594,10 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		}
 
 		// Format timestamps
-		startTime := call.StartTime.Format("15:04:05.000")
+		startTime := call.StartTime.Format("2006-01-02 15:04:05.000")
 		endTime := "N/A"
 		if !call.EndTime.IsZero() {
-			endTime = call.EndTime.Format("15:04:05.000")
+			endTime = call.EndTime.Format("2006-01-02 15:04:05.000")
 		} else if call.State == CallStateActive {
 			endTime = "Active"
 		}
@@ -732,6 +732,16 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 	content.WriteString(fmt.Sprintf("To: %s\n", extractSIPURI(selectedCall.To)))
 	content.WriteString(fmt.Sprintf("State: %s\n", selectedCall.State.String()))
 
+	// Show start time
+	if !selectedCall.StartTime.IsZero() {
+		content.WriteString(fmt.Sprintf("Started: %s\n", selectedCall.StartTime.Format("2006-01-02 15:04:05.000")))
+	}
+
+	// Show end time if available
+	if !selectedCall.EndTime.IsZero() {
+		content.WriteString(fmt.Sprintf("Ended: %s\n", selectedCall.EndTime.Format("2006-01-02 15:04:05.000")))
+	}
+
 	// Calculate duration
 	duration := selectedCall.Duration
 	if selectedCall.State == CallStateActive {
@@ -776,11 +786,11 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 
 			// Calculate timing delta from first leg
 			if i == 0 {
-				legContent.WriteString(fmt.Sprintf("  Started: %s\n", leg.StartTime.Format("15:04:05.000")))
+				legContent.WriteString(fmt.Sprintf("  Started: %s\n", leg.StartTime.Format("2006-01-02 15:04:05.000")))
 			} else {
 				delta := leg.StartTime.Sub(legs[0].StartTime)
 				legContent.WriteString(fmt.Sprintf("  Started: %s (+%s)\n",
-					leg.StartTime.Format("15:04:05.000"),
+					leg.StartTime.Format("2006-01-02 15:04:05.000"),
 					formatMilliseconds(delta)))
 			}
 

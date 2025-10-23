@@ -560,7 +560,7 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 		nodePref = 12 // Full node ID
 
 		timeMin  = 8  // HH:MM:SS
-		timePref = 12 // HH:MM:SS.ms
+		timePref = 19 // YYYY-MM-DD HH:MM:SS (2025-10-23 07:48:29)
 
 		srcMin  = 9  // Short IP or partial
 		srcPref = 22 // Full IP:Port
@@ -568,8 +568,8 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 		dstMin  = 9
 		dstPref = 22
 
-		protoMin  = 3 // Short protocol names
-		protoPref = 8
+		protoMin  = 3  // Short protocol names
+		protoPref = 10 // Longest protocol: "PostgreSQL"
 
 		lenMin  = 4 // Length
 		lenPref = 6
@@ -593,19 +593,19 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	} else if availableWidth < 150 {
 		// Narrow/medium (split view with details) - keep columns compact, give space to Info
 		nodeMax = 13
-		timeMax = 12
+		timeMax = 19
 		srcMax = 22
 		dstMax = 22
-		protoMax = 8
+		protoMax = 10
 		lenMax = 6
 	} else {
 		// Wide (full width, no details) - generous max
 		nodeMax = 25
-		timeMax = 20
+		timeMax = 23
 		srcMax = 35
 		dstMax = 35
-		protoMax = 15
-		lenMax = 10
+		protoMax = 12
+		lenMax = 6
 	}
 
 	// Start with minimum widths
@@ -859,14 +859,19 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 
 	// Format timestamp based on available width
 	var timeStr string
-	if timeWidth >= 15 {
+	if timeWidth >= 23 {
+		// Full date + time + milliseconds: "2025-10-23 07:48:29.123"
+		timeStr = pkt.Timestamp.Format("2006-01-02 15:04:05.000")
+	} else if timeWidth >= 19 {
+		// Date + time without milliseconds: "2025-10-23 07:48:29"
+		timeStr = pkt.Timestamp.Format("2006-01-02 15:04:05")
+	} else if timeWidth >= 15 {
 		timeStr = pkt.Timestamp.Format("15:04:05.000000")
 	} else if timeWidth >= 12 {
 		timeStr = pkt.Timestamp.Format("15:04:05.000")
 	} else {
 		timeStr = pkt.Timestamp.Format("15:04:05")
 	}
-	timeStr = truncate(timeStr, timeWidth)
 
 	// Format source and destination
 	src := fmt.Sprintf("%s:%s", pkt.SrcIP, pkt.SrcPort)

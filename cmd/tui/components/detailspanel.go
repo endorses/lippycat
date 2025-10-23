@@ -163,7 +163,7 @@ func (d *DetailsPanel) renderContent() string {
 	content.WriteString("\n\n")
 
 	content.WriteString(labelStyle.Render("Timestamp: "))
-	content.WriteString(valueStyle.Render(d.packet.Timestamp.Format("15:04:05.000000")))
+	content.WriteString(valueStyle.Render(d.packet.Timestamp.Format("2006-01-02 15:04:05.000000")))
 	content.WriteString("\n")
 
 	content.WriteString(labelStyle.Render("Protocol: "))

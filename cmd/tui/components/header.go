@@ -109,7 +109,7 @@ func (h *Header) View() string {
 			statusColor = h.theme.InfoColor // Blue for reading file
 		case CaptureModeRemote:
 			statusText = "● STREAMING"
-			statusColor = h.theme.InfoColor // Blue for streaming from remote
+			statusColor = h.theme.DNSColor // Yellow (solarized) to match Nodes tab
 		default:
 			statusText = "● CAPTURING"
 			statusColor = h.theme.ErrorColor // Red for capturing

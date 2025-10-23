@@ -32,6 +32,7 @@ type Theme struct {
 	DNSColor     lipgloss.Color
 	HTTPColor    lipgloss.Color
 	TLSColor     lipgloss.Color
+	SSHColor     lipgloss.Color
 	ICMPColor    lipgloss.Color
 	ICMPv6Color  lipgloss.Color
 	ARPColor     lipgloss.Color
@@ -96,6 +97,7 @@ func Solarized() Theme {
 		DNSColor:     solarizedYellow,
 		HTTPColor:    solarizedViolet,
 		TLSColor:     solarizedMagenta,
+		SSHColor:     solarizedMagenta,
 		ICMPColor:    solarizedOrange,
 		ICMPv6Color:  solarizedOrange,
 		ARPColor:     solarizedYellow,

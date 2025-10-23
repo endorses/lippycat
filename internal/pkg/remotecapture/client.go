@@ -655,18 +655,22 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 	// Parse timestamp
 	ts := time.Unix(0, pkt.TimestampNs)
 
-	// Get actual interface name from mapping
-	c.interfacesMu.RLock()
-	hunterInterfaces, exists := c.interfaces[hunterID]
-	c.interfacesMu.RUnlock()
-
+	// Use interface name from packet (set by hunter), or fall back to index-based lookup
 	var ifaceName string
-	if exists && int(pkt.InterfaceIndex) < len(hunterInterfaces) {
-		// Use actual interface name from hunter registration
-		ifaceName = hunterInterfaces[pkt.InterfaceIndex]
+	if pkt.InterfaceName != "" {
+		// Use interface name directly from packet (preferred method - works in hierarchical mode)
+		ifaceName = pkt.InterfaceName
 	} else {
-		// Fallback to interface index if mapping not available yet
-		ifaceName = fmt.Sprintf("iface%d", pkt.InterfaceIndex)
+		// Fallback to interface index lookup (legacy method for backwards compatibility)
+		c.interfacesMu.RLock()
+		hunterInterfaces, exists := c.interfaces[hunterID]
+		c.interfacesMu.RUnlock()
+
+		if exists && int(pkt.InterfaceIndex) < len(hunterInterfaces) {
+			ifaceName = hunterInterfaces[pkt.InterfaceIndex]
+		} else {
+			ifaceName = fmt.Sprintf("iface%d", pkt.InterfaceIndex)
+		}
 	}
 
 	// Build VoIP metadata if present

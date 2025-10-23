@@ -11,8 +11,8 @@ import (
 
 // PacketForwarder is an interface for forwarding packets (implemented by Hunter)
 type PacketForwarder interface {
-	// ForwardPacketWithMetadata forwards a packet with embedded metadata
-	ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata) error
+	// ForwardPacketWithMetadata forwards a packet with embedded metadata and interface name
+	ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string) error
 }
 
 // HunterForwardHandler handles SIP messages for hunter mode (lc hunt voip)
@@ -78,7 +78,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 
 			// Forward termination message
 			for _, pkt := range bufferedPackets {
-				if err := h.forwarder.ForwardPacketWithMetadata(pkt, pbMetadata); err != nil {
+				if err := h.forwarder.ForwardPacketWithMetadata(pkt.Packet, pbMetadata, pkt.Interface); err != nil {
 					logger.Error("Failed to forward TCP call termination packet",
 						"call_id", SanitizeCallIDForLogging(callID),
 						"method", method,
@@ -146,7 +146,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 
 	// Forward all buffered TCP packets with metadata embedded
 	for _, pkt := range bufferedPackets {
-		if err := h.forwarder.ForwardPacketWithMetadata(pkt, pbMetadata); err != nil {
+		if err := h.forwarder.ForwardPacketWithMetadata(pkt.Packet, pbMetadata, pkt.Interface); err != nil {
 			logger.Error("Failed to forward TCP SIP packet",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
@@ -159,8 +159,9 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	}
 
 	// Register call in buffer manager for RTP buffering
+	// Note: TCP handler doesn't track interface names per packet (TCP streams may cross interfaces)
 	if h.bufferMgr != nil {
-		h.bufferMgr.AddSIPPacket(callID, nil, metadata)
+		h.bufferMgr.AddSIPPacket(callID, nil, metadata, "")
 		h.bufferMgr.CheckFilterWithCallback(callID,
 			func(m *CallMetadata) bool { return true }, // already matched
 			nil, // no callback needed - we already forwarded

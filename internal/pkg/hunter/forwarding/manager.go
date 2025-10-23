@@ -510,6 +510,7 @@ func convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket {
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,
 		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
+		InterfaceName:  pktInfo.Interface,
 	}
 }
 

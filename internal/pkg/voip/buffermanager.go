@@ -37,13 +37,14 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 }
 
 // AddSIPPacket adds a SIP packet to the buffer
-func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata) {
+func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata, interfaceName string) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
 	buffer, exists := bm.buffers[callID]
 	if !exists {
 		buffer = NewCallBuffer(callID)
+		buffer.SetInterfaceName(interfaceName)
 		bm.buffers[callID] = buffer
 	}
 
@@ -134,7 +135,7 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 func (bm *BufferManager) CheckFilterWithCallback(
 	callID string,
 	filterFunc func(*CallMetadata) bool,
-	onMatch func(callID string, packets []gopacket.Packet, metadata *CallMetadata),
+	onMatch func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string),
 ) bool {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
@@ -159,7 +160,7 @@ func (bm *BufferManager) CheckFilterWithCallback(
 
 		// Call the handler callback
 		if onMatch != nil {
-			onMatch(callID, packets, buffer.GetMetadata())
+			onMatch(callID, packets, buffer.GetMetadata(), buffer.GetInterfaceName())
 		}
 	} else {
 		// Discard buffer

@@ -31,20 +31,20 @@ func NewUDPPacketHandler(forwarder PacketForwarder, bufferMgr *BufferManager) *U
 
 // HandleUDPPacket processes a UDP packet (SIP or RTP) with buffering
 func (h *UDPPacketHandler) HandleUDPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
-	packet := pkt.Packet
-
 	// Handle SIP packets (port 5060 or 5061)
 	if layer.SrcPort == SIPPort || layer.DstPort == SIPPort ||
 		layer.SrcPort == SIPPortTLS || layer.DstPort == SIPPortTLS {
-		return h.handleSIPPacket(packet, layer)
+		return h.handleSIPPacket(pkt, layer)
 	}
 
 	// Handle potential RTP packets
-	return h.handleRTPPacket(packet, layer)
+	return h.handleRTPPacket(pkt, layer)
 }
 
 // handleSIPPacket processes a SIP packet with buffering
-func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers.UDP) bool {
+func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
+	packet := pkt.Packet
+	interfaceName := pkt.Interface
 	payload := layer.Payload
 
 	// Get LinkType from the packet
@@ -97,7 +97,7 @@ func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers
 	}
 
 	// Buffer the SIP packet
-	h.bufferMgr.AddSIPPacket(callID, packet, metadata)
+	h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName)
 
 	// Check if this is a call termination message (BYE or CANCEL)
 	method := metadata.Method
@@ -121,7 +121,7 @@ func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers
 			}
 
 			// Forward termination message immediately
-			if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata); err != nil {
+			if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName); err != nil {
 				logger.Error("Failed to forward UDP call termination packet",
 					"call_id", SanitizeCallIDForLogging(callID),
 					"method", method,
@@ -154,9 +154,9 @@ func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers
 					"p-asserted-identity": m.PAssertedIdentity,
 				})
 			},
-			func(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
+			func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string) {
 				// Forward all buffered packets to processor
-				h.forwardBufferedPackets(callID, packets, metadata)
+				h.forwardBufferedPackets(callID, packets, metadata, interfaceName)
 
 				// Extract RTP ports from SDP for future RTP association
 				ExtractPortFromSdp(metadata.SDPBody, callID)
@@ -181,7 +181,9 @@ func (h *UDPPacketHandler) handleSIPPacket(packet gopacket.Packet, layer *layers
 }
 
 // handleRTPPacket processes a potential RTP packet with buffering
-func (h *UDPPacketHandler) handleRTPPacket(packet gopacket.Packet, layer *layers.UDP) bool {
+func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers.UDP) bool {
+	packet := pkt.Packet
+	interfaceName := pkt.Interface
 	dstPort := layer.DstPort.String()
 	srcPort := layer.SrcPort.String()
 
@@ -201,7 +203,7 @@ func (h *UDPPacketHandler) handleRTPPacket(packet gopacket.Packet, layer *layers
 
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata
-		h.forwardRTPPacket(bufCallID, packet, layer)
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName)
 		return true
 	}
 
@@ -210,7 +212,7 @@ func (h *UDPPacketHandler) handleRTPPacket(packet gopacket.Packet, layer *layers
 }
 
 // forwardBufferedPackets forwards all buffered packets for a matched call
-func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
+func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string) {
 	// Debug logging
 	f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if f != nil {
@@ -299,7 +301,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			}
 		}
 
-		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata); err != nil {
+		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata, interfaceName); err != nil {
 			logger.Error("Failed to forward buffered UDP packet",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
@@ -312,7 +314,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 }
 
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)
-func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP) {
+func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string) {
 	// Try to extract RTP header for metadata
 	var pbMetadata *data.PacketMetadata
 
@@ -352,7 +354,7 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 	}
 
 	// Forward with RTP metadata if available
-	if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata); err != nil {
+	if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName); err != nil {
 		logger.Error("Failed to forward RTP packet",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)

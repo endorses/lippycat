@@ -176,7 +176,10 @@ type CapturedPacket struct {
 	// Link type (Ethernet, Raw IP, etc.) - from libpcap
 	LinkType uint32 `protobuf:"varint,6,opt,name=link_type,json=linkType,proto3" json:"link_type,omitempty"`
 	// Optional: Metadata from local analysis
-	Metadata      *PacketMetadata `protobuf:"bytes,7,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	Metadata *PacketMetadata `protobuf:"bytes,7,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	// Interface name where packet was captured (e.g., "eth0", "wlan0")
+	// This preserves the actual interface name across hierarchical processor chains
+	InterfaceName string `protobuf:"bytes,8,opt,name=interface_name,json=interfaceName,proto3" json:"interface_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -258,6 +261,13 @@ func (x *CapturedPacket) GetMetadata() *PacketMetadata {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *CapturedPacket) GetInterfaceName() string {
+	if x != nil {
+		return x.InterfaceName
+	}
+	return ""
 }
 
 // PacketMetadata contains hunter-side analysis results
@@ -1039,7 +1049,7 @@ const file_data_proto_rawDesc = "" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
 	"\ftimestamp_ns\x18\x03 \x01(\x03R\vtimestampNs\x127\n" +
 	"\apackets\x18\x04 \x03(\v2\x1d.lippycat.data.CapturedPacketR\apackets\x12/\n" +
-	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\x98\x02\n" +
+	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xbf\x02\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -1047,7 +1057,8 @@ const file_data_proto_rawDesc = "" +
 	"\x0foriginal_length\x18\x04 \x01(\rR\x0eoriginalLength\x12'\n" +
 	"\x0finterface_index\x18\x05 \x01(\rR\x0einterfaceIndex\x12\x1b\n" +
 	"\tlink_type\x18\x06 \x01(\rR\blinkType\x129\n" +
-	"\bmetadata\x18\a \x01(\v2\x1d.lippycat.data.PacketMetadataR\bmetadata\"\xa0\x03\n" +
+	"\bmetadata\x18\a \x01(\v2\x1d.lippycat.data.PacketMetadataR\bmetadata\x12%\n" +
+	"\x0einterface_name\x18\b \x01(\tR\rinterfaceName\"\xa0\x03\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +

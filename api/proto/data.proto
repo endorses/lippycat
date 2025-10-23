@@ -60,6 +60,10 @@ message CapturedPacket {
 
     // Optional: Metadata from local analysis
     PacketMetadata metadata = 7;
+
+    // Interface name where packet was captured (e.g., "eth0", "wlan0")
+    // This preserves the actual interface name across hierarchical processor chains
+    string interface_name = 8;
 }
 
 // PacketMetadata contains hunter-side analysis results

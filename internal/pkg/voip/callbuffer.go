@@ -16,6 +16,7 @@ type CallBuffer struct {
 	matched       bool              // Whether call matches filter
 	createdAt     time.Time
 	rtpPorts      []string // RTP ports for this call
+	interfaceName string   // Interface where packets were captured
 }
 
 // CallMetadata contains extracted SIP header information
@@ -117,4 +118,14 @@ func (cb *CallBuffer) GetAge() time.Duration {
 // GetPacketCount returns the total number of buffered packets
 func (cb *CallBuffer) GetPacketCount() int {
 	return len(cb.sipPackets) + len(cb.rtpPackets)
+}
+
+// SetInterfaceName sets the interface name for this call's packets
+func (cb *CallBuffer) SetInterfaceName(name string) {
+	cb.interfaceName = name
+}
+
+// GetInterfaceName returns the interface name for this call's packets
+func (cb *CallBuffer) GetInterfaceName() string {
+	return cb.interfaceName
 }

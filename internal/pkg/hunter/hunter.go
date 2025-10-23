@@ -369,13 +369,14 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,
 		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
+		InterfaceName:  pktInfo.Interface,
 		// TODO: Add metadata extraction (SIP, RTP, etc.)
 	}
 }
 
 // ForwardPacketWithMetadata forwards a packet with embedded metadata to the processor
 // This is used by TCP SIP handler to forward reassembled packets with extracted metadata
-func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata) error {
+func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string) error {
 	if packet == nil {
 		return fmt.Errorf("cannot forward nil packet")
 	}
@@ -415,6 +416,7 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,
 		LinkType:       linkType,
+		InterfaceName:  interfaceName,
 		Metadata:       metadata, // Embedded metadata from TCP SIP handler
 	}
 

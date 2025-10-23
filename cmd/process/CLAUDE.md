@@ -407,7 +407,109 @@ processor:
 
 Hunter nodes running in VoIP mode include call-id in `packet.Metadata.Sip.CallId` for BOTH SIP and RTP packets (see `internal/pkg/voip/udp_handler_hunter.go:243-253`), enabling the processor to correlate RTP packets to their calls without additional state tracking.
 
-### 11. Resilience Patterns (Network Interruption Survival)
+### 11. Auto-Rotating PCAP Writing Pattern (Non-VoIP)
+
+**Files:** `internal/pkg/processor/auto_rotate_pcap.go`, `internal/pkg/processor/processor.go`
+
+For non-VoIP traffic, processor can auto-rotate PCAP files based on activity:
+
+**Architecture:**
+
+```go
+type AutoRotatePcapWriter struct {
+    config         *AutoRotateConfig
+    currentFile    *os.File
+    currentWriter  *pcapgo.Writer
+    lastPacketTime time.Time
+    fileStartTime  time.Time
+    currentSize    int64
+    idleTimer      *time.Timer
+}
+```
+
+**Rotation Logic:**
+
+```go
+// Rotation triggers (multiple conditions)
+func (w *AutoRotatePcapWriter) shouldRotate() bool {
+    // 1. File too large
+    if w.currentSize >= w.config.MaxFileSize {
+        return true
+    }
+
+    // 2. File too old
+    if time.Since(w.fileStartTime) >= w.config.MaxDuration {
+        return true
+    }
+
+    // 3. Idle timeout (handled by timer)
+    return false
+}
+
+// Idle timer with minimum duration protection
+func (w *AutoRotatePcapWriter) resetIdleTimer() {
+    w.idleTimer = time.AfterFunc(w.config.MaxIdleTime, func() {
+        // Only close if minimum duration elapsed
+        if time.Since(w.fileStartTime) >= w.config.MinDuration {
+            w.closeCurrentFile()
+        }
+    })
+}
+```
+
+**Packet Routing:**
+
+```go
+// In processor.go processBatch()
+if p.autoRotatePcapWriter != nil {
+    for _, packet := range batch.Packets {
+        // Skip VoIP packets (handled by per-call writer)
+        isVoIP := packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil)
+        if isVoIP {
+            continue
+        }
+
+        // Write non-VoIP packet
+        timestamp := time.Unix(0, packet.TimestampNs)
+        p.autoRotatePcapWriter.WritePacket(timestamp, packet.Data)
+    }
+}
+```
+
+**Key Features:**
+
+1. **Auto-rotation on idle:** Closes file after N seconds without packets
+2. **Size-based rotation:** Rotates when file reaches size limit
+3. **Duration-based rotation:** Rotates after maximum duration (1 hour)
+4. **Minimum duration:** Prevents tiny files from rapid start/stop traffic
+5. **Async syncing:** Periodic fsync() every 5 seconds
+6. **Independent of VoIP:** VoIP packets bypass auto-rotate writer
+
+**File Naming:**
+
+```
+20250123_143022.pcap       # First burst
+20250123_144530.pcap       # Next burst after idle period
+```
+
+**Configuration:**
+
+```bash
+lc process --auto-rotate-pcap \
+  --auto-rotate-pcap-dir ./bursts \
+  --auto-rotate-idle-timeout 30s \
+  --auto-rotate-max-size 100M
+```
+
+**Default Values:**
+
+- `MaxIdleTime`: 30 seconds
+- `MaxFileSize`: 100MB
+- `MaxDuration`: 1 hour
+- `MinDuration`: 10 seconds
+- `SyncInterval`: 5 seconds
+
+### 12. Resilience Patterns (Network Interruption Survival)
 
 **File:** `internal/pkg/processor/processor.go`
 

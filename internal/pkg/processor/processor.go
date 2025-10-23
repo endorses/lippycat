@@ -42,7 +42,8 @@ type Config struct {
 	MaxSubscribers   int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
 	WriteFile        string
 	DisplayStats     bool
-	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration
+	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration (VoIP)
+	AutoRotateConfig *AutoRotateConfig // Auto-rotating PCAP writing configuration (non-VoIP)
 	EnableDetection  bool              // Enable centralized protocol detection
 	FilterFile       string            // Path to filter persistence file (YAML)
 	// TLS settings
@@ -82,6 +83,9 @@ type Processor struct {
 
 	// Per-call PCAP writer (separate from main PCAP writer)
 	perCallPcapWriter *PcapWriterManager
+
+	// Auto-rotate PCAP writer (for non-VoIP traffic)
+	autoRotatePcapWriter *AutoRotatePcapWriter
 
 	// Protocol aggregators
 	callAggregator *voip.CallAggregator // VoIP call state aggregation
@@ -126,6 +130,20 @@ func New(config Config) (*Processor, error) {
 		logger.Info("Per-call PCAP writing enabled",
 			"output_dir", config.PcapWriterConfig.OutputDir,
 			"pattern", config.PcapWriterConfig.FilePattern)
+	}
+
+	// Initialize auto-rotate PCAP writer if configured
+	if config.AutoRotateConfig != nil && config.AutoRotateConfig.Enabled {
+		writer, err := NewAutoRotatePcapWriter(config.AutoRotateConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize auto-rotate PCAP writer: %w", err)
+		}
+		p.autoRotatePcapWriter = writer
+		logger.Info("Auto-rotate PCAP writing enabled",
+			"output_dir", config.AutoRotateConfig.OutputDir,
+			"pattern", config.AutoRotateConfig.FilePattern,
+			"max_idle_time", config.AutoRotateConfig.MaxIdleTime,
+			"max_file_size", config.AutoRotateConfig.MaxFileSize)
 	}
 
 	// Initialize stats collector (needs to be created first as it's used by other managers)
@@ -353,6 +371,13 @@ func (p *Processor) Shutdown() error {
 		}
 	}
 
+	// Close auto-rotate PCAP writer
+	if p.autoRotatePcapWriter != nil {
+		if err := p.autoRotatePcapWriter.Close(); err != nil {
+			logger.Warn("Failed to close auto-rotate PCAP writer", "error", err)
+		}
+	}
+
 	// Give time for graceful shutdown
 	if p.grpcServer != nil {
 		p.grpcServer.GracefulStop()
@@ -494,6 +519,26 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 								"error", err)
 						}
 					}
+				}
+			}
+		}
+	}
+
+	// Write non-VoIP packets to auto-rotating PCAP files if configured
+	// Auto-rotates based on idle time, file size, and duration
+	if p.autoRotatePcapWriter != nil {
+		for _, packet := range batch.Packets {
+			// Skip VoIP packets (they're handled by per-call writer)
+			isVoIP := packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil)
+			if isVoIP {
+				continue
+			}
+
+			// Write non-VoIP packet to auto-rotating PCAP
+			if len(packet.Data) > 0 {
+				timestamp := time.Unix(0, packet.TimestampNs)
+				if err := p.autoRotatePcapWriter.WritePacket(timestamp, packet.Data); err != nil {
+					logger.Warn("Failed to write packet to auto-rotate PCAP", "error", err)
 				}
 			}
 		}

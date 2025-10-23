@@ -47,11 +47,11 @@ lc process --listen :50051 --write-file /var/capture/packets.pcap
 
 ### PCAP File Writing
 
-Processors can write received packets to PCAP files in two modes:
+Processors can write received packets to PCAP files in three independent modes:
 
 #### Unified PCAP Writing
 
-Write all packets to a single file:
+Write all packets to a single continuous file:
 
 - `-w, --write-file` - Write all received packets to one PCAP file
 
@@ -90,7 +90,39 @@ lc process --listen :50051 \
 
 **Use Cases:** VoIP call recording, per-call analysis, selective archival, call quality analysis.
 
-**Note:** Both modes are independent. You can enable unified PCAP (`-w`) and per-call PCAP (`--per-call-pcap`) simultaneously.
+#### Auto-Rotating PCAP Writing (Non-VoIP)
+
+Write non-VoIP packets to auto-rotating files based on activity:
+
+- `--auto-rotate-pcap` - Enable auto-rotating PCAP writing
+- `--auto-rotate-pcap-dir` - Output directory (default: `./auto-rotate-pcaps`)
+- `--auto-rotate-pcap-pattern` - Filename pattern (default: `{timestamp}.pcap`)
+- `--auto-rotate-idle-timeout` - Close file after idle time (default: `30s`)
+- `--auto-rotate-max-size` - Max file size before rotation (default: `100M`)
+
+```bash
+lc process --listen :50051 \
+  --auto-rotate-pcap \
+  --auto-rotate-pcap-dir /var/capture/bursts \
+  --auto-rotate-idle-timeout 30s \
+  --auto-rotate-max-size 100M
+```
+
+**Output:** Creates timestamped files for traffic bursts:
+```
+20250123_143022.pcap   # First burst
+20250123_144530.pcap   # Next burst after 30s idle
+```
+
+**Rotation Triggers:**
+- **Idle timeout:** Close file after N seconds of inactivity (default: 30s)
+- **File size:** Rotate when file reaches size limit (default: 100MB)
+- **Duration:** Rotate after maximum file duration (1 hour)
+- **Minimum duration:** Keep file open for at least 10 seconds (prevents tiny files)
+
+**Use Cases:** Network traffic bursts, session-based capture, automatic segmentation, bandwidth monitoring.
+
+**Note:** All three modes are independent. You can enable unified (`-w`), per-call (`--per-call-pcap`), and auto-rotate (`--auto-rotate-pcap`) simultaneously. VoIP packets are routed to per-call writer; non-VoIP packets go to auto-rotate writer.
 
 ### Protocol Detection
 
@@ -284,11 +316,19 @@ processor:
   enable_detection: true
   filter_file: "~/.config/lippycat/filters.yaml"
 
-  # Per-call PCAP writing
+  # Per-call PCAP writing (VoIP)
   per_call_pcap:
     enabled: true
     output_dir: "/var/capture/calls"
     file_pattern: "{timestamp}_{callid}.pcap"
+
+  # Auto-rotating PCAP writing (non-VoIP)
+  auto_rotate_pcap:
+    enabled: true
+    output_dir: "/var/capture/bursts"
+    file_pattern: "{timestamp}.pcap"
+    idle_timeout: "30s"
+    max_size: "100M"
 
   # TLS security
   tls:

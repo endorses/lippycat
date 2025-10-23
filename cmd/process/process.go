@@ -57,6 +57,12 @@ var (
 	perCallPcapEnabled bool
 	perCallPcapDir     string
 	perCallPcapPattern string
+	// Auto-rotate PCAP flags
+	autoRotatePcapEnabled     bool
+	autoRotatePcapDir         string
+	autoRotatePcapPattern     string
+	autoRotatePcapIdleTimeout string
+	autoRotatePcapMaxSize     string
 )
 
 func init() {
@@ -86,6 +92,13 @@ func init() {
 	ProcessCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
 	ProcessCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files (supports {callid}, {from}, {to}, {timestamp})")
 
+	// Auto-rotate PCAP writing
+	ProcessCmd.Flags().BoolVar(&autoRotatePcapEnabled, "auto-rotate-pcap", false, "Enable auto-rotating PCAP writing for non-VoIP traffic")
+	ProcessCmd.Flags().StringVar(&autoRotatePcapDir, "auto-rotate-pcap-dir", "./auto-rotate-pcaps", "Directory for auto-rotating PCAP files")
+	ProcessCmd.Flags().StringVar(&autoRotatePcapPattern, "auto-rotate-pcap-pattern", "{timestamp}.pcap", "Filename pattern for auto-rotating PCAP files (supports {timestamp})")
+	ProcessCmd.Flags().StringVar(&autoRotatePcapIdleTimeout, "auto-rotate-idle-timeout", "30s", "Close PCAP file after this idle time (e.g., 30s, 1m)")
+	ProcessCmd.Flags().StringVar(&autoRotatePcapMaxSize, "auto-rotate-max-size", "100M", "Maximum PCAP file size before rotation (e.g., 100M, 1G)")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
 	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
@@ -104,6 +117,11 @@ func init() {
 	_ = viper.BindPFlag("processor.per_call_pcap.enabled", ProcessCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("processor.per_call_pcap.output_dir", ProcessCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("processor.per_call_pcap.file_pattern", ProcessCmd.Flags().Lookup("per-call-pcap-pattern"))
+	_ = viper.BindPFlag("processor.auto_rotate_pcap.enabled", ProcessCmd.Flags().Lookup("auto-rotate-pcap"))
+	_ = viper.BindPFlag("processor.auto_rotate_pcap.output_dir", ProcessCmd.Flags().Lookup("auto-rotate-pcap-dir"))
+	_ = viper.BindPFlag("processor.auto_rotate_pcap.file_pattern", ProcessCmd.Flags().Lookup("auto-rotate-pcap-pattern"))
+	_ = viper.BindPFlag("processor.auto_rotate_pcap.idle_timeout", ProcessCmd.Flags().Lookup("auto-rotate-idle-timeout"))
+	_ = viper.BindPFlag("processor.auto_rotate_pcap.max_size", ProcessCmd.Flags().Lookup("auto-rotate-max-size"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -135,6 +153,36 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Build auto-rotate PCAP config if enabled
+	var autoRotateConfig *processor.AutoRotateConfig
+	if getBoolConfig("processor.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
+		// Parse idle timeout
+		idleTimeoutStr := getStringConfig("processor.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
+		idleTimeout, err := time.ParseDuration(idleTimeoutStr)
+		if err != nil {
+			return fmt.Errorf("invalid auto-rotate-idle-timeout: %w", err)
+		}
+
+		// Parse max size (supports K, M, G suffixes)
+		maxSizeStr := getStringConfig("processor.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
+		maxSize, err := parseSizeString(maxSizeStr)
+		if err != nil {
+			return fmt.Errorf("invalid auto-rotate-max-size: %w", err)
+		}
+
+		autoRotateConfig = &processor.AutoRotateConfig{
+			Enabled:      true,
+			OutputDir:    getStringConfig("processor.auto_rotate_pcap.output_dir", autoRotatePcapDir),
+			FilePattern:  getStringConfig("processor.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
+			MaxIdleTime:  idleTimeout,
+			MaxFileSize:  maxSize,
+			MaxDuration:  1 * time.Hour,    // Fixed: 1 hour max per file
+			MinDuration:  10 * time.Second, // Fixed: 10 second minimum
+			BufferSize:   4096,
+			SyncInterval: 5 * time.Second,
+		}
+	}
+
 	// Get configuration (flags override config file)
 	config := processor.Config{
 		ListenAddr:       getStringConfig("processor.listen_addr", listenAddr),
@@ -145,6 +193,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		WriteFile:        getStringConfig("processor.write_file", writeFile),
 		DisplayStats:     getBoolConfig("processor.display_stats", displayStats),
 		PcapWriterConfig: pcapWriterConfig,
+		AutoRotateConfig: autoRotateConfig,
 		EnableDetection:  getBoolConfig("processor.enable_detection", enableDetection),
 		FilterFile:       getStringConfig("processor.filter_file", filterFile),
 		// TLS configuration
@@ -295,4 +344,39 @@ func getBoolConfig(key string, flagValue bool) bool {
 		return viper.GetBool(key)
 	}
 	return flagValue
+}
+
+// parseSizeString parses a size string (e.g., "100M", "1G", "500K") and returns bytes
+func parseSizeString(s string) (int64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty size string")
+	}
+
+	// Check last character for suffix
+	lastChar := s[len(s)-1]
+	var multiplier int64 = 1
+
+	switch lastChar {
+	case 'K', 'k':
+		multiplier = 1024
+		s = s[:len(s)-1]
+	case 'M', 'm':
+		multiplier = 1024 * 1024
+		s = s[:len(s)-1]
+	case 'G', 'g':
+		multiplier = 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	case 'T', 't':
+		multiplier = 1024 * 1024 * 1024 * 1024
+		s = s[:len(s)-1]
+	}
+
+	// Parse number
+	var value int64
+	_, err := fmt.Sscanf(s, "%d", &value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size value: %w", err)
+	}
+
+	return value * multiplier, nil
 }

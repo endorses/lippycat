@@ -136,9 +136,9 @@ func (h *HTTPSignature) detectRequest(ctx *signatures.DetectionContext) *signatu
 			LastHost:        headers["Host"],
 			LastRequestTime: ctx.Packet.Metadata().Timestamp,
 		}
-		ctx.Flow.State = httpState
-		ctx.Flow.Metadata["http_method"] = method
-		ctx.Flow.Metadata["http_path"] = path
+		ctx.Flow.SetState(httpState)
+		ctx.Flow.SetMetadata("http_method", method)
+		ctx.Flow.SetMetadata("http_path", path)
 	}
 
 	// Calculate confidence based on indicators
@@ -217,13 +217,16 @@ func (h *HTTPSignature) detectResponse(ctx *signatures.DetectionContext) *signat
 	}
 
 	// Correlate with request if available
-	if ctx.Flow != nil && ctx.Flow.State != nil {
-		if httpState, ok := ctx.Flow.State.(*HTTPFlowState); ok {
-			metadata["request_method"] = httpState.LastMethod
-			metadata["request_path"] = httpState.LastPath
-			if !httpState.LastRequestTime.IsZero() {
-				responseTime := ctx.Packet.Metadata().Timestamp.Sub(httpState.LastRequestTime)
-				metadata["response_time_ms"] = responseTime.Milliseconds()
+	if ctx.Flow != nil {
+		state := ctx.Flow.GetState()
+		if state != nil {
+			if httpState, ok := state.(*HTTPFlowState); ok {
+				metadata["request_method"] = httpState.LastMethod
+				metadata["request_path"] = httpState.LastPath
+				if !httpState.LastRequestTime.IsZero() {
+					responseTime := ctx.Packet.Metadata().Timestamp.Sub(httpState.LastRequestTime)
+					metadata["response_time_ms"] = responseTime.Milliseconds()
+				}
 			}
 		}
 	}

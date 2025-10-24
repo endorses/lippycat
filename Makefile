@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui binaries clean-binaries
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui binaries clean-binaries
 
 # Build variables
 BINARY_NAME=lc
@@ -126,6 +126,10 @@ test-coverage:
 	$(GO) test -tags all -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
+# Run tests with race detector
+test-race:
+	$(GO) test -tags all -race ./...
+
 # Run benchmarks and generate profile
 bench:
 	$(GO) test -tags all -bench=. -cpuprofile=$(PROFILE_DATA) -memprofile=mem.prof ./...
@@ -214,6 +218,7 @@ help:
 	@echo "  make test           - Run tests"
 	@echo "  make test-verbose   - Run tests with verbose output"
 	@echo "  make test-coverage  - Generate coverage report"
+	@echo "  make test-race      - Run tests with race detector"
 	@echo "  make bench          - Run benchmarks"
 	@echo "  make fmt            - Format code"
 	@echo "  make vet            - Run go vet"

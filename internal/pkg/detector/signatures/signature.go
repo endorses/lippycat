@@ -2,6 +2,7 @@ package signatures
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -110,6 +111,45 @@ type FlowContext struct {
 
 	// Protocol-specific state (type-asserted by signatures)
 	State interface{}
+
+	// mu protects concurrent access to Metadata and State
+	mu sync.RWMutex
+}
+
+// SetMetadata safely sets a metadata key-value pair
+func (f *FlowContext) SetMetadata(key string, value interface{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Metadata[key] = value
+}
+
+// GetMetadata safely retrieves a metadata value
+func (f *FlowContext) GetMetadata(key string) (interface{}, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	val, ok := f.Metadata[key]
+	return val, ok
+}
+
+// DeleteMetadata safely deletes a metadata key
+func (f *FlowContext) DeleteMetadata(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.Metadata, key)
+}
+
+// SetState safely sets the flow state
+func (f *FlowContext) SetState(state interface{}) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.State = state
+}
+
+// GetState safely retrieves the flow state
+func (f *FlowContext) GetState() interface{} {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.State
 }
 
 // Confidence level constants for standardized scoring

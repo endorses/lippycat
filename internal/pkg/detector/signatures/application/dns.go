@@ -128,21 +128,21 @@ func (d *DNSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		if qr == 0 {
 			// This is a query - store it
 			queryKey := fmt.Sprintf("dns_query_%d", transactionID)
-			ctx.Flow.Metadata[queryKey] = DNSQuery{
+			ctx.Flow.SetMetadata(queryKey, DNSQuery{
 				TransactionID: transactionID,
 				QuestionCount: questionCount,
 				Timestamp:     ctx.Packet.Metadata().Timestamp,
-			}
+			})
 		} else {
 			// This is a response - try to correlate with query
 			queryKey := fmt.Sprintf("dns_query_%d", transactionID)
-			if queryData, ok := ctx.Flow.Metadata[queryKey]; ok {
+			if queryData, ok := ctx.Flow.GetMetadata(queryKey); ok {
 				if query, ok := queryData.(DNSQuery); ok {
 					responseTime := ctx.Packet.Metadata().Timestamp.Sub(query.Timestamp)
 					metadata["query_response_time_ms"] = responseTime.Milliseconds()
 					metadata["correlated_query"] = true
 					// Clean up the query
-					delete(ctx.Flow.Metadata, queryKey)
+					ctx.Flow.DeleteMetadata(queryKey)
 				}
 			}
 		}

@@ -198,3 +198,58 @@ func TestTextFilter_Selectivity(t *testing.T) {
 	specificFieldFilter := NewTextFilter("test", []string{"src"})
 	assert.Equal(t, 0.6, specificFieldFilter.Selectivity())
 }
+
+// TestFilterChain_RemoveLastByInsertionOrder verifies RemoveLast removes by insertion order, not sorted position
+func TestFilterChain_RemoveLastByInsertionOrder(t *testing.T) {
+	fc := NewFilterChain()
+
+	// Add filters in a specific insertion order
+	textFilter := NewTextFilter("first", []string{"all"})         // Selectivity: 0.3 (inserted first)
+	voipFilter := NewVoIPFilter("user", "alicent")                // Selectivity: 0.7 (inserted second)
+	specificTextFilter := NewTextFilter("third", []string{"src"}) // Selectivity: 0.6 (inserted third)
+
+	fc.Add(textFilter)
+	fc.Add(voipFilter)
+	fc.Add(specificTextFilter)
+
+	// Filters are sorted by selectivity: [VoIP(0.7), Text(0.6), Text(0.3)]
+	// But insertion order is: [Text(0.3), VoIP(0.7), Text(0.6)]
+	filters := fc.GetFilters()
+	assert.Equal(t, 3, len(filters))
+	assert.Equal(t, "voip", filters[0].Type()) // Most selective (0.7)
+	assert.Equal(t, "text", filters[1].Type()) // Second most selective (0.6)
+	assert.Equal(t, "text", filters[2].Type()) // Least selective (0.3)
+
+	// Remove last filter (should remove third inserted filter, which is Text(0.6))
+	removed := fc.RemoveLast()
+	assert.True(t, removed)
+
+	// Verify the filter with selectivity 0.6 was removed (third inserted)
+	filters = fc.GetFilters()
+	assert.Equal(t, 2, len(filters))
+	assert.Equal(t, "voip", filters[0].Type()) // VoIP (0.7) still present
+	assert.Equal(t, "text", filters[1].Type()) // Text (0.3) still present
+	assert.Equal(t, 0.7, filters[0].Selectivity())
+	assert.Equal(t, 0.3, filters[1].Selectivity())
+
+	// Remove last again (should remove second inserted filter, which is VoIP(0.7))
+	removed = fc.RemoveLast()
+	assert.True(t, removed)
+
+	filters = fc.GetFilters()
+	assert.Equal(t, 1, len(filters))
+	assert.Equal(t, "text", filters[0].Type()) // Only Text (0.3) remains (first inserted)
+	assert.Equal(t, 0.3, filters[0].Selectivity())
+
+	// Remove last again (should remove first inserted filter, which is Text(0.3))
+	removed = fc.RemoveLast()
+	assert.True(t, removed)
+
+	filters = fc.GetFilters()
+	assert.Equal(t, 0, len(filters))
+	assert.True(t, fc.IsEmpty())
+
+	// Try to remove from empty chain
+	removed = fc.RemoveLast()
+	assert.False(t, removed)
+}

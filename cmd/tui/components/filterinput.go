@@ -203,7 +203,7 @@ func (f *FilterInput) View() string {
 
 	// Focus-aware border style
 	borderStyle := lipgloss.RoundedBorder()
-	borderColor := f.theme.InfoColor
+	borderColor := f.theme.FilterColor
 
 	containerStyle := lipgloss.NewStyle().
 		Border(borderStyle).
@@ -215,13 +215,13 @@ func (f *FilterInput) View() string {
 		Foreground(f.theme.Foreground)
 
 	promptStyle := lipgloss.NewStyle().
-		Foreground(f.theme.InfoColor).
+		Foreground(f.theme.FilterColor).
 		Bold(true)
 
 	// Build the input line with cursor
 	cursorStyle := lipgloss.NewStyle().
 		Foreground(f.theme.CursorFg).
-		Background(f.theme.CursorBg)
+		Background(f.theme.FilterColor)
 
 	var displayValue string
 	if f.cursor < len(f.value) {
@@ -243,7 +243,7 @@ func (f *FilterInput) View() string {
 	// Show active filters if there are any
 	if len(f.activeFilters) > 0 {
 		filterInfoStyle := lipgloss.NewStyle().
-			Foreground(f.theme.InfoColor).
+			Foreground(f.theme.FilterColor).
 			Italic(true)
 
 		// Build filter list string

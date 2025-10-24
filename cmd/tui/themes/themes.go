@@ -44,6 +44,7 @@ type Theme struct {
 	WarningColor lipgloss.Color
 	SuccessColor lipgloss.Color
 	InfoColor    lipgloss.Color
+	FilterColor  lipgloss.Color
 }
 
 // Solarized color palette
@@ -109,6 +110,7 @@ func Solarized() Theme {
 		WarningColor: solarizedOrange,
 		SuccessColor: solarizedGreen,
 		InfoColor:    solarizedBlue,
+		FilterColor:  solarizedViolet,
 	}
 }
 

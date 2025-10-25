@@ -66,6 +66,8 @@ var (
 	// Virtual interface flags
 	virtualInterface     bool
 	virtualInterfaceName string
+	vifType              string
+	vifBufferSize        int
 )
 
 func init() {
@@ -105,6 +107,8 @@ func init() {
 	// Virtual Interface flags
 	ProcessCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
 	ProcessCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
+	ProcessCmd.Flags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
+	ProcessCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 4096, "Injection queue buffer size (packets)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -131,6 +135,8 @@ func init() {
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.max_size", ProcessCmd.Flags().Lookup("auto-rotate-max-size"))
 	_ = viper.BindPFlag("processor.virtual_interface", ProcessCmd.Flags().Lookup("virtual-interface"))
 	_ = viper.BindPFlag("processor.vif_name", ProcessCmd.Flags().Lookup("vif-name"))
+	_ = viper.BindPFlag("processor.vif_type", ProcessCmd.Flags().Lookup("vif-type"))
+	_ = viper.BindPFlag("processor.vif_buffer_size", ProcessCmd.Flags().Lookup("vif-buffer-size"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -214,6 +220,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		// Virtual interface configuration
 		VirtualInterface:     getBoolConfig("processor.virtual_interface", virtualInterface),
 		VirtualInterfaceName: getStringConfig("processor.vif_name", virtualInterfaceName),
+		VirtualInterfaceType: getStringConfig("processor.vif_type", vifType),
+		VifBufferSize:        getIntConfig("processor.vif_buffer_size", vifBufferSize),
 	}
 
 	// Security check: require explicit opt-in to insecure mode

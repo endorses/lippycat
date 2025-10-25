@@ -8,6 +8,17 @@
 # pcap_timeout_ms: 200  # PCAP read timeout in ms (default: 200, range: 50-1000)
 
 # ========================================
+# VIRTUAL INTERFACE CONFIGURATION
+# ========================================
+
+# Virtual Interface (for sniff and process commands)
+# virtual_interface:
+#   enabled: false         # Enable virtual network interface for packet injection
+#   name: "lc0"           # Interface name (default: lc0)
+#   type: "tap"           # Interface type: tap (Layer 2) or tun (Layer 3)
+#   buffer_size: 4096     # Injection queue buffer size (packets)
+
+# ========================================
 # SIMPLIFIED TCP CONFIGURATION (8 parameters)
 # ========================================
 

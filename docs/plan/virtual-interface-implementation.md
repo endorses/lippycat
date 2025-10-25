@@ -222,17 +222,22 @@ tshark -i lc0
   - [x] `hunter` build does NOT include vinterface (verified: hunt command has no flag)
 
 #### Configuration & CLI
-- [ ] Add comprehensive CLI flags (all commands)
-  - [ ] --vif-type (tap/tun, default: tap)
-  - [ ] --vif-buffer-size (injection queue size, default: 4096)
-- [ ] Add YAML configuration support
-  - [ ] virtual_interface.enabled
-  - [ ] virtual_interface.name
-  - [ ] virtual_interface.type
-  - [ ] virtual_interface.buffer_size
-- [ ] Implement Config struct and validation
-- [ ] Default interface name: `lc0` for all commands
-- [ ] Users can override with --vif-name for custom names
+- [x] Add comprehensive CLI flags (all commands)
+  - [x] --vif-type (tap/tun, default: tap)
+  - [x] --vif-buffer-size (injection queue size, default: 4096)
+- [x] Add YAML configuration support
+  - [x] virtual_interface.enabled
+  - [x] virtual_interface.name
+  - [x] virtual_interface.type
+  - [x] virtual_interface.buffer_size
+- [x] Implement Config struct and validation
+- [x] Default interface name: `lc0` for all commands
+- [x] Users can override with --vif-name for custom names
+- [x] Implement proper TUN support (Layer 3, strips Ethernet headers)
+  - [x] Add ConvertToIP() for TUN interfaces
+  - [x] Add extractIPPacket() to strip Ethernet headers
+  - [x] Add reconstructIPPacket() for TUN packet reconstruction
+  - [x] Update InjectPacketBatch() to choose conversion based on interface type
 
 #### Error Handling & Robustness
 - [ ] Handle interface creation failures

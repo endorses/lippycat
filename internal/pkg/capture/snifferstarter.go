@@ -218,6 +218,16 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 		cfg := vinterface.DefaultConfig()
 		cfg.Name = vifName
 
+		// Read type from config (default: tap)
+		if vifType := viper.GetString("sniff.vif_type"); vifType != "" {
+			cfg.Type = vifType
+		}
+
+		// Read buffer size from config (default: 4096)
+		if bufferSize := viper.GetInt("sniff.vif_buffer_size"); bufferSize > 0 {
+			cfg.BufferSize = bufferSize
+		}
+
 		var err error
 		vifMgr, err = vinterface.NewManager(cfg)
 		if err != nil {

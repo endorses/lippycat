@@ -35,6 +35,45 @@ func ConvertToEthernet(pkt *types.PacketDisplay) ([]byte, error) {
 	return reconstructPacket(pkt)
 }
 
+// ConvertToIP converts a PacketDisplay to a raw IP packet (without Ethernet header).
+// This is used for TUN interface injection, which requires Layer 3 packets only.
+//
+// The conversion follows this structure:
+// - IP layer (IPv4 or IPv6) from RawData
+// - Transport layer (TCP/UDP) from RawData
+//
+// If RawData contains an Ethernet frame, the Ethernet header is stripped.
+// Otherwise, the IP packet is reconstructed from PacketDisplay fields.
+func ConvertToIP(pkt *types.PacketDisplay) ([]byte, error) {
+	if pkt == nil {
+		return nil, fmt.Errorf("nil packet")
+	}
+
+	// If we have raw data, extract the IP packet
+	if len(pkt.RawData) > 0 {
+		return extractIPPacket(pkt.RawData, pkt.LinkType)
+	}
+
+	// Otherwise, reconstruct IP packet from packet fields
+	return reconstructIPPacket(pkt)
+}
+
+// extractIPPacket extracts the IP packet from raw data, stripping Ethernet header if present.
+func extractIPPacket(rawData []byte, linkType layers.LinkType) ([]byte, error) {
+	// If it's already an IP packet (no Ethernet header), return as-is
+	if linkType != layers.LinkTypeEthernet {
+		return rawData, nil
+	}
+
+	// If it has an Ethernet header, strip it (14 bytes)
+	if len(rawData) < 14 {
+		return nil, fmt.Errorf("packet too short to contain Ethernet header: %d bytes", len(rawData))
+	}
+
+	// Return IP packet (everything after Ethernet header)
+	return rawData[14:], nil
+}
+
 // prependEthernetHeader adds an Ethernet header to raw IP packet data.
 func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, error) {
 	// If already has Ethernet header, return as-is
@@ -76,6 +115,129 @@ func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, er
 	copy(frame[14:], rawData)
 
 	return frame, nil
+}
+
+// reconstructIPPacket builds an IP packet from PacketDisplay fields (without Ethernet header).
+// This is a fallback for TUN interfaces when RawData is not available.
+func reconstructIPPacket(pkt *types.PacketDisplay) ([]byte, error) {
+	// Parse IP addresses
+	srcIP := net.ParseIP(pkt.SrcIP)
+	dstIP := net.ParseIP(pkt.DstIP)
+	if srcIP == nil || dstIP == nil {
+		return nil, fmt.Errorf("invalid IP addresses: src=%s dst=%s", pkt.SrcIP, pkt.DstIP)
+	}
+
+	// Determine if IPv4 or IPv6
+	isIPv6 := srcIP.To4() == nil
+
+	// Create packet buffer
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+
+	// Build layers from top to bottom
+	var payload gopacket.Payload
+	if pkt.Info != "" {
+		payload = gopacket.Payload([]byte(pkt.Info))
+	}
+
+	// Create transport layer
+	var transportLayer gopacket.SerializableLayer
+	switch pkt.Protocol {
+	case "TCP":
+		srcPort, dstPort, err := parsePorts(pkt.SrcPort, pkt.DstPort)
+		if err != nil {
+			return nil, fmt.Errorf("invalid TCP ports: %w", err)
+		}
+		tcp := &layers.TCP{
+			SrcPort: layers.TCPPort(srcPort),
+			DstPort: layers.TCPPort(dstPort),
+		}
+		if isIPv6 {
+			tcp.SetNetworkLayerForChecksum(&layers.IPv6{
+				SrcIP: srcIP,
+				DstIP: dstIP,
+			})
+		} else {
+			tcp.SetNetworkLayerForChecksum(&layers.IPv4{
+				SrcIP: srcIP,
+				DstIP: dstIP,
+			})
+		}
+		transportLayer = tcp
+
+	case "UDP":
+		srcPort, dstPort, err := parsePorts(pkt.SrcPort, pkt.DstPort)
+		if err != nil {
+			return nil, fmt.Errorf("invalid UDP ports: %w", err)
+		}
+		udp := &layers.UDP{
+			SrcPort: layers.UDPPort(srcPort),
+			DstPort: layers.UDPPort(dstPort),
+		}
+		if isIPv6 {
+			udp.SetNetworkLayerForChecksum(&layers.IPv6{
+				SrcIP: srcIP,
+				DstIP: dstIP,
+			})
+		} else {
+			udp.SetNetworkLayerForChecksum(&layers.IPv4{
+				SrcIP: srcIP,
+				DstIP: dstIP,
+			})
+		}
+		transportLayer = udp
+
+	default:
+		// For other protocols, just use payload
+		transportLayer = nil
+	}
+
+	// Create network layer
+	var networkLayer gopacket.SerializableLayer
+	if isIPv6 {
+		ipv6 := &layers.IPv6{
+			Version:    6,
+			SrcIP:      srcIP,
+			DstIP:      dstIP,
+			HopLimit:   64,
+			NextHeader: layers.IPProtocolTCP, // Default, will be fixed by FixLengths
+		}
+		if pkt.Protocol == "UDP" {
+			ipv6.NextHeader = layers.IPProtocolUDP
+		}
+		networkLayer = ipv6
+	} else {
+		ipv4 := &layers.IPv4{
+			Version:  4,
+			TTL:      64,
+			SrcIP:    srcIP,
+			DstIP:    dstIP,
+			Protocol: layers.IPProtocolTCP, // Default, will be fixed by FixLengths
+		}
+		if pkt.Protocol == "UDP" {
+			ipv4.Protocol = layers.IPProtocolUDP
+		}
+		networkLayer = ipv4
+	}
+
+	// Serialize layers (NO Ethernet layer for TUN)
+	var serializeLayers []gopacket.SerializableLayer
+	serializeLayers = append(serializeLayers, networkLayer)
+	if transportLayer != nil {
+		serializeLayers = append(serializeLayers, transportLayer)
+	}
+	if len(payload) > 0 {
+		serializeLayers = append(serializeLayers, payload)
+	}
+
+	if err := gopacket.SerializeLayers(buf, opts, serializeLayers...); err != nil {
+		return nil, fmt.Errorf("failed to serialize IP packet: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 // reconstructPacket builds a complete Ethernet frame from PacketDisplay fields.

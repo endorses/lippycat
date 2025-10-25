@@ -7,6 +7,13 @@
                         # Higher values (200-500ms) = smoother display, slightly slower shutdown
                         # Can also be set via env var: LIPPYCAT_PCAP_TIMEOUT_MS=200
 
+# Virtual Interface Configuration (for sniff and process commands)
+# virtual_interface:
+#   enabled: false              # Enable virtual network interface for packet injection
+#   name: "lc0"                 # Interface name (default: lc0)
+#   type: "tap"                 # Interface type: tap (Layer 2) or tun (Layer 3)
+#   buffer_size: 4096           # Injection queue buffer size (packets)
+
 voip:
   # Basic TCP configuration
   max_goroutines: 1000

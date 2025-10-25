@@ -208,11 +208,21 @@ func (m *linuxManager) InjectPacketBatch(packets []types.PacketDisplay) error {
 	}
 
 	for i := range packets {
-		// Convert PacketDisplay to raw frame
-		frame, err := ConvertToEthernet(&packets[i])
+		// Convert PacketDisplay to raw frame based on interface type
+		var frame []byte
+		var err error
+
+		if m.config.Type == "tun" {
+			// TUN: Convert to IP packet (Layer 3 only, no Ethernet header)
+			frame, err = ConvertToIP(&packets[i])
+		} else {
+			// TAP: Convert to Ethernet frame (Layer 2, includes Ethernet header)
+			frame, err = ConvertToEthernet(&packets[i])
+		}
+
 		if err != nil {
 			m.stats.conversionErrors.Add(1)
-			logger.Debug("Packet conversion failed", "error", err)
+			logger.Debug("Packet conversion failed", "error", err, "type", m.config.Type)
 			continue
 		}
 

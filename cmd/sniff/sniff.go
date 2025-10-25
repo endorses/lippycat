@@ -32,6 +32,8 @@ var (
 	virtualInterfaceName string
 	vifStartupDelay      time.Duration
 	vifReplayTiming      bool
+	vifType              string
+	vifBufferSize        int
 )
 
 func sniff(cmd *cobra.Command, args []string) {
@@ -52,6 +54,12 @@ func sniff(cmd *cobra.Command, args []string) {
 	}
 	if cmd.Flags().Changed("vif-replay-timing") {
 		viper.Set("sniff.vif_replay_timing", vifReplayTiming)
+	}
+	if cmd.Flags().Changed("vif-type") {
+		viper.Set("sniff.vif_type", vifType)
+	}
+	if cmd.Flags().Changed("vif-buffer-size") {
+		viper.Set("sniff.vif_buffer_size", vifBufferSize)
 	}
 
 	if readFile == "" {
@@ -76,6 +84,8 @@ func init() {
 	SniffCmd.PersistentFlags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
 	SniffCmd.PersistentFlags().DurationVar(&vifStartupDelay, "vif-startup-delay", 3*time.Second, "Delay before packet injection starts (allows tools to attach)")
 	SniffCmd.PersistentFlags().BoolVar(&vifReplayTiming, "vif-replay-timing", false, "Respect original packet timing from PCAP (like tcpreplay)")
+	SniffCmd.PersistentFlags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
+	SniffCmd.PersistentFlags().IntVar(&vifBufferSize, "vif-buffer-size", 4096, "Injection queue buffer size (packets)")
 
 	_ = viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("sniff.quiet", SniffCmd.PersistentFlags().Lookup("quiet"))
@@ -86,4 +96,6 @@ func init() {
 	_ = viper.BindPFlag("sniff.vif_name", SniffCmd.PersistentFlags().Lookup("vif-name"))
 	_ = viper.BindPFlag("sniff.vif_startup_delay", SniffCmd.PersistentFlags().Lookup("vif-startup-delay"))
 	_ = viper.BindPFlag("sniff.vif_replay_timing", SniffCmd.PersistentFlags().Lookup("vif-replay-timing"))
+	_ = viper.BindPFlag("sniff.vif_type", SniffCmd.PersistentFlags().Lookup("vif-type"))
+	_ = viper.BindPFlag("sniff.vif_buffer_size", SniffCmd.PersistentFlags().Lookup("vif-buffer-size"))
 }

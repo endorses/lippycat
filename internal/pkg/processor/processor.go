@@ -58,6 +58,8 @@ type Config struct {
 	// Virtual interface settings
 	VirtualInterface     bool   // Enable virtual network interface
 	VirtualInterfaceName string // Virtual interface name
+	VirtualInterfaceType string // Virtual interface type (tap/tun)
+	VifBufferSize        int    // Virtual interface buffer size
 }
 
 // Processor represents a processor node
@@ -164,6 +166,16 @@ func New(config Config) (*Processor, error) {
 
 		cfg := vinterface.DefaultConfig()
 		cfg.Name = ifaceName
+
+		// Apply type from config (default: tap)
+		if config.VirtualInterfaceType != "" {
+			cfg.Type = config.VirtualInterfaceType
+		}
+
+		// Apply buffer size from config (default: 4096)
+		if config.VifBufferSize > 0 {
+			cfg.BufferSize = config.VifBufferSize
+		}
 
 		mgr, err := vinterface.NewManager(cfg)
 		if err != nil {

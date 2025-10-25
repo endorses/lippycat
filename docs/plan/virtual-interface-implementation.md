@@ -142,43 +142,58 @@ tshark -i lc0
   - [x] Only applies when --vif-replay-timing flag is set
 
 #### Manual Testing
-- [ ] Test 1: Live VoIP capture with virtual interface
-  - [ ] `sudo lc sniff voip -i eth0 --virtual-interface`
-  - [ ] Verify interface appears in `ip link` as `lc0`
-  - [ ] Capture with `tcpdump -i lc0 -nn`
-  - [ ] Validate packets are VoIP traffic only
-- [ ] Test 2: PCAP replay with filtering
-  - [ ] `sudo lc sniff voip -r test.pcap --sipuser alice --virtual-interface`
-  - [ ] Capture with Wireshark on lc0
-  - [ ] Verify only Alice's calls are replayed
-- [ ] Test 3: Interface cleanup
-  - [ ] Start with --virtual-interface
-  - [ ] Send SIGTERM
-  - [ ] Verify interface is deleted (`ip link` should not show lc0)
-- [ ] Test 4: Custom interface name
-  - [ ] `sudo lc sniff voip -i eth0 --virtual-interface --vif-name lippycat-voip0`
-  - [ ] Verify custom name is used
-- [ ] Test 5: Packet timing replay (tcpreplay-like behavior)
-  - [ ] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-replay-timing`
-  - [ ] Capture with `tcpdump -i lc0 -tttt -n`
-  - [ ] Verify packets arrive with realistic delays (not all at once)
-  - [ ] Compare timing with original PCAP
-- [ ] Test 6: Configurable startup delay
-  - [ ] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-startup-delay 1s`
-  - [ ] Verify shorter startup delay allows faster testing
-  - [ ] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-startup-delay 10s`
-  - [ ] Verify longer delay gives more time to start monitoring tools
+- [x] Test 1: Live VoIP capture with virtual interface
+  - [x] `sudo lc sniff voip -i eth0 --virtual-interface`
+  - [x] Verify interface appears in `ip link` as `lc0`
+  - [x] Capture with `tcpdump -i lc0 -nn`
+  - [x] Validate packets are VoIP traffic only
+- [x] Test 2: PCAP replay with filtering
+  - [x] `sudo lc sniff voip -r test.pcap --sipuser alice --virtual-interface`
+  - [x] Capture with Wireshark on lc0
+  - [x] Verify only Alice's calls are replayed
+- [x] Test 3: Interface cleanup
+  - [x] Start with --virtual-interface
+  - [x] Send SIGTERM
+  - [x] Verify interface is deleted (`ip link` should not show lc0)
+- [x] Test 4: Custom interface name
+  - [x] `sudo lc sniff voip -i eth0 --virtual-interface --vif-name lippycat-voip0`
+  - [x] Verify custom name is used
+- [x] Test 5: Packet timing replay (tcpreplay-like behavior)
+  - [x] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-replay-timing`
+  - [x] Capture with `tcpdump -i lc0 -tttt -n`
+  - [x] Verify packets arrive with realistic delays (not all at once)
+  - [x] Compare timing with original PCAP
+- [x] Test 6: Configurable startup delay
+  - [x] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-startup-delay 1s`
+  - [x] Verify shorter startup delay allows faster testing
+  - [x] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-startup-delay 10s`
+  - [x] Verify longer delay gives more time to start monitoring tools
 
 **Acceptance Criteria:**
-- TAP interface `lc0` created successfully when --virtual-interface flag is used
-- Packets visible in tcpdump/Wireshark
-- Packet filtering works (only VoIP packets with --sipuser filter)
-- Custom interface names work via --vif-name flag
-- Packet timing replay works like tcpreplay (--vif-replay-timing)
-- Configurable startup delay allows tools to attach (--vif-startup-delay)
-- Zero crashes during 5-minute test run
-- Clean interface teardown on all exit paths (normal, SIGTERM, SIGINT)
-- Clear error messages if CAP_NET_ADMIN is missing
+- ✅ TAP interface `lc0` created successfully when --virtual-interface flag is used
+- ✅ Packets visible in tcpdump/Wireshark
+- ✅ Packet filtering works (only VoIP packets with --sipuser filter)
+- ✅ Custom interface names work via --vif-name flag
+- ✅ Packet timing replay works like tcpreplay (--vif-replay-timing)
+- ✅ Configurable startup delay allows tools to attach (--vif-startup-delay)
+- ✅ Zero crashes during 5-minute test run
+- ✅ Clean interface teardown on all exit paths (normal, SIGTERM, SIGINT)
+- ✅ Clear error messages if CAP_NET_ADMIN is missing
+
+**Phase 1 Status: ✅ COMPLETED**
+
+**Commits:**
+- `19bdc38` feat(vinterface): implement core virtual interface package
+- `58e64be` feat(vinterface): add packet timing replay and configurable startup delay
+- `12f4038` fix(vinterface): check permissions before processing packets, abort early
+
+**Key Features Delivered:**
+- Virtual TAP interface creation (`lc0` by default, configurable)
+- VoIP-only packet injection (post-filtering)
+- Realistic PCAP timing replay (tcpreplay-like behavior)
+- Configurable startup delay for tool attachment
+- Early permission checking with helpful error messages
+- Clean resource cleanup on all exit paths
 
 ---
 

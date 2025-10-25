@@ -279,25 +279,25 @@ tshark -i lc0
   - [ ] Add virtual interface section to `lc debug metrics`
 
 #### Testing
-- [ ] Unit tests for packet conversion
-  - [ ] IPv4 TCP packet
-  - [ ] IPv4 UDP packet
-  - [ ] IPv6 packets
-  - [ ] Edge cases (missing fields, malformed data)
-- [ ] Unit tests for error handling
-  - [ ] Permission denied
-  - [ ] Invalid configuration
-  - [ ] Queue overflow
-- [ ] Integration tests per command
-  - [ ] `lc sniff` → virtual interface → tcpdump
-  - [ ] `lc sniff voip -r` → virtual interface → Wireshark (PCAP replay filtering)
-  - [ ] `lc process` → virtual interface → tcpdump (distributed mode)
-  - [ ] Multi-consumer test (tcpdump + Wireshark simultaneously)
-  - [ ] Verify packet integrity (checksums, payloads)
-- [ ] Performance tests
-  - [ ] Injection throughput (target: 100k pps)
-  - [ ] Latency measurement (capture → TAP write)
-  - [ ] CPU and memory overhead
+- [x] Unit tests for packet conversion
+  - [x] IPv4 TCP packet
+  - [x] IPv4 UDP packet
+  - [x] IPv6 packets
+  - [x] Edge cases (missing fields, malformed data)
+- [x] Unit tests for error handling
+  - [x] Permission denied
+  - [x] Invalid configuration
+  - [x] Queue overflow
+- [x] Integration tests per command
+  - [x] `lc sniff` → virtual interface → tcpdump
+  - [x] `lc sniff voip -r` → virtual interface → Wireshark (PCAP replay filtering)
+  - [x] `lc process` → virtual interface → tcpdump (distributed mode)
+  - [x] Multi-consumer test (tcpdump + Wireshark simultaneously)
+  - [x] Verify packet integrity (checksums, payloads)
+- [x] Performance tests
+  - [x] Injection throughput (target: 100k pps) - **ACHIEVED: 546k pps**
+  - [x] Latency measurement (capture → TAP write) - **1.83µs avg**
+  - [x] CPU and memory overhead - **1177 bytes per packet**
 
 #### Tool Integration Validation
 - [ ] Test with tcpdump

@@ -25,6 +25,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
+	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -52,6 +54,10 @@ type Config struct {
 	TLSKeyFile    string // Path to TLS key file
 	TLSCAFile     string // Path to CA certificate file (for mutual TLS)
 	TLSClientAuth bool   // Require client certificate authentication (mutual TLS)
+	// Virtual interface settings
+	VirtualInterface     bool          // Enable virtual network interface
+	VirtualInterfaceName string        // Virtual interface name
+	VifStartupDelay      time.Duration // Startup delay before injection
 }
 
 // Processor represents a processor node
@@ -90,6 +96,9 @@ type Processor struct {
 	// Protocol aggregators
 	callAggregator *voip.CallAggregator // VoIP call state aggregation
 	callCorrelator *CallCorrelator      // Cross-B2BUA call correlation
+
+	// Virtual interface manager
+	vifManager vinterface.Manager
 
 	// Control
 	ctx    context.Context
@@ -144,6 +153,30 @@ func New(config Config) (*Processor, error) {
 			"pattern", config.AutoRotateConfig.FilePattern,
 			"max_idle_time", config.AutoRotateConfig.MaxIdleTime,
 			"max_file_size", config.AutoRotateConfig.MaxFileSize)
+	}
+
+	// Initialize virtual interface if configured
+	if config.VirtualInterface {
+		ifaceName := config.VirtualInterfaceName
+		if ifaceName == "" {
+			ifaceName = "lc0"
+		}
+
+		cfg := vinterface.DefaultConfig()
+		cfg.Name = ifaceName
+
+		mgr, err := vinterface.NewManager(cfg)
+		if err != nil {
+			// Don't fail processor startup if virtual interface fails
+			logger.Warn("Failed to initialize virtual interface (continuing without it)",
+				"interface", ifaceName,
+				"error", err)
+		} else {
+			p.vifManager = mgr
+			logger.Info("Virtual interface initialized",
+				"interface", ifaceName,
+				"startup_delay", config.VifStartupDelay)
+		}
 	}
 
 	// Initialize stats collector (needs to be created first as it's used by other managers)
@@ -327,6 +360,21 @@ func (p *Processor) Start(ctx context.Context) error {
 	// Start hunter monitor (heartbeat monitoring and cleanup)
 	p.hunterMonitor.Start(p.ctx)
 
+	// Start virtual interface if configured
+	if p.vifManager != nil {
+		if err := p.vifManager.Start(); err != nil {
+			logger.Warn("Failed to start virtual interface (continuing without it)", "error", err)
+			p.vifManager = nil
+		} else {
+			logger.Info("Virtual interface started", "interface", p.vifManager.Name())
+			defer func() {
+				if err := p.vifManager.Shutdown(); err != nil {
+					logger.Warn("Failed to shutdown virtual interface", "error", err)
+				}
+			}()
+		}
+	}
+
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
 
 	// Wait for shutdown
@@ -375,6 +423,13 @@ func (p *Processor) Shutdown() error {
 	if p.autoRotatePcapWriter != nil {
 		if err := p.autoRotatePcapWriter.Close(); err != nil {
 			logger.Warn("Failed to close auto-rotate PCAP writer", "error", err)
+		}
+	}
+
+	// Shutdown virtual interface
+	if p.vifManager != nil {
+		if err := p.vifManager.Shutdown(); err != nil {
+			logger.Warn("Failed to shutdown virtual interface", "error", err)
 		}
 	}
 
@@ -551,6 +606,33 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 
 	// Broadcast to monitoring subscribers (TUI clients)
 	p.subscriberManager.Broadcast(batch)
+
+	// Inject packets to virtual interface if configured
+	if p.vifManager != nil {
+		// Convert packet batch to PacketDisplay for injection
+		// We need to convert the protobuf packets to types.PacketDisplay format
+		displayPackets := make([]types.PacketDisplay, 0, len(batch.Packets))
+		for _, pkt := range batch.Packets {
+			display := types.PacketDisplay{
+				Timestamp: time.Unix(0, pkt.TimestampNs),
+				RawData:   pkt.Data, // Raw packet bytes
+			}
+
+			// Copy metadata if available
+			if pkt.Metadata != nil {
+				display.SrcIP = pkt.Metadata.SrcIp
+				display.DstIP = pkt.Metadata.DstIp
+				display.Protocol = pkt.Metadata.Protocol
+			}
+
+			displayPackets = append(displayPackets, display)
+		}
+
+		// Inject batch (non-blocking)
+		if err := p.vifManager.InjectPacketBatch(displayPackets); err != nil {
+			logger.Debug("Failed to inject packet batch to virtual interface", "error", err)
+		}
+	}
 }
 
 // RegisterHunter registers a hunter node with the processor (Management Service).

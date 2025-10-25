@@ -63,6 +63,10 @@ var (
 	autoRotatePcapPattern     string
 	autoRotatePcapIdleTimeout string
 	autoRotatePcapMaxSize     string
+	// Virtual interface flags
+	virtualInterface     bool
+	virtualInterfaceName string
+	vifStartupDelay      time.Duration
 )
 
 func init() {
@@ -99,6 +103,11 @@ func init() {
 	ProcessCmd.Flags().StringVar(&autoRotatePcapIdleTimeout, "auto-rotate-idle-timeout", "30s", "Close PCAP file after this idle time (e.g., 30s, 1m)")
 	ProcessCmd.Flags().StringVar(&autoRotatePcapMaxSize, "auto-rotate-max-size", "100M", "Maximum PCAP file size before rotation (e.g., 100M, 1G)")
 
+	// Virtual Interface flags
+	ProcessCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
+	ProcessCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
+	ProcessCmd.Flags().DurationVar(&vifStartupDelay, "vif-startup-delay", 3*time.Second, "Delay before packet injection starts (allows tools to attach)")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
 	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
@@ -122,6 +131,9 @@ func init() {
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.file_pattern", ProcessCmd.Flags().Lookup("auto-rotate-pcap-pattern"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.idle_timeout", ProcessCmd.Flags().Lookup("auto-rotate-idle-timeout"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.max_size", ProcessCmd.Flags().Lookup("auto-rotate-max-size"))
+	_ = viper.BindPFlag("processor.virtual_interface", ProcessCmd.Flags().Lookup("virtual-interface"))
+	_ = viper.BindPFlag("processor.vif_name", ProcessCmd.Flags().Lookup("vif-name"))
+	_ = viper.BindPFlag("processor.vif_startup_delay", ProcessCmd.Flags().Lookup("vif-startup-delay"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -202,6 +214,10 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		TLSKeyFile:    getStringConfig("processor.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("processor.tls.ca_file", tlsCAFile),
 		TLSClientAuth: getBoolConfig("processor.tls.client_auth", tlsClientAuth),
+		// Virtual interface configuration
+		VirtualInterface:     getBoolConfig("processor.virtual_interface", virtualInterface),
+		VirtualInterfaceName: getStringConfig("processor.vif_name", virtualInterfaceName),
+		VifStartupDelay:      getDurationConfig("processor.vif_startup_delay", vifStartupDelay),
 	}
 
 	// Security check: require explicit opt-in to insecure mode
@@ -342,6 +358,13 @@ func getBoolConfig(key string, flagValue bool) bool {
 	// Simplified version without circular reference
 	if viper.IsSet(key) {
 		return viper.GetBool(key)
+	}
+	return flagValue
+}
+
+func getDurationConfig(key string, flagValue time.Duration) time.Duration {
+	if viper.IsSet(key) {
+		return viper.GetDuration(key)
 	}
 	return flagValue
 }

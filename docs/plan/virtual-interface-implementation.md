@@ -211,9 +211,9 @@ tshark -i lc0
   - [x] Initialize vinterface manager in capture loop
   - [x] Test with live capture and PCAP replay
   - [x] Create reusable TimingReplayer helper for packet timing
-- [ ] Integrate with `lc process` (distributed mode)
-  - [ ] Add --virtual-interface flags to process command
-  - [ ] Inject packets in broadcastPackets() pipeline
+- [x] Integrate with `lc process` (distributed mode)
+  - [x] Add --virtual-interface flags to process command
+  - [x] Inject packets in processBatch() pipeline
   - [ ] Test with hunter → processor → virtual interface flow
 - [ ] Verify build tags include virtual interface
   - [ ] `all` build includes vinterface

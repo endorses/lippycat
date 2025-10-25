@@ -28,6 +28,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/google/gopacket/layers"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -615,7 +616,8 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 		for _, pkt := range batch.Packets {
 			display := types.PacketDisplay{
 				Timestamp: time.Unix(0, pkt.TimestampNs),
-				RawData:   pkt.Data, // Raw packet bytes
+				RawData:   pkt.Data,                      // Raw packet bytes (includes Ethernet header if LinkType is Ethernet)
+				LinkType:  layers.LinkType(pkt.LinkType), // Link layer type (Ethernet, Raw IP, etc.)
 			}
 
 			// Copy metadata if available

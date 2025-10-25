@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -85,16 +86,59 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 	cleanup := signals.SetupHandler(ctx, cancel)
 	defer cleanup()
 
+	// Channel to signal when capture exits (for early exit on capture failure)
+	captureDone := make(chan struct{})
+
 	// Run capture in background (like hunter nodes do)
 	go func() {
 		InitWithContext(ctx, devices, filter, processor, assembler)
+		close(captureDone)
 	}()
 
-	// Wait for signal (blocks until context is cancelled)
-	<-ctx.Done()
+	// Wait for signal OR capture completion (e.g., all captures failed)
+	select {
+	case <-ctx.Done():
+		// Signal received, wait for capture to finish
+		<-captureDone
+	case <-captureDone:
+		// Capture finished early (likely all captures failed)
+		// No need to wait, just exit
+	}
 
 	// Give a brief moment for graceful cleanup (like hunt nodes do)
 	time.Sleep(constants.SnifferCleanupTimeout)
+}
+
+// checkCapturePermissions validates that we can open capture handles on all devices
+// Returns true if at least one device is accessible, false if all fail
+func checkCapturePermissions(devices []pcaptypes.PcapInterface) bool {
+	hasPermission := false
+	allFailed := true
+
+	for _, dev := range devices {
+		// Try to set the handle (this will fail if insufficient permissions)
+		err := dev.SetHandle()
+		if err != nil {
+			logger.Error("Error setting pcap handle", "error", err, "interface", dev.Name())
+			continue
+		}
+
+		// Success - at least one device is accessible
+		hasPermission = true
+		allFailed = false
+
+		// Close the handle immediately - we'll reopen in capture goroutines
+		if handle, err := dev.Handle(); err == nil && handle != nil {
+			handle.Close()
+		}
+	}
+
+	if allFailed {
+		logger.Error("All capture interfaces failed to start - insufficient permissions")
+		return false
+	}
+
+	return hasPermission
 }
 
 func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
@@ -116,6 +160,14 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
 			isOffline = true
 			break
+		}
+	}
+
+	// For live capture, check permissions upfront before starting goroutines
+	if !isOffline {
+		if !checkCapturePermissions(devices) {
+			// All captures failed - exit immediately
+			return
 		}
 	}
 
@@ -143,6 +195,9 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
 	defer packetBuffer.Close()
 
+	// Track if any capture succeeded (for error handling)
+	var captureSuccessCount atomic.Int32
+
 	// Start capture goroutines
 	var captureWg sync.WaitGroup
 	for _, iface := range devices {
@@ -162,6 +217,9 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 			}
 			defer handle.Close()
 
+			// Mark that at least one capture succeeded
+			captureSuccessCount.Add(1)
+
 			captureFromInterface(ctx, pif, filter, packetBuffer)
 		}(iface)
 	}
@@ -176,6 +234,16 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 
 	// Wait for all capture goroutines to finish (EOF reached)
 	captureWg.Wait()
+
+	// If no captures succeeded, all goroutines failed (likely permission error)
+	// Exit immediately without waiting for signal
+	if captureSuccessCount.Load() == 0 {
+		logger.Error("All capture interfaces failed to start - exiting")
+		// Close buffer immediately so processor can exit
+		packetBuffer.Close()
+		processorWg.Wait()
+		return
+	}
 
 	// Flush TCP assembler if present (forces reassembly of any remaining streams)
 	// Note: This can sometimes panic with gopacket's known index out of range bug

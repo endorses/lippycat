@@ -144,6 +144,9 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	var processorWg sync.WaitGroup
 	processorWg.Add(1)
 
+	// Track if any capture succeeded (for error handling)
+	var captureSuccessCount atomic.Int32
+
 	for _, iface := range ifaces {
 		wg.Add(1)
 		go func(pif pcaptypes.PcapInterface) {
@@ -166,6 +169,9 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 				return
 			}
 			defer handle.Close()
+
+			// Mark that at least one capture succeeded
+			captureSuccessCount.Add(1)
 
 			// Close handle when context is cancelled to unblock packet reads
 			// This ensures captureFromInterface exits promptly on context cancellation
@@ -191,6 +197,22 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 		processorWg.Done()
 	}
 
+	// Monitor for capture failures - exit early if all captures fail
+	captureFailureCh := make(chan struct{})
+	go func() {
+		// Wait for all capture goroutines to complete their initialization
+		wg.Wait()
+		// If no captures succeeded, all goroutines failed (likely permission error)
+		if captureSuccessCount.Load() == 0 {
+			logger.Error("All capture interfaces failed to start - exiting")
+			// Close buffer immediately so processor can exit
+			if packetProcessor != nil {
+				packetBuffer.Close()
+			}
+			close(captureFailureCh)
+		}
+	}()
+
 	shutdownCh := make(chan struct{})
 	go func() {
 		<-ctx.Done()
@@ -213,11 +235,21 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 		close(done)
 	}()
 
-	// Wait for either completion or shutdown + timeout
+	// Wait for either completion, shutdown, or capture failure
 	select {
 	case <-done:
 		// Completed normally (before or after shutdown)
 		return
+	case <-captureFailureCh:
+		// All captures failed - exit immediately
+		// Wait briefly for processor to finish draining
+		select {
+		case <-done:
+			return
+		case <-time.After(500 * time.Millisecond):
+			// Force exit if processor doesn't finish quickly
+			return
+		}
 	case <-shutdownCh:
 		// Shutdown started, now wait with timeout for processor to finish draining
 		select {

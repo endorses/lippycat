@@ -11,7 +11,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/tcpassembly"
@@ -75,7 +74,6 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 	}()
 
 	// Initialize virtual interface if enabled
-	var vifManager vinterface.Manager
 	if viper.GetBool("voip.virtual_interface") {
 		vifName := viper.GetString("voip.vif_name")
 		if vifName == "" {
@@ -86,32 +84,32 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		cfg.Name = vifName
 
 		var err error
-		vifManager, err = vinterface.NewManager(cfg)
+		globalVifMgr, err = vinterface.NewManager(cfg)
 		if err != nil {
 			logger.Error("Failed to create virtual interface manager",
 				"error", err,
 				"interface_name", vifName)
 			logger.Warn("Continuing without virtual interface")
 		} else {
-			err = vifManager.Start()
+			err = globalVifMgr.Start()
 			if err != nil {
 				logger.Error("Failed to start virtual interface",
 					"error", err,
 					"interface_name", vifName)
 				logger.Warn("Continuing without virtual interface")
-				vifManager = nil
+				globalVifMgr = nil
 			} else {
 				logger.Info("Virtual interface started successfully",
-					"interface_name", vifManager.Name())
+					"interface_name", globalVifMgr.Name())
 				defer func() {
-					if vifManager != nil {
-						stats := vifManager.Stats()
+					if globalVifMgr != nil {
+						stats := globalVifMgr.Stats()
 						logger.Info("Virtual interface statistics",
 							"packets_injected", stats.PacketsInjected,
 							"packets_dropped", stats.PacketsDropped,
 							"injection_errors", stats.InjectionErrors,
 							"conversion_errors", stats.ConversionErrors)
-						if err := vifManager.Shutdown(); err != nil {
+						if err := globalVifMgr.Shutdown(); err != nil {
 							logger.Error("Error shutting down virtual interface", "error", err)
 						} else {
 							logger.Info("Virtual interface shutdown successfully")
@@ -130,14 +128,6 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
 			logger.Debug("Skipping packet - missing network or transport layer")
 			continue
-		}
-
-		// Inject packet into virtual interface if enabled
-		if vifManager != nil {
-			display := capture.ConvertPacketToDisplay(pkt)
-			if err := vifManager.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
-				logger.Debug("Failed to inject packet into virtual interface", "error", err)
-			}
 		}
 
 		switch layer := packet.TransportLayer().(type) {

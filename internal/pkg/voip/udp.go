@@ -64,7 +64,10 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 
 		// Try to parse as SIP message (content-based detection, not port-based)
 		if handleSipMessage(payload, pkt.LinkType) {
-			// It's a SIP packet - process it
+			// It's a SIP packet - inject into virtual interface
+			injectPacketToVirtualInterface(pkt)
+
+			// Process it
 			headers, body := parseSipHeaders(payload)
 			callID := headers["call-id"]
 			if callID != "" {
@@ -103,6 +106,9 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 
 	// Not a SIP packet - check if it's RTP for a tracked call
 	if IsTracked(packet) {
+		// It's an RTP packet for a tracked call - inject into virtual interface
+		injectPacketToVirtualInterface(pkt)
+
 		callID := GetCallIDForPacket(packet)
 		if viper.GetViper().GetBool("writeVoip") {
 			WriteRTP(callID, packet)
@@ -181,6 +187,9 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 							})
 						}
 
+						// Inject matched SIP packet into virtual interface
+						injectPacketToVirtualInterface(pkt)
+
 						// Write all buffered packets using helper
 						handleMatchedCallForFileWrite(callID, packets, metadata)
 
@@ -214,14 +223,18 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				shouldWrite := globalBufferMgr.AddRTPPacket(bufCallID, dstPort, packet)
 
 				if shouldWrite {
-					// Call already matched, write immediately
+					// Call already matched, inject into virtual interface and write immediately
+					injectPacketToVirtualInterface(pkt)
+
 					if viper.GetViper().GetBool("writeVoip") {
 						WriteRTP(bufCallID, packet)
 					}
 				}
 				// Otherwise packet is buffered, waiting for filter decision
 			} else if IsTracked(packet) {
-				// Call already decided and tracker knows about it
+				// Call already decided and tracker knows about it, inject into virtual interface
+				injectPacketToVirtualInterface(pkt)
+
 				if viper.GetViper().GetBool("writeVoip") {
 					WriteRTP(callID, packet)
 				}

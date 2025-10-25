@@ -167,6 +167,9 @@ func flushTCPPacketsToCall(flow gopacket.Flow, callID string, writeVoip bool) {
 
 	// Write buffered packets to the call
 	for _, pkt := range buffer.packets {
+		// Inject TCP SIP packet into virtual interface
+		injectPacketToVirtualInterface(pkt)
+
 		if writeVoip {
 			WriteSIP(callID, pkt.Packet)
 		}

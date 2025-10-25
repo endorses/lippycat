@@ -304,7 +304,7 @@ tshark -i lc0
   - [ ] Verify packet capture
   - [ ] Validate filters work correctly
 - [ ] Test with Wireshark
-  - [ ] Live capture on lippycat0
+  - [ ] Live capture on lc0
   - [ ] Verify protocol dissectors work
   - [ ] Check for packet drops in Wireshark stats
 - [ ] Test with Snort/Suricata (if available)

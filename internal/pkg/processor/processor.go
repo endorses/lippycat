@@ -56,9 +56,8 @@ type Config struct {
 	TLSCAFile     string // Path to CA certificate file (for mutual TLS)
 	TLSClientAuth bool   // Require client certificate authentication (mutual TLS)
 	// Virtual interface settings
-	VirtualInterface     bool          // Enable virtual network interface
-	VirtualInterfaceName string        // Virtual interface name
-	VifStartupDelay      time.Duration // Startup delay before injection
+	VirtualInterface     bool   // Enable virtual network interface
+	VirtualInterfaceName string // Virtual interface name
 }
 
 // Processor represents a processor node
@@ -174,9 +173,7 @@ func New(config Config) (*Processor, error) {
 				"error", err)
 		} else {
 			p.vifManager = mgr
-			logger.Info("Virtual interface initialized",
-				"interface", ifaceName,
-				"startup_delay", config.VifStartupDelay)
+			logger.Info("Virtual interface initialized", "interface", ifaceName)
 		}
 	}
 

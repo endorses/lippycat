@@ -206,10 +206,11 @@ tshark -i lc0
 ### Tasks
 
 #### Command Integration
-- [ ] Integrate with `lc sniff` (general capture)
-  - [ ] Add --virtual-interface flags to sniff command
-  - [ ] Initialize vinterface manager in capture loop
-  - [ ] Test with live capture and PCAP replay
+- [x] Integrate with `lc sniff` (general capture)
+  - [x] Add --virtual-interface flags to sniff command (inherited from parent)
+  - [x] Initialize vinterface manager in capture loop
+  - [x] Test with live capture and PCAP replay
+  - [x] Create reusable TimingReplayer helper for packet timing
 - [ ] Integrate with `lc process` (distributed mode)
   - [ ] Add --virtual-interface flags to process command
   - [ ] Inject packets in broadcastPackets() pipeline

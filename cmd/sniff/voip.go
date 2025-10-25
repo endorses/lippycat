@@ -44,11 +44,8 @@ var (
 	enableBackpressure    bool
 	memoryOptimization    bool
 
-	// Virtual interface flags
-	virtualInterface     bool
-	virtualInterfaceName string
-	vifStartupDelay      time.Duration
-	vifReplayTiming      bool
+	// Virtual interface flags inherited from parent SniffCmd
+	// (defined in sniff.go as PersistentFlags)
 )
 
 func voipHandler(cmd *cobra.Command, args []string) {
@@ -128,13 +125,9 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		viper.Set("voip.memory_optimization", memoryOptimization)
 	}
 
-	// Set virtual interface configuration values
-	if cmd.Flags().Changed("virtual-interface") {
-		viper.Set("voip.virtual_interface", virtualInterface)
-	}
-	if cmd.Flags().Changed("vif-name") {
-		viper.Set("voip.vif_name", virtualInterfaceName)
-	}
+	// Virtual interface flags are inherited from parent SniffCmd
+	// They are automatically bound to viper via sniff.go init()
+	// Read from sniff.* namespace (not voip.* namespace)
 
 	logger.Info("Starting VoIP sniffing with optimizations",
 		"gpu_enable", viper.GetBool("voip.gpu_enable"),
@@ -144,10 +137,10 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"tcp_buffer_strategy", viper.GetString("voip.tcp_buffer_strategy"),
 		"enable_backpressure", viper.GetBool("voip.enable_backpressure"),
 		"memory_optimization", viper.GetBool("voip.memory_optimization"),
-		"virtual_interface", viper.GetBool("voip.virtual_interface"),
-		"vif_name", viper.GetString("voip.vif_name"),
-		"vif_startup_delay", viper.GetDuration("voip.vif_startup_delay"),
-		"vif_replay_timing", viper.GetBool("voip.vif_replay_timing"))
+		"virtual_interface", viper.GetBool("sniff.virtual_interface"),
+		"vif_name", viper.GetString("sniff.vif_name"),
+		"vif_startup_delay", viper.GetDuration("sniff.vif_startup_delay"),
+		"vif_replay_timing", viper.GetBool("sniff.vif_replay_timing"))
 
 	if readFile == "" {
 		voip.StartLiveVoipSniffer(interfaces, filter)
@@ -200,15 +193,6 @@ func init() {
 	_ = viper.BindPFlag("voip.enable_backpressure", voipCmd.Flags().Lookup("enable-backpressure"))
 	_ = viper.BindPFlag("voip.memory_optimization", voipCmd.Flags().Lookup("memory-optimization"))
 
-	// Virtual Interface Flags
-	voipCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
-	voipCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
-	voipCmd.Flags().DurationVar(&vifStartupDelay, "vif-startup-delay", 3*time.Second, "Delay before packet injection starts (allows tools to attach)")
-	voipCmd.Flags().BoolVar(&vifReplayTiming, "vif-replay-timing", false, "Respect original packet timing from PCAP (like tcpreplay)")
-
-	// Bind virtual interface flags to viper
-	_ = viper.BindPFlag("voip.virtual_interface", voipCmd.Flags().Lookup("virtual-interface"))
-	_ = viper.BindPFlag("voip.vif_name", voipCmd.Flags().Lookup("vif-name"))
-	_ = viper.BindPFlag("voip.vif_startup_delay", voipCmd.Flags().Lookup("vif-startup-delay"))
-	_ = viper.BindPFlag("voip.vif_replay_timing", voipCmd.Flags().Lookup("vif-replay-timing"))
+	// Virtual Interface Flags are inherited from parent SniffCmd (sniff.go)
+	// No need to register them here - they're PersistentFlags on the parent
 }

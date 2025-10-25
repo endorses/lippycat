@@ -2,28 +2,21 @@ package voip
 
 import (
 	"sync"
-	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
-	"github.com/spf13/viper"
 )
 
 // Shared variables and helpers used by both CLI and hunter builds
 
 var (
-	globalBufferMgr *BufferManager
-	bufferOnce      sync.Once
-	globalVifMgr    vinterface.Manager // Virtual interface manager for packet injection
-
-	// Packet timing replay state
-	vifTimingMu       sync.Mutex
-	vifFirstTimestamp time.Time
-	vifLastTimestamp  time.Time
-	vifReplayStart    time.Time
+	globalBufferMgr    *BufferManager
+	bufferOnce         sync.Once
+	globalVifMgr       vinterface.Manager         // Virtual interface manager for packet injection
+	globalTimingReplay *vinterface.TimingReplayer // Timing replayer for virtual interface
 )
 
 // injectPacketToVirtualInterface injects a packet into the virtual interface if enabled
@@ -34,42 +27,9 @@ func injectPacketToVirtualInterface(pkt capture.PacketInfo) {
 		return
 	}
 
-	// Handle packet timing replay if enabled
-	if viper.GetBool("voip.vif_replay_timing") {
-		pktTimestamp := pkt.Packet.Metadata().Timestamp
-
-		vifTimingMu.Lock()
-		// Initialize timing on first packet
-		if vifFirstTimestamp.IsZero() {
-			vifFirstTimestamp = pktTimestamp
-			vifReplayStart = time.Now()
-			vifLastTimestamp = pktTimestamp
-			vifTimingMu.Unlock()
-		} else {
-			// Calculate how much time has elapsed in the PCAP
-			pcapElapsed := pktTimestamp.Sub(vifFirstTimestamp)
-
-			// Calculate how much time has elapsed in real time since we started
-			realElapsed := time.Since(vifReplayStart)
-
-			// If we're ahead of schedule, sleep to match PCAP timing
-			if pcapElapsed > realElapsed {
-				sleepDuration := pcapElapsed - realElapsed
-				vifTimingMu.Unlock()
-
-				logger.Debug("Sleeping to match PCAP timing",
-					"sleep_duration", sleepDuration,
-					"pcap_elapsed", pcapElapsed,
-					"real_elapsed", realElapsed)
-				time.Sleep(sleepDuration)
-			} else {
-				vifTimingMu.Unlock()
-			}
-
-			vifTimingMu.Lock()
-			vifLastTimestamp = pktTimestamp
-			vifTimingMu.Unlock()
-		}
+	// Handle packet timing replay (respects PCAP timestamps like tcpreplay)
+	if globalTimingReplay != nil {
+		globalTimingReplay.WaitForPacketTime(pkt.Packet.Metadata().Timestamp)
 	}
 
 	// Inject the packet

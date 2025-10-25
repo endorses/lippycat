@@ -26,8 +26,8 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	// Initialize virtual interface FIRST if enabled (before processing any packets)
 	// This allows early permission check and avoids wasting time processing packets
-	if viper.GetBool("voip.virtual_interface") {
-		vifName := viper.GetString("voip.vif_name")
+	if viper.GetBool("sniff.virtual_interface") {
+		vifName := viper.GetString("sniff.vif_name")
 		if vifName == "" {
 			vifName = "lc0"
 		}
@@ -75,8 +75,12 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		logger.Info("Virtual interface started successfully",
 			"interface_name", globalVifMgr.Name())
 
+		// Initialize timing replayer for virtual interface
+		replayTiming := viper.GetBool("sniff.vif_replay_timing")
+		globalTimingReplay = vinterface.NewTimingReplayer(replayTiming)
+
 		// Wait for external tools (tcpdump, Wireshark) to attach
-		startupDelay := viper.GetDuration("voip.vif_startup_delay")
+		startupDelay := viper.GetDuration("sniff.vif_startup_delay")
 		if startupDelay > 0 {
 			logger.Info("Waiting for monitoring tools to attach...",
 				"delay", startupDelay)

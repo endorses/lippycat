@@ -3,6 +3,7 @@ package capture
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
@@ -203,6 +206,88 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 	format := viper.GetString("sniff.format")
 	writeFile := viper.GetString("sniff.write_file")
 
+	// Initialize virtual interface if enabled
+	var vifMgr vinterface.Manager
+	var timingReplayer *vinterface.TimingReplayer
+	if viper.GetBool("sniff.virtual_interface") {
+		vifName := viper.GetString("sniff.vif_name")
+		if vifName == "" {
+			vifName = "lc0"
+		}
+
+		cfg := vinterface.DefaultConfig()
+		cfg.Name = vifName
+
+		var err error
+		vifMgr, err = vinterface.NewManager(cfg)
+		if err != nil {
+			if errors.Is(err, vinterface.ErrPermissionDenied) {
+				logger.Error("Virtual interface requires elevated privileges",
+					"error", err,
+					"interface_name", vifName,
+					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+				logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
+				return
+			} else {
+				logger.Error("Failed to create virtual interface manager",
+					"error", err,
+					"interface_name", vifName)
+				logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
+				return
+			}
+		}
+
+		err = vifMgr.Start()
+		if err != nil {
+			if errors.Is(err, vinterface.ErrPermissionDenied) {
+				logger.Error("Virtual interface requires elevated privileges",
+					"error", err,
+					"interface_name", vifName,
+					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+			} else {
+				logger.Error("Failed to start virtual interface",
+					"error", err,
+					"interface_name", vifName)
+			}
+			logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
+			return
+		}
+
+		logger.Info("Virtual interface started successfully",
+			"interface_name", vifMgr.Name())
+
+		// Wait for external tools (tcpdump, Wireshark) to attach
+		startupDelay := viper.GetDuration("sniff.vif_startup_delay")
+		if startupDelay > 0 {
+			logger.Info("Waiting for monitoring tools to attach...",
+				"delay", startupDelay)
+			time.Sleep(startupDelay)
+		}
+		logger.Info("Starting packet injection")
+
+		// Initialize timing replayer for virtual interface
+		replayTiming := viper.GetBool("sniff.vif_replay_timing")
+		timingReplayer = vinterface.NewTimingReplayer(replayTiming)
+
+		// Ensure cleanup on exit
+		defer func() {
+			if vifMgr != nil {
+				stats := vifMgr.Stats()
+				logger.Info("Virtual interface statistics",
+					"packets_injected", stats.PacketsInjected,
+					"packets_dropped", stats.PacketsDropped,
+					"injection_errors", stats.InjectionErrors,
+					"conversion_errors", stats.ConversionErrors)
+
+				if err := vifMgr.Shutdown(); err != nil {
+					logger.Error("Error shutting down virtual interface", "error", err)
+				} else {
+					logger.Info("Virtual interface shutdown successfully")
+				}
+			}
+		}()
+	}
+
 	// Create JSON encoder if using JSON format
 	var jsonEncoder *json.Encoder
 	if format == "json" {
@@ -240,6 +325,19 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 
 	for p := range packetChan {
 		packetCount++
+
+		// Inject packet into virtual interface if enabled
+		if vifMgr != nil {
+			// Handle packet timing replay (respects PCAP timestamps like tcpreplay)
+			if timingReplayer != nil {
+				timingReplayer.WaitForPacketTime(p.Packet.Metadata().Timestamp)
+			}
+
+			display := ConvertPacketToDisplay(p)
+			if err := vifMgr.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
+				logger.Debug("Failed to inject packet to virtual interface", "error", err)
+			}
+		}
 
 		// Write to PCAP file if writer is available
 		if pcapWriter != nil {

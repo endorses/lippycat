@@ -47,6 +47,8 @@ var (
 	// Virtual interface flags
 	virtualInterface     bool
 	virtualInterfaceName string
+	vifStartupDelay      time.Duration
+	vifReplayTiming      bool
 )
 
 func voipHandler(cmd *cobra.Command, args []string) {
@@ -143,7 +145,9 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"enable_backpressure", viper.GetBool("voip.enable_backpressure"),
 		"memory_optimization", viper.GetBool("voip.memory_optimization"),
 		"virtual_interface", viper.GetBool("voip.virtual_interface"),
-		"vif_name", viper.GetString("voip.vif_name"))
+		"vif_name", viper.GetString("voip.vif_name"),
+		"vif_startup_delay", viper.GetDuration("voip.vif_startup_delay"),
+		"vif_replay_timing", viper.GetBool("voip.vif_replay_timing"))
 
 	if readFile == "" {
 		voip.StartLiveVoipSniffer(interfaces, filter)
@@ -199,8 +203,12 @@ func init() {
 	// Virtual Interface Flags
 	voipCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
 	voipCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
+	voipCmd.Flags().DurationVar(&vifStartupDelay, "vif-startup-delay", 3*time.Second, "Delay before packet injection starts (allows tools to attach)")
+	voipCmd.Flags().BoolVar(&vifReplayTiming, "vif-replay-timing", false, "Respect original packet timing from PCAP (like tcpreplay)")
 
 	// Bind virtual interface flags to viper
 	_ = viper.BindPFlag("voip.virtual_interface", voipCmd.Flags().Lookup("virtual-interface"))
 	_ = viper.BindPFlag("voip.vif_name", voipCmd.Flags().Lookup("vif-name"))
+	_ = viper.BindPFlag("voip.vif_startup_delay", voipCmd.Flags().Lookup("vif-startup-delay"))
+	_ = viper.BindPFlag("voip.vif_replay_timing", voipCmd.Flags().Lookup("vif-replay-timing"))
 }

@@ -126,6 +126,8 @@ tshark -i lc0
 - [x] Add CLI flags to sniff/voip command
   - [x] --virtual-interface (enable/disable)
   - [x] --vif-name (interface name, default: lc0)
+  - [x] --vif-startup-delay (delay before injection starts, default: 3s)
+  - [x] --vif-replay-timing (respect PCAP timestamps like tcpreplay)
 - [x] Integrate vinterface manager into VoIP capture loop
   - [x] Initialize manager when flag is set
   - [x] Call InjectPacketBatch() for captured packets
@@ -133,6 +135,11 @@ tshark -i lc0
 - [x] Handle errors gracefully
   - [x] Permission denied → clear error message
   - [x] Continue sniffing even if virtual interface fails
+- [x] Implement packet timing replay
+  - [x] Track first packet timestamp and replay start time
+  - [x] Calculate inter-packet delays from PCAP timestamps
+  - [x] Sleep between injections to match original timing
+  - [x] Only applies when --vif-replay-timing flag is set
 
 #### Manual Testing
 - [ ] Test 1: Live VoIP capture with virtual interface
@@ -151,12 +158,24 @@ tshark -i lc0
 - [ ] Test 4: Custom interface name
   - [ ] `sudo lc sniff voip -i eth0 --virtual-interface --vif-name lippycat-voip0`
   - [ ] Verify custom name is used
+- [ ] Test 5: Packet timing replay (tcpreplay-like behavior)
+  - [ ] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-replay-timing`
+  - [ ] Capture with `tcpdump -i lc0 -tttt -n`
+  - [ ] Verify packets arrive with realistic delays (not all at once)
+  - [ ] Compare timing with original PCAP
+- [ ] Test 6: Configurable startup delay
+  - [ ] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-startup-delay 1s`
+  - [ ] Verify shorter startup delay allows faster testing
+  - [ ] `sudo lc sniff voip -r test.pcap --virtual-interface --vif-startup-delay 10s`
+  - [ ] Verify longer delay gives more time to start monitoring tools
 
 **Acceptance Criteria:**
 - TAP interface `lc0` created successfully when --virtual-interface flag is used
 - Packets visible in tcpdump/Wireshark
 - Packet filtering works (only VoIP packets with --sipuser filter)
 - Custom interface names work via --vif-name flag
+- Packet timing replay works like tcpreplay (--vif-replay-timing)
+- Configurable startup delay allows tools to attach (--vif-startup-delay)
 - Zero crashes during 5-minute test run
 - Clean interface teardown on all exit paths (normal, SIGTERM, SIGINT)
 - Clear error messages if CAP_NET_ADMIN is missing

@@ -101,6 +101,16 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 			} else {
 				logger.Info("Virtual interface started successfully",
 					"interface_name", globalVifMgr.Name())
+
+				// Wait for external tools (tcpdump, Wireshark) to attach
+				startupDelay := viper.GetDuration("voip.vif_startup_delay")
+				if startupDelay > 0 {
+					logger.Info("Waiting for monitoring tools to attach...",
+						"delay", startupDelay)
+					time.Sleep(startupDelay)
+				}
+				logger.Info("Starting packet injection")
+
 				defer func() {
 					if globalVifMgr != nil {
 						stats := globalVifMgr.Stats()
@@ -109,6 +119,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 							"packets_dropped", stats.PacketsDropped,
 							"injection_errors", stats.InjectionErrors,
 							"conversion_errors", stats.ConversionErrors)
+
 						if err := globalVifMgr.Shutdown(); err != nil {
 							logger.Error("Error shutting down virtual interface", "error", err)
 						} else {

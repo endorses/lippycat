@@ -2,7 +2,7 @@ lippycat
 lc
 captures
 *.md
-!docs/*.md
+!docs/**/*.md
 !README.md
 !CLAUDE.md
 !CHANGELOG.md

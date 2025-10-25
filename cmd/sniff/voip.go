@@ -43,6 +43,9 @@ var (
 	tcpBufferStrategy     string
 	enableBackpressure    bool
 	memoryOptimization    bool
+
+	// Virtual interface flags inherited from parent SniffCmd
+	// (defined in sniff.go as PersistentFlags)
 )
 
 func voipHandler(cmd *cobra.Command, args []string) {
@@ -122,6 +125,10 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		viper.Set("voip.memory_optimization", memoryOptimization)
 	}
 
+	// Virtual interface flags are inherited from parent SniffCmd
+	// They are automatically bound to viper via sniff.go init()
+	// Read from sniff.* namespace (not voip.* namespace)
+
 	logger.Info("Starting VoIP sniffing with optimizations",
 		"gpu_enable", viper.GetBool("voip.gpu_enable"),
 		"gpu_backend", viper.GetString("voip.gpu_backend"),
@@ -129,7 +136,11 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"tcp_performance_mode", viper.GetString("voip.tcp_performance_mode"),
 		"tcp_buffer_strategy", viper.GetString("voip.tcp_buffer_strategy"),
 		"enable_backpressure", viper.GetBool("voip.enable_backpressure"),
-		"memory_optimization", viper.GetBool("voip.memory_optimization"))
+		"memory_optimization", viper.GetBool("voip.memory_optimization"),
+		"virtual_interface", viper.GetBool("sniff.virtual_interface"),
+		"vif_name", viper.GetString("sniff.vif_name"),
+		"vif_startup_delay", viper.GetDuration("sniff.vif_startup_delay"),
+		"vif_replay_timing", viper.GetBool("sniff.vif_replay_timing"))
 
 	if readFile == "" {
 		voip.StartLiveVoipSniffer(interfaces, filter)
@@ -181,4 +192,7 @@ func init() {
 	_ = viper.BindPFlag("voip.tcp_buffer_strategy", voipCmd.Flags().Lookup("tcp-buffer-strategy"))
 	_ = viper.BindPFlag("voip.enable_backpressure", voipCmd.Flags().Lookup("enable-backpressure"))
 	_ = viper.BindPFlag("voip.memory_optimization", voipCmd.Flags().Lookup("memory-optimization"))
+
+	// Virtual Interface Flags are inherited from parent SniffCmd (sniff.go)
+	// No need to register them here - they're PersistentFlags on the parent
 }

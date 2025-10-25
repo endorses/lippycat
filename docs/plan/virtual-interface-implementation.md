@@ -123,16 +123,16 @@ tshark -i lc0
   - [x] Handle missing metadata gracefully
 
 #### Initial Integration: `lc sniff voip` (Simplest Use Case)
-- [ ] Add CLI flags to sniff/voip command
-  - [ ] --virtual-interface (enable/disable)
-  - [ ] --vif-name (interface name, default: lc0)
-- [ ] Integrate vinterface manager into VoIP capture loop
-  - [ ] Initialize manager when flag is set
-  - [ ] Call InjectPacketBatch() for captured packets
-  - [ ] Shutdown manager on exit
-- [ ] Handle errors gracefully
-  - [ ] Permission denied → clear error message
-  - [ ] Continue sniffing even if virtual interface fails
+- [x] Add CLI flags to sniff/voip command
+  - [x] --virtual-interface (enable/disable)
+  - [x] --vif-name (interface name, default: lc0)
+- [x] Integrate vinterface manager into VoIP capture loop
+  - [x] Initialize manager when flag is set
+  - [x] Call InjectPacketBatch() for captured packets
+  - [x] Shutdown manager on exit
+- [x] Handle errors gracefully
+  - [x] Permission denied → clear error message
+  - [x] Continue sniffing even if virtual interface fails
 
 #### Manual Testing
 - [ ] Test 1: Live VoIP capture with virtual interface

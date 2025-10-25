@@ -43,6 +43,10 @@ var (
 	tcpBufferStrategy     string
 	enableBackpressure    bool
 	memoryOptimization    bool
+
+	// Virtual interface flags
+	virtualInterface     bool
+	virtualInterfaceName string
 )
 
 func voipHandler(cmd *cobra.Command, args []string) {
@@ -122,6 +126,14 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		viper.Set("voip.memory_optimization", memoryOptimization)
 	}
 
+	// Set virtual interface configuration values
+	if cmd.Flags().Changed("virtual-interface") {
+		viper.Set("voip.virtual_interface", virtualInterface)
+	}
+	if cmd.Flags().Changed("vif-name") {
+		viper.Set("voip.vif_name", virtualInterfaceName)
+	}
+
 	logger.Info("Starting VoIP sniffing with optimizations",
 		"gpu_enable", viper.GetBool("voip.gpu_enable"),
 		"gpu_backend", viper.GetString("voip.gpu_backend"),
@@ -129,7 +141,9 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"tcp_performance_mode", viper.GetString("voip.tcp_performance_mode"),
 		"tcp_buffer_strategy", viper.GetString("voip.tcp_buffer_strategy"),
 		"enable_backpressure", viper.GetBool("voip.enable_backpressure"),
-		"memory_optimization", viper.GetBool("voip.memory_optimization"))
+		"memory_optimization", viper.GetBool("voip.memory_optimization"),
+		"virtual_interface", viper.GetBool("voip.virtual_interface"),
+		"vif_name", viper.GetString("voip.vif_name"))
 
 	if readFile == "" {
 		voip.StartLiveVoipSniffer(interfaces, filter)
@@ -181,4 +195,12 @@ func init() {
 	_ = viper.BindPFlag("voip.tcp_buffer_strategy", voipCmd.Flags().Lookup("tcp-buffer-strategy"))
 	_ = viper.BindPFlag("voip.enable_backpressure", voipCmd.Flags().Lookup("enable-backpressure"))
 	_ = viper.BindPFlag("voip.memory_optimization", voipCmd.Flags().Lookup("memory-optimization"))
+
+	// Virtual Interface Flags
+	voipCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
+	voipCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
+
+	// Bind virtual interface flags to viper
+	_ = viper.BindPFlag("voip.virtual_interface", voipCmd.Flags().Lookup("virtual-interface"))
+	_ = viper.BindPFlag("voip.vif_name", voipCmd.Flags().Lookup("vif-name"))
 }

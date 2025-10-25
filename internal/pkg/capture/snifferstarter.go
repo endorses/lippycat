@@ -231,53 +231,65 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 		var err error
 		vifMgr, err = vinterface.NewManager(cfg)
 		if err != nil {
+			// Provide helpful error message for common errors
 			if errors.Is(err, vinterface.ErrPermissionDenied) {
 				logger.Error("Virtual interface requires elevated privileges",
 					"error", err,
 					"interface_name", vifName,
 					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
-				logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
-				return
+			} else if errors.Is(err, vinterface.ErrInterfaceExists) {
+				logger.Error("Virtual interface already exists",
+					"error", err,
+					"interface_name", vifName,
+					"solution", "Delete existing interface or choose a different name with --vif-name")
 			} else {
 				logger.Error("Failed to create virtual interface manager",
 					"error", err,
 					"interface_name", vifName)
-				logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
-				return
+			}
+			logger.Warn("Continuing without virtual interface")
+			vifMgr = nil
+		} else {
+			err = vifMgr.Start()
+			if err != nil {
+				// Provide helpful error message for common errors
+				if errors.Is(err, vinterface.ErrPermissionDenied) {
+					logger.Error("Virtual interface requires elevated privileges",
+						"error", err,
+						"interface_name", vifName,
+						"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+				} else if errors.Is(err, vinterface.ErrInterfaceExists) {
+					logger.Error("Virtual interface already exists",
+						"error", err,
+						"interface_name", vifName,
+						"solution", "Delete existing interface or choose a different name with --vif-name")
+				} else {
+					logger.Error("Failed to start virtual interface",
+						"error", err,
+						"interface_name", vifName)
+				}
+				logger.Warn("Continuing without virtual interface")
+				vifMgr = nil
 			}
 		}
 
-		err = vifMgr.Start()
-		if err != nil {
-			if errors.Is(err, vinterface.ErrPermissionDenied) {
-				logger.Error("Virtual interface requires elevated privileges",
-					"error", err,
-					"interface_name", vifName,
-					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
-			} else {
-				logger.Error("Failed to start virtual interface",
-					"error", err,
-					"interface_name", vifName)
+		if vifMgr != nil {
+			logger.Info("Virtual interface started successfully",
+				"interface_name", vifMgr.Name())
+
+			// Wait for external tools (tcpdump, Wireshark) to attach
+			startupDelay := viper.GetDuration("sniff.vif_startup_delay")
+			if startupDelay > 0 {
+				logger.Info("Waiting for monitoring tools to attach...",
+					"delay", startupDelay)
+				time.Sleep(startupDelay)
 			}
-			logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
-			return
+			logger.Info("Starting packet injection")
+
+			// Initialize timing replayer for virtual interface
+			replayTiming := viper.GetBool("sniff.vif_replay_timing")
+			timingReplayer = vinterface.NewTimingReplayer(replayTiming)
 		}
-
-		logger.Info("Virtual interface started successfully",
-			"interface_name", vifMgr.Name())
-
-		// Wait for external tools (tcpdump, Wireshark) to attach
-		startupDelay := viper.GetDuration("sniff.vif_startup_delay")
-		if startupDelay > 0 {
-			logger.Info("Waiting for monitoring tools to attach...",
-				"delay", startupDelay)
-			time.Sleep(startupDelay)
-		}
-		logger.Info("Starting packet injection")
-
-		// Initialize timing replayer for virtual interface
-		replayTiming := viper.GetBool("sniff.vif_replay_timing")
-		timingReplayer = vinterface.NewTimingReplayer(replayTiming)
 
 		// Ensure cleanup on exit
 		defer func() {

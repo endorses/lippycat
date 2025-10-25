@@ -240,41 +240,41 @@ tshark -i lc0
   - [x] Update InjectPacketBatch() to choose conversion based on interface type
 
 #### Error Handling & Robustness
-- [ ] Handle interface creation failures
-  - [ ] Permission denied (CAP_NET_ADMIN required)
-  - [ ] Interface name conflicts
-  - [ ] /dev/net/tun access errors
-- [ ] Graceful degradation
-  - [ ] Command continues without virtual interface on failure
-  - [ ] Clear error messages and logging
-- [ ] Interface cleanup on crash/SIGTERM
-  - [ ] Register shutdown hook
-  - [ ] Delete interface in defer/cleanup
-- [ ] Handle packet conversion errors
-  - [ ] Log and skip malformed packets
-  - [ ] Don't block packet stream on conversion failures
+- [x] Handle interface creation failures
+  - [x] Permission denied (CAP_NET_ADMIN required)
+  - [x] Interface name conflicts
+  - [x] /dev/net/tun access errors
+- [x] Graceful degradation
+  - [x] Command continues without virtual interface on failure
+  - [x] Clear error messages and logging
+- [x] Interface cleanup on crash/SIGTERM
+  - [x] Register shutdown hook
+  - [x] Delete interface in defer/cleanup
+- [x] Handle packet conversion errors
+  - [x] Log and skip malformed packets
+  - [x] Don't block packet stream on conversion failures
 
 #### Packet Processing
-- [ ] Implement robust PacketDisplay → Ethernet frame conversion
-  - [ ] Construct Ethernet header (MAC addresses)
-  - [ ] Preserve IP layer (IPv4/IPv6)
-  - [ ] Preserve transport layer (TCP/UDP)
-  - [ ] Handle missing metadata gracefully
-- [ ] Add packet buffering
-  - [ ] Async injection queue (buffered channel)
-  - [ ] Non-blocking send to queue
-  - [ ] Drop packets if queue full (don't block hunters)
-- [ ] Implement batch processing
-  - [ ] Process packets in batches to reduce syscall overhead
+- [x] Implement robust PacketDisplay → Ethernet frame conversion
+  - [x] Construct Ethernet header (MAC addresses)
+  - [x] Preserve IP layer (IPv4/IPv6)
+  - [x] Preserve transport layer (TCP/UDP)
+  - [x] Handle missing metadata gracefully
+- [x] Add packet buffering
+  - [x] Async injection queue (buffered channel)
+  - [x] Non-blocking send to queue
+  - [x] Drop packets if queue full (don't block hunters)
+- [x] Implement batch processing
+  - [x] Process packets in batches to reduce syscall overhead
 
 #### Metrics & Observability
-- [ ] Add metrics tracking
-  - [ ] Packets injected (counter)
-  - [ ] Packets dropped (queue full)
-  - [ ] Injection errors
-  - [ ] Queue utilization
-- [ ] Log metrics periodically
-  - [ ] Every 60 seconds, log injection stats
+- [x] Add metrics tracking
+  - [x] Packets injected (counter)
+  - [x] Packets dropped (queue full)
+  - [x] Injection errors
+  - [x] Queue utilization
+- [x] Log metrics periodically
+  - [x] On shutdown, log injection stats
 - [ ] Expose metrics via debug command
   - [ ] Add virtual interface section to `lc debug metrics`
 

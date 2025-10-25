@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -180,9 +181,23 @@ func New(config Config) (*Processor, error) {
 		mgr, err := vinterface.NewManager(cfg)
 		if err != nil {
 			// Don't fail processor startup if virtual interface fails
-			logger.Warn("Failed to initialize virtual interface (continuing without it)",
-				"interface", ifaceName,
-				"error", err)
+			// Provide helpful error message for common errors
+			if errors.Is(err, vinterface.ErrPermissionDenied) {
+				logger.Error("Virtual interface requires elevated privileges",
+					"error", err,
+					"interface_name", ifaceName,
+					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+			} else if errors.Is(err, vinterface.ErrInterfaceExists) {
+				logger.Error("Virtual interface already exists",
+					"error", err,
+					"interface_name", ifaceName,
+					"solution", "Delete existing interface or choose a different name with --vif-name")
+			} else {
+				logger.Error("Failed to create virtual interface manager",
+					"error", err,
+					"interface_name", ifaceName)
+			}
+			logger.Warn("Continuing without virtual interface")
 		} else {
 			p.vifManager = mgr
 			logger.Info("Virtual interface initialized", "interface", ifaceName)
@@ -373,7 +388,19 @@ func (p *Processor) Start(ctx context.Context) error {
 	// Start virtual interface if configured
 	if p.vifManager != nil {
 		if err := p.vifManager.Start(); err != nil {
-			logger.Warn("Failed to start virtual interface (continuing without it)", "error", err)
+			// Provide helpful error message for common errors
+			if errors.Is(err, vinterface.ErrPermissionDenied) {
+				logger.Error("Virtual interface requires elevated privileges",
+					"error", err,
+					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+			} else if errors.Is(err, vinterface.ErrInterfaceExists) {
+				logger.Error("Virtual interface already exists",
+					"error", err,
+					"solution", "Delete existing interface or choose a different name with --vif-name")
+			} else {
+				logger.Error("Failed to start virtual interface", "error", err)
+			}
+			logger.Warn("Continuing without virtual interface")
 			p.vifManager = nil
 		} else {
 			logger.Info("Virtual interface started", "interface", p.vifManager.Name())

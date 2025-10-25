@@ -214,12 +214,12 @@ tshark -i lc0
 - [x] Integrate with `lc process` (distributed mode)
   - [x] Add --virtual-interface flags to process command
   - [x] Inject packets in processBatch() pipeline
-  - [ ] Test with hunter → processor → virtual interface flow
-- [ ] Verify build tags include virtual interface
-  - [ ] `all` build includes vinterface
-  - [ ] `processor` build includes vinterface
-  - [ ] `cli` build includes vinterface
-  - [ ] `hunter` build does NOT include vinterface
+  - [x] Test with hunter → processor → virtual interface flow
+- [x] Verify build tags include virtual interface
+  - [x] `all` build includes vinterface (verified: sniff and process commands have flag)
+  - [x] `processor` build includes vinterface (verified: process command has flag)
+  - [x] `cli` build includes vinterface (verified: sniff command has flag)
+  - [x] `hunter` build does NOT include vinterface (verified: hunt command has no flag)
 
 #### Configuration & CLI
 - [ ] Add comprehensive CLI flags (all commands)

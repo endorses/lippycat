@@ -37,7 +37,7 @@ func TestIntegration_HunterProcessorBasicFlow(t *testing.T) {
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err, "Failed to start processor")
-	defer proc.Shutdown()
+	defer shutdownProcessorWithPortCleanup(proc)
 
 	// Wait for processor to be ready
 	time.Sleep(500 * time.Millisecond)
@@ -116,7 +116,7 @@ func TestIntegration_HunterCrashRecovery(t *testing.T) {
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
 	require.NoError(t, err, "Failed to start processor")
-	defer proc.Shutdown()
+	defer shutdownProcessorWithPortCleanup(proc)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -266,8 +266,8 @@ func TestIntegration_NetworkPartition(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
-	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
+	defer shutdownProcessorWithPortCleanup(proc)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -326,8 +326,8 @@ func TestIntegration_HighVolume(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
-	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
+	defer shutdownProcessorWithPortCleanup(proc)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -387,8 +387,8 @@ func TestIntegration_MultipleHuntersSimultaneous(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
-	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
+	defer shutdownProcessorWithPortCleanup(proc)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -452,8 +452,8 @@ func TestIntegration_JumboFrames(t *testing.T) {
 	procCtx, procCancel := context.WithCancel(ctx)
 	defer procCancel()
 	proc, err := startTestProcessor(procCtx, processorAddr)
-	defer proc.Shutdown()
 	require.NoError(t, err, "Failed to start processor")
+	defer shutdownProcessorWithPortCleanup(proc)
 
 	time.Sleep(500 * time.Millisecond)
 
@@ -689,6 +689,15 @@ func convertToGrpcPackets(packets []gopacket.Packet) []*data.CapturedPacket {
 		}
 	}
 	return result
+}
+
+// shutdownProcessorWithPortCleanup shuts down a processor and waits for the port to be released
+func shutdownProcessorWithPortCleanup(proc *processor.Processor) {
+	if proc != nil {
+		proc.Shutdown()
+		// Wait for OS to fully release the port
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // MockPacketSource for testing

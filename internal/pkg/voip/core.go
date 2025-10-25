@@ -5,6 +5,7 @@ package voip
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -22,6 +23,85 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	logger.InfoContext(ctx, "Starting VoIP sniffer",
 		"device_count", len(devices),
 		"filter", filter)
+
+	// Initialize virtual interface FIRST if enabled (before processing any packets)
+	// This allows early permission check and avoids wasting time processing packets
+	if viper.GetBool("voip.virtual_interface") {
+		vifName := viper.GetString("voip.vif_name")
+		if vifName == "" {
+			vifName = "lc0"
+		}
+
+		cfg := vinterface.DefaultConfig()
+		cfg.Name = vifName
+
+		var err error
+		globalVifMgr, err = vinterface.NewManager(cfg)
+		if err != nil {
+			// Provide helpful error message for permission errors
+			if errors.Is(err, vinterface.ErrPermissionDenied) {
+				logger.Error("Virtual interface requires elevated privileges",
+					"error", err,
+					"interface_name", vifName,
+					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+				logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
+				return
+			} else {
+				logger.Error("Failed to create virtual interface manager",
+					"error", err,
+					"interface_name", vifName)
+				logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
+				return
+			}
+		}
+
+		err = globalVifMgr.Start()
+		if err != nil {
+			// Provide helpful error message for permission errors
+			if errors.Is(err, vinterface.ErrPermissionDenied) {
+				logger.Error("Virtual interface requires elevated privileges",
+					"error", err,
+					"interface_name", vifName,
+					"solution", "Run with sudo or add CAP_NET_ADMIN capability")
+			} else {
+				logger.Error("Failed to start virtual interface",
+					"error", err,
+					"interface_name", vifName)
+			}
+			logger.Error("Aborting - cannot proceed without virtual interface when --virtual-interface flag is set")
+			return
+		}
+
+		logger.Info("Virtual interface started successfully",
+			"interface_name", globalVifMgr.Name())
+
+		// Wait for external tools (tcpdump, Wireshark) to attach
+		startupDelay := viper.GetDuration("voip.vif_startup_delay")
+		if startupDelay > 0 {
+			logger.Info("Waiting for monitoring tools to attach...",
+				"delay", startupDelay)
+			time.Sleep(startupDelay)
+		}
+		logger.Info("Starting packet injection")
+
+		// Ensure cleanup on exit
+		defer func() {
+			if globalVifMgr != nil {
+				stats := globalVifMgr.Stats()
+				logger.Info("Virtual interface statistics",
+					"packets_injected", stats.PacketsInjected,
+					"packets_dropped", stats.PacketsDropped,
+					"injection_errors", stats.InjectionErrors,
+					"conversion_errors", stats.ConversionErrors)
+
+				if err := globalVifMgr.Shutdown(); err != nil {
+					logger.Error("Error shutting down virtual interface", "error", err)
+				} else {
+					logger.Info("Virtual interface shutdown successfully")
+				}
+			}
+		}()
+	}
 
 	// Create handler for local file writing
 	handler := NewLocalFileHandler()
@@ -73,63 +153,8 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		}
 	}()
 
-	// Initialize virtual interface if enabled
-	if viper.GetBool("voip.virtual_interface") {
-		vifName := viper.GetString("voip.vif_name")
-		if vifName == "" {
-			vifName = "lc0"
-		}
-
-		cfg := vinterface.DefaultConfig()
-		cfg.Name = vifName
-
-		var err error
-		globalVifMgr, err = vinterface.NewManager(cfg)
-		if err != nil {
-			logger.Error("Failed to create virtual interface manager",
-				"error", err,
-				"interface_name", vifName)
-			logger.Warn("Continuing without virtual interface")
-		} else {
-			err = globalVifMgr.Start()
-			if err != nil {
-				logger.Error("Failed to start virtual interface",
-					"error", err,
-					"interface_name", vifName)
-				logger.Warn("Continuing without virtual interface")
-				globalVifMgr = nil
-			} else {
-				logger.Info("Virtual interface started successfully",
-					"interface_name", globalVifMgr.Name())
-
-				// Wait for external tools (tcpdump, Wireshark) to attach
-				startupDelay := viper.GetDuration("voip.vif_startup_delay")
-				if startupDelay > 0 {
-					logger.Info("Waiting for monitoring tools to attach...",
-						"delay", startupDelay)
-					time.Sleep(startupDelay)
-				}
-				logger.Info("Starting packet injection")
-
-				defer func() {
-					if globalVifMgr != nil {
-						stats := globalVifMgr.Stats()
-						logger.Info("Virtual interface statistics",
-							"packets_injected", stats.PacketsInjected,
-							"packets_dropped", stats.PacketsDropped,
-							"injection_errors", stats.InjectionErrors,
-							"conversion_errors", stats.ConversionErrors)
-
-						if err := globalVifMgr.Shutdown(); err != nil {
-							logger.Error("Error shutting down virtual interface", "error", err)
-						} else {
-							logger.Info("Virtual interface shutdown successfully")
-						}
-					}
-				}()
-			}
-		}
-	}
+	// Note: Virtual interface is now initialized in StartVoipSniffer() before packet processing begins
+	// This allows early permission checking and avoids wasting time if permissions are insufficient
 
 	packetCount := 0
 	for pkt := range ch {

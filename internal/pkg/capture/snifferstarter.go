@@ -175,8 +175,13 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 	captureWg.Wait()
 
 	// Flush TCP assembler if present (forces reassembly of any remaining streams)
+	// Note: This can sometimes panic with gopacket's known index out of range bug
+	// but since virtual interface creation now happens first, permission errors abort early
 	if assembler != nil {
-		assembler.FlushAll()
+		// Use FlushOlderThan instead of FlushAll to reduce panic frequency
+		// FlushAll has a known issue with index out of range when called on certain states
+		// FlushOlderThan(time.Now()) achieves the same result but is more robust
+		_, _ = assembler.FlushOlderThan(time.Now())
 		// Give assembler time to process flushed streams
 		// This ensures SIP messages are extracted before we close the buffer
 		time.Sleep(100 * time.Millisecond)

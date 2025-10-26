@@ -488,10 +488,82 @@ cat ~/.config/lippycat/filters.yaml
 # (check hunter logs for "Received filter update")
 ```
 
+## Virtual Interface Integration
+
+**Status:** Production-ready (v0.2.10+, Linux only)
+
+Expose aggregated packet streams from multiple hunters to third-party tools (Wireshark, tcpdump, Snort) via virtual TAP/TUN interface.
+
+### Use Case
+
+Centralized monitoring of distributed capture from multiple edge sites.
+
+### Quick Start
+
+```bash
+# Processor with virtual interface
+lc process --listen 0.0.0.0:50051 --virtual-interface --tls --tls-cert server.crt --tls-key server.key
+
+# Edge site hunters
+sudo lc hunt --processor processor:50051 --interface eth0 --tls --tls-ca ca.crt
+
+# Monitor aggregated stream from all hunters
+wireshark -i lc0
+```
+
+### Configuration
+
+```bash
+--virtual-interface              # Enable virtual interface
+--vif-name lc0                   # Interface name (default: lc0)
+--vif-type tap                   # Interface type: tap or tun (default: tap)
+--vif-buffer-size 4096           # Injection queue size
+```
+
+YAML configuration:
+```yaml
+virtual_interface:
+  enabled: true
+  name: lc0
+  type: tap
+  buffer_size: 4096
+```
+
+### Permissions
+
+Requires `CAP_NET_ADMIN` capability:
+
+```bash
+# Recommended: File capabilities
+sudo setcap cap_net_admin+ep /usr/local/bin/lc
+lc process --listen 0.0.0.0:50051 --virtual-interface
+
+# Alternative: Run as root
+sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+```
+
+### Multi-Hunter Monitoring
+
+All packets from connected hunters appear on a single virtual interface:
+
+```bash
+# Processor aggregates from all hunters
+lc process --virtual-interface
+
+# Single Wireshark instance shows traffic from ALL hunters
+wireshark -i lc0
+
+# Or run IDS on aggregated stream
+snort -i lc0 -c /etc/snort/snort.conf
+```
+
+**See:** [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) for complete guide and tool integration examples.
+
 ## See Also
 
 - [cmd/hunt/CLAUDE.md](../hunt/CLAUDE.md) - Hunter node configuration
 - [cmd/tui/CLAUDE.md](../tui/CLAUDE.md) - TUI monitoring interface
 - [docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md) - Complete distributed architecture guide
+- [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide and tool integration
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS setup and security best practices
 - [docs/operational-procedures.md](../../docs/operational-procedures.md) - Production operations guide

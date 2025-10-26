@@ -312,40 +312,47 @@ tshark -i lc0
   - [ ] Verify alerts triggered correctly
 
 #### Documentation
-- [ ] User documentation (README.md files)
-  - [ ] cmd/sniff/README.md - Virtual interface section
-    - [ ] Live capture with filtering to virtual interface
-    - [ ] PCAP replay with filtering (tcpreplay alternative)
-  - [ ] cmd/process/README.md - Virtual interface section
-    - [ ] Distributed aggregation to virtual interface
-    - [ ] Multi-hunter monitoring with single interface
-  - [ ] Common examples across all commands:
-    - [ ] tcpdump integration
-    - [ ] Wireshark integration
-    - [ ] Snort/Suricata integration
-    - [ ] Troubleshooting section
-- [ ] Architecture documentation (CLAUDE.md files)
-  - [ ] internal/pkg/vinterface/CLAUDE.md - Package documentation
-    - [ ] Design rationale
-    - [ ] Platform support matrix
-    - [ ] Packet conversion details
-  - [ ] Update cmd/sniff/CLAUDE.md - Virtual interface integration
-  - [ ] Update cmd/process/CLAUDE.md - Virtual interface integration
-- [ ] Central documentation
-  - [ ] docs/VIRTUAL_INTERFACE.md - Complete guide
-    - [ ] Overview and use cases
-    - [ ] Setup and configuration
-    - [ ] Tool integration examples (tcpdump, Wireshark, Snort, Zeek)
-    - [ ] Performance characteristics
-    - [ ] Troubleshooting
-  - [ ] docs/SECURITY.md - Add virtual interface section
-    - [ ] Privilege requirements (CAP_NET_ADMIN)
-    - [ ] File capabilities setup (`setcap cap_net_admin+ep`)
-    - [ ] Security considerations
-    - [ ] Network namespace isolation (Phase 3 preview)
-- [ ] Update main README.md
-  - [ ] Add virtual interface to feature list
-  - [ ] Quick example showing PCAP replay filtering use case
+- [x] User documentation (README.md files)
+  - [x] cmd/sniff/README.md - Virtual interface section
+    - [x] Live capture with filtering to virtual interface
+    - [x] PCAP replay with filtering (tcpreplay alternative)
+    - [x] Timing replay examples
+  - [x] cmd/process/README.md - Virtual interface section
+    - [x] Distributed aggregation to virtual interface
+    - [x] Multi-hunter monitoring with single interface
+  - [x] Common examples across all commands:
+    - [x] tcpdump integration
+    - [x] Wireshark integration
+    - [x] Snort/Suricata integration
+    - [x] Troubleshooting section
+- [x] Architecture documentation (CLAUDE.md files)
+  - [x] internal/pkg/vinterface/CLAUDE.md - Package documentation
+    - [x] Design rationale
+    - [x] Platform support matrix
+    - [x] Packet conversion details
+    - [x] Integration patterns
+    - [x] Performance characteristics
+  - [x] Update cmd/sniff/CLAUDE.md - Virtual interface integration
+  - [x] Update cmd/process/CLAUDE.md - Virtual interface integration
+- [x] Central documentation
+  - [x] docs/VIRTUAL_INTERFACE.md - Complete guide
+    - [x] Overview and use cases
+    - [x] Setup and configuration
+    - [x] Tool integration examples (tcpdump, Wireshark, Snort, Zeek)
+    - [x] Performance characteristics
+    - [x] Troubleshooting
+    - [x] Advanced scenarios (multi-consumer, hierarchical aggregation)
+  - [x] docs/SECURITY.md - Add virtual interface section
+    - [x] Privilege requirements (CAP_NET_ADMIN)
+    - [x] File capabilities setup (`setcap cap_net_admin+ep`)
+    - [x] Security considerations
+    - [x] Containerized deployment examples
+    - [x] Security checklist
+    - [x] Network namespace isolation (Phase 3 preview)
+- [x] Update main README.md
+  - [x] Add virtual interface to feature list
+  - [x] Quick example showing PCAP replay filtering use case
+  - [x] Add to Documentation section
 
 **Acceptance Criteria:**
 - Virtual interface works in all three commands (sniff, sniff voip, process)

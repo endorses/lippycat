@@ -18,6 +18,7 @@ Network traffic sniffer and protocol analyzer built with Go. Currently focused o
 
 - **VoIP Analysis**: SIP/RTP traffic capture, call tracking, user targeting
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
+- **Virtual Interface**: Expose filtered streams to Wireshark, tcpdump, Snort (Linux only)
 - **TLS/mTLS Security**: Encrypted gRPC connections with mutual authentication
 - **Hunter Subscription**: Selective monitoring of specific hunters via TUI
 - **Performance**: SIMD optimizations, optional GPU acceleration, AF_XDP support
@@ -111,6 +112,10 @@ sudo lc sniff voip --interface eth0
 # Target specific SIP users
 sudo lc sniff voip --sipuser alicent,robb
 
+# PCAP replay with filtering (tcpreplay alternative)
+sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
+wireshark -i lc0  # Monitor filtered stream in another terminal
+
 # Interactive TUI
 sudo lc tui
 
@@ -194,6 +199,7 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 
 ## Documentation
 
+- [Virtual Interface](docs/VIRTUAL_INTERFACE.md) - Tool integration (Wireshark, Snort, tcpdump)
 - [Distributed Mode](docs/DISTRIBUTED_MODE.md) - Multi-node architecture
 - [TUI Remote Capture](docs/TUI_REMOTE_CAPTURE.md) - Remote monitoring setup
 - [GPU Acceleration](docs/GPU_ACCELERATION.md) - GPU/SIMD optimization

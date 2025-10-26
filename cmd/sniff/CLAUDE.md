@@ -623,8 +623,99 @@ Edit `internal/pkg/voip/tcp_config_simplified.go`:
 - `internal/pkg/logger` - Structured logging (stderr output)
 - `internal/pkg/types` - Shared domain types (PacketDisplay)
 
+## Virtual Interface Integration
+
+**Status:** Production-ready (v0.2.10+)
+
+The sniff command supports virtual interface creation for exposing filtered packet streams to third-party tools (Wireshark, tcpdump, Snort).
+
+### Overview
+
+When `--virtual-interface` is enabled, sniff creates a TAP/TUN interface (default: `lc0`) and injects filtered packets in real-time.
+
+**Use Cases:**
+1. **PCAP replay with filtering:** `lc sniff voip -r huge.pcap --sipuser alice --virtual-interface` (tcpreplay alternative)
+2. **Live filtered capture:** `lc sniff voip -i eth0 --virtual-interface` (expose VoIP-only stream to Wireshark)
+
+### Integration Pattern
+
+**Location:** `cmd/sniff/voip.go` (VoIP mode) and `cmd/sniff/sniff.go` (general mode)
+
+```go
+// Check if virtual interface enabled
+if viper.GetBool("virtual_interface.enabled") {
+    // Create manager
+    vifMgr, err := vinterface.NewManager(vinterface.Config{
+        Name:       viper.GetString("virtual_interface.name"),
+        Type:       vinterface.InterfaceType(viper.GetString("virtual_interface.type")),
+        BufferSize: viper.GetInt("virtual_interface.buffer_size"),
+    })
+    if err != nil {
+        logger.Error("Failed to create virtual interface: %v", err)
+        // Continue without virtual interface
+    } else {
+        defer vifMgr.Shutdown()
+        if err := vifMgr.Start(); err != nil {
+            logger.Error("Failed to start virtual interface: %v", err)
+        }
+
+        // Inject packets in capture loop
+        vifMgr.InjectPacketBatch(packets)
+    }
+}
+```
+
+### Timing Replay (PCAP Files)
+
+For PCAP replay, timing can be preserved using `TimingReplayer`:
+
+```go
+replayer := vinterface.NewTimingReplayer(viper.GetBool("virtual_interface.replay_timing"))
+
+for packet := range packets {
+    // Sleep to match original packet timing
+    replayer.Sleep(packet.Timestamp)
+
+    // Inject packet
+    vifMgr.InjectPacket(packet)
+}
+```
+
+### CLI Flags
+
+```bash
+--virtual-interface              # Enable virtual interface
+--vif-name lc0                   # Interface name
+--vif-type tap                   # Interface type: tap or tun
+--vif-buffer-size 4096           # Injection queue size
+--vif-startup-delay 3s           # Delay before injection starts
+--vif-replay-timing              # Respect PCAP timestamps
+```
+
+### Configuration Support
+
+```yaml
+virtual_interface:
+  enabled: true
+  name: lc0
+  type: tap
+  buffer_size: 4096
+  startup_delay: 3s
+  replay_timing: true
+```
+
+### Error Handling
+
+- **Permission denied:** Clear error message, continues without virtual interface
+- **Interface name conflict:** Logged, continues without virtual interface
+- **Injection failures:** Logged but non-blocking (capture continues)
+
+**See:** [internal/pkg/vinterface/CLAUDE.md](../../internal/pkg/vinterface/CLAUDE.md) for implementation details
+
 ## Related Documentation
 
 - [README.md](README.md) - User-facing command documentation
 - [../../docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Performance tuning guide
 - [../../docs/tcp-troubleshooting.md](../../docs/tcp-troubleshooting.md) - TCP troubleshooting
+- [../../docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide
+- [../../internal/pkg/vinterface/CLAUDE.md](../../internal/pkg/vinterface/CLAUDE.md) - Virtual interface architecture

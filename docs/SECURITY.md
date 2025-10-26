@@ -1027,3 +1027,221 @@ Content-Length: 123456789012345678901234567890
 *Attempts to exhaust parsing resources with long strings*
 
 All of these attacks are prevented by the bounds validation system.
+
+## Virtual Interface Security
+
+**Status:** Production-ready (v0.2.10+)
+
+Virtual interface creation requires elevated privileges. Follow these guidelines to minimize security risks.
+
+### Privilege Requirements
+
+Creating TAP/TUN devices requires the `CAP_NET_ADMIN` Linux capability.
+
+**Required for:**
+- `lc sniff --virtual-interface`
+- `lc sniff voip --virtual-interface`
+- `lc process --virtual-interface`
+
+### Recommended Setup: File Capabilities
+
+**Preferred method** - grants only the necessary capability without running as root:
+
+```bash
+# Grant CAP_NET_ADMIN to lippycat binary
+sudo setcap cap_net_admin+ep /usr/local/bin/lc
+
+# Verify capability
+getcap /usr/local/bin/lc
+# Output: /usr/local/bin/lc = cap_net_admin+ep
+
+# Now run without sudo
+lc sniff voip -i eth0 --virtual-interface
+```
+
+**Security benefits:**
+- Process runs as regular user (not root)
+- Only `CAP_NET_ADMIN` capability is granted (not all root capabilities)
+- Capability is effective only when needed
+- Follows principle of least privilege
+
+**Capability is used for:**
+1. Creating TAP/TUN device via netlink
+2. Bringing interface up (`ip link set up`)
+3. Opening `/dev/net/tun` for packet injection
+
+### Alternative: Run as Root (Not Recommended)
+
+```bash
+sudo lc sniff voip -i eth0 --virtual-interface
+```
+
+**Security drawbacks:**
+- Entire process runs with full root privileges
+- Increased attack surface if process is compromised
+- Violates principle of least privilege
+- Not necessary with file capabilities
+
+**Only use when:**
+- File capabilities are not available
+- Testing in containerized/isolated environments
+
+### Permission Errors
+
+If you encounter permission errors:
+
+```
+ERROR Failed to create virtual interface: operation not permitted
+```
+
+**Diagnosis:**
+```bash
+# Check if CAP_NET_ADMIN is set
+getcap /usr/local/bin/lc
+
+# Check if user has permissions
+id -u  # Should show non-zero for regular user
+```
+
+**Solution:**
+```bash
+# Set file capability
+sudo setcap cap_net_admin+ep /usr/local/bin/lc
+
+# Verify
+getcap /usr/local/bin/lc
+```
+
+### Access Control
+
+Virtual interfaces are visible to all users on the system. To restrict access:
+
+#### Option 1: File Descriptor Permissions (Current)
+
+The `/dev/net/tun` device controls who can create interfaces:
+
+```bash
+# Check current permissions
+ls -l /dev/net/tun
+# Output: crw-rw-rw- 1 root root 10, 200 ...
+
+# Restrict to root and specific group
+sudo chgrp netdev /dev/net/tun
+sudo chmod 660 /dev/net/tun
+
+# Add user to netdev group
+sudo usermod -aG netdev $USER
+```
+
+#### Option 2: Network Namespace Isolation (Phase 3)
+
+Future enhancement: Create virtual interfaces in isolated network namespaces.
+
+```bash
+# Create namespace
+sudo ip netns add lippycat-vif
+
+# Run lippycat with interface in namespace
+sudo lc sniff voip -i eth0 --virtual-interface --vif-namespace lippycat-vif
+
+# Only tools in the namespace can access lc0
+sudo ip netns exec lippycat-vif wireshark -i lc0
+```
+
+**Benefits:**
+- Complete isolation from host network stack
+- Prevents unauthorized sniffing
+- Container-like security model
+
+### Packet Integrity
+
+Virtual interfaces only expose packets that:
+1. Pass lippycat's capture filters
+2. Pass protocol-specific filters (e.g., `--sipuser`)
+3. Have valid checksums and headers
+
+**Packets are NOT injected if:**
+- Conversion to Ethernet/IP fails
+- Payload is missing or malformed
+- Injection queue is full (dropped, not delayed)
+
+This prevents malformed packets from reaching downstream tools.
+
+### Containerized Deployment
+
+When running lippycat in Docker/Kubernetes:
+
+```dockerfile
+# Dockerfile
+FROM debian:bookworm-slim
+
+# Install lippycat
+COPY lc /usr/local/bin/lc
+
+# Grant capability in container
+RUN setcap cap_net_admin+ep /usr/local/bin/lc
+
+# Run as non-root user
+USER lippycat:lippycat
+
+CMD ["lc", "sniff", "voip", "--virtual-interface"]
+```
+
+**Docker run with required privileges:**
+```bash
+# Grant CAP_NET_ADMIN to container
+docker run --cap-add=NET_ADMIN lippycat:latest
+```
+
+**Kubernetes deployment:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lippycat
+spec:
+  containers:
+  - name: lippycat
+    image: lippycat:latest
+    securityContext:
+      capabilities:
+        add:
+        - NET_ADMIN
+      runAsNonRoot: true
+      runAsUser: 1000
+```
+
+### Security Checklist
+
+Before deploying virtual interface in production:
+
+- [ ] Use file capabilities (`setcap`) instead of running as root
+- [ ] Restrict `/dev/net/tun` permissions if needed
+- [ ] Verify lippycat binary integrity (checksums, signatures)
+- [ ] Use TLS encryption for distributed mode (hunter→processor)
+- [ ] Monitor virtual interface creation/deletion logs
+- [ ] Plan for network namespace isolation (Phase 3)
+- [ ] Validate downstream tool security (Wireshark, Snort, etc.)
+- [ ] Implement monitoring for unauthorized interface creation
+
+### Threat Model
+
+**Threats mitigated:**
+- Unauthorized packet capture (via filtered stream)
+- Privilege escalation (file capabilities vs. root)
+- Memory exhaustion (bounded injection queue)
+
+**Threats NOT mitigated (future work):**
+- Unauthorized interface access (Phase 3: namespace isolation)
+- Packet tampering (read-only TAP/TUN, no ingress)
+- Resource exhaustion by malicious tools (Phase 3: rate limiting)
+
+### Performance vs. Security Trade-offs
+
+| Setting | Security | Performance | Recommendation |
+|---------|----------|-------------|----------------|
+| `--vif-buffer-size 1024` | High (low memory) | Lower throughput | High-security environments |
+| `--vif-buffer-size 4096` | Balanced | Balanced | Default (recommended) |
+| `--vif-buffer-size 16384` | Lower (high memory) | Higher throughput | Trusted environments only |
+
+**Guideline:** Use default buffer size unless justified by specific requirements.

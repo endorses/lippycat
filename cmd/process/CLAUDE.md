@@ -830,9 +830,91 @@ Edit `internal/pkg/processor/subscribers.go` broadcast functions.
 - `internal/pkg/tlsutil` - TLS utilities
 - `api/gen/go` - Generated gRPC stubs
 
+## Virtual Interface Integration
+
+**Status:** Production-ready (v0.2.10+)
+
+The processor supports virtual interface creation for exposing aggregated packet streams from multiple hunters to third-party tools.
+
+### Overview
+
+When `--virtual-interface` is enabled, the processor creates a TAP/TUN interface (default: `lc0`) and injects packets received from all connected hunters.
+
+**Use Case:** Centralized monitoring of distributed capture with tools like Wireshark or Snort.
+
+### Integration Pattern
+
+**Location:** `cmd/process/process.go`
+
+```go
+// Initialize virtual interface manager
+if viper.GetBool("virtual_interface.enabled") {
+    vifMgr, err := vinterface.NewManager(vinterface.Config{
+        Name:       viper.GetString("virtual_interface.name"),
+        Type:       vinterface.InterfaceType(viper.GetString("virtual_interface.type")),
+        BufferSize: viper.GetInt("virtual_interface.buffer_size"),
+    })
+    if err != nil {
+        logger.Error("Failed to create virtual interface", "error", err)
+    } else {
+        defer vifMgr.Shutdown()
+        if err := vifMgr.Start(); err != nil {
+            logger.Error("Failed to start virtual interface", "error", err)
+        }
+
+        // Inject packets in processBatch() pipeline
+        if err := vifMgr.InjectPacketBatch(batch); err != nil {
+            logger.Debug("Virtual interface injection failed", "error", err)
+        }
+    }
+}
+```
+
+### Injection Point
+
+Packets are injected in `processBatch()` (`internal/pkg/processor/processor.go`) after:
+1. Receiving from hunter
+2. Protocol detection (if enabled)
+3. Filter application
+
+**Parallel outputs:**
+- Virtual interface injection
+- PCAP file writing
+- TUI subscriber broadcast
+- Upstream forwarding (hierarchical mode)
+
+### CLI Flags
+
+```bash
+--virtual-interface              # Enable virtual interface
+--vif-name lc0                   # Interface name
+--vif-type tap                   # Interface type: tap or tun
+--vif-buffer-size 4096           # Injection queue size
+```
+
+### Configuration Support
+
+```yaml
+virtual_interface:
+  enabled: true
+  name: lc0
+  type: tap
+  buffer_size: 4096
+```
+
+### Error Handling
+
+- **Permission denied:** Logged, continues without virtual interface
+- **Injection failures:** Non-blocking (other outputs continue)
+- **Hunter disconnects:** Virtual interface remains active, continues injecting from remaining hunters
+
+**See:** [internal/pkg/vinterface/CLAUDE.md](../../internal/pkg/vinterface/CLAUDE.md) for implementation details
+
 ## Related Documentation
 
 - [README.md](README.md) - User-facing command documentation
 - [../hunt/CLAUDE.md](../hunt/CLAUDE.md) - Hunter architecture
 - [../tui/CLAUDE.md](../tui/CLAUDE.md) - TUI client architecture
 - [../../docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md) - Distributed system overview
+- [../../docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide
+- [../../internal/pkg/vinterface/CLAUDE.md](../../internal/pkg/vinterface/CLAUDE.md) - Virtual interface architecture

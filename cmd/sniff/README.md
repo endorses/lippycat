@@ -284,6 +284,78 @@ voip:
   tcp_buffer_strategy: "adaptive"
 ```
 
+## Virtual Interface Integration
+
+**Status:** Production-ready (v0.2.10+, Linux only)
+
+Expose filtered packet streams to third-party tools (Wireshark, tcpdump, Snort) via virtual TAP/TUN interface.
+
+### Quick Start
+
+```bash
+# PCAP replay with filtering (tcpreplay alternative)
+sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
+
+# Monitor in another terminal
+wireshark -i lc0
+```
+
+### Use Cases
+
+#### 1. PCAP Replay Filtering
+```bash
+# Replay large PCAP, filter for specific user
+sudo lc sniff voip -r 10GB-capture.pcap --sipuser alice --virtual-interface
+
+# Capture filtered stream
+tcpdump -i lc0 -w alice-calls.pcap
+```
+
+#### 2. Live VoIP Monitoring
+```bash
+# Capture only VoIP traffic
+sudo lc sniff voip -i eth0 --virtual-interface
+
+# Multiple tools can monitor simultaneously
+wireshark -i lc0 &
+snort -i lc0 -c voip-rules.conf &
+```
+
+#### 3. Timing Replay
+```bash
+# Preserve PCAP timing (like tcpreplay)
+sudo lc sniff voip -r capture.pcap --virtual-interface --vif-replay-timing
+
+# Verify timing with tcpdump
+tcpdump -i lc0 -tttt -n
+```
+
+### Configuration
+
+```bash
+--virtual-interface              # Enable virtual interface
+--vif-name lc0                   # Interface name (default: lc0)
+--vif-type tap                   # Interface type: tap or tun (default: tap)
+--vif-buffer-size 4096           # Injection queue size
+--vif-startup-delay 3s           # Delay before injection starts
+--vif-replay-timing              # Respect PCAP timestamps
+```
+
+### Permissions
+
+Requires `CAP_NET_ADMIN` capability:
+
+```bash
+# Recommended: File capabilities
+sudo setcap cap_net_admin+ep /usr/local/bin/lc
+lc sniff voip -i eth0 --virtual-interface
+
+# Alternative: Run as root
+sudo lc sniff voip -i eth0 --virtual-interface
+```
+
+**See:** [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) for complete guide and tool integration examples.
+
 ## Best Practices
 
 1. **Start with profiles** - Use `--tcp-performance-mode` instead of manual tuning
@@ -295,5 +367,6 @@ voip:
 ## See Also
 
 - [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Detailed performance tuning guide
+- [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide and tool integration
 - [cmd/debug/CLAUDE.md](../debug/CLAUDE.md) - Debug commands for monitoring TCP health
 - [docs/SECURITY.md](../../docs/SECURITY.md) - Security features and configuration

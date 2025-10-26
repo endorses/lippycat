@@ -382,9 +382,12 @@ tshark -i lc0
   - [x] Create interface with CAP_NET_ADMIN
   - [x] Drop privileges after interface creation
   - [x] Run injection loop as unprivileged user
-- [ ] Access control
-  - [ ] File permissions on /dev/net/tun
-  - [ ] Per-tool access control (if namespace isolation)
+- [x] Access control
+  - [x] File permissions on /dev/net/tun
+  - [x] Per-tool access control (namespace isolation + group-based access)
+  - [x] Document three access control options (file permissions, namespace isolation, per-tool)
+  - [x] Provide production deployment examples
+  - [x] Update security checklist and threat model
 
 #### Advanced Packet Processing
 - [ ] Preserve original timestamps

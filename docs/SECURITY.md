@@ -1219,6 +1219,123 @@ sudo ip netns exec lippycat-isolated wireshark -i lc0
 - `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` capabilities (or run as root)
 - Network namespace must exist before starting lippycat
 
+#### Option 3: Per-Tool Access Control (Advanced)
+
+Control which users/tools can capture from the virtual interface using group-based permissions and interface ownership.
+
+**Method 1: Interface Group Ownership**
+
+After the interface is created, change its ownership to a specific group:
+
+```bash
+# Start lippycat (creates lc0 interface)
+sudo lc sniff voip -i eth0 --virtual-interface &
+
+# Wait for interface to be created
+sleep 3
+
+# Create a dedicated group for virtual interface access
+sudo groupadd lippycat-monitor
+
+# Add authorized users to the group
+sudo usermod -aG lippycat-monitor alice
+sudo usermod -aG lippycat-monitor bob
+
+# Note: Interface permissions are controlled via /dev/net/tun
+# To restrict interface access, combine with namespace isolation (Option 2)
+```
+
+**Method 2: Namespace + Group-based Access**
+
+Combine namespace isolation with selective user access:
+
+```bash
+# Create namespace
+sudo ip netns add lippycat-isolated
+
+# Create monitoring group
+sudo groupadd lippycat-monitor
+sudo usermod -aG lippycat-monitor alice
+
+# Run lippycat in namespace
+sudo lc sniff voip -i eth0 --virtual-interface --vif-netns lippycat-isolated &
+
+# Create wrapper script for authorized users
+cat > /usr/local/bin/lc-monitor <<'EOF'
+#!/bin/bash
+# Only users in lippycat-monitor group can access
+if ! groups | grep -q lippycat-monitor; then
+    echo "ERROR: You must be in the lippycat-monitor group"
+    exit 1
+fi
+sudo ip netns exec lippycat-isolated "$@"
+EOF
+
+sudo chmod 755 /usr/local/bin/lc-monitor
+sudo chown root:lippycat-monitor /usr/local/bin/lc-monitor
+
+# Configure sudo to allow lippycat-monitor group to execute ip netns
+cat > /etc/sudoers.d/lippycat-monitor <<'EOF'
+%lippycat-monitor ALL=(root) NOPASSWD: /usr/sbin/ip netns exec lippycat-isolated *
+EOF
+sudo chmod 440 /etc/sudoers.d/lippycat-monitor
+
+# Now authorized users can access the interface
+lc-monitor wireshark -i lc0       # alice can run this
+lc-monitor tcpdump -i lc0 -nn     # bob can run this
+```
+
+**Method 3: Tool-Specific Capabilities**
+
+Grant specific monitoring tools the ability to capture without full root access:
+
+```bash
+# Grant Wireshark/dumpcap the ability to capture
+sudo setcap cap_net_raw,cap_net_admin+ep /usr/bin/dumpcap
+
+# Grant tcpdump the ability to capture
+sudo setcap cap_net_raw,cap_net_admin+ep /usr/bin/tcpdump
+
+# Now these tools can capture from lc0 without sudo
+wireshark -i lc0
+tcpdump -i lc0 -nn
+```
+
+**Best Practices for Per-Tool Access Control:**
+
+1. **Namespace Isolation First:** Always use network namespace isolation as the primary security boundary
+2. **Least Privilege:** Grant only the necessary capabilities to monitoring tools
+3. **Group-based Access:** Use system groups to manage who can access monitoring tools
+4. **Audit Logging:** Monitor and log all access to the virtual interface
+5. **Regular Reviews:** Periodically review group memberships and tool capabilities
+
+**Example Production Setup:**
+
+```bash
+# 1. Create isolated namespace
+sudo ip netns add lippycat-prod
+
+# 2. Create monitoring group
+sudo groupadd lippycat-monitor
+sudo usermod -aG lippycat-monitor security-team
+
+# 3. Run lippycat with namespace isolation and privilege dropping
+sudo lc sniff voip -i eth0 \
+  --virtual-interface \
+  --vif-netns lippycat-prod \
+  --vif-drop-privileges lippycat
+
+# 4. Configure sudo for authorized users
+cat > /etc/sudoers.d/lippycat-monitor <<'EOF'
+%lippycat-monitor ALL=(root) NOPASSWD: /usr/sbin/ip netns exec lippycat-prod /usr/bin/tcpdump *
+%lippycat-monitor ALL=(root) NOPASSWD: /usr/sbin/ip netns exec lippycat-prod /usr/bin/wireshark *
+%lippycat-monitor ALL=(root) NOPASSWD: /usr/sbin/ip netns exec lippycat-prod /usr/bin/tshark *
+EOF
+
+# 5. Authorized users can now monitor
+sudo ip netns exec lippycat-prod wireshark -i lc0
+```
+
 **Creating persistent namespaces:**
 
 ```bash
@@ -1319,13 +1436,18 @@ spec:
 Before deploying virtual interface in production:
 
 - [ ] Use file capabilities (`setcap`) instead of running as root
-- [ ] Restrict `/dev/net/tun` permissions if needed
+- [ ] Restrict `/dev/net/tun` permissions if needed (Option 1)
+- [ ] Implement network namespace isolation (Option 2) - **Recommended**
+- [ ] Configure per-tool access control via groups and sudo (Option 3)
+- [ ] Set up privilege dropping with `--vif-drop-privileges` flag
+- [ ] Grant only necessary capabilities to monitoring tools (`setcap`)
 - [ ] Verify lippycat binary integrity (checksums, signatures)
 - [ ] Use TLS encryption for distributed mode (hunter→processor)
 - [ ] Monitor virtual interface creation/deletion logs
-- [ ] Plan for network namespace isolation (Phase 3)
+- [ ] Audit group memberships for monitoring access
 - [ ] Validate downstream tool security (Wireshark, Snort, etc.)
 - [ ] Implement monitoring for unauthorized interface creation
+- [ ] Review and update sudoers rules regularly
 
 ### Threat Model
 
@@ -1333,11 +1455,14 @@ Before deploying virtual interface in production:
 - Unauthorized packet capture (via filtered stream)
 - Privilege escalation (file capabilities vs. root)
 - Memory exhaustion (bounded injection queue)
+- Unauthorized interface access (namespace isolation + per-tool access control)
+- Lateral movement (isolated namespaces prevent interface visibility)
+- Unauthorized user access (group-based access control with sudo policies)
 
 **Threats NOT mitigated (future work):**
-- Unauthorized interface access (Phase 3: namespace isolation)
 - Packet tampering (read-only TAP/TUN, no ingress)
 - Resource exhaustion by malicious tools (Phase 3: rate limiting)
+- Side-channel attacks via packet timing analysis
 
 ### Performance vs. Security Trade-offs
 

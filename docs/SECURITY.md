@@ -1086,6 +1086,66 @@ sudo lc sniff voip -i eth0 --virtual-interface
 - File capabilities are not available
 - Testing in containerized/isolated environments
 
+### Privilege Dropping (Advanced)
+
+**Status:** Available in v0.2.10+
+
+For maximum security when running as root, lippycat can automatically drop privileges to a non-privileged user after creating the virtual interface.
+
+**How it works:**
+1. Process starts as root (or with `CAP_NET_ADMIN`)
+2. Virtual interface is created and brought up
+3. Process drops to specified user's UID/GID
+4. Packet injection continues as unprivileged user
+
+**Example usage:**
+
+```bash
+# Drop to 'nobody' user after interface creation
+sudo lc sniff voip -i eth0 --virtual-interface --vif-drop-privileges nobody
+
+# Drop to custom 'lippycat' user
+sudo lc sniff voip -i eth0 --virtual-interface --vif-drop-privileges lippycat
+
+# Processor node with privilege dropping
+sudo lc process --listen :50051 --virtual-interface --vif-drop-privileges lippycat
+```
+
+**Configuration file:**
+
+```yaml
+virtual_interface:
+  enabled: true
+  name: lc0
+  drop_privileges_user: lippycat
+```
+
+**Requirements:**
+- Must run as root (UID 0) for privilege dropping to work
+- Target user must exist on the system
+- Go 1.16+ (privilege dropping fixed in Go 1.16)
+
+**Security benefits:**
+- Minimizes attack surface after interface creation
+- Follows principle of least privilege
+- Injection loop runs as unprivileged user
+- Limits damage from potential process compromise
+
+**Limitations:**
+- Only works on Linux (no-op on other platforms)
+- Requires running as root initially
+- File capabilities (`setcap`) are still preferred for most use cases
+
+**When to use:**
+- Production deployments requiring maximum isolation
+- Environments with strict security policies
+- When combined with other security features (network namespaces, seccomp, etc.)
+
+**When NOT to use:**
+- If you can use file capabilities instead (`setcap cap_net_admin+ep`)
+- Non-root deployments (privilege dropping is skipped)
+- macOS/Windows (not supported)
+
 ### Permission Errors
 
 If you encounter permission errors:

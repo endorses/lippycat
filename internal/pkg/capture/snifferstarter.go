@@ -301,6 +301,11 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 			cfg.NetNS = netNS
 		}
 
+		// Read privilege dropping user from config (default: empty)
+		if dropPrivUser := viper.GetString("sniff.vif_drop_privileges"); dropPrivUser != "" {
+			cfg.DropPrivilegesUser = dropPrivUser
+		}
+
 		var err error
 		vifMgr, err = vinterface.NewManager(cfg)
 		if err != nil {

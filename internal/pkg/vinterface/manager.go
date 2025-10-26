@@ -89,6 +89,12 @@ type Config struct {
 	// Example: "lippycat-isolated"
 	// Note: Requires CAP_NET_ADMIN and CAP_SYS_ADMIN capabilities.
 	NetNS string
+
+	// DropPrivilegesUser is the username to drop privileges to after interface creation.
+	// If empty, privileges are not dropped.
+	// Example: "lippycat" or "nobody"
+	// Note: Only works when running as root (UID 0). Requires Go 1.16+.
+	DropPrivilegesUser string
 }
 
 // DefaultConfig returns a Config with sensible defaults.

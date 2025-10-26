@@ -69,6 +69,7 @@ var (
 	vifType              string
 	vifBufferSize        int
 	vifNetNS             string
+	vifDropPrivileges    string
 )
 
 func init() {
@@ -111,6 +112,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
 	ProcessCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size (packets)")
 	ProcessCmd.Flags().StringVar(&vifNetNS, "vif-netns", "", "Network namespace for interface isolation (requires CAP_SYS_ADMIN)")
+	ProcessCmd.Flags().StringVar(&vifDropPrivileges, "vif-drop-privileges", "", "Drop privileges to specified user after interface creation (requires running as root)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -140,6 +142,7 @@ func init() {
 	_ = viper.BindPFlag("processor.vif_type", ProcessCmd.Flags().Lookup("vif-type"))
 	_ = viper.BindPFlag("processor.vif_buffer_size", ProcessCmd.Flags().Lookup("vif-buffer-size"))
 	_ = viper.BindPFlag("processor.vif_netns", ProcessCmd.Flags().Lookup("vif-netns"))
+	_ = viper.BindPFlag("processor.vif_drop_privileges", ProcessCmd.Flags().Lookup("vif-drop-privileges"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -221,11 +224,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		TLSCAFile:     getStringConfig("processor.tls.ca_file", tlsCAFile),
 		TLSClientAuth: getBoolConfig("processor.tls.client_auth", tlsClientAuth),
 		// Virtual interface configuration
-		VirtualInterface:     getBoolConfig("processor.virtual_interface", virtualInterface),
-		VirtualInterfaceName: getStringConfig("processor.vif_name", virtualInterfaceName),
-		VirtualInterfaceType: getStringConfig("processor.vif_type", vifType),
-		VifBufferSize:        getIntConfig("processor.vif_buffer_size", vifBufferSize),
-		VifNetNS:             getStringConfig("processor.vif_netns", vifNetNS),
+		VirtualInterface:      getBoolConfig("processor.virtual_interface", virtualInterface),
+		VirtualInterfaceName:  getStringConfig("processor.vif_name", virtualInterfaceName),
+		VirtualInterfaceType:  getStringConfig("processor.vif_type", vifType),
+		VifBufferSize:         getIntConfig("processor.vif_buffer_size", vifBufferSize),
+		VifNetNS:              getStringConfig("processor.vif_netns", vifNetNS),
+		VifDropPrivilegesUser: getStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
 	}
 
 	// Security check: require explicit opt-in to insecure mode

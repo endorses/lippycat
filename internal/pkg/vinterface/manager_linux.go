@@ -109,6 +109,15 @@ func (m *linuxManager) Start() error {
 		return fmt.Errorf("failed to bring interface up: %w", err)
 	}
 
+	// Drop privileges after interface creation (if configured)
+	if m.config.DropPrivilegesUser != "" {
+		if err := DropPrivileges(m.config.DropPrivilegesUser); err != nil {
+			m.cleanupInNamespace()
+			m.started.Store(false)
+			return fmt.Errorf("failed to drop privileges: %w", err)
+		}
+	}
+
 	// Start async injection worker
 	m.queueWg.Add(1)
 	go m.injectionWorker()

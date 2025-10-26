@@ -57,11 +57,12 @@ type Config struct {
 	TLSCAFile     string // Path to CA certificate file (for mutual TLS)
 	TLSClientAuth bool   // Require client certificate authentication (mutual TLS)
 	// Virtual interface settings
-	VirtualInterface     bool   // Enable virtual network interface
-	VirtualInterfaceName string // Virtual interface name
-	VirtualInterfaceType string // Virtual interface type (tap/tun)
-	VifBufferSize        int    // Virtual interface buffer size
-	VifNetNS             string // Network namespace for interface isolation
+	VirtualInterface      bool   // Enable virtual network interface
+	VirtualInterfaceName  string // Virtual interface name
+	VirtualInterfaceType  string // Virtual interface type (tap/tun)
+	VifBufferSize         int    // Virtual interface buffer size
+	VifNetNS              string // Network namespace for interface isolation
+	VifDropPrivilegesUser string // User to drop privileges to after interface creation
 }
 
 // Processor represents a processor node
@@ -182,6 +183,11 @@ func New(config Config) (*Processor, error) {
 		// Apply network namespace from config (default: empty)
 		if config.VifNetNS != "" {
 			cfg.NetNS = config.VifNetNS
+		}
+
+		// Apply privilege dropping user from config (default: empty)
+		if config.VifDropPrivilegesUser != "" {
+			cfg.DropPrivilegesUser = config.VifDropPrivilegesUser
 		}
 
 		mgr, err := vinterface.NewManager(cfg)

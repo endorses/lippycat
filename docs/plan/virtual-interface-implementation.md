@@ -378,10 +378,10 @@ tshark -i lc0
   - [x] Create interface in isolated namespace
   - [x] Document usage with `ip netns`
   - [x] Prevent unauthorized sniffing
-- [ ] Privilege dropping
-  - [ ] Create interface with CAP_NET_ADMIN
-  - [ ] Drop privileges after interface creation
-  - [ ] Run injection loop as unprivileged user
+- [x] Privilege dropping
+  - [x] Create interface with CAP_NET_ADMIN
+  - [x] Drop privileges after interface creation
+  - [x] Run injection loop as unprivileged user
 - [ ] Access control
   - [ ] File permissions on /dev/net/tun
   - [ ] Per-tool access control (if namespace isolation)

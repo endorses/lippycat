@@ -35,6 +35,26 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		cfg := vinterface.DefaultConfig()
 		cfg.Name = vifName
 
+		// Read interface type from config (default: tap)
+		if vifType := viper.GetString("sniff.vif_type"); vifType != "" {
+			cfg.Type = vifType
+		}
+
+		// Read buffer size from config (default: 4096)
+		if bufferSize := viper.GetInt("sniff.vif_buffer_size"); bufferSize > 0 {
+			cfg.BufferSize = bufferSize
+		}
+
+		// Read network namespace from config (default: empty)
+		if netNS := viper.GetString("sniff.vif_netns"); netNS != "" {
+			cfg.NetNS = netNS
+		}
+
+		// Read privilege dropping user from config (default: empty)
+		if dropPrivUser := viper.GetString("sniff.vif_drop_privileges"); dropPrivUser != "" {
+			cfg.DropPrivilegesUser = dropPrivUser
+		}
+
 		var err error
 		globalVifMgr, err = vinterface.NewManager(cfg)
 		if err != nil {

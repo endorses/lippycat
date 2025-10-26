@@ -458,6 +458,60 @@ lc process --listen 0.0.0.0:50051 \
 wireshark -i lc-central
 ```
 
+## Known Limitations
+
+### Timestamp Preservation
+
+**Limitation:** Original packet timestamps are not preserved when injecting packets into TAP/TUN interfaces.
+
+**Technical Details:**
+- When packets are written to `/dev/net/tun`, the Linux kernel assigns them the **current time** as their timestamp
+- There is no standard mechanism in Linux to set custom timestamps for injected packets through TAP/TUN devices
+- Tools capturing from the virtual interface (tcpdump, Wireshark) will see "now" timestamps, not the original capture timestamps
+- This applies to both live capture and PCAP replay modes
+
+**Impact:**
+- **PCAP replay:** When replaying a PCAP file with `lc sniff voip -r capture.pcap --virtual-interface`, timestamps in the output will reflect the replay time, not the original capture time
+- **Distributed mode:** Timestamps reflect when packets arrive at the processor, not when they were captured by hunters
+- **Timing analysis:** Inter-packet timing is preserved (via `--vif-replay-timing`), but absolute timestamps are not
+
+**Workarounds:**
+
+1. **Use timing replay mode** for inter-packet delay preservation:
+   ```bash
+   # Preserves relative timing between packets (tcpreplay-like)
+   sudo lc sniff voip -r capture.pcap --virtual-interface --vif-replay-timing
+   ```
+
+2. **Write PCAP directly** instead of using virtual interface:
+   ```bash
+   # Preserves original timestamps in PCAP file
+   lc sniff voip -r original.pcap --sipuser alice -w filtered.pcap
+   # Then analyze filtered.pcap in Wireshark (original timestamps intact)
+   ```
+
+3. **Use lippycat's built-in PCAP writer** in distributed mode:
+   ```bash
+   # Processor writes PCAP with hunter timestamps preserved
+   lc process --listen 0.0.0.0:50051 -w aggregated.pcap
+   ```
+
+**Why this is a kernel limitation:**
+- TAP/TUN interfaces are designed for **packet injection**, not **packet replay with historical timestamps**
+- The kernel's `struct sk_buff` (socket buffer) timestamp is set by the network driver/stack based on packet arrival time
+- SO_TIMESTAMPING socket options control **how** timestamps are generated (hardware/software), but not the timestamp **value**
+- PCAP-NG enhanced block types cannot be used with TAP/TUN because:
+  - TAP/TUN interfaces work at the kernel network stack level (raw packets)
+  - PCAP-NG is a **file format** used by packet capture tools, not a network interface protocol
+  - There's no mechanism to embed PCAP-NG metadata blocks into kernel network packets
+
+**Future Research:**
+- Linux kernel patches to support custom timestamp injection (would require kernel changes)
+- AF_XDP-based alternatives with custom timestamp control (experimental)
+- User-space packet processing frameworks (DPDK, netmap) with timestamp control
+
+**Recommendation:** If timestamp preservation is critical for your use case, use lippycat's PCAP file writing (`-w` flag) instead of the virtual interface. The virtual interface is best suited for real-time monitoring and tool integration where relative timing (not absolute timestamps) is sufficient.
+
 ## Future Enhancements (Phase 3)
 
 - **Network namespace isolation:** Create interface in isolated namespace

@@ -230,6 +230,11 @@ go test ./internal/pkg/vinterface/...
 2. **No filtering:** Packet filtering happens at capture/analysis layer (not in vinterface)
 3. **No rate limiting:** Phase 3 feature
 4. **Single interface per process:** Multi-interface support in Phase 3
+5. **No timestamp preservation:** Original packet timestamps are not preserved when injecting into TAP/TUN
+   - Kernel assigns current time to injected packets (no mechanism to override)
+   - Tools see "now" timestamps, not original capture timestamps
+   - Inter-packet timing can be preserved via TimingReplayer, but absolute timestamps cannot
+   - **Workaround:** Use PCAP file writing (`-w` flag) to preserve original timestamps
 
 ## Future Enhancements (Phase 3)
 

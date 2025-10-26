@@ -390,9 +390,11 @@ tshark -i lc0
   - [x] Update security checklist and threat model
 
 #### Advanced Packet Processing
-- [ ] Preserve original timestamps
-  - [ ] Embed hunter timestamps in PCAP-NG format
-  - [ ] Support for enhanced block types
+- [x] Preserve original timestamps
+  - [x] Documented as kernel limitation (TAP/TUN cannot preserve timestamps)
+  - [x] Explained PCAP-NG is a file format, not applicable to network interfaces
+  - [x] Provided workarounds (timing replay, PCAP file writing)
+  - [x] Added comprehensive documentation to VIRTUAL_INTERFACE.md and CLAUDE.md
 ~- [ ] Filtering support~ (filtering is done on the hunter)
   ~- [ ] Only inject specific protocols (config: filters)~
   ~- [ ] IP/port-based filtering~

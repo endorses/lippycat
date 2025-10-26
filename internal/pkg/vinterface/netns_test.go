@@ -188,7 +188,7 @@ func TestNamespacePermissions(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNetNSPermissionDenied)
 
 	// Attempt to delete namespace without privileges
-	err = DeleteNamespace("test-no-perms")
+	_ = DeleteNamespace("test-no-perms")
 	// Should not error if namespace doesn't exist
 	// But if it does exist, should get permission denied
 }

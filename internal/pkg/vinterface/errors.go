@@ -32,4 +32,10 @@ var (
 
 	// ErrShuttingDown indicates the manager is shutting down.
 	ErrShuttingDown = errors.New("manager is shutting down")
+
+	// ErrNetNSNotFound indicates the network namespace doesn't exist.
+	ErrNetNSNotFound = errors.New("network namespace not found")
+
+	// ErrNetNSPermissionDenied indicates insufficient privileges for namespace operations.
+	ErrNetNSPermissionDenied = errors.New("permission denied: CAP_NET_ADMIN and CAP_SYS_ADMIN required for namespace operations")
 )

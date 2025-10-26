@@ -296,6 +296,11 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 			cfg.BufferSize = bufferSize
 		}
 
+		// Read network namespace from config (default: empty)
+		if netNS := viper.GetString("sniff.vif_netns"); netNS != "" {
+			cfg.NetNS = netNS
+		}
+
 		var err error
 		vifMgr, err = vinterface.NewManager(cfg)
 		if err != nil {

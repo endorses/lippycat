@@ -61,6 +61,7 @@ type Config struct {
 	VirtualInterfaceName string // Virtual interface name
 	VirtualInterfaceType string // Virtual interface type (tap/tun)
 	VifBufferSize        int    // Virtual interface buffer size
+	VifNetNS             string // Network namespace for interface isolation
 }
 
 // Processor represents a processor node
@@ -176,6 +177,11 @@ func New(config Config) (*Processor, error) {
 		// Apply buffer size from config (default: 4096)
 		if config.VifBufferSize > 0 {
 			cfg.BufferSize = config.VifBufferSize
+		}
+
+		// Apply network namespace from config (default: empty)
+		if config.VifNetNS != "" {
+			cfg.NetNS = config.VifNetNS
 		}
 
 		mgr, err := vinterface.NewManager(cfg)

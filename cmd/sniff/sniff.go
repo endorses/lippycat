@@ -34,6 +34,7 @@ var (
 	vifReplayTiming      bool
 	vifType              string
 	vifBufferSize        int
+	vifNetNS             string
 )
 
 func sniff(cmd *cobra.Command, args []string) {
@@ -61,6 +62,9 @@ func sniff(cmd *cobra.Command, args []string) {
 	if cmd.Flags().Changed("vif-buffer-size") {
 		viper.Set("sniff.vif_buffer_size", vifBufferSize)
 	}
+	if cmd.Flags().Changed("vif-netns") {
+		viper.Set("sniff.vif_netns", vifNetNS)
+	}
 
 	if readFile == "" {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
@@ -86,6 +90,7 @@ func init() {
 	SniffCmd.PersistentFlags().BoolVar(&vifReplayTiming, "vif-replay-timing", false, "Respect original packet timing from PCAP (like tcpreplay)")
 	SniffCmd.PersistentFlags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
 	SniffCmd.PersistentFlags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size (packets)")
+	SniffCmd.PersistentFlags().StringVar(&vifNetNS, "vif-netns", "", "Network namespace for interface isolation (requires CAP_SYS_ADMIN)")
 
 	_ = viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("sniff.quiet", SniffCmd.PersistentFlags().Lookup("quiet"))
@@ -98,4 +103,5 @@ func init() {
 	_ = viper.BindPFlag("sniff.vif_replay_timing", SniffCmd.PersistentFlags().Lookup("vif-replay-timing"))
 	_ = viper.BindPFlag("sniff.vif_type", SniffCmd.PersistentFlags().Lookup("vif-type"))
 	_ = viper.BindPFlag("sniff.vif_buffer_size", SniffCmd.PersistentFlags().Lookup("vif-buffer-size"))
+	_ = viper.BindPFlag("sniff.vif_netns", SniffCmd.PersistentFlags().Lookup("vif-netns"))
 }

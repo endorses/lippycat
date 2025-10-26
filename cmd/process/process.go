@@ -68,6 +68,7 @@ var (
 	virtualInterfaceName string
 	vifType              string
 	vifBufferSize        int
+	vifNetNS             string
 )
 
 func init() {
@@ -109,6 +110,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
 	ProcessCmd.Flags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
 	ProcessCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size (packets)")
+	ProcessCmd.Flags().StringVar(&vifNetNS, "vif-netns", "", "Network namespace for interface isolation (requires CAP_SYS_ADMIN)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -137,6 +139,7 @@ func init() {
 	_ = viper.BindPFlag("processor.vif_name", ProcessCmd.Flags().Lookup("vif-name"))
 	_ = viper.BindPFlag("processor.vif_type", ProcessCmd.Flags().Lookup("vif-type"))
 	_ = viper.BindPFlag("processor.vif_buffer_size", ProcessCmd.Flags().Lookup("vif-buffer-size"))
+	_ = viper.BindPFlag("processor.vif_netns", ProcessCmd.Flags().Lookup("vif-netns"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -222,6 +225,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VirtualInterfaceName: getStringConfig("processor.vif_name", virtualInterfaceName),
 		VirtualInterfaceType: getStringConfig("processor.vif_type", vifType),
 		VifBufferSize:        getIntConfig("processor.vif_buffer_size", vifBufferSize),
+		VifNetNS:             getStringConfig("processor.vif_netns", vifNetNS),
 	}
 
 	// Security check: require explicit opt-in to insecure mode

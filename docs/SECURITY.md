@@ -1133,25 +1133,68 @@ sudo chmod 660 /dev/net/tun
 sudo usermod -aG netdev $USER
 ```
 
-#### Option 2: Network Namespace Isolation (Phase 3)
+#### Option 2: Network Namespace Isolation (Production-ready)
 
-Future enhancement: Create virtual interfaces in isolated network namespaces.
+Create virtual interfaces in isolated network namespaces for enhanced security.
 
 ```bash
 # Create namespace
-sudo ip netns add lippycat-vif
+sudo ip netns add lippycat-isolated
 
 # Run lippycat with interface in namespace
-sudo lc sniff voip -i eth0 --virtual-interface --vif-namespace lippycat-vif
+sudo lc sniff voip -i eth0 --virtual-interface --vif-netns lippycat-isolated
 
 # Only tools in the namespace can access lc0
-sudo ip netns exec lippycat-vif wireshark -i lc0
+sudo ip netns exec lippycat-isolated wireshark -i lc0
 ```
 
 **Benefits:**
 - Complete isolation from host network stack
-- Prevents unauthorized sniffing
+- Prevents unauthorized sniffing of virtual interface traffic
 - Container-like security model
+- Interface invisible to host network tools
+- Additional layer of defense against privilege escalation
+
+**Requirements:**
+- `CAP_NET_ADMIN` + `CAP_SYS_ADMIN` capabilities (or run as root)
+- Network namespace must exist before starting lippycat
+
+**Creating persistent namespaces:**
+
+```bash
+# Create namespace (persists until deleted)
+sudo ip netns add lippycat-isolated
+
+# List namespaces
+sudo ip netns list
+
+# Access namespace
+sudo ip netns exec lippycat-isolated bash
+
+# Delete namespace
+sudo ip netns delete lippycat-isolated
+```
+
+**Configuration file support:**
+
+```yaml
+# ~/.config/lippycat/config.yaml
+sniff:
+  virtual_interface: true
+  vif_name: lc0
+  vif_netns: lippycat-isolated
+
+processor:
+  virtual_interface: true
+  vif_name: lc0
+  vif_netns: lippycat-isolated
+```
+
+**Security implications:**
+- Interface is completely isolated from the default namespace
+- Only processes running in the target namespace can access the interface
+- Namespace provides additional containment boundary
+- Recommended for production deployments with strict security requirements
 
 ### Packet Integrity
 

@@ -374,10 +374,10 @@ tshark -i lc0
 ### Tasks
 
 #### Security Enhancements
-- [ ] Network namespace isolation
-  - [ ] Create interface in isolated namespace
-  - [ ] Document usage with `ip netns`
-  - [ ] Prevent unauthorized sniffing
+- [x] Network namespace isolation
+  - [x] Create interface in isolated namespace
+  - [x] Document usage with `ip netns`
+  - [x] Prevent unauthorized sniffing
 - [ ] Privilege dropping
   - [ ] Create interface with CAP_NET_ADMIN
   - [ ] Drop privileges after interface creation

@@ -83,6 +83,12 @@ type Config struct {
 	// MTU is the Maximum Transmission Unit for the interface.
 	// Default: 1500 bytes
 	MTU int
+
+	// NetNS is the network namespace name to create the interface in.
+	// If empty, the interface is created in the default namespace.
+	// Example: "lippycat-isolated"
+	// Note: Requires CAP_NET_ADMIN and CAP_SYS_ADMIN capabilities.
+	NetNS string
 }
 
 // DefaultConfig returns a Config with sensible defaults.

@@ -85,17 +85,26 @@ func (m *linuxManager) Start() error {
 		return ErrAlreadyStarted
 	}
 
-	logger.Info("Starting virtual interface", "name", m.config.Name, "type", m.config.Type)
+	if m.config.NetNS != "" {
+		logger.Info("Starting virtual interface",
+			"name", m.config.Name,
+			"type", m.config.Type,
+			"namespace", m.config.NetNS)
+	} else {
+		logger.Info("Starting virtual interface",
+			"name", m.config.Name,
+			"type", m.config.Type)
+	}
 
-	// Create TUN/TAP device
-	if err := m.createInterface(); err != nil {
+	// Create TUN/TAP device (with namespace support)
+	if err := m.createInterfaceInNamespace(); err != nil {
 		m.started.Store(false)
 		return fmt.Errorf("failed to create interface: %w", err)
 	}
 
-	// Bring interface up
-	if err := m.bringUp(); err != nil {
-		m.cleanup()
+	// Bring interface up (with namespace support)
+	if err := m.bringUpInNamespace(); err != nil {
+		m.cleanupInNamespace()
 		m.started.Store(false)
 		return fmt.Errorf("failed to bring interface up: %w", err)
 	}
@@ -282,8 +291,8 @@ func (m *linuxManager) Shutdown() error {
 	close(m.queueStop)
 	m.queueWg.Wait()
 
-	// Cleanup interface
-	m.cleanup()
+	// Cleanup interface (with namespace support)
+	m.cleanupInNamespace()
 
 	logger.Info("Virtual interface shutdown complete", "name", m.config.Name,
 		"packets_injected", m.stats.packetsInjected.Load(),

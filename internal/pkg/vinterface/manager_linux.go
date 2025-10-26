@@ -47,6 +47,9 @@ type linuxManager struct {
 	shutdownMu sync.RWMutex
 	shutdown   bool
 
+	// Buffer pool for packet data in queue
+	bufferPool sync.Pool
+
 	// Statistics
 	stats struct {
 		packetsInjected  atomic.Uint64
@@ -71,6 +74,15 @@ func NewManager(config Config) (Manager, error) {
 		config:    config,
 		queue:     make(chan []byte, config.BufferSize),
 		queueStop: make(chan struct{}),
+	}
+
+	// Initialize buffer pool for packet buffers
+	m.bufferPool = sync.Pool{
+		New: func() interface{} {
+			// Allocate 1600 bytes (typical MTU size)
+			buf := make([]byte, 0, 1600)
+			return &buf
+		},
 	}
 
 	return m, nil
@@ -244,12 +256,27 @@ func (m *linuxManager) InjectPacketBatch(packets []types.PacketDisplay) error {
 			continue
 		}
 
+		// Get buffer from pool and copy frame data
+		bufPtr := m.bufferPool.Get().(*[]byte)
+		buf := *bufPtr
+
+		// Ensure buffer has enough capacity
+		if cap(buf) < len(frame) {
+			// Buffer too small, allocate new one
+			buf = make([]byte, len(frame))
+		} else {
+			buf = buf[:len(frame)]
+		}
+		copy(buf, frame)
+
 		// Non-blocking send to queue
 		select {
-		case m.queue <- frame:
+		case m.queue <- buf:
 		default:
-			// Queue full, drop packet
+			// Queue full, drop packet and return buffer to pool
 			m.stats.packetsDropped.Add(1)
+			*bufPtr = buf[:0] // Reset length
+			m.bufferPool.Put(bufPtr)
 		}
 	}
 
@@ -272,6 +299,11 @@ func (m *linuxManager) injectionWorker() {
 				m.stats.bytesInjected.Add(uint64(len(packet)))
 				m.stats.lastInjection.Store(time.Now().UnixNano())
 			}
+
+			// Return buffer to pool after writing
+			// Reset length to 0 but keep capacity
+			packet = packet[:0]
+			m.bufferPool.Put(&packet)
 		}
 	}
 }

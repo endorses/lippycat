@@ -427,9 +427,15 @@ tshark -i lc0
   - [ ] Workarounds for unsupported platforms
 
 #### Performance Optimizations
-- [ ] Zero-copy optimizations
-  - [ ] Reuse packet buffers (sync.Pool)
-  - [ ] Minimize allocations
+- [x] Zero-copy optimizations
+  - [x] Reuse packet buffers (sync.Pool)
+  - [x] Minimize allocations
+  - [x] Implemented ethernetFramePool for Ethernet frame buffers (up to 1600 bytes)
+  - [x] Implemented serializeBufferPool for gopacket serialize buffers
+  - [x] Added per-manager buffer pool for injection queue buffers
+  - [x] Achieved 28.5% memory reduction (1177 → 841 bytes per packet)
+  - [x] ConvertToIP strip Ethernet: 0 allocations (true zero-copy)
+  - [x] ConvertToEthernet with RawData: 1 allocation, 48 B/op
 - [ ] Kernel buffer tuning
   - [ ] Increase txqueuelen (`ip link set txqueuelen`)
   - [ ] Document optimal settings

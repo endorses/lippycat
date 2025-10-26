@@ -4,10 +4,29 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+)
+
+// Buffer pools for zero-copy optimizations
+var (
+	// ethernetFramePool reuses buffers for Ethernet frames (up to 1600 bytes)
+	ethernetFramePool = sync.Pool{
+		New: func() interface{} {
+			buf := make([]byte, 1600)
+			return &buf
+		},
+	}
+
+	// serializeBufferPool reuses gopacket serialize buffers
+	serializeBufferPool = sync.Pool{
+		New: func() interface{} {
+			return gopacket.NewSerializeBuffer()
+		},
+	}
 )
 
 // ConvertToEthernet converts a PacketDisplay to a raw Ethernet frame.
@@ -83,6 +102,7 @@ func extractIPPacket(rawData []byte, linkType layers.LinkType) ([]byte, error) {
 }
 
 // prependEthernetHeader adds an Ethernet header to raw IP packet data.
+// Uses buffer pool to minimize allocations.
 func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, error) {
 	// If already has Ethernet header, return as-is
 	if linkType == layers.LinkTypeEthernet && len(rawData) >= 14 {
@@ -99,6 +119,21 @@ func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, er
 		ipPacket = rawData[16:]
 	}
 
+	frameLen := 14 + len(ipPacket)
+
+	// Get buffer from pool or allocate new one if too large
+	var frame []byte
+	var poolBuf *[]byte
+	if frameLen <= 1600 {
+		poolBuf = ethernetFramePool.Get().(*[]byte)
+		frame = (*poolBuf)[:frameLen]
+		// Note: Caller must copy the returned buffer if they need to retain it
+		// after the function returns, as the buffer will be returned to the pool
+	} else {
+		// Frame too large for pool, allocate directly
+		frame = make([]byte, frameLen)
+	}
+
 	// Determine EtherType from IP version
 	etherType := layers.EthernetTypeIPv4
 	if len(ipPacket) > 0 {
@@ -107,9 +142,6 @@ func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, er
 			etherType = layers.EthernetTypeIPv6
 		}
 	}
-
-	// Create Ethernet header (14 bytes)
-	frame := make([]byte, 14+len(ipPacket))
 
 	// Destination MAC: 00:00:00:00:00:00 (wildcard)
 	// Source MAC: 02:00:00:00:00:01 (locally administered unicast)
@@ -132,11 +164,21 @@ func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, er
 	// Copy IP payload
 	copy(frame[14:], ipPacket)
 
+	// For pooled buffers, we need to make a copy since the buffer will be reused
+	// This is still more efficient than allocating from scratch
+	if poolBuf != nil {
+		result := make([]byte, frameLen)
+		copy(result, frame)
+		ethernetFramePool.Put(poolBuf)
+		return result, nil
+	}
+
 	return frame, nil
 }
 
 // reconstructIPPacket builds an IP packet from PacketDisplay fields (without Ethernet header).
 // This is a fallback for TUN interfaces when RawData is not available.
+// Uses buffer pool to minimize allocations.
 func reconstructIPPacket(pkt *types.PacketDisplay) ([]byte, error) {
 	// Parse IP addresses
 	srcIP := net.ParseIP(pkt.SrcIP)
@@ -148,8 +190,13 @@ func reconstructIPPacket(pkt *types.PacketDisplay) ([]byte, error) {
 	// Determine if IPv4 or IPv6
 	isIPv6 := srcIP.To4() == nil
 
-	// Create packet buffer
-	buf := gopacket.NewSerializeBuffer()
+	// Get serialize buffer from pool
+	buf := serializeBufferPool.Get().(gopacket.SerializeBuffer)
+	defer func() {
+		buf.Clear()
+		serializeBufferPool.Put(buf)
+	}()
+
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,
@@ -260,6 +307,7 @@ func reconstructIPPacket(pkt *types.PacketDisplay) ([]byte, error) {
 
 // reconstructPacket builds a complete Ethernet frame from PacketDisplay fields.
 // This is a fallback when RawData is not available.
+// Uses buffer pool to minimize allocations.
 func reconstructPacket(pkt *types.PacketDisplay) ([]byte, error) {
 	// Parse IP addresses
 	srcIP := net.ParseIP(pkt.SrcIP)
@@ -271,8 +319,13 @@ func reconstructPacket(pkt *types.PacketDisplay) ([]byte, error) {
 	// Determine if IPv4 or IPv6
 	isIPv6 := srcIP.To4() == nil
 
-	// Create packet buffer
-	buf := gopacket.NewSerializeBuffer()
+	// Get serialize buffer from pool
+	buf := serializeBufferPool.Get().(gopacket.SerializeBuffer)
+	defer func() {
+		buf.Clear()
+		serializeBufferPool.Put(buf)
+	}()
+
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,
 		ComputeChecksums: true,

@@ -34,6 +34,17 @@ func injectPacketToVirtualInterface(pkt capture.PacketInfo) {
 
 	// Inject the packet
 	display := capture.ConvertPacketToDisplay(pkt)
+
+	// Preserve raw packet data for virtual interface injection
+	// (normally nil to save memory, but required for packet reconstruction)
+	display.RawData = pkt.Packet.Data()
+	display.LinkType = pkt.LinkType
+
+	logger.Debug("Injecting packet to virtual interface",
+		"raw_data_len", len(display.RawData),
+		"link_type", display.LinkType,
+		"packet_len", pkt.Packet.Metadata().Length)
+
 	if err := globalVifMgr.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
 		logger.Debug("Failed to inject VoIP packet into virtual interface", "error", err)
 	}

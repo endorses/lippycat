@@ -108,7 +108,7 @@ func init() {
 	ProcessCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
 	ProcessCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
 	ProcessCmd.Flags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
-	ProcessCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 4096, "Injection queue buffer size (packets)")
+	ProcessCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size (packets)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))

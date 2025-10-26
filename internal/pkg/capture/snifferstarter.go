@@ -424,6 +424,9 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 			}
 
 			display := ConvertPacketToDisplay(p)
+			// Preserve raw packet data for virtual interface injection
+			display.RawData = p.Packet.Data()
+			display.LinkType = p.LinkType
 			if err := vifMgr.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
 				logger.Debug("Failed to inject packet to virtual interface", "error", err)
 			}

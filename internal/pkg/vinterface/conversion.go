@@ -58,20 +58,28 @@ func ConvertToIP(pkt *types.PacketDisplay) ([]byte, error) {
 	return reconstructIPPacket(pkt)
 }
 
-// extractIPPacket extracts the IP packet from raw data, stripping Ethernet header if present.
+// extractIPPacket extracts the IP packet from raw data, stripping Ethernet or LinuxSLL header if present.
 func extractIPPacket(rawData []byte, linkType layers.LinkType) ([]byte, error) {
-	// If it's already an IP packet (no Ethernet header), return as-is
-	if linkType != layers.LinkTypeEthernet {
-		return rawData, nil
+	// Handle LinuxSLL (Linux cooked capture) - strip 16-byte SLL header
+	if linkType == layers.LinkTypeLinuxSLL {
+		if len(rawData) < 16 {
+			return nil, fmt.Errorf("packet too short to contain LinuxSLL header: %d bytes", len(rawData))
+		}
+		// Return IP packet (everything after SLL header)
+		return rawData[16:], nil
 	}
 
-	// If it has an Ethernet header, strip it (14 bytes)
-	if len(rawData) < 14 {
-		return nil, fmt.Errorf("packet too short to contain Ethernet header: %d bytes", len(rawData))
+	// Handle Ethernet - strip 14-byte Ethernet header
+	if linkType == layers.LinkTypeEthernet {
+		if len(rawData) < 14 {
+			return nil, fmt.Errorf("packet too short to contain Ethernet header: %d bytes", len(rawData))
+		}
+		// Return IP packet (everything after Ethernet header)
+		return rawData[14:], nil
 	}
 
-	// Return IP packet (everything after Ethernet header)
-	return rawData[14:], nil
+	// For other link types, assume it's already an IP packet
+	return rawData, nil
 }
 
 // prependEthernetHeader adds an Ethernet header to raw IP packet data.
@@ -81,17 +89,27 @@ func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, er
 		return rawData, nil
 	}
 
+	// Handle LinuxSLL (Linux cooked capture) - strip 16-byte SLL header
+	ipPacket := rawData
+	if linkType == layers.LinkTypeLinuxSLL {
+		if len(rawData) < 16 {
+			return nil, fmt.Errorf("packet too short for LinuxSLL header: %d bytes", len(rawData))
+		}
+		// Skip 16-byte SLL header to get to IP layer
+		ipPacket = rawData[16:]
+	}
+
 	// Determine EtherType from IP version
 	etherType := layers.EthernetTypeIPv4
-	if len(rawData) > 0 {
-		version := rawData[0] >> 4
+	if len(ipPacket) > 0 {
+		version := ipPacket[0] >> 4
 		if version == 6 {
 			etherType = layers.EthernetTypeIPv6
 		}
 	}
 
 	// Create Ethernet header (14 bytes)
-	frame := make([]byte, 14+len(rawData))
+	frame := make([]byte, 14+len(ipPacket))
 
 	// Destination MAC: 00:00:00:00:00:00 (wildcard)
 	// Source MAC: 02:00:00:00:00:01 (locally administered unicast)
@@ -112,7 +130,7 @@ func prependEthernetHeader(rawData []byte, linkType layers.LinkType) ([]byte, er
 	binary.BigEndian.PutUint16(frame[12:14], uint16(etherType))
 
 	// Copy IP payload
-	copy(frame[14:], rawData)
+	copy(frame[14:], ipPacket)
 
 	return frame, nil
 }

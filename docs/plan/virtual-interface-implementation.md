@@ -300,11 +300,11 @@ tshark -i lc0
   - [x] CPU and memory overhead - **1177 bytes per packet**
 
 #### Tool Integration Validation
-- [ ] Test with tcpdump
-  - [ ] Verify packet capture
-  - [ ] Validate filters work correctly
-- [ ] Test with Wireshark
-  - [ ] Live capture on lc0
+- [x] Test with tcpdump
+  - [x] Verify packet capture
+  - [x] Validate filters work correctly
+- [x] Test with Wireshark
+  - [x] Live capture on lc0
   - [ ] Verify protocol dissectors work
   - [ ] Check for packet drops in Wireshark stats
 - [ ] Test with Snort/Suricata (if available)

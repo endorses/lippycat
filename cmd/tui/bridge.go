@@ -172,14 +172,18 @@ func getByteBuffer() *[]byte {
 // Uses intelligent sampling and throttling to handle high packet rates
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program) {
 	const (
-		targetPacketsPerSecond = 200                    // Target display rate
+		targetPacketsPerSecond = 1000                   // Target display rate (increased for bulk transfers)
 		batchInterval          = 100 * time.Millisecond // Batch interval
+		rateWindowSize         = 2 * time.Second        // Rolling window for rate calculation (react quickly)
 	)
 
 	batch := make([]components.PacketDisplay, 0, 100)
 	packetCount := int64(0)
 	displayedCount := int64(0)
-	startTime := time.Now()
+
+	// Rolling window for recent packet rate calculation
+	var recentPackets []time.Time
+	lastRateCheck := time.Now()
 
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
@@ -193,14 +197,34 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		}
 	}
 
-	// Calculate sampling ratio based on recent packet rate
+	// Calculate sampling ratio based on RECENT packet rate (rolling 2s window)
+	// This allows quick switching between fast/full mode
 	getSamplingRatio := func() float64 {
-		elapsed := time.Since(startTime).Seconds()
-		if elapsed < 1.0 {
-			return 1.0 // No sampling for first second
+		now := time.Now()
+
+		// Update rolling window every 100ms to avoid overhead
+		if now.Sub(lastRateCheck) > 100*time.Millisecond {
+			// Remove packets older than window
+			cutoff := now.Add(-rateWindowSize)
+			i := 0
+			for i < len(recentPackets) && recentPackets[i].Before(cutoff) {
+				i++
+			}
+			recentPackets = recentPackets[i:]
+			lastRateCheck = now
 		}
 
-		currentRate := float64(packetCount) / elapsed
+		// Calculate rate from rolling window
+		if len(recentPackets) < 10 {
+			return 1.0 // Not enough data, use full mode
+		}
+
+		windowDuration := now.Sub(recentPackets[0]).Seconds()
+		if windowDuration < 0.1 {
+			return 1.0 // Too short, use full mode
+		}
+
+		currentRate := float64(len(recentPackets)) / windowDuration
 		if currentRate <= float64(targetPacketsPerSecond) {
 			return 1.0 // Show all packets if under target
 		}
@@ -224,6 +248,9 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			packetCount++
 
+			// Track packet timestamp for rolling window rate calculation
+			recentPackets = append(recentPackets, time.Now())
+
 			// Adaptive sampling based on load
 			samplingRatio := getSamplingRatio()
 
@@ -231,11 +258,11 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			var packet components.PacketDisplay
 			if samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1) {
 				// This packet should be displayed
-				if samplingRatio < 0.5 {
-					// High load - use fast conversion
+				if samplingRatio < 0.2 {
+					// Very high load - use fast conversion (only when rate > 5000 pps)
 					packet = convertPacketFast(pktInfo)
 				} else {
-					// Normal load - full conversion
+					// Normal/moderate load - full conversion with raw data
 					packet = convertPacket(pktInfo)
 				}
 				batch = append(batch, packet)

@@ -102,6 +102,10 @@ type Model struct {
 	lastDetailsPanelUpdate     time.Time     // Last time details panel was updated
 	detailsPanelUpdateInterval time.Duration // Minimum interval between updates (e.g., 50ms = 20 Hz)
 
+	// Performance optimization - throttle packet list updates during high packet rate
+	lastPacketListUpdate     time.Time     // Last time packet list was updated
+	packetListUpdateInterval time.Duration // Minimum interval between updates (e.g., 100ms = 10 Hz)
+
 	// Call aggregation (offline and live modes)
 	offlineCallAggregator *LocalCallAggregator // Call aggregator for offline PCAP analysis
 	liveCallAggregator    *LocalCallAggregator // Call aggregator for live capture
@@ -205,7 +209,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		captureMode:                initialMode,
 		nodesFilePath:              nodesFilePath,
 		insecure:                   insecure,
-		detailsPanelUpdateInterval: 50 * time.Millisecond, // 20 Hz throttle (imperceptible to user)
+		detailsPanelUpdateInterval: 50 * time.Millisecond,  // 20 Hz throttle (imperceptible to user)
+		packetListUpdateInterval:   100 * time.Millisecond, // 10 Hz throttle for packet list (prevents freeze)
 	}
 }
 

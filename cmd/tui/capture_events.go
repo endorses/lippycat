@@ -68,18 +68,22 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 			m.updateStatistics(packet)
 		}
 
-		// Update packet list immediately for smooth streaming
-		if !m.packetStore.HasFilter() {
-			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-		} else {
-			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+		// Update packet list with moderate throttling for smooth display
+		// Throttle to 10 Hz (100ms) to balance responsiveness with performance
+		now := time.Now()
+		if now.Sub(m.lastPacketListUpdate) >= m.packetListUpdateInterval {
+			if !m.packetStore.HasFilter() {
+				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+			} else {
+				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+			}
+			m.lastPacketListUpdate = now
 		}
 
 		// Update details panel if showing details (throttled to reduce CPU usage)
 		// Only update at configured interval (default 20 Hz) to avoid rendering
 		// expensive hex dumps on every packet during high packet rate
 		if m.uiState.ShowDetails {
-			now := time.Now()
 			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
 				m.updateDetailsPanel()
 				m.lastDetailsPanelUpdate = now
@@ -136,18 +140,22 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		// Update statistics (lightweight)
 		m.updateStatistics(packet)
 
-		// Update packet list immediately for smooth streaming
-		if !m.packetStore.HasFilter() {
-			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-		} else {
-			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+		// Update packet list with moderate throttling for smooth display
+		// Throttle to 10 Hz (100ms) to balance responsiveness with performance
+		now := time.Now()
+		if now.Sub(m.lastPacketListUpdate) >= m.packetListUpdateInterval {
+			if !m.packetStore.HasFilter() {
+				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+			} else {
+				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+			}
+			m.lastPacketListUpdate = now
 		}
 
 		// Update details panel if showing details (throttled to reduce CPU usage)
 		// Only update at configured interval (default 20 Hz) to avoid rendering
 		// expensive hex dumps on every packet during high packet rate
 		if m.uiState.ShowDetails {
-			now := time.Now()
 			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
 				m.updateDetailsPanel()
 				m.lastDetailsPanelUpdate = now

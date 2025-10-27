@@ -41,6 +41,18 @@ service ManagementService {
     // Returns a stream of topology updates when hunters/processors connect/disconnect
     // Replaces polling GetTopology() for real-time monitoring
     rpc SubscribeTopology(TopologySubscribeRequest) returns (stream TopologyUpdate);
+
+    // UpdateFilterOnProcessor adds or modifies a filter on a specific processor
+    // Used for multi-level management to target filters to specific processors in the hierarchy
+    rpc UpdateFilterOnProcessor(ProcessorFilterRequest) returns (FilterUpdateResult);
+
+    // DeleteFilterOnProcessor removes a filter from a specific processor
+    // Used for multi-level management to remove filters from specific processors in the hierarchy
+    rpc DeleteFilterOnProcessor(ProcessorFilterDeleteRequest) returns (FilterUpdateResult);
+
+    // GetFiltersFromProcessor retrieves filters from a specific processor
+    // Used for multi-level management to query filter state in the hierarchy
+    rpc GetFiltersFromProcessor(ProcessorFilterQuery) returns (FilterResponse);
 }
 
 // HunterRegistration sent when hunter first connects
@@ -302,6 +314,33 @@ message FilterUpdateResult {
 message FilterDeleteRequest {
     // Filter ID to delete
     string filter_id = 1;
+}
+
+// ProcessorFilterRequest to update filter on a specific processor
+message ProcessorFilterRequest {
+    // Target processor identifier
+    string processor_id = 1;
+
+    // Filter to add or modify
+    Filter filter = 2;
+}
+
+// ProcessorFilterDeleteRequest to delete filter from a specific processor
+message ProcessorFilterDeleteRequest {
+    // Target processor identifier
+    string processor_id = 1;
+
+    // Filter ID to delete
+    string filter_id = 2;
+}
+
+// ProcessorFilterQuery to retrieve filters from a specific processor
+message ProcessorFilterQuery {
+    // Target processor identifier
+    string processor_id = 1;
+
+    // Optional: filter by hunter ID on that processor
+    string hunter_id = 2;
 }
 
 // StatusRequest to get hunter status (for TUI)

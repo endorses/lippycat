@@ -41,11 +41,11 @@ TUI → Processor A (root)
 ### Tasks
 
 #### 1.1
-- [ ] Define `SubscribeTopology()` RPC in `api/proto/management.proto`
-  - [ ] Add `TopologySubscribeRequest` message
-  - [ ] Add `TopologyUpdate` message with oneof update types
-  - [ ] Add `TopologyUpdateType` enum
-  - [ ] Add event messages: `HunterConnectedEvent`, `HunterDisconnectedEvent`, etc.
+- [x] Define `SubscribeTopology()` RPC in `api/proto/management.proto`
+  - [x] Add `TopologySubscribeRequest` message
+  - [x] Add `TopologyUpdate` message with oneof update types
+  - [x] Add `TopologyUpdateType` enum
+  - [x] Add event messages: `HunterConnectedEvent`, `HunterDisconnectedEvent`, etc.
 
 #### 1.2
 - [ ] Define processor-scoped management RPCs in `api/proto/management.proto`

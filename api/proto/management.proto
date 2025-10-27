@@ -36,6 +36,11 @@ service ManagementService {
     // GetTopology retrieves the complete downstream topology (processors and hunters)
     // Recursively queries downstream processors to build full hierarchy
     rpc GetTopology(TopologyRequest) returns (TopologyResponse);
+
+    // SubscribeTopology subscribes to real-time topology changes
+    // Returns a stream of topology updates when hunters/processors connect/disconnect
+    // Replaces polling GetTopology() for real-time monitoring
+    rpc SubscribeTopology(TopologySubscribeRequest) returns (stream TopologyUpdate);
 }
 
 // HunterRegistration sent when hunter first connects
@@ -446,4 +451,97 @@ message ProcessorNode {
 
     // Downstream processors forwarding to this processor
     repeated ProcessorNode downstream_processors = 6;
+}
+
+// TopologySubscribeRequest to subscribe to topology updates
+message TopologySubscribeRequest {
+    // Include downstream processor topology changes (default: true)
+    bool include_downstream = 1;
+
+    // Client identifier for logging/tracking
+    string client_id = 2;
+}
+
+// TopologyUpdate represents a real-time topology change event
+message TopologyUpdate {
+    // Update type
+    TopologyUpdateType update_type = 1;
+
+    // Timestamp when update occurred (Unix nanoseconds)
+    int64 timestamp_ns = 2;
+
+    // Processor where the event originated
+    string processor_id = 3;
+
+    // Event details (one of the following)
+    oneof event {
+        HunterConnectedEvent hunter_connected = 4;
+        HunterDisconnectedEvent hunter_disconnected = 5;
+        ProcessorConnectedEvent processor_connected = 6;
+        ProcessorDisconnectedEvent processor_disconnected = 7;
+        HunterStatusChangedEvent hunter_status_changed = 8;
+    }
+}
+
+// TopologyUpdateType enum
+enum TopologyUpdateType {
+    // Hunter connected to a processor
+    TOPOLOGY_HUNTER_CONNECTED = 0;
+
+    // Hunter disconnected from a processor
+    TOPOLOGY_HUNTER_DISCONNECTED = 1;
+
+    // Downstream processor connected
+    TOPOLOGY_PROCESSOR_CONNECTED = 2;
+
+    // Downstream processor disconnected
+    TOPOLOGY_PROCESSOR_DISCONNECTED = 3;
+
+    // Hunter status changed (healthy -> warning, etc.)
+    TOPOLOGY_HUNTER_STATUS_CHANGED = 4;
+}
+
+// HunterConnectedEvent when a hunter connects
+message HunterConnectedEvent {
+    // Hunter information
+    ConnectedHunter hunter = 1;
+}
+
+// HunterDisconnectedEvent when a hunter disconnects
+message HunterDisconnectedEvent {
+    // Hunter ID that disconnected
+    string hunter_id = 1;
+
+    // Reason for disconnection
+    string reason = 2;
+}
+
+// ProcessorConnectedEvent when a downstream processor connects
+message ProcessorConnectedEvent {
+    // Processor node information
+    ProcessorNode processor = 1;
+}
+
+// ProcessorDisconnectedEvent when a downstream processor disconnects
+message ProcessorDisconnectedEvent {
+    // Processor ID that disconnected
+    string processor_id = 1;
+
+    // Processor address
+    string address = 2;
+
+    // Reason for disconnection
+    string reason = 3;
+}
+
+// HunterStatusChangedEvent when a hunter's status changes
+message HunterStatusChangedEvent {
+    // Hunter ID
+    string hunter_id = 1;
+
+    // Previous status
+    HunterStatus old_status = 2;
+
+    // New status
+    HunterStatus new_status = 3;
 }

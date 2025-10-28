@@ -83,6 +83,12 @@ message ProcessorRegistration {
 
     // Processor version
     string version = 3;
+
+    // Chain of upstream processor IDs from root to this processor
+    // Empty if this is a leaf processor connecting directly to root
+    // Example: ["root", "intermediate1", "intermediate2"] means this processor
+    // connects to intermediate2, which connects to intermediate1, which connects to root
+    repeated string upstream_chain = 4;
 }
 
 // ProcessorRegistrationResponse from upstream after processor registration
@@ -520,6 +526,15 @@ message ProcessorNode {
 
     // Downstream processors forwarding to this processor
     repeated ProcessorNode downstream_processors = 6;
+
+    // Hierarchy depth (0 = root/leaf with no upstream, 1 = direct child, etc.)
+    uint32 hierarchy_depth = 7;
+
+    // Whether this processor is reachable for management operations
+    bool reachable = 8;
+
+    // Reason why processor is unreachable (empty if reachable)
+    string unreachable_reason = 9;
 }
 
 // TopologySubscribeRequest to subscribe to topology updates

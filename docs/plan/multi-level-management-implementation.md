@@ -62,10 +62,10 @@ TUI → Processor A (root)
   - [x] Add token fields to `ProcessorFilterRequest`
 
 #### 1.4
-- [ ] Add hierarchy metadata to existing messages
-  - [ ] Add `hierarchy_depth` field to `ProcessorNode`
-  - [ ] Add `reachable` and `unreachable_reason` fields to `ProcessorNode`
-  - [ ] Add `upstream_chain` field to processor registration
+- [x] Add hierarchy metadata to existing messages
+  - [x] Add `hierarchy_depth` field to `ProcessorNode`
+  - [x] Add `reachable` and `unreachable_reason` fields to `ProcessorNode`
+  - [x] Add `upstream_chain` field to processor registration
 
 #### 1.5
 - [ ] Regenerate protobuf code

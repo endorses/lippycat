@@ -73,21 +73,21 @@ TUI → Processor A (root)
   - [x] Verify generated files compile
   - [x] Commit generated code
 
-#### 1.7
-- [ ] Create `internal/pkg/processor/proxy/` package structure
-  - [ ] Create `manager.go` with `Manager` struct
-  - [ ] Create `topology_cache.go` with `TopologyCache` struct
-  - [ ] Create `auth.go` for token generation/verification
-  - [ ] Add package documentation
+#### 1.6
+- [x] Create `internal/pkg/processor/proxy/` package structure
+  - [x] Create `manager.go` with `Manager` struct
+  - [x] Create `topology_cache.go` with `TopologyCache` struct
+  - [x] Create `auth.go` for token generation/verification
+  - [x] Add package documentation
 
-#### 1.8
+#### 1.7
 - [ ] Implement `TopologyCache`
   - [ ] Implement `Apply(update)` method for state updates
   - [ ] Implement `GetSnapshot()` method for current state
   - [ ] Add methods: `GetProcessor()`, `GetHunter()`, `GetFilter()`
   - [ ] Add thread-safety (RWMutex)
 
-#### 1.9
+#### 1.8
 - [ ] Write unit tests for `TopologyCache`
   - [ ] Test hunter connect/disconnect events
   - [ ] Test processor connect/disconnect events
@@ -95,14 +95,14 @@ TUI → Processor A (root)
   - [ ] Test concurrent access (race detection)
   - [ ] Test snapshot generation
 
-#### 1.10
+#### 1.9
 - [ ] Implement authorization token system
   - [ ] Implement `issueAuthToken()` in proxy manager
   - [ ] Implement `verifyAuthToken()` with signature verification
   - [ ] Implement `signToken()` using processor certificate
   - [ ] Add token expiration checks (5-minute TTL)
 
-#### 1.11
+#### 1.10
 - [ ] Write tests for authorization tokens
   - [ ] Test token issuance
   - [ ] Test token verification (valid signature)

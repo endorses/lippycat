@@ -19,16 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagementService_RegisterHunter_FullMethodName       = "/lippycat.management.ManagementService/RegisterHunter"
-	ManagementService_RegisterProcessor_FullMethodName    = "/lippycat.management.ManagementService/RegisterProcessor"
-	ManagementService_Heartbeat_FullMethodName            = "/lippycat.management.ManagementService/Heartbeat"
-	ManagementService_GetFilters_FullMethodName           = "/lippycat.management.ManagementService/GetFilters"
-	ManagementService_SubscribeFilters_FullMethodName     = "/lippycat.management.ManagementService/SubscribeFilters"
-	ManagementService_GetHunterStatus_FullMethodName      = "/lippycat.management.ManagementService/GetHunterStatus"
-	ManagementService_UpdateFilter_FullMethodName         = "/lippycat.management.ManagementService/UpdateFilter"
-	ManagementService_DeleteFilter_FullMethodName         = "/lippycat.management.ManagementService/DeleteFilter"
-	ManagementService_ListAvailableHunters_FullMethodName = "/lippycat.management.ManagementService/ListAvailableHunters"
-	ManagementService_GetTopology_FullMethodName          = "/lippycat.management.ManagementService/GetTopology"
+	ManagementService_RegisterHunter_FullMethodName          = "/lippycat.management.ManagementService/RegisterHunter"
+	ManagementService_RegisterProcessor_FullMethodName       = "/lippycat.management.ManagementService/RegisterProcessor"
+	ManagementService_Heartbeat_FullMethodName               = "/lippycat.management.ManagementService/Heartbeat"
+	ManagementService_GetFilters_FullMethodName              = "/lippycat.management.ManagementService/GetFilters"
+	ManagementService_SubscribeFilters_FullMethodName        = "/lippycat.management.ManagementService/SubscribeFilters"
+	ManagementService_GetHunterStatus_FullMethodName         = "/lippycat.management.ManagementService/GetHunterStatus"
+	ManagementService_UpdateFilter_FullMethodName            = "/lippycat.management.ManagementService/UpdateFilter"
+	ManagementService_DeleteFilter_FullMethodName            = "/lippycat.management.ManagementService/DeleteFilter"
+	ManagementService_ListAvailableHunters_FullMethodName    = "/lippycat.management.ManagementService/ListAvailableHunters"
+	ManagementService_GetTopology_FullMethodName             = "/lippycat.management.ManagementService/GetTopology"
+	ManagementService_SubscribeTopology_FullMethodName       = "/lippycat.management.ManagementService/SubscribeTopology"
+	ManagementService_UpdateFilterOnProcessor_FullMethodName = "/lippycat.management.ManagementService/UpdateFilterOnProcessor"
+	ManagementService_DeleteFilterOnProcessor_FullMethodName = "/lippycat.management.ManagementService/DeleteFilterOnProcessor"
+	ManagementService_GetFiltersFromProcessor_FullMethodName = "/lippycat.management.ManagementService/GetFiltersFromProcessor"
 )
 
 // ManagementServiceClient is the client API for ManagementService service.
@@ -58,6 +62,19 @@ type ManagementServiceClient interface {
 	// GetTopology retrieves the complete downstream topology (processors and hunters)
 	// Recursively queries downstream processors to build full hierarchy
 	GetTopology(ctx context.Context, in *TopologyRequest, opts ...grpc.CallOption) (*TopologyResponse, error)
+	// SubscribeTopology subscribes to real-time topology changes
+	// Returns a stream of topology updates when hunters/processors connect/disconnect
+	// Replaces polling GetTopology() for real-time monitoring
+	SubscribeTopology(ctx context.Context, in *TopologySubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TopologyUpdate], error)
+	// UpdateFilterOnProcessor adds or modifies a filter on a specific processor
+	// Used for multi-level management to target filters to specific processors in the hierarchy
+	UpdateFilterOnProcessor(ctx context.Context, in *ProcessorFilterRequest, opts ...grpc.CallOption) (*FilterUpdateResult, error)
+	// DeleteFilterOnProcessor removes a filter from a specific processor
+	// Used for multi-level management to remove filters from specific processors in the hierarchy
+	DeleteFilterOnProcessor(ctx context.Context, in *ProcessorFilterDeleteRequest, opts ...grpc.CallOption) (*FilterUpdateResult, error)
+	// GetFiltersFromProcessor retrieves filters from a specific processor
+	// Used for multi-level management to query filter state in the hierarchy
+	GetFiltersFromProcessor(ctx context.Context, in *ProcessorFilterQuery, opts ...grpc.CallOption) (*FilterResponse, error)
 }
 
 type managementServiceClient struct {
@@ -180,6 +197,55 @@ func (c *managementServiceClient) GetTopology(ctx context.Context, in *TopologyR
 	return out, nil
 }
 
+func (c *managementServiceClient) SubscribeTopology(ctx context.Context, in *TopologySubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TopologyUpdate], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ManagementService_ServiceDesc.Streams[2], ManagementService_SubscribeTopology_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TopologySubscribeRequest, TopologyUpdate]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagementService_SubscribeTopologyClient = grpc.ServerStreamingClient[TopologyUpdate]
+
+func (c *managementServiceClient) UpdateFilterOnProcessor(ctx context.Context, in *ProcessorFilterRequest, opts ...grpc.CallOption) (*FilterUpdateResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilterUpdateResult)
+	err := c.cc.Invoke(ctx, ManagementService_UpdateFilterOnProcessor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managementServiceClient) DeleteFilterOnProcessor(ctx context.Context, in *ProcessorFilterDeleteRequest, opts ...grpc.CallOption) (*FilterUpdateResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilterUpdateResult)
+	err := c.cc.Invoke(ctx, ManagementService_DeleteFilterOnProcessor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managementServiceClient) GetFiltersFromProcessor(ctx context.Context, in *ProcessorFilterQuery, opts ...grpc.CallOption) (*FilterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilterResponse)
+	err := c.cc.Invoke(ctx, ManagementService_GetFiltersFromProcessor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagementServiceServer is the server API for ManagementService service.
 // All implementations must embed UnimplementedManagementServiceServer
 // for forward compatibility.
@@ -207,6 +273,19 @@ type ManagementServiceServer interface {
 	// GetTopology retrieves the complete downstream topology (processors and hunters)
 	// Recursively queries downstream processors to build full hierarchy
 	GetTopology(context.Context, *TopologyRequest) (*TopologyResponse, error)
+	// SubscribeTopology subscribes to real-time topology changes
+	// Returns a stream of topology updates when hunters/processors connect/disconnect
+	// Replaces polling GetTopology() for real-time monitoring
+	SubscribeTopology(*TopologySubscribeRequest, grpc.ServerStreamingServer[TopologyUpdate]) error
+	// UpdateFilterOnProcessor adds or modifies a filter on a specific processor
+	// Used for multi-level management to target filters to specific processors in the hierarchy
+	UpdateFilterOnProcessor(context.Context, *ProcessorFilterRequest) (*FilterUpdateResult, error)
+	// DeleteFilterOnProcessor removes a filter from a specific processor
+	// Used for multi-level management to remove filters from specific processors in the hierarchy
+	DeleteFilterOnProcessor(context.Context, *ProcessorFilterDeleteRequest) (*FilterUpdateResult, error)
+	// GetFiltersFromProcessor retrieves filters from a specific processor
+	// Used for multi-level management to query filter state in the hierarchy
+	GetFiltersFromProcessor(context.Context, *ProcessorFilterQuery) (*FilterResponse, error)
 	mustEmbedUnimplementedManagementServiceServer()
 }
 
@@ -246,6 +325,18 @@ func (UnimplementedManagementServiceServer) ListAvailableHunters(context.Context
 }
 func (UnimplementedManagementServiceServer) GetTopology(context.Context, *TopologyRequest) (*TopologyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTopology not implemented")
+}
+func (UnimplementedManagementServiceServer) SubscribeTopology(*TopologySubscribeRequest, grpc.ServerStreamingServer[TopologyUpdate]) error {
+	return status.Errorf(codes.Unimplemented, "method SubscribeTopology not implemented")
+}
+func (UnimplementedManagementServiceServer) UpdateFilterOnProcessor(context.Context, *ProcessorFilterRequest) (*FilterUpdateResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateFilterOnProcessor not implemented")
+}
+func (UnimplementedManagementServiceServer) DeleteFilterOnProcessor(context.Context, *ProcessorFilterDeleteRequest) (*FilterUpdateResult, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteFilterOnProcessor not implemented")
+}
+func (UnimplementedManagementServiceServer) GetFiltersFromProcessor(context.Context, *ProcessorFilterQuery) (*FilterResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFiltersFromProcessor not implemented")
 }
 func (UnimplementedManagementServiceServer) mustEmbedUnimplementedManagementServiceServer() {}
 func (UnimplementedManagementServiceServer) testEmbeddedByValue()                           {}
@@ -430,6 +521,71 @@ func _ManagementService_GetTopology_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagementService_SubscribeTopology_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(TopologySubscribeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(ManagementServiceServer).SubscribeTopology(m, &grpc.GenericServerStream[TopologySubscribeRequest, TopologyUpdate]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagementService_SubscribeTopologyServer = grpc.ServerStreamingServer[TopologyUpdate]
+
+func _ManagementService_UpdateFilterOnProcessor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProcessorFilterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).UpdateFilterOnProcessor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_UpdateFilterOnProcessor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).UpdateFilterOnProcessor(ctx, req.(*ProcessorFilterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagementService_DeleteFilterOnProcessor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProcessorFilterDeleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).DeleteFilterOnProcessor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_DeleteFilterOnProcessor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).DeleteFilterOnProcessor(ctx, req.(*ProcessorFilterDeleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagementService_GetFiltersFromProcessor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProcessorFilterQuery)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).GetFiltersFromProcessor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_GetFiltersFromProcessor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).GetFiltersFromProcessor(ctx, req.(*ProcessorFilterQuery))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagementService_ServiceDesc is the grpc.ServiceDesc for ManagementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -469,6 +625,18 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetTopology",
 			Handler:    _ManagementService_GetTopology_Handler,
 		},
+		{
+			MethodName: "UpdateFilterOnProcessor",
+			Handler:    _ManagementService_UpdateFilterOnProcessor_Handler,
+		},
+		{
+			MethodName: "DeleteFilterOnProcessor",
+			Handler:    _ManagementService_DeleteFilterOnProcessor_Handler,
+		},
+		{
+			MethodName: "GetFiltersFromProcessor",
+			Handler:    _ManagementService_GetFiltersFromProcessor_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -480,6 +648,11 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeFilters",
 			Handler:       _ManagementService_SubscribeFilters_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "SubscribeTopology",
+			Handler:       _ManagementService_SubscribeTopology_Handler,
 			ServerStreams: true,
 		},
 	},

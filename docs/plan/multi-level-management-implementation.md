@@ -96,25 +96,25 @@ TUI → Processor A (root)
   - [x] Test snapshot generation
 
 #### 1.9
-- [ ] Implement authorization token system
-  - [ ] Implement `issueAuthToken()` in proxy manager
-  - [ ] Implement `verifyAuthToken()` with signature verification
-  - [ ] Implement `signToken()` using processor certificate
-  - [ ] Add token expiration checks (5-minute TTL)
+- [x] Implement authorization token system
+  - [x] Implement `issueAuthToken()` in proxy manager
+  - [x] Implement `verifyAuthToken()` with signature verification
+  - [x] Implement `signToken()` using processor certificate
+  - [x] Add token expiration checks (5-minute TTL)
 
 #### 1.10
-- [ ] Write tests for authorization tokens
-  - [ ] Test token issuance
-  - [ ] Test token verification (valid signature)
-  - [ ] Test token verification (expired token)
-  - [ ] Test token verification (invalid signature)
+- [x] Write tests for authorization tokens
+  - [x] Test token issuance
+  - [x] Test token verification (valid signature)
+  - [x] Test token verification (expired token)
+  - [x] Test token verification (invalid signature)
 
 ### Deliverables
 - ✅ Updated protobuf definitions with all new RPCs and messages
 - ✅ Generated Go code compiles successfully
 - ✅ `internal/pkg/processor/proxy/` package with core types
 - ✅ `TopologyCache` implementation with >90% test coverage
-- ✅ Authorization token system with tests
+- ✅ Authorization token system with tests (79.3% package coverage)
 
 ---
 

@@ -316,6 +316,24 @@ message FilterDeleteRequest {
     string filter_id = 1;
 }
 
+// AuthorizationToken for deep chain management operations
+// When a top-level processor issues management commands to deep downstream processors,
+// intermediate processors validate this token to authorize the operation.
+message AuthorizationToken {
+    // Cryptographic signature (HMAC-SHA256) of the request
+    // Signed by the originating processor using a shared secret
+    bytes signature = 1;
+
+    // Timestamp when token was issued (Unix nanoseconds)
+    int64 issued_at_ns = 2;
+
+    // Processor ID of the originating processor
+    string issuer_id = 3;
+
+    // Chain of processor IDs from issuer to target (for auditing)
+    repeated string processor_chain = 4;
+}
+
 // ProcessorFilterRequest to update filter on a specific processor
 message ProcessorFilterRequest {
     // Target processor identifier
@@ -323,6 +341,10 @@ message ProcessorFilterRequest {
 
     // Filter to add or modify
     Filter filter = 2;
+
+    // Optional: Authorization token for deep chain operations
+    // Required when target processor is not directly connected
+    AuthorizationToken auth_token = 3;
 }
 
 // ProcessorFilterDeleteRequest to delete filter from a specific processor
@@ -332,6 +354,10 @@ message ProcessorFilterDeleteRequest {
 
     // Filter ID to delete
     string filter_id = 2;
+
+    // Optional: Authorization token for deep chain operations
+    // Required when target processor is not directly connected
+    AuthorizationToken auth_token = 3;
 }
 
 // ProcessorFilterQuery to retrieve filters from a specific processor
@@ -341,6 +367,10 @@ message ProcessorFilterQuery {
 
     // Optional: filter by hunter ID on that processor
     string hunter_id = 2;
+
+    // Optional: Authorization token for deep chain operations
+    // Required when target processor is not directly connected
+    AuthorizationToken auth_token = 3;
 }
 
 // StatusRequest to get hunter status (for TUI)

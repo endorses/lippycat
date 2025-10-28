@@ -68,10 +68,10 @@ TUI → Processor A (root)
   - [x] Add `upstream_chain` field to processor registration
 
 #### 1.5
-- [ ] Regenerate protobuf code
-  - [ ] Run `make proto` or protoc command
-  - [ ] Verify generated files compile
-  - [ ] Commit generated code
+- [x] Regenerate protobuf code
+  - [x] Run `make proto` or protoc command
+  - [x] Verify generated files compile
+  - [x] Commit generated code
 
 #### 1.7
 - [ ] Create `internal/pkg/processor/proxy/` package structure

@@ -57,9 +57,9 @@ TUI → Processor A (root)
   - [x] Add `ProcessorFilterQueryRequest` message
 
 #### 1.3
-- [ ] Add authorization token messages for deep chains
-  - [ ] Add `AuthorizationToken` message with signature field
-  - [ ] Add token fields to `ProcessorFilterRequest`
+- [x] Add authorization token messages for deep chains
+  - [x] Add `AuthorizationToken` message with signature field
+  - [x] Add token fields to `ProcessorFilterRequest`
 
 #### 1.4
 - [ ] Add hierarchy metadata to existing messages

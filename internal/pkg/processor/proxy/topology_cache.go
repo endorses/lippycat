@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"sync"
+
+	"github.com/endorses/lippycat/api/gen/management"
 )
 
 // TopologyCache maintains a thread-safe in-memory cache of the complete
@@ -156,19 +158,169 @@ type TopologySnapshot struct {
 }
 
 // Apply applies a topology update to the cache
-// This method will be fully implemented in Phase 1, Task 1.7
-// The update parameter type will be the protobuf TopologyUpdate message
-func (c *TopologyCache) Apply(update interface{}) {
+// The update parameter must be a *management.TopologyUpdate message
+func (c *TopologyCache) Apply(update *management.TopologyUpdate) {
+	if update == nil {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// TODO: Implement in Phase 1, Task 1.7
-	// - Handle HunterConnectedEvent
-	// - Handle HunterDisconnectedEvent
-	// - Handle ProcessorConnectedEvent
-	// - Handle ProcessorDisconnectedEvent
-	// - Handle FilterUpdatedEvent
-	// - Handle FilterDeletedEvent
+	// Handle different event types using type switch on the oneof field
+	switch event := update.Event.(type) {
+	case *management.TopologyUpdate_HunterConnected:
+		c.applyHunterConnected(update.ProcessorId, event.HunterConnected)
+
+	case *management.TopologyUpdate_HunterDisconnected:
+		c.applyHunterDisconnected(update.ProcessorId, event.HunterDisconnected)
+
+	case *management.TopologyUpdate_ProcessorConnected:
+		c.applyProcessorConnected(event.ProcessorConnected)
+
+	case *management.TopologyUpdate_ProcessorDisconnected:
+		c.applyProcessorDisconnected(event.ProcessorDisconnected)
+
+	case *management.TopologyUpdate_HunterStatusChanged:
+		c.applyHunterStatusChanged(update.ProcessorId, event.HunterStatusChanged)
+	}
+}
+
+// applyHunterConnected handles a hunter connected event
+func (c *TopologyCache) applyHunterConnected(processorID string, event *management.HunterConnectedEvent) {
+	if event == nil || event.Hunter == nil {
+		return
+	}
+
+	hunter := event.Hunter
+	fullID := processorID + "/" + hunter.HunterId
+
+	// Create HunterNode from protobuf message
+	node := &HunterNode{
+		ID:          hunter.HunterId,
+		ProcessorID: processorID,
+		Address:     hunter.RemoteAddr,
+		Status:      hunter.Status.String(),
+		Metadata:    make(map[string]string),
+	}
+
+	// Copy metadata if available
+	if len(hunter.Interfaces) > 0 {
+		node.Metadata["interfaces"] = hunter.Interfaces[0] // Store first interface
+	}
+	if hunter.Hostname != "" {
+		node.Metadata["hostname"] = hunter.Hostname
+	}
+
+	c.hunters[fullID] = node
+}
+
+// applyHunterDisconnected handles a hunter disconnected event
+func (c *TopologyCache) applyHunterDisconnected(processorID string, event *management.HunterDisconnectedEvent) {
+	if event == nil {
+		return
+	}
+
+	fullID := processorID + "/" + event.HunterId
+	delete(c.hunters, fullID)
+
+	// Also remove all filters for this hunter
+	for filterID, filter := range c.filters {
+		if filter.ProcessorID == processorID && filter.HunterID == event.HunterId {
+			delete(c.filters, filterID)
+		}
+	}
+}
+
+// applyProcessorConnected handles a processor connected event
+func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConnectedEvent) {
+	if event == nil || event.Processor == nil {
+		return
+	}
+
+	proc := event.Processor
+
+	// Create ProcessorNode from protobuf message
+	node := &ProcessorNode{
+		ID:                proc.ProcessorId,
+		Address:           proc.Address,
+		ParentID:          proc.UpstreamProcessor,
+		HierarchyDepth:    int32(proc.HierarchyDepth),
+		Reachable:         proc.Reachable,
+		UnreachableReason: proc.UnreachableReason,
+		Metadata:          make(map[string]string),
+	}
+
+	// Store metadata
+	node.Metadata["status"] = proc.Status.String()
+
+	c.processors[proc.ProcessorId] = node
+
+	// Add hunters from this processor
+	for _, hunter := range proc.Hunters {
+		fullID := proc.ProcessorId + "/" + hunter.HunterId
+		hunterNode := &HunterNode{
+			ID:          hunter.HunterId,
+			ProcessorID: proc.ProcessorId,
+			Address:     hunter.RemoteAddr,
+			Status:      hunter.Status.String(),
+			Metadata:    make(map[string]string),
+		}
+		if hunter.Hostname != "" {
+			hunterNode.Metadata["hostname"] = hunter.Hostname
+		}
+		c.hunters[fullID] = hunterNode
+
+		// Add filters for this hunter
+		for _, filter := range hunter.Filters {
+			filterFullID := proc.ProcessorId + "/" + hunter.HunterId + "/" + filter.Id
+			filterNode := &FilterNode{
+				ID:          filter.Id,
+				HunterID:    hunter.HunterId,
+				ProcessorID: proc.ProcessorId,
+				FilterType:  filter.Type.String(),
+				Pattern:     filter.Pattern,
+				Active:      filter.Enabled,
+			}
+			c.filters[filterFullID] = filterNode
+		}
+	}
+}
+
+// applyProcessorDisconnected handles a processor disconnected event
+func (c *TopologyCache) applyProcessorDisconnected(event *management.ProcessorDisconnectedEvent) {
+	if event == nil {
+		return
+	}
+
+	processorID := event.ProcessorId
+	delete(c.processors, processorID)
+
+	// Remove all hunters for this processor
+	for hunterID, hunter := range c.hunters {
+		if hunter.ProcessorID == processorID {
+			delete(c.hunters, hunterID)
+		}
+	}
+
+	// Remove all filters for this processor
+	for filterID, filter := range c.filters {
+		if filter.ProcessorID == processorID {
+			delete(c.filters, filterID)
+		}
+	}
+}
+
+// applyHunterStatusChanged handles a hunter status change event
+func (c *TopologyCache) applyHunterStatusChanged(processorID string, event *management.HunterStatusChangedEvent) {
+	if event == nil {
+		return
+	}
+
+	fullID := processorID + "/" + event.HunterId
+	if hunter, exists := c.hunters[fullID]; exists {
+		hunter.Status = event.NewStatus.String()
+	}
 }
 
 // AddHunter adds or updates a hunter in the cache

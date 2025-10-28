@@ -81,19 +81,19 @@ TUI → Processor A (root)
   - [x] Add package documentation
 
 #### 1.7
-- [ ] Implement `TopologyCache`
-  - [ ] Implement `Apply(update)` method for state updates
-  - [ ] Implement `GetSnapshot()` method for current state
-  - [ ] Add methods: `GetProcessor()`, `GetHunter()`, `GetFilter()`
-  - [ ] Add thread-safety (RWMutex)
+- [x] Implement `TopologyCache`
+  - [x] Implement `Apply(update)` method for state updates
+  - [x] Implement `GetSnapshot()` method for current state
+  - [x] Add methods: `GetProcessor()`, `GetHunter()`, `GetFilter()`
+  - [x] Add thread-safety (RWMutex)
 
 #### 1.8
-- [ ] Write unit tests for `TopologyCache`
-  - [ ] Test hunter connect/disconnect events
-  - [ ] Test processor connect/disconnect events
-  - [ ] Test filter update events
-  - [ ] Test concurrent access (race detection)
-  - [ ] Test snapshot generation
+- [x] Write unit tests for `TopologyCache`
+  - [x] Test hunter connect/disconnect events
+  - [x] Test processor connect/disconnect events
+  - [x] Test filter update events
+  - [x] Test concurrent access (race detection)
+  - [x] Test snapshot generation
 
 #### 1.9
 - [ ] Implement authorization token system

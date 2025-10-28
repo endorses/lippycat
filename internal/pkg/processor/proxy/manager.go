@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+
+	"github.com/endorses/lippycat/api/gen/management"
 )
 
 // Manager coordinates topology subscription and operation proxying for hierarchical
@@ -25,7 +27,7 @@ type Manager struct {
 	// subscribers is the list of active topology update subscribers
 	// Each subscriber has a buffered channel receiving TopologyUpdate messages
 	subscribersMu sync.RWMutex
-	subscribers   map[string]chan interface{} // interface{} will be TopologyUpdate from protobuf
+	subscribers   map[string]chan *management.TopologyUpdate
 
 	// processorID is this processor's unique identifier
 	processorID string
@@ -55,7 +57,7 @@ func NewManager(log *slog.Logger, processorID string) *Manager {
 	return &Manager{
 		logger:      log,
 		cache:       NewTopologyCache(),
-		subscribers: make(map[string]chan interface{}),
+		subscribers: make(map[string]chan *management.TopologyUpdate),
 		processorID: processorID,
 		ctx:         ctx,
 		cancel:      cancel,
@@ -109,11 +111,11 @@ func (m *Manager) Shutdown() {
 // updates will be dropped (non-blocking send).
 //
 // Call UnregisterSubscriber() when the subscriber disconnects to clean up.
-func (m *Manager) RegisterSubscriber(subscriberID string) chan interface{} {
+func (m *Manager) RegisterSubscriber(subscriberID string) chan *management.TopologyUpdate {
 	m.subscribersMu.Lock()
 	defer m.subscribersMu.Unlock()
 
-	ch := make(chan interface{}, 100)
+	ch := make(chan *management.TopologyUpdate, 100)
 	m.subscribers[subscriberID] = ch
 
 	m.logger.Info("registered topology subscriber",
@@ -143,7 +145,7 @@ func (m *Manager) UnregisterSubscriber(subscriberID string) {
 // Uses non-blocking sends to prevent slow subscribers from blocking the broadcaster.
 //
 // Dropped updates are logged as warnings, including the subscriber ID.
-func (m *Manager) broadcastTopologyUpdate(update interface{}) {
+func (m *Manager) broadcastTopologyUpdate(update *management.TopologyUpdate) {
 	m.subscribersMu.RLock()
 	defer m.subscribersMu.RUnlock()
 

@@ -48,13 +48,13 @@ TUI → Processor A (root)
   - [x] Add event messages: `HunterConnectedEvent`, `HunterDisconnectedEvent`, etc.
 
 #### 1.2
-- [ ] Define processor-scoped management RPCs in `api/proto/management.proto`
-  - [ ] Add `UpdateFilterOnProcessor()` RPC
-  - [ ] Add `DeleteFilterOnProcessor()` RPC
-  - [ ] Add `GetFiltersFromProcessor()` RPC
-  - [ ] Add `ProcessorFilterRequest` message
-  - [ ] Add `ProcessorFilterDeleteRequest` message
-  - [ ] Add `ProcessorFilterQueryRequest` message
+- [x] Define processor-scoped management RPCs in `api/proto/management.proto`
+  - [x] Add `UpdateFilterOnProcessor()` RPC
+  - [x] Add `DeleteFilterOnProcessor()` RPC
+  - [x] Add `GetFiltersFromProcessor()` RPC
+  - [x] Add `ProcessorFilterRequest` message
+  - [x] Add `ProcessorFilterDeleteRequest` message
+  - [x] Add `ProcessorFilterQueryRequest` message
 
 #### 1.3
 - [ ] Add authorization token messages for deep chains

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/flow"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/endorses/lippycat/internal/pkg/processor/pcap"
+	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
 	"github.com/endorses/lippycat/internal/pkg/processor/stats"
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
@@ -87,6 +89,7 @@ type Processor struct {
 	upstreamManager   *upstream.Manager
 	downstreamManager *downstream.Manager
 	enricher          *enrichment.Enricher
+	proxyManager      *proxy.Manager // Manages topology subscriptions and operation proxying
 
 	// Packet counters (shared with stats collector and flow controller)
 	packetsReceived  atomic.Uint64
@@ -277,6 +280,32 @@ func New(config Config) (*Processor, error) {
 		false, // tlsSkipVerify
 		"",    // tlsServerName
 	)
+
+	// Initialize proxy manager for topology subscriptions and operation proxying
+	proxyLogger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	p.proxyManager = proxy.NewManager(proxyLogger, config.ProcessorID)
+
+	// Set TLS credentials for token signing if TLS is enabled
+	if config.TLSEnabled && config.TLSCertFile != "" && config.TLSKeyFile != "" {
+		certPEM, err := os.ReadFile(config.TLSCertFile)
+		if err != nil {
+			logger.Warn("Failed to read TLS certificate for proxy manager",
+				"error", err,
+				"cert_file", config.TLSCertFile)
+		} else {
+			keyPEM, err := os.ReadFile(config.TLSKeyFile)
+			if err != nil {
+				logger.Warn("Failed to read TLS key for proxy manager",
+					"error", err,
+					"key_file", config.TLSKeyFile)
+			} else {
+				p.proxyManager.SetTLSCredentials(certPEM, keyPEM)
+				logger.Debug("Proxy manager TLS credentials configured for token signing")
+			}
+		}
+	}
 
 	return p, nil
 }
@@ -480,6 +509,11 @@ func (p *Processor) Shutdown() error {
 		if err := p.vifManager.Shutdown(); err != nil {
 			logger.Warn("Failed to shutdown virtual interface", "error", err)
 		}
+	}
+
+	// Shutdown proxy manager (close all topology subscriptions)
+	if p.proxyManager != nil {
+		p.proxyManager.Shutdown()
 	}
 
 	// Give time for graceful shutdown
@@ -976,6 +1010,63 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 	return &management.TopologyResponse{
 		Processor: node,
 	}, nil
+}
+
+// SubscribeTopology subscribes to real-time topology updates (Management Service)
+// Clients should call GetTopology() first to get the current state, then subscribe for updates
+func (p *Processor) SubscribeTopology(req *management.TopologySubscribeRequest, stream management.ManagementService_SubscribeTopologyServer) error {
+	// Generate subscriber ID from request
+	subscriberID := req.ClientId
+	if subscriberID == "" {
+		subscriberID = fmt.Sprintf("subscriber-%d", time.Now().UnixNano())
+	}
+
+	logger.Info("Topology subscription request",
+		"subscriber_id", subscriberID,
+		"include_downstream", req.IncludeDownstream)
+
+	// Register subscriber in proxy manager
+	updateChan := p.proxyManager.RegisterSubscriber(subscriberID)
+
+	// Cleanup on disconnect
+	defer func() {
+		p.proxyManager.UnregisterSubscriber(subscriberID)
+		logger.Info("Topology subscription ended", "subscriber_id", subscriberID)
+	}()
+
+	logger.Info("Topology subscription active, streaming updates", "subscriber_id", subscriberID)
+
+	// Stream topology updates
+	for {
+		select {
+		case <-stream.Context().Done():
+			logger.Debug("SubscribeTopology: stream context cancelled",
+				"subscriber_id", subscriberID,
+				"error", stream.Context().Err())
+			return nil
+		case update, ok := <-updateChan:
+			if !ok {
+				logger.Debug("SubscribeTopology: update channel closed",
+					"subscriber_id", subscriberID)
+				return nil
+			}
+
+			logger.Debug("Sending topology update",
+				"subscriber_id", subscriberID,
+				"update_type", update.UpdateType)
+
+			if err := stream.Send(update); err != nil {
+				logger.Error("Failed to send topology update",
+					"subscriber_id", subscriberID,
+					"error", err)
+				return err
+			}
+
+			logger.Debug("Topology update sent successfully",
+				"subscriber_id", subscriberID,
+				"update_type", update.UpdateType)
+		}
+	}
 }
 
 // UpdateFilter adds or modifies a filter (Management Service)

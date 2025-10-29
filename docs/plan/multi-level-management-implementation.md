@@ -142,12 +142,12 @@ TUI → Processor A (root)
   - [x] Cleanup on manager shutdown
 
 #### 2.3
-- [ ] Implement `SubscribeTopology()` RPC handler in `internal/pkg/processor/processor.go`
-  - [ ] Create subscriber channel (buffered, size 100)
-  - [ ] Register subscriber in proxy manager
-  - [ ] Send initial topology snapshot to subscriber
-  - [ ] Stream topology updates until context canceled
-  - [ ] Clean up subscriber on disconnect
+- [x] Implement `SubscribeTopology()` RPC handler in `internal/pkg/processor/processor.go`
+  - [x] Create subscriber channel (buffered, size 100)
+  - [x] Register subscriber in proxy manager
+  - [x] Send initial topology snapshot to subscriber
+  - [x] Stream topology updates until context canceled
+  - [x] Clean up subscriber on disconnect
 
 #### 2.4
 - [ ] Enhance `internal/pkg/processor/hunter/manager.go` to publish events

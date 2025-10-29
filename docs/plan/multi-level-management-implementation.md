@@ -222,11 +222,12 @@ TUI → Processor A (root)
   - [x] Return filters
 
 #### 3.4
-- [ ] Add routing logic in proxy manager
-  - [ ] Implement `routeToProcessor(processorID, request)` method
-  - [ ] Handle processor not found errors
-  - [ ] Handle downstream connection errors
-  - [ ] Add timeout per hop (5 seconds base + depth scaling)
+- [x] Add routing logic in proxy manager
+  - [x] Implement `RouteToProcessor(ctx, processorID)` method
+  - [x] Handle processor not found errors (returns codes.NotFound)
+  - [x] Handle downstream connection errors (ValidateRoutingConnection method)
+  - [x] Add timeout per hop (5 seconds base + depth * 500ms scaling)
+  - [x] Additional helper methods: CalculateChainTimeout, FormatRoutingError
 
 #### 3.5
 - [ ] Enhance downstream manager for operation forwarding

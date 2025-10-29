@@ -8,6 +8,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
+// TopologyPublisher defines the interface for publishing topology updates upstream
+type TopologyPublisher interface {
+	PublishTopologyUpdate(update *management.TopologyUpdate)
+}
+
 // ConnectedHunter represents a connected hunter node
 type ConnectedHunter struct {
 	ID                      string
@@ -35,6 +40,9 @@ type Manager struct {
 
 	// Callbacks for stats updates
 	onStatsChanged func()
+
+	// topologyPublisher forwards topology updates upstream for multi-level management
+	topologyPublisher TopologyPublisher
 }
 
 // NewManager creates a new hunter manager
@@ -44,6 +52,11 @@ func NewManager(maxHunters int, onStatsChanged func()) *Manager {
 		maxHunters:     maxHunters,
 		onStatsChanged: onStatsChanged,
 	}
+}
+
+// SetTopologyPublisher sets the topology publisher for forwarding updates upstream
+func (m *Manager) SetTopologyPublisher(publisher TopologyPublisher) {
+	m.topologyPublisher = publisher
 }
 
 // Register registers or re-registers a hunter
@@ -86,6 +99,29 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 		m.onStatsChanged()
 	}
 
+	// Publish topology update for hunter connection
+	if m.topologyPublisher != nil {
+		m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
+			UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_CONNECTED,
+			TimestampNs: time.Now().UnixNano(),
+			Event: &management.TopologyUpdate_HunterConnected{
+				HunterConnected: &management.HunterConnectedEvent{
+					Hunter: &management.ConnectedHunter{
+						HunterId:   hunterID,
+						Hostname:   hostname,
+						RemoteAddr: "", // Will be set by the processor when receiving registration
+						Status:     management.HunterStatus_STATUS_HEALTHY,
+						// Note: Other fields like connected_duration_sec, interfaces, capabilities
+						// are not part of the ConnectedHunter proto definition
+					},
+				},
+			},
+		})
+		logger.Debug("Published HUNTER_CONNECTED topology event",
+			"hunter_id", hunterID,
+			"hostname", hostname)
+	}
+
 	return hunter, isReconnect, nil
 }
 
@@ -95,9 +131,22 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 	m.mu.Lock()
 
 	statsChanged := false
+	statusChanged := false
+	var oldStatus management.HunterStatus
 	if hunter, exists := m.hunters[hunterID]; exists {
 		hunter.LastHeartbeat = timestampNs
-		hunter.Status = status
+
+		// Track status changes for topology updates
+		if hunter.Status != status {
+			oldStatus = hunter.Status
+			hunter.Status = status
+			statusChanged = true
+			logger.Info("Hunter status changed",
+				"hunter_id", hunterID,
+				"old_status", oldStatus,
+				"new_status", status)
+		}
+
 		if stats != nil {
 			// Update packet counts from hunter's reported stats
 			hunter.PacketsCaptured = stats.PacketsCaptured
@@ -126,6 +175,25 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 	// call back into GetHealthStats() which needs to acquire the read lock.
 	if statsChanged && m.onStatsChanged != nil {
 		m.onStatsChanged()
+	}
+
+	// Publish topology update if status changed
+	if statusChanged && m.topologyPublisher != nil {
+		m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
+			UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_STATUS_CHANGED,
+			TimestampNs: timestampNs,
+			Event: &management.TopologyUpdate_HunterStatusChanged{
+				HunterStatusChanged: &management.HunterStatusChangedEvent{
+					HunterId:  hunterID,
+					NewStatus: status,
+					OldStatus: oldStatus,
+				},
+			},
+		})
+		logger.Debug("Published HUNTER_STATUS_CHANGED topology event",
+			"hunter_id", hunterID,
+			"old_status", oldStatus,
+			"new_status", status)
 	}
 
 	return statsChanged
@@ -195,6 +263,7 @@ func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 
 	now := time.Now().UnixNano()
 	staleCount := 0
+	staleHunters := make([]string, 0) // Track hunters that became stale for topology updates
 
 	for hunterID, hunter := range m.hunters {
 		if hunter.LastHeartbeat > 0 {
@@ -207,6 +276,7 @@ func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 						"last_heartbeat_sec", timeSinceHeartbeat/int64(time.Second))
 					hunter.Status = management.HunterStatus_STATUS_ERROR
 					staleCount++
+					staleHunters = append(staleHunters, hunterID)
 				}
 			}
 		}
@@ -219,6 +289,27 @@ func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 	// call back into GetHealthStats() which needs to acquire the read lock.
 	if staleCount > 0 && m.onStatsChanged != nil {
 		m.onStatsChanged()
+	}
+
+	// Publish topology updates for hunters that became stale
+	if m.topologyPublisher != nil {
+		for _, hunterID := range staleHunters {
+			m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
+				UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_STATUS_CHANGED,
+				TimestampNs: now,
+				Event: &management.TopologyUpdate_HunterStatusChanged{
+					HunterStatusChanged: &management.HunterStatusChangedEvent{
+						HunterId:  hunterID,
+						NewStatus: management.HunterStatus_STATUS_ERROR,
+						OldStatus: management.HunterStatus_STATUS_HEALTHY, // Assumption: was healthy before timeout
+					},
+				},
+			})
+			logger.Debug("Published HUNTER_STATUS_CHANGED topology event",
+				"hunter_id", hunterID,
+				"new_status", "ERROR",
+				"reason", "heartbeat timeout")
+		}
 	}
 
 	return staleCount
@@ -251,6 +342,23 @@ func (m *Manager) RemoveStale(gracePeriod time.Duration) []string {
 			"hunter_id", hunterID,
 			"reason", "in ERROR state beyond grace period")
 		delete(m.hunters, hunterID)
+
+		// Publish topology update for hunter disconnection
+		if m.topologyPublisher != nil {
+			m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
+				UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_DISCONNECTED,
+				TimestampNs: time.Now().UnixNano(),
+				Event: &management.TopologyUpdate_HunterDisconnected{
+					HunterDisconnected: &management.HunterDisconnectedEvent{
+						HunterId: hunterID,
+						Reason:   "heartbeat timeout - in ERROR state beyond grace period",
+					},
+				},
+			})
+			logger.Debug("Published HUNTER_DISCONNECTED topology event",
+				"hunter_id", hunterID,
+				"reason", "heartbeat timeout")
+		}
 	}
 
 	return toRemove

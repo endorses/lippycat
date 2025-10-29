@@ -150,12 +150,12 @@ TUI → Processor A (root)
   - [x] Clean up subscriber on disconnect
 
 #### 2.4
-- [ ] Enhance `internal/pkg/processor/hunter/manager.go` to publish events
-  - [ ] Add `TopologyPublisher` interface
-  - [ ] Add `topologyPublisher` field to `Manager`
-  - [ ] Call `PublishHunterConnected()` on registration
-  - [ ] Call `PublishHunterDisconnected()` on removal
-  - [ ] Call `PublishFilterUpdated()` on filter changes
+- [x] Enhance `internal/pkg/processor/hunter/manager.go` to publish events
+  - [x] Add `TopologyPublisher` interface
+  - [x] Add `topologyPublisher` field to `Manager`
+  - [x] Call `PublishHunterConnected()` on registration
+  - [x] Call `PublishHunterDisconnected()` on removal
+  - [x] Call `PublishHunterStatusChanged()` on status changes
 
 #### 2.5
 - [ ] Implement event publisher in proxy manager

@@ -28,6 +28,10 @@ type ProcessorInfo struct {
 	TopologyCancel       context.CancelFunc
 	TopologyUpdateChan   chan *management.TopologyUpdate
 	TopologyStreamActive bool
+
+	// Reconnection state for exponential backoff
+	reconnectAttempts int           // Number of consecutive reconnection attempts
+	reconnectBackoff  time.Duration // Current backoff duration
 }
 
 // TopologyPublisher defines the interface for publishing topology updates upstream
@@ -119,7 +123,7 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 
 	client := management.NewManagementServiceClient(conn)
 
-	m.downstreams[processorID] = &ProcessorInfo{
+	proc := &ProcessorInfo{
 		ProcessorID:   processorID,
 		ListenAddress: listenAddress,
 		Version:       version,
@@ -127,6 +131,16 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		LastSeen:      now,
 		Client:        client,
 		Conn:          conn,
+	}
+
+	m.downstreams[processorID] = proc
+
+	// Automatically subscribe to topology updates from this downstream processor
+	if err := m.SubscribeToDownstream(proc); err != nil {
+		logger.Warn("Failed to subscribe to downstream topology (will retry)",
+			"processor_id", processorID,
+			"error", err)
+		// Don't fail registration - subscription will be retried on reconnection
 	}
 
 	return nil
@@ -139,9 +153,17 @@ func (m *Manager) Unregister(processorID string) {
 
 	if proc, exists := m.downstreams[processorID]; exists {
 		logger.Info("Unregistering downstream processor", "processor_id", processorID)
+
+		// Cancel topology subscription
+		if proc.TopologyCancel != nil {
+			proc.TopologyCancel()
+		}
+
+		// Close gRPC connection
 		if proc.Conn != nil {
 			_ = proc.Conn.Close()
 		}
+
 		delete(m.downstreams, processorID)
 	}
 }
@@ -257,18 +279,40 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 				"processor_id", proc.ProcessorID,
 				"error", err)
 
-			// Attempt automatic reconnection with backoff
+			// Attempt automatic reconnection with exponential backoff
+			// Start at 5s, double each time, max 60s
+			proc.reconnectAttempts++
+			if proc.reconnectBackoff == 0 {
+				proc.reconnectBackoff = 5 * time.Second
+			} else {
+				proc.reconnectBackoff *= 2
+				if proc.reconnectBackoff > 60*time.Second {
+					proc.reconnectBackoff = 60 * time.Second
+				}
+			}
+
+			logger.Info("Waiting before reconnection attempt",
+				"processor_id", proc.ProcessorID,
+				"attempt", proc.reconnectAttempts,
+				"backoff", proc.reconnectBackoff)
+
 			select {
 			case <-m.ctx.Done():
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.After(proc.reconnectBackoff):
 				if err := m.reconnectTopologyStream(proc); err != nil {
 					logger.Error("Failed to reconnect topology stream",
 						"processor_id", proc.ProcessorID,
+						"attempt", proc.reconnectAttempts,
 						"error", err)
-					return
+					// Continue loop to retry with next backoff
+					continue
 				}
-				// Successfully reconnected, continue receiving
+				// Successfully reconnected, reset backoff and continue receiving
+				proc.reconnectAttempts = 0
+				proc.reconnectBackoff = 0
+				logger.Info("Topology stream reconnected successfully",
+					"processor_id", proc.ProcessorID)
 				continue
 			}
 		}

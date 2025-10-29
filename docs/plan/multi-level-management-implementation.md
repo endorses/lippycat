@@ -135,11 +135,11 @@ TUI → Processor A (root)
   - [x] Add health monitoring for topology stream
 
 #### 2.2
-- [ ] Implement topology subscription lifecycle
-  - [ ] Subscribe when downstream processor connects
-  - [ ] Unsubscribe when downstream processor disconnects
-  - [ ] Automatic reconnection on stream failure (with backoff)
-  - [ ] Cleanup on manager shutdown
+- [x] Implement topology subscription lifecycle
+  - [x] Subscribe when downstream processor connects
+  - [x] Unsubscribe when downstream processor disconnects
+  - [x] Automatic reconnection on stream failure (with backoff)
+  - [x] Cleanup on manager shutdown
 
 #### 2.3
 - [ ] Implement `SubscribeTopology()` RPC handler in `internal/pkg/processor/processor.go`

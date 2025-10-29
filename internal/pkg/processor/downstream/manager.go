@@ -22,6 +22,17 @@ type ProcessorInfo struct {
 	// gRPC client for querying this downstream processor
 	Client management.ManagementServiceClient
 	Conn   *grpc.ClientConn
+
+	// Topology streaming fields
+	TopologyStream       management.ManagementService_SubscribeTopologyClient
+	TopologyCancel       context.CancelFunc
+	TopologyUpdateChan   chan *management.TopologyUpdate
+	TopologyStreamActive bool
+}
+
+// TopologyPublisher defines the interface for publishing topology updates upstream
+type TopologyPublisher interface {
+	PublishTopologyUpdate(update *management.TopologyUpdate)
 }
 
 // Manager tracks downstream processors that forward packets to this processor
@@ -34,10 +45,19 @@ type Manager struct {
 	tlsCAFile     string
 	tlsSkipVerify bool
 	tlsServerName string
+
+	// topologyPublisher forwards topology updates from downstream processors upstream
+	topologyPublisher TopologyPublisher
+
+	// ctx and cancel for managing goroutines
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 // NewManager creates a new downstream processor manager
 func NewManager(tlsInsecure bool, tlsCertFile, tlsKeyFile, tlsCAFile string, tlsSkipVerify bool, tlsServerName string) *Manager {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		downstreams:   make(map[string]*ProcessorInfo),
 		tlsInsecure:   tlsInsecure,
@@ -46,7 +66,14 @@ func NewManager(tlsInsecure bool, tlsCertFile, tlsKeyFile, tlsCAFile string, tls
 		tlsCAFile:     tlsCAFile,
 		tlsSkipVerify: tlsSkipVerify,
 		tlsServerName: tlsServerName,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
+}
+
+// SetTopologyPublisher sets the topology publisher for forwarding updates upstream
+func (m *Manager) SetTopologyPublisher(publisher TopologyPublisher) {
+	m.topologyPublisher = publisher
 }
 
 // Register registers a downstream processor
@@ -176,12 +203,161 @@ func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatu
 	return node, nil
 }
 
-// Close closes all downstream connections
+// SubscribeToDownstream subscribes to topology updates from a downstream processor.
+// This should be called after a downstream processor registers to start receiving
+// real-time topology updates from it.
+func (m *Manager) SubscribeToDownstream(proc *ProcessorInfo) error {
+	// Create context for this subscription
+	ctx, cancel := context.WithCancel(m.ctx)
+	proc.TopologyCancel = cancel
+	proc.TopologyUpdateChan = make(chan *management.TopologyUpdate, 100)
+
+	// Subscribe to topology updates
+	req := &management.TopologySubscribeRequest{
+		IncludeDownstream: true,
+		ClientId:          m.getProcessorID(),
+	}
+
+	stream, err := proc.Client.SubscribeTopology(ctx, req)
+	if err != nil {
+		logger.Error("Failed to subscribe to downstream topology",
+			"processor_id", proc.ProcessorID,
+			"error", err)
+		cancel()
+		return err
+	}
+
+	proc.TopologyStream = stream
+	proc.TopologyStreamActive = true
+
+	logger.Info("Subscribed to downstream processor topology",
+		"processor_id", proc.ProcessorID,
+		"address", proc.ListenAddress)
+
+	// Start goroutine to receive topology updates
+	m.wg.Add(1)
+	go m.receiveTopologyUpdates(proc, stream)
+
+	return nil
+}
+
+// receiveTopologyUpdates receives topology updates from a downstream processor
+// and forwards them upstream. Runs until the stream is closed or context canceled.
+func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.ManagementService_SubscribeTopologyClient) {
+	defer m.wg.Done()
+	defer func() {
+		proc.TopologyStreamActive = false
+		close(proc.TopologyUpdateChan)
+	}()
+
+	for {
+		update, err := stream.Recv()
+		if err != nil {
+			logger.Warn("Topology stream closed from downstream processor",
+				"processor_id", proc.ProcessorID,
+				"error", err)
+
+			// Attempt automatic reconnection with backoff
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+				if err := m.reconnectTopologyStream(proc); err != nil {
+					logger.Error("Failed to reconnect topology stream",
+						"processor_id", proc.ProcessorID,
+						"error", err)
+					return
+				}
+				// Successfully reconnected, continue receiving
+				continue
+			}
+		}
+
+		// Forward update upstream via publisher
+		if m.topologyPublisher != nil {
+			m.topologyPublisher.PublishTopologyUpdate(update)
+		}
+
+		// Send to local channel (non-blocking)
+		select {
+		case proc.TopologyUpdateChan <- update:
+		default:
+			logger.Warn("Topology update channel full, dropping update",
+				"processor_id", proc.ProcessorID,
+				"update_type", update.UpdateType)
+		}
+
+		// Update last seen time
+		m.mu.Lock()
+		proc.LastSeen = time.Now()
+		m.mu.Unlock()
+	}
+}
+
+// reconnectTopologyStream attempts to reconnect the topology stream for a downstream processor
+func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	logger.Info("Reconnecting topology stream",
+		"processor_id", proc.ProcessorID)
+
+	// Cancel old stream if it exists
+	if proc.TopologyCancel != nil {
+		proc.TopologyCancel()
+	}
+
+	// Create new context for subscription
+	ctx, cancel := context.WithCancel(m.ctx)
+	proc.TopologyCancel = cancel
+
+	// Subscribe to topology updates
+	req := &management.TopologySubscribeRequest{
+		IncludeDownstream: true,
+		ClientId:          m.getProcessorID(),
+	}
+
+	stream, err := proc.Client.SubscribeTopology(ctx, req)
+	if err != nil {
+		cancel()
+		return err
+	}
+
+	proc.TopologyStream = stream
+	proc.TopologyStreamActive = true
+
+	logger.Info("Topology stream reconnected",
+		"processor_id", proc.ProcessorID)
+
+	return nil
+}
+
+// getProcessorID returns this processor's ID for use in subscription requests
+// This should be set during manager initialization
+func (m *Manager) getProcessorID() string {
+	// TODO: This should be configurable or passed during manager creation
+	// For now, return a placeholder
+	return "processor-upstream"
+}
+
+// Close closes all downstream connections and cancels topology subscriptions
 func (m *Manager) Close() {
+	// Cancel all topology subscriptions
+	m.cancel()
+
+	// Wait for all goroutines to finish
+	m.wg.Wait()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	for _, proc := range m.downstreams {
+		// Cancel topology subscription
+		if proc.TopologyCancel != nil {
+			proc.TopologyCancel()
+		}
+
+		// Close gRPC connection
 		if proc.Conn != nil {
 			_ = proc.Conn.Close()
 		}

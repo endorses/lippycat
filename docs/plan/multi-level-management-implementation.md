@@ -126,13 +126,13 @@ TUI → Processor A (root)
 ### Tasks
 
 #### 2.1
-- [ ] Enhance `internal/pkg/processor/downstream/manager.go`
-  - [ ] Add `ProcessorInfo.TopologyStream` field
-  - [ ] Add `ProcessorInfo.TopologyCancel` field
-  - [ ] Add `ProcessorInfo.TopologyUpdateChan` field
-  - [ ] Implement `SubscribeToDownstream(proc)` method
-  - [ ] Implement `receiveTopologyUpdates(proc, stream)` goroutine
-  - [ ] Add health monitoring for topology stream
+- [x] Enhance `internal/pkg/processor/downstream/manager.go`
+  - [x] Add `ProcessorInfo.TopologyStream` field
+  - [x] Add `ProcessorInfo.TopologyCancel` field
+  - [x] Add `ProcessorInfo.TopologyUpdateChan` field
+  - [x] Implement `SubscribeToDownstream(proc)` method
+  - [x] Implement `receiveTopologyUpdates(proc, stream)` goroutine
+  - [x] Add health monitoring for topology stream
 
 #### 2.2
 - [ ] Implement topology subscription lifecycle

@@ -1257,6 +1257,73 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 	return result, nil
 }
 
+// GetFiltersFromProcessor retrieves filters from a specific processor (Management Service)
+// Implements processor-scoped filter queries for multi-level management
+func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management.ProcessorFilterQuery) (*management.FilterResponse, error) {
+	logger.Info("Get filters from processor request",
+		"processor_id", req.ProcessorId,
+		"hunter_id", req.HunterId)
+
+	// Check if target is local processor
+	if req.ProcessorId == p.config.ProcessorID || req.ProcessorId == "" {
+		// Handle locally
+		logger.Debug("Target is local processor, handling directly")
+
+		filters := p.filterManager.GetForHunter(req.HunterId)
+
+		logger.Info("Filters retrieved from local processor",
+			"processor_id", req.ProcessorId,
+			"hunter_id", req.HunterId,
+			"filter_count", len(filters))
+
+		return &management.FilterResponse{
+			Filters: filters,
+		}, nil
+	}
+
+	// Target is a downstream processor - need to route the request
+	logger.Debug("Target is downstream processor, routing request",
+		"target_processor_id", req.ProcessorId)
+
+	// Find the downstream processor
+	downstream := p.downstreamManager.Get(req.ProcessorId)
+	if downstream == nil {
+		logger.Warn("Target processor not found",
+			"target_processor_id", req.ProcessorId)
+		return nil, status.Errorf(codes.NotFound,
+			"processor not found: %s", req.ProcessorId)
+	}
+
+	// Verify authorization token if present
+	if req.AuthToken != nil {
+		logger.Debug("Authorization token present, verifying",
+			"issuer_id", req.AuthToken.IssuerId)
+		// TODO: Implement token verification in phase 3.7
+		// For now, we accept the token without verification
+		// This will be implemented when auth.go has the verification methods
+	}
+
+	// Forward request to downstream processor
+	logger.Debug("Forwarding request to downstream processor",
+		"downstream_processor_id", downstream.ProcessorID,
+		"downstream_address", downstream.ListenAddress)
+
+	result, err := downstream.Client.GetFiltersFromProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter query to downstream",
+			"downstream_processor_id", downstream.ProcessorID,
+			"error", err)
+		return nil, status.Errorf(codes.Internal,
+			"failed to forward request to downstream processor: %v", err)
+	}
+
+	logger.Info("Filter query forwarded successfully",
+		"target_processor_id", req.ProcessorId,
+		"filter_count", len(result.Filters))
+
+	return result, nil
+}
+
 // GetStats returns current statistics
 func (p *Processor) GetStats() stats.Stats {
 	return p.statsCollector.Get()

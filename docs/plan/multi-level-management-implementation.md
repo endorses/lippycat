@@ -171,9 +171,9 @@ TUI → Processor A (root)
   - [ ] Track broadcast metrics
 
 #### 2.7
-- [ ] Wire up event flow
-  - [ ] Connect hunter manager to proxy manager publisher
-  - [ ] Connect downstream manager to proxy manager
+- [x] Wire up event flow
+  - [x] Connect hunter manager to proxy manager publisher
+  - [x] Connect downstream manager to proxy manager
   - [ ] Test event propagation: hunter → processor → upstream
 
 #### 2.8

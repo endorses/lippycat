@@ -307,6 +307,14 @@ func New(config Config) (*Processor, error) {
 		}
 	}
 
+	// Wire up topology event flow: hunter/downstream managers → proxy manager → subscribers
+	// This enables real-time topology updates to propagate upstream through the hierarchy
+	p.hunterManager.SetTopologyPublisher(p.proxyManager)
+	p.downstreamManager.SetTopologyPublisher(p.proxyManager)
+	logger.Debug("Topology event flow wired",
+		"hunter_manager", "connected",
+		"downstream_manager", "connected")
+
 	return p, nil
 }
 

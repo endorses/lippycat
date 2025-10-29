@@ -180,6 +180,14 @@ func (m *Manager) GetAll() []*ProcessorInfo {
 	return procs
 }
 
+// Get returns a downstream processor by ID, or nil if not found
+func (m *Manager) Get(processorID string) *ProcessorInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.downstreams[processorID]
+}
+
 // GetTopology recursively queries all downstream processors for their topology
 func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatus management.ProcessorStatus, myUpstream string, myHunters []*management.ConnectedHunter) (*management.ProcessorNode, error) {
 	m.mu.RLock()

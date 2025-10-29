@@ -200,12 +200,12 @@ TUI → Processor A (root)
 ### Tasks
 
 #### 3.1
-- [ ] Implement `UpdateFilterOnProcessor()` RPC handler
-  - [ ] Check if target is local processor (handle directly)
-  - [ ] Find downstream processor by ID
-  - [ ] Forward request via gRPC to downstream
-  - [ ] Verify authorization token
-  - [ ] Return result to caller
+- [x] Implement `UpdateFilterOnProcessor()` RPC handler
+  - [x] Check if target is local processor (handle directly)
+  - [x] Find downstream processor by ID
+  - [x] Forward request via gRPC to downstream
+  - [x] Verify authorization token (placeholder - full verification in phase 3.7)
+  - [x] Return result to caller
 
 #### 3.2
 - [ ] Implement `DeleteFilterOnProcessor()` RPC handler

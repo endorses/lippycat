@@ -184,3 +184,21 @@ func (m *Manager) broadcastTopologyUpdate(update *management.TopologyUpdate) {
 		}
 	}
 }
+
+// FindDownstreamForTarget searches the topology cache to find which downstream
+// processor is on the path to the target processor.
+// Returns the downstream processor ID, or empty string if not found.
+func (m *Manager) FindDownstreamForTarget(targetProcessorID string) string {
+	// First, check if target is a direct downstream
+	if proc := m.cache.GetProcessor(targetProcessorID); proc != nil {
+		// Found in cache - it's either this processor or a downstream
+		return targetProcessorID
+	}
+
+	// TODO: For phase 3, we need to search the full hierarchy tree
+	// For now, we only support direct downstream routing (one level)
+	// Full recursive routing will be implemented when topology cache
+	// stores the full hierarchy structure
+
+	return ""
+}

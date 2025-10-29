@@ -208,11 +208,11 @@ TUI → Processor A (root)
   - [x] Return result to caller
 
 #### 3.2
-- [ ] Implement `DeleteFilterOnProcessor()` RPC handler
-  - [ ] Check if target is local processor
-  - [ ] Route to downstream if needed
-  - [ ] Verify authorization token
-  - [ ] Return result
+- [x] Implement `DeleteFilterOnProcessor()` RPC handler
+  - [x] Check if target is local processor
+  - [x] Route to downstream if needed
+  - [x] Verify authorization token (placeholder - full verification in phase 3.7)
+  - [x] Return result
 
 #### 3.3
 - [ ] Implement `GetFiltersFromProcessor()` RPC handler

@@ -1187,6 +1187,76 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	return result, nil
 }
 
+// DeleteFilterOnProcessor removes a filter from a specific processor (Management Service)
+// Implements processor-scoped filter operations for multi-level management
+func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management.ProcessorFilterDeleteRequest) (*management.FilterUpdateResult, error) {
+	logger.Info("Delete filter on processor request",
+		"processor_id", req.ProcessorId,
+		"filter_id", req.FilterId)
+
+	// Check if target is local processor
+	if req.ProcessorId == p.config.ProcessorID || req.ProcessorId == "" {
+		// Handle locally
+		logger.Debug("Target is local processor, handling directly")
+
+		huntersUpdated, err := p.filterManager.Delete(req.FilterId)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to delete filter: %v", err)
+		}
+
+		logger.Info("Filter deleted on local processor",
+			"filter_id", req.FilterId,
+			"hunters_updated", huntersUpdated)
+
+		return &management.FilterUpdateResult{
+			Success:        true,
+			HuntersUpdated: huntersUpdated,
+		}, nil
+	}
+
+	// Target is a downstream processor - need to route the request
+	logger.Debug("Target is downstream processor, routing request",
+		"target_processor_id", req.ProcessorId)
+
+	// Find the downstream processor
+	downstream := p.downstreamManager.Get(req.ProcessorId)
+	if downstream == nil {
+		logger.Warn("Target processor not found",
+			"target_processor_id", req.ProcessorId)
+		return nil, status.Errorf(codes.NotFound,
+			"processor not found: %s", req.ProcessorId)
+	}
+
+	// Verify authorization token if present
+	if req.AuthToken != nil {
+		logger.Debug("Authorization token present, verifying",
+			"issuer_id", req.AuthToken.IssuerId)
+		// TODO: Implement token verification in phase 3.7
+		// For now, we accept the token without verification
+		// This will be implemented when auth.go has the verification methods
+	}
+
+	// Forward request to downstream processor
+	logger.Debug("Forwarding request to downstream processor",
+		"downstream_processor_id", downstream.ProcessorID,
+		"downstream_address", downstream.ListenAddress)
+
+	result, err := downstream.Client.DeleteFilterOnProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter delete to downstream",
+			"downstream_processor_id", downstream.ProcessorID,
+			"error", err)
+		return nil, status.Errorf(codes.Internal,
+			"failed to forward request to downstream processor: %v", err)
+	}
+
+	logger.Info("Filter delete forwarded successfully",
+		"target_processor_id", req.ProcessorId,
+		"hunters_updated", result.HuntersUpdated)
+
+	return result, nil
+}
+
 // GetStats returns current statistics
 func (p *Processor) GetStats() stats.Stats {
 	return p.statsCollector.Get()

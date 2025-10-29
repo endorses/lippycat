@@ -141,6 +141,29 @@ func (m *Manager) UnregisterSubscriber(subscriberID string) {
 	}
 }
 
+// PublishTopologyUpdate implements TopologyPublisher interface.
+// This method:
+// 1. Applies the update to the local topology cache
+// 2. Broadcasts the update to all active subscribers
+//
+// This is called by hunter manager and downstream manager when topology events occur.
+func (m *Manager) PublishTopologyUpdate(update *management.TopologyUpdate) {
+	if update == nil {
+		m.logger.Warn("received nil topology update, ignoring")
+		return
+	}
+
+	// Apply update to topology cache
+	m.cache.Apply(update)
+
+	// Broadcast to all subscribers
+	m.broadcastTopologyUpdate(update)
+
+	m.logger.Debug("published topology update",
+		"update_type", update.UpdateType,
+		"timestamp_ns", update.TimestampNs)
+}
+
 // broadcastTopologyUpdate sends a topology update to all active subscribers.
 // Uses non-blocking sends to prevent slow subscribers from blocking the broadcaster.
 //
@@ -156,7 +179,8 @@ func (m *Manager) broadcastTopologyUpdate(update *management.TopologyUpdate) {
 		default:
 			// Channel full, drop update
 			m.logger.Warn("dropped topology update for slow subscriber",
-				"subscriber_id", subscriberID)
+				"subscriber_id", subscriberID,
+				"update_type", update.UpdateType)
 		}
 	}
 }

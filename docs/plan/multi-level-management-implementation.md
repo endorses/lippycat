@@ -158,18 +158,16 @@ TUI → Processor A (root)
   - [x] Call `PublishHunterStatusChanged()` on status changes
 
 #### 2.5
-- [ ] Implement event publisher in proxy manager
-  - [ ] Implement `PublishHunterConnected(hunter)`
-  - [ ] Implement `PublishHunterDisconnected(hunterID, reason)`
-  - [ ] Implement `PublishFilterUpdated(hunterID, filter, updateType)`
-  - [ ] Update topology cache on each event
-  - [ ] Broadcast to all subscribers
+- [x] Implement event publisher in proxy manager
+  - [x] Implement `PublishTopologyUpdate(update)` method
+  - [x] Update topology cache on each event
+  - [x] Broadcast to all subscribers
 
 #### 2.6
-- [ ] Implement topology update broadcasting
-  - [ ] Create `broadcastTopologyUpdate(update)` method
-  - [ ] Non-blocking send to subscriber channels
-  - [ ] Drop updates for slow subscribers (with warning log)
+- [x] Implement topology update broadcasting
+  - [x] Create `broadcastTopologyUpdate(update)` method
+  - [x] Non-blocking send to subscriber channels
+  - [x] Drop updates for slow subscribers (with warning log)
   - [ ] Track broadcast metrics
 
 #### 2.7

@@ -8,6 +8,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -400,9 +401,11 @@ func (m *Manager) getProcessorID() string {
 //   - ctx: Context with timeout for the operation
 //   - downstreamID: The direct downstream processor to forward through
 //   - req: The original filter update request (target may be further downstream)
+//   - processorPath: Current processor path from root (for chain error context)
+//   - currentProcessorID: ID of this processor (for chain error context)
 //
 // Returns the filter update result or an error with chain context.
-func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterRequest) (*management.FilterUpdateResult, error) {
+func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterRequest, processorPath []string, currentProcessorID string) (*management.FilterUpdateResult, error) {
 	downstream := m.Get(downstreamID)
 	if downstream == nil {
 		logger.Error("Downstream processor not found for forwarding",
@@ -423,8 +426,11 @@ func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, 
 			"downstream_id", downstreamID,
 			"target_processor_id", req.ProcessorId,
 			"error", err)
-		return nil, fmt.Errorf("forward to %s (target: %s): %w",
-			downstreamID, req.ProcessorId, err)
+
+		// Build chain context for error
+		// If err is already a ChainError from downstream, preserve it
+		// Otherwise, create new ChainError with full context
+		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "UpdateFilter")
 	}
 
 	return result, nil
@@ -437,9 +443,11 @@ func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, 
 //   - ctx: Context with timeout for the operation
 //   - downstreamID: The direct downstream processor to forward through
 //   - req: The original filter delete request (target may be further downstream)
+//   - processorPath: Current processor path from root (for chain error context)
+//   - currentProcessorID: ID of this processor (for chain error context)
 //
 // Returns the filter update result or an error with chain context.
-func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterDeleteRequest) (*management.FilterUpdateResult, error) {
+func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterDeleteRequest, processorPath []string, currentProcessorID string) (*management.FilterUpdateResult, error) {
 	downstream := m.Get(downstreamID)
 	if downstream == nil {
 		logger.Error("Downstream processor not found for forwarding",
@@ -460,8 +468,9 @@ func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, 
 			"downstream_id", downstreamID,
 			"target_processor_id", req.ProcessorId,
 			"error", err)
-		return nil, fmt.Errorf("forward to %s (target: %s): %w",
-			downstreamID, req.ProcessorId, err)
+
+		// Build chain context for error
+		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "DeleteFilter")
 	}
 
 	return result, nil
@@ -474,9 +483,11 @@ func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, 
 //   - ctx: Context with timeout for the operation
 //   - downstreamID: The direct downstream processor to forward through
 //   - req: The original filter query request (target may be further downstream)
+//   - processorPath: Current processor path from root (for chain error context)
+//   - currentProcessorID: ID of this processor (for chain error context)
 //
 // Returns the filter response or an error with chain context.
-func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, req *management.ProcessorFilterQuery) (*management.FilterResponse, error) {
+func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, req *management.ProcessorFilterQuery, processorPath []string, currentProcessorID string) (*management.FilterResponse, error) {
 	downstream := m.Get(downstreamID)
 	if downstream == nil {
 		logger.Error("Downstream processor not found for forwarding",
@@ -497,11 +508,45 @@ func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, re
 			"downstream_id", downstreamID,
 			"target_processor_id", req.ProcessorId,
 			"error", err)
-		return nil, fmt.Errorf("forward to %s (target: %s): %w",
-			downstreamID, req.ProcessorId, err)
+
+		// Build chain context for error
+		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "GetFilters")
 	}
 
 	return result, nil
+}
+
+// wrapChainError wraps an error with chain context information.
+// If the error is already a ChainError, it is returned as-is (already has context).
+// Otherwise, a new ChainError is created with the current processor path.
+//
+// Parameters:
+//   - err: The error to wrap
+//   - processorPath: Current processor path from root
+//   - currentProcessorID: ID of this processor
+//   - downstreamID: ID of the downstream processor that was contacted
+//   - operation: Operation being performed (for context)
+func (m *Manager) wrapChainError(err error, processorPath []string, currentProcessorID, downstreamID, operation string) error {
+	// Check if error is already a ChainError
+	if chainErr, ok := proxy.IsChainError(err); ok {
+		// Already has chain context, return as-is
+		return chainErr
+	}
+
+	// Create new ChainError with full context
+	// Build processor path: existing path + current processor
+	fullPath := make([]string, len(processorPath)+1)
+	copy(fullPath, processorPath)
+	fullPath[len(fullPath)-1] = currentProcessorID
+
+	// The failed processor is the downstream we tried to contact
+	return proxy.NewChainErrorWithOperation(
+		operation,
+		fullPath,
+		downstreamID, // The downstream processor is where it failed
+		len(fullPath),
+		err,
+	)
 }
 
 // Close closes all downstream connections and cancels topology subscriptions

@@ -1124,8 +1124,15 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 		"type", req.Filter.Type,
 		"pattern", req.Filter.Pattern)
 
+	// Use proxy manager to determine routing
+	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
+	if err != nil {
+		// RouteToProcessor returns gRPC status errors
+		return nil, err
+	}
+
 	// Check if target is local processor
-	if req.ProcessorId == p.config.ProcessorID || req.ProcessorId == "" {
+	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
 
@@ -1146,16 +1153,9 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 
 	// Target is a downstream processor - need to route the request
 	logger.Debug("Target is downstream processor, routing request",
-		"target_processor_id", req.ProcessorId)
-
-	// Find the downstream processor
-	downstream := p.downstreamManager.Get(req.ProcessorId)
-	if downstream == nil {
-		logger.Warn("Target processor not found",
-			"target_processor_id", req.ProcessorId)
-		return nil, status.Errorf(codes.NotFound,
-			"processor not found: %s", req.ProcessorId)
-	}
+		"target_processor_id", req.ProcessorId,
+		"downstream_processor_id", routingDecision.DownstreamProcessorID,
+		"chain_depth", routingDecision.Depth)
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
@@ -1166,18 +1166,20 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 		// This will be implemented when auth.go has the verification methods
 	}
 
-	// Forward request to downstream processor
-	logger.Debug("Forwarding request to downstream processor",
-		"downstream_processor_id", downstream.ProcessorID,
-		"downstream_address", downstream.ListenAddress)
+	// Build processor path for chain error context
+	processorPath := []string{p.config.ProcessorID}
 
-	result, err := downstream.Client.UpdateFilterOnProcessor(ctx, req)
+	// Forward request using downstream manager (handles chain error wrapping)
+	result, err := p.downstreamManager.ForwardUpdateFilter(
+		ctx,
+		routingDecision.DownstreamProcessorID,
+		req,
+		processorPath,
+		p.config.ProcessorID,
+	)
 	if err != nil {
-		logger.Error("Failed to forward filter update to downstream",
-			"downstream_processor_id", downstream.ProcessorID,
-			"error", err)
-		return nil, status.Errorf(codes.Internal,
-			"failed to forward request to downstream processor: %v", err)
+		// Convert ChainError to gRPC status if needed
+		return nil, p.convertChainErrorToStatus(err)
 	}
 
 	logger.Info("Filter update forwarded successfully",
@@ -1194,8 +1196,15 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 		"processor_id", req.ProcessorId,
 		"filter_id", req.FilterId)
 
+	// Use proxy manager to determine routing
+	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
+	if err != nil {
+		// RouteToProcessor returns gRPC status errors
+		return nil, err
+	}
+
 	// Check if target is local processor
-	if req.ProcessorId == p.config.ProcessorID || req.ProcessorId == "" {
+	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
 
@@ -1216,16 +1225,9 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 
 	// Target is a downstream processor - need to route the request
 	logger.Debug("Target is downstream processor, routing request",
-		"target_processor_id", req.ProcessorId)
-
-	// Find the downstream processor
-	downstream := p.downstreamManager.Get(req.ProcessorId)
-	if downstream == nil {
-		logger.Warn("Target processor not found",
-			"target_processor_id", req.ProcessorId)
-		return nil, status.Errorf(codes.NotFound,
-			"processor not found: %s", req.ProcessorId)
-	}
+		"target_processor_id", req.ProcessorId,
+		"downstream_processor_id", routingDecision.DownstreamProcessorID,
+		"chain_depth", routingDecision.Depth)
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
@@ -1236,18 +1238,20 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 		// This will be implemented when auth.go has the verification methods
 	}
 
-	// Forward request to downstream processor
-	logger.Debug("Forwarding request to downstream processor",
-		"downstream_processor_id", downstream.ProcessorID,
-		"downstream_address", downstream.ListenAddress)
+	// Build processor path for chain error context
+	processorPath := []string{p.config.ProcessorID}
 
-	result, err := downstream.Client.DeleteFilterOnProcessor(ctx, req)
+	// Forward request using downstream manager (handles chain error wrapping)
+	result, err := p.downstreamManager.ForwardDeleteFilter(
+		ctx,
+		routingDecision.DownstreamProcessorID,
+		req,
+		processorPath,
+		p.config.ProcessorID,
+	)
 	if err != nil {
-		logger.Error("Failed to forward filter delete to downstream",
-			"downstream_processor_id", downstream.ProcessorID,
-			"error", err)
-		return nil, status.Errorf(codes.Internal,
-			"failed to forward request to downstream processor: %v", err)
+		// Convert ChainError to gRPC status if needed
+		return nil, p.convertChainErrorToStatus(err)
 	}
 
 	logger.Info("Filter delete forwarded successfully",
@@ -1264,8 +1268,15 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 		"processor_id", req.ProcessorId,
 		"hunter_id", req.HunterId)
 
+	// Use proxy manager to determine routing
+	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
+	if err != nil {
+		// RouteToProcessor returns gRPC status errors
+		return nil, err
+	}
+
 	// Check if target is local processor
-	if req.ProcessorId == p.config.ProcessorID || req.ProcessorId == "" {
+	if routingDecision.IsLocal {
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
 
@@ -1283,16 +1294,9 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 
 	// Target is a downstream processor - need to route the request
 	logger.Debug("Target is downstream processor, routing request",
-		"target_processor_id", req.ProcessorId)
-
-	// Find the downstream processor
-	downstream := p.downstreamManager.Get(req.ProcessorId)
-	if downstream == nil {
-		logger.Warn("Target processor not found",
-			"target_processor_id", req.ProcessorId)
-		return nil, status.Errorf(codes.NotFound,
-			"processor not found: %s", req.ProcessorId)
-	}
+		"target_processor_id", req.ProcessorId,
+		"downstream_processor_id", routingDecision.DownstreamProcessorID,
+		"chain_depth", routingDecision.Depth)
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
@@ -1303,18 +1307,20 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 		// This will be implemented when auth.go has the verification methods
 	}
 
-	// Forward request to downstream processor
-	logger.Debug("Forwarding request to downstream processor",
-		"downstream_processor_id", downstream.ProcessorID,
-		"downstream_address", downstream.ListenAddress)
+	// Build processor path for chain error context
+	processorPath := []string{p.config.ProcessorID}
 
-	result, err := downstream.Client.GetFiltersFromProcessor(ctx, req)
+	// Forward request using downstream manager (handles chain error wrapping)
+	result, err := p.downstreamManager.ForwardGetFilters(
+		ctx,
+		routingDecision.DownstreamProcessorID,
+		req,
+		processorPath,
+		p.config.ProcessorID,
+	)
 	if err != nil {
-		logger.Error("Failed to forward filter query to downstream",
-			"downstream_processor_id", downstream.ProcessorID,
-			"error", err)
-		return nil, status.Errorf(codes.Internal,
-			"failed to forward request to downstream processor: %v", err)
+		// Convert ChainError to gRPC status if needed
+		return nil, p.convertChainErrorToStatus(err)
 	}
 
 	logger.Info("Filter query forwarded successfully",
@@ -1322,6 +1328,32 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 		"filter_count", len(result.Filters))
 
 	return result, nil
+}
+
+// convertChainErrorToStatus converts a ChainError to a gRPC status error.
+// If the error is not a ChainError, it returns the error wrapped in a standard status.
+//
+// This helper ensures that chain errors are properly converted with full context
+// preserved in the gRPC error message.
+func (p *Processor) convertChainErrorToStatus(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	// Check if error is a ChainError
+	if chainErr, ok := proxy.IsChainError(err); ok {
+		// Convert using ChainError's GRPCStatus method
+		return chainErr.GRPCStatus().Err()
+	}
+
+	// Not a ChainError, wrap in standard gRPC status
+	// Try to preserve existing gRPC status code if present
+	if st, ok := status.FromError(err); ok {
+		return st.Err()
+	}
+
+	// Default to Internal error
+	return status.Errorf(codes.Internal, "%v", err)
 }
 
 // GetStats returns current statistics

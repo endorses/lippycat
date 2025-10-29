@@ -236,11 +236,11 @@ TUI → Processor A (root)
   - [x] Error propagation with chain context
 
 #### 3.6
-- [ ] Implement error context for chains
-  - [ ] Create `ChainError` type with processor path
-  - [ ] Track which processor failed in chain
-  - [ ] Include chain depth in error
-  - [ ] Return detailed error to client
+- [x] Implement error context for chains
+  - [x] Create `ChainError` type with processor path
+  - [x] Track which processor failed in chain
+  - [x] Include chain depth in error
+  - [x] Return detailed error to client
 
 #### 3.7
 - [ ] Add authorization checks

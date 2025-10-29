@@ -192,18 +192,57 @@ func (m *Manager) broadcastTopologyUpdate(update *management.TopologyUpdate) {
 // FindDownstreamForTarget searches the topology cache to find which downstream
 // processor is on the path to the target processor.
 // Returns the downstream processor ID, or empty string if not found.
+//
+// This method implements recursive routing by walking up the processor hierarchy
+// from the target processor until it finds a direct child of this processor.
+//
+// Example hierarchy:
+//
+//	Processor A (this)
+//	  └─ Processor B (direct child)
+//	      └─ Processor C (indirect child)
+//
+// FindDownstreamForTarget("processor-c") returns "processor-b"
+// FindDownstreamForTarget("processor-b") returns "processor-b"
 func (m *Manager) FindDownstreamForTarget(targetProcessorID string) string {
-	// First, check if target is a direct downstream
-	if proc := m.cache.GetProcessor(targetProcessorID); proc != nil {
-		// Found in cache - it's either this processor or a downstream
-		return targetProcessorID
+	// Look up target processor in topology cache
+	targetProc := m.cache.GetProcessor(targetProcessorID)
+	if targetProc == nil {
+		m.logger.Warn("target processor not found in topology cache",
+			"target_processor_id", targetProcessorID)
+		return ""
 	}
 
-	// TODO: For phase 3, we need to search the full hierarchy tree
-	// For now, we only support direct downstream routing (one level)
-	// Full recursive routing will be implemented when topology cache
-	// stores the full hierarchy structure
+	// Walk up the hierarchy from target to find the direct downstream
+	// that is on the path to the target
+	currentID := targetProcessorID
+	currentProc := targetProc
 
+	// Keep walking up until we find a processor whose parent is this processor
+	for currentProc != nil {
+		// Check if this processor's parent is this processor (direct child)
+		if currentProc.ParentID == m.processorID {
+			m.logger.Debug("found downstream processor for target",
+				"target_processor_id", targetProcessorID,
+				"downstream_processor_id", currentID)
+			return currentID
+		}
+
+		// If parent is empty, we've reached the root without finding this processor
+		if currentProc.ParentID == "" {
+			m.logger.Warn("reached root processor without finding path",
+				"target_processor_id", targetProcessorID,
+				"current_processor_id", currentID)
+			return ""
+		}
+
+		// Move up to parent
+		currentID = currentProc.ParentID
+		currentProc = m.cache.GetProcessor(currentID)
+	}
+
+	m.logger.Warn("could not find downstream route to target (broken chain)",
+		"target_processor_id", targetProcessorID)
 	return ""
 }
 

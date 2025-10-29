@@ -2,6 +2,7 @@ package downstream
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -390,6 +391,117 @@ func (m *Manager) getProcessorID() string {
 	// TODO: This should be configurable or passed during manager creation
 	// For now, return a placeholder
 	return "processor-upstream"
+}
+
+// ForwardUpdateFilter forwards a filter update operation to a downstream processor.
+// This is used for recursive routing where the target may not be a direct downstream.
+//
+// Parameters:
+//   - ctx: Context with timeout for the operation
+//   - downstreamID: The direct downstream processor to forward through
+//   - req: The original filter update request (target may be further downstream)
+//
+// Returns the filter update result or an error with chain context.
+func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterRequest) (*management.FilterUpdateResult, error) {
+	downstream := m.Get(downstreamID)
+	if downstream == nil {
+		logger.Error("Downstream processor not found for forwarding",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId)
+		return nil, fmt.Errorf("downstream processor not found: %s (target: %s)",
+			downstreamID, req.ProcessorId)
+	}
+
+	logger.Info("Forwarding filter update operation",
+		"downstream_id", downstreamID,
+		"target_processor_id", req.ProcessorId,
+		"filter_id", req.Filter.Id)
+
+	result, err := downstream.Client.UpdateFilterOnProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter update",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId,
+			"error", err)
+		return nil, fmt.Errorf("forward to %s (target: %s): %w",
+			downstreamID, req.ProcessorId, err)
+	}
+
+	return result, nil
+}
+
+// ForwardDeleteFilter forwards a filter deletion operation to a downstream processor.
+// This is used for recursive routing where the target may not be a direct downstream.
+//
+// Parameters:
+//   - ctx: Context with timeout for the operation
+//   - downstreamID: The direct downstream processor to forward through
+//   - req: The original filter delete request (target may be further downstream)
+//
+// Returns the filter update result or an error with chain context.
+func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterDeleteRequest) (*management.FilterUpdateResult, error) {
+	downstream := m.Get(downstreamID)
+	if downstream == nil {
+		logger.Error("Downstream processor not found for forwarding",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId)
+		return nil, fmt.Errorf("downstream processor not found: %s (target: %s)",
+			downstreamID, req.ProcessorId)
+	}
+
+	logger.Info("Forwarding filter delete operation",
+		"downstream_id", downstreamID,
+		"target_processor_id", req.ProcessorId,
+		"filter_id", req.FilterId)
+
+	result, err := downstream.Client.DeleteFilterOnProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter delete",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId,
+			"error", err)
+		return nil, fmt.Errorf("forward to %s (target: %s): %w",
+			downstreamID, req.ProcessorId, err)
+	}
+
+	return result, nil
+}
+
+// ForwardGetFilters forwards a filter query operation to a downstream processor.
+// This is used for recursive routing where the target may not be a direct downstream.
+//
+// Parameters:
+//   - ctx: Context with timeout for the operation
+//   - downstreamID: The direct downstream processor to forward through
+//   - req: The original filter query request (target may be further downstream)
+//
+// Returns the filter response or an error with chain context.
+func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, req *management.ProcessorFilterQuery) (*management.FilterResponse, error) {
+	downstream := m.Get(downstreamID)
+	if downstream == nil {
+		logger.Error("Downstream processor not found for forwarding",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId)
+		return nil, fmt.Errorf("downstream processor not found: %s (target: %s)",
+			downstreamID, req.ProcessorId)
+	}
+
+	logger.Info("Forwarding filter query operation",
+		"downstream_id", downstreamID,
+		"target_processor_id", req.ProcessorId,
+		"hunter_id", req.HunterId)
+
+	result, err := downstream.Client.GetFiltersFromProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter query",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId,
+			"error", err)
+		return nil, fmt.Errorf("forward to %s (target: %s): %w",
+			downstreamID, req.ProcessorId, err)
+	}
+
+	return result, nil
 }
 
 // Close closes all downstream connections and cancels topology subscriptions

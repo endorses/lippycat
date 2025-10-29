@@ -230,10 +230,10 @@ TUI → Processor A (root)
   - [x] Additional helper methods: CalculateChainTimeout, FormatRoutingError
 
 #### 3.5
-- [ ] Enhance downstream manager for operation forwarding
-  - [ ] Add `ForwardFilterOperation(targetID, operation)` method
-  - [ ] Recursive routing (if target not direct child)
-  - [ ] Error propagation with chain context
+- [x] Enhance downstream manager for operation forwarding
+  - [x] Add `ForwardFilterOperation(targetID, operation)` method
+  - [x] Recursive routing (if target not direct child)
+  - [x] Error propagation with chain context
 
 #### 3.6
 - [ ] Implement error context for chains

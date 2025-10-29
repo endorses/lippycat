@@ -250,11 +250,11 @@ TUI → Processor A (root)
   - [x] Log authorization attempts (audit trail)
 
 #### 3.8
-- [ ] Implement audit logging
-  - [ ] Log all proxied operations (requester, target, operation)
-  - [ ] Log authorization successes and failures
-  - [ ] Log operation results
-  - [ ] Include chain depth in logs
+- [x] Implement audit logging
+  - [x] Log all proxied operations (requester, target, operation)
+  - [x] Log authorization successes and failures
+  - [x] Log operation results
+  - [x] Include chain depth in logs
 
 #### 3.9
 - [ ] Write integration tests

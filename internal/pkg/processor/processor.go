@@ -36,6 +36,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -1118,16 +1119,20 @@ func (p *Processor) DeleteFilter(ctx context.Context, req *management.FilterDele
 // UpdateFilterOnProcessor adds or modifies a filter on a specific processor (Management Service)
 // Implements processor-scoped filter operations for multi-level management
 func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management.ProcessorFilterRequest) (*management.FilterUpdateResult, error) {
-	logger.Info("Update filter on processor request",
-		"processor_id", req.ProcessorId,
+	// Extract audit context for logging
+	audit := extractAuditContext(ctx, "UpdateFilter")
+
+	// Log operation start with filter details
+	logAuditOperationStart(audit, req.ProcessorId,
 		"filter_id", req.Filter.Id,
-		"type", req.Filter.Type,
-		"pattern", req.Filter.Pattern)
+		"filter_type", req.Filter.Type,
+		"filter_pattern", req.Filter.Pattern)
 
 	// Use proxy manager to determine routing
 	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
 	if err != nil {
 		// RouteToProcessor returns gRPC status errors
+		logAuditOperationResult(audit, req.ProcessorId, false, err, "reason", "routing_failed")
 		return nil, err
 	}
 
@@ -1138,12 +1143,16 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 
 		huntersUpdated, err := p.filterManager.Update(req.Filter)
 		if err != nil {
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"filter_id", req.Filter.Id,
+				"chain_depth", 0)
 			return nil, status.Errorf(codes.Internal, "failed to update filter: %v", err)
 		}
 
-		logger.Info("Filter updated on local processor",
+		logAuditOperationResult(audit, req.ProcessorId, true, nil,
 			"filter_id", req.Filter.Id,
-			"hunters_updated", huntersUpdated)
+			"hunters_updated", huntersUpdated,
+			"chain_depth", 0)
 
 		return &management.FilterUpdateResult{
 			Success:        true,
@@ -1159,36 +1168,28 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
-		logger.Info("Verifying authorization token",
-			"issuer_id", req.AuthToken.IssuerId,
-			"target_processor_id", req.ProcessorId,
-			"operation", "UpdateFilter")
-
 		// Convert protobuf token to internal type
 		token, err := proxy.ConvertProtoToken(req.AuthToken)
 		if err != nil {
-			logger.Warn("Authorization token conversion failed",
-				"error", err,
-				"target_processor_id", req.ProcessorId,
-				"operation", "UpdateFilter")
+			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), routingDecision.Depth)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "invalid_auth_token",
+				"chain_depth", routingDecision.Depth)
 			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
 		}
 
 		// Verify token signature and expiration
 		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
-			logger.Warn("Authorization token verification failed",
-				"error", err,
-				"target_processor_id", req.ProcessorId,
+			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), routingDecision.Depth)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "auth_verification_failed",
 				"issuer_id", req.AuthToken.IssuerId,
-				"operation", "UpdateFilter",
-				"expires_at", token.ExpiresAt)
+				"expires_at", token.ExpiresAt,
+				"chain_depth", routingDecision.Depth)
 			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
 		}
 
-		logger.Info("Authorization token verified successfully",
-			"target_processor_id", req.ProcessorId,
-			"issuer_id", req.AuthToken.IssuerId,
-			"operation", "UpdateFilter")
+		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, routingDecision.Depth)
 	}
 
 	// Build processor path for chain error context
@@ -1203,13 +1204,18 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 		p.config.ProcessorID,
 	)
 	if err != nil {
+		logAuditOperationResult(audit, req.ProcessorId, false, err,
+			"reason", "forward_failed",
+			"downstream_processor_id", routingDecision.DownstreamProcessorID,
+			"chain_depth", routingDecision.Depth)
 		// Convert ChainError to gRPC status if needed
 		return nil, p.convertChainErrorToStatus(err)
 	}
 
-	logger.Info("Filter update forwarded successfully",
-		"target_processor_id", req.ProcessorId,
-		"hunters_updated", result.HuntersUpdated)
+	logAuditOperationResult(audit, req.ProcessorId, true, nil,
+		"filter_id", req.Filter.Id,
+		"hunters_updated", result.HuntersUpdated,
+		"chain_depth", routingDecision.Depth)
 
 	return result, nil
 }
@@ -1217,14 +1223,18 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 // DeleteFilterOnProcessor removes a filter from a specific processor (Management Service)
 // Implements processor-scoped filter operations for multi-level management
 func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management.ProcessorFilterDeleteRequest) (*management.FilterUpdateResult, error) {
-	logger.Info("Delete filter on processor request",
-		"processor_id", req.ProcessorId,
+	// Extract audit context for logging
+	audit := extractAuditContext(ctx, "DeleteFilter")
+
+	// Log operation start
+	logAuditOperationStart(audit, req.ProcessorId,
 		"filter_id", req.FilterId)
 
 	// Use proxy manager to determine routing
 	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
 	if err != nil {
 		// RouteToProcessor returns gRPC status errors
+		logAuditOperationResult(audit, req.ProcessorId, false, err, "reason", "routing_failed")
 		return nil, err
 	}
 
@@ -1235,12 +1245,16 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 
 		huntersUpdated, err := p.filterManager.Delete(req.FilterId)
 		if err != nil {
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"filter_id", req.FilterId,
+				"chain_depth", 0)
 			return nil, status.Errorf(codes.Internal, "failed to delete filter: %v", err)
 		}
 
-		logger.Info("Filter deleted on local processor",
+		logAuditOperationResult(audit, req.ProcessorId, true, nil,
 			"filter_id", req.FilterId,
-			"hunters_updated", huntersUpdated)
+			"hunters_updated", huntersUpdated,
+			"chain_depth", 0)
 
 		return &management.FilterUpdateResult{
 			Success:        true,
@@ -1256,36 +1270,28 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
-		logger.Info("Verifying authorization token",
-			"issuer_id", req.AuthToken.IssuerId,
-			"target_processor_id", req.ProcessorId,
-			"operation", "DeleteFilter")
-
 		// Convert protobuf token to internal type
 		token, err := proxy.ConvertProtoToken(req.AuthToken)
 		if err != nil {
-			logger.Warn("Authorization token conversion failed",
-				"error", err,
-				"target_processor_id", req.ProcessorId,
-				"operation", "DeleteFilter")
+			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), routingDecision.Depth)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "invalid_auth_token",
+				"chain_depth", routingDecision.Depth)
 			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
 		}
 
 		// Verify token signature and expiration
 		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
-			logger.Warn("Authorization token verification failed",
-				"error", err,
-				"target_processor_id", req.ProcessorId,
+			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), routingDecision.Depth)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "auth_verification_failed",
 				"issuer_id", req.AuthToken.IssuerId,
-				"operation", "DeleteFilter",
-				"expires_at", token.ExpiresAt)
+				"expires_at", token.ExpiresAt,
+				"chain_depth", routingDecision.Depth)
 			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
 		}
 
-		logger.Info("Authorization token verified successfully",
-			"target_processor_id", req.ProcessorId,
-			"issuer_id", req.AuthToken.IssuerId,
-			"operation", "DeleteFilter")
+		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, routingDecision.Depth)
 	}
 
 	// Build processor path for chain error context
@@ -1300,13 +1306,18 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 		p.config.ProcessorID,
 	)
 	if err != nil {
+		logAuditOperationResult(audit, req.ProcessorId, false, err,
+			"reason", "forward_failed",
+			"downstream_processor_id", routingDecision.DownstreamProcessorID,
+			"chain_depth", routingDecision.Depth)
 		// Convert ChainError to gRPC status if needed
 		return nil, p.convertChainErrorToStatus(err)
 	}
 
-	logger.Info("Filter delete forwarded successfully",
-		"target_processor_id", req.ProcessorId,
-		"hunters_updated", result.HuntersUpdated)
+	logAuditOperationResult(audit, req.ProcessorId, true, nil,
+		"filter_id", req.FilterId,
+		"hunters_updated", result.HuntersUpdated,
+		"chain_depth", routingDecision.Depth)
 
 	return result, nil
 }
@@ -1314,14 +1325,18 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 // GetFiltersFromProcessor retrieves filters from a specific processor (Management Service)
 // Implements processor-scoped filter queries for multi-level management
 func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management.ProcessorFilterQuery) (*management.FilterResponse, error) {
-	logger.Info("Get filters from processor request",
-		"processor_id", req.ProcessorId,
+	// Extract audit context for logging
+	audit := extractAuditContext(ctx, "GetFilters")
+
+	// Log operation start
+	logAuditOperationStart(audit, req.ProcessorId,
 		"hunter_id", req.HunterId)
 
 	// Use proxy manager to determine routing
 	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
 	if err != nil {
 		// RouteToProcessor returns gRPC status errors
+		logAuditOperationResult(audit, req.ProcessorId, false, err, "reason", "routing_failed")
 		return nil, err
 	}
 
@@ -1332,10 +1347,10 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 
 		filters := p.filterManager.GetForHunter(req.HunterId)
 
-		logger.Info("Filters retrieved from local processor",
-			"processor_id", req.ProcessorId,
+		logAuditOperationResult(audit, req.ProcessorId, true, nil,
 			"hunter_id", req.HunterId,
-			"filter_count", len(filters))
+			"filter_count", len(filters),
+			"chain_depth", 0)
 
 		return &management.FilterResponse{
 			Filters: filters,
@@ -1350,36 +1365,28 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
-		logger.Info("Verifying authorization token",
-			"issuer_id", req.AuthToken.IssuerId,
-			"target_processor_id", req.ProcessorId,
-			"operation", "GetFilters")
-
 		// Convert protobuf token to internal type
 		token, err := proxy.ConvertProtoToken(req.AuthToken)
 		if err != nil {
-			logger.Warn("Authorization token conversion failed",
-				"error", err,
-				"target_processor_id", req.ProcessorId,
-				"operation", "GetFilters")
+			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), routingDecision.Depth)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "invalid_auth_token",
+				"chain_depth", routingDecision.Depth)
 			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
 		}
 
 		// Verify token signature and expiration
 		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
-			logger.Warn("Authorization token verification failed",
-				"error", err,
-				"target_processor_id", req.ProcessorId,
+			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), routingDecision.Depth)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "auth_verification_failed",
 				"issuer_id", req.AuthToken.IssuerId,
-				"operation", "GetFilters",
-				"expires_at", token.ExpiresAt)
+				"expires_at", token.ExpiresAt,
+				"chain_depth", routingDecision.Depth)
 			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
 		}
 
-		logger.Info("Authorization token verified successfully",
-			"target_processor_id", req.ProcessorId,
-			"issuer_id", req.AuthToken.IssuerId,
-			"operation", "GetFilters")
+		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, routingDecision.Depth)
 	}
 
 	// Build processor path for chain error context
@@ -1394,13 +1401,18 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 		p.config.ProcessorID,
 	)
 	if err != nil {
+		logAuditOperationResult(audit, req.ProcessorId, false, err,
+			"reason", "forward_failed",
+			"downstream_processor_id", routingDecision.DownstreamProcessorID,
+			"chain_depth", routingDecision.Depth)
 		// Convert ChainError to gRPC status if needed
 		return nil, p.convertChainErrorToStatus(err)
 	}
 
-	logger.Info("Filter query forwarded successfully",
-		"target_processor_id", req.ProcessorId,
-		"filter_count", len(result.Filters))
+	logAuditOperationResult(audit, req.ProcessorId, true, nil,
+		"hunter_id", req.HunterId,
+		"filter_count", len(result.Filters),
+		"chain_depth", routingDecision.Depth)
 
 	return result, nil
 }
@@ -1641,4 +1653,94 @@ func createReuseAddrListener(network, address string) (net.Listener, error) {
 		},
 	}
 	return lc.Listen(context.Background(), network, address)
+}
+
+// auditContext extracts requester information from gRPC context for audit logging
+type auditContext struct {
+	RemoteAddr string
+	CommonName string
+	Operation  string
+}
+
+// extractAuditContext extracts audit information from gRPC context
+func extractAuditContext(ctx context.Context, operation string) auditContext {
+	audit := auditContext{
+		Operation:  operation,
+		RemoteAddr: "unknown",
+		CommonName: "unknown",
+	}
+
+	// Extract peer information (remote address)
+	if p, ok := peer.FromContext(ctx); ok {
+		audit.RemoteAddr = p.Addr.String()
+
+		// Extract TLS certificate info if present
+		if tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+			if len(tlsInfo.State.PeerCertificates) > 0 {
+				cert := tlsInfo.State.PeerCertificates[0]
+				audit.CommonName = cert.Subject.CommonName
+			}
+		}
+	}
+
+	return audit
+}
+
+// logAuditOperationStart logs the start of an audited operation
+func logAuditOperationStart(audit auditContext, targetProcessorID string, additionalFields ...any) {
+	fields := []any{
+		"audit", "operation_start",
+		"operation", audit.Operation,
+		"requester_addr", audit.RemoteAddr,
+		"requester_cn", audit.CommonName,
+		"target_processor_id", targetProcessorID,
+	}
+	fields = append(fields, additionalFields...)
+	logger.Info("AUDIT: Operation started", fields...)
+}
+
+// logAuditAuthSuccess logs successful authorization
+func logAuditAuthSuccess(audit auditContext, targetProcessorID, issuerID string, chainDepth int32) {
+	logger.Info("AUDIT: Authorization successful",
+		"audit", "auth_success",
+		"operation", audit.Operation,
+		"requester_addr", audit.RemoteAddr,
+		"requester_cn", audit.CommonName,
+		"target_processor_id", targetProcessorID,
+		"issuer_id", issuerID,
+		"chain_depth", chainDepth)
+}
+
+// logAuditAuthFailure logs failed authorization
+func logAuditAuthFailure(audit auditContext, targetProcessorID string, reason string, chainDepth int32) {
+	logger.Warn("AUDIT: Authorization failed",
+		"audit", "auth_failure",
+		"operation", audit.Operation,
+		"requester_addr", audit.RemoteAddr,
+		"requester_cn", audit.CommonName,
+		"target_processor_id", targetProcessorID,
+		"reason", reason,
+		"chain_depth", chainDepth)
+}
+
+// logAuditOperationResult logs the result of an audited operation
+func logAuditOperationResult(audit auditContext, targetProcessorID string, success bool, err error, additionalFields ...any) {
+	fields := []any{
+		"audit", "operation_result",
+		"operation", audit.Operation,
+		"requester_addr", audit.RemoteAddr,
+		"requester_cn", audit.CommonName,
+		"target_processor_id", targetProcessorID,
+		"success", success,
+	}
+	if err != nil {
+		fields = append(fields, "error", err.Error())
+	}
+	fields = append(fields, additionalFields...)
+
+	if success {
+		logger.Info("AUDIT: Operation completed successfully", fields...)
+	} else {
+		logger.Warn("AUDIT: Operation failed", fields...)
+	}
 }

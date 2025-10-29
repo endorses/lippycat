@@ -243,11 +243,11 @@ TUI → Processor A (root)
   - [x] Return detailed error to client
 
 #### 3.7
-- [ ] Add authorization checks
-  - [ ] Verify token at each hop
-  - [ ] Check token expiration
-  - [ ] Verify signature from root processor
-  - [ ] Log authorization attempts (audit trail)
+- [x] Add authorization checks
+  - [x] Verify token at each hop
+  - [x] Check token expiration
+  - [x] Verify signature from root processor
+  - [x] Log authorization attempts (audit trail)
 
 #### 3.8
 - [ ] Implement audit logging

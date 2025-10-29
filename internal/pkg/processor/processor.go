@@ -1159,11 +1159,36 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
-		logger.Debug("Authorization token present, verifying",
-			"issuer_id", req.AuthToken.IssuerId)
-		// TODO: Implement token verification in phase 3.7
-		// For now, we accept the token without verification
-		// This will be implemented when auth.go has the verification methods
+		logger.Info("Verifying authorization token",
+			"issuer_id", req.AuthToken.IssuerId,
+			"target_processor_id", req.ProcessorId,
+			"operation", "UpdateFilter")
+
+		// Convert protobuf token to internal type
+		token, err := proxy.ConvertProtoToken(req.AuthToken)
+		if err != nil {
+			logger.Warn("Authorization token conversion failed",
+				"error", err,
+				"target_processor_id", req.ProcessorId,
+				"operation", "UpdateFilter")
+			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
+		}
+
+		// Verify token signature and expiration
+		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
+			logger.Warn("Authorization token verification failed",
+				"error", err,
+				"target_processor_id", req.ProcessorId,
+				"issuer_id", req.AuthToken.IssuerId,
+				"operation", "UpdateFilter",
+				"expires_at", token.ExpiresAt)
+			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
+		}
+
+		logger.Info("Authorization token verified successfully",
+			"target_processor_id", req.ProcessorId,
+			"issuer_id", req.AuthToken.IssuerId,
+			"operation", "UpdateFilter")
 	}
 
 	// Build processor path for chain error context
@@ -1231,11 +1256,36 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
-		logger.Debug("Authorization token present, verifying",
-			"issuer_id", req.AuthToken.IssuerId)
-		// TODO: Implement token verification in phase 3.7
-		// For now, we accept the token without verification
-		// This will be implemented when auth.go has the verification methods
+		logger.Info("Verifying authorization token",
+			"issuer_id", req.AuthToken.IssuerId,
+			"target_processor_id", req.ProcessorId,
+			"operation", "DeleteFilter")
+
+		// Convert protobuf token to internal type
+		token, err := proxy.ConvertProtoToken(req.AuthToken)
+		if err != nil {
+			logger.Warn("Authorization token conversion failed",
+				"error", err,
+				"target_processor_id", req.ProcessorId,
+				"operation", "DeleteFilter")
+			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
+		}
+
+		// Verify token signature and expiration
+		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
+			logger.Warn("Authorization token verification failed",
+				"error", err,
+				"target_processor_id", req.ProcessorId,
+				"issuer_id", req.AuthToken.IssuerId,
+				"operation", "DeleteFilter",
+				"expires_at", token.ExpiresAt)
+			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
+		}
+
+		logger.Info("Authorization token verified successfully",
+			"target_processor_id", req.ProcessorId,
+			"issuer_id", req.AuthToken.IssuerId,
+			"operation", "DeleteFilter")
 	}
 
 	// Build processor path for chain error context
@@ -1300,11 +1350,36 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
-		logger.Debug("Authorization token present, verifying",
-			"issuer_id", req.AuthToken.IssuerId)
-		// TODO: Implement token verification in phase 3.7
-		// For now, we accept the token without verification
-		// This will be implemented when auth.go has the verification methods
+		logger.Info("Verifying authorization token",
+			"issuer_id", req.AuthToken.IssuerId,
+			"target_processor_id", req.ProcessorId,
+			"operation", "GetFilters")
+
+		// Convert protobuf token to internal type
+		token, err := proxy.ConvertProtoToken(req.AuthToken)
+		if err != nil {
+			logger.Warn("Authorization token conversion failed",
+				"error", err,
+				"target_processor_id", req.ProcessorId,
+				"operation", "GetFilters")
+			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
+		}
+
+		// Verify token signature and expiration
+		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
+			logger.Warn("Authorization token verification failed",
+				"error", err,
+				"target_processor_id", req.ProcessorId,
+				"issuer_id", req.AuthToken.IssuerId,
+				"operation", "GetFilters",
+				"expires_at", token.ExpiresAt)
+			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
+		}
+
+		logger.Info("Authorization token verified successfully",
+			"target_processor_id", req.ProcessorId,
+			"issuer_id", req.AuthToken.IssuerId,
+			"operation", "GetFilters")
 	}
 
 	// Build processor path for chain error context

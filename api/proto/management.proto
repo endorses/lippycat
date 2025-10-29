@@ -326,18 +326,24 @@ message FilterDeleteRequest {
 // When a top-level processor issues management commands to deep downstream processors,
 // intermediate processors validate this token to authorize the operation.
 message AuthorizationToken {
-    // Cryptographic signature (HMAC-SHA256) of the request
-    // Signed by the originating processor using a shared secret
+    // Cryptographic signature (RSA-SHA256) of the token
+    // Signed by the root processor using its TLS private key
     bytes signature = 1;
 
     // Timestamp when token was issued (Unix nanoseconds)
     int64 issued_at_ns = 2;
 
-    // Processor ID of the originating processor
-    string issuer_id = 3;
+    // Timestamp when token expires (Unix nanoseconds)
+    int64 expires_at_ns = 3;
+
+    // Target processor ID that this token authorizes operations for
+    string target_processor_id = 4;
+
+    // Processor ID of the root processor that issued this token (for auditing)
+    string issuer_id = 5;
 
     // Chain of processor IDs from issuer to target (for auditing)
-    repeated string processor_chain = 4;
+    repeated string processor_chain = 6;
 }
 
 // ProcessorFilterRequest to update filter on a specific processor

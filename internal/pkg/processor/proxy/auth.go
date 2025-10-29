@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/endorses/lippycat/api/gen/management"
 )
 
 const (
@@ -215,4 +217,40 @@ func DetectCycle(processorID string, upstreamChain []string) bool {
 		}
 	}
 	return false
+}
+
+// ConvertProtoToken converts a protobuf AuthorizationToken to the internal type
+// Returns ErrInvalidToken if the protobuf token is nil or invalid
+func ConvertProtoToken(protoToken *management.AuthorizationToken) (*AuthorizationToken, error) {
+	if protoToken == nil {
+		return nil, ErrInvalidToken
+	}
+
+	// Convert Unix nanoseconds to time.Time
+	issuedAt := time.Unix(0, protoToken.IssuedAtNs)
+	expiresAt := time.Unix(0, protoToken.ExpiresAtNs)
+
+	return &AuthorizationToken{
+		ProcessorID: protoToken.TargetProcessorId,
+		IssuedAt:    issuedAt,
+		ExpiresAt:   expiresAt,
+		Signature:   protoToken.Signature,
+	}, nil
+}
+
+// ConvertToProtoToken converts an internal AuthorizationToken to protobuf format
+// The issuerID and processorChain parameters are used for auditing
+func ConvertToProtoToken(token *AuthorizationToken, issuerID string, processorChain []string) *management.AuthorizationToken {
+	if token == nil {
+		return nil
+	}
+
+	return &management.AuthorizationToken{
+		Signature:         token.Signature,
+		IssuedAtNs:        token.IssuedAt.UnixNano(),
+		ExpiresAtNs:       token.ExpiresAt.UnixNano(),
+		TargetProcessorId: token.ProcessorID,
+		IssuerId:          issuerID,
+		ProcessorChain:    processorChain,
+	}
 }

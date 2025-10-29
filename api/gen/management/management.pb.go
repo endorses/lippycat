@@ -1350,15 +1350,19 @@ func (x *FilterDeleteRequest) GetFilterId() string {
 // intermediate processors validate this token to authorize the operation.
 type AuthorizationToken struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Cryptographic signature (HMAC-SHA256) of the request
-	// Signed by the originating processor using a shared secret
+	// Cryptographic signature (RSA-SHA256) of the token
+	// Signed by the root processor using its TLS private key
 	Signature []byte `protobuf:"bytes,1,opt,name=signature,proto3" json:"signature,omitempty"`
 	// Timestamp when token was issued (Unix nanoseconds)
 	IssuedAtNs int64 `protobuf:"varint,2,opt,name=issued_at_ns,json=issuedAtNs,proto3" json:"issued_at_ns,omitempty"`
-	// Processor ID of the originating processor
-	IssuerId string `protobuf:"bytes,3,opt,name=issuer_id,json=issuerId,proto3" json:"issuer_id,omitempty"`
+	// Timestamp when token expires (Unix nanoseconds)
+	ExpiresAtNs int64 `protobuf:"varint,3,opt,name=expires_at_ns,json=expiresAtNs,proto3" json:"expires_at_ns,omitempty"`
+	// Target processor ID that this token authorizes operations for
+	TargetProcessorId string `protobuf:"bytes,4,opt,name=target_processor_id,json=targetProcessorId,proto3" json:"target_processor_id,omitempty"`
+	// Processor ID of the root processor that issued this token (for auditing)
+	IssuerId string `protobuf:"bytes,5,opt,name=issuer_id,json=issuerId,proto3" json:"issuer_id,omitempty"`
 	// Chain of processor IDs from issuer to target (for auditing)
-	ProcessorChain []string `protobuf:"bytes,4,rep,name=processor_chain,json=processorChain,proto3" json:"processor_chain,omitempty"`
+	ProcessorChain []string `protobuf:"bytes,6,rep,name=processor_chain,json=processorChain,proto3" json:"processor_chain,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1405,6 +1409,20 @@ func (x *AuthorizationToken) GetIssuedAtNs() int64 {
 		return x.IssuedAtNs
 	}
 	return 0
+}
+
+func (x *AuthorizationToken) GetExpiresAtNs() int64 {
+	if x != nil {
+		return x.ExpiresAtNs
+	}
+	return 0
+}
+
+func (x *AuthorizationToken) GetTargetProcessorId() string {
+	if x != nil {
+		return x.TargetProcessorId
+	}
+	return ""
 }
 
 func (x *AuthorizationToken) GetIssuerId() string {
@@ -2923,13 +2941,15 @@ const file_management_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12'\n" +
 	"\x0fhunters_updated\x18\x03 \x01(\rR\x0ehuntersUpdated\"2\n" +
 	"\x13FilterDeleteRequest\x12\x1b\n" +
-	"\tfilter_id\x18\x01 \x01(\tR\bfilterId\"\x9a\x01\n" +
+	"\tfilter_id\x18\x01 \x01(\tR\bfilterId\"\xee\x01\n" +
 	"\x12AuthorizationToken\x12\x1c\n" +
 	"\tsignature\x18\x01 \x01(\fR\tsignature\x12 \n" +
 	"\fissued_at_ns\x18\x02 \x01(\x03R\n" +
-	"issuedAtNs\x12\x1b\n" +
-	"\tissuer_id\x18\x03 \x01(\tR\bissuerId\x12'\n" +
-	"\x0fprocessor_chain\x18\x04 \x03(\tR\x0eprocessorChain\"\xb8\x01\n" +
+	"issuedAtNs\x12\"\n" +
+	"\rexpires_at_ns\x18\x03 \x01(\x03R\vexpiresAtNs\x12.\n" +
+	"\x13target_processor_id\x18\x04 \x01(\tR\x11targetProcessorId\x12\x1b\n" +
+	"\tissuer_id\x18\x05 \x01(\tR\bissuerId\x12'\n" +
+	"\x0fprocessor_chain\x18\x06 \x03(\tR\x0eprocessorChain\"\xb8\x01\n" +
 	"\x16ProcessorFilterRequest\x12!\n" +
 	"\fprocessor_id\x18\x01 \x01(\tR\vprocessorId\x123\n" +
 	"\x06filter\x18\x02 \x01(\v2\x1b.lippycat.management.FilterR\x06filter\x12F\n" +

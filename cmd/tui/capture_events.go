@@ -4,7 +4,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -344,25 +343,13 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 			return
 		}
 
-		// Fetch topology to discover downstream processors and hunters
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			topology, err := client.GetTopology(ctx)
-			if err != nil {
-				logger.Warn("Failed to fetch topology from processor",
-					"address", msg.Address,
-					"error", err)
-				// Non-fatal - continue with regular hunter status
-			} else if topology != nil {
-				// Send topology to TUI for processing
-				currentProgram.Send(TopologyReceivedMsg{
-					Address:  msg.Address,
-					Topology: topology,
-				})
-			}
-		}()
+		// Subscribe to topology updates to discover downstream processors and hunters
+		if err := client.SubscribeTopology(); err != nil {
+			logger.Warn("Failed to subscribe to topology from processor",
+				"address", msg.Address,
+				"error", err)
+			// Non-fatal - continue with regular hunter status
+		}
 
 		// Start hunter status subscription
 		if err := client.SubscribeHunterStatus(); err != nil {
@@ -558,6 +545,158 @@ func (m Model) handleTopologyReceivedMsg(msg TopologyReceivedMsg) (Model, tea.Cm
 	m.uiState.NodesView.SetProcessors(procInfos)
 
 	return m, nil
+}
+
+// handleTopologyUpdateMsg processes streaming topology updates from a processor
+func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
+	logger.Debug("Received topology update",
+		"address", msg.ProcessorAddr,
+		"type", msg.Update.UpdateType)
+
+	// Process the update based on its type
+	switch msg.Update.UpdateType {
+	case management.TopologyUpdateType_TOPOLOGY_HUNTER_CONNECTED:
+		if event := msg.Update.GetHunterConnected(); event != nil {
+			logger.Info("Hunter connected via topology update",
+				"hunter_id", event.Hunter.HunterId,
+				"processor", msg.ProcessorAddr)
+			// Add hunter to the processor's hunter list
+			m.addHunterFromTopologyUpdate(msg.ProcessorAddr, event.Hunter)
+		}
+
+	case management.TopologyUpdateType_TOPOLOGY_HUNTER_DISCONNECTED:
+		if event := msg.Update.GetHunterDisconnected(); event != nil {
+			logger.Info("Hunter disconnected via topology update",
+				"hunter_id", event.HunterId,
+				"processor", msg.ProcessorAddr)
+			// Remove hunter from the processor's hunter list
+			m.removeHunterFromTopologyUpdate(msg.ProcessorAddr, event.HunterId)
+		}
+
+	case management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED:
+		if event := msg.Update.GetProcessorConnected(); event != nil {
+			logger.Info("Processor connected via topology update",
+				"processor_id", event.Processor.ProcessorId,
+				"address", event.Processor.Address)
+			// Add downstream processor to topology
+			m.addProcessorFromTopologyUpdate(event.Processor, msg.ProcessorAddr)
+		}
+
+	case management.TopologyUpdateType_TOPOLOGY_PROCESSOR_DISCONNECTED:
+		if event := msg.Update.GetProcessorDisconnected(); event != nil {
+			logger.Info("Processor disconnected via topology update",
+				"processor_id", event.ProcessorId)
+			// Remove downstream processor from topology
+			m.removeProcessorFromTopologyUpdate(event.ProcessorId)
+		}
+	}
+
+	// Update NodesView with the updated topology
+	procInfos := m.getProcessorInfoList()
+	m.uiState.NodesView.SetProcessors(procInfos)
+
+	return m, nil
+}
+
+// addHunterFromTopologyUpdate adds a hunter discovered via topology update
+func (m *Model) addHunterFromTopologyUpdate(processorAddr string, hunter *management.ConnectedHunter) {
+	// Convert to components.HunterInfo
+	hunterInfo := components.HunterInfo{
+		ID:               hunter.HunterId,
+		Hostname:         hunter.Hostname,
+		RemoteAddr:       hunter.RemoteAddr,
+		Status:           hunter.Status,
+		ConnectedAt:      time.Now().UnixNano() - int64(hunter.ConnectedDurationSec*1e9),
+		LastHeartbeat:    hunter.LastHeartbeatNs,
+		PacketsCaptured:  hunter.Stats.PacketsCaptured,
+		PacketsForwarded: hunter.Stats.PacketsForwarded,
+		ActiveFilters:    hunter.Stats.ActiveFilters,
+		Interfaces:       hunter.Interfaces,
+		ProcessorAddr:    processorAddr,
+		Capabilities:     hunter.Capabilities,
+	}
+
+	// Add or update in the hunter list for this processor
+	hunters := m.connectionMgr.HuntersByProcessor[processorAddr]
+	found := false
+	for i, h := range hunters {
+		if h.ID == hunter.HunterId {
+			hunters[i] = hunterInfo
+			found = true
+			break
+		}
+	}
+	if !found {
+		hunters = append(hunters, hunterInfo)
+	}
+	m.connectionMgr.HuntersByProcessor[processorAddr] = hunters
+}
+
+// removeHunterFromTopologyUpdate removes a hunter based on topology update
+func (m *Model) removeHunterFromTopologyUpdate(processorAddr string, hunterID string) {
+	hunters := m.connectionMgr.HuntersByProcessor[processorAddr]
+	filtered := make([]components.HunterInfo, 0, len(hunters))
+	for _, h := range hunters {
+		if h.ID != hunterID {
+			filtered = append(filtered, h)
+		}
+	}
+	m.connectionMgr.HuntersByProcessor[processorAddr] = filtered
+}
+
+// addProcessorFromTopologyUpdate adds a processor discovered via topology update
+func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNode, parentAddr string) {
+	// Use the address from the processor node
+	nodeAddr := processor.Address
+
+	// Determine TLS security from parent processor
+	var tlsInsecure bool
+	if connectedProc, exists := m.connectionMgr.Processors[parentAddr]; exists {
+		tlsInsecure = connectedProc.TLSInsecure
+	}
+
+	// Create or update processor entry
+	if _, exists := m.connectionMgr.Processors[nodeAddr]; !exists {
+		m.connectionMgr.Processors[nodeAddr] = &store.ProcessorConnection{
+			Address:      nodeAddr,
+			State:        store.ProcessorStateUnknown,
+			ProcessorID:  processor.ProcessorId,
+			Status:       processor.Status,
+			TLSInsecure:  tlsInsecure,
+			UpstreamAddr: parentAddr,
+		}
+		logger.Debug("Discovered processor from topology update",
+			"address", nodeAddr,
+			"processor_id", processor.ProcessorId,
+			"parent", parentAddr)
+	} else {
+		// Update existing entry
+		proc := m.connectionMgr.Processors[nodeAddr]
+		proc.ProcessorID = processor.ProcessorId
+		proc.Status = processor.Status
+		proc.UpstreamAddr = parentAddr
+	}
+}
+
+// removeProcessorFromTopologyUpdate removes a processor based on topology update
+func (m *Model) removeProcessorFromTopologyUpdate(processorID string) {
+	// Find and remove processor by ID
+	for addr, proc := range m.connectionMgr.Processors {
+		if proc.ProcessorID == processorID {
+			// Clean up any remaining client
+			if proc.Client != nil {
+				proc.Client.Close()
+			}
+			// Remove from maps
+			delete(m.connectionMgr.Processors, addr)
+			delete(m.connectionMgr.RemoteClients, addr)
+			delete(m.connectionMgr.HuntersByProcessor, addr)
+			logger.Debug("Removed processor from topology",
+				"processor_id", processorID,
+				"address", addr)
+			break
+		}
+	}
 }
 
 // processTopologyNode recursively processes a topology node and its children

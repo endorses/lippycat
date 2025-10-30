@@ -70,6 +70,16 @@ func (h *TUIEventHandler) OnDisconnect(address string, err error) {
 	}
 }
 
+// OnTopologyUpdate sends TopologyUpdateMsg to TUI
+func (h *TUIEventHandler) OnTopologyUpdate(update *management.TopologyUpdate, processorAddr string) {
+	if h.program != nil {
+		h.program.Send(TopologyUpdateMsg{
+			Update:        update,
+			ProcessorAddr: processorAddr,
+		})
+	}
+}
+
 // PacketBatchMsg is sent when multiple packets are captured
 type PacketBatchMsg struct {
 	Packets []components.PacketDisplay
@@ -104,4 +114,10 @@ type ProcessorDisconnectedMsg struct {
 type TopologyReceivedMsg struct {
 	Address  string
 	Topology *management.ProcessorNode
+}
+
+// TopologyUpdateMsg is sent when a topology update is received from a processor
+type TopologyUpdateMsg struct {
+	Update        *management.TopologyUpdate
+	ProcessorAddr string
 }

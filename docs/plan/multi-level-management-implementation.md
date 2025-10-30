@@ -281,11 +281,11 @@ TUI → Processor A (root)
 ### Tasks
 
 #### 4.1
-- [ ] Replace one-shot topology query with subscription
-  - [ ] Remove `queryProcessorTopology()` call
-  - [ ] Add `subscribeToProcessorTopology()` method
-  - [ ] Create goroutine to receive topology updates
-  - [ ] Send updates to TUI event loop via `currentProgram.Send()`
+- [x] Replace one-shot topology query with subscription
+  - [x] Remove `queryProcessorTopology()` call
+  - [x] Add `subscribeToProcessorTopology()` method
+  - [x] Create goroutine to receive topology updates
+  - [x] Send updates to TUI event loop via `currentProgram.Send()`
 
 #### 4.2
 - [ ] Add topology update message handler in `cmd/tui/capture_events.go`

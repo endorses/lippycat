@@ -58,6 +58,10 @@ func (m *MockEventHandler) OnDisconnect(address string, err error) {
 	})
 }
 
+func (m *MockEventHandler) OnTopologyUpdate(update *management.TopologyUpdate, processorAddr string) {
+	// Mock implementation - topology updates not tracked in tests yet
+}
+
 func TestClientConfig_Defaults(t *testing.T) {
 	config := &ClientConfig{
 		Address:    "localhost:50051",

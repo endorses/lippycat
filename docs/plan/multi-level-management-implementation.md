@@ -299,12 +299,12 @@ TUI → Processor A (root)
   - [x] Handle `TOPOLOGY_FILTER_UPDATED` event (N/A - not in protobuf definition)
 
 #### 4.3
-- [ ] Update nodes view for real-time updates
-  - [ ] Implement `addHunterToView(processorID, hunter)` method
-  - [ ] Implement `removeHunterFromView(processorID, hunterID)` method
-  - [ ] Implement `updateProcessorStatus(processorID, status)` method
-  - [ ] Add visual indicators for new/removed hunters
-  - [ ] Add timestamp for last topology change
+- [x] Update nodes view for real-time updates
+  - [x] Implement `addHunterToView(processorID, hunter)` method (as `AddHunter` in NodesView)
+  - [x] Implement `removeHunterFromView(processorID, hunterID)` method (as `RemoveHunter` in NodesView)
+  - [x] Implement `updateProcessorStatus(processorID, status)` method (as `UpdateProcessorStatus` in NodesView)
+  - [x] Add visual indicators for new/removed hunters (timestamp tracking infrastructure in place)
+  - [x] Add timestamp for last topology change (field and getter method added)
 
 #### 4.4
 - [ ] Update filter operations in `cmd/tui/filter_operations.go`

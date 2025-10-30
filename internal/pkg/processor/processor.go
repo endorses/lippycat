@@ -977,7 +977,7 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 	}
 
 	// Add processor to proxy manager's topology cache for routing
-	p.proxyManager.AddProcessor(&proxy.ProcessorNode{
+	processorNode := &proxy.ProcessorNode{
 		ID:             req.ProcessorId,
 		Address:        req.ListenAddress,
 		ParentID:       p.config.ProcessorID, // This processor is the parent
@@ -986,7 +986,29 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		Metadata: map[string]string{
 			"version": req.Version,
 		},
-	})
+	}
+	p.proxyManager.AddProcessor(processorNode)
+
+	// Publish topology update event so upstream processors learn about this new processor
+	topologyUpdate := &management.TopologyUpdate{
+		UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
+		ProcessorId: p.config.ProcessorID, // The processor where this event occurred
+		TimestampNs: time.Now().UnixNano(),
+		Event: &management.TopologyUpdate_ProcessorConnected{
+			ProcessorConnected: &management.ProcessorConnectedEvent{
+				Processor: &management.ProcessorNode{
+					ProcessorId:       req.ProcessorId,
+					Address:           req.ListenAddress,
+					Status:            management.ProcessorStatus_PROCESSOR_HEALTHY,
+					UpstreamProcessor: p.config.ProcessorID,
+					HierarchyDepth:    1,
+					Reachable:         true,
+					Hunters:           []*management.ConnectedHunter{}, // Will be populated as hunters connect
+				},
+			},
+		},
+	}
+	p.proxyManager.PublishTopologyUpdate(topologyUpdate)
 
 	return &management.ProcessorRegistrationResponse{
 		Accepted: true,

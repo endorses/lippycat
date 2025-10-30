@@ -252,11 +252,14 @@ func (m *Manager) SubscribeToDownstream(proc *ProcessorInfo) error {
 
 	stream, err := proc.Client.SubscribeTopology(ctx, req)
 	if err != nil {
-		logger.Error("Failed to subscribe to downstream topology",
+		logger.Warn("Failed to subscribe to downstream topology (will retry)",
 			"processor_id", proc.ProcessorID,
 			"error", err)
-		cancel()
-		return err
+		// Don't fail - start the receive goroutine which will retry
+		// This handles the case where the downstream processor hasn't fully started yet
+		m.wg.Add(1)
+		go m.receiveTopologyUpdates(proc, nil)
+		return nil
 	}
 
 	proc.TopologyStream = stream
@@ -282,18 +285,54 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 		close(proc.TopologyUpdateChan)
 	}()
 
+	// If stream is nil, immediately try to establish connection
+	if stream == nil {
+		proc.reconnectAttempts = 0
+		proc.reconnectBackoff = 500 * time.Millisecond
+
+		logger.Info("Attempting initial topology subscription",
+			"processor_id", proc.ProcessorID,
+			"backoff", proc.reconnectBackoff)
+
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-time.After(proc.reconnectBackoff):
+			if err := m.reconnectTopologyStream(proc); err != nil {
+				logger.Error("Failed initial topology subscription",
+					"processor_id", proc.ProcessorID,
+					"error", err)
+				// Will retry in main loop below
+			} else {
+				stream = proc.TopologyStream
+				logger.Info("Initial topology subscription successful",
+					"processor_id", proc.ProcessorID)
+			}
+		}
+	}
+
 	for {
-		update, err := stream.Recv()
+		var update *management.TopologyUpdate
+		var err error
+
+		// Check if we have a valid stream
+		if stream != nil {
+			update, err = stream.Recv()
+		} else {
+			// No stream available, treat as error to trigger retry
+			err = fmt.Errorf("no active stream")
+		}
+
 		if err != nil {
-			logger.Warn("Topology stream closed from downstream processor",
+			logger.Warn("Topology stream error from downstream processor",
 				"processor_id", proc.ProcessorID,
 				"error", err)
 
 			// Attempt automatic reconnection with exponential backoff
-			// Start at 5s, double each time, max 60s
+			// Start at 500ms, double each time, max 60s
 			proc.reconnectAttempts++
 			if proc.reconnectBackoff == 0 {
-				proc.reconnectBackoff = 5 * time.Second
+				proc.reconnectBackoff = 500 * time.Millisecond
 			} else {
 				proc.reconnectBackoff *= 2
 				if proc.reconnectBackoff > 60*time.Second {
@@ -318,9 +357,10 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 					// Continue loop to retry with next backoff
 					continue
 				}
-				// Successfully reconnected, reset backoff and continue receiving
+				// Successfully reconnected, reset backoff and update local stream variable
 				proc.reconnectAttempts = 0
 				proc.reconnectBackoff = 0
+				stream = proc.TopologyStream
 				logger.Info("Topology stream reconnected successfully",
 					"processor_id", proc.ProcessorID)
 				continue

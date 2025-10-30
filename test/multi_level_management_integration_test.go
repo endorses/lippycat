@@ -50,7 +50,7 @@ func TestIntegration_MultiLevel_FilterUpdate2Level(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
 	defer downstreamConn.Close()
 
-	time.Sleep(2 * time.Second) // Wait for hierarchy to stabilize
+	time.Sleep(3 * time.Second) // Wait for hierarchy to stabilize (allows for retry backoff)
 
 	// Connect hunter to downstream processor
 	hunterConn, hunterStream, err := connectHunter(ctx, downstreamAddr, "test-hunter-2level")
@@ -150,7 +150,7 @@ func TestIntegration_MultiLevel_FilterUpdate3Level(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(leafProc)
 	defer leafConn.Close()
 
-	time.Sleep(4 * time.Second) // Wait for 3-level hierarchy to stabilize
+	time.Sleep(6 * time.Second) // Wait for 3-level hierarchy to stabilize (allows for retry backoff)
 
 	// Connect hunter to leaf processor
 	hunterConn, hunterStream, err := connectHunter(ctx, leafAddr, "test-hunter-3level")
@@ -581,8 +581,8 @@ func startProcessorHierarchy(ctx context.Context, addr, processorID, upstreamAdd
 			upstreamConn.Close()
 		}
 		return nil, nil, fmt.Errorf("processor failed to start: %w", err)
-	case <-time.After(200 * time.Millisecond):
-		// Processor started successfully
+	case <-time.After(2 * time.Second):
+		// Processor started successfully (wait to ensure gRPC server is fully listening and accepting connections)
 	}
 
 	return proc, upstreamConn, nil
@@ -660,8 +660,8 @@ func startProcessorHierarchyWithTLS(ctx context.Context, addr, processorID, upst
 			upstreamConn.Close()
 		}
 		return nil, nil, fmt.Errorf("processor failed to start: %w", err)
-	case <-time.After(200 * time.Millisecond):
-		// Processor started successfully
+	case <-time.After(2 * time.Second):
+		// Processor started successfully (wait to ensure gRPC server is fully listening and accepting connections)
 	}
 
 	return proc, upstreamConn, nil

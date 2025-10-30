@@ -288,14 +288,15 @@ TUI → Processor A (root)
   - [x] Send updates to TUI event loop via `currentProgram.Send()`
 
 #### 4.2
-- [ ] Add topology update message handler in `cmd/tui/capture_events.go`
-  - [ ] Define `TopologyUpdateMsg` type
-  - [ ] Implement `handleTopologyUpdateMsg(msg)` method
-  - [ ] Handle `TOPOLOGY_HUNTER_CONNECTED` event
-  - [ ] Handle `TOPOLOGY_HUNTER_DISCONNECTED` event
-  - [ ] Handle `TOPOLOGY_PROCESSOR_CONNECTED` event
-  - [ ] Handle `TOPOLOGY_PROCESSOR_DISCONNECTED` event
-  - [ ] Handle `TOPOLOGY_FILTER_UPDATED` event
+- [x] Add topology update message handler in `cmd/tui/capture_events.go`
+  - [x] Define `TopologyUpdateMsg` type (in eventhandler.go)
+  - [x] Implement `handleTopologyUpdateMsg(msg)` method
+  - [x] Handle `TOPOLOGY_HUNTER_CONNECTED` event
+  - [x] Handle `TOPOLOGY_HUNTER_DISCONNECTED` event
+  - [x] Handle `TOPOLOGY_PROCESSOR_CONNECTED` event
+  - [x] Handle `TOPOLOGY_PROCESSOR_DISCONNECTED` event
+  - [x] Handle `TOPOLOGY_HUNTER_STATUS_CHANGED` event
+  - [x] Handle `TOPOLOGY_FILTER_UPDATED` event (N/A - not in protobuf definition)
 
 #### 4.3
 - [ ] Update nodes view for real-time updates

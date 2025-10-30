@@ -589,6 +589,16 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 			// Remove downstream processor from topology
 			m.removeProcessorFromTopologyUpdate(event.ProcessorId)
 		}
+
+	case management.TopologyUpdateType_TOPOLOGY_HUNTER_STATUS_CHANGED:
+		if event := msg.Update.GetHunterStatusChanged(); event != nil {
+			logger.Info("Hunter status changed via topology update",
+				"hunter_id", event.HunterId,
+				"status", event.NewStatus,
+				"processor", msg.ProcessorAddr)
+			// Update hunter status in the processor's hunter list
+			m.updateHunterStatusFromTopologyUpdate(msg.ProcessorAddr, event.HunterId, event.NewStatus)
+		}
 	}
 
 	// Update NodesView with the updated topology
@@ -642,6 +652,21 @@ func (m *Model) removeHunterFromTopologyUpdate(processorAddr string, hunterID st
 		}
 	}
 	m.connectionMgr.HuntersByProcessor[processorAddr] = filtered
+}
+
+// updateHunterStatusFromTopologyUpdate updates a hunter's status based on topology update
+func (m *Model) updateHunterStatusFromTopologyUpdate(processorAddr string, hunterID string, newStatus management.HunterStatus) {
+	hunters := m.connectionMgr.HuntersByProcessor[processorAddr]
+	for i, h := range hunters {
+		if h.ID == hunterID {
+			hunters[i].Status = newStatus
+			logger.Debug("Updated hunter status",
+				"hunter_id", hunterID,
+				"processor", processorAddr,
+				"new_status", newStatus)
+			break
+		}
+	}
 }
 
 // addProcessorFromTopologyUpdate adds a processor discovered via topology update

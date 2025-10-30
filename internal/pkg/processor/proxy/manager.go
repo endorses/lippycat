@@ -418,3 +418,9 @@ func FormatRoutingError(processorChain []string, err error) error {
 
 	return fmt.Errorf("%s: %w", chainStr, err)
 }
+
+// AddProcessor adds a processor to the topology cache.
+// This is used when a downstream processor registers with this processor.
+func (m *Manager) AddProcessor(processor *ProcessorNode) {
+	m.cache.AddProcessor(processor)
+}

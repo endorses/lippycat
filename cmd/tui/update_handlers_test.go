@@ -315,8 +315,8 @@ func TestHandleFilterOperationResultMsg_Failure(t *testing.T) {
 	}
 	_, cmd := m.handleFilterOperationResultMsg(msg)
 
-	// Failure returns nil command (no toast)
-	assert.Nil(t, cmd, "Should not return any command on failure")
+	// Failure returns toast command with error message
+	assert.NotNil(t, cmd, "Should return toast command on failure")
 }
 
 func TestHandleHuntersLoadedMsg(t *testing.T) {

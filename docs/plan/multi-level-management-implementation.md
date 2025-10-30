@@ -345,19 +345,19 @@ TUI → Processor A (root)
   - [x] Show "unreachable" status for partitioned subtrees
 
 #### 4.9
-- [ ] Write end-to-end tests
-  - [ ] Test: TUI connects → receives topology subscription
-  - [ ] Test: Hunter connects to downstream → TUI updates immediately
-  - [ ] Test: TUI creates filter on downstream hunter → succeeds
-  - [ ] Test: TUI deletes filter on downstream hunter → succeeds
-  - [ ] Test: Downstream processor disconnects → TUI shows unreachable
-  - [ ] Test: 5-level hierarchy with all operations
+- [x] Write end-to-end tests
+  - [x] Test: TUI connects → receives topology subscription
+  - [x] Test: Hunter connects to downstream → TUI updates immediately
+  - [x] Test: TUI creates filter on downstream hunter → succeeds
+  - [x] Test: TUI deletes filter on downstream hunter → succeeds
+  - [x] Test: Downstream processor disconnects → TUI shows unreachable
+  - [x] Test: 5-level hierarchy with all operations
 
 ### Deliverables
 - ✅ TUI receives real-time topology updates
 - ✅ TUI can manage filters on any hunter in hierarchy
 - ✅ TUI shows hierarchy depth and health status
-- ✅ End-to-end test: Complete workflow with 3-level hierarchy
+- ✅ End-to-end tests: Complete workflow with multi-level hierarchy (tests cover 2-level, 3-level, and 5-level hierarchies)
 
 ---
 

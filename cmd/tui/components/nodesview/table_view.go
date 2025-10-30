@@ -17,14 +17,17 @@ import (
 
 // ProcessorInfo represents a processor node (local definition to avoid import cycles)
 type ProcessorInfo struct {
-	Address         string
-	ProcessorID     string
-	Status          management.ProcessorStatus
-	ConnectionState ProcessorConnectionState
-	TLSInsecure     bool   // True if connection is insecure (no TLS)
-	UpstreamAddr    string // Address of upstream processor (if hierarchical)
-	Hunters         []types.HunterInfo
-	TotalHunters    int // Total hunters connected to this processor (all hunters)
+	Address          string
+	ProcessorID      string
+	Status           management.ProcessorStatus
+	ConnectionState  ProcessorConnectionState
+	TLSInsecure      bool   // True if connection is insecure (no TLS)
+	UpstreamAddr     string // Address of upstream processor (if hierarchical)
+	Hunters          []types.HunterInfo
+	TotalHunters     int      // Total hunters connected to this processor (all hunters)
+	HierarchyDepth   int      // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
+	ProcessorPath    []string // Full path from root to this processor
+	EstimatedLatency int      // Estimated operation latency in ms (-1 if unknown)
 }
 
 // TableViewParams contains all parameters needed for rendering table views
@@ -245,23 +248,33 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		// Apply selection styling if this processor is selected
 		if params.SelectedProcessorAddr == proc.Address {
 			selectedNodeLine = linesRendered
+
+			// Build depth indicator and warning for deep hierarchies
+			depthIndicator := ""
+			if proc.HierarchyDepth >= 0 {
+				depthIndicator = fmt.Sprintf("[L%d]", proc.HierarchyDepth)
+				if proc.HierarchyDepth > 7 {
+					depthIndicator += "⚠" // Warning for deep hierarchies
+				}
+			}
+
 			if isChildProcessor {
 				// Child processor - show with tree branch (gray) before status icon
 				// Even when selected, keep tree prefix gray
 				treePrefixRendered := treePrefixStyle.Render(treePrefix)
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
 				}
 				// Combine gray prefix with selected line
 				b.WriteString(treePrefixRendered + selectedStyle.Render(procLine) + "\n")
 			} else {
 				// Root processor - no tree prefix
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("%s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf("%s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
 				}
 				b.WriteString(selectedStyle.Width(params.Width).Render(procLine) + "\n")
 			}
@@ -269,21 +282,30 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			// Style the status icon with color separately
 			statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
 
+			// Build depth indicator and warning for deep hierarchies
+			depthIndicator := ""
+			if proc.HierarchyDepth >= 0 {
+				depthIndicator = fmt.Sprintf("[L%d]", proc.HierarchyDepth)
+				if proc.HierarchyDepth > 7 {
+					depthIndicator += "⚠" // Warning for deep hierarchies
+				}
+			}
+
 			if isChildProcessor {
 				// Child processor - gray tree prefix, then colored status icon
 				treePrefixRendered := treePrefixStyle.Render(treePrefix)
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
 				}
 				b.WriteString(treePrefixRendered + statusStyled + processorStyle.Render(procLine) + "\n")
 			} else {
 				// Root processor - no tree prefix
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf(" %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf(" %s 📡 Processor: %s (%d hunters)", securityIcon, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
 				}
 				b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 			}

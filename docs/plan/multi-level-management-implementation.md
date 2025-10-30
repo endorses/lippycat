@@ -325,11 +325,11 @@ TUI → Processor A (root)
   - [x] Handle case where root not found (error)
 
 #### 4.6
-- [ ] Add hierarchy depth indicators in UI
-  - [ ] Show depth number next to processor names
-  - [ ] Show full processor path on hover/selection
-  - [ ] Add latency estimate for deep operations
-  - [ ] Warn when depth > 7 (high latency risk)
+- [x] Add hierarchy depth indicators in UI
+  - [x] Show depth number next to processor names
+  - [x] Show full processor path on hover/selection
+  - [x] Add latency estimate for deep operations
+  - [x] Warn when depth > 7 (high latency risk)
 
 #### 4.7
 - [ ] Update subscription management

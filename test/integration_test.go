@@ -560,7 +560,7 @@ func connectHunter(ctx context.Context, addr string, hunterID string) (*grpc.Cli
 		Interfaces: []string{"mock0"},
 		Version:    "test-1.0.0",
 		Capabilities: &management.HunterCapabilities{
-			FilterTypes:     []string{"bpf"},
+			FilterTypes:     []string{"bpf", "sip_user", "phone_number", "ip_address", "call_id", "codec"},
 			MaxBufferSize:   8192,
 			GpuAcceleration: false,
 			AfXdp:           false,

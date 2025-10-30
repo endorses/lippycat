@@ -989,6 +989,10 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 	}
 	p.proxyManager.AddProcessor(processorNode)
 
+	logger.Debug("Publishing PROCESSOR_CONNECTED topology event",
+		"processor_id", req.ProcessorId,
+		"listen_address", req.ListenAddress)
+
 	// Publish topology update event so upstream processors learn about this new processor
 	topologyUpdate := &management.TopologyUpdate{
 		UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,

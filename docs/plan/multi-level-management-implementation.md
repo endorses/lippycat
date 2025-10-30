@@ -311,8 +311,11 @@ TUI → Processor A (root)
   - [x] Replace `UpdateFilter()` calls with `UpdateFilterOnProcessor()`
   - [x] Replace `DeleteFilter()` calls with `DeleteFilterOnProcessor()`
   - [x] Include target processor ID in requests
-  - [x] Request auth token from root processor (TODO comment added - RPC needs to be implemented)
-  - [x] Include token in all proxied operations (set to nil with TODO - token request RPC to be added)
+  - [x] Request auth token from root processor (fully implemented via RequestAuthToken RPC)
+  - [x] Include token in all proxied operations (implemented - TUI requests tokens before operations)
+  - [x] Add `RequestAuthToken()` RPC to `api/proto/management.proto`
+  - [x] Implement `RequestAuthToken()` RPC handler in `internal/pkg/processor/processor.go`
+  - [x] Update TUI to call `RequestAuthToken()` before filter operations
 
 #### 4.5
 - [ ] Implement root processor lookup

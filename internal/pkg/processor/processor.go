@@ -1425,6 +1425,46 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 	return result, nil
 }
 
+// RequestAuthToken issues an authorization token for proxied operations.
+// The token is signed by this processor and can be verified by downstream processors.
+// Tokens are valid for 5 minutes and authorize operations on the specified target processor.
+func (p *Processor) RequestAuthToken(ctx context.Context, req *management.AuthTokenRequest) (*management.AuthorizationToken, error) {
+	// Extract audit context for logging
+	audit := extractAuditContext(ctx, "RequestAuthToken")
+
+	// Log operation start
+	logAuditOperationStart(audit, req.TargetProcessorId)
+
+	// Issue token via proxy manager
+	token, err := p.proxyManager.IssueAuthToken(req.TargetProcessorId)
+	if err != nil {
+		logger.Error("Failed to issue authorization token",
+			"error", err,
+			"target_processor_id", req.TargetProcessorId,
+			"requester_addr", audit.RemoteAddr,
+			"requester_cn", audit.CommonName)
+		logAuditOperationResult(audit, req.TargetProcessorId, false, err,
+			"reason", "token_issuance_failed")
+		return nil, status.Errorf(codes.Internal, "failed to issue authorization token: %v", err)
+	}
+
+	// Log successful token issuance
+	logger.Info("Issued authorization token",
+		"target_processor_id", req.TargetProcessorId,
+		"requester_addr", audit.RemoteAddr,
+		"requester_cn", audit.CommonName,
+		"expires_at", token.ExpiresAt)
+
+	logAuditOperationResult(audit, req.TargetProcessorId, true, nil,
+		"expires_at", token.ExpiresAt.Unix())
+
+	// Convert internal token to protobuf format
+	// TODO: Get processor chain from topology cache for auditing
+	protoToken := proxy.ConvertToProtoToken(token, p.config.ProcessorID, []string{})
+
+	return protoToken, nil
+}
+
 // convertChainErrorToStatus converts a ChainError to a gRPC status error.
 // If the error is not a ChainError, it returns the error wrapped in a standard status.
 //

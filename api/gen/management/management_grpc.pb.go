@@ -33,6 +33,7 @@ const (
 	ManagementService_UpdateFilterOnProcessor_FullMethodName = "/lippycat.management.ManagementService/UpdateFilterOnProcessor"
 	ManagementService_DeleteFilterOnProcessor_FullMethodName = "/lippycat.management.ManagementService/DeleteFilterOnProcessor"
 	ManagementService_GetFiltersFromProcessor_FullMethodName = "/lippycat.management.ManagementService/GetFiltersFromProcessor"
+	ManagementService_RequestAuthToken_FullMethodName        = "/lippycat.management.ManagementService/RequestAuthToken"
 )
 
 // ManagementServiceClient is the client API for ManagementService service.
@@ -75,6 +76,10 @@ type ManagementServiceClient interface {
 	// GetFiltersFromProcessor retrieves filters from a specific processor
 	// Used for multi-level management to query filter state in the hierarchy
 	GetFiltersFromProcessor(ctx context.Context, in *ProcessorFilterQuery, opts ...grpc.CallOption) (*FilterResponse, error)
+	// RequestAuthToken requests an authorization token for proxied operations
+	// Used by TUI clients to get tokens for managing downstream processors
+	// The token is signed by the processor and can be verified by downstream processors
+	RequestAuthToken(ctx context.Context, in *AuthTokenRequest, opts ...grpc.CallOption) (*AuthorizationToken, error)
 }
 
 type managementServiceClient struct {
@@ -246,6 +251,16 @@ func (c *managementServiceClient) GetFiltersFromProcessor(ctx context.Context, i
 	return out, nil
 }
 
+func (c *managementServiceClient) RequestAuthToken(ctx context.Context, in *AuthTokenRequest, opts ...grpc.CallOption) (*AuthorizationToken, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthorizationToken)
+	err := c.cc.Invoke(ctx, ManagementService_RequestAuthToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagementServiceServer is the server API for ManagementService service.
 // All implementations must embed UnimplementedManagementServiceServer
 // for forward compatibility.
@@ -286,6 +301,10 @@ type ManagementServiceServer interface {
 	// GetFiltersFromProcessor retrieves filters from a specific processor
 	// Used for multi-level management to query filter state in the hierarchy
 	GetFiltersFromProcessor(context.Context, *ProcessorFilterQuery) (*FilterResponse, error)
+	// RequestAuthToken requests an authorization token for proxied operations
+	// Used by TUI clients to get tokens for managing downstream processors
+	// The token is signed by the processor and can be verified by downstream processors
+	RequestAuthToken(context.Context, *AuthTokenRequest) (*AuthorizationToken, error)
 	mustEmbedUnimplementedManagementServiceServer()
 }
 
@@ -337,6 +356,9 @@ func (UnimplementedManagementServiceServer) DeleteFilterOnProcessor(context.Cont
 }
 func (UnimplementedManagementServiceServer) GetFiltersFromProcessor(context.Context, *ProcessorFilterQuery) (*FilterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetFiltersFromProcessor not implemented")
+}
+func (UnimplementedManagementServiceServer) RequestAuthToken(context.Context, *AuthTokenRequest) (*AuthorizationToken, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestAuthToken not implemented")
 }
 func (UnimplementedManagementServiceServer) mustEmbedUnimplementedManagementServiceServer() {}
 func (UnimplementedManagementServiceServer) testEmbeddedByValue()                           {}
@@ -586,6 +608,24 @@ func _ManagementService_GetFiltersFromProcessor_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagementService_RequestAuthToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagementServiceServer).RequestAuthToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagementService_RequestAuthToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagementServiceServer).RequestAuthToken(ctx, req.(*AuthTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagementService_ServiceDesc is the grpc.ServiceDesc for ManagementService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -636,6 +676,10 @@ var ManagementService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFiltersFromProcessor",
 			Handler:    _ManagementService_GetFiltersFromProcessor_Handler,
+		},
+		{
+			MethodName: "RequestAuthToken",
+			Handler:    _ManagementService_RequestAuthToken_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -178,12 +178,22 @@ func (m *Model) loadFiltersFromProcessor(processorAddr string, hunterID string) 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		// TODO(multi-level): Add RequestAuthToken() RPC and implement token request (phase 4.4)
-		// For now, auth_token is nil (works for directly connected processors via mTLS)
+		// Request authorization token for this operation
+		tokenResp, err := mgmtClient.RequestAuthToken(ctx, &management.AuthTokenRequest{
+			TargetProcessorId: processorAddr,
+		})
+		if err != nil {
+			logger.Warn("Failed to request authorization token, proceeding without token",
+				"error", err,
+				"processor", processorAddr)
+			// Continue without token - will work for directly connected processors (mTLS auth)
+			tokenResp = nil
+		}
+
 		resp, err := mgmtClient.GetFiltersFromProcessor(ctx, &management.ProcessorFilterQuery{
 			ProcessorId: processorAddr,
 			HunterId:    hunterID, // Empty string means all filters
-			AuthToken:   nil,      // Token request RPC to be added in future phase
+			AuthToken:   tokenResp,
 		})
 		if err != nil {
 			logger.Error("Failed to load filters from processor",
@@ -239,12 +249,18 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 		var err error
 		var filterPattern string
 
-		// TODO(multi-level): Add RequestAuthToken() RPC and implement token request (phase 4.4)
-		// For now, auth_token is nil (works for directly connected processors via mTLS)
-		// Once hierarchical routing is implemented (phase 4.5), we need to:
-		// 1. Add RequestAuthToken(targetProcessorID) RPC to management.proto
-		// 2. Call that RPC to get a token from the root processor
-		// 3. Include the token in these requests for proxied operations
+		// Request authorization token for this operation
+		// Token is signed by the processor and authorizes operations on the target
+		tokenResp, err := mgmtClient.RequestAuthToken(ctx, &management.AuthTokenRequest{
+			TargetProcessorId: msg.ProcessorAddr,
+		})
+		if err != nil {
+			logger.Warn("Failed to request authorization token, proceeding without token",
+				"error", err,
+				"processor", msg.ProcessorAddr)
+			// Continue without token - will work for directly connected processors (mTLS auth)
+			tokenResp = nil
+		}
 
 		switch msg.Operation {
 		case "create", "update", "toggle":
@@ -261,7 +277,7 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 			result, err = mgmtClient.UpdateFilterOnProcessor(ctx, &management.ProcessorFilterRequest{
 				ProcessorId: msg.ProcessorAddr,
 				Filter:      msg.Filter,
-				AuthToken:   nil, // Token request RPC to be added in future phase
+				AuthToken:   tokenResp,
 			})
 
 		case "delete":
@@ -278,7 +294,7 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 			result, err = mgmtClient.DeleteFilterOnProcessor(ctx, &management.ProcessorFilterDeleteRequest{
 				ProcessorId: msg.ProcessorAddr,
 				FilterId:    msg.FilterID,
-				AuthToken:   nil, // Token request RPC to be added in future phase
+				AuthToken:   tokenResp,
 			})
 
 		default:

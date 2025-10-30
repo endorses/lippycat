@@ -685,23 +685,28 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 	// Create or update processor entry
 	if _, exists := m.connectionMgr.Processors[nodeAddr]; !exists {
 		m.connectionMgr.Processors[nodeAddr] = &store.ProcessorConnection{
-			Address:      nodeAddr,
-			State:        store.ProcessorStateUnknown,
-			ProcessorID:  processor.ProcessorId,
-			Status:       processor.Status,
-			TLSInsecure:  tlsInsecure,
-			UpstreamAddr: parentAddr,
+			Address:           nodeAddr,
+			State:             store.ProcessorStateUnknown,
+			ProcessorID:       processor.ProcessorId,
+			Status:            processor.Status,
+			TLSInsecure:       tlsInsecure,
+			UpstreamAddr:      parentAddr,
+			Reachable:         processor.Reachable,
+			UnreachableReason: processor.UnreachableReason,
 		}
 		logger.Debug("Discovered processor from topology update",
 			"address", nodeAddr,
 			"processor_id", processor.ProcessorId,
-			"parent", parentAddr)
+			"parent", parentAddr,
+			"reachable", processor.Reachable)
 	} else {
 		// Update existing entry
 		proc := m.connectionMgr.Processors[nodeAddr]
 		proc.ProcessorID = processor.ProcessorId
 		proc.Status = processor.Status
 		proc.UpstreamAddr = parentAddr
+		proc.Reachable = processor.Reachable
+		proc.UnreachableReason = processor.UnreachableReason
 		// Invalidate cache when hierarchy changes
 		m.connectionMgr.InvalidateRootProcessorCache("")
 	}

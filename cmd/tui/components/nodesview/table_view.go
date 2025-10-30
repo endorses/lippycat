@@ -17,17 +17,19 @@ import (
 
 // ProcessorInfo represents a processor node (local definition to avoid import cycles)
 type ProcessorInfo struct {
-	Address          string
-	ProcessorID      string
-	Status           management.ProcessorStatus
-	ConnectionState  ProcessorConnectionState
-	TLSInsecure      bool   // True if connection is insecure (no TLS)
-	UpstreamAddr     string // Address of upstream processor (if hierarchical)
-	Hunters          []types.HunterInfo
-	TotalHunters     int      // Total hunters connected to this processor (all hunters)
-	HierarchyDepth   int      // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
-	ProcessorPath    []string // Full path from root to this processor
-	EstimatedLatency int      // Estimated operation latency in ms (-1 if unknown)
+	Address           string
+	ProcessorID       string
+	Status            management.ProcessorStatus
+	ConnectionState   ProcessorConnectionState
+	TLSInsecure       bool   // True if connection is insecure (no TLS)
+	UpstreamAddr      string // Address of upstream processor (if hierarchical)
+	Hunters           []types.HunterInfo
+	TotalHunters      int      // Total hunters connected to this processor (all hunters)
+	HierarchyDepth    int      // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
+	ProcessorPath     []string // Full path from root to this processor
+	EstimatedLatency  int      // Estimated operation latency in ms (-1 if unknown)
+	Reachable         bool     // Whether this processor is reachable for management operations
+	UnreachableReason string   // Reason why processor is unreachable (empty if reachable)
 }
 
 // TableViewParams contains all parameters needed for rendering table views
@@ -258,6 +260,11 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				}
 			}
 
+			// Add reachability indicator
+			if !proc.Reachable {
+				depthIndicator += "✗" // Processor unreachable
+			}
+
 			if isChildProcessor {
 				// Child processor - show with tree branch (gray) before status icon
 				// Even when selected, keep tree prefix gray
@@ -291,6 +298,11 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				}
 			}
 
+			// Add reachability indicator
+			if !proc.Reachable {
+				depthIndicator += "✗" // Processor unreachable
+			}
+
 			if isChildProcessor {
 				// Child processor - gray tree prefix, then colored status icon
 				treePrefixRendered := treePrefixStyle.Render(treePrefix)
@@ -311,6 +323,14 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			}
 		}
 		linesRendered++
+
+		// Show unreachable reason if processor is not reachable
+		if !proc.Reachable && proc.UnreachableReason != "" {
+			unreachableStyle := lipgloss.NewStyle().Foreground(params.Theme.ErrorColor).Faint(true)
+			unreachableLine := fmt.Sprintf("    ⚠ Unreachable: %s", proc.UnreachableReason)
+			b.WriteString(unreachableStyle.Render(unreachableLine) + "\n")
+			linesRendered++
+		}
 
 		// Only show hunter table if this processor has hunters or is a parent with no downstream processors
 		hasHunters := len(proc.Hunters) > 0

@@ -100,17 +100,19 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 		latency := m.connectionMgr.EstimateOperationLatency(addr)
 
 		procInfos = append(procInfos, components.ProcessorInfo{
-			Address:          addr,
-			ProcessorID:      proc.ProcessorID,
-			Status:           proc.Status,
-			ConnectionState:  connState,
-			TLSInsecure:      proc.TLSInsecure,
-			UpstreamAddr:     proc.UpstreamAddr, // Upstream processor (for hierarchy display)
-			Hunters:          displayHunters,
-			TotalHunters:     len(allHunters), // Total hunters connected to processor
-			HierarchyDepth:   depth,           // Hierarchy depth (0 = root, -1 = unknown)
-			ProcessorPath:    path,            // Full path from root to this processor
-			EstimatedLatency: latency,         // Estimated operation latency in ms
+			Address:           addr,
+			ProcessorID:       proc.ProcessorID,
+			Status:            proc.Status,
+			ConnectionState:   connState,
+			TLSInsecure:       proc.TLSInsecure,
+			UpstreamAddr:      proc.UpstreamAddr, // Upstream processor (for hierarchy display)
+			Hunters:           displayHunters,
+			TotalHunters:      len(allHunters),        // Total hunters connected to processor
+			HierarchyDepth:    depth,                  // Hierarchy depth (0 = root, -1 = unknown)
+			ProcessorPath:     path,                   // Full path from root to this processor
+			EstimatedLatency:  latency,                // Estimated operation latency in ms
+			Reachable:         proc.Reachable,         // Whether processor is reachable for management operations
+			UnreachableReason: proc.UnreachableReason, // Reason why processor is unreachable
 		})
 	}
 	return procInfos

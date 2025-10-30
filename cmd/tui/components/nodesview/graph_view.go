@@ -272,6 +272,15 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 			procLines = append(procLines, "↑ [upstream]")
 		}
 
+		// Add reachability status
+		if !proc.Reachable {
+			if proc.UnreachableReason != "" {
+				procLines = append(procLines, fmt.Sprintf("⚠ Unreachable: %s", proc.UnreachableReason))
+			} else {
+				procLines = append(procLines, "⚠ Unreachable")
+			}
+		}
+
 		// Determine if processor is selected
 		isProcessorSelected := params.SelectedProcessorAddr == proc.Address
 

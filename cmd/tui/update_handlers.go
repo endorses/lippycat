@@ -360,7 +360,14 @@ func (m Model) handleFilterOperationResultMsg(msg components.FilterOperationResu
 			components.ToastDurationShort,
 		)
 	}
-	return m, nil
+
+	// Operation failed - display error with chain context if available
+	errorMsg := m.formatChainError(msg.Operation, msg.FilterPattern, msg.Error)
+	return m, m.uiState.Toast.Show(
+		errorMsg,
+		components.ToastError,
+		components.ToastDurationLong,
+	)
 }
 
 // handleHunterSelectionConfirmedMsg handles confirmed hunter selection

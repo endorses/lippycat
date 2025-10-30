@@ -37,17 +37,19 @@ const (
 
 // ProcessorInfo represents a processor node
 type ProcessorInfo struct {
-	Address          string
-	ProcessorID      string                     // ID of the processor
-	Status           management.ProcessorStatus // Status of the processor (when connected)
-	ConnectionState  ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
-	TLSInsecure      bool                       // True if connection is insecure (no TLS)
-	UpstreamAddr     string                     // Address of upstream processor (if hierarchical)
-	Hunters          []HunterInfo               // Hunters subscribed to by this TUI client (filtered)
-	TotalHunters     int                        // Total hunters connected to this processor (all hunters)
-	HierarchyDepth   int                        // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
-	ProcessorPath    []string                   // Full path from root to this processor
-	EstimatedLatency int                        // Estimated operation latency in ms (-1 if unknown)
+	Address           string
+	ProcessorID       string                     // ID of the processor
+	Status            management.ProcessorStatus // Status of the processor (when connected)
+	ConnectionState   ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
+	TLSInsecure       bool                       // True if connection is insecure (no TLS)
+	UpstreamAddr      string                     // Address of upstream processor (if hierarchical)
+	Hunters           []HunterInfo               // Hunters subscribed to by this TUI client (filtered)
+	TotalHunters      int                        // Total hunters connected to this processor (all hunters)
+	HierarchyDepth    int                        // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
+	ProcessorPath     []string                   // Full path from root to this processor
+	EstimatedLatency  int                        // Estimated operation latency in ms (-1 if unknown)
+	Reachable         bool                       // Whether this processor is reachable for management operations
+	UnreachableReason string                     // Reason why processor is unreachable (empty if reachable)
 }
 
 // AddNodeMsg is sent when user wants to add a node

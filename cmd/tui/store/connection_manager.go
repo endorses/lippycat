@@ -35,6 +35,8 @@ type ProcessorConnection struct {
 	SubscribedHunters  []string // Hunter IDs we're subscribed to (empty = all hunters)
 	TLSInsecure        bool     // True if connection is insecure (no TLS)
 	UpstreamAddr       string   // Address of upstream processor (if this processor forwards to another)
+	Reachable          bool     // Whether this processor is reachable for management operations
+	UnreachableReason  string   // Reason why processor is unreachable (empty if reachable)
 }
 
 // ConnectionManager manages remote processor connections

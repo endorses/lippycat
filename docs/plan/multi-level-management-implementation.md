@@ -338,11 +338,11 @@ TUI → Processor A (root)
   - [x] Handle subscription changes without reconnecting
 
 #### 4.8
-- [ ] Add error handling for chain operations
-  - [ ] Display `ChainError` with full context
-  - [ ] Show which processor in chain failed
-  - [ ] Offer retry option for failed operations
-  - [ ] Show "unreachable" status for partitioned subtrees
+- [x] Add error handling for chain operations
+  - [x] Display `ChainError` with full context
+  - [x] Show which processor in chain failed
+  - [x] Offer retry option for failed operations
+  - [x] Show "unreachable" status for partitioned subtrees
 
 #### 4.9
 - [ ] Write end-to-end tests

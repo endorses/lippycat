@@ -173,13 +173,27 @@ func (m *Model) loadFiltersFromProcessor(processorAddr string, hunterID string) 
 			}
 		}
 
-		// Call GetFilters RPC
+		// Call GetFiltersFromProcessor RPC (processor-scoped, multi-level management)
 		mgmtClient := management.NewManagementServiceClient(client.GetConn())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		resp, err := mgmtClient.GetFilters(ctx, &management.FilterRequest{
-			HunterId: hunterID, // Empty string means all filters
+		// Request authorization token for this operation
+		tokenResp, err := mgmtClient.RequestAuthToken(ctx, &management.AuthTokenRequest{
+			TargetProcessorId: processorAddr,
+		})
+		if err != nil {
+			logger.Warn("Failed to request authorization token, proceeding without token",
+				"error", err,
+				"processor", processorAddr)
+			// Continue without token - will work for directly connected processors (mTLS auth)
+			tokenResp = nil
+		}
+
+		resp, err := mgmtClient.GetFiltersFromProcessor(ctx, &management.ProcessorFilterQuery{
+			ProcessorId: processorAddr,
+			HunterId:    hunterID, // Empty string means all filters
+			AuthToken:   tokenResp,
 		})
 		if err != nil {
 			logger.Error("Failed to load filters from processor",
@@ -235,9 +249,22 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 		var err error
 		var filterPattern string
 
+		// Request authorization token for this operation
+		// Token is signed by the processor and authorizes operations on the target
+		tokenResp, err := mgmtClient.RequestAuthToken(ctx, &management.AuthTokenRequest{
+			TargetProcessorId: msg.ProcessorAddr,
+		})
+		if err != nil {
+			logger.Warn("Failed to request authorization token, proceeding without token",
+				"error", err,
+				"processor", msg.ProcessorAddr)
+			// Continue without token - will work for directly connected processors (mTLS auth)
+			tokenResp = nil
+		}
+
 		switch msg.Operation {
 		case "create", "update", "toggle":
-			// UpdateFilter handles both create and update
+			// UpdateFilterOnProcessor handles both create and update (processor-scoped, multi-level)
 			if msg.Filter == nil {
 				return components.FilterOperationResultMsg{
 					Success:       false,
@@ -247,10 +274,14 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 				}
 			}
 			filterPattern = msg.Filter.Pattern
-			result, err = mgmtClient.UpdateFilter(ctx, msg.Filter)
+			result, err = mgmtClient.UpdateFilterOnProcessor(ctx, &management.ProcessorFilterRequest{
+				ProcessorId: msg.ProcessorAddr,
+				Filter:      msg.Filter,
+				AuthToken:   tokenResp,
+			})
 
 		case "delete":
-			// DeleteFilter
+			// DeleteFilterOnProcessor (processor-scoped, multi-level)
 			if msg.FilterID == "" {
 				return components.FilterOperationResultMsg{
 					Success:       false,
@@ -260,8 +291,10 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 				}
 			}
 			filterPattern = msg.FilterID
-			result, err = mgmtClient.DeleteFilter(ctx, &management.FilterDeleteRequest{
-				FilterId: msg.FilterID,
+			result, err = mgmtClient.DeleteFilterOnProcessor(ctx, &management.ProcessorFilterDeleteRequest{
+				ProcessorId: msg.ProcessorAddr,
+				FilterId:    msg.FilterID,
+				AuthToken:   tokenResp,
 			})
 
 		default:

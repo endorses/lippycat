@@ -94,15 +94,25 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			}
 		}
 
+		// Calculate hierarchy information
+		depth := m.connectionMgr.GetHierarchyDepth(addr)
+		path := m.connectionMgr.GetProcessorPath(addr)
+		latency := m.connectionMgr.EstimateOperationLatency(addr)
+
 		procInfos = append(procInfos, components.ProcessorInfo{
-			Address:         addr,
-			ProcessorID:     proc.ProcessorID,
-			Status:          proc.Status,
-			ConnectionState: connState,
-			TLSInsecure:     proc.TLSInsecure,
-			UpstreamAddr:    proc.UpstreamAddr, // Upstream processor (for hierarchy display)
-			Hunters:         displayHunters,
-			TotalHunters:    len(allHunters), // Total hunters connected to processor
+			Address:           addr,
+			ProcessorID:       proc.ProcessorID,
+			Status:            proc.Status,
+			ConnectionState:   connState,
+			TLSInsecure:       proc.TLSInsecure,
+			UpstreamAddr:      proc.UpstreamAddr, // Upstream processor (for hierarchy display)
+			Hunters:           displayHunters,
+			TotalHunters:      len(allHunters),        // Total hunters connected to processor
+			HierarchyDepth:    depth,                  // Hierarchy depth (0 = root, -1 = unknown)
+			ProcessorPath:     path,                   // Full path from root to this processor
+			EstimatedLatency:  latency,                // Estimated operation latency in ms
+			Reachable:         proc.Reachable,         // Whether processor is reachable for management operations
+			UnreachableReason: proc.UnreachableReason, // Reason why processor is unreachable
 		})
 	}
 	return procInfos
@@ -315,54 +325,129 @@ func (m *Model) handleHunterSelectionConfirmed(msg components.HunterSelectionCon
 }
 
 // reconnectWithHunterFilter hot-swaps the hunter subscription without reconnecting
+// This works across the hierarchy by finding the root processor connection
 func (m *Model) reconnectWithHunterFilter(processorAddr string, hunterIDs []string) tea.Cmd {
 	proc, exists := m.connectionMgr.Processors[processorAddr]
 	if !exists {
 		return nil
 	}
 
-	// Store the new subscription list
+	// Store the new subscription list for this processor
 	proc.SubscribedHunters = hunterIDs
 
-	// Hot-swap subscription if client is connected
+	// Find the root processor (the one we're directly connected to)
+	// This handles hierarchical subscriptions where hunters may be on downstream processors
+	var client *remotecapture.Client
+	var rootAddr string
+
 	if proc.Client != nil {
-		client, ok := proc.Client.(*remotecapture.Client)
-		if ok {
-			// Update subscription without disconnecting
-			return func() tea.Msg {
-				err := client.UpdateSubscription(hunterIDs)
-				if err != nil {
-					// Hot-swap failed, fall back to reconnection
-					logger.Error("Hot-swap subscription failed, reconnecting",
-						"processor", processorAddr,
-						"error", err)
-					return ProcessorReconnectMsg{
-						Address:   processorAddr,
-						HunterIDs: hunterIDs,
-					}
-				}
-				// Success - subscription updated seamlessly
-				return nil
-			}
+		// This processor is directly connected (it's the root)
+		rootAddr = processorAddr
+		client, _ = proc.Client.(*remotecapture.Client)
+	} else {
+		// This processor is downstream - find the root processor
+		rootProcAddr, rootClient, err := m.connectionMgr.GetRootProcessorForAddress(processorAddr)
+		if err != nil {
+			logger.Error("Failed to find root processor for subscription update",
+				"processor", processorAddr,
+				"error", err)
+			return nil
 		}
+		rootAddr = rootProcAddr
+		client, _ = rootClient.(*remotecapture.Client)
 	}
 
-	// Client not available - do full reconnection
-	proc.State = store.ProcessorStateDisconnected
+	if client == nil {
+		logger.Error("No client available for subscription update",
+			"processor", processorAddr,
+			"root_processor", rootAddr)
+		return nil
+	}
+
+	// Update subscription on the root processor connection
+	// The root processor will filter packets by hunter_id, which works across the hierarchy
 	return func() tea.Msg {
-		return ProcessorReconnectMsg{
-			Address:   processorAddr,
-			HunterIDs: hunterIDs,
+		err := client.UpdateSubscription(hunterIDs)
+		if err != nil {
+			// Hot-swap failed, fall back to reconnection
+			logger.Error("Hot-swap subscription failed on root processor",
+				"processor", processorAddr,
+				"root_processor", rootAddr,
+				"error", err)
+			return ProcessorReconnectMsg{
+				Address:   rootAddr, // Reconnect to root processor
+				HunterIDs: hunterIDs,
+			}
 		}
+		// Success - subscription updated seamlessly across hierarchy
+		logger.Info("Subscription updated successfully",
+			"processor", processorAddr,
+			"root_processor", rootAddr,
+			"hunters", hunterIDs)
+		return nil
 	}
 }
 
-// loadHuntersFromProcessor loads the list of hunters from a processor via gRPC
+// loadHuntersFromProcessor loads the list of hunters from a processor
+// For hierarchical mode, uses cached topology data from the connection manager
+// For direct connections, queries via gRPC if needed
 func (m *Model) loadHuntersFromProcessor(processorAddr string) tea.Cmd {
 	return func() tea.Msg {
-		// Get the client for this processor
 		proc, exists := m.connectionMgr.Processors[processorAddr]
-		if !exists || proc.Client == nil {
+		if !exists {
+			return components.HuntersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Hunters:       []components.HunterSelectorItem{},
+			}
+		}
+
+		// Get hunters from cached topology (updated via SubscribeTopology)
+		// This works for both direct connections and hierarchical downstream processors
+		cachedHunters := m.connectionMgr.GetHunters(processorAddr)
+
+		// If we have cached hunters, use them (most common case)
+		if len(cachedHunters) > 0 {
+			// Convert to HunterSelectorItem and mark currently subscribed hunters as selected
+			subscribedIDs := make(map[string]bool)
+			if proc.SubscribedHunters == nil {
+				// Never configured - pre-select all hunters (default)
+				for _, h := range cachedHunters {
+					subscribedIDs[h.ID] = true
+				}
+			} else if len(proc.SubscribedHunters) == 0 {
+				// Explicitly subscribed to no hunters - select none
+			} else {
+				// We have a specific subscription list - only these are selected
+				for _, hunterID := range proc.SubscribedHunters {
+					subscribedIDs[hunterID] = true
+				}
+			}
+
+			// Build hunter items from cached data
+			hunterItems := make([]components.HunterSelectorItem, 0, len(cachedHunters))
+			for _, h := range cachedHunters {
+				hunterItems = append(hunterItems, components.HunterSelectorItem{
+					HunterID:     h.ID,
+					Hostname:     h.Hostname,
+					Interfaces:   h.Interfaces,
+					Status:       h.Status,
+					RemoteAddr:   h.RemoteAddr,
+					Selected:     subscribedIDs[h.ID],
+					Capabilities: h.Capabilities,
+				})
+			}
+
+			return components.HuntersLoadedMsg{
+				ProcessorAddr: processorAddr,
+				Hunters:       hunterItems,
+			}
+		}
+
+		// No cached hunters - try to query directly if we have a client
+		// This handles the case where topology hasn't been received yet
+		if proc.Client == nil {
+			// For downstream processors without direct connection, return empty
+			// (topology will populate this later)
 			return components.HuntersLoadedMsg{
 				ProcessorAddr: processorAddr,
 				Hunters:       []components.HunterSelectorItem{},
@@ -378,7 +463,7 @@ func (m *Model) loadHuntersFromProcessor(processorAddr string) tea.Cmd {
 			}
 		}
 
-		// Call ListAvailableHunters RPC
+		// Call ListAvailableHunters RPC (fallback for direct connections)
 		mgmtClient := management.NewManagementServiceClient(client.GetConn())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -411,7 +496,7 @@ func (m *Model) loadHuntersFromProcessor(processorAddr string) tea.Cmd {
 			}
 		}
 
-		// Build hunter items
+		// Build hunter items from RPC response
 		hunterItems := make([]components.HunterSelectorItem, 0, len(resp.Hunters))
 		for _, h := range resp.Hunters {
 			hunterItems = append(hunterItems, components.HunterSelectorItem{

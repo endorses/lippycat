@@ -53,6 +53,11 @@ service ManagementService {
     // GetFiltersFromProcessor retrieves filters from a specific processor
     // Used for multi-level management to query filter state in the hierarchy
     rpc GetFiltersFromProcessor(ProcessorFilterQuery) returns (FilterResponse);
+
+    // RequestAuthToken requests an authorization token for proxied operations
+    // Used by TUI clients to get tokens for managing downstream processors
+    // The token is signed by the processor and can be verified by downstream processors
+    rpc RequestAuthToken(AuthTokenRequest) returns (AuthorizationToken);
 }
 
 // HunterRegistration sent when hunter first connects
@@ -320,6 +325,12 @@ message FilterUpdateResult {
 message FilterDeleteRequest {
     // Filter ID to delete
     string filter_id = 1;
+}
+
+// AuthTokenRequest to request an authorization token
+message AuthTokenRequest {
+    // Target processor ID to authorize operations for
+    string target_processor_id = 1;
 }
 
 // AuthorizationToken for deep chain management operations

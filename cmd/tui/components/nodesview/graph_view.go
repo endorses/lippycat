@@ -246,15 +246,39 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 		if proc.ProcessorID != "" {
 			procHeader = proc.ProcessorID
 		}
+
+		// Add depth indicator to header
+		if proc.HierarchyDepth >= 0 {
+			depthIndicator := fmt.Sprintf("[L%d]", proc.HierarchyDepth)
+			if proc.HierarchyDepth > 7 {
+				depthIndicator += "⚠" // Warning for deep hierarchies
+			}
+			procHeader = depthIndicator + " " + procHeader
+		}
+
 		procLines = append(procLines, procHeader)
 		// Only add address line if different from header
 		if proc.ProcessorID != "" {
 			procLines = append(procLines, proc.Address)
 		}
 
+		// Add latency estimate if available
+		if proc.EstimatedLatency > 0 {
+			procLines = append(procLines, fmt.Sprintf("~%dms latency", proc.EstimatedLatency))
+		}
+
 		// Add upstream indicator if this processor forwards to another
 		if proc.UpstreamAddr != "" {
 			procLines = append(procLines, "↑ [upstream]")
+		}
+
+		// Add reachability status
+		if !proc.Reachable {
+			if proc.UnreachableReason != "" {
+				procLines = append(procLines, fmt.Sprintf("⚠ Unreachable: %s", proc.UnreachableReason))
+			} else {
+				procLines = append(procLines, "⚠ Unreachable")
+			}
 		}
 
 		// Determine if processor is selected

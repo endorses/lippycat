@@ -25,6 +25,9 @@ type EventHandler interface {
 
 	// OnDisconnect is called when connection is lost
 	OnDisconnect(address string, err error)
+
+	// OnTopologyUpdate is called when topology changes are received
+	OnTopologyUpdate(update *management.TopologyUpdate, processorAddr string)
 }
 
 // CallInfo represents a VoIP call for display
@@ -79,3 +82,5 @@ func (n *NoopEventHandler) OnHunterStatus(hunters []HunterInfo, processorID stri
 func (n *NoopEventHandler) OnCallUpdate(calls []CallInfo)                               {}
 func (n *NoopEventHandler) OnCorrelatedCallUpdate(correlatedCalls []CorrelatedCallInfo) {}
 func (n *NoopEventHandler) OnDisconnect(address string, err error)                      {}
+func (n *NoopEventHandler) OnTopologyUpdate(update *management.TopologyUpdate, processorAddr string) {
+}

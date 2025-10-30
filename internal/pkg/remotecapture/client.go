@@ -343,6 +343,45 @@ func (c *Client) UpdateSubscription(hunterIDs []string) error {
 }
 
 // SubscribeHunterStatus subscribes to hunter status updates
+// SubscribeTopology subscribes to real-time topology updates from a processor
+func (c *Client) SubscribeTopology() error {
+	// Only works for processors
+	if c.nodeType == NodeTypeHunter {
+		return fmt.Errorf("topology subscription is only available from processor nodes")
+	}
+
+	// Create subscription request
+	req := &management.TopologySubscribeRequest{}
+
+	// Start topology stream
+	stream, err := c.mgmtClient.SubscribeTopology(c.ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to topology: %w", err)
+	}
+
+	// Start goroutine to receive topology updates
+	go func() {
+		for {
+			update, err := stream.Recv()
+			if err != nil {
+				// Don't report error if context was cancelled (normal shutdown)
+				if c.ctx.Err() == nil && c.handler != nil {
+					// Notify handler of disconnection
+					c.handler.OnDisconnect(c.addr, fmt.Errorf("topology stream error: %w", err))
+				}
+				return
+			}
+
+			// Send topology update to handler
+			if c.handler != nil {
+				c.handler.OnTopologyUpdate(update, c.addr)
+			}
+		}
+	}()
+
+	return nil
+}
+
 func (c *Client) SubscribeHunterStatus() error {
 	// Only works for processors - hunters don't have GetHunterStatus
 	if c.nodeType == NodeTypeHunter {

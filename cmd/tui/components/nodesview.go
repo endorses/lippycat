@@ -8,6 +8,7 @@ import (
 
 	// "os" // Only needed for debug logging - uncomment if enabling DEBUG logs
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -36,14 +37,19 @@ const (
 
 // ProcessorInfo represents a processor node
 type ProcessorInfo struct {
-	Address         string
-	ProcessorID     string                     // ID of the processor
-	Status          management.ProcessorStatus // Status of the processor (when connected)
-	ConnectionState ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
-	TLSInsecure     bool                       // True if connection is insecure (no TLS)
-	UpstreamAddr    string                     // Address of upstream processor (if hierarchical)
-	Hunters         []HunterInfo               // Hunters subscribed to by this TUI client (filtered)
-	TotalHunters    int                        // Total hunters connected to this processor (all hunters)
+	Address           string
+	ProcessorID       string                     // ID of the processor
+	Status            management.ProcessorStatus // Status of the processor (when connected)
+	ConnectionState   ProcessorConnectionState   // Connection state (disconnected, connecting, connected, failed)
+	TLSInsecure       bool                       // True if connection is insecure (no TLS)
+	UpstreamAddr      string                     // Address of upstream processor (if hierarchical)
+	Hunters           []HunterInfo               // Hunters subscribed to by this TUI client (filtered)
+	TotalHunters      int                        // Total hunters connected to this processor (all hunters)
+	HierarchyDepth    int                        // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
+	ProcessorPath     []string                   // Full path from root to this processor
+	EstimatedLatency  int                        // Estimated operation latency in ms (-1 if unknown)
+	Reachable         bool                       // Whether this processor is reachable for management operations
+	UnreachableReason string                     // Reason why processor is unreachable (empty if reachable)
 }
 
 // AddNodeMsg is sent when user wants to add a node
@@ -92,6 +98,9 @@ type NodesView struct {
 
 	// Viewport scrolling
 	selectedNodeLine int // Line position of currently selected node in rendered content (-1 if no selection)
+
+	// Real-time topology updates
+	lastTopologyChange time.Time // Timestamp of last topology change (hunter/processor add/remove/status update)
 }
 
 // NewNodesView creates a new nodes view component
@@ -1175,4 +1184,117 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 	}
 
 	return nil
+}
+
+// AddHunter incrementally adds a hunter to a specific processor
+// This is more efficient than rebuilding the entire processor list
+func (n *NodesView) AddHunter(processorAddr string, hunter HunterInfo) {
+	// Find the processor and add/update the hunter
+	found := false
+	for i := range n.processors {
+		if n.processors[i].Address == processorAddr {
+			// Check if hunter already exists (update case)
+			hunterExists := false
+			for j := range n.processors[i].Hunters {
+				if n.processors[i].Hunters[j].ID == hunter.ID {
+					n.processors[i].Hunters[j] = hunter
+					hunterExists = true
+					break
+				}
+			}
+			// Add new hunter if it doesn't exist
+			if !hunterExists {
+				n.processors[i].Hunters = append(n.processors[i].Hunters, hunter)
+				// Sort hunters by ID for consistent ordering
+				sort.Slice(n.processors[i].Hunters, func(a, b int) bool {
+					return n.processors[i].Hunters[a].ID < n.processors[i].Hunters[b].ID
+				})
+			}
+			n.processors[i].TotalHunters = len(n.processors[i].Hunters)
+			found = true
+			break
+		}
+	}
+
+	// If processor doesn't exist, create it with this hunter
+	if !found {
+		newProc := ProcessorInfo{
+			Address:      processorAddr,
+			Hunters:      []HunterInfo{hunter},
+			TotalHunters: 1,
+		}
+		n.processors = append(n.processors, newProc)
+		// Sort processors alphabetically
+		sort.Slice(n.processors, func(i, j int) bool {
+			return n.processors[i].Address < n.processors[j].Address
+		})
+	}
+
+	// Rebuild flat hunters list
+	n.rebuildHuntersList()
+
+	// Update timestamp
+	n.lastTopologyChange = time.Now()
+
+	// Update viewport
+	n.updateViewportContent()
+}
+
+// RemoveHunter incrementally removes a hunter from a specific processor
+func (n *NodesView) RemoveHunter(processorAddr string, hunterID string) {
+	// Find the processor and remove the hunter
+	for i := range n.processors {
+		if n.processors[i].Address == processorAddr {
+			// Find and remove the hunter
+			filtered := make([]HunterInfo, 0, len(n.processors[i].Hunters))
+			for _, h := range n.processors[i].Hunters {
+				if h.ID != hunterID {
+					filtered = append(filtered, h)
+				}
+			}
+			n.processors[i].Hunters = filtered
+			n.processors[i].TotalHunters = len(filtered)
+			break
+		}
+	}
+
+	// Rebuild flat hunters list
+	n.rebuildHuntersList()
+
+	// Update timestamp
+	n.lastTopologyChange = time.Now()
+
+	// Update viewport
+	n.updateViewportContent()
+}
+
+// UpdateProcessorStatus updates the status of a specific processor
+func (n *NodesView) UpdateProcessorStatus(processorAddr string, status management.ProcessorStatus) {
+	// Find the processor and update its status
+	for i := range n.processors {
+		if n.processors[i].Address == processorAddr {
+			n.processors[i].Status = status
+			break
+		}
+	}
+
+	// Update timestamp
+	n.lastTopologyChange = time.Now()
+
+	// Update viewport
+	n.updateViewportContent()
+}
+
+// GetLastTopologyChange returns the timestamp of the last topology change
+func (n *NodesView) GetLastTopologyChange() time.Time {
+	return n.lastTopologyChange
+}
+
+// rebuildHuntersList rebuilds the flat hunters list from all processors
+func (n *NodesView) rebuildHuntersList() {
+	allHunters := make([]HunterInfo, 0)
+	for _, proc := range n.processors {
+		allHunters = append(allHunters, proc.Hunters...)
+	}
+	n.hunters = allHunters
 }

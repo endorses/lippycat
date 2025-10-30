@@ -332,10 +332,10 @@ TUI → Processor A (root)
   - [x] Warn when depth > 7 (high latency risk)
 
 #### 4.7
-- [ ] Update subscription management
-  - [ ] Ensure hunter subscriptions work across hierarchy
-  - [ ] Update `UpdateSubscription()` to use root processor connection
-  - [ ] Handle subscription changes without reconnecting
+- [x] Update subscription management
+  - [x] Ensure hunter subscriptions work across hierarchy
+  - [x] Update `UpdateSubscription()` to use root processor connection
+  - [x] Handle subscription changes without reconnecting
 
 #### 4.8
 - [ ] Add error handling for chain operations

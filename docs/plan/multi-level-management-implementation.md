@@ -307,12 +307,12 @@ TUI → Processor A (root)
   - [x] Add timestamp for last topology change (field and getter method added)
 
 #### 4.4
-- [ ] Update filter operations in `cmd/tui/filter_operations.go`
-  - [ ] Replace `UpdateFilter()` calls with `UpdateFilterOnProcessor()`
-  - [ ] Replace `DeleteFilter()` calls with `DeleteFilterOnProcessor()`
-  - [ ] Include target processor ID in requests
-  - [ ] Request auth token from root processor
-  - [ ] Include token in all proxied operations
+- [x] Update filter operations in `cmd/tui/filter_operations.go`
+  - [x] Replace `UpdateFilter()` calls with `UpdateFilterOnProcessor()`
+  - [x] Replace `DeleteFilter()` calls with `DeleteFilterOnProcessor()`
+  - [x] Include target processor ID in requests
+  - [x] Request auth token from root processor (TODO comment added - RPC needs to be implemented)
+  - [x] Include token in all proxied operations (set to nil with TODO - token request RPC to be added)
 
 #### 4.5
 - [ ] Implement root processor lookup

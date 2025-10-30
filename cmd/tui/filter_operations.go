@@ -173,13 +173,17 @@ func (m *Model) loadFiltersFromProcessor(processorAddr string, hunterID string) 
 			}
 		}
 
-		// Call GetFilters RPC
+		// Call GetFiltersFromProcessor RPC (processor-scoped, multi-level management)
 		mgmtClient := management.NewManagementServiceClient(client.GetConn())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		resp, err := mgmtClient.GetFilters(ctx, &management.FilterRequest{
-			HunterId: hunterID, // Empty string means all filters
+		// TODO(multi-level): Add RequestAuthToken() RPC and implement token request (phase 4.4)
+		// For now, auth_token is nil (works for directly connected processors via mTLS)
+		resp, err := mgmtClient.GetFiltersFromProcessor(ctx, &management.ProcessorFilterQuery{
+			ProcessorId: processorAddr,
+			HunterId:    hunterID, // Empty string means all filters
+			AuthToken:   nil,      // Token request RPC to be added in future phase
 		})
 		if err != nil {
 			logger.Error("Failed to load filters from processor",
@@ -235,9 +239,16 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 		var err error
 		var filterPattern string
 
+		// TODO(multi-level): Add RequestAuthToken() RPC and implement token request (phase 4.4)
+		// For now, auth_token is nil (works for directly connected processors via mTLS)
+		// Once hierarchical routing is implemented (phase 4.5), we need to:
+		// 1. Add RequestAuthToken(targetProcessorID) RPC to management.proto
+		// 2. Call that RPC to get a token from the root processor
+		// 3. Include the token in these requests for proxied operations
+
 		switch msg.Operation {
 		case "create", "update", "toggle":
-			// UpdateFilter handles both create and update
+			// UpdateFilterOnProcessor handles both create and update (processor-scoped, multi-level)
 			if msg.Filter == nil {
 				return components.FilterOperationResultMsg{
 					Success:       false,
@@ -247,10 +258,14 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 				}
 			}
 			filterPattern = msg.Filter.Pattern
-			result, err = mgmtClient.UpdateFilter(ctx, msg.Filter)
+			result, err = mgmtClient.UpdateFilterOnProcessor(ctx, &management.ProcessorFilterRequest{
+				ProcessorId: msg.ProcessorAddr,
+				Filter:      msg.Filter,
+				AuthToken:   nil, // Token request RPC to be added in future phase
+			})
 
 		case "delete":
-			// DeleteFilter
+			// DeleteFilterOnProcessor (processor-scoped, multi-level)
 			if msg.FilterID == "" {
 				return components.FilterOperationResultMsg{
 					Success:       false,
@@ -260,8 +275,10 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 				}
 			}
 			filterPattern = msg.FilterID
-			result, err = mgmtClient.DeleteFilter(ctx, &management.FilterDeleteRequest{
-				FilterId: msg.FilterID,
+			result, err = mgmtClient.DeleteFilterOnProcessor(ctx, &management.ProcessorFilterDeleteRequest{
+				ProcessorId: msg.ProcessorAddr,
+				FilterId:    msg.FilterID,
+				AuthToken:   nil, // Token request RPC to be added in future phase
 			})
 
 		default:

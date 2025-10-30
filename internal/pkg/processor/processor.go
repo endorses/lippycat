@@ -976,6 +976,18 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		}, nil
 	}
 
+	// Add processor to proxy manager's topology cache for routing
+	p.proxyManager.AddProcessor(&proxy.ProcessorNode{
+		ID:             req.ProcessorId,
+		Address:        req.ListenAddress,
+		ParentID:       p.config.ProcessorID, // This processor is the parent
+		HierarchyDepth: 1,                    // Direct child has depth 1
+		Reachable:      true,
+		Metadata: map[string]string{
+			"version": req.Version,
+		},
+	})
+
 	return &management.ProcessorRegistrationResponse{
 		Accepted: true,
 	}, nil
@@ -1136,6 +1148,30 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 		"filter_type", req.Filter.Type,
 		"filter_pattern", req.Filter.Pattern)
 
+	// Verify authorization token if present (must happen before routing)
+	if req.AuthToken != nil {
+		// Convert protobuf token to internal type
+		token, err := proxy.ConvertProtoToken(req.AuthToken)
+		if err != nil {
+			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), 0)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "invalid_auth_token")
+			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
+		}
+
+		// Verify token signature and expiration
+		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
+			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), 0)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "auth_verification_failed",
+				"issuer_id", req.AuthToken.IssuerId,
+				"expires_at", token.ExpiresAt)
+			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
+		}
+
+		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, 0)
+	}
+
 	// Use proxy manager to determine routing
 	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
 	if err != nil {
@@ -1173,32 +1209,6 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 		"target_processor_id", req.ProcessorId,
 		"downstream_processor_id", routingDecision.DownstreamProcessorID,
 		"chain_depth", routingDecision.Depth)
-
-	// Verify authorization token if present
-	if req.AuthToken != nil {
-		// Convert protobuf token to internal type
-		token, err := proxy.ConvertProtoToken(req.AuthToken)
-		if err != nil {
-			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), routingDecision.Depth)
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"reason", "invalid_auth_token",
-				"chain_depth", routingDecision.Depth)
-			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
-		}
-
-		// Verify token signature and expiration
-		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
-			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), routingDecision.Depth)
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"reason", "auth_verification_failed",
-				"issuer_id", req.AuthToken.IssuerId,
-				"expires_at", token.ExpiresAt,
-				"chain_depth", routingDecision.Depth)
-			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
-		}
-
-		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, routingDecision.Depth)
-	}
 
 	// Build processor path for chain error context
 	processorPath := []string{p.config.ProcessorID}
@@ -1238,6 +1248,30 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 	logAuditOperationStart(audit, req.ProcessorId,
 		"filter_id", req.FilterId)
 
+	// Verify authorization token if present (must happen before routing)
+	if req.AuthToken != nil {
+		// Convert protobuf token to internal type
+		token, err := proxy.ConvertProtoToken(req.AuthToken)
+		if err != nil {
+			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), 0)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "invalid_auth_token")
+			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
+		}
+
+		// Verify token signature and expiration
+		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
+			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), 0)
+			logAuditOperationResult(audit, req.ProcessorId, false, err,
+				"reason", "auth_verification_failed",
+				"issuer_id", req.AuthToken.IssuerId,
+				"expires_at", token.ExpiresAt)
+			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
+		}
+
+		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, 0)
+	}
+
 	// Use proxy manager to determine routing
 	routingDecision, err := p.proxyManager.RouteToProcessor(ctx, req.ProcessorId)
 	if err != nil {
@@ -1275,32 +1309,6 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 		"target_processor_id", req.ProcessorId,
 		"downstream_processor_id", routingDecision.DownstreamProcessorID,
 		"chain_depth", routingDecision.Depth)
-
-	// Verify authorization token if present
-	if req.AuthToken != nil {
-		// Convert protobuf token to internal type
-		token, err := proxy.ConvertProtoToken(req.AuthToken)
-		if err != nil {
-			logAuditAuthFailure(audit, req.ProcessorId, "token_conversion_failed: "+err.Error(), routingDecision.Depth)
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"reason", "invalid_auth_token",
-				"chain_depth", routingDecision.Depth)
-			return nil, status.Errorf(codes.Unauthenticated, "invalid authorization token: %v", err)
-		}
-
-		// Verify token signature and expiration
-		if err := p.proxyManager.VerifyAuthToken(token, req.ProcessorId); err != nil {
-			logAuditAuthFailure(audit, req.ProcessorId, err.Error(), routingDecision.Depth)
-			logAuditOperationResult(audit, req.ProcessorId, false, err,
-				"reason", "auth_verification_failed",
-				"issuer_id", req.AuthToken.IssuerId,
-				"expires_at", token.ExpiresAt,
-				"chain_depth", routingDecision.Depth)
-			return nil, status.Errorf(codes.Unauthenticated, "authorization failed: %v", err)
-		}
-
-		logAuditAuthSuccess(audit, req.ProcessorId, req.AuthToken.IssuerId, routingDecision.Depth)
-	}
 
 	// Build processor path for chain error context
 	processorPath := []string{p.config.ProcessorID}

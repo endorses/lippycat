@@ -50,7 +50,7 @@ func TestIntegration_MultiLevel_FilterUpdate2Level(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
 	defer downstreamConn.Close()
 
-	time.Sleep(1 * time.Second) // Wait for hierarchy to stabilize
+	time.Sleep(2 * time.Second) // Wait for hierarchy to stabilize
 
 	// Connect hunter to downstream processor
 	hunterConn, hunterStream, err := connectHunter(ctx, downstreamAddr, "test-hunter-2level")
@@ -150,7 +150,7 @@ func TestIntegration_MultiLevel_FilterUpdate3Level(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(leafProc)
 	defer leafConn.Close()
 
-	time.Sleep(2 * time.Second) // Wait for 3-level hierarchy to stabilize
+	time.Sleep(4 * time.Second) // Wait for 3-level hierarchy to stabilize
 
 	// Connect hunter to leaf processor
 	hunterConn, hunterStream, err := connectHunter(ctx, leafAddr, "test-hunter-3level")
@@ -242,7 +242,7 @@ func TestIntegration_MultiLevel_FilterDelete(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
 	defer downstreamConn.Close()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// Connect hunter
 	hunterConn, hunterStream, err := connectHunter(ctx, downstreamAddr, "test-hunter-delete")
@@ -347,7 +347,7 @@ func TestIntegration_MultiLevel_ExpiredToken(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
 	defer downstreamConn.Close()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// Create an expired token
 	expiredToken := &management.AuthorizationToken{
@@ -417,7 +417,7 @@ func TestIntegration_MultiLevel_InvalidToken(t *testing.T) {
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
 	defer downstreamConn.Close()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// Create a token with invalid signature
 	invalidToken := &management.AuthorizationToken{

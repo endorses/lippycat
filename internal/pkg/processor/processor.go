@@ -537,6 +537,14 @@ func (p *Processor) Shutdown() error {
 	return nil
 }
 
+// SetProxyTLSCredentials sets TLS credentials on the proxy manager for authorization token signing.
+// This method is primarily used for testing to configure TLS credentials after processor creation.
+func (p *Processor) SetProxyTLSCredentials(cert, key []byte) {
+	if p.proxyManager != nil {
+		p.proxyManager.SetTLSCredentials(cert, key)
+	}
+}
+
 // StreamPackets handles packet streaming from hunters (Data Service)
 func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) error {
 	var hunterID string // Track which hunter this stream belongs to

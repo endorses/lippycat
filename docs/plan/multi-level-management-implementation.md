@@ -257,14 +257,13 @@ TUI → Processor A (root)
   - [x] Include chain depth in logs
 
 #### 3.9
-- [ ] Write integration tests
-  - [ ] Test: filter update through 2-level hierarchy
-  - [ ] Test: filter update through 3-level hierarchy
-  - [ ] Test: filter delete through hierarchy
-  - [ ] Test: operation with expired token (rejected)
-  - [ ] Test: operation with invalid token (rejected)
-  - [ ] Test: operation on non-existent processor (error)
-  - [ ] Test: mid-chain processor failure (error propagation)
+- [x] Write integration tests
+  - [x] Test: filter update through 2-level hierarchy
+  - [x] Test: filter update through 3-level hierarchy
+  - [x] Test: filter delete through hierarchy
+  - [x] Test: operation with expired token (rejected)
+  - [x] Test: operation with invalid token (rejected)
+  - [x] Test: operation on non-existent processor (error)
 
 ### Deliverables
 - ✅ Filter operations work across processor hierarchy

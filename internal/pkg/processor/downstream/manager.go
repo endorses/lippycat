@@ -2,11 +2,13 @@ package downstream
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -178,6 +180,14 @@ func (m *Manager) GetAll() []*ProcessorInfo {
 		procs = append(procs, proc)
 	}
 	return procs
+}
+
+// Get returns a downstream processor by ID, or nil if not found
+func (m *Manager) Get(processorID string) *ProcessorInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	return m.downstreams[processorID]
 }
 
 // GetTopology recursively queries all downstream processors for their topology
@@ -382,6 +392,161 @@ func (m *Manager) getProcessorID() string {
 	// TODO: This should be configurable or passed during manager creation
 	// For now, return a placeholder
 	return "processor-upstream"
+}
+
+// ForwardUpdateFilter forwards a filter update operation to a downstream processor.
+// This is used for recursive routing where the target may not be a direct downstream.
+//
+// Parameters:
+//   - ctx: Context with timeout for the operation
+//   - downstreamID: The direct downstream processor to forward through
+//   - req: The original filter update request (target may be further downstream)
+//   - processorPath: Current processor path from root (for chain error context)
+//   - currentProcessorID: ID of this processor (for chain error context)
+//
+// Returns the filter update result or an error with chain context.
+func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterRequest, processorPath []string, currentProcessorID string) (*management.FilterUpdateResult, error) {
+	downstream := m.Get(downstreamID)
+	if downstream == nil {
+		logger.Error("Downstream processor not found for forwarding",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId)
+		return nil, fmt.Errorf("downstream processor not found: %s (target: %s)",
+			downstreamID, req.ProcessorId)
+	}
+
+	logger.Info("Forwarding filter update operation",
+		"downstream_id", downstreamID,
+		"target_processor_id", req.ProcessorId,
+		"filter_id", req.Filter.Id)
+
+	result, err := downstream.Client.UpdateFilterOnProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter update",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId,
+			"error", err)
+
+		// Build chain context for error
+		// If err is already a ChainError from downstream, preserve it
+		// Otherwise, create new ChainError with full context
+		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "UpdateFilter")
+	}
+
+	return result, nil
+}
+
+// ForwardDeleteFilter forwards a filter deletion operation to a downstream processor.
+// This is used for recursive routing where the target may not be a direct downstream.
+//
+// Parameters:
+//   - ctx: Context with timeout for the operation
+//   - downstreamID: The direct downstream processor to forward through
+//   - req: The original filter delete request (target may be further downstream)
+//   - processorPath: Current processor path from root (for chain error context)
+//   - currentProcessorID: ID of this processor (for chain error context)
+//
+// Returns the filter update result or an error with chain context.
+func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, req *management.ProcessorFilterDeleteRequest, processorPath []string, currentProcessorID string) (*management.FilterUpdateResult, error) {
+	downstream := m.Get(downstreamID)
+	if downstream == nil {
+		logger.Error("Downstream processor not found for forwarding",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId)
+		return nil, fmt.Errorf("downstream processor not found: %s (target: %s)",
+			downstreamID, req.ProcessorId)
+	}
+
+	logger.Info("Forwarding filter delete operation",
+		"downstream_id", downstreamID,
+		"target_processor_id", req.ProcessorId,
+		"filter_id", req.FilterId)
+
+	result, err := downstream.Client.DeleteFilterOnProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter delete",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId,
+			"error", err)
+
+		// Build chain context for error
+		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "DeleteFilter")
+	}
+
+	return result, nil
+}
+
+// ForwardGetFilters forwards a filter query operation to a downstream processor.
+// This is used for recursive routing where the target may not be a direct downstream.
+//
+// Parameters:
+//   - ctx: Context with timeout for the operation
+//   - downstreamID: The direct downstream processor to forward through
+//   - req: The original filter query request (target may be further downstream)
+//   - processorPath: Current processor path from root (for chain error context)
+//   - currentProcessorID: ID of this processor (for chain error context)
+//
+// Returns the filter response or an error with chain context.
+func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, req *management.ProcessorFilterQuery, processorPath []string, currentProcessorID string) (*management.FilterResponse, error) {
+	downstream := m.Get(downstreamID)
+	if downstream == nil {
+		logger.Error("Downstream processor not found for forwarding",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId)
+		return nil, fmt.Errorf("downstream processor not found: %s (target: %s)",
+			downstreamID, req.ProcessorId)
+	}
+
+	logger.Info("Forwarding filter query operation",
+		"downstream_id", downstreamID,
+		"target_processor_id", req.ProcessorId,
+		"hunter_id", req.HunterId)
+
+	result, err := downstream.Client.GetFiltersFromProcessor(ctx, req)
+	if err != nil {
+		logger.Error("Failed to forward filter query",
+			"downstream_id", downstreamID,
+			"target_processor_id", req.ProcessorId,
+			"error", err)
+
+		// Build chain context for error
+		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "GetFilters")
+	}
+
+	return result, nil
+}
+
+// wrapChainError wraps an error with chain context information.
+// If the error is already a ChainError, it is returned as-is (already has context).
+// Otherwise, a new ChainError is created with the current processor path.
+//
+// Parameters:
+//   - err: The error to wrap
+//   - processorPath: Current processor path from root
+//   - currentProcessorID: ID of this processor
+//   - downstreamID: ID of the downstream processor that was contacted
+//   - operation: Operation being performed (for context)
+func (m *Manager) wrapChainError(err error, processorPath []string, currentProcessorID, downstreamID, operation string) error {
+	// Check if error is already a ChainError
+	if chainErr, ok := proxy.IsChainError(err); ok {
+		// Already has chain context, return as-is
+		return chainErr
+	}
+
+	// Create new ChainError with full context
+	// Build processor path: existing path + current processor
+	fullPath := make([]string, len(processorPath)+1)
+	copy(fullPath, processorPath)
+	fullPath[len(fullPath)-1] = currentProcessorID
+
+	// The failed processor is the downstream we tried to contact
+	return proxy.NewChainErrorWithOperation(
+		operation,
+		fullPath,
+		downstreamID, // The downstream processor is where it failed
+		len(fullPath),
+		err,
+	)
 }
 
 // Close closes all downstream connections and cancels topology subscriptions

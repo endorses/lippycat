@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -42,6 +43,7 @@ type ConnectionManager struct {
 	Processors         map[string]*ProcessorConnection    // address -> connection
 	HuntersByProcessor map[string][]components.HunterInfo // address -> hunters
 	RemoteClients      map[string]interface{ Close() }    // DEPRECATED: backward compatibility
+	rootProcessorCache map[string]string                  // target address -> root processor address (for hierarchy routing)
 }
 
 // NewConnectionManager creates a new connection manager
@@ -50,6 +52,7 @@ func NewConnectionManager() *ConnectionManager {
 		Processors:         make(map[string]*ProcessorConnection),
 		HuntersByProcessor: make(map[string][]components.HunterInfo),
 		RemoteClients:      make(map[string]interface{ Close() }),
+		rootProcessorCache: make(map[string]string),
 	}
 }
 
@@ -58,6 +61,8 @@ func (cm *ConnectionManager) AddProcessor(address string, conn *ProcessorConnect
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.Processors[address] = conn
+	// Invalidate cache when topology changes
+	cm.rootProcessorCache = make(map[string]string)
 }
 
 // RemoveProcessor removes a processor connection and closes it
@@ -74,6 +79,8 @@ func (cm *ConnectionManager) RemoveProcessor(address string) {
 		}
 		delete(cm.Processors, address)
 		delete(cm.HuntersByProcessor, address)
+		// Invalidate cache when topology changes
+		cm.rootProcessorCache = make(map[string]string)
 	}
 }
 
@@ -154,6 +161,7 @@ func (cm *ConnectionManager) CloseAll() {
 	cm.Processors = make(map[string]*ProcessorConnection)
 	cm.HuntersByProcessor = make(map[string][]components.HunterInfo)
 	cm.RemoteClients = make(map[string]interface{ Close() })
+	cm.rootProcessorCache = make(map[string]string)
 }
 
 // ConnectionCount returns the number of active connections
@@ -180,4 +188,82 @@ func (cm *ConnectionManager) TotalHunterCount() int {
 		count += len(hunters)
 	}
 	return count
+}
+
+// GetRootProcessorForAddress finds the root processor (directly connected to TUI) for a given target address
+// by walking up the hierarchy via UpstreamAddr fields. Returns the root processor address and client,
+// or an error if no root processor is found.
+//
+// The root processor is the processor that the TUI is directly connected to (has a Client) and can be used
+// to route operations to the target processor through the hierarchy.
+//
+// Example hierarchy:
+//
+//	TUI -> Processor A (root) -> Processor B -> Processor C (target)
+//
+// GetRootProcessorForAddress("processor-c:50051") would return Processor A's address and client.
+func (cm *ConnectionManager) GetRootProcessorForAddress(targetAddr string) (string, interface{ Close() }, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	// Check cache first
+	if rootAddr, exists := cm.rootProcessorCache[targetAddr]; exists {
+		if proc, exists := cm.Processors[rootAddr]; exists && proc.Client != nil && proc.State == ProcessorStateConnected {
+			return rootAddr, proc.Client, nil
+		}
+		// Cache entry is stale, remove it
+		delete(cm.rootProcessorCache, targetAddr)
+	}
+
+	// Walk up the hierarchy to find the root processor
+	visited := make(map[string]bool) // Prevent infinite loops
+	currentAddr := targetAddr
+	maxDepth := 20 // Prevent infinite loops even with cycle detection
+
+	for i := 0; i < maxDepth; i++ {
+		// Check for cycles
+		if visited[currentAddr] {
+			return "", nil, fmt.Errorf("cycle detected in processor hierarchy at %s", currentAddr)
+		}
+		visited[currentAddr] = true
+
+		// Get the processor
+		proc, exists := cm.Processors[currentAddr]
+		if !exists {
+			return "", nil, fmt.Errorf("processor %s not found in hierarchy", currentAddr)
+		}
+
+		// If this processor is directly connected (has a Client), it's the root
+		if proc.Client != nil && proc.State == ProcessorStateConnected {
+			// Cache the result
+			cm.rootProcessorCache[targetAddr] = currentAddr
+			return currentAddr, proc.Client, nil
+		}
+
+		// If no upstream, we've reached the top but it's not connected
+		if proc.UpstreamAddr == "" {
+			return "", nil, fmt.Errorf("processor %s has no upstream and is not connected", currentAddr)
+		}
+
+		// Move to upstream processor
+		currentAddr = proc.UpstreamAddr
+	}
+
+	return "", nil, fmt.Errorf("maximum hierarchy depth exceeded (max %d levels)", maxDepth)
+}
+
+// InvalidateRootProcessorCache clears the root processor cache for a specific target address
+// or all cache entries if targetAddr is empty. This should be called when the hierarchy changes
+// (e.g., processor connects/disconnects, upstream changes).
+func (cm *ConnectionManager) InvalidateRootProcessorCache(targetAddr string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if targetAddr == "" {
+		// Clear entire cache
+		cm.rootProcessorCache = make(map[string]string)
+	} else {
+		// Clear specific entry
+		delete(cm.rootProcessorCache, targetAddr)
+	}
 }

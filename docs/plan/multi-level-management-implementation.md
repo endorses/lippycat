@@ -318,11 +318,11 @@ TUI → Processor A (root)
   - [x] Update TUI to call `RequestAuthToken()` before filter operations
 
 #### 4.5
-- [ ] Implement root processor lookup
-  - [ ] Add `getRootProcessorForAddress(targetAddr)` method
-  - [ ] Walk up hierarchy to find directly connected processor
-  - [ ] Cache root processor for each downstream processor
-  - [ ] Handle case where root not found (error)
+- [x] Implement root processor lookup
+  - [x] Add `getRootProcessorForAddress(targetAddr)` method
+  - [x] Walk up hierarchy to find directly connected processor
+  - [x] Cache root processor for each downstream processor
+  - [x] Handle case where root not found (error)
 
 #### 4.6
 - [ ] Add hierarchy depth indicators in UI

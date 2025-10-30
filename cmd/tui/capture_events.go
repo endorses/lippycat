@@ -255,6 +255,8 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 
 				// Mark that this processor forwards to upstream
 				proc.UpstreamAddr = msg.UpstreamProcessor
+				// Invalidate cache when hierarchy changes
+				m.connectionMgr.InvalidateRootProcessorCache("")
 			}
 		}
 	}
@@ -700,6 +702,8 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 		proc.ProcessorID = processor.ProcessorId
 		proc.Status = processor.Status
 		proc.UpstreamAddr = parentAddr
+		// Invalidate cache when hierarchy changes
+		m.connectionMgr.InvalidateRootProcessorCache("")
 	}
 }
 
@@ -769,6 +773,8 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 		proc.Status = node.Status
 		// Update UpstreamAddr based on topology tree structure
 		proc.UpstreamAddr = parentAddr
+		// Invalidate cache when hierarchy changes
+		m.connectionMgr.InvalidateRootProcessorCache("")
 		// Update TLS setting if this is a discovered processor
 		if proc.State == store.ProcessorStateUnknown {
 			proc.TLSInsecure = tlsInsecure

@@ -59,22 +59,37 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// Health check configuration
+	healthCheckInterval time.Duration
 }
+
+const (
+	// DefaultHealthCheckInterval is the default interval for health checks (30 seconds)
+	DefaultHealthCheckInterval = 30 * time.Second
+)
 
 // NewManager creates a new downstream processor manager
 func NewManager(tlsInsecure bool, tlsCertFile, tlsKeyFile, tlsCAFile string, tlsSkipVerify bool, tlsServerName string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Manager{
-		downstreams:   make(map[string]*ProcessorInfo),
-		tlsInsecure:   tlsInsecure,
-		tlsCertFile:   tlsCertFile,
-		tlsKeyFile:    tlsKeyFile,
-		tlsCAFile:     tlsCAFile,
-		tlsSkipVerify: tlsSkipVerify,
-		tlsServerName: tlsServerName,
-		ctx:           ctx,
-		cancel:        cancel,
+	m := &Manager{
+		downstreams:         make(map[string]*ProcessorInfo),
+		tlsInsecure:         tlsInsecure,
+		tlsCertFile:         tlsCertFile,
+		tlsKeyFile:          tlsKeyFile,
+		tlsCAFile:           tlsCAFile,
+		tlsSkipVerify:       tlsSkipVerify,
+		tlsServerName:       tlsServerName,
+		ctx:                 ctx,
+		cancel:              cancel,
+		healthCheckInterval: DefaultHealthCheckInterval,
 	}
+
+	// Start health check goroutine
+	m.wg.Add(1)
+	go m.healthCheckLoop(m.healthCheckInterval)
+
+	return m
 }
 
 // SetTopologyPublisher sets the topology publisher for forwarding updates upstream
@@ -388,7 +403,9 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 	}
 }
 
-// reconnectTopologyStream attempts to reconnect the topology stream for a downstream processor
+// reconnectTopologyStream attempts to reconnect the topology stream for a downstream processor.
+// After reconnection, it performs a full topology re-sync by waiting for the initial snapshot
+// from the topology stream.
 func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -420,8 +437,34 @@ func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 	proc.TopologyStream = stream
 	proc.TopologyStreamActive = true
 
-	logger.Info("Topology stream reconnected",
+	logger.Info("Topology stream reconnected, waiting for initial snapshot",
 		"processor_id", proc.ProcessorID)
+
+	// Perform full topology re-sync
+	// The first message in a topology subscription is always a snapshot
+	// This will be handled by receiveTopologyUpdates goroutine
+	// Mark processor as reachable again if publisher is set
+	if m.topologyPublisher != nil {
+		// Publish processor reconnected event
+		update := &management.TopologyUpdate{
+			TimestampNs: time.Now().UnixNano(),
+			ProcessorId: proc.ProcessorID,
+			UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
+			Event: &management.TopologyUpdate_ProcessorConnected{
+				ProcessorConnected: &management.ProcessorConnectedEvent{
+					Processor: &management.ProcessorNode{
+						ProcessorId: proc.ProcessorID,
+						Address:     proc.ListenAddress,
+						Reachable:   true,
+					},
+				},
+			},
+		}
+		m.topologyPublisher.PublishTopologyUpdate(update)
+
+		logger.Info("Published processor reconnected event",
+			"processor_id", proc.ProcessorID)
+	}
 
 	return nil
 }
@@ -665,6 +708,100 @@ func (m *Manager) wrapChainError(err error, processorPath []string, currentProce
 		len(fullPath),
 		err,
 	)
+}
+
+// healthCheckLoop runs periodically to check the health of downstream processors
+// and mark them as unreachable if the topology stream is not active.
+// The interval parameter is passed at goroutine creation to avoid data races.
+func (m *Manager) healthCheckLoop(interval time.Duration) {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	logger.Info("Starting downstream health check loop",
+		"interval", interval)
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			logger.Info("Downstream health check loop stopped")
+			return
+		case <-ticker.C:
+			m.performHealthCheck(interval)
+		}
+	}
+}
+
+// performHealthCheck checks the health of all downstream processors.
+// The interval parameter is used to determine warning thresholds.
+func (m *Manager) performHealthCheck(interval time.Duration) {
+	// Snapshot processor state within the lock to avoid races
+	type procSnapshot struct {
+		ProcessorID          string
+		LastSeen             time.Time
+		TopologyStreamActive bool
+		ReconnectAttempts    int
+	}
+
+	m.mu.RLock()
+	snapshots := make([]procSnapshot, 0, len(m.downstreams))
+	for _, proc := range m.downstreams {
+		snapshots = append(snapshots, procSnapshot{
+			ProcessorID:          proc.ProcessorID,
+			LastSeen:             proc.LastSeen,
+			TopologyStreamActive: proc.TopologyStreamActive,
+			ReconnectAttempts:    proc.reconnectAttempts,
+		})
+	}
+	m.mu.RUnlock()
+
+	for _, snap := range snapshots {
+		// Check if topology stream is active
+		if !snap.TopologyStreamActive {
+			logger.Warn("Downstream processor topology stream inactive",
+				"processor_id", snap.ProcessorID,
+				"last_seen", snap.LastSeen,
+				"reconnect_attempts", snap.ReconnectAttempts)
+
+			// Mark processor as unreachable if publisher is set
+			if m.topologyPublisher != nil {
+				reason := fmt.Sprintf("topology stream inactive (last seen: %v ago, reconnect attempts: %d)",
+					time.Since(snap.LastSeen).Round(time.Second),
+					snap.ReconnectAttempts)
+
+				// Publish processor unreachable event
+				update := &management.TopologyUpdate{
+					TimestampNs: time.Now().UnixNano(),
+					ProcessorId: snap.ProcessorID,
+					UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_DISCONNECTED,
+					Event: &management.TopologyUpdate_ProcessorDisconnected{
+						ProcessorDisconnected: &management.ProcessorDisconnectedEvent{
+							ProcessorId: snap.ProcessorID,
+							Reason:      reason,
+						},
+					},
+				}
+				m.topologyPublisher.PublishTopologyUpdate(update)
+
+				logger.Info("Published processor unreachable event",
+					"processor_id", snap.ProcessorID,
+					"reason", reason)
+			}
+		} else {
+			// Stream is active, update last seen
+			timeSinceLastSeen := time.Since(snap.LastSeen)
+			if timeSinceLastSeen > interval*2 {
+				logger.Warn("Downstream processor has not sent updates recently",
+					"processor_id", snap.ProcessorID,
+					"last_seen", timeSinceLastSeen.Round(time.Second))
+			} else {
+				logger.Debug("Downstream processor health check passed",
+					"processor_id", snap.ProcessorID,
+					"last_seen", timeSinceLastSeen.Round(time.Second))
+			}
+		}
+	}
 }
 
 // Close closes all downstream connections and cancels topology subscriptions

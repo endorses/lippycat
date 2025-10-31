@@ -418,11 +418,11 @@ TUI → Processor A (root)
   - [x] Clean up downstream connections
 
 #### 5.8
-- [ ] Add network partition handling
-  - [ ] Health check goroutine for downstream connections (30s interval)
-  - [ ] Automatic reconnection on stream failure
-  - [ ] Mark subtree as unreachable on partition
-  - [ ] Full topology re-sync on reconnection
+- [x] Add network partition handling
+  - [x] Health check goroutine for downstream connections (30s interval)
+  - [x] Automatic reconnection on stream failure
+  - [x] Mark subtree as unreachable on partition
+  - [x] Full topology re-sync on reconnection
 
 #### 5.9
 - [ ] Performance testing

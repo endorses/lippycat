@@ -376,11 +376,11 @@ TUI → Processor A (root)
   - [x] Test: verify reduced update frequency
 
 #### 5.2
-- [ ] Add retry logic for proxied operations
-  - [ ] Implement exponential backoff (100ms, 200ms, 400ms, 800ms)
-  - [ ] Maximum 3 retries per operation
-  - [ ] Only retry on transient errors (connection, timeout)
-  - [ ] Don't retry on authorization failures
+- [x] Add retry logic for proxied operations
+  - [x] Implement exponential backoff (100ms, 200ms, 400ms, 800ms)
+  - [x] Maximum 3 retries per operation
+  - [x] Only retry on transient errors (connection, timeout)
+  - [x] Don't retry on authorization failures
 
 #### 5.3
 - [ ] Implement topology cache TTL

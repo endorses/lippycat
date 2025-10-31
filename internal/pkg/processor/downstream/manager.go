@@ -460,17 +460,25 @@ func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, 
 		"target_processor_id", req.ProcessorId,
 		"filter_id", req.Filter.Id)
 
-	result, err := downstream.Client.UpdateFilterOnProcessor(ctx, req)
-	if err != nil {
+	var result *management.FilterUpdateResult
+	var err error
+
+	// Execute with retry logic for transient failures
+	retryErr := withRetry(ctx, func() error {
+		result, err = downstream.Client.UpdateFilterOnProcessor(ctx, req)
+		return err
+	}, "UpdateFilter", req.ProcessorId)
+
+	if retryErr != nil {
 		logger.Error("Failed to forward filter update",
 			"downstream_id", downstreamID,
 			"target_processor_id", req.ProcessorId,
-			"error", err)
+			"error", retryErr)
 
 		// Build chain context for error
 		// If err is already a ChainError from downstream, preserve it
 		// Otherwise, create new ChainError with full context
-		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "UpdateFilter")
+		return nil, m.wrapChainError(retryErr, processorPath, currentProcessorID, downstreamID, "UpdateFilter")
 	}
 
 	return result, nil
@@ -502,15 +510,23 @@ func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, 
 		"target_processor_id", req.ProcessorId,
 		"filter_id", req.FilterId)
 
-	result, err := downstream.Client.DeleteFilterOnProcessor(ctx, req)
-	if err != nil {
+	var result *management.FilterUpdateResult
+	var err error
+
+	// Execute with retry logic for transient failures
+	retryErr := withRetry(ctx, func() error {
+		result, err = downstream.Client.DeleteFilterOnProcessor(ctx, req)
+		return err
+	}, "DeleteFilter", req.ProcessorId)
+
+	if retryErr != nil {
 		logger.Error("Failed to forward filter delete",
 			"downstream_id", downstreamID,
 			"target_processor_id", req.ProcessorId,
-			"error", err)
+			"error", retryErr)
 
 		// Build chain context for error
-		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "DeleteFilter")
+		return nil, m.wrapChainError(retryErr, processorPath, currentProcessorID, downstreamID, "DeleteFilter")
 	}
 
 	return result, nil
@@ -542,15 +558,23 @@ func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, re
 		"target_processor_id", req.ProcessorId,
 		"hunter_id", req.HunterId)
 
-	result, err := downstream.Client.GetFiltersFromProcessor(ctx, req)
-	if err != nil {
+	var result *management.FilterResponse
+	var err error
+
+	// Execute with retry logic for transient failures
+	retryErr := withRetry(ctx, func() error {
+		result, err = downstream.Client.GetFiltersFromProcessor(ctx, req)
+		return err
+	}, "GetFilters", req.ProcessorId)
+
+	if retryErr != nil {
 		logger.Error("Failed to forward filter query",
 			"downstream_id", downstreamID,
 			"target_processor_id", req.ProcessorId,
-			"error", err)
+			"error", retryErr)
 
 		// Build chain context for error
-		return nil, m.wrapChainError(err, processorPath, currentProcessorID, downstreamID, "GetFilters")
+		return nil, m.wrapChainError(retryErr, processorPath, currentProcessorID, downstreamID, "GetFilters")
 	}
 
 	return result, nil

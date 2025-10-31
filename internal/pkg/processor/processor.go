@@ -987,6 +987,25 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		}, nil
 	}
 
+	// Check for cycles in the upstream chain
+	// A cycle occurs if this processor's ID appears in the registering processor's upstream chain
+	// Example: A → B → C → A (cycle) - when A tries to register with C,
+	// C's ID would already be in A's upstream chain
+	for _, upstreamID := range req.UpstreamChain {
+		if upstreamID == p.config.ProcessorID {
+			errMsg := fmt.Sprintf("cycle detected: processor %s is already in the upstream chain %v",
+				p.config.ProcessorID, req.UpstreamChain)
+			logger.Warn("Rejecting processor registration: cycle detected",
+				"processor_id", req.ProcessorId,
+				"this_processor_id", p.config.ProcessorID,
+				"upstream_chain", req.UpstreamChain)
+			return &management.ProcessorRegistrationResponse{
+				Accepted: false,
+				Error:    errMsg,
+			}, nil
+		}
+	}
+
 	err := p.downstreamManager.Register(req.ProcessorId, req.ListenAddress, req.Version)
 	if err != nil {
 		return &management.ProcessorRegistrationResponse{

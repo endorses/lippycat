@@ -397,11 +397,11 @@ TUI → Processor A (root)
   - [x] Test: 11-level hierarchy rejected
 
 #### 5.5
-- [ ] Implement cycle detection
-  - [ ] Add `upstream_chain` field to processor registration
-  - [ ] Check if registering processor is in upstream chain
-  - [ ] Reject registration if cycle detected
-  - [ ] Test: A → B → C → A (cycle rejected)
+- [x] Implement cycle detection
+  - [x] Add `upstream_chain` field to processor registration
+  - [x] Check if registering processor is in upstream chain
+  - [x] Reject registration if cycle detected
+  - [x] Test: A → B → C → A (cycle rejected)
 
 #### 5.6
 - [ ] Add operation timeout scaling

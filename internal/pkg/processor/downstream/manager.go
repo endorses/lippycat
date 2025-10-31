@@ -434,6 +434,60 @@ func (m *Manager) getProcessorID() string {
 	return "processor-upstream"
 }
 
+// Shutdown gracefully shuts down the downstream manager, closing all connections
+// and waiting for active goroutines to complete.
+//
+// This should be called during processor shutdown to ensure clean cleanup.
+func (m *Manager) Shutdown(timeout time.Duration) {
+	logger.Info("Shutting down downstream manager",
+		"timeout", timeout,
+		"downstream_count", len(m.downstreams))
+
+	// Cancel all subscriptions and connections
+	m.cancel()
+
+	// Create timeout context for waiting on goroutines
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// Wait for all goroutines to complete with timeout
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("All downstream goroutines completed")
+	case <-ctx.Done():
+		logger.Warn("Timeout waiting for downstream goroutines to complete",
+			"timeout", timeout)
+	}
+
+	// Close all downstream connections
+	m.mu.Lock()
+	for processorID, proc := range m.downstreams {
+		logger.Debug("Closing downstream connection",
+			"processor_id", processorID)
+
+		// Cancel topology subscription
+		if proc.TopologyCancel != nil {
+			proc.TopologyCancel()
+		}
+
+		// Close gRPC connection
+		if proc.Conn != nil {
+			_ = proc.Conn.Close()
+		}
+	}
+	// Clear the map
+	m.downstreams = make(map[string]*ProcessorInfo)
+	m.mu.Unlock()
+
+	logger.Info("Downstream manager shutdown complete")
+}
+
 // ForwardUpdateFilter forwards a filter update operation to a downstream processor.
 // This is used for recursive routing where the target may not be a direct downstream.
 //

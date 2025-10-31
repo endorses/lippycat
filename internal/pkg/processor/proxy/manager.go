@@ -101,25 +101,70 @@ func (m *Manager) GetCache() *TopologyCache {
 // Shutdown gracefully shuts down the manager, closing all subscriber channels
 // and waiting for active goroutines to complete.
 //
+// The timeout parameter specifies how long to wait for in-flight operations
+// and goroutines to complete before forcefully terminating.
+//
 // This should be called during processor shutdown to ensure clean cleanup.
-func (m *Manager) Shutdown() {
+func (m *Manager) Shutdown(timeout time.Duration) {
+	m.logger.Info("shutting down proxy manager",
+		"timeout", timeout,
+		"subscriber_count", len(m.subscribers))
+
+	// Cancel context to signal all goroutines to stop
 	m.cancel()
 
 	// Stop batcher (will flush pending updates)
 	if m.batcher != nil {
+		m.logger.Debug("stopping topology update batcher")
 		m.batcher.Stop()
 	}
 
-	// Close all subscriber channels
+	// Drain and close all subscriber channels
 	m.subscribersMu.Lock()
+	m.logger.Debug("draining subscriber channels",
+		"subscriber_count", len(m.subscribers))
+
 	for subscriberID, ch := range m.subscribers {
+		// Drain channel before closing to avoid blocking sends
+		drained := 0
+	drainLoop:
+		for {
+			select {
+			case <-ch:
+				drained++
+			default:
+				break drainLoop
+			}
+		}
+
+		if drained > 0 {
+			m.logger.Debug("drained subscriber channel",
+				"subscriber_id", subscriberID,
+				"drained_updates", drained)
+		}
+
 		close(ch)
 		delete(m.subscribers, subscriberID)
 	}
 	m.subscribersMu.Unlock()
 
-	// Wait for active goroutines
-	m.wg.Wait()
+	// Wait for active goroutines with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		m.logger.Info("all proxy manager goroutines completed")
+	case <-ctx.Done():
+		m.logger.Warn("timeout waiting for proxy manager goroutines to complete",
+			"timeout", timeout)
+	}
 
 	m.logger.Info("proxy manager shutdown complete")
 }

@@ -522,7 +522,12 @@ func (p *Processor) Shutdown() error {
 
 	// Shutdown proxy manager (close all topology subscriptions)
 	if p.proxyManager != nil {
-		p.proxyManager.Shutdown()
+		p.proxyManager.Shutdown(5 * time.Second)
+	}
+
+	// Shutdown downstream manager (close all downstream connections)
+	if p.downstreamManager != nil {
+		p.downstreamManager.Shutdown(5 * time.Second)
 	}
 
 	// Give time for graceful shutdown

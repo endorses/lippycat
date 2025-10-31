@@ -411,11 +411,11 @@ TUI → Processor A (root)
   - [x] Configure timeouts in context
 
 #### 5.7
-- [ ] Implement graceful shutdown
-  - [ ] Cancel all topology subscriptions
-  - [ ] Drain subscriber channels
-  - [ ] Wait for in-flight operations (with timeout)
-  - [ ] Clean up downstream connections
+- [x] Implement graceful shutdown
+  - [x] Cancel all topology subscriptions
+  - [x] Drain subscriber channels
+  - [x] Wait for in-flight operations (with timeout)
+  - [x] Clean up downstream connections
 
 #### 5.8
 - [ ] Add network partition handling

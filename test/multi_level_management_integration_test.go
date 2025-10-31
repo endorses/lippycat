@@ -516,6 +516,149 @@ func TestIntegration_MultiLevel_NonExistentProcessor(t *testing.T) {
 	t.Logf("✓ Non-existent processor test: Operation correctly rejected with error: %v", st.Message())
 }
 
+// TestIntegration_MultiLevel_HierarchyDepthLimit tests that processor registration is rejected when depth exceeds maximum
+func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Start root processor (depth 0)
+	rootAddr := "127.0.0.1:51061"
+	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc-depth", "")
+	require.NoError(t, err, "Failed to start root processor")
+	defer shutdownProcessorWithPortCleanup(rootProc)
+	if rootConn != nil {
+		defer rootConn.Close()
+	}
+
+	// Build a chain of processors up to depth 10 (MaxHierarchyDepth)
+	// We'll create 10 levels, where the last one is at depth 10
+	basePort := 51062
+	processors := []*processor.Processor{rootProc}
+	connections := []*grpc.ClientConn{}
+	upstreamChain := []string{}
+
+	for i := 1; i <= 10; i++ {
+		addr := fmt.Sprintf("127.0.0.1:%d", basePort+i-1)
+		processorID := fmt.Sprintf("proc-depth-%d", i)
+		upstreamAddr := fmt.Sprintf("127.0.0.1:%d", basePort+i-2)
+		if i == 1 {
+			upstreamAddr = rootAddr
+		}
+
+		// Connect to upstream
+		upstreamConn, err := grpc.DialContext(ctx, upstreamAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithBlock(),
+		)
+		require.NoError(t, err, "Failed to connect to upstream at level %d", i)
+
+		// Register processor with upstream_chain
+		mgmtClient := management.NewManagementServiceClient(upstreamConn)
+		resp, err := mgmtClient.RegisterProcessor(ctx, &management.ProcessorRegistration{
+			ProcessorId:   processorID,
+			ListenAddress: addr,
+			Version:       "test-1.0.0",
+			UpstreamChain: upstreamChain,
+		})
+		require.NoError(t, err, "Failed to register processor at level %d", i)
+		require.True(t, resp.Accepted, "Processor at level %d should be accepted (depth=%d)", i, i)
+
+		// Start the processor
+		config := processor.Config{
+			ProcessorID:     processorID,
+			ListenAddr:      addr,
+			UpstreamAddr:    upstreamAddr,
+			EnableDetection: false,
+			MaxHunters:      100,
+		}
+
+		proc, err := processor.New(config)
+		require.NoError(t, err, "Failed to create processor at level %d", i)
+
+		errChan := make(chan error, 1)
+		go func() {
+			if err := proc.Start(ctx); err != nil {
+				select {
+				case errChan <- err:
+				default:
+				}
+			}
+		}()
+
+		// Wait for processor to start
+		select {
+		case err := <-errChan:
+			upstreamConn.Close()
+			require.NoError(t, err, "Processor at level %d failed to start", i)
+		case <-time.After(2 * time.Second):
+			// Started successfully
+		}
+
+		processors = append(processors, proc)
+		connections = append(connections, upstreamConn)
+
+		// Build upstream chain for next level (add current processor's parent)
+		if i == 1 {
+			upstreamChain = []string{"root-proc-depth"}
+		} else {
+			upstreamChain = append(upstreamChain, fmt.Sprintf("proc-depth-%d", i-1))
+		}
+
+		t.Logf("✓ Created processor at depth %d: %s", i, processorID)
+	}
+
+	// Now attempt to register an 11th processor (depth 11, which exceeds MaxHierarchyDepth=10)
+	level11Addr := fmt.Sprintf("127.0.0.1:%d", basePort+10)
+	level11ID := "proc-depth-11"
+	level10Addr := fmt.Sprintf("127.0.0.1:%d", basePort+9)
+
+	// Connect to level 10 processor
+	level10Conn, err := grpc.DialContext(ctx, level10Addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	require.NoError(t, err, "Failed to connect to level 10 processor")
+	defer level10Conn.Close()
+
+	// Build upstream chain for level 11 (includes all processors from root to level 10)
+	level11UpstreamChain := []string{"root-proc-depth"}
+	for i := 1; i <= 10; i++ {
+		level11UpstreamChain = append(level11UpstreamChain, fmt.Sprintf("proc-depth-%d", i))
+	}
+
+	// Attempt to register level 11 processor (should be rejected)
+	mgmtClient := management.NewManagementServiceClient(level10Conn)
+	resp, err := mgmtClient.RegisterProcessor(ctx, &management.ProcessorRegistration{
+		ProcessorId:   level11ID,
+		ListenAddress: level11Addr,
+		Version:       "test-1.0.0",
+		UpstreamChain: level11UpstreamChain,
+	})
+
+	// Should succeed in getting a response, but registration should be rejected
+	require.NoError(t, err, "RegisterProcessor RPC should succeed")
+	require.NotNil(t, resp, "Response should not be nil")
+	assert.False(t, resp.Accepted, "Registration at depth 11 should be rejected")
+	assert.Contains(t, resp.Error, "hierarchy depth", "Error message should mention hierarchy depth")
+	assert.Contains(t, resp.Error, "exceeds maximum", "Error message should mention exceeding maximum")
+
+	t.Logf("✓ Level 11 processor correctly rejected with error: %s", resp.Error)
+
+	// Clean up all processors and connections
+	for i := len(processors) - 1; i >= 0; i-- {
+		if i > 0 { // Skip root processor (will be cleaned by defer)
+			shutdownProcessorWithPortCleanup(processors[i])
+		}
+	}
+	for _, conn := range connections {
+		conn.Close()
+	}
+}
+
 // Helper functions
 
 // startProcessorHierarchy starts a processor and optionally connects it to an upstream processor

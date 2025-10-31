@@ -84,3 +84,14 @@ const (
 	// MaxGRPCMessageSize is the maximum size for gRPC messages (10MB)
 	MaxGRPCMessageSize = 10 * 1024 * 1024
 )
+
+// Hierarchy configuration
+const (
+	// MaxHierarchyDepth is the maximum allowed depth of the processor hierarchy
+	// Depth is calculated from the root processor (depth 0) to the registering processor
+	// Example: root → intermediate → leaf has depth 2 for the leaf processor
+	// Rationale: Deep hierarchies increase operation latency and complexity
+	// Recommended: 1-3 levels for optimal performance
+	// Maximum: 10 levels to balance flexibility with operational overhead
+	MaxHierarchyDepth = 10
+)

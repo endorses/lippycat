@@ -968,6 +968,25 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		"listen_address", req.ListenAddress,
 		"version", req.Version)
 
+	// Calculate hierarchy depth from upstream chain
+	// Depth = len(upstream_chain) + 1 (since this processor adds one more level)
+	// Example: upstream_chain = ["root"] means registering processor is at depth 1
+	// Example: upstream_chain = ["root", "intermediate"] means registering processor is at depth 2
+	hierarchyDepth := len(req.UpstreamChain) + 1
+
+	// Check if hierarchy depth exceeds maximum
+	if hierarchyDepth > constants.MaxHierarchyDepth {
+		errMsg := fmt.Sprintf("hierarchy depth %d exceeds maximum allowed depth %d", hierarchyDepth, constants.MaxHierarchyDepth)
+		logger.Warn("Rejecting processor registration: depth limit exceeded",
+			"processor_id", req.ProcessorId,
+			"hierarchy_depth", hierarchyDepth,
+			"max_depth", constants.MaxHierarchyDepth)
+		return &management.ProcessorRegistrationResponse{
+			Accepted: false,
+			Error:    errMsg,
+		}, nil
+	}
+
 	err := p.downstreamManager.Register(req.ProcessorId, req.ListenAddress, req.Version)
 	if err != nil {
 		return &management.ProcessorRegistrationResponse{
@@ -981,7 +1000,7 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		ID:             req.ProcessorId,
 		Address:        req.ListenAddress,
 		ParentID:       p.config.ProcessorID, // This processor is the parent
-		HierarchyDepth: 1,                    // Direct child has depth 1
+		HierarchyDepth: int32(hierarchyDepth),
 		Reachable:      true,
 		Metadata: map[string]string{
 			"version": req.Version,
@@ -1005,7 +1024,7 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 					Address:           req.ListenAddress,
 					Status:            management.ProcessorStatus_PROCESSOR_HEALTHY,
 					UpstreamProcessor: p.config.ProcessorID,
-					HierarchyDepth:    1,
+					HierarchyDepth:    uint32(hierarchyDepth),
 					Reachable:         true,
 					Hunters:           []*management.ConnectedHunter{}, // Will be populated as hunters connect
 				},

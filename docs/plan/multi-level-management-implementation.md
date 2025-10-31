@@ -390,11 +390,11 @@ TUI → Processor A (root)
   - [x] Refresh on cache miss
 
 #### 5.4
-- [ ] Add hierarchy depth limits
-  - [ ] Define `MaxHierarchyDepth = 10`
-  - [ ] Reject processor registration if depth exceeded
-  - [ ] Return error with depth information
-  - [ ] Test: 11-level hierarchy rejected
+- [x] Add hierarchy depth limits
+  - [x] Define `MaxHierarchyDepth = 10`
+  - [x] Reject processor registration if depth exceeded
+  - [x] Return error with depth information
+  - [x] Test: 11-level hierarchy rejected
 
 #### 5.5
 - [ ] Implement cycle detection

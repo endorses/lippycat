@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"io"
+	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/assert"
@@ -11,6 +14,7 @@ import (
 
 func TestNewTopologyCache(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 	require.NotNil(t, cache)
 	assert.NotNil(t, cache.hunters)
 	assert.NotNil(t, cache.processors)
@@ -22,6 +26,7 @@ func TestNewTopologyCache(t *testing.T) {
 
 func TestTopologyCache_HunterConnected(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Create a hunter connected event
 	update := &management.TopologyUpdate{
@@ -57,6 +62,7 @@ func TestTopologyCache_HunterConnected(t *testing.T) {
 
 func TestTopologyCache_HunterDisconnected(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// First add a hunter
 	cache.AddHunter(&HunterNode{
@@ -105,6 +111,7 @@ func TestTopologyCache_HunterDisconnected(t *testing.T) {
 
 func TestTopologyCache_ProcessorConnected(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Create a processor connected event with hunters and filters
 	update := &management.TopologyUpdate{
@@ -174,6 +181,7 @@ func TestTopologyCache_ProcessorConnected(t *testing.T) {
 
 func TestTopologyCache_ProcessorDisconnected(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add a processor with hunters and filters
 	cache.AddProcessor(&ProcessorNode{
@@ -232,6 +240,7 @@ func TestTopologyCache_ProcessorDisconnected(t *testing.T) {
 
 func TestTopologyCache_HunterStatusChanged(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add a hunter
 	cache.AddHunter(&HunterNode{
@@ -272,6 +281,7 @@ func TestTopologyCache_HunterStatusChanged(t *testing.T) {
 
 func TestTopologyCache_GetHuntersForProcessor(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add hunters for multiple processors
 	cache.AddHunter(&HunterNode{
@@ -313,6 +323,7 @@ func TestTopologyCache_GetHuntersForProcessor(t *testing.T) {
 
 func TestTopologyCache_GetFiltersForHunter(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add filters for multiple hunters
 	cache.AddFilter(&FilterNode{
@@ -357,6 +368,7 @@ func TestTopologyCache_GetFiltersForHunter(t *testing.T) {
 
 func TestTopologyCache_GetSnapshot(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add some data
 	cache.AddProcessor(&ProcessorNode{
@@ -400,6 +412,7 @@ func TestTopologyCache_GetSnapshot(t *testing.T) {
 
 func TestTopologyCache_MarkProcessorUnreachable(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add a processor
 	cache.AddProcessor(&ProcessorNode{
@@ -429,6 +442,7 @@ func TestTopologyCache_MarkProcessorUnreachable(t *testing.T) {
 
 func TestTopologyCache_MarkProcessorReachable(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Add an unreachable processor
 	cache.AddProcessor(&ProcessorNode{
@@ -459,6 +473,7 @@ func TestTopologyCache_MarkProcessorReachable(t *testing.T) {
 
 func TestTopologyCache_ConcurrentAccess(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Test concurrent reads and writes
 	var wg sync.WaitGroup
@@ -504,6 +519,7 @@ func TestTopologyCache_ConcurrentAccess(t *testing.T) {
 
 func TestTopologyCache_NilUpdates(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Apply nil update - should not panic
 	cache.Apply(nil)
@@ -523,6 +539,7 @@ func TestTopologyCache_NilUpdates(t *testing.T) {
 
 func TestTopologyCache_RemoveNonExistent(t *testing.T) {
 	cache := NewTopologyCache()
+	defer cache.Close()
 
 	// Remove non-existent hunter - should not panic
 	cache.RemoveHunter("proc-1", "hunter-999")
@@ -537,4 +554,253 @@ func TestTopologyCache_RemoveNonExistent(t *testing.T) {
 	assert.Empty(t, cache.hunters)
 	assert.Empty(t, cache.processors)
 	assert.Empty(t, cache.filters)
+}
+
+// TestTopologyCache_TTLExpiration tests that entries expire after the TTL period
+func TestTopologyCache_TTLExpiration(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 100*time.Millisecond, 50*time.Millisecond)
+	defer cache.Close()
+
+	// Add a hunter
+	cache.AddHunter(&HunterNode{
+		ID:          "hunter-1",
+		ProcessorID: "proc-1",
+		Address:     "192.168.1.100:12345",
+		Status:      "STATUS_HEALTHY",
+		Metadata:    make(map[string]string),
+	})
+
+	// Verify hunter exists immediately
+	hunter := cache.GetHunter("proc-1/hunter-1")
+	require.NotNil(t, hunter)
+
+	// Wait for TTL to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Hunter should now return nil (expired)
+	hunter = cache.GetHunter("proc-1/hunter-1")
+	assert.Nil(t, hunter, "Hunter should be nil after TTL expiration")
+
+	// Wait for cleanup to run
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify hunter was removed from internal map
+	cache.mu.RLock()
+	_, exists := cache.hunters["proc-1/hunter-1"]
+	cache.mu.RUnlock()
+	assert.False(t, exists, "Hunter should be removed from internal map after cleanup")
+}
+
+// TestTopologyCache_ProcessorTTLExpiration tests processor expiration
+func TestTopologyCache_ProcessorTTLExpiration(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 100*time.Millisecond, 50*time.Millisecond)
+	defer cache.Close()
+
+	// Add a processor with a hunter and filter
+	cache.AddProcessor(&ProcessorNode{
+		ID:             "proc-1",
+		Address:        "192.168.1.200:50051",
+		ParentID:       "",
+		HierarchyDepth: 0,
+		Reachable:      true,
+		Metadata:       make(map[string]string),
+	})
+
+	cache.AddHunter(&HunterNode{
+		ID:          "hunter-1",
+		ProcessorID: "proc-1",
+		Address:     "192.168.1.100:12345",
+		Status:      "STATUS_HEALTHY",
+		Metadata:    make(map[string]string),
+	})
+
+	cache.AddFilter(&FilterNode{
+		ID:          "filter-1",
+		HunterID:    "hunter-1",
+		ProcessorID: "proc-1",
+		FilterType:  "FILTER_SIP_USER",
+		Pattern:     "alice",
+		Active:      true,
+	})
+
+	// Verify all exist
+	require.NotNil(t, cache.GetProcessor("proc-1"))
+	require.NotNil(t, cache.GetHunter("proc-1/hunter-1"))
+	require.NotNil(t, cache.GetFilter("proc-1/hunter-1/filter-1"))
+
+	// Wait for TTL to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// All should return nil (expired)
+	assert.Nil(t, cache.GetProcessor("proc-1"))
+	assert.Nil(t, cache.GetHunter("proc-1/hunter-1"))
+	assert.Nil(t, cache.GetFilter("proc-1/hunter-1/filter-1"))
+
+	// Wait for cleanup to run
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify all were removed from internal maps
+	cache.mu.RLock()
+	assert.Empty(t, cache.processors)
+	assert.Empty(t, cache.hunters)
+	assert.Empty(t, cache.filters)
+	cache.mu.RUnlock()
+}
+
+// TestTopologyCache_FilterTTLExpiration tests filter expiration
+func TestTopologyCache_FilterTTLExpiration(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 100*time.Millisecond, 50*time.Millisecond)
+	defer cache.Close()
+
+	// Add a filter
+	cache.AddFilter(&FilterNode{
+		ID:          "filter-1",
+		HunterID:    "hunter-1",
+		ProcessorID: "proc-1",
+		FilterType:  "FILTER_SIP_USER",
+		Pattern:     "alice",
+		Active:      true,
+	})
+
+	// Verify filter exists immediately
+	filter := cache.GetFilter("proc-1/hunter-1/filter-1")
+	require.NotNil(t, filter)
+
+	// Wait for TTL to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Filter should now return nil (expired)
+	filter = cache.GetFilter("proc-1/hunter-1/filter-1")
+	assert.Nil(t, filter, "Filter should be nil after TTL expiration")
+
+	// Wait for cleanup to run
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify filter was removed from internal map
+	cache.mu.RLock()
+	_, exists := cache.filters["proc-1/hunter-1/filter-1"]
+	cache.mu.RUnlock()
+	assert.False(t, exists, "Filter should be removed from internal map after cleanup")
+}
+
+// TestTopologyCache_CleanupRemovesExpiredHunterFilters tests that filters are removed when their hunter expires
+func TestTopologyCache_CleanupRemovesExpiredHunterFilters(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 100*time.Millisecond, 50*time.Millisecond)
+	defer cache.Close()
+
+	// Add a hunter with a filter
+	cache.AddHunter(&HunterNode{
+		ID:          "hunter-1",
+		ProcessorID: "proc-1",
+		Address:     "192.168.1.100:12345",
+		Status:      "STATUS_HEALTHY",
+		Metadata:    make(map[string]string),
+	})
+
+	cache.AddFilter(&FilterNode{
+		ID:          "filter-1",
+		HunterID:    "hunter-1",
+		ProcessorID: "proc-1",
+		FilterType:  "FILTER_SIP_USER",
+		Pattern:     "alice",
+		Active:      true,
+	})
+
+	// Verify both exist
+	require.NotNil(t, cache.GetHunter("proc-1/hunter-1"))
+	require.NotNil(t, cache.GetFilter("proc-1/hunter-1/filter-1"))
+
+	// Wait for TTL to expire and cleanup to run
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify both hunter and filter were removed
+	cache.mu.RLock()
+	assert.Empty(t, cache.hunters)
+	assert.Empty(t, cache.filters)
+	cache.mu.RUnlock()
+}
+
+// TestTopologyCache_IsExpired tests the IsExpired helper method
+func TestTopologyCache_IsExpired(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 5*time.Minute, 1*time.Minute)
+	defer cache.Close()
+
+	// Recent timestamp should not be expired
+	recent := time.Now().Add(-1 * time.Minute)
+	assert.False(t, cache.IsExpired(recent))
+
+	// Old timestamp should be expired
+	old := time.Now().Add(-10 * time.Minute)
+	assert.True(t, cache.IsExpired(old))
+
+	// Near but before TTL boundary (edge case - with 1 second buffer to avoid timing issues)
+	boundary := time.Now().Add(-5*time.Minute + 1*time.Second)
+	assert.False(t, cache.IsExpired(boundary))
+
+	// Just past TTL boundary
+	justPast := time.Now().Add(-5*time.Minute - 1*time.Millisecond)
+	assert.True(t, cache.IsExpired(justPast))
+}
+
+// TestTopologyCache_CleanupLoop tests that the cleanup loop runs periodically
+func TestTopologyCache_CleanupLoop(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 50*time.Millisecond, 100*time.Millisecond)
+	defer cache.Close()
+
+	// Add a hunter
+	cache.AddHunter(&HunterNode{
+		ID:          "hunter-1",
+		ProcessorID: "proc-1",
+		Address:     "192.168.1.100:12345",
+		Status:      "STATUS_HEALTHY",
+		Metadata:    make(map[string]string),
+	})
+
+	// Verify hunter exists
+	require.NotNil(t, cache.GetHunter("proc-1/hunter-1"))
+
+	// Wait for entry to expire and cleanup to run (TTL=50ms, cleanup=100ms)
+	// We need to wait: TTL expiry (50ms) + cleanup interval (100ms) + buffer
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify hunter was removed by cleanup loop
+	cache.mu.RLock()
+	_, exists := cache.hunters["proc-1/hunter-1"]
+	cache.mu.RUnlock()
+	assert.False(t, exists, "Cleanup loop should have removed expired hunter")
+}
+
+// TestTopologyCache_Close tests graceful shutdown
+func TestTopologyCache_Close(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := NewTopologyCacheWithConfig(log, 5*time.Minute, 1*time.Minute)
+
+	// Add some data
+	cache.AddHunter(&HunterNode{
+		ID:          "hunter-1",
+		ProcessorID: "proc-1",
+		Address:     "192.168.1.100:12345",
+		Status:      "STATUS_HEALTHY",
+		Metadata:    make(map[string]string),
+	})
+
+	// Close should not hang
+	done := make(chan struct{})
+	go func() {
+		cache.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success - Close() completed
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close() did not complete within timeout")
+	}
 }

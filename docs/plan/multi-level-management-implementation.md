@@ -383,11 +383,11 @@ TUI → Processor A (root)
   - [x] Don't retry on authorization failures
 
 #### 5.3
-- [ ] Implement topology cache TTL
-  - [ ] Add timestamp to cached entries
-  - [ ] Expire entries after 5 minutes
-  - [ ] Periodic cleanup goroutine (every 1 minute)
-  - [ ] Refresh on cache miss
+- [x] Implement topology cache TTL
+  - [x] Add timestamp to cached entries
+  - [x] Expire entries after 5 minutes
+  - [x] Periodic cleanup goroutine (every 1 minute)
+  - [x] Refresh on cache miss
 
 #### 5.4
 - [ ] Add hierarchy depth limits

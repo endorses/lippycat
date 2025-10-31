@@ -1,7 +1,10 @@
 package proxy
 
 import (
+	"context"
+	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 )
@@ -12,6 +15,9 @@ import (
 //
 // The cache is updated by applying TopologyUpdate messages received from
 // downstream processors via the SubscribeTopology() gRPC stream.
+//
+// Entries expire after cacheTTL (5 minutes by default) and are cleaned up
+// by a background goroutine running every cleanupInterval (1 minute by default).
 //
 // All methods are thread-safe and can be called concurrently.
 type TopologyCache struct {
@@ -27,6 +33,16 @@ type TopologyCache struct {
 	// filters maps filter ID to filter information
 	// Key format: "processor-id/hunter-id/filter-id"
 	filters map[string]*FilterNode
+
+	// TTL configuration
+	cacheTTL        time.Duration
+	cleanupInterval time.Duration
+	logger          *slog.Logger
+
+	// Cleanup goroutine management
+	cleanupCtx    context.Context
+	cleanupCancel context.CancelFunc
+	cleanupDone   chan struct{}
 }
 
 // HunterNode represents a hunter in the topology cache
@@ -36,6 +52,7 @@ type HunterNode struct {
 	Address     string
 	Status      string
 	Metadata    map[string]string
+	LastSeen    time.Time // Timestamp of last update for TTL expiration
 }
 
 // ProcessorNode represents a processor in the topology cache
@@ -47,6 +64,7 @@ type ProcessorNode struct {
 	Reachable         bool
 	UnreachableReason string
 	Metadata          map[string]string
+	LastSeen          time.Time // Timestamp of last update for TTL expiration
 }
 
 // FilterNode represents an active filter in the topology cache
@@ -57,42 +75,90 @@ type FilterNode struct {
 	FilterType  string
 	Pattern     string
 	Active      bool
+	LastSeen    time.Time // Timestamp of last update for TTL expiration
 }
 
-// NewTopologyCache creates a new empty topology cache
+const (
+	// DefaultCacheTTL is the default time-to-live for cache entries (5 minutes)
+	DefaultCacheTTL = 5 * time.Minute
+	// DefaultCleanupInterval is how often the cleanup goroutine runs (1 minute)
+	DefaultCleanupInterval = 1 * time.Minute
+)
+
+// NewTopologyCache creates a new empty topology cache with default TTL settings
 func NewTopologyCache() *TopologyCache {
-	return &TopologyCache{
-		hunters:    make(map[string]*HunterNode),
-		processors: make(map[string]*ProcessorNode),
-		filters:    make(map[string]*FilterNode),
+	return NewTopologyCacheWithConfig(nil, DefaultCacheTTL, DefaultCleanupInterval)
+}
+
+// NewTopologyCacheWithConfig creates a new topology cache with custom configuration
+func NewTopologyCacheWithConfig(log *slog.Logger, cacheTTL, cleanupInterval time.Duration) *TopologyCache {
+	if log == nil {
+		log = slog.Default()
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cache := &TopologyCache{
+		hunters:         make(map[string]*HunterNode),
+		processors:      make(map[string]*ProcessorNode),
+		filters:         make(map[string]*FilterNode),
+		cacheTTL:        cacheTTL,
+		cleanupInterval: cleanupInterval,
+		logger:          log,
+		cleanupCtx:      ctx,
+		cleanupCancel:   cancel,
+		cleanupDone:     make(chan struct{}),
+	}
+
+	// Start cleanup goroutine
+	go cache.cleanupLoop()
+
+	return cache
+}
+
+// Close stops the background cleanup goroutine
+func (c *TopologyCache) Close() {
+	c.cleanupCancel()
+	<-c.cleanupDone
 }
 
 // GetHunter retrieves a hunter by its full ID (processor-id/hunter-id)
-// Returns nil if the hunter is not found
+// Returns nil if the hunter is not found or has expired
 func (c *TopologyCache) GetHunter(fullHunterID string) *HunterNode {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.hunters[fullHunterID]
+	hunter := c.hunters[fullHunterID]
+	if hunter != nil && c.IsExpired(hunter.LastSeen) {
+		return nil // Entry expired, treat as cache miss
+	}
+	return hunter
 }
 
 // GetProcessor retrieves a processor by its ID
-// Returns nil if the processor is not found
+// Returns nil if the processor is not found or has expired
 func (c *TopologyCache) GetProcessor(processorID string) *ProcessorNode {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.processors[processorID]
+	processor := c.processors[processorID]
+	if processor != nil && c.IsExpired(processor.LastSeen) {
+		return nil // Entry expired, treat as cache miss
+	}
+	return processor
 }
 
 // GetFilter retrieves a filter by its full ID (processor-id/hunter-id/filter-id)
-// Returns nil if the filter is not found
+// Returns nil if the filter is not found or has expired
 func (c *TopologyCache) GetFilter(fullFilterID string) *FilterNode {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.filters[fullFilterID]
+	filter := c.filters[fullFilterID]
+	if filter != nil && c.IsExpired(filter.LastSeen) {
+		return nil // Entry expired, treat as cache miss
+	}
+	return filter
 }
 
 // GetHuntersForProcessor returns all hunters registered to a specific processor
@@ -202,6 +268,7 @@ func (c *TopologyCache) applyHunterConnected(processorID string, event *manageme
 		Address:     hunter.RemoteAddr,
 		Status:      hunter.Status.String(),
 		Metadata:    make(map[string]string),
+		LastSeen:    time.Now(),
 	}
 
 	// Copy metadata if available
@@ -249,6 +316,7 @@ func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConne
 		Reachable:         proc.Reachable,
 		UnreachableReason: proc.UnreachableReason,
 		Metadata:          make(map[string]string),
+		LastSeen:          time.Now(),
 	}
 
 	// Store metadata
@@ -257,6 +325,7 @@ func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConne
 	c.processors[proc.ProcessorId] = node
 
 	// Add hunters from this processor
+	now := time.Now()
 	for _, hunter := range proc.Hunters {
 		fullID := proc.ProcessorId + "/" + hunter.HunterId
 		hunterNode := &HunterNode{
@@ -265,6 +334,7 @@ func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConne
 			Address:     hunter.RemoteAddr,
 			Status:      hunter.Status.String(),
 			Metadata:    make(map[string]string),
+			LastSeen:    now,
 		}
 		if hunter.Hostname != "" {
 			hunterNode.Metadata["hostname"] = hunter.Hostname
@@ -281,6 +351,7 @@ func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConne
 				FilterType:  filter.Type.String(),
 				Pattern:     filter.Pattern,
 				Active:      filter.Enabled,
+				LastSeen:    now,
 			}
 			c.filters[filterFullID] = filterNode
 		}
@@ -320,6 +391,7 @@ func (c *TopologyCache) applyHunterStatusChanged(processorID string, event *mana
 	fullID := processorID + "/" + event.HunterId
 	if hunter, exists := c.hunters[fullID]; exists {
 		hunter.Status = event.NewStatus.String()
+		hunter.LastSeen = time.Now()
 	}
 }
 
@@ -328,6 +400,7 @@ func (c *TopologyCache) AddHunter(hunter *HunterNode) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	hunter.LastSeen = time.Now()
 	fullID := hunter.ProcessorID + "/" + hunter.ID
 	c.hunters[fullID] = hunter
 }
@@ -353,6 +426,7 @@ func (c *TopologyCache) AddProcessor(processor *ProcessorNode) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	processor.LastSeen = time.Now()
 	c.processors[processor.ID] = processor
 }
 
@@ -382,6 +456,7 @@ func (c *TopologyCache) AddFilter(filter *FilterNode) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	filter.LastSeen = time.Now()
 	fullID := filter.ProcessorID + "/" + filter.HunterID + "/" + filter.ID
 	c.filters[fullID] = filter
 }
@@ -415,4 +490,91 @@ func (c *TopologyCache) MarkProcessorReachable(processorID string) {
 		processor.Reachable = true
 		processor.UnreachableReason = ""
 	}
+}
+
+// cleanupLoop runs periodically to remove expired entries from the cache
+func (c *TopologyCache) cleanupLoop() {
+	defer close(c.cleanupDone)
+
+	ticker := time.NewTicker(c.cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.cleanupCtx.Done():
+			c.logger.Info("Topology cache cleanup loop stopped")
+			return
+		case <-ticker.C:
+			c.cleanupExpiredEntries()
+		}
+	}
+}
+
+// cleanupExpiredEntries removes all entries that have exceeded the TTL
+func (c *TopologyCache) cleanupExpiredEntries() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	expirationTime := now.Add(-c.cacheTTL)
+
+	// Clean up expired hunters
+	expiredHunters := 0
+	for id, hunter := range c.hunters {
+		if hunter.LastSeen.Before(expirationTime) {
+			delete(c.hunters, id)
+			expiredHunters++
+
+			// Also remove filters for expired hunters
+			for filterID, filter := range c.filters {
+				if filter.ProcessorID == hunter.ProcessorID && filter.HunterID == hunter.ID {
+					delete(c.filters, filterID)
+				}
+			}
+		}
+	}
+
+	// Clean up expired processors
+	expiredProcessors := 0
+	for id, processor := range c.processors {
+		if processor.LastSeen.Before(expirationTime) {
+			delete(c.processors, id)
+			expiredProcessors++
+
+			// Also remove hunters and filters for expired processors
+			for hunterID, hunter := range c.hunters {
+				if hunter.ProcessorID == id {
+					delete(c.hunters, hunterID)
+				}
+			}
+			for filterID, filter := range c.filters {
+				if filter.ProcessorID == id {
+					delete(c.filters, filterID)
+				}
+			}
+		}
+	}
+
+	// Clean up expired filters
+	expiredFilters := 0
+	for id, filter := range c.filters {
+		if filter.LastSeen.Before(expirationTime) {
+			delete(c.filters, id)
+			expiredFilters++
+		}
+	}
+
+	if expiredHunters > 0 || expiredProcessors > 0 || expiredFilters > 0 {
+		c.logger.Debug("Cleaned up expired topology cache entries",
+			"expired_hunters", expiredHunters,
+			"expired_processors", expiredProcessors,
+			"expired_filters", expiredFilters,
+			"ttl_minutes", c.cacheTTL.Minutes())
+	}
+}
+
+// IsExpired checks if an entry would be considered expired
+func (c *TopologyCache) IsExpired(lastSeen time.Time) bool {
+	expirationTime := time.Now().Add(-c.cacheTTL)
+	return lastSeen.Before(expirationTime)
 }

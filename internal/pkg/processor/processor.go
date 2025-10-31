@@ -1058,7 +1058,8 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 	p.proxyManager.PublishTopologyUpdate(topologyUpdate)
 
 	return &management.ProcessorRegistrationResponse{
-		Accepted: true,
+		Accepted:            true,
+		UpstreamProcessorId: p.config.ProcessorID,
 	}, nil
 }
 
@@ -1093,12 +1094,18 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 	// Get processor stats
 	processorStats := p.statsCollector.GetProto()
 
+	// Get upstream processor ID (empty if this is the root processor)
+	upstreamProcessorID := ""
+	if p.upstreamManager != nil {
+		upstreamProcessorID = p.upstreamManager.GetUpstreamProcessorID()
+	}
+
 	// Recursively query downstream processors
 	node, err := p.downstreamManager.GetTopology(
 		ctx,
 		p.config.ProcessorID,
 		processorStats.Status,
-		p.config.UpstreamAddr,
+		upstreamProcessorID,
 		connectedHunters,
 	)
 	if err != nil {

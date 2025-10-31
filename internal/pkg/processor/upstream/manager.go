@@ -39,6 +39,9 @@ type Manager struct {
 	stream     data.DataService_StreamPacketsClient
 	mu         sync.Mutex
 
+	// Upstream processor ID (learned during registration)
+	upstreamProcessorID string
+
 	// Packet forwarding stats
 	packetsForwarded *atomic.Uint64
 
@@ -123,7 +126,11 @@ func (m *Manager) Connect() error {
 			_ = conn.Close()
 			return fmt.Errorf("upstream processor rejected registration: %s", regResp.Error)
 		}
-		logger.Info("Successfully registered with upstream processor")
+
+		// Store the upstream processor ID for topology reporting
+		m.upstreamProcessorID = regResp.UpstreamProcessorId
+		logger.Info("Successfully registered with upstream processor",
+			"upstream_processor_id", m.upstreamProcessorID)
 	} else {
 		logger.Warn("ProcessorID or ListenAddress not configured, skipping processor registration")
 	}
@@ -246,4 +253,11 @@ func (m *Manager) IsConnected() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.stream != nil
+}
+
+// GetUpstreamProcessorID returns the upstream processor ID (learned during registration)
+func (m *Manager) GetUpstreamProcessorID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.upstreamProcessorID
 }

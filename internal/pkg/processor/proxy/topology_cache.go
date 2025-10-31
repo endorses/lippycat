@@ -322,6 +322,16 @@ func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConne
 	// Store metadata
 	node.Metadata["status"] = proc.Status.String()
 
+	// FIXME: Workaround for topology updates with empty UpstreamProcessor
+	// Don't overwrite ParentID if the new value is empty and we already have a non-empty value
+	// This can happen when a processor receives a topology update before its upstream registration completes
+	if existing := c.processors[proc.ProcessorId]; existing != nil && existing.ParentID != "" && proc.UpstreamProcessor == "" {
+		node.ParentID = existing.ParentID
+		c.logger.Debug("applyProcessorConnected: preserving existing ParentID (update had empty UpstreamProcessor)",
+			"processor_id", proc.ProcessorId,
+			"existing_parent_id", existing.ParentID)
+	}
+
 	c.processors[proc.ProcessorId] = node
 
 	// Add hunters from this processor

@@ -103,6 +103,10 @@ message ProcessorRegistrationResponse {
 
     // Error message if rejected
     string error = 2;
+
+    // Upstream processor ID (the processor that accepted this registration)
+    // This allows the downstream processor to know its parent's ID for topology reporting
+    string upstream_processor_id = 3;
 }
 
 // HunterCapabilities describes what a hunter can do

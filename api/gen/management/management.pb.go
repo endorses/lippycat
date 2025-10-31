@@ -474,9 +474,12 @@ type ProcessorRegistrationResponse struct {
 	// Registration accepted
 	Accepted bool `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
 	// Error message if rejected
-	Error         string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Error string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	// Upstream processor ID (the processor that accepted this registration)
+	// This allows the downstream processor to know its parent's ID for topology reporting
+	UpstreamProcessorId string `protobuf:"bytes,3,opt,name=upstream_processor_id,json=upstreamProcessorId,proto3" json:"upstream_processor_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ProcessorRegistrationResponse) Reset() {
@@ -519,6 +522,13 @@ func (x *ProcessorRegistrationResponse) GetAccepted() bool {
 func (x *ProcessorRegistrationResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *ProcessorRegistrationResponse) GetUpstreamProcessorId() string {
+	if x != nil {
+		return x.UpstreamProcessorId
 	}
 	return ""
 }
@@ -2927,10 +2937,11 @@ const file_management_proto_rawDesc = "" +
 	"\fprocessor_id\x18\x01 \x01(\tR\vprocessorId\x12%\n" +
 	"\x0elisten_address\x18\x02 \x01(\tR\rlistenAddress\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12%\n" +
-	"\x0eupstream_chain\x18\x04 \x03(\tR\rupstreamChain\"Q\n" +
+	"\x0eupstream_chain\x18\x04 \x03(\tR\rupstreamChain\"\x85\x01\n" +
 	"\x1dProcessorRegistrationResponse\x12\x1a\n" +
 	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xa1\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x122\n" +
+	"\x15upstream_processor_id\x18\x03 \x01(\tR\x13upstreamProcessorId\"\xa1\x01\n" +
 	"\x12HunterCapabilities\x12!\n" +
 	"\ffilter_types\x18\x01 \x03(\tR\vfilterTypes\x12&\n" +
 	"\x0fmax_buffer_size\x18\x02 \x01(\x04R\rmaxBufferSize\x12)\n" +

@@ -307,6 +307,11 @@ func (m *Manager) FindDownstreamForTarget(targetProcessorID string) string {
 		return ""
 	}
 
+	m.logger.Debug("FindDownstreamForTarget: found target processor",
+		"target_processor_id", targetProcessorID,
+		"target_parent_id", targetProc.ParentID,
+		"this_processor_id", m.processorID)
+
 	// Walk up the hierarchy from target to find the direct downstream
 	// that is on the path to the target
 	currentID := targetProcessorID
@@ -326,7 +331,8 @@ func (m *Manager) FindDownstreamForTarget(targetProcessorID string) string {
 		if currentProc.ParentID == "" {
 			m.logger.Warn("reached root processor without finding path",
 				"target_processor_id", targetProcessorID,
-				"current_processor_id", currentID)
+				"current_processor_id", currentID,
+				"this_processor_id", m.processorID)
 			return ""
 		}
 

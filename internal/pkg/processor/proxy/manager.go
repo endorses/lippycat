@@ -33,6 +33,9 @@ type Manager struct {
 	subscribersMu sync.RWMutex
 	subscribers   map[string]chan *management.TopologyUpdate
 
+	// batcher batches topology updates to reduce network overhead
+	batcher *TopologyUpdateBatcher
+
 	// processorID is this processor's unique identifier
 	processorID string
 
@@ -58,7 +61,7 @@ type Manager struct {
 func NewManager(log *slog.Logger, processorID string) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &Manager{
+	m := &Manager{
 		logger:      log,
 		cache:       NewTopologyCache(),
 		subscribers: make(map[string]chan *management.TopologyUpdate),
@@ -66,6 +69,14 @@ func NewManager(log *slog.Logger, processorID string) *Manager {
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+
+	// Create batcher with flush function that broadcasts to subscribers
+	m.batcher = NewTopologyUpdateBatcher(func(updates []*management.TopologyUpdate) {
+		m.broadcastTopologyUpdateBatch(updates)
+	})
+	m.batcher.Start()
+
+	return m
 }
 
 // SetTLSCredentials configures the TLS certificate and private key used for
@@ -93,6 +104,11 @@ func (m *Manager) GetCache() *TopologyCache {
 // This should be called during processor shutdown to ensure clean cleanup.
 func (m *Manager) Shutdown() {
 	m.cancel()
+
+	// Stop batcher (will flush pending updates)
+	if m.batcher != nil {
+		m.batcher.Stop()
+	}
 
 	// Close all subscriber channels
 	m.subscribersMu.Lock()
@@ -148,20 +164,21 @@ func (m *Manager) UnregisterSubscriber(subscriberID string) {
 // PublishTopologyUpdate implements TopologyPublisher interface.
 // This method:
 // 1. Applies the update to the local topology cache
-// 2. Broadcasts the update to all active subscribers
+// 2. Batches the update for broadcasting to all active subscribers
 //
 // This is called by hunter manager and downstream manager when topology events occur.
+// Updates are batched to reduce network overhead (100ms window, max 10 updates per batch).
 func (m *Manager) PublishTopologyUpdate(update *management.TopologyUpdate) {
 	if update == nil {
 		m.logger.Warn("received nil topology update, ignoring")
 		return
 	}
 
-	// Apply update to topology cache
+	// Apply update to topology cache immediately
 	m.cache.Apply(update)
 
-	// Broadcast to all subscribers
-	m.broadcastTopologyUpdate(update)
+	// Add to batcher for efficient broadcasting
+	m.batcher.Add(update)
 
 	m.logger.Debug("published topology update",
 		"update_type", update.UpdateType,
@@ -185,6 +202,38 @@ func (m *Manager) broadcastTopologyUpdate(update *management.TopologyUpdate) {
 			m.logger.Warn("dropped topology update for slow subscriber",
 				"subscriber_id", subscriberID,
 				"update_type", update.UpdateType)
+		}
+	}
+}
+
+// broadcastTopologyUpdateBatch sends a batch of topology updates to all active subscribers.
+// This is called by the batcher's flush function.
+// Uses non-blocking sends to prevent slow subscribers from blocking the broadcaster.
+func (m *Manager) broadcastTopologyUpdateBatch(updates []*management.TopologyUpdate) {
+	if len(updates) == 0 {
+		return
+	}
+
+	m.subscribersMu.RLock()
+	defer m.subscribersMu.RUnlock()
+
+	m.logger.Debug("broadcasting topology update batch",
+		"batch_size", len(updates),
+		"subscriber_count", len(m.subscribers))
+
+	// Send each update in the batch to all subscribers
+	for _, update := range updates {
+		for subscriberID, ch := range m.subscribers {
+			select {
+			case ch <- update:
+				// Successfully sent
+			default:
+				// Channel full, drop update
+				m.logger.Warn("dropped topology update for slow subscriber",
+					"subscriber_id", subscriberID,
+					"update_type", update.UpdateType,
+					"batch_size", len(updates))
+			}
 		}
 	}
 }

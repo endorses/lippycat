@@ -369,11 +369,11 @@ TUI → Processor A (root)
 ### Tasks
 
 #### 5.1
-- [ ] Implement topology update batching
-  - [ ] Create `TopologyUpdateBatcher` with max size and delay
-  - [ ] Batch multiple updates within time window (100ms)
-  - [ ] Flush on max size (10 updates) or timeout
-  - [ ] Test: verify reduced update frequency
+- [x] Implement topology update batching
+  - [x] Create `TopologyUpdateBatcher` with max size and delay
+  - [x] Batch multiple updates within time window (100ms)
+  - [x] Flush on max size (10 updates) or timeout
+  - [x] Test: verify reduced update frequency
 
 #### 5.2
 - [ ] Add retry logic for proxied operations

@@ -53,6 +53,70 @@ Multi-tier architecture for geographic or network segmentation:
 └──────────┘
 ```
 
+### Multi-Level Management (v0.3.0+)
+
+**NEW:** Hierarchical management enables real-time topology updates and transparent operation proxying across processor chains.
+
+**Key Features:**
+- **Real-time topology updates** propagate upstream from leaf processors to root
+- **Transparent management proxying** allows TUI to control hunters on downstream processors
+- **Streaming topology subscription** replaces polling for instant updates
+- **Event-driven architecture** with hunter connect/disconnect propagation
+- **Authorization tokens** for secure multi-hop operations
+- **Hierarchy depth limits** (max: 10 levels) for performance and latency control
+
+**Example Topology:**
+```
+TUI → Processor A (root, depth=0)
+        ├─ Hunter 1, Hunter 2
+        └─ Processor B (downstream, depth=1) ← TRANSPARENT PROXY
+            ├─ Hunter 3, Hunter 4
+            └─ Processor C (deeper, depth=2)
+                └─ Hunter 5, Hunter 6
+```
+
+**How It Works:**
+1. **Topology Propagation**: When Hunter 5 connects to Processor C, the event flows:
+   - Processor C publishes `HunterConnected` event
+   - Event propagates to Processor B
+   - Processor B forwards to Processor A
+   - Processor A broadcasts to TUI clients
+   - TUI updates hunters view instantly
+
+2. **Operation Proxying**: When TUI creates filter on Hunter 5:
+   - TUI requests auth token from Processor A (root)
+   - TUI sends `UpdateFilterOnProcessor(target=ProcessorC, hunter=Hunter5)` to A
+   - Processor A validates token and routes to Processor B
+   - Processor B validates and routes to Processor C
+   - Processor C applies filter to Hunter 5
+   - Success/error propagates back up chain to TUI
+
+**Hierarchy Depth Guidelines:**
+
+| Depth | Use Case | Latency | Status |
+|-------|----------|---------|--------|
+| 0-1 | Direct hunters, single edge processor | <100ms | Optimal |
+| 2-3 | Regional aggregation, multi-site | 100-500ms | Recommended |
+| 4-6 | Large enterprise, geographic distribution | 500ms-2s | Acceptable |
+| 7-9 | Complex hierarchies, extreme distribution | 2s-5s | Performance warning |
+| 10+ | Not recommended | >5s | Rejected |
+
+**Operation Latency by Depth:**
+- Base timeout: 5 seconds
+- Per-hop timeout: +500ms per level
+- Examples:
+  - Depth 1 (direct): ~5.5s max
+  - Depth 3 (regional): ~6.5s max
+  - Depth 7 (complex): ~8.5s max
+  - Depth 10 (max): ~10s max
+
+**Best Practices:**
+- Keep depth ≤3 for optimal performance
+- Use regional aggregation for geographic distribution
+- Monitor operation latency metrics
+- Configure depth limits based on requirements
+- Use TLS/mTLS for security across all hops
+
 ---
 
 ## Components
@@ -136,6 +200,34 @@ sudo ./lippycat process --listen :50051 --upstream localhost:50052
 ```bash
 sudo ./lippycat hunt --processor localhost:50051 --interface any
 ```
+
+### 4. Multi-Level Management with TUI (v0.3.0+)
+
+**Terminal 1 - Root Processor:**
+```bash
+sudo ./lippycat process --listen :50051 --write-file /tmp/root.pcap
+```
+
+**Terminal 2 - Downstream Processor:**
+```bash
+sudo ./lippycat process --listen :50052 --upstream localhost:50051
+```
+
+**Terminal 3 - Hunter (connected to downstream):**
+```bash
+sudo ./lippycat hunt --processor localhost:50052 --interface any
+```
+
+**Terminal 4 - TUI (connected to root, can manage all hunters):**
+```bash
+./lippycat tui --remote --processor localhost:50051
+```
+
+**Features:**
+- TUI shows hunters from both root and downstream processors
+- Real-time topology updates when hunters connect/disconnect
+- Create/delete filters on any hunter through transparent proxying
+- Hierarchy depth and processor chain visible in TUI
 
 ---
 
@@ -723,6 +815,256 @@ sudo ./lippycat process \
    htop
    ```
 
+### Multi-Level Hierarchy Issues (v0.3.0+)
+
+#### Chain Operation Failures
+
+**Error:** `operation failed in chain: processor "proc-b" unreachable`
+
+**Solutions:**
+1. Check processor health:
+   ```bash
+   # Verify downstream processor is running
+   ssh proc-b systemctl status lippycat-processor
+   ```
+
+2. Check network connectivity:
+   ```bash
+   # Test connection from upstream to downstream
+   telnet proc-b 50051
+   ```
+
+3. Verify TLS certificates (if enabled):
+   ```bash
+   # Check certificate validity
+   openssl x509 -in /path/to/cert.crt -noout -dates
+
+   # Verify SAN matches hostname
+   openssl x509 -in /path/to/cert.crt -noout -ext subjectAltName
+   ```
+
+4. Check processor logs:
+   ```bash
+   # Check for topology stream errors
+   journalctl -u lippycat-processor -f | grep -i "topology\|downstream"
+   ```
+
+#### Operation Timeout
+
+**Error:** `context deadline exceeded`
+
+**Cause:** Operation took longer than configured timeout for hierarchy depth.
+
+**Solutions:**
+1. Check hierarchy depth:
+   - Depth >7 has high latency (2s-5s)
+   - Consider restructuring to reduce depth
+
+2. Verify network latency:
+   ```bash
+   # Measure latency between processors
+   ping -c 10 downstream-processor
+
+   # Trace route to identify slow hops
+   traceroute downstream-processor
+   ```
+
+3. Check processor load:
+   ```bash
+   # High CPU/memory can slow operations
+   top -bn1 | grep lippycat
+   ```
+
+4. Increase timeout tolerance:
+   - Base timeout: 5s
+   - Per-hop: +500ms
+   - Depth 7 = 8.5s max (not configurable, but automatic)
+
+#### Topology Updates Not Propagating
+
+**Symptom:** TUI doesn't show new hunters on downstream processors
+
+**Solutions:**
+1. Verify topology subscription is active:
+   ```bash
+   # Check TUI logs for subscription errors
+   journalctl -u lippycat-tui -f | grep -i "topology"
+   ```
+
+2. Check downstream processor registration:
+   ```bash
+   # On upstream processor, verify downstream is registered
+   journalctl -u lippycat-processor -f | grep "Downstream processor registered"
+   ```
+
+3. Test topology stream health:
+   ```bash
+   # Look for stream reconnection messages
+   journalctl -u lippycat-processor -f | grep "topology stream"
+   ```
+
+4. Manual topology refresh:
+   - In TUI, press `r` to force refresh (if implemented)
+   - Or restart TUI connection
+
+#### Authorization Token Errors
+
+**Error:** `authorization token invalid` or `token expired`
+
+**Solutions:**
+1. Check token expiration (5-minute TTL):
+   - Operations must complete within 5 minutes of token issuance
+   - For deep hierarchies, this should be sufficient
+
+2. Verify token signature:
+   ```bash
+   # Check processor certificate is valid
+   openssl x509 -in /path/to/processor.crt -noout -text
+   ```
+
+3. Check clock synchronization:
+   ```bash
+   # Ensure all processors have synchronized clocks
+   timedatectl status
+
+   # Install NTP if needed
+   sudo apt-get install ntp
+   ```
+
+4. Verify root processor identity:
+   - Token must be issued by root processor in chain
+   - Check TUI is connected to correct root
+
+#### Processor Chain Broken/Partitioned
+
+**Symptom:** Subtree shows as "unreachable" in TUI
+
+**Solutions:**
+1. Check network partition:
+   ```bash
+   # From upstream processor, test downstream connectivity
+   ping downstream-processor
+   telnet downstream-processor 50051
+   ```
+
+2. Check processor status:
+   ```bash
+   # On downstream processor
+   systemctl status lippycat-processor
+
+   # Check if it's trying to reconnect
+   journalctl -u lippycat-processor -f | grep -i "reconnect\|upstream"
+   ```
+
+3. Wait for automatic recovery:
+   - Health checks run every 30 seconds
+   - Automatic reconnection with exponential backoff
+   - Full topology re-sync on reconnection
+   - Should recover within 1-2 minutes
+
+4. Manual reconnection:
+   ```bash
+   # Restart downstream processor to force reconnection
+   sudo systemctl restart lippycat-processor
+   ```
+
+5. Check for network policy changes:
+   - Firewall rules blocking port 50051
+   - Network segmentation changes
+   - VPN/tunnel failures
+
+#### Hierarchy Depth Limit Exceeded
+
+**Error:** `hierarchy depth limit exceeded (max: 10)`
+
+**Cause:** Attempting to register processor that would exceed max depth of 10 levels.
+
+**Solutions:**
+1. Restructure hierarchy:
+   - Flatten deep chains
+   - Use hub-and-spoke instead of deep chains
+   - Combine intermediate processors
+
+2. Example restructuring:
+   ```
+   # Before (depth 11 - rejected)
+   TUI → P1 → P2 → P3 → P4 → P5 → P6 → P7 → P8 → P9 → P10 → P11 → Hunter
+
+   # After (depth 3 - optimal)
+   TUI → Regional1 → Edge1 → Hunter1
+       → Regional1 → Edge2 → Hunter2
+       → Regional2 → Edge3 → Hunter3
+       → Regional2 → Edge4 → Hunter4
+   ```
+
+3. Consider direct connections:
+   - For some edges, connect hunters directly to regional processor
+   - Skip intermediate aggregation where not needed
+
+#### Cycle Detection Error
+
+**Error:** `processor cycle detected in upstream chain`
+
+**Cause:** Processor attempting to register would create a loop (A → B → C → A).
+
+**Solutions:**
+1. Check upstream chain:
+   - Verify processor hierarchy configuration
+   - Ensure each processor has unique upstream
+
+2. Fix configuration:
+   ```bash
+   # Check processor's configured upstream
+   grep upstream_addr ~/.config/lippycat.yaml
+
+   # Verify no cycles exist
+   # Each processor should have exactly one upstream (or none for root)
+   ```
+
+3. Example cycle (INCORRECT):
+   ```
+   Processor A --upstream--> Processor B
+   Processor B --upstream--> Processor C
+   Processor C --upstream--> Processor A  # CYCLE!
+   ```
+
+4. Correct hierarchy:
+   ```
+   Processor A (root, no upstream)
+   Processor B --upstream--> Processor A
+   Processor C --upstream--> Processor A
+   ```
+
+#### Performance Degradation in Deep Chains
+
+**Symptom:** Operations slow or timing out in hierarchies with depth >5
+
+**Mitigation:**
+1. Monitor operation latency:
+   - Expected: base 5s + (depth × 500ms)
+   - Depth 7 = 8.5s max
+   - If exceeding this, investigate network/processor issues
+
+2. Optimize hierarchy:
+   - Keep critical operations at depth ≤3
+   - Use regional aggregation for non-critical monitoring
+
+3. Check processor resources:
+   ```bash
+   # CPU usage should be low
+   top -bn1 | grep lippycat
+
+   # Memory should be stable
+   free -h
+
+   # Network saturation?
+   iftop -i eth0
+   ```
+
+4. Consider horizontal scaling:
+   - Instead of deep chains, use multiple shallow trees
+   - Aggregate at application layer rather than network layer
+
 ---
 
 ## Protocol Details
@@ -746,6 +1088,14 @@ service ManagementService {
   rpc GetHunterStatus(StatusRequest) returns (StatusResponse);
   rpc UpdateFilter(Filter) returns (FilterUpdateResult);
   rpc DeleteFilter(FilterDeleteRequest) returns (FilterUpdateResult);
+
+  // Multi-level management (v0.3.0+)
+  rpc SubscribeTopology(TopologySubscribeRequest) returns (stream TopologyUpdate);
+  rpc UpdateFilterOnProcessor(ProcessorFilterRequest) returns (FilterUpdateResult);
+  rpc DeleteFilterOnProcessor(ProcessorFilterDeleteRequest) returns (FilterUpdateResult);
+  rpc GetFiltersFromProcessor(ProcessorFilterQueryRequest) returns (FilterResponse);
+  rpc RequestAuthToken(AuthTokenRequest) returns (AuthTokenResponse);
+  rpc GetTopology(TopologyRequest) returns (TopologyResponse);  // Legacy, use SubscribeTopology
 }
 ```
 
@@ -783,6 +1133,30 @@ service ManagementService {
 5. Reconnect and re-register
 6. Re-subscribe to filters
 7. Resume packet forwarding
+
+**Multi-Level Topology (v0.3.0+):**
+1. TUI connects to root processor
+2. TUI calls `SubscribeTopology()` RPC
+3. Processor sends initial topology snapshot
+4. Processor streams real-time updates
+5. When hunter connects to downstream processor:
+   - Downstream publishes `HunterConnected` event
+   - Event propagates through processor chain
+   - Root processor broadcasts to all TUI subscribers
+6. When TUI creates filter on downstream hunter:
+   - TUI calls `RequestAuthToken()` to get auth token
+   - TUI calls `UpdateFilterOnProcessor(target=downstream, token=...)`
+   - Root processor validates token and routes to downstream
+   - Downstream applies filter and returns result
+   - Result propagates back to TUI
+
+**Topology Events:**
+- `TOPOLOGY_HUNTER_CONNECTED` - New hunter registered
+- `TOPOLOGY_HUNTER_DISCONNECTED` - Hunter disconnected
+- `TOPOLOGY_HUNTER_STATUS_CHANGED` - Hunter health status changed
+- `TOPOLOGY_PROCESSOR_CONNECTED` - Downstream processor registered
+- `TOPOLOGY_PROCESSOR_DISCONNECTED` - Downstream processor disconnected
+- `TOPOLOGY_FILTER_UPDATED` - Filter created/modified/deleted
 
 ---
 
@@ -948,6 +1322,21 @@ A: Use external tools (logrotate) or restart processor with new filename.
 
 **Q: What protocols are supported?**
 A: All protocols. Lippycat captures raw packets. Built-in VoIP analysis available.
+
+**Q: How deep can processor hierarchies be? (v0.3.0+)**
+A: Maximum 10 levels. Recommended depth is 1-3 for optimal performance. Depth >7 results in higher latency (2s-5s).
+
+**Q: Can I manage hunters on downstream processors from TUI? (v0.3.0+)**
+A: Yes! With multi-level management, TUI can create/delete filters on any hunter in the hierarchy, even those connected to downstream processors. Operations are transparently proxied through the processor chain.
+
+**Q: How do I know if a processor chain is broken? (v0.3.0+)**
+A: The TUI shows processors and their subtrees as "unreachable" when a network partition is detected. The system automatically attempts reconnection every 30 seconds.
+
+**Q: Are topology updates real-time? (v0.3.0+)**
+A: Yes! The TUI uses streaming topology subscription instead of polling. When a hunter connects/disconnects anywhere in the hierarchy, the TUI updates within milliseconds.
+
+**Q: What happens if authorization tokens expire? (v0.3.0+)**
+A: Tokens have a 5-minute TTL. If an operation fails due to expired token, the TUI automatically requests a new token and retries the operation.
 
 ---
 

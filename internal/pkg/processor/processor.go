@@ -1272,14 +1272,20 @@ func (p *Processor) UpdateFilterOnProcessor(ctx context.Context, req *management
 	logger.Debug("Target is downstream processor, routing request",
 		"target_processor_id", req.ProcessorId,
 		"downstream_processor_id", routingDecision.DownstreamProcessorID,
-		"chain_depth", routingDecision.Depth)
+		"chain_depth", routingDecision.Depth,
+		"recommended_timeout", routingDecision.RecommendedTimeout)
 
 	// Build processor path for chain error context
 	processorPath := []string{p.config.ProcessorID}
 
+	// Apply recommended timeout to context for this operation
+	// Timeout scales with chain depth: 5s base + 500ms per hop
+	timeoutCtx, cancel := context.WithTimeout(ctx, routingDecision.RecommendedTimeout)
+	defer cancel()
+
 	// Forward request using downstream manager (handles chain error wrapping)
 	result, err := p.downstreamManager.ForwardUpdateFilter(
-		ctx,
+		timeoutCtx,
 		routingDecision.DownstreamProcessorID,
 		req,
 		processorPath,
@@ -1372,14 +1378,20 @@ func (p *Processor) DeleteFilterOnProcessor(ctx context.Context, req *management
 	logger.Debug("Target is downstream processor, routing request",
 		"target_processor_id", req.ProcessorId,
 		"downstream_processor_id", routingDecision.DownstreamProcessorID,
-		"chain_depth", routingDecision.Depth)
+		"chain_depth", routingDecision.Depth,
+		"recommended_timeout", routingDecision.RecommendedTimeout)
 
 	// Build processor path for chain error context
 	processorPath := []string{p.config.ProcessorID}
 
+	// Apply recommended timeout to context for this operation
+	// Timeout scales with chain depth: 5s base + 500ms per hop
+	timeoutCtx, cancel := context.WithTimeout(ctx, routingDecision.RecommendedTimeout)
+	defer cancel()
+
 	// Forward request using downstream manager (handles chain error wrapping)
 	result, err := p.downstreamManager.ForwardDeleteFilter(
-		ctx,
+		timeoutCtx,
 		routingDecision.DownstreamProcessorID,
 		req,
 		processorPath,
@@ -1441,7 +1453,8 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 	logger.Debug("Target is downstream processor, routing request",
 		"target_processor_id", req.ProcessorId,
 		"downstream_processor_id", routingDecision.DownstreamProcessorID,
-		"chain_depth", routingDecision.Depth)
+		"chain_depth", routingDecision.Depth,
+		"recommended_timeout", routingDecision.RecommendedTimeout)
 
 	// Verify authorization token if present
 	if req.AuthToken != nil {
@@ -1472,9 +1485,14 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 	// Build processor path for chain error context
 	processorPath := []string{p.config.ProcessorID}
 
+	// Apply recommended timeout to context for this operation
+	// Timeout scales with chain depth: 5s base + 500ms per hop
+	timeoutCtx, cancel := context.WithTimeout(ctx, routingDecision.RecommendedTimeout)
+	defer cancel()
+
 	// Forward request using downstream manager (handles chain error wrapping)
 	result, err := p.downstreamManager.ForwardGetFilters(
-		ctx,
+		timeoutCtx,
 		routingDecision.DownstreamProcessorID,
 		req,
 		processorPath,

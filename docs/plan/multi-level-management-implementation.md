@@ -404,11 +404,11 @@ TUI → Processor A (root)
   - [x] Test: A → B → C → A (cycle rejected)
 
 #### 5.6
-- [ ] Add operation timeout scaling
-  - [ ] Base timeout: 5 seconds
-  - [ ] Add per-hop timeout: 500ms × depth
-  - [ ] Example: 7-level chain = 5s + (7 × 500ms) = 8.5s
-  - [ ] Configure timeouts in context
+- [x] Add operation timeout scaling
+  - [x] Base timeout: 5 seconds
+  - [x] Add per-hop timeout: 500ms × depth
+  - [x] Example: 7-level chain = 5s + (7 × 500ms) = 8.5s
+  - [x] Configure timeouts in context
 
 #### 5.7
 - [ ] Implement graceful shutdown

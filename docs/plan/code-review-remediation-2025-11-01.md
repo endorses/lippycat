@@ -99,17 +99,17 @@ func (ct *CallTracker) Shutdown() {
 **Effort:** 2-3 days
 
 #### Tasks:
-- [ ] Create `internal/pkg/auth/` package for API key validation
-- [ ] Define API key configuration structure (YAML support)
-- [ ] Implement API key extraction from gRPC metadata
-- [ ] Add authentication to `RegisterHunter()` method
-- [ ] Add authentication to `SubscribeToPackets()` method
-- [ ] Add authentication to `TopologyUpdates()` method
-- [ ] Add audit logging for failed authentication attempts
-- [ ] Support multiple API keys with roles (hunter, subscriber)
-- [ ] Update documentation with API key setup instructions
-- [ ] Add test cases for authentication success/failure
-- [ ] Add example configuration to `config.yaml`
+- [x] Create `internal/pkg/auth/` package for API key validation
+- [x] Define API key configuration structure (YAML support)
+- [x] Implement API key extraction from gRPC metadata
+- [x] Add authentication to `RegisterHunter()` method (via interceptors)
+- [x] Add authentication to `SubscribeToPackets()` method (via interceptors)
+- [x] Add authentication to `TopologyUpdates()` method (via interceptors)
+- [x] Add audit logging for failed authentication attempts
+- [x] Support multiple API keys with roles (hunter, subscriber, admin)
+- [x] Update documentation with API key setup instructions
+- [x] Add test cases for authentication success/failure
+- [x] Add example configuration to `config.yaml`
 
 **Configuration Format:**
 ```yaml

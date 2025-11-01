@@ -14,6 +14,21 @@
 #   type: "tap"                 # Interface type: tap (Layer 2) or tun (Layer 3)
 #   buffer_size: 4096           # Injection queue buffer size (packets)
 
+# Security Configuration (for processor nodes)
+# security:
+#   api_keys:
+#     enabled: false            # Enable API key authentication (alternative to mTLS)
+#     keys:
+#       - key: "hunter-key-abc123"
+#         role: "hunter"
+#         description: "Production hunters"
+#       - key: "tui-key-xyz789"
+#         role: "subscriber"
+#         description: "TUI clients"
+#       - key: "admin-key-123456"
+#         role: "admin"
+#         description: "Administrative access"
+
 voip:
   # Basic TCP configuration
   max_goroutines: 1000

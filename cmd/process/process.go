@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -53,6 +54,8 @@ var (
 	tlsCAFile       string
 	tlsClientAuth   bool
 	insecureAllowed bool
+	// API Key Authentication flags
+	apiKeyAuthEnabled bool
 	// Per-call PCAP flags
 	perCallPcapEnabled bool
 	perCallPcapDir     string
@@ -94,6 +97,9 @@ func init() {
 	ProcessCmd.Flags().BoolVar(&tlsClientAuth, "tls-client-auth", false, "Require client certificate authentication (mutual TLS)")
 	ProcessCmd.Flags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 
+	// API Key Authentication
+	ProcessCmd.Flags().BoolVar(&apiKeyAuthEnabled, "api-key-auth", false, "Enable API key authentication (config file required for keys)")
+
 	// Per-call PCAP writing
 	ProcessCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic")
 	ProcessCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
@@ -129,6 +135,7 @@ func init() {
 	_ = viper.BindPFlag("processor.tls.key_file", ProcessCmd.Flags().Lookup("tls-key"))
 	_ = viper.BindPFlag("processor.tls.ca_file", ProcessCmd.Flags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("processor.tls.client_auth", ProcessCmd.Flags().Lookup("tls-client-auth"))
+	_ = viper.BindPFlag("security.api_keys.enabled", ProcessCmd.Flags().Lookup("api-key-auth"))
 	_ = viper.BindPFlag("processor.per_call_pcap.enabled", ProcessCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("processor.per_call_pcap.output_dir", ProcessCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("processor.per_call_pcap.file_pattern", ProcessCmd.Flags().Lookup("per-call-pcap-pattern"))
@@ -204,6 +211,29 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Build auth config if enabled
+	var authConfig *auth.Config
+	if getBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
+		// Load API keys from config file
+		var apiKeys []auth.APIKey
+		if err := viper.UnmarshalKey("security.api_keys.keys", &apiKeys); err != nil {
+			return fmt.Errorf("failed to load API keys from config: %w", err)
+		}
+
+		if len(apiKeys) == 0 {
+			return fmt.Errorf("API key authentication enabled but no keys configured (add security.api_keys.keys to config file)")
+		}
+
+		authConfig = &auth.Config{
+			Enabled: true,
+			APIKeys: apiKeys,
+		}
+
+		logger.Info("API key authentication configured",
+			"num_keys", len(apiKeys),
+			"source", "config file")
+	}
+
 	// Get configuration (flags override config file)
 	config := processor.Config{
 		ListenAddr:       getStringConfig("processor.listen_addr", listenAddr),
@@ -223,6 +253,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		TLSKeyFile:    getStringConfig("processor.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("processor.tls.ca_file", tlsCAFile),
 		TLSClientAuth: getBoolConfig("processor.tls.client_auth", tlsClientAuth),
+		// API Key Authentication
+		AuthConfig: authConfig,
 		// Virtual interface configuration
 		VirtualInterface:      getBoolConfig("processor.virtual_interface", virtualInterface),
 		VirtualInterfaceName:  getStringConfig("processor.vif_name", virtualInterfaceName),

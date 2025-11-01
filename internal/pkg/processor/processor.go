@@ -14,6 +14,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -59,6 +60,8 @@ type Config struct {
 	TLSKeyFile    string // Path to TLS key file
 	TLSCAFile     string // Path to CA certificate file (for mutual TLS)
 	TLSClientAuth bool   // Require client certificate authentication (mutual TLS)
+	// API Key Authentication (for non-mTLS deployments)
+	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
 	// Virtual interface settings
 	VirtualInterface      bool   // Enable virtual network interface
 	VirtualInterfaceName  string // Virtual interface name
@@ -402,6 +405,27 @@ func (p *Processor) Start(ctx context.Context) error {
 		if productionMode {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS to be enabled")
 		}
+	}
+
+	// Add API key authentication if configured
+	if p.config.AuthConfig != nil && p.config.AuthConfig.Enabled {
+		validator := auth.NewValidator(*p.config.AuthConfig)
+		serverOpts = append(serverOpts,
+			grpc.UnaryInterceptor(auth.UnaryServerInterceptor(validator)),
+			grpc.StreamInterceptor(auth.StreamServerInterceptor(validator)),
+		)
+
+		logger.Info("API key authentication enabled",
+			"num_keys", len(p.config.AuthConfig.APIKeys),
+			"security", "API key validation on all gRPC methods")
+
+		// In production mode, require either mTLS OR API key auth
+		if productionMode && !p.config.TLSClientAuth {
+			logger.Info("Production mode: API key authentication replaces mTLS requirement")
+		}
+	} else if productionMode && !p.config.TLSClientAuth {
+		// In production mode without mTLS, require API key auth
+		return fmt.Errorf("LIPPYCAT_PRODUCTION=true without mTLS requires API key authentication (set security.api_keys in config)")
 	}
 
 	p.grpcServer = grpc.NewServer(serverOpts...)

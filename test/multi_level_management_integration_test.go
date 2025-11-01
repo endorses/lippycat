@@ -525,8 +525,9 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Start root processor (depth 0)
-	rootAddr := "127.0.0.1:51061"
+	// Start root processor (depth 0) with dynamic port
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc-depth", "")
 	require.NoError(t, err, "Failed to start root processor")
 	defer shutdownProcessorWithPortCleanup(rootProc)
@@ -536,18 +537,19 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 
 	// Build a chain of processors up to depth 10 (MaxHierarchyDepth)
 	// We'll create 10 levels, where the last one is at depth 10
-	basePort := 51062
+	// Use dynamic ports to avoid conflicts
+	processorAddrs := []string{rootAddr} // Store addresses for each level
 	processors := []*processor.Processor{rootProc}
 	connections := []*grpc.ClientConn{}
 	upstreamChain := []string{}
 
 	for i := 1; i <= 10; i++ {
-		addr := fmt.Sprintf("127.0.0.1:%d", basePort+i-1)
+		// Get dynamic port for this processor
+		addr, err := getFreePort()
+		require.NoError(t, err, "Failed to get free port for processor at level %d", i)
+
 		processorID := fmt.Sprintf("proc-depth-%d", i)
-		upstreamAddr := fmt.Sprintf("127.0.0.1:%d", basePort+i-2)
-		if i == 1 {
-			upstreamAddr = rootAddr
-		}
+		upstreamAddr := processorAddrs[i-1] // Use the address from the previous level
 
 		// Start the processor BEFORE registering with upstream
 		// This ensures the gRPC server is ready to accept connections
@@ -621,6 +623,7 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 
 		processors = append(processors, proc)
 		connections = append(connections, upstreamConn)
+		processorAddrs = append(processorAddrs, addr) // Store address for next level
 
 		// Build upstream chain for next level (add current processor's parent)
 		if i == 1 {
@@ -629,13 +632,13 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 			upstreamChain = append(upstreamChain, fmt.Sprintf("proc-depth-%d", i-1))
 		}
 
-		t.Logf("✓ Created processor at depth %d: %s", i, processorID)
+		t.Logf("✓ Created processor at depth %d: %s (listening on %s)", i, processorID, addr)
 	}
 
 	// Now attempt to register an 11th processor (depth 11, which exceeds MaxHierarchyDepth=10)
-	level11Addr := fmt.Sprintf("127.0.0.1:%d", basePort+10)
 	level11ID := "proc-depth-11"
-	level10Addr := fmt.Sprintf("127.0.0.1:%d", basePort+9)
+	level11Addr := "127.0.0.1:0"      // Dummy address (we're not actually starting a server)
+	level10Addr := processorAddrs[10] // Address of the level 10 processor
 
 	// Connect to level 10 processor
 	level10Conn, err := grpc.DialContext(ctx, level10Addr,

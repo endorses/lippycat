@@ -331,14 +331,16 @@ func (c *CallInfo) initWriters() error {
 
 	var err error
 
+	// Create SIP file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked or user-specified
-	c.sipFile, err = os.Create(sipPath)
+	c.sipFile, err = os.OpenFile(sipPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP file %s: %w", sipPath, err)
 	}
 
+	// Create RTP file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked or user-specified
-	c.rtpFile, err = os.Create(rtpPath)
+	c.rtpFile, err = os.OpenFile(rtpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		if c.sipFile != nil {
 			_ = c.sipFile.Close()

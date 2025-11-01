@@ -2,6 +2,7 @@ package voip
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -544,4 +545,54 @@ func TestWritesDuringShutdown(t *testing.T) {
 
 	assert.False(t, writeAttempted,
 		"Write should not be attempted when shuttingDown flag is set")
+}
+
+// TestCallTrackerFilePermissions verifies that per-call PCAP files are created with secure permissions (0600)
+// This test addresses security concern from code review: Phase 1.4 - Fix PCAP File Permissions
+func TestCallTrackerFilePermissions(t *testing.T) {
+	// Create tracker with PCAP writing enabled
+	tracker := NewCallTracker()
+	defer tracker.Shutdown()
+
+	// Create a call with PCAP files
+	callID := "test-call-permissions"
+	call := &CallInfo{
+		CallID:      callID,
+		State:       "NEW",
+		Created:     time.Now(),
+		LastUpdated: time.Now(),
+		LinkType:    layers.LinkTypeEthernet,
+	}
+
+	// Initialize PCAP files
+	err := call.initWriters()
+	require.NoError(t, err)
+	require.NotNil(t, call.sipFile, "SIP file should be created")
+	require.NotNil(t, call.rtpFile, "RTP file should be created")
+
+	// Get file paths before closing
+	sipPath := call.sipFile.Name()
+	rtpPath := call.rtpFile.Name()
+
+	// Close the call to flush files
+	err = call.Close()
+	require.NoError(t, err)
+
+	// Check SIP file permissions
+	sipInfo, err := os.Stat(sipPath)
+	require.NoError(t, err)
+	sipMode := sipInfo.Mode().Perm()
+	assert.Equal(t, os.FileMode(0600), sipMode,
+		"SIP PCAP file should have 0600 permissions (owner read/write only), got %04o", sipMode)
+
+	// Check RTP file permissions
+	rtpInfo, err := os.Stat(rtpPath)
+	require.NoError(t, err)
+	rtpMode := rtpInfo.Mode().Perm()
+	assert.Equal(t, os.FileMode(0600), rtpMode,
+		"RTP PCAP file should have 0600 permissions (owner read/write only), got %04o", rtpMode)
+
+	// Cleanup
+	_ = os.Remove(sipPath)
+	_ = os.Remove(rtpPath)
 }

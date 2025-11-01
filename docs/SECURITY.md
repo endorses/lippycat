@@ -4,12 +4,13 @@ This document describes the security enhancements available in lippycat for prot
 
 ## Overview
 
-Lippycat includes four primary security enhancements:
+Lippycat includes five primary security enhancements:
 
 1. **TLS Transport Encryption** - Protects hunter-processor communication in transit
 2. **Call-ID Sanitization** - Prevents information leakage in log files
 3. **PCAP File Encryption** - Protects captured traffic data at rest
-4. **Content-Length Bounds Validation** - Prevents DoS attacks via memory exhaustion
+4. **PCAP File Permissions** - Restricts file access to owner only (0600)
+5. **Content-Length Bounds Validation** - Prevents DoS attacks via memory exhaustion
 
 These features are designed for sensitive deployments where VoIP traffic data requires additional protection.
 
@@ -18,6 +19,7 @@ These features are designed for sensitive deployments where VoIP traffic data re
 - [TLS Transport Encryption](#tls-transport-encryption)
 - [Call-ID Sanitization](#call-id-sanitization)
 - [PCAP File Encryption](#pcap-file-encryption)
+- [PCAP File Permissions](#pcap-file-permissions)
 - [Content-Length Bounds Validation](#content-length-bounds-validation)
 - [Security Best Practices](#security-best-practices)
 
@@ -743,6 +745,44 @@ voip:
     key_file: "/secure/keys/lippycat-pcap.key"
     pbkdf2_iterations: 200000
 ```
+
+### PCAP File Permissions
+
+**As of v0.2.6**, all PCAP files are created with restrictive permissions (0600 / `rw-------`) to prevent unauthorized access. This applies to:
+
+- Unified PCAP files (processor mode)
+- Per-call SIP and RTP PCAP files (VoIP mode)
+- Auto-rotating PCAP files
+- Async PCAP writer output
+
+**File Permission Details:**
+- **Owner**: Read and write access only
+- **Group**: No access
+- **Others**: No access
+
+This ensures that only the user running lippycat (typically root or a dedicated service account) can read the captured traffic data.
+
+**Recommended Directory Permissions:**
+- PCAP output directory: `0700` (drwx------)
+- Ensures directory browsing is also restricted
+
+**Example Setup:**
+```bash
+# Create secure PCAP directory
+sudo mkdir -p /var/lib/lippycat/pcaps
+sudo chmod 700 /var/lib/lippycat/pcaps
+sudo chown lippycat:lippycat /var/lib/lippycat/pcaps
+
+# Verify permissions
+ls -ld /var/lib/lippycat/pcaps
+# Expected: drwx------ 2 lippycat lippycat 4096 Nov 01 16:00 /var/lib/lippycat/pcaps
+
+# After capture, verify file permissions
+ls -l /var/lib/lippycat/pcaps/*.pcap
+# Expected: -rw------- 1 lippycat lippycat ... *.pcap
+```
+
+**Security Note:** Even with file encryption enabled, proper file permissions are essential as they provide defense-in-depth and prevent unauthorized access to encrypted files.
 
 ### Key Storage
 

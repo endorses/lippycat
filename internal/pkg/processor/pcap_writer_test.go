@@ -388,3 +388,46 @@ func TestIndexSubstring(t *testing.T) {
 		})
 	}
 }
+
+// TestPcapFilePermissions verifies that PCAP files are created with secure permissions (0600)
+// This test addresses security concern from code review: Phase 1.4 - Fix PCAP File Permissions
+func TestPcapFilePermissions(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "lippycat-permissions-test")
+	defer os.RemoveAll(tempDir)
+
+	config := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    tempDir,
+		SyncInterval: 5 * time.Second, // Required to avoid panic
+	}
+
+	manager, err := NewPcapWriterManager(config)
+	require.NoError(t, err)
+
+	// Create a writer which will create SIP and RTP PCAP files
+	writer, err := manager.GetOrCreateWriter("test-call-permissions", "alicent", "robb")
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+
+	// Close the writer to flush files
+	err = manager.CloseWriter("test-call-permissions")
+	require.NoError(t, err)
+
+	// Check permissions on created files
+	files, err := os.ReadDir(tempDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, files, "expected PCAP files to be created")
+
+	for _, file := range files {
+		if filepath.Ext(file.Name()) == ".pcap" {
+			info, err := file.Info()
+			require.NoError(t, err)
+
+			// Verify permissions are 0600 (owner read/write only)
+			mode := info.Mode().Perm()
+			assert.Equal(t, os.FileMode(0600), mode,
+				"PCAP file %s should have 0600 permissions (owner read/write only), got %04o",
+				file.Name(), mode)
+		}
+	}
+}

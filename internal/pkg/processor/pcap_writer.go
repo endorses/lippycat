@@ -232,9 +232,9 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 	filename := writer.generateFilename("sip", writer.sipFileIndex)
 	filepath := filepath.Join(writer.config.OutputDir, filename)
 
-	// Create file
+	// Create file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.Create(filepath)
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP PCAP file: %w", err)
 	}
@@ -272,9 +272,9 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 	filename := writer.generateFilename("rtp", writer.rtpFileIndex)
 	filepath := filepath.Join(writer.config.OutputDir, filename)
 
-	// Create file
+	// Create file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.Create(filepath)
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create RTP PCAP file: %w", err)
 	}

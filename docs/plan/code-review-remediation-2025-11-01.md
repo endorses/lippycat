@@ -131,14 +131,14 @@ security:
 **Effort:** 1 day
 
 #### Tasks:
-- [ ] Change `os.Create()` to `os.OpenFile()` with 0600 permissions
-- [ ] Update `internal/pkg/processor/pcap/writer.go:39`
-- [ ] Update `internal/pkg/processor/pcap_writer.go:233`
-- [ ] Update `internal/pkg/processor/pcap_writer.go:277`
-- [ ] Update `internal/pkg/processor/auto_rotate_pcap.go`
-- [ ] Update `internal/pkg/voip/calltracker.go` (per-call PCAP creation)
-- [ ] Add file permissions check to test suite
-- [ ] Document recommended file permissions in security docs
+- [x] Change `os.Create()` to `os.OpenFile()` with 0600 permissions
+- [x] Update `internal/pkg/processor/pcap/writer.go:39`
+- [x] Update `internal/pkg/processor/pcap_writer.go:233`
+- [x] Update `internal/pkg/processor/pcap_writer.go:277`
+- [x] Update `internal/pkg/processor/auto_rotate_pcap.go`
+- [x] Update `internal/pkg/voip/calltracker.go` (per-call PCAP creation)
+- [x] Add file permissions check to test suite
+- [x] Document recommended file permissions in security docs
 
 **Implementation Pattern:**
 ```go

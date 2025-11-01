@@ -36,7 +36,9 @@ type Writer struct {
 func NewWriter(filePath string) (*Writer, error) {
 	logger.Info("Initializing async PCAP writer", "file", filePath)
 
-	file, err := os.Create(filePath) // #nosec G304 - filePath is controlled by admin via config
+	// Create file with restrictive permissions (owner read/write only)
+	// #nosec G304 - filePath is controlled by admin via config
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create PCAP file: %w", err)
 	}

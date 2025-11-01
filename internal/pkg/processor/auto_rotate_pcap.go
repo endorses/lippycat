@@ -199,9 +199,9 @@ func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 	filename := w.generateFilename(timestamp)
 	filepath := filepath.Join(w.config.OutputDir, filename)
 
-	// Create file
+	// Create file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.Create(filepath)
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create auto-rotate PCAP file: %w", err)
 	}

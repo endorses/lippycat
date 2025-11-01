@@ -169,13 +169,21 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 		switch result.Protocol {
 		case "sip":
 			if call.SIPWriter != nil {
-				if err := call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+				// Lock the SIP writer mutex for thread-safe write
+				call.sipWriterMu.Lock()
+				err := call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				call.sipWriterMu.Unlock()
+				if err != nil {
 					logger.Error("Failed to write SIP packet", "error", err)
 				}
 			}
 		case "rtp":
 			if call.RTPWriter != nil {
-				if err := call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+				// Lock the RTP writer mutex for thread-safe write
+				call.rtpWriterMu.Lock()
+				err := call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				call.rtpWriterMu.Unlock()
+				if err != nil {
 					logger.Error("Failed to write RTP packet", "error", err)
 				}
 			}

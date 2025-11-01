@@ -26,6 +26,22 @@ const (
 	maxSanitizationIterations = 10
 )
 
+// CallInfo contains information about a VoIP call and manages PCAP file writing.
+//
+// Thread Safety:
+// - SIPWriter and sipFile must be accessed only while holding sipWriterMu
+// - RTPWriter and rtpFile must be accessed only while holding rtpWriterMu
+// - All other fields (CallID, State, etc.) are protected by CallTracker.mu
+//
+// Mutex Usage Pattern:
+// Always lock the appropriate writer mutex before accessing the writer or file:
+//
+//	call.sipWriterMu.Lock()
+//	err := call.SIPWriter.WritePacket(...)
+//	call.sipWriterMu.Unlock()
+//
+// The Close() method handles all locking internally and is safe to call
+// concurrently and multiple times (idempotent).
 type CallInfo struct {
 	CallID      string
 	State       string
@@ -37,8 +53,38 @@ type CallInfo struct {
 	RTPWriter   *pcapgo.Writer
 	sipFile     *os.File
 	rtpFile     *os.File
-	sipWriterMu sync.Mutex // Protects SIPWriter access
-	rtpWriterMu sync.Mutex // Protects RTPWriter access
+	sipWriterMu sync.Mutex // Protects SIPWriter and sipFile access
+	rtpWriterMu sync.Mutex // Protects RTPWriter and rtpFile access
+}
+
+// Close safely closes all PCAP writers and files for this call with proper locking.
+// This method is safe to call concurrently and idempotent.
+func (c *CallInfo) Close() error {
+	var firstErr error
+
+	// Close SIP file (with mutex protection)
+	c.sipWriterMu.Lock()
+	if c.sipFile != nil {
+		if err := c.sipFile.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close SIP file: %w", err)
+		}
+		c.sipFile = nil
+		c.SIPWriter = nil
+	}
+	c.sipWriterMu.Unlock()
+
+	// Close RTP file (with mutex protection)
+	c.rtpWriterMu.Lock()
+	if c.rtpFile != nil {
+		if err := c.rtpFile.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("failed to close RTP file: %w", err)
+		}
+		c.rtpFile = nil
+		c.RTPWriter = nil
+	}
+	c.rtpWriterMu.Unlock()
+
+	return firstErr
 }
 
 type CallTracker struct {
@@ -119,11 +165,10 @@ func (ct *CallTracker) Shutdown() {
 		// Close all open call files
 		ct.mu.Lock()
 		for id, call := range ct.callMap {
-			if call.sipFile != nil {
-				_ = call.sipFile.Close()
-			}
-			if call.rtpFile != nil {
-				_ = call.rtpFile.Close()
+			if err := call.Close(); err != nil {
+				logger.Error("Failed to close call files",
+					"call_id", SanitizeCallIDForLogging(id),
+					"error", err)
 			}
 			delete(ct.callMap, id)
 		}
@@ -202,15 +247,10 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 
 			// Clean up the old call's resources
 			if oldCall != nil {
-				if oldCall.sipFile != nil {
-					if err := oldCall.sipFile.Close(); err != nil {
-						logger.Error("Error closing SIP file", "error", err)
-					}
-				}
-				if oldCall.rtpFile != nil {
-					if err := oldCall.rtpFile.Close(); err != nil {
-						logger.Error("Error closing RTP file", "error", err)
-					}
+				if err := oldCall.Close(); err != nil {
+					logger.Error("Error closing call files",
+						"call_id", SanitizeCallIDForLogging(oldestCallID),
+						"error", err)
 				}
 				// Remove from port mapping
 				for port, cid := range tracker.portToCallID {

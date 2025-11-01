@@ -60,16 +60,28 @@ func WriteSIP(callID string, packet gopacket.Packet) {
 func writeSIPSync(callID string, packet gopacket.Packet) {
 	tracker := getTracker()
 	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
+	call, ok := tracker.callMap[callID]
+	tracker.mu.Unlock()
 
-	if call, ok := tracker.callMap[callID]; ok && call.SIPWriter != nil {
-		if err := call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+	if ok && call != nil && call.SIPWriter != nil {
+		// Lock the SIP writer mutex for thread-safe write
+		call.sipWriterMu.Lock()
+		err := call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+		call.sipWriterMu.Unlock()
+
+		if err != nil {
 			logger.Error("Error writing SIP packet for call",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
 			return
 		}
-		call.LastUpdated = time.Now()
+
+		// Update last updated time (with minimal locking)
+		tracker.mu.Lock()
+		if call, exists := tracker.callMap[callID]; exists {
+			call.LastUpdated = time.Now()
+		}
+		tracker.mu.Unlock()
 	}
 }
 
@@ -95,16 +107,28 @@ func WriteRTP(callID string, packet gopacket.Packet) {
 func writeRTPSync(callID string, packet gopacket.Packet) {
 	tracker := getTracker()
 	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
+	call, ok := tracker.callMap[callID]
+	tracker.mu.Unlock()
 
-	if call, ok := tracker.callMap[callID]; ok && call.RTPWriter != nil {
-		if err := call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data()); err != nil {
+	if ok && call != nil && call.RTPWriter != nil {
+		// Lock the RTP writer mutex for thread-safe write
+		call.rtpWriterMu.Lock()
+		err := call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+		call.rtpWriterMu.Unlock()
+
+		if err != nil {
 			logger.Error("Error writing RTP packet for call",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
 			return
 		}
-		call.LastUpdated = time.Now()
+
+		// Update last updated time (with minimal locking)
+		tracker.mu.Lock()
+		if call, exists := tracker.callMap[callID]; exists {
+			call.LastUpdated = time.Now()
+		}
+		tracker.mu.Unlock()
 	}
 }
 

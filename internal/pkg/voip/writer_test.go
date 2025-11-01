@@ -85,6 +85,10 @@ func TestCloseWriters(t *testing.T) {
 func TestWriteSIP(t *testing.T) {
 	// Get tracker for fresh state
 	tracker := getTracker()
+
+	// Reset shutdown flag to allow writes (other tests may have shut down the tracker)
+	tracker.shuttingDown.Store(0)
+
 	tracker.mu.Lock()
 	originalCallMap := make(map[string]*CallInfo)
 	for k, v := range tracker.callMap {
@@ -164,19 +168,17 @@ func TestWriteSIP(t *testing.T) {
 			time.Sleep(2 * time.Millisecond)
 
 			// This should not panic
+			// Call writeSIPSync directly to bypass async writer and ensure deterministic test behavior
 			assert.NotPanics(t, func() {
-				WriteSIP(tt.callID, packet)
+				writeSIPSync(tt.callID, packet)
 			})
 
 			if tt.shouldWrite && call != nil {
-				// Give write operation time to complete
-				// Increased sleep for race detector overhead (race detector can be 10-20x slower)
-				time.Sleep(100 * time.Millisecond)
-
-				// LastUpdated should be modified
+				// LastUpdated should be modified (synchronous write completes before returning)
 				tracker.mu.Lock()
 				updatedCall := tracker.callMap[tt.callID]
 				tracker.mu.Unlock()
+
 				assert.True(t, updatedCall.LastUpdated.After(originalTime),
 					"LastUpdated should be updated after successful write")
 			}
@@ -187,6 +189,10 @@ func TestWriteSIP(t *testing.T) {
 func TestWriteRTP(t *testing.T) {
 	// Get tracker for fresh state
 	tracker := getTracker()
+
+	// Reset shutdown flag to allow writes (other tests may have shut down the tracker)
+	tracker.shuttingDown.Store(0)
+
 	tracker.mu.Lock()
 	originalCallMap := make(map[string]*CallInfo)
 	for k, v := range tracker.callMap {
@@ -266,19 +272,17 @@ func TestWriteRTP(t *testing.T) {
 			time.Sleep(2 * time.Millisecond)
 
 			// This should not panic
+			// Call writeRTPSync directly to bypass async writer and ensure deterministic test behavior
 			assert.NotPanics(t, func() {
-				WriteRTP(tt.callID, packet)
+				writeRTPSync(tt.callID, packet)
 			})
 
 			if tt.shouldWrite && call != nil {
-				// Give write operation time to complete
-				// Increased sleep for race detector overhead (race detector can be 10-20x slower)
-				time.Sleep(100 * time.Millisecond)
-
-				// LastUpdated should be modified
+				// LastUpdated should be modified (synchronous write completes before returning)
 				tracker.mu.Lock()
 				updatedCall := tracker.callMap[tt.callID]
 				tracker.mu.Unlock()
+
 				assert.True(t, updatedCall.LastUpdated.After(originalTime),
 					"LastUpdated should be updated after successful write")
 			}

@@ -549,7 +549,59 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 			upstreamAddr = rootAddr
 		}
 
-		// Connect to upstream
+		// Start the processor BEFORE registering with upstream
+		// This ensures the gRPC server is ready to accept connections
+		config := processor.Config{
+			ProcessorID:     processorID,
+			ListenAddr:      addr,
+			UpstreamAddr:    upstreamAddr,
+			EnableDetection: false,
+			MaxHunters:      100,
+		}
+
+		proc, err := processor.New(config)
+		require.NoError(t, err, "Failed to create processor at level %d", i)
+
+		errChan := make(chan error, 1)
+		readyChan := make(chan struct{})
+		go func() {
+			if err := proc.Start(ctx); err != nil {
+				select {
+				case errChan <- err:
+				default:
+				}
+			}
+		}()
+
+		// Wait for processor gRPC server to be ready (with health check)
+		go func() {
+			maxAttempts := 50 // 50 * 100ms = 5 seconds max
+			for attempt := 0; attempt < maxAttempts; attempt++ {
+				conn, err := grpc.DialContext(ctx, addr,
+					grpc.WithTransportCredentials(insecure.NewCredentials()),
+					grpc.WithBlock(),
+					grpc.WithTimeout(100*time.Millisecond),
+				)
+				if err == nil {
+					conn.Close()
+					close(readyChan)
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
+
+		// Wait for processor to be ready or fail
+		select {
+		case err := <-errChan:
+			require.NoError(t, err, "Processor at level %d failed to start", i)
+		case <-readyChan:
+			// Started successfully and server is accepting connections
+		case <-time.After(10 * time.Second):
+			require.Fail(t, "Processor at level %d did not become ready within 10 seconds", i)
+		}
+
+		// Connect to upstream processor
 		upstreamConn, err := grpc.DialContext(ctx, upstreamAddr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithBlock(),
@@ -566,37 +618,6 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 		})
 		require.NoError(t, err, "Failed to register processor at level %d", i)
 		require.True(t, resp.Accepted, "Processor at level %d should be accepted (depth=%d)", i, i)
-
-		// Start the processor
-		config := processor.Config{
-			ProcessorID:     processorID,
-			ListenAddr:      addr,
-			UpstreamAddr:    upstreamAddr,
-			EnableDetection: false,
-			MaxHunters:      100,
-		}
-
-		proc, err := processor.New(config)
-		require.NoError(t, err, "Failed to create processor at level %d", i)
-
-		errChan := make(chan error, 1)
-		go func() {
-			if err := proc.Start(ctx); err != nil {
-				select {
-				case errChan <- err:
-				default:
-				}
-			}
-		}()
-
-		// Wait for processor to start
-		select {
-		case err := <-errChan:
-			upstreamConn.Close()
-			require.NoError(t, err, "Processor at level %d failed to start", i)
-		case <-time.After(2 * time.Second):
-			// Started successfully
-		}
 
 		processors = append(processors, proc)
 		connections = append(connections, upstreamConn)

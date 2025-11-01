@@ -154,7 +154,10 @@ func TestWriteSIP(t *testing.T) {
 			packet := createMockSIPPacket()
 			originalTime := time.Time{}
 			if call != nil {
+				// Read LastUpdated with proper locking to avoid data race
+				tracker.mu.Lock()
 				originalTime = call.LastUpdated
+				tracker.mu.Unlock()
 			}
 
 			// Ensure we have a clear time boundary
@@ -167,7 +170,8 @@ func TestWriteSIP(t *testing.T) {
 
 			if tt.shouldWrite && call != nil {
 				// Give write operation time to complete
-				time.Sleep(2 * time.Millisecond)
+				// Increased sleep for race detector overhead (race detector can be 10-20x slower)
+				time.Sleep(100 * time.Millisecond)
 
 				// LastUpdated should be modified
 				tracker.mu.Lock()
@@ -252,7 +256,10 @@ func TestWriteRTP(t *testing.T) {
 			packet := createMockRTPPacket()
 			originalTime := time.Time{}
 			if call != nil {
+				// Read LastUpdated with proper locking to avoid data race
+				tracker.mu.Lock()
 				originalTime = call.LastUpdated
+				tracker.mu.Unlock()
 			}
 
 			// Ensure we have a clear time boundary
@@ -265,7 +272,8 @@ func TestWriteRTP(t *testing.T) {
 
 			if tt.shouldWrite && call != nil {
 				// Give write operation time to complete
-				time.Sleep(2 * time.Millisecond)
+				// Increased sleep for race detector overhead (race detector can be 10-20x slower)
+				time.Sleep(100 * time.Millisecond)
 
 				// LastUpdated should be modified
 				tracker.mu.Lock()

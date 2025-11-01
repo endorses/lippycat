@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -24,6 +25,11 @@ const (
 	// maxSanitizationIterations limits the number of sanitization passes to prevent
 	// infinite loops from adversarial inputs with recursive dangerous patterns
 	maxSanitizationIterations = 10
+)
+
+var (
+	// ErrShuttingDown is returned when attempting to write during shutdown
+	ErrShuttingDown = errors.New("call tracker is shutting down")
 )
 
 // CallInfo contains information about a VoIP call and manages PCAP file writing.
@@ -101,6 +107,8 @@ type CallTracker struct {
 	shutdownOnce      sync.Once
 	signalHandlerOnce sync.Once
 	config            *Config
+	shuttingDown      atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
+	activeWrites      sync.WaitGroup // Tracks active write operations
 }
 
 var (
@@ -159,11 +167,23 @@ func (ct *CallTracker) setupSignalHandler() {
 // Shutdown gracefully shuts down the call tracker
 func (ct *CallTracker) Shutdown() {
 	ct.shutdownOnce.Do(func() {
+		// Signal shutdown to prevent new writes
+		ct.shuttingDown.Store(1)
+		logger.Info("Call tracker shutdown initiated, waiting for active writes to complete")
+
+		// Cancel janitor goroutine
 		if ct.janitorCancel != nil {
 			ct.janitorCancel()
 		}
-		// Close all open call files
+
+		// Wait for all active writes to complete
+		ct.activeWrites.Wait()
+		logger.Info("All active writes completed, closing call files")
+
+		// Now safe to close all files
 		ct.mu.Lock()
+		defer ct.mu.Unlock()
+
 		for id, call := range ct.callMap {
 			if err := call.Close(); err != nil {
 				logger.Error("Failed to close call files",
@@ -172,7 +192,7 @@ func (ct *CallTracker) Shutdown() {
 			}
 			delete(ct.callMap, id)
 		}
-		ct.mu.Unlock()
+		logger.Info("Call tracker shutdown complete")
 	})
 }
 

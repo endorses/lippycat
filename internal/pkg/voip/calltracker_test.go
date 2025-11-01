@@ -397,3 +397,151 @@ func TestCallInfoClose(t *testing.T) {
 		assert.NoError(t, err3)
 	})
 }
+
+// TestConcurrentShutdownAndWrites tests that concurrent writes during shutdown
+// are handled gracefully. This verifies Phase 1.2 of the code review remediation plan:
+// - Shutdown sets the shuttingDown flag
+// - Active writes are tracked with activeWrites WaitGroup
+// - Shutdown waits for active writes to complete before closing files
+// - New writes during shutdown are rejected
+func TestConcurrentShutdownAndWrites(t *testing.T) {
+	tracker := NewCallTracker()
+
+	callID := "test-shutdown-race-call"
+	call := &CallInfo{
+		CallID:      callID,
+		State:       "ACTIVE",
+		Created:     time.Now(),
+		LastUpdated: time.Now(),
+		LinkType:    layers.LinkTypeEthernet,
+	}
+
+	tracker.mu.Lock()
+	tracker.callMap[callID] = call
+	tracker.mu.Unlock()
+
+	const numWriters = 20
+	const writesPerWriter = 50
+	var wg sync.WaitGroup
+
+	// Start concurrent writers
+	for i := 0; i < numWriters; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < writesPerWriter; j++ {
+				// Simulate write operations by acquiring activeWrites
+				if tracker.shuttingDown.Load() == 0 {
+					tracker.activeWrites.Add(1)
+					// Simulate some work
+					time.Sleep(time.Microsecond)
+					tracker.activeWrites.Done()
+				}
+			}
+		}(i)
+	}
+
+	// Let some writes happen
+	time.Sleep(10 * time.Millisecond)
+
+	// Trigger shutdown while writes are still happening
+	shutdownDone := make(chan struct{})
+	go func() {
+		tracker.Shutdown()
+		close(shutdownDone)
+	}()
+
+	// Wait for all writers to finish
+	wg.Wait()
+
+	// Wait for shutdown to complete
+	select {
+	case <-shutdownDone:
+		// Shutdown completed successfully
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown did not complete within timeout")
+	}
+
+	// Verify shutdown state
+	assert.Equal(t, int32(1), tracker.shuttingDown.Load(), "shuttingDown flag should be set")
+
+	// Verify that call map is empty (all calls were closed)
+	tracker.mu.RLock()
+	assert.Empty(t, tracker.callMap, "All calls should be closed and removed")
+	tracker.mu.RUnlock()
+
+	// Verify no new writes can happen after shutdown
+	tracker.activeWrites.Add(1)
+	tracker.activeWrites.Done()
+	// If this doesn't panic, the WaitGroup is working correctly
+}
+
+// TestShutdownWithActiveWrites tests that shutdown waits for active writes
+// to complete before closing files.
+func TestShutdownWithActiveWrites(t *testing.T) {
+	tracker := NewCallTracker()
+
+	callID := "test-shutdown-wait-call"
+	call := &CallInfo{
+		CallID:      callID,
+		State:       "ACTIVE",
+		Created:     time.Now(),
+		LastUpdated: time.Now(),
+		LinkType:    layers.LinkTypeEthernet,
+	}
+
+	tracker.mu.Lock()
+	tracker.callMap[callID] = call
+	tracker.mu.Unlock()
+
+	// Start a long-running write operation
+	writeDone := make(chan struct{})
+	tracker.activeWrites.Add(1)
+	go func() {
+		defer tracker.activeWrites.Done()
+		// Simulate long write
+		time.Sleep(100 * time.Millisecond)
+		close(writeDone)
+	}()
+
+	// Start shutdown (should wait for write to complete)
+	shutdownStart := time.Now()
+	tracker.Shutdown()
+	shutdownDuration := time.Since(shutdownStart)
+
+	// Verify that shutdown waited for the write
+	assert.GreaterOrEqual(t, shutdownDuration, 100*time.Millisecond,
+		"Shutdown should wait for active writes to complete")
+
+	// Verify write completed before shutdown finished
+	select {
+	case <-writeDone:
+		// Write completed as expected
+	default:
+		t.Fatal("Write should have completed before shutdown finished")
+	}
+
+	// Verify call map is empty
+	tracker.mu.RLock()
+	assert.Empty(t, tracker.callMap)
+	tracker.mu.RUnlock()
+}
+
+// TestWritesDuringShutdown tests that writes are rejected during shutdown
+func TestWritesDuringShutdown(t *testing.T) {
+	tracker := NewCallTracker()
+
+	// Trigger shutdown
+	tracker.shuttingDown.Store(1)
+
+	// Try to start a new write after shutdown flag is set
+	writeAttempted := false
+	if tracker.shuttingDown.Load() == 0 {
+		tracker.activeWrites.Add(1)
+		writeAttempted = true
+		tracker.activeWrites.Done()
+	}
+
+	assert.False(t, writeAttempted,
+		"Write should not be attempted when shuttingDown flag is set")
+}

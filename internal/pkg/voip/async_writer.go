@@ -250,6 +250,25 @@ func (p *AsyncWriterPool) worker(workerID int) {
 // processWriteRequest handles the actual writing of a packet
 func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	tracker := getTracker()
+
+	// Check if shutting down
+	if tracker.shuttingDown.Load() == 1 {
+		logger.Debug("Skipping async write during shutdown",
+			"call_id", SanitizeCallIDForLogging(req.CallID))
+		return ErrShuttingDown
+	}
+
+	// Track active write
+	tracker.activeWrites.Add(1)
+	defer tracker.activeWrites.Done()
+
+	// Double-check shutdown after acquiring write slot
+	if tracker.shuttingDown.Load() == 1 {
+		logger.Debug("Skipping async write during shutdown",
+			"call_id", SanitizeCallIDForLogging(req.CallID))
+		return ErrShuttingDown
+	}
+
 	tracker.mu.RLock()
 	call, exists := tracker.callMap[req.CallID]
 	tracker.mu.RUnlock()

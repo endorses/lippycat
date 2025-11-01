@@ -54,14 +54,14 @@ func (tracker *CallTracker) writeSIPPacket(callID string, packet gopacket.Packet
 **Effort:** 1-2 days
 
 #### Tasks:
-- [ ] Add `shuttingDown` atomic int32 flag to `CallTracker`
-- [ ] Add `activeWrites` sync.WaitGroup to `CallTracker`
-- [ ] Signal shutdown at start of `Shutdown()` method
-- [ ] Wait for active writes before closing files
-- [ ] Check shutdown flag in write paths (return `ErrShuttingDown`)
-- [ ] Increment/decrement `activeWrites` around write operations
-- [ ] Log file close errors instead of silently ignoring
-- [ ] Add test case for concurrent shutdown + writes
+- [x] Add `shuttingDown` atomic int32 flag to `CallTracker`
+- [x] Add `activeWrites` sync.WaitGroup to `CallTracker`
+- [x] Signal shutdown at start of `Shutdown()` method
+- [x] Wait for active writes before closing files
+- [x] Check shutdown flag in write paths (return `ErrShuttingDown`)
+- [x] Increment/decrement `activeWrites` around write operations
+- [x] Log file close errors instead of silently ignoring
+- [x] Add test case for concurrent shutdown + writes
 
 **Implementation Pattern:**
 ```go

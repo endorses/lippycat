@@ -177,6 +177,9 @@ func TestIntegration_FilterDistribution_MultipleHunters(t *testing.T) {
 		}()
 	}
 
+	// Wait for all hunters to be fully registered and connected
+	time.Sleep(100 * time.Millisecond)
+
 	// Push filter to all hunters
 	conn, err := grpc.DialContext(ctx, processorAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),

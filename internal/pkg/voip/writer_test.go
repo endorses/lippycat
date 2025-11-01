@@ -157,12 +157,18 @@ func TestWriteSIP(t *testing.T) {
 				originalTime = call.LastUpdated
 			}
 
+			// Ensure we have a clear time boundary
+			time.Sleep(2 * time.Millisecond)
+
 			// This should not panic
 			assert.NotPanics(t, func() {
 				WriteSIP(tt.callID, packet)
 			})
 
 			if tt.shouldWrite && call != nil {
+				// Give write operation time to complete
+				time.Sleep(2 * time.Millisecond)
+
 				// LastUpdated should be modified
 				tracker.mu.Lock()
 				updatedCall := tracker.callMap[tt.callID]
@@ -249,12 +255,18 @@ func TestWriteRTP(t *testing.T) {
 				originalTime = call.LastUpdated
 			}
 
+			// Ensure we have a clear time boundary
+			time.Sleep(2 * time.Millisecond)
+
 			// This should not panic
 			assert.NotPanics(t, func() {
 				WriteRTP(tt.callID, packet)
 			})
 
 			if tt.shouldWrite && call != nil {
+				// Give write operation time to complete
+				time.Sleep(2 * time.Millisecond)
+
 				// LastUpdated should be modified
 				tracker.mu.Lock()
 				updatedCall := tracker.callMap[tt.callID]

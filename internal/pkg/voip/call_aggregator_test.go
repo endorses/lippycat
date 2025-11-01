@@ -551,3 +551,156 @@ func TestCallAggregator_ResponseCodesTransitions(t *testing.T) {
 		})
 	}
 }
+
+// TestCallAggregator_DeepCopyRaceCondition tests that deep copies prevent race conditions
+// when reading calls while they're being modified. This test exercises the deep copy
+// functionality to ensure pointer and slice fields are properly isolated.
+func TestCallAggregator_DeepCopyRaceCondition(t *testing.T) {
+	ca := NewCallAggregator()
+	callID := "test-call-race"
+
+	// Create initial call with RTP stats and hunters
+	sipPacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   callID,
+				Method:   "INVITE",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
+			},
+		},
+	}
+	ca.ProcessPacket(sipPacket, "hunter-1")
+
+	// Add RTP packet to populate RTPStats
+	rtpPacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: callID,
+			},
+			Rtp: &data.RTPMetadata{
+				Ssrc:        12345,
+				Sequence:    100,
+				Timestamp:   1000,
+				PayloadType: 0, // G.711 µ-law
+			},
+		},
+	}
+	ca.ProcessPacket(rtpPacket, "hunter-1")
+
+	// Concurrent writers and readers
+	done := make(chan bool)
+	writerCount := 5
+	readerCount := 10
+	iterations := 50
+
+	// Start multiple writers
+	for w := 0; w < writerCount; w++ {
+		hunterID := "hunter-" + string(rune('A'+w))
+		go func(hID string) {
+			for i := 0; i < iterations; i++ {
+				// Alternate between SIP and RTP packets
+				if i%2 == 0 {
+					packet := &data.CapturedPacket{
+						TimestampNs: time.Now().UnixNano(),
+						Metadata: &data.PacketMetadata{
+							Sip: &data.SIPMetadata{
+								CallId:   callID,
+								Method:   "ACK",
+								FromUser: "alicent@example.com",
+								ToUser:   "robb@example.com",
+							},
+						},
+					}
+					ca.ProcessPacket(packet, hID)
+				} else {
+					packet := &data.CapturedPacket{
+						TimestampNs: time.Now().UnixNano(),
+						Metadata: &data.PacketMetadata{
+							Sip: &data.SIPMetadata{
+								CallId: callID,
+							},
+							Rtp: &data.RTPMetadata{
+								Ssrc:        12345,
+								Sequence:    uint32(100 + i),
+								Timestamp:   uint32(1000 + i*160),
+								PayloadType: 0,
+							},
+						},
+					}
+					ca.ProcessPacket(packet, hID)
+				}
+			}
+			done <- true
+		}(hunterID)
+	}
+
+	// Start multiple readers
+	for r := 0; r < readerCount; r++ {
+		go func() {
+			for i := 0; i < iterations; i++ {
+				// Read via different methods to test all code paths
+				switch i % 4 {
+				case 0:
+					calls := ca.GetCalls()
+					// Modify returned data to ensure it's truly a copy
+					for idx := range calls {
+						calls[idx].PacketCount = 999999
+						if calls[idx].RTPStats != nil {
+							calls[idx].RTPStats.PacketLoss = 100.0
+						}
+						if len(calls[idx].Hunters) > 0 {
+							calls[idx].Hunters[0] = "modified-hunter"
+						}
+					}
+				case 1:
+					calls := ca.GetActiveCalls()
+					// Modify returned data
+					for idx := range calls {
+						calls[idx].State = CallStateFailed
+					}
+				case 2:
+					call, exists := ca.GetCall(callID)
+					if exists {
+						// Modify returned data
+						call.From = "modified@example.com"
+						if call.RTPStats != nil {
+							call.RTPStats.Jitter = 999.0
+						}
+					}
+				case 3:
+					// Just count to exercise the lock
+					_ = ca.GetCallCount()
+				}
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < writerCount+readerCount; i++ {
+		<-done
+	}
+
+	// Verify data integrity - internal state should not be corrupted by reader modifications
+	call, exists := ca.GetCall(callID)
+	assert.True(t, exists, "Call should still exist")
+	assert.NotEqual(t, "modified@example.com", call.From, "Internal state should not be modified by readers")
+	assert.NotEqual(t, 999999, call.PacketCount, "PacketCount should not be 999999")
+
+	if call.RTPStats != nil {
+		assert.NotEqual(t, 100.0, call.RTPStats.PacketLoss, "RTPStats should not show 100% loss from reader modification")
+		assert.NotEqual(t, 999.0, call.RTPStats.Jitter, "RTPStats jitter should not be modified by readers")
+	}
+
+	if len(call.Hunters) > 0 {
+		assert.NotContains(t, call.Hunters, "modified-hunter", "Hunters list should not contain modified values")
+		// Should contain actual hunter IDs
+		assert.Contains(t, call.Hunters, "hunter-1", "Should contain original hunter")
+	}
+
+	// Verify state is reasonable
+	assert.Contains(t, []CallState{CallStateRinging, CallStateActive}, call.State, "State should be valid")
+}

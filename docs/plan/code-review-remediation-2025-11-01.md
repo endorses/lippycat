@@ -155,13 +155,13 @@ file, err := os.OpenFile(filePath,
 **Effort:** 1-2 days
 
 #### Tasks:
-- [ ] Implement proper deep copy in `CallAggregator.GetCalls()`
-- [ ] Implement proper deep copy in `CallCorrelator.GetCalls()`
-- [ ] Deep copy pointer fields (`RTPStats`, etc.)
-- [ ] Deep copy slice fields (`Hunters`, etc.)
-- [ ] Run race detector tests: `go test -race ./internal/pkg/voip/...`
-- [ ] Add test case for concurrent read/write scenarios
-- [ ] Document deep copy requirements in code comments
+- [x] Implement proper deep copy in `CallAggregator.GetCalls()`
+- [x] Implement proper deep copy in `CallCorrelator.GetCalls()`
+- [x] Deep copy pointer fields (`RTPStats`, etc.)
+- [x] Deep copy slice fields (`Hunters`, etc.)
+- [x] Run race detector tests: `go test -race ./internal/pkg/voip/...`
+- [x] Add test case for concurrent read/write scenarios
+- [x] Document deep copy requirements in code comments
 
 **Implementation Pattern:**
 ```go

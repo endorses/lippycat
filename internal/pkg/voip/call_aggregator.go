@@ -481,9 +481,8 @@ func (ca *CallAggregator) GetCalls() []AggregatedCall {
 
 	calls := make([]AggregatedCall, 0, len(ca.calls))
 	for _, call := range ca.calls {
-		// Create a copy to avoid race conditions
-		callCopy := *call
-		calls = append(calls, callCopy)
+		// Create a deep copy to avoid race conditions
+		calls = append(calls, ca.deepCopyCall(call))
 	}
 
 	return calls
@@ -497,8 +496,8 @@ func (ca *CallAggregator) GetActiveCalls() []AggregatedCall {
 	calls := make([]AggregatedCall, 0)
 	for _, call := range ca.calls {
 		if call.State != CallStateEnded && call.State != CallStateFailed {
-			callCopy := *call
-			calls = append(calls, callCopy)
+			// Create a deep copy to avoid race conditions
+			calls = append(calls, ca.deepCopyCall(call))
 		}
 	}
 
@@ -515,8 +514,8 @@ func (ca *CallAggregator) GetCall(callID string) (*AggregatedCall, bool) {
 		return nil, false
 	}
 
-	// Return a copy
-	callCopy := *call
+	// Return a deep copy to avoid race conditions
+	callCopy := ca.deepCopyCall(call)
 	return &callCopy, true
 }
 
@@ -525,6 +524,36 @@ func (ca *CallAggregator) GetCallCount() int {
 	ca.mu.RLock()
 	defer ca.mu.RUnlock()
 	return len(ca.calls)
+}
+
+// deepCopyCall creates a deep copy of an AggregatedCall to avoid race conditions.
+// Caller must hold at least a read lock (ca.mu.RLock()).
+func (ca *CallAggregator) deepCopyCall(call *AggregatedCall) AggregatedCall {
+	callCopy := AggregatedCall{
+		CallID:         call.CallID,
+		From:           call.From,
+		To:             call.To,
+		State:          call.State,
+		StartTime:      call.StartTime,
+		EndTime:        call.EndTime,
+		LastPacketTime: call.LastPacketTime,
+		PacketCount:    call.PacketCount,
+		SIPMethod:      call.SIPMethod,
+	}
+
+	// Deep copy pointer fields (RTPStats)
+	if call.RTPStats != nil {
+		rtpCopy := *call.RTPStats
+		callCopy.RTPStats = &rtpCopy
+	}
+
+	// Deep copy slice fields (Hunters)
+	if len(call.Hunters) > 0 {
+		callCopy.Hunters = make([]string, len(call.Hunters))
+		copy(callCopy.Hunters, call.Hunters)
+	}
+
+	return callCopy
 }
 
 // CleanupEndedCalls removes ended calls older than the specified duration

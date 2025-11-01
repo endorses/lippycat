@@ -499,3 +499,161 @@ func TestPacketCount(t *testing.T) {
 	require.NotNil(t, leg)
 	assert.Equal(t, 5, leg.PacketCount, "Should have counted 5 packets")
 }
+
+// TestCallCorrelator_DeepCopyRaceCondition tests that deep copies prevent race conditions
+// when reading correlated calls while they're being modified. This test exercises the
+// copyCall() deep copy functionality to ensure CallLegs map is properly isolated.
+func TestCallCorrelator_DeepCopyRaceCondition(t *testing.T) {
+	cc := NewCallCorrelator()
+	defer cc.Stop()
+
+	// Create initial correlated call with multiple legs
+	fromTag := "alice-tag"
+	toTag := "bob-tag"
+
+	// First leg
+	packet1 := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.168.1.100",
+			DstIp: "192.168.1.200",
+			Sip: &data.SIPMetadata{
+				CallId:   "call-leg-1",
+				Method:   "INVITE",
+				FromTag:  fromTag,
+				ToTag:    toTag,
+				FromUser: "alice@example.com",
+				ToUser:   "bob@example.com",
+			},
+		},
+	}
+	cc.ProcessPacket(packet1, "hunter-1")
+
+	// Second leg (B2BUA forwarding)
+	packet2 := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.168.2.100",
+			DstIp: "192.168.2.200",
+			Sip: &data.SIPMetadata{
+				CallId:   "call-leg-2",
+				Method:   "INVITE",
+				FromTag:  fromTag,
+				ToTag:    toTag,
+				FromUser: "alice@example.com",
+				ToUser:   "bob@example.com",
+			},
+		},
+	}
+	cc.ProcessPacket(packet2, "hunter-2")
+
+	// Concurrent writers and readers
+	done := make(chan bool)
+	writerCount := 5
+	readerCount := 10
+	iterations := 50
+
+	// Start multiple writers - create more legs and update existing ones
+	for w := 0; w < writerCount; w++ {
+		legID := w + 3
+		hunterID := "hunter-" + string(rune('A'+w))
+		go func(lid int, hID string) {
+			for i := 0; i < iterations; i++ {
+				packet := &data.CapturedPacket{
+					TimestampNs: time.Now().UnixNano(),
+					Metadata: &data.PacketMetadata{
+						SrcIp: "192.168.1.100",
+						DstIp: "192.168.1.200",
+						Sip: &data.SIPMetadata{
+							CallId:       "call-leg-" + string(rune('0'+lid)),
+							Method:       "ACK",
+							FromTag:      fromTag,
+							ToTag:        toTag,
+							FromUser:     "alice@example.com",
+							ToUser:       "bob@example.com",
+							ResponseCode: uint32(200),
+						},
+					},
+				}
+				cc.ProcessPacket(packet, hID)
+			}
+			done <- true
+		}(legID, hunterID)
+	}
+
+	// Start multiple readers
+	for r := 0; r < readerCount; r++ {
+		go func() {
+			for i := 0; i < iterations; i++ {
+				// Read via different methods to test all code paths
+				switch i % 3 {
+				case 0:
+					calls := cc.GetCorrelatedCalls()
+					// Modify returned data to ensure it's truly a copy
+					for _, call := range calls {
+						call.FromUser = "modified@example.com"
+						call.State = CallStateEnded
+						// Modify CallLegs map - this is the critical test
+						for legID, leg := range call.CallLegs {
+							leg.Method = "MODIFIED"
+							leg.PacketCount = 999999
+							leg.HunterID = "modified-hunter"
+							// Try to corrupt the map
+							call.CallLegs[legID] = &CallLeg{
+								CallID:   "corrupted",
+								HunterID: "corrupted",
+								Method:   "CORRUPTED",
+							}
+						}
+					}
+				case 1:
+					correlationID := generateCorrelationID(fromTag, toTag)
+					call, exists := cc.GetCorrelatedCall(correlationID)
+					if exists {
+						// Modify returned data
+						call.ToUser = "modified-to@example.com"
+						for _, leg := range call.CallLegs {
+							leg.ResponseCode = 999
+						}
+					}
+				case 2:
+					// Just count to exercise the lock
+					_ = cc.GetCallCount()
+				}
+			}
+			done <- true
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < writerCount+readerCount; i++ {
+		<-done
+	}
+
+	// Verify data integrity - internal state should not be corrupted by reader modifications
+	correlationID := generateCorrelationID(fromTag, toTag)
+	call, exists := cc.GetCorrelatedCall(correlationID)
+	require.True(t, exists, "Correlated call should still exist")
+
+	// Check that reader modifications didn't corrupt internal state
+	assert.NotEqual(t, "modified@example.com", call.FromUser, "FromUser should not be modified by readers")
+	assert.NotEqual(t, "modified-to@example.com", call.ToUser, "ToUser should not be modified by readers")
+	assert.NotEqual(t, CallStateEnded, call.State, "State should not be CallStateEnded from reader modification")
+
+	// Verify original legs are intact
+	require.Contains(t, call.CallLegs, "call-leg-1", "Original leg 1 should exist")
+	require.Contains(t, call.CallLegs, "call-leg-2", "Original leg 2 should exist")
+
+	leg1 := call.CallLegs["call-leg-1"]
+	assert.NotEqual(t, "MODIFIED", leg1.Method, "Leg method should not be modified by readers")
+	assert.NotEqual(t, "CORRUPTED", leg1.Method, "Leg method should not be corrupted")
+	assert.NotEqual(t, "modified-hunter", leg1.HunterID, "Hunter ID should not be modified")
+	assert.NotEqual(t, 999999, leg1.PacketCount, "PacketCount should not be 999999")
+	assert.NotEqual(t, uint32(999), leg1.ResponseCode, "ResponseCode should not be 999")
+
+	// Should have multiple legs from the concurrent writers
+	assert.GreaterOrEqual(t, len(call.CallLegs), 2, "Should have at least the original 2 legs")
+
+	// Verify state is reasonable
+	assert.Contains(t, []CallState{CallStateTrying, CallStateRinging, CallStateEstablished}, call.State, "State should be valid")
+}

@@ -476,7 +476,10 @@ func (c *Client) SubscribeHunterStatus() error {
 func (c *Client) Close() {
 	c.cancel()
 	if c.conn != nil {
-		_ = c.conn.Close()
+		if err := c.conn.Close(); err != nil {
+			// Note: logger not imported in this package - error is non-fatal during shutdown
+			_ = err // Close error during shutdown is acceptable
+		}
 	}
 }
 

@@ -47,7 +47,9 @@ func NewWriter(filePath string) (*Writer, error) {
 
 	// Write PCAP header (Ethernet link type)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
+		}
 		return nil, fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 
@@ -85,8 +87,11 @@ func (w *Writer) Stop() {
 
 	// Close file
 	if w.file != nil {
-		_ = w.file.Close()
-		logger.Info("PCAP file closed")
+		if err := w.file.Close(); err != nil {
+			logger.Error("Failed to close PCAP file during shutdown", "error", err)
+		} else {
+			logger.Info("PCAP file closed")
+		}
 	}
 }
 

@@ -151,7 +151,15 @@ make clean-cuda     # Remove CUDA artifacts
 
 1. **Code Structure**: Follow Go module structure with internal packages
 2. **Testing**: Use testify framework for unit tests (test pcap files are in `captures/`)
-3. **Error Handling**: Use standard Go error handling patterns
+3. **Error Handling**:
+   - **Never silently ignore errors** - All errors must be handled appropriately
+   - **Close() operations**:
+     - Error path cleanup: Log errors with structured context (`logger.Error()`)
+     - Shutdown/cleanup: Log errors (can't return from `Shutdown()` methods)
+     - Normal path: Return errors to caller or handle explicitly
+   - **Wrap errors** with context using `fmt.Errorf(..., %w, err)`
+   - **Structured logging**: Include relevant fields (file, operation, call_id, etc.)
+   - See `CONTRIBUTING.md` for comprehensive error handling patterns
 4. **Concurrency**: Project uses goroutines and channels for concurrent packet processing
 5. **Network Interfaces**: Requires elevated privileges for live network capture
 6. **12-Factor App**: Follow the 12 factors.

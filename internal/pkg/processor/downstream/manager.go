@@ -178,7 +178,9 @@ func (m *Manager) Unregister(processorID string) {
 
 		// Close gRPC connection
 		if proc.Conn != nil {
-			_ = proc.Conn.Close()
+			if err := proc.Conn.Close(); err != nil {
+				logger.Error("Failed to close downstream processor connection during shutdown", "error", err, "processor_id", processorID)
+			}
 		}
 
 		delete(m.downstreams, processorID)
@@ -521,7 +523,9 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 
 		// Close gRPC connection
 		if proc.Conn != nil {
-			_ = proc.Conn.Close()
+			if err := proc.Conn.Close(); err != nil {
+				logger.Error("Failed to close downstream processor connection during shutdown", "error", err, "processor_id", processorID)
+			}
 		}
 	}
 	// Clear the map
@@ -815,7 +819,7 @@ func (m *Manager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for _, proc := range m.downstreams {
+	for processorID, proc := range m.downstreams {
 		// Cancel topology subscription
 		if proc.TopologyCancel != nil {
 			proc.TopologyCancel()
@@ -823,7 +827,9 @@ func (m *Manager) Close() {
 
 		// Close gRPC connection
 		if proc.Conn != nil {
-			_ = proc.Conn.Close()
+			if err := proc.Conn.Close(); err != nil {
+				logger.Error("Failed to close downstream processor connection", "error", err, "processor_id", processorID)
+			}
 		}
 	}
 	m.downstreams = make(map[string]*ProcessorInfo)

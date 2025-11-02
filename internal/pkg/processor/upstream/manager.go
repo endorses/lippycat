@@ -119,11 +119,15 @@ func (m *Manager) Connect() error {
 			Version:       "dev", // TODO: Use actual version
 		})
 		if err != nil {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Error("Failed to close connection during error cleanup", "error", closeErr, "upstream", m.config.Address)
+			}
 			return fmt.Errorf("failed to register with upstream processor: %w", err)
 		}
 		if !regResp.Accepted {
-			_ = conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Error("Failed to close connection during error cleanup", "error", closeErr, "upstream", m.config.Address)
+			}
 			return fmt.Errorf("upstream processor rejected registration: %s", regResp.Error)
 		}
 
@@ -138,7 +142,9 @@ func (m *Manager) Connect() error {
 	// Create streaming connection
 	stream, err := m.dataClient.StreamPackets(m.ctx)
 	if err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Error("Failed to close connection during error cleanup", "error", closeErr, "upstream", m.config.Address)
+		}
 		return fmt.Errorf("failed to create upstream stream: %w", err)
 	}
 
@@ -160,13 +166,17 @@ func (m *Manager) Disconnect() {
 
 	m.mu.Lock()
 	if m.stream != nil {
-		_ = m.stream.CloseSend()
+		if err := m.stream.CloseSend(); err != nil {
+			logger.Error("Failed to close gRPC stream during shutdown", "error", err)
+		}
 		m.stream = nil
 	}
 	m.mu.Unlock()
 
 	if m.conn != nil {
-		_ = m.conn.Close()
+		if err := m.conn.Close(); err != nil {
+			logger.Error("Failed to close connection during shutdown", "error", err, "upstream", m.config.Address)
+		}
 		m.conn = nil
 	}
 

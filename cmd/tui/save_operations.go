@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/cmd/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pcap"
 	"github.com/google/gopacket/layers"
 )
@@ -109,7 +110,9 @@ func (m *Model) startOneShotSave(filePath string) tea.Cmd {
 		// Write all packets
 		for _, pkt := range packets {
 			if err := writer.WritePacket(pkt); err != nil {
-				_ = writer.Close() // Best-effort cleanup on error path
+				if closeErr := writer.Close(); closeErr != nil {
+					logger.Error("Failed to close writer during error cleanup", "error", closeErr, "file", filePath)
+				}
 				return SaveCompleteMsg{
 					Success: false,
 					Path:    filePath,

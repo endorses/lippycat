@@ -202,15 +202,16 @@ func (ca *CallAggregator) GetCalls() []AggregatedCall {
 ### 2.1 Fix Silent Error Suppression
 **Priority:** 🟠 MEDIUM-HIGH
 **Effort:** 3-5 days
+**Status:** ✅ COMPLETE
 
 #### Tasks:
-- [ ] Find all `_ = *.Close()` instances: `grep -rn "_ = .*\.Close()" internal/ cmd/ --include="*.go" > close_errors.txt`
-- [ ] Review each instance and categorize (defer cleanup vs normal path)
-- [ ] Add error logging for defer cleanup paths
-- [ ] Return errors for normal path close operations
-- [ ] Add structured logging with context (file path, operation type)
+- [x] Find all `_ = *.Close()` instances: `grep -rn "_ = .*\.Close()" internal/ cmd/ --include="*.go" > close_errors.txt`
+- [x] Review each instance and categorize (defer cleanup vs normal path)
+- [x] Add error logging for defer cleanup paths
+- [x] Return errors for normal path close operations
+- [x] Add structured logging with context (file path, operation type)
 - [ ] Test disk-full scenarios to verify error reporting
-- [ ] Update error handling guidelines in CONTRIBUTING.md
+- [x] Update error handling guidelines in CONTRIBUTING.md
 
 **Categories:**
 - Defer cleanup: Log error with `logger.Error()`

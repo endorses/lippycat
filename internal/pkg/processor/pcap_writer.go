@@ -220,7 +220,9 @@ func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte) e
 func (writer *CallPcapWriter) rotateSIPFile() error {
 	// Close existing file
 	if writer.sipFile != nil {
-		_ = writer.sipFile.Close()
+		if err := writer.sipFile.Close(); err != nil {
+			logger.Error("Failed to close SIP file during rotation", "error", err, "call_id", writer.callID)
+		}
 	}
 
 	// Check file limit
@@ -242,7 +244,9 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filepath)
+		}
 		return fmt.Errorf("failed to write SIP PCAP header: %w", err)
 	}
 
@@ -260,7 +264,9 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 func (writer *CallPcapWriter) rotateRTPFile() error {
 	// Close existing file
 	if writer.rtpFile != nil {
-		_ = writer.rtpFile.Close()
+		if err := writer.rtpFile.Close(); err != nil {
+			logger.Error("Failed to close RTP file during rotation", "error", err, "call_id", writer.callID)
+		}
 	}
 
 	// Check file limit
@@ -282,7 +288,9 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filepath)
+		}
 		return fmt.Errorf("failed to write RTP PCAP header: %w", err)
 	}
 

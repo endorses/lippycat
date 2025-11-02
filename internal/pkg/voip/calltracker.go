@@ -343,7 +343,9 @@ func (c *CallInfo) initWriters() error {
 	c.rtpFile, err = os.OpenFile(rtpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		if c.sipFile != nil {
-			_ = c.sipFile.Close()
+			if closeErr := c.sipFile.Close(); closeErr != nil {
+				logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
+			}
 		}
 		return fmt.Errorf("failed to create RTP file %s: %w", rtpPath, err)
 	}
@@ -352,14 +354,22 @@ func (c *CallInfo) initWriters() error {
 	c.RTPWriter = pcapgo.NewWriter(c.rtpFile)
 
 	if err := c.SIPWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, c.LinkType); err != nil {
-		_ = c.sipFile.Close()
-		_ = c.rtpFile.Close()
+		if closeErr := c.sipFile.Close(); closeErr != nil {
+			logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
+		}
+		if closeErr := c.rtpFile.Close(); closeErr != nil {
+			logger.Error("Failed to close RTP file during error cleanup", "error", closeErr, "file", rtpPath)
+		}
 		return fmt.Errorf("failed to write SIP file header: %w", err)
 	}
 
 	if err := c.RTPWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, c.LinkType); err != nil {
-		_ = c.sipFile.Close()
-		_ = c.rtpFile.Close()
+		if closeErr := c.sipFile.Close(); closeErr != nil {
+			logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
+		}
+		if closeErr := c.rtpFile.Close(); closeErr != nil {
+			logger.Error("Failed to close RTP file during error cleanup", "error", closeErr, "file", rtpPath)
+		}
 		return fmt.Errorf("failed to write RTP file header: %w", err)
 	}
 

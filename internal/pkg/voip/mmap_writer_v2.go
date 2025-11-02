@@ -101,7 +101,9 @@ func NewMmapWriterV2(filename string, linkType layers.LinkType, config *MmapWrit
 	// Write PCAP header
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, linkType); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filename)
+		}
 		return nil, fmt.Errorf("failed to write PCAP header: %w", err)
 	}
 	writer.writer = pcapWriter
@@ -115,7 +117,9 @@ func NewMmapWriterV2(filename string, linkType layers.LinkType, config *MmapWrit
 					"error", err, "filename", filename)
 				writer.fallbackMode.Store(true)
 			} else {
-				_ = file.Close()
+				if closeErr := file.Close(); closeErr != nil {
+					logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filename)
+				}
 				return nil, fmt.Errorf("failed to setup memory mapping: %w", err)
 			}
 		}

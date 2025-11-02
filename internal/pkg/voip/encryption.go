@@ -153,7 +153,9 @@ func NewEncryptedPCAPWriter(filename string) (*EncryptedPCAPWriter, error) {
 	// Generate initial nonce base
 	nonceBase := make([]byte, 8)
 	if _, err := rand.Read(nonceBase); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filename+".enc")
+		}
 		return nil, fmt.Errorf("failed to generate nonce base: %w", err)
 	}
 
@@ -171,7 +173,9 @@ func NewEncryptedPCAPWriter(filename string) (*EncryptedPCAPWriter, error) {
 		config.Algorithm, config.KeyDerive)
 
 	if _, err := file.Write([]byte(header)); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filename+".enc")
+		}
 		return nil, fmt.Errorf("failed to write encryption header: %w", err)
 	}
 

@@ -209,7 +209,9 @@ func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filepath)
+		}
 		return fmt.Errorf("failed to write auto-rotate PCAP header: %w", err)
 	}
 

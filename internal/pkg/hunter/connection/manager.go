@@ -379,7 +379,9 @@ func (m *Manager) connectToProcessor() error {
 	// Connect management channel (same address for now, different service)
 	mgmtConn, err := grpc.Dial(m.config.ProcessorAddr, opts...)
 	if err != nil {
-		_ = dataConn.Close()
+		if closeErr := dataConn.Close(); closeErr != nil {
+			logger.Error("Failed to close data connection during error cleanup", "error", closeErr, "processor", m.config.ProcessorAddr)
+		}
 		return fmt.Errorf("failed to dial processor management: %w", err)
 	}
 	m.managementConn = mgmtConn
@@ -750,16 +752,22 @@ func (m *Manager) cleanup() {
 
 	m.streamMu.Lock()
 	if m.stream != nil {
-		_ = m.stream.CloseSend()
+		if err := m.stream.CloseSend(); err != nil {
+			logger.Error("Failed to close gRPC stream during shutdown", "error", err)
+		}
 	}
 	m.streamMu.Unlock()
 
 	if m.dataConn != nil {
-		_ = m.dataConn.Close()
+		if err := m.dataConn.Close(); err != nil {
+			logger.Error("Failed to close data connection during shutdown", "error", err, "processor", m.config.ProcessorAddr)
+		}
 	}
 
 	if m.managementConn != nil {
-		_ = m.managementConn.Close()
+		if err := m.managementConn.Close(); err != nil {
+			logger.Error("Failed to close management connection during shutdown", "error", err, "processor", m.config.ProcessorAddr)
+		}
 	}
 }
 

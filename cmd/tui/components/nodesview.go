@@ -553,8 +553,16 @@ func (n *NodesView) GetViewMode() string {
 	return n.viewMode
 }
 
-// SelectUp moves selection up in graph mode (vertical navigation through hierarchy)
-func (n *NodesView) SelectUp() {
+// navigationData holds the prepared data for navigation operations
+type navigationData struct {
+	processors    []ProcessorInfo
+	hunters       []HunterInfo
+	selectedIndex int
+}
+
+// prepareNavigationData extracts and prepares data for navigation operations.
+// In graph mode, it returns filtered data; otherwise returns full data.
+func (n *NodesView) prepareNavigationData() navigationData {
 	processors := n.processors
 	hunters := n.hunters
 	selectedIndex := n.selectedIndex
@@ -564,17 +572,18 @@ func (n *NodesView) SelectUp() {
 		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
 	}
 
-	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(processors),
-		Hunters:                 hunters,
-		SelectedIndex:           selectedIndex,
-		SelectedProcessorAddr:   n.selectedProcessorAddr,
-		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
+	return navigationData{
+		processors:    processors,
+		hunters:       hunters,
+		selectedIndex: selectedIndex,
 	}
-	result := nodesview.SelectUp(params)
+}
 
+// applyNavigationResult applies the navigation result to the NodesView state.
+// In graph mode, it maps the filtered index back to global; otherwise uses it directly.
+func (n *NodesView) applyNavigationResult(result nodesview.NavigationResult, data navigationData) {
 	if n.viewMode == "graph" {
-		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
+		n.selectedIndex = n.mapFilteredToGlobalIndex(data.hunters, result.SelectedIndex)
 	} else {
 		n.selectedIndex = result.SelectedIndex
 	}
@@ -582,99 +591,43 @@ func (n *NodesView) SelectUp() {
 	n.selectedProcessorAddr = result.SelectedProcessorAddr
 	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
 	n.updateViewportContent()
+}
+
+// navigate performs a navigation operation using the provided navigation function.
+// It handles data preparation, function invocation, and result application.
+func (n *NodesView) navigate(navFunc func(nodesview.NavigationParams) nodesview.NavigationResult) {
+	data := n.prepareNavigationData()
+
+	params := nodesview.NavigationParams{
+		Processors:              convertProcessorInfos(data.processors),
+		Hunters:                 data.hunters,
+		SelectedIndex:           data.selectedIndex,
+		SelectedProcessorAddr:   n.selectedProcessorAddr,
+		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
+	}
+	result := navFunc(params)
+
+	n.applyNavigationResult(result, data)
+}
+
+// SelectUp moves selection up in graph mode (vertical navigation through hierarchy)
+func (n *NodesView) SelectUp() {
+	n.navigate(nodesview.SelectUp)
 }
 
 // SelectDown moves selection down in graph mode (vertical navigation through hierarchy)
 func (n *NodesView) SelectDown() {
-	processors := n.processors
-	hunters := n.hunters
-	selectedIndex := n.selectedIndex
-
-	if n.viewMode == "graph" {
-		processors, hunters = n.getFilteredGraphData()
-		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
-	}
-
-	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(processors),
-		Hunters:                 hunters,
-		SelectedIndex:           selectedIndex,
-		SelectedProcessorAddr:   n.selectedProcessorAddr,
-		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
-	}
-	result := nodesview.SelectDown(params)
-
-	if n.viewMode == "graph" {
-		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
-	} else {
-		n.selectedIndex = result.SelectedIndex
-	}
-
-	n.selectedProcessorAddr = result.SelectedProcessorAddr
-	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
-	n.updateViewportContent()
+	n.navigate(nodesview.SelectDown)
 }
 
 // SelectLeft moves selection left in graph mode (horizontal navigation within same processor)
 func (n *NodesView) SelectLeft() {
-	processors := n.processors
-	hunters := n.hunters
-	selectedIndex := n.selectedIndex
-
-	if n.viewMode == "graph" {
-		processors, hunters = n.getFilteredGraphData()
-		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
-	}
-
-	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(processors),
-		Hunters:                 hunters,
-		SelectedIndex:           selectedIndex,
-		SelectedProcessorAddr:   n.selectedProcessorAddr,
-		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
-	}
-	result := nodesview.SelectLeft(params)
-
-	if n.viewMode == "graph" {
-		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
-	} else {
-		n.selectedIndex = result.SelectedIndex
-	}
-
-	n.selectedProcessorAddr = result.SelectedProcessorAddr
-	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
-	n.updateViewportContent()
+	n.navigate(nodesview.SelectLeft)
 }
 
 // SelectRight moves selection right in graph mode (horizontal navigation within same processor)
 func (n *NodesView) SelectRight() {
-	processors := n.processors
-	hunters := n.hunters
-	selectedIndex := n.selectedIndex
-
-	if n.viewMode == "graph" {
-		processors, hunters = n.getFilteredGraphData()
-		selectedIndex = n.mapGlobalToFilteredIndex(hunters, n.selectedIndex)
-	}
-
-	params := nodesview.NavigationParams{
-		Processors:              convertProcessorInfos(processors),
-		Hunters:                 hunters,
-		SelectedIndex:           selectedIndex,
-		SelectedProcessorAddr:   n.selectedProcessorAddr,
-		LastSelectedHunterIndex: n.lastSelectedHunterIndex,
-	}
-	result := nodesview.SelectRight(params)
-
-	if n.viewMode == "graph" {
-		n.selectedIndex = n.mapFilteredToGlobalIndex(hunters, result.SelectedIndex)
-	} else {
-		n.selectedIndex = result.SelectedIndex
-	}
-
-	n.selectedProcessorAddr = result.SelectedProcessorAddr
-	n.lastSelectedHunterIndex = result.LastSelectedHunterIndex
-	n.updateViewportContent()
+	n.navigate(nodesview.SelectRight)
 }
 
 // Update handles key presses and mouse events

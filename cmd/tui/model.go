@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/cmd/tui/store"
 	"github.com/endorses/lippycat/cmd/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/pcap"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -52,7 +53,7 @@ type ProcessorReconnectMsg struct {
 type TickMsg struct{}
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(constants.TUITickInterval, func(t time.Time) tea.Msg {
 		return TickMsg{}
 	})
 }
@@ -209,8 +210,8 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		captureMode:                initialMode,
 		nodesFilePath:              nodesFilePath,
 		insecure:                   insecure,
-		detailsPanelUpdateInterval: 50 * time.Millisecond,  // 20 Hz throttle (imperceptible to user)
-		packetListUpdateInterval:   100 * time.Millisecond, // 10 Hz throttle for packet list (prevents freeze)
+		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
+		packetListUpdateInterval:   constants.TUITickInterval, // 10 Hz throttle for packet list (prevents freeze)
 	}
 }
 

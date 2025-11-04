@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -52,7 +53,7 @@ func (m *Monitor) Stop() {
 func (m *Monitor) monitorHeartbeats() {
 	defer m.wg.Done()
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(constants.HunterHeartbeatInterval)
 	defer ticker.Stop()
 
 	logger.Info("Heartbeat monitor started")
@@ -75,16 +76,16 @@ func (m *Monitor) cleanupStaleHunters() {
 	defer m.wg.Done()
 
 	// Cleanup interval: check every 2 minutes (more frequent for faster recovery)
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(constants.HunterStaleCheckInterval)
 	defer ticker.Stop()
 
 	// Grace period: remove hunters that have been in ERROR state for 5 minutes
 	// This allows hunters to reconnect quickly without being stuck in registry
 	// Hunters will re-register when they reconnect, so aggressive cleanup is safe
-	const gracePeriod = 5 * time.Minute
+	const gracePeriod = constants.HunterStaleGracePeriod
 
 	logger.Info("Stale hunter cleanup janitor started",
-		"cleanup_interval", "2m",
+		"cleanup_interval", constants.HunterStaleCheckInterval,
 		"grace_period", gracePeriod)
 
 	for {

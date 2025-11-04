@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/cmd/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 )
 
 // ToastType defines the type/severity of a toast notification
@@ -165,7 +166,7 @@ func (t *Toast) Update(msg tea.Msg) tea.Cmd {
 
 // tickCmd returns a command that sends a ToastTickMsg after a short delay
 func (t *Toast) tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time time.Time) tea.Msg {
+	return tea.Tick(constants.TUITickInterval, func(time time.Time) tea.Msg {
 		return ToastTickMsg{Time: time}
 	})
 }

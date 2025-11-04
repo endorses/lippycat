@@ -95,3 +95,81 @@ const (
 	// Maximum: 10 levels to balance flexibility with operational overhead
 	MaxHierarchyDepth = 10
 )
+
+// Network configuration
+const (
+	// DefaultGRPCPort is the default port for gRPC communication between hunters and processors
+	DefaultGRPCPort = 50051
+
+	// DefaultMaxHunters is the default maximum number of concurrent hunter connections per processor
+	DefaultMaxHunters = 100
+
+	// DefaultMaxSubscribers is the default maximum number of concurrent TUI/monitoring subscribers
+	DefaultMaxSubscribers = 100
+)
+
+// Flow control thresholds
+//
+// Flow Control Strategy:
+//
+// Flow control is based on PCAP write queue utilization to prevent packet loss
+// during I/O pressure. Thresholds are set to provide smooth transitions between
+// flow states while preventing queue overflow.
+//
+// Threshold Levels:
+// - RESUME (<30%): Queue has drained sufficiently, hunters can resume normal rate
+// - CONTINUE (30-70%): Normal operation, no action needed
+// - SLOW (70-90%): Queue filling up, hunters should reduce packet rate
+// - PAUSE (>90%): Queue critically full, hunters should pause packet transmission
+//
+// Rationale:
+// - 30% resume threshold: Provides hysteresis to prevent rapid state oscillation
+// - 70% slow threshold: Early warning allows hunters to reduce rate before critical
+// - 90% pause threshold: Emergency brake to prevent queue overflow and packet loss
+const (
+	// FlowControlResumeThreshold is the queue utilization (0-1) below which to resume normal flow
+	FlowControlResumeThreshold = 0.30
+
+	// FlowControlSlowThreshold is the queue utilization (0-1) above which to slow down hunters
+	FlowControlSlowThreshold = 0.70
+
+	// FlowControlPauseThreshold is the queue utilization (0-1) above which to pause hunters
+	FlowControlPauseThreshold = 0.90
+
+	// FlowControlUpstreamBacklogThreshold is the packet backlog above which to trigger slowdown
+	// when forwarding to upstream processors
+	FlowControlUpstreamBacklogThreshold = 10000
+)
+
+// UI/TUI configuration
+const (
+	// TUITickInterval is the interval for TUI screen refresh
+	TUITickInterval = 100 * time.Millisecond
+
+	// TUICleanupInterval is the interval for TUI cleanup operations (stale data removal)
+	TUICleanupInterval = 30 * time.Second
+
+	// TUIConnectionTimeout is the timeout for establishing TUI remote connections
+	TUIConnectionTimeout = 10 * time.Second
+
+	// TUIReconnectInterval is the initial interval for TUI reconnection attempts
+	TUIReconnectInterval = 5 * time.Second
+
+	// TUIMaxReconnectInterval is the maximum interval for TUI reconnection attempts (with backoff)
+	TUIMaxReconnectInterval = 60 * time.Second
+)
+
+// Hunter/Processor keepalive and monitoring
+const (
+	// HunterHeartbeatInterval is the interval for hunter heartbeat messages
+	HunterHeartbeatInterval = 10 * time.Second
+
+	// HunterStaleCheckInterval is the interval for checking stale hunters
+	HunterStaleCheckInterval = 2 * time.Minute
+
+	// HunterStaleGracePeriod is the time since last heartbeat before considering a hunter stale
+	HunterStaleGracePeriod = 5 * time.Minute
+
+	// ProcessorBatchTimeoutMs is the default timeout in milliseconds for batching packets before sending
+	ProcessorBatchTimeoutMs = 100
+)

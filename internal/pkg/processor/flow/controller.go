@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -45,16 +46,17 @@ func (c *Controller) Determine() data.FlowControl {
 		queueCapacity := c.pcapQueueCapacity()
 
 		if queueCapacity > 0 {
-			utilizationPct := float64(queueDepth) / float64(queueCapacity) * 100
+			utilization := float64(queueDepth) / float64(queueCapacity)
+			utilizationPct := utilization * 100
 
 			// Pause if queue is critically full (>90%)
-			if utilizationPct > 90 {
+			if utilization > constants.FlowControlPauseThreshold {
 				logger.Warn("PCAP write queue critically full - requesting pause",
 					"queue_depth", queueDepth,
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
 				mostSevere = data.FlowControl_FLOW_PAUSE
-			} else if utilizationPct > 70 {
+			} else if utilization > constants.FlowControlSlowThreshold {
 				// Slow down if queue is getting full (>70%)
 				logger.Debug("PCAP write queue filling - requesting slowdown",
 					"queue_depth", queueDepth,
@@ -63,7 +65,7 @@ func (c *Controller) Determine() data.FlowControl {
 				if mostSevere < data.FlowControl_FLOW_SLOW {
 					mostSevere = data.FlowControl_FLOW_SLOW
 				}
-			} else if utilizationPct < 30 {
+			} else if utilization < constants.FlowControlResumeThreshold {
 				// Resume if queue has drained (< 30%)
 				if mostSevere < data.FlowControl_FLOW_RESUME {
 					mostSevere = data.FlowControl_FLOW_RESUME
@@ -88,7 +90,7 @@ func (c *Controller) Determine() data.FlowControl {
 		// If we're significantly behind in forwarding, slow down
 		if packetsReceived > packetsForwarded {
 			backlog := packetsReceived - packetsForwarded
-			if backlog > 10000 {
+			if backlog > constants.FlowControlUpstreamBacklogThreshold {
 				logger.Warn("Large packet backlog detected - requesting slowdown",
 					"backlog", backlog)
 				if mostSevere < data.FlowControl_FLOW_SLOW {

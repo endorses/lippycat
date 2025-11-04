@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/cmd/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/google/gopacket/layers"
@@ -172,9 +173,9 @@ func getByteBuffer() *[]byte {
 // Uses intelligent sampling and throttling to handle high packet rates
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program) {
 	const (
-		targetPacketsPerSecond = 1000                   // Target display rate (increased for bulk transfers)
-		batchInterval          = 100 * time.Millisecond // Batch interval
-		rateWindowSize         = 2 * time.Second        // Rolling window for rate calculation (react quickly)
+		targetPacketsPerSecond = 1000                      // Target display rate (increased for bulk transfers)
+		batchInterval          = constants.TUITickInterval // Batch interval
+		rateWindowSize         = 2 * time.Second           // Rolling window for rate calculation (react quickly)
 	)
 
 	batch := make([]components.PacketDisplay, 0, 100)
@@ -203,7 +204,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		now := time.Now()
 
 		// Update rolling window every 100ms to avoid overhead
-		if now.Sub(lastRateCheck) > 100*time.Millisecond {
+		if now.Sub(lastRateCheck) > constants.TUITickInterval {
 			// Remove packets older than window
 			cutoff := now.Add(-rateWindowSize)
 			i := 0

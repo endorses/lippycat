@@ -806,7 +806,7 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 		Filters:    filters,
 		Config: &management.ProcessorConfig{
 			BatchSize:            64,
-			BatchTimeoutMs:       100,
+			BatchTimeoutMs:       constants.ProcessorBatchTimeoutMs,
 			ReconnectIntervalSec: 5,
 			MaxReconnectAttempts: 0, // infinite
 			ProcessorId:          p.config.ProcessorID,

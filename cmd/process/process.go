@@ -77,13 +77,13 @@ var (
 
 func init() {
 	// Required flags
-	ProcessCmd.Flags().StringVarP(&listenAddr, "listen", "l", ":50051", "Listen address for hunter connections (host:port)")
+	ProcessCmd.Flags().StringVarP(&listenAddr, "listen", "l", fmt.Sprintf(":%d", constants.DefaultGRPCPort), "Listen address for hunter connections (host:port)")
 
 	// Processor configuration
 	ProcessCmd.Flags().StringVarP(&processorID, "processor-id", "", "", "Unique processor identifier (default: hostname)")
 	ProcessCmd.Flags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
-	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", 100, "Maximum number of concurrent hunter connections")
-	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", 100, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
+	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", constants.DefaultMaxHunters, "Maximum number of concurrent hunter connections")
+	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", constants.DefaultMaxSubscribers, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 	ProcessCmd.Flags().BoolVarP(&enableDetection, "enable-detection", "d", true, "Enable centralized protocol detection (default: true)")

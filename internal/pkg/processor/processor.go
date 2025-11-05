@@ -1,3 +1,21 @@
+// Package processor provides the core processor node implementation for the distributed
+// capture system. This file contains the core types, configuration, constructor, and
+// basic accessors for the Processor.
+//
+// File Organization:
+//   - processor.go                - Core types, Config, Processor struct, New() constructor
+//   - processor_lifecycle.go      - Server lifecycle: Start(), Shutdown(), listener setup
+//   - processor_packet_pipeline.go - Packet processing: processBatch(), PCAP coordination
+//   - processor_grpc_handlers.go  - gRPC service implementations (21 methods)
+//
+// The Processor acts as a central aggregation node that:
+//   - Accepts connections from multiple hunter nodes
+//   - Receives packet streams via gRPC
+//   - Performs protocol detection and enrichment
+//   - Distributes filters to hunters
+//   - Writes packets to PCAP files (unified, per-call, auto-rotating)
+//   - Broadcasts packets to TUI subscribers
+//   - Forwards packets to upstream processors (hierarchical mode)
 package processor
 
 import (

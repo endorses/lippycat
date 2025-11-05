@@ -24,11 +24,13 @@ Processors are **central aggregation nodes** that:
 ├────────────────────────────────────────────────────────────────┤
 │  Uses internal/pkg/                                            │
 │    ├── processor/       - Core processor logic                 │
-│    │   ├── processor.go - Main aggregation logic               │
-│    │   ├── config.go    - Configuration                        │
-│    │   ├── server.go    - gRPC server                          │
-│    │   ├── filters.go   - Filter management                    │
-│    │   └── subscribers.go - TUI subscriber management          │
+│    │   ├── processor.go                - Core types & constructor │
+│    │   ├── processor_lifecycle.go      - Server lifecycle     │
+│    │   ├── processor_packet_pipeline.go - Packet processing   │
+│    │   ├── processor_grpc_handlers.go  - gRPC services        │
+│    │   ├── config.go                   - Configuration        │
+│    │   ├── filters.go                  - Filter management    │
+│    │   └── subscribers.go              - TUI subscriber mgmt  │
 │    ├── detector/        - Protocol detection                   │
 │    └── tlsutil/         - TLS configuration                    │
 ├────────────────────────────────────────────────────────────────┤
@@ -38,6 +40,25 @@ Processors are **central aggregation nodes** that:
 │    └── monitoring.proto - TUI monitoring                       │
 └────────────────────────────────────────────────────────────────┘
 ```
+
+## Processor Package File Organization
+
+The processor package has been refactored (v0.3.0+) from a single 1,921-line file into four focused files:
+
+| File | Lines | Purpose | Key Contents |
+|------|-------|---------|--------------|
+| `processor.go` | ~270 | Core types & constructor | Config, Processor struct, New(), GetStats(), embedded gRPC interfaces |
+| `processor_lifecycle.go` | ~250 | Server lifecycle | Start(), Shutdown(), TCP listener creation, gRPC server setup |
+| `processor_packet_pipeline.go` | ~200 | Packet processing | processBatch(), PCAP coordination, call aggregation, protocol detection |
+| `processor_grpc_handlers.go` | ~1,200 | gRPC service implementations | 21 gRPC methods (data service, management service), helper functions |
+
+**Benefits:**
+- **Easier navigation:** Methods grouped by purpose (lifecycle vs. processing vs. gRPC)
+- **Faster file loading:** Average file size reduced from 1,921 to ~480 lines
+- **Clearer separation:** Core types, lifecycle, processing pipeline, and API handlers in separate files
+- **Maintained architecture:** No structural changes, all tests pass unchanged
+
+**Design Principle:** File splitting only, no architectural changes. The Processor remains a single struct with all methods as receiver methods, preserving existing patterns and test compatibility.
 
 ## Build Tags
 

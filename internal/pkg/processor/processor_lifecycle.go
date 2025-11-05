@@ -1,3 +1,27 @@
+// Package processor - Lifecycle Management
+//
+// This file contains the processor lifecycle management methods:
+//   - Start()                    - Initialize and start the processor server
+//   - Shutdown()                 - Gracefully shut down all components
+//   - createReuseAddrListener()  - Create TCP listener with SO_REUSEADDR
+//
+// The Start() method coordinates the initialization of:
+//  1. Filter loading from persistence file
+//  2. Unified PCAP writer (optional)
+//  3. Per-call PCAP writer (VoIP, optional)
+//  4. Auto-rotating PCAP writer (non-VoIP, optional)
+//  5. Upstream processor connection (hierarchical mode)
+//  6. Hunter monitor (stale connection cleanup)
+//  7. Virtual interface manager (packet injection)
+//  8. gRPC server with TLS and keepalive configuration
+//
+// The Shutdown() method ensures graceful cleanup in this order:
+//  1. Upstream connection
+//  2. Hunter monitor
+//  3. Virtual interface
+//  4. All PCAP writers (unified, per-call, auto-rotating)
+//  5. gRPC server (with 5-second grace period)
+//  6. TUI subscribers
 package processor
 
 import (

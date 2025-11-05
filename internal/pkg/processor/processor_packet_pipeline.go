@@ -1,3 +1,25 @@
+// Package processor - Packet Processing Pipeline
+//
+// This file contains the core packet processing logic for the processor:
+//   - processBatch() - Main packet processing pipeline
+//
+// The processBatch() method processes packets in the following order:
+//  1. Update hunter statistics
+//  2. Queue to unified PCAP writer (async)
+//  3. Increment packet counters
+//  4. Enrich packets with protocol detection (if enabled)
+//  5. Aggregate VoIP calls and correlate B2BUA calls (if VoIP aggregator enabled)
+//  6. Write per-call PCAP files (SIP and RTP separated, if enabled)
+//  7. Write auto-rotating PCAP files for non-VoIP traffic (if enabled)
+//  8. Forward to upstream processor (if hierarchical mode)
+//  9. Broadcast to TUI subscribers (with per-subscriber buffering)
+//  10. Inject to virtual interface (if enabled)
+//
+// Key Design Decisions:
+//   - Non-blocking: All I/O operations are async (queues, channels, goroutines)
+//   - Per-subscriber buffering: Slow TUI clients don't block hunters
+//   - Separate VoIP handling: Per-call PCAP writer handles VoIP, auto-rotate handles non-VoIP
+//   - Flow control: Based on processor state (PCAP queue), not subscriber drops
 package processor
 
 import (

@@ -1,3 +1,38 @@
+// Package processor - gRPC Service Handlers
+//
+// This file contains all gRPC service method implementations for the processor:
+//
+// Data Service (3 methods):
+//   - StreamPackets()              - Hunter packet ingestion (bidirectional streaming)
+//   - SubscribePackets()           - TUI client packet subscription (server streaming)
+//   - SubscribeCorrelatedCalls()   - B2BUA call correlation updates (server streaming)
+//
+// Management Service - Hunter Management (4 methods):
+//   - RegisterHunter()             - Hunter registration with processor
+//   - Heartbeat()                  - Hunter heartbeat and keepalive
+//   - GetHunterStatus()            - Query hunter connection status
+//   - ListAvailableHunters()       - List all connected hunters
+//
+// Management Service - Filter Management (7 methods):
+//   - GetFilters()                 - Get current processor filters
+//   - SubscribeFilters()           - Subscribe to filter updates
+//   - UpdateFilter()               - Update a filter
+//   - DeleteFilter()               - Delete a filter
+//   - UpdateFilterOnProcessor()    - Propagate filter update to processor hierarchy
+//   - DeleteFilterOnProcessor()    - Propagate filter deletion to processor hierarchy
+//   - GetFiltersFromProcessor()    - Query filters from processor hierarchy
+//
+// Management Service - Processor Hierarchy (4 methods):
+//   - RegisterProcessor()          - Register downstream processor
+//   - GetTopology()                - Get processor hierarchy topology
+//   - SubscribeTopology()          - Subscribe to topology updates
+//   - RequestAuthToken()           - Request authentication token for proxy mode
+//
+// Helper Functions:
+//   - buildTLSCredentials()        - Build gRPC TLS credentials from config
+//   - convertChainErrorToStatus()  - Convert proxy chain errors to gRPC status
+//   - correlatedCallToProto()      - Convert internal B2BUA call to protobuf
+//   - Audit logging helpers        - Log management operations for security audit trail
 package processor
 
 import (

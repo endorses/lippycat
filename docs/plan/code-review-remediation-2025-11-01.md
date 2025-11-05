@@ -352,25 +352,42 @@ const (
 
 ### 3.1 Improve Test Coverage
 **Priority:** 🟡 MEDIUM
-**Effort:** 2-3 weeks
+**Effort:** 10-15 days (2-3 weeks)
+**Status:** 🔄 IN PROGRESS (Day 1/15)
+**Detailed Plan:** See [phase-3.1-test-coverage-implementation.md](phase-3.1-test-coverage-implementation.md)
 
-#### Tasks:
-- [ ] Add unit tests for `processor.go:processBatch()`
-- [ ] Add unit tests for flow control logic
-- [ ] Add integration tests for `remotecapture/client.go` streaming
-- [ ] Add table-driven tests for TUI navigation
-- [ ] Add error path tests for shutdown coordination
-- [ ] Add tests for network failure scenarios (reconnection)
-- [ ] Add tests for disk full conditions (PCAP write failures)
-- [ ] Add load/stress tests for high packet rates (10K+ pps)
-- [ ] Add tests for many concurrent hunters (100+)
-- [ ] Add tests for deep topology hierarchies
-- [ ] Target coverage: processor 70%+, remotecapture 60%+, capture 60%+
+#### Current Coverage (Baseline - 2025-11-05):
+- **processor**: 31.4% → target **70%+** (need +38.6%)
+- **remotecapture**: 12.2% → target **60%+** (need +47.8%)
+- **capture**: 30.3% → target **60%+** (need +29.7%)
 
-**Priority Areas:**
-1. `processor.go` (currently 24.4% → target 70%+)
-2. `remotecapture/client.go` (currently 12.0% → target 60%+)
-3. `capture/capture.go` (currently 30.3% → target 60%+)
+#### Implementation Approach:
+**Daily incremental commits** over 15 days, with each day targeting specific coverage improvements:
+- **Days 1-2**: processor_packet_pipeline tests (31.4% → 45%)
+- **Days 3-4**: processor_lifecycle tests (45% → 55%)
+- **Days 5-7**: processor_grpc_handlers tests (55% → 70%+)
+- **Days 8-10**: remotecapture client tests (12.2% → 60%+)
+- **Days 11-13**: capture package tests (30.3% → 60%+)
+- **Days 14-15**: Load tests and finalization
+
+#### Progress Tracking:
+
+**Day 1 (2025-11-05):** ⏳ In Progress
+- [x] Create detailed implementation plan
+- [x] Measure baseline coverage
+- [x] Create `processor_packet_pipeline_test.go` (needs fixes)
+- [ ] Fix test compilation errors
+- [ ] Run tests and verify they pass with `-race`
+- [ ] Measure coverage increase
+
+**Day 2-15:** 📋 Planned
+- See detailed breakdown in [phase-3.1-test-coverage-implementation.md](phase-3.1-test-coverage-implementation.md)
+
+#### Key Implementation Notes:
+- **Processor Architecture**: Tests must account for 4-file split (processor.go, processor_lifecycle.go, processor_packet_pipeline.go, processor_grpc_handlers.go)
+- **Testing Strategy**: Table-driven tests with comprehensive error paths
+- **Concurrency**: All tests must pass with `-race` flag
+- **Mock Servers**: gRPC handlers require mock server infrastructure
 
 ---
 

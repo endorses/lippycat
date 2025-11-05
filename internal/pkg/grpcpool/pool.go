@@ -115,6 +115,9 @@ func NewConnectionPool(config PoolConfig) *ConnectionPool {
 //	// Use connection...
 //	client := service.NewClient(conn)
 func Get(pool *ConnectionPool, ctx context.Context, address string, dialOptions ...grpc.DialOption) (*grpc.ClientConn, error) {
+	if pool == nil {
+		return nil, fmt.Errorf("connection pool is nil")
+	}
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
@@ -169,6 +172,9 @@ func Get(pool *ConnectionPool, ctx context.Context, address string, dialOptions 
 //
 // The caller must call Release() exactly once for each successful Get().
 func Release(pool *ConnectionPool, address string) {
+	if pool == nil {
+		return
+	}
 	pool.mu.RLock()
 	pc, exists := pool.connections[address]
 	pool.mu.RUnlock()
@@ -198,6 +204,9 @@ func Release(pool *ConnectionPool, address string) {
 // Close closes the connection pool and all managed connections.
 // All connections are closed regardless of reference count.
 func Close(pool *ConnectionPool) {
+	if pool == nil {
+		return
+	}
 	logger.Info("Closing connection pool",
 		"pool_size", len(pool.connections))
 
@@ -315,6 +324,9 @@ type Stats struct {
 
 // GetStats returns statistics about the connection pool
 func GetStats(pool *ConnectionPool) Stats {
+	if pool == nil {
+		return Stats{}
+	}
 	pool.mu.RLock()
 	defer pool.mu.RUnlock()
 

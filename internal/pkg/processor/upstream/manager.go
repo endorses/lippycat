@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/grpcpool"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
-	"time"
 )
 
 // Config contains upstream connection configuration
@@ -39,6 +40,9 @@ type Manager struct {
 	stream     data.DataService_StreamPacketsClient
 	mu         sync.Mutex
 
+	// Connection pooling
+	connPool *grpcpool.ConnectionPool
+
 	// Upstream processor ID (learned during registration)
 	upstreamProcessorID string
 
@@ -56,6 +60,7 @@ func NewManager(config Config, packetsForwarded *atomic.Uint64) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		config:           config,
+		connPool:         grpcpool.NewConnectionPool(grpcpool.DefaultPoolConfig()),
 		packetsForwarded: packetsForwarded,
 		ctx:              ctx,
 		cancel:           cancel,
@@ -98,7 +103,7 @@ func (m *Manager) Connect() error {
 			"security_risk", "packet data transmitted in cleartext")
 	}
 
-	conn, err := grpc.Dial(m.config.Address, opts...)
+	conn, err := grpcpool.Get(m.connPool, m.ctx, m.config.Address, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to dial upstream: %w", err)
 	}
@@ -119,15 +124,11 @@ func (m *Manager) Connect() error {
 			Version:       "dev", // TODO: Use actual version
 		})
 		if err != nil {
-			if closeErr := conn.Close(); closeErr != nil {
-				logger.Error("Failed to close connection during error cleanup", "error", closeErr, "upstream", m.config.Address)
-			}
+			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("failed to register with upstream processor: %w", err)
 		}
 		if !regResp.Accepted {
-			if closeErr := conn.Close(); closeErr != nil {
-				logger.Error("Failed to close connection during error cleanup", "error", closeErr, "upstream", m.config.Address)
-			}
+			grpcpool.Release(m.connPool, m.config.Address)
 			return fmt.Errorf("upstream processor rejected registration: %s", regResp.Error)
 		}
 
@@ -142,9 +143,7 @@ func (m *Manager) Connect() error {
 	// Create streaming connection
 	stream, err := m.dataClient.StreamPackets(m.ctx)
 	if err != nil {
-		if closeErr := conn.Close(); closeErr != nil {
-			logger.Error("Failed to close connection during error cleanup", "error", closeErr, "upstream", m.config.Address)
-		}
+		grpcpool.Release(m.connPool, m.config.Address)
 		return fmt.Errorf("failed to create upstream stream: %w", err)
 	}
 
@@ -174,13 +173,16 @@ func (m *Manager) Disconnect() {
 	m.mu.Unlock()
 
 	if m.conn != nil {
-		if err := m.conn.Close(); err != nil {
-			logger.Error("Failed to close connection during shutdown", "error", err, "upstream", m.config.Address)
-		}
+		// Release connection back to pool
+		grpcpool.Release(m.connPool, m.config.Address)
 		m.conn = nil
 	}
 
 	m.wg.Wait() // Wait for goroutines to finish
+
+	// Close the connection pool
+	grpcpool.Close(m.connPool)
+
 	logger.Info("Disconnected from upstream processor")
 }
 
@@ -270,4 +272,9 @@ func (m *Manager) GetUpstreamProcessorID() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.upstreamProcessorID
+}
+
+// GetPoolStats returns statistics about the connection pool
+func (m *Manager) GetPoolStats() grpcpool.Stats {
+	return grpcpool.GetStats(m.connPool)
 }

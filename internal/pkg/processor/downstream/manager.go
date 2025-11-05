@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/grpcpool"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
 	"google.golang.org/grpc"
@@ -52,6 +53,9 @@ type Manager struct {
 	tlsSkipVerify bool
 	tlsServerName string
 
+	// Connection pooling
+	connPool *grpcpool.ConnectionPool
+
 	// topologyPublisher forwards topology updates from downstream processors upstream
 	topologyPublisher TopologyPublisher
 
@@ -80,6 +84,7 @@ func NewManager(tlsInsecure bool, tlsCertFile, tlsKeyFile, tlsCAFile string, tls
 		tlsCAFile:           tlsCAFile,
 		tlsSkipVerify:       tlsSkipVerify,
 		tlsServerName:       tlsServerName,
+		connPool:            grpcpool.NewConnectionPool(grpcpool.DefaultPoolConfig()),
 		ctx:                 ctx,
 		cancel:              cancel,
 		healthCheckInterval: DefaultHealthCheckInterval,
@@ -120,7 +125,7 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		"address", listenAddress,
 		"version", version)
 
-	// Create gRPC client to this downstream processor
+	// Create gRPC client to this downstream processor using connection pool
 	var opts []grpc.DialOption
 	if m.tlsInsecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -129,7 +134,7 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	conn, err := grpc.Dial(listenAddress, opts...)
+	conn, err := grpcpool.Get(m.connPool, m.ctx, listenAddress, opts...)
 	if err != nil {
 		logger.Error("Failed to create client for downstream processor",
 			"processor_id", processorID,
@@ -176,11 +181,9 @@ func (m *Manager) Unregister(processorID string) {
 			proc.TopologyCancel()
 		}
 
-		// Close gRPC connection
+		// Release connection back to pool
 		if proc.Conn != nil {
-			if err := proc.Conn.Close(); err != nil {
-				logger.Error("Failed to close downstream processor connection during shutdown", "error", err, "processor_id", processorID)
-			}
+			grpcpool.Release(m.connPool, proc.ListenAddress)
 		}
 
 		delete(m.downstreams, processorID)
@@ -510,10 +513,10 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 			"timeout", timeout)
 	}
 
-	// Close all downstream connections
+	// Release all downstream connections back to pool
 	m.mu.Lock()
 	for processorID, proc := range m.downstreams {
-		logger.Debug("Closing downstream connection",
+		logger.Debug("Releasing downstream connection",
 			"processor_id", processorID)
 
 		// Cancel topology subscription
@@ -521,16 +524,17 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 			proc.TopologyCancel()
 		}
 
-		// Close gRPC connection
+		// Release connection back to pool
 		if proc.Conn != nil {
-			if err := proc.Conn.Close(); err != nil {
-				logger.Error("Failed to close downstream processor connection during shutdown", "error", err, "processor_id", processorID)
-			}
+			grpcpool.Release(m.connPool, proc.ListenAddress)
 		}
 	}
 	// Clear the map
 	m.downstreams = make(map[string]*ProcessorInfo)
 	m.mu.Unlock()
+
+	// Close the connection pool
+	grpcpool.Close(m.connPool)
 
 	logger.Info("Downstream manager shutdown complete")
 }
@@ -808,6 +812,11 @@ func (m *Manager) performHealthCheck(interval time.Duration) {
 	}
 }
 
+// GetPoolStats returns statistics about the connection pool
+func (m *Manager) GetPoolStats() grpcpool.Stats {
+	return grpcpool.GetStats(m.connPool)
+}
+
 // Close closes all downstream connections and cancels topology subscriptions
 func (m *Manager) Close() {
 	// Cancel all topology subscriptions
@@ -817,20 +826,20 @@ func (m *Manager) Close() {
 	m.wg.Wait()
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for processorID, proc := range m.downstreams {
+	for _, proc := range m.downstreams {
 		// Cancel topology subscription
 		if proc.TopologyCancel != nil {
 			proc.TopologyCancel()
 		}
 
-		// Close gRPC connection
+		// Release connection back to pool
 		if proc.Conn != nil {
-			if err := proc.Conn.Close(); err != nil {
-				logger.Error("Failed to close downstream processor connection", "error", err, "processor_id", processorID)
-			}
+			grpcpool.Release(m.connPool, proc.ListenAddress)
 		}
 	}
 	m.downstreams = make(map[string]*ProcessorInfo)
+	m.mu.Unlock()
+
+	// Close the connection pool
+	grpcpool.Close(m.connPool)
 }

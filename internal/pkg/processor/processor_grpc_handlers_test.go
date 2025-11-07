@@ -2,12 +2,18 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
 )
 
 // TestRegisterHunter tests the RegisterHunter gRPC handler
@@ -486,4 +492,389 @@ func TestRegisterHunter_Concurrent(t *testing.T) {
 	statusResp, err := processor.GetHunterStatus(context.Background(), &management.StatusRequest{})
 	require.NoError(t, err)
 	assert.Len(t, statusResp.Hunters, numHunters)
+}
+
+// mockStreamPacketsServer is a mock implementation of DataService_StreamPacketsServer for testing
+type mockStreamPacketsServer struct {
+	data.DataService_StreamPacketsServer
+	ctx             context.Context
+	recvBatches     []*data.PacketBatch
+	recvIndex       int
+	sentControls    []*data.StreamControl
+	mu              sync.Mutex
+	recvErr         error // Error to return from Recv()
+	sendErr         error // Error to return from Send()
+	cancelAfterRecv int   // Cancel context after N Recv() calls (0 = don't cancel)
+}
+
+func (m *mockStreamPacketsServer) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockStreamPacketsServer) Recv() (*data.PacketBatch, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if we should cancel context
+	if m.cancelAfterRecv > 0 && m.recvIndex >= m.cancelAfterRecv {
+		return nil, context.Canceled
+	}
+
+	// Return configured error
+	if m.recvErr != nil {
+		return nil, m.recvErr
+	}
+
+	// Return EOF if no more batches
+	if m.recvIndex >= len(m.recvBatches) {
+		return nil, io.EOF
+	}
+
+	batch := m.recvBatches[m.recvIndex]
+	m.recvIndex++
+	return batch, nil
+}
+
+func (m *mockStreamPacketsServer) Send(ctrl *data.StreamControl) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Return configured error
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+
+	m.sentControls = append(m.sentControls, ctrl)
+	return nil
+}
+
+func (m *mockStreamPacketsServer) SendMsg(msg interface{}) error {
+	return nil
+}
+
+func (m *mockStreamPacketsServer) RecvMsg(msg interface{}) error {
+	return nil
+}
+
+func (m *mockStreamPacketsServer) SetHeader(metadata.MD) error {
+	return nil
+}
+
+func (m *mockStreamPacketsServer) SendHeader(metadata.MD) error {
+	return nil
+}
+
+func (m *mockStreamPacketsServer) SetTrailer(metadata.MD) {}
+
+// TestStreamPackets_Success tests successful packet streaming from a hunter
+func TestStreamPackets_Success(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create packet batches
+	batches := []*data.PacketBatch{
+		{
+			HunterId:    "hunter-1",
+			Sequence:    1,
+			TimestampNs: time.Now().UnixNano(),
+			Packets: []*data.CapturedPacket{
+				{
+					Data:           []byte{0x01, 0x02, 0x03},
+					TimestampNs:    time.Now().UnixNano(),
+					CaptureLength:  3,
+					OriginalLength: 3,
+					LinkType:       1, // Ethernet
+				},
+			},
+		},
+		{
+			HunterId:    "hunter-1",
+			Sequence:    2,
+			TimestampNs: time.Now().UnixNano(),
+			Packets: []*data.CapturedPacket{
+				{
+					Data:           []byte{0x04, 0x05, 0x06},
+					TimestampNs:    time.Now().UnixNano(),
+					CaptureLength:  3,
+					OriginalLength: 3,
+					LinkType:       1,
+				},
+			},
+		},
+	}
+
+	// Create mock stream
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockStreamPacketsServer{
+		ctx:         ctx,
+		recvBatches: batches,
+	}
+
+	// Run StreamPackets in goroutine (it blocks until EOF)
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.StreamPackets(mockStream)
+	}()
+
+	// Wait for completion or timeout
+	select {
+	case err := <-done:
+		assert.Equal(t, io.EOF, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("StreamPackets timed out")
+	}
+
+	// Verify acknowledgments were sent
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	assert.Len(t, mockStream.sentControls, 2)
+	assert.Equal(t, uint64(1), mockStream.sentControls[0].AckSequence)
+	assert.Equal(t, uint64(2), mockStream.sentControls[1].AckSequence)
+	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, mockStream.sentControls[0].FlowControl)
+}
+
+// TestStreamPackets_MultipleConcurrentHunters tests multiple hunters streaming simultaneously
+func TestStreamPackets_MultipleConcurrentHunters(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	numHunters := 5
+	var wg sync.WaitGroup
+	wg.Add(numHunters)
+
+	for i := 0; i < numHunters; i++ {
+		hunterID := fmt.Sprintf("hunter-%d", i+1)
+
+		go func(hid string) {
+			defer wg.Done()
+
+			// Create packet batch
+			batch := &data.PacketBatch{
+				HunterId:    hid,
+				Sequence:    1,
+				TimestampNs: time.Now().UnixNano(),
+				Packets: []*data.CapturedPacket{
+					{
+						Data:           []byte{0x01, 0x02, 0x03},
+						TimestampNs:    time.Now().UnixNano(),
+						CaptureLength:  3,
+						OriginalLength: 3,
+						LinkType:       1,
+					},
+				},
+			}
+
+			// Create mock stream
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			mockStream := &mockStreamPacketsServer{
+				ctx:         ctx,
+				recvBatches: []*data.PacketBatch{batch},
+			}
+
+			// Stream packets
+			err := processor.StreamPackets(mockStream)
+			assert.Equal(t, io.EOF, err)
+
+			// Verify acknowledgment
+			mockStream.mu.Lock()
+			defer mockStream.mu.Unlock()
+			assert.Len(t, mockStream.sentControls, 1)
+			assert.Equal(t, uint64(1), mockStream.sentControls[0].AckSequence)
+		}(hunterID)
+	}
+
+	// Wait for all hunters to complete
+	wg.Wait()
+
+	// Verify stats
+	stats := processor.statsCollector.GetProto()
+	assert.Greater(t, stats.TotalPacketsReceived, uint64(0))
+}
+
+// TestStreamPackets_DisconnectHandling tests hunter disconnect (context cancellation)
+func TestStreamPackets_DisconnectHandling(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create batches but configure to cancel after 2 receives
+	batches := []*data.PacketBatch{
+		{
+			HunterId:    "hunter-disconnect",
+			Sequence:    1,
+			TimestampNs: time.Now().UnixNano(),
+			Packets:     []*data.CapturedPacket{{Data: []byte{0x01}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+		},
+		{
+			HunterId:    "hunter-disconnect",
+			Sequence:    2,
+			TimestampNs: time.Now().UnixNano(),
+			Packets:     []*data.CapturedPacket{{Data: []byte{0x02}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+		},
+		// Third batch should never be received due to cancellation
+		{
+			HunterId:    "hunter-disconnect",
+			Sequence:    3,
+			TimestampNs: time.Now().UnixNano(),
+			Packets:     []*data.CapturedPacket{{Data: []byte{0x03}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockStreamPacketsServer{
+		ctx:             ctx,
+		recvBatches:     batches,
+		cancelAfterRecv: 2, // Cancel after 2 receives
+	}
+
+	// Stream packets (should stop after context cancellation)
+	err = processor.StreamPackets(mockStream)
+	assert.Equal(t, context.Canceled, err)
+
+	// Verify only 2 batches were processed
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	assert.Len(t, mockStream.sentControls, 2) // Only 2 acknowledgments sent
+}
+
+// TestStreamPackets_FlowControl tests flow control signals
+func TestStreamPackets_FlowControl(t *testing.T) {
+	// Create processor with PCAP writer to trigger flow control
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+		WriteFile:   "/tmp/test-flow-control.pcap",
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create batches
+	batch := &data.PacketBatch{
+		HunterId:    "hunter-flow",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets: []*data.CapturedPacket{
+			{
+				Data:           []byte{0x01, 0x02, 0x03},
+				TimestampNs:    time.Now().UnixNano(),
+				CaptureLength:  3,
+				OriginalLength: 3,
+				LinkType:       1,
+			},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockStreamPacketsServer{
+		ctx:         ctx,
+		recvBatches: []*data.PacketBatch{batch},
+	}
+
+	// Stream packets
+	err = processor.StreamPackets(mockStream)
+	assert.Equal(t, io.EOF, err)
+
+	// Verify flow control signal was sent
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	assert.Len(t, mockStream.sentControls, 1)
+	// Flow control should be CONTINUE (queue not full)
+	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, mockStream.sentControls[0].FlowControl)
+}
+
+// TestStreamPackets_SendError tests handling of Send() errors
+func TestStreamPackets_SendError(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create batch
+	batch := &data.PacketBatch{
+		HunterId:    "hunter-send-error",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{{Data: []byte{0x01}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockStreamPacketsServer{
+		ctx:         ctx,
+		recvBatches: []*data.PacketBatch{batch},
+		sendErr:     errors.New("mock send error"),
+	}
+
+	// StreamPackets should continue despite Send() error (as per implementation)
+	err = processor.StreamPackets(mockStream)
+	// Should still get EOF from Recv(), not the send error
+	assert.Equal(t, io.EOF, err)
+}
+
+// TestStreamPackets_EmptyBatch tests handling of empty batches
+func TestStreamPackets_EmptyBatch(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create empty batch
+	batch := &data.PacketBatch{
+		HunterId:    "hunter-empty",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{}, // Empty
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockStreamPacketsServer{
+		ctx:         ctx,
+		recvBatches: []*data.PacketBatch{batch},
+	}
+
+	// Stream packets
+	err = processor.StreamPackets(mockStream)
+	assert.Equal(t, io.EOF, err)
+
+	// Verify acknowledgment was still sent
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	assert.Len(t, mockStream.sentControls, 1)
 }

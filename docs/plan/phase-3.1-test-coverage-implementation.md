@@ -151,9 +151,9 @@ The processor was refactored using **Option A: File Splitting** into 4 focused f
    - [x] Max subscribers limit enforcement
    - [x] Auto-generated client ID
 4. **CreateFilter, UpdateFilter, DeleteFilter**
-   - [ ] Valid filter operations
-   - [ ] Invalid filter patterns
-   - [ ] Filter application to hunters
+   - [x] Valid filter operations
+   - [x] Invalid filter patterns
+   - [x] Filter application to hunters
 5. **GetStats, GetHunters** - Read operations
    - [ ] Stats retrieval
    - [ ] Hunter list retrieval
@@ -195,11 +195,24 @@ func TestRegisterHunter(t *testing.T) {
 - Coverage ≥ 70% for processor package
 - All tests pass with `-race`
 
-**Status:** In Progress (Day 5-7/15 - Part 3)
-**Coverage Improvement:** 49.7% → 56.0% (+6.3%)
+**Status:** In Progress (Day 5-7/15 - Part 4)
+**Coverage Improvement:** 49.7% → 56.5% (+6.8%)
 **RegisterHunter Coverage:** 90.9%
 **StreamPackets Coverage:** 100.0%
 **SubscribePackets Coverage:** 97.3%
+**UpdateFilter Coverage:** 83.3%
+**DeleteFilter Coverage:** 100.0%
+
+**Completed (2025-11-08 - Part 4):**
+- Added comprehensive UpdateFilter and DeleteFilter tests to `processor_grpc_handlers_test.go`
+- 3 test functions covering all filter management scenarios:
+  - TestUpdateFilter (7 test cases): Create, update, all filter types, disabled filters, targeted hunters
+  - TestDeleteFilter (4 test cases): Successful deletion, non-existent filter, multiple filters, empty ID
+  - TestUpdateDeleteFilterIntegration: End-to-end workflow testing filter lifecycle
+- All tests pass with `-race` flag
+- UpdateFilter handler now has 83.3% coverage
+- DeleteFilter handler now has 100.0% coverage
+- Overall processor package coverage: 56.5% (+0.5%)
 
 **Completed (2025-11-08 - Part 3):**
 - Added comprehensive SubscribePackets tests to `processor_grpc_handlers_test.go`
@@ -222,7 +235,7 @@ func TestRegisterHunter(t *testing.T) {
 - 6 test functions covering all streaming scenarios
 - All tests pass with `-race` flag
 
-**Next:** Continue with CreateFilter, UpdateFilter, DeleteFilter, and other gRPC handlers
+**Next:** Continue with GetStats, GetHunters, and other remaining gRPC handlers
 
 ---
 

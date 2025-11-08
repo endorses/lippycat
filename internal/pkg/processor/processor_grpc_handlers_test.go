@@ -2385,3 +2385,396 @@ func TestGetHunterStatusAndListAvailableHunters_Integration(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, allHunters.Hunters, 3)
 }
+
+// ========== Low-Priority gRPC Handler Tests ==========
+
+// TestGetFilters tests the GetFilters gRPC handler
+func TestGetFilters(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupFilters   func(*Processor) []*management.Filter
+		hunterID       string
+		expectedCount  int
+		validateResult func(t *testing.T, filters []*management.Filter)
+	}{
+		{
+			name: "no filters",
+			setupFilters: func(p *Processor) []*management.Filter {
+				return nil
+			},
+			hunterID:      "hunter-1",
+			expectedCount: 0,
+		},
+		{
+			name: "single global filter",
+			setupFilters: func(p *Processor) []*management.Filter {
+				// Register hunter with SIP_USER capability
+				p.RegisterHunter(context.Background(), &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes: []string{"sip_user"},
+					},
+				})
+				filter := &management.Filter{
+					Id:            "filter-1",
+					Type:          management.FilterType_FILTER_SIP_USER,
+					Pattern:       "alice",
+					Enabled:       true,
+					TargetHunters: nil, // Global filter
+				}
+				p.filterManager.Update(filter)
+				return []*management.Filter{filter}
+			},
+			hunterID:      "hunter-1",
+			expectedCount: 1,
+			validateResult: func(t *testing.T, filters []*management.Filter) {
+				assert.Equal(t, "filter-1", filters[0].Id)
+				assert.Equal(t, management.FilterType_FILTER_SIP_USER, filters[0].Type)
+				assert.Equal(t, "alice", filters[0].Pattern)
+				assert.True(t, filters[0].Enabled)
+			},
+		},
+		{
+			name: "multiple filters with targeting",
+			setupFilters: func(p *Processor) []*management.Filter {
+				// Register hunter with both SIP_USER and IP_ADDRESS capabilities
+				p.RegisterHunter(context.Background(), &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes: []string{"sip_user", "ip_address"},
+					},
+				})
+				filter1 := &management.Filter{
+					Id:            "filter-global",
+					Type:          management.FilterType_FILTER_SIP_USER,
+					Pattern:       "alice",
+					Enabled:       true,
+					TargetHunters: nil,
+				}
+				filter2 := &management.Filter{
+					Id:            "filter-hunter1",
+					Type:          management.FilterType_FILTER_IP_ADDRESS,
+					Pattern:       "192.168.1.0/24",
+					Enabled:       true,
+					TargetHunters: []string{"hunter-1"},
+				}
+				filter3 := &management.Filter{
+					Id:            "filter-hunter2",
+					Type:          management.FilterType_FILTER_SIP_USER,
+					Pattern:       "bob",
+					Enabled:       true,
+					TargetHunters: []string{"hunter-2"},
+				}
+				p.filterManager.Update(filter1)
+				p.filterManager.Update(filter2)
+				p.filterManager.Update(filter3)
+				return []*management.Filter{filter1, filter2, filter3}
+			},
+			hunterID:      "hunter-1",
+			expectedCount: 2, // Global + hunter-1 specific
+			validateResult: func(t *testing.T, filters []*management.Filter) {
+				// Should get global filter and hunter-1 specific filter
+				ids := make(map[string]bool)
+				for _, f := range filters {
+					ids[f.Id] = true
+				}
+				assert.True(t, ids["filter-global"], "Should include global filter")
+				assert.True(t, ids["filter-hunter1"], "Should include hunter-1 filter")
+				assert.False(t, ids["filter-hunter2"], "Should not include hunter-2 filter")
+			},
+		},
+		{
+			name: "disabled filters included",
+			setupFilters: func(p *Processor) []*management.Filter {
+				// Register hunter with SIP_USER capability
+				p.RegisterHunter(context.Background(), &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes: []string{"sip_user"},
+					},
+				})
+				filter := &management.Filter{
+					Id:            "filter-disabled",
+					Type:          management.FilterType_FILTER_SIP_USER,
+					Pattern:       "test",
+					Enabled:       false,
+					TargetHunters: []string{"hunter-1"},
+				}
+				p.filterManager.Update(filter)
+				return []*management.Filter{filter}
+			},
+			hunterID:      "hunter-1",
+			expectedCount: 1,
+			validateResult: func(t *testing.T, filters []*management.Filter) {
+				assert.False(t, filters[0].Enabled, "Disabled filters should still be returned")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			processor, err := New(Config{
+				ProcessorID: "test-processor",
+				ListenAddr:  "localhost:50051",
+				MaxHunters:  10,
+			})
+			require.NoError(t, err)
+			defer processor.Shutdown()
+
+			// Setup filters
+			if tt.setupFilters != nil {
+				tt.setupFilters(processor)
+			}
+
+			// Call GetFilters
+			resp, err := processor.GetFilters(context.Background(), &management.FilterRequest{
+				HunterId: tt.hunterID,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.Len(t, resp.Filters, tt.expectedCount)
+
+			if tt.validateResult != nil {
+				tt.validateResult(t, resp.Filters)
+			}
+		})
+	}
+}
+
+// mockSubscribeFiltersServer implements the server-side streaming interface for SubscribeFilters
+type mockSubscribeFiltersServer struct {
+	management.ManagementService_SubscribeFiltersServer
+	ctx     context.Context
+	updates []*management.FilterUpdate
+	mu      sync.Mutex
+	sendErr error
+}
+
+func (m *mockSubscribeFiltersServer) Send(update *management.FilterUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.updates = append(m.updates, update)
+	return nil
+}
+
+func (m *mockSubscribeFiltersServer) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockSubscribeFiltersServer) getUpdates() []*management.FilterUpdate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]*management.FilterUpdate, len(m.updates))
+	copy(result, m.updates)
+	return result
+}
+
+// TestSubscribeFilters tests the SubscribeFilters gRPC handler
+// Note: This is a smoke test only due to complexity of mocking streaming gRPC
+func TestSubscribeFilters(t *testing.T) {
+	t.Run("context cancellation", func(t *testing.T) {
+		processor, err := New(Config{
+			ProcessorID: "test-processor",
+			ListenAddr:  "localhost:50051",
+			MaxHunters:  10,
+		})
+		require.NoError(t, err)
+		defer processor.Shutdown()
+
+		// Create mock stream with already-cancelled context
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // Cancel immediately
+		stream := &mockSubscribeFiltersServer{
+			ctx:     ctx,
+			updates: make([]*management.FilterUpdate, 0),
+		}
+
+		// Should exit immediately due to cancelled context
+		err = processor.SubscribeFilters(&management.FilterRequest{
+			HunterId: "hunter-1",
+		}, stream)
+		require.NoError(t, err)
+	})
+}
+
+// TestGetTopology tests the GetTopology gRPC handler
+func TestGetTopology(t *testing.T) {
+	t.Run("single processor no upstream", func(t *testing.T) {
+		processor, err := New(Config{
+			ProcessorID: "test-processor",
+			ListenAddr:  "localhost:50051",
+			MaxHunters:  10,
+		})
+		require.NoError(t, err)
+		defer processor.Shutdown()
+
+		// Register a hunter
+		_, err = processor.RegisterHunter(context.Background(), &management.HunterRegistration{
+			HunterId:   "hunter-1",
+			Hostname:   "host1",
+			Interfaces: []string{"eth0"},
+			Version:    "v1.0.0",
+			Capabilities: &management.HunterCapabilities{
+				FilterTypes:   []string{"sip_user"},
+				MaxBufferSize: 1024000,
+			},
+		})
+		require.NoError(t, err)
+
+		// Get topology
+		resp, err := processor.GetTopology(context.Background(), &management.TopologyRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.NotNil(t, resp.Processor)
+
+		// Verify topology structure
+		assert.Equal(t, "test-processor", resp.Processor.ProcessorId)
+		require.Len(t, resp.Processor.Hunters, 1)
+		assert.Equal(t, "hunter-1", resp.Processor.Hunters[0].HunterId)
+		assert.Empty(t, resp.Processor.UpstreamProcessor, "No upstream configured")
+	})
+
+	t.Run("multiple hunters", func(t *testing.T) {
+		processor, err := New(Config{
+			ProcessorID: "test-processor",
+			ListenAddr:  "localhost:50051",
+			MaxHunters:  10,
+		})
+		require.NoError(t, err)
+		defer processor.Shutdown()
+
+		// Register multiple hunters
+		for i := 1; i <= 3; i++ {
+			_, err = processor.RegisterHunter(context.Background(), &management.HunterRegistration{
+				HunterId:   fmt.Sprintf("hunter-%d", i),
+				Hostname:   fmt.Sprintf("host%d", i),
+				Interfaces: []string{"eth0"},
+				Version:    "v1.0.0",
+				Capabilities: &management.HunterCapabilities{
+					FilterTypes:   []string{"sip_user"},
+					MaxBufferSize: 1024000,
+				},
+			})
+			require.NoError(t, err)
+		}
+
+		// Get topology
+		resp, err := processor.GetTopology(context.Background(), &management.TopologyRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, resp.Processor)
+		require.Len(t, resp.Processor.Hunters, 3)
+
+		// Verify all hunters present
+		ids := make(map[string]bool)
+		for _, h := range resp.Processor.Hunters {
+			ids[h.HunterId] = true
+		}
+		for i := 1; i <= 3; i++ {
+			assert.True(t, ids[fmt.Sprintf("hunter-%d", i)])
+		}
+	})
+
+	t.Run("no hunters registered", func(t *testing.T) {
+		processor, err := New(Config{
+			ProcessorID: "test-processor",
+			ListenAddr:  "localhost:50051",
+		})
+		require.NoError(t, err)
+		defer processor.Shutdown()
+
+		resp, err := processor.GetTopology(context.Background(), &management.TopologyRequest{})
+		require.NoError(t, err)
+		require.NotNil(t, resp.Processor)
+		assert.Equal(t, "test-processor", resp.Processor.ProcessorId)
+		assert.Empty(t, resp.Processor.Hunters)
+	})
+}
+
+// TestRequestAuthToken tests the RequestAuthToken gRPC handler
+func TestRequestAuthToken(t *testing.T) {
+	t.Run("fails with internal error when not configured", func(t *testing.T) {
+		processor, err := New(Config{
+			ProcessorID: "test-processor",
+			ListenAddr:  "localhost:50051",
+			MaxHunters:  10,
+		})
+		require.NoError(t, err)
+		defer processor.Shutdown()
+
+		resp, err := processor.RequestAuthToken(context.Background(), &management.AuthTokenRequest{
+			TargetProcessorId: "processor-1",
+		})
+		require.Error(t, err)
+		assert.Nil(t, resp)
+
+		// Verify it's an Internal error (proxy manager not configured for auth)
+		st, ok := status.FromError(err)
+		require.True(t, ok)
+		assert.Equal(t, codes.Internal, st.Code())
+	})
+}
+
+// mockSubscribeTopologyServer implements the server-side streaming interface for SubscribeTopology
+type mockSubscribeTopologyServer struct {
+	management.ManagementService_SubscribeTopologyServer
+	ctx     context.Context
+	updates []*management.TopologyUpdate
+	mu      sync.Mutex
+	sendErr error
+}
+
+func (m *mockSubscribeTopologyServer) Send(update *management.TopologyUpdate) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.updates = append(m.updates, update)
+	return nil
+}
+
+func (m *mockSubscribeTopologyServer) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockSubscribeTopologyServer) getUpdates() []*management.TopologyUpdate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make([]*management.TopologyUpdate, len(m.updates))
+	copy(result, m.updates)
+	return result
+}
+
+// TestSubscribeTopology tests the SubscribeTopology gRPC handler
+// Note: This is a smoke test only due to complexity of mocking streaming gRPC
+func TestSubscribeTopology(t *testing.T) {
+	t.Run("context cancellation", func(t *testing.T) {
+		processor, err := New(Config{
+			ProcessorID: "test-processor",
+			ListenAddr:  "localhost:50051",
+			MaxHunters:  10,
+		})
+		require.NoError(t, err)
+		defer processor.Shutdown()
+
+		// Create stream with cancelled context
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		stream := &mockSubscribeTopologyServer{
+			ctx:     ctx,
+			updates: make([]*management.TopologyUpdate, 0),
+		}
+
+		err = processor.SubscribeTopology(&management.TopologySubscribeRequest{}, stream)
+		require.NoError(t, err)
+	})
+}

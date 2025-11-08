@@ -195,8 +195,8 @@ func TestRegisterHunter(t *testing.T) {
 - Coverage ≥ 70% for processor package
 - All tests pass with `-race`
 
-**Status:** In Progress (Day 5-7/15 - Part 5)
-**Coverage Improvement:** 49.7% → 57.3% (+7.6%)
+**Status:** In Progress (Day 5-7/15 - Part 6)
+**Coverage Improvement:** 49.7% → 63.1% (+13.4%)
 **RegisterHunter Coverage:** 90.9%
 **StreamPackets Coverage:** 100.0%
 **SubscribePackets Coverage:** 97.3%
@@ -204,6 +204,22 @@ func TestRegisterHunter(t *testing.T) {
 **DeleteFilter Coverage:** 100.0%
 **GetHunterStatus Coverage:** 100.0%
 **ListAvailableHunters Coverage:** 100.0%
+**GetFilters Coverage:** 100.0%
+**GetTopology Coverage:** ~70%
+**RequestAuthToken Coverage:** 63.6%
+**SubscribeFilters Coverage:** ~50% (smoke test only)
+**SubscribeTopology Coverage:** ~50% (smoke test only)
+
+**Completed (2025-11-08 - Part 6):**
+- Added low-priority gRPC handler tests to `processor_grpc_handlers_test.go`
+- 5 new test functions covering remaining handlers:
+  - TestGetFilters (4 test cases): No filters, single global filter, multiple filters with targeting, disabled filters
+  - TestSubscribeFilters (1 test case): Context cancellation smoke test
+  - TestGetTopology (3 test cases): Single processor no upstream, multiple hunters, no hunters registered
+  - TestRequestAuthToken (1 test case): Fails with internal error when not configured
+  - TestSubscribeTopology (1 test case): Context cancellation smoke test
+- All tests pass with `-race` flag
+- Overall processor package coverage: 63.1% (+5.8%)
 
 **Completed (2025-11-08 - Part 5):**
 - Added comprehensive GetHunterStatus and ListAvailableHunters tests to `processor_grpc_handlers_test.go`

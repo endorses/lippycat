@@ -511,6 +511,7 @@ func startTestProcessor(ctx context.Context, addr string) (*processor.Processor,
 		ListenAddr:      addr,
 		EnableDetection: false,
 		MaxHunters:      100,
+		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
 	}
 
 	proc, err := processor.New(config)

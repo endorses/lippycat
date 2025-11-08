@@ -468,6 +468,7 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 		TLSEnabled:     false, // Insecure in production
 		MaxHunters:     10,
 		MaxSubscribers: 5,
+		FilterFile:     "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
 	}
 
 	proc, err := processor.New(*config)
@@ -502,6 +503,7 @@ func startTLSProcessor(ctx context.Context, addr, certsDir string, requireClient
 		TLSClientAuth:  requireClientAuth,
 		MaxHunters:     10,
 		MaxSubscribers: 5,
+		FilterFile:     "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
 	}
 
 	proc, err := processor.New(*config)

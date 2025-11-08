@@ -559,6 +559,7 @@ func TestIntegration_MultiLevel_HierarchyDepthLimit(t *testing.T) {
 			UpstreamAddr:    upstreamAddr,
 			EnableDetection: false,
 			MaxHunters:      100,
+			FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
 		}
 
 		proc, err := processor.New(config)
@@ -692,6 +693,7 @@ func startProcessorHierarchy(ctx context.Context, addr, processorID, upstreamAdd
 		ListenAddr:      addr,
 		EnableDetection: false,
 		MaxHunters:      100,
+		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
 	}
 
 	// If upstream address is provided, configure as downstream processor
@@ -768,6 +770,7 @@ func startProcessorHierarchyWithTLS(ctx context.Context, addr, processorID, upst
 		ListenAddr:      addr,
 		EnableDetection: false,
 		MaxHunters:      100,
+		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
 	}
 
 	// If upstream address is provided, configure as downstream processor

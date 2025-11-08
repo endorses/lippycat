@@ -878,3 +878,520 @@ func TestStreamPackets_EmptyBatch(t *testing.T) {
 	defer mockStream.mu.Unlock()
 	assert.Len(t, mockStream.sentControls, 1)
 }
+
+// mockSubscribePacketsServer is a mock implementation of DataService_SubscribePacketsServer for testing
+type mockSubscribePacketsServer struct {
+	data.DataService_SubscribePacketsServer
+	ctx         context.Context
+	sentBatches []*data.PacketBatch
+	mu          sync.Mutex
+	sendErr     error // Error to return from Send()
+	sendDelay   time.Duration
+	cancelAfter int // Cancel context after N Send() calls (0 = don't cancel)
+	sendCount   int
+}
+
+func (m *mockSubscribePacketsServer) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockSubscribePacketsServer) Send(batch *data.PacketBatch) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if we should cancel context
+	if m.cancelAfter > 0 && m.sendCount >= m.cancelAfter {
+		return context.Canceled
+	}
+
+	m.sendCount++
+
+	// Return configured error
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+
+	// Add delay if configured (for slow subscriber simulation)
+	if m.sendDelay > 0 {
+		m.mu.Unlock()
+		time.Sleep(m.sendDelay)
+		m.mu.Lock()
+	}
+
+	m.sentBatches = append(m.sentBatches, batch)
+	return nil
+}
+
+func (m *mockSubscribePacketsServer) SendMsg(msg interface{}) error {
+	return nil
+}
+
+func (m *mockSubscribePacketsServer) RecvMsg(msg interface{}) error {
+	return nil
+}
+
+func (m *mockSubscribePacketsServer) SetHeader(metadata.MD) error {
+	return nil
+}
+
+func (m *mockSubscribePacketsServer) SendHeader(metadata.MD) error {
+	return nil
+}
+
+func (m *mockSubscribePacketsServer) SetTrailer(metadata.MD) {}
+
+// TestSubscribePackets_Success tests successful packet subscription
+func TestSubscribePackets_Success(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create mock stream
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockSubscribePacketsServer{
+		ctx: ctx,
+	}
+
+	// Create subscribe request
+	req := &data.SubscribeRequest{
+		ClientId: "test-client-1",
+	}
+
+	// Run SubscribePackets in goroutine (it blocks until disconnect)
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.SubscribePackets(req, mockStream)
+	}()
+
+	// Wait for subscriber to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify subscriber was added
+	assert.Equal(t, 1, processor.subscriberManager.Count())
+
+	// Simulate packet batch arriving (directly send to subscriber channel)
+	batch := &data.PacketBatch{
+		HunterId:    "hunter-1",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets: []*data.CapturedPacket{
+			{
+				Data:           []byte{0x01, 0x02, 0x03},
+				TimestampNs:    time.Now().UnixNano(),
+				CaptureLength:  3,
+				OriginalLength: 3,
+				LinkType:       1,
+			},
+		},
+	}
+
+	// Broadcast to all subscribers
+	processor.subscriberManager.Broadcast(batch)
+
+	// Wait for batch to be sent
+	time.Sleep(100 * time.Millisecond)
+
+	// Cancel context to stop subscription
+	cancel()
+
+	// Wait for completion
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("SubscribePackets timed out")
+	}
+
+	// Verify batch was sent
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	require.Len(t, mockStream.sentBatches, 1)
+	assert.Equal(t, "hunter-1", mockStream.sentBatches[0].HunterId)
+	assert.Equal(t, uint64(1), mockStream.sentBatches[0].Sequence)
+
+	// Verify subscriber was removed
+	assert.Equal(t, 0, processor.subscriberManager.Count())
+}
+
+// TestSubscribePackets_WithHunterFilter tests subscription with hunter ID filter
+func TestSubscribePackets_WithHunterFilter(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create mock stream
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockSubscribePacketsServer{
+		ctx: ctx,
+	}
+
+	// Create subscribe request with hunter filter (only subscribe to hunter-2)
+	req := &data.SubscribeRequest{
+		ClientId:        "test-client-filter",
+		HunterIds:       []string{"hunter-2"},
+		HasHunterFilter: true,
+	}
+
+	// Run SubscribePackets in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.SubscribePackets(req, mockStream)
+	}()
+
+	// Wait for subscriber to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Send batches from different hunters
+	batch1 := &data.PacketBatch{
+		HunterId:    "hunter-1",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{{Data: []byte{0x01}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+	}
+
+	batch2 := &data.PacketBatch{
+		HunterId:    "hunter-2",
+		Sequence:    2,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{{Data: []byte{0x02}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+	}
+
+	batch3 := &data.PacketBatch{
+		HunterId:    "hunter-3",
+		Sequence:    3,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{{Data: []byte{0x03}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+	}
+
+	// Broadcast all batches
+	processor.subscriberManager.Broadcast(batch1)
+	processor.subscriberManager.Broadcast(batch2)
+	processor.subscriberManager.Broadcast(batch3)
+
+	// Wait for batches to be processed
+	time.Sleep(200 * time.Millisecond)
+
+	// Cancel context
+	cancel()
+
+	// Wait for completion
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("SubscribePackets timed out")
+	}
+
+	// Verify only hunter-2's batch was sent (hunter filter)
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	require.Len(t, mockStream.sentBatches, 1)
+	assert.Equal(t, "hunter-2", mockStream.sentBatches[0].HunterId)
+	assert.Equal(t, uint64(2), mockStream.sentBatches[0].Sequence)
+}
+
+// TestSubscribePackets_EmptyHunterFilter tests subscription with empty hunter filter (no packets)
+func TestSubscribePackets_EmptyHunterFilter(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create mock stream
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockSubscribePacketsServer{
+		ctx: ctx,
+	}
+
+	// Create subscribe request with empty hunter filter (subscribe to no hunters)
+	req := &data.SubscribeRequest{
+		ClientId:        "test-client-empty-filter",
+		HunterIds:       []string{}, // Empty list
+		HasHunterFilter: true,       // Explicitly set filter
+	}
+
+	// Run SubscribePackets in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.SubscribePackets(req, mockStream)
+	}()
+
+	// Wait for subscriber to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Send batch from any hunter
+	batch := &data.PacketBatch{
+		HunterId:    "hunter-1",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{{Data: []byte{0x01}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+	}
+
+	// Broadcast batch
+	processor.subscriberManager.Broadcast(batch)
+
+	// Wait for potential processing
+	time.Sleep(200 * time.Millisecond)
+
+	// Cancel context
+	cancel()
+
+	// Wait for completion
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("SubscribePackets timed out")
+	}
+
+	// Verify no batches were sent (empty filter = subscribe to no hunters)
+	mockStream.mu.Lock()
+	defer mockStream.mu.Unlock()
+	assert.Len(t, mockStream.sentBatches, 0)
+}
+
+// TestSubscribePackets_DisconnectHandling tests subscriber disconnect
+func TestSubscribePackets_DisconnectHandling(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create mock stream with early cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	mockStream := &mockSubscribePacketsServer{
+		ctx: ctx,
+	}
+
+	// Create subscribe request
+	req := &data.SubscribeRequest{
+		ClientId: "test-client-disconnect",
+	}
+
+	// Run SubscribePackets in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.SubscribePackets(req, mockStream)
+	}()
+
+	// Wait for subscriber to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify subscriber was added
+	assert.Equal(t, 1, processor.subscriberManager.Count())
+
+	// Cancel context immediately (simulating client disconnect)
+	cancel()
+
+	// Wait for completion
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("SubscribePackets timed out")
+	}
+
+	// Verify subscriber was removed
+	assert.Equal(t, 0, processor.subscriberManager.Count())
+}
+
+// TestSubscribePackets_SendError tests handling of Send() errors (slow subscriber)
+func TestSubscribePackets_SendError(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create mock stream that returns error on Send()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockSubscribePacketsServer{
+		ctx:     ctx,
+		sendErr: errors.New("mock send error"),
+	}
+
+	// Create subscribe request
+	req := &data.SubscribeRequest{
+		ClientId: "test-client-send-error",
+	}
+
+	// Run SubscribePackets in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.SubscribePackets(req, mockStream)
+	}()
+
+	// Wait for subscriber to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Send batch
+	batch := &data.PacketBatch{
+		HunterId:    "hunter-1",
+		Sequence:    1,
+		TimestampNs: time.Now().UnixNano(),
+		Packets:     []*data.CapturedPacket{{Data: []byte{0x01}, TimestampNs: time.Now().UnixNano(), CaptureLength: 1, OriginalLength: 1, LinkType: 1}},
+	}
+
+	// Broadcast batch
+	processor.subscriberManager.Broadcast(batch)
+
+	// Wait for completion (should error quickly)
+	select {
+	case err := <-done:
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "mock send error")
+	case <-time.After(10 * time.Second):
+		t.Fatal("SubscribePackets timed out")
+	}
+
+	// Verify subscriber was removed
+	assert.Equal(t, 0, processor.subscriberManager.Count())
+}
+
+// TestSubscribePackets_MaxSubscribersLimit tests subscriber limit enforcement
+func TestSubscribePackets_MaxSubscribersLimit(t *testing.T) {
+	// Create processor with max 2 subscribers
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 2,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Add first subscriber
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel1()
+
+	mockStream1 := &mockSubscribePacketsServer{ctx: ctx1}
+	req1 := &data.SubscribeRequest{ClientId: "subscriber-1"}
+
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- processor.SubscribePackets(req1, mockStream1)
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	// Add second subscriber
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	mockStream2 := &mockSubscribePacketsServer{ctx: ctx2}
+	req2 := &data.SubscribeRequest{ClientId: "subscriber-2"}
+
+	done2 := make(chan error, 1)
+	go func() {
+		done2 <- processor.SubscribePackets(req2, mockStream2)
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify we have 2 subscribers
+	assert.Equal(t, 2, processor.subscriberManager.Count())
+
+	// Try to add third subscriber - should fail
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel3()
+
+	mockStream3 := &mockSubscribePacketsServer{ctx: ctx3}
+	req3 := &data.SubscribeRequest{ClientId: "subscriber-3"}
+
+	err = processor.SubscribePackets(req3, mockStream3)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ResourceExhausted")
+	assert.Contains(t, err.Error(), "maximum number of subscribers")
+
+	// Cleanup
+	cancel1()
+	cancel2()
+	<-done1
+	<-done2
+
+	// Verify subscribers were removed
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, 0, processor.subscriberManager.Count())
+}
+
+// TestSubscribePackets_AutoGeneratedClientID tests auto-generation of client IDs
+func TestSubscribePackets_AutoGeneratedClientID(t *testing.T) {
+	// Create processor
+	processor, err := New(Config{
+		ProcessorID:    "test-processor",
+		ListenAddr:     "localhost:50051",
+		MaxHunters:     10,
+		MaxSubscribers: 10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Create mock stream
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	mockStream := &mockSubscribePacketsServer{
+		ctx: ctx,
+	}
+
+	// Create subscribe request without client ID
+	req := &data.SubscribeRequest{
+		ClientId: "", // Empty - should be auto-generated
+	}
+
+	// Run SubscribePackets in goroutine
+	done := make(chan error, 1)
+	go func() {
+		done <- processor.SubscribePackets(req, mockStream)
+	}()
+
+	// Wait for subscriber to be registered
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify subscriber was added (with auto-generated ID)
+	assert.Equal(t, 1, processor.subscriberManager.Count())
+
+	// Cancel context
+	cancel()
+
+	// Wait for completion
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("SubscribePackets timed out")
+	}
+}

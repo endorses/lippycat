@@ -142,11 +142,14 @@ The processor was refactored using **Option A: File Splitting** into 4 focused f
    - [x] Hunter disconnect handling
    - [x] Flow control signals
    - [x] Backpressure handling
-3. **SubscribeToPackets** - TUI client subscription
-   - [ ] Successful subscription
-   - [ ] Subscription with hunter filter
-   - [ ] Subscriber disconnect
-   - [ ] Slow subscriber handling
+3. **SubscribePackets** - TUI client subscription
+   - [x] Successful subscription
+   - [x] Subscription with hunter filter (specific hunters)
+   - [x] Subscription with empty hunter filter (no packets)
+   - [x] Subscriber disconnect
+   - [x] Send error handling (slow subscriber)
+   - [x] Max subscribers limit enforcement
+   - [x] Auto-generated client ID
 4. **CreateFilter, UpdateFilter, DeleteFilter**
    - [ ] Valid filter operations
    - [ ] Invalid filter patterns
@@ -192,31 +195,34 @@ func TestRegisterHunter(t *testing.T) {
 - Coverage ≥ 70% for processor package
 - All tests pass with `-race`
 
-**Status:** In Progress (Day 5-7/15)
-**Coverage Improvement:** 49.7% → 52.1% (+2.4%)
+**Status:** In Progress (Day 5-7/15 - Part 3)
+**Coverage Improvement:** 49.7% → 56.0% (+6.3%)
 **RegisterHunter Coverage:** 90.9%
 **StreamPackets Coverage:** 100.0%
+**SubscribePackets Coverage:** 97.3%
+
+**Completed (2025-11-08 - Part 3):**
+- Added comprehensive SubscribePackets tests to `processor_grpc_handlers_test.go`
+- 7 test functions covering all subscription scenarios:
+  - Successful packet subscription (basic flow)
+  - Subscription with hunter filter (specific hunters only)
+  - Subscription with empty hunter filter (no packets sent)
+  - Subscriber disconnect handling (context cancellation)
+  - Send error handling (slow/failing subscriber)
+  - Max subscribers limit enforcement
+  - Auto-generated client ID
+- Created `mockSubscribePacketsServer` for testing server streams
+- All tests pass with `-race` flag
+- SubscribePackets handler now has 97.3% coverage
 
 **Completed (2025-11-07):**
 - Created `processor_grpc_handlers_test.go` with comprehensive RegisterHunter tests
-- 8 test functions covering all registration scenarios:
-  - Successful registration (basic and with GPU capabilities)
-  - Hunter reconnection (doesn't count against max limit)
-  - Max hunters limit enforcement
-  - Registration with filter distribution (capability-based)
-  - Processor config validation
-  - Concurrent registration (50 hunters)
+- 8 test functions covering all registration scenarios
 - Added comprehensive StreamPackets tests with mock bidirectional stream
-- 6 test functions covering all streaming scenarios:
-  - Successful packet streaming from hunter
-  - Multiple concurrent hunters streaming (5 concurrent streams)
-  - Hunter disconnect handling (context cancellation)
-  - Flow control signals (CONTINUE, SLOW, PAUSE)
-  - Send() error handling (continues despite errors)
-  - Empty batch handling
+- 6 test functions covering all streaming scenarios
 - All tests pass with `-race` flag
 
-**Next:** Continue with SubscribeToPackets, and other gRPC handlers
+**Next:** Continue with CreateFilter, UpdateFilter, DeleteFilter, and other gRPC handlers
 
 ---
 

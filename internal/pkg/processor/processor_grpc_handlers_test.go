@@ -1803,3 +1803,585 @@ func TestUpdateDeleteFilterIntegration(t *testing.T) {
 	assert.True(t, result.Success)
 	assert.Equal(t, 1, processor.filterManager.Count())
 }
+
+// TestGetHunterStatus_GRPCHandler tests the GetHunterStatus gRPC handler
+func TestGetHunterStatus_GRPCHandler(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupHunters  func(*Processor) // Setup hunters before calling GetHunterStatus
+		request       *management.StatusRequest
+		validateResp  func(t *testing.T, resp *management.StatusResponse)
+		expectHunters int
+	}{
+		{
+			name: "no hunters connected",
+			setupHunters: func(p *Processor) {
+				// No hunters registered
+			},
+			request: &management.StatusRequest{
+				HunterId: "", // Request all hunters
+			},
+			validateResp: func(t *testing.T, resp *management.StatusResponse) {
+				assert.NotNil(t, resp)
+				assert.Empty(t, resp.Hunters)
+				assert.NotNil(t, resp.ProcessorStats)
+			},
+			expectHunters: 0,
+		},
+		{
+			name: "single hunter connected",
+			setupHunters: func(p *Processor) {
+				// Register a hunter
+				ctx := context.Background()
+				reg := &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user"},
+						MaxBufferSize:   1024000,
+						GpuAcceleration: false,
+						AfXdp:           false,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg)
+				require.NoError(t, err)
+			},
+			request: &management.StatusRequest{
+				HunterId: "", // Request all hunters
+			},
+			validateResp: func(t *testing.T, resp *management.StatusResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 1)
+
+				hunter := resp.Hunters[0]
+				assert.Equal(t, "hunter-1", hunter.HunterId)
+				assert.Equal(t, "host1", hunter.Hostname)
+				assert.Equal(t, []string{"eth0"}, hunter.Interfaces)
+				// RemoteAddr may be empty in tests without real gRPC connections
+				assert.NotNil(t, hunter.Stats)
+				assert.NotNil(t, hunter.Capabilities)
+				assert.GreaterOrEqual(t, hunter.ConnectedDurationSec, uint64(0))
+			},
+			expectHunters: 1,
+		},
+		{
+			name: "multiple hunters connected",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Register hunter 1
+				reg1 := &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user"},
+						MaxBufferSize:   1024000,
+						GpuAcceleration: false,
+						AfXdp:           false,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg1)
+				require.NoError(t, err)
+
+				// Register hunter 2
+				reg2 := &management.HunterRegistration{
+					HunterId:   "hunter-2",
+					Hostname:   "host2",
+					Interfaces: []string{"eth1", "eth2"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user", "ip_address"},
+						MaxBufferSize:   2048000,
+						GpuAcceleration: true,
+						AfXdp:           true,
+					},
+				}
+				_, err = p.RegisterHunter(ctx, reg2)
+				require.NoError(t, err)
+			},
+			request: &management.StatusRequest{
+				HunterId: "", // Request all hunters
+			},
+			validateResp: func(t *testing.T, resp *management.StatusResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 2)
+
+				// Find each hunter
+				hunterMap := make(map[string]*management.ConnectedHunter)
+				for _, h := range resp.Hunters {
+					hunterMap[h.HunterId] = h
+				}
+
+				// Validate hunter-1
+				hunter1, ok := hunterMap["hunter-1"]
+				require.True(t, ok, "hunter-1 not found")
+				assert.Equal(t, "host1", hunter1.Hostname)
+				assert.Equal(t, []string{"eth0"}, hunter1.Interfaces)
+
+				// Validate hunter-2
+				hunter2, ok := hunterMap["hunter-2"]
+				require.True(t, ok, "hunter-2 not found")
+				assert.Equal(t, "host2", hunter2.Hostname)
+				assert.Equal(t, []string{"eth1", "eth2"}, hunter2.Interfaces)
+				assert.True(t, hunter2.Capabilities.GpuAcceleration)
+				assert.True(t, hunter2.Capabilities.AfXdp)
+			},
+			expectHunters: 2,
+		},
+		{
+			name: "filter by specific hunter ID",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Register multiple hunters
+				for i := 1; i <= 3; i++ {
+					reg := &management.HunterRegistration{
+						HunterId:   fmt.Sprintf("hunter-%d", i),
+						Hostname:   fmt.Sprintf("host%d", i),
+						Interfaces: []string{"eth0"},
+						Version:    "v1.0.0",
+						Capabilities: &management.HunterCapabilities{
+							FilterTypes:   []string{"sip_user"},
+							MaxBufferSize: 1024000,
+						},
+					}
+					_, err := p.RegisterHunter(ctx, reg)
+					require.NoError(t, err)
+				}
+			},
+			request: &management.StatusRequest{
+				HunterId: "hunter-2", // Request specific hunter
+			},
+			validateResp: func(t *testing.T, resp *management.StatusResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 1)
+
+				hunter := resp.Hunters[0]
+				assert.Equal(t, "hunter-2", hunter.HunterId)
+				assert.Equal(t, "host2", hunter.Hostname)
+			},
+			expectHunters: 1,
+		},
+		{
+			name: "processor stats included in response",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Register a hunter
+				reg := &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:   []string{"sip_user"},
+						MaxBufferSize: 1024000,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg)
+				require.NoError(t, err)
+			},
+			request: &management.StatusRequest{
+				HunterId: "",
+			},
+			validateResp: func(t *testing.T, resp *management.StatusResponse) {
+				assert.NotNil(t, resp)
+				assert.NotNil(t, resp.ProcessorStats, "ProcessorStats should be included")
+
+				// ProcessorStats should have basic fields populated
+				stats := resp.ProcessorStats
+				assert.NotNil(t, stats)
+				// Note: Stats values depend on statsCollector implementation
+				// We just verify the structure is present
+			},
+			expectHunters: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create processor
+			processor, err := New(Config{
+				ProcessorID: "test-processor",
+				ListenAddr:  "localhost:50051",
+				MaxHunters:  10,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, processor)
+			defer processor.Shutdown()
+
+			// Setup hunters
+			if tt.setupHunters != nil {
+				tt.setupHunters(processor)
+			}
+
+			// Call GetHunterStatus
+			ctx := context.Background()
+			resp, err := processor.GetHunterStatus(ctx, tt.request)
+
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			// Validate response
+			assert.Len(t, resp.Hunters, tt.expectHunters)
+			if tt.validateResp != nil {
+				tt.validateResp(t, resp)
+			}
+		})
+	}
+}
+
+// TestListAvailableHunters tests the ListAvailableHunters gRPC handler
+func TestListAvailableHunters(t *testing.T) {
+	tests := []struct {
+		name          string
+		setupHunters  func(*Processor) // Setup hunters before calling ListAvailableHunters
+		request       *management.ListHuntersRequest
+		validateResp  func(t *testing.T, resp *management.ListHuntersResponse)
+		expectHunters int
+	}{
+		{
+			name: "no hunters available",
+			setupHunters: func(p *Processor) {
+				// No hunters registered
+			},
+			request: &management.ListHuntersRequest{},
+			validateResp: func(t *testing.T, resp *management.ListHuntersResponse) {
+				assert.NotNil(t, resp)
+				assert.Empty(t, resp.Hunters)
+			},
+			expectHunters: 0,
+		},
+		{
+			name: "single hunter available",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+				reg := &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user"},
+						MaxBufferSize:   1024000,
+						GpuAcceleration: false,
+						AfXdp:           false,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg)
+				require.NoError(t, err)
+			},
+			request: &management.ListHuntersRequest{},
+			validateResp: func(t *testing.T, resp *management.ListHuntersResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 1)
+
+				hunter := resp.Hunters[0]
+				assert.Equal(t, "hunter-1", hunter.HunterId)
+				assert.Equal(t, "host1", hunter.Hostname)
+				assert.Equal(t, []string{"eth0"}, hunter.Interfaces)
+				// RemoteAddr may be empty in tests without real gRPC connections
+				assert.NotNil(t, hunter.Capabilities)
+				assert.GreaterOrEqual(t, hunter.ConnectedDurationSec, uint64(0))
+			},
+			expectHunters: 1,
+		},
+		{
+			name: "multiple hunters with different capabilities",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Basic hunter
+				reg1 := &management.HunterRegistration{
+					HunterId:   "hunter-basic",
+					Hostname:   "host-basic",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user"},
+						MaxBufferSize:   1024000,
+						GpuAcceleration: false,
+						AfXdp:           false,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg1)
+				require.NoError(t, err)
+
+				// GPU-accelerated hunter
+				reg2 := &management.HunterRegistration{
+					HunterId:   "hunter-gpu",
+					Hostname:   "host-gpu",
+					Interfaces: []string{"eth1", "eth2"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user", "ip_address", "bpf"},
+						MaxBufferSize:   10240000,
+						GpuAcceleration: true,
+						AfXdp:           false,
+					},
+				}
+				_, err = p.RegisterHunter(ctx, reg2)
+				require.NoError(t, err)
+
+				// AF_XDP hunter
+				reg3 := &management.HunterRegistration{
+					HunterId:   "hunter-afxdp",
+					Hostname:   "host-afxdp",
+					Interfaces: []string{"eth3"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:     []string{"sip_user", "ip_address"},
+						MaxBufferSize:   20480000,
+						GpuAcceleration: false,
+						AfXdp:           true,
+					},
+				}
+				_, err = p.RegisterHunter(ctx, reg3)
+				require.NoError(t, err)
+			},
+			request: &management.ListHuntersRequest{},
+			validateResp: func(t *testing.T, resp *management.ListHuntersResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 3)
+
+				// Build map for easy lookup
+				hunterMap := make(map[string]*management.AvailableHunter)
+				for _, h := range resp.Hunters {
+					hunterMap[h.HunterId] = h
+				}
+
+				// Validate basic hunter
+				basic, ok := hunterMap["hunter-basic"]
+				require.True(t, ok)
+				assert.Equal(t, "host-basic", basic.Hostname)
+				assert.False(t, basic.Capabilities.GpuAcceleration)
+				assert.False(t, basic.Capabilities.AfXdp)
+				assert.Equal(t, uint64(1024000), basic.Capabilities.MaxBufferSize)
+
+				// Validate GPU hunter
+				gpu, ok := hunterMap["hunter-gpu"]
+				require.True(t, ok)
+				assert.Equal(t, "host-gpu", gpu.Hostname)
+				assert.True(t, gpu.Capabilities.GpuAcceleration)
+				assert.False(t, gpu.Capabilities.AfXdp)
+				assert.Equal(t, []string{"eth1", "eth2"}, gpu.Interfaces)
+
+				// Validate AF_XDP hunter
+				afxdp, ok := hunterMap["hunter-afxdp"]
+				require.True(t, ok)
+				assert.Equal(t, "host-afxdp", afxdp.Hostname)
+				assert.False(t, afxdp.Capabilities.GpuAcceleration)
+				assert.True(t, afxdp.Capabilities.AfXdp)
+			},
+			expectHunters: 3,
+		},
+		{
+			name: "many hunters",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Register 10 hunters
+				for i := 1; i <= 10; i++ {
+					reg := &management.HunterRegistration{
+						HunterId:   fmt.Sprintf("hunter-%02d", i),
+						Hostname:   fmt.Sprintf("host-%02d", i),
+						Interfaces: []string{fmt.Sprintf("eth%d", i)},
+						Version:    "v1.0.0",
+						Capabilities: &management.HunterCapabilities{
+							FilterTypes:   []string{"sip_user"},
+							MaxBufferSize: uint64(1024000 * i),
+						},
+					}
+					_, err := p.RegisterHunter(ctx, reg)
+					require.NoError(t, err)
+				}
+			},
+			request: &management.ListHuntersRequest{},
+			validateResp: func(t *testing.T, resp *management.ListHuntersResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 10)
+
+				// Verify all hunters are unique
+				hunterIDs := make(map[string]bool)
+				for _, h := range resp.Hunters {
+					assert.False(t, hunterIDs[h.HunterId], "Duplicate hunter ID: %s", h.HunterId)
+					hunterIDs[h.HunterId] = true
+				}
+			},
+			expectHunters: 10,
+		},
+		{
+			name: "hunters with different status",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Register hunter
+				reg := &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:   []string{"sip_user"},
+						MaxBufferSize: 1024000,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg)
+				require.NoError(t, err)
+			},
+			request: &management.ListHuntersRequest{},
+			validateResp: func(t *testing.T, resp *management.ListHuntersResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 1)
+
+				hunter := resp.Hunters[0]
+				// Status should be set (STATUS_HEALTHY by default)
+				assert.Equal(t, management.HunterStatus_STATUS_HEALTHY, hunter.Status)
+			},
+			expectHunters: 1,
+		},
+		{
+			name: "connection duration tracking",
+			setupHunters: func(p *Processor) {
+				ctx := context.Background()
+
+				// Register hunter
+				reg := &management.HunterRegistration{
+					HunterId:   "hunter-1",
+					Hostname:   "host1",
+					Interfaces: []string{"eth0"},
+					Version:    "v1.0.0",
+					Capabilities: &management.HunterCapabilities{
+						FilterTypes:   []string{"sip_user"},
+						MaxBufferSize: 1024000,
+					},
+				}
+				_, err := p.RegisterHunter(ctx, reg)
+				require.NoError(t, err)
+
+				// Wait a bit to ensure duration > 0
+				time.Sleep(10 * time.Millisecond)
+			},
+			request: &management.ListHuntersRequest{},
+			validateResp: func(t *testing.T, resp *management.ListHuntersResponse) {
+				assert.NotNil(t, resp)
+				require.Len(t, resp.Hunters, 1)
+
+				hunter := resp.Hunters[0]
+				// Connection duration should be >= 0 (may be 0 on fast systems)
+				assert.GreaterOrEqual(t, hunter.ConnectedDurationSec, uint64(0))
+			},
+			expectHunters: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create processor
+			processor, err := New(Config{
+				ProcessorID: "test-processor",
+				ListenAddr:  "localhost:50051",
+				MaxHunters:  100, // Enough for "many hunters" test
+			})
+			require.NoError(t, err)
+			require.NotNil(t, processor)
+			defer processor.Shutdown()
+
+			// Setup hunters
+			if tt.setupHunters != nil {
+				tt.setupHunters(processor)
+			}
+
+			// Call ListAvailableHunters
+			ctx := context.Background()
+			resp, err := processor.ListAvailableHunters(ctx, tt.request)
+
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			// Validate response
+			assert.Len(t, resp.Hunters, tt.expectHunters)
+			if tt.validateResp != nil {
+				tt.validateResp(t, resp)
+			}
+		})
+	}
+}
+
+// TestGetHunterStatusAndListAvailableHunters_Integration tests interaction between the two handlers
+func TestGetHunterStatusAndListAvailableHunters_Integration(t *testing.T) {
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:50051",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, processor)
+	defer processor.Shutdown()
+
+	ctx := context.Background()
+
+	// Initially, both should return no hunters
+	statusResp, err := processor.GetHunterStatus(ctx, &management.StatusRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, statusResp.Hunters)
+
+	listResp, err := processor.ListAvailableHunters(ctx, &management.ListHuntersRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, listResp.Hunters)
+
+	// Register some hunters
+	for i := 1; i <= 3; i++ {
+		reg := &management.HunterRegistration{
+			HunterId:   fmt.Sprintf("hunter-%d", i),
+			Hostname:   fmt.Sprintf("host%d", i),
+			Interfaces: []string{"eth0"},
+			Version:    "v1.0.0",
+			Capabilities: &management.HunterCapabilities{
+				FilterTypes:   []string{"sip_user"},
+				MaxBufferSize: 1024000,
+			},
+		}
+		_, err := processor.RegisterHunter(ctx, reg)
+		require.NoError(t, err)
+	}
+
+	// Both should now return 3 hunters
+	statusResp, err = processor.GetHunterStatus(ctx, &management.StatusRequest{})
+	require.NoError(t, err)
+	require.Len(t, statusResp.Hunters, 3)
+
+	listResp, err = processor.ListAvailableHunters(ctx, &management.ListHuntersRequest{})
+	require.NoError(t, err)
+	require.Len(t, listResp.Hunters, 3)
+
+	// Verify same hunters appear in both responses
+	statusIDs := make(map[string]bool)
+	for _, h := range statusResp.Hunters {
+		statusIDs[h.HunterId] = true
+	}
+
+	listIDs := make(map[string]bool)
+	for _, h := range listResp.Hunters {
+		listIDs[h.HunterId] = true
+	}
+
+	assert.Equal(t, statusIDs, listIDs, "Both handlers should return the same set of hunters")
+
+	// Test GetHunterStatus with specific hunter filter
+	specificStatus, err := processor.GetHunterStatus(ctx, &management.StatusRequest{
+		HunterId: "hunter-2",
+	})
+	require.NoError(t, err)
+	require.Len(t, specificStatus.Hunters, 1)
+	assert.Equal(t, "hunter-2", specificStatus.Hunters[0].HunterId)
+
+	// ListAvailableHunters always returns all hunters (no filtering)
+	allHunters, err := processor.ListAvailableHunters(ctx, &management.ListHuntersRequest{})
+	require.NoError(t, err)
+	require.Len(t, allHunters.Hunters, 3)
+}

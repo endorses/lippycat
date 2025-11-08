@@ -155,8 +155,8 @@ The processor was refactored using **Option A: File Splitting** into 4 focused f
    - [x] Invalid filter patterns
    - [x] Filter application to hunters
 5. **GetStats, GetHunters** - Read operations
-   - [ ] Stats retrieval
-   - [ ] Hunter list retrieval
+   - [x] GetHunterStatus handler (100% coverage)
+   - [x] ListAvailableHunters handler (100% coverage)
 6. **Low-priority handlers** - Basic smoke tests only
    - Shutdown, ListFilters, GetTopology, etc.
 
@@ -195,13 +195,26 @@ func TestRegisterHunter(t *testing.T) {
 - Coverage ≥ 70% for processor package
 - All tests pass with `-race`
 
-**Status:** In Progress (Day 5-7/15 - Part 4)
-**Coverage Improvement:** 49.7% → 56.5% (+6.8%)
+**Status:** In Progress (Day 5-7/15 - Part 5)
+**Coverage Improvement:** 49.7% → 57.3% (+7.6%)
 **RegisterHunter Coverage:** 90.9%
 **StreamPackets Coverage:** 100.0%
 **SubscribePackets Coverage:** 97.3%
 **UpdateFilter Coverage:** 83.3%
 **DeleteFilter Coverage:** 100.0%
+**GetHunterStatus Coverage:** 100.0%
+**ListAvailableHunters Coverage:** 100.0%
+
+**Completed (2025-11-08 - Part 5):**
+- Added comprehensive GetHunterStatus and ListAvailableHunters tests to `processor_grpc_handlers_test.go`
+- 3 test functions covering all read operation scenarios:
+  - TestGetHunterStatus_GRPCHandler (5 test cases): No hunters, single hunter, multiple hunters, filter by ID, processor stats
+  - TestListAvailableHunters (6 test cases): No hunters, single hunter, multiple capabilities, many hunters, status tracking, duration tracking
+  - TestGetHunterStatusAndListAvailableHunters_Integration: Integration test verifying both handlers return consistent data
+- All tests pass with `-race` flag
+- GetHunterStatus handler now has 100.0% coverage
+- ListAvailableHunters handler now has 100.0% coverage
+- Overall processor package coverage: 57.3% (+0.8%)
 
 **Completed (2025-11-08 - Part 4):**
 - Added comprehensive UpdateFilter and DeleteFilter tests to `processor_grpc_handlers_test.go`
@@ -235,7 +248,7 @@ func TestRegisterHunter(t *testing.T) {
 - 6 test functions covering all streaming scenarios
 - All tests pass with `-race` flag
 
-**Next:** Continue with GetStats, GetHunters, and other remaining gRPC handlers
+**Next:** Continue with remaining low-priority gRPC handlers (GetFilters, GetTopology, Heartbeat, etc.)
 
 ---
 

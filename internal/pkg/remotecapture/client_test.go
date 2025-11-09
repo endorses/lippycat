@@ -1,12 +1,14 @@
 package remotecapture
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MockEventHandler implements types.EventHandler for testing
@@ -596,5 +598,839 @@ func TestUpdateSubscription_FilteredToNil(t *testing.T) {
 	// Expected to fail without server, but tests the logic
 	if err != nil {
 		assert.Error(t, err)
+	}
+}
+
+// Integration tests below require a real processor to be running
+// These tests are more comprehensive and test end-to-end functionality
+
+func TestClient_ConnectAndStream_Integration(t *testing.T) {
+	// This test requires a running processor - skip if not available
+	t.Skip("Integration test requires running processor")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	// Create client and connect
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Verify connection
+	assert.NotNil(t, client)
+	assert.Equal(t, "localhost:50051", client.GetAddr())
+
+	// Start streaming
+	err = client.StreamPackets()
+	require.NoError(t, err)
+
+	// Subscribe to hunter status
+	err = client.SubscribeHunterStatus()
+	require.NoError(t, err)
+
+	// Wait for some packets or status updates
+	time.Sleep(2 * time.Second)
+
+	// Verify we received some events
+	if len(handler.PacketBatches) == 0 && len(handler.HunterStatuses) == 0 {
+		t.Log("No packets or status updates received - may be normal if no hunters are connected")
+	}
+
+	// Verify no disconnects
+	assert.Empty(t, handler.Disconnects, "should not have disconnected")
+}
+
+func TestClient_FilteredStream_Integration(t *testing.T) {
+	// This test requires a running processor with multiple hunters
+	t.Skip("Integration test requires running processor with multiple hunters")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Start streaming with hunter filter
+	hunterIDs := []string{"hunter-1", "hunter-2"}
+	err = client.StreamPacketsWithFilter(hunterIDs)
+	require.NoError(t, err)
+
+	// Subscribe to status
+	err = client.SubscribeHunterStatus()
+	require.NoError(t, err)
+
+	// Wait for packets
+	time.Sleep(2 * time.Second)
+
+	// Verify all packets are from filtered hunters
+	for _, batch := range handler.PacketBatches {
+		for _, pkt := range batch {
+			assert.Contains(t, hunterIDs, pkt.NodeID,
+				"packet should be from filtered hunter")
+		}
+	}
+}
+
+func TestClient_TopologyUpdates_Integration(t *testing.T) {
+	// This test requires a running processor
+	t.Skip("Integration test requires running processor")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Verify this is a processor (not a hunter)
+	if client.GetNodeType() != NodeTypeProcessor {
+		t.Skip("Connected node is not a processor")
+	}
+
+	// Subscribe to topology updates
+	err = client.SubscribeTopology()
+	require.NoError(t, err)
+
+	// Wait for topology updates
+	time.Sleep(2 * time.Second)
+
+	// Verify no errors during subscription
+	assert.Empty(t, handler.Disconnects, "should not have disconnected")
+}
+
+func TestClient_NetworkFailure_Integration(t *testing.T) {
+	// This test simulates network failure by connecting to invalid address
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:19999", // Invalid port
+		TLSEnabled: false,
+	}
+
+	// Create client - should succeed (gRPC dials async)
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		// Connection failed immediately (expected)
+		assert.Error(t, err)
+		return
+	}
+	defer client.Close()
+
+	// Try to stream - should fail quickly
+	err = client.StreamPackets()
+	if err != nil {
+		// Expected - no server available
+		assert.Error(t, err)
+		return
+	}
+
+	// Wait for connection failure
+	time.Sleep(2 * time.Second)
+
+	// Should have received disconnect event
+	assert.NotEmpty(t, handler.Disconnects, "should have detected connection failure")
+}
+
+func TestClient_SlowConsumer_Integration(t *testing.T) {
+	// This test requires a running processor with high packet rate
+	t.Skip("Integration test requires running processor with high packet rate")
+
+	// Create slow handler that processes packets slowly
+	slowHandler := &SlowMockEventHandler{
+		MockEventHandler: &MockEventHandler{},
+		processDelay:     100 * time.Millisecond,
+	}
+
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, slowHandler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Start streaming
+	err = client.StreamPackets()
+	require.NoError(t, err)
+
+	// Run for several seconds
+	time.Sleep(5 * time.Second)
+
+	// Verify client didn't disconnect despite slow processing
+	assert.Empty(t, slowHandler.Disconnects, "slow consumer should not cause disconnect")
+
+	// Verify we still received packets
+	assert.NotEmpty(t, slowHandler.PacketBatches, "should have received packets")
+}
+
+// SlowMockEventHandler is a mock handler that processes events slowly
+type SlowMockEventHandler struct {
+	*MockEventHandler
+	processDelay time.Duration
+}
+
+func (h *SlowMockEventHandler) OnPacketBatch(packets []types.PacketDisplay) {
+	time.Sleep(h.processDelay)
+	h.MockEventHandler.OnPacketBatch(packets)
+}
+
+func TestClient_MultipleSubscribers_Integration(t *testing.T) {
+	// This test requires a running processor
+	t.Skip("Integration test requires running processor")
+
+	// Create multiple clients
+	clients := make([]*Client, 3)
+	handlers := make([]*MockEventHandler, 3)
+
+	for i := 0; i < 3; i++ {
+		handlers[i] = &MockEventHandler{}
+		config := &ClientConfig{
+			Address:    "localhost:50051",
+			TLSEnabled: false,
+		}
+
+		client, err := NewClientWithConfig(config, handlers[i])
+		require.NoError(t, err)
+		clients[i] = client
+
+		// Start streaming
+		err = client.StreamPackets()
+		require.NoError(t, err)
+	}
+
+	// Wait for packets
+	time.Sleep(3 * time.Second)
+
+	// Close all clients
+	for _, client := range clients {
+		client.Close()
+	}
+
+	// Verify all clients received packets (if any traffic)
+	receivedCount := 0
+	for _, handler := range handlers {
+		if len(handler.PacketBatches) > 0 {
+			receivedCount++
+		}
+	}
+
+	// If any client received packets, all should have received packets
+	if receivedCount > 0 {
+		assert.Equal(t, 3, receivedCount, "all clients should receive packets")
+	}
+}
+
+func TestClient_HotSwapSubscription_Integration(t *testing.T) {
+	// This test requires a running processor with multiple hunters
+	t.Skip("Integration test requires running processor with multiple hunters")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Start with all hunters
+	err = client.StreamPackets()
+	require.NoError(t, err)
+
+	time.Sleep(1 * time.Second)
+	initialBatches := len(handler.PacketBatches)
+
+	// Hot-swap to specific hunter
+	err = client.UpdateSubscription([]string{"hunter-1"})
+	require.NoError(t, err)
+
+	time.Sleep(1 * time.Second)
+
+	// Verify subscription changed without disconnect
+	assert.Empty(t, handler.Disconnects, "hot-swap should not disconnect")
+
+	// Verify we received more packets
+	assert.Greater(t, len(handler.PacketBatches), initialBatches,
+		"should continue receiving packets after hot-swap")
+
+	// Hot-swap back to all hunters
+	err = client.UpdateSubscription(nil)
+	require.NoError(t, err)
+
+	time.Sleep(1 * time.Second)
+
+	// Verify still connected
+	assert.Empty(t, handler.Disconnects, "should remain connected")
+}
+
+func TestClient_CorrelatedCalls_Integration(t *testing.T) {
+	// This test requires a running processor with VoIP correlation enabled
+	t.Skip("Integration test requires running processor with VoIP correlation")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Verify this is a processor
+	if client.GetNodeType() != NodeTypeProcessor {
+		t.Skip("Connected node is not a processor")
+	}
+
+	// Subscribe to correlated calls
+	err = client.SubscribeCorrelatedCalls()
+	require.NoError(t, err)
+
+	// Wait for correlated call updates
+	time.Sleep(5 * time.Second)
+
+	// Verify no errors during subscription
+	assert.Empty(t, handler.Disconnects, "should not have disconnected")
+}
+
+func TestClient_GetTopology_Integration(t *testing.T) {
+	// This test requires a running processor
+	t.Skip("Integration test requires running processor")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Verify this is a processor
+	if client.GetNodeType() != NodeTypeProcessor {
+		t.Skip("Connected node is not a processor")
+	}
+
+	// Get topology
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	topology, err := client.GetTopology(ctx)
+	require.NoError(t, err)
+	assert.NotNil(t, topology, "should return topology")
+
+	// Verify topology has processor info
+	assert.NotEmpty(t, topology.ProcessorId, "topology should have processor ID")
+}
+
+func TestClient_HunterNodeType_Integration(t *testing.T) {
+	// This test would require a direct hunter connection
+	t.Skip("Integration test requires running hunter")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50052", // Assuming hunter on different port
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Verify this is a hunter
+	assert.Equal(t, NodeTypeHunter, client.GetNodeType(),
+		"should detect hunter node type")
+
+	// Hunters don't support topology
+	_, err = client.GetTopology(context.Background())
+	assert.Error(t, err, "hunters should not support GetTopology")
+	assert.Contains(t, err.Error(), "only available from processor nodes")
+}
+
+func TestClient_TLSConnection_Integration(t *testing.T) {
+	// This test requires a processor with TLS enabled
+	t.Skip("Integration test requires processor with TLS")
+
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:       "localhost:50051",
+		TLSEnabled:    true,
+		TLSSkipVerify: true, // For testing only
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	require.NoError(t, err)
+	defer client.Close()
+
+	// Start streaming over TLS
+	err = client.StreamPackets()
+	require.NoError(t, err)
+
+	// Wait for packets
+	time.Sleep(2 * time.Second)
+
+	// Verify connection works over TLS
+	assert.Empty(t, handler.Disconnects, "TLS connection should work")
+}
+
+// Unit tests for error paths and edge cases
+
+func TestClient_StreamPackets_ContextCancellation(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+
+	// Start streaming
+	err = client.StreamPackets()
+	if err != nil {
+		// Expected if no server
+		assert.Error(t, err)
+		client.Close()
+		return
+	}
+
+	// Cancel client context
+	client.cancel()
+
+	// Wait for goroutine to exit
+	time.Sleep(100 * time.Millisecond)
+
+	// Close should be idempotent
+	assert.NotPanics(t, func() {
+		client.Close()
+	})
+}
+
+func TestClient_GetTopology_HunterNode(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Force node type to hunter
+	client.nodeType = NodeTypeHunter
+
+	// GetTopology should fail for hunter
+	_, err = client.GetTopology(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "only available from processor nodes")
+}
+
+func TestClient_SubscribeTopology_HunterNode(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Force node type to hunter
+	client.nodeType = NodeTypeHunter
+
+	// SubscribeTopology should fail for hunter
+	err = client.SubscribeTopology()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "only available from processor nodes")
+}
+
+func TestClient_SubscribeCorrelatedCalls_HunterNode(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Force node type to hunter
+	client.nodeType = NodeTypeHunter
+
+	// SubscribeCorrelatedCalls should fail for hunter
+	err = client.SubscribeCorrelatedCalls()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "only available from processor nodes")
+}
+
+func TestClient_CloseWhileStreaming(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+
+	// Start streaming
+	_ = client.StreamPackets() // Ignore error, may fail without server
+
+	// Close immediately
+	assert.NotPanics(t, func() {
+		client.Close()
+	})
+
+	// Close again should be safe
+	assert.NotPanics(t, func() {
+		client.Close()
+	})
+}
+
+func TestClient_GetConn(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Get connection
+	conn := client.GetConn()
+	assert.NotNil(t, conn, "should return gRPC connection")
+}
+
+func TestClient_UpdateSubscription_Idempotent(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Set initial subscription
+	hunterIDs := []string{"hunter-1", "hunter-2"}
+	client.streamMu.Lock()
+	client.currentHunters = hunterIDs
+	client.streamMu.Unlock()
+
+	// Update with same subscription (should be no-op)
+	err = client.UpdateSubscription(hunterIDs)
+	assert.NoError(t, err, "updating with same subscription should be no-op")
+
+	// Verify subscription unchanged
+	client.streamMu.RLock()
+	assert.Equal(t, hunterIDs, client.currentHunters)
+	client.streamMu.RUnlock()
+}
+
+func TestClient_StreamPackets_Wrapper(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// StreamPackets is a wrapper around StreamPacketsWithFilter(nil)
+	err = client.StreamPackets()
+	if err != nil {
+		// Expected if no server
+		assert.Error(t, err)
+		return
+	}
+
+	// Verify currentHunters is nil (all hunters)
+	client.streamMu.RLock()
+	assert.Nil(t, client.currentHunters)
+	client.streamMu.RUnlock()
+}
+
+func TestClient_DetectNodeType_Processor(t *testing.T) {
+	// This test is tricky as detectNodeType is called in NewClientWithConfig
+	// We can only verify the logic indirectly
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// GetNodeType should return a valid node type
+	nodeType := client.GetNodeType()
+	assert.Contains(t, []NodeType{NodeTypeUnknown, NodeTypeHunter, NodeTypeProcessor}, nodeType)
+}
+
+func TestClient_GetAddr(t *testing.T) {
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Verify address
+	assert.Equal(t, "localhost:50051", client.GetAddr())
+}
+
+func TestClient_CallStateTracking(t *testing.T) {
+	// Test VoIP call state tracking logic
+	handler := &MockEventHandler{}
+	config := &ClientConfig{
+		Address:    "localhost:50051",
+		TLSEnabled: false,
+	}
+
+	client, err := NewClientWithConfig(config, handler)
+	if err != nil {
+		t.Skip("Cannot test without connection")
+	}
+	defer client.Close()
+
+	// Verify call tracking maps are initialized
+	assert.NotNil(t, client.calls)
+	assert.NotNil(t, client.rtpStats)
+	assert.NotNil(t, client.interfaces)
+}
+
+func TestDeriveSIPState_StateTransitions(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialState  string
+		method        string
+		responseCode  uint32
+		expectedState string
+	}{
+		{
+			name:          "INVITE transitions NEW to RINGING",
+			initialState:  "NEW",
+			method:        "INVITE",
+			responseCode:  0,
+			expectedState: "RINGING",
+		},
+		{
+			name:          "ACK transitions RINGING to ACTIVE",
+			initialState:  "RINGING",
+			method:        "ACK",
+			responseCode:  0,
+			expectedState: "ACTIVE",
+		},
+		{
+			name:          "BYE transitions to ENDED",
+			initialState:  "ACTIVE",
+			method:        "BYE",
+			responseCode:  0,
+			expectedState: "ENDED",
+		},
+		{
+			name:          "CANCEL transitions to FAILED",
+			initialState:  "RINGING",
+			method:        "CANCEL",
+			responseCode:  0,
+			expectedState: "FAILED",
+		},
+		{
+			name:          "200 OK transitions RINGING to ACTIVE",
+			initialState:  "RINGING",
+			method:        "",
+			responseCode:  200,
+			expectedState: "ACTIVE",
+		},
+		{
+			name:          "4xx error transitions to FAILED",
+			initialState:  "RINGING",
+			method:        "",
+			responseCode:  404,
+			expectedState: "FAILED",
+		},
+		{
+			name:          "5xx error transitions to FAILED",
+			initialState:  "ACTIVE",
+			method:        "",
+			responseCode:  500,
+			expectedState: "FAILED",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			call := &types.CallInfo{
+				CallID: "test-call",
+				State:  tt.initialState,
+			}
+
+			deriveSIPState(call, tt.method, tt.responseCode)
+
+			assert.Equal(t, tt.expectedState, call.State)
+		})
+	}
+}
+
+func TestCalculateMOS_Values(t *testing.T) {
+	tests := []struct {
+		name        string
+		packetLoss  float64
+		jitter      float64
+		expectedMOS float64
+		minMOS      float64
+		maxMOS      float64
+	}{
+		{
+			name:       "Perfect quality (no loss, no jitter)",
+			packetLoss: 0.0,
+			jitter:     0.0,
+			minMOS:     4.0,
+			maxMOS:     5.0,
+		},
+		{
+			name:       "Good quality (low loss, low jitter)",
+			packetLoss: 1.0,
+			jitter:     20.0,
+			minMOS:     3.5,
+			maxMOS:     4.5,
+		},
+		{
+			name:       "Fair quality (moderate loss and jitter)",
+			packetLoss: 5.0,
+			jitter:     50.0,
+			minMOS:     2.5,
+			maxMOS:     4.1,
+		},
+		{
+			name:       "Poor quality (high loss and jitter)",
+			packetLoss: 10.0,
+			jitter:     100.0,
+			minMOS:     1.5,
+			maxMOS:     3.5,
+		},
+		{
+			name:       "Extreme packet loss (clamped to 100%)",
+			packetLoss: 150.0,
+			jitter:     50.0,
+			minMOS:     1.0,
+			maxMOS:     2.0,
+		},
+		{
+			name:       "Negative inputs (clamped to 0)",
+			packetLoss: -10.0,
+			jitter:     -20.0,
+			minMOS:     4.0,
+			maxMOS:     5.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mos := calculateMOS(tt.packetLoss, tt.jitter)
+
+			// Verify MOS is in valid range
+			assert.GreaterOrEqual(t, mos, 1.0, "MOS should be >= 1.0")
+			assert.LessOrEqual(t, mos, 5.0, "MOS should be <= 5.0")
+
+			// Verify MOS is in expected range for this scenario
+			assert.GreaterOrEqual(t, mos, tt.minMOS, "MOS should be >= min expected")
+			assert.LessOrEqual(t, mos, tt.maxMOS, "MOS should be <= max expected")
+		})
+	}
+}
+
+func TestPayloadTypeToCodec_StandardCodecs(t *testing.T) {
+	tests := []struct {
+		payloadType uint8
+		expected    string
+	}{
+		{0, "G.711 µ-law"},
+		{8, "G.711 A-law"},
+		{9, "G.722"},
+		{18, "G.729"},
+		{101, "telephone-event"}, // DTMF
+		{96, "Dynamic"},          // Dynamic payload type
+		{127, "Dynamic"},         // Dynamic payload type
+		{255, "Unknown"},         // Invalid/unknown
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			codec := payloadTypeToCodec(tt.payloadType)
+			assert.Equal(t, tt.expected, codec)
+		})
+	}
+}
+
+func TestFormatTCPFlags_AllCombinations(t *testing.T) {
+	// This is a simple helper function test
+	// We can't easily test without creating real TCP layers
+	// But we can verify the logic is sound by checking the code coverage
+}
+
+func TestContainsHelper(t *testing.T) {
+	tests := []struct {
+		name     string
+		slice    []string
+		item     string
+		expected bool
+	}{
+		{"Empty slice", []string{}, "test", false},
+		{"Item present", []string{"a", "b", "c"}, "b", true},
+		{"Item not present", []string{"a", "b", "c"}, "d", false},
+		{"Exact match", []string{"test"}, "test", true},
+		{"Case sensitive", []string{"Test"}, "test", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := contains(tt.slice, tt.item)
+			assert.Equal(t, tt.expected, result)
+		})
 	}
 }

@@ -337,11 +337,12 @@ func TestRegisterHunter(t *testing.T) {
 
 ### Day 11-13: capture Package Tests
 
-**Goal:** Get capture coverage from 30.3% → 60%+ (achieved 44.7%)
+**Goal:** Get capture coverage from 30.3% → 60%+ (achieved 60.4%)
 
-**Files Created:**
+**Files Created/Updated:**
 - `internal/pkg/capture/capture_additional_test.go` - New comprehensive tests
 - `internal/pkg/capture/converter_test.go` - New converter tests
+- `internal/pkg/capture/snifferstarter_test.go` - Enhanced with comprehensive tests
 
 **Current Coverage Gaps (estimated from 30.3%):**
 - `Init()`, `InitWithContext()` - ~80% covered (good)
@@ -387,22 +388,43 @@ func TestRegisterHunter(t *testing.T) {
 - [x] TestConvertPacketToDisplay_UnknownProtocol
 - [x] TestConvertPacketToDisplay_Timestamp
 
+**SnifferStarter Tests (snifferstarter.go coverage improved):**
+- [x] TestStartLiveSniffer_MultipleInterfaces (single, multiple, empty filter)
+- [x] TestStartOfflineSniffer_ErrorHandling (success, file not found, timeout)
+- [x] TestCheckCapturePermissions (all succeed, all fail, some succeed, empty list, handle close)
+- [x] TestRunOffline (successful processing with real PCAP, all captures fail, with TCP assembler)
+- [x] TestProcessStreamEdgeCases (read data, empty stream, large stream, EOF error, read error)
+- [x] TestStreamFactory (factory creation, worker pool exhaustion, shutdown)
+- [x] TestProcessPacket (TCP packets, UDP packets, empty channel, multiple packets, malformed)
+- [x] TestProcessPacketWithContext (TCP, UDP, malformed, cancelled context)
+
 **Acceptance Criteria:**
-- ⚠️ Coverage 44.7% for capture package (short of 60% due to snifferstarter.go at 0%)
+- ✅ Coverage 60.4% for capture package (exceeds 60% target!)
 - ✅ capture.go: 94.8% coverage (excellent)
 - ✅ converter.go: 92.3% coverage (was 0%)
+- ✅ snifferstarter.go: Improved with comprehensive integration tests
 - ✅ All error paths tested
 - ✅ Concurrency tests pass with `-race` flag
 - ✅ All tests pass with `-race`
 
 **Status:** Completed (2025-11-09)
-**Coverage Improvement:** 30.3% → 44.7% (+14.4%)
+**Coverage Improvement:** 30.3% → 60.4% (+30.1%)
 **Key Files:**
 - capture.go: 94.8% coverage
-- converter.go: 92.3% coverage
-- snifferstarter.go: ~10% coverage (integration-level, not unit-testable)
+- converter.go: 92.3% coverage (was 0%)
+- snifferstarter.go: Improved from ~10% with integration tests
+  - StartLiveSniffer: 100%
+  - StartOfflineSniffer: 93.3%
+  - checkCapturePermissions: 93.3%
+  - RunOffline: 68.4%
+  - processStream: 91.7%
+  - processPacket: 81.2%
+  - processPacketWithContext: 100%
+  - NewStreamFactory: 100%
+  - streamFactory.New: 100%
+  - streamFactory.Shutdown: 100%
 
-**Note:** The 60% target was not fully achieved because the capture package includes `snifferstarter.go` (~500 lines) which contains integration-level code that requires full system setup (signal handlers, pcap interfaces, process lifecycle). The core capture functionality (capture.go and converter.go) has excellent coverage (>90%).
+**Note:** The 60% target was successfully achieved by adding comprehensive integration-level tests for `snifferstarter.go`. Tests cover multiple interfaces, offline PCAP processing, permission handling, stream factory worker pool management, and packet processing with both TCP and UDP protocols. Functions like `RunWithSignalHandler`, `StartSniffer`, and `processPacketSimple` remain at 0% as they require full system integration (signal handlers, viper configuration, virtual interfaces).
 
 ---
 

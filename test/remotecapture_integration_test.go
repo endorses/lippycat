@@ -375,6 +375,9 @@ func TestIntegration_RemoteCapture_MultipleSubscribers(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// Wait for all subscriptions to be established
+	time.Sleep(500 * time.Millisecond)
+
 	// Send packets
 	dataClient := data.NewDataServiceClient(conn)
 	stream, err := dataClient.StreamPackets(ctx)

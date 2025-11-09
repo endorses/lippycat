@@ -325,7 +325,13 @@ func TestRegisterHunter(t *testing.T) {
 
 **Status:** Completed (2025-11-09)
 **Coverage Improvement:** 12.2% → 23.0% (+10.8%) in unit test mode
-**Note:** True coverage will be significantly higher (60%+) when integration tests run in CI with actual processor/hunter servers. The integration tests are comprehensive but skip without servers. Unit tests cover all testable functions without server dependency.
+**CI Integration:** ✅ Added test/remotecapture_integration_test.go with 5 integration tests
+- Uses existing test infrastructure (processor, hunters, helpers)
+- Tests run automatically in CI via existing integration-tests job
+- All tests pass with -race flag
+- Expected coverage in CI: 60%+ (streaming goroutines, convertToPacketDisplay, etc.)
+
+**Note:** Unit tests in internal/pkg/remotecapture/ provide 23% coverage (limited by t.Skip for server-dependent tests). CI integration tests in test/ directory provide full end-to-end coverage.
 
 ---
 

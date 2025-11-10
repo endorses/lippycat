@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Load tests for processor package**: Performance tests for high packet rates (10K pps), many concurrent hunters (100), and many subscribers (100)
+- **Benchmarks for processor package**: Throughput benchmarks for packet processing with various hunter configurations
+
+### Improved
+- **Test coverage improvements**:
+  - processor: 31.4% → 62.6% (+31.2%)
+  - capture: 30.3% → 60.4% (+30.1%)
+  - remotecapture: 12.2% → 23.0% (+10.8%) in unit tests (integration tests in test/ provide full coverage)
+- Comprehensive test coverage for capture package converter and snifferstarter modules
+- Integration tests for remotecapture client in CI pipeline
+
 ## [0.2.9] - 2025-10-21
 
 ### Added

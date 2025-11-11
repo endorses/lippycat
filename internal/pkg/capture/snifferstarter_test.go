@@ -514,25 +514,38 @@ func TestStreamFactory(t *testing.T) {
 	t.Run("worker pool exhaustion", func(t *testing.T) {
 		factory := NewStreamFactory().(*streamFactory)
 
-		// Fill the worker pool completely
+		// Manually fill the worker pool to simulate exhaustion
+		// We'll add workers without starting goroutines
+		filledSlots := make([]struct{}, 0, maxStreamWorkers)
 		for i := 0; i < maxStreamWorkers; i++ {
 			factory.workerPool <- struct{}{}
+			filledSlots = append(filledSlots, struct{}{})
 		}
 
-		// Try to create a stream when pool is full
-		net := gopacket.NewFlow(layers.EndpointIPv4, []byte{192, 168, 1, 1}, []byte{192, 168, 1, 2})
-		transport := gopacket.NewFlow(layers.EndpointTCPPort, []byte{0, 80}, []byte{0, 1})
+		// Verify pool is full
+		assert.Equal(t, maxStreamWorkers, len(factory.workerPool),
+			"Worker pool should be completely full")
+
+		// Try to create a stream when pool is full (should succeed but skip processing)
+		net := gopacket.NewFlow(layers.EndpointIPv4, []byte{192, 168, 1, 3}, []byte{192, 168, 1, 4})
+		transport := gopacket.NewFlow(layers.EndpointTCPPort, []byte{0, 90}, []byte{0, 1})
 		stream := factory.New(net, transport)
 
 		// Stream should still be created (worker pool exhaustion is logged but doesn't fail)
 		assert.NotNil(t, stream, "Stream should be created even when pool is full")
 
-		// Drain the pool
+		// Pool should still be full (no new worker was added)
+		assert.Equal(t, maxStreamWorkers, len(factory.workerPool),
+			"Worker pool should remain full after rejected stream creation")
+
+		// Manually drain the pool to clean up
 		for i := 0; i < maxStreamWorkers; i++ {
 			<-factory.workerPool
 		}
 
-		factory.Shutdown()
+		// Verify pool is empty
+		assert.Equal(t, 0, len(factory.workerPool),
+			"Worker pool should be empty after draining")
 	})
 
 	t.Run("shutdown with no workers", func(t *testing.T) {

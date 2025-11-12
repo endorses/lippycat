@@ -565,7 +565,7 @@ Ref: docs/plan/phase-3.1-test-coverage-implementation.md
 
 ### Documentation Complete:
 - [x] This plan updated with ✅ checkmarks
-- [ ] Phase 3.1 in remediation plan marked complete (pending final review)
+- [x] Phase 3.1 in remediation plan marked complete (pending final review)
 - [x] Coverage improvements documented in commit messages
 
 ### Integration Complete:

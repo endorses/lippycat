@@ -302,7 +302,7 @@ func TestRegistry_ProcessPacket_Timeout(t *testing.T) {
 
 	packet := createTestPacket()
 	start := time.Now()
-	_, err = r.ProcessPacket(context.Background(), packet)
+	_, _ = r.ProcessPacket(context.Background(), packet)
 	duration := time.Since(start)
 
 	// Should timeout quickly

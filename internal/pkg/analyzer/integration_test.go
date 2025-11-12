@@ -258,7 +258,7 @@ func TestIntegration_ContextTimeout(t *testing.T) {
 	// Process with context timeout
 	packet := createUDPPacket(8080, 8081, []byte("test"))
 	start := time.Now()
-	_, err = r.ProcessPacket(context.Background(), packet)
+	_, _ = r.ProcessPacket(context.Background(), packet)
 	duration := time.Since(start)
 
 	// Should timeout quickly

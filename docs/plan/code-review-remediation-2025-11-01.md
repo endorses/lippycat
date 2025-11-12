@@ -397,10 +397,10 @@ const (
 ### 3.2 Resolve Plugin System Technical Debt
 **Priority:** 🟡 LOW-MEDIUM
 **Effort:** 1-2 weeks
-**Status:** ✅ COMPLETE (2025-11-12) - Option D Implemented
+**Status:** 🟡 IN PROGRESS (2025-11-12) - Option D Implementation Started
 
 #### Decision: Option D (Compile-Time Protocol Modules)
-Implemented compile-time protocol analyzer framework in `internal/pkg/analyzer/` to replace dynamic plugin system.
+Implementing compile-time protocol analyzer framework in `internal/pkg/analyzer/` to replace dynamic plugin system.
 
 #### Completed Tasks:
 - [x] Created `internal/pkg/analyzer/` package with `Protocol` interface and `Registry`
@@ -411,6 +411,17 @@ Implemented compile-time protocol analyzer framework in `internal/pkg/analyzer/`
 - [x] Documented pattern in comprehensive README.md with examples for future protocols
 - [x] Added DEPRECATED.md to old plugins/ directory marking it for removal
 - [x] Code builds successfully with `go build ./internal/pkg/analyzer/`
+
+#### Remaining Tasks:
+- [ ] Add comprehensive test suite for analyzer package
+  - [ ] `registry_test.go`: Protocol registration, routing, priority, enable/disable, concurrency
+  - [ ] `voip_protocol_test.go`: SIP/RTP detection, Call-ID extraction, metrics, health
+  - [ ] Integration tests: Multiple protocols, detector integration, context timeouts
+  - [ ] Run with `-race` flag to verify thread safety
+- [ ] Migrate existing callers from `plugins.GetGlobalRegistry()` to `analyzer.GetRegistry()`
+- [ ] Remove `internal/pkg/voip/plugins/` directory (after migration)
+- [ ] Remove `internal/pkg/voip/plugin_integration.go` (after migration)
+- [ ] Update documentation references to point to new analyzer package
 
 #### Implementation Summary:
 ```
@@ -616,9 +627,9 @@ make bench
 - [x] Documentation updated
 
 ### Phase 3 Complete:
-- [ ] All P2 tasks completed (3.1 ✅ complete, 3.2 ✅ complete, 3.3-3.5 pending)
+- [ ] All P2 tasks completed (3.1 ✅ complete, 3.2 🟡 in progress, 3.3-3.5 pending)
 - [x] Test coverage targets met (Phase 3.1 complete - 2025-11-11)
-- [x] Plugin system resolved (Phase 3.2 complete - 2025-11-12)
+- [ ] Plugin system resolved (Phase 3.2 in progress - started 2025-11-12)
 - [ ] Technical debt tracked in issues
 - [ ] Architecture documentation updated
 

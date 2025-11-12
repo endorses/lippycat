@@ -80,19 +80,20 @@ func (v *VoIPProtocol) ProcessPacket(ctx context.Context, packet gopacket.Packet
 
 			if callID != "" {
 				v.metrics.callsDetected.Add(1)
-				return &Result{
-					CallID:         callID,
-					Protocol:       "sip",
-					Action:         "track",
-					Confidence:     0.95,
-					ProcessingTime: time.Since(start),
-					ShouldContinue: false, // VoIP analyzer has handled this packet
-					Metadata: map[string]interface{}{
-						"src_port": udp.SrcPort.String(),
-						"dst_port": udp.DstPort.String(),
-					},
-				}, nil
 			}
+
+			return &Result{
+				CallID:         callID,
+				Protocol:       "sip",
+				Action:         "track",
+				Confidence:     0.95,
+				ProcessingTime: time.Since(start),
+				ShouldContinue: false, // VoIP analyzer has handled this packet
+				Metadata: map[string]interface{}{
+					"src_port": udp.SrcPort.String(),
+					"dst_port": udp.DstPort.String(),
+				},
+			}, nil
 		}
 
 		// Check for RTP (common range: 10000-20000, 16384-32767)

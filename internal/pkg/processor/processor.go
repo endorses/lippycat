@@ -245,7 +245,7 @@ func New(config Config) (*Processor, error) {
 	}
 
 	// Initialize hunter manager
-	p.hunterManager = hunter.NewManager(config.MaxHunters, onStatsChanged)
+	p.hunterManager = hunter.NewManager(config.ProcessorID, config.MaxHunters, onStatsChanged)
 
 	// Initialize hunter monitor (will be started in Start())
 	p.hunterMonitor = hunter.NewMonitor(p.hunterManager)

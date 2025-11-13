@@ -322,14 +322,21 @@ func (c *TopologyCache) applyProcessorConnected(event *management.ProcessorConne
 	// Store metadata
 	node.Metadata["status"] = proc.Status.String()
 
-	// FIXME: Workaround for topology updates with empty UpstreamProcessor
-	// Don't overwrite ParentID if the new value is empty and we already have a non-empty value
-	// This can happen when a processor receives a topology update before its upstream registration completes
-	if existing := c.processors[proc.ProcessorId]; existing != nil && existing.ParentID != "" && proc.UpstreamProcessor == "" {
-		node.ParentID = existing.ParentID
-		c.logger.Debug("applyProcessorConnected: preserving existing ParentID (update had empty UpstreamProcessor)",
-			"processor_id", proc.ProcessorId,
-			"existing_parent_id", existing.ParentID)
+	// Defensive check: Validate UpstreamProcessor is not empty (should be set at source)
+	// FIXED 2025-11-13: hunter.Manager now sets ProcessorId field for all topology updates
+	// Keeping this defensive check for backward compatibility and extra safety
+	if proc.UpstreamProcessor == "" {
+		if existing := c.processors[proc.ProcessorId]; existing != nil && existing.ParentID != "" {
+			// Preserve existing ParentID if new value is empty (defensive fallback)
+			node.ParentID = existing.ParentID
+			c.logger.Warn("Received topology update with empty UpstreamProcessor (using existing ParentID)",
+				"processor_id", proc.ProcessorId,
+				"existing_parent_id", existing.ParentID)
+		} else {
+			// Log warning if we can't preserve (this should not happen with fix in place)
+			c.logger.Warn("Received topology update with empty UpstreamProcessor and no existing ParentID",
+				"processor_id", proc.ProcessorId)
+		}
 	}
 
 	c.processors[proc.ProcessorId] = node

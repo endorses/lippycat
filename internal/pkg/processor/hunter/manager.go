@@ -36,7 +36,8 @@ type Manager struct {
 	mu      sync.RWMutex
 	hunters map[string]*ConnectedHunter
 
-	maxHunters int
+	processorID string // ID of the processor this manager belongs to
+	maxHunters  int
 
 	// Callbacks for stats updates
 	onStatsChanged func()
@@ -46,8 +47,9 @@ type Manager struct {
 }
 
 // NewManager creates a new hunter manager
-func NewManager(maxHunters int, onStatsChanged func()) *Manager {
+func NewManager(processorID string, maxHunters int, onStatsChanged func()) *Manager {
 	return &Manager{
+		processorID:    processorID,
 		hunters:        make(map[string]*ConnectedHunter),
 		maxHunters:     maxHunters,
 		onStatsChanged: onStatsChanged,
@@ -103,6 +105,7 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 	if m.topologyPublisher != nil {
 		m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
 			UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_CONNECTED,
+			ProcessorId: m.processorID,
 			TimestampNs: time.Now().UnixNano(),
 			Event: &management.TopologyUpdate_HunterConnected{
 				HunterConnected: &management.HunterConnectedEvent{
@@ -119,7 +122,8 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 		})
 		logger.Debug("Published HUNTER_CONNECTED topology event",
 			"hunter_id", hunterID,
-			"hostname", hostname)
+			"hostname", hostname,
+			"processor_id", m.processorID)
 	}
 
 	return hunter, isReconnect, nil
@@ -181,6 +185,7 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 	if statusChanged && m.topologyPublisher != nil {
 		m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
 			UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_STATUS_CHANGED,
+			ProcessorId: m.processorID,
 			TimestampNs: timestampNs,
 			Event: &management.TopologyUpdate_HunterStatusChanged{
 				HunterStatusChanged: &management.HunterStatusChangedEvent{
@@ -193,6 +198,7 @@ func (m *Manager) UpdateHeartbeat(hunterID string, timestampNs int64, status man
 		logger.Debug("Published HUNTER_STATUS_CHANGED topology event",
 			"hunter_id", hunterID,
 			"old_status", oldStatus,
+			"processor_id", m.processorID,
 			"new_status", status)
 	}
 
@@ -296,6 +302,7 @@ func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 		for _, hunterID := range staleHunters {
 			m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
 				UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_STATUS_CHANGED,
+				ProcessorId: m.processorID,
 				TimestampNs: now,
 				Event: &management.TopologyUpdate_HunterStatusChanged{
 					HunterStatusChanged: &management.HunterStatusChangedEvent{
@@ -306,6 +313,7 @@ func (m *Manager) MarkStale(staleThreshold time.Duration) int {
 				},
 			})
 			logger.Debug("Published HUNTER_STATUS_CHANGED topology event",
+				"processor_id", m.processorID,
 				"hunter_id", hunterID,
 				"new_status", "ERROR",
 				"reason", "heartbeat timeout")
@@ -347,6 +355,7 @@ func (m *Manager) RemoveStale(gracePeriod time.Duration) []string {
 		if m.topologyPublisher != nil {
 			m.topologyPublisher.PublishTopologyUpdate(&management.TopologyUpdate{
 				UpdateType:  management.TopologyUpdateType_TOPOLOGY_HUNTER_DISCONNECTED,
+				ProcessorId: m.processorID,
 				TimestampNs: time.Now().UnixNano(),
 				Event: &management.TopologyUpdate_HunterDisconnected{
 					HunterDisconnected: &management.HunterDisconnectedEvent{
@@ -356,6 +365,7 @@ func (m *Manager) RemoveStale(gracePeriod time.Duration) []string {
 				},
 			})
 			logger.Debug("Published HUNTER_DISCONNECTED topology event",
+				"processor_id", m.processorID,
 				"hunter_id", hunterID,
 				"reason", "heartbeat timeout")
 		}

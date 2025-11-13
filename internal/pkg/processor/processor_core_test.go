@@ -93,7 +93,7 @@ func TestNew(t *testing.T) {
 
 // TestGetHunterStatus tests hunter status retrieval
 func TestGetHunterStatus(t *testing.T) {
-	hunterMgr := hunter.NewManager(10, nil)
+	hunterMgr := hunter.NewManager("test-processor", 10, nil)
 
 	// Register test hunters
 	_, _, err := hunterMgr.Register("hunter-1", "host1", []string{"eth0"}, nil)
@@ -197,7 +197,7 @@ func TestStats(t *testing.T) {
 	packetsReceived.Store(1000)
 	packetsForwarded.Store(900)
 
-	hunterMgr := hunter.NewManager(10, nil)
+	hunterMgr := hunter.NewManager("test-processor", 10, nil)
 	// Register some hunters to test stats
 	hunterMgr.Register("hunter-1", "host1", []string{"eth0"}, nil)
 	hunterMgr.Register("hunter-2", "host2", []string{"eth1"}, nil)
@@ -233,7 +233,7 @@ func TestContextCancellation(t *testing.T) {
 func TestMaxHunters(t *testing.T) {
 	const maxHunters = 3
 
-	hunterMgr := hunter.NewManager(maxHunters, nil)
+	hunterMgr := hunter.NewManager("test-processor", maxHunters, nil)
 
 	// Add hunters up to the limit
 	for i := 0; i < maxHunters; i++ {

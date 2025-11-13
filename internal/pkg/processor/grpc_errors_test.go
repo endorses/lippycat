@@ -20,7 +20,7 @@ func TestRegisterHunter_MaxHuntersExceeded(t *testing.T) {
 	packetsReceived := atomic.Uint64{}
 	packetsForwarded := atomic.Uint64{}
 
-	hunterMgr := hunter.NewManager(2, nil)
+	hunterMgr := hunter.NewManager("test-processor", 2, nil)
 	p := &Processor{
 		config: Config{
 			MaxHunters: 2,
@@ -66,7 +66,7 @@ func TestRegisterHunter_AllowsReregistration(t *testing.T) {
 	packetsReceived := atomic.Uint64{}
 	packetsForwarded := atomic.Uint64{}
 
-	hunterMgr := hunter.NewManager(2, nil)
+	hunterMgr := hunter.NewManager("test-processor", 2, nil)
 	p := &Processor{
 		config: Config{
 			MaxHunters: 2,

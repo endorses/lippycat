@@ -491,21 +491,37 @@ The old `internal/pkg/voip/plugins/` system remains in place for backward compat
 ### 3.4 Establish Error Handling Policy
 **Priority:** 🟡 MEDIUM
 **Effort:** 2-3 days
+**Status:** ✅ COMPLETE (2025-11-14) - Comprehensive policy documented in CONTRIBUTING.md
 
-#### Tasks:
-- [ ] Document error handling guidelines in `CONTRIBUTING.md`
-- [ ] Define when to log vs return errors
-- [ ] Define error wrapping patterns (`fmt.Errorf(..., %w, err)`)
-- [ ] Define structured logging patterns
-- [ ] Create error handling decision tree
-- [ ] Update existing code to follow policy (gradual)
-- [ ] Add error handling examples to documentation
+#### Completed Tasks:
+- [x] Document error handling guidelines in `CONTRIBUTING.md`
+- [x] Define when to log vs return errors (decision tree + table)
+- [x] Define error wrapping patterns (`fmt.Errorf(..., %w, err)`)
+- [x] Define structured logging patterns (levels, context fields, advanced patterns)
+- [x] Create error handling decision tree (ASCII diagram)
+- [x] Add error handling examples to documentation (5 categories with examples)
+- [ ] Update existing code to follow policy (gradual - ongoing)
 
-**Policy Categories:**
-1. **Critical path errors**: Return to caller with context
-2. **Cleanup errors**: Log with structured context
-3. **Background goroutine errors**: Log and increment metric
-4. **User input errors**: Return with clear message
+**Implementation Summary:**
+- **Decision Tree**: ASCII flowchart for quick decision-making
+- **Comparison Table**: 7 scenarios with actions and examples
+- **Structured Logging**: Context fields by operation type, logging levels, advanced patterns
+- **Error Wrapping**: Basic wrapping, multi-level context, error chain inspection, context-rich messages
+- **Error Categories**: 5 categories with detailed examples
+  1. Critical Path Errors (return with context)
+  2. Cleanup Errors (log, don't override primary error)
+  3. Background Errors (log + increment metrics)
+  4. User Input Errors (clear, actionable messages)
+  5. Expected Errors (handle silently or DEBUG level)
+
+**Documentation Added:**
+- General principles (6 principles)
+- Decision tree (ASCII diagram)
+- When to log vs. return table (7 scenarios)
+- Close() error handling (4 patterns)
+- Structured logging patterns (basic, common fields, levels, advanced)
+- Error wrapping (basic, multi-level, chain inspection, context-rich)
+- Error categories (5 categories with comprehensive examples)
 
 ---
 
@@ -643,11 +659,11 @@ make bench
 - [x] Documentation updated
 
 ### Phase 3 Complete:
-- [ ] All P2 tasks completed (3.1 ✅ complete, 3.2 ✅ complete, 3.3 ✅ complete, 3.4-3.5 pending)
+- [ ] All P2 tasks completed (3.1 ✅, 3.2 ✅, 3.3 ✅, 3.4 ✅, 3.5 pending)
 - [x] Test coverage targets met (Phase 3.1 complete - 2025-11-11)
 - [x] Plugin system resolved (Phase 3.2 complete - 2025-11-12) - New analyzer framework with 36 tests
 - [x] Technical debt resolved (Phase 3.3 complete - 2025-11-13) - P1 fixed, P2/P3 documented in inventory
-- [ ] Error handling policy documented (Phase 3.4 pending)
+- [x] Error handling policy documented (Phase 3.4 complete - 2025-11-14) - Comprehensive policy in CONTRIBUTING.md
 - [ ] Large files refactored (Phase 3.5 pending)
 
 ### Final Release Checklist:

@@ -119,11 +119,11 @@ internal/pkg/remotecapture/
 
 ## Implementation Steps
 
-### Preparation (15 minutes)
+### Preparation (15 minutes) ✅ COMPLETE
 - [x] Read current `client.go` to understand structure
 - [x] Create backup branch: `git checkout -b refactor/phase-3.5-client`
-- [ ] Run baseline tests: `go test -race ./internal/pkg/remotecapture/...`
-- [ ] Record current test coverage: `go test -cover ./internal/pkg/remotecapture/...`
+- [x] Run baseline tests: `go test -race ./internal/pkg/remotecapture/...` → ✅ PASS (1.047s)
+- [x] Record current test coverage: `go test -cover ./internal/pkg/remotecapture/...` → 23.0% coverage
 
 ### Step 1: Create client_conversion.go (1.5 hours)
 - [ ] Create new file with header comment and package declaration

@@ -125,15 +125,16 @@ internal/pkg/remotecapture/
 - [x] Run baseline tests: `go test -race ./internal/pkg/remotecapture/...` → ✅ PASS (1.047s)
 - [x] Record current test coverage: `go test -cover ./internal/pkg/remotecapture/...` → 23.0% coverage
 
-### Step 1: Create client_conversion.go (1.5 hours)
-- [ ] Create new file with header comment and package declaration
-- [ ] Move conversion functions from `client.go`
-- [ ] Move MOS calculation logic
-- [ ] Move helper functions for metadata parsing
-- [ ] Run tests: `go test -race ./internal/pkg/remotecapture/...`
-- [ ] Verify no compilation errors
-- [ ] Format: `gofmt -w internal/pkg/remotecapture/client_conversion.go`
-- [ ] Commit: `git add . && git commit -m "refactor(remotecapture): extract conversion logic to client_conversion.go"`
+### Step 1: Create client_conversion.go (1.5 hours) ✅ COMPLETE
+- [x] Create new file with header comment and package declaration
+- [x] Move conversion functions from `client.go`
+- [x] Move MOS calculation logic
+- [x] Move helper functions for metadata parsing
+- [x] Run tests: `go test -race ./internal/pkg/remotecapture/...` → ✅ PASS (1.047s)
+- [x] Verify no compilation errors → ✅ Clean build
+- [x] Format: `gofmt -w internal/pkg/remotecapture/client_conversion.go` → ✅ Done
+- [x] Commit: `git add . && git commit -m "refactor(remotecapture): extract conversion logic to client_conversion.go"` → ✅ 7e186b3
+- [x] Result: client_conversion.go created (696 lines), client.go reduced to 593 lines
 
 ### Step 2: Create client_subscriptions.go (1.5 hours)
 - [ ] Create new file with header comment and package declaration

@@ -136,15 +136,16 @@ internal/pkg/remotecapture/
 - [x] Commit: `git add . && git commit -m "refactor(remotecapture): extract conversion logic to client_conversion.go"` → ✅ 7e186b3
 - [x] Result: client_conversion.go created (696 lines), client.go reduced to 593 lines
 
-### Step 2: Create client_subscriptions.go (1.5 hours)
-- [ ] Create new file with header comment and package declaration
-- [ ] Move subscription methods from `client.go`
-- [ ] Move stream restart logic
-- [ ] Move subscription error handling
-- [ ] Run tests: `go test -race ./internal/pkg/remotecapture/...`
-- [ ] Verify no compilation errors
-- [ ] Format: `gofmt -w internal/pkg/remotecapture/client_subscriptions.go`
-- [ ] Commit: `git add . && git commit -m "refactor(remotecapture): extract subscriptions to client_subscriptions.go"`
+### Step 2: Create client_subscriptions.go (1.5 hours) ✅ COMPLETE
+- [x] Create new file with header comment and package declaration
+- [x] Move subscription methods from `client.go`
+- [x] Move stream restart logic
+- [x] Move subscription error handling
+- [x] Run tests: `go test -race ./internal/pkg/remotecapture/...` → ✅ PASS (1.046s)
+- [x] Verify no compilation errors → ✅ Clean build
+- [x] Format: `gofmt -w internal/pkg/remotecapture/client_subscriptions.go` → ✅ Done
+- [x] Commit: `git add . && git commit -m "refactor(remotecapture): extract subscriptions to client_subscriptions.go"` → ✅ 2e8dae2
+- [x] Result: client_subscriptions.go created (215 lines), client.go reduced to 394 lines
 
 ### Step 3: Create client_streaming.go (2 hours)
 - [ ] Create new file with header comment and package declaration

@@ -147,17 +147,16 @@ internal/pkg/remotecapture/
 - [x] Commit: `git add . && git commit -m "refactor(remotecapture): extract subscriptions to client_subscriptions.go"` → ✅ 2e8dae2
 - [x] Result: client_subscriptions.go created (215 lines), client.go reduced to 394 lines
 
-### Step 3: Create client_streaming.go (2 hours)
-- [ ] Create new file with header comment and package declaration
-- [ ] Move `streamPackets()` method
-- [ ] Move `hotSwapEventHandler()` method
-- [ ] Move `processPacketBatch()` method
-- [ ] Move stream error handling
-- [ ] Move flow control logic
-- [ ] Run tests: `go test -race ./internal/pkg/remotecapture/...`
-- [ ] Verify no compilation errors
-- [ ] Format: `gofmt -w internal/pkg/remotecapture/client_streaming.go`
-- [ ] Commit: `git add . && git commit -m "refactor(remotecapture): extract streaming logic to client_streaming.go"`
+### Step 3: Create client_streaming.go (2 hours) ✅ COMPLETE
+- [x] Create new file with header comment and package declaration
+- [x] Move `StreamPackets()` method
+- [x] Move `StreamPacketsWithFilter()` method (includes stream error handling and flow control)
+- [x] Move `UpdateSubscription()` method (hot-swapping logic)
+- [x] Run tests: `go test -race ./internal/pkg/remotecapture/...` → ✅ PASS (1.047s)
+- [x] Verify no compilation errors → ✅ Clean build
+- [x] Format: `gofmt -w internal/pkg/remotecapture/client_streaming.go` → ✅ Done
+- [x] Commit: `git add . && git commit -m "refactor(remotecapture): extract streaming logic to client_streaming.go"` → ✅ 7096bf7
+- [x] Result: client_streaming.go created (127 lines), client.go reduced to 280 lines
 
 ### Step 4: Clean Up client.go (1 hour)
 - [ ] Verify only core types, constructor, and lifecycle remain

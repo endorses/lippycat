@@ -1,3 +1,14 @@
+// Package remotecapture provides a client for connecting to remote processors
+// and subscribing to packet streams, hunter status, and topology updates.
+//
+// File: client.go - Core types, constructor, and lifecycle management
+//
+// This file contains the fundamental client types, configuration, constructor,
+// connection management, and node type detection. Related functionality is split
+// across companion files:
+//   - client_streaming.go: Packet streaming and hot-swapping
+//   - client_subscriptions.go: Hunter status, topology, and call subscriptions
+//   - client_conversion.go: Packet parsing and state conversion
 package remotecapture
 
 import (

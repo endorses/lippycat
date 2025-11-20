@@ -158,15 +158,16 @@ internal/pkg/remotecapture/
 - [x] Commit: `git add . && git commit -m "refactor(remotecapture): extract streaming logic to client_streaming.go"` → ✅ 7096bf7
 - [x] Result: client_streaming.go created (127 lines), client.go reduced to 280 lines
 
-### Step 4: Clean Up client.go (1 hour)
-- [ ] Verify only core types, constructor, and lifecycle remain
-- [ ] Update file header comment to reflect new structure
-- [ ] Ensure proper organization of remaining code
-- [ ] Verify all imports are still needed
-- [ ] Remove unused imports
-- [ ] Run tests: `go test -race ./internal/pkg/remotecapture/...`
-- [ ] Format: `gofmt -w internal/pkg/remotecapture/client.go`
-- [ ] Commit: `git add . && git commit -m "refactor(remotecapture): clean up client.go (core types and lifecycle only)"`
+### Step 4: Clean Up client.go (1 hour) ✅ COMPLETE
+- [x] Verify only core types, constructor, and lifecycle remain → ✅ All extractions complete (291 lines)
+- [x] Update file header comment to reflect new structure → ✅ Added comprehensive header
+- [x] Ensure proper organization of remaining code → ✅ Well organized
+- [x] Verify all imports are still needed → ✅ All imports actively used
+- [x] Remove unused imports → ✅ No unused imports found
+- [x] Run tests: `go test -race ./internal/pkg/remotecapture/...` → ✅ PASS (1.050s)
+- [x] Format: `gofmt -w internal/pkg/remotecapture/client.go` → ✅ Done
+- [x] Commit: `git add . && git commit -m "docs(remotecapture): update client.go header with file structure (Phase 3.5 Step 4)"` → ✅ 935be2c
+- [x] Result: client.go at 291 lines (77% reduction from original 1,269 lines)
 
 ### Step 5: Validation (1 hour)
 - [ ] Run full test suite: `go test -race ./...`

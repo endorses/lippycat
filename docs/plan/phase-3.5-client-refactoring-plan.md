@@ -181,13 +181,14 @@ internal/pkg/remotecapture/
 - [x] Review code organization and comments → ✅ All files have clear header comments
 - [x] Run linter: `golangci-lint run ./internal/pkg/remotecapture/...` → ✅ 0 issues
 
-### Step 6: Documentation (30 minutes)
-- [ ] Update `cmd/tui/CLAUDE.md` if it references `client.go` structure
-- [ ] Add note about file organization to package godoc
-- [ ] Update Phase 3.5 status in `docs/plan/code-review-remediation-2025-11-01.md`
-- [ ] Mark `client.go` refactoring as complete
-- [ ] Mark `nodesview.go` as complete (already well-structured)
-- [ ] Commit documentation updates
+### Step 6: Documentation (30 minutes) ✅ COMPLETE
+- [x] Update `cmd/tui/CLAUDE.md` if it references `client.go` structure → ✅ No update needed (generic reference only)
+- [x] Add note about file organization to package godoc → ✅ Already included in client.go header
+- [x] Update Phase 3.5 status in `docs/plan/code-review-remediation-2025-11-01.md` → ✅ Done
+- [x] Mark `client.go` refactoring as complete → ✅ Marked complete (2025-11-21)
+- [x] Mark `nodesview.go` as complete (already well-structured) → ✅ Marked complete (2025-11-16)
+- [x] Mark Phase 3 as complete → ✅ All Phase 3 tasks complete
+- [x] Commit documentation updates → ✅ Ready to commit
 
 ### Step 7: Final Commit (15 minutes)
 - [ ] Create summary commit for the refactoring

@@ -202,6 +202,9 @@ sudo lc sniff voip --interface eth0 --sipuser alicent
 sudo lc sniff voip -i eth0 \
   --tcp-performance-mode high_performance \
   --gpu-backend auto
+
+# UDP-only VoIP capture (bypass TCP, reduces CPU on TCP-heavy networks)
+sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
 ```
 
 **Distributed Capture:**
@@ -217,6 +220,11 @@ sudo lc hunt --processor processor:50051 \
 
 # VoIP hunter with call filtering
 sudo lc hunt voip --processor processor:50051 --tls --tls-ca ca.crt
+
+# VoIP hunter with BPF filter optimization (UDP-only)
+sudo lc hunt voip --processor processor:50051 \
+  --udp-only --sip-port 5060 \
+  --tls --tls-ca ca.crt
 ```
 
 **Interactive Monitoring:**

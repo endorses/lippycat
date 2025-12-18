@@ -76,6 +76,12 @@ VoIP hunter mode provides intelligent call buffering and filtering:
 - Filter matching using processor-provided filters
 - Selective forwarding (only matched calls sent to processor)
 - TCP SIP reassembly with buffering
+- BPF filter optimization for high-traffic networks
+
+**BPF Filter Optimization Flags:**
+- `--udp-only` - Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)
+- `--sip-port` - Restrict SIP capture to specific port(s), comma-separated
+- `--rtp-port-range` - Custom RTP port range(s), comma-separated (default: 10000-32768)
 
 **How It Works:**
 
@@ -103,6 +109,27 @@ lc hunt voip \
   --tls-cert /etc/lippycat/certs/hunter.crt \
   --tls-key /etc/lippycat/certs/hunter.key \
   --tls-ca /etc/lippycat/certs/ca.crt
+
+# VoIP hunter with BPF filter optimization (UDP-only)
+lc hunt voip \
+  --processor processor:50051 \
+  --interface eth0 \
+  --udp-only \
+  --tls --tls-ca ca.crt
+
+# VoIP hunter with specific SIP port
+lc hunt voip \
+  --processor processor:50051 \
+  --interface eth0 \
+  --sip-port 5060 \
+  --tls --tls-ca ca.crt
+
+# VoIP hunter with custom RTP port range
+lc hunt voip \
+  --processor processor:50051 \
+  --interface eth0 \
+  --rtp-port-range 8000-9000 \
+  --tls --tls-ca ca.crt
 ```
 
 **Filter Management:**
@@ -268,6 +295,12 @@ hunter:
     enabled: true
     gpu_backend: "auto"
     gpu_batch_size: 100
+
+  # VoIP BPF filter optimization (for lc hunt voip)
+  voip:
+    udp_only: false
+    sip_ports: "5060"
+    rtp_port_ranges: "10000-32768"
 
   # TLS security
   tls:

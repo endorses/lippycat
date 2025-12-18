@@ -71,6 +71,11 @@ var (
     sipuser   string
     writeVoip bool
 
+    // BPF filter optimization flags
+    udpOnly       bool
+    sipPorts      string
+    rtpPortRanges string
+
     // GPU acceleration flags
     gpuBackend   string
     gpuBatchSize int
@@ -310,7 +315,44 @@ Instead of setting 17+ TCP parameters manually, users select a profile:
 
 Profiles (`minimal`, `balanced`, `high_performance`, `low_latency`) map to full `Config` structs with all parameters pre-tuned.
 
-### 7. GPU Acceleration Pattern (VoIP)
+### 7. BPF Filter Builder Pattern (VoIP)
+
+**Purpose:** Construct optimized BPF filters for high-traffic networks where TCP reassembly overhead overwhelms SIP processing.
+
+**Implementation:** `internal/pkg/voip/filter.go`
+
+```go
+// Build optimized filter
+builder := voip.NewVoIPFilterBuilder()
+filterConfig := voip.VoIPFilterConfig{
+    SIPPorts:      parsedSIPPorts,      // []int from ParsePorts()
+    RTPPortRanges: parsedRTPRanges,     // []PortRange from ParsePortRanges()
+    UDPOnly:       voipUDPOnly,         // bool
+    BaseFilter:    filter,              // user's --filter value
+}
+effectiveFilter := builder.Build(filterConfig)
+```
+
+**Key Functions:**
+- `NewVoIPFilterBuilder()` - Create builder instance
+- `VoIPFilterBuilder.Build(config)` - Generate BPF filter string
+- `ParsePorts(s string)` - Parse "5060,5061,5080" to `[]int`
+- `ParsePortRanges(s string)` - Parse "8000-9000,40000-50000" to `[]PortRange`
+
+**Filter Construction Algorithm:**
+1. If no SIP ports and no RTP ranges, return base filter (with optional `udp` prefix)
+2. Build SIP port filter (captures both TCP and UDP unless `--udp-only`)
+3. Build RTP port range filter (always UDP)
+4. Combine SIP and RTP with OR
+5. Apply UDP-only constraint if requested
+6. Combine with base filter using AND
+
+**Viper Bindings:**
+- `voip.udp_only` → `--udp-only` flag
+- `voip.sip_ports` → `--sip-port` flag
+- `voip.rtp_port_ranges` → `--rtp-port-range` flag
+
+### 8. GPU Acceleration Pattern (VoIP)
 
 **Backend Auto-Detection:**
 
@@ -322,7 +364,7 @@ Profiles (`minimal`, `balanced`, `high_performance`, `low_latency`) map to full 
 
 Uses interface-based abstraction with runtime backend selection.
 
-### 8. TCP Reassembly Pattern (VoIP)
+### 9. TCP Reassembly Pattern (VoIP)
 
 **Challenge:** SIP over TCP requires stream reassembly.
 

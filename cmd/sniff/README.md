@@ -139,6 +139,56 @@ lc sniff voip -i eth0 --sipuser alicent,robb,charlie
 lc sniff voip -i eth0 --sipuser alicent
 ```
 
+### BPF Filter Optimization
+
+**Purpose:** Optimize BPF filters for high-traffic networks where TCP overhead overwhelms SIP handling.
+
+**Flags:**
+- `--udp-only` - Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)
+- `--sip-port` - Restrict SIP capture to specific port(s), comma-separated
+- `--rtp-port-range` - Custom RTP port range(s), comma-separated (default: 10000-32768)
+
+**Examples:**
+
+```bash
+# UDP-only VoIP capture (bypass TCP reassembly)
+lc sniff voip -i eth0 --udp-only
+
+# Restrict SIP to port 5060
+lc sniff voip -i eth0 --sip-port 5060
+
+# Multiple SIP ports
+lc sniff voip -i eth0 --sip-port 5060,5061,5080
+
+# Custom RTP port range
+lc sniff voip -i eth0 --rtp-port-range 8000-9000
+
+# Multiple RTP ranges
+lc sniff voip -i eth0 --rtp-port-range 8000-9000,40000-50000
+
+# Combined: UDP-only with specific SIP port
+lc sniff voip -i eth0 --udp-only --sip-port 5060
+
+# With host filter
+lc sniff voip -i eth0 --filter "host 10.0.0.1" --sip-port 5060
+```
+
+**Generated BPF Filters:**
+
+| Input | Generated BPF Filter |
+|-------|---------------------|
+| `--udp-only` | `udp` |
+| `--sip-port 5060` | `(port 5060) or (udp portrange 10000-32768)` |
+| `--sip-port 5060 --udp-only` | `udp and ((port 5060) or (portrange 10000-32768))` |
+| `--rtp-port-range 8000-9000` | `(udp portrange 8000-9000)` |
+| `--filter "host 10.0.0.1" --sip-port 5060` | `(host 10.0.0.1) and ((port 5060) or (udp portrange 10000-32768))` |
+
+**When to use:**
+- Networks with high non-VoIP TCP traffic (web servers, databases)
+- UDP-only SIP environments (most SIP deployments)
+- Custom SIP port configurations
+- Non-standard RTP port ranges
+
 ### PCAP File Writing
 
 **Flag:** `--write-file` / `-w`
@@ -262,6 +312,11 @@ All flags can be specified in the configuration file (`~/.config/lippycat/config
 
 ```yaml
 voip:
+  # BPF filter optimization
+  udp_only: false
+  sip_ports: "5060,5061"
+  rtp_port_ranges: "10000-32768"
+
   # GPU acceleration
   gpu_enable: true
   gpu_backend: "auto"

@@ -70,12 +70,12 @@ Implement three new flags for `lc sniff voip` and `lc hunt voip` that allow user
 - [ ] Test combination with `--filter "host 10.0.0.1"` produces correct AND combination
 - [ ] Test YAML config file values are read correctly
 
-#### Step 3.2: Documentation Updates
-- [ ] Update `cmd/sniff/README.md` — Add new flags with examples
-- [ ] Update `cmd/hunt/README.md` — Add new flags with examples
-- [ ] Update `cmd/sniff/CLAUDE.md` — Document filter builder pattern
-- [ ] Update root `CLAUDE.md` — Add flags to CLI usage section
-- [ ] Add YAML config examples to relevant READMEs
+#### Step 3.2: Documentation Updates ✅
+- [x] Update `cmd/sniff/README.md` — Add new flags with examples
+- [x] Update `cmd/hunt/README.md` — Add new flags with examples
+- [x] Update `cmd/sniff/CLAUDE.md` — Document filter builder pattern
+- [x] Update root `CLAUDE.md` — Add flags to CLI usage section
+- [x] Add YAML config examples to relevant READMEs
 
 #### Step 3.3: Final Validation
 - [ ] Run full test suite: `make test`

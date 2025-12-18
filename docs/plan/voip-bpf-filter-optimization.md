@@ -23,21 +23,21 @@ Implement three new flags for `lc sniff voip` and `lc hunt voip` that allow user
 
 ## Implementation Steps
 
-### Phase 1: Core Filter Builder (1.5 hours)
+### Phase 1: Core Filter Builder (1.5 hours) ✅
 
 #### Step 1.1: Create `internal/pkg/voip/filter.go`
-- [ ] Create `PortRange` struct and `VoIPFilterConfig` struct
-- [ ] Implement `VoIPFilterBuilder.Build()` method
-- [ ] Add `ParsePortRanges()` and `ParsePorts()` helper functions
-- [ ] Export `DefaultRTPPortRange()` (10000-32768)
-- [ ] Run tests: `go test -race ./internal/pkg/voip/...`
-- [ ] Format: `gofmt -w internal/pkg/voip/filter.go`
+- [x] Create `PortRange` struct and `VoIPFilterConfig` struct
+- [x] Implement `VoIPFilterBuilder.Build()` method
+- [x] Add `ParsePortRanges()` and `ParsePorts()` helper functions
+- [x] Export `DefaultRTPPortRange()` (10000-32768)
+- [x] Run tests: `go test -race ./internal/pkg/voip/...`
+- [x] Format: `gofmt -w internal/pkg/voip/filter.go`
 
 #### Step 1.2: Create `internal/pkg/voip/filter_test.go`
-- [ ] Test filter construction for all flag combinations (from research §4)
-- [ ] Test edge cases: empty inputs, multiple ranges, combined filters
-- [ ] Test `ParsePortRanges()` and `ParsePorts()` error handling
-- [ ] Run tests: `go test -race ./internal/pkg/voip/...`
+- [x] Test filter construction for all flag combinations (from research §4)
+- [x] Test edge cases: empty inputs, multiple ranges, combined filters
+- [x] Test `ParsePortRanges()` and `ParsePorts()` error handling
+- [x] Run tests: `go test -race ./internal/pkg/voip/...`
 
 ---
 

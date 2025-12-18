@@ -78,10 +78,10 @@ Implement three new flags for `lc sniff voip` and `lc hunt voip` that allow user
 - [x] Add YAML config examples to relevant READMEs
 
 #### Step 3.3: Final Validation
-- [ ] Run full test suite: `make test`
-- [ ] Run linter: `golangci-lint run ./...`
-- [ ] Build all variants: `make binaries`
-- [ ] Commit changes
+- [x] Run full test suite: `make test`
+- [x] Run linter: `golangci-lint run ./...` (123 pre-existing style warnings about legacy build tags)
+- [x] Build all variants: `make binaries`
+- [x] Commit changes
 
 ---
 
@@ -128,12 +128,12 @@ func ParsePorts(s string) ([]int, error)             // "5060,5061,5080"
 
 ## Success Criteria
 
-- [ ] `VoIPFilterBuilder` correctly generates all filter combinations from research §3
-- [ ] Both commands accept new flags and produce correct BPF filters
-- [ ] YAML config file support works for all three options
-- [ ] All tests pass with race detector
-- [ ] Documentation covers all new flags with examples
-- [ ] No breaking changes to existing behavior (empty flags = original behavior)
+- [x] `VoIPFilterBuilder` correctly generates all filter combinations from research §3
+- [x] Both commands accept new flags and produce correct BPF filters
+- [x] YAML config file support works for all three options
+- [x] All tests pass with race detector
+- [x] Documentation covers all new flags with examples
+- [x] No breaking changes to existing behavior (empty flags = original behavior)
 
 ---
 

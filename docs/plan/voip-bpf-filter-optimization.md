@@ -41,22 +41,22 @@ Implement three new flags for `lc sniff voip` and `lc hunt voip` that allow user
 
 ---
 
-### Phase 2: Command Integration (2 hours)
+### Phase 2: Command Integration (2 hours) ✅
 
 #### Step 2.1: Update `cmd/sniff/voip.go`
-- [ ] Add `--udp-only` flag (bool, default: false)
-- [ ] Add `--sip-port` flag (string, comma-separated ports)
-- [ ] Add `--rtp-port-range` flag (string, comma-separated ranges)
-- [ ] Bind flags to Viper: `voip.udp_only`, `voip.sip_ports`, `voip.rtp_port_ranges`
-- [ ] Build effective filter using `VoIPFilterBuilder` before capture
-- [ ] Run tests: `go test -race ./cmd/sniff/...`
-- [ ] Format: `gofmt -w cmd/sniff/voip.go`
+- [x] Add `--udp-only` flag (bool, default: false)
+- [x] Add `--sip-port` flag (string, comma-separated ports)
+- [x] Add `--rtp-port-range` flag (string, comma-separated ranges)
+- [x] Bind flags to Viper: `voip.udp_only`, `voip.sip_ports`, `voip.rtp_port_ranges`
+- [x] Build effective filter using `VoIPFilterBuilder` before capture
+- [x] Run tests: `go test -race ./cmd/sniff/...`
+- [x] Format: `gofmt -w cmd/sniff/voip.go`
 
 #### Step 2.2: Update `cmd/hunt/voip.go`
-- [ ] Add same three flags with Viper bindings under `hunter.voip.*`
-- [ ] Integrate `VoIPFilterBuilder` with existing `buildCombinedBPFFilter()` in hunter
-- [ ] Run tests: `go test -race ./cmd/hunt/...`
-- [ ] Format: `gofmt -w cmd/hunt/voip.go`
+- [x] Add same three flags with Viper bindings under `hunter.voip.*`
+- [x] Integrate `VoIPFilterBuilder` with existing `buildCombinedBPFFilter()` in hunter
+- [x] Run tests: `go test -race ./cmd/hunt/...`
+- [x] Format: `gofmt -w cmd/hunt/voip.go`
 
 ---
 

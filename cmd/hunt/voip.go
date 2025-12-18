@@ -18,6 +18,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+var (
+	// BPF filter optimization flags for VoIP hunter
+	hunterUDPOnly       bool
+	hunterSIPPorts      string
+	hunterRTPPortRanges string
+)
+
 var voipHuntCmd = &cobra.Command{
 	Use:   "voip",
 	Short: "Run as VoIP hunter with call buffering",
@@ -46,7 +53,16 @@ Example:
 
 func init() {
 	HuntCmd.AddCommand(voipHuntCmd)
-	// No voip-specific flags - filters come from processor
+
+	// BPF Filter Optimization Flags (VoIP-specific)
+	voipHuntCmd.Flags().BoolVar(&hunterUDPOnly, "udp-only", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
+	voipHuntCmd.Flags().StringVar(&hunterSIPPorts, "sip-port", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
+	voipHuntCmd.Flags().StringVar(&hunterRTPPortRanges, "rtp-port-range", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
+
+	// Bind BPF filter optimization flags to viper under hunter.voip.* namespace
+	_ = viper.BindPFlag("hunter.voip.udp_only", voipHuntCmd.Flags().Lookup("udp-only"))
+	_ = viper.BindPFlag("hunter.voip.sip_ports", voipHuntCmd.Flags().Lookup("sip-port"))
+	_ = viper.BindPFlag("hunter.voip.rtp_port_ranges", voipHuntCmd.Flags().Lookup("rtp-port-range"))
 }
 
 func runVoIPHunt(cmd *cobra.Command, args []string) error {
@@ -62,12 +78,52 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Production mode: TLS encryption enforced")
 	}
 
+	// Build optimized BPF filter using VoIPFilterBuilder
+	baseBPFFilter := getStringConfig("hunter.bpf_filter", bpfFilter)
+	effectiveBPFFilter := baseBPFFilter
+
+	// Parse BPF filter optimization flags (from flags or viper config)
+	voipUDPOnly := viper.GetBool("hunter.voip.udp_only")
+	voipSIPPorts := viper.GetString("hunter.voip.sip_ports")
+	voipRTPPortRanges := viper.GetString("hunter.voip.rtp_port_ranges")
+
+	// Only build VoIP filter if any optimization flags are set
+	if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {
+		// Parse SIP ports
+		parsedSIPPorts, err := voip.ParsePorts(voipSIPPorts)
+		if err != nil {
+			return fmt.Errorf("invalid --sip-port value: %w", err)
+		}
+
+		// Parse RTP port ranges
+		parsedRTPRanges, err := voip.ParsePortRanges(voipRTPPortRanges)
+		if err != nil {
+			return fmt.Errorf("invalid --rtp-port-range value: %w", err)
+		}
+
+		// Build optimized filter
+		builder := voip.NewVoIPFilterBuilder()
+		filterConfig := voip.VoIPFilterConfig{
+			SIPPorts:      parsedSIPPorts,
+			RTPPortRanges: parsedRTPRanges,
+			UDPOnly:       voipUDPOnly,
+			BaseFilter:    baseBPFFilter,
+		}
+		effectiveBPFFilter = builder.Build(filterConfig)
+
+		logger.Info("VoIP BPF filter optimization enabled",
+			"udp_only", voipUDPOnly,
+			"sip_ports", voipSIPPorts,
+			"rtp_port_ranges", voipRTPPortRanges,
+			"effective_filter", effectiveBPFFilter)
+	}
+
 	// Get configuration (reuse flags from parent command)
 	config := hunter.Config{
 		ProcessorAddr:    getStringConfig("hunter.processor_addr", processorAddr),
 		HunterID:         getStringConfig("hunter.hunter_id", hunterID),
 		Interfaces:       getStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:        getStringConfig("hunter.bpf_filter", bpfFilter),
+		BPFFilter:        effectiveBPFFilter,
 		BufferSize:       getIntConfig("hunter.buffer_size", bufferSize),
 		BatchSize:        getIntConfig("hunter.batch_size", batchSize),
 		BatchTimeout:     time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,

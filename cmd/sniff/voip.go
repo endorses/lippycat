@@ -25,6 +25,11 @@ var (
 	sipuser       string
 	writeVoipFile string
 
+	// BPF filter optimization flags
+	udpOnly       bool
+	sipPorts      string
+	rtpPortRanges string
+
 	// GPU acceleration flags
 	gpuBackend   string
 	gpuBatchSize int
@@ -129,6 +134,47 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	// They are automatically bound to viper via sniff.go init()
 	// Read from sniff.* namespace (not voip.* namespace)
 
+	// Build optimized BPF filter using VoIPFilterBuilder
+	effectiveFilter := filter // Start with the base --filter value
+
+	// Parse BPF filter optimization flags (from flags or viper config)
+	voipUDPOnly := viper.GetBool("voip.udp_only")
+	voipSIPPorts := viper.GetString("voip.sip_ports")
+	voipRTPPortRanges := viper.GetString("voip.rtp_port_ranges")
+
+	// Only build VoIP filter if any optimization flags are set
+	if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {
+		// Parse SIP ports
+		parsedSIPPorts, err := voip.ParsePorts(voipSIPPorts)
+		if err != nil {
+			logger.Error("Invalid --sip-port value", "error", err)
+			return
+		}
+
+		// Parse RTP port ranges
+		parsedRTPRanges, err := voip.ParsePortRanges(voipRTPPortRanges)
+		if err != nil {
+			logger.Error("Invalid --rtp-port-range value", "error", err)
+			return
+		}
+
+		// Build optimized filter
+		builder := voip.NewVoIPFilterBuilder()
+		filterConfig := voip.VoIPFilterConfig{
+			SIPPorts:      parsedSIPPorts,
+			RTPPortRanges: parsedRTPRanges,
+			UDPOnly:       voipUDPOnly,
+			BaseFilter:    filter,
+		}
+		effectiveFilter = builder.Build(filterConfig)
+
+		logger.Info("VoIP BPF filter optimization enabled",
+			"udp_only", voipUDPOnly,
+			"sip_ports", voipSIPPorts,
+			"rtp_port_ranges", voipRTPPortRanges,
+			"effective_filter", effectiveFilter)
+	}
+
 	logger.Info("Starting VoIP sniffing with optimizations",
 		"gpu_enable", viper.GetBool("voip.gpu_enable"),
 		"gpu_backend", viper.GetString("voip.gpu_backend"),
@@ -143,15 +189,25 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"vif_replay_timing", viper.GetBool("sniff.vif_replay_timing"))
 
 	if readFile == "" {
-		voip.StartLiveVoipSniffer(interfaces, filter)
+		voip.StartLiveVoipSniffer(interfaces, effectiveFilter)
 	} else {
-		voip.StartOfflineVoipSniffer(readFile, filter)
+		voip.StartOfflineVoipSniffer(readFile, effectiveFilter)
 	}
 }
 
 func init() {
 	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")
 	voipCmd.Flags().StringVarP(&writeVoipFile, "write-file", "w", "", "prefix for output pcap files (creates <prefix>_sip_<callid>.pcap and <prefix>_rtp_<callid>.pcap)")
+
+	// BPF Filter Optimization Flags
+	voipCmd.Flags().BoolVar(&udpOnly, "udp-only", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
+	voipCmd.Flags().StringVar(&sipPorts, "sip-port", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
+	voipCmd.Flags().StringVar(&rtpPortRanges, "rtp-port-range", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
+
+	// Bind BPF filter optimization flags to viper
+	_ = viper.BindPFlag("voip.udp_only", voipCmd.Flags().Lookup("udp-only"))
+	_ = viper.BindPFlag("voip.sip_ports", voipCmd.Flags().Lookup("sip-port"))
+	_ = viper.BindPFlag("voip.rtp_port_ranges", voipCmd.Flags().Lookup("rtp-port-range"))
 
 	// GPU Acceleration Flags
 	voipCmd.Flags().BoolVar(&gpuEnable, "gpu-enable", true, "Enable GPU acceleration for pattern matching (default: true)")

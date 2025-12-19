@@ -151,9 +151,9 @@ thin CLI wrappers and `internal/pkg/` contains implementation. Compare with how
 - [x] Remove `cmd/debug/` directory
 
 #### Step 2.3: Clean up root registrations
-- [ ] Remove tui command registration from root files
-- [ ] Remove interfaces command registration from root files
-- [ ] Remove debug command registration from root files
+- [x] Remove tui command registration from root files
+- [x] Remove interfaces command registration from root files
+- [x] Remove debug command registration from root files
 
 ---
 

@@ -97,12 +97,12 @@ OBJECTS BY VERB:
 ### Phase 1: Create New Commands
 
 #### Step 1.1: Create `cmd/watch/` command structure
-- [ ] Create `cmd/watch/watch.go` — Base watch command (defaults to `live`)
-- [ ] Create `cmd/watch/live.go` — Live capture TUI (move logic from `cmd/tui/`)
-- [ ] Create `cmd/watch/file.go` — PCAP file analysis TUI
-- [ ] Create `cmd/watch/remote.go` — Remote node monitoring
-- [ ] Add build tag variants for watch command
-- [ ] Run tests: `go test -race ./cmd/watch/...`
+- [x] Create `cmd/watch/watch.go` — Base watch command (defaults to `live`)
+- [x] Create `cmd/watch/live.go` — Live capture TUI (move logic from `cmd/tui/`)
+- [x] Create `cmd/watch/file.go` — PCAP file analysis TUI
+- [x] Create `cmd/watch/remote.go` — Remote node monitoring
+- [x] Add build tag variants for watch command
+- [x] Run tests: `go test -race ./cmd/watch/...`
 
 #### Step 1.2: Create `cmd/list/` command structure
 - [ ] Create `cmd/list/list.go` — Base list command

@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/cmd/process"
 	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/cmd/tui"
+	"github.com/endorses/lippycat/cmd/watch"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/version"
 	"github.com/spf13/cobra"
@@ -36,6 +37,7 @@ func Execute() {
 func addSubCommandPalattes() {
 	rootCmd.AddCommand(sniff.SniffCmd)
 	rootCmd.AddCommand(tui.TuiCmd)
+	rootCmd.AddCommand(watch.WatchCmd)
 	rootCmd.AddCommand(hunt.HuntCmd)
 	rootCmd.AddCommand(process.ProcessCmd)
 }

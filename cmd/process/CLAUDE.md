@@ -571,6 +571,93 @@ const graceperiod = 5 * time.Minute
 
 **Benefit:** Faster detection and cleanup of truly dead hunters while maintaining 5min grace period for temporary disruptions.
 
+### 13. Command Hooks Pattern
+
+**Files:** `internal/pkg/processor/command_executor.go`, `internal/pkg/processor/call_completion_monitor.go`
+
+Execute custom commands when PCAP files are written or VoIP calls complete:
+
+**Architecture:**
+
+```go
+// CommandExecutor handles async command execution with placeholders
+type CommandExecutor struct {
+    config *CommandExecutorConfig
+    sem    chan struct{} // Concurrency limiter
+}
+
+type CommandExecutorConfig struct {
+    PcapCommand string        // Template: "gzip %pcap%"
+    VoipCommand string        // Template: "notify.sh %callid% %dirname%"
+    Timeout     time.Duration // Default: 30s
+    Concurrency int           // Default: 10
+}
+```
+
+**Callback Integration:**
+
+```go
+// PCAP writers call OnFileClose callback when files are closed
+type CallPcapWriterConfig struct {
+    OnFileClose    func(filePath string)     // Fires on every file close
+    OnCallComplete func(meta CallMetadata)   // Fires when call ends
+}
+
+// CommandExecutor provides callback functions
+executor := NewCommandExecutor(config)
+pcapConfig.OnFileClose = executor.OnFileClose()
+pcapConfig.OnCallComplete = executor.OnCallComplete()
+```
+
+**Call Completion Flow:**
+
+```
+BYE/CANCEL received
+       ↓
+CallAggregator.State = CallStateEnded
+       ↓
+CallCompletionMonitor detects ended call
+       ↓
+Grace period (5s) to capture late packets
+       ↓
+PcapWriterManager.CloseCallWriter(callID)
+       ↓
+OnFileClose(sipFile) + OnFileClose(rtpFile)
+       ↓
+OnCallComplete(CallMetadata)
+       ↓
+CommandExecutor.ExecuteVoipCommand(meta)
+       ↓
+Async shell execution with timeout
+```
+
+**Key Features:**
+
+1. **Async Execution:** Commands run in goroutines, never block packet processing
+2. **Concurrency Control:** Semaphore limits concurrent executions (default: 10)
+3. **Timeout Protection:** Commands killed after timeout (default: 30s)
+4. **Placeholder Substitution:** `%pcap%`, `%callid%`, `%dirname%`, `%caller%`, `%called%`, `%calldate%`
+5. **Grace Period:** Waits 5s after BYE/CANCEL before closing files
+
+**CLI Flags:**
+
+```bash
+--pcap-command 'gzip %pcap%'                    # Execute on file close
+--voip-command 'notify.sh %callid% %dirname%'   # Execute on call complete
+--command-timeout 30s                            # Execution timeout
+--command-concurrency 10                         # Max concurrent commands
+```
+
+**Viper Configuration:**
+
+```yaml
+processor:
+  pcap_command: "gzip %pcap%"
+  voip_command: "notify.sh %callid% %dirname%"
+  command_timeout: "30s"
+  command_concurrency: 10
+```
+
 ## gRPC Server Implementation
 
 ### Packet Reception Service

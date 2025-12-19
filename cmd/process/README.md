@@ -124,6 +124,64 @@ lc process --listen :50051 \
 
 **Note:** All three modes are independent. You can enable unified (`-w`), per-call (`--per-call-pcap`), and auto-rotate (`--auto-rotate-pcap`) simultaneously. VoIP packets are routed to per-call writer; non-VoIP packets go to auto-rotate writer.
 
+#### Command Hooks
+
+Execute custom commands when PCAP files are written or VoIP calls complete:
+
+- `--pcap-command` - Command to execute when any PCAP file is closed
+- `--voip-command` - Command to execute when a VoIP call completes
+- `--command-timeout` - Timeout for command execution (default: `30s`)
+- `--command-concurrency` - Maximum concurrent command executions (default: `10`)
+
+```bash
+# Execute script when PCAP files are written
+lc process --listen :50051 \
+  --per-call-pcap \
+  --pcap-command 'echo "%pcap%" >> /var/log/pcap-files.log'
+
+# Execute script when VoIP calls complete
+lc process --listen :50051 \
+  --per-call-pcap \
+  --voip-command '/opt/scripts/process-call.sh %callid% %dirname%'
+
+# Both hooks with custom timeout
+lc process --listen :50051 \
+  --per-call-pcap \
+  --pcap-command 'gzip %pcap%' \
+  --voip-command 'notify.sh %callid% %caller% %called%' \
+  --command-timeout 60s
+```
+
+**PCAP Command Placeholders:**
+
+| Placeholder | Description |
+|-------------|-------------|
+| `%pcap%` | Full path to the PCAP file |
+
+**VoIP Command Placeholders:**
+
+| Placeholder | Description |
+|-------------|-------------|
+| `%callid%` | SIP Call-ID |
+| `%dirname%` | Directory containing the call's PCAP files |
+| `%caller%` | Caller (From user) |
+| `%called%` | Called party (To user) |
+| `%calldate%` | Call start time (RFC3339 format) |
+
+**Execution Details:**
+- Commands execute asynchronously (don't block packet processing)
+- Commands run via shell (`sh -c`)
+- Failed commands are logged but don't affect processing
+- Timed-out commands are killed after `--command-timeout`
+- Concurrency is limited by `--command-concurrency`
+
+**Use Cases:**
+- Compress PCAP files after writing: `gzip %pcap%`
+- Upload to cloud storage: `aws s3 cp %pcap% s3://bucket/`
+- Send notifications: `curl -X POST -d "call=%callid%" webhook.example.com`
+- Archive completed calls: `tar -czf %dirname%.tar.gz %dirname%`
+- Trigger analysis pipelines: `analyze-voip.sh %callid% %caller% %called%`
+
 ### Protocol Detection
 
 - `-d, --enable-detection` - Enable centralized protocol detection (default: true)
@@ -329,6 +387,12 @@ processor:
     file_pattern: "{timestamp}.pcap"
     idle_timeout: "30s"
     max_size: "100M"
+
+  # Command hooks
+  pcap_command: "gzip %pcap%"
+  voip_command: "/opt/scripts/process-call.sh %callid% %dirname% %caller% %called% %calldate%"
+  command_timeout: "30s"
+  command_concurrency: 10
 
   # TLS security
   tls:

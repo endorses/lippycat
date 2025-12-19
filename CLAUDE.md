@@ -234,6 +234,13 @@ sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
 lc process --listen 0.0.0.0:50051 \
   --tls --tls-cert server.crt --tls-key server.key
 
+# Processor with per-call PCAP and command hooks
+lc process --listen 0.0.0.0:50051 \
+  --per-call-pcap --per-call-pcap-dir /var/capture/calls \
+  --pcap-command 'gzip %pcap%' \
+  --voip-command '/opt/scripts/process-call.sh %callid% %dirname%' \
+  --tls --tls-cert server.crt --tls-key server.key
+
 # Hunter (edge capture)
 sudo lc hunt --processor processor:50051 \
   --interface eth0 \

@@ -86,28 +86,28 @@ Implement command hooks that execute when PCAP files are written by the processo
 
 ---
 
-### Phase 4: Validation & Documentation
+### Phase 4: Validation & Documentation ✅
 
 #### Step 4.1: Manual Testing
 
-- [ ] Test `--pcap-command 'echo %pcap%'` fires on PCAP close
-- [ ] Test `--voip-command 'echo %callid% %dirname%'` fires on call complete
-- [ ] Test command timeout kills long-running process
-- [ ] Test concurrent commands respect semaphore
-- [ ] Test YAML config file values work
+- [x] Test `--pcap-command 'echo %pcap%'` fires on PCAP close
+- [x] Test `--voip-command 'echo %callid% %dirname%'` fires on call complete
+- [x] Test command timeout kills long-running process
+- [x] Test concurrent commands respect semaphore
+- [x] Test YAML config file values work
 
 #### Step 4.2: Documentation Updates
 
-- [ ] Update `cmd/process/README.md` — Add new flags with examples
-- [ ] Update `cmd/process/CLAUDE.md` — Document hook architecture
-- [ ] Update root `CLAUDE.md` — Add flags to CLI usage section
+- [x] Update `cmd/process/README.md` — Add new flags with examples
+- [x] Update `cmd/process/CLAUDE.md` — Document hook architecture
+- [x] Update root `CLAUDE.md` — Add flags to CLI usage section
 
 #### Step 4.3: Final Validation
 
-- [ ] Run full test suite: `make test`
-- [ ] Run linter: `golangci-lint run ./...`
-- [ ] Build all variants: `make binaries`
-- [ ] Commit changes
+- [x] Run full test suite: `make test`
+- [x] Run linter: `golangci-lint run ./...`
+- [x] Build all variants: `make binaries`
+- [x] Commit changes
 
 ---
 
@@ -124,9 +124,10 @@ Implement command hooks that execute when PCAP files are written by the processo
 | `internal/pkg/processor/processor.go` | **Modify** — Wire CallCompletionMonitor ✅ |
 | `internal/pkg/processor/processor_lifecycle.go` | **Modify** — Start/stop CallCompletionMonitor ✅ |
 | `cmd/process/process.go` | **Modify** — Add 4 flags ✅ |
-| `cmd/process/README.md` | **Modify** — Document new flags |
-| `cmd/process/CLAUDE.md` | **Modify** — Document architecture |
-| `CLAUDE.md` | **Modify** — Add flags to usage section |
+| `cmd/process/README.md` | **Modify** — Document new flags ✅ |
+| `cmd/process/CLAUDE.md` | **Modify** — Document architecture ✅ |
+| `CLAUDE.md` | **Modify** — Add flags to usage section ✅ |
+| `test/command_hooks_integration_test.go` | **New** — Integration tests for command hooks ✅ |
 
 ---
 
@@ -192,13 +193,13 @@ processor:
 
 ## Success Criteria
 
-- [ ] `CommandExecutor` correctly substitutes all placeholders
-- [ ] `pcapcommand` fires on every PCAP file close (including rotations)
-- [ ] `voipcommand` fires after both SIP and RTP files are closed
-- [ ] Grace period prevents premature call closure
-- [ ] Timeout and concurrency limits work correctly
-- [ ] All tests pass with race detector
-- [ ] Documentation covers all new flags with examples
+- [x] `CommandExecutor` correctly substitutes all placeholders
+- [x] `pcapcommand` fires on every PCAP file close (including rotations)
+- [x] `voipcommand` fires after both SIP and RTP files are closed
+- [x] Grace period prevents premature call closure
+- [x] Timeout and concurrency limits work correctly
+- [x] All tests pass with race detector
+- [x] Documentation covers all new flags with examples
 
 ---
 

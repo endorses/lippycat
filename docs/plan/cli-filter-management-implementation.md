@@ -1,7 +1,7 @@
 # CLI Filter Management Implementation Plan
 
 **Date:** 2025-12-19
-**Status:** In Progress (Phase 2 complete)
+**Status:** In Progress (Phase 3 complete)
 **Research:** `docs/research/cli-filter-management.md`
 
 ## Overview
@@ -76,24 +76,24 @@ Implement filter management commands with build tags `cli || all`.
 
 ### Step 3.1: Create verb parent commands
 
-- [ ] Create `cmd/set/set.go` - `lc set` parent command
-- [ ] Create `cmd/rm/rm.go` - `lc rm` parent command
-- [ ] Update `cmd/list/list.go` - add filters subcommand hook
-- [ ] Update `cmd/show/show.go` - add filter subcommand hook
+- [x] Create `cmd/set/set.go` - `lc set` parent command
+- [x] Create `cmd/rm/rm.go` - `lc rm` parent command
+- [x] Update `cmd/list/list.go` - add filters subcommand hook
+- [x] Update `cmd/show/show.go` - add filter subcommand hook
 
 ### Step 3.2: Create filter subcommands
 
-- [ ] Create `cmd/filter/filter.go` - shared flags (--processor, --tls-*)
-- [ ] Create `cmd/filter/list.go` - `lc list filters`
-- [ ] Create `cmd/filter/show.go` - `lc show filter`
-- [ ] Create `cmd/filter/set.go` - `lc set filter`
-- [ ] Create `cmd/filter/rm.go` - `lc rm filter`
+- [x] Create `cmd/filter/filter.go` - shared flags (--processor, --tls-*)
+- [x] Create `cmd/filter/list.go` - `lc list filters`
+- [x] Create `cmd/filter/show.go` - `lc show filter`
+- [x] Create `cmd/filter/set.go` - `lc set filter`
+- [x] Create `cmd/filter/rm.go` - `lc rm filter`
 
 ### Step 3.3: Wire up commands
 
-- [ ] Update `cmd/root_all.go` - register set, rm commands
-- [ ] Update `cmd/root_cli.go` - register set, rm commands
-- [ ] Add config file support for `remote.processor` and `remote.tls.*`
+- [x] Update `cmd/root_all.go` - register set, rm commands
+- [x] Update `cmd/root_cli.go` - register set, rm commands
+- [x] Add config file support for `remote.processor` and `remote.tls.*`
 
 ## Phase 4: Integration Tests
 

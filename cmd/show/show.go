@@ -11,7 +11,7 @@ import (
 var ShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Display information and diagnostics",
-	Long: `Display information and diagnostics for TCP SIP processing components.
+	Long: `Display information and diagnostics for TCP SIP processing and remote resources.
 
 Subcommands:
   health   - Show TCP assembler health status
@@ -21,12 +21,14 @@ Subcommands:
   streams  - Show TCP stream processing metrics
   config   - Display current configuration
   summary  - Show overall system status summary
+  filter   - Show filter details from a remote processor
 
 Examples:
   lc show health           # Show TCP assembler health status
   lc show metrics --json   # Display metrics in JSON format
   lc show alerts           # Show all alerts
-  lc show summary          # Show overall system summary`,
+  lc show summary          # Show overall system summary
+  lc show filter --id myfilter -p localhost:50051  # Show a filter`,
 	// No Run function - requires a subcommand
 }
 

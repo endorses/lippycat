@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-12-19
+
+### Added
+- **PCAP command hooks for processor node**: Execute custom commands when PCAP files are written
+  - `--pcap-command`: Run command when any PCAP file is completed (supports `%pcap%` placeholder)
+  - `--voip-command`: Run command when VoIP call PCAP is completed (supports `%pcap%`, `%callid%`, `%dirname%` placeholders)
+  - Call completion monitor tracks call state and triggers hooks after configurable idle timeout
+  - Async command execution with configurable timeout and concurrent execution limits
+  - Comprehensive integration tests for command hook workflows
+
 ## [Unreleased]
 
 ## [0.3.0] - 2025-12-19

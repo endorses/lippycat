@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/endorses/lippycat/cmd/list"
 	"github.com/endorses/lippycat/cmd/tui"
 	"github.com/endorses/lippycat/cmd/watch"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -34,7 +35,7 @@ func Execute() {
 func addSubCommandPalattes() {
 	rootCmd.AddCommand(tui.TuiCmd)
 	rootCmd.AddCommand(watch.WatchCmd)
-	// interfacesCmd is registered directly in root.AddCommand() in its init() function
+	rootCmd.AddCommand(list.ListCmd)
 }
 
 func init() {

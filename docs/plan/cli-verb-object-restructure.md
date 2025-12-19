@@ -109,10 +109,10 @@ OBJECTS BY VERB:
 packages are CLI entry points and `internal/pkg/` contains the implementation.
 
 #### Step 1.2: Create `cmd/list/` command structure
-- [ ] Create `cmd/list/list.go` — Base list command
-- [ ] Create `cmd/list/interfaces.go` — List interfaces (move from `cmd/interfaces.go`)
-- [ ] Add build tag variants for list command
-- [ ] Run tests: `go test -race ./cmd/list/...`
+- [x] Create `cmd/list/list.go` — Base list command
+- [x] Create `cmd/list/interfaces.go` — List interfaces (move from `cmd/interfaces.go`)
+- [x] Add build tag variants for list command
+- [x] Run tests: `go test -race ./cmd/list/...`
 
 #### Step 1.3: Create `cmd/show/` command structure
 - [ ] Create `cmd/show/show.go` — Base show command

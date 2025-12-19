@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/endorses/lippycat/cmd/hunt"
+	"github.com/endorses/lippycat/cmd/list"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/version"
 	"github.com/spf13/cobra"
@@ -32,6 +33,7 @@ func Execute() {
 
 func addSubCommandPalattes() {
 	rootCmd.AddCommand(hunt.HuntCmd)
+	rootCmd.AddCommand(list.ListCmd)
 }
 
 func init() {

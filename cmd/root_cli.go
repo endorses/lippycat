@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/endorses/lippycat/cmd/list"
 	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/version"
@@ -32,7 +33,7 @@ func Execute() {
 
 func addSubCommandPalattes() {
 	rootCmd.AddCommand(sniff.SniffCmd)
-	// interfacesCmd and debugCmd are registered directly in root.AddCommand() in their init() functions
+	rootCmd.AddCommand(list.ListCmd)
 }
 
 func init() {

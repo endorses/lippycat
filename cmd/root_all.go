@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/endorses/lippycat/cmd/hunt"
+	"github.com/endorses/lippycat/cmd/list"
 	"github.com/endorses/lippycat/cmd/process"
 	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/cmd/tui"
@@ -38,6 +39,7 @@ func addSubCommandPalattes() {
 	rootCmd.AddCommand(sniff.SniffCmd)
 	rootCmd.AddCommand(tui.TuiCmd)
 	rootCmd.AddCommand(watch.WatchCmd)
+	rootCmd.AddCommand(list.ListCmd)
 	rootCmd.AddCommand(hunt.HuntCmd)
 	rootCmd.AddCommand(process.ProcessCmd)
 }

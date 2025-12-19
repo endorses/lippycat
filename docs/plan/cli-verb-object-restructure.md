@@ -115,16 +115,16 @@ packages are CLI entry points and `internal/pkg/` contains the implementation.
 - [x] Run tests: `go test -race ./cmd/list/...`
 
 #### Step 1.3: Create `cmd/show/` command structure
-- [ ] Create `cmd/show/show.go` — Base show command
-- [ ] Create `cmd/show/health.go` — Health status (move from debug)
-- [ ] Create `cmd/show/metrics.go` — Metrics (move from debug)
-- [ ] Create `cmd/show/alerts.go` — Alerts (move from debug)
-- [ ] Create `cmd/show/buffers.go` — Buffers (move from debug)
-- [ ] Create `cmd/show/streams.go` — Streams (move from debug)
-- [ ] Create `cmd/show/config.go` — Config (move from debug)
-- [ ] Create `cmd/show/summary.go` — Summary (move from debug)
-- [ ] Add build tag variants for show command
-- [ ] Run tests: `go test -race ./cmd/show/...`
+- [x] Create `cmd/show/show.go` — Base show command
+- [x] Create `cmd/show/health.go` — Health status (move from debug)
+- [x] Create `cmd/show/metrics.go` — Metrics (move from debug)
+- [x] Create `cmd/show/alerts.go` — Alerts (move from debug)
+- [x] Create `cmd/show/buffers.go` — Buffers (move from debug)
+- [x] Create `cmd/show/streams.go` — Streams (move from debug)
+- [x] Create `cmd/show/config.go` — Config (move from debug)
+- [x] Create `cmd/show/summary.go` — Summary (move from debug)
+- [x] Add build tag variants for show command
+- [x] Run tests: `go test -race ./cmd/show/...`
 
 #### Step 1.4: Update root command registrations
 - [ ] Update `cmd/root_all.go` — Register watch, list, show

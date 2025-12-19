@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -82,97 +83,46 @@ func TestYAMLPersistence_SaveAndLoad(t *testing.T) {
 	})
 }
 
-func TestFilterTypeConversion(t *testing.T) {
-	tests := []struct {
-		name      string
-		yamlType  string
-		protoType management.FilterType
-		expectErr bool
-	}{
-		{"SIPUser", "sip_user", management.FilterType_FILTER_SIP_USER, false},
-		{"SIPUserUpper", "FILTER_SIP_USER", management.FilterType_FILTER_SIP_USER, false},
-		{"PhoneNumber", "phone_number", management.FilterType_FILTER_PHONE_NUMBER, false},
-		{"IPAddress", "ip_address", management.FilterType_FILTER_IP_ADDRESS, false},
-		{"CallID", "call_id", management.FilterType_FILTER_CALL_ID, false},
-		{"Codec", "codec", management.FilterType_FILTER_CODEC, false},
-		{"BPF", "bpf", management.FilterType_FILTER_BPF, false},
-		{"Invalid", "invalid_type", 0, true},
-	}
+// TestFilterTypeConversion tests are now in internal/pkg/filtering/conversion_test.go
+// These tests verify the shared package integration works correctly
+func TestSharedPackageIntegration(t *testing.T) {
+	t.Run("ParseFilterType", func(t *testing.T) {
+		result, err := filtering.ParseFilterType("sip_user")
+		require.NoError(t, err)
+		assert.Equal(t, management.FilterType_FILTER_SIP_USER, result)
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := parseFilterType(tt.yamlType)
-			if tt.expectErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.protoType, result)
-			}
-		})
-	}
-}
+	t.Run("FilterTypeToString", func(t *testing.T) {
+		result := filtering.FilterTypeToString(management.FilterType_FILTER_IP_ADDRESS)
+		assert.Equal(t, "ip_address", result)
+	})
 
-func TestYAMLToProtoConversion(t *testing.T) {
-	t.Run("ValidFilter", func(t *testing.T) {
-		yaml := &FilterYAML{
-			ID:            "test-filter",
-			Type:          "sip_user",
-			Pattern:       "user@domain.com",
-			TargetHunters: []string{"hunter-1"},
-			Enabled:       true,
-			Description:   "Test filter",
+	t.Run("YAMLToProto", func(t *testing.T) {
+		yaml := &filtering.FilterYAML{
+			ID:      "test-filter",
+			Type:    "sip_user",
+			Pattern: "user@domain.com",
+			Enabled: true,
 		}
 
-		proto, err := yamlToProtoFilter(yaml)
+		proto, err := filtering.YAMLToProto(yaml)
 		require.NoError(t, err)
 		assert.Equal(t, "test-filter", proto.Id)
 		assert.Equal(t, management.FilterType_FILTER_SIP_USER, proto.Type)
-		assert.Equal(t, "user@domain.com", proto.Pattern)
-		assert.Equal(t, []string{"hunter-1"}, proto.TargetHunters)
-		assert.True(t, proto.Enabled)
-		assert.Equal(t, "Test filter", proto.Description)
 	})
 
-	t.Run("MissingID", func(t *testing.T) {
-		yaml := &FilterYAML{
-			Type:    "sip_user",
-			Pattern: "user@domain.com",
+	t.Run("ProtoToYAML", func(t *testing.T) {
+		proto := &management.Filter{
+			Id:      "test-filter",
+			Type:    management.FilterType_FILTER_IP_ADDRESS,
+			Pattern: "10.0.0.0/8",
+			Enabled: true,
 		}
 
-		_, err := yamlToProtoFilter(yaml)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "ID is required")
+		yaml := filtering.ProtoToYAML(proto)
+		assert.Equal(t, "test-filter", yaml.ID)
+		assert.Equal(t, "ip_address", yaml.Type)
 	})
-
-	t.Run("MissingPattern", func(t *testing.T) {
-		yaml := &FilterYAML{
-			ID:   "test-filter",
-			Type: "sip_user",
-		}
-
-		_, err := yamlToProtoFilter(yaml)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "pattern is required")
-	})
-}
-
-func TestProtoToYAMLConversion(t *testing.T) {
-	proto := &management.Filter{
-		Id:            "test-filter",
-		Type:          management.FilterType_FILTER_IP_ADDRESS,
-		Pattern:       "10.0.0.0/8",
-		TargetHunters: []string{"hunter-1", "hunter-2"},
-		Enabled:       false,
-		Description:   "Private network",
-	}
-
-	yaml := protoToYAMLFilter(proto)
-	assert.Equal(t, "test-filter", yaml.ID)
-	assert.Equal(t, "ip_address", yaml.Type)
-	assert.Equal(t, "10.0.0.0/8", yaml.Pattern)
-	assert.Equal(t, []string{"hunter-1", "hunter-2"}, yaml.TargetHunters)
-	assert.False(t, yaml.Enabled)
-	assert.Equal(t, "Private network", yaml.Description)
 }
 
 func TestManager_PersistenceIntegration(t *testing.T) {

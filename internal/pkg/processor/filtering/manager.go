@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -110,8 +111,8 @@ func hunterSupportsFilterType(capabilities *management.HunterCapabilities, filte
 			filterType == management.FilterType_FILTER_IP_ADDRESS
 	}
 
-	// Map protobuf enum to string (using existing helper from persistence.go)
-	filterTypeStr := filterTypeToString(filterType)
+	// Map protobuf enum to string
+	filterTypeStr := filtering.FilterTypeToString(filterType)
 
 	// Check if hunter supports this filter type
 	for _, supportedType := range capabilities.FilterTypes {

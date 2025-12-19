@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+- **CLI restructured to verb-object pattern**: Commands reorganized for consistency and discoverability
+  - `lc tui` → `lc watch` (defaults to live mode)
+  - `lc tui --remote` → `lc watch remote`
+  - `lc interfaces` → `lc list interfaces`
+  - `lc debug <subcommand>` → `lc show <subcommand>`
+- **TUI package relocated**: `cmd/tui/` moved to `internal/pkg/tui/` (internal implementation detail)
+
 ### Added
+- **New command structure**: `lc [verb] [object]` pattern for improved discoverability
+  - `lc watch` - Interactive TUI monitoring (live, file, remote modes)
+  - `lc list` - Resource listing (interfaces, future: hunters, calls)
+  - `lc show` - Diagnostics display (health, metrics, alerts, buffers, streams, config, summary)
 - **Load tests for processor package**: Performance tests for high packet rates (10K pps), many concurrent hunters (100), and many subscribers (100)
 - **Benchmarks for processor package**: Throughput benchmarks for packet processing with various hunter configurations
 

@@ -104,7 +104,7 @@ Run `make help` to see all available build targets.
 
 ```bash
 # List interfaces
-lc interfaces
+lc list interfaces
 
 # Capture VoIP traffic
 sudo lc sniff voip --interface eth0
@@ -117,7 +117,13 @@ sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
 wireshark -i lc0  # Monitor filtered stream in another terminal
 
 # Interactive TUI
-sudo lc tui
+sudo lc watch
+
+# Analyze PCAP file in TUI
+lc watch file -r capture.pcap
+
+# Remote monitoring
+lc watch remote --nodes-file nodes.yaml
 
 # Distributed capture
 lc process --listen :50051                         # Processor node
@@ -126,15 +132,33 @@ sudo lc hunt --interface eth0 --processor host:50051 # Hunter node
 
 ## Commands
 
+```
+lc [verb] [object] [flags]
+
+VERBS:
+  sniff     Capture packets from interface or file
+  hunt      Distributed edge capture (hunter node)
+  process   Central aggregation (processor node)
+  watch     Monitor traffic (TUI)
+  list      List resources
+  show      Display information/diagnostics
+```
+
 | Command | Description |
 |---------|-------------|
 | `sniff` | Packet capture (general) |
 | `sniff voip` | VoIP-specific capture with SIP/RTP analysis |
-| `tui` | Terminal User Interface |
+| `watch` | Interactive TUI (defaults to live mode) |
+| `watch live` | Live capture in TUI |
+| `watch file` | Analyze PCAP file in TUI |
+| `watch remote` | Monitor remote nodes in TUI |
 | `hunt` | Hunter node (distributed edge capture) |
+| `hunt voip` | VoIP hunter with call buffering |
 | `process` | Processor node (distributed aggregation) |
-| `interfaces` | List available network interfaces |
-| `debug` | Debug TCP SIP processing |
+| `list interfaces` | List available network interfaces |
+| `show health` | Show TCP assembler health |
+| `show metrics` | Display TCP metrics |
+| `show summary` | System status overview |
 
 Run `lc [command] --help` for detailed options.
 
@@ -190,7 +214,7 @@ sudo lc hunt --interface eth0 --processor processor:50051 \
   --tls-cert client.crt --tls-key client.key --tls-ca ca.crt
 
 # TUI monitoring with selective hunter subscription
-lc tui --remote --nodes-file nodes.yaml
+lc watch remote --nodes-file nodes.yaml
 # Press 's' to select specific hunters to monitor
 # Press 'd' to unsubscribe from hunters
 ```

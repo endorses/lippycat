@@ -25,9 +25,13 @@ This architecture allows for:
 - **Build Tags**: Go build tags enable specialized binary variants (hunter, processor, cli, tui, all)
 - **Main Components**:
   - `cmd/`: CLI command definitions with build-tag-based variants
-  - `cmd/tui/`: Terminal User Interface with Bubbletea framework
+  - `cmd/sniff/`: Packet capture command (CLI output)
+  - `cmd/watch/`: TUI monitoring commands (live, file, remote)
   - `cmd/hunt/`: Hunter node implementation for distributed capture
   - `cmd/process/`: Processor node implementation for distributed analysis
+  - `cmd/list/`: Resource listing commands
+  - `cmd/show/`: Diagnostics and information commands
+  - `internal/pkg/tui/`: Terminal User Interface with Bubbletea framework
   - `internal/pkg/types/`: Shared domain types (PacketDisplay, VoIPMetadata, EventHandler)
   - `internal/pkg/capture/`: Network packet capture functionality using gopacket
   - `internal/pkg/voip/`: VoIP protocol plugin (SIP, RTP, call tracking)
@@ -171,25 +175,42 @@ make clean-cuda     # Remove CUDA artifacts
 
 ## CLI Usage
 
+### Command Structure
+
+lippycat follows a consistent `[verb] [object]` pattern:
+
+```
+lc [verb] [object] [flags]
+
+VERBS:
+  sniff     Capture packets from interface or file
+  hunt      Distributed edge capture (hunter node)
+  process   Central aggregation (processor node)
+  watch     Monitor traffic (TUI)
+  list      List resources
+  show      Display information/diagnostics
+```
+
 ### Available Commands
 
-lippycat provides several commands for different deployment modes:
-
 - **`lc sniff`** - CLI mode packet capture ([docs](cmd/sniff/CLAUDE.md))
-- **`lc sniff voip`** - VoIP-specific capture with SIP/RTP analysis, GPU acceleration, TCP performance tuning ([docs](cmd/sniff/CLAUDE.md))
-- **`lc tui`** - Interactive TUI for local or remote monitoring ([docs](cmd/tui/CLAUDE.md))
+- **`lc sniff voip`** - VoIP-specific capture with SIP/RTP analysis ([docs](cmd/sniff/CLAUDE.md))
+- **`lc watch`** - Interactive TUI, defaults to live mode ([docs](cmd/watch/CLAUDE.md))
+- **`lc watch live`** - Live capture TUI ([docs](cmd/watch/CLAUDE.md))
+- **`lc watch file`** - PCAP file analysis TUI ([docs](cmd/watch/CLAUDE.md))
+- **`lc watch remote`** - Remote node monitoring TUI ([docs](cmd/watch/CLAUDE.md))
 - **`lc hunt`** - Hunter node for distributed edge capture ([docs](cmd/hunt/CLAUDE.md))
-- **`lc hunt voip`** - VoIP hunter with call buffering and filtering ([docs](cmd/hunt/CLAUDE.md))
-- **`lc process`** - Processor node for central aggregation and analysis ([docs](cmd/process/CLAUDE.md))
-- **`lc debug`** - TCP SIP diagnostics and troubleshooting ([docs](cmd/debug/CLAUDE.md))
-  - `debug health` - Health status
-  - `debug metrics` - Comprehensive metrics
-  - `debug alerts` - Active alerts
-  - `debug buffers` - Buffer statistics
-  - `debug streams` - Stream metrics
-  - `debug config` - Configuration display
-  - `debug summary` - System summary
-- **`lc interfaces`** - List available network interfaces
+- **`lc hunt voip`** - VoIP hunter with call buffering ([docs](cmd/hunt/CLAUDE.md))
+- **`lc process`** - Processor node for central aggregation ([docs](cmd/process/CLAUDE.md))
+- **`lc list interfaces`** - List network interfaces ([docs](cmd/list/CLAUDE.md))
+- **`lc show`** - TCP SIP diagnostics ([docs](cmd/show/CLAUDE.md))
+  - `show health` - Health status
+  - `show metrics` - Comprehensive metrics
+  - `show alerts` - Active alerts
+  - `show buffers` - Buffer statistics
+  - `show streams` - Stream metrics
+  - `show config` - Configuration display
+  - `show summary` - System summary
 
 ### Quick Start Examples
 
@@ -229,11 +250,14 @@ sudo lc hunt voip --processor processor:50051 \
 
 **Interactive Monitoring:**
 ```bash
-# Local TUI
-sudo lc tui
+# Local TUI (live capture)
+sudo lc watch
+
+# Analyze PCAP file
+lc watch file -r capture.pcap
 
 # Remote TUI (monitor distributed nodes)
-lc tui --remote --nodes-file nodes.yaml
+lc watch remote --nodes-file nodes.yaml
 ```
 
 ### Environment Variables
@@ -250,17 +274,20 @@ Configuration via YAML file (in priority order):
 **See command-specific documentation:**
 - User Documentation (README.md files):
   - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage
+  - [cmd/watch/README.md](cmd/watch/README.md) - Watch (TUI) command usage
   - [cmd/hunt/README.md](cmd/hunt/README.md) - Hunter node usage
   - [cmd/process/README.md](cmd/process/README.md) - Processor node usage
-  - [cmd/debug/README.md](cmd/debug/README.md) - Debug commands usage
-  - [cmd/tui/README.md](cmd/tui/README.md) - TUI usage
+  - [cmd/list/README.md](cmd/list/README.md) - List command usage
+  - [cmd/show/README.md](cmd/show/README.md) - Show (diagnostics) command usage
 
 - Architecture Documentation (CLAUDE.md files for AI assistants):
   - [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture & patterns
+  - [cmd/watch/CLAUDE.md](cmd/watch/CLAUDE.md) - Watch command architecture
   - [cmd/hunt/CLAUDE.md](cmd/hunt/CLAUDE.md) - Hunter architecture & patterns
   - [cmd/process/CLAUDE.md](cmd/process/CLAUDE.md) - Processor architecture & patterns
-  - [cmd/debug/CLAUDE.md](cmd/debug/CLAUDE.md) - Debug command architecture
-  - [cmd/tui/CLAUDE.md](cmd/tui/CLAUDE.md) - TUI architecture & Bubbletea patterns
+  - [cmd/list/CLAUDE.md](cmd/list/CLAUDE.md) - List command architecture
+  - [cmd/show/CLAUDE.md](cmd/show/CLAUDE.md) - Show command architecture
+  - [internal/pkg/tui/CLAUDE.md](internal/pkg/tui/CLAUDE.md) - TUI architecture & Bubbletea patterns
 
 ## Architecture Patterns
 
@@ -329,7 +356,7 @@ The TUI (Terminal User Interface) provides interactive real-time packet monitori
 - FileDialog component for file operations
 - Toast notifications for transient status messages
 
-**For TUI architecture and development, see [cmd/tui/CLAUDE.md](cmd/tui/CLAUDE.md) (Bubbletea patterns, EventHandler integration, component architecture).**
+**For TUI architecture and development, see [internal/pkg/tui/CLAUDE.md](internal/pkg/tui/CLAUDE.md) (Bubbletea patterns, EventHandler integration, component architecture).**
 
 ## Plugin Architecture
 lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.
@@ -340,17 +367,20 @@ The hunter node includes protocol detection for multiple protocols (HTTP, DNS, T
 
 ### User Documentation (README.md)
 - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage, flags, examples
+- [cmd/watch/README.md](cmd/watch/README.md) - Watch (TUI) command usage and keybindings
 - [cmd/hunt/README.md](cmd/hunt/README.md) - Hunter node setup and configuration
 - [cmd/process/README.md](cmd/process/README.md) - Processor node setup and management
-- [cmd/debug/README.md](cmd/debug/README.md) - Debug command usage and troubleshooting
-- [cmd/tui/README.md](cmd/tui/README.md) - TUI user guide and keybindings
+- [cmd/list/README.md](cmd/list/README.md) - List command usage
+- [cmd/show/README.md](cmd/show/README.md) - Show (diagnostics) command usage
 
 ### Architecture Documentation (CLAUDE.md - for AI assistants)
 - [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture, Viper patterns, TCP reassembly
+- [cmd/watch/CLAUDE.md](cmd/watch/CLAUDE.md) - Watch command architecture
 - [cmd/hunt/CLAUDE.md](cmd/hunt/CLAUDE.md) - Hunter architecture, gRPC client, VoIP buffering
 - [cmd/process/CLAUDE.md](cmd/process/CLAUDE.md) - Processor architecture, gRPC server, broadcasting
-- [cmd/debug/CLAUDE.md](cmd/debug/CLAUDE.md) - Debug command patterns, metrics collection
-- [cmd/tui/CLAUDE.md](cmd/tui/CLAUDE.md) - TUI architecture, Bubbletea, EventHandler pattern
+- [cmd/list/CLAUDE.md](cmd/list/CLAUDE.md) - List command architecture
+- [cmd/show/CLAUDE.md](cmd/show/CLAUDE.md) - Show command architecture
+- [internal/pkg/tui/CLAUDE.md](internal/pkg/tui/CLAUDE.md) - TUI architecture, Bubbletea, EventHandler pattern
 
 ### Operational Guides
 - [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) - Complete distributed architecture guide (hub-and-spoke, hierarchical)

@@ -160,23 +160,23 @@ thin CLI wrappers and `internal/pkg/` contains implementation. Compare with how
 ### Phase 3: Documentation & Validation
 
 #### Step 3.1: Create new command documentation
-- [ ] Create `cmd/watch/README.md`
-- [ ] Create `cmd/watch/CLAUDE.md`
-- [ ] Create `cmd/list/README.md`
-- [ ] Create `cmd/list/CLAUDE.md`
-- [ ] Create `cmd/show/README.md`
-- [ ] Create `cmd/show/CLAUDE.md`
+- [x] Create `cmd/watch/README.md`
+- [x] Create `cmd/watch/CLAUDE.md`
+- [x] Create `cmd/list/README.md`
+- [x] Create `cmd/list/CLAUDE.md`
+- [x] Create `cmd/show/README.md`
+- [x] Create `cmd/show/CLAUDE.md`
 
 #### Step 3.2: Update root documentation
-- [ ] Update `README.md` with new command structure
-- [ ] Update `CLAUDE.md` CLI usage section
-- [ ] Update `CHANGELOG.md` with breaking changes
+- [x] Update `README.md` with new command structure
+- [x] Update `CLAUDE.md` CLI usage section
+- [x] Update `CHANGELOG.md` with breaking changes
 
 #### Step 3.3: Build & test verification
-- [ ] Run `make binaries` — all variants build
-- [ ] Run `make test` — all tests pass
-- [ ] Run `golangci-lint run ./...`
-- [ ] Manual testing of all new commands
+- [x] Run `make binaries` — all variants build
+- [x] Run `make test` — all tests pass
+- [x] Run `golangci-lint run ./...`
+- [x] Manual testing of all new commands
 
 ---
 
@@ -234,13 +234,13 @@ thin CLI wrappers and `internal/pkg/` contains implementation. Compare with how
 
 ## Success Criteria
 
-- [ ] All new commands work correctly
-- [ ] Old commands are fully removed
-- [ ] All build variants compile
-- [ ] All tests pass
-- [ ] Documentation is complete and accurate
-- [ ] `lc watch` defaults to `live` mode
-- [ ] Future expansion paths are clear
+- [x] All new commands work correctly
+- [x] Old commands are fully removed
+- [x] All build variants compile
+- [x] All tests pass
+- [x] Documentation is complete and accurate
+- [x] `lc watch` defaults to `live` mode
+- [x] Future expansion paths are clear
 
 ---
 

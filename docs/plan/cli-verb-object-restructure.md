@@ -98,11 +98,15 @@ OBJECTS BY VERB:
 
 #### Step 1.1: Create `cmd/watch/` command structure
 - [x] Create `cmd/watch/watch.go` — Base watch command (defaults to `live`)
-- [x] Create `cmd/watch/live.go` — Live capture TUI (move logic from `cmd/tui/`)
+- [x] Create `cmd/watch/live.go` — Live capture TUI (imports from `internal/pkg/tui/`)
 - [x] Create `cmd/watch/file.go` — PCAP file analysis TUI
 - [x] Create `cmd/watch/remote.go` — Remote node monitoring
 - [x] Add build tag variants for watch command
 - [x] Run tests: `go test -race ./cmd/watch/...`
+
+**Note:** The watch commands are thin wrappers that import the TUI model from
+`internal/pkg/tui/`. This follows the project's established pattern where `cmd/`
+packages are CLI entry points and `internal/pkg/` contains the implementation.
 
 #### Step 1.2: Create `cmd/list/` command structure
 - [ ] Create `cmd/list/list.go` — Base list command
@@ -132,12 +136,21 @@ OBJECTS BY VERB:
 
 ### Phase 2: Remove Old Commands
 
-#### Step 2.1: Remove deprecated command files
-- [ ] Remove `cmd/tui/` directory
+#### Step 2.1: Refactor TUI package location
+- [ ] Move `cmd/tui/` to `internal/pkg/tui/` (keeps TUI logic as internal package)
+- [ ] Update `cmd/watch/` imports to use `internal/pkg/tui/`
+- [ ] Remove `cmd/tui/tui.go` (old command entry point, replaced by watch commands)
+- [ ] Run tests: `go test -race ./internal/pkg/tui/...`
+
+**Rationale:** This follows the project's architectural pattern where `cmd/` contains
+thin CLI wrappers and `internal/pkg/` contains implementation. Compare with how
+`cmd/sniff/` imports from `internal/pkg/capture/` and `internal/pkg/voip/`.
+
+#### Step 2.2: Remove other deprecated command files
 - [ ] Remove `cmd/interfaces.go`
 - [ ] Remove `cmd/debug/` directory
 
-#### Step 2.2: Clean up root registrations
+#### Step 2.3: Clean up root registrations
 - [ ] Remove tui command registration from root files
 - [ ] Remove interfaces command registration from root files
 - [ ] Remove debug command registration from root files
@@ -195,10 +208,15 @@ OBJECTS BY VERB:
 | `CLAUDE.md` | Update CLI usage section |
 | `CHANGELOG.md` | Document breaking changes |
 
+### Moved Files
+| From | To | Notes |
+|------|-----|-------|
+| `cmd/tui/` | `internal/pkg/tui/` | TUI model/components become internal package |
+| `cmd/tui/tui.go` | (deleted) | Replaced by `cmd/watch/` commands |
+
 ### Deleted Files
 | File | Replacement |
 |------|-------------|
-| `cmd/tui/` | `cmd/watch/` |
 | `cmd/interfaces.go` | `cmd/list/interfaces.go` |
 | `cmd/debug/` | `cmd/show/` |
 

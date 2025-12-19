@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2025-12-19
+
+### Added
+- **Filter management CLI commands**: Remote filter management on processor nodes
+  - `lc list filters`: List all filters on a processor
+  - `lc show filter <id>`: Show details of a single filter by ID
+  - `lc set filter`: Create or update filters (inline or batch from file)
+  - `lc rm filter <id>`: Delete filters (single or batch from file)
+  - JSON output for scripting/automation
+  - Config file support for `remote.processor` and `remote.tls.*` settings
+  - TLS/mTLS connection support
+  - Auto-generated UUIDs for new filters
+  - Batch operations via `--file` flag
+  - Proper exit codes (0=success, 1=general, 2=connection, 3=validation, 4=not found)
+- **Shared filter types package**: `internal/pkg/filtering` with types, parser, validation, and conversion utilities
+- **Filter client package**: `internal/pkg/filterclient` with gRPC client for filter operations
+
+### Security
+- **Go 1.24.11**: Updated Go version for security fixes in CI
+
 ## [0.3.1] - 2025-12-19
 
 ### Added

@@ -197,8 +197,18 @@ func (p *Processor) Heartbeat(stream management.ManagementService_HeartbeatServe
 }
 
 // GetFilters retrieves filters for a hunter (Management Service)
+// If hunter_id is empty, returns all filters (for CLI/administrative use).
+// If hunter_id is specified, returns only filters applicable to that hunter
+// after filtering by target hunters and capability compatibility.
 func (p *Processor) GetFilters(ctx context.Context, req *management.FilterRequest) (*management.FilterResponse, error) {
-	filters := p.filterManager.GetForHunter(req.HunterId)
+	var filters []*management.Filter
+	if req.HunterId == "" {
+		// Return all filters for CLI/administrative queries
+		filters = p.filterManager.GetAll()
+	} else {
+		// Return filters filtered by hunter capabilities and targeting
+		filters = p.filterManager.GetForHunter(req.HunterId)
+	}
 
 	return &management.FilterResponse{
 		Filters: filters,

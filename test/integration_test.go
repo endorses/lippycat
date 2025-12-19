@@ -506,12 +506,14 @@ func getFreePort() (string, error) {
 }
 
 func startTestProcessor(ctx context.Context, addr string) (*processor.Processor, error) {
+	// Use a unique filter file path per test to avoid contamination from previous runs
+	filterFile := fmt.Sprintf("/tmp/lippycat-test-filters-%s-%d.yaml", addr, time.Now().UnixNano())
 	config := processor.Config{
 		ProcessorID:     "test-processor-" + addr,
 		ListenAddr:      addr,
 		EnableDetection: false,
 		MaxHunters:      100,
-		FilterFile:      "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
+		FilterFile:      filterFile, // Unique path to start with clean filter state
 	}
 
 	proc, err := processor.New(config)

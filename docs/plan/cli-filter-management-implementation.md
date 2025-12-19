@@ -1,7 +1,7 @@
 # CLI Filter Management Implementation Plan
 
 **Date:** 2025-12-19
-**Status:** In Progress (Phase 3 complete)
+**Status:** Complete (All phases done)
 **Research:** `docs/research/cli-filter-management.md`
 
 ## Overview
@@ -99,11 +99,11 @@ Implement filter management commands with build tags `cli || all`.
 
 ### Step 4.1: Add integration tests
 
-- [ ] Create `test/filter_cli_integration_test.go`
-- [ ] Test list, show, set, rm operations
-- [ ] Test batch operations with --file
-- [ ] Test TLS connections
-- [ ] Test error handling and JSON error output
+- [x] Create `test/filter_cli_integration_test.go`
+- [x] Test list, show, set, rm operations
+- [x] Test batch operations with --file
+- [x] Test TLS connections
+- [x] Test error handling and JSON error output
 
 ## File Structure
 

@@ -1,7 +1,7 @@
 # CLI Filter Management Implementation Plan
 
 **Date:** 2025-12-19
-**Status:** In Progress (Phase 1 complete)
+**Status:** In Progress (Phase 2 complete)
 **Research:** `docs/research/cli-filter-management.md`
 
 ## Overview
@@ -38,7 +38,7 @@ Create gRPC client for CLI filter operations.
 
 ### Step 2.1: Create `internal/pkg/filterclient/` package
 
-- [ ] Create `client.go`:
+- [x] Create `client.go`:
   ```go
   type ClientConfig struct {
       Address     string
@@ -54,7 +54,7 @@ Create gRPC client for CLI filter operations.
   func (c *FilterClient) Close() error
   ```
 
-- [ ] Create `operations.go`:
+- [x] Create `operations.go`:
   ```go
   func (c *FilterClient) List(opts ListOptions) ([]*management.Filter, error)
   func (c *FilterClient) Get(id string) (*management.Filter, error)
@@ -62,13 +62,13 @@ Create gRPC client for CLI filter operations.
   func (c *FilterClient) Delete(id string) (*management.FilterUpdateResult, error)
   ```
 
-- [ ] Create `batch.go`:
+- [x] Create `batch.go`:
   ```go
   func (c *FilterClient) SetBatch(filters []*management.Filter) (*BatchResult, error)
   func (c *FilterClient) DeleteBatch(ids []string) (*BatchResult, error)
   ```
 
-- [ ] Add unit tests with mock gRPC server
+- [x] Add unit tests with mock gRPC server
 
 ## Phase 3: CLI Commands
 

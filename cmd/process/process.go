@@ -73,6 +73,11 @@ var (
 	vifBufferSize        int
 	vifNetNS             string
 	vifDropPrivileges    string
+	// Command hook flags
+	pcapCommand        string
+	voipCommand        string
+	commandTimeout     string
+	commandConcurrency int
 )
 
 func init() {
@@ -120,6 +125,12 @@ func init() {
 	ProcessCmd.Flags().StringVar(&vifNetNS, "vif-netns", "", "Network namespace for interface isolation (requires CAP_SYS_ADMIN)")
 	ProcessCmd.Flags().StringVar(&vifDropPrivileges, "vif-drop-privileges", "", "Drop privileges to specified user after interface creation (requires running as root)")
 
+	// Command hook flags (PCAP file events)
+	ProcessCmd.Flags().StringVar(&pcapCommand, "pcap-command", "", "Command to execute when PCAP file closes (supports %pcap% placeholder)")
+	ProcessCmd.Flags().StringVar(&voipCommand, "voip-command", "", "Command to execute when VoIP call completes (supports %callid%, %dirname%, %caller%, %called%, %calldate%)")
+	ProcessCmd.Flags().StringVar(&commandTimeout, "command-timeout", "30s", "Timeout for command execution (e.g., 30s, 1m)")
+	ProcessCmd.Flags().IntVar(&commandConcurrency, "command-concurrency", 10, "Maximum concurrent command executions")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
 	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
@@ -150,6 +161,10 @@ func init() {
 	_ = viper.BindPFlag("processor.vif_buffer_size", ProcessCmd.Flags().Lookup("vif-buffer-size"))
 	_ = viper.BindPFlag("processor.vif_netns", ProcessCmd.Flags().Lookup("vif-netns"))
 	_ = viper.BindPFlag("processor.vif_drop_privileges", ProcessCmd.Flags().Lookup("vif-drop-privileges"))
+	_ = viper.BindPFlag("processor.pcap_command", ProcessCmd.Flags().Lookup("pcap-command"))
+	_ = viper.BindPFlag("processor.voip_command", ProcessCmd.Flags().Lookup("voip-command"))
+	_ = viper.BindPFlag("processor.command_timeout", ProcessCmd.Flags().Lookup("command-timeout"))
+	_ = viper.BindPFlag("processor.command_concurrency", ProcessCmd.Flags().Lookup("command-concurrency"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -211,6 +226,26 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Build command executor config if commands are configured
+	var commandExecutorConfig *processor.CommandExecutorConfig
+	pcapCmd := getStringConfig("processor.pcap_command", pcapCommand)
+	voipCmd := getStringConfig("processor.voip_command", voipCommand)
+	if pcapCmd != "" || voipCmd != "" {
+		// Parse command timeout
+		timeoutStr := getStringConfig("processor.command_timeout", commandTimeout)
+		timeout, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			return fmt.Errorf("invalid command-timeout: %w", err)
+		}
+
+		commandExecutorConfig = &processor.CommandExecutorConfig{
+			PcapCommand: pcapCmd,
+			VoipCommand: voipCmd,
+			Timeout:     timeout,
+			Concurrency: getIntConfig("processor.command_concurrency", commandConcurrency),
+		}
+	}
+
 	// Build auth config if enabled
 	var authConfig *auth.Config
 	if getBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
@@ -236,17 +271,18 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := processor.Config{
-		ListenAddr:       getStringConfig("processor.listen_addr", listenAddr),
-		ProcessorID:      getStringConfig("processor.processor_id", processorID),
-		UpstreamAddr:     getStringConfig("processor.upstream_addr", upstreamAddr),
-		MaxHunters:       getIntConfig("processor.max_hunters", maxHunters),
-		MaxSubscribers:   getIntConfig("processor.max_subscribers", maxSubscribers),
-		WriteFile:        getStringConfig("processor.write_file", writeFile),
-		DisplayStats:     getBoolConfig("processor.display_stats", displayStats),
-		PcapWriterConfig: pcapWriterConfig,
-		AutoRotateConfig: autoRotateConfig,
-		EnableDetection:  getBoolConfig("processor.enable_detection", enableDetection),
-		FilterFile:       getStringConfig("processor.filter_file", filterFile),
+		ListenAddr:            getStringConfig("processor.listen_addr", listenAddr),
+		ProcessorID:           getStringConfig("processor.processor_id", processorID),
+		UpstreamAddr:          getStringConfig("processor.upstream_addr", upstreamAddr),
+		MaxHunters:            getIntConfig("processor.max_hunters", maxHunters),
+		MaxSubscribers:        getIntConfig("processor.max_subscribers", maxSubscribers),
+		WriteFile:             getStringConfig("processor.write_file", writeFile),
+		DisplayStats:          getBoolConfig("processor.display_stats", displayStats),
+		PcapWriterConfig:      pcapWriterConfig,
+		AutoRotateConfig:      autoRotateConfig,
+		CommandExecutorConfig: commandExecutorConfig,
+		EnableDetection:       getBoolConfig("processor.enable_detection", enableDetection),
+		FilterFile:            getStringConfig("processor.filter_file", filterFile),
 		// TLS configuration
 		TLSEnabled:    getBoolConfig("processor.tls.enabled", tlsEnabled),
 		TLSCertFile:   getStringConfig("processor.tls.cert_file", tlsCertFile),

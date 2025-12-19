@@ -50,18 +50,19 @@ import (
 
 // Config contains processor configuration
 type Config struct {
-	ListenAddr            string
-	ProcessorID           string
-	UpstreamAddr          string
-	MaxHunters            int
-	MaxSubscribers        int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
-	WriteFile             string
-	DisplayStats          bool
-	PcapWriterConfig      *PcapWriterConfig      // Per-call PCAP writing configuration (VoIP)
-	AutoRotateConfig      *AutoRotateConfig      // Auto-rotating PCAP writing configuration (non-VoIP)
-	CommandExecutorConfig *CommandExecutorConfig // Command execution for PCAP hooks
-	EnableDetection       bool                   // Enable centralized protocol detection
-	FilterFile            string                 // Path to filter persistence file (YAML)
+	ListenAddr                  string
+	ProcessorID                 string
+	UpstreamAddr                string
+	MaxHunters                  int
+	MaxSubscribers              int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
+	WriteFile                   string
+	DisplayStats                bool
+	PcapWriterConfig            *PcapWriterConfig            // Per-call PCAP writing configuration (VoIP)
+	AutoRotateConfig            *AutoRotateConfig            // Auto-rotating PCAP writing configuration (non-VoIP)
+	CommandExecutorConfig       *CommandExecutorConfig       // Command execution for PCAP hooks
+	CallCompletionMonitorConfig *CallCompletionMonitorConfig // Call completion monitoring configuration
+	EnableDetection             bool                         // Enable centralized protocol detection
+	FilterFile                  string                       // Path to filter persistence file (YAML)
 	// TLS settings
 	TLSEnabled    bool   // Enable TLS encryption for gRPC server
 	TLSCertFile   string // Path to TLS certificate file
@@ -115,6 +116,9 @@ type Processor struct {
 
 	// Command executor for PCAP hooks
 	commandExecutor *CommandExecutor
+
+	// Call completion monitor (closes PCAP files after grace period)
+	callCompletionMonitor *CallCompletionMonitor
 
 	// Protocol aggregators
 	callAggregator *voip.CallAggregator // VoIP call state aggregation
@@ -196,6 +200,19 @@ func New(config Config) (*Processor, error) {
 			"pattern", config.AutoRotateConfig.FilePattern,
 			"max_idle_time", config.AutoRotateConfig.MaxIdleTime,
 			"max_file_size", config.AutoRotateConfig.MaxFileSize)
+	}
+
+	// Initialize call completion monitor if per-call PCAP is enabled
+	// This monitors VoIP call state and closes PCAP files after grace period
+	if p.perCallPcapWriter != nil {
+		monitorConfig := config.CallCompletionMonitorConfig
+		if monitorConfig == nil {
+			monitorConfig = DefaultCallCompletionMonitorConfig()
+		}
+		p.callCompletionMonitor = NewCallCompletionMonitor(monitorConfig, p.callAggregator, p.perCallPcapWriter)
+		logger.Info("Call completion monitor configured",
+			"grace_period", monitorConfig.GracePeriod,
+			"check_interval", monitorConfig.CheckInterval)
 	}
 
 	// Initialize virtual interface if configured

@@ -181,6 +181,11 @@ func (p *Processor) Start(ctx context.Context) error {
 	// Start hunter monitor (heartbeat monitoring and cleanup)
 	p.hunterMonitor.Start(p.ctx)
 
+	// Start call completion monitor (VoIP PCAP file management)
+	if p.callCompletionMonitor != nil {
+		p.callCompletionMonitor.Start()
+	}
+
 	// Start virtual interface if configured
 	if p.vifManager != nil {
 		if err := p.vifManager.Start(); err != nil {
@@ -243,6 +248,11 @@ func (p *Processor) Shutdown() error {
 	// Shutdown call correlator to stop cleanup goroutine
 	if p.callCorrelator != nil {
 		p.callCorrelator.Stop()
+	}
+
+	// Stop call completion monitor (closes any pending PCAP files)
+	if p.callCompletionMonitor != nil {
+		p.callCompletionMonitor.Stop()
 	}
 
 	// Close per-call PCAP writer

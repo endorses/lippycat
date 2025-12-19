@@ -66,23 +66,23 @@ Implement command hooks that execute when PCAP files are written by the processo
 
 ---
 
-### Phase 3: Call Completion Detection
+### Phase 3: Call Completion Detection ✅
 
-#### Step 3.1: Add call state monitoring
+#### Step 3.1: Add call state monitoring ✅
 
-- [ ] Add method to detect ended calls from `CallAggregator` state
-- [ ] Implement grace period timer (default: 5s) after BYE/CANCEL
-- [ ] Trigger `PcapWriterManager.CloseWriter(callID)` after grace period
-- [ ] Run tests: `go test -race ./internal/pkg/processor/...`
+- [x] Add method to detect ended calls from `CallAggregator` state
+- [x] Implement grace period timer (default: 5s) after BYE/CANCEL
+- [x] Trigger `PcapWriterManager.CloseWriter(callID)` after grace period
+- [x] Run tests: `go test -race ./internal/pkg/processor/...`
 
-#### Step 3.2: Configuration and CLI flags
+#### Step 3.2: Configuration and CLI flags ✅
 
-- [ ] Add `--pcap-command` flag to `cmd/process/process.go`
-- [ ] Add `--voip-command` flag to `cmd/process/process.go`
-- [ ] Add `--command-timeout` flag (default: 30s)
-- [ ] Add `--command-concurrency` flag (default: 10)
-- [ ] Bind flags to Viper: `processor.pcap_command`, `processor.voip_command`, etc.
-- [ ] Format: `gofmt -w cmd/process/process.go`
+- [x] Add `--pcap-command` flag to `cmd/process/process.go`
+- [x] Add `--voip-command` flag to `cmd/process/process.go`
+- [x] Add `--command-timeout` flag (default: 30s)
+- [x] Add `--command-concurrency` flag (default: 10)
+- [x] Bind flags to Viper: `processor.pcap_command`, `processor.voip_command`, etc.
+- [x] Format: `gofmt -w cmd/process/process.go`
 
 ---
 
@@ -115,13 +115,15 @@ Implement command hooks that execute when PCAP files are written by the processo
 
 | File | Change |
 |------|--------|
-| `internal/pkg/processor/command_executor.go` | **New** — Command execution with templates |
-| `internal/pkg/processor/command_executor_test.go` | **New** — Unit tests |
-| `internal/pkg/processor/pcap_writer.go` | **Modify** — Add callbacks, `CloseCall()` |
-| `internal/pkg/processor/auto_rotate_pcap.go` | **Modify** — Add callback |
-| `internal/pkg/processor/pcap_writer_manager.go` | **Modify** — Wire callbacks |
-| `internal/pkg/processor/call_correlator.go` | **Modify** — Call completion detection |
-| `cmd/process/process.go` | **Modify** — Add 4 flags |
+| `internal/pkg/processor/command_executor.go` | **New** — Command execution with templates ✅ |
+| `internal/pkg/processor/command_executor_test.go` | **New** — Unit tests ✅ |
+| `internal/pkg/processor/call_completion_monitor.go` | **New** — Call state monitoring with grace period ✅ |
+| `internal/pkg/processor/call_completion_monitor_test.go` | **New** — Unit tests ✅ |
+| `internal/pkg/processor/pcap_writer.go` | **Modify** — Add callbacks, `CloseCall()` ✅ |
+| `internal/pkg/processor/auto_rotate_pcap.go` | **Modify** — Add callback ✅ |
+| `internal/pkg/processor/processor.go` | **Modify** — Wire CallCompletionMonitor ✅ |
+| `internal/pkg/processor/processor_lifecycle.go` | **Modify** — Start/stop CallCompletionMonitor ✅ |
+| `cmd/process/process.go` | **Modify** — Add 4 flags ✅ |
 | `cmd/process/README.md` | **Modify** — Document new flags |
 | `cmd/process/CLAUDE.md` | **Modify** — Document architecture |
 | `CLAUDE.md` | **Modify** — Add flags to usage section |

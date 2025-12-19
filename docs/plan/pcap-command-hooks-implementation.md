@@ -42,27 +42,27 @@ Implement command hooks that execute when PCAP files are written by the processo
 
 ---
 
-### Phase 2: PCAP Writer Integration
+### Phase 2: PCAP Writer Integration ✅
 
-#### Step 2.1: Add callbacks to `CallPcapWriter`
+#### Step 2.1: Add callbacks to `CallPcapWriter` ✅
 
-- [ ] Add `OnFileClose func(filePath string)` to config
-- [ ] Add `OnCallComplete func(meta CallMetadata)` to config
-- [ ] Call `OnFileClose` in `Close()`, `rotateSipFile()`, `rotateRtpFile()`
-- [ ] Create new `CloseCall()` method that closes both files and fires `OnCallComplete`
-- [ ] Run tests: `go test -race ./internal/pkg/processor/...`
+- [x] Add `OnFileClose func(filePath string)` to config
+- [x] Add `OnCallComplete func(meta CallMetadata)` to config
+- [x] Call `OnFileClose` in `Close()`, `rotateSipFile()`, `rotateRtpFile()`
+- [x] Create new `CloseCall()` method that closes both files and fires `OnCallComplete`
+- [x] Run tests: `go test -race ./internal/pkg/processor/...`
 
-#### Step 2.2: Add callback to `AutoRotatePcapWriter`
+#### Step 2.2: Add callback to `AutoRotatePcapWriter` ✅
 
-- [ ] Add `OnFileClose func(filePath string)` to `AutoRotateConfig`
-- [ ] Call `OnFileClose` in `Close()` and `rotateFile()`
-- [ ] Run tests: `go test -race ./internal/pkg/processor/...`
+- [x] Add `OnFileClose func(filePath string)` to `AutoRotateConfig`
+- [x] Call `OnFileClose` in `Close()` and `rotateFile()`
+- [x] Run tests: `go test -race ./internal/pkg/processor/...`
 
-#### Step 2.3: Integrate with `PcapWriterManager`
+#### Step 2.3: Integrate with `PcapWriterManager` ✅
 
-- [ ] Wire `CommandExecutor` callbacks to writer configs
-- [ ] Ensure callbacks are async (don't block writers)
-- [ ] Run tests: `go test -race ./internal/pkg/processor/...`
+- [x] Wire `CommandExecutor` callbacks to writer configs
+- [x] Ensure callbacks are async (don't block writers)
+- [x] Run tests: `go test -race ./internal/pkg/processor/...`
 
 ---
 

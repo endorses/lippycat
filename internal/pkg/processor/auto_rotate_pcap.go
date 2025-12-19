@@ -24,6 +24,9 @@ type AutoRotateConfig struct {
 	MinDuration  time.Duration // Minimum time to keep file open before closing due to idle
 	BufferSize   int           // Write buffer size
 	SyncInterval time.Duration // How often to sync to disk
+
+	// Callback for command hooks
+	OnFileClose func(filePath string) // Called when a PCAP file is closed
 }
 
 // DefaultAutoRotateConfig returns default configuration
@@ -43,18 +46,19 @@ func DefaultAutoRotateConfig() *AutoRotateConfig {
 
 // AutoRotatePcapWriter writes non-VoIP packets with auto-rotation based on idle time, size, and duration
 type AutoRotatePcapWriter struct {
-	config         *AutoRotateConfig
-	currentFile    *os.File
-	currentWriter  *pcapgo.Writer
-	lastPacketTime time.Time
-	fileStartTime  time.Time
-	currentSize    int64
-	packetCount    int
-	fileIndex      int
-	mu             sync.Mutex
-	idleTimer      *time.Timer
-	syncTicker     *time.Ticker
-	stopSync       chan struct{}
+	config          *AutoRotateConfig
+	currentFile     *os.File
+	currentWriter   *pcapgo.Writer
+	currentFilePath string
+	lastPacketTime  time.Time
+	fileStartTime   time.Time
+	currentSize     int64
+	packetCount     int
+	fileIndex       int
+	mu              sync.Mutex
+	idleTimer       *time.Timer
+	syncTicker      *time.Ticker
+	stopSync        chan struct{}
 }
 
 // NewAutoRotatePcapWriter creates a new auto-rotating PCAP writer
@@ -168,6 +172,7 @@ func (w *AutoRotatePcapWriter) rotateFile() error {
 	}
 
 	duration := time.Since(w.fileStartTime)
+	closedPath := w.currentFilePath
 
 	// Close current file
 	if err := w.currentFile.Sync(); err != nil {
@@ -186,9 +191,15 @@ func (w *AutoRotatePcapWriter) rotateFile() error {
 	// Reset state
 	w.currentFile = nil
 	w.currentWriter = nil
+	w.currentFilePath = ""
 	w.currentSize = 0
 	w.packetCount = 0
 	w.fileIndex++
+
+	// Fire callback after file is closed
+	if closedPath != "" && w.config.OnFileClose != nil {
+		w.config.OnFileClose(closedPath)
+	}
 
 	return nil
 }
@@ -197,11 +208,11 @@ func (w *AutoRotatePcapWriter) rotateFile() error {
 func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 	// Generate filename based on pattern
 	filename := w.generateFilename(timestamp)
-	filepath := filepath.Join(w.config.OutputDir, filename)
+	filePath := filepath.Join(w.config.OutputDir, filename)
 
 	// Create file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create auto-rotate PCAP file: %w", err)
 	}
@@ -210,19 +221,20 @@ func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filepath)
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
 		return fmt.Errorf("failed to write auto-rotate PCAP header: %w", err)
 	}
 
 	w.currentFile = file
 	w.currentWriter = pcapWriter
+	w.currentFilePath = filePath
 	w.currentSize = 0
 	w.packetCount = 0
 	w.fileStartTime = time.Now()
 	w.lastPacketTime = time.Now()
 
-	logger.Info("Created new auto-rotate PCAP file", "file", filepath)
+	logger.Info("Created new auto-rotate PCAP file", "file", filePath)
 
 	return nil
 }
@@ -289,6 +301,7 @@ func (w *AutoRotatePcapWriter) closeCurrentFile() {
 	}
 
 	duration := time.Since(w.fileStartTime)
+	closedPath := w.currentFilePath
 
 	if err := w.currentFile.Sync(); err != nil {
 		logger.Warn("Failed to sync auto-rotate PCAP file", "error", err)
@@ -306,6 +319,12 @@ func (w *AutoRotatePcapWriter) closeCurrentFile() {
 
 	w.currentFile = nil
 	w.currentWriter = nil
+	w.currentFilePath = ""
+
+	// Fire callback after file is closed
+	if closedPath != "" && w.config.OnFileClose != nil {
+		w.config.OnFileClose(closedPath)
+	}
 }
 
 // syncLoop periodically syncs file to disk
@@ -343,8 +362,10 @@ func (w *AutoRotatePcapWriter) Close() error {
 	}
 
 	// Close current file
+	var closedPath string
 	if w.currentFile != nil {
 		duration := time.Since(w.fileStartTime)
+		closedPath = w.currentFilePath
 
 		if err := w.currentFile.Sync(); err != nil {
 			logger.Warn("Failed to sync auto-rotate PCAP file", "error", err)
@@ -360,6 +381,12 @@ func (w *AutoRotatePcapWriter) Close() error {
 			"duration", duration)
 
 		w.currentFile = nil
+		w.currentFilePath = ""
+	}
+
+	// Fire callback after file is closed
+	if closedPath != "" && w.config.OnFileClose != nil {
+		w.config.OnFileClose(closedPath)
 	}
 
 	return nil

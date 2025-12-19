@@ -3,6 +3,7 @@ package processor
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -430,4 +431,118 @@ func TestPcapFilePermissions(t *testing.T) {
 				file.Name(), mode)
 		}
 	}
+}
+
+// TestOnFileCloseCallback tests that the OnFileClose callback is invoked when files are closed
+func TestOnFileCloseCallback(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "lippycat-callback-test")
+	defer os.RemoveAll(tempDir)
+
+	var closedFiles []string
+	var mu sync.Mutex
+
+	config := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    tempDir,
+		SyncInterval: 5 * time.Second,
+		OnFileClose: func(filePath string) {
+			mu.Lock()
+			closedFiles = append(closedFiles, filePath)
+			mu.Unlock()
+		},
+	}
+
+	manager, err := NewPcapWriterManager(config)
+	require.NoError(t, err)
+
+	// Create a writer
+	writer, err := manager.GetOrCreateWriter("test-callback-call", "alice", "bob")
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+
+	// Close the writer
+	err = manager.CloseWriter("test-callback-call")
+	require.NoError(t, err)
+
+	// Verify callbacks were fired for both SIP and RTP files
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Len(t, closedFiles, 2, "expected 2 file close callbacks (SIP and RTP)")
+}
+
+// TestOnCallCompleteCallback tests that the OnCallComplete callback is invoked when calls are closed
+func TestOnCallCompleteCallback(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "lippycat-call-callback-test")
+	defer os.RemoveAll(tempDir)
+
+	var completedCalls []CallMetadata
+	var mu sync.Mutex
+
+	config := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    tempDir,
+		SyncInterval: 5 * time.Second,
+		OnCallComplete: func(meta CallMetadata) {
+			mu.Lock()
+			completedCalls = append(completedCalls, meta)
+			mu.Unlock()
+		},
+	}
+
+	manager, err := NewPcapWriterManager(config)
+	require.NoError(t, err)
+
+	// Create a writer
+	writer, err := manager.GetOrCreateWriter("test-call-complete", "alice", "bob")
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+
+	// Close the writer using CloseCallWriter (fires OnCallComplete)
+	err = manager.CloseCallWriter("test-call-complete")
+	require.NoError(t, err)
+
+	// Verify callback was fired
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, completedCalls, 1, "expected 1 call complete callback")
+	assert.Equal(t, "test-call-complete", completedCalls[0].CallID)
+	assert.Equal(t, "alice", completedCalls[0].Caller)
+	assert.Equal(t, "bob", completedCalls[0].Called)
+	assert.Equal(t, tempDir, completedCalls[0].DirName)
+}
+
+// TestCloseWriterDoesNotFireOnCallComplete verifies that CloseWriter doesn't fire OnCallComplete
+func TestCloseWriterDoesNotFireOnCallComplete(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "lippycat-no-callback-test")
+	defer os.RemoveAll(tempDir)
+
+	callCompleteCount := 0
+	var mu sync.Mutex
+
+	config := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    tempDir,
+		SyncInterval: 5 * time.Second,
+		OnCallComplete: func(meta CallMetadata) {
+			mu.Lock()
+			callCompleteCount++
+			mu.Unlock()
+		},
+	}
+
+	manager, err := NewPcapWriterManager(config)
+	require.NoError(t, err)
+
+	// Create a writer
+	_, err = manager.GetOrCreateWriter("test-no-callback", "alice", "bob")
+	require.NoError(t, err)
+
+	// Close using CloseWriter (should NOT fire OnCallComplete)
+	err = manager.CloseWriter("test-no-callback")
+	require.NoError(t, err)
+
+	// Verify callback was NOT fired
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 0, callCompleteCount, "CloseWriter should not fire OnCallComplete")
 }

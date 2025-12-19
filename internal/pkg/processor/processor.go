@@ -50,17 +50,18 @@ import (
 
 // Config contains processor configuration
 type Config struct {
-	ListenAddr       string
-	ProcessorID      string
-	UpstreamAddr     string
-	MaxHunters       int
-	MaxSubscribers   int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
-	WriteFile        string
-	DisplayStats     bool
-	PcapWriterConfig *PcapWriterConfig // Per-call PCAP writing configuration (VoIP)
-	AutoRotateConfig *AutoRotateConfig // Auto-rotating PCAP writing configuration (non-VoIP)
-	EnableDetection  bool              // Enable centralized protocol detection
-	FilterFile       string            // Path to filter persistence file (YAML)
+	ListenAddr            string
+	ProcessorID           string
+	UpstreamAddr          string
+	MaxHunters            int
+	MaxSubscribers        int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
+	WriteFile             string
+	DisplayStats          bool
+	PcapWriterConfig      *PcapWriterConfig      // Per-call PCAP writing configuration (VoIP)
+	AutoRotateConfig      *AutoRotateConfig      // Auto-rotating PCAP writing configuration (non-VoIP)
+	CommandExecutorConfig *CommandExecutorConfig // Command execution for PCAP hooks
+	EnableDetection       bool                   // Enable centralized protocol detection
+	FilterFile            string                 // Path to filter persistence file (YAML)
 	// TLS settings
 	TLSEnabled    bool   // Enable TLS encryption for gRPC server
 	TLSCertFile   string // Path to TLS certificate file
@@ -112,6 +113,9 @@ type Processor struct {
 	// Auto-rotate PCAP writer (for non-VoIP traffic)
 	autoRotatePcapWriter *AutoRotatePcapWriter
 
+	// Command executor for PCAP hooks
+	commandExecutor *CommandExecutor
+
 	// Protocol aggregators
 	callAggregator *voip.CallAggregator // VoIP call state aggregation
 	callCorrelator *CallCorrelator      // Cross-B2BUA call correlation
@@ -148,8 +152,24 @@ func New(config Config) (*Processor, error) {
 		logger.Info("Protocol detection enabled on processor")
 	}
 
+	// Initialize command executor if configured
+	if config.CommandExecutorConfig != nil {
+		p.commandExecutor = NewCommandExecutor(config.CommandExecutorConfig)
+		if p.commandExecutor.HasPcapCommand() {
+			logger.Info("PCAP command hook enabled", "command", config.CommandExecutorConfig.PcapCommand)
+		}
+		if p.commandExecutor.HasVoipCommand() {
+			logger.Info("VoIP command hook enabled", "command", config.CommandExecutorConfig.VoipCommand)
+		}
+	}
+
 	// Initialize per-call PCAP writer if configured
 	if config.PcapWriterConfig != nil && config.PcapWriterConfig.Enabled {
+		// Wire command executor callbacks to PCAP writer config
+		if p.commandExecutor != nil {
+			config.PcapWriterConfig.OnFileClose = p.commandExecutor.OnFileClose()
+			config.PcapWriterConfig.OnCallComplete = p.commandExecutor.OnCallComplete()
+		}
 		writer, err := NewPcapWriterManager(config.PcapWriterConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize per-call PCAP writer: %w", err)
@@ -162,6 +182,10 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize auto-rotate PCAP writer if configured
 	if config.AutoRotateConfig != nil && config.AutoRotateConfig.Enabled {
+		// Wire command executor callback to auto-rotate writer config
+		if p.commandExecutor != nil {
+			config.AutoRotateConfig.OnFileClose = p.commandExecutor.OnFileClose()
+		}
 		writer, err := NewAutoRotatePcapWriter(config.AutoRotateConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize auto-rotate PCAP writer: %w", err)

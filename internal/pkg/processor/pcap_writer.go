@@ -22,6 +22,10 @@ type PcapWriterConfig struct {
 	MaxFilesPerCall int           // Max number of PCAP files per call (for rotation)
 	BufferSize      int           // Write buffer size
 	SyncInterval    time.Duration // How often to sync to disk
+
+	// Callbacks for command hooks
+	OnFileClose    func(filePath string)   // Called when any PCAP file is closed
+	OnCallComplete func(meta CallMetadata) // Called when a VoIP call is complete
 }
 
 // DefaultPcapWriterConfig returns default configuration
@@ -47,12 +51,14 @@ type CallPcapWriter struct {
 	// SIP file
 	sipFile        *os.File
 	sipWriter      *pcapgo.Writer
+	sipFilePath    string
 	sipSize        int64
 	sipFileIndex   int
 	sipPacketCount int
 	// RTP file
 	rtpFile        *os.File
 	rtpWriter      *pcapgo.Writer
+	rtpFilePath    string
 	rtpSize        int64
 	rtpFileIndex   int
 	rtpPacketCount int
@@ -218,10 +224,15 @@ func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte) e
 
 // rotateSIPFile creates a new SIP PCAP file (called when size limit reached)
 func (writer *CallPcapWriter) rotateSIPFile() error {
-	// Close existing file
+	// Close existing file and fire callback
 	if writer.sipFile != nil {
+		closedPath := writer.sipFilePath
 		if err := writer.sipFile.Close(); err != nil {
 			logger.Error("Failed to close SIP file during rotation", "error", err, "call_id", writer.callID)
+		}
+		// Fire callback after successful close
+		if closedPath != "" && writer.config.OnFileClose != nil {
+			writer.config.OnFileClose(closedPath)
 		}
 	}
 
@@ -232,11 +243,11 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 
 	// Generate filename
 	filename := writer.generateFilename("sip", writer.sipFileIndex)
-	filepath := filepath.Join(writer.config.OutputDir, filename)
+	filePath := filepath.Join(writer.config.OutputDir, filename)
 
 	// Create file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP PCAP file: %w", err)
 	}
@@ -245,27 +256,33 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filepath)
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
 		return fmt.Errorf("failed to write SIP PCAP header: %w", err)
 	}
 
 	writer.sipFile = file
 	writer.sipWriter = pcapWriter
+	writer.sipFilePath = filePath
 	writer.sipSize = 0
 	writer.sipFileIndex++
 
-	logger.Info("Created SIP PCAP file for call", "call_id", writer.callID, "file", filepath)
+	logger.Info("Created SIP PCAP file for call", "call_id", writer.callID, "file", filePath)
 
 	return nil
 }
 
 // rotateRTPFile creates a new RTP PCAP file (called when size limit reached)
 func (writer *CallPcapWriter) rotateRTPFile() error {
-	// Close existing file
+	// Close existing file and fire callback
 	if writer.rtpFile != nil {
+		closedPath := writer.rtpFilePath
 		if err := writer.rtpFile.Close(); err != nil {
 			logger.Error("Failed to close RTP file during rotation", "error", err, "call_id", writer.callID)
+		}
+		// Fire callback after successful close
+		if closedPath != "" && writer.config.OnFileClose != nil {
+			writer.config.OnFileClose(closedPath)
 		}
 	}
 
@@ -276,11 +293,11 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 
 	// Generate filename
 	filename := writer.generateFilename("rtp", writer.rtpFileIndex)
-	filepath := filepath.Join(writer.config.OutputDir, filename)
+	filePath := filepath.Join(writer.config.OutputDir, filename)
 
 	// Create file with restrictive permissions (owner read/write only)
 	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create RTP PCAP file: %w", err)
 	}
@@ -289,17 +306,18 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 	pcapWriter := pcapgo.NewWriter(file)
 	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filepath)
+			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
 		return fmt.Errorf("failed to write RTP PCAP header: %w", err)
 	}
 
 	writer.rtpFile = file
 	writer.rtpWriter = pcapWriter
+	writer.rtpFilePath = filePath
 	writer.rtpSize = 0
 	writer.rtpFileIndex++
 
-	logger.Info("Created RTP PCAP file for call", "call_id", writer.callID, "file", filepath)
+	logger.Info("Created RTP PCAP file for call", "call_id", writer.callID, "file", filePath)
 
 	return nil
 }
@@ -362,7 +380,9 @@ func (writer *CallPcapWriter) Close() error {
 	writer.syncTicker.Stop()
 
 	// Close SIP file
+	var sipClosedPath string
 	if writer.sipFile != nil {
+		sipClosedPath = writer.sipFilePath
 		if err := writer.sipFile.Sync(); err != nil {
 			logger.Warn("Failed to sync SIP PCAP file", "error", err)
 		}
@@ -373,7 +393,9 @@ func (writer *CallPcapWriter) Close() error {
 	}
 
 	// Close RTP file
+	var rtpClosedPath string
 	if writer.rtpFile != nil {
+		rtpClosedPath = writer.rtpFilePath
 		if err := writer.rtpFile.Sync(); err != nil {
 			logger.Warn("Failed to sync RTP PCAP file", "error", err)
 		}
@@ -390,10 +412,47 @@ func (writer *CallPcapWriter) Close() error {
 		"sip_files", writer.sipFileIndex,
 		"rtp_files", writer.rtpFileIndex)
 
+	// Fire OnFileClose callbacks after files are closed
+	if writer.config.OnFileClose != nil {
+		if sipClosedPath != "" {
+			writer.config.OnFileClose(sipClosedPath)
+		}
+		if rtpClosedPath != "" {
+			writer.config.OnFileClose(rtpClosedPath)
+		}
+	}
+
 	return nil
 }
 
-// CloseWriter closes a specific call's writer
+// CloseCall closes both PCAP files and fires the OnCallComplete callback
+// This should be called when a VoIP call is complete
+func (writer *CallPcapWriter) CloseCall() error {
+	if writer == nil {
+		return nil
+	}
+
+	// Close files first
+	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	// Fire OnCallComplete callback with call metadata
+	if writer.config.OnCallComplete != nil {
+		meta := CallMetadata{
+			CallID:   writer.callID,
+			DirName:  writer.config.OutputDir,
+			Caller:   writer.from,
+			Called:   writer.to,
+			CallDate: writer.startTime,
+		}
+		writer.config.OnCallComplete(meta)
+	}
+
+	return nil
+}
+
+// CloseWriter closes a specific call's writer (without firing OnCallComplete)
 func (pwm *PcapWriterManager) CloseWriter(callID string) error {
 	pwm.mu.Lock()
 	defer pwm.mu.Unlock()
@@ -404,6 +463,25 @@ func (pwm *PcapWriterManager) CloseWriter(callID string) error {
 	}
 
 	if err := writer.Close(); err != nil {
+		return err
+	}
+
+	delete(pwm.writers, callID)
+	return nil
+}
+
+// CloseCallWriter closes a specific call's writer and fires OnCallComplete callback
+// Use this method when a VoIP call completes to trigger the voipcommand hook
+func (pwm *PcapWriterManager) CloseCallWriter(callID string) error {
+	pwm.mu.Lock()
+	defer pwm.mu.Unlock()
+
+	writer, exists := pwm.writers[callID]
+	if !exists {
+		return nil
+	}
+
+	if err := writer.CloseCall(); err != nil {
 		return err
 	}
 

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/endorses/lippycat/cmd/list"
+	"github.com/endorses/lippycat/cmd/show"
 	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/version"
@@ -34,6 +35,7 @@ func Execute() {
 func addSubCommandPalattes() {
 	rootCmd.AddCommand(sniff.SniffCmd)
 	rootCmd.AddCommand(list.ListCmd)
+	rootCmd.AddCommand(show.ShowCmd)
 }
 
 func init() {

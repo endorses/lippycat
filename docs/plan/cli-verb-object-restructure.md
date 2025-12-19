@@ -127,10 +127,10 @@ packages are CLI entry points and `internal/pkg/` contains the implementation.
 - [x] Run tests: `go test -race ./cmd/show/...`
 
 #### Step 1.4: Update root command registrations
-- [ ] Update `cmd/root_all.go` — Register watch, list, show
-- [ ] Update `cmd/root_tui.go` — Register watch
-- [ ] Update `cmd/root_cli.go` — Register list, show
-- [ ] Update other root variants as needed
+- [x] Update `cmd/root_all.go` — Register watch, list, show
+- [x] Update `cmd/root_tui.go` — Register watch
+- [x] Update `cmd/root_cli.go` — Register list, show
+- [x] Update other root variants as needed
 
 ---
 

@@ -23,14 +23,14 @@ Implement command hooks that execute when PCAP files are written by the processo
 
 ### Phase 1: CommandExecutor Component
 
-#### Step 1.1: Create `internal/pkg/processor/command_executor.go`
+#### Step 1.1: Create `internal/pkg/processor/command_executor.go` ✅
 
-- [ ] Create `CommandExecutor` struct with template strings and concurrency control
-- [ ] Implement `ExecutePcapCommand(filePath string)` with `%pcap%` substitution
-- [ ] Implement `ExecuteVoipCommand(meta CallMetadata)` with all placeholders
-- [ ] Add async execution with timeout (default: 30s) and semaphore (default: 10)
-- [ ] Add dry-run mode for testing commands
-- [ ] Format: `gofmt -w internal/pkg/processor/command_executor.go`
+- [x] Create `CommandExecutor` struct with template strings and concurrency control
+- [x] Implement `ExecutePcapCommand(filePath string)` with `%pcap%` substitution
+- [x] Implement `ExecuteVoipCommand(meta CallMetadata)` with all placeholders
+- [x] Add async execution with timeout (default: 30s) and semaphore (default: 10)
+- [x] Add dry-run mode for testing commands
+- [x] Format: `gofmt -w internal/pkg/processor/command_executor.go`
 
 #### Step 1.2: Create `internal/pkg/processor/command_executor_test.go`
 

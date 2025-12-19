@@ -32,13 +32,13 @@ Implement command hooks that execute when PCAP files are written by the processo
 - [x] Add dry-run mode for testing commands
 - [x] Format: `gofmt -w internal/pkg/processor/command_executor.go`
 
-#### Step 1.2: Create `internal/pkg/processor/command_executor_test.go`
+#### Step 1.2: Create `internal/pkg/processor/command_executor_test.go` ✅
 
-- [ ] Test placeholder substitution for all placeholders
-- [ ] Test concurrent execution respects semaphore limit
-- [ ] Test timeout kills long-running commands
-- [ ] Test dry-run mode logs without executing
-- [ ] Run tests: `go test -race ./internal/pkg/processor/...`
+- [x] Test placeholder substitution for all placeholders
+- [x] Test concurrent execution respects semaphore limit
+- [x] Test timeout kills long-running commands
+- [x] Test dry-run mode logs without executing
+- [x] Run tests: `go test -race ./internal/pkg/processor/...`
 
 ---
 

@@ -147,8 +147,8 @@ thin CLI wrappers and `internal/pkg/` contains implementation. Compare with how
 `cmd/sniff/` imports from `internal/pkg/capture/` and `internal/pkg/voip/`.
 
 #### Step 2.2: Remove other deprecated command files
-- [ ] Remove `cmd/interfaces.go`
-- [ ] Remove `cmd/debug/` directory
+- [x] Remove `cmd/interfaces.go`
+- [x] Remove `cmd/debug/` directory
 
 #### Step 2.3: Clean up root registrations
 - [ ] Remove tui command registration from root files

@@ -1,7 +1,7 @@
 //go:build cli || tui || all
 // +build cli tui all
 
-package cmd
+package list
 
 import (
 	"testing"

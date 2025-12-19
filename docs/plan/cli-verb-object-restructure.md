@@ -137,10 +137,10 @@ packages are CLI entry points and `internal/pkg/` contains the implementation.
 ### Phase 2: Remove Old Commands
 
 #### Step 2.1: Refactor TUI package location
-- [ ] Move `cmd/tui/` to `internal/pkg/tui/` (keeps TUI logic as internal package)
-- [ ] Update `cmd/watch/` imports to use `internal/pkg/tui/`
-- [ ] Remove `cmd/tui/tui.go` (old command entry point, replaced by watch commands)
-- [ ] Run tests: `go test -race ./internal/pkg/tui/...`
+- [x] Move `cmd/tui/` to `internal/pkg/tui/` (keeps TUI logic as internal package)
+- [x] Update `cmd/watch/` imports to use `internal/pkg/tui/`
+- [x] Remove `cmd/tui/tui.go` (old command entry point, replaced by watch commands)
+- [x] Run tests: `go test -race ./internal/pkg/tui/...`
 
 **Rationale:** This follows the project's architectural pattern where `cmd/` contains
 thin CLI wrappers and `internal/pkg/` contains implementation. Compare with how

@@ -8,8 +8,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/endorses/lippycat/cmd/tui"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-12-19
+
 ### Breaking Changes
 - **CLI restructured to verb-object pattern**: Commands reorganized for consistency and discoverability
   - `lc tui` → `lc watch` (defaults to live mode)
@@ -20,16 +22,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `lc watch` - Interactive TUI monitoring (live, file, remote modes)
   - `lc list` - Resource listing (interfaces, future: hunters, calls)
   - `lc show` - Diagnostics display (health, metrics, alerts, buffers, streams, config, summary)
-- **Load tests for processor package**: Performance tests for high packet rates (10K pps), many concurrent hunters (100), and many subscribers (100)
-- **Benchmarks for processor package**: Throughput benchmarks for packet processing with various hunter configurations
+- **Multi-level processor hierarchy**: Complete support for hierarchical processor deployments
+  - Real-time topology subscriptions with streaming updates
+  - Recursive routing for deep processor chains
+  - Authorization token verification for cross-processor operations
+  - Chain error context propagation
+  - Audit logging for multi-level management operations
+  - Network partition handling with automatic recovery
+  - Graceful shutdown coordination across hierarchy
+  - Cycle detection and hierarchy depth limits
+  - Topology cache with configurable TTL
+  - Retry logic for proxied operations with exponential backoff
+- **Virtual interface feature**: Replay PCAP files through virtual network interfaces
+  - TUN/TAP device support for packet injection
+  - Network namespace isolation for security
+  - Privilege dropping after interface creation
+  - Packet timing replay for realistic traffic simulation
+  - Integration with `lc sniff` and `lc process` commands
+- **BPF filter optimization**: VoIPFilterBuilder for efficient kernel-level packet filtering
+  - `--udp-only` flag for UDP-only VoIP capture (reduces CPU on TCP-heavy networks)
+  - `--sip-port` flag for custom SIP port filtering
+- **Per-call PCAP writing**: Separate SIP and RTP files per VoIP call
+- **Auto-rotating PCAP writing**: Time/size-based rotation for non-VoIP traffic
+- **gRPC connection pooling**: Improved performance for processor-to-processor communication
+- **API key authentication**: Secure distributed deployments with `--api-key` flag
+- **Protocol analyzer framework**: Compile-time protocol module registration system
+- **TUI enhancements**:
+  - Hierarchical processor tree view with upstream tracking
+  - Hierarchy depth indicators and latency estimates
+  - SSH packet coloring (solarized magenta)
+  - Solarized colors for VPN, ARP, and ICMPv6 protocols
+  - Filter box styling with solarized violet
+  - Date display in all timestamps
+  - Adaptive packet display throttling for improved responsiveness
+  - Chain error handling with unreachable status display
+  - Hierarchical hunter subscription management
+- **Hunter improvements**:
+  - Automatic BPF filter for processor communication port exclusion
 
-### Improved
+### Changed
+- **Processor refactoring**: Split monolithic processor.go into focused modules
+  - Core infrastructure, upstream handling, enrichment, and manager packages
+  - Improved separation of concerns and testability
+- **RemoteCapture client refactoring**: Extracted conversion, subscriptions, and streaming logic
+- **Constants consolidation**: Magic numbers moved to dedicated constants package
+- **TUI navigation**: Eliminated code duplication across components
+- **Error handling policy**: Comprehensive guidelines established in CONTRIBUTING.md
+
+### Fixed
+- **Race conditions**: Fixed PCAP writer and shutdown race conditions in VoIP package
+- **Deep copy safety**: Proper deep copies in GetCalls() to prevent concurrent modification
+- **gRPC pool stability**: Added nil checks to prevent panics in pool operations
+- **Processor routing**: Fixed multi-level processor routing with upstream processor ID
+- **Topology events**: Proper publishing on processor registration
+- **Flow context**: Fixed concurrent map write crash in detector package
+- **TUI filters**: Remove filters by insertion order, not selectivity order
+- **TUI tree view**: Correct navigation with hierarchical processor ordering
+- **ARP display**: Full ARP info display for remote capture
+- **Settings input**: Limited field widths to reasonable size
+- **Config loading**: Restore TLS settings from config file when flags not provided
+
+### Security
+- **PCAP file permissions**: Changed from 0644 to 0600
+- **Silent error suppression**: Eliminated in Close() operations
+
+### Performance
+- **Zero-copy optimizations**: sync.Pool usage in virtual interface package
+- **Adaptive throttling**: TUI packet display responsiveness improvements
+
+### Testing
 - **Test coverage improvements**:
   - processor: 31.4% → 62.6% (+31.2%)
   - capture: 30.3% → 60.4% (+30.1%)
-  - remotecapture: 12.2% → 23.0% (+10.8%) in unit tests (integration tests in test/ provide full coverage)
-- Comprehensive test coverage for capture package converter and snifferstarter modules
-- Integration tests for remotecapture client in CI pipeline
+  - remotecapture: 12.2% → 23.0% (+10.8%)
+- **Load tests**: High packet rates (10K pps), concurrent hunters (100), subscribers (100)
+- **Integration tests**: Multi-level topology, remotecapture client, CI-ready test suite
+- **Protocol analyzer tests**: Comprehensive test suite for module framework
 
 ## [0.2.9] - 2025-10-21
 

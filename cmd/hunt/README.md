@@ -136,7 +136,19 @@ lc hunt voip \
 
 Filters are managed centrally by the processor and pushed to hunters via the filter subscription mechanism. Hunters do NOT configure filters locally - they receive them from the processor.
 
-To add filters, use the processor's management API or filter file (see [cmd/process/CLAUDE.md](../process/CLAUDE.md#filter-management)).
+**Wildcard Pattern Support:**
+
+Filters support wildcard patterns for flexible matching:
+
+| Pattern | Type | Description |
+|---------|------|-------------|
+| `alice` | Contains | Substring match (backward compatible) |
+| `*456789` | Suffix | Matches any prefix + `456789` |
+| `alice*` | Prefix | Matches `alice` + any suffix |
+
+This is particularly useful for phone number matching where the same number may appear in different formats (E.164, 00-prefix, tech prefixes like `*31#`).
+
+To add filters, configure them in the processor's filter file (see [cmd/process/README.md](../process/README.md#filter-management)).
 
 ## Security
 

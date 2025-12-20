@@ -139,6 +139,38 @@ lc sniff voip -i eth0 --sipuser alicent,robb,charlie
 lc sniff voip -i eth0 --sipuser alicent
 ```
 
+#### Wildcard Pattern Matching
+
+Wildcard patterns allow flexible matching for international phone number formats and username variations:
+
+| Pattern | Type | Description |
+|---------|------|-------------|
+| `alice` | Contains | Substring match (backward compatible) |
+| `*456789` | Suffix | Matches any prefix + `456789` |
+| `alice*` | Prefix | Matches `alice` + any suffix |
+| `*alice*` | Contains | Explicit contains (same as no wildcards) |
+| `\*alice` | Literal | Escaped `*` treated as literal character |
+
+**Examples:**
+
+```bash
+# Match phone numbers ending in 456789 (handles E.164, 00-prefix, tech prefixes)
+# Matches: +49123456789, 0049123456789, *31#+49123456789
+lc sniff voip -i eth0 --sipuser '*456789'
+
+# Match usernames starting with "alice"
+# Matches: alice, alicent, alice-backup
+lc sniff voip -i eth0 --sipuser 'alice*'
+
+# Combine multiple patterns
+lc sniff voip -i eth0 --sipuser '*456789,*999000,admin*'
+
+# Match literal asterisk (tech prefix)
+lc sniff voip -i eth0 --sipuser '\*31#'
+```
+
+**Note:** Quote patterns containing `*` to prevent shell expansion.
+
 ### BPF Filter Optimization
 
 **Purpose:** Optimize BPF filters for high-traffic networks where TCP overhead overwhelms SIP handling.

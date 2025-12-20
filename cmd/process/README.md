@@ -232,6 +232,41 @@ filters:
 - `callid` - Match SIP Call-ID
 - `ip` - Match IP address or CIDR range
 
+**Wildcard Pattern Matching (sipuser filters):**
+
+| Pattern | Type | Description |
+|---------|------|-------------|
+| `alice` | Contains | Substring match (backward compatible) |
+| `*456789` | Suffix | Matches any prefix + `456789` |
+| `alice*` | Prefix | Matches `alice` + any suffix |
+| `*alice*` | Contains | Explicit contains (same as no wildcards) |
+| `\*alice` | Literal | Escaped `*` treated as literal character |
+
+**Wildcard Examples:**
+
+```yaml
+filters:
+  # Match calls ending in phone number suffix (handles E.164, 00-prefix, tech prefixes)
+  # Matches: +49123456789, 0049123456789, *31#+49123456789
+  - id: "phone-suffix"
+    type: "sipuser"
+    pattern: "*456789"
+    enabled: true
+
+  # Match usernames starting with "admin"
+  # Matches: admin, admin@example.com, administrator
+  - id: "admin-prefix"
+    type: "sipuser"
+    pattern: "admin*"
+    enabled: true
+
+  # Match literal asterisk (tech prefix)
+  - id: "tech-prefix"
+    type: "sipuser"
+    pattern: "\\*31#"
+    enabled: true
+```
+
 **Management:**
 Filters can be managed via:
 1. Direct YAML file editing (requires processor restart)

@@ -196,7 +196,7 @@ func voipHandler(cmd *cobra.Command, args []string) {
 }
 
 func init() {
-	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user to intercept")
+	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user/phone to match (supports wildcards: '*456789' for suffix, 'alice*' for prefix)")
 	voipCmd.Flags().StringVarP(&writeVoipFile, "write-file", "w", "", "prefix for output pcap files (creates <prefix>_sip_<callid>.pcap and <prefix>_rtp_<callid>.pcap)")
 
 	// BPF Filter Optimization Flags

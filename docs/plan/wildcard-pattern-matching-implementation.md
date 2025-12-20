@@ -1,7 +1,7 @@
 # Wildcard Pattern Matching Implementation
 
 **Date:** 2025-12-20
-**Status:** Ready for Implementation
+**Status:** Implementation Complete (Phases 1-5)
 **Research:** `docs/research/wildcard-pattern-matching.md`
 
 ## Overview
@@ -66,8 +66,8 @@ Add wildcard pattern matching for SIP user and phone number filters to handle in
 
 ### Phase 5: Documentation
 
-- [ ] Update CLI help text for `--sipuser` and `--phone` flags
-- [ ] Add examples to `cmd/sniff/README.md` and `cmd/hunt/README.md`
+- [x] Update CLI help text for `--sipuser` flag
+- [x] Add examples to `cmd/sniff/README.md`, `cmd/hunt/README.md`, and `cmd/process/README.md`
 
 ## File Changes
 
@@ -98,8 +98,8 @@ Add wildcard pattern matching for SIP user and phone number filters to handle in
 
 ## Testing Checklist
 
-- [ ] Pattern parsing: all types including escaped `\*`
-- [ ] Suffix SIMD: phone number variations (+49..., 0049..., *31#+49...)
-- [ ] Prefix SIMD: username prefix matching
-- [ ] P-Asserted-Identity: extraction and matching
+- [x] Pattern parsing: all types including escaped `\*`
+- [x] Suffix SIMD: phone number variations (+49..., 0049..., *31#+49...)
+- [x] Prefix SIMD: username prefix matching
+- [x] P-Asserted-Identity: extraction and matching
 - [ ] Integration: end-to-end with `lc sniff voip --sipuser '*456789'`

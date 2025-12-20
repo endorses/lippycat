@@ -33,13 +33,16 @@ Add wildcard pattern matching for SIP user and phone number filters to handle in
 
 ### Phase 2: SIMD Suffix Matching
 
-- [ ] Add `PatternTypeSuffix` constant in `internal/pkg/voip/gpu_accel.go`
+- [x] Add `PatternTypeSuffix` constant in `internal/pkg/voip/gpu_accel.go`
 
-- [ ] Implement `matchSuffixSIMD()` in `internal/pkg/voip/gpu_simd_backend.go`
+- [x] Implement `matchSuffixSIMD()` in `internal/pkg/voip/gpu_simd_backend.go`
   - Compare last N bytes of data against pattern
   - Add case to `matchPatternSIMD()` switch
+  - Also added `matchSuffix()` CPU fallback in `gpu_accel.go`
 
-- [ ] Add suffix tests in `internal/pkg/voip/gpu_simd_backend_test.go`
+- [x] Add suffix tests in `internal/pkg/voip/gpu_simd_backend_test.go`
+  - Added suffix test cases to `TestSIMDBackend_MatchTypes`
+  - Added dedicated `TestSIMDBackend_SuffixMatching` for phone number variations
 
 ### Phase 3: Username Extraction for Matching
 

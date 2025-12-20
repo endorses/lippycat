@@ -252,7 +252,8 @@ func TestPatternTypes(t *testing.T) {
 	assert.Equal(t, PatternTypeLiteral, PatternType(0))
 	assert.Equal(t, PatternTypePrefix, PatternType(1))
 	assert.Equal(t, PatternTypeContains, PatternType(2))
-	assert.Equal(t, PatternTypeRegex, PatternType(3))
+	assert.Equal(t, PatternTypeSuffix, PatternType(3))
+	assert.Equal(t, PatternTypeRegex, PatternType(4))
 }
 
 func TestGPUPattern_String(t *testing.T) {

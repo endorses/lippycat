@@ -147,6 +147,8 @@ func (sb *SIMDBackend) matchPatternSIMD(data []byte, pattern GPUPattern) (bool, 
 		return sb.matchPrefixSIMD(data, pattern)
 	case PatternTypeContains:
 		return sb.matchContainsSIMD(data, pattern)
+	case PatternTypeSuffix:
+		return sb.matchSuffixSIMD(data, pattern)
 	default:
 		return false, -1
 	}
@@ -175,6 +177,23 @@ func (sb *SIMDBackend) matchPrefixSIMD(data []byte, pattern GPUPattern) (bool, i
 	// Use SIMD-optimized comparison
 	if BytesEqual(data[:pattern.PatternLen], pattern.Pattern) {
 		return true, 0
+	}
+
+	return false, -1
+}
+
+// matchSuffixSIMD checks for suffix match using SIMD
+func (sb *SIMDBackend) matchSuffixSIMD(data []byte, pattern GPUPattern) (bool, int) {
+	if len(data) < pattern.PatternLen {
+		return false, -1
+	}
+
+	// Calculate offset to start of suffix
+	offset := len(data) - pattern.PatternLen
+
+	// Use SIMD-optimized comparison on last N bytes
+	if BytesEqual(data[offset:], pattern.Pattern) {
+		return true, offset
 	}
 
 	return false, -1

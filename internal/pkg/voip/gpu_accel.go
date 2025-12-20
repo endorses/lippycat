@@ -72,6 +72,7 @@ const (
 	PatternTypeLiteral  PatternType = iota // Exact string match
 	PatternTypePrefix                      // Prefix match
 	PatternTypeContains                    // Contains substring
+	PatternTypeSuffix                      // Suffix match
 	PatternTypeRegex                       // Regular expression (complex)
 )
 
@@ -277,6 +278,8 @@ func matchPattern(data []byte, pattern GPUPattern) (bool, int) {
 		return matchPrefix(data, pattern.Pattern)
 	case PatternTypeContains:
 		return matchContains(data, pattern.Pattern)
+	case PatternTypeSuffix:
+		return matchSuffix(data, pattern.Pattern)
 	default:
 		return false, -1
 	}
@@ -300,6 +303,18 @@ func matchPrefix(data, pattern []byte) (bool, int) {
 	}
 	if BytesEqual(data[:len(pattern)], pattern) {
 		return true, 0
+	}
+	return false, -1
+}
+
+// matchSuffix checks for suffix match
+func matchSuffix(data, pattern []byte) (bool, int) {
+	if len(data) < len(pattern) {
+		return false, -1
+	}
+	offset := len(data) - len(pattern)
+	if BytesEqual(data[offset:], pattern) {
+		return true, offset
 	}
 	return false, -1
 }

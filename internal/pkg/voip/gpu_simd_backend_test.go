@@ -194,6 +194,72 @@ func TestSIMDBackend_MatchTypes(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			name:   "suffix match",
+			packet: []byte("+49123456789"),
+			pattern: GPUPattern{
+				ID:         0,
+				Pattern:    []byte("456789"),
+				PatternLen: 6,
+				Type:       PatternTypeSuffix,
+			},
+			expected: true,
+		},
+		{
+			name:   "suffix match 00-prefix",
+			packet: []byte("0049123456789"),
+			pattern: GPUPattern{
+				ID:         0,
+				Pattern:    []byte("456789"),
+				PatternLen: 6,
+				Type:       PatternTypeSuffix,
+			},
+			expected: true,
+		},
+		{
+			name:   "suffix match tech prefix",
+			packet: []byte("*31#+49123456789"),
+			pattern: GPUPattern{
+				ID:         0,
+				Pattern:    []byte("456789"),
+				PatternLen: 6,
+				Type:       PatternTypeSuffix,
+			},
+			expected: true,
+		},
+		{
+			name:   "suffix no match",
+			packet: []byte("+49123456000"),
+			pattern: GPUPattern{
+				ID:         0,
+				Pattern:    []byte("456789"),
+				PatternLen: 6,
+				Type:       PatternTypeSuffix,
+			},
+			expected: false,
+		},
+		{
+			name:   "suffix exact length match",
+			packet: []byte("456789"),
+			pattern: GPUPattern{
+				ID:         0,
+				Pattern:    []byte("456789"),
+				PatternLen: 6,
+				Type:       PatternTypeSuffix,
+			},
+			expected: true,
+		},
+		{
+			name:   "suffix too short",
+			packet: []byte("789"),
+			pattern: GPUPattern{
+				ID:         0,
+				Pattern:    []byte("456789"),
+				PatternLen: 6,
+				Type:       PatternTypeSuffix,
+			},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -219,6 +285,59 @@ func TestSIMDBackend_Cleanup(t *testing.T) {
 
 	err := backend.Cleanup()
 	require.NoError(t, err)
+}
+
+func TestSIMDBackend_SuffixMatching(t *testing.T) {
+	backend := NewSIMDBackend().(*SIMDBackend)
+	config := DefaultGPUConfig()
+	_ = backend.Initialize(config)
+
+	// Test phone number suffix matching - the core use case for wildcard patterns
+	// Pattern *456789 should match all these phone number formats
+	packets := [][]byte{
+		[]byte("+49123456789"),     // E.164 format
+		[]byte("0049123456789"),    // 00-prefix format
+		[]byte("*31#+49123456789"), // Tech prefix (CLIR)
+		[]byte("123456789"),        // Plain format
+		[]byte("+49123456000"),     // Different ending - should NOT match
+	}
+
+	err := backend.TransferPacketsToGPU(packets)
+	require.NoError(t, err)
+
+	patterns := []GPUPattern{
+		{
+			ID:         0,
+			Pattern:    []byte("456789"),
+			PatternLen: 6,
+			Type:       PatternTypeSuffix,
+		},
+	}
+
+	err = backend.ExecutePatternMatching(patterns)
+	require.NoError(t, err)
+
+	results, err := backend.TransferResultsFromGPU()
+	require.NoError(t, err)
+
+	// Should match first 4 packets (indices 0, 1, 2, 3) but not packet 4
+	assert.Equal(t, 4, len(results), "Should match 4 packets ending in 456789")
+
+	matchedIndices := make(map[int]bool)
+	for _, result := range results {
+		matchedIndices[result.PacketIndex] = true
+		assert.True(t, result.Matched)
+		// Verify offset is correct (pointing to start of suffix)
+		packet := packets[result.PacketIndex]
+		expectedOffset := len(packet) - 6
+		assert.Equal(t, expectedOffset, result.Offset, "Offset should point to suffix start")
+	}
+
+	assert.True(t, matchedIndices[0], "E.164 format should match")
+	assert.True(t, matchedIndices[1], "00-prefix format should match")
+	assert.True(t, matchedIndices[2], "Tech prefix format should match")
+	assert.True(t, matchedIndices[3], "Plain format should match")
+	assert.False(t, matchedIndices[4], "Different ending should NOT match")
 }
 
 func TestSIMDCallIDExtractor(t *testing.T) {

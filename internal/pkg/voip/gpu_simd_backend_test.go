@@ -3,6 +3,8 @@ package voip
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -435,6 +437,114 @@ func TestSIMDBackend_Stats(t *testing.T) {
 	stats := backend.GetStats()
 	assert.Greater(t, stats.ProcessingTimeNS.Get(), uint64(0))
 	assert.Equal(t, uint64(2), stats.PacketsProcessed.Get())
+}
+
+func TestSIMDBackend_BuildAutomaton(t *testing.T) {
+	backend := NewSIMDBackend().(*SIMDBackend)
+	config := DefaultGPUConfig()
+	_ = backend.Initialize(config)
+
+	patterns := []ahocorasick.Pattern{
+		{ID: 1, Text: "alice", Type: filtering.PatternTypeContains},
+		{ID: 2, Text: "+49", Type: filtering.PatternTypePrefix},
+		{ID: 3, Text: "example.com", Type: filtering.PatternTypeSuffix},
+	}
+
+	err := backend.BuildAutomaton(patterns)
+	require.NoError(t, err)
+	assert.NotNil(t, backend.acMatcher)
+}
+
+func TestSIMDBackend_MatchUsernames(t *testing.T) {
+	backend := NewSIMDBackend().(*SIMDBackend)
+	config := DefaultGPUConfig()
+	_ = backend.Initialize(config)
+
+	patterns := []ahocorasick.Pattern{
+		{ID: 1, Text: "alice", Type: filtering.PatternTypeContains},
+		{ID: 2, Text: "+49", Type: filtering.PatternTypePrefix},
+		{ID: 3, Text: "example.com", Type: filtering.PatternTypeSuffix},
+	}
+
+	err := backend.BuildAutomaton(patterns)
+	require.NoError(t, err)
+
+	usernames := [][]byte{
+		[]byte("alice@test.org"),       // matches alice (contains)
+		[]byte("+49123456789"),         // matches +49 (prefix)
+		[]byte("bob@example.com"),      // matches example.com (suffix)
+		[]byte("alice@example.com"),    // matches alice and example.com
+		[]byte("nobody@nowhere.net"),   // no match
+		[]byte("+4912345@example.com"), // matches +49 and example.com
+	}
+
+	results, err := backend.MatchUsernames(usernames)
+	require.NoError(t, err)
+	require.Equal(t, 6, len(results))
+
+	// alice@test.org - should match pattern ID 1 (alice)
+	assert.NotEmpty(t, results[0], "alice@test.org should match")
+	assert.Contains(t, results[0], 1)
+
+	// +49123456789 - should match pattern ID 2 (+49)
+	assert.NotEmpty(t, results[1], "+49123456789 should match")
+	assert.Contains(t, results[1], 2)
+
+	// bob@example.com - should match pattern ID 3 (example.com)
+	assert.NotEmpty(t, results[2], "bob@example.com should match")
+	assert.Contains(t, results[2], 3)
+
+	// alice@example.com - should match pattern IDs 1 and 3
+	assert.NotEmpty(t, results[3], "alice@example.com should match multiple patterns")
+	assert.Contains(t, results[3], 1)
+	assert.Contains(t, results[3], 3)
+
+	// nobody@nowhere.net - should not match
+	assert.Empty(t, results[4], "nobody@nowhere.net should not match")
+
+	// +4912345@example.com - should match pattern IDs 2 and 3
+	assert.NotEmpty(t, results[5], "+4912345@example.com should match multiple patterns")
+	assert.Contains(t, results[5], 2)
+	assert.Contains(t, results[5], 3)
+}
+
+func TestSIMDBackend_MatchUsernames_NoAutomaton(t *testing.T) {
+	backend := NewSIMDBackend().(*SIMDBackend)
+	config := DefaultGPUConfig()
+	_ = backend.Initialize(config)
+
+	// Don't build automaton, just call MatchUsernames
+	usernames := [][]byte{
+		[]byte("alice@test.org"),
+		[]byte("bob@example.com"),
+	}
+
+	results, err := backend.MatchUsernames(usernames)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(results))
+
+	// Should return empty results when no automaton is built
+	assert.Empty(t, results[0])
+	assert.Empty(t, results[1])
+}
+
+func TestSIMDBackend_MatchUsernames_EmptyPatterns(t *testing.T) {
+	backend := NewSIMDBackend().(*SIMDBackend)
+	config := DefaultGPUConfig()
+	_ = backend.Initialize(config)
+
+	// Build with empty patterns
+	err := backend.BuildAutomaton([]ahocorasick.Pattern{})
+	require.NoError(t, err)
+	assert.Nil(t, backend.acMatcher)
+
+	usernames := [][]byte{
+		[]byte("alice@test.org"),
+	}
+
+	results, err := backend.MatchUsernames(usernames)
+	require.NoError(t, err)
+	assert.Empty(t, results[0])
 }
 
 // Benchmarks

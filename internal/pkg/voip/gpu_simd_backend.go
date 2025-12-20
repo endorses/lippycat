@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -18,6 +19,10 @@ type SIMDBackend struct {
 	numWorkers int
 	mu         sync.Mutex
 	stats      SIMDBackendStats
+
+	// acMatcher is the Aho-Corasick automaton for efficient pattern matching.
+	// Uses DenseAhoCorasick for O(1) state transitions and SIMD-optimized matching.
+	acMatcher *ahocorasick.DenseAhoCorasick
 }
 
 // SIMDBackendStats holds SIMD backend statistics
@@ -295,6 +300,100 @@ func (sb *SIMDBackend) Name() string {
 // IsAvailable checks if SIMD backend is available (always true)
 func (sb *SIMDBackend) IsAvailable() bool {
 	return true
+}
+
+// BuildAutomaton builds an Aho-Corasick automaton from patterns.
+// This enables O(n+m+z) matching using the DenseAhoCorasick implementation
+// which provides O(1) state transitions and SIMD-optimized lowercase conversion.
+func (sb *SIMDBackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	if len(patterns) == 0 {
+		sb.acMatcher = nil
+		return nil
+	}
+
+	startTime := time.Now()
+	ac := ahocorasick.NewDenseAhoCorasick()
+	if err := ac.Build(patterns); err != nil {
+		return fmt.Errorf("failed to build AC automaton: %w", err)
+	}
+	sb.acMatcher = ac
+
+	logger.Info("SIMD backend AC automaton built",
+		"pattern_count", len(patterns),
+		"build_duration", time.Since(startTime))
+
+	return nil
+}
+
+// MatchUsernames matches usernames against the built Aho-Corasick automaton.
+// Returns matched pattern IDs for each input username.
+// If no automaton is built, returns empty results for all inputs.
+func (sb *SIMDBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+
+	results := make([][]int, len(usernames))
+
+	if sb.acMatcher == nil {
+		// No automaton built, return empty results
+		return results, nil
+	}
+
+	startTime := time.Now()
+
+	// Use parallel processing for large batches
+	numUsernames := len(usernames)
+	if numUsernames > sb.numWorkers*10 {
+		// Parallel processing
+		usernamesPerWorker := (numUsernames + sb.numWorkers - 1) / sb.numWorkers
+
+		var wg sync.WaitGroup
+		for workerID := range sb.numWorkers {
+			wg.Add(1)
+			go func(wid int) {
+				defer wg.Done()
+
+				start := wid * usernamesPerWorker
+				end := start + usernamesPerWorker
+				if end > numUsernames {
+					end = numUsernames
+				}
+
+				for i := start; i < end; i++ {
+					matchResults := sb.acMatcher.Match(usernames[i])
+					if len(matchResults) > 0 {
+						patternIDs := make([]int, len(matchResults))
+						for j, mr := range matchResults {
+							patternIDs[j] = mr.PatternID
+						}
+						results[i] = patternIDs
+					}
+				}
+			}(workerID)
+		}
+		wg.Wait()
+	} else {
+		// Sequential processing for small batches
+		for i, username := range usernames {
+			matchResults := sb.acMatcher.Match(username)
+			if len(matchResults) > 0 {
+				patternIDs := make([]int, len(matchResults))
+				for j, mr := range matchResults {
+					patternIDs[j] = mr.PatternID
+				}
+				results[i] = patternIDs
+			}
+		}
+	}
+
+	processingTime := time.Since(startTime)
+	sb.stats.ProcessingTimeNS.Add(uint64(processingTime.Nanoseconds())) // #nosec G115
+	sb.stats.PacketsProcessed.Add(uint64(numUsernames))                 // #nosec G115
+
+	return results, nil
 }
 
 // GetStats returns SIMD backend statistics

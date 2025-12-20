@@ -68,12 +68,31 @@ extern void launchPatternMatchKernel(
     int* d_resultCount,
     cudaStream_t stream
 );
+
+
+// Aho-Corasick kernel wrapper
+// Each thread processes one username, traversing the automaton states
+extern void launchACMatchKernel(
+    const char* d_usernames,
+    const int* d_usernameOffsets,
+    int numUsernames,
+    const int* d_transitions,   // [numStates][256] dense transition table
+    const int* d_failure,       // [numStates] failure links
+    const int* d_outputs,       // [numStates] output pattern indices (packed)
+    const int* d_outputOffsets, // [numStates+1] offsets into d_outputs
+    int numStates,
+    int* d_results,             // [numUsernames * maxMatches] matched pattern IDs
+    int* d_resultCounts,        // [numUsernames] number of matches per username
+    int maxMatchesPerUsername,
+    cudaStream_t stream
+);
 */
 import "C"
 import (
 	"fmt"
 	"unsafe"
 
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -91,6 +110,23 @@ type CUDABackendImpl struct {
 	maxPacketSize int
 	maxBatchSize  int
 	initialized   bool
+
+	// Aho-Corasick automaton data on GPU
+	acTransitions   unsafe.Pointer // [numStates][256] int32 dense transition table
+	acFailure       unsafe.Pointer // [numStates] int32 failure links
+	acOutputs       unsafe.Pointer // Packed output pattern indices
+	acOutputOffsets unsafe.Pointer // [numStates+1] int32 offsets into acOutputs
+	acNumStates     int
+	acNumPatterns   int
+	acBuilt         bool
+
+	// Username matching buffers
+	usernameBuffer       unsafe.Pointer // Flattened username data
+	usernameOffsetBuffer unsafe.Pointer // Offsets into username buffer
+	acResultBuffer       unsafe.Pointer // Match results per username
+	acResultCountBuffer  unsafe.Pointer // Match count per username
+	maxUsernamesBatch    int
+	maxMatchesPerUser    int
 }
 
 // NewCUDABackendImpl creates a real CUDA backend implementation
@@ -319,6 +355,9 @@ func (cb *CUDABackendImpl) TransferResultsFromGPU() ([]GPUResult, error) {
 
 // Cleanup releases CUDA resources
 func (cb *CUDABackendImpl) Cleanup() error {
+	// Free Aho-Corasick buffers
+	cb.freeACBuffers()
+
 	if cb.packetBuffer != nil {
 		C.freeDeviceMemory(cb.packetBuffer)
 		cb.packetBuffer = nil
@@ -355,4 +394,300 @@ func (cb *CUDABackendImpl) IsAvailable() bool {
 	var deviceCount C.int
 	err := C.getDeviceCount(&deviceCount)
 	return err == 0 && deviceCount > 0
+}
+
+// BuildAutomaton builds an Aho-Corasick automaton from patterns and uploads to GPU.
+// The automaton is serialized into dense arrays for efficient GPU traversal.
+func (cb *CUDABackendImpl) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	if !cb.initialized {
+		return ErrGPUNotAvailable
+	}
+
+	// Free previous automaton if exists
+	cb.freeACBuffers()
+
+	if len(patterns) == 0 {
+		cb.acBuilt = false
+		return nil
+	}
+
+	// Build CPU automaton first using DenseAhoCorasick
+	ac := ahocorasick.NewDenseAhoCorasick()
+	if err := ac.Build(patterns); err != nil {
+		return fmt.Errorf("failed to build AC automaton: %w", err)
+	}
+
+	// Serialize automaton to flat arrays for GPU
+	numStates, transitions, failure, outputs, outputOffsets := cb.serializeAutomaton(ac)
+	cb.acNumStates = numStates
+	cb.acNumPatterns = len(patterns)
+
+	// Allocate and copy transitions to GPU: [numStates][256] int32
+	transitionSize := numStates * 256 * 4
+	var transitionBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&transitionBuf, C.size_t(transitionSize)); cerr != 0 {
+		return fmt.Errorf("failed to allocate AC transitions: %d", cerr)
+	}
+	cb.acTransitions = transitionBuf
+	if cerr := C.copyHostToDevice(transitionBuf, unsafe.Pointer(&transitions[0]), C.size_t(transitionSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to copy AC transitions to GPU: %d", cerr)
+	}
+
+	// Allocate and copy failure links to GPU
+	failureSize := numStates * 4
+	var failureBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&failureBuf, C.size_t(failureSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to allocate AC failure links: %d", cerr)
+	}
+	cb.acFailure = failureBuf
+	if cerr := C.copyHostToDevice(failureBuf, unsafe.Pointer(&failure[0]), C.size_t(failureSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to copy AC failure links to GPU: %d", cerr)
+	}
+
+	// Allocate and copy output offsets to GPU
+	outputOffsetsSize := (numStates + 1) * 4
+	var outputOffsetsBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&outputOffsetsBuf, C.size_t(outputOffsetsSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to allocate AC output offsets: %d", cerr)
+	}
+	cb.acOutputOffsets = outputOffsetsBuf
+	if cerr := C.copyHostToDevice(outputOffsetsBuf, unsafe.Pointer(&outputOffsets[0]), C.size_t(outputOffsetsSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to copy AC output offsets to GPU: %d", cerr)
+	}
+
+	// Allocate and copy outputs to GPU
+	if len(outputs) > 0 {
+		outputsSize := len(outputs) * 4
+		var outputsBuf unsafe.Pointer
+		if cerr := C.allocateDeviceMemory(&outputsBuf, C.size_t(outputsSize)); cerr != 0 {
+			cb.freeACBuffers()
+			return fmt.Errorf("failed to allocate AC outputs: %d", cerr)
+		}
+		cb.acOutputs = outputsBuf
+		if cerr := C.copyHostToDevice(outputsBuf, unsafe.Pointer(&outputs[0]), C.size_t(outputsSize)); cerr != 0 {
+			cb.freeACBuffers()
+			return fmt.Errorf("failed to copy AC outputs to GPU: %d", cerr)
+		}
+	}
+
+	// Allocate username matching buffers
+	cb.maxUsernamesBatch = cb.maxBatchSize
+	cb.maxMatchesPerUser = 16 // Max patterns that can match a single username
+
+	// Username buffer (estimate 64 bytes avg per username)
+	usernameBufferSize := cb.maxUsernamesBatch * 64
+	var usernameBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&usernameBuf, C.size_t(usernameBufferSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to allocate username buffer: %d", cerr)
+	}
+	cb.usernameBuffer = usernameBuf
+
+	// Username offsets
+	usernameOffsetsSize := (cb.maxUsernamesBatch + 1) * 4
+	var usernameOffsetsBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&usernameOffsetsBuf, C.size_t(usernameOffsetsSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to allocate username offsets: %d", cerr)
+	}
+	cb.usernameOffsetBuffer = usernameOffsetsBuf
+
+	// Results buffer
+	resultsSize := cb.maxUsernamesBatch * cb.maxMatchesPerUser * 4
+	var resultsBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&resultsBuf, C.size_t(resultsSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to allocate AC results buffer: %d", cerr)
+	}
+	cb.acResultBuffer = resultsBuf
+
+	// Result counts buffer
+	resultCountsSize := cb.maxUsernamesBatch * 4
+	var resultCountsBuf unsafe.Pointer
+	if cerr := C.allocateDeviceMemory(&resultCountsBuf, C.size_t(resultCountsSize)); cerr != 0 {
+		cb.freeACBuffers()
+		return fmt.Errorf("failed to allocate AC result counts: %d", cerr)
+	}
+	cb.acResultCountBuffer = resultCountsBuf
+
+	cb.acBuilt = true
+
+	logger.Info("CUDA AC automaton built and uploaded",
+		"pattern_count", len(patterns),
+		"state_count", numStates,
+		"transition_size_mb", transitionSize/(1024*1024))
+
+	return nil
+}
+
+// serializeAutomaton extracts the automaton data into flat arrays.
+// Returns: numStates, transitions[numStates*256], failure[numStates], outputs[], outputOffsets[numStates+1]
+func (cb *CUDABackendImpl) serializeAutomaton(ac *ahocorasick.DenseAhoCorasick) (int, []int32, []int32, []int32, []int32) {
+	numStates := ac.StateCount()
+	transitions, failure, outputs, outputOffsets, _, _ := ac.ExportStates()
+	return numStates, transitions, failure, outputs, outputOffsets
+}
+
+// MatchUsernames matches usernames against the built Aho-Corasick automaton.
+// Each GPU thread processes one username, traversing the automaton states.
+func (cb *CUDABackendImpl) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	if !cb.initialized {
+		return nil, ErrGPUNotAvailable
+	}
+
+	results := make([][]int, len(usernames))
+	if !cb.acBuilt || len(usernames) == 0 {
+		return results, nil
+	}
+
+	numUsernames := len(usernames)
+	if numUsernames > cb.maxUsernamesBatch {
+		// Process in batches
+		for batchStart := 0; batchStart < numUsernames; batchStart += cb.maxUsernamesBatch {
+			batchEnd := batchStart + cb.maxUsernamesBatch
+			if batchEnd > numUsernames {
+				batchEnd = numUsernames
+			}
+			batchResults, err := cb.matchUsernamesBatch(usernames[batchStart:batchEnd])
+			if err != nil {
+				return nil, err
+			}
+			for i, r := range batchResults {
+				results[batchStart+i] = r
+			}
+		}
+		return results, nil
+	}
+
+	return cb.matchUsernamesBatch(usernames)
+}
+
+// matchUsernamesBatch processes a single batch of usernames.
+func (cb *CUDABackendImpl) matchUsernamesBatch(usernames [][]byte) ([][]int, error) {
+	numUsernames := len(usernames)
+	results := make([][]int, numUsernames)
+
+	// Flatten usernames
+	totalSize := 0
+	offsets := make([]int32, numUsernames+1)
+	offsets[0] = 0
+
+	for i, u := range usernames {
+		totalSize += len(u)
+		offsets[i+1] = int32(totalSize)
+	}
+
+	if totalSize == 0 {
+		return results, nil
+	}
+
+	// Create flat buffer
+	flatBuffer := make([]byte, totalSize)
+	offset := 0
+	for _, u := range usernames {
+		copy(flatBuffer[offset:], u)
+		offset += len(u)
+	}
+
+	// Copy usernames to GPU
+	if cerr := C.copyHostToDevice(cb.usernameBuffer, unsafe.Pointer(&flatBuffer[0]), C.size_t(totalSize)); cerr != 0 {
+		return nil, fmt.Errorf("failed to copy usernames to GPU: %d", cerr)
+	}
+
+	// Copy offsets to GPU
+	if cerr := C.copyHostToDevice(cb.usernameOffsetBuffer, unsafe.Pointer(&offsets[0]), C.size_t((numUsernames+1)*4)); cerr != 0 {
+		return nil, fmt.Errorf("failed to copy username offsets to GPU: %d", cerr)
+	}
+
+	// Launch AC matching kernel
+	C.launchACMatchKernel(
+		(*C.char)(cb.usernameBuffer),
+		(*C.int)(cb.usernameOffsetBuffer),
+		C.int(numUsernames),
+		(*C.int)(cb.acTransitions),
+		(*C.int)(cb.acFailure),
+		(*C.int)(cb.acOutputs),
+		(*C.int)(cb.acOutputOffsets),
+		C.int(cb.acNumStates),
+		(*C.int)(cb.acResultBuffer),
+		(*C.int)(cb.acResultCountBuffer),
+		C.int(cb.maxMatchesPerUser),
+		cb.stream,
+	)
+
+	// Synchronize
+	if cerr := C.syncDevice(); cerr != 0 {
+		return nil, fmt.Errorf("failed to synchronize after AC kernel: %d", cerr)
+	}
+
+	// Read result counts
+	resultCounts := make([]int32, numUsernames)
+	if cerr := C.copyDeviceToHost(unsafe.Pointer(&resultCounts[0]), cb.acResultCountBuffer, C.size_t(numUsernames*4)); cerr != 0 {
+		return nil, fmt.Errorf("failed to read AC result counts: %d", cerr)
+	}
+
+	// Read results
+	allResults := make([]int32, numUsernames*cb.maxMatchesPerUser)
+	if cerr := C.copyDeviceToHost(unsafe.Pointer(&allResults[0]), cb.acResultBuffer, C.size_t(numUsernames*cb.maxMatchesPerUser*4)); cerr != 0 {
+		return nil, fmt.Errorf("failed to read AC results: %d", cerr)
+	}
+
+	// Unpack results
+	for i := 0; i < numUsernames; i++ {
+		count := int(resultCounts[i])
+		if count > 0 {
+			if count > cb.maxMatchesPerUser {
+				count = cb.maxMatchesPerUser
+			}
+			patternIDs := make([]int, count)
+			for j := 0; j < count; j++ {
+				patternIDs[j] = int(allResults[i*cb.maxMatchesPerUser+j])
+			}
+			results[i] = patternIDs
+		}
+	}
+
+	return results, nil
+}
+
+// freeACBuffers releases all Aho-Corasick related GPU buffers.
+func (cb *CUDABackendImpl) freeACBuffers() {
+	if cb.acTransitions != nil {
+		C.freeDeviceMemory(cb.acTransitions)
+		cb.acTransitions = nil
+	}
+	if cb.acFailure != nil {
+		C.freeDeviceMemory(cb.acFailure)
+		cb.acFailure = nil
+	}
+	if cb.acOutputs != nil {
+		C.freeDeviceMemory(cb.acOutputs)
+		cb.acOutputs = nil
+	}
+	if cb.acOutputOffsets != nil {
+		C.freeDeviceMemory(cb.acOutputOffsets)
+		cb.acOutputOffsets = nil
+	}
+	if cb.usernameBuffer != nil {
+		C.freeDeviceMemory(cb.usernameBuffer)
+		cb.usernameBuffer = nil
+	}
+	if cb.usernameOffsetBuffer != nil {
+		C.freeDeviceMemory(cb.usernameOffsetBuffer)
+		cb.usernameOffsetBuffer = nil
+	}
+	if cb.acResultBuffer != nil {
+		C.freeDeviceMemory(cb.acResultBuffer)
+		cb.acResultBuffer = nil
+	}
+	if cb.acResultCountBuffer != nil {
+		C.freeDeviceMemory(cb.acResultCountBuffer)
+		cb.acResultCountBuffer = nil
+	}
+	cb.acBuilt = false
 }

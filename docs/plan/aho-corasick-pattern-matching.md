@@ -1,7 +1,7 @@
 # Aho-Corasick Pattern Matching Implementation
 
 **Date:** 2025-12-20
-**Status:** Phase 4 Complete
+**Status:** Phase 5 Complete
 **Research:** `docs/research/gpu-pattern-matching-architecture.md`
 
 ## Goal
@@ -84,19 +84,21 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 
 ## Phase 5: GPU Backend Update
 
-- [ ] Update `GPUBackend` interface in `internal/pkg/voip/gpu_accel.go`
-  - [ ] Add `BuildAutomaton(patterns []Pattern) error`
-  - [ ] Add `MatchUsernames(usernames [][]byte) ([][]int, error)`
-  - [ ] Deprecate `ExecutePatternMatching()`
+- [x] Update `GPUBackend` interface in `internal/pkg/voip/gpu_accel.go`
+  - [x] Add `BuildAutomaton(patterns []Pattern) error`
+  - [x] Add `MatchUsernames(usernames [][]byte) ([][]int, error)`
+  - [x] Deprecate `ExecutePatternMatching()`
 
-- [ ] Update `SIMDBackend` in `internal/pkg/voip/gpu_simd_backend.go`
-  - [ ] Embed `MultiModeAC` for pattern matching
-  - [ ] Implement new interface methods
+- [x] Update `SIMDBackend` in `internal/pkg/voip/gpu_simd_backend.go`
+  - [x] Embed `DenseAhoCorasick` for pattern matching (faster than MultiModeAC)
+  - [x] Implement new interface methods with parallel processing
 
-- [ ] Update `CUDABackend` in `internal/pkg/voip/gpu_cuda_backend_impl.go`
-  - [ ] Serialize AC automaton to VRAM
-  - [ ] Implement CUDA kernel for automaton traversal
-  - [ ] Each thread processes one username
+- [x] Update `CUDABackend` in `internal/pkg/voip/gpu_cuda_backend_impl.go`
+  - [x] Add `ExportStates()` method to DenseAhoCorasick for GPU serialization
+  - [x] Serialize AC automaton to VRAM (transitions, failure links, outputs)
+  - [x] Implement CUDA kernel wrapper for automaton traversal
+  - [x] Each thread processes one username
+  - [x] Update OpenCL backend with stub implementations
 
 ## Phase 6: Configuration & Flags
 
@@ -149,9 +151,12 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 | Path | Changes | Status |
 |------|---------|--------|
 | `internal/pkg/hunter/application_filter.go` | Integrate BufferedMatcher for O(n) matching | ✅ Done |
-| `internal/pkg/voip/gpu_accel.go` | Add new interface methods | Pending |
-| `internal/pkg/voip/gpu_simd_backend.go` | Integrate AC matcher | Pending |
-| `internal/pkg/voip/gpu_cuda_backend_impl.go` | CUDA AC kernel | Pending |
+| `internal/pkg/voip/gpu_accel.go` | Add BuildAutomaton/MatchUsernames to GPUBackend interface | ✅ Done |
+| `internal/pkg/voip/gpu_simd_backend.go` | Integrate DenseAhoCorasick for pattern matching | ✅ Done |
+| `internal/pkg/voip/gpu_cuda_backend.go` | Add stub implementations for new interface | ✅ Done |
+| `internal/pkg/voip/gpu_cuda_backend_impl.go` | CUDA AC kernel, automaton serialization | ✅ Done |
+| `internal/pkg/voip/gpu_opencl_backend.go` | Add stub implementations for new interface | ✅ Done |
+| `internal/pkg/ahocorasick/dense.go` | Add ExportStates() for GPU serialization | ✅ Done |
 | `cmd/hunt/hunt.go` | Add flags | Pending |
 | `cmd/sniff/voip.go` | Add flags | Pending |
 

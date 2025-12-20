@@ -181,6 +181,65 @@ func (d *DenseAhoCorasick) PatternCount() int {
 	return len(d.patterns)
 }
 
+// StateCount returns the number of states in the automaton.
+func (d *DenseAhoCorasick) StateCount() int {
+	return len(d.states)
+}
+
+// ExportStates exports the automaton states for GPU serialization.
+// Returns:
+//   - transitions: flat array [numStates*256] of int32 state transitions (-1 = no transition)
+//   - failure: array [numStates] of int32 failure link states
+//   - outputs: flat array of int32 pattern indices for all output patterns
+//   - outputOffsets: array [numStates+1] of int32 offsets into outputs array
+//   - patternTypes: array [numPatterns] of PatternType for each pattern
+//   - patternLengths: array [numPatterns] of int for each pattern length
+func (d *DenseAhoCorasick) ExportStates() (transitions []int32, failure []int32, outputs []int32, outputOffsets []int32, patternTypes []filtering.PatternType, patternLengths []int) {
+	numStates := len(d.states)
+
+	// Export transitions as flat array [numStates][256]
+	transitions = make([]int32, numStates*256)
+	for stateIdx, state := range d.states {
+		for charIdx := 0; charIdx < 256; charIdx++ {
+			transitions[stateIdx*256+charIdx] = state.transitions[charIdx]
+		}
+	}
+
+	// Export failure links
+	failure = make([]int32, numStates)
+	for stateIdx, state := range d.states {
+		failure[stateIdx] = state.failure
+	}
+
+	// Export outputs with offsets (CSR format)
+	outputOffsets = make([]int32, numStates+1)
+	totalOutputs := 0
+	for stateIdx, state := range d.states {
+		outputOffsets[stateIdx] = int32(totalOutputs)
+		totalOutputs += len(state.output)
+	}
+	outputOffsets[numStates] = int32(totalOutputs)
+
+	outputs = make([]int32, totalOutputs)
+	idx := 0
+	for _, state := range d.states {
+		for _, patternIdx := range state.output {
+			outputs[idx] = int32(patternIdx)
+			idx++
+		}
+	}
+
+	// Export pattern metadata
+	patternTypes = make([]filtering.PatternType, len(d.patterns))
+	patternLengths = make([]int, len(d.patterns))
+	for i, p := range d.patterns {
+		patternTypes[i] = p.Type
+		patternLengths[i] = len(p.Text)
+	}
+
+	return transitions, failure, outputs, outputOffsets, patternTypes, patternLengths
+}
+
 // validateMatch checks if a match result is valid based on pattern type.
 func validateMatch(pattern Pattern, matchStart, matchEnd, inputLen int) bool {
 	switch pattern.Type {

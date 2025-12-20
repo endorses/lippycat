@@ -5,6 +5,8 @@ package voip
 
 import (
 	"errors"
+
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 )
 
 // CUDABackend implements GPU backend using NVIDIA CUDA (stub version)
@@ -64,6 +66,26 @@ func (cb *CUDABackend) ExecutePatternMatching(patterns []GPUPattern) error {
 func (cb *CUDABackend) TransferResultsFromGPU() ([]GPUResult, error) {
 	// TODO: Copy results back
 	// cudaMemcpyAsync(hostPtr, devicePtr, size, cudaMemcpyDeviceToHost, stream)
+	return nil, ErrGPUNotAvailable
+}
+
+// BuildAutomaton builds an Aho-Corasick automaton from patterns.
+// Stub: CUDA not available, returns ErrGPUNotAvailable.
+func (cb *CUDABackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	// TODO: When CUDA is available:
+	// 1. Build DenseAhoCorasick automaton on CPU
+	// 2. Serialize state table to contiguous memory
+	// 3. cudaMemcpy state table to device memory
+	return ErrGPUNotAvailable
+}
+
+// MatchUsernames matches usernames against the built automaton.
+// Stub: CUDA not available, returns ErrGPUNotAvailable.
+func (cb *CUDABackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	// TODO: When CUDA is available:
+	// 1. Copy usernames to device memory
+	// 2. Launch kernel: one thread per username traverses automaton
+	// 3. Copy results back to host
 	return nil, ErrGPUNotAvailable
 }
 

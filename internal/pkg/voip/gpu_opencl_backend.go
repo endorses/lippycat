@@ -2,6 +2,8 @@ package voip
 
 import (
 	"errors"
+
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 )
 
 // OpenCLBackend implements GPU backend using OpenCL
@@ -67,6 +69,26 @@ func (ob *OpenCLBackend) ExecutePatternMatching(patterns []GPUPattern) error {
 func (ob *OpenCLBackend) TransferResultsFromGPU() ([]GPUResult, error) {
 	// TODO: Read buffer
 	// clEnqueueReadBuffer(queue, buffer, CL_TRUE, 0, size, data, 0, NULL, NULL)
+	return nil, ErrGPUNotAvailable
+}
+
+// BuildAutomaton builds an Aho-Corasick automaton from patterns.
+// Stub: OpenCL not available, returns ErrGPUNotAvailable.
+func (ob *OpenCLBackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	// TODO: When OpenCL is available:
+	// 1. Build DenseAhoCorasick automaton on CPU
+	// 2. Create OpenCL buffers for state table
+	// 3. clEnqueueWriteBuffer to copy automaton to device
+	return ErrGPUNotAvailable
+}
+
+// MatchUsernames matches usernames against the built automaton.
+// Stub: OpenCL not available, returns ErrGPUNotAvailable.
+func (ob *OpenCLBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	// TODO: When OpenCL is available:
+	// 1. Copy usernames to device
+	// 2. Launch kernel: one work-item per username traverses automaton
+	// 3. Copy results back to host
 	return nil, ErrGPUNotAvailable
 }
 

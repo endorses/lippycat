@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -40,11 +41,23 @@ type GPUBackend interface {
 	// Copy packets from CPU to GPU
 	TransferPacketsToGPU(packets [][]byte) error
 
-	// Execute pattern matching kernel
+	// ExecutePatternMatching executes pattern matching kernel.
+	// Deprecated: Use BuildAutomaton + MatchUsernames for Aho-Corasick based matching.
+	// This method performs linear scan O(n*m) matching and will be removed in a future version.
 	ExecutePatternMatching(patterns []GPUPattern) error
 
 	// Copy results from GPU to CPU
 	TransferResultsFromGPU() ([]GPUResult, error)
+
+	// BuildAutomaton builds an Aho-Corasick automaton from patterns.
+	// This enables O(n+m+z) matching where n=input length, m=total pattern length, z=matches.
+	// For GPU backends, this may serialize the automaton to device memory.
+	BuildAutomaton(patterns []ahocorasick.Pattern) error
+
+	// MatchUsernames matches usernames against the built automaton.
+	// Returns matched pattern IDs for each input username.
+	// Each element in the result corresponds to an input username.
+	MatchUsernames(usernames [][]byte) ([][]int, error)
 
 	// Free GPU resources
 	Cleanup() error

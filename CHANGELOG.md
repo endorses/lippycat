@@ -8,13 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.3] - 2025-12-20
 
 ### Added
-- Aho-Corasick pattern matching for high-performance filtering
+- **Aho-Corasick pattern matching engine** (`internal/pkg/ahocorasick/`): High-performance multi-pattern string matching
+  - Core Aho-Corasick automaton with failure links and output links
+  - `MultiModeAC`: Separate automata per pattern type (literal, prefix, suffix, contains)
+  - `BufferedMatcher`: Lock-free concurrent reads with atomic automaton swapping
+  - `DenseAC`: SIMD-friendly state layout for cache-efficient traversal
+  - AMD64-optimized matching with prefetch hints
+  - Algorithm selection via `--pattern-algorithm` flag: `auto`, `ahocorasick`, `linear`
+- **Wildcard pattern matching**: Support for `*` wildcards in SIP user patterns
+  - `*suffix` - match users ending with suffix
+  - `prefix*` - match users starting with prefix
+  - `*contains*` - match users containing substring
+  - Configurable via `--sipuser` flag (e.g., `--sipuser 'alice*,*bob,*test*'`)
+- **GPU backend integration**: AC-based pattern matching in GPU acceleration path
+  - SIMD backend uses DenseAC for vectorized matching
+  - CUDA backend integration for GPU-accelerated filtering
+  - Automatic algorithm selection based on pattern count thresholds
 
 ### Changed
-- TODO: Add detailed changelog entries
-
-### Fixed
-- TODO: Add fixed items
+- Hunter application filter migrated from linear search to Aho-Corasick matching
+- SIP user filtering now uses unified pattern matching infrastructure
+- GPU acceleration path uses AC-based matching for improved throughput
 
 ## [0.3.2] - 2025-12-19
 

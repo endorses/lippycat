@@ -264,6 +264,34 @@ lc sniff voip -i eth0 --gpu-enable=false
 - `cpu-simd` - CPU SIMD instructions (AVX2/SSE4.2)
 - `disabled` - No acceleration (pure Go implementation)
 
+### Pattern Matching Algorithm
+
+**Purpose:** Select the algorithm for matching SIP usernames and phone numbers against filter patterns.
+
+**Flags:**
+- `--pattern-algorithm` - Pattern matching algorithm: `auto`, `linear`, `aho-corasick` (default: auto)
+- `--pattern-buffer-mb` - Memory budget for pattern buffer in MB (default: 64)
+
+**Algorithm Selection:**
+| Algorithm | Complexity | Best For | Description |
+|-----------|------------|----------|-------------|
+| `auto` | Adaptive | General use | Selects Aho-Corasick for ≥100 patterns, linear otherwise |
+| `linear` | O(n×m) | <100 patterns | Simple linear scan, low memory overhead |
+| `aho-corasick` | O(n+m+z) | ≥100 patterns | Trie-based automaton, ~265x faster at 10K patterns |
+
+**Examples:**
+
+```bash
+# Auto-select algorithm (recommended)
+lc sniff voip -i eth0 --pattern-algorithm auto
+
+# Force Aho-Corasick for large pattern sets
+lc sniff voip -i eth0 --pattern-algorithm aho-corasick
+
+# Force linear scan for small pattern sets with minimal memory
+lc sniff voip -i eth0 --pattern-algorithm linear --pattern-buffer-mb 16
+```
+
 ### TCP Performance Tuning
 
 VoIP mode includes extensive TCP reassembly configuration for handling SIP over TCP.
@@ -354,6 +382,10 @@ voip:
   gpu_backend: "auto"
   gpu_batch_size: 1024
   gpu_max_memory: 0
+
+  # Pattern matching algorithm
+  pattern_algorithm: "auto"    # auto, linear, or aho-corasick
+  pattern_buffer_mb: 64        # Memory budget for pattern buffer in MB
 
   # TCP performance
   tcp_performance_mode: "balanced"

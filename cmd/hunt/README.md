@@ -52,6 +52,13 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--gpu-backend` - GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd` (default: auto)
 - `--gpu-batch-size` - Batch size for GPU processing (default: 100)
 
+**Pattern Matching Algorithm:**
+- `--pattern-algorithm` - Pattern matching algorithm: `auto`, `linear`, `aho-corasick` (default: auto)
+  - `auto`: Selects Aho-Corasick for 100+ patterns, linear scan otherwise
+  - `linear`: O(n×m) linear scan - simple, low memory, good for <100 patterns
+  - `aho-corasick`: O(n+m+z) Aho-Corasick automaton - ~265x faster at 10K patterns
+- `--pattern-buffer-mb` - Memory budget for pattern buffer in MB (default: 64)
+
 **Disk Buffer (Nuclear-Proof Resilience):**
 - `--disk-buffer` - Enable disk overflow buffer for extended disconnections
 - `--disk-buffer-dir` - Directory for buffer files (default: /var/tmp/lippycat-buffer)
@@ -307,6 +314,10 @@ hunter:
     enabled: true
     gpu_backend: "auto"
     gpu_batch_size: 100
+
+  # Pattern matching algorithm (for VoIP user/phone filtering)
+  pattern_algorithm: "auto"    # auto, linear, or aho-corasick
+  pattern_buffer_mb: 64        # Memory budget for pattern buffer
 
   # VoIP BPF filter optimization (for lc hunt voip)
   voip:

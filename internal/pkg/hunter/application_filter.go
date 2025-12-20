@@ -34,9 +34,11 @@ type ApplicationFilter struct {
 	ipAddresses    []string       // IP addresses as strings (for display/logging)
 	ipAddressBytes [][]byte       // Parsed IP addresses as bytes (for SIMD comparison)
 	patterns       []voip.GPUPattern
+	acPatterns     []ahocorasick.Pattern        // AC patterns for GPU backend
 	acMatcher      *ahocorasick.BufferedMatcher // Aho-Corasick matcher for high-performance pattern matching
 	mu             sync.RWMutex
 	enabled        bool
+	gpuACBuilt     bool // Whether GPU has AC automaton built
 }
 
 // NewApplicationFilter creates a new application-layer filter with optional GPU acceleration
@@ -63,8 +65,10 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		ipAddresses:    make([]string, 0),
 		ipAddressBytes: make([][]byte, 0),
 		patterns:       make([]voip.GPUPattern, 0),
+		acPatterns:     make([]ahocorasick.Pattern, 0),
 		acMatcher:      ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick with configurable algorithm
 		enabled:        config != nil && config.Enabled,
+		gpuACBuilt:     false,
 	}
 
 	// Initialize GPU accelerator if enabled
@@ -118,6 +122,8 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	af.ipAddresses = af.ipAddresses[:0]
 	af.ipAddressBytes = af.ipAddressBytes[:0]
 	af.patterns = af.patterns[:0]
+	af.acPatterns = af.acPatterns[:0]
+	af.gpuACBuilt = false
 
 	// Build new filter lists
 	// Note: BPF filters are NOT handled here - they require capture restart
@@ -197,9 +203,9 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 
 	// Build Aho-Corasick patterns for CPU matching
 	// Combines SIP users and phone numbers into a single AC automaton
-	acPatterns := make([]ahocorasick.Pattern, 0, len(af.sipUsers)+len(af.phoneNumbers))
+	af.acPatterns = make([]ahocorasick.Pattern, 0, len(af.sipUsers)+len(af.phoneNumbers))
 	for i, f := range af.sipUsers {
-		acPatterns = append(acPatterns, ahocorasick.Pattern{
+		af.acPatterns = append(af.acPatterns, ahocorasick.Pattern{
 			ID:   i,
 			Text: f.pattern,
 			Type: f.patternType,
@@ -208,16 +214,32 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	// Phone numbers get IDs starting after SIP users
 	baseID := len(af.sipUsers)
 	for i, f := range af.phoneNumbers {
-		acPatterns = append(acPatterns, ahocorasick.Pattern{
+		af.acPatterns = append(af.acPatterns, ahocorasick.Pattern{
 			ID:   baseID + i,
 			Text: f.pattern,
 			Type: f.patternType,
 		})
 	}
 
-	// Trigger background rebuild of AC automaton
+	// Trigger background rebuild of AC automaton for CPU
 	// This is non-blocking - matching continues with old automaton or linear scan
-	af.acMatcher.UpdatePatterns(acPatterns)
+	af.acMatcher.UpdatePatterns(af.acPatterns)
+
+	// Build AC automaton in GPU backend if enabled
+	// Uses the same patterns but built inside GPU backend (SIMD/CUDA/OpenCL)
+	if af.enabled && af.gpuAccel != nil && len(af.acPatterns) > 0 {
+		if backend := af.gpuAccel.Backend(); backend != nil {
+			if err := backend.BuildAutomaton(af.acPatterns); err != nil {
+				logger.Warn("Failed to build GPU AC automaton, will use CPU fallback",
+					"error", err,
+					"pattern_count", len(af.acPatterns))
+			} else {
+				af.gpuACBuilt = true
+				logger.Debug("GPU AC automaton built successfully",
+					"pattern_count", len(af.acPatterns))
+			}
+		}
+	}
 }
 
 // MatchPacket checks if a packet matches any of the filters
@@ -255,8 +277,8 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 	payload := appLayer.LayerContents()
 
-	// Use GPU if enabled and we have patterns
-	if af.enabled && af.gpuAccel != nil && len(af.patterns) > 0 {
+	// Use GPU if enabled, AC automaton is built, and we have patterns
+	if af.enabled && af.gpuACBuilt && af.gpuAccel != nil && len(af.acPatterns) > 0 {
 		return af.matchWithGPU([]byte(payload))
 	}
 
@@ -265,6 +287,7 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 }
 
 // MatchBatch checks multiple packets using GPU acceleration
+// Uses Aho-Corasick automaton for O(n) username matching
 func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	af.mu.RLock()
 	defer af.mu.RUnlock()
@@ -280,37 +303,69 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	}
 
 	// Extract VoIP packets and payloads
-	voipPackets := make([][]byte, 0, len(packets))
+	voipPayloads := make([][]byte, 0, len(packets))
 	voipIndices := make([]int, 0, len(packets))
 
 	for i, packet := range packets {
 		if af.isVoIPPacket(packet) {
 			if appLayer := packet.ApplicationLayer(); appLayer != nil {
 				// Use LayerContents() to get full message with headers
-				voipPackets = append(voipPackets, appLayer.LayerContents())
+				voipPayloads = append(voipPayloads, appLayer.LayerContents())
 				voipIndices = append(voipIndices, i)
 			}
 		}
 	}
 
-	// If we have GPU and multiple packets, use batch processing
-	if af.enabled && af.gpuAccel != nil && len(voipPackets) > 1 && len(af.patterns) > 0 {
-		gpuResults, err := af.gpuAccel.ProcessBatch(voipPackets, af.patterns)
-		if err == nil {
-			// Map GPU results back to packet indices
-			matchedPackets := make(map[int]bool)
-			for _, result := range gpuResults {
-				if result.Matched && result.PacketIndex < len(voipIndices) {
-					matchedPackets[voipIndices[result.PacketIndex]] = true
+	// If we have GPU with AC automaton and multiple packets, use batch processing
+	if af.enabled && af.gpuACBuilt && af.gpuAccel != nil && len(voipPayloads) > 1 && len(af.acPatterns) > 0 {
+		backend := af.gpuAccel.Backend()
+		if backend != nil {
+			// Extract usernames from all VoIP payloads
+			allUsernames := make([][]byte, 0, len(voipPayloads)*3)
+			usernameToPacket := make([]int, 0, len(voipPayloads)*3) // Maps username index to voipPayload index
+
+			for payloadIdx, payload := range voipPayloads {
+				sipHeaders := extractSIPHeaders(payload)
+				if len(sipHeaders.from) > 0 {
+					if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
+						allUsernames = append(allUsernames, []byte(user))
+						usernameToPacket = append(usernameToPacket, payloadIdx)
+					}
+				}
+				if len(sipHeaders.to) > 0 {
+					if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
+						allUsernames = append(allUsernames, []byte(user))
+						usernameToPacket = append(usernameToPacket, payloadIdx)
+					}
+				}
+				if len(sipHeaders.pAssertedIdentity) > 0 {
+					if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+						allUsernames = append(allUsernames, []byte(user))
+						usernameToPacket = append(usernameToPacket, payloadIdx)
+					}
 				}
 			}
 
-			for i := range results {
-				results[i] = matchedPackets[i]
+			if len(allUsernames) > 0 {
+				// Use GPU backend's MatchUsernames with pre-built AC automaton
+				gpuResults, err := backend.MatchUsernames(allUsernames)
+				if err == nil {
+					// Map GPU results back to packet indices
+					matchedPayloads := make(map[int]bool)
+					for usernameIdx, patternIDs := range gpuResults {
+						if len(patternIDs) > 0 && usernameIdx < len(usernameToPacket) {
+							matchedPayloads[usernameToPacket[usernameIdx]] = true
+						}
+					}
+
+					for payloadIdx, packetIdx := range voipIndices {
+						results[packetIdx] = matchedPayloads[payloadIdx]
+					}
+					return results
+				}
 			}
-			return results
+			// GPU failed or no usernames, fall back to CPU
 		}
-		// GPU failed, fall back to CPU
 	}
 
 	// CPU fallback
@@ -323,21 +378,55 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 }
 
 // matchWithGPU uses GPU acceleration for pattern matching
+// Uses Aho-Corasick automaton (BuildAutomaton/MatchUsernames) for O(n) matching
 func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
-	if af.gpuAccel == nil || len(af.patterns) == 0 {
+	if af.gpuAccel == nil || len(af.acPatterns) == 0 {
 		return false
 	}
 
-	// Process single packet as batch of 1
-	results, err := af.gpuAccel.ProcessBatch([][]byte{payload}, af.patterns)
+	// If GPU AC automaton not built, fall back to CPU
+	if !af.gpuACBuilt {
+		return af.matchWithCPU(string(payload))
+	}
+
+	backend := af.gpuAccel.Backend()
+	if backend == nil {
+		return af.matchWithCPU(string(payload))
+	}
+
+	// Extract SIP headers and usernames (same as CPU path)
+	sipHeaders := extractSIPHeaders(payload)
+	usernames := make([][]byte, 0, 3)
+	if len(sipHeaders.from) > 0 {
+		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
+			usernames = append(usernames, []byte(user))
+		}
+	}
+	if len(sipHeaders.to) > 0 {
+		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
+			usernames = append(usernames, []byte(user))
+		}
+	}
+	if len(sipHeaders.pAssertedIdentity) > 0 {
+		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+			usernames = append(usernames, []byte(user))
+		}
+	}
+
+	if len(usernames) == 0 {
+		return false
+	}
+
+	// Use GPU backend's MatchUsernames with pre-built AC automaton
+	results, err := backend.MatchUsernames(usernames)
 	if err != nil {
 		// Fall back to CPU on error
 		return af.matchWithCPU(string(payload))
 	}
 
-	// Check if any pattern matched
-	for _, result := range results {
-		if result.Matched && result.PacketIndex == 0 {
+	// Check if any username matched
+	for _, patternIDs := range results {
+		if len(patternIDs) > 0 {
 			return true
 		}
 	}

@@ -442,6 +442,11 @@ func (ga *GPUAccelerator) GetBackendName() string {
 	return ga.backend.Name()
 }
 
+// Backend returns the underlying GPUBackend for direct access to BuildAutomaton/MatchUsernames
+func (ga *GPUAccelerator) Backend() GPUBackend {
+	return ga.backend
+}
+
 // Close releases GPU resources
 func (ga *GPUAccelerator) Close() error {
 	if ga.backend != nil {

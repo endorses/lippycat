@@ -63,9 +63,7 @@ func TestDeleteMultipleSipUsers(t *testing.T) {
 
 func TestIsSurveiled(t *testing.T) {
 	// Clear existing users
-	muSu.Lock()
-	sipUserMap = make(map[string]*SipUser)
-	muSu.Unlock()
+	ClearAll()
 
 	// Add test users
 	testUsers := map[string]*SipUser{
@@ -82,32 +80,32 @@ func TestIsSurveiled(t *testing.T) {
 	}{
 		{
 			name:      "Header contains alicent",
-			sipHeader: "From: <sip:alicent@example.com>;tag=123",
+			sipHeader: "<sip:alicent@example.com>;tag=123",
 			expected:  true,
 		},
 		{
 			name:      "Header contains robb",
-			sipHeader: "To: <sip:robb@company.org>",
+			sipHeader: "<sip:robb@company.org>",
 			expected:  true,
 		},
 		{
 			name:      "Header contains charlie in URI",
-			sipHeader: "Contact: <sip:charlie@192.168.1.100:5060>",
+			sipHeader: "<sip:charlie@192.168.1.100:5060>",
 			expected:  true,
 		},
 		{
-			name:      "Header contains alicent in display name",
-			sipHeader: "From: Alicent Smith <sip:asmith@example.com>",
-			expected:  true, // Case-insensitive matching finds "Alicent" when checking for "alicent"
+			name:      "Header contains alicent in display name only (no match - we extract username)",
+			sipHeader: "Alicent Smith <sip:asmith@example.com>",
+			expected:  false, // Now we extract username "asmith", not display name
 		},
 		{
-			name:      "Header with multiple users - alicent",
-			sipHeader: "Route: <sip:alicent@proxy1.example.com>, <sip:proxy2.example.com>",
+			name:      "Header with multiple URIs - first matches",
+			sipHeader: "<sip:alicent@proxy1.example.com>, <sip:proxy2.example.com>",
 			expected:  true,
 		},
 		{
 			name:      "Header with no surveiled users",
-			sipHeader: "From: <sip:eve@external.com>;tag=456",
+			sipHeader: "<sip:eve@external.com>;tag=456",
 			expected:  false,
 		},
 		{
@@ -116,27 +114,23 @@ func TestIsSurveiled(t *testing.T) {
 			expected:  false,
 		},
 		{
-			name:      "Header with partial match (should match)",
-			sipHeader: "From: <sip:alicent-backup@example.com>", // Contains "alicent"
+			name:      "Header with partial match (should match with contains pattern)",
+			sipHeader: "<sip:alicent-backup@example.com>", // Contains "alicent"
 			expected:  true,
 		},
 		{
 			name:      "Header with case sensitivity",
-			sipHeader: "From: <sip:ALICENT@example.com>",
+			sipHeader: "<sip:ALICENT@example.com>",
 			expected:  true,
 		},
 		{
-			name: "Complex SIP header with robb",
-			sipHeader: `Via: SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK776asdhds
-From: "Robb Jones" <sip:robb@bigcompany.com>;tag=1928301774
-To: "Alicent Smith" <sip:alicent@atlanta.com>
-Call-ID: a84b4c76e66710@pc33.atlanta.com
-CSeq: 314159 INVITE`,
-			expected: true, // Contains both "robb" and "alicent"
+			name:      "Header with username as substring",
+			sipHeader: "<sip:robby@example.com>",
+			expected:  true, // Contains "robb"
 		},
 		{
-			name:      "Header with username as substring",
-			sipHeader: "From: <sip:robby@example.com>",
+			name:      "SIPS URI",
+			sipHeader: "<sips:alicent@secure.example.com>",
 			expected:  true,
 		},
 	}
@@ -149,12 +143,217 @@ CSeq: 314159 INVITE`,
 	}
 }
 
+func TestIsSurveiled_WildcardPatterns(t *testing.T) {
+	// Test wildcard pattern matching for international phone number formats
+
+	tests := []struct {
+		name      string
+		patterns  []string // Patterns to add as sipusers
+		sipHeader string   // SIP header value to check
+		expected  bool
+	}{
+		// Suffix matching (*456789)
+		{
+			name:      "Suffix pattern matches E.164 format",
+			patterns:  []string{"*456789"},
+			sipHeader: "<sip:+49123456789@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Suffix pattern matches 00-prefix format",
+			patterns:  []string{"*456789"},
+			sipHeader: "<sip:0049123456789@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Suffix pattern matches tech prefix format",
+			patterns:  []string{"*456789"},
+			sipHeader: "<sip:*31#+49123456789@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Suffix pattern no match",
+			patterns:  []string{"*456789"},
+			sipHeader: "<sip:+49123456000@domain.com>",
+			expected:  false,
+		},
+
+		// Prefix matching (alice*)
+		{
+			name:      "Prefix pattern matches exact",
+			patterns:  []string{"alice*"},
+			sipHeader: "<sip:alice@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Prefix pattern matches with suffix",
+			patterns:  []string{"alice*"},
+			sipHeader: "<sip:alicent@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Prefix pattern no match",
+			patterns:  []string{"alice*"},
+			sipHeader: "<sip:bob@domain.com>",
+			expected:  false,
+		},
+		{
+			name:      "Prefix pattern is case-insensitive",
+			patterns:  []string{"alice*"},
+			sipHeader: "<sip:ALICENT@domain.com>",
+			expected:  true,
+		},
+
+		// Contains matching (default, backward compatible)
+		{
+			name:      "Contains pattern matches substring",
+			patterns:  []string{"admin"},
+			sipHeader: "<sip:sysadmin@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Contains pattern matches at start",
+			patterns:  []string{"admin"},
+			sipHeader: "<sip:admin@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Contains pattern matches at end",
+			patterns:  []string{"admin"},
+			sipHeader: "<sip:superadmin@domain.com>",
+			expected:  true,
+		},
+
+		// Explicit contains (*pattern*)
+		{
+			name:      "Explicit contains matches",
+			patterns:  []string{"*admin*"},
+			sipHeader: "<sip:sysadmin123@domain.com>",
+			expected:  true,
+		},
+
+		// Multiple patterns (any match)
+		{
+			name:      "Multiple patterns - first matches",
+			patterns:  []string{"*456789", "*999000"},
+			sipHeader: "<sip:+49123456789@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Multiple patterns - second matches",
+			patterns:  []string{"*456789", "*999000"},
+			sipHeader: "<sip:+49123999000@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Multiple patterns - none matches",
+			patterns:  []string{"*456789", "*999000"},
+			sipHeader: "<sip:+49123111222@domain.com>",
+			expected:  false,
+		},
+
+		// Edge cases
+		{
+			name:      "Empty pattern matches everything",
+			patterns:  []string{""},
+			sipHeader: "<sip:anyuser@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "Escaped asterisk as literal",
+			patterns:  []string{"\\*31#"},
+			sipHeader: "<sip:*31#123456789@domain.com>",
+			expected:  true,
+		},
+		{
+			name:      "P-Asserted-Identity header value",
+			patterns:  []string{"*456789"},
+			sipHeader: "<sip:+49123456789@domain.com>",
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear and add patterns
+			ClearAll()
+			for _, pattern := range tt.patterns {
+				AddSipUser(pattern, &SipUser{ExpirationDate: time.Now().Add(1 * time.Hour)})
+			}
+
+			result := IsSurveiled(tt.sipHeader)
+			assert.Equal(t, tt.expected, result,
+				"IsSurveiled with patterns %v should return %t for header: %s",
+				tt.patterns, tt.expected, tt.sipHeader)
+		})
+	}
+}
+
+func TestExtractUserFromSIPURI(t *testing.T) {
+	tests := []struct {
+		name     string
+		uri      string
+		expected string
+	}{
+		{
+			name:     "Simple SIP URI",
+			uri:      "<sip:alice@domain.com>",
+			expected: "alice",
+		},
+		{
+			name:     "SIP URI with display name",
+			uri:      "Alice Smith <sip:alice@domain.com>",
+			expected: "alice",
+		},
+		{
+			name:     "SIP URI with tag",
+			uri:      "<sip:alice@domain.com>;tag=123",
+			expected: "alice",
+		},
+		{
+			name:     "SIPS URI",
+			uri:      "<sips:alice@secure.domain.com>",
+			expected: "alice",
+		},
+		{
+			name:     "Phone number in URI",
+			uri:      "<sip:+49123456789@domain.com>",
+			expected: "+49123456789",
+		},
+		{
+			name:     "Phone number with tech prefix",
+			uri:      "<sip:*31#+49123456789@domain.com>",
+			expected: "*31#+49123456789",
+		},
+		{
+			name:     "No @ symbol",
+			uri:      "<sip:alice>",
+			expected: "",
+		},
+		{
+			name:     "No SIP prefix - returns as-is",
+			uri:      "alice",
+			expected: "alice",
+		},
+		{
+			name:     "Empty string",
+			uri:      "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractUserFromSIPURI(tt.uri)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestIsSurveiled_Concurrency(t *testing.T) {
 	// Test concurrent access to IsSurveiled
-	muSu.Lock()
-	sipUserMap = make(map[string]*SipUser)
-	sipUserMap["testuser"] = &SipUser{ExpirationDate: time.Now().Add(1 * time.Hour)}
-	muSu.Unlock()
+	ClearAll()
+	AddSipUser("testuser", &SipUser{ExpirationDate: time.Now().Add(1 * time.Hour)})
 
 	const numGoroutines = 50
 	const checksPerGoroutine = 100
@@ -172,10 +371,10 @@ func TestIsSurveiled_Concurrency(t *testing.T) {
 				var header string
 				var expected bool
 				if j%2 == 0 {
-					header = fmt.Sprintf("From: <sip:testuser@example%d.com>", id)
+					header = fmt.Sprintf("<sip:testuser@example%d.com>", id)
 					expected = true
 				} else {
-					header = fmt.Sprintf("From: <sip:other%d@example.com>", id)
+					header = fmt.Sprintf("<sip:other%d@example.com>", id)
 					expected = false
 				}
 
@@ -204,14 +403,12 @@ func TestIsSurveiled_Concurrency(t *testing.T) {
 
 func TestIsSurveiled_EmptyUserMap(t *testing.T) {
 	// Test with empty user map
-	muSu.Lock()
-	sipUserMap = make(map[string]*SipUser)
-	muSu.Unlock()
+	ClearAll()
 
 	tests := []string{
-		"From: <sip:anyone@example.com>",
-		"To: <sip:user@company.org>",
-		"Contact: <sip:test@192.168.1.100:5060>",
+		"<sip:anyone@example.com>",
+		"<sip:user@company.org>",
+		"<sip:test@192.168.1.100:5060>",
 		"",
 	}
 

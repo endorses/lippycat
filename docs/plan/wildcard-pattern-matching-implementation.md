@@ -59,10 +59,10 @@ Add wildcard pattern matching for SIP user and phone number filters to handle in
 
 ### Phase 4: Update sipusers Package
 
-- [ ] Update `internal/pkg/voip/sipusers/sipusers.go`
+- [x] Update `internal/pkg/voip/sipusers/sipusers.go`
   - Use pattern parsing for stored patterns
   - Match against extracted username, not full header
-  - Support P-Asserted-Identity matching
+  - Support P-Asserted-Identity matching (via containsUserInHeaders in shared.go)
 
 ### Phase 5: Documentation
 

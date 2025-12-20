@@ -3,9 +3,44 @@ package hunter
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/stretchr/testify/assert"
 )
+
+// newTestApplicationFilter creates an ApplicationFilter for testing with properly
+// initialized acMatcher. The patterns from sipUsers and phoneNumbers are automatically
+// added to the AC matcher.
+func newTestApplicationFilter(sipUsers, phoneNumbers []parsedFilter) *ApplicationFilter {
+	af := &ApplicationFilter{
+		sipUsers:     sipUsers,
+		phoneNumbers: phoneNumbers,
+		acMatcher:    ahocorasick.NewBufferedMatcher(),
+	}
+
+	// Build AC patterns from sipUsers and phoneNumbers
+	acPatterns := make([]ahocorasick.Pattern, 0, len(sipUsers)+len(phoneNumbers))
+	for i, f := range sipUsers {
+		acPatterns = append(acPatterns, ahocorasick.Pattern{
+			ID:   i,
+			Text: f.pattern,
+			Type: f.patternType,
+		})
+	}
+	baseID := len(sipUsers)
+	for i, f := range phoneNumbers {
+		acPatterns = append(acPatterns, ahocorasick.Pattern{
+			ID:   baseID + i,
+			Text: f.pattern,
+			Type: f.patternType,
+		})
+	}
+
+	// Synchronously update patterns so they're ready for testing
+	_ = af.acMatcher.UpdatePatternsSync(acPatterns)
+
+	return af
+}
 
 func TestExtractSIPHeaders(t *testing.T) {
 	tests := []struct {
@@ -74,16 +109,16 @@ P-Asserted-Identity:  <sip:+44123@carrier.com>
 }
 
 func TestMatchWithCPU_ProperHeaderFiltering(t *testing.T) {
-	af := &ApplicationFilter{
-		sipUsers: []parsedFilter{
+	af := newTestApplicationFilter(
+		[]parsedFilter{
 			{original: "alicent", pattern: "alicent", patternType: filtering.PatternTypeContains},
 			{original: "robb", pattern: "robb", patternType: filtering.PatternTypeContains},
 		},
-		phoneNumbers: []parsedFilter{
+		[]parsedFilter{
 			{original: "+4415777", pattern: "+4415777", patternType: filtering.PatternTypeContains},
 			{original: "1234567890", pattern: "1234567890", patternType: filtering.PatternTypeContains},
 		},
-	}
+	)
 
 	tests := []struct {
 		name        string
@@ -167,12 +202,8 @@ Call-ID: test123
 }
 
 func TestMatchWithCPU_NoFilters(t *testing.T) {
-	// When no filters are set, should match everything
-	af := &ApplicationFilter{
-		sipUsers:     []parsedFilter{},
-		phoneNumbers: []parsedFilter{},
-		ipAddresses:  []string{},
-	}
+	// When no filters are set, should NOT match (no patterns to match against)
+	af := newTestApplicationFilter([]parsedFilter{}, []parsedFilter{})
 
 	payload := `INVITE sip:anyone@example.com SIP/2.0
 From: <sip:anyone@example.com>
@@ -202,15 +233,15 @@ func TestMatchIPAddress(t *testing.T) {
 
 func TestMatchWithCPU_WildcardPatterns(t *testing.T) {
 	// Test suffix pattern matching for phone numbers (main use case)
-	af := &ApplicationFilter{
-		sipUsers: []parsedFilter{
+	af := newTestApplicationFilter(
+		[]parsedFilter{
 			{original: "alice*", pattern: "alice", patternType: filtering.PatternTypePrefix},
 		},
-		phoneNumbers: []parsedFilter{
+		[]parsedFilter{
 			// Suffix pattern to match last 6 digits regardless of prefix
 			{original: "*456789", pattern: "456789", patternType: filtering.PatternTypeSuffix},
 		},
-	}
+	)
 
 	tests := []struct {
 		name        string

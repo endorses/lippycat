@@ -1,7 +1,7 @@
 # Aho-Corasick Pattern Matching Implementation
 
 **Date:** 2025-12-20
-**Status:** Phase 2 Complete
+**Status:** Phase 3 Complete
 **Research:** `docs/research/gpu-pattern-matching-architecture.md`
 
 ## Goal
@@ -51,17 +51,17 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 
 ## Phase 3: Double-Buffering & Integration
 
-- [ ] Create `internal/pkg/ahocorasick/buffered.go`
-  - [ ] `atomic.Pointer[MultiModeAC]` for lock-free reads
-  - [ ] Background rebuild on pattern update
-  - [ ] Linear scan fallback during initial build
+- [x] Create `internal/pkg/ahocorasick/buffered.go`
+  - [x] `atomic.Pointer[AhoCorasick]` for lock-free reads (SingleAC is faster than MultiModeAC)
+  - [x] Background rebuild on pattern update via `UpdatePatterns()`
+  - [x] Linear scan fallback during initial build
 
-- [ ] Update `internal/pkg/hunter/application_filter.go`
-  - [ ] Replace linear scan with `MultiModeAC`
-  - [ ] Call `RebuildAutomaton()` in `UpdateFilters()`
-  - [ ] Use `MatchUsernames()` in `matchWithCPU()`
+- [x] Update `internal/pkg/hunter/application_filter.go`
+  - [x] Replace linear scan with `BufferedMatcher`
+  - [x] Call `UpdatePatterns()` in `UpdateFilters()`
+  - [x] Use `MatchUsernames()` in `matchWithCPU()`
 
-- [ ] Add integration tests
+- [x] Add integration tests (`buffered_test.go`)
 
 ## Phase 4: SIMD Optimization
 
@@ -122,25 +122,27 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 ## File Changes Summary
 
 ### New Files
-| Path | Purpose |
-|------|---------|
-| `internal/pkg/ahocorasick/ahocorasick.go` | Core AC implementation |
-| `internal/pkg/ahocorasick/builder.go` | Automaton builder |
-| `internal/pkg/ahocorasick/matcher.go` | Match interface |
-| `internal/pkg/ahocorasick/multimode.go` | Prefix/suffix/contains handling |
-| `internal/pkg/ahocorasick/buffered.go` | Double-buffered wrapper |
-| `internal/pkg/ahocorasick/ahocorasick_test.go` | Tests |
-| `internal/pkg/ahocorasick/benchmark_test.go` | Benchmarks |
+| Path | Purpose | Status |
+|------|---------|--------|
+| `internal/pkg/ahocorasick/ahocorasick.go` | Core AC implementation | ✅ Done |
+| `internal/pkg/ahocorasick/builder.go` | Automaton builder | ✅ Done |
+| `internal/pkg/ahocorasick/matcher.go` | Match interface | ✅ Done |
+| `internal/pkg/ahocorasick/multimode.go` | Prefix/suffix/contains handling | ✅ Done |
+| `internal/pkg/ahocorasick/buffered.go` | Double-buffered wrapper with lock-free reads | ✅ Done |
+| `internal/pkg/ahocorasick/ahocorasick_test.go` | Tests | ✅ Done |
+| `internal/pkg/ahocorasick/multimode_test.go` | MultiMode tests | ✅ Done |
+| `internal/pkg/ahocorasick/buffered_test.go` | Buffered matcher tests | ✅ Done |
+| `internal/pkg/ahocorasick/benchmark_test.go` | Benchmarks | ✅ Done |
 
 ### Modified Files
-| Path | Changes |
-|------|---------|
-| `internal/pkg/voip/gpu_accel.go` | Add new interface methods |
-| `internal/pkg/voip/gpu_simd_backend.go` | Integrate AC matcher |
-| `internal/pkg/voip/gpu_cuda_backend_impl.go` | CUDA AC kernel |
-| `internal/pkg/hunter/application_filter.go` | Use AC instead of linear |
-| `cmd/hunt/hunt.go` | Add flags |
-| `cmd/sniff/voip.go` | Add flags |
+| Path | Changes | Status |
+|------|---------|--------|
+| `internal/pkg/hunter/application_filter.go` | Integrate BufferedMatcher for O(n) matching | ✅ Done |
+| `internal/pkg/voip/gpu_accel.go` | Add new interface methods | Pending |
+| `internal/pkg/voip/gpu_simd_backend.go` | Integrate AC matcher | Pending |
+| `internal/pkg/voip/gpu_cuda_backend_impl.go` | CUDA AC kernel | Pending |
+| `cmd/hunt/hunt.go` | Add flags | Pending |
+| `cmd/sniff/voip.go` | Add flags | Pending |
 
 ## Success Criteria
 

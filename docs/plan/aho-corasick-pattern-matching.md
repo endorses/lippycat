@@ -1,7 +1,7 @@
 # Aho-Corasick Pattern Matching Implementation
 
 **Date:** 2025-12-20
-**Status:** Phase 1 Complete
+**Status:** Phase 2 Complete
 **Research:** `docs/research/gpu-pattern-matching-architecture.md`
 
 ## Goal
@@ -42,9 +42,12 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 
 - [x] Tests for all pattern types added in Phase 1
 
-- [ ] (Optional) Create `MultiModeAC` wrapper for optimized suffix matching
-  - [ ] Separate automata for contains, prefix, suffix patterns
-  - [ ] Suffix handling: reverse patterns and inputs (for potential performance boost)
+- [x] (Optional) Create `MultiModeAC` wrapper for optimized suffix matching
+  - [x] Separate automata for contains, prefix, suffix patterns
+  - [x] Suffix handling: reverse patterns and inputs
+  - [x] Benchmarks show SingleAC (~800ns) is faster than MultiModeAC (~2-3μs) for mixed patterns
+  - [x] For suffix-only patterns, both are comparable (~700-880ns)
+  - Note: SingleAC from Phase 1 is recommended as the default; MultiModeAC provides architectural separation
 
 ## Phase 3: Double-Buffering & Integration
 

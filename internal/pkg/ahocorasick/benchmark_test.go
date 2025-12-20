@@ -274,3 +274,122 @@ func BenchmarkMatchWithMatches(b *testing.B) {
 		})
 	}
 }
+
+// generateMixedPatterns creates patterns with a mix of types.
+func generateMixedPatterns(n int) []Pattern {
+	patterns := make([]Pattern, n)
+	types := []filtering.PatternType{
+		filtering.PatternTypeContains,
+		filtering.PatternTypePrefix,
+		filtering.PatternTypeSuffix,
+	}
+
+	for i := 0; i < n; i++ {
+		length := 7 + rand.Intn(9)
+		digits := make([]byte, length)
+		for j := 0; j < length; j++ {
+			digits[j] = '0' + byte(rand.Intn(10))
+		}
+		patterns[i] = Pattern{
+			ID:   i,
+			Text: string(digits),
+			Type: types[i%3], // Rotate through types
+		}
+	}
+	return patterns
+}
+
+// BenchmarkMultiModeAC_Build measures build time for MultiModeAC.
+func BenchmarkMultiModeAC_Build(b *testing.B) {
+	sizes := []int{10, 100, 1000, 10000}
+
+	for _, size := range sizes {
+		patterns := generateMixedPatterns(size)
+
+		b.Run(fmt.Sprintf("SingleAC/patterns=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				ac := &AhoCorasick{}
+				_ = ac.Build(patterns)
+			}
+		})
+
+		b.Run(fmt.Sprintf("MultiModeAC/patterns=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				m := NewMultiModeAC()
+				_ = m.Build(patterns)
+			}
+		})
+	}
+}
+
+// BenchmarkMultiModeAC_Match compares single AC vs MultiModeAC matching.
+func BenchmarkMultiModeAC_Match(b *testing.B) {
+	patternCounts := []int{100, 1000, 10000}
+	input := []byte("+49123456789012345")
+
+	for _, count := range patternCounts {
+		patterns := generateMixedPatterns(count)
+
+		ac := &AhoCorasick{}
+		if err := ac.Build(patterns); err != nil {
+			b.Fatal(err)
+		}
+
+		multi := NewMultiModeAC()
+		if err := multi.Build(patterns); err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(fmt.Sprintf("SingleAC/patterns=%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = ac.Match(input)
+			}
+		})
+
+		b.Run(fmt.Sprintf("MultiModeAC/patterns=%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = multi.Match(input)
+			}
+		})
+	}
+}
+
+// BenchmarkMultiModeAC_SuffixOptimization specifically tests suffix matching
+// to verify the reversed pattern optimization provides a benefit.
+func BenchmarkMultiModeAC_SuffixOptimization(b *testing.B) {
+	patternCounts := []int{100, 1000, 10000}
+	input := []byte("+49123456789012345")
+
+	for _, count := range patternCounts {
+		// All suffix patterns
+		patterns := generatePatterns(count, filtering.PatternTypeSuffix)
+
+		ac := &AhoCorasick{}
+		if err := ac.Build(patterns); err != nil {
+			b.Fatal(err)
+		}
+
+		multi := NewMultiModeAC()
+		if err := multi.Build(patterns); err != nil {
+			b.Fatal(err)
+		}
+
+		b.Run(fmt.Sprintf("SingleAC_Suffix/patterns=%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = ac.Match(input)
+			}
+		})
+
+		b.Run(fmt.Sprintf("MultiModeAC_Suffix/patterns=%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = multi.Match(input)
+			}
+		})
+	}
+}

@@ -22,12 +22,13 @@ Add wildcard pattern matching for SIP user and phone number filters to handle in
 
 ### Phase 1: Pattern Parsing Package
 
-- [ ] Create `internal/pkg/filtering/pattern.go`
+- [x] Create `internal/pkg/filtering/pattern.go`
   - `ParsePattern(input string) (pattern string, patternType PatternType)`
   - Handle `\*` escape sequences (unescape to literal `*`)
   - Return stripped pattern and detected type
+  - Added `Match()` helper function for case-insensitive matching
 
-- [ ] Create `internal/pkg/filtering/pattern_test.go`
+- [x] Create `internal/pkg/filtering/pattern_test.go`
   - Test all pattern types: suffix, prefix, contains, escaped
 
 ### Phase 2: SIMD Suffix Matching

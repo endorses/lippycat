@@ -66,6 +66,22 @@ func extractFullSIPURI(header string) string {
 	return uri
 }
 
+// ExtractUserFromHeader extracts the username from a SIP header value (From, To, P-Asserted-Identity)
+// This is the exported version for use by other packages.
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "alicent"
+// Example: "sip:+49123456789@domain.com" -> "+49123456789"
+func ExtractUserFromHeader(header string) string {
+	return extractUserFromSIPURI(header)
+}
+
+// ExtractUserFromHeaderBytes extracts the username from a SIP header value (byte slice version)
+// This is optimized for the hunter's application filter which works with byte slices.
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "alicent"
+// Example: "sip:+49123456789@domain.com" -> "+49123456789"
+func ExtractUserFromHeaderBytes(header []byte) string {
+	return extractUserFromSIPURI(string(header))
+}
+
 // extractTagFromHeader extracts the tag parameter from a SIP From/To header
 // Example: "Alicent <sip:alicent@domain.com>;tag=abc123" -> "abc123"
 // Example: "<sip:user@host>;tag=xyz789;other=param" -> "xyz789"

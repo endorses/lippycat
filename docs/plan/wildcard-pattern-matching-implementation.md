@@ -46,15 +46,16 @@ Add wildcard pattern matching for SIP user and phone number filters to handle in
 
 ### Phase 3: Username Extraction for Matching
 
-- [ ] Extract P-Asserted-Identity username in `internal/pkg/voip/sip.go`
-  - Add `extractPAssertedIdentityUser()` function
-  - Extract from `P-Asserted-Identity` header using same logic as From/To
+- [x] Extract P-Asserted-Identity username in `internal/pkg/voip/sip.go`
+  - Added `ExtractUserFromHeader()` and `ExtractUserFromHeaderBytes()` exported functions
+  - Reuses existing `extractUserFromSIPURI()` logic for all headers
 
-- [ ] Update `internal/pkg/hunter/application_filter.go`
+- [x] Update `internal/pkg/hunter/application_filter.go`
   - Import `internal/pkg/filtering` package
+  - Added `parsedFilter` struct to store parsed patterns with their types
   - Use `ParsePattern()` when adding filters in `UpdateFilters()`
   - In `matchWithCPU()`: extract username from From/To/P-Asserted-Identity before matching
-  - Match against extracted usernames instead of full header values
+  - Match against extracted usernames using `filtering.Match()` with pattern type
 
 ### Phase 4: Update sipusers Package
 

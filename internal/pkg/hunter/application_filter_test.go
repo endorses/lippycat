@@ -3,6 +3,7 @@ package hunter
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -74,8 +75,14 @@ P-Asserted-Identity:  <sip:+44123@carrier.com>
 
 func TestMatchWithCPU_ProperHeaderFiltering(t *testing.T) {
 	af := &ApplicationFilter{
-		sipUsers:     []string{"alicent", "robb"},
-		phoneNumbers: []string{"+4415777", "1234567890"},
+		sipUsers: []parsedFilter{
+			{original: "alicent", pattern: "alicent", patternType: filtering.PatternTypeContains},
+			{original: "robb", pattern: "robb", patternType: filtering.PatternTypeContains},
+		},
+		phoneNumbers: []parsedFilter{
+			{original: "+4415777", pattern: "+4415777", patternType: filtering.PatternTypeContains},
+			{original: "1234567890", pattern: "1234567890", patternType: filtering.PatternTypeContains},
+		},
 	}
 
 	tests := []struct {
@@ -162,8 +169,8 @@ Call-ID: test123
 func TestMatchWithCPU_NoFilters(t *testing.T) {
 	// When no filters are set, should match everything
 	af := &ApplicationFilter{
-		sipUsers:     []string{},
-		phoneNumbers: []string{},
+		sipUsers:     []parsedFilter{},
+		phoneNumbers: []parsedFilter{},
 		ipAddresses:  []string{},
 	}
 
@@ -182,8 +189,8 @@ func TestMatchIPAddress(t *testing.T) {
 	// Note: This test would require creating mock gopacket.Packet objects with network layers
 	// For now, we'll test the UpdateFilters integration with IP addresses
 	af := &ApplicationFilter{
-		sipUsers:     []string{},
-		phoneNumbers: []string{},
+		sipUsers:     []parsedFilter{},
+		phoneNumbers: []parsedFilter{},
 		ipAddresses:  []string{"192.168.0.1", "10.0.0.5"},
 	}
 
@@ -191,4 +198,92 @@ func TestMatchIPAddress(t *testing.T) {
 	assert.Equal(t, 2, len(af.ipAddresses), "Should have 2 IP addresses")
 	assert.Contains(t, af.ipAddresses, "192.168.0.1")
 	assert.Contains(t, af.ipAddresses, "10.0.0.5")
+}
+
+func TestMatchWithCPU_WildcardPatterns(t *testing.T) {
+	// Test suffix pattern matching for phone numbers (main use case)
+	af := &ApplicationFilter{
+		sipUsers: []parsedFilter{
+			{original: "alice*", pattern: "alice", patternType: filtering.PatternTypePrefix},
+		},
+		phoneNumbers: []parsedFilter{
+			// Suffix pattern to match last 6 digits regardless of prefix
+			{original: "*456789", pattern: "456789", patternType: filtering.PatternTypeSuffix},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		payload     string
+		shouldMatch bool
+		reason      string
+	}{
+		{
+			name: "Suffix match E.164 format",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: true,
+			reason:      "+49123456789 ends with 456789",
+		},
+		{
+			name: "Suffix match 00-prefix format",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:0049123456789@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: true,
+			reason:      "0049123456789 ends with 456789",
+		},
+		{
+			name: "Suffix match tech prefix (CLIR)",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:*31#+49123456789@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: true,
+			reason:      "*31#+49123456789 ends with 456789",
+		},
+		{
+			name: "Suffix no match - different ending",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456000@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: false,
+			reason:      "+49123456000 does NOT end with 456789",
+		},
+		{
+			name: "Prefix match for username",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:alice.smith@example.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: true,
+			reason:      "alice.smith starts with alice",
+		},
+		{
+			name: "Prefix no match",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:bob.alice@example.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: false,
+			reason:      "bob.alice does NOT start with alice",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := af.matchWithCPU(tt.payload)
+			assert.Equal(t, tt.shouldMatch, result, tt.reason)
+		})
+	}
 }

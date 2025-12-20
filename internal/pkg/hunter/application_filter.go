@@ -3,16 +3,24 @@ package hunter
 import (
 	"bytes"
 	"net"
-	"strings"
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 )
+
+// parsedFilter holds a parsed pattern with its type for matching
+type parsedFilter struct {
+	original    string                // Original pattern from user (for logging)
+	pattern     string                // Parsed pattern (wildcards stripped)
+	patternType filtering.PatternType // Type of matching (prefix, suffix, contains)
+	gpuType     voip.PatternType      // GPU pattern type for SIMD matching
+}
 
 // ApplicationFilter handles GPU-accelerated application-layer packet filtering
 // Supports multiple protocols via the detector and can be extended with protocol-specific filters
@@ -20,10 +28,10 @@ type ApplicationFilter struct {
 	gpuAccel       *voip.GPUAccelerator
 	detector       *detector.Detector // Protocol detector for accurate protocol detection
 	config         *voip.GPUConfig
-	sipUsers       []string
-	phoneNumbers   []string
-	ipAddresses    []string // IP addresses as strings (for display/logging)
-	ipAddressBytes [][]byte // Parsed IP addresses as bytes (for SIMD comparison)
+	sipUsers       []parsedFilter // Parsed SIP user patterns
+	phoneNumbers   []parsedFilter // Parsed phone number patterns
+	ipAddresses    []string       // IP addresses as strings (for display/logging)
+	ipAddressBytes [][]byte       // Parsed IP addresses as bytes (for SIMD comparison)
 	patterns       []voip.GPUPattern
 	mu             sync.RWMutex
 	enabled        bool
@@ -35,8 +43,8 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 	af := &ApplicationFilter{
 		config:         config,
 		detector:       detector.InitDefault(), // Use centralized detector for accurate protocol detection
-		sipUsers:       make([]string, 0),
-		phoneNumbers:   make([]string, 0),
+		sipUsers:       make([]parsedFilter, 0),
+		phoneNumbers:   make([]parsedFilter, 0),
 		ipAddresses:    make([]string, 0),
 		ipAddressBytes: make([][]byte, 0),
 		patterns:       make([]voip.GPUPattern, 0),
@@ -65,6 +73,20 @@ func NewVoIPFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 	return NewApplicationFilter(config)
 }
 
+// filteringToGPUPatternType converts filtering.PatternType to voip.PatternType
+func filteringToGPUPatternType(pt filtering.PatternType) voip.PatternType {
+	switch pt {
+	case filtering.PatternTypePrefix:
+		return voip.PatternTypePrefix
+	case filtering.PatternTypeSuffix:
+		return voip.PatternTypeSuffix
+	case filtering.PatternTypeContains:
+		return voip.PatternTypeContains
+	default:
+		return voip.PatternTypeContains
+	}
+}
+
 // UpdateFilters updates the filter list from processor
 // This method supports hot-reload without restarting capture for application-level filters
 func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
@@ -84,24 +106,44 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	for _, filter := range filters {
 		switch filter.Type {
 		case management.FilterType_FILTER_SIP_USER:
-			af.sipUsers = append(af.sipUsers, filter.Pattern)
-			// Create GPU pattern for SIP user matching (payload scanning)
+			// Parse pattern for wildcard support (e.g., "alice*", "*456789")
+			pattern, patternType := filtering.ParsePattern(filter.Pattern)
+			gpuType := filteringToGPUPatternType(patternType)
+
+			af.sipUsers = append(af.sipUsers, parsedFilter{
+				original:    filter.Pattern,
+				pattern:     pattern,
+				patternType: patternType,
+				gpuType:     gpuType,
+			})
+
+			// Create GPU pattern for SIP user matching
 			af.patterns = append(af.patterns, voip.GPUPattern{
 				ID:            len(af.patterns),
-				Pattern:       []byte(filter.Pattern),
-				PatternLen:    len(filter.Pattern),
-				Type:          voip.PatternTypeContains,
+				Pattern:       []byte(pattern),
+				PatternLen:    len(pattern),
+				Type:          gpuType,
 				CaseSensitive: false,
 			})
 
 		case management.FilterType_FILTER_PHONE_NUMBER:
-			af.phoneNumbers = append(af.phoneNumbers, filter.Pattern)
-			// Create GPU pattern for phone number matching (payload scanning)
+			// Parse pattern for wildcard support (e.g., "*456789" for suffix match)
+			pattern, patternType := filtering.ParsePattern(filter.Pattern)
+			gpuType := filteringToGPUPatternType(patternType)
+
+			af.phoneNumbers = append(af.phoneNumbers, parsedFilter{
+				original:    filter.Pattern,
+				pattern:     pattern,
+				patternType: patternType,
+				gpuType:     gpuType,
+			})
+
+			// Create GPU pattern for phone number matching
 			af.patterns = append(af.patterns, voip.GPUPattern{
 				ID:            len(af.patterns),
-				Pattern:       []byte(filter.Pattern),
-				PatternLen:    len(filter.Pattern),
-				Type:          voip.PatternTypeContains,
+				Pattern:       []byte(pattern),
+				PatternLen:    len(pattern),
+				Type:          gpuType,
 				CaseSensitive: false,
 			})
 
@@ -260,59 +302,60 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 	return false
 }
 
-// matchWithCPU uses CPU for pattern matching with SIMD optimization
+// matchWithCPU uses CPU for pattern matching with wildcard support
+// Extracts usernames from SIP headers and matches against parsed patterns
 func (af *ApplicationFilter) matchWithCPU(payload string) bool {
-	// Convert to bytes for SIMD operations (zero-copy)
+	// Convert to bytes for header extraction
 	payloadBytes := []byte(payload)
 
 	// Extract SIP headers for proper matching
 	sipHeaders := extractSIPHeaders(payloadBytes)
 
-	// Check SIP users in proper headers (From, To, P-Asserted-Identity)
-	for _, user := range af.sipUsers {
-		userBytes := []byte(strings.ToLower(user))
+	// Extract usernames from each header (the user part of the SIP URI)
+	var fromUser, toUser, paiUser string
+	if len(sipHeaders.from) > 0 {
+		fromUser = voip.ExtractUserFromHeaderBytes(sipHeaders.from)
+	}
+	if len(sipHeaders.to) > 0 {
+		toUser = voip.ExtractUserFromHeaderBytes(sipHeaders.to)
+	}
+	if len(sipHeaders.pAssertedIdentity) > 0 {
+		paiUser = voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity)
+	}
 
-		// Check in From header
-		if len(sipHeaders.from) > 0 {
-			fromLower := bytes.ToLower(sipHeaders.from)
-			if simd.BytesContains(fromLower, userBytes) {
-				return true
-			}
+	// Check SIP users against extracted usernames
+	for _, filter := range af.sipUsers {
+		// Match against extracted username from From header
+		if fromUser != "" && filtering.Match(fromUser, filter.pattern, filter.patternType) {
+			return true
 		}
 
-		// Check in To header
-		if len(sipHeaders.to) > 0 {
-			toLower := bytes.ToLower(sipHeaders.to)
-			if simd.BytesContains(toLower, userBytes) {
-				return true
-			}
+		// Match against extracted username from To header
+		if toUser != "" && filtering.Match(toUser, filter.pattern, filter.patternType) {
+			return true
 		}
 
-		// Check in P-Asserted-Identity header
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			paiLower := bytes.ToLower(sipHeaders.pAssertedIdentity)
-			if simd.BytesContains(paiLower, userBytes) {
-				return true
-			}
+		// Match against extracted username from P-Asserted-Identity header
+		if paiUser != "" && filtering.Match(paiUser, filter.pattern, filter.patternType) {
+			return true
 		}
 	}
 
-	// Check phone numbers in proper headers
-	for _, number := range af.phoneNumbers {
-		numberBytes := []byte(number)
-
-		// Check in From header
-		if len(sipHeaders.from) > 0 && simd.BytesContains(sipHeaders.from, numberBytes) {
+	// Check phone numbers against extracted usernames
+	// Phone numbers are typically in the user part of the SIP URI
+	for _, filter := range af.phoneNumbers {
+		// Match against extracted username from From header
+		if fromUser != "" && filtering.Match(fromUser, filter.pattern, filter.patternType) {
 			return true
 		}
 
-		// Check in To header
-		if len(sipHeaders.to) > 0 && simd.BytesContains(sipHeaders.to, numberBytes) {
+		// Match against extracted username from To header
+		if toUser != "" && filtering.Match(toUser, filter.pattern, filter.patternType) {
 			return true
 		}
 
-		// Check in P-Asserted-Identity header
-		if len(sipHeaders.pAssertedIdentity) > 0 && simd.BytesContains(sipHeaders.pAssertedIdentity, numberBytes) {
+		// Match against extracted username from P-Asserted-Identity header
+		if paiUser != "" && filtering.Match(paiUser, filter.pattern, filter.patternType) {
 			return true
 		}
 	}

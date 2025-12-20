@@ -10,6 +10,21 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
+// Algorithm defines the pattern matching algorithm to use
+type Algorithm string
+
+const (
+	// AlgorithmAuto selects Aho-Corasick for 100+ patterns, linear scan otherwise
+	AlgorithmAuto Algorithm = "auto"
+	// AlgorithmLinear forces linear scan O(n*m) - simple, low memory
+	AlgorithmLinear Algorithm = "linear"
+	// AlgorithmAhoCorasick forces Aho-Corasick O(n+m+z) - fast for many patterns
+	AlgorithmAhoCorasick Algorithm = "aho-corasick"
+)
+
+// AutoThreshold is the pattern count at which auto mode switches to Aho-Corasick
+const AutoThreshold = 100
+
 // BufferedMatcher provides a double-buffered Aho-Corasick matcher for lock-free reads
 // and background rebuilds. This enables zero-downtime pattern updates in high-throughput
 // environments like network traffic analysis.
@@ -19,6 +34,7 @@ import (
 //   - Background automaton rebuilds without blocking matches
 //   - Linear scan fallback during initial build or when automaton is unavailable
 //   - Thread-safe pattern updates
+//   - Configurable algorithm selection (auto, linear, aho-corasick)
 type BufferedMatcher struct {
 	// automaton is the current Aho-Corasick automaton, accessed atomically.
 	// nil indicates no automaton is available (use linear scan fallback).
@@ -42,14 +58,49 @@ type BufferedMatcher struct {
 
 	// lastBuildDuration tracks how long the last build took.
 	lastBuildDuration atomic.Value // time.Duration
+
+	// algorithm specifies the matching algorithm to use
+	algorithm Algorithm
+
+	// algorithmSelected is the actual algorithm being used after auto-selection
+	algorithmSelected Algorithm
 }
 
-// NewBufferedMatcher creates a new BufferedMatcher.
+// NewBufferedMatcher creates a new BufferedMatcher with default auto algorithm.
 func NewBufferedMatcher() *BufferedMatcher {
-	bm := &BufferedMatcher{}
+	return NewBufferedMatcherWithAlgorithm(AlgorithmAuto)
+}
+
+// NewBufferedMatcherWithAlgorithm creates a new BufferedMatcher with specified algorithm.
+func NewBufferedMatcherWithAlgorithm(algorithm Algorithm) *BufferedMatcher {
+	bm := &BufferedMatcher{
+		algorithm: algorithm,
+	}
 	bm.lastBuildTime.Store(time.Time{})
 	bm.lastBuildDuration.Store(time.Duration(0))
 	return bm
+}
+
+// SetAlgorithm sets the pattern matching algorithm.
+// This takes effect on the next call to UpdatePatterns.
+func (bm *BufferedMatcher) SetAlgorithm(algorithm Algorithm) {
+	bm.patternsMu.Lock()
+	bm.algorithm = algorithm
+	bm.patternsMu.Unlock()
+}
+
+// GetAlgorithm returns the configured algorithm.
+func (bm *BufferedMatcher) GetAlgorithm() Algorithm {
+	bm.patternsMu.RLock()
+	defer bm.patternsMu.RUnlock()
+	return bm.algorithm
+}
+
+// GetSelectedAlgorithm returns the algorithm actually being used after auto-selection.
+func (bm *BufferedMatcher) GetSelectedAlgorithm() Algorithm {
+	bm.patternsMu.RLock()
+	defer bm.patternsMu.RUnlock()
+	return bm.algorithmSelected
 }
 
 // UpdatePatterns updates the pattern list and triggers a background rebuild.
@@ -78,6 +129,10 @@ func (bm *BufferedMatcher) UpdatePatternsSync(patterns []Pattern) error {
 }
 
 // rebuildAutomaton builds a new automaton in the background and swaps it in atomically.
+// The algorithm selection is determined by the configured algorithm:
+//   - AlgorithmAuto: Use AC for 100+ patterns, linear scan otherwise
+//   - AlgorithmLinear: Always use linear scan (no AC automaton)
+//   - AlgorithmAhoCorasick: Always build AC automaton
 func (bm *BufferedMatcher) rebuildAutomaton() error {
 	// Ensure only one rebuild at a time
 	bm.buildMu.Lock()
@@ -86,16 +141,55 @@ func (bm *BufferedMatcher) rebuildAutomaton() error {
 	bm.building.Store(true)
 	defer bm.building.Store(false)
 
-	// Get current patterns
+	// Get current patterns and algorithm
 	bm.patternsMu.RLock()
 	patterns := make([]Pattern, len(bm.patterns))
 	copy(patterns, bm.patterns)
+	algorithm := bm.algorithm
 	bm.patternsMu.RUnlock()
 
 	// If no patterns, clear the automaton
 	if len(patterns) == 0 {
 		bm.automaton.Store(nil)
+		bm.patternsMu.Lock()
+		bm.algorithmSelected = AlgorithmLinear
+		bm.patternsMu.Unlock()
 		logger.Debug("Cleared AC automaton (no patterns)")
+		return nil
+	}
+
+	// Determine which algorithm to use
+	useAC := false
+	switch algorithm {
+	case AlgorithmAhoCorasick:
+		useAC = true
+	case AlgorithmLinear:
+		useAC = false
+	case AlgorithmAuto:
+		// Use AC for 100+ patterns (crossover point where AC becomes faster)
+		useAC = len(patterns) >= AutoThreshold
+	default:
+		// Default to auto behavior
+		useAC = len(patterns) >= AutoThreshold
+	}
+
+	// Update selected algorithm
+	bm.patternsMu.Lock()
+	if useAC {
+		bm.algorithmSelected = AlgorithmAhoCorasick
+	} else {
+		bm.algorithmSelected = AlgorithmLinear
+	}
+	bm.patternsMu.Unlock()
+
+	// If forcing linear scan, clear any existing automaton
+	if !useAC {
+		bm.automaton.Store(nil)
+		logger.Info("Pattern matching algorithm selected",
+			"algorithm", "linear",
+			"pattern_count", len(patterns),
+			"configured", string(algorithm),
+			"reason", "algorithm selection")
 		return nil
 	}
 
@@ -113,8 +207,10 @@ func (bm *BufferedMatcher) rebuildAutomaton() error {
 	bm.lastBuildTime.Store(time.Now())
 	bm.lastBuildDuration.Store(buildDuration)
 
-	logger.Info("AC automaton rebuilt",
+	logger.Info("Pattern matching algorithm selected",
+		"algorithm", "aho-corasick",
 		"pattern_count", len(patterns),
+		"configured", string(algorithm),
 		"build_duration", buildDuration,
 		"state_count", len(newAC.states))
 
@@ -264,6 +360,8 @@ type Stats struct {
 	LastBuildTime     time.Time
 	LastBuildDuration time.Duration
 	StateCount        int
+	Algorithm         Algorithm // Configured algorithm
+	AlgorithmSelected Algorithm // Actual algorithm in use
 }
 
 // GetStats returns current statistics.
@@ -274,6 +372,11 @@ func (bm *BufferedMatcher) GetStats() Stats {
 		stateCount = len(ac.states)
 	}
 
+	bm.patternsMu.RLock()
+	algo := bm.algorithm
+	algoSelected := bm.algorithmSelected
+	bm.patternsMu.RUnlock()
+
 	return Stats{
 		PatternCount:      bm.PatternCount(),
 		HasAutomaton:      ac != nil,
@@ -281,5 +384,7 @@ func (bm *BufferedMatcher) GetStats() Stats {
 		LastBuildTime:     bm.LastBuildTime(),
 		LastBuildDuration: bm.LastBuildDuration(),
 		StateCount:        stateCount,
+		Algorithm:         algo,
+		AlgorithmSelected: algoSelected,
 	}
 }

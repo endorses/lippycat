@@ -11,7 +11,8 @@ import (
 )
 
 func TestBufferedMatcher_BasicMatch(t *testing.T) {
-	bm := NewBufferedMatcher()
+	// Force aho-corasick algorithm to test automaton path
+	bm := NewBufferedMatcherWithAlgorithm(AlgorithmAhoCorasick)
 
 	patterns := []Pattern{
 		{ID: 0, Text: "alice", Type: filtering.PatternTypeContains},
@@ -22,6 +23,7 @@ func TestBufferedMatcher_BasicMatch(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, bm.HasAutomaton())
+	assert.Equal(t, AlgorithmAhoCorasick, bm.GetSelectedAlgorithm())
 	assert.Equal(t, 2, bm.PatternCount())
 
 	// Test matching
@@ -261,13 +263,15 @@ func TestBufferedMatcher_CaseInsensitive(t *testing.T) {
 }
 
 func TestBufferedMatcher_Stats(t *testing.T) {
-	bm := NewBufferedMatcher()
+	// Force aho-corasick algorithm to test automaton stats
+	bm := NewBufferedMatcherWithAlgorithm(AlgorithmAhoCorasick)
 
 	// Initial stats
 	stats := bm.GetStats()
 	assert.Equal(t, 0, stats.PatternCount)
 	assert.False(t, stats.HasAutomaton)
 	assert.False(t, stats.IsBuilding)
+	assert.Equal(t, AlgorithmAhoCorasick, stats.Algorithm)
 
 	// After building
 	err := bm.UpdatePatternsSync([]Pattern{
@@ -282,6 +286,7 @@ func TestBufferedMatcher_Stats(t *testing.T) {
 	assert.Greater(t, stats.StateCount, 0)
 	assert.False(t, stats.LastBuildTime.IsZero())
 	assert.Greater(t, stats.LastBuildDuration, time.Duration(0))
+	assert.Equal(t, AlgorithmAhoCorasick, stats.AlgorithmSelected)
 }
 
 func TestBufferedMatcher_MatchBatch(t *testing.T) {
@@ -330,6 +335,97 @@ func TestBufferedMatcher_UpdateReplacesPatterns(t *testing.T) {
 	assert.False(t, bm.MatchUsernames([]string{"alice"}))
 	// New pattern should match
 	assert.True(t, bm.MatchUsernames([]string{"bob"}))
+}
+
+func TestBufferedMatcher_AlgorithmSelection(t *testing.T) {
+	t.Run("auto with few patterns uses linear", func(t *testing.T) {
+		bm := NewBufferedMatcher() // Default is auto
+
+		err := bm.UpdatePatternsSync([]Pattern{
+			{ID: 0, Text: "alice", Type: filtering.PatternTypeContains},
+			{ID: 1, Text: "bob", Type: filtering.PatternTypeContains},
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, AlgorithmAuto, bm.GetAlgorithm())
+		assert.Equal(t, AlgorithmLinear, bm.GetSelectedAlgorithm())
+		assert.False(t, bm.HasAutomaton())
+
+		// Should still match via linear scan
+		assert.True(t, bm.MatchUsernames([]string{"alice"}))
+	})
+
+	t.Run("auto with many patterns uses aho-corasick", func(t *testing.T) {
+		bm := NewBufferedMatcher()
+
+		// Create 150 patterns (above threshold of 100)
+		patterns := make([]Pattern, 150)
+		for i := 0; i < 150; i++ {
+			patterns[i] = Pattern{
+				ID:   i,
+				Text: "pattern" + string(rune('a'+i%26)),
+				Type: filtering.PatternTypeContains,
+			}
+		}
+
+		err := bm.UpdatePatternsSync(patterns)
+		require.NoError(t, err)
+
+		assert.Equal(t, AlgorithmAuto, bm.GetAlgorithm())
+		assert.Equal(t, AlgorithmAhoCorasick, bm.GetSelectedAlgorithm())
+		assert.True(t, bm.HasAutomaton())
+	})
+
+	t.Run("forced linear scan", func(t *testing.T) {
+		bm := NewBufferedMatcherWithAlgorithm(AlgorithmLinear)
+
+		// Even with many patterns, should use linear scan
+		patterns := make([]Pattern, 150)
+		for i := 0; i < 150; i++ {
+			patterns[i] = Pattern{
+				ID:   i,
+				Text: "pattern" + string(rune('a'+i%26)),
+				Type: filtering.PatternTypeContains,
+			}
+		}
+
+		err := bm.UpdatePatternsSync(patterns)
+		require.NoError(t, err)
+
+		assert.Equal(t, AlgorithmLinear, bm.GetAlgorithm())
+		assert.Equal(t, AlgorithmLinear, bm.GetSelectedAlgorithm())
+		assert.False(t, bm.HasAutomaton())
+
+		// Should still match via linear scan
+		assert.True(t, bm.MatchUsernames([]string{"patterna"}))
+	})
+
+	t.Run("forced aho-corasick", func(t *testing.T) {
+		bm := NewBufferedMatcherWithAlgorithm(AlgorithmAhoCorasick)
+
+		// Even with few patterns, should use AC
+		err := bm.UpdatePatternsSync([]Pattern{
+			{ID: 0, Text: "alice", Type: filtering.PatternTypeContains},
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, AlgorithmAhoCorasick, bm.GetAlgorithm())
+		assert.Equal(t, AlgorithmAhoCorasick, bm.GetSelectedAlgorithm())
+		assert.True(t, bm.HasAutomaton())
+	})
+
+	t.Run("set algorithm after creation", func(t *testing.T) {
+		bm := NewBufferedMatcher()
+		bm.SetAlgorithm(AlgorithmLinear)
+
+		err := bm.UpdatePatternsSync([]Pattern{
+			{ID: 0, Text: "test", Type: filtering.PatternTypeContains},
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, AlgorithmLinear, bm.GetAlgorithm())
+		assert.Equal(t, AlgorithmLinear, bm.GetSelectedAlgorithm())
+	})
 }
 
 // Benchmark concurrent reads during updates

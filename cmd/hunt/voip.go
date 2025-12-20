@@ -23,6 +23,10 @@ var (
 	hunterUDPOnly       bool
 	hunterSIPPorts      string
 	hunterRTPPortRanges string
+
+	// Pattern matching flags for VoIP hunter
+	hunterPatternAlgorithm string
+	hunterPatternBufferMB  int
 )
 
 var voipHuntCmd = &cobra.Command{
@@ -59,10 +63,18 @@ func init() {
 	voipHuntCmd.Flags().StringVar(&hunterSIPPorts, "sip-port", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
 	voipHuntCmd.Flags().StringVar(&hunterRTPPortRanges, "rtp-port-range", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
 
+	// Pattern Matching Algorithm Flags (VoIP-specific)
+	voipHuntCmd.Flags().StringVar(&hunterPatternAlgorithm, "pattern-algorithm", "auto", "Pattern matching algorithm: 'auto', 'linear', 'aho-corasick' (default: auto)")
+	voipHuntCmd.Flags().IntVar(&hunterPatternBufferMB, "pattern-buffer-mb", 64, "Memory budget for pattern buffer in MB (default: 64)")
+
 	// Bind BPF filter optimization flags to viper under hunter.voip.* namespace
 	_ = viper.BindPFlag("hunter.voip.udp_only", voipHuntCmd.Flags().Lookup("udp-only"))
 	_ = viper.BindPFlag("hunter.voip.sip_ports", voipHuntCmd.Flags().Lookup("sip-port"))
 	_ = viper.BindPFlag("hunter.voip.rtp_port_ranges", voipHuntCmd.Flags().Lookup("rtp-port-range"))
+
+	// Bind pattern algorithm flags to viper
+	_ = viper.BindPFlag("voip.pattern_algorithm", voipHuntCmd.Flags().Lookup("pattern-algorithm"))
+	_ = viper.BindPFlag("voip.pattern_buffer_mb", voipHuntCmd.Flags().Lookup("pattern-buffer-mb"))
 }
 
 func runVoIPHunt(cmd *cobra.Command, args []string) error {
@@ -179,7 +191,9 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	logger.Info("VoIP Hunter configuration",
 		"hunter_id", config.HunterID,
 		"processor", config.ProcessorAddr,
-		"interfaces", config.Interfaces)
+		"interfaces", config.Interfaces,
+		"pattern_algorithm", viper.GetString("voip.pattern_algorithm"),
+		"pattern_buffer_mb", viper.GetInt("voip.pattern_buffer_mb"))
 
 	// Create hunter instance
 	h, err := hunter.New(config)

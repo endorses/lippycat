@@ -1,7 +1,7 @@
 # Aho-Corasick Pattern Matching Implementation
 
 **Date:** 2025-12-20
-**Status:** Phase 5 Complete
+**Status:** Phase 6 Complete
 **Research:** `docs/research/gpu-pattern-matching-architecture.md`
 
 ## Goal
@@ -102,18 +102,20 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 
 ## Phase 6: Configuration & Flags
 
-- [ ] Add CLI flags to `cmd/hunt/hunt.go` and `cmd/sniff/voip.go`
-  - [ ] `--pattern-algorithm=auto|linear|aho-corasick`
-  - [ ] `--pattern-buffer-mb=64` (default)
+- [x] Add CLI flags to `cmd/hunt/hunt.go` and `cmd/sniff/voip.go`
+  - [x] `--pattern-algorithm=auto|linear|aho-corasick`
+  - [x] `--pattern-buffer-mb=64` (default)
 
-- [ ] Add config file support in Viper
+- [x] Add config file support in Viper
   ```yaml
   voip:
     pattern_algorithm: auto
     pattern_buffer_mb: 64
   ```
 
-- [ ] Add logging for algorithm selection and build times
+- [x] Add logging for algorithm selection and build times
+  - Algorithm selection logged when automaton is built/updated
+  - Auto mode threshold: 100 patterns (uses AC above, linear below)
 
 ## Phase 7: Cleanup & Documentation
 
@@ -157,8 +159,9 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 | `internal/pkg/voip/gpu_cuda_backend_impl.go` | CUDA AC kernel, automaton serialization | ✅ Done |
 | `internal/pkg/voip/gpu_opencl_backend.go` | Add stub implementations for new interface | ✅ Done |
 | `internal/pkg/ahocorasick/dense.go` | Add ExportStates() for GPU serialization | ✅ Done |
-| `cmd/hunt/hunt.go` | Add flags | Pending |
-| `cmd/sniff/voip.go` | Add flags | Pending |
+| `internal/pkg/ahocorasick/buffered.go` | Add algorithm selection, logging | ✅ Done |
+| `cmd/hunt/hunt.go` | Add pattern-algorithm, pattern-buffer-mb flags | ✅ Done |
+| `cmd/sniff/voip.go` | Add pattern-algorithm, pattern-buffer-mb flags | ✅ Done |
 
 ## Success Criteria
 

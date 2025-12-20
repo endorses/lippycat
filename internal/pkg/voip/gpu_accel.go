@@ -19,6 +19,18 @@ type GPUAccelerator struct {
 	mu            sync.RWMutex
 }
 
+// PatternAlgorithm defines the algorithm used for pattern matching
+type PatternAlgorithm string
+
+const (
+	// PatternAlgorithmAuto selects Aho-Corasick for 100+ patterns, linear scan otherwise
+	PatternAlgorithmAuto PatternAlgorithm = "auto"
+	// PatternAlgorithmLinear uses linear scan O(n*m) - simple, low memory
+	PatternAlgorithmLinear PatternAlgorithm = "linear"
+	// PatternAlgorithmAhoCorasick uses Aho-Corasick O(n+m+z) - fast for many patterns
+	PatternAlgorithmAhoCorasick PatternAlgorithm = "aho-corasick"
+)
+
 // GPUConfig configures GPU acceleration
 type GPUConfig struct {
 	Enabled           bool
@@ -28,6 +40,9 @@ type GPUConfig struct {
 	PinnedMemory      bool
 	StreamCount       int
 	PatternBufferSize int
+	// Pattern matching algorithm configuration
+	PatternAlgorithm PatternAlgorithm // "auto", "linear", "aho-corasick"
+	PatternBufferMB  int              // Memory budget for pattern buffer in MB (default: 64)
 }
 
 // GPUBackend defines the interface for GPU compute backends
@@ -141,7 +156,9 @@ func DefaultGPUConfig() *GPUConfig {
 		MaxBatchSize:      1024,
 		PinnedMemory:      true,
 		StreamCount:       4,
-		PatternBufferSize: 1024 * 1024, // 1MB for patterns
+		PatternBufferSize: 1024 * 1024,          // 1MB for patterns
+		PatternAlgorithm:  PatternAlgorithmAuto, // Auto-select based on pattern count
+		PatternBufferMB:   64,                   // 64MB default pattern buffer
 	}
 }
 
@@ -464,6 +481,25 @@ func ConfigFromViper(v interface {
 	if maxMem := v.GetInt64("voip.gpu_max_memory"); maxMem > 0 {
 		// Convert to pattern buffer size (simplified)
 		config.PatternBufferSize = int(maxMem)
+	}
+
+	// Pattern matching algorithm configuration
+	if algo := v.GetString("voip.pattern_algorithm"); algo != "" {
+		switch algo {
+		case "auto":
+			config.PatternAlgorithm = PatternAlgorithmAuto
+		case "linear":
+			config.PatternAlgorithm = PatternAlgorithmLinear
+		case "aho-corasick":
+			config.PatternAlgorithm = PatternAlgorithmAhoCorasick
+		default:
+			logger.Warn("Unknown pattern algorithm, using auto", "algorithm", algo)
+			config.PatternAlgorithm = PatternAlgorithmAuto
+		}
+	}
+
+	if bufferMB := v.GetInt("voip.pattern_buffer_mb"); bufferMB > 0 {
+		config.PatternBufferMB = bufferMB
 	}
 
 	return config

@@ -36,6 +36,10 @@ var (
 	gpuMaxMemory int64
 	gpuEnable    bool
 
+	// Pattern matching flags
+	patternAlgorithm string
+	patternBufferMB  int
+
 	// TCP-specific configuration flags
 	tcpMaxGoroutines      int
 	tcpCleanupInterval    time.Duration
@@ -93,6 +97,14 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	}
 	if cmd.Flags().Changed("gpu-max-memory") {
 		viper.Set("voip.gpu_max_memory", gpuMaxMemory)
+	}
+
+	// Set pattern algorithm configuration values
+	if cmd.Flags().Changed("pattern-algorithm") {
+		viper.Set("voip.pattern_algorithm", patternAlgorithm)
+	}
+	if cmd.Flags().Changed("pattern-buffer-mb") {
+		viper.Set("voip.pattern_buffer_mb", patternBufferMB)
 	}
 
 	// Set TCP-specific configuration values
@@ -178,6 +190,8 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	logger.Info("Starting VoIP sniffing with optimizations",
 		"gpu_enable", viper.GetBool("voip.gpu_enable"),
 		"gpu_backend", viper.GetString("voip.gpu_backend"),
+		"pattern_algorithm", viper.GetString("voip.pattern_algorithm"),
+		"pattern_buffer_mb", viper.GetInt("voip.pattern_buffer_mb"),
 		"tcp_max_goroutines", viper.GetInt("voip.max_goroutines"),
 		"tcp_performance_mode", viper.GetString("voip.tcp_performance_mode"),
 		"tcp_buffer_strategy", viper.GetString("voip.tcp_buffer_strategy"),
@@ -215,6 +229,10 @@ func init() {
 	voipCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 1024, "Batch size for GPU processing (default: 1024)")
 	voipCmd.Flags().Int64Var(&gpuMaxMemory, "gpu-max-memory", 0, "Maximum GPU memory in bytes (0 = auto)")
 
+	// Pattern Matching Algorithm Flags
+	voipCmd.Flags().StringVar(&patternAlgorithm, "pattern-algorithm", "auto", "Pattern matching algorithm: 'auto', 'linear', 'aho-corasick' (default: auto)")
+	voipCmd.Flags().IntVar(&patternBufferMB, "pattern-buffer-mb", 64, "Memory budget for pattern buffer in MB (default: 64)")
+
 	// TCP Performance and Configuration Flags
 	voipCmd.Flags().IntVar(&tcpMaxGoroutines, "tcp-max-goroutines", 0, "Maximum concurrent TCP stream processing goroutines (0 = use default)")
 	voipCmd.Flags().DurationVar(&tcpCleanupInterval, "tcp-cleanup-interval", 0, "TCP resource cleanup interval (0 = use default)")
@@ -235,6 +253,10 @@ func init() {
 	_ = viper.BindPFlag("voip.gpu_backend", voipCmd.Flags().Lookup("gpu-backend"))
 	_ = viper.BindPFlag("voip.gpu_batch_size", voipCmd.Flags().Lookup("gpu-batch-size"))
 	_ = viper.BindPFlag("voip.gpu_max_memory", voipCmd.Flags().Lookup("gpu-max-memory"))
+
+	// Bind pattern algorithm flags to viper for config file support
+	_ = viper.BindPFlag("voip.pattern_algorithm", voipCmd.Flags().Lookup("pattern-algorithm"))
+	_ = viper.BindPFlag("voip.pattern_buffer_mb", voipCmd.Flags().Lookup("pattern-buffer-mb"))
 
 	// Bind flags to viper for config file support
 	_ = viper.BindPFlag("voip.max_goroutines", voipCmd.Flags().Lookup("tcp-max-goroutines"))

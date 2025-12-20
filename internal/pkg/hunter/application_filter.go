@@ -42,6 +42,19 @@ type ApplicationFilter struct {
 // NewApplicationFilter creates a new application-layer filter with optional GPU acceleration
 // This filter is protocol-agnostic and uses the detector to identify protocols
 func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
+	// Convert voip.PatternAlgorithm to ahocorasick.Algorithm
+	acAlgorithm := ahocorasick.AlgorithmAuto
+	if config != nil {
+		switch config.PatternAlgorithm {
+		case voip.PatternAlgorithmLinear:
+			acAlgorithm = ahocorasick.AlgorithmLinear
+		case voip.PatternAlgorithmAhoCorasick:
+			acAlgorithm = ahocorasick.AlgorithmAhoCorasick
+		case voip.PatternAlgorithmAuto:
+			acAlgorithm = ahocorasick.AlgorithmAuto
+		}
+	}
+
 	af := &ApplicationFilter{
 		config:         config,
 		detector:       detector.InitDefault(), // Use centralized detector for accurate protocol detection
@@ -50,7 +63,7 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		ipAddresses:    make([]string, 0),
 		ipAddressBytes: make([][]byte, 0),
 		patterns:       make([]voip.GPUPattern, 0),
-		acMatcher:      ahocorasick.NewBufferedMatcher(), // Aho-Corasick for O(n) pattern matching
+		acMatcher:      ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick with configurable algorithm
 		enabled:        config != nil && config.Enabled,
 	}
 
@@ -65,7 +78,10 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		}
 	}
 
-	logger.Info("Application filter initialized with centralized protocol detector")
+	logger.Info("Application filter initialized",
+		"protocol_detector", "centralized",
+		"pattern_algorithm", string(acAlgorithm),
+		"gpu_enabled", af.enabled)
 	return af, nil
 }
 

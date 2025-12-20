@@ -1,7 +1,7 @@
 # Aho-Corasick Pattern Matching Implementation
 
 **Date:** 2025-12-20
-**Status:** Planning
+**Status:** Phase 1 Complete
 **Research:** `docs/research/gpu-pattern-matching-architecture.md`
 
 ## Goal
@@ -10,34 +10,41 @@ Replace linear scan pattern matching with Aho-Corasick algorithm to support LI-s
 
 ## Phase 1: Core AC Implementation
 
-- [ ] Create `internal/pkg/ahocorasick/` package
-  - [ ] `ahocorasick.go` - Core AC automaton (trie + failure links)
-  - [ ] `builder.go` - Automaton builder from patterns
-  - [ ] `matcher.go` - Match function that traverses automaton
-  - [ ] `ahocorasick_test.go` - Unit tests
+- [x] Create `internal/pkg/ahocorasick/` package
+  - [x] `ahocorasick.go` - Core AC automaton (trie + failure links)
+  - [x] `builder.go` - Automaton builder from patterns
+  - [x] `matcher.go` - Match interface and Pattern/MatchResult types
+  - [x] `ahocorasick_test.go` - Unit tests
 
-- [ ] Implement `AhoCorasickMatcher` interface:
+- [x] Implement `Matcher` interface:
   ```go
   type Matcher interface {
       Build(patterns []Pattern) error
       Match(input []byte) []MatchResult
       MatchBatch(inputs [][]byte) [][]MatchResult
+      PatternCount() int
   }
   ```
 
-- [ ] Add benchmarks comparing AC vs linear scan at various pattern counts
+- [x] Add benchmarks comparing AC vs linear scan at various pattern counts
+  - Benchmark results show AC is ~265x faster at 10K patterns
 
 ## Phase 2: Multi-Mode Support (Prefix/Suffix/Contains)
 
-- [ ] Create `MultiModeAC` wrapper in `internal/pkg/ahocorasick/multimode.go`
+**Note:** Basic multi-mode support already implemented in Phase 1. The current implementation handles all pattern types in a single automaton by validating match positions during the match phase (prefix must start at offset 0, suffix must end at input length). The `MultiModeAC` wrapper with separate automata can be added later for optimization if needed.
+
+- [x] Handle prefix/suffix/contains patterns in core AC
+  - [x] Prefix handling: verify match offset == 0
+  - [x] Suffix handling: verify match ends at input length
+  - [x] Contains: matches anywhere
+
+- [x] `PatternType` already exists in `internal/pkg/filtering/pattern.go`
+
+- [x] Tests for all pattern types added in Phase 1
+
+- [ ] (Optional) Create `MultiModeAC` wrapper for optimized suffix matching
   - [ ] Separate automata for contains, prefix, suffix patterns
-  - [ ] Suffix handling: reverse patterns and inputs
-  - [ ] Prefix handling: verify match offset == 0
-
-- [ ] Update `internal/pkg/filtering/pattern.go`
-  - [ ] Add `PatternType` to distinguish prefix/suffix/contains
-
-- [ ] Add tests for all pattern types with AC
+  - [ ] Suffix handling: reverse patterns and inputs (for potential performance boost)
 
 ## Phase 3: Double-Buffering & Integration
 

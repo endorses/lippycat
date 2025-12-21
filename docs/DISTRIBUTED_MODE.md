@@ -8,6 +8,7 @@ Lippycat supports a fully distributed packet capture architecture that allows yo
 
 - **Multi-node capture** across network segments
 - **Hierarchical aggregation** (edge → regional → central)
+- **Standalone tap mode** for single-machine deployments
 - **Real-time monitoring** via TUI with selective hunter subscription
 - **TLS/mTLS security** for encrypted node communication
 - **Automatic fault recovery** with fast reconnection (<100ms)
@@ -18,6 +19,48 @@ Lippycat supports a fully distributed packet capture architecture that allows yo
 ---
 
 ## Architecture
+
+### Standalone Tap Mode
+
+For single-machine deployments, tap mode combines local capture with processor capabilities:
+
+```
+Network Interface
+       ↓
+┌──────────────────────────┐
+│       Tap Node           │
+│                          │
+│ - Local capture          │
+│ - PCAP writing           │
+│ - Per-call PCAP (VoIP)   │
+│ - TUI server             │
+│ - Optional upstream      │
+└──────────────────────────┘
+       ↓         ↓
+    PCAP     TUI Clients
+   Files
+```
+
+**When to use Tap Mode:**
+- Single-machine VoIP capture with per-call PCAP
+- Standalone deployments with TUI monitoring
+- Edge nodes that need local capture AND TUI serving
+- Development/testing before distributed deployment
+
+**When to use Hunter/Processor:**
+- Multi-machine distributed capture
+- Network segmentation (capture in DMZ, analyze elsewhere)
+- High-scale deployments (hundreds of capture points)
+- Centralized analysis with multiple capture sources
+
+**Quick Start:**
+```bash
+# Standalone VoIP capture with TUI
+sudo lc tap voip -i eth0 --sipuser alicent --insecure
+
+# Connect TUI
+lc watch remote --addr localhost:50051 --insecure
+```
 
 ### Hub-and-Spoke Mode
 
@@ -120,6 +163,28 @@ TUI → Processor A (root, depth=0)
 ---
 
 ## Components
+
+### Tap Node (Standalone Capture)
+
+Tap nodes combine local capture with processor capabilities on a single machine.
+
+**Features:**
+- Local packet capture from network interfaces
+- Per-call PCAP writing (VoIP)
+- Auto-rotating PCAP writing (non-VoIP)
+- Management gRPC API for TUI connections
+- Optional upstream forwarding (hierarchical mode)
+- Command hooks for PCAP/call completion
+
+**Use Cases:**
+- Single-machine VoIP monitoring
+- Edge deployments with local TUI access
+- Development and testing
+
+**Resource Usage:**
+- Memory: ~300-400MB (with per-call PCAP)
+- CPU: Depends on traffic volume and PCAP writing
+- Disk: Depends on captured traffic
 
 ### Hunter (Edge Capture Node)
 

@@ -1,5 +1,5 @@
-//go:build all
-// +build all
+//go:build tap && !all
+// +build tap,!all
 
 package cmd
 
@@ -7,15 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/endorses/lippycat/cmd/hunt"
-	"github.com/endorses/lippycat/cmd/list"
-	"github.com/endorses/lippycat/cmd/process"
-	"github.com/endorses/lippycat/cmd/rm"
-	"github.com/endorses/lippycat/cmd/set"
-	"github.com/endorses/lippycat/cmd/show"
-	"github.com/endorses/lippycat/cmd/sniff"
 	"github.com/endorses/lippycat/cmd/tap"
-	"github.com/endorses/lippycat/cmd/watch"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/version"
 	"github.com/spf13/cobra"
@@ -27,7 +19,7 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:     "lc",
 	Short:   "lippycat sniffs for you",
-	Long:    fmt.Sprintf("lippycat %s - Network traffic sniffer and analyzer\n\n%s", version.GetVersion(), "http://🫦🐱.ws"),
+	Long:    fmt.Sprintf("lippycat %s - Network traffic sniffer and analyzer (tap build)\n\n%s", version.GetVersion(), "http://🫦🐱.ws"),
 	Version: version.GetFullVersion(),
 }
 
@@ -39,14 +31,6 @@ func Execute() {
 }
 
 func addSubCommandPalattes() {
-	rootCmd.AddCommand(sniff.SniffCmd)
-	rootCmd.AddCommand(watch.WatchCmd)
-	rootCmd.AddCommand(list.ListCmd)
-	rootCmd.AddCommand(show.ShowCmd)
-	rootCmd.AddCommand(set.SetCmd)
-	rootCmd.AddCommand(rm.RmCmd)
-	rootCmd.AddCommand(hunt.HuntCmd)
-	rootCmd.AddCommand(process.ProcessCmd)
 	rootCmd.AddCommand(tap.TapCmd)
 }
 

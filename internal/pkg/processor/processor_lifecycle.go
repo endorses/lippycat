@@ -39,6 +39,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/pcap"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -214,6 +215,29 @@ func (p *Processor) Start(ctx context.Context) error {
 	}
 
 	logger.Info("Processor started", "listen_addr", p.config.ListenAddr)
+
+	// Start local capture loop if using LocalSource
+	if localSource, ok := p.packetSource.(*source.LocalSource); ok {
+		logger.Info("Starting local capture mode")
+
+		// Start the local source in a goroutine
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			if err := localSource.Start(p.ctx); err != nil {
+				logger.Error("Local capture failed", "error", err)
+			}
+		}()
+
+		// Start a goroutine to process batches from local source
+		p.wg.Add(1)
+		go func() {
+			defer p.wg.Done()
+			for batch := range localSource.Batches() {
+				p.processBatch(batch)
+			}
+		}()
+	}
 
 	// Wait for shutdown
 	<-p.ctx.Done()

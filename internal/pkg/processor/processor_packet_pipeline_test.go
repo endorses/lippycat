@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +41,7 @@ func TestProcessBatch_BasicFlow(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet counter was updated
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -79,7 +80,7 @@ func TestProcessBatch_MultiplePackets(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify all packets were counted
 	assert.Equal(t, uint64(packetCount), processor.packetsReceived.Load())
@@ -129,7 +130,7 @@ func TestProcessBatch_ConcurrentProcessing(t *testing.T) {
 					Packets:     packets,
 				}
 
-				processor.processBatch(batch)
+				processor.processBatch(source.FromProtoBatch(batch))
 			}
 		}(hunterID)
 	}
@@ -185,7 +186,7 @@ func TestProcessBatch_WithVoIPMetadata(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet was processed
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -229,7 +230,7 @@ func TestProcessBatch_WithBroadcast(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify subscriber received the batch
 	select {
@@ -271,7 +272,7 @@ func TestProcessBatch_LargePackets(t *testing.T) {
 	}
 
 	// Should handle large packets
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }
@@ -305,7 +306,7 @@ func TestProcessBatch_HighSequenceNumber(t *testing.T) {
 	}
 
 	// Should handle high sequence numbers
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }
@@ -336,7 +337,7 @@ func TestProcessBatch_UnregisteredHunter(t *testing.T) {
 	}
 
 	// Should not panic
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Packet should still be counted
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -386,7 +387,7 @@ func TestProcessBatch_WithRTPMetadata(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet was processed
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -423,7 +424,7 @@ func TestProcessBatch_WithUpstreamForwarding(t *testing.T) {
 	}
 
 	// Process the batch (should forward to upstream)
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet was processed
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -477,7 +478,7 @@ func TestProcessBatch_WithAutoRotatePcapWriter(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet was counted
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -533,7 +534,7 @@ func TestProcessBatch_WithPerCallPcapWriter(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet was counted
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -592,7 +593,7 @@ func TestProcessBatch_WithPerCallPcapWriter_RTPPacket(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify packet was counted
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
@@ -682,7 +683,7 @@ func TestProcessBatch_MixedVoIPAndNonVoIP(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify all packets were counted
 	assert.Equal(t, uint64(3), processor.packetsReceived.Load())
@@ -717,7 +718,7 @@ func TestProcessBatch_EmptyPacketData(t *testing.T) {
 	}
 
 	// Should not panic
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }
@@ -753,7 +754,7 @@ func TestProcessBatch_NilMetadata(t *testing.T) {
 	}
 
 	// Should not panic
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }
@@ -787,7 +788,7 @@ func TestProcessBatch_WithEnricher(t *testing.T) {
 	}
 
 	// Process the batch (enricher should process)
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }
@@ -835,7 +836,7 @@ func TestProcessBatch_WithCallCorrelator(t *testing.T) {
 	}
 
 	// Process the batch (call correlator should process)
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	assert.Equal(t, uint64(1), processor.packetsReceived.Load())
 }

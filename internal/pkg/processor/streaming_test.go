@@ -7,6 +7,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,7 +48,7 @@ func TestProcessBatch(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify stats were updated
 	assert.Equal(t, uint64(2), processor.packetsReceived.Load(),
@@ -71,7 +72,7 @@ func TestProcessBatch_EmptyBatch(t *testing.T) {
 	}
 
 	// Process the batch
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify no packets were counted
 	assert.Equal(t, uint64(0), processor.packetsReceived.Load(),
@@ -306,7 +307,7 @@ func TestConcurrentBatchProcessing(t *testing.T) {
 				Packets:     packets,
 			}
 
-			processor.processBatch(batch)
+			processor.processBatch(source.FromProtoBatch(batch))
 		}(i)
 	}
 
@@ -374,7 +375,7 @@ func TestHunterPacketCounting(t *testing.T) {
 		},
 	}
 
-	processor.processBatch(batch)
+	processor.processBatch(source.FromProtoBatch(batch))
 
 	// Verify hunter's packet count was updated
 	hunters := processor.hunterManager.GetAll("")

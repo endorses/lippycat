@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui binaries clean-binaries
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries
 
 # Build variables
 BINARY_NAME=lc
@@ -55,8 +55,14 @@ tui:
 	@mkdir -p bin
 	$(GO) build $(GOFLAGS) -tags tui -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tui
 
+# Build tap-only binary (standalone capture + processor capabilities)
+tap:
+	@echo "Building tap binary $(VERSION) (stripped, standalone capture)..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags tap -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tap
+
 # Build all binary variants
-binaries: all hunter processor cli tui
+binaries: all hunter processor cli tui tap
 	@echo "All binary variants built successfully:"
 	@ls -lh bin/
 
@@ -208,6 +214,7 @@ help:
 	@echo "  make processor      - Build processor node only"
 	@echo "  make cli            - Build CLI commands only"
 	@echo "  make tui            - Build TUI interface only"
+	@echo "  make tap            - Build tap node (standalone capture + processor)"
 	@echo "  make binaries       - Build all variants"
 	@echo ""
 	@echo "Installation:"

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-12-21
+
+### Added
+- **Standalone tap capture mode** (`lc tap`): Single-machine capture with processor capabilities
+  - `lc tap` - General packet capture with TUI serving
+  - `lc tap voip` - VoIP-specific capture with per-call PCAP writing
+  - Local packet source using gopacket for direct interface capture
+  - Local filter target for protocol-specific packet filtering
+  - Optional upstream forwarding to central processor nodes
+  - TUI clients can connect for remote monitoring
+  - Supports all processor features: per-call PCAP, command hooks, TLS/mTLS
+- **PacketSource/FilterTarget interfaces** (`internal/pkg/processor/source/`, `internal/pkg/processor/filtering/`): Abstraction layer for packet ingestion and filtering
+  - `PacketSource` interface for unified packet ingestion (local capture, gRPC hunters)
+  - `FilterTarget` interface for protocol-specific packet filtering
+  - `LocalSource`: Direct interface capture using gopacket
+  - `GRPCSource`: Receives packets from distributed hunter nodes
+  - `LocalTarget`: Local packet filtering with VoIP call tracking
+  - `HunterTarget`: Forwards filtered packets to processor nodes
+
 ## [0.3.3] - 2025-12-20
 
 ### Added

@@ -54,24 +54,24 @@ Extract current gRPC handling to implement interfaces.
 
 ### Step 2.1: Extract GRPCSource
 
-- [ ] Create `internal/pkg/processor/source/grpc.go`
-- [ ] Move gRPC server setup and hunter connection handling
-- [ ] Implement PacketSource interface
-- [ ] Add `HunterManager()` accessor for distributed mode
+- [x] Create `internal/pkg/processor/source/grpc.go`
+- [x] Move gRPC server setup and hunter connection handling
+- [x] Implement PacketSource interface
+- [x] Add `HunterManager()` accessor for distributed mode
 
 ### Step 2.2: Extract HunterTarget
 
-- [ ] Create `internal/pkg/processor/filtering/target_hunter.go`
-- [ ] Move filter distribution logic from Manager
-- [ ] Implement FilterTarget interface
+- [x] Create `internal/pkg/processor/filtering/target_hunter.go`
+- [x] Move filter distribution logic from Manager
+- [x] Implement FilterTarget interface
 
 ### Step 2.3: Update Processor
 
-- [ ] Add `packetSource PacketSource` field to Processor
-- [ ] Add `filterTarget FilterTarget` field to Processor
-- [ ] Modify `New()` to accept source/target based on config
-- [ ] Update `processBatch()` to use `source.PacketBatch`
-- [ ] Run all existing tests
+- [x] Add `packetSource PacketSource` field to Processor
+- [x] Add `filterTarget FilterTarget` field to Processor
+- [x] Modify `New()` to accept source/target based on config
+- [x] Update `processBatch()` to use `source.PacketBatch`
+- [x] Run all existing tests
 
 ## Phase 3: Implement LocalSource
 

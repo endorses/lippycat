@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
@@ -82,7 +83,7 @@ sendLoop:
 					TimestampNs: time.Now().UnixNano(),
 					Packets:     []*data.CapturedPacket{createTestDataPacket()},
 				}
-				p.processBatch(batch)
+				p.processBatch(source.FromProtoBatch(batch))
 				sent++
 			}
 
@@ -179,7 +180,7 @@ func TestProcessor_ManyHunters_100Concurrent(t *testing.T) {
 					TimestampNs: time.Now().UnixNano(),
 					Packets:     []*data.CapturedPacket{createTestDataPacket()},
 				}
-				p.processBatch(batch)
+				p.processBatch(source.FromProtoBatch(batch))
 			}
 		}(i)
 	}
@@ -273,7 +274,7 @@ func TestProcessor_ManySubscribers_100Concurrent(t *testing.T) {
 			TimestampNs: time.Now().UnixNano(),
 			Packets:     []*data.CapturedPacket{createTestDataPacket()},
 		}
-		p.processBatch(batch)
+		p.processBatch(source.FromProtoBatch(batch))
 	}
 
 	// Give time for broadcasts
@@ -361,7 +362,7 @@ func BenchmarkProcessor_PacketProcessing(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		p.processBatch(batch)
+		p.processBatch(source.FromProtoBatch(batch))
 	}
 
 	b.StopTimer()
@@ -420,7 +421,7 @@ func BenchmarkProcessor_ManyHunters(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				// Round-robin through hunters
-				p.processBatch(batches[i%hunterCount])
+				p.processBatch(source.FromProtoBatch(batches[i%hunterCount]))
 			}
 
 			b.StopTimer()

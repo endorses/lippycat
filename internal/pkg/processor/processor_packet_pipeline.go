@@ -25,23 +25,26 @@ package processor
 import (
 	"time"
 
-	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket/layers"
 )
 
-// processBatch processes a received packet batch
-func (p *Processor) processBatch(batch *data.PacketBatch) {
-	hunterID := batch.HunterId
+// processBatch processes a received packet batch using the source.PacketBatch abstraction.
+// This supports both gRPC (distributed) and local (standalone tap) packet sources.
+func (p *Processor) processBatch(batch *source.PacketBatch) {
+	sourceID := batch.SourceID
 
 	logger.Debug("Received packet batch",
-		"hunter_id", hunterID,
+		"source_id", sourceID,
 		"sequence", batch.Sequence,
 		"packets", len(batch.Packets))
 
-	// Update hunter statistics
-	p.hunterManager.UpdatePacketStats(hunterID, uint64(len(batch.Packets)), batch.TimestampNs)
+	// Update hunter statistics (only for gRPC sources with hunter IDs)
+	if p.hunterManager != nil && sourceID != "" && sourceID != "local" {
+		p.hunterManager.UpdatePacketStats(sourceID, uint64(len(batch.Packets)), batch.TimestampNs)
+	}
 
 	// Queue packets for async PCAP write if configured
 	if p.pcapWriter != nil {
@@ -60,7 +63,7 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	if p.callAggregator != nil {
 		for _, packet := range batch.Packets {
 			if packet.Metadata != nil && (packet.Metadata.Sip != nil || packet.Metadata.Rtp != nil) {
-				p.callAggregator.ProcessPacket(packet, hunterID)
+				p.callAggregator.ProcessPacket(packet, sourceID)
 			}
 		}
 	}
@@ -69,7 +72,7 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 	if p.callCorrelator != nil {
 		for _, packet := range batch.Packets {
 			if packet.Metadata != nil && packet.Metadata.Sip != nil {
-				p.callCorrelator.ProcessPacket(packet, hunterID)
+				p.callCorrelator.ProcessPacket(packet, sourceID)
 			}
 		}
 	}
@@ -138,13 +141,16 @@ func (p *Processor) processBatch(batch *data.PacketBatch) {
 		}
 	}
 
+	// Convert to protobuf batch for upstream forwarding and subscriber broadcast
+	protoBatch := batch.ToProtoBatch()
+
 	// Forward to upstream in hierarchical mode
 	if p.upstreamManager != nil {
-		p.upstreamManager.Forward(batch)
+		p.upstreamManager.Forward(protoBatch)
 	}
 
 	// Broadcast to monitoring subscribers (TUI clients)
-	p.subscriberManager.Broadcast(batch)
+	p.subscriberManager.Broadcast(protoBatch)
 
 	// Inject packets to virtual interface if configured
 	if p.vifManager != nil {

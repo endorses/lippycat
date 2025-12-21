@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -301,7 +302,7 @@ func TestProcessor_Shutdown_WithAutoRotatePcapWriter(t *testing.T) {
 		// Register hunter first
 		processor.hunterManager.Register("test-hunter", "localhost", []string{"eth0"}, nil)
 
-		processor.processBatch(batch)
+		processor.processBatch(source.FromProtoBatch(batch))
 	}
 
 	// Give time for async write
@@ -381,7 +382,7 @@ func TestProcessor_Shutdown_WithPerCallPcapWriter(t *testing.T) {
 		// Register hunter first
 		processor.hunterManager.Register("test-hunter", "localhost", []string{"eth0"}, nil)
 
-		processor.processBatch(batch)
+		processor.processBatch(source.FromProtoBatch(batch))
 	}
 
 	// Give time for async write

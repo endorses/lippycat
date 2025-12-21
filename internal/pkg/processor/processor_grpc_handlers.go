@@ -46,6 +46,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -76,8 +77,9 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 			logger.Info("Packet stream started", "hunter_id", hunterID)
 		}
 
-		// Process batch
-		p.processBatch(batch)
+		// Convert protobuf batch to internal format and process
+		internalBatch := source.FromProtoBatch(batch)
+		p.processBatch(internalBatch)
 
 		// Determine flow control state based on processor load
 		flowControl := p.flowController.Determine()

@@ -40,6 +40,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/hunter"
 	"github.com/endorses/lippycat/internal/pkg/processor/pcap"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/processor/stats"
 	"github.com/endorses/lippycat/internal/pkg/processor/subscriber"
 	"github.com/endorses/lippycat/internal/pkg/processor/upstream"
@@ -90,6 +91,12 @@ type Processor struct {
 	// gRPC server
 	grpcServer *grpc.Server
 	listener   net.Listener
+
+	// Packet source abstraction (gRPC or local capture)
+	packetSource source.PacketSource
+
+	// Filter target abstraction (hunter distribution or local BPF)
+	filterTarget filtering.FilterTarget
 
 	// Extracted managers
 	hunterManager     *hunter.Manager
@@ -299,6 +306,15 @@ func New(config Config) (*Processor, error) {
 	// Initialize filter manager
 	persistence := filtering.NewYAMLPersistence()
 	p.filterManager = filtering.NewManager(config.FilterFile, persistence, p.hunterManager, onFilterFailure, nil)
+
+	// Create GRPCSource for distributed mode (default packet source)
+	p.packetSource = source.NewGRPCSource(source.GRPCSourceConfig{
+		ProcessorID:   config.ProcessorID,
+		HunterManager: p.hunterManager,
+	})
+
+	// Create HunterTarget for distributed mode (default filter target)
+	p.filterTarget = filtering.NewHunterTarget(p.filterManager)
 
 	// Initialize flow controller
 	hasUpstream := config.UpstreamAddr != ""

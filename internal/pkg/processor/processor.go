@@ -398,3 +398,24 @@ func (p *Processor) SetProxyTLSCredentials(cert, key []byte) {
 func (p *Processor) GetStats() stats.Stats {
 	return p.statsCollector.Get()
 }
+
+// SetPacketSource sets the packet source for the processor.
+// This allows overriding the default GRPCSource for standalone/tap mode.
+// Must be called before Start().
+func (p *Processor) SetPacketSource(source source.PacketSource) {
+	p.packetSource = source
+}
+
+// SetFilterTarget sets the filter target for the processor.
+// This allows overriding the default HunterTarget for standalone/tap mode.
+// Must be called before Start().
+func (p *Processor) SetFilterTarget(target filtering.FilterTarget) {
+	p.filterTarget = target
+}
+
+// IsLocalMode returns true if the processor is using a local packet source
+// rather than receiving packets from hunters via gRPC.
+func (p *Processor) IsLocalMode() bool {
+	_, isLocal := p.packetSource.(*source.LocalSource)
+	return isLocal
+}

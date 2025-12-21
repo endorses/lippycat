@@ -27,6 +27,7 @@ This architecture allows for:
   - `cmd/`: CLI command definitions with build-tag-based variants
   - `cmd/sniff/`: Packet capture command (CLI output)
   - `cmd/watch/`: TUI monitoring commands (live, file, remote)
+  - `cmd/tap/`: Standalone capture with processor capabilities (local capture + TUI serving)
   - `cmd/hunt/`: Hunter node implementation for distributed capture
   - `cmd/process/`: Processor node implementation for distributed analysis
   - `cmd/list/`: Resource listing commands
@@ -67,6 +68,7 @@ make binaries
 make all          # Complete suite (22 MB) - all commands
 make hunter       # Hunter node (18 MB) - edge capture with GPU filtering
 make processor    # Processor node (14 MB) - central aggregation
+make tap          # Tap node - standalone capture with processor capabilities
 make cli          # CLI tools only - sniff, debug, interfaces
 make tui          # TUI only - terminal interface
 
@@ -87,6 +89,7 @@ make build-pgo
 - `all`: Complete suite with all commands (default)
 - `hunter`: Hunter node only - includes GPU acceleration and protocol detection
 - `processor`: Processor node only - includes protocol analysis and gRPC server
+- `tap`: Tap node only - standalone capture with processor capabilities
 - `cli`: CLI commands only - sniff, debug, interfaces
 - `tui`: TUI interface only - terminal UI with remote monitoring
 
@@ -184,6 +187,7 @@ lc [verb] [object] [flags]
 
 VERBS:
   sniff     Capture packets from interface or file
+  tap       Standalone capture with processor capabilities
   hunt      Distributed edge capture (hunter node)
   process   Central aggregation (processor node)
   watch     Monitor traffic (TUI)
@@ -195,6 +199,8 @@ VERBS:
 
 - **`lc sniff`** - CLI mode packet capture ([docs](cmd/sniff/CLAUDE.md))
 - **`lc sniff voip`** - VoIP-specific capture with SIP/RTP analysis ([docs](cmd/sniff/CLAUDE.md))
+- **`lc tap`** - Standalone capture with processor capabilities ([docs](cmd/tap/CLAUDE.md))
+- **`lc tap voip`** - VoIP standalone capture with per-call PCAP ([docs](cmd/tap/CLAUDE.md))
 - **`lc watch`** - Interactive TUI, defaults to live mode ([docs](cmd/watch/CLAUDE.md))
 - **`lc watch live`** - Live capture TUI ([docs](cmd/watch/CLAUDE.md))
 - **`lc watch file`** - PCAP file analysis TUI ([docs](cmd/watch/CLAUDE.md))
@@ -214,7 +220,7 @@ VERBS:
 
 ### Quick Start Examples
 
-**Standalone VoIP Capture:**
+**CLI VoIP Capture:**
 ```bash
 # VoIP capture with balanced performance
 sudo lc sniff voip --interface eth0 --sipuser alicent
@@ -226,6 +232,22 @@ sudo lc sniff voip -i eth0 \
 
 # UDP-only VoIP capture (bypass TCP, reduces CPU on TCP-heavy networks)
 sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
+```
+
+**Standalone Tap Mode (Single Machine with TUI/PCAP):**
+```bash
+# Standalone VoIP capture with TUI serving and per-call PCAP
+sudo lc tap voip -i eth0 --sipuser alicent --insecure
+
+# Tap with TLS for production (TUI clients can connect)
+sudo lc tap voip -i eth0 \
+  --per-call-pcap --per-call-pcap-dir /var/voip/calls \
+  --tls --tls-cert server.crt --tls-key server.key
+
+# Tap with upstream forwarding (edge node)
+sudo lc tap voip -i eth0 \
+  --upstream central-processor:50051 \
+  --tls --tls-ca ca.crt
 ```
 
 **Distributed Capture:**
@@ -281,6 +303,7 @@ Configuration via YAML file (in priority order):
 **See command-specific documentation:**
 - User Documentation (README.md files):
   - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage
+  - [cmd/tap/README.md](cmd/tap/README.md) - Tap (standalone) command usage
   - [cmd/watch/README.md](cmd/watch/README.md) - Watch (TUI) command usage
   - [cmd/hunt/README.md](cmd/hunt/README.md) - Hunter node usage
   - [cmd/process/README.md](cmd/process/README.md) - Processor node usage
@@ -289,6 +312,7 @@ Configuration via YAML file (in priority order):
 
 - Architecture Documentation (CLAUDE.md files for AI assistants):
   - [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture & patterns
+  - [cmd/tap/CLAUDE.md](cmd/tap/CLAUDE.md) - Tap architecture & patterns
   - [cmd/watch/CLAUDE.md](cmd/watch/CLAUDE.md) - Watch command architecture
   - [cmd/hunt/CLAUDE.md](cmd/hunt/CLAUDE.md) - Hunter architecture & patterns
   - [cmd/process/CLAUDE.md](cmd/process/CLAUDE.md) - Processor architecture & patterns

@@ -19,7 +19,7 @@ Define abstraction for packet origin.
 
 ### Step 1.1: Create interface
 
-- [ ] Create `internal/pkg/processor/source/source.go`:
+- [x] Create `internal/pkg/processor/source/source.go`:
   ```go
   type PacketSource interface {
       Start(ctx context.Context) error
@@ -38,7 +38,7 @@ Define abstraction for packet origin.
 
 ### Step 1.2: Create FilterTarget interface
 
-- [ ] Create `internal/pkg/processor/filtering/target.go`:
+- [x] Create `internal/pkg/processor/filtering/target.go`:
   ```go
   type FilterTarget interface {
       ApplyFilter(filter *management.Filter) error

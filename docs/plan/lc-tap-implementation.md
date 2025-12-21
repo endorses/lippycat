@@ -79,19 +79,20 @@ Wrap hunter capture code for local mode.
 
 ### Step 3.1: Create LocalSource
 
-- [ ] Create `internal/pkg/processor/source/local.go`
-- [ ] Import `hunter/capture.Manager` (reuse, not reimplement)
-- [ ] Import `hunter/forwarding.ConvertPacket()`
-- [ ] Import `hunter.ApplicationFilter` for GPU filtering
-- [ ] Add batching logic
-- [ ] Implement PacketSource interface
-- [ ] Add `SetBPFFilter()` for filter integration
+- [x] Create `internal/pkg/processor/source/local.go`
+- [x] Import `capture` package directly (reuse, not reimplement)
+- [x] Reuse `convertPacketInfo()` logic from forwarding
+- [x] Support `ApplicationFilter` interface for GPU and CPU filtering
+- [x] Add batching logic
+- [x] Implement PacketSource interface
+- [x] Add `SetBPFFilter()` for filter integration
 
 ### Step 3.2: Unit tests
 
-- [ ] Test packet flow from capture to batches
-- [ ] Test BPF filter updates
-- [ ] Test graceful shutdown
+- [x] Test config defaults and custom config
+- [x] Test state management (Start/Stop/IsStarted)
+- [x] Test BPF filter updates
+- [x] Test graceful shutdown
 
 ## Phase 4: Implement LocalTarget
 

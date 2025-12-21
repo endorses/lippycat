@@ -100,16 +100,16 @@ BPF-based filtering for local mode.
 
 ### Step 4.1: Create LocalTarget
 
-- [ ] Create `internal/pkg/processor/filtering/target_local.go`
-- [ ] Implement filter-to-BPF conversion (reuse `internal/pkg/filtering`)
-- [ ] Implement dynamic BPF recompilation
-- [ ] Integrate `hunter.ApplicationFilter` for VoIP filters
-- [ ] Implement FilterTarget interface
+- [x] Create `internal/pkg/processor/filtering/target_local.go`
+- [x] Implement filter-to-BPF conversion (reuse `internal/pkg/filtering`)
+- [x] Implement dynamic BPF recompilation
+- [x] Integrate `hunter.ApplicationFilter` for VoIP filters
+- [x] Implement FilterTarget interface
 
 ### Step 4.2: Unit tests
 
-- [ ] Test BPF generation from filters
-- [ ] Test filter add/remove/update
+- [x] Test BPF generation from filters
+- [x] Test filter add/remove/update
 
 ## Phase 5: Command Implementation
 

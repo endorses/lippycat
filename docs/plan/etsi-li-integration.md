@@ -56,7 +56,8 @@ Create LI package structure and wire into processor.
 
 - [ ] Create `internal/pkg/li/registry.go`
 - [ ] Implement thread-safe task storage (sync.RWMutex)
-- [ ] Add methods: `AddTask`, `RemoveTask`, `GetTask`, `ListTasks`
+- [ ] Add methods: `AddTask`, `ModifyTask`, `RemoveTask`, `GetTask`, `ListTasks`
+- [ ] `ModifyTask` must be atomic: reject entire update if any field cannot be modified
 - [ ] Implement task lifecycle per ETSI TS 103 221-1:
   - Default: Task ends only via ADMF `DeactivateTask` or terminating fault
   - If `ImplicitDeactivationAllowed=true`: NE may enforce `EndTime` expiration
@@ -214,6 +215,8 @@ Implement bidirectional X1 with ADMF.
 - [ ] Create mock ADMF server for X1 testing
 - [ ] Create mock MDF server for X2/X3 testing
 - [ ] Test full flow: task activation → packet match → IRI/CC delivery
+- [ ] Test ModifyTask updates targets/destinations atomically
+- [ ] Test ModifyTask rejection when partial update impossible
 - [ ] Test DeactivateTask stops interception
 - [ ] Test ImplicitDeactivationAllowed: NE enforces EndTime, sends status to ADMF
 - [ ] Test without ImplicitDeactivationAllowed: NE ignores EndTime, waits for ADMF

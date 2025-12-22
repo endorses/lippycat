@@ -56,7 +56,12 @@ Create LI package structure and wire into processor.
 
 - [ ] Create `internal/pkg/li/registry.go`
 - [ ] Implement thread-safe task storage (sync.RWMutex)
-- [ ] Add methods: `AddTask`, `ModifyTask`, `RemoveTask`, `GetTask`, `ListTasks`
+- [ ] Add methods matching ETSI X1 terminology:
+  - `ActivateTask` - add new intercept task
+  - `ModifyTask` - update task parameters (atomic)
+  - `DeactivateTask` - remove task
+  - `GetTaskDetails` - query task by XID
+  - `ListTasks` - internal iteration (no ETSI equivalent)
 - [ ] `ModifyTask` must be atomic: reject entire update if any field cannot be modified
 - [ ] Implement task lifecycle per ETSI TS 103 221-1:
   - Default: Task ends only via ADMF `DeactivateTask` or terminating fault

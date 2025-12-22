@@ -68,13 +68,20 @@ Create LI package structure and wire into processor.
   - If `ImplicitDeactivationAllowed=true`: NE may enforce `EndTime` expiration
   - On implicit deactivation: Send status report to ADMF via X1 client
 
-### Step 1.3: Target matcher
+### Step 1.3: Task-to-filter mapping
 
-- [ ] Create `internal/pkg/li/matcher.go`
-- [ ] Implement `Match(packet *types.PacketDisplay) []InterceptTask`
-- [ ] Support SIP URI matching (`VoIPMetadata.From`, `VoIPMetadata.To`)
-- [ ] Support IP address matching (`SrcIP`, `DstIP`)
-- [ ] Optimize with index maps for O(1) lookups
+Leverage existing filter management system - no new matching logic needed.
+
+- [ ] Create `internal/pkg/li/filters.go`
+- [ ] Map X1 target identities to existing filter types:
+  - SIP URI → SIPUser filter
+  - IP address → IP filter
+  - etc.
+- [ ] Store XID ↔ FilterID mapping for correlation
+- [ ] On ActivateTask: create filter, push via existing filter management
+- [ ] On DeactivateTask: remove filter
+- [ ] On ModifyTask: update filter atomically
+- [ ] When packets match filter: lookup XID, deliver via X2/X3
 
 ### Step 1.4: LI Manager
 

@@ -29,13 +29,14 @@ Create LI package structure and wire into processor.
 - [ ] Create `internal/pkg/li/types.go`:
   ```go
   type InterceptTask struct {
-      XID           uuid.UUID
-      Targets       []TargetIdentity
-      Destinations  []string  // DIDs
-      DeliveryType  DeliveryType  // X2Only, X3Only, X2andX3
-      StartTime     time.Time
-      EndTime       time.Time
-      Status        TaskStatus
+      XID                        uuid.UUID
+      Targets                    []TargetIdentity
+      Destinations               []string  // DIDs
+      DeliveryType               DeliveryType  // X2Only, X3Only, X2andX3
+      StartTime                  time.Time
+      EndTime                    time.Time
+      ImplicitDeactivationAllowed bool  // If true, NE may end task autonomously
+      Status                     TaskStatus
   }
 
   type TargetIdentity struct {
@@ -56,7 +57,10 @@ Create LI package structure and wire into processor.
 - [ ] Create `internal/pkg/li/registry.go`
 - [ ] Implement thread-safe task storage (sync.RWMutex)
 - [ ] Add methods: `AddTask`, `RemoveTask`, `GetTask`, `ListTasks`
-- [ ] Add task expiration enforcement (check EndTime)
+- [ ] Implement task lifecycle per ETSI TS 103 221-1:
+  - Default: Task ends only via ADMF `DeactivateTask` or terminating fault
+  - If `ImplicitDeactivationAllowed=true`: NE may enforce `EndTime` expiration
+  - On implicit deactivation: Send status report to ADMF via X1 client
 
 ### Step 1.3: Target matcher
 
@@ -210,7 +214,9 @@ Implement bidirectional X1 with ADMF.
 - [ ] Create mock ADMF server for X1 testing
 - [ ] Create mock MDF server for X2/X3 testing
 - [ ] Test full flow: task activation → packet match → IRI/CC delivery
-- [ ] Test task expiration enforcement
+- [ ] Test DeactivateTask stops interception
+- [ ] Test ImplicitDeactivationAllowed: NE enforces EndTime, sends status to ADMF
+- [ ] Test without ImplicitDeactivationAllowed: NE ignores EndTime, waits for ADMF
 
 ### Step 5.2: Performance testing
 
@@ -242,6 +248,7 @@ Implement bidirectional X1 with ADMF.
 4. Matching packets generate X2 IRI events
 5. RTP packets generate X3 CC events
 6. X2/X3 delivered to MDF over TLS
-7. Task expiration automatically stops interception
-8. All existing tests pass unchanged
-9. Audit log captures all LI operations
+7. DeactivateTask from ADMF stops interception
+8. ImplicitDeactivationAllowed tasks: NE enforces EndTime, reports to ADMF
+9. All existing tests pass unchanged
+10. Audit log captures all LI operations

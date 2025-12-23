@@ -19,6 +19,38 @@ Implement ETSI X1/X2/X3 lawful interception interfaces for lippycat processor no
 - `make processor-li` - Processor-only with LI
 - `make tap-li` - Tap-only with LI
 
+## Phase 0: Filter Infrastructure Enhancements
+
+Prerequisites for LI - extend existing filter system.
+
+### Step 0.1: SIPURI filter (new filter type)
+
+Current SIPUser filter extracts only user part from To/From/P-Asserted-Identity headers.
+LI requires full URI matching (`user@domain`).
+
+- [ ] Add `FILTER_SIP_URI` to `management.proto` FilterType enum
+- [ ] Implement SIPURI extraction in `application_filter.go`:
+  - Extract `user@domain` from SIP headers (not just user)
+  - Add to Aho-Corasick matcher alongside existing patterns
+- [ ] Keep existing SIPUser filter unchanged (phone number matching)
+- [ ] Unit tests for SIPURI matching vs SIPUser matching
+
+### Step 0.2: IP filter optimization
+
+Current IP matching is O(n) linear scan with SIMD comparison.
+LI with many concurrent IP targets needs O(1) lookups.
+CIDR only works at BPF level (requires capture restart on changes).
+
+- [ ] Exact IP matching: replace linear scan with hash map lookup O(1)
+  - `map[netip.Addr][]*Filter` for IPv4/IPv6
+  - Fall back to SIMD comparison only if hash miss (shouldn't happen)
+- [ ] CIDR matching: implement radix/prefix tree for app-level matching
+  - Avoids BPF restart when CIDR filters change
+  - O(prefix length) lookup
+  - Consider using existing library (e.g., `github.com/kentik/patricia`)
+- [ ] Benchmark: verify O(1) for exact, O(log n) or better for CIDR
+- [ ] Unit tests for hash map and radix tree correctness
+
 ## Phase 1: Core Infrastructure
 
 Create LI package structure and wire into processor.
@@ -70,15 +102,15 @@ Create LI package structure and wire into processor.
 
 ### Step 1.3: Task-to-filter mapping
 
-Leverage existing filter management system - no new matching logic needed.
+Leverage existing filter management system with Phase 0 enhancements.
 
 - [ ] Create `internal/pkg/li/filters.go`
-- [ ] Map X1 target identities (per ETSI TS 103 280) to existing filter types:
-  - `SIPURI` (sip:user@domain) → SIPUser filter
-  - `TELURI` (tel:+number) → SIPUser filter
-  - `NAI` (user@realm) → SIPUser filter
-  - `IPv4Address` → IP filter
-  - `IPv4CIDR` → IP filter (range)
+- [ ] Map X1 target identities (per ETSI TS 103 280) to lippycat filters:
+  - `SIPURI` (sip:user@domain) → SIPURI filter (Phase 0.1)
+  - `TELURI` (tel:+number) → SIPUser filter (existing, phone number)
+  - `NAI` (user@realm) → SIPURI filter (same format as SIP URI)
+  - `IPv4Address` → IP filter with hash map lookup (Phase 0.2)
+  - `IPv4CIDR` → IP filter with radix tree lookup (Phase 0.2)
   - Mobile identifiers (IMSI, IMEI, MSISDN) → out of scope for now
 - [ ] Store XID ↔ FilterID mapping for correlation
 - [ ] On ActivateTask: create filter, push via existing filter management
@@ -260,13 +292,21 @@ Implement bidirectional X1 with ADMF.
 
 ## Validation Criteria
 
-1. `make build-li` produces binary with LI support
-2. `make build` produces binary without LI code (verified with `go tool nm`)
-3. X1 server accepts ActivateTask and creates intercept
-4. Matching packets generate X2 IRI events
-5. RTP packets generate X3 CC events
-6. X2/X3 delivered to MDF over TLS
-7. DeactivateTask from ADMF stops interception
-8. ImplicitDeactivationAllowed tasks: NE enforces EndTime, reports to ADMF
-9. All existing tests pass unchanged
-10. Audit log captures all LI operations
+**Phase 0 (Filter Infrastructure):**
+1. SIPURI filter matches `user@domain`, not just `user`
+2. SIPUser filter unchanged (backward compatible)
+3. IP exact match: O(1) hash lookup (benchmark)
+4. IP CIDR match: O(prefix) radix tree lookup (benchmark)
+5. CIDR filter changes don't require capture restart
+
+**Phase 1-6 (LI Integration):**
+6. `make build-li` produces binary with LI support
+7. `make build` produces binary without LI code (verified with `go tool nm`)
+8. X1 server accepts ActivateTask and creates intercept
+9. Matching packets generate X2 IRI events
+10. RTP packets generate X3 CC events
+11. X2/X3 delivered to MDF over TLS
+12. DeactivateTask from ADMF stops interception
+13. ImplicitDeactivationAllowed tasks: NE enforces EndTime, reports to ADMF
+14. All existing tests pass unchanged
+15. Audit log captures all LI operations

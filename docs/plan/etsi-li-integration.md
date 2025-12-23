@@ -25,14 +25,22 @@ Prerequisites for LI - extend existing filter system.
 
 ### Step 0.1: SIPURI filter (new filter type)
 
-Current SIPUser filter extracts only user part from To/From/P-Asserted-Identity headers.
-LI requires full URI matching (`user@domain`).
+Current SIPUser filter extracts user part and uses suffix/wildcard matching (`*49123456789`).
+This doesn't work for full URI matching - suffix pattern wouldn't match `user@domain`.
+
+Need separate matching paths:
+- **SIPUser**: extract user → suffix matching (existing, for phone numbers)
+- **SIPURI**: extract `user@domain` → exact/Aho-Corasick matching (new)
 
 - [ ] Add `FILTER_SIP_URI` to `management.proto` FilterType enum
-- [ ] Implement SIPURI extraction in `application_filter.go`:
-  - Extract `user@domain` from SIP headers (not just user)
-  - Add to Aho-Corasick matcher alongside existing patterns
-- [ ] Keep existing SIPUser filter unchanged (phone number matching)
+- [ ] Implement separate SIPURI matching in `application_filter.go`:
+  - Extract `user@domain` from SIP headers
+  - Separate Aho-Corasick automaton for URI patterns
+  - Only run each matching pass if filters of that type exist:
+    - SIPUser filters present → run suffix match on user part
+    - SIPURI filters present → run Aho-Corasick on user@domain
+  - Typical case (phone numbers only): single pass, no overhead
+- [ ] Keep existing SIPUser filter unchanged (phone number suffix matching)
 - [ ] Unit tests for SIPURI matching vs SIPUser matching
 
 ### Step 0.2: IP filter optimization

@@ -73,10 +73,13 @@ Create LI package structure and wire into processor.
 Leverage existing filter management system - no new matching logic needed.
 
 - [ ] Create `internal/pkg/li/filters.go`
-- [ ] Map X1 target identities to existing filter types:
-  - SIP URI → SIPUser filter
-  - IP address → IP filter
-  - etc.
+- [ ] Map X1 target identities (per ETSI TS 103 280) to existing filter types:
+  - `SIPURI` (sip:user@domain) → SIPUser filter
+  - `TELURI` (tel:+number) → SIPUser filter
+  - `NAI` (user@realm) → SIPUser filter
+  - `IPv4Address` → IP filter
+  - `IPv4CIDR` → IP filter (range)
+  - Mobile identifiers (IMSI, IMEI, MSISDN) → out of scope for now
 - [ ] Store XID ↔ FilterID mapping for correlation
 - [ ] On ActivateTask: create filter, push via existing filter management
 - [ ] On DeactivateTask: remove filter

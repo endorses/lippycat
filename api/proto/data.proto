@@ -64,6 +64,11 @@ message CapturedPacket {
     // Interface name where packet was captured (e.g., "eth0", "wlan0")
     // This preserves the actual interface name across hierarchical processor chains
     string interface_name = 8;
+
+    // Matched filter IDs (for LI correlation)
+    // Populated by hunters/LocalSource when a packet matches application filters.
+    // Used by the processor to correlate packets to LI intercept tasks.
+    repeated string matched_filter_ids = 9;
 }
 
 // PacketMetadata contains hunter-side analysis results

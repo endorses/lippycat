@@ -83,6 +83,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// This is a no-op if built without -tags li or if LI is not enabled
 	if p.isLIEnabled() {
 		for _, pkt := range batch.Packets {
+			// Skip packets without matched filter IDs (not targeted by LI)
+			if len(pkt.MatchedFilterIds) == 0 {
+				continue
+			}
+
 			// Convert to PacketDisplay for LI processing
 			display := types.PacketDisplay{
 				Timestamp: time.Unix(0, pkt.TimestampNs),
@@ -97,16 +102,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				display.DstPort = strconv.FormatUint(uint64(pkt.Metadata.DstPort), 10)
 			}
 
-			// Get matched filter IDs from packet batch
-			// TODO: Filter IDs will be populated when filter ID plumbing is implemented
-			// For distributed mode: hunters include filter IDs in packet batch
-			// For tap mode: LocalSource uses MatchPacketWithIDs
-			var matchedFilterIDs []string
-			if batch.MatchedFilterIDs != nil {
-				matchedFilterIDs = batch.MatchedFilterIDs
-			}
-
-			p.processLIPacket(&display, matchedFilterIDs)
+			// Use per-packet filter IDs for LI correlation
+			p.processLIPacket(&display, pkt.MatchedFilterIds)
 		}
 	}
 

@@ -242,6 +242,9 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 			// Increment captured counter
 			m.statsCollector.IncrementCaptured()
 
+			// Track matched filter IDs for LI correlation
+			var matchedFilterIDs []string
+
 			// Apply custom packet processor if set (for VoIP buffering, etc.)
 			if m.packetProcessor != nil {
 				if !m.packetProcessor.ProcessPacket(pktInfo) {
@@ -250,18 +253,22 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 				}
 				// Packet should be forwarded - count it as matched
 				m.statsCollector.IncrementMatched()
+				// Note: VoIP processor doesn't provide filter IDs currently
 			} else if m.applicationFilter != nil {
 				// Fall back to application-layer filter if no custom processor
-				if !m.applicationFilter.MatchPacket(pktInfo.Packet) {
+				// Use MatchPacketWithIDs to get filter IDs for LI correlation
+				matched, filterIDs := m.applicationFilter.MatchPacketWithIDs(pktInfo.Packet)
+				if !matched {
 					// Packet didn't match application filter - skip it
 					continue
 				}
-				// Packet matched - count it
+				// Packet matched - count it and save filter IDs
 				m.statsCollector.IncrementMatched()
+				matchedFilterIDs = filterIDs
 			}
 
 			// Convert to protobuf packet
-			pbPkt := convertPacket(pktInfo)
+			pbPkt := convertPacket(pktInfo, matchedFilterIDs)
 
 			// Add to current batch with minimal lock duration
 			m.batchMu.Lock()
@@ -489,7 +496,8 @@ func (m *Manager) AddPacketToBatch(pbPkt *data.CapturedPacket) bool {
 }
 
 // convertPacket converts capture.PacketInfo to protobuf format
-func convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket {
+// matchedFilterIDs contains IDs of filters that matched this packet (for LI correlation)
+func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *data.CapturedPacket {
 	pkt := pktInfo.Packet
 
 	captureLen := 0
@@ -509,13 +517,14 @@ func convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket {
 
 	// Packet field conversions (safe: lengths are from pcap, LinkType is enum < 300)
 	return &data.CapturedPacket{
-		Data:           packetData,
-		TimestampNs:    time.Now().UnixNano(),
-		CaptureLength:  uint32(captureLen),  // #nosec G115
-		OriginalLength: uint32(originalLen), // #nosec G115
-		InterfaceIndex: 0,
-		LinkType:       uint32(pktInfo.LinkType), // #nosec G115
-		InterfaceName:  pktInfo.Interface,
+		Data:             packetData,
+		TimestampNs:      time.Now().UnixNano(),
+		CaptureLength:    uint32(captureLen),  // #nosec G115
+		OriginalLength:   uint32(originalLen), // #nosec G115
+		InterfaceIndex:   0,
+		LinkType:         uint32(pktInfo.LinkType), // #nosec G115
+		InterfaceName:    pktInfo.Interface,
+		MatchedFilterIds: matchedFilterIDs, // For LI correlation
 	}
 }
 

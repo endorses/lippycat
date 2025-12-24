@@ -242,15 +242,23 @@ func (s *LocalSource) batchingLoop() {
 			filter := s.appFilter
 			s.mu.Unlock()
 
+			var matchedFilterIDs []string
 			if filter != nil {
-				if !filter.MatchPacket(pktInfo.Packet) {
+				matched, filterIDs := filter.MatchPacketWithIDs(pktInfo.Packet)
+				if !matched {
 					// Packet filtered out
 					continue
 				}
+				matchedFilterIDs = filterIDs
 			}
 
 			// Convert to protobuf format
 			pbPkt := convertPacketInfo(pktInfo)
+
+			// Set matched filter IDs for LI correlation
+			if len(matchedFilterIDs) > 0 {
+				pbPkt.MatchedFilterIds = matchedFilterIDs
+			}
 
 			// Update stats
 			s.stats.AddPacket(uint64(len(pbPkt.Data)))

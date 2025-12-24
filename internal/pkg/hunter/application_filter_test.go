@@ -690,18 +690,25 @@ func TestIPFilterOptimization(t *testing.T) {
 		assert.NoError(t, err)
 
 		filters := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "10.0.0.1"},
+			{Id: "filter-1", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},
+			{Id: "filter-2", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "10.0.0.1"},
 		}
 		af.UpdateFilters(filters)
 
-		// Test matching IPs
-		assert.True(t, af.matchSingleIP(mustParseAddr("192.168.1.1")), "Should match 192.168.1.1")
-		assert.True(t, af.matchSingleIP(mustParseAddr("10.0.0.1")), "Should match 10.0.0.1")
+		// Test matching IPs (matchSingleIP now returns (filterID, matched))
+		filterID, matched := af.matchSingleIP(mustParseAddr("192.168.1.1"))
+		assert.True(t, matched, "Should match 192.168.1.1")
+		assert.Equal(t, "filter-1", filterID, "Should return correct filter ID")
+
+		filterID, matched = af.matchSingleIP(mustParseAddr("10.0.0.1"))
+		assert.True(t, matched, "Should match 10.0.0.1")
+		assert.Equal(t, "filter-2", filterID, "Should return correct filter ID")
 
 		// Test non-matching IPs
-		assert.False(t, af.matchSingleIP(mustParseAddr("192.168.1.2")), "Should not match 192.168.1.2")
-		assert.False(t, af.matchSingleIP(mustParseAddr("8.8.8.8")), "Should not match 8.8.8.8")
+		_, matched = af.matchSingleIP(mustParseAddr("192.168.1.2"))
+		assert.False(t, matched, "Should not match 192.168.1.2")
+		_, matched = af.matchSingleIP(mustParseAddr("8.8.8.8"))
+		assert.False(t, matched, "Should not match 8.8.8.8")
 	})
 
 	t.Run("matchSingleIP matches CIDR IPv4", func(t *testing.T) {
@@ -709,24 +716,32 @@ func TestIPFilterOptimization(t *testing.T) {
 		assert.NoError(t, err)
 
 		filters := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "10.0.0.0/8"},     // Class A
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.0.0/16"}, // Class C private
+			{Id: "cidr-10", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "10.0.0.0/8"},      // Class A
+			{Id: "cidr-192", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.0.0/16"}, // Class C private
 		}
 		af.UpdateFilters(filters)
 
 		// Test IPs within 10.0.0.0/8
-		assert.True(t, af.matchSingleIP(mustParseAddr("10.0.0.1")), "10.0.0.1 should match 10.0.0.0/8")
-		assert.True(t, af.matchSingleIP(mustParseAddr("10.255.255.255")), "10.255.255.255 should match 10.0.0.0/8")
-		assert.True(t, af.matchSingleIP(mustParseAddr("10.123.45.67")), "10.123.45.67 should match 10.0.0.0/8")
+		_, matched := af.matchSingleIP(mustParseAddr("10.0.0.1"))
+		assert.True(t, matched, "10.0.0.1 should match 10.0.0.0/8")
+		_, matched = af.matchSingleIP(mustParseAddr("10.255.255.255"))
+		assert.True(t, matched, "10.255.255.255 should match 10.0.0.0/8")
+		_, matched = af.matchSingleIP(mustParseAddr("10.123.45.67"))
+		assert.True(t, matched, "10.123.45.67 should match 10.0.0.0/8")
 
 		// Test IPs within 192.168.0.0/16
-		assert.True(t, af.matchSingleIP(mustParseAddr("192.168.0.1")), "192.168.0.1 should match 192.168.0.0/16")
-		assert.True(t, af.matchSingleIP(mustParseAddr("192.168.255.255")), "192.168.255.255 should match 192.168.0.0/16")
+		_, matched = af.matchSingleIP(mustParseAddr("192.168.0.1"))
+		assert.True(t, matched, "192.168.0.1 should match 192.168.0.0/16")
+		_, matched = af.matchSingleIP(mustParseAddr("192.168.255.255"))
+		assert.True(t, matched, "192.168.255.255 should match 192.168.0.0/16")
 
 		// Test IPs outside both CIDRs
-		assert.False(t, af.matchSingleIP(mustParseAddr("11.0.0.1")), "11.0.0.1 should not match")
-		assert.False(t, af.matchSingleIP(mustParseAddr("8.8.8.8")), "8.8.8.8 should not match")
-		assert.False(t, af.matchSingleIP(mustParseAddr("192.169.0.1")), "192.169.0.1 should not match 192.168.0.0/16")
+		_, matched = af.matchSingleIP(mustParseAddr("11.0.0.1"))
+		assert.False(t, matched, "11.0.0.1 should not match")
+		_, matched = af.matchSingleIP(mustParseAddr("8.8.8.8"))
+		assert.False(t, matched, "8.8.8.8 should not match")
+		_, matched = af.matchSingleIP(mustParseAddr("192.169.0.1"))
+		assert.False(t, matched, "192.169.0.1 should not match 192.168.0.0/16")
 	})
 
 	t.Run("matchSingleIP matches exact IPv6", func(t *testing.T) {
@@ -734,18 +749,22 @@ func TestIPFilterOptimization(t *testing.T) {
 		assert.NoError(t, err)
 
 		filters := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "2001:db8::1"},
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "::1"},
+			{Id: "ipv6-1", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "2001:db8::1"},
+			{Id: "ipv6-2", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "::1"},
 		}
 		af.UpdateFilters(filters)
 
 		// Test matching IPs
-		assert.True(t, af.matchSingleIP(mustParseAddr("2001:db8::1")), "Should match 2001:db8::1")
-		assert.True(t, af.matchSingleIP(mustParseAddr("::1")), "Should match ::1")
+		_, matched := af.matchSingleIP(mustParseAddr("2001:db8::1"))
+		assert.True(t, matched, "Should match 2001:db8::1")
+		_, matched = af.matchSingleIP(mustParseAddr("::1"))
+		assert.True(t, matched, "Should match ::1")
 
 		// Test non-matching IPs
-		assert.False(t, af.matchSingleIP(mustParseAddr("2001:db8::2")), "Should not match 2001:db8::2")
-		assert.False(t, af.matchSingleIP(mustParseAddr("::2")), "Should not match ::2")
+		_, matched = af.matchSingleIP(mustParseAddr("2001:db8::2"))
+		assert.False(t, matched, "Should not match 2001:db8::2")
+		_, matched = af.matchSingleIP(mustParseAddr("::2"))
+		assert.False(t, matched, "Should not match ::2")
 	})
 
 	t.Run("matchSingleIP matches CIDR IPv6", func(t *testing.T) {
@@ -753,22 +772,28 @@ func TestIPFilterOptimization(t *testing.T) {
 		assert.NoError(t, err)
 
 		filters := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "2001:db8::/32"},
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "fe80::/10"},
+			{Id: "cidr-2001", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "2001:db8::/32"},
+			{Id: "cidr-fe80", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "fe80::/10"},
 		}
 		af.UpdateFilters(filters)
 
 		// Test IPs within 2001:db8::/32
-		assert.True(t, af.matchSingleIP(mustParseAddr("2001:db8::1")), "2001:db8::1 should match 2001:db8::/32")
-		assert.True(t, af.matchSingleIP(mustParseAddr("2001:db8:abcd::1")), "2001:db8:abcd::1 should match 2001:db8::/32")
+		_, matched := af.matchSingleIP(mustParseAddr("2001:db8::1"))
+		assert.True(t, matched, "2001:db8::1 should match 2001:db8::/32")
+		_, matched = af.matchSingleIP(mustParseAddr("2001:db8:abcd::1"))
+		assert.True(t, matched, "2001:db8:abcd::1 should match 2001:db8::/32")
 
 		// Test IPs within fe80::/10 (link-local)
-		assert.True(t, af.matchSingleIP(mustParseAddr("fe80::1")), "fe80::1 should match fe80::/10")
-		assert.True(t, af.matchSingleIP(mustParseAddr("febf::1")), "febf::1 should match fe80::/10")
+		_, matched = af.matchSingleIP(mustParseAddr("fe80::1"))
+		assert.True(t, matched, "fe80::1 should match fe80::/10")
+		_, matched = af.matchSingleIP(mustParseAddr("febf::1"))
+		assert.True(t, matched, "febf::1 should match fe80::/10")
 
 		// Test IPs outside CIDRs
-		assert.False(t, af.matchSingleIP(mustParseAddr("2001:db9::1")), "2001:db9::1 should not match 2001:db8::/32")
-		assert.False(t, af.matchSingleIP(mustParseAddr("fec0::1")), "fec0::1 should not match fe80::/10")
+		_, matched = af.matchSingleIP(mustParseAddr("2001:db9::1"))
+		assert.False(t, matched, "2001:db9::1 should not match 2001:db8::/32")
+		_, matched = af.matchSingleIP(mustParseAddr("fec0::1"))
+		assert.False(t, matched, "fec0::1 should not match fe80::/10")
 	})
 
 	t.Run("matchSingleIP prioritizes exact match over CIDR", func(t *testing.T) {
@@ -776,14 +801,20 @@ func TestIPFilterOptimization(t *testing.T) {
 		assert.NoError(t, err)
 
 		filters := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},    // exact
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.0.0/16"}, // CIDR
+			{Id: "exact-ip", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},   // exact
+			{Id: "cidr-ip", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.0.0/16"}, // CIDR
 		}
 		af.UpdateFilters(filters)
 
-		// Both exact and CIDR should work
-		assert.True(t, af.matchSingleIP(mustParseAddr("192.168.1.1")), "Exact IP should match")
-		assert.True(t, af.matchSingleIP(mustParseAddr("192.168.1.2")), "IP in CIDR should match")
+		// Exact IP should match with exact filter (checked first)
+		filterID, matched := af.matchSingleIP(mustParseAddr("192.168.1.1"))
+		assert.True(t, matched, "Exact IP should match")
+		assert.Equal(t, "exact-ip", filterID, "Should match exact filter first")
+
+		// IP in CIDR range should match CIDR filter
+		filterID, matched = af.matchSingleIP(mustParseAddr("192.168.1.2"))
+		assert.True(t, matched, "IP in CIDR should match")
+		assert.Equal(t, "cidr-ip", filterID, "Should match CIDR filter")
 	})
 
 	t.Run("UpdateFilters clears previous filters", func(t *testing.T) {
@@ -792,19 +823,23 @@ func TestIPFilterOptimization(t *testing.T) {
 
 		// First update
 		filters1 := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},
+			{Id: "filter-old", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},
 		}
 		af.UpdateFilters(filters1)
-		assert.True(t, af.matchSingleIP(mustParseAddr("192.168.1.1")), "Should match after first update")
+		_, matched := af.matchSingleIP(mustParseAddr("192.168.1.1"))
+		assert.True(t, matched, "Should match after first update")
 
 		// Second update with different IP
 		filters2 := []*management.Filter{
-			{Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "10.0.0.1"},
+			{Id: "filter-new", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "10.0.0.1"},
 		}
 		af.UpdateFilters(filters2)
 
-		assert.False(t, af.matchSingleIP(mustParseAddr("192.168.1.1")), "Old IP should not match after update")
-		assert.True(t, af.matchSingleIP(mustParseAddr("10.0.0.1")), "New IP should match after update")
+		_, matched = af.matchSingleIP(mustParseAddr("192.168.1.1"))
+		assert.False(t, matched, "Old IP should not match after update")
+		filterID, matched := af.matchSingleIP(mustParseAddr("10.0.0.1"))
+		assert.True(t, matched, "New IP should match after update")
+		assert.Equal(t, "filter-new", filterID, "Should return new filter ID")
 	})
 }
 
@@ -815,4 +850,137 @@ func mustParseAddr(s string) netip.Addr {
 		panic(err)
 	}
 	return addr
+}
+
+func TestMatchWithCPUAndReturnIDs(t *testing.T) {
+	t.Run("returns filter IDs for SIPUser matches", func(t *testing.T) {
+		af, err := NewApplicationFilter(nil)
+		assert.NoError(t, err)
+
+		filters := []*management.Filter{
+			{Id: "sip-alice", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"},
+			{Id: "sip-bob", Type: management.FilterType_FILTER_SIP_USER, Pattern: "bob"},
+		}
+		af.UpdateFilters(filters)
+
+		payload := []byte(`INVITE sip:someone@example.com SIP/2.0
+From: Alice <sip:alice@example.com>;tag=123
+To: Bob <sip:bob@example.com>
+Call-ID: abc123
+`)
+
+		matchedIDs := af.matchWithCPUAndReturnIDs(payload)
+		assert.Contains(t, matchedIDs, "sip-alice", "Should contain alice filter ID")
+		assert.Contains(t, matchedIDs, "sip-bob", "Should contain bob filter ID")
+	})
+
+	t.Run("returns filter IDs for PhoneNumber matches", func(t *testing.T) {
+		af, err := NewApplicationFilter(nil)
+		assert.NoError(t, err)
+
+		filters := []*management.Filter{
+			{Id: "phone-target", Type: management.FilterType_FILTER_PHONE_NUMBER, Pattern: "49123456789"},
+		}
+		af.UpdateFilters(filters)
+
+		payload := []byte(`INVITE sip:+49123456789@carrier.com SIP/2.0
+From: <sip:+49123456789@carrier.com>;tag=123
+To: <sip:dest@example.com>
+Call-ID: abc123
+`)
+
+		matchedIDs := af.matchWithCPUAndReturnIDs(payload)
+		assert.Contains(t, matchedIDs, "phone-target", "Should contain phone number filter ID")
+	})
+
+	t.Run("returns filter IDs for SIPURI matches", func(t *testing.T) {
+		af, err := NewApplicationFilter(nil)
+		assert.NoError(t, err)
+
+		filters := []*management.Filter{
+			{Id: "uri-alice", Type: management.FilterType_FILTER_SIP_URI, Pattern: "alice@example.com"},
+		}
+		af.UpdateFilters(filters)
+
+		payload := []byte(`INVITE sip:robb@example.com SIP/2.0
+From: Alice <sip:alice@example.com>;tag=123
+To: <sip:robb@example.com>
+Call-ID: abc123
+`)
+
+		matchedIDs := af.matchWithCPUAndReturnIDs(payload)
+		assert.Contains(t, matchedIDs, "uri-alice", "Should contain SIPURI filter ID")
+	})
+
+	t.Run("returns empty for no matches", func(t *testing.T) {
+		af, err := NewApplicationFilter(nil)
+		assert.NoError(t, err)
+
+		filters := []*management.Filter{
+			{Id: "sip-target", Type: management.FilterType_FILTER_SIP_USER, Pattern: "target"},
+		}
+		af.UpdateFilters(filters)
+
+		payload := []byte(`INVITE sip:other@example.com SIP/2.0
+From: Someone <sip:someone@example.com>;tag=123
+To: <sip:other@example.com>
+Call-ID: abc123
+`)
+
+		matchedIDs := af.matchWithCPUAndReturnIDs(payload)
+		assert.Empty(t, matchedIDs, "Should not match non-target users")
+	})
+
+	t.Run("deduplicates filter IDs", func(t *testing.T) {
+		af, err := NewApplicationFilter(nil)
+		assert.NoError(t, err)
+
+		// Same user appears in multiple headers - should only return filter ID once
+		filters := []*management.Filter{
+			{Id: "sip-alice", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"},
+		}
+		af.UpdateFilters(filters)
+
+		payload := []byte(`INVITE sip:alice@example.com SIP/2.0
+From: Alice <sip:alice@example.com>;tag=123
+To: <sip:alice@example.com>
+P-Asserted-Identity: <sip:alice@example.com>
+Call-ID: abc123
+`)
+
+		matchedIDs := af.matchWithCPUAndReturnIDs(payload)
+		assert.Len(t, matchedIDs, 1, "Should deduplicate filter IDs")
+		assert.Equal(t, "sip-alice", matchedIDs[0])
+	})
+}
+
+func TestFilterIDMappings(t *testing.T) {
+	t.Run("UpdateFilters populates filter ID mappings", func(t *testing.T) {
+		af, err := NewApplicationFilter(nil)
+		assert.NoError(t, err)
+
+		filters := []*management.Filter{
+			{Id: "sip-alice", Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"},
+			{Id: "phone-target", Type: management.FilterType_FILTER_PHONE_NUMBER, Pattern: "49123456789"},
+			{Id: "uri-bob", Type: management.FilterType_FILTER_SIP_URI, Pattern: "bob@example.com"},
+			{Id: "ip-server", Type: management.FilterType_FILTER_IP_ADDRESS, Pattern: "192.168.1.1"},
+		}
+		af.UpdateFilters(filters)
+
+		// Verify AC pattern to filter ID mapping
+		assert.NotEmpty(t, af.acPatternToFilterID, "AC pattern mapping should be populated")
+
+		// Verify phone number to filter ID mapping
+		assert.Contains(t, af.phoneNumberToFilterID, "49123456789", "Phone number mapping should be populated")
+		assert.Equal(t, "phone-target", af.phoneNumberToFilterID["49123456789"])
+
+		// Verify SIPURI pattern to filter ID mapping
+		assert.NotEmpty(t, af.sipURIPatternToFilterID, "SIPURI pattern mapping should be populated")
+
+		// Verify IP filter ID in hash map
+		addr := mustParseAddr("192.168.1.1")
+		filterID, exists := af.exactIPv4[addr]
+		assert.True(t, exists, "IP should be in exactIPv4")
+		assert.Equal(t, "ip-server", filterID, "IP filter ID should be stored")
+	})
 }

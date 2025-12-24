@@ -189,6 +189,11 @@ func (m *mockAppFilter) MatchPacket(_ gopacket.Packet) bool {
 	return m.matchAll
 }
 
+func (m *mockAppFilter) MatchPacketWithIDs(_ gopacket.Packet) (bool, []string) {
+	m.calls++
+	return m.matchAll, nil
+}
+
 func TestLocalSource_ImplementsPacketSource(t *testing.T) {
 	// Compile-time check is in the source file, but let's verify at runtime too
 	var _ PacketSource = (*LocalSource)(nil)

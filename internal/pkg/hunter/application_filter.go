@@ -20,6 +20,7 @@ import (
 
 // parsedFilter holds a parsed pattern with its type for matching
 type parsedFilter struct {
+	id          string                // Filter ID from management.Filter (for LI correlation)
 	original    string                // Original pattern from user (for logging)
 	pattern     string                // Parsed pattern (wildcards stripped)
 	patternType filtering.PatternType // Type of matching (prefix, suffix, contains)
@@ -43,12 +44,17 @@ type ApplicationFilter struct {
 	sipURIPatterns []ahocorasick.Pattern        // AC patterns for SIPURI matching (user@domain)
 	sipURIMatcher  *ahocorasick.BufferedMatcher // Separate Aho-Corasick matcher for SIPURI matching
 
+	// Filter ID mappings for LI correlation
+	acPatternToFilterID     map[int]string    // AC pattern ID -> filter ID (for SIPUser/PhoneNumber AC patterns)
+	phoneNumberToFilterID   map[string]string // Normalized phone number -> filter ID (for PhoneNumberMatcher)
+	sipURIPatternToFilterID map[int]string    // SIPURI AC pattern ID -> filter ID
+
 	// IP filter data structures for O(1) exact matching and O(prefix) CIDR matching
-	exactIPv4      map[netip.Addr]struct{}         // Hash map for O(1) exact IPv4 lookup
-	exactIPv6      map[netip.Addr]struct{}         // Hash map for O(1) exact IPv6 lookup
-	cidrTreeV4     *generics_tree.TreeV4[struct{}] // Radix tree for IPv4 CIDR matching
-	cidrTreeV6     *generics_tree.TreeV6[struct{}] // Radix tree for IPv6 CIDR matching
-	hasCIDRFilters bool                            // Whether any CIDR filters are present
+	exactIPv4      map[netip.Addr]string         // Hash map for O(1) exact IPv4 lookup (value = filter ID)
+	exactIPv6      map[netip.Addr]string         // Hash map for O(1) exact IPv6 lookup (value = filter ID)
+	cidrTreeV4     *generics_tree.TreeV4[string] // Radix tree for IPv4 CIDR matching (tag = filter ID)
+	cidrTreeV6     *generics_tree.TreeV6[string] // Radix tree for IPv6 CIDR matching (tag = filter ID)
+	hasCIDRFilters bool                          // Whether any CIDR filters are present
 
 	mu               sync.RWMutex
 	enabled          bool
@@ -73,25 +79,28 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 	}
 
 	af := &ApplicationFilter{
-		config:         config,
-		detector:       detector.InitDefault(), // Use centralized detector for accurate protocol detection
-		sipUsers:       make([]parsedFilter, 0),
-		sipURIs:        make([]parsedFilter, 0),
-		phoneNumbers:   make([]parsedFilter, 0),
-		ipAddresses:    make([]string, 0),
-		patterns:       make([]voip.GPUPattern, 0),
-		acPatterns:     make([]ahocorasick.Pattern, 0),
-		acMatcher:      ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick for SIP users
-		phoneMatcher:   phonematcher.New(),                                       // Bloom+hash for phone numbers (LI-optimized)
-		sipURIPatterns: make([]ahocorasick.Pattern, 0),
-		sipURIMatcher:  ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
-		exactIPv4:      make(map[netip.Addr]struct{}),
-		exactIPv6:      make(map[netip.Addr]struct{}),
-		cidrTreeV4:     generics_tree.NewTreeV4[struct{}](),
-		cidrTreeV6:     generics_tree.NewTreeV6[struct{}](),
-		hasCIDRFilters: false,
-		enabled:        config != nil && config.Enabled,
-		gpuACBuilt:     false,
+		config:                  config,
+		detector:                detector.InitDefault(), // Use centralized detector for accurate protocol detection
+		sipUsers:                make([]parsedFilter, 0),
+		sipURIs:                 make([]parsedFilter, 0),
+		phoneNumbers:            make([]parsedFilter, 0),
+		ipAddresses:             make([]string, 0),
+		patterns:                make([]voip.GPUPattern, 0),
+		acPatterns:              make([]ahocorasick.Pattern, 0),
+		acMatcher:               ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick for SIP users
+		phoneMatcher:            phonematcher.New(),                                       // Bloom+hash for phone numbers (LI-optimized)
+		sipURIPatterns:          make([]ahocorasick.Pattern, 0),
+		sipURIMatcher:           ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
+		acPatternToFilterID:     make(map[int]string),
+		phoneNumberToFilterID:   make(map[string]string),
+		sipURIPatternToFilterID: make(map[int]string),
+		exactIPv4:               make(map[netip.Addr]string),
+		exactIPv6:               make(map[netip.Addr]string),
+		cidrTreeV4:              generics_tree.NewTreeV4[string](),
+		cidrTreeV6:              generics_tree.NewTreeV6[string](),
+		hasCIDRFilters:          false,
+		enabled:                 config != nil && config.Enabled,
+		gpuACBuilt:              false,
 	}
 
 	// Initialize GPU accelerator if enabled
@@ -151,11 +160,16 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	af.gpuSIPURIACBuilt = false
 
 	// Reset IP filter data structures
-	af.exactIPv4 = make(map[netip.Addr]struct{})
-	af.exactIPv6 = make(map[netip.Addr]struct{})
-	af.cidrTreeV4 = generics_tree.NewTreeV4[struct{}]()
-	af.cidrTreeV6 = generics_tree.NewTreeV6[struct{}]()
+	af.exactIPv4 = make(map[netip.Addr]string)
+	af.exactIPv6 = make(map[netip.Addr]string)
+	af.cidrTreeV4 = generics_tree.NewTreeV4[string]()
+	af.cidrTreeV6 = generics_tree.NewTreeV6[string]()
 	af.hasCIDRFilters = false
+
+	// Reset filter ID mappings
+	af.acPatternToFilterID = make(map[int]string)
+	af.phoneNumberToFilterID = make(map[string]string)
+	af.sipURIPatternToFilterID = make(map[int]string)
 
 	// Build new filter lists
 	// Note: BPF filters are NOT handled here - they require capture restart
@@ -168,6 +182,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			gpuType := filteringToGPUPatternType(patternType)
 
 			af.sipUsers = append(af.sipUsers, parsedFilter{
+				id:          filter.Id,
 				original:    filter.Pattern,
 				pattern:     pattern,
 				patternType: patternType,
@@ -189,6 +204,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			gpuType := filteringToGPUPatternType(patternType)
 
 			af.phoneNumbers = append(af.phoneNumbers, parsedFilter{
+				id:          filter.Id,
 				original:    filter.Pattern,
 				pattern:     pattern,
 				patternType: patternType,
@@ -216,31 +232,31 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 				if prefix.Addr().Is4() {
 					ipv4Addr, _, _ := patricia.ParseFromNetIPPrefix(prefix)
 					if ipv4Addr != nil {
-						af.cidrTreeV4.Set(*ipv4Addr, struct{}{})
+						af.cidrTreeV4.Set(*ipv4Addr, filter.Id)
 						af.hasCIDRFilters = true
 					}
 				} else {
 					_, ipv6Addr, _ := patricia.ParseFromNetIPPrefix(prefix)
 					if ipv6Addr != nil {
-						af.cidrTreeV6.Set(*ipv6Addr, struct{}{})
+						af.cidrTreeV6.Set(*ipv6Addr, filter.Id)
 						af.hasCIDRFilters = true
 					}
 				}
 			} else if addr, err := netip.ParseAddr(filter.Pattern); err == nil {
 				// Exact IP address - add to hash map for O(1) lookup
 				if addr.Is4() {
-					af.exactIPv4[addr] = struct{}{}
+					af.exactIPv4[addr] = filter.Id
 				} else {
-					af.exactIPv6[addr] = struct{}{}
+					af.exactIPv6[addr] = filter.Id
 				}
 			} else {
 				// Legacy fallback: try net.ParseIP for non-standard formats
 				if ip := net.ParseIP(filter.Pattern); ip != nil {
 					if addr, ok := netip.AddrFromSlice(ip); ok {
 						if addr.Is4() {
-							af.exactIPv4[addr.Unmap()] = struct{}{}
+							af.exactIPv4[addr.Unmap()] = filter.Id
 						} else {
-							af.exactIPv6[addr] = struct{}{}
+							af.exactIPv6[addr] = filter.Id
 						}
 					}
 				} else {
@@ -255,6 +271,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			gpuType := filteringToGPUPatternType(patternType)
 
 			af.sipURIs = append(af.sipURIs, parsedFilter{
+				id:          filter.Id,
 				original:    filter.Pattern,
 				pattern:     pattern,
 				patternType: patternType,
@@ -283,11 +300,14 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 
 	// Add SIP user patterns to AC
 	for i, f := range af.sipUsers {
+		patternID := i
 		af.acPatterns = append(af.acPatterns, ahocorasick.Pattern{
-			ID:   i,
+			ID:   patternID,
 			Text: f.pattern,
 			Type: f.patternType,
 		})
+		// Map AC pattern ID to filter ID for LI correlation
+		af.acPatternToFilterID[patternID] = f.id
 	}
 
 	// Separate phone numbers:
@@ -298,14 +318,19 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	for i, f := range af.phoneNumbers {
 		if f.patternType != filtering.PatternTypeContains || !phonematcher.IsDigitsOnly(f.pattern) {
 			// Wildcard pattern OR non-digit pattern - use AC for substring/wildcard matching
+			patternID := baseID + i
 			af.acPatterns = append(af.acPatterns, ahocorasick.Pattern{
-				ID:   baseID + i,
+				ID:   patternID,
 				Text: f.pattern,
 				Type: f.patternType,
 			})
+			// Map AC pattern ID to filter ID for LI correlation
+			af.acPatternToFilterID[patternID] = f.id
 		} else {
 			// Pure digit pattern (LI use case) - use PhoneNumberMatcher
 			exactPhonePatterns = append(exactPhonePatterns, f.pattern)
+			// Map normalized phone number to filter ID for LI correlation
+			af.phoneNumberToFilterID[f.pattern] = f.id
 		}
 	}
 
@@ -319,11 +344,14 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	// Build SIPURI AC patterns (separate automaton for user@domain matching)
 	af.sipURIPatterns = make([]ahocorasick.Pattern, 0, len(af.sipURIs))
 	for i, f := range af.sipURIs {
+		patternID := i
 		af.sipURIPatterns = append(af.sipURIPatterns, ahocorasick.Pattern{
-			ID:   i,
+			ID:   patternID,
 			Text: f.pattern,
 			Type: f.patternType,
 		})
+		// Map SIPURI AC pattern ID to filter ID for LI correlation
+		af.sipURIPatternToFilterID[patternID] = f.id
 	}
 
 	// Trigger background rebuild of SIPURI AC automaton
@@ -375,7 +403,7 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 	// Check IP addresses first (applies to all protocols)
 	if len(af.ipAddresses) > 0 {
-		if af.matchIPAddress(packet) {
+		if af.matchIPAddressBool(packet) {
 			return true
 		}
 		// If we have ONLY IP filters (no VoIP filters), don't continue to VoIP checks
@@ -405,6 +433,146 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 	// CPU fallback
 	return af.matchWithCPU(string(payload))
+}
+
+// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
+// This method is used for LI correlation - it returns which specific filters matched
+// so the LI Manager can look up the corresponding intercept task XIDs.
+func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []string) {
+	af.mu.RLock()
+	defer af.mu.RUnlock()
+
+	var matchedFilterIDs []string
+
+	// If no filters, match everything (but no specific filter IDs)
+	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 && len(af.ipAddresses) == 0 {
+		return true, nil
+	}
+
+	// Check IP addresses first (applies to all protocols)
+	if len(af.ipAddresses) > 0 {
+		ipFilterIDs := af.matchIPAddress(packet)
+		if len(ipFilterIDs) > 0 {
+			matchedFilterIDs = append(matchedFilterIDs, ipFilterIDs...)
+		}
+		// If we have ONLY IP filters (no VoIP filters), return now
+		if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
+			return len(matchedFilterIDs) > 0, matchedFilterIDs
+		}
+	}
+
+	// Check if this is a SIP or RTP packet
+	if !af.isVoIPPacket(packet) {
+		return len(matchedFilterIDs) > 0, matchedFilterIDs
+	}
+
+	// Get payload - use LayerContents() to get full message including headers
+	appLayer := packet.ApplicationLayer()
+	if appLayer == nil {
+		return len(matchedFilterIDs) > 0, matchedFilterIDs
+	}
+
+	payload := appLayer.LayerContents()
+
+	// Match VoIP filters and collect filter IDs
+	voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
+	matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
+
+	return len(matchedFilterIDs) > 0, matchedFilterIDs
+}
+
+// matchWithCPUAndReturnIDs uses CPU matching and returns matched filter IDs.
+// This is used by MatchPacketWithIDs for LI correlation.
+func (af *ApplicationFilter) matchWithCPUAndReturnIDs(payload []byte) []string {
+	var matchedFilterIDs []string
+	seen := make(map[string]bool) // Deduplicate filter IDs
+
+	// Extract SIP headers for proper matching
+	sipHeaders := extractSIPHeaders(payload)
+
+	// Extract usernames for SIPUser and PhoneNumber matching
+	var usernames []string
+	if len(af.sipUsers) > 0 || len(af.phoneNumbers) > 0 {
+		usernames = make([]string, 0, 3)
+		if len(sipHeaders.from) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
+				usernames = append(usernames, user)
+			}
+		}
+		if len(sipHeaders.to) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
+				usernames = append(usernames, user)
+			}
+		}
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+				usernames = append(usernames, user)
+			}
+		}
+	}
+
+	// SIPUser + wildcard PhoneNumber matching: use Aho-Corasick with ID tracking
+	if len(af.acPatterns) > 0 && len(usernames) > 0 {
+		for _, username := range usernames {
+			results := af.acMatcher.Match([]byte(username))
+			for _, result := range results {
+				if filterID, ok := af.acPatternToFilterID[result.PatternID]; ok && filterID != "" {
+					if !seen[filterID] {
+						seen[filterID] = true
+						matchedFilterIDs = append(matchedFilterIDs, filterID)
+					}
+				}
+			}
+		}
+	}
+
+	// Exact PhoneNumber matching: use PhoneNumberMatcher
+	if af.phoneMatcher.Size() > 0 && len(usernames) > 0 {
+		for _, username := range usernames {
+			if matchedPhone, ok := af.phoneMatcher.Match(username); ok {
+				if filterID, found := af.phoneNumberToFilterID[matchedPhone]; found && filterID != "" {
+					if !seen[filterID] {
+						seen[filterID] = true
+						matchedFilterIDs = append(matchedFilterIDs, filterID)
+					}
+				}
+			}
+		}
+	}
+
+	// SIPURI matching: extract user@domain, use exact/contains matching
+	if len(af.sipURIs) > 0 {
+		sipURIValues := make([]string, 0, 3)
+		if len(sipHeaders.from) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+		if len(sipHeaders.to) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+
+		for _, uri := range sipURIValues {
+			results := af.sipURIMatcher.Match([]byte(uri))
+			for _, result := range results {
+				if filterID, ok := af.sipURIPatternToFilterID[result.PatternID]; ok && filterID != "" {
+					if !seen[filterID] {
+						seen[filterID] = true
+						matchedFilterIDs = append(matchedFilterIDs, filterID)
+					}
+				}
+			}
+		}
+	}
+
+	return matchedFilterIDs
 }
 
 // MatchBatch checks multiple packets using GPU acceleration
@@ -841,10 +1009,11 @@ func extractHeaderValue(line []byte) []byte {
 
 // matchIPAddress checks if packet source or destination IP matches any filter
 // Uses O(1) hash map lookup for exact IPs and O(prefix) radix tree for CIDRs
-func (af *ApplicationFilter) matchIPAddress(packet gopacket.Packet) bool {
+// Returns matched filter IDs
+func (af *ApplicationFilter) matchIPAddress(packet gopacket.Packet) []string {
 	netLayer := packet.NetworkLayer()
 	if netLayer == nil {
-		return false
+		return nil
 	}
 
 	// Get raw IP bytes (4 bytes for IPv4, 16 bytes for IPv6)
@@ -855,26 +1024,38 @@ func (af *ApplicationFilter) matchIPAddress(packet gopacket.Packet) bool {
 	srcAddr, srcOk := netip.AddrFromSlice(srcIPBytes)
 	dstAddr, dstOk := netip.AddrFromSlice(dstIPBytes)
 
+	var matchedIDs []string
+
 	// Check source IP
 	if srcOk {
-		if af.matchSingleIP(srcAddr) {
-			return true
+		if filterID, matched := af.matchSingleIP(srcAddr); matched {
+			matchedIDs = append(matchedIDs, filterID)
 		}
 	}
 
 	// Check destination IP
 	if dstOk {
-		if af.matchSingleIP(dstAddr) {
-			return true
+		if filterID, matched := af.matchSingleIP(dstAddr); matched {
+			// Avoid duplicates if same filter matches both src and dst
+			if len(matchedIDs) == 0 || matchedIDs[0] != filterID {
+				matchedIDs = append(matchedIDs, filterID)
+			}
 		}
 	}
 
-	return false
+	return matchedIDs
+}
+
+// matchIPAddressBool checks if packet source or destination IP matches any filter
+// Returns true if any filter matches (for backward compatibility)
+func (af *ApplicationFilter) matchIPAddressBool(packet gopacket.Packet) bool {
+	return len(af.matchIPAddress(packet)) > 0
 }
 
 // matchSingleIP checks if a single IP address matches any filter (exact or CIDR)
 // Uses O(1) hash map lookup for exact matches, O(prefix) radix tree for CIDRs
-func (af *ApplicationFilter) matchSingleIP(addr netip.Addr) bool {
+// Returns the matched filter ID if found, empty string otherwise
+func (af *ApplicationFilter) matchSingleIP(addr netip.Addr) (string, bool) {
 	// Normalize IPv4-mapped IPv6 addresses to plain IPv4
 	if addr.Is4In6() {
 		addr = addr.Unmap()
@@ -882,37 +1063,37 @@ func (af *ApplicationFilter) matchSingleIP(addr netip.Addr) bool {
 
 	if addr.Is4() {
 		// O(1) exact match check
-		if _, found := af.exactIPv4[addr]; found {
-			return true
+		if filterID, found := af.exactIPv4[addr]; found {
+			return filterID, true
 		}
 
 		// O(prefix) CIDR match check via radix tree
 		if af.hasCIDRFilters {
 			ipv4Addr, _, _ := patricia.ParseFromNetIPAddr(addr)
 			if ipv4Addr != nil {
-				if found, _ := af.cidrTreeV4.FindDeepestTag(*ipv4Addr); found {
-					return true
+				if found, filterID := af.cidrTreeV4.FindDeepestTag(*ipv4Addr); found {
+					return filterID, true
 				}
 			}
 		}
 	} else {
 		// O(1) exact match check
-		if _, found := af.exactIPv6[addr]; found {
-			return true
+		if filterID, found := af.exactIPv6[addr]; found {
+			return filterID, true
 		}
 
 		// O(prefix) CIDR match check via radix tree
 		if af.hasCIDRFilters {
 			_, ipv6Addr, _ := patricia.ParseFromNetIPAddr(addr)
 			if ipv6Addr != nil {
-				if found, _ := af.cidrTreeV6.FindDeepestTag(*ipv6Addr); found {
-					return true
+				if found, filterID := af.cidrTreeV6.FindDeepestTag(*ipv6Addr); found {
+					return filterID, true
 				}
 			}
 		}
 	}
 
-	return false
+	return "", false
 }
 
 // isVoIPPacket checks if a packet is SIP or RTP using centralized detector

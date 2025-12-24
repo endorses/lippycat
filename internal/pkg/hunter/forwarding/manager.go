@@ -25,7 +25,12 @@ type PacketProcessor interface {
 
 // ApplicationFilter provides application-layer packet filtering (protocol-agnostic)
 type ApplicationFilter interface {
+	// MatchPacket checks if a packet matches any filter.
 	MatchPacket(packet gopacket.Packet) bool
+
+	// MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
+	// Used for LI correlation to map matched filters back to intercept task XIDs.
+	MatchPacketWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
 }
 
 // StatsCollector provides access to hunter statistics

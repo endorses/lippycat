@@ -175,9 +175,9 @@ Leverage existing filter management system with Phase 0 enhancements.
 
 ### Step 1.5: Processor integration
 
-- [ ] Add `liManager *li.Manager` field to Processor
-- [ ] Wire LI processing into `processBatch()` pipeline (after VoIP aggregation)
-- [ ] Add LI config flags: `--li-enabled`, `--li-x1-listen`, `--li-admf-endpoint`
+- [x] Add `liManager *li.Manager` field to Processor
+- [x] Wire LI processing into `processBatch()` pipeline (after VoIP aggregation)
+- [x] Add LI config flags: `--li-enabled`, `--li-x1-listen`, `--li-admf-endpoint`
 
 ### Step 1.6: Build system
 

@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li verify-no-li
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li
 
 # Build variables
 BINARY_NAME=lc
@@ -83,6 +83,14 @@ tap-li:
 binaries-li: build-li processor-li tap-li
 	@echo "All LI binary variants built successfully:"
 	@ls -lh bin/*-li
+
+# Build tap with LI + CUDA support (standalone with GPU filtering + LI delivery)
+# Note: Hunters filter (need CUDA), processors deliver LI (need LI tag).
+#       Tap does both, so it's the only node type that benefits from LI+CUDA.
+tap-li-cuda: cuda-kernels
+	@echo "Building tap binary $(VERSION) with LI + CUDA support..."
+	@mkdir -p bin
+	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags tap,li,cuda -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tap-li-cuda
 
 # Verify non-LI builds exclude LI implementation code
 # Types are shared, but Registry/FilterManager are excluded via dead code elimination
@@ -255,6 +263,7 @@ help:
 	@echo "  make build-li       - Build complete suite with LI support"
 	@echo "  make processor-li   - Build processor with LI support"
 	@echo "  make tap-li         - Build tap with LI support"
+	@echo "  make tap-li-cuda    - Build tap with LI + CUDA (standalone GPU+LI)"
 	@echo "  make binaries-li    - Build all LI variants"
 	@echo "  make verify-no-li   - Verify non-LI builds exclude LI code"
 	@echo ""

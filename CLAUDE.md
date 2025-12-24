@@ -80,10 +80,14 @@ make dev           # ~31 MB
 
 # LI (Lawful Interception) builds - requires -tags li
 make build-li       # Complete suite with LI support
-make processor-li   # Processor with LI support
+make processor-li   # Processor with LI support (LI delivery)
 make tap-li         # Tap with LI support
+make tap-li-cuda    # Tap with LI + CUDA (standalone GPU filtering + LI)
 make binaries-li    # Build all LI variants
 make verify-no-li   # Verify non-LI builds exclude LI code
+
+# Note: Hunters filter (CUDA) but don't need LI. Processors deliver LI but don't filter.
+#       Only tap (standalone) benefits from both LI + CUDA.
 
 # Build with CUDA GPU acceleration
 make build-cuda

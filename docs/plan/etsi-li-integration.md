@@ -61,6 +61,44 @@ CIDR only works at BPF level (requires capture restart on changes).
 - [x] Unit tests for hash map and radix tree correctness
   - See `TestIPFilterOptimization` in `application_filter_test.go`
 
+### Step 0.3: PhoneNumberMatcher (LI-optimized phone number matching)
+
+Current SIPUser/PhoneNumber filter uses Aho-Corasick for pattern matching.
+For LI with thousands of phone numbers, a specialized approach is more efficient:
+- Phone numbers are structured (digits only after normalization)
+- Suffix matching handles varying prefixes (+49, 0049, routing codes)
+- 99%+ of traffic doesn't match → bloom filter for fast rejection
+
+**Why not Aho-Corasick for this use case:**
+- AC is for substring matching in unstructured text
+- SIP provides structured fields; parsing + suffix checking is simpler
+- Hash set lookups are faster than AC state machine traversal
+- Bloom filter pre-check eliminates 99%+ of non-matches in ~10ns
+
+- [x] Create `internal/pkg/phonematcher/` package
+- [x] Implement `PhoneNumberMatcher` struct:
+  - Bloom filter for quick rejection (false positive rate ~0.1%)
+  - Hash set of normalized watchlist numbers
+  - Sorted unique lengths for bounded suffix checks
+  - Configurable minimum suffix length (default: 10 digits)
+- [x] Implement phone number normalization:
+  - Strip `tel:`, `sip:`, domain, params, `+`, separators
+  - Result: digits-only string
+- [x] Implement `Match(observed string) (matched string, ok bool)`:
+  - Normalize to digits
+  - Check all candidate suffixes against bloom filter
+  - If any bloom hit, confirm with hash set (longest match first)
+- [x] Implement `UpdatePatterns(patterns []string)`:
+  - Rebuild bloom filter and hash set atomically
+  - Lock-free reads during rebuild (similar to AC BufferedMatcher)
+- [x] Add benchmarks comparing to AC:
+  - Achieved: ~85-94ns constant time regardless of watchlist size (100 to 50K patterns)
+- [x] Unit tests for normalization, suffix matching, bloom false positives
+- [x] Integrate into `application_filter.go`:
+  - Use PhoneNumberMatcher for pure-digit `FILTER_PHONE_NUMBER` patterns (LI use case)
+  - Use AC for wildcard patterns and non-digit patterns
+  - Keep AC for `FILTER_SIP_USER` (alphanumeric usernames)
+
 ## Phase 1: Core Infrastructure
 
 Create LI package structure and wire into processor.
@@ -117,7 +155,7 @@ Leverage existing filter management system with Phase 0 enhancements.
 - [ ] Create `internal/pkg/li/filters.go`
 - [ ] Map X1 target identities (per ETSI TS 103 280) to lippycat filters:
   - `SIPURI` (sip:user@domain) → SIPURI filter (Phase 0.1)
-  - `TELURI` (tel:+number) → SIPUser filter (existing, phone number)
+  - `TELURI` (tel:+number) → PhoneNumber filter with PhoneNumberMatcher (Phase 0.3)
   - `NAI` (user@realm) → SIPURI filter (same format as SIP URI)
   - `IPv4Address` → IP filter with hash map lookup (Phase 0.2)
   - `IPv4CIDR` → IP filter with radix tree lookup (Phase 0.2)

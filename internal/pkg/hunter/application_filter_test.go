@@ -7,24 +7,28 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/phonematcher"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/stretchr/testify/assert"
 )
 
 // newTestApplicationFilter creates an ApplicationFilter for testing with properly
-// initialized acMatcher. The patterns from sipUsers and phoneNumbers are automatically
-// added to the AC matcher.
+// initialized matchers. SIP users use AC matcher, phone numbers use either AC (wildcards)
+// or PhoneNumberMatcher (exact patterns).
 func newTestApplicationFilter(sipUsers, phoneNumbers []parsedFilter) *ApplicationFilter {
 	af := &ApplicationFilter{
 		sipUsers:      sipUsers,
 		sipURIs:       []parsedFilter{},
 		phoneNumbers:  phoneNumbers,
 		acMatcher:     ahocorasick.NewBufferedMatcher(),
+		phoneMatcher:  phonematcher.New(),
 		sipURIMatcher: ahocorasick.NewBufferedMatcher(),
 	}
 
-	// Build AC patterns from sipUsers and phoneNumbers
+	// Build AC patterns: SIP users + phone numbers with wildcards
 	acPatterns := make([]ahocorasick.Pattern, 0, len(sipUsers)+len(phoneNumbers))
+	exactPhonePatterns := make([]string, 0, len(phoneNumbers))
+
 	for i, f := range sipUsers {
 		acPatterns = append(acPatterns, ahocorasick.Pattern{
 			ID:   i,
@@ -32,17 +36,34 @@ func newTestApplicationFilter(sipUsers, phoneNumbers []parsedFilter) *Applicatio
 			Type: f.patternType,
 		})
 	}
+
+	// Separate phone numbers:
+	// - Wildcard patterns (prefix/suffix) → AC
+	// - Non-digit patterns → AC (substring matching)
+	// - Pure digit patterns → PhoneNumberMatcher (LI-optimized)
 	baseID := len(sipUsers)
 	for i, f := range phoneNumbers {
-		acPatterns = append(acPatterns, ahocorasick.Pattern{
-			ID:   baseID + i,
-			Text: f.pattern,
-			Type: f.patternType,
-		})
+		if f.patternType != filtering.PatternTypeContains || !phonematcher.IsDigitsOnly(f.pattern) {
+			// Wildcard pattern OR non-digit pattern - use AC
+			acPatterns = append(acPatterns, ahocorasick.Pattern{
+				ID:   baseID + i,
+				Text: f.pattern,
+				Type: f.patternType,
+			})
+		} else {
+			// Pure digit pattern - use PhoneNumberMatcher
+			exactPhonePatterns = append(exactPhonePatterns, f.pattern)
+		}
 	}
 
-	// Synchronously update patterns so they're ready for testing
+	// Store acPatterns for condition checks in matching
+	af.acPatterns = acPatterns
+
+	// Synchronously update AC patterns
 	_ = af.acMatcher.UpdatePatternsSync(acPatterns)
+
+	// Update PhoneNumberMatcher with exact phone number patterns
+	af.phoneMatcher.UpdatePatterns(exactPhonePatterns)
 
 	return af
 }
@@ -55,6 +76,7 @@ func newTestApplicationFilterWithSIPURI(sipURIs []parsedFilter) *ApplicationFilt
 		sipURIs:       sipURIs,
 		phoneNumbers:  []parsedFilter{},
 		acMatcher:     ahocorasick.NewBufferedMatcher(),
+		phoneMatcher:  phonematcher.New(),
 		sipURIMatcher: ahocorasick.NewBufferedMatcher(),
 	}
 

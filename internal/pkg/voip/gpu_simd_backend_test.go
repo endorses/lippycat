@@ -452,7 +452,7 @@ func TestSIMDBackend_BuildAutomaton(t *testing.T) {
 
 	err := backend.BuildAutomaton(patterns)
 	require.NoError(t, err)
-	assert.NotNil(t, backend.acMatcher)
+	assert.NotNil(t, backend.acMatchers["default"])
 }
 
 func TestSIMDBackend_MatchUsernames(t *testing.T) {
@@ -536,7 +536,7 @@ func TestSIMDBackend_MatchUsernames_EmptyPatterns(t *testing.T) {
 	// Build with empty patterns
 	err := backend.BuildAutomaton([]ahocorasick.Pattern{})
 	require.NoError(t, err)
-	assert.Nil(t, backend.acMatcher)
+	assert.Nil(t, backend.acMatchers["default"])
 
 	usernames := [][]byte{
 		[]byte("alice@test.org"),

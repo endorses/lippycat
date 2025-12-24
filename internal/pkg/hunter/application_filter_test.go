@@ -3,8 +3,10 @@ package hunter
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -515,5 +517,70 @@ To: <sip:dest@example.com>
 			result := af.matchWithCPU(p.payload)
 			assert.True(t, result, "SIPUser filter should match user part regardless of domain (%s)", p.domain)
 		}
+	})
+}
+
+// TestMatchWithGPU_SIPURINamedAutomaton tests GPU matching using named automatons.
+// This verifies that SIPURI matching via GPU works correctly using a separate named automaton.
+func TestMatchWithGPU_SIPURINamedAutomaton(t *testing.T) {
+	// Create an ApplicationFilter with GPU enabled (SIMD backend)
+	config := &voip.GPUConfig{
+		Enabled:          true,
+		Backend:          "cpu-simd",
+		PatternAlgorithm: voip.PatternAlgorithmAhoCorasick,
+	}
+
+	af, err := NewApplicationFilter(config)
+	assert.NoError(t, err)
+
+	// Update filters with both SIPUser and SIPURI filters
+	filters := []*management.Filter{
+		{Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice"},
+		{Type: management.FilterType_FILTER_SIP_URI, Pattern: "bob@example.com"},
+	}
+	af.UpdateFilters(filters)
+
+	// Verify both GPU automatons are built
+	assert.True(t, af.gpuACBuilt, "GPU AC automaton should be built for SIPUser")
+	assert.True(t, af.gpuSIPURIACBuilt, "GPU SIPURI AC automaton should be built")
+
+	t.Run("GPU SIPUser matching via named automaton", func(t *testing.T) {
+		payload := []byte(`INVITE sip:someone@example.com SIP/2.0
+From: <sip:alice@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`)
+		result := af.matchWithGPU(payload)
+		assert.True(t, result, "Should match SIPUser 'alice' via GPU")
+	})
+
+	t.Run("GPU SIPURI matching via named automaton", func(t *testing.T) {
+		payload := []byte(`INVITE sip:someone@example.com SIP/2.0
+From: <sip:bob@example.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`)
+		result := af.matchWithGPU(payload)
+		assert.True(t, result, "Should match SIPURI 'bob@example.com' via GPU")
+	})
+
+	t.Run("GPU SIPURI no match when domain differs", func(t *testing.T) {
+		payload := []byte(`INVITE sip:someone@example.com SIP/2.0
+From: <sip:bob@different.org>
+To: <sip:dest@example.com>
+Call-ID: test123
+`)
+		result := af.matchWithGPU(payload)
+		assert.False(t, result, "Should NOT match SIPURI when domain differs")
+	})
+
+	t.Run("GPU both filters - SIPUser match", func(t *testing.T) {
+		payload := []byte(`INVITE sip:someone@example.com SIP/2.0
+From: <sip:alice@any-domain.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`)
+		result := af.matchWithGPU(payload)
+		assert.True(t, result, "Should match SIPUser 'alice' even with different domain")
 	})
 }

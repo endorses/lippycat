@@ -75,6 +75,12 @@ func (ob *OpenCLBackend) TransferResultsFromGPU() ([]GPUResult, error) {
 // BuildAutomaton builds an Aho-Corasick automaton from patterns.
 // Stub: OpenCL not available, returns ErrGPUNotAvailable.
 func (ob *OpenCLBackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	return ob.BuildNamedAutomaton("default", patterns)
+}
+
+// BuildNamedAutomaton builds a named Aho-Corasick automaton from patterns.
+// Stub: OpenCL not available, returns ErrGPUNotAvailable.
+func (ob *OpenCLBackend) BuildNamedAutomaton(name string, patterns []ahocorasick.Pattern) error {
 	// TODO: When OpenCL is available:
 	// 1. Build DenseAhoCorasick automaton on CPU
 	// 2. Create OpenCL buffers for state table
@@ -85,9 +91,15 @@ func (ob *OpenCLBackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
 // MatchUsernames matches usernames against the built automaton.
 // Stub: OpenCL not available, returns ErrGPUNotAvailable.
 func (ob *OpenCLBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	return ob.MatchWithAutomaton("default", usernames)
+}
+
+// MatchWithAutomaton matches inputs against a specific named automaton.
+// Stub: OpenCL not available, returns ErrGPUNotAvailable.
+func (ob *OpenCLBackend) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {
 	// TODO: When OpenCL is available:
-	// 1. Copy usernames to device
-	// 2. Launch kernel: one work-item per username traverses automaton
+	// 1. Copy inputs to device
+	// 2. Launch kernel: one work-item per input traverses automaton
 	// 3. Copy results back to host
 	return nil, ErrGPUNotAvailable
 }

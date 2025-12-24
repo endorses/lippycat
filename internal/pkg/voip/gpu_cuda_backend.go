@@ -72,6 +72,12 @@ func (cb *CUDABackend) TransferResultsFromGPU() ([]GPUResult, error) {
 // BuildAutomaton builds an Aho-Corasick automaton from patterns.
 // Stub: CUDA not available, returns ErrGPUNotAvailable.
 func (cb *CUDABackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	return cb.BuildNamedAutomaton("default", patterns)
+}
+
+// BuildNamedAutomaton builds a named Aho-Corasick automaton from patterns.
+// Stub: CUDA not available, returns ErrGPUNotAvailable.
+func (cb *CUDABackend) BuildNamedAutomaton(name string, patterns []ahocorasick.Pattern) error {
 	// TODO: When CUDA is available:
 	// 1. Build DenseAhoCorasick automaton on CPU
 	// 2. Serialize state table to contiguous memory
@@ -82,9 +88,15 @@ func (cb *CUDABackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
 // MatchUsernames matches usernames against the built automaton.
 // Stub: CUDA not available, returns ErrGPUNotAvailable.
 func (cb *CUDABackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	return cb.MatchWithAutomaton("default", usernames)
+}
+
+// MatchWithAutomaton matches inputs against a specific named automaton.
+// Stub: CUDA not available, returns ErrGPUNotAvailable.
+func (cb *CUDABackend) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {
 	// TODO: When CUDA is available:
-	// 1. Copy usernames to device memory
-	// 2. Launch kernel: one thread per username traverses automaton
+	// 1. Copy inputs to device memory
+	// 2. Launch kernel: one thread per input traverses automaton
 	// 3. Copy results back to host
 	return nil, ErrGPUNotAvailable
 }

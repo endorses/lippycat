@@ -67,12 +67,24 @@ type GPUBackend interface {
 	// BuildAutomaton builds an Aho-Corasick automaton from patterns.
 	// This enables O(n+m+z) matching where n=input length, m=total pattern length, z=matches.
 	// For GPU backends, this may serialize the automaton to device memory.
+	// This is equivalent to BuildNamedAutomaton("default", patterns).
 	BuildAutomaton(patterns []ahocorasick.Pattern) error
 
-	// MatchUsernames matches usernames against the built automaton.
+	// BuildNamedAutomaton builds a named Aho-Corasick automaton from patterns.
+	// Multiple automatons can coexist with different names (e.g., "sipuser", "sipuri").
+	// This allows different filter types to have their own GPU-accelerated matching.
+	BuildNamedAutomaton(name string, patterns []ahocorasick.Pattern) error
+
+	// MatchUsernames matches usernames against the default automaton.
 	// Returns matched pattern IDs for each input username.
 	// Each element in the result corresponds to an input username.
+	// This is equivalent to MatchWithAutomaton("default", usernames).
 	MatchUsernames(usernames [][]byte) ([][]int, error)
+
+	// MatchWithAutomaton matches inputs against a specific named automaton.
+	// Returns matched pattern IDs for each input.
+	// Use the same name as passed to BuildNamedAutomaton.
+	MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error)
 
 	// Free GPU resources
 	Cleanup() error

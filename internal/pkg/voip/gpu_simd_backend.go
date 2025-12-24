@@ -20,9 +20,10 @@ type SIMDBackend struct {
 	mu         sync.Mutex
 	stats      SIMDBackendStats
 
-	// acMatcher is the Aho-Corasick automaton for efficient pattern matching.
+	// acMatchers holds named Aho-Corasick automatons for efficient pattern matching.
 	// Uses DenseAhoCorasick for O(1) state transitions and SIMD-optimized matching.
-	acMatcher *ahocorasick.DenseAhoCorasick
+	// Multiple automatons can coexist for different filter types (e.g., "sipuser", "sipuri").
+	acMatchers map[string]*ahocorasick.DenseAhoCorasick
 }
 
 // SIMDBackendStats holds SIMD backend statistics
@@ -36,6 +37,7 @@ type SIMDBackendStats struct {
 func NewSIMDBackend() GPUBackend {
 	return &SIMDBackend{
 		numWorkers: runtime.NumCPU(),
+		acMatchers: make(map[string]*ahocorasick.DenseAhoCorasick),
 	}
 }
 
@@ -305,50 +307,67 @@ func (sb *SIMDBackend) IsAvailable() bool {
 // BuildAutomaton builds an Aho-Corasick automaton from patterns.
 // This enables O(n+m+z) matching using the DenseAhoCorasick implementation
 // which provides O(1) state transitions and SIMD-optimized lowercase conversion.
+// This is equivalent to BuildNamedAutomaton("default", patterns).
 func (sb *SIMDBackend) BuildAutomaton(patterns []ahocorasick.Pattern) error {
+	return sb.BuildNamedAutomaton("default", patterns)
+}
+
+// BuildNamedAutomaton builds a named Aho-Corasick automaton from patterns.
+// Multiple automatons can coexist with different names (e.g., "sipuser", "sipuri").
+func (sb *SIMDBackend) BuildNamedAutomaton(name string, patterns []ahocorasick.Pattern) error {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
 	if len(patterns) == 0 {
-		sb.acMatcher = nil
+		delete(sb.acMatchers, name)
 		return nil
 	}
 
 	startTime := time.Now()
 	ac := ahocorasick.NewDenseAhoCorasick()
 	if err := ac.Build(patterns); err != nil {
-		return fmt.Errorf("failed to build AC automaton: %w", err)
+		return fmt.Errorf("failed to build AC automaton %q: %w", name, err)
 	}
-	sb.acMatcher = ac
+	sb.acMatchers[name] = ac
 
 	logger.Info("SIMD backend AC automaton built",
+		"name", name,
 		"pattern_count", len(patterns),
 		"build_duration", time.Since(startTime))
 
 	return nil
 }
 
-// MatchUsernames matches usernames against the built Aho-Corasick automaton.
+// MatchUsernames matches usernames against the default Aho-Corasick automaton.
 // Returns matched pattern IDs for each input username.
 // If no automaton is built, returns empty results for all inputs.
+// This is equivalent to MatchWithAutomaton("default", usernames).
 func (sb *SIMDBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
+	return sb.MatchWithAutomaton("default", usernames)
+}
+
+// MatchWithAutomaton matches inputs against a specific named automaton.
+// Returns matched pattern IDs for each input.
+// If no automaton with that name exists, returns empty results for all inputs.
+func (sb *SIMDBackend) MatchWithAutomaton(name string, inputs [][]byte) ([][]int, error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()
 
-	results := make([][]int, len(usernames))
+	results := make([][]int, len(inputs))
 
-	if sb.acMatcher == nil {
-		// No automaton built, return empty results
+	acMatcher := sb.acMatchers[name]
+	if acMatcher == nil {
+		// No automaton built with this name, return empty results
 		return results, nil
 	}
 
 	startTime := time.Now()
 
 	// Use parallel processing for large batches
-	numUsernames := len(usernames)
-	if numUsernames > sb.numWorkers*10 {
+	numInputs := len(inputs)
+	if numInputs > sb.numWorkers*10 {
 		// Parallel processing
-		usernamesPerWorker := (numUsernames + sb.numWorkers - 1) / sb.numWorkers
+		inputsPerWorker := (numInputs + sb.numWorkers - 1) / sb.numWorkers
 
 		var wg sync.WaitGroup
 		for workerID := range sb.numWorkers {
@@ -356,14 +375,14 @@ func (sb *SIMDBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
 			go func(wid int) {
 				defer wg.Done()
 
-				start := wid * usernamesPerWorker
-				end := start + usernamesPerWorker
-				if end > numUsernames {
-					end = numUsernames
+				start := wid * inputsPerWorker
+				end := start + inputsPerWorker
+				if end > numInputs {
+					end = numInputs
 				}
 
 				for i := start; i < end; i++ {
-					matchResults := sb.acMatcher.Match(usernames[i])
+					matchResults := acMatcher.Match(inputs[i])
 					if len(matchResults) > 0 {
 						patternIDs := make([]int, len(matchResults))
 						for j, mr := range matchResults {
@@ -377,8 +396,8 @@ func (sb *SIMDBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
 		wg.Wait()
 	} else {
 		// Sequential processing for small batches
-		for i, username := range usernames {
-			matchResults := sb.acMatcher.Match(username)
+		for i, input := range inputs {
+			matchResults := acMatcher.Match(input)
 			if len(matchResults) > 0 {
 				patternIDs := make([]int, len(matchResults))
 				for j, mr := range matchResults {
@@ -391,7 +410,7 @@ func (sb *SIMDBackend) MatchUsernames(usernames [][]byte) ([][]int, error) {
 
 	processingTime := time.Since(startTime)
 	sb.stats.ProcessingTimeNS.Add(uint64(processingTime.Nanoseconds())) // #nosec G115
-	sb.stats.PacketsProcessed.Add(uint64(numUsernames))                 // #nosec G115
+	sb.stats.PacketsProcessed.Add(uint64(numInputs))                    // #nosec G115
 
 	return results, nil
 }

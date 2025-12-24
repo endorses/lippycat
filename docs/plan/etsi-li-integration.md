@@ -105,8 +105,8 @@ Create LI package structure and wire into processor.
 
 ### Step 1.1: Package structure
 
-- [ ] Create `internal/pkg/li/` directory
-- [ ] Create `internal/pkg/li/types.go`:
+- [x] Create `internal/pkg/li/` directory
+- [x] Create `internal/pkg/li/types.go`:
   ```go
   type InterceptTask struct {
       XID                        uuid.UUID

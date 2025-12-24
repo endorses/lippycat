@@ -52,6 +52,12 @@ type PacketBatch struct {
 
 	// Stats contains optional statistics about capture at the source
 	Stats *data.BatchStats
+
+	// MatchedFilterIDs contains filter IDs that matched this batch.
+	// Used for LI (Lawful Interception) correlation to identify which
+	// intercept tasks apply to these packets.
+	// Populated by hunters (distributed mode) or LocalSource (tap mode).
+	MatchedFilterIDs []string
 }
 
 // Stats contains packet source statistics.

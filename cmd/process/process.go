@@ -78,6 +78,10 @@ var (
 	voipCommand        string
 	commandTimeout     string
 	commandConcurrency int
+	// LI (Lawful Interception) flags - requires -tags li build
+	liEnabled      bool
+	liX1ListenAddr string
+	liADMFEndpoint string
 )
 
 func init() {
@@ -131,6 +135,11 @@ func init() {
 	ProcessCmd.Flags().StringVar(&commandTimeout, "command-timeout", "30s", "Timeout for command execution (e.g., 30s, 1m)")
 	ProcessCmd.Flags().IntVar(&commandConcurrency, "command-concurrency", 10, "Maximum concurrent command executions")
 
+	// LI (Lawful Interception) flags - requires build with -tags li
+	ProcessCmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
+	ProcessCmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
+	ProcessCmd.Flags().StringVar(&liADMFEndpoint, "li-admf-endpoint", "", "ADMF endpoint for X1 notifications (e.g., https://admf:8443)")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
 	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
@@ -165,6 +174,10 @@ func init() {
 	_ = viper.BindPFlag("processor.voip_command", ProcessCmd.Flags().Lookup("voip-command"))
 	_ = viper.BindPFlag("processor.command_timeout", ProcessCmd.Flags().Lookup("command-timeout"))
 	_ = viper.BindPFlag("processor.command_concurrency", ProcessCmd.Flags().Lookup("command-concurrency"))
+	// LI viper bindings
+	_ = viper.BindPFlag("processor.li.enabled", ProcessCmd.Flags().Lookup("li-enabled"))
+	_ = viper.BindPFlag("processor.li.x1_listen_addr", ProcessCmd.Flags().Lookup("li-x1-listen"))
+	_ = viper.BindPFlag("processor.li.admf_endpoint", ProcessCmd.Flags().Lookup("li-admf-endpoint"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -298,6 +311,10 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VifBufferSize:         getIntConfig("processor.vif_buffer_size", vifBufferSize),
 		VifNetNS:              getStringConfig("processor.vif_netns", vifNetNS),
 		VifDropPrivilegesUser: getStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
+		// LI configuration
+		LIEnabled:      getBoolConfig("processor.li.enabled", liEnabled),
+		LIX1ListenAddr: getStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
+		LIADMFEndpoint: getStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
 	}
 
 	// Security check: require explicit opt-in to insecure mode

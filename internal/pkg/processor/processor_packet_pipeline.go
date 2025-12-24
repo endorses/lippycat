@@ -9,11 +9,12 @@
 //  3. Increment packet counters
 //  4. Enrich packets with protocol detection (if enabled)
 //  5. Aggregate VoIP calls and correlate B2BUA calls (if VoIP aggregator enabled)
-//  6. Write per-call PCAP files (SIP and RTP separated, if enabled)
-//  7. Write auto-rotating PCAP files for non-VoIP traffic (if enabled)
-//  8. Forward to upstream processor (if hierarchical mode)
-//  9. Broadcast to TUI subscribers (with per-subscriber buffering)
-//  10. Inject to virtual interface (if enabled)
+//  6. Process LI (Lawful Interception) if enabled (build tag: li)
+//  7. Write per-call PCAP files (SIP and RTP separated, if enabled)
+//  8. Write auto-rotating PCAP files for non-VoIP traffic (if enabled)
+//  9. Forward to upstream processor (if hierarchical mode)
+//  10. Broadcast to TUI subscribers (with per-subscriber buffering)
+//  11. Inject to virtual interface (if enabled)
 //
 // Key Design Decisions:
 //   - Non-blocking: All I/O operations are async (queues, channels, goroutines)
@@ -23,6 +24,7 @@
 package processor
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -74,6 +76,37 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if packet.Metadata != nil && packet.Metadata.Sip != nil {
 				p.callCorrelator.ProcessPacket(packet, sourceID)
 			}
+		}
+	}
+
+	// Process LI (Lawful Interception) if enabled
+	// This is a no-op if built without -tags li or if LI is not enabled
+	if p.isLIEnabled() {
+		for _, pkt := range batch.Packets {
+			// Convert to PacketDisplay for LI processing
+			display := types.PacketDisplay{
+				Timestamp: time.Unix(0, pkt.TimestampNs),
+				RawData:   pkt.Data,
+				LinkType:  layers.LinkType(pkt.LinkType),
+			}
+			if pkt.Metadata != nil {
+				display.SrcIP = pkt.Metadata.SrcIp
+				display.DstIP = pkt.Metadata.DstIp
+				display.Protocol = pkt.Metadata.Protocol
+				display.SrcPort = strconv.FormatUint(uint64(pkt.Metadata.SrcPort), 10)
+				display.DstPort = strconv.FormatUint(uint64(pkt.Metadata.DstPort), 10)
+			}
+
+			// Get matched filter IDs from packet batch
+			// TODO: Filter IDs will be populated when filter ID plumbing is implemented
+			// For distributed mode: hunters include filter IDs in packet batch
+			// For tap mode: LocalSource uses MatchPacketWithIDs
+			var matchedFilterIDs []string
+			if batch.MatchedFilterIDs != nil {
+				matchedFilterIDs = batch.MatchedFilterIDs
+			}
+
+			p.processLIPacket(&display, matchedFilterIDs)
 		}
 	}
 

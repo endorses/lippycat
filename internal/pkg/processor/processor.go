@@ -32,6 +32,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/enrichment"
@@ -72,6 +73,10 @@ type Config struct {
 	TLSClientAuth bool   // Require client certificate authentication (mutual TLS)
 	// API Key Authentication (for non-mTLS deployments)
 	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
+	// LI (Lawful Interception) settings - only functional with -tags li build
+	LIEnabled      bool   // Enable LI processing
+	LIX1ListenAddr string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
+	LIADMFEndpoint string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
 	// Virtual interface settings
 	VirtualInterface      bool   // Enable virtual network interface
 	VirtualInterfaceName  string // Virtual interface name
@@ -133,6 +138,9 @@ type Processor struct {
 
 	// Virtual interface manager
 	vifManager vinterface.Manager
+
+	// LI (Lawful Interception) manager
+	liManager *li.Manager
 
 	// Control
 	ctx    context.Context
@@ -382,6 +390,9 @@ func New(config Config) (*Processor, error) {
 	logger.Debug("Topology event flow wired",
 		"hunter_manager", "connected",
 		"downstream_manager", "connected")
+
+	// Initialize LI Manager (no-op if !li build or LI not enabled in config)
+	p.initLIManager()
 
 	return p, nil
 }

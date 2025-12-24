@@ -187,6 +187,11 @@ func (p *Processor) Start(ctx context.Context) error {
 		p.callCompletionMonitor.Start()
 	}
 
+	// Start LI Manager if configured (no-op if !li build)
+	if err := p.startLIManager(); err != nil {
+		return fmt.Errorf("failed to start LI manager: %w", err)
+	}
+
 	// Start virtual interface if configured
 	if p.vifManager != nil {
 		if err := p.vifManager.Start(); err != nil {
@@ -263,6 +268,9 @@ func (p *Processor) Shutdown() error {
 	if p.cancel != nil {
 		p.cancel()
 	}
+
+	// Stop LI Manager (no-op if !li build)
+	p.stopLIManager()
 
 	// Shutdown detector to stop background goroutines
 	if p.detector != nil {

@@ -449,7 +449,7 @@ func TestIntegration_FilterCLI_TLSConnection(t *testing.T) {
 	processorAddr, err := getFreePort()
 	require.NoError(t, err)
 
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err)
 	defer proc.Shutdown()
 
@@ -514,7 +514,7 @@ func TestIntegration_FilterCLI_TLSInvalidCert(t *testing.T) {
 	processorAddr, err := getFreePort()
 	require.NoError(t, err)
 
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err)
 	defer proc.Shutdown()
 

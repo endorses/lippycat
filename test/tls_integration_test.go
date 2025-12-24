@@ -44,7 +44,7 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 
 	// Start processor with TLS enabled
 	processorAddr := "127.0.0.1:50058"
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err, "Failed to start TLS processor")
 	defer proc.Shutdown()
 
@@ -163,7 +163,7 @@ func TestIntegration_TLS_ClientAuthRequired(t *testing.T) {
 
 	// Start processor with TLS and client auth required
 	processorAddr := "127.0.0.1:50059"
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err, "Failed to start TLS processor")
 	defer proc.Shutdown()
 
@@ -236,7 +236,7 @@ func TestIntegration_TLS_TLS13Enforcement(t *testing.T) {
 
 	// Start processor with TLS 1.3
 	processorAddr := "127.0.0.1:50060"
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err)
 	defer proc.Shutdown()
 
@@ -308,7 +308,7 @@ func TestIntegration_TLS_InvalidCertificate(t *testing.T) {
 
 	// Start processor with TLS
 	processorAddr := "127.0.0.1:50061"
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err)
 	defer proc.Shutdown()
 
@@ -387,7 +387,7 @@ func TestIntegration_TLS_ServerNameVerification(t *testing.T) {
 
 	// Start processor
 	processorAddr := "127.0.0.1:50062"
-	proc, err := startTLSProcessor(ctx, processorAddr, certsDir, true)
+	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
 	require.NoError(t, err)
 	defer proc.Shutdown()
 
@@ -489,10 +489,14 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 }
 
 // Helper function to start a TLS-enabled processor
-func startTLSProcessor(ctx context.Context, addr, certsDir string, requireClientAuth bool) (*processor.Processor, error) {
+// Uses t.TempDir() for filter file to ensure test isolation
+func startTLSProcessor(t *testing.T, ctx context.Context, addr, certsDir string, requireClientAuth bool) (*processor.Processor, error) {
 	serverCert := filepath.Join(certsDir, "processor-cert.pem")
 	serverKey := filepath.Join(certsDir, "processor-key.pem")
 	caCert := filepath.Join(certsDir, "ca-cert.pem")
+
+	// Use t.TempDir() for filter file to ensure each test has isolated state
+	filterFile := filepath.Join(t.TempDir(), "filters.yaml")
 
 	config := &processor.Config{
 		ListenAddr:     addr,
@@ -503,7 +507,7 @@ func startTLSProcessor(ctx context.Context, addr, certsDir string, requireClient
 		TLSClientAuth:  requireClientAuth,
 		MaxHunters:     10,
 		MaxSubscribers: 5,
-		FilterFile:     "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
+		FilterFile:     filterFile,
 	}
 
 	proc, err := processor.New(*config)

@@ -29,13 +29,16 @@ type ApplicationFilter struct {
 	gpuAccel       *voip.GPUAccelerator
 	detector       *detector.Detector // Protocol detector for accurate protocol detection
 	config         *voip.GPUConfig
-	sipUsers       []parsedFilter // Parsed SIP user patterns
+	sipUsers       []parsedFilter // Parsed SIP user patterns (user part only, suffix matching)
+	sipURIs        []parsedFilter // Parsed SIP URI patterns (user@domain, exact/contains matching)
 	phoneNumbers   []parsedFilter // Parsed phone number patterns
 	ipAddresses    []string       // IP addresses as strings (for display/logging)
 	ipAddressBytes [][]byte       // Parsed IP addresses as bytes (for SIMD comparison)
 	patterns       []voip.GPUPattern
-	acPatterns     []ahocorasick.Pattern        // AC patterns for GPU backend
-	acMatcher      *ahocorasick.BufferedMatcher // Aho-Corasick matcher for high-performance pattern matching
+	acPatterns     []ahocorasick.Pattern        // AC patterns for GPU backend (SIP users + phone numbers)
+	acMatcher      *ahocorasick.BufferedMatcher // Aho-Corasick matcher for SIP user/phone number matching
+	sipURIPatterns []ahocorasick.Pattern        // AC patterns for SIPURI matching (user@domain)
+	sipURIMatcher  *ahocorasick.BufferedMatcher // Separate Aho-Corasick matcher for SIPURI matching
 	mu             sync.RWMutex
 	enabled        bool
 	gpuACBuilt     bool // Whether GPU has AC automaton built
@@ -61,12 +64,15 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		config:         config,
 		detector:       detector.InitDefault(), // Use centralized detector for accurate protocol detection
 		sipUsers:       make([]parsedFilter, 0),
+		sipURIs:        make([]parsedFilter, 0),
 		phoneNumbers:   make([]parsedFilter, 0),
 		ipAddresses:    make([]string, 0),
 		ipAddressBytes: make([][]byte, 0),
 		patterns:       make([]voip.GPUPattern, 0),
 		acPatterns:     make([]ahocorasick.Pattern, 0),
-		acMatcher:      ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick with configurable algorithm
+		acMatcher:      ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick for SIP user/phone
+		sipURIPatterns: make([]ahocorasick.Pattern, 0),
+		sipURIMatcher:  ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
 		enabled:        config != nil && config.Enabled,
 		gpuACBuilt:     false,
 	}
@@ -118,11 +124,13 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 
 	// Clear existing
 	af.sipUsers = af.sipUsers[:0]
+	af.sipURIs = af.sipURIs[:0]
 	af.phoneNumbers = af.phoneNumbers[:0]
 	af.ipAddresses = af.ipAddresses[:0]
 	af.ipAddressBytes = af.ipAddressBytes[:0]
 	af.patterns = af.patterns[:0]
 	af.acPatterns = af.acPatterns[:0]
+	af.sipURIPatterns = af.sipURIPatterns[:0]
 	af.gpuACBuilt = false
 
 	// Build new filter lists
@@ -189,6 +197,19 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 				logger.Warn("Failed to parse IP address filter", "pattern", filter.Pattern)
 			}
 
+		case management.FilterType_FILTER_SIP_URI:
+			// SIPURI filter: extracts user@domain for exact/pattern matching
+			// Different from SIPUser which only extracts user part for suffix matching
+			pattern, patternType := filtering.ParsePattern(filter.Pattern)
+			gpuType := filteringToGPUPatternType(patternType)
+
+			af.sipURIs = append(af.sipURIs, parsedFilter{
+				original:    filter.Pattern,
+				pattern:     pattern,
+				patternType: patternType,
+				gpuType:     gpuType,
+			})
+
 			// Future: Add other protocol-specific filters here
 			// case management.FilterType_FILTER_HTTP_PATH:
 			// case management.FilterType_FILTER_DNS_QUERY:
@@ -197,6 +218,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 
 	logger.Info("Updated application-level filters (hot-reload, no restart)",
 		"sip_users", len(af.sipUsers),
+		"sip_uris", len(af.sipURIs),
 		"phone_numbers", len(af.phoneNumbers),
 		"ip_addresses", len(af.ipAddresses),
 		"gpu_enabled", af.enabled)
@@ -221,9 +243,22 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 		})
 	}
 
-	// Trigger background rebuild of AC automaton for CPU
+	// Trigger background rebuild of AC automaton for CPU (SIP users + phone numbers)
 	// This is non-blocking - matching continues with old automaton or linear scan
 	af.acMatcher.UpdatePatterns(af.acPatterns)
+
+	// Build SIPURI AC patterns (separate automaton for user@domain matching)
+	af.sipURIPatterns = make([]ahocorasick.Pattern, 0, len(af.sipURIs))
+	for i, f := range af.sipURIs {
+		af.sipURIPatterns = append(af.sipURIPatterns, ahocorasick.Pattern{
+			ID:   i,
+			Text: f.pattern,
+			Type: f.patternType,
+		})
+	}
+
+	// Trigger background rebuild of SIPURI AC automaton
+	af.sipURIMatcher.UpdatePatterns(af.sipURIPatterns)
 
 	// Build AC automaton in GPU backend if enabled
 	// Uses the same patterns but built inside GPU backend (SIMD/CUDA/OpenCL)
@@ -248,7 +283,7 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	defer af.mu.RUnlock()
 
 	// If no filters, match everything
-	if len(af.sipUsers) == 0 && len(af.phoneNumbers) == 0 && len(af.ipAddresses) == 0 {
+	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 && len(af.ipAddresses) == 0 {
 		return true
 	}
 
@@ -258,7 +293,7 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 			return true
 		}
 		// If we have ONLY IP filters (no VoIP filters), don't continue to VoIP checks
-		if len(af.sipUsers) == 0 && len(af.phoneNumbers) == 0 {
+		if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
 			return false
 		}
 	}
@@ -295,7 +330,7 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 	results := make([]bool, len(packets))
 
 	// If no filters, match everything
-	if len(af.sipUsers) == 0 && len(af.phoneNumbers) == 0 {
+	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
 		for i := range results {
 			results[i] = true
 		}
@@ -379,13 +414,10 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 
 // matchWithGPU uses GPU acceleration for pattern matching
 // Uses Aho-Corasick automaton (BuildAutomaton/MatchUsernames) for O(n) matching
+// Note: SIPURI matching is handled via CPU (separate AC automaton)
 func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
-	if af.gpuAccel == nil || len(af.acPatterns) == 0 {
-		return false
-	}
-
-	// If GPU AC automaton not built, fall back to CPU
-	if !af.gpuACBuilt {
+	// If GPU AC automaton not built or no patterns, fall back to CPU
+	if af.gpuAccel == nil || !af.gpuACBuilt || len(af.acPatterns) == 0 {
 		return af.matchWithCPU(string(payload))
 	}
 
@@ -394,39 +426,71 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 		return af.matchWithCPU(string(payload))
 	}
 
-	// Extract SIP headers and usernames (same as CPU path)
+	// Extract SIP headers for matching
 	sipHeaders := extractSIPHeaders(payload)
-	usernames := make([][]byte, 0, 3)
-	if len(sipHeaders.from) > 0 {
-		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
-			usernames = append(usernames, []byte(user))
+
+	// SIPUser/PhoneNumber matching via GPU (if we have those filters)
+	if len(af.sipUsers) > 0 || len(af.phoneNumbers) > 0 {
+		usernames := make([][]byte, 0, 3)
+		if len(sipHeaders.from) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
+				usernames = append(usernames, []byte(user))
+			}
 		}
-	}
-	if len(sipHeaders.to) > 0 {
-		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
-			usernames = append(usernames, []byte(user))
+		if len(sipHeaders.to) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
+				usernames = append(usernames, []byte(user))
+			}
 		}
-	}
-	if len(sipHeaders.pAssertedIdentity) > 0 {
-		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
-			usernames = append(usernames, []byte(user))
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+				usernames = append(usernames, []byte(user))
+			}
+		}
+
+		if len(usernames) > 0 {
+			// Use GPU backend's MatchUsernames with pre-built AC automaton
+			results, err := backend.MatchUsernames(usernames)
+			if err != nil {
+				// Fall back to CPU on error for SIPUser matching
+				usernameStrs := make([]string, len(usernames))
+				for i, u := range usernames {
+					usernameStrs[i] = string(u)
+				}
+				if af.acMatcher.MatchUsernames(usernameStrs) {
+					return true
+				}
+			} else {
+				// Check if any username matched
+				for _, patternIDs := range results {
+					if len(patternIDs) > 0 {
+						return true
+					}
+				}
+			}
 		}
 	}
 
-	if len(usernames) == 0 {
-		return false
-	}
+	// SIPURI matching via CPU (separate AC automaton, not on GPU)
+	if len(af.sipURIs) > 0 {
+		sipURIValues := make([]string, 0, 3)
+		if len(sipHeaders.from) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+		if len(sipHeaders.to) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
 
-	// Use GPU backend's MatchUsernames with pre-built AC automaton
-	results, err := backend.MatchUsernames(usernames)
-	if err != nil {
-		// Fall back to CPU on error
-		return af.matchWithCPU(string(payload))
-	}
-
-	// Check if any username matched
-	for _, patternIDs := range results {
-		if len(patternIDs) > 0 {
+		if af.sipURIMatcher.MatchUsernames(sipURIValues) {
 			return true
 		}
 	}
@@ -435,7 +499,8 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 }
 
 // matchWithCPU uses Aho-Corasick for O(n) pattern matching
-// Extracts usernames from SIP headers and matches against all patterns in a single pass
+// Runs separate matching passes for SIPUser/phoneNumber (user part) and SIPURI (user@domain)
+// Only runs each pass if filters of that type exist (typical case: single pass)
 func (af *ApplicationFilter) matchWithCPU(payload string) bool {
 	// Convert to bytes for header extraction
 	payloadBytes := []byte(payload)
@@ -443,27 +508,59 @@ func (af *ApplicationFilter) matchWithCPU(payload string) bool {
 	// Extract SIP headers for proper matching
 	sipHeaders := extractSIPHeaders(payloadBytes)
 
-	// Extract usernames from each header (the user part of the SIP URI)
-	usernames := make([]string, 0, 3)
-	if len(sipHeaders.from) > 0 {
-		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
-			usernames = append(usernames, user)
+	// SIPUser/PhoneNumber matching: extract user part, use suffix matching
+	// Only run if we have SIPUser or phoneNumber filters
+	if len(af.sipUsers) > 0 || len(af.phoneNumbers) > 0 {
+		usernames := make([]string, 0, 3)
+		if len(sipHeaders.from) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
+				usernames = append(usernames, user)
+			}
 		}
-	}
-	if len(sipHeaders.to) > 0 {
-		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
-			usernames = append(usernames, user)
+		if len(sipHeaders.to) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
+				usernames = append(usernames, user)
+			}
 		}
-	}
-	if len(sipHeaders.pAssertedIdentity) > 0 {
-		if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
-			usernames = append(usernames, user)
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+				usernames = append(usernames, user)
+			}
+		}
+
+		// Use Aho-Corasick matcher for O(n) matching against SIP users + phone numbers
+		if af.acMatcher.MatchUsernames(usernames) {
+			return true
 		}
 	}
 
-	// Use Aho-Corasick matcher for O(n) matching against all patterns
-	// The AC automaton combines both SIP users and phone number patterns
-	return af.acMatcher.MatchUsernames(usernames)
+	// SIPURI matching: extract user@domain, use exact/contains matching
+	// Only run if we have SIPURI filters
+	if len(af.sipURIs) > 0 {
+		sipURIValues := make([]string, 0, 3)
+		if len(sipHeaders.from) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+		if len(sipHeaders.to) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+		if len(sipHeaders.pAssertedIdentity) > 0 {
+			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+				sipURIValues = append(sipURIValues, uri)
+			}
+		}
+
+		// Use separate Aho-Corasick matcher for SIPURI matching
+		if af.sipURIMatcher.MatchUsernames(sipURIValues) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // sipHeaders holds parsed SIP header values

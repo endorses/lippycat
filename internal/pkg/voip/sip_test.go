@@ -420,3 +420,160 @@ a=rtpmap:0 PCMU/8000`)
 	// At minimum, the function should not crash
 	assert.True(t, true, "SIP message processing completed")
 }
+
+func TestExtractUserFromHeader(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected string
+	}{
+		{
+			name:     "Standard SIP URI with display name",
+			header:   "Alicent <sip:alicent@domain.com>;tag=123",
+			expected: "alicent",
+		},
+		{
+			name:     "SIP URI without display name",
+			header:   "<sip:robb@example.org>",
+			expected: "robb",
+		},
+		{
+			name:     "Bare SIP URI",
+			header:   "sip:+49123456789@carrier.com",
+			expected: "+49123456789",
+		},
+		{
+			name:     "SIPS URI",
+			header:   "sips:alice.smith@secure.example.com",
+			expected: "alice.smith",
+		},
+		{
+			name:     "Phone number with tech prefix (CLIR)",
+			header:   "<sip:*31#+49123456789@carrier.com>",
+			expected: "*31#+49123456789",
+		},
+		{
+			name:     "URI with port",
+			header:   "<sip:user@192.168.1.100:5060>",
+			expected: "user",
+		},
+		{
+			name:     "No URI scheme",
+			header:   "user@example.com",
+			expected: "",
+		},
+		{
+			name:     "Empty header",
+			header:   "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractUserFromHeader(tt.header)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExtractURIFromHeader(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected string
+	}{
+		{
+			name:     "Standard SIP URI with display name",
+			header:   "Alicent <sip:alicent@domain.com>;tag=123",
+			expected: "alicent@domain.com",
+		},
+		{
+			name:     "SIP URI without display name",
+			header:   "<sip:robb@example.org>",
+			expected: "robb@example.org",
+		},
+		{
+			name:     "Bare SIP URI",
+			header:   "sip:+49123456789@carrier.com",
+			expected: "+49123456789@carrier.com",
+		},
+		{
+			name:     "SIPS URI",
+			header:   "sips:alice.smith@secure.example.com",
+			expected: "alice.smith@secure.example.com",
+		},
+		{
+			name:     "Phone number with tech prefix (CLIR)",
+			header:   "<sip:*31#+49123456789@carrier.com>",
+			expected: "*31#+49123456789@carrier.com",
+		},
+		{
+			name:     "URI with port - port included",
+			header:   "<sip:user@192.168.1.100:5060>",
+			expected: "user@192.168.1.100:5060",
+		},
+		{
+			name:     "No URI scheme",
+			header:   "user@example.com",
+			expected: "",
+		},
+		{
+			name:     "Empty header",
+			header:   "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractURIFromHeader(tt.header)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExtractUserVsURIFromHeader_Difference(t *testing.T) {
+	// This test demonstrates the key difference between user extraction and URI extraction
+	testCases := []struct {
+		name        string
+		header      string
+		expectedUSR string // ExtractUserFromHeader result
+		expectedURI string // ExtractURIFromHeader result
+	}{
+		{
+			name:        "Standard user",
+			header:      "<sip:alice@example.com>",
+			expectedUSR: "alice",
+			expectedURI: "alice@example.com",
+		},
+		{
+			name:        "Phone number",
+			header:      "<sip:+49123456789@carrier.com>",
+			expectedUSR: "+49123456789",
+			expectedURI: "+49123456789@carrier.com",
+		},
+		{
+			name:        "With display name and tag",
+			header:      "Bob Smith <sip:bob.smith@company.org>;tag=abc123",
+			expectedUSR: "bob.smith",
+			expectedURI: "bob.smith@company.org",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			userResult := ExtractUserFromHeader(tc.header)
+			uriResult := ExtractURIFromHeader(tc.header)
+
+			assert.Equal(t, tc.expectedUSR, userResult, "ExtractUserFromHeader should return user part only")
+			assert.Equal(t, tc.expectedURI, uriResult, "ExtractURIFromHeader should return user@domain")
+
+			// URI should always contain the user
+			if userResult != "" && uriResult != "" {
+				assert.True(t, strings.HasPrefix(uriResult, userResult+"@"),
+					"URI (%s) should start with user@: %s@", uriResult, userResult)
+			}
+		})
+	}
+}

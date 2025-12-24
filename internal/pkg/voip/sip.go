@@ -82,6 +82,42 @@ func ExtractUserFromHeaderBytes(header []byte) string {
 	return extractUserFromSIPURI(string(header))
 }
 
+// extractURIFromSIPHeader extracts user@domain from a SIP URI (without the sip: prefix)
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "alicent@domain.com"
+// Example: "sip:robb@example.org" -> "robb@example.org"
+func extractURIFromSIPHeader(header string) string {
+	// Get the full SIP URI first (e.g., "sip:alice@domain.com")
+	fullURI := extractFullSIPURI(header)
+	if fullURI == "" {
+		return ""
+	}
+
+	// Strip the sip: or sips: prefix to get user@domain
+	if strings.HasPrefix(fullURI, "sips:") {
+		return fullURI[5:]
+	}
+	if strings.HasPrefix(fullURI, "sip:") {
+		return fullURI[4:]
+	}
+	return fullURI
+}
+
+// ExtractURIFromHeader extracts user@domain from a SIP header value (From, To, P-Asserted-Identity)
+// This is used for SIPURI filter matching where the full identity is needed.
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "alicent@domain.com"
+// Example: "sip:+49123456789@carrier.com" -> "+49123456789@carrier.com"
+func ExtractURIFromHeader(header string) string {
+	return extractURIFromSIPHeader(header)
+}
+
+// ExtractURIFromHeaderBytes extracts user@domain from a SIP header value (byte slice version)
+// This is optimized for the hunter's application filter which works with byte slices.
+// Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "alicent@domain.com"
+// Example: "sip:+49123456789@carrier.com" -> "+49123456789@carrier.com"
+func ExtractURIFromHeaderBytes(header []byte) string {
+	return extractURIFromSIPHeader(string(header))
+}
+
 // extractTagFromHeader extracts the tag parameter from a SIP From/To header
 // Example: "Alicent <sip:alicent@domain.com>;tag=abc123" -> "abc123"
 // Example: "<sip:user@host>;tag=xyz789;other=param" -> "xyz789"

@@ -13,9 +13,11 @@ import (
 // added to the AC matcher.
 func newTestApplicationFilter(sipUsers, phoneNumbers []parsedFilter) *ApplicationFilter {
 	af := &ApplicationFilter{
-		sipUsers:     sipUsers,
-		phoneNumbers: phoneNumbers,
-		acMatcher:    ahocorasick.NewBufferedMatcher(),
+		sipUsers:      sipUsers,
+		sipURIs:       []parsedFilter{},
+		phoneNumbers:  phoneNumbers,
+		acMatcher:     ahocorasick.NewBufferedMatcher(),
+		sipURIMatcher: ahocorasick.NewBufferedMatcher(),
 	}
 
 	// Build AC patterns from sipUsers and phoneNumbers
@@ -38,6 +40,33 @@ func newTestApplicationFilter(sipUsers, phoneNumbers []parsedFilter) *Applicatio
 
 	// Synchronously update patterns so they're ready for testing
 	_ = af.acMatcher.UpdatePatternsSync(acPatterns)
+
+	return af
+}
+
+// newTestApplicationFilterWithSIPURI creates an ApplicationFilter for testing SIPURI matching.
+// SIPURI patterns match user@domain, not just user.
+func newTestApplicationFilterWithSIPURI(sipURIs []parsedFilter) *ApplicationFilter {
+	af := &ApplicationFilter{
+		sipUsers:      []parsedFilter{},
+		sipURIs:       sipURIs,
+		phoneNumbers:  []parsedFilter{},
+		acMatcher:     ahocorasick.NewBufferedMatcher(),
+		sipURIMatcher: ahocorasick.NewBufferedMatcher(),
+	}
+
+	// Build AC patterns for SIPURI matching
+	uriPatterns := make([]ahocorasick.Pattern, 0, len(sipURIs))
+	for i, f := range sipURIs {
+		uriPatterns = append(uriPatterns, ahocorasick.Pattern{
+			ID:   i,
+			Text: f.pattern,
+			Type: f.patternType,
+		})
+	}
+
+	// Synchronously update patterns so they're ready for testing
+	_ = af.sipURIMatcher.UpdatePatternsSync(uriPatterns)
 
 	return af
 }
@@ -317,4 +346,174 @@ Call-ID: test123
 			assert.Equal(t, tt.shouldMatch, result, tt.reason)
 		})
 	}
+}
+
+func TestMatchWithCPU_SIPURIMatching(t *testing.T) {
+	// SIPURI filter: matches user@domain (not just user part)
+	af := newTestApplicationFilterWithSIPURI(
+		[]parsedFilter{
+			// Exact URI match
+			{original: "alice@example.com", pattern: "alice@example.com", patternType: filtering.PatternTypeContains},
+			// Match any user at specific domain
+			{original: "@carrier.com", pattern: "@carrier.com", patternType: filtering.PatternTypeSuffix},
+		},
+	)
+
+	tests := []struct {
+		name        string
+		payload     string
+		shouldMatch bool
+		reason      string
+	}{
+		{
+			name: "Exact URI match",
+			payload: `INVITE sip:robb@example.com SIP/2.0
+From: Alice <sip:alice@example.com>
+To: Robb <sip:robb@example.com>
+Call-ID: test123
+`,
+			shouldMatch: true,
+			reason:      "alice@example.com matches exactly",
+		},
+		{
+			name: "Domain suffix match",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+4912345@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: true,
+			reason:      "+4912345@carrier.com ends with @carrier.com",
+		},
+		{
+			name: "No match - different domain",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:alice@different.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: false,
+			reason:      "alice@different.com does not match alice@example.com",
+		},
+		{
+			name: "No match - user part only would match but URI doesn't",
+			payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:alice@other-domain.org>
+To: <sip:dest@example.com>
+Call-ID: test123
+`,
+			shouldMatch: false,
+			reason:      "alice@other-domain.org does not match alice@example.com (full URI match required)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := af.matchWithCPU(tt.payload)
+			assert.Equal(t, tt.shouldMatch, result, tt.reason)
+		})
+	}
+}
+
+func TestMatchWithCPU_SIPUserVsSIPURI_Difference(t *testing.T) {
+	// This test demonstrates the key difference between SIPUser and SIPURI filters:
+	// - SIPUser: extracts user part only, uses suffix matching (for phone numbers)
+	// - SIPURI: extracts user@domain, uses exact/contains matching
+
+	// Test case: Looking for calls from alice (suffix pattern *456789)
+	// The user "+49123456789" should match SIPUser filter "*456789"
+	// But the URI "+49123456789@carrier.com" requires different handling
+
+	t.Run("SIPUser suffix matches user part only", func(t *testing.T) {
+		af := newTestApplicationFilter(
+			[]parsedFilter{},
+			[]parsedFilter{
+				// Phone number suffix pattern
+				{original: "*456789", pattern: "456789", patternType: filtering.PatternTypeSuffix},
+			},
+		)
+
+		payload := `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`
+		result := af.matchWithCPU(payload)
+		assert.True(t, result, "SIPUser/PhoneNumber filter should match user part +49123456789 ending with 456789")
+	})
+
+	t.Run("SIPURI matches full identity", func(t *testing.T) {
+		af := newTestApplicationFilterWithSIPURI(
+			[]parsedFilter{
+				// Full URI pattern
+				{original: "+49123456789@carrier.com", pattern: "+49123456789@carrier.com", patternType: filtering.PatternTypeContains},
+			},
+		)
+
+		payload := `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`
+		result := af.matchWithCPU(payload)
+		assert.True(t, result, "SIPURI filter should match full URI +49123456789@carrier.com")
+	})
+
+	t.Run("SIPURI does not match when domain differs", func(t *testing.T) {
+		af := newTestApplicationFilterWithSIPURI(
+			[]parsedFilter{
+				{original: "+49123456789@carrier.com", pattern: "+49123456789@carrier.com", patternType: filtering.PatternTypeContains},
+			},
+		)
+
+		payload := `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@different-carrier.com>
+To: <sip:dest@example.com>
+Call-ID: test123
+`
+		result := af.matchWithCPU(payload)
+		assert.False(t, result, "SIPURI filter should NOT match when domain differs (+49123456789@different-carrier.com vs +49123456789@carrier.com)")
+	})
+
+	t.Run("SIPUser matches regardless of domain", func(t *testing.T) {
+		af := newTestApplicationFilter(
+			[]parsedFilter{},
+			[]parsedFilter{
+				{original: "*456789", pattern: "456789", patternType: filtering.PatternTypeSuffix},
+			},
+		)
+
+		// Same user, different domains
+		payloads := []struct {
+			payload string
+			domain  string
+		}{
+			{
+				payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@carrier.com>
+To: <sip:dest@example.com>
+`,
+				domain: "carrier.com",
+			},
+			{
+				payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@different.org>
+To: <sip:dest@example.com>
+`,
+				domain: "different.org",
+			},
+			{
+				payload: `INVITE sip:someone@example.com SIP/2.0
+From: <sip:+49123456789@third-party.net>
+To: <sip:dest@example.com>
+`,
+				domain: "third-party.net",
+			},
+		}
+
+		for _, p := range payloads {
+			result := af.matchWithCPU(p.payload)
+			assert.True(t, result, "SIPUser filter should match user part regardless of domain (%s)", p.domain)
+		}
+	})
 }

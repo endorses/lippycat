@@ -273,7 +273,8 @@ message Filter {
 
 // FilterType enum
 enum FilterType {
-    // SIP user (From/To headers)
+    // SIP user (From/To headers) - extracts user part for suffix/wildcard matching
+    // Use for phone number suffix matching (e.g., *456789 matches +49123456789)
     FILTER_SIP_USER = 0;
 
     // Phone number (with wildcard support)
@@ -290,6 +291,10 @@ enum FilterType {
 
     // Custom BPF filter
     FILTER_BPF = 5;
+
+    // SIP URI (From/To headers) - extracts user@domain for exact/pattern matching
+    // Use for matching full SIP identities (e.g., alice@example.com)
+    FILTER_SIP_URI = 6;
 }
 
 // FilterUpdate pushed to hunters in real-time

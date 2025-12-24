@@ -78,6 +78,13 @@ make build-release  # 22 MB
 # Quick dev build (unstripped, no version info)
 make dev           # ~31 MB
 
+# LI (Lawful Interception) builds - requires -tags li
+make build-li       # Complete suite with LI support
+make processor-li   # Processor with LI support
+make tap-li         # Tap with LI support
+make binaries-li    # Build all LI variants
+make verify-no-li   # Verify non-LI builds exclude LI code
+
 # Build with CUDA GPU acceleration
 make build-cuda
 
@@ -92,8 +99,9 @@ make build-pgo
 - `tap`: Tap node only - standalone capture with processor capabilities
 - `cli`: CLI commands only - sniff, debug, interfaces
 - `tui`: TUI interface only - terminal UI with remote monitoring
+- `li`: Lawful Interception support (ETSI X1/X2/X3) - can be combined with other tags
 
-Each specialized build is stripped (`-s -w`) and optimized to reduce binary size while maintaining full functionality for its role. Hunter nodes include all protocol detectors and GPU acceleration for edge filtering.
+Each specialized build is stripped (`-s -w`) and optimized to reduce binary size while maintaining full functionality for its role. Hunter nodes include all protocol detectors and GPU acceleration for edge filtering. LI support is optional and excluded from non-LI builds via dead code elimination.
 
 ### Install
 ```bash

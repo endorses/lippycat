@@ -168,10 +168,10 @@ Leverage existing filter management system with Phase 0 enhancements.
 
 ### Step 1.4: LI Manager
 
-- [ ] Create `internal/pkg/li/manager.go` with `//go:build li`
-- [ ] Create `internal/pkg/li/manager_stub.go` with `//go:build !li`
-- [ ] Manager aggregates: registry, matcher, destination manager, X1 client
-- [ ] Add `ProcessPacket(pkt *types.PacketDisplay)` method
+- [x] Create `internal/pkg/li/manager.go` with `//go:build li`
+- [x] Create `internal/pkg/li/manager_stub.go` with `//go:build !li`
+- [x] Manager aggregates: registry, matcher, destination manager, X1 client
+- [x] Add `ProcessPacket(pkt *types.PacketDisplay)` method
 
 ### Step 1.5: Processor integration
 

@@ -3,6 +3,7 @@ package hunter
 import (
 	"bytes"
 	"net"
+	"net/netip"
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
@@ -10,9 +11,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
+	"github.com/kentik/patricia"
+	"github.com/kentik/patricia/generics_tree"
 )
 
 // parsedFilter holds a parsed pattern with its type for matching
@@ -26,19 +28,26 @@ type parsedFilter struct {
 // ApplicationFilter handles GPU-accelerated application-layer packet filtering
 // Supports multiple protocols via the detector and can be extended with protocol-specific filters
 type ApplicationFilter struct {
-	gpuAccel         *voip.GPUAccelerator
-	detector         *detector.Detector // Protocol detector for accurate protocol detection
-	config           *voip.GPUConfig
-	sipUsers         []parsedFilter // Parsed SIP user patterns (user part only, suffix matching)
-	sipURIs          []parsedFilter // Parsed SIP URI patterns (user@domain, exact/contains matching)
-	phoneNumbers     []parsedFilter // Parsed phone number patterns
-	ipAddresses      []string       // IP addresses as strings (for display/logging)
-	ipAddressBytes   [][]byte       // Parsed IP addresses as bytes (for SIMD comparison)
-	patterns         []voip.GPUPattern
-	acPatterns       []ahocorasick.Pattern        // AC patterns for GPU backend (SIP users + phone numbers)
-	acMatcher        *ahocorasick.BufferedMatcher // Aho-Corasick matcher for SIP user/phone number matching
-	sipURIPatterns   []ahocorasick.Pattern        // AC patterns for SIPURI matching (user@domain)
-	sipURIMatcher    *ahocorasick.BufferedMatcher // Separate Aho-Corasick matcher for SIPURI matching
+	gpuAccel       *voip.GPUAccelerator
+	detector       *detector.Detector // Protocol detector for accurate protocol detection
+	config         *voip.GPUConfig
+	sipUsers       []parsedFilter // Parsed SIP user patterns (user part only, suffix matching)
+	sipURIs        []parsedFilter // Parsed SIP URI patterns (user@domain, exact/contains matching)
+	phoneNumbers   []parsedFilter // Parsed phone number patterns
+	ipAddresses    []string       // IP addresses as strings (for display/logging)
+	patterns       []voip.GPUPattern
+	acPatterns     []ahocorasick.Pattern        // AC patterns for GPU backend (SIP users + phone numbers)
+	acMatcher      *ahocorasick.BufferedMatcher // Aho-Corasick matcher for SIP user/phone number matching
+	sipURIPatterns []ahocorasick.Pattern        // AC patterns for SIPURI matching (user@domain)
+	sipURIMatcher  *ahocorasick.BufferedMatcher // Separate Aho-Corasick matcher for SIPURI matching
+
+	// IP filter data structures for O(1) exact matching and O(prefix) CIDR matching
+	exactIPv4      map[netip.Addr]struct{}         // Hash map for O(1) exact IPv4 lookup
+	exactIPv6      map[netip.Addr]struct{}         // Hash map for O(1) exact IPv6 lookup
+	cidrTreeV4     *generics_tree.TreeV4[struct{}] // Radix tree for IPv4 CIDR matching
+	cidrTreeV6     *generics_tree.TreeV6[struct{}] // Radix tree for IPv6 CIDR matching
+	hasCIDRFilters bool                            // Whether any CIDR filters are present
+
 	mu               sync.RWMutex
 	enabled          bool
 	gpuACBuilt       bool // Whether GPU has default (SIPUser+PhoneNumber) AC automaton built
@@ -68,12 +77,16 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		sipURIs:        make([]parsedFilter, 0),
 		phoneNumbers:   make([]parsedFilter, 0),
 		ipAddresses:    make([]string, 0),
-		ipAddressBytes: make([][]byte, 0),
 		patterns:       make([]voip.GPUPattern, 0),
 		acPatterns:     make([]ahocorasick.Pattern, 0),
 		acMatcher:      ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick for SIP user/phone
 		sipURIPatterns: make([]ahocorasick.Pattern, 0),
 		sipURIMatcher:  ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
+		exactIPv4:      make(map[netip.Addr]struct{}),
+		exactIPv6:      make(map[netip.Addr]struct{}),
+		cidrTreeV4:     generics_tree.NewTreeV4[struct{}](),
+		cidrTreeV6:     generics_tree.NewTreeV6[struct{}](),
+		hasCIDRFilters: false,
 		enabled:        config != nil && config.Enabled,
 		gpuACBuilt:     false,
 	}
@@ -128,12 +141,18 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	af.sipURIs = af.sipURIs[:0]
 	af.phoneNumbers = af.phoneNumbers[:0]
 	af.ipAddresses = af.ipAddresses[:0]
-	af.ipAddressBytes = af.ipAddressBytes[:0]
 	af.patterns = af.patterns[:0]
 	af.acPatterns = af.acPatterns[:0]
 	af.sipURIPatterns = af.sipURIPatterns[:0]
 	af.gpuACBuilt = false
 	af.gpuSIPURIACBuilt = false
+
+	// Reset IP filter data structures
+	af.exactIPv4 = make(map[netip.Addr]struct{})
+	af.exactIPv6 = make(map[netip.Addr]struct{})
+	af.cidrTreeV4 = generics_tree.NewTreeV4[struct{}]()
+	af.cidrTreeV6 = generics_tree.NewTreeV6[struct{}]()
+	af.hasCIDRFilters = false
 
 	// Build new filter lists
 	// Note: BPF filters are NOT handled here - they require capture restart
@@ -184,19 +203,46 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 
 		case management.FilterType_FILTER_IP_ADDRESS:
 			af.ipAddresses = append(af.ipAddresses, filter.Pattern)
-			// Parse and normalize IP address to bytes for comparison
+			// Parse IP address or CIDR range
 			// IP addresses are matched at network layer (headers), not payload
 			// GPU acceleration doesn't apply here
-			if ip := net.ParseIP(filter.Pattern); ip != nil {
-				// Convert to 4-byte form for IPv4 (gopacket uses 4-byte representation)
-				// or 16-byte form for IPv6
-				if ipv4 := ip.To4(); ipv4 != nil {
-					af.ipAddressBytes = append(af.ipAddressBytes, []byte(ipv4))
+
+			// First try parsing as CIDR (e.g., "10.0.0.0/8", "2001:db8::/32")
+			if prefix, err := netip.ParsePrefix(filter.Pattern); err == nil {
+				// CIDR filter - add to radix tree for O(prefix) lookup
+				if prefix.Addr().Is4() {
+					ipv4Addr, _, _ := patricia.ParseFromNetIPPrefix(prefix)
+					if ipv4Addr != nil {
+						af.cidrTreeV4.Set(*ipv4Addr, struct{}{})
+						af.hasCIDRFilters = true
+					}
 				} else {
-					af.ipAddressBytes = append(af.ipAddressBytes, []byte(ip))
+					_, ipv6Addr, _ := patricia.ParseFromNetIPPrefix(prefix)
+					if ipv6Addr != nil {
+						af.cidrTreeV6.Set(*ipv6Addr, struct{}{})
+						af.hasCIDRFilters = true
+					}
+				}
+			} else if addr, err := netip.ParseAddr(filter.Pattern); err == nil {
+				// Exact IP address - add to hash map for O(1) lookup
+				if addr.Is4() {
+					af.exactIPv4[addr] = struct{}{}
+				} else {
+					af.exactIPv6[addr] = struct{}{}
 				}
 			} else {
-				logger.Warn("Failed to parse IP address filter", "pattern", filter.Pattern)
+				// Legacy fallback: try net.ParseIP for non-standard formats
+				if ip := net.ParseIP(filter.Pattern); ip != nil {
+					if addr, ok := netip.AddrFromSlice(ip); ok {
+						if addr.Is4() {
+							af.exactIPv4[addr.Unmap()] = struct{}{}
+						} else {
+							af.exactIPv6[addr] = struct{}{}
+						}
+					}
+				} else {
+					logger.Warn("Failed to parse IP address filter", "pattern", filter.Pattern)
+				}
 			}
 
 		case management.FilterType_FILTER_SIP_URI:
@@ -763,25 +809,78 @@ func extractHeaderValue(line []byte) []byte {
 }
 
 // matchIPAddress checks if packet source or destination IP matches any filter
-// Uses SIMD-optimized byte comparison for high-performance network layer filtering
+// Uses O(1) hash map lookup for exact IPs and O(prefix) radix tree for CIDRs
 func (af *ApplicationFilter) matchIPAddress(packet gopacket.Packet) bool {
-	// Get network layer
-	if netLayer := packet.NetworkLayer(); netLayer != nil {
-		// Get raw IP bytes (4 bytes for IPv4, 16 bytes for IPv6)
-		// This avoids string conversion overhead
-		srcIPBytes := netLayer.NetworkFlow().Src().Raw()
-		dstIPBytes := netLayer.NetworkFlow().Dst().Raw()
+	netLayer := packet.NetworkLayer()
+	if netLayer == nil {
+		return false
+	}
 
-		// Check if source or destination matches any IP filter
-		// Use SIMD-optimized comparison (AVX2/SSE2) for maximum performance
-		for _, filterIPBytes := range af.ipAddressBytes {
-			// SIMD comparison is much faster than string comparison
-			// Especially for high packet rates
-			if simd.BytesEqual(srcIPBytes, filterIPBytes) || simd.BytesEqual(dstIPBytes, filterIPBytes) {
-				return true
+	// Get raw IP bytes (4 bytes for IPv4, 16 bytes for IPv6)
+	srcIPBytes := netLayer.NetworkFlow().Src().Raw()
+	dstIPBytes := netLayer.NetworkFlow().Dst().Raw()
+
+	// Convert to netip.Addr for hash map and radix tree lookups
+	srcAddr, srcOk := netip.AddrFromSlice(srcIPBytes)
+	dstAddr, dstOk := netip.AddrFromSlice(dstIPBytes)
+
+	// Check source IP
+	if srcOk {
+		if af.matchSingleIP(srcAddr) {
+			return true
+		}
+	}
+
+	// Check destination IP
+	if dstOk {
+		if af.matchSingleIP(dstAddr) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchSingleIP checks if a single IP address matches any filter (exact or CIDR)
+// Uses O(1) hash map lookup for exact matches, O(prefix) radix tree for CIDRs
+func (af *ApplicationFilter) matchSingleIP(addr netip.Addr) bool {
+	// Normalize IPv4-mapped IPv6 addresses to plain IPv4
+	if addr.Is4In6() {
+		addr = addr.Unmap()
+	}
+
+	if addr.Is4() {
+		// O(1) exact match check
+		if _, found := af.exactIPv4[addr]; found {
+			return true
+		}
+
+		// O(prefix) CIDR match check via radix tree
+		if af.hasCIDRFilters {
+			ipv4Addr, _, _ := patricia.ParseFromNetIPAddr(addr)
+			if ipv4Addr != nil {
+				if found, _ := af.cidrTreeV4.FindDeepestTag(*ipv4Addr); found {
+					return true
+				}
+			}
+		}
+	} else {
+		// O(1) exact match check
+		if _, found := af.exactIPv6[addr]; found {
+			return true
+		}
+
+		// O(prefix) CIDR match check via radix tree
+		if af.hasCIDRFilters {
+			_, ipv6Addr, _ := patricia.ParseFromNetIPAddr(addr)
+			if ipv6Addr != nil {
+				if found, _ := af.cidrTreeV6.FindDeepestTag(*ipv6Addr); found {
+					return true
+				}
 			}
 		}
 	}
+
 	return false
 }
 

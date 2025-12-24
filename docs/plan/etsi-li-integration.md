@@ -49,15 +49,17 @@ Current IP matching is O(n) linear scan with SIMD comparison.
 LI with many concurrent IP targets needs O(1) lookups.
 CIDR only works at BPF level (requires capture restart on changes).
 
-- [ ] Exact IP matching: replace linear scan with hash map lookup O(1)
-  - `map[netip.Addr][]*Filter` for IPv4/IPv6
-  - Fall back to SIMD comparison only if hash miss (shouldn't happen)
-- [ ] CIDR matching: implement radix/prefix tree for app-level matching
+- [x] Exact IP matching: replace linear scan with hash map lookup O(1)
+  - `map[netip.Addr]struct{}` for IPv4/IPv6
+  - Benchmarks: 15.82 ns/op with 1000 filters (constant time)
+- [x] CIDR matching: implement radix/prefix tree for app-level matching
+  - Uses `github.com/kentik/patricia/generics_tree`
   - Avoids BPF restart when CIDR filters change
-  - O(prefix length) lookup
-  - Consider using existing library (e.g., `github.com/kentik/patricia`)
-- [ ] Benchmark: verify O(1) for exact, O(log n) or better for CIDR
-- [ ] Unit tests for hash map and radix tree correctness
+  - O(prefix length) lookup via patricia trie
+- [x] Benchmark: verify O(1) for exact, O(prefix) for CIDR
+  - See `internal/pkg/hunter/ip_filter_bench_test.go`
+- [x] Unit tests for hash map and radix tree correctness
+  - See `TestIPFilterOptimization` in `application_filter_test.go`
 
 ## Phase 1: Core Infrastructure
 

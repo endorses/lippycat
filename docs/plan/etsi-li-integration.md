@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 1 in progress (Steps 1.1-1.5 complete, filter ID plumbing done)
+**Status:** Phase 1 complete (Steps 1.1-1.6 done)
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -181,9 +181,11 @@ Leverage existing filter management system with Phase 0 enhancements.
 
 ### Step 1.6: Build system
 
-- [ ] Add `li` build tag to Makefile
-- [ ] Add `build-li`, `processor-li`, `tap-li` targets
-- [ ] Verify non-LI builds exclude all LI code
+- [x] Add `li` build tag to Makefile
+- [x] Add `build-li`, `processor-li`, `tap-li` targets
+- [x] Verify non-LI builds exclude all LI code
+  - Types are shared, but Registry/FilterManager excluded via dead code elimination
+  - `make verify-no-li` confirms LI implementation excluded from non-LI builds
 
 ## Phase 2: X2/X3 Protocol (TLV Encoder)
 

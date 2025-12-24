@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li verify-no-li
 
 # Build variables
 BINARY_NAME=lc
@@ -60,6 +60,40 @@ tap:
 	@echo "Building tap binary $(VERSION) (stripped, standalone capture)..."
 	@mkdir -p bin
 	$(GO) build $(GOFLAGS) -tags tap -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tap
+
+# Build complete suite with LI (Lawful Interception) support
+build-li:
+	@echo "Building $(BINARY_NAME) $(VERSION) with LI support..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags all,li -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-li
+
+# Build processor with LI support
+processor-li:
+	@echo "Building processor binary $(VERSION) with LI support..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags processor,li -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-process-li
+
+# Build tap with LI support
+tap-li:
+	@echo "Building tap binary $(VERSION) with LI support..."
+	@mkdir -p bin
+	$(GO) build $(GOFLAGS) -tags tap,li -ldflags "$(LDFLAGS) -s -w" -o bin/$(BINARY_NAME)-tap-li
+
+# Build all LI-enabled binary variants
+binaries-li: build-li processor-li tap-li
+	@echo "All LI binary variants built successfully:"
+	@ls -lh bin/*-li
+
+# Verify non-LI builds exclude LI implementation code
+# Types are shared, but Registry/FilterManager are excluded via dead code elimination
+verify-no-li: all
+	@echo "Verifying non-LI build excludes LI implementation..."
+	@if go tool nm bin/$(BINARY_NAME) 2>/dev/null | grep -q 'li\..*Registry'; then \
+		echo "ERROR: LI Registry found in non-LI build!"; \
+		exit 1; \
+	else \
+		echo "OK: LI implementation code excluded from non-LI build"; \
+	fi
 
 # Build all binary variants
 binaries: all hunter processor cli tui tap
@@ -216,6 +250,13 @@ help:
 	@echo "  make tui            - Build TUI interface only"
 	@echo "  make tap            - Build tap node (standalone capture + processor)"
 	@echo "  make binaries       - Build all variants"
+	@echo ""
+	@echo "LI (Lawful Interception) builds:"
+	@echo "  make build-li       - Build complete suite with LI support"
+	@echo "  make processor-li   - Build processor with LI support"
+	@echo "  make tap-li         - Build tap with LI support"
+	@echo "  make binaries-li    - Build all LI variants"
+	@echo "  make verify-no-li   - Verify non-LI builds exclude LI code"
 	@echo ""
 	@echo "Installation:"
 	@echo "  make install        - Install to GOPATH/bin as 'lc'"

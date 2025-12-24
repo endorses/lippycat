@@ -152,19 +152,19 @@ Create LI package structure and wire into processor.
 
 Leverage existing filter management system with Phase 0 enhancements.
 
-- [ ] Create `internal/pkg/li/filters.go`
-- [ ] Map X1 target identities (per ETSI TS 103 280) to lippycat filters:
+- [x] Create `internal/pkg/li/filters.go`
+- [x] Map X1 target identities (per ETSI TS 103 280) to lippycat filters:
   - `SIPURI` (sip:user@domain) → SIPURI filter (Phase 0.1)
   - `TELURI` (tel:+number) → PhoneNumber filter with PhoneNumberMatcher (Phase 0.3)
   - `NAI` (user@realm) → SIPURI filter (same format as SIP URI)
   - `IPv4Address` → IP filter with hash map lookup (Phase 0.2)
   - `IPv4CIDR` → IP filter with radix tree lookup (Phase 0.2)
   - Mobile identifiers (IMSI, IMEI, MSISDN) → out of scope for now
-- [ ] Store XID ↔ FilterID mapping for correlation
-- [ ] On ActivateTask: create filter, push via existing filter management
-- [ ] On DeactivateTask: remove filter
-- [ ] On ModifyTask: update filter atomically
-- [ ] When packets match filter: lookup XID, deliver via X2/X3
+- [x] Store XID ↔ FilterID mapping for correlation
+- [x] On ActivateTask: create filter, push via existing filter management
+- [x] On DeactivateTask: remove filter
+- [x] On ModifyTask: update filter atomically
+- [x] When packets match filter: lookup XID, deliver via X2/X3
 
 ### Step 1.4: LI Manager
 

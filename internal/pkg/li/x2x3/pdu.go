@@ -253,6 +253,33 @@ const (
 	// AttrCorrelationNumber contains a call correlation identifier.
 	// Used to link multiple IRIs belonging to the same communication session.
 	AttrCorrelationNumber AttributeType = 0x0111
+
+	// RTP/Media-specific attribute types for X3 CC (Content of Communication).
+	// These are used in X3 PDUs for voice/media interception.
+
+	// AttrRTPSSRC contains the RTP SSRC (Synchronization Source) identifier.
+	// 4 bytes, identifies the synchronization source.
+	AttrRTPSSRC AttributeType = 0x0200
+
+	// AttrRTPSequenceNumber contains the RTP sequence number.
+	// 2 bytes, used for packet ordering and loss detection.
+	AttrRTPSequenceNumber AttributeType = 0x0201
+
+	// AttrRTPTimestamp contains the RTP timestamp.
+	// 4 bytes, sampling instant of the first octet in the RTP data packet.
+	AttrRTPTimestamp AttributeType = 0x0202
+
+	// AttrRTPPayloadType contains the RTP payload type.
+	// 1 byte, identifies the format of the RTP payload.
+	AttrRTPPayloadType AttributeType = 0x0203
+
+	// AttrMediaPayload contains the raw media payload.
+	// Variable length, the actual audio/video content.
+	AttrMediaPayload AttributeType = 0x0204
+
+	// AttrStreamID contains an identifier linking X3 CC to corresponding X2 IRI.
+	// 8 bytes, typically derived from Call-ID or SSRC for correlation.
+	AttrStreamID AttributeType = 0x0210
 )
 
 // IRIType identifies the type of Intercept Related Information event.

@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 2 in progress (Steps 2.1-2.3 done, 2.4-2.5 pending)
+**Status:** Phase 2 in progress (Steps 2.1-2.4 done, 2.5 pending)
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -216,17 +216,17 @@ Implement binary TLV encoding per TS 103 221-2.
 
 ### Step 2.4: X3 Encoder (CC)
 
-- [ ] Create `internal/pkg/li/x2x3/x3_encoder.go`
-- [ ] Wrap RTP packets with X3 PDU header
-- [ ] Include: SSRC, sequence, timestamp, raw payload
-- [ ] Support high-volume streaming
+- [x] Create `internal/pkg/li/x2x3/x3_encoder.go`
+- [x] Wrap RTP packets with X3 PDU header
+- [x] Include: SSRC, sequence, timestamp, raw payload
+- [x] Support high-volume streaming (batch encoding, buffer pooling)
 
 ### Step 2.5: Unit tests
 
 - [x] Test PDU serialization/deserialization
 - [x] Test TLV encoding edge cases
 - [x] Test SIP→IRI mapping (X2 encoder tests)
-- [ ] Test X3 RTP→CC mapping
+- [x] Test X3 RTP→CC mapping
 - [ ] Verify byte-level compliance with spec
 
 ## Phase 3: X2/X3 Delivery (TLS Client)

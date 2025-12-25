@@ -193,10 +193,10 @@ Implement binary TLV encoding per TS 103 221-2.
 
 ### Step 2.1: PDU structures
 
-- [ ] Create `internal/pkg/li/x2x3/pdu.go`
-- [ ] Implement PDU header (version, type, lengths, XID, correlation)
-- [ ] Implement TLV attribute encoding (type, length, value)
-- [ ] Use network byte order (big-endian)
+- [x] Create `internal/pkg/li/x2x3/pdu.go`
+- [x] Implement PDU header (version, type, lengths, XID, correlation)
+- [x] Implement TLV attribute encoding (type, length, value)
+- [x] Use network byte order (big-endian)
 
 ### Step 2.2: Common attributes
 

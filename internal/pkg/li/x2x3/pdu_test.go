@@ -427,3 +427,216 @@ func TestHeaderMinSize(t *testing.T) {
 	expected := 2 + 2 + 2 + 2 + 4 + 16 + 8
 	assert.Equal(t, expected, HeaderMinSize)
 }
+
+// TestETSI_TS_103_221_2_ByteCompliance verifies byte-level compliance with ETSI TS 103 221-2.
+// This test constructs a PDU and verifies each byte matches the specification.
+func TestETSI_TS_103_221_2_ByteCompliance(t *testing.T) {
+	t.Run("X2_PDU_header_layout", func(t *testing.T) {
+		// Create a PDU with known values for deterministic testing
+		xid := uuid.MustParse("01234567-89ab-cdef-0123-456789abcdef")
+		correlationID := uint64(0xFEDCBA9876543210)
+
+		pdu := NewPDU(PDUTypeX2, xid, correlationID)
+		pdu.SetPayload([]byte{0xAA, 0xBB, 0xCC, 0xDD})
+
+		data, err := pdu.MarshalBinary()
+		require.NoError(t, err)
+
+		// Verify header layout per ETSI TS 103 221-2 Section 5.2
+		// Offset 0-1: Version (2 bytes, big-endian)
+		assert.Equal(t, byte(VersionMajor), data[0], "Version major byte")
+		assert.Equal(t, byte(VersionMinor), data[1], "Version minor byte")
+
+		// Offset 2-3: PDU Type (2 bytes, big-endian)
+		assert.Equal(t, byte(0), data[2], "PDU type high byte")
+		assert.Equal(t, byte(1), data[3], "PDU type low byte (1=X2)")
+
+		// Offset 4-5: Header Length (2 bytes, big-endian)
+		headerLen := binary.BigEndian.Uint16(data[4:6])
+		assert.Equal(t, uint16(HeaderMinSize), headerLen, "Header length")
+
+		// Offset 6-7: Payload Format (2 bytes, big-endian)
+		assert.Equal(t, byte(0), data[6], "Payload format high byte")
+		assert.Equal(t, byte(1), data[7], "Payload format low byte (1=ETSI)")
+
+		// Offset 8-11: Payload Length (4 bytes, big-endian)
+		payloadLen := binary.BigEndian.Uint32(data[8:12])
+		assert.Equal(t, uint32(4), payloadLen, "Payload length")
+
+		// Offset 12-27: XID (16 bytes, UUID in network byte order)
+		assert.Equal(t, xid[:], data[12:28], "XID bytes")
+
+		// Offset 28-35: Correlation ID (8 bytes, big-endian)
+		assert.Equal(t, []byte{0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10}, data[28:36], "Correlation ID bytes")
+
+		// Offset 36+: Payload
+		assert.Equal(t, []byte{0xAA, 0xBB, 0xCC, 0xDD}, data[36:40], "Payload bytes")
+	})
+
+	t.Run("X3_PDU_header_layout", func(t *testing.T) {
+		xid := uuid.MustParse("fedcba98-7654-3210-fedc-ba9876543210")
+		correlationID := uint64(0x0102030405060708)
+
+		pdu := NewPDU(PDUTypeX3, xid, correlationID)
+		data, err := pdu.MarshalBinary()
+		require.NoError(t, err)
+
+		// Verify X3 PDU type encoding
+		assert.Equal(t, byte(0), data[2], "PDU type high byte")
+		assert.Equal(t, byte(2), data[3], "PDU type low byte (2=X3)")
+	})
+
+	t.Run("TLV_attribute_layout", func(t *testing.T) {
+		// Per ETSI TS 103 221-2 Section 5.3: TLV format
+		// Offset 0-1: Type (2 bytes, big-endian)
+		// Offset 2-3: Length (2 bytes, big-endian)
+		// Offset 4+: Value (Length bytes)
+
+		attr := TLVAttribute{
+			Type:  AttrSIPCallID, // 0x0100
+			Value: []byte("call-123@example.com"),
+		}
+
+		data, err := attr.MarshalBinary()
+		require.NoError(t, err)
+
+		// Verify type encoding (0x0100)
+		assert.Equal(t, byte(0x01), data[0], "Type high byte")
+		assert.Equal(t, byte(0x00), data[1], "Type low byte")
+
+		// Verify length encoding
+		assert.Equal(t, byte(0x00), data[2], "Length high byte")
+		assert.Equal(t, byte(20), data[3], "Length low byte (20 chars)")
+
+		// Verify value
+		assert.Equal(t, "call-123@example.com", string(data[4:24]))
+	})
+
+	t.Run("timestamp_POSIX_timespec_format", func(t *testing.T) {
+		// Per ETSI TS 103 221-2: Timestamp is POSIX timespec
+		// 8 bytes for seconds (int64, signed) + 4 bytes for nanoseconds (int32)
+		ts := Timestamp{
+			Seconds:     1703500000, // 2023-12-25 12:26:40 UTC
+			Nanoseconds: 123456789,
+		}
+
+		data, err := ts.MarshalBinary()
+		require.NoError(t, err)
+		require.Len(t, data, 12)
+
+		// Verify seconds encoding (big-endian, signed 64-bit)
+		secs := int64(binary.BigEndian.Uint64(data[0:8]))
+		assert.Equal(t, int64(1703500000), secs)
+
+		// Verify nanoseconds encoding (big-endian, signed 32-bit)
+		nanos := int32(binary.BigEndian.Uint32(data[8:12]))
+		assert.Equal(t, int32(123456789), nanos)
+	})
+
+	t.Run("IPv4_address_encoding", func(t *testing.T) {
+		// IPv4 addresses are 4 bytes in network byte order
+		encoder := TLVEncoder{}
+		attr := encoder.EncodeBytes(AttrSourceIPv4, []byte{192, 168, 1, 100})
+
+		data, err := attr.MarshalBinary()
+		require.NoError(t, err)
+
+		// Type: 0x0003 (AttrSourceIPv4)
+		assert.Equal(t, byte(0x00), data[0])
+		assert.Equal(t, byte(0x03), data[1])
+
+		// Length: 4 bytes
+		assert.Equal(t, byte(0x00), data[2])
+		assert.Equal(t, byte(0x04), data[3])
+
+		// Value: 192.168.1.100
+		assert.Equal(t, []byte{192, 168, 1, 100}, data[4:8])
+	})
+
+	t.Run("IPv6_address_encoding", func(t *testing.T) {
+		// IPv6 addresses are 16 bytes in network byte order
+		ipv6 := []byte{
+			0x20, 0x01, 0x0d, 0xb8, // 2001:0db8
+			0x00, 0x00, 0x00, 0x00, // ::
+			0x00, 0x00, 0x00, 0x00, // ::
+			0x00, 0x00, 0x00, 0x01, // ::1
+		}
+
+		encoder := TLVEncoder{}
+		attr := encoder.EncodeBytes(AttrSourceIPv6, ipv6)
+
+		data, err := attr.MarshalBinary()
+		require.NoError(t, err)
+
+		// Type: 0x0005 (AttrSourceIPv6)
+		assert.Equal(t, byte(0x00), data[0])
+		assert.Equal(t, byte(0x05), data[1])
+
+		// Length: 16 bytes
+		assert.Equal(t, byte(0x00), data[2])
+		assert.Equal(t, byte(0x10), data[3])
+
+		// Value
+		assert.Equal(t, ipv6, data[4:20])
+	})
+
+	t.Run("RTP_attributes_encoding", func(t *testing.T) {
+		encoder := TLVEncoder{}
+
+		// SSRC: 0x12345678
+		ssrcAttr := encoder.EncodeUint32(AttrRTPSSRC, 0x12345678)
+		ssrcData, _ := ssrcAttr.MarshalBinary()
+		assert.Equal(t, byte(0x02), ssrcData[0], "SSRC type high byte")
+		assert.Equal(t, byte(0x00), ssrcData[1], "SSRC type low byte")
+		assert.Equal(t, []byte{0x12, 0x34, 0x56, 0x78}, ssrcData[4:8], "SSRC value")
+
+		// RTP Sequence Number: 0xABCD
+		seqAttr := encoder.EncodeUint16(AttrRTPSequenceNumber, 0xABCD)
+		seqData, _ := seqAttr.MarshalBinary()
+		assert.Equal(t, byte(0x02), seqData[0], "Seq type high byte")
+		assert.Equal(t, byte(0x01), seqData[1], "Seq type low byte")
+		assert.Equal(t, []byte{0xAB, 0xCD}, seqData[4:6], "Seq value")
+
+		// RTP Timestamp: 0x11223344
+		tsAttr := encoder.EncodeUint32(AttrRTPTimestamp, 0x11223344)
+		tsData, _ := tsAttr.MarshalBinary()
+		assert.Equal(t, byte(0x02), tsData[0], "TS type high byte")
+		assert.Equal(t, byte(0x02), tsData[1], "TS type low byte")
+		assert.Equal(t, []byte{0x11, 0x22, 0x33, 0x44}, tsData[4:8], "TS value")
+
+		// RTP Payload Type: 0 (PCMU)
+		ptAttr := encoder.EncodeUint8(AttrRTPPayloadType, 0)
+		ptData, _ := ptAttr.MarshalBinary()
+		assert.Equal(t, byte(0x02), ptData[0], "PT type high byte")
+		assert.Equal(t, byte(0x03), ptData[1], "PT type low byte")
+		assert.Equal(t, byte(0x00), ptData[4], "PT value")
+	})
+
+	t.Run("complete_X2_PDU_with_attributes", func(t *testing.T) {
+		xid := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		pdu := NewPDU(PDUTypeX2, xid, 1)
+
+		encoder := TLVEncoder{}
+		pdu.AddAttribute(encoder.EncodeUint32(AttrSequenceNumber, 1))
+
+		data, err := pdu.MarshalBinary()
+		require.NoError(t, err)
+
+		// Total size: 36 (header) + 8 (seq attr: 4 type/len + 4 value) = 44
+		assert.Len(t, data, 44)
+
+		// Header length should include attribute
+		headerLen := binary.BigEndian.Uint16(data[4:6])
+		assert.Equal(t, uint16(44), headerLen)
+
+		// Attribute starts at offset 36
+		attrType := binary.BigEndian.Uint16(data[36:38])
+		assert.Equal(t, uint16(AttrSequenceNumber), attrType)
+
+		attrLen := binary.BigEndian.Uint16(data[38:40])
+		assert.Equal(t, uint16(4), attrLen)
+
+		attrVal := binary.BigEndian.Uint32(data[40:44])
+		assert.Equal(t, uint32(1), attrVal)
+	})
+}

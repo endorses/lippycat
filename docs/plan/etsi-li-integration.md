@@ -200,10 +200,10 @@ Implement binary TLV encoding per TS 103 221-2.
 
 ### Step 2.2: Common attributes
 
-- [ ] Implement Timestamp attribute (POSIX timespec: 8-byte seconds + 4-byte nanos)
-- [ ] Implement Sequence Number attribute (4-byte unsigned)
-- [ ] Implement IP address attributes (IPv4/IPv6)
-- [ ] Implement Correlation ID attribute
+- [x] Implement Timestamp attribute (POSIX timespec: 8-byte seconds + 4-byte nanos)
+- [x] Implement Sequence Number attribute (4-byte unsigned)
+- [x] Implement IP address attributes (IPv4/IPv6)
+- [x] Implement Correlation ID attribute
 
 ### Step 2.3: X2 Encoder (IRI)
 

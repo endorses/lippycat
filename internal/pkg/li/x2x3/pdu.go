@@ -222,7 +222,82 @@ const (
 
 	// AttrNationalParameter is reserved for national extensions.
 	AttrNationalParameter AttributeType = 0xFFFF
+
+	// SIP/VoIP-specific attribute types per ETSI TS 103 221-2.
+	// These are used in X2 IRI PDUs for VoIP interception.
+
+	// AttrSIPCallID contains the SIP Call-ID header value.
+	AttrSIPCallID AttributeType = 0x0100
+
+	// AttrSIPFromURI contains the SIP From header URI (user@domain).
+	AttrSIPFromURI AttributeType = 0x0101
+
+	// AttrSIPToURI contains the SIP To header URI (user@domain).
+	AttrSIPToURI AttributeType = 0x0102
+
+	// AttrSIPMethod contains the SIP request method (INVITE, BYE, etc.).
+	AttrSIPMethod AttributeType = 0x0103
+
+	// AttrSIPResponseCode contains the SIP response status code (200, 404, etc.).
+	AttrSIPResponseCode AttributeType = 0x0104
+
+	// AttrSIPFromTag contains the tag parameter from the From header.
+	AttrSIPFromTag AttributeType = 0x0105
+
+	// AttrSIPToTag contains the tag parameter from the To header.
+	AttrSIPToTag AttributeType = 0x0106
+
+	// AttrIRIType identifies the type of IRI event.
+	AttrIRIType AttributeType = 0x0110
+
+	// AttrCorrelationNumber contains a call correlation identifier.
+	// Used to link multiple IRIs belonging to the same communication session.
+	AttrCorrelationNumber AttributeType = 0x0111
 )
+
+// IRIType identifies the type of Intercept Related Information event.
+type IRIType uint16
+
+const (
+	// IRISessionBegin indicates the start of a communication session (SIP INVITE).
+	IRISessionBegin IRIType = 1
+
+	// IRISessionAnswer indicates the session was answered (SIP 200 OK to INVITE).
+	IRISessionAnswer IRIType = 2
+
+	// IRISessionEnd indicates the end of a communication session (SIP BYE).
+	IRISessionEnd IRIType = 3
+
+	// IRISessionAttempt indicates a session attempt that was not answered.
+	// Generated when a session ends before being answered (e.g., CANCEL, 4xx/5xx/6xx).
+	IRISessionAttempt IRIType = 4
+
+	// IRIRegistration indicates a SIP REGISTER event.
+	IRIRegistration IRIType = 5
+
+	// IRIRegistrationEnd indicates a SIP de-registration event.
+	IRIRegistrationEnd IRIType = 6
+)
+
+// String returns the string representation of the IRI type.
+func (t IRIType) String() string {
+	switch t {
+	case IRISessionBegin:
+		return "SessionBegin"
+	case IRISessionAnswer:
+		return "SessionAnswer"
+	case IRISessionEnd:
+		return "SessionEnd"
+	case IRISessionAttempt:
+		return "SessionAttempt"
+	case IRIRegistration:
+		return "Registration"
+	case IRIRegistrationEnd:
+		return "RegistrationEnd"
+	default:
+		return fmt.Sprintf("Unknown(%d)", t)
+	}
+}
 
 // TLVAttribute represents a Type-Length-Value encoded attribute.
 //

@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 1 complete (Steps 1.1-1.6 done)
+**Status:** Phase 2 in progress (Steps 2.1-2.3 done, 2.4-2.5 pending)
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -207,12 +207,12 @@ Implement binary TLV encoding per TS 103 221-2.
 
 ### Step 2.3: X2 Encoder (IRI)
 
-- [ ] Create `internal/pkg/li/x2x3/x2_encoder.go`
-- [ ] Map SIP INVITE → Session Begin IRI
-- [ ] Map SIP 200 OK → Session Answer IRI
-- [ ] Map SIP BYE → Session End IRI
-- [ ] Map SIP REGISTER → Registration IRI
-- [ ] Include: Call-ID, From, To, timestamps
+- [x] Create `internal/pkg/li/x2x3/x2_encoder.go`
+- [x] Map SIP INVITE → Session Begin IRI
+- [x] Map SIP 200 OK → Session Answer IRI
+- [x] Map SIP BYE → Session End IRI
+- [x] Map SIP REGISTER → Registration IRI
+- [x] Include: Call-ID, From, To, timestamps
 
 ### Step 2.4: X3 Encoder (CC)
 
@@ -223,9 +223,10 @@ Implement binary TLV encoding per TS 103 221-2.
 
 ### Step 2.5: Unit tests
 
-- [ ] Test PDU serialization/deserialization
-- [ ] Test TLV encoding edge cases
-- [ ] Test SIP→IRI mapping
+- [x] Test PDU serialization/deserialization
+- [x] Test TLV encoding edge cases
+- [x] Test SIP→IRI mapping (X2 encoder tests)
+- [ ] Test X3 RTP→CC mapping
 - [ ] Verify byte-level compliance with spec
 
 ## Phase 3: X2/X3 Delivery (TLS Client)

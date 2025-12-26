@@ -211,6 +211,18 @@ func (b *AttributeBuilder) TrafficDirection(dir Direction) TLVAttribute {
 	return b.encoder.EncodeUint8(AttrDirection, uint8(dir))
 }
 
+// NFID creates a Network Function Identifier attribute.
+// This identifies the NE/NF (e.g., processor-id or tap-id) to the MDF.
+func (b *AttributeBuilder) NFID(id string) TLVAttribute {
+	return b.encoder.EncodeString(AttrNFID, id)
+}
+
+// IPID creates an Interception Point Identifier attribute.
+// This identifies the specific POI within the NF (e.g., hunter-id).
+func (b *AttributeBuilder) IPID(id string) TLVAttribute {
+	return b.encoder.EncodeString(AttrIPID, id)
+}
+
 // CorrelationAttrID creates a correlation ID attribute.
 // Note: This is different from the header correlation ID field.
 // This attribute is used for additional correlation within the PDU.
@@ -321,6 +333,22 @@ func (p *AttributeParser) ParseDirection(attr *TLVAttribute) (Direction, error) 
 	}
 	val, err := p.decoder.DecodeUint8(attr)
 	return Direction(val), err
+}
+
+// ParseNFID extracts a Network Function Identifier from an attribute.
+func (p *AttributeParser) ParseNFID(attr *TLVAttribute) (string, error) {
+	if attr.Type != AttrNFID {
+		return "", ErrInvalidAttrLength
+	}
+	return p.decoder.DecodeString(attr), nil
+}
+
+// ParseIPID extracts an Interception Point Identifier from an attribute.
+func (p *AttributeParser) ParseIPID(attr *TLVAttribute) (string, error) {
+	if attr.Type != AttrIPID {
+		return "", ErrInvalidAttrLength
+	}
+	return p.decoder.DecodeString(attr), nil
 }
 
 // FindAttribute searches for an attribute by type in a slice of attributes.

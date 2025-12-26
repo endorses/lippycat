@@ -267,6 +267,45 @@ func TestAttributeBuilder_TargetIdentifier(t *testing.T) {
 	assert.Equal(t, target, parsed)
 }
 
+func TestAttributeBuilder_NFID(t *testing.T) {
+	builder := NewAttributeBuilder()
+	parser := NewAttributeParser()
+
+	// Test with processor-id style NFID
+	nfid := "processor-central-01"
+	attr := builder.NFID(nfid)
+	assert.Equal(t, AttrNFID, attr.Type)
+	assert.Equal(t, nfid, string(attr.Value))
+
+	parsed, err := parser.ParseNFID(&attr)
+	require.NoError(t, err)
+	assert.Equal(t, nfid, parsed)
+
+	// Test with tap-id style NFID
+	tapNfid := "edge-tap-voip-01"
+	tapAttr := builder.NFID(tapNfid)
+	assert.Equal(t, AttrNFID, tapAttr.Type)
+
+	parsedTap, err := parser.ParseNFID(&tapAttr)
+	require.NoError(t, err)
+	assert.Equal(t, tapNfid, parsedTap)
+}
+
+func TestAttributeBuilder_IPID(t *testing.T) {
+	builder := NewAttributeBuilder()
+	parser := NewAttributeParser()
+
+	// Test with hunter-id style IPID
+	ipid := "hunter-eth0-sip"
+	attr := builder.IPID(ipid)
+	assert.Equal(t, AttrIPID, attr.Type)
+	assert.Equal(t, ipid, string(attr.Value))
+
+	parsed, err := parser.ParseIPID(&attr)
+	require.NoError(t, err)
+	assert.Equal(t, ipid, parsed)
+}
+
 func TestAttributeBuilder_Direction(t *testing.T) {
 	builder := NewAttributeBuilder()
 	parser := NewAttributeParser()

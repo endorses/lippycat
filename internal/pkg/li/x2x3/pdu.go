@@ -220,6 +220,16 @@ const (
 	// AttrDirection indicates traffic direction (1 byte: 0=unknown, 1=from target, 2=to target).
 	AttrDirection AttributeType = 0x000B
 
+	// AttrNFID contains the Network Function Identifier per ETSI TS 103 221-2.
+	// Identifies the NE/NF associated with the POI to the MDF.
+	// Variable length string (e.g., processor-id or tap-id).
+	AttrNFID AttributeType = 0x000C
+
+	// AttrIPID contains the Interception Point Identifier per ETSI TS 103 221-2.
+	// Identifies the specific POI within the NF.
+	// Variable length string (e.g., hunter-id for distributed capture).
+	AttrIPID AttributeType = 0x000D
+
 	// AttrNationalParameter is reserved for national extensions.
 	AttrNationalParameter AttributeType = 0xFFFF
 

@@ -231,63 +231,80 @@ Implement binary TLV encoding per TS 103 221-2.
 
 ## Phase 3: X2/X3 Delivery (TLS Client)
 
-Implement delivery to MDF endpoints.
+Implement delivery to MDF endpoints. Destinations are configured via X1 per ETSI architecture.
 
-### Step 3.1: Destination manager
+### Step 3.1: X1 Schema generation (partial - for destinations)
+
+Generate Go structs from ETSI XSD for destination management.
+
+- [ ] Download ETSI XSD schemas from forge.etsi.org (TS 103 221-1)
+- [ ] Use `xuri/xgen` to generate Go structs
+- [ ] Place in `internal/pkg/li/x1/schema/`
+- [ ] Focus on: `Destination`, `CreateDestination`, `ModifyDestination`, `RemoveDestination`
+
+### Step 3.2: X1 Destination management server
+
+Implement X1 server subset for destination CRUD operations.
+
+- [ ] Create `internal/pkg/li/x1/server.go`
+- [ ] Implement HTTPS server with mutual TLS
+- [ ] Implement destination handlers:
+  - [ ] `POST /CreateDestination` - register MDF endpoint with DID
+  - [ ] `POST /ModifyDestination` - update destination config
+  - [ ] `DELETE /RemoveDestination` - remove destination
+  - [ ] `GET /Ping` - health check
+- [ ] Validate XML against schema
+- [ ] Return proper X1 response codes
+- [ ] Add CLI flags: `--li-x1-listen`, `--li-x1-tls-cert`, `--li-x1-tls-key`, `--li-x1-tls-ca`
+
+### Step 3.3: Destination manager
 
 - [ ] Create `internal/pkg/li/delivery/destination.go`
+- [ ] Store destinations by DID (from X1 CreateDestination)
 - [ ] Manage TLS connections per destination
 - [ ] Implement connection pooling for multiple DIDs
 - [ ] Add reconnection with exponential backoff
 
-### Step 3.2: Delivery client
+### Step 3.4: Delivery client
 
 - [ ] Create `internal/pkg/li/delivery/client.go`
-- [ ] Implement `SendX2(xid uuid.UUID, iri []byte) error`
-- [ ] Implement `SendX3(xid uuid.UUID, cc []byte) error`
+- [ ] Implement `SendX2(xid uuid.UUID, destIDs []uuid.UUID, iri []byte) error`
+- [ ] Implement `SendX3(xid uuid.UUID, destIDs []uuid.UUID, cc []byte) error`
+- [ ] Resolve destination IDs to connections via destination manager
 - [ ] Add sequence numbering per stream
 - [ ] Add delivery queue with backpressure
 
-### Step 3.3: TLS configuration
+### Step 3.5: TLS configuration
 
-- [ ] Require mutual TLS (client certificate)
+- [ ] Require mutual TLS for X2/X3 delivery (client certificate)
 - [ ] Support certificate pinning
 - [ ] Minimum TLS 1.2, prefer TLS 1.3
-- [ ] Add flags: `--li-x2-dest`, `--li-x3-dest`, `--li-tls-cert`, `--li-tls-key`, `--li-tls-ca`
+- [ ] Add flags: `--li-delivery-tls-cert`, `--li-delivery-tls-key`, `--li-delivery-tls-ca`
 
-### Step 3.4: Unit tests
+### Step 3.6: Unit tests
 
+- [ ] Test X1 destination CRUD operations
 - [ ] Test connection management
-- [ ] Test delivery with mock server
+- [ ] Test delivery with mock MDF server
 - [ ] Test reconnection behavior
 
-## Phase 4: X1 Interface (Administration)
+## Phase 4: X1 Interface (Task Administration)
 
-Implement bidirectional X1 with ADMF.
+Complete X1 interface for task management and ADMF notifications.
 
-### Step 4.1: Generate Go structs from XSD
+### Step 4.1: X1 Task handlers
 
-- [ ] Download ETSI XSD schemas from forge.etsi.org
-- [ ] Use `xuri/xgen` to generate Go structs
-- [ ] Place in `internal/pkg/li/x1/schema/`
+Extend X1 server with task management (destination handlers done in Phase 3).
 
-### Step 4.2: X1 Server (receives ADMF requests)
-
-- [ ] Create `internal/pkg/li/x1/server.go`
-- [ ] Implement HTTPS server with mutual TLS
-- [ ] Implement handlers:
-  - [ ] `POST /ActivateTask`
-  - [ ] `POST /DeactivateTask`
-  - [ ] `POST /ModifyTask`
-  - [ ] `GET /GetTaskDetails`
-  - [ ] `POST /CreateDestination`
-  - [ ] `POST /ModifyDestination`
-  - [ ] `DELETE /RemoveDestination`
-  - [ ] `GET /Ping`
+- [ ] Implement task handlers:
+  - [ ] `POST /ActivateTask` - create intercept with target identities and destination IDs
+  - [ ] `POST /DeactivateTask` - stop intercept
+  - [ ] `POST /ModifyTask` - update task parameters atomically
+  - [ ] `GET /GetTaskDetails` - query task status
 - [ ] Validate XML against schema
 - [ ] Return proper X1 response codes
 
-### Step 4.3: X1 Client (sends notifications to ADMF)
+### Step 4.2: X1 Client (sends notifications to ADMF)
 
 - [ ] Create `internal/pkg/li/x1/client.go`
 - [ ] Implement HTTPS client with mutual TLS
@@ -298,8 +315,9 @@ Implement bidirectional X1 with ADMF.
   - [ ] `DeliveryNotification` (X2/X3 delivery issues)
 - [ ] Add retry with exponential backoff
 - [ ] Add configurable heartbeat interval
+- [ ] Add flags: `--li-admf-endpoint`
 
-### Step 4.4: Unit tests
+### Step 4.3: Unit tests
 
 - [ ] Test task activation/deactivation flow
 - [ ] Test XML parsing and validation

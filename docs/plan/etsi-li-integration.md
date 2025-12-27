@@ -268,12 +268,12 @@ Implement X1 server subset for destination CRUD operations.
 
 ### Step 3.4: Delivery client
 
-- [ ] Create `internal/pkg/li/delivery/client.go`
-- [ ] Implement `SendX2(xid uuid.UUID, destIDs []uuid.UUID, iri []byte) error`
-- [ ] Implement `SendX3(xid uuid.UUID, destIDs []uuid.UUID, cc []byte) error`
-- [ ] Resolve destination IDs to connections via destination manager
-- [ ] Add sequence numbering per stream
-- [ ] Add delivery queue with backpressure
+- [x] Create `internal/pkg/li/delivery/client.go`
+- [x] Implement `SendX2(xid uuid.UUID, destIDs []uuid.UUID, iri []byte) error`
+- [x] Implement `SendX3(xid uuid.UUID, destIDs []uuid.UUID, cc []byte) error`
+- [x] Resolve destination IDs to connections via destination manager
+- [x] Add sequence numbering per stream
+- [x] Add delivery queue with backpressure
 
 ### Step 3.5: TLS configuration
 

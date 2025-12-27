@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 4 step 4.3 complete
+**Status:** Phase 5 step 5.1 complete
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -331,14 +331,14 @@ Extend X1 server with task management (destination handlers done in Phase 3).
 
 ### Step 5.1: End-to-end testing
 
-- [ ] Create mock ADMF server for X1 testing
-- [ ] Create mock MDF server for X2/X3 testing
-- [ ] Test full flow: task activation → packet match → IRI/CC delivery
-- [ ] Test ModifyTask updates targets/destinations atomically
-- [ ] Test ModifyTask rejection when partial update impossible
-- [ ] Test DeactivateTask stops interception
-- [ ] Test ImplicitDeactivationAllowed: NE enforces EndTime, sends status to ADMF
-- [ ] Test without ImplicitDeactivationAllowed: NE ignores EndTime, waits for ADMF
+- [x] Create mock ADMF server for X1 testing
+- [x] Create mock MDF server for X2/X3 testing
+- [x] Test full flow: task activation → packet match → IRI/CC delivery
+- [x] Test ModifyTask updates targets/destinations atomically
+- [x] Test ModifyTask rejection when partial update impossible
+- [x] Test DeactivateTask stops interception
+- [x] Test ImplicitDeactivationAllowed: NE enforces EndTime, sends status to ADMF
+- [x] Test without ImplicitDeactivationAllowed: NE ignores EndTime, waits for ADMF
 
 ### Step 5.2: Performance testing
 

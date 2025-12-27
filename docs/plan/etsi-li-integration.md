@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 3 in progress (Steps 3.1-3.5 done)
+**Status:** Phase 3 complete
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -284,10 +284,10 @@ Implement X1 server subset for destination CRUD operations.
 
 ### Step 3.6: Unit tests
 
-- [ ] Test X1 destination CRUD operations
-- [ ] Test connection management
-- [ ] Test delivery with mock MDF server
-- [ ] Test reconnection behavior
+- [x] Test X1 destination CRUD operations
+- [x] Test connection management
+- [x] Test delivery with mock MDF server
+- [x] Test reconnection behavior
 
 ## Phase 4: X1 Interface (Task Administration)
 

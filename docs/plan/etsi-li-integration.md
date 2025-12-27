@@ -260,11 +260,11 @@ Implement X1 server subset for destination CRUD operations.
 
 ### Step 3.3: Destination manager
 
-- [ ] Create `internal/pkg/li/delivery/destination.go`
-- [ ] Store destinations by DID (from X1 CreateDestination)
-- [ ] Manage TLS connections per destination
-- [ ] Implement connection pooling for multiple DIDs
-- [ ] Add reconnection with exponential backoff
+- [x] Create `internal/pkg/li/delivery/destination.go`
+- [x] Store destinations by DID (from X1 CreateDestination)
+- [x] Manage TLS connections per destination
+- [x] Implement connection pooling for multiple DIDs
+- [x] Add reconnection with exponential backoff
 
 ### Step 3.4: Delivery client
 

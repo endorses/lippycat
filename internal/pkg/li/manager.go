@@ -16,6 +16,23 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
+// X1ClientConfig holds configuration for the X1 client (ADMF notifications).
+// These are separate from X1ServerConfig used for the X1 server.
+type X1ClientConfig struct {
+	// TLSCertFile is the path to the client TLS certificate for mutual TLS with ADMF.
+	TLSCertFile string
+
+	// TLSKeyFile is the path to the client TLS private key.
+	TLSKeyFile string
+
+	// TLSCAFile is the path to the CA certificate for ADMF server verification.
+	TLSCAFile string
+
+	// KeepaliveInterval is the interval for sending keepalive messages to ADMF.
+	// Set to 0 to disable keepalive.
+	KeepaliveInterval time.Duration
+}
+
 // ManagerConfig holds configuration for the LI Manager.
 type ManagerConfig struct {
 	// Enabled controls whether LI processing is active.
@@ -42,6 +59,9 @@ type ManagerConfig struct {
 	// Defaults to hostname if empty.
 	NEIdentifier string
 
+	// X1Client contains configuration for the X1 client (ADMF notifications).
+	X1Client X1ClientConfig
+
 	// FilterPusher integrates with the processor's filter management system.
 	FilterPusher FilterPusher
 }
@@ -56,8 +76,8 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 //   - Registry: task and destination storage
 //   - FilterManager: XID-to-filter mapping
 //   - X1Server: administration interface for ADMF communication
+//   - X1Client: ADMF notification sender (keepalive, error reports)
 //   - (Future) DestinationManager: X2/X3 delivery connections
-//   - (Future) X1Client: ADMF notification sender
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
@@ -66,6 +86,9 @@ type Manager struct {
 	config   ManagerConfig
 	registry *Registry
 	filters  *FilterManager
+
+	// x1Client sends notifications to ADMF.
+	x1Client *x1.Client
 
 	// x1Server is the X1 administration interface server.
 	x1Server *x1.Server
@@ -100,17 +123,72 @@ type ManagerStats struct {
 // The deactivationCallback is called when a task is implicitly deactivated
 // (e.g., EndTime expiration). This is used to notify ADMF via X1.
 func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback) *Manager {
-	registry := NewRegistry(deactivationCallback)
-	filters := NewFilterManager(config.FilterPusher)
-
 	m := &Manager{
 		config:   config,
-		registry: registry,
-		filters:  filters,
+		filters:  NewFilterManager(config.FilterPusher),
 		stopChan: make(chan struct{}),
 	}
 
-	// Create X1 server if TLS is configured
+	// Create X1 client if ADMF endpoint is configured.
+	// This is used to send notifications (keepalive, errors, etc.) to the ADMF.
+	if config.ADMFEndpoint != "" {
+		x1ClientConfig := x1.ClientConfig{
+			ADMFEndpoint:      config.ADMFEndpoint,
+			NEIdentifier:      config.NEIdentifier,
+			TLSCertFile:       config.X1Client.TLSCertFile,
+			TLSKeyFile:        config.X1Client.TLSKeyFile,
+			TLSCAFile:         config.X1Client.TLSCAFile,
+			KeepaliveInterval: config.X1Client.KeepaliveInterval,
+		}
+
+		client, err := x1.NewClient(x1ClientConfig)
+		if err != nil {
+			logger.Warn("X1 client creation failed, ADMF notifications disabled",
+				"error", err,
+				"admf_endpoint", config.ADMFEndpoint,
+			)
+		} else {
+			m.x1Client = client
+		}
+	}
+
+	// Create deactivation callback that reports to ADMF and then calls user callback.
+	internalCallback := func(task *InterceptTask, reason DeactivationReason) {
+		// Report implicit deactivation to ADMF via X1 client.
+		if m.x1Client != nil && reason != DeactivationReasonADMF {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				reasonStr := reason.String()
+				if reason == DeactivationReasonExpired {
+					reasonStr = "Task EndTime reached"
+				} else if reason == DeactivationReasonFault {
+					reasonStr = task.LastError
+					if reasonStr == "" {
+						reasonStr = "Task terminated due to fault"
+					}
+				}
+
+				if err := m.x1Client.ReportTaskImplicitDeactivation(ctx, task.XID, reasonStr); err != nil {
+					logger.Error("Failed to report implicit deactivation to ADMF",
+						"xid", task.XID,
+						"reason", reason,
+						"error", err,
+					)
+				}
+			}()
+		}
+
+		// Call user's callback if provided.
+		if deactivationCallback != nil {
+			deactivationCallback(task, reason)
+		}
+	}
+
+	m.registry = NewRegistry(internalCallback)
+
+	// Create X1 server if TLS is configured.
 	if config.X1ListenAddr != "" && config.X1TLSCertFile != "" && config.X1TLSKeyFile != "" {
 		x1Config := x1.ServerConfig{
 			ListenAddr:   config.X1ListenAddr,
@@ -119,7 +197,7 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 			TLSCAFile:    config.X1TLSCAFile,
 			NEIdentifier: config.NEIdentifier,
 		}
-		// Create adapters that implement x1.DestinationManager and x1.TaskManager
+		// Create adapters that implement x1.DestinationManager and x1.TaskManager.
 		destAdapter := &managerDestinationAdapter{m: m}
 		taskAdapter := &managerTaskAdapter{m: m}
 		m.x1Server = x1.NewServer(x1Config, destAdapter, taskAdapter)
@@ -144,7 +222,7 @@ func (m *Manager) Start() error {
 	// Start the registry's background task management
 	m.registry.Start()
 
-	// Start X1 server if configured
+	// Start X1 server if configured.
 	if m.x1Server != nil {
 		m.x1ServerCtx, m.x1ServerCancel = context.WithCancel(context.Background())
 		m.wg.Add(1)
@@ -162,6 +240,25 @@ func (m *Manager) Start() error {
 		)
 	}
 
+	// Start X1 client if configured (for ADMF notifications).
+	if m.x1Client != nil {
+		m.x1Client.Start()
+
+		// Send startup notification to ADMF.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := m.x1Client.ReportStartup(ctx); err != nil {
+				logger.Warn("Failed to send startup notification to ADMF",
+					"error", err,
+					"admf", m.config.ADMFEndpoint,
+				)
+			}
+		}()
+
+		logger.Info("X1 client started", "admf_endpoint", m.config.ADMFEndpoint)
+	}
+
 	logger.Info("LI Manager started",
 		"x1_listen", m.config.X1ListenAddr,
 		"admf_endpoint", m.config.ADMFEndpoint,
@@ -175,7 +272,19 @@ func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Stop X1 server
+	// Send shutdown notification to ADMF before stopping X1 client.
+	if m.x1Client != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := m.x1Client.ReportShutdown(ctx); err != nil {
+			logger.Warn("Failed to send shutdown notification to ADMF",
+				"error", err,
+				"admf", m.config.ADMFEndpoint,
+			)
+		}
+		cancel()
+	}
+
+	// Stop X1 server.
 	if m.x1ServerCancel != nil {
 		m.x1ServerCancel()
 	}
@@ -183,6 +292,11 @@ func (m *Manager) Stop() {
 		if err := m.x1Server.Shutdown(); err != nil {
 			logger.Error("X1 server shutdown error", "error", err)
 		}
+	}
+
+	// Stop X1 client.
+	if m.x1Client != nil {
+		m.x1Client.Stop()
 	}
 
 	close(m.stopChan)
@@ -763,4 +877,84 @@ func (m *Manager) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
 // PurgeDeactivatedTasks removes old deactivated tasks.
 func (m *Manager) PurgeDeactivatedTasks(olderThan time.Duration) int {
 	return m.registry.PurgeDeactivatedTasks(olderThan)
+}
+
+// ReportTaskError reports a task execution error to ADMF via X1.
+// This is a non-blocking operation; errors are logged but not returned.
+func (m *Manager) ReportTaskError(xid uuid.UUID, errorCode int, details string) {
+	if m.x1Client == nil {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := m.x1Client.ReportTaskError(ctx, xid, errorCode, details); err != nil {
+			logger.Error("Failed to report task error to ADMF",
+				"xid", xid,
+				"error_code", errorCode,
+				"error", err,
+			)
+		}
+	}()
+}
+
+// ReportDeliveryError reports an X2/X3 delivery error to ADMF via X1.
+// This is a non-blocking operation; errors are logged but not returned.
+func (m *Manager) ReportDeliveryError(did uuid.UUID, errorCode int, details string) {
+	if m.x1Client == nil {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := m.x1Client.ReportDeliveryError(ctx, did, errorCode, details); err != nil {
+			logger.Error("Failed to report delivery error to ADMF",
+				"did", did,
+				"error_code", errorCode,
+				"error", err,
+			)
+		}
+	}()
+}
+
+// ReportDeliveryRecovered reports that X2/X3 delivery has recovered to ADMF via X1.
+// This is a non-blocking operation; errors are logged but not returned.
+func (m *Manager) ReportDeliveryRecovered(did uuid.UUID) {
+	if m.x1Client == nil {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := m.x1Client.ReportDeliveryRecovered(ctx, did); err != nil {
+			logger.Error("Failed to report delivery recovered to ADMF",
+				"did", did,
+				"error", err,
+			)
+		}
+	}()
+}
+
+// X1ClientStats returns the X1 client statistics.
+// Returns zero values if X1 client is not configured.
+func (m *Manager) X1ClientStats() x1.ClientStats {
+	if m.x1Client == nil {
+		return x1.ClientStats{}
+	}
+	return m.x1Client.Stats()
+}
+
+// IsADMFConnected returns whether the X1 client is connected to ADMF.
+// Returns false if X1 client is not configured.
+func (m *Manager) IsADMFConnected() bool {
+	if m.x1Client == nil {
+		return false
+	}
+	return m.x1Client.IsConnected()
 }

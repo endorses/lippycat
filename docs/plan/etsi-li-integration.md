@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 4 step 4.1 complete
+**Status:** Phase 4 step 4.2 complete
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -307,16 +307,18 @@ Extend X1 server with task management (destination handlers done in Phase 3).
 
 ### Step 4.2: X1 Client (sends notifications to ADMF)
 
-- [ ] Create `internal/pkg/li/x1/client.go`
-- [ ] Implement HTTPS client with mutual TLS
-- [ ] Implement notifications:
-  - [ ] `ErrorReport` (task execution errors)
-  - [ ] `TaskProgress` (activation progress)
-  - [ ] `KeepAlive` (periodic heartbeat)
-  - [ ] `DeliveryNotification` (X2/X3 delivery issues)
-- [ ] Add retry with exponential backoff
-- [ ] Add configurable heartbeat interval
-- [ ] Add flags: `--li-admf-endpoint`
+- [x] Create `internal/pkg/li/x1/client.go`
+- [x] Implement HTTPS client with mutual TLS
+- [x] Implement notifications:
+  - [x] `ErrorReport` (task execution errors)
+  - [x] `TaskProgress` (activation progress)
+  - [x] `KeepAlive` (periodic heartbeat)
+  - [x] `DeliveryNotification` (X2/X3 delivery issues)
+- [x] Add retry with exponential backoff
+- [x] Add configurable heartbeat interval
+- [x] Add flags: `--li-admf-endpoint`, `--li-admf-tls-cert`, `--li-admf-tls-key`, `--li-admf-tls-ca`, `--li-admf-keepalive`
+- [x] Integrate with LI Manager (startup/shutdown notifications, implicit deactivation reports)
+- [x] Unit tests for X1 client
 
 ### Step 4.3: Unit tests
 

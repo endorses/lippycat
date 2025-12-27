@@ -7,6 +7,8 @@
 package processor
 
 import (
+	"time"
+
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -45,6 +47,20 @@ func (p *Processor) initLIManager() {
 	// Create filter pusher adapter
 	filterPusher := &processorFilterPusher{p: p}
 
+	// Parse keepalive interval
+	var keepaliveInterval time.Duration
+	if p.config.LIADMFKeepalive != "" && p.config.LIADMFKeepalive != "0" {
+		var err error
+		keepaliveInterval, err = time.ParseDuration(p.config.LIADMFKeepalive)
+		if err != nil {
+			logger.Warn("Invalid LI ADMF keepalive interval, using default",
+				"value", p.config.LIADMFKeepalive,
+				"error", err,
+			)
+			keepaliveInterval = 30 * time.Second
+		}
+	}
+
 	// Create LI manager config
 	config := li.ManagerConfig{
 		Enabled:       true,
@@ -54,17 +70,23 @@ func (p *Processor) initLIManager() {
 		X1TLSCAFile:   p.config.LIX1TLSCAFile,
 		ADMFEndpoint:  p.config.LIADMFEndpoint,
 		NEIdentifier:  p.config.ProcessorID,
-		FilterPusher:  filterPusher,
+		X1Client: li.X1ClientConfig{
+			TLSCertFile:       p.config.LIADMFTLSCertFile,
+			TLSKeyFile:        p.config.LIADMFTLSKeyFile,
+			TLSCAFile:         p.config.LIADMFTLSCAFile,
+			KeepaliveInterval: keepaliveInterval,
+		},
+		FilterPusher: filterPusher,
 	}
 
 	// Deactivation callback - called when a task is implicitly deactivated
 	// (e.g., EndTime expiration with ImplicitDeactivationAllowed=true)
+	// The LI Manager automatically reports these to ADMF via X1 client.
 	deactivationCallback := func(task *li.InterceptTask, reason li.DeactivationReason) {
 		logger.Info("LI task implicitly deactivated",
 			"xid", task.XID,
 			"reason", reason,
 		)
-		// TODO: In Phase 4, this will send notification to ADMF via X1 client
 	}
 
 	// Create LI manager

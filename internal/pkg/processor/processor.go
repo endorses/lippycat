@@ -80,6 +80,11 @@ type Config struct {
 	LIX1TLSKeyFile  string // Path to X1 server TLS key
 	LIX1TLSCAFile   string // Path to CA certificate for X1 client verification (mutual TLS)
 	LIADMFEndpoint  string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
+	// LI ADMF client (X1 notifications) TLS settings - for connecting to ADMF
+	LIADMFTLSCertFile string // Path to client TLS certificate for ADMF notifications (mutual TLS)
+	LIADMFTLSKeyFile  string // Path to client TLS key for ADMF notifications
+	LIADMFTLSCAFile   string // Path to CA certificate for verifying ADMF server
+	LIADMFKeepalive   string // Keepalive interval for ADMF notifications (e.g., "30s", "0" to disable)
 	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
 	LIDeliveryTLSCertFile   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
 	LIDeliveryTLSKeyFile    string   // Path to client TLS key for X2/X3 delivery

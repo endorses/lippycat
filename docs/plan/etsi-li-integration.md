@@ -247,16 +247,16 @@ Generate Go structs from ETSI XSD schemas (full schema, not just destinations).
 
 Implement X1 server subset for destination CRUD operations.
 
-- [ ] Create `internal/pkg/li/x1/server.go`
-- [ ] Implement HTTPS server with mutual TLS
-- [ ] Implement destination handlers:
-  - [ ] `POST /CreateDestination` - register MDF endpoint with DID
-  - [ ] `POST /ModifyDestination` - update destination config
-  - [ ] `DELETE /RemoveDestination` - remove destination
-  - [ ] `GET /Ping` - health check
-- [ ] Validate XML against schema
-- [ ] Return proper X1 response codes
-- [ ] Add CLI flags: `--li-x1-listen`, `--li-x1-tls-cert`, `--li-x1-tls-key`, `--li-x1-tls-ca`
+- [x] Create `internal/pkg/li/x1/server.go`
+- [x] Implement HTTPS server with mutual TLS
+- [x] Implement destination handlers:
+  - [x] `POST /CreateDestination` - register MDF endpoint with DID
+  - [x] `POST /ModifyDestination` - update destination config
+  - [x] `DELETE /RemoveDestination` - remove destination
+  - [x] `GET /Ping` - health check
+- [x] Validate XML against schema
+- [x] Return proper X1 response codes
+- [x] Add CLI flags: `--li-x1-listen`, `--li-x1-tls-cert`, `--li-x1-tls-key`, `--li-x1-tls-ca`
 
 ### Step 3.3: Destination manager
 

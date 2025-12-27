@@ -79,9 +79,12 @@ var (
 	commandTimeout     string
 	commandConcurrency int
 	// LI (Lawful Interception) flags - requires -tags li build
-	liEnabled      bool
-	liX1ListenAddr string
-	liADMFEndpoint string
+	liEnabled       bool
+	liX1ListenAddr  string
+	liX1TLSCertFile string
+	liX1TLSKeyFile  string
+	liX1TLSCAFile   string
+	liADMFEndpoint  string
 )
 
 func init() {
@@ -138,6 +141,9 @@ func init() {
 	// LI (Lawful Interception) flags - requires build with -tags li
 	ProcessCmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
 	ProcessCmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
+	ProcessCmd.Flags().StringVar(&liX1TLSCertFile, "li-x1-tls-cert", "", "Path to X1 server TLS certificate")
+	ProcessCmd.Flags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
+	ProcessCmd.Flags().StringVar(&liX1TLSCAFile, "li-x1-tls-ca", "", "Path to CA certificate for X1 client verification (mutual TLS)")
 	ProcessCmd.Flags().StringVar(&liADMFEndpoint, "li-admf-endpoint", "", "ADMF endpoint for X1 notifications (e.g., https://admf:8443)")
 
 	// Bind to viper for config file support
@@ -177,6 +183,9 @@ func init() {
 	// LI viper bindings
 	_ = viper.BindPFlag("processor.li.enabled", ProcessCmd.Flags().Lookup("li-enabled"))
 	_ = viper.BindPFlag("processor.li.x1_listen_addr", ProcessCmd.Flags().Lookup("li-x1-listen"))
+	_ = viper.BindPFlag("processor.li.x1_tls_cert", ProcessCmd.Flags().Lookup("li-x1-tls-cert"))
+	_ = viper.BindPFlag("processor.li.x1_tls_key", ProcessCmd.Flags().Lookup("li-x1-tls-key"))
+	_ = viper.BindPFlag("processor.li.x1_tls_ca", ProcessCmd.Flags().Lookup("li-x1-tls-ca"))
 	_ = viper.BindPFlag("processor.li.admf_endpoint", ProcessCmd.Flags().Lookup("li-admf-endpoint"))
 }
 
@@ -312,9 +321,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VifNetNS:              getStringConfig("processor.vif_netns", vifNetNS),
 		VifDropPrivilegesUser: getStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
 		// LI configuration
-		LIEnabled:      getBoolConfig("processor.li.enabled", liEnabled),
-		LIX1ListenAddr: getStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
-		LIADMFEndpoint: getStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
+		LIEnabled:       getBoolConfig("processor.li.enabled", liEnabled),
+		LIX1ListenAddr:  getStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
+		LIX1TLSCertFile: getStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
+		LIX1TLSKeyFile:  getStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
+		LIX1TLSCAFile:   getStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
+		LIADMFEndpoint:  getStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
 	}
 
 	// Security check: require explicit opt-in to insecure mode

@@ -47,10 +47,14 @@ func (p *Processor) initLIManager() {
 
 	// Create LI manager config
 	config := li.ManagerConfig{
-		Enabled:      true,
-		X1ListenAddr: p.config.LIX1ListenAddr,
-		ADMFEndpoint: p.config.LIADMFEndpoint,
-		FilterPusher: filterPusher,
+		Enabled:       true,
+		X1ListenAddr:  p.config.LIX1ListenAddr,
+		X1TLSCertFile: p.config.LIX1TLSCertFile,
+		X1TLSKeyFile:  p.config.LIX1TLSKeyFile,
+		X1TLSCAFile:   p.config.LIX1TLSCAFile,
+		ADMFEndpoint:  p.config.LIADMFEndpoint,
+		NEIdentifier:  p.config.ProcessorID,
+		FilterPusher:  filterPusher,
 	}
 
 	// Deactivation callback - called when a task is implicitly deactivated

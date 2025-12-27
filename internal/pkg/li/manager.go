@@ -4,11 +4,14 @@
 package li
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -22,9 +25,22 @@ type ManagerConfig struct {
 	// Format: "host:port" (e.g., "0.0.0.0:8443")
 	X1ListenAddr string
 
+	// X1TLSCertFile is the path to the X1 server TLS certificate.
+	X1TLSCertFile string
+
+	// X1TLSKeyFile is the path to the X1 server TLS key.
+	X1TLSKeyFile string
+
+	// X1TLSCAFile is the path to the CA certificate for X1 client verification (mutual TLS).
+	X1TLSCAFile string
+
 	// ADMFEndpoint is the address of the ADMF for X1 notifications.
 	// Format: "https://host:port"
 	ADMFEndpoint string
+
+	// NEIdentifier is the network element identifier for X1 responses.
+	// Defaults to hostname if empty.
+	NEIdentifier string
 
 	// FilterPusher integrates with the processor's filter management system.
 	FilterPusher FilterPusher
@@ -39,6 +55,7 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 // It aggregates:
 //   - Registry: task and destination storage
 //   - FilterManager: XID-to-filter mapping
+//   - X1Server: administration interface for ADMF communication
 //   - (Future) DestinationManager: X2/X3 delivery connections
 //   - (Future) X1Client: ADMF notification sender
 //
@@ -49,6 +66,13 @@ type Manager struct {
 	config   ManagerConfig
 	registry *Registry
 	filters  *FilterManager
+
+	// x1Server is the X1 administration interface server.
+	x1Server *x1.Server
+
+	// x1ServerCtx controls the X1 server lifecycle.
+	x1ServerCtx    context.Context
+	x1ServerCancel context.CancelFunc
 
 	// onPacketMatch is called when a packet matches an intercept task.
 	// This allows the processor to handle X2/X3 delivery.
@@ -79,12 +103,28 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 	registry := NewRegistry(deactivationCallback)
 	filters := NewFilterManager(config.FilterPusher)
 
-	return &Manager{
+	m := &Manager{
 		config:   config,
 		registry: registry,
 		filters:  filters,
 		stopChan: make(chan struct{}),
 	}
+
+	// Create X1 server if TLS is configured
+	if config.X1ListenAddr != "" && config.X1TLSCertFile != "" && config.X1TLSKeyFile != "" {
+		x1Config := x1.ServerConfig{
+			ListenAddr:   config.X1ListenAddr,
+			TLSCertFile:  config.X1TLSCertFile,
+			TLSKeyFile:   config.X1TLSKeyFile,
+			TLSCAFile:    config.X1TLSCAFile,
+			NEIdentifier: config.NEIdentifier,
+		}
+		// Create adapter that implements x1.DestinationManager
+		adapter := &managerDestinationAdapter{m: m}
+		m.x1Server = x1.NewServer(x1Config, adapter)
+	}
+
+	return m
 }
 
 // Start begins LI Manager operation.
@@ -103,6 +143,24 @@ func (m *Manager) Start() error {
 	// Start the registry's background task management
 	m.registry.Start()
 
+	// Start X1 server if configured
+	if m.x1Server != nil {
+		m.x1ServerCtx, m.x1ServerCancel = context.WithCancel(context.Background())
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			if err := m.x1Server.Start(m.x1ServerCtx); err != nil {
+				logger.Error("X1 server error", "error", err)
+			}
+		}()
+		logger.Info("X1 server started", "addr", m.config.X1ListenAddr)
+	} else if m.config.X1ListenAddr != "" {
+		logger.Warn("X1 server not started: TLS certificate not configured",
+			"addr", m.config.X1ListenAddr,
+			"hint", "provide --li-x1-tls-cert and --li-x1-tls-key",
+		)
+	}
+
 	logger.Info("LI Manager started",
 		"x1_listen", m.config.X1ListenAddr,
 		"admf_endpoint", m.config.ADMFEndpoint,
@@ -115,6 +173,16 @@ func (m *Manager) Start() error {
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Stop X1 server
+	if m.x1ServerCancel != nil {
+		m.x1ServerCancel()
+	}
+	if m.x1Server != nil {
+		if err := m.x1Server.Shutdown(); err != nil {
+			logger.Error("X1 server shutdown error", "error", err)
+		}
+	}
 
 	close(m.stopChan)
 	m.registry.Stop()
@@ -289,6 +357,111 @@ func (m *Manager) GetDestination(did uuid.UUID) (*Destination, error) {
 // RemoveDestination removes a delivery destination.
 func (m *Manager) RemoveDestination(did uuid.UUID) error {
 	return m.registry.RemoveDestination(did)
+}
+
+// ModifyDestination updates an existing delivery destination.
+func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
+	return m.registry.ModifyDestination(did, dest)
+}
+
+// managerDestinationAdapter adapts the Manager to the x1.DestinationManager interface.
+type managerDestinationAdapter struct {
+	m *Manager
+}
+
+// Ensure managerDestinationAdapter implements x1.DestinationManager.
+var _ x1.DestinationManager = (*managerDestinationAdapter)(nil)
+
+// CreateDestination implements x1.DestinationManager.
+func (a *managerDestinationAdapter) CreateDestination(dest *x1.Destination) error {
+	return a.m.CreateDestinationX1(dest)
+}
+
+// GetDestination implements x1.DestinationManager.
+func (a *managerDestinationAdapter) GetDestination(did uuid.UUID) (*x1.Destination, error) {
+	return a.m.GetDestinationX1(did)
+}
+
+// RemoveDestination implements x1.DestinationManager.
+func (a *managerDestinationAdapter) RemoveDestination(did uuid.UUID) error {
+	return a.m.RemoveDestinationX1(did)
+}
+
+// ModifyDestination implements x1.DestinationManager.
+func (a *managerDestinationAdapter) ModifyDestination(did uuid.UUID, dest *x1.Destination) error {
+	return a.m.ModifyDestinationX1(did, dest)
+}
+
+// The following methods are the actual implementation,
+// adapting between x1.Destination and li.Destination types.
+
+// CreateDestinationX1 creates a destination from X1 request data.
+func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
+	liDest := &Destination{
+		DID:         dest.DID,
+		Address:     dest.Address,
+		Port:        dest.Port,
+		X2Enabled:   dest.X2Enabled,
+		X3Enabled:   dest.X3Enabled,
+		Description: dest.Description,
+	}
+	err := m.registry.CreateDestination(liDest)
+	if err != nil {
+		// Convert to x1 error type
+		if errors.Is(err, ErrDestinationAlreadyExists) {
+			return x1.ErrDestinationAlreadyExists
+		}
+	}
+	return err
+}
+
+// GetDestinationX1 retrieves a destination for X1 response.
+func (m *Manager) GetDestinationX1(did uuid.UUID) (*x1.Destination, error) {
+	liDest, err := m.registry.GetDestination(did)
+	if err != nil {
+		if errors.Is(err, ErrDestinationNotFound) {
+			return nil, x1.ErrDestinationNotFound
+		}
+		return nil, err
+	}
+	return &x1.Destination{
+		DID:         liDest.DID,
+		Address:     liDest.Address,
+		Port:        liDest.Port,
+		X2Enabled:   liDest.X2Enabled,
+		X3Enabled:   liDest.X3Enabled,
+		Description: liDest.Description,
+	}, nil
+}
+
+// RemoveDestinationX1 removes a destination via X1 request.
+func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
+	err := m.registry.RemoveDestination(did)
+	if err != nil {
+		if errors.Is(err, ErrDestinationNotFound) {
+			return x1.ErrDestinationNotFound
+		}
+	}
+	return err
+}
+
+// ModifyDestinationX1 modifies a destination via X1 request.
+func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error {
+	liDest := &Destination{
+		DID:         dest.DID,
+		Address:     dest.Address,
+		Port:        dest.Port,
+		X2Enabled:   dest.X2Enabled,
+		X3Enabled:   dest.X3Enabled,
+		Description: dest.Description,
+	}
+	err := m.registry.ModifyDestination(did, liDest)
+	if err != nil {
+		if errors.Is(err, ErrDestinationNotFound) {
+			return x1.ErrDestinationNotFound
+		}
+	}
+	return err
 }
 
 // Stats returns current LI processing statistics.

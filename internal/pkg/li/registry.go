@@ -513,6 +513,38 @@ func (r *Registry) RemoveDestination(did uuid.UUID) error {
 	return nil
 }
 
+// ModifyDestination updates an existing delivery destination.
+//
+// Returns ErrDestinationNotFound if the destination doesn't exist.
+func (r *Registry) ModifyDestination(did uuid.UUID, dest *Destination) error {
+	if dest == nil {
+		return fmt.Errorf("%w: destination is nil", ErrInvalidTask)
+	}
+	if dest.DID != did {
+		return fmt.Errorf("%w: DID mismatch", ErrInvalidTask)
+	}
+	if dest.Address == "" {
+		return fmt.Errorf("%w: address is empty", ErrInvalidTask)
+	}
+	if dest.Port <= 0 || dest.Port > 65535 {
+		return fmt.Errorf("%w: invalid port %d", ErrInvalidTask, dest.Port)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.destinations[did]; !exists {
+		return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
+	}
+
+	// Update the destination (preserving CreatedAt)
+	existing := r.destinations[did]
+	dest.CreatedAt = existing.CreatedAt
+	r.destinations[did] = dest
+
+	return nil
+}
+
 // DestinationCount returns the total number of destinations.
 func (r *Registry) DestinationCount() int {
 	r.mu.RLock()

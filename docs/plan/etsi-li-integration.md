@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 2 complete (Steps 2.1-2.5 done)
+**Status:** Phase 3 in progress (Steps 3.1-3.5 done)
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -277,10 +277,10 @@ Implement X1 server subset for destination CRUD operations.
 
 ### Step 3.5: TLS configuration
 
-- [ ] Require mutual TLS for X2/X3 delivery (client certificate)
-- [ ] Support certificate pinning
-- [ ] Minimum TLS 1.2, prefer TLS 1.3
-- [ ] Add flags: `--li-delivery-tls-cert`, `--li-delivery-tls-key`, `--li-delivery-tls-ca`
+- [x] Require mutual TLS for X2/X3 delivery (client certificate)
+- [x] Support certificate pinning
+- [x] Minimum TLS 1.2, prefer TLS 1.3
+- [x] Add flags: `--li-delivery-tls-cert`, `--li-delivery-tls-key`, `--li-delivery-tls-ca`
 
 ### Step 3.6: Unit tests
 

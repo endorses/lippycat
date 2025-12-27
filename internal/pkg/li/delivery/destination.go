@@ -8,12 +8,15 @@ package delivery
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,18 +77,33 @@ var (
 
 	// ErrPoolExhausted indicates no connections are available in the pool.
 	ErrPoolExhausted = errors.New("connection pool exhausted")
+
+	// ErrMutualTLSRequired indicates mutual TLS is required but not configured.
+	ErrMutualTLSRequired = errors.New("mutual TLS required: client certificate and key must be provided")
+
+	// ErrCertificatePinningFailed indicates the server certificate doesn't match pinned fingerprints.
+	ErrCertificatePinningFailed = errors.New("certificate pinning failed: server certificate fingerprint not in pinned list")
 )
 
 // DestinationConfig holds configuration for the destination manager.
+// Mutual TLS is REQUIRED for X2/X3 delivery per ETSI TS 103 221-2.
 type DestinationConfig struct {
 	// TLSCertFile is the path to the client TLS certificate for mutual TLS.
+	// REQUIRED: mutual TLS is mandatory for LI delivery.
 	TLSCertFile string
 
 	// TLSKeyFile is the path to the client TLS private key.
+	// REQUIRED: mutual TLS is mandatory for LI delivery.
 	TLSKeyFile string
 
 	// TLSCAFile is the path to the CA certificate for server verification.
+	// If empty, system CA pool is used.
 	TLSCAFile string
+
+	// TLSPinnedCerts contains SHA256 fingerprints of pinned server certificates.
+	// If non-empty, server certificates must match one of these fingerprints.
+	// Fingerprints should be lowercase hex-encoded SHA256 hashes.
+	TLSPinnedCerts []string
 
 	// DialTimeout is the timeout for establishing connections.
 	DialTimeout time.Duration
@@ -316,8 +334,15 @@ func NewManager(config DestinationConfig) (*Manager, error) {
 	}, nil
 }
 
-// buildClientTLSConfig builds the TLS configuration for client connections.
+// buildClientTLSConfig builds the TLS configuration for X2/X3 delivery client connections.
+// Per ETSI TS 103 221-2, mutual TLS is REQUIRED for delivery to MDF endpoints.
+// TLS 1.2 is minimum, TLS 1.3 is preferred.
 func buildClientTLSConfig(config DestinationConfig) (*tls.Config, error) {
+	// Validate that mTLS is configured - this is mandatory for LI delivery.
+	if config.TLSCertFile == "" || config.TLSKeyFile == "" {
+		return nil, ErrMutualTLSRequired
+	}
+
 	// Load client certificate for mutual TLS.
 	cert, err := tls.LoadX509KeyPair(config.TLSCertFile, config.TLSKeyFile)
 	if err != nil {
@@ -326,10 +351,28 @@ func buildClientTLSConfig(config DestinationConfig) (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
+		// Minimum TLS 1.2, prefer TLS 1.3 (Go's crypto/tls prefers 1.3 when available)
+		MinVersion: tls.VersionTLS12,
+		// Secure cipher suites - TLS 1.3 suites are automatically preferred when available
+		CipherSuites: []uint16{
+			// TLS 1.3 cipher suites (automatically used when TLS 1.3 is negotiated)
+			// tls.TLS_AES_256_GCM_SHA384,       // Handled automatically by Go for TLS 1.3
+			// tls.TLS_AES_128_GCM_SHA256,       // Handled automatically by Go for TLS 1.3
+			// tls.TLS_CHACHA20_POLY1305_SHA256, // Handled automatically by Go for TLS 1.3
+
+			// TLS 1.2 cipher suites (fallback when TLS 1.3 not available)
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+		},
+		// Prefer server cipher order for TLS 1.2 (TLS 1.3 always uses server preference)
+		PreferServerCipherSuites: true,
 	}
 
-	// Load CA certificate if provided.
+	// Load CA certificate if provided, otherwise use system CA pool.
 	if config.TLSCAFile != "" {
 		caCert, err := os.ReadFile(config.TLSCAFile)
 		if err != nil {
@@ -342,6 +385,40 @@ func buildClientTLSConfig(config DestinationConfig) (*tls.Config, error) {
 		}
 
 		tlsConfig.RootCAs = certPool
+	}
+
+	// Configure certificate pinning if fingerprints are provided.
+	if len(config.TLSPinnedCerts) > 0 {
+		// Normalize fingerprints to lowercase for consistent comparison.
+		pinnedFingerprints := make(map[string]struct{}, len(config.TLSPinnedCerts))
+		for _, fp := range config.TLSPinnedCerts {
+			pinnedFingerprints[strings.ToLower(strings.ReplaceAll(fp, ":", ""))] = struct{}{}
+		}
+
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			// At least one certificate in the chain must match a pinned fingerprint.
+			for _, rawCert := range rawCerts {
+				fingerprint := sha256.Sum256(rawCert)
+				fpHex := hex.EncodeToString(fingerprint[:])
+				if _, ok := pinnedFingerprints[fpHex]; ok {
+					logger.Debug("certificate pinning: matched pinned fingerprint",
+						"fingerprint", fpHex,
+					)
+					return nil
+				}
+			}
+
+			// Log what we received for debugging.
+			if len(rawCerts) > 0 {
+				fingerprint := sha256.Sum256(rawCerts[0])
+				logger.Warn("certificate pinning failed: no matching fingerprint",
+					"server_fingerprint", hex.EncodeToString(fingerprint[:]),
+					"pinned_count", len(pinnedFingerprints),
+				)
+			}
+
+			return ErrCertificatePinningFailed
+		}
 	}
 
 	return tlsConfig, nil

@@ -80,6 +80,11 @@ type Config struct {
 	LIX1TLSKeyFile  string // Path to X1 server TLS key
 	LIX1TLSCAFile   string // Path to CA certificate for X1 client verification (mutual TLS)
 	LIADMFEndpoint  string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
+	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
+	LIDeliveryTLSCertFile   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
+	LIDeliveryTLSKeyFile    string   // Path to client TLS key for X2/X3 delivery
+	LIDeliveryTLSCAFile     string   // Path to CA certificate for verifying MDF servers
+	LIDeliveryTLSPinnedCert []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
 	// Virtual interface settings
 	VirtualInterface      bool   // Enable virtual network interface
 	VirtualInterfaceName  string // Virtual interface name

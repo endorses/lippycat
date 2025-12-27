@@ -85,6 +85,11 @@ var (
 	liX1TLSKeyFile  string
 	liX1TLSCAFile   string
 	liADMFEndpoint  string
+	// LI Delivery (X2/X3) TLS flags
+	liDeliveryTLSCertFile   string
+	liDeliveryTLSKeyFile    string
+	liDeliveryTLSCAFile     string
+	liDeliveryTLSPinnedCert []string
 )
 
 func init() {
@@ -145,6 +150,11 @@ func init() {
 	ProcessCmd.Flags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
 	ProcessCmd.Flags().StringVar(&liX1TLSCAFile, "li-x1-tls-ca", "", "Path to CA certificate for X1 client verification (mutual TLS)")
 	ProcessCmd.Flags().StringVar(&liADMFEndpoint, "li-admf-endpoint", "", "ADMF endpoint for X1 notifications (e.g., https://admf:8443)")
+	// LI Delivery (X2/X3) TLS flags - mutual TLS is required for delivery
+	ProcessCmd.Flags().StringVar(&liDeliveryTLSCertFile, "li-delivery-tls-cert", "", "Path to client TLS certificate for X2/X3 delivery (mutual TLS required)")
+	ProcessCmd.Flags().StringVar(&liDeliveryTLSKeyFile, "li-delivery-tls-key", "", "Path to client TLS key for X2/X3 delivery")
+	ProcessCmd.Flags().StringVar(&liDeliveryTLSCAFile, "li-delivery-tls-ca", "", "Path to CA certificate for verifying MDF servers")
+	ProcessCmd.Flags().StringSliceVar(&liDeliveryTLSPinnedCert, "li-delivery-tls-pinned-cert", nil, "Pinned certificate fingerprints for MDF servers (SHA256, hex encoded, comma-separated)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -187,6 +197,11 @@ func init() {
 	_ = viper.BindPFlag("processor.li.x1_tls_key", ProcessCmd.Flags().Lookup("li-x1-tls-key"))
 	_ = viper.BindPFlag("processor.li.x1_tls_ca", ProcessCmd.Flags().Lookup("li-x1-tls-ca"))
 	_ = viper.BindPFlag("processor.li.admf_endpoint", ProcessCmd.Flags().Lookup("li-admf-endpoint"))
+	// LI Delivery (X2/X3) viper bindings
+	_ = viper.BindPFlag("processor.li.delivery_tls_cert", ProcessCmd.Flags().Lookup("li-delivery-tls-cert"))
+	_ = viper.BindPFlag("processor.li.delivery_tls_key", ProcessCmd.Flags().Lookup("li-delivery-tls-key"))
+	_ = viper.BindPFlag("processor.li.delivery_tls_ca", ProcessCmd.Flags().Lookup("li-delivery-tls-ca"))
+	_ = viper.BindPFlag("processor.li.delivery_tls_pinned_cert", ProcessCmd.Flags().Lookup("li-delivery-tls-pinned-cert"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -327,6 +342,11 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		LIX1TLSKeyFile:  getStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
 		LIX1TLSCAFile:   getStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
 		LIADMFEndpoint:  getStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
+		// LI Delivery (X2/X3) TLS configuration - mutual TLS is required
+		LIDeliveryTLSCertFile:   getStringConfig("processor.li.delivery_tls_cert", liDeliveryTLSCertFile),
+		LIDeliveryTLSKeyFile:    getStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
+		LIDeliveryTLSCAFile:     getStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
+		LIDeliveryTLSPinnedCert: getStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
 	}
 
 	// Security check: require explicit opt-in to insecure mode
@@ -467,6 +487,13 @@ func getBoolConfig(key string, flagValue bool) bool {
 	// Simplified version without circular reference
 	if viper.IsSet(key) {
 		return viper.GetBool(key)
+	}
+	return flagValue
+}
+
+func getStringSliceConfig(key string, flagValue []string) []string {
+	if viper.IsSet(key) {
+		return viper.GetStringSlice(key)
 	}
 	return flagValue
 }

@@ -233,14 +233,15 @@ Implement binary TLV encoding per TS 103 221-2.
 
 Implement delivery to MDF endpoints. Destinations are configured via X1 per ETSI architecture.
 
-### Step 3.1: X1 Schema generation (partial - for destinations)
+### Step 3.1: X1 Schema generation
 
-Generate Go structs from ETSI XSD for destination management.
+Generate Go structs from ETSI XSD schemas (full schema, not just destinations).
 
-- [ ] Download ETSI XSD schemas from forge.etsi.org (TS 103 221-1)
-- [ ] Use `xuri/xgen` to generate Go structs
-- [ ] Place in `internal/pkg/li/x1/schema/`
-- [ ] Focus on: `Destination`, `CreateDestination`, `ModifyDestination`, `RemoveDestination`
+- [x] Download ETSI XSD schemas from forge.etsi.org (TS 103 221-1, TS 103 280)
+- [x] Use `xuri/xgen` to generate Go structs
+- [x] Place in `internal/pkg/li/x1/schema/`
+- [x] Add `li` build tag to all generated files
+- [x] Generated types include: destinations, tasks, notifications, common types
 
 ### Step 3.2: X1 Destination management server
 

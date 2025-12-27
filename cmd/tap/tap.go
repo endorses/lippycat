@@ -38,11 +38,25 @@ Tap mode combines local packet capture with full processor capabilities:
 This is ideal for single-machine deployments where you want the full
 power of the processor without the distributed architecture.
 
-Example:
-  lc tap --interface eth0
-  lc tap -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps
-  lc tap -i eth0 --upstream central-processor:50051
-  lc tap -i eth0,eth1 --listen 0.0.0.0:50051`,
+Examples:
+  # Basic tap (insecure, local testing only)
+  lc tap --interface eth0 --insecure
+
+  # Tap with per-call PCAP
+  lc tap -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps --insecure
+
+  # Tap with upstream forwarding (hierarchical mode)
+  lc tap -i eth0 --upstream central-processor:50051 --tls --tls-ca ca.crt
+
+  # Tap with TUI serving (secure)
+  lc tap -i eth0 --listen 0.0.0.0:50051 --tls --tls-cert server.crt --tls-key server.key
+
+  # Lawful Interception (requires -tags li build)
+  lc tap -i eth0 --tls ... \
+    --li-enabled \
+    --li-x1-listen :8443 \
+    --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \
+    --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key`,
 	RunE: runTap,
 }
 

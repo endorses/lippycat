@@ -406,6 +406,83 @@ lippycat is designed with extensibility in mind. Protocol-specific analyzers can
 
 The hunter node includes protocol detection for multiple protocols (HTTP, DNS, TLS, MySQL, PostgreSQL, VoIP, VPN) with signature-based matching and GPU acceleration support for filtering at the edge.
 
+## Lawful Interception (LI)
+
+lippycat supports ETSI X1/X2/X3 lawful interception interfaces for authorized interception.
+
+**Build Requirement:** LI support requires the `li` build tag:
+```bash
+make processor-li   # Processor with LI support
+make build-li       # Complete suite with LI
+```
+
+### ETSI Interfaces
+
+| Interface | Purpose | Protocol | Specification |
+|-----------|---------|----------|---------------|
+| **X1** | Administration (ADMF ↔ NE) | XML/HTTPS | TS 103 221-1 |
+| **X2** | IRI delivery (signaling) | Binary TLV/TLS | TS 103 221-2 |
+| **X3** | CC delivery (content) | Binary TLV/TLS | TS 103 221-2 |
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                     lippycat Processor                          │
+│  ┌──────────┐  ┌─────────────┐  ┌───────────┐  ┌────────────┐ │
+│  │X1 Server │←─│ LI Manager  │─→│ X2/X3     │─→│ Delivery   │ │
+│  │ :8443    │  │ (registry,  │  │ Encoder   │  │ Client     │ │
+│  └──────────┘  │  filters)   │  └───────────┘  └─────┬──────┘ │
+│                └─────────────┘                       │        │
+└──────────────────────────────────────────────────────┼────────┘
+       ▲ X1 (HTTPS/XML)                                │ X2/X3 (TLS)
+       │                                               ▼
+  ┌────┴────┐                                    ┌───────────┐
+  │  ADMF   │                                    │    MDF    │
+  └─────────┘                                    └───────────┘
+```
+
+### LI Package Structure
+
+- `internal/pkg/li/` - Core LI types, manager, registry, filter mapping
+- `internal/pkg/li/x1/` - X1 HTTPS server and client, XML schema types
+- `internal/pkg/li/x2x3/` - Binary TLV PDU encoding
+- `internal/pkg/li/delivery/` - Connection pool, async delivery with batching
+
+### Quick Start
+
+```bash
+# Start processor with LI enabled
+lc process --listen :50051 \
+  --tls --tls-cert=server.crt --tls-key=server.key \
+  --li-enabled \
+  --li-x1-listen :8443 \
+  --li-x1-tls-cert x1-server.crt \
+  --li-x1-tls-key x1-server.key \
+  --li-x1-tls-ca admf-ca.crt \
+  --li-delivery-tls-cert delivery.crt \
+  --li-delivery-tls-key delivery.key \
+  --li-delivery-tls-ca mdf-ca.crt
+```
+
+### Filter Integration
+
+LI tasks integrate with lippycat's optimized filter system:
+
+| LI Target Type | Filter System | Description |
+|----------------|---------------|-------------|
+| SIP URI | Aho-Corasick | Pattern matching |
+| Phone Number | PhoneNumberMatcher | Bloom filter + suffix |
+| IP Address | Hash Map | O(1) lookup |
+| IP CIDR | Radix Trie | O(prefix) lookup |
+
+When tasks are activated via X1, the LI Manager creates filters that are pushed to hunters. Matched packets are encoded as X2 (IRI) or X3 (CC) PDUs and delivered to MDF endpoints.
+
+**For detailed documentation, see:**
+- [docs/LI_INTEGRATION.md](docs/LI_INTEGRATION.md) - Deployment guide
+- [docs/LI_CERTIFICATES.md](docs/LI_CERTIFICATES.md) - Certificate management
+- [internal/pkg/li/CLAUDE.md](internal/pkg/li/CLAUDE.md) - Architecture details
+
 ## Documentation Index
 
 ### User Documentation (README.md)
@@ -438,3 +515,8 @@ The hunter node includes protocol detection for multiple protocols (HTTP, DNS, T
 - [docs/TUI_REMOTE_CAPTURE.md](docs/TUI_REMOTE_CAPTURE.md) - Remote capture with TUI
 - [docs/AF_XDP_SETUP.md](docs/AF_XDP_SETUP.md) - AF_XDP high-performance capture setup
 - [docs/voip-build-tag-optimization.md](docs/voip-build-tag-optimization.md) - VoIP build tag optimization
+
+### Lawful Interception (LI)
+- [docs/LI_INTEGRATION.md](docs/LI_INTEGRATION.md) - LI deployment guide, X1/X2/X3 operations
+- [docs/LI_CERTIFICATES.md](docs/LI_CERTIFICATES.md) - LI certificate generation and management
+- [internal/pkg/li/CLAUDE.md](internal/pkg/li/CLAUDE.md) - LI package architecture

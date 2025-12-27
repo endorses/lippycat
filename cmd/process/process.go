@@ -30,10 +30,26 @@ another processor (hierarchical mode).
 Processors manage filter distribution to connected hunters and
 provide monitoring APIs for TUI clients.
 
-Example:
-  lc process --listen :50051
-  lc process --listen 0.0.0.0:50051 --upstream parent:50051
-  lc process --listen :50051 --max-hunters 100`,
+Examples:
+  # Basic processor with TLS
+  lc process --listen :50051 --tls --tls-cert server.crt --tls-key server.key
+
+  # Hierarchical mode (forward to upstream processor)
+  lc process --listen :50051 --upstream parent:50051 --tls ...
+
+  # With per-call PCAP and command hooks
+  lc process --listen :50051 \
+    --per-call-pcap --per-call-pcap-dir /var/voip/calls \
+    --pcap-command 'gzip %pcap%'
+
+  # Lawful Interception (requires -tags li build)
+  lc process --listen :50051 --tls ... \
+    --li-enabled \
+    --li-x1-listen :8443 \
+    --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \
+    --li-x1-tls-ca admf-ca.crt \
+    --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key \
+    --li-delivery-tls-ca mdf-ca.crt`,
 	RunE: runProcess,
 }
 

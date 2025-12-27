@@ -119,9 +119,10 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 			TLSCAFile:    config.X1TLSCAFile,
 			NEIdentifier: config.NEIdentifier,
 		}
-		// Create adapter that implements x1.DestinationManager
-		adapter := &managerDestinationAdapter{m: m}
-		m.x1Server = x1.NewServer(x1Config, adapter)
+		// Create adapters that implement x1.DestinationManager and x1.TaskManager
+		destAdapter := &managerDestinationAdapter{m: m}
+		taskAdapter := &managerTaskAdapter{m: m}
+		m.x1Server = x1.NewServer(x1Config, destAdapter, taskAdapter)
 	}
 
 	return m
@@ -462,6 +463,256 @@ func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error
 		}
 	}
 	return err
+}
+
+// managerTaskAdapter adapts the Manager to the x1.TaskManager interface.
+type managerTaskAdapter struct {
+	m *Manager
+}
+
+// Ensure managerTaskAdapter implements x1.TaskManager.
+var _ x1.TaskManager = (*managerTaskAdapter)(nil)
+
+// ActivateTask implements x1.TaskManager.
+func (a *managerTaskAdapter) ActivateTask(task *x1.Task) error {
+	return a.m.ActivateTaskX1(task)
+}
+
+// DeactivateTask implements x1.TaskManager.
+func (a *managerTaskAdapter) DeactivateTask(xid uuid.UUID) error {
+	return a.m.DeactivateTaskX1(xid)
+}
+
+// ModifyTask implements x1.TaskManager.
+func (a *managerTaskAdapter) ModifyTask(xid uuid.UUID, mod *x1.TaskModification) error {
+	return a.m.ModifyTaskX1(xid, mod)
+}
+
+// GetTaskDetails implements x1.TaskManager.
+func (a *managerTaskAdapter) GetTaskDetails(xid uuid.UUID) (*x1.Task, error) {
+	return a.m.GetTaskDetailsX1(xid)
+}
+
+// The following methods are the actual implementation,
+// adapting between x1.Task and li.InterceptTask types.
+
+// ActivateTaskX1 activates a task from X1 request data.
+func (m *Manager) ActivateTaskX1(task *x1.Task) error {
+	// Convert x1.Task to li.InterceptTask
+	liTask := &InterceptTask{
+		XID:                         task.XID,
+		DestinationIDs:              task.DestinationIDs,
+		StartTime:                   task.StartTime,
+		EndTime:                     task.EndTime,
+		ImplicitDeactivationAllowed: task.ImplicitDeactivationAllowed,
+	}
+
+	// Convert targets
+	for _, t := range task.Targets {
+		liTask.Targets = append(liTask.Targets, TargetIdentity{
+			Type:  convertTargetType(t.Type),
+			Value: t.Value,
+		})
+	}
+
+	// Convert delivery type
+	liTask.DeliveryType = convertDeliveryType(task.DeliveryType)
+
+	err := m.ActivateTask(liTask)
+	if err != nil {
+		// Convert to x1 error types
+		if errors.Is(err, ErrTaskAlreadyExists) {
+			return x1.ErrTaskAlreadyExists
+		}
+		if errors.Is(err, ErrInvalidTask) {
+			return x1.ErrInvalidTask
+		}
+		if errors.Is(err, ErrDestinationNotFound) {
+			return x1.ErrDestinationNotFound
+		}
+	}
+	return err
+}
+
+// DeactivateTaskX1 deactivates a task via X1 request.
+func (m *Manager) DeactivateTaskX1(xid uuid.UUID) error {
+	err := m.DeactivateTask(xid)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return x1.ErrTaskNotFound
+		}
+	}
+	return err
+}
+
+// ModifyTaskX1 modifies a task via X1 request.
+func (m *Manager) ModifyTaskX1(xid uuid.UUID, mod *x1.TaskModification) error {
+	// Convert x1.TaskModification to li.TaskModification
+	liMod := &TaskModification{
+		DestinationIDs:              mod.DestinationIDs,
+		EndTime:                     mod.EndTime,
+		ImplicitDeactivationAllowed: mod.ImplicitDeactivationAllowed,
+	}
+
+	// Convert targets if provided
+	if mod.Targets != nil {
+		targets := make([]TargetIdentity, len(*mod.Targets))
+		for i, t := range *mod.Targets {
+			targets[i] = TargetIdentity{
+				Type:  convertTargetType(t.Type),
+				Value: t.Value,
+			}
+		}
+		liMod.Targets = &targets
+	}
+
+	// Convert delivery type if provided
+	if mod.DeliveryType != nil {
+		dt := convertDeliveryType(*mod.DeliveryType)
+		liMod.DeliveryType = &dt
+	}
+
+	err := m.ModifyTask(xid, liMod)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return x1.ErrTaskNotFound
+		}
+		if errors.Is(err, ErrModifyNotAllowed) {
+			return x1.ErrModifyNotAllowed
+		}
+		if errors.Is(err, ErrDestinationNotFound) {
+			return x1.ErrDestinationNotFound
+		}
+	}
+	return err
+}
+
+// GetTaskDetailsX1 retrieves a task for X1 response.
+func (m *Manager) GetTaskDetailsX1(xid uuid.UUID) (*x1.Task, error) {
+	liTask, err := m.GetTaskDetails(xid)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return nil, x1.ErrTaskNotFound
+		}
+		return nil, err
+	}
+
+	// Convert li.InterceptTask to x1.Task
+	task := &x1.Task{
+		XID:                         liTask.XID,
+		DestinationIDs:              liTask.DestinationIDs,
+		StartTime:                   liTask.StartTime,
+		EndTime:                     liTask.EndTime,
+		ImplicitDeactivationAllowed: liTask.ImplicitDeactivationAllowed,
+		Status:                      convertTaskStatusToX1(liTask.Status),
+		ActivatedAt:                 liTask.ActivatedAt,
+		LastError:                   liTask.LastError,
+	}
+
+	// Convert targets
+	for _, t := range liTask.Targets {
+		task.Targets = append(task.Targets, x1.TargetIdentity{
+			Type:  convertTargetTypeToX1(t.Type),
+			Value: t.Value,
+		})
+	}
+
+	// Convert delivery type
+	task.DeliveryType = convertDeliveryTypeToX1(liTask.DeliveryType)
+
+	return task, nil
+}
+
+// convertTargetType converts x1.TargetType to li.TargetType.
+func convertTargetType(t x1.TargetType) TargetType {
+	switch t {
+	case x1.TargetTypeSIPURI:
+		return TargetTypeSIPURI
+	case x1.TargetTypeTELURI:
+		return TargetTypeTELURI
+	case x1.TargetTypeIPv4Address:
+		return TargetTypeIPv4Address
+	case x1.TargetTypeIPv4CIDR:
+		return TargetTypeIPv4CIDR
+	case x1.TargetTypeIPv6Address:
+		return TargetTypeIPv6Address
+	case x1.TargetTypeIPv6CIDR:
+		return TargetTypeIPv6CIDR
+	case x1.TargetTypeNAI:
+		return TargetTypeNAI
+	case x1.TargetTypeE164:
+		return TargetTypeTELURI // E.164 is essentially TEL URI without prefix
+	default:
+		return TargetTypeSIPURI // Default to SIPURI
+	}
+}
+
+// convertTargetTypeToX1 converts li.TargetType to x1.TargetType.
+func convertTargetTypeToX1(t TargetType) x1.TargetType {
+	switch t {
+	case TargetTypeSIPURI:
+		return x1.TargetTypeSIPURI
+	case TargetTypeTELURI:
+		return x1.TargetTypeTELURI
+	case TargetTypeIPv4Address:
+		return x1.TargetTypeIPv4Address
+	case TargetTypeIPv4CIDR:
+		return x1.TargetTypeIPv4CIDR
+	case TargetTypeIPv6Address:
+		return x1.TargetTypeIPv6Address
+	case TargetTypeIPv6CIDR:
+		return x1.TargetTypeIPv6CIDR
+	case TargetTypeNAI:
+		return x1.TargetTypeNAI
+	default:
+		return x1.TargetTypeSIPURI
+	}
+}
+
+// convertDeliveryType converts x1.DeliveryType to li.DeliveryType.
+func convertDeliveryType(dt x1.DeliveryType) DeliveryType {
+	switch dt {
+	case x1.DeliveryX2Only:
+		return DeliveryX2Only
+	case x1.DeliveryX3Only:
+		return DeliveryX3Only
+	case x1.DeliveryX2andX3:
+		return DeliveryX2andX3
+	default:
+		return DeliveryX2andX3
+	}
+}
+
+// convertDeliveryTypeToX1 converts li.DeliveryType to x1.DeliveryType.
+func convertDeliveryTypeToX1(dt DeliveryType) x1.DeliveryType {
+	switch dt {
+	case DeliveryX2Only:
+		return x1.DeliveryX2Only
+	case DeliveryX3Only:
+		return x1.DeliveryX3Only
+	case DeliveryX2andX3:
+		return x1.DeliveryX2andX3
+	default:
+		return x1.DeliveryX2andX3
+	}
+}
+
+// convertTaskStatusToX1 converts li.TaskStatus to x1.TaskStatus.
+func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
+	switch s {
+	case TaskStatusPending:
+		return x1.TaskStatusPending
+	case TaskStatusActive:
+		return x1.TaskStatusActive
+	case TaskStatusSuspended:
+		return x1.TaskStatusSuspended
+	case TaskStatusDeactivated:
+		return x1.TaskStatusDeactivated
+	case TaskStatusFailed:
+		return x1.TaskStatusFailed
+	default:
+		return x1.TaskStatusPending
+	}
 }
 
 // Stats returns current LI processing statistics.

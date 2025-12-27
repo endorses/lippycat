@@ -50,6 +50,10 @@ const (
 	MessageTypeCreateDestination = "CreateDestinationRequest"
 	MessageTypeModifyDestination = "ModifyDestinationRequest"
 	MessageTypeRemoveDestination = "RemoveDestinationRequest"
+	MessageTypeActivateTask      = "ActivateTaskRequest"
+	MessageTypeDeactivateTask    = "DeactivateTaskRequest"
+	MessageTypeModifyTask        = "ModifyTaskRequest"
+	MessageTypeGetTaskDetails    = "GetTaskDetailsRequest"
 	MessageTypePing              = "PingRequest"
 )
 
@@ -59,6 +63,18 @@ var (
 	ErrDestinationNotFound = errors.New("destination not found")
 	// ErrDestinationAlreadyExists indicates a destination with the given DID already exists.
 	ErrDestinationAlreadyExists = errors.New("destination already exists")
+)
+
+// Sentinel errors for task operations.
+var (
+	// ErrTaskNotFound indicates the requested task XID does not exist.
+	ErrTaskNotFound = errors.New("task not found")
+	// ErrTaskAlreadyExists indicates a task with the given XID already exists.
+	ErrTaskAlreadyExists = errors.New("task already exists")
+	// ErrInvalidTask indicates the task parameters are invalid.
+	ErrInvalidTask = errors.New("invalid task parameters")
+	// ErrModifyNotAllowed indicates the requested modification is not permitted.
+	ErrModifyNotAllowed = errors.New("modification not allowed")
 )
 
 // Destination represents an X2/X3 delivery endpoint.
@@ -76,6 +92,102 @@ type Destination struct {
 	X3Enabled bool
 	// Description is an optional human-readable description.
 	Description string
+}
+
+// TargetType specifies the type of target identifier per ETSI TS 103 280.
+type TargetType int
+
+const (
+	// TargetTypeSIPURI identifies a target by SIP URI.
+	TargetTypeSIPURI TargetType = iota + 1
+	// TargetTypeTELURI identifies a target by telephone URI.
+	TargetTypeTELURI
+	// TargetTypeIPv4Address identifies a target by IPv4 address.
+	TargetTypeIPv4Address
+	// TargetTypeIPv4CIDR identifies a target by IPv4 CIDR range.
+	TargetTypeIPv4CIDR
+	// TargetTypeIPv6Address identifies a target by IPv6 address.
+	TargetTypeIPv6Address
+	// TargetTypeIPv6CIDR identifies a target by IPv6 CIDR range.
+	TargetTypeIPv6CIDR
+	// TargetTypeNAI identifies a target by Network Access Identifier.
+	TargetTypeNAI
+	// TargetTypeE164 identifies a target by E.164 number.
+	TargetTypeE164
+)
+
+// TargetIdentity specifies a single target to intercept.
+type TargetIdentity struct {
+	// Type specifies the format of the Value field.
+	Type TargetType
+	// Value contains the target identifier.
+	Value string
+}
+
+// DeliveryType specifies what content should be delivered.
+type DeliveryType int
+
+const (
+	// DeliveryX2Only delivers only IRI (Intercept Related Information).
+	DeliveryX2Only DeliveryType = iota + 1
+	// DeliveryX3Only delivers only CC (Content of Communication).
+	DeliveryX3Only
+	// DeliveryX2andX3 delivers both IRI and CC.
+	DeliveryX2andX3
+)
+
+// TaskStatus represents the lifecycle state of an intercept task.
+type TaskStatus int
+
+const (
+	// TaskStatusPending indicates the task has been received but not yet activated.
+	TaskStatusPending TaskStatus = iota
+	// TaskStatusActive indicates the task is actively intercepting traffic.
+	TaskStatusActive
+	// TaskStatusSuspended indicates the task is temporarily suspended.
+	TaskStatusSuspended
+	// TaskStatusDeactivated indicates the task has been explicitly deactivated.
+	TaskStatusDeactivated
+	// TaskStatusFailed indicates the task failed to activate.
+	TaskStatusFailed
+)
+
+// Task represents an intercept task for X1 operations.
+type Task struct {
+	// XID is the unique identifier for this task (UUID v4).
+	XID uuid.UUID
+	// Targets specifies the identities to intercept.
+	Targets []TargetIdentity
+	// DestinationIDs references the Destination objects for X2/X3 delivery.
+	DestinationIDs []uuid.UUID
+	// DeliveryType specifies whether to deliver X2 (IRI), X3 (CC), or both.
+	DeliveryType DeliveryType
+	// StartTime is when the intercept should begin. Zero means immediately.
+	StartTime time.Time
+	// EndTime is when the intercept should end. Zero means indefinite.
+	EndTime time.Time
+	// ImplicitDeactivationAllowed indicates whether the NE may autonomously deactivate.
+	ImplicitDeactivationAllowed bool
+	// Status is the current lifecycle state of the task.
+	Status TaskStatus
+	// ActivatedAt records when the task was activated.
+	ActivatedAt time.Time
+	// LastError contains the most recent error message (if any).
+	LastError string
+}
+
+// TaskModification specifies which fields to modify in a task.
+type TaskModification struct {
+	// Targets replaces the target list if non-nil.
+	Targets *[]TargetIdentity
+	// DestinationIDs replaces the destination list if non-nil.
+	DestinationIDs *[]uuid.UUID
+	// DeliveryType changes the delivery type if non-nil.
+	DeliveryType *DeliveryType
+	// EndTime changes the end time if non-nil.
+	EndTime *time.Time
+	// ImplicitDeactivationAllowed changes the implicit deactivation flag if non-nil.
+	ImplicitDeactivationAllowed *bool
 }
 
 // ServerConfig holds configuration for the X1 server.
@@ -110,17 +222,31 @@ type DestinationManager interface {
 	ModifyDestination(did uuid.UUID, dest *Destination) error
 }
 
+// TaskManager provides task CRUD operations.
+// This interface is implemented by the LI Manager.
+type TaskManager interface {
+	// ActivateTask creates and activates a new intercept task.
+	ActivateTask(task *Task) error
+	// DeactivateTask stops an active intercept task.
+	DeactivateTask(xid uuid.UUID) error
+	// ModifyTask updates an existing task's parameters atomically.
+	ModifyTask(xid uuid.UUID, mod *TaskModification) error
+	// GetTaskDetails retrieves a task by its XID.
+	GetTaskDetails(xid uuid.UUID) (*Task, error)
+}
+
 // Server implements the X1 administration interface.
 type Server struct {
 	mu           sync.RWMutex
 	config       ServerConfig
 	destManager  DestinationManager
+	taskManager  TaskManager
 	httpServer   *http.Server
 	shutdownOnce sync.Once
 }
 
 // NewServer creates a new X1 server.
-func NewServer(config ServerConfig, destManager DestinationManager) *Server {
+func NewServer(config ServerConfig, destManager DestinationManager, taskManager TaskManager) *Server {
 	if config.Version == "" {
 		config.Version = "v1.13.1"
 	}
@@ -132,6 +258,7 @@ func NewServer(config ServerConfig, destManager DestinationManager) *Server {
 	return &Server{
 		config:      config,
 		destManager: destManager,
+		taskManager: taskManager,
 	}
 }
 
@@ -356,6 +483,34 @@ func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMess
 		}
 		return s.handlePing(&pingReq)
 
+	case "activateTaskRequest", "ActivateTaskRequest":
+		var activateReq schema.ActivateTaskRequest
+		if err := xml.Unmarshal(body, &activateReq); err != nil {
+			return s.buildErrorResponse(reqMsg, MessageTypeActivateTask, ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
+		}
+		return s.handleActivateTask(&activateReq)
+
+	case "deactivateTaskRequest", "DeactivateTaskRequest":
+		var deactivateReq schema.DeactivateTaskRequest
+		if err := xml.Unmarshal(body, &deactivateReq); err != nil {
+			return s.buildErrorResponse(reqMsg, MessageTypeDeactivateTask, ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
+		}
+		return s.handleDeactivateTask(&deactivateReq)
+
+	case "modifyTaskRequest", "ModifyTaskRequest":
+		var modifyReq schema.ModifyTaskRequest
+		if err := xml.Unmarshal(body, &modifyReq); err != nil {
+			return s.buildErrorResponse(reqMsg, MessageTypeModifyTask, ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
+		}
+		return s.handleModifyTask(&modifyReq)
+
+	case "getTaskDetailsRequest", "GetTaskDetailsRequest":
+		var getReq schema.GetTaskDetailsRequest
+		if err := xml.Unmarshal(body, &getReq); err != nil {
+			return s.buildErrorResponse(reqMsg, MessageTypeGetTaskDetails, ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
+		}
+		return s.handleGetTaskDetails(&getReq)
+
 	case "requestContainer":
 		// This is a container with multiple messages - already handled in handleX1Request
 		// This shouldn't happen, but handle gracefully
@@ -514,6 +669,389 @@ func (s *Server) handleRemoveDestination(req *schema.RemoveDestinationRequest) *
 func (s *Server) handlePing(req *schema.PingRequest) *schema.X1ResponseMessage {
 	logger.Debug("X1 ping received")
 	return s.buildOKResponse(req.X1RequestMessage, MessageTypePing)
+}
+
+// handleActivateTask handles ActivateTaskRequest.
+func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) *schema.X1ResponseMessage {
+	if s.taskManager == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeGenericError, "task management not configured")
+	}
+
+	details := req.TaskDetails
+	if details == nil || details.XId == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "missing task details or XID")
+	}
+
+	// Parse XID
+	xid, err := uuid.Parse(string(*details.XId))
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "invalid XID format: "+err.Error())
+	}
+
+	// Extract target identifiers
+	targets, err := extractTargetIdentifiers(details.TargetIdentifiers)
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, err.Error())
+	}
+
+	if len(targets) == 0 {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "no target identifiers specified")
+	}
+
+	// Extract destination IDs
+	destIDs, err := extractDestinationIDs(details.ListOfDIDs)
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, err.Error())
+	}
+
+	if len(destIDs) == 0 {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "no destination IDs specified")
+	}
+
+	// Parse delivery type
+	deliveryType := parseDeliveryType(details.DeliveryType)
+	if deliveryType == 0 {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeDeliveryTypeNotSupport, "unsupported delivery type: "+details.DeliveryType)
+	}
+
+	// Build task
+	task := &Task{
+		XID:            xid,
+		Targets:        targets,
+		DestinationIDs: destIDs,
+		DeliveryType:   deliveryType,
+	}
+
+	// Parse implicit deactivation allowed
+	if details.ImplicitDeactivationAllowed != nil {
+		task.ImplicitDeactivationAllowed = *details.ImplicitDeactivationAllowed
+	}
+
+	// Note: StartTime and EndTime parsing from MediationDetails would go here
+	// For now, we use immediate activation and indefinite duration
+
+	// Activate task
+	if err := s.taskManager.ActivateTask(task); err != nil {
+		if errors.Is(err, ErrTaskAlreadyExists) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeXIDAlreadyExists, "task already exists: "+xid.String())
+		}
+		if errors.Is(err, ErrInvalidTask) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeRequestSyntaxError, "invalid task: "+err.Error())
+		}
+		// Check for destination not found error
+		if errors.Is(err, ErrDestinationNotFound) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeDIDNotFound, "destination not found: "+err.Error())
+		}
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeGenericError, "failed to activate task: "+err.Error())
+	}
+
+	logger.Info("X1 task activated",
+		"xid", xid,
+		"targets", len(targets),
+		"destinations", len(destIDs),
+		"delivery_type", details.DeliveryType,
+	)
+
+	return s.buildOKResponse(req.X1RequestMessage, MessageTypeActivateTask)
+}
+
+// handleDeactivateTask handles DeactivateTaskRequest.
+func (s *Server) handleDeactivateTask(req *schema.DeactivateTaskRequest) *schema.X1ResponseMessage {
+	if s.taskManager == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeDeactivateTask,
+			ErrorCodeGenericError, "task management not configured")
+	}
+
+	if req.XId == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeDeactivateTask,
+			ErrorCodeRequestSyntaxError, "missing XID")
+	}
+
+	// Parse XID
+	xid, err := uuid.Parse(string(*req.XId))
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeDeactivateTask,
+			ErrorCodeRequestSyntaxError, "invalid XID format: "+err.Error())
+	}
+
+	// Deactivate task
+	if err := s.taskManager.DeactivateTask(xid); err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeDeactivateTask,
+				ErrorCodeXIDNotFound, "task not found: "+xid.String())
+		}
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeDeactivateTask,
+			ErrorCodeGenericError, "failed to deactivate task: "+err.Error())
+	}
+
+	logger.Info("X1 task deactivated", "xid", xid)
+
+	return s.buildOKResponse(req.X1RequestMessage, MessageTypeDeactivateTask)
+}
+
+// handleModifyTask handles ModifyTaskRequest.
+func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) *schema.X1ResponseMessage {
+	if s.taskManager == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+			ErrorCodeGenericError, "task management not configured")
+	}
+
+	details := req.TaskDetails
+	if details == nil || details.XId == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+			ErrorCodeRequestSyntaxError, "missing task details or XID")
+	}
+
+	// Parse XID
+	xid, err := uuid.Parse(string(*details.XId))
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+			ErrorCodeRequestSyntaxError, "invalid XID format: "+err.Error())
+	}
+
+	// Build modification
+	mod := &TaskModification{}
+
+	// Update targets if provided
+	if details.TargetIdentifiers != nil {
+		targets, err := extractTargetIdentifiers(details.TargetIdentifiers)
+		if err != nil {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeRequestSyntaxError, err.Error())
+		}
+		mod.Targets = &targets
+	}
+
+	// Update destination IDs if provided
+	if details.ListOfDIDs != nil {
+		destIDs, err := extractDestinationIDs(details.ListOfDIDs)
+		if err != nil {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeRequestSyntaxError, err.Error())
+		}
+		mod.DestinationIDs = &destIDs
+	}
+
+	// Update delivery type if provided
+	if details.DeliveryType != "" {
+		deliveryType := parseDeliveryType(details.DeliveryType)
+		if deliveryType == 0 {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeDeliveryTypeNotSupport, "unsupported delivery type: "+details.DeliveryType)
+		}
+		mod.DeliveryType = &deliveryType
+	}
+
+	// Update implicit deactivation allowed if provided
+	if details.ImplicitDeactivationAllowed != nil {
+		mod.ImplicitDeactivationAllowed = details.ImplicitDeactivationAllowed
+	}
+
+	// Modify task
+	if err := s.taskManager.ModifyTask(xid, mod); err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeXIDNotFound, "task not found: "+xid.String())
+		}
+		if errors.Is(err, ErrModifyNotAllowed) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeGenericError, "modification not allowed: "+err.Error())
+		}
+		if errors.Is(err, ErrDestinationNotFound) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeDIDNotFound, "destination not found: "+err.Error())
+		}
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+			ErrorCodeGenericError, "failed to modify task: "+err.Error())
+	}
+
+	logger.Info("X1 task modified", "xid", xid)
+
+	return s.buildOKResponse(req.X1RequestMessage, MessageTypeModifyTask)
+}
+
+// handleGetTaskDetails handles GetTaskDetailsRequest.
+func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) *schema.X1ResponseMessage {
+	if s.taskManager == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
+			ErrorCodeGenericError, "task management not configured")
+	}
+
+	if req.XId == nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
+			ErrorCodeRequestSyntaxError, "missing XID")
+	}
+
+	// Parse XID
+	xid, err := uuid.Parse(string(*req.XId))
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
+			ErrorCodeRequestSyntaxError, "invalid XID format: "+err.Error())
+	}
+
+	// Get task details
+	task, err := s.taskManager.GetTaskDetails(xid)
+	if err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
+				ErrorCodeXIDNotFound, "task not found: "+xid.String())
+		}
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
+			ErrorCodeGenericError, "failed to get task details: "+err.Error())
+	}
+
+	logger.Debug("X1 task details retrieved", "xid", xid, "status", task.Status)
+
+	// Build GetTaskDetailsResponse
+	// Note: For now, we return a basic OK response. A full implementation would
+	// return the TaskResponseDetails with full task information.
+	return s.buildOKResponse(req.X1RequestMessage, MessageTypeGetTaskDetails)
+}
+
+// extractTargetIdentifiers extracts target identities from schema.
+func extractTargetIdentifiers(list *schema.ListOfTargetIdentifiers) ([]TargetIdentity, error) {
+	if list == nil {
+		return nil, nil
+	}
+
+	var targets []TargetIdentity
+	for _, ti := range list.TargetIdentifier {
+		if ti == nil {
+			continue
+		}
+
+		target, err := parseTargetIdentifier(ti)
+		if err != nil {
+			return nil, err
+		}
+		if target != nil {
+			targets = append(targets, *target)
+		}
+	}
+
+	return targets, nil
+}
+
+// parseTargetIdentifier parses a single target identifier.
+func parseTargetIdentifier(ti *schema.TargetIdentifier) (*TargetIdentity, error) {
+	if ti == nil {
+		return nil, nil
+	}
+
+	// SIP URI
+	if ti.SipUri != nil && *ti.SipUri != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeSIPURI,
+			Value: string(*ti.SipUri),
+		}, nil
+	}
+
+	// TEL URI
+	if ti.TelUri != nil && *ti.TelUri != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeTELURI,
+			Value: string(*ti.TelUri),
+		}, nil
+	}
+
+	// E.164 Number
+	if ti.E164Number != nil && *ti.E164Number != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeE164,
+			Value: string(*ti.E164Number),
+		}, nil
+	}
+
+	// IPv4 Address
+	if ti.Ipv4Address != nil && *ti.Ipv4Address != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeIPv4Address,
+			Value: string(*ti.Ipv4Address),
+		}, nil
+	}
+
+	// IPv4 CIDR
+	if ti.Ipv4Cidr != nil {
+		if ti.Ipv4Cidr.IPv4CIDR != nil && *ti.Ipv4Cidr.IPv4CIDR != "" {
+			return &TargetIdentity{
+				Type:  TargetTypeIPv4CIDR,
+				Value: *ti.Ipv4Cidr.IPv4CIDR,
+			}, nil
+		}
+	}
+
+	// IPv6 Address
+	if ti.Ipv6Address != nil && *ti.Ipv6Address != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeIPv6Address,
+			Value: string(*ti.Ipv6Address),
+		}, nil
+	}
+
+	// IPv6 CIDR
+	if ti.Ipv6Cidr != nil && *ti.Ipv6Cidr != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeIPv6CIDR,
+			Value: string(*ti.Ipv6Cidr),
+		}, nil
+	}
+
+	// NAI (Network Access Identifier)
+	if ti.Nai != nil && *ti.Nai != "" {
+		return &TargetIdentity{
+			Type:  TargetTypeNAI,
+			Value: string(*ti.Nai),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("unsupported target identifier type")
+}
+
+// extractDestinationIDs extracts destination UUIDs from schema.
+func extractDestinationIDs(list *schema.ListOfDids) ([]uuid.UUID, error) {
+	if list == nil {
+		return nil, nil
+	}
+
+	var destIDs []uuid.UUID
+	for _, did := range list.DId {
+		if did == nil {
+			continue
+		}
+		id, err := uuid.Parse(string(*did))
+		if err != nil {
+			return nil, fmt.Errorf("invalid destination ID format: %w", err)
+		}
+		destIDs = append(destIDs, id)
+	}
+
+	return destIDs, nil
+}
+
+// parseDeliveryType parses delivery type string to enum.
+func parseDeliveryType(dt string) DeliveryType {
+	switch dt {
+	case "X2Only":
+		return DeliveryX2Only
+	case "X3Only":
+		return DeliveryX3Only
+	case "X2andX3":
+		return DeliveryX2andX3
+	default:
+		return 0
+	}
 }
 
 // buildOKResponse creates a successful X1 response.

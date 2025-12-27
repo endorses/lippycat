@@ -81,13 +81,85 @@ func (m *mockDestinationManager) ModifyDestination(did uuid.UUID, dest *Destinat
 // Ensure mockDestinationManager implements DestinationManager.
 var _ DestinationManager = (*mockDestinationManager)(nil)
 
+// mockTaskManager implements TaskManager for testing.
+type mockTaskManager struct {
+	tasks         map[uuid.UUID]*Task
+	activateErr   error
+	deactivateErr error
+	modifyErr     error
+	getErr        error
+}
+
+func newMockTaskManager() *mockTaskManager {
+	return &mockTaskManager{
+		tasks: make(map[uuid.UUID]*Task),
+	}
+}
+
+func (m *mockTaskManager) ActivateTask(task *Task) error {
+	if m.activateErr != nil {
+		return m.activateErr
+	}
+	if _, exists := m.tasks[task.XID]; exists {
+		return ErrTaskAlreadyExists
+	}
+	task.Status = TaskStatusActive
+	m.tasks[task.XID] = task
+	return nil
+}
+
+func (m *mockTaskManager) DeactivateTask(xid uuid.UUID) error {
+	if m.deactivateErr != nil {
+		return m.deactivateErr
+	}
+	if _, exists := m.tasks[xid]; !exists {
+		return ErrTaskNotFound
+	}
+	m.tasks[xid].Status = TaskStatusDeactivated
+	return nil
+}
+
+func (m *mockTaskManager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
+	if m.modifyErr != nil {
+		return m.modifyErr
+	}
+	task, exists := m.tasks[xid]
+	if !exists {
+		return ErrTaskNotFound
+	}
+	if mod.Targets != nil {
+		task.Targets = *mod.Targets
+	}
+	if mod.DestinationIDs != nil {
+		task.DestinationIDs = *mod.DestinationIDs
+	}
+	if mod.DeliveryType != nil {
+		task.DeliveryType = *mod.DeliveryType
+	}
+	return nil
+}
+
+func (m *mockTaskManager) GetTaskDetails(xid uuid.UUID) (*Task, error) {
+	if m.getErr != nil {
+		return nil, m.getErr
+	}
+	task, exists := m.tasks[xid]
+	if !exists {
+		return nil, ErrTaskNotFound
+	}
+	return task, nil
+}
+
+// Ensure mockTaskManager implements TaskManager.
+var _ TaskManager = (*mockTaskManager)(nil)
+
 func TestServer_HandlePing(t *testing.T) {
 	mock := newMockDestinationManager()
 	config := ServerConfig{
 		NEIdentifier: "test-ne",
 		Version:      "v1.13.1",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	// Build Ping request (direct request type, not wrapped)
 	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
@@ -123,7 +195,7 @@ func TestServer_HandleCreateDestination(t *testing.T) {
 		NEIdentifier: "test-ne",
 		Version:      "v1.13.1",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	did := uuid.New()
 
@@ -174,7 +246,7 @@ func TestServer_HandleCreateDestination_AlreadyExists(t *testing.T) {
 		NEIdentifier: "test-ne",
 		Version:      "v1.13.1",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	did := uuid.New()
 
@@ -224,7 +296,7 @@ func TestServer_HandleModifyDestination(t *testing.T) {
 		NEIdentifier: "test-ne",
 		Version:      "v1.13.1",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	did := uuid.New()
 
@@ -280,7 +352,7 @@ func TestServer_HandleModifyDestination_NotFound(t *testing.T) {
 	config := ServerConfig{
 		NEIdentifier: "test-ne",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	did := uuid.New()
 
@@ -309,7 +381,7 @@ func TestServer_HandleRemoveDestination(t *testing.T) {
 	config := ServerConfig{
 		NEIdentifier: "test-ne",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	did := uuid.New()
 
@@ -345,7 +417,7 @@ func TestServer_HandleRemoveDestination_NotFound(t *testing.T) {
 	config := ServerConfig{
 		NEIdentifier: "test-ne",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	did := uuid.New()
 
@@ -371,7 +443,7 @@ func TestServer_InvalidXML(t *testing.T) {
 	config := ServerConfig{
 		NEIdentifier: "test-ne",
 	}
-	s := NewServer(config, mock)
+	s := NewServer(config, mock, nil)
 
 	// Send invalid XML
 	reqBody := `not valid xml at all`
@@ -501,4 +573,513 @@ func TestExtractDeliveryAddress_Nil(t *testing.T) {
 	_, _, err := extractDeliveryAddress(nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing delivery address")
+}
+
+func TestServer_HandleActivateTask(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "v1.13.1",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	// Build ActivateTask request
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <neIdentifier>test-ne</neIdentifier>
+  <version>v1.13.1</version>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:alice@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was created
+	task, exists := taskMock.tasks[xid]
+	require.True(t, exists, "task should be created")
+	assert.Equal(t, xid, task.XID)
+	require.Len(t, task.Targets, 1)
+	assert.Equal(t, TargetTypeSIPURI, task.Targets[0].Type)
+	assert.Equal(t, "sip:alice@example.com", task.Targets[0].Value)
+	assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
+	require.Len(t, task.DestinationIDs, 1)
+	assert.Equal(t, did, task.DestinationIDs[0])
+}
+
+func TestServer_HandleActivateTask_AlreadyExists(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	// Pre-create task
+	taskMock.tasks[xid] = &Task{
+		XID:    xid,
+		Status: TaskStatusActive,
+	}
+
+	// Try to create same task
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:bob@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2Only</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response will contain error code (task already exists)
+}
+
+func TestServer_HandleDeactivateTask(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+
+	// Pre-create task
+	taskMock.tasks[xid] = &Task{
+		XID:    xid,
+		Status: TaskStatusActive,
+	}
+
+	// Deactivate task
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<deactivateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</deactivateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was deactivated
+	task := taskMock.tasks[xid]
+	assert.Equal(t, TaskStatusDeactivated, task.Status)
+}
+
+func TestServer_HandleDeactivateTask_NotFound(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+
+	// Try to deactivate non-existent task
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<deactivateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</deactivateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response will contain error code (task not found)
+}
+
+func TestServer_HandleModifyTask(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	// Pre-create task
+	taskMock.tasks[xid] = &Task{
+		XID:          xid,
+		Status:       TaskStatusActive,
+		DeliveryType: DeliveryX2Only,
+		Targets: []TargetIdentity{
+			{Type: TargetTypeSIPURI, Value: "sip:alice@example.com"},
+		},
+	}
+
+	// Modify task
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<modifyTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</modifyTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was modified
+	task := taskMock.tasks[xid]
+	assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
+	require.Len(t, task.DestinationIDs, 1)
+	assert.Equal(t, did, task.DestinationIDs[0])
+}
+
+func TestServer_HandleModifyTask_NotFound(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+
+	// Try to modify non-existent task
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<modifyTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <deliveryType>X2Only</deliveryType>
+  </taskDetails>
+</modifyTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response will contain error code (task not found)
+}
+
+func TestServer_HandleGetTaskDetails(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+
+	// Pre-create task
+	taskMock.tasks[xid] = &Task{
+		XID:          xid,
+		Status:       TaskStatusActive,
+		DeliveryType: DeliveryX2andX3,
+	}
+
+	// Get task details
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<getTaskDetailsRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</getTaskDetailsRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestServer_HandleGetTaskDetails_NotFound(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+
+	// Try to get non-existent task
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<getTaskDetailsRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</getTaskDetailsRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response will contain error code (task not found)
+}
+
+func TestServer_HandleActivateTask_NoTaskManager(t *testing.T) {
+	destMock := newMockDestinationManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+	}
+	s := NewServer(config, destMock, nil) // No task manager
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:alice@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response will contain error (task management not configured)
+}
+
+func TestParseDeliveryType(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected DeliveryType
+	}{
+		{"X2Only", DeliveryX2Only},
+		{"X3Only", DeliveryX3Only},
+		{"X2andX3", DeliveryX2andX3},
+		{"Unknown", 0},
+		{"", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := parseDeliveryType(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExtractTargetIdentifiers(t *testing.T) {
+	sipUri := schema.SIPURI("sip:alice@example.com")
+	telUri := schema.TELURI("tel:+15551234567")
+	e164 := schema.InternationalE164("+15551234567")
+	ipv4 := schema.IPv4Address("192.168.1.100")
+
+	tests := []struct {
+		name     string
+		input    *schema.ListOfTargetIdentifiers
+		expected []TargetIdentity
+		hasError bool
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+			hasError: false,
+		},
+		{
+			name: "SIP URI",
+			input: &schema.ListOfTargetIdentifiers{
+				TargetIdentifier: []*schema.TargetIdentifier{
+					{SipUri: &sipUri},
+				},
+			},
+			expected: []TargetIdentity{
+				{Type: TargetTypeSIPURI, Value: "sip:alice@example.com"},
+			},
+			hasError: false,
+		},
+		{
+			name: "TEL URI",
+			input: &schema.ListOfTargetIdentifiers{
+				TargetIdentifier: []*schema.TargetIdentifier{
+					{TelUri: &telUri},
+				},
+			},
+			expected: []TargetIdentity{
+				{Type: TargetTypeTELURI, Value: "tel:+15551234567"},
+			},
+			hasError: false,
+		},
+		{
+			name: "E.164 Number",
+			input: &schema.ListOfTargetIdentifiers{
+				TargetIdentifier: []*schema.TargetIdentifier{
+					{E164Number: &e164},
+				},
+			},
+			expected: []TargetIdentity{
+				{Type: TargetTypeE164, Value: "+15551234567"},
+			},
+			hasError: false,
+		},
+		{
+			name: "IPv4 Address",
+			input: &schema.ListOfTargetIdentifiers{
+				TargetIdentifier: []*schema.TargetIdentifier{
+					{Ipv4Address: &ipv4},
+				},
+			},
+			expected: []TargetIdentity{
+				{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			},
+			hasError: false,
+		},
+		{
+			name: "Multiple targets",
+			input: &schema.ListOfTargetIdentifiers{
+				TargetIdentifier: []*schema.TargetIdentifier{
+					{SipUri: &sipUri},
+					{TelUri: &telUri},
+				},
+			},
+			expected: []TargetIdentity{
+				{Type: TargetTypeSIPURI, Value: "sip:alice@example.com"},
+				{Type: TargetTypeTELURI, Value: "tel:+15551234567"},
+			},
+			hasError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := extractTargetIdentifiers(tt.input)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestExtractDestinationIDs(t *testing.T) {
+	did1 := uuid.New()
+	did2 := uuid.New()
+	schemaUUID1 := schema.UUID(did1.String())
+	schemaUUID2 := schema.UUID(did2.String())
+	invalidUUID := schema.UUID("not-a-valid-uuid")
+
+	tests := []struct {
+		name     string
+		input    *schema.ListOfDids
+		expected []uuid.UUID
+		hasError bool
+	}{
+		{
+			name:     "nil input",
+			input:    nil,
+			expected: nil,
+			hasError: false,
+		},
+		{
+			name: "single DID",
+			input: &schema.ListOfDids{
+				DId: []*schema.UUID{&schemaUUID1},
+			},
+			expected: []uuid.UUID{did1},
+			hasError: false,
+		},
+		{
+			name: "multiple DIDs",
+			input: &schema.ListOfDids{
+				DId: []*schema.UUID{&schemaUUID1, &schemaUUID2},
+			},
+			expected: []uuid.UUID{did1, did2},
+			hasError: false,
+		},
+		{
+			name: "invalid UUID",
+			input: &schema.ListOfDids{
+				DId: []*schema.UUID{&invalidUUID},
+			},
+			expected: nil,
+			hasError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := extractDestinationIDs(tt.input)
+			if tt.hasError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
 }

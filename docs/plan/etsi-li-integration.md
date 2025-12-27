@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 3 complete
+**Status:** Phase 4 step 4.1 complete
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -297,13 +297,13 @@ Complete X1 interface for task management and ADMF notifications.
 
 Extend X1 server with task management (destination handlers done in Phase 3).
 
-- [ ] Implement task handlers:
-  - [ ] `POST /ActivateTask` - create intercept with target identities and destination IDs
-  - [ ] `POST /DeactivateTask` - stop intercept
-  - [ ] `POST /ModifyTask` - update task parameters atomically
-  - [ ] `GET /GetTaskDetails` - query task status
-- [ ] Validate XML against schema
-- [ ] Return proper X1 response codes
+- [x] Implement task handlers:
+  - [x] `POST /ActivateTask` - create intercept with target identities and destination IDs
+  - [x] `POST /DeactivateTask` - stop intercept
+  - [x] `POST /ModifyTask` - update task parameters atomically
+  - [x] `GET /GetTaskDetails` - query task status
+- [x] Validate XML against schema
+- [x] Return proper X1 response codes
 
 ### Step 4.2: X1 Client (sends notifications to ADMF)
 

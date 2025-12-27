@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 5 step 5.1 complete
+**Status:** Phase 5 step 5.2 complete
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -342,10 +342,10 @@ Extend X1 server with task management (destination handlers done in Phase 3).
 
 ### Step 5.2: Performance testing
 
-- [ ] Benchmark X2 encoding throughput
-- [ ] Benchmark X3 encoding throughput (high-volume RTP)
-- [ ] Test delivery under load
-- [ ] Verify no impact on non-LI packet processing
+- [x] Benchmark X2 encoding throughput
+- [x] Benchmark X3 encoding throughput (high-volume RTP)
+- [x] Test delivery under load
+- [x] Verify no impact on non-LI packet processing
 
 ### Step 5.3: Security testing
 

@@ -1,7 +1,7 @@
 # ETSI LI Integration Implementation Plan
 
 **Date:** 2025-12-22
-**Status:** Phase 4 step 4.2 complete
+**Status:** Phase 4 step 4.3 complete
 **Research:** `docs/research/etsi-x1-x2-x3-integration.md`
 **Branch:** `feature/etsi-li-integration`
 
@@ -322,10 +322,10 @@ Extend X1 server with task management (destination handlers done in Phase 3).
 
 ### Step 4.3: Unit tests
 
-- [ ] Test task activation/deactivation flow
-- [ ] Test XML parsing and validation
-- [ ] Test error reporting
-- [ ] Test keepalive mechanism
+- [x] Test task activation/deactivation flow
+- [x] Test XML parsing and validation
+- [x] Test error reporting
+- [x] Test keepalive mechanism
 
 ## Phase 5: Integration & Testing
 

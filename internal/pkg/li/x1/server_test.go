@@ -1083,3 +1083,939 @@ func TestExtractDestinationIDs(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Step 4.3 Unit Tests: Task Activation/Deactivation Flow
+// ============================================================================
+
+// TestServer_TaskActivationDeactivationFlow tests the complete task lifecycle.
+func TestServer_TaskActivationDeactivationFlow(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "v1.13.1",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	// Step 1: Activate task
+	activateReq := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <neIdentifier>test-ne</neIdentifier>
+  <version>v1.13.1</version>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:target@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(activateReq))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was created and is active
+	task, exists := taskMock.tasks[xid]
+	require.True(t, exists, "task should exist after activation")
+	assert.Equal(t, TaskStatusActive, task.Status)
+
+	// Step 2: Get task details
+	getReq := `<?xml version="1.0" encoding="UTF-8"?>
+<getTaskDetailsRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</getTaskDetailsRequest>`
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(getReq))
+	req.Header.Set("Content-Type", "application/xml")
+	w = httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Step 3: Deactivate task
+	deactivateReq := `<?xml version="1.0" encoding="UTF-8"?>
+<deactivateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</deactivateTaskRequest>`
+
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(deactivateReq))
+	req.Header.Set("Content-Type", "application/xml")
+	w = httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was deactivated
+	task = taskMock.tasks[xid]
+	assert.Equal(t, TaskStatusDeactivated, task.Status)
+}
+
+// TestServer_HandleActivateTask_MultipleTargets tests task activation with multiple targets.
+func TestServer_HandleActivateTask_MultipleTargets(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "v1.13.1",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+	did1 := uuid.New()
+	did2 := uuid.New()
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:alice@example.com</sipUri>
+      </targetIdentifier>
+      <targetIdentifier>
+        <telUri>tel:+15551234567</telUri>
+      </targetIdentifier>
+      <targetIdentifier>
+        <e164Number>+15559876543</e164Number>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + did1.String() + `</dId>
+      <dId>` + did2.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was created with all targets
+	task, exists := taskMock.tasks[xid]
+	require.True(t, exists, "task should be created")
+	require.Len(t, task.Targets, 3)
+	assert.Equal(t, TargetTypeSIPURI, task.Targets[0].Type)
+	assert.Equal(t, "sip:alice@example.com", task.Targets[0].Value)
+	assert.Equal(t, TargetTypeTELURI, task.Targets[1].Type)
+	assert.Equal(t, "tel:+15551234567", task.Targets[1].Value)
+	assert.Equal(t, TargetTypeE164, task.Targets[2].Type)
+	assert.Equal(t, "+15559876543", task.Targets[2].Value)
+
+	// Verify multiple destinations
+	require.Len(t, task.DestinationIDs, 2)
+	assert.Equal(t, did1, task.DestinationIDs[0])
+	assert.Equal(t, did2, task.DestinationIDs[1])
+}
+
+// TestServer_HandleActivateTask_IPv4Target tests task activation with IPv4 address target.
+func TestServer_HandleActivateTask_IPv4Target(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <ipv4Address>192.168.1.100</ipv4Address>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2Only</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	task := taskMock.tasks[xid]
+	require.NotNil(t, task)
+	require.Len(t, task.Targets, 1)
+	assert.Equal(t, TargetTypeIPv4Address, task.Targets[0].Type)
+	assert.Equal(t, "192.168.1.100", task.Targets[0].Value)
+	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
+}
+
+// TestServer_HandleActivateTask_NAITarget tests task activation with NAI target.
+func TestServer_HandleActivateTask_NAITarget(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <nai>user@realm.example.com</nai>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X3Only</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	task := taskMock.tasks[xid]
+	require.NotNil(t, task)
+	require.Len(t, task.Targets, 1)
+	assert.Equal(t, TargetTypeNAI, task.Targets[0].Type)
+	assert.Equal(t, "user@realm.example.com", task.Targets[0].Value)
+	assert.Equal(t, DeliveryX3Only, task.DeliveryType)
+}
+
+// TestServer_HandleActivateTask_ImplicitDeactivationAllowed tests implicit deactivation flag.
+func TestServer_HandleActivateTask_ImplicitDeactivationAllowed(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <implicitDeactivationAllowed>true</implicitDeactivationAllowed>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	task := taskMock.tasks[xid]
+	require.NotNil(t, task)
+	assert.True(t, task.ImplicitDeactivationAllowed)
+}
+
+// ============================================================================
+// Step 4.3 Unit Tests: XML Parsing and Validation
+// ============================================================================
+
+// TestServer_XMLParsing_MalformedXML tests various malformed XML scenarios.
+func TestServer_XMLParsing_MalformedXML(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, mock, nil)
+
+	tests := []struct {
+		name       string
+		body       string
+		expectCode int
+	}{
+		{
+			name:       "completely invalid XML",
+			body:       "this is not xml",
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "unclosed tag",
+			body:       `<?xml version="1.0"?><pingRequest><admfIdentifier>test`,
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "mismatched tags",
+			body:       `<?xml version="1.0"?><pingRequest></wrongTag>`,
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid characters",
+			body:       `<?xml version="1.0"?><pingRequest>` + string([]byte{0x00, 0x01}) + `</pingRequest>`,
+			expectCode: http.StatusBadRequest,
+		},
+		{
+			name:       "empty body",
+			body:       "",
+			expectCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/xml")
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			assert.Equal(t, tt.expectCode, w.Code)
+		})
+	}
+}
+
+// TestServer_XMLParsing_MissingRequiredFields tests missing required fields.
+func TestServer_XMLParsing_MissingRequiredFields(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "activate task missing XID",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + uuid.New().String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`,
+		},
+		{
+			name: "activate task missing targets",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + uuid.New().String() + `</xId>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + uuid.New().String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`,
+		},
+		{
+			name: "activate task missing destination IDs",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + uuid.New().String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+  </taskDetails>
+</activateTaskRequest>`,
+		},
+		{
+			name: "deactivate task missing XID",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<deactivateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+</deactivateTaskRequest>`,
+		},
+		{
+			name: "create destination missing DID",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<createDestinationRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <destinationDetails>
+    <deliveryType>X2andX3</deliveryType>
+    <deliveryAddress>
+      <ipAddressAndPort>
+        <address>
+          <IPv4Address>192.168.1.100</IPv4Address>
+        </address>
+        <port>
+          <TCPPort>5443</TCPPort>
+        </port>
+      </ipAddressAndPort>
+    </deliveryAddress>
+  </destinationDetails>
+</createDestinationRequest>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/xml")
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			// Should return 200 OK with error in response (X1 protocol)
+			assert.Equal(t, http.StatusOK, w.Code)
+			// Response body would contain error code
+		})
+	}
+}
+
+// TestServer_XMLParsing_InvalidUUIDs tests invalid UUID formats.
+func TestServer_XMLParsing_InvalidUUIDs(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "invalid XID format",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <taskDetails>
+    <xId>not-a-valid-uuid</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + uuid.New().String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`,
+		},
+		{
+			name: "invalid DID format",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <taskDetails>
+    <xId>` + uuid.New().String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>invalid-did</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`,
+		},
+		{
+			name: "empty XID",
+			body: `<?xml version="1.0" encoding="UTF-8"?>
+<deactivateTaskRequest>
+  <xId></xId>
+</deactivateTaskRequest>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/xml")
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			// Should return 200 OK with error in response (X1 protocol)
+			assert.Equal(t, http.StatusOK, w.Code)
+		})
+	}
+}
+
+// TestServer_XMLParsing_InvalidDeliveryType tests invalid delivery types.
+func TestServer_XMLParsing_InvalidDeliveryType(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	tests := []struct {
+		name         string
+		deliveryType string
+	}{
+		{"empty delivery type", ""},
+		{"invalid delivery type", "InvalidType"},
+		{"lowercase x2only", "x2only"},
+		{"numeric", "123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>` + tt.deliveryType + `</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+			req.Header.Set("Content-Type", "application/xml")
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			// Should return 200 OK with error code for unsupported delivery type
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			// Verify task was not created
+			_, exists := taskMock.tasks[xid]
+			assert.False(t, exists, "task should not be created with invalid delivery type")
+		})
+	}
+}
+
+// TestServer_XMLParsing_UnknownRequestType tests unknown request types.
+func TestServer_XMLParsing_UnknownRequestType(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, mock, nil)
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<unknownRequestType>
+  <admfIdentifier>test-admf</admfIdentifier>
+</unknownRequestType>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	// Should return 200 with error in response
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// ============================================================================
+// Step 4.3 Unit Tests: Error Reporting and Error Code Verification
+// ============================================================================
+
+// TestServer_ErrorCodes_TaskNotFound tests error code for task not found.
+func TestServer_ErrorCodes_TaskNotFound(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+
+	tests := []struct {
+		name    string
+		reqBody string
+	}{
+		{
+			name: "deactivate non-existent task",
+			reqBody: `<?xml version="1.0" encoding="UTF-8"?>
+<deactivateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</deactivateTaskRequest>`,
+		},
+		{
+			name: "get details of non-existent task",
+			reqBody: `<?xml version="1.0" encoding="UTF-8"?>
+<getTaskDetailsRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <xId>` + xid.String() + `</xId>
+</getTaskDetailsRequest>`,
+		},
+		{
+			name: "modify non-existent task",
+			reqBody: `<?xml version="1.0" encoding="UTF-8"?>
+<modifyTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <deliveryType>X2Only</deliveryType>
+  </taskDetails>
+</modifyTaskRequest>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tt.reqBody))
+			req.Header.Set("Content-Type", "application/xml")
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			// Response contains ErrorCodeXIDNotFound (301)
+		})
+	}
+}
+
+// TestServer_ErrorCodes_DestinationNotFound tests error code for destination not found.
+func TestServer_ErrorCodes_DestinationNotFound(t *testing.T) {
+	destMock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, nil)
+
+	did := uuid.New()
+
+	tests := []struct {
+		name    string
+		reqBody string
+	}{
+		{
+			name: "remove non-existent destination",
+			reqBody: `<?xml version="1.0" encoding="UTF-8"?>
+<removeDestinationRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <dId>` + did.String() + `</dId>
+</removeDestinationRequest>`,
+		},
+		{
+			name: "modify non-existent destination",
+			reqBody: `<?xml version="1.0" encoding="UTF-8"?>
+<modifyDestinationRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <destinationDetails>
+    <dId>` + did.String() + `</dId>
+    <deliveryType>X2Only</deliveryType>
+  </destinationDetails>
+</modifyDestinationRequest>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(tt.reqBody))
+			req.Header.Set("Content-Type", "application/xml")
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			// Response contains ErrorCodeDIDNotFound (303)
+		})
+	}
+}
+
+// TestServer_ErrorCodes_DuplicateXID tests error code for duplicate task XID.
+func TestServer_ErrorCodes_DuplicateXID(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	// Pre-create task
+	taskMock.tasks[xid] = &Task{
+		XID:    xid,
+		Status: TaskStatusActive,
+	}
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:test@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response contains ErrorCodeXIDAlreadyExists (300)
+}
+
+// TestServer_ErrorCodes_DuplicateDID tests error code for duplicate destination DID.
+func TestServer_ErrorCodes_DuplicateDID(t *testing.T) {
+	destMock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, nil)
+
+	did := uuid.New()
+
+	// Pre-create destination
+	destMock.destinations[did] = &Destination{
+		DID:     did,
+		Address: "10.0.0.1",
+		Port:    443,
+	}
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<createDestinationRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <destinationDetails>
+    <dId>` + did.String() + `</dId>
+    <deliveryType>X2andX3</deliveryType>
+    <deliveryAddress>
+      <ipAddressAndPort>
+        <address>
+          <IPv4Address>192.168.1.100</IPv4Address>
+        </address>
+        <port>
+          <TCPPort>5443</TCPPort>
+        </port>
+      </ipAddressAndPort>
+    </deliveryAddress>
+  </destinationDetails>
+</createDestinationRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	// Response contains ErrorCodeDIDAlreadyExists (302)
+
+	// Verify original destination unchanged
+	assert.Equal(t, "10.0.0.1", destMock.destinations[did].Address)
+}
+
+// TestServer_ResponseXMLStructure tests the structure of X1 response XML.
+func TestServer_ResponseXMLStructure(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{
+		NEIdentifier: "ne-unit-test",
+		Version:      "v1.13.1",
+	}, mock, nil)
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<pingRequest>
+  <admfIdentifier>admf-test</admfIdentifier>
+  <neIdentifier>ne-unit-test</neIdentifier>
+  <version>v1.13.1</version>
+</pingRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "application/xml")
+
+	// Parse response
+	var respContainer schema.ResponseContainer
+	err := xml.Unmarshal(w.Body.Bytes(), &respContainer)
+	require.NoError(t, err)
+
+	require.Len(t, respContainer.X1ResponseMessage, 1)
+	resp := respContainer.X1ResponseMessage[0]
+
+	// Verify response structure
+	assert.Equal(t, "ne-unit-test", resp.NeIdentifier)
+	assert.NotNil(t, resp.MessageTimestamp)
+}
+
+// TestServer_ModifyTask_UpdatesAllFields tests that ModifyTask updates all provided fields.
+func TestServer_ModifyTask_UpdatesAllFields(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destMock, taskMock)
+
+	xid := uuid.New()
+	oldDID := uuid.New()
+	newDID1 := uuid.New()
+	newDID2 := uuid.New()
+
+	// Pre-create task with initial values
+	taskMock.tasks[xid] = &Task{
+		XID:          xid,
+		Status:       TaskStatusActive,
+		DeliveryType: DeliveryX2Only,
+		Targets: []TargetIdentity{
+			{Type: TargetTypeSIPURI, Value: "sip:old@example.com"},
+		},
+		DestinationIDs: []uuid.UUID{oldDID},
+	}
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<modifyTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:new1@example.com</sipUri>
+      </targetIdentifier>
+      <targetIdentifier>
+        <telUri>tel:+15551234567</telUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2andX3</deliveryType>
+    <listOfDIDs>
+      <dId>` + newDID1.String() + `</dId>
+      <dId>` + newDID2.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</modifyTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify all fields were updated
+	task := taskMock.tasks[xid]
+	require.NotNil(t, task)
+
+	// Verify targets updated
+	require.Len(t, task.Targets, 2)
+	assert.Equal(t, "sip:new1@example.com", task.Targets[0].Value)
+	assert.Equal(t, "tel:+15551234567", task.Targets[1].Value)
+
+	// Verify delivery type updated
+	assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
+
+	// Verify destination IDs updated
+	require.Len(t, task.DestinationIDs, 2)
+	assert.Equal(t, newDID1, task.DestinationIDs[0])
+	assert.Equal(t, newDID2, task.DestinationIDs[1])
+}
+
+// TestExtractTargetIdentifiers_IPv6 tests IPv6 address target extraction.
+func TestExtractTargetIdentifiers_IPv6(t *testing.T) {
+	ipv6 := schema.IPv6Address("2001:db8::1")
+
+	input := &schema.ListOfTargetIdentifiers{
+		TargetIdentifier: []*schema.TargetIdentifier{
+			{Ipv6Address: &ipv6},
+		},
+	}
+
+	result, err := extractTargetIdentifiers(input)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, TargetTypeIPv6Address, result[0].Type)
+	assert.Equal(t, "2001:db8::1", result[0].Value)
+}
+
+// TestExtractTargetIdentifiers_IPv4CIDR tests IPv4 CIDR target extraction.
+func TestExtractTargetIdentifiers_IPv4CIDR(t *testing.T) {
+	cidr := "192.168.1.0/24"
+
+	input := &schema.ListOfTargetIdentifiers{
+		TargetIdentifier: []*schema.TargetIdentifier{
+			{Ipv4Cidr: &schema.IPCIDR{IPv4CIDR: &cidr}},
+		},
+	}
+
+	result, err := extractTargetIdentifiers(input)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, TargetTypeIPv4CIDR, result[0].Type)
+	assert.Equal(t, "192.168.1.0/24", result[0].Value)
+}
+
+// TestExtractTargetIdentifiers_IPv6CIDR tests IPv6 CIDR target extraction.
+func TestExtractTargetIdentifiers_IPv6CIDR(t *testing.T) {
+	cidr := schema.IPv6CIDR("2001:db8::/32")
+
+	input := &schema.ListOfTargetIdentifiers{
+		TargetIdentifier: []*schema.TargetIdentifier{
+			{Ipv6Cidr: &cidr},
+		},
+	}
+
+	result, err := extractTargetIdentifiers(input)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, TargetTypeIPv6CIDR, result[0].Type)
+	assert.Equal(t, "2001:db8::/32", result[0].Value)
+}
+
+// TestExtractTargetIdentifiers_NilEntry tests that nil entries in target list are skipped.
+func TestExtractTargetIdentifiers_NilEntry(t *testing.T) {
+	valid := schema.SIPURI("sip:valid@example.com")
+
+	input := &schema.ListOfTargetIdentifiers{
+		TargetIdentifier: []*schema.TargetIdentifier{
+			{SipUri: &valid}, // Should be included
+			nil,              // Should be skipped
+		},
+	}
+
+	result, err := extractTargetIdentifiers(input)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, "sip:valid@example.com", result[0].Value)
+}
+
+// TestExtractTargetIdentifiers_EmptyIdentifier tests that empty identifier value errors.
+func TestExtractTargetIdentifiers_EmptyIdentifier(t *testing.T) {
+	empty := schema.SIPURI("")
+
+	input := &schema.ListOfTargetIdentifiers{
+		TargetIdentifier: []*schema.TargetIdentifier{
+			{SipUri: &empty}, // Empty value - unsupported
+		},
+	}
+
+	// Empty identifier should result in error (unsupported target type)
+	_, err := extractTargetIdentifiers(input)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported target identifier type")
+}

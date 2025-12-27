@@ -242,6 +242,7 @@ type Server struct {
 	destManager  DestinationManager
 	taskManager  TaskManager
 	httpServer   *http.Server
+	listener     net.Listener
 	shutdownOnce sync.Once
 }
 
@@ -264,12 +265,13 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 
 // Start begins serving the X1 interface.
 func (s *Server) Start(ctx context.Context) error {
+	// Setup phase - hold lock briefly.
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Build TLS config with mutual TLS
 	tlsConfig, err := s.buildTLSConfig()
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("failed to build TLS config: %w", err)
 	}
 
@@ -290,11 +292,16 @@ func (s *Server) Start(ctx context.Context) error {
 	// Create listener
 	ln, err := net.Listen("tcp", s.config.ListenAddr)
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
 	}
+	s.listener = ln
+
+	// Release lock before blocking operations.
+	s.mu.Unlock()
 
 	logger.Info("X1 server starting",
-		"addr", s.config.ListenAddr,
+		"addr", ln.Addr().String(),
 		"tls", true,
 		"mutual_tls", s.config.TLSCAFile != "",
 	)
@@ -315,6 +322,17 @@ func (s *Server) Start(ctx context.Context) error {
 	case err := <-errChan:
 		return err
 	}
+}
+
+// Addr returns the server's bound address, or empty string if not started.
+// This is useful for tests when using ":0" to get an available port.
+func (s *Server) Addr() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.listener != nil {
+		return s.listener.Addr().String()
+	}
+	return ""
 }
 
 // Shutdown gracefully stops the X1 server.

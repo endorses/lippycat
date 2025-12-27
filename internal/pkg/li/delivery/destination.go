@@ -316,14 +316,15 @@ type Manager struct {
 
 // NewManager creates a new destination manager.
 func NewManager(config DestinationConfig) (*Manager, error) {
-	// Build TLS config if certificates are provided.
-	var tlsConfig *tls.Config
-	if config.TLSCertFile != "" && config.TLSKeyFile != "" {
-		var err error
-		tlsConfig, err = buildClientTLSConfig(config)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build TLS config: %w", err)
-		}
+	// Mutual TLS is REQUIRED for X2/X3 delivery per ETSI TS 103 221-2.
+	if config.TLSCertFile == "" || config.TLSKeyFile == "" {
+		return nil, ErrMutualTLSRequired
+	}
+
+	// Build TLS config.
+	tlsConfig, err := buildClientTLSConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build TLS config: %w", err)
 	}
 
 	return &Manager{

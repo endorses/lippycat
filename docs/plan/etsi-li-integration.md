@@ -349,10 +349,10 @@ Extend X1 server with task management (destination handlers done in Phase 3).
 
 ### Step 5.3: Security testing
 
-- [ ] Verify mutual TLS enforcement
-- [ ] Test certificate validation
-- [ ] Verify audit logging completeness
-- [ ] Test with expired/invalid certificates
+- [x] Verify mutual TLS enforcement
+- [x] Test certificate validation
+- [x] Verify audit logging completeness
+- [x] Test with expired/invalid certificates
 
 ## Phase 6: Documentation
 

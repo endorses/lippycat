@@ -7,6 +7,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,8 +21,34 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/li"
 )
 
+// testCertDir returns the path to the LI test certificates directory.
+func testCertDir() string {
+	return filepath.Join("..", "..", "..", "..", "test", "testcerts", "li")
+}
+
+// testConfigWithCerts returns a DestinationConfig with test TLS certificates.
+// If certificates are not available, the test is skipped.
+func testConfigWithCerts(t *testing.T) DestinationConfig {
+	t.Helper()
+	certDir := testCertDir()
+	certPath := filepath.Join(certDir, "delivery-client-cert.pem")
+	keyPath := filepath.Join(certDir, "delivery-client-key.pem")
+	caPath := filepath.Join(certDir, "ca-cert.pem")
+
+	// Check if certificates exist.
+	if _, err := os.Stat(certPath); os.IsNotExist(err) {
+		t.Skip("LI test certificates not available - run test/testcerts/generate_li_test_certs.sh first")
+	}
+
+	config := DefaultConfig()
+	config.TLSCertFile = certPath
+	config.TLSKeyFile = keyPath
+	config.TLSCAFile = caPath
+	return config
+}
+
 func TestNewClient(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -41,7 +69,7 @@ func TestDefaultClientConfig(t *testing.T) {
 }
 
 func TestClientConfigDefaults(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -55,7 +83,7 @@ func TestClientConfigDefaults(t *testing.T) {
 }
 
 func TestSendX2QueueFull(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -84,7 +112,7 @@ func TestSendX2QueueFull(t *testing.T) {
 }
 
 func TestSendX3QueueFull(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -110,7 +138,7 @@ func TestSendX3QueueFull(t *testing.T) {
 }
 
 func TestSendNoDestinations(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -130,7 +158,7 @@ func TestSendNoDestinations(t *testing.T) {
 }
 
 func TestSendAfterStop(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -150,7 +178,7 @@ func TestSendAfterStop(t *testing.T) {
 }
 
 func TestSequenceNumbering(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -183,7 +211,7 @@ func TestSequenceNumbering(t *testing.T) {
 }
 
 func TestSequenceNumberingConcurrent(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -215,7 +243,7 @@ func TestSequenceNumberingConcurrent(t *testing.T) {
 }
 
 func TestResetSequence(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -243,7 +271,7 @@ func TestResetSequence(t *testing.T) {
 }
 
 func TestQueueDepth(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -271,7 +299,7 @@ func TestQueueDepth(t *testing.T) {
 }
 
 func TestClientStartStop(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -291,7 +319,7 @@ func TestDeliveryToConnectedDestination(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(certPEM)
 
-	managerConfig := DefaultConfig()
+	managerConfig := testConfigWithCerts(t)
 	managerConfig.DialTimeout = 2 * time.Second
 
 	manager, err := NewManager(managerConfig)
@@ -365,7 +393,7 @@ func TestDeliveryToMultipleDestinations(t *testing.T) {
 		MinVersion:         tls.VersionTLS12,
 	}
 
-	managerConfig := DefaultConfig()
+	managerConfig := testConfigWithCerts(t)
 	managerConfig.DialTimeout = 2 * time.Second
 
 	manager, err := NewManager(managerConfig)
@@ -420,7 +448,7 @@ func TestDeliveryToMultipleDestinations(t *testing.T) {
 }
 
 func TestDeliveryFailure(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -463,7 +491,7 @@ func TestSendX2Sync(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(certPEM)
 
-	managerConfig := DefaultConfig()
+	managerConfig := testConfigWithCerts(t)
 	manager, err := NewManager(managerConfig)
 	require.NoError(t, err)
 	defer manager.Stop()
@@ -508,7 +536,7 @@ func TestSendX3Sync(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(certPEM)
 
-	managerConfig := DefaultConfig()
+	managerConfig := testConfigWithCerts(t)
 	manager, err := NewManager(managerConfig)
 	require.NoError(t, err)
 	defer manager.Stop()
@@ -544,7 +572,7 @@ func TestSendX3Sync(t *testing.T) {
 }
 
 func TestSendSyncAllFailed(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -568,7 +596,7 @@ func TestSendSyncAllFailed(t *testing.T) {
 }
 
 func TestSendSyncContextCanceled(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -587,7 +615,7 @@ func TestSendSyncContextCanceled(t *testing.T) {
 }
 
 func TestSendSyncAfterStop(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -604,7 +632,7 @@ func TestSendSyncAfterStop(t *testing.T) {
 }
 
 func TestSendSyncNoDestinations(t *testing.T) {
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -632,7 +660,7 @@ func TestBatchDelivery(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(certPEM)
 
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 
@@ -740,7 +768,7 @@ func TestConcurrentSend(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(certPEM)
 
-	manager, err := NewManager(DefaultConfig())
+	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)
 	defer manager.Stop()
 

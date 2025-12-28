@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1401,7 +1402,7 @@ func TestPayloadTypeToCodec_StandardCodecs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			codec := payloadTypeToCodec(tt.payloadType)
+			codec := capture.PayloadTypeToCodec(tt.payloadType)
 			assert.Equal(t, tt.expected, codec)
 		})
 	}

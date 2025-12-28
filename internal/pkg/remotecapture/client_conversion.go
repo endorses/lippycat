@@ -7,8 +7,6 @@ package remotecapture
 
 import (
 	"fmt"
-	"net"
-	"os"
 	"strings"
 	"time"
 
@@ -17,6 +15,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -32,140 +31,14 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 	// Parse packet using gopacket with correct link type
 	packet := gopacket.NewPacket(pkt.Data, linkType, gopacket.Default)
 
-	// Extract basic info
-	srcIP := ""
-	dstIP := ""
-	srcPort := ""
-	dstPort := ""
-	protocol := ""
-	info := ""
-
-	// Extract IP layer
-	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-		ip, _ := ipLayer.(*layers.IPv4)
-		srcIP = ip.SrcIP.String()
-		dstIP = ip.DstIP.String()
-		protocol = ip.Protocol.String()
-	} else if ipLayer := packet.Layer(layers.LayerTypeIPv6); ipLayer != nil {
-		ip, _ := ipLayer.(*layers.IPv6)
-		srcIP = ip.SrcIP.String()
-		dstIP = ip.DstIP.String()
-		protocol = ip.NextHeader.String()
-	} else {
-		// No IP layer - check for ARP or other link-layer protocols
-		if arpLayer := packet.Layer(layers.LayerTypeARP); arpLayer != nil {
-			arp, _ := arpLayer.(*layers.ARP)
-			srcIP = fmt.Sprintf("%d.%d.%d.%d", arp.SourceProtAddress[0], arp.SourceProtAddress[1], arp.SourceProtAddress[2], arp.SourceProtAddress[3])
-			dstIP = fmt.Sprintf("%d.%d.%d.%d", arp.DstProtAddress[0], arp.DstProtAddress[1], arp.DstProtAddress[2], arp.DstProtAddress[3])
-			protocol = "ARP"
-			switch arp.Operation {
-			case 1:
-				info = "Who has " + dstIP
-			case 2:
-				info = srcIP + " is at " + net.HardwareAddr(arp.SourceHwAddress).String()
-			}
-		} else if ethLayer := packet.Layer(layers.LayerTypeEthernet); ethLayer != nil {
-			eth, _ := ethLayer.(*layers.Ethernet)
-			srcIP = eth.SrcMAC.String()
-			dstIP = eth.DstMAC.String()
-			// Handle EtherType - use hex format for non-standard types
-			switch eth.EthernetType {
-			case layers.EthernetTypeLLC:
-				protocol = "LLC"
-				info = "Logical Link Control"
-			case layers.EthernetTypeDot1Q:
-				protocol = "802.1Q"
-				info = "VLAN tag"
-			case layers.EthernetTypeCiscoDiscovery:
-				protocol = "CDP"
-				info = "Cisco Discovery Protocol"
-			case layers.EthernetTypeLinkLayerDiscovery:
-				protocol = "LLDP"
-				info = "Link Layer Discovery Protocol"
-			case layers.EthernetTypeEthernetCTP:
-				protocol = "EthernetCTP"
-				info = "Configuration Test Protocol"
-			case 0x888E: // 802.1X (EAP)
-				protocol = "802.1X"
-				info = "Port-based authentication"
-			default:
-				// Non-standard EtherType - show hex value clearly
-				protocol = fmt.Sprintf("0x%04x", uint16(eth.EthernetType))
-				info = "Vendor-specific EtherType"
-			}
-			// Add broadcast indicator if applicable
-			if eth.DstMAC.String() == "ff:ff:ff:ff:ff:ff" {
-				if info != "" {
-					info = info + " (broadcast)"
-				} else {
-					info = "Broadcast frame"
-				}
-			}
-		} else if linuxSLL := packet.Layer(layers.LayerTypeLinuxSLL); linuxSLL != nil {
-			// Linux cooked capture (interface "any")
-			sll, _ := linuxSLL.(*layers.LinuxSLL)
-			srcIP = fmt.Sprintf("%s", sll.Addr[:sll.AddrLen])
-			protocol = sll.EthernetType.String()
-			// For cooked capture, destination is not in the header
-		} else {
-			// Completely unknown packet type
-			protocol = "Unknown"
-			// Try to show something useful
-			if packet.ErrorLayer() != nil {
-				info = fmt.Sprintf("Parse error: %v", packet.ErrorLayer().Error())
-			} else if len(pkt.Data) > 0 {
-				// Show first few bytes as hex
-				maxBytes := 8
-				if len(pkt.Data) < maxBytes {
-					maxBytes = len(pkt.Data)
-				}
-				info = fmt.Sprintf("%x", pkt.Data[:maxBytes])
-			}
-		}
-	}
-
-	// Extract transport layer
-	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-		tcp, _ := tcpLayer.(*layers.TCP)
-		srcPort = fmt.Sprintf("%d", tcp.SrcPort)
-		dstPort = fmt.Sprintf("%d", tcp.DstPort)
-		protocol = "TCP"
-		// Add TCP flags to info
-		info = fmt.Sprintf("%s → %s [%s]", srcPort, dstPort, formatTCPFlags(tcp))
-	} else if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		udp, _ := udpLayer.(*layers.UDP)
-		srcPort = fmt.Sprintf("%d", udp.SrcPort)
-		dstPort = fmt.Sprintf("%d", udp.DstPort)
-		protocol = "UDP"
-		// Add port info
-		info = fmt.Sprintf("%s → %s", srcPort, dstPort)
-	} else if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
-		// Handle ICMP separately since it's not a transport layer
-		icmp, _ := icmpLayer.(*layers.ICMPv4)
-		protocol = "ICMP"
-		if icmp != nil {
-			info = fmt.Sprintf("Type %d Code %d", icmp.TypeCode.Type(), icmp.TypeCode.Code())
-		} else {
-			info = "ICMP packet"
-		}
-	} else if icmp6Layer := packet.Layer(layers.LayerTypeICMPv6); icmp6Layer != nil {
-		icmp6, _ := icmp6Layer.(*layers.ICMPv6)
-		protocol = "ICMPv6"
-		if icmp6 != nil {
-			info = fmt.Sprintf("Type %d Code %d", icmp6.TypeCode.Type(), icmp6.TypeCode.Code())
-		} else {
-			info = "ICMPv6 packet"
-		}
-	} else if igmpLayer := packet.Layer(layers.LayerTypeIGMP); igmpLayer != nil {
-		// Handle IGMP (Internet Group Management Protocol)
-		igmp, _ := igmpLayer.(*layers.IGMP)
-		protocol = "IGMP"
-		if igmp != nil {
-			info = fmt.Sprintf("Type %d Group %s", igmp.Type, igmp.GroupAddress.String())
-		} else {
-			info = "IGMP packet"
-		}
-	}
+	// Use shared extraction logic for basic fields
+	fields := capture.ExtractPacketFields(packet)
+	srcIP := fields.SrcIP
+	dstIP := fields.DstIP
+	srcPort := fields.SrcPort
+	dstPort := fields.DstPort
+	protocol := fields.Protocol
+	info := fields.Info
 
 	// Use pre-computed metadata from processor if available (centralized detection)
 	if pkt.Metadata != nil && pkt.Metadata.Protocol != "" {
@@ -204,7 +77,7 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 				if pkt.Metadata.Rtp != nil {
 					// Derive codec name from payload type (safe: RTP payload type is 0-127)
 					if pkt.Metadata.Rtp.PayloadType > 0 {
-						codec := payloadTypeToCodec(uint8(pkt.Metadata.Rtp.PayloadType)) // #nosec G115
+						codec := capture.PayloadTypeToCodec(uint8(pkt.Metadata.Rtp.PayloadType)) // #nosec G115
 						info = codec
 					} else {
 						info = "RTP stream"
@@ -214,7 +87,7 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		}
 	}
 
-	// Fallback to application layer detection
+	// Fallback to application layer detection for DNS
 	if packet.ApplicationLayer() != nil {
 		payload := packet.ApplicationLayer().Payload()
 		if len(payload) > 0 {
@@ -226,8 +99,6 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 				protocol = "DNS"
 				info = "DNS Query/Response"
 			}
-			// Note: Removed overly-broad SIP detection that was showing binary data
-			// SIP should be detected via metadata from hunter/processor
 		}
 	}
 
@@ -290,8 +161,8 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 			// Trust the hunter's analysis even if TUI parsing failed
 			protocol = "RTP"
 			// Update info with codec if not already set
-			if info == "" || info == fmt.Sprintf("%s → %s", srcPort, dstPort) || strings.Contains(info, "Parse error") {
-				codec := payloadTypeToCodec(voipData.PayloadType)
+			if info == "" || info == fmt.Sprintf("%s -> %s", srcPort, dstPort) || strings.Contains(info, "Parse error") {
+				codec := capture.PayloadTypeToCodec(voipData.PayloadType)
 				info = fmt.Sprintf("SSRC=%d %s", voipData.SSRC, codec)
 			}
 		}
@@ -401,76 +272,6 @@ func calculateMOS(packetLoss, jitter float64) float64 {
 	return mos
 }
 
-// payloadTypeToCodec maps RTP payload type to codec name
-// Based on IANA RTP Payload Types: https://www.iana.org/assignments/rtp-parameters/rtp-parameters.xhtml
-func payloadTypeToCodec(pt uint8) string {
-	codecs := map[uint8]string{
-		0:   "G.711 µ-law",
-		3:   "GSM",
-		4:   "G.723",
-		5:   "DVI4 8kHz",
-		6:   "DVI4 16kHz",
-		7:   "LPC",
-		8:   "G.711 A-law",
-		9:   "G.722",
-		10:  "L16 Stereo",
-		11:  "L16 Mono",
-		12:  "QCELP",
-		13:  "Comfort Noise",
-		14:  "MPA",
-		15:  "G.728",
-		16:  "DVI4 11kHz",
-		17:  "DVI4 22kHz",
-		18:  "G.729",
-		25:  "CelB",
-		26:  "JPEG",
-		28:  "nv",
-		31:  "H.261",
-		32:  "MPV",
-		33:  "MP2T",
-		34:  "H.263",
-		101: "telephone-event", // DTMF
-	}
-
-	if codec, ok := codecs[pt]; ok {
-		return codec
-	}
-
-	// Dynamic payload types (96-127) require SDP negotiation to determine codec
-	if pt >= 96 && pt <= 127 {
-		return "Dynamic"
-	}
-
-	return "Unknown"
-}
-
-// formatTCPFlags returns a string representation of TCP flags
-func formatTCPFlags(tcp *layers.TCP) string {
-	flags := ""
-	if tcp.SYN {
-		flags += "SYN "
-	}
-	if tcp.ACK {
-		flags += "ACK "
-	}
-	if tcp.FIN {
-		flags += "FIN "
-	}
-	if tcp.RST {
-		flags += "RST "
-	}
-	if tcp.PSH {
-		flags += "PSH "
-	}
-	if tcp.URG {
-		flags += "URG "
-	}
-	if flags == "" {
-		return "NONE"
-	}
-	return flags[:len(flags)-1] // Remove trailing space
-}
-
 // updateCallState updates call state from SIP packet metadata
 func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
 	sip := pkt.Metadata.Sip
@@ -559,20 +360,6 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 	rtp := pkt.Metadata.Rtp
 	sip := pkt.Metadata.Sip
 
-	// Debug: log entry
-	f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if f != nil {
-		fmt.Fprintf(f, "[%s] updateRTPQuality called: has_rtp=%v has_sip=%v call_id=%s\n",
-			time.Now().Format("15:04:05"), rtp != nil, sip != nil,
-			func() string {
-				if sip != nil {
-					return sip.CallId
-				}
-				return ""
-			}())
-		_ = f.Close() // Debug file, ignore close errors
-	}
-
 	if rtp == nil || sip == nil || sip.CallId == "" {
 		return
 	}
@@ -601,15 +388,7 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 		c.rtpStats[callID] = stats
 
 		// Extract codec from payload type (first RTP packet)
-		call.Codec = payloadTypeToCodec(uint8(rtp.PayloadType)) // #nosec G115 - RTP payload type is 7 bits (0-127)
-
-		// Debug: write to file
-		f, _ := os.OpenFile("/tmp/lippycat-rtp-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-		if f != nil {
-			fmt.Fprintf(f, "[%s] First RTP packet for call %s: payload_type=%d codec=%s\n",
-				time.Now().Format("15:04:05"), callID, rtp.PayloadType, call.Codec)
-			_ = f.Close() // Debug file, ignore close errors
-		}
+		call.Codec = capture.PayloadTypeToCodec(uint8(rtp.PayloadType)) // #nosec G115 - RTP payload type is 7 bits (0-127)
 	}
 
 	// Detect packet loss from sequence number gaps

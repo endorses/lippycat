@@ -70,13 +70,13 @@ snapshot := &CallInfo{
 - [x] Add test for concurrent access during eviction (`TestCallAggregator_RingBufferEvictionRace`)
 
 ### 9. Extract shared packet converter
-- [ ] Create `internal/pkg/capture/converter_shared.go`
-- [ ] Extract common logic from:
+- [x] Create `internal/pkg/capture/converter_shared.go`
+- [x] Extract common logic from:
   - `internal/pkg/tui/bridge.go`
   - `internal/pkg/remotecapture/client_conversion.go`
   - `internal/pkg/capture/converter.go`
-- [ ] Refactor all three to use shared implementation
-- [ ] Estimated reduction: ~1,200 lines
+- [x] Refactor all three to use shared implementation
+- [x] Actual reduction: ~550 lines (converter.go: 137→13, client_conversion.go: 697→476, bridge.go: 996→745)
 
 ---
 

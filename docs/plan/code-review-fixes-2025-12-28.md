@@ -59,14 +59,9 @@ snapshot := &CallInfo{
 - [x] Document breaking change in CHANGELOG
 
 ### 7. Fix SIPStream goroutine leak
-- [ ] Modify `internal/pkg/voip/tcp_stream.go`
-- [ ] Add read deadline before blocking reads:
-```go
-if deadline, ok := ctx.Deadline(); ok {
-    conn.SetReadDeadline(deadline)
-}
-```
-- [ ] Ensure context cancellation interrupts blocked readers
+- [x] Modify `internal/pkg/voip/tcp_stream.go`
+- [x] Implement `safeReader` wrapper using `io.Pipe` to decouple tcpreader from consumer
+- [x] Ensure context cancellation interrupts blocked readers (pipe close unblocks consumer reads)
 
 ### 8. Fix CallAggregator ring buffer race
 - [ ] Review `internal/pkg/voip/call_aggregator.go:217-220`

@@ -129,6 +129,7 @@ func (c *CallIDDetector) Close() {
 // SIPStream represents a TCP stream that processes SIP messages
 type SIPStream struct {
 	reader         *tcpreader.ReaderStream
+	readerWrapper  *safeReader
 	callIDDetector *CallIDDetector
 	ctx            context.Context
 	factory        *sipStreamFactory
@@ -138,9 +139,120 @@ type SIPStream struct {
 	processedMsgs  int64
 }
 
+// safeReader wraps a tcpreader.ReaderStream to provide interruptible reads
+// without data races. The tcpreader package's Close() method races with Read(),
+// so this wrapper uses an io.Pipe to decouple the underlying reader from the
+// consumer. A background goroutine copies data from tcpreader to the pipe,
+// and closing the pipe writer is thread-safe.
+type safeReader struct {
+	pipeReader *io.PipeReader
+	pipeWriter *io.PipeWriter
+	bufReader  *bufio.Reader
+	ctx        context.Context
+	cancel     context.CancelFunc
+	copyDone   chan struct{}
+	closeOnce  sync.Once
+}
+
+func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context) *safeReader {
+	pipeReader, pipeWriter := io.Pipe()
+	ctx, cancel := context.WithCancel(ctx)
+
+	sr := &safeReader{
+		pipeReader: pipeReader,
+		pipeWriter: pipeWriter,
+		bufReader:  bufio.NewReader(pipeReader),
+		ctx:        ctx,
+		cancel:     cancel,
+		copyDone:   make(chan struct{}),
+	}
+
+	// Start a goroutine that copies data from tcpreader to the pipe.
+	// This goroutine owns the tcpreader and will close it when done.
+	go func() {
+		defer close(sr.copyDone)
+		defer pipeWriter.Close()
+
+		// Handle nil reader gracefully
+		if reader == nil {
+			pipeWriter.CloseWithError(fmt.Errorf("nil reader"))
+			return
+		}
+		defer reader.Close()
+
+		buf := make([]byte, 4096)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			n, err := reader.Read(buf)
+			if n > 0 {
+				if _, writeErr := pipeWriter.Write(buf[:n]); writeErr != nil {
+					return
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					pipeWriter.CloseWithError(err)
+				}
+				return
+			}
+		}
+	}()
+
+	return sr
+}
+
+// shouldStop returns true if the reader should stop reading
+func (sr *safeReader) shouldStop() bool {
+	return sr.ctx.Err() != nil
+}
+
+// close shuts down the safe reader. The copy goroutine will exit when
+// its blocked read returns (either from data arrival or stream close).
+func (sr *safeReader) close() {
+	sr.closeOnce.Do(func() {
+		// Cancel context to signal copy goroutine to stop
+		sr.cancel()
+		// Close pipe reader to unblock any pending reads from consumer
+		sr.pipeReader.Close()
+		// Don't wait for copyDone - the copy goroutine will exit naturally
+		// when its blocked read returns. Waiting here could cause a deadlock
+		// if the tcpreader is blocked indefinitely waiting for data.
+	})
+}
+
+// ReadString reads until the first occurrence of delim in the input.
+func (sr *safeReader) ReadString(delim byte) (string, error) {
+	if sr.shouldStop() {
+		return "", sr.ctx.Err()
+	}
+	return sr.bufReader.ReadString(delim)
+}
+
+// ReadFull reads exactly len(buf) bytes from the reader.
+func (sr *safeReader) ReadFull(buf []byte) (int, error) {
+	if sr.shouldStop() {
+		return 0, sr.ctx.Err()
+	}
+	return io.ReadFull(sr.bufReader, buf)
+}
+
 func (s *SIPStream) run() {
 	logger.Debug("SIP stream starting", "flow", s.flow.String())
+
+	// Create a safe reader wrapper that handles context cancellation.
+	// The wrapper performs reads in goroutines and uses channels for coordination,
+	// allowing context cancellation to properly interrupt blocking reads.
+	s.readerWrapper = newSafeReader(s.reader, s.ctx)
+
 	defer func() {
+		// Close the reader wrapper to clean up any pending read goroutines
+		s.readerWrapper.close()
+
 		// Decrement goroutine counter
 		if s.factory != nil {
 			atomic.AddInt64(&s.factory.activeGoroutines, -1)
@@ -192,7 +304,8 @@ func (s *SIPStream) processSingle() {
 	// Read and buffer the complete SIP message
 	sipMessage, err := s.readCompleteSipMessage()
 	if err != nil {
-		if !errors.Is(err, io.EOF) {
+		// Don't log errors during context cancellation (normal shutdown)
+		if !errors.Is(err, io.EOF) && s.ctx.Err() == nil {
 			logger.Error("Error reading complete SIP message", "error", err)
 		} else {
 			logger.Debug("EOF reading SIP message")
@@ -240,7 +353,8 @@ func (s *SIPStream) processBatched(batchSize int) {
 		logger.Debug("About to read SIP message", "current_batch_size", batch.size)
 		sipMessage, err := s.readCompleteSipMessage()
 		if err != nil {
-			if !errors.Is(err, io.EOF) {
+			// Don't log errors during context cancellation (normal shutdown)
+			if !errors.Is(err, io.EOF) && s.ctx.Err() == nil {
 				logger.Error("Error reading SIP message in batch", "error", err)
 			} else {
 				logger.Debug("EOF in batch read", "messages_read", batch.size)
@@ -266,12 +380,11 @@ func (s *SIPStream) processBatched(batchSize int) {
 
 // readCompleteSipMessage reads a complete SIP message from the TCP stream
 func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
-	// Check if reader is nil (defensive check for abnormal conditions)
-	if s.reader == nil {
-		return nil, fmt.Errorf("TCP stream reader is nil")
+	// Check if reader wrapper is nil (defensive check for abnormal conditions)
+	if s.readerWrapper == nil {
+		return nil, fmt.Errorf("TCP stream reader wrapper is nil")
 	}
 
-	reader := bufio.NewReader(s.reader)
 	var message strings.Builder
 	var contentLength int
 	headersDone := false
@@ -285,7 +398,7 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 		// If headers are done and we have content to read
 		if headersDone && contentLength > 0 {
 			content := make([]byte, contentLength)
-			_, err := io.ReadFull(reader, content)
+			_, err := s.readerWrapper.ReadFull(content)
 			if err != nil {
 				return nil, fmt.Errorf("failed to read SIP message content (%d bytes) from TCP stream: %w", contentLength, err)
 			}
@@ -293,13 +406,12 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 			break
 		}
 
-		select {
-		case <-s.ctx.Done():
+		// Check if we should stop (context cancelled or close signaled)
+		if s.readerWrapper.shouldStop() {
 			return nil, s.ctx.Err()
-		default:
 		}
 
-		line, err := reader.ReadString('\n')
+		line, err := s.readerWrapper.ReadString('\n')
 		if err != nil {
 			return nil, fmt.Errorf("failed to read SIP message line from TCP stream: %w", err)
 		}

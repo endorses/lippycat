@@ -19,9 +19,9 @@ func GetSecurityConfig() *SecurityConfig {
 ```
 
 ### 2. Fix methodRoles mapping in auth interceptor
-- [ ] Audit `internal/pkg/auth/interceptor.go:12-28`
-- [ ] Compare method names against `api/proto/*.proto` service definitions
-- [ ] Align method names with actual gRPC service paths
+- [x] Audit `internal/pkg/auth/interceptor.go:12-28`
+- [x] Compare method names against `api/proto/*.proto` service definitions
+- [x] Align method names with actual gRPC service paths
 
 ### 3. Implement or remove GenerateAPIKey
 - [ ] Implement in `internal/pkg/auth/validator.go:151-160`:

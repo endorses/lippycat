@@ -9,22 +9,29 @@ import (
 )
 
 // methodRoles defines the required role for each gRPC method.
+// Method paths must match the proto package names exactly.
 var methodRoles = map[string]Role{
-	// Data service methods
-	"/data.DataService/RegisterHunter":     RoleHunter,
-	"/data.DataService/SendPacketBatch":    RoleHunter,
-	"/data.DataService/SubscribeToPackets": RoleSubscriber,
-	"/data.DataService/GetTopology":        RoleSubscriber,
-	"/data.DataService/TopologyUpdates":    RoleSubscriber,
+	// Data service methods (lippycat.data package)
+	"/lippycat.data.DataService/StreamPackets":            RoleHunter,
+	"/lippycat.data.DataService/SubscribePackets":         RoleSubscriber,
+	"/lippycat.data.DataService/SubscribeCorrelatedCalls": RoleSubscriber,
 
-	// Management service methods
-	"/management.ManagementService/GetHealth":             RoleSubscriber,
-	"/management.ManagementService/GetMetrics":            RoleSubscriber,
-	"/management.ManagementService/GetHunters":            RoleSubscriber,
-	"/management.ManagementService/GetCalls":              RoleSubscriber,
-	"/management.ManagementService/UpdateCallFilters":     RoleAdmin,
-	"/management.ManagementService/UpdateProtocolFilters": RoleAdmin,
-	"/management.ManagementService/GetProcessorInfo":      RoleSubscriber,
+	// Management service methods (lippycat.management package)
+	"/lippycat.management.ManagementService/RegisterHunter":          RoleHunter,
+	"/lippycat.management.ManagementService/RegisterProcessor":       RoleHunter,
+	"/lippycat.management.ManagementService/Heartbeat":               RoleHunter,
+	"/lippycat.management.ManagementService/GetFilters":              RoleHunter,
+	"/lippycat.management.ManagementService/SubscribeFilters":        RoleHunter,
+	"/lippycat.management.ManagementService/GetHunterStatus":         RoleSubscriber,
+	"/lippycat.management.ManagementService/UpdateFilter":            RoleAdmin,
+	"/lippycat.management.ManagementService/DeleteFilter":            RoleAdmin,
+	"/lippycat.management.ManagementService/ListAvailableHunters":    RoleSubscriber,
+	"/lippycat.management.ManagementService/GetTopology":             RoleSubscriber,
+	"/lippycat.management.ManagementService/SubscribeTopology":       RoleSubscriber,
+	"/lippycat.management.ManagementService/UpdateFilterOnProcessor": RoleAdmin,
+	"/lippycat.management.ManagementService/DeleteFilterOnProcessor": RoleAdmin,
+	"/lippycat.management.ManagementService/GetFiltersFromProcessor": RoleSubscriber,
+	"/lippycat.management.ManagementService/RequestAuthToken":        RoleSubscriber,
 }
 
 // UnaryServerInterceptor returns a gRPC unary interceptor for API key authentication.

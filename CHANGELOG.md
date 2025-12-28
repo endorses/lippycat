@@ -8,13 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2025-12-28
 
 ### Added
-- ETSI X1/X2/X3 Lawful Interception integration
+- **ETSI Lawful Interception (LI) support** (`internal/pkg/li/`): Complete implementation of ETSI TS 103 221-1/2 interfaces
+  - **X1 Interface** (ADMF ↔ NE): XML/HTTPS administration interface for task management
+    - X1 Server for receiving task activation/deactivation/modification from ADMF
+    - X1 Client for sending notifications and status updates to ADMF
+    - Full XSD schema types from ETSI TS 103 221-1 and TS 103 280
+  - **X2 Interface** (IRI delivery): Binary TLV encoding for SIP signaling events
+    - SIP INVITE/ACK/BYE/CANCEL/REGISTER message encoding
+    - Party information, correlation IDs, and timestamp attributes
+  - **X3 Interface** (CC delivery): Binary TLV encoding for RTP content
+    - RTP payload encoding with sequence numbers and timestamps
+    - SSRC and payload type attributes per ETSI TS 103 221-2
+  - **LI Manager**: Central coordinator for task lifecycle, filter mapping, and packet routing
+  - **Task Registry**: ETSI X1 lifecycle state machine (pending → active → removed)
+  - **Filter Manager**: Maps LI task XIDs to lippycat filter IDs for packet correlation
+  - **Delivery Client**: Async delivery with connection pooling, batching, and backpressure
+  - **Destination Manager**: Connection pool with health monitoring and automatic reconnection
+- **PhoneNumberMatcher** (`internal/pkg/phonematcher/`): LI-optimized phone number matching
+  - Bloom filter pre-check for fast negative lookups
+  - Suffix-based matching for E.164 number normalization
+  - Support for national/international format variations
+- **SIPURI filter type** (`internal/pkg/hunter/`): Full SIP URI matching for LI targets
+  - GPU-accelerated Aho-Corasick matching for SIPURI patterns
+  - Named automaton support for per-filter pattern groups
+- **IP filter optimizations**: O(1) hash map for exact IPs, O(prefix) radix trie for CIDRs
+- **LI build targets**: `make build-li`, `make processor-li`, `make tap-li`, `make tap-li-cuda`
+- **Comprehensive LI documentation**: Integration guide, certificate management, architecture docs
 
 ### Changed
-- TODO: Add detailed changelog entries
-
-### Fixed
-- TODO: Add fixed items
+- Hunter application filter extended with per-packet filter ID tracking for LI correlation
+- Processor packet pipeline includes LI Manager integration for matched packet delivery
+- GPU backends (CUDA, OpenCL, SIMD) support named automata for LI filter groups
 
 ## [0.4.0] - 2025-12-21
 

@@ -338,16 +338,18 @@ func (lf *LockFreeCallInfo) getLastUpdatedLockFree() time.Time {
 // This prevents data races when multiple readers access the same call
 func (lf *LockFreeCallInfo) getSnapshot() *CallInfo {
 	// Create a new CallInfo with safe-to-copy fields only (no mutexes)
+	// Note: Writers are intentionally nil - snapshots are read-only and
+	// should not share writer references with the original CallInfo
 	snapshot := &CallInfo{
 		CallID:      lf.CallInfo.CallID,
 		State:       lf.getStateLockFree(),
 		Created:     lf.CallInfo.Created,
 		LastUpdated: lf.getLastUpdatedLockFree(),
 		LinkType:    lf.CallInfo.LinkType,
-		SIPWriter:   lf.CallInfo.SIPWriter,
-		RTPWriter:   lf.CallInfo.RTPWriter,
-		sipFile:     lf.CallInfo.sipFile,
-		rtpFile:     lf.CallInfo.rtpFile,
+		SIPWriter:   nil, // Read-only snapshot
+		RTPWriter:   nil, // Read-only snapshot
+		sipFile:     nil, // Read-only snapshot
+		rtpFile:     nil, // Read-only snapshot
 		// Note: We intentionally don't copy sipWriterMu and rtpWriterMu
 		// as mutexes should never be copied. These fields will be zero-valued.
 	}

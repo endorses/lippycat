@@ -36,8 +36,8 @@ func GenerateAPIKey() (string, error) {
 ```
 
 ### 4. Fix LockFreeCallInfo snapshot writer sharing
-- [ ] Modify `internal/pkg/voip/lockfree_calltracker.go:337-355`
-- [ ] Nil out SIPWriter and RTPWriter in snapshots (read-only semantics)
+- [x] Modify `internal/pkg/voip/lockfree_calltracker.go:337-355`
+- [x] Nil out SIPWriter and RTPWriter in snapshots (read-only semantics)
 ```go
 snapshot := &CallInfo{
     // ... other fields

@@ -311,3 +311,20 @@ func TestMaskAPIKey(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateAPIKey(t *testing.T) {
+	// Generate a key
+	key1, err := GenerateAPIKey()
+	require.NoError(t, err)
+
+	// Should be 44 characters (32 bytes base64 encoded with padding)
+	assert.Len(t, key1, 44)
+
+	// Generate another key - should be different
+	key2, err := GenerateAPIKey()
+	require.NoError(t, err)
+	assert.NotEqual(t, key1, key2)
+
+	// Should be valid URL-safe base64 (includes = padding)
+	assert.Regexp(t, `^[A-Za-z0-9_=-]+$`, key1)
+}

@@ -24,7 +24,7 @@ func GetSecurityConfig() *SecurityConfig {
 - [x] Align method names with actual gRPC service paths
 
 ### 3. Implement or remove GenerateAPIKey
-- [ ] Implement in `internal/pkg/auth/validator.go:151-160`:
+- [x] Implement in `internal/pkg/auth/validator.go:151-160`:
 ```go
 func GenerateAPIKey() (string, error) {
     b := make([]byte, 32)

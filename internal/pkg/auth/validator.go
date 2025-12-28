@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"sync"
 
@@ -147,14 +149,11 @@ func LogAuthFailure(ctx context.Context, err error, operation string) {
 }
 
 // GenerateAPIKey generates a cryptographically random API key.
-// This is a helper function for administrators creating new keys.
+// Returns a 32-byte (256-bit) key encoded as URL-safe base64.
 func GenerateAPIKey() (string, error) {
-	// For now, return a placeholder. In production, this should use crypto/rand.
-	// Example implementation would be:
-	// b := make([]byte, 32)
-	// if _, err := rand.Read(b); err != nil {
-	//     return "", err
-	// }
-	// return base64.URLEncoding.EncodeToString(b), nil
-	return "", fmt.Errorf("GenerateAPIKey not yet implemented - use external tool to generate keys")
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate random bytes: %w", err)
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
 }

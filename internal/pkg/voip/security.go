@@ -20,19 +20,21 @@ type SecurityConfig struct {
 }
 
 var (
-	securityConfig *SecurityConfig
-	securityMutex  sync.RWMutex
+	securityConfig     *SecurityConfig
+	securityConfigOnce sync.Once
 )
 
+// ResetSecurityConfigForTesting resets the security configuration state for testing.
+// This allows tests to reinitialize with different configurations.
+// DO NOT use in production code.
+func ResetSecurityConfigForTesting() {
+	securityConfig = nil
+	securityConfigOnce = sync.Once{}
+}
+
 // initSecurityConfig initializes security configuration from viper
+// This function is called via sync.Once and should not be called directly.
 func initSecurityConfig() {
-	securityMutex.Lock()
-	defer securityMutex.Unlock()
-
-	if securityConfig != nil {
-		return
-	}
-
 	// Set security defaults
 	viper.SetDefault("voip.security.sanitize_call_ids", false)
 	viper.SetDefault("voip.security.call_id_hash_length", 8)
@@ -53,15 +55,7 @@ func initSecurityConfig() {
 
 // GetSecurityConfig returns the current security configuration
 func GetSecurityConfig() *SecurityConfig {
-	securityMutex.RLock()
-	defer securityMutex.RUnlock()
-
-	if securityConfig == nil {
-		securityMutex.RUnlock()
-		initSecurityConfig()
-		securityMutex.RLock()
-	}
-
+	securityConfigOnce.Do(initSecurityConfig)
 	return securityConfig
 }
 

@@ -12,7 +12,7 @@ import (
 func TestValidateContentLength(t *testing.T) {
 	// Reset configuration
 	viper.Reset()
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name          string
@@ -66,7 +66,7 @@ func TestValidateContentLength(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set configuration
 			viper.Set("voip.security.max_content_length", tt.maxContentLen)
-			securityConfig = nil // Reset to pick up new config
+			ResetSecurityConfigForTesting() // Reset to pick up new config
 
 			err := ValidateContentLength(tt.contentLength)
 
@@ -84,7 +84,7 @@ func TestValidateContentLength(t *testing.T) {
 func TestValidateMessageSize(t *testing.T) {
 	// Reset configuration
 	viper.Reset()
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name           string
@@ -131,7 +131,7 @@ func TestValidateMessageSize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set configuration
 			viper.Set("voip.security.max_message_size", tt.maxMessageSize)
-			securityConfig = nil // Reset to pick up new config
+			ResetSecurityConfigForTesting() // Reset to pick up new config
 
 			err := ValidateMessageSize(tt.messageSize)
 
@@ -150,7 +150,7 @@ func TestParseContentLengthSecurely(t *testing.T) {
 	// Reset configuration
 	viper.Reset()
 	viper.Set("voip.security.max_content_length", 1048576) // 1MB
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name          string
@@ -314,7 +314,7 @@ func TestParseContentLengthSecurityConfiguration(t *testing.T) {
 			// Reset and configure
 			viper.Reset()
 			viper.Set("voip.security.max_content_length", tt.maxContentLen)
-			securityConfig = nil
+			ResetSecurityConfigForTesting()
 
 			_, err := ParseContentLengthSecurely(tt.input)
 
@@ -335,7 +335,7 @@ func TestContentLengthDoSProtection(t *testing.T) {
 	// Reset configuration with small limits for testing
 	viper.Reset()
 	viper.Set("voip.security.max_content_length", 4096)
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name        string
@@ -386,7 +386,7 @@ func TestContentLengthEdgeCases(t *testing.T) {
 	// Reset configuration
 	viper.Reset()
 	viper.Set("voip.security.max_content_length", 1048576)
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name     string
@@ -433,7 +433,7 @@ func TestContentLengthSecurityMetrics(t *testing.T) {
 	// Test that security violations are properly logged/counted
 	viper.Reset()
 	viper.Set("voip.security.max_content_length", 1024)
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	// Test cases that should trigger security violations
 	violations := []string{
@@ -455,7 +455,7 @@ func TestBackwardCompatibility(t *testing.T) {
 	// Ensure that normal, valid Content-Length values still work correctly
 	viper.Reset()
 	// Use default security settings
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	normalValues := []struct {
 		input    string

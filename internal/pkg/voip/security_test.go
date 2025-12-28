@@ -12,7 +12,7 @@ import (
 func TestSanitizeCallIDForLogging(t *testing.T) {
 	// Reset viper for clean test environment
 	viper.Reset()
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name              string
@@ -71,7 +71,7 @@ func TestSanitizeCallIDForLogging(t *testing.T) {
 			viper.Set("voip.security.call_id_max_log_length", 16)
 
 			// Reset security config to pick up new settings
-			securityConfig = nil
+			ResetSecurityConfigForTesting()
 
 			result := SanitizeCallIDForLogging(tt.callID)
 
@@ -98,7 +98,7 @@ func TestSanitizeCallIDForLogging(t *testing.T) {
 
 func TestSanitizeCallIDForDisplay(t *testing.T) {
 	viper.Reset()
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	tests := []struct {
 		name            string
@@ -135,7 +135,7 @@ func TestSanitizeCallIDForDisplay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			viper.Set("voip.security.sanitize_call_ids", tt.sanitizeEnabled)
-			securityConfig = nil
+			ResetSecurityConfigForTesting()
 
 			result := SanitizeCallIDForDisplay(tt.callID)
 
@@ -231,7 +231,7 @@ func TestValidateCallIDForSecurity(t *testing.T) {
 func TestGetSecurityConfig(t *testing.T) {
 	// Clean slate
 	viper.Reset()
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	// Test default configuration
 	config := GetSecurityConfig()
@@ -248,7 +248,7 @@ func TestGetSecurityConfig(t *testing.T) {
 	viper.Set("voip.security.enable_pcap_encryption", true)
 
 	// Reset to pick up new config
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 	config = GetSecurityConfig()
 
 	assert.True(t, config.SanitizeCallIDs)
@@ -261,7 +261,7 @@ func TestSanitizeCallIDConsistency(t *testing.T) {
 	// Ensure sanitization is consistent for the same Call-ID
 	viper.Reset()
 	viper.Set("voip.security.sanitize_call_ids", true)
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	callID := "consistent-test-call-id-for-hashing"
 
@@ -284,7 +284,7 @@ func TestSanitizeCallIDUniqueness(t *testing.T) {
 	// Ensure different Call-IDs produce different sanitized outputs
 	viper.Reset()
 	viper.Set("voip.security.sanitize_call_ids", true)
-	securityConfig = nil
+	ResetSecurityConfigForTesting()
 
 	callID1 := "unique-test-call-id-1"
 	callID2 := "unique-test-call-id-2"

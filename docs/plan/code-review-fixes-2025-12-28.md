@@ -64,10 +64,10 @@ snapshot := &CallInfo{
 - [x] Ensure context cancellation interrupts blocked readers (pipe close unblocks consumer reads)
 
 ### 8. Fix CallAggregator ring buffer race
-- [ ] Review `internal/pkg/voip/call_aggregator.go:217-220`
-- [ ] Option A: Implement reference counting for CallInfo
-- [ ] Option B: Return copies instead of pointers from GetCall()
-- [ ] Add test for concurrent access during eviction
+- [x] Review `internal/pkg/voip/call_aggregator.go:217-220`
+- [ ] ~~Option A: Implement reference counting for CallInfo~~ (not needed, Option B already implemented)
+- [x] Option B: Return copies instead of pointers from GetCall() (already implemented via `deepCopyCall()`)
+- [x] Add test for concurrent access during eviction (`TestCallAggregator_RingBufferEvictionRace`)
 
 ### 9. Extract shared packet converter
 - [ ] Create `internal/pkg/capture/converter_shared.go`

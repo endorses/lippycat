@@ -1,11 +1,15 @@
 package voip
 
 import (
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewCallAggregator(t *testing.T) {
@@ -703,4 +707,303 @@ func TestCallAggregator_DeepCopyRaceCondition(t *testing.T) {
 
 	// Verify state is reasonable
 	assert.Contains(t, []CallState{CallStateRinging, CallStateActive}, call.State, "State should be valid")
+}
+
+// TestCallAggregator_RingBufferEvictionRace tests that concurrent reads during ring buffer
+// eviction are safe. This specifically tests the scenario where:
+// 1. Reader holds a reference to a call
+// 2. Writer evicts that call from the ring buffer
+// 3. Reader's copy remains valid and isolated from internal state changes
+//
+// This test exercises the fix for the ring buffer race condition documented in
+// the code review (issue #8).
+func TestCallAggregator_RingBufferEvictionRace(t *testing.T) {
+	// Use small ring buffer to trigger frequent evictions
+	const ringSize = 10
+	ca := NewCallAggregatorWithCapacity(ringSize)
+
+	// Track successful reads of evicted calls
+	var successfulReadsAfterEviction atomic.Int64
+	var evictedCallsRead atomic.Int64
+
+	// First, fill the ring buffer completely
+	for i := 0; i < ringSize; i++ {
+		callID := fmt.Sprintf("call-%03d", i)
+		packet := &data.CapturedPacket{
+			TimestampNs: time.Now().UnixNano(),
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:   callID,
+					Method:   "INVITE",
+					FromUser: fmt.Sprintf("user%d@example.com", i),
+					ToUser:   "robb@example.com",
+				},
+			},
+		}
+		ca.ProcessPacket(packet, "hunter-1")
+
+		// Add RTP to populate stats
+		rtpPacket := &data.CapturedPacket{
+			TimestampNs: time.Now().UnixNano(),
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{CallId: callID},
+				Rtp: &data.RTPMetadata{
+					Ssrc:        uint32(12345 + i),
+					Sequence:    uint32(100 + i),
+					Timestamp:   uint32(1000 + i*160),
+					PayloadType: 0,
+				},
+			},
+		}
+		ca.ProcessPacket(rtpPacket, "hunter-1")
+	}
+
+	require.Equal(t, ringSize, ca.GetCallCount(), "Ring buffer should be full")
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+
+	// Reader goroutines: continuously read calls that may be evicted
+	readerCount := 5
+	for r := 0; r < readerCount; r++ {
+		wg.Add(1)
+		go func(readerID int) {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					// Try to read older calls that are likely to be evicted
+					for i := 0; i < ringSize*2; i++ {
+						callID := fmt.Sprintf("call-%03d", i)
+						call, exists := ca.GetCall(callID)
+						if exists {
+							// Verify the copy is valid and isolated
+							originalFrom := call.From
+
+							// Mutate the copy to prove isolation
+							call.From = "mutated@example.com"
+							call.PacketCount = 999999
+							if call.RTPStats != nil {
+								call.RTPStats.PacketLoss = 100.0
+							}
+
+							// Re-read to verify internal state wasn't affected
+							call2, exists2 := ca.GetCall(callID)
+							if exists2 {
+								if call2.From == originalFrom && call2.From != "mutated@example.com" {
+									successfulReadsAfterEviction.Add(1)
+								}
+							} else {
+								// Call was evicted between reads - this is expected
+								evictedCallsRead.Add(1)
+							}
+						}
+					}
+				}
+			}
+		}(r)
+	}
+
+	// Writer goroutines: continuously add new calls, causing evictions
+	writerCount := 3
+	callCounter := atomic.Int64{}
+	callCounter.Store(int64(ringSize)) // Start after initial calls
+
+	for w := 0; w < writerCount; w++ {
+		wg.Add(1)
+		go func(writerID int) {
+			defer wg.Done()
+			hunterID := fmt.Sprintf("hunter-%d", writerID)
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					callNum := callCounter.Add(1)
+					callID := fmt.Sprintf("call-%03d", callNum)
+
+					packet := &data.CapturedPacket{
+						TimestampNs: time.Now().UnixNano(),
+						Metadata: &data.PacketMetadata{
+							Sip: &data.SIPMetadata{
+								CallId:   callID,
+								Method:   "INVITE",
+								FromUser: fmt.Sprintf("user%d@example.com", callNum),
+								ToUser:   "robb@example.com",
+							},
+						},
+					}
+					ca.ProcessPacket(packet, hunterID)
+
+					// Small delay to allow interleaving
+					time.Sleep(100 * time.Microsecond)
+				}
+			}
+		}(w)
+	}
+
+	// Let the test run for a while to trigger many evictions
+	time.Sleep(200 * time.Millisecond)
+	close(done)
+	wg.Wait()
+
+	// Verify ring buffer maintained correct size
+	finalCount := ca.GetCallCount()
+	assert.LessOrEqual(t, finalCount, ringSize, "Should not exceed ring buffer size")
+
+	// Verify we had meaningful concurrent activity
+	t.Logf("Successful isolated reads: %d", successfulReadsAfterEviction.Load())
+	t.Logf("Evicted calls encountered: %d", evictedCallsRead.Load())
+	t.Logf("Final call count: %d", finalCount)
+
+	// Sanity check: we should have had some concurrent activity
+	assert.Greater(t, successfulReadsAfterEviction.Load()+evictedCallsRead.Load(), int64(0),
+		"Test should have exercised concurrent read paths")
+
+	// Verify all remaining calls have valid, uncorrupted data
+	calls := ca.GetCalls()
+	for _, call := range calls {
+		assert.NotEqual(t, "mutated@example.com", call.From, "Internal state should not be corrupted")
+		assert.NotEqual(t, 999999, call.PacketCount, "PacketCount should not be corrupted")
+		if call.RTPStats != nil {
+			assert.NotEqual(t, 100.0, call.RTPStats.PacketLoss, "RTPStats should not be corrupted")
+		}
+	}
+}
+
+// TestNewCallAggregatorWithCapacity tests the configurable capacity constructor
+func TestNewCallAggregatorWithCapacity(t *testing.T) {
+	tests := []struct {
+		name         string
+		capacity     int
+		expectedMax  int
+		callsToAdd   int
+		expectedSize int
+	}{
+		{
+			name:         "normal capacity",
+			capacity:     5,
+			expectedMax:  5,
+			callsToAdd:   3,
+			expectedSize: 3,
+		},
+		{
+			name:         "zero capacity defaults to 1000",
+			capacity:     0,
+			expectedMax:  1000,
+			callsToAdd:   3,
+			expectedSize: 3,
+		},
+		{
+			name:         "negative capacity defaults to 1000",
+			capacity:     -1,
+			expectedMax:  1000,
+			callsToAdd:   3,
+			expectedSize: 3,
+		},
+		{
+			name:         "eviction when full",
+			capacity:     3,
+			expectedMax:  3,
+			callsToAdd:   5,
+			expectedSize: 3, // Evicted 2 oldest
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ca := NewCallAggregatorWithCapacity(tt.capacity)
+			assert.Equal(t, tt.expectedMax, ca.maxCalls, "maxCalls should match expected")
+
+			// Add calls
+			for i := 0; i < tt.callsToAdd; i++ {
+				packet := &data.CapturedPacket{
+					Metadata: &data.PacketMetadata{
+						Sip: &data.SIPMetadata{
+							CallId:   fmt.Sprintf("call-%d", i),
+							Method:   "INVITE",
+							FromUser: "alicent@example.com",
+							ToUser:   "robb@example.com",
+						},
+					},
+				}
+				ca.ProcessPacket(packet, "hunter-1")
+			}
+
+			assert.Equal(t, tt.expectedSize, ca.GetCallCount(), "Call count should match expected")
+		})
+	}
+}
+
+// TestCallAggregator_EvictionOrder verifies FIFO eviction behavior
+func TestCallAggregator_EvictionOrder(t *testing.T) {
+	ca := NewCallAggregatorWithCapacity(3)
+
+	// Add calls 0, 1, 2
+	for i := 0; i < 3; i++ {
+		packet := &data.CapturedPacket{
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:   fmt.Sprintf("call-%d", i),
+					Method:   "INVITE",
+					FromUser: "alicent@example.com",
+					ToUser:   "robb@example.com",
+				},
+			},
+		}
+		ca.ProcessPacket(packet, "hunter-1")
+	}
+
+	// Verify all 3 exist
+	for i := 0; i < 3; i++ {
+		_, exists := ca.GetCall(fmt.Sprintf("call-%d", i))
+		assert.True(t, exists, "call-%d should exist", i)
+	}
+
+	// Add call 3, should evict call 0 (FIFO)
+	packet3 := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call-3",
+				Method:   "INVITE",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
+			},
+		},
+	}
+	ca.ProcessPacket(packet3, "hunter-1")
+
+	// Verify eviction
+	_, exists0 := ca.GetCall("call-0")
+	assert.False(t, exists0, "call-0 should be evicted (FIFO)")
+
+	_, exists1 := ca.GetCall("call-1")
+	assert.True(t, exists1, "call-1 should still exist")
+
+	_, exists2 := ca.GetCall("call-2")
+	assert.True(t, exists2, "call-2 should still exist")
+
+	_, exists3 := ca.GetCall("call-3")
+	assert.True(t, exists3, "call-3 should exist")
+
+	// Add call 4, should evict call 1
+	packet4 := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call-4",
+				Method:   "INVITE",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
+			},
+		},
+	}
+	ca.ProcessPacket(packet4, "hunter-1")
+
+	_, exists1After := ca.GetCall("call-1")
+	assert.False(t, exists1After, "call-1 should be evicted")
+
+	// Final state should be: call-2, call-3, call-4
+	assert.Equal(t, 3, ca.GetCallCount())
 }

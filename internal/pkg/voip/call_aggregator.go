@@ -74,9 +74,17 @@ type CallAggregator struct {
 	mu        sync.RWMutex
 }
 
-// NewCallAggregator creates a new call aggregator
+// NewCallAggregator creates a new call aggregator with default capacity (1000 calls)
 func NewCallAggregator() *CallAggregator {
-	maxCalls := 1000 // Default ring buffer size
+	return NewCallAggregatorWithCapacity(1000)
+}
+
+// NewCallAggregatorWithCapacity creates a new call aggregator with specified ring buffer capacity.
+// This is primarily useful for testing eviction behavior with smaller buffers.
+func NewCallAggregatorWithCapacity(maxCalls int) *CallAggregator {
+	if maxCalls <= 0 {
+		maxCalls = 1000
+	}
 	return &CallAggregator{
 		calls:     make(map[string]*AggregatedCall),
 		callRing:  make([]string, maxCalls),

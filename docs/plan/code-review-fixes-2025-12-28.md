@@ -47,10 +47,10 @@ snapshot := &CallInfo{
 ```
 
 ### 5. Add rate limiting to authentication
-- [ ] Add rate limiter to `internal/pkg/auth/interceptor.go`
-- [ ] Track failed attempts per client IP with TTL
-- [ ] Block after 5 failures in 60 seconds
-- [ ] Consider using `golang.org/x/time/rate` or simple map with cleanup
+- [x] Add rate limiter to `internal/pkg/auth/interceptor.go`
+- [x] Track failed attempts per client IP with TTL
+- [x] Block after 5 failures in 60 seconds
+- [x] Consider using `golang.org/x/time/rate` or simple map with cleanup
 
 ### 6. Migrate RSA PKCS1v15 to PSS
 - [ ] Update `internal/pkg/processor/proxy/auth.go:148`

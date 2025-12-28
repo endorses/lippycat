@@ -155,7 +155,7 @@ Failed authentication attempts are logged with structured context:
   "level": "WARN",
   "msg": "Authentication failed: invalid API key",
   "key_prefix": "hunter-p****",
-  "operation": "/data.DataService/RegisterHunter",
+  "operation": "/lippycat.management.ManagementService/RegisterHunter",
   "client_info": "grpc-go/1.50.0"
 }
 ```
@@ -213,27 +213,33 @@ Successful authentications are logged at debug level:
 
 The following table shows which role is required for each gRPC method:
 
-### Data Service Methods
+### Data Service Methods (`lippycat.data.DataService`)
 
-| Method | Required Role |
-|--------|--------------|
-| `RegisterHunter` | `hunter` |
-| `SendPacketBatch` | `hunter` |
-| `SubscribeToPackets` | `subscriber` |
-| `GetTopology` | `subscriber` |
-| `TopologyUpdates` | `subscriber` |
+| Method | Required Role | Description |
+|--------|--------------|-------------|
+| `StreamPackets` | `hunter` | Bidirectional stream for packet transmission |
+| `SubscribePackets` | `subscriber` | Subscribe to packet stream |
+| `SubscribeCorrelatedCalls` | `subscriber` | Subscribe to correlated call updates |
 
-### Management Service Methods
+### Management Service Methods (`lippycat.management.ManagementService`)
 
-| Method | Required Role |
-|--------|--------------|
-| `GetHealth` | `subscriber` |
-| `GetMetrics` | `subscriber` |
-| `GetHunters` | `subscriber` |
-| `GetCalls` | `subscriber` |
-| `UpdateCallFilters` | `admin` |
-| `UpdateProtocolFilters` | `admin` |
-| `GetProcessorInfo` | `subscriber` |
+| Method | Required Role | Description |
+|--------|--------------|-------------|
+| `RegisterHunter` | `hunter` | Register hunter with processor |
+| `RegisterProcessor` | `hunter` | Register downstream processor |
+| `Heartbeat` | `hunter` | Maintain connection and report status |
+| `GetFilters` | `hunter` | Retrieve current filter configuration |
+| `SubscribeFilters` | `hunter` | Stream for real-time filter updates |
+| `GetHunterStatus` | `subscriber` | Get status of connected hunters |
+| `ListAvailableHunters` | `subscriber` | List hunters available for subscription |
+| `GetTopology` | `subscriber` | Get complete downstream topology |
+| `SubscribeTopology` | `subscriber` | Subscribe to topology changes |
+| `GetFiltersFromProcessor` | `subscriber` | Query filters from specific processor |
+| `RequestAuthToken` | `subscriber` | Request auth token for proxied operations |
+| `UpdateFilter` | `admin` | Add or modify a filter |
+| `DeleteFilter` | `admin` | Remove a filter |
+| `UpdateFilterOnProcessor` | `admin` | Update filter on specific processor |
+| `DeleteFilterOnProcessor` | `admin` | Delete filter from specific processor |
 
 **Note:** Admin role satisfies all requirements.
 

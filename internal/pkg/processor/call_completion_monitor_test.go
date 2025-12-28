@@ -266,37 +266,27 @@ func TestCallCompletionMonitor_GracePeriodRespected(t *testing.T) {
 
 	byeTime := time.Now()
 
-	// Hook into the PCAP manager to track when close is called
-	go func() {
-		// Poll until close is called
-		for {
-			pcapManager.mu.RLock()
-			_, exists := pcapManager.writers[callID]
-			pcapManager.mu.RUnlock()
+	// Wait for the writer to be closed using Eventually to avoid race conditions
+	// The close should happen after the grace period (200ms) plus some margin
+	require.Eventually(t, func() bool {
+		pcapManager.mu.RLock()
+		_, exists := pcapManager.writers[callID]
+		pcapManager.mu.RUnlock()
 
-			if !exists {
-				closeTime.Store(time.Now().UnixNano())
-				closeCalled.Add(1)
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
+		if !exists {
+			closeTime.Store(time.Now().UnixNano())
+			closeCalled.Add(1)
+			return true
 		}
-	}()
-
-	// Wait for close to happen
-	time.Sleep(gracePeriod + 100*time.Millisecond)
-
-	// Verify close was called
-	assert.Greater(t, closeCalled.Load(), int32(0), "Close should have been called")
+		return false
+	}, gracePeriod+500*time.Millisecond, 10*time.Millisecond, "Close should have been called")
 
 	// Verify grace period was respected
-	if closeCalled.Load() > 0 {
-		closeNano := closeTime.Load()
-		elapsed := time.Duration(closeNano - byeTime.UnixNano())
-		// Allow some margin for timing
-		assert.GreaterOrEqual(t, elapsed, gracePeriod-50*time.Millisecond,
-			"Close should happen after grace period")
-	}
+	closeNano := closeTime.Load()
+	elapsed := time.Duration(closeNano - byeTime.UnixNano())
+	// Allow some margin for timing
+	assert.GreaterOrEqual(t, elapsed, gracePeriod-50*time.Millisecond,
+		"Close should happen after grace period")
 }
 
 func TestCallCompletionMonitor_CancelPendingClose(t *testing.T) {

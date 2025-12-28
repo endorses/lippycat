@@ -119,7 +119,8 @@ func (m *Manager) VerifyAuthToken(token *AuthorizationToken, expectedProcessorID
 	return nil
 }
 
-// signToken generates a cryptographic signature for the token using RSA-SHA256
+// signToken generates a cryptographic signature for the token using RSA-PSS with SHA256.
+// RSA-PSS provides provable security under the random oracle model.
 func (m *Manager) signToken(token *AuthorizationToken) ([]byte, error) {
 	// Parse private key from PEM
 	block, _ := pem.Decode(m.tlsPrivateKey)
@@ -144,8 +145,12 @@ func (m *Manager) signToken(token *AuthorizationToken) ([]byte, error) {
 	// Create hash of token data
 	hash := m.hashToken(token)
 
-	// Sign the hash
-	signature, err := rsa.SignPKCS1v15(rand.Reader, rsaKey, crypto.SHA256, hash[:])
+	// Sign the hash using PSS (more secure than PKCS1v15)
+	pssOpts := &rsa.PSSOptions{
+		SaltLength: rsa.PSSSaltLengthEqualsHash,
+		Hash:       crypto.SHA256,
+	}
+	signature, err := rsa.SignPSS(rand.Reader, rsaKey, crypto.SHA256, hash[:], pssOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
@@ -153,7 +158,8 @@ func (m *Manager) signToken(token *AuthorizationToken) ([]byte, error) {
 	return signature, nil
 }
 
-// verifyTokenSignature verifies the token's signature using the processor's public key
+// verifyTokenSignature verifies the token's RSA-PSS signature using the processor's public key.
+// Must use the same PSS options as signToken for verification to succeed.
 func (m *Manager) verifyTokenSignature(token *AuthorizationToken) error {
 	if m.tlsCert == nil {
 		return ErrNoTLSCredentials
@@ -178,8 +184,12 @@ func (m *Manager) verifyTokenSignature(token *AuthorizationToken) error {
 	// Create hash of token data
 	hash := m.hashToken(token)
 
-	// Verify signature
-	err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hash[:], token.Signature)
+	// Verify signature using PSS (must match signing options)
+	pssOpts := &rsa.PSSOptions{
+		SaltLength: rsa.PSSSaltLengthEqualsHash,
+		Hash:       crypto.SHA256,
+	}
+	err = rsa.VerifyPSS(publicKey, crypto.SHA256, hash[:], token.Signature, pssOpts)
 	if err != nil {
 		return ErrInvalidSignature
 	}

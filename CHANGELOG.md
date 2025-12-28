@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Processor packet pipeline includes LI Manager integration for matched packet delivery
 - GPU backends (CUDA, OpenCL, SIMD) support named automata for LI filter groups
 
+### Security
+- **BREAKING**: Migrated RSA signature scheme from PKCS#1 v1.5 to PSS in proxy authorization tokens
+  - RSA-PSS provides provable security under the random oracle model
+  - Uses SHA-256 hash and salt length equal to hash length
+  - **Note**: Tokens signed with previous versions will not verify; rolling restarts required during upgrade
+
 ## [0.4.0] - 2025-12-21
 
 ### Added

@@ -53,10 +53,10 @@ snapshot := &CallInfo{
 - [x] Consider using `golang.org/x/time/rate` or simple map with cleanup
 
 ### 6. Migrate RSA PKCS1v15 to PSS
-- [ ] Update `internal/pkg/processor/proxy/auth.go:148`
-- [ ] Change `rsa.SignPKCS1v15` to `rsa.SignPSS`
-- [ ] Update verification to use `rsa.VerifyPSS`
-- [ ] Document breaking change in CHANGELOG
+- [x] Update `internal/pkg/processor/proxy/auth.go:148`
+- [x] Change `rsa.SignPKCS1v15` to `rsa.SignPSS`
+- [x] Update verification to use `rsa.VerifyPSS`
+- [x] Document breaking change in CHANGELOG
 
 ### 7. Fix SIPStream goroutine leak
 - [ ] Modify `internal/pkg/voip/tcp_stream.go`

@@ -46,6 +46,9 @@ func BuildServerCredentials(config ServerConfig) (credentials.TransportCredentia
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS13,
+		// TLS 1.3 uses a fixed set of secure cipher suites (AES-GCM, ChaCha20-Poly1305).
+		// CipherSuites is not configurable for TLS 1.3 - Go automatically negotiates
+		// the strongest available cipher from the TLS 1.3 mandatory set.
 	}
 
 	// Configure client certificate authentication if enabled
@@ -92,6 +95,9 @@ func BuildClientCredentials(config ClientConfig) (credentials.TransportCredentia
 		InsecureSkipVerify: config.SkipVerify,
 		ServerName:         config.ServerNameOverride,
 		MinVersion:         tls.VersionTLS13,
+		// TLS 1.3 uses a fixed set of secure cipher suites (AES-GCM, ChaCha20-Poly1305).
+		// CipherSuites is not configurable for TLS 1.3 - Go automatically negotiates
+		// the strongest available cipher from the TLS 1.3 mandatory set.
 	}
 
 	// Validate production mode security requirements

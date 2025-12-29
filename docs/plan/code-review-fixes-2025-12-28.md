@@ -120,9 +120,13 @@ snapshot := &CallInfo{
 - Debug log for normal stale stream cleanup
 
 ### 15. Add explicit TLS cipher configuration
-- [ ] Update TLS configs in `internal/pkg/tlsutil/`
-- [ ] Set `MinVersion: tls.VersionTLS12` (or TLS13)
-- [ ] Explicitly configure strong cipher suites
+- [x] Update TLS configs in `internal/pkg/tlsutil/`
+- [x] Set `MinVersion: tls.VersionTLS12` (or TLS13)
+- [x] Explicitly configure strong cipher suites
+- `tlsutil.go`: TLS 1.3 minimum (cipher suites fixed automatically, added documentation)
+- `li/x1/server.go`: TLS 1.2 minimum + explicit AEAD cipher suites
+- `li/x1/client.go`: TLS 1.2 minimum + explicit AEAD cipher suites
+- `li/delivery/destination.go`: Already configured with explicit cipher suites
 
 ### 16. Statistics counter bounds (Low risk, skip if needed)
 - [ ] Review `internal/pkg/tui/model.go:187-193`

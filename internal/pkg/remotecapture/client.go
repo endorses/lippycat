@@ -26,6 +26,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -241,8 +242,7 @@ func (c *Client) Close() {
 	c.cancel()
 	if c.conn != nil {
 		if err := c.conn.Close(); err != nil {
-			// Note: logger not imported in this package - error is non-fatal during shutdown
-			_ = err // Close error during shutdown is acceptable
+			logger.Warn("Failed to close gRPC connection during shutdown", "error", err, "addr", c.addr)
 		}
 	}
 }

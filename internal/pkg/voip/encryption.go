@@ -269,7 +269,11 @@ func DecryptPCAPFile(encryptedFile, outputFile, keyFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open encrypted file: %w", err)
 	}
-	defer inFile.Close()
+	defer func() {
+		if closeErr := inFile.Close(); closeErr != nil {
+			logger.Warn("Failed to close encrypted input file", "error", closeErr, "file", encryptedFile)
+		}
+	}()
 
 	// Create output file
 	// #nosec G304 -- outputFile from internal call tracker, sanitized
@@ -277,7 +281,11 @@ func DecryptPCAPFile(encryptedFile, outputFile, keyFile string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
-	defer outFile.Close()
+	defer func() {
+		if closeErr := outFile.Close(); closeErr != nil {
+			logger.Error("Failed to close decrypted output file", "error", closeErr, "file", outputFile)
+		}
+	}()
 
 	// Skip header (read until first binary data)
 	scanner := make([]byte, 1)

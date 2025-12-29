@@ -141,8 +141,11 @@ snapshot := &CallInfo{
 ## Phase 3: Low Priority (Code Quality)
 
 ### 17. Improve error handling in Close operations
-- [ ] Audit `defer Close()` patterns in critical paths
-- [ ] Add error logging for PCAP writers, gRPC connections
+- [x] Audit `defer Close()` patterns in critical paths
+- [x] Add error logging for PCAP writers, gRPC connections
+- Added logger import and error logging to `internal/pkg/remotecapture/client.go:Close()`
+- Added error logging for file Close() operations in `internal/pkg/voip/encryption.go:DecryptPCAPFile()`
+- Existing good patterns found: `internal/pkg/processor/pcap_writer.go`, `internal/pkg/hunter/connection/manager.go`
 
 ### 18. Extract magic numbers to constants
 - [ ] Create constants file or add to existing configs

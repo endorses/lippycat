@@ -38,6 +38,14 @@ var (
 
 	// TCP-specific configuration flags
 	tcpPerformanceMode string
+
+	// Per-call PCAP flags (VoIP-specific)
+	perCallPcapEnabled bool
+	perCallPcapDir     string
+	perCallPcapPattern string
+
+	// VoIP command hook
+	voipCommand string
 )
 
 var voipTapCmd = &cobra.Command{
@@ -68,7 +76,7 @@ func init() {
 	TapCmd.AddCommand(voipTapCmd)
 
 	// VoIP-specific flags
-	voipTapCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user/phone to match (comma-separated, supports wildcards: '*456789', 'alice*')")
+	voipTapCmd.Flags().StringVar(&sipuser, "sipuser", "", "SIP user/phone to match (comma-separated, supports wildcards: '*456789', 'alice*')")
 
 	// BPF Filter Optimization Flags
 	voipTapCmd.Flags().BoolVar(&udpOnly, "udp-only", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
@@ -82,6 +90,14 @@ func init() {
 	// TCP Performance Mode
 	voipTapCmd.Flags().StringVar(&tcpPerformanceMode, "tcp-performance-mode", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
 
+	// Per-call PCAP (VoIP-specific)
+	voipTapCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic (default: enabled for tap voip)")
+	voipTapCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
+	voipTapCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files")
+
+	// VoIP command hook
+	voipTapCmd.Flags().StringVar(&voipCommand, "voip-command", "", "Command to execute when VoIP call completes (supports %callid%, %dirname%, etc.)")
+
 	// Bind VoIP-specific flags to viper
 	_ = viper.BindPFlag("tap.voip.sipuser", voipTapCmd.Flags().Lookup("sipuser"))
 	_ = viper.BindPFlag("tap.voip.udp_only", voipTapCmd.Flags().Lookup("udp-only"))
@@ -90,6 +106,10 @@ func init() {
 	_ = viper.BindPFlag("tap.voip.pattern_algorithm", voipTapCmd.Flags().Lookup("pattern-algorithm"))
 	_ = viper.BindPFlag("tap.voip.pattern_buffer_mb", voipTapCmd.Flags().Lookup("pattern-buffer-mb"))
 	_ = viper.BindPFlag("tap.voip.tcp_performance_mode", voipTapCmd.Flags().Lookup("tcp-performance-mode"))
+	_ = viper.BindPFlag("tap.per_call_pcap.enabled", voipTapCmd.Flags().Lookup("per-call-pcap"))
+	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", voipTapCmd.Flags().Lookup("per-call-pcap-dir"))
+	_ = viper.BindPFlag("tap.per_call_pcap.file_pattern", voipTapCmd.Flags().Lookup("per-call-pcap-pattern"))
+	_ = viper.BindPFlag("tap.voip_command", voipTapCmd.Flags().Lookup("voip-command"))
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {

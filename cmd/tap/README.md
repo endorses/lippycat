@@ -21,8 +21,8 @@ sudo lc tap --interface eth0 --insecure
 # With TLS for TUI connections
 sudo lc tap -i eth0 --tls --tls-cert server.crt --tls-key server.key
 
-# With per-call PCAP writing
-sudo lc tap -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps --insecure
+# With auto-rotating PCAP writing
+sudo lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
 # Hierarchical mode (forward to central processor)
 sudo lc tap -i eth0 --upstream central-processor:50051 --tls --tls-ca ca.crt
@@ -76,33 +76,7 @@ sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 
 - `-w, --write-file` - Write all received packets to one PCAP file
 
-#### Per-Call PCAP (VoIP)
-
-- `--per-call-pcap` - Enable per-call PCAP writing for VoIP traffic
-- `--per-call-pcap-dir` - Output directory (default: `./pcaps`)
-- `--per-call-pcap-pattern` - Filename pattern (default: `{timestamp}_{callid}.pcap`)
-
-```bash
-lc tap voip -i eth0 \
-  --per-call-pcap \
-  --per-call-pcap-dir /var/capture/calls \
-  --per-call-pcap-pattern "{timestamp}_{callid}.pcap" \
-  --insecure
-```
-
-**Output:**
-```
-20250123_143022_abc123_sip.pcap   # SIP signaling
-20250123_143022_abc123_rtp.pcap   # RTP media
-```
-
-**Pattern Placeholders:**
-- `{callid}` - SIP Call-ID
-- `{from}` - SIP From user
-- `{to}` - SIP To user
-- `{timestamp}` - Call start time (YYYYMMDD_HHMMSS)
-
-#### Auto-Rotating PCAP (Non-VoIP)
+#### Auto-Rotating PCAP
 
 - `--auto-rotate-pcap` - Enable auto-rotating PCAP writing for non-VoIP traffic
 - `--auto-rotate-pcap-dir` - Output directory (default: `./auto-rotate-pcaps`)
@@ -113,16 +87,12 @@ lc tap voip -i eth0 \
 ### Command Hooks
 
 - `--pcap-command` - Command to execute when PCAP file closes (supports `%pcap%` placeholder)
-- `--voip-command` - Command to execute when VoIP call completes (supports `%callid%`, `%dirname%`, etc.)
 - `--command-timeout` - Timeout for command execution (default: `30s`)
 - `--command-concurrency` - Maximum concurrent command executions (default: `10`)
 
 ```bash
 # Compress PCAP files after writing
-lc tap voip -i eth0 --pcap-command 'gzip %pcap%' --insecure
-
-# Notify on call completion
-lc tap voip -i eth0 --voip-command 'notify.sh %callid% %caller% %called%' --insecure
+lc tap -i eth0 --auto-rotate-pcap --pcap-command 'gzip %pcap%' --insecure
 ```
 
 ### Virtual Interface
@@ -148,12 +118,54 @@ lc tap voip -i eth0 --voip-command 'notify.sh %callid% %caller% %called%' --inse
 - `--api-key-auth` - Enable API key authentication
 - `--insecure` - Allow insecure connections without TLS
 
-### VoIP-Specific Flags (tap voip)
+### VoIP-Specific Flags (tap voip only)
 
-- `-u, --sipuser` - SIP user/phone to match (comma-separated, supports wildcards)
+These flags are only available with the `lc tap voip` subcommand:
+
+#### SIP Filtering
+
+- `--sipuser` - SIP user/phone to match (comma-separated, supports wildcards)
 - `--udp-only` - Capture UDP only, bypass TCP SIP
 - `--sip-port` - Restrict SIP capture to specific port(s)
 - `--rtp-port-range` - Custom RTP port range(s)
+
+#### Per-Call PCAP
+
+- `--per-call-pcap` - Enable per-call PCAP writing (enabled by default for tap voip)
+- `--per-call-pcap-dir` - Output directory (default: `./pcaps`)
+- `--per-call-pcap-pattern` - Filename pattern (default: `{timestamp}_{callid}.pcap`)
+
+```bash
+lc tap voip -i eth0 \
+  --per-call-pcap \
+  --per-call-pcap-dir /var/capture/calls \
+  --per-call-pcap-pattern "{timestamp}_{callid}.pcap" \
+  --insecure
+```
+
+**Output:**
+```
+20250123_143022_abc123_sip.pcap   # SIP signaling
+20250123_143022_abc123_rtp.pcap   # RTP media
+```
+
+**Pattern Placeholders:**
+- `{callid}` - SIP Call-ID
+- `{from}` - SIP From user
+- `{to}` - SIP To user
+- `{timestamp}` - Call start time (YYYYMMDD_HHMMSS)
+
+#### VoIP Command Hook
+
+- `--voip-command` - Command to execute when VoIP call completes (supports `%callid%`, `%dirname%`, etc.)
+
+```bash
+# Notify on call completion
+lc tap voip -i eth0 --voip-command 'notify.sh %callid% %caller% %called%' --insecure
+```
+
+#### Performance Tuning
+
 - `--pattern-algorithm` - Pattern matching algorithm: `auto`, `linear`, `aho-corasick`
 - `--pattern-buffer-mb` - Memory budget for pattern buffer in MB
 - `--tcp-performance-mode` - TCP performance mode: `minimal`, `balanced`, `high_performance`, `low_latency`
@@ -269,10 +281,6 @@ tap:
 
   # PCAP writing
   write_file: ""
-  per_call_pcap:
-    enabled: true
-    output_dir: "/var/capture/calls"
-    file_pattern: "{timestamp}_{callid}.pcap"
   auto_rotate_pcap:
     enabled: false
     output_dir: "/var/capture/bursts"
@@ -281,9 +289,15 @@ tap:
 
   # Command hooks
   pcap_command: "gzip %pcap%"
-  voip_command: ""
   command_timeout: "30s"
   command_concurrency: 10
+
+  # VoIP-specific PCAP (only applies to tap voip)
+  per_call_pcap:
+    enabled: true
+    output_dir: "/var/capture/calls"
+    file_pattern: "{timestamp}_{callid}.pcap"
+  voip_command: ""
 
   # Protocol detection
   enable_detection: true
@@ -309,15 +323,16 @@ tap:
 
 ## Comparison with Other Modes
 
-| Feature | `lc sniff` | `lc tap` | `lc hunt` + `lc process` |
-|---------|-----------|----------|--------------------------|
-| Local capture | Yes | Yes | Hunt only |
-| TUI server | No | Yes | Process only |
-| Per-call PCAP | No | Yes | Process only |
-| Upstream forwarding | No | Yes | Process only |
-| Distributed capture | No | No | Yes |
-| Deployment | Single machine | Single machine | Multi-machine |
-| Use case | Quick analysis | Standalone production | Distributed production |
+| Feature | `lc sniff` | `lc tap` | `lc tap voip` | `lc hunt` + `lc process` |
+|---------|-----------|----------|---------------|--------------------------|
+| Local capture | Yes | Yes | Yes | Hunt only |
+| TUI server | No | Yes | Yes | Process only |
+| Per-call PCAP | No | No | Yes (default) | Process only |
+| Auto-rotate PCAP | No | Yes | Yes | Process only |
+| Upstream forwarding | No | Yes | Yes | Process only |
+| Distributed capture | No | No | No | Yes |
+| Deployment | Single machine | Single machine | Single machine | Multi-machine |
+| Use case | Quick analysis | General capture | VoIP capture | Distributed production |
 
 ## Performance Tuning
 

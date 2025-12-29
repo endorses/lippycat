@@ -42,14 +42,17 @@ Examples:
   # Basic tap (insecure, local testing only)
   lc tap --interface eth0 --insecure
 
-  # Tap with per-call PCAP
-  lc tap -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps --insecure
+  # Tap with auto-rotating PCAP
+  lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
   # Tap with upstream forwarding (hierarchical mode)
   lc tap -i eth0 --upstream central-processor:50051 --tls --tls-ca ca.crt
 
   # Tap with TUI serving (secure)
   lc tap -i eth0 --listen 0.0.0.0:50051 --tls --tls-cert server.crt --tls-key server.key
+
+  # VoIP capture with per-call PCAP (use 'tap voip' subcommand)
+  lc tap voip -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps --insecure
 
   # Lawful Interception (requires -tags li build)
   lc tap -i eth0 --tls ... \
@@ -80,11 +83,6 @@ var (
 	// PCAP flags
 	writeFile string
 
-	// Per-call PCAP flags
-	perCallPcapEnabled bool
-	perCallPcapDir     string
-	perCallPcapPattern string
-
 	// Auto-rotate PCAP flags
 	autoRotatePcapEnabled     bool
 	autoRotatePcapDir         string
@@ -100,9 +98,8 @@ var (
 	vifNetNS             string
 	vifDropPrivileges    string
 
-	// Command hook flags
+	// Command hook flags (general)
 	pcapCommand        string
-	voipCommand        string
 	commandTimeout     string
 	commandConcurrency int
 
@@ -135,69 +132,63 @@ func init() {
 	TapCmd.PersistentFlags().IntVar(&batchTimeout, "batch-timeout", 100, "Batch timeout in milliseconds")
 
 	// ============================================================
-	// Management Interface Configuration
+	// Management Interface Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.Flags().StringVarP(&listenAddr, "listen", "l", fmt.Sprintf(":%d", constants.DefaultGRPCPort), "Listen address for TUI connections (host:port)")
-	TapCmd.Flags().StringVar(&tapID, "tap-id", "", "Unique tap identifier (default: hostname)")
-	TapCmd.Flags().IntVar(&maxSubscribers, "max-subscribers", constants.DefaultMaxSubscribers, "Maximum concurrent TUI subscribers (0 = unlimited)")
+	TapCmd.PersistentFlags().StringVarP(&listenAddr, "listen", "l", fmt.Sprintf(":%d", constants.DefaultGRPCPort), "Listen address for TUI connections (host:port)")
+	TapCmd.PersistentFlags().StringVar(&tapID, "tap-id", "", "Unique tap identifier (default: hostname)")
+	TapCmd.PersistentFlags().IntVar(&maxSubscribers, "max-subscribers", constants.DefaultMaxSubscribers, "Maximum concurrent TUI subscribers (0 = unlimited)")
 
 	// Upstream forwarding
-	TapCmd.Flags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
+	TapCmd.PersistentFlags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
 
 	// ============================================================
-	// PCAP Writing Configuration
+	// PCAP Writing Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
-
-	// Per-call PCAP (VoIP)
-	TapCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic")
-	TapCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
-	TapCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files")
+	TapCmd.PersistentFlags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 
 	// Auto-rotate PCAP (non-VoIP)
-	TapCmd.Flags().BoolVar(&autoRotatePcapEnabled, "auto-rotate-pcap", false, "Enable auto-rotating PCAP writing for non-VoIP traffic")
-	TapCmd.Flags().StringVar(&autoRotatePcapDir, "auto-rotate-pcap-dir", "./auto-rotate-pcaps", "Directory for auto-rotating PCAP files")
-	TapCmd.Flags().StringVar(&autoRotatePcapPattern, "auto-rotate-pcap-pattern", "{timestamp}.pcap", "Filename pattern for auto-rotating PCAP files")
-	TapCmd.Flags().StringVar(&autoRotatePcapIdleTimeout, "auto-rotate-idle-timeout", "30s", "Close PCAP file after this idle time")
-	TapCmd.Flags().StringVar(&autoRotatePcapMaxSize, "auto-rotate-max-size", "100M", "Maximum PCAP file size before rotation")
+	TapCmd.PersistentFlags().BoolVar(&autoRotatePcapEnabled, "auto-rotate-pcap", false, "Enable auto-rotating PCAP writing for non-VoIP traffic")
+	TapCmd.PersistentFlags().StringVar(&autoRotatePcapDir, "auto-rotate-pcap-dir", "./auto-rotate-pcaps", "Directory for auto-rotating PCAP files")
+	TapCmd.PersistentFlags().StringVar(&autoRotatePcapPattern, "auto-rotate-pcap-pattern", "{timestamp}.pcap", "Filename pattern for auto-rotating PCAP files")
+	TapCmd.PersistentFlags().StringVar(&autoRotatePcapIdleTimeout, "auto-rotate-idle-timeout", "30s", "Close PCAP file after this idle time")
+	TapCmd.PersistentFlags().StringVar(&autoRotatePcapMaxSize, "auto-rotate-max-size", "100M", "Maximum PCAP file size before rotation")
 
 	// ============================================================
-	// Virtual Interface Configuration
+	// Virtual Interface Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
-	TapCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name")
-	TapCmd.Flags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap or tun")
-	TapCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size")
-	TapCmd.Flags().StringVar(&vifNetNS, "vif-netns", "", "Network namespace for interface isolation")
-	TapCmd.Flags().StringVar(&vifDropPrivileges, "vif-drop-privileges", "", "Drop privileges to specified user after interface creation")
+	TapCmd.PersistentFlags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
+	TapCmd.PersistentFlags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name")
+	TapCmd.PersistentFlags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap or tun")
+	TapCmd.PersistentFlags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size")
+	TapCmd.PersistentFlags().StringVar(&vifNetNS, "vif-netns", "", "Network namespace for interface isolation")
+	TapCmd.PersistentFlags().StringVar(&vifDropPrivileges, "vif-drop-privileges", "", "Drop privileges to specified user after interface creation")
 
 	// ============================================================
-	// Command Hooks Configuration
+	// Command Hooks Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.Flags().StringVar(&pcapCommand, "pcap-command", "", "Command to execute when PCAP file closes (supports %pcap% placeholder)")
-	TapCmd.Flags().StringVar(&voipCommand, "voip-command", "", "Command to execute when VoIP call completes (supports %callid%, %dirname%, etc.)")
-	TapCmd.Flags().StringVar(&commandTimeout, "command-timeout", "30s", "Timeout for command execution")
-	TapCmd.Flags().IntVar(&commandConcurrency, "command-concurrency", 10, "Maximum concurrent command executions")
+	TapCmd.PersistentFlags().StringVar(&pcapCommand, "pcap-command", "", "Command to execute when PCAP file closes (supports %pcap% placeholder)")
+	TapCmd.PersistentFlags().StringVar(&commandTimeout, "command-timeout", "30s", "Timeout for command execution")
+	TapCmd.PersistentFlags().IntVar(&commandConcurrency, "command-concurrency", 10, "Maximum concurrent command executions")
 
 	// ============================================================
-	// Protocol Detection
+	// Protocol Detection (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.Flags().BoolVarP(&enableDetection, "detect", "d", true, "Enable protocol detection")
+	TapCmd.PersistentFlags().BoolVarP(&enableDetection, "detect", "d", true, "Enable protocol detection")
 
 	// ============================================================
-	// TLS Configuration (for management interface)
+	// TLS Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption for management interface")
-	TapCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "Path to server TLS certificate")
-	TapCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "Path to server TLS key")
-	TapCmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification")
-	TapCmd.Flags().BoolVar(&tlsClientAuth, "tls-client-auth", false, "Require client certificate authentication")
+	TapCmd.PersistentFlags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption for management interface")
+	TapCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert", "", "Path to server TLS certificate")
+	TapCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key", "", "Path to server TLS key")
+	TapCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification")
+	TapCmd.PersistentFlags().BoolVar(&tlsClientAuth, "tls-client-auth", false, "Require client certificate authentication")
 
-	// API Key Authentication
-	TapCmd.Flags().BoolVar(&apiKeyAuthEnabled, "api-key-auth", false, "Enable API key authentication")
+	// API Key Authentication (persistent for voip subcommand)
+	TapCmd.PersistentFlags().BoolVar(&apiKeyAuthEnabled, "api-key-auth", false, "Enable API key authentication")
 
-	// Security
-	TapCmd.Flags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS")
+	// Security (persistent for voip subcommand)
+	TapCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS")
 
 	// ============================================================
 	// Viper Bindings
@@ -211,46 +202,42 @@ func init() {
 	_ = viper.BindPFlag("tap.batch_timeout_ms", TapCmd.PersistentFlags().Lookup("batch-timeout"))
 
 	// Management interface
-	_ = viper.BindPFlag("tap.listen_addr", TapCmd.Flags().Lookup("listen"))
-	_ = viper.BindPFlag("tap.tap_id", TapCmd.Flags().Lookup("tap-id"))
-	_ = viper.BindPFlag("tap.max_subscribers", TapCmd.Flags().Lookup("max-subscribers"))
-	_ = viper.BindPFlag("tap.upstream_addr", TapCmd.Flags().Lookup("upstream"))
+	_ = viper.BindPFlag("tap.listen_addr", TapCmd.PersistentFlags().Lookup("listen"))
+	_ = viper.BindPFlag("tap.tap_id", TapCmd.PersistentFlags().Lookup("tap-id"))
+	_ = viper.BindPFlag("tap.max_subscribers", TapCmd.PersistentFlags().Lookup("max-subscribers"))
+	_ = viper.BindPFlag("tap.upstream_addr", TapCmd.PersistentFlags().Lookup("upstream"))
 
 	// PCAP configuration
-	_ = viper.BindPFlag("tap.write_file", TapCmd.Flags().Lookup("write-file"))
-	_ = viper.BindPFlag("tap.per_call_pcap.enabled", TapCmd.Flags().Lookup("per-call-pcap"))
-	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", TapCmd.Flags().Lookup("per-call-pcap-dir"))
-	_ = viper.BindPFlag("tap.per_call_pcap.file_pattern", TapCmd.Flags().Lookup("per-call-pcap-pattern"))
-	_ = viper.BindPFlag("tap.auto_rotate_pcap.enabled", TapCmd.Flags().Lookup("auto-rotate-pcap"))
-	_ = viper.BindPFlag("tap.auto_rotate_pcap.output_dir", TapCmd.Flags().Lookup("auto-rotate-pcap-dir"))
-	_ = viper.BindPFlag("tap.auto_rotate_pcap.file_pattern", TapCmd.Flags().Lookup("auto-rotate-pcap-pattern"))
-	_ = viper.BindPFlag("tap.auto_rotate_pcap.idle_timeout", TapCmd.Flags().Lookup("auto-rotate-idle-timeout"))
-	_ = viper.BindPFlag("tap.auto_rotate_pcap.max_size", TapCmd.Flags().Lookup("auto-rotate-max-size"))
+	_ = viper.BindPFlag("tap.write_file", TapCmd.PersistentFlags().Lookup("write-file"))
+	_ = viper.BindPFlag("tap.auto_rotate_pcap.enabled", TapCmd.PersistentFlags().Lookup("auto-rotate-pcap"))
+	_ = viper.BindPFlag("tap.auto_rotate_pcap.output_dir", TapCmd.PersistentFlags().Lookup("auto-rotate-pcap-dir"))
+	_ = viper.BindPFlag("tap.auto_rotate_pcap.file_pattern", TapCmd.PersistentFlags().Lookup("auto-rotate-pcap-pattern"))
+	_ = viper.BindPFlag("tap.auto_rotate_pcap.idle_timeout", TapCmd.PersistentFlags().Lookup("auto-rotate-idle-timeout"))
+	_ = viper.BindPFlag("tap.auto_rotate_pcap.max_size", TapCmd.PersistentFlags().Lookup("auto-rotate-max-size"))
 
 	// Virtual interface
-	_ = viper.BindPFlag("tap.virtual_interface", TapCmd.Flags().Lookup("virtual-interface"))
-	_ = viper.BindPFlag("tap.vif_name", TapCmd.Flags().Lookup("vif-name"))
-	_ = viper.BindPFlag("tap.vif_type", TapCmd.Flags().Lookup("vif-type"))
-	_ = viper.BindPFlag("tap.vif_buffer_size", TapCmd.Flags().Lookup("vif-buffer-size"))
-	_ = viper.BindPFlag("tap.vif_netns", TapCmd.Flags().Lookup("vif-netns"))
-	_ = viper.BindPFlag("tap.vif_drop_privileges", TapCmd.Flags().Lookup("vif-drop-privileges"))
+	_ = viper.BindPFlag("tap.virtual_interface", TapCmd.PersistentFlags().Lookup("virtual-interface"))
+	_ = viper.BindPFlag("tap.vif_name", TapCmd.PersistentFlags().Lookup("vif-name"))
+	_ = viper.BindPFlag("tap.vif_type", TapCmd.PersistentFlags().Lookup("vif-type"))
+	_ = viper.BindPFlag("tap.vif_buffer_size", TapCmd.PersistentFlags().Lookup("vif-buffer-size"))
+	_ = viper.BindPFlag("tap.vif_netns", TapCmd.PersistentFlags().Lookup("vif-netns"))
+	_ = viper.BindPFlag("tap.vif_drop_privileges", TapCmd.PersistentFlags().Lookup("vif-drop-privileges"))
 
 	// Command hooks
-	_ = viper.BindPFlag("tap.pcap_command", TapCmd.Flags().Lookup("pcap-command"))
-	_ = viper.BindPFlag("tap.voip_command", TapCmd.Flags().Lookup("voip-command"))
-	_ = viper.BindPFlag("tap.command_timeout", TapCmd.Flags().Lookup("command-timeout"))
-	_ = viper.BindPFlag("tap.command_concurrency", TapCmd.Flags().Lookup("command-concurrency"))
+	_ = viper.BindPFlag("tap.pcap_command", TapCmd.PersistentFlags().Lookup("pcap-command"))
+	_ = viper.BindPFlag("tap.command_timeout", TapCmd.PersistentFlags().Lookup("command-timeout"))
+	_ = viper.BindPFlag("tap.command_concurrency", TapCmd.PersistentFlags().Lookup("command-concurrency"))
 
 	// Detection
-	_ = viper.BindPFlag("tap.enable_detection", TapCmd.Flags().Lookup("detect"))
+	_ = viper.BindPFlag("tap.enable_detection", TapCmd.PersistentFlags().Lookup("detect"))
 
 	// TLS
-	_ = viper.BindPFlag("tap.tls.enabled", TapCmd.Flags().Lookup("tls"))
-	_ = viper.BindPFlag("tap.tls.cert_file", TapCmd.Flags().Lookup("tls-cert"))
-	_ = viper.BindPFlag("tap.tls.key_file", TapCmd.Flags().Lookup("tls-key"))
-	_ = viper.BindPFlag("tap.tls.ca_file", TapCmd.Flags().Lookup("tls-ca"))
-	_ = viper.BindPFlag("tap.tls.client_auth", TapCmd.Flags().Lookup("tls-client-auth"))
-	_ = viper.BindPFlag("security.api_keys.enabled", TapCmd.Flags().Lookup("api-key-auth"))
+	_ = viper.BindPFlag("tap.tls.enabled", TapCmd.PersistentFlags().Lookup("tls"))
+	_ = viper.BindPFlag("tap.tls.cert_file", TapCmd.PersistentFlags().Lookup("tls-cert"))
+	_ = viper.BindPFlag("tap.tls.key_file", TapCmd.PersistentFlags().Lookup("tls-key"))
+	_ = viper.BindPFlag("tap.tls.ca_file", TapCmd.PersistentFlags().Lookup("tls-ca"))
+	_ = viper.BindPFlag("tap.tls.client_auth", TapCmd.PersistentFlags().Lookup("tls-client-auth"))
+	_ = viper.BindPFlag("security.api_keys.enabled", TapCmd.PersistentFlags().Lookup("api-key-auth"))
 }
 
 func runTap(cmd *cobra.Command, args []string) error {
@@ -263,20 +250,6 @@ func runTap(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
-	}
-
-	// Build per-call PCAP config if enabled
-	var pcapWriterConfig *processor.PcapWriterConfig
-	if getBoolConfig("tap.per_call_pcap.enabled", perCallPcapEnabled) {
-		pcapWriterConfig = &processor.PcapWriterConfig{
-			Enabled:         true,
-			OutputDir:       getStringConfig("tap.per_call_pcap.output_dir", perCallPcapDir),
-			FilePattern:     getStringConfig("tap.per_call_pcap.file_pattern", perCallPcapPattern),
-			MaxFileSize:     100 * 1024 * 1024, // 100MB default
-			MaxFilesPerCall: 10,
-			BufferSize:      4096,
-			SyncInterval:    5 * time.Second,
-		}
 	}
 
 	// Build auto-rotate PCAP config if enabled
@@ -310,8 +283,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 	// Build command executor config if configured
 	var commandExecutorConfig *processor.CommandExecutorConfig
 	pcapCmd := getStringConfig("tap.pcap_command", pcapCommand)
-	voipCmd := getStringConfig("tap.voip_command", voipCommand)
-	if pcapCmd != "" || voipCmd != "" {
+	if pcapCmd != "" {
 		timeoutStr := getStringConfig("tap.command_timeout", commandTimeout)
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
@@ -320,7 +292,6 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 		commandExecutorConfig = &processor.CommandExecutorConfig{
 			PcapCommand: pcapCmd,
-			VoipCommand: voipCmd,
 			Timeout:     timeout,
 			Concurrency: getIntConfig("tap.command_concurrency", commandConcurrency),
 		}
@@ -365,7 +336,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             getStringConfig("tap.write_file", writeFile),
 		DisplayStats:          true,
-		PcapWriterConfig:      pcapWriterConfig,
+		PcapWriterConfig:      nil, // Per-call PCAP is VoIP-specific, use tap voip
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
 		EnableDetection:       getBoolConfig("tap.enable_detection", enableDetection),

@@ -66,6 +66,7 @@ type CallPcapWriter struct {
 	mu         sync.Mutex
 	syncTicker *time.Ticker
 	stopSync   chan struct{}
+	syncErrors int // Count of sync errors during periodic sync
 }
 
 // PcapWriterManager manages PCAP writers for multiple calls
@@ -354,10 +355,16 @@ func (writer *CallPcapWriter) syncLoop() {
 		case <-writer.syncTicker.C:
 			writer.mu.Lock()
 			if writer.sipFile != nil {
-				_ = writer.sipFile.Sync()
+				if err := writer.sipFile.Sync(); err != nil {
+					writer.syncErrors++
+					logger.Warn("Failed to sync SIP PCAP", "error", err, "call_id", writer.callID)
+				}
 			}
 			if writer.rtpFile != nil {
-				_ = writer.rtpFile.Sync()
+				if err := writer.rtpFile.Sync(); err != nil {
+					writer.syncErrors++
+					logger.Warn("Failed to sync RTP PCAP", "error", err, "call_id", writer.callID)
+				}
 			}
 			writer.mu.Unlock()
 		case <-writer.stopSync:
@@ -410,7 +417,8 @@ func (writer *CallPcapWriter) Close() error {
 		"sip_packets", writer.sipPacketCount,
 		"rtp_packets", writer.rtpPacketCount,
 		"sip_files", writer.sipFileIndex,
-		"rtp_files", writer.rtpFileIndex)
+		"rtp_files", writer.rtpFileIndex,
+		"sync_errors", writer.syncErrors)
 
 	// Fire OnFileClose callbacks after files are closed
 	if writer.config.OnFileClose != nil {

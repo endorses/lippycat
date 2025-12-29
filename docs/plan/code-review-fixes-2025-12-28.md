@@ -91,14 +91,10 @@ snapshot := &CallInfo{
   - [x] `voip/simd.go:151` - SIMD assembly (implemented in `simd_amd64.s`)
 
 ### 11. Fix PCAP sync error handling
-- [ ] Update `internal/pkg/processor/pcap_writer.go:357-360`
-- [ ] Log sync errors instead of ignoring:
-```go
-if err := writer.sipFile.Sync(); err != nil {
-    logger.Warn("Failed to sync SIP PCAP", "error", err, "call_id", writer.callID)
-    writer.statsCollector.IncrementSyncErrors()
-}
-```
+- [x] Update `internal/pkg/processor/pcap_writer.go:357-360`
+- [x] Log sync errors instead of ignoring
+- [x] Added `syncErrors` counter to `CallPcapWriter` struct
+- [x] Include sync error count in close log message
 
 ### 12. Fix virtual interface injection log level
 - [ ] Update `internal/pkg/processor/processor_packet_pipeline.go:208-209`

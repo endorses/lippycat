@@ -107,6 +107,12 @@ make build-pgo
 
 Each specialized build is stripped (`-s -w`) and optimized to reduce binary size while maintaining full functionality for its role. Hunter nodes include all protocol detectors and GPU acceleration for edge filtering. LI support is optional and excluded from non-LI builds via dead code elimination.
 
+**CUDA Build Tag Pattern:** The `cuda` build tag controls GPU acceleration. Files follow this pattern:
+- `gpu_cuda_backend_impl.go` (`//go:build cuda`) - **Full CUDA implementation** with CGo bindings
+- `gpu_cuda_backend.go` (`//go:build !cuda`) - Stub for non-CUDA builds (returns `ErrGPUNotAvailable`)
+
+The stub file is NOT an indicator of missing GPU support - it exists only so non-CUDA builds compile cleanly.
+
 ### Install
 ```bash
 # Install to GOPATH/bin
@@ -428,13 +434,13 @@ make build-li       # Complete suite with LI
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                     lippycat Processor                          │
-│  ┌──────────┐  ┌─────────────┐  ┌───────────┐  ┌────────────┐ │
-│  │X1 Server │←─│ LI Manager  │─→│ X2/X3     │─→│ Delivery   │ │
-│  │ :8443    │  │ (registry,  │  │ Encoder   │  │ Client     │ │
-│  └──────────┘  │  filters)   │  └───────────┘  └─────┬──────┘ │
-│                └─────────────┘                       │        │
-└──────────────────────────────────────────────────────┼────────┘
+│                     lippycat Processor                         │
+│  ┌──────────┐  ┌─────────────┐  ┌───────────┐  ┌────────────┐  │
+│  │X1 Server │←─│ LI Manager  │─→│ X2/X3     │─→│ Delivery   │  │
+│  │ :8443    │  │ (registry,  │  │ Encoder   │  │ Client     │  │
+│  └──────────┘  │  filters)   │  └───────────┘  └─────┬──────┘  │
+│                └─────────────┘                       │         │
+└──────────────────────────────────────────────────────┼─────────┘
        ▲ X1 (HTTPS/XML)                                │ X2/X3 (TLS)
        │                                               ▼
   ┌────┴────┐                                    ┌───────────┐

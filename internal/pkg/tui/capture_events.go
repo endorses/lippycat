@@ -304,8 +304,15 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 
 	// Attempt connection in background
 	go func() {
+		// Get program reference via synchronized CaptureState
+		program := globalCaptureState.GetProgram()
+		if program == nil {
+			logger.Error("Cannot connect to processor: no TUI program set", "address", msg.Address)
+			return
+		}
+
 		// Create TUI event handler adapter
-		handler := NewTUIEventHandler(currentProgram)
+		handler := NewTUIEventHandler(program)
 
 		// Build client config with TLS settings from viper
 		// If --insecure flag is set, disable TLS entirely
@@ -328,7 +335,7 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		if err != nil {
 			// Connection failed
 			logger.Error("Failed to connect to processor", "address", msg.Address, "error", err)
-			currentProgram.Send(ProcessorDisconnectedMsg{
+			globalCaptureState.SendMessage(ProcessorDisconnectedMsg{
 				Address: msg.Address,
 				Error:   err,
 			})
@@ -338,7 +345,7 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		// Start packet stream with hunter filter (if specified)
 		if err := client.StreamPacketsWithFilter(msg.HunterIDs); err != nil {
 			client.Close()
-			currentProgram.Send(ProcessorDisconnectedMsg{
+			globalCaptureState.SendMessage(ProcessorDisconnectedMsg{
 				Address: msg.Address,
 				Error:   err,
 			})
@@ -364,7 +371,7 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		}
 
 		// Connection successful
-		currentProgram.Send(ProcessorConnectedMsg{
+		globalCaptureState.SendMessage(ProcessorConnectedMsg{
 			Address:     msg.Address,
 			Client:      client,
 			TLSInsecure: !tlsEnabled, // Record if connection is insecure

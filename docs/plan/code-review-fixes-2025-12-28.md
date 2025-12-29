@@ -102,9 +102,13 @@ snapshot := &CallInfo{
 - [x] Add `vifInjectionErrors` atomic counter to Processor struct
 
 ### 13. Refactor global capture state
-- [ ] Review `internal/pkg/tui/model.go:29-32`
-- [ ] Move globals into struct with proper synchronization
-- [ ] Pass state through function parameters or use context
+- [x] Review `internal/pkg/tui/model.go:29-32`
+- [x] Move globals into struct with proper synchronization
+- [x] Pass state through function parameters or use context
+- Created `capture_state.go` with `CaptureState` struct using `sync.RWMutex`
+- Provides thread-safe access via `globalCaptureState` singleton
+- Updated `capture_lifecycle.go`, `capture_events.go`, `exports.go` to use CaptureState
+- Removed raw global variables from `model.go`
 
 ### 14. Fix TCP stream cleanup silent drops
 - [ ] Update `internal/pkg/voip/tcp_factory.go:206-239`

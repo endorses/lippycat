@@ -19,17 +19,15 @@ import (
 	"github.com/spf13/viper"
 )
 
-// captureHandle holds cancellation and completion signaling for a capture session
+// captureHandle holds cancellation and completion signaling for a capture session.
+// Used by CaptureState (in capture_state.go) to manage capture lifecycle.
 type captureHandle struct {
 	cancel context.CancelFunc
 	done   chan struct{} // Closed when capture goroutine exits
 }
 
-// Global state for capture management (shared with tui.go)
-var (
-	currentCaptureHandle *captureHandle
-	currentProgram       *tea.Program
-)
+// Note: Capture state is now managed by globalCaptureState (see capture_state.go)
+// which provides thread-safe access via sync.RWMutex.
 
 // PacketMsg is sent when a new packet is captured
 type PacketMsg struct {

@@ -36,16 +36,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	}
 
 	// Stop current capture and wait for it to finish
-	if currentCaptureHandle != nil {
-		// Cancel the old capture and wait for completion
-		// This ensures old and new captures don't run simultaneously
-		handle := currentCaptureHandle
-		currentCaptureHandle = nil // Clear immediately to prevent double-cancellation
-
-		handle.cancel()
-		// Wait for capture goroutine to finish (deterministic, no race conditions)
-		<-handle.done
-	}
+	// Uses synchronized CaptureState to safely cancel and wait
+	globalCaptureState.StopCapture()
 
 	// Stop call aggregators if switching modes
 	if m.offlineCallAggregator != nil {
@@ -117,43 +109,44 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	m.statistics.MaxPacketSize = 0
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
 
-	// Start new capture in background using global program reference
-	if currentProgram != nil {
+	// Start new capture in background using synchronized program reference
+	program := globalCaptureState.GetProgram()
+	if program != nil {
 		// Only create new capture context for live/offline modes
 		// Remote mode doesn't need a capture context since it uses gRPC clients
 		if msg.Mode == components.CaptureModeLive || msg.Mode == components.CaptureModeOffline {
 			ctx, cancel := context.WithCancel(context.Background())
 			done := make(chan struct{})
-			currentCaptureHandle = &captureHandle{cancel: cancel, done: done}
+			globalCaptureState.SetHandle(cancel, done)
 
 			switch msg.Mode {
 			case components.CaptureModeLive:
 				// Initialize live call aggregator for VoIP analysis
-				m.liveCallAggregator = NewLocalCallAggregator(currentProgram)
+				m.liveCallAggregator = NewLocalCallAggregator(program)
 				m.liveCallAggregator.Start()
 
 				// Initialize call tracker for RTP-to-CallID mapping (shared with offline mode)
 				liveTracker := NewOfflineCallTracker()
 				SetOfflineCallTracker(liveTracker)
 
-				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, currentProgram, done)
+				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, program, done)
 			case components.CaptureModeOffline:
 				// Initialize offline call aggregator for VoIP analysis
-				m.offlineCallAggregator = NewLocalCallAggregator(currentProgram)
+				m.offlineCallAggregator = NewLocalCallAggregator(program)
 				m.offlineCallAggregator.Start()
 
 				// Initialize offline call tracker for RTP-to-CallID mapping
 				offlineTracker := NewOfflineCallTracker()
 				SetOfflineCallTracker(offlineTracker)
 
-				go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, currentProgram, done)
+				go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, program, done)
 			}
 
 			// Mark capture as active for live/offline modes
 			m.uiState.SetCapturing(true)
 		} else if msg.Mode == components.CaptureModeRemote {
-			// Remote mode: set capture handle to nil since we're not running local capture
-			currentCaptureHandle = nil
+			// Remote mode: clear capture handle since we're not running local capture
+			globalCaptureState.ClearHandle()
 
 			// Load and connect to nodes from YAML file (if provided)
 			if msg.NodesFile != "" {

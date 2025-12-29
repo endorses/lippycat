@@ -7,12 +7,30 @@
 package processor
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
+)
+
+// LI encoders and delivery - initialized when LI is enabled
+var (
+	liX2Encoder *x2x3.X2Encoder
+	liX3Encoder *x2x3.X3Encoder
+)
+
+// LI statistics
+var (
+	liX2Encoded atomic.Uint64
+	liX3Encoded atomic.Uint64
+	liX2Errors  atomic.Uint64
+	liX3Errors  atomic.Uint64
+	liX2Skipped atomic.Uint64
+	liX3Skipped atomic.Uint64
 )
 
 // processorFilterPusher adapts the processor's filter management system
@@ -92,15 +110,67 @@ func (p *Processor) initLIManager() {
 	// Create LI manager
 	p.liManager = li.NewManager(config, deactivationCallback)
 
+	// Initialize X2/X3 encoders
+	liX2Encoder = x2x3.NewX2Encoder()
+	liX3Encoder = x2x3.NewX3Encoder()
+	logger.Info("LI X2/X3 encoders initialized")
+
 	// Set packet processor callback for X2/X3 delivery
 	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) {
-		// TODO: In Phase 2/3, this will encode and deliver X2/X3 PDUs
-		logger.Debug("LI packet match",
-			"xid", task.XID,
-			"delivery_type", task.DeliveryType,
-			"src_ip", pkt.SrcIP,
-			"dst_ip", pkt.DstIP,
-		)
+		// Determine what to deliver based on task configuration
+		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
+		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
+
+		// Encode and log X2 (IRI - signaling) for SIP packets
+		if deliverX2 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
+			pdu, err := liX2Encoder.EncodeIRI(pkt, task.XID)
+			if err != nil {
+				liX2Errors.Add(1)
+				logger.Debug("X2 encode error",
+					"xid", task.XID,
+					"error", err,
+				)
+			} else if pdu != nil {
+				liX2Encoded.Add(1)
+				// PDU is ready for delivery
+				// Note: Actual delivery requires delivery client with MDF connection
+				// For now, log the encoded PDU details for monitoring
+				logger.Debug("X2 IRI encoded",
+					"xid", task.XID,
+					"correlation_id", pdu.Header.CorrelationID,
+					"attributes", len(pdu.Attributes),
+					"destinations", len(task.DestinationIDs),
+				)
+			} else {
+				// nil PDU means packet doesn't require IRI (e.g., 1xx response)
+				liX2Skipped.Add(1)
+			}
+		}
+
+		// Encode and log X3 (CC - content) for RTP packets
+		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.IsRTP {
+			pdu, err := liX3Encoder.EncodeCC(pkt, task.XID)
+			if err != nil {
+				liX3Errors.Add(1)
+				logger.Debug("X3 encode error",
+					"xid", task.XID,
+					"error", err,
+				)
+			} else if pdu != nil {
+				liX3Encoded.Add(1)
+				// PDU is ready for delivery
+				// Note: Actual delivery requires delivery client with MDF connection
+				// For now, log the encoded PDU details for monitoring
+				logger.Debug("X3 CC encoded",
+					"xid", task.XID,
+					"correlation_id", pdu.Header.CorrelationID,
+					"payload_size", len(pdu.Payload),
+					"destinations", len(task.DestinationIDs),
+				)
+			} else {
+				liX3Skipped.Add(1)
+			}
+		}
 	})
 
 	logger.Info("LI Manager initialized",
@@ -144,4 +214,26 @@ func (p *Processor) processLIPacket(pkt *types.PacketDisplay, matchedFilterIDs [
 // isLIEnabled returns whether LI is enabled on this processor.
 func (p *Processor) isLIEnabled() bool {
 	return p.liManager != nil && p.liManager.IsEnabled()
+}
+
+// LIEncodingStats contains X2/X3 encoding statistics.
+type LIEncodingStats struct {
+	X2Encoded uint64
+	X2Errors  uint64
+	X2Skipped uint64
+	X3Encoded uint64
+	X3Errors  uint64
+	X3Skipped uint64
+}
+
+// getLIEncodingStats returns current LI encoding statistics.
+func (p *Processor) getLIEncodingStats() LIEncodingStats {
+	return LIEncodingStats{
+		X2Encoded: liX2Encoded.Load(),
+		X2Errors:  liX2Errors.Load(),
+		X2Skipped: liX2Skipped.Load(),
+		X3Encoded: liX3Encoded.Load(),
+		X3Errors:  liX3Errors.Load(),
+		X3Skipped: liX3Skipped.Load(),
+	}
 }

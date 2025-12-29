@@ -19,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tlsutil"
+	"github.com/endorses/lippycat/internal/pkg/version"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -436,7 +437,7 @@ func (m *Manager) register() error {
 		HunterId:   m.config.HunterID,
 		Hostname:   hostname,
 		Interfaces: m.config.Interfaces,
-		Version:    "0.1.0", // TODO: version from build
+		Version:    version.GetVersion(),
 		Capabilities: &management.HunterCapabilities{
 			FilterTypes:     filterTypes,
 			MaxBufferSize:   uint64(m.config.BufferSize * 2048), // #nosec G115 - Assume 2KB avg packet

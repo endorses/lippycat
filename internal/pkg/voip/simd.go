@@ -147,33 +147,74 @@ func SIPMethodMatchSIMD(line []byte) string {
 // - simd_amd64_nocuda.go (when building without CUDA - links to simd_amd64.s)
 // - simd_cuda.go (when building with CUDA - provides Go fallbacks due to CGo+asm conflict)
 
-func sipMethodMatchSSE42(line []byte) string {
-	// TODO: Implement in assembly using PCMPESTRI for parallel string matching
-	// This can check multiple prefixes in parallel
+// sipMethodMatchDispatchFn is the dispatch function for SIP method matching.
+// This is set to the assembly implementation on amd64 builds without CUDA.
+var sipMethodMatchDispatchFn = sipMethodMatchFallback
 
-	// Fallback implementation
-	if BytesHasPrefixString(line, "INVITE") {
+// sipMethodMatchSSE42 uses SSE4.2 optimized matching for SIP method detection.
+// On amd64 builds without CUDA, this uses assembly implementation with
+// first-byte dispatch and 64-bit word comparison for fast prefix matching.
+func sipMethodMatchSSE42(line []byte) string {
+	// Dispatch to assembly or fallback implementation
+	// Returns: 1=INVITE, 2=REGISTER, 3=BYE, 4=CANCEL, 5=ACK, 6=OPTIONS, -1=SIP/2.0, 0=no match
+	result := sipMethodMatchDispatchFn(line)
+	switch result {
+	case 1:
 		return "INVITE"
-	}
-	if BytesHasPrefixString(line, "REGISTER") {
+	case 2:
 		return "REGISTER"
-	}
-	if BytesHasPrefixString(line, "BYE") {
+	case 3:
 		return "BYE"
-	}
-	if BytesHasPrefixString(line, "CANCEL") {
+	case 4:
 		return "CANCEL"
-	}
-	if BytesHasPrefixString(line, "ACK") {
+	case 5:
 		return "ACK"
-	}
-	if BytesHasPrefixString(line, "OPTIONS") {
+	case 6:
 		return "OPTIONS"
-	}
-	if BytesHasPrefixString(line, "SIP/2.0") {
+	case -1:
+		return "" // SIP/2.0 response
+	default:
 		return ""
 	}
-	return ""
+}
+
+// sipMethodMatchFallback provides scalar fallback for non-amd64 or CUDA builds.
+func sipMethodMatchFallback(line []byte) int {
+	if len(line) < 3 {
+		return 0
+	}
+
+	switch line[0] {
+	case 'I':
+		if len(line) >= 6 && BytesHasPrefixString(line, "INVITE") {
+			return 1
+		}
+	case 'R':
+		if len(line) >= 8 && BytesHasPrefixString(line, "REGISTER") {
+			return 2
+		}
+	case 'B':
+		if BytesHasPrefixString(line, "BYE") {
+			return 3
+		}
+	case 'C':
+		if len(line) >= 6 && BytesHasPrefixString(line, "CANCEL") {
+			return 4
+		}
+	case 'A':
+		if BytesHasPrefixString(line, "ACK") {
+			return 5
+		}
+	case 'O':
+		if len(line) >= 7 && BytesHasPrefixString(line, "OPTIONS") {
+			return 6
+		}
+	case 'S':
+		if len(line) >= 7 && BytesHasPrefixString(line, "SIP/2.0") {
+			return -1
+		}
+	}
+	return 0
 }
 
 // Optimized scalar implementations using unrolled loops

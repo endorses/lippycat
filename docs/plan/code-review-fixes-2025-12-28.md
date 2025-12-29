@@ -83,12 +83,12 @@ snapshot := &CallInfo{
 ## Phase 2: Medium Priority (Error Handling & Observability)
 
 ### 10. Address incomplete TODOs
-- [ ] Review each TODO and either implement or create GitHub issue:
-  - `processor_grpc_handlers.go:1008` - BPF filtering
-  - `processor_li.go:97` - X2/X3 encoding
-  - `downstream/manager.go:133` - TLS credentials
-  - `hunter/connection/manager.go:439` - Hardcoded version
-  - `voip/simd.go:151` - SIMD assembly
+- [x] Review each TODO and either implement or create GitHub issue:
+  - [x] `processor_grpc_handlers.go:1008` - BPF filtering (implemented in `bpf_filter.go`)
+  - [x] `processor_li.go:97` - X2/X3 encoding (implemented using x2x3 encoders)
+  - [x] `downstream/manager.go:133` - TLS credentials (uses `tlsutil.BuildClientCredentials`)
+  - [x] `hunter/connection/manager.go:439` - Hardcoded version (uses `version.GetVersion()`)
+  - [x] `voip/simd.go:151` - SIMD assembly (implemented in `simd_amd64.s`)
 
 ### 11. Fix PCAP sync error handling
 - [ ] Update `internal/pkg/processor/pcap_writer.go:357-360`

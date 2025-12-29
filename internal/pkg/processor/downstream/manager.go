@@ -10,6 +10,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/grpcpool"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/proxy"
+	"github.com/endorses/lippycat/internal/pkg/tlsutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -130,8 +131,21 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 	if m.tlsInsecure {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	} else {
-		// TODO: Implement TLS credentials similar to remotecapture client
-		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		tlsCreds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+			CAFile:             m.tlsCAFile,
+			CertFile:           m.tlsCertFile,
+			KeyFile:            m.tlsKeyFile,
+			SkipVerify:         m.tlsSkipVerify,
+			ServerNameOverride: m.tlsServerName,
+		})
+		if err != nil {
+			logger.Error("Failed to build TLS credentials for downstream processor",
+				"processor_id", processorID,
+				"address", listenAddress,
+				"error", err)
+			return fmt.Errorf("build TLS credentials: %w", err)
+		}
+		opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
 	}
 
 	conn, err := grpcpool.Get(m.connPool, m.ctx, listenAddress, opts...)

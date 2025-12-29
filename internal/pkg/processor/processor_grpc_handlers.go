@@ -966,6 +966,23 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 			"maximum number of subscribers (%d) reached", p.config.MaxSubscribers)
 	}
 
+	// Compile BPF filter if specified
+	var bpfFilter *BPFFilter
+	if req.BpfFilter != "" {
+		var err error
+		bpfFilter, err = NewBPFFilter(req.BpfFilter)
+		if err != nil {
+			logger.Warn("Invalid BPF filter expression",
+				"client_id", clientID,
+				"filter", req.BpfFilter,
+				"error", err)
+			return status.Errorf(codes.InvalidArgument, "invalid BPF filter: %v", err)
+		}
+		logger.Info("BPF filter compiled for subscriber",
+			"client_id", clientID,
+			"filter", req.BpfFilter)
+	}
+
 	// Store hunter subscription filter for this client
 	// has_hunter_filter = false: subscribe to all hunters (default/backward compatibility)
 	// has_hunter_filter = true + empty list: subscribe to no hunters (explicit opt-out)
@@ -1004,9 +1021,12 @@ func (p *Processor) SubscribePackets(req *data.SubscribeRequest, stream data.Dat
 			}
 
 			// Apply BPF filter if specified
-			if req.BpfFilter != "" {
-				// TODO: Implement server-side BPF filtering
-				// For now, send all packets
+			if bpfFilter != nil {
+				batch = bpfFilter.FilterBatch(batch)
+				if batch == nil {
+					// All packets filtered out, skip this batch
+					continue
+				}
 			}
 
 			// Filter by hunter IDs if filter is explicitly set

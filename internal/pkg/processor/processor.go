@@ -130,8 +130,9 @@ type Processor struct {
 	proxyManager      *proxy.Manager // Manages topology subscriptions and operation proxying
 
 	// Packet counters (shared with stats collector and flow controller)
-	packetsReceived  atomic.Uint64
-	packetsForwarded atomic.Uint64
+	packetsReceived    atomic.Uint64
+	packetsForwarded   atomic.Uint64
+	vifInjectionErrors atomic.Uint64 // Virtual interface injection failures
 
 	// Per-call PCAP writer (separate from main PCAP writer)
 	perCallPcapWriter *PcapWriterManager

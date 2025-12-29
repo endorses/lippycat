@@ -97,9 +97,9 @@ snapshot := &CallInfo{
 - [x] Include sync error count in close log message
 
 ### 12. Fix virtual interface injection log level
-- [ ] Update `internal/pkg/processor/processor_packet_pipeline.go:208-209`
-- [ ] Change `logger.Debug` to `logger.Warn`
-- [ ] Add injection failure counter to stats
+- [x] Update `internal/pkg/processor/processor_packet_pipeline.go:208-209`
+- [x] Change `logger.Debug` to `logger.Warn`
+- [x] Add `vifInjectionErrors` atomic counter to Processor struct
 
 ### 13. Refactor global capture state
 - [ ] Review `internal/pkg/tui/model.go:29-32`

@@ -206,7 +206,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 		// Inject batch (non-blocking)
 		if err := p.vifManager.InjectPacketBatch(displayPackets); err != nil {
-			logger.Debug("Failed to inject packet batch to virtual interface", "error", err)
+			p.vifInjectionErrors.Add(1)
+			logger.Warn("Failed to inject packet batch to virtual interface", "error", err)
 		}
 	}
 }

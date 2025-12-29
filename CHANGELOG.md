@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2025-12-29
+
+### Fixed
+- **Memory leak**: Optimized sync.Pool usage to prevent buffer retention
+- **TUI overflow**: Use int64 for statistics counters to prevent overflow on high-traffic captures
+- **TLS security**: Added explicit cipher suite configuration for secure defaults
+- **Error handling**: Added error logging for critical Close operations throughout codebase
+- **VIF injection**: Upgraded errors to warnings with counter for better observability
+
+### Changed
+- **Constants extraction**: Refactored magic numbers to documented constants for maintainability
+- **TUI state management**: Replaced global capture state with synchronized struct for thread safety
+- **VoIP logging**: Added logging for TCP stream cleanup drops for debugging
+
+### Documentation
+- Clarified CUDA build tag pattern in CLAUDE.md to prevent misinterpretation
+
+### Testing
+- Improved test coverage for hunter/connection and SIP parsing modules
+
 ## [0.5.0] - 2025-12-28
 
 ### Added

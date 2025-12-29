@@ -148,8 +148,17 @@ snapshot := &CallInfo{
 - Existing good patterns found: `internal/pkg/processor/pcap_writer.go`, `internal/pkg/hunter/connection/manager.go`
 
 ### 18. Extract magic numbers to constants
-- [ ] Create constants file or add to existing configs
-- [ ] Document purpose of each constant
+- [x] Create constants file or add to existing configs
+- [x] Document purpose of each constant
+- Added pool size class constants to `voip/constants.go` (128B-64KB with documentation)
+- Added pool config constants (PoolDefaultInitialSize, PoolDefaultMaxSize, etc.)
+- Added security validation constants (MaxCallIDLength, MaxContentLengthDigits)
+- Added PCAP writer constants to `constants/constants.go` (DefaultPCAPMaxFileSize, etc.)
+- Added forwarding constants (MaxConsecutiveSendFailures, DefaultSendTimeout)
+- Updated pools.go to use PoolSizeClass* and PoolDefault* constants
+- Updated security.go to use MaxCallIDLength and MaxContentLengthDigits constants
+- Updated pcap_writer.go and auto_rotate_pcap.go to use DefaultPCAP* constants
+- Updated forwarding/manager.go to use constants.MaxConsecutiveSendFailures
 
 ### 19. Improve test coverage
 - [ ] Add `-tags all` note to CI documentation

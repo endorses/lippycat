@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -36,11 +37,11 @@ func DefaultAutoRotateConfig() *AutoRotateConfig {
 		OutputDir:    "./auto-rotate-pcaps",
 		FilePattern:  "{timestamp}.pcap",
 		MaxIdleTime:  30 * time.Second,
-		MaxFileSize:  100 * 1024 * 1024, // 100MB
+		MaxFileSize:  constants.DefaultPCAPMaxFileSize,
 		MaxDuration:  1 * time.Hour,
 		MinDuration:  10 * time.Second,
-		BufferSize:   4096,
-		SyncInterval: 5 * time.Second,
+		BufferSize:   constants.DefaultPCAPBufferSize,
+		SyncInterval: constants.DefaultPCAPSyncInterval,
 	}
 }
 
@@ -219,7 +220,7 @@ func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, layers.LinkTypeEthernet); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
 			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}

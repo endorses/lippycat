@@ -76,12 +76,12 @@ type PoolConfig struct {
 }
 
 var defaultPoolConfig = PoolConfig{
-	InitialSize:     128,
-	MaxSize:         10000,
-	MaxObjectSize:   65536, // 64KB max for individual objects
+	InitialSize:     PoolDefaultInitialSize,
+	MaxSize:         PoolDefaultMaxSize,
+	MaxObjectSize:   PoolDefaultMaxObjectSize,
 	EnableMetrics:   true,
 	DrainOnPressure: true,
-	GrowthFactor:    2,
+	GrowthFactor:    PoolDefaultGrowthFactor,
 }
 
 // PacketBuffer represents a reusable packet buffer
@@ -272,7 +272,14 @@ type BufferPool struct {
 // NewBufferPool creates a new buffer pool with multiple size classes
 func NewBufferPool(config PoolConfig) *BufferPool {
 	// Size classes: 128B, 512B, 2KB, 8KB, 32KB, 64KB
-	sizes := []int{128, 512, 2048, 8192, 32768, 65536}
+	sizes := []int{
+		PoolSizeClass128,
+		PoolSizeClass512,
+		PoolSizeClass2K,
+		PoolSizeClass8K,
+		PoolSizeClass32K,
+		PoolSizeClass64K,
+	}
 
 	bp := &BufferPool{
 		pools:   make([]*sync.Pool, len(sizes)),

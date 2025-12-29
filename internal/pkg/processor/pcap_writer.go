@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -34,10 +35,10 @@ func DefaultPcapWriterConfig() *PcapWriterConfig {
 		Enabled:         false,
 		OutputDir:       "./pcaps",
 		FilePattern:     "{timestamp}_{callid}.pcap",
-		MaxFileSize:     100 * 1024 * 1024, // 100MB
-		MaxFilesPerCall: 10,
-		BufferSize:      4096,
-		SyncInterval:    5 * time.Second,
+		MaxFileSize:     constants.DefaultPCAPMaxFileSize,
+		MaxFilesPerCall: constants.DefaultMaxFilesPerCall,
+		BufferSize:      constants.DefaultPCAPBufferSize,
+		SyncInterval:    constants.DefaultPCAPSyncInterval,
 	}
 }
 
@@ -255,7 +256,7 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, layers.LinkTypeEthernet); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
 			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
@@ -305,7 +306,7 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 
 	// Create PCAP writer
 	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, layers.LinkTypeEthernet); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
 			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}

@@ -123,8 +123,8 @@ func ValidateCallIDForSecurity(callID string) error {
 	}
 
 	// Check for excessive length (potential DoS)
-	if len(callID) > 1024 {
-		return fmt.Errorf("Call-ID too long: %d characters", len(callID))
+	if len(callID) > MaxCallIDLength {
+		return fmt.Errorf("Call-ID too long: %d characters (max %d)", len(callID), MaxCallIDLength)
 	}
 
 	// Check for null bytes (potential injection)
@@ -193,8 +193,8 @@ func ParseContentLengthSecurely(value string) (int, error) {
 	}
 
 	// Prevent excessively long number strings (potential DoS)
-	if len(trimmed) > 10 { // Max digits for reasonable content length
-		return 0, fmt.Errorf("Content-Length value too long: %d characters", len(trimmed))
+	if len(trimmed) > MaxContentLengthDigits {
+		return 0, fmt.Errorf("Content-Length value too long: %d characters (max %d)", len(trimmed), MaxContentLengthDigits)
 	}
 
 	length := 0
@@ -207,7 +207,7 @@ func ParseContentLengthSecurely(value string) (int, error) {
 			digit := int(char - '0')
 
 			// Check for overflow before multiplication
-			if length > (2147483647-digit)/10 { // Int max check
+			if length > (MaxInt32ForContentLength-digit)/10 {
 				return 0, fmt.Errorf("Content-Length value causes integer overflow")
 			}
 

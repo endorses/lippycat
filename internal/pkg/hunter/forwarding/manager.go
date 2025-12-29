@@ -422,7 +422,7 @@ func (m *Manager) SendBatchToStream(batch *data.PacketBatch) {
 	}
 
 	// Send with context timeout to prevent blocking indefinitely
-	sendCtx, sendCancel := context.WithTimeout(m.connCtx, 5*time.Second)
+	sendCtx, sendCancel := context.WithTimeout(m.connCtx, constants.DefaultSendTimeout)
 	defer sendCancel()
 
 	// Create a channel to receive the result
@@ -465,13 +465,12 @@ func (m *Manager) recordSendFailure() {
 	// Increment failure counter
 	failures := m.consecutiveFailures.Add(1)
 
-	// After 3 consecutive failures, assume connection is dead
+	// After N consecutive failures, assume connection is dead
 	// This helps detect dead connections faster after laptop resume from standby
-	const maxConsecutiveFailures = 3
-	if failures >= maxConsecutiveFailures {
+	if failures >= constants.MaxConsecutiveSendFailures {
 		logger.Warn("Too many consecutive send failures, connection may be dead",
 			"consecutive_failures", failures,
-			"threshold", maxConsecutiveFailures)
+			"threshold", constants.MaxConsecutiveSendFailures)
 
 		// Trigger disconnect callback if set
 		if m.disconnectCallback != nil {

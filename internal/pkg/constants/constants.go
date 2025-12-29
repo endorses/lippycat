@@ -173,3 +173,39 @@ const (
 	// ProcessorBatchTimeoutMs is the default timeout in milliseconds for batching packets before sending
 	ProcessorBatchTimeoutMs = 100
 )
+
+// PCAP writer configuration
+//
+// These constants define defaults for PCAP file writing operations.
+const (
+	// DefaultPCAPMaxFileSize is the default maximum size for PCAP files (100MB)
+	// Files are rotated when they reach this size
+	DefaultPCAPMaxFileSize = 100 * 1024 * 1024
+
+	// DefaultPCAPBufferSize is the default buffer size for PCAP I/O operations (4KB)
+	// This balances memory usage with I/O efficiency
+	DefaultPCAPBufferSize = 4096
+
+	// DefaultPCAPSyncInterval is the default interval for syncing PCAP files to disk
+	DefaultPCAPSyncInterval = 5 * time.Second
+
+	// DefaultPCAPSnapLen is the snapshot length for PCAP files (64KB - 1)
+	// This is the maximum packet data captured per packet
+	DefaultPCAPSnapLen = 65536
+
+	// DefaultMaxFilesPerCall is the maximum number of PCAP files per call for rotation
+	DefaultMaxFilesPerCall = 10
+)
+
+// Forwarding and connection resilience
+//
+// These constants control retry behavior and failure detection.
+const (
+	// MaxConsecutiveSendFailures is the threshold for considering a connection dead
+	// After this many consecutive failures, the connection is assumed to be lost
+	MaxConsecutiveSendFailures = 3
+
+	// DefaultSendTimeout is the timeout for sending a batch via gRPC
+	// Used to prevent indefinite blocking on unresponsive connections
+	DefaultSendTimeout = 5 * time.Second
+)

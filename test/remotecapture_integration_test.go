@@ -83,6 +83,10 @@ func TestIntegration_RemoteCapture_ConnectAndStream(t *testing.T) {
 	err = client.SubscribeHunterStatus()
 	require.NoError(t, err)
 
+	// Wait for subscriptions to be established on the server
+	// This prevents a race between subscriber registration and packet processing
+	time.Sleep(200 * time.Millisecond)
+
 	// Send some packets from hunter
 	dataClient := data.NewDataServiceClient(conn)
 	stream, err := dataClient.StreamPackets(ctx)

@@ -147,7 +147,7 @@ func isBPFExpression(s string) bool {
 // applyFilters re-applies all active filters to the packet list
 func (m *Model) applyFilters() {
 	if !m.packetStore.HasFilter() {
-		m.packetStore.MatchedPackets = m.packetStore.PacketsCount
+		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 		return
 	}
@@ -159,5 +159,5 @@ func (m *Model) applyFilters() {
 			m.packetStore.FilteredPackets = append(m.packetStore.FilteredPackets, pkt)
 		}
 	}
-	m.packetStore.MatchedPackets = len(m.packetStore.FilteredPackets)
+	m.packetStore.MatchedPackets = int64(len(m.packetStore.FilteredPackets))
 }

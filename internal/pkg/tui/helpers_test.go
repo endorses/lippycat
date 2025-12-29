@@ -129,14 +129,14 @@ func TestUpdateStatistics(t *testing.T) {
 	}
 
 	// Initial state
-	assert.Equal(t, 0, m.statistics.TotalPackets, "Should start with 0 packets")
+	assert.Equal(t, int64(0), m.statistics.TotalPackets, "Should start with 0 packets")
 	assert.Equal(t, int64(0), m.statistics.TotalBytes, "Should start with 0 bytes")
 
 	// Update statistics
 	m.updateStatistics(pkt)
 
 	// Verify statistics were updated
-	assert.Equal(t, 1, m.statistics.TotalPackets, "Should have 1 packet")
+	assert.Equal(t, int64(1), m.statistics.TotalPackets, "Should have 1 packet")
 	assert.Equal(t, int64(100), m.statistics.TotalBytes, "Should have 100 bytes")
 	assert.Equal(t, 100, m.statistics.MinPacketSize, "Min packet size should be 100")
 	assert.Equal(t, 100, m.statistics.MaxPacketSize, "Max packet size should be 100")
@@ -171,7 +171,7 @@ func TestUpdateStatistics_MultiplePackets(t *testing.T) {
 	}
 
 	// Verify aggregated statistics
-	assert.Equal(t, 3, m.statistics.TotalPackets, "Should have 3 packets")
+	assert.Equal(t, int64(3), m.statistics.TotalPackets, "Should have 3 packets")
 	assert.Equal(t, int64(350), m.statistics.TotalBytes, "Should have 350 bytes total")
 	assert.Equal(t, 50, m.statistics.MinPacketSize, "Min packet size should be 50")
 	assert.Equal(t, 200, m.statistics.MaxPacketSize, "Max packet size should be 200")
@@ -209,5 +209,5 @@ func TestUpdateStatistics_ProtocolCounts(t *testing.T) {
 	// Verify protocol counts were tracked
 	// Note: The actual counts are in a bounded counter, so we just verify
 	// the statistics object was updated (non-zero packets)
-	assert.Equal(t, 5, m.statistics.TotalPackets, "Should have 5 packets total")
+	assert.Equal(t, int64(5), m.statistics.TotalPackets, "Should have 5 packets total")
 }

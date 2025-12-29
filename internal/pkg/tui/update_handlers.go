@@ -206,7 +206,7 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 		// "All" protocol - clear filters
 		m.packetStore.ClearFilter()
 		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
-		m.packetStore.MatchedPackets = m.packetStore.PacketsCount
+		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 	}
 

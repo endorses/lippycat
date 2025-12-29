@@ -8,6 +8,8 @@ import (
 )
 
 // PacketStore manages packet storage and filtering with a circular buffer
+// Note: int64 counters ensure consistent behavior across 32-bit and 64-bit platforms
+// and prevent overflow for long-running capture sessions.
 type PacketStore struct {
 	mu              sync.RWMutex
 	Packets         []components.PacketDisplay // Ring buffer of packets (all captured)
@@ -16,8 +18,8 @@ type PacketStore struct {
 	FilteredPackets []components.PacketDisplay // Filtered packets for display
 	MaxPackets      int                        // Maximum packets to keep in memory
 	FilterChain     *filters.FilterChain       // Active filters
-	TotalPackets    int                        // Total packets seen
-	MatchedPackets  int                        // Packets matching filter
+	TotalPackets    int64                      // Total packets seen
+	MatchedPackets  int64                      // Packets matching filter
 }
 
 // NewPacketStore creates a new packet store with the given buffer size
@@ -228,7 +230,7 @@ func (ps *PacketStore) Clear() {
 }
 
 // Stats returns packet statistics
-func (ps *PacketStore) Stats() (total, matched int) {
+func (ps *PacketStore) Stats() (total, matched int64) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	return ps.TotalPackets, ps.MatchedPackets
@@ -290,7 +292,7 @@ func (ps *PacketStore) SetPackets(packets []components.PacketDisplay, head, coun
 }
 
 // GetBufferInfo returns buffer metadata (maxPackets, packetsCount, totalPackets, matchedPackets)
-func (ps *PacketStore) GetBufferInfo() (maxPackets, packetsCount, totalPackets, matchedPackets int) {
+func (ps *PacketStore) GetBufferInfo() (maxPackets, packetsCount int, totalPackets, matchedPackets int64) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	return ps.MaxPackets, ps.PacketsCount, ps.TotalPackets, ps.MatchedPackets
@@ -329,8 +331,8 @@ func (ps *PacketStore) UpdateMatchedCount() {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	if ps.FilterChain.IsEmpty() {
-		ps.MatchedPackets = ps.PacketsCount
+		ps.MatchedPackets = int64(ps.PacketsCount)
 	} else {
-		ps.MatchedPackets = len(ps.FilteredPackets)
+		ps.MatchedPackets = int64(len(ps.FilteredPackets))
 	}
 }

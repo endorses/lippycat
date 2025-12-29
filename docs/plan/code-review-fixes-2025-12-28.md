@@ -129,8 +129,12 @@ snapshot := &CallInfo{
 - `li/delivery/destination.go`: Already configured with explicit cipher suites
 
 ### 16. Statistics counter bounds (Low risk, skip if needed)
-- [ ] Review `internal/pkg/tui/model.go:187-193`
-- [ ] Consider if uint64 overflow is a real concern (probably not)
+- [x] Review `internal/pkg/tui/model.go:187-193`
+- [x] Consider if uint64 overflow is a real concern (probably not)
+- Changed `TotalPackets` from `int` to `int64` in Statistics struct
+- Changed `TotalPackets` and `MatchedPackets` from `int` to `int64` in PacketStore
+- Changed `BoundedCounter.counts` from `map[string]int` to `map[string]int64`
+- Ensures consistent behavior across 32-bit and 64-bit platforms
 
 ---
 

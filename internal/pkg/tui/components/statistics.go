@@ -15,12 +15,14 @@ import (
 
 // Statistics holds aggregated packet statistics
 // Uses bounded counters to prevent unbounded memory growth
+// Note: int64 counters ensure consistent behavior across 32-bit and 64-bit platforms
+// and prevent overflow for long-running capture sessions.
 type Statistics struct {
 	ProtocolCounts *BoundedCounter // Protocol -> packet count (max 1000)
 	SourceCounts   *BoundedCounter // Source IP -> packet count (max 10000)
 	DestCounts     *BoundedCounter // Dest IP -> packet count (max 10000)
 	TotalBytes     int64
-	TotalPackets   int
+	TotalPackets   int64
 	MinPacketSize  int
 	MaxPacketSize  int
 }
@@ -136,9 +138,9 @@ func (s *StatisticsView) renderContent() string {
 	result.WriteString(valueStyle.Render(formatBytes(s.stats.TotalBytes)))
 	result.WriteString("\n")
 	result.WriteString(labelStyle.Render("Avg Packet Size: "))
-	avgSize := 0
+	var avgSize int64
 	if s.stats.TotalPackets > 0 {
-		avgSize = int(s.stats.TotalBytes) / s.stats.TotalPackets
+		avgSize = s.stats.TotalBytes / s.stats.TotalPackets
 	}
 	result.WriteString(valueStyle.Render(fmt.Sprintf("%d bytes", avgSize)))
 	result.WriteString("\n")

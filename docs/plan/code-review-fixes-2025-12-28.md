@@ -111,9 +111,13 @@ snapshot := &CallInfo{
 - Removed raw global variables from `model.go`
 
 ### 14. Fix TCP stream cleanup silent drops
-- [ ] Update `internal/pkg/voip/tcp_factory.go:206-239`
-- [ ] Log when valid streams are dropped during cleanup
-- [ ] Consider using temporary buffer during cleanup
+- [x] Update `internal/pkg/voip/tcp_factory.go:206-239`
+- [x] Log when valid streams are dropped during cleanup
+- [x] Consider using temporary buffer during cleanup
+- Implemented temporary buffer to hold valid streams during cleanup
+- Separate tracking of stale vs valid dropped streams
+- Warning log when valid streams are dropped due to queue capacity
+- Debug log for normal stale stream cleanup
 
 ### 15. Add explicit TLS cipher configuration
 - [ ] Update TLS configs in `internal/pkg/tlsutil/`

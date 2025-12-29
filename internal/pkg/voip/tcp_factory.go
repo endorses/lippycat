@@ -206,35 +206,58 @@ func (f *sipStreamFactory) cleanupRoutine() {
 // cleanupStaleQueuedStreams removes old queued streams
 func (f *sipStreamFactory) cleanupStaleQueuedStreams() {
 	maxAge := f.config.TCPStreamMaxQueueTime
-	drainedCount := 0
+	staleCount := 0
+	validDroppedCount := 0
 
-	// Drain stale streams from queue
+	// Use a temporary buffer to hold valid (non-stale) streams during cleanup
+	// This prevents valid streams from being dropped due to queue contention
+	validStreams := make([]*queuedStream, 0, cap(f.streamQueue))
+
+	// Drain all streams from queue, separating stale from valid
 drainLoop:
 	for {
 		select {
 		case queuedStream := <-f.streamQueue:
 			if time.Since(queuedStream.createdAt) > maxAge {
-				drainedCount++
-				// Update metrics for dropped stream
+				staleCount++
+				// Update metrics for dropped stale stream
 				tcpStreamMetrics.mu.Lock()
 				tcpStreamMetrics.droppedStreams++
 				tcpStreamMetrics.queuedStreams--
 				tcpStreamMetrics.mu.Unlock()
 			} else {
-				// Put non-stale stream back
-				select {
-				case f.streamQueue <- queuedStream:
-				default:
-					drainedCount++
-				}
+				// Keep valid stream for re-queuing
+				validStreams = append(validStreams, queuedStream)
 			}
 		default:
 			break drainLoop
 		}
 	}
 
-	if drainedCount > 0 {
-		logger.Debug("Cleaned up stale queued streams", "count", drainedCount)
+	// Re-queue valid streams
+	for _, queuedStream := range validStreams {
+		select {
+		case f.streamQueue <- queuedStream:
+			// Successfully re-queued
+		default:
+			// Queue is full, must drop valid stream
+			validDroppedCount++
+			tcpStreamMetrics.mu.Lock()
+			tcpStreamMetrics.droppedStreams++
+			tcpStreamMetrics.queuedStreams--
+			tcpStreamMetrics.mu.Unlock()
+		}
+	}
+
+	// Log cleanup results with appropriate severity
+	if staleCount > 0 {
+		logger.Debug("Cleaned up stale queued streams", "count", staleCount, "max_age", maxAge)
+	}
+	if validDroppedCount > 0 {
+		logger.Warn("Dropped valid TCP streams during cleanup due to queue capacity",
+			"dropped_count", validDroppedCount,
+			"queue_capacity", cap(f.streamQueue),
+			"stale_cleaned", staleCount)
 	}
 }
 

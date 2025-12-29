@@ -166,8 +166,11 @@ snapshot := &CallInfo{
 - [ ] Add fuzz tests for SIP parsing
 
 ### 20. Optimize sync.Pool usage
-- [ ] Review `internal/pkg/tui/bridge.go` and `internal/pkg/voip/pools.go`
-- [ ] Ensure objects are reset before returning to pool
+- [x] Review `internal/pkg/tui/bridge.go` and `internal/pkg/voip/pools.go`
+- [x] Ensure objects are reset before returning to pool
+- Fixed `CallInfoPool.Put()` to reset `EndTime` field before returning to pool
+- Removed unused `packetDisplayPool` and `byteBufferPool` from `bridge.go` (memory leak - buffers never returned)
+- Simplified `convertPacket()` to use direct allocation instead of leaking pool
 
 ---
 

@@ -224,11 +224,12 @@ func (cip *CallInfoPool) Put(ci *CallInfo) {
 
 	cip.metrics.TotalPuts.Add(1)
 
-	// Clear fields before returning to pool
+	// Clear fields before returning to pool to prevent data leaks
 	ci.CallID = ""
 	ci.State = ""
 	ci.Created = time.Time{}
 	ci.LastUpdated = time.Time{}
+	ci.EndTime = nil
 	ci.LinkType = 0
 	ci.SIPWriter = nil
 	ci.RTPWriter = nil

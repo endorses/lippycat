@@ -20,23 +20,8 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-// Object pools for reducing allocations
+// Offline call tracker for RTP-to-CallID mapping in offline mode
 var (
-	packetDisplayPool = sync.Pool{
-		New: func() interface{} {
-			return &components.PacketDisplay{}
-		},
-	}
-
-	byteBufferPool = sync.Pool{
-		New: func() interface{} {
-			// Pre-allocate 1500 bytes (typical MTU)
-			buf := make([]byte, 0, 1500)
-			return &buf
-		},
-	}
-
-	// Offline call tracker for RTP-to-CallID mapping in offline mode
 	offlineCallTracker *OfflineCallTracker
 	offlineTrackerMu   sync.RWMutex
 
@@ -162,11 +147,6 @@ func ClearOfflineCallTracker() {
 		offlineCallTracker.Clear()
 		offlineCallTracker = nil
 	}
-}
-
-// getByteBuffer acquires a byte buffer from the pool
-func getByteBuffer() *[]byte {
-	return byteBufferPool.Get().(*[]byte)
 }
 
 // StartPacketBridge creates a bridge between packet capture and TUI
@@ -331,14 +311,11 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 	// Use shared extraction for basic fields
 	fields := capture.ExtractPacketFields(pkt)
 
-	// Get buffer from pool for raw data
+	// Copy raw data for packet display
 	var rawData []byte
 	if pkt.Data() != nil {
-		bufPtr := getByteBuffer()
-		*bufPtr = append(*bufPtr, pkt.Data()...)
-		rawData = *bufPtr
-		// Note: We don't return the buffer to pool here - it's owned by the PacketDisplay
-		// The model will need to handle cleanup when packets age out
+		rawData = make([]byte, len(pkt.Data()))
+		copy(rawData, pkt.Data())
 	}
 
 	display := components.PacketDisplay{

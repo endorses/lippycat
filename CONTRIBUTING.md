@@ -573,19 +573,26 @@ if len(calls) == 0 {
 
 ### Running Tests
 
+**Important:** lippycat uses build tags to create specialized binaries. When running tests locally, you must use `-tags=all` to include all code paths. Without this tag, tests for specialized components (hunter, processor, TUI, etc.) will be skipped.
+
 ```bash
-# Run all tests
+# Run all tests (includes all build tags)
 make test
 
 # Run tests with coverage
 make test-coverage
 
-# Run tests with race detector
-go test -race ./...
+# Run tests manually with build tags (REQUIRED for full coverage)
+go test -race -tags=all ./...
+
+# Run tests for a specific package
+go test -race -tags=all ./internal/pkg/hunter/...
 
 # Run benchmarks
 make bench
 ```
+
+The CI pipeline always runs tests with `-tags=all` to ensure full coverage.
 
 ## Pull Request Process
 

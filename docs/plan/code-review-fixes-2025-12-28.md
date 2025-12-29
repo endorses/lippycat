@@ -161,9 +161,9 @@ snapshot := &CallInfo{
 - Updated forwarding/manager.go to use constants.MaxConsecutiveSendFailures
 
 ### 19. Improve test coverage
-- [ ] Add `-tags all` note to CI documentation
-- [ ] Focus on `hunter/connection` package (0.3% coverage)
-- [ ] Add fuzz tests for SIP parsing
+- [x] Add `-tags all` note to CI documentation
+- [x] Focus on `hunter/connection` package (0.3% coverage)
+- [x] Add fuzz tests for SIP parsing
 
 ### 20. Optimize sync.Pool usage
 - [x] Review `internal/pkg/tui/bridge.go` and `internal/pkg/voip/pools.go`

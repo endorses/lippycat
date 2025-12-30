@@ -14,6 +14,23 @@ Network traffic sniffer and protocol analyzer built with Go. Currently focused o
 
 **Status:** v0.5.2 - Early development. Expect breaking changes.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [Performance](#performance)
+- [Distributed Mode](#distributed-mode)
+- [Documentation](#documentation)
+- [Security](#security)
+- [Development](#development)
+- [Changelog](#changelog)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Features
 
 - **VoIP Analysis**: SIP/RTP traffic capture, call tracking, user targeting
@@ -137,6 +154,7 @@ lc [verb] [object] [flags]
 
 VERBS:
   sniff     Capture packets from interface or file
+  tap       Standalone capture with processor capabilities
   hunt      Distributed edge capture (hunter node)
   process   Central aggregation (processor node)
   watch     Monitor traffic (TUI)
@@ -148,6 +166,8 @@ VERBS:
 |---------|-------------|
 | `sniff` | Packet capture (general) |
 | `sniff voip` | VoIP-specific capture with SIP/RTP analysis |
+| `tap` | Standalone capture with TUI serving and PCAP writing |
+| `tap voip` | VoIP tap with per-call PCAP and optional upstream forwarding |
 | `watch` | Interactive TUI (defaults to live mode) |
 | `watch live` | Live capture in TUI |
 | `watch file` | Analyze PCAP file in TUI |
@@ -203,6 +223,32 @@ Kernel-bypass packet capture on Linux 4.18+ with XDP-capable NICs. See [docs/AF_
 ## Distributed Mode
 
 Deploy hunters across network segments and aggregate to central processors.
+
+```mermaid
+flowchart TB
+    subgraph Edge["Distributed Hunters"]
+        direction LR
+        H1[Hunter<br/>datacenter-1]
+        H2[Hunter<br/>datacenter-2]
+        H3[Hunter<br/>branch-office]
+    end
+
+    P[Processor<br/>monitor.internal:50051]
+    PCAP[(PCAP Files)]
+
+    subgraph Clients["Monitoring Clients"]
+        direction LR
+        TUI1[TUI Client]
+        TUI2[TUI Client]
+    end
+
+    H1 -->|gRPC/TLS| P
+    H2 -->|gRPC/TLS| P
+    H3 -->|gRPC/TLS| P
+    P --> PCAP
+    P <-->|gRPC/TLS| TUI1
+    P <-->|gRPC/TLS| TUI2
+```
 
 ```bash
 # Processor (with TLS)

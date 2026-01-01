@@ -53,6 +53,8 @@ func (m Model) View() string {
 		mainContent = m.uiState.StatisticsView.View()
 	case 3: // Settings
 		mainContent = m.uiState.SettingsView.View()
+	case 4: // Help
+		mainContent = m.uiState.HelpView.View()
 	}
 
 	// Combine main views (header + tabs + content)

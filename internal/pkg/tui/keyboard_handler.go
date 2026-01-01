@@ -65,7 +65,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			)
 		case "t": // Allow theme toggle
 			return m.handleThemeToggle()
-		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "p":
+		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "p", "?":
 			// Let these fall through to normal tab switching and global key handling
 		default:
 			// Forward everything else to settings view
@@ -73,6 +73,78 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// Update interface name in header when it changes (for display only)
 			// Actual capture interface doesn't change until restart
 			return m, cmd
+		}
+	}
+
+	// Help tab key handling
+	if m.uiState.Tabs.GetActive() == 4 {
+		// Handle search mode input
+		if m.uiState.HelpView.IsSearchMode() {
+			switch msg.Type {
+			case tea.KeyEsc:
+				m.uiState.HelpView.ExitSearchMode()
+				return m, nil
+			case tea.KeyEnter:
+				// Keep search results, exit search mode
+				m.uiState.HelpView.ExitSearchMode()
+				return m, nil
+			case tea.KeyBackspace:
+				m.uiState.HelpView.DeleteSearchChar()
+				return m, nil
+			case tea.KeyRunes:
+				for _, r := range msg.Runes {
+					m.uiState.HelpView.AddSearchChar(r)
+				}
+				return m, nil
+			}
+		}
+
+		// Normal Help tab key handling
+		switch msg.String() {
+		case "q", "ctrl+c":
+			m.uiState.Quitting = true
+			return m, tea.Quit
+		case "ctrl+z":
+			return m, tea.Suspend
+		case "n": // Next match
+			m.uiState.HelpView.NextMatch()
+			return m, nil
+		case "N": // Previous match
+			m.uiState.HelpView.PrevMatch()
+			return m, nil
+		case "1": // Keybindings section
+			m.uiState.HelpView.SetSection(components.SectionKeybindings)
+			return m, nil
+		case "2": // Commands section
+			m.uiState.HelpView.SetSection(components.SectionCommands)
+			return m, nil
+		case "3": // Workflows section
+			m.uiState.HelpView.SetSection(components.SectionWorkflows)
+			return m, nil
+		case "j", "down":
+			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyDown})
+			return m, cmd
+		case "k", "up":
+			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyUp})
+			return m, cmd
+		case "g", "home":
+			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyHome})
+			return m, cmd
+		case "G", "end":
+			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyEnd})
+			return m, cmd
+		case "pgup":
+			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+			return m, cmd
+		case "pgdown":
+			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+			return m, cmd
+		case " ": // Pause/resume
+			return m.handlePauseResume()
+		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "p", "?", "/":
+			// Let these fall through to normal handling
+		default:
+			return m, nil
 		}
 	}
 
@@ -86,9 +158,13 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.uiState.Quitting = true
 		return m, tea.Quit
 
-	case "/": // Enter filter mode (Capture tab only)
+	case "/": // Enter filter mode (Capture tab) or search mode (Help tab)
 		if m.uiState.Tabs.GetActive() == 0 {
 			return m.handleEnterFilterMode()
+		}
+		if m.uiState.Tabs.GetActive() == 4 {
+			m.uiState.HelpView.EnterSearchMode()
+			return m, nil
 		}
 		return m, nil
 
@@ -160,8 +236,12 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "shift+tab": // Switch to previous tab
 		return m.handlePreviousTab()
 
-	case "alt+1", "alt+2", "alt+3", "alt+4":
+	case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5":
 		return m.handleAltNumberKey(msg.String())
+
+	case "?": // Jump to Help tab
+		m.uiState.Tabs.SetActive(4)
+		return m, nil
 
 	case "a": // Add node (only on Nodes tab)
 		return m.handleAddNode()

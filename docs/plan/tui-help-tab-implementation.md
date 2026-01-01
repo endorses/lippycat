@@ -1,7 +1,7 @@
 # TUI Help Tab Implementation
 
 **Date:** 2025-12-31
-**Status:** In Progress (Phase 2 Complete)
+**Status:** In Progress (Phase 3 Complete)
 **Research:** [docs/research/tui-help-tab.md](../research/tui-help-tab.md)
 
 ## Overview
@@ -30,13 +30,14 @@ Add a Help tab (index 4) to the TUI with embedded markdown documentation, search
 
 ### Phase 3: Tab Integration
 
-- [ ] Add Help tab to `tabs.go` (index 4, icon `?`, label "Help")
-- [ ] Update `keyboard_navigation.go`: `totalTabs = 5`, add `Alt+5` binding
-- [ ] Add `?` global shortcut to jump to Help tab (when not in input mode)
-- [ ] Add `HelpView` field to `store/ui_state.go`
-- [ ] Add case 4 to `view_renderer.go`
-- [ ] Add `SetSize` call in `update_handlers.go`
-- [ ] Add Help tab keybindings to `footer.go`
+- [x] Add Help tab to `tabs.go` (index 4, icon `?`, label "Help")
+- [x] Update `keyboard_navigation.go`: `totalTabs = 5`, add `Alt+5` binding
+- [x] Add `?` global shortcut to jump to Help tab (when not in input mode)
+- [x] Add `HelpView` field to `store/ui_state.go`
+- [x] Add case 4 to `view_renderer.go`
+- [x] Add `SetSize` call in `update_handlers.go`
+- [x] Add Help tab keybindings to `footer.go`
+- [x] Add Help tab keyboard handling (search, section nav, scrolling)
 
 ### Phase 4: Polish
 

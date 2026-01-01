@@ -52,6 +52,9 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	// Set settings view size
 	m.uiState.SettingsView.SetSize(msg.Width, contentHeight)
 
+	// Set help view size
+	m.uiState.HelpView.SetSize(msg.Width, contentHeight)
+
 	// Set calls view size (always full width, no split view)
 	m.uiState.CallsView.SetSize(msg.Width, contentHeight)
 

@@ -88,12 +88,13 @@ func (f *Footer) SetPaused(paused bool) {
 // getTabColor returns the background color for a given tab index
 func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 	// Map tab index to theme color
-	// 0: Capture (red), 1: Nodes (yellow), 2: Statistics (green), 3: Settings (blue)
+	// 0: Capture (red), 1: Nodes (yellow), 2: Statistics (green), 3: Settings (blue), 4: Help (violet)
 	tabColors := []lipgloss.Color{
 		f.theme.ErrorColor,   // Tab 0: Capture
 		f.theme.DNSColor,     // Tab 1: Nodes
 		f.theme.SuccessColor, // Tab 2: Statistics
 		f.theme.InfoColor,    // Tab 3: Settings
+		f.theme.HTTPColor,    // Tab 4: Help (violet/purple)
 	}
 
 	if tabIndex >= 0 && tabIndex < len(tabColors) {
@@ -147,6 +148,13 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 			{Key: "Enter", Description: "edit/toggle"},
 			{Key: "Esc", Description: "cancel"},
 			{Key: "←/→", Description: "switch"},
+		}
+
+	case 4: // Help tab
+		return []TabKeybind{
+			{Key: "/", Description: "search"},
+			{Key: "n/N", Description: "next/prev"},
+			{Key: "1-3", Description: "sections"},
 		}
 
 	default:

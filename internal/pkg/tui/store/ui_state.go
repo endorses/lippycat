@@ -22,6 +22,7 @@ type UIState struct {
 	NodesView        *components.NodesView
 	StatisticsView   components.StatisticsView
 	SettingsView     components.SettingsView
+	HelpView         components.HelpView
 	CallsView        *components.CallsView
 	ProtocolSelector components.ProtocolSelector
 	HunterSelector   components.HunterSelector
@@ -73,7 +74,8 @@ func NewUIState(theme themes.Theme) *UIState {
 		{Label: "Live Capture", Icon: "📡"},
 		{Label: "Nodes", Icon: "🔗"},
 		{Label: "Statistics", Icon: "📊"},
-		{Label: "Settings", Icon: "🔧"}, // Wrench emoji (U+1F527)
+		{Label: "Settings", Icon: "🔧"},
+		{Label: "Help", Icon: "?"},
 	})
 	tabs.SetTheme(theme)
 
@@ -82,6 +84,9 @@ func NewUIState(theme themes.Theme) *UIState {
 
 	statisticsView := components.NewStatisticsView()
 	statisticsView.SetTheme(theme)
+
+	helpView := components.NewHelpView()
+	helpView.SetTheme(theme)
 
 	// SettingsView will be initialized by caller with proper parameters
 	// (interface, bufferSize, promiscuous, bpfFilter, pcapFile)
@@ -131,6 +136,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		NodesView:        nodesViewPtr,
 		StatisticsView:   statisticsView,
 		SettingsView:     settingsView,
+		HelpView:         helpView,
 		CallsView:        &callsView, // Use pointer to avoid copying mutex
 		ProtocolSelector: protocolSelector,
 		HunterSelector:   hunterSelector,
@@ -169,6 +175,7 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.NodesView.SetTheme(theme)
 	ui.StatisticsView.SetTheme(theme)
 	ui.SettingsView.SetTheme(theme)
+	ui.HelpView.SetTheme(theme)
 	ui.CallsView.SetTheme(theme)
 	ui.ProtocolSelector.SetTheme(theme)
 	ui.FilterInput.SetTheme(theme)

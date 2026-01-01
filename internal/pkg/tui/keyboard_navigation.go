@@ -159,7 +159,7 @@ func (m Model) handlePageDown() (Model, tea.Cmd) {
 // handleNextTab switches to the next tab
 func (m Model) handleNextTab() (Model, tea.Cmd) {
 	currentTab := m.uiState.Tabs.GetActive()
-	totalTabs := 4 // Capture, Nodes, Statistics, Settings
+	totalTabs := 5 // Capture, Nodes, Statistics, Settings, Help
 	nextTab := (currentTab + 1) % totalTabs
 	m.uiState.Tabs.SetActive(nextTab)
 	return m, nil
@@ -168,7 +168,7 @@ func (m Model) handleNextTab() (Model, tea.Cmd) {
 // handlePreviousTab switches to the previous tab
 func (m Model) handlePreviousTab() (Model, tea.Cmd) {
 	currentTab := m.uiState.Tabs.GetActive()
-	totalTabs := 4
+	totalTabs := 5
 	prevTab := (currentTab - 1 + totalTabs) % totalTabs
 	m.uiState.Tabs.SetActive(prevTab)
 	return m, nil
@@ -185,6 +185,8 @@ func (m Model) handleAltNumberKey(key string) (Model, tea.Cmd) {
 		m.uiState.Tabs.SetActive(2)
 	case "alt+4":
 		m.uiState.Tabs.SetActive(3)
+	case "alt+5":
+		m.uiState.Tabs.SetActive(4)
 	}
 	return m, nil
 }

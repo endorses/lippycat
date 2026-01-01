@@ -1,7 +1,7 @@
 # TUI Help Tab Implementation
 
 **Date:** 2025-12-31
-**Status:** In Progress (Phase 1 Complete)
+**Status:** In Progress (Phase 2 Complete)
 **Research:** [docs/research/tui-help-tab.md](../research/tui-help-tab.md)
 
 ## Overview
@@ -20,12 +20,13 @@ Add a Help tab (index 4) to the TUI with embedded markdown documentation, search
 
 ### Phase 2: HelpView Component
 
-- [ ] Create `internal/pkg/tui/components/helpview.go`:
+- [x] Create `internal/pkg/tui/components/helpview.go`:
   - Embed help files via `go:embed`
   - Viewport for scrollable content
   - Glamour rendering with dark theme
   - Search mode (`/` to enter, `n`/`N` for next/prev match, `Esc` to exit)
   - Section navigation (`1`-`3` for keybindings/commands/workflows)
+- [x] Restrict `/` keybind to Capture tab only (fixes conflict with Help search)
 
 ### Phase 3: Tab Integration
 
@@ -50,6 +51,7 @@ Add a Help tab (index 4) to the TUI with embedded markdown documentation, search
 - `internal/pkg/tui/help/keybindings.md`
 - `internal/pkg/tui/help/commands.md`
 - `internal/pkg/tui/help/workflows.md`
+- `internal/pkg/tui/help/embed.go` (go:embed for help files)
 - `internal/pkg/tui/components/helpview.go`
 
 **Modified files:**

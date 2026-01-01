@@ -86,17 +86,29 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.uiState.Quitting = true
 		return m, tea.Quit
 
-	case "/": // Enter filter mode
-		return m.handleEnterFilterMode()
+	case "/": // Enter filter mode (Capture tab only)
+		if m.uiState.Tabs.GetActive() == 0 {
+			return m.handleEnterFilterMode()
+		}
+		return m, nil
 
-	case "C": // Clear all filters (Shift+C)
-		return m.handleClearAllFilters()
+	case "C": // Clear all filters (Shift+C) - Capture tab only
+		if m.uiState.Tabs.GetActive() == 0 {
+			return m.handleClearAllFilters()
+		}
+		return m, nil
 
-	case "c": // Remove last filter
-		return m.handleRemoveLastFilter()
+	case "c": // Remove last filter - Capture tab only
+		if m.uiState.Tabs.GetActive() == 0 {
+			return m.handleRemoveLastFilter()
+		}
+		return m, nil
 
-	case "x": // Clear/flush packets
-		return m.handleClearPackets()
+	case "x": // Clear/flush packets - Capture tab only
+		if m.uiState.Tabs.GetActive() == 0 {
+			return m.handleClearPackets()
+		}
+		return m, nil
 
 	case " ": // Space to pause/resume
 		return m.handlePauseResume()

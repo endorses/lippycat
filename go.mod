@@ -6,7 +6,7 @@ require (
 	github.com/bits-and-blooms/bloom/v3 v3.7.1
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
-	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.6.0
 	github.com/kentik/patricia v1.2.2

@@ -1,7 +1,7 @@
 # TUI Help Tab Implementation
 
 **Date:** 2025-12-31
-**Status:** Planned
+**Status:** In Progress (Phase 1 Complete)
 **Research:** [docs/research/tui-help-tab.md](../research/tui-help-tab.md)
 
 ## Overview
@@ -12,11 +12,11 @@ Add a Help tab (index 4) to the TUI with embedded markdown documentation, search
 
 ### Phase 1: Dependencies & Content
 
-- [ ] Add `github.com/charmbracelet/glamour` dependency
-- [ ] Create `internal/pkg/tui/help/` directory
-- [ ] Write `keybindings.md` - global and per-tab keybindings
-- [ ] Write `commands.md` - CLI command reference (sniff, tap, watch, hunt, process, list, show)
-- [ ] Write `workflows.md` - common usage patterns
+- [x] Add `github.com/charmbracelet/glamour` dependency
+- [x] Create `internal/pkg/tui/help/` directory
+- [x] Write `keybindings.md` - global and per-tab keybindings
+- [x] Write `commands.md` - CLI command reference (sniff, tap, watch, hunt, process, list, show)
+- [x] Write `workflows.md` - common usage patterns
 
 ### Phase 2: HelpView Component
 

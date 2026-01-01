@@ -6,6 +6,7 @@ captures
 !README.md
 !CLAUDE.md
 !CHANGELOG.md
+!internal/pkg/tui/help/*.md
 nodes.yaml
 testdata/pcaps/*
 scripts/*

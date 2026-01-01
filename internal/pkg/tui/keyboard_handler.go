@@ -113,14 +113,14 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.uiState.HelpView.PrevMatch()
 			return m, nil
 		case "1": // Keybindings section
-			m.uiState.HelpView.SetSection(components.SectionKeybindings)
-			return m, nil
+			cmd := m.uiState.HelpView.SetSection(components.SectionKeybindings)
+			return m, cmd
 		case "2": // Commands section
-			m.uiState.HelpView.SetSection(components.SectionCommands)
-			return m, nil
+			cmd := m.uiState.HelpView.SetSection(components.SectionCommands)
+			return m, cmd
 		case "3": // Workflows section
-			m.uiState.HelpView.SetSection(components.SectionWorkflows)
-			return m, nil
+			cmd := m.uiState.HelpView.SetSection(components.SectionWorkflows)
+			return m, cmd
 		case "j", "down":
 			cmd := m.uiState.HelpView.Update(tea.KeyMsg{Type: tea.KeyDown})
 			return m, cmd
@@ -241,6 +241,10 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "?": // Jump to Help tab
 		m.uiState.Tabs.SetActive(4)
+		// Trigger async content loading if needed
+		if m.uiState.HelpView.NeedsContentLoad() {
+			return m, m.uiState.HelpView.LoadContentAsync()
+		}
 		return m, nil
 
 	case "a": // Add node (only on Nodes tab)

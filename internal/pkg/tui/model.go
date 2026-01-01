@@ -355,6 +355,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSaveCompleteMsg(msg)
 	case components.FilterOperationResultMsg:
 		return m.handleFilterOperationResultMsg(msg)
+	case components.HelpContentLoadedMsg:
+		m.uiState.HelpView.HandleContentLoaded(msg)
+		return m, nil
 	case ProcessorReconnectMsg:
 		return m.handleProcessorReconnectMsg(msg)
 	case ProcessorConnectedMsg:

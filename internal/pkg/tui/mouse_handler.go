@@ -114,6 +114,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		clickedTab := m.uiState.Tabs.GetTabAtX(msg.X)
 		if clickedTab >= 0 {
 			m.uiState.Tabs.SetActive(clickedTab)
+			// Trigger async content loading when switching to Help tab
+			if clickedTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
+				return m, m.uiState.HelpView.LoadContentAsync()
+			}
 		}
 		return m, nil
 	}

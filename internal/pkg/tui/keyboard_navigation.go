@@ -162,6 +162,10 @@ func (m Model) handleNextTab() (Model, tea.Cmd) {
 	totalTabs := 5 // Capture, Nodes, Statistics, Settings, Help
 	nextTab := (currentTab + 1) % totalTabs
 	m.uiState.Tabs.SetActive(nextTab)
+	// Trigger async content loading when switching to Help tab
+	if nextTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
+		return m, m.uiState.HelpView.LoadContentAsync()
+	}
 	return m, nil
 }
 
@@ -171,22 +175,34 @@ func (m Model) handlePreviousTab() (Model, tea.Cmd) {
 	totalTabs := 5
 	prevTab := (currentTab - 1 + totalTabs) % totalTabs
 	m.uiState.Tabs.SetActive(prevTab)
+	// Trigger async content loading when switching to Help tab
+	if prevTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
+		return m, m.uiState.HelpView.LoadContentAsync()
+	}
 	return m, nil
 }
 
 // handleAltNumberKey switches to a specific tab by Alt+number
 func (m Model) handleAltNumberKey(key string) (Model, tea.Cmd) {
+	var targetTab int
 	switch key {
 	case "alt+1":
-		m.uiState.Tabs.SetActive(0)
+		targetTab = 0
 	case "alt+2":
-		m.uiState.Tabs.SetActive(1)
+		targetTab = 1
 	case "alt+3":
-		m.uiState.Tabs.SetActive(2)
+		targetTab = 2
 	case "alt+4":
-		m.uiState.Tabs.SetActive(3)
+		targetTab = 3
 	case "alt+5":
-		m.uiState.Tabs.SetActive(4)
+		targetTab = 4
+	default:
+		return m, nil
+	}
+	m.uiState.Tabs.SetActive(targetTab)
+	// Trigger async content loading when switching to Help tab
+	if targetTab == 4 && m.uiState.HelpView.NeedsContentLoad() {
+		return m, m.uiState.HelpView.LoadContentAsync()
 	}
 	return m, nil
 }

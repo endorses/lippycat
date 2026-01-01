@@ -33,7 +33,7 @@ type Footer struct {
 // NewFooter creates a new footer component
 func NewFooter() Footer {
 	return Footer{
-		width:      80,
+		width:      200, // Start with large default to show all keybinds; real size set by WindowSizeMsg
 		theme:      themes.Solarized(),
 		filterMode: false,
 		hasFilter:  false,
@@ -88,13 +88,13 @@ func (f *Footer) SetPaused(paused bool) {
 // getTabColor returns the background color for a given tab index
 func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 	// Map tab index to theme color
-	// 0: Capture (red), 1: Nodes (yellow), 2: Statistics (green), 3: Settings (blue), 4: Help (violet)
+	// 0: Capture (red), 1: Nodes (yellow), 2: Statistics (green), 3: Settings (blue), 4: Help (magenta)
 	tabColors := []lipgloss.Color{
 		f.theme.ErrorColor,   // Tab 0: Capture
 		f.theme.DNSColor,     // Tab 1: Nodes
 		f.theme.SuccessColor, // Tab 2: Statistics
 		f.theme.InfoColor,    // Tab 3: Settings
-		f.theme.HTTPColor,    // Tab 4: Help (violet/purple)
+		f.theme.TLSColor,     // Tab 4: Help (magenta)
 	}
 
 	if tabIndex >= 0 && tabIndex < len(tabColors) {

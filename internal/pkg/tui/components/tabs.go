@@ -109,12 +109,13 @@ func (t *Tabs) UpdateTab(index int, label string, icon string) {
 
 // View renders the tabs
 func (t *Tabs) View() string {
-	// Define tab colors: red, yellow, green, blue
+	// Define tab colors: red, yellow, green, blue, magenta
 	tabColors := []lipgloss.Color{
 		t.theme.ErrorColor,   // Tab 0 (Live Capture): red
 		t.theme.DNSColor,     // Tab 1 (Nodes): yellow
 		t.theme.SuccessColor, // Tab 2 (Statistics): green
 		t.theme.InfoColor,    // Tab 3 (Settings): blue
+		t.theme.TLSColor,     // Tab 4 (Help): magenta
 	}
 
 	// Get the active tab's color for the horizontal line

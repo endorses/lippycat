@@ -148,8 +148,8 @@ func NewUIState(theme themes.Theme) *UIState {
 		Statistics:       nil, // Initialized separately by caller
 		Capturing:        false,
 		Paused:           false,
-		Width:            0,
-		Height:           0,
+		Width:            120, // Reasonable default until WindowSizeMsg arrives
+		Height:           40,  // Reasonable default until WindowSizeMsg arrives
 		Quitting:         false,
 		Theme:            theme,
 		FilterMode:       false,

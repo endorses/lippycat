@@ -252,11 +252,13 @@ func (h *HelpView) View() string {
 	result.WriteString(h.renderSectionTabs())
 	result.WriteString("\n")
 
-	// Show loading message or content
+	// Show loading message or content (must match viewport height exactly)
 	if !h.contentLoaded {
 		loadingStyle := lipgloss.NewStyle().
 			Foreground(h.theme.BorderColor).
-			Italic(true)
+			Italic(true).
+			Width(h.width).
+			Height(h.viewport.Height)
 		result.WriteString(loadingStyle.Render("Loading help content..."))
 	} else {
 		result.WriteString(h.viewport.View())

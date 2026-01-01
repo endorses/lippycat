@@ -489,13 +489,13 @@ func solarizedGlamourStyle() ansi.StyleConfig {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Color: strPtr(cyan),
+				Color: strPtr(yellow),
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
 			StyleBlock: ansi.StyleBlock{
 				StylePrimitive: ansi.StylePrimitive{
-					Color: strPtr(cyan),
+					Color: strPtr(yellow),
 				},
 				Margin: uintPtr(1),
 			},
@@ -513,13 +513,15 @@ func solarizedGlamourStyle() ansi.StyleConfig {
 					Color: strPtr(base0),
 				},
 			},
-			LevelIndent: 2,
+			LevelIndent: 3,
 		},
 		Item: ansi.StylePrimitive{
-			Color: strPtr(base0),
+			Color:       strPtr(base0),
+			BlockPrefix: "• ",
 		},
 		Enumeration: ansi.StylePrimitive{
-			Color: strPtr(green),
+			Color:       strPtr(green),
+			BlockSuffix: ". ",
 		},
 		Task: ansi.StyleTask{
 			Ticked:   "[✓] ",

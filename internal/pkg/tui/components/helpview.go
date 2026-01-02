@@ -75,12 +75,12 @@ func (h *HelpView) SetSize(width, height int) {
 	h.height = height
 
 	if !h.ready {
-		h.viewport = viewport.New(width, height)
+		h.viewport = viewport.New(width, height-1)
 		h.ready = true
 		// Don't load content here - use LoadContentAsync() to avoid blocking
 	} else {
 		h.viewport.Width = width
-		h.viewport.Height = height
+		h.viewport.Height = height - 1
 	}
 }
 

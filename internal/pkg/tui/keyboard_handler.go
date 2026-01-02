@@ -106,6 +106,9 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+z":
 			return m, tea.Suspend
+		case "c": // Clear search
+			m.uiState.HelpView.ClearSearch()
+			return m, nil
 		case "n": // Next match
 			m.uiState.HelpView.NextMatch()
 			return m, nil

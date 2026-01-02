@@ -28,6 +28,7 @@ type Footer struct {
 	activeTab            int  // Active tab index
 	hasProtocolSelection bool // True when a protocol is selected
 	paused               bool // True when capture is paused
+	hasHelpSearch        bool // True when Help tab has active search
 }
 
 // NewFooter creates a new footer component
@@ -83,6 +84,11 @@ func (f *Footer) SetHasProtocolSelection(has bool) {
 // SetPaused sets whether capture is currently paused
 func (f *Footer) SetPaused(paused bool) {
 	f.paused = paused
+}
+
+// SetHasHelpSearch sets whether Help tab has an active search
+func (f *Footer) SetHasHelpSearch(hasSearch bool) {
+	f.hasHelpSearch = hasSearch
 }
 
 // getTabColor returns the background color for a given tab index
@@ -151,11 +157,17 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		}
 
 	case 4: // Help tab
-		return []TabKeybind{
+		keybinds := []TabKeybind{
 			{Key: "/", Description: "search"},
-			{Key: "n/N", Description: "next/prev"},
-			{Key: "1-3", Description: "sections"},
 		}
+		if f.hasHelpSearch {
+			keybinds = append(keybinds,
+				TabKeybind{Key: "n/N", Description: "next/prev"},
+				TabKeybind{Key: "c", Description: "clear"},
+			)
+		}
+		keybinds = append(keybinds, TabKeybind{Key: "1-3", Description: "sections"})
+		return keybinds
 
 	default:
 		return []TabKeybind{}

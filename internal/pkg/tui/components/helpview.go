@@ -4,6 +4,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -182,14 +183,30 @@ func (h *HelpView) EnterSearchMode() {
 	h.currentMatch = 0
 }
 
-// ExitSearchMode exits search mode
+// ExitSearchMode exits search mode but keeps search results for n/N navigation
 func (h *HelpView) ExitSearchMode() {
 	h.searchMode = false
+	// Keep searchQuery, searchMatches, currentMatch so n/N still work
+	// Keep highlights in viewport
+}
+
+// ClearSearch fully clears search state and highlights
+func (h *HelpView) ClearSearch() {
+	h.searchMode = false
+	h.searchQuery = ""
+	h.searchMatches = nil
+	h.currentMatch = 0
+	h.viewport.SetContent(h.renderedContent)
 }
 
 // GetSearchQuery returns the current search query
 func (h *HelpView) GetSearchQuery() string {
 	return h.searchQuery
+}
+
+// HasActiveSearch returns true if there's an active search with results
+func (h *HelpView) HasActiveSearch() bool {
+	return h.searchQuery != "" && len(h.searchMatches) > 0
 }
 
 // AddSearchChar adds a character to the search query
@@ -212,6 +229,7 @@ func (h *HelpView) NextMatch() {
 		return
 	}
 	h.currentMatch = (h.currentMatch + 1) % len(h.searchMatches)
+	h.viewport.SetContent(h.highlightMatches(h.renderedContent))
 	h.scrollToMatch()
 }
 
@@ -221,6 +239,7 @@ func (h *HelpView) PrevMatch() {
 		return
 	}
 	h.currentMatch = (h.currentMatch - 1 + len(h.searchMatches)) % len(h.searchMatches)
+	h.viewport.SetContent(h.highlightMatches(h.renderedContent))
 	h.scrollToMatch()
 }
 
@@ -248,8 +267,12 @@ func (h *HelpView) View() string {
 	// Build the view with section tabs at top
 	var result strings.Builder
 
-	// Section tabs
-	result.WriteString(h.renderSectionTabs())
+	// Section tabs (or search bar if in search mode)
+	if h.searchMode {
+		result.WriteString(h.renderSearchBar())
+	} else {
+		result.WriteString(h.renderSectionTabs())
+	}
 	result.WriteString("\n")
 
 	// Show loading message or content (must match viewport height exactly)
@@ -265,6 +288,33 @@ func (h *HelpView) View() string {
 	}
 
 	return result.String()
+}
+
+// renderSearchBar renders the search input bar
+func (h *HelpView) renderSearchBar() string {
+	promptStyle := lipgloss.NewStyle().
+		Foreground(h.theme.WarningColor).
+		Bold(true)
+
+	queryStyle := lipgloss.NewStyle().
+		Foreground(h.theme.Foreground)
+
+	matchStyle := lipgloss.NewStyle().
+		Foreground(h.theme.BorderColor)
+
+	prompt := promptStyle.Render("/")
+	query := queryStyle.Render(h.searchQuery)
+	cursor := queryStyle.Render("▏")
+
+	var matchInfo string
+	current, total := h.GetMatchInfo()
+	if total > 0 {
+		matchInfo = matchStyle.Render(fmt.Sprintf(" [%d/%d]", current, total))
+	} else if h.searchQuery != "" {
+		matchInfo = matchStyle.Render(" [no matches]")
+	}
+
+	return prompt + query + cursor + matchInfo
 }
 
 // clearSearch clears search state
@@ -329,6 +379,8 @@ func (h *HelpView) performSearch() {
 	h.currentMatch = 0
 
 	if h.searchQuery == "" {
+		// Restore unhighlighted content
+		h.viewport.SetContent(h.renderedContent)
 		return
 	}
 
@@ -341,9 +393,84 @@ func (h *HelpView) performSearch() {
 		}
 	}
 
+	// Apply highlighting to viewport
+	h.viewport.SetContent(h.highlightMatches(h.renderedContent))
+
 	if len(h.searchMatches) > 0 {
 		h.scrollToMatch()
 	}
+}
+
+// highlightMatches wraps search matches with highlighting
+// Current match uses red background with bright text, other matches use reverse video
+func (h *HelpView) highlightMatches(content string) string {
+	if h.searchQuery == "" {
+		return content
+	}
+
+	query := strings.ToLower(h.searchQuery)
+	queryLen := len(h.searchQuery)
+
+	// Get current match line number
+	var currentLine int
+	if len(h.searchMatches) > 0 {
+		currentLine = h.searchMatches[h.currentMatch]
+	} else {
+		currentLine = -1
+	}
+
+	// Solarized colors for current match: red background (#dc322f), bright text (#fdf6e3)
+	// Using 256-color mode: red=160 approximates #dc322f, white=230 approximates #fdf6e3
+	// Or use true color: \x1b[48;2;220;50;47m for bg, \x1b[38;2;253;246;227m for fg
+	currentStart := "\x1b[48;2;220;50;47m\x1b[38;2;253;246;227m\x1b[1m" // Red bg, bright fg, bold
+	currentEnd := "\x1b[0m"                                             // Reset all
+
+	// Other matches: reverse video
+	otherStart := "\x1b[7m" // Reverse video on
+	otherEnd := "\x1b[27m"  // Reverse video off
+
+	// Process line by line to track which line we're on
+	lines := strings.Split(content, "\n")
+	for lineNum, line := range lines {
+		lowerLine := strings.ToLower(line)
+		if !strings.Contains(lowerLine, query) {
+			continue
+		}
+
+		// Determine highlight style based on whether this is the current match line
+		var highlightStart, highlightEnd string
+		if lineNum == currentLine {
+			highlightStart = currentStart
+			highlightEnd = currentEnd
+		} else {
+			highlightStart = otherStart
+			highlightEnd = otherEnd
+		}
+
+		// Replace all occurrences in this line
+		var newLine strings.Builder
+		lastEnd := 0
+		for {
+			idx := strings.Index(lowerLine[lastEnd:], query)
+			if idx == -1 {
+				newLine.WriteString(line[lastEnd:])
+				break
+			}
+
+			matchStart := lastEnd + idx
+			matchEnd := matchStart + queryLen
+
+			newLine.WriteString(line[lastEnd:matchStart])
+			newLine.WriteString(highlightStart)
+			newLine.WriteString(line[matchStart:matchEnd])
+			newLine.WriteString(highlightEnd)
+
+			lastEnd = matchEnd
+		}
+		lines[lineNum] = newLine.String()
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // scrollToMatch scrolls the viewport to the current match

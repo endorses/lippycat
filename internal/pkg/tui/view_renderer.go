@@ -29,6 +29,7 @@ func (m Model) View() string {
 	m.uiState.Footer.SetActiveTab(m.uiState.Tabs.GetActive())
 	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
 	m.uiState.Footer.SetPaused(m.uiState.Paused)
+	m.uiState.Footer.SetHasHelpSearch(m.uiState.HelpView.HasActiveSearch())
 
 	// Render components
 	headerView := m.uiState.Header.View()

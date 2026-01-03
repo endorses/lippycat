@@ -29,6 +29,12 @@ type DNSQuery struct {
 	LastSeen          time.Time
 }
 
+// pendingDNSQuery tracks a DNS query awaiting response for RTT correlation
+type pendingDNSQuery struct {
+	domain    string
+	timestamp time.Time
+}
+
 // DNSQueriesView displays aggregated DNS queries
 type DNSQueriesView struct {
 	queries     []DNSQuery
@@ -39,17 +45,22 @@ type DNSQueriesView struct {
 	height      int
 	theme       themes.Theme
 	showDetails bool
+
+	// DNS query correlation for RTT calculation
+	// Key: transaction ID (uint16), Value: pending query info
+	pendingQueries map[uint16]pendingDNSQuery
 }
 
 // NewDNSQueriesView creates a new DNS queries view
 func NewDNSQueriesView() *DNSQueriesView {
 	return &DNSQueriesView{
-		queries:     make([]DNSQuery, 0),
-		queryMap:    make(map[string]*DNSQuery),
-		selected:    0,
-		offset:      0,
-		showDetails: false,
-		theme:       themes.Solarized(),
+		queries:        make([]DNSQuery, 0),
+		queryMap:       make(map[string]*DNSQuery),
+		pendingQueries: make(map[uint16]pendingDNSQuery),
+		selected:       0,
+		offset:         0,
+		showDetails:    false,
+		theme:          themes.Solarized(),
 	}
 }
 
@@ -87,16 +98,29 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 		dv.queryMap[domain] = query
 	}
 
+	txID := pkt.DNSData.TransactionID
+
 	if pkt.DNSData.IsResponse {
 		query.ResponseCount++
-		if pkt.DNSData.CorrelatedQuery && pkt.DNSData.QueryResponseTimeMs > 0 {
-			// Update average response time (incremental average)
-			if query.ResponseCount == 1 {
-				query.AvgResponseTimeMs = pkt.DNSData.QueryResponseTimeMs
-			} else {
-				query.AvgResponseTimeMs = (query.AvgResponseTimeMs*(query.ResponseCount-1) + pkt.DNSData.QueryResponseTimeMs) / query.ResponseCount
+
+		// Try to correlate with pending query for RTT calculation
+		if pending, ok := dv.pendingQueries[txID]; ok {
+			// Calculate RTT from stored query timestamp
+			rttMs := pkt.Timestamp.Sub(pending.timestamp).Milliseconds()
+			if rttMs > 0 && rttMs < 30000 { // Sanity check: RTT should be < 30s
+				// Update average response time (incremental average)
+				totalResponses := query.ResponseCount
+				if totalResponses == 1 {
+					query.AvgResponseTimeMs = rttMs
+				} else {
+					// Incremental average: new_avg = old_avg + (new_value - old_avg) / n
+					query.AvgResponseTimeMs = query.AvgResponseTimeMs + (rttMs-query.AvgResponseTimeMs)/totalResponses
+				}
 			}
+			// Remove from pending (response received)
+			delete(dv.pendingQueries, txID)
 		}
+
 		switch pkt.DNSData.ResponseCode {
 		case "NXDOMAIN":
 			query.NXDomainCount++
@@ -105,6 +129,18 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 		}
 	} else {
 		query.QueryCount++
+
+		// Store query for RTT correlation when response arrives
+		dv.pendingQueries[txID] = pendingDNSQuery{
+			domain:    domain,
+			timestamp: pkt.Timestamp,
+		}
+
+		// Cleanup stale pending queries (older than 10 seconds)
+		// Do this occasionally to prevent memory growth
+		if len(dv.pendingQueries) > 100 {
+			dv.cleanupStalePendingQueries(pkt.Timestamp)
+		}
 	}
 
 	// Normalize query type - gopacket returns "Unknown" for unrecognized types
@@ -138,6 +174,17 @@ func (dv *DNSQueriesView) rebuildQueryList() {
 	// Adjust selection if needed
 	if dv.selected >= len(dv.queries) && len(dv.queries) > 0 {
 		dv.selected = len(dv.queries) - 1
+	}
+}
+
+// cleanupStalePendingQueries removes DNS queries older than 10 seconds
+// to prevent memory growth from unanswered queries
+func (dv *DNSQueriesView) cleanupStalePendingQueries(now time.Time) {
+	const maxAge = 10 * time.Second
+	for txID, pending := range dv.pendingQueries {
+		if now.Sub(pending.timestamp) > maxAge {
+			delete(dv.pendingQueries, txID)
+		}
 	}
 }
 
@@ -616,6 +663,7 @@ func (dv *DNSQueriesView) Count() int {
 func (dv *DNSQueriesView) Clear() {
 	dv.queries = make([]DNSQuery, 0)
 	dv.queryMap = make(map[string]*DNSQuery)
+	dv.pendingQueries = make(map[uint16]pendingDNSQuery)
 	dv.selected = 0
 	dv.offset = 0
 }

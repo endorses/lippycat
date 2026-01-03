@@ -292,9 +292,10 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	defer ticker.Stop()
 
 	// Batched atomic updates: use local counter and periodically sync to atomic
-	var packetCount int64      // shared atomic counter
-	var localCount int64       // goroutine-local counter (no atomic needed)
-	const batchThreshold = 100 // flush to atomic every N packets
+	// Both counters are atomic so the stats goroutine can safely read the total
+	var packetCount atomic.Int64 // flushed counter
+	var localCount atomic.Int64  // unflushed counter (for accurate stats reporting)
+	const batchThreshold = 100   // flush to packetCount every N packets
 
 	go func() {
 		logger.Debug("Stats logging goroutine starting", "interface", iface.Name())
@@ -305,7 +306,8 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				logger.Debug("Stats goroutine received context cancellation", "interface", iface.Name())
 				return
 			case <-ticker.C:
-				count := atomic.LoadInt64(&packetCount)
+				// Include both flushed and unflushed counts for accurate reporting
+				count := packetCount.Load() + localCount.Load()
 				dropped := atomic.LoadInt64(&buffer.dropped)
 				logger.Info("Interface packet statistics",
 					"interface", iface.Name(),
@@ -325,8 +327,9 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 		case <-ctx.Done():
 			logger.Debug("Packet loop received context cancellation (priority check)", "interface", iface.Name())
 			// Flush remaining local count before exit
-			if localCount > 0 {
-				atomic.AddInt64(&packetCount, localCount)
+			if lc := localCount.Load(); lc > 0 {
+				packetCount.Add(lc)
+				localCount.Store(0)
 			}
 			return
 		default:
@@ -337,16 +340,18 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 		case <-ctx.Done():
 			logger.Debug("Packet loop received context cancellation (select check)", "interface", iface.Name())
 			// Flush remaining local count before exit
-			if localCount > 0 {
-				atomic.AddInt64(&packetCount, localCount)
+			if lc := localCount.Load(); lc > 0 {
+				packetCount.Add(lc)
+				localCount.Store(0)
 			}
 			return
 		case packet, ok := <-packetCh:
 			if !ok {
 				logger.Debug("Packet channel closed", "interface", iface.Name())
 				// Channel closed, flush and exit
-				if localCount > 0 {
-					atomic.AddInt64(&packetCount, localCount)
+				if lc := localCount.Load(); lc > 0 {
+					packetCount.Add(lc)
+					localCount.Store(0)
 				}
 				return
 			}
@@ -358,10 +363,10 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			buffer.Send(pktInfo)
 
 			// Batched atomic update: increment local counter
-			localCount++
-			if localCount >= batchThreshold {
-				atomic.AddInt64(&packetCount, localCount)
-				localCount = 0
+			lc := localCount.Add(1)
+			if lc >= batchThreshold {
+				packetCount.Add(lc)
+				localCount.Store(0)
 			}
 		}
 	}

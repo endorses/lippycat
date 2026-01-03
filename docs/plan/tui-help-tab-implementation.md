@@ -1,7 +1,7 @@
 # TUI Help Tab Implementation
 
 **Date:** 2025-12-31
-**Status:** In Progress (Phase 3 Complete)
+**Status:** Complete
 **Research:** [docs/research/tui-help-tab.md](../research/tui-help-tab.md)
 
 ## Overview
@@ -41,10 +41,10 @@ Add a Help tab (index 4) to the TUI with embedded markdown documentation, search
 
 ### Phase 4: Polish
 
-- [ ] Test search functionality
-- [ ] Verify viewport scrolling with rendered markdown
-- [ ] Test tab navigation (Tab/Shift+Tab cycles through 5 tabs)
-- [ ] Verify `?` shortcut works from all tabs
+- [x] Test search functionality
+- [x] Verify viewport scrolling with rendered markdown
+- [x] Test tab navigation (Tab/Shift+Tab cycles through 5 tabs)
+- [x] Verify `?` shortcut works from all tabs
 
 ## File Summary
 

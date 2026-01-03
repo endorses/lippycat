@@ -70,7 +70,14 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 		return
 	}
 
-	domain := pkt.DNSData.QueryName
+	// Normalize domain name for consistent lookups:
+	// - Convert to lowercase (DNS is case-insensitive)
+	// - Remove trailing dot (FQDN vs relative name)
+	domain := normalizeDomain(pkt.DNSData.QueryName)
+	if domain == "" {
+		return
+	}
+
 	query, exists := dv.queryMap[domain]
 	if !exists {
 		query = &DNSQuery{
@@ -100,8 +107,10 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 		query.QueryCount++
 	}
 
-	if pkt.DNSData.QueryType != "" {
-		query.RecordTypes[pkt.DNSData.QueryType]++
+	// Normalize query type - gopacket returns "Unknown" for unrecognized types
+	queryType := pkt.DNSData.QueryType
+	if queryType != "" && queryType != "Unknown" {
+		query.RecordTypes[queryType]++
 	}
 
 	if pkt.DNSData.TunnelingScore > query.TunnelingScore {
@@ -465,7 +474,7 @@ func (dv *DNSQueriesView) renderTableWithSize(width, height int) string {
 // formatRecordTypes formats record types as comma-separated list
 func formatRecordTypes(types map[string]int64) string {
 	if len(types) == 0 {
-		return "N/A"
+		return "-"
 	}
 
 	// Sort by count
@@ -475,8 +484,17 @@ func formatRecordTypes(types map[string]int64) string {
 	}
 	var sorted []typeCount
 	for name, count := range types {
+		// Skip empty or unknown types
+		if name == "" || name == "Unknown" {
+			continue
+		}
 		sorted = append(sorted, typeCount{name, count})
 	}
+
+	if len(sorted) == 0 {
+		return "-"
+	}
+
 	sort.Slice(sorted, func(i, j int) bool {
 		return sorted[i].count > sorted[j].count
 	})
@@ -502,6 +520,23 @@ func truncateDNS(s string, width int) string {
 		return s[:width]
 	}
 	return s[:width-3] + "..."
+}
+
+// normalizeDomain normalizes a DNS domain name for consistent lookups
+// - Converts to lowercase (DNS is case-insensitive per RFC 1035)
+// - Removes trailing dot (FQDN indicator)
+// - Trims whitespace
+func normalizeDomain(domain string) string {
+	// Trim whitespace
+	domain = strings.TrimSpace(domain)
+
+	// Remove trailing dot (FQDN indicator)
+	domain = strings.TrimSuffix(domain, ".")
+
+	// Convert to lowercase (DNS is case-insensitive)
+	domain = strings.ToLower(domain)
+
+	return domain
 }
 
 // renderQueryDetails shows query details panel

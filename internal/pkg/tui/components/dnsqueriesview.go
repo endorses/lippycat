@@ -103,22 +103,30 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 	if pkt.DNSData.IsResponse {
 		query.ResponseCount++
 
-		// Try to correlate with pending query for RTT calculation
-		if pending, ok := dv.pendingQueries[txID]; ok {
+		// Try to get RTT from multiple sources:
+		// 1. Pre-calculated by processor (CorrelatedQuery + QueryResponseTimeMs)
+		// 2. Our own correlation from pendingQueries
+		var rttMs int64
+
+		if pkt.DNSData.CorrelatedQuery && pkt.DNSData.QueryResponseTimeMs > 0 {
+			// Use pre-calculated RTT from processor/CLI
+			rttMs = pkt.DNSData.QueryResponseTimeMs
+		} else if pending, ok := dv.pendingQueries[txID]; ok {
 			// Calculate RTT from stored query timestamp
-			rttMs := pkt.Timestamp.Sub(pending.timestamp).Milliseconds()
-			if rttMs > 0 && rttMs < 30000 { // Sanity check: RTT should be < 30s
-				// Update average response time (incremental average)
-				totalResponses := query.ResponseCount
-				if totalResponses == 1 {
-					query.AvgResponseTimeMs = rttMs
-				} else {
-					// Incremental average: new_avg = old_avg + (new_value - old_avg) / n
-					query.AvgResponseTimeMs = query.AvgResponseTimeMs + (rttMs-query.AvgResponseTimeMs)/totalResponses
-				}
-			}
+			rttMs = pkt.Timestamp.Sub(pending.timestamp).Milliseconds()
 			// Remove from pending (response received)
 			delete(dv.pendingQueries, txID)
+		}
+
+		// Update average RTT if we have a valid value
+		if rttMs > 0 && rttMs < 30000 { // Sanity check: RTT should be < 30s
+			totalResponses := query.ResponseCount
+			if totalResponses == 1 {
+				query.AvgResponseTimeMs = rttMs
+			} else {
+				// Incremental average: new_avg = old_avg + (new_value - old_avg) / n
+				query.AvgResponseTimeMs = query.AvgResponseTimeMs + (rttMs-query.AvgResponseTimeMs)/totalResponses
+			}
 		}
 
 		switch pkt.DNSData.ResponseCode {

@@ -35,6 +35,12 @@ type pendingDNSQuery struct {
 	timestamp time.Time
 }
 
+// orphanDNSResponse tracks a DNS response that arrived before its query
+type orphanDNSResponse struct {
+	domain    string
+	timestamp time.Time
+}
+
 // DNSQueriesView displays aggregated DNS queries
 type DNSQueriesView struct {
 	queries     []DNSQuery
@@ -49,18 +55,23 @@ type DNSQueriesView struct {
 	// DNS query correlation for RTT calculation
 	// Key: transaction ID (uint16), Value: pending query info
 	pendingQueries map[uint16]pendingDNSQuery
+
+	// Orphan responses (arrived before their queries) for bidirectional correlation
+	// Key: transaction ID (uint16), Value: orphan response info
+	orphanResponses map[uint16]orphanDNSResponse
 }
 
 // NewDNSQueriesView creates a new DNS queries view
 func NewDNSQueriesView() *DNSQueriesView {
 	return &DNSQueriesView{
-		queries:        make([]DNSQuery, 0),
-		queryMap:       make(map[string]*DNSQuery),
-		pendingQueries: make(map[uint16]pendingDNSQuery),
-		selected:       0,
-		offset:         0,
-		showDetails:    false,
-		theme:          themes.Solarized(),
+		queries:         make([]DNSQuery, 0),
+		queryMap:        make(map[string]*DNSQuery),
+		pendingQueries:  make(map[uint16]pendingDNSQuery),
+		orphanResponses: make(map[uint16]orphanDNSResponse),
+		selected:        0,
+		offset:          0,
+		showDetails:     false,
+		theme:           themes.Solarized(),
 	}
 }
 
@@ -106,6 +117,7 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 		// Try to get RTT from multiple sources:
 		// 1. Pre-calculated by processor (CorrelatedQuery + QueryResponseTimeMs)
 		// 2. Our own correlation from pendingQueries
+		// 3. Store as orphan for later correlation if query arrives after response
 		var rttMs int64
 
 		if pkt.DNSData.CorrelatedQuery && pkt.DNSData.QueryResponseTimeMs > 0 {
@@ -116,17 +128,17 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 			rttMs = pkt.Timestamp.Sub(pending.timestamp).Milliseconds()
 			// Remove from pending (response received)
 			delete(dv.pendingQueries, txID)
+		} else {
+			// Response arrived before query - store as orphan for later correlation
+			dv.orphanResponses[txID] = orphanDNSResponse{
+				domain:    domain,
+				timestamp: pkt.Timestamp,
+			}
 		}
 
 		// Update average RTT if we have a valid value
 		if rttMs > 0 && rttMs < 30000 { // Sanity check: RTT should be < 30s
-			totalResponses := query.ResponseCount
-			if totalResponses == 1 {
-				query.AvgResponseTimeMs = rttMs
-			} else {
-				// Incremental average: new_avg = old_avg + (new_value - old_avg) / n
-				query.AvgResponseTimeMs = query.AvgResponseTimeMs + (rttMs-query.AvgResponseTimeMs)/totalResponses
-			}
+			dv.updateAverageRTT(query, rttMs)
 		}
 
 		switch pkt.DNSData.ResponseCode {
@@ -138,16 +150,34 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 	} else {
 		query.QueryCount++
 
-		// Store query for RTT correlation when response arrives
-		dv.pendingQueries[txID] = pendingDNSQuery{
-			domain:    domain,
-			timestamp: pkt.Timestamp,
+		// Check for orphan response (response arrived before this query)
+		if orphan, ok := dv.orphanResponses[txID]; ok {
+			// Calculate RTT: response_time - query_time
+			// Note: Since response arrived first, RTT = query_time - response_time would be negative
+			// We need: RTT = response_time - query_time (but response is later)
+			// Actually in this case: query is NOW, response was BEFORE
+			// So: RTT = query_timestamp - orphan_timestamp (query arrived after response)
+			// But wait - that's backwards. The response timestamp is when we received the response.
+			// If packets are reordered: response was captured AFTER query but arrived BEFORE.
+			// The capture timestamps should be correct, so RTT = response_ts - query_ts
+			rttMs := orphan.timestamp.Sub(pkt.Timestamp).Milliseconds()
+			if rttMs > 0 && rttMs < 30000 {
+				dv.updateAverageRTT(query, rttMs)
+			}
+			delete(dv.orphanResponses, txID)
+		} else {
+			// Store query for RTT correlation when response arrives
+			dv.pendingQueries[txID] = pendingDNSQuery{
+				domain:    domain,
+				timestamp: pkt.Timestamp,
+			}
 		}
 
-		// Cleanup stale pending queries (older than 10 seconds)
+		// Cleanup stale entries (older than 10 seconds)
 		// Do this occasionally to prevent memory growth
-		if len(dv.pendingQueries) > 100 {
+		if len(dv.pendingQueries) > 100 || len(dv.orphanResponses) > 100 {
 			dv.cleanupStalePendingQueries(pkt.Timestamp)
+			dv.cleanupStaleOrphanResponses(pkt.Timestamp)
 		}
 	}
 
@@ -185,6 +215,17 @@ func (dv *DNSQueriesView) rebuildQueryList() {
 	}
 }
 
+// updateAverageRTT updates the average RTT for a domain query
+func (dv *DNSQueriesView) updateAverageRTT(query *DNSQuery, rttMs int64) {
+	totalResponses := query.ResponseCount
+	if totalResponses <= 1 {
+		query.AvgResponseTimeMs = rttMs
+	} else {
+		// Incremental average: new_avg = old_avg + (new_value - old_avg) / n
+		query.AvgResponseTimeMs = query.AvgResponseTimeMs + (rttMs-query.AvgResponseTimeMs)/totalResponses
+	}
+}
+
 // cleanupStalePendingQueries removes DNS queries older than 10 seconds
 // to prevent memory growth from unanswered queries
 func (dv *DNSQueriesView) cleanupStalePendingQueries(now time.Time) {
@@ -192,6 +233,16 @@ func (dv *DNSQueriesView) cleanupStalePendingQueries(now time.Time) {
 	for txID, pending := range dv.pendingQueries {
 		if now.Sub(pending.timestamp) > maxAge {
 			delete(dv.pendingQueries, txID)
+		}
+	}
+}
+
+// cleanupStaleOrphanResponses removes orphan responses older than 10 seconds
+func (dv *DNSQueriesView) cleanupStaleOrphanResponses(now time.Time) {
+	const maxAge = 10 * time.Second
+	for txID, orphan := range dv.orphanResponses {
+		if now.Sub(orphan.timestamp) > maxAge {
+			delete(dv.orphanResponses, txID)
 		}
 	}
 }
@@ -672,6 +723,7 @@ func (dv *DNSQueriesView) Clear() {
 	dv.queries = make([]DNSQuery, 0)
 	dv.queryMap = make(map[string]*DNSQuery)
 	dv.pendingQueries = make(map[uint16]pendingDNSQuery)
+	dv.orphanResponses = make(map[uint16]orphanDNSResponse)
 	dv.selected = 0
 	dv.offset = 0
 }

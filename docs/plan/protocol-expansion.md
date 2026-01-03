@@ -1,7 +1,7 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Status:** Pending
+**Status:** Phase 1 Complete
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -74,18 +74,18 @@ All commands (sniff/tap/hunt) use existing output mechanisms:
 
 New protocols plug into these existing paths—no new output mechanisms needed.
 
-## Phase 1: DNS (2-3 days)
+## Phase 1: DNS (2-3 days) ✅ COMPLETE
 
 **Priority:** Highest - Low effort, high value, strong LI relevance
 
-- [ ] Create `internal/pkg/dns/` package (parser, tracker, plugin)
-- [ ] Add `DNSMetadata` type in `internal/pkg/types/`
-- [ ] Create `cmd/hunt/dns.go` (hunter node)
-- [ ] Create `cmd/tap/dns.go` (standalone capture)
-- [ ] Create `cmd/sniff/dns.go` (CLI mode)
-- [ ] Add DNS protocol view in TUI (toggle with `v`)
-- [ ] Query/response correlation via transaction ID
-- [ ] DNS tunneling detection (entropy analysis)
+- [x] Create `internal/pkg/dns/` package (parser, tracker, plugin)
+- [x] Add `DNSMetadata` type in `internal/pkg/types/`
+- [x] Create `cmd/hunt/dns.go` (hunter node)
+- [x] Create `cmd/tap/dns.go` (standalone capture)
+- [x] Create `cmd/sniff/dns.go` (CLI mode)
+- [x] Add DNS protocol view in TUI (toggle with `v`)
+- [x] Query/response correlation via transaction ID
+- [x] DNS tunneling detection (entropy analysis)
 
 ## Phase 2: Email - SMTP (3-4 days)
 

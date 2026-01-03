@@ -263,6 +263,105 @@ func (d *DetailsPanel) renderContent() string {
 		}
 	}
 
+	// DNS Details Section (only for DNS packets)
+	if d.packet.DNSData != nil {
+		content.WriteString("\n\n")
+		content.WriteString(sectionStyle.Render("🔍 DNS Details"))
+		content.WriteString("\n\n")
+
+		// Transaction ID
+		content.WriteString(labelStyle.Render("Transaction ID: "))
+		content.WriteString(valueStyle.Render(fmt.Sprintf("0x%04x", d.packet.DNSData.TransactionID)))
+		content.WriteString("\n")
+
+		// Query/Response indicator
+		content.WriteString(labelStyle.Render("Type: "))
+		if d.packet.DNSData.IsResponse {
+			content.WriteString(valueStyle.Render("Response"))
+		} else {
+			content.WriteString(valueStyle.Render("Query"))
+		}
+		content.WriteString("\n")
+
+		// Query name and type
+		if d.packet.DNSData.QueryName != "" {
+			content.WriteString(labelStyle.Render("Query: "))
+			content.WriteString(valueStyle.Render(d.packet.DNSData.QueryName))
+			content.WriteString("\n")
+		}
+
+		if d.packet.DNSData.QueryType != "" {
+			content.WriteString(labelStyle.Render("Record Type: "))
+			content.WriteString(valueStyle.Render(d.packet.DNSData.QueryType))
+			content.WriteString("\n")
+		}
+
+		// Response-specific fields
+		if d.packet.DNSData.IsResponse {
+			content.WriteString(labelStyle.Render("Response Code: "))
+			responseStyle := valueStyle
+			if d.packet.DNSData.ResponseCode != "NOERROR" {
+				responseStyle = lipgloss.NewStyle().Foreground(d.theme.ErrorColor)
+			}
+			content.WriteString(responseStyle.Render(d.packet.DNSData.ResponseCode))
+			content.WriteString("\n")
+
+			// Response time if correlated
+			if d.packet.DNSData.CorrelatedQuery && d.packet.DNSData.QueryResponseTimeMs > 0 {
+				content.WriteString(labelStyle.Render("Response Time: "))
+				content.WriteString(valueStyle.Render(fmt.Sprintf("%d ms", d.packet.DNSData.QueryResponseTimeMs)))
+				content.WriteString("\n")
+			}
+		}
+
+		// Flags
+		var flags []string
+		if d.packet.DNSData.Authoritative {
+			flags = append(flags, "AA")
+		}
+		if d.packet.DNSData.Truncated {
+			flags = append(flags, "TC")
+		}
+		if d.packet.DNSData.RecursionDesired {
+			flags = append(flags, "RD")
+		}
+		if d.packet.DNSData.RecursionAvailable {
+			flags = append(flags, "RA")
+		}
+		if len(flags) > 0 {
+			content.WriteString(labelStyle.Render("Flags: "))
+			content.WriteString(valueStyle.Render(strings.Join(flags, ", ")))
+			content.WriteString("\n")
+		}
+
+		// Answers (for responses)
+		if len(d.packet.DNSData.Answers) > 0 {
+			content.WriteString(labelStyle.Render("Answers:\n"))
+			for _, answer := range d.packet.DNSData.Answers {
+				content.WriteString("  ")
+				content.WriteString(valueStyle.Render(fmt.Sprintf("%s %s %s (TTL: %d)",
+					answer.Name, answer.Type, answer.Data, answer.TTL)))
+				content.WriteString("\n")
+			}
+		}
+
+		// Tunneling detection warning
+		if d.packet.DNSData.TunnelingScore > 0.5 {
+			content.WriteString("\n")
+			warningStyle := lipgloss.NewStyle().
+				Foreground(d.theme.WarningColor).
+				Bold(true)
+			content.WriteString(warningStyle.Render("⚠ Potential DNS Tunneling Detected"))
+			content.WriteString("\n")
+			content.WriteString(labelStyle.Render("Tunneling Score: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("%.2f", d.packet.DNSData.TunnelingScore)))
+			content.WriteString("\n")
+			content.WriteString(labelStyle.Render("Entropy Score: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("%.2f", d.packet.DNSData.EntropyScore)))
+			content.WriteString("\n")
+		}
+	}
+
 	// Hex Dump Section
 	content.WriteString("\n\n")
 	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))

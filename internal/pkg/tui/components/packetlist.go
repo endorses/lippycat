@@ -17,6 +17,8 @@ import (
 // across the codebase without violating Go architecture principles.
 type (
 	VoIPMetadata  = types.VoIPMetadata
+	DNSMetadata   = types.DNSMetadata
+	DNSAnswer     = types.DNSAnswer
 	PacketDisplay = types.PacketDisplay
 )
 

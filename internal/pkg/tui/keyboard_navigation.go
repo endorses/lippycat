@@ -39,6 +39,8 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 	case 0: // Capture tab
 		if m.uiState.ViewMode == "calls" {
 			m.uiState.CallsView.SelectNext()
+		} else if m.uiState.ViewMode == "queries" {
+			m.uiState.DNSQueriesView.SelectNext()
 		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.CursorDown()
 			m.updateDetailsPanel()
@@ -63,6 +65,8 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 	case 0: // Capture tab
 		if m.uiState.ViewMode == "calls" {
 			m.uiState.CallsView.SelectPrevious()
+		} else if m.uiState.ViewMode == "queries" {
+			m.uiState.DNSQueriesView.SelectPrevious()
 		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.CursorUp()
 			m.updateDetailsPanel()
@@ -86,6 +90,8 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyHome})
+		} else if m.uiState.ViewMode == "queries" {
+			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyHome})
 		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.SetCursor(0)
 			m.updateDetailsPanel()
@@ -104,6 +110,8 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyEnd})
+		} else if m.uiState.ViewMode == "queries" {
+			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyEnd})
 		} else if m.uiState.FocusedPane == "left" {
 			packets := m.uiState.PacketList.GetPackets()
 			if len(packets) > 0 {
@@ -125,6 +133,8 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+		} else if m.uiState.ViewMode == "queries" {
+			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.PageUp()
 			m.updateDetailsPanel()
@@ -143,6 +153,8 @@ func (m Model) handlePageDown() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+		} else if m.uiState.ViewMode == "queries" {
+			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 		} else if m.uiState.FocusedPane == "left" {
 			m.uiState.PacketList.PageDown()
 			m.updateDetailsPanel()

@@ -456,9 +456,18 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 				}
 			}
 		} else if m.uiState.SelectedProtocol.Name == "DNS" {
-			// DNS doesn't have alternate view modes yet
-			cmd := m.uiState.Toast.Show("DNS view modes not available", components.ToastInfo, components.ToastDurationShort)
-			return m, cmd
+			// DNS: toggle between packets and queries view
+			if m.uiState.ViewMode == "packets" {
+				m.uiState.ViewMode = "queries"
+			} else {
+				m.uiState.ViewMode = "packets"
+				// Refresh packet list when switching to packets view
+				if !m.packetStore.HasFilter() {
+					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+				} else {
+					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+				}
+			}
 		}
 	} else if m.uiState.Tabs.GetActive() == 1 {
 		// On nodes tab: toggle between table and graph view

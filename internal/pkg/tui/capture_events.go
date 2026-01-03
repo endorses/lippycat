@@ -15,6 +15,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
 )
 
@@ -55,6 +57,16 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 				// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
 				typesPacket := types.PacketDisplay(packet)
 				m.liveCallAggregator.ProcessPacket(&typesPacket)
+			}
+
+			// Update DNS queries view if this is a DNS packet
+			// Parse DNS from raw data if not already parsed
+			if packet.DNSData == nil && packet.Protocol == "DNS" && len(packet.RawData) > 0 {
+				packet.DNSData = parseDNSFromRawData(packet.RawData, packet.LinkType)
+			}
+			if packet.DNSData != nil {
+				typesPacket := types.PacketDisplay(packet)
+				m.uiState.DNSQueriesView.UpdateFromPacket(&typesPacket)
 			}
 
 			// Write to streaming save if active
@@ -823,5 +835,108 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 	// Pass the same 'address' (our connected processor) to inherit TLS settings
 	for _, downstream := range node.DownstreamProcessors {
 		m.processTopologyNode(downstream, address, nodeAddr)
+	}
+}
+
+// parseDNSFromRawData parses DNS metadata from raw packet bytes.
+// This is used when packets arrive via remote capture without pre-parsed DNS data.
+func parseDNSFromRawData(rawData []byte, linkType layers.LinkType) *types.DNSMetadata {
+	if len(rawData) == 0 {
+		return nil
+	}
+
+	// Create a gopacket from the raw data
+	packet := gopacket.NewPacket(rawData, linkType, gopacket.DecodeOptions{
+		Lazy:   true,
+		NoCopy: true,
+	})
+
+	// Extract DNS layer
+	dnsLayer := packet.Layer(layers.LayerTypeDNS)
+	if dnsLayer == nil {
+		return nil
+	}
+
+	dns, ok := dnsLayer.(*layers.DNS)
+	if !ok {
+		return nil
+	}
+
+	metadata := &types.DNSMetadata{
+		TransactionID:      dns.ID,
+		IsResponse:         dns.QR,
+		ResponseCode:       rcodeToString(dns.ResponseCode),
+		Authoritative:      dns.AA,
+		Truncated:          dns.TC,
+		RecursionDesired:   dns.RD,
+		RecursionAvailable: dns.RA,
+		QuestionCount:      dns.QDCount,
+		AnswerCount:        dns.ANCount,
+		AuthorityCount:     dns.NSCount,
+		AdditionalCount:    dns.ARCount,
+	}
+
+	// Extract query information
+	if len(dns.Questions) > 0 {
+		q := dns.Questions[0]
+		metadata.QueryName = string(q.Name)
+		metadata.QueryType = q.Type.String()
+		metadata.QueryClass = q.Class.String()
+	}
+
+	// Extract answers
+	for _, answer := range dns.Answers {
+		a := types.DNSAnswer{
+			Name:  string(answer.Name),
+			Type:  answer.Type.String(),
+			Class: answer.Class.String(),
+			TTL:   answer.TTL,
+		}
+
+		// Extract answer data based on type
+		switch answer.Type {
+		case layers.DNSTypeA:
+			if len(answer.IP) == 4 {
+				a.Data = answer.IP.String()
+			}
+		case layers.DNSTypeAAAA:
+			if len(answer.IP) == 16 {
+				a.Data = answer.IP.String()
+			}
+		case layers.DNSTypeCNAME, layers.DNSTypeNS, layers.DNSTypePTR:
+			a.Data = string(answer.CNAME)
+		case layers.DNSTypeMX:
+			a.Data = string(answer.MX.Name)
+		case layers.DNSTypeTXT:
+			for _, txt := range answer.TXTs {
+				a.Data += string(txt) + " "
+			}
+		default:
+			a.Data = fmt.Sprintf("<%s data>", answer.Type.String())
+		}
+
+		metadata.Answers = append(metadata.Answers, a)
+	}
+
+	return metadata
+}
+
+// rcodeToString converts DNS response code to string
+func rcodeToString(rcode layers.DNSResponseCode) string {
+	switch rcode {
+	case layers.DNSResponseCodeNoErr:
+		return "NOERROR"
+	case layers.DNSResponseCodeFormErr:
+		return "FORMERR"
+	case layers.DNSResponseCodeServFail:
+		return "SERVFAIL"
+	case layers.DNSResponseCodeNXDomain:
+		return "NXDOMAIN"
+	case layers.DNSResponseCodeNotImp:
+		return "NOTIMP"
+	case layers.DNSResponseCodeRefused:
+		return "REFUSED"
+	default:
+		return fmt.Sprintf("RCODE%d", rcode)
 	}
 }

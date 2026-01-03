@@ -81,7 +81,7 @@ func (m Model) View() string {
 
 // renderCaptureTab renders the Capture tab content (packets or calls)
 func (m Model) renderCaptureTab(contentHeight int) string {
-	// Check if we should display calls view or packets view
+	// Check if we should display calls view, queries view, or packets view
 	if m.uiState.ViewMode == "calls" {
 		// Render calls view with optional details panel
 		minWidthForDetails := 120 // Need enough width for call details
@@ -104,6 +104,31 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 
 		// Full width calls table (size is set in handleWindowSizeMsg)
 		return m.uiState.CallsView.View()
+	}
+
+	if m.uiState.ViewMode == "queries" {
+		// Render DNS queries view with optional details panel
+		minWidthForDetails := 120 // Need enough width for query details
+		showDetails := m.uiState.DNSQueriesView.IsShowingDetails()
+		detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
+
+		if detailsVisible {
+			// Split pane layout for queries
+			detailsWidth := 60 // Query details panel width
+
+			// Calculate available width for queries table
+			tableWidth := m.uiState.Width - detailsWidth
+
+			// Render queries table and details side by side
+			queriesTableView := m.uiState.DNSQueriesView.RenderTable(tableWidth, contentHeight)
+			queryDetailsView := m.uiState.DNSQueriesView.RenderDetails(detailsWidth, contentHeight)
+
+			return lipgloss.JoinHorizontal(lipgloss.Top, queriesTableView, queryDetailsView)
+		}
+
+		// Full width queries table
+		m.uiState.DNSQueriesView.SetSize(m.uiState.Width, contentHeight)
+		return m.uiState.DNSQueriesView.View()
 	}
 
 	// Render packets view

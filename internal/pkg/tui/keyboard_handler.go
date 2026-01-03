@@ -455,6 +455,10 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 				}
 			}
+		} else if m.uiState.SelectedProtocol.Name == "DNS" {
+			// DNS doesn't have alternate view modes yet
+			cmd := m.uiState.Toast.Show("DNS view modes not available", components.ToastInfo, components.ToastDurationShort)
+			return m, cmd
 		}
 	} else if m.uiState.Tabs.GetActive() == 1 {
 		// On nodes tab: toggle between table and graph view

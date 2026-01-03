@@ -3,6 +3,7 @@
 package dns
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -97,6 +98,13 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 // processDNSPackets processes packets from the channel.
 func processDNSPackets(packetChan <-chan capture.PacketInfo) {
 	quietMode := viper.GetBool("sniff.quiet")
+	format := viper.GetString("sniff.format")
+
+	// Create JSON encoder if using JSON format
+	var jsonEncoder *json.Encoder
+	if format == "json" {
+		jsonEncoder = json.NewEncoder(os.Stdout)
+	}
 
 	for pktInfo := range packetChan {
 		packet := pktInfo.Packet
@@ -129,7 +137,15 @@ func processDNSPackets(packetChan <-chan capture.PacketInfo) {
 
 		// Print to console unless quiet mode
 		if !quietMode {
-			printDNSPacket(pktDisplay, metadata)
+			if format == "json" {
+				// Output as JSON (omit RawData for cleaner output)
+				pktDisplay.RawData = nil
+				if err := jsonEncoder.Encode(pktDisplay); err != nil {
+					logger.Error("Failed to encode packet as JSON", "error", err)
+				}
+			} else {
+				printDNSPacket(pktDisplay, metadata)
+			}
 		}
 
 		// Write to PCAP if configured

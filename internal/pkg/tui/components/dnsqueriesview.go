@@ -153,12 +153,6 @@ func (dv *DNSQueriesView) UpdateFromPacket(pkt *types.PacketDisplay) {
 		// Check for orphan response (response arrived before this query)
 		if orphan, ok := dv.orphanResponses[txID]; ok {
 			// Calculate RTT: response_time - query_time
-			// Note: Since response arrived first, RTT = query_time - response_time would be negative
-			// We need: RTT = response_time - query_time (but response is later)
-			// Actually in this case: query is NOW, response was BEFORE
-			// So: RTT = query_timestamp - orphan_timestamp (query arrived after response)
-			// But wait - that's backwards. The response timestamp is when we received the response.
-			// If packets are reordered: response was captured AFTER query but arrived BEFORE.
 			// The capture timestamps should be correct, so RTT = response_ts - query_ts
 			rttMs := orphan.timestamp.Sub(pkt.Timestamp).Milliseconds()
 			if rttMs > 0 && rttMs < 30000 {

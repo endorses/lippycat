@@ -393,6 +393,7 @@ func convertPacketInfo(pktInfo capture.PacketInfo) *data.CapturedPacket {
 	captureLen := 0
 	originalLen := 0
 	var packetData []byte
+	var timestampNs int64
 
 	if pkt != nil {
 		if pkt.Data() != nil {
@@ -402,12 +403,19 @@ func convertPacketInfo(pktInfo capture.PacketInfo) *data.CapturedPacket {
 		if meta := pkt.Metadata(); meta != nil {
 			captureLen = meta.CaptureLength
 			originalLen = meta.Length
+			// Use actual packet capture timestamp, not current time
+			timestampNs = meta.Timestamp.UnixNano()
 		}
+	}
+
+	// Fallback to current time if no metadata timestamp available
+	if timestampNs == 0 {
+		timestampNs = time.Now().UnixNano()
 	}
 
 	return &data.CapturedPacket{
 		Data:           packetData,
-		TimestampNs:    time.Now().UnixNano(),
+		TimestampNs:    timestampNs,
 		CaptureLength:  uint32(captureLen),  // #nosec G115
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,

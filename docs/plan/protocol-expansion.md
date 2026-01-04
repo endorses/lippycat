@@ -1,7 +1,7 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Status:** Phase 2 Complete
+**Status:** Phase 2 Protocol Support Complete (Filtering Incomplete)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -74,10 +74,11 @@ All commands (sniff/tap/hunt) use existing output mechanisms:
 
 New protocols plug into these existing paths—no new output mechanisms needed.
 
-## Phase 1: DNS (2-3 days) ✅ COMPLETE
+## Phase 1: DNS (2-3 days) - Protocol Complete, Filtering Incomplete
 
 **Priority:** Highest - Low effort, high value, strong LI relevance
 
+### Protocol Support ✅
 - [x] Create `internal/pkg/dns/` package (parser, tracker, plugin)
 - [x] Add `DNSMetadata` type in `internal/pkg/types/`
 - [x] Create `cmd/hunt/dns.go` (hunter node)
@@ -87,10 +88,19 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Query/response correlation via transaction ID
 - [x] DNS tunneling detection (entropy analysis)
 
-## Phase 2: Email - SMTP (3-4 days)
+### Content Filtering ⚠️ Incomplete
+- [x] Glob pattern matching implementation (`internal/pkg/dns/processor.go:matchGlob`)
+- [ ] Wire `--domain` flag to sniff mode (`core.go` ignores `dns.domain_pattern` from viper)
+- [ ] Add `--domain` flag to hunt command (flag missing, processor has `DomainPatterns` config)
+- [ ] Add `--domain` flag to tap command
+- [ ] Add `--domains-file` flag for bulk domain lists (load patterns from file)
+- [ ] Integrate with Aho-Corasick for multi-pattern matching (currently uses simple glob loop)
+
+## Phase 2: Email - SMTP (3-4 days) - Protocol Complete, Filtering Incomplete
 
 **Priority:** High - Major LI use case
 
+### Protocol Support ✅
 - [x] Create `internal/pkg/email/` package
 - [x] Add `EmailMetadata` type (envelope: MAIL FROM, RCPT TO, Subject)
 - [x] SMTP parser using TCP reassembly (already working from SIP)
@@ -101,10 +111,22 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] STARTTLS detection
 - [x] Message-ID correlation
 
+### Content Filtering ⚠️ Not Implemented
+- [ ] Create `internal/pkg/email/content_filter.go` with glob pattern matching
+- [ ] Add `--sender` flag (filter by MAIL FROM, glob pattern e.g., `*@example.com`)
+- [ ] Add `--recipient` flag (filter by RCPT TO, glob pattern)
+- [ ] Add `--address` flag (match either sender OR recipient)
+- [ ] Wire existing `--address` flag in hunt command (defined but ignored)
+- [ ] Add `--subject` flag (filter by Subject header, glob pattern)
+- [ ] Add `--keywords-file` flag (Aho-Corasick patterns for body/subject)
+- [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
+- [ ] Add filter support to sniff, tap, and hunt commands
+
 ## Phase 3: TLS/JA3 Fingerprinting (3-4 days)
 
 **Priority:** High - Critical for encrypted traffic analysis
 
+### Protocol Support
 - [ ] Create `internal/pkg/tls/` package
 - [ ] Add `TLSMetadata` type (SNI, cipher suites, fingerprints)
 - [ ] ClientHello parser (no decryption needed)
@@ -115,10 +137,19 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Add TLS protocol view in TUI (toggle with `v`)
 - [ ] Fingerprint database integration hooks
 
+### Content Filtering
+- [ ] Add `--sni` flag (filter by SNI hostname, glob pattern e.g., `*.example.com`)
+- [ ] Add `--sni-file` flag (bulk SNI patterns from file)
+- [ ] Add `--ja3` flag (filter by JA3 fingerprint hash)
+- [ ] Add `--ja3-file` flag (known-bad fingerprint list)
+- [ ] Add `--ja3s` flag (filter by server JA3S fingerprint)
+- [ ] Integrate with Aho-Corasick for multi-SNI matching
+
 ## Phase 4: HTTP (4-5 days)
 
 **Priority:** Medium - Complements TLS analysis
 
+### Protocol Support
 - [ ] Create `internal/pkg/http/` package
 - [ ] Add `HTTPMetadata` type (method, URL, headers, status)
 - [ ] HTTP/1.x request/response parser
@@ -129,10 +160,21 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Add HTTP protocol view in TUI (toggle with `v`)
 - [ ] Content-type classification
 
+### Content Filtering
+- [ ] Add `--host` flag (filter by Host header, glob pattern)
+- [ ] Add `--url` flag (filter by URL path, glob pattern e.g., `/api/*`)
+- [ ] Add `--method` flag (filter by HTTP method: GET, POST, etc.)
+- [ ] Add `--status` flag (filter by response status code range e.g., `4xx`, `500-599`)
+- [ ] Add `--user-agent` flag (filter by User-Agent header, glob pattern)
+- [ ] Add `--content-type` flag (filter by Content-Type header)
+- [ ] Add `--keywords-file` flag (Aho-Corasick patterns for URL/headers/body)
+- [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
+
 ## Phase 5: Email - IMAP/POP3 (4-5 days)
 
 **Priority:** Medium - Completes email protocol suite
 
+### Protocol Support
 - [ ] Extend `EmailMetadata` for IMAP/POP3 fields
 - [ ] IMAP command parser (SELECT, FETCH, SEARCH)
 - [ ] POP3 command parser
@@ -141,10 +183,16 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Update `cmd/tap/email.go` for IMAP/POP3 support
 - [ ] Update `cmd/sniff/email.go` for IMAP/POP3 support
 
+### Content Filtering
+- [ ] Extend Phase 2 email filters to IMAP/POP3 (same `--sender`, `--recipient`, etc.)
+- [ ] Add `--mailbox` flag (filter by mailbox name for IMAP)
+- [ ] Add `--command` flag (filter by IMAP/POP3 command: FETCH, SEARCH, RETR, etc.)
+
 ## Phase 6: Database Protocols (10-14 days) - Optional
 
 **Priority:** Lower - High effort, niche use case
 
+### Protocol Support
 - [ ] Create `internal/pkg/database/` package
 - [ ] Add `DatabaseMetadata` type (query, username, database, tables)
 - [ ] MySQL protocol parser
@@ -155,21 +203,61 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Create `cmd/sniff/db.go` (CLI mode)
 - [ ] Add Database protocol view in TUI (toggle with `v`)
 
+### Content Filtering
+- [ ] Add `--user` flag (filter by database username)
+- [ ] Add `--database` flag (filter by database name)
+- [ ] Add `--table` flag (filter by table name in query, glob pattern)
+- [ ] Add `--query-type` flag (filter by query type: SELECT, INSERT, UPDATE, DELETE)
+- [ ] Add `--keywords-file` flag (Aho-Corasick patterns for query content)
+- [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
+
 ## Implementation Notes
 
 1. **Separate packages per protocol:** `internal/pkg/dns/`, `internal/pkg/email/`, etc.
 2. **Type-safe metadata:** Add protocol-specific fields to `PacketDisplay` (e.g., `DNSData *DNSMetadata`)
 3. **Reuse Aho-Corasick:** Existing `internal/pkg/ahocorasick/` for content filtering in email/HTTP
+4. **Filter architecture pattern:**
+   - Each protocol package has a `content_filter.go` with `FilterConfig` struct and `Match()` method
+   - CLI flags bound to viper (`protocol.filter_field`)
+   - Commands read viper config and pass to processor/sniffer
+   - Glob patterns use existing `matchGlob()` from DNS (extract to shared package)
+   - Bulk patterns use Aho-Corasick matcher
+5. **Consistent flag naming:**
+   - Single pattern: `--domain`, `--sender`, `--host`
+   - Bulk file: `--domains-file`, `--senders-file`, `--hosts-file`
+   - Keywords: `--keywords-file` (universal Aho-Corasick patterns)
 
 ## Estimated Timeline
 
-| Phase | Protocol | Effort |
-|-------|----------|--------|
-| 1 | DNS | 2-3 days |
-| 2 | SMTP | 3-4 days |
-| 3 | TLS/JA3 | 3-4 days |
-| 4 | HTTP | 4-5 days |
-| 5 | IMAP/POP3 | 4-5 days |
-| 6 | Database | 10-14 days |
+| Phase | Protocol | Protocol Support | Content Filtering | Total |
+|-------|----------|------------------|-------------------|-------|
+| 1 | DNS | ✅ Complete | 1 day | 1 day remaining |
+| 2 | SMTP | ✅ Complete | 1-2 days | 1-2 days remaining |
+| 3 | TLS/JA3 | 3-4 days | 1 day | 4-5 days |
+| 4 | HTTP | 4-5 days | 1-2 days | 5-7 days |
+| 5 | IMAP/POP3 | 4-5 days | 0.5 days (reuse Phase 2) | 4-5 days |
+| 6 | Database | 10-14 days | 1-2 days | 11-16 days |
 
-**Total (Phases 1-5):** ~17-21 days
+**Remaining work (Phases 1-5):** ~16-20 days
+- Phase 1-2 filtering backfill: 2-3 days
+- Phase 3-5 new work: ~14-17 days
+
+## Current Status (2026-01-04)
+
+### What Works
+- DNS and SMTP protocol parsing and display (sniff, hunt, tap, TUI)
+- DNS query/response correlation and tunneling detection
+- SMTP envelope extraction (MAIL FROM, RCPT TO, Subject)
+- BPF port-level filtering for both protocols
+
+### What's Broken/Incomplete
+1. **DNS `--domain` flag** (`cmd/sniff/dns.go`): Flag defined and bound to viper, but `core.go` never reads it
+2. **DNS hunt mode**: No `--domain` flag exists, even though processor has `DomainPatterns` config
+3. **Email `--address` flag** (`cmd/hunt/email.go`): Flag defined but never passed to any filter logic
+4. **Email content filtering**: No filter implementation exists in the email package
+
+### Recommended Next Steps
+1. Extract `matchGlob()` from `internal/pkg/dns/processor.go` to `internal/pkg/filter/glob.go`
+2. Wire DNS `--domain` flag through all commands (sniff, hunt, tap)
+3. Create `internal/pkg/email/content_filter.go` with sender/recipient/address matching
+4. Wire Email `--address` flag through all commands

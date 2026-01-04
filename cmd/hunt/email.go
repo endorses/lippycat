@@ -19,8 +19,7 @@ import (
 
 var (
 	// Email-specific flags for hunter mode
-	hunterEmailPorts   string
-	hunterEmailAddress string
+	hunterEmailPorts string
 )
 
 var emailHuntCmd = &cobra.Command{
@@ -34,27 +33,26 @@ processor for analysis and correlation.
 Features:
 - SMTP command/response capture
 - Port filtering (default: 25, 587, 465)
-- Email address filtering
 - Efficient forwarding to processor
+
+Note: Email address filtering is managed by the processor and pushed to hunters.
 
 Example:
   lc hunt email --processor processor:50051
   lc hunt email --processor 192.168.1.100:50051 --interface eth0
-  lc hunt email --processor processor:50051 --smtp-port 25,587,2525
-  lc hunt email --processor processor:50051 --address "*@example.com"`,
+  lc hunt email --processor processor:50051 --smtp-port 25,587,2525`,
 	RunE: runEmailHunt,
 }
 
 func init() {
 	HuntCmd.AddCommand(emailHuntCmd)
 
-	// Email-specific flags
+	// Email-specific flags (BPF-level filtering only)
+	// Note: Application-level email filtering is managed by the processor and pushed to hunters
 	emailHuntCmd.Flags().StringVar(&hunterEmailPorts, "smtp-port", "25,587,465", "SMTP port(s) to capture, comma-separated")
-	emailHuntCmd.Flags().StringVar(&hunterEmailAddress, "address", "", "Filter by email address pattern (glob-style)")
 
 	// Bind to viper
 	_ = viper.BindPFlag("hunter.email.ports", emailHuntCmd.Flags().Lookup("smtp-port"))
-	_ = viper.BindPFlag("hunter.email.address", emailHuntCmd.Flags().Lookup("address"))
 }
 
 func runEmailHunt(cmd *cobra.Command, args []string) error {
@@ -146,10 +144,10 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		"hunter_id", config.HunterID,
 		"processor", config.ProcessorAddr,
 		"interfaces", config.Interfaces,
-		"smtp_ports", hunterEmailPorts,
-		"address_filter", hunterEmailAddress)
+		"smtp_ports", hunterEmailPorts)
 
 	// Create hunter instance
+	// Note: Email address filtering is managed by the processor and pushed to hunters via gRPC
 	h, err := hunter.New(config)
 	if err != nil {
 		return fmt.Errorf("failed to create hunter: %w", err)

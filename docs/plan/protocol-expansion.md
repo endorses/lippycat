@@ -91,10 +91,13 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 ### Content Filtering ✅
 - [x] Glob pattern matching implementation (extracted to `internal/pkg/filtering/glob.go`)
 - [x] Wire `--domain` flag to sniff mode (`core.go` reads `dns.domain_pattern` from viper)
-- [x] Add `--domain` flag to hunt command (creates DNS processor with domain patterns)
 - [x] Add `--domain` flag to tap command (stores in viper for processor-level filtering)
 - [x] Add `--domains-file` flag for bulk domain lists (load patterns from file)
 - [x] GlobMatcher type with O(1) exact match lookup and AC integration foundation
+
+**Architecture Note:** Hunt commands do NOT have application-level content filtering flags.
+Hunters capture all packets matching BPF filters and forward to processors.
+Application-level filtering (domain patterns, keywords) is managed by processors and pushed to hunters via gRPC.
 
 ## Phase 2: Email - SMTP (3-4 days) - Protocol Complete, Filtering Incomplete
 
@@ -116,11 +119,10 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Add `--sender` flag (filter by MAIL FROM, glob pattern e.g., `*@example.com`)
 - [ ] Add `--recipient` flag (filter by RCPT TO, glob pattern)
 - [ ] Add `--address` flag (match either sender OR recipient)
-- [ ] Wire existing `--address` flag in hunt command (defined but ignored)
 - [ ] Add `--subject` flag (filter by Subject header, glob pattern)
 - [ ] Add `--keywords-file` flag (Aho-Corasick patterns for body/subject)
 - [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
-- [ ] Add filter support to sniff, tap, and hunt commands
+- [ ] Add filter support to sniff and tap commands (hunt receives filters from processor)
 
 ## Phase 3: TLS/JA3 Fingerprinting (3-4 days)
 
@@ -250,16 +252,15 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - SMTP envelope extraction (MAIL FROM, RCPT TO, Subject)
 - BPF port-level filtering for both protocols
 - **DNS content filtering complete:**
-  - `--domain` flag works in sniff, hunt, and tap commands
+  - `--domain` flag works in sniff and tap commands
   - `--domains-file` flag loads bulk patterns from file
   - Shared `filtering.MatchGlob()` for case-insensitive glob matching
   - `GlobMatcher` type with O(1) exact match optimization
 
 ### What's Broken/Incomplete
-1. **Email `--address` flag** (`cmd/hunt/email.go`): Flag defined but never passed to any filter logic
-2. **Email content filtering**: No filter implementation exists in the email package
+1. **Email content filtering**: No filter implementation exists in the email package
 
 ### Recommended Next Steps
 1. Create `internal/pkg/email/content_filter.go` with sender/recipient/address matching
-2. Wire Email `--address`, `--sender`, `--recipient` flags through all commands
+2. Wire Email `--address`, `--sender`, `--recipient` flags through sniff and tap commands
 3. Add `--keywords-file` for Aho-Corasick pattern matching in email body/subject

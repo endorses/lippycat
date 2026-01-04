@@ -25,6 +25,7 @@ type UIState struct {
 	HelpView         components.HelpView
 	CallsView        *components.CallsView
 	DNSQueriesView   *components.DNSQueriesView
+	EmailView        *components.EmailView
 	ProtocolSelector components.ProtocolSelector
 	HunterSelector   components.HunterSelector
 	FilterManager    components.FilterManager
@@ -100,6 +101,9 @@ func NewUIState(theme themes.Theme) *UIState {
 	dnsQueriesView := components.NewDNSQueriesView()
 	dnsQueriesView.SetTheme(theme)
 
+	emailView := components.NewEmailView()
+	emailView.SetTheme(theme)
+
 	protocolSelector := components.NewProtocolSelector()
 	protocolSelector.SetTheme(theme)
 
@@ -143,6 +147,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		HelpView:         helpView,
 		CallsView:        &callsView, // Use pointer to avoid copying mutex
 		DNSQueriesView:   dnsQueriesView,
+		EmailView:        emailView,
 		ProtocolSelector: protocolSelector,
 		HunterSelector:   hunterSelector,
 		FilterManager:    filterManager,
@@ -183,6 +188,7 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.HelpView.SetTheme(theme)
 	ui.CallsView.SetTheme(theme)
 	ui.DNSQueriesView.SetTheme(theme)
+	ui.EmailView.SetTheme(theme)
 	ui.ProtocolSelector.SetTheme(theme)
 	ui.FilterInput.SetTheme(theme)
 	ui.Toast.SetTheme(theme)

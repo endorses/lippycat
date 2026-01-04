@@ -468,6 +468,19 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
 				}
 			}
+		} else if m.uiState.SelectedProtocol.Name == "Email" {
+			// Email: toggle between packets and emails view
+			if m.uiState.ViewMode == "packets" {
+				m.uiState.ViewMode = "emails"
+			} else {
+				m.uiState.ViewMode = "packets"
+				// Refresh packet list when switching to packets view
+				if !m.packetStore.HasFilter() {
+					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+				} else {
+					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+				}
+			}
 		}
 	} else if m.uiState.Tabs.GetActive() == 1 {
 		// On nodes tab: toggle between table and graph view

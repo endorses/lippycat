@@ -37,7 +37,7 @@ func NewProtocolSelector() ProtocolSelector {
 		{Name: "DNS", BPFFilter: "port 53", Description: "Domain name system", Icon: "🔍"},
 		{Name: "HTTP", BPFFilter: "port 80 or port 8080", Description: "Hypertext transfer protocol", Icon: "🌐"},
 		{Name: "HTTPS/TLS", BPFFilter: "port 443", Description: "Encrypted HTTP traffic", Icon: "🔒"},
-		{Name: "SMTP", BPFFilter: "port 25 or port 587", Description: "Simple mail transfer protocol", Icon: "📧"},
+		{Name: "Email", BPFFilter: "port 25 or port 587 or port 465 or port 110 or port 143", Description: "Email protocols (SMTP, POP3, IMAP)", Icon: "📧"},
 		{Name: "ICMP", BPFFilter: "icmp", Description: "Internet control message protocol", Icon: "📡"},
 		{Name: "TCP", BPFFilter: "tcp", Description: "Transmission control protocol", Icon: "🔗"},
 		{Name: "UDP", BPFFilter: "udp", Description: "User datagram protocol", Icon: "📦"},

@@ -69,6 +69,12 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 				m.uiState.DNSQueriesView.UpdateFromPacket(&typesPacket)
 			}
 
+			// Update Email sessions view if this is an email packet
+			if packet.EmailData != nil {
+				typesPacket := types.PacketDisplay(packet)
+				m.uiState.EmailView.UpdateFromPacket(&typesPacket)
+			}
+
 			// Write to streaming save if active
 			if m.activeWriter != nil {
 				// WritePacket will apply filter internally if configured (best-effort)

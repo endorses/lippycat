@@ -131,6 +131,31 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 		return m.uiState.DNSQueriesView.View()
 	}
 
+	if m.uiState.ViewMode == "emails" {
+		// Render Email sessions view with optional details panel
+		minWidthForDetails := 120 // Need enough width for session details
+		showDetails := m.uiState.EmailView.IsShowingDetails()
+		detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
+
+		if detailsVisible {
+			// Split pane layout for email sessions
+			detailsWidth := 60 // Session details panel width
+
+			// Calculate available width for sessions table
+			tableWidth := m.uiState.Width - detailsWidth
+
+			// Render sessions table and details side by side
+			sessionsTableView := m.uiState.EmailView.RenderTable(tableWidth, contentHeight)
+			sessionDetailsView := m.uiState.EmailView.RenderDetails(detailsWidth, contentHeight)
+
+			return lipgloss.JoinHorizontal(lipgloss.Top, sessionsTableView, sessionDetailsView)
+		}
+
+		// Full width sessions table
+		m.uiState.EmailView.SetSize(m.uiState.Width, contentHeight)
+		return m.uiState.EmailView.View()
+	}
+
 	// Render packets view
 	minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
 	detailsVisible := m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails

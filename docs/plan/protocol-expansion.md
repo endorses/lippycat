@@ -1,7 +1,7 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Status:** Phase 2 In Progress (8/9 tasks complete)
+**Status:** Phase 2 Complete
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -97,7 +97,7 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Create `cmd/hunt/email.go` (hunter node)
 - [x] Create `cmd/tap/email.go` (standalone capture)
 - [x] Create `cmd/sniff/email.go` (CLI mode)
-- [ ] Add Email protocol view in TUI (toggle with `v`)
+- [x] Add Email protocol view in TUI (toggle with `v`)
 - [x] STARTTLS detection
 - [x] Message-ID correlation
 

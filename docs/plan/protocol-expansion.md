@@ -1,7 +1,7 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Status:** Phase 1 Complete
+**Status:** Phase 2 In Progress (8/9 tasks complete)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -91,15 +91,15 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 
 **Priority:** High - Major LI use case
 
-- [ ] Create `internal/pkg/email/` package
-- [ ] Add `EmailMetadata` type (envelope: MAIL FROM, RCPT TO, Subject)
-- [ ] SMTP parser using TCP reassembly (already working from SIP)
-- [ ] Create `cmd/hunt/email.go` (hunter node)
-- [ ] Create `cmd/tap/email.go` (standalone capture)
-- [ ] Create `cmd/sniff/email.go` (CLI mode)
+- [x] Create `internal/pkg/email/` package
+- [x] Add `EmailMetadata` type (envelope: MAIL FROM, RCPT TO, Subject)
+- [x] SMTP parser using TCP reassembly (already working from SIP)
+- [x] Create `cmd/hunt/email.go` (hunter node)
+- [x] Create `cmd/tap/email.go` (standalone capture)
+- [x] Create `cmd/sniff/email.go` (CLI mode)
 - [ ] Add Email protocol view in TUI (toggle with `v`)
-- [ ] STARTTLS detection
-- [ ] Message-ID correlation
+- [x] STARTTLS detection
+- [x] Message-ID correlation
 
 ## Phase 3: TLS/JA3 Fingerprinting (3-4 days)
 

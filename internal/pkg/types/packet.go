@@ -23,6 +23,7 @@ type PacketDisplay struct {
 	Interface string          // Network interface where packet was captured
 	VoIPData  *VoIPMetadata   // Parsed VoIP metadata (nil if not VoIP)
 	DNSData   *DNSMetadata    // Parsed DNS metadata (nil if not DNS)
+	EmailData *EmailMetadata  // Parsed Email metadata (nil if not email)
 	LinkType  layers.LinkType // Link layer type for PCAP writing
 }
 
@@ -96,6 +97,46 @@ type DNSAnswer struct {
 	Class string // Record class (usually IN)
 	TTL   uint32 // Time to live in seconds
 	Data  string // Answer data (IP address, CNAME target, etc.)
+}
+
+// EmailMetadata contains parsed email protocol information (SMTP/IMAP/POP3).
+type EmailMetadata struct {
+	// Protocol identification
+	Protocol string // "SMTP", "IMAP", "POP3"
+	IsServer bool   // True if from server, false if from client
+
+	// SMTP envelope (extracted during SMTP transaction)
+	MailFrom  string   // MAIL FROM address
+	RcptTo    []string // RCPT TO addresses
+	Subject   string   // Subject header from DATA
+	MessageID string   // Message-ID header for correlation
+
+	// SMTP transaction state
+	Command      string // Current command (HELO, EHLO, MAIL, RCPT, DATA, etc.)
+	ResponseCode int    // Response code (220, 250, 354, etc.)
+	ResponseText string // Response text
+
+	// TLS/Security
+	STARTTLSOffered   bool // Server advertised STARTTLS
+	STARTTLSRequested bool // Client requested STARTTLS
+	Encrypted         bool // Session is encrypted (after STARTTLS)
+
+	// Authentication
+	AuthMethod string // AUTH method (PLAIN, LOGIN, CRAM-MD5)
+	AuthUser   string // Authenticated username (if available)
+
+	// Session tracking
+	SessionID    string    // Unique session identifier (for correlation)
+	ServerBanner string    // Initial server banner (220 greeting)
+	ClientHelo   string    // HELO/EHLO hostname
+	Timestamp    time.Time // Message timestamp
+
+	// Size information
+	MessageSize int // SIZE parameter or actual message size
+
+	// Correlation and timing
+	TransactionTimeMs int64 // Transaction completion time
+	Correlated        bool  // True if response was correlated with command
 }
 
 // HunterInfo represents a hunter node's status information.

@@ -80,6 +80,7 @@ func sniff(cmd *cobra.Command, args []string) {
 func init() {
 	SniffCmd.AddCommand(voipCmd)
 	SniffCmd.AddCommand(dnsCmd)
+	SniffCmd.AddCommand(emailCmd)
 	SniffCmd.PersistentFlags().StringVarP(&interfaces, "interface", "i", "any", "interface(s) to monitor, comma separated")
 	SniffCmd.PersistentFlags().StringVarP(&filter, "filter", "f", "", "bpf filter to apply")
 	SniffCmd.PersistentFlags().StringVarP(&readFile, "read-file", "r", "", "read from pcap file")

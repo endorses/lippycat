@@ -4,6 +4,7 @@ package dns
 
 import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket/layers"
@@ -147,50 +148,9 @@ func (p *Processor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 }
 
 // matchesDomainPattern checks if a domain matches any configured pattern.
+// Uses filtering.MatchAnyGlob for case-insensitive glob pattern matching.
 func (p *Processor) matchesDomainPattern(domain string) bool {
-	for _, pattern := range p.domainPatterns {
-		if matchGlob(pattern, domain) {
-			return true
-		}
-	}
-	return false
-}
-
-// matchGlob performs simple glob matching with * wildcard.
-func matchGlob(pattern, s string) bool {
-	// Handle empty pattern
-	if pattern == "" {
-		return s == ""
-	}
-
-	// Handle * at the start (suffix match)
-	if pattern[0] == '*' {
-		suffix := pattern[1:]
-		if suffix == "" {
-			return true
-		}
-		return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
-	}
-
-	// Handle * at the end (prefix match)
-	if pattern[len(pattern)-1] == '*' {
-		prefix := pattern[:len(pattern)-1]
-		return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-	}
-
-	// Handle * in the middle
-	for i, c := range pattern {
-		if c == '*' {
-			prefix := pattern[:i]
-			suffix := pattern[i+1:]
-			return len(s) >= len(prefix)+len(suffix) &&
-				s[:len(prefix)] == prefix &&
-				s[len(s)-len(suffix):] == suffix
-		}
-	}
-
-	// Exact match
-	return pattern == s
+	return filtering.MatchAnyGlob(p.domainPatterns, domain)
 }
 
 // createPacketDisplay creates a PacketDisplay from packet info and metadata.

@@ -38,6 +38,7 @@ Examples:
 var (
 	// DNS-specific flags
 	dnsDomainPattern string
+	dnsDomainsFile   string
 	dnsUDPOnly       bool
 	dnsPorts         string
 	dnsTrackQueries  bool
@@ -66,6 +67,17 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		viper.Set("dns.write_file", dnsWriteFile)
 	}
 
+	// Load domain patterns from file if specified
+	if dnsDomainsFile != "" {
+		patterns, err := dns.LoadDomainsFromFile(dnsDomainsFile)
+		if err != nil {
+			logger.Error("Failed to load domains file", "error", err, "file", dnsDomainsFile)
+			return
+		}
+		viper.Set("dns.domain_patterns", patterns)
+		logger.Info("Loaded domain patterns from file", "count", len(patterns), "file", dnsDomainsFile)
+	}
+
 	// Build DNS filter
 	filterBuilder := dns.NewFilterBuilder()
 	ports, err := dns.ParsePorts(dnsPorts)
@@ -85,6 +97,7 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		"interfaces", interfaces,
 		"filter", effectiveFilter,
 		"domain_pattern", dnsDomainPattern,
+		"domains_file", dnsDomainsFile,
 		"track_queries", dnsTrackQueries,
 		"detect_tunneling", dnsDetectTunnel)
 
@@ -99,6 +112,7 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 func init() {
 	// DNS-specific flags
 	dnsCmd.Flags().StringVar(&dnsDomainPattern, "domain", "", "Filter by domain pattern (glob-style, e.g., '*.example.com')")
+	dnsCmd.Flags().StringVar(&dnsDomainsFile, "domains-file", "", "Load domain patterns from file (one per line, # for comments)")
 	dnsCmd.Flags().BoolVar(&dnsUDPOnly, "udp-only", false, "Capture UDP DNS only (ignore TCP DNS)")
 	dnsCmd.Flags().StringVar(&dnsPorts, "dns-port", "53", "DNS port(s) to capture, comma-separated (default: 53)")
 	dnsCmd.Flags().BoolVar(&dnsTrackQueries, "track-queries", true, "Enable query/response correlation")
@@ -107,6 +121,7 @@ func init() {
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("dns.domain_pattern", dnsCmd.Flags().Lookup("domain"))
+	_ = viper.BindPFlag("dns.domains_file", dnsCmd.Flags().Lookup("domains-file"))
 	_ = viper.BindPFlag("dns.udp_only", dnsCmd.Flags().Lookup("udp-only"))
 	_ = viper.BindPFlag("dns.ports", dnsCmd.Flags().Lookup("dns-port"))
 	_ = viper.BindPFlag("dns.track_queries", dnsCmd.Flags().Lookup("track-queries"))

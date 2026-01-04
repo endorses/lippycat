@@ -1,7 +1,7 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Status:** Phase 2 Protocol Support Complete (Filtering Incomplete)
+**Status:** Phase 1-2 Protocol Support Complete, Phase 1 Content Filtering Complete
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -74,7 +74,7 @@ All commands (sniff/tap/hunt) use existing output mechanisms:
 
 New protocols plug into these existing paths—no new output mechanisms needed.
 
-## Phase 1: DNS (2-3 days) - Protocol Complete, Filtering Incomplete
+## Phase 1: DNS (2-3 days) - Complete ✅
 
 **Priority:** Highest - Low effort, high value, strong LI relevance
 
@@ -88,13 +88,13 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Query/response correlation via transaction ID
 - [x] DNS tunneling detection (entropy analysis)
 
-### Content Filtering ⚠️ Incomplete
-- [x] Glob pattern matching implementation (`internal/pkg/dns/processor.go:matchGlob`)
-- [ ] Wire `--domain` flag to sniff mode (`core.go` ignores `dns.domain_pattern` from viper)
-- [ ] Add `--domain` flag to hunt command (flag missing, processor has `DomainPatterns` config)
-- [ ] Add `--domain` flag to tap command
-- [ ] Add `--domains-file` flag for bulk domain lists (load patterns from file)
-- [ ] Integrate with Aho-Corasick for multi-pattern matching (currently uses simple glob loop)
+### Content Filtering ✅
+- [x] Glob pattern matching implementation (extracted to `internal/pkg/filtering/glob.go`)
+- [x] Wire `--domain` flag to sniff mode (`core.go` reads `dns.domain_pattern` from viper)
+- [x] Add `--domain` flag to hunt command (creates DNS processor with domain patterns)
+- [x] Add `--domain` flag to tap command (stores in viper for processor-level filtering)
+- [x] Add `--domains-file` flag for bulk domain lists (load patterns from file)
+- [x] GlobMatcher type with O(1) exact match lookup and AC integration foundation
 
 ## Phase 2: Email - SMTP (3-4 days) - Protocol Complete, Filtering Incomplete
 
@@ -249,15 +249,17 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - DNS query/response correlation and tunneling detection
 - SMTP envelope extraction (MAIL FROM, RCPT TO, Subject)
 - BPF port-level filtering for both protocols
+- **DNS content filtering complete:**
+  - `--domain` flag works in sniff, hunt, and tap commands
+  - `--domains-file` flag loads bulk patterns from file
+  - Shared `filtering.MatchGlob()` for case-insensitive glob matching
+  - `GlobMatcher` type with O(1) exact match optimization
 
 ### What's Broken/Incomplete
-1. **DNS `--domain` flag** (`cmd/sniff/dns.go`): Flag defined and bound to viper, but `core.go` never reads it
-2. **DNS hunt mode**: No `--domain` flag exists, even though processor has `DomainPatterns` config
-3. **Email `--address` flag** (`cmd/hunt/email.go`): Flag defined but never passed to any filter logic
-4. **Email content filtering**: No filter implementation exists in the email package
+1. **Email `--address` flag** (`cmd/hunt/email.go`): Flag defined but never passed to any filter logic
+2. **Email content filtering**: No filter implementation exists in the email package
 
 ### Recommended Next Steps
-1. Extract `matchGlob()` from `internal/pkg/dns/processor.go` to `internal/pkg/filter/glob.go`
-2. Wire DNS `--domain` flag through all commands (sniff, hunt, tap)
-3. Create `internal/pkg/email/content_filter.go` with sender/recipient/address matching
-4. Wire Email `--address` flag through all commands
+1. Create `internal/pkg/email/content_filter.go` with sender/recipient/address matching
+2. Wire Email `--address`, `--sender`, `--recipient` flags through all commands
+3. Add `--keywords-file` for Aho-Corasick pattern matching in email body/subject

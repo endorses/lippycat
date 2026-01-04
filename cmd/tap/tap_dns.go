@@ -22,8 +22,10 @@ import (
 
 var (
 	// DNS-specific flags
-	dnsTapPorts   string
-	dnsTapUDPOnly bool
+	dnsTapPorts         string
+	dnsTapUDPOnly       bool
+	dnsTapDomainPattern string
+	dnsTapDomainsFile   string
 )
 
 var dnsTapCmd = &cobra.Command{
@@ -56,10 +58,14 @@ func init() {
 	// DNS-specific flags
 	dnsTapCmd.Flags().StringVar(&dnsTapPorts, "dns-port", "53", "DNS port(s) to capture, comma-separated (default: 53)")
 	dnsTapCmd.Flags().BoolVar(&dnsTapUDPOnly, "udp-only", false, "Capture UDP DNS only (ignore TCP DNS)")
+	dnsTapCmd.Flags().StringVar(&dnsTapDomainPattern, "domain", "", "Filter by domain pattern (glob-style, e.g., '*.example.com')")
+	dnsTapCmd.Flags().StringVar(&dnsTapDomainsFile, "domains-file", "", "Load domain patterns from file (one per line, # for comments)")
 
 	// Bind DNS-specific flags to viper
 	_ = viper.BindPFlag("tap.dns.ports", dnsTapCmd.Flags().Lookup("dns-port"))
 	_ = viper.BindPFlag("tap.dns.udp_only", dnsTapCmd.Flags().Lookup("udp-only"))
+	_ = viper.BindPFlag("tap.dns.domain_pattern", dnsTapCmd.Flags().Lookup("domain"))
+	_ = viper.BindPFlag("tap.dns.domains_file", dnsTapCmd.Flags().Lookup("domains-file"))
 }
 
 func runDNSTap(cmd *cobra.Command, args []string) error {
@@ -89,9 +95,30 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	}
 	effectiveBPFFilter := filterBuilder.Build(filterConfig)
 
+	// Get domain pattern for filtering
+	domainPattern := getStringConfig("tap.dns.domain_pattern", dnsTapDomainPattern)
+	domainsFile := getStringConfig("tap.dns.domains_file", dnsTapDomainsFile)
+
+	// Store domain pattern in viper for processor-level DNS filtering
+	if domainPattern != "" {
+		viper.Set("dns.domain_pattern", domainPattern)
+	}
+
+	// Load additional patterns from file if specified
+	if domainsFile != "" {
+		filePatterns, err := dns.LoadDomainsFromFile(domainsFile)
+		if err != nil {
+			return fmt.Errorf("failed to load domains file: %w", err)
+		}
+		viper.Set("dns.domain_patterns", filePatterns)
+		logger.Info("Loaded domain patterns from file", "count", len(filePatterns), "file", domainsFile)
+	}
+
 	logger.Info("DNS BPF filter configured",
 		"udp_only", dnsTapUDPOnly,
 		"ports", dnsTapPorts,
+		"domain_pattern", domainPattern,
+		"domains_file", domainsFile,
 		"effective_filter", effectiveBPFFilter)
 
 	// Build auto-rotate PCAP config - default for DNS mode
@@ -245,6 +272,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		"bpf_filter", localSourceConfig.BPFFilter,
 		"dns_ports", dnsTapPorts,
 		"udp_only", dnsTapUDPOnly,
+		"domain_pattern", domainPattern,
 		"auto_rotate_pcap", effectiveAutoRotate,
 		"listen", config.ListenAddr)
 

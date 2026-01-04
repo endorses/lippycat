@@ -11,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
@@ -22,12 +23,13 @@ import (
 
 // Global state for DNS sniffer
 var (
-	dnsParser     *Parser
-	dnsTracker    *QueryTracker
-	dnsTunneling  *TunnelingDetector
-	dnsAggregator *QueryAggregator
-	dnsPcapWriter *pcapgo.Writer
-	dnsOutputFile *os.File
+	dnsParser         *Parser
+	dnsTracker        *QueryTracker
+	dnsTunneling      *TunnelingDetector
+	dnsAggregator     *QueryAggregator
+	dnsPcapWriter     *pcapgo.Writer
+	dnsOutputFile     *os.File
+	dnsDomainPatterns []string // Domain patterns to filter (glob-style)
 )
 
 // StartDNSSniffer starts the DNS sniffer on the specified interfaces.
@@ -46,6 +48,17 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	if viper.GetBool("dns.detect_tunneling") {
 		dnsTunneling = NewTunnelingDetector(DefaultTunnelingConfig())
+	}
+
+	// Initialize domain patterns from viper
+	dnsDomainPatterns = nil
+	if pattern := viper.GetString("dns.domain_pattern"); pattern != "" {
+		dnsDomainPatterns = []string{pattern}
+		logger.Info("DNS domain filter enabled", "pattern", pattern)
+	}
+	if patterns := viper.GetStringSlice("dns.domain_patterns"); len(patterns) > 0 {
+		dnsDomainPatterns = append(dnsDomainPatterns, patterns...)
+		logger.Info("DNS domain patterns loaded", "count", len(patterns))
 	}
 
 	// Create aggregator for statistics
@@ -112,6 +125,11 @@ func processDNSPackets(packetChan <-chan capture.PacketInfo) {
 		// Parse DNS
 		metadata := dnsParser.Parse(packet)
 		if metadata == nil {
+			continue
+		}
+
+		// Apply domain filter if configured
+		if len(dnsDomainPatterns) > 0 && !filtering.MatchAnyGlob(dnsDomainPatterns, metadata.QueryName) {
 			continue
 		}
 

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 )
 
 // FilterBuilder builds BPF filters for DNS capture.
@@ -138,4 +140,10 @@ var DoHPorts = []uint16{
 // DoTPorts includes DNS-over-TLS ports.
 var DoTPorts = []uint16{
 	853, // DNS-over-TLS
+}
+
+// LoadDomainsFromFile loads domain patterns from a file.
+// Each line is a domain pattern. Empty lines and lines starting with # are ignored.
+func LoadDomainsFromFile(filename string) ([]string, error) {
+	return filtering.LoadPatternsFromFile(filename)
 }

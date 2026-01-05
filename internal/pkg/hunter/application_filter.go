@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 
 	"github.com/endorses/lippycat/api/gen/management"
@@ -47,7 +48,8 @@ type ApplicationFilter struct {
 	sipURIMatcher  *ahocorasick.BufferedMatcher // Separate Aho-Corasick matcher for SIPURI matching
 
 	// Protocol-specific matchers
-	dnsMatcher *filter.DNSMatcher // DNS domain pattern matcher
+	dnsMatcher   *filter.DNSMatcher   // DNS domain pattern matcher
+	emailMatcher *filter.EmailMatcher // Email address/subject pattern matcher
 
 	// Filter ID mappings for LI correlation
 	acPatternToFilterID     map[int]string    // AC pattern ID -> filter ID (for SIPUser/PhoneNumber AC patterns)
@@ -97,6 +99,7 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		sipURIPatterns:          make([]ahocorasick.Pattern, 0),
 		sipURIMatcher:           ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
 		dnsMatcher:              filter.NewDNSMatcher(),                                   // DNS domain matcher
+		emailMatcher:            filter.NewEmailMatcher(),                                 // Email address/subject matcher
 		acPatternToFilterID:     make(map[int]string),
 		phoneNumberToFilterID:   make(map[string]string),
 		sipURIPatternToFilterID: make(map[int]string),
@@ -298,12 +301,18 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 		af.dnsMatcher.UpdateFilters(filters)
 	}
 
+	// Update email matcher with all filters (it extracts email address/subject filters internally)
+	if af.emailMatcher != nil {
+		af.emailMatcher.UpdateFilters(filters)
+	}
+
 	logger.Info("Updated application-level filters (hot-reload, no restart)",
 		"sip_users", len(af.sipUsers),
 		"sip_uris", len(af.sipURIs),
 		"phone_numbers", len(af.phoneNumbers),
 		"ip_addresses", len(af.ipAddresses),
 		"dns_domains", af.dnsMatcher.HasFilters(),
+		"email_filters", af.emailMatcher.HasFilters(),
 		"gpu_enabled", af.enabled)
 
 	// Build Aho-Corasick patterns for CPU matching
@@ -413,11 +422,12 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 
 	// Check if we have any filters at all
 	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
+	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, match everything
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters {
 		return true
 	}
 
@@ -435,6 +445,13 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	// Check DNS packets
 	if hasDNSFilters {
 		if matched, _ := af.matchDNSPacket(packet); matched {
+			return true
+		}
+	}
+
+	// Check email packets
+	if hasEmailFilters {
+		if matched, _ := af.matchEmailPacket(packet); matched {
 			return true
 		}
 	}
@@ -474,11 +491,12 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 
 	// Check if we have any filters at all
 	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
+	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, match everything (but no specific filter IDs)
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters {
 		return true, nil
 	}
 
@@ -494,6 +512,13 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 	if hasDNSFilters {
 		if matched, dnsFilterIDs := af.matchDNSPacket(packet); matched {
 			matchedFilterIDs = append(matchedFilterIDs, dnsFilterIDs...)
+		}
+	}
+
+	// Check email packets
+	if hasEmailFilters {
+		if matched, emailFilterIDs := af.matchEmailPacket(packet); matched {
+			matchedFilterIDs = append(matchedFilterIDs, emailFilterIDs...)
 		}
 	}
 
@@ -1210,6 +1235,196 @@ func (af *ApplicationFilter) matchDNSPacket(packet gopacket.Packet) (bool, []str
 	}
 
 	return len(matchedFilterIDs) > 0, matchedFilterIDs
+}
+
+// matchEmailPacket checks if a packet is an email protocol (SMTP, POP3, IMAP) and matches email filters.
+// Returns true if the packet is email and matches at least one filter, along with matched filter IDs.
+func (af *ApplicationFilter) matchEmailPacket(packet gopacket.Packet) (bool, []string) {
+	// First check if this is an email protocol packet using the detector
+	result := af.detector.Detect(packet)
+	if result == nil {
+		return false, nil
+	}
+
+	// Check for email protocols
+	switch result.Protocol {
+	case "SMTP", "POP3", "IMAP":
+		// Email protocol detected
+	default:
+		return false, nil
+	}
+
+	// Get packet payload for field extraction
+	appLayer := packet.ApplicationLayer()
+	if appLayer == nil {
+		return false, nil
+	}
+	payload := appLayer.LayerContents()
+	if len(payload) == 0 {
+		return false, nil
+	}
+
+	// Extract email fields based on protocol
+	var sender, recipient, subject string
+
+	switch result.Protocol {
+	case "SMTP":
+		sender, recipient, subject = af.extractSMTPFields(payload, result.Metadata)
+	case "POP3", "IMAP":
+		// POP3/IMAP field extraction can be added later
+		// For now, just match based on detected protocol
+	}
+
+	// If no fields extracted, check if this is a protocol we should pass through
+	// when we have email filters (to support session-based filtering at processor)
+	if sender == "" && recipient == "" && subject == "" {
+		return false, nil
+	}
+
+	// Match against email filters
+	var matchedFilterIDs []string
+	seen := make(map[string]bool)
+
+	// Match sender address
+	if sender != "" {
+		if matched, filterIDs := af.emailMatcher.MatchAddress(sender); matched {
+			for _, id := range filterIDs {
+				if !seen[id] {
+					seen[id] = true
+					matchedFilterIDs = append(matchedFilterIDs, id)
+				}
+			}
+		}
+	}
+
+	// Match recipient address
+	if recipient != "" {
+		if matched, filterIDs := af.emailMatcher.MatchAddress(recipient); matched {
+			for _, id := range filterIDs {
+				if !seen[id] {
+					seen[id] = true
+					matchedFilterIDs = append(matchedFilterIDs, id)
+				}
+			}
+		}
+	}
+
+	// Match subject
+	if subject != "" {
+		if matched, filterIDs := af.emailMatcher.MatchSubject(subject); matched {
+			for _, id := range filterIDs {
+				if !seen[id] {
+					seen[id] = true
+					matchedFilterIDs = append(matchedFilterIDs, id)
+				}
+			}
+		}
+	}
+
+	return len(matchedFilterIDs) > 0, matchedFilterIDs
+}
+
+// extractSMTPFields extracts sender, recipient, and subject from SMTP packet payload.
+// Uses detector metadata when available, falls back to payload parsing.
+func (af *ApplicationFilter) extractSMTPFields(payload []byte, metadata map[string]interface{}) (sender, recipient, subject string) {
+	payloadStr := string(payload)
+
+	// Check detector metadata for command type and args
+	if metadata != nil {
+		if msgType, ok := metadata["type"].(string); ok && msgType == "command" {
+			if cmd, ok := metadata["command"].(string); ok {
+				if args, ok := metadata["args"].(string); ok {
+					switch cmd {
+					case "MAIL", "MAIL FROM":
+						sender = extractEmailAddress(args)
+					case "RCPT", "RCPT TO":
+						recipient = extractEmailAddress(args)
+					}
+				}
+			}
+			return
+		}
+	}
+
+	// Parse payload directly for commands
+	upperPayload := bytes.ToUpper(payload[:min(20, len(payload))])
+
+	if bytes.HasPrefix(upperPayload, []byte("MAIL FROM:")) {
+		// Extract sender from MAIL FROM:<addr>
+		colonIdx := bytes.IndexByte(payload, ':')
+		if colonIdx != -1 && colonIdx < len(payload)-1 {
+			sender = extractEmailAddress(string(payload[colonIdx+1:]))
+		}
+	} else if bytes.HasPrefix(upperPayload, []byte("RCPT TO:")) {
+		// Extract recipient from RCPT TO:<addr>
+		colonIdx := bytes.IndexByte(payload, ':')
+		if colonIdx != -1 && colonIdx < len(payload)-1 {
+			recipient = extractEmailAddress(string(payload[colonIdx+1:]))
+		}
+	} else if isSubjectHeader(payloadStr) {
+		// Extract subject from Subject: header line
+		subject = extractSubjectLine(payloadStr)
+	}
+
+	return
+}
+
+// extractEmailAddress extracts an email address from an SMTP command argument.
+// Handles formats like: <user@example.com>, "Name" <user@example.com>, user@example.com
+func extractEmailAddress(arg string) string {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return ""
+	}
+
+	// Look for angle brackets first: <user@example.com>
+	ltIdx := strings.IndexByte(arg, '<')
+	if ltIdx != -1 {
+		gtIdx := strings.IndexByte(arg[ltIdx:], '>')
+		if gtIdx != -1 {
+			return strings.TrimSpace(arg[ltIdx+1 : ltIdx+gtIdx])
+		}
+	}
+
+	// No angle brackets - might be bare address or have trailing params
+	// Split on whitespace and take first part
+	parts := strings.Fields(arg)
+	if len(parts) > 0 {
+		addr := parts[0]
+		// Remove any trailing >
+		addr = strings.TrimSuffix(addr, ">")
+		if strings.Contains(addr, "@") {
+			return addr
+		}
+	}
+
+	return ""
+}
+
+// isSubjectHeader checks if the payload line is a Subject header.
+func isSubjectHeader(payload string) bool {
+	upper := strings.ToUpper(payload)
+	return strings.HasPrefix(upper, "SUBJECT:")
+}
+
+// extractSubjectLine extracts the subject value from a Subject header line.
+func extractSubjectLine(payload string) string {
+	colonIdx := strings.IndexByte(payload, ':')
+	if colonIdx == -1 || colonIdx >= len(payload)-1 {
+		return ""
+	}
+
+	// Get value after colon, trim whitespace
+	subject := strings.TrimSpace(payload[colonIdx+1:])
+
+	// Handle CRLF - take only first line
+	if crlfIdx := strings.Index(subject, "\r\n"); crlfIdx != -1 {
+		subject = subject[:crlfIdx]
+	} else if lfIdx := strings.IndexByte(subject, '\n'); lfIdx != -1 {
+		subject = subject[:lfIdx]
+	}
+
+	return strings.TrimSpace(subject)
 }
 
 // Close cleans up GPU resources

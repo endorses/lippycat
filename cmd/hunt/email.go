@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/constants"
@@ -20,39 +21,67 @@ import (
 var (
 	// Email-specific flags for hunter mode
 	hunterEmailPorts string
+
+	// Content filter flags for local filtering (in addition to processor-pushed filters)
+	hunterEmailSender    string // Sender address patterns (comma-separated)
+	hunterEmailRecipient string // Recipient address patterns (comma-separated)
+	hunterEmailSubject   string // Subject patterns (comma-separated)
+	hunterEmailKeywords  string // Body/subject keyword patterns (comma-separated)
+	hunterCaptureBody    bool   // Enable body capture for keyword filtering
+	hunterMaxBodySize    int    // Max body size to capture (bytes)
 )
 
 var emailHuntCmd = &cobra.Command{
 	Use:   "email",
 	Short: "Run as Email hunter with SMTP filtering",
-	Long: `Run lippycat in Email hunter mode with packet forwarding.
+	Long: `Run lippycat in Email hunter mode with TCP reassembly and content filtering.
 
-Email hunter mode captures SMTP traffic and forwards it to the
-processor for analysis and correlation.
+Email hunter mode captures SMTP traffic, reassembles TCP streams, applies
+content filtering (including body keyword matching), and forwards matched
+email sessions to the processor.
 
 Features:
-- SMTP command/response capture
+- SMTP TCP stream reassembly for complete message parsing
 - Port filtering (default: 25, 587, 465)
+- Sender/recipient address filtering (glob patterns)
+- Subject line filtering (glob patterns)
+- Body content keyword filtering (Aho-Corasick)
 - Efficient forwarding to processor
 
-Note: Email address filtering is managed by the processor and pushed to hunters.
+Filters can be specified locally (flags) or pushed from the processor.
+Local filters apply in addition to processor-pushed filters.
 
 Example:
   lc hunt email --processor processor:50051
   lc hunt email --processor 192.168.1.100:50051 --interface eth0
-  lc hunt email --processor processor:50051 --smtp-port 25,587,2525`,
+  lc hunt email --processor processor:50051 --smtp-port 25,587,2525
+  lc hunt email --processor processor:50051 --sender "*@suspicious.com"
+  lc hunt email --processor processor:50051 --keywords "confidential,secret" --capture-body`,
 	RunE: runEmailHunt,
 }
 
 func init() {
 	HuntCmd.AddCommand(emailHuntCmd)
 
-	// Email-specific flags (BPF-level filtering only)
-	// Note: Application-level email filtering is managed by the processor and pushed to hunters
+	// Email-specific flags (BPF-level filtering)
 	emailHuntCmd.Flags().StringVar(&hunterEmailPorts, "smtp-port", "25,587,465", "SMTP port(s) to capture, comma-separated")
+
+	// Content filter flags for local filtering
+	emailHuntCmd.Flags().StringVar(&hunterEmailSender, "sender", "", "Sender address patterns (comma-separated, glob-style)")
+	emailHuntCmd.Flags().StringVar(&hunterEmailRecipient, "recipient", "", "Recipient address patterns (comma-separated, glob-style)")
+	emailHuntCmd.Flags().StringVar(&hunterEmailSubject, "subject", "", "Subject patterns (comma-separated, glob-style)")
+	emailHuntCmd.Flags().StringVar(&hunterEmailKeywords, "keywords", "", "Body/subject keywords (comma-separated)")
+	emailHuntCmd.Flags().BoolVar(&hunterCaptureBody, "capture-body", false, "Enable body capture for keyword filtering")
+	emailHuntCmd.Flags().IntVar(&hunterMaxBodySize, "max-body-size", 65536, "Max body size to capture in bytes (default: 64KB)")
 
 	// Bind to viper
 	_ = viper.BindPFlag("hunter.email.ports", emailHuntCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("hunter.email.sender", emailHuntCmd.Flags().Lookup("sender"))
+	_ = viper.BindPFlag("hunter.email.recipient", emailHuntCmd.Flags().Lookup("recipient"))
+	_ = viper.BindPFlag("hunter.email.subject", emailHuntCmd.Flags().Lookup("subject"))
+	_ = viper.BindPFlag("hunter.email.keywords", emailHuntCmd.Flags().Lookup("keywords"))
+	_ = viper.BindPFlag("hunter.email.capture_body", emailHuntCmd.Flags().Lookup("capture-body"))
+	_ = viper.BindPFlag("hunter.email.max_body_size", emailHuntCmd.Flags().Lookup("max-body-size"))
 }
 
 func runEmailHunt(cmd *cobra.Command, args []string) error {
@@ -149,7 +178,6 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		"smtp_ports", hunterEmailPorts)
 
 	// Create hunter instance
-	// Note: Email address filtering is managed by the processor and pushed to hunters via gRPC
 	h, err := hunter.New(config)
 	if err != nil {
 		return fmt.Errorf("failed to create hunter: %w", err)
@@ -162,6 +190,32 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 	// Handle signals for graceful shutdown
 	cleanup := signals.SetupHandler(ctx, cancel)
 	defer cleanup()
+
+	// Build content filter from flags (local filters)
+	contentFilter := buildEmailContentFilter()
+
+	// Configure SMTP stream factory
+	smtpConfig := email.SMTPStreamFactoryConfig{
+		MaxGoroutines:   1000,
+		CleanupInterval: 30 * time.Second,
+		ServerPorts:     ports,
+		CaptureBody:     hunterCaptureBody || len(hunterEmailKeywords) > 0, // Enable if keywords specified
+		MaxBodySize:     hunterMaxBodySize,
+	}
+
+	// Create email packet processor with TCP reassembly and content filtering
+	processor := email.NewEmailPacketProcessor(ctx, h, contentFilter, smtpConfig)
+	defer processor.Close()
+
+	// Set the packet processor on the hunter
+	h.SetPacketProcessor(processor)
+
+	logger.Info("Email hunter initialized with TCP reassembly and content filtering",
+		"has_sender_filter", len(hunterEmailSender) > 0,
+		"has_recipient_filter", len(hunterEmailRecipient) > 0,
+		"has_subject_filter", len(hunterEmailSubject) > 0,
+		"has_keywords", len(hunterEmailKeywords) > 0,
+		"capture_body", smtpConfig.CaptureBody)
 
 	// Start hunter in background
 	errChan := make(chan error, constants.ErrorChannelBuffer)
@@ -179,4 +233,38 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Shutdown signal received, stopping Email hunter...")
 		return nil
 	}
+}
+
+// buildEmailContentFilter creates a ContentFilter from command-line flags.
+func buildEmailContentFilter() *email.ContentFilter {
+	cfg := email.ContentFilterConfig{}
+
+	// Parse comma-separated patterns
+	if hunterEmailSender != "" {
+		cfg.SenderPatterns = splitAndTrim(hunterEmailSender)
+	}
+	if hunterEmailRecipient != "" {
+		cfg.RecipientPatterns = splitAndTrim(hunterEmailRecipient)
+	}
+	if hunterEmailSubject != "" {
+		cfg.SubjectPatterns = splitAndTrim(hunterEmailSubject)
+	}
+	if hunterEmailKeywords != "" {
+		cfg.Keywords = splitAndTrim(hunterEmailKeywords)
+	}
+
+	return email.NewContentFilter(cfg)
+}
+
+// splitAndTrim splits a comma-separated string and trims whitespace.
+func splitAndTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }

@@ -102,6 +102,9 @@ message PacketMetadata {
 
     // Generic key-value details for protocol-specific data
     map<string, string> details = 10;
+
+    // Email-specific metadata (if applicable)
+    EmailMetadata email = 11;
 }
 
 // SIPMetadata for SIP packets
@@ -150,6 +153,30 @@ message RTPMetadata {
 
     // Timestamp
     uint32 timestamp = 4;
+}
+
+// EmailMetadata for SMTP/email packets
+message EmailMetadata {
+    // MAIL FROM address
+    string mail_from = 1;
+
+    // RCPT TO addresses
+    repeated string rcpt_to = 2;
+
+    // Subject header
+    string subject = 3;
+
+    // Message-ID header
+    string message_id = 4;
+
+    // Body preview (limited to configured max size)
+    string body_preview = 5;
+
+    // Full body size in bytes
+    int32 body_size = 6;
+
+    // True if body was truncated due to size limit
+    bool body_truncated = 7;
 }
 
 // BatchStats contains statistics about a hunter's capture

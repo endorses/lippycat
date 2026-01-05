@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-05
-**Status:** Phase 0-2 Complete (local filtering), Phase 2 distributed filtering pending
+**Status:** Phase 0-2 Complete (local + distributed filtering with body content)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -293,12 +293,26 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body
 lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-size 262144
 ```
 
-### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+### Content Filtering - Distributed (hunt) ✅ Complete
 - [x] `FILTER_EMAIL_ADDRESS` type in proto (Phase 0 - complete)
 - [x] `FILTER_EMAIL_SUBJECT` type in proto (Phase 0 - complete)
 - [x] Hunter email address/subject matching logic (`internal/pkg/hunter/filter/email.go`)
-- [ ] Wire email filters from TUI/CLI to hunters
-- [ ] Test end-to-end email filter distribution
+- [x] Wire email filters from TUI/CLI to hunters (`ApplicationFilter.emailMatcher` integration)
+- [x] Email packet detection and field extraction (`matchEmailPacket()` in ApplicationFilter)
+- [x] Test email matcher and SMTP field extraction (unit tests added)
+- [x] Hunter-side TCP reassembly for body content filtering (follows VoIP SIP-over-TCP pattern)
+- [x] `EmailPacketProcessor` with TCP assembler and packet buffering
+- [x] `EmailHunterHandler` implementing `SMTPMessageHandler` for stream callbacks
+- [x] Body keyword matching via Aho-Corasick at hunter level
+- [x] TCP packet buffering per session for forwarding after filter match
+
+**Implementation details:**
+- Hunters perform TCP reassembly locally using `tcpassembly.Assembler` (same as VoIP SIP-over-TCP)
+- `EmailHunterHandler` accumulates envelope data across SMTP commands (MAIL FROM, RCPT TO, DATA)
+- On DATA_COMPLETE, the handler applies full `ContentFilter` including body keyword matching
+- Matched sessions retrieve buffered TCP packets via `GetEmailBufferedPackets()` and forward to processor
+- Non-matching sessions discard buffered packets to save bandwidth
+- Configurable via `--capture-body`, `--max-body-size`, `--keywords` flags on `hunt email` command
 
 ## Phase 3: TLS/JA3 Fingerprinting (3-4 days)
 
@@ -446,16 +460,15 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 |-------|----------|------------------|-----------------|----------------------|-------|
 | 0 | Infrastructure | N/A | N/A | ✅ Complete | ✅ Complete |
 | 1 | DNS | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
-| 2 | SMTP | ✅ Complete | ✅ Complete | Ready (Phase 0 done) | ✅ Local Complete |
+| 2 | SMTP | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 3 | TLS/JA3 | 3-4 days | 1 day | Ready (Phase 0 done) | 4-5 days |
 | 4 | HTTP | 4-5 days | 1-2 days | Ready (Phase 0 done) | 5-7 days |
 | 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
 
-**Critical path:** Phase 0-2 (local filtering) complete. Email distributed filtering wiring remains.
+**Critical path:** Phases 0-2 complete (DNS and email local + distributed filtering).
 
 **Remaining work:**
-- Phase 2 email distributed filtering wiring: 0.5 days
 - Phase 3-5 complete: ~14-17 days
 
 ## Current Status (2026-01-05)
@@ -488,6 +501,19 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
   - DNS packet detection via centralized detector
   - Domain extraction from DNS queries/answers (including CNAME targets)
   - Full filter ID tracking for LI correlation
+- **Phase 2 - Email Distributed Filtering:** ✅
+  - Email hunters advertise `email_address`, `email_subject` filter capabilities
+  - `ApplicationFilter` integrates `EmailMatcher` for address/subject pattern matching
+  - SMTP packet detection via centralized detector
+  - Email field extraction from MAIL FROM, RCPT TO, Subject header packets
+  - Full filter ID tracking for LI correlation
+  - Unit tests for EmailMatcher and SMTP field extraction
+  - **Hunter-side TCP reassembly for body content filtering:**
+    - `EmailPacketProcessor` creates TCP assembler and feeds packets
+    - `EmailHunterHandler` implements `SMTPMessageHandler` for stream callbacks
+    - TCP packet buffering per session via `tcp_buffer.go`
+    - Body keyword matching via Aho-Corasick at hunter level
+    - Full parity with local sniff/tap body filtering capabilities
 
 ### What's Incomplete
 
@@ -495,11 +521,7 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
    - No validation for JA3 hash format (32-char hex)
    - No validation for glob syntax errors
 
-2. **Email distributed filtering wiring:**
-   - Hunt mode email filter integration needs testing
-
 ### Recommended Next Steps
 
 1. **Add pattern validation:** JA3/JA3S hash format, glob syntax
 2. **Start Phase 3 TLS/JA3 fingerprinting:** Protocol parser, fingerprint calculation
-3. **Wire email distributed filtering:** Test hunt mode email filter integration

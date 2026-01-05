@@ -303,7 +303,9 @@ type PacketMetadata struct {
 	// Generic info string for display (e.g., "SSH-2.0-OpenSSH_...", "Echo Reply")
 	Info string `protobuf:"bytes,9,opt,name=info,proto3" json:"info,omitempty"`
 	// Generic key-value details for protocol-specific data
-	Details       map[string]string `protobuf:"bytes,10,rep,name=details,proto3" json:"details,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Details map[string]string `protobuf:"bytes,10,rep,name=details,proto3" json:"details,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Email-specific metadata (if applicable)
+	Email         *EmailMetadata `protobuf:"bytes,11,opt,name=email,proto3" json:"email,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -404,6 +406,13 @@ func (x *PacketMetadata) GetInfo() string {
 func (x *PacketMetadata) GetDetails() map[string]string {
 	if x != nil {
 		return x.Details
+	}
+	return nil
+}
+
+func (x *PacketMetadata) GetEmail() *EmailMetadata {
+	if x != nil {
+		return x.Email
 	}
 	return nil
 }
@@ -608,6 +617,106 @@ func (x *RTPMetadata) GetTimestamp() uint32 {
 	return 0
 }
 
+// EmailMetadata for SMTP/email packets
+type EmailMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// MAIL FROM address
+	MailFrom string `protobuf:"bytes,1,opt,name=mail_from,json=mailFrom,proto3" json:"mail_from,omitempty"`
+	// RCPT TO addresses
+	RcptTo []string `protobuf:"bytes,2,rep,name=rcpt_to,json=rcptTo,proto3" json:"rcpt_to,omitempty"`
+	// Subject header
+	Subject string `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`
+	// Message-ID header
+	MessageId string `protobuf:"bytes,4,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	// Body preview (limited to configured max size)
+	BodyPreview string `protobuf:"bytes,5,opt,name=body_preview,json=bodyPreview,proto3" json:"body_preview,omitempty"`
+	// Full body size in bytes
+	BodySize int32 `protobuf:"varint,6,opt,name=body_size,json=bodySize,proto3" json:"body_size,omitempty"`
+	// True if body was truncated due to size limit
+	BodyTruncated bool `protobuf:"varint,7,opt,name=body_truncated,json=bodyTruncated,proto3" json:"body_truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EmailMetadata) Reset() {
+	*x = EmailMetadata{}
+	mi := &file_data_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EmailMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EmailMetadata) ProtoMessage() {}
+
+func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EmailMetadata.ProtoReflect.Descriptor instead.
+func (*EmailMetadata) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *EmailMetadata) GetMailFrom() string {
+	if x != nil {
+		return x.MailFrom
+	}
+	return ""
+}
+
+func (x *EmailMetadata) GetRcptTo() []string {
+	if x != nil {
+		return x.RcptTo
+	}
+	return nil
+}
+
+func (x *EmailMetadata) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *EmailMetadata) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
+	}
+	return ""
+}
+
+func (x *EmailMetadata) GetBodyPreview() string {
+	if x != nil {
+		return x.BodyPreview
+	}
+	return ""
+}
+
+func (x *EmailMetadata) GetBodySize() int32 {
+	if x != nil {
+		return x.BodySize
+	}
+	return 0
+}
+
+func (x *EmailMetadata) GetBodyTruncated() bool {
+	if x != nil {
+		return x.BodyTruncated
+	}
+	return false
+}
+
 // BatchStats contains statistics about a hunter's capture
 type BatchStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -625,7 +734,7 @@ type BatchStats struct {
 
 func (x *BatchStats) Reset() {
 	*x = BatchStats{}
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +746,7 @@ func (x *BatchStats) String() string {
 func (*BatchStats) ProtoMessage() {}
 
 func (x *BatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +759,7 @@ func (x *BatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchStats.ProtoReflect.Descriptor instead.
 func (*BatchStats) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{5}
+	return file_data_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *BatchStats) GetTotalCaptured() uint64 {
@@ -696,7 +805,7 @@ type StreamControl struct {
 
 func (x *StreamControl) Reset() {
 	*x = StreamControl{}
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -708,7 +817,7 @@ func (x *StreamControl) String() string {
 func (*StreamControl) ProtoMessage() {}
 
 func (x *StreamControl) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -721,7 +830,7 @@ func (x *StreamControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamControl.ProtoReflect.Descriptor instead.
 func (*StreamControl) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{6}
+	return file_data_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *StreamControl) GetAckSequence() uint64 {
@@ -766,7 +875,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -778,7 +887,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -791,7 +900,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{7}
+	return file_data_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SubscribeRequest) GetHunterIds() []string {
@@ -847,7 +956,7 @@ type CorrelatedCallUpdate struct {
 
 func (x *CorrelatedCallUpdate) Reset() {
 	*x = CorrelatedCallUpdate{}
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -859,7 +968,7 @@ func (x *CorrelatedCallUpdate) String() string {
 func (*CorrelatedCallUpdate) ProtoMessage() {}
 
 func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -872,7 +981,7 @@ func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CorrelatedCallUpdate.ProtoReflect.Descriptor instead.
 func (*CorrelatedCallUpdate) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{8}
+	return file_data_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CorrelatedCallUpdate) GetCorrelationId() string {
@@ -958,7 +1067,7 @@ type CallLegInfo struct {
 
 func (x *CallLegInfo) Reset() {
 	*x = CallLegInfo{}
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1079,7 @@ func (x *CallLegInfo) String() string {
 func (*CallLegInfo) ProtoMessage() {}
 
 func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1092,7 @@ func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallLegInfo.ProtoReflect.Descriptor instead.
 func (*CallLegInfo) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{9}
+	return file_data_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CallLegInfo) GetCallId() string {
@@ -1070,7 +1179,7 @@ const file_data_proto_rawDesc = "" +
 	"\tlink_type\x18\x06 \x01(\rR\blinkType\x129\n" +
 	"\bmetadata\x18\a \x01(\v2\x1d.lippycat.data.PacketMetadataR\bmetadata\x12%\n" +
 	"\x0einterface_name\x18\b \x01(\tR\rinterfaceName\x12,\n" +
-	"\x12matched_filter_ids\x18\t \x03(\tR\x10matchedFilterIds\"\xa0\x03\n" +
+	"\x12matched_filter_ids\x18\t \x03(\tR\x10matchedFilterIds\"\xd4\x03\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +
@@ -1082,7 +1191,8 @@ const file_data_proto_rawDesc = "" +
 	"\x03rtp\x18\b \x01(\v2\x1a.lippycat.data.RTPMetadataR\x03rtp\x12\x12\n" +
 	"\x04info\x18\t \x01(\tR\x04info\x12D\n" +
 	"\adetails\x18\n" +
-	" \x03(\v2*.lippycat.data.PacketMetadata.DetailsEntryR\adetails\x1a:\n" +
+	" \x03(\v2*.lippycat.data.PacketMetadata.DetailsEntryR\adetails\x122\n" +
+	"\x05email\x18\v \x01(\v2\x1c.lippycat.data.EmailMetadataR\x05email\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x02\n" +
@@ -1102,7 +1212,16 @@ const file_data_proto_rawDesc = "" +
 	"\x04ssrc\x18\x01 \x01(\rR\x04ssrc\x12!\n" +
 	"\fpayload_type\x18\x02 \x01(\rR\vpayloadType\x12\x1a\n" +
 	"\bsequence\x18\x03 \x01(\rR\bsequence\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\rR\ttimestamp\"\x9b\x01\n" +
+	"\ttimestamp\x18\x04 \x01(\rR\ttimestamp\"\xe5\x01\n" +
+	"\rEmailMetadata\x12\x1b\n" +
+	"\tmail_from\x18\x01 \x01(\tR\bmailFrom\x12\x17\n" +
+	"\arcpt_to\x18\x02 \x03(\tR\x06rcptTo\x12\x18\n" +
+	"\asubject\x18\x03 \x01(\tR\asubject\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x04 \x01(\tR\tmessageId\x12!\n" +
+	"\fbody_preview\x18\x05 \x01(\tR\vbodyPreview\x12\x1b\n" +
+	"\tbody_size\x18\x06 \x01(\x05R\bbodySize\x12%\n" +
+	"\x0ebody_truncated\x18\a \x01(\bR\rbodyTruncated\"\x9b\x01\n" +
 	"\n" +
 	"BatchStats\x12%\n" +
 	"\x0etotal_captured\x18\x01 \x01(\x04R\rtotalCaptured\x12)\n" +
@@ -1165,7 +1284,7 @@ func file_data_proto_rawDescGZIP() []byte {
 }
 
 var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_data_proto_goTypes = []any{
 	(FlowControl)(0),             // 0: lippycat.data.FlowControl
 	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
@@ -1173,33 +1292,35 @@ var file_data_proto_goTypes = []any{
 	(*PacketMetadata)(nil),       // 3: lippycat.data.PacketMetadata
 	(*SIPMetadata)(nil),          // 4: lippycat.data.SIPMetadata
 	(*RTPMetadata)(nil),          // 5: lippycat.data.RTPMetadata
-	(*BatchStats)(nil),           // 6: lippycat.data.BatchStats
-	(*StreamControl)(nil),        // 7: lippycat.data.StreamControl
-	(*SubscribeRequest)(nil),     // 8: lippycat.data.SubscribeRequest
-	(*CorrelatedCallUpdate)(nil), // 9: lippycat.data.CorrelatedCallUpdate
-	(*CallLegInfo)(nil),          // 10: lippycat.data.CallLegInfo
-	nil,                          // 11: lippycat.data.PacketMetadata.DetailsEntry
+	(*EmailMetadata)(nil),        // 6: lippycat.data.EmailMetadata
+	(*BatchStats)(nil),           // 7: lippycat.data.BatchStats
+	(*StreamControl)(nil),        // 8: lippycat.data.StreamControl
+	(*SubscribeRequest)(nil),     // 9: lippycat.data.SubscribeRequest
+	(*CorrelatedCallUpdate)(nil), // 10: lippycat.data.CorrelatedCallUpdate
+	(*CallLegInfo)(nil),          // 11: lippycat.data.CallLegInfo
+	nil,                          // 12: lippycat.data.PacketMetadata.DetailsEntry
 }
 var file_data_proto_depIdxs = []int32{
 	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
-	6,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
+	7,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
 	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
 	4,  // 3: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
 	5,  // 4: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	11, // 5: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	0,  // 6: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	10, // 7: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	1,  // 8: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	8,  // 9: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	8,  // 10: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	7,  // 11: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1,  // 12: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	9,  // 13: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	11, // [11:14] is the sub-list for method output_type
-	8,  // [8:11] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	12, // 5: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	6,  // 6: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	0,  // 7: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	11, // 8: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	1,  // 9: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	9,  // 10: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	9,  // 11: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	8,  // 12: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	1,  // 13: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	10, // 14: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	12, // [12:15] is the sub-list for method output_type
+	9,  // [9:12] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -1213,7 +1334,7 @@ func file_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

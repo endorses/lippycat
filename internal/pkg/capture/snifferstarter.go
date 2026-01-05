@@ -395,8 +395,10 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 	}
 
 	// Create PCAP writer if write_file is specified
+	// Note: The PCAP header is written on the first packet to use the correct link type
 	var pcapWriter *pcapgo.Writer
 	var pcapFile *os.File
+	var pcapHeaderWritten bool
 	if writeFile != "" {
 		// #nosec G304 -- writeFile is from CLI --write-file flag, intentional user-specified path
 		f, err := os.Create(writeFile)
@@ -405,21 +407,13 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 		} else {
 			pcapFile = f
 			pcapWriter = pcapgo.NewWriter(pcapFile)
-			// Write PCAP header with snaplen of 65535 (max packet size)
-			if err := pcapWriter.WriteFileHeader(65535, layers.LinkTypeEthernet); err != nil {
-				logger.Error("Failed to write PCAP header", "error", err)
-				pcapFile.Close()
-				pcapWriter = nil
-				pcapFile = nil
-			} else {
-				logger.Info("Writing packets to PCAP file", "file", writeFile)
-				defer func() {
-					if pcapFile != nil {
-						pcapFile.Close()
-						logger.Info("PCAP file written successfully", "file", writeFile, "packets", packetCount)
-					}
-				}()
-			}
+			logger.Info("Writing packets to PCAP file", "file", writeFile)
+			defer func() {
+				if pcapFile != nil {
+					pcapFile.Close()
+					logger.Info("PCAP file written successfully", "file", writeFile, "packets", packetCount)
+				}
+			}()
 		}
 	}
 
@@ -444,8 +438,22 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 
 		// Write to PCAP file if writer is available
 		if pcapWriter != nil {
-			if err := pcapWriter.WritePacket(p.Packet.Metadata().CaptureInfo, p.Packet.Data()); err != nil {
-				logger.Error("Failed to write packet to PCAP", "error", err)
+			// Write PCAP header on first packet to use correct link type
+			if !pcapHeaderWritten {
+				if err := pcapWriter.WriteFileHeader(65535, p.LinkType); err != nil {
+					logger.Error("Failed to write PCAP header", "error", err)
+					pcapFile.Close()
+					pcapWriter = nil
+					pcapFile = nil
+				} else {
+					pcapHeaderWritten = true
+					logger.Debug("Wrote PCAP header with link type", "link_type", p.LinkType)
+				}
+			}
+			if pcapWriter != nil {
+				if err := pcapWriter.WritePacket(p.Packet.Metadata().CaptureInfo, p.Packet.Data()); err != nil {
+					logger.Error("Failed to write packet to PCAP", "error", err)
+				}
 			}
 		}
 

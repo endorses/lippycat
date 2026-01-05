@@ -134,6 +134,11 @@ type EmailMetadata struct {
 	// Size information
 	MessageSize int // SIZE parameter or actual message size
 
+	// Body content (opt-in capture)
+	BodyPreview   string // Body preview (limited to configured max size)
+	BodySize      int    // Full body size in bytes
+	BodyTruncated bool   // True if body was truncated due to size limit
+
 	// Correlation and timing
 	TransactionTimeMs int64 // Transaction completion time
 	Correlated        bool  // True if response was correlated with command

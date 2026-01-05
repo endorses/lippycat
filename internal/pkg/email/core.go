@@ -152,9 +152,12 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		processEmailPackets(packetChan, asm)
 	}
 
-	// Create TCP assembler for SMTP
+	// Create TCP assembler for SMTP with body capture config
 	ctx := context.Background()
-	emailFactory = NewSMTPStreamFactory(ctx, emailHandler, DefaultSMTPStreamFactoryConfig())
+	factoryConfig := DefaultSMTPStreamFactoryConfig()
+	factoryConfig.CaptureBody = viper.GetBool("email.capture_body")
+	factoryConfig.MaxBodySize = viper.GetInt("email.max_body_size")
+	emailFactory = NewSMTPStreamFactory(ctx, emailHandler, factoryConfig)
 	streamPool := tcpassembly.NewStreamPool(emailFactory)
 	emailAssembler = tcpassembly.NewAssembler(streamPool)
 

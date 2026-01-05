@@ -208,3 +208,125 @@ func TestContentFilter_CaseInsensitive(t *testing.T) {
 		MailFrom: "USER@EXAMPLE.COM",
 	}))
 }
+
+func TestContentFilter_KeywordsInBody(t *testing.T) {
+	filter := NewContentFilter(ContentFilterConfig{
+		Keywords: []string{"confidential", "secret"},
+	})
+
+	require.True(t, filter.HasFilters())
+
+	// Should match - keyword in body only
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		Subject:     "Regular meeting notes",
+		BodyPreview: "This document contains confidential information.",
+	}))
+
+	// Should match - keyword in body (case insensitive)
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		Subject:     "Hello",
+		BodyPreview: "This is TOP SECRET data.",
+	}))
+
+	// Should not match - no keyword in subject or body
+	assert.False(t, filter.Match(&types.EmailMetadata{
+		Subject:     "Hello World",
+		BodyPreview: "Just a regular message.",
+	}))
+
+	// Should not match - empty body and no keyword in subject
+	assert.False(t, filter.Match(&types.EmailMetadata{
+		Subject:     "Hello World",
+		BodyPreview: "",
+	}))
+}
+
+func TestContentFilter_KeywordsInSubjectOrBody(t *testing.T) {
+	filter := NewContentFilter(ContentFilterConfig{
+		Keywords: []string{"urgent"},
+	})
+
+	require.True(t, filter.HasFilters())
+
+	// Should match - keyword in subject (body not checked since subject matches)
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		Subject:     "URGENT: Please respond",
+		BodyPreview: "Regular body content",
+	}))
+
+	// Should match - keyword in body (subject doesn't match)
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		Subject:     "Regular subject",
+		BodyPreview: "This is urgent - please review immediately.",
+	}))
+
+	// Should match - keyword in both
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		Subject:     "URGENT request",
+		BodyPreview: "This is urgent.",
+	}))
+}
+
+func TestContentFilter_KeywordsWithEmptySubject(t *testing.T) {
+	filter := NewContentFilter(ContentFilterConfig{
+		Keywords: []string{"important"},
+	})
+
+	require.True(t, filter.HasFilters())
+
+	// Should match - keyword in body when subject is empty
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		Subject:     "",
+		BodyPreview: "This is an important message.",
+	}))
+
+	// Should not match - neither subject nor body has keyword
+	assert.False(t, filter.Match(&types.EmailMetadata{
+		Subject:     "",
+		BodyPreview: "Just a regular message.",
+	}))
+
+	// Should not match - both empty
+	assert.False(t, filter.Match(&types.EmailMetadata{
+		Subject:     "",
+		BodyPreview: "",
+	}))
+}
+
+func TestContentFilter_CombinedWithBody(t *testing.T) {
+	// Test combined filters with body keyword matching
+	filter := NewContentFilter(ContentFilterConfig{
+		SenderPatterns: []string{"*@example.com"},
+		Keywords:       []string{"confidential"},
+	})
+
+	require.True(t, filter.HasFilters())
+
+	// Should match - sender matches AND keyword in body
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		MailFrom:    "user@example.com",
+		Subject:     "Regular subject",
+		BodyPreview: "This is confidential.",
+	}))
+
+	// Should match - sender matches AND keyword in subject
+	assert.True(t, filter.Match(&types.EmailMetadata{
+		MailFrom:    "user@example.com",
+		Subject:     "Confidential report",
+		BodyPreview: "",
+	}))
+
+	// Should not match - sender matches but no keyword
+	assert.False(t, filter.Match(&types.EmailMetadata{
+		MailFrom:    "user@example.com",
+		Subject:     "Hello",
+		BodyPreview: "Regular message.",
+	}))
+
+	// Should not match - keyword matches but sender doesn't
+	assert.False(t, filter.Match(&types.EmailMetadata{
+		MailFrom:    "user@other.com",
+		Subject:     "Confidential",
+		BodyPreview: "",
+	}))
+}

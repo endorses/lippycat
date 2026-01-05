@@ -33,6 +33,8 @@ var (
 	emailTapRecipientsFile string
 	emailTapSubjectsFile   string
 	emailTapKeywordsFile   string
+	emailTapCaptureBody    bool
+	emailTapMaxBodySize    int
 )
 
 var emailTapCmd = &cobra.Command{
@@ -53,7 +55,11 @@ Filter Options:
   --sender        Match sender only (MAIL FROM, glob pattern)
   --recipient     Match recipient only (RCPT TO, glob pattern)
   --subject       Match subject line (glob pattern)
-  --keywords-file Keywords for subject matching (Aho-Corasick)
+  --keywords-file Keywords for subject/body matching (Aho-Corasick)
+
+Body Capture (for keyword matching in body):
+  --capture-body      Enable body content capture (default: false)
+  --max-body-size     Maximum body size to capture (default: 64KB)
 
 Pattern Files (one pattern per line, # for comments):
   --addresses-file, --senders-file, --recipients-file, --subjects-file
@@ -83,7 +89,11 @@ func init() {
 	emailTapCmd.Flags().StringVar(&emailTapSendersFile, "senders-file", "", "Load sender patterns from file (one per line)")
 	emailTapCmd.Flags().StringVar(&emailTapRecipientsFile, "recipients-file", "", "Load recipient patterns from file (one per line)")
 	emailTapCmd.Flags().StringVar(&emailTapSubjectsFile, "subjects-file", "", "Load subject patterns from file (one per line)")
-	emailTapCmd.Flags().StringVar(&emailTapKeywordsFile, "keywords-file", "", "Load keywords from file for subject matching (Aho-Corasick)")
+	emailTapCmd.Flags().StringVar(&emailTapKeywordsFile, "keywords-file", "", "Load keywords from file for subject/body matching (Aho-Corasick)")
+
+	// Body capture flags
+	emailTapCmd.Flags().BoolVar(&emailTapCaptureBody, "capture-body", false, "Enable email body content capture (for keyword matching)")
+	emailTapCmd.Flags().IntVar(&emailTapMaxBodySize, "max-body-size", 65536, "Maximum body size to capture in bytes (default: 64KB)")
 
 	// Bind email-specific flags to viper
 	_ = viper.BindPFlag("tap.email.ports", emailTapCmd.Flags().Lookup("smtp-port"))
@@ -96,6 +106,8 @@ func init() {
 	_ = viper.BindPFlag("tap.email.recipients_file", emailTapCmd.Flags().Lookup("recipients-file"))
 	_ = viper.BindPFlag("tap.email.subjects_file", emailTapCmd.Flags().Lookup("subjects-file"))
 	_ = viper.BindPFlag("tap.email.keywords_file", emailTapCmd.Flags().Lookup("keywords-file"))
+	_ = viper.BindPFlag("tap.email.capture_body", emailTapCmd.Flags().Lookup("capture-body"))
+	_ = viper.BindPFlag("tap.email.max_body_size", emailTapCmd.Flags().Lookup("max-body-size"))
 }
 
 func runEmailTap(cmd *cobra.Command, args []string) error {
@@ -122,6 +134,12 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("subject") {
 		viper.Set("email.subject_pattern", emailTapSubject)
+	}
+	if cmd.Flags().Changed("capture-body") {
+		viper.Set("email.capture_body", emailTapCaptureBody)
+	}
+	if cmd.Flags().Changed("max-body-size") {
+		viper.Set("email.max_body_size", emailTapMaxBodySize)
 	}
 
 	// Load patterns from files if specified

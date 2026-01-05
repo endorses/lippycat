@@ -27,6 +27,10 @@ type smtpStreamFactory struct {
 	// Track server ports to determine direction
 	serverPorts map[uint16]bool
 	portsMu     sync.RWMutex
+
+	// Body capture configuration
+	captureBody bool
+	maxBodySize int
 }
 
 // SMTPStreamFactoryConfig holds configuration for the factory.
@@ -34,6 +38,8 @@ type SMTPStreamFactoryConfig struct {
 	MaxGoroutines   int
 	CleanupInterval time.Duration
 	ServerPorts     []uint16
+	CaptureBody     bool // Enable body content capture
+	MaxBodySize     int  // Maximum body size to capture (bytes), 0 = default 64KB
 }
 
 // DefaultSMTPStreamFactoryConfig returns default configuration.
@@ -59,6 +65,12 @@ func NewSMTPStreamFactory(ctx context.Context, handler SMTPMessageHandler, confi
 		config.ServerPorts = DefaultSMTPPorts
 	}
 
+	// Default max body size is 64KB
+	maxBodySize := config.MaxBodySize
+	if maxBodySize <= 0 {
+		maxBodySize = 64 * 1024 // 64KB default
+	}
+
 	factory := &smtpStreamFactory{
 		ctx:           ctx,
 		cancel:        cancel,
@@ -66,6 +78,8 @@ func NewSMTPStreamFactory(ctx context.Context, handler SMTPMessageHandler, confi
 		handler:       handler,
 		cleanupTicker: time.NewTicker(config.CleanupInterval),
 		serverPorts:   make(map[uint16]bool),
+		captureBody:   config.CaptureBody,
+		maxBodySize:   maxBodySize,
 	}
 
 	// Initialize server ports map

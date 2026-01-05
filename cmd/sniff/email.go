@@ -27,7 +27,11 @@ Filter Options:
   --sender        Match sender only (MAIL FROM, glob pattern)
   --recipient     Match recipient only (RCPT TO, glob pattern)
   --subject       Match subject line (glob pattern)
-  --keywords-file Keywords for subject matching (Aho-Corasick)
+  --keywords-file Keywords for subject/body matching (Aho-Corasick)
+
+Body Capture (for keyword matching in body):
+  --capture-body      Enable body content capture (default: false)
+  --max-body-size     Maximum body size to capture (default: 64KB)
 
 Pattern Files (one pattern per line, # for comments):
   --addresses-file, --senders-file, --recipients-file, --subjects-file
@@ -50,6 +54,9 @@ Examples:
 
   # Use keyword file for subject matching
   lc sniff email -i eth0 --keywords-file keywords.txt
+
+  # Match keywords in both subject and body
+  lc sniff email -i eth0 --keywords-file keywords.txt --capture-body
 
   # Read from PCAP file
   lc sniff email -r capture.pcap
@@ -78,6 +85,10 @@ var (
 	emailRecipientsFile string
 	emailSubjectsFile   string
 	emailKeywordsFile   string
+
+	// Body capture flags
+	emailCaptureBody bool
+	emailMaxBodySize int
 )
 
 func emailHandler(cmd *cobra.Command, args []string) {
@@ -102,6 +113,12 @@ func emailHandler(cmd *cobra.Command, args []string) {
 	}
 	if emailWriteFile != "" {
 		viper.Set("email.write_file", emailWriteFile)
+	}
+	if cmd.Flags().Changed("capture-body") {
+		viper.Set("email.capture_body", emailCaptureBody)
+	}
+	if cmd.Flags().Changed("max-body-size") {
+		viper.Set("email.max_body_size", emailMaxBodySize)
 	}
 
 	// Load address patterns from file if specified
@@ -209,6 +226,10 @@ func init() {
 	emailCmd.Flags().BoolVar(&emailTrackSessions, "track-sessions", true, "Enable session tracking")
 	emailCmd.Flags().StringVarP(&emailWriteFile, "write-file", "w", "", "Write captured email packets to PCAP file")
 
+	// Body capture flags
+	emailCmd.Flags().BoolVar(&emailCaptureBody, "capture-body", false, "Enable email body content capture (for keyword matching)")
+	emailCmd.Flags().IntVar(&emailMaxBodySize, "max-body-size", 65536, "Maximum body size to capture in bytes (default: 64KB)")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("email.address_pattern", emailCmd.Flags().Lookup("address"))
 	_ = viper.BindPFlag("email.sender_pattern", emailCmd.Flags().Lookup("sender"))
@@ -221,4 +242,6 @@ func init() {
 	_ = viper.BindPFlag("email.keywords_file", emailCmd.Flags().Lookup("keywords-file"))
 	_ = viper.BindPFlag("email.ports", emailCmd.Flags().Lookup("smtp-port"))
 	_ = viper.BindPFlag("email.track_sessions", emailCmd.Flags().Lookup("track-sessions"))
+	_ = viper.BindPFlag("email.capture_body", emailCmd.Flags().Lookup("capture-body"))
+	_ = viper.BindPFlag("email.max_body_size", emailCmd.Flags().Lookup("max-body-size"))
 }

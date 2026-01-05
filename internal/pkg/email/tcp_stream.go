@@ -38,6 +38,13 @@ type SMTPStream struct {
 	isFromServer bool
 	sessionID    string
 	parser       *Parser
+
+	// Body capture state
+	bodyBuffer     strings.Builder      // Accumulated body content
+	bodySize       int                  // Total body size seen
+	bodyTruncated  bool                 // Body exceeded max size
+	inBodyMode     bool                 // True when past headers in DATA
+	headerMetadata *types.EmailMetadata // Parsed header metadata (before body)
 }
 
 // safeSMTPReader wraps a tcpreader.ReaderStream to provide interruptible reads.
@@ -158,20 +165,22 @@ func (s *SMTPStream) run() {
 		// Handle DATA mode
 		if inData {
 			if line == "." {
-				// End of DATA
+				// End of DATA - finalize message with body
 				inData = false
-				// Process accumulated data headers
-				s.processDataHeaders(dataLines)
+				s.processDataContent(dataLines)
 				dataLines = nil
+				s.resetBodyCapture()
+			} else if s.inBodyMode {
+				// We're in body mode - capture body content
+				s.captureBodyLine(line)
 			} else {
-				// Accumulate data lines (only headers for now)
-				if len(dataLines) < 100 && (len(line) == 0 || len(dataLines) == 0 || !strings.HasPrefix(line, " ")) {
-					dataLines = append(dataLines, line)
-					// Stop accumulating after empty line (end of headers)
-					if line == "" {
-						s.processDataHeaders(dataLines)
-						dataLines = nil
-					}
+				// Still in headers
+				dataLines = append(dataLines, line)
+				// Check for empty line (end of headers)
+				if line == "" {
+					s.inBodyMode = true
+					// Process headers now, body will follow
+					s.processDataHeaders(dataLines)
 				}
 			}
 			continue
@@ -187,6 +196,7 @@ func (s *SMTPStream) run() {
 			// Check for 354 response (ready for data)
 			if s.isFromServer && metadata.ResponseCode == 354 {
 				inData = true
+				s.inBodyMode = false // Start in header mode
 			}
 
 			// Notify handler
@@ -197,24 +207,100 @@ func (s *SMTPStream) run() {
 	}
 }
 
-func (s *SMTPStream) processDataHeaders(lines []string) {
-	if s.factory == nil || s.factory.handler == nil {
+// captureBodyLine adds a line to the body buffer if body capture is enabled.
+func (s *SMTPStream) captureBodyLine(line string) {
+	// Track total body size (including line separators)
+	lineLen := len(line) + 1 // +1 for newline
+	s.bodySize += lineLen
+
+	// Skip capture if factory doesn't have body capture enabled
+	if s.factory == nil || !s.factory.captureBody {
 		return
 	}
 
-	metadata := &types.EmailMetadata{
+	// Check if we've exceeded the max body size
+	if s.bodyTruncated {
+		return // Already truncated, don't add more
+	}
+
+	maxBodySize := s.factory.maxBodySize
+	if s.bodyBuffer.Len()+lineLen > maxBodySize {
+		// Would exceed limit - truncate
+		remaining := maxBodySize - s.bodyBuffer.Len()
+		if remaining > 0 {
+			s.bodyBuffer.WriteString(line[:remaining])
+		}
+		s.bodyTruncated = true
+		return
+	}
+
+	// Add line to buffer
+	if s.bodyBuffer.Len() > 0 {
+		s.bodyBuffer.WriteString("\n")
+	}
+	s.bodyBuffer.WriteString(line)
+}
+
+// resetBodyCapture resets the body capture state for the next message.
+func (s *SMTPStream) resetBodyCapture() {
+	s.bodyBuffer.Reset()
+	s.bodySize = 0
+	s.bodyTruncated = false
+	s.inBodyMode = false
+}
+
+// processDataHeaders parses header lines but does not emit.
+// Headers are stored in headerMetadata for later use by processDataContent.
+func (s *SMTPStream) processDataHeaders(lines []string) {
+	s.headerMetadata = &types.EmailMetadata{
 		Protocol: "SMTP",
 		IsServer: false,
 		Command:  "DATA_HEADERS",
 	}
 
 	for _, line := range lines {
-		s.parser.ParseDataHeader(line, metadata)
+		s.parser.ParseDataHeader(line, s.headerMetadata)
+	}
+}
+
+// processDataContent emits the complete message with headers and body.
+func (s *SMTPStream) processDataContent(headerLines []string) {
+	if s.factory == nil || s.factory.handler == nil {
+		return
 	}
 
-	if metadata.MessageID != "" || metadata.Subject != "" {
+	// Use previously parsed headers or parse now if not available
+	var metadata *types.EmailMetadata
+	if s.headerMetadata != nil {
+		metadata = s.headerMetadata
+	} else {
+		// Parse headers now (fallback)
+		metadata = &types.EmailMetadata{
+			Protocol: "SMTP",
+			IsServer: false,
+		}
+		for _, line := range headerLines {
+			s.parser.ParseDataHeader(line, metadata)
+		}
+	}
+
+	// Update command to indicate complete message
+	metadata.Command = "DATA_COMPLETE"
+
+	// Add body content if captured
+	if s.factory.captureBody && s.bodyBuffer.Len() > 0 {
+		metadata.BodyPreview = s.bodyBuffer.String()
+	}
+	metadata.BodySize = s.bodySize
+	metadata.BodyTruncated = s.bodyTruncated
+
+	// Emit if we have meaningful content
+	if metadata.MessageID != "" || metadata.Subject != "" || metadata.BodyPreview != "" {
 		s.factory.handler.HandleSMTPLine("", metadata, s.sessionID, s.flow)
 	}
+
+	// Clear header metadata for next message
+	s.headerMetadata = nil
 }
 
 // createSMTPStream creates a new SMTP stream.

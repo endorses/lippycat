@@ -111,16 +111,24 @@ func (cf *ContentFilter) Match(metadata *types.EmailMetadata) bool {
 		}
 	}
 
-	// Check keyword matches (in subject)
+	// Check keyword matches (in subject AND/OR body)
 	if cf.keywordsMatcher != nil {
+		// Search in subject first
+		foundInSubject := false
 		if metadata.Subject != "" {
-			// Match returns slice of MatchResults; we just need any match
 			results := cf.keywordsMatcher.Match([]byte(strings.ToLower(metadata.Subject)))
-			if len(results) == 0 {
-				return false
-			}
-		} else {
-			// No subject to match keywords against
+			foundInSubject = len(results) > 0
+		}
+
+		// Search in body if not found in subject
+		foundInBody := false
+		if !foundInSubject && metadata.BodyPreview != "" {
+			results := cf.keywordsMatcher.Match([]byte(strings.ToLower(metadata.BodyPreview)))
+			foundInBody = len(results) > 0
+		}
+
+		// Must match in either subject or body
+		if !foundInSubject && !foundInBody {
 			return false
 		}
 	}

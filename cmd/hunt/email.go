@@ -96,6 +96,8 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		BatchTimeout:   time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BatchQueueSize: getIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:       false, // Not VoIP mode
+		// Email hunter supports BPF, IP, email address, and email subject filters
+		SupportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"},
 		// TLS configuration
 		TLSEnabled:    getBoolConfig("hunter.tls.enabled", tlsEnabled),
 		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),

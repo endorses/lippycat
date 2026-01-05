@@ -34,7 +34,9 @@ type Config struct {
 	BufferSize    int
 	BatchSize     int
 	BatchTimeout  time.Duration
-	VoIPMode      bool // Determines filter capabilities advertised to processor
+	VoIPMode      bool // Determines filter capabilities advertised to processor (legacy)
+	// Filter capabilities advertised to processor
+	SupportedFilterTypes []string // If set, overrides VoIPMode-based defaults
 	// TLS settings
 	TLSEnabled            bool
 	TLSCertFile           string
@@ -425,9 +427,12 @@ func (m *Manager) register() error {
 
 	// Determine filter capabilities based on hunter mode
 	var filterTypes []string
-	if m.config.VoIPMode {
+	if len(m.config.SupportedFilterTypes) > 0 {
+		// Use explicitly configured filter types
+		filterTypes = m.config.SupportedFilterTypes
+	} else if m.config.VoIPMode {
 		// VoIP hunter - supports all filter types (call buffering + RTP association)
-		filterTypes = []string{"bpf", "ip_address", "sip_user", "phone_number", "call_id", "codec"}
+		filterTypes = []string{"bpf", "ip_address", "sip_user", "phone_number", "call_id", "codec", "sip_uri"}
 	} else {
 		// Generic hunter - only BPF and IP filters (no call buffering)
 		filterTypes = []string{"bpf", "ip_address"}

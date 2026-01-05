@@ -177,18 +177,18 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Create `internal/pkg/hunter/filter/tls.go` - SNI/JA3/JA3S/JA4 matching
 - [x] Create `internal/pkg/hunter/filter/http.go` - Host/URL matching
 - [x] Create `internal/pkg/hunter/filter/matcher.go` - Base matcher interface
-- [ ] Add filter type capability reporting in hunter registration
+- [x] Add filter type capability reporting in hunter registration (SupportedFilterTypes config field)
 
-### Processor Filter Registry
+### Processor Filter Registry ✅
 - [x] Processor filter registry already supports new types via proto enum
-- [ ] Validate filter patterns on creation (glob syntax, JA3 hash format, etc.)
+- [x] Validate filter patterns on creation (glob syntax, JA3 hash format, etc.) - `filtering.ValidatePattern()`
 - [x] Push filter updates to hunters via existing gRPC mechanism (already working)
 
 ### CLI Updates ✅
 - [x] Update `internal/pkg/filtering/types.go` to parse new filter types
 - [x] Update `internal/pkg/filtering/conversion.go` with new type conversions
-- [ ] Update `lc set filter --type` to accept new types (dns_domain, email_address, etc.)
-- [ ] Add validation for protocol-specific pattern formats
+- [x] Update `lc set filter --type` to accept new types (dns_domain, email_address, etc.)
+- [x] Add validation for protocol-specific pattern formats (JA3: 32-char hex, JA4: fingerprint format)
 
 ### TUI Updates ✅
 - [x] Update `filtermanager/list.go` AbbreviateType for new types
@@ -217,11 +217,11 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Add `--domains-file` flag for bulk domain lists (load patterns from file)
 - [x] GlobMatcher type with O(1) exact match lookup and AC integration foundation
 
-### Content Filtering - Distributed (hunt) ⚠️ Requires Phase 0
-- [ ] `FILTER_DNS_DOMAIN` type in proto (Phase 0)
-- [ ] Hunter DNS domain matching logic (Phase 0)
-- [ ] Processor can push domain filters to DNS hunters
-- [ ] TUI/CLI can create DNS domain filters targeting hunters
+### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+- [x] `FILTER_DNS_DOMAIN` type in proto (Phase 0 - complete)
+- [x] Hunter DNS domain matching logic (`internal/pkg/hunter/filter/dns.go`)
+- [ ] Wire DNS filters from TUI/CLI to hunters
+- [ ] Test end-to-end domain filter distribution
 
 ## Phase 2: Email - SMTP (3-4 days) - Protocol Complete, Filtering Incomplete
 
@@ -248,12 +248,12 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
 - [ ] Wire filter flags in sniff and tap commands
 
-### Content Filtering - Distributed (hunt) ⚠️ Requires Phase 0
-- [ ] `FILTER_EMAIL_ADDRESS` type in proto (Phase 0)
-- [ ] `FILTER_EMAIL_SUBJECT` type in proto (Phase 0)
-- [ ] Hunter email address/subject matching logic (Phase 0)
-- [ ] Processor can push email filters to Email hunters
-- [ ] TUI/CLI can create email filters targeting hunters
+### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+- [x] `FILTER_EMAIL_ADDRESS` type in proto (Phase 0 - complete)
+- [x] `FILTER_EMAIL_SUBJECT` type in proto (Phase 0 - complete)
+- [x] Hunter email address/subject matching logic (`internal/pkg/hunter/filter/email.go`)
+- [ ] Wire email filters from TUI/CLI to hunters
+- [ ] Test end-to-end email filter distribution
 
 ## Phase 3: TLS/JA3 Fingerprinting (3-4 days)
 
@@ -282,14 +282,14 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Integrate with Aho-Corasick for multi-SNI matching
 - [ ] Wire filter flags in sniff and tap commands
 
-### Content Filtering - Distributed (hunt) ⚠️ Requires Phase 0
-- [ ] `FILTER_TLS_SNI` type in proto (Phase 0)
-- [ ] `FILTER_TLS_JA3` type in proto (Phase 0)
-- [ ] `FILTER_TLS_JA3S` type in proto (Phase 0)
-- [ ] `FILTER_TLS_JA4` type in proto (Phase 0)
-- [ ] Hunter TLS SNI/JA3/JA3S/JA4 matching logic (Phase 0)
-- [ ] Processor can push TLS filters to TLS hunters
-- [ ] TUI/CLI can create TLS filters targeting hunters
+### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+- [x] `FILTER_TLS_SNI` type in proto (Phase 0 - complete)
+- [x] `FILTER_TLS_JA3` type in proto (Phase 0 - complete)
+- [x] `FILTER_TLS_JA3S` type in proto (Phase 0 - complete)
+- [x] `FILTER_TLS_JA4` type in proto (Phase 0 - complete)
+- [x] Hunter TLS SNI/JA3/JA3S/JA4 matching logic (`internal/pkg/hunter/filter/tls.go`)
+- [ ] Wire TLS filters from TUI/CLI to hunters
+- [ ] Test end-to-end TLS filter distribution
 
 ## Phase 4: HTTP (4-5 days)
 
@@ -317,12 +317,12 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
 - [ ] Wire filter flags in sniff and tap commands
 
-### Content Filtering - Distributed (hunt) ⚠️ Requires Phase 0
-- [ ] `FILTER_HTTP_HOST` type in proto (Phase 0)
-- [ ] `FILTER_HTTP_URL` type in proto (Phase 0)
-- [ ] Hunter HTTP host/URL matching logic (Phase 0)
-- [ ] Processor can push HTTP filters to HTTP hunters
-- [ ] TUI/CLI can create HTTP filters targeting hunters
+### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+- [x] `FILTER_HTTP_HOST` type in proto (Phase 0 - complete)
+- [x] `FILTER_HTTP_URL` type in proto (Phase 0 - complete)
+- [x] Hunter HTTP host/URL matching logic (`internal/pkg/hunter/filter/http.go`)
+- [ ] Wire HTTP filters from TUI/CLI to hunters
+- [ ] Test end-to-end HTTP filter distribution
 
 ## Phase 5: Email - IMAP/POP3 (4-5 days)
 

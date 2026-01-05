@@ -53,26 +53,50 @@ The command can operate in two modes:
 If --id is not provided, a UUID will be auto-generated.
 
 Filter types:
-  sip_user      - Match SIP user/extension
-  phone_number  - Match phone number
-  ip_address    - Match IP address
-  call_id       - Match SIP Call-ID
-  codec         - Match RTP codec
-  bpf           - Raw BPF filter expression
+  VoIP:
+    sip_user      - Match SIP user/extension (glob patterns)
+    sip_uri       - Match SIP URI (glob patterns)
+    phone_number  - Match phone number (prefix/suffix wildcards)
+    call_id       - Match SIP Call-ID
+    codec         - Match RTP codec
+
+  DNS:
+    dns_domain    - Match DNS domain name (glob patterns: *.example.com)
+
+  Email:
+    email_address - Match email sender/recipient (glob patterns)
+    email_subject - Match email subject line (glob patterns)
+
+  TLS:
+    tls_sni       - Match TLS SNI hostname (glob patterns)
+    tls_ja3       - Match JA3 client fingerprint (32-char hex MD5)
+    tls_ja3s      - Match JA3S server fingerprint (32-char hex MD5)
+    tls_ja4       - Match JA4 fingerprint (e.g., t13d1516h2_8daaf6152771_b186095e22bb)
+
+  HTTP:
+    http_host     - Match HTTP Host header (glob patterns)
+    http_url      - Match HTTP URL path (glob patterns)
+
+  Universal:
+    ip_address    - Match IP address or CIDR
+    bpf           - Raw BPF filter expression
 
 Examples:
-  # Create a new filter with auto-generated ID
+  # Create a SIP user filter
   lc set filter --processor localhost:50051 \
     --type sip_user --pattern alice@example.com
 
-  # Update an existing filter by ID
+  # Create a DNS domain filter with wildcard
   lc set filter --processor localhost:50051 \
-    --id myfilter --type sip_user --pattern bob@example.com
+    --type dns_domain --pattern "*.malware-domain.com"
 
-  # Create a filter targeted at specific hunters
+  # Create a TLS JA3 fingerprint filter
   lc set filter --processor localhost:50051 \
-    --type ip_address --pattern 192.168.1.100 \
-    --hunters hunter-1,hunter-2
+    --type tls_ja3 --pattern e7d705a3286e19ea42f587b344ee6865
+
+  # Create an email address filter
+  lc set filter --processor localhost:50051 \
+    --type email_address --pattern "*@suspicious-domain.com"
 
   # Import filters from a file (batch)
   lc set filter --processor localhost:50051 --file filters.yaml`,
@@ -82,7 +106,7 @@ Examples:
 func init() {
 	AddConnectionFlags(SetFilterCmd)
 	SetFilterCmd.Flags().StringVar(&setFilterID, "id", "", "Filter ID (auto-generated if not provided)")
-	SetFilterCmd.Flags().StringVarP(&setFilterType, "type", "t", "", "Filter type (sip_user, phone_number, ip_address, call_id, codec, bpf)")
+	SetFilterCmd.Flags().StringVarP(&setFilterType, "type", "t", "", "Filter type (see --help for full list)")
 	SetFilterCmd.Flags().StringVar(&setFilterPattern, "pattern", "", "Filter pattern")
 	SetFilterCmd.Flags().StringVar(&setFilterDescription, "description", "", "Filter description")
 	SetFilterCmd.Flags().BoolVar(&setFilterEnabled, "enabled", true, "Enable the filter")
@@ -110,6 +134,12 @@ func runSetFilter(cmd *cobra.Command, args []string) {
 	// Parse filter type
 	filterType, err := filtering.ParseFilterType(setFilterType)
 	if err != nil {
+		OutputError(err, ExitValidationError)
+		return
+	}
+
+	// Validate pattern for the filter type
+	if err := filtering.ValidatePattern(filterType, setFilterPattern); err != nil {
 		OutputError(err, ExitValidationError)
 		return
 	}

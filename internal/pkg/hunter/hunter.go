@@ -39,6 +39,8 @@ type Config struct {
 	EnableVoIPFilter bool   // Enable VoIP filtering with GPU acceleration
 	GPUBackend       string // GPU backend: "auto", "cuda", "opencl", "cpu-simd"
 	GPUBatchSize     int    // Batch size for GPU processing
+	// Filter capabilities advertised to processor
+	SupportedFilterTypes []string // Filter types this hunter supports (overrides VoIPMode defaults)
 	// TLS settings
 	TLSEnabled            bool   // Enable TLS encryption for gRPC connections
 	TLSCertFile           string // Path to TLS certificate file (for server verification)
@@ -205,6 +207,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 			BatchSize:             h.config.BatchSize,
 			BatchTimeout:          h.config.BatchTimeout,
 			VoIPMode:              h.config.VoIPMode,
+			SupportedFilterTypes:  h.config.SupportedFilterTypes,
 			TLSEnabled:            h.config.TLSEnabled,
 			TLSCertFile:           h.config.TLSCertFile,
 			TLSKeyFile:            h.config.TLSKeyFile,

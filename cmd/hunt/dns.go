@@ -102,6 +102,8 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 		BatchTimeout:   time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BatchQueueSize: getIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:       false, // Not VoIP mode
+		// DNS hunter supports BPF, IP, and DNS domain filters
+		SupportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"},
 		// TLS configuration
 		TLSEnabled:    getBoolConfig("hunter.tls.enabled", tlsEnabled),
 		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),

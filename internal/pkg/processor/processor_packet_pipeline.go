@@ -129,18 +129,19 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				// Write packet to appropriate file (SIP or RTP) using raw packet data
 				if len(packet.Data) > 0 {
 					timestamp := time.Unix(0, packet.TimestampNs)
+					linkType := layers.LinkType(packet.LinkType)
 
 					// Check if this is an RTP packet (has RTP metadata)
 					if packet.Metadata.Rtp != nil {
 						// Write to RTP PCAP file
-						if err := writer.WriteRTPPacket(timestamp, packet.Data); err != nil {
+						if err := writer.WriteRTPPacket(timestamp, packet.Data, linkType); err != nil {
 							logger.Warn("Failed to write RTP packet to call PCAP",
 								"call_id", callID,
 								"error", err)
 						}
 					} else {
 						// Write to SIP PCAP file
-						if err := writer.WriteSIPPacket(timestamp, packet.Data); err != nil {
+						if err := writer.WriteSIPPacket(timestamp, packet.Data, linkType); err != nil {
 							logger.Warn("Failed to write SIP packet to call PCAP",
 								"call_id", callID,
 								"error", err)
@@ -164,7 +165,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			// Write non-VoIP packet to auto-rotating PCAP
 			if len(packet.Data) > 0 {
 				timestamp := time.Unix(0, packet.TimestampNs)
-				if err := p.autoRotatePcapWriter.WritePacket(timestamp, packet.Data); err != nil {
+				linkType := layers.LinkType(packet.LinkType)
+				if err := p.autoRotatePcapWriter.WritePacket(timestamp, packet.Data, linkType); err != nil {
 					logger.Warn("Failed to write packet to auto-rotate PCAP", "error", err)
 				}
 			}

@@ -56,6 +56,7 @@ type AutoRotatePcapWriter struct {
 	currentSize     int64
 	packetCount     int
 	fileIndex       int
+	linkType        layers.LinkType // Link type for PCAP files (set from first packet)
 	mu              sync.Mutex
 	idleTimer       *time.Timer
 	syncTicker      *time.Ticker
@@ -94,13 +95,19 @@ func NewAutoRotatePcapWriter(config *AutoRotateConfig) (*AutoRotatePcapWriter, e
 }
 
 // WritePacket writes a packet to the current auto-rotating PCAP file
-func (w *AutoRotatePcapWriter) WritePacket(timestamp time.Time, data []byte) error {
+func (w *AutoRotatePcapWriter) WritePacket(timestamp time.Time, data []byte, linkType layers.LinkType) error {
 	if w == nil || !w.config.Enabled {
 		return nil
 	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Store link type from first packet (used for all files)
+	if w.linkType == 0 {
+		w.linkType = linkType
+		logger.Debug("Set auto-rotate PCAP link type", "link_type", linkType)
+	}
 
 	// Check if we need to rotate based on size or duration
 	if w.shouldRotate() {
@@ -218,9 +225,14 @@ func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 		return fmt.Errorf("failed to create auto-rotate PCAP file: %w", err)
 	}
 
-	// Create PCAP writer
+	// Create PCAP writer with actual link type from captured packets
+	// Default to Ethernet if no packets received yet (shouldn't happen in normal flow)
+	linkType := w.linkType
+	if linkType == 0 {
+		linkType = layers.LinkTypeEthernet
+	}
 	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, layers.LinkTypeEthernet); err != nil {
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
 			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
@@ -235,7 +247,7 @@ func (w *AutoRotatePcapWriter) createNewFile(timestamp time.Time) error {
 	w.fileStartTime = time.Now()
 	w.lastPacketTime = time.Now()
 
-	logger.Info("Created new auto-rotate PCAP file", "file", filePath)
+	logger.Info("Created new auto-rotate PCAP file", "file", filePath, "link_type", linkType)
 
 	return nil
 }

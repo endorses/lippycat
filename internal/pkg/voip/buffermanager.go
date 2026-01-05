@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
@@ -37,7 +38,7 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 }
 
 // AddSIPPacket adds a SIP packet to the buffer
-func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata, interfaceName string) {
+func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -45,6 +46,7 @@ func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, met
 	if !exists {
 		buffer = NewCallBuffer(callID)
 		buffer.SetInterfaceName(interfaceName)
+		buffer.SetLinkType(linkType)
 		bm.buffers[callID] = buffer
 	}
 
@@ -135,7 +137,7 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 func (bm *BufferManager) CheckFilterWithCallback(
 	callID string,
 	filterFunc func(*CallMetadata) bool,
-	onMatch func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string),
+	onMatch func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType),
 ) bool {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
@@ -160,7 +162,7 @@ func (bm *BufferManager) CheckFilterWithCallback(
 
 		// Call the handler callback
 		if onMatch != nil {
-			onMatch(callID, packets, buffer.GetMetadata(), buffer.GetInterfaceName())
+			onMatch(callID, packets, buffer.GetMetadata(), buffer.GetInterfaceName(), buffer.GetLinkType())
 		}
 	} else {
 		// Discard buffer

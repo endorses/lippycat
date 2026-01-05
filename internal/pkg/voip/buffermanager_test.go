@@ -34,7 +34,7 @@ func TestBufferManager_AddSIPPacket(t *testing.T) {
 		Method: "INVITE",
 	}
 
-	bm.AddSIPPacket(callID, packet, metadata, "eth0")
+	bm.AddSIPPacket(callID, packet, metadata, "eth0", layers.LinkTypeEthernet)
 
 	assert.Equal(t, 1, bm.GetBufferCount(), "Should have 1 buffer")
 }
@@ -54,7 +54,7 @@ func TestBufferManager_AddRTPPacket(t *testing.T) {
 		Method:  "INVITE",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Now add RTP packet
 	rtpPacket := createTestUDPPacket(t, 8000, 9000, []byte{0x80, 0x00})
@@ -79,7 +79,7 @@ func TestBufferManager_CheckFilter_Matched(t *testing.T) {
 		Method:  "INVITE",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Add RTP packets
 	rtpPacket1 := createTestUDPPacket(t, 8000, 9000, []byte{0x80, 0x00})
@@ -113,7 +113,7 @@ func TestBufferManager_CheckFilter_NotMatched(t *testing.T) {
 		To:     "robb@example.com",
 		Method: "INVITE",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Check filter - should not match
 	filterFunc := func(m *CallMetadata) bool {
@@ -142,7 +142,7 @@ func TestBufferManager_CheckFilterWithCallback(t *testing.T) {
 		Method:  "INVITE",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	rtpPacket := createTestUDPPacket(t, 8000, 9000, []byte{0x80, 0x00})
 	bm.AddRTPPacket(callID, "8000", rtpPacket)
@@ -156,7 +156,7 @@ func TestBufferManager_CheckFilterWithCallback(t *testing.T) {
 		return m.From == "alicent@example.com"
 	}
 
-	onMatch := func(cid string, packets []gopacket.Packet, meta *CallMetadata, interfaceName string) {
+	onMatch := func(cid string, packets []gopacket.Packet, meta *CallMetadata, interfaceName string, linkType layers.LinkType) {
 		callbackCalled = true
 		receivedPackets = packets
 		receivedMetadata = meta
@@ -184,7 +184,7 @@ func TestBufferManager_GetCallIDForRTPPort(t *testing.T) {
 		To:      "robb@example.com",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Look up call ID by RTP port
 	foundCallID, exists := bm.GetCallIDForRTPPort("8000")
@@ -210,7 +210,7 @@ func TestBufferManager_MultipleCallBuffers(t *testing.T) {
 			From:   "user" + string(rune('A'+i)) + "@example.com",
 			To:     "robb@example.com",
 		}
-		bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+		bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 	}
 
 	assert.Equal(t, 3, bm.GetBufferCount(), "Should have 3 buffers")
@@ -229,7 +229,7 @@ func TestBufferManager_DiscardBuffer(t *testing.T) {
 		From:   "alicent@example.com",
 		To:     "robb@example.com",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	assert.Equal(t, 1, bm.GetBufferCount(), "Should have 1 buffer")
 
@@ -252,7 +252,7 @@ func TestBufferManager_IsCallMatched(t *testing.T) {
 		From:   "alicent@example.com",
 		To:     "robb@example.com",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Not matched yet
 	assert.False(t, bm.IsCallMatched(callID), "Should not be matched initially")
@@ -281,7 +281,7 @@ func TestBufferManager_RTPAfterFilterMatch(t *testing.T) {
 		To:      "robb@example.com",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Check filter - matches
 	filterFunc := func(m *CallMetadata) bool {
@@ -310,7 +310,7 @@ func TestBufferManager_JanitorCleanup(t *testing.T) {
 		From:   "alicent@example.com",
 		To:     "robb@example.com",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	assert.Equal(t, 1, bm.GetBufferCount(), "Should have 1 buffer")
 
@@ -336,7 +336,7 @@ func TestBufferManager_CleanupOversizedBuffer(t *testing.T) {
 		To:      "robb@example.com",
 		SDPBody: "m=audio 8000 RTP/AVP 0",
 	}
-	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0")
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
 
 	// Add more packets than maxSize
 	for i := 0; i < 5; i++ {
@@ -429,7 +429,7 @@ func TestBufferManager_ConcurrentAccess(t *testing.T) {
 				From:   "user@example.com",
 				To:     "robb@example.com",
 			}
-			bm.AddSIPPacket(callID, packet, metadata, "eth0")
+			bm.AddSIPPacket(callID, packet, metadata, "eth0", layers.LinkTypeEthernet)
 			time.Sleep(1 * time.Millisecond)
 		}
 		done <- true

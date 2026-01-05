@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // CallBuffer holds packets for a call until filter decision is made
@@ -15,8 +16,9 @@ type CallBuffer struct {
 	filterChecked bool              // Whether filter match was evaluated
 	matched       bool              // Whether call matches filter
 	createdAt     time.Time
-	rtpPorts      []string // RTP ports for this call
-	interfaceName string   // Interface where packets were captured
+	rtpPorts      []string        // RTP ports for this call
+	interfaceName string          // Interface where packets were captured
+	linkType      layers.LinkType // Link type for PCAP writing (e.g., Ethernet, Linux cooked, raw IP)
 }
 
 // CallMetadata contains extracted SIP header information
@@ -128,4 +130,14 @@ func (cb *CallBuffer) SetInterfaceName(name string) {
 // GetInterfaceName returns the interface name for this call's packets
 func (cb *CallBuffer) GetInterfaceName() string {
 	return cb.interfaceName
+}
+
+// SetLinkType sets the link type for this call's packets
+func (cb *CallBuffer) SetLinkType(linkType layers.LinkType) {
+	cb.linkType = linkType
+}
+
+// GetLinkType returns the link type for this call's packets
+func (cb *CallBuffer) GetLinkType() layers.LinkType {
+	return cb.linkType
 }

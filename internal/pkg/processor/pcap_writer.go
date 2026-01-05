@@ -49,6 +49,7 @@ type CallPcapWriter struct {
 	from      string
 	to        string
 	startTime time.Time
+	linkType  layers.LinkType // Link type for PCAP files (set from first packet)
 	// SIP file
 	sipFile        *os.File
 	sipWriter      *pcapgo.Writer
@@ -145,25 +146,36 @@ func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWr
 	return writer, nil
 }
 
-// createInitialFiles creates both SIP and RTP PCAP files
+// createInitialFiles is a no-op; files are created lazily on first packet
+// to ensure we have the correct link type from the actual captured packets.
+// This prevents the bug where PCAP files were hardcoded to LinkTypeEthernet
+// regardless of the actual capture interface type (e.g., Linux cooked, raw IP).
 func (writer *CallPcapWriter) createInitialFiles() error {
-	if err := writer.rotateSIPFile(); err != nil {
-		return fmt.Errorf("failed to create SIP file: %w", err)
-	}
-	if err := writer.rotateRTPFile(); err != nil {
-		return fmt.Errorf("failed to create RTP file: %w", err)
-	}
+	// Files are created in WriteSIPPacket/WriteRTPPacket on first packet
 	return nil
 }
 
 // WriteSIPPacket writes a SIP packet to the SIP PCAP file
-func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte) error {
+func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte, linkType layers.LinkType) error {
 	if writer == nil {
 		return nil
 	}
 
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
+
+	// Store link type from first packet (used for all files in this call)
+	if writer.linkType == 0 {
+		writer.linkType = linkType
+		logger.Debug("Set PCAP link type for call", "call_id", writer.callID, "link_type", linkType)
+	}
+
+	// Create SIP file on first SIP packet (deferred from createInitialFiles)
+	if writer.sipWriter == nil {
+		if err := writer.rotateSIPFile(); err != nil {
+			return fmt.Errorf("failed to create SIP PCAP file: %w", err)
+		}
+	}
 
 	// Check if we need to rotate SIP file
 	if writer.config.MaxFileSize > 0 && writer.sipSize >= writer.config.MaxFileSize {
@@ -191,13 +203,26 @@ func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte) e
 }
 
 // WriteRTPPacket writes an RTP packet to the RTP PCAP file
-func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte) error {
+func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte, linkType layers.LinkType) error {
 	if writer == nil {
 		return nil
 	}
 
 	writer.mu.Lock()
 	defer writer.mu.Unlock()
+
+	// Store link type from first packet (used for all files in this call)
+	if writer.linkType == 0 {
+		writer.linkType = linkType
+		logger.Debug("Set PCAP link type for call", "call_id", writer.callID, "link_type", linkType)
+	}
+
+	// Create RTP file on first RTP packet (deferred from createInitialFiles)
+	if writer.rtpWriter == nil {
+		if err := writer.rotateRTPFile(); err != nil {
+			return fmt.Errorf("failed to create RTP PCAP file: %w", err)
+		}
+	}
 
 	// Check if we need to rotate RTP file
 	if writer.config.MaxFileSize > 0 && writer.rtpSize >= writer.config.MaxFileSize {
@@ -254,9 +279,14 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 		return fmt.Errorf("failed to create SIP PCAP file: %w", err)
 	}
 
-	// Create PCAP writer
+	// Create PCAP writer with actual link type from captured packets
+	// Default to Ethernet if no packets received yet (shouldn't happen in normal flow)
+	linkType := writer.linkType
+	if linkType == 0 {
+		linkType = layers.LinkTypeEthernet
+	}
 	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, layers.LinkTypeEthernet); err != nil {
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
 			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
@@ -269,7 +299,7 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 	writer.sipSize = 0
 	writer.sipFileIndex++
 
-	logger.Info("Created SIP PCAP file for call", "call_id", writer.callID, "file", filePath)
+	logger.Info("Created SIP PCAP file for call", "call_id", writer.callID, "file", filePath, "link_type", linkType)
 
 	return nil
 }
@@ -304,9 +334,14 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 		return fmt.Errorf("failed to create RTP PCAP file: %w", err)
 	}
 
-	// Create PCAP writer
+	// Create PCAP writer with actual link type from captured packets
+	// Default to Ethernet if no packets received yet (shouldn't happen in normal flow)
+	linkType := writer.linkType
+	if linkType == 0 {
+		linkType = layers.LinkTypeEthernet
+	}
 	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, layers.LinkTypeEthernet); err != nil {
+	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
 			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
 		}
@@ -319,7 +354,7 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 	writer.rtpSize = 0
 	writer.rtpFileIndex++
 
-	logger.Info("Created RTP PCAP file for call", "call_id", writer.callID, "file", filePath)
+	logger.Info("Created RTP PCAP file for call", "call_id", writer.callID, "file", filePath, "link_type", linkType)
 
 	return nil
 }

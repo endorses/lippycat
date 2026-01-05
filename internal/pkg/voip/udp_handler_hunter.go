@@ -96,8 +96,8 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		SDPBody:           body,
 	}
 
-	// Buffer the SIP packet
-	h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName)
+	// Buffer the SIP packet with link type for proper PCAP writing
+	h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, pkt.LinkType)
 
 	// Check if this is a call termination message (BYE or CANCEL)
 	method := metadata.Method
@@ -121,7 +121,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 			}
 
 			// Forward termination message immediately
-			if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName); err != nil {
+			if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName, pkt.LinkType); err != nil {
 				logger.Error("Failed to forward UDP call termination packet",
 					"call_id", SanitizeCallIDForLogging(callID),
 					"method", method,
@@ -154,9 +154,9 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 					"p-asserted-identity": m.PAssertedIdentity,
 				})
 			},
-			func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string) {
+			func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 				// Forward all buffered packets to processor
-				h.forwardBufferedPackets(callID, packets, metadata, interfaceName)
+				h.forwardBufferedPackets(callID, packets, metadata, interfaceName, linkType)
 
 				// Extract RTP ports from SDP for future RTP association
 				ExtractPortFromSdp(metadata.SDPBody, callID)
@@ -203,7 +203,7 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata
-		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName)
+		h.forwardRTPPacket(bufCallID, packet, layer, interfaceName, pkt.LinkType)
 		return true
 	}
 
@@ -212,7 +212,7 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 }
 
 // forwardBufferedPackets forwards all buffered packets for a matched call
-func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string) {
+func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 	// Debug logging
 	f, _ := os.OpenFile("/tmp/lippycat-buffer-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if f != nil {
@@ -301,7 +301,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 			}
 		}
 
-		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata, interfaceName); err != nil {
+		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata, interfaceName, linkType); err != nil {
 			logger.Error("Failed to forward buffered UDP packet",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
@@ -314,7 +314,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 }
 
 // forwardRTPPacket forwards a single RTP packet immediately (call already matched)
-func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string) {
+func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packet, layer *layers.UDP, interfaceName string, linkType layers.LinkType) {
 	// Try to extract RTP header for metadata
 	var pbMetadata *data.PacketMetadata
 
@@ -354,7 +354,7 @@ func (h *UDPPacketHandler) forwardRTPPacket(callID string, packet gopacket.Packe
 	}
 
 	// Forward with RTP metadata if available
-	if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName); err != nil {
+	if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName, linkType); err != nil {
 		logger.Error("Failed to forward RTP packet",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)

@@ -18,6 +18,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // Config contains hunter configuration
@@ -376,7 +377,7 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 
 // ForwardPacketWithMetadata forwards a packet with embedded metadata to the processor
 // This is used by TCP SIP handler to forward reassembled packets with extracted metadata
-func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string) error {
+func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *data.PacketMetadata, interfaceName string, linkType layers.LinkType) error {
 	if packet == nil {
 		return fmt.Errorf("cannot forward nil packet")
 	}
@@ -403,19 +404,15 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 		originalLen = meta.Length
 	}
 
-	// For packets with embedded metadata (already analyzed VoIP packets),
-	// default to Ethernet LinkType (1) since the TUI will use metadata fields
-	// instead of re-parsing the packet
-	linkType := uint32(1) // LinkTypeEthernet
-
 	// Create protobuf packet with embedded metadata
+	// Use the provided link type from the capture source (preserves Linux cooked, raw IP, etc.)
 	pbPkt := &data.CapturedPacket{
 		Data:           packetData,
 		TimestampNs:    time.Now().UnixNano(),
 		CaptureLength:  uint32(captureLen),  // #nosec G115
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,
-		LinkType:       linkType,
+		LinkType:       uint32(linkType), // #nosec G115
 		InterfaceName:  interfaceName,
 		Metadata:       metadata, // Embedded metadata from TCP SIP handler
 	}

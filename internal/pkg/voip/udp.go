@@ -160,8 +160,8 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				SDPBody:           body,
 			}
 
-			// Buffer the SIP packet
-			globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface)
+			// Buffer the SIP packet with link type for proper PCAP writing
+			globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface, pkt.LinkType)
 
 			// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 			bodyBytes := StringToBytes(body)
@@ -177,9 +177,9 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 							"p-asserted-identity": m.PAssertedIdentity,
 						})
 					},
-					func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string) {
+					func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 						// Create call tracker entry
-						call := GetOrCreateCall(callID, pkt.LinkType)
+						call := GetOrCreateCall(callID, linkType)
 						if call != nil {
 							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
 								"from": metadata.From,

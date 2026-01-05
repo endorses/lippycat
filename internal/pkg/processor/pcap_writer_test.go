@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -405,10 +406,17 @@ func TestPcapFilePermissions(t *testing.T) {
 	manager, err := NewPcapWriterManager(config)
 	require.NoError(t, err)
 
-	// Create a writer which will create SIP and RTP PCAP files
+	// Create a writer (files are now created lazily on first packet write)
 	writer, err := manager.GetOrCreateWriter("test-call-permissions", "alicent", "robb")
 	require.NoError(t, err)
 	require.NotNil(t, writer)
+
+	// Write test packets to trigger file creation (files created lazily with correct link type)
+	testData := []byte("test packet data for permissions check")
+	err = writer.WriteSIPPacket(time.Now(), testData, layers.LinkTypeEthernet)
+	require.NoError(t, err, "should write SIP packet")
+	err = writer.WriteRTPPacket(time.Now(), testData, layers.LinkTypeEthernet)
+	require.NoError(t, err, "should write RTP packet")
 
 	// Close the writer to flush files
 	err = manager.CloseWriter("test-call-permissions")
@@ -459,6 +467,13 @@ func TestOnFileCloseCallback(t *testing.T) {
 	writer, err := manager.GetOrCreateWriter("test-callback-call", "alice", "bob")
 	require.NoError(t, err)
 	require.NotNil(t, writer)
+
+	// Write packets to trigger file creation (files are created lazily)
+	testData := []byte("test packet data")
+	err = writer.WriteSIPPacket(time.Now(), testData, layers.LinkTypeEthernet)
+	require.NoError(t, err, "should write SIP packet")
+	err = writer.WriteRTPPacket(time.Now(), testData, layers.LinkTypeEthernet)
+	require.NoError(t, err, "should write RTP packet")
 
 	// Close the writer
 	err = manager.CloseWriter("test-callback-call")

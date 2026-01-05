@@ -637,20 +637,29 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 
 // addHunterFromTopologyUpdate adds a hunter discovered via topology update
 func (m *Model) addHunterFromTopologyUpdate(processorAddr string, hunter *management.ConnectedHunter) {
+	if hunter == nil {
+		logger.Warn("Received nil hunter in topology update", "processor", processorAddr)
+		return
+	}
+
 	// Convert to components.HunterInfo
 	hunterInfo := components.HunterInfo{
-		ID:               hunter.HunterId,
-		Hostname:         hunter.Hostname,
-		RemoteAddr:       hunter.RemoteAddr,
-		Status:           hunter.Status,
-		ConnectedAt:      time.Now().UnixNano() - int64(hunter.ConnectedDurationSec*1e9),
-		LastHeartbeat:    hunter.LastHeartbeatNs,
-		PacketsCaptured:  hunter.Stats.PacketsCaptured,
-		PacketsForwarded: hunter.Stats.PacketsForwarded,
-		ActiveFilters:    hunter.Stats.ActiveFilters,
-		Interfaces:       hunter.Interfaces,
-		ProcessorAddr:    processorAddr,
-		Capabilities:     hunter.Capabilities,
+		ID:            hunter.HunterId,
+		Hostname:      hunter.Hostname,
+		RemoteAddr:    hunter.RemoteAddr,
+		Status:        hunter.Status,
+		ConnectedAt:   time.Now().UnixNano() - int64(hunter.ConnectedDurationSec*1e9),
+		LastHeartbeat: hunter.LastHeartbeatNs,
+		Interfaces:    hunter.Interfaces,
+		ProcessorAddr: processorAddr,
+		Capabilities:  hunter.Capabilities,
+	}
+
+	// Stats may be nil if hunter disconnected abruptly
+	if hunter.Stats != nil {
+		hunterInfo.PacketsCaptured = hunter.Stats.PacketsCaptured
+		hunterInfo.PacketsForwarded = hunter.Stats.PacketsForwarded
+		hunterInfo.ActiveFilters = hunter.Stats.ActiveFilters
 	}
 
 	// Add or update in the hunter list for this processor
@@ -814,22 +823,29 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 	// Convert and store hunters for this processor
 	hunters := make([]components.HunterInfo, 0, len(node.Hunters))
 	for _, h := range node.Hunters {
-		hunters = append(hunters, components.HunterInfo{
-			ID:               h.HunterId,
-			Hostname:         h.Hostname,
-			RemoteAddr:       h.RemoteAddr,
-			Status:           h.Status,
-			ConnectedAt:      time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
-			LastHeartbeat:    h.LastHeartbeatNs,
-			PacketsCaptured:  h.Stats.PacketsCaptured,
-			PacketsMatched:   0, // Not provided in topology
-			PacketsForwarded: h.Stats.PacketsForwarded,
-			PacketsDropped:   0, // Not provided in topology
-			ActiveFilters:    h.Stats.ActiveFilters,
-			Interfaces:       h.Interfaces,
-			ProcessorAddr:    nodeAddr,
-			Capabilities:     h.Capabilities,
-		})
+		if h == nil {
+			continue
+		}
+		hunterInfo := components.HunterInfo{
+			ID:             h.HunterId,
+			Hostname:       h.Hostname,
+			RemoteAddr:     h.RemoteAddr,
+			Status:         h.Status,
+			ConnectedAt:    time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
+			LastHeartbeat:  h.LastHeartbeatNs,
+			PacketsMatched: 0, // Not provided in topology
+			PacketsDropped: 0, // Not provided in topology
+			Interfaces:     h.Interfaces,
+			ProcessorAddr:  nodeAddr,
+			Capabilities:   h.Capabilities,
+		}
+		// Stats may be nil if hunter disconnected abruptly
+		if h.Stats != nil {
+			hunterInfo.PacketsCaptured = h.Stats.PacketsCaptured
+			hunterInfo.PacketsForwarded = h.Stats.PacketsForwarded
+			hunterInfo.ActiveFilters = h.Stats.ActiveFilters
+		}
+		hunters = append(hunters, hunterInfo)
 	}
 	m.connectionMgr.HuntersByProcessor[nodeAddr] = hunters
 

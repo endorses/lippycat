@@ -23,8 +23,16 @@ import (
 
 var (
 	// Email-specific flags
-	emailTapPorts   string
-	emailTapAddress string
+	emailTapPorts          string
+	emailTapAddress        string
+	emailTapSender         string
+	emailTapRecipient      string
+	emailTapSubject        string
+	emailTapAddressesFile  string
+	emailTapSendersFile    string
+	emailTapRecipientsFile string
+	emailTapSubjectsFile   string
+	emailTapKeywordsFile   string
 )
 
 var emailTapCmd = &cobra.Command{
@@ -38,30 +46,56 @@ Email tap mode combines local SMTP-optimized capture with full processor capabil
 - Serves TUI connections for monitoring
 - Supports upstream forwarding in hierarchical mode
 - SMTP session tracking and correlation
+- Content filtering (sender, recipient, subject, keywords)
 
-This is ideal for single-machine email capture where you want:
-- Real-time email monitoring via TUI
-- Auto-rotating PCAP files for continuous capture
-- Email address filtering
+Filter Options:
+  --address       Match either sender OR recipient (glob pattern)
+  --sender        Match sender only (MAIL FROM, glob pattern)
+  --recipient     Match recipient only (RCPT TO, glob pattern)
+  --subject       Match subject line (glob pattern)
+  --keywords-file Keywords for subject matching (Aho-Corasick)
+
+Pattern Files (one pattern per line, # for comments):
+  --addresses-file, --senders-file, --recipients-file, --subjects-file
 
 Example:
   lc tap email --interface eth0 --insecure
   lc tap email -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/email/pcaps
   lc tap email -i eth0 --smtp-port 25,587,2525
-  lc tap email -i eth0 --address "*@example.com"`,
+  lc tap email -i eth0 --address "*@example.com"
+  lc tap email -i eth0 --sender "*@suspicious.com"
+  lc tap email -i eth0 --subject "*invoice*"`,
 	RunE: runEmailTap,
 }
 
 func init() {
 	TapCmd.AddCommand(emailTapCmd)
 
-	// Email-specific flags
+	// Email-specific flags - single patterns
 	emailTapCmd.Flags().StringVar(&emailTapPorts, "smtp-port", "25,587,465", "SMTP port(s) to capture, comma-separated")
-	emailTapCmd.Flags().StringVar(&emailTapAddress, "address", "", "Filter by email address pattern (glob-style)")
+	emailTapCmd.Flags().StringVar(&emailTapAddress, "address", "", "Filter by email address pattern (matches sender OR recipient, glob-style)")
+	emailTapCmd.Flags().StringVar(&emailTapSender, "sender", "", "Filter by sender address pattern (MAIL FROM, glob-style)")
+	emailTapCmd.Flags().StringVar(&emailTapRecipient, "recipient", "", "Filter by recipient address pattern (RCPT TO, glob-style)")
+	emailTapCmd.Flags().StringVar(&emailTapSubject, "subject", "", "Filter by subject pattern (glob-style)")
+
+	// Email filter file flags - bulk patterns
+	emailTapCmd.Flags().StringVar(&emailTapAddressesFile, "addresses-file", "", "Load address patterns from file (one per line)")
+	emailTapCmd.Flags().StringVar(&emailTapSendersFile, "senders-file", "", "Load sender patterns from file (one per line)")
+	emailTapCmd.Flags().StringVar(&emailTapRecipientsFile, "recipients-file", "", "Load recipient patterns from file (one per line)")
+	emailTapCmd.Flags().StringVar(&emailTapSubjectsFile, "subjects-file", "", "Load subject patterns from file (one per line)")
+	emailTapCmd.Flags().StringVar(&emailTapKeywordsFile, "keywords-file", "", "Load keywords from file for subject matching (Aho-Corasick)")
 
 	// Bind email-specific flags to viper
 	_ = viper.BindPFlag("tap.email.ports", emailTapCmd.Flags().Lookup("smtp-port"))
-	_ = viper.BindPFlag("tap.email.address", emailTapCmd.Flags().Lookup("address"))
+	_ = viper.BindPFlag("tap.email.address_pattern", emailTapCmd.Flags().Lookup("address"))
+	_ = viper.BindPFlag("tap.email.sender_pattern", emailTapCmd.Flags().Lookup("sender"))
+	_ = viper.BindPFlag("tap.email.recipient_pattern", emailTapCmd.Flags().Lookup("recipient"))
+	_ = viper.BindPFlag("tap.email.subject_pattern", emailTapCmd.Flags().Lookup("subject"))
+	_ = viper.BindPFlag("tap.email.addresses_file", emailTapCmd.Flags().Lookup("addresses-file"))
+	_ = viper.BindPFlag("tap.email.senders_file", emailTapCmd.Flags().Lookup("senders-file"))
+	_ = viper.BindPFlag("tap.email.recipients_file", emailTapCmd.Flags().Lookup("recipients-file"))
+	_ = viper.BindPFlag("tap.email.subjects_file", emailTapCmd.Flags().Lookup("subjects-file"))
+	_ = viper.BindPFlag("tap.email.keywords_file", emailTapCmd.Flags().Lookup("keywords-file"))
 }
 
 func runEmailTap(cmd *cobra.Command, args []string) error {
@@ -74,6 +108,66 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
+	}
+
+	// Set email filter patterns from flags
+	if cmd.Flags().Changed("address") {
+		viper.Set("email.address_pattern", emailTapAddress)
+	}
+	if cmd.Flags().Changed("sender") {
+		viper.Set("email.sender_pattern", emailTapSender)
+	}
+	if cmd.Flags().Changed("recipient") {
+		viper.Set("email.recipient_pattern", emailTapRecipient)
+	}
+	if cmd.Flags().Changed("subject") {
+		viper.Set("email.subject_pattern", emailTapSubject)
+	}
+
+	// Load patterns from files if specified
+	if emailTapAddressesFile != "" {
+		patterns, err := email.LoadEmailPatternsFromFile(emailTapAddressesFile)
+		if err != nil {
+			return fmt.Errorf("failed to load addresses file: %w", err)
+		}
+		viper.Set("email.address_patterns", patterns)
+		logger.Info("Loaded address patterns from file", "count", len(patterns), "file", emailTapAddressesFile)
+	}
+
+	if emailTapSendersFile != "" {
+		patterns, err := email.LoadEmailPatternsFromFile(emailTapSendersFile)
+		if err != nil {
+			return fmt.Errorf("failed to load senders file: %w", err)
+		}
+		viper.Set("email.sender_patterns", patterns)
+		logger.Info("Loaded sender patterns from file", "count", len(patterns), "file", emailTapSendersFile)
+	}
+
+	if emailTapRecipientsFile != "" {
+		patterns, err := email.LoadEmailPatternsFromFile(emailTapRecipientsFile)
+		if err != nil {
+			return fmt.Errorf("failed to load recipients file: %w", err)
+		}
+		viper.Set("email.recipient_patterns", patterns)
+		logger.Info("Loaded recipient patterns from file", "count", len(patterns), "file", emailTapRecipientsFile)
+	}
+
+	if emailTapSubjectsFile != "" {
+		patterns, err := email.LoadSubjectPatternsFromFile(emailTapSubjectsFile)
+		if err != nil {
+			return fmt.Errorf("failed to load subjects file: %w", err)
+		}
+		viper.Set("email.subject_patterns", patterns)
+		logger.Info("Loaded subject patterns from file", "count", len(patterns), "file", emailTapSubjectsFile)
+	}
+
+	if emailTapKeywordsFile != "" {
+		keywords, err := email.LoadKeywordsFromFile(emailTapKeywordsFile)
+		if err != nil {
+			return fmt.Errorf("failed to load keywords file: %w", err)
+		}
+		viper.Set("email.keywords", keywords)
+		logger.Info("Loaded keywords from file", "count", len(keywords), "file", emailTapKeywordsFile)
 	}
 
 	// Build email filter
@@ -258,6 +352,9 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 		"bpf_filter", localSourceConfig.BPFFilter,
 		"smtp_ports", emailTapPorts,
 		"address_filter", emailTapAddress,
+		"sender_filter", emailTapSender,
+		"recipient_filter", emailTapRecipient,
+		"subject_filter", emailTapSubject,
 		"auto_rotate_pcap", effectiveAutoRotate,
 		"listen", config.ListenAddr)
 

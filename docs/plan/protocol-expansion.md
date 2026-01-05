@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-05
-**Status:** Phase 0-1 Complete, Phase 2 Protocol Support Complete
+**Status:** Phase 0-1 Complete, Phase 2 Partial (body filtering deferred)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -223,7 +223,7 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Wire DNS filters from TUI/CLI to hunters (`ApplicationFilter` integration)
 - [x] DNS packet detection and domain matching in `ApplicationFilter.matchDNSPacket()`
 
-## Phase 2: Email - SMTP (3-4 days) - Protocol Complete, Filtering Incomplete
+## Phase 2: Email - SMTP (3-4 days) - Local Filtering Partial ⚠️
 
 **Priority:** High - Major LI use case
 
@@ -238,15 +238,58 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] STARTTLS detection
 - [x] Message-ID correlation
 
-### Content Filtering - Local (sniff/tap) ⚠️ Not Implemented
-- [ ] Create `internal/pkg/email/content_filter.go` with glob pattern matching
-- [ ] Add `--sender` flag (filter by MAIL FROM, glob pattern e.g., `*@example.com`)
-- [ ] Add `--recipient` flag (filter by RCPT TO, glob pattern)
-- [ ] Add `--address` flag (match either sender OR recipient)
-- [ ] Add `--subject` flag (filter by Subject header, glob pattern)
-- [ ] Add `--keywords-file` flag (Aho-Corasick patterns for body/subject)
-- [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
-- [ ] Wire filter flags in sniff and tap commands
+### Content Filtering - Local (sniff/tap) ⚠️ Subject Complete, Body Pending
+- [x] Create `internal/pkg/email/content_filter.go` with glob pattern matching
+- [x] Add `--sender` flag (filter by MAIL FROM, glob pattern e.g., `*@example.com`)
+- [x] Add `--recipient` flag (filter by RCPT TO, glob pattern)
+- [x] Add `--address` flag (match either sender OR recipient)
+- [x] Add `--subject` flag (filter by Subject header, glob pattern)
+- [x] Add `--keywords-file` flag (Aho-Corasick patterns for subject) ⚠️ Subject only
+- [x] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
+- [x] Wire filter flags in sniff and tap commands
+
+### Body Content Filtering (deferred)
+
+**Status:** Not implemented - keywords currently match subject only
+
+**Implementation Steps:**
+
+1. **Extend EmailMetadata type** (`internal/pkg/types/packet.go`)
+   - [ ] Add `Body string` field (or `BodyPreview string` with configurable length limit)
+   - [ ] Add `BodySize int` field for full message size tracking
+   - [ ] Consider `BodyTruncated bool` flag if preview is used
+
+2. **Update SMTP TCP stream handler** (`internal/pkg/email/tcp_stream.go`)
+   - [ ] Add body capture state machine (currently stops at headers)
+   - [ ] Buffer body content during DATA phase (after blank line separator)
+   - [ ] Implement configurable body size limit (default: 64KB? 256KB?)
+   - [ ] Handle MIME multipart boundaries (optional, for text extraction)
+   - [ ] Emit body content to EmailMetadata when message completes (dot terminator)
+
+3. **Update content filter** (`internal/pkg/email/content_filter.go`)
+   - [ ] Extend `Match()` to search body content with keywords matcher
+   - [ ] Add `--body-keywords-file` flag or reuse `--keywords-file` for both
+   - [ ] Consider separate `--body-only` vs `--subject-and-body` modes
+
+4. **Add configuration options** (`cmd/sniff/email.go`, `cmd/tap/tap_email.go`)
+   - [ ] Add `--max-body-size` flag (limit memory usage)
+   - [ ] Add `--capture-body` flag (opt-in for body capture, default: false)
+   - [ ] Viper keys: `email.capture_body`, `email.max_body_size`
+
+5. **Memory management considerations**
+   - [ ] Streaming scan option: scan body as it arrives, don't store full content
+   - [ ] Or: ring buffer approach for recent body content
+   - [ ] Document memory implications in help text
+
+**Trade-offs:**
+| Approach | Memory | Complexity | Use Case |
+|----------|--------|------------|----------|
+| No body capture (current) | Minimal | Simple | Envelope-based filtering |
+| Body preview (first N bytes) | Bounded | Moderate | Keyword detection in headers/intro |
+| Full body capture | Unbounded | Moderate | Complete content analysis |
+| Streaming scan | Minimal | Complex | Large message handling |
+
+**Recommended approach:** Body preview with configurable limit (default 64KB), opt-in via `--capture-body` flag.
 
 ### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
 - [x] `FILTER_EMAIL_ADDRESS` type in proto (Phase 0 - complete)
@@ -401,16 +444,16 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 |-------|----------|------------------|-----------------|----------------------|-------|
 | 0 | Infrastructure | N/A | N/A | ✅ Complete | ✅ Complete |
 | 1 | DNS | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
-| 2 | SMTP | ✅ Complete | 1-2 days | Ready (Phase 0 done) | 1-2 days |
+| 2 | SMTP | ✅ Complete | ⚠️ Partial (no body) | Ready (Phase 0 done) | ⚠️ Partial |
 | 3 | TLS/JA3 | 3-4 days | 1 day | Ready (Phase 0 done) | 4-5 days |
 | 4 | HTTP | 4-5 days | 1-2 days | Ready (Phase 0 done) | 5-7 days |
 | 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
 
-**Critical path:** Phase 0-1 complete - DNS distributed filtering fully operational.
+**Critical path:** Phase 0-1 complete. Phase 2 partial (envelope/subject filtering works, body filtering deferred).
 
 **Remaining work:**
-- Phase 2 email local filtering: 1-2 days
+- Phase 2 body filtering: 1-2 days (optional, see implementation steps)
 - Phase 3-5 complete: ~14-17 days
 
 ## Current Status (2026-01-05)
@@ -425,6 +468,11 @@ New protocols plug into these existing paths—no new output mechanisms needed.
   - `--domains-file` flag loads bulk patterns from file
   - Shared `filtering.MatchGlob()` for case-insensitive glob matching
   - `GlobMatcher` type with O(1) exact match optimization
+- **Email local content filtering (sniff/tap):** ⚠️ Partial
+  - `--sender`, `--recipient`, `--address`, `--subject` flags in sniff and tap commands
+  - `--senders-file`, `--recipients-file`, `--addresses-file`, `--subjects-file` for bulk patterns
+  - `--keywords-file` for Aho-Corasick matching (subject only, body not implemented)
+  - `ContentFilter` with AND logic between filter groups, OR logic within groups
 - **Phase 0 - Filter Distribution Infrastructure:** ✅
   - New filter types in proto: DNS_DOMAIN, EMAIL_ADDRESS, EMAIL_SUBJECT, TLS_SNI, TLS_JA3, TLS_JA3S, TLS_JA4, HTTP_HOST, HTTP_URL
   - Hunter filter matchers for DNS, Email, TLS, HTTP in `internal/pkg/hunter/filter/`
@@ -439,16 +487,21 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 
 ### What's Incomplete
 
-1. **Email local content filtering (sniff/tap):**
-   - No filter implementation exists in the email package
-   - Requires `--sender`, `--recipient`, `--subject` flags
+1. **Email body content filtering:**
+   - `--keywords-file` only matches subject, not body
+   - Requires SMTP parser extension to capture body content
+   - See "Body Content Filtering (deferred)" section in Phase 2 for implementation steps
 
 2. **Pattern validation:**
    - No validation for JA3 hash format (32-char hex)
    - No validation for glob syntax errors
 
+3. **Email distributed filtering wiring:**
+   - Hunt mode email filter integration needs testing
+
 ### Recommended Next Steps
 
-1. **Implement Phase 2 email local filtering:** Add sniff/tap filter flags (`--sender`, `--recipient`, `--subject`)
+1. **Implement email body content filtering:** Extend SMTP parser to capture body, update content filter
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
 3. **Start Phase 3 TLS/JA3 fingerprinting:** Protocol parser, fingerprint calculation
+4. **Wire email distributed filtering:** Test hunt mode email filter integration

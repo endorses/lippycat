@@ -34,15 +34,23 @@ var (
 
 // cliSMTPHandler handles SMTP messages for CLI output.
 type cliSMTPHandler struct {
-	quietMode   bool
-	jsonEncoder *json.Encoder
-	tracker     *SessionTracker
+	quietMode     bool
+	jsonEncoder   *json.Encoder
+	tracker       *SessionTracker
+	contentFilter *ContentFilter
 }
 
 func (h *cliSMTPHandler) HandleSMTPLine(line string, metadata *types.EmailMetadata, sessionID string, flow gopacket.Flow) {
 	// Update tracker
 	if h.tracker != nil {
 		h.tracker.UpdateSession(sessionID, metadata)
+	}
+
+	// Apply content filter if configured
+	if h.contentFilter != nil && h.contentFilter.HasFilters() {
+		if !h.contentFilter.Match(metadata) {
+			return // Skip this message - doesn't match filter
+		}
 	}
 
 	if h.quietMode {
@@ -109,10 +117,24 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		jsonEncoder = json.NewEncoder(os.Stdout)
 	}
 
+	// Build content filter from viper configuration
+	var contentFilter *ContentFilter
+	filterConfig := buildContentFilterConfig()
+	if filterConfig.hasPatterns() {
+		contentFilter = NewContentFilter(filterConfig)
+		logger.Info("Email content filter enabled",
+			"address_patterns", len(filterConfig.AddressPatterns),
+			"sender_patterns", len(filterConfig.SenderPatterns),
+			"recipient_patterns", len(filterConfig.RecipientPatterns),
+			"subject_patterns", len(filterConfig.SubjectPatterns),
+			"keywords", len(filterConfig.Keywords))
+	}
+
 	emailHandler = &cliSMTPHandler{
-		quietMode:   quietMode,
-		jsonEncoder: jsonEncoder,
-		tracker:     emailTracker,
+		quietMode:     quietMode,
+		jsonEncoder:   jsonEncoder,
+		tracker:       emailTracker,
+		contentFilter: contentFilter,
 	}
 
 	// Detect offline mode
@@ -267,4 +289,53 @@ func printStatistics() {
 		fmt.Printf("  Total messages: %d\n", stats.TotalMessages)
 		fmt.Printf("  Encrypted sessions: %d\n", stats.EncryptedSessions)
 	}
+}
+
+// buildContentFilterConfig builds a ContentFilterConfig from viper configuration.
+func buildContentFilterConfig() ContentFilterConfig {
+	config := ContentFilterConfig{}
+
+	// Load single patterns from viper
+	if pattern := viper.GetString("email.address_pattern"); pattern != "" {
+		config.AddressPatterns = []string{pattern}
+	}
+	if pattern := viper.GetString("email.sender_pattern"); pattern != "" {
+		config.SenderPatterns = []string{pattern}
+	}
+	if pattern := viper.GetString("email.recipient_pattern"); pattern != "" {
+		config.RecipientPatterns = []string{pattern}
+	}
+	if pattern := viper.GetString("email.subject_pattern"); pattern != "" {
+		config.SubjectPatterns = []string{pattern}
+	}
+
+	// Append patterns loaded from files
+	if patterns := viper.GetStringSlice("email.address_patterns"); len(patterns) > 0 {
+		config.AddressPatterns = append(config.AddressPatterns, patterns...)
+	}
+	if patterns := viper.GetStringSlice("email.sender_patterns"); len(patterns) > 0 {
+		config.SenderPatterns = append(config.SenderPatterns, patterns...)
+	}
+	if patterns := viper.GetStringSlice("email.recipient_patterns"); len(patterns) > 0 {
+		config.RecipientPatterns = append(config.RecipientPatterns, patterns...)
+	}
+	if patterns := viper.GetStringSlice("email.subject_patterns"); len(patterns) > 0 {
+		config.SubjectPatterns = append(config.SubjectPatterns, patterns...)
+	}
+
+	// Load keywords for Aho-Corasick matching
+	if keywords := viper.GetStringSlice("email.keywords"); len(keywords) > 0 {
+		config.Keywords = keywords
+	}
+
+	return config
+}
+
+// hasPatterns returns true if any patterns are configured.
+func (c ContentFilterConfig) hasPatterns() bool {
+	return len(c.AddressPatterns) > 0 ||
+		len(c.SenderPatterns) > 0 ||
+		len(c.RecipientPatterns) > 0 ||
+		len(c.SubjectPatterns) > 0 ||
+		len(c.Keywords) > 0
 }

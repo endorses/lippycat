@@ -18,7 +18,7 @@ services:
     ports:
       - "50051:50051"
     environment:
-      - LIPPYCAT_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
       - LIPPYCAT_TLS_CERT=/certs/processor-cert.pem
       - LIPPYCAT_TLS_KEY=/certs/processor-key.pem
@@ -48,7 +48,7 @@ services:
     ports:
       - "50052:50051"
     environment:
-      - LIPPYCAT_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
       - LIPPYCAT_TLS_CERT=/certs/upstream-cert.pem
       - LIPPYCAT_TLS_KEY=/certs/upstream-key.pem
@@ -77,7 +77,7 @@ services:
     cap_add:
       - NET_ADMIN  # Required for packet capture
     environment:
-      - LIPPYCAT_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
       - LIPPYCAT_TLS_CERT=/certs/hunter-cert.pem
       - LIPPYCAT_TLS_KEY=/certs/hunter-key.pem
@@ -102,7 +102,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      - LIPPYCAT_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
       - LIPPYCAT_TLS_CERT=/certs/hunter-cert.pem
       - LIPPYCAT_TLS_KEY=/certs/hunter-key.pem
@@ -127,7 +127,7 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      - LIPPYCAT_LOG_LEVEL=debug
+      - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
       - LIPPYCAT_TLS_CERT=/certs/hunter-cert.pem
       - LIPPYCAT_TLS_KEY=/certs/hunter-key.pem
@@ -164,7 +164,7 @@ services:
     container_name: lippycat-test-client
     hostname: client.test.local
     environment:
-      - LIPPYCAT_LOG_LEVEL=info
+      - LOG_LEVEL=info
       - LIPPYCAT_TLS_ENABLED=true
       - LIPPYCAT_TLS_CERT=/certs/client-cert.pem
       - LIPPYCAT_TLS_KEY=/certs/client-key.pem

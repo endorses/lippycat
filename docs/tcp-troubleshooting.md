@@ -41,7 +41,7 @@ sudo ./lippycat sniff voip --interface any --tcp-performance-mode latency
 **Diagnostic Steps:**
 ```bash
 # Enable debug logging
-export LIPPYCAT_LOG_LEVEL=debug
+export LOG_LEVEL=debug
 sudo ./lippycat sniff voip --tcp-performance-mode latency
 
 # Check TCP assembler health
@@ -229,7 +229,7 @@ Enable debug logging for detailed troubleshooting:
 
 ```bash
 # Set debug level
-export LIPPYCAT_LOG_LEVEL=debug
+export LOG_LEVEL=debug
 
 # Capture logs to file
 sudo ./lippycat sniff voip 2> lippycat-debug.log

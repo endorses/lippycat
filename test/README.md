@@ -302,7 +302,7 @@ cd test/testcerts
 
 ```bash
 # Enable debug logging for test runs
-LIPPYCAT_LOG_LEVEL=debug go test -v ./test/...
+LOG_LEVEL=debug go test -v ./test/...
 ```
 
 ### Isolate Failing Test

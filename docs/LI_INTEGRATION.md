@@ -404,7 +404,7 @@ Check:
 
 Enable debug logging:
 ```bash
-LIPPYCAT_LOG_LEVEL=debug lc process --li-enabled ...
+LOG_LEVEL=debug lc process --li-enabled ...
 ```
 
 Key log fields:

@@ -40,6 +40,7 @@ var (
 	hunterID         string
 	interfaces       []string
 	bpfFilter        string
+	pcapBufferSize   int
 	bufferSize       int
 	batchSize        int
 	batchTimeout     int
@@ -71,6 +72,7 @@ func init() {
 	HuntCmd.PersistentFlags().StringSliceVarP(&interfaces, "interface", "i", []string{"any"}, "Network interfaces to capture (comma-separated)")
 	HuntCmd.PersistentFlags().StringVarP(&bpfFilter, "filter", "f", "", "BPF filter expression")
 	HuntCmd.PersistentFlags().BoolVarP(&promiscuous, "promisc", "p", false, "Enable promiscuous mode")
+	HuntCmd.PersistentFlags().IntVar(&pcapBufferSize, "pcap-buffer-size", 16*1024*1024, "Kernel pcap buffer size in bytes (default 16MB, increase for high-traffic interfaces)")
 
 	// Performance tuning (persistent for subcommands)
 	HuntCmd.PersistentFlags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
@@ -106,6 +108,7 @@ func init() {
 	_ = viper.BindPFlag("hunter.batch_timeout_ms", HuntCmd.PersistentFlags().Lookup("batch-timeout"))
 	_ = viper.BindPFlag("hunter.batch_queue_size", HuntCmd.PersistentFlags().Lookup("batch-queue-size"))
 	_ = viper.BindPFlag("promiscuous", HuntCmd.PersistentFlags().Lookup("promisc"))
+	_ = viper.BindPFlag("pcap_buffer_size", HuntCmd.PersistentFlags().Lookup("pcap-buffer-size"))
 	_ = viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.PersistentFlags().Lookup("enable-voip-filter"))
 	_ = viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.PersistentFlags().Lookup("gpu-backend"))
 	_ = viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.PersistentFlags().Lookup("gpu-batch-size"))

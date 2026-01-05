@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/dns"
+	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -194,6 +195,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		DisplayStats:          true,
 		AutoRotateConfig:      autoRotateConfig,
 		EnableDetection:       true, // Enable protocol detection for DNS
+		FilterFile:            getStringConfig("tap.filter_file", filterFile),
 		TLSEnabled:            getBoolConfig("tap.tls.enabled", tlsEnabled),
 		TLSCertFile:           getStringConfig("tap.tls.cert_file", tlsCertFile),
 		TLSKeyFile:            getStringConfig("tap.tls.key_file", tlsKeyFile),
@@ -255,6 +257,18 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 
 	// Wire LocalTarget to LocalSource for BPF filter updates
 	localTarget.SetBPFUpdater(localSource)
+
+	// Create ApplicationFilter for content filtering (same as hunt mode)
+	appFilter, err := hunter.NewApplicationFilter(nil)
+	if err != nil {
+		return fmt.Errorf("failed to create application filter: %w", err)
+	}
+
+	// Wire ApplicationFilter to both LocalSource and LocalTarget
+	// - LocalSource uses it to filter packets before batching (like hunt does)
+	// - LocalTarget uses it to update filters when management API changes them
+	localSource.SetApplicationFilter(appFilter)
+	localTarget.SetApplicationFilter(appFilter)
 
 	// Set the local source and target on the processor
 	p.SetPacketSource(localSource)

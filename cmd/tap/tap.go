@@ -13,6 +13,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -65,12 +66,13 @@ Examples:
 
 var (
 	// Capture flags (from hunter)
-	interfaces   []string
-	bpfFilter    string
-	promiscuous  bool
-	bufferSize   int
-	batchSize    int
-	batchTimeout int
+	interfaces     []string
+	bpfFilter      string
+	promiscuous    bool
+	pcapBufferSize int
+	bufferSize     int
+	batchSize      int
+	batchTimeout   int
 
 	// Management interface flags
 	listenAddr     string
@@ -106,6 +108,9 @@ var (
 	// Protocol detection
 	enableDetection bool
 
+	// Filter persistence
+	filterFile string
+
 	// TLS flags (for management interface)
 	tlsEnabled    bool
 	tlsCertFile   string
@@ -127,6 +132,7 @@ func init() {
 	TapCmd.PersistentFlags().StringSliceVarP(&interfaces, "interface", "i", []string{"any"}, "Network interfaces to capture (comma-separated)")
 	TapCmd.PersistentFlags().StringVarP(&bpfFilter, "filter", "f", "", "BPF filter expression")
 	TapCmd.PersistentFlags().BoolVarP(&promiscuous, "promisc", "p", false, "Enable promiscuous mode")
+	TapCmd.PersistentFlags().IntVar(&pcapBufferSize, "pcap-buffer-size", 16*1024*1024, "Kernel pcap buffer size in bytes (default 16MB, increase for high-traffic interfaces)")
 	TapCmd.PersistentFlags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
 	TapCmd.PersistentFlags().IntVar(&batchSize, "batch-size", 100, "Packets per batch")
 	TapCmd.PersistentFlags().IntVar(&batchTimeout, "batch-timeout", 100, "Batch timeout in milliseconds")
@@ -176,6 +182,11 @@ func init() {
 	TapCmd.PersistentFlags().BoolVarP(&enableDetection, "detect", "d", true, "Enable protocol detection")
 
 	// ============================================================
+	// Filter Persistence (persistent for voip subcommand)
+	// ============================================================
+	TapCmd.PersistentFlags().StringVar(&filterFile, "filter-file", "", "Path to filter persistence file (YAML, default: ~/.config/lippycat/filters.yaml)")
+
+	// ============================================================
 	// TLS Configuration (persistent for voip subcommand)
 	// ============================================================
 	TapCmd.PersistentFlags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption for management interface")
@@ -197,6 +208,10 @@ func init() {
 	_ = viper.BindPFlag("tap.interfaces", TapCmd.PersistentFlags().Lookup("interface"))
 	_ = viper.BindPFlag("tap.bpf_filter", TapCmd.PersistentFlags().Lookup("filter"))
 	_ = viper.BindPFlag("tap.promiscuous", TapCmd.PersistentFlags().Lookup("promisc"))
+	// Also bind to "promiscuous" for pcaptypes/live.go which reads this key
+	_ = viper.BindPFlag("promiscuous", TapCmd.PersistentFlags().Lookup("promisc"))
+	// Bind pcap buffer size for pcaptypes/live.go which reads this key
+	_ = viper.BindPFlag("pcap_buffer_size", TapCmd.PersistentFlags().Lookup("pcap-buffer-size"))
 	_ = viper.BindPFlag("tap.buffer_size", TapCmd.PersistentFlags().Lookup("buffer-size"))
 	_ = viper.BindPFlag("tap.batch_size", TapCmd.PersistentFlags().Lookup("batch-size"))
 	_ = viper.BindPFlag("tap.batch_timeout_ms", TapCmd.PersistentFlags().Lookup("batch-timeout"))
@@ -230,6 +245,9 @@ func init() {
 
 	// Detection
 	_ = viper.BindPFlag("tap.enable_detection", TapCmd.PersistentFlags().Lookup("detect"))
+
+	// Filter persistence
+	_ = viper.BindPFlag("tap.filter_file", TapCmd.PersistentFlags().Lookup("filter-file"))
 
 	// TLS
 	_ = viper.BindPFlag("tap.tls.enabled", TapCmd.PersistentFlags().Lookup("tls"))
@@ -340,6 +358,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
 		EnableDetection:       getBoolConfig("tap.enable_detection", enableDetection),
+		FilterFile:            getStringConfig("tap.filter_file", filterFile),
 		// TLS configuration
 		TLSEnabled:    getBoolConfig("tap.tls.enabled", tlsEnabled),
 		TLSCertFile:   getStringConfig("tap.tls.cert_file", tlsCertFile),
@@ -414,6 +433,18 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 	// Wire LocalTarget to LocalSource for BPF filter updates
 	localTarget.SetBPFUpdater(localSource)
+
+	// Create ApplicationFilter for VoIP/content filtering (same as hunt mode)
+	appFilter, err := hunter.NewApplicationFilter(nil)
+	if err != nil {
+		return fmt.Errorf("failed to create application filter: %w", err)
+	}
+
+	// Wire ApplicationFilter to both LocalSource and LocalTarget
+	// - LocalSource uses it to filter packets before batching (like hunt does)
+	// - LocalTarget uses it to update filters when management API changes them
+	localSource.SetApplicationFilter(appFilter)
+	localTarget.SetApplicationFilter(appFilter)
 
 	// Set the local source and target on the processor
 	p.SetPacketSource(localSource)

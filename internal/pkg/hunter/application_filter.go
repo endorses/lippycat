@@ -10,10 +10,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/hunter/filter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/phonematcher"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/kentik/patricia"
 	"github.com/kentik/patricia/generics_tree"
 )
@@ -43,6 +45,9 @@ type ApplicationFilter struct {
 	phoneMatcher   *phonematcher.Matcher        // Bloom+hash matcher for phone numbers (LI-optimized)
 	sipURIPatterns []ahocorasick.Pattern        // AC patterns for SIPURI matching (user@domain)
 	sipURIMatcher  *ahocorasick.BufferedMatcher // Separate Aho-Corasick matcher for SIPURI matching
+
+	// Protocol-specific matchers
+	dnsMatcher *filter.DNSMatcher // DNS domain pattern matcher
 
 	// Filter ID mappings for LI correlation
 	acPatternToFilterID     map[int]string    // AC pattern ID -> filter ID (for SIPUser/PhoneNumber AC patterns)
@@ -91,6 +96,7 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		phoneMatcher:            phonematcher.New(),                                       // Bloom+hash for phone numbers (LI-optimized)
 		sipURIPatterns:          make([]ahocorasick.Pattern, 0),
 		sipURIMatcher:           ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
+		dnsMatcher:              filter.NewDNSMatcher(),                                   // DNS domain matcher
 		acPatternToFilterID:     make(map[int]string),
 		phoneNumberToFilterID:   make(map[string]string),
 		sipURIPatternToFilterID: make(map[int]string),
@@ -278,10 +284,18 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 				gpuType:     gpuType,
 			})
 
+			// DNS domain filters are handled by the dedicated DNS matcher
+			// case management.FilterType_FILTER_DNS_DOMAIN: handled below
+
 			// Future: Add other protocol-specific filters here
-			// case management.FilterType_FILTER_HTTP_PATH:
-			// case management.FilterType_FILTER_DNS_QUERY:
+			// case management.FilterType_FILTER_HTTP_HOST:
+			// case management.FilterType_FILTER_HTTP_URL:
 		}
+	}
+
+	// Update DNS matcher with all filters (it extracts DNS domain filters internally)
+	if af.dnsMatcher != nil {
+		af.dnsMatcher.UpdateFilters(filters)
 	}
 
 	logger.Info("Updated application-level filters (hot-reload, no restart)",
@@ -289,6 +303,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 		"sip_uris", len(af.sipURIs),
 		"phone_numbers", len(af.phoneNumbers),
 		"ip_addresses", len(af.ipAddresses),
+		"dns_domains", af.dnsMatcher.HasFilters(),
 		"gpu_enabled", af.enabled)
 
 	// Build Aho-Corasick patterns for CPU matching
@@ -396,43 +411,56 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	af.mu.RLock()
 	defer af.mu.RUnlock()
 
+	// Check if we have any filters at all
+	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
+	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
+	hasIPFilters := len(af.ipAddresses) > 0
+
 	// If no filters, match everything
-	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 && len(af.ipAddresses) == 0 {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters {
 		return true
 	}
 
 	// Check IP addresses first (applies to all protocols)
-	if len(af.ipAddresses) > 0 {
+	if hasIPFilters {
 		if af.matchIPAddressBool(packet) {
 			return true
 		}
-		// If we have ONLY IP filters (no VoIP filters), don't continue to VoIP checks
-		if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
+		// If we have ONLY IP filters (no other protocol filters), no match
+		if !hasVoIPFilters && !hasDNSFilters {
 			return false
 		}
 	}
 
-	// Check if this is a SIP or RTP packet
-	if !af.isVoIPPacket(packet) {
-		return false
+	// Check DNS packets
+	if hasDNSFilters {
+		if matched, _ := af.matchDNSPacket(packet); matched {
+			return true
+		}
 	}
 
-	// Get payload - use LayerContents() to get full message including headers
-	// Payload() only returns the body (e.g., SDP for SIP), missing critical info
-	appLayer := packet.ApplicationLayer()
-	if appLayer == nil {
-		return false
+	// Check VoIP packets
+	if hasVoIPFilters {
+		// Check if this is a SIP or RTP packet
+		if af.isVoIPPacket(packet) {
+			// Get payload - use LayerContents() to get full message including headers
+			// Payload() only returns the body (e.g., SDP for SIP), missing critical info
+			appLayer := packet.ApplicationLayer()
+			if appLayer != nil {
+				payload := appLayer.LayerContents()
+
+				// Use GPU if enabled and at least one GPU automaton is built
+				if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
+					return af.matchWithGPU([]byte(payload))
+				}
+
+				// CPU fallback
+				return af.matchWithCPU(string(payload))
+			}
+		}
 	}
 
-	payload := appLayer.LayerContents()
-
-	// Use GPU if enabled and at least one GPU automaton is built
-	if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
-		return af.matchWithGPU([]byte(payload))
-	}
-
-	// CPU fallback
-	return af.matchWithCPU(string(payload))
+	return false
 }
 
 // MatchPacketWithIDs checks if a packet matches any filters and returns the matched filter IDs.
@@ -444,39 +472,46 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 
 	var matchedFilterIDs []string
 
+	// Check if we have any filters at all
+	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
+	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
+	hasIPFilters := len(af.ipAddresses) > 0
+
 	// If no filters, match everything (but no specific filter IDs)
-	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 && len(af.ipAddresses) == 0 {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters {
 		return true, nil
 	}
 
 	// Check IP addresses first (applies to all protocols)
-	if len(af.ipAddresses) > 0 {
+	if hasIPFilters {
 		ipFilterIDs := af.matchIPAddress(packet)
 		if len(ipFilterIDs) > 0 {
 			matchedFilterIDs = append(matchedFilterIDs, ipFilterIDs...)
 		}
-		// If we have ONLY IP filters (no VoIP filters), return now
-		if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
-			return len(matchedFilterIDs) > 0, matchedFilterIDs
+	}
+
+	// Check DNS packets
+	if hasDNSFilters {
+		if matched, dnsFilterIDs := af.matchDNSPacket(packet); matched {
+			matchedFilterIDs = append(matchedFilterIDs, dnsFilterIDs...)
 		}
 	}
 
-	// Check if this is a SIP or RTP packet
-	if !af.isVoIPPacket(packet) {
-		return len(matchedFilterIDs) > 0, matchedFilterIDs
+	// Check VoIP packets
+	if hasVoIPFilters {
+		// Check if this is a SIP or RTP packet
+		if af.isVoIPPacket(packet) {
+			// Get payload - use LayerContents() to get full message including headers
+			appLayer := packet.ApplicationLayer()
+			if appLayer != nil {
+				payload := appLayer.LayerContents()
+
+				// Match VoIP filters and collect filter IDs
+				voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
+				matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
+			}
+		}
 	}
-
-	// Get payload - use LayerContents() to get full message including headers
-	appLayer := packet.ApplicationLayer()
-	if appLayer == nil {
-		return len(matchedFilterIDs) > 0, matchedFilterIDs
-	}
-
-	payload := appLayer.LayerContents()
-
-	// Match VoIP filters and collect filter IDs
-	voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
-	matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
 
 	return len(matchedFilterIDs) > 0, matchedFilterIDs
 }
@@ -1112,6 +1147,69 @@ func (af *ApplicationFilter) isVoIPPacket(packet gopacket.Packet) bool {
 	default:
 		return false
 	}
+}
+
+// matchDNSPacket checks if a packet is DNS and matches domain filters.
+// Returns true if the packet is DNS and matches at least one filter, along with matched filter IDs.
+func (af *ApplicationFilter) matchDNSPacket(packet gopacket.Packet) (bool, []string) {
+	// First check if this is a DNS packet using the detector
+	result := af.detector.Detect(packet)
+	if result == nil || result.Protocol != "DNS" {
+		return false, nil
+	}
+
+	// Parse DNS layer to get query/response domains
+	dnsLayer := packet.Layer(layers.LayerTypeDNS)
+	if dnsLayer == nil {
+		return false, nil
+	}
+
+	dns, ok := dnsLayer.(*layers.DNS)
+	if !ok {
+		return false, nil
+	}
+
+	// Collect all domain names from queries and answers
+	var domains []string
+
+	// Extract query names
+	for _, question := range dns.Questions {
+		if len(question.Name) > 0 {
+			domains = append(domains, string(question.Name))
+		}
+	}
+
+	// Extract answer names (for responses)
+	for _, answer := range dns.Answers {
+		if len(answer.Name) > 0 {
+			domains = append(domains, string(answer.Name))
+		}
+		// Also extract CNAME targets
+		if answer.Type == layers.DNSTypeCNAME && len(answer.CNAME) > 0 {
+			domains = append(domains, string(answer.CNAME))
+		}
+	}
+
+	if len(domains) == 0 {
+		return false, nil
+	}
+
+	// Match domains against filters
+	var matchedFilterIDs []string
+	seen := make(map[string]bool) // Deduplicate filter IDs
+
+	for _, domain := range domains {
+		if matched, filterIDs := af.dnsMatcher.MatchDomain(domain); matched {
+			for _, id := range filterIDs {
+				if !seen[id] {
+					seen[id] = true
+					matchedFilterIDs = append(matchedFilterIDs, id)
+				}
+			}
+		}
+	}
+
+	return len(matchedFilterIDs) > 0, matchedFilterIDs
 }
 
 // Close cleans up GPU resources

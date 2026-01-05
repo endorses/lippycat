@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-05
-**Status:** Phase 0 Complete, Phase 1-2 Protocol Support Complete
+**Status:** Phase 0-1 Complete, Phase 2 Protocol Support Complete
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -196,7 +196,7 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Update `filtermanager/editor.go` CycleFormFilterType for new types
 - [x] Add filter type category functions (IsDNSFilterType, IsEmailFilterType, etc.)
 
-## Phase 1: DNS (2-3 days) - Protocol Complete, Filtering Partial ⚠️
+## Phase 1: DNS (2-3 days) - Complete ✅
 
 **Priority:** Highest - Low effort, high value, strong LI relevance
 
@@ -217,11 +217,11 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [x] Add `--domains-file` flag for bulk domain lists (load patterns from file)
 - [x] GlobMatcher type with O(1) exact match lookup and AC integration foundation
 
-### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+### Content Filtering - Distributed (hunt) ✅
 - [x] `FILTER_DNS_DOMAIN` type in proto (Phase 0 - complete)
 - [x] Hunter DNS domain matching logic (`internal/pkg/hunter/filter/dns.go`)
-- [ ] Wire DNS filters from TUI/CLI to hunters
-- [ ] Test end-to-end domain filter distribution
+- [x] Wire DNS filters from TUI/CLI to hunters (`ApplicationFilter` integration)
+- [x] DNS packet detection and domain matching in `ApplicationFilter.matchDNSPacket()`
 
 ## Phase 2: Email - SMTP (3-4 days) - Protocol Complete, Filtering Incomplete
 
@@ -400,17 +400,17 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 | Phase | Protocol | Protocol Support | Local Filtering | Distributed Filtering | Total |
 |-------|----------|------------------|-----------------|----------------------|-------|
 | 0 | Infrastructure | N/A | N/A | ✅ Complete | ✅ Complete |
-| 1 | DNS | ✅ Complete | ✅ Complete | Ready (Phase 0 done) | 0 days |
+| 1 | DNS | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 2 | SMTP | ✅ Complete | 1-2 days | Ready (Phase 0 done) | 1-2 days |
 | 3 | TLS/JA3 | 3-4 days | 1 day | Ready (Phase 0 done) | 4-5 days |
 | 4 | HTTP | 4-5 days | 1-2 days | Ready (Phase 0 done) | 5-7 days |
 | 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
 
-**Critical path:** Phase 0 is now complete - distributed filtering infrastructure is ready.
+**Critical path:** Phase 0-1 complete - DNS distributed filtering fully operational.
 
 **Remaining work:**
-- Phase 1-2 remaining local filtering: 1-2 days
+- Phase 2 email local filtering: 1-2 days
 - Phase 3-5 complete: ~14-17 days
 
 ## Current Status (2026-01-05)
@@ -430,6 +430,12 @@ New protocols plug into these existing paths—no new output mechanisms needed.
   - Hunter filter matchers for DNS, Email, TLS, HTTP in `internal/pkg/hunter/filter/`
   - TUI filter manager supports all new filter types
   - CLI filtering types.go and conversion.go updated
+- **Phase 1 - DNS Distributed Filtering:** ✅
+  - DNS hunters advertise `dns_domain` filter capability
+  - `ApplicationFilter` integrates `DNSMatcher` for domain pattern matching
+  - DNS packet detection via centralized detector
+  - Domain extraction from DNS queries/answers (including CNAME targets)
+  - Full filter ID tracking for LI correlation
 
 ### What's Incomplete
 
@@ -441,11 +447,8 @@ New protocols plug into these existing paths—no new output mechanisms needed.
    - No validation for JA3 hash format (32-char hex)
    - No validation for glob syntax errors
 
-3. **Hunter capability reporting:**
-   - Hunters don't yet report which filter types they support
-
 ### Recommended Next Steps
 
-1. **Complete Phase 1 distributed filtering:** Wire DNS filters from TUI/CLI to hunters
-2. **Implement Phase 2 email local filtering:** Add sniff/tap filter flags
-3. **Add pattern validation:** JA3/JA3S hash format, glob syntax
+1. **Implement Phase 2 email local filtering:** Add sniff/tap filter flags (`--sender`, `--recipient`, `--subject`)
+2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
+3. **Start Phase 3 TLS/JA3 fingerprinting:** Protocol parser, fingerprint calculation

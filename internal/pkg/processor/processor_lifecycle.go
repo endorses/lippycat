@@ -58,6 +58,28 @@ func (p *Processor) Start(ctx context.Context) error {
 		// Continue anyway - not a fatal error
 	}
 
+	// Apply loaded filters to the filter target (needed for tap/local mode)
+	// In distributed mode, filters are pushed when hunters connect.
+	// In tap mode, we need to apply them immediately to the LocalTarget/ApplicationFilter.
+	loadedFilters := p.filterManager.GetAll()
+	if len(loadedFilters) > 0 {
+		// Use batch apply if available (more efficient - rebuilds automaton once)
+		if batchTarget, ok := p.filterTarget.(interface {
+			ApplyFilterBatch([]*management.Filter) (uint32, error)
+		}); ok {
+			if _, err := batchTarget.ApplyFilterBatch(loadedFilters); err != nil {
+				logger.Warn("Failed to batch apply loaded filters", "error", err)
+			}
+		} else {
+			// Fall back to individual apply
+			for _, filter := range loadedFilters {
+				if _, err := p.filterTarget.ApplyFilter(filter); err != nil {
+					logger.Warn("Failed to apply loaded filter", "filter_id", filter.Id, "error", err)
+				}
+			}
+		}
+	}
+
 	// Initialize PCAP writer if configured
 	if p.config.WriteFile != "" {
 		writer, err := pcap.NewWriter(p.config.WriteFile)

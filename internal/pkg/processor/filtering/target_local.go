@@ -118,6 +118,56 @@ func (t *LocalTarget) ApplyFilter(filter *management.Filter) (uint32, error) {
 	return 1, nil
 }
 
+// ApplyFilterBatch adds or updates multiple filters in a single operation.
+// This is more efficient than calling ApplyFilter repeatedly because it only
+// rebuilds the Aho-Corasick automaton once at the end.
+// Returns the number of filters applied successfully.
+func (t *LocalTarget) ApplyFilterBatch(filters []*management.Filter) (uint32, error) {
+	if len(filters) == 0 {
+		return 0, nil
+	}
+
+	t.mu.Lock()
+	var count uint32
+	for _, filter := range filters {
+		if filter == nil || filter.Id == "" {
+			continue
+		}
+		t.filters[filter.Id] = filter
+		count++
+	}
+	bpfUpdater := t.bpfUpdater
+	appFilter := t.appFilterFunc
+	t.mu.Unlock()
+
+	// Count enabled filters by type
+	var enabledApp, disabledCount int
+	for _, f := range t.filters {
+		if !f.Enabled {
+			disabledCount++
+			continue
+		}
+		switch f.Type {
+		case management.FilterType_FILTER_SIP_USER,
+			management.FilterType_FILTER_PHONE_NUMBER,
+			management.FilterType_FILTER_CALL_ID,
+			management.FilterType_FILTER_CODEC:
+			enabledApp++
+		}
+	}
+	logger.Info("LocalTarget batch filter update",
+		"total_count", count,
+		"enabled_app_filters", enabledApp,
+		"disabled_count", disabledCount)
+
+	// Apply all filters once
+	if err := t.applyFilters(bpfUpdater, appFilter); err != nil {
+		return 0, fmt.Errorf("failed to apply filters: %w", err)
+	}
+
+	return count, nil
+}
+
 // RemoveFilter removes a filter by ID.
 // Returns 1 if the filter was removed successfully, 0 if not found.
 func (t *LocalTarget) RemoveFilter(filterID string) (uint32, error) {
@@ -241,9 +291,12 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 
 	// Apply application-layer filters
 	if appFilter != nil {
-		logger.Debug("LocalTarget updating application filter",
+		logger.Info("LocalTarget updating application filter",
 			"filter_count", len(appFilters))
 		appFilter.UpdateFilters(appFilters)
+	} else {
+		logger.Warn("LocalTarget has no application filter configured",
+			"app_filter_count", len(appFilters))
 	}
 
 	return nil

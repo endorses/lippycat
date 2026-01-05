@@ -148,6 +148,7 @@ func (d FilterDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 // AbbreviateType returns abbreviated filter type name
 func AbbreviateType(t management.FilterType) string {
 	switch t {
+	// VoIP filters
 	case management.FilterType_FILTER_SIP_USER:
 		return "SIP User"
 	case management.FilterType_FILTER_PHONE_NUMBER:
@@ -160,6 +161,30 @@ func AbbreviateType(t management.FilterType) string {
 		return "Codec"
 	case management.FilterType_FILTER_BPF:
 		return "BPF"
+	case management.FilterType_FILTER_SIP_URI:
+		return "SIP URI"
+	// DNS filters
+	case management.FilterType_FILTER_DNS_DOMAIN:
+		return "DNS Domain"
+	// Email filters
+	case management.FilterType_FILTER_EMAIL_ADDRESS:
+		return "Email Addr"
+	case management.FilterType_FILTER_EMAIL_SUBJECT:
+		return "Email Subj"
+	// TLS filters
+	case management.FilterType_FILTER_TLS_SNI:
+		return "TLS SNI"
+	case management.FilterType_FILTER_TLS_JA3:
+		return "TLS JA3"
+	case management.FilterType_FILTER_TLS_JA3S:
+		return "TLS JA3S"
+	case management.FilterType_FILTER_TLS_JA4:
+		return "TLS JA4"
+	// HTTP filters
+	case management.FilterType_FILTER_HTTP_HOST:
+		return "HTTP Host"
+	case management.FilterType_FILTER_HTTP_URL:
+		return "HTTP URL"
 	default:
 		return "Unknown"
 	}

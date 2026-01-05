@@ -25,7 +25,39 @@ func IsVoIPFilterType(filterType management.FilterType) bool {
 	return filterType == management.FilterType_FILTER_SIP_USER ||
 		filterType == management.FilterType_FILTER_PHONE_NUMBER ||
 		filterType == management.FilterType_FILTER_CALL_ID ||
-		filterType == management.FilterType_FILTER_CODEC
+		filterType == management.FilterType_FILTER_CODEC ||
+		filterType == management.FilterType_FILTER_SIP_URI
+}
+
+// IsDNSFilterType returns true if the filter type is DNS-related
+func IsDNSFilterType(filterType management.FilterType) bool {
+	return filterType == management.FilterType_FILTER_DNS_DOMAIN
+}
+
+// IsEmailFilterType returns true if the filter type is email-related
+func IsEmailFilterType(filterType management.FilterType) bool {
+	return filterType == management.FilterType_FILTER_EMAIL_ADDRESS ||
+		filterType == management.FilterType_FILTER_EMAIL_SUBJECT
+}
+
+// IsTLSFilterType returns true if the filter type is TLS-related
+func IsTLSFilterType(filterType management.FilterType) bool {
+	return filterType == management.FilterType_FILTER_TLS_SNI ||
+		filterType == management.FilterType_FILTER_TLS_JA3 ||
+		filterType == management.FilterType_FILTER_TLS_JA3S ||
+		filterType == management.FilterType_FILTER_TLS_JA4
+}
+
+// IsHTTPFilterType returns true if the filter type is HTTP-related
+func IsHTTPFilterType(filterType management.FilterType) bool {
+	return filterType == management.FilterType_FILTER_HTTP_HOST ||
+		filterType == management.FilterType_FILTER_HTTP_URL
+}
+
+// IsUniversalFilterType returns true if the filter type works with all hunters
+func IsUniversalFilterType(filterType management.FilterType) bool {
+	return filterType == management.FilterType_FILTER_BPF ||
+		filterType == management.FilterType_FILTER_IP_ADDRESS
 }
 
 // HunterSupportsFilterType checks if a hunter supports a given filter type based on capabilities
@@ -258,14 +290,30 @@ func HasVoIPHunters(hunters []HunterSelectorItem) bool {
 func CycleFormFilterType(current management.FilterType, forward bool, availableHunters []HunterSelectorItem) management.FilterType {
 	hasVoIP := HasVoIPHunters(availableHunters)
 
-	// All available filter types in order
+	// All available filter types in order (grouped by category)
 	allTypes := []management.FilterType{
+		// Universal filters (work with all hunters)
 		management.FilterType_FILTER_BPF,
 		management.FilterType_FILTER_IP_ADDRESS,
+		// VoIP filters
 		management.FilterType_FILTER_SIP_USER,
 		management.FilterType_FILTER_PHONE_NUMBER,
 		management.FilterType_FILTER_CALL_ID,
 		management.FilterType_FILTER_CODEC,
+		management.FilterType_FILTER_SIP_URI,
+		// DNS filters
+		management.FilterType_FILTER_DNS_DOMAIN,
+		// Email filters
+		management.FilterType_FILTER_EMAIL_ADDRESS,
+		management.FilterType_FILTER_EMAIL_SUBJECT,
+		// TLS filters
+		management.FilterType_FILTER_TLS_SNI,
+		management.FilterType_FILTER_TLS_JA3,
+		management.FilterType_FILTER_TLS_JA3S,
+		management.FilterType_FILTER_TLS_JA4,
+		// HTTP filters
+		management.FilterType_FILTER_HTTP_HOST,
+		management.FilterType_FILTER_HTTP_URL,
 	}
 
 	// Filter out VoIP types if no VoIP hunters available

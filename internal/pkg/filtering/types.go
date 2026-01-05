@@ -20,6 +20,7 @@ type FilterYAML struct {
 
 // ValidFilterTypes contains all valid filter type strings
 var ValidFilterTypes = map[string]bool{
+	// VoIP filters
 	"sip_user":            true,
 	"FILTER_SIP_USER":     true,
 	"phone_number":        true,
@@ -32,4 +33,28 @@ var ValidFilterTypes = map[string]bool{
 	"FILTER_CODEC":        true,
 	"bpf":                 true,
 	"FILTER_BPF":          true,
+	"sip_uri":             true,
+	"FILTER_SIP_URI":      true,
+	// DNS filters
+	"dns_domain":        true,
+	"FILTER_DNS_DOMAIN": true,
+	// Email filters
+	"email_address":        true,
+	"FILTER_EMAIL_ADDRESS": true,
+	"email_subject":        true,
+	"FILTER_EMAIL_SUBJECT": true,
+	// TLS filters
+	"tls_sni":         true,
+	"FILTER_TLS_SNI":  true,
+	"tls_ja3":         true,
+	"FILTER_TLS_JA3":  true,
+	"tls_ja3s":        true,
+	"FILTER_TLS_JA3S": true,
+	"tls_ja4":         true,
+	"FILTER_TLS_JA4":  true,
+	// HTTP filters
+	"http_host":        true,
+	"FILTER_HTTP_HOST": true,
+	"http_url":         true,
+	"FILTER_HTTP_URL":  true,
 }

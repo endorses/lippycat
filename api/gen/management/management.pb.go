@@ -151,27 +151,72 @@ const (
 	// SIP URI (From/To headers) - extracts user@domain for exact/pattern matching
 	// Use for matching full SIP identities (e.g., alice@example.com)
 	FilterType_FILTER_SIP_URI FilterType = 6
+	// DNS domain name (with glob-style wildcard support)
+	// Examples: *.example.com, malware.com, *.bad-domain.*
+	FilterType_FILTER_DNS_DOMAIN FilterType = 7
+	// Email address (sender or recipient, with glob-style wildcard support)
+	// Examples: *@example.com, admin@*, user@company.com
+	FilterType_FILTER_EMAIL_ADDRESS FilterType = 8
+	// Email subject line (with glob-style wildcard support)
+	// Examples: *confidential*, invoice*, *password*
+	FilterType_FILTER_EMAIL_SUBJECT FilterType = 9
+	// TLS Server Name Indication (SNI) hostname
+	// Examples: *.google.com, api.example.com
+	FilterType_FILTER_TLS_SNI FilterType = 10
+	// TLS JA3 client fingerprint hash (32-char hex MD5)
+	// Example: e7d705a3286e19ea42f587b344ee6865
+	FilterType_FILTER_TLS_JA3 FilterType = 11
+	// TLS JA3S server fingerprint hash (32-char hex MD5)
+	// Example: ae4edc6faf64d08308082ad26be60767
+	FilterType_FILTER_TLS_JA3S FilterType = 12
+	// TLS JA4 fingerprint (updated format)
+	// Example: t13d1516h2_8daaf6152771_b186095e22bb
+	FilterType_FILTER_TLS_JA4 FilterType = 13
+	// HTTP Host header (with glob-style wildcard support)
+	// Examples: *.example.com, api.*, admin.internal.corp
+	FilterType_FILTER_HTTP_HOST FilterType = 14
+	// HTTP URL path (with glob-style wildcard support)
+	// Examples: /api/*, */admin/*, /login*
+	FilterType_FILTER_HTTP_URL FilterType = 15
 )
 
 // Enum value maps for FilterType.
 var (
 	FilterType_name = map[int32]string{
-		0: "FILTER_SIP_USER",
-		1: "FILTER_PHONE_NUMBER",
-		2: "FILTER_IP_ADDRESS",
-		3: "FILTER_CALL_ID",
-		4: "FILTER_CODEC",
-		5: "FILTER_BPF",
-		6: "FILTER_SIP_URI",
+		0:  "FILTER_SIP_USER",
+		1:  "FILTER_PHONE_NUMBER",
+		2:  "FILTER_IP_ADDRESS",
+		3:  "FILTER_CALL_ID",
+		4:  "FILTER_CODEC",
+		5:  "FILTER_BPF",
+		6:  "FILTER_SIP_URI",
+		7:  "FILTER_DNS_DOMAIN",
+		8:  "FILTER_EMAIL_ADDRESS",
+		9:  "FILTER_EMAIL_SUBJECT",
+		10: "FILTER_TLS_SNI",
+		11: "FILTER_TLS_JA3",
+		12: "FILTER_TLS_JA3S",
+		13: "FILTER_TLS_JA4",
+		14: "FILTER_HTTP_HOST",
+		15: "FILTER_HTTP_URL",
 	}
 	FilterType_value = map[string]int32{
-		"FILTER_SIP_USER":     0,
-		"FILTER_PHONE_NUMBER": 1,
-		"FILTER_IP_ADDRESS":   2,
-		"FILTER_CALL_ID":      3,
-		"FILTER_CODEC":        4,
-		"FILTER_BPF":          5,
-		"FILTER_SIP_URI":      6,
+		"FILTER_SIP_USER":      0,
+		"FILTER_PHONE_NUMBER":  1,
+		"FILTER_IP_ADDRESS":    2,
+		"FILTER_CALL_ID":       3,
+		"FILTER_CODEC":         4,
+		"FILTER_BPF":           5,
+		"FILTER_SIP_URI":       6,
+		"FILTER_DNS_DOMAIN":    7,
+		"FILTER_EMAIL_ADDRESS": 8,
+		"FILTER_EMAIL_SUBJECT": 9,
+		"FILTER_TLS_SNI":       10,
+		"FILTER_TLS_JA3":       11,
+		"FILTER_TLS_JA3S":      12,
+		"FILTER_TLS_JA4":       13,
+		"FILTER_HTTP_HOST":     14,
+		"FILTER_HTTP_URL":      15,
 	}
 )
 
@@ -3128,7 +3173,7 @@ const file_management_proto_rawDesc = "" +
 	"\x0fProcessorStatus\x12\x15\n" +
 	"\x11PROCESSOR_HEALTHY\x10\x00\x12\x15\n" +
 	"\x11PROCESSOR_WARNING\x10\x01\x12\x13\n" +
-	"\x0fPROCESSOR_ERROR\x10\x02*\x9b\x01\n" +
+	"\x0fPROCESSOR_ERROR\x10\x02*\xe2\x02\n" +
 	"\n" +
 	"FilterType\x12\x13\n" +
 	"\x0fFILTER_SIP_USER\x10\x00\x12\x17\n" +
@@ -3138,7 +3183,17 @@ const file_management_proto_rawDesc = "" +
 	"\fFILTER_CODEC\x10\x04\x12\x0e\n" +
 	"\n" +
 	"FILTER_BPF\x10\x05\x12\x12\n" +
-	"\x0eFILTER_SIP_URI\x10\x06*H\n" +
+	"\x0eFILTER_SIP_URI\x10\x06\x12\x15\n" +
+	"\x11FILTER_DNS_DOMAIN\x10\a\x12\x18\n" +
+	"\x14FILTER_EMAIL_ADDRESS\x10\b\x12\x18\n" +
+	"\x14FILTER_EMAIL_SUBJECT\x10\t\x12\x12\n" +
+	"\x0eFILTER_TLS_SNI\x10\n" +
+	"\x12\x12\n" +
+	"\x0eFILTER_TLS_JA3\x10\v\x12\x13\n" +
+	"\x0fFILTER_TLS_JA3S\x10\f\x12\x12\n" +
+	"\x0eFILTER_TLS_JA4\x10\r\x12\x14\n" +
+	"\x10FILTER_HTTP_HOST\x10\x0e\x12\x13\n" +
+	"\x0fFILTER_HTTP_URL\x10\x0f*H\n" +
 	"\x10FilterUpdateType\x12\x0e\n" +
 	"\n" +
 	"UPDATE_ADD\x10\x00\x12\x11\n" +

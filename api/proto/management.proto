@@ -295,6 +295,42 @@ enum FilterType {
     // SIP URI (From/To headers) - extracts user@domain for exact/pattern matching
     // Use for matching full SIP identities (e.g., alice@example.com)
     FILTER_SIP_URI = 6;
+
+    // DNS domain name (with glob-style wildcard support)
+    // Examples: *.example.com, malware.com, *.bad-domain.*
+    FILTER_DNS_DOMAIN = 7;
+
+    // Email address (sender or recipient, with glob-style wildcard support)
+    // Examples: *@example.com, admin@*, user@company.com
+    FILTER_EMAIL_ADDRESS = 8;
+
+    // Email subject line (with glob-style wildcard support)
+    // Examples: *confidential*, invoice*, *password*
+    FILTER_EMAIL_SUBJECT = 9;
+
+    // TLS Server Name Indication (SNI) hostname
+    // Examples: *.google.com, api.example.com
+    FILTER_TLS_SNI = 10;
+
+    // TLS JA3 client fingerprint hash (32-char hex MD5)
+    // Example: e7d705a3286e19ea42f587b344ee6865
+    FILTER_TLS_JA3 = 11;
+
+    // TLS JA3S server fingerprint hash (32-char hex MD5)
+    // Example: ae4edc6faf64d08308082ad26be60767
+    FILTER_TLS_JA3S = 12;
+
+    // TLS JA4 fingerprint (updated format)
+    // Example: t13d1516h2_8daaf6152771_b186095e22bb
+    FILTER_TLS_JA4 = 13;
+
+    // HTTP Host header (with glob-style wildcard support)
+    // Examples: *.example.com, api.*, admin.internal.corp
+    FILTER_HTTP_HOST = 14;
+
+    // HTTP URL path (with glob-style wildcard support)
+    // Examples: /api/*, */admin/*, /login*
+    FILTER_HTTP_URL = 15;
 }
 
 // FilterUpdate pushed to hunters in real-time

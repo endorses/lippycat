@@ -109,7 +109,7 @@ func TestApplyFilters_CombinedFilters(t *testing.T) {
 }
 
 func TestCycleTypeFilter_Forward(t *testing.T) {
-	// All → SIP User
+	// All → SIP User (first in the list)
 	result := CycleTypeFilter(CycleTypeFilterParams{
 		CurrentType: nil,
 		Forward:     true,
@@ -125,25 +125,42 @@ func TestCycleTypeFilter_Forward(t *testing.T) {
 	assert.NotNil(t, result.NewType)
 	assert.Equal(t, management.FilterType_FILTER_PHONE_NUMBER, *result.NewType)
 
-	// BPF → All
+	// BPF → SIP_URI (next in the list, not wrapping to All)
 	bpf := management.FilterType_FILTER_BPF
 	result = CycleTypeFilter(CycleTypeFilterParams{
 		CurrentType: &bpf,
+		Forward:     true,
+	})
+	assert.NotNil(t, result.NewType)
+	assert.Equal(t, management.FilterType_FILTER_SIP_URI, *result.NewType)
+
+	// HTTP_URL → All (last in list wraps to All)
+	httpUrl := management.FilterType_FILTER_HTTP_URL
+	result = CycleTypeFilter(CycleTypeFilterParams{
+		CurrentType: &httpUrl,
 		Forward:     true,
 	})
 	assert.Nil(t, result.NewType)
 }
 
 func TestCycleTypeFilter_Backward(t *testing.T) {
-	// All → BPF
+	// All → HTTP_URL (last in the list)
 	result := CycleTypeFilter(CycleTypeFilterParams{
 		CurrentType: nil,
 		Forward:     false,
 	})
 	assert.NotNil(t, result.NewType)
-	assert.Equal(t, management.FilterType_FILTER_BPF, *result.NewType)
+	assert.Equal(t, management.FilterType_FILTER_HTTP_URL, *result.NewType)
 
-	// SIP User → All
+	// HTTP_URL → HTTP_HOST (previous in list)
+	result = CycleTypeFilter(CycleTypeFilterParams{
+		CurrentType: result.NewType,
+		Forward:     false,
+	})
+	assert.NotNil(t, result.NewType)
+	assert.Equal(t, management.FilterType_FILTER_HTTP_HOST, *result.NewType)
+
+	// SIP User → All (first in list wraps to All)
 	sipUser := management.FilterType_FILTER_SIP_USER
 	result = CycleTypeFilter(CycleTypeFilterParams{
 		CurrentType: &sipUser,

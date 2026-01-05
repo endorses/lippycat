@@ -87,64 +87,72 @@ type CycleTypeFilterResult struct {
 	NewType *management.FilterType
 }
 
+// allFilterTypes is the ordered list of all filter types for cycling
+var allFilterTypes = []management.FilterType{
+	// VoIP filters
+	management.FilterType_FILTER_SIP_USER,
+	management.FilterType_FILTER_PHONE_NUMBER,
+	management.FilterType_FILTER_IP_ADDRESS,
+	management.FilterType_FILTER_CALL_ID,
+	management.FilterType_FILTER_CODEC,
+	management.FilterType_FILTER_BPF,
+	management.FilterType_FILTER_SIP_URI,
+	// DNS filters
+	management.FilterType_FILTER_DNS_DOMAIN,
+	// Email filters
+	management.FilterType_FILTER_EMAIL_ADDRESS,
+	management.FilterType_FILTER_EMAIL_SUBJECT,
+	// TLS filters
+	management.FilterType_FILTER_TLS_SNI,
+	management.FilterType_FILTER_TLS_JA3,
+	management.FilterType_FILTER_TLS_JA3S,
+	management.FilterType_FILTER_TLS_JA4,
+	// HTTP filters
+	management.FilterType_FILTER_HTTP_HOST,
+	management.FilterType_FILTER_HTTP_URL,
+}
+
 // CycleTypeFilter cycles through filter type options
 func CycleTypeFilter(params CycleTypeFilterParams) CycleTypeFilterResult {
+	// Find current index in the list
+	currentIdx := -1
+	if params.CurrentType != nil {
+		for i, t := range allFilterTypes {
+			if t == *params.CurrentType {
+				currentIdx = i
+				break
+			}
+		}
+	}
+
 	if params.Forward {
-		// Forward: All → SIP User → Phone → IP → Call-ID → Codec → BPF → All
-		if params.CurrentType == nil {
-			t := management.FilterType_FILTER_SIP_USER
+		// Forward: All → first type → ... → last type → All
+		if currentIdx == -1 {
+			// Currently "All", go to first type
+			t := allFilterTypes[0]
 			return CycleTypeFilterResult{NewType: &t}
 		}
-
-		switch *params.CurrentType {
-		case management.FilterType_FILTER_SIP_USER:
-			t := management.FilterType_FILTER_PHONE_NUMBER
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_PHONE_NUMBER:
-			t := management.FilterType_FILTER_IP_ADDRESS
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_IP_ADDRESS:
-			t := management.FilterType_FILTER_CALL_ID
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_CALL_ID:
-			t := management.FilterType_FILTER_CODEC
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_CODEC:
-			t := management.FilterType_FILTER_BPF
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_BPF:
-			return CycleTypeFilterResult{NewType: nil}
-		default:
+		if currentIdx >= len(allFilterTypes)-1 {
+			// At last type, go to "All"
 			return CycleTypeFilterResult{NewType: nil}
 		}
+		// Go to next type
+		t := allFilterTypes[currentIdx+1]
+		return CycleTypeFilterResult{NewType: &t}
 	} else {
-		// Backward: All → BPF → Codec → Call-ID → IP → Phone → SIP User → All
-		if params.CurrentType == nil {
-			t := management.FilterType_FILTER_BPF
+		// Backward: All → last type → ... → first type → All
+		if currentIdx == -1 {
+			// Currently "All", go to last type
+			t := allFilterTypes[len(allFilterTypes)-1]
 			return CycleTypeFilterResult{NewType: &t}
 		}
-
-		switch *params.CurrentType {
-		case management.FilterType_FILTER_BPF:
-			t := management.FilterType_FILTER_CODEC
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_CODEC:
-			t := management.FilterType_FILTER_CALL_ID
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_CALL_ID:
-			t := management.FilterType_FILTER_IP_ADDRESS
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_IP_ADDRESS:
-			t := management.FilterType_FILTER_PHONE_NUMBER
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_PHONE_NUMBER:
-			t := management.FilterType_FILTER_SIP_USER
-			return CycleTypeFilterResult{NewType: &t}
-		case management.FilterType_FILTER_SIP_USER:
-			return CycleTypeFilterResult{NewType: nil}
-		default:
+		if currentIdx <= 0 {
+			// At first type, go to "All"
 			return CycleTypeFilterResult{NewType: nil}
 		}
+		// Go to previous type
+		t := allFilterTypes[currentIdx-1]
+		return CycleTypeFilterResult{NewType: &t}
 	}
 }
 

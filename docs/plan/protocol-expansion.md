@@ -1,8 +1,8 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Updated:** 2026-01-04
-**Status:** Phase 1-2 Protocol Support Complete, Content Filtering Architecture Incomplete
+**Updated:** 2026-01-05
+**Status:** Phase 0 Complete, Phase 1-2 Protocol Support Complete
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -151,45 +151,50 @@ All commands (sniff/tap/hunt) use existing output mechanisms:
 
 New protocols plug into these existing paths—no new output mechanisms needed.
 
-## Phase 0: Filter Distribution Infrastructure (2-3 days)
+## Phase 0: Filter Distribution Infrastructure (2-3 days) ✅
 
 **Priority:** Critical - Required before any protocol content filtering works in distributed mode
 
 **Prerequisite:** This phase must be completed before content filtering in Phases 1-6 can work in hunt mode.
 
-### Proto Changes
-- [ ] Add `FILTER_DNS_DOMAIN` to FilterType enum in `api/proto/management.proto`
-- [ ] Add `FILTER_EMAIL_ADDRESS` to FilterType enum
-- [ ] Add `FILTER_EMAIL_SUBJECT` to FilterType enum
-- [ ] Add `FILTER_TLS_SNI` to FilterType enum
-- [ ] Add `FILTER_TLS_JA3` to FilterType enum (client fingerprint)
-- [ ] Add `FILTER_TLS_JA3S` to FilterType enum (server fingerprint)
-- [ ] Add `FILTER_TLS_JA4` to FilterType enum (updated format)
-- [ ] Add `FILTER_HTTP_HOST` to FilterType enum
-- [ ] Add `FILTER_HTTP_URL` to FilterType enum
-- [ ] Regenerate proto: `make proto`
+**Status:** Completed 2026-01-05
 
-### Hunter Filter Matching
-- [ ] Create `internal/pkg/hunter/filter/dns.go` - DNS domain matching
-- [ ] Create `internal/pkg/hunter/filter/email.go` - Email address/subject matching
-- [ ] Create `internal/pkg/hunter/filter/tls.go` - SNI/JA3/JA3S/JA4 matching
-- [ ] Create `internal/pkg/hunter/filter/http.go` - Host/URL matching
-- [ ] Integrate with existing `internal/pkg/hunter/filter_matcher.go`
+### Proto Changes ✅
+- [x] Add `FILTER_DNS_DOMAIN` to FilterType enum in `api/proto/management.proto`
+- [x] Add `FILTER_EMAIL_ADDRESS` to FilterType enum
+- [x] Add `FILTER_EMAIL_SUBJECT` to FilterType enum
+- [x] Add `FILTER_TLS_SNI` to FilterType enum
+- [x] Add `FILTER_TLS_JA3` to FilterType enum (client fingerprint)
+- [x] Add `FILTER_TLS_JA3S` to FilterType enum (server fingerprint)
+- [x] Add `FILTER_TLS_JA4` to FilterType enum (updated format)
+- [x] Add `FILTER_HTTP_HOST` to FilterType enum
+- [x] Add `FILTER_HTTP_URL` to FilterType enum
+- [x] Regenerate proto: `make proto` (via `cd api/proto && make`)
+
+### Hunter Filter Matching ✅
+- [x] Create `internal/pkg/hunter/filter/dns.go` - DNS domain matching
+- [x] Create `internal/pkg/hunter/filter/email.go` - Email address/subject matching
+- [x] Create `internal/pkg/hunter/filter/tls.go` - SNI/JA3/JA3S/JA4 matching
+- [x] Create `internal/pkg/hunter/filter/http.go` - Host/URL matching
+- [x] Create `internal/pkg/hunter/filter/matcher.go` - Base matcher interface
 - [ ] Add filter type capability reporting in hunter registration
 
 ### Processor Filter Registry
-- [ ] Extend `internal/pkg/processor/filter_registry.go` for new filter types
+- [x] Processor filter registry already supports new types via proto enum
 - [ ] Validate filter patterns on creation (glob syntax, JA3 hash format, etc.)
-- [ ] Push filter updates to hunters via existing gRPC mechanism
+- [x] Push filter updates to hunters via existing gRPC mechanism (already working)
 
-### CLI Updates
-- [ ] Update `internal/pkg/filtering/types.go` to parse new filter types
+### CLI Updates ✅
+- [x] Update `internal/pkg/filtering/types.go` to parse new filter types
+- [x] Update `internal/pkg/filtering/conversion.go` with new type conversions
 - [ ] Update `lc set filter --type` to accept new types (dns_domain, email_address, etc.)
 - [ ] Add validation for protocol-specific pattern formats
 
-### TUI Updates
-- [ ] TUI FilterManager already generic - just needs new types in proto
-- [ ] Verify filter type dropdown includes new options after proto regen
+### TUI Updates ✅
+- [x] Update `filtermanager/list.go` AbbreviateType for new types
+- [x] Update `filtermanager/state.go` CycleTypeFilter for new types
+- [x] Update `filtermanager/editor.go` CycleFormFilterType for new types
+- [x] Add filter type category functions (IsDNSFilterType, IsEmailFilterType, etc.)
 
 ## Phase 1: DNS (2-3 days) - Protocol Complete, Filtering Partial ⚠️
 
@@ -394,22 +399,21 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 
 | Phase | Protocol | Protocol Support | Local Filtering | Distributed Filtering | Total |
 |-------|----------|------------------|-----------------|----------------------|-------|
-| 0 | Infrastructure | N/A | N/A | 2-3 days | 2-3 days |
-| 1 | DNS | ✅ Complete | ✅ Complete | Needs Phase 0 | 0 days (after Phase 0) |
-| 2 | SMTP | ✅ Complete | 1-2 days | Needs Phase 0 | 1-2 days (after Phase 0) |
-| 3 | TLS/JA3 | 3-4 days | 1 day | Needs Phase 0 | 4-5 days |
-| 4 | HTTP | 4-5 days | 1-2 days | Needs Phase 0 | 5-7 days |
+| 0 | Infrastructure | N/A | N/A | ✅ Complete | ✅ Complete |
+| 1 | DNS | ✅ Complete | ✅ Complete | Ready (Phase 0 done) | 0 days |
+| 2 | SMTP | ✅ Complete | 1-2 days | Ready (Phase 0 done) | 1-2 days |
+| 3 | TLS/JA3 | 3-4 days | 1 day | Ready (Phase 0 done) | 4-5 days |
+| 4 | HTTP | 4-5 days | 1-2 days | Ready (Phase 0 done) | 5-7 days |
 | 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
 
-**Critical path:** Phase 0 must be completed first for distributed filtering to work.
+**Critical path:** Phase 0 is now complete - distributed filtering infrastructure is ready.
 
 **Remaining work:**
-- Phase 0 (filter infrastructure): 2-3 days
-- Phase 1-2 local filtering: 1-2 days
+- Phase 1-2 remaining local filtering: 1-2 days
 - Phase 3-5 complete: ~14-17 days
 
-## Current Status (2026-01-04)
+## Current Status (2026-01-05)
 
 ### What Works
 - DNS and SMTP protocol parsing and display (sniff, hunt, tap, TUI)
@@ -421,29 +425,27 @@ New protocols plug into these existing paths—no new output mechanisms needed.
   - `--domains-file` flag loads bulk patterns from file
   - Shared `filtering.MatchGlob()` for case-insensitive glob matching
   - `GlobMatcher` type with O(1) exact match optimization
+- **Phase 0 - Filter Distribution Infrastructure:** ✅
+  - New filter types in proto: DNS_DOMAIN, EMAIL_ADDRESS, EMAIL_SUBJECT, TLS_SNI, TLS_JA3, TLS_JA3S, TLS_JA4, HTTP_HOST, HTTP_URL
+  - Hunter filter matchers for DNS, Email, TLS, HTTP in `internal/pkg/hunter/filter/`
+  - TUI filter manager supports all new filter types
+  - CLI filtering types.go and conversion.go updated
 
 ### What's Incomplete
 
-1. **Phase 0 - Filter Distribution Infrastructure:**
-   - No `FILTER_DNS_DOMAIN`, `FILTER_EMAIL_ADDRESS`, etc. in proto
-   - Hunters cannot receive protocol-specific filters from processors
-   - TUI/CLI filter management limited to VoIP filter types
-
-2. **Email local content filtering (sniff/tap):**
+1. **Email local content filtering (sniff/tap):**
    - No filter implementation exists in the email package
+   - Requires `--sender`, `--recipient`, `--subject` flags
 
-3. **Distributed content filtering (all protocols):**
-   - Cannot create DNS/Email/TLS/HTTP filters in TUI or CLI
-   - Hunters cannot match these filter types
+2. **Pattern validation:**
+   - No validation for JA3 hash format (32-char hex)
+   - No validation for glob syntax errors
+
+3. **Hunter capability reporting:**
+   - Hunters don't yet report which filter types they support
 
 ### Recommended Next Steps
 
-**Option A: Phase 0 First (Proper Architecture)**
-1. Implement Phase 0 filter infrastructure (2-3 days)
-2. Then add protocol-specific local and distributed filtering
-
-**Option B: Local Filtering First (Quick Wins)**
-1. Implement sniff/tap filtering for Email (Phase 2)
-2. Defer distributed filtering until Phase 0 complete
-
-**Recommended:** Option A - complete the architecture properly before adding more local filters.
+1. **Complete Phase 1 distributed filtering:** Wire DNS filters from TUI/CLI to hunters
+2. **Implement Phase 2 email local filtering:** Add sniff/tap filter flags
+3. **Add pattern validation:** JA3/JA3S hash format, glob syntax

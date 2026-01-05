@@ -19,33 +19,33 @@ The filter distribution infrastructure exists but only supports VoIP filter type
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Processor                                │
+│                         Processor                               │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
 │  │ Filter       │───▶│ gRPC         │───▶│ Push to Hunters  │   │
 │  │ Registry     │    │ Management   │    │ (FilterUpdate)   │   │
 │  └──────────────┘    └──────────────┘    └──────────────────┘   │
-│         ▲                                                        │
-│         │ CRUD                                                   │
-│  ┌──────┴──────┐                                                 │
+│         ▲                                                       │
+│         │ CRUD                                                  │
+│  ┌──────┴──────┐                                                │
 │  │ TUI Filter  │  CLI: lc set/rm/list/show filter               │
-│  │ Manager     │                                                 │
-│  └─────────────┘                                                 │
+│  │ Manager     │                                                │
+│  └─────────────┘                                                │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               │ gRPC SubscribeFilters
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                          Hunter                                  │
+│                          Hunter                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
 │  │ Filter       │◀───│ gRPC         │◀───│ Receive Updates  │   │
 │  │ Matcher      │    │ Client       │    │ (FilterUpdate)   │   │
 │  └──────────────┘    └──────────────┘    └──────────────────┘   │
-│         │                                                        │
-│         ▼ Match packets                                          │
-│  ┌──────────────┐                                                │
-│  │ Forward only │                                                │
-│  │ matched pkts │                                                │
-│  └──────────────┘                                                │
+│         │                                                       │
+│         ▼ Match packets                                         │
+│  ┌──────────────┐                                               │
+│  │ Forward only │                                               │
+│  │ matched pkts │                                               │
+│  └──────────────┘                                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,7 +71,9 @@ enum FilterType {
 | Email | `FILTER_EMAIL_ADDRESS` | `*@example.com`, `admin@*` |
 | Email | `FILTER_EMAIL_SUBJECT` | `*confidential*` |
 | TLS | `FILTER_TLS_SNI` | `*.google.com` |
-| TLS | `FILTER_TLS_JA3` | `abc123...` (hash) |
+| TLS | `FILTER_TLS_JA3` | `abc123...` (client fingerprint hash) |
+| TLS | `FILTER_TLS_JA3S` | `def456...` (server fingerprint hash) |
+| TLS | `FILTER_TLS_JA4` | `t13d...` (JA4 format fingerprint) |
 | HTTP | `FILTER_HTTP_HOST` | `*.example.com` |
 | HTTP | `FILTER_HTTP_URL` | `/api/*`, `*/admin/*` |
 
@@ -160,7 +162,9 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 - [ ] Add `FILTER_EMAIL_ADDRESS` to FilterType enum
 - [ ] Add `FILTER_EMAIL_SUBJECT` to FilterType enum
 - [ ] Add `FILTER_TLS_SNI` to FilterType enum
-- [ ] Add `FILTER_TLS_JA3` to FilterType enum
+- [ ] Add `FILTER_TLS_JA3` to FilterType enum (client fingerprint)
+- [ ] Add `FILTER_TLS_JA3S` to FilterType enum (server fingerprint)
+- [ ] Add `FILTER_TLS_JA4` to FilterType enum (updated format)
 - [ ] Add `FILTER_HTTP_HOST` to FilterType enum
 - [ ] Add `FILTER_HTTP_URL` to FilterType enum
 - [ ] Regenerate proto: `make proto`
@@ -168,7 +172,7 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 ### Hunter Filter Matching
 - [ ] Create `internal/pkg/hunter/filter/dns.go` - DNS domain matching
 - [ ] Create `internal/pkg/hunter/filter/email.go` - Email address/subject matching
-- [ ] Create `internal/pkg/hunter/filter/tls.go` - SNI/JA3 matching
+- [ ] Create `internal/pkg/hunter/filter/tls.go` - SNI/JA3/JA3S/JA4 matching
 - [ ] Create `internal/pkg/hunter/filter/http.go` - Host/URL matching
 - [ ] Integrate with existing `internal/pkg/hunter/filter_matcher.go`
 - [ ] Add filter type capability reporting in hunter registration
@@ -264,16 +268,21 @@ New protocols plug into these existing paths—no new output mechanisms needed.
 ### Content Filtering - Local (sniff/tap)
 - [ ] Add `--sni` flag (filter by SNI hostname, glob pattern e.g., `*.example.com`)
 - [ ] Add `--sni-file` flag (bulk SNI patterns from file)
-- [ ] Add `--ja3` flag (filter by JA3 fingerprint hash)
-- [ ] Add `--ja3-file` flag (known-bad fingerprint list)
-- [ ] Add `--ja3s` flag (filter by server JA3S fingerprint)
+- [ ] Add `--ja3` flag (filter by JA3 client fingerprint hash)
+- [ ] Add `--ja3-file` flag (known-bad JA3 fingerprint list)
+- [ ] Add `--ja3s` flag (filter by JA3S server fingerprint hash)
+- [ ] Add `--ja3s-file` flag (known-bad JA3S fingerprint list)
+- [ ] Add `--ja4` flag (filter by JA4 fingerprint)
+- [ ] Add `--ja4-file` flag (known-bad JA4 fingerprint list)
 - [ ] Integrate with Aho-Corasick for multi-SNI matching
 - [ ] Wire filter flags in sniff and tap commands
 
 ### Content Filtering - Distributed (hunt) ⚠️ Requires Phase 0
 - [ ] `FILTER_TLS_SNI` type in proto (Phase 0)
 - [ ] `FILTER_TLS_JA3` type in proto (Phase 0)
-- [ ] Hunter TLS SNI/JA3 matching logic (Phase 0)
+- [ ] `FILTER_TLS_JA3S` type in proto (Phase 0)
+- [ ] `FILTER_TLS_JA4` type in proto (Phase 0)
+- [ ] Hunter TLS SNI/JA3/JA3S/JA4 matching logic (Phase 0)
 - [ ] Processor can push TLS filters to TLS hunters
 - [ ] TUI/CLI can create TLS filters targeting hunters
 

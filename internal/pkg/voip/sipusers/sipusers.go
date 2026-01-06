@@ -36,14 +36,60 @@ func AddSipUser(username string, newSipUser *SipUser) {
 		su := &SipUser{ExpirationDate: newSipUser.ExpirationDate}
 		sipUserMap[username] = su
 
+		// Normalize phone number patterns (e.g., +49123456789 → 49123456789)
+		// This allows users to input phone numbers in various formats
+		normalizedUsername := normalizeIfPhoneNumber(username)
+
 		// Parse the pattern for wildcard support
-		pattern, patternType := filtering.ParsePattern(username)
+		pattern, patternType := filtering.ParsePattern(normalizedUsername)
 		parsedPatterns[username] = parsedPattern{
 			original:    username,
 			pattern:     pattern,
 			patternType: patternType,
 		}
 	}
+}
+
+// normalizeIfPhoneNumber normalizes the input if it looks like a phone number.
+// Returns the original input if it appears to be a SIP username (contains letters).
+func normalizeIfPhoneNumber(input string) string {
+	// tel: URIs are always phone numbers
+	if strings.HasPrefix(input, "tel:") {
+		return filtering.NormalizePhonePattern(input)
+	}
+
+	// Strip wildcards for detection
+	working := strings.TrimPrefix(input, "*")
+	working = strings.TrimSuffix(working, "*")
+
+	// Strip common phone number prefixes for detection
+	working = strings.TrimPrefix(working, "+")
+	working = strings.TrimPrefix(working, "sip:")
+	working = strings.TrimPrefix(working, "sips:")
+
+	// If it has @ it's a SIP URI - extract user part for detection
+	if atIdx := strings.IndexByte(working, '@'); atIdx != -1 {
+		working = working[:atIdx]
+	}
+
+	// Check if remaining content is all digits (phone number)
+	isPhoneNumber := true
+	hasDigits := false
+	for _, r := range working {
+		if r >= '0' && r <= '9' {
+			hasDigits = true
+		} else if r != ' ' && r != '-' && r != '.' && r != '(' && r != ')' {
+			// Contains non-digit, non-separator character - likely a username
+			isPhoneNumber = false
+			break
+		}
+	}
+
+	if isPhoneNumber && hasDigits {
+		return filtering.NormalizePhonePattern(input)
+	}
+
+	return input
 }
 
 func AddMultipleSipUsers(sipUsers map[string]*SipUser) {

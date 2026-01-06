@@ -262,6 +262,92 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+func TestNormalizePhonePattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Empty and basic
+		{"empty string", "", ""},
+		{"already normalized", "49123456789", "49123456789"},
+
+		// Plus prefix
+		{"E.164 with plus", "+49123456789", "49123456789"},
+		{"plus with spaces", "+49 123 456 789", "49123456789"},
+		{"plus with dashes", "+49-123-456-789", "49123456789"},
+
+		// European international prefix (00)
+		{"00 prefix", "0049123456789", "49123456789"},
+		{"00 prefix with spaces", "00 49 123 456 789", "49123456789"},
+		{"00 prefix with dashes", "00-49-123-456-789", "49123456789"},
+
+		// North American international prefix (011)
+		{"011 prefix to Germany", "01149123456789", "49123456789"},
+		{"011 prefix to UK", "011441234567890", "441234567890"},
+		{"011 prefix clean", "0111234567890", "1234567890"},
+
+		// URI formats
+		{"tel URI with plus", "tel:+49123456789", "49123456789"},
+		{"tel URI with 00", "tel:0049123456789", "49123456789"},
+		{"sip URI", "sip:+49123456789@domain.com", "49123456789"},
+		{"sip URI with 00", "sip:0049123456789@domain.com", "49123456789"},
+		{"sips URI", "sips:+49123456789@domain.com;tag=xyz", "49123456789"},
+
+		// Wildcards preserved
+		{"suffix wildcard", "*456789", "*456789"},
+		{"prefix wildcard with 00", "0049*", "49*"},
+		{"prefix wildcard with plus", "+49*", "49*"},
+		{"both wildcards", "*456*", "*456*"},
+		{"suffix wildcard 00 prefix", "*0049123456789", "*49123456789"}, // normalizes after *
+
+		// Non-phone patterns (usernames) - returned as-is
+		{"username", "alice", "alice"},
+		{"username with domain", "alice@domain.com", "alice@domain.com"},
+		{"sip username", "sip:alice@domain.com", "sip:alice@domain.com"},
+		{"username wildcard", "alice*", "alice*"},
+		{"username suffix", "*alice", "*alice"},
+
+		// Edge cases
+		{"only plus", "+", "+"}, // No digits, returned as-is (might be a pattern)
+		{"only 00", "00", ""},   // Digits only, prefix stripped
+		{"only 011", "011", ""}, // Digits only, prefix stripped
+		{"short number after 00", "001", "1"},
+		{"mixed format", "(+49) 123-456 789", "49123456789"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := NormalizePhonePattern(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestNormalizePhonePatternUserInputScenarios(t *testing.T) {
+	// Test the specific user scenario: non-standardized phone numbers
+	// User has: 0049123456789, 49123456789, +49123456789
+	// All should normalize to: 49123456789
+
+	inputs := []string{
+		"0049123456789",     // European format
+		"49123456789",       // Already normalized
+		"+49123456789",      // E.164 format
+		"+49 123 456 789",   // E.164 with spaces
+		"00 49 123 456 789", // European with spaces
+		"tel:+49123456789",  // tel: URI
+	}
+
+	expected := "49123456789"
+
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			result := NormalizePhonePattern(input)
+			assert.Equal(t, expected, result, "input %q should normalize to %q", input, expected)
+		})
+	}
+}
+
 func TestParsePatternAndMatch(t *testing.T) {
 	// Integration tests: parse pattern then match
 	tests := []struct {

@@ -401,6 +401,115 @@ func TestIsSurveiled_Concurrency(t *testing.T) {
 	assert.Equal(t, totalCount, successCount, "All concurrent checks should have returned correct results")
 }
 
+func TestIsSurveiled_PhoneNumberNormalization(t *testing.T) {
+	// Test that phone numbers in various formats are automatically normalized
+	// This is the key use case: user provides phone numbers in mixed formats
+	// and they should all match the same observed phone number
+
+	tests := []struct {
+		name           string
+		filterPatterns []string // Input patterns (mixed formats)
+		sipHeader      string   // Observed SIP header
+		expected       bool
+	}{
+		{
+			name:           "All formats match same number - E.164 observed",
+			filterPatterns: []string{"0049123456789"}, // European format
+			sipHeader:      "<sip:+49123456789@domain.com>",
+			expected:       true, // 0049... normalized to 49..., matches +49...
+		},
+		{
+			name:           "All formats match same number - 00 prefix observed",
+			filterPatterns: []string{"+49123456789"}, // E.164 format
+			sipHeader:      "<sip:0049123456789@domain.com>",
+			expected:       true, // +49... normalized to 49..., matches 0049... (suffix)
+		},
+		{
+			name:           "Multiple non-standard formats",
+			filterPatterns: []string{"0049123456789", "+49987654321"},
+			sipHeader:      "<sip:49123456789@domain.com>",
+			expected:       true, // First pattern normalized matches
+		},
+		{
+			name:           "011 North American format",
+			filterPatterns: []string{"01149123456789"},
+			sipHeader:      "<sip:+49123456789@domain.com>",
+			expected:       true, // 011 stripped → 49..., matches
+		},
+		{
+			name:           "Phone with spaces and dashes normalized",
+			filterPatterns: []string{"+49 123 456 789"},
+			sipHeader:      "<sip:49123456789@domain.com>",
+			expected:       true, // Spaces stripped, + stripped → 49..., matches
+		},
+		{
+			name:           "tel: URI format pattern",
+			filterPatterns: []string{"tel:+49123456789"},
+			sipHeader:      "<sip:49123456789@domain.com>",
+			expected:       true, // tel: and + stripped → 49..., matches
+		},
+		{
+			name:           "Username not affected by phone normalization",
+			filterPatterns: []string{"alice"},
+			sipHeader:      "<sip:alice@domain.com>",
+			expected:       true, // Username preserved, matches
+		},
+		{
+			name:           "Username with numbers not affected",
+			filterPatterns: []string{"alice123"},
+			sipHeader:      "<sip:alice123@domain.com>",
+			expected:       true, // Contains letters, preserved
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ClearAll()
+			for _, pattern := range tt.filterPatterns {
+				AddSipUser(pattern, &SipUser{ExpirationDate: time.Now().Add(1 * time.Hour)})
+			}
+
+			result := IsSurveiled(tt.sipHeader)
+			assert.Equal(t, tt.expected, result,
+				"IsSurveiled with patterns %v should return %t for header: %s",
+				tt.filterPatterns, tt.expected, tt.sipHeader)
+		})
+	}
+}
+
+func TestNormalizeIfPhoneNumber(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Phone numbers should be normalized
+		{"E.164 format", "+49123456789", "49123456789"},
+		{"European 00 prefix", "0049123456789", "49123456789"},
+		{"North American 011 prefix", "01149123456789", "49123456789"},
+		{"Phone with spaces", "+49 123 456 789", "49123456789"},
+		{"Phone with dashes", "+49-123-456-789", "49123456789"},
+		{"tel: URI", "tel:+49123456789", "49123456789"},
+
+		// Wildcards preserved
+		{"Suffix wildcard", "*456789", "*456789"},
+		{"Prefix wildcard with 00", "0049*", "49*"},
+
+		// Usernames should NOT be normalized
+		{"Plain username", "alice", "alice"},
+		{"Username with numbers", "alice123", "alice123"},
+		{"Username wildcard", "alice*", "alice*"},
+		{"SIP URI username", "sip:alice@domain.com", "sip:alice@domain.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeIfPhoneNumber(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestIsSurveiled_EmptyUserMap(t *testing.T) {
 	// Test with empty user map
 	ClearAll()

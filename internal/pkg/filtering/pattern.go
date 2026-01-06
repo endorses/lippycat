@@ -69,6 +69,117 @@ func ParsePattern(input string) (pattern string, patternType PatternType) {
 	return pattern, patternType
 }
 
+// NormalizePhonePattern normalizes a phone number pattern by:
+//  1. Extracting only digits (stripping +, spaces, dashes, URI prefixes)
+//  2. Stripping common international dialing prefixes (00, 011)
+//
+// This allows users to input phone numbers in various formats:
+//   - +49123456789   → 49123456789
+//   - 0049123456789  → 49123456789
+//   - 011149123456   → 149123456  (US international prefix to country code 1)
+//   - tel:+49123456  → 49123456
+//
+// Wildcards are preserved:
+//   - *456789       → *456789 (suffix match)
+//   - 0049*         → 49* (prefix match with normalized digits)
+//
+// The function returns the original pattern unchanged if it doesn't look
+// like a phone number (e.g., contains letters).
+func NormalizePhonePattern(pattern string) string {
+	if pattern == "" {
+		return ""
+	}
+
+	// Parse wildcards first
+	hasLeadingWildcard := strings.HasPrefix(pattern, "*")
+	hasTrailingWildcard := strings.HasSuffix(pattern, "*")
+
+	// Strip wildcards for processing
+	working := pattern
+	if hasLeadingWildcard {
+		working = strings.TrimPrefix(working, "*")
+	}
+	if hasTrailingWildcard {
+		working = strings.TrimSuffix(working, "*")
+	}
+
+	// Extract digits from the pattern (handles tel:, sip:, +, spaces, etc.)
+	digits := extractDigits(working)
+
+	// If no digits extracted or pattern has non-digit/non-wildcard chars that matter,
+	// return original (might be a username like "alice")
+	if digits == "" && working != "" {
+		return pattern
+	}
+
+	// Strip common international dialing prefixes
+	// Order matters: check longer prefixes first
+	switch {
+	case strings.HasPrefix(digits, "011"):
+		// North American international prefix (011 + country code)
+		digits = strings.TrimPrefix(digits, "011")
+	case strings.HasPrefix(digits, "00"):
+		// European/ITU international prefix (00 + country code)
+		digits = strings.TrimPrefix(digits, "00")
+	}
+
+	// Reconstruct with wildcards
+	if hasLeadingWildcard {
+		digits = "*" + digits
+	}
+	if hasTrailingWildcard {
+		digits = digits + "*"
+	}
+
+	return digits
+}
+
+// extractDigits extracts only digit characters from a string.
+// Handles common phone number formats:
+//   - tel:+49123456789 → 49123456789
+//   - sip:+49123456789@domain.com → 49123456789
+//   - +49 123 456 789 → 49123456789
+func extractDigits(input string) string {
+	if input == "" {
+		return ""
+	}
+
+	// Strip common URI prefixes
+	s := input
+	if idx := strings.Index(s, "tel:"); idx != -1 {
+		s = s[idx+4:]
+	} else if idx := strings.Index(s, "sip:"); idx != -1 {
+		s = s[idx+4:]
+	} else if idx := strings.Index(s, "sips:"); idx != -1 {
+		s = s[idx+5:]
+	}
+
+	// Strip domain part (everything after @)
+	if atIdx := strings.IndexByte(s, '@'); atIdx != -1 {
+		s = s[:atIdx]
+	}
+
+	// Strip URI parameters (everything after ; or ?)
+	if semiIdx := strings.IndexByte(s, ';'); semiIdx != -1 {
+		s = s[:semiIdx]
+	}
+	if qIdx := strings.IndexByte(s, '?'); qIdx != -1 {
+		s = s[:qIdx]
+	}
+
+	// Extract only digits
+	var result strings.Builder
+	result.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			result.WriteByte(c)
+		}
+	}
+
+	return result.String()
+}
+
 // Match checks if the given value matches the pattern according to the pattern type.
 // Matching is case-insensitive.
 func Match(value, pattern string, patternType PatternType) bool {

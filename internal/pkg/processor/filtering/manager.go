@@ -167,6 +167,18 @@ func (m *Manager) GetForHunter(hunterID string) []*management.Filter {
 
 // Update adds or modifies a filter
 func (m *Manager) Update(filter *management.Filter) (uint32, error) {
+	// Normalize phone number patterns before storage/distribution
+	// This ensures consistent matching regardless of input format
+	if filter.Type == management.FilterType_FILTER_PHONE_NUMBER {
+		originalPattern := filter.Pattern
+		filter.Pattern = filtering.NormalizePhonePattern(filter.Pattern)
+		if filter.Pattern != originalPattern {
+			logger.Debug("Normalized phone pattern",
+				"original", originalPattern,
+				"normalized", filter.Pattern)
+		}
+	}
+
 	// Generate ID for new filters
 	m.mu.Lock()
 	if filter.Id == "" {

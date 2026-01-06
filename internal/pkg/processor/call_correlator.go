@@ -55,6 +55,7 @@ type CallLeg struct {
 type CorrelatedCall struct {
 	CorrelationID string              // Hash of normalized tag pair
 	TagPair       [2]string           // Normalized [tag1, tag2] (sorted)
+	PhonePairKey  string              // Phone suffix pair key for B2BUA correlation
 	FromUser      string              // From user (participant A)
 	ToUser        string              // To user (participant B)
 	CallLegs      map[string]*CallLeg // Key: CallID, Value: leg details
@@ -63,21 +64,46 @@ type CorrelatedCall struct {
 	State         CallState // TRYING, RINGING, ESTABLISHED, ENDED
 }
 
-// CallCorrelator correlates call legs across B2BUA boundaries
-type CallCorrelator struct {
-	calls         map[string]*CorrelatedCall // Key: CorrelationID
-	callsByTag    map[string]string          // Key: individual tag -> CorrelationID (for quick lookup)
-	mu            sync.RWMutex
-	cleanupTicker *time.Ticker
-	stopCleanup   chan struct{}
+// PhoneCorrelationConfig configures phone number suffix matching
+type PhoneCorrelationConfig struct {
+	Enabled         bool          // Enable phone suffix correlation (default: true)
+	MinSuffixDigits int           // Minimum digits for suffix matching (default: 7)
+	TimeWindow      time.Duration // Max time between call legs (default: 30s)
 }
 
-// NewCallCorrelator creates a new call correlator
+// DefaultPhoneCorrelationConfig returns default phone correlation settings
+func DefaultPhoneCorrelationConfig() PhoneCorrelationConfig {
+	return PhoneCorrelationConfig{
+		Enabled:         true,
+		MinSuffixDigits: 7,
+		TimeWindow:      30 * time.Second,
+	}
+}
+
+// CallCorrelator correlates call legs based on SIP dialog tags and phone number suffixes
+type CallCorrelator struct {
+	calls            map[string]*CorrelatedCall // Key: CorrelationID
+	callsByTag       map[string]string          // Key: individual tag -> CorrelationID (for quick lookup)
+	callsByPhonePair map[string]string          // Key: phone suffix pair -> CorrelationID
+	phoneConfig      PhoneCorrelationConfig
+	mu               sync.RWMutex
+	cleanupTicker    *time.Ticker
+	stopCleanup      chan struct{}
+}
+
+// NewCallCorrelator creates a new call correlator with default phone correlation config
 func NewCallCorrelator() *CallCorrelator {
+	return NewCallCorrelatorWithConfig(DefaultPhoneCorrelationConfig())
+}
+
+// NewCallCorrelatorWithConfig creates a new call correlator with custom phone correlation config
+func NewCallCorrelatorWithConfig(phoneConfig PhoneCorrelationConfig) *CallCorrelator {
 	cc := &CallCorrelator{
-		calls:       make(map[string]*CorrelatedCall),
-		callsByTag:  make(map[string]string),
-		stopCleanup: make(chan struct{}),
+		calls:            make(map[string]*CorrelatedCall),
+		callsByTag:       make(map[string]string),
+		callsByPhonePair: make(map[string]string),
+		phoneConfig:      phoneConfig,
+		stopCleanup:      make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -116,34 +142,64 @@ func (cc *CallCorrelator) ProcessPacket(packet *data.CapturedPacket, hunterID st
 	}
 
 	// Generate correlation ID from normalized tag pair
-	correlationID := generateCorrelationID(fromTag, toTag)
-	if correlationID == "" {
+	tagCorrelationID := generateCorrelationID(fromTag, toTag)
+	if tagCorrelationID == "" {
 		return
+	}
+
+	// Prefer full URIs if available, fallback to username only
+	fromUser := sip.FromUri
+	if fromUser == "" {
+		fromUser = sip.FromUser
+	}
+	toUser := sip.ToUri
+	if toUser == "" {
+		toUser = sip.ToUser
 	}
 
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
-	// Find or create correlated call
-	call, exists := cc.calls[correlationID]
+	// Try to find an existing call by tag correlation ID first
+	call, exists := cc.calls[tagCorrelationID]
+
+	// If not found by tag, try phone suffix correlation (for B2BUA scenarios)
+	var phonePairKey string
+	if !exists && cc.phoneConfig.Enabled {
+		phonePairKey = phoneSuffixPairKey(fromUser, toUser, cc.phoneConfig.MinSuffixDigits)
+		if phonePairKey != "" {
+			if existingCorrelationID, found := cc.callsByPhonePair[phonePairKey]; found {
+				if existingCall, callFound := cc.calls[existingCorrelationID]; callFound {
+					// Check time window - only correlate if within configured window
+					if timestamp.Sub(existingCall.StartTime) <= cc.phoneConfig.TimeWindow {
+						call = existingCall
+						exists = true
+						logger.Info("Correlated call leg via phone suffix",
+							"correlation_id", existingCorrelationID,
+							"phone_pair_key", phonePairKey,
+							"call_id", sip.CallId,
+							"from_user", fromUser,
+							"to_user", toUser)
+					}
+				}
+			}
+		}
+	}
+
+	// Ensure phonePairKey is computed if not already (needed for new calls)
+	if phonePairKey == "" && cc.phoneConfig.Enabled {
+		phonePairKey = phoneSuffixPairKey(fromUser, toUser, cc.phoneConfig.MinSuffixDigits)
+	}
+
 	if !exists {
 		// Create normalized tag pair (sorted alphabetically)
 		tags := []string{fromTag, toTag}
 		sort.Strings(tags)
 
-		// Prefer full URIs if available, fallback to username only
-		fromUser := sip.FromUri
-		if fromUser == "" {
-			fromUser = sip.FromUser
-		}
-		toUser := sip.ToUri
-		if toUser == "" {
-			toUser = sip.ToUser
-		}
-
 		call = &CorrelatedCall{
-			CorrelationID: correlationID,
+			CorrelationID: tagCorrelationID,
 			TagPair:       [2]string{tags[0], tags[1]},
+			PhonePairKey:  phonePairKey,
 			FromUser:      fromUser,
 			ToUser:        toUser,
 			CallLegs:      make(map[string]*CallLeg),
@@ -151,15 +207,21 @@ func (cc *CallCorrelator) ProcessPacket(packet *data.CapturedPacket, hunterID st
 			LastSeen:      timestamp,
 			State:         CallStateTrying,
 		}
-		cc.calls[correlationID] = call
+		cc.calls[tagCorrelationID] = call
 
 		// Index by both tags for quick lookup
-		cc.callsByTag[tags[0]] = correlationID
-		cc.callsByTag[tags[1]] = correlationID
+		cc.callsByTag[tags[0]] = tagCorrelationID
+		cc.callsByTag[tags[1]] = tagCorrelationID
+
+		// Index by phone pair for B2BUA correlation
+		if cc.phoneConfig.Enabled && phonePairKey != "" {
+			cc.callsByPhonePair[phonePairKey] = tagCorrelationID
+		}
 
 		logger.Info("New correlated call detected",
-			"correlation_id", correlationID,
+			"correlation_id", tagCorrelationID,
 			"tag_pair", tags,
+			"phone_pair_key", phonePairKey,
 			"from_user", fromUser,
 			"to_user", toUser)
 	}
@@ -178,7 +240,7 @@ func (cc *CallCorrelator) ProcessPacket(packet *data.CapturedPacket, hunterID st
 		call.CallLegs[sip.CallId] = leg
 
 		logger.Info("New call leg detected for correlated call",
-			"correlation_id", correlationID,
+			"correlation_id", call.CorrelationID,
 			"call_id", sip.CallId,
 			"hunter_id", hunterID,
 			"leg_count", len(call.CallLegs))
@@ -212,37 +274,75 @@ func (cc *CallCorrelator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 		return
 	}
 
-	// Generate correlation ID
-	correlationID := generateCorrelationID(fromTag, toTag)
-	if correlationID == "" {
+	// Generate correlation ID from tags
+	tagCorrelationID := generateCorrelationID(fromTag, toTag)
+	if tagCorrelationID == "" {
 		return
 	}
+
+	fromUser := voip.From
+	toUser := voip.To
 
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
-	// Find or create correlated call
-	call, exists := cc.calls[correlationID]
+	// Try to find an existing call by tag correlation ID first
+	call, exists := cc.calls[tagCorrelationID]
+
+	// If not found by tag, try phone suffix correlation (for B2BUA scenarios)
+	var phonePairKey string
+	if !exists && cc.phoneConfig.Enabled {
+		phonePairKey = phoneSuffixPairKey(fromUser, toUser, cc.phoneConfig.MinSuffixDigits)
+		if phonePairKey != "" {
+			if existingCorrelationID, found := cc.callsByPhonePair[phonePairKey]; found {
+				if existingCall, callFound := cc.calls[existingCorrelationID]; callFound {
+					// Check time window - only correlate if within configured window
+					if pkt.Timestamp.Sub(existingCall.StartTime) <= cc.phoneConfig.TimeWindow {
+						call = existingCall
+						exists = true
+						logger.Info("Correlated call leg via phone suffix (display)",
+							"correlation_id", existingCorrelationID,
+							"phone_pair_key", phonePairKey,
+							"call_id", voip.CallID,
+							"from_user", fromUser,
+							"to_user", toUser)
+					}
+				}
+			}
+		}
+	}
+
+	// Ensure phonePairKey is computed if not already (needed for new calls)
+	if phonePairKey == "" && cc.phoneConfig.Enabled {
+		phonePairKey = phoneSuffixPairKey(fromUser, toUser, cc.phoneConfig.MinSuffixDigits)
+	}
+
 	if !exists {
 		// Create normalized tag pair (sorted alphabetically)
 		tags := []string{fromTag, toTag}
 		sort.Strings(tags)
 
 		call = &CorrelatedCall{
-			CorrelationID: correlationID,
+			CorrelationID: tagCorrelationID,
 			TagPair:       [2]string{tags[0], tags[1]},
-			FromUser:      voip.From,
-			ToUser:        voip.To,
+			PhonePairKey:  phonePairKey,
+			FromUser:      fromUser,
+			ToUser:        toUser,
 			CallLegs:      make(map[string]*CallLeg),
 			StartTime:     pkt.Timestamp,
 			LastSeen:      pkt.Timestamp,
 			State:         CallStateTrying,
 		}
-		cc.calls[correlationID] = call
+		cc.calls[tagCorrelationID] = call
 
 		// Index by both tags
-		cc.callsByTag[tags[0]] = correlationID
-		cc.callsByTag[tags[1]] = correlationID
+		cc.callsByTag[tags[0]] = tagCorrelationID
+		cc.callsByTag[tags[1]] = tagCorrelationID
+
+		// Index by phone pair for B2BUA correlation
+		if cc.phoneConfig.Enabled && phonePairKey != "" {
+			cc.callsByPhonePair[phonePairKey] = tagCorrelationID
+		}
 	}
 
 	// Find or create call leg
@@ -354,6 +454,7 @@ func (cc *CallCorrelator) copyCall(call *CorrelatedCall) *CorrelatedCall {
 	callCopy := &CorrelatedCall{
 		CorrelationID: call.CorrelationID,
 		TagPair:       call.TagPair,
+		PhonePairKey:  call.PhonePairKey,
 		FromUser:      call.FromUser,
 		ToUser:        call.ToUser,
 		StartTime:     call.StartTime,
@@ -398,6 +499,11 @@ func (cc *CallCorrelator) cleanupStaleCalls(maxAge time.Duration) {
 				delete(cc.callsByTag, tag)
 			}
 
+			// Remove from phone pair index
+			if call.PhonePairKey != "" {
+				delete(cc.callsByPhonePair, call.PhonePairKey)
+			}
+
 			delete(cc.calls, correlationID)
 			removed++
 		}
@@ -413,7 +519,6 @@ func (cc *CallCorrelator) cleanupStaleCalls(maxAge time.Duration) {
 
 // generateCorrelationID generates a correlation ID from two tags
 func generateCorrelationID(tag1, tag2 string) string {
-	// Handle empty tags
 	if tag1 == "" || tag2 == "" {
 		return ""
 	}
@@ -426,4 +531,60 @@ func generateCorrelationID(tag1, tag2 string) string {
 	data := fmt.Sprintf("%s:%s", tags[0], tags[1])
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
+}
+
+// extractPhoneSuffix extracts the last N digits from a phone number/SIP user.
+// It strips prefixes, country codes, and non-digit characters.
+// Returns empty string if insufficient digits found.
+func extractPhoneSuffix(phoneNumber string, minDigits int) string {
+	// Extract only digits
+	var digits []byte
+	for i := 0; i < len(phoneNumber); i++ {
+		c := phoneNumber[i]
+		if c >= '0' && c <= '9' {
+			digits = append(digits, c)
+		}
+	}
+
+	// Return the last minDigits (suffix)
+	if len(digits) < minDigits {
+		return ""
+	}
+	return string(digits[len(digits)-minDigits:])
+}
+
+// generatePhoneCorrelationID generates a correlation ID from phone number suffixes.
+// This matches calls with the same participants regardless of prefixes added by B2BUAs.
+func generatePhoneCorrelationID(from, to string, minSuffixLen int) string {
+	fromSuffix := extractPhoneSuffix(from, minSuffixLen)
+	toSuffix := extractPhoneSuffix(to, minSuffixLen)
+
+	if fromSuffix == "" || toSuffix == "" {
+		return ""
+	}
+
+	// Normalize: sort suffixes alphabetically so A→B and B→A match
+	suffixes := []string{fromSuffix, toSuffix}
+	sort.Strings(suffixes)
+
+	// Use "phone:" prefix to distinguish from tag-based correlation
+	data := fmt.Sprintf("phone:%s:%s", suffixes[0], suffixes[1])
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
+}
+
+// phoneSuffixPairKey generates a key for phone pair lookup
+func phoneSuffixPairKey(from, to string, minSuffixLen int) string {
+	fromSuffix := extractPhoneSuffix(from, minSuffixLen)
+	toSuffix := extractPhoneSuffix(to, minSuffixLen)
+
+	if fromSuffix == "" || toSuffix == "" {
+		return ""
+	}
+
+	// Normalize: sort suffixes
+	suffixes := []string{fromSuffix, toSuffix}
+	sort.Strings(suffixes)
+
+	return suffixes[0] + ":" + suffixes[1]
 }

@@ -657,3 +657,347 @@ func TestCallCorrelator_DeepCopyRaceCondition(t *testing.T) {
 	// Verify state is reasonable
 	assert.Contains(t, []CallState{CallStateTrying, CallStateRinging, CallStateEstablished}, call.State, "State should be valid")
 }
+
+// TestExtractPhoneSuffix tests phone number suffix extraction
+func TestExtractPhoneSuffix(t *testing.T) {
+	tests := []struct {
+		name      string
+		phone     string
+		minDigits int
+		expected  string
+	}{
+		{
+			name:      "Simple phone number",
+			phone:     "12345678901",
+			minDigits: 7,
+			expected:  "5678901",
+		},
+		{
+			name:      "Phone with country code and prefix",
+			phone:     "+1-555-123-4567",
+			minDigits: 7,
+			expected:  "1234567",
+		},
+		{
+			name:      "Phone with tech prefix (2482)",
+			phone:     "2482+1234567890",
+			minDigits: 7,
+			expected:  "4567890",
+		},
+		{
+			name:      "SIP URI with domain",
+			phone:     "alice@example.com",
+			minDigits: 7,
+			expected:  "", // Not enough digits
+		},
+		{
+			name:      "Phone number with letters",
+			phone:     "+1-800-CALL-NOW",
+			minDigits: 7,
+			expected:  "", // Only 4 digits (1, 8, 0, 0)
+		},
+		{
+			name:      "Short number",
+			phone:     "12345",
+			minDigits: 7,
+			expected:  "", // Less than minDigits
+		},
+		{
+			name:      "Exact length",
+			phone:     "1234567",
+			minDigits: 7,
+			expected:  "1234567",
+		},
+		{
+			name:      "International format",
+			phone:     "+49 170 1234567",
+			minDigits: 7,
+			expected:  "1234567",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractPhoneSuffix(tt.phone, tt.minDigits)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestGeneratePhoneCorrelationID tests phone-based correlation ID generation
+func TestGeneratePhoneCorrelationID(t *testing.T) {
+	// Same suffixes, different order should produce same ID
+	id1 := generatePhoneCorrelationID("+1-555-123-4567", "+1-555-765-4321", 7)
+	id2 := generatePhoneCorrelationID("+1-555-765-4321", "+1-555-123-4567", 7)
+	assert.Equal(t, id1, id2, "Same phone suffixes in different order should produce same ID")
+	assert.NotEmpty(t, id1)
+
+	// Different suffixes should produce different IDs
+	id3 := generatePhoneCorrelationID("+1-555-123-4567", "+1-555-111-2222", 7)
+	assert.NotEqual(t, id1, id3, "Different phone suffixes should produce different IDs")
+
+	// With tech prefix vs without - same suffix should match
+	idNoPrefix := generatePhoneCorrelationID("+1234567890", "+0987654321", 7)
+	idWithPrefix := generatePhoneCorrelationID("2482+1234567890", "+0987654321", 7)
+	assert.Equal(t, idNoPrefix, idWithPrefix, "Tech prefix should not affect suffix matching")
+}
+
+// TestPhoneSuffixCorrelation_B2BUA tests B2BUA scenario with different tags but same phone suffixes
+func TestPhoneSuffixCorrelation_B2BUA(t *testing.T) {
+	config := PhoneCorrelationConfig{
+		Enabled:         true,
+		MinSuffixDigits: 7,
+		TimeWindow:      30 * time.Second,
+	}
+	cc := NewCallCorrelatorWithConfig(config)
+	defer cc.Stop()
+
+	baseTime := time.Now()
+
+	// Leg 1: Alice -> B2BUA (original Call-ID and tags)
+	leg1 := &data.CapturedPacket{
+		TimestampNs: baseTime.UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.168.1.100",
+			DstIp: "192.168.1.200",
+			Sip: &data.SIPMetadata{
+				CallId:   "leg1@alice",
+				Method:   "INVITE",
+				FromTag:  "alice-tag-original",
+				ToTag:    "b2bua-tag-inbound",
+				FromUser: "+1234567890", // Alice's number
+				ToUser:   "+0987654321", // Bob's number
+			},
+		},
+	}
+	cc.ProcessPacket(leg1, "hunter-1")
+
+	// Leg 2: B2BUA -> Bob (NEW Call-ID and NEW tags - B2BUA regenerates)
+	leg2 := &data.CapturedPacket{
+		TimestampNs: baseTime.Add(100 * time.Millisecond).UnixNano(),
+		Metadata: &data.PacketMetadata{
+			SrcIp: "192.168.1.200",
+			DstIp: "192.168.2.100",
+			Sip: &data.SIPMetadata{
+				CallId:   "leg2@b2bua", // Different Call-ID!
+				Method:   "INVITE",
+				FromTag:  "b2bua-tag-out",    // Different From tag!
+				ToTag:    "bob-tag-received", // Different To tag!
+				FromUser: "+1234567890",      // Same from number (suffix matches)
+				ToUser:   "+0987654321",      // Same to number
+			},
+		},
+	}
+	cc.ProcessPacket(leg2, "hunter-2")
+
+	// Should have 1 correlated call with 2 legs (correlated by phone suffix)
+	calls := cc.GetCorrelatedCalls()
+	require.Len(t, calls, 1, "Should have 1 correlated call via phone suffix matching")
+
+	call := calls[0]
+	assert.Len(t, call.CallLegs, 2, "Should have 2 call legs")
+	assert.NotEmpty(t, call.PhonePairKey, "Should have phone pair key set")
+
+	// Both legs should be present
+	assert.NotNil(t, call.CallLegs["leg1@alice"], "Should have leg 1")
+	assert.NotNil(t, call.CallLegs["leg2@b2bua"], "Should have leg 2")
+}
+
+// TestPhoneSuffixCorrelation_TechPrefix tests B2BUA with tech prefix (anonymous calling)
+func TestPhoneSuffixCorrelation_TechPrefix(t *testing.T) {
+	config := PhoneCorrelationConfig{
+		Enabled:         true,
+		MinSuffixDigits: 7,
+		TimeWindow:      30 * time.Second,
+	}
+	cc := NewCallCorrelatorWithConfig(config)
+	defer cc.Stop()
+
+	baseTime := time.Now()
+
+	// Leg 1: Original call (non-anonymous)
+	leg1 := &data.CapturedPacket{
+		TimestampNs: baseTime.UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call1@pbx",
+				Method:   "INVITE",
+				FromTag:  "tag1a",
+				ToTag:    "tag1b",
+				FromUser: "+1234567890",
+				ToUser:   "+0987654321",
+			},
+		},
+	}
+	cc.ProcessPacket(leg1, "hunter-1")
+
+	// Leg 2: Same call with tech prefix added (anonymous)
+	// e.g., "2482" is a proprietary prefix that makes caller anonymous
+	leg2 := &data.CapturedPacket{
+		TimestampNs: baseTime.Add(50 * time.Millisecond).UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call2@carrier",
+				Method:   "INVITE",
+				FromTag:  "tag2a",           // Different tag
+				ToTag:    "tag2b",           // Different tag
+				FromUser: "2482+1234567890", // Same number with tech prefix
+				ToUser:   "+0987654321",     // Same destination
+			},
+		},
+	}
+	cc.ProcessPacket(leg2, "hunter-2")
+
+	// Should correlate both legs via phone suffix
+	calls := cc.GetCorrelatedCalls()
+	require.Len(t, calls, 1, "Should correlate via phone suffix despite tech prefix")
+
+	call := calls[0]
+	assert.Len(t, call.CallLegs, 2, "Should have 2 call legs")
+}
+
+// TestPhoneSuffixCorrelation_TimeWindow tests that time window is respected
+func TestPhoneSuffixCorrelation_TimeWindow(t *testing.T) {
+	config := PhoneCorrelationConfig{
+		Enabled:         true,
+		MinSuffixDigits: 7,
+		TimeWindow:      1 * time.Second, // Very short window
+	}
+	cc := NewCallCorrelatorWithConfig(config)
+	defer cc.Stop()
+
+	baseTime := time.Now()
+
+	// Leg 1
+	leg1 := &data.CapturedPacket{
+		TimestampNs: baseTime.UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call1",
+				Method:   "INVITE",
+				FromTag:  "tag1a",
+				ToTag:    "tag1b",
+				FromUser: "+1234567890",
+				ToUser:   "+0987654321",
+			},
+		},
+	}
+	cc.ProcessPacket(leg1, "hunter-1")
+
+	// Leg 2: Same phones, but outside time window (2 seconds later)
+	leg2 := &data.CapturedPacket{
+		TimestampNs: baseTime.Add(2 * time.Second).UnixNano(), // Outside 1s window
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call2",
+				Method:   "INVITE",
+				FromTag:  "tag2a",
+				ToTag:    "tag2b",
+				FromUser: "+1234567890",
+				ToUser:   "+0987654321",
+			},
+		},
+	}
+	cc.ProcessPacket(leg2, "hunter-2")
+
+	// Should have 2 separate calls (outside time window)
+	calls := cc.GetCorrelatedCalls()
+	assert.Len(t, calls, 2, "Should NOT correlate legs outside time window")
+}
+
+// TestPhoneSuffixCorrelation_Disabled tests that phone correlation can be disabled
+func TestPhoneSuffixCorrelation_Disabled(t *testing.T) {
+	config := PhoneCorrelationConfig{
+		Enabled:         false, // Disabled
+		MinSuffixDigits: 7,
+		TimeWindow:      30 * time.Second,
+	}
+	cc := NewCallCorrelatorWithConfig(config)
+	defer cc.Stop()
+
+	baseTime := time.Now()
+
+	// Leg 1
+	leg1 := &data.CapturedPacket{
+		TimestampNs: baseTime.UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call1",
+				Method:   "INVITE",
+				FromTag:  "tag1a",
+				ToTag:    "tag1b",
+				FromUser: "+1234567890",
+				ToUser:   "+0987654321",
+			},
+		},
+	}
+	cc.ProcessPacket(leg1, "hunter-1")
+
+	// Leg 2: Different tags (B2BUA style)
+	leg2 := &data.CapturedPacket{
+		TimestampNs: baseTime.Add(100 * time.Millisecond).UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call2",
+				Method:   "INVITE",
+				FromTag:  "tag2a",
+				ToTag:    "tag2b",
+				FromUser: "+1234567890",
+				ToUser:   "+0987654321",
+			},
+		},
+	}
+	cc.ProcessPacket(leg2, "hunter-2")
+
+	// Should have 2 separate calls (phone correlation disabled)
+	calls := cc.GetCorrelatedCalls()
+	assert.Len(t, calls, 2, "Should NOT correlate when phone correlation is disabled")
+}
+
+// TestPhoneSuffixCorrelation_CleanupIncludesPhonePair tests that cleanup removes phone pair index
+func TestPhoneSuffixCorrelation_CleanupIncludesPhonePair(t *testing.T) {
+	config := PhoneCorrelationConfig{
+		Enabled:         true,
+		MinSuffixDigits: 7,
+		TimeWindow:      30 * time.Second,
+	}
+	cc := NewCallCorrelatorWithConfig(config)
+	defer cc.Stop()
+
+	// Create a call with phone numbers
+	packet := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call-1",
+				Method:   "INVITE",
+				FromTag:  "tag1",
+				ToTag:    "tag2",
+				FromUser: "+1234567890",
+				ToUser:   "+0987654321",
+			},
+		},
+	}
+	cc.ProcessPacket(packet, "hunter-1")
+
+	// Verify call exists and has phone pair key
+	calls := cc.GetCorrelatedCalls()
+	require.Len(t, calls, 1)
+	require.NotEmpty(t, calls[0].PhonePairKey)
+
+	// Verify phone pair is indexed
+	cc.mu.RLock()
+	phonePairCount := len(cc.callsByPhonePair)
+	cc.mu.RUnlock()
+	assert.Equal(t, 1, phonePairCount, "Should have 1 phone pair indexed")
+
+	// Wait for it to become stale and cleanup
+	time.Sleep(200 * time.Millisecond)
+	cc.cleanupStaleCalls(100 * time.Millisecond)
+
+	// Phone pair should be cleaned up
+	cc.mu.RLock()
+	phonePairCountAfter := len(cc.callsByPhonePair)
+	cc.mu.RUnlock()
+	assert.Equal(t, 0, phonePairCountAfter, "Phone pair should be cleaned up")
+}

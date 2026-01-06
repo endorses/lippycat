@@ -514,8 +514,8 @@ func (pwm *PcapWriterManager) CloseWriter(callID string) error {
 	return nil
 }
 
-// CloseCallWriter closes a specific call's writer and fires OnCallComplete callback
-// Use this method when a VoIP call completes to trigger the voipcommand hook
+// CloseCallWriter closes a specific call's writer and fires OnCallComplete callback.
+// Use this method when a VoIP call completes to trigger the voipcommand hook.
 func (pwm *PcapWriterManager) CloseCallWriter(callID string) error {
 	pwm.mu.Lock()
 	defer pwm.mu.Unlock()
@@ -531,6 +531,37 @@ func (pwm *PcapWriterManager) CloseCallWriter(callID string) error {
 
 	delete(pwm.writers, callID)
 	return nil
+}
+
+// HasRTPPackets returns true if the call has received any RTP packets.
+// Used by CallCompletionMonitor to wait for RTP before firing voipcommand.
+func (pwm *PcapWriterManager) HasRTPPackets(callID string) bool {
+	pwm.mu.RLock()
+	defer pwm.mu.RUnlock()
+
+	writer, exists := pwm.writers[callID]
+	if !exists {
+		return false
+	}
+
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.rtpPacketCount > 0
+}
+
+// HasSIPPackets returns true if the call has received any SIP packets.
+func (pwm *PcapWriterManager) HasSIPPackets(callID string) bool {
+	pwm.mu.RLock()
+	defer pwm.mu.RUnlock()
+
+	writer, exists := pwm.writers[callID]
+	if !exists {
+		return false
+	}
+
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.sipPacketCount > 0
 }
 
 // Close closes all writers

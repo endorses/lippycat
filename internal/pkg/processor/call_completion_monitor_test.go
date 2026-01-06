@@ -1,6 +1,8 @@
 package processor
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -134,9 +136,11 @@ func TestCallCompletionMonitor_DetectsEndedCalls(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use short intervals for testing
+	// Short RTP wait timeout since we don't write RTP in this test
 	config := &CallCompletionMonitorConfig{
-		GracePeriod:   100 * time.Millisecond,
-		CheckInterval: 50 * time.Millisecond,
+		GracePeriod:    100 * time.Millisecond,
+		CheckInterval:  50 * time.Millisecond,
+		RTPWaitTimeout: 50 * time.Millisecond,
 	}
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
@@ -218,10 +222,12 @@ func TestCallCompletionMonitor_GracePeriodRespected(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use specific grace period
+	// Short RTP wait timeout since we don't write RTP in this test
 	gracePeriod := 200 * time.Millisecond
 	config := &CallCompletionMonitorConfig{
-		GracePeriod:   gracePeriod,
-		CheckInterval: 50 * time.Millisecond,
+		GracePeriod:    gracePeriod,
+		CheckInterval:  50 * time.Millisecond,
+		RTPWaitTimeout: 50 * time.Millisecond,
 	}
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
@@ -302,9 +308,11 @@ func TestCallCompletionMonitor_CancelPendingClose(t *testing.T) {
 	pcapManager, err := NewPcapWriterManager(pcapConfig)
 	require.NoError(t, err)
 
+	// Long grace period but short RTP wait timeout since we don't write RTP
 	config := &CallCompletionMonitorConfig{
-		GracePeriod:   500 * time.Millisecond, // Long grace period
-		CheckInterval: 50 * time.Millisecond,
+		GracePeriod:    500 * time.Millisecond,
+		CheckInterval:  50 * time.Millisecond,
+		RTPWaitTimeout: 50 * time.Millisecond,
 	}
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
@@ -368,9 +376,11 @@ func TestCallCompletionMonitor_MultipleCalls(t *testing.T) {
 	pcapManager, err := NewPcapWriterManager(pcapConfig)
 	require.NoError(t, err)
 
+	// Short RTP wait timeout since we don't write RTP in this test
 	config := &CallCompletionMonitorConfig{
-		GracePeriod:   100 * time.Millisecond,
-		CheckInterval: 50 * time.Millisecond,
+		GracePeriod:    100 * time.Millisecond,
+		CheckInterval:  50 * time.Millisecond,
+		RTPWaitTimeout: 50 * time.Millisecond,
 	}
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
@@ -436,9 +446,11 @@ func TestCallCompletionMonitor_ShutdownClosesPending(t *testing.T) {
 	pcapManager, err := NewPcapWriterManager(pcapConfig)
 	require.NoError(t, err)
 
+	// Very long grace period to ensure shutdown triggers closure, short RTP wait timeout
 	config := &CallCompletionMonitorConfig{
-		GracePeriod:   1 * time.Hour, // Very long grace period
-		CheckInterval: 50 * time.Millisecond,
+		GracePeriod:    1 * time.Hour,
+		CheckInterval:  50 * time.Millisecond,
+		RTPWaitTimeout: 50 * time.Millisecond,
 	}
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
@@ -513,9 +525,11 @@ func TestCallCompletionMonitor_ConcurrentAccess(t *testing.T) {
 	pcapManager, err := NewPcapWriterManager(pcapConfig)
 	require.NoError(t, err)
 
+	// Short RTP wait timeout since we don't write RTP in this test
 	config := &CallCompletionMonitorConfig{
-		GracePeriod:   50 * time.Millisecond,
-		CheckInterval: 10 * time.Millisecond,
+		GracePeriod:    50 * time.Millisecond,
+		CheckInterval:  10 * time.Millisecond,
+		RTPWaitTimeout: 50 * time.Millisecond,
 	}
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
@@ -640,4 +654,217 @@ func TestCallCompletionMonitor_FailedCallStateDetection(t *testing.T) {
 	// Wait for grace period
 	time.Sleep(150 * time.Millisecond)
 	assert.Equal(t, 0, monitor.GetPendingCount(), "Failed call should have been closed")
+}
+
+// TestCallCompletionMonitor_WaitsForRTPBeforeClosing verifies that calls with RTP
+// wait for RTP packets to be written to PCAP before firing voipcommand
+func TestCallCompletionMonitor_WaitsForRTPBeforeClosing(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "lippycat-rtp-wait-test")
+	defer os.RemoveAll(tempDir)
+
+	var voipCommandCalled bool
+	var mu sync.Mutex
+
+	pcapConfig := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    tempDir,
+		SyncInterval: 5 * time.Second,
+		OnCallComplete: func(meta CallMetadata) {
+			mu.Lock()
+			voipCommandCalled = true
+			mu.Unlock()
+		},
+	}
+
+	pcapManager, err := NewPcapWriterManager(pcapConfig)
+	require.NoError(t, err)
+
+	aggregator := voip.NewCallAggregator()
+	config := &CallCompletionMonitorConfig{
+		GracePeriod:    100 * time.Millisecond,
+		CheckInterval:  50 * time.Millisecond,
+		RTPWaitTimeout: 2 * time.Second, // Long enough for test
+	}
+
+	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
+	monitor.Start()
+	defer monitor.Stop()
+
+	callID := "test-call-rtp-wait"
+
+	// Create PCAP writer for the call
+	writer, err := pcapManager.GetOrCreateWriter(callID, "alice", "bob")
+	require.NoError(t, err)
+	require.NotNil(t, writer)
+
+	// Simulate a call with RTP: INVITE -> 200 OK -> RTP -> BYE
+	// INVITE
+	invitePacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   callID,
+				Method:   "INVITE",
+				FromUser: "alice",
+				ToUser:   "bob",
+			},
+		},
+	}
+	aggregator.ProcessPacket(invitePacket, "hunter-1")
+
+	// 200 OK (call becomes ACTIVE)
+	okPacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       callID,
+				ResponseCode: 200,
+			},
+		},
+	}
+	aggregator.ProcessPacket(okPacket, "hunter-1")
+
+	// RTP packet (tracked by aggregator, but NOT yet written to PCAP)
+	rtpPacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: callID}, // For call association
+			Rtp: &data.RTPMetadata{
+				Ssrc:        12345,
+				PayloadType: 0,
+				Sequence:    1,
+				Timestamp:   160,
+			},
+		},
+	}
+	aggregator.ProcessPacket(rtpPacket, "hunter-1")
+
+	// Verify aggregator has RTP stats
+	call, exists := aggregator.GetCall(callID)
+	require.True(t, exists)
+	require.NotNil(t, call.RTPStats)
+	require.Greater(t, call.RTPStats.TotalPackets, 0, "Aggregator should have RTP stats")
+
+	// BYE (call ends)
+	byePacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: callID,
+				Method: "BYE",
+			},
+		},
+	}
+	aggregator.ProcessPacket(byePacket, "hunter-1")
+
+	// Wait for grace period to expire
+	time.Sleep(200 * time.Millisecond)
+
+	// Call should still be pending (waiting for RTP in PCAP)
+	mu.Lock()
+	called := voipCommandCalled
+	mu.Unlock()
+	assert.False(t, called, "voipcommand should NOT have fired yet (waiting for RTP)")
+	assert.Greater(t, monitor.GetPendingCount(), 0, "Call should still be pending")
+
+	// Now write RTP to PCAP (simulates late-arriving RTP packets)
+	dummyRTPData := make([]byte, 100)
+	err = writer.WriteRTPPacket(time.Now(), dummyRTPData, 1) // LinkType 1 = Ethernet
+	require.NoError(t, err)
+
+	// Wait for next check interval
+	time.Sleep(100 * time.Millisecond)
+
+	// Now voipcommand should have fired
+	mu.Lock()
+	called = voipCommandCalled
+	mu.Unlock()
+	assert.True(t, called, "voipcommand should have fired after RTP was written")
+	assert.Equal(t, 0, monitor.GetPendingCount(), "Call should have been closed")
+}
+
+// TestCallCompletionMonitor_RTPWaitTimeout verifies the timeout fallback
+func TestCallCompletionMonitor_RTPWaitTimeout(t *testing.T) {
+	tempDir := filepath.Join(os.TempDir(), "lippycat-rtp-timeout-test")
+	defer os.RemoveAll(tempDir)
+
+	var voipCommandCalled bool
+	var mu sync.Mutex
+
+	pcapConfig := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    tempDir,
+		SyncInterval: 5 * time.Second,
+		OnCallComplete: func(meta CallMetadata) {
+			mu.Lock()
+			voipCommandCalled = true
+			mu.Unlock()
+		},
+	}
+
+	pcapManager, err := NewPcapWriterManager(pcapConfig)
+	require.NoError(t, err)
+
+	aggregator := voip.NewCallAggregator()
+	config := &CallCompletionMonitorConfig{
+		GracePeriod:    50 * time.Millisecond,
+		CheckInterval:  25 * time.Millisecond,
+		RTPWaitTimeout: 150 * time.Millisecond, // Short timeout for test
+	}
+
+	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
+	monitor.Start()
+	defer monitor.Stop()
+
+	callID := "test-call-rtp-timeout"
+
+	// Create PCAP writer
+	_, err = pcapManager.GetOrCreateWriter(callID, "alice", "bob")
+	require.NoError(t, err)
+
+	// Simulate call with RTP in aggregator but NOT in PCAP
+	invitePacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: callID, Method: "INVITE", FromUser: "alice", ToUser: "bob"},
+		},
+	}
+	aggregator.ProcessPacket(invitePacket, "hunter-1")
+
+	okPacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: callID, ResponseCode: 200},
+		},
+	}
+	aggregator.ProcessPacket(okPacket, "hunter-1")
+
+	// RTP in aggregator only (not written to PCAP)
+	rtpPacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: callID},
+			Rtp: &data.RTPMetadata{Ssrc: 12345, PayloadType: 0, Sequence: 1, Timestamp: 160},
+		},
+	}
+	aggregator.ProcessPacket(rtpPacket, "hunter-1")
+
+	// BYE
+	byePacket := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{CallId: callID, Method: "BYE"},
+		},
+	}
+	aggregator.ProcessPacket(byePacket, "hunter-1")
+
+	// Wait for timeout to expire (grace + RTP wait timeout)
+	time.Sleep(300 * time.Millisecond)
+
+	// voipcommand should have fired due to timeout
+	mu.Lock()
+	called := voipCommandCalled
+	mu.Unlock()
+	assert.True(t, called, "voipcommand should have fired after RTP wait timeout")
+	assert.Equal(t, 0, monitor.GetPendingCount(), "Call should have been closed after timeout")
 }

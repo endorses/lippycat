@@ -19,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -365,6 +366,16 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// - LocalTarget uses it to update filters when management API changes them
 	localSource.SetApplicationFilter(appFilter)
 	localTarget.SetApplicationFilter(appFilter)
+
+	// Create VoIPProcessor for SIP/RTP metadata extraction
+	// This enables per-call PCAP writing and RTP association in tap mode
+	// Pass the ApplicationFilter so only matching calls are tracked
+	voipProcConfig := voipprocessor.DefaultConfig()
+	voipProcConfig.ApplicationFilter = appFilter
+	voipProc := voipprocessor.New(voipProcConfig)
+	voipAdapter := voipprocessor.NewSourceAdapter(voipProc)
+	localSource.SetVoIPProcessor(voipAdapter)
+	logger.Info("VoIP processor enabled for tap mode")
 
 	// Set the local source and target on the processor
 	p.SetPacketSource(localSource)

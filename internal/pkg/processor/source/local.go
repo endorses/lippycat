@@ -22,6 +22,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 )
 
@@ -35,6 +36,10 @@ type ApplicationFilter interface {
 	// Used for LI correlation to map matched filters back to intercept task XIDs.
 	MatchPacketWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
 }
+
+// VoIPProcessor is an alias for voipprocessor.SourceAdapter.
+// It provides VoIP packet processing for SIP/RTP detection.
+type VoIPProcessor = *voipprocessor.SourceAdapter
 
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
@@ -57,6 +62,9 @@ type LocalSource struct {
 
 	// Optional filtering
 	appFilter ApplicationFilter
+
+	// Optional VoIP processing for SIP/RTP metadata extraction
+	voipProcessor VoIPProcessor
 
 	// Stats tracking
 	stats *AtomicStats
@@ -133,6 +141,24 @@ func (s *LocalSource) SetApplicationFilter(filter ApplicationFilter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appFilter = filter
+}
+
+// SetVoIPProcessor sets an optional VoIP processor for SIP/RTP detection.
+// When set, packets are processed for VoIP metadata which is attached to
+// the CapturedPacket.Metadata field for downstream per-call PCAP writing.
+// Pass nil to disable VoIP processing.
+func (s *LocalSource) SetVoIPProcessor(processor VoIPProcessor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.voipProcessor = processor
+}
+
+// GetVoIPProcessor returns the VoIP processor if set.
+// Returns nil if no VoIP processor is configured.
+func (s *LocalSource) GetVoIPProcessor() VoIPProcessor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.voipProcessor
 }
 
 // Start begins packet capture. Blocks until ctx is cancelled.
@@ -237,13 +263,30 @@ func (s *LocalSource) batchingLoop() {
 				return
 			}
 
-			// Apply application filter if set
 			s.mu.Lock()
 			filter := s.appFilter
+			voipProc := s.voipProcessor
 			s.mu.Unlock()
 
+			// Convert to protobuf format first
+			pbPkt := convertPacketInfo(pktInfo)
+
+			// Apply VoIP processing BEFORE filtering
+			// This ensures RTP packets associated with calls are detected
+			// before the application filter can drop them
+			var isVoIPPacket bool
+			if voipProc != nil {
+				if result := voipProc.Process(pktInfo.Packet); result != nil && result.IsVoIPPacket() {
+					pbPkt.Metadata = result.GetMetadata()
+					isVoIPPacket = true
+				}
+			}
+
+			// Apply application filter if set
+			// VoIP packets (SIP and associated RTP) bypass the filter
+			// since they're already identified by the VoIP processor
 			var matchedFilterIDs []string
-			if filter != nil {
+			if filter != nil && !isVoIPPacket {
 				matched, filterIDs := filter.MatchPacketWithIDs(pktInfo.Packet)
 				if !matched {
 					// Packet filtered out
@@ -251,9 +294,6 @@ func (s *LocalSource) batchingLoop() {
 				}
 				matchedFilterIDs = filterIDs
 			}
-
-			// Convert to protobuf format
-			pbPkt := convertPacketInfo(pktInfo)
 
 			// Set matched filter IDs for LI correlation
 			if len(matchedFilterIDs) > 0 {

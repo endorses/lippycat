@@ -206,6 +206,12 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	// Start call completion monitor (VoIP PCAP file management)
 	if p.callCompletionMonitor != nil {
+		// Wire up voip processor cleanup if available (tap mode with LocalSource)
+		if localSrc, ok := p.packetSource.(*source.LocalSource); ok {
+			if voipProc := localSrc.GetVoIPProcessor(); voipProc != nil {
+				p.callCompletionMonitor.SetVoIPPortCleaner(voipProc)
+			}
+		}
 		p.callCompletionMonitor.Start()
 	}
 

@@ -245,6 +245,12 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 	// Create VoIP packet processor for UDP buffering
 	// This handles UDP SIP/RTP packets with buffering and filtering
 	processor := voip.NewVoIPPacketProcessor(h, bufferMgr)
+
+	// Wire TCP handler to processor so ApplicationFilter propagates to both
+	// This enables proper multi-filter support (phone_number, sip_user, etc.)
+	// for both UDP and TCP SIP traffic
+	processor.SetTCPHandler(tcpHandler)
+
 	h.SetPacketProcessor(processor)
 
 	logger.Info("VoIP hunter initialized with complete buffering support",

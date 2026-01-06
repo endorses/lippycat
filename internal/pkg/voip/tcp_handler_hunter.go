@@ -21,6 +21,7 @@ type PacketForwarder interface {
 type HunterForwardHandler struct {
 	forwarder PacketForwarder
 	bufferMgr *BufferManager
+	appFilter ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
 }
 
 // NewHunterForwardHandler creates a handler for hunter packet forwarding
@@ -29,6 +30,13 @@ func NewHunterForwardHandler(forwarder PacketForwarder, bufferMgr *BufferManager
 		forwarder: forwarder,
 		bufferMgr: bufferMgr,
 	}
+}
+
+// SetApplicationFilter sets the application filter for proper filter matching.
+// When set, this filter is used instead of the legacy sipusers.IsSurveiled() check.
+// This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
+func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
+	h.appFilter = filter
 }
 
 // HandleSIPMessage processes a complete SIP message for hunter forwarding
@@ -98,7 +106,9 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	}
 
 	// Check if this call matches tracked users
-	if !containsUserInHeaders(headers) {
+	// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
+	// Fall back to legacy containsUserInHeaders() if no ApplicationFilter is set
+	if !h.matchesFilter(flow, headers) {
 		// Call doesn't match filter - discard buffered TCP packets
 		discardTCPBufferedPackets(flow)
 		logger.Debug("TCP SIP call filtered out",
@@ -171,4 +181,27 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	}
 
 	return true
+}
+
+// matchesFilter checks if a TCP SIP call matches any configured filter.
+// Uses ApplicationFilter if available (supports phone_number, sip_user, etc.)
+// Falls back to legacy containsUserInHeaders() if no ApplicationFilter is set.
+func (h *HunterForwardHandler) matchesFilter(flow gopacket.Flow, headers map[string]string) bool {
+	// Use ApplicationFilter if available (Phase 2: proper multi-filter support)
+	if h.appFilter != nil {
+		// For TCP SIP, we need a packet to pass to ApplicationFilter.
+		// Use one of the buffered TCP packets if available.
+		bufferedPackets := getTCPBufferedPackets(flow)
+		if len(bufferedPackets) > 0 {
+			// Use the first buffered packet for filter matching
+			// The ApplicationFilter will extract SIP headers from the packet
+			return h.appFilter.MatchPacket(bufferedPackets[0].Packet)
+		}
+		// No buffered packets - fall back to legacy method
+		logger.Debug("TCP SIP: No buffered packets for ApplicationFilter, falling back to legacy filter")
+	}
+
+	// Legacy fallback: use sipusers.IsSurveiled() via containsUserInHeaders()
+	// This only supports sip_user filters, not phone_number or other filter types
+	return containsUserInHeaders(headers)
 }

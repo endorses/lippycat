@@ -11,10 +11,20 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
+// ApplicationFilter provides application-layer packet filtering for hunter mode.
+// This interface is implemented by hunter.ApplicationFilter but defined here
+// to avoid import cycles (voip cannot import hunter).
+type ApplicationFilter interface {
+	// MatchPacket checks if a packet matches any filter.
+	// Returns true if no filters are configured (promiscuous mode) OR if a match is found.
+	MatchPacket(packet gopacket.Packet) bool
+}
+
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
 	forwarder PacketForwarder
 	bufferMgr *BufferManager
+	appFilter ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
 }
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
@@ -23,6 +33,44 @@ func NewUDPPacketHandler(forwarder PacketForwarder, bufferMgr *BufferManager) *U
 		forwarder: forwarder,
 		bufferMgr: bufferMgr,
 	}
+}
+
+// SetApplicationFilter sets the application filter for proper filter matching.
+// When set, this filter is used instead of the legacy sipusers.IsSurveiled() check.
+// This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
+func (h *UDPPacketHandler) SetApplicationFilter(filter ApplicationFilter) {
+	h.appFilter = filter
+}
+
+// matchesFilter checks if a packet matches any configured filter.
+// Uses ApplicationFilter if available (supports phone_number, sip_user, etc.)
+// Falls back to legacy containsUserInHeaders() if no ApplicationFilter is set.
+func (h *UDPPacketHandler) matchesFilter(packet gopacket.Packet, headers map[string]string) bool {
+	// Use ApplicationFilter if available (Phase 2: proper multi-filter support)
+	if h.appFilter != nil {
+		return h.appFilter.MatchPacket(packet)
+	}
+
+	// Legacy fallback: use sipusers.IsSurveiled() via containsUserInHeaders()
+	// This only supports sip_user filters, not phone_number or other filter types
+	return containsUserInHeaders(headers)
+}
+
+// matchesFilterWithMetadata checks if call metadata matches any configured filter.
+// Used by the buffer manager callback when checking filter after SDP is received.
+func (h *UDPPacketHandler) matchesFilterWithMetadata(packet gopacket.Packet, m *CallMetadata) bool {
+	// Use ApplicationFilter if available (Phase 2: proper multi-filter support)
+	// The packet is passed to get full header matching capability
+	if h.appFilter != nil {
+		return h.appFilter.MatchPacket(packet)
+	}
+
+	// Legacy fallback: use sipusers.IsSurveiled() via containsUserInHeaders()
+	return containsUserInHeaders(map[string]string{
+		"from":                m.From,
+		"to":                  m.To,
+		"p-asserted-identity": m.PAssertedIdentity,
+	})
 }
 
 // HandleUDPPacket processes a UDP packet (SIP or RTP) with buffering
@@ -75,7 +123,9 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	}
 
 	// Check if the SIP message matches our filter (for forwarding decision)
-	if !handleSipMessage(payload, linkType) {
+	// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
+	// Fall back to legacy containsUserInHeaders() if no ApplicationFilter is set
+	if !h.matchesFilter(packet, headers) {
 		return false
 	}
 
@@ -140,15 +190,13 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	bodyBytes := StringToBytes(body)
 	if BytesContains(bodyBytes, []byte("m=audio")) {
 		// Use callback-based filter check for flexible handling
+		// Note: 'packet' is captured by the closure for ApplicationFilter matching
 		matched := h.bufferMgr.CheckFilterWithCallback(
 			callID,
 			func(m *CallMetadata) bool {
-				// Check if From, To, or P-Asserted-Identity matches tracked users
-				return containsUserInHeaders(map[string]string{
-					"from":                m.From,
-					"to":                  m.To,
-					"p-asserted-identity": m.PAssertedIdentity,
-				})
+				// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
+				// Falls back to legacy containsUserInHeaders() if no filter is set
+				return h.matchesFilterWithMetadata(packet, m)
 			},
 			func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 				// Forward all buffered packets to processor
@@ -183,8 +231,28 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 	dstPort := layer.DstPort.String()
 	srcPort := layer.SrcPort.String()
 
+	// Extract IP addresses for IP:PORT endpoint lookups
+	var dstIP, srcIP string
+	if netLayer := packet.NetworkLayer(); netLayer != nil {
+		dstIP = netLayer.NetworkFlow().Dst().String()
+		srcIP = netLayer.NetworkFlow().Src().String()
+	}
+
 	// Try to get CallID from buffer manager's port mapping
-	bufCallID, exists := h.bufferMgr.GetCallIDForRTPPort(dstPort)
+	// Check IP:PORT endpoints first (more specific), then fall back to port-only
+	var bufCallID string
+	var exists bool
+
+	if dstIP != "" {
+		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(dstIP + ":" + dstPort)
+	}
+	if !exists && srcIP != "" {
+		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(srcIP + ":" + srcPort)
+	}
+	// Fall back to port-only lookups
+	if !exists {
+		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(dstPort)
+	}
 	if !exists {
 		bufCallID, exists = h.bufferMgr.GetCallIDForRTPPort(srcPort)
 	}
@@ -195,7 +263,12 @@ func (h *UDPPacketHandler) handleRTPPacket(pkt capture.PacketInfo, layer *layers
 	}
 
 	// This RTP packet belongs to a call we're buffering or tracking
-	shouldForward := h.bufferMgr.AddRTPPacket(bufCallID, dstPort, packet)
+	// Use IP:PORT for the port parameter if available for more precise matching
+	portKey := dstPort
+	if dstIP != "" {
+		portKey = dstIP + ":" + dstPort
+	}
+	shouldForward := h.bufferMgr.AddRTPPacket(bufCallID, portKey, packet)
 
 	if shouldForward {
 		// Call already matched, forward immediately with RTP metadata

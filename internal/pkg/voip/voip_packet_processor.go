@@ -12,12 +12,30 @@ import (
 // VoIPPacketProcessor processes VoIP packets (SIP/RTP) with buffering for hunter mode
 type VoIPPacketProcessor struct {
 	udpHandler *UDPPacketHandler
+	tcpHandler *HunterForwardHandler // Optional: for wiring ApplicationFilter to TCP handler
 }
 
 // NewVoIPPacketProcessor creates a packet processor for VoIP buffering in hunter mode
 func NewVoIPPacketProcessor(forwarder PacketForwarder, bufferMgr *BufferManager) *VoIPPacketProcessor {
 	return &VoIPPacketProcessor{
 		udpHandler: NewUDPPacketHandler(forwarder, bufferMgr),
+	}
+}
+
+// SetTCPHandler sets the TCP handler reference for ApplicationFilter wiring.
+// This allows SetApplicationFilter to propagate to both UDP and TCP handlers.
+func (p *VoIPPacketProcessor) SetTCPHandler(handler *HunterForwardHandler) {
+	p.tcpHandler = handler
+}
+
+// SetApplicationFilter sets the application filter for proper filter matching.
+// When set, this filter is used instead of the legacy sipusers.IsSurveiled() check.
+// This supports all filter types including phone_number, sip_user, sipuri, ip_address, etc.
+// If a TCP handler is set, the filter is also propagated to it.
+func (p *VoIPPacketProcessor) SetApplicationFilter(filter ApplicationFilter) {
+	p.udpHandler.SetApplicationFilter(filter)
+	if p.tcpHandler != nil {
+		p.tcpHandler.SetApplicationFilter(filter)
 	}
 }
 

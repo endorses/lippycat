@@ -179,6 +179,15 @@ func (h *Hunter) Start(ctx context.Context) error {
 		// Wire up application filter to filter manager for hot-reload
 		h.filterManager.SetApplicationFilterUpdater(appFilter)
 		logger.Info("Application filter hot-reload enabled (filters update without restart)")
+
+		// Wire up ApplicationFilter to packet processor if it supports it
+		// This allows VoIP packet processor to use the filter for proper multi-filter support
+		if h.packetProcessor != nil {
+			if receiver, ok := h.packetProcessor.(forwarding.ApplicationFilterReceiver); ok {
+				receiver.SetApplicationFilter(appFilter)
+				logger.Info("ApplicationFilter wired to packet processor")
+			}
+		}
 	}
 	defer func() {
 		if h.applicationFilter != nil {

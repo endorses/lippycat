@@ -11,7 +11,6 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 )
 
 // CaptureRestarter is an interface for restarting capture with new filters
@@ -84,10 +83,8 @@ func (m *Manager) SetInitialFilters(filters []*management.Filter) {
 	appFilterUpdater := m.appFilterUpdater
 	m.mu.Unlock()
 
-	// Sync SIP user filters to sipusers package
-	m.syncSIPUserFilters(filters)
-
 	// Update application filter if configured (for hot-reload support)
+	// Note: Phase 2 removed sipusers sync - ApplicationFilter handles all filter types
 	if appFilterUpdater != nil {
 		appFilterUpdater.UpdateFilters(filters)
 	}
@@ -263,19 +260,14 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 			// BPF filter changed - must restart capture
 			logger.Info("BPF filter changed, restarting capture", "active_filters", len(currentFilters))
 
-			// Sync SIP user filters to sipusers package for application-level filtering
-			m.syncSIPUserFilters(currentFilters)
-
 			if err := m.captureRestarter.Restart(currentFilters); err != nil {
 				logger.Error("Failed to restart capture with new filters", "error", err)
 			}
 		} else if appFilterUpdater != nil {
 			// Application-level filter changed - hot-reload without restart
+			// Note: Phase 2 removed sipusers sync - ApplicationFilter handles all filter types
 			logger.Info("Application-level filter changed, hot-reloading (no restart)",
 				"active_filters", len(currentFilters))
-
-			// Sync SIP user filters to sipusers package for application-level filtering
-			m.syncSIPUserFilters(currentFilters)
 
 			// Update application filter without restarting capture
 			appFilterUpdater.UpdateFilters(currentFilters)
@@ -283,9 +275,6 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 			// No app filter updater - fall back to restart (backward compatibility)
 			logger.Info("Application-level filter changed but no updater set, restarting capture",
 				"active_filters", len(currentFilters))
-
-			// Sync SIP user filters to sipusers package for application-level filtering
-			m.syncSIPUserFilters(currentFilters)
 
 			if err := m.captureRestarter.Restart(currentFilters); err != nil {
 				logger.Error("Failed to restart capture with new filters", "error", err)
@@ -297,26 +286,4 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 // containsBPFFilter checks if a filter is a BPF filter (requires capture restart)
 func (m *Manager) containsBPFFilter(filter *management.Filter) bool {
 	return filter.Type == management.FilterType_FILTER_BPF
-}
-
-// syncSIPUserFilters synchronizes FILTER_SIP_USER filters to the sipusers package
-// This allows application-level filtering to work correctly in hunter mode
-func (m *Manager) syncSIPUserFilters(filters []*management.Filter) {
-	// Build map of SIP users from filters
-	sipUsers := make(map[string]*sipusers.SipUser)
-	for _, filter := range filters {
-		if filter.Type == management.FilterType_FILTER_SIP_USER {
-			// Use a far-future expiration date since processor manages filter lifetime
-			sipUsers[filter.Pattern] = &sipusers.SipUser{
-				ExpirationDate: time.Date(2099, 12, 31, 23, 59, 59, 0, time.UTC),
-			}
-		}
-	}
-
-	// Clear existing SIP users and add new ones
-	// Note: This is safe because in hunter mode, sipusers are ONLY managed by filter updates
-	sipusers.ClearAll()
-	sipusers.AddMultipleSipUsers(sipUsers)
-
-	logger.Debug("Synchronized SIP user filters", "sip_user_count", len(sipUsers))
 }

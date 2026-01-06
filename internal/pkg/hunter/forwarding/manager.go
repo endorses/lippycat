@@ -33,6 +33,14 @@ type ApplicationFilter interface {
 	MatchPacketWithIDs(packet gopacket.Packet) (matched bool, filterIDs []string)
 }
 
+// ApplicationFilterReceiver is an interface for components that can receive ApplicationFilter updates.
+// This allows Hunter to inject the ApplicationFilter into packet processors after initialization,
+// supporting the pattern where processors are created before Hunter.Start() but need the filter
+// that is created inside Start().
+type ApplicationFilterReceiver interface {
+	SetApplicationFilter(filter ApplicationFilter)
+}
+
 // StatsCollector provides access to hunter statistics
 type StatsCollector interface {
 	IncrementCaptured()

@@ -1,8 +1,8 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Updated:** 2026-01-05
-**Status:** Phase 0-2 Complete (local + distributed filtering with body content)
+**Updated:** 2026-01-06
+**Status:** Phase 0-3 Complete (DNS, Email, TLS/JA3 fingerprinting)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -314,41 +314,44 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 - Non-matching sessions discard buffered packets to save bandwidth
 - Configurable via `--capture-body`, `--max-body-size`, `--keywords` flags on `hunt email` command
 
-## Phase 3: TLS/JA3 Fingerprinting (3-4 days)
+## Phase 3: TLS/JA3 Fingerprinting (3-4 days) ✅ Complete
 
 **Priority:** High - Critical for encrypted traffic analysis
 
-### Protocol Support
-- [ ] Create `internal/pkg/tls/` package
-- [ ] Add `TLSMetadata` type (SNI, cipher suites, fingerprints)
-- [ ] ClientHello parser (no decryption needed)
-- [ ] JA3/JA3S/JA4 fingerprint calculation
-- [ ] Create `cmd/hunt/tls.go` (hunter node)
-- [ ] Create `cmd/tap/tls.go` (standalone capture)
-- [ ] Create `cmd/sniff/tls.go` (CLI mode)
-- [ ] Add TLS protocol view in TUI (toggle with `v`)
-- [ ] Fingerprint database integration hooks
+### Protocol Support ✅
+- [x] Create `internal/pkg/tls/` package (parser.go, ja3.go, tracker.go, filter.go, core.go, content_filter.go)
+- [x] Add `TLSMetadata` type (SNI, cipher suites, fingerprints) in `internal/pkg/types/packet.go`
+- [x] ClientHello parser (no decryption needed) - `parser.go:parseClientHello()`
+- [x] ServerHello parser - `parser.go:parseServerHello()`
+- [x] JA3/JA3S/JA4 fingerprint calculation - `ja3.go`
+- [x] Create `cmd/hunt/tls.go` (hunter node)
+- [x] Create `cmd/tap/tap_tls.go` (standalone capture)
+- [x] Create `cmd/sniff/tls.go` (CLI mode)
+- [x] Add TLS protocol view in TUI (toggle with `v`) - `detailspanel.go:renderTLSDetails()`
+- [x] Connection correlation via Tracker (correlate ClientHello/ServerHello)
 
-### Content Filtering - Local (sniff/tap)
-- [ ] Add `--sni` flag (filter by SNI hostname, glob pattern e.g., `*.example.com`)
-- [ ] Add `--sni-file` flag (bulk SNI patterns from file)
-- [ ] Add `--ja3` flag (filter by JA3 client fingerprint hash)
-- [ ] Add `--ja3-file` flag (known-bad JA3 fingerprint list)
-- [ ] Add `--ja3s` flag (filter by JA3S server fingerprint hash)
-- [ ] Add `--ja3s-file` flag (known-bad JA3S fingerprint list)
-- [ ] Add `--ja4` flag (filter by JA4 fingerprint)
-- [ ] Add `--ja4-file` flag (known-bad JA4 fingerprint list)
-- [ ] Integrate with Aho-Corasick for multi-SNI matching
-- [ ] Wire filter flags in sniff and tap commands
+### Content Filtering - Local (sniff/tap) ✅
+- [x] Add `--sni` flag (filter by SNI hostname, glob pattern e.g., `*.example.com`)
+- [x] Add `--sni-file` flag (bulk SNI patterns from file)
+- [x] Add `--ja3` flag (filter by JA3 client fingerprint hash)
+- [x] Add `--ja3-file` flag (known-bad JA3 fingerprint list)
+- [x] Add `--ja3s` flag (filter by JA3S server fingerprint hash)
+- [x] Add `--ja3s-file` flag (known-bad JA3S fingerprint list)
+- [x] Add `--ja4` flag (filter by JA4 fingerprint)
+- [x] Add `--ja4-file` flag (known-bad JA4 fingerprint list)
+- [x] ContentFilter with glob pattern matching for SNI
+- [x] Wire filter flags in sniff and tap commands
 
-### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+### Content Filtering - Distributed (hunt) ✅ Complete
 - [x] `FILTER_TLS_SNI` type in proto (Phase 0 - complete)
 - [x] `FILTER_TLS_JA3` type in proto (Phase 0 - complete)
 - [x] `FILTER_TLS_JA3S` type in proto (Phase 0 - complete)
 - [x] `FILTER_TLS_JA4` type in proto (Phase 0 - complete)
 - [x] Hunter TLS SNI/JA3/JA3S/JA4 matching logic (`internal/pkg/hunter/filter/tls.go`)
-- [ ] Wire TLS filters from TUI/CLI to hunters
-- [ ] Test end-to-end TLS filter distribution
+- [x] Wire TLS filters from TUI/CLI to hunters (`ApplicationFilter.tlsMatcher` integration)
+- [x] TLS packet detection and metadata extraction (`matchTLSPacket()` in ApplicationFilter)
+- [x] Initialize `tlsParser` and `tlsMatcher` in `NewApplicationFilter()`
+- [x] Update filter build tags to include `tap` variant
 
 ## Phase 4: HTTP (4-5 days)
 

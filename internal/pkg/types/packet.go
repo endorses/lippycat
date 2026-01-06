@@ -24,6 +24,7 @@ type PacketDisplay struct {
 	VoIPData  *VoIPMetadata   // Parsed VoIP metadata (nil if not VoIP)
 	DNSData   *DNSMetadata    // Parsed DNS metadata (nil if not DNS)
 	EmailData *EmailMetadata  // Parsed Email metadata (nil if not email)
+	TLSData   *TLSMetadata    // Parsed TLS metadata (nil if not TLS handshake)
 	LinkType  layers.LinkType // Link layer type for PCAP writing
 }
 
@@ -142,6 +143,55 @@ type EmailMetadata struct {
 	// Correlation and timing
 	TransactionTimeMs int64 // Transaction completion time
 	Correlated        bool  // True if response was correlated with command
+}
+
+// TLSMetadata contains parsed TLS handshake information.
+type TLSMetadata struct {
+	// TLS version information
+	Version       string // Human-readable version (e.g., "TLS 1.3")
+	VersionRaw    uint16 // Raw version bytes (e.g., 0x0303 for TLS 1.2)
+	RecordVersion uint16 // Record layer version (may differ from handshake version)
+
+	// Handshake information
+	HandshakeType string // "ClientHello", "ServerHello", "Certificate", etc.
+	IsServer      bool   // True if ServerHello, false if ClientHello
+	SessionID     string // Hex-encoded session ID
+
+	// SNI (Server Name Indication)
+	SNI string // Server hostname from ClientHello extension
+
+	// ClientHello data (if ClientHello)
+	CipherSuites    []uint16 // Advertised cipher suites
+	Extensions      []uint16 // Extension types
+	SupportedGroups []uint16 // Elliptic curves / named groups
+	SignatureAlgos  []uint16 // Signature algorithms
+	ECPointFormats  []uint8  // EC point formats
+	ALPNProtocols   []string // ALPN protocols (e.g., ["h2", "http/1.1"])
+
+	// ServerHello data (if ServerHello)
+	SelectedCipher uint16 // Selected cipher suite
+	Compression    uint8  // Selected compression method
+
+	// JA3/JA3S fingerprinting (client fingerprint)
+	JA3String      string // Full JA3 string (version,ciphers,extensions,curves,formats)
+	JA3Fingerprint string // MD5 hash of JA3 string
+
+	// JA3S fingerprinting (server fingerprint)
+	JA3SString      string // Full JA3S string (version,cipher,extensions)
+	JA3SFingerprint string // MD5 hash of JA3S string
+
+	// JA4 fingerprinting (modern TLS fingerprint)
+	JA4String      string // Full JA4 string
+	JA4Fingerprint string // JA4 fingerprint
+
+	// Session correlation
+	FlowKey         string // "srcIP:srcPort-dstIP:dstPort" for correlation
+	CorrelatedPeer  bool   // True if matched with ClientHello/ServerHello pair
+	HandshakeTimeMs int64  // Time from ClientHello to ServerHello
+
+	// Security analysis
+	RiskScore float64 // Risk score 0.0-1.0 (weak ciphers, old versions, etc.)
+	RiskFlags int     // Bitmask of specific risk indicators
 }
 
 // HunterInfo represents a hunter node's status information.

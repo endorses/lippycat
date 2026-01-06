@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/filter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/phonematcher"
+	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -50,6 +51,8 @@ type ApplicationFilter struct {
 	// Protocol-specific matchers
 	dnsMatcher   *filter.DNSMatcher   // DNS domain pattern matcher
 	emailMatcher *filter.EmailMatcher // Email address/subject pattern matcher
+	tlsMatcher   *filter.TLSMatcher   // TLS SNI/JA3/JA3S/JA4 matcher
+	tlsParser    *tls.Parser          // TLS handshake parser for metadata extraction
 
 	// Filter ID mappings for LI correlation
 	acPatternToFilterID     map[int]string    // AC pattern ID -> filter ID (for SIPUser/PhoneNumber AC patterns)
@@ -100,6 +103,8 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		sipURIMatcher:           ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Separate AC for SIPURI
 		dnsMatcher:              filter.NewDNSMatcher(),                                   // DNS domain matcher
 		emailMatcher:            filter.NewEmailMatcher(),                                 // Email address/subject matcher
+		tlsMatcher:              filter.NewTLSMatcher(),                                   // TLS SNI/JA3/JA3S/JA4 matcher
+		tlsParser:               tls.NewParser(),                                          // TLS handshake parser
 		acPatternToFilterID:     make(map[int]string),
 		phoneNumberToFilterID:   make(map[string]string),
 		sipURIPatternToFilterID: make(map[int]string),
@@ -306,6 +311,11 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 		af.emailMatcher.UpdateFilters(filters)
 	}
 
+	// Update TLS matcher with all filters (it extracts TLS SNI/JA3/JA3S/JA4 filters internally)
+	if af.tlsMatcher != nil {
+		af.tlsMatcher.UpdateFilters(filters)
+	}
+
 	logger.Info("Updated application-level filters (hot-reload, no restart)",
 		"sip_users", len(af.sipUsers),
 		"sip_uris", len(af.sipURIs),
@@ -313,6 +323,7 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 		"ip_addresses", len(af.ipAddresses),
 		"dns_domains", af.dnsMatcher.HasFilters(),
 		"email_filters", af.emailMatcher.HasFilters(),
+		"tls_filters", af.tlsMatcher.HasFilters(),
 		"gpu_enabled", af.enabled)
 
 	// Build Aho-Corasick patterns for CPU matching
@@ -423,11 +434,12 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	// Check if we have any filters at all
 	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
+	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, match everything
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters {
 		return true
 	}
 
@@ -437,7 +449,7 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 			return true
 		}
 		// If we have ONLY IP filters (no other protocol filters), no match
-		if !hasVoIPFilters && !hasDNSFilters {
+		if !hasVoIPFilters && !hasDNSFilters && !hasTLSFilters {
 			return false
 		}
 	}
@@ -452,6 +464,13 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	// Check email packets
 	if hasEmailFilters {
 		if matched, _ := af.matchEmailPacket(packet); matched {
+			return true
+		}
+	}
+
+	// Check TLS packets
+	if hasTLSFilters {
+		if matched, _ := af.matchTLSPacket(packet); matched {
 			return true
 		}
 	}
@@ -492,11 +511,12 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 	// Check if we have any filters at all
 	hasDNSFilters := af.dnsMatcher != nil && af.dnsMatcher.HasFilters()
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
+	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, match everything (but no specific filter IDs)
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters {
 		return true, nil
 	}
 
@@ -519,6 +539,13 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 	if hasEmailFilters {
 		if matched, emailFilterIDs := af.matchEmailPacket(packet); matched {
 			matchedFilterIDs = append(matchedFilterIDs, emailFilterIDs...)
+		}
+	}
+
+	// Check TLS packets
+	if hasTLSFilters {
+		if matched, tlsFilterIDs := af.matchTLSPacket(packet); matched {
+			matchedFilterIDs = append(matchedFilterIDs, tlsFilterIDs...)
 		}
 	}
 
@@ -1322,6 +1349,43 @@ func (af *ApplicationFilter) matchEmailPacket(packet gopacket.Packet) (bool, []s
 	}
 
 	return len(matchedFilterIDs) > 0, matchedFilterIDs
+}
+
+// matchTLSPacket checks if a packet is TLS and matches TLS filters (SNI, JA3, JA3S, JA4).
+// Returns true if the packet is TLS and matches at least one filter, along with matched filter IDs.
+func (af *ApplicationFilter) matchTLSPacket(packet gopacket.Packet) (bool, []string) {
+	// First check if this is a TLS packet using the detector
+	result := af.detector.Detect(packet)
+	if result == nil || result.Protocol != "TLS" {
+		return false, nil
+	}
+
+	// Parse TLS handshake to extract metadata
+	if af.tlsParser == nil {
+		return false, nil
+	}
+
+	tlsMetadata := af.tlsParser.Parse(packet)
+	if tlsMetadata == nil {
+		return false, nil
+	}
+
+	// Only match on ClientHello and ServerHello (where we have fingerprints)
+	if tlsMetadata.HandshakeType != "ClientHello" && tlsMetadata.HandshakeType != "ServerHello" {
+		return false, nil
+	}
+
+	// Match against TLS filters using the TLS matcher
+	// ClientHello: has SNI, JA3, JA4
+	// ServerHello: has JA3S
+	matched, filterIDs := af.tlsMatcher.MatchTLSHandshake(
+		tlsMetadata.SNI,
+		tlsMetadata.JA3Fingerprint,
+		tlsMetadata.JA3SFingerprint,
+		tlsMetadata.JA4Fingerprint,
+	)
+
+	return matched, filterIDs
 }
 
 // extractSMTPFields extracts sender, recipient, and subject from SMTP packet payload.

@@ -1,4 +1,4 @@
-//go:build hunter || all
+//go:build hunter || tap || all
 
 // Package filter provides protocol-specific content filtering for hunters.
 // These matchers are used to filter packets based on application-layer content

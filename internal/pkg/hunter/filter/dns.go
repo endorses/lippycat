@@ -1,4 +1,4 @@
-//go:build hunter || all
+//go:build hunter || tap || all
 
 package filter
 

@@ -362,6 +362,97 @@ func (d *DetailsPanel) renderContent() string {
 		}
 	}
 
+	// TLS Details Section (only for TLS handshakes)
+	if d.packet.TLSData != nil {
+		content.WriteString("\n\n")
+		content.WriteString(sectionStyle.Render("🔐 TLS Details"))
+		content.WriteString("\n\n")
+
+		// Handshake type
+		content.WriteString(labelStyle.Render("Handshake: "))
+		content.WriteString(valueStyle.Render(d.packet.TLSData.HandshakeType))
+		content.WriteString("\n")
+
+		// TLS Version
+		content.WriteString(labelStyle.Render("Version: "))
+		versionStyle := valueStyle
+		// Warn about old TLS versions
+		if d.packet.TLSData.Version == "TLS 1.0" || d.packet.TLSData.Version == "TLS 1.1" || strings.HasPrefix(d.packet.TLSData.Version, "SSL") {
+			versionStyle = lipgloss.NewStyle().Foreground(d.theme.WarningColor)
+		}
+		content.WriteString(versionStyle.Render(d.packet.TLSData.Version))
+		content.WriteString("\n")
+
+		// SNI (Server Name Indication)
+		if d.packet.TLSData.SNI != "" {
+			content.WriteString(labelStyle.Render("SNI: "))
+			content.WriteString(valueStyle.Render(d.packet.TLSData.SNI))
+			content.WriteString("\n")
+		}
+
+		// JA3 Fingerprint (ClientHello)
+		if d.packet.TLSData.JA3Fingerprint != "" {
+			content.WriteString(labelStyle.Render("JA3: "))
+			content.WriteString(valueStyle.Render(d.packet.TLSData.JA3Fingerprint))
+			content.WriteString("\n")
+		}
+
+		// JA3S Fingerprint (ServerHello)
+		if d.packet.TLSData.JA3SFingerprint != "" {
+			content.WriteString(labelStyle.Render("JA3S: "))
+			content.WriteString(valueStyle.Render(d.packet.TLSData.JA3SFingerprint))
+			content.WriteString("\n")
+		}
+
+		// JA4 Fingerprint
+		if d.packet.TLSData.JA4Fingerprint != "" {
+			content.WriteString(labelStyle.Render("JA4: "))
+			content.WriteString(valueStyle.Render(d.packet.TLSData.JA4Fingerprint))
+			content.WriteString("\n")
+		}
+
+		// Cipher suites for ClientHello
+		if len(d.packet.TLSData.CipherSuites) > 0 {
+			content.WriteString(labelStyle.Render("Cipher Suites: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("%d offered", len(d.packet.TLSData.CipherSuites))))
+			content.WriteString("\n")
+		}
+
+		// Selected cipher for ServerHello
+		if d.packet.TLSData.IsServer && d.packet.TLSData.SelectedCipher != 0 {
+			content.WriteString(labelStyle.Render("Selected Cipher: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("0x%04X", d.packet.TLSData.SelectedCipher)))
+			content.WriteString("\n")
+		}
+
+		// ALPN protocols
+		if len(d.packet.TLSData.ALPNProtocols) > 0 {
+			content.WriteString(labelStyle.Render("ALPN: "))
+			content.WriteString(valueStyle.Render(strings.Join(d.packet.TLSData.ALPNProtocols, ", ")))
+			content.WriteString("\n")
+		}
+
+		// Handshake time (if correlated)
+		if d.packet.TLSData.CorrelatedPeer && d.packet.TLSData.HandshakeTimeMs > 0 {
+			content.WriteString(labelStyle.Render("Handshake Time: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("%d ms", d.packet.TLSData.HandshakeTimeMs)))
+			content.WriteString("\n")
+		}
+
+		// Risk score warning
+		if d.packet.TLSData.RiskScore > 0.5 {
+			content.WriteString("\n")
+			warningStyle := lipgloss.NewStyle().
+				Foreground(d.theme.WarningColor).
+				Bold(true)
+			content.WriteString(warningStyle.Render("⚠ Security Risk Detected"))
+			content.WriteString("\n")
+			content.WriteString(labelStyle.Render("Risk Score: "))
+			content.WriteString(valueStyle.Render(fmt.Sprintf("%.0f%%", d.packet.TLSData.RiskScore*100)))
+			content.WriteString("\n")
+		}
+	}
+
 	// Hex Dump Section
 	content.WriteString("\n\n")
 	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))

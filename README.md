@@ -5,12 +5,12 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
 
-[![VoIP](https://img.shields.io/badge/VoIP-SIP%2FRTP-purple)](#features)
+[![Protocols](https://img.shields.io/badge/protocols-VoIP%20%7C%20DNS%20%7C%20TLS%20%7C%20Email-purple)](#features)
 [![GPU](https://img.shields.io/badge/GPU-CUDA%20%7C%20SIMD-green)](docs/GPU_ACCELERATION.md)
 [![TLS/mTLS](https://img.shields.io/badge/TLS%2FmTLS-supported-success)](docs/SECURITY.md)
 [![Distributed](https://img.shields.io/badge/architecture-distributed-blue)](docs/DISTRIBUTED_MODE.md)
 
-Network traffic sniffer and protocol analyzer built with Go. Currently focused on VoIP (SIP/RTP) analysis with plans for multi-protocol support.
+Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, TLS/JA3, and Email (SMTP) analysis with distributed capture capabilities.
 
 **Status:** v0.5.2 - Early development. Expect breaking changes.
 
@@ -33,14 +33,18 @@ Network traffic sniffer and protocol analyzer built with Go. Currently focused o
 
 ## Features
 
-- **VoIP Analysis**: SIP/RTP traffic capture, call tracking, user targeting
+- **Multi-Protocol Analysis**:
+  - **VoIP**: SIP/RTP traffic capture, call tracking, per-call PCAP, user targeting
+  - **DNS**: Query/response correlation, RTT calculation, tunneling detection
+  - **TLS**: JA3/JA3S fingerprinting, certificate extraction, SNI filtering
+  - **Email**: SMTP session tracking, sender/recipient filtering, content keywords
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
-- **Virtual Interface**: Expose filtered streams to Wireshark, tcpdump, Snort (Linux only)
+- **Virtual Interface**: Replay filtered streams to Wireshark, tcpdump, Snort (Linux only)
 - **TLS/mTLS Security**: Encrypted gRPC connections with mutual authentication
 - **Hunter Subscription**: Selective monitoring of specific hunters via TUI
 - **Performance**: SIMD optimizations, optional GPU acceleration, AF_XDP support
 - **TUI & CLI**: Terminal UI with remote monitoring and command-line interfaces
-- **Flexible Output**: PCAP files, structured logging
+- **Flexible Output**: PCAP files (unified, per-call, auto-rotating), structured logging
 
 ## Installation
 
@@ -129,6 +133,15 @@ sudo lc sniff voip --interface eth0
 # Target specific SIP users
 sudo lc sniff voip --sipuser alicent,robb
 
+# Capture DNS traffic
+sudo lc sniff dns --interface eth0
+
+# Capture TLS traffic with JA3 fingerprinting
+sudo lc sniff tls --interface eth0
+
+# Capture Email (SMTP) traffic
+sudo lc sniff email --interface eth0
+
 # PCAP replay with filtering (tcpreplay alternative)
 sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
 wireshark -i lc0  # Monitor filtered stream in another terminal
@@ -143,7 +156,7 @@ lc watch file -r capture.pcap
 lc watch remote --nodes-file nodes.yaml
 
 # Distributed capture
-lc process --listen :50051                         # Processor node
+lc process --listen :50051                           # Processor node
 sudo lc hunt --interface eth0 --processor host:50051 # Hunter node
 ```
 
@@ -165,15 +178,24 @@ VERBS:
 | Command | Description |
 |---------|-------------|
 | `sniff` | Packet capture (general) |
-| `sniff voip` | VoIP-specific capture with SIP/RTP analysis |
+| `sniff voip` | VoIP capture with SIP/RTP analysis |
+| `sniff dns` | DNS capture with query/response correlation |
+| `sniff tls` | TLS capture with JA3 fingerprinting |
+| `sniff email` | Email (SMTP) capture with session tracking |
 | `tap` | Standalone capture with TUI serving and PCAP writing |
-| `tap voip` | VoIP tap with per-call PCAP and optional upstream forwarding |
+| `tap voip` | VoIP tap with per-call PCAP |
+| `tap dns` | DNS tap with domain filtering |
+| `tap tls` | TLS tap with JA3/SNI filtering |
+| `tap email` | Email tap with content filtering |
 | `watch` | Interactive TUI (defaults to live mode) |
 | `watch live` | Live capture in TUI |
 | `watch file` | Analyze PCAP file in TUI |
 | `watch remote` | Monitor remote nodes in TUI |
 | `hunt` | Hunter node (distributed edge capture) |
 | `hunt voip` | VoIP hunter with call buffering |
+| `hunt dns` | DNS hunter with domain filtering |
+| `hunt tls` | TLS hunter with JA3/SNI filtering |
+| `hunt email` | Email hunter with content filtering |
 | `process` | Processor node (distributed aggregation) |
 | `list interfaces` | List available network interfaces |
 | `show health` | Show TCP assembler health |
@@ -233,31 +255,54 @@ flowchart TB
         H3[Hunter<br/>branch-office]
     end
 
-    P[Processor<br/>monitor.internal:50051]
-    PCAP[(PCAP Files)]
+    subgraph Processor["Processor Node"]
+        P[Processor<br/>monitor.internal:50051]
+        VIRT[Virtual Interface<br/>lc0]
+    end
 
-    subgraph Clients["Monitoring Clients"]
+    subgraph Outputs[" "]
         direction LR
-        TUI1[TUI Client]
-        TUI2[TUI Client]
+        subgraph Tools["Analysis Tools"]
+            direction LR
+            WS[Wireshark]
+            TD[tcpdump]
+            SNORT[Snort/Zeek]
+        end
+
+        PCAP[(PCAP Files)]
+
+        subgraph Clients["Monitoring Clients"]
+            direction LR
+            TUI1[TUI Client]
+            TUI2[TUI Client]
+        end
     end
 
     H1 -->|gRPC/TLS| P
     H2 -->|gRPC/TLS| P
     H3 -->|gRPC/TLS| P
+    VIRT --> Tools
     P --> PCAP
-    P <-->|gRPC/TLS| TUI1
-    P <-->|gRPC/TLS| TUI2
+    P <-->|gRPC/TLS| Clients
 ```
 
 ```bash
-# Processor (with TLS)
-lc process --listen :50051 --write-file capture.pcap \
+# Processor (with TLS and virtual interface)
+lc process --listen :50051 --write-file capture.pcap --virtual-interface \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
 
 # Hunter (with TLS)
 sudo lc hunt --interface eth0 --processor processor:50051 \
   --tls-cert client.crt --tls-key client.key --tls-ca ca.crt
+
+# Protocol-specific hunters
+sudo lc hunt voip --interface eth0 --processor processor:50051  # VoIP with call buffering
+sudo lc hunt dns --interface eth0 --processor processor:50051   # DNS with domain filtering
+sudo lc hunt tls --interface eth0 --processor processor:50051   # TLS with JA3 filtering
+
+# Analyze aggregated traffic on processor with external tools
+wireshark -i lc0     # Real-time analysis in Wireshark
+tcpdump -i lc0 -w out.pcap  # Capture filtered stream
 
 # TUI monitoring with selective hunter subscription
 lc watch remote --nodes-file nodes.yaml
@@ -284,8 +329,8 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 **Defensive use only.** This tool is for authorized network monitoring and analysis.
 
 - ✅ Network diagnostics and troubleshooting
-- ✅ VoIP security analysis
-- ✅ Protocol analysis and testing
+- ✅ Protocol security analysis (VoIP, DNS, TLS, Email)
+- ✅ Traffic analysis and testing
 - ❌ Unauthorized surveillance
 
 Requires root privileges for packet capture. Use responsibly and legally.
@@ -325,10 +370,9 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ### Planned
 - HTTP/HTTPS protocol support
-- DNS monitoring
-- Additional protocol plugins
 - Web dashboard
 - Enhanced GPU acceleration
+- Additional protocol plugins
 
 ## Contributing
 

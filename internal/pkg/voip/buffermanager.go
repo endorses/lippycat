@@ -259,15 +259,40 @@ func (bm *BufferManager) Close() {
 	}
 }
 
-// extractRTPPortsFromSDP extracts RTP ports from SDP body
+// extractRTPPortsFromSDP extracts RTP ports and IP:PORT endpoints from SDP body
+// Returns both IP:PORT (for precise matching) and port-only (for NAT fallback)
 func extractRTPPortsFromSDP(sdp string) []string {
-	ports := make([]string, 0, 2)
+	endpoints := make([]string, 0, 4)
 
-	// Look for m=audio lines
-	// Format: m=audio <port> RTP/AVP <payload_types>
+	// First, extract the session-level connection address (c= line)
+	// Can be overridden per media line
+	sessionIP := ""
 	lines := strings.Split(sdp, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
+			// Format: c=IN IP4 <ip> or c=IN IP6 <ip>
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				sessionIP = fields[2]
+				break // Use first c= line as session-level
+			}
+		}
+	}
+
+	// Now extract media ports and combine with IP
+	currentIP := sessionIP
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Update connection IP if we see a media-level c= line
+		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				currentIP = fields[2]
+			}
+			continue
+		}
 
 		// Check for m=audio
 		if strings.HasPrefix(line, "m=audio ") {
@@ -277,13 +302,22 @@ func extractRTPPortsFromSDP(sdp string) []string {
 				port := fields[1]
 				// Validate port
 				if isValidPort(port) {
-					ports = append(ports, port)
-					logger.Debug("Extracted RTP port from SDP",
-						"port", port)
+					if currentIP != "" {
+						// Register IP:port endpoint
+						endpoint := currentIP + ":" + port
+						endpoints = append(endpoints, endpoint)
+						logger.Debug("Extracted RTP endpoint from SDP",
+							"ip", currentIP,
+							"port", port,
+							"endpoint", endpoint)
+					}
+					// Also register port-only for backward compatibility
+					// (some RTP may come from unexpected IPs due to NAT)
+					endpoints = append(endpoints, port)
 				}
 			}
 		}
 	}
 
-	return ports
+	return endpoints
 }

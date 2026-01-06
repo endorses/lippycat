@@ -239,16 +239,18 @@ func TestRTPPortTracking_EdgeCases(t *testing.T) {
 
 func TestExtractPortFromSdp_MultiStream(t *testing.T) {
 	// Test multi-stream call support (conference calls, multiple audio streams)
+	// Now registers both IP:PORT endpoints (more specific) and port-only (NAT fallback)
 	tracker := getTracker()
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string]string)
 	tracker.mu.Unlock()
 
 	tests := []struct {
-		name          string
-		sdpBody       string
-		callID        string
-		expectedPorts []string
+		name              string
+		sdpBody           string
+		callID            string
+		expectedPorts     []string // Port-only entries that should be registered
+		expectedEndpoints []string // IP:PORT entries that should be registered
 	}{
 		{
 			name: "Single audio stream",
@@ -259,8 +261,9 @@ c=IN IP4 192.168.1.100
 t=0 0
 m=audio 10000 RTP/AVP 0 8 101
 a=rtpmap:0 PCMU/8000`,
-			callID:        "single-stream-call",
-			expectedPorts: []string{"10000"},
+			callID:            "single-stream-call",
+			expectedPorts:     []string{"10000"},
+			expectedEndpoints: []string{"192.168.1.100:10000"},
 		},
 		{
 			name: "Multiple audio streams (conference call)",
@@ -273,8 +276,9 @@ m=audio 49170 RTP/AVP 0
 a=rtpmap:0 PCMU/8000
 m=audio 49172 RTP/AVP 0
 a=rtpmap:0 PCMU/8000`,
-			callID:        "multi-stream-call",
-			expectedPorts: []string{"49170", "49172"},
+			callID:            "multi-stream-call",
+			expectedPorts:     []string{"49170", "49172"},
+			expectedEndpoints: []string{"conference.example.com:49170", "conference.example.com:49172"},
 		},
 		{
 			name: "Audio and video (only audio ports extracted)",
@@ -287,8 +291,9 @@ m=audio 49170 RTP/AVP 0 8 97
 a=rtpmap:0 PCMU/8000
 m=video 51372 RTP/AVP 31 32
 a=rtpmap:31 H261/90000`,
-			callID:        "audio-video-call",
-			expectedPorts: []string{"49170"},
+			callID:            "audio-video-call",
+			expectedPorts:     []string{"49170"},
+			expectedEndpoints: []string{"client.example.com:49170"},
 		},
 		{
 			name: "Three audio streams (multi-party conference)",
@@ -300,8 +305,9 @@ t=0 0
 m=audio 8000 RTP/AVP 0
 m=audio 8002 RTP/AVP 0
 m=audio 8004 RTP/AVP 0`,
-			callID:        "three-stream-call",
-			expectedPorts: []string{"8000", "8002", "8004"},
+			callID:            "three-stream-call",
+			expectedPorts:     []string{"8000", "8002", "8004"},
+			expectedEndpoints: []string{"10.0.0.1:8000", "10.0.0.1:8002", "10.0.0.1:8004"},
 		},
 		{
 			name: "Mixed valid and inactive streams",
@@ -314,8 +320,9 @@ m=audio 8000 RTP/AVP 0
 a=sendrecv
 m=audio 0 RTP/AVP 0
 a=inactive`,
-			callID:        "mixed-streams-call",
-			expectedPorts: []string{"8000"},
+			callID:            "mixed-streams-call",
+			expectedPorts:     []string{"8000"},
+			expectedEndpoints: []string{"10.0.0.1:8000"},
 		},
 	}
 
@@ -333,15 +340,24 @@ a=inactive`,
 			tracker.mu.RLock()
 			defer tracker.mu.RUnlock()
 
+			// Check port-only entries
 			for _, expectedPort := range tt.expectedPorts {
 				registeredCallID, exists := tracker.portToCallID[expectedPort]
 				assert.True(t, exists, "Port %s should be registered", expectedPort)
 				assert.Equal(t, tt.callID, registeredCallID, "Port %s should map to correct call ID", expectedPort)
 			}
 
-			// Verify no extra ports were registered
-			assert.Equal(t, len(tt.expectedPorts), len(tracker.portToCallID),
-				"Should register exactly %d ports", len(tt.expectedPorts))
+			// Check IP:PORT endpoint entries
+			for _, expectedEndpoint := range tt.expectedEndpoints {
+				registeredCallID, exists := tracker.portToCallID[expectedEndpoint]
+				assert.True(t, exists, "Endpoint %s should be registered", expectedEndpoint)
+				assert.Equal(t, tt.callID, registeredCallID, "Endpoint %s should map to correct call ID", expectedEndpoint)
+			}
+
+			// Verify total entries (both port-only and IP:PORT)
+			expectedTotal := len(tt.expectedPorts) + len(tt.expectedEndpoints)
+			assert.Equal(t, expectedTotal, len(tracker.portToCallID),
+				"Should register exactly %d entries (ports + endpoints)", expectedTotal)
 		})
 	}
 }

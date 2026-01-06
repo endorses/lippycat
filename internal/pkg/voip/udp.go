@@ -212,15 +212,40 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 			dstPort := layer.DstPort.String()
 			srcPort := layer.SrcPort.String()
 
+			// Extract IP addresses for IP:PORT endpoint lookups
+			var dstIP, srcIP string
+			if netLayer := packet.NetworkLayer(); netLayer != nil {
+				dstIP = netLayer.NetworkFlow().Dst().String()
+				srcIP = netLayer.NetworkFlow().Src().String()
+			}
+
 			// Try to get CallID from buffer manager's port mapping
-			bufCallID, exists := globalBufferMgr.GetCallIDForRTPPort(dstPort)
+			// Check IP:PORT endpoints first (more specific), then fall back to port-only
+			var bufCallID string
+			var exists bool
+
+			if dstIP != "" {
+				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(dstIP + ":" + dstPort)
+			}
+			if !exists && srcIP != "" {
+				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(srcIP + ":" + srcPort)
+			}
+			// Fall back to port-only lookups
+			if !exists {
+				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(dstPort)
+			}
 			if !exists {
 				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(srcPort)
 			}
 
 			if exists {
 				// This RTP packet belongs to a call we're buffering
-				shouldWrite := globalBufferMgr.AddRTPPacket(bufCallID, dstPort, packet)
+				// Use IP:PORT for the port parameter if available for more precise matching
+				portKey := dstPort
+				if dstIP != "" {
+					portKey = dstIP + ":" + dstPort
+				}
+				shouldWrite := globalBufferMgr.AddRTPPacket(bufCallID, portKey, packet)
 
 				if shouldWrite {
 					// Call already matched, inject into virtual interface and write immediately

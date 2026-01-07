@@ -158,26 +158,26 @@ func (hv *HTTPView) rebuildRequestList() {
 		hv.requests = append(hv.requests, *r)
 	}
 
-	// Sort by timestamp (most recent first)
+	// Sort by timestamp (chronological - oldest first, newest last)
 	sort.Slice(hv.requests, func(i, j int) bool {
-		return hv.requests[i].Timestamp.After(hv.requests[j].Timestamp)
+		return hv.requests[i].Timestamp.Before(hv.requests[j].Timestamp)
 	})
 
 	// Limit to max 1000 requests to prevent memory growth
 	const maxRequests = 1000
 	if len(hv.requests) > maxRequests {
-		// Remove oldest requests
-		oldRequests := hv.requests[maxRequests:]
+		// Remove oldest requests (at the beginning of the list)
+		oldRequests := hv.requests[:len(hv.requests)-maxRequests]
 		for _, r := range oldRequests {
 			delete(hv.requestMap, r.RequestID)
 		}
-		hv.requests = hv.requests[:maxRequests]
+		hv.requests = hv.requests[len(hv.requests)-maxRequests:]
 	}
 
-	// Auto-scroll to top when new requests arrive (newest at top)
-	if hv.autoScroll {
-		hv.selected = 0
-		hv.offset = 0
+	// Auto-scroll to bottom when new requests arrive (newest at bottom)
+	if hv.autoScroll && len(hv.requests) > 0 {
+		hv.selected = len(hv.requests) - 1
+		hv.adjustOffset()
 	} else if hv.selected >= len(hv.requests) && len(hv.requests) > 0 {
 		// Adjust selection if needed when not auto-scrolling
 		hv.selected = len(hv.requests) - 1
@@ -235,12 +235,12 @@ func (hv *HTTPView) Update(msg tea.Msg) tea.Cmd {
 			if len(hv.requests) > 0 {
 				hv.selected = 0
 				hv.offset = 0
-				hv.autoScroll = true // Re-enable auto-scroll when jumping to top
+				hv.autoScroll = false // Disable auto-scroll when jumping to top
 			}
 		case "end", "G":
 			if len(hv.requests) > 0 {
 				hv.selected = len(hv.requests) - 1
-				hv.autoScroll = false // Disable auto-scroll when jumping to end
+				hv.autoScroll = true // Re-enable auto-scroll when jumping to end (bottom)
 				hv.adjustOffset()
 			}
 		case "pgup":
@@ -303,10 +303,8 @@ func (hv *HTTPView) PageUp() {
 	hv.selected -= pageSize
 	if hv.selected < 0 {
 		hv.selected = 0
-		hv.autoScroll = true // Re-enable auto-scroll when reaching top
-	} else {
-		hv.autoScroll = false // Disable auto-scroll when navigating
 	}
+	hv.autoScroll = false // Disable auto-scroll when navigating up
 	hv.adjustOffset()
 }
 
@@ -321,11 +319,13 @@ func (hv *HTTPView) PageDown() {
 	hv.selected += pageSize
 	if hv.selected >= len(hv.requests) {
 		hv.selected = len(hv.requests) - 1
+		hv.autoScroll = true // Re-enable auto-scroll when reaching bottom
+	} else {
+		hv.autoScroll = false // Disable auto-scroll when navigating
 	}
 	if hv.selected < 0 {
 		hv.selected = 0
 	}
-	hv.autoScroll = false // Disable auto-scroll when navigating
 	hv.adjustOffset()
 }
 
@@ -391,8 +391,8 @@ func (hv *HTTPView) renderTableWithSize(width, height int) string {
 	const (
 		methodMin    = 7
 		statusMin    = 4
-		hostMin      = 30
-		pathMin      = 20
+		hostMin      = 25
+		pathMin      = 25
 		contentMin   = 15
 		respTimeMin  = 6
 		timestampMin = 10
@@ -410,8 +410,9 @@ func (hv *HTTPView) renderTableWithSize(width, height int) string {
 	fixedTotal := methodWidth + statusWidth + respTimeWidth + timestampWidth + 8
 	remaining := availableWidth - fixedTotal - hostMin - pathMin - contentMin
 	if remaining > 0 {
-		// Give extra space to host column
-		hostWidth = hostMin + remaining
+		// Split extra space between host and path columns
+		hostWidth = hostMin + remaining/2
+		pathWidth = pathMin + remaining - remaining/2
 	}
 
 	// Header style

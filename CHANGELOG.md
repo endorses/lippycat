@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-07
+
+### Added
+- **DNS Protocol Support (Phase 1)**: Complete DNS analysis with sniff/hunt/tap commands
+  - Query/response correlation with RTT calculation
+  - DNS tunneling detection via entropy analysis
+  - TUI DNS queries view with `v` key toggle
+  - `--domain` and `--domains-file` flags for content filtering
+  - Distributed filtering via `FILTER_DNS_DOMAIN` type
+- **Email/SMTP Protocol Support (Phase 2)**: SMTP envelope and body analysis
+  - MAIL FROM, RCPT TO, Subject header extraction
+  - STARTTLS detection and Message-ID correlation
+  - TUI Email sessions view with details panel
+  - Content filtering: `--sender`, `--recipient`, `--address`, `--subject` flags
+  - Body content filtering with `--keywords-file` and `--capture-body`
+  - Hunter-side TCP reassembly for distributed body keyword matching
+- **TLS/JA3 Fingerprinting (Phase 3)**: TLS handshake analysis
+  - ClientHello/ServerHello parsing with SNI extraction
+  - JA3, JA3S, and JA4 fingerprint calculation
+  - TUI TLS details view in packet details panel
+  - Content filtering: `--sni`, `--ja3`, `--ja3s`, `--ja4` flags with file variants
+  - Distributed filtering via `FILTER_TLS_SNI`, `FILTER_TLS_JA3`, `FILTER_TLS_JA3S`, `FILTER_TLS_JA4`
+- **HTTP Protocol Support (Phase 4)**: HTTP/1.x request/response analysis
+  - Request/response correlation with RTT measurement
+  - TCP stream reassembly for complete message reconstruction
+  - TUI HTTP view with auto-scroll and chronological ordering
+  - Content filtering: `--host`, `--path`, `--method`, `--status`, `--user-agent`, `--content-type`
+  - Body content filtering with `--keywords-file` and `--capture-body`
+  - Distributed filtering via `FILTER_HTTP_HOST`, `FILTER_HTTP_URL`
+- **Filter Distribution Infrastructure (Phase 0)**: Protocol-agnostic filter framework
+  - New filter types in proto for all supported protocols
+  - Hunter filter matchers in `internal/pkg/hunter/filter/`
+  - TUI filter manager supports all new filter types
+  - Glob pattern matching with O(1) exact match optimization
+- **TUI Help Tab**: Interactive help with search functionality
+  - Async content loading with glamour markdown rendering
+  - Section tabs for navigation (Overview, Capture, Nodes, etc.)
+  - Search highlighting with `/` key and persistent results
+- **Tap Mode VoIP Integration**: Local capture with processor capabilities
+  - VoIP processor integration for standalone capture
+  - Per-call PCAP writing in tap mode
+- **VoIP Improvements**
+  - B2BUA phone suffix correlation for call leg matching
+  - RTP tracking via IP:PORT endpoints instead of port-only
+  - Phone number normalization for filter patterns
+  - Improved call completion monitor for RTP handling
+
+### Changed
+- Config file path logged as debug instead of stderr
+- README updated with multi-protocol support and architecture diagram
+
+### Fixed
+- Prevent nil pointer crash when hunter disconnects abruptly
+- Defer PCAP header write until first packet (fixes empty file issues)
+- Apply loaded filters to LocalTarget at startup in tap mode
+- Propagate actual link type through packet pipeline
+- Include unflushed packets in stats reporting
+- Use actual capture timestamp instead of current time in processor
+
 ## [0.5.2] - 2025-12-29
 
 ### Changed

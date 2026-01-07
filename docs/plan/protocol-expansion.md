@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-07
-**Status:** Phase 0-4 Complete (DNS, Email, TLS/JA3 fingerprinting, HTTP)
+**Status:** Phase 0-4 Complete (DNS, Email, TLS/JA3 fingerprinting, HTTP), Phase 7 Planned (TLS Decryption)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -437,6 +437,175 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 - [ ] Hunter database filter matching logic
 - [ ] Processor can push database filters to DB hunters
 
+## Phase 7: TLS Decryption via SSLKEYLOGFILE (6-8 weeks)
+
+**Priority:** Medium - Enables HTTPS content inspection for authorized monitoring
+
+**Approach:** SSLKEYLOGFILE (NSS Key Log Format) - same method used by Wireshark. Works with all cipher suites including forward secrecy and TLS 1.3.
+
+### Overview
+
+SSLKEYLOGFILE contains pre-master secrets or session keys logged by TLS clients/servers. This allows passive decryption without breaking forward secrecy (keys are provided, not derived from private keys).
+
+**Key Log Format (NSS):**
+```
+# Each line: <label> <client_random_hex> <secret_hex>
+CLIENT_RANDOM 1234...abcd 5678...efgh
+```
+
+**Labels:**
+- `CLIENT_RANDOM` - Pre-master secret (TLS 1.2 and earlier)
+- `CLIENT_HANDSHAKE_TRAFFIC_SECRET` - TLS 1.3 client handshake
+- `SERVER_HANDSHAKE_TRAFFIC_SECRET` - TLS 1.3 server handshake
+- `CLIENT_TRAFFIC_SECRET_0` - TLS 1.3 client application data
+- `SERVER_TRAFFIC_SECRET_0` - TLS 1.3 server application data
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      TLS Decryption Pipeline                    │
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
+│  │ SSLKEYLOG    │───▶│ Key Store    │◀───│ TLS Session      │   │
+│  │ File/Pipe    │    │ (by Client   │    │ Tracker          │   │
+│  │ Reader       │    │  Random)     │    │ (ClientHello)    │   │
+│  └──────────────┘    └──────────────┘    └──────────────────┘   │
+│                             │                    │              │
+│                             ▼                    ▼              │
+│                      ┌──────────────────────────────┐           │
+│                      │ TLS Record Decryptor         │           │
+│                      │ - Derive session keys        │           │
+│                      │ - Decrypt records            │           │
+│                      │ - Reassemble app data        │           │
+│                      └──────────────────────────────┘           │
+│                                    │                            │
+│                                    ▼                            │
+│                      ┌──────────────────────────────┐           │
+│                      │ HTTP Parser (existing)       │           │
+│                      │ - Parse decrypted payload    │           │
+│                      │ - Apply content filters      │           │
+│                      └──────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 7.1: SSLKEYLOGFILE Parser (3-4 days)
+
+- [ ] Create `internal/pkg/tls/keylog/` package
+- [ ] Implement NSS Key Log format parser (`parser.go`)
+- [ ] Support all TLS 1.2 and TLS 1.3 labels
+- [ ] Create key store indexed by client_random (`store.go`)
+- [ ] File watcher for live key log updates (inotify/polling)
+- [ ] Named pipe support for real-time key injection
+- [ ] Unit tests with sample key log files
+
+### Phase 7.2: TLS Record Layer (1-2 weeks)
+
+- [ ] Create `internal/pkg/tls/decrypt/` package
+- [ ] TLS record layer parser (`record.go`)
+  - [ ] Record header parsing (content type, version, length)
+  - [ ] Record reassembly across TCP segments
+  - [ ] Encrypted vs plaintext record detection
+- [ ] TLS 1.2 key derivation (`kdf_tls12.go`)
+  - [ ] PRF (Pseudo-Random Function) implementation
+  - [ ] Master secret → session keys derivation
+  - [ ] Client/server write keys, IVs, MAC keys
+- [ ] TLS 1.3 key derivation (`kdf_tls13.go`)
+  - [ ] HKDF-Extract and HKDF-Expand-Label
+  - [ ] Handshake traffic secrets → keys
+  - [ ] Application traffic secrets → keys
+
+### Phase 7.3: Cipher Suite Support (2-3 weeks)
+
+- [ ] Implement decryption for common cipher suites (`ciphers/`)
+- [ ] **TLS 1.2 cipher suites:**
+  - [ ] AES-128-GCM, AES-256-GCM (AEAD)
+  - [ ] AES-128-CBC, AES-256-CBC (with HMAC-SHA1/SHA256)
+  - [ ] ChaCha20-Poly1305
+- [ ] **TLS 1.3 cipher suites:**
+  - [ ] TLS_AES_128_GCM_SHA256
+  - [ ] TLS_AES_256_GCM_SHA384
+  - [ ] TLS_CHACHA20_POLY1305_SHA256
+- [ ] Sequence number tracking (per-direction)
+- [ ] AEAD nonce construction (explicit + implicit IV)
+- [ ] Unit tests with known-answer test vectors
+
+### Phase 7.4: Session Tracking & Decryption (1-2 weeks)
+
+- [ ] Extend existing TLS tracker for decryption state
+- [ ] Match captured sessions to key log entries by client_random
+- [ ] Handle key log entries arriving before/after handshake
+- [ ] Decrypt application data records
+- [ ] Reassemble decrypted data into HTTP stream
+- [ ] Handle session resumption (session ID, tickets)
+- [ ] Memory management (bounded session cache)
+
+### Phase 7.5: Integration & Commands (1 week)
+
+- [ ] Add `--tls-keylog` flag to sniff/tap/watch commands
+- [ ] Add `--tls-keylog-pipe` for named pipe input
+- [ ] Integrate decrypted HTTPS with HTTP parser
+- [ ] Show decrypted HTTP in TUI HTTP view
+- [ ] Show decryption status in TUI (encrypted/decrypted indicator)
+- [ ] Add PCAP export with decrypted payloads (optional)
+- [ ] Documentation and usage examples
+
+### CLI Usage
+
+```bash
+# Capture with key log file (static or watched)
+sudo lc watch --tls-keylog /tmp/sslkeys.log
+
+# Capture with named pipe (real-time keys)
+mkfifo /tmp/sslkeys.pipe
+sudo lc watch --tls-keylog-pipe /tmp/sslkeys.pipe &
+SSLKEYLOGFILE=/tmp/sslkeys.pipe curl https://example.com
+
+# TUI shows decrypted HTTPS in HTTP view
+# Protocol selector: HTTPS (decrypted) vs TLS (encrypted)
+```
+
+### Generating Key Logs
+
+**Browsers:**
+```bash
+export SSLKEYLOGFILE=/tmp/sslkeys.log
+firefox  # or chromium, chrome
+```
+
+**curl:**
+```bash
+SSLKEYLOGFILE=/tmp/sslkeys.log curl https://example.com
+```
+
+**OpenSSL (1.1.1+):**
+```bash
+openssl s_client -connect example.com:443 -keylogfile /tmp/sslkeys.log
+```
+
+**Python (requests):**
+```python
+import os
+os.environ['SSLKEYLOGFILE'] = '/tmp/sslkeys.log'
+import requests
+requests.get('https://example.com')
+```
+
+### Limitations
+
+1. **Key log required:** Cannot decrypt without SSLKEYLOGFILE (forward secrecy)
+2. **No private key decryption:** RSA key exchange is rare/obsolete
+3. **Real-time sync:** Keys must arrive before or shortly after handshake
+4. **Memory usage:** Session state stored until connection closes
+5. **Not for production interception:** Intended for development/debugging/authorized monitoring
+
+### Security Considerations
+
+- Key log files contain session secrets - protect appropriately
+- Clear key store on file rotation/truncation
+- Warn if key log file has insecure permissions
+- Document authorized use cases (debugging, security research, CTF)
+
 ## Implementation Notes
 
 1. **Separate packages per protocol:** `internal/pkg/dns/`, `internal/pkg/email/`, etc.
@@ -469,12 +638,14 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 | 4 | HTTP | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
+| 7 | TLS Decryption | 6-8 weeks | N/A | N/A | 6-8 weeks |
 
 **Critical path:** Phases 0-4 complete (DNS, Email, TLS, HTTP - all local + distributed filtering).
 
 **Remaining work:**
 - Phase 5 (IMAP/POP3): ~4-5 days
 - Phase 6 (Database): ~11-16 days (optional)
+- Phase 7 (TLS Decryption): ~6-8 weeks (SSLKEYLOGFILE-based HTTPS decryption)
 
 ## Current Status (2026-01-07)
 
@@ -544,3 +715,4 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 
 1. **Add pattern validation:** JA3/JA3S hash format, glob syntax
 2. **Start Phase 5 IMAP/POP3:** Extend email protocol support
+3. **Start Phase 7 TLS Decryption:** SSLKEYLOGFILE-based HTTPS decryption for development/debugging

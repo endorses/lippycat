@@ -412,6 +412,24 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// If in queries view mode, toggle DNSQueriesView details
+		if m.uiState.ViewMode == "queries" {
+			m.uiState.DNSQueriesView.ToggleDetails()
+			return m, nil
+		}
+
+		// If in emails view mode, toggle EmailView details
+		if m.uiState.ViewMode == "emails" {
+			m.uiState.EmailView.ToggleDetails()
+			return m, nil
+		}
+
+		// If in http view mode, toggle HTTPView details
+		if m.uiState.ViewMode == "http" {
+			m.uiState.HTTPView.ToggleDetails()
+			return m, nil
+		}
+
 		// Otherwise, toggle packet details panel
 		m.uiState.ShowDetails = !m.uiState.ShowDetails
 		// Recalculate packet list size based on new showDetails state
@@ -472,6 +490,19 @@ func (m Model) handleToggleView() (Model, tea.Cmd) {
 			// Email: toggle between packets and emails view
 			if m.uiState.ViewMode == "packets" {
 				m.uiState.ViewMode = "emails"
+			} else {
+				m.uiState.ViewMode = "packets"
+				// Refresh packet list when switching to packets view
+				if !m.packetStore.HasFilter() {
+					m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+				} else {
+					m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+				}
+			}
+		} else if m.uiState.SelectedProtocol.Name == "HTTP" {
+			// HTTP: toggle between packets and http view
+			if m.uiState.ViewMode == "packets" {
+				m.uiState.ViewMode = "http"
 			} else {
 				m.uiState.ViewMode = "packets"
 				// Refresh packet list when switching to packets view

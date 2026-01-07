@@ -25,6 +25,7 @@ type PacketDisplay struct {
 	DNSData   *DNSMetadata    // Parsed DNS metadata (nil if not DNS)
 	EmailData *EmailMetadata  // Parsed Email metadata (nil if not email)
 	TLSData   *TLSMetadata    // Parsed TLS metadata (nil if not TLS handshake)
+	HTTPData  *HTTPMetadata   // Parsed HTTP metadata (nil if not HTTP)
 	LinkType  layers.LinkType // Link layer type for PCAP writing
 }
 
@@ -192,6 +193,51 @@ type TLSMetadata struct {
 	// Security analysis
 	RiskScore float64 // Risk score 0.0-1.0 (weak ciphers, old versions, etc.)
 	RiskFlags int     // Bitmask of specific risk indicators
+}
+
+// HTTPMetadata contains parsed HTTP request/response information.
+type HTTPMetadata struct {
+	// Request/Response identification
+	Type     string // "request" or "response"
+	IsServer bool   // True if from server (response), false if from client (request)
+
+	// Request fields
+	Method  string // GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, TRACE, CONNECT
+	Path    string // URL path (/api/users, /admin, etc.)
+	Version string // HTTP/1.0, HTTP/1.1
+
+	// Response fields
+	StatusCode   int    // 200, 404, 500, etc.
+	StatusReason string // "OK", "Not Found", "Internal Server Error"
+
+	// Common headers
+	Host          string // Host header (request)
+	Server        string // Server header (response)
+	ContentType   string // Content-Type header
+	ContentLength int64  // Content-Length value
+	UserAgent     string // User-Agent header (request)
+
+	// Session tracking
+	SessionID    string // Connection ID for correlation (flow key)
+	RequestTime  int64  // Request timestamp (unix ms)
+	ResponseTime int64  // Response RTT (ms)
+
+	// Security analysis
+	IsHTTPS bool // Whether connection appears to be HTTPS (TLS)
+	HasAuth bool // Authorization header present
+
+	// Correlation and timing
+	CorrelatedResponse    bool  // True if response matched with request
+	RequestResponseTimeMs int64 // Response latency
+
+	// Additional metadata
+	Headers     map[string]string // All headers
+	QueryString string            // URL query parameters (after ?)
+
+	// Body content (opt-in capture)
+	BodyPreview   string // Body preview (limited to configured max size)
+	BodySize      int    // Full body size in bytes
+	BodyTruncated bool   // True if body was truncated due to size limit
 }
 
 // HunterInfo represents a hunter node's status information.

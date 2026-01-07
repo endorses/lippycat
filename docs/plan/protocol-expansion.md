@@ -1,8 +1,8 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Updated:** 2026-01-06
-**Status:** Phase 0-3 Complete (DNS, Email, TLS/JA3 fingerprinting)
+**Updated:** 2026-01-07
+**Status:** Phase 0-4 Complete (DNS, Email, TLS/JA3 fingerprinting, HTTP)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -353,38 +353,39 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 - [x] Initialize `tlsParser` and `tlsMatcher` in `NewApplicationFilter()`
 - [x] Update filter build tags to include `tap` variant
 
-## Phase 4: HTTP (4-5 days)
+## Phase 4: HTTP (4-5 days) ✅ Complete
 
 **Priority:** Medium - Complements TLS analysis
 
-### Protocol Support
-- [ ] Create `internal/pkg/http/` package
-- [ ] Add `HTTPMetadata` type (method, URL, headers, status)
-- [ ] HTTP/1.x request/response parser
-- [ ] Request/response correlation
-- [ ] Create `cmd/hunt/http.go` (hunter node)
-- [ ] Create `cmd/tap/http.go` (standalone capture)
-- [ ] Create `cmd/sniff/http.go` (CLI mode)
-- [ ] Add HTTP protocol view in TUI (toggle with `v`)
-- [ ] Content-type classification
+### Protocol Support ✅
+- [x] Create `internal/pkg/http/` package (parser.go, tracker.go, aggregator.go, content_filter.go, filter.go, tcp_factory.go, tcp_stream.go, core.go, processor.go)
+- [x] Add `HTTPMetadata` type (method, URL, headers, status) in `internal/pkg/types/packet.go`
+- [x] HTTP/1.x request/response parser - `parser.go`
+- [x] Request/response correlation with RTT measurement - `tracker.go`
+- [x] Create `cmd/hunt/http.go` (hunter node)
+- [x] Create `cmd/tap/tap_http.go` (standalone capture)
+- [x] Create `cmd/sniff/http.go` (CLI mode)
+- [x] Add HTTP protocol view in TUI (toggle with `v`) - `internal/pkg/tui/components/httpview.go`
+- [x] Content-type classification - In HTTPMetadata
 
-### Content Filtering - Local (sniff/tap)
-- [ ] Add `--host` flag (filter by Host header, glob pattern)
-- [ ] Add `--url` flag (filter by URL path, glob pattern e.g., `/api/*`)
-- [ ] Add `--method` flag (filter by HTTP method: GET, POST, etc.)
-- [ ] Add `--status` flag (filter by response status code range e.g., `4xx`, `500-599`)
-- [ ] Add `--user-agent` flag (filter by User-Agent header, glob pattern)
-- [ ] Add `--content-type` flag (filter by Content-Type header)
-- [ ] Add `--keywords-file` flag (Aho-Corasick patterns for URL/headers/body)
-- [ ] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
-- [ ] Wire filter flags in sniff and tap commands
+### Content Filtering - Local (sniff/tap) ✅
+- [x] Add `--host` flag (filter by Host header, glob pattern)
+- [x] Add `--path` flag (filter by URL path, glob pattern e.g., `/api/*`)
+- [x] Add `--method` flag (filter by HTTP method: GET, POST, etc.)
+- [x] Add `--status` flag (filter by response status code range e.g., `4xx`, `500-599`)
+- [x] Add `--user-agent` flag (filter by User-Agent header, glob pattern)
+- [x] Add `--content-type` flag (filter by Content-Type header)
+- [x] Add `--keywords-file` flag (Aho-Corasick patterns for URL/headers/body)
+- [x] Integrate with `internal/pkg/ahocorasick/` for multi-pattern matching
+- [x] Wire filter flags in sniff and tap commands
+- [x] Add `--hosts-file`, `--paths-file`, `--user-agents-file`, `--content-types-file` for bulk patterns
 
-### Content Filtering - Distributed (hunt) ⚠️ Infrastructure Complete, Wiring Needed
+### Content Filtering - Distributed (hunt) ✅
 - [x] `FILTER_HTTP_HOST` type in proto (Phase 0 - complete)
 - [x] `FILTER_HTTP_URL` type in proto (Phase 0 - complete)
 - [x] Hunter HTTP host/URL matching logic (`internal/pkg/hunter/filter/http.go`)
-- [ ] Wire HTTP filters from TUI/CLI to hunters
-- [ ] Test end-to-end HTTP filter distribution
+- [x] Wire HTTP filters from hunter command flags
+- [x] HTTP packet processor with content filtering - `processor.go`
 
 ## Phase 5: Email - IMAP/POP3 (4-5 days)
 
@@ -464,23 +465,26 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 | 0 | Infrastructure | N/A | N/A | ✅ Complete | ✅ Complete |
 | 1 | DNS | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 2 | SMTP | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
-| 3 | TLS/JA3 | 3-4 days | 1 day | Ready (Phase 0 done) | 4-5 days |
-| 4 | HTTP | 4-5 days | 1-2 days | Ready (Phase 0 done) | 5-7 days |
+| 3 | TLS/JA3 | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
+| 4 | HTTP | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
 
-**Critical path:** Phases 0-2 complete (DNS and email local + distributed filtering).
+**Critical path:** Phases 0-4 complete (DNS, Email, TLS, HTTP - all local + distributed filtering).
 
 **Remaining work:**
-- Phase 3-5 complete: ~14-17 days
+- Phase 5 (IMAP/POP3): ~4-5 days
+- Phase 6 (Database): ~11-16 days (optional)
 
-## Current Status (2026-01-05)
+## Current Status (2026-01-07)
 
 ### What Works
-- DNS and SMTP protocol parsing and display (sniff, hunt, tap, TUI)
+- DNS, SMTP, TLS, and HTTP protocol parsing and display (sniff, hunt, tap)
 - DNS query/response correlation and tunneling detection
 - SMTP envelope extraction (MAIL FROM, RCPT TO, Subject)
-- BPF port-level filtering for both protocols
+- TLS ClientHello/ServerHello parsing with JA3/JA3S/JA4 fingerprinting
+- HTTP request/response parsing with RTT measurement
+- BPF port-level filtering for all protocols
 - **DNS local content filtering (sniff/tap):**
   - `--domain` flag works in sniff and tap commands
   - `--domains-file` flag loads bulk patterns from file
@@ -517,6 +521,18 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
     - TCP packet buffering per session via `tcp_buffer.go`
     - Body keyword matching via Aho-Corasick at hunter level
     - Full parity with local sniff/tap body filtering capabilities
+- **Phase 3 - TLS/JA3 Fingerprinting:** ✅ Complete
+  - ClientHello/ServerHello parsing with JA3/JA3S/JA4 fingerprint calculation
+  - SNI, cipher suite, and extension extraction
+  - `--sni`, `--ja3`, `--ja3s`, `--ja4` flags for local filtering
+  - TLS hunters with SNI/fingerprint matching
+- **Phase 4 - HTTP:** ✅ Complete
+  - HTTP/1.x request/response parsing with `internal/pkg/http/` package
+  - Request/response correlation with RTT measurement
+  - TCP stream reassembly for complete message reconstruction
+  - `--host`, `--path`, `--method`, `--status`, `--user-agent`, `--content-type` flags
+  - `--keywords-file` for body content filtering (with `--capture-body`)
+  - HTTP hunters with host/path content filtering
 
 ### What's Incomplete
 
@@ -527,4 +543,4 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 ### Recommended Next Steps
 
 1. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-2. **Start Phase 3 TLS/JA3 fingerprinting:** Protocol parser, fingerprint calculation
+2. **Start Phase 5 IMAP/POP3:** Extend email protocol support

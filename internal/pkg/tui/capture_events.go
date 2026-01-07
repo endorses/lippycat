@@ -75,6 +75,16 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 				m.uiState.EmailView.UpdateFromPacket(&typesPacket)
 			}
 
+			// Update HTTP requests view if this is an HTTP packet
+			// Parse HTTP from raw data if not already parsed
+			if packet.HTTPData == nil && packet.Protocol == "HTTP" && len(packet.RawData) > 0 {
+				packet.HTTPData = parseHTTPFromRawData(packet.RawData, packet.LinkType)
+			}
+			if packet.HTTPData != nil {
+				typesPacket := types.PacketDisplay(packet)
+				m.uiState.HTTPView.UpdateFromPacket(&typesPacket)
+			}
+
 			// Write to streaming save if active
 			if m.activeWriter != nil {
 				// WritePacket will apply filter internally if configured (best-effort)
@@ -960,5 +970,225 @@ func rcodeToString(rcode layers.DNSResponseCode) string {
 		return "REFUSED"
 	default:
 		return fmt.Sprintf("RCODE%d", rcode)
+	}
+}
+
+// parseHTTPFromRawData parses HTTP metadata from raw packet bytes.
+// This is used when packets arrive via remote capture without pre-parsed HTTP data.
+func parseHTTPFromRawData(rawData []byte, linkType layers.LinkType) *types.HTTPMetadata {
+	if len(rawData) == 0 {
+		return nil
+	}
+
+	// Create a gopacket from the raw data
+	packet := gopacket.NewPacket(rawData, linkType, gopacket.DecodeOptions{
+		Lazy:   true,
+		NoCopy: true,
+	})
+
+	// Extract TCP layer to get payload
+	tcpLayer := packet.Layer(layers.LayerTypeTCP)
+	if tcpLayer == nil {
+		return nil
+	}
+
+	tcp, ok := tcpLayer.(*layers.TCP)
+	if !ok || len(tcp.Payload) < 10 {
+		return nil
+	}
+
+	return parseHTTPPayload(tcp.Payload)
+}
+
+// parseHTTPPayload parses HTTP metadata from TCP payload.
+func parseHTTPPayload(payload []byte) *types.HTTPMetadata {
+	if len(payload) < 10 {
+		return nil
+	}
+
+	// Find the first line (request line or status line)
+	newlineIdx := -1
+	for i, b := range payload {
+		if b == '\n' {
+			newlineIdx = i
+			break
+		}
+		if i > 8192 {
+			return nil // Line too long
+		}
+	}
+	if newlineIdx == -1 {
+		return nil
+	}
+
+	firstLine := string(payload[:newlineIdx])
+	// Trim \r if present
+	if len(firstLine) > 0 && firstLine[len(firstLine)-1] == '\r' {
+		firstLine = firstLine[:len(firstLine)-1]
+	}
+
+	// Try to parse as HTTP request
+	if metadata := parseHTTPRequestLine(firstLine); metadata != nil {
+		parseHTTPHeaders(payload[newlineIdx+1:], metadata)
+		return metadata
+	}
+
+	// Try to parse as HTTP response
+	if metadata := parseHTTPStatusLine(firstLine); metadata != nil {
+		parseHTTPHeaders(payload[newlineIdx+1:], metadata)
+		return metadata
+	}
+
+	return nil
+}
+
+// parseHTTPRequestLine parses an HTTP request line (e.g., "GET /path HTTP/1.1")
+func parseHTTPRequestLine(line string) *types.HTTPMetadata {
+	// Request line format: METHOD PATH HTTP/VERSION
+	parts := strings.SplitN(line, " ", 3)
+	if len(parts) != 3 {
+		return nil
+	}
+
+	method := parts[0]
+	path := parts[1]
+	version := parts[2]
+
+	// Validate method
+	validMethods := map[string]bool{
+		"GET": true, "HEAD": true, "POST": true, "PUT": true,
+		"DELETE": true, "CONNECT": true, "OPTIONS": true, "TRACE": true, "PATCH": true,
+	}
+	if !validMethods[method] {
+		return nil
+	}
+
+	// Validate version
+	if !strings.HasPrefix(version, "HTTP/") {
+		return nil
+	}
+
+	// Extract query string if present
+	queryString := ""
+	if qIdx := strings.Index(path, "?"); qIdx != -1 {
+		queryString = path[qIdx+1:]
+		path = path[:qIdx]
+	}
+
+	return &types.HTTPMetadata{
+		Type:        "request",
+		IsServer:    false,
+		Method:      method,
+		Path:        path,
+		Version:     version,
+		QueryString: queryString,
+		Headers:     make(map[string]string),
+	}
+}
+
+// parseHTTPStatusLine parses an HTTP response status line (e.g., "HTTP/1.1 200 OK")
+func parseHTTPStatusLine(line string) *types.HTTPMetadata {
+	// Status line format: HTTP/VERSION STATUS REASON
+	if !strings.HasPrefix(line, "HTTP/") {
+		return nil
+	}
+
+	parts := strings.SplitN(line, " ", 3)
+	if len(parts) < 2 {
+		return nil
+	}
+
+	version := parts[0]
+	statusCode := 0
+	if len(parts[1]) == 3 {
+		for _, c := range parts[1] {
+			if c < '0' || c > '9' {
+				return nil
+			}
+			statusCode = statusCode*10 + int(c-'0')
+		}
+	}
+	if statusCode < 100 || statusCode > 599 {
+		return nil
+	}
+
+	statusReason := ""
+	if len(parts) >= 3 {
+		statusReason = parts[2]
+	}
+
+	return &types.HTTPMetadata{
+		Type:         "response",
+		IsServer:     true,
+		Version:      version,
+		StatusCode:   statusCode,
+		StatusReason: statusReason,
+		Headers:      make(map[string]string),
+	}
+}
+
+// parseHTTPHeaders parses HTTP headers from payload after the first line.
+func parseHTTPHeaders(payload []byte, metadata *types.HTTPMetadata) {
+	// Parse headers line by line
+	offset := 0
+	for i := 0; i < 100 && offset < len(payload); i++ {
+		// Find end of line
+		lineEnd := -1
+		for j := offset; j < len(payload); j++ {
+			if payload[j] == '\n' {
+				lineEnd = j
+				break
+			}
+		}
+		if lineEnd == -1 {
+			break
+		}
+
+		line := string(payload[offset:lineEnd])
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		offset = lineEnd + 1
+
+		if line == "" {
+			// End of headers
+			break
+		}
+
+		// Parse header: Name: Value
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+
+		name := strings.ToLower(strings.TrimSpace(line[:colonIdx]))
+		value := strings.TrimSpace(line[colonIdx+1:])
+
+		metadata.Headers[name] = value
+
+		// Extract common headers
+		switch name {
+		case "host":
+			metadata.Host = value
+		case "server":
+			metadata.Server = value
+		case "content-type":
+			metadata.ContentType = value
+		case "content-length":
+			// Simple atoi for content-length
+			cl := int64(0)
+			for _, c := range value {
+				if c >= '0' && c <= '9' {
+					cl = cl*10 + int64(c-'0')
+				} else {
+					break
+				}
+			}
+			metadata.ContentLength = cl
+		case "user-agent":
+			metadata.UserAgent = value
+		case "authorization":
+			metadata.HasAuth = true
+		}
 	}
 }

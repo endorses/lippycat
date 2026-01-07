@@ -156,6 +156,31 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 		return m.uiState.EmailView.View()
 	}
 
+	if m.uiState.ViewMode == "http" {
+		// Render HTTP requests view with optional details panel
+		minWidthForDetails := 120 // Need enough width for request details
+		showDetails := m.uiState.HTTPView.IsShowingDetails()
+		detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
+
+		if detailsVisible {
+			// Split pane layout for HTTP requests
+			detailsWidth := 60 // Request details panel width
+
+			// Calculate available width for requests table
+			tableWidth := m.uiState.Width - detailsWidth
+
+			// Render requests table and details side by side
+			requestsTableView := m.uiState.HTTPView.RenderTable(tableWidth, contentHeight)
+			requestDetailsView := m.uiState.HTTPView.RenderDetails(detailsWidth, contentHeight)
+
+			return lipgloss.JoinHorizontal(lipgloss.Top, requestsTableView, requestDetailsView)
+		}
+
+		// Full width requests table
+		m.uiState.HTTPView.SetSize(m.uiState.Width, contentHeight)
+		return m.uiState.HTTPView.View()
+	}
+
 	// Render packets view
 	minWidthForDetails := 160 // Need enough width for hex dump (~78 chars) + reasonable packet list
 	detailsVisible := m.uiState.ShowDetails && m.uiState.Width >= minWidthForDetails

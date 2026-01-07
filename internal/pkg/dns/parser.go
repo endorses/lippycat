@@ -369,3 +369,14 @@ func dnsClassToString(c layers.DNSClass) string {
 		return fmt.Sprintf("CLASS%d", c)
 	}
 }
+
+// formatDNSInfo creates a human-readable DNS info string.
+func formatDNSInfo(metadata *types.DNSMetadata) string {
+	if metadata.IsResponse {
+		if len(metadata.Answers) > 0 {
+			return metadata.QueryType + " " + metadata.QueryName + " -> " + metadata.Answers[0].Data
+		}
+		return metadata.QueryType + " " + metadata.QueryName + " " + metadata.ResponseCode
+	}
+	return metadata.QueryType + " " + metadata.QueryName + "?"
+}

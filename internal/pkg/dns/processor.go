@@ -188,17 +188,6 @@ func (p *Processor) createPacketDisplay(pktInfo capture.PacketInfo, metadata *ty
 	}
 }
 
-// formatDNSInfo creates a human-readable DNS info string.
-func formatDNSInfo(metadata *types.DNSMetadata) string {
-	if metadata.IsResponse {
-		if len(metadata.Answers) > 0 {
-			return metadata.QueryType + " " + metadata.QueryName + " -> " + metadata.Answers[0].Data
-		}
-		return metadata.QueryType + " " + metadata.QueryName + " " + metadata.ResponseCode
-	}
-	return metadata.QueryType + " " + metadata.QueryName + "?"
-}
-
 // Stats returns processor statistics.
 func (p *Processor) Stats() ProcessorStats {
 	stats := ProcessorStats{}

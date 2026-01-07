@@ -123,10 +123,11 @@ func TestIntegration_FilterCLI_ShowFilter(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now get should succeed
+	// Note: Phone patterns are normalized (+ is stripped), so expect "1234567890" not "+1234567890"
 	retrieved, err := client.Get("show-test-filter")
 	require.NoError(t, err)
 	assert.Equal(t, "show-test-filter", retrieved.Id)
-	assert.Equal(t, "+1234567890", retrieved.Pattern)
+	assert.Equal(t, "1234567890", retrieved.Pattern)
 	assert.Equal(t, "Test phone filter", retrieved.Description)
 
 	t.Logf("✓ Show filter test: Successfully retrieved filter %s", retrieved.Id)

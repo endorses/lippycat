@@ -3,6 +3,8 @@
 package email
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -205,11 +207,11 @@ func matchGlob(pattern, s string) bool {
 
 // createSessionIDFromPorts creates a session ID from ports and flow.
 func createSessionIDFromPorts(srcPort, dstPort uint16, flow interface{ String() string }) string {
-	// Normalize port order
+	// Normalize port order for consistent session IDs regardless of direction
 	if srcPort > dstPort {
 		srcPort, dstPort = dstPort, srcPort
 	}
-	return flow.String()
+	return fmt.Sprintf("%s:%d-%d", flow.String(), srcPort, dstPort)
 }
 
 // Stats returns processor statistics.

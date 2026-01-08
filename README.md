@@ -1,6 +1,6 @@
 # lippycat 🫦🐱
 
-[![Version](https://img.shields.io/badge/version-0.6.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.1-blue)](CHANGELOG.md)
 [![Go Version](https://img.shields.io/badge/go-1.24%2B-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
@@ -10,9 +10,9 @@
 [![TLS/mTLS](https://img.shields.io/badge/TLS%2FmTLS-supported-success)](docs/SECURITY.md)
 [![Distributed](https://img.shields.io/badge/architecture-distributed-blue)](docs/DISTRIBUTED_MODE.md)
 
-Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, TLS/JA3, and Email (SMTP) analysis with distributed capture capabilities.
+Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
 
-**Status:** v0.6.0 - Early development. Expect breaking changes.
+**Status:** v0.6.1 - Early development. Expect breaking changes.
 
 ## Table of Contents
 
@@ -37,7 +37,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
   - **VoIP**: SIP/RTP traffic capture, call tracking, per-call PCAP, user targeting
   - **DNS**: Query/response correlation, RTT calculation, tunneling detection
   - **TLS**: JA3/JA3S fingerprinting, certificate extraction, SNI filtering
-  - **Email**: SMTP session tracking, sender/recipient filtering, content keywords
+  - **Email**: SMTP/IMAP/POP3 session tracking, sender/recipient/mailbox filtering, content keywords
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
 - **Virtual Interface**: Replay filtered streams to Wireshark, tcpdump, Snort (Linux only)
 - **TLS/mTLS Security**: Encrypted gRPC connections with mutual authentication
@@ -139,8 +139,11 @@ sudo lc sniff dns --interface eth0
 # Capture TLS traffic with JA3 fingerprinting
 sudo lc sniff tls --interface eth0
 
-# Capture Email (SMTP) traffic
+# Capture Email traffic (SMTP/IMAP/POP3)
 sudo lc sniff email --interface eth0
+
+# Capture IMAP only
+sudo lc sniff email --interface eth0 --protocol imap
 
 # PCAP replay with filtering (tcpreplay alternative)
 sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
@@ -181,7 +184,7 @@ VERBS:
 | `sniff voip` | VoIP capture with SIP/RTP analysis |
 | `sniff dns` | DNS capture with query/response correlation |
 | `sniff tls` | TLS capture with JA3 fingerprinting |
-| `sniff email` | Email (SMTP) capture with session tracking |
+| `sniff email` | Email (SMTP/IMAP/POP3) capture with session tracking |
 | `tap` | Standalone capture with TUI serving and PCAP writing |
 | `tap voip` | VoIP tap with per-call PCAP |
 | `tap dns` | DNS tap with domain filtering |
@@ -370,7 +373,6 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
 ### Planned
 - HTTP/HTTPS protocol support
-- Web dashboard
 - Enhanced GPU acceleration
 - Additional protocol plugins
 

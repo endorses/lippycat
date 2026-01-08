@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-01-08
+
+### Added
+- **IMAP/POP3 Protocol Support (Phase 5)**: Complete email protocol suite
+  - IMAP command parser (SELECT, FETCH, SEARCH, LOGIN, etc.)
+  - POP3 command parser (USER, PASS, RETR, LIST, etc.)
+  - Multi-protocol factory for port-based protocol detection
+  - `--protocol` flag for smtp/imap/pop3/all selection
+  - `--imap-port` and `--pop3-port` flags for custom port configuration
+  - `--mailbox` flag for IMAP mailbox name filtering (glob patterns)
+  - `--command` flag for IMAP/POP3 command filtering (FETCH, RETR, etc.)
+  - Extended `EmailMetadata` with IMAP/POP3-specific fields
+  - TCP stream handlers for IMAP and POP3 protocols
+
 ## [0.6.0] - 2026-01-07
 
 ### Added

@@ -490,6 +490,12 @@ func buildContentFilterConfig() ContentFilterConfig {
 	if pattern := viper.GetString("email.subject_pattern"); pattern != "" {
 		config.SubjectPatterns = []string{pattern}
 	}
+	if pattern := viper.GetString("email.mailbox_pattern"); pattern != "" {
+		config.MailboxPatterns = []string{pattern}
+	}
+	if pattern := viper.GetString("email.command_pattern"); pattern != "" {
+		config.CommandPatterns = []string{pattern}
+	}
 
 	// Append patterns loaded from files
 	if patterns := viper.GetStringSlice("email.address_patterns"); len(patterns) > 0 {
@@ -503,6 +509,12 @@ func buildContentFilterConfig() ContentFilterConfig {
 	}
 	if patterns := viper.GetStringSlice("email.subject_patterns"); len(patterns) > 0 {
 		config.SubjectPatterns = append(config.SubjectPatterns, patterns...)
+	}
+	if patterns := viper.GetStringSlice("email.mailbox_patterns"); len(patterns) > 0 {
+		config.MailboxPatterns = append(config.MailboxPatterns, patterns...)
+	}
+	if patterns := viper.GetStringSlice("email.command_patterns"); len(patterns) > 0 {
+		config.CommandPatterns = append(config.CommandPatterns, patterns...)
 	}
 
 	// Load keywords for Aho-Corasick matching
@@ -519,5 +531,7 @@ func (c ContentFilterConfig) hasPatterns() bool {
 		len(c.SenderPatterns) > 0 ||
 		len(c.RecipientPatterns) > 0 ||
 		len(c.SubjectPatterns) > 0 ||
+		len(c.MailboxPatterns) > 0 ||
+		len(c.CommandPatterns) > 0 ||
 		len(c.Keywords) > 0
 }

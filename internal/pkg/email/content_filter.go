@@ -24,6 +24,12 @@ type ContentFilterConfig struct {
 
 	// Keywords are patterns to search in subject/body using Aho-Corasick.
 	Keywords []string
+
+	// MailboxPatterns filters by IMAP mailbox name (glob-style patterns).
+	MailboxPatterns []string
+
+	// CommandPatterns filters by IMAP/POP3 command (glob-style patterns).
+	CommandPatterns []string
 }
 
 // ContentFilter applies content-based filtering to email metadata.
@@ -34,6 +40,8 @@ type ContentFilter struct {
 	subjectPatterns   []string
 	keywords          []string
 	keywordsMatcher   *ahocorasick.BufferedMatcher
+	mailboxPatterns   []string
+	commandPatterns   []string
 }
 
 // NewContentFilter creates a new email content filter.
@@ -44,6 +52,8 @@ func NewContentFilter(config ContentFilterConfig) *ContentFilter {
 		addressPatterns:   config.AddressPatterns,
 		subjectPatterns:   config.SubjectPatterns,
 		keywords:          config.Keywords,
+		mailboxPatterns:   config.MailboxPatterns,
+		commandPatterns:   config.CommandPatterns,
 	}
 
 	// Create Aho-Corasick matcher for keywords if provided
@@ -71,7 +81,9 @@ func (cf *ContentFilter) HasFilters() bool {
 		len(cf.recipientPatterns) > 0 ||
 		len(cf.addressPatterns) > 0 ||
 		len(cf.subjectPatterns) > 0 ||
-		cf.keywordsMatcher != nil
+		cf.keywordsMatcher != nil ||
+		len(cf.mailboxPatterns) > 0 ||
+		len(cf.commandPatterns) > 0
 }
 
 // Match checks if the email metadata matches the configured filters.
@@ -133,7 +145,33 @@ func (cf *ContentFilter) Match(metadata *types.EmailMetadata) bool {
 		}
 	}
 
+	// Check mailbox patterns (IMAP mailbox name)
+	if len(cf.mailboxPatterns) > 0 {
+		if metadata.IMAPMailbox == "" || !filtering.MatchAnyGlob(cf.mailboxPatterns, metadata.IMAPMailbox) {
+			return false
+		}
+	}
+
+	// Check command patterns (IMAP/POP3 command)
+	if len(cf.commandPatterns) > 0 {
+		command := cf.getCommand(metadata)
+		if command == "" || !filtering.MatchAnyGlob(cf.commandPatterns, command) {
+			return false
+		}
+	}
+
 	return true
+}
+
+// getCommand extracts the command from email metadata (IMAP or POP3).
+func (cf *ContentFilter) getCommand(metadata *types.EmailMetadata) string {
+	if metadata.IMAPCommand != "" {
+		return metadata.IMAPCommand
+	}
+	if metadata.POP3Command != "" {
+		return metadata.POP3Command
+	}
+	return metadata.Command // SMTP command
 }
 
 // matchAnyRecipient checks if any recipient matches any pattern.

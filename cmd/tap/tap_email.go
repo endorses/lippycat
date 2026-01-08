@@ -24,10 +24,15 @@ import (
 var (
 	// Email-specific flags
 	emailTapPorts          string
+	emailTapImapPorts      string
+	emailTapPop3Ports      string
+	emailTapProtocol       string
 	emailTapAddress        string
 	emailTapSender         string
 	emailTapRecipient      string
 	emailTapSubject        string
+	emailTapMailbox        string
+	emailTapCommand        string
 	emailTapAddressesFile  string
 	emailTapSendersFile    string
 	emailTapRecipientsFile string
@@ -42,19 +47,27 @@ var emailTapCmd = &cobra.Command{
 	Short: "Standalone email capture with full processor capabilities",
 	Long: `Run lippycat in standalone email tap mode.
 
-Email tap mode combines local SMTP-optimized capture with full processor capabilities:
-- Captures and analyzes SMTP traffic from local interfaces
+Email tap mode combines local email capture with full processor capabilities:
+- Captures and analyzes SMTP, IMAP, and POP3 traffic from local interfaces
 - Provides auto-rotating PCAP writing
 - Serves TUI connections for monitoring
 - Supports upstream forwarding in hierarchical mode
-- SMTP session tracking and correlation
-- Content filtering (sender, recipient, subject, keywords)
+- Session tracking and correlation for all protocols
+- Content filtering (sender, recipient, subject, keywords, mailbox, command)
+
+Protocol Selection:
+  --protocol smtp    SMTP only (ports 25, 465, 587)
+  --protocol imap    IMAP only (ports 143, 993)
+  --protocol pop3    POP3 only (ports 110, 995)
+  --protocol all     All email protocols (default)
 
 Filter Options:
   --address       Match either sender OR recipient (glob pattern)
   --sender        Match sender only (MAIL FROM, glob pattern)
   --recipient     Match recipient only (RCPT TO, glob pattern)
   --subject       Match subject line (glob pattern)
+  --mailbox       Match IMAP mailbox name (glob pattern)
+  --command       Match IMAP/POP3 command (glob pattern, e.g., "FETCH", "RETR")
   --keywords-file Keywords for subject/body matching (Aho-Corasick)
 
 Body Capture (for keyword matching in body):
@@ -66,23 +79,35 @@ Pattern Files (one pattern per line, # for comments):
 
 Example:
   lc tap email --interface eth0 --insecure
+  lc tap email -i eth0 --protocol imap --insecure
   lc tap email -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/email/pcaps
   lc tap email -i eth0 --smtp-port 25,587,2525
   lc tap email -i eth0 --address "*@example.com"
   lc tap email -i eth0 --sender "*@suspicious.com"
-  lc tap email -i eth0 --subject "*invoice*"`,
+  lc tap email -i eth0 --subject "*invoice*"
+  lc tap email -i eth0 --protocol imap --mailbox "INBOX"
+  lc tap email -i eth0 --protocol imap --command "FETCH"`,
 	RunE: runEmailTap,
 }
 
 func init() {
 	TapCmd.AddCommand(emailTapCmd)
 
-	// Email-specific flags - single patterns
+	// Protocol selection
+	emailTapCmd.Flags().StringVar(&emailTapProtocol, "protocol", "all", "Email protocol to capture: smtp, imap, pop3, all")
+
+	// Port configuration
 	emailTapCmd.Flags().StringVar(&emailTapPorts, "smtp-port", "25,587,465", "SMTP port(s) to capture, comma-separated")
+	emailTapCmd.Flags().StringVar(&emailTapImapPorts, "imap-port", "143,993", "IMAP port(s) to capture, comma-separated")
+	emailTapCmd.Flags().StringVar(&emailTapPop3Ports, "pop3-port", "110,995", "POP3 port(s) to capture, comma-separated")
+
+	// Email-specific flags - single patterns
 	emailTapCmd.Flags().StringVar(&emailTapAddress, "address", "", "Filter by email address pattern (matches sender OR recipient, glob-style)")
 	emailTapCmd.Flags().StringVar(&emailTapSender, "sender", "", "Filter by sender address pattern (MAIL FROM, glob-style)")
 	emailTapCmd.Flags().StringVar(&emailTapRecipient, "recipient", "", "Filter by recipient address pattern (RCPT TO, glob-style)")
 	emailTapCmd.Flags().StringVar(&emailTapSubject, "subject", "", "Filter by subject pattern (glob-style)")
+	emailTapCmd.Flags().StringVar(&emailTapMailbox, "mailbox", "", "Filter by IMAP mailbox name (glob-style)")
+	emailTapCmd.Flags().StringVar(&emailTapCommand, "command", "", "Filter by IMAP/POP3 command (glob-style, e.g., FETCH, RETR)")
 
 	// Email filter file flags - bulk patterns
 	emailTapCmd.Flags().StringVar(&emailTapAddressesFile, "addresses-file", "", "Load address patterns from file (one per line)")
@@ -96,11 +121,16 @@ func init() {
 	emailTapCmd.Flags().IntVar(&emailTapMaxBodySize, "max-body-size", 65536, "Maximum body size to capture in bytes (default: 64KB)")
 
 	// Bind email-specific flags to viper
-	_ = viper.BindPFlag("tap.email.ports", emailTapCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("tap.email.protocol", emailTapCmd.Flags().Lookup("protocol"))
+	_ = viper.BindPFlag("tap.email.smtp_ports", emailTapCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("tap.email.imap_ports", emailTapCmd.Flags().Lookup("imap-port"))
+	_ = viper.BindPFlag("tap.email.pop3_ports", emailTapCmd.Flags().Lookup("pop3-port"))
 	_ = viper.BindPFlag("tap.email.address_pattern", emailTapCmd.Flags().Lookup("address"))
 	_ = viper.BindPFlag("tap.email.sender_pattern", emailTapCmd.Flags().Lookup("sender"))
 	_ = viper.BindPFlag("tap.email.recipient_pattern", emailTapCmd.Flags().Lookup("recipient"))
 	_ = viper.BindPFlag("tap.email.subject_pattern", emailTapCmd.Flags().Lookup("subject"))
+	_ = viper.BindPFlag("tap.email.mailbox_pattern", emailTapCmd.Flags().Lookup("mailbox"))
+	_ = viper.BindPFlag("tap.email.command_pattern", emailTapCmd.Flags().Lookup("command"))
 	_ = viper.BindPFlag("tap.email.addresses_file", emailTapCmd.Flags().Lookup("addresses-file"))
 	_ = viper.BindPFlag("tap.email.senders_file", emailTapCmd.Flags().Lookup("senders-file"))
 	_ = viper.BindPFlag("tap.email.recipients_file", emailTapCmd.Flags().Lookup("recipients-file"))
@@ -123,6 +153,9 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set email filter patterns from flags
+	if cmd.Flags().Changed("protocol") {
+		viper.Set("email.protocol", emailTapProtocol)
+	}
 	if cmd.Flags().Changed("address") {
 		viper.Set("email.address_pattern", emailTapAddress)
 	}
@@ -134,6 +167,21 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("subject") {
 		viper.Set("email.subject_pattern", emailTapSubject)
+	}
+	if cmd.Flags().Changed("mailbox") {
+		viper.Set("email.mailbox_pattern", emailTapMailbox)
+	}
+	if cmd.Flags().Changed("command") {
+		viper.Set("email.command_pattern", emailTapCommand)
+	}
+	if cmd.Flags().Changed("smtp-port") {
+		viper.Set("email.smtp_ports", emailTapPorts)
+	}
+	if cmd.Flags().Changed("imap-port") {
+		viper.Set("email.imap_ports", emailTapImapPorts)
+	}
+	if cmd.Flags().Changed("pop3-port") {
+		viper.Set("email.pop3_ports", emailTapPop3Ports)
 	}
 	if cmd.Flags().Changed("capture-body") {
 		viper.Set("email.capture_body", emailTapCaptureBody)
@@ -188,22 +236,104 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", emailTapKeywordsFile)
 	}
 
-	// Build email filter
-	filterBuilder := email.NewFilterBuilder()
-	ports, err := email.ParsePorts(emailTapPorts)
-	if err != nil {
-		return fmt.Errorf("invalid --smtp-port value: %w", err)
+	// Determine protocol and ports
+	protocol := viper.GetString("email.protocol")
+	if protocol == "" {
+		protocol = "all"
 	}
 
+	// Build port list based on protocol selection
+	var ports []uint16
+	switch protocol {
+	case "smtp":
+		smtpPortStr := viper.GetString("email.smtp_ports")
+		if smtpPortStr == "" {
+			smtpPortStr = emailTapPorts
+		}
+		parsed, err := email.ParsePorts(smtpPortStr)
+		if err != nil {
+			return fmt.Errorf("invalid SMTP port specification: %w", err)
+		}
+		ports = parsed
+	case "imap":
+		imapPortStr := viper.GetString("email.imap_ports")
+		if imapPortStr == "" {
+			imapPortStr = emailTapImapPorts
+		}
+		parsed, err := email.ParsePorts(imapPortStr)
+		if err != nil {
+			return fmt.Errorf("invalid IMAP port specification: %w", err)
+		}
+		if len(parsed) == 0 {
+			ports = email.DefaultIMAPPorts
+		} else {
+			ports = parsed
+		}
+	case "pop3":
+		pop3PortStr := viper.GetString("email.pop3_ports")
+		if pop3PortStr == "" {
+			pop3PortStr = emailTapPop3Ports
+		}
+		parsed, err := email.ParsePorts(pop3PortStr)
+		if err != nil {
+			return fmt.Errorf("invalid POP3 port specification: %w", err)
+		}
+		if len(parsed) == 0 {
+			ports = email.DefaultPOP3Ports
+		} else {
+			ports = parsed
+		}
+	case "all":
+		// Combine all protocol ports
+		var allPorts []uint16
+		smtpPortStr := viper.GetString("email.smtp_ports")
+		if smtpPortStr == "" {
+			smtpPortStr = emailTapPorts
+		}
+		smtpParsed, err := email.ParsePorts(smtpPortStr)
+		if err == nil && len(smtpParsed) > 0 {
+			allPorts = append(allPorts, smtpParsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultSMTPPorts...)
+		}
+		imapPortStr := viper.GetString("email.imap_ports")
+		if imapPortStr == "" {
+			imapPortStr = emailTapImapPorts
+		}
+		imapParsed, err := email.ParsePorts(imapPortStr)
+		if err == nil && len(imapParsed) > 0 {
+			allPorts = append(allPorts, imapParsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultIMAPPorts...)
+		}
+		pop3PortStr := viper.GetString("email.pop3_ports")
+		if pop3PortStr == "" {
+			pop3PortStr = emailTapPop3Ports
+		}
+		pop3Parsed, err := email.ParsePorts(pop3PortStr)
+		if err == nil && len(pop3Parsed) > 0 {
+			allPorts = append(allPorts, pop3Parsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultPOP3Ports...)
+		}
+		ports = allPorts
+	default:
+		return fmt.Errorf("invalid protocol: %s (valid: smtp, imap, pop3, all)", protocol)
+	}
+
+	// Build email filter
+	filterBuilder := email.NewFilterBuilder()
 	baseBPFFilter := getStringConfig("tap.bpf_filter", bpfFilter)
 	filterConfig := email.FilterConfig{
 		Ports:      ports,
+		Protocol:   protocol,
 		BaseFilter: baseBPFFilter,
 	}
 	effectiveBPFFilter := filterBuilder.Build(filterConfig)
 
 	logger.Info("Email BPF filter configured",
-		"ports", emailTapPorts,
+		"protocol", protocol,
+		"ports", ports,
 		"effective_filter", effectiveBPFFilter)
 
 	// Build auto-rotate PCAP config - default for Email mode
@@ -367,12 +497,15 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 		"tap_id", effectiveTapID,
 		"mode", mode,
 		"interfaces", localSourceConfig.Interfaces,
+		"protocol", protocol,
 		"bpf_filter", localSourceConfig.BPFFilter,
-		"smtp_ports", emailTapPorts,
+		"ports", ports,
 		"address_filter", emailTapAddress,
 		"sender_filter", emailTapSender,
 		"recipient_filter", emailTapRecipient,
 		"subject_filter", emailTapSubject,
+		"mailbox_filter", emailTapMailbox,
+		"command_filter", emailTapCommand,
 		"auto_rotate_pcap", effectiveAutoRotate,
 		"listen", config.ListenAddr)
 

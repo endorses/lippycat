@@ -20,33 +20,46 @@ import (
 
 var (
 	// Email-specific flags for hunter mode
-	hunterEmailPorts string
+	hunterEmailPorts     string
+	hunterEmailImapPorts string
+	hunterEmailPop3Ports string
+	hunterEmailProtocol  string
 
 	// Content filter flags for local filtering (in addition to processor-pushed filters)
 	hunterEmailSender    string // Sender address patterns (comma-separated)
 	hunterEmailRecipient string // Recipient address patterns (comma-separated)
 	hunterEmailSubject   string // Subject patterns (comma-separated)
 	hunterEmailKeywords  string // Body/subject keyword patterns (comma-separated)
+	hunterEmailMailbox   string // IMAP mailbox name patterns (comma-separated)
+	hunterEmailCommand   string // IMAP/POP3 command patterns (comma-separated)
 	hunterCaptureBody    bool   // Enable body capture for keyword filtering
 	hunterMaxBodySize    int    // Max body size to capture (bytes)
 )
 
 var emailHuntCmd = &cobra.Command{
 	Use:   "email",
-	Short: "Run as Email hunter with SMTP filtering",
+	Short: "Run as Email hunter with SMTP/IMAP/POP3 filtering",
 	Long: `Run lippycat in Email hunter mode with TCP reassembly and content filtering.
 
-Email hunter mode captures SMTP traffic, reassembles TCP streams, applies
-content filtering (including body keyword matching), and forwards matched
+Email hunter mode captures SMTP, IMAP, and POP3 traffic, reassembles TCP streams,
+applies content filtering (including body keyword matching), and forwards matched
 email sessions to the processor.
 
 Features:
-- SMTP TCP stream reassembly for complete message parsing
-- Port filtering (default: 25, 587, 465)
+- Multi-protocol support: SMTP, IMAP, POP3
+- TCP stream reassembly for complete message parsing
 - Sender/recipient address filtering (glob patterns)
 - Subject line filtering (glob patterns)
+- Mailbox name filtering (IMAP, glob patterns)
+- Command filtering (IMAP/POP3 commands, glob patterns)
 - Body content keyword filtering (Aho-Corasick)
 - Efficient forwarding to processor
+
+Protocol Selection:
+  --protocol smtp    SMTP only (ports 25, 465, 587)
+  --protocol imap    IMAP only (ports 143, 993)
+  --protocol pop3    POP3 only (ports 110, 995)
+  --protocol all     All email protocols (default)
 
 Filters can be specified locally (flags) or pushed from the processor.
 Local filters apply in addition to processor-pushed filters.
@@ -54,32 +67,47 @@ Local filters apply in addition to processor-pushed filters.
 Example:
   lc hunt email --processor processor:50051
   lc hunt email --processor 192.168.1.100:50051 --interface eth0
+  lc hunt email --processor processor:50051 --protocol imap
   lc hunt email --processor processor:50051 --smtp-port 25,587,2525
   lc hunt email --processor processor:50051 --sender "*@suspicious.com"
-  lc hunt email --processor processor:50051 --keywords "confidential,secret" --capture-body`,
+  lc hunt email --processor processor:50051 --keywords "confidential,secret" --capture-body
+  lc hunt email --processor processor:50051 --protocol imap --mailbox "INBOX"
+  lc hunt email --processor processor:50051 --protocol pop3 --command "RETR"`,
 	RunE: runEmailHunt,
 }
 
 func init() {
 	HuntCmd.AddCommand(emailHuntCmd)
 
-	// Email-specific flags (BPF-level filtering)
+	// Protocol selection
+	emailHuntCmd.Flags().StringVar(&hunterEmailProtocol, "protocol", "all", "Email protocol to capture: smtp, imap, pop3, all")
+
+	// Port configuration
 	emailHuntCmd.Flags().StringVar(&hunterEmailPorts, "smtp-port", "25,587,465", "SMTP port(s) to capture, comma-separated")
+	emailHuntCmd.Flags().StringVar(&hunterEmailImapPorts, "imap-port", "143,993", "IMAP port(s) to capture, comma-separated")
+	emailHuntCmd.Flags().StringVar(&hunterEmailPop3Ports, "pop3-port", "110,995", "POP3 port(s) to capture, comma-separated")
 
 	// Content filter flags for local filtering
 	emailHuntCmd.Flags().StringVar(&hunterEmailSender, "sender", "", "Sender address patterns (comma-separated, glob-style)")
 	emailHuntCmd.Flags().StringVar(&hunterEmailRecipient, "recipient", "", "Recipient address patterns (comma-separated, glob-style)")
 	emailHuntCmd.Flags().StringVar(&hunterEmailSubject, "subject", "", "Subject patterns (comma-separated, glob-style)")
 	emailHuntCmd.Flags().StringVar(&hunterEmailKeywords, "keywords", "", "Body/subject keywords (comma-separated)")
+	emailHuntCmd.Flags().StringVar(&hunterEmailMailbox, "mailbox", "", "IMAP mailbox name patterns (comma-separated, glob-style)")
+	emailHuntCmd.Flags().StringVar(&hunterEmailCommand, "command", "", "IMAP/POP3 command patterns (comma-separated, glob-style, e.g., FETCH, RETR)")
 	emailHuntCmd.Flags().BoolVar(&hunterCaptureBody, "capture-body", false, "Enable body capture for keyword filtering")
 	emailHuntCmd.Flags().IntVar(&hunterMaxBodySize, "max-body-size", 65536, "Max body size to capture in bytes (default: 64KB)")
 
 	// Bind to viper
-	_ = viper.BindPFlag("hunter.email.ports", emailHuntCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("hunter.email.protocol", emailHuntCmd.Flags().Lookup("protocol"))
+	_ = viper.BindPFlag("hunter.email.smtp_ports", emailHuntCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("hunter.email.imap_ports", emailHuntCmd.Flags().Lookup("imap-port"))
+	_ = viper.BindPFlag("hunter.email.pop3_ports", emailHuntCmd.Flags().Lookup("pop3-port"))
 	_ = viper.BindPFlag("hunter.email.sender", emailHuntCmd.Flags().Lookup("sender"))
 	_ = viper.BindPFlag("hunter.email.recipient", emailHuntCmd.Flags().Lookup("recipient"))
 	_ = viper.BindPFlag("hunter.email.subject", emailHuntCmd.Flags().Lookup("subject"))
 	_ = viper.BindPFlag("hunter.email.keywords", emailHuntCmd.Flags().Lookup("keywords"))
+	_ = viper.BindPFlag("hunter.email.mailbox", emailHuntCmd.Flags().Lookup("mailbox"))
+	_ = viper.BindPFlag("hunter.email.command", emailHuntCmd.Flags().Lookup("command"))
 	_ = viper.BindPFlag("hunter.email.capture_body", emailHuntCmd.Flags().Lookup("capture-body"))
 	_ = viper.BindPFlag("hunter.email.max_body_size", emailHuntCmd.Flags().Lookup("max-body-size"))
 }
@@ -96,22 +124,80 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Production mode: TLS encryption enforced")
 	}
 
-	// Build email filter
-	filterBuilder := email.NewFilterBuilder()
-	ports, err := email.ParsePorts(hunterEmailPorts)
-	if err != nil {
-		return fmt.Errorf("invalid --smtp-port value: %w", err)
+	// Determine protocol and ports
+	protocol := hunterEmailProtocol
+	if protocol == "" {
+		protocol = "all"
 	}
 
+	// Build port list based on protocol selection
+	var ports []uint16
+	switch protocol {
+	case "smtp":
+		parsed, err := email.ParsePorts(hunterEmailPorts)
+		if err != nil {
+			return fmt.Errorf("invalid SMTP port specification: %w", err)
+		}
+		ports = parsed
+	case "imap":
+		parsed, err := email.ParsePorts(hunterEmailImapPorts)
+		if err != nil {
+			return fmt.Errorf("invalid IMAP port specification: %w", err)
+		}
+		if len(parsed) == 0 {
+			ports = email.DefaultIMAPPorts
+		} else {
+			ports = parsed
+		}
+	case "pop3":
+		parsed, err := email.ParsePorts(hunterEmailPop3Ports)
+		if err != nil {
+			return fmt.Errorf("invalid POP3 port specification: %w", err)
+		}
+		if len(parsed) == 0 {
+			ports = email.DefaultPOP3Ports
+		} else {
+			ports = parsed
+		}
+	case "all":
+		// Combine all protocol ports
+		var allPorts []uint16
+		smtpParsed, err := email.ParsePorts(hunterEmailPorts)
+		if err == nil && len(smtpParsed) > 0 {
+			allPorts = append(allPorts, smtpParsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultSMTPPorts...)
+		}
+		imapParsed, err := email.ParsePorts(hunterEmailImapPorts)
+		if err == nil && len(imapParsed) > 0 {
+			allPorts = append(allPorts, imapParsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultIMAPPorts...)
+		}
+		pop3Parsed, err := email.ParsePorts(hunterEmailPop3Ports)
+		if err == nil && len(pop3Parsed) > 0 {
+			allPorts = append(allPorts, pop3Parsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultPOP3Ports...)
+		}
+		ports = allPorts
+	default:
+		return fmt.Errorf("invalid protocol: %s (valid: smtp, imap, pop3, all)", protocol)
+	}
+
+	// Build email filter
+	filterBuilder := email.NewFilterBuilder()
 	baseBPFFilter := getStringConfig("hunter.bpf_filter", bpfFilter)
 	filterConfig := email.FilterConfig{
 		Ports:      ports,
+		Protocol:   protocol,
 		BaseFilter: baseBPFFilter,
 	}
 	effectiveBPFFilter := filterBuilder.Build(filterConfig)
 
 	logger.Info("Email BPF filter configured",
-		"ports", hunterEmailPorts,
+		"protocol", protocol,
+		"ports", ports,
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
@@ -211,9 +297,12 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 	h.SetPacketProcessor(processor)
 
 	logger.Info("Email hunter initialized with TCP reassembly and content filtering",
+		"protocol", protocol,
 		"has_sender_filter", len(hunterEmailSender) > 0,
 		"has_recipient_filter", len(hunterEmailRecipient) > 0,
 		"has_subject_filter", len(hunterEmailSubject) > 0,
+		"has_mailbox_filter", len(hunterEmailMailbox) > 0,
+		"has_command_filter", len(hunterEmailCommand) > 0,
 		"has_keywords", len(hunterEmailKeywords) > 0,
 		"capture_body", smtpConfig.CaptureBody)
 
@@ -248,6 +337,12 @@ func buildEmailContentFilter() *email.ContentFilter {
 	}
 	if hunterEmailSubject != "" {
 		cfg.SubjectPatterns = splitAndTrim(hunterEmailSubject)
+	}
+	if hunterEmailMailbox != "" {
+		cfg.MailboxPatterns = splitAndTrim(hunterEmailMailbox)
+	}
+	if hunterEmailCommand != "" {
+		cfg.CommandPatterns = splitAndTrim(hunterEmailCommand)
 	}
 	if hunterEmailKeywords != "" {
 		cfg.Keywords = splitAndTrim(hunterEmailKeywords)

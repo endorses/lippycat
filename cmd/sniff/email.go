@@ -96,6 +96,8 @@ var (
 	emailSenderPattern    string
 	emailRecipientPattern string
 	emailSubjectPattern   string
+	emailMailboxPattern   string
+	emailCommandPattern   string
 	smtpPorts             string
 	imapPorts             string
 	pop3Ports             string
@@ -128,6 +130,12 @@ func emailHandler(cmd *cobra.Command, args []string) {
 	}
 	if cmd.Flags().Changed("subject") {
 		viper.Set("email.subject_pattern", emailSubjectPattern)
+	}
+	if cmd.Flags().Changed("mailbox") {
+		viper.Set("email.mailbox_pattern", emailMailboxPattern)
+	}
+	if cmd.Flags().Changed("command") {
+		viper.Set("email.command_pattern", emailCommandPattern)
 	}
 	if cmd.Flags().Changed("protocol") {
 		viper.Set("email.protocol", emailProtocol)
@@ -307,6 +315,8 @@ func init() {
 	emailCmd.Flags().StringVar(&emailSenderPattern, "sender", "", "Filter by sender address pattern (MAIL FROM, glob-style)")
 	emailCmd.Flags().StringVar(&emailRecipientPattern, "recipient", "", "Filter by recipient address pattern (RCPT TO, glob-style)")
 	emailCmd.Flags().StringVar(&emailSubjectPattern, "subject", "", "Filter by subject pattern (glob-style)")
+	emailCmd.Flags().StringVar(&emailMailboxPattern, "mailbox", "", "Filter by IMAP mailbox name (glob-style)")
+	emailCmd.Flags().StringVar(&emailCommandPattern, "command", "", "Filter by IMAP/POP3 command (glob-style, e.g., FETCH, RETR)")
 
 	// Email filter file flags - bulk patterns
 	emailCmd.Flags().StringVar(&emailAddressesFile, "addresses-file", "", "Load address patterns from file (one per line)")
@@ -336,6 +346,8 @@ func init() {
 	_ = viper.BindPFlag("email.sender_pattern", emailCmd.Flags().Lookup("sender"))
 	_ = viper.BindPFlag("email.recipient_pattern", emailCmd.Flags().Lookup("recipient"))
 	_ = viper.BindPFlag("email.subject_pattern", emailCmd.Flags().Lookup("subject"))
+	_ = viper.BindPFlag("email.mailbox_pattern", emailCmd.Flags().Lookup("mailbox"))
+	_ = viper.BindPFlag("email.command_pattern", emailCmd.Flags().Lookup("command"))
 	_ = viper.BindPFlag("email.addresses_file", emailCmd.Flags().Lookup("addresses-file"))
 	_ = viper.BindPFlag("email.senders_file", emailCmd.Flags().Lookup("senders-file"))
 	_ = viper.BindPFlag("email.recipients_file", emailCmd.Flags().Lookup("recipients-file"))

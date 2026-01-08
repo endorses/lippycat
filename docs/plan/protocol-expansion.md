@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-08
-**Status:** Phase 0-4 Complete, Phase 5 Protocol Support Complete (IMAP/POP3), Phase 7 Planned (TLS Decryption)
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7 Planned (TLS Decryption)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -387,11 +387,11 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 - [x] Wire HTTP filters from hunter command flags
 - [x] HTTP packet processor with content filtering - `processor.go`
 
-## Phase 5: Email - IMAP/POP3 (4-5 days) - Protocol Support Complete ✅
+## Phase 5: Email - IMAP/POP3 (4-5 days) - Complete ✅
 
 **Priority:** Medium - Completes email protocol suite
 
-**Status:** Protocol support complete (2026-01-08), content filtering pending
+**Status:** Complete (2026-01-08) - Protocol support and content filtering
 
 ### Protocol Support ✅
 - [x] Extend `EmailMetadata` for IMAP/POP3 fields (`internal/pkg/types/packet.go`)
@@ -401,17 +401,17 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 - [x] IMAP/POP3 TCP stream handlers (`internal/pkg/email/imap_tcp_stream.go`, `pop3_tcp_stream.go`)
 - [x] Multi-protocol factory for port-based protocol detection (`internal/pkg/email/multi_protocol_factory.go`)
 - [x] Update `cmd/sniff/email.go` for IMAP/POP3 support (`--protocol`, `--imap-port`, `--pop3-port`)
-- [ ] Update `cmd/tap/email.go` for IMAP/POP3 support
-- [ ] Update `cmd/hunt/email.go` for IMAP/POP3 support
+- [x] Update `cmd/tap/email.go` for IMAP/POP3 support
+- [x] Update `cmd/hunt/email.go` for IMAP/POP3 support
 
-### Content Filtering - Local (sniff/tap)
-- [ ] Extend Phase 2 email filters to IMAP/POP3 (same `--sender`, `--recipient`, etc.)
-- [ ] Add `--mailbox` flag (filter by mailbox name for IMAP)
-- [ ] Add `--command` flag (filter by IMAP/POP3 command: FETCH, SEARCH, RETR, etc.)
+### Content Filtering - Local (sniff/tap) ✅
+- [x] Extend Phase 2 email filters to IMAP/POP3 (same `--sender`, `--recipient`, etc.)
+- [x] Add `--mailbox` flag (filter by mailbox name for IMAP)
+- [x] Add `--command` flag (filter by IMAP/POP3 command: FETCH, SEARCH, RETR, etc.)
 
-### Content Filtering - Distributed (hunt)
-- [ ] Reuses Phase 2 `FILTER_EMAIL_ADDRESS` and `FILTER_EMAIL_SUBJECT` (Phase 0)
-- [ ] IMAP/POP3-specific filters may need additional filter types if required
+### Content Filtering - Distributed (hunt) ✅
+- [x] Reuses Phase 2 `FILTER_EMAIL_ADDRESS` and `FILTER_EMAIL_SUBJECT` (Phase 0)
+- [x] `--mailbox` and `--command` flags added for local filtering on hunter
 
 ## Phase 6: Database Protocols (10-14 days) - Optional
 

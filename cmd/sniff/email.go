@@ -12,15 +12,24 @@ import (
 var emailCmd = &cobra.Command{
 	Use:   "email",
 	Short: "Sniff in Email mode",
-	Long: `Sniff in Email mode. Capture and analyze SMTP traffic.
+	Long: `Sniff in Email mode. Capture and analyze SMTP, IMAP, and POP3 traffic.
 
 Features:
-- SMTP command/response parsing
+- SMTP command/response parsing (sending)
+- IMAP command/response parsing (mailbox access)
+- POP3 command/response parsing (retrieval)
 - Session tracking and correlation
-- MAIL FROM/RCPT TO extraction
+- MAIL FROM/RCPT TO extraction (SMTP)
+- Mailbox operations tracking (IMAP/POP3)
 - STARTTLS detection
 - Message-ID correlation
 - Content filtering (sender, recipient, subject, keywords)
+
+Protocol Selection:
+  --protocol smtp    SMTP only (ports 25, 465, 587)
+  --protocol imap    IMAP only (ports 143, 993)
+  --protocol pop3    POP3 only (ports 110, 995)
+  --protocol all     All email protocols (default)
 
 Filter Options:
   --address       Match either sender OR recipient (glob pattern)
@@ -37,8 +46,17 @@ Pattern Files (one pattern per line, # for comments):
   --addresses-file, --senders-file, --recipients-file, --subjects-file
 
 Examples:
-  # Basic SMTP capture
+  # Basic email capture (all protocols)
   lc sniff email -i eth0
+
+  # SMTP only
+  lc sniff email -i eth0 --protocol smtp
+
+  # IMAP only
+  lc sniff email -i eth0 --protocol imap
+
+  # POP3 only
+  lc sniff email -i eth0 --protocol pop3
 
   # Filter by sender domain
   lc sniff email -i eth0 --sender "*@example.com"
@@ -61,8 +79,11 @@ Examples:
   # Read from PCAP file
   lc sniff email -r capture.pcap
 
-  # Capture on non-standard port
+  # Capture on non-standard SMTP port
   lc sniff email -i eth0 --smtp-port 25,587,2525
+
+  # Capture on non-standard IMAP port
+  lc sniff email -i eth0 --protocol imap --imap-port 143,993,1143
 
   # Write to output file
   lc sniff email -i eth0 -w email-output.pcap`,
@@ -76,6 +97,9 @@ var (
 	emailRecipientPattern string
 	emailSubjectPattern   string
 	smtpPorts             string
+	imapPorts             string
+	pop3Ports             string
+	emailProtocol         string
 	emailTrackSessions    bool
 	emailWriteFile        string
 
@@ -105,8 +129,17 @@ func emailHandler(cmd *cobra.Command, args []string) {
 	if cmd.Flags().Changed("subject") {
 		viper.Set("email.subject_pattern", emailSubjectPattern)
 	}
+	if cmd.Flags().Changed("protocol") {
+		viper.Set("email.protocol", emailProtocol)
+	}
 	if cmd.Flags().Changed("smtp-port") {
-		viper.Set("email.ports", smtpPorts)
+		viper.Set("email.smtp_ports", smtpPorts)
+	}
+	if cmd.Flags().Changed("imap-port") {
+		viper.Set("email.imap_ports", imapPorts)
+	}
+	if cmd.Flags().Changed("pop3-port") {
+		viper.Set("email.pop3_ports", pop3Ports)
 	}
 	if cmd.Flags().Changed("track-sessions") {
 		viper.Set("email.track_sessions", emailTrackSessions)
@@ -176,22 +209,83 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", emailKeywordsFile)
 	}
 
-	// Build email filter
-	filterBuilder := email.NewFilterBuilder()
-	ports, err := email.ParsePorts(smtpPorts)
-	if err != nil {
-		logger.Error("Invalid SMTP port specification", "error", err)
+	// Determine protocol and ports
+	protocol := viper.GetString("email.protocol")
+	if protocol == "" {
+		protocol = "all"
+	}
+
+	// Build port list based on protocol selection
+	var ports []uint16
+	switch protocol {
+	case "smtp":
+		parsed, err := email.ParsePorts(viper.GetString("email.smtp_ports"))
+		if err != nil {
+			logger.Error("Invalid SMTP port specification", "error", err)
+			return
+		}
+		ports = parsed
+	case "imap":
+		parsed, err := email.ParsePorts(viper.GetString("email.imap_ports"))
+		if err != nil {
+			logger.Error("Invalid IMAP port specification", "error", err)
+			return
+		}
+		if len(parsed) == 0 {
+			ports = email.DefaultIMAPPorts
+		} else {
+			ports = parsed
+		}
+	case "pop3":
+		parsed, err := email.ParsePorts(viper.GetString("email.pop3_ports"))
+		if err != nil {
+			logger.Error("Invalid POP3 port specification", "error", err)
+			return
+		}
+		if len(parsed) == 0 {
+			ports = email.DefaultPOP3Ports
+		} else {
+			ports = parsed
+		}
+	case "all":
+		// Combine all protocol ports
+		var allPorts []uint16
+		smtpParsed, err := email.ParsePorts(viper.GetString("email.smtp_ports"))
+		if err == nil && len(smtpParsed) > 0 {
+			allPorts = append(allPorts, smtpParsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultSMTPPorts...)
+		}
+		imapParsed, err := email.ParsePorts(viper.GetString("email.imap_ports"))
+		if err == nil && len(imapParsed) > 0 {
+			allPorts = append(allPorts, imapParsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultIMAPPorts...)
+		}
+		pop3Parsed, err := email.ParsePorts(viper.GetString("email.pop3_ports"))
+		if err == nil && len(pop3Parsed) > 0 {
+			allPorts = append(allPorts, pop3Parsed...)
+		} else {
+			allPorts = append(allPorts, email.DefaultPOP3Ports...)
+		}
+		ports = allPorts
+	default:
+		logger.Error("Invalid protocol", "protocol", protocol, "valid", "smtp, imap, pop3, all")
 		return
 	}
 
+	// Build email filter
+	filterBuilder := email.NewFilterBuilder()
 	filterConfig := email.FilterConfig{
 		Ports:      ports,
+		Protocol:   protocol,
 		BaseFilter: filter,
 	}
 	effectiveFilter := filterBuilder.Build(filterConfig)
 
 	logger.Info("Starting Email sniffing",
 		"interfaces", interfaces,
+		"protocol", protocol,
 		"filter", effectiveFilter,
 		"address_pattern", emailAddressPattern,
 		"sender_pattern", emailSenderPattern,
@@ -221,8 +315,15 @@ func init() {
 	emailCmd.Flags().StringVar(&emailSubjectsFile, "subjects-file", "", "Load subject patterns from file (one per line)")
 	emailCmd.Flags().StringVar(&emailKeywordsFile, "keywords-file", "", "Load keywords from file for subject matching (Aho-Corasick)")
 
-	// Other email flags
+	// Protocol selection
+	emailCmd.Flags().StringVar(&emailProtocol, "protocol", "all", "Email protocol to capture: smtp, imap, pop3, all")
+
+	// Port configuration
 	emailCmd.Flags().StringVar(&smtpPorts, "smtp-port", "25,587,465", "SMTP port(s) to capture, comma-separated")
+	emailCmd.Flags().StringVar(&imapPorts, "imap-port", "143,993", "IMAP port(s) to capture, comma-separated")
+	emailCmd.Flags().StringVar(&pop3Ports, "pop3-port", "110,995", "POP3 port(s) to capture, comma-separated")
+
+	// Other email flags
 	emailCmd.Flags().BoolVar(&emailTrackSessions, "track-sessions", true, "Enable session tracking")
 	emailCmd.Flags().StringVarP(&emailWriteFile, "write-file", "w", "", "Write captured email packets to PCAP file")
 
@@ -240,7 +341,10 @@ func init() {
 	_ = viper.BindPFlag("email.recipients_file", emailCmd.Flags().Lookup("recipients-file"))
 	_ = viper.BindPFlag("email.subjects_file", emailCmd.Flags().Lookup("subjects-file"))
 	_ = viper.BindPFlag("email.keywords_file", emailCmd.Flags().Lookup("keywords-file"))
-	_ = viper.BindPFlag("email.ports", emailCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("email.protocol", emailCmd.Flags().Lookup("protocol"))
+	_ = viper.BindPFlag("email.smtp_ports", emailCmd.Flags().Lookup("smtp-port"))
+	_ = viper.BindPFlag("email.imap_ports", emailCmd.Flags().Lookup("imap-port"))
+	_ = viper.BindPFlag("email.pop3_ports", emailCmd.Flags().Lookup("pop3-port"))
 	_ = viper.BindPFlag("email.track_sessions", emailCmd.Flags().Lookup("track-sessions"))
 	_ = viper.BindPFlag("email.capture_body", emailCmd.Flags().Lookup("capture-body"))
 	_ = viper.BindPFlag("email.max_body_size", emailCmd.Flags().Lookup("max-body-size"))

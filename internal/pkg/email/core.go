@@ -24,28 +24,66 @@ import (
 // Global state for email sniffer
 var (
 	emailParser     *Parser
+	imapParser      *IMAPParser
+	pop3Parser      *POP3Parser
 	emailTracker    *SessionTracker
+	imapTracker     *IMAPTracker
+	pop3Tracker     *POP3Tracker
 	emailPcapWriter *pcapgo.Writer
 	emailOutputFile *os.File
-	emailFactory    tcpassembly.StreamFactory
+	smtpFactory     tcpassembly.StreamFactory
+	imapFactory     tcpassembly.StreamFactory
+	pop3Factory     tcpassembly.StreamFactory
 	emailAssembler  *tcpassembly.Assembler
-	emailHandler    *cliSMTPHandler
+	emailHandler    *cliEmailHandler
+	activeProtocol  string
+	activeSmtpPorts map[uint16]bool
+	activeImapPorts map[uint16]bool
+	activePop3Ports map[uint16]bool
 )
 
-// cliSMTPHandler handles SMTP messages for CLI output.
-type cliSMTPHandler struct {
+// cliEmailHandler handles email messages (SMTP, IMAP, POP3) for CLI output.
+type cliEmailHandler struct {
 	quietMode     bool
 	jsonEncoder   *json.Encoder
-	tracker       *SessionTracker
+	smtpTracker   *SessionTracker
+	imapTracker   *IMAPTracker
+	pop3Tracker   *POP3Tracker
 	contentFilter *ContentFilter
 }
 
-func (h *cliSMTPHandler) HandleSMTPLine(line string, metadata *types.EmailMetadata, sessionID string, flow gopacket.Flow) {
+// HandleSMTPLine implements SMTPMessageHandler.
+func (h *cliEmailHandler) HandleSMTPLine(line string, metadata *types.EmailMetadata, sessionID string, flow gopacket.Flow) {
 	// Update tracker
-	if h.tracker != nil {
-		h.tracker.UpdateSession(sessionID, metadata)
+	if h.smtpTracker != nil {
+		h.smtpTracker.UpdateSession(sessionID, metadata)
 	}
 
+	h.handleMessage(metadata, sessionID, flow)
+}
+
+// HandleIMAPLine implements IMAPMessageHandler.
+func (h *cliEmailHandler) HandleIMAPLine(line string, metadata *types.EmailMetadata, sessionID string, flow gopacket.Flow) {
+	// Update tracker
+	if h.imapTracker != nil {
+		h.imapTracker.UpdateSession(sessionID, metadata)
+	}
+
+	h.handleMessage(metadata, sessionID, flow)
+}
+
+// HandlePOP3Line implements POP3MessageHandler.
+func (h *cliEmailHandler) HandlePOP3Line(line string, metadata *types.EmailMetadata, sessionID string, flow gopacket.Flow) {
+	// Update tracker
+	if h.pop3Tracker != nil {
+		h.pop3Tracker.UpdateSession(sessionID, metadata)
+	}
+
+	h.handleMessage(metadata, sessionID, flow)
+}
+
+// handleMessage is the common handler for all email protocols.
+func (h *cliEmailHandler) handleMessage(metadata *types.EmailMetadata, sessionID string, flow gopacket.Flow) {
 	// Apply content filter if configured
 	if h.contentFilter != nil && h.contentFilter.HasFilters() {
 		if !h.contentFilter.Match(metadata) {
@@ -60,8 +98,8 @@ func (h *cliSMTPHandler) HandleSMTPLine(line string, metadata *types.EmailMetada
 	// Create packet display
 	pkt := &types.PacketDisplay{
 		Timestamp: time.Now(),
-		Protocol:  "SMTP",
-		Info:      FormatInfo(metadata),
+		Protocol:  metadata.Protocol,
+		Info:      FormatEmailInfo(metadata),
 		EmailData: metadata,
 	}
 
@@ -78,17 +116,60 @@ func (h *cliSMTPHandler) HandleSMTPLine(line string, metadata *types.EmailMetada
 	}
 }
 
+// FormatEmailInfo creates a human-readable info string from any email protocol.
+func FormatEmailInfo(metadata *types.EmailMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+
+	switch metadata.Protocol {
+	case "SMTP":
+		return FormatInfo(metadata)
+	case "IMAP":
+		return FormatIMAPInfo(metadata)
+	case "POP3":
+		return FormatPOP3Info(metadata)
+	default:
+		return FormatInfo(metadata)
+	}
+}
+
 // StartEmailSniffer starts the email sniffer on the specified interfaces.
 func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	logger.Info("Starting Email sniffer",
 		"device_count", len(devices),
 		"filter", filter)
 
-	// Initialize parser and tracker
-	emailParser = NewParser()
+	// Get protocol configuration
+	activeProtocol = viper.GetString("email.protocol")
+	if activeProtocol == "" {
+		activeProtocol = "all"
+	}
 
-	if viper.GetBool("email.track_sessions") {
-		emailTracker = NewSessionTracker(DefaultTrackerConfig())
+	// Initialize port maps for protocol detection
+	initializePortMaps()
+
+	// Initialize parsers and trackers based on protocol
+	trackSessions := viper.GetBool("email.track_sessions")
+	trackerConfig := DefaultTrackerConfig()
+
+	if activeProtocol == "smtp" || activeProtocol == "all" {
+		emailParser = NewParser()
+		if trackSessions {
+			emailTracker = NewSessionTracker(trackerConfig)
+		}
+	}
+	if activeProtocol == "imap" || activeProtocol == "all" {
+		imapParser = NewIMAPParser()
+		if trackSessions {
+			imapTracker = NewIMAPTracker(trackerConfig)
+		}
+	}
+	if activeProtocol == "pop3" || activeProtocol == "all" {
+		pop3Parser = NewPOP3Parser()
+		if trackSessions {
+			pop3Tracker = NewPOP3Tracker(trackerConfig)
+		}
 	}
 
 	// PCAP writer if output file specified
@@ -130,10 +211,12 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			"keywords", len(filterConfig.Keywords))
 	}
 
-	emailHandler = &cliSMTPHandler{
+	emailHandler = &cliEmailHandler{
 		quietMode:     quietMode,
 		jsonEncoder:   jsonEncoder,
-		tracker:       emailTracker,
+		smtpTracker:   emailTracker,
+		imapTracker:   imapTracker,
+		pop3Tracker:   pop3Tracker,
 		contentFilter: contentFilter,
 	}
 
@@ -152,13 +235,20 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		processEmailPackets(packetChan, asm)
 	}
 
-	// Create TCP assembler for SMTP with body capture config
+	// Create TCP assembler with multi-protocol factory
 	ctx := context.Background()
-	factoryConfig := DefaultSMTPStreamFactoryConfig()
-	factoryConfig.CaptureBody = viper.GetBool("email.capture_body")
-	factoryConfig.MaxBodySize = viper.GetInt("email.max_body_size")
-	emailFactory = NewSMTPStreamFactory(ctx, emailHandler, factoryConfig)
-	streamPool := tcpassembly.NewStreamPool(emailFactory)
+	captureBody := viper.GetBool("email.capture_body")
+	maxBodySize := viper.GetInt("email.max_body_size")
+
+	multiFactory := NewMultiProtocolFactory(ctx, emailHandler, MultiProtocolFactoryConfig{
+		Protocol:    activeProtocol,
+		CaptureBody: captureBody,
+		MaxBodySize: maxBodySize,
+		SMTPPorts:   activeSmtpPorts,
+		IMAPPorts:   activeImapPorts,
+		POP3Ports:   activePop3Ports,
+	})
+	streamPool := tcpassembly.NewStreamPool(multiFactory)
 	emailAssembler = tcpassembly.NewAssembler(streamPool)
 
 	// Run capture with appropriate mode
@@ -171,6 +261,58 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	// Print statistics and cleanup
 	printStatistics()
 	cleanup()
+}
+
+// initializePortMaps initializes the port maps for protocol detection.
+func initializePortMaps() {
+	activeSmtpPorts = make(map[uint16]bool)
+	activeImapPorts = make(map[uint16]bool)
+	activePop3Ports = make(map[uint16]bool)
+
+	// Parse SMTP ports
+	if activeProtocol == "smtp" || activeProtocol == "all" {
+		smtpPortStr := viper.GetString("email.smtp_ports")
+		ports, err := ParsePorts(smtpPortStr)
+		if err == nil && len(ports) > 0 {
+			for _, p := range ports {
+				activeSmtpPorts[p] = true
+			}
+		} else {
+			for _, p := range DefaultSMTPPorts {
+				activeSmtpPorts[p] = true
+			}
+		}
+	}
+
+	// Parse IMAP ports
+	if activeProtocol == "imap" || activeProtocol == "all" {
+		imapPortStr := viper.GetString("email.imap_ports")
+		ports, err := ParsePorts(imapPortStr)
+		if err == nil && len(ports) > 0 {
+			for _, p := range ports {
+				activeImapPorts[p] = true
+			}
+		} else {
+			for _, p := range DefaultIMAPPorts {
+				activeImapPorts[p] = true
+			}
+		}
+	}
+
+	// Parse POP3 ports
+	if activeProtocol == "pop3" || activeProtocol == "all" {
+		pop3PortStr := viper.GetString("email.pop3_ports")
+		ports, err := ParsePorts(pop3PortStr)
+		if err == nil && len(ports) > 0 {
+			for _, p := range ports {
+				activePop3Ports[p] = true
+			}
+		} else {
+			for _, p := range DefaultPOP3Ports {
+				activePop3Ports[p] = true
+			}
+		}
+	}
 }
 
 // processEmailPackets processes packets from the channel.
@@ -222,15 +364,32 @@ func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *tcpassembly.
 
 // cleanup releases resources.
 func cleanup() {
+	// Stop all trackers
 	if emailTracker != nil {
 		emailTracker.Stop()
 	}
+	if imapTracker != nil {
+		imapTracker.Stop()
+	}
+	if pop3Tracker != nil {
+		pop3Tracker.Stop()
+	}
+
+	// Close output file
 	if emailOutputFile != nil {
 		if err := emailOutputFile.Close(); err != nil {
 			logger.Error("Failed to close output file", "error", err)
 		}
 	}
-	if factory, ok := emailFactory.(*smtpStreamFactory); ok {
+
+	// Close factories
+	if factory, ok := smtpFactory.(*smtpStreamFactory); ok {
+		factory.Close()
+	}
+	if factory, ok := imapFactory.(*imapStreamFactory); ok {
+		factory.Close()
+	}
+	if factory, ok := pop3Factory.(*pop3StreamFactory); ok {
 		factory.Close()
 	}
 }
@@ -287,10 +446,30 @@ func printStatistics() {
 
 	if emailTracker != nil {
 		stats := emailTracker.Stats()
-		fmt.Printf("\nSession Statistics:\n")
+		fmt.Printf("\nSMTP Statistics:\n")
 		fmt.Printf("  Active sessions: %d\n", stats.ActiveSessions)
 		fmt.Printf("  Total messages: %d\n", stats.TotalMessages)
 		fmt.Printf("  Encrypted sessions: %d\n", stats.EncryptedSessions)
+	}
+
+	if imapTracker != nil {
+		stats := imapTracker.Stats()
+		fmt.Printf("\nIMAP Statistics:\n")
+		fmt.Printf("  Active sessions: %d\n", stats.ActiveSessions)
+		fmt.Printf("  Authenticated: %d\n", stats.AuthenticatedSessions)
+		fmt.Printf("  Selected mailboxes: %d\n", stats.SelectedMailboxes)
+		fmt.Printf("  Total commands: %d\n", stats.TotalCommands)
+		fmt.Printf("  Total fetches: %d\n", stats.TotalFetches)
+	}
+
+	if pop3Tracker != nil {
+		stats := pop3Tracker.Stats()
+		fmt.Printf("\nPOP3 Statistics:\n")
+		fmt.Printf("  Active sessions: %d\n", stats.ActiveSessions)
+		fmt.Printf("  Authenticated: %d\n", stats.AuthenticatedSessions)
+		fmt.Printf("  Messages retrieved: %d\n", stats.TotalMessagesRetrieved)
+		fmt.Printf("  Messages deleted: %d\n", stats.TotalMessagesDeleted)
+		fmt.Printf("  Bytes transferred: %d\n", stats.TotalBytesTransferred)
 	}
 }
 

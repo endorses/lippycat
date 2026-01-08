@@ -144,6 +144,27 @@ type EmailMetadata struct {
 	// Correlation and timing
 	TransactionTimeMs int64 // Transaction completion time
 	Correlated        bool  // True if response was correlated with command
+
+	// IMAP-specific fields
+	IMAPTag         string   // IMAP command tag (e.g., "A001", "B002")
+	IMAPCommand     string   // IMAP command (SELECT, FETCH, SEARCH, LOGIN, etc.)
+	IMAPMailbox     string   // Currently selected mailbox (e.g., "INBOX")
+	IMAPUID         uint32   // Message UID (for UID commands)
+	IMAPSeqNum      uint32   // Message sequence number
+	IMAPStatus      string   // Response status (OK, NO, BAD)
+	IMAPFlags       []string // Message flags (\Seen, \Answered, \Deleted, etc.)
+	IMAPExists      uint32   // EXISTS count (number of messages in mailbox)
+	IMAPRecent      uint32   // RECENT count (new messages since last select)
+	IMAPUIDNext     uint32   // UIDNEXT (predicted next UID)
+	IMAPUIDValidity uint32   // UIDVALIDITY (mailbox unique identifier)
+
+	// POP3-specific fields
+	POP3Command   string // POP3 command (USER, PASS, RETR, LIST, DELE, etc.)
+	POP3Status    string // Response status (+OK, -ERR)
+	POP3MsgNum    uint32 // Message number (for RETR, DELE, TOP, etc.)
+	POP3MsgSize   uint32 // Message size in bytes
+	POP3MsgCount  uint32 // Total message count (from STAT)
+	POP3TotalSize uint64 // Total mailbox size (from STAT)
 }
 
 // TLSMetadata contains parsed TLS handshake information.

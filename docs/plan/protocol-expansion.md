@@ -1,8 +1,8 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Updated:** 2026-01-07
-**Status:** Phase 0-4 Complete (DNS, Email, TLS/JA3 fingerprinting, HTTP), Phase 7 Planned (TLS Decryption)
+**Updated:** 2026-01-08
+**Status:** Phase 0-4 Complete, Phase 5 Protocol Support Complete (IMAP/POP3), Phase 7 Planned (TLS Decryption)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -387,18 +387,22 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 - [x] Wire HTTP filters from hunter command flags
 - [x] HTTP packet processor with content filtering - `processor.go`
 
-## Phase 5: Email - IMAP/POP3 (4-5 days)
+## Phase 5: Email - IMAP/POP3 (4-5 days) - Protocol Support Complete ✅
 
 **Priority:** Medium - Completes email protocol suite
 
-### Protocol Support
-- [ ] Extend `EmailMetadata` for IMAP/POP3 fields
-- [ ] IMAP command parser (SELECT, FETCH, SEARCH)
-- [ ] POP3 command parser
-- [ ] Mailbox operation tracking
-- [ ] Update `cmd/hunt/email.go` for IMAP/POP3 support
+**Status:** Protocol support complete (2026-01-08), content filtering pending
+
+### Protocol Support ✅
+- [x] Extend `EmailMetadata` for IMAP/POP3 fields (`internal/pkg/types/packet.go`)
+- [x] IMAP command parser (SELECT, FETCH, SEARCH, LOGIN, etc.) (`internal/pkg/email/imap_parser.go`)
+- [x] POP3 command parser (USER, PASS, RETR, LIST, etc.) (`internal/pkg/email/pop3_parser.go`)
+- [x] Mailbox operation tracking (`internal/pkg/email/imap_tracker.go`, `pop3_tracker.go`)
+- [x] IMAP/POP3 TCP stream handlers (`internal/pkg/email/imap_tcp_stream.go`, `pop3_tcp_stream.go`)
+- [x] Multi-protocol factory for port-based protocol detection (`internal/pkg/email/multi_protocol_factory.go`)
+- [x] Update `cmd/sniff/email.go` for IMAP/POP3 support (`--protocol`, `--imap-port`, `--pop3-port`)
 - [ ] Update `cmd/tap/email.go` for IMAP/POP3 support
-- [ ] Update `cmd/sniff/email.go` for IMAP/POP3 support
+- [ ] Update `cmd/hunt/email.go` for IMAP/POP3 support
 
 ### Content Filtering - Local (sniff/tap)
 - [ ] Extend Phase 2 email filters to IMAP/POP3 (same `--sender`, `--recipient`, etc.)
@@ -636,23 +640,25 @@ requests.get('https://example.com')
 | 2 | SMTP | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 3 | TLS/JA3 | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
 | 4 | HTTP | ✅ Complete | ✅ Complete | ✅ Complete | ✅ Complete |
-| 5 | IMAP/POP3 | 4-5 days | 0.5 days | Reuses Phase 2 | 4-5 days |
+| 5 | IMAP/POP3 | ✅ Complete | 0.5 days | Reuses Phase 2 | ~0.5 days |
 | 6 | Database | 10-14 days | 1-2 days | Extension | 11-16 days |
 | 7 | TLS Decryption | 6-8 weeks | N/A | N/A | 6-8 weeks |
 
-**Critical path:** Phases 0-4 complete (DNS, Email, TLS, HTTP - all local + distributed filtering).
+**Critical path:** Phases 0-5 protocol support complete (DNS, Email with IMAP/POP3, TLS, HTTP).
 
 **Remaining work:**
-- Phase 5 (IMAP/POP3): ~4-5 days
+- Phase 5 content filtering: ~0.5 days (tap/hunt command updates, `--mailbox`/`--command` flags)
 - Phase 6 (Database): ~11-16 days (optional)
 - Phase 7 (TLS Decryption): ~6-8 weeks (SSLKEYLOGFILE-based HTTPS decryption)
 
-## Current Status (2026-01-07)
+## Current Status (2026-01-08)
 
 ### What Works
-- DNS, SMTP, TLS, and HTTP protocol parsing and display (sniff, hunt, tap)
+- DNS, SMTP, IMAP, POP3, TLS, and HTTP protocol parsing and display (sniff, hunt, tap)
 - DNS query/response correlation and tunneling detection
 - SMTP envelope extraction (MAIL FROM, RCPT TO, Subject)
+- IMAP command/response parsing (SELECT, FETCH, SEARCH, LOGIN, etc.)
+- POP3 command/response parsing (USER, PASS, RETR, LIST, etc.)
 - TLS ClientHello/ServerHello parsing with JA3/JA3S/JA4 fingerprinting
 - HTTP request/response parsing with RTT measurement
 - BPF port-level filtering for all protocols
@@ -704,6 +710,16 @@ requests.get('https://example.com')
   - `--host`, `--path`, `--method`, `--status`, `--user-agent`, `--content-type` flags
   - `--keywords-file` for body content filtering (with `--capture-body`)
   - HTTP hunters with host/path content filtering
+- **Phase 5 - IMAP/POP3 Protocol Support:** ✅ Complete
+  - Extended `EmailMetadata` with IMAP/POP3-specific fields
+  - IMAP parser with command/response parsing, tag tracking, mailbox state
+  - POP3 parser with command/response parsing, message tracking
+  - IMAP session tracker with command correlation and mailbox state
+  - POP3 session tracker with transaction state
+  - Multi-protocol factory for port-based protocol detection
+  - `--protocol` flag in sniff (smtp, imap, pop3, all)
+  - `--imap-port`, `--pop3-port` flags for custom ports
+  - Statistics display for all three protocols
 
 ### What's Incomplete
 
@@ -711,8 +727,14 @@ requests.get('https://example.com')
    - No validation for JA3 hash format (32-char hex)
    - No validation for glob syntax errors
 
+2. **Phase 5 content filtering:**
+   - Update `cmd/tap/email.go` for IMAP/POP3 support
+   - Update `cmd/hunt/email.go` for IMAP/POP3 support
+   - Add `--mailbox` flag for IMAP mailbox filtering
+   - Add `--command` flag for IMAP/POP3 command filtering
+
 ### Recommended Next Steps
 
-1. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-2. **Start Phase 5 IMAP/POP3:** Extend email protocol support
+1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
+2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
 3. **Start Phase 7 TLS Decryption:** SSLKEYLOGFILE-based HTTPS decryption for development/debugging

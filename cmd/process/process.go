@@ -111,6 +111,8 @@ var (
 	liDeliveryTLSKeyFile    string
 	liDeliveryTLSCAFile     string
 	liDeliveryTLSPinnedCert []string
+	// TLS keylog flags (for decryption support)
+	tlsKeylogDir string
 )
 
 func init() {
@@ -182,6 +184,9 @@ func init() {
 	ProcessCmd.Flags().StringVar(&liDeliveryTLSCAFile, "li-delivery-tls-ca", "", "Path to CA certificate for verifying MDF servers")
 	ProcessCmd.Flags().StringSliceVar(&liDeliveryTLSPinnedCert, "li-delivery-tls-pinned-cert", nil, "Pinned certificate fingerprints for MDF servers (SHA256, hex encoded, comma-separated)")
 
+	// TLS keylog flags (for decryption support)
+	ProcessCmd.Flags().StringVar(&tlsKeylogDir, "tls-keylog-dir", "", "Directory to write TLS session keys (NSS keylog format, Wireshark-compatible)")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
 	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
@@ -233,6 +238,8 @@ func init() {
 	_ = viper.BindPFlag("processor.li.delivery_tls_key", ProcessCmd.Flags().Lookup("li-delivery-tls-key"))
 	_ = viper.BindPFlag("processor.li.delivery_tls_ca", ProcessCmd.Flags().Lookup("li-delivery-tls-ca"))
 	_ = viper.BindPFlag("processor.li.delivery_tls_pinned_cert", ProcessCmd.Flags().Lookup("li-delivery-tls-pinned-cert"))
+	// TLS keylog viper bindings
+	_ = viper.BindPFlag("processor.tls_keylog.output_dir", ProcessCmd.Flags().Lookup("tls-keylog-dir"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -337,6 +344,19 @@ func runProcess(cmd *cobra.Command, args []string) error {
 			"source", "config file")
 	}
 
+	// Build TLS keylog config if output directory is specified
+	var tlsKeylogConfig *processor.TLSKeylogWriterConfig
+	keylogDir := getStringConfig("processor.tls_keylog.output_dir", tlsKeylogDir)
+	if keylogDir != "" {
+		tlsKeylogConfig = &processor.TLSKeylogWriterConfig{
+			OutputDir:   keylogDir,
+			FilePattern: "session_{timestamp}.keys",
+			MaxEntries:  10000,
+			SessionTTL:  time.Hour,
+		}
+		logger.Info("TLS keylog writing enabled", "output_dir", keylogDir)
+	}
+
 	// Get configuration (flags override config file)
 	config := processor.Config{
 		ListenAddr:            getStringConfig("processor.listen_addr", listenAddr),
@@ -383,6 +403,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		LIDeliveryTLSKeyFile:    getStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
 		LIDeliveryTLSCAFile:     getStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
 		LIDeliveryTLSPinnedCert: getStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
+		// TLS keylog configuration (for decryption support)
+		TLSKeylogConfig: tlsKeylogConfig,
 	}
 
 	// Security check: require explicit opt-in to insecure mode

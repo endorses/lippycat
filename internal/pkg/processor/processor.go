@@ -97,6 +97,8 @@ type Config struct {
 	VifBufferSize         int    // Virtual interface buffer size
 	VifNetNS              string // Network namespace for interface isolation
 	VifDropPrivilegesUser string // User to drop privileges to after interface creation
+	// TLS keylog settings (for decryption support)
+	TLSKeylogConfig *TLSKeylogWriterConfig // TLS session key storage and file writing
 }
 
 // Processor represents a processor node
@@ -155,6 +157,9 @@ type Processor struct {
 
 	// LI (Lawful Interception) manager
 	liManager *li.Manager
+
+	// TLS keylog writer for session key storage and file output
+	tlsKeylogWriter *TLSKeylogWriter
 
 	// Control
 	ctx    context.Context
@@ -300,6 +305,15 @@ func New(config Config) (*Processor, error) {
 		}
 	}
 
+	// Initialize TLS keylog writer if configured
+	if config.TLSKeylogConfig != nil {
+		writer, err := NewTLSKeylogWriter(config.TLSKeylogConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize TLS keylog writer: %w", err)
+		}
+		p.tlsKeylogWriter = writer
+	}
+
 	// Initialize stats collector (needs to be created first as it's used by other managers)
 	p.statsCollector = stats.NewCollector(config.ProcessorID, &p.packetsReceived, &p.packetsForwarded)
 
@@ -443,4 +457,10 @@ func (p *Processor) SetFilterTarget(target filtering.FilterTarget) {
 func (p *Processor) IsLocalMode() bool {
 	_, isLocal := p.packetSource.(*source.LocalSource)
 	return isLocal
+}
+
+// GetTLSKeylogWriter returns the TLS keylog writer if configured.
+// This allows TUI/display components to access session keys for decryption.
+func (p *Processor) GetTLSKeylogWriter() *TLSKeylogWriter {
+	return p.tlsKeylogWriter
 }

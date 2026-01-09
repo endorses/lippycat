@@ -69,6 +69,11 @@ message CapturedPacket {
     // Populated by hunters/LocalSource when a packet matches application filters.
     // Used by the processor to correlate packets to LI intercept tasks.
     repeated string matched_filter_ids = 9;
+
+    // TLS session keys for decryption (forwarded on first matched packet of session)
+    // Original encrypted packets are preserved for audit integrity.
+    // Processor uses these keys to decrypt traffic for display/analysis.
+    TLSSessionKeys tls_keys = 10;
 }
 
 // PacketMetadata contains hunter-side analysis results
@@ -295,4 +300,46 @@ message CallLegInfo {
 
     // Last seen time for this leg (Unix nanoseconds)
     int64 last_seen_ns = 9;
+}
+
+// TLSSessionKeys contains session keys for TLS decryption
+// Keys are forwarded from hunters to processors when a TLS session matches filters.
+// This enables processors to decrypt traffic for display while storing original
+// encrypted packets for audit integrity.
+message TLSSessionKeys {
+    // Client random (32 bytes) - unique session identifier from ClientHello
+    bytes client_random = 1;
+
+    // Server random (32 bytes) - from ServerHello, for correlation
+    bytes server_random = 2;
+
+    // TLS version (e.g., 0x0303 for TLS 1.2, 0x0304 for TLS 1.3)
+    uint32 tls_version = 3;
+
+    // Cipher suite (e.g., 0x1301 for TLS_AES_128_GCM_SHA256)
+    uint32 cipher_suite = 4;
+
+    // TLS 1.2: Pre-master secret (48 bytes)
+    bytes pre_master_secret = 5;
+
+    // TLS 1.3: Handshake traffic secrets
+    bytes client_handshake_traffic_secret = 6;
+    bytes server_handshake_traffic_secret = 7;
+
+    // TLS 1.3: Application traffic secrets
+    bytes client_traffic_secret_0 = 8;
+    bytes server_traffic_secret_0 = 9;
+
+    // TLS 1.3: Exporter secrets (optional)
+    bytes exporter_secret = 10;
+    bytes early_exporter_secret = 11;
+
+    // TLS 1.3: Early traffic secret (0-RTT)
+    bytes client_early_traffic_secret = 12;
+
+    // Flow identification for session correlation
+    string src_ip = 13;
+    uint32 src_port = 14;
+    string dst_ip = 15;
+    uint32 dst_port = 16;
 }

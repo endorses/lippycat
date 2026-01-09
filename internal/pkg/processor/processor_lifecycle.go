@@ -329,6 +329,13 @@ func (p *Processor) Shutdown() error {
 		}
 	}
 
+	// Close TLS keylog writer
+	if p.tlsKeylogWriter != nil {
+		if err := p.tlsKeylogWriter.Close(); err != nil {
+			logger.Warn("Failed to close TLS keylog writer", "error", err)
+		}
+	}
+
 	// Shutdown virtual interface
 	if p.vifManager != nil {
 		if err := p.vifManager.Shutdown(); err != nil {

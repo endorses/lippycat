@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-09
-**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.4 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support, Session Tracking & Decryption)
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.5 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support, Session Tracking & Decryption, Key Forwarding & gRPC Integration)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -585,13 +585,15 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 - [x] Handle session resumption (session ID, tickets)
 - [x] Memory management (bounded session cache)
 
-### Phase 7.5: Key Forwarding & gRPC Integration (1 week)
+### Phase 7.5: Key Forwarding & gRPC Integration (1 week) - Complete ✅
 
-- [ ] Extend `PacketData` proto with TLS session key field
-- [ ] Forward session keys on first matched packet of a session
-- [ ] Processor receives and stores keys in local key store
-- [ ] Processor writes keylog file alongside PCAP (Wireshark-compatible)
-- [ ] TUI decrypts packets using forwarded keys for display
+- [x] Extend `PacketData` proto with TLS session key field (`TLSSessionKeys` message in `api/proto/data.proto`)
+- [x] Forward session keys on first matched packet of a session (`TLSKeyForwarder` in `internal/pkg/hunter/`)
+- [x] Processor receives and stores keys in local key store (`TLSKeylogWriter` in `internal/pkg/processor/`)
+- [x] Processor writes keylog file alongside PCAP (Wireshark-compatible NSS format)
+- [x] Processor `--tls-keylog-dir` flag for keylog file output
+- [x] Unit tests for hunter TLSKeyForwarder and processor TLSKeylogWriter
+- [ ] TUI decrypts packets using forwarded keys for display (deferred to Phase 7.6)
 
 ### Phase 7.6: Command Integration (1 week)
 
@@ -878,6 +880,13 @@ config := &tls.Config{
   - Bounded session cache with LRU eviction and TTL cleanup
   - `OnDecryptedData` callback for real-time decryption notifications
   - Comprehensive unit tests for session management and decryption flow
+- **Phase 7.5 - Key Forwarding & gRPC Integration:** ✅ Complete
+  - Extended `CapturedPacket` proto with `TLSSessionKeys` message (`api/proto/data.proto`)
+  - `TLSKeyForwarder` in `internal/pkg/hunter/` attaches session keys to first matched packet
+  - `TLSKeylogWriter` in `internal/pkg/processor/` receives and stores keys
+  - Processor writes Wireshark-compatible NSS keylog files
+  - `--tls-keylog-dir` flag in process command for keylog output directory
+  - Comprehensive unit tests for TLSKeyForwarder and TLSKeylogWriter
 
 ### What's Incomplete
 
@@ -895,4 +904,4 @@ config := &tls.Config{
 
 1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-3. **Continue Phase 7.5 Key Forwarding & gRPC Integration:** Extend proto for session key forwarding, integrate with processor
+3. **Continue Phase 7.6 Command Integration:** Add `--tls-keylog` flag to sniff/tap/hunt commands, TUI decryption display

@@ -184,8 +184,12 @@ type CapturedPacket struct {
 	// Populated by hunters/LocalSource when a packet matches application filters.
 	// Used by the processor to correlate packets to LI intercept tasks.
 	MatchedFilterIds []string `protobuf:"bytes,9,rep,name=matched_filter_ids,json=matchedFilterIds,proto3" json:"matched_filter_ids,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// TLS session keys for decryption (forwarded on first matched packet of session)
+	// Original encrypted packets are preserved for audit integrity.
+	// Processor uses these keys to decrypt traffic for display/analysis.
+	TlsKeys       *TLSSessionKeys `protobuf:"bytes,10,opt,name=tls_keys,json=tlsKeys,proto3" json:"tls_keys,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CapturedPacket) Reset() {
@@ -277,6 +281,13 @@ func (x *CapturedPacket) GetInterfaceName() string {
 func (x *CapturedPacket) GetMatchedFilterIds() []string {
 	if x != nil {
 		return x.MatchedFilterIds
+	}
+	return nil
+}
+
+func (x *CapturedPacket) GetTlsKeys() *TLSSessionKeys {
+	if x != nil {
+		return x.TlsKeys
 	}
 	return nil
 }
@@ -1158,6 +1169,184 @@ func (x *CallLegInfo) GetLastSeenNs() int64 {
 	return 0
 }
 
+// TLSSessionKeys contains session keys for TLS decryption
+// Keys are forwarded from hunters to processors when a TLS session matches filters.
+// This enables processors to decrypt traffic for display while storing original
+// encrypted packets for audit integrity.
+type TLSSessionKeys struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Client random (32 bytes) - unique session identifier from ClientHello
+	ClientRandom []byte `protobuf:"bytes,1,opt,name=client_random,json=clientRandom,proto3" json:"client_random,omitempty"`
+	// Server random (32 bytes) - from ServerHello, for correlation
+	ServerRandom []byte `protobuf:"bytes,2,opt,name=server_random,json=serverRandom,proto3" json:"server_random,omitempty"`
+	// TLS version (e.g., 0x0303 for TLS 1.2, 0x0304 for TLS 1.3)
+	TlsVersion uint32 `protobuf:"varint,3,opt,name=tls_version,json=tlsVersion,proto3" json:"tls_version,omitempty"`
+	// Cipher suite (e.g., 0x1301 for TLS_AES_128_GCM_SHA256)
+	CipherSuite uint32 `protobuf:"varint,4,opt,name=cipher_suite,json=cipherSuite,proto3" json:"cipher_suite,omitempty"`
+	// TLS 1.2: Pre-master secret (48 bytes)
+	PreMasterSecret []byte `protobuf:"bytes,5,opt,name=pre_master_secret,json=preMasterSecret,proto3" json:"pre_master_secret,omitempty"`
+	// TLS 1.3: Handshake traffic secrets
+	ClientHandshakeTrafficSecret []byte `protobuf:"bytes,6,opt,name=client_handshake_traffic_secret,json=clientHandshakeTrafficSecret,proto3" json:"client_handshake_traffic_secret,omitempty"`
+	ServerHandshakeTrafficSecret []byte `protobuf:"bytes,7,opt,name=server_handshake_traffic_secret,json=serverHandshakeTrafficSecret,proto3" json:"server_handshake_traffic_secret,omitempty"`
+	// TLS 1.3: Application traffic secrets
+	ClientTrafficSecret_0 []byte `protobuf:"bytes,8,opt,name=client_traffic_secret_0,json=clientTrafficSecret0,proto3" json:"client_traffic_secret_0,omitempty"`
+	ServerTrafficSecret_0 []byte `protobuf:"bytes,9,opt,name=server_traffic_secret_0,json=serverTrafficSecret0,proto3" json:"server_traffic_secret_0,omitempty"`
+	// TLS 1.3: Exporter secrets (optional)
+	ExporterSecret      []byte `protobuf:"bytes,10,opt,name=exporter_secret,json=exporterSecret,proto3" json:"exporter_secret,omitempty"`
+	EarlyExporterSecret []byte `protobuf:"bytes,11,opt,name=early_exporter_secret,json=earlyExporterSecret,proto3" json:"early_exporter_secret,omitempty"`
+	// TLS 1.3: Early traffic secret (0-RTT)
+	ClientEarlyTrafficSecret []byte `protobuf:"bytes,12,opt,name=client_early_traffic_secret,json=clientEarlyTrafficSecret,proto3" json:"client_early_traffic_secret,omitempty"`
+	// Flow identification for session correlation
+	SrcIp         string `protobuf:"bytes,13,opt,name=src_ip,json=srcIp,proto3" json:"src_ip,omitempty"`
+	SrcPort       uint32 `protobuf:"varint,14,opt,name=src_port,json=srcPort,proto3" json:"src_port,omitempty"`
+	DstIp         string `protobuf:"bytes,15,opt,name=dst_ip,json=dstIp,proto3" json:"dst_ip,omitempty"`
+	DstPort       uint32 `protobuf:"varint,16,opt,name=dst_port,json=dstPort,proto3" json:"dst_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TLSSessionKeys) Reset() {
+	*x = TLSSessionKeys{}
+	mi := &file_data_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TLSSessionKeys) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TLSSessionKeys) ProtoMessage() {}
+
+func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TLSSessionKeys.ProtoReflect.Descriptor instead.
+func (*TLSSessionKeys) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *TLSSessionKeys) GetClientRandom() []byte {
+	if x != nil {
+		return x.ClientRandom
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetServerRandom() []byte {
+	if x != nil {
+		return x.ServerRandom
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetTlsVersion() uint32 {
+	if x != nil {
+		return x.TlsVersion
+	}
+	return 0
+}
+
+func (x *TLSSessionKeys) GetCipherSuite() uint32 {
+	if x != nil {
+		return x.CipherSuite
+	}
+	return 0
+}
+
+func (x *TLSSessionKeys) GetPreMasterSecret() []byte {
+	if x != nil {
+		return x.PreMasterSecret
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetClientHandshakeTrafficSecret() []byte {
+	if x != nil {
+		return x.ClientHandshakeTrafficSecret
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetServerHandshakeTrafficSecret() []byte {
+	if x != nil {
+		return x.ServerHandshakeTrafficSecret
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetClientTrafficSecret_0() []byte {
+	if x != nil {
+		return x.ClientTrafficSecret_0
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetServerTrafficSecret_0() []byte {
+	if x != nil {
+		return x.ServerTrafficSecret_0
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetExporterSecret() []byte {
+	if x != nil {
+		return x.ExporterSecret
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetEarlyExporterSecret() []byte {
+	if x != nil {
+		return x.EarlyExporterSecret
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetClientEarlyTrafficSecret() []byte {
+	if x != nil {
+		return x.ClientEarlyTrafficSecret
+	}
+	return nil
+}
+
+func (x *TLSSessionKeys) GetSrcIp() string {
+	if x != nil {
+		return x.SrcIp
+	}
+	return ""
+}
+
+func (x *TLSSessionKeys) GetSrcPort() uint32 {
+	if x != nil {
+		return x.SrcPort
+	}
+	return 0
+}
+
+func (x *TLSSessionKeys) GetDstIp() string {
+	if x != nil {
+		return x.DstIp
+	}
+	return ""
+}
+
+func (x *TLSSessionKeys) GetDstPort() uint32 {
+	if x != nil {
+		return x.DstPort
+	}
+	return 0
+}
+
 var File_data_proto protoreflect.FileDescriptor
 
 const file_data_proto_rawDesc = "" +
@@ -1169,7 +1358,7 @@ const file_data_proto_rawDesc = "" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12!\n" +
 	"\ftimestamp_ns\x18\x03 \x01(\x03R\vtimestampNs\x127\n" +
 	"\apackets\x18\x04 \x03(\v2\x1d.lippycat.data.CapturedPacketR\apackets\x12/\n" +
-	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xed\x02\n" +
+	"\x05stats\x18\x05 \x01(\v2\x19.lippycat.data.BatchStatsR\x05stats\"\xa7\x03\n" +
 	"\x0eCapturedPacket\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x12%\n" +
@@ -1179,7 +1368,9 @@ const file_data_proto_rawDesc = "" +
 	"\tlink_type\x18\x06 \x01(\rR\blinkType\x129\n" +
 	"\bmetadata\x18\a \x01(\v2\x1d.lippycat.data.PacketMetadataR\bmetadata\x12%\n" +
 	"\x0einterface_name\x18\b \x01(\tR\rinterfaceName\x12,\n" +
-	"\x12matched_filter_ids\x18\t \x03(\tR\x10matchedFilterIds\"\xd4\x03\n" +
+	"\x12matched_filter_ids\x18\t \x03(\tR\x10matchedFilterIds\x128\n" +
+	"\btls_keys\x18\n" +
+	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\"\xd4\x03\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +
@@ -1259,7 +1450,26 @@ const file_data_proto_rawDesc = "" +
 	"\fpacket_count\x18\a \x01(\x05R\vpacketCount\x12\"\n" +
 	"\rstart_time_ns\x18\b \x01(\x03R\vstartTimeNs\x12 \n" +
 	"\flast_seen_ns\x18\t \x01(\x03R\n" +
-	"lastSeenNs*P\n" +
+	"lastSeenNs\"\xc6\x05\n" +
+	"\x0eTLSSessionKeys\x12#\n" +
+	"\rclient_random\x18\x01 \x01(\fR\fclientRandom\x12#\n" +
+	"\rserver_random\x18\x02 \x01(\fR\fserverRandom\x12\x1f\n" +
+	"\vtls_version\x18\x03 \x01(\rR\n" +
+	"tlsVersion\x12!\n" +
+	"\fcipher_suite\x18\x04 \x01(\rR\vcipherSuite\x12*\n" +
+	"\x11pre_master_secret\x18\x05 \x01(\fR\x0fpreMasterSecret\x12E\n" +
+	"\x1fclient_handshake_traffic_secret\x18\x06 \x01(\fR\x1cclientHandshakeTrafficSecret\x12E\n" +
+	"\x1fserver_handshake_traffic_secret\x18\a \x01(\fR\x1cserverHandshakeTrafficSecret\x125\n" +
+	"\x17client_traffic_secret_0\x18\b \x01(\fR\x14clientTrafficSecret0\x125\n" +
+	"\x17server_traffic_secret_0\x18\t \x01(\fR\x14serverTrafficSecret0\x12'\n" +
+	"\x0fexporter_secret\x18\n" +
+	" \x01(\fR\x0eexporterSecret\x122\n" +
+	"\x15early_exporter_secret\x18\v \x01(\fR\x13earlyExporterSecret\x12=\n" +
+	"\x1bclient_early_traffic_secret\x18\f \x01(\fR\x18clientEarlyTrafficSecret\x12\x15\n" +
+	"\x06src_ip\x18\r \x01(\tR\x05srcIp\x12\x19\n" +
+	"\bsrc_port\x18\x0e \x01(\rR\asrcPort\x12\x15\n" +
+	"\x06dst_ip\x18\x0f \x01(\tR\x05dstIp\x12\x19\n" +
+	"\bdst_port\x18\x10 \x01(\rR\adstPort*P\n" +
 	"\vFlowControl\x12\x11\n" +
 	"\rFLOW_CONTINUE\x10\x00\x12\r\n" +
 	"\tFLOW_SLOW\x10\x01\x12\x0e\n" +
@@ -1284,7 +1494,7 @@ func file_data_proto_rawDescGZIP() []byte {
 }
 
 var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_data_proto_goTypes = []any{
 	(FlowControl)(0),             // 0: lippycat.data.FlowControl
 	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
@@ -1298,29 +1508,31 @@ var file_data_proto_goTypes = []any{
 	(*SubscribeRequest)(nil),     // 9: lippycat.data.SubscribeRequest
 	(*CorrelatedCallUpdate)(nil), // 10: lippycat.data.CorrelatedCallUpdate
 	(*CallLegInfo)(nil),          // 11: lippycat.data.CallLegInfo
-	nil,                          // 12: lippycat.data.PacketMetadata.DetailsEntry
+	(*TLSSessionKeys)(nil),       // 12: lippycat.data.TLSSessionKeys
+	nil,                          // 13: lippycat.data.PacketMetadata.DetailsEntry
 }
 var file_data_proto_depIdxs = []int32{
 	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
 	7,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
 	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
-	4,  // 3: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
-	5,  // 4: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	12, // 5: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	6,  // 6: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
-	0,  // 7: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	11, // 8: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	1,  // 9: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	9,  // 10: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	9,  // 11: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	8,  // 12: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1,  // 13: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	10, // 14: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	12, // [12:15] is the sub-list for method output_type
-	9,  // [9:12] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	12, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
+	4,  // 4: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
+	5,  // 5: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
+	13, // 6: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	6,  // 7: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	0,  // 8: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	11, // 9: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	1,  // 10: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	9,  // 11: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	9,  // 12: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	8,  // 13: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	1,  // 14: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	10, // 15: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	13, // [13:16] is the sub-list for method output_type
+	10, // [10:13] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -1334,7 +1546,7 @@ func file_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

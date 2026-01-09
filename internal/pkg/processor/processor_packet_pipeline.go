@@ -56,6 +56,15 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	// Update processor statistics (atomic increment)
 	p.packetsReceived.Add(uint64(len(batch.Packets)))
 
+	// Process TLS session keys from packets (for decryption support)
+	if p.tlsKeylogWriter != nil {
+		for _, packet := range batch.Packets {
+			if packet.TlsKeys != nil {
+				p.tlsKeylogWriter.ProcessPacketKeys(packet)
+			}
+		}
+	}
+
 	// Enrich packets with protocol detection if enabled
 	if p.enricher != nil {
 		p.enricher.Enrich(batch.Packets)

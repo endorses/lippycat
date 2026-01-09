@@ -1,8 +1,8 @@
 # Protocol Expansion Implementation Plan
 
 **Date:** 2026-01-03
-**Updated:** 2026-01-08
-**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7 Planned (TLS Decryption)
+**Updated:** 2026-01-09
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1 Complete (SSLKEYLOGFILE Parser)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -534,15 +534,15 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 4. Processor stores encrypted PCAP + keylog file (audit-ready, Wireshark-compatible)
 5. Processor/TUI decrypts using forwarded keys for display
 
-### Phase 7.1: SSLKEYLOGFILE Parser (3-4 days)
+### Phase 7.1: SSLKEYLOGFILE Parser (3-4 days) - Complete ✅
 
-- [ ] Create `internal/pkg/tls/keylog/` package
-- [ ] Implement NSS Key Log format parser (`parser.go`)
-- [ ] Support all TLS 1.2 and TLS 1.3 labels
-- [ ] Create key store indexed by client_random (`store.go`)
-- [ ] File watcher for live key log updates (inotify/polling)
-- [ ] Named pipe support for real-time key injection
-- [ ] Unit tests with sample key log files
+- [x] Create `internal/pkg/tls/keylog/` package
+- [x] Implement NSS Key Log format parser (`parser.go`)
+- [x] Support all TLS 1.2 and TLS 1.3 labels
+- [x] Create key store indexed by client_random (`store.go`)
+- [x] File watcher for live key log updates (fsnotify/polling)
+- [x] Named pipe support for real-time key injection
+- [x] Unit tests with sample key log files
 
 ### Phase 7.2: TLS Record Layer (1-2 weeks)
 
@@ -755,7 +755,7 @@ config := &tls.Config{
 - Phase 6 (Database): ~11-16 days (optional)
 - Phase 7 (TLS Decryption): ~6-8 weeks (SSLKEYLOGFILE-based HTTPS decryption)
 
-## Current Status (2026-01-08)
+## Current Status (2026-01-09)
 
 ### What Works
 - DNS, SMTP, IMAP, POP3, TLS, and HTTP protocol parsing and display (sniff, hunt, tap)
@@ -824,6 +824,14 @@ config := &tls.Config{
   - `--protocol` flag in sniff (smtp, imap, pop3, all)
   - `--imap-port`, `--pop3-port` flags for custom ports
   - Statistics display for all three protocols
+- **Phase 7.1 - SSLKEYLOGFILE Parser:** ✅ Complete
+  - `internal/pkg/tls/keylog/` package with NSS Key Log format support
+  - TLS 1.2 labels: `CLIENT_RANDOM` (pre-master secret)
+  - TLS 1.3 labels: `CLIENT_HANDSHAKE_TRAFFIC_SECRET`, `SERVER_HANDSHAKE_TRAFFIC_SECRET`, `CLIENT_TRAFFIC_SECRET_0`, `SERVER_TRAFFIC_SECRET_0`, `EXPORTER_SECRET`, `EARLY_EXPORTER_SECRET`, `CLIENT_EARLY_TRAFFIC_SECRET`
+  - `Store` for session key storage indexed by client_random (with LRU eviction, TTL cleanup)
+  - `Watcher` for live key log file updates (fsnotify with polling fallback)
+  - Named pipe support for real-time key injection
+  - Comprehensive unit tests
 
 ### What's Incomplete
 
@@ -841,4 +849,4 @@ config := &tls.Config{
 
 1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-3. **Start Phase 7 TLS Decryption:** SSLKEYLOGFILE-based HTTPS decryption for development/debugging
+3. **Continue Phase 7.2 TLS Record Layer:** Implement TLS record parsing and key derivation for decryption

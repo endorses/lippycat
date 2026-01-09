@@ -111,20 +111,23 @@ The `Remove()` method (lines 43-46) deletes from sync.Map but does not close the
   - No panic possible from sending to closed channel
   - Added comprehensive unit tests including race detector verification
 
-### Issue #8: writtenKeys Memory Growth [MEDIUM]
+### Issue #8: writtenKeys Memory Growth [MEDIUM] ✅ FIXED
 
 **File:** `internal/pkg/processor/tls_keylog_writer.go`
 
 The `writtenKeys` map (line 68) grows unboundedly while `keyStore` has cleanup.
 
-- [ ] Add periodic cleanup for writtenKeys
-  - Option A: Use same TTL-based cleanup as keyStore
-  - Option B: Convert to bounded LRU cache (e.g., `github.com/hashicorp/golang-lru`)
-  - Keep at most `MaxEntries` keys (default 10000)
+- [x] Add periodic cleanup for writtenKeys
+  - Changed `writtenKeys` from `map[string]bool` to `map[string]time.Time` to track insertion time
+  - Added cleanup goroutine that runs every 5 minutes (matching keyStore)
+  - Added LRU eviction when MaxEntries is reached (`evictOldestLocked()`)
 
-- [ ] Add cleanup goroutine or piggyback on keyStore cleanup
-  - Track insertion time per key
-  - Remove keys older than SessionTTL during periodic cleanup
+- [x] Add cleanup goroutine
+  - Added `cleanupLoop()` goroutine started in `NewTLSKeylogWriter()`
+  - Added `stopChan` and `WaitGroup` for clean shutdown
+  - `cleanupWrittenKeys()` removes entries older than SessionTTL
+  - `Close()` now stops cleanup goroutine before releasing resources
+  - Added unit tests for eviction and TTL cleanup
 
 ### Issue #9: X1 Error Response Missing Details [LOW-MEDIUM]
 
@@ -217,7 +220,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 **Short-Term (4 tasks):**
 - [x] Add X1 rate limiting (#4) ✅
 - [x] Fix subscriber channel leak (#11) ✅
-- [ ] Add writtenKeys cleanup (#8)
+- [x] Add writtenKeys cleanup (#8) ✅
 - [ ] Include X1 error details (#9)
 
 **Medium-Term (4 tasks):**

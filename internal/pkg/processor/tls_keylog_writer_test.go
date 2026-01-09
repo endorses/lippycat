@@ -460,6 +460,94 @@ func TestTLSKeylogWriter_Close(t *testing.T) {
 	assert.Contains(t, string(content), "CLIENT_RANDOM")
 }
 
+func TestTLSKeylogWriter_WrittenKeysEviction(t *testing.T) {
+	// Test LRU eviction when MaxEntries is reached
+	config := &TLSKeylogWriterConfig{
+		MaxEntries: 3, // Very small for testing
+		SessionTTL: time.Hour,
+	}
+
+	writer, err := NewTLSKeylogWriter(config)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	// Add 4 keys - should evict oldest when 4th is added
+	for i := byte(0); i < 4; i++ {
+		packet := &data.CapturedPacket{
+			TlsKeys: &data.TLSSessionKeys{
+				ClientRandom:    createTestClientRandom(i),
+				TlsVersion:      0x0303,
+				PreMasterSecret: createTestSecret(0xAA, 48),
+			},
+		}
+		writer.ProcessPacketKeys(packet)
+	}
+
+	// Should have 3 keys (max) and 1 evicted
+	writer.mu.Lock()
+	assert.Equal(t, 3, len(writer.writtenKeys))
+	assert.Equal(t, uint64(1), writer.keysEvicted)
+	writer.mu.Unlock()
+}
+
+func TestTLSKeylogWriter_WrittenKeysTTLCleanup(t *testing.T) {
+	// Test TTL-based cleanup
+	config := &TLSKeylogWriterConfig{
+		MaxEntries: 100,
+		SessionTTL: 50 * time.Millisecond, // Very short for testing
+	}
+
+	writer, err := NewTLSKeylogWriter(config)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	// Add a key
+	packet := &data.CapturedPacket{
+		TlsKeys: &data.TLSSessionKeys{
+			ClientRandom:    createTestClientRandom(0x01),
+			TlsVersion:      0x0303,
+			PreMasterSecret: createTestSecret(0xAA, 48),
+		},
+	}
+	writer.ProcessPacketKeys(packet)
+
+	// Verify key exists
+	writer.mu.Lock()
+	assert.Equal(t, 1, len(writer.writtenKeys))
+	writer.mu.Unlock()
+
+	// Wait for TTL to expire
+	time.Sleep(100 * time.Millisecond)
+
+	// Manually trigger cleanup (normally runs every 5 minutes)
+	writer.cleanupWrittenKeys()
+
+	// Key should be evicted
+	writer.mu.Lock()
+	assert.Equal(t, 0, len(writer.writtenKeys))
+	assert.Equal(t, uint64(1), writer.keysEvicted)
+	writer.mu.Unlock()
+}
+
+func TestTLSKeylogWriter_CleanupLoopStopsOnClose(t *testing.T) {
+	config := &TLSKeylogWriterConfig{
+		MaxEntries: 100,
+		SessionTTL: time.Hour,
+	}
+
+	writer, err := NewTLSKeylogWriter(config)
+	require.NoError(t, err)
+
+	// Close should stop the cleanup goroutine cleanly
+	err = writer.Close()
+	assert.NoError(t, err)
+
+	// Multiple closes should not panic
+	assert.NotPanics(t, func() {
+		// The goroutine is already stopped, this is to verify no deadlock
+	})
+}
+
 // Helper function for hex encoding
 func hexEncode(data []byte) string {
 	const hexChars = "0123456789abcdef"

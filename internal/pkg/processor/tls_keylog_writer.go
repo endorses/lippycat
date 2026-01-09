@@ -65,11 +65,17 @@ type TLSKeylogWriter struct {
 	fileStartTime   time.Time
 
 	// Track which client randoms have been written (avoid duplicates)
-	writtenKeys map[string]bool
+	// Maps clientRandomHex -> insertion time for TTL-based cleanup
+	writtenKeys map[string]time.Time
+
+	// Cleanup goroutine control
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 
 	// Statistics
 	keysReceived uint64
 	keysWritten  uint64
+	keysEvicted  uint64
 
 	mu sync.Mutex
 }
@@ -90,7 +96,8 @@ func NewTLSKeylogWriter(config *TLSKeylogWriterConfig) (*TLSKeylogWriter, error)
 	w := &TLSKeylogWriter{
 		config:      config,
 		keyStore:    store,
-		writtenKeys: make(map[string]bool),
+		writtenKeys: make(map[string]time.Time),
+		stopChan:    make(chan struct{}),
 	}
 
 	// Create output directory if specified
@@ -104,6 +111,10 @@ func NewTLSKeylogWriter(config *TLSKeylogWriterConfig) (*TLSKeylogWriter, error)
 	} else {
 		logger.Info("TLS keylog writer initialized (memory only, no file output)")
 	}
+
+	// Start cleanup goroutine for writtenKeys
+	w.wg.Add(1)
+	go w.cleanupLoop()
 
 	return w, nil
 }
@@ -129,12 +140,17 @@ func (w *TLSKeylogWriter) ProcessPacketKeys(packet *data.CapturedPacket) {
 	clientRandomHex := hex.EncodeToString(keys.ClientRandom)
 
 	// Check if we already have these keys
-	if w.writtenKeys[clientRandomHex] {
+	if _, exists := w.writtenKeys[clientRandomHex]; exists {
 		return
 	}
 
-	// Mark as received
-	w.writtenKeys[clientRandomHex] = true
+	// Evict oldest if at capacity (LRU)
+	if w.config.MaxEntries > 0 && len(w.writtenKeys) >= w.config.MaxEntries {
+		w.evictOldestLocked()
+	}
+
+	// Mark as received with current timestamp
+	w.writtenKeys[clientRandomHex] = time.Now()
 
 	// Convert to keylog entries and add to store
 	var cr [32]byte
@@ -320,8 +336,12 @@ func (w *TLSKeylogWriter) Stats() (received, written uint64) {
 	return w.keysReceived, w.keysWritten
 }
 
-// Close closes the keylog file and stops the key store.
+// Close closes the keylog file and stops all cleanup goroutines.
 func (w *TLSKeylogWriter) Close() error {
+	// Stop the writtenKeys cleanup goroutine
+	close(w.stopChan)
+	w.wg.Wait()
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -350,6 +370,59 @@ func (w *TLSKeylogWriter) Close() error {
 	}
 
 	return nil
+}
+
+// cleanupLoop periodically removes expired entries from writtenKeys.
+func (w *TLSKeylogWriter) cleanupLoop() {
+	defer w.wg.Done()
+
+	// Use same cleanup interval as keylog store (5 minutes)
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			w.cleanupWrittenKeys()
+		case <-w.stopChan:
+			return
+		}
+	}
+}
+
+// cleanupWrittenKeys removes expired entries from writtenKeys.
+func (w *TLSKeylogWriter) cleanupWrittenKeys() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	now := time.Now()
+	for key, insertedAt := range w.writtenKeys {
+		if now.Sub(insertedAt) > w.config.SessionTTL {
+			delete(w.writtenKeys, key)
+			w.keysEvicted++
+		}
+	}
+}
+
+// evictOldestLocked removes the oldest entry from writtenKeys.
+// Must be called with mu held.
+func (w *TLSKeylogWriter) evictOldestLocked() {
+	var oldestKey string
+	var oldestTime time.Time
+	first := true
+
+	for key, insertedAt := range w.writtenKeys {
+		if first || insertedAt.Before(oldestTime) {
+			oldestKey = key
+			oldestTime = insertedAt
+			first = false
+		}
+	}
+
+	if !first {
+		delete(w.writtenKeys, oldestKey)
+		w.keysEvicted++
+	}
 }
 
 // RotateFile closes the current file and opens a new one.

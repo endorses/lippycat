@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-09
-**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1 Complete (SSLKEYLOGFILE Parser)
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.2 Complete (SSLKEYLOGFILE Parser, TLS Record Layer)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -544,21 +544,21 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 - [x] Named pipe support for real-time key injection
 - [x] Unit tests with sample key log files
 
-### Phase 7.2: TLS Record Layer (1-2 weeks)
+### Phase 7.2: TLS Record Layer (1-2 weeks) - Complete ✅
 
-- [ ] Create `internal/pkg/tls/decrypt/` package
-- [ ] TLS record layer parser (`record.go`)
-  - [ ] Record header parsing (content type, version, length)
-  - [ ] Record reassembly across TCP segments
-  - [ ] Encrypted vs plaintext record detection
-- [ ] TLS 1.2 key derivation (`kdf_tls12.go`)
-  - [ ] PRF (Pseudo-Random Function) implementation
-  - [ ] Master secret → session keys derivation
-  - [ ] Client/server write keys, IVs, MAC keys
-- [ ] TLS 1.3 key derivation (`kdf_tls13.go`)
-  - [ ] HKDF-Extract and HKDF-Expand-Label
-  - [ ] Handshake traffic secrets → keys
-  - [ ] Application traffic secrets → keys
+- [x] Create `internal/pkg/tls/decrypt/` package
+- [x] TLS record layer parser (`record.go`)
+  - [x] Record header parsing (content type, version, length)
+  - [x] Record reassembly across TCP segments
+  - [x] Encrypted vs plaintext record detection
+- [x] TLS 1.2 key derivation (`kdf_tls12.go`)
+  - [x] PRF (Pseudo-Random Function) implementation
+  - [x] Master secret → session keys derivation
+  - [x] Client/server write keys, IVs, MAC keys
+- [x] TLS 1.3 key derivation (`kdf_tls13.go`)
+  - [x] HKDF-Extract and HKDF-Expand-Label
+  - [x] Handshake traffic secrets → keys
+  - [x] Application traffic secrets → keys
 
 ### Phase 7.3: Cipher Suite Support (2-3 weeks)
 
@@ -832,6 +832,25 @@ config := &tls.Config{
   - `Watcher` for live key log file updates (fsnotify with polling fallback)
   - Named pipe support for real-time key injection
   - Comprehensive unit tests
+- **Phase 7.2 - TLS Record Layer:** ✅ Complete
+  - `internal/pkg/tls/decrypt/` package with TLS record parsing and key derivation
+  - TLS record layer parser (`record.go`):
+    - Record header parsing (content type, version, length)
+    - Record reassembly across TCP segments via `RecordParser` and `StreamReassembler`
+    - Encrypted vs plaintext record detection
+    - Helper functions: `ExtractClientRandom`, `ExtractServerRandom`, `ExtractCipherSuite`, `ExtractTLSVersion`
+  - TLS 1.2 key derivation (`kdf_tls12.go`):
+    - PRF (Pseudo-Random Function) implementation via P_hash
+    - `DeriveMasterSecret` and `DeriveKeyMaterial` for session key derivation
+    - GCM and ChaCha20-Poly1305 nonce construction
+    - Additional authenticated data computation
+  - TLS 1.3 key derivation (`kdf_tls13.go`):
+    - HKDF-Extract and HKDF-Expand-Label per RFC 8446
+    - `TLS13KeySchedule` for full key schedule derivation
+    - Traffic key derivation and key update support
+    - Verified with RFC 8448 test vectors
+  - Cipher suite information for common TLS 1.2 and TLS 1.3 suites
+  - Comprehensive unit tests
 
 ### What's Incomplete
 
@@ -849,4 +868,4 @@ config := &tls.Config{
 
 1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-3. **Continue Phase 7.2 TLS Record Layer:** Implement TLS record parsing and key derivation for decryption
+3. **Continue Phase 7.3 Cipher Suite Support:** Implement AEAD decryption (AES-GCM, ChaCha20-Poly1305) and CBC mode

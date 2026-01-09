@@ -443,13 +443,15 @@ lc sniff email -i eth0 --keywords-file keywords.txt --capture-body --max-body-si
 
 ## Phase 7: TLS Decryption via SSLKEYLOGFILE (6-8 weeks)
 
-**Priority:** Medium - Enables HTTPS content inspection for authorized monitoring
+**Priority:** Medium - Enables encrypted traffic content inspection for authorized monitoring
 
 **Approach:** SSLKEYLOGFILE (NSS Key Log Format) - same method used by Wireshark. Works with all cipher suites including forward secrecy and TLS 1.3.
 
 ### Overview
 
 SSLKEYLOGFILE contains pre-master secrets or session keys logged by TLS clients/servers. This allows passive decryption without breaking forward secrecy (keys are provided, not derived from private keys).
+
+TLS wraps many protocols: HTTPS, SMTPS, IMAPS, POP3S, database connections, etc. The `--tls-keylog` flag works at the capture level for any TLS-encrypted traffic.
 
 **Key Log Format (NSS):**
 ```
@@ -466,9 +468,11 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 
 ### Architecture
 
+**Key principle:** Preserve original encrypted packets for audit integrity. Forward TLS session keys alongside packets so processor/TUI can decrypt for display while storing original evidence.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      TLS Decryption Pipeline                    │
+│                   Capturing Node (sniff/tap/hunt)               │
 │                                                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐   │
 │  │ SSLKEYLOG    │───▶│ Key Store    │◀───│ TLS Session      │   │
@@ -486,12 +490,49 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 │                                    │                            │
 │                                    ▼                            │
 │                      ┌──────────────────────────────┐           │
-│                      │ HTTP Parser (existing)       │           │
+│                      │ Content Filter               │           │
 │                      │ - Parse decrypted payload    │           │
-│                      │ - Apply content filters      │           │
+│                      │ - Apply protocol filters     │           │
+│                      │ - Match → forward session    │           │
+│                      └──────────────────────────────┘           │
+│                                    │                            │
+│                                    ▼ On match                   │
+│                      ┌──────────────────────────────┐           │
+│                      │ Forward to Processor/TUI     │           │
+│                      │ - Original encrypted packets │           │
+│                      │ - TLS session keys           │           │
 │                      └──────────────────────────────┘           │
 └─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ gRPC (encrypted pkts + keys)
+                                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Processor / TUI                            │
+│                                                                 │
+│  ┌──────────────────┐    ┌──────────────────────────────────┐   │
+│  │ Receive Keys     │───▶│ Local Key Store                  │   │
+│  │ (per session)    │    │ (decrypt for display)            │   │
+│  └──────────────────┘    └──────────────────────────────────┘   │
+│                                                                 │
+│  ┌──────────────────┐    ┌──────────────────────────────────┐   │
+│  │ PCAP Writer      │    │ Keylog Writer                    │   │
+│  │ (encrypted pkts) │    │ (Wireshark-compatible)           │   │
+│  └──────────────────┘    └──────────────────────────────────┘   │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ TUI Display                                              │   │
+│  │ - Decrypt using forwarded keys                           │   │
+│  │ - Show decrypted content (HTTP, SMTP, etc.)              │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+**Data flow:**
+1. Capturing node reads TLS keys from keylog file/pipe
+2. Decrypts traffic locally to apply content filters
+3. On filter match, forwards **original encrypted packets + session keys**
+4. Processor stores encrypted PCAP + keylog file (audit-ready, Wireshark-compatible)
+5. Processor/TUI decrypts using forwarded keys for display
 
 ### Phase 7.1: SSLKEYLOGFILE Parser (3-4 days)
 
@@ -540,36 +581,91 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 - [ ] Match captured sessions to key log entries by client_random
 - [ ] Handle key log entries arriving before/after handshake
 - [ ] Decrypt application data records
-- [ ] Reassemble decrypted data into HTTP stream
+- [ ] Reassemble decrypted data into application stream
 - [ ] Handle session resumption (session ID, tickets)
 - [ ] Memory management (bounded session cache)
 
-### Phase 7.5: Integration & Commands (1 week)
+### Phase 7.5: Key Forwarding & gRPC Integration (1 week)
 
-- [ ] Add `--tls-keylog` flag to sniff/tap/watch commands
+- [ ] Extend `PacketData` proto with TLS session key field
+- [ ] Forward session keys on first matched packet of a session
+- [ ] Processor receives and stores keys in local key store
+- [ ] Processor writes keylog file alongside PCAP (Wireshark-compatible)
+- [ ] TUI decrypts packets using forwarded keys for display
+
+### Phase 7.6: Command Integration (1 week)
+
+**Live capture:**
+- [ ] Add `--tls-keylog` flag to sniff/tap/hunt commands
 - [ ] Add `--tls-keylog-pipe` for named pipe input
-- [ ] Integrate decrypted HTTPS with HTTP parser
-- [ ] Show decrypted HTTP in TUI HTTP view
+- [ ] Works for any TLS-wrapped protocol (HTTPS, SMTPS, IMAPS, etc.)
+- [ ] Processor `--tls-keylog-dir` for keylog file output
+
+**Offline analysis (PCAP + keylog):**
+- [ ] Support `lc sniff -r file.pcap --tls-keylog keys.log` for CLI analysis
+- [ ] Support `lc watch file -r file.pcap --tls-keylog keys.log` for TUI analysis
+- [ ] Full round-trip: capture → store → re-analyze with same decryption
+
+**Display:**
 - [ ] Show decryption status in TUI (encrypted/decrypted indicator)
-- [ ] Add PCAP export with decrypted payloads (optional)
 - [ ] Documentation and usage examples
 
 ### CLI Usage
 
+**Live capture:**
 ```bash
-# Capture with key log file (static or watched)
-sudo lc watch --tls-keylog /tmp/sslkeys.log
+# Standalone CLI capture with key log file
+sudo lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
 
-# Capture with named pipe (real-time keys)
+# Standalone tap (serves TUI, writes PCAP + keylog)
+sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log
+
+# Distributed hunter (decrypts for filtering, forwards encrypted + keys)
+sudo lc hunt http -i eth0 --processor central:50051 \
+  --tls-keylog /tmp/sslkeys.log
+
+# Real-time key injection via named pipe
 mkfifo /tmp/sslkeys.pipe
-sudo lc watch --tls-keylog-pipe /tmp/sslkeys.pipe &
-SSLKEYLOGFILE=/tmp/sslkeys.pipe curl https://example.com
+sudo lc tap http -i eth0 --tls-keylog-pipe /tmp/sslkeys.pipe &
+SSLKEYLOGFILE=/tmp/sslkeys.pipe ./myserver
 
-# TUI shows decrypted HTTPS in HTTP view
-# Protocol selector: HTTPS (decrypted) vs TLS (encrypted)
+# Combined with content filtering (filter decrypted traffic)
+sudo lc hunt http -i eth0 --processor central:50051 \
+  --tls-keylog /tmp/sslkeys.log \
+  --host "*.example.com" --keywords-file sensitive.txt
+
+# Processor stores encrypted PCAP + keylog for Wireshark analysis
+lc process --listen :50051 \
+  --per-call-pcap --per-call-pcap-dir /var/capture \
+  --tls-keylog-dir /var/capture/keys
+
+# Works for any TLS-wrapped protocol
+sudo lc hunt email -i eth0 --processor central:50051 \
+  --tls-keylog /tmp/sslkeys.log  # SMTPS, IMAPS, POP3S
+```
+
+**Offline analysis (PCAP + keylog):**
+```bash
+# CLI analysis of stored capture
+lc sniff http -r capture.pcap --tls-keylog keys.log
+
+# TUI analysis of stored capture
+lc watch file -r capture.pcap --tls-keylog keys.log
+
+# Full round-trip workflow:
+# 1. Capture with keylog
+sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log \
+  -w /var/capture/session.pcap
+
+# 2. Later: re-analyze with same decryption capability
+lc watch file -r /var/capture/session.pcap \
+  --tls-keylog /var/capture/session.keys
 ```
 
 ### Generating Key Logs
+
+**Server-side (typical deployment):**
+Configure your TLS server to log session keys. The capturing node runs on the same machine.
 
 **Browsers:**
 ```bash
@@ -595,20 +691,28 @@ import requests
 requests.get('https://example.com')
 ```
 
+**Go (crypto/tls):**
+```go
+config := &tls.Config{
+    KeyLogWriter: keylogFile,
+}
+```
+
 ### Limitations
 
 1. **Key log required:** Cannot decrypt without SSLKEYLOGFILE (forward secrecy)
 2. **No private key decryption:** RSA key exchange is rare/obsolete
 3. **Real-time sync:** Keys must arrive before or shortly after handshake
 4. **Memory usage:** Session state stored until connection closes
-5. **Not for production interception:** Intended for development/debugging/authorized monitoring
+5. **Same-machine deployment:** Key log file must be accessible to capturing node
 
 ### Security Considerations
 
 - Key log files contain session secrets - protect appropriately
 - Clear key store on file rotation/truncation
 - Warn if key log file has insecure permissions
-- Document authorized use cases (debugging, security research, CTF)
+- Forwarded keys are protected by gRPC TLS (hunter→processor)
+- Stored keylog files should have restricted permissions
 
 ## Implementation Notes
 

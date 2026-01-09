@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-09
-**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.3 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support)
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.4 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support, Session Tracking & Decryption)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -575,15 +575,15 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 - [x] AEAD nonce construction (explicit + implicit IV)
 - [x] Unit tests with known-answer test vectors
 
-### Phase 7.4: Session Tracking & Decryption (1-2 weeks)
+### Phase 7.4: Session Tracking & Decryption (1-2 weeks) - Complete ✅
 
-- [ ] Extend existing TLS tracker for decryption state
-- [ ] Match captured sessions to key log entries by client_random
-- [ ] Handle key log entries arriving before/after handshake
-- [ ] Decrypt application data records
-- [ ] Reassemble decrypted data into application stream
-- [ ] Handle session resumption (session ID, tickets)
-- [ ] Memory management (bounded session cache)
+- [x] Extend existing TLS tracker for decryption state
+- [x] Match captured sessions to key log entries by client_random
+- [x] Handle key log entries arriving before/after handshake
+- [x] Decrypt application data records
+- [x] Reassemble decrypted data into application stream
+- [x] Handle session resumption (session ID, tickets)
+- [x] Memory management (bounded session cache)
 
 ### Phase 7.5: Key Forwarding & gRPC Integration (1 week)
 
@@ -866,6 +866,18 @@ config := &tls.Config{
   - TLS 1.3 inner plaintext padding removal and content type extraction
   - PKCS#7 padding for CBC mode with constant-time validation
   - Comprehensive unit tests including NIST and RFC 7539 test vectors
+- **Phase 7.4 - Session Tracking & Decryption:** ✅ Complete
+  - `internal/pkg/tls/decrypt/session.go` with `SessionManager` integrating all components
+  - Session tracking by flow key (srcIP:srcPort-dstIP:dstPort)
+  - ClientRandom-based key lookup from keylog store
+  - Async key arrival handling (keys before or after handshake)
+  - TLS 1.2 decryption with AEAD (GCM, ChaCha20) and CBC cipher support
+  - TLS 1.3 decryption with traffic secret-based key derivation
+  - Decrypted application data stream buffering
+  - Session resumption support (session ID and ticket extraction)
+  - Bounded session cache with LRU eviction and TTL cleanup
+  - `OnDecryptedData` callback for real-time decryption notifications
+  - Comprehensive unit tests for session management and decryption flow
 
 ### What's Incomplete
 
@@ -883,4 +895,4 @@ config := &tls.Config{
 
 1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-3. **Continue Phase 7.4 Session Tracking & Decryption:** Integrate cipher implementations with TLS session tracking
+3. **Continue Phase 7.5 Key Forwarding & gRPC Integration:** Extend proto for session key forwarding, integrate with processor

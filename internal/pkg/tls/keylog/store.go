@@ -379,3 +379,11 @@ func (s *Store) ForEach(fn func(keys *SessionKeys) bool) {
 		}
 	}
 }
+
+// SetOnKeyAdded sets the callback for when a new key is added.
+// This allows external components to react to key arrivals.
+func (s *Store) SetOnKeyAdded(fn func(clientRandom [32]byte, entry *KeyEntry)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.config.OnKeyAdded = fn
+}

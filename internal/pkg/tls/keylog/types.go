@@ -155,6 +155,12 @@ func (e *KeyEntry) SecretHex() string {
 
 // bytesToHex converts bytes to lowercase hex string.
 func bytesToHex(b []byte) string {
+	return BytesToHex(b)
+}
+
+// BytesToHex converts bytes to lowercase hex string.
+// Exported for use by other packages.
+func BytesToHex(b []byte) string {
 	const hexChars = "0123456789abcdef"
 	result := make([]byte, len(b)*2)
 	for i, v := range b {

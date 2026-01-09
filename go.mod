@@ -19,6 +19,7 @@ require (
 	github.com/vishvananda/netns v0.0.5
 	golang.org/x/crypto v0.41.0
 	golang.org/x/sys v0.36.0
+	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.67.3
 	google.golang.org/protobuf v1.36.8
 	gopkg.in/yaml.v3 v3.0.1

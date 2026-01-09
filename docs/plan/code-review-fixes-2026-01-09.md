@@ -68,20 +68,31 @@ Tests failed without `-tags all` because `internal/pkg/processor` imported `inte
 
 ## Short-Term Priority (Next Sprint)
 
-### Issue #4: X1 Rate Limiting [MEDIUM]
+### Issue #4: X1 Rate Limiting [MEDIUM] ✅ FIXED
 
 **File:** `internal/pkg/li/x1/server.go`
 
 The X1 HTTPS server lacks per-IP rate limiting. XML parsing can be expensive.
 
-- [ ] Add rate limiting middleware
+- [x] Add rate limiting middleware
   - Use `golang.org/x/time/rate` for per-IP rate limiting
   - Store rate limiters in `sync.Map` keyed by IP
-  - Configure via `X1RateLimitPerIP` (default: 10 req/s) and `X1RateLimitBurst` (default: 20)
+  - Configure via `RateLimitPerIP` (default: 10 req/s) and `RateLimitBurst` (default: 20)
+  - Added `getRateLimiter()` helper and `extractClientIP()` for X-Forwarded-For support
 
-- [ ] Add request timeout for XML parsing
-  - Wrap XML parsing in context with timeout (e.g., 5s)
-  - Return 503 if parsing times out
+- [x] Add request timeout for XML parsing
+  - XML parsing wrapped in goroutine with configurable `XMLParseTimeout` (default: 5s)
+  - Returns 503 if parsing times out
+
+- [x] Add unit tests for rate limiting
+  - `TestServer_RateLimiting`: Tests burst limit enforcement
+  - `TestServer_RateLimiting_PerIP`: Tests separate rate limiters per IP
+  - `TestServer_RateLimiting_XForwardedFor`: Tests proxy IP extraction
+  - `TestServer_RateLimiting_XForwardedFor_Chain`: Tests X-FF chain parsing
+  - `TestExtractClientIP`: Tests IP extraction from various formats
+  - `TestServer_GetRateLimiter`: Tests limiter creation and reuse
+  - `TestServer_DefaultConfig`: Tests default config values
+  - `TestServer_CustomConfig`: Tests custom config values
 
 ### Issue #11: Subscriber Channel Leak [MEDIUM]
 
@@ -210,7 +221,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 - [x] Fix build constraints (#2) ✅
 
 **Short-Term (4 tasks):**
-- [ ] Add X1 rate limiting (#4)
+- [x] Add X1 rate limiting (#4) ✅
 - [ ] Fix subscriber channel leak (#11)
 - [ ] Add writtenKeys cleanup (#8)
 - [ ] Include X1 error details (#9)

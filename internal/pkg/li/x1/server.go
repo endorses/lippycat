@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/time/rate"
 
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -209,6 +210,15 @@ type ServerConfig struct {
 
 	// Version is the X1 protocol version (default: "v1.13.1").
 	Version string
+
+	// RateLimitPerIP is the maximum requests per second per IP address (default: 10).
+	RateLimitPerIP float64
+
+	// RateLimitBurst is the maximum burst size for rate limiting (default: 20).
+	RateLimitBurst int
+
+	// XMLParseTimeout is the maximum time allowed for XML parsing (default: 5s).
+	XMLParseTimeout time.Duration
 }
 
 // DestinationManager provides destination CRUD operations.
@@ -244,6 +254,9 @@ type Server struct {
 	httpServer   *http.Server
 	listener     net.Listener
 	shutdownOnce sync.Once
+
+	// rateLimiters stores per-IP rate limiters for request throttling.
+	rateLimiters sync.Map // map[string]*rate.Limiter
 }
 
 // NewServer creates a new X1 server.
@@ -254,6 +267,15 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 	if config.NEIdentifier == "" {
 		hostname, _ := os.Hostname()
 		config.NEIdentifier = hostname
+	}
+	if config.RateLimitPerIP <= 0 {
+		config.RateLimitPerIP = 10 // 10 requests/second per IP
+	}
+	if config.RateLimitBurst <= 0 {
+		config.RateLimitBurst = 20
+	}
+	if config.XMLParseTimeout <= 0 {
+		config.XMLParseTimeout = 5 * time.Second
 	}
 
 	return &Server{
@@ -400,8 +422,55 @@ func (s *Server) buildTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
+// getRateLimiter returns the rate limiter for the given IP, creating one if necessary.
+func (s *Server) getRateLimiter(ip string) *rate.Limiter {
+	if limiter, ok := s.rateLimiters.Load(ip); ok {
+		return limiter.(*rate.Limiter)
+	}
+
+	// Create new limiter for this IP
+	limiter := rate.NewLimiter(rate.Limit(s.config.RateLimitPerIP), s.config.RateLimitBurst)
+	actual, _ := s.rateLimiters.LoadOrStore(ip, limiter)
+	return actual.(*rate.Limiter)
+}
+
+// extractClientIP extracts the client IP from the request, handling proxies.
+func extractClientIP(r *http.Request) string {
+	// For X1, we typically don't go through proxies, but handle X-Forwarded-For if present
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Take the first IP in the chain
+		for i := 0; i < len(xff); i++ {
+			if xff[i] == ',' {
+				return xff[:i]
+			}
+		}
+		return xff
+	}
+
+	// Extract IP from RemoteAddr (host:port format)
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 // handleX1Request handles incoming X1 requests.
 func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
+	// Extract client IP for rate limiting
+	clientIP := extractClientIP(r)
+
+	// Check rate limit
+	limiter := s.getRateLimiter(clientIP)
+	if !limiter.Allow() {
+		logger.Warn("X1 rate limit exceeded",
+			"remote", r.RemoteAddr,
+			"client_ip", clientIP,
+		)
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+
 	// Log request
 	logger.Debug("X1 request received",
 		"method", r.Method,
@@ -417,10 +486,38 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Detect the root element to determine if this is a container or direct request
+	// Create context with timeout for XML parsing
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.XMLParseTimeout)
+	defer cancel()
+
+	// Parse XML with timeout protection via goroutine
+	type parseResult struct {
+		rootDetector xmlRootDetector
+		err          error
+	}
+	resultCh := make(chan parseResult, 1)
+
+	go func() {
+		var root xmlRootDetector
+		err := xml.Unmarshal(body, &root)
+		resultCh <- parseResult{root, err}
+	}()
+
+	// Wait for result or timeout
 	var rootDetector xmlRootDetector
-	if err := xml.Unmarshal(body, &rootDetector); err != nil {
-		s.sendErrorResponse(w, "", ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			s.sendErrorResponse(w, "", ErrorCodeRequestSyntaxError, "invalid XML: "+result.err.Error())
+			return
+		}
+		rootDetector = result.rootDetector
+	case <-ctx.Done():
+		logger.Warn("X1 XML parsing timeout",
+			"remote", r.RemoteAddr,
+			"timeout", s.config.XMLParseTimeout,
+		)
+		http.Error(w, "request timeout", http.StatusServiceUnavailable)
 		return
 	}
 

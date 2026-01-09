@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -2018,4 +2019,264 @@ func TestExtractTargetIdentifiers_EmptyIdentifier(t *testing.T) {
 	_, err := extractTargetIdentifiers(input)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported target identifier type")
+}
+
+// ============================================================================
+// Rate Limiting Tests
+// ============================================================================
+
+// TestServer_RateLimiting tests that rate limiting is enforced per IP.
+func TestServer_RateLimiting(t *testing.T) {
+	mock := newMockDestinationManager()
+	config := ServerConfig{
+		NEIdentifier:   "test-ne",
+		RateLimitPerIP: 2, // Very low limit for testing
+		RateLimitBurst: 2, // Allow burst of 2
+	}
+	s := NewServer(config, mock, nil)
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<pingRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+</pingRequest>`
+
+	// First two requests should succeed (burst)
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+		req.Header.Set("Content-Type", "application/xml")
+		req.RemoteAddr = "192.168.1.100:12345"
+		w := httptest.NewRecorder()
+		s.handleX1Request(w, req)
+		assert.Equal(t, http.StatusOK, w.Code, "request %d should succeed", i+1)
+	}
+
+	// Third request should be rate limited
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	req.RemoteAddr = "192.168.1.100:12345"
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+	assert.Equal(t, http.StatusTooManyRequests, w.Code, "third request should be rate limited")
+}
+
+// TestServer_RateLimiting_PerIP tests that different IPs have separate rate limits.
+func TestServer_RateLimiting_PerIP(t *testing.T) {
+	mock := newMockDestinationManager()
+	config := ServerConfig{
+		NEIdentifier:   "test-ne",
+		RateLimitPerIP: 1,
+		RateLimitBurst: 1,
+	}
+	s := NewServer(config, mock, nil)
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<pingRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+</pingRequest>`
+
+	// Request from IP 1 - should succeed
+	req1 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req1.Header.Set("Content-Type", "application/xml")
+	req1.RemoteAddr = "192.168.1.100:12345"
+	w1 := httptest.NewRecorder()
+	s.handleX1Request(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code, "first IP should succeed")
+
+	// Request from IP 2 - should also succeed (different rate limiter)
+	req2 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req2.Header.Set("Content-Type", "application/xml")
+	req2.RemoteAddr = "192.168.1.200:12345"
+	w2 := httptest.NewRecorder()
+	s.handleX1Request(w2, req2)
+	assert.Equal(t, http.StatusOK, w2.Code, "second IP should succeed")
+
+	// Second request from IP 1 - should be rate limited
+	req3 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req3.Header.Set("Content-Type", "application/xml")
+	req3.RemoteAddr = "192.168.1.100:54321"
+	w3 := httptest.NewRecorder()
+	s.handleX1Request(w3, req3)
+	assert.Equal(t, http.StatusTooManyRequests, w3.Code, "second request from first IP should be limited")
+}
+
+// TestServer_RateLimiting_XForwardedFor tests rate limiting with X-Forwarded-For header.
+func TestServer_RateLimiting_XForwardedFor(t *testing.T) {
+	mock := newMockDestinationManager()
+	config := ServerConfig{
+		NEIdentifier:   "test-ne",
+		RateLimitPerIP: 1,
+		RateLimitBurst: 1,
+	}
+	s := NewServer(config, mock, nil)
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<pingRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+</pingRequest>`
+
+	// Request with X-Forwarded-For - should use forwarded IP
+	req1 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req1.Header.Set("Content-Type", "application/xml")
+	req1.Header.Set("X-Forwarded-For", "10.0.0.50")
+	req1.RemoteAddr = "192.168.1.100:12345" // Proxy IP
+	w1 := httptest.NewRecorder()
+	s.handleX1Request(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code, "first request should succeed")
+
+	// Second request from same forwarded IP - should be rate limited
+	req2 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req2.Header.Set("Content-Type", "application/xml")
+	req2.Header.Set("X-Forwarded-For", "10.0.0.50")
+	req2.RemoteAddr = "192.168.1.100:54321"
+	w2 := httptest.NewRecorder()
+	s.handleX1Request(w2, req2)
+	assert.Equal(t, http.StatusTooManyRequests, w2.Code, "second request from same forwarded IP should be limited")
+
+	// Request from different forwarded IP - should succeed
+	req3 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req3.Header.Set("Content-Type", "application/xml")
+	req3.Header.Set("X-Forwarded-For", "10.0.0.60")
+	req3.RemoteAddr = "192.168.1.100:54321"
+	w3 := httptest.NewRecorder()
+	s.handleX1Request(w3, req3)
+	assert.Equal(t, http.StatusOK, w3.Code, "different forwarded IP should succeed")
+}
+
+// TestServer_RateLimiting_XForwardedFor_Chain tests X-Forwarded-For with multiple IPs.
+func TestServer_RateLimiting_XForwardedFor_Chain(t *testing.T) {
+	mock := newMockDestinationManager()
+	config := ServerConfig{
+		NEIdentifier:   "test-ne",
+		RateLimitPerIP: 1,
+		RateLimitBurst: 1,
+	}
+	s := NewServer(config, mock, nil)
+
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<pingRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+</pingRequest>`
+
+	// Request with X-Forwarded-For chain - should use first IP
+	req1 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req1.Header.Set("Content-Type", "application/xml")
+	req1.Header.Set("X-Forwarded-For", "10.0.0.50, 172.16.0.1, 192.168.1.1")
+	req1.RemoteAddr = "192.168.1.100:12345"
+	w1 := httptest.NewRecorder()
+	s.handleX1Request(w1, req1)
+	assert.Equal(t, http.StatusOK, w1.Code, "first request should succeed")
+
+	// Second request from same chain - should be rate limited (same first IP)
+	req2 := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req2.Header.Set("Content-Type", "application/xml")
+	req2.Header.Set("X-Forwarded-For", "10.0.0.50, 172.16.0.2")
+	req2.RemoteAddr = "192.168.1.200:12345"
+	w2 := httptest.NewRecorder()
+	s.handleX1Request(w2, req2)
+	assert.Equal(t, http.StatusTooManyRequests, w2.Code, "same origin IP should be limited")
+}
+
+// TestExtractClientIP tests client IP extraction from requests.
+func TestExtractClientIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteAddr string
+		xff        string
+		expected   string
+	}{
+		{
+			name:       "simple remote addr with port",
+			remoteAddr: "192.168.1.100:12345",
+			xff:        "",
+			expected:   "192.168.1.100",
+		},
+		{
+			name:       "IPv6 remote addr with port",
+			remoteAddr: "[2001:db8::1]:12345",
+			xff:        "",
+			expected:   "2001:db8::1",
+		},
+		{
+			name:       "remote addr without port",
+			remoteAddr: "192.168.1.100",
+			xff:        "",
+			expected:   "192.168.1.100",
+		},
+		{
+			name:       "X-Forwarded-For single IP",
+			remoteAddr: "10.0.0.1:12345",
+			xff:        "192.168.1.100",
+			expected:   "192.168.1.100",
+		},
+		{
+			name:       "X-Forwarded-For chain",
+			remoteAddr: "10.0.0.1:12345",
+			xff:        "203.0.113.50, 70.41.3.18, 150.172.238.178",
+			expected:   "203.0.113.50",
+		},
+		{
+			name:       "X-Forwarded-For takes precedence",
+			remoteAddr: "192.168.1.100:12345",
+			xff:        "10.0.0.50",
+			expected:   "10.0.0.50",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.RemoteAddr = tt.remoteAddr
+			if tt.xff != "" {
+				req.Header.Set("X-Forwarded-For", tt.xff)
+			}
+			result := extractClientIP(req)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestServer_GetRateLimiter tests rate limiter creation and reuse.
+func TestServer_GetRateLimiter(t *testing.T) {
+	s := NewServer(ServerConfig{
+		NEIdentifier:   "test-ne",
+		RateLimitPerIP: 10,
+		RateLimitBurst: 20,
+	}, nil, nil)
+
+	// Get limiter for IP
+	limiter1 := s.getRateLimiter("192.168.1.100")
+	assert.NotNil(t, limiter1)
+
+	// Get limiter again - should return same instance (pointer comparison)
+	limiter2 := s.getRateLimiter("192.168.1.100")
+	assert.True(t, limiter1 == limiter2, "should return same limiter instance for same IP")
+
+	// Get limiter for different IP - should be different instance (pointer comparison)
+	limiter3 := s.getRateLimiter("192.168.1.200")
+	assert.True(t, limiter1 != limiter3, "should return different limiter instance for different IP")
+}
+
+// TestServer_DefaultConfig tests that default config values are applied.
+func TestServer_DefaultConfig(t *testing.T) {
+	s := NewServer(ServerConfig{}, nil, nil)
+
+	assert.Equal(t, "v1.13.1", s.config.Version)
+	assert.Equal(t, float64(10), s.config.RateLimitPerIP)
+	assert.Equal(t, 20, s.config.RateLimitBurst)
+	assert.Equal(t, 5*time.Second, s.config.XMLParseTimeout)
+}
+
+// TestServer_CustomConfig tests that custom config values are preserved.
+func TestServer_CustomConfig(t *testing.T) {
+	s := NewServer(ServerConfig{
+		Version:         "v2.0.0",
+		RateLimitPerIP:  50,
+		RateLimitBurst:  100,
+		XMLParseTimeout: 10 * time.Second,
+	}, nil, nil)
+
+	assert.Equal(t, "v2.0.0", s.config.Version)
+	assert.Equal(t, float64(50), s.config.RateLimitPerIP)
+	assert.Equal(t, 100, s.config.RateLimitBurst)
+	assert.Equal(t, 10*time.Second, s.config.XMLParseTimeout)
 }

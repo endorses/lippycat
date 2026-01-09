@@ -1,3 +1,5 @@
+//go:build processor || tap || all
+
 // Package processor provides the core processor node implementation for the distributed
 // capture system. This file contains the core types, configuration, constructor, and
 // basic accessors for the Processor.

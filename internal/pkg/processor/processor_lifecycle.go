@@ -1,3 +1,5 @@
+//go:build processor || tap || all
+
 // Package processor - Lifecycle Management
 //
 // This file contains the processor lifecycle management methods:

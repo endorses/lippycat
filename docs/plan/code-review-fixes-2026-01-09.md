@@ -37,21 +37,32 @@ The `ExecutePcapCommand` (line 82) and `ExecuteVoipCommand` (lines 97-101) subst
   - `TestExecuteVoipCommand_CommandInjectionPrevention_SubshellExpansion`: Tests $() execution
   - `TestExecuteVoipCommand_PathWithSpaces`: Tests proper handling of spaces
 
-### Issue #2: Build Constraint Test Failures [HIGH]
+### Issue #2: Build Constraint Test Failures [HIGH] ✅ FIXED
 
-**Files:** Multiple test files in `internal/pkg/processor/`
+**Files:** `internal/pkg/processor/`, `internal/pkg/tls/keylog/`
 
-Tests fail without `-tags all` due to `TLSKeylogWriter` being build-tagged but referenced unconditionally.
+Tests failed without `-tags all` because `internal/pkg/processor` imported `internal/pkg/tls/keylog` which had build constraints, but processor itself had no constraints.
 
-- [ ] Add test file build constraints
-  - Ensure `processor_test.go` and related test files have `//go:build all` or appropriate tags
-  - Add `processor_tls_keylog_writer_test.go` with `//go:build processor || tap || all`
+**Root Cause:** The `processor` package had no build tags but imported packages with build tags (`tls/keylog`). When running `go test ./...` without tags, keylog was excluded but processor tried to import it.
 
-- [ ] Update Makefile test target
-  - Modify `make test` to use `go test -tags all ./...`
-  - Document this requirement in CONTRIBUTING.md
+**Solution:** Add proper build constraints to the processor package (since it's only used by processor/tap/all builds):
 
-- [ ] Verify CI/CD pipeline uses correct test invocation
+- [x] Add `//go:build processor || tap || all` to all processor package files (28 files)
+  - All `.go` files in `internal/pkg/processor/`
+  - All `*_test.go` files in `internal/pkg/processor/`
+  - LI files updated to combined constraints: `(processor || tap || all) && li` / `(processor || tap || all) && !li`
+
+- [x] Add `processor` to `tls/keylog` package build tags
+  - Updated all files in `internal/pkg/tls/keylog/` to include `processor` tag
+  - Changed from `cli || hunter || tap || all` to `cli || hunter || processor || tap || all`
+
+- [x] Verify Makefile test target (already correct)
+  - `make test` already uses `go test -tags all ./...` (line 166)
+  - No changes needed
+
+- [x] Verify CONTRIBUTING.md documentation (already correct)
+  - Already documents `-tags all` requirement (lines 576-595)
+  - No changes needed
 
 ---
 
@@ -196,7 +207,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 
 **Immediate (2 tasks):**
 - [x] Fix command injection (#1) ✅
-- [ ] Fix build constraints (#2)
+- [x] Fix build constraints (#2) ✅
 
 **Short-Term (4 tasks):**
 - [ ] Add X1 rate limiting (#4)

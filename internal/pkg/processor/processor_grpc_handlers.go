@@ -1,3 +1,5 @@
+//go:build processor || tap || all
+
 // Package processor - gRPC Service Handlers
 //
 // This file contains all gRPC service method implementations for the processor:

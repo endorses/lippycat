@@ -1,4 +1,4 @@
-//go:build li
+//go:build (processor || tap || all) && li
 
 // Package processor - LI Integration (Lawful Interception)
 //

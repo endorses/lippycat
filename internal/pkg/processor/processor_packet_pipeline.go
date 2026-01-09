@@ -1,3 +1,5 @@
+//go:build processor || tap || all
+
 // Package processor - Packet Processing Pipeline
 //
 // This file contains the core packet processing logic for the processor:

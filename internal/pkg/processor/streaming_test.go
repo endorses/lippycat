@@ -256,22 +256,26 @@ func TestRemoveSubscriber(t *testing.T) {
 	// Add a subscriber
 	ch := processor.subscriberManager.Add("subscriber-1")
 
-	// Remove the subscriber
+	// Remove the subscriber (this closes the channel)
 	processor.subscriberManager.Remove("subscriber-1")
 
-	// Verify subscriber was removed by broadcasting (channel should not receive)
+	// Verify subscriber was removed - channel should be closed
+	select {
+	case _, ok := <-ch:
+		// Channel should be closed
+		assert.False(t, ok, "channel should be closed after Remove")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("channel should be closed immediately, not timeout")
+	}
+
+	// Broadcast should not panic with removed subscriber
 	batch := &data.PacketBatch{
 		HunterId: "test",
 		Packets:  []*data.CapturedPacket{{Data: []byte("test")}},
 	}
-	processor.subscriberManager.Broadcast(batch)
-
-	select {
-	case <-ch:
-		t.Fatal("removed subscriber should not receive broadcasts")
-	case <-time.After(100 * time.Millisecond):
-		// Success - subscriber not receiving
-	}
+	assert.NotPanics(t, func() {
+		processor.subscriberManager.Broadcast(batch)
+	})
 }
 
 // TestConcurrentBatchProcessing tests concurrent batch processing

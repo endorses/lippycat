@@ -94,28 +94,22 @@ The X1 HTTPS server lacks per-IP rate limiting. XML parsing can be expensive.
   - `TestServer_DefaultConfig`: Tests default config values
   - `TestServer_CustomConfig`: Tests custom config values
 
-### Issue #11: Subscriber Channel Leak [MEDIUM]
+### Issue #11: Subscriber Channel Leak [MEDIUM] ✅ FIXED
 
 **File:** `internal/pkg/processor/subscriber/manager.go`
 
 The `Remove()` method (lines 43-46) deletes from sync.Map but does not close the channel, leaving readers blocked forever.
 
-- [ ] Close channel on Remove
-  - Modify `Remove()` to retrieve channel before deletion
-  - Close the channel after deletion
-  - Document that subscribers must handle closed channels
+- [x] Close channel on Remove
+  - Created `safeChannel` wrapper type with synchronized `Close()` and `TrySend()` methods
+  - Uses RWMutex to prevent races between closing and sending
+  - `Remove()` now calls `safeChannel.Close()` which properly closes the underlying channel
+  - Callers receiving from the channel will see the channel as closed
 
-```go
-func (m *Manager) Remove(clientID string) {
-    if val, ok := m.subscribers.LoadAndDelete(clientID); ok {
-        close(val.(chan *data.PacketBatch))
-    }
-    m.filters.Delete(clientID)
-}
-```
-
-- [ ] Update `Broadcast()` to handle closed channel gracefully
-  - The existing `select` with `default` already handles this
+- [x] Update `Broadcast()` to handle closed channel gracefully
+  - Uses `safeChannel.TrySend()` which checks the closed flag under RLock before attempting send
+  - No panic possible from sending to closed channel
+  - Added comprehensive unit tests including race detector verification
 
 ### Issue #8: writtenKeys Memory Growth [MEDIUM]
 
@@ -222,7 +216,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 
 **Short-Term (4 tasks):**
 - [x] Add X1 rate limiting (#4) ✅
-- [ ] Fix subscriber channel leak (#11)
+- [x] Fix subscriber channel leak (#11) ✅
 - [ ] Add writtenKeys cleanup (#8)
 - [ ] Include X1 error details (#9)
 

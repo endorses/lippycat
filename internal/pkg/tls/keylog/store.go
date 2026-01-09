@@ -1,4 +1,4 @@
-//go:build cli || hunter || processor || tap || all
+//go:build cli || hunter || processor || tap || tui || all
 
 package keylog
 

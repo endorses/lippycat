@@ -1,4 +1,4 @@
-//go:build cli || hunter || tap || all
+//go:build cli || hunter || tap || tui || all
 
 package ciphers
 

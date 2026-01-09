@@ -1,3 +1,5 @@
+//go:build tui || all
+
 package store
 
 import (

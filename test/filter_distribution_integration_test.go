@@ -1,3 +1,5 @@
+//go:build processor || tap || all
+
 package test
 
 import (

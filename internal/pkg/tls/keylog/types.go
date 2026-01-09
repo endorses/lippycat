@@ -1,4 +1,4 @@
-//go:build cli || hunter || processor || tap || all
+//go:build cli || hunter || processor || tap || tui || all
 
 // Package keylog provides parsing and storage for TLS session keys
 // in the NSS Key Log format (SSLKEYLOGFILE).

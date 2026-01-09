@@ -1,4 +1,4 @@
-//go:build cli || hunter || tap || all
+//go:build cli || hunter || tap || tui || all
 
 // Package decrypt provides TLS record decryption using session keys
 // from SSLKEYLOGFILE format.

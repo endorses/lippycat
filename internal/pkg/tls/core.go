@@ -1,4 +1,4 @@
-//go:build cli || all
+//go:build cli || tui || all
 
 package tls
 

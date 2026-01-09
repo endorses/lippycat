@@ -4,12 +4,48 @@ lippycat supports decrypting TLS-encrypted traffic (HTTPS, SMTPS, IMAPS, etc.) u
 
 ## Overview
 
-TLS decryption requires session keys exported by the TLS client or server. These keys are stored in NSS Key Log Format (SSLKEYLOGFILE), which is also compatible with Wireshark.
+TLS decryption requires session keys exported by the TLS client or server. These keys are stored in NSS Key Log Format (SSLKEYLOGFILE), originally created by Mozilla's NSS library and now a de facto standard supported by Wireshark.
+
+**Key Log Format:**
+```
+# Each line: <label> <client_random_hex> <secret_hex>
+CLIENT_RANDOM 1234...abcd 5678...efgh
+```
 
 **Key concepts:**
 - Keys must be captured at runtime (forward secrecy prevents after-the-fact decryption)
 - The capturing node needs access to the key log file
 - In distributed mode, hunters forward keys to processors automatically
+
+## SSLKEYLOGFILE Support Matrix
+
+### Web Servers
+
+| Server | Support | Version | Mechanism | Notes |
+|--------|---------|---------|-----------|-------|
+| **Apache** | Native | 2.4.49+ | Environment variable | Requires OpenSSL 1.1.1+ |
+| **Caddy** | Native | v2.6.0+ | Environment variable | Uses Go's `KeyLogWriter` |
+| **nginx Plus** | Native | R33+ | `ssl_key_log` directive | Commercial only |
+| **nginx OSS** | Third-party | - | Module or LD_PRELOAD | See workarounds below |
+
+### Programming Languages
+
+| Language | Library | Support | Mechanism |
+|----------|---------|---------|-----------|
+| **Go** | crypto/tls | Native | `tls.Config.KeyLogWriter` |
+| **Python** | ssl | Manual | Set env var before import |
+| **Node.js** | tls | Native | `keylog` event on sockets |
+| **OpenSSL** | 1.1.1+ | Native | `SSL_CTX_set_keylog_callback()` |
+| **Java** | JSSE | Manual | Custom implementation required |
+
+### Client Applications
+
+| Application | Support | Mechanism |
+|-------------|---------|-----------|
+| **Firefox** | Native | `SSLKEYLOGFILE` env var |
+| **Chrome/Chromium** | Native | `SSLKEYLOGFILE` env var |
+| **curl** | Native | `SSLKEYLOGFILE` env var |
+| **wget** | Native | `SSLKEYLOGFILE` env var |
 
 ## CLI Usage
 
@@ -67,9 +103,52 @@ lc watch file -r /var/capture/session.pcap \
 
 ## Generating Key Logs
 
-### Server-Side (Typical Deployment)
+### Web Servers
 
-Configure your TLS server to log session keys. The capturing node runs on the same machine.
+#### Apache (2.4.49+)
+
+```bash
+# Set environment variable before starting Apache
+export SSLKEYLOGFILE=/var/log/apache2/sslkeys.log
+systemctl start apache2
+
+# Or in systemd unit file (/etc/systemd/system/apache2.service.d/override.conf)
+[Service]
+Environment="SSLKEYLOGFILE=/var/log/apache2/sslkeys.log"
+```
+
+**Note:** Requires OpenSSL 1.1.1+. Some distributions disable this feature by default.
+
+#### Caddy (v2.6.0+)
+
+```bash
+export SSLKEYLOGFILE=/tmp/caddy-keys.log
+caddy run
+```
+
+#### nginx Plus (R33+)
+
+```nginx
+server {
+    listen 443 ssl;
+    ssl_key_log /tmp/sslkey.log;
+    # ...
+}
+```
+
+Also supports `proxy_ssl_key_log`, `grpc_ssl_key_log`, and `uwsgi_ssl_key_log` for upstream connections.
+
+#### nginx Open Source (Workarounds)
+
+nginx OSS doesn't have native support. Options:
+
+1. **Third-party module:** [nginx-sslkeylog](https://github.com/tiandrey/nginx-sslkeylog)
+   - Requires OpenSSL 1.1.1+
+   - Requires patching nginx sources for TLSv1.3
+
+2. **LD_PRELOAD method:** Preload a shared library that intercepts OpenSSL calls
+   - No patching/rebuilding required
+   - Works with any OpenSSL-based application
 
 ### Browsers
 
@@ -78,40 +157,45 @@ export SSLKEYLOGFILE=/tmp/sslkeys.log
 firefox  # or chromium, chrome
 ```
 
-### curl
+### Command-Line Tools
 
 ```bash
+# curl
 SSLKEYLOGFILE=/tmp/sslkeys.log curl https://example.com
-```
 
-### OpenSSL (1.1.1+)
+# wget
+SSLKEYLOGFILE=/tmp/sslkeys.log wget https://example.com
 
-```bash
+# OpenSSL (1.1.1+)
 openssl s_client -connect example.com:443 -keylogfile /tmp/sslkeys.log
 ```
 
-### Python (requests)
+### Programming Languages
 
-```python
-import os
-os.environ['SSLKEYLOGFILE'] = '/tmp/sslkeys.log'
-import requests
-requests.get('https://example.com')
-```
-
-### Go (crypto/tls)
+#### Go (crypto/tls)
 
 ```go
+keylogFile, _ := os.Create("/tmp/keys.log")
 config := &tls.Config{
     KeyLogWriter: keylogFile,
 }
 ```
 
-### Node.js
+#### Python
+
+```python
+import os
+os.environ['SSLKEYLOGFILE'] = '/tmp/sslkeys.log'
+import requests  # Must import AFTER setting env var
+requests.get('https://example.com')
+```
+
+#### Node.js
 
 ```javascript
 // Set before importing https/tls modules
 process.env.SSLKEYLOGFILE = '/tmp/sslkeys.log';
+const https = require('https');
 ```
 
 ## Distributed Key Forwarding

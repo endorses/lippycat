@@ -150,7 +150,8 @@ func TestExecutePcapCommand_PlaceholderSubstitution(t *testing.T) {
 	testPath := "/var/pcaps/call_123_sip.pcap"
 
 	executor := NewCommandExecutor(&CommandExecutorConfig{
-		PcapCommand: "echo '%pcap%' > " + outputFile,
+		// Note: Do NOT quote %pcap% - shellEscape adds quotes automatically
+		PcapCommand: "echo %pcap% > " + outputFile,
 		Timeout:     5 * time.Second,
 		Concurrency: 1,
 	})
@@ -181,7 +182,9 @@ func TestExecuteVoipCommand_PlaceholderSubstitution(t *testing.T) {
 	}
 
 	executor := NewCommandExecutor(&CommandExecutorConfig{
-		VoipCommand: "echo '%callid%|%dirname%|%caller%|%called%|%calldate%' > " + outputFile,
+		// Note: Do NOT quote placeholders - shellEscape adds quotes automatically
+		// Use printf to concatenate the shell-escaped values
+		VoipCommand: "printf '%s|%s|%s|%s|%s\\n' %callid% %dirname% %caller% %called% %calldate% > " + outputFile,
 		Timeout:     5 * time.Second,
 		Concurrency: 1,
 	})
@@ -414,7 +417,8 @@ func TestOnFileClose_CallbackWorks(t *testing.T) {
 	testPath := "/var/pcaps/test.pcap"
 
 	executor := NewCommandExecutor(&CommandExecutorConfig{
-		PcapCommand: "echo '%pcap%' > " + outputFile,
+		// Note: Do NOT quote %pcap% - shellEscape adds quotes automatically
+		PcapCommand: "echo %pcap% > " + outputFile,
 		Timeout:     5 * time.Second,
 		Concurrency: 1,
 	})
@@ -447,7 +451,8 @@ func TestOnCallComplete_CallbackWorks(t *testing.T) {
 	}
 
 	executor := NewCommandExecutor(&CommandExecutorConfig{
-		VoipCommand: "echo '%callid%' > " + outputFile,
+		// Note: Do NOT quote %callid% - shellEscape adds quotes automatically
+		VoipCommand: "echo %callid% > " + outputFile,
 		Timeout:     5 * time.Second,
 		Concurrency: 1,
 	})
@@ -479,4 +484,274 @@ func TestCommandExecutor_FailedCommand(t *testing.T) {
 
 	// Wait for async execution
 	time.Sleep(100 * time.Millisecond)
+}
+
+// === Command Injection Prevention Tests ===
+
+func TestShellEscape(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple string",
+			input:    "hello",
+			expected: "'hello'",
+		},
+		{
+			name:     "string with spaces",
+			input:    "hello world",
+			expected: "'hello world'",
+		},
+		{
+			name:     "string with single quote",
+			input:    "it's",
+			expected: "'it'\\''s'",
+		},
+		{
+			name:     "string with multiple single quotes",
+			input:    "don't won't",
+			expected: "'don'\\''t won'\\''t'",
+		},
+		{
+			name:     "string with shell metacharacters",
+			input:    "; rm -rf /",
+			expected: "'; rm -rf /'",
+		},
+		{
+			name:     "string with backticks",
+			input:    "`whoami`",
+			expected: "'`whoami`'",
+		},
+		{
+			name:     "string with command substitution",
+			input:    "$(cat /etc/passwd)",
+			expected: "'$(cat /etc/passwd)'",
+		},
+		{
+			name:     "string with pipe",
+			input:    "test | cat",
+			expected: "'test | cat'",
+		},
+		{
+			name:     "string with redirect",
+			input:    "test > /etc/passwd",
+			expected: "'test > /etc/passwd'",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "''",
+		},
+		{
+			name:     "path with spaces",
+			input:    "/path/with spaces/file.pcap",
+			expected: "'/path/with spaces/file.pcap'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := shellEscape(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestContainsShellMetachars(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"safe string", "hello-world_123", false},
+		{"safe path", "/var/pcaps/call.pcap", false},
+		{"safe email", "alice@example.com", false},
+		{"semicolon", "test; rm -rf /", true},
+		{"pipe", "test | cat", true},
+		{"ampersand", "test && echo", true},
+		{"dollar sign", "$HOME", true},
+		{"backtick", "`whoami`", true},
+		{"double quote", "test\"quote", true},
+		{"single quote", "it's", true},
+		{"redirect", "test > file", true},
+		{"newline", "test\ncommand", true},
+		{"parenthesis", "$(cmd)", true},
+		{"brackets", "{a,b}", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := containsShellMetachars(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestExecutePcapCommand_CommandInjectionPrevention(t *testing.T) {
+	// Test that malicious file paths are safely escaped
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	markerFile := filepath.Join(tmpDir, "INJECTED")
+
+	// Malicious file path attempting command injection
+	maliciousPath := "/var/pcaps/test.pcap'; touch '" + markerFile + "'; echo '"
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		PcapCommand: "echo %pcap% > " + outputFile,
+		Timeout:     5 * time.Second,
+		Concurrency: 1,
+	})
+
+	executor.ExecutePcapCommand(maliciousPath)
+
+	// Wait for async execution
+	time.Sleep(200 * time.Millisecond)
+
+	// The marker file should NOT exist - injection should have been prevented
+	_, err := os.Stat(markerFile)
+	assert.True(t, os.IsNotExist(err), "Injection marker file should NOT exist - command injection should be prevented")
+
+	// The output file should contain the escaped path (not executed as command)
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, maliciousPath+"\n", string(content))
+}
+
+func TestExecuteVoipCommand_CommandInjectionPrevention_CallID(t *testing.T) {
+	// Test injection via Call-ID field (attacker-controlled from SIP packet)
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	markerFile := filepath.Join(tmpDir, "INJECTED")
+
+	// Malicious Call-ID attempting command injection
+	meta := CallMetadata{
+		CallID:   "abc123'; touch '" + markerFile + "'; echo '",
+		DirName:  "/var/pcaps/calls",
+		Caller:   "alice@example.com",
+		Called:   "bob@example.com",
+		CallDate: time.Now(),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		VoipCommand: "echo %callid% > " + outputFile,
+		Timeout:     5 * time.Second,
+		Concurrency: 1,
+	})
+
+	executor.ExecuteVoipCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(200 * time.Millisecond)
+
+	// The marker file should NOT exist - injection should have been prevented
+	_, err := os.Stat(markerFile)
+	assert.True(t, os.IsNotExist(err), "Injection marker file should NOT exist - command injection should be prevented")
+
+	// The output file should contain the malicious string safely
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, meta.CallID+"\n", string(content))
+}
+
+func TestExecuteVoipCommand_CommandInjectionPrevention_Caller(t *testing.T) {
+	// Test injection via Caller field (attacker-controlled from SIP From header)
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	markerFile := filepath.Join(tmpDir, "INJECTED")
+
+	// Malicious Caller attempting backtick command execution
+	meta := CallMetadata{
+		CallID:   "safe-call-id",
+		DirName:  "/var/pcaps/calls",
+		Caller:   "`touch " + markerFile + "`",
+		Called:   "bob@example.com",
+		CallDate: time.Now(),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		VoipCommand: "echo %caller% > " + outputFile,
+		Timeout:     5 * time.Second,
+		Concurrency: 1,
+	})
+
+	executor.ExecuteVoipCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(200 * time.Millisecond)
+
+	// The marker file should NOT exist - backtick execution should have been prevented
+	_, err := os.Stat(markerFile)
+	assert.True(t, os.IsNotExist(err), "Injection marker file should NOT exist - backtick execution should be prevented")
+
+	// The output should contain the literal backtick string
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, meta.Caller+"\n", string(content))
+}
+
+func TestExecuteVoipCommand_CommandInjectionPrevention_SubshellExpansion(t *testing.T) {
+	// Test $() subshell expansion prevention
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	markerFile := filepath.Join(tmpDir, "INJECTED")
+
+	// Malicious Called attempting $() command execution
+	meta := CallMetadata{
+		CallID:   "safe-call-id",
+		DirName:  "/var/pcaps/calls",
+		Caller:   "alice@example.com",
+		Called:   "$(touch " + markerFile + ")",
+		CallDate: time.Now(),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		VoipCommand: "echo %called% > " + outputFile,
+		Timeout:     5 * time.Second,
+		Concurrency: 1,
+	})
+
+	executor.ExecuteVoipCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(200 * time.Millisecond)
+
+	// The marker file should NOT exist - subshell execution should have been prevented
+	_, err := os.Stat(markerFile)
+	assert.True(t, os.IsNotExist(err), "Injection marker file should NOT exist - $() execution should be prevented")
+
+	// The output should contain the literal $() string
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, meta.Called+"\n", string(content))
+}
+
+func TestExecuteVoipCommand_PathWithSpaces(t *testing.T) {
+	// Test that paths with spaces work correctly with escaping
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+
+	meta := CallMetadata{
+		CallID:   "call-id-with spaces",
+		DirName:  "/var/pcaps/calls with spaces/subdir",
+		Caller:   "alice with space@example.com",
+		Called:   "bob smith@example.com",
+		CallDate: time.Now(),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		VoipCommand: "echo %callid% > " + outputFile,
+		Timeout:     5 * time.Second,
+		Concurrency: 1,
+	})
+
+	executor.ExecuteVoipCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(200 * time.Millisecond)
+
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, "call-id-with spaces\n", string(content))
 }

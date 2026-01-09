@@ -9,6 +9,25 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
+// shellMetachars contains shell metacharacters that could enable injection attacks
+const shellMetachars = ";|&$`\\\"'<>(){}[]!#~*?\n\r"
+
+// shellEscape escapes a string for safe use in shell commands.
+// It wraps the value in single quotes and escapes any embedded single quotes.
+// This is the safest approach as single-quoted strings in sh/bash
+// treat all characters literally except for single quotes themselves.
+func shellEscape(s string) string {
+	// Replace single quotes with '\'' (end quote, escaped quote, start quote)
+	escaped := strings.ReplaceAll(s, "'", "'\\''")
+	return "'" + escaped + "'"
+}
+
+// containsShellMetachars checks if a string contains shell metacharacters.
+// This is used for logging/warning purposes.
+func containsShellMetachars(s string) bool {
+	return strings.ContainsAny(s, shellMetachars)
+}
+
 // CallMetadata contains information about a completed VoIP call
 type CallMetadata struct {
 	CallID   string
@@ -78,8 +97,15 @@ func (e *CommandExecutor) ExecutePcapCommand(filePath string) {
 		return
 	}
 
-	// Substitute placeholder
-	cmd := strings.ReplaceAll(e.config.PcapCommand, "%pcap%", filePath)
+	// Log warning if filePath contains shell metacharacters
+	if containsShellMetachars(filePath) {
+		logger.Warn("PCAP file path contains shell metacharacters, escaping for safety",
+			"file", filePath,
+		)
+	}
+
+	// Substitute placeholder with shell-escaped value to prevent command injection
+	cmd := strings.ReplaceAll(e.config.PcapCommand, "%pcap%", shellEscape(filePath))
 
 	go e.executeAsync(cmd, "pcap", map[string]string{
 		"file": filePath,
@@ -92,13 +118,35 @@ func (e *CommandExecutor) ExecuteVoipCommand(meta CallMetadata) {
 		return
 	}
 
-	// Substitute all placeholders
+	// Log warning if any metadata fields contain shell metacharacters
+	// These values come from SIP packets and could be attacker-controlled
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"call_id", meta.CallID},
+		{"caller", meta.Caller},
+		{"called", meta.Called},
+	} {
+		if containsShellMetachars(field.value) {
+			logger.Warn("VoIP metadata contains shell metacharacters, escaping for safety",
+				"field", field.name,
+				"call_id", meta.CallID,
+			)
+			break // Only log once per command
+		}
+	}
+
+	// Substitute all placeholders with shell-escaped values to prevent command injection.
+	// CallID, Caller, and Called come from SIP packets and could be attacker-controlled.
+	// DirName is derived from CallID (already sanitized) and timestamps.
+	// CallDate is generated internally but escaped for consistency.
 	cmd := e.config.VoipCommand
-	cmd = strings.ReplaceAll(cmd, "%callid%", meta.CallID)
-	cmd = strings.ReplaceAll(cmd, "%dirname%", meta.DirName)
-	cmd = strings.ReplaceAll(cmd, "%caller%", meta.Caller)
-	cmd = strings.ReplaceAll(cmd, "%called%", meta.Called)
-	cmd = strings.ReplaceAll(cmd, "%calldate%", meta.CallDate.Format(time.RFC3339))
+	cmd = strings.ReplaceAll(cmd, "%callid%", shellEscape(meta.CallID))
+	cmd = strings.ReplaceAll(cmd, "%dirname%", shellEscape(meta.DirName))
+	cmd = strings.ReplaceAll(cmd, "%caller%", shellEscape(meta.Caller))
+	cmd = strings.ReplaceAll(cmd, "%called%", shellEscape(meta.Called))
+	cmd = strings.ReplaceAll(cmd, "%calldate%", shellEscape(meta.CallDate.Format(time.RFC3339)))
 
 	go e.executeAsync(cmd, "voip", map[string]string{
 		"call_id": meta.CallID,
@@ -142,7 +190,7 @@ func (e *CommandExecutor) executeAsync(cmdStr, cmdType string, logFields map[str
 	defer cancel()
 
 	// Execute command via shell
-	// #nosec G204 -- Command comes from config file, not user input
+	// #nosec G204 -- Command template from config, substituted values are shell-escaped
 	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
 
 	output, err := cmd.CombinedOutput()

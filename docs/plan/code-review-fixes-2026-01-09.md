@@ -2,7 +2,7 @@
 
 **Reference:** [docs/review/CODE_REVIEW_2026-01-09.md](../review/CODE_REVIEW_2026-01-09.md)
 **Created:** 2026-01-09
-**Status:** Pending
+**Status:** In Progress
 
 ## Summary
 
@@ -12,26 +12,30 @@ This plan addresses issues identified in the 2026-01-09 code review. Skipped iss
 
 ## Immediate Priority (Before Next Release)
 
-### Issue #1: Command Injection in CommandExecutor [CRITICAL]
+### Issue #1: Command Injection in CommandExecutor [CRITICAL] ✅ FIXED
 
 **File:** `internal/pkg/processor/command_executor.go`
 
 The `ExecutePcapCommand` (line 82) and `ExecuteVoipCommand` (lines 97-101) substitute attacker-controllable values from SIP packets directly into shell commands.
 
-- [ ] Add shell escaping for substituted values
-  - Import `github.com/alessio/shellescape` (or equivalent)
-  - In `ExecutePcapCommand` (line 82): Escape `filePath` before substitution
-  - In `ExecuteVoipCommand` (lines 97-101): Escape `meta.CallID`, `meta.DirName`, `meta.Caller`, `meta.Called` before substitution
-  - Alternative: Refactor to use `exec.Command` with separate arguments instead of shell evaluation
+- [x] Add shell escaping for substituted values
+  - Implemented `shellEscape()` function using single-quote wrapping with embedded quote escaping
+  - `ExecutePcapCommand`: Escapes `filePath` before substitution
+  - `ExecuteVoipCommand`: Escapes all metadata fields (`CallID`, `DirName`, `Caller`, `Called`, `CallDate`)
 
-- [ ] Add input validation to reject shell metacharacters
-  - Create helper function `containsShellMetachars(s string) bool`
-  - Log warning and skip execution if metacharacters detected
-  - Characters to check: `;`, `|`, `&`, `$`, `` ` ``, `\`, `"`, `'`, `<`, `>`, `(`, `)`, `{`, `}`, `[`, `]`
+- [x] Add input validation to reject shell metacharacters
+  - Created `containsShellMetachars(s string) bool` helper function
+  - Logs warning when metacharacters are detected (still executes safely with escaping)
+  - Characters checked: `;|&$`\"'<>(){}[]!#~*?\n\r`
 
-- [ ] Add unit tests for command injection prevention
-  - Test with Call-ID containing `; rm -rf /`
-  - Test with caller/called containing backticks and $()
+- [x] Add unit tests for command injection prevention
+  - `TestShellEscape`: Tests escaping of various metacharacters and edge cases
+  - `TestContainsShellMetachars`: Tests detection of shell metacharacters
+  - `TestExecutePcapCommand_CommandInjectionPrevention`: Tests quote-based injection
+  - `TestExecuteVoipCommand_CommandInjectionPrevention_CallID`: Tests Call-ID injection
+  - `TestExecuteVoipCommand_CommandInjectionPrevention_Caller`: Tests backtick execution
+  - `TestExecuteVoipCommand_CommandInjectionPrevention_SubshellExpansion`: Tests $() execution
+  - `TestExecuteVoipCommand_PathWithSpaces`: Tests proper handling of spaces
 
 ### Issue #2: Build Constraint Test Failures [HIGH]
 
@@ -191,7 +195,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 ## Checklist Summary
 
 **Immediate (2 tasks):**
-- [ ] Fix command injection (#1)
+- [x] Fix command injection (#1) ✅
 - [ ] Fix build constraints (#2)
 
 **Short-Term (4 tasks):**

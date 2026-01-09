@@ -515,6 +515,7 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 - [docs/operational-procedures.md](docs/operational-procedures.md) - Production operations and procedures
 
 ### Specialized Topics
+- [docs/TLS_DECRYPTION.md](docs/TLS_DECRYPTION.md) - TLS decryption with SSLKEYLOGFILE, Wireshark integration
 - [docs/GPU_ACCELERATION.md](docs/GPU_ACCELERATION.md) - GPU backends (CUDA, OpenCL, SIMD), benchmarks
 - [docs/GPU_TROUBLESHOOTING.md](docs/GPU_TROUBLESHOOTING.md) - GPU-specific troubleshooting
 - [docs/tcp-troubleshooting.md](docs/tcp-troubleshooting.md) - TCP SIP capture troubleshooting

@@ -83,6 +83,8 @@ lc watch file -r https.pcap --tls-keylog /tmp/sslkeys.log
 
 The TUI will show a "TLS" indicator in the header when decryption is enabled. In the packet details panel, decrypted content appears in a dedicated "Decrypted Content" section with HTTP syntax highlighting.
 
+**For comprehensive documentation:** See [docs/TLS_DECRYPTION.md](../../docs/TLS_DECRYPTION.md) for key log generation, distributed key forwarding, Wireshark integration, and troubleshooting.
+
 ### Remote Monitoring
 
 ```bash
@@ -202,6 +204,7 @@ lc watch file -r voip-capture.pcap -f "port 5060"
 
 ## See Also
 
+- [docs/TLS_DECRYPTION.md](../../docs/TLS_DECRYPTION.md) - TLS decryption guide
 - [docs/TUI_REMOTE_CAPTURE.md](../../docs/TUI_REMOTE_CAPTURE.md) - Remote capture setup guide
 - [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS configuration
 - [internal/pkg/tui/CLAUDE.md](../../internal/pkg/tui/CLAUDE.md) - TUI architecture

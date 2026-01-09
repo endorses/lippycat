@@ -6,6 +6,7 @@ package components
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,14 +14,19 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
+// DecryptedDataGetter is a callback function type for retrieving decrypted TLS data.
+// It takes source/destination IP and port and returns client and server decrypted data.
+type DecryptedDataGetter func(srcIP, dstIP, srcPort, dstPort string) (clientData, serverData []byte)
+
 // DetailsPanel displays detailed information about a selected packet
 type DetailsPanel struct {
-	viewport viewport.Model
-	packet   *PacketDisplay
-	width    int
-	height   int
-	theme    themes.Theme
-	ready    bool
+	viewport            viewport.Model
+	packet              *PacketDisplay
+	width               int
+	height              int
+	theme               themes.Theme
+	ready               bool
+	decryptedDataGetter DecryptedDataGetter // Callback to get decrypted TLS data
 }
 
 // NewDetailsPanel creates a new details panel
@@ -37,6 +43,11 @@ func NewDetailsPanel() DetailsPanel {
 // SetTheme updates the theme
 func (d *DetailsPanel) SetTheme(theme themes.Theme) {
 	d.theme = theme
+}
+
+// SetDecryptedDataGetter sets the callback for retrieving decrypted TLS data
+func (d *DetailsPanel) SetDecryptedDataGetter(getter DecryptedDataGetter) {
+	d.decryptedDataGetter = getter
 }
 
 // SetPacket sets the packet to display
@@ -453,6 +464,34 @@ func (d *DetailsPanel) renderContent() string {
 		}
 	}
 
+	// Decrypted Data Section (for TLS-encrypted traffic with keylog)
+	if d.decryptedDataGetter != nil && d.packet.Protocol == "TLS" {
+		clientData, serverData := d.decryptedDataGetter(d.packet.SrcIP, d.packet.DstIP, d.packet.SrcPort, d.packet.DstPort)
+		if len(clientData) > 0 || len(serverData) > 0 {
+			content.WriteString("\n\n")
+			decryptedStyle := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(d.theme.SuccessColor)
+			content.WriteString(decryptedStyle.Render("🔓 Decrypted Content"))
+			content.WriteString("\n\n")
+
+			if len(clientData) > 0 {
+				content.WriteString(labelStyle.Render("Client → Server:\n"))
+				content.WriteString(d.renderDecryptedContent(clientData, contentWidth))
+				content.WriteString("\n")
+			}
+
+			if len(serverData) > 0 {
+				if len(clientData) > 0 {
+					content.WriteString("\n")
+				}
+				content.WriteString(labelStyle.Render("Server → Client:\n"))
+				content.WriteString(d.renderDecryptedContent(serverData, contentWidth))
+				content.WriteString("\n")
+			}
+		}
+	}
+
 	// Hex Dump Section
 	content.WriteString("\n\n")
 	content.WriteString(sectionStyle.Render("🔍 Hex Dump"))
@@ -594,4 +633,104 @@ func (d *DetailsPanel) renderHexDump(data []byte) string {
 	}
 
 	return sb.String()
+}
+
+// renderDecryptedContent renders decrypted TLS data as text with syntax highlighting
+// for HTTP and other text-based protocols, or falls back to hex dump for binary data.
+func (d *DetailsPanel) renderDecryptedContent(data []byte, maxWidth int) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	// Limit display size to avoid overwhelming the UI
+	const maxDisplaySize = 4096
+	displayData := data
+	truncated := false
+	if len(data) > maxDisplaySize {
+		displayData = data[:maxDisplaySize]
+		truncated = true
+	}
+
+	// Check if data is printable text (HTTP, etc.)
+	isPrintable := true
+	nonPrintableCount := 0
+	for _, b := range displayData[:min(len(displayData), 512)] {
+		if b < 32 && b != '\n' && b != '\r' && b != '\t' {
+			nonPrintableCount++
+		}
+	}
+	// Allow up to 5% non-printable characters (for binary-like text protocols)
+	if nonPrintableCount > len(displayData[:min(len(displayData), 512)])/20 {
+		isPrintable = false
+	}
+
+	var sb strings.Builder
+
+	if isPrintable {
+		// Render as formatted text
+		textStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg)
+		httpMethodStyle := lipgloss.NewStyle().Foreground(d.theme.HTTPColor).Bold(true)
+		httpHeaderStyle := lipgloss.NewStyle().Foreground(d.theme.InfoColor)
+
+		lines := strings.Split(string(displayData), "\n")
+		for i, line := range lines {
+			// Limit line count
+			if i >= 50 {
+				sb.WriteString(textStyle.Render("... (truncated)"))
+				break
+			}
+
+			// Trim carriage returns
+			line = strings.TrimSuffix(line, "\r")
+
+			// Truncate long lines
+			if len(line) > maxWidth {
+				line = line[:maxWidth-3] + "..."
+			}
+
+			// Highlight HTTP request/response lines
+			if strings.HasPrefix(line, "GET ") || strings.HasPrefix(line, "POST ") ||
+				strings.HasPrefix(line, "PUT ") || strings.HasPrefix(line, "DELETE ") ||
+				strings.HasPrefix(line, "HEAD ") || strings.HasPrefix(line, "OPTIONS ") ||
+				strings.HasPrefix(line, "HTTP/") {
+				sb.WriteString(httpMethodStyle.Render(line))
+			} else if strings.Contains(line, ":") && !strings.HasPrefix(line, " ") && len(line) < 100 {
+				// Likely an HTTP header
+				parts := strings.SplitN(line, ":", 2)
+				if len(parts) == 2 && isHTTPHeaderName(parts[0]) {
+					sb.WriteString(httpHeaderStyle.Render(parts[0] + ":"))
+					sb.WriteString(textStyle.Render(parts[1]))
+				} else {
+					sb.WriteString(textStyle.Render(line))
+				}
+			} else {
+				sb.WriteString(textStyle.Render(line))
+			}
+			sb.WriteString("\n")
+		}
+	} else {
+		// Render as hex dump for binary data
+		sb.WriteString(d.renderHexDump(displayData))
+	}
+
+	if truncated {
+		sb.WriteString(lipgloss.NewStyle().
+			Foreground(d.theme.WarningColor).
+			Render(fmt.Sprintf("\n... (showing %d of %d bytes)", maxDisplaySize, len(data))))
+	}
+
+	return sb.String()
+}
+
+// isHTTPHeaderName checks if a string looks like an HTTP header name
+func isHTTPHeaderName(s string) bool {
+	if len(s) == 0 || len(s) > 50 {
+		return false
+	}
+	for _, c := range s {
+		if !unicode.IsLetter(c) && c != '-' {
+			return false
+		}
+	}
+	return true
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -30,6 +31,10 @@ var (
 	hunterHTTPKeywords    string // Body/URL keyword patterns (comma-separated)
 	hunterHTTPCaptureBody bool   // Enable body capture for keyword filtering
 	hunterHTTPMaxBodySize int    // Max body size to capture (bytes)
+
+	// TLS decryption flags
+	hunterHTTPTLSKeylog     string // Path to SSLKEYLOGFILE
+	hunterHTTPTLSKeylogPipe string // Path to named pipe for key injection
 )
 
 var httpHuntCmd = &cobra.Command{
@@ -48,9 +53,19 @@ Features:
 - Method and status code filtering
 - Body content keyword filtering (Aho-Corasick)
 - Efficient forwarding to processor
+- HTTPS decryption via SSLKEYLOGFILE (forwards encrypted + keys to processor)
 
 Filters can be specified locally (flags) or pushed from the processor.
 Local filters apply in addition to processor-pushed filters.
+
+TLS Decryption (HTTPS):
+  --tls-keylog        Path to SSLKEYLOGFILE for HTTPS decryption
+  --tls-keylog-pipe   Path to named pipe for real-time TLS key injection
+
+When TLS decryption is enabled, the hunter decrypts traffic locally to apply
+content filters, then forwards the original encrypted packets plus session
+keys to the processor. The processor stores encrypted PCAP + keylog files
+(Wireshark-compatible) for audit integrity.
 
 Example:
   lc hunt http --processor processor:50051
@@ -59,7 +74,8 @@ Example:
   lc hunt http --processor processor:50051 --host "*.example.com"
   lc hunt http --processor processor:50051 --path "/api/*"
   lc hunt http --processor processor:50051 --method "POST,PUT"
-  lc hunt http --processor processor:50051 --keywords "password,secret" --capture-body`,
+  lc hunt http --processor processor:50051 --keywords "password,secret" --capture-body
+  lc hunt http --processor processor:50051 --tls-keylog /tmp/sslkeys.log`,
 	RunE: runHTTPHunt,
 }
 
@@ -78,6 +94,10 @@ func init() {
 	httpHuntCmd.Flags().BoolVar(&hunterHTTPCaptureBody, "capture-body", false, "Enable body capture for keyword filtering")
 	httpHuntCmd.Flags().IntVar(&hunterHTTPMaxBodySize, "max-body-size", 65536, "Max body size to capture in bytes (default: 64KB)")
 
+	// TLS decryption flags
+	httpHuntCmd.Flags().StringVar(&hunterHTTPTLSKeylog, "tls-keylog", "", "Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)")
+	httpHuntCmd.Flags().StringVar(&hunterHTTPTLSKeylogPipe, "tls-keylog-pipe", "", "Path to named pipe for real-time TLS key injection")
+
 	// Bind to viper
 	_ = viper.BindPFlag("hunter.http.ports", httpHuntCmd.Flags().Lookup("http-port"))
 	_ = viper.BindPFlag("hunter.http.host", httpHuntCmd.Flags().Lookup("host"))
@@ -87,6 +107,8 @@ func init() {
 	_ = viper.BindPFlag("hunter.http.keywords", httpHuntCmd.Flags().Lookup("keywords"))
 	_ = viper.BindPFlag("hunter.http.capture_body", httpHuntCmd.Flags().Lookup("capture-body"))
 	_ = viper.BindPFlag("hunter.http.max_body_size", httpHuntCmd.Flags().Lookup("max-body-size"))
+	_ = viper.BindPFlag("hunter.http.tls_keylog", httpHuntCmd.Flags().Lookup("tls-keylog"))
+	_ = viper.BindPFlag("hunter.http.tls_keylog_pipe", httpHuntCmd.Flags().Lookup("tls-keylog-pipe"))
 }
 
 func runHTTPHunt(cmd *cobra.Command, args []string) error {
@@ -118,6 +140,25 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 	logger.Info("HTTP BPF filter configured",
 		"ports", hunterHTTPPorts,
 		"effective_filter", effectiveBPFFilter)
+
+	// Configure TLS decryption if specified
+	tlsKeylogPath := hunterHTTPTLSKeylog
+	if tlsKeylogPath == "" {
+		tlsKeylogPath = hunterHTTPTLSKeylogPipe
+	}
+	if tlsKeylogPath != "" {
+		decryptConfig := tls.DecryptConfig{
+			KeylogFile: hunterHTTPTLSKeylog,
+			KeylogPipe: hunterHTTPTLSKeylogPipe,
+		}
+		if err := decryptConfig.Validate(); err != nil {
+			return fmt.Errorf("invalid TLS keylog configuration: %w", err)
+		}
+		viper.Set("http.tls_keylog", tlsKeylogPath)
+		viper.Set("http.tls_decryption_enabled", true)
+		logger.Info("TLS decryption configured (keys will be forwarded to processor)",
+			"keylog", tlsKeylogPath)
+	}
 
 	// Get configuration (reuse flags from parent command)
 	config := hunter.Config{
@@ -180,7 +221,8 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 		"hunter_id", config.HunterID,
 		"processor", config.ProcessorAddr,
 		"interfaces", config.Interfaces,
-		"http_ports", hunterHTTPPorts)
+		"http_ports", hunterHTTPPorts,
+		"tls_decryption", tlsKeylogPath != "")
 
 	// Create hunter instance
 	h, err := hunter.New(config)

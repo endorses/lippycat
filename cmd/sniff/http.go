@@ -5,6 +5,7 @@ package sniff
 import (
 	"github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -22,6 +23,7 @@ Features:
 - Content-type detection
 - Method and status code filtering
 - User-Agent and keyword matching
+- HTTPS decryption via SSLKEYLOGFILE
 
 Filter Options:
   --host         Match host header (glob pattern)
@@ -35,6 +37,10 @@ Filter Options:
 Body Capture (for keyword matching in body):
   --capture-body      Enable body content capture (default: false)
   --max-body-size     Maximum body size to capture (default: 64KB)
+
+TLS Decryption (HTTPS):
+  --tls-keylog        Path to SSLKEYLOGFILE for HTTPS decryption
+  --tls-keylog-pipe   Path to named pipe for real-time key injection
 
 Pattern Files (one pattern per line, # for comments):
   --hosts-file, --paths-file, --user-agents-file, --content-types-file
@@ -65,7 +71,18 @@ Examples:
   lc sniff http -i eth0 --http-port 80,8080,3000
 
   # Write to output file
-  lc sniff http -i eth0 -w http-output.pcap`,
+  lc sniff http -i eth0 -w http-output.pcap
+
+  # HTTPS decryption with keylog file
+  lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
+
+  # HTTPS decryption from PCAP + keylog
+  lc sniff http -r capture.pcap --tls-keylog keys.log
+
+  # Real-time HTTPS decryption via named pipe
+  mkfifo /tmp/sslkeys.pipe
+  lc sniff http -i eth0 --tls-keylog-pipe /tmp/sslkeys.pipe &
+  SSLKEYLOGFILE=/tmp/sslkeys.pipe curl https://example.com`,
 	Run: httpHandler,
 }
 
@@ -91,6 +108,10 @@ var (
 	// Body capture flags
 	httpCaptureBody bool
 	httpMaxBodySize int
+
+	// TLS decryption flags
+	httpTLSKeylog     string
+	httpTLSKeylogPipe string
 )
 
 func httpHandler(cmd *cobra.Command, args []string) {
@@ -200,6 +221,24 @@ func httpHandler(cmd *cobra.Command, args []string) {
 	}
 	effectiveFilter := filterBuilder.Build(filterConfig)
 
+	// Configure TLS decryption if specified
+	tlsKeylogPath := httpTLSKeylog
+	if tlsKeylogPath == "" {
+		tlsKeylogPath = httpTLSKeylogPipe
+	}
+	if tlsKeylogPath != "" {
+		decryptConfig := tls.DecryptConfig{
+			KeylogFile: httpTLSKeylog,
+			KeylogPipe: httpTLSKeylogPipe,
+		}
+		if err := decryptConfig.Validate(); err != nil {
+			logger.Error("Invalid TLS keylog configuration", "error", err)
+			return
+		}
+		viper.Set("http.tls_keylog", tlsKeylogPath)
+		viper.Set("http.tls_decryption_enabled", true)
+	}
+
 	logger.Info("Starting HTTP sniffing",
 		"interfaces", interfaces,
 		"filter", effectiveFilter,
@@ -207,7 +246,8 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		"path_pattern", httpPathPattern,
 		"methods", httpMethods,
 		"status_codes", httpStatusCodes,
-		"track_requests", httpTrackRequests)
+		"track_requests", httpTrackRequests,
+		"tls_decryption", tlsKeylogPath != "")
 
 	// Start HTTP sniffer using appropriate mode
 	if readFile == "" {
@@ -242,6 +282,10 @@ func init() {
 	httpCmd.Flags().BoolVar(&httpCaptureBody, "capture-body", false, "Enable HTTP body content capture (for keyword matching)")
 	httpCmd.Flags().IntVar(&httpMaxBodySize, "max-body-size", 65536, "Maximum body size to capture in bytes (default: 64KB)")
 
+	// TLS decryption flags
+	httpCmd.Flags().StringVar(&httpTLSKeylog, "tls-keylog", "", "Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)")
+	httpCmd.Flags().StringVar(&httpTLSKeylogPipe, "tls-keylog-pipe", "", "Path to named pipe for real-time TLS key injection")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("http.host_pattern", httpCmd.Flags().Lookup("host"))
 	_ = viper.BindPFlag("http.path_pattern", httpCmd.Flags().Lookup("path"))
@@ -258,4 +302,6 @@ func init() {
 	_ = viper.BindPFlag("http.track_requests", httpCmd.Flags().Lookup("track-requests"))
 	_ = viper.BindPFlag("http.capture_body", httpCmd.Flags().Lookup("capture-body"))
 	_ = viper.BindPFlag("http.max_body_size", httpCmd.Flags().Lookup("max-body-size"))
+	_ = viper.BindPFlag("http.tls_keylog", httpCmd.Flags().Lookup("tls-keylog"))
+	_ = viper.BindPFlag("http.tls_keylog_pipe", httpCmd.Flags().Lookup("tls-keylog-pipe"))
 }

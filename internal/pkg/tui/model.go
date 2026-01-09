@@ -197,6 +197,16 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		uiState.SetCapturing(true)
 	}
 
+	// Set up TLS decryption data getter if decryption is enabled
+	if viper.GetBool("tui.tls_decryption_enabled") {
+		uiState.DetailsPanel.SetDecryptedDataGetter(func(srcIP, dstIP, srcPort, dstPort string) (clientData, serverData []byte) {
+			if decryptor := GetTLSDecryptor(); decryptor != nil {
+				return decryptor.GetDecryptedData(srcIP, dstIP, srcPort, dstPort)
+			}
+			return nil, nil
+		})
+	}
+
 	return Model{
 		packetStore:                packetStore,
 		callStore:                  callStore,

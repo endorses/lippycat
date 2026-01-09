@@ -5,6 +5,7 @@ package tui
 
 import (
 	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/viper"
 )
 
 // View renders the entire TUI based on current state
@@ -21,6 +22,7 @@ func (m Model) View() string {
 	// Use hunter count (not remote client count) for accurate node display
 	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
 	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())
+	m.uiState.Header.SetTLSDecryption(viper.GetBool("tui.tls_decryption_enabled"))
 
 	// Update footer state
 	m.uiState.Footer.SetFilterMode(m.uiState.FilterMode)

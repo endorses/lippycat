@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/tui"
 	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/cobra"
@@ -23,15 +24,21 @@ var fileCmd = &cobra.Command{
 	Short: "Analyze PCAP file in TUI",
 	Long: `Open a PCAP file for interactive analysis in the TUI.
 
+TLS Decryption:
+  Use --tls-keylog to provide an SSLKEYLOGFILE for decrypting HTTPS traffic.
+  This enables viewing decrypted HTTP content from encrypted PCAP captures.
+
 Examples:
   lc watch file -r capture.pcap
-  lc watch file -r capture.pcap -f "port 5060"  # With BPF filter`,
+  lc watch file -r capture.pcap -f "port 5060"  # With BPF filter
+  lc watch file -r capture.pcap --tls-keylog keys.log  # With TLS decryption`,
 	Run: runFile,
 }
 
 var (
-	fileReadFile string
-	fileFilter   string
+	fileReadFile  string
+	fileFilter    string
+	fileTLSKeylog string
 )
 
 func runFile(cmd *cobra.Command, args []string) {
@@ -40,9 +47,27 @@ func runFile(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Validate TLS keylog if specified
+	if fileTLSKeylog != "" {
+		decryptConfig := tls.DecryptConfig{
+			KeylogFile: fileTLSKeylog,
+		}
+		if err := decryptConfig.Validate(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid TLS keylog: %v\n", err)
+			os.Exit(1)
+		}
+		viper.Set("tui.tls_keylog", fileTLSKeylog)
+		viper.Set("tui.tls_decryption_enabled", true)
+	}
+
 	// Disable logging to prevent corrupting TUI display
 	logger.Disable()
 	defer logger.Enable()
+
+	// Initialize TLS decryptor if enabled
+	if tui.InitTLSDecryptorFromConfig() {
+		defer tui.ClearTLSDecryptor()
+	}
 
 	// Load buffer size from config, use flag value as fallback
 	configBufferSize := viper.GetInt("watch.buffer_size")
@@ -97,6 +122,10 @@ func startFileSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 func init() {
 	fileCmd.Flags().StringVarP(&fileReadFile, "read-file", "r", "", "PCAP file to analyze (required)")
 	fileCmd.Flags().StringVarP(&fileFilter, "filter", "f", "", "BPF filter to apply")
+	fileCmd.Flags().StringVar(&fileTLSKeylog, "tls-keylog", "", "Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)")
 
 	_ = fileCmd.MarkFlagRequired("read-file")
+
+	// Bind to viper for config file support
+	_ = viper.BindPFlag("watch.file.tls_keylog", fileCmd.Flags().Lookup("tls-keylog"))
 }

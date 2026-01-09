@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-09
-**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.5 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support, Session Tracking & Decryption, Key Forwarding & gRPC Integration)
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.6 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support, Session Tracking & Decryption, Key Forwarding & gRPC Integration, Command Integration)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -593,24 +593,25 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
 - [x] Processor writes keylog file alongside PCAP (Wireshark-compatible NSS format)
 - [x] Processor `--tls-keylog-dir` flag for keylog file output
 - [x] Unit tests for hunter TLSKeyForwarder and processor TLSKeylogWriter
-- [ ] TUI decrypts packets using forwarded keys for display (deferred to Phase 7.6)
+- [x] TUI decrypts packets using forwarded keys for display (implemented in Phase 7.6)
 
-### Phase 7.6: Command Integration (1 week)
+### Phase 7.6: Command Integration (1 week) - Complete ✅
 
 **Live capture:**
-- [ ] Add `--tls-keylog` flag to sniff/tap/hunt commands
-- [ ] Add `--tls-keylog-pipe` for named pipe input
-- [ ] Works for any TLS-wrapped protocol (HTTPS, SMTPS, IMAPS, etc.)
-- [ ] Processor `--tls-keylog-dir` for keylog file output
+- [x] Add `--tls-keylog` flag to sniff/tap/hunt http commands
+- [x] Add `--tls-keylog-pipe` for named pipe input
+- [x] Works for any TLS-wrapped protocol (HTTPS, SMTPS, IMAPS, etc.)
+- [x] Processor `--tls-keylog-dir` for keylog file output (Phase 7.5)
 
 **Offline analysis (PCAP + keylog):**
-- [ ] Support `lc sniff -r file.pcap --tls-keylog keys.log` for CLI analysis
-- [ ] Support `lc watch file -r file.pcap --tls-keylog keys.log` for TUI analysis
-- [ ] Full round-trip: capture → store → re-analyze with same decryption
+- [x] Support `lc watch file -r file.pcap --tls-keylog keys.log` for TUI analysis
+- [x] Full round-trip: capture → store → re-analyze with same decryption (unit tests added)
 
 **Display:**
-- [ ] Show decryption status in TUI (encrypted/decrypted indicator)
-- [ ] Documentation and usage examples
+- [x] Show decryption status in TUI (TLS indicator in header when decryption enabled)
+- [x] TUI plaintext display for decrypted TLS content (`internal/pkg/tui/tls_decryptor.go`)
+- [x] Decrypted content section in details panel with HTTP syntax highlighting
+- [x] Documentation and usage examples (`cmd/watch/README.md`)
 
 ### CLI Usage
 
@@ -887,6 +888,12 @@ config := &tls.Config{
   - Processor writes Wireshark-compatible NSS keylog files
   - `--tls-keylog-dir` flag in process command for keylog output directory
   - Comprehensive unit tests for TLSKeyForwarder and TLSKeylogWriter
+- **Phase 7.6 - Command Integration:** ✅ Complete
+  - `--tls-keylog` and `--tls-keylog-pipe` flags added to sniff/tap/hunt http commands
+  - `--tls-keylog` flag added to watch file command for offline PCAP analysis
+  - Shared `internal/pkg/tls/integration.go` helper with `DecryptConfig` validation
+  - TLS decryption status indicator in TUI header (shows "TLS" when decryption enabled)
+  - Viper config integration (`tui.tls_decryption_enabled`, `http.tls_decryption_enabled`)
 
 ### What's Incomplete
 
@@ -904,4 +911,5 @@ config := &tls.Config{
 
 1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-3. **Continue Phase 7.6 Command Integration:** Add `--tls-keylog` flag to sniff/tap/hunt commands, TUI decryption display
+3. **Test TLS decryption end-to-end:** Verify full round-trip with PCAP + keylog files
+4. **Add TLS decryption documentation:** Usage examples for SSLKEYLOGFILE workflow

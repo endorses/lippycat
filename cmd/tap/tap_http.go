@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -37,6 +38,10 @@ var (
 	httpTapKeywordsFile     string
 	httpTapCaptureBody      bool
 	httpTapMaxBodySize      int
+
+	// TLS decryption flags
+	httpTapTLSKeylog     string
+	httpTapTLSKeylogPipe string
 )
 
 var httpTapCmd = &cobra.Command{
@@ -51,6 +56,7 @@ HTTP tap mode combines local HTTP-optimized capture with full processor capabili
 - Supports upstream forwarding in hierarchical mode
 - Request/response tracking and correlation
 - Content filtering (host, path, method, status, keywords)
+- HTTPS decryption via SSLKEYLOGFILE
 
 Filter Options:
   --host         Match host header (glob pattern)
@@ -65,6 +71,10 @@ Body Capture (for keyword matching in body):
   --capture-body      Enable body content capture (default: false)
   --max-body-size     Maximum body size to capture (default: 64KB)
 
+TLS Decryption (HTTPS):
+  --tls-keylog        Path to SSLKEYLOGFILE for HTTPS decryption
+  --tls-keylog-pipe   Path to named pipe for real-time TLS key injection
+
 Pattern Files (one pattern per line, # for comments):
   --hosts-file, --paths-file, --user-agents-file, --content-types-file
 
@@ -74,7 +84,8 @@ Example:
   lc tap http -i eth0 --http-port 80,8080,3000
   lc tap http -i eth0 --host "*.example.com"
   lc tap http -i eth0 --path "/api/*"
-  lc tap http -i eth0 --method "POST,PUT"`,
+  lc tap http -i eth0 --method "POST,PUT"
+  lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log --insecure`,
 	RunE: runHTTPTap,
 }
 
@@ -101,6 +112,10 @@ func init() {
 	httpTapCmd.Flags().BoolVar(&httpTapCaptureBody, "capture-body", false, "Enable HTTP body content capture (for keyword matching)")
 	httpTapCmd.Flags().IntVar(&httpTapMaxBodySize, "max-body-size", 65536, "Maximum body size to capture in bytes (default: 64KB)")
 
+	// TLS decryption flags
+	httpTapCmd.Flags().StringVar(&httpTapTLSKeylog, "tls-keylog", "", "Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)")
+	httpTapCmd.Flags().StringVar(&httpTapTLSKeylogPipe, "tls-keylog-pipe", "", "Path to named pipe for real-time TLS key injection")
+
 	// Bind HTTP-specific flags to viper
 	_ = viper.BindPFlag("tap.http.ports", httpTapCmd.Flags().Lookup("http-port"))
 	_ = viper.BindPFlag("tap.http.host_pattern", httpTapCmd.Flags().Lookup("host"))
@@ -116,6 +131,8 @@ func init() {
 	_ = viper.BindPFlag("tap.http.keywords_file", httpTapCmd.Flags().Lookup("keywords-file"))
 	_ = viper.BindPFlag("tap.http.capture_body", httpTapCmd.Flags().Lookup("capture-body"))
 	_ = viper.BindPFlag("tap.http.max_body_size", httpTapCmd.Flags().Lookup("max-body-size"))
+	_ = viper.BindPFlag("tap.http.tls_keylog", httpTapCmd.Flags().Lookup("tls-keylog"))
+	_ = viper.BindPFlag("tap.http.tls_keylog_pipe", httpTapCmd.Flags().Lookup("tls-keylog-pipe"))
 }
 
 func runHTTPTap(cmd *cobra.Command, args []string) error {
@@ -202,6 +219,24 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 		}
 		viper.Set("http.keywords", keywords)
 		logger.Info("Loaded keywords from file", "count", len(keywords), "file", httpTapKeywordsFile)
+	}
+
+	// Configure TLS decryption if specified
+	tlsKeylogPath := httpTapTLSKeylog
+	if tlsKeylogPath == "" {
+		tlsKeylogPath = httpTapTLSKeylogPipe
+	}
+	if tlsKeylogPath != "" {
+		decryptConfig := tls.DecryptConfig{
+			KeylogFile: httpTapTLSKeylog,
+			KeylogPipe: httpTapTLSKeylogPipe,
+		}
+		if err := decryptConfig.Validate(); err != nil {
+			return fmt.Errorf("invalid TLS keylog configuration: %w", err)
+		}
+		viper.Set("http.tls_keylog", tlsKeylogPath)
+		viper.Set("http.tls_decryption_enabled", true)
+		logger.Info("TLS decryption configured", "keylog", tlsKeylogPath)
 	}
 
 	// Build HTTP filter
@@ -390,6 +425,7 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 		"method_filter", httpTapMethods,
 		"status_filter", httpTapStatusCodes,
 		"auto_rotate_pcap", effectiveAutoRotate,
+		"tls_decryption", tlsKeylogPath != "",
 		"listen", config.ListenAddr)
 
 	// Set up context

@@ -21,8 +21,9 @@ type Header struct {
 	packets        int
 	bufferSize     int // Maximum buffer capacity
 	captureMode    CaptureMode
-	nodeCount      int // Number of connected remote nodes (hunters)
-	processorCount int // Number of connected processors
+	nodeCount      int  // Number of connected remote nodes (hunters)
+	processorCount int  // Number of connected processors
+	tlsDecryption  bool // True when TLS decryption is active
 }
 
 // NewHeader creates a new header component
@@ -80,6 +81,11 @@ func (h *Header) SetProcessorCount(count int) {
 	h.processorCount = count
 }
 
+// SetTLSDecryption sets whether TLS decryption is active
+func (h *Header) SetTLSDecryption(active bool) {
+	h.tlsDecryption = active
+}
+
 // View renders the header
 func (h *Header) View() string {
 	// Clean header with visible text
@@ -119,12 +125,18 @@ func (h *Header) View() string {
 		statusColor = lipgloss.Color("240")
 	}
 
+	// Add TLS indicator if decryption is active
+	if h.tlsDecryption {
+		tlsStyle := lipgloss.NewStyle().Foreground(h.theme.TLSColor).Bold(true)
+		statusText = statusText + " " + tlsStyle.Render("TLS")
+	}
+
 	statusStyle := leftStyle.Foreground(statusColor)
 
 	// Fixed width sections to prevent shifting
 	// Account for padding (0,1) = 2 chars per section = 6 total
-	// Left: 20 chars, Middle: flexible, Right: 20 chars
-	leftWidth := 20
+	// Left: 25 chars (extra space for "TLS" indicator), Middle: flexible, Right: 20 chars
+	leftWidth := 25
 	rightWidth := 20
 	paddingTotal := 6 // 2 per section * 3 sections
 

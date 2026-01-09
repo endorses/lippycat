@@ -40,12 +40,48 @@ lc watch file -r capture.pcap
 
 # With BPF filter
 lc watch file -r capture.pcap -f "port 5060"
+
+# With TLS decryption (for HTTPS, SMTPS, etc.)
+lc watch file -r https-capture.pcap --tls-keylog sslkeys.log
 ```
 
 **Flags:**
 - `-r, --read-file` - PCAP file to analyze (required)
 - `-f, --filter` - BPF filter expression
+- `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption
 - `--buffer-size` - Maximum packets in memory (default: 10000)
+
+#### TLS Decryption
+
+When analyzing PCAP files containing TLS-encrypted traffic (HTTPS, SMTPS, IMAPS, etc.), you can provide an SSLKEYLOGFILE to decrypt and view the plaintext content.
+
+**Generating an SSLKEYLOGFILE:**
+
+Most browsers and applications can export TLS session keys when the `SSLKEYLOGFILE` environment variable is set:
+
+```bash
+# Firefox / Chrome
+SSLKEYLOGFILE=/tmp/sslkeys.log firefox
+
+# curl
+SSLKEYLOGFILE=/tmp/sslkeys.log curl https://example.com
+
+# Python requests (requires PyOpenSSL)
+import sslkeylog
+sslkeylog.set_keylog("sslkeys.log")
+```
+
+**Using with lc watch:**
+
+```bash
+# Capture traffic (separate terminal)
+tcpdump -i eth0 -w https.pcap port 443
+
+# Analyze with decryption
+lc watch file -r https.pcap --tls-keylog /tmp/sslkeys.log
+```
+
+The TUI will show a "TLS" indicator in the header when decryption is enabled. In the packet details panel, decrypted content appears in a dedicated "Decrypted Content" section with HTTP syntax highlighting.
 
 ### Remote Monitoring
 

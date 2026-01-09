@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-03
 **Updated:** 2026-01-09
-**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.2 Complete (SSLKEYLOGFILE Parser, TLS Record Layer)
+**Status:** Phase 0-5 Complete (DNS, Email with IMAP/POP3, TLS, HTTP), Phase 7.1-7.3 Complete (SSLKEYLOGFILE Parser, TLS Record Layer, Cipher Suite Support)
 **Research:** [docs/research/protocol-expansion-roadmap.md](../research/protocol-expansion-roadmap.md)
 
 ## Overview
@@ -560,20 +560,20 @@ CLIENT_RANDOM 1234...abcd 5678...efgh
   - [x] Handshake traffic secrets → keys
   - [x] Application traffic secrets → keys
 
-### Phase 7.3: Cipher Suite Support (2-3 weeks)
+### Phase 7.3: Cipher Suite Support (2-3 weeks) - Complete ✅
 
-- [ ] Implement decryption for common cipher suites (`ciphers/`)
-- [ ] **TLS 1.2 cipher suites:**
-  - [ ] AES-128-GCM, AES-256-GCM (AEAD)
-  - [ ] AES-128-CBC, AES-256-CBC (with HMAC-SHA1/SHA256)
-  - [ ] ChaCha20-Poly1305
-- [ ] **TLS 1.3 cipher suites:**
-  - [ ] TLS_AES_128_GCM_SHA256
-  - [ ] TLS_AES_256_GCM_SHA384
-  - [ ] TLS_CHACHA20_POLY1305_SHA256
-- [ ] Sequence number tracking (per-direction)
-- [ ] AEAD nonce construction (explicit + implicit IV)
-- [ ] Unit tests with known-answer test vectors
+- [x] Implement decryption for common cipher suites (`ciphers/`)
+- [x] **TLS 1.2 cipher suites:**
+  - [x] AES-128-GCM, AES-256-GCM (AEAD)
+  - [x] AES-128-CBC, AES-256-CBC (with HMAC-SHA1/SHA256)
+  - [x] ChaCha20-Poly1305
+- [x] **TLS 1.3 cipher suites:**
+  - [x] TLS_AES_128_GCM_SHA256
+  - [x] TLS_AES_256_GCM_SHA384
+  - [x] TLS_CHACHA20_POLY1305_SHA256
+- [x] Sequence number tracking (per-direction)
+- [x] AEAD nonce construction (explicit + implicit IV)
+- [x] Unit tests with known-answer test vectors
 
 ### Phase 7.4: Session Tracking & Decryption (1-2 weeks)
 
@@ -851,6 +851,21 @@ config := &tls.Config{
     - Verified with RFC 8448 test vectors
   - Cipher suite information for common TLS 1.2 and TLS 1.3 suites
   - Comprehensive unit tests
+- **Phase 7.3 - Cipher Suite Support:** ✅ Complete
+  - `internal/pkg/tls/decrypt/ciphers/` package with cipher implementations
+  - TLS 1.2 cipher suites:
+    - AES-128-GCM, AES-256-GCM (AEAD with 4-byte implicit + 8-byte explicit nonce)
+    - AES-128-CBC, AES-256-CBC with HMAC-SHA1 and HMAC-SHA256
+    - ChaCha20-Poly1305 (12-byte IV XOR sequence number nonce)
+  - TLS 1.3 cipher suites:
+    - TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384
+    - TLS_CHACHA20_POLY1305_SHA256
+  - Sequence number tracking (per-direction in SessionState)
+  - AEAD nonce construction for both TLS 1.2 and TLS 1.3
+  - TLS record decryption helpers (DecryptTLS12Record, DecryptTLS13Record)
+  - TLS 1.3 inner plaintext padding removal and content type extraction
+  - PKCS#7 padding for CBC mode with constant-time validation
+  - Comprehensive unit tests including NIST and RFC 7539 test vectors
 
 ### What's Incomplete
 
@@ -868,4 +883,4 @@ config := &tls.Config{
 
 1. **Complete Phase 5 content filtering:** Update tap/hunt commands, add mailbox/command flags
 2. **Add pattern validation:** JA3/JA3S hash format, glob syntax
-3. **Continue Phase 7.3 Cipher Suite Support:** Implement AEAD decryption (AES-GCM, ChaCha20-Poly1305) and CBC mode
+3. **Continue Phase 7.4 Session Tracking & Decryption:** Integrate cipher implementations with TLS session tracking

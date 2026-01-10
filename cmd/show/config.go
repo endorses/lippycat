@@ -7,17 +7,16 @@ import (
 	"fmt"
 
 	"github.com/endorses/lippycat/internal/pkg/output"
-	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Display current configuration",
-	Long:  `Show the current VoIP configuration including performance mode, thresholds, and optimization settings. Output is JSON.`,
+	Long:  `Show the current application configuration from config file and defaults. Output is JSON.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		config := voip.GetConfig()
-		data, err := output.MarshalJSON(config)
+		data, err := output.MarshalJSON(viper.AllSettings())
 		if err != nil {
 			fmt.Printf("Error marshaling config: %v\n", err)
 			return

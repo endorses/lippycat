@@ -35,7 +35,7 @@ Examples:
   lc process --listen :50051 --tls --tls-cert server.crt --tls-key server.key
 
   # Hierarchical mode (forward to upstream processor)
-  lc process --listen :50051 --upstream parent:50051 --tls ...
+  lc process --listen :50051 --processor parent:50051 --tls ...
 
   # With per-call PCAP and command hooks
   lc process --listen :50051 \
@@ -50,19 +50,40 @@ Examples:
     --li-x1-tls-ca admf-ca.crt \
     --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key \
     --li-delivery-tls-ca mdf-ca.crt`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Handle deprecated --processor-id flag migration to --id
+		if cmd.Flags().Changed("processor-id") {
+			if cmd.Flags().Changed("id") {
+				return fmt.Errorf("cannot use both --processor-id (deprecated) and --id; use --id only")
+			}
+			processorID = processorIDDeprecated
+			logger.Warn("--processor-id is deprecated, use --id instead")
+		}
+		// Handle deprecated --upstream flag migration to --processor
+		if cmd.Flags().Changed("upstream") {
+			if cmd.Flags().Changed("processor") {
+				return fmt.Errorf("cannot use both --upstream (deprecated) and --processor; use --processor only")
+			}
+			processorAddr = upstreamAddrDeprecated
+			logger.Warn("--upstream is deprecated, use --processor instead")
+		}
+		return nil
+	},
 	RunE: runProcess,
 }
 
 var (
-	listenAddr      string
-	processorID     string
-	upstreamAddr    string
-	maxHunters      int
-	maxSubscribers  int
-	writeFile       string
-	displayStats    bool
-	enableDetection bool
-	filterFile      string
+	listenAddr             string
+	processorID            string // renamed from processor-id, now --id
+	processorIDDeprecated  string // deprecated, use processorID
+	processorAddr          string // renamed from upstreamAddr
+	upstreamAddrDeprecated string // deprecated, use processorAddr
+	maxHunters             int
+	maxSubscribers         int
+	writeFile              string
+	displayStats           bool
+	enableDetection        bool
+	filterFile             string
 	// TLS flags
 	tlsEnabled      bool
 	tlsCertFile     string
@@ -120,8 +141,16 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&listenAddr, "listen", "l", fmt.Sprintf(":%d", constants.DefaultGRPCPort), "Listen address for hunter connections (host:port)")
 
 	// Processor configuration
-	ProcessCmd.Flags().StringVarP(&processorID, "processor-id", "", "", "Unique processor identifier (default: hostname)")
-	ProcessCmd.Flags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
+	// --id is the new flag, --processor-id is deprecated
+	ProcessCmd.Flags().StringVarP(&processorID, "id", "I", "", "Unique processor identifier (default: hostname)")
+	ProcessCmd.Flags().StringVar(&processorIDDeprecated, "processor-id", "", "")
+	ProcessCmd.Flags().Lookup("processor-id").Deprecated = "use --id instead"
+	ProcessCmd.Flags().Lookup("processor-id").Hidden = true
+	// Upstream forwarding (--processor is the new name, --upstream is deprecated)
+	ProcessCmd.Flags().StringVarP(&processorAddr, "processor", "P", "", "Upstream processor address for hierarchical mode (host:port)")
+	ProcessCmd.Flags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
+	ProcessCmd.Flags().Lookup("upstream").Deprecated = "use --processor instead"
+	ProcessCmd.Flags().Lookup("upstream").Hidden = true
 	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", constants.DefaultMaxHunters, "Maximum number of concurrent hunter connections")
 	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", constants.DefaultMaxSubscribers, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
@@ -189,8 +218,12 @@ func init() {
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
-	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("processor-id"))
-	_ = viper.BindPFlag("processor.upstream_addr", ProcessCmd.Flags().Lookup("upstream"))
+	_ = viper.BindPFlag("processor.id", ProcessCmd.Flags().Lookup("id"))
+	// Also bind to old key for backward compatibility with config files
+	_ = viper.BindPFlag("processor.processor_id", ProcessCmd.Flags().Lookup("id"))
+	_ = viper.BindPFlag("processor.processor_addr", ProcessCmd.Flags().Lookup("processor"))
+	// Also bind to old key for backward compatibility with config files
+	_ = viper.BindPFlag("processor.upstream_addr", ProcessCmd.Flags().Lookup("processor"))
 	_ = viper.BindPFlag("processor.max_hunters", ProcessCmd.Flags().Lookup("max-hunters"))
 	_ = viper.BindPFlag("processor.max_subscribers", ProcessCmd.Flags().Lookup("max-subscribers"))
 	_ = viper.BindPFlag("processor.write_file", ProcessCmd.Flags().Lookup("write-file"))
@@ -361,7 +394,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	config := processor.Config{
 		ListenAddr:            getStringConfig("processor.listen_addr", listenAddr),
 		ProcessorID:           getStringConfig("processor.processor_id", processorID),
-		UpstreamAddr:          getStringConfig("processor.upstream_addr", upstreamAddr),
+		UpstreamAddr:          getStringConfig("processor.processor_addr", processorAddr),
 		MaxHunters:            getIntConfig("processor.max_hunters", maxHunters),
 		MaxSubscribers:        getIntConfig("processor.max_subscribers", maxSubscribers),
 		WriteFile:             getStringConfig("processor.write_file", writeFile),

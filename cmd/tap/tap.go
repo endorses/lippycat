@@ -47,7 +47,7 @@ Examples:
   lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
   # Tap with upstream forwarding (hierarchical mode)
-  lc tap -i eth0 --upstream central-processor:50051 --tls --tls-ca ca.crt
+  lc tap -i eth0 --processor central-processor:50051 --tls --tls-ca ca.crt
 
   # Tap with TUI serving (secure)
   lc tap -i eth0 --listen 0.0.0.0:50051 --tls --tls-cert server.crt --tls-key server.key
@@ -61,6 +61,25 @@ Examples:
     --li-x1-listen :8443 \
     --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \
     --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Handle deprecated --tap-id flag migration to --id
+		if cmd.Flags().Changed("tap-id") {
+			if cmd.Flags().Changed("id") {
+				return fmt.Errorf("cannot use both --tap-id (deprecated) and --id; use --id only")
+			}
+			tapID = tapIDDeprecated
+			logger.Warn("--tap-id is deprecated, use --id instead")
+		}
+		// Handle deprecated --upstream flag migration to --processor
+		if cmd.Flags().Changed("upstream") {
+			if cmd.Flags().Changed("processor") {
+				return fmt.Errorf("cannot use both --upstream (deprecated) and --processor; use --processor only")
+			}
+			processorAddr = upstreamAddrDeprecated
+			logger.Warn("--upstream is deprecated, use --processor instead")
+		}
+		return nil
+	},
 	RunE: runTap,
 }
 
@@ -75,12 +94,14 @@ var (
 	batchTimeout   int
 
 	// Management interface flags
-	listenAddr     string
-	tapID          string
-	maxSubscribers int
+	listenAddr      string
+	tapID           string // renamed from tap-id, now --id
+	tapIDDeprecated string // deprecated, use tapID
+	maxSubscribers  int
 
-	// Upstream forwarding
-	upstreamAddr string
+	// Upstream forwarding (renamed from --upstream to --processor)
+	processorAddr          string
+	upstreamAddrDeprecated string // deprecated, use processorAddr
 
 	// PCAP flags
 	writeFile string
@@ -141,11 +162,18 @@ func init() {
 	// Management Interface Configuration (persistent for voip subcommand)
 	// ============================================================
 	TapCmd.PersistentFlags().StringVarP(&listenAddr, "listen", "l", fmt.Sprintf(":%d", constants.DefaultGRPCPort), "Listen address for TUI connections (host:port)")
-	TapCmd.PersistentFlags().StringVar(&tapID, "tap-id", "", "Unique tap identifier (default: hostname)")
+	// --id is the new flag, --tap-id is deprecated
+	TapCmd.PersistentFlags().StringVarP(&tapID, "id", "I", "", "Unique tap identifier (default: hostname)")
+	TapCmd.PersistentFlags().StringVar(&tapIDDeprecated, "tap-id", "", "")
+	TapCmd.PersistentFlags().Lookup("tap-id").Deprecated = "use --id instead"
+	TapCmd.PersistentFlags().Lookup("tap-id").Hidden = true
 	TapCmd.PersistentFlags().IntVar(&maxSubscribers, "max-subscribers", constants.DefaultMaxSubscribers, "Maximum concurrent TUI subscribers (0 = unlimited)")
 
-	// Upstream forwarding
-	TapCmd.PersistentFlags().StringVarP(&upstreamAddr, "upstream", "u", "", "Upstream processor address for hierarchical mode (host:port)")
+	// Upstream forwarding (--processor is the new name, --upstream is deprecated)
+	TapCmd.PersistentFlags().StringVarP(&processorAddr, "processor", "P", "", "Upstream processor address for hierarchical mode (host:port)")
+	TapCmd.PersistentFlags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
+	TapCmd.PersistentFlags().Lookup("upstream").Deprecated = "use --processor instead"
+	TapCmd.PersistentFlags().Lookup("upstream").Hidden = true
 
 	// ============================================================
 	// PCAP Writing Configuration (persistent for voip subcommand)
@@ -218,9 +246,13 @@ func init() {
 
 	// Management interface
 	_ = viper.BindPFlag("tap.listen_addr", TapCmd.PersistentFlags().Lookup("listen"))
-	_ = viper.BindPFlag("tap.tap_id", TapCmd.PersistentFlags().Lookup("tap-id"))
+	_ = viper.BindPFlag("tap.id", TapCmd.PersistentFlags().Lookup("id"))
+	// Also bind to old key for backward compatibility with config files
+	_ = viper.BindPFlag("tap.tap_id", TapCmd.PersistentFlags().Lookup("id"))
 	_ = viper.BindPFlag("tap.max_subscribers", TapCmd.PersistentFlags().Lookup("max-subscribers"))
-	_ = viper.BindPFlag("tap.upstream_addr", TapCmd.PersistentFlags().Lookup("upstream"))
+	_ = viper.BindPFlag("tap.processor_addr", TapCmd.PersistentFlags().Lookup("processor"))
+	// Also bind to old key for backward compatibility with config files
+	_ = viper.BindPFlag("tap.upstream_addr", TapCmd.PersistentFlags().Lookup("processor"))
 
 	// PCAP configuration
 	_ = viper.BindPFlag("tap.write_file", TapCmd.PersistentFlags().Lookup("write-file"))
@@ -349,7 +381,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 	config := processor.Config{
 		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          getStringConfig("tap.upstream_addr", upstreamAddr),
+		UpstreamAddr:          getStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:            0, // Not accepting hunters in tap mode
 		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             getStringConfig("tap.write_file", writeFile),

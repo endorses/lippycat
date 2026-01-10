@@ -31,24 +31,36 @@ relevant packets upstream.
 Example:
   lc hunt --processor processor.example.com:50051
   lc hunt --processor 192.168.1.100:50051 --interface eth0
-  lc hunt --processor processor:50051 --hunter-id edge-01`,
+  lc hunt --processor processor:50051 --id edge-01`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Handle deprecated --hunter-id flag migration to --id
+		if cmd.Flags().Changed("hunter-id") {
+			if cmd.Flags().Changed("id") {
+				return fmt.Errorf("cannot use both --hunter-id (deprecated) and --id; use --id only")
+			}
+			hunterID = hunterIDDeprecated
+			logger.Warn("--hunter-id is deprecated, use --id instead")
+		}
+		return nil
+	},
 	RunE: runHunt,
 }
 
 var (
-	processorAddr    string
-	hunterID         string
-	interfaces       []string
-	bpfFilter        string
-	pcapBufferSize   int
-	bufferSize       int
-	batchSize        int
-	batchTimeout     int
-	batchQueueSize   int
-	promiscuous      bool
-	enableVoIPFilter bool
-	gpuBackend       string
-	gpuBatchSize     int
+	processorAddr      string
+	hunterID           string // renamed from hunter-id, now --id
+	hunterIDDeprecated string // deprecated, use hunterID
+	interfaces         []string
+	bpfFilter          string
+	pcapBufferSize     int
+	bufferSize         int
+	batchSize          int
+	batchTimeout       int
+	batchQueueSize     int
+	promiscuous        bool
+	enableVoIPFilter   bool
+	gpuBackend         string
+	gpuBatchSize       int
 	// Disk buffer flags (nuclear-proof resilience)
 	diskBufferEnabled bool
 	diskBufferDir     string
@@ -68,7 +80,11 @@ func init() {
 	_ = HuntCmd.MarkPersistentFlagRequired("processor") // Error only occurs with invalid flag name (hard-coded string)
 
 	// Hunter configuration (persistent for subcommands)
-	HuntCmd.PersistentFlags().StringVarP(&hunterID, "hunter-id", "", "", "Unique hunter identifier (default: hostname)")
+	// --id is the new flag, --hunter-id is deprecated
+	HuntCmd.PersistentFlags().StringVarP(&hunterID, "id", "I", "", "Unique hunter identifier (default: hostname)")
+	HuntCmd.PersistentFlags().StringVar(&hunterIDDeprecated, "hunter-id", "", "")
+	HuntCmd.PersistentFlags().Lookup("hunter-id").Deprecated = "use --id instead"
+	HuntCmd.PersistentFlags().Lookup("hunter-id").Hidden = true
 	HuntCmd.PersistentFlags().StringSliceVarP(&interfaces, "interface", "i", []string{"any"}, "Network interfaces to capture (comma-separated)")
 	HuntCmd.PersistentFlags().StringVarP(&bpfFilter, "filter", "f", "", "BPF filter expression")
 	HuntCmd.PersistentFlags().BoolVarP(&promiscuous, "promisc", "p", false, "Enable promiscuous mode")
@@ -100,7 +116,9 @@ func init() {
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("hunter.processor_addr", HuntCmd.PersistentFlags().Lookup("processor"))
-	_ = viper.BindPFlag("hunter.hunter_id", HuntCmd.PersistentFlags().Lookup("hunter-id"))
+	_ = viper.BindPFlag("hunter.id", HuntCmd.PersistentFlags().Lookup("id"))
+	// Also bind to old key for backward compatibility with config files
+	_ = viper.BindPFlag("hunter.hunter_id", HuntCmd.PersistentFlags().Lookup("id"))
 	_ = viper.BindPFlag("hunter.interfaces", HuntCmd.PersistentFlags().Lookup("interface"))
 	_ = viper.BindPFlag("hunter.bpf_filter", HuntCmd.PersistentFlags().Lookup("filter"))
 	_ = viper.BindPFlag("hunter.buffer_size", HuntCmd.PersistentFlags().Lookup("buffer-size"))

@@ -4,6 +4,7 @@
 package sniff
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,12 +19,24 @@ var voipCmd = &cobra.Command{
 	Use:   "voip",
 	Short: "Sniff in VOIP mode",
 	Long:  `Sniff in VOIP mode. Filter for SIP username, capture RTP stream.`,
-	Run:   voipHandler,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Handle deprecated --sipuser flag migration to --sip-user
+		if cmd.Flags().Changed("sipuser") {
+			if cmd.Flags().Changed("sip-user") {
+				return fmt.Errorf("cannot use both --sipuser (deprecated) and --sip-user; use --sip-user only")
+			}
+			sipuser = sipuserDeprecated
+			logger.Warn("--sipuser is deprecated, use --sip-user instead")
+		}
+		return nil
+	},
+	Run: voipHandler,
 }
 
 var (
-	sipuser       string
-	writeVoipFile string
+	sipuser           string
+	sipuserDeprecated string // deprecated, use sipuser (via --sip-user)
+	writeVoipFile     string
 
 	// BPF filter optimization flags
 	udpOnly       bool
@@ -210,7 +223,11 @@ func voipHandler(cmd *cobra.Command, args []string) {
 }
 
 func init() {
-	voipCmd.Flags().StringVarP(&sipuser, "sipuser", "u", "", "SIP user/phone to match (supports wildcards: '*456789' for suffix, 'alice*' for prefix)")
+	// --sip-user is the new flag, --sipuser is deprecated
+	voipCmd.Flags().StringVarP(&sipuser, "sip-user", "u", "", "SIP user/phone to match (supports wildcards: '*456789' for suffix, 'alice*' for prefix)")
+	voipCmd.Flags().StringVar(&sipuserDeprecated, "sipuser", "", "")
+	voipCmd.Flags().Lookup("sipuser").Deprecated = "use --sip-user instead"
+	voipCmd.Flags().Lookup("sipuser").Hidden = true
 	voipCmd.Flags().StringVarP(&writeVoipFile, "write-file", "w", "", "prefix for output pcap files (creates <prefix>_sip_<callid>.pcap and <prefix>_rtp_<callid>.pcap)")
 
 	// BPF Filter Optimization Flags

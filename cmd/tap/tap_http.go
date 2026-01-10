@@ -323,7 +323,7 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 	config := processor.Config{
 		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          getStringConfig("tap.upstream_addr", upstreamAddr),
+		UpstreamAddr:          getStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:            0,
 		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             getStringConfig("tap.write_file", writeFile),

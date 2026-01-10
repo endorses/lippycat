@@ -38,7 +38,7 @@ var (
 
 // AddConnectionFlags adds common gRPC connection flags to a command
 func AddConnectionFlags(cmd *cobra.Command) {
-	cmd.Flags().StringVarP(&processorAddr, "processor", "p", "", "Processor address (host:port)")
+	cmd.Flags().StringVarP(&processorAddr, "processor", "P", "", "Processor address (host:port)")
 	cmd.Flags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption")
 	cmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate file")
 	cmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "Path to client certificate file (mTLS)")

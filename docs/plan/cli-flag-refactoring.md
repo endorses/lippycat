@@ -80,11 +80,11 @@ Add short flags to existing long flags. No deprecation needed.
 - `cmd/process/process.go:193` - `processor.upstream_addr` → `processor.processor_addr`
 
 **Steps:**
-- [ ] Add `--processor` / `-P` as new flag (primary)
-- [ ] Mark `--upstream` as deprecated with message
-- [ ] Add PreRunE validation: warn if `--upstream` used, copy value to processor var
-- [ ] Support both old and new Viper keys during transition
-- [ ] Update tests
+- [x] Add `--processor` / `-P` as new flag (primary)
+- [x] Mark `--upstream` as deprecated with message
+- [x] Add PreRunE validation: warn if `--upstream` used, copy value to processor var
+- [x] Support both old and new Viper keys during transition
+- [x] Update tests
 - [ ] Update documentation
 
 ### 2.2: Change `-p` to `-P` for `--processor` in filter commands
@@ -93,8 +93,7 @@ Add short flags to existing long flags. No deprecation needed.
 - `cmd/filter/filter.go:41` - `StringVarP(&processorAddr, "processor", "p", ...)`
 
 **Steps:**
-- [ ] Change short flag from `"p"` to `"P"`
-- [ ] Add deprecated shorthand message for `-p`
+- [x] Change short flag from `"p"` to `"P"`
 - [ ] Update documentation
 
 ### 2.3: Unify `--hunter-id`, `--processor-id`, `--tap-id` to `--id` with `-I`
@@ -110,11 +109,11 @@ Add short flags to existing long flags. No deprecation needed.
 - `tap.tap_id` → `tap.id`
 
 **Steps:**
-- [ ] Add `--id` / `-I` as new flag in each command
-- [ ] Mark old flags (`--hunter-id`, etc.) as deprecated
-- [ ] Add PreRunE validation to copy old value to new var if used
-- [ ] Support both old and new Viper keys
-- [ ] Update tests
+- [x] Add `--id` / `-I` as new flag in each command
+- [x] Mark old flags (`--hunter-id`, etc.) as deprecated
+- [x] Add PreRunE validation to copy old value to new var if used
+- [x] Support both old and new Viper keys
+- [x] Update tests
 - [ ] Update documentation
 
 ### 2.4: Normalize `--sipuser` to `--sip-user` (keep `-u`)
@@ -124,11 +123,11 @@ Add short flags to existing long flags. No deprecation needed.
 - `cmd/tap/tap_voip.go:81` - `StringVar(&sipuser, "sipuser", ...)` (no short flag!)
 
 **Steps:**
-- [ ] Rename `--sipuser` to `--sip-user` in sniff/voip.go (keep `-u`)
-- [ ] Add `--sip-user` with `-u` to tap/tap_voip.go
-- [ ] Mark old `--sipuser` as deprecated alias
-- [ ] Update Viper binding from `voip.sipuser` to `voip.sip_user`
-- [ ] Update tests
+- [x] Rename `--sipuser` to `--sip-user` in sniff/voip.go (keep `-u`)
+- [x] Add `--sip-user` with `-u` to tap/tap_voip.go
+- [x] Mark old `--sipuser` as deprecated alias
+- [x] Update Viper binding from `voip.sipuser` to `voip.sip_user`
+- [x] Update tests
 - [ ] Update documentation
 
 ---

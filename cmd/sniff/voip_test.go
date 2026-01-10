@@ -325,7 +325,7 @@ func TestVoipCommandStructure(t *testing.T) {
 		shorthand string
 		flagType  string
 	}{
-		{"sipuser", "u", "string"},
+		{"sip-user", "u", "string"},
 		{"write-file", "w", "string"},
 	}
 

@@ -27,7 +27,8 @@ import (
 
 var (
 	// VoIP-specific flags
-	sipuser string
+	sipuser           string
+	sipuserDeprecated string // deprecated, use sipuser (via --sip-user)
 
 	// BPF filter optimization flags for VoIP
 	udpOnly       bool
@@ -68,9 +69,20 @@ This is ideal for single-machine VoIP capture where you want:
 - Optional upstream forwarding
 
 Example:
-  lc tap voip --interface eth0 --sipuser alicent
+  lc tap voip --interface eth0 --sip-user alicent
   lc tap voip -i eth0 --per-call-pcap --per-call-pcap-dir /var/voip/pcaps
   lc tap voip -i eth0 --udp-only --sip-port 5060`,
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		// Handle deprecated --sipuser flag migration to --sip-user
+		if cmd.Flags().Changed("sipuser") {
+			if cmd.Flags().Changed("sip-user") {
+				return fmt.Errorf("cannot use both --sipuser (deprecated) and --sip-user; use --sip-user only")
+			}
+			sipuser = sipuserDeprecated
+			logger.Warn("--sipuser is deprecated, use --sip-user instead")
+		}
+		return nil
+	},
 	RunE: runVoIPTap,
 }
 
@@ -78,7 +90,11 @@ func init() {
 	TapCmd.AddCommand(voipTapCmd)
 
 	// VoIP-specific flags
-	voipTapCmd.Flags().StringVar(&sipuser, "sipuser", "", "SIP user/phone to match (comma-separated, supports wildcards: '*456789', 'alice*')")
+	// --sip-user is the new flag, --sipuser is deprecated
+	voipTapCmd.Flags().StringVarP(&sipuser, "sip-user", "u", "", "SIP user/phone to match (comma-separated, supports wildcards: '*456789', 'alice*')")
+	voipTapCmd.Flags().StringVar(&sipuserDeprecated, "sipuser", "", "")
+	voipTapCmd.Flags().Lookup("sipuser").Deprecated = "use --sip-user instead"
+	voipTapCmd.Flags().Lookup("sipuser").Hidden = true
 
 	// BPF Filter Optimization Flags
 	voipTapCmd.Flags().BoolVarP(&udpOnly, "udp-only", "U", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
@@ -101,7 +117,9 @@ func init() {
 	voipTapCmd.Flags().StringVar(&voipCommand, "voip-command", "", "Command to execute when VoIP call completes (supports %callid%, %dirname%, etc.)")
 
 	// Bind VoIP-specific flags to viper
-	_ = viper.BindPFlag("tap.voip.sipuser", voipTapCmd.Flags().Lookup("sipuser"))
+	_ = viper.BindPFlag("tap.voip.sip_user", voipTapCmd.Flags().Lookup("sip-user"))
+	// Also bind to old key for backward compatibility with config files
+	_ = viper.BindPFlag("tap.voip.sipuser", voipTapCmd.Flags().Lookup("sip-user"))
 	_ = viper.BindPFlag("tap.voip.udp_only", voipTapCmd.Flags().Lookup("udp-only"))
 	_ = viper.BindPFlag("tap.voip.sip_ports", voipTapCmd.Flags().Lookup("sip-port"))
 	_ = viper.BindPFlag("tap.voip.rtp_port_ranges", voipTapCmd.Flags().Lookup("rtp-port-range"))
@@ -283,7 +301,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	config := processor.Config{
 		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          getStringConfig("tap.upstream_addr", upstreamAddr),
+		UpstreamAddr:          getStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:            0,
 		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             getStringConfig("tap.write_file", writeFile),

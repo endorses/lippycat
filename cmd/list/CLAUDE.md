@@ -1,16 +1,24 @@
 # List Command - Architecture
 
-The `list` command provides resource listing functionality. Currently supports interface listing.
+The `list` command provides resource listing functionality.
 
 ## Structure
 
 ```
 cmd/list/
 ├── list.go        - Base command (requires subcommand)
-└── interfaces.go  - List network interfaces
+├── interfaces.go  - List network interfaces (local)
+└── filters.go     - List filters on processor (gRPC, delegates to cmd/filter)
 ```
 
 **Build Tags:** `cli`, `tui`, `hunter`, or `all`
+
+## Subcommands
+
+- `list interfaces` - Local command, lists network interfaces
+- `list filters` - Remote command, queries processor via gRPC
+
+**Security:** For remote commands (filters), TLS is enabled by default. Use `--insecure` for local testing.
 
 ## Implementation
 

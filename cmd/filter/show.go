@@ -24,12 +24,14 @@ var ShowFilterCmd = &cobra.Command{
 The command connects to the processor via gRPC and retrieves the filter
 with the specified ID. Output is JSON to stdout.
 
-Examples:
-  # Show a filter by ID
-  lc show filter --id myfilter --processor localhost:50051
+TLS is enabled by default. Use --insecure for local testing without TLS.
 
-  # With TLS
-  lc show filter --id myfilter --processor processor.example.com:50051 --tls --tls-ca ca.crt`,
+Examples:
+  # Show a filter by ID (TLS with CA verification)
+  lc show filter --id myfilter -P processor.example.com:50051 --tls-ca ca.crt
+
+  # Local testing without TLS
+  lc show filter --id myfilter -P localhost:50051 --insecure`,
 	Run: runShowFilter,
 }
 

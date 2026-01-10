@@ -22,15 +22,17 @@ var ListFiltersCmd = &cobra.Command{
 The command connects to the processor via gRPC and retrieves the current
 filter configuration. Output is JSON to stdout.
 
+TLS is enabled by default. Use --insecure for local testing without TLS.
+
 Examples:
-  # List all filters
-  lc list filters --processor localhost:50051
+  # List all filters (TLS with CA verification)
+  lc list filters -P processor.example.com:50051 --tls-ca ca.crt
 
   # List filters for a specific hunter
-  lc list filters --processor localhost:50051 --hunter hunter-1
+  lc list filters -P processor.example.com:50051 --tls-ca ca.crt --hunter hunter-1
 
-  # With TLS
-  lc list filters --processor processor.example.com:50051 --tls --tls-ca ca.crt`,
+  # Local testing without TLS
+  lc list filters -P localhost:50051 --insecure`,
 	Run: runListFilters,
 }
 

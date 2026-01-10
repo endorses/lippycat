@@ -2,6 +2,8 @@
 
 The `show` command displays information and diagnostics from running processors. Remote commands connect via gRPC and output JSON for easy parsing.
 
+**Security:** TLS is enabled by default. Use `--insecure` for local testing without TLS.
+
 ## Commands
 
 ### Status
@@ -9,11 +11,11 @@ The `show` command displays information and diagnostics from running processors.
 Show processor status and statistics.
 
 ```bash
-# Show processor status
-lc show status -P localhost:50051
+# Show processor status (TLS with CA verification)
+lc show status -P processor.example.com:50051 --tls-ca ca.crt
 
-# With TLS
-lc show status -P processor.example.com:50051 -T --tls-ca ca.crt
+# Local testing without TLS
+lc show status -P localhost:50051 --insecure
 ```
 
 **Output:**
@@ -37,14 +39,14 @@ lc show status -P processor.example.com:50051 -T --tls-ca ca.crt
 Show connected hunter details and statistics.
 
 ```bash
-# List all connected hunters
-lc show hunters -P localhost:50051
+# List all connected hunters (TLS with CA verification)
+lc show hunters -P processor.example.com:50051 --tls-ca ca.crt
 
 # Show a specific hunter
-lc show hunters -P localhost:50051 --hunter edge-01
+lc show hunters -P processor.example.com:50051 --tls-ca ca.crt --hunter edge-01
 
-# With TLS
-lc show hunters -P processor.example.com:50051 -T --tls-ca ca.crt
+# Local testing without TLS
+lc show hunters -P localhost:50051 --insecure
 ```
 
 **Output (list):**
@@ -79,11 +81,11 @@ lc show hunters -P processor.example.com:50051 -T --tls-ca ca.crt
 Show the complete distributed topology.
 
 ```bash
-# Show full topology
-lc show topology -P localhost:50051
+# Show full topology (TLS with CA verification)
+lc show topology -P processor.example.com:50051 --tls-ca ca.crt
 
-# With TLS
-lc show topology -P processor.example.com:50051 -T --tls-ca ca.crt
+# Local testing without TLS
+lc show topology -P localhost:50051 --insecure
 ```
 
 **Output:**
@@ -113,8 +115,11 @@ lc show topology -P processor.example.com:50051 -T --tls-ca ca.crt
 Show filter details (see `cmd/filter` for full filter management).
 
 ```bash
-# Show a specific filter
-lc show filter --id myfilter -P localhost:50051
+# Show a specific filter (TLS with CA verification)
+lc show filter --id myfilter -P processor.example.com:50051 --tls-ca ca.crt
+
+# Local testing without TLS
+lc show filter --id myfilter -P localhost:50051 --insecure
 ```
 
 ### Config
@@ -131,16 +136,16 @@ lc show config --json
 
 ## Connection Flags
 
-All remote commands support these flags:
+All remote commands support these flags. **TLS is enabled by default.**
 
 | Flag | Description |
 |------|-------------|
 | `-P, --processor` | Processor address (host:port) - **required** |
-| `-T, --tls` | Enable TLS encryption |
+| `--insecure` | Allow insecure connections without TLS (must be explicitly set) |
 | `--tls-ca` | Path to CA certificate file |
 | `--tls-cert` | Path to client certificate file (mTLS) |
 | `--tls-key` | Path to client key file (mTLS) |
-| `--tls-skip-verify` | Skip TLS certificate verification (insecure) |
+| `--tls-skip-verify` | Skip TLS certificate verification (INSECURE - testing only) |
 
 ## Usage Examples
 
@@ -148,8 +153,8 @@ All remote commands support these flags:
 
 ```bash
 #!/bin/bash
-# Check processor health
-status=$(lc show status -P localhost:50051 2>/dev/null | jq -r '.status')
+# Check processor health (assumes TLS config in environment or config file)
+status=$(lc show status -P processor:50051 --tls-ca /etc/lippycat/ca.crt 2>/dev/null | jq -r '.status')
 if [ "$status" = "healthy" ]; then
     echo "OK"
 else
@@ -161,15 +166,15 @@ fi
 ### Monitor Hunter Count
 
 ```bash
-# Watch hunter connections
-watch -n 5 'lc show status -P localhost:50051 | jq "{total: .total_hunters, healthy: .healthy_hunters}"'
+# Watch hunter connections (local testing)
+watch -n 5 'lc show status -P localhost:50051 --insecure | jq "{total: .total_hunters, healthy: .healthy_hunters}"'
 ```
 
 ### Export Topology
 
 ```bash
 # Save topology to file
-lc show topology -P localhost:50051 > topology-$(date +%Y%m%d).json
+lc show topology -P processor:50051 --tls-ca ca.crt > topology-$(date +%Y%m%d).json
 ```
 
 ## Error Handling

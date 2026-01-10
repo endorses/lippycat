@@ -43,15 +43,17 @@ The command can operate in two modes:
 1. Single mode: Delete one filter by ID
 2. File mode: Delete multiple filters from a file of IDs (one per line)
 
+TLS is enabled by default. Use --insecure for local testing without TLS.
+
 Examples:
-  # Delete a single filter
-  lc rm filter --id myfilter --processor localhost:50051
+  # Delete a single filter (TLS with CA verification)
+  lc rm filter --id myfilter -P processor.example.com:50051 --tls-ca ca.crt
 
   # Delete multiple filters from a file
-  lc rm filter --file filter-ids.txt --processor localhost:50051
+  lc rm filter -f filter-ids.txt -P processor.example.com:50051 --tls-ca ca.crt
 
-  # With TLS
-  lc rm filter --id myfilter --processor processor.example.com:50051 --tls --tls-ca ca.crt`,
+  # Local testing without TLS
+  lc rm filter --id myfilter -P localhost:50051 --insecure`,
 	Run: runRmFilter,
 }
 

@@ -22,15 +22,17 @@ Connects to a processor via gRPC and retrieves information about connected
 hunters including capture statistics, interfaces, and capabilities.
 Output is JSON to stdout.
 
+TLS is enabled by default. Use --insecure for local testing without TLS.
+
 Examples:
-  # List all connected hunters
-  lc show hunters -P localhost:50051
+  # List all connected hunters (TLS with CA verification)
+  lc show hunters -P processor.example.com:50051 --tls-ca ca.crt
 
   # Show a specific hunter
-  lc show hunters -P localhost:50051 --hunter edge-01
+  lc show hunters -P processor.example.com:50051 --tls-ca ca.crt --hunter edge-01
 
-  # With TLS
-  lc show hunters -P processor.example.com:50051 -T --tls-ca ca.crt`,
+  # Local testing without TLS
+  lc show hunters -P localhost:50051 --insecure`,
 	Run: runShowHunters,
 }
 

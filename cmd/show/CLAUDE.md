@@ -32,6 +32,8 @@ All use:
 - `cmd/filter.OutputError()` for JSON error output
 - JSON output to stdout for scripting
 
+**Security:** TLS is enabled by default. Use `--insecure` for local testing without TLS.
+
 ### Local Commands
 
 - `show config` - Displays local TCP SIP configuration from `internal/pkg/voip`

@@ -20,12 +20,14 @@ Subcommands:
   filter   - Show filter details (requires -P)
   config   - Display local configuration
 
+TLS is enabled by default for remote commands. Use --insecure for local testing.
+
 Examples:
-  lc show status -P localhost:50051              # Show processor status
-  lc show hunters -P localhost:50051             # List connected hunters
-  lc show hunters -P localhost:50051 --hunter h1 # Show specific hunter
-  lc show topology -P localhost:50051            # Show full topology
-  lc show filter --id myfilter -P localhost:50051
+  lc show status -P proc:50051 --tls-ca ca.crt   # Show processor status
+  lc show hunters -P proc:50051 --tls-ca ca.crt  # List connected hunters
+  lc show topology -P proc:50051 --tls-ca ca.crt # Show full topology
+  lc show filter --id myfilter -P proc:50051 --tls-ca ca.crt
+  lc show status -P localhost:50051 --insecure   # Local testing
   lc show config                                 # Show local config`,
 	// No Run function - requires a subcommand
 }

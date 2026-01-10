@@ -17,12 +17,14 @@ var statusCmd = &cobra.Command{
 Connects to a processor via gRPC and retrieves current status including
 hunter counts, packet statistics, and overall health. Output is JSON to stdout.
 
-Examples:
-  # Show processor status
-  lc show status -P localhost:50051
+TLS is enabled by default. Use --insecure for local testing without TLS.
 
-  # With TLS
-  lc show status -P processor.example.com:50051 -T --tls-ca ca.crt`,
+Examples:
+  # Show processor status (TLS with CA verification)
+  lc show status -P processor.example.com:50051 --tls-ca ca.crt
+
+  # Local testing without TLS
+  lc show status -P localhost:50051 --insecure`,
 	Run: runShowStatus,
 }
 

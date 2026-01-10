@@ -81,25 +81,27 @@ Filter types:
     ip_address    - Match IP address or CIDR
     bpf           - Raw BPF filter expression
 
+TLS is enabled by default. Use --insecure for local testing without TLS.
+
 Examples:
-  # Create a SIP user filter
-  lc set filter --processor localhost:50051 \
+  # Create a SIP user filter (TLS with CA verification)
+  lc set filter -P processor.example.com:50051 --tls-ca ca.crt \
     --type sip_user --pattern alice@example.com
 
   # Create a DNS domain filter with wildcard
-  lc set filter --processor localhost:50051 \
+  lc set filter -P processor.example.com:50051 --tls-ca ca.crt \
     --type dns_domain --pattern "*.malware-domain.com"
 
   # Create a TLS JA3 fingerprint filter
-  lc set filter --processor localhost:50051 \
+  lc set filter -P processor.example.com:50051 --tls-ca ca.crt \
     --type tls_ja3 --pattern e7d705a3286e19ea42f587b344ee6865
 
-  # Create an email address filter
-  lc set filter --processor localhost:50051 \
-    --type email_address --pattern "*@suspicious-domain.com"
+  # Local testing without TLS
+  lc set filter -P localhost:50051 --insecure \
+    --type sip_user --pattern alice@example.com
 
   # Import filters from a file (batch)
-  lc set filter --processor localhost:50051 --file filters.yaml`,
+  lc set filter -P processor.example.com:50051 --tls-ca ca.crt -f filters.yaml`,
 	Run: runSetFilter,
 }
 

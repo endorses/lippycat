@@ -28,42 +28,45 @@ const (
 
 // Common flags used across filter commands
 var (
-	processorAddr string
-	tlsEnabled    bool
-	tlsCAFile     string
-	tlsCertFile   string
-	tlsKeyFile    string
-	tlsSkipVerify bool
+	processorAddr   string
+	insecureAllowed bool
+	tlsCAFile       string
+	tlsCertFile     string
+	tlsKeyFile      string
+	tlsSkipVerify   bool
 )
 
-// AddConnectionFlags adds common gRPC connection flags to a command
+// AddConnectionFlags adds common gRPC connection flags to a command.
+// Uses secure-by-default: TLS is enabled unless --insecure is explicitly set.
 func AddConnectionFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&processorAddr, "processor", "P", "", "Processor address (host:port)")
-	cmd.Flags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption")
+	cmd.Flags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 	cmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate file")
 	cmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "Path to client certificate file (mTLS)")
 	cmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "Path to client key file (mTLS)")
-	cmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (insecure)")
+	cmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (INSECURE - testing only)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("remote.processor", cmd.Flags().Lookup("processor"))
-	_ = viper.BindPFlag("remote.tls.enabled", cmd.Flags().Lookup("tls"))
+	_ = viper.BindPFlag("remote.insecure", cmd.Flags().Lookup("insecure"))
 	_ = viper.BindPFlag("remote.tls.ca", cmd.Flags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("remote.tls.cert", cmd.Flags().Lookup("tls-cert"))
 	_ = viper.BindPFlag("remote.tls.key", cmd.Flags().Lookup("tls-key"))
 	_ = viper.BindPFlag("remote.tls.skip_verify", cmd.Flags().Lookup("tls-skip-verify"))
 }
 
-// GetClientConfig builds a ClientConfig from flags and viper settings
+// GetClientConfig builds a ClientConfig from flags and viper settings.
+// Secure-by-default: TLS is enabled unless --insecure is explicitly set.
 func GetClientConfig() filterclient.ClientConfig {
 	addr := processorAddr
 	if addr == "" {
 		addr = viper.GetString("remote.processor")
 	}
 
-	tls := tlsEnabled
-	if !tls {
-		tls = viper.GetBool("remote.tls.enabled")
+	// Check if insecure mode is explicitly requested
+	insecure := insecureAllowed
+	if !insecure {
+		insecure = viper.GetBool("remote.insecure")
 	}
 
 	ca := tlsCAFile
@@ -86,9 +89,12 @@ func GetClientConfig() filterclient.ClientConfig {
 		skip = viper.GetBool("remote.tls.skip_verify")
 	}
 
+	// TLS is enabled by default unless insecure is explicitly set
+	tlsEnabled := !insecure
+
 	return filterclient.ClientConfig{
 		Address:       addr,
-		TLSEnabled:    tls,
+		TLSEnabled:    tlsEnabled,
 		TLSCAFile:     ca,
 		TLSCertFile:   cert,
 		TLSKeyFile:    key,

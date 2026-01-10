@@ -76,7 +76,7 @@ var (
 
 func init() {
 	// Required flags (persistent so subcommands inherit them)
-	HuntCmd.PersistentFlags().StringVar(&processorAddr, "processor", "", "Processor address (host:port)")
+	HuntCmd.PersistentFlags().StringVarP(&processorAddr, "processor", "P", "", "Processor address (host:port)")
 	_ = HuntCmd.MarkPersistentFlagRequired("processor") // Error only occurs with invalid flag name (hard-coded string)
 
 	// Hunter configuration (persistent for subcommands)

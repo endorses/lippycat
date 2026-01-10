@@ -1,6 +1,6 @@
 # lippycat 🫦🐱
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.1-blue)](CHANGELOG.md)
 [![Go Version](https://img.shields.io/badge/go-1.24%2B-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
@@ -12,7 +12,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
 
-**Status:** v0.7.0 - Early development. Expect breaking changes.
+**Status:** v0.7.1 - Early development. Expect breaking changes.
 
 ## Table of Contents
 

@@ -36,7 +36,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 - **Multi-Protocol Analysis**:
   - **VoIP**: SIP/RTP traffic capture, call tracking, per-call PCAP, user targeting
   - **DNS**: Query/response correlation, RTT calculation, tunneling detection
-  - **TLS**: JA3/JA3S fingerprinting, certificate extraction, SNI filtering
+  - **TLS**: JA3/JA3S fingerprinting, certificate extraction, SNI filtering, [traffic decryption](docs/TLS_DECRYPTION.md)
   - **Email**: SMTP/IMAP/POP3 session tracking, sender/recipient/mailbox filtering, content keywords
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
 - **Virtual Interface**: Replay filtered streams to Wireshark, tcpdump, Snort (Linux only)

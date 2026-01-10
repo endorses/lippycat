@@ -8,13 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.0] - 2026-01-10
 
 ### Added
-- TLS decryption support and security fixes
+- **TLS Decryption Support (Phase 7)**: Real-time TLS traffic decryption using SSLKEYLOGFILE
+  - SSLKEYLOGFILE parser with file watcher for dynamic key updates
+  - TLS 1.2 key derivation (PRF with SHA-256/SHA-384)
+  - TLS 1.3 key derivation (HKDF-based)
+  - Cipher suite support: AES-128/256-GCM, AES-128/256-CBC, ChaCha20-Poly1305
+  - Session tracking with automatic key matching via Client Random
+  - Key forwarding from hunters to processors via gRPC
+  - TUI decryption display in packet details panel
+  - `--sslkeylogfile` flag for sniff/hunt/tap commands
+  - Documentation: [TLS_DECRYPTION.md](docs/TLS_DECRYPTION.md)
+- **X1 Rate Limiting**: Per-IP rate limiting for X1 HTTPS server
+  - Configurable rate limit (default: 10 req/s) and burst (default: 20)
+  - X-Forwarded-For header support for proxy deployments
+  - XML parsing timeout protection (default: 5s)
 
 ### Changed
-- TODO: Add detailed changelog entries
+- X1 handler functions return flexible types for proper error responses
+- Improved test coverage for remotecapture, downstream, and subscriber packages
 
 ### Fixed
-- TODO: Add fixed items
+- **Security**: Command injection vulnerability in CommandExecutor
+  - Shell escaping for all user-controlled values (Call-ID, file paths, etc.)
+  - Metacharacter detection with warning logs
+- **Security**: TOCTOU race condition in CallIDDetector eliminated
+  - Mutex-protected state instead of atomic operations
+  - Comprehensive race detector stress tests
+- **Memory Leak**: Subscriber channel not closed on Remove
+  - New `safeChannel` wrapper with synchronized Close/TrySend
+  - Prevents goroutine leaks from blocked channel readers
+- **Memory Leak**: writtenKeys map unbounded growth in TLS keylog writer
+  - Periodic cleanup goroutine (5-minute interval)
+  - LRU eviction when MaxEntries reached
+- **ETSI Compliance**: X1 error responses now include error details
+  - Proper `<errorResponse>` with `<errorCode>` and `<errorDescription>`
+- **Context Propagation**: LI delivery client passes context to GetConnection
+  - Enables proper cancellation during connection establishment
+- **Build**: Processor package build constraints for test compatibility
+  - All processor files tagged with `//go:build processor || tap || all`
 
 ## [0.6.1] - 2026-01-08
 

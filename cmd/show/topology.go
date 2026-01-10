@@ -5,6 +5,7 @@ package show
 
 import (
 	"github.com/endorses/lippycat/cmd/filter"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/endorses/lippycat/internal/pkg/statusclient"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +48,7 @@ func runShowTopology(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	jsonBytes, err := statusclient.TopologyToJSON(resp)
+	jsonBytes, err := statusclient.TopologyToJSON(resp, output.IsTTY())
 	if err != nil {
 		filter.OutputError(err, filter.ExitGeneralError)
 		return

@@ -1,10 +1,10 @@
 package filtering
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/output"
 )
 
 // YAMLToProto converts a FilterYAML to a protobuf Filter
@@ -43,19 +43,21 @@ func ProtoToYAML(proto *management.Filter) *FilterYAML {
 	}
 }
 
-// ProtoToJSON converts a protobuf Filter to JSON bytes
-func ProtoToJSON(proto *management.Filter) ([]byte, error) {
+// ProtoToJSON converts a protobuf Filter to JSON bytes.
+// When pretty is true, output is indented; when false, output is compact.
+func ProtoToJSON(proto *management.Filter, pretty bool) ([]byte, error) {
 	yaml := ProtoToYAML(proto)
-	return json.Marshal(yaml)
+	return output.MarshalJSONPretty(yaml, pretty)
 }
 
-// ProtoSliceToJSON converts a slice of protobuf Filters to JSON bytes
-func ProtoSliceToJSON(filters []*management.Filter) ([]byte, error) {
+// ProtoSliceToJSON converts a slice of protobuf Filters to JSON bytes.
+// When pretty is true, output is indented; when false, output is compact.
+func ProtoSliceToJSON(filters []*management.Filter, pretty bool) ([]byte, error) {
 	yamlFilters := make([]*FilterYAML, len(filters))
 	for i, f := range filters {
 		yamlFilters[i] = ProtoToYAML(f)
 	}
-	return json.Marshal(yamlFilters)
+	return output.MarshalJSONPretty(yamlFilters, pretty)
 }
 
 // ParseFilterType converts a string to FilterType enum

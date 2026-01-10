@@ -6,11 +6,11 @@
 package filter
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/endorses/lippycat/internal/pkg/filterclient"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc/codes"
@@ -127,7 +127,8 @@ type ErrorResponse struct {
 	Code  string `json:"code"`
 }
 
-// OutputError writes an error response to stderr in JSON format and exits
+// OutputError writes an error response to stderr in JSON format and exits.
+// Uses TTY detection to format output: pretty-printed for terminals, compact for pipes.
 func OutputError(err error, exitCode int) {
 	resp := ErrorResponse{
 		Error: err.Error(),
@@ -140,14 +141,15 @@ func OutputError(err error, exitCode int) {
 		resp.Error = st.Message()
 	}
 
-	data, _ := json.Marshal(resp)
+	data, _ := output.MarshalJSON(resp)
 	fmt.Fprintln(os.Stderr, string(data))
 	os.Exit(exitCode)
 }
 
-// OutputJSON writes a value to stdout as JSON
+// OutputJSON writes a value to stdout as JSON.
+// Uses TTY detection to format output: pretty-printed for terminals, compact for pipes.
 func OutputJSON(v interface{}) error {
-	data, err := json.Marshal(v)
+	data, err := output.MarshalJSON(v)
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON: %w", err)
 	}

@@ -1,9 +1,8 @@
 package statusclient
 
 import (
-	"encoding/json"
-
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/output"
 )
 
 // StatusJSON represents processor status in JSON-friendly format
@@ -63,8 +62,9 @@ type TopologyNodeJSON struct {
 	DownstreamProcessors []*TopologyNodeJSON `json:"downstream_processors,omitempty"`
 }
 
-// StatusResponseToJSON converts a StatusResponse to JSON bytes
-func StatusResponseToJSON(resp *management.StatusResponse) ([]byte, error) {
+// StatusResponseToJSON converts a StatusResponse to JSON bytes.
+// When pretty is true, output is indented; when false, output is compact.
+func StatusResponseToJSON(resp *management.StatusResponse, pretty bool) ([]byte, error) {
 	status := &StatusJSON{}
 
 	if resp.ProcessorStats != nil {
@@ -80,30 +80,33 @@ func StatusResponseToJSON(resp *management.StatusResponse) ([]byte, error) {
 		status.UpstreamProcessor = resp.ProcessorStats.UpstreamProcessor
 	}
 
-	return json.MarshalIndent(status, "", "  ")
+	return output.MarshalJSONPretty(status, pretty)
 }
 
-// HuntersToJSON converts a slice of ConnectedHunter to JSON bytes
-func HuntersToJSON(hunters []*management.ConnectedHunter) ([]byte, error) {
+// HuntersToJSON converts a slice of ConnectedHunter to JSON bytes.
+// When pretty is true, output is indented; when false, output is compact.
+func HuntersToJSON(hunters []*management.ConnectedHunter, pretty bool) ([]byte, error) {
 	result := make([]*HunterJSON, len(hunters))
 	for i, h := range hunters {
 		result[i] = hunterToJSON(h)
 	}
-	return json.MarshalIndent(result, "", "  ")
+	return output.MarshalJSONPretty(result, pretty)
 }
 
-// HunterToJSON converts a single ConnectedHunter to JSON bytes
-func HunterToJSON(hunter *management.ConnectedHunter) ([]byte, error) {
-	return json.MarshalIndent(hunterToJSON(hunter), "", "  ")
+// HunterToJSON converts a single ConnectedHunter to JSON bytes.
+// When pretty is true, output is indented; when false, output is compact.
+func HunterToJSON(hunter *management.ConnectedHunter, pretty bool) ([]byte, error) {
+	return output.MarshalJSONPretty(hunterToJSON(hunter), pretty)
 }
 
-// TopologyToJSON converts a TopologyResponse to JSON bytes
-func TopologyToJSON(resp *management.TopologyResponse) ([]byte, error) {
+// TopologyToJSON converts a TopologyResponse to JSON bytes.
+// When pretty is true, output is indented; when false, output is compact.
+func TopologyToJSON(resp *management.TopologyResponse, pretty bool) ([]byte, error) {
 	if resp.Processor == nil {
-		return json.MarshalIndent(nil, "", "  ")
+		return output.MarshalJSONPretty(nil, pretty)
 	}
 	node := processorNodeToJSON(resp.Processor)
-	return json.MarshalIndent(node, "", "  ")
+	return output.MarshalJSONPretty(node, pretty)
 }
 
 func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {

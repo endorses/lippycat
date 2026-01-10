@@ -4,9 +4,9 @@
 package show
 
 import (
-	"encoding/json"
 	"fmt"
 
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +29,7 @@ func showConfig(jsonOutput bool) {
 	config := voip.GetConfig()
 
 	if jsonOutput {
-		data, err := json.MarshalIndent(config, "", "  ")
+		data, err := output.MarshalJSON(config)
 		if err != nil {
 			fmt.Printf("Error marshaling config: %v\n", err)
 			return

@@ -4,7 +4,6 @@
 package filter
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -250,7 +250,7 @@ func runSetFilterBatch(cmd *cobra.Command) {
 	}
 
 	// Output as JSON
-	data, err := json.Marshal(resp)
+	data, err := output.MarshalJSON(resp)
 	if err != nil {
 		OutputError(err, ExitGeneralError)
 		return

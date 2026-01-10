@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/endorses/lippycat/cmd/filter"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/endorses/lippycat/internal/pkg/statusclient"
 	"github.com/spf13/cobra"
 )
@@ -49,7 +50,7 @@ func runShowStatus(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	jsonBytes, err := statusclient.StatusResponseToJSON(resp)
+	jsonBytes, err := statusclient.StatusResponseToJSON(resp, output.IsTTY())
 	if err != nil {
 		filter.OutputError(err, filter.ExitGeneralError)
 		return

@@ -118,7 +118,7 @@ func TestProtoToJSON(t *testing.T) {
 		Enabled: true,
 	}
 
-	jsonBytes, err := ProtoToJSON(proto)
+	jsonBytes, err := ProtoToJSON(proto, false)
 	require.NoError(t, err)
 
 	var result map[string]interface{}
@@ -147,7 +147,7 @@ func TestProtoSliceToJSON(t *testing.T) {
 		},
 	}
 
-	jsonBytes, err := ProtoSliceToJSON(filters)
+	jsonBytes, err := ProtoSliceToJSON(filters, false)
 	require.NoError(t, err)
 
 	var result []map[string]interface{}

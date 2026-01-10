@@ -5,11 +5,11 @@ package filter
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -149,7 +149,7 @@ func runRmFilterBatch(cmd *cobra.Command) {
 	}
 
 	// Output as JSON
-	data, err := json.Marshal(resp)
+	data, err := output.MarshalJSON(resp)
 	if err != nil {
 		OutputError(err, ExitGeneralError)
 		return

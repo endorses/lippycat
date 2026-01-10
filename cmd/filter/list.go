@@ -6,6 +6,7 @@ package filter
 import (
 	"github.com/endorses/lippycat/internal/pkg/filterclient"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/spf13/cobra"
 )
 
@@ -58,12 +59,11 @@ func runListFilters(cmd *cobra.Command, args []string) {
 	}
 
 	// Convert to JSON-friendly format using the filtering package
-	jsonBytes, err := filtering.ProtoSliceToJSON(filters)
+	jsonBytes, err := filtering.ProtoSliceToJSON(filters, output.IsTTY())
 	if err != nil {
 		OutputError(err, ExitGeneralError)
 		return
 	}
 
-	// Output pretty-printed JSON
 	cmd.Println(string(jsonBytes))
 }

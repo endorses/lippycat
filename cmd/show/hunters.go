@@ -5,6 +5,7 @@ package show
 
 import (
 	"github.com/endorses/lippycat/cmd/filter"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/endorses/lippycat/internal/pkg/statusclient"
 	"github.com/spf13/cobra"
 )
@@ -66,12 +67,13 @@ func runShowHunters(cmd *cobra.Command, args []string) {
 	}
 
 	var jsonBytes []byte
+	pretty := output.IsTTY()
 	if huntersHunterID != "" && len(hunters) == 1 {
 		// Single hunter requested - output as object
-		jsonBytes, err = statusclient.HunterToJSON(hunters[0])
+		jsonBytes, err = statusclient.HunterToJSON(hunters[0], pretty)
 	} else {
 		// Multiple hunters - output as array
-		jsonBytes, err = statusclient.HuntersToJSON(hunters)
+		jsonBytes, err = statusclient.HuntersToJSON(hunters, pretty)
 	}
 
 	if err != nil {

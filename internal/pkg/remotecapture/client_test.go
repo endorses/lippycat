@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/types"
@@ -17,6 +18,7 @@ type MockEventHandler struct {
 	PacketBatches  [][]types.PacketDisplay
 	HunterStatuses []MockHunterStatus
 	Disconnects    []MockDisconnect
+	CallUpdates    [][]types.CallInfo
 }
 
 type MockHunterStatus struct {
@@ -47,7 +49,7 @@ func (m *MockEventHandler) OnHunterStatus(hunters []types.HunterInfo, processorI
 }
 
 func (m *MockEventHandler) OnCallUpdate(calls []types.CallInfo) {
-	// Mock implementation - calls not tracked in tests yet
+	m.CallUpdates = append(m.CallUpdates, calls)
 }
 
 func (m *MockEventHandler) OnCorrelatedCallUpdate(correlatedCalls []types.CorrelatedCallInfo) {
@@ -1433,5 +1435,398 @@ func TestContainsHelper(t *testing.T) {
 			result := contains(tt.slice, tt.item)
 			assert.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+// Tests for call state tracking
+
+func TestUpdateCallState_NewCall(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+		nodeID:     "test-processor",
+	}
+
+	pkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "test-call-id-1",
+				Method:   "INVITE",
+				FromUser: "alice",
+				ToUser:   "bob",
+				FromUri:  "sip:alice@example.com",
+				ToUri:    "sip:bob@example.com",
+			},
+		},
+	}
+
+	client.updateCallState(pkt, "hunter-1")
+
+	// Verify call was created
+	assert.Len(t, client.calls, 1)
+	call := client.calls["test-call-id-1"]
+	assert.NotNil(t, call)
+	assert.Equal(t, "test-call-id-1", call.CallID)
+	assert.Equal(t, "sip:alice@example.com", call.From)
+	assert.Equal(t, "sip:bob@example.com", call.To)
+	assert.Equal(t, "RINGING", call.State) // INVITE transitions NEW -> RINGING
+	assert.Contains(t, call.Hunters, "hunter-1")
+}
+
+func TestUpdateCallState_ExistingCall_MultipleHunters(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+		nodeID:     "test-processor",
+	}
+
+	// Create initial call from hunter-1
+	pkt1 := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "test-call-id-2",
+				Method:   "INVITE",
+				FromUser: "alice",
+				ToUser:   "bob",
+			},
+		},
+	}
+	client.updateCallState(pkt1, "hunter-1")
+
+	// Update from hunter-2
+	pkt2 := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "test-call-id-2",
+				Method:   "ACK",
+				FromUser: "alice",
+				ToUser:   "bob",
+			},
+		},
+	}
+	client.updateCallState(pkt2, "hunter-2")
+
+	// Verify both hunters are tracked
+	call := client.calls["test-call-id-2"]
+	assert.NotNil(t, call)
+	assert.Contains(t, call.Hunters, "hunter-1")
+	assert.Contains(t, call.Hunters, "hunter-2")
+	assert.Equal(t, "ACTIVE", call.State) // ACK transitions RINGING -> ACTIVE
+}
+
+func TestUpdateCallState_EmptyCallID(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	pkt := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: "", // Empty call ID
+				Method: "INVITE",
+			},
+		},
+	}
+
+	client.updateCallState(pkt, "hunter-1")
+
+	// No call should be created
+	assert.Empty(t, client.calls)
+}
+
+func TestUpdateCallState_NilSIPMetadata(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	pkt := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: nil, // No SIP metadata
+		},
+	}
+
+	client.updateCallState(pkt, "hunter-1")
+
+	// No call should be created
+	assert.Empty(t, client.calls)
+}
+
+func TestUpdateRTPQuality_NewStats(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// First create a call
+	client.calls["call-123"] = &types.CallInfo{
+		CallID: "call-123",
+		State:  "ACTIVE",
+	}
+
+	// Add RTP packet
+	pkt := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: "call-123",
+			},
+			Rtp: &data.RTPMetadata{
+				Ssrc:        12345,
+				PayloadType: 0, // G.711 µ-law
+				Sequence:    100,
+				Timestamp:   8000,
+			},
+		},
+	}
+
+	client.updateRTPQuality(pkt)
+
+	// Verify RTP stats were created
+	assert.Len(t, client.rtpStats, 1)
+	stats := client.rtpStats["call-123"]
+	assert.NotNil(t, stats)
+	assert.Equal(t, uint16(100), stats.lastSeqNum)
+	assert.Equal(t, uint32(8000), stats.lastTimestamp)
+	assert.Equal(t, 1, stats.totalPackets)
+
+	// Verify codec was set
+	call := client.calls["call-123"]
+	assert.Equal(t, "G.711 µ-law", call.Codec)
+}
+
+func TestUpdateRTPQuality_PacketLoss(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// Create a call with existing RTP stats
+	client.calls["call-loss"] = &types.CallInfo{
+		CallID: "call-loss",
+		State:  "ACTIVE",
+	}
+	client.rtpStats["call-loss"] = &rtpQualityStats{
+		lastSeqNum:    100,
+		lastTimestamp: 8000,
+		totalPackets:  10,
+		lostPackets:   0,
+	}
+
+	// Add RTP packet with gap (seq 100 -> 105 = 4 lost packets)
+	pkt := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: "call-loss",
+			},
+			Rtp: &data.RTPMetadata{
+				Ssrc:        12345,
+				PayloadType: 0,
+				Sequence:    105, // Gap of 4 (101, 102, 103, 104 lost)
+				Timestamp:   8160,
+			},
+		},
+	}
+
+	client.updateRTPQuality(pkt)
+
+	// Verify packet loss was detected
+	stats := client.rtpStats["call-loss"]
+	assert.Equal(t, 4, stats.lostPackets)
+	assert.Equal(t, 11, stats.totalPackets)
+
+	// Verify packet loss percentage is calculated
+	call := client.calls["call-loss"]
+	expectedLoss := (float64(4) / float64(11)) * 100.0
+	assert.InDelta(t, expectedLoss, call.PacketLoss, 0.01)
+}
+
+func TestUpdateRTPQuality_SequenceWrap(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// Create a call with seq near max uint16
+	client.calls["call-wrap"] = &types.CallInfo{
+		CallID: "call-wrap",
+		State:  "ACTIVE",
+	}
+	client.rtpStats["call-wrap"] = &rtpQualityStats{
+		lastSeqNum:    65534,
+		lastTimestamp: 8000,
+		totalPackets:  10,
+		lostPackets:   0,
+	}
+
+	// Add RTP packet that wraps (65534 -> 2 = 3 lost packets: 65535, 0, 1)
+	pkt := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: "call-wrap",
+			},
+			Rtp: &data.RTPMetadata{
+				Ssrc:        12345,
+				PayloadType: 0,
+				Sequence:    2, // Wrapped around
+				Timestamp:   8160,
+			},
+		},
+	}
+
+	client.updateRTPQuality(pkt)
+
+	// Verify wraparound was handled correctly
+	stats := client.rtpStats["call-wrap"]
+	assert.Equal(t, 3, stats.lostPackets) // 65535, 0, 1 are lost
+}
+
+func TestUpdateRTPQuality_NoCall(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// RTP packet for non-existent call
+	pkt := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId: "nonexistent-call",
+			},
+			Rtp: &data.RTPMetadata{
+				Ssrc:        12345,
+				PayloadType: 0,
+				Sequence:    100,
+				Timestamp:   8000,
+			},
+		},
+	}
+
+	client.updateRTPQuality(pkt)
+
+	// No stats should be created
+	assert.Empty(t, client.rtpStats)
+}
+
+func TestMaybeNotifyCallUpdates_Throttling(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// Add a call
+	client.calls["test-call"] = &types.CallInfo{
+		CallID:    "test-call",
+		State:     "ACTIVE",
+		StartTime: time.Now().Add(-5 * time.Second),
+	}
+
+	// First call should update
+	client.maybeNotifyCallUpdates()
+	assert.Len(t, handler.CallUpdates, 1, "first call should notify")
+
+	// Immediate second call should be throttled
+	client.maybeNotifyCallUpdates()
+	assert.Len(t, handler.CallUpdates, 1, "second call should be throttled")
+
+	// Wait for throttle period
+	time.Sleep(600 * time.Millisecond)
+
+	// Third call should update
+	client.maybeNotifyCallUpdates()
+	assert.Len(t, handler.CallUpdates, 2, "third call should notify after throttle")
+}
+
+func TestMaybeNotifyCallUpdates_EmptyCalls(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// No calls exist
+	client.maybeNotifyCallUpdates()
+
+	// Handler should not be called with empty calls
+	assert.Empty(t, handler.CallUpdates)
+}
+
+func TestMaybeNotifyCallUpdates_DurationCalculation(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	startTime := time.Now().Add(-10 * time.Second)
+	endTime := time.Now().Add(-5 * time.Second)
+
+	// Active call - duration calculated from start time
+	client.calls["active-call"] = &types.CallInfo{
+		CallID:    "active-call",
+		State:     "ACTIVE",
+		StartTime: startTime,
+	}
+
+	// Ended call - duration calculated from end time
+	client.calls["ended-call"] = &types.CallInfo{
+		CallID:    "ended-call",
+		State:     "ENDED",
+		StartTime: startTime,
+		EndTime:   endTime,
+	}
+
+	client.maybeNotifyCallUpdates()
+
+	assert.Len(t, handler.CallUpdates, 1)
+	calls := handler.CallUpdates[0]
+	assert.Len(t, calls, 2)
+
+	// Find and verify each call
+	for _, call := range calls {
+		switch call.CallID {
+		case "active-call":
+			// Active call duration should be approximately 10 seconds
+			assert.GreaterOrEqual(t, call.Duration, 9*time.Second)
+			assert.LessOrEqual(t, call.Duration, 11*time.Second)
+		case "ended-call":
+			// Ended call duration should be approximately 5 seconds
+			assert.GreaterOrEqual(t, call.Duration, 5*time.Second)
+			assert.LessOrEqual(t, call.Duration, 6*time.Second)
+		}
 	}
 }

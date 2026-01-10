@@ -97,11 +97,11 @@ func runRemote(cmd *cobra.Command, args []string) {
 }
 
 func init() {
-	remoteCmd.Flags().StringVar(&remoteNodesFile, "nodes-file", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
+	remoteCmd.Flags().StringVarP(&remoteNodesFile, "nodes-file", "n", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
 	remoteCmd.Flags().BoolVar(&remoteInsecure, "insecure", false, "allow insecure connections (no TLS) for testing/development")
 
 	// TLS configuration
-	remoteCmd.Flags().BoolVar(&remoteTLSEnabled, "tls", false, "enable TLS encryption for remote connections")
+	remoteCmd.Flags().BoolVarP(&remoteTLSEnabled, "tls", "T", false, "enable TLS encryption for remote connections")
 	remoteCmd.Flags().StringVar(&remoteTLSCAFile, "tls-ca", "", "path to CA certificate for server verification")
 	remoteCmd.Flags().StringVar(&remoteTLSCertFile, "tls-cert", "", "path to client TLS certificate (for mutual TLS)")
 	remoteCmd.Flags().StringVar(&remoteTLSKeyFile, "tls-key", "", "path to client TLS key (for mutual TLS)")

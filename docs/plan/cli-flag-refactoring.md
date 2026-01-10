@@ -54,15 +54,15 @@ Add short flags to existing long flags. No deprecation needed.
 
 ### Implementation Steps
 
-- [ ] Add `-c` to `--config` in all `root_*.go` files (6 files)
-- [ ] Add `-g` to `--gpu-backend` in sniff/voip.go, hunt/hunt.go, watch/live.go
-- [ ] Add `-n` to `--nodes-file` in watch/remote.go
-- [ ] Add `-T` to `--tls` in hunt, process, tap, watch/remote, filter (5 files)
-- [ ] Add `-S` to `--sip-port` in sniff/voip, hunt/voip, tap/tap_voip (3 files)
-- [ ] Add `-M` to `--tcp-performance-mode` in sniff/voip, tap/tap_voip (2 files)
-- [ ] Add `-V` to `--virtual-interface` in sniff, tap, process (3 files)
-- [ ] Add `-U` to `--udp-only` in sniff/voip, tap/tap_voip, hunt/voip (3 files)
-- [ ] Add `-R` to `--rtp-port-range` in sniff/voip, tap/tap_voip, hunt/voip (3 files)
+- [x] Add `-c` to `--config` in all `root_*.go` files (6 files)
+- [x] Add `-g` to `--gpu-backend` in sniff/voip.go, hunt/hunt.go, watch/live.go
+- [x] Add `-n` to `--nodes-file` in watch/remote.go
+- [x] Add `-T` to `--tls` in hunt, process, tap, watch/remote, filter (5 files)
+- [x] Add `-S` to `--sip-port` in sniff/voip, hunt/voip, tap/tap_voip (3 files)
+- [x] Add `-M` to `--tcp-performance-mode` in sniff/voip, tap/tap_voip (2 files)
+- [x] Add `-V` to `--virtual-interface` in sniff, tap, process (3 files)
+- [x] Add `-U` to `--udp-only` in sniff/voip, tap/tap_voip, hunt/voip (3 files)
+- [x] Add `-R` to `--rtp-port-range` in sniff/voip, tap/tap_voip, hunt/voip (3 files)
 - [ ] Update documentation (README.md files in cmd/)
 
 ---

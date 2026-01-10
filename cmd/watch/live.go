@@ -102,7 +102,7 @@ func init() {
 	liveCmd.Flags().StringVarP(&liveFilter, "filter", "f", "", "BPF filter to apply")
 	liveCmd.Flags().BoolVarP(&livePromiscuous, "promiscuous", "p", false, "use promiscuous mode")
 	liveCmd.Flags().BoolVar(&liveEnableGPU, "enable-gpu", false, "enable GPU-accelerated VoIP parsing")
-	liveCmd.Flags().StringVar(&liveGPUBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
+	liveCmd.Flags().StringVarP(&liveGPUBackend, "gpu-backend", "g", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	liveCmd.Flags().IntVar(&liveGPUBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
 
 	_ = viper.BindPFlag("promiscuous", liveCmd.Flags().Lookup("promiscuous"))

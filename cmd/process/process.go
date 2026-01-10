@@ -130,7 +130,7 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&filterFile, "filter-file", "f", "", "Path to filter persistence file (YAML, default: ~/.config/lippycat/filters.yaml)")
 
 	// TLS configuration (security)
-	ProcessCmd.Flags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption (recommended for production)")
+	ProcessCmd.Flags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption (recommended for production)")
 	ProcessCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "Path to server TLS certificate")
 	ProcessCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "Path to server TLS key")
 	ProcessCmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification (mutual TLS)")
@@ -153,7 +153,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&autoRotatePcapMaxSize, "auto-rotate-max-size", "100M", "Maximum PCAP file size before rotation (e.g., 100M, 1G)")
 
 	// Virtual Interface flags
-	ProcessCmd.Flags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
+	ProcessCmd.Flags().BoolVarP(&virtualInterface, "virtual-interface", "V", false, "Enable virtual network interface for packet injection")
 	ProcessCmd.Flags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
 	ProcessCmd.Flags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap (Layer 2) or tun (Layer 3)")
 	ProcessCmd.Flags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size (packets)")

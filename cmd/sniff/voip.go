@@ -214,9 +214,9 @@ func init() {
 	voipCmd.Flags().StringVarP(&writeVoipFile, "write-file", "w", "", "prefix for output pcap files (creates <prefix>_sip_<callid>.pcap and <prefix>_rtp_<callid>.pcap)")
 
 	// BPF Filter Optimization Flags
-	voipCmd.Flags().BoolVar(&udpOnly, "udp-only", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
-	voipCmd.Flags().StringVar(&sipPorts, "sip-port", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
-	voipCmd.Flags().StringVar(&rtpPortRanges, "rtp-port-range", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
+	voipCmd.Flags().BoolVarP(&udpOnly, "udp-only", "U", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
+	voipCmd.Flags().StringVarP(&sipPorts, "sip-port", "S", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
+	voipCmd.Flags().StringVarP(&rtpPortRanges, "rtp-port-range", "R", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
 
 	// Bind BPF filter optimization flags to viper
 	_ = viper.BindPFlag("voip.udp_only", voipCmd.Flags().Lookup("udp-only"))
@@ -225,7 +225,7 @@ func init() {
 
 	// GPU Acceleration Flags
 	voipCmd.Flags().BoolVar(&gpuEnable, "gpu-enable", true, "Enable GPU acceleration for pattern matching (default: true)")
-	voipCmd.Flags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd', 'disabled' (default: auto)")
+	voipCmd.Flags().StringVarP(&gpuBackend, "gpu-backend", "g", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd', 'disabled' (default: auto)")
 	voipCmd.Flags().IntVar(&gpuBatchSize, "gpu-batch-size", 1024, "Batch size for GPU processing (default: 1024)")
 	voipCmd.Flags().Int64Var(&gpuMaxMemory, "gpu-max-memory", 0, "Maximum GPU memory in bytes (0 = auto)")
 
@@ -243,7 +243,7 @@ func init() {
 	voipCmd.Flags().IntVar(&tcpAssemblerMaxPages, "tcp-assembler-max-pages", 0, "Maximum pages for TCP assembler (0 = use default)")
 
 	// TCP Performance Optimization Flags
-	voipCmd.Flags().StringVar(&tcpPerformanceMode, "tcp-performance-mode", "", "TCP performance mode: 'balanced', 'throughput', 'latency', 'memory' (default: balanced)")
+	voipCmd.Flags().StringVarP(&tcpPerformanceMode, "tcp-performance-mode", "M", "", "TCP performance mode: 'balanced', 'throughput', 'latency', 'memory' (default: balanced)")
 	voipCmd.Flags().StringVar(&tcpBufferStrategy, "tcp-buffer-strategy", "", "TCP buffering strategy: 'adaptive', 'fixed', 'ring' (default: adaptive)")
 	voipCmd.Flags().BoolVar(&enableBackpressure, "enable-backpressure", false, "Enable backpressure handling for TCP streams")
 	voipCmd.Flags().BoolVar(&memoryOptimization, "memory-optimization", false, "Enable memory usage optimizations")

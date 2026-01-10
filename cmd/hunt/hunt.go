@@ -82,7 +82,7 @@ func init() {
 
 	// VoIP filtering with GPU acceleration (persistent for subcommands)
 	HuntCmd.PersistentFlags().BoolVar(&enableVoIPFilter, "enable-voip-filter", false, "Enable GPU-accelerated VoIP filtering")
-	HuntCmd.PersistentFlags().StringVar(&gpuBackend, "gpu-backend", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
+	HuntCmd.PersistentFlags().StringVarP(&gpuBackend, "gpu-backend", "g", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	HuntCmd.PersistentFlags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "Batch size for GPU processing")
 
 	// Disk overflow buffer (nuclear-proof resilience) - persistent for subcommands
@@ -91,7 +91,7 @@ func init() {
 	HuntCmd.PersistentFlags().IntVar(&diskBufferMaxSize, "disk-buffer-max-mb", 1024, "Maximum disk buffer size in megabytes")
 
 	// TLS configuration (security) - persistent for subcommands
-	HuntCmd.PersistentFlags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption (recommended for production)")
+	HuntCmd.PersistentFlags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption (recommended for production)")
 	HuntCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert", "", "Path to client TLS certificate (for mutual TLS)")
 	HuntCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key", "", "Path to client TLS key (for mutual TLS)")
 	HuntCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for server verification")

@@ -81,16 +81,16 @@ func init() {
 	voipTapCmd.Flags().StringVar(&sipuser, "sipuser", "", "SIP user/phone to match (comma-separated, supports wildcards: '*456789', 'alice*')")
 
 	// BPF Filter Optimization Flags
-	voipTapCmd.Flags().BoolVar(&udpOnly, "udp-only", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
-	voipTapCmd.Flags().StringVar(&sipPorts, "sip-port", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
-	voipTapCmd.Flags().StringVar(&rtpPortRanges, "rtp-port-range", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000')")
+	voipTapCmd.Flags().BoolVarP(&udpOnly, "udp-only", "U", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
+	voipTapCmd.Flags().StringVarP(&sipPorts, "sip-port", "S", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
+	voipTapCmd.Flags().StringVarP(&rtpPortRanges, "rtp-port-range", "R", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000')")
 
 	// Pattern Matching Algorithm Flags
 	voipTapCmd.Flags().StringVar(&patternAlgorithm, "pattern-algorithm", "auto", "Pattern matching algorithm: 'auto', 'linear', 'aho-corasick'")
 	voipTapCmd.Flags().IntVar(&patternBufferMB, "pattern-buffer-mb", 64, "Memory budget for pattern buffer in MB")
 
 	// TCP Performance Mode
-	voipTapCmd.Flags().StringVar(&tcpPerformanceMode, "tcp-performance-mode", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
+	voipTapCmd.Flags().StringVarP(&tcpPerformanceMode, "tcp-performance-mode", "M", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
 
 	// Per-call PCAP (VoIP-specific)
 	voipTapCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic (default: enabled for tap voip)")

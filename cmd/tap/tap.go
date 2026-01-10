@@ -162,7 +162,7 @@ func init() {
 	// ============================================================
 	// Virtual Interface Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.PersistentFlags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
+	TapCmd.PersistentFlags().BoolVarP(&virtualInterface, "virtual-interface", "V", false, "Enable virtual network interface for packet injection")
 	TapCmd.PersistentFlags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name")
 	TapCmd.PersistentFlags().StringVar(&vifType, "vif-type", "tap", "Virtual interface type: tap or tun")
 	TapCmd.PersistentFlags().IntVar(&vifBufferSize, "vif-buffer-size", 65536, "Injection queue buffer size")
@@ -189,7 +189,7 @@ func init() {
 	// ============================================================
 	// TLS Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.PersistentFlags().BoolVar(&tlsEnabled, "tls", false, "Enable TLS encryption for management interface")
+	TapCmd.PersistentFlags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption for management interface")
 	TapCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert", "", "Path to server TLS certificate")
 	TapCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key", "", "Path to server TLS key")
 	TapCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification")

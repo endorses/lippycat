@@ -59,9 +59,9 @@ func init() {
 	HuntCmd.AddCommand(voipHuntCmd)
 
 	// BPF Filter Optimization Flags (VoIP-specific)
-	voipHuntCmd.Flags().BoolVar(&hunterUDPOnly, "udp-only", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
-	voipHuntCmd.Flags().StringVar(&hunterSIPPorts, "sip-port", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
-	voipHuntCmd.Flags().StringVar(&hunterRTPPortRanges, "rtp-port-range", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
+	voipHuntCmd.Flags().BoolVarP(&hunterUDPOnly, "udp-only", "U", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
+	voipHuntCmd.Flags().StringVarP(&hunterSIPPorts, "sip-port", "S", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
+	voipHuntCmd.Flags().StringVarP(&hunterRTPPortRanges, "rtp-port-range", "R", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
 
 	// Pattern Matching Algorithm Flags (VoIP-specific)
 	voipHuntCmd.Flags().StringVar(&hunterPatternAlgorithm, "pattern-algorithm", "auto", "Pattern matching algorithm: 'auto', 'linear', 'aho-corasick' (default: auto)")

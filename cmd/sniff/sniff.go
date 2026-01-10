@@ -92,7 +92,7 @@ func init() {
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
 
 	// Virtual Interface Flags (inherited by voip subcommand)
-	SniffCmd.PersistentFlags().BoolVar(&virtualInterface, "virtual-interface", false, "Enable virtual network interface for packet injection")
+	SniffCmd.PersistentFlags().BoolVarP(&virtualInterface, "virtual-interface", "V", false, "Enable virtual network interface for packet injection")
 	SniffCmd.PersistentFlags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
 	SniffCmd.PersistentFlags().DurationVar(&vifStartupDelay, "vif-startup-delay", 3*time.Second, "Delay before packet injection starts (allows tools to attach)")
 	SniffCmd.PersistentFlags().BoolVar(&vifReplayTiming, "vif-replay-timing", false, "Respect original packet timing from PCAP (like tcpreplay)")

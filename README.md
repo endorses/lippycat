@@ -5,12 +5,12 @@
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux-lightgrey?logo=linux)](#installation)
 
-[![Protocols](https://img.shields.io/badge/protocols-VoIP%20%7C%20DNS%20%7C%20TLS%20%7C%20Email-purple)](#features)
+[![Protocols](https://img.shields.io/badge/protocols-VoIP%20%7C%20DNS%20%7C%20HTTP%20%7C%20TLS%20%7C%20Email-purple)](#features)
 [![GPU](https://img.shields.io/badge/GPU-CUDA%20%7C%20SIMD-green)](docs/GPU_ACCELERATION.md)
 [![TLS/mTLS](https://img.shields.io/badge/TLS%2FmTLS-supported-success)](docs/SECURITY.md)
 [![Distributed](https://img.shields.io/badge/architecture-distributed-blue)](docs/DISTRIBUTED_MODE.md)
 
-Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
+Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
 
 **Status:** v0.7.0 - Early development. Expect breaking changes.
 
@@ -36,6 +36,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
 - **Multi-Protocol Analysis**:
   - **VoIP**: SIP/RTP traffic capture, call tracking, per-call PCAP, user targeting
   - **DNS**: Query/response correlation, RTT calculation, tunneling detection
+  - **HTTP**: Request/response tracking, method/path/host filtering, status code analysis
   - **TLS**: JA3/JA3S fingerprinting, certificate extraction, SNI filtering, [traffic decryption](docs/TLS_DECRYPTION.md)
   - **Email**: SMTP/IMAP/POP3 session tracking, sender/recipient/mailbox filtering, content keywords
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
@@ -183,11 +184,13 @@ VERBS:
 | `sniff` | Packet capture (general) |
 | `sniff voip` | VoIP capture with SIP/RTP analysis |
 | `sniff dns` | DNS capture with query/response correlation |
+| `sniff http` | HTTP capture with request/response tracking |
 | `sniff tls` | TLS capture with JA3 fingerprinting |
 | `sniff email` | Email (SMTP/IMAP/POP3) capture with session tracking |
 | `tap` | Standalone capture with TUI serving and PCAP writing |
 | `tap voip` | VoIP tap with per-call PCAP |
 | `tap dns` | DNS tap with domain filtering |
+| `tap http` | HTTP tap with method/path filtering |
 | `tap tls` | TLS tap with JA3/SNI filtering |
 | `tap email` | Email tap with content filtering |
 | `watch` | Interactive TUI (defaults to live mode) |
@@ -197,6 +200,7 @@ VERBS:
 | `hunt` | Hunter node (distributed edge capture) |
 | `hunt voip` | VoIP hunter with call buffering |
 | `hunt dns` | DNS hunter with domain filtering |
+| `hunt http` | HTTP hunter with URL filtering |
 | `hunt tls` | TLS hunter with JA3/SNI filtering |
 | `hunt email` | Email hunter with content filtering |
 | `process` | Processor node (distributed aggregation) |
@@ -377,7 +381,6 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 ## Roadmap
 
 ### Planned
-- HTTP/HTTPS protocol support
 - Enhanced GPU acceleration
 - Additional protocol plugins
 

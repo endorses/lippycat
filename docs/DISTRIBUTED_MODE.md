@@ -1,5 +1,28 @@
 # Distributed Mode - Complete Documentation
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+  - [Standalone Tap Mode](#standalone-tap-mode)
+  - [Hub-and-Spoke Mode](#hub-and-spoke-mode)
+  - [Hierarchical Mode](#hierarchical-mode)
+  - [Multi-Level Management](#multi-level-management-v030)
+- [Components](#components)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Features](#features)
+- [Use Cases](#use-cases)
+- [Production Deployment](#production-deployment)
+- [Performance Tuning](#performance-tuning)
+- [Troubleshooting](#troubleshooting)
+- [Protocol Details](#protocol-details)
+- [Security Features](#security-features-v024)
+- [Known Limitations](#known-limitations)
+- [FAQ](#faq)
+
+---
+
 ## Overview
 
 Lippycat supports a fully distributed packet capture architecture that allows you to deploy multiple capture nodes (hunters) across your network and aggregate traffic to central processors. This enables scalable, multi-site packet capture with hierarchical aggregation.
@@ -35,11 +58,12 @@ flowchart TB
         PW[PCAP writing]
         PC[Per-call PCAP]
         TS[TUI server]
-        OU[Optional upstream]
     end
 
     TAP --> PCAP[PCAP Files]
     TAP --> TUI[TUI Clients]
+    TAP --> UP[Upstream Processor]
+    TAP --> VI[Virtual Interface]
 ```
 
 **When to use Tap Mode:**

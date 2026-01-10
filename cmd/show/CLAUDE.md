@@ -1,99 +1,150 @@
 # Show Command - Architecture
 
-The `show` command provides diagnostics for TCP SIP processing. Queries runtime state from `internal/pkg/voip/`.
+The `show` command provides remote processor diagnostics via gRPC, plus local configuration display.
 
 ## Structure
 
 ```
 cmd/show/
-├── show.go     - Base command (requires subcommand)
-├── health.go   - TCP assembler health
-├── metrics.go  - Comprehensive TCP metrics
-├── alerts.go   - Alert management
-├── buffers.go  - Buffer statistics
-├── streams.go  - Stream metrics
-├── config.go   - Configuration display
-└── summary.go  - System overview
+├── show.go      - Base command (requires subcommand)
+├── status.go    - Processor status (gRPC)
+├── hunters.go   - Hunter details (gRPC)
+├── topology.go  - Distributed topology (gRPC)
+├── filter.go    - Filter details (delegates to cmd/filter)
+└── config.go    - Local configuration display
 ```
 
 **Build Tag:** `cli` or `all`
 
-## Integration with internal/pkg/voip/
+## Architecture
 
-All show commands query the VoIP package's runtime state:
+### Remote Commands (gRPC-based)
 
-```go
-// Health checks
-voip.IsTCPAssemblerHealthy() bool
-voip.GetTCPAssemblerHealth() map[string]interface{}
+Commands that query remote processors:
+- `show status` - Processor stats via `GetHunterStatus`
+- `show hunters` - Hunter details via `GetHunterStatus`
+- `show topology` - Full topology via `GetTopology`
+- `show filter` - Filter details (delegated to cmd/filter)
 
-// Metrics
-voip.GetTCPAssemblerMetrics() map[string]interface{}
-voip.GetTCPStreamMetrics() TCPStreamMetrics
-voip.GetTCPBufferStats() TCPBufferStats
+All use:
+- `internal/pkg/statusclient` for gRPC client
+- `cmd/filter.AddConnectionFlags()` for connection flags
+- `cmd/filter.OutputError()` for JSON error output
+- JSON output to stdout for scripting
 
-// Alerts
-voip.GetAlertManager() *AlertManager
-alertManager.GetActiveAlerts() []Alert
-alertManager.GetAlertHistory() []Alert
-alertManager.ClearAllAlerts()
+### Local Commands
 
-// Config
-voip.GetConfig() *Config
-```
+- `show config` - Displays local TCP SIP configuration from `internal/pkg/voip`
 
-## Output Format Pattern
+## Integration Pattern
 
-Most commands support JSON output:
+Remote show commands reuse the filter package's connection utilities:
 
 ```go
-func showMetrics(jsonOutput bool) {
-    metrics := voip.GetTCPAssemblerMetrics()
+import "github.com/endorses/lippycat/cmd/filter"
 
-    if jsonOutput {
-        data, _ := json.MarshalIndent(metrics, "", "  ")
-        fmt.Println(string(data))
+func init() {
+    filter.AddConnectionFlags(statusCmd)
+    ShowCmd.AddCommand(statusCmd)
+}
+
+func runShowStatus(cmd *cobra.Command, args []string) {
+    client, err := newStatusClient()
+    if err != nil {
+        filter.OutputError(err, filter.ExitConnectionError)
         return
     }
+    defer client.Close()
 
-    // Human-readable output
-    fmt.Println("=== TCP Metrics ===")
+    resp, err := client.GetStatus()
     // ...
 }
 ```
 
-## Not Initialized Handling
+## statusclient Package
 
-All commands handle the case where no VoIP capture is running:
+`internal/pkg/statusclient/` provides:
 
 ```go
-health := voip.GetTCPAssemblerHealth()
-if status, ok := health["status"].(string); ok && status == "not_initialized" {
-    fmt.Println("TCP factory not initialized - no active VoIP capture")
-    return
-}
+// Client creation
+client, err := statusclient.NewStatusClient(config)
+defer client.Close()
+
+// Methods
+resp, err := client.GetStatus()         // ProcessorStats + hunters summary
+hunters, err := client.GetHunters(id)   // ConnectedHunter details
+topo, err := client.GetTopology()       // Full topology tree
+
+// JSON conversion
+json, err := statusclient.StatusResponseToJSON(resp)
+json, err := statusclient.HuntersToJSON(hunters)
+json, err := statusclient.TopologyToJSON(topo)
 ```
 
-## Adding New Subcommands
+## gRPC Methods Used
+
+| Command | gRPC Method | Response |
+|---------|-------------|----------|
+| `show status` | `GetHunterStatus` | ProcessorStats |
+| `show hunters` | `GetHunterStatus` | []ConnectedHunter |
+| `show topology` | `GetTopology` | ProcessorNode (recursive) |
+| `show filter` | `GetFilters` | Filter (via filterclient) |
+
+## JSON Output Format
+
+All remote commands output JSON for scripting:
 
 ```go
-// cmd/show/newmetric.go
-var newMetricCmd = &cobra.Command{
-    Use:   "newmetric",
-    Short: "Show new metric",
-    Run: func(cmd *cobra.Command, args []string) {
-        jsonOutput, _ := cmd.Flags().GetBool("json")
-        showNewMetric(jsonOutput)
-    },
+jsonBytes, err := statusclient.StatusResponseToJSON(resp)
+cmd.Println(string(jsonBytes))
+```
+
+Errors also output JSON to stderr:
+
+```go
+filter.OutputError(err, filter.ExitConnectionError)
+// Outputs: {"error":"...","code":"UNAVAILABLE"}
+```
+
+## Exit Codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | ExitSuccess | Success |
+| 1 | ExitGeneralError | General error |
+| 2 | ExitConnectionError | Connection failed |
+| 3 | ExitValidationError | Invalid input |
+| 4 | ExitNotFoundError | Resource not found |
+
+## Adding New Show Subcommands
+
+```go
+// cmd/show/newcmd.go
+var newCmd = &cobra.Command{
+    Use:   "newcmd",
+    Short: "Show something new",
+    Run:   runNewCmd,
 }
 
 func init() {
-    newMetricCmd.Flags().Bool("json", false, "JSON output")
-    ShowCmd.AddCommand(newMetricCmd)
+    filter.AddConnectionFlags(newCmd)
+    ShowCmd.AddCommand(newCmd)
+}
+
+func runNewCmd(cmd *cobra.Command, args []string) {
+    client, err := newStatusClient()
+    if err != nil {
+        filter.OutputError(err, filter.ExitConnectionError)
+        return
+    }
+    defer client.Close()
+
+    // Query and output JSON
 }
 ```
 
 ## See Also
 
 - [README.md](README.md) - User documentation
-- [internal/pkg/voip/tcp_metrics.go](../../internal/pkg/voip/tcp_metrics.go) - Metrics implementation
+- [../filter/CLAUDE.md](../filter/CLAUDE.md) - Filter command architecture
+- [../../internal/pkg/statusclient/](../../internal/pkg/statusclient/) - Status client package

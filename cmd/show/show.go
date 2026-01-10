@@ -11,34 +11,28 @@ import (
 var ShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Display information and diagnostics",
-	Long: `Display information and diagnostics for TCP SIP processing and remote resources.
+	Long: `Display information and diagnostics for processors and local configuration.
 
 Subcommands:
-  health   - Show TCP assembler health status
-  metrics  - Display comprehensive TCP metrics
-  alerts   - Show active alerts and alert history
-  buffers  - Inspect TCP buffer statistics
-  streams  - Show TCP stream processing metrics
-  config   - Display current configuration
-  summary  - Show overall system status summary
-  filter   - Show filter details from a remote processor
+  status   - Show processor status and statistics (requires -P)
+  hunters  - Show connected hunter details (requires -P)
+  topology - Show distributed topology (requires -P)
+  filter   - Show filter details (requires -P)
+  config   - Display local configuration
 
 Examples:
-  lc show health           # Show TCP assembler health status
-  lc show metrics --json   # Display metrics in JSON format
-  lc show alerts           # Show all alerts
-  lc show summary          # Show overall system summary
-  lc show filter --id myfilter -p localhost:50051  # Show a filter`,
+  lc show status -P localhost:50051              # Show processor status
+  lc show hunters -P localhost:50051             # List connected hunters
+  lc show hunters -P localhost:50051 --hunter h1 # Show specific hunter
+  lc show topology -P localhost:50051            # Show full topology
+  lc show filter --id myfilter -P localhost:50051
+  lc show config                                 # Show local config`,
 	// No Run function - requires a subcommand
 }
 
 func init() {
 	// Add subcommands
-	ShowCmd.AddCommand(healthCmd)
-	ShowCmd.AddCommand(metricsCmd)
-	ShowCmd.AddCommand(alertsCmd)
-	ShowCmd.AddCommand(buffersCmd)
-	ShowCmd.AddCommand(streamsCmd)
+	// Note: filter is added via filter.go init()
+	// Note: status, hunters, topology are added via their respective files
 	ShowCmd.AddCommand(configCmd)
-	ShowCmd.AddCommand(summaryCmd)
 }

@@ -1,100 +1,146 @@
-# Show Command - Diagnostics and Information
+# Show Command - Processor Diagnostics
 
-The `show` command displays diagnostics and information for TCP SIP processing components. Use these commands to monitor system health, debug issues, and inspect configuration.
+The `show` command displays information and diagnostics from running processors. Remote commands connect via gRPC and output JSON for easy parsing.
 
 ## Commands
 
-### Summary
+### Status
+
+Show processor status and statistics.
 
 ```bash
-# Overall system status
-lc show summary
+# Show processor status
+lc show status -P localhost:50051
+
+# With TLS
+lc show status -P processor.example.com:50051 -T --tls-ca ca.crt
 ```
 
-Displays health status, resource utilization, active alerts, and quick metrics.
+**Output:**
+```json
+{
+  "processor_id": "central-proc",
+  "status": "healthy",
+  "total_hunters": 3,
+  "healthy_hunters": 3,
+  "warning_hunters": 0,
+  "error_hunters": 0,
+  "total_packets_received": 1250000,
+  "total_packets_forwarded": 0,
+  "total_filters": 5,
+  "upstream_processor": ""
+}
+```
 
-### Health
+### Hunters
+
+Show connected hunter details and statistics.
 
 ```bash
-# TCP assembler health status
-lc show health
+# List all connected hunters
+lc show hunters -P localhost:50051
+
+# Show a specific hunter
+lc show hunters -P localhost:50051 --hunter edge-01
+
+# With TLS
+lc show hunters -P processor.example.com:50051 -T --tls-ca ca.crt
 ```
 
-Shows goroutine usage, queue status, active streams, and health indicators.
+**Output (list):**
+```json
+[
+  {
+    "hunter_id": "edge-01",
+    "hostname": "capture-node-1",
+    "remote_addr": "10.0.1.10:45678",
+    "status": "healthy",
+    "connected_duration_sec": 3600,
+    "interfaces": ["eth0"],
+    "stats": {
+      "packets_captured": 500000,
+      "packets_matched": 12500,
+      "packets_forwarded": 12500,
+      "packets_dropped": 0,
+      "buffer_bytes": 1048576,
+      "active_filters": 3
+    },
+    "capabilities": {
+      "filter_types": ["sip_user", "ip_address"],
+      "gpu_acceleration": true,
+      "af_xdp": false
+    }
+  }
+]
+```
 
-### Metrics
+### Topology
+
+Show the complete distributed topology.
 
 ```bash
-# Comprehensive TCP metrics
-lc show metrics
+# Show full topology
+lc show topology -P localhost:50051
 
-# JSON output
-lc show metrics --json
+# With TLS
+lc show topology -P processor.example.com:50051 -T --tls-ca ca.crt
 ```
 
-**Metrics include:**
-- Health status
-- Stream metrics (active, created, completed, failed)
-- Buffer statistics (count, packets, drops)
-- Success/failure rates
+**Output:**
+```json
+{
+  "processor_id": "central-proc",
+  "address": ":50051",
+  "status": "healthy",
+  "hierarchy_depth": 0,
+  "reachable": true,
+  "hunters": [...],
+  "downstream_processors": [
+    {
+      "processor_id": "region-east",
+      "address": "10.0.2.1:50051",
+      "status": "healthy",
+      "hierarchy_depth": 1,
+      "reachable": true,
+      "hunters": [...]
+    }
+  ]
+}
+```
 
-### Alerts
+### Filter
+
+Show filter details (see `cmd/filter` for full filter management).
 
 ```bash
-# Show active alerts
-lc show alerts
-
-# Show all alerts including resolved
-lc show alerts --all
-
-# Clear all alerts
-lc show alerts --clear
-
-# JSON output
-lc show alerts --json
+# Show a specific filter
+lc show filter --id myfilter -P localhost:50051
 ```
-
-**Alert levels:** Critical, Warning, Info
-
-### Buffers
-
-```bash
-# TCP buffer statistics
-lc show buffers
-
-# JSON output
-lc show buffers --json
-```
-
-Shows buffer count, packet count, dropped buffers, and utilization.
-
-### Streams
-
-```bash
-# TCP stream processing metrics
-lc show streams
-
-# JSON output
-lc show streams --json
-```
-
-Shows active/completed/failed streams, queue depth, and drop counts.
 
 ### Config
 
+Show local TCP SIP configuration (no processor connection required).
+
 ```bash
-# Current configuration
+# Show local configuration
 lc show config
 
 # JSON output
 lc show config --json
 ```
 
-Displays TCP performance settings, buffer limits, and tuning parameters.
+## Connection Flags
 
-## Common Output Flags
+All remote commands support these flags:
 
-- `--json` - Output in JSON format for scripting/automation
+| Flag | Description |
+|------|-------------|
+| `-P, --processor` | Processor address (host:port) - **required** |
+| `-T, --tls` | Enable TLS encryption |
+| `--tls-ca` | Path to CA certificate file |
+| `--tls-cert` | Path to client certificate file (mTLS) |
+| `--tls-key` | Path to client key file (mTLS) |
+| `--tls-skip-verify` | Skip TLS certificate verification (insecure) |
 
 ## Usage Examples
 
@@ -102,47 +148,48 @@ Displays TCP performance settings, buffer limits, and tuning parameters.
 
 ```bash
 #!/bin/bash
-# Check if TCP assembler is healthy
-lc show health | grep -q "HEALTHY" && echo "OK" || echo "UNHEALTHY"
+# Check processor health
+status=$(lc show status -P localhost:50051 2>/dev/null | jq -r '.status')
+if [ "$status" = "healthy" ]; then
+    echo "OK"
+else
+    echo "UNHEALTHY: $status"
+    exit 1
+fi
 ```
 
-### Metrics Collection
+### Monitor Hunter Count
 
 ```bash
-# Collect metrics to JSON file
-lc show metrics --json > metrics-$(date +%Y%m%d-%H%M%S).json
+# Watch hunter connections
+watch -n 5 'lc show status -P localhost:50051 | jq "{total: .total_hunters, healthy: .healthy_hunters}"'
 ```
 
-### Alert Monitoring
+### Export Topology
 
 ```bash
-# Watch for critical alerts
-watch -n 5 'lc show alerts | head -20'
+# Save topology to file
+lc show topology -P localhost:50051 > topology-$(date +%Y%m%d).json
 ```
 
-## When to Use
+## Error Handling
 
-| Symptom | Command |
-|---------|---------|
-| General issues | `lc show summary` |
-| Goroutine exhaustion | `lc show health` |
-| High memory usage | `lc show buffers` |
-| Stream failures | `lc show streams` |
-| Configuration problems | `lc show config` |
-| Active problems | `lc show alerts` |
+Errors are output as JSON to stderr with appropriate exit codes:
 
-## Prerequisites
-
-Show commands display information about an **active VoIP capture session**. If no capture is running, most commands will indicate "TCP factory not initialized".
-
-Start a capture first:
-```bash
-# In another terminal
-sudo lc sniff voip -i eth0
+```json
+{"error":"processor address is required","code":"UNAVAILABLE"}
 ```
+
+| Exit Code | Meaning |
+|-----------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Connection error |
+| 3 | Validation error |
+| 4 | Not found |
 
 ## See Also
 
-- [cmd/sniff/README.md](../sniff/README.md) - VoIP capture with TCP reassembly
-- [docs/tcp-troubleshooting.md](../../docs/tcp-troubleshooting.md) - TCP debugging guide
-- [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Performance tuning
+- [cmd/filter/README.md](../filter/README.md) - Filter management commands
+- [docs/DISTRIBUTED_MODE.md](../../docs/DISTRIBUTED_MODE.md) - Distributed architecture
+- [docs/SECURITY.md](../../docs/SECURITY.md) - TLS/mTLS configuration

@@ -227,14 +227,12 @@ VERBS:
 - **`lc hunt voip`** - VoIP hunter with call buffering ([docs](cmd/hunt/CLAUDE.md))
 - **`lc process`** - Processor node for central aggregation ([docs](cmd/process/CLAUDE.md))
 - **`lc list interfaces`** - List network interfaces ([docs](cmd/list/CLAUDE.md))
-- **`lc show`** - TCP SIP diagnostics ([docs](cmd/show/CLAUDE.md))
-  - `show health` - Health status
-  - `show metrics` - Comprehensive metrics
-  - `show alerts` - Active alerts
-  - `show buffers` - Buffer statistics
-  - `show streams` - Stream metrics
-  - `show config` - Configuration display
-  - `show summary` - System summary
+- **`lc show`** - Processor diagnostics ([docs](cmd/show/CLAUDE.md))
+  - `show status` - Processor status (requires `-P`)
+  - `show hunters` - Connected hunters (requires `-P`)
+  - `show topology` - Distributed topology (requires `-P`)
+  - `show filter` - Filter details (requires `-P`)
+  - `show config` - Local configuration display
 
 ### Quick Start Examples
 

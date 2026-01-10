@@ -41,7 +41,7 @@ Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/
   - **Email**: SMTP/IMAP/POP3 session tracking, sender/recipient/mailbox filtering, content keywords
 - **Distributed Capture**: Multi-node architecture with hunter/processor nodes
 - **Virtual Interface**: Replay filtered streams to Wireshark, tcpdump, Snort (Linux only)
-- **TLS/mTLS Security**: Encrypted gRPC connections with mutual authentication
+- **Secure by Default**: TLS enabled for all gRPC connections, with optional mTLS
 - **Hunter Subscription**: Selective monitoring of specific hunters via TUI
 - **Performance**: SIMD optimizations, optional GPU acceleration, AF_XDP support
 - **TUI & CLI**: Terminal UI with remote monitoring and command-line interfaces
@@ -159,9 +159,13 @@ lc watch file -r capture.pcap
 # Remote monitoring
 lc watch remote --nodes-file nodes.yaml
 
-# Distributed capture
-lc process --listen :50051                           # Processor node
-sudo lc hunt --interface eth0 --processor host:50051 # Hunter node
+# Distributed capture (TLS enabled by default)
+lc process --listen :50051 --tls-cert server.crt --tls-key server.key  # Processor
+sudo lc hunt --interface eth0 --processor host:50051 --tls-ca ca.crt   # Hunter
+
+# Local testing without TLS (not for production)
+lc process --listen :50051 --insecure
+sudo lc hunt --interface eth0 --processor host:50051 --insecure
 ```
 
 ## Commands
@@ -254,7 +258,7 @@ Kernel-bypass packet capture on Linux 4.18+ with XDP-capable NICs. See [docs/AF_
 
 ## Distributed Mode
 
-Deploy hunters across network segments and aggregate to central processors.
+Deploy hunters across network segments and aggregate to central processors. **TLS is enabled by default** for all gRPC connections—processors require certificates, hunters require CA verification.
 
 ```mermaid
 flowchart TB
@@ -297,18 +301,21 @@ flowchart TB
 ```
 
 ```bash
-# Processor (with TLS and virtual interface)
+# Processor (TLS enabled by default, requires cert/key)
 lc process --listen :50051 --write-file capture.pcap --virtual-interface \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
 
-# Hunter (with TLS)
+# Hunter (TLS enabled by default, requires CA cert)
+sudo lc hunt --interface eth0 --processor processor:50051 --tls-ca ca.crt
+
+# Mutual TLS (client certificate authentication)
 sudo lc hunt --interface eth0 --processor processor:50051 \
   --tls-cert client.crt --tls-key client.key --tls-ca ca.crt
 
-# Protocol-specific hunters
-sudo lc hunt voip --interface eth0 --processor processor:50051  # VoIP with call buffering
-sudo lc hunt dns --interface eth0 --processor processor:50051   # DNS with domain filtering
-sudo lc hunt tls --interface eth0 --processor processor:50051   # TLS with JA3 filtering
+# Protocol-specific hunters (all use TLS by default)
+sudo lc hunt voip --interface eth0 --processor processor:50051 --tls-ca ca.crt
+sudo lc hunt dns --interface eth0 --processor processor:50051 --tls-ca ca.crt
+sudo lc hunt tls --interface eth0 --processor processor:50051 --tls-ca ca.crt
 
 # Analyze aggregated traffic on processor with external tools
 wireshark -i lc0     # Real-time analysis in Wireshark
@@ -347,7 +354,8 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 Requires root privileges for packet capture. Use responsibly and legally.
 
 **Security Features:**
-- TLS/mTLS encryption for all distributed connections
+- **Secure by default**: TLS enabled for all distributed connections (use `--insecure` to disable)
+- TLS/mTLS encryption with mutual authentication
 - Call-ID sanitization for privacy
 - PCAP file encryption support
 - DoS protection with rate limiting

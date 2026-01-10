@@ -140,8 +140,8 @@ Add short flags to existing long flags. No deprecation needed.
 - [x] `cmd/hunt/README.md`
 - [x] `cmd/process/README.md`
 - [x] `cmd/watch/README.md`
-- [ ] `cmd/filter/README.md` (if exists)
-- [ ] `cmd/list/README.md`
+- [x] `cmd/filter/README.md` (does not exist)
+- [x] `cmd/list/README.md` (no relevant flags)
 - [x] Root `README.md`
 
 ### CLAUDE.md files to update

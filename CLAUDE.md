@@ -241,7 +241,7 @@ VERBS:
 **CLI VoIP Capture:**
 ```bash
 # VoIP capture with balanced performance
-sudo lc sniff voip --interface eth0 --sipuser alicent
+sudo lc sniff voip --interface eth0 --sip-user alicent
 
 # High-performance VoIP capture with GPU acceleration
 sudo lc sniff voip -i eth0 \
@@ -255,7 +255,7 @@ sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
 **Standalone Tap Mode (Single Machine with TUI/PCAP):**
 ```bash
 # Standalone VoIP capture with TUI serving and per-call PCAP
-sudo lc tap voip -i eth0 --sipuser alicent --insecure
+sudo lc tap voip -i eth0 --sip-user alicent --insecure
 
 # Tap with TLS for production (TUI clients can connect)
 sudo lc tap voip -i eth0 \
@@ -264,7 +264,7 @@ sudo lc tap voip -i eth0 \
 
 # Tap with upstream forwarding (edge node)
 sudo lc tap voip -i eth0 \
-  --upstream central-processor:50051 \
+  --processor central-processor:50051 \
   --tls --tls-ca ca.crt
 ```
 

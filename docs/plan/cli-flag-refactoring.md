@@ -145,12 +145,12 @@ Add short flags to existing long flags. No deprecation needed.
 - [x] Root `README.md`
 
 ### CLAUDE.md files to update
-- [ ] `CLAUDE.md` (root - CLI usage section)
-- [ ] `cmd/sniff/CLAUDE.md`
-- [ ] `cmd/tap/CLAUDE.md`
-- [ ] `cmd/hunt/CLAUDE.md`
-- [ ] `cmd/process/CLAUDE.md`
-- [ ] `cmd/watch/CLAUDE.md`
+- [x] `CLAUDE.md` (root - CLI usage section)
+- [x] `cmd/sniff/CLAUDE.md`
+- [x] `cmd/tap/CLAUDE.md`
+- [x] `cmd/hunt/CLAUDE.md`
+- [x] `cmd/process/CLAUDE.md`
+- [x] `cmd/watch/CLAUDE.md` (no changes needed)
 
 ### CHANGELOG.md
 - [x] Add breaking changes section

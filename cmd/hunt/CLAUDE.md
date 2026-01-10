@@ -409,7 +409,7 @@ Config file support for all flags:
 ```yaml
 hunter:
   processor_addr: "processor.example.com:50051"
-  hunter_id: "edge-01"
+  id: "edge-01"
   interfaces: ["eth0"]
   batch_size: 64
   batch_timeout_ms: 100

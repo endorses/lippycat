@@ -375,10 +375,10 @@ Tap nodes can forward to upstream processors:
 
 ```bash
 # Edge tap (captures locally, forwards to regional)
-lc tap -i eth0 --upstream regional:50051 --tls --tls-ca ca.crt
+lc tap -i eth0 --processor regional:50051 --tls --tls-ca ca.crt
 
 # Regional tap (captures locally, receives from edges, forwards to central)
-lc tap -i eth0 --upstream central:50051 --tls --tls-ca ca.crt
+lc tap -i eth0 --processor central:50051 --tls --tls-ca ca.crt
 
 # Central processor (receives from all)
 lc process --listen 0.0.0.0:50051 --tls --tls-cert server.crt --tls-key server.key
@@ -399,8 +399,8 @@ tap:
   batch_size: 100
   batch_timeout_ms: 100
   listen_addr: ":50051"
-  tap_id: "edge-tap"
-  upstream_addr: ""
+  id: "edge-tap"
+  processor_addr: ""
 
   per_call_pcap:
     enabled: true

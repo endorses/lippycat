@@ -85,7 +85,7 @@ Unlike hunt/sniff, processor has no subcommands. Single command handles all func
 **Why no subcommands?**
 - Processor role is well-defined
 - Configuration handled via flags or config file
-- Hierarchical mode enabled via `--upstream` flag (not a subcommand)
+- Hierarchical mode enabled via `--processor` flag (not a subcommand)
 
 ## Data Flow
 
@@ -266,11 +266,11 @@ func (p *Processor) determineFlowControl() FlowControl {
 Processor can act as hunter to upstream processor:
 
 ```go
-if config.UpstreamAddr != "" {
+if config.ProcessorAddr != "" {
     // Create hunter client to upstream
     upstreamHunter := hunter.New(hunter.Config{
-        ProcessorAddr: config.UpstreamAddr,
-        HunterID:      config.ProcessorID + "-upstream",
+        ProcessorAddr: config.ProcessorAddr,
+        HunterID:      config.ID + "-upstream",
     })
 
     // Forward filtered packets to upstream
@@ -785,8 +785,8 @@ All flags bound to Viper:
 ```yaml
 processor:
   listen_addr: "0.0.0.0:50051"
-  processor_id: "central-proc"
-  upstream_addr: ""
+  id: "central-proc"
+  processor_addr: ""
   max_hunters: 100
   max_subscribers: 100
   write_file: "/var/capture/packets.pcap"

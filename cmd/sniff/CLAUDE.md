@@ -676,7 +676,7 @@ The sniff command supports virtual interface creation for exposing filtered pack
 When `--virtual-interface` is enabled, sniff creates a TAP/TUN interface (default: `lc0`) and injects filtered packets in real-time.
 
 **Use Cases:**
-1. **PCAP replay with filtering:** `lc sniff voip -r huge.pcap --sipuser alice --virtual-interface` (tcpreplay alternative)
+1. **PCAP replay with filtering:** `lc sniff voip -r huge.pcap --sip-user alice --virtual-interface` (tcpreplay alternative)
 2. **Live filtered capture:** `lc sniff voip -i eth0 --virtual-interface` (expose VoIP-only stream to Wireshark)
 
 ### Integration Pattern

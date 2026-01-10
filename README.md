@@ -146,7 +146,7 @@ sudo lc sniff email --interface eth0
 sudo lc sniff email --interface eth0 --protocol imap
 
 # PCAP replay with filtering (tcpreplay alternative)
-sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
+sudo lc sniff voip -r capture.pcap --sip-user alicent --virtual-interface
 wireshark -i lc0  # Monitor filtered stream in another terminal
 
 # Interactive TUI
@@ -201,9 +201,12 @@ VERBS:
 | `hunt email` | Email hunter with content filtering |
 | `process` | Processor node (distributed aggregation) |
 | `list interfaces` | List available network interfaces |
-| `show health` | Show TCP assembler health |
-| `show metrics` | Display TCP metrics |
-| `show summary` | System status overview |
+| `list filters` | List filters on a processor |
+| `show status` | Show processor status |
+| `show hunters` | Show connected hunters |
+| `show topology` | Show distributed topology |
+| `show filter` | Show filter details |
+| `show config` | Display local configuration |
 
 Run `lc [command] --help` for detailed options.
 

@@ -7,14 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.1] - 2026-01-10
 
+### Breaking Changes
+- **Secure-by-default TLS**: TLS is now enabled by default for all gRPC connections
+  - Removed `--tls` flag from hunt, process, and tap commands
+  - Use `--insecure` flag to disable TLS when needed (e.g., local development)
+  - Production environments (`LIPPYCAT_PRODUCTION=true`) reject insecure connections
+
 ### Added
-- CLI improvements and secure-by-default TLS
+- **TTY-aware JSON output**: CLI commands with JSON output now detect terminal vs pipe
+  - Pretty-printed JSON when output is a terminal
+  - Compact JSON when piped to other commands
 
 ### Changed
-- TODO: Add detailed changelog entries
-
-### Fixed
-- TODO: Add fixed items
+- **`show config` command**: Refactored to display all Viper settings
+  - JSON-only output format for easier parsing
+  - Shows complete configuration state including defaults
 
 ## [Unreleased]
 

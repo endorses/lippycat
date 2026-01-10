@@ -409,7 +409,11 @@ func (c *Client) deliverBatch(batch []*deliveryItem) {
 
 // deliverToDestination sends items to a single destination.
 func (c *Client) deliverToDestination(did uuid.UUID, items []*deliveryItem) {
-	conn, err := c.manager.GetConnection(did)
+	// Use a timeout context for connection establishment in async delivery.
+	ctx, cancel := context.WithTimeout(context.Background(), c.config.SendTimeout)
+	defer cancel()
+
+	conn, err := c.manager.GetConnection(ctx, did)
 	if err != nil {
 		// Log warning and record failures.
 		logger.Warn("failed to get connection for delivery",
@@ -539,7 +543,7 @@ func (c *Client) sendSync(ctx context.Context, pduType PDUType, xid uuid.UUID, d
 		default:
 		}
 
-		conn, err := c.manager.GetConnection(did)
+		conn, err := c.manager.GetConnection(ctx, did)
 		if err != nil {
 			lastErr = err
 			continue

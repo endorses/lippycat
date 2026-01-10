@@ -554,9 +554,17 @@ func (m *Manager) GetDestination(did uuid.UUID) (*li.Destination, error) {
 
 // GetConnection acquires a connection to the destination.
 // The caller must call ReleaseConnection when done.
-func (m *Manager) GetConnection(did uuid.UUID) (*tls.Conn, error) {
+// The context is used for connection establishment timeout and cancellation.
+func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, error) {
 	if m.shuttingDown.Load() {
 		return nil, ErrShuttingDown
+	}
+
+	// Check for context cancellation early.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	m.mu.RLock()
@@ -577,8 +585,8 @@ func (m *Manager) GetConnection(did uuid.UUID) (*tls.Conn, error) {
 		return nil, ErrNotConnected
 	}
 
-	// Create a new connection.
-	conn, err := m.dialDestination(state)
+	// Create a new connection using the provided context.
+	conn, err := m.dialDestinationWithContext(ctx, state)
 	if err != nil {
 		return nil, err
 	}
@@ -753,23 +761,28 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 }
 
 // dialDestination creates a new TLS connection to the destination.
+// Uses a background context with the configured dial timeout.
 func (m *Manager) dialDestination(state *destinationState) (*tls.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), m.config.DialTimeout)
+	defer cancel()
+	return m.dialDestinationWithContext(ctx, state)
+}
+
+// dialDestinationWithContext creates a new TLS connection using the provided context.
+// The context controls both the TCP dial and TLS handshake timeouts.
+func (m *Manager) dialDestinationWithContext(ctx context.Context, state *destinationState) (*tls.Conn, error) {
 	state.mu.RLock()
 	dest := state.dest
 	state.mu.RUnlock()
 
 	address := fmt.Sprintf("%s:%d", dest.Address, dest.Port)
 
-	// Create dialer with timeout and keepalive.
+	// Create dialer with keepalive.
 	dialer := &net.Dialer{
-		Timeout:   m.config.DialTimeout,
 		KeepAlive: m.config.KeepAliveInterval,
 	}
 
-	// Dial TCP first.
-	ctx, cancel := context.WithTimeout(context.Background(), m.config.DialTimeout)
-	defer cancel()
-
+	// Dial TCP using the provided context for timeout/cancellation.
 	tcpConn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrConnectionFailed, err)
@@ -792,12 +805,28 @@ func (m *Manager) dialDestination(state *destinationState) (*tls.Conn, error) {
 	// Wrap with TLS.
 	tlsConn := tls.Client(tcpConn, tlsConfig)
 
-	// Perform handshake with timeout.
-	if err := tlsConn.SetDeadline(time.Now().Add(m.config.DialTimeout)); err != nil {
+	// Perform handshake with context-based timeout.
+	// Calculate remaining time from context deadline for handshake.
+	handshakeDeadline := time.Now().Add(m.config.DialTimeout)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(handshakeDeadline) {
+		handshakeDeadline = deadline
+	}
+
+	if err := tlsConn.SetDeadline(handshakeDeadline); err != nil {
 		if closeErr := tcpConn.Close(); closeErr != nil {
 			logger.Debug("error closing connection after deadline error", "error", closeErr)
 		}
 		return nil, fmt.Errorf("%w: failed to set deadline: %v", ErrConnectionFailed, err)
+	}
+
+	// Check for context cancellation before handshake.
+	select {
+	case <-ctx.Done():
+		if closeErr := tcpConn.Close(); closeErr != nil {
+			logger.Debug("error closing connection after context cancellation", "error", closeErr)
+		}
+		return nil, ctx.Err()
+	default:
 	}
 
 	if err := tlsConn.Handshake(); err != nil {

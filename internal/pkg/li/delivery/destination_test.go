@@ -3,6 +3,7 @@
 package delivery
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -547,7 +548,8 @@ func TestGetConnectionNotConnected(t *testing.T) {
 	require.NoError(t, err)
 
 	// Don't wait for connection - try immediately.
-	_, err = manager.GetConnection(did)
+	ctx := context.Background()
+	_, err = manager.GetConnection(ctx, did)
 	// Either not connected or pool exhausted.
 	assert.Error(t, err)
 }

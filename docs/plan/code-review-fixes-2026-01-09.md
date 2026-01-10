@@ -164,18 +164,22 @@ Small TOCTOU window in `SetCallID()` (lines 53-78) between atomic load and chann
   - All goroutines start simultaneously for maximum contention
   - Passes with `-race` flag
 
-### Issue #7: Context Propagation in Delivery Client [MEDIUM]
+### Issue #7: Context Propagation in Delivery Client [MEDIUM] ✅ FIXED
 
 **File:** `internal/pkg/li/delivery/client.go`
 
 The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetConnection()` (line 542).
 
-- [ ] Add context parameter to GetConnection
-  - Update `Manager.GetConnection(ctx, did)` signature
-  - Use context for connection establishment timeout
-  - Propagate cancellation
+- [x] Add context parameter to GetConnection
+  - Updated `Manager.GetConnection(ctx context.Context, did uuid.UUID)` signature
+  - Added `dialDestinationWithContext()` that uses the provided context for TCP dial and TLS handshake
+  - Context deadline is respected for connection timeout
+  - Early cancellation check added before handshake
 
-- [ ] Update all call sites to pass context
+- [x] Update all call sites to pass context
+  - `sendSync()`: Passes caller's context to GetConnection
+  - `deliverToDestination()`: Creates timeout context from SendTimeout config
+  - Test updated to use `context.Background()`
 
 ### Test Coverage Improvements [MEDIUM]
 
@@ -210,6 +214,6 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 
 **Medium-Term (4 tasks):**
 - [x] Fix CallIDDetector race (#3) ✅
-- [ ] Propagate context in delivery (#7)
+- [x] Propagate context in delivery (#7) ✅
 - [ ] Improve test coverage
 - [ ] Add integration tests

@@ -4,6 +4,8 @@
 package show
 
 import (
+	"fmt"
+
 	"github.com/endorses/lippycat/cmd/filter"
 	"github.com/endorses/lippycat/internal/pkg/statusclient"
 	"github.com/spf13/cobra"
@@ -56,9 +58,23 @@ func runShowStatus(cmd *cobra.Command, args []string) {
 	cmd.Println(string(jsonBytes))
 }
 
-// newStatusClient creates a StatusClient using the shared connection config
+// newStatusClient creates a StatusClient using the shared connection config.
+// Validates secure-by-default requirements before attempting connection.
 func newStatusClient() (*statusclient.StatusClient, error) {
 	cfg := filter.GetClientConfig()
+
+	if cfg.Address == "" {
+		return nil, fmt.Errorf("processor address is required (use --processor or set remote.processor in config)")
+	}
+
+	// Secure-by-default validation: TLS enabled requires CA cert (unless skip-verify)
+	if cfg.TLSEnabled && cfg.TLSCAFile == "" && !cfg.TLSSkipVerify {
+		return nil, fmt.Errorf("TLS is enabled but no CA certificate provided\n\n" +
+			"To connect securely, use: --tls-ca=/path/to/ca.crt\n" +
+			"To skip verification (INSECURE), use: --tls-skip-verify\n" +
+			"To allow insecure connections (NOT RECOMMENDED), use: --insecure")
+	}
+
 	return statusclient.NewStatusClient(statusclient.ClientConfig{
 		Address:       cfg.Address,
 		TLSEnabled:    cfg.TLSEnabled,

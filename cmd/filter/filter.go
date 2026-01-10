@@ -102,12 +102,22 @@ func GetClientConfig() filterclient.ClientConfig {
 	}
 }
 
-// NewClient creates a new filter client using the current configuration
+// NewClient creates a new filter client using the current configuration.
+// Validates secure-by-default requirements before attempting connection.
 func NewClient() (*filterclient.FilterClient, error) {
 	config := GetClientConfig()
 	if config.Address == "" {
 		return nil, fmt.Errorf("processor address is required (use --processor or set remote.processor in config)")
 	}
+
+	// Secure-by-default validation: TLS enabled requires CA cert (unless skip-verify)
+	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
+		return nil, fmt.Errorf("TLS is enabled but no CA certificate provided\n\n" +
+			"To connect securely, use: --tls-ca=/path/to/ca.crt\n" +
+			"To skip verification (INSECURE), use: --tls-skip-verify\n" +
+			"To allow insecure connections (NOT RECOMMENDED), use: --insecure")
+	}
+
 	return filterclient.NewFilterClient(config)
 }
 

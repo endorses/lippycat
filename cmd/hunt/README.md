@@ -64,13 +64,12 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--disk-buffer-dir` - Directory for buffer files (default: /var/tmp/lippycat-buffer)
 - `--disk-buffer-max-mb` - Maximum disk buffer size in MB (default: 1024)
 
-**TLS/Security:**
-- `-T, --tls` - Enable TLS encryption (recommended for production)
+**TLS/Security (TLS enabled by default):**
 - `--tls-cert` - Path to client TLS certificate (for mutual TLS)
 - `--tls-key` - Path to client TLS key (for mutual TLS)
-- `--tls-ca` - Path to CA certificate for server verification
+- `--tls-ca` - Path to CA certificate for server verification (required for TLS)
 - `--tls-skip-verify` - Skip TLS certificate verification (INSECURE - testing only)
-- `--insecure` - Allow insecure connections without TLS (must be explicitly set)
+- `--insecure` - Disable TLS encryption (must be explicitly set, NOT RECOMMENDED)
 
 ### `lc hunt voip` - VoIP Hunter Mode
 
@@ -102,17 +101,15 @@ VoIP hunter mode provides intelligent call buffering and filtering:
 **Example:**
 
 ```bash
-# VoIP hunter with TLS
+# VoIP hunter with TLS (TLS enabled by default)
 lc hunt voip \
   --processor processor.example.com:50051 \
   --interface eth0 \
-  --tls \
   --tls-ca /etc/lippycat/certs/ca.crt
 
 # VoIP hunter with client certificate (mutual TLS)
 lc hunt voip \
   --processor processor:50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/hunter.crt \
   --tls-key /etc/lippycat/certs/hunter.key \
   --tls-ca /etc/lippycat/certs/ca.crt
@@ -122,21 +119,21 @@ lc hunt voip \
   --processor processor:50051 \
   --interface eth0 \
   --udp-only \
-  --tls --tls-ca ca.crt
+  --tls-ca ca.crt
 
 # VoIP hunter with specific SIP port
 lc hunt voip \
   --processor processor:50051 \
   --interface eth0 \
   --sip-port 5060 \
-  --tls --tls-ca ca.crt
+  --tls-ca ca.crt
 
 # VoIP hunter with custom RTP port range
 lc hunt voip \
   --processor processor:50051 \
   --interface eth0 \
   --rtp-port-range 8000-9000 \
-  --tls --tls-ca ca.crt
+  --tls-ca ca.crt
 ```
 
 **Filter Management:**
@@ -161,25 +158,24 @@ To add filters, configure them in the processor's filter file (see [cmd/process/
 
 ### Production Mode Enforcement
 
-Set `LIPPYCAT_PRODUCTION=true` to enforce TLS:
+Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag:
 
 ```bash
 export LIPPYCAT_PRODUCTION=true
-lc hunt --processor processor:50051  # ERROR: requires --tls
-lc hunt --processor processor:50051 --tls --tls-ca ca.crt  # OK
+lc hunt --processor processor:50051 --insecure  # ERROR: --insecure not allowed
+lc hunt --processor processor:50051 --tls-ca ca.crt  # OK (TLS is default)
 ```
 
 ### TLS Configuration
 
-Hunters support three TLS modes:
+TLS is enabled by default. Hunters support three TLS modes:
 
 **1. Server TLS (One-Way Authentication)**
 
-Hunter verifies processor's certificate:
+Hunter verifies processor's certificate (default when `--tls-ca` is provided):
 
 ```bash
 lc hunt --processor processor:50051 \
-  --tls \
   --tls-ca /etc/lippycat/certs/ca.crt
 ```
 
@@ -189,7 +185,6 @@ Both hunter and processor verify each other:
 
 ```bash
 lc hunt --processor processor:50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/hunter.crt \
   --tls-key /etc/lippycat/certs/hunter.key \
   --tls-ca /etc/lippycat/certs/ca.crt
@@ -197,7 +192,7 @@ lc hunt --processor processor:50051 \
 
 **3. Insecure Mode (No TLS) ⚠️**
 
-Only for testing on trusted networks:
+Only for testing on trusted networks. Must explicitly disable TLS:
 
 ```bash
 lc hunt --processor localhost:50051 --insecure
@@ -338,7 +333,7 @@ promiscuous: false
 
 ## Best Practices
 
-1. **Always use TLS in production** - Use `--tls` with mutual authentication
+1. **Always use TLS in production** - TLS is enabled by default, use mutual authentication for best security
 2. **Set meaningful hunter IDs** - Use `--hunter-id` for easier monitoring
 3. **Use BPF filters** - Reduce capture scope with `--filter` (e.g., "port 5060")
 4. **Tune batch parameters** - Balance latency vs. throughput for your use case

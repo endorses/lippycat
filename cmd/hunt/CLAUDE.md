@@ -306,13 +306,13 @@ err := circuitBreaker.Call(func() error {
 
 #### Production Mode Enforcement
 
-**File:** `cmd/hunt/hunt.go:114-120`
+**File:** `cmd/hunt/hunt.go:144-151`
 
 ```go
 productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 if productionMode {
-    if !tlsEnabled && !viper.GetBool("hunter.tls.enabled") {
-        return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+    if getBoolConfig("insecure", insecureAllowed) {
+        return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
     }
 }
 ```
@@ -321,15 +321,23 @@ if productionMode {
 
 #### TLS Secure-by-Default
 
-**File:** `cmd/hunt/hunt.go:144-150`
+**File:** `cmd/hunt/hunt.go:171-185`
+
+TLS is enabled by default. The `--insecure` flag must be explicitly set to disable TLS:
 
 ```go
-if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
-    return fmt.Errorf("TLS is disabled but --insecure flag not set...")
+// TLS configuration (enabled by default unless --insecure is set)
+TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
+```
+
+```go
+// Validate TLS configuration: CA file required when TLS is enabled
+if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
+    return fmt.Errorf("TLS enabled but no CA certificate provided...")
 }
 ```
 
-**Pattern:** Require explicit `--insecure` flag to allow non-TLS connections.
+**Pattern:** TLS enabled by default, require explicit `--insecure` flag to disable TLS, and require CA certificate when TLS is enabled.
 
 #### Security Banner Pattern
 

@@ -65,8 +65,7 @@ var (
 	diskBufferEnabled bool
 	diskBufferDir     string
 	diskBufferMaxSize int // MB
-	// TLS flags
-	tlsEnabled      bool
+	// TLS flags (TLS is enabled by default unless --insecure is set)
 	tlsCertFile     string
 	tlsKeyFile      string
 	tlsCAFile       string
@@ -107,7 +106,7 @@ func init() {
 	HuntCmd.PersistentFlags().IntVar(&diskBufferMaxSize, "disk-buffer-max-mb", 1024, "Maximum disk buffer size in megabytes")
 
 	// TLS configuration (security) - persistent for subcommands
-	HuntCmd.PersistentFlags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption (recommended for production)")
+	// TLS is enabled by default unless --insecure is explicitly set
 	HuntCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert", "", "Path to client TLS certificate (for mutual TLS)")
 	HuntCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key", "", "Path to client TLS key (for mutual TLS)")
 	HuntCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for server verification")
@@ -133,7 +132,6 @@ func init() {
 	_ = viper.BindPFlag("hunter.disk_buffer.enabled", HuntCmd.PersistentFlags().Lookup("disk-buffer"))
 	_ = viper.BindPFlag("hunter.disk_buffer.dir", HuntCmd.PersistentFlags().Lookup("disk-buffer-dir"))
 	_ = viper.BindPFlag("hunter.disk_buffer.max_mb", HuntCmd.PersistentFlags().Lookup("disk-buffer-max-mb"))
-	_ = viper.BindPFlag("hunter.tls.enabled", HuntCmd.PersistentFlags().Lookup("tls"))
 	_ = viper.BindPFlag("hunter.tls.cert_file", HuntCmd.PersistentFlags().Lookup("tls-cert"))
 	_ = viper.BindPFlag("hunter.tls.key_file", HuntCmd.PersistentFlags().Lookup("tls-key"))
 	_ = viper.BindPFlag("hunter.tls.ca_file", HuntCmd.PersistentFlags().Lookup("tls-ca"))
@@ -146,8 +144,8 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if !tlsEnabled && !viper.GetBool("hunter.tls.enabled") {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		if getBoolConfig("insecure", insecureAllowed) {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
 		logger.Info("Production mode: TLS encryption enforced")
 	}
@@ -170,21 +168,20 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		DiskBufferEnabled: getBoolConfig("hunter.disk_buffer.enabled", diskBufferEnabled),
 		DiskBufferDir:     getStringConfig("hunter.disk_buffer.dir", diskBufferDir),
 		DiskBufferMaxSize: uint64(getIntConfig("hunter.disk_buffer.max_mb", diskBufferMaxSize)) * 1024 * 1024, // Convert MB to bytes
-		// TLS configuration
-		TLSEnabled:    getBoolConfig("hunter.tls.enabled", tlsEnabled),
+		// TLS configuration (enabled by default unless --insecure is set)
+		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),
 		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
 		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
 	}
 
-	// Security check: require explicit opt-in to insecure mode
-	if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
-		return fmt.Errorf("TLS is disabled but --insecure flag not set\n\n" +
-			"For security, lippycat requires TLS encryption for production deployments.\n" +
-			"To enable TLS, use: --tls --tls-ca=/path/to/ca.crt\n" +
-			"To explicitly allow insecure connections (NOT RECOMMENDED), use: --insecure\n\n" +
-			"WARNING: Insecure mode transmits network traffic in cleartext!")
+	// Validate TLS configuration: CA file required when TLS is enabled
+	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
+		return fmt.Errorf("TLS enabled but no CA certificate provided\n\n" +
+			"For TLS connections, provide a CA certificate: --tls-ca=/path/to/ca.crt\n" +
+			"Or skip verification (INSECURE - testing only): --tls-skip-verify\n" +
+			"Or disable TLS entirely (NOT RECOMMENDED): --insecure")
 	}
 
 	// Display security banner
@@ -193,7 +190,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		logger.Warn("  SECURITY WARNING: TLS ENCRYPTION DISABLED")
 		logger.Warn("  Packet data will be transmitted in CLEARTEXT")
 		logger.Warn("  This mode should ONLY be used in trusted networks")
-		logger.Warn("  Enable TLS for production: --tls --tls-ca=/path/to/ca.crt")
+		logger.Warn("  Enable TLS for production: --tls-ca=/path/to/ca.crt")
 		logger.Warn("═══════════════════════════════════════════════════════════")
 	} else {
 		logger.Info("═══════════════════════════════════════════════════════════")

@@ -84,8 +84,7 @@ var (
 	displayStats           bool
 	enableDetection        bool
 	filterFile             string
-	// TLS flags
-	tlsEnabled      bool
+	// TLS flags (TLS is enabled by default unless --insecure is set)
 	tlsCertFile     string
 	tlsKeyFile      string
 	tlsCAFile       string
@@ -159,7 +158,7 @@ func init() {
 	ProcessCmd.Flags().StringVarP(&filterFile, "filter-file", "f", "", "Path to filter persistence file (YAML, default: ~/.config/lippycat/filters.yaml)")
 
 	// TLS configuration (security)
-	ProcessCmd.Flags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption (recommended for production)")
+	// TLS is enabled by default unless --insecure is explicitly set
 	ProcessCmd.Flags().StringVar(&tlsCertFile, "tls-cert", "", "Path to server TLS certificate")
 	ProcessCmd.Flags().StringVar(&tlsKeyFile, "tls-key", "", "Path to server TLS key")
 	ProcessCmd.Flags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification (mutual TLS)")
@@ -230,7 +229,6 @@ func init() {
 	_ = viper.BindPFlag("processor.display_stats", ProcessCmd.Flags().Lookup("stats"))
 	_ = viper.BindPFlag("processor.enable_detection", ProcessCmd.Flags().Lookup("enable-detection"))
 	_ = viper.BindPFlag("processor.filter_file", ProcessCmd.Flags().Lookup("filter-file"))
-	_ = viper.BindPFlag("processor.tls.enabled", ProcessCmd.Flags().Lookup("tls"))
 	_ = viper.BindPFlag("processor.tls.cert_file", ProcessCmd.Flags().Lookup("tls-cert"))
 	_ = viper.BindPFlag("processor.tls.key_file", ProcessCmd.Flags().Lookup("tls-key"))
 	_ = viper.BindPFlag("processor.tls.ca_file", ProcessCmd.Flags().Lookup("tls-ca"))
@@ -281,8 +279,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if !tlsEnabled && !viper.GetBool("processor.tls.enabled") {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		if getBoolConfig("insecure", insecureAllowed) {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
 		if !tlsClientAuth && !viper.GetBool("processor.tls.client_auth") {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)")
@@ -404,8 +402,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		CommandExecutorConfig: commandExecutorConfig,
 		EnableDetection:       getBoolConfig("processor.enable_detection", enableDetection),
 		FilterFile:            getStringConfig("processor.filter_file", filterFile),
-		// TLS configuration
-		TLSEnabled:    getBoolConfig("processor.tls.enabled", tlsEnabled),
+		// TLS configuration (enabled by default unless --insecure is set)
+		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   getStringConfig("processor.tls.cert_file", tlsCertFile),
 		TLSKeyFile:    getStringConfig("processor.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("processor.tls.ca_file", tlsCAFile),
@@ -440,13 +438,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		TLSKeylogConfig: tlsKeylogConfig,
 	}
 
-	// Security check: require explicit opt-in to insecure mode
-	if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
-		return fmt.Errorf("TLS is disabled but --insecure flag not set\n\n" +
-			"For security, lippycat requires TLS encryption for production deployments.\n" +
-			"To enable TLS, use: --tls --tls-cert=/path/to/server.crt --tls-key=/path/to/server.key\n" +
-			"To explicitly allow insecure connections (NOT RECOMMENDED), use: --insecure\n\n" +
-			"WARNING: Insecure mode accepts unencrypted connections from hunters!")
+	// Validate TLS configuration: cert and key required when TLS is enabled
+	if config.TLSEnabled && (config.TLSCertFile == "" || config.TLSKeyFile == "") {
+		return fmt.Errorf("TLS enabled but certificate/key not provided\n\n" +
+			"For TLS connections, provide certificate and key:\n" +
+			"  --tls-cert=/path/to/server.crt --tls-key=/path/to/server.key\n" +
+			"Or disable TLS entirely (NOT RECOMMENDED): --insecure")
 	}
 
 	// Display security banner
@@ -455,7 +452,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		logger.Warn("  SECURITY WARNING: TLS ENCRYPTION DISABLED")
 		logger.Warn("  Server will accept UNENCRYPTED hunter connections")
 		logger.Warn("  This mode should ONLY be used in trusted networks")
-		logger.Warn("  Enable TLS: --tls --tls-cert=server.crt --tls-key=server.key")
+		logger.Warn("  Enable TLS: --tls-cert=server.crt --tls-key=server.key")
 		logger.Warn("═══════════════════════════════════════════════════════════")
 	} else {
 		authMode := "Server TLS"

@@ -737,21 +737,41 @@ Used by TUI clients for real-time monitoring.
 
 ### Production Mode Enforcement
 
-**File:** `cmd/process/process.go:100-110`
+**File:** `cmd/process/process.go:279-289`
 
 ```go
 productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 if productionMode {
-    if !tlsEnabled {
-        return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+    if getBoolConfig("insecure", insecureAllowed) {
+        return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
     }
-    if !tlsClientAuth {
+    if !tlsClientAuth && !viper.GetBool("processor.tls.client_auth") {
         return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)")
     }
 }
 ```
 
-**Enforcement:** Production requires BOTH TLS AND client cert authentication.
+**Enforcement:** Production blocks `--insecure` flag AND requires client cert authentication.
+
+### TLS Secure-by-Default
+
+**File:** `cmd/process/process.go:405-447`
+
+TLS is enabled by default. The `--insecure` flag must be explicitly set to disable TLS:
+
+```go
+// TLS configuration (enabled by default unless --insecure is set)
+TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
+```
+
+```go
+// Validate TLS configuration: cert and key required when TLS is enabled
+if config.TLSEnabled && (config.TLSCertFile == "" || config.TLSKeyFile == "") {
+    return fmt.Errorf("TLS enabled but certificate/key not provided...")
+}
+```
+
+**Pattern:** TLS enabled by default, require explicit `--insecure` flag to disable TLS, and require cert/key when TLS is enabled.
 
 ### TLS Server Configuration
 

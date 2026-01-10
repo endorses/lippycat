@@ -117,8 +117,8 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if !tlsEnabled && !viper.GetBool("hunter.tls.enabled") {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		if getBoolConfig("insecure", insecureAllowed) {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
 		logger.Info("Production mode: TLS encryption enforced")
 	}
@@ -173,20 +173,20 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 		VoIPMode:       false, // Not VoIP mode
 		// HTTP hunter supports BPF, IP, and HTTP host/path filters
 		SupportedFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"},
-		// TLS configuration
-		TLSEnabled:    getBoolConfig("hunter.tls.enabled", tlsEnabled),
+		// TLS configuration (enabled by default unless --insecure is set)
+		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),
 		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
 		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
 	}
 
-	// Security check
-	if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
-		return fmt.Errorf("TLS is disabled but --insecure flag not set\n\n" +
-			"For security, lippycat requires TLS encryption for production deployments.\n" +
-			"To enable TLS, use: --tls --tls-ca=/path/to/ca.crt\n" +
-			"To explicitly allow insecure connections (NOT RECOMMENDED), use: --insecure")
+	// Validate TLS configuration: CA file required when TLS is enabled
+	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
+		return fmt.Errorf("TLS enabled but no CA certificate provided\n\n" +
+			"For TLS connections, provide a CA certificate: --tls-ca=/path/to/ca.crt\n" +
+			"Or skip verification (INSECURE - testing only): --tls-skip-verify\n" +
+			"Or disable TLS entirely (NOT RECOMMENDED): --insecure")
 	}
 
 	// Display security banner

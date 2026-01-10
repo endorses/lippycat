@@ -18,9 +18,8 @@ Processors are the central hub in lippycat's distributed architecture. They:
 # Start processor on default port
 lc process --listen :50051
 
-# Processor with TLS
+# Processor with TLS (TLS enabled by default)
 lc process --listen 0.0.0.0:50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key
 
@@ -275,30 +274,33 @@ Filters can be managed via:
 
 Hunters automatically receive filter updates via the filter subscription mechanism.
 
-### TLS/Security
+### TLS/Security (TLS enabled by default)
 
-- `-T, --tls` - Enable TLS encryption (recommended for production)
-- `--tls-cert` - Path to server TLS certificate
-- `--tls-key` - Path to server TLS key
+- `--tls-cert` - Path to server TLS certificate (required for TLS)
+- `--tls-key` - Path to server TLS key (required for TLS)
 - `--tls-ca` - Path to CA certificate for client verification (mutual TLS)
 - `--tls-client-auth` - Require client certificate authentication (mutual TLS)
-- `--insecure` - Allow insecure connections without TLS (must be explicitly set)
+- `--insecure` - Disable TLS encryption (must be explicitly set, NOT RECOMMENDED)
 
 ## Security
 
 ### Production Mode Enforcement
 
-Set `LIPPYCAT_PRODUCTION=true` to enforce TLS and mutual authentication:
+Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag and require mutual authentication:
 
 ```bash
 export LIPPYCAT_PRODUCTION=true
 
-# ERROR: requires --tls and --tls-client-auth
-lc process --listen :50051
+# ERROR: --insecure not allowed in production mode
+lc process --listen :50051 --insecure
+
+# ERROR: requires --tls-client-auth in production mode
+lc process --listen :50051 \
+  --tls-cert server.crt \
+  --tls-key server.key
 
 # OK: TLS with mutual authentication
 lc process --listen :50051 \
-  --tls \
   --tls-cert server.crt \
   --tls-key server.key \
   --tls-ca ca.crt \
@@ -307,36 +309,24 @@ lc process --listen :50051 \
 
 ### TLS Configuration
 
-Processors support three security modes:
+TLS is enabled by default. Processors support three security modes:
 
-**1. No TLS (Insecure) ⚠️**
+**1. Server TLS (One-Way Authentication)**
 
-Only for testing on trusted networks:
-
-```bash
-lc process --listen :50051 --insecure
-```
-
-**Security Warning:** Displays prominent banner when TLS is disabled.
-
-**2. Server TLS (One-Way Authentication)**
-
-Hunters verify processor's certificate:
+Hunters verify processor's certificate (default when cert/key provided):
 
 ```bash
 lc process --listen :50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key
 ```
 
-**3. Mutual TLS (Two-Way Authentication) ⭐ Recommended**
+**2. Mutual TLS (Two-Way Authentication) ⭐ Recommended**
 
 Both processor and hunters verify each other:
 
 ```bash
 lc process --listen :50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key \
   --tls-ca /etc/lippycat/certs/ca.crt \
@@ -344,6 +334,16 @@ lc process --listen :50051 \
 ```
 
 This prevents unauthorized hunters from connecting.
+
+**3. No TLS (Insecure) ⚠️**
+
+Only for testing on trusted networks. Must explicitly disable TLS:
+
+```bash
+lc process --listen :50051 --insecure
+```
+
+**Security Warning:** Displays prominent banner when TLS is disabled.
 
 See [docs/SECURITY.md](../../docs/SECURITY.md#tls-transport-encryption) for complete TLS setup and certificate management.
 
@@ -537,7 +537,7 @@ Processors are designed to survive network disruptions and temporary outages:
 
 ## Best Practices
 
-1. **Always use mutual TLS in production** - `--tls --tls-client-auth`
+1. **Always use mutual TLS in production** - TLS is enabled by default, use `--tls-client-auth` for mutual authentication
 2. **Set meaningful processor IDs** - Use `--processor-id` for identification
 3. **Configure filter files** - Use `--filter-file` for persistent filter storage
 4. **Monitor hunter connections** - Use TUI or check logs for hunter health
@@ -601,10 +601,10 @@ Centralized monitoring of distributed capture from multiple edge sites.
 
 ```bash
 # Processor with virtual interface
-lc process --listen 0.0.0.0:50051 --virtual-interface --tls --tls-cert server.crt --tls-key server.key
+lc process --listen 0.0.0.0:50051 --virtual-interface --tls-cert server.crt --tls-key server.key
 
 # Edge site hunters
-sudo lc hunt --processor processor:50051 --interface eth0 --tls --tls-ca ca.crt
+sudo lc hunt --processor processor:50051 --interface eth0 --tls-ca ca.crt
 
 # Monitor aggregated stream from all hunters
 wireshark -i lc0

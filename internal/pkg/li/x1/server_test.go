@@ -2280,3 +2280,80 @@ func TestServer_CustomConfig(t *testing.T) {
 	assert.Equal(t, 100, s.config.RateLimitBurst)
 	assert.Equal(t, 10*time.Second, s.config.XMLParseTimeout)
 }
+
+func TestServer_ErrorResponse_IncludesDetails(t *testing.T) {
+	// Test that error responses include proper error code and description
+	s := NewServer(ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "1.0",
+	}, newMockDestinationManager(), newMockTaskManager())
+
+	// Send an invalid request to trigger an error response
+	invalidXML := `<?xml version="1.0"?>
+<createDestinationRequest>
+    <x1RequestMessage>
+        <admfIdentifier>test-admf</admfIdentifier>
+        <neIdentifier>test-ne</neIdentifier>
+        <version>1.0</version>
+    </x1RequestMessage>
+    <!-- Missing destinationDetails -->
+</createDestinationRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(invalidXML))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Parse the response and verify error details are present
+	body := w.Body.String()
+
+	// Should contain error response element
+	assert.Contains(t, body, "errorResponse")
+
+	// Should contain error information with code and description
+	assert.Contains(t, body, "errorInformation")
+	assert.Contains(t, body, "errorCode")
+	assert.Contains(t, body, "errorDescription")
+
+	// Should contain the request message type
+	assert.Contains(t, body, "requestMessageType")
+	assert.Contains(t, body, "CreateDestination")
+
+	// Should contain the specific error code (101 = RequestSyntaxError for missing details)
+	assert.Contains(t, body, "101")
+}
+
+func TestServer_ErrorResponse_XMLStructure(t *testing.T) {
+	// Test that error response XML structure is valid and complete
+	s := NewServer(ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "1.0",
+	}, newMockDestinationManager(), newMockTaskManager())
+
+	// Trigger DID not found error
+	removeXML := `<?xml version="1.0"?>
+<removeDestinationRequest>
+    <x1RequestMessage>
+        <admfIdentifier>test-admf</admfIdentifier>
+        <neIdentifier>test-ne</neIdentifier>
+        <version>1.0</version>
+    </x1RequestMessage>
+    <dId>12345678-1234-1234-1234-123456789abc</dId>
+</removeDestinationRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(removeXML))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	body := w.Body.String()
+
+	// Verify error code 303 (DIDNotFound)
+	assert.Contains(t, body, "303")
+	assert.Contains(t, body, "destination not found")
+	assert.Contains(t, body, "RemoveDestination")
+}

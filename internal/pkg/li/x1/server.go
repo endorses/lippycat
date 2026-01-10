@@ -521,7 +521,7 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var responses []*schema.X1ResponseMessage
+	var responses []any
 
 	// Check if it's a request container (batch) or a direct request
 	if rootDetector.XMLName.Local == "requestContainer" {
@@ -545,9 +545,9 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 		responses = append(responses, resp)
 	}
 
-	// Build response container
-	respContainer := &schema.ResponseContainer{
-		X1ResponseMessage: responses,
+	// Build flexible response container that handles both success and error responses
+	respContainer := &flexibleResponseContainer{
+		Responses: responses,
 	}
 
 	// Marshal and send response
@@ -570,8 +570,48 @@ type xmlRootDetector struct {
 	XMLName xml.Name
 }
 
+// flexibleResponseContainer wraps responses for XML marshaling.
+// It handles both X1ResponseMessage and ErrorResponse types properly.
+type flexibleResponseContainer struct {
+	Responses []any
+}
+
+// MarshalXML implements custom marshaling for the flexible response container.
+// Each response is marshaled with the appropriate xml element name based on its type.
+func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	// Start the responseContainer element
+	containerStart := xml.StartElement{Name: xml.Name{Local: "responseContainer"}}
+	if err := e.EncodeToken(containerStart); err != nil {
+		return err
+	}
+
+	// Marshal each response with appropriate element name
+	for _, resp := range c.Responses {
+		var elemName string
+		switch resp.(type) {
+		case *schema.ErrorResponse:
+			elemName = "errorResponse"
+		default:
+			elemName = "x1ResponseMessage"
+		}
+
+		respStart := xml.StartElement{Name: xml.Name{Local: elemName}}
+		if err := e.EncodeElement(resp, respStart); err != nil {
+			return err
+		}
+	}
+
+	// End the responseContainer element
+	if err := e.EncodeToken(containerStart.End()); err != nil {
+		return err
+	}
+
+	return e.Flush()
+}
+
 // processRequestMessage processes a single X1 request message.
-func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) *schema.X1ResponseMessage {
+// Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
+func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) any {
 	// First, detect the root element to determine the request type
 	var rootDetector xmlRootDetector
 	if err := xml.Unmarshal(body, &rootDetector); err != nil {
@@ -647,7 +687,7 @@ func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMess
 }
 
 // handleCreateDestination handles CreateDestinationRequest.
-func (s *Server) handleCreateDestination(req *schema.CreateDestinationRequest) *schema.X1ResponseMessage {
+func (s *Server) handleCreateDestination(req *schema.CreateDestinationRequest) any {
 	details := req.DestinationDetails
 	if details == nil || details.DId == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeCreateDestination,
@@ -701,7 +741,7 @@ func (s *Server) handleCreateDestination(req *schema.CreateDestinationRequest) *
 }
 
 // handleModifyDestination handles ModifyDestinationRequest.
-func (s *Server) handleModifyDestination(req *schema.ModifyDestinationRequest) *schema.X1ResponseMessage {
+func (s *Server) handleModifyDestination(req *schema.ModifyDestinationRequest) any {
 	details := req.DestinationDetails
 	if details == nil || details.DId == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyDestination,
@@ -760,7 +800,7 @@ func (s *Server) handleModifyDestination(req *schema.ModifyDestinationRequest) *
 }
 
 // handleRemoveDestination handles RemoveDestinationRequest.
-func (s *Server) handleRemoveDestination(req *schema.RemoveDestinationRequest) *schema.X1ResponseMessage {
+func (s *Server) handleRemoveDestination(req *schema.RemoveDestinationRequest) any {
 	if req.DId == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeRemoveDestination,
 			ErrorCodeRequestSyntaxError, "missing DID")
@@ -791,13 +831,13 @@ func (s *Server) handleRemoveDestination(req *schema.RemoveDestinationRequest) *
 }
 
 // handlePing handles PingRequest.
-func (s *Server) handlePing(req *schema.PingRequest) *schema.X1ResponseMessage {
+func (s *Server) handlePing(req *schema.PingRequest) any {
 	logger.Debug("X1 ping received")
 	return s.buildOKResponse(req.X1RequestMessage, MessageTypePing)
 }
 
 // handleActivateTask handles ActivateTaskRequest.
-func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) *schema.X1ResponseMessage {
+func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 	if s.taskManager == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 			ErrorCodeGenericError, "task management not configured")
@@ -893,7 +933,7 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) *schema.X1R
 }
 
 // handleDeactivateTask handles DeactivateTaskRequest.
-func (s *Server) handleDeactivateTask(req *schema.DeactivateTaskRequest) *schema.X1ResponseMessage {
+func (s *Server) handleDeactivateTask(req *schema.DeactivateTaskRequest) any {
 	if s.taskManager == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeDeactivateTask,
 			ErrorCodeGenericError, "task management not configured")
@@ -927,7 +967,7 @@ func (s *Server) handleDeactivateTask(req *schema.DeactivateTaskRequest) *schema
 }
 
 // handleModifyTask handles ModifyTaskRequest.
-func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) *schema.X1ResponseMessage {
+func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 	if s.taskManager == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
 			ErrorCodeGenericError, "task management not configured")
@@ -1008,7 +1048,7 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) *schema.X1Respo
 }
 
 // handleGetTaskDetails handles GetTaskDetailsRequest.
-func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) *schema.X1ResponseMessage {
+func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) any {
 	if s.taskManager == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeGetTaskDetails,
 			ErrorCodeGenericError, "task management not configured")
@@ -1180,7 +1220,7 @@ func parseDeliveryType(dt string) DeliveryType {
 }
 
 // buildOKResponse creates a successful X1 response.
-func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType string) *schema.X1ResponseMessage {
+func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType string) any {
 	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
 
 	admfID := ""
@@ -1199,8 +1239,9 @@ func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType st
 	}
 }
 
-// buildErrorResponse creates an error X1 response.
-func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType string, errorCode int, errorDesc string) *schema.X1ResponseMessage {
+// buildErrorResponse creates an error X1 response per ETSI TS 103 221-1.
+// Returns a complete ErrorResponse with error code and description.
+func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType string, errorCode int, errorDesc string) *schema.ErrorResponse {
 	logger.Warn("X1 error response",
 		"message_type", messageType,
 		"error_code", errorCode,
@@ -1216,15 +1257,19 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 		transID = reqMsg.X1TransactionId
 	}
 
-	// Note: The ErrorResponse type embeds X1ResponseMessage but we return
-	// the base response for simplicity. A full implementation would return
-	// the ErrorResponse type with proper XML marshaling.
-	return &schema.X1ResponseMessage{
-		AdmfIdentifier:   admfID,
-		NeIdentifier:     s.config.NEIdentifier,
-		MessageTimestamp: &now,
-		Version:          s.config.Version,
-		X1TransactionId:  transID,
+	return &schema.ErrorResponse{
+		RequestMessageType: messageType,
+		ErrorInformation: &schema.ErrorInformation{
+			ErrorCode:        errorCode,
+			ErrorDescription: errorDesc,
+		},
+		X1ResponseMessage: &schema.X1ResponseMessage{
+			AdmfIdentifier:   admfID,
+			NeIdentifier:     s.config.NEIdentifier,
+			MessageTimestamp: &now,
+			Version:          s.config.Version,
+			X1TransactionId:  transID,
+		},
 	}
 }
 

@@ -129,16 +129,18 @@ The `writtenKeys` map (line 68) grows unboundedly while `keyStore` has cleanup.
   - `Close()` now stops cleanup goroutine before releasing resources
   - Added unit tests for eviction and TTL cleanup
 
-### Issue #9: X1 Error Response Missing Details [LOW-MEDIUM]
+### Issue #9: X1 Error Response Missing Details [LOW-MEDIUM] ✅ FIXED
 
 **File:** `internal/pkg/li/x1/server.go`
 
 The `buildErrorResponse()` function (lines 1105-1132) logs error details but returns empty response without error code/description.
 
-- [ ] Include error details in X1 response per ETSI spec
-  - Modify return type to use `schema.ErrorResponse` instead of base `X1ResponseMessage`
-  - Populate `ErrorCode` and `ErrorDescription` fields
-  - Update response marshaling to include error elements
+- [x] Include error details in X1 response per ETSI spec
+  - Created `flexibleResponseContainer` type with custom `MarshalXML` method
+  - Changed `buildErrorResponse` to return `*schema.ErrorResponse` with proper error info
+  - Changed all handler functions from `*schema.X1ResponseMessage` to `any` return type
+  - Response XML now includes `<errorResponse>`, `<errorInformation>`, `<errorCode>`, `<errorDescription>`
+  - Added `TestServer_ErrorResponse_IncludesDetails` and `TestServer_ErrorResponse_XMLStructure` tests
 
 ---
 
@@ -221,7 +223,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 - [x] Add X1 rate limiting (#4) ✅
 - [x] Fix subscriber channel leak (#11) ✅
 - [x] Add writtenKeys cleanup (#8) ✅
-- [ ] Include X1 error details (#9)
+- [x] Include X1 error details (#9) ✅
 
 **Medium-Term (4 tasks):**
 - [ ] Fix CallIDDetector race (#3)

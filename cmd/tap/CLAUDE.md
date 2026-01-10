@@ -373,15 +373,17 @@ Tap nodes can forward to upstream processors:
 
 **Configuration:**
 
+TLS is enabled by default. Use `--insecure` for local testing without TLS.
+
 ```bash
 # Edge tap (captures locally, forwards to regional)
-lc tap -i eth0 --processor regional:50051 --tls --tls-ca ca.crt
+lc tap -i eth0 --processor regional:50051 --tls-ca ca.crt
 
 # Regional tap (captures locally, receives from edges, forwards to central)
-lc tap -i eth0 --processor central:50051 --tls --tls-ca ca.crt
+lc tap -i eth0 --processor central:50051 --tls-ca ca.crt
 
 # Central processor (receives from all)
-lc process --listen 0.0.0.0:50051 --tls --tls-cert server.crt --tls-key server.key
+lc process --listen 0.0.0.0:50051 --tls-cert server.crt --tls-key server.key
 ```
 
 ## Configuration Patterns
@@ -406,8 +408,8 @@ tap:
     enabled: true
     output_dir: "./pcaps"
 
+  # TLS is enabled by default unless --insecure is set
   tls:
-    enabled: true
     cert_file: "server.crt"
     key_file: "server.key"
 ```

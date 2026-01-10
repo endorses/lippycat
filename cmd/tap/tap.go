@@ -39,24 +39,26 @@ Tap mode combines local packet capture with full processor capabilities:
 This is ideal for single-machine deployments where you want the full
 power of the processor without the distributed architecture.
 
+TLS is enabled by default. Use --insecure for local testing without TLS.
+
 Examples:
   # Basic tap (insecure, local testing only)
   lc tap --interface eth0 --insecure
 
-  # Tap with auto-rotating PCAP
+  # Tap with auto-rotating PCAP (insecure, local testing)
   lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
   # Tap with upstream forwarding (hierarchical mode)
-  lc tap -i eth0 --processor central-processor:50051 --tls --tls-ca ca.crt
+  lc tap -i eth0 --processor central-processor:50051 --tls-ca ca.crt
 
   # Tap with TUI serving (secure)
-  lc tap -i eth0 --listen 0.0.0.0:50051 --tls --tls-cert server.crt --tls-key server.key
+  lc tap -i eth0 --listen 0.0.0.0:50051 --tls-cert server.crt --tls-key server.key
 
   # VoIP capture with per-call PCAP (use 'tap voip' subcommand)
   lc tap voip -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps --insecure
 
   # Lawful Interception (requires -tags li build)
-  lc tap -i eth0 --tls ... \
+  lc tap -i eth0 --tls-cert server.crt --tls-key server.key \
     --li-enabled \
     --li-x1-listen :8443 \
     --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \
@@ -133,7 +135,7 @@ var (
 	filterFile string
 
 	// TLS flags (for management interface)
-	tlsEnabled    bool
+	// Note: TLS is enabled by default unless --insecure is set
 	tlsCertFile   string
 	tlsKeyFile    string
 	tlsCAFile     string
@@ -216,8 +218,8 @@ func init() {
 
 	// ============================================================
 	// TLS Configuration (persistent for voip subcommand)
+	// TLS is enabled by default unless --insecure is set
 	// ============================================================
-	TapCmd.PersistentFlags().BoolVarP(&tlsEnabled, "tls", "T", false, "Enable TLS encryption for management interface")
 	TapCmd.PersistentFlags().StringVar(&tlsCertFile, "tls-cert", "", "Path to server TLS certificate")
 	TapCmd.PersistentFlags().StringVar(&tlsKeyFile, "tls-key", "", "Path to server TLS key")
 	TapCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification")
@@ -282,7 +284,6 @@ func init() {
 	_ = viper.BindPFlag("tap.filter_file", TapCmd.PersistentFlags().Lookup("filter-file"))
 
 	// TLS
-	_ = viper.BindPFlag("tap.tls.enabled", TapCmd.PersistentFlags().Lookup("tls"))
 	_ = viper.BindPFlag("tap.tls.cert_file", TapCmd.PersistentFlags().Lookup("tls-cert"))
 	_ = viper.BindPFlag("tap.tls.key_file", TapCmd.PersistentFlags().Lookup("tls-key"))
 	_ = viper.BindPFlag("tap.tls.ca_file", TapCmd.PersistentFlags().Lookup("tls-ca"))
@@ -296,8 +297,8 @@ func runTap(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if !tlsEnabled && !viper.GetBool("tap.tls.enabled") {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		if getBoolConfig("insecure", insecureAllowed) {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
 	}
@@ -391,8 +392,8 @@ func runTap(cmd *cobra.Command, args []string) error {
 		CommandExecutorConfig: commandExecutorConfig,
 		EnableDetection:       getBoolConfig("tap.enable_detection", enableDetection),
 		FilterFile:            getStringConfig("tap.filter_file", filterFile),
-		// TLS configuration
-		TLSEnabled:    getBoolConfig("tap.tls.enabled", tlsEnabled),
+		// TLS configuration (TLS enabled by default unless --insecure is set)
+		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   getStringConfig("tap.tls.cert_file", tlsCertFile),
 		TLSKeyFile:    getStringConfig("tap.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("tap.tls.ca_file", tlsCAFile),
@@ -408,11 +409,11 @@ func runTap(cmd *cobra.Command, args []string) error {
 		VifDropPrivilegesUser: getStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 	}
 
-	// Security check: require explicit opt-in to insecure mode
-	if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
-		return fmt.Errorf("TLS is disabled but --insecure flag not set\n\n" +
+	// Security check: TLS is enabled by default, require cert/key when enabled
+	if config.TLSEnabled && (config.TLSCertFile == "" || config.TLSKeyFile == "") {
+		return fmt.Errorf("TLS is enabled by default but certificate/key not provided\n\n" +
 			"For security, lippycat requires TLS encryption for production deployments.\n" +
-			"To enable TLS, use: --tls --tls-cert=/path/to/server.crt --tls-key=/path/to/server.key\n" +
+			"To enable TLS, use: --tls-cert=/path/to/server.crt --tls-key=/path/to/server.key\n" +
 			"To explicitly allow insecure connections (NOT RECOMMENDED), use: --insecure\n\n" +
 			"WARNING: Insecure mode accepts unencrypted TUI connections!")
 	}

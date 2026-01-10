@@ -153,8 +153,8 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if !tlsEnabled && !viper.GetBool("tap.tls.enabled") {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (--tls)")
+		if getBoolConfig("insecure", insecureAllowed) {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
 	}
@@ -311,7 +311,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		CommandExecutorConfig: commandExecutorConfig,
 		EnableDetection:       getBoolConfig("tap.enable_detection", enableDetection),
 		FilterFile:            getStringConfig("tap.filter_file", filterFile),
-		TLSEnabled:            getBoolConfig("tap.tls.enabled", tlsEnabled),
+		TLSEnabled:            !getBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:           getStringConfig("tap.tls.cert_file", tlsCertFile),
 		TLSKeyFile:            getStringConfig("tap.tls.key_file", tlsKeyFile),
 		TLSCAFile:             getStringConfig("tap.tls.ca_file", tlsCAFile),
@@ -325,11 +325,11 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		VifDropPrivilegesUser: getStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 	}
 
-	// Security check
-	if !config.TLSEnabled && !getBoolConfig("insecure", insecureAllowed) {
-		return fmt.Errorf("TLS is disabled but --insecure flag not set\n\n" +
+	// Security check: TLS is enabled by default, require cert/key when enabled
+	if config.TLSEnabled && (config.TLSCertFile == "" || config.TLSKeyFile == "") {
+		return fmt.Errorf("TLS is enabled by default but certificate/key not provided\n\n" +
 			"For security, lippycat requires TLS encryption for production deployments.\n" +
-			"To enable TLS, use: --tls --tls-cert=/path/to/server.crt --tls-key=/path/to/server.key\n" +
+			"To enable TLS, use: --tls-cert=/path/to/server.crt --tls-key=/path/to/server.key\n" +
 			"To explicitly allow insecure connections (NOT RECOMMENDED), use: --insecure")
 	}
 

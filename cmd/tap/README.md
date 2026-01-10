@@ -14,18 +14,20 @@ Tap mode is ideal for single-machine deployments where you want the full power o
 
 ## Basic Usage
 
+TLS is enabled by default. Use `--insecure` for local testing without TLS.
+
 ```bash
-# Standalone capture on eth0
+# Standalone capture on eth0 (insecure, local testing only)
 sudo lc tap --interface eth0 --insecure
 
-# With TLS for TUI connections
-sudo lc tap -i eth0 --tls --tls-cert server.crt --tls-key server.key
+# With TLS for TUI connections (secure, production)
+sudo lc tap -i eth0 --tls-cert server.crt --tls-key server.key
 
-# With auto-rotating PCAP writing
+# With auto-rotating PCAP writing (insecure, local testing)
 sudo lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
 # Hierarchical mode (forward to central processor)
-sudo lc tap -i eth0 --processor central-processor:50051 --tls --tls-ca ca.crt
+sudo lc tap -i eth0 --processor central-processor:50051 --tls-ca ca.crt
 ```
 
 ## Commands
@@ -110,13 +112,14 @@ lc tap -i eth0 --auto-rotate-pcap --pcap-command 'gzip %pcap%' --insecure
 
 ### TLS/Security
 
-- `-T, --tls` - Enable TLS encryption for management interface
-- `--tls-cert` - Path to server TLS certificate
-- `--tls-key` - Path to server TLS key
+TLS is enabled by default unless `--insecure` is explicitly set.
+
+- `--tls-cert` - Path to server TLS certificate (required unless --insecure)
+- `--tls-key` - Path to server TLS key (required unless --insecure)
 - `--tls-ca` - Path to CA certificate for client verification
 - `--tls-client-auth` - Require client certificate authentication
 - `--api-key-auth` - Enable API key authentication
-- `--insecure` - Allow insecure connections without TLS
+- `--insecure` - Allow insecure connections without TLS (NOT RECOMMENDED for production)
 
 ### VoIP-Specific Flags (tap voip only)
 
@@ -181,12 +184,12 @@ sudo lc tap voip -i eth0 \
   --sip-user alicent,robb \
   --per-call-pcap \
   --per-call-pcap-dir /var/voip/calls \
-  --tls --tls-cert server.crt --tls-key server.key
+  --tls-cert server.crt --tls-key server.key
 ```
 
 Monitor via TUI:
 ```bash
-lc watch remote --addr localhost:50051 --tls --tls-ca ca.crt
+lc watch remote --addr localhost:50051 --tls-ca ca.crt
 ```
 
 ### Edge Node with Upstream Forwarding
@@ -197,11 +200,11 @@ Deploy tap nodes at edge locations, forwarding to central processor:
 # Edge tap node
 sudo lc tap voip -i eth0 \
   --processor central-processor:50051 \
-  --tls --tls-cert edge.crt --tls-key edge.key --tls-ca ca.crt
+  --tls-cert edge.crt --tls-key edge.key --tls-ca ca.crt
 
 # Central processor (receives from multiple edge taps)
 lc process --listen 0.0.0.0:50051 \
-  --tls --tls-cert server.crt --tls-key server.key --tls-ca ca.crt \
+  --tls-cert server.crt --tls-key server.key --tls-ca ca.crt \
   --tls-client-auth
 ```
 
@@ -227,14 +230,16 @@ wireshark -i lc0
 
 ## Security
 
+TLS is enabled by default. Use `--insecure` for local testing without TLS.
+
 ### Production Mode Enforcement
 
-Set `LIPPYCAT_PRODUCTION=true` to enforce TLS:
+Set `LIPPYCAT_PRODUCTION=true` to enforce TLS (blocks `--insecure`):
 
 ```bash
 export LIPPYCAT_PRODUCTION=true
-lc tap -i eth0  # ERROR: requires --tls
-lc tap -i eth0 --tls --tls-cert server.crt --tls-key server.key  # OK
+lc tap -i eth0 --insecure  # ERROR: cannot use --insecure in production mode
+lc tap -i eth0 --tls-cert server.crt --tls-key server.key  # OK
 ```
 
 ### TLS Configuration
@@ -242,7 +247,6 @@ lc tap -i eth0 --tls --tls-cert server.crt --tls-key server.key  # OK
 **Server TLS (One-Way Authentication):**
 ```bash
 lc tap -i eth0 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key
 ```
@@ -250,7 +254,6 @@ lc tap -i eth0 \
 **Mutual TLS (Two-Way Authentication):**
 ```bash
 lc tap -i eth0 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key \
   --tls-ca /etc/lippycat/certs/ca.crt \
@@ -302,9 +305,8 @@ tap:
   # Protocol detection
   enable_detection: true
 
-  # TLS
+  # TLS (enabled by default unless --insecure is set)
   tls:
-    enabled: true
     cert_file: "/etc/lippycat/certs/server.crt"
     key_file: "/etc/lippycat/certs/server.key"
     ca_file: "/etc/lippycat/certs/ca.crt"

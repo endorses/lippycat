@@ -63,7 +63,7 @@ Add short flags to existing long flags. No deprecation needed.
 - [x] Add `-V` to `--virtual-interface` in sniff, tap, process (3 files)
 - [x] Add `-U` to `--udp-only` in sniff/voip, tap/tap_voip, hunt/voip (3 files)
 - [x] Add `-R` to `--rtp-port-range` in sniff/voip, tap/tap_voip, hunt/voip (3 files)
-- [ ] Update documentation (README.md files in cmd/)
+- [x] Update documentation (README.md files in cmd/)
 
 ---
 
@@ -85,7 +85,7 @@ Add short flags to existing long flags. No deprecation needed.
 - [x] Add PreRunE validation: warn if `--upstream` used, copy value to processor var
 - [x] Support both old and new Viper keys during transition
 - [x] Update tests
-- [ ] Update documentation
+- [x] Update documentation
 
 ### 2.2: Change `-p` to `-P` for `--processor` in filter commands
 
@@ -94,7 +94,7 @@ Add short flags to existing long flags. No deprecation needed.
 
 **Steps:**
 - [x] Change short flag from `"p"` to `"P"`
-- [ ] Update documentation
+- [x] Update documentation
 
 ### 2.3: Unify `--hunter-id`, `--processor-id`, `--tap-id` to `--id` with `-I`
 
@@ -114,7 +114,7 @@ Add short flags to existing long flags. No deprecation needed.
 - [x] Add PreRunE validation to copy old value to new var if used
 - [x] Support both old and new Viper keys
 - [x] Update tests
-- [ ] Update documentation
+- [x] Update documentation
 
 ### 2.4: Normalize `--sipuser` to `--sip-user` (keep `-u`)
 
@@ -128,21 +128,21 @@ Add short flags to existing long flags. No deprecation needed.
 - [x] Mark old `--sipuser` as deprecated alias
 - [x] Update Viper binding from `voip.sipuser` to `voip.sip_user`
 - [x] Update tests
-- [ ] Update documentation
+- [x] Update documentation
 
 ---
 
 ## Phase 3: Documentation Updates
 
 ### README.md files to update
-- [ ] `cmd/sniff/README.md`
-- [ ] `cmd/tap/README.md`
-- [ ] `cmd/hunt/README.md`
-- [ ] `cmd/process/README.md`
-- [ ] `cmd/watch/README.md`
+- [x] `cmd/sniff/README.md`
+- [x] `cmd/tap/README.md`
+- [x] `cmd/hunt/README.md`
+- [x] `cmd/process/README.md`
+- [x] `cmd/watch/README.md`
 - [ ] `cmd/filter/README.md` (if exists)
 - [ ] `cmd/list/README.md`
-- [ ] Root `README.md`
+- [x] Root `README.md`
 
 ### CLAUDE.md files to update
 - [ ] `CLAUDE.md` (root - CLI usage section)
@@ -153,8 +153,8 @@ Add short flags to existing long flags. No deprecation needed.
 - [ ] `cmd/watch/CLAUDE.md`
 
 ### CHANGELOG.md
-- [ ] Add breaking changes section
-- [ ] Document deprecation timeline
+- [x] Add breaking changes section
+- [x] Document deprecation timeline
 
 ---
 

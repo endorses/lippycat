@@ -105,9 +105,9 @@ lc watch remote --insecure
 ```
 
 **Flags:**
-- `--nodes-file` - Path to nodes YAML file (default: `~/.config/lippycat/nodes.yaml` or `./nodes.yaml`)
+- `-n, --nodes-file` - Path to nodes YAML file (default: `~/.config/lippycat/nodes.yaml` or `./nodes.yaml`)
 - `--insecure` - Allow insecure connections without TLS (testing only)
-- `--tls` - Enable TLS encryption
+- `-T, --tls` - Enable TLS encryption
 - `--tls-ca` - CA certificate for server verification
 - `--tls-cert` - Client certificate for mutual TLS
 - `--tls-key` - Client private key for mutual TLS

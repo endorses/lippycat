@@ -20,7 +20,7 @@ lc hunt --processor processor.example.com:50051 --interface eth0
 lc hunt --processor 192.168.1.100:50051 -i eth0,eth1
 
 # With custom hunter ID
-lc hunt --processor processor:50051 --hunter-id edge-01
+lc hunt --processor processor:50051 --id edge-01
 
 # VoIP hunter with call buffering
 lc hunt voip --processor processor:50051
@@ -33,10 +33,10 @@ lc hunt voip --processor processor:50051
 Captures all packets (or BPF-filtered packets) and forwards to processor.
 
 **Required Flags:**
-- `--processor` - Processor address (host:port) **[REQUIRED]**
+- `-P, --processor` - Processor address (host:port) **[REQUIRED]**
 
 **Hunter Configuration:**
-- `--hunter-id` - Unique hunter identifier (default: hostname)
+- `-I, --id` - Unique hunter identifier (default: hostname)
 - `-i, --interface` - Network interfaces to capture (comma-separated, default: any)
 - `-f, --filter` - BPF filter expression
 - `-p, --promisc` - Enable promiscuous mode
@@ -65,7 +65,7 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--disk-buffer-max-mb` - Maximum disk buffer size in MB (default: 1024)
 
 **TLS/Security:**
-- `--tls` - Enable TLS encryption (recommended for production)
+- `-T, --tls` - Enable TLS encryption (recommended for production)
 - `--tls-cert` - Path to client TLS certificate (for mutual TLS)
 - `--tls-key` - Path to client TLS key (for mutual TLS)
 - `--tls-ca` - Path to CA certificate for server verification
@@ -297,7 +297,7 @@ All flags can be specified in `~/.config/lippycat/config.yaml`:
 ```yaml
 hunter:
   processor_addr: "processor.example.com:50051"
-  hunter_id: "edge-hunter-01"
+  id: "edge-hunter-01"
   interfaces:
     - "eth0"
     - "eth1"

@@ -131,7 +131,7 @@ lc list interfaces
 sudo lc sniff voip --interface eth0
 
 # Target specific SIP users
-sudo lc sniff voip --sipuser alicent,robb
+sudo lc sniff voip --sip-user alicent,robb
 
 # Capture DNS traffic
 sudo lc sniff dns --interface eth0

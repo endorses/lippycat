@@ -25,7 +25,7 @@ lc process --listen 0.0.0.0:50051 \
   --tls-key /etc/lippycat/certs/server.key
 
 # Hierarchical mode (forward to upstream processor)
-lc process --listen :50051 --upstream parent-processor:50051
+lc process --listen :50051 --processor parent-processor:50051
 
 # With PCAP writing
 lc process --listen :50051 --write-file /var/capture/packets.pcap
@@ -39,8 +39,8 @@ lc process --listen :50051 --write-file /var/capture/packets.pcap
 
 ### Processor Configuration
 
-- `--processor-id` - Unique processor identifier (default: hostname)
-- `-u, --upstream` - Upstream processor address for hierarchical mode (host:port)
+- `-I, --id` - Unique processor identifier (default: hostname)
+- `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
 - `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100)
 - `--max-subscribers` - Maximum TUI/monitoring subscribers (default: 100, 0 = unlimited)
 - `-s, --stats` - Display statistics (default: true)
@@ -277,7 +277,7 @@ Hunters automatically receive filter updates via the filter subscription mechani
 
 ### TLS/Security
 
-- `--tls` - Enable TLS encryption (recommended for production)
+- `-T, --tls` - Enable TLS encryption (recommended for production)
 - `--tls-cert` - Path to server TLS certificate
 - `--tls-key` - Path to server TLS key
 - `--tls-ca` - Path to CA certificate for client verification (mutual TLS)
@@ -364,23 +364,23 @@ Processors can forward filtered traffic to upstream processors for multi-tier ag
 **Edge Processor:**
 ```bash
 lc process --listen :50051 \
-  --processor-id edge-01 \
-  --upstream regional-processor:50051 \
+  --id edge-01 \
+  --processor regional-processor:50051 \
   --max-hunters 50
 ```
 
 **Regional Processor:**
 ```bash
 lc process --listen :50051 \
-  --processor-id regional-west \
-  --upstream central-processor:50051 \
+  --id regional-west \
+  --processor central-processor:50051 \
   --max-hunters 10  # Receives from edge processors
 ```
 
 **Central Processor:**
 ```bash
 lc process --listen :50051 \
-  --processor-id central \
+  --id central \
   --write-file /var/capture/all-traffic.pcap \
   --max-hunters 5
 ```
@@ -400,8 +400,8 @@ All flags can be specified in `~/.config/lippycat/config.yaml`:
 ```yaml
 processor:
   listen_addr: "0.0.0.0:50051"
-  processor_id: "prod-processor-01"
-  upstream_addr: ""  # Empty for no upstream
+  id: "prod-processor-01"
+  processor_addr: ""  # Empty for no upstream
   max_hunters: 100
   max_subscribers: 100
   write_file: "/var/capture/packets.pcap"

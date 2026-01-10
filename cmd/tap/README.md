@@ -25,7 +25,7 @@ sudo lc tap -i eth0 --tls --tls-cert server.crt --tls-key server.key
 sudo lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
 # Hierarchical mode (forward to central processor)
-sudo lc tap -i eth0 --upstream central-processor:50051 --tls --tls-ca ca.crt
+sudo lc tap -i eth0 --processor central-processor:50051 --tls --tls-ca ca.crt
 ```
 
 ## Commands
@@ -40,7 +40,7 @@ VoIP-optimized capture with SIP/RTP analysis, per-call PCAP writing enabled by d
 
 ```bash
 # VoIP capture with SIP user filtering
-sudo lc tap voip --interface eth0 --sipuser alicent --insecure
+sudo lc tap voip --interface eth0 --sip-user alicent --insecure
 
 # UDP-only VoIP capture (bypass TCP reassembly)
 sudo lc tap voip -i eth0 --udp-only --sip-port 5060 --insecure
@@ -63,12 +63,12 @@ sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 ### Management Interface
 
 - `-l, --listen` - Listen address for TUI connections (default: `:50051`)
-- `--tap-id` - Unique tap identifier (default: hostname-tap)
+- `-I, --id` - Unique tap identifier (default: hostname-tap)
 - `--max-subscribers` - Maximum concurrent TUI subscribers (default: 100, 0 = unlimited)
 
 ### Upstream Forwarding
 
-- `-u, --upstream` - Upstream processor address for hierarchical mode (host:port)
+- `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
 
 ### PCAP Writing
 
@@ -110,7 +110,7 @@ lc tap -i eth0 --auto-rotate-pcap --pcap-command 'gzip %pcap%' --insecure
 
 ### TLS/Security
 
-- `--tls` - Enable TLS encryption for management interface
+- `-T, --tls` - Enable TLS encryption for management interface
 - `--tls-cert` - Path to server TLS certificate
 - `--tls-key` - Path to server TLS key
 - `--tls-ca` - Path to CA certificate for client verification
@@ -124,7 +124,7 @@ These flags are only available with the `lc tap voip` subcommand:
 
 #### SIP Filtering
 
-- `--sipuser` - SIP user/phone to match (comma-separated, supports wildcards)
+- `-u, --sip-user` - SIP user/phone to match (comma-separated, supports wildcards)
 - `--udp-only` - Capture UDP only, bypass TCP SIP
 - `--sip-port` - Restrict SIP capture to specific port(s)
 - `--rtp-port-range` - Custom RTP port range(s)
@@ -178,7 +178,7 @@ When you need full VoIP analysis on a single machine:
 
 ```bash
 sudo lc tap voip -i eth0 \
-  --sipuser alicent,robb \
+  --sip-user alicent,robb \
   --per-call-pcap \
   --per-call-pcap-dir /var/voip/calls \
   --tls --tls-cert server.crt --tls-key server.key
@@ -196,7 +196,7 @@ Deploy tap nodes at edge locations, forwarding to central processor:
 ```bash
 # Edge tap node
 sudo lc tap voip -i eth0 \
-  --upstream central-processor:50051 \
+  --processor central-processor:50051 \
   --tls --tls-cert edge.crt --tls-key edge.key --tls-ca ca.crt
 
 # Central processor (receives from multiple edge taps)
@@ -275,9 +275,9 @@ tap:
 
   # Management interface
   listen_addr: ":50051"
-  tap_id: "edge-tap-01"
+  id: "edge-tap-01"
   max_subscribers: 100
-  upstream_addr: ""
+  processor_addr: ""
 
   # PCAP writing
   write_file: ""
@@ -312,7 +312,7 @@ tap:
 
   # VoIP-specific (for tap voip)
   voip:
-    sipuser: ""
+    sip_user: ""
     udp_only: false
     sip_ports: ""
     rtp_port_ranges: ""

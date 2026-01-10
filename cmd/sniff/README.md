@@ -115,9 +115,9 @@ lc sniff -r capture.pcap -f "port 5060" 2>/dev/null | jq -c .
 ### VoIP-Specific Capture
 
 ```bash
-lc sniff voip --interface eth0 --sipuser alicent
+lc sniff voip --interface eth0 --sip-user alicent
 lc sniff voip -i eth0 -u alicent,robb --write-file
-lc sniff voip --read-file voip-capture.pcap --sipuser alicent
+lc sniff voip --read-file voip-capture.pcap --sip-user alicent
 ```
 
 The `sniff voip` subcommand provides SIP/RTP-specific capture with advanced filtering, TCP reassembly, and optional GPU acceleration.
@@ -130,13 +130,13 @@ The `sniff voip` subcommand provides SIP/RTP-specific capture with advanced filt
 
 ```bash
 # Single user
-lc sniff voip -i eth0 --sipuser alicent@example.com
+lc sniff voip -i eth0 --sip-user alicent@example.com
 
 # Multiple users (comma-separated)
-lc sniff voip -i eth0 --sipuser alicent,robb,charlie
+lc sniff voip -i eth0 --sip-user alicent,robb,charlie
 
 # User without domain
-lc sniff voip -i eth0 --sipuser alicent
+lc sniff voip -i eth0 --sip-user alicent
 ```
 
 #### Wildcard Pattern Matching
@@ -156,17 +156,17 @@ Wildcard patterns allow flexible matching for international phone number formats
 ```bash
 # Match phone numbers ending in 456789 (handles E.164, 00-prefix, tech prefixes)
 # Matches: +49123456789, 0049123456789, *31#+49123456789
-lc sniff voip -i eth0 --sipuser '*456789'
+lc sniff voip -i eth0 --sip-user '*456789'
 
 # Match usernames starting with "alice"
 # Matches: alice, alicent, alice-backup
-lc sniff voip -i eth0 --sipuser 'alice*'
+lc sniff voip -i eth0 --sip-user 'alice*'
 
 # Combine multiple patterns
-lc sniff voip -i eth0 --sipuser '*456789,*999000,admin*'
+lc sniff voip -i eth0 --sip-user '*456789,*999000,admin*'
 
 # Match literal asterisk (tech prefix)
-lc sniff voip -i eth0 --sipuser '\*31#'
+lc sniff voip -i eth0 --sip-user '\*31#'
 ```
 
 **Note:** Quote patterns containing `*` to prevent shell expansion.

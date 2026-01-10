@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking Changes (with deprecation warnings)
+- **CLI flag normalization**: Standardized flag naming with short flags
+  - `--sipuser` → `--sip-user` (`-u`) for sniff voip, tap voip commands
+  - `--upstream` → `--processor` (`-P`) for tap, process commands
+  - `--hunter-id` → `--id` (`-I`) for hunt command
+  - `--processor-id` → `--id` (`-I`) for process command
+  - `--tap-id` → `--id` (`-I`) for tap command
+  - Old flag names are deprecated and will show warning messages, but continue to work
+
+### Added
+- **New short flags**: Added short flags for commonly used options
+  - `-T` for `--tls` across all commands
+  - `-V` for `--virtual-interface` in sniff, tap, process commands
+  - `-P` for `--processor` in hunt, tap, process commands
+  - `-I` for `--id` in hunt, tap, process commands
+  - `-u` for `--sip-user` in sniff voip, tap voip commands
+  - `-n` for `--nodes-file` in watch remote command
+
 ## [0.7.0] - 2026-01-10
 
 ### Added
@@ -265,8 +285,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Call completion monitor tracks call state and triggers hooks after configurable idle timeout
   - Async command execution with configurable timeout and concurrent execution limits
   - Comprehensive integration tests for command hook workflows
-
-## [Unreleased]
 
 ## [0.3.0] - 2025-12-19
 

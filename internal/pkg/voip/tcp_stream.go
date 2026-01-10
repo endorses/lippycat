@@ -29,15 +29,16 @@ type SIPMessageHandler interface {
 	HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool
 }
 
-// CallIDDetector manages Call-ID detection with timeout support
+// CallIDDetector manages Call-ID detection with timeout support.
+// All state is protected by mu to avoid TOCTOU races.
 type CallIDDetector struct {
 	callID   string
 	detected chan string
 	ctx      context.Context
 	cancel   context.CancelFunc
-	mu       sync.RWMutex
-	set      bool  // flag to indicate if Call-ID has been set
-	closed   int32 // atomic flag to track if detector is closed
+	mu       sync.Mutex
+	set      bool // flag to indicate if Call-ID has been set
+	closed   bool // flag to track if detector is closed (mutex-protected)
 }
 
 func NewCallIDDetector() *CallIDDetector {
@@ -51,41 +52,38 @@ func NewCallIDDetector() *CallIDDetector {
 }
 
 func (c *CallIDDetector) SetCallID(id string) {
-	// Check if the detector is already closed
-	if atomic.LoadInt32(&c.closed) == 1 {
-		return
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Only set the call ID if it hasn't been set already (first-wins semantics)
-	if !c.set {
-		c.callID = id
-		c.set = true
-
-		// Send to channel and close it to notify all waiters
-		if atomic.LoadInt32(&c.closed) == 0 {
-			select {
-			case c.detected <- id:
-				close(c.detected) // Close the channel so all waiters get the value
-			default:
-				// Channel already has a value or is closed
-			}
-		}
+	// Check both closed and set under the same lock to avoid TOCTOU races
+	if c.closed || c.set {
+		return
 	}
-	// Call-ID already set, ignore this call
+
+	c.callID = id
+	c.set = true
+
+	// Send to channel and close it to notify all waiters.
+	// The select handles the case where channel already has a value (shouldn't happen
+	// with first-wins semantics, but defensive).
+	select {
+	case c.detected <- id:
+		close(c.detected)
+	default:
+		// Channel already has a value, just close it
+		close(c.detected)
+	}
 }
 
 func (c *CallIDDetector) Wait() string {
 	// First check if callID is already set
-	c.mu.RLock()
+	c.mu.Lock()
 	if c.set {
 		callID := c.callID
-		c.mu.RUnlock()
+		c.mu.Unlock()
 		return callID
 	}
-	c.mu.RUnlock()
+	c.mu.Unlock()
 
 	// If not set, wait on the channel
 	select {
@@ -94,8 +92,8 @@ func (c *CallIDDetector) Wait() string {
 			return callID
 		}
 		// Channel was closed, check if callID was set
-		c.mu.RLock()
-		defer c.mu.RUnlock()
+		c.mu.Lock()
+		defer c.mu.Unlock()
 		if c.set {
 			return c.callID
 		}
@@ -106,24 +104,22 @@ func (c *CallIDDetector) Wait() string {
 }
 
 func (c *CallIDDetector) Close() {
-	// Use atomic compare-and-swap to ensure Close is only executed once
-	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
 		return // Already closed
 	}
+	c.closed = true
 
-	// Cancel context to wake up any waiters
-	c.cancel()
-
-	// Close the channel safely - it might already be closed by SetCallID
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	select {
-	case <-c.detected:
-		// Channel already closed, do nothing
-	default:
+	// Only close the channel if SetCallID hasn't already done it.
+	// If set is true, SetCallID already closed the channel.
+	if !c.set {
 		close(c.detected)
 	}
+	c.mu.Unlock()
+
+	// Cancel context to wake up any waiters (done outside mutex to avoid holding lock)
+	c.cancel()
 }
 
 // SIPStream represents a TCP stream that processes SIP messages

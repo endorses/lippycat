@@ -100,6 +100,58 @@ func TestCallIDDetector_RaceConditions(t *testing.T) {
 		assert.Empty(t, result, "Should return empty string when closed")
 		assert.Less(t, duration, 1*time.Second, "Should return quickly when closed")
 	})
+
+	t.Run("Concurrent SetCallID and Close stress test", func(t *testing.T) {
+		// This test specifically stresses the potential TOCTOU race between
+		// SetCallID and Close by running them concurrently many times.
+		// Run with -race flag to detect any data races.
+		const iterations = 100
+		const goroutinesPerOp = 10
+
+		for i := 0; i < iterations; i++ {
+			detector := NewCallIDDetector()
+
+			var wg sync.WaitGroup
+			ready := make(chan struct{})
+
+			// Start goroutines that will call SetCallID
+			for j := 0; j < goroutinesPerOp; j++ {
+				wg.Add(1)
+				go func(id int) {
+					defer wg.Done()
+					<-ready // Wait for signal
+					detector.SetCallID(fmt.Sprintf("call-%d", id))
+				}(j)
+			}
+
+			// Start goroutines that will call Close
+			for j := 0; j < goroutinesPerOp; j++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-ready // Wait for signal
+					detector.Close()
+				}()
+			}
+
+			// Start goroutines that will call Wait
+			for j := 0; j < goroutinesPerOp; j++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-ready // Wait for signal
+					_ = detector.Wait()
+				}()
+			}
+
+			// Release all goroutines at once for maximum contention
+			close(ready)
+			wg.Wait()
+
+			// Final cleanup (Close is idempotent)
+			detector.Close()
+		}
+	})
 }
 
 func TestCallIDDetector_EdgeCases(t *testing.T) {

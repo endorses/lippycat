@@ -146,40 +146,23 @@ The `buildErrorResponse()` function (lines 1105-1132) logs error details but ret
 
 ## Medium-Term Priority (Next Quarter)
 
-### Issue #3: CallIDDetector Race Condition [MEDIUM]
+### Issue #3: CallIDDetector Race Condition [MEDIUM] ✅ FIXED
 
 **File:** `internal/pkg/voip/tcp_stream.go`
 
 Small TOCTOU window in `SetCallID()` (lines 53-78) between atomic load and channel close.
 
-- [ ] Move channel operations fully under mutex
-  - Remove redundant atomic check inside mutex (line 68)
-  - Set `closed` flag within the same mutex-protected block
-  - Or use single atomic CAS for the entire close operation
+- [x] Move channel operations fully under mutex
+  - Changed `closed` from atomic `int32` to mutex-protected `bool`
+  - Changed `mu` from `RWMutex` to `Mutex` (simpler, no need for read-only path)
+  - `SetCallID()` now checks both `closed` and `set` under the same lock
+  - `Close()` now uses mutex instead of atomic CAS, only closes channel if `set` is false
 
-```go
-func (c *CallIDDetector) SetCallID(id string) {
-    c.mu.Lock()
-    defer c.mu.Unlock()
-
-    if c.closed == 1 || c.set {
-        return
-    }
-
-    c.callID = id
-    c.set = true
-
-    select {
-    case c.detected <- id:
-        close(c.detected)
-    default:
-    }
-}
-```
-
-- [ ] Add race detector test
-  - Create test that spawns multiple goroutines calling SetCallID and Close concurrently
-  - Run with `-race` flag
+- [x] Add race detector test
+  - Added "Concurrent SetCallID and Close stress test" subtest in `TestCallIDDetector_RaceConditions`
+  - Runs 100 iterations with 10 goroutines each for SetCallID, Close, and Wait
+  - All goroutines start simultaneously for maximum contention
+  - Passes with `-race` flag
 
 ### Issue #7: Context Propagation in Delivery Client [MEDIUM]
 
@@ -226,7 +209,7 @@ The `sendSync()` method (line 529) accepts context but doesn't pass it to `GetCo
 - [x] Include X1 error details (#9) ✅
 
 **Medium-Term (4 tasks):**
-- [ ] Fix CallIDDetector race (#3)
+- [x] Fix CallIDDetector race (#3) ✅
 - [ ] Propagate context in delivery (#7)
 - [ ] Improve test coverage
 - [ ] Add integration tests

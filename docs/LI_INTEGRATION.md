@@ -14,27 +14,24 @@ lippycat implements the following ETSI interfaces for lawful interception:
 
 **Architecture:**
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           lippycat Processor                             │
-│                                                                          │
-│  ┌──────────┐  ┌───────────────┐  ┌─────────────┐  ┌──────────────────┐│
-│  │ X1 Server│←─│  LI Manager   │─→│ X2 Encoder  │─→│  Delivery Client ││
-│  │ :8443    │  │  (registry,   │  │ X3 Encoder  │  │  (TLS/mTLS)      ││
-│  └────┬─────┘  │   filters)    │  └─────────────┘  └────────┬─────────┘│
-│       │        └───────┬───────┘                            │          │
-│       │                │                                    │          │
-│  ┌────▼────────────────▼─────┐                        ┌─────▼────────┐ │
-│  │     Packet Processing     │                        │     MDF      │ │
-│  │   (filter matching)       │                        │  (X2/X3      │ │
-│  └───────────────────────────┘                        │   delivery)  │ │
-└─────────────────────────────────────────────────────────────────────────┘
-          ▲                                                    ▲
-          │ X1 (HTTPS/XML)                                     │ X2/X3 (TLS/Binary)
-          │                                                    │
-    ┌─────┴─────┐                                        ┌─────┴─────┐
-    │   ADMF    │                                        │    MDF    │
-    └───────────┘                                        └───────────┘
+```mermaid
+flowchart LR
+    ADMF["ADMF"]
+
+    subgraph Processor[lippycat Processor]
+        X1["X1 Server :8443"]
+        LIM["LI Manager"]
+        ENC["X2/X3 Encoder"]
+        DC["Delivery Client"]
+    end
+
+    MDF["MDF"]
+
+    ADMF <-->|X1 HTTPS| X1
+    X1 <--> LIM
+    LIM --> ENC
+    ENC --> DC
+    DC -->|X2/X3 TLS| MDF
 ```
 
 ## Build Requirements
@@ -205,19 +202,17 @@ Content is delivered to MDF using binary TLV encoding per TS 103 221-2.
 
 ### PDU Structure
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                           PDU Header (36 bytes min)               │
-├──────────────────────────────────────────────────────────────────┤
-│ Version (2) │ Type (2) │ HeaderLen (2) │ PayloadFmt (2)          │
-├──────────────────────────────────────────────────────────────────┤
-│ PayloadLength (4) │ XID (16 bytes UUID) │ CorrelationID (8)      │
-├──────────────────────────────────────────────────────────────────┤
-│                    Conditional Attributes (TLV)                   │
-├──────────────────────────────────────────────────────────────────┤
-│                          Payload                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
+| Offset | Field | Size |
+|--------|-------|------|
+| 0 | Version | 2 bytes |
+| 2 | Type | 2 bytes |
+| 4 | HeaderLen | 2 bytes |
+| 6 | PayloadFmt | 2 bytes |
+| 8 | PayloadLength | 4 bytes |
+| 12 | XID (UUID) | 16 bytes |
+| 28 | CorrelationID | 8 bytes |
+| 36+ | Conditional Attributes (TLV) | variable |
+| ... | Payload | variable |
 
 ### X2 IRI Events
 

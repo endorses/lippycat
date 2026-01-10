@@ -69,10 +69,10 @@ grep BPF /boot/config-$(uname -r)
 AF_XDP requires elevated privileges:
 ```bash
 # Option 1: Run as root
-sudo ./lippycat
+sudo lc
 
 # Option 2: Grant CAP_NET_ADMIN and CAP_NET_RAW
-sudo setcap cap_net_admin,cap_net_raw=eip ./lippycat
+sudo setcap cap_net_admin,cap_net_raw=eip lc
 ```
 
 #### Libraries
@@ -151,7 +151,7 @@ For NUMA systems, pin to same NUMA node as NIC:
 cat /sys/class/net/eth0/device/numa_node
 
 # Pin process to NUMA node 0
-numactl --cpunodebind=0 --membind=0 ./lippycat
+numactl --cpunodebind=0 --membind=0 lc
 ```
 
 ### Memory Configuration
@@ -284,7 +284,7 @@ uname -r
 #### Using lippycat
 ```bash
 # Enable verbose logging
-sudo ./lippycat sniff --interface eth0 --verbose
+sudo lc sniff --interface eth0 --verbose
 
 # Check stats output:
 # Capture statistics: mode=AF_XDP packets_received=X ...
@@ -364,10 +364,10 @@ sudo apt-get install linux-generic-hwe-20.04
 **Solution:**
 ```bash
 # Run as root
-sudo ./lippycat
+sudo lc
 
 # Or grant capabilities
-sudo setcap cap_net_admin,cap_net_raw=eip ./lippycat
+sudo setcap cap_net_admin,cap_net_raw=eip lc
 ```
 
 ### High Packet Loss
@@ -389,7 +389,7 @@ fill_ring_size: 4096
 batch_size: 128
 
 # Pin to specific CPU
-taskset -c 0 ./lippycat
+taskset -c 0 lc
 
 # Increase NIC ring buffers
 sudo ethtool -G eth0 rx 4096
@@ -435,7 +435,7 @@ sudo ethtool -K eth0 gro off lro off tso off gso off
 sudo cpupower frequency-set -g performance
 
 # Pin to correct NUMA node
-numactl --cpunodebind=0 --membind=0 ./lippycat
+numactl --cpunodebind=0 --membind=0 lc
 
 # Increase batch size
 batch_size: 128

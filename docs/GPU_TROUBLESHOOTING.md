@@ -195,7 +195,7 @@ cd ../../..
 ./build_cuda.sh
 
 # Run with CUDA backend
-./lippycat-cuda
+lc-cuda
 ```
 
 ## Fallback: CPU SIMD Backend
@@ -207,7 +207,7 @@ The CPU SIMD backend is **always available** and provides excellent performance:
 go build -o lippycat
 
 # Run - automatically uses AVX2/SSE4.2
-./lippycat
+lc
 ```
 
 **CPU SIMD Performance**: 30K packets/sec pattern matching, zero GPU required.

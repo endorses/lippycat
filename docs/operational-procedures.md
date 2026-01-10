@@ -1,14 +1,14 @@
-# TCP SIP Operational Procedures
+# Operational Procedures
 
 ## Overview
-This document provides standardized operational procedures for managing lippycat TCP SIP capture in production environments. It includes deployment guidelines, monitoring procedures, incident response, and maintenance tasks.
+This document provides standardized operational procedures for managing lippycat in production environments. It includes deployment guidelines, monitoring procedures, incident response, and maintenance tasks.
 
 ## Production Deployment
 
 ### Pre-Deployment Checklist
 
 #### System Requirements
-- [ ] Go 1.19+ installed
+- [ ] Go 1.24+ installed (for building)
 - [ ] libpcap development libraries installed
 - [ ] Root/sudo access for network capture
 - [ ] Minimum 4GB RAM, 8GB recommended for high-volume environments
@@ -18,38 +18,32 @@ This document provides standardized operational procedures for managing lippycat
 #### Configuration Validation
 ```bash
 # Test with sample traffic
-./lippycat sniff voip --read-file test-sip-tcp.pcap --tcp-performance-mode balanced
+lc sniff voip --read-file test-sip-tcp.pcap --tcp-performance-mode balanced
 
-# Verify debug commands work
-./lippycat debug health
-./lippycat debug config
-```
-
-#### Performance Baseline
-```bash
-# Establish baseline metrics
-./lippycat debug summary > baseline-metrics.txt
+# Verify configuration is loaded
+lc show config
 
 # Test resource limits
-./lippycat sniff voip --tcp-performance-mode memory --max-goroutines 100
-./lippycat sniff voip --tcp-performance-mode throughput --max-goroutines 2000
+lc sniff voip --tcp-performance-mode memory --max-goroutines 100
+lc sniff voip --tcp-performance-mode throughput --max-goroutines 2000
 ```
 
 ### Deployment Procedure
 
 1. **Install Binary**
    ```bash
-   sudo cp lippycat /usr/local/bin/
-   sudo chmod +x /usr/local/bin/lippycat
-   sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lippycat
+   make build
+   sudo cp lc /usr/local/bin/
+   sudo chmod +x /usr/local/bin/lc
+   sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
    ```
 
 2. **Create Configuration**
    ```bash
    sudo mkdir -p /etc/lippycat
-   sudo cp lippycat.yaml /etc/lippycat/
-   sudo chown root:root /etc/lippycat/lippycat.yaml
-   sudo chmod 600 /etc/lippycat/lippycat.yaml
+   sudo cp config.yaml /etc/lippycat/
+   sudo chown root:root /etc/lippycat/config.yaml
+   sudo chmod 600 /etc/lippycat/config.yaml
    ```
 
 3. **Create Service (systemd)**
@@ -62,7 +56,7 @@ This document provides standardized operational procedures for managing lippycat
    [Service]
    Type=simple
    User=root
-   ExecStart=/usr/local/bin/lippycat sniff voip --config /etc/lippycat/lippycat.yaml
+   ExecStart=/usr/local/bin/lc sniff voip --config /etc/lippycat/config.yaml
    Restart=always
    RestartSec=5
    StandardOutput=journal
@@ -80,10 +74,7 @@ This document provides standardized operational procedures for managing lippycat
    ```bash
    sudo systemctl start lippycat
    sudo systemctl status lippycat
-
-   # Wait 30 seconds, then check health
-   sleep 30
-   lippycat debug health
+   journalctl -u lippycat -f  # Monitor logs
    ```
 
 ## Daily Operations
@@ -102,54 +93,31 @@ echo "1. Service Status:"
 systemctl is-active lippycat
 systemctl is-enabled lippycat
 
-# Health check
-echo -e "\n2. TCP Health:"
-lippycat debug health
-
-# Active alerts
-echo -e "\n3. Active Alerts:"
-lippycat debug alerts --active-only
-
 # Resource usage
-echo -e "\n4. Resource Usage:"
-ps aux | grep lippycat | grep -v grep
+echo -e "\n2. Resource Usage:"
+ps aux | grep lc | grep -v grep
 
 # Disk space for PCAP files
-echo -e "\n5. PCAP Storage:"
+echo -e "\n3. PCAP Storage:"
 df -h /var/lib/lippycat/pcap/ 2>/dev/null || echo "PCAP directory not configured"
 
 # Recent errors in logs
-echo -e "\n6. Recent Errors (last 24h):"
+echo -e "\n4. Recent Errors (last 24h):"
 journalctl -u lippycat --since "24 hours ago" --priority=err --no-pager -q
 
 echo -e "\n=== Health Check Complete ==="
 ```
 
-#### Continuous Monitoring
-Set up monitoring with your preferred system (Prometheus, Nagios, etc.):
-
+#### For Distributed Deployments
 ```bash
-# Example monitoring script for integration
-#!/bin/bash
-# lippycat-metrics.sh
+# Check processor status (requires running processor)
+lc show status -P processor:50051 --tls-ca ca.crt
 
-# Export metrics in Prometheus format
-echo "# HELP lippycat_tcp_healthy TCP assembler health status"
-echo "# TYPE lippycat_tcp_healthy gauge"
-if lippycat debug health >/dev/null 2>&1; then
-    echo "lippycat_tcp_healthy 1"
-else
-    echo "lippycat_tcp_healthy 0"
-fi
+# List connected hunters
+lc show hunters -P processor:50051 --tls-ca ca.crt
 
-# Get detailed metrics
-METRICS=$(lippycat debug metrics --json 2>/dev/null)
-if [ $? -eq 0 ]; then
-    echo "$METRICS" | jq -r '
-        .streams | to_entries[] |
-        "lippycat_tcp_streams_\(.key) \(.value)"
-    '
-fi
+# View topology
+lc show topology -P processor:50051 --tls-ca ca.crt
 ```
 
 ### Log Management
@@ -192,37 +160,6 @@ grep -i "error\|critical\|fatal" "$LOG_FILE" |
     awk '{print $4}' | sort | uniq -c | sort -nr | head -10
 ```
 
-### Performance Monitoring
-
-#### Performance Dashboard Script
-```bash
-#!/bin/bash
-# performance-dashboard.sh
-
-while true; do
-    clear
-    echo "=== lippycat Performance Dashboard - $(date) ==="
-    echo
-
-    # Quick health overview
-    lippycat debug summary
-
-    # Resource usage
-    echo "=== System Resources ==="
-    echo "Memory Usage:"
-    free -h | grep -E "Mem|Swap"
-
-    echo -e "\nCPU Usage:"
-    top -bn1 | grep "lippycat" | head -1
-
-    echo -e "\nNetwork Interfaces:"
-    ss -i | grep -E "State|lippycat" | head -5
-
-    echo -e "\n=== Refresh in 10 seconds (Ctrl+C to exit) ==="
-    sleep 10
-done
-```
-
 ## Incident Response
 
 ### Critical Alerts Response
@@ -234,8 +171,8 @@ done
 **Immediate Actions:**
 1. Check current memory usage:
    ```bash
-   lippycat debug buffers
-   ps aux | grep lippycat
+   ps aux | grep lc
+   top -p $(pgrep -f "lc.*sniff")
    ```
 
 2. If memory continues growing:
@@ -250,28 +187,6 @@ done
    ```bash
    # Emergency restart
    sudo systemctl restart lippycat
-   ```
-
-#### High Failure Rate (>15%)
-**Severity:** High
-**Response Time:** 15 minutes
-
-**Investigation Steps:**
-1. Check stream metrics:
-   ```bash
-   lippycat debug streams
-   lippycat debug alerts
-   ```
-
-2. Analyze recent errors:
-   ```bash
-   journalctl -u lippycat --since "1 hour ago" --priority=err
-   ```
-
-3. Check network issues:
-   ```bash
-   netstat -i
-   tcpdump -i any -c 100 port 5060
    ```
 
 #### Service Down
@@ -289,13 +204,13 @@ done
    ```bash
    sudo systemctl restart lippycat
    sleep 30
-   lippycat debug health
+   sudo systemctl status lippycat
    ```
 
 3. If restart fails, safe mode:
    ```bash
    # Start with minimal configuration
-   sudo lippycat sniff voip --tcp-performance-mode memory --max-goroutines 100
+   sudo lc sniff voip --tcp-performance-mode memory --max-goroutines 100
    ```
 
 ### Escalation Procedures
@@ -334,19 +249,14 @@ cat /etc/os-release >> "$DIAG_DIR/system_info.txt"
 systemctl status lippycat > "$DIAG_DIR/service_status.txt"
 
 # Configuration
-cp /etc/lippycat/lippycat.yaml "$DIAG_DIR/config.yaml" 2>/dev/null
+cp /etc/lippycat/config.yaml "$DIAG_DIR/config.yaml" 2>/dev/null
+lc show config > "$DIAG_DIR/effective_config.json" 2>&1
 
 # Recent logs
 journalctl -u lippycat --since "2 hours ago" > "$DIAG_DIR/recent_logs.txt"
 
-# Debug output
-lippycat debug summary > "$DIAG_DIR/debug_summary.txt" 2>&1
-lippycat debug metrics --json > "$DIAG_DIR/metrics.json" 2>&1
-lippycat debug health > "$DIAG_DIR/health.txt" 2>&1
-lippycat debug config --json > "$DIAG_DIR/effective_config.json" 2>&1
-
 # System resources
-ps aux | grep lippycat > "$DIAG_DIR/process_info.txt"
+ps aux | grep lc > "$DIAG_DIR/process_info.txt"
 free -h > "$DIAG_DIR/memory_info.txt"
 df -h > "$DIAG_DIR/disk_info.txt"
 ss -tuln | grep 5060 > "$DIAG_DIR/network_info.txt"
@@ -364,32 +274,6 @@ echo "Diagnostic data collected: lippycat_diagnostics_$TIMESTAMP.tar.gz"
 ## Maintenance Procedures
 
 ### Weekly Maintenance
-
-#### Performance Review
-```bash
-#!/bin/bash
-# weekly-performance-review.sh
-
-echo "=== Weekly Performance Review - $(date) ==="
-
-# Calculate average metrics over the week
-echo "1. Stream Processing Statistics (Last 7 days):"
-journalctl -u lippycat --since "7 days ago" | grep "Stream completed" | wc -l
-
-echo -e "\n2. Error Summary (Last 7 days):"
-journalctl -u lippycat --since "7 days ago" --priority=err |
-    grep -o "error: [^\"]*" | sort | uniq -c | sort -nr
-
-echo -e "\n3. Resource Usage Trends:"
-# Implementation would depend on your monitoring system
-echo "Check Grafana/monitoring dashboard for trends"
-
-echo -e "\n4. Configuration Optimization Recommendations:"
-CURRENT_MODE=$(lippycat debug config --json | jq -r '.tcp_performance_mode')
-echo "Current performance mode: $CURRENT_MODE"
-
-# Add logic to recommend optimizations based on metrics
-```
 
 #### Log Cleanup
 ```bash
@@ -417,37 +301,6 @@ echo "Log cleanup complete"
 
 ### Monthly Maintenance
 
-#### Configuration Review
-```bash
-#!/bin/bash
-# monthly-config-review.sh
-
-echo "=== Monthly Configuration Review ==="
-
-# Current configuration
-echo "1. Current Configuration:"
-lippycat debug config
-
-# Performance analysis
-echo -e "\n2. Performance Analysis:"
-echo "Average memory usage: [implement based on monitoring]"
-echo "Average CPU usage: [implement based on monitoring]"
-echo "Peak concurrent streams: [implement based on monitoring]"
-
-# Recommendations
-echo -e "\n3. Optimization Recommendations:"
-METRICS=$(lippycat debug metrics --json)
-GOROUTINE_UTIL=$(echo "$METRICS" | jq -r '.health.goroutine_utilization // 0')
-
-if (( $(echo "$GOROUTINE_UTIL > 0.8" | bc -l) )); then
-    echo "- Consider increasing max_goroutines"
-fi
-
-if (( $(echo "$GOROUTINE_UTIL < 0.3" | bc -l) )); then
-    echo "- Consider decreasing max_goroutines to save memory"
-fi
-```
-
 #### Security Review
 ```bash
 #!/bin/bash
@@ -457,25 +310,21 @@ echo "=== Monthly Security Review ==="
 
 # Check file permissions
 echo "1. File Permissions:"
-ls -la /usr/local/bin/lippycat
-ls -la /etc/lippycat/lippycat.yaml
+ls -la /usr/local/bin/lc
+ls -la /etc/lippycat/config.yaml
 
 # Check capabilities
 echo -e "\n2. Binary Capabilities:"
-getcap /usr/local/bin/lippycat
+getcap /usr/local/bin/lc
 
 # Check service user
 echo -e "\n3. Service User:"
 systemctl show lippycat | grep User
 
-# Check for security updates
-echo -e "\n4. Go Version:"
-go version
-
 echo -e "\nRecommendations:"
 echo "- Ensure binary has minimal required capabilities"
 echo "- Verify configuration file has restrictive permissions"
-echo "- Update Go runtime if security patches available"
+echo "- Update to latest release if security patches available"
 ```
 
 ## Emergency Procedures
@@ -485,13 +334,13 @@ echo "- Update Go runtime if security patches available"
 #### Service Won't Start
 1. **Check Configuration:**
    ```bash
-   lippycat sniff voip --config /etc/lippycat/lippycat.yaml --validate-config
+   lc show config
    ```
 
 2. **Reset to Minimal Configuration:**
    ```bash
-   sudo cp /etc/lippycat/lippycat.yaml /etc/lippycat/lippycat.yaml.backup
-   sudo tee /etc/lippycat/lippycat.yaml.minimal << EOF
+   sudo cp /etc/lippycat/config.yaml /etc/lippycat/config.yaml.backup
+   sudo tee /etc/lippycat/config.yaml.minimal << EOF
    voip:
      tcp_performance_mode: "memory"
      max_goroutines: 100
@@ -503,7 +352,7 @@ echo "- Update Go runtime if security patches available"
 3. **Manual Debugging Start:**
    ```bash
    sudo systemctl stop lippycat
-   sudo /usr/local/bin/lippycat sniff voip --config /etc/lippycat/lippycat.yaml.minimal
+   sudo /usr/local/bin/lc sniff voip --config /etc/lippycat/config.yaml.minimal
    ```
 
 #### Data Recovery
@@ -519,10 +368,7 @@ echo "- Update Go runtime if security patches available"
 2. **Configuration Recovery:**
    ```bash
    # Restore from backup
-   sudo cp /etc/lippycat/lippycat.yaml.backup /etc/lippycat/lippycat.yaml
-
-   # Or regenerate default config
-   lippycat config generate > /tmp/default-config.yaml
+   sudo cp /etc/lippycat/config.yaml.backup /etc/lippycat/config.yaml
    ```
 
 ### Disaster Recovery
@@ -544,16 +390,16 @@ cp -r /etc/lippycat /tmp/lippycat-backup/ 2>/dev/null
 cp -r /var/lib/lippycat /tmp/lippycat-backup/ 2>/dev/null
 
 # Reinstall binary
-wget -O /tmp/lippycat https://github.com/endorses/lippycat/releases/latest/download/lippycat
-sudo cp /tmp/lippycat /usr/local/bin/
-sudo chmod +x /usr/local/bin/lippycat
-sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lippycat
+wget -O /tmp/lc https://github.com/endorses/lippycat/releases/latest/download/lc
+sudo cp /tmp/lc /usr/local/bin/
+sudo chmod +x /usr/local/bin/lc
+sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
 
 # Restore configuration
 sudo cp -r /tmp/lippycat-backup/lippycat /etc/
 
 # Test and restart
-lippycat debug config
+lc show config
 sudo systemctl enable lippycat
 sudo systemctl start lippycat
 
@@ -576,6 +422,5 @@ This document should be reviewed and updated:
 
 ---
 
-**Last Updated:** [Date]
-**Version:** 1.0
-**Next Review:** [Date + 3 months]
+**Last Updated:** 2026-01-10
+**Version:** 2.0

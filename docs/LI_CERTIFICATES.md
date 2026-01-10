@@ -6,40 +6,33 @@ This guide covers certificate generation and management for ETSI X1/X2/X3 lawful
 
 LI interfaces require mutual TLS with separate certificate chains:
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Certificate Chains                           │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────────────┐           ┌─────────────────────────────────┐ │
-│  │    ADMF CA      │           │           LI CA                 │ │
-│  │  (admf-ca.crt)  │           │     (for NE certificates)       │ │
-│  └────────┬────────┘           └────────────┬────────────────────┘ │
-│           │                                 │                      │
-│           │                    ┌────────────┼────────────┐         │
-│           │                    │            │            │         │
-│           ▼                    ▼            ▼            ▼         │
-│  ┌────────────────┐   ┌──────────────┐ ┌──────────┐ ┌──────────┐  │
-│  │  ADMF Client   │   │ X1 Server    │ │X1 Client │ │ Delivery │  │
-│  │  Certificate   │   │ Certificate  │ │   Cert   │ │   Cert   │  │
-│  │ (used by ADMF) │   │(processor)   │ │(→ ADMF)  │ │(→ MDF)   │  │
-│  └────────────────┘   └──────────────┘ └──────────┘ └──────────┘  │
-│                                                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌─────────────────┐                                                │
-│  │     MDF CA      │                                                │
-│  │  (mdf-ca.crt)   │                                                │
-│  └────────┬────────┘                                                │
-│           │                                                         │
-│           ▼                                                         │
-│  ┌────────────────┐                                                 │
-│  │   MDF Server   │                                                 │
-│  │  Certificate   │                                                 │
-│  │ (used by MDF)  │                                                 │
-│  └────────────────┘                                                 │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CertChains["Certificate Chains"]
+        direction TB
+
+        subgraph ADMF["ADMF Chain"]
+            ADMF_CA["ADMF CA<br/>(admf-ca.crt)"]
+            ADMF_Client["ADMF Client Certificate<br/>(used by ADMF)"]
+            ADMF_CA --> ADMF_Client
+        end
+
+        subgraph LI["LI CA Chain"]
+            LI_CA["LI CA<br/>(for NE certificates)"]
+            X1_Server["X1 Server Certificate<br/>(processor)"]
+            X1_Client["X1 Client Cert<br/>(→ ADMF)"]
+            Delivery["Delivery Cert<br/>(→ MDF)"]
+            LI_CA --> X1_Server
+            LI_CA --> X1_Client
+            LI_CA --> Delivery
+        end
+
+        subgraph MDF["MDF Chain"]
+            MDF_CA["MDF CA<br/>(mdf-ca.crt)"]
+            MDF_Server["MDF Server Certificate<br/>(used by MDF)"]
+            MDF_CA --> MDF_Server
+        end
+    end
 ```
 
 ## Required Certificates

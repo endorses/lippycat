@@ -202,14 +202,17 @@ const https = require('https');
 
 In distributed mode, hunters automatically forward TLS session keys to processors:
 
-```
-┌─────────────┐                    ┌─────────────┐
-│   Hunter    │  gRPC (encrypted)  │  Processor  │
-│             │ ─────────────────► │             │
-│ --tls-keylog│   PacketData with  │ Writes:     │
-│ /tmp/keys   │   TLSSessionKeys   │ - PCAP      │
-└─────────────┘                    │ - keylog    │
-                                   └─────────────┘
+```mermaid
+flowchart LR
+    subgraph Hunter
+        HK["--tls-keylog /tmp/keys"]
+    end
+
+    subgraph Processor
+        PW["Writes:<br/>- PCAP<br/>- keylog"]
+    end
+
+    Hunter -->|"gRPC (encrypted)<br/>PacketData with TLSSessionKeys"| Processor
 ```
 
 **Processor flags:**

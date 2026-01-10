@@ -337,6 +337,7 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 - ✅ Network diagnostics and troubleshooting
 - ✅ Protocol security analysis (VoIP, DNS, TLS, Email)
 - ✅ Traffic analysis and testing
+- ✅ Lawful interception (ETSI X1/X2/X3 interfaces)
 - ❌ Unauthorized surveillance
 
 Requires root privileges for packet capture. Use responsibly and legally.
@@ -347,8 +348,9 @@ Requires root privileges for packet capture. Use responsibly and legally.
 - PCAP file encryption support
 - DoS protection with rate limiting
 - Per-node certificate authentication
+- ETSI-compliant lawful interception (X1/X2/X3)
 
-See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
+See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation. For lawful interception setup, see [docs/LI_INTEGRATION.md](docs/LI_INTEGRATION.md).
 
 ## Development
 

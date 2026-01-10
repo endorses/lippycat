@@ -24,21 +24,22 @@ Lippycat supports a fully distributed packet capture architecture that allows yo
 
 For single-machine deployments, tap mode combines local capture with processor capabilities:
 
-```
-Network Interface
-       ↓
-┌──────────────────────────┐
-│       Tap Node           │
-│                          │
-│ - Local capture          │
-│ - PCAP writing           │
-│ - Per-call PCAP (VoIP)   │
-│ - TUI server             │
-│ - Optional upstream      │
-└──────────────────────────┘
-       ↓         ↓
-    PCAP     TUI Clients
-   Files
+```mermaid
+flowchart TB
+    NI[Network Interface]
+    NI --> TAP
+
+    subgraph TAP[Tap Node]
+        direction TB
+        LC[Local capture]
+        PW[PCAP writing]
+        PC[Per-call PCAP]
+        TS[TUI server]
+        OU[Optional upstream]
+    end
+
+    TAP --> PCAP[PCAP Files]
+    TAP --> TUI[TUI Clients]
 ```
 
 **When to use Tap Mode:**
@@ -66,34 +67,51 @@ lc watch remote --addr localhost:50051 --insecure
 
 Simple architecture where hunters connect directly to a central processor:
 
-```
-┌─────────┐  ┌─────────┐  ┌─────────┐
-│Hunter 1 │  │Hunter 2 │  │Hunter 3 │
-└────┬────┘  └────┬────┘  └────┬────┘
-     │            │            │
-     └────────┬───┴────────────┘
-              │
-       ┌──────▼──────┐
-       │  Processor  │
-       │             │
-       │ - Aggregates│
-       │ - Filters   │
-       │ - Writes    │
-       └─────────────┘
+```mermaid
+flowchart TB
+    H1[Hunter 1]
+    H2[Hunter 2]
+    H3[Hunter 3]
+
+    H1 --> P
+    H2 --> P
+    H3 --> P
+
+    subgraph P[Processor]
+        direction TB
+        A[Aggregates]
+        F[Filters]
+        W[Writes]
+    end
 ```
 
 ### Hierarchical Mode
 
 Multi-tier architecture for geographic or network segmentation:
 
-```
-     Hunters         Edge         Regional       Central
-┌──────────┐      ┌──────┐      ┌──────┐      ┌──────┐
-│ Hunter 1 │─────→│      │      │      │      │      │
-└──────────┘      │ Edge │─────→│ Rgnl │─────→│ Ctrl │
-┌──────────┐      │      │      │      │      │      │
-│ Hunter 2 │─────→└──────┘      └──────┘      └──────┘
-└──────────┘
+```mermaid
+flowchart LR
+    subgraph Hunters
+        H1[Hunter 1]
+        H2[Hunter 2]
+    end
+
+    subgraph Edge
+        E[Edge Processor]
+    end
+
+    subgraph Regional
+        R[Regional Processor]
+    end
+
+    subgraph Central
+        C[Central Processor]
+    end
+
+    H1 --> E
+    H2 --> E
+    E --> R
+    R --> C
 ```
 
 ### Multi-Level Management (v0.3.0+)
@@ -109,13 +127,32 @@ Multi-tier architecture for geographic or network segmentation:
 - **Hierarchy depth limits** (max: 10 levels) for performance and latency control
 
 **Example Topology:**
-```
-TUI → Processor A (root, depth=0)
-        ├─ Hunter 1, Hunter 2
-        └─ Processor B (downstream, depth=1) ← TRANSPARENT PROXY
-            ├─ Hunter 3, Hunter 4
-            └─ Processor C (deeper, depth=2)
-                └─ Hunter 5, Hunter 6
+```mermaid
+flowchart TB
+    TUI[TUI Client]
+    TUI --> PA
+
+    subgraph PA[Processor A - root]
+        direction LR
+        H1[Hunter 1]
+        H2[Hunter 2]
+    end
+
+    PA --> PB
+
+    subgraph PB[Processor B - depth 1]
+        direction LR
+        H3[Hunter 3]
+        H4[Hunter 4]
+    end
+
+    PB --> PC
+
+    subgraph PC[Processor C - depth 2]
+        direction LR
+        H5[Hunter 5]
+        H6[Hunter 6]
+    end
 ```
 
 **How It Works:**
@@ -229,63 +266,63 @@ Processors receive packets from multiple hunters and optionally forward to upstr
 ### 1. Build
 
 ```bash
-go build -o lippycat
+make build
 ```
 
 ### 2. Basic Setup (Hub-and-Spoke)
 
 **Terminal 1 - Start Processor:**
 ```bash
-sudo ./lippycat process --listen :50051 --write-file /tmp/captured.pcap --stats
+sudo lc process --listen :50051 --write-file /tmp/captured.pcap --stats
 ```
 
 **Terminal 2 - Start Hunter:**
 ```bash
-sudo ./lippycat hunt --processor localhost:50051 --interface any
+sudo lc hunt --processor localhost:50051 --interface any
 ```
 
 ### 3. Hierarchical Setup (3-Tier)
 
 **Terminal 1 - Central Processor:**
 ```bash
-sudo ./lippycat process --listen :50053 --write-file /tmp/central.pcap
+sudo lc process --listen :50053 --write-file /tmp/central.pcap
 ```
 
 **Terminal 2 - Regional Processor:**
 ```bash
-sudo ./lippycat process --listen :50052 --upstream localhost:50053
+sudo lc process --listen :50052 --upstream localhost:50053
 ```
 
 **Terminal 3 - Edge Processor:**
 ```bash
-sudo ./lippycat process --listen :50051 --upstream localhost:50052
+sudo lc process --listen :50051 --upstream localhost:50052
 ```
 
 **Terminal 4 - Hunter:**
 ```bash
-sudo ./lippycat hunt --processor localhost:50051 --interface any
+sudo lc hunt --processor localhost:50051 --interface any
 ```
 
 ### 4. Multi-Level Management with TUI (v0.3.0+)
 
 **Terminal 1 - Root Processor:**
 ```bash
-sudo ./lippycat process --listen :50051 --write-file /tmp/root.pcap
+sudo lc process --listen :50051 --write-file /tmp/root.pcap
 ```
 
 **Terminal 2 - Downstream Processor:**
 ```bash
-sudo ./lippycat process --listen :50052 --upstream localhost:50051
+sudo lc process --listen :50052 --upstream localhost:50051
 ```
 
 **Terminal 3 - Hunter (connected to downstream):**
 ```bash
-sudo ./lippycat hunt --processor localhost:50052 --interface any
+sudo lc hunt --processor localhost:50052 --interface any
 ```
 
 **Terminal 4 - TUI (connected to root, can manage all hunters):**
 ```bash
-./lippycat tui --remote --processor localhost:50051
+lc watch remote --addr localhost:50051 --insecure
 ```
 
 **Features:**
@@ -303,7 +340,7 @@ sudo ./lippycat hunt --processor localhost:50052 --interface any
 #### Hunter
 
 ```bash
-lippycat hunt [flags]
+lc hunt [flags]
 ```
 
 | Flag | Description | Default |
@@ -319,7 +356,7 @@ lippycat hunt [flags]
 #### Processor
 
 ```bash
-lippycat process [flags]
+lc process [flags]
 ```
 
 | Flag | Description | Default |
@@ -514,7 +551,7 @@ The TUI includes a "Nodes" tab for monitoring hunters.
 
 **Access:**
 ```bash
-./lippycat tui
+lc watch
 # Press Tab key twice to switch to Nodes tab
 ```
 
@@ -550,10 +587,22 @@ The TUI includes a "Nodes" tab for monitoring hunters.
 
 Capture SIP/RTP traffic across multiple office locations:
 
-```
-Office A Hunters → Office A Processor ──┐
-Office B Hunters → Office B Processor ──┼→ Central Processor → Analysis
-Office C Hunters → Office C Processor ──┘
+```mermaid
+flowchart LR
+    subgraph OfficeA["Office A"]
+        HA[Hunters] --> PA[Processor]
+    end
+    subgraph OfficeB["Office B"]
+        HB[Hunters] --> PB[Processor]
+    end
+    subgraph OfficeC["Office C"]
+        HC[Hunters] --> PC[Processor]
+    end
+
+    PA --> Central[Central Processor]
+    PB --> Central
+    PC --> Central
+    Central --> Analysis
 ```
 
 **Configuration:**
@@ -571,10 +620,16 @@ processor:
 
 Capture from both DMZ and internal networks:
 
-```
-DMZ Hunters → DMZ Processor ────┐
-                                ├→ Internal Processor → PCAP
-Internal Hunters → Internal Processor
+```mermaid
+flowchart LR
+    subgraph DMZ
+        DH[DMZ Hunters] --> DP[DMZ Processor]
+    end
+    subgraph Internal
+        IH[Internal Hunters] --> IP[Internal Processor]
+    end
+    DP --> IP
+    IP --> PCAP
 ```
 
 **Security:** DMZ processor forwards through firewall to internal processor.
@@ -583,20 +638,30 @@ Internal Hunters → Internal Processor
 
 Global packet capture with regional aggregation:
 
-```
-US-West Hunters → US-West Processor ──┐
-US-East Hunters → US-East Processor ──┼→ Global HQ Processor
-EMEA Hunters → EMEA Processor ────────┘
+```mermaid
+flowchart LR
+    USW[US-West Hunters] --> USWP[US-West Processor]
+    USE[US-East Hunters] --> USEP[US-East Processor]
+    EMEA[EMEA Hunters] --> EMEAP[EMEA Processor]
+
+    USWP --> HQ[Global HQ Processor]
+    USEP --> HQ
+    EMEAP --> HQ
 ```
 
 ### 4. Load Distribution
 
 Distribute load across multiple edge processors:
 
-```
-Hunters 1-100   → Edge Processor 1 ──┐
-Hunters 101-200 → Edge Processor 2 ──┼→ Central Processor
-Hunters 201-300 → Edge Processor 3 ──┘
+```mermaid
+flowchart LR
+    H1["Hunters 1-100"] --> E1[Edge Processor 1]
+    H2["Hunters 101-200"] --> E2[Edge Processor 2]
+    H3["Hunters 201-300"] --> E3[Edge Processor 3]
+
+    E1 --> Central[Central Processor]
+    E2 --> Central
+    E3 --> Central
 ```
 
 ---
@@ -614,13 +679,13 @@ Hunters 201-300 → Edge Processor 3 ──┘
 
 **1. Build binary:**
 ```bash
-go build -o lippycat
-sudo cp lippycat /usr/local/bin/
+make build
+sudo cp lc /usr/local/bin/
 ```
 
 **2. Set capabilities (optional, avoids sudo):**
 ```bash
-sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lippycat
+sudo setcap cap_net_raw,cap_net_admin=eip /usr/local/bin/lc
 ```
 
 **3. Create configuration:**
@@ -640,7 +705,7 @@ After=network.target
 [Service]
 Type=simple
 User=lippycat
-ExecStart=/usr/local/bin/lippycat process --listen :50051 --write-file /var/log/lippycat/capture.pcap
+ExecStart=/usr/local/bin/lc process --listen :50051 --write-file /var/log/lippycat/capture.pcap
 Restart=always
 RestartSec=10
 
@@ -657,7 +722,7 @@ After=network.target
 [Service]
 Type=simple
 User=lippycat
-ExecStart=/usr/local/bin/lippycat hunt --processor processor.example.com:50051
+ExecStart=/usr/local/bin/lc hunt --processor processor.example.com:50051
 Restart=always
 RestartSec=10
 
@@ -693,7 +758,7 @@ sudo iptables -A OUTPUT -p tcp --dport 50051 -j ACCEPT
 **Check status:**
 ```bash
 # Processor stats (every 5s)
-sudo ./lippycat process --listen :50051 --stats
+sudo lc process --listen :50051 --stats
 
 # Hunter logs
 sudo journalctl -u lippycat-hunter -f
@@ -724,7 +789,7 @@ For high packet rates:
 
 ```bash
 # Hunter: larger batches, higher buffer
-sudo ./lippycat hunt \
+sudo lc hunt \
   --processor localhost:50051 \
   --batch-size 256 \
   --buffer-size 50000 \
@@ -737,7 +802,7 @@ For minimal latency:
 
 ```bash
 # Hunter: small batches, short timeout
-sudo ./lippycat hunt \
+sudo lc hunt \
   --processor localhost:50051 \
   --batch-size 16 \
   --batch-timeout 10
@@ -749,7 +814,7 @@ For limited memory:
 
 ```bash
 # Hunter: small buffer
-sudo ./lippycat hunt \
+sudo lc hunt \
   --processor localhost:50051 \
   --buffer-size 1000 \
   --batch-size 32
@@ -761,7 +826,7 @@ For many hunters:
 
 ```bash
 # Processor: increase limits
-sudo ./lippycat process \
+sudo lc process \
   --listen :50051 \
   --max-hunters 1000 \
   --stats=false
@@ -815,7 +880,7 @@ sudo ./lippycat process \
 4. Check interface:
    ```bash
    # List interfaces
-   ./lippycat interfaces
+   lc list interfaces
    ```
 
 ### Reconnection Issues

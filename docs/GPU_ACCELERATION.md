@@ -12,27 +12,34 @@ lippycat supports GPU-accelerated pattern matching and SIP parsing to achieve ma
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     GPU Accelerator                         │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────────────┐   │
-│  │  CUDA    │  │ OpenCL   │  │  CPU SIMD (Fallback)     │   │
-│  │ Backend  │  │ Backend  │  │  - AVX2                  │   │
-│  └──────────┘  └──────────┘  │  - SSE4.2                │   │
-│                              └──────────────────────────┘   │
-├─────────────────────────────────────────────────────────────┤
-│            Pattern Matching Engine                          │
-│  - Literal matching                                         │
-│  - Prefix matching                                          │
-│  - Substring search                                         │
-│  - Multi-pattern search                                     │
-├─────────────────────────────────────────────────────────────┤
-│            SIP-Specific Optimizations                       │
-│  - Call-ID extraction                                       │
-│  - Header parsing                                           │
-│  - Method detection                                         │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Backends
+        direction LR
+        CUDA[CUDA Backend]
+        OpenCL[OpenCL Backend]
+        SIMD["CPU SIMD Fallback<br/>AVX2 / SSE4.2"]
+    end
+
+    subgraph PME[Pattern Matching Engine]
+        direction LR
+        PM1[Literal matching]
+        PM2[Prefix matching]
+        PM3[Substring search]
+        PM4[Multi-pattern search]
+    end
+
+    subgraph SIP[SIP-Specific Optimizations]
+        direction LR
+        S1[Call-ID extraction]
+        S2[Header parsing]
+        S3[Method detection]
+    end
+
+    CUDA --> PM1
+    OpenCL --> PM1
+    SIMD --> PM1
+    PM1 --> S1
 ```
 
 ## Performance

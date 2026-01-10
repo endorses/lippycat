@@ -22,10 +22,10 @@ The lippycat TUI supports **remote capture mode**, allowing you to monitor distr
 1. **Running Nodes**: You need at least one processor or hunter node running:
    ```bash
    # Start a processor node
-   lippycat process --listen 0.0.0.0:50051
+   lc process --listen 0.0.0.0:50051
 
    # Start a hunter node
-   sudo lippycat hunt --interface eth0 --processor processor-host:50051
+   sudo lc hunt --interface eth0 --processor processor-host:50051
    ```
 
 2. **Network Access**: Ensure TUI host can reach nodes on configured ports (default: 50051)
@@ -36,17 +36,17 @@ The lippycat TUI supports **remote capture mode**, allowing you to monitor distr
 
 ```bash
 # Using default nodes file location (~/.config/lippycat/nodes.yaml or ./nodes.yaml)
-lippycat tui --remote
+lc watch remote
 
 # Using custom nodes file path
-lippycat tui --remote --nodes-file /path/to/nodes.yaml
+lc watch remote --nodes-file /path/to/nodes.yaml
 ```
 
 #### Option 2: Launch and Configure Interactively
 
 ```bash
 # Start in remote mode without nodes file
-lippycat tui --remote
+lc watch remote
 
 # Then add nodes via the TUI:
 # 1. Navigate to "Nodes" tab
@@ -320,10 +320,10 @@ journalctl -u lippycat-hunter -f
 sudo tcpdump -i eth0 -c 10
 
 # Test without BPF filter
-lippycat tui --remote  # No filter
+lc watch remote  # No filter
 
-# Check processor statistics
-lippycat debug health
+# Check processor status
+lc show status -P processor-host:50051 --insecure
 ```
 
 ### High Latency
@@ -342,7 +342,7 @@ lippycat debug health
 - Increase processor resources (CPU/RAM)
 - Use latency-optimized performance mode on hunters:
   ```bash
-  sudo lippycat hunt --tcp-performance-mode latency --processor ...
+  sudo lc hunt --tcp-performance-mode latency --processor ...
   ```
 
 ### Node Disconnections
@@ -485,21 +485,21 @@ Recommended limits:
 
 1. **Use BPF Filters**: Reduce traffic at hunter level
    ```bash
-   sudo lippycat hunt --filter "port 5060" --processor ...
+   sudo lc hunt --filter "port 5060" --processor ...
    ```
 
 2. **Adjust Buffer Sizes**: Tune TUI buffer for your workload
    ```bash
-   lippycat tui --remote --buffer-size 50000
+   lc watch remote --buffer-size 50000
    ```
 
 3. **Performance Modes**: Use appropriate mode for hunters
    ```bash
    # High packet rate
-   sudo lippycat hunt --tcp-performance-mode throughput ...
+   sudo lc hunt --tcp-performance-mode throughput ...
 
    # Low latency required
-   sudo lippycat hunt --tcp-performance-mode latency ...
+   sudo lc hunt --tcp-performance-mode latency ...
    ```
 
 ## Best Practices

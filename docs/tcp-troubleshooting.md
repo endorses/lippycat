@@ -19,7 +19,7 @@ This guide provides comprehensive troubleshooting procedures for TCP SIP capture
 sudo tcpdump -i any -n port 5060 and tcp
 
 # Verify lippycat is processing TCP packets
-sudo ./lippycat sniff voip --interface any --tcp-performance-mode latency
+sudo lc sniff voip --interface any --tcp-performance-mode latency
 ```
 
 **Common Causes & Solutions:**
@@ -42,7 +42,7 @@ sudo ./lippycat sniff voip --interface any --tcp-performance-mode latency
 ```bash
 # Enable debug logging
 export LOG_LEVEL=debug
-sudo ./lippycat sniff voip --tcp-performance-mode latency
+sudo lc sniff voip --tcp-performance-mode latency
 
 # Check TCP assembler health
 # (Use debugging commands - see section below)
@@ -165,10 +165,10 @@ go tool pprof http://localhost:6060/debug/pprof/heap
 ls -la ~/.lippycat.yaml
 
 # Test with explicit config
-sudo ./lippycat sniff voip --config /path/to/config.yaml
+sudo lc sniff voip --config /path/to/config.yaml
 
 # Check config validation
-sudo ./lippycat sniff voip --tcp-performance-mode invalid  # Should show error
+sudo lc sniff voip --tcp-performance-mode invalid  # Should show error
 ```
 
 **Solutions:**
@@ -186,10 +186,10 @@ sudo ./lippycat sniff voip --tcp-performance-mode invalid  # Should show error
 **Solutions:**
 ```bash
 # Run with sudo
-sudo ./lippycat sniff voip
+sudo lc sniff voip
 
 # Or set capabilities (Linux)
-sudo setcap cap_net_raw,cap_net_admin=eip ./lippycat
+sudo setcap cap_net_raw,cap_net_admin=eip lc
 ```
 
 #### Issue: Interface not found
@@ -203,7 +203,7 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./lippycat
 ip link show
 
 # Test with 'any' interface
-sudo ./lippycat sniff voip --interface any
+sudo lc sniff voip --interface any
 ```
 
 ## Diagnostic Tools and Commands
@@ -232,7 +232,7 @@ Enable debug logging for detailed troubleshooting:
 export LOG_LEVEL=debug
 
 # Capture logs to file
-sudo ./lippycat sniff voip 2> lippycat-debug.log
+sudo lc sniff voip 2> lippycat-debug.log
 
 # Monitor logs in real-time
 tail -f lippycat-debug.log | grep -i "tcp\|sip\|error"
@@ -310,7 +310,7 @@ voip:
 2. **Check Resources:** Verify system memory/CPU availability
 3. **Restart with Conservative Settings:**
    ```bash
-   sudo ./lippycat sniff voip --tcp-performance-mode memory --max-goroutines 100
+   sudo lc sniff voip --tcp-performance-mode memory --max-goroutines 100
    ```
 
 ### Data Recovery

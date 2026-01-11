@@ -20,51 +20,43 @@ var remoteCmd = &cobra.Command{
 	Long: `Start the TUI in remote monitoring mode to connect to distributed
 hunter and processor nodes.
 
+TLS is enabled by default. Use --insecure for local testing without TLS.
+
 The nodes configuration is loaded from a YAML file. Default locations:
   1. ./nodes.yaml
   2. ~/.config/lippycat/nodes.yaml
 
 Examples:
-  lc watch remote
-  lc watch remote --nodes-file /path/to/nodes.yaml
-  lc watch remote --tls --tls-ca ca.crt`,
+  lc watch remote --tls-ca ca.crt
+  lc watch remote -n /path/to/nodes.yaml --tls-ca ca.crt
+  lc watch remote --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+  lc watch remote --insecure  # Local testing only`,
 	Run: runRemote,
 }
 
 var (
 	remoteNodesFile string
-	remoteInsecure  bool
-	// TLS flags
-	remoteTLSEnabled  bool
-	remoteTLSCAFile   string
-	remoteTLSCertFile string
-	remoteTLSKeyFile  string
 )
 
 func runRemote(cmd *cobra.Command, args []string) {
-	// Override TLS config with command-line flags ONLY if explicitly provided
-	if cmd.Flags().Changed("insecure") && remoteInsecure {
-		viper.Set("tui.tls.enabled", false)
-	}
-	if cmd.Flags().Changed("tls") {
-		viper.Set("tui.tls.enabled", remoteTLSEnabled)
-	}
-	if cmd.Flags().Changed("tls-ca") {
-		viper.Set("tui.tls.ca_file", remoteTLSCAFile)
-	}
-	if cmd.Flags().Changed("tls-cert") {
-		viper.Set("tui.tls.cert_file", remoteTLSCertFile)
-	}
-	if cmd.Flags().Changed("tls-key") {
-		viper.Set("tui.tls.key_file", remoteTLSKeyFile)
+	// Check production mode
+	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
+	if productionMode && insecureAllowed {
+		fmt.Fprintln(os.Stderr, "Error: LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
+		os.Exit(1)
 	}
 
-	// Auto-enable TLS if any TLS certificate files are provided
-	// This allows users to just provide --tls-ca (or --tls-cert/--tls-key) without needing --tls
-	if !cmd.Flags().Changed("tls") && !remoteInsecure {
-		if cmd.Flags().Changed("tls-ca") || cmd.Flags().Changed("tls-cert") || cmd.Flags().Changed("tls-key") {
-			viper.Set("tui.tls.enabled", true)
-		}
+	// Set TLS configuration in viper for use by TUI components
+	configureTLSViper(cmd)
+
+	// Validate TLS configuration when TLS is enabled (remote mode requires server connection)
+	tlsEnabled := !insecureAllowed
+	if tlsEnabled && tlsCAFile == "" && !tlsSkipVerify {
+		fmt.Fprintln(os.Stderr, "Error: TLS is enabled but no CA certificate provided")
+		fmt.Fprintln(os.Stderr, "For TLS connections, provide a CA certificate: --tls-ca=/path/to/ca.crt")
+		fmt.Fprintln(os.Stderr, "Or skip verification (INSECURE - testing only): --tls-skip-verify")
+		fmt.Fprintln(os.Stderr, "Or disable TLS entirely (NOT RECOMMENDED): --insecure")
+		os.Exit(1)
 	}
 
 	// Disable logging to prevent corrupting TUI display
@@ -86,7 +78,7 @@ func runRemote(cmd *cobra.Command, args []string) {
 		false,           // promiscuous - not applicable
 		true,            // startInRemoteMode
 		remoteNodesFile, // nodesFilePath
-		remoteInsecure,  // insecure
+		insecureAllowed, // insecure
 	)
 
 	// Start bubbletea program with mouse support
@@ -106,11 +98,4 @@ func runRemote(cmd *cobra.Command, args []string) {
 
 func init() {
 	remoteCmd.Flags().StringVarP(&remoteNodesFile, "nodes-file", "n", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
-	remoteCmd.Flags().BoolVar(&remoteInsecure, "insecure", false, "allow insecure connections (no TLS) for testing/development")
-
-	// TLS configuration
-	remoteCmd.Flags().BoolVarP(&remoteTLSEnabled, "tls", "T", false, "enable TLS encryption for remote connections")
-	remoteCmd.Flags().StringVar(&remoteTLSCAFile, "tls-ca", "", "path to CA certificate for server verification")
-	remoteCmd.Flags().StringVar(&remoteTLSCertFile, "tls-cert", "", "path to client TLS certificate (for mutual TLS)")
-	remoteCmd.Flags().StringVar(&remoteTLSKeyFile, "tls-key", "", "path to client TLS key (for mutual TLS)")
 }

@@ -42,6 +42,9 @@ var (
 )
 
 func runLive(cmd *cobra.Command, args []string) {
+	// Set TLS configuration in viper for use by TUI components (if user switches to remote mode)
+	configureTLSViper(cmd)
+
 	// Disable logging to prevent corrupting TUI display
 	logger.Disable()
 	defer logger.Enable()
@@ -54,15 +57,16 @@ func runLive(cmd *cobra.Command, args []string) {
 
 	// Create TUI model for live capture mode
 	// Live mode: no pcapFile, not remote, no nodesFile
+	// Pass insecureAllowed so TLS settings work if user switches to remote mode in TUI
 	model := tui.NewModel(
 		bufferSize,
 		liveInterfaces,
 		liveFilter,
 		"", // pcapFile - empty for live mode
 		livePromiscuous,
-		false, // startInRemoteMode
-		"",    // nodesFilePath
-		false, // insecure - not applicable for live mode
+		false,           // startInRemoteMode
+		"",              // nodesFilePath
+		insecureAllowed, // insecure - passed for remote mode switching
 	)
 
 	// Start bubbletea program with mouse support

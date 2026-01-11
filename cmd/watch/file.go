@@ -47,6 +47,9 @@ func runFile(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	// Set TLS configuration in viper for use by TUI components (if user switches to remote mode)
+	configureTLSViper(cmd)
+
 	// Validate TLS keylog if specified
 	if fileTLSKeylog != "" {
 		decryptConfig := tls.DecryptConfig{
@@ -76,15 +79,16 @@ func runFile(cmd *cobra.Command, args []string) {
 	}
 
 	// Create TUI model for offline file mode
+	// Pass insecureAllowed so TLS settings work if user switches to remote mode in TUI
 	model := tui.NewModel(
 		bufferSize,
 		"", // interfaceName - not used for file mode
 		fileFilter,
-		fileReadFile, // pcapFile
-		false,        // promiscuous - not applicable
-		false,        // startInRemoteMode
-		"",           // nodesFilePath
-		false,        // insecure
+		fileReadFile,    // pcapFile
+		false,           // promiscuous - not applicable
+		false,           // startInRemoteMode
+		"",              // nodesFilePath
+		insecureAllowed, // insecure - passed for remote mode switching
 	)
 
 	// Start bubbletea program with mouse support

@@ -71,11 +71,11 @@ func BuildServerCredentials(config ServerConfig) (credentials.TransportCredentia
 		tlsConfig.ClientCAs = certPool
 		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 
-		logger.Info("Mutual TLS enabled - requiring client certificates",
+		logger.Debug("Mutual TLS enabled - requiring client certificates",
 			"ca_file", config.CAFile)
 	}
 
-	logger.Info("TLS server credentials loaded",
+	logger.Debug("TLS server credentials loaded",
 		"cert", config.CertFile,
 		"key", config.KeyFile,
 		"min_version", "TLS 1.3",
@@ -123,7 +123,7 @@ func BuildClientCredentials(config ClientConfig) (credentials.TransportCredentia
 		if !certPool.AppendCertsFromPEM(caCert) {
 			return nil, fmt.Errorf("failed to parse CA certificate")
 		}
-		logger.Info("Loaded CA certificate", "file", config.CAFile)
+		logger.Debug("Loaded CA certificate", "file", config.CAFile)
 	} else if config.UseSystemCertPool {
 		// Use system certificate pool as fallback
 		var err error
@@ -132,7 +132,7 @@ func BuildClientCredentials(config ClientConfig) (credentials.TransportCredentia
 			logger.Warn("Failed to load system cert pool, using empty pool", "error", err)
 			certPool = x509.NewCertPool()
 		} else {
-			logger.Info("Using system certificate pool")
+			logger.Debug("Using system certificate pool")
 		}
 	}
 
@@ -147,7 +147,7 @@ func BuildClientCredentials(config ClientConfig) (credentials.TransportCredentia
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
-		logger.Info("Loaded client certificate for mutual TLS",
+		logger.Debug("Loaded client certificate for mutual TLS",
 			"cert", config.CertFile,
 			"key", config.KeyFile)
 	} else if config.CertFile != "" || config.KeyFile != "" {
@@ -155,7 +155,7 @@ func BuildClientCredentials(config ClientConfig) (credentials.TransportCredentia
 		return nil, fmt.Errorf("both cert_file and key_file must be provided for mutual TLS")
 	}
 
-	logger.Info("TLS client credentials configured",
+	logger.Debug("TLS client credentials configured",
 		"has_ca", config.CAFile != "",
 		"has_client_cert", config.CertFile != "",
 		"skip_verify", config.SkipVerify,

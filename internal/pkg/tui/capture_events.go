@@ -443,6 +443,8 @@ func (m Model) handleProcessorConnectedMsg(msg ProcessorConnectedMsg) (Model, te
 		proc.Client = msg.Client
 		proc.FailureCount = 0
 		proc.TLSInsecure = msg.TLSInsecure
+		proc.Reachable = true // Mark as reachable since connection succeeded
+		proc.UnreachableReason = ""
 
 		// Store processor info from GetTopology call
 		if msg.ProcessorID != "" {
@@ -490,6 +492,12 @@ func (m Model) handleProcessorDisconnectedMsg(msg ProcessorDisconnectedMsg) (Mod
 		proc.State = store.ProcessorStateFailed
 		proc.FailureCount++
 		proc.LastDisconnectedAt = time.Now() // Track when disconnected for cleanup
+		proc.Reachable = false               // Mark as unreachable since connection failed
+		if msg.Error != nil {
+			proc.UnreachableReason = msg.Error.Error()
+		} else {
+			proc.UnreachableReason = "connection lost"
+		}
 
 		// Clean up old client
 		if proc.Client != nil {

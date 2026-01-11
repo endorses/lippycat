@@ -110,6 +110,9 @@ message PacketMetadata {
 
     // Email-specific metadata (if applicable)
     EmailMetadata email = 11;
+
+    // DNS-specific metadata (if applicable)
+    DNSMetadata dns = 12;
 }
 
 // SIPMetadata for SIP packets
@@ -158,6 +161,54 @@ message RTPMetadata {
 
     // Timestamp
     uint32 timestamp = 4;
+}
+
+// DNSMetadata for DNS packets
+message DNSMetadata {
+    // Header fields
+    uint32 transaction_id = 1;  // DNS transaction ID for query/response correlation
+    bool is_response = 2;       // True if response, false if query
+    string opcode = 3;          // Operation type (QUERY, IQUERY, STATUS, NOTIFY, UPDATE, DSO)
+    string response_code = 4;   // Response code (NOERROR, NXDOMAIN, SERVFAIL, etc.)
+
+    // Header flags
+    bool authoritative = 5;       // AA: Authoritative Answer
+    bool truncated = 6;           // TC: Message truncated
+    bool recursion_desired = 7;   // RD: Recursion Desired
+    bool recursion_available = 8; // RA: Recursion Available
+    bool authenticated_data = 9;  // AD: Authenticated Data (DNSSEC)
+    bool checking_disabled = 10;  // CD: Checking Disabled (DNSSEC)
+
+    // Record counts
+    uint32 question_count = 11;   // Number of questions
+    uint32 answer_count = 12;     // Number of answer records
+    uint32 authority_count = 13;  // Number of authority records
+    uint32 additional_count = 14; // Number of additional records
+
+    // Query information (parsed from question section)
+    string query_name = 15;  // Queried domain name (e.g., "example.com")
+    string query_type = 16;  // Record type (A, AAAA, MX, CNAME, TXT, etc.)
+    string query_class = 17; // Query class (usually IN for Internet)
+
+    // Response information (parsed from answer section)
+    repeated DNSAnswer answers = 18; // Parsed answer records
+
+    // Correlation and timing
+    int64 query_response_time_ms = 19; // Response latency (only for correlated responses)
+    bool correlated_query = 20;        // True if response was correlated with a query
+
+    // Security analysis (tunneling detection)
+    double tunneling_score = 21; // DNS tunneling probability (0.0-1.0)
+    double entropy_score = 22;   // Entropy of query name (for tunneling detection)
+}
+
+// DNSAnswer represents a single DNS answer record
+message DNSAnswer {
+    string name = 1;   // Domain name
+    string type = 2;   // Record type (A, AAAA, CNAME, etc.)
+    string class = 3;  // Record class (usually IN)
+    uint32 ttl = 4;    // Time to live in seconds
+    string data = 5;   // Answer data (IP address, CNAME target, etc.)
 }
 
 // EmailMetadata for SMTP/email packets

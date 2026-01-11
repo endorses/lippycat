@@ -316,7 +316,9 @@ type PacketMetadata struct {
 	// Generic key-value details for protocol-specific data
 	Details map[string]string `protobuf:"bytes,10,rep,name=details,proto3" json:"details,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Email-specific metadata (if applicable)
-	Email         *EmailMetadata `protobuf:"bytes,11,opt,name=email,proto3" json:"email,omitempty"`
+	Email *EmailMetadata `protobuf:"bytes,11,opt,name=email,proto3" json:"email,omitempty"`
+	// DNS-specific metadata (if applicable)
+	Dns           *DNSMetadata `protobuf:"bytes,12,opt,name=dns,proto3" json:"dns,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -424,6 +426,13 @@ func (x *PacketMetadata) GetDetails() map[string]string {
 func (x *PacketMetadata) GetEmail() *EmailMetadata {
 	if x != nil {
 		return x.Email
+	}
+	return nil
+}
+
+func (x *PacketMetadata) GetDns() *DNSMetadata {
+	if x != nil {
+		return x.Dns
 	}
 	return nil
 }
@@ -628,6 +637,303 @@ func (x *RTPMetadata) GetTimestamp() uint32 {
 	return 0
 }
 
+// DNSMetadata for DNS packets
+type DNSMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Header fields
+	TransactionId uint32 `protobuf:"varint,1,opt,name=transaction_id,json=transactionId,proto3" json:"transaction_id,omitempty"` // DNS transaction ID for query/response correlation
+	IsResponse    bool   `protobuf:"varint,2,opt,name=is_response,json=isResponse,proto3" json:"is_response,omitempty"`          // True if response, false if query
+	Opcode        string `protobuf:"bytes,3,opt,name=opcode,proto3" json:"opcode,omitempty"`                                     // Operation type (QUERY, IQUERY, STATUS, NOTIFY, UPDATE, DSO)
+	ResponseCode  string `protobuf:"bytes,4,opt,name=response_code,json=responseCode,proto3" json:"response_code,omitempty"`     // Response code (NOERROR, NXDOMAIN, SERVFAIL, etc.)
+	// Header flags
+	Authoritative      bool `protobuf:"varint,5,opt,name=authoritative,proto3" json:"authoritative,omitempty"`                                     // AA: Authoritative Answer
+	Truncated          bool `protobuf:"varint,6,opt,name=truncated,proto3" json:"truncated,omitempty"`                                             // TC: Message truncated
+	RecursionDesired   bool `protobuf:"varint,7,opt,name=recursion_desired,json=recursionDesired,proto3" json:"recursion_desired,omitempty"`       // RD: Recursion Desired
+	RecursionAvailable bool `protobuf:"varint,8,opt,name=recursion_available,json=recursionAvailable,proto3" json:"recursion_available,omitempty"` // RA: Recursion Available
+	AuthenticatedData  bool `protobuf:"varint,9,opt,name=authenticated_data,json=authenticatedData,proto3" json:"authenticated_data,omitempty"`    // AD: Authenticated Data (DNSSEC)
+	CheckingDisabled   bool `protobuf:"varint,10,opt,name=checking_disabled,json=checkingDisabled,proto3" json:"checking_disabled,omitempty"`      // CD: Checking Disabled (DNSSEC)
+	// Record counts
+	QuestionCount   uint32 `protobuf:"varint,11,opt,name=question_count,json=questionCount,proto3" json:"question_count,omitempty"`       // Number of questions
+	AnswerCount     uint32 `protobuf:"varint,12,opt,name=answer_count,json=answerCount,proto3" json:"answer_count,omitempty"`             // Number of answer records
+	AuthorityCount  uint32 `protobuf:"varint,13,opt,name=authority_count,json=authorityCount,proto3" json:"authority_count,omitempty"`    // Number of authority records
+	AdditionalCount uint32 `protobuf:"varint,14,opt,name=additional_count,json=additionalCount,proto3" json:"additional_count,omitempty"` // Number of additional records
+	// Query information (parsed from question section)
+	QueryName  string `protobuf:"bytes,15,opt,name=query_name,json=queryName,proto3" json:"query_name,omitempty"`    // Queried domain name (e.g., "example.com")
+	QueryType  string `protobuf:"bytes,16,opt,name=query_type,json=queryType,proto3" json:"query_type,omitempty"`    // Record type (A, AAAA, MX, CNAME, TXT, etc.)
+	QueryClass string `protobuf:"bytes,17,opt,name=query_class,json=queryClass,proto3" json:"query_class,omitempty"` // Query class (usually IN for Internet)
+	// Response information (parsed from answer section)
+	Answers []*DNSAnswer `protobuf:"bytes,18,rep,name=answers,proto3" json:"answers,omitempty"` // Parsed answer records
+	// Correlation and timing
+	QueryResponseTimeMs int64 `protobuf:"varint,19,opt,name=query_response_time_ms,json=queryResponseTimeMs,proto3" json:"query_response_time_ms,omitempty"` // Response latency (only for correlated responses)
+	CorrelatedQuery     bool  `protobuf:"varint,20,opt,name=correlated_query,json=correlatedQuery,proto3" json:"correlated_query,omitempty"`                 // True if response was correlated with a query
+	// Security analysis (tunneling detection)
+	TunnelingScore float64 `protobuf:"fixed64,21,opt,name=tunneling_score,json=tunnelingScore,proto3" json:"tunneling_score,omitempty"` // DNS tunneling probability (0.0-1.0)
+	EntropyScore   float64 `protobuf:"fixed64,22,opt,name=entropy_score,json=entropyScore,proto3" json:"entropy_score,omitempty"`       // Entropy of query name (for tunneling detection)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DNSMetadata) Reset() {
+	*x = DNSMetadata{}
+	mi := &file_data_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DNSMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DNSMetadata) ProtoMessage() {}
+
+func (x *DNSMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DNSMetadata.ProtoReflect.Descriptor instead.
+func (*DNSMetadata) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DNSMetadata) GetTransactionId() uint32 {
+	if x != nil {
+		return x.TransactionId
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetIsResponse() bool {
+	if x != nil {
+		return x.IsResponse
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetOpcode() string {
+	if x != nil {
+		return x.Opcode
+	}
+	return ""
+}
+
+func (x *DNSMetadata) GetResponseCode() string {
+	if x != nil {
+		return x.ResponseCode
+	}
+	return ""
+}
+
+func (x *DNSMetadata) GetAuthoritative() bool {
+	if x != nil {
+		return x.Authoritative
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetRecursionDesired() bool {
+	if x != nil {
+		return x.RecursionDesired
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetRecursionAvailable() bool {
+	if x != nil {
+		return x.RecursionAvailable
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetAuthenticatedData() bool {
+	if x != nil {
+		return x.AuthenticatedData
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetCheckingDisabled() bool {
+	if x != nil {
+		return x.CheckingDisabled
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetQuestionCount() uint32 {
+	if x != nil {
+		return x.QuestionCount
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetAnswerCount() uint32 {
+	if x != nil {
+		return x.AnswerCount
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetAuthorityCount() uint32 {
+	if x != nil {
+		return x.AuthorityCount
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetAdditionalCount() uint32 {
+	if x != nil {
+		return x.AdditionalCount
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetQueryName() string {
+	if x != nil {
+		return x.QueryName
+	}
+	return ""
+}
+
+func (x *DNSMetadata) GetQueryType() string {
+	if x != nil {
+		return x.QueryType
+	}
+	return ""
+}
+
+func (x *DNSMetadata) GetQueryClass() string {
+	if x != nil {
+		return x.QueryClass
+	}
+	return ""
+}
+
+func (x *DNSMetadata) GetAnswers() []*DNSAnswer {
+	if x != nil {
+		return x.Answers
+	}
+	return nil
+}
+
+func (x *DNSMetadata) GetQueryResponseTimeMs() int64 {
+	if x != nil {
+		return x.QueryResponseTimeMs
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetCorrelatedQuery() bool {
+	if x != nil {
+		return x.CorrelatedQuery
+	}
+	return false
+}
+
+func (x *DNSMetadata) GetTunnelingScore() float64 {
+	if x != nil {
+		return x.TunnelingScore
+	}
+	return 0
+}
+
+func (x *DNSMetadata) GetEntropyScore() float64 {
+	if x != nil {
+		return x.EntropyScore
+	}
+	return 0
+}
+
+// DNSAnswer represents a single DNS answer record
+type DNSAnswer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`   // Domain name
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`   // Record type (A, AAAA, CNAME, etc.)
+	Class         string                 `protobuf:"bytes,3,opt,name=class,proto3" json:"class,omitempty"` // Record class (usually IN)
+	Ttl           uint32                 `protobuf:"varint,4,opt,name=ttl,proto3" json:"ttl,omitempty"`    // Time to live in seconds
+	Data          string                 `protobuf:"bytes,5,opt,name=data,proto3" json:"data,omitempty"`   // Answer data (IP address, CNAME target, etc.)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DNSAnswer) Reset() {
+	*x = DNSAnswer{}
+	mi := &file_data_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DNSAnswer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DNSAnswer) ProtoMessage() {}
+
+func (x *DNSAnswer) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DNSAnswer.ProtoReflect.Descriptor instead.
+func (*DNSAnswer) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DNSAnswer) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DNSAnswer) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *DNSAnswer) GetClass() string {
+	if x != nil {
+		return x.Class
+	}
+	return ""
+}
+
+func (x *DNSAnswer) GetTtl() uint32 {
+	if x != nil {
+		return x.Ttl
+	}
+	return 0
+}
+
+func (x *DNSAnswer) GetData() string {
+	if x != nil {
+		return x.Data
+	}
+	return ""
+}
+
 // EmailMetadata for SMTP/email packets
 type EmailMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -651,7 +957,7 @@ type EmailMetadata struct {
 
 func (x *EmailMetadata) Reset() {
 	*x = EmailMetadata{}
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +969,7 @@ func (x *EmailMetadata) String() string {
 func (*EmailMetadata) ProtoMessage() {}
 
 func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +982,7 @@ func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmailMetadata.ProtoReflect.Descriptor instead.
 func (*EmailMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{5}
+	return file_data_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *EmailMetadata) GetMailFrom() string {
@@ -745,7 +1051,7 @@ type BatchStats struct {
 
 func (x *BatchStats) Reset() {
 	*x = BatchStats{}
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -757,7 +1063,7 @@ func (x *BatchStats) String() string {
 func (*BatchStats) ProtoMessage() {}
 
 func (x *BatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -770,7 +1076,7 @@ func (x *BatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchStats.ProtoReflect.Descriptor instead.
 func (*BatchStats) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{6}
+	return file_data_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *BatchStats) GetTotalCaptured() uint64 {
@@ -816,7 +1122,7 @@ type StreamControl struct {
 
 func (x *StreamControl) Reset() {
 	*x = StreamControl{}
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -828,7 +1134,7 @@ func (x *StreamControl) String() string {
 func (*StreamControl) ProtoMessage() {}
 
 func (x *StreamControl) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -841,7 +1147,7 @@ func (x *StreamControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamControl.ProtoReflect.Descriptor instead.
 func (*StreamControl) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{7}
+	return file_data_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *StreamControl) GetAckSequence() uint64 {
@@ -886,7 +1192,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -898,7 +1204,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -911,7 +1217,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{8}
+	return file_data_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SubscribeRequest) GetHunterIds() []string {
@@ -967,7 +1273,7 @@ type CorrelatedCallUpdate struct {
 
 func (x *CorrelatedCallUpdate) Reset() {
 	*x = CorrelatedCallUpdate{}
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -979,7 +1285,7 @@ func (x *CorrelatedCallUpdate) String() string {
 func (*CorrelatedCallUpdate) ProtoMessage() {}
 
 func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -992,7 +1298,7 @@ func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CorrelatedCallUpdate.ProtoReflect.Descriptor instead.
 func (*CorrelatedCallUpdate) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{9}
+	return file_data_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CorrelatedCallUpdate) GetCorrelationId() string {
@@ -1078,7 +1384,7 @@ type CallLegInfo struct {
 
 func (x *CallLegInfo) Reset() {
 	*x = CallLegInfo{}
-	mi := &file_data_proto_msgTypes[10]
+	mi := &file_data_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1090,7 +1396,7 @@ func (x *CallLegInfo) String() string {
 func (*CallLegInfo) ProtoMessage() {}
 
 func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[10]
+	mi := &file_data_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1103,7 +1409,7 @@ func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallLegInfo.ProtoReflect.Descriptor instead.
 func (*CallLegInfo) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{10}
+	return file_data_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CallLegInfo) GetCallId() string {
@@ -1207,7 +1513,7 @@ type TLSSessionKeys struct {
 
 func (x *TLSSessionKeys) Reset() {
 	*x = TLSSessionKeys{}
-	mi := &file_data_proto_msgTypes[11]
+	mi := &file_data_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1219,7 +1525,7 @@ func (x *TLSSessionKeys) String() string {
 func (*TLSSessionKeys) ProtoMessage() {}
 
 func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[11]
+	mi := &file_data_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1232,7 +1538,7 @@ func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TLSSessionKeys.ProtoReflect.Descriptor instead.
 func (*TLSSessionKeys) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{11}
+	return file_data_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TLSSessionKeys) GetClientRandom() []byte {
@@ -1370,7 +1676,7 @@ const file_data_proto_rawDesc = "" +
 	"\x0einterface_name\x18\b \x01(\tR\rinterfaceName\x12,\n" +
 	"\x12matched_filter_ids\x18\t \x03(\tR\x10matchedFilterIds\x128\n" +
 	"\btls_keys\x18\n" +
-	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\"\xd4\x03\n" +
+	" \x01(\v2\x1d.lippycat.data.TLSSessionKeysR\atlsKeys\"\x82\x04\n" +
 	"\x0ePacketMetadata\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x15\n" +
 	"\x06src_ip\x18\x02 \x01(\tR\x05srcIp\x12\x15\n" +
@@ -1383,7 +1689,8 @@ const file_data_proto_rawDesc = "" +
 	"\x04info\x18\t \x01(\tR\x04info\x12D\n" +
 	"\adetails\x18\n" +
 	" \x03(\v2*.lippycat.data.PacketMetadata.DetailsEntryR\adetails\x122\n" +
-	"\x05email\x18\v \x01(\v2\x1c.lippycat.data.EmailMetadataR\x05email\x1a:\n" +
+	"\x05email\x18\v \x01(\v2\x1c.lippycat.data.EmailMetadataR\x05email\x12,\n" +
+	"\x03dns\x18\f \x01(\v2\x1a.lippycat.data.DNSMetadataR\x03dns\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x02\n" +
@@ -1403,7 +1710,41 @@ const file_data_proto_rawDesc = "" +
 	"\x04ssrc\x18\x01 \x01(\rR\x04ssrc\x12!\n" +
 	"\fpayload_type\x18\x02 \x01(\rR\vpayloadType\x12\x1a\n" +
 	"\bsequence\x18\x03 \x01(\rR\bsequence\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\rR\ttimestamp\"\xe5\x01\n" +
+	"\ttimestamp\x18\x04 \x01(\rR\ttimestamp\"\xef\x06\n" +
+	"\vDNSMetadata\x12%\n" +
+	"\x0etransaction_id\x18\x01 \x01(\rR\rtransactionId\x12\x1f\n" +
+	"\vis_response\x18\x02 \x01(\bR\n" +
+	"isResponse\x12\x16\n" +
+	"\x06opcode\x18\x03 \x01(\tR\x06opcode\x12#\n" +
+	"\rresponse_code\x18\x04 \x01(\tR\fresponseCode\x12$\n" +
+	"\rauthoritative\x18\x05 \x01(\bR\rauthoritative\x12\x1c\n" +
+	"\ttruncated\x18\x06 \x01(\bR\ttruncated\x12+\n" +
+	"\x11recursion_desired\x18\a \x01(\bR\x10recursionDesired\x12/\n" +
+	"\x13recursion_available\x18\b \x01(\bR\x12recursionAvailable\x12-\n" +
+	"\x12authenticated_data\x18\t \x01(\bR\x11authenticatedData\x12+\n" +
+	"\x11checking_disabled\x18\n" +
+	" \x01(\bR\x10checkingDisabled\x12%\n" +
+	"\x0equestion_count\x18\v \x01(\rR\rquestionCount\x12!\n" +
+	"\fanswer_count\x18\f \x01(\rR\vanswerCount\x12'\n" +
+	"\x0fauthority_count\x18\r \x01(\rR\x0eauthorityCount\x12)\n" +
+	"\x10additional_count\x18\x0e \x01(\rR\x0fadditionalCount\x12\x1d\n" +
+	"\n" +
+	"query_name\x18\x0f \x01(\tR\tqueryName\x12\x1d\n" +
+	"\n" +
+	"query_type\x18\x10 \x01(\tR\tqueryType\x12\x1f\n" +
+	"\vquery_class\x18\x11 \x01(\tR\n" +
+	"queryClass\x122\n" +
+	"\aanswers\x18\x12 \x03(\v2\x18.lippycat.data.DNSAnswerR\aanswers\x123\n" +
+	"\x16query_response_time_ms\x18\x13 \x01(\x03R\x13queryResponseTimeMs\x12)\n" +
+	"\x10correlated_query\x18\x14 \x01(\bR\x0fcorrelatedQuery\x12'\n" +
+	"\x0ftunneling_score\x18\x15 \x01(\x01R\x0etunnelingScore\x12#\n" +
+	"\rentropy_score\x18\x16 \x01(\x01R\fentropyScore\"o\n" +
+	"\tDNSAnswer\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
+	"\x05class\x18\x03 \x01(\tR\x05class\x12\x10\n" +
+	"\x03ttl\x18\x04 \x01(\rR\x03ttl\x12\x12\n" +
+	"\x04data\x18\x05 \x01(\tR\x04data\"\xe5\x01\n" +
 	"\rEmailMetadata\x12\x1b\n" +
 	"\tmail_from\x18\x01 \x01(\tR\bmailFrom\x12\x17\n" +
 	"\arcpt_to\x18\x02 \x03(\tR\x06rcptTo\x12\x18\n" +
@@ -1494,7 +1835,7 @@ func file_data_proto_rawDescGZIP() []byte {
 }
 
 var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_data_proto_goTypes = []any{
 	(FlowControl)(0),             // 0: lippycat.data.FlowControl
 	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
@@ -1502,37 +1843,41 @@ var file_data_proto_goTypes = []any{
 	(*PacketMetadata)(nil),       // 3: lippycat.data.PacketMetadata
 	(*SIPMetadata)(nil),          // 4: lippycat.data.SIPMetadata
 	(*RTPMetadata)(nil),          // 5: lippycat.data.RTPMetadata
-	(*EmailMetadata)(nil),        // 6: lippycat.data.EmailMetadata
-	(*BatchStats)(nil),           // 7: lippycat.data.BatchStats
-	(*StreamControl)(nil),        // 8: lippycat.data.StreamControl
-	(*SubscribeRequest)(nil),     // 9: lippycat.data.SubscribeRequest
-	(*CorrelatedCallUpdate)(nil), // 10: lippycat.data.CorrelatedCallUpdate
-	(*CallLegInfo)(nil),          // 11: lippycat.data.CallLegInfo
-	(*TLSSessionKeys)(nil),       // 12: lippycat.data.TLSSessionKeys
-	nil,                          // 13: lippycat.data.PacketMetadata.DetailsEntry
+	(*DNSMetadata)(nil),          // 6: lippycat.data.DNSMetadata
+	(*DNSAnswer)(nil),            // 7: lippycat.data.DNSAnswer
+	(*EmailMetadata)(nil),        // 8: lippycat.data.EmailMetadata
+	(*BatchStats)(nil),           // 9: lippycat.data.BatchStats
+	(*StreamControl)(nil),        // 10: lippycat.data.StreamControl
+	(*SubscribeRequest)(nil),     // 11: lippycat.data.SubscribeRequest
+	(*CorrelatedCallUpdate)(nil), // 12: lippycat.data.CorrelatedCallUpdate
+	(*CallLegInfo)(nil),          // 13: lippycat.data.CallLegInfo
+	(*TLSSessionKeys)(nil),       // 14: lippycat.data.TLSSessionKeys
+	nil,                          // 15: lippycat.data.PacketMetadata.DetailsEntry
 }
 var file_data_proto_depIdxs = []int32{
 	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
-	7,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
+	9,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
 	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
-	12, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
+	14, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
 	4,  // 4: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
 	5,  // 5: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	13, // 6: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	6,  // 7: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
-	0,  // 8: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	11, // 9: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	1,  // 10: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	9,  // 11: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	9,  // 12: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	8,  // 13: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1,  // 14: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	10, // 15: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	13, // [13:16] is the sub-list for method output_type
-	10, // [10:13] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	15, // 6: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	8,  // 7: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	6,  // 8: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
+	7,  // 9: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
+	0,  // 10: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	13, // 11: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	1,  // 12: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	11, // 13: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	11, // 14: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	10, // 15: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	1,  // 16: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	12, // 17: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	15, // [15:18] is the sub-list for method output_type
+	12, // [12:15] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -1546,7 +1891,7 @@ func file_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

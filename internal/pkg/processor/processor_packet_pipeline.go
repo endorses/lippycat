@@ -11,12 +11,13 @@
 //  3. Increment packet counters
 //  4. Enrich packets with protocol detection (if enabled)
 //  5. Aggregate VoIP calls and correlate B2BUA calls (if VoIP aggregator enabled)
-//  6. Process LI (Lawful Interception) if enabled (build tag: li)
-//  7. Write per-call PCAP files (SIP and RTP separated, if enabled)
-//  8. Write auto-rotating PCAP files for non-VoIP traffic (if enabled)
-//  9. Forward to upstream processor (if hierarchical mode)
-//  10. Broadcast to TUI subscribers (with per-subscriber buffering)
-//  11. Inject to virtual interface (if enabled)
+//  6. Aggregate DNS tunneling statistics from hunter-provided metadata
+//  7. Process LI (Lawful Interception) if enabled (build tag: li)
+//  8. Write per-call PCAP files (SIP and RTP separated, if enabled)
+//  9. Write auto-rotating PCAP files for non-VoIP traffic (if enabled)
+//  10. Forward to upstream processor (if hierarchical mode)
+//  11. Broadcast to TUI subscribers (with per-subscriber buffering)
+//  12. Inject to virtual interface (if enabled)
 //
 // Key Design Decisions:
 //   - Non-blocking: All I/O operations are async (queues, channels, goroutines)
@@ -86,6 +87,26 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		for _, packet := range batch.Packets {
 			if packet.Metadata != nil && packet.Metadata.Sip != nil {
 				p.callCorrelator.ProcessPacket(packet, sourceID)
+			}
+		}
+	}
+
+	// Aggregate DNS tunneling statistics from hunter-provided metadata
+	// This builds a cross-hunter view of suspicious domains
+	if p.dnsTunneling != nil {
+		for _, packet := range batch.Packets {
+			if packet.Metadata != nil && packet.Metadata.Dns != nil {
+				dnsProto := packet.Metadata.Dns
+				// Convert proto DNS metadata to types.DNSMetadata for analysis
+				dnsMeta := &types.DNSMetadata{
+					QueryName:      dnsProto.QueryName,
+					QueryType:      dnsProto.QueryType,
+					IsResponse:     dnsProto.IsResponse,
+					TunnelingScore: dnsProto.TunnelingScore,
+					EntropyScore:   dnsProto.EntropyScore,
+				}
+				// Analyze updates aggregated domain statistics
+				p.dnsTunneling.Analyze(dnsMeta)
 			}
 		}
 	}

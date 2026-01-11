@@ -34,6 +34,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
@@ -151,8 +152,9 @@ type Processor struct {
 	callCompletionMonitor *CallCompletionMonitor
 
 	// Protocol aggregators
-	callAggregator *voip.CallAggregator // VoIP call state aggregation
-	callCorrelator *CallCorrelator      // Cross-B2BUA call correlation
+	callAggregator *voip.CallAggregator   // VoIP call state aggregation
+	callCorrelator *CallCorrelator        // Cross-B2BUA call correlation
+	dnsTunneling   *dns.TunnelingDetector // DNS tunneling detection aggregation
 
 	// Virtual interface manager
 	vifManager vinterface.Manager
@@ -181,8 +183,9 @@ func New(config Config) (*Processor, error) {
 
 	p := &Processor{
 		config:         config,
-		callAggregator: voip.NewCallAggregator(), // Initialize call aggregator
-		callCorrelator: NewCallCorrelator(),      // Initialize call correlator
+		callAggregator: voip.NewCallAggregator(),                               // Initialize call aggregator
+		callCorrelator: NewCallCorrelator(),                                    // Initialize call correlator
+		dnsTunneling:   dns.NewTunnelingDetector(dns.DefaultTunnelingConfig()), // Initialize DNS tunneling aggregator
 	}
 
 	// Initialize protocol detector and enricher if enabled
@@ -474,4 +477,16 @@ func (p *Processor) GetCaptureInterfaces() []string {
 // This allows TUI/display components to access session keys for decryption.
 func (p *Processor) GetTLSKeylogWriter() *TLSKeylogWriter {
 	return p.tlsKeylogWriter
+}
+
+// GetSuspiciousDomains returns domains with high DNS tunneling scores.
+// This provides a cross-hunter view of potentially malicious DNS activity.
+// Threshold is the minimum score (0.0-1.0) for a domain to be considered suspicious.
+// Limit is the maximum number of domains to return, sorted by score descending.
+// Returns nil if DNS tunneling detection is not enabled.
+func (p *Processor) GetSuspiciousDomains(threshold float64, limit int) []dns.TunnelingReport {
+	if p.dnsTunneling == nil {
+		return nil
+	}
+	return p.dnsTunneling.GetSuspiciousDomains(threshold, limit)
 }

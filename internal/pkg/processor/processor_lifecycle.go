@@ -312,6 +312,11 @@ func (p *Processor) Shutdown() error {
 		p.callCorrelator.Stop()
 	}
 
+	// Stop DNS tunneling detector to stop cleanup goroutine
+	if p.dnsTunneling != nil {
+		p.dnsTunneling.Stop()
+	}
+
 	// Stop call completion monitor (closes any pending PCAP files)
 	if p.callCompletionMonitor != nil {
 		p.callCompletionMonitor.Stop()

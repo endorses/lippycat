@@ -85,9 +85,9 @@ Benefits:
 
 **File:** `internal/pkg/processor/processor.go`
 
-- [ ] Add `dnsTunneling *dns.TunnelingDetector` for cross-hunter aggregation
-- [ ] In `processBatch()`, update aggregated stats from hunter-provided metadata
-- [ ] Provide `GetSuspiciousDomains()` API for management/alerting
+- [x] Add `dnsTunneling *dns.TunnelingDetector` for cross-hunter aggregation
+- [x] In `processBatch()`, update aggregated stats from hunter-provided metadata
+- [x] Provide `GetSuspiciousDomains()` API for management/alerting
 
 ### Phase 6: Proto-to-Types Conversion (TUI)
 

@@ -168,6 +168,61 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		}
 	}
 
+	// Build DNS metadata if present
+	var dnsData *types.DNSMetadata
+	if pkt.Metadata != nil && pkt.Metadata.Dns != nil {
+		dnsProto := pkt.Metadata.Dns
+		dnsData = &types.DNSMetadata{
+			TransactionID:       uint16(dnsProto.TransactionId), // #nosec G115 - DNS transaction ID is 16 bits
+			IsResponse:          dnsProto.IsResponse,
+			Opcode:              dnsProto.Opcode,
+			ResponseCode:        dnsProto.ResponseCode,
+			Authoritative:       dnsProto.Authoritative,
+			Truncated:           dnsProto.Truncated,
+			RecursionDesired:    dnsProto.RecursionDesired,
+			RecursionAvailable:  dnsProto.RecursionAvailable,
+			AuthenticatedData:   dnsProto.AuthenticatedData,
+			CheckingDisabled:    dnsProto.CheckingDisabled,
+			QuestionCount:       uint16(dnsProto.QuestionCount),   // #nosec G115
+			AnswerCount:         uint16(dnsProto.AnswerCount),     // #nosec G115
+			AuthorityCount:      uint16(dnsProto.AuthorityCount),  // #nosec G115
+			AdditionalCount:     uint16(dnsProto.AdditionalCount), // #nosec G115
+			QueryName:           dnsProto.QueryName,
+			QueryType:           dnsProto.QueryType,
+			QueryClass:          dnsProto.QueryClass,
+			QueryResponseTimeMs: dnsProto.QueryResponseTimeMs,
+			CorrelatedQuery:     dnsProto.CorrelatedQuery,
+			TunnelingScore:      dnsProto.TunnelingScore,
+			EntropyScore:        dnsProto.EntropyScore,
+		}
+
+		// Convert answers
+		if len(dnsProto.Answers) > 0 {
+			dnsData.Answers = make([]types.DNSAnswer, len(dnsProto.Answers))
+			for i, a := range dnsProto.Answers {
+				dnsData.Answers[i] = types.DNSAnswer{
+					Name:  a.Name,
+					Type:  a.Type,
+					Class: a.Class,
+					TTL:   a.Ttl,
+					Data:  a.Data,
+				}
+			}
+		}
+
+		// Set protocol and info from DNS metadata
+		protocol = "DNS"
+		if dnsProto.IsResponse {
+			if len(dnsData.Answers) > 0 {
+				info = fmt.Sprintf("%s %s -> %s", dnsProto.QueryType, dnsProto.QueryName, dnsData.Answers[0].Data)
+			} else {
+				info = fmt.Sprintf("%s %s %s", dnsProto.QueryType, dnsProto.QueryName, dnsProto.ResponseCode)
+			}
+		} else {
+			info = fmt.Sprintf("%s %s?", dnsProto.QueryType, dnsProto.QueryName)
+		}
+	}
+
 	return types.PacketDisplay{
 		Timestamp: ts,
 		SrcIP:     srcIP,
@@ -181,6 +236,7 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		NodeID:    hunterID,  // Set node ID from batch
 		Interface: ifaceName, // Interface where packet was captured
 		VoIPData:  voipData,  // VoIP metadata if applicable
+		DNSData:   dnsData,   // DNS metadata if applicable
 		LinkType:  linkType,  // Link layer type
 	}
 }

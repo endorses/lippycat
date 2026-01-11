@@ -93,7 +93,7 @@ Benefits:
 
 **File:** `internal/pkg/remotecapture/client_conversion.go`
 
-- [ ] Add DNS metadata conversion in `convertToPacketDisplay()`:
+- [x] Add DNS metadata conversion in `convertToPacketDisplay()`:
   - Check if `pkt.Metadata.Dns != nil`
   - Create `types.DNSMetadata` from proto fields
   - Set `display.DNSData`

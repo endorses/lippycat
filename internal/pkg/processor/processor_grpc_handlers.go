@@ -832,7 +832,14 @@ func (p *Processor) GetFiltersFromProcessor(ctx context.Context, req *management
 		// Handle locally
 		logger.Debug("Target is local processor, handling directly")
 
-		filters := p.filterManager.GetForHunter(req.HunterId)
+		var filters []*management.Filter
+		if req.HunterId == "" {
+			// Return all filters for TUI/administrative queries
+			filters = p.filterManager.GetAll()
+		} else {
+			// Return filters filtered by hunter capabilities and targeting
+			filters = p.filterManager.GetForHunter(req.HunterId)
+		}
 
 		logAuditOperationResult(audit, req.ProcessorId, true, nil,
 			"hunter_id", req.HunterId,

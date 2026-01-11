@@ -190,9 +190,11 @@ func (m *Model) loadFiltersFromProcessor(processorAddr string, hunterID string) 
 			tokenResp = nil
 		}
 
+		// Empty ProcessorId means "query this processor" (the one we're connected to)
+		// ProcessorId is only used for multi-level topologies to target downstream processors
 		resp, err := mgmtClient.GetFiltersFromProcessor(ctx, &management.ProcessorFilterQuery{
-			ProcessorId: processorAddr,
-			HunterId:    hunterID, // Empty string means all filters
+			ProcessorId: "", // Empty = query the directly connected processor
+			HunterId:    hunterID,
 			AuthToken:   tokenResp,
 		})
 		if err != nil {
@@ -274,8 +276,9 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 				}
 			}
 			filterPattern = msg.Filter.Pattern
+			// Empty ProcessorId = query the directly connected processor
 			result, err = mgmtClient.UpdateFilterOnProcessor(ctx, &management.ProcessorFilterRequest{
-				ProcessorId: msg.ProcessorAddr,
+				ProcessorId: "",
 				Filter:      msg.Filter,
 				AuthToken:   tokenResp,
 			})
@@ -291,8 +294,9 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 				}
 			}
 			filterPattern = msg.FilterID
+			// Empty ProcessorId = query the directly connected processor
 			result, err = mgmtClient.DeleteFilterOnProcessor(ctx, &management.ProcessorFilterDeleteRequest{
-				ProcessorId: msg.ProcessorAddr,
+				ProcessorId: "",
 				FilterId:    msg.FilterID,
 				AuthToken:   tokenResp,
 			})

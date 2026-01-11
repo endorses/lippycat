@@ -209,7 +209,7 @@ func (s *POP3Stream) handleMultilineLine(line string) {
 			bodyContent := s.bodyBuffer.String()
 			s.extractHeadersFromBody(bodyContent, metadata)
 
-			metadata.BodyPreview = bodyContent
+			metadata.BodyPreview = sanitizeUTF8(bodyContent)
 			metadata.BodySize = s.bodySize
 			metadata.BodyTruncated = s.bodySize > s.factory.maxBodySize
 

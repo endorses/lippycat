@@ -5,9 +5,20 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
+
+// sanitizeUTF8 replaces invalid UTF-8 sequences with the replacement character.
+// This is necessary because email content can contain arbitrary encodings,
+// but protobuf string fields require valid UTF-8.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
 
 // Parser extracts SMTP metadata from packet payloads.
 type Parser struct {

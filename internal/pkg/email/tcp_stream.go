@@ -287,9 +287,9 @@ func (s *SMTPStream) processDataContent(headerLines []string) {
 	// Update command to indicate complete message
 	metadata.Command = "DATA_COMPLETE"
 
-	// Add body content if captured
+	// Add body content if captured (sanitize for UTF-8 to prevent protobuf errors)
 	if s.factory.captureBody && s.bodyBuffer.Len() > 0 {
-		metadata.BodyPreview = s.bodyBuffer.String()
+		metadata.BodyPreview = sanitizeUTF8(s.bodyBuffer.String())
 	}
 	metadata.BodySize = s.bodySize
 	metadata.BodyTruncated = s.bodyTruncated

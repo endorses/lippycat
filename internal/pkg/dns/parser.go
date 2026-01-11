@@ -5,11 +5,22 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
+
+// sanitizeUTF8 replaces invalid UTF-8 sequences with the replacement character.
+// This is necessary because DNS names can contain arbitrary bytes (especially in
+// tunneling scenarios), but protobuf string fields require valid UTF-8.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
 
 // Parser extracts DNS metadata from packets.
 type Parser struct{}
@@ -51,7 +62,7 @@ func (p *Parser) Parse(packet gopacket.Packet) *types.DNSMetadata {
 	// Parse first question (most DNS queries have exactly one)
 	if len(dns.Questions) > 0 {
 		q := dns.Questions[0]
-		metadata.QueryName = string(q.Name)
+		metadata.QueryName = sanitizeUTF8(string(q.Name))
 		metadata.QueryType = dnsTypeToString(q.Type)
 		metadata.QueryClass = dnsClassToString(q.Class)
 	}
@@ -61,7 +72,7 @@ func (p *Parser) Parse(packet gopacket.Packet) *types.DNSMetadata {
 		metadata.Answers = make([]types.DNSAnswer, 0, len(dns.Answers))
 		for _, a := range dns.Answers {
 			answer := types.DNSAnswer{
-				Name:  string(a.Name),
+				Name:  sanitizeUTF8(string(a.Name)),
 				Type:  dnsTypeToString(a.Type),
 				Class: dnsClassToString(a.Class),
 				TTL:   a.TTL,
@@ -184,7 +195,7 @@ func parseDomainName(payload []byte, offset int) (string, int) {
 		if offset+length > len(payload) {
 			return "", -1
 		}
-		parts = append(parts, string(payload[offset:offset+length]))
+		parts = append(parts, sanitizeUTF8(string(payload[offset:offset+length])))
 		offset += length
 	}
 
@@ -235,20 +246,21 @@ func formatRData(rrType layers.DNSType, rdata []byte, fullPayload []byte) string
 			return net.IP(rdata).String()
 		}
 	case layers.DNSTypeCNAME, layers.DNSTypeNS, layers.DNSTypePTR:
-		// These contain a domain name
+		// These contain a domain name (already sanitized by parseDomainName)
 		name, _ := parseDomainName(fullPayload, len(fullPayload)-len(rdata))
 		if name != "" {
 			return name
 		}
-		return string(rdata)
+		return sanitizeUTF8(string(rdata))
 	case layers.DNSTypeMX:
 		if len(rdata) > 2 {
 			priority := binary.BigEndian.Uint16(rdata[0:2])
+			// parseDomainName already sanitizes
 			name, _ := parseDomainName(fullPayload, len(fullPayload)-len(rdata)+2)
 			return fmt.Sprintf("%d %s", priority, name)
 		}
 	case layers.DNSTypeTXT:
-		return string(rdata)
+		return sanitizeUTF8(string(rdata))
 	case layers.DNSTypeSOA:
 		// SOA has complex format, just show length
 		return fmt.Sprintf("<SOA %d bytes>", len(rdata))
@@ -262,17 +274,17 @@ func formatAnswerData(a layers.DNSResourceRecord) string {
 	case layers.DNSTypeA, layers.DNSTypeAAAA:
 		return a.IP.String()
 	case layers.DNSTypeCNAME, layers.DNSTypeNS, layers.DNSTypePTR:
-		return string(a.CNAME)
+		return sanitizeUTF8(string(a.CNAME))
 	case layers.DNSTypeMX:
-		return fmt.Sprintf("%d %s", a.MX.Preference, string(a.MX.Name))
+		return fmt.Sprintf("%d %s", a.MX.Preference, sanitizeUTF8(string(a.MX.Name)))
 	case layers.DNSTypeTXT:
 		var parts []string
 		for _, txt := range a.TXTs {
-			parts = append(parts, string(txt))
+			parts = append(parts, sanitizeUTF8(string(txt)))
 		}
 		return strings.Join(parts, " ")
 	case layers.DNSTypeSOA:
-		return fmt.Sprintf("%s %s", string(a.SOA.MName), string(a.SOA.RName))
+		return fmt.Sprintf("%s %s", sanitizeUTF8(string(a.SOA.MName)), sanitizeUTF8(string(a.SOA.RName)))
 	default:
 		return fmt.Sprintf("<data %d bytes>", len(a.Data))
 	}

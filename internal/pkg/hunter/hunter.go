@@ -19,6 +19,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/spf13/viper"
 )
 
 // Config contains hunter configuration
@@ -68,6 +69,9 @@ type Hunter struct {
 
 	// Application-level filtering (GPU-accelerated, protocol-agnostic)
 	applicationFilter *ApplicationFilter
+
+	// DNS processing (tunneling detection at edge)
+	dnsProcessor *DNSProcessor
 
 	// Custom packet processing
 	packetProcessor forwarding.PacketProcessor // Optional custom processor for VoIP buffering, etc.
@@ -201,6 +205,17 @@ func (h *Hunter) Start(ctx context.Context) error {
 	defer func() {
 		if h.applicationFilter != nil {
 			h.applicationFilter.Close()
+		}
+	}()
+
+	// Initialize DNS processor if tunneling detection is enabled
+	if viper.GetBool("dns.detect_tunneling") {
+		h.dnsProcessor = NewDNSProcessor(true)
+		logger.Info("DNS tunneling detection enabled at hunter edge")
+	}
+	defer func() {
+		if h.dnsProcessor != nil {
+			h.dnsProcessor.Stop()
 		}
 	}()
 
@@ -346,6 +361,9 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 	}
 	if h.applicationFilter != nil {
 		fwdMgr.SetApplicationFilter(h.applicationFilter)
+	}
+	if h.dnsProcessor != nil {
+		fwdMgr.SetDNSMetadataProvider(h.dnsProcessor)
 	}
 	// Set disconnect callback to trigger reconnection on send failures
 	fwdMgr.SetDisconnectCallback(func() {

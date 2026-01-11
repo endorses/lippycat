@@ -56,21 +56,21 @@ Benefits:
 
 **File:** `internal/pkg/hunter/dns_processor.go` (new file)
 
-- [ ] Create `DNSProcessor` struct with:
+- [x] Create `DNSProcessor` struct with:
   - `parser *dns.Parser`
   - `tunneling *dns.TunnelingDetector`
 
-- [ ] Implement `ProcessPacket(packet) → *data.DNSMetadata`:
+- [x] Implement `ProcessPacket(packet) → *data.DNSMetadata`:
   1. Parse DNS packet
   2. Run tunneling analysis
   3. Return proto-ready metadata
 
 **File:** `internal/pkg/hunter/hunter.go`
 
-- [ ] Add `dnsProcessor *DNSProcessor` field
-- [ ] Initialize when DNS mode + tunneling detection enabled
-- [ ] In capture loop, call `dnsProcessor.ProcessPacket()` for DNS packets
-- [ ] Populate `CapturedPacket.Metadata.Dns` before batching
+- [x] Add `dnsProcessor *DNSProcessor` field
+- [x] Initialize when DNS mode + tunneling detection enabled
+- [x] In capture loop, call `dnsProcessor.ProcessPacket()` for DNS packets
+- [x] Populate `CapturedPacket.Metadata.Dns` before batching
 
 ### Phase 4: Tap-Side DNS Detection (LocalSource)
 

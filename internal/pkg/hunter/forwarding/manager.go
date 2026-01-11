@@ -41,6 +41,14 @@ type ApplicationFilterReceiver interface {
 	SetApplicationFilter(filter ApplicationFilter)
 }
 
+// DNSMetadataProvider provides DNS metadata for packets.
+// Used for DNS tunneling detection at the hunter edge.
+type DNSMetadataProvider interface {
+	// ProcessPacket parses a DNS packet and returns proto-ready metadata.
+	// Returns nil if the packet is not a DNS packet or parsing fails.
+	ProcessPacket(packet gopacket.Packet) *data.DNSMetadata
+}
+
 // StatsCollector provides access to hunter statistics
 type StatsCollector interface {
 	IncrementCaptured()
@@ -100,8 +108,9 @@ type Manager struct {
 	disconnectCallback  func()       // Called when connection appears dead
 
 	// Optional packet processing
-	packetProcessor   PacketProcessor
-	applicationFilter ApplicationFilter
+	packetProcessor     PacketProcessor
+	applicationFilter   ApplicationFilter
+	dnsMetadataProvider DNSMetadataProvider
 
 	// Dependencies
 	statsCollector   StatsCollector
@@ -166,6 +175,11 @@ func (m *Manager) SetDisconnectCallback(callback func()) {
 // SetApplicationFilter sets an optional application-layer filter
 func (m *Manager) SetApplicationFilter(filter ApplicationFilter) {
 	m.applicationFilter = filter
+}
+
+// SetDNSMetadataProvider sets the DNS metadata provider for DNS analysis.
+func (m *Manager) SetDNSMetadataProvider(provider DNSMetadataProvider) {
+	m.dnsMetadataProvider = provider
 }
 
 // SetVoIPFilter is a deprecated alias for SetApplicationFilter
@@ -277,6 +291,16 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 
 			// Convert to protobuf packet
 			pbPkt := convertPacket(pktInfo, matchedFilterIDs)
+
+			// Add DNS metadata if DNS processor is set
+			if m.dnsMetadataProvider != nil {
+				if dnsMetadata := m.dnsMetadataProvider.ProcessPacket(pktInfo.Packet); dnsMetadata != nil {
+					if pbPkt.Metadata == nil {
+						pbPkt.Metadata = &data.PacketMetadata{}
+					}
+					pbPkt.Metadata.Dns = dnsMetadata
+				}
+			}
 
 			// Add to current batch with minimal lock duration
 			m.batchMu.Lock()

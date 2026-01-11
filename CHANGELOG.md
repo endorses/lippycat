@@ -8,13 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.2] - 2026-01-11
 
 ### Added
-- Fix filter changes not applying in tap mode
+- **Secure-by-default TLS for watch modes**: `watch live`, `watch file`, and `watch remote` now use TLS by default
+  - Use `--insecure` flag to disable TLS when needed
+- **Tap node badge in TUI**: Tap nodes now display with `[TAP]` badge in nodes tab for easy identification
 
 ### Changed
-- TODO: Add detailed changelog entries
+- **TLS credential logging**: Changed TLS credential setup logs from INFO to DEBUG level to reduce log noise
 
 ### Fixed
-- TODO: Add fixed items
+- **Tap mode filter management**: Filter changes via `lc set/rm filter` now properly restart capture
+  - BPF filters are recompiled and capture is restarted when filters change
+  - Application-level filters (SIP user, phone number, call ID, codec) are updated at runtime
+- **TUI filter display**: Filters now correctly appear in TUI filter management view
+- **TUI connection status**: Fixed Reachable flag not being set on connection success/failure
+  - Only shows "Unreachable" status for actually failed connections
+- **Watch TLS auto-enable**: TLS is now automatically enabled when certificate flags are provided
+- **Topology reachability**: Current processor node now correctly shows as reachable in topology
+- **Build tags**: Added missing build tags to TUI and hunter files
 
 ## [0.7.1] - 2026-01-10
 

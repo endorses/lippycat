@@ -113,6 +113,8 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 			EstimatedLatency:  latency,                // Estimated operation latency in ms
 			Reachable:         proc.Reachable,         // Whether processor is reachable for management operations
 			UnreachableReason: proc.UnreachableReason, // Reason why processor is unreachable
+			NodeType:          proc.NodeType,          // TAP or PROCESSOR
+			CaptureInterfaces: proc.CaptureInterfaces, // Interfaces being captured (TAP only)
 		})
 	}
 	return procInfos

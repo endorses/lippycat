@@ -461,6 +461,15 @@ func (p *Processor) IsLocalMode() bool {
 	return isLocal
 }
 
+// GetCaptureInterfaces returns the interfaces being captured if in local mode.
+// Returns nil if not in local mode (i.e., receiving from hunters via gRPC).
+func (p *Processor) GetCaptureInterfaces() []string {
+	if localSource, ok := p.packetSource.(*source.LocalSource); ok {
+		return localSource.Interfaces()
+	}
+	return nil
+}
+
 // GetTLSKeylogWriter returns the TLS keylog writer if configured.
 // This allows TUI/display components to access session keys for decryption.
 func (p *Processor) GetTLSKeylogWriter() *TLSKeylogWriter {

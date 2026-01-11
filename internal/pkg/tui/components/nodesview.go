@@ -50,6 +50,8 @@ type ProcessorInfo struct {
 	EstimatedLatency  int                        // Estimated operation latency in ms (-1 if unknown)
 	Reachable         bool                       // Whether this processor is reachable for management operations
 	UnreachableReason string                     // Reason why processor is unreachable (empty if reachable)
+	NodeType          management.NodeType        // TAP captures locally, PROCESSOR receives from hunters
+	CaptureInterfaces []string                   // Interfaces being captured (TAP only)
 }
 
 // AddNodeMsg is sent when user wants to add a node
@@ -769,14 +771,16 @@ func convertProcessorInfos(procs []ProcessorInfo) []nodesview.ProcessorInfo {
 	result := make([]nodesview.ProcessorInfo, len(procs))
 	for i, proc := range procs {
 		result[i] = nodesview.ProcessorInfo{
-			Address:         proc.Address,
-			ProcessorID:     proc.ProcessorID,
-			Status:          proc.Status,
-			ConnectionState: proc.ConnectionState,
-			TLSInsecure:     proc.TLSInsecure,  // Preserve TLS security status
-			UpstreamAddr:    proc.UpstreamAddr, // Preserve upstream processor address
-			Hunters:         proc.Hunters,
-			TotalHunters:    proc.TotalHunters,
+			Address:           proc.Address,
+			ProcessorID:       proc.ProcessorID,
+			Status:            proc.Status,
+			ConnectionState:   proc.ConnectionState,
+			TLSInsecure:       proc.TLSInsecure,  // Preserve TLS security status
+			UpstreamAddr:      proc.UpstreamAddr, // Preserve upstream processor address
+			Hunters:           proc.Hunters,
+			TotalHunters:      proc.TotalHunters,
+			NodeType:          proc.NodeType,          // TAP or PROCESSOR
+			CaptureInterfaces: proc.CaptureInterfaces, // Interfaces being captured (TAP only)
 		}
 	}
 	return result

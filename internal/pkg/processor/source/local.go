@@ -425,6 +425,11 @@ func (s *LocalSource) IsStarted() bool {
 	return s.started
 }
 
+// Interfaces returns the configured capture interfaces.
+func (s *LocalSource) Interfaces() []string {
+	return s.config.Interfaces
+}
+
 // convertPacketInfo converts capture.PacketInfo to protobuf CapturedPacket.
 // This is similar to forwarding.convertPacket but works with capture.PacketInfo.
 func convertPacketInfo(pktInfo capture.PacketInfo) *data.CapturedPacket {

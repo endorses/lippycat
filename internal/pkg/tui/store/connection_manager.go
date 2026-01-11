@@ -32,11 +32,13 @@ type ProcessorConnection struct {
 	LastDisconnectedAt time.Time // Time when processor was last disconnected (for cleanup)
 	FailureCount       int
 	ReconnectTimer     *time.Timer
-	SubscribedHunters  []string // Hunter IDs we're subscribed to (empty = all hunters)
-	TLSInsecure        bool     // True if connection is insecure (no TLS)
-	UpstreamAddr       string   // Address of upstream processor (if this processor forwards to another)
-	Reachable          bool     // Whether this processor is reachable for management operations
-	UnreachableReason  string   // Reason why processor is unreachable (empty if reachable)
+	SubscribedHunters  []string            // Hunter IDs we're subscribed to (empty = all hunters)
+	TLSInsecure        bool                // True if connection is insecure (no TLS)
+	UpstreamAddr       string              // Address of upstream processor (if this processor forwards to another)
+	Reachable          bool                // Whether this processor is reachable for management operations
+	UnreachableReason  string              // Reason why processor is unreachable (empty if reachable)
+	NodeType           management.NodeType // TAP captures locally, PROCESSOR receives from hunters
+	CaptureInterfaces  []string            // Interfaces being captured (TAP only)
 }
 
 // ConnectionManager manages remote processor connections

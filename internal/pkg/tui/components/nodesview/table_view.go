@@ -24,12 +24,14 @@ type ProcessorInfo struct {
 	TLSInsecure       bool   // True if connection is insecure (no TLS)
 	UpstreamAddr      string // Address of upstream processor (if hierarchical)
 	Hunters           []types.HunterInfo
-	TotalHunters      int      // Total hunters connected to this processor (all hunters)
-	HierarchyDepth    int      // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
-	ProcessorPath     []string // Full path from root to this processor
-	EstimatedLatency  int      // Estimated operation latency in ms (-1 if unknown)
-	Reachable         bool     // Whether this processor is reachable for management operations
-	UnreachableReason string   // Reason why processor is unreachable (empty if reachable)
+	TotalHunters      int                 // Total hunters connected to this processor (all hunters)
+	HierarchyDepth    int                 // Depth in hierarchy (0 = root, 1 = first level downstream, etc., -1 = unknown)
+	ProcessorPath     []string            // Full path from root to this processor
+	EstimatedLatency  int                 // Estimated operation latency in ms (-1 if unknown)
+	Reachable         bool                // Whether this processor is reachable for management operations
+	UnreachableReason string              // Reason why processor is unreachable (empty if reachable)
+	NodeType          management.NodeType // TAP captures locally, PROCESSOR receives from hunters
+	CaptureInterfaces []string            // Interfaces being captured (TAP only)
 }
 
 // TableViewParams contains all parameters needed for rendering table views
@@ -265,23 +267,26 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				depthIndicator += "✗" // Processor unreachable
 			}
 
+			// Build node type badge
+			nodeTypeBadge := buildNodeTypeBadge(proc.NodeType, proc.CaptureInterfaces)
+
 			if isChildProcessor {
 				// Child processor - show with tree branch (gray) before status icon
 				// Even when selected, keep tree prefix gray
 				treePrefixRendered := treePrefixStyle.Render(treePrefix)
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 %s %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 %s %s (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
 				}
 				// Combine gray prefix with selected line
 				b.WriteString(treePrefixRendered + selectedStyle.Render(procLine) + "\n")
 			} else {
 				// Root processor - no tree prefix
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 %s %s [%s] (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf("%s %s %s 📡 Processor: %s (%d hunters)", statusIcon, securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf("%s %s %s 📡 %s %s (%d hunters)", statusIcon, securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
 				}
 				b.WriteString(selectedStyle.Width(params.Width).Render(procLine) + "\n")
 			}
@@ -303,21 +308,24 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				depthIndicator += "✗" // Processor unreachable
 			}
 
+			// Build node type badge
+			nodeTypeBadge := buildNodeTypeBadge(proc.NodeType, proc.CaptureInterfaces)
+
 			if isChildProcessor {
 				// Child processor - gray tree prefix, then colored status icon
 				treePrefixRendered := treePrefixStyle.Render(treePrefix)
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 %s %s [%s] (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 %s %s (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
 				}
 				b.WriteString(treePrefixRendered + statusStyled + processorStyle.Render(procLine) + "\n")
 			} else {
 				// Root processor - no tree prefix
 				if proc.ProcessorID != "" {
-					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s [%s] (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.ProcessorID, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 %s %s [%s] (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.ProcessorID, proc.TotalHunters)
 				} else {
-					procLine = fmt.Sprintf(" %s %s 📡 Processor: %s (%d hunters)", securityIcon, depthIndicator, proc.Address, proc.TotalHunters)
+					procLine = fmt.Sprintf(" %s %s 📡 %s %s (%d hunters)", securityIcon, depthIndicator, nodeTypeBadge, proc.Address, proc.TotalHunters)
 				}
 				b.WriteString(statusStyled + processorStyle.Render(procLine) + "\n")
 			}
@@ -684,4 +692,18 @@ func RenderFlatView(params TableViewParams) (string, int) {
 	}
 
 	return b.String(), selectedNodeLine
+}
+
+// buildNodeTypeBadge returns a badge string for the node type.
+// For TAP nodes, includes the capture interfaces (e.g., "[TAP] eth0")
+// For PROCESSOR nodes, returns "[PROC]"
+func buildNodeTypeBadge(nodeType management.NodeType, captureInterfaces []string) string {
+	if nodeType == management.NodeType_NODE_TYPE_TAP {
+		badge := "[TAP]"
+		if len(captureInterfaces) > 0 {
+			badge += " " + strings.Join(captureInterfaces, ",")
+		}
+		return badge
+	}
+	return "[PROC]"
 }

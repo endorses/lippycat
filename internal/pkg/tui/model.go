@@ -36,9 +36,12 @@ type PacketMsg struct {
 
 // ProcessorConnectedMsg is sent when a processor connection succeeds
 type ProcessorConnectedMsg struct {
-	Address     string
-	Client      interface{ Close() }
-	TLSInsecure bool // True if connection is insecure (no TLS)
+	Address           string
+	Client            interface{ Close() }
+	TLSInsecure       bool     // True if connection is insecure (no TLS)
+	ProcessorID       string   // ID of the processor (from GetTopology)
+	NodeType          int32    // NodeType: 0=PROCESSOR, 1=TAP (from GetTopology)
+	CaptureInterfaces []string // Interfaces being captured (TAP only, from GetTopology)
 }
 
 // ProcessorReconnectMsg is sent to trigger a reconnection attempt

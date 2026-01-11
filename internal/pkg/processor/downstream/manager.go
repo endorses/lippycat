@@ -225,7 +225,7 @@ func (m *Manager) Get(processorID string) *ProcessorInfo {
 }
 
 // GetTopology recursively queries all downstream processors for their topology
-func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatus management.ProcessorStatus, myUpstream string, myHunters []*management.ConnectedHunter) (*management.ProcessorNode, error) {
+func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatus management.ProcessorStatus, myUpstream string, myHunters []*management.ConnectedHunter, nodeType management.NodeType, captureInterfaces []string) (*management.ProcessorNode, error) {
 	m.mu.RLock()
 	downstreams := make([]*ProcessorInfo, 0, len(m.downstreams))
 	for _, proc := range m.downstreams {
@@ -240,6 +240,8 @@ func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatu
 		Status:            myStatus,
 		UpstreamProcessor: myUpstream,
 		Hunters:           myHunters,
+		NodeType:          nodeType,
+		CaptureInterfaces: captureInterfaces,
 	}
 
 	// Query each downstream processor for its topology

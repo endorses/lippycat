@@ -473,6 +473,14 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 		upstreamProcessorID = p.upstreamManager.GetUpstreamProcessorID()
 	}
 
+	// Determine node type and capture interfaces
+	nodeType := management.NodeType_NODE_TYPE_PROCESSOR
+	var captureInterfaces []string
+	if p.IsLocalMode() {
+		nodeType = management.NodeType_NODE_TYPE_TAP
+		captureInterfaces = p.GetCaptureInterfaces()
+	}
+
 	// Recursively query downstream processors
 	node, err := p.downstreamManager.GetTopology(
 		ctx,
@@ -480,6 +488,8 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 		processorStats.Status,
 		upstreamProcessorID,
 		connectedHunters,
+		nodeType,
+		captureInterfaces,
 	)
 	if err != nil {
 		return nil, err

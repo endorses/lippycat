@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -398,11 +399,36 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 			// Non-fatal - continue anyway (feature may not be available)
 		}
 
+		// Get initial topology to retrieve processor info (including NodeType)
+		var processorID string
+		var nodeType int32
+		var captureInterfaces []string
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		topology, err := client.GetTopology(ctx)
+		cancel()
+		if err != nil {
+			logger.Warn("Failed to get initial topology from processor",
+				"address", msg.Address,
+				"error", err)
+			// Non-fatal - continue without initial topology info
+		} else if topology != nil {
+			processorID = topology.ProcessorId
+			nodeType = int32(topology.NodeType)
+			captureInterfaces = topology.CaptureInterfaces
+			logger.Debug("Retrieved processor topology",
+				"processor_id", processorID,
+				"node_type", nodeType,
+				"capture_interfaces", captureInterfaces)
+		}
+
 		// Connection successful
 		globalCaptureState.SendMessage(ProcessorConnectedMsg{
-			Address:     msg.Address,
-			Client:      client,
-			TLSInsecure: !tlsEnabled, // Record if connection is insecure
+			Address:           msg.Address,
+			Client:            client,
+			TLSInsecure:       !tlsEnabled, // Record if connection is insecure
+			ProcessorID:       processorID,
+			NodeType:          nodeType,
+			CaptureInterfaces: captureInterfaces,
 		})
 	}()
 
@@ -417,6 +443,13 @@ func (m Model) handleProcessorConnectedMsg(msg ProcessorConnectedMsg) (Model, te
 		proc.Client = msg.Client
 		proc.FailureCount = 0
 		proc.TLSInsecure = msg.TLSInsecure
+
+		// Store processor info from GetTopology call
+		if msg.ProcessorID != "" {
+			proc.ProcessorID = msg.ProcessorID
+		}
+		proc.NodeType = management.NodeType(msg.NodeType)
+		proc.CaptureInterfaces = msg.CaptureInterfaces
 
 		// Also store in deprecated map for compatibility
 		m.connectionMgr.RemoteClients[msg.Address] = msg.Client
@@ -737,6 +770,8 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 			UpstreamAddr:      parentAddr,
 			Reachable:         processor.Reachable,
 			UnreachableReason: processor.UnreachableReason,
+			NodeType:          processor.NodeType,
+			CaptureInterfaces: processor.CaptureInterfaces,
 		}
 		logger.Debug("Discovered processor from topology update",
 			"address", nodeAddr,
@@ -751,6 +786,8 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 		proc.UpstreamAddr = parentAddr
 		proc.Reachable = processor.Reachable
 		proc.UnreachableReason = processor.UnreachableReason
+		proc.NodeType = processor.NodeType
+		proc.CaptureInterfaces = processor.CaptureInterfaces
 		// Invalidate cache when hierarchy changes
 		m.connectionMgr.InvalidateRootProcessorCache("")
 	}
@@ -803,12 +840,14 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 	if _, exists := m.connectionMgr.Processors[nodeAddr]; !exists {
 		// Discover this processor
 		m.connectionMgr.Processors[nodeAddr] = &store.ProcessorConnection{
-			Address:      nodeAddr,
-			State:        store.ProcessorStateUnknown,
-			ProcessorID:  node.ProcessorId,
-			Status:       node.Status,
-			TLSInsecure:  tlsInsecure, // Inherit TLS setting from connected processor
-			UpstreamAddr: parentAddr,  // Use parent from topology tree, not node.UpstreamProcessor
+			Address:           nodeAddr,
+			State:             store.ProcessorStateUnknown,
+			ProcessorID:       node.ProcessorId,
+			Status:            node.Status,
+			TLSInsecure:       tlsInsecure, // Inherit TLS setting from connected processor
+			UpstreamAddr:      parentAddr,  // Use parent from topology tree, not node.UpstreamProcessor
+			NodeType:          node.NodeType,
+			CaptureInterfaces: node.CaptureInterfaces,
 		}
 		logger.Debug("Discovered processor from topology",
 			"address", nodeAddr,
@@ -822,6 +861,9 @@ func (m Model) processTopologyNode(node *management.ProcessorNode, address strin
 		proc.Status = node.Status
 		// Update UpstreamAddr based on topology tree structure
 		proc.UpstreamAddr = parentAddr
+		// Update node type and capture interfaces
+		proc.NodeType = node.NodeType
+		proc.CaptureInterfaces = node.CaptureInterfaces
 		// Invalidate cache when hierarchy changes
 		m.connectionMgr.InvalidateRootProcessorCache("")
 		// Update TLS setting if this is a discovered processor

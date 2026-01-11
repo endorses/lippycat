@@ -247,6 +247,10 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 			procHeader = proc.ProcessorID
 		}
 
+		// Add node type badge
+		nodeTypeBadge := buildNodeTypeBadge(proc.NodeType, proc.CaptureInterfaces)
+		procHeader = nodeTypeBadge + " " + procHeader
+
 		// Add depth indicator to header
 		if proc.HierarchyDepth >= 0 {
 			depthIndicator := fmt.Sprintf("[L%d]", proc.HierarchyDepth)

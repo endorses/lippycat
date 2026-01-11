@@ -569,6 +569,15 @@ message TopologyResponse {
     ProcessorNode processor = 1;
 }
 
+// NodeType distinguishes between different processor types
+enum NodeType {
+    // Pure processor: receives packets from remote hunters (default)
+    NODE_TYPE_PROCESSOR = 0;
+
+    // Tap: captures packets locally from network interfaces
+    NODE_TYPE_TAP = 1;
+}
+
 // ProcessorNode represents a processor in the topology tree
 message ProcessorNode {
     // Processor address
@@ -597,6 +606,12 @@ message ProcessorNode {
 
     // Reason why processor is unreachable (empty if reachable)
     string unreachable_reason = 9;
+
+    // Node type: TAP captures locally, PROCESSOR receives from hunters
+    NodeType node_type = 10;
+
+    // Interfaces being captured (only populated for TAP nodes)
+    repeated string capture_interfaces = 11;
 }
 
 // TopologySubscribeRequest to subscribe to topology updates

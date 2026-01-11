@@ -66,6 +66,9 @@ type LocalSource struct {
 	// Optional VoIP processing for SIP/RTP metadata extraction
 	voipProcessor VoIPProcessor
 
+	// Optional DNS processing for DNS parsing and tunneling detection
+	dnsProcessor DNSProcessor
+
 	// Stats tracking
 	stats *AtomicStats
 
@@ -159,6 +162,23 @@ func (s *LocalSource) GetVoIPProcessor() VoIPProcessor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.voipProcessor
+}
+
+// SetDNSProcessor sets an optional DNS processor for DNS parsing and tunneling detection.
+// When set, DNS packets are parsed and metadata is attached to the CapturedPacket.
+// Pass nil to disable DNS processing.
+func (s *LocalSource) SetDNSProcessor(processor DNSProcessor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dnsProcessor = processor
+}
+
+// GetDNSProcessor returns the DNS processor if set.
+// Returns nil if no DNS processor is configured.
+func (s *LocalSource) GetDNSProcessor() DNSProcessor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dnsProcessor
 }
 
 // Start begins packet capture. Blocks until ctx is cancelled.
@@ -266,6 +286,7 @@ func (s *LocalSource) batchingLoop() {
 			s.mu.Lock()
 			filter := s.appFilter
 			voipProc := s.voipProcessor
+			dnsProc := s.dnsProcessor
 			s.mu.Unlock()
 
 			// Convert to protobuf format first
@@ -279,6 +300,18 @@ func (s *LocalSource) batchingLoop() {
 				if result := voipProc.Process(pktInfo.Packet); result != nil && result.IsVoIPPacket() {
 					pbPkt.Metadata = result.GetMetadata()
 					isVoIPPacket = true
+				}
+			}
+
+			// Apply DNS processing if enabled and not a VoIP packet
+			// DNS packets are not VoIP, so skip if already identified as VoIP
+			if dnsProc != nil && !isVoIPPacket {
+				if dnsMetadata := dnsProc.ProcessPacket(pktInfo.Packet); dnsMetadata != nil {
+					// Create metadata if nil, then set DNS field
+					if pbPkt.Metadata == nil {
+						pbPkt.Metadata = &data.PacketMetadata{}
+					}
+					pbPkt.Metadata.Dns = dnsMetadata
 				}
 			}
 
@@ -415,6 +448,11 @@ func (s *LocalSource) Stop() {
 
 	if s.cancel != nil {
 		s.cancel()
+	}
+
+	// Stop DNS processor if set
+	if s.dnsProcessor != nil {
+		s.dnsProcessor.Stop()
 	}
 }
 

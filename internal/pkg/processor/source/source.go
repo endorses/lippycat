@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/google/gopacket"
 )
 
 // PacketSource abstracts the origin of packets for the processor.
@@ -30,6 +31,17 @@ type PacketSource interface {
 	// SourceID returns a unique identifier for this source.
 	// For GRPCSource this could be "grpc", for LocalSource the interface name.
 	SourceID() string
+}
+
+// DNSProcessor provides DNS packet parsing and tunneling detection.
+// Implementations parse DNS packets and optionally detect tunneling behavior.
+type DNSProcessor interface {
+	// ProcessPacket parses a DNS packet and returns proto-ready metadata.
+	// Returns nil if the packet is not a DNS packet or parsing fails.
+	ProcessPacket(packet gopacket.Packet) *data.DNSMetadata
+
+	// Stop stops the DNS processor and releases resources.
+	Stop()
 }
 
 // PacketBatch contains a batch of packets from a source.

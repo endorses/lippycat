@@ -76,10 +76,10 @@ Benefits:
 
 **File:** `internal/pkg/processor/source/local.go`
 
-- [ ] Add `dnsProcessor` field (same interface as hunter)
-- [ ] Initialize when DNS tunneling detection enabled
-- [ ] Process DNS packets before batching
-- [ ] Populate metadata in CapturedPacket
+- [x] Add `dnsProcessor` field (same interface as hunter)
+- [x] Initialize when DNS tunneling detection enabled
+- [x] Process DNS packets before batching
+- [x] Populate metadata in CapturedPacket
 
 ### Phase 5: Processor-Side Aggregation
 
@@ -103,10 +103,12 @@ Benefits:
 | File | Changes |
 |------|---------|
 | `api/proto/data.proto` | Add DNSMetadata message |
-| `cmd/tap/tap_dns.go` | Add --detect-tunneling flag |
+| `cmd/tap/tap_dns.go` | Add --detect-tunneling flag, wire DNS processor |
 | `cmd/hunt/dns.go` | Add --detect-tunneling flag |
 | `internal/pkg/hunter/dns_processor.go` | New: DNS parsing + tunneling at hunter |
 | `internal/pkg/hunter/hunter.go` | Wire DNS processor |
+| `internal/pkg/processor/source/source.go` | DNSProcessor interface |
+| `internal/pkg/processor/source/dns_processor.go` | New: DNS processor impl for tap mode |
 | `internal/pkg/processor/source/local.go` | DNS processing for tap mode |
 | `internal/pkg/processor/processor.go` | Aggregated tunneling stats |
 | `internal/pkg/remotecapture/client_conversion.go` | Proto to types conversion |

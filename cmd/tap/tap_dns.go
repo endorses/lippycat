@@ -277,6 +277,11 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	localSource.SetApplicationFilter(appFilter)
 	localTarget.SetApplicationFilter(appFilter)
 
+	// Wire DNS processor for DNS parsing and tunneling detection
+	// dns.detect_tunneling is already set in viper above
+	dnsProcessor := source.NewDNSProcessorFromViper()
+	localSource.SetDNSProcessor(dnsProcessor)
+
 	// Set the local source and target on the processor
 	p.SetPacketSource(localSource)
 	p.SetFilterTarget(localTarget)

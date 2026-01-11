@@ -42,15 +42,15 @@ Benefits:
 
 **File:** `cmd/tap/tap_dns.go`
 
-- [ ] Add `--detect-tunneling` flag (default: true)
-- [ ] Bind to viper: `viper.BindPFlag("dns.detect_tunneling", ...)`
-- [ ] Set viper value in runDNSTap()
+- [x] Add `--detect-tunneling` flag (default: true)
+- [x] Bind to viper: `viper.BindPFlag("dns.detect_tunneling", ...)`
+- [x] Set viper value in runDNSTap()
 
 **File:** `cmd/hunt/dns.go`
 
-- [ ] Add `--detect-tunneling` flag (default: true)
-- [ ] Bind to viper: `viper.BindPFlag("dns.detect_tunneling", ...)`
-- [ ] Set viper value in runDNSHunt()
+- [x] Add `--detect-tunneling` flag (default: true)
+- [x] Bind to viper: `viper.BindPFlag("dns.detect_tunneling", ...)`
+- [x] Set viper value in runDNSHunt()
 
 ### Phase 3: Hunter-Side DNS Detection
 

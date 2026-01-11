@@ -22,10 +22,11 @@ import (
 
 var (
 	// DNS-specific flags
-	dnsTapPorts         string
-	dnsTapUDPOnly       bool
-	dnsTapDomainPattern string
-	dnsTapDomainsFile   string
+	dnsTapPorts           string
+	dnsTapUDPOnly         bool
+	dnsTapDomainPattern   string
+	dnsTapDomainsFile     string
+	dnsTapDetectTunneling bool
 )
 
 var dnsTapCmd = &cobra.Command{
@@ -60,12 +61,14 @@ func init() {
 	dnsTapCmd.Flags().BoolVar(&dnsTapUDPOnly, "udp-only", false, "Capture UDP DNS only (ignore TCP DNS)")
 	dnsTapCmd.Flags().StringVar(&dnsTapDomainPattern, "domain", "", "Filter by domain pattern (glob-style, e.g., '*.example.com')")
 	dnsTapCmd.Flags().StringVar(&dnsTapDomainsFile, "domains-file", "", "Load domain patterns from file (one per line, # for comments)")
+	dnsTapCmd.Flags().BoolVar(&dnsTapDetectTunneling, "detect-tunneling", true, "Enable DNS tunneling detection")
 
 	// Bind DNS-specific flags to viper
 	_ = viper.BindPFlag("tap.dns.ports", dnsTapCmd.Flags().Lookup("dns-port"))
 	_ = viper.BindPFlag("tap.dns.udp_only", dnsTapCmd.Flags().Lookup("udp-only"))
 	_ = viper.BindPFlag("tap.dns.domain_pattern", dnsTapCmd.Flags().Lookup("domain"))
 	_ = viper.BindPFlag("tap.dns.domains_file", dnsTapCmd.Flags().Lookup("domains-file"))
+	_ = viper.BindPFlag("dns.detect_tunneling", dnsTapCmd.Flags().Lookup("detect-tunneling"))
 }
 
 func runDNSTap(cmd *cobra.Command, args []string) error {
@@ -114,11 +117,16 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Loaded domain patterns from file", "count", len(filePatterns), "file", domainsFile)
 	}
 
+	// Set tunneling detection config for processor-level DNS analysis
+	detectTunneling := getBoolConfig("dns.detect_tunneling", dnsTapDetectTunneling)
+	viper.Set("dns.detect_tunneling", detectTunneling)
+
 	logger.Info("DNS BPF filter configured",
 		"udp_only", dnsTapUDPOnly,
 		"ports", dnsTapPorts,
 		"domain_pattern", domainPattern,
 		"domains_file", domainsFile,
+		"detect_tunneling", detectTunneling,
 		"effective_filter", effectiveBPFFilter)
 
 	// Build auto-rotate PCAP config - default for DNS mode

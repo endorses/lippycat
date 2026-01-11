@@ -19,8 +19,9 @@ import (
 
 var (
 	// DNS-specific flags for hunter mode
-	hunterDNSPorts   string
-	hunterDNSUDPOnly bool
+	hunterDNSPorts           string
+	hunterDNSUDPOnly         bool
+	hunterDNSDetectTunneling bool
 )
 
 var dnsHuntCmd = &cobra.Command{
@@ -53,10 +54,12 @@ func init() {
 	// Note: Application-level domain filtering is managed by the processor and pushed to hunters
 	dnsHuntCmd.Flags().StringVar(&hunterDNSPorts, "dns-port", "53", "DNS port(s) to capture, comma-separated (default: 53)")
 	dnsHuntCmd.Flags().BoolVar(&hunterDNSUDPOnly, "udp-only", false, "Capture UDP DNS only (ignore TCP DNS)")
+	dnsHuntCmd.Flags().BoolVar(&hunterDNSDetectTunneling, "detect-tunneling", true, "Enable DNS tunneling detection at edge")
 
 	// Bind to viper
 	_ = viper.BindPFlag("hunter.dns.ports", dnsHuntCmd.Flags().Lookup("dns-port"))
 	_ = viper.BindPFlag("hunter.dns.udp_only", dnsHuntCmd.Flags().Lookup("udp-only"))
+	_ = viper.BindPFlag("dns.detect_tunneling", dnsHuntCmd.Flags().Lookup("detect-tunneling"))
 }
 
 func runDNSHunt(cmd *cobra.Command, args []string) error {
@@ -86,9 +89,14 @@ func runDNSHunt(cmd *cobra.Command, args []string) error {
 	}
 	effectiveBPFFilter := filterBuilder.Build(filterConfig)
 
+	// Set tunneling detection config for hunter-side DNS analysis
+	detectTunneling := getBoolConfig("dns.detect_tunneling", hunterDNSDetectTunneling)
+	viper.Set("dns.detect_tunneling", detectTunneling)
+
 	logger.Info("DNS BPF filter configured",
 		"udp_only", hunterDNSUDPOnly,
 		"ports", hunterDNSPorts,
+		"detect_tunneling", detectTunneling,
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)

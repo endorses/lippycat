@@ -276,8 +276,9 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 			procLines = append(procLines, "↑ [upstream]")
 		}
 
-		// Add reachability status
-		if !proc.Reachable {
+		// Add reachability status - only show "Unreachable" for failed connections,
+		// not for processors that are connecting or have never been connected yet
+		if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed {
 			if proc.UnreachableReason != "" {
 				procLines = append(procLines, fmt.Sprintf("⚠ Unreachable: %s", proc.UnreachableReason))
 			} else {

@@ -262,8 +262,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				}
 			}
 
-			// Add reachability indicator
-			if !proc.Reachable {
+			// Add reachability indicator (only for failed connections)
+			if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed {
 				depthIndicator += "✗" // Processor unreachable
 			}
 
@@ -303,8 +303,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				}
 			}
 
-			// Add reachability indicator
-			if !proc.Reachable {
+			// Add reachability indicator (only for failed connections)
+			if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed {
 				depthIndicator += "✗" // Processor unreachable
 			}
 
@@ -332,8 +332,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 		}
 		linesRendered++
 
-		// Show unreachable reason if processor is not reachable
-		if !proc.Reachable && proc.UnreachableReason != "" {
+		// Show unreachable reason if processor is not reachable (only for failed connections)
+		if !proc.Reachable && proc.ConnectionState == ProcessorConnectionStateFailed && proc.UnreachableReason != "" {
 			unreachableStyle := lipgloss.NewStyle().Foreground(params.Theme.ErrorColor).Faint(true)
 			unreachableLine := fmt.Sprintf("    ⚠ Unreachable: %s", proc.UnreachableReason)
 			b.WriteString(unreachableStyle.Render(unreachableLine) + "\n")

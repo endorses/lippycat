@@ -242,6 +242,7 @@ func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatu
 		Hunters:           myHunters,
 		NodeType:          nodeType,
 		CaptureInterfaces: captureInterfaces,
+		Reachable:         true, // Current processor is always reachable (we're responding)
 	}
 
 	// Query each downstream processor for its topology

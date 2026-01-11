@@ -1,3 +1,5 @@
+//go:build hunter || all
+
 package hunter
 
 import (

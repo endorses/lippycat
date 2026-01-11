@@ -71,6 +71,8 @@ var (
 	tlsCAFile       string
 	tlsSkipVerify   bool
 	insecureAllowed bool
+	// Filter policy
+	noFilterPolicy string
 )
 
 func init() {
@@ -113,6 +115,9 @@ func init() {
 	HuntCmd.PersistentFlags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (INSECURE - testing only)")
 	HuntCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 
+	// Filter policy configuration
+	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "allow", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
+
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("hunter.processor_addr", HuntCmd.PersistentFlags().Lookup("processor"))
 	_ = viper.BindPFlag("hunter.id", HuntCmd.PersistentFlags().Lookup("id"))
@@ -136,6 +141,7 @@ func init() {
 	_ = viper.BindPFlag("hunter.tls.key_file", HuntCmd.PersistentFlags().Lookup("tls-key"))
 	_ = viper.BindPFlag("hunter.tls.ca_file", HuntCmd.PersistentFlags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.PersistentFlags().Lookup("tls-skip-verify"))
+	_ = viper.BindPFlag("hunter.no_filter_policy", HuntCmd.PersistentFlags().Lookup("no-filter-policy"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {
@@ -174,6 +180,8 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
 		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+		// Filter policy
+		NoFilterPolicy: getStringConfig("hunter.no_filter_policy", noFilterPolicy),
 	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled

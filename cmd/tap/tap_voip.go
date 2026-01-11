@@ -12,7 +12,6 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
-	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -374,9 +373,9 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	localTarget.SetBPFUpdater(localSource)
 
 	// Create ApplicationFilter for VoIP/content filtering (same as hunt mode)
-	appFilter, err := hunter.NewApplicationFilter(nil)
+	appFilter, err := createApplicationFilter()
 	if err != nil {
-		return fmt.Errorf("failed to create application filter: %w", err)
+		return err
 	}
 
 	// Wire ApplicationFilter to both LocalSource and LocalTarget

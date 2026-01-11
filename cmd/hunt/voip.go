@@ -150,6 +150,8 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
 		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
 		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+		// Filter policy
+		NoFilterPolicy: getStringConfig("hunter.no_filter_policy", noFilterPolicy),
 	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled

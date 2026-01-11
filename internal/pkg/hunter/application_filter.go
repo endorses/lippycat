@@ -24,6 +24,16 @@ import (
 	"github.com/kentik/patricia/generics_tree"
 )
 
+// NoFilterPolicy controls behavior when no filters are configured
+type NoFilterPolicy string
+
+const (
+	// NoFilterPolicyAllow allows all packets when no filters are set (default, current behavior)
+	NoFilterPolicyAllow NoFilterPolicy = "allow"
+	// NoFilterPolicyDeny blocks all packets when no filters are set (useful for remote-configured nodes)
+	NoFilterPolicyDeny NoFilterPolicy = "deny"
+)
+
 // parsedFilter holds a parsed pattern with its type for matching
 type parsedFilter struct {
 	id          string                // Filter ID from management.Filter (for LI correlation)
@@ -70,8 +80,9 @@ type ApplicationFilter struct {
 
 	mu               sync.RWMutex
 	enabled          bool
-	gpuACBuilt       bool // Whether GPU has default (SIPUser+PhoneNumber) AC automaton built
-	gpuSIPURIACBuilt bool // Whether GPU has SIPURI AC automaton built
+	gpuACBuilt       bool           // Whether GPU has default (SIPUser+PhoneNumber) AC automaton built
+	gpuSIPURIACBuilt bool           // Whether GPU has SIPURI AC automaton built
+	noFilterPolicy   NoFilterPolicy // Policy when no filters are configured (allow/deny)
 }
 
 // NewApplicationFilter creates a new application-layer filter with optional GPU acceleration
@@ -117,6 +128,7 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		hasCIDRFilters:          false,
 		enabled:                 config != nil && config.Enabled,
 		gpuACBuilt:              false,
+		noFilterPolicy:          NoFilterPolicyAllow, // Default: allow all when no filters
 	}
 
 	// Initialize GPU accelerator if enabled
@@ -135,6 +147,23 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		"pattern_algorithm", string(acAlgorithm),
 		"gpu_enabled", af.enabled)
 	return af, nil
+}
+
+// SetNoFilterPolicy sets the policy for when no filters are configured.
+// NoFilterPolicyAllow (default) allows all packets when no filters are set.
+// NoFilterPolicyDeny blocks all packets when no filters are set.
+func (af *ApplicationFilter) SetNoFilterPolicy(policy NoFilterPolicy) {
+	af.mu.Lock()
+	defer af.mu.Unlock()
+	af.noFilterPolicy = policy
+	logger.Info("No-filter policy updated", "policy", string(policy))
+}
+
+// GetNoFilterPolicy returns the current no-filter policy.
+func (af *ApplicationFilter) GetNoFilterPolicy() NoFilterPolicy {
+	af.mu.RLock()
+	defer af.mu.RUnlock()
+	return af.noFilterPolicy
 }
 
 // NewVoIPFilter is a deprecated alias for NewApplicationFilter
@@ -440,9 +469,9 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
-	// If no filters, match everything
+	// If no filters, use the no-filter policy
 	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters {
-		return true
+		return af.noFilterPolicy == NoFilterPolicyAllow
 	}
 
 	// Check IP addresses first (applies to all protocols)
@@ -517,9 +546,9 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
-	// If no filters, match everything (but no specific filter IDs)
+	// If no filters, use the no-filter policy (but no specific filter IDs)
 	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters {
-		return true, nil
+		return af.noFilterPolicy == NoFilterPolicyAllow, nil
 	}
 
 	// Check IP addresses first (applies to all protocols)
@@ -672,10 +701,11 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 
 	results := make([]bool, len(packets))
 
-	// If no filters, match everything
+	// If no filters, use the no-filter policy
 	if len(af.sipUsers) == 0 && len(af.sipURIs) == 0 && len(af.phoneNumbers) == 0 {
+		matchAll := af.noFilterPolicy == NoFilterPolicyAllow
 		for i := range results {
-			results[i] = true
+			results[i] = matchAll
 		}
 		return results
 	}

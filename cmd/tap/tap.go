@@ -146,6 +146,9 @@ var (
 
 	// Security flags
 	insecureAllowed bool
+
+	// Filter policy
+	noFilterPolicy string
 )
 
 func init() {
@@ -232,6 +235,11 @@ func init() {
 	TapCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS")
 
 	// ============================================================
+	// Filter Policy Configuration (persistent for voip subcommand)
+	// ============================================================
+	TapCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "allow", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
+
+	// ============================================================
 	// Viper Bindings
 	// ============================================================
 	// Capture configuration
@@ -289,6 +297,9 @@ func init() {
 	_ = viper.BindPFlag("tap.tls.ca_file", TapCmd.PersistentFlags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("tap.tls.client_auth", TapCmd.PersistentFlags().Lookup("tls-client-auth"))
 	_ = viper.BindPFlag("security.api_keys.enabled", TapCmd.PersistentFlags().Lookup("api-key-auth"))
+
+	// Filter policy
+	_ = viper.BindPFlag("tap.no_filter_policy", TapCmd.PersistentFlags().Lookup("no-filter-policy"))
 }
 
 func runTap(cmd *cobra.Command, args []string) error {
@@ -468,9 +479,9 @@ func runTap(cmd *cobra.Command, args []string) error {
 	localTarget.SetBPFUpdater(localSource)
 
 	// Create ApplicationFilter for VoIP/content filtering (same as hunt mode)
-	appFilter, err := hunter.NewApplicationFilter(nil)
+	appFilter, err := createApplicationFilter()
 	if err != nil {
-		return fmt.Errorf("failed to create application filter: %w", err)
+		return err
 	}
 
 	// Wire ApplicationFilter to both LocalSource and LocalTarget
@@ -561,6 +572,23 @@ func getBoolConfig(key string, flagValue bool) bool {
 		return viper.GetBool(key)
 	}
 	return flagValue
+}
+
+// createApplicationFilter creates an ApplicationFilter with the no-filter policy applied.
+// This is a shared helper for all tap subcommands to avoid duplication.
+func createApplicationFilter() (*hunter.ApplicationFilter, error) {
+	appFilter, err := hunter.NewApplicationFilter(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create application filter: %w", err)
+	}
+
+	// Apply no-filter policy if configured
+	effectiveNoFilterPolicy := getStringConfig("tap.no_filter_policy", noFilterPolicy)
+	if effectiveNoFilterPolicy == "deny" {
+		appFilter.SetNoFilterPolicy(hunter.NoFilterPolicyDeny)
+	}
+
+	return appFilter, nil
 }
 
 // parseSizeString parses a size string (e.g., "100M", "1G", "500K") and returns bytes

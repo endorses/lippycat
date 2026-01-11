@@ -52,6 +52,8 @@ type Config struct {
 	DiskBufferEnabled bool   // Enable disk overflow buffer for nuclear-proof resilience
 	DiskBufferDir     string // Directory for disk buffer (default: /var/tmp/lippycat-buffer)
 	DiskBufferMaxSize uint64 // Maximum disk buffer size in bytes (default: 1GB)
+	// Filter policy
+	NoFilterPolicy string // Policy when no filters: "allow" (default) or "deny"
 }
 
 // Hunter represents a hunter node
@@ -171,10 +173,17 @@ func (h *Hunter) Start(ctx context.Context) error {
 		logger.Warn("Failed to initialize application filter, continuing without it", "error", err)
 	} else {
 		h.applicationFilter = appFilter
+
+		// Apply no-filter policy if configured
+		if h.config.NoFilterPolicy == "deny" {
+			appFilter.SetNoFilterPolicy(NoFilterPolicyDeny)
+		}
+
 		logger.Info("Application filter initialized",
 			"gpu_enabled", h.config.EnableVoIPFilter,
 			"gpu_backend", h.config.GPUBackend,
-			"batch_size", h.config.GPUBatchSize)
+			"batch_size", h.config.GPUBatchSize,
+			"no_filter_policy", h.config.NoFilterPolicy)
 
 		// Wire up application filter to filter manager for hot-reload
 		h.filterManager.SetApplicationFilterUpdater(appFilter)

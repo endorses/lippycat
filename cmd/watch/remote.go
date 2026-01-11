@@ -59,6 +59,14 @@ func runRemote(cmd *cobra.Command, args []string) {
 		viper.Set("tui.tls.key_file", remoteTLSKeyFile)
 	}
 
+	// Auto-enable TLS if any TLS certificate files are provided
+	// This allows users to just provide --tls-ca (or --tls-cert/--tls-key) without needing --tls
+	if !cmd.Flags().Changed("tls") && !remoteInsecure {
+		if cmd.Flags().Changed("tls-ca") || cmd.Flags().Changed("tls-cert") || cmd.Flags().Changed("tls-key") {
+			viper.Set("tui.tls.enabled", true)
+		}
+	}
+
 	// Disable logging to prevent corrupting TUI display
 	logger.Disable()
 	defer logger.Enable()

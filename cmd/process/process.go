@@ -114,6 +114,10 @@ var (
 	voipCommand        string
 	commandTimeout     string
 	commandConcurrency int
+	// DNS tunneling detection command hook flags
+	tunnelingCommand   string
+	tunnelingThreshold float64
+	tunnelingDebounce  string
 	// LI (Lawful Interception) flags - requires -tags li build
 	liEnabled       bool
 	liX1ListenAddr  string
@@ -194,6 +198,11 @@ func init() {
 	ProcessCmd.Flags().StringVar(&commandTimeout, "command-timeout", "30s", "Timeout for command execution (e.g., 30s, 1m)")
 	ProcessCmd.Flags().IntVar(&commandConcurrency, "command-concurrency", 10, "Maximum concurrent command executions")
 
+	// DNS tunneling detection command hook
+	ProcessCmd.Flags().StringVar(&tunnelingCommand, "tunneling-command", "", "Command to execute when DNS tunneling detected (supports %domain%, %score%, %entropy%, %queries%, %srcips%, %hunter%, %timestamp%)")
+	ProcessCmd.Flags().Float64Var(&tunnelingThreshold, "tunneling-threshold", 0.7, "DNS tunneling score threshold for triggering command (0.0-1.0)")
+	ProcessCmd.Flags().StringVar(&tunnelingDebounce, "tunneling-debounce", "5m", "Minimum time between alerts per domain (e.g., 5m, 30s)")
+
 	// LI (Lawful Interception) flags - requires build with -tags li
 	ProcessCmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
 	ProcessCmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
@@ -252,6 +261,10 @@ func init() {
 	_ = viper.BindPFlag("processor.voip_command", ProcessCmd.Flags().Lookup("voip-command"))
 	_ = viper.BindPFlag("processor.command_timeout", ProcessCmd.Flags().Lookup("command-timeout"))
 	_ = viper.BindPFlag("processor.command_concurrency", ProcessCmd.Flags().Lookup("command-concurrency"))
+	// DNS tunneling detection viper bindings
+	_ = viper.BindPFlag("processor.tunneling_command", ProcessCmd.Flags().Lookup("tunneling-command"))
+	_ = viper.BindPFlag("processor.tunneling_threshold", ProcessCmd.Flags().Lookup("tunneling-threshold"))
+	_ = viper.BindPFlag("processor.tunneling_debounce", ProcessCmd.Flags().Lookup("tunneling-debounce"))
 	// LI viper bindings
 	_ = viper.BindPFlag("processor.li.enabled", ProcessCmd.Flags().Lookup("li-enabled"))
 	_ = viper.BindPFlag("processor.li.x1_listen_addr", ProcessCmd.Flags().Lookup("li-x1-listen"))

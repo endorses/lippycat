@@ -27,6 +27,10 @@ var (
 	dnsTapDomainPattern   string
 	dnsTapDomainsFile     string
 	dnsTapDetectTunneling bool
+	// DNS tunneling detection command hook flags
+	dnsTunnelingCommand   string
+	dnsTunnelingThreshold float64
+	dnsTunnelingDebounce  string
 )
 
 var dnsTapCmd = &cobra.Command{
@@ -63,12 +67,21 @@ func init() {
 	dnsTapCmd.Flags().StringVar(&dnsTapDomainsFile, "domains-file", "", "Load domain patterns from file (one per line, # for comments)")
 	dnsTapCmd.Flags().BoolVar(&dnsTapDetectTunneling, "detect-tunneling", true, "Enable DNS tunneling detection")
 
+	// DNS tunneling detection command hook
+	dnsTapCmd.Flags().StringVar(&dnsTunnelingCommand, "tunneling-command", "", "Command to execute when DNS tunneling detected (supports %domain%, %score%, %entropy%, %queries%, %srcips%, %hunter%, %timestamp%)")
+	dnsTapCmd.Flags().Float64Var(&dnsTunnelingThreshold, "tunneling-threshold", 0.7, "DNS tunneling score threshold for triggering command (0.0-1.0)")
+	dnsTapCmd.Flags().StringVar(&dnsTunnelingDebounce, "tunneling-debounce", "5m", "Minimum time between alerts per domain (e.g., 5m, 30s)")
+
 	// Bind DNS-specific flags to viper
 	_ = viper.BindPFlag("tap.dns.ports", dnsTapCmd.Flags().Lookup("dns-port"))
 	_ = viper.BindPFlag("tap.dns.udp_only", dnsTapCmd.Flags().Lookup("udp-only"))
 	_ = viper.BindPFlag("tap.dns.domain_pattern", dnsTapCmd.Flags().Lookup("domain"))
 	_ = viper.BindPFlag("tap.dns.domains_file", dnsTapCmd.Flags().Lookup("domains-file"))
 	_ = viper.BindPFlag("dns.detect_tunneling", dnsTapCmd.Flags().Lookup("detect-tunneling"))
+	// DNS tunneling detection viper bindings
+	_ = viper.BindPFlag("processor.tunneling_command", dnsTapCmd.Flags().Lookup("tunneling-command"))
+	_ = viper.BindPFlag("processor.tunneling_threshold", dnsTapCmd.Flags().Lookup("tunneling-threshold"))
+	_ = viper.BindPFlag("processor.tunneling_debounce", dnsTapCmd.Flags().Lookup("tunneling-debounce"))
 }
 
 func runDNSTap(cmd *cobra.Command, args []string) error {

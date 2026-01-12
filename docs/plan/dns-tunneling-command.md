@@ -34,17 +34,17 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 
 **File:** `cmd/process/process.go`
 
-- [ ] Add `--tunneling-command` flag (string)
-- [ ] Add `--tunneling-threshold` flag (float64, default: 0.7)
-- [ ] Add `--tunneling-debounce` flag (duration, default: 5m)
-- [ ] Bind to viper: `processor.tunneling_command`, `processor.tunneling_threshold`, `processor.tunneling_debounce`
+- [x] Add `--tunneling-command` flag (string)
+- [x] Add `--tunneling-threshold` flag (float64, default: 0.7)
+- [x] Add `--tunneling-debounce` flag (duration, default: 5m)
+- [x] Bind to viper: `processor.tunneling_command`, `processor.tunneling_threshold`, `processor.tunneling_debounce`
 
 **File:** `cmd/tap/tap_dns.go`
 
-- [ ] Add `--tunneling-command` flag (string)
-- [ ] Add `--tunneling-threshold` flag (float64, default: 0.7)
-- [ ] Add `--tunneling-debounce` flag (duration, default: 5m)
-- [ ] Bind to viper (same keys as processor)
+- [x] Add `--tunneling-command` flag (string)
+- [x] Add `--tunneling-threshold` flag (float64, default: 0.7)
+- [x] Add `--tunneling-debounce` flag (duration, default: 5m)
+- [x] Bind to viper (same keys as processor)
 
 ### Phase 2: Extend CommandExecutor
 

@@ -51,6 +51,25 @@ sudo lc tap voip -i eth0 --udp-only --sip-port 5060 --insecure
 sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
 ```
 
+### `lc tap dns` - DNS Standalone Capture
+
+DNS-optimized capture with tunneling detection and alerting.
+
+```bash
+# DNS capture with tunneling detection
+sudo lc tap dns --interface eth0 --insecure
+
+# DNS capture with custom ports
+sudo lc tap dns -i eth0 --dns-port 53,5353 --udp-only --insecure
+
+# DNS capture with tunneling alerts
+sudo lc tap dns -i eth0 \
+  --tunneling-command 'echo "ALERT: %domain% score=%score%" >> /var/log/tunneling.log' \
+  --tunneling-threshold 0.7 \
+  --tunneling-debounce 5m \
+  --insecure
+```
+
 ## Command Flags
 
 ### Capture Configuration
@@ -173,6 +192,57 @@ lc tap voip -i eth0 --voip-command 'notify.sh %callid% %caller% %called%' --inse
 - `--pattern-buffer-mb` - Memory budget for pattern buffer in MB
 - `--tcp-performance-mode` - TCP performance mode: `minimal`, `balanced`, `high_performance`, `low_latency`
 
+### DNS-Specific Flags (tap dns only)
+
+These flags are only available with the `lc tap dns` subcommand:
+
+#### DNS Filtering
+
+- `--dns-port` - DNS port(s) to capture, comma-separated (default: `53`)
+- `--udp-only` - Capture UDP DNS only (ignore TCP DNS)
+- `--domain` - Filter by domain pattern (glob-style, e.g., `*.example.com`)
+- `--domains-file` - Load domain patterns from file (one per line, # for comments)
+- `--detect-tunneling` - Enable DNS tunneling detection (default: `true`)
+
+#### DNS Tunneling Command Hook
+
+- `--tunneling-command` - Command to execute when DNS tunneling is detected
+- `--tunneling-threshold` - DNS tunneling score threshold for triggering command (0.0-1.0, default: `0.7`)
+- `--tunneling-debounce` - Minimum time between alerts per domain (default: `5m`)
+
+```bash
+# Alert on DNS tunneling detection
+sudo lc tap dns -i eth0 \
+  --tunneling-command 'echo "ALERT: %domain% score=%score%" >> /var/log/tunneling.log' \
+  --tunneling-threshold 0.7 \
+  --tunneling-debounce 5m \
+  --insecure
+
+# Send to SIEM
+sudo lc tap dns -i eth0 \
+  --tunneling-command 'curl -X POST https://siem.example.com/alert \
+    -d "domain=%domain%&score=%score%&entropy=%entropy%&queries=%queries%&srcips=%srcips%&time=%timestamp%"' \
+  --tunneling-threshold 0.8 \
+  --insecure
+```
+
+**Tunneling Command Placeholders:**
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `%domain%` | Suspicious domain (or parent) | `evil.example.com` |
+| `%score%` | Tunneling score (0.0-1.0) | `0.85` |
+| `%entropy%` | Entropy score | `4.20` |
+| `%queries%` | Query count observed | `1523` |
+| `%srcips%` | Source IPs (comma-separated) | `192.168.1.10,192.168.1.20` |
+| `%hunter%` | Hunter ID ("local" for tap mode) | `local` |
+| `%timestamp%` | Detection time (RFC3339) | `2025-01-11T14:30:22Z` |
+
+**Alerting Behavior:**
+- Alerts trigger when a domain's tunneling score crosses the threshold
+- Debounce prevents alert fatigue (same domain won't alert again until debounce expires)
+- Commands execute asynchronously (don't block packet processing)
+
 ## Use Cases
 
 ### Single-Machine VoIP Capture
@@ -184,6 +254,24 @@ sudo lc tap voip -i eth0 \
   --sip-user alicent,robb \
   --per-call-pcap \
   --per-call-pcap-dir /var/voip/calls \
+  --tls-cert server.crt --tls-key server.key
+```
+
+Monitor via TUI:
+```bash
+lc watch remote --addr localhost:50051 --tls-ca ca.crt
+```
+
+### Single-Machine DNS Capture
+
+When you need DNS monitoring with tunneling detection on a single machine:
+
+```bash
+sudo lc tap dns -i eth0 \
+  --auto-rotate-pcap \
+  --auto-rotate-pcap-dir /var/dns/pcaps \
+  --tunneling-command '/opt/scripts/alert.sh %domain% %score% %srcips%' \
+  --tunneling-threshold 0.7 \
   --tls-cert server.crt --tls-key server.key
 ```
 
@@ -321,20 +409,35 @@ tap:
     pattern_algorithm: "auto"
     pattern_buffer_mb: 64
     tcp_performance_mode: "balanced"
+
+  # DNS-specific (for tap dns)
+  dns:
+    ports: "53"
+    udp_only: false
+    domain_pattern: ""
+    domains_file: ""
+    detect_tunneling: true
+
+# DNS tunneling detection alerts (applies to processor and tap dns)
+processor:
+  tunneling_command: "/opt/scripts/alert.sh %domain% %score% %srcips%"
+  tunneling_threshold: 0.7
+  tunneling_debounce: "5m"
 ```
 
 ## Comparison with Other Modes
 
-| Feature | `lc sniff` | `lc tap` | `lc tap voip` | `lc hunt` + `lc process` |
-|---------|-----------|----------|---------------|--------------------------|
-| Local capture | Yes | Yes | Yes | Hunt only |
-| TUI server | No | Yes | Yes | Process only |
-| Per-call PCAP | No | No | Yes (default) | Process only |
-| Auto-rotate PCAP | No | Yes | Yes | Process only |
-| Upstream forwarding | No | Yes | Yes | Process only |
-| Distributed capture | No | No | No | Yes |
-| Deployment | Single machine | Single machine | Single machine | Multi-machine |
-| Use case | Quick analysis | General capture | VoIP capture | Distributed production |
+| Feature | `lc sniff` | `lc tap` | `lc tap voip` | `lc tap dns` | `lc hunt` + `lc process` |
+|---------|-----------|----------|---------------|--------------|--------------------------|
+| Local capture | Yes | Yes | Yes | Yes | Hunt only |
+| TUI server | No | Yes | Yes | Yes | Process only |
+| Per-call PCAP | No | No | Yes (default) | No | Process only |
+| Auto-rotate PCAP | No | Yes | Yes | Yes (default) | Process only |
+| DNS tunneling detection | No | No | No | Yes | Process only |
+| Upstream forwarding | No | Yes | Yes | Yes | Process only |
+| Distributed capture | No | No | No | No | Yes |
+| Deployment | Single machine | Single machine | Single machine | Single machine | Multi-machine |
+| Use case | Quick analysis | General capture | VoIP capture | DNS monitoring | Distributed production |
 
 ## Performance Tuning
 

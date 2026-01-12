@@ -181,6 +181,54 @@ lc process --listen :50051 \
 - Archive completed calls: `tar -czf %dirname%.tar.gz %dirname%`
 - Trigger analysis pipelines: `analyze-voip.sh %callid% %caller% %called%`
 
+#### DNS Tunneling Command Hook
+
+Execute custom commands when DNS tunneling is detected:
+
+- `--tunneling-command` - Command to execute when DNS tunneling is detected
+- `--tunneling-threshold` - DNS tunneling score threshold for triggering command (0.0-1.0, default: `0.7`)
+- `--tunneling-debounce` - Minimum time between alerts per domain (default: `5m`)
+
+```bash
+# Alert on DNS tunneling detection
+lc process --listen :50051 \
+  --tunneling-command 'echo "ALERT: %domain% score=%score%" >> /var/log/tunneling.log' \
+  --tunneling-threshold 0.7 \
+  --tunneling-debounce 5m
+
+# Send to SIEM
+lc process --listen :50051 \
+  --tunneling-command 'curl -X POST https://siem.example.com/alert \
+    -d "domain=%domain%&score=%score%&entropy=%entropy%&queries=%queries%&srcips=%srcips%&hunter=%hunter%&time=%timestamp%"' \
+  --tunneling-threshold 0.8 \
+  --tunneling-debounce 10m
+
+# Combined with PCAP and VoIP commands
+lc process --listen :50051 \
+  --per-call-pcap \
+  --pcap-command 'gzip %pcap%' \
+  --voip-command 'notify-voip.sh %callid%' \
+  --tunneling-command 'notify-tunneling.sh %domain% %score%'
+```
+
+**Tunneling Command Placeholders:**
+
+| Placeholder | Description | Example |
+|-------------|-------------|---------|
+| `%domain%` | Suspicious domain (or parent) | `evil.example.com` |
+| `%score%` | Tunneling score (0.0-1.0) | `0.85` |
+| `%entropy%` | Entropy score | `4.20` |
+| `%queries%` | Query count observed | `1523` |
+| `%srcips%` | Source IPs (comma-separated) | `192.168.1.10,192.168.1.20` |
+| `%hunter%` | Hunter ID (distributed) or "local" | `hunter-01` |
+| `%timestamp%` | Detection time (RFC3339) | `2025-01-11T14:30:22Z` |
+
+**Alerting Behavior:**
+- Alerts trigger when a domain's tunneling score crosses the threshold
+- Debounce prevents alert fatigue (same domain won't alert again until debounce expires)
+- Source IPs are tracked across all hunters for cross-hunter correlation
+- Commands execute asynchronously (don't block packet processing)
+
 ### Protocol Detection
 
 - `-d, --enable-detection` - Enable centralized protocol detection (default: true)
@@ -428,6 +476,11 @@ processor:
   voip_command: "/opt/scripts/process-call.sh %callid% %dirname% %caller% %called% %calldate%"
   command_timeout: "30s"
   command_concurrency: 10
+
+  # DNS tunneling detection alerts
+  tunneling_command: "/opt/scripts/alert.sh %domain% %score% %srcips%"
+  tunneling_threshold: 0.7
+  tunneling_debounce: "5m"
 
   # TLS security
   tls:

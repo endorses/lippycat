@@ -172,17 +172,17 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 
 **File:** `cmd/process/README.md`
 
-- [ ] Document `--tunneling-command` flag
-- [ ] Document `--tunneling-threshold` flag
-- [ ] Document `--tunneling-debounce` flag
-- [ ] Add usage examples
-- [ ] Add config file example to Configuration File section
+- [x] Document `--tunneling-command` flag
+- [x] Document `--tunneling-threshold` flag
+- [x] Document `--tunneling-debounce` flag
+- [x] Add usage examples
+- [x] Add config file example to Configuration File section
 
 **File:** `cmd/tap/README.md`
 
-- [ ] Document flags (same as process)
-- [ ] Add usage examples
-- [ ] Add config file example
+- [x] Document flags (same as process)
+- [x] Add usage examples
+- [x] Add config file example
 
 ## Configuration File
 

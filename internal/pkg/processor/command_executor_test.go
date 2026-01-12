@@ -757,3 +757,231 @@ func TestExecuteVoipCommand_PathWithSpaces(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "call-id-with spaces\n", string(content))
 }
+
+// === DNS Tunneling Command Tests ===
+
+func TestHasTunnelingCommand(t *testing.T) {
+	tests := []struct {
+		name     string
+		executor *CommandExecutor
+		expected bool
+	}{
+		{
+			name:     "nil executor",
+			executor: nil,
+			expected: false,
+		},
+		{
+			name:     "empty command",
+			executor: NewCommandExecutor(&CommandExecutorConfig{}),
+			expected: false,
+		},
+		{
+			name: "with command",
+			executor: NewCommandExecutor(&CommandExecutorConfig{
+				TunnelingCommand: "echo %domain%",
+			}),
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.executor.HasTunnelingCommand())
+		})
+	}
+}
+
+func TestExecuteTunnelingCommand_PlaceholderSubstitution(t *testing.T) {
+	// Create temp file to verify command execution
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+
+	timestamp := time.Date(2025, 1, 11, 14, 30, 22, 0, time.UTC)
+	meta := TunnelingMetadata{
+		Domain:    "evil.example.com",
+		Score:     0.85,
+		Entropy:   4.23,
+		Queries:   1523,
+		SrcIPs:    []string{"192.168.1.10", "192.168.1.20"},
+		HunterID:  "hunter-01",
+		Timestamp: timestamp,
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		// Note: Do NOT quote placeholders - shellEscape adds quotes automatically
+		// Use printf to concatenate the shell-escaped values
+		TunnelingCommand: "printf '%s|%s|%s|%s|%s|%s|%s\\n' %domain% %score% %entropy% %queries% %srcips% %hunter% %timestamp% > " + outputFile,
+		Timeout:          5 * time.Second,
+		Concurrency:      1,
+	})
+
+	executor.ExecuteTunnelingCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify file was created with correct content
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+
+	expected := "evil.example.com|0.85|4.23|1523|192.168.1.10,192.168.1.20|hunter-01|2025-01-11T14:30:22Z\n"
+	assert.Equal(t, expected, string(content))
+}
+
+func TestExecuteTunnelingCommand_NilExecutor(t *testing.T) {
+	var executor *CommandExecutor
+	// Should not panic
+	executor.ExecuteTunnelingCommand(TunnelingMetadata{})
+}
+
+func TestExecuteTunnelingCommand_EmptyCommand(t *testing.T) {
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		TunnelingCommand: "",
+	})
+
+	// Should not panic or execute anything
+	executor.ExecuteTunnelingCommand(TunnelingMetadata{})
+}
+
+func TestOnTunnelingDetected(t *testing.T) {
+	tests := []struct {
+		name      string
+		executor  *CommandExecutor
+		expectNil bool
+	}{
+		{
+			name:      "nil executor",
+			executor:  nil,
+			expectNil: true,
+		},
+		{
+			name:      "no tunneling command",
+			executor:  NewCommandExecutor(&CommandExecutorConfig{}),
+			expectNil: true,
+		},
+		{
+			name: "with tunneling command",
+			executor: NewCommandExecutor(&CommandExecutorConfig{
+				TunnelingCommand: "echo %domain%",
+			}),
+			expectNil: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			callback := tt.executor.OnTunnelingDetected()
+			if tt.expectNil {
+				assert.Nil(t, callback)
+			} else {
+				assert.NotNil(t, callback)
+			}
+		})
+	}
+}
+
+func TestOnTunnelingDetected_CallbackWorks(t *testing.T) {
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+
+	meta := TunnelingMetadata{
+		Domain:    "suspicious.example.com",
+		Score:     0.92,
+		Entropy:   4.5,
+		Queries:   2000,
+		SrcIPs:    []string{"10.0.0.5"},
+		HunterID:  "local",
+		Timestamp: time.Date(2025, 1, 12, 10, 0, 0, 0, time.UTC),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		TunnelingCommand: "echo %domain% > " + outputFile,
+		Timeout:          5 * time.Second,
+		Concurrency:      1,
+	})
+
+	callback := executor.OnTunnelingDetected()
+	require.NotNil(t, callback)
+
+	// Call the callback
+	callback(meta)
+
+	// Wait for async execution
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify file was created
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, "suspicious.example.com\n", string(content))
+}
+
+func TestExecuteTunnelingCommand_CommandInjectionPrevention_Domain(t *testing.T) {
+	// Test injection via Domain field (attacker-controlled from DNS packet)
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	markerFile := filepath.Join(tmpDir, "INJECTED")
+
+	// Malicious domain attempting command injection
+	meta := TunnelingMetadata{
+		Domain:    "test.example.com'; touch '" + markerFile + "'; echo '",
+		Score:     0.9,
+		Entropy:   4.0,
+		Queries:   100,
+		SrcIPs:    []string{"192.168.1.1"},
+		HunterID:  "hunter-01",
+		Timestamp: time.Now(),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		TunnelingCommand: "echo %domain% > " + outputFile,
+		Timeout:          5 * time.Second,
+		Concurrency:      1,
+	})
+
+	executor.ExecuteTunnelingCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(200 * time.Millisecond)
+
+	// The marker file should NOT exist - injection should have been prevented
+	_, err := os.Stat(markerFile)
+	assert.True(t, os.IsNotExist(err), "Injection marker file should NOT exist - command injection should be prevented")
+
+	// The output file should contain the malicious domain string safely
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, meta.Domain+"\n", string(content))
+}
+
+func TestExecuteTunnelingCommand_EmptySrcIPs(t *testing.T) {
+	// Test with empty source IPs list
+	tmpDir := t.TempDir()
+	outputFile := filepath.Join(tmpDir, "output.txt")
+
+	meta := TunnelingMetadata{
+		Domain:    "test.example.com",
+		Score:     0.8,
+		Entropy:   3.5,
+		Queries:   50,
+		SrcIPs:    []string{}, // Empty list
+		HunterID:  "local",
+		Timestamp: time.Now(),
+	}
+
+	executor := NewCommandExecutor(&CommandExecutorConfig{
+		TunnelingCommand: "echo %srcips% > " + outputFile,
+		Timeout:          5 * time.Second,
+		Concurrency:      1,
+	})
+
+	executor.ExecuteTunnelingCommand(meta)
+
+	// Wait for async execution
+	time.Sleep(100 * time.Millisecond)
+
+	// Should execute with empty string for srcips
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, "\n", string(content))
+}

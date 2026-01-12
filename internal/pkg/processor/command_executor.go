@@ -4,6 +4,7 @@ package processor
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -39,13 +40,25 @@ type CallMetadata struct {
 	CallDate time.Time
 }
 
+// TunnelingMetadata contains information about detected DNS tunneling
+type TunnelingMetadata struct {
+	Domain    string
+	Score     float64
+	Entropy   float64
+	Queries   int64
+	SrcIPs    []string
+	HunterID  string
+	Timestamp time.Time
+}
+
 // CommandExecutorConfig configures the command executor
 type CommandExecutorConfig struct {
-	PcapCommand string        // Template with %pcap% placeholder
-	VoipCommand string        // Template with %callid%, %dirname%, %caller%, %called%, %calldate%
-	Timeout     time.Duration // Command execution timeout (default: 30s)
-	Concurrency int           // Max concurrent command executions (default: 10)
-	DryRun      bool          // Log commands without executing
+	PcapCommand      string        // Template with %pcap% placeholder
+	VoipCommand      string        // Template with %callid%, %dirname%, %caller%, %called%, %calldate%
+	TunnelingCommand string        // Template with %domain%, %score%, %entropy%, %queries%, %srcips%, %hunter%, %timestamp%
+	Timeout          time.Duration // Command execution timeout (default: 30s)
+	Concurrency      int           // Max concurrent command executions (default: 10)
+	DryRun           bool          // Log commands without executing
 }
 
 // DefaultCommandExecutorConfig returns default configuration
@@ -91,6 +104,11 @@ func (e *CommandExecutor) HasPcapCommand() bool {
 // HasVoipCommand returns true if a VoIP command is configured
 func (e *CommandExecutor) HasVoipCommand() bool {
 	return e != nil && e.config.VoipCommand != ""
+}
+
+// HasTunnelingCommand returns true if a tunneling command is configured
+func (e *CommandExecutor) HasTunnelingCommand() bool {
+	return e != nil && e.config.TunnelingCommand != ""
 }
 
 // ExecutePcapCommand executes the PCAP command asynchronously with the given file path
@@ -153,6 +171,52 @@ func (e *CommandExecutor) ExecuteVoipCommand(meta CallMetadata) {
 	go e.executeAsync(cmd, "voip", map[string]string{
 		"call_id": meta.CallID,
 		"dir":     meta.DirName,
+	})
+}
+
+// ExecuteTunnelingCommand executes the tunneling command asynchronously with detection metadata
+func (e *CommandExecutor) ExecuteTunnelingCommand(meta TunnelingMetadata) {
+	if e == nil || e.config.TunnelingCommand == "" {
+		return
+	}
+
+	// Log warning if domain contains shell metacharacters
+	// Domain names come from DNS packets and could be attacker-controlled
+	if containsShellMetachars(meta.Domain) {
+		logger.Warn("Tunneling domain contains shell metacharacters, escaping for safety",
+			"domain", meta.Domain,
+		)
+	}
+
+	// Format score and entropy as floats with 2 decimal places
+	scoreStr := fmt.Sprintf("%.2f", meta.Score)
+	entropyStr := fmt.Sprintf("%.2f", meta.Entropy)
+
+	// Format queries as integer
+	queriesStr := fmt.Sprintf("%d", meta.Queries)
+
+	// Join source IPs with commas
+	srcIPsStr := strings.Join(meta.SrcIPs, ",")
+
+	// Substitute all placeholders with shell-escaped values to prevent command injection.
+	// Domain comes from DNS packets and could be attacker-controlled.
+	// Other values are internally generated but escaped for consistency.
+	cmd := e.config.TunnelingCommand
+	cmd = strings.ReplaceAll(cmd, "%domain%", shellEscape(meta.Domain))
+	cmd = strings.ReplaceAll(cmd, "%score%", shellEscape(scoreStr))
+	cmd = strings.ReplaceAll(cmd, "%entropy%", shellEscape(entropyStr))
+	cmd = strings.ReplaceAll(cmd, "%queries%", shellEscape(queriesStr))
+	cmd = strings.ReplaceAll(cmd, "%srcips%", shellEscape(srcIPsStr))
+	cmd = strings.ReplaceAll(cmd, "%hunter%", shellEscape(meta.HunterID))
+	cmd = strings.ReplaceAll(cmd, "%timestamp%", shellEscape(meta.Timestamp.Format(time.RFC3339)))
+
+	go e.executeAsync(cmd, "tunneling", map[string]string{
+		"domain":  meta.Domain,
+		"score":   scoreStr,
+		"hunter":  meta.HunterID,
+		"src_ips": srcIPsStr,
+		"queries": queriesStr,
+		"entropy": entropyStr,
 	})
 }
 
@@ -235,4 +299,12 @@ func (e *CommandExecutor) OnCallComplete() func(meta CallMetadata) {
 		return nil
 	}
 	return e.ExecuteVoipCommand
+}
+
+// OnTunnelingDetected returns a callback function for DNS tunneling detection events
+func (e *CommandExecutor) OnTunnelingDetected() func(meta TunnelingMetadata) {
+	if e == nil || !e.HasTunnelingCommand() {
+		return nil
+	}
+	return e.ExecuteTunnelingCommand
 }

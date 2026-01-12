@@ -50,8 +50,8 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 
 **File:** `internal/pkg/processor/command_executor.go`
 
-- [ ] Add `TunnelingCommand` to `CommandExecutorConfig`
-- [ ] Add `TunnelingMetadata` struct:
+- [x] Add `TunnelingCommand` to `CommandExecutorConfig`
+- [x] Add `TunnelingMetadata` struct:
   ```go
   type TunnelingMetadata struct {
       Domain    string
@@ -64,19 +64,19 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
   }
   ```
 
-- [ ] Implement `ExecuteTunnelingCommand(meta TunnelingMetadata)`:
+- [x] Implement `ExecuteTunnelingCommand(meta TunnelingMetadata)`:
   - Substitute all placeholders with shell-escaped values
   - Format score/entropy as "%.2f"
   - Format queries as integer
   - Join SrcIPs with commas
   - Execute async (same pattern as voip-command)
 
-- [ ] Add `OnTunnelingDetected()` callback factory method
+- [x] Add `OnTunnelingDetected()` callback factory method
 
 **File:** `internal/pkg/processor/command_executor_test.go`
 
-- [ ] Add tests for tunneling placeholder substitution
-- [ ] Add tests for shell escaping of domain names
+- [x] Add tests for tunneling placeholder substitution
+- [x] Add tests for shell escaping of domain names
 
 ### Phase 3: Add Alert Tracking to TunnelingDetector
 

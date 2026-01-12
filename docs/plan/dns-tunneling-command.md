@@ -131,8 +131,8 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 
 **File:** `internal/pkg/processor/processor.go`
 
-- [ ] Add `TunnelingThreshold` and `TunnelingDebounce` to `Config`
-- [ ] In `New()`, configure TunnelingDetector with AlertConfig:
+- [x] Add `TunnelingThreshold` and `TunnelingDebounce` to `Config`
+- [x] In `New()`, configure TunnelingDetector with AlertConfig:
   ```go
   if config.CommandExecutor != nil && config.CommandExecutor.TunnelingCommand != "" {
       p.dnsTunneling.SetAlertConfig(dns.AlertConfig{
@@ -155,18 +155,18 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 
 **File:** `internal/pkg/processor/processor_packet_pipeline.go`
 
-- [ ] Pass hunter ID to Analyze() call (from batch.SourceID)
-- [ ] Pass source IP to Analyze() call (from packet metadata)
+- [x] Pass hunter ID to Analyze() call (from batch.SourceID)
+- [x] Pass source IP to Analyze() call (from packet metadata)
 
 **File:** `cmd/process/process.go`
 
-- [ ] Read viper values and pass to processor config
-- [ ] Add to CommandExecutorConfig initialization
+- [x] Read viper values and pass to processor config
+- [x] Add to CommandExecutorConfig initialization
 
 **File:** `cmd/tap/tap_dns.go`
 
-- [ ] Read viper values and pass to processor config
-- [ ] Add to CommandExecutorConfig initialization
+- [x] Read viper values and pass to processor config
+- [x] Add to CommandExecutorConfig initialization
 
 ### Phase 5: Documentation
 

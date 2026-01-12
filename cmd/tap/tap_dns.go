@@ -204,6 +204,28 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		effectiveTapID = hostname + "-dns-tap"
 	}
 
+	// Build command executor config if tunneling command is configured
+	var commandExecutorConfig *processor.CommandExecutorConfig
+	tunnelingCmd := getStringConfig("processor.tunneling_command", dnsTunnelingCommand)
+	if tunnelingCmd != "" {
+		commandExecutorConfig = &processor.CommandExecutorConfig{
+			TunnelingCommand: tunnelingCmd,
+			Timeout:          30 * time.Second,
+			Concurrency:      10,
+		}
+	}
+
+	// Parse tunneling debounce duration
+	var tunnelingDebounceDuration time.Duration
+	tunnelingDebounceStr := getStringConfig("processor.tunneling_debounce", dnsTunnelingDebounce)
+	if tunnelingDebounceStr != "" {
+		var err error
+		tunnelingDebounceDuration, err = time.ParseDuration(tunnelingDebounceStr)
+		if err != nil {
+			return fmt.Errorf("invalid tunneling-debounce: %w", err)
+		}
+	}
+
 	// Build processor configuration
 	config := processor.Config{
 		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
@@ -214,6 +236,9 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		WriteFile:             getStringConfig("tap.write_file", writeFile),
 		DisplayStats:          true,
 		AutoRotateConfig:      autoRotateConfig,
+		CommandExecutorConfig: commandExecutorConfig,
+		TunnelingThreshold:    getFloat64Config("processor.tunneling_threshold", dnsTunnelingThreshold),
+		TunnelingDebounce:     tunnelingDebounceDuration,
 		EnableDetection:       true, // Enable protocol detection for DNS
 		FilterFile:            getStringConfig("tap.filter_file", filterFile),
 		TLSEnabled:            !getBoolConfig("insecure", insecureAllowed),

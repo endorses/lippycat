@@ -29,6 +29,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
@@ -66,6 +67,8 @@ type Config struct {
 	AutoRotateConfig            *AutoRotateConfig            // Auto-rotating PCAP writing configuration (non-VoIP)
 	CommandExecutorConfig       *CommandExecutorConfig       // Command execution for PCAP hooks
 	CallCompletionMonitorConfig *CallCompletionMonitorConfig // Call completion monitoring configuration
+	TunnelingThreshold          float64                      // DNS tunneling score threshold (default: 0.7)
+	TunnelingDebounce           time.Duration                // Min time between alerts per domain (default: 5m)
 	EnableDetection             bool                         // Enable centralized protocol detection
 	FilterFile                  string                       // Path to filter persistence file (YAML)
 	// TLS settings
@@ -204,6 +207,41 @@ func New(config Config) (*Processor, error) {
 		if p.commandExecutor.HasVoipCommand() {
 			logger.Info("VoIP command hook enabled", "command", config.CommandExecutorConfig.VoipCommand)
 		}
+		if p.commandExecutor.HasTunnelingCommand() {
+			logger.Info("Tunneling command hook enabled", "command", config.CommandExecutorConfig.TunnelingCommand)
+		}
+	}
+
+	// Wire DNS tunneling alert callback if tunneling command is configured
+	if p.commandExecutor != nil && p.commandExecutor.HasTunnelingCommand() {
+		// Apply defaults for threshold and debounce
+		threshold := config.TunnelingThreshold
+		if threshold == 0 {
+			threshold = 0.7 // Default threshold
+		}
+		debounce := config.TunnelingDebounce
+		if debounce == 0 {
+			debounce = 5 * time.Minute // Default debounce
+		}
+
+		p.dnsTunneling.SetAlertConfig(dns.AlertConfig{
+			Threshold: threshold,
+			Debounce:  debounce,
+			Callback: func(alert dns.TunnelingAlert) {
+				p.commandExecutor.ExecuteTunnelingCommand(TunnelingMetadata{
+					Domain:    alert.Domain,
+					Score:     alert.Score,
+					Entropy:   alert.Entropy,
+					Queries:   alert.Queries,
+					SrcIPs:    alert.SrcIPs,
+					HunterID:  alert.HunterID,
+					Timestamp: alert.Timestamp,
+				})
+			},
+		})
+		logger.Info("DNS tunneling alert configured",
+			"threshold", threshold,
+			"debounce", debounce)
 	}
 
 	// Initialize per-call PCAP writer if configured

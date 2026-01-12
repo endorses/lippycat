@@ -105,8 +105,13 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 					TunnelingScore: dnsProto.TunnelingScore,
 					EntropyScore:   dnsProto.EntropyScore,
 				}
-				// Analyze updates aggregated domain statistics
-				p.dnsTunneling.Analyze(dnsMeta)
+				// Extract source IP from packet metadata for tracking
+				srcIP := ""
+				if packet.Metadata != nil {
+					srcIP = packet.Metadata.SrcIp
+				}
+				// AnalyzeWithContext updates aggregated domain statistics with hunter/source tracking
+				p.dnsTunneling.AnalyzeWithContext(dnsMeta, sourceID, srcIP)
 			}
 		}
 	}

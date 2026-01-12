@@ -349,7 +349,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	var commandExecutorConfig *processor.CommandExecutorConfig
 	pcapCmd := getStringConfig("processor.pcap_command", pcapCommand)
 	voipCmd := getStringConfig("processor.voip_command", voipCommand)
-	if pcapCmd != "" || voipCmd != "" {
+	tunnelingCmd := getStringConfig("processor.tunneling_command", tunnelingCommand)
+	if pcapCmd != "" || voipCmd != "" || tunnelingCmd != "" {
 		// Parse command timeout
 		timeoutStr := getStringConfig("processor.command_timeout", commandTimeout)
 		timeout, err := time.ParseDuration(timeoutStr)
@@ -358,10 +359,22 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		}
 
 		commandExecutorConfig = &processor.CommandExecutorConfig{
-			PcapCommand: pcapCmd,
-			VoipCommand: voipCmd,
-			Timeout:     timeout,
-			Concurrency: getIntConfig("processor.command_concurrency", commandConcurrency),
+			PcapCommand:      pcapCmd,
+			VoipCommand:      voipCmd,
+			TunnelingCommand: tunnelingCmd,
+			Timeout:          timeout,
+			Concurrency:      getIntConfig("processor.command_concurrency", commandConcurrency),
+		}
+	}
+
+	// Parse tunneling debounce duration
+	var tunnelingDebounceDuration time.Duration
+	tunnelingDebounceStr := getStringConfig("processor.tunneling_debounce", tunnelingDebounce)
+	if tunnelingDebounceStr != "" {
+		var err error
+		tunnelingDebounceDuration, err = time.ParseDuration(tunnelingDebounceStr)
+		if err != nil {
+			return fmt.Errorf("invalid tunneling-debounce: %w", err)
 		}
 	}
 
@@ -413,6 +426,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		PcapWriterConfig:      pcapWriterConfig,
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
+		TunnelingThreshold:    getFloat64Config("processor.tunneling_threshold", tunnelingThreshold),
+		TunnelingDebounce:     tunnelingDebounceDuration,
 		EnableDetection:       getBoolConfig("processor.enable_detection", enableDetection),
 		FilterFile:            getStringConfig("processor.filter_file", filterFile),
 		// TLS configuration (enabled by default unless --insecure is set)
@@ -595,6 +610,13 @@ func getBoolConfig(key string, flagValue bool) bool {
 func getStringSliceConfig(key string, flagValue []string) []string {
 	if viper.IsSet(key) {
 		return viper.GetStringSlice(key)
+	}
+	return flagValue
+}
+
+func getFloat64Config(key string, flagValue float64) float64 {
+	if viper.IsSet(key) {
+		return viper.GetFloat64(key)
 	}
 	return flagValue
 }

@@ -574,6 +574,13 @@ func getBoolConfig(key string, flagValue bool) bool {
 	return flagValue
 }
 
+func getFloat64Config(key string, flagValue float64) float64 {
+	if viper.IsSet(key) {
+		return viper.GetFloat64(key)
+	}
+	return flagValue
+}
+
 // createApplicationFilter creates an ApplicationFilter with the no-filter policy applied.
 // This is a shared helper for all tap subcommands to avoid duplication.
 func createApplicationFilter() (*hunter.ApplicationFilter, error) {

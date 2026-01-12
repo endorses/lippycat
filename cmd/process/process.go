@@ -608,8 +608,10 @@ func getBoolConfig(key string, flagValue bool) bool {
 }
 
 func getStringSliceConfig(key string, flagValue []string) []string {
-	if viper.IsSet(key) {
-		return viper.GetStringSlice(key)
+	// Check actual config value instead of viper.IsSet() which returns true
+	// for bound flags even when config file doesn't define them
+	if configValue := viper.GetStringSlice(key); len(configValue) > 0 {
+		return configValue
 	}
 	return flagValue
 }

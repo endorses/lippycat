@@ -176,11 +176,32 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 - [ ] Document `--tunneling-threshold` flag
 - [ ] Document `--tunneling-debounce` flag
 - [ ] Add usage examples
+- [ ] Add config file example to Configuration File section
 
 **File:** `cmd/tap/README.md`
 
 - [ ] Document flags (same as process)
 - [ ] Add usage examples
+- [ ] Add config file example
+
+## Configuration File
+
+All tunneling options can be specified in `~/.config/lippycat/config.yaml`:
+
+```yaml
+processor:
+  # DNS tunneling detection alerts
+  tunneling_command: "/opt/scripts/alert.sh %domain% %score% %srcips%"
+  tunneling_threshold: 0.7
+  tunneling_debounce: "5m"
+```
+
+The viper keys follow the existing pattern:
+- `processor.tunneling_command` - Command template to execute
+- `processor.tunneling_threshold` - Score threshold (float64)
+- `processor.tunneling_debounce` - Debounce duration (string, e.g., "5m", "30s")
+
+These work for both `lc process` and `lc tap dns` commands since they share the same viper namespace.
 
 ## Key Files to Modify
 

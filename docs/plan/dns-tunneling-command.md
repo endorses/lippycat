@@ -82,7 +82,7 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
 
 **File:** `internal/pkg/dns/tunneling.go`
 
-- [ ] Add `AlertConfig` struct:
+- [x] Add `AlertConfig` struct:
   ```go
   type AlertConfig struct {
       Threshold float64       // Score threshold (default: 0.7)
@@ -91,7 +91,7 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
   }
   ```
 
-- [ ] Add `TunnelingAlert` struct:
+- [x] Add `TunnelingAlert` struct:
   ```go
   type TunnelingAlert struct {
       Domain    string
@@ -104,10 +104,10 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
   }
   ```
 
-- [ ] Add `lastAlerted map[string]time.Time` field to `TunnelingDetector`
-- [ ] Add `alertConfig *AlertConfig` field
-- [ ] Add `SetAlertConfig(config AlertConfig)` method
-- [ ] Modify `Analyze()` to check threshold and debounce:
+- [x] Add `lastAlerted map[string]time.Time` field to `TunnelingDetector`
+- [x] Add `alertConfig *AlertConfig` field
+- [x] Add `SetAlertConfig(config AlertConfig)` method
+- [x] Modify `Analyze()` to check threshold and debounce:
   ```go
   if t.alertConfig != nil && stats.TunnelingScore >= t.alertConfig.Threshold {
       lastTime, exists := t.lastAlerted[domain]
@@ -118,14 +118,14 @@ Add `--tunneling-command` flag to execute external commands when DNS tunneling i
   }
   ```
 
-- [ ] Add `hunterID string` field to track source (set per-packet or per-batch)
-- [ ] Add `srcIPs map[string]map[string]struct{}` to track unique source IPs per domain
+- [x] Add `hunterID string` field to track source (set per-packet or per-batch)
+- [x] Add `srcIPs map[string]map[string]struct{}` to track unique source IPs per domain
 
 **File:** `internal/pkg/dns/tunneling_test.go`
 
-- [ ] Add tests for alert threshold triggering
-- [ ] Add tests for debounce behavior
-- [ ] Add tests for source IP tracking
+- [x] Add tests for alert threshold triggering
+- [x] Add tests for debounce behavior
+- [x] Add tests for source IP tracking
 
 ### Phase 4: Wire Callbacks in Processor
 

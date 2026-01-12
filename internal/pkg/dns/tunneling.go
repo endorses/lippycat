@@ -10,6 +10,24 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
+// TunnelingAlert represents an alert for detected DNS tunneling.
+type TunnelingAlert struct {
+	Domain    string
+	Score     float64
+	Entropy   float64
+	Queries   int64
+	SrcIPs    []string
+	HunterID  string
+	Timestamp time.Time
+}
+
+// AlertConfig configures alert behavior for tunneling detection.
+type AlertConfig struct {
+	Threshold float64                    // Score threshold (default: 0.7)
+	Debounce  time.Duration              // Min time between alerts per domain (default: 5m)
+	Callback  func(alert TunnelingAlert) // Callback when alert triggers
+}
+
 // TunnelingDetector detects potential DNS tunneling attempts.
 type TunnelingDetector struct {
 	mu            sync.RWMutex
@@ -17,6 +35,11 @@ type TunnelingDetector struct {
 	config        TunnelingConfig
 	maxDomains    int
 	cleanupTicker *time.Ticker
+
+	// Alert tracking
+	alertConfig *AlertConfig
+	lastAlerted map[string]time.Time           // Last alert time per domain
+	srcIPs      map[string]map[string]struct{} // Source IPs per domain
 }
 
 // domainStats tracks statistics for a domain to detect tunneling.
@@ -102,6 +125,8 @@ func NewTunnelingDetector(config TunnelingConfig) *TunnelingDetector {
 		config:        config,
 		maxDomains:    config.MaxDomains,
 		cleanupTicker: time.NewTicker(config.CleanupInterval),
+		lastAlerted:   make(map[string]time.Time),
+		srcIPs:        make(map[string]map[string]struct{}),
 	}
 
 	go td.cleanupLoop()
@@ -109,9 +134,28 @@ func NewTunnelingDetector(config TunnelingConfig) *TunnelingDetector {
 	return td
 }
 
+// SetAlertConfig configures alert behavior for the detector.
+// When set, the detector will call the callback when a domain's tunneling
+// score crosses the threshold, respecting the debounce interval.
+func (td *TunnelingDetector) SetAlertConfig(config AlertConfig) {
+	td.mu.Lock()
+	defer td.mu.Unlock()
+	td.alertConfig = &config
+}
+
 // Analyze analyzes a DNS query for tunneling indicators.
 // Updates the metadata with tunneling score and entropy.
+// For backward compatibility; use AnalyzeWithContext for full alerting support.
 func (td *TunnelingDetector) Analyze(metadata *types.DNSMetadata) {
+	td.AnalyzeWithContext(metadata, "", "")
+}
+
+// AnalyzeWithContext analyzes a DNS query for tunneling indicators with context.
+// hunterID identifies the source hunter (or "local" for tap mode).
+// srcIP is the source IP address of the DNS query.
+// Updates the metadata with tunneling score and entropy.
+// Triggers alerts when score crosses threshold (if alertConfig is set).
+func (td *TunnelingDetector) AnalyzeWithContext(metadata *types.DNSMetadata, hunterID, srcIP string) {
 	if metadata == nil || metadata.QueryName == "" {
 		return
 	}
@@ -171,8 +215,70 @@ func (td *TunnelingDetector) Analyze(metadata *types.DNSMetadata) {
 		}
 	}
 
+	// Track source IP per domain
+	if srcIP != "" {
+		if td.srcIPs[baseDomain] == nil {
+			td.srcIPs[baseDomain] = make(map[string]struct{})
+		}
+		td.srcIPs[baseDomain][srcIP] = struct{}{}
+	}
+
 	// Calculate tunneling score
 	metadata.TunnelingScore = td.calculateScore(stats, metadata)
+
+	// Check alert threshold and debounce
+	td.checkAndTriggerAlert(baseDomain, stats, metadata, hunterID)
+}
+
+// checkAndTriggerAlert checks if an alert should be triggered for the domain.
+// Must be called with td.mu held.
+func (td *TunnelingDetector) checkAndTriggerAlert(baseDomain string, stats *domainStats, metadata *types.DNSMetadata, hunterID string) {
+	if td.alertConfig == nil || td.alertConfig.Callback == nil {
+		return
+	}
+
+	// Check if score crosses threshold
+	if metadata.TunnelingScore < td.alertConfig.Threshold {
+		return
+	}
+
+	// Check debounce
+	lastTime, exists := td.lastAlerted[baseDomain]
+	if exists && time.Since(lastTime) < td.alertConfig.Debounce {
+		return
+	}
+
+	// Update last alerted time
+	td.lastAlerted[baseDomain] = time.Now()
+
+	// Build source IPs list
+	var srcIPsList []string
+	if ips, ok := td.srcIPs[baseDomain]; ok {
+		srcIPsList = make([]string, 0, len(ips))
+		for ip := range ips {
+			srcIPsList = append(srcIPsList, ip)
+		}
+	}
+
+	// Use "local" as default hunter ID if not provided
+	if hunterID == "" {
+		hunterID = "local"
+	}
+
+	// Create alert
+	alert := TunnelingAlert{
+		Domain:    baseDomain,
+		Score:     metadata.TunnelingScore,
+		Entropy:   metadata.EntropyScore,
+		Queries:   stats.QueryCount,
+		SrcIPs:    srcIPsList,
+		HunterID:  hunterID,
+		Timestamp: time.Now(),
+	}
+
+	// Call callback in a goroutine to avoid blocking
+	callback := td.alertConfig.Callback
+	go callback(alert)
 }
 
 // calculateScore computes a tunneling probability score.
@@ -379,6 +485,9 @@ func (td *TunnelingDetector) cleanup() {
 	for k, v := range td.domainStats {
 		if v.LastSeen.Before(cutoff) {
 			delete(td.domainStats, k)
+			// Also clean up related tracking data
+			delete(td.srcIPs, k)
+			delete(td.lastAlerted, k)
 		}
 	}
 }

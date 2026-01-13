@@ -65,6 +65,13 @@ func init() {
 	WatchCmd.PersistentFlags().StringVar(&tlsServerOverride, "tls-server-name", "", "override server name for TLS verification")
 
 	_ = viper.BindPFlag("watch.buffer_size", WatchCmd.PersistentFlags().Lookup("buffer-size"))
+
+	// Bind TLS flags to viper for config file support
+	_ = viper.BindPFlag("tui.tls.ca_file", WatchCmd.PersistentFlags().Lookup("tls-ca"))
+	_ = viper.BindPFlag("tui.tls.cert_file", WatchCmd.PersistentFlags().Lookup("tls-cert"))
+	_ = viper.BindPFlag("tui.tls.key_file", WatchCmd.PersistentFlags().Lookup("tls-key"))
+	_ = viper.BindPFlag("tui.tls.skip_verify", WatchCmd.PersistentFlags().Lookup("tls-skip-verify"))
+	_ = viper.BindPFlag("tui.tls.server_name_override", WatchCmd.PersistentFlags().Lookup("tls-server-name"))
 }
 
 // configureTLSViper sets TLS configuration in viper for use by TUI components.

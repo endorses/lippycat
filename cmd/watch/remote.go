@@ -51,7 +51,9 @@ func runRemote(cmd *cobra.Command, args []string) {
 
 	// Validate TLS configuration when TLS is enabled (remote mode requires server connection)
 	tlsEnabled := !insecureAllowed
-	if tlsEnabled && tlsCAFile == "" && !tlsSkipVerify {
+	effectiveCAFile := viper.GetString("tui.tls.ca_file")
+	effectiveSkipVerify := viper.GetBool("tui.tls.skip_verify")
+	if tlsEnabled && effectiveCAFile == "" && !effectiveSkipVerify {
 		fmt.Fprintln(os.Stderr, "Error: TLS is enabled but no CA certificate provided")
 		fmt.Fprintln(os.Stderr, "For TLS connections, provide a CA certificate: --tls-ca=/path/to/ca.crt")
 		fmt.Fprintln(os.Stderr, "Or skip verification (INSECURE - testing only): --tls-skip-verify")

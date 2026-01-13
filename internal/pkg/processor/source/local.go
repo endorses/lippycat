@@ -235,7 +235,8 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	close(s.batches)
 
 	logger.Info("LocalSource stopped",
-		"packets_received", s.stats.packetsReceived.Load(),
+		"packets_captured", s.stats.packetsCaptured.Load(),
+		"packets_forwarded", s.stats.packetsForwarded.Load(),
 		"packets_dropped", s.stats.packetsDropped.Load())
 
 	return nil
@@ -287,6 +288,9 @@ func (s *LocalSource) batchingLoop() {
 				return
 			}
 
+			// Count ALL packets received from buffer (before filtering)
+			s.stats.AddCaptured()
+
 			s.mu.Lock()
 			filter := s.appFilter
 			voipProc := s.voipProcessor
@@ -337,8 +341,8 @@ func (s *LocalSource) batchingLoop() {
 				pbPkt.MatchedFilterIds = matchedFilterIDs
 			}
 
-			// Update stats
-			s.stats.AddPacket(uint64(len(pbPkt.Data)))
+			// Update stats for packets that passed filtering
+			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 
 			// Add to batch
 			s.batchMu.Lock()
@@ -373,8 +377,8 @@ func (s *LocalSource) sendBatch() {
 		Sequence:    s.batchSeq,
 		TimestampNs: time.Now().UnixNano(),
 		Stats: &data.BatchStats{
-			TotalCaptured:   s.stats.packetsReceived.Load(),
-			FilteredMatched: s.stats.packetsReceived.Load(), // All received packets match (post-filter)
+			TotalCaptured:   s.stats.packetsCaptured.Load(),
+			FilteredMatched: s.stats.packetsForwarded.Load(),
 			Dropped:         s.stats.packetsDropped.Load(),
 		},
 	}

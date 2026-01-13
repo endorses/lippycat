@@ -122,9 +122,10 @@ func (s *GRPCSource) Push(batch *data.PacketBatch) bool {
 		return false
 	}
 
-	// Update stats
+	// Update stats (all packets from hunters are captured and forwarded)
 	for _, pkt := range batch.Packets {
-		s.stats.AddPacket(uint64(len(pkt.Data)))
+		s.stats.AddCaptured()
+		s.stats.AddForwarded(uint64(len(pkt.Data)))
 	}
 	s.stats.AddBatch()
 
@@ -150,9 +151,10 @@ func (s *GRPCSource) PushInternal(batch *PacketBatch) bool {
 		return false
 	}
 
-	// Update stats
+	// Update stats (all packets are captured and forwarded)
 	for _, pkt := range batch.Packets {
-		s.stats.AddPacket(uint64(len(pkt.Data)))
+		s.stats.AddCaptured()
+		s.stats.AddForwarded(uint64(len(pkt.Data)))
 	}
 	s.stats.AddBatch()
 

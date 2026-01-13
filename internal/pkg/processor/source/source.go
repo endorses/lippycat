@@ -74,8 +74,12 @@ type PacketBatch struct {
 
 // Stats contains packet source statistics.
 type Stats struct {
-	// PacketsReceived is the total number of packets received/captured
-	PacketsReceived uint64
+	// PacketsCaptured is the total number of packets received from the capture buffer
+	// (before any application-layer filtering)
+	PacketsCaptured uint64
+
+	// PacketsForwarded is the number of packets that passed filtering and were batched
+	PacketsForwarded uint64
 
 	// PacketsDropped is the number of packets dropped (buffer overflow, etc.)
 	PacketsDropped uint64
@@ -96,12 +100,13 @@ type Stats struct {
 // AtomicStats provides thread-safe access to Stats fields.
 // Use this for concurrent updates from packet processing goroutines.
 type AtomicStats struct {
-	packetsReceived atomic.Uint64
-	packetsDropped  atomic.Uint64
-	bytesReceived   atomic.Uint64
-	batchesReceived atomic.Uint64
-	lastPacketTime  atomic.Int64 // Unix nano
-	startTime       int64        // Set once at start
+	packetsCaptured  atomic.Uint64
+	packetsForwarded atomic.Uint64
+	packetsDropped   atomic.Uint64
+	bytesReceived    atomic.Uint64
+	batchesReceived  atomic.Uint64
+	lastPacketTime   atomic.Int64 // Unix nano
+	startTime        int64        // Set once at start
 }
 
 // NewAtomicStats creates a new AtomicStats initialized with the current time.
@@ -111,11 +116,16 @@ func NewAtomicStats() *AtomicStats {
 	}
 }
 
-// AddPacket records a received packet.
-func (s *AtomicStats) AddPacket(bytes uint64) {
-	s.packetsReceived.Add(1)
-	s.bytesReceived.Add(bytes)
+// AddCaptured records a packet received from the capture buffer (before filtering).
+func (s *AtomicStats) AddCaptured() {
+	s.packetsCaptured.Add(1)
 	s.lastPacketTime.Store(time.Now().UnixNano())
+}
+
+// AddForwarded records a packet that passed filtering and was batched.
+func (s *AtomicStats) AddForwarded(bytes uint64) {
+	s.packetsForwarded.Add(1)
+	s.bytesReceived.Add(bytes)
 }
 
 // AddDropped records a dropped packet.
@@ -137,12 +147,13 @@ func (s *AtomicStats) Snapshot() Stats {
 	}
 
 	return Stats{
-		PacketsReceived: s.packetsReceived.Load(),
-		PacketsDropped:  s.packetsDropped.Load(),
-		BytesReceived:   s.bytesReceived.Load(),
-		BatchesReceived: s.batchesReceived.Load(),
-		LastPacketTime:  lastTime,
-		StartTime:       time.Unix(0, s.startTime),
+		PacketsCaptured:  s.packetsCaptured.Load(),
+		PacketsForwarded: s.packetsForwarded.Load(),
+		PacketsDropped:   s.packetsDropped.Load(),
+		BytesReceived:    s.bytesReceived.Load(),
+		BatchesReceived:  s.batchesReceived.Load(),
+		LastPacketTime:   lastTime,
+		StartTime:        time.Unix(0, s.startTime),
 	}
 }
 

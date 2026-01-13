@@ -555,6 +555,12 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		caps.FilterTypes = []string{"sip_user", "phone_number"}
 	}
 
+	// Get active filter count
+	var activeFilters uint32
+	if p.filterTarget != nil {
+		activeFilters = uint32(len(p.filterTarget.GetActiveFilters())) // #nosec G115
+	}
+
 	return &management.ConnectedHunter{
 		HunterId:             p.config.ProcessorID + "-local",
 		Hostname:             hostname,
@@ -562,9 +568,10 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		ConnectedDurationSec: durationSec,
 		LastHeartbeatNs:      time.Now().UnixNano(),
 		Stats: &management.HunterStats{
-			PacketsCaptured:  stats.PacketsReceived,
-			PacketsForwarded: stats.PacketsReceived, // All captured = forwarded for local
+			PacketsCaptured:  stats.PacketsCaptured,
+			PacketsForwarded: stats.PacketsForwarded,
 			PacketsDropped:   stats.PacketsDropped,
+			ActiveFilters:    activeFilters,
 		},
 		Interfaces:   localSource.Interfaces(),
 		Capabilities: caps,

@@ -72,7 +72,8 @@ func TestLocalSource_Stats(t *testing.T) {
 	s := NewLocalSource(DefaultLocalSourceConfig())
 
 	stats := s.Stats()
-	assert.Equal(t, uint64(0), stats.PacketsReceived)
+	assert.Equal(t, uint64(0), stats.PacketsCaptured)
+	assert.Equal(t, uint64(0), stats.PacketsForwarded)
 	assert.Equal(t, uint64(0), stats.PacketsDropped)
 	assert.Equal(t, uint64(0), stats.BytesReceived)
 	assert.Equal(t, uint64(0), stats.BatchesReceived)

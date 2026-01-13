@@ -65,7 +65,7 @@ func runRemote(cmd *cobra.Command, args []string) {
 	defer logger.Enable()
 
 	// Load buffer size from config, use flag value as fallback
-	configBufferSize := viper.GetInt("watch.buffer_size")
+	configBufferSize := viper.GetInt("tui.buffer_size")
 	if configBufferSize > 0 {
 		bufferSize = configBufferSize
 	}

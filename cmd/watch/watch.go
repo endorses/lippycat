@@ -63,7 +63,7 @@ func init() {
 	WatchCmd.PersistentFlags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "skip TLS certificate verification (INSECURE - testing only)")
 	WatchCmd.PersistentFlags().StringVar(&tlsServerOverride, "tls-server-name", "", "override server name for TLS verification")
 
-	_ = viper.BindPFlag("watch.buffer_size", WatchCmd.PersistentFlags().Lookup("buffer-size"))
+	_ = viper.BindPFlag("tui.buffer_size", WatchCmd.PersistentFlags().Lookup("buffer-size"))
 
 	// Bind TLS flags to viper for config file support
 	_ = viper.BindPFlag("tui.tls.ca_file", WatchCmd.PersistentFlags().Lookup("tls-ca"))

@@ -296,6 +296,7 @@ func init() {
 	_ = viper.BindPFlag("tap.tls.key_file", TapCmd.PersistentFlags().Lookup("tls-key"))
 	_ = viper.BindPFlag("tap.tls.ca_file", TapCmd.PersistentFlags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("tap.tls.client_auth", TapCmd.PersistentFlags().Lookup("tls-client-auth"))
+	_ = viper.BindPFlag("tap.insecure", TapCmd.PersistentFlags().Lookup("insecure"))
 	_ = viper.BindPFlag("security.api_keys.enabled", TapCmd.PersistentFlags().Lookup("api-key-auth"))
 
 	// Filter policy

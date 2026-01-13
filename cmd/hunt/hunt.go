@@ -141,6 +141,7 @@ func init() {
 	_ = viper.BindPFlag("hunter.tls.key_file", HuntCmd.PersistentFlags().Lookup("tls-key"))
 	_ = viper.BindPFlag("hunter.tls.ca_file", HuntCmd.PersistentFlags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.PersistentFlags().Lookup("tls-skip-verify"))
+	_ = viper.BindPFlag("hunter.insecure", HuntCmd.PersistentFlags().Lookup("insecure"))
 	_ = viper.BindPFlag("hunter.no_filter_policy", HuntCmd.PersistentFlags().Lookup("no-filter-policy"))
 }
 

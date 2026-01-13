@@ -242,6 +242,7 @@ func init() {
 	_ = viper.BindPFlag("processor.tls.key_file", ProcessCmd.Flags().Lookup("tls-key"))
 	_ = viper.BindPFlag("processor.tls.ca_file", ProcessCmd.Flags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("processor.tls.client_auth", ProcessCmd.Flags().Lookup("tls-client-auth"))
+	_ = viper.BindPFlag("processor.insecure", ProcessCmd.Flags().Lookup("insecure"))
 	_ = viper.BindPFlag("security.api_keys.enabled", ProcessCmd.Flags().Lookup("api-key-auth"))
 	_ = viper.BindPFlag("processor.per_call_pcap.enabled", ProcessCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("processor.per_call_pcap.output_dir", ProcessCmd.Flags().Lookup("per-call-pcap-dir"))

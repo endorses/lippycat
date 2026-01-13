@@ -528,3 +528,45 @@ func (p *Processor) GetSuspiciousDomains(threshold float64, limit int) []dns.Tun
 	}
 	return p.dnsTunneling.GetSuspiciousDomains(threshold, limit)
 }
+
+// SynthesizeVirtualHunter creates a synthetic ConnectedHunter representing
+// the local capture for TAP nodes. Returns nil if not in local mode.
+// This allows TAP node capture statistics to be displayed in the TUI
+// using the existing hunter infrastructure.
+func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
+	localSource, ok := p.packetSource.(*source.LocalSource)
+	if !ok {
+		return nil
+	}
+
+	stats := localSource.Stats()
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "localhost"
+	}
+
+	// Calculate connected duration from start time
+	durationNs := time.Now().UnixNano() - stats.StartTime.UnixNano()
+	durationSec := uint64(durationNs / 1e9) // #nosec G115
+
+	// Build capabilities based on VoIP mode
+	caps := &management.HunterCapabilities{}
+	if localSource.GetVoIPProcessor() != nil {
+		caps.FilterTypes = []string{"sip_user", "phone_number"}
+	}
+
+	return &management.ConnectedHunter{
+		HunterId:             p.config.ProcessorID + "-local",
+		Hostname:             hostname,
+		Status:               management.HunterStatus_STATUS_HEALTHY,
+		ConnectedDurationSec: durationSec,
+		LastHeartbeatNs:      time.Now().UnixNano(),
+		Stats: &management.HunterStats{
+			PacketsCaptured:  stats.PacketsReceived,
+			PacketsForwarded: stats.PacketsReceived, // All captured = forwarded for local
+			PacketsDropped:   stats.PacketsDropped,
+		},
+		Interfaces:   localSource.Interfaces(),
+		Capabilities: caps,
+	}
+}

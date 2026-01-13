@@ -304,6 +304,15 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 		})
 	}
 
+	// Inject virtual hunter for TAP nodes (local capture)
+	// Only include if no specific hunter ID filter, or filter matches virtual hunter
+	if virtualHunter := p.SynthesizeVirtualHunter(); virtualHunter != nil {
+		if req.HunterId == "" || req.HunterId == virtualHunter.HunterId {
+			// Prepend virtual hunter so it appears first
+			connectedHunters = append([]*management.ConnectedHunter{virtualHunter}, connectedHunters...)
+		}
+	}
+
 	processorStats := p.statsCollector.GetProto()
 
 	return &management.StatusResponse{
@@ -331,6 +340,20 @@ func (p *Processor) ListAvailableHunters(ctx context.Context, req *management.Li
 			ConnectedDurationSec: durationSec,
 			Capabilities:         h.Capabilities, // Hunter capabilities (filter types, etc.)
 		})
+	}
+
+	// Inject virtual hunter for TAP nodes (local capture)
+	if virtualHunter := p.SynthesizeVirtualHunter(); virtualHunter != nil {
+		// Prepend virtual hunter so it appears first
+		availableHunters = append([]*management.AvailableHunter{{
+			HunterId:             virtualHunter.HunterId,
+			Hostname:             virtualHunter.Hostname,
+			Interfaces:           virtualHunter.Interfaces,
+			Status:               virtualHunter.Status,
+			RemoteAddr:           "", // Local capture has no remote address
+			ConnectedDurationSec: virtualHunter.ConnectedDurationSec,
+			Capabilities:         virtualHunter.Capabilities,
+		}}, availableHunters...)
 	}
 
 	logger.Debug("ListAvailableHunters request", "hunter_count", len(availableHunters))
@@ -463,6 +486,12 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 			Interfaces:   h.Interfaces,
 			Capabilities: h.Capabilities,
 		})
+	}
+
+	// Inject virtual hunter for TAP nodes (local capture)
+	if virtualHunter := p.SynthesizeVirtualHunter(); virtualHunter != nil {
+		// Prepend virtual hunter so it appears first
+		connectedHunters = append([]*management.ConnectedHunter{virtualHunter}, connectedHunters...)
 	}
 
 	// Get processor stats

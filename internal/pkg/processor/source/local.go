@@ -101,6 +101,10 @@ type LocalSourceConfig struct {
 
 	// BatchBuffer is the channel buffer size for batches (default: 1000)
 	BatchBuffer int
+
+	// ProcessorID is the processor's ID, used for virtual hunter ID generation.
+	// When set, SourceID() returns "{ProcessorID}-local" instead of "local".
+	ProcessorID string
 }
 
 // DefaultLocalSourceConfig returns a LocalSourceConfig with sensible defaults.
@@ -404,8 +408,12 @@ func (s *LocalSource) Stats() Stats {
 	return s.stats.Snapshot()
 }
 
-// SourceID returns "local" as the source identifier.
+// SourceID returns the source identifier for this local capture.
+// Returns "{ProcessorID}-local" if ProcessorID is configured, otherwise "local".
 func (s *LocalSource) SourceID() string {
+	if s.config.ProcessorID != "" {
+		return s.config.ProcessorID + "-local"
+	}
 	return "local"
 }
 

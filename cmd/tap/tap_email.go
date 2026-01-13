@@ -459,6 +459,7 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 		BatchTimeout: time.Duration(getIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
+		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
 	}
 	localSource := source.NewLocalSource(localSourceConfig)
 

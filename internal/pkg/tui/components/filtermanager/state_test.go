@@ -1,5 +1,4 @@
 //go:build tui || all
-// +build tui all
 
 package filtermanager
 

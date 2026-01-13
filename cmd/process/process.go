@@ -1,5 +1,4 @@
 //go:build processor || all
-// +build processor all
 
 package process
 

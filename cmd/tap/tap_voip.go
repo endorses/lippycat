@@ -1,5 +1,4 @@
 //go:build tap || all
-// +build tap all
 
 package tap
 

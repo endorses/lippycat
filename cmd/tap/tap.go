@@ -1,5 +1,4 @@
 //go:build tap || all
-// +build tap all
 
 // Package tap implements the standalone capture command that combines local packet capture
 // with full processor capabilities (PCAP writing, TUI serving, upstream forwarding).

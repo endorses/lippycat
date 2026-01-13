@@ -1,5 +1,4 @@
 //go:build cli || tui || hunter || all
-// +build cli tui hunter all
 
 package list
 

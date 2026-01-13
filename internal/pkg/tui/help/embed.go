@@ -1,5 +1,4 @@
 //go:build tui || all
-// +build tui all
 
 // Package help provides embedded help documentation for the TUI.
 package help

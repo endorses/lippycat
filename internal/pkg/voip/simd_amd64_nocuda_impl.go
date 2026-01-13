@@ -1,5 +1,4 @@
 //go:build amd64 && !cuda
-// +build amd64,!cuda
 
 package voip
 

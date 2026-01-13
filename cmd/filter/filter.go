@@ -1,5 +1,4 @@
 //go:build cli || all
-// +build cli all
 
 // Package filter provides CLI commands for remote filter management.
 // Commands use the filterclient package to communicate with processors via gRPC.

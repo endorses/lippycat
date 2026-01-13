@@ -1,5 +1,4 @@
 //go:build all
-// +build all
 
 package cmd
 

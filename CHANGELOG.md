@@ -8,13 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.7.3] - 2026-01-13
 
 ### Added
-- DNS tunneling detection with command hooks
-
-### Changed
-- TODO: Add detailed changelog entries
+- **DNS tunneling detection with command hooks**: Execute custom commands when DNS tunneling is detected
+  - `--tunneling-command` flag with placeholder substitution (%domain%, %score%, %entropy%, etc.)
+  - `--tunneling-threshold` for configurable detection sensitivity
+  - `--tunneling-debounce` for per-domain alert rate limiting
+  - Cross-hunter aggregation of tunneling indicators at processor level
+  - Alert tracking with source IP aggregation
+- **Virtual hunter for TAP nodes**: TAP nodes now display local capture statistics in TUI
+  - Appears as "{processor-id}-local" in the hunter list
+  - Shows real-time capture stats (packets captured, forwarded, dropped)
+  - Displays VoIP mode when VoIP processor is configured
+- **`--no-filter-policy` flag**: Added for hunt and tap commands to disable filter policy enforcement
+- **DNS metadata in TUI**: DNS query/response metadata now displayed in packet details
 
 ### Fixed
-- TODO: Add fixed items
+- **Config file handling**: Fixed viper.IsSet() returning empty slice for unset config keys
+  - CLI flag defaults are now preserved when config file doesn't explicitly set a value
+  - Affected commands: tap, hunt, process
 
 ## [0.7.2] - 2026-01-11
 

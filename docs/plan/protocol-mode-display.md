@@ -16,9 +16,9 @@ Display DNS, Email, HTTP, and TLS modes in TUI for hunter and tap nodes.
 
 ## Phase 2: Virtual Hunter Capabilities
 
-- [ ] Update `SynthesizeVirtualHunter()` in `internal/pkg/processor/processor.go`:
-  - Use `localSource.GetProtocolMode()` to set `FilterTypes` based on mode
-  - Map each mode to its corresponding filter types array
+- [x] Update `SynthesizeVirtualHunter()` in `internal/pkg/processor/processor.go`:
+  - [x] Use `localSource.GetProtocolMode()` to set `FilterTypes` based on mode
+  - [x] Map each mode to its corresponding filter types array
 
 ## Phase 3: TUI Mode Detection
 

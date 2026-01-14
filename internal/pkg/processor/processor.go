@@ -549,10 +549,21 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 	durationNs := time.Now().UnixNano() - stats.StartTime.UnixNano()
 	durationSec := uint64(durationNs / 1e9) // #nosec G115
 
-	// Build capabilities based on VoIP mode
+	// Build capabilities based on protocol mode
 	caps := &management.HunterCapabilities{}
-	if localSource.GetVoIPProcessor() != nil {
-		caps.FilterTypes = []string{"sip_user", "phone_number"}
+	switch localSource.GetProtocolMode() {
+	case "voip":
+		caps.FilterTypes = []string{"sip_user", "phone_number", "call_id", "codec", "sip_uri"}
+	case "dns":
+		caps.FilterTypes = []string{"dns_domain"}
+	case "email":
+		caps.FilterTypes = []string{"email_address", "email_subject"}
+	case "http":
+		caps.FilterTypes = []string{"http_host", "http_path"}
+	case "tls":
+		caps.FilterTypes = []string{"tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}
+	default: // "generic"
+		caps.FilterTypes = []string{"bpf", "ip_address"}
 	}
 
 	// Get active filter count

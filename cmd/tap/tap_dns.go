@@ -292,6 +292,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
 		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
+		ProtocolMode: "dns",
 	}
 	localSource := source.NewLocalSource(localSourceConfig)
 

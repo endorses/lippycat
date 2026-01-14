@@ -4,15 +4,15 @@ Display DNS, Email, HTTP, and TLS modes in TUI for hunter and tap nodes.
 
 ## Phase 1: LocalSource Protocol Mode
 
-- [ ] Add `ProtocolMode string` field to `LocalSourceConfig` in `internal/pkg/processor/source/local.go`
-- [ ] Add `GetProtocolMode() string` method to `LocalSource`
-- [ ] Update tap commands to set protocol mode:
-  - [ ] `cmd/tap/tap.go` → `"generic"`
-  - [ ] `cmd/tap/tap_voip.go` → `"voip"`
-  - [ ] `cmd/tap/tap_dns.go` → `"dns"`
-  - [ ] `cmd/tap/tap_email.go` → `"email"`
-  - [ ] `cmd/tap/tap_http.go` → `"http"`
-  - [ ] `cmd/tap/tap_tls.go` → `"tls"`
+- [x] Add `ProtocolMode string` field to `LocalSourceConfig` in `internal/pkg/processor/source/local.go`
+- [x] Add `GetProtocolMode() string` method to `LocalSource`
+- [x] Update tap commands to set protocol mode:
+  - [x] `cmd/tap/tap.go` → `"generic"`
+  - [x] `cmd/tap/tap_voip.go` → `"voip"`
+  - [x] `cmd/tap/tap_dns.go` → `"dns"`
+  - [x] `cmd/tap/tap_email.go` → `"email"`
+  - [x] `cmd/tap/tap_http.go` → `"http"`
+  - [x] `cmd/tap/tap_tls.go` → `"tls"`
 
 ## Phase 2: Virtual Hunter Capabilities
 

@@ -105,6 +105,10 @@ type LocalSourceConfig struct {
 	// ProcessorID is the processor's ID, used for virtual hunter ID generation.
 	// When set, SourceID() returns "{ProcessorID}-local" instead of "local".
 	ProcessorID string
+
+	// ProtocolMode indicates the capture protocol mode (e.g., "generic", "voip", "dns", "email", "http", "tls").
+	// Used for TUI display and filter validation.
+	ProtocolMode string
 }
 
 // DefaultLocalSourceConfig returns a LocalSourceConfig with sensible defaults.
@@ -419,6 +423,15 @@ func (s *LocalSource) SourceID() string {
 		return s.config.ProcessorID + "-local"
 	}
 	return "local"
+}
+
+// GetProtocolMode returns the protocol mode for this local capture.
+// Returns the configured ProtocolMode, or "generic" if not set.
+func (s *LocalSource) GetProtocolMode() string {
+	if s.config.ProtocolMode != "" {
+		return s.config.ProtocolMode
+	}
+	return "generic"
 }
 
 // SetBPFFilter updates the BPF filter. This requires restarting capture.

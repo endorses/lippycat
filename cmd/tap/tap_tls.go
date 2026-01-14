@@ -242,6 +242,7 @@ func runTLSTap(cmd *cobra.Command, args []string) error {
 		BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
 		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
+		ProtocolMode: "tls",
 	}
 	localSource := source.NewLocalSource(localSourceConfig)
 

@@ -4,12 +4,37 @@ package list
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/output"
 	"github.com/google/gopacket/pcap"
 	"github.com/spf13/cobra"
+)
+
+// InterfaceAddress represents an IP address assigned to an interface (JSON output).
+type InterfaceAddress struct {
+	IP        string `json:"ip"`
+	PrefixLen int    `json:"prefix_len,omitempty"`
+}
+
+// InterfaceInfo represents a network interface (JSON output).
+type InterfaceInfo struct {
+	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
+	Addresses   []InterfaceAddress `json:"addresses,omitempty"`
+}
+
+// InterfacesOutput represents the JSON output for list interfaces.
+type InterfacesOutput struct {
+	Interfaces []InterfaceInfo `json:"interfaces"`
+	Warning    string          `json:"warning,omitempty"`
+}
+
+var (
+	interfacesJSON bool
 )
 
 var interfacesCmd = &cobra.Command{
@@ -19,8 +44,17 @@ var interfacesCmd = &cobra.Command{
 	Run:   runInterfaces,
 }
 
+func init() {
+	interfacesCmd.Flags().BoolVar(&interfacesJSON, "json", false, "Output in JSON format")
+}
+
 func runInterfaces(cmd *cobra.Command, args []string) {
-	// Check if running with appropriate privileges
+	if interfacesJSON {
+		runInterfacesJSON(cmd)
+		return
+	}
+
+	// Plain text output (default)
 	if os.Geteuid() != 0 {
 		fmt.Println("Warning: Running without root privileges. Some interfaces may not be accessible.")
 		fmt.Println("Consider running with 'sudo' for full interface access.")
@@ -37,14 +71,11 @@ func runInterfaces(cmd *cobra.Command, args []string) {
 	fmt.Println("Network interfaces suitable for VoIP monitoring:")
 	validCount := 0
 	for _, device := range devices {
-		// Filter out sensitive or irrelevant interfaces
 		if isValidMonitoringInterface(device.Name) {
 			validCount++
 			fmt.Printf("  %s", device.Name)
 
-			// Only show basic, non-sensitive description
 			if device.Description != "" && !containsSensitiveInfo(device.Description) {
-				// Sanitize description
 				desc := sanitizeDescription(device.Description)
 				if desc != "" {
 					fmt.Printf(" - %s", desc)
@@ -60,6 +91,66 @@ func runInterfaces(cmd *cobra.Command, args []string) {
 
 	fmt.Println("\nNote: Interface selection should comply with your organization's network monitoring policies.")
 	fmt.Println("Only monitor interfaces you have explicit permission to access.")
+}
+
+func runInterfacesJSON(cmd *cobra.Command) {
+	result := InterfacesOutput{}
+
+	if os.Geteuid() != 0 {
+		result.Warning = "Running without root privileges. Some interfaces may not be accessible."
+	}
+
+	devices, err := pcap.FindAllDevs()
+	if err != nil {
+		logger.Error("Error accessing network interfaces", "error", err)
+		outputInterfacesError(cmd, fmt.Errorf("unable to list network interfaces: %w", err))
+		return
+	}
+
+	for _, device := range devices {
+		if isValidMonitoringInterface(device.Name) {
+			info := InterfaceInfo{
+				Name: device.Name,
+			}
+
+			if device.Description != "" && !containsSensitiveInfo(device.Description) {
+				info.Description = sanitizeDescription(device.Description)
+			}
+
+			for _, addr := range device.Addresses {
+				if addr.IP != nil {
+					ifaceAddr := InterfaceAddress{
+						IP: addr.IP.String(),
+					}
+					if addr.Netmask != nil {
+						ones, _ := net.IPMask(addr.Netmask).Size()
+						ifaceAddr.PrefixLen = ones
+					}
+					info.Addresses = append(info.Addresses, ifaceAddr)
+				}
+			}
+
+			result.Interfaces = append(result.Interfaces, info)
+		}
+	}
+
+	jsonBytes, err := output.MarshalJSON(result)
+	if err != nil {
+		outputInterfacesError(cmd, fmt.Errorf("failed to marshal JSON: %w", err))
+		return
+	}
+
+	cmd.Println(string(jsonBytes))
+}
+
+func outputInterfacesError(cmd *cobra.Command, err error) {
+	errOutput := struct {
+		Error string `json:"error"`
+	}{
+		Error: err.Error(),
+	}
+	jsonBytes, _ := output.MarshalJSON(errOutput)
+	cmd.PrintErrln(string(jsonBytes))
 }
 
 func isValidMonitoringInterface(name string) bool {

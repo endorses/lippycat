@@ -25,6 +25,8 @@ Display DNS, Email, HTTP, and TLS modes in TUI for hunter and tap nodes.
 - [x] Update `internal/pkg/tui/components/nodesview/rendering.go`:
   - [x] Add `GetProtocolMode(capabilities)` function that checks filter types for protocol indicators
   - [x] Update `GetHunterModeBadge()` to return DNS/Email/HTTP/TLS (not just VoIP/Generic)
+- [x] Update `internal/pkg/tui/components/nodesview/table_view.go`:
+  - [x] Fix tree view to use `GetHunterModeBadge()` instead of hardcoded VoIP/Generic check
 
 ## Phase 4: Filter Validation
 

@@ -486,11 +486,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			forwardedStr := FormatPacketNumber(hunter.PacketsForwarded)
 			filtersStr := fmt.Sprintf("%d", hunter.ActiveFilters)
 
-			// Determine mode (VoIP or Generic)
-			modeStr := "Generic"
-			if IsVoIPHunter(hunter.Capabilities) {
-				modeStr = "VoIP"
-			}
+			// Determine mode from capabilities
+			modeStr := GetHunterModeBadge(hunter.Capabilities, params.Theme)
 
 			// Track this hunter's line position for mouse clicks
 			// Current line is linesRendered (before we increment it)

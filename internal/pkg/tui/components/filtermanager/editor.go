@@ -59,37 +59,51 @@ func IsUniversalFilterType(filterType management.FilterType) bool {
 		filterType == management.FilterType_FILTER_IP_ADDRESS
 }
 
+// GetRequiredProtocolMode returns the protocol mode required for a filter type.
+// Returns "generic" for universal filters that work with all hunters.
+func GetRequiredProtocolMode(filterType management.FilterType) string {
+	if IsVoIPFilterType(filterType) {
+		return "voip"
+	}
+	if IsDNSFilterType(filterType) {
+		return "dns"
+	}
+	if IsEmailFilterType(filterType) {
+		return "email"
+	}
+	if IsHTTPFilterType(filterType) {
+		return "http"
+	}
+	if IsTLSFilterType(filterType) {
+		return "tls"
+	}
+	return "generic" // BPF, IP address work with all hunters
+}
+
 // HunterSupportsFilterType checks if a hunter supports a given filter type based on capabilities
 func HunterSupportsFilterType(hunter HunterSelectorItem, filterType management.FilterType) bool {
-	// Non-VoIP filters (BPF, IP) are supported by all hunters
-	if !IsVoIPFilterType(filterType) {
+	requiredMode := GetRequiredProtocolMode(filterType)
+
+	// Universal filters (BPF, IP) are supported by all hunters
+	if requiredMode == "generic" {
 		return true
 	}
 
-	// VoIP filters require VoIP capabilities
-	if hunter.Capabilities == nil || len(hunter.Capabilities.FilterTypes) == 0 {
-		// No capabilities info - assume generic hunter (no VoIP support)
-		return false
-	}
-
-	// Check if hunter supports VoIP-specific filters (sip_user is the indicator)
-	for _, ft := range hunter.Capabilities.FilterTypes {
-		if ft == "sip_user" {
-			return true
-		}
-	}
-
-	return false
+	// Protocol-specific filters require matching hunter mode
+	hunterMode := GetHunterProtocolMode(hunter)
+	return hunterMode == requiredMode
 }
 
 // FilterHuntersByCapability filters hunters based on filter type capabilities
 func FilterHuntersByCapability(hunters []HunterSelectorItem, filterType management.FilterType) []HunterSelectorItem {
-	// Non-VoIP filters - all hunters compatible
-	if !IsVoIPFilterType(filterType) {
+	requiredMode := GetRequiredProtocolMode(filterType)
+
+	// Universal filters - all hunters compatible
+	if requiredMode == "generic" {
 		return hunters
 	}
 
-	// VoIP filters - only return VoIP-capable hunters
+	// Protocol-specific filters - only return compatible hunters
 	compatible := make([]HunterSelectorItem, 0)
 	for _, hunter := range hunters {
 		if HunterSupportsFilterType(hunter, filterType) {
@@ -274,20 +288,90 @@ type CycleFormFilterTypeParams struct {
 	AvailableHunters []HunterSelectorItem
 }
 
+// GetHunterProtocolMode returns the protocol mode of a hunter based on capabilities.
+// Returns "voip", "dns", "email", "http", "tls", or "generic".
+func GetHunterProtocolMode(hunter HunterSelectorItem) string {
+	if hunter.Capabilities == nil || len(hunter.Capabilities.FilterTypes) == 0 {
+		return "generic"
+	}
+
+	for _, ft := range hunter.Capabilities.FilterTypes {
+		switch ft {
+		case "sip_user":
+			return "voip"
+		case "dns_domain":
+			return "dns"
+		case "email_address":
+			return "email"
+		case "http_host":
+			return "http"
+		case "tls_sni":
+			return "tls"
+		}
+	}
+
+	return "generic"
+}
+
 // HasVoIPHunters checks if any hunters support VoIP filters
 func HasVoIPHunters(hunters []HunterSelectorItem) bool {
 	for _, hunter := range hunters {
-		if HunterSupportsFilterType(hunter, management.FilterType_FILTER_SIP_USER) {
+		if GetHunterProtocolMode(hunter) == "voip" {
 			return true
 		}
 	}
 	return false
 }
 
-// CycleFormFilterType cycles to the next/previous filter type in the form
-// If no VoIP hunters are available, VoIP filter types are skipped
+// HasDNSHunters checks if any hunters support DNS filters
+func HasDNSHunters(hunters []HunterSelectorItem) bool {
+	for _, hunter := range hunters {
+		if GetHunterProtocolMode(hunter) == "dns" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasEmailHunters checks if any hunters support Email filters
+func HasEmailHunters(hunters []HunterSelectorItem) bool {
+	for _, hunter := range hunters {
+		if GetHunterProtocolMode(hunter) == "email" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasHTTPHunters checks if any hunters support HTTP filters
+func HasHTTPHunters(hunters []HunterSelectorItem) bool {
+	for _, hunter := range hunters {
+		if GetHunterProtocolMode(hunter) == "http" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasTLSHunters checks if any hunters support TLS filters
+func HasTLSHunters(hunters []HunterSelectorItem) bool {
+	for _, hunter := range hunters {
+		if GetHunterProtocolMode(hunter) == "tls" {
+			return true
+		}
+	}
+	return false
+}
+
+// CycleFormFilterType cycles to the next/previous filter type in the form.
+// Filter types are skipped if no compatible hunters are available.
 func CycleFormFilterType(current management.FilterType, forward bool, availableHunters []HunterSelectorItem) management.FilterType {
+	// Check which protocol modes have available hunters
 	hasVoIP := HasVoIPHunters(availableHunters)
+	hasDNS := HasDNSHunters(availableHunters)
+	hasEmail := HasEmailHunters(availableHunters)
+	hasHTTP := HasHTTPHunters(availableHunters)
+	hasTLS := HasTLSHunters(availableHunters)
 
 	// All available filter types in order (grouped by category)
 	allTypes := []management.FilterType{
@@ -315,10 +399,19 @@ func CycleFormFilterType(current management.FilterType, forward bool, availableH
 		management.FilterType_FILTER_HTTP_URL,
 	}
 
-	// Filter out VoIP types if no VoIP hunters available
+	// Filter out types if no compatible hunters available
 	availableTypes := make([]management.FilterType, 0, len(allTypes))
 	for _, t := range allTypes {
-		if !hasVoIP && IsVoIPFilterType(t) {
+		switch {
+		case IsVoIPFilterType(t) && !hasVoIP:
+			continue
+		case IsDNSFilterType(t) && !hasDNS:
+			continue
+		case IsEmailFilterType(t) && !hasEmail:
+			continue
+		case IsHTTPFilterType(t) && !hasHTTP:
+			continue
+		case IsTLSFilterType(t) && !hasTLS:
 			continue
 		}
 		availableTypes = append(availableTypes, t)

@@ -35,11 +35,44 @@ func ValidateFilter(params ValidateFilterParams) ValidateFilterResult {
 		}
 	}
 
-	// Check if VoIP filter type is used without VoIP hunters
-	if IsVoIPFilterType(params.Type) && !HasVoIPHunters(params.AvailableHunters) {
-		return ValidateFilterResult{
-			Valid:        false,
-			ErrorMessage: "No VoIP-capable hunters available. Start a VoIP hunter with 'lc hunt voip' to use this filter type.",
+	// Check protocol-specific filter types against available hunters
+	requiredMode := GetRequiredProtocolMode(params.Type)
+
+	switch requiredMode {
+	case "voip":
+		if !HasVoIPHunters(params.AvailableHunters) {
+			return ValidateFilterResult{
+				Valid:        false,
+				ErrorMessage: "No VoIP-capable hunters available. Start a VoIP hunter with 'lc hunt voip' or 'lc tap voip' to use this filter type.",
+			}
+		}
+	case "dns":
+		if !HasDNSHunters(params.AvailableHunters) {
+			return ValidateFilterResult{
+				Valid:        false,
+				ErrorMessage: "No DNS-capable hunters available. Start a DNS hunter with 'lc hunt dns' or 'lc tap dns' to use this filter type.",
+			}
+		}
+	case "email":
+		if !HasEmailHunters(params.AvailableHunters) {
+			return ValidateFilterResult{
+				Valid:        false,
+				ErrorMessage: "No Email-capable hunters available. Start an Email hunter with 'lc hunt email' or 'lc tap email' to use this filter type.",
+			}
+		}
+	case "http":
+		if !HasHTTPHunters(params.AvailableHunters) {
+			return ValidateFilterResult{
+				Valid:        false,
+				ErrorMessage: "No HTTP-capable hunters available. Start an HTTP hunter with 'lc hunt http' or 'lc tap http' to use this filter type.",
+			}
+		}
+	case "tls":
+		if !HasTLSHunters(params.AvailableHunters) {
+			return ValidateFilterResult{
+				Valid:        false,
+				ErrorMessage: "No TLS-capable hunters available. Start a TLS hunter with 'lc hunt tls' or 'lc tap tls' to use this filter type.",
+			}
 		}
 	}
 

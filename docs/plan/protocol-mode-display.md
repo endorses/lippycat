@@ -28,12 +28,19 @@ Display DNS, Email, HTTP, and TLS modes in TUI for hunter and tap nodes.
 
 ## Phase 4: Filter Validation
 
-- [ ] Add helper functions to `internal/pkg/tui/components/filtermanager/`:
-  - [ ] `IsDNSFilterType()`
-  - [ ] `IsEmailFilterType()`
-  - [ ] `IsHTTPFilterType()`
-  - [ ] `IsTLSFilterType()`
-- [ ] Update filter validation to check protocol-specific filters against hunter mode
+- [x] Add helper functions to `internal/pkg/tui/components/filtermanager/`:
+  - [x] `IsDNSFilterType()` (already existed)
+  - [x] `IsEmailFilterType()` (already existed)
+  - [x] `IsHTTPFilterType()` (already existed)
+  - [x] `IsTLSFilterType()` (already existed)
+  - [x] `GetHunterProtocolMode()` - get protocol mode from hunter capabilities
+  - [x] `GetRequiredProtocolMode()` - get required protocol mode for filter type
+  - [x] `HasDNSHunters()`, `HasEmailHunters()`, `HasHTTPHunters()`, `HasTLSHunters()`
+- [x] Update filter validation to check protocol-specific filters against hunter mode:
+  - [x] `HunterSupportsFilterType()` - uses protocol mode checking
+  - [x] `FilterHuntersByCapability()` - filters hunters by protocol mode
+  - [x] `ValidateFilter()` - validates all protocol-specific filters
+  - [x] `CycleFormFilterType()` - skips filter types without compatible hunters
 
 ## Filter Type Mappings
 

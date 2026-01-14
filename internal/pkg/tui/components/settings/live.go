@@ -12,8 +12,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
-	"github.com/google/gopacket/pcap"
 )
 
 // LiveSettings encapsulates all settings for live capture mode
@@ -40,34 +40,15 @@ func NewLiveSettings(currentInterface string, bufferSize int, promiscuous bool, 
 		}
 	}
 
-	// Get available interfaces
-	ifaces, _ := pcap.FindAllDevs()
-	availableIfaces := []string{"any"}
-	for _, iface := range ifaces {
-		if iface.Name != "" {
-			availableIfaces = append(availableIfaces, iface.Name)
-		}
-	}
+	// Get available interfaces (filtered for monitoring suitability)
+	ifaces, _ := capture.ListInterfaces(true) // includeAny = true
 
 	// Create list items
-	items := make([]list.Item, len(availableIfaces))
+	items := make([]list.Item, len(ifaces))
 	selectedIdx := 0
-	for i, iface := range availableIfaces {
-		desc := "Capture from all interfaces"
-		if iface != "any" {
-			for _, pcapIface := range ifaces {
-				if pcapIface.Name == iface {
-					if pcapIface.Description != "" {
-						desc = pcapIface.Description
-					} else {
-						desc = "Network interface"
-					}
-					break
-				}
-			}
-		}
-		items[i] = &settingItem{title: iface, desc: desc}
-		if selectedIfaces[iface] {
+	for i, iface := range ifaces {
+		items[i] = &settingItem{title: iface.Name, desc: iface.Description}
+		if selectedIfaces[iface.Name] {
 			selectedIdx = i
 		}
 	}

@@ -1,6 +1,4 @@
-//go:build cli || tui || all
-
-package list
+package capture
 
 import (
 	"testing"
@@ -143,7 +141,7 @@ func TestIsValidMonitoringInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isValidMonitoringInterface(tt.interfaceName)
+			result := IsValidMonitoringInterface(tt.interfaceName)
 			assert.Equal(t, tt.expected, result, "Interface %s should return %t", tt.interfaceName, tt.expected)
 		})
 	}
@@ -366,7 +364,7 @@ func TestInterfaceSecurityFiltering_Integration(t *testing.T) {
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test interface filtering
-			isValid := isValidMonitoringInterface(tt.interfaceName)
+			isValid := IsValidMonitoringInterface(tt.interfaceName)
 			assert.Equal(t, tt.shouldShow, isValid, "Interface validity should match expected")
 
 			if tt.shouldShow {

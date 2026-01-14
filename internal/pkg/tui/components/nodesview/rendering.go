@@ -65,29 +65,55 @@ func FormatDuration(ns int64) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
-// IsVoIPHunter determines if a hunter supports VoIP filters based on capabilities
-func IsVoIPHunter(capabilities *management.HunterCapabilities) bool {
+// GetProtocolMode determines the protocol mode from hunter capabilities.
+// Returns "voip", "dns", "email", "http", "tls", or "generic" based on filter types.
+func GetProtocolMode(capabilities *management.HunterCapabilities) string {
 	if capabilities == nil || len(capabilities.FilterTypes) == 0 {
 		// No capabilities - assume generic (backward compatibility)
-		return false
+		return "generic"
 	}
 
-	// Check if hunter supports VoIP-specific filters (sip_user is the indicator)
+	// Check filter types for protocol indicators
 	for _, ft := range capabilities.FilterTypes {
-		if ft == "sip_user" {
-			return true
+		switch ft {
+		case "sip_user":
+			return "voip"
+		case "dns_domain":
+			return "dns"
+		case "email_address":
+			return "email"
+		case "http_host":
+			return "http"
+		case "tls_sni":
+			return "tls"
 		}
 	}
 
-	return false
+	return "generic"
+}
+
+// IsVoIPHunter determines if a hunter supports VoIP filters based on capabilities
+func IsVoIPHunter(capabilities *management.HunterCapabilities) bool {
+	return GetProtocolMode(capabilities) == "voip"
 }
 
 // GetHunterModeBadge returns an unstyled badge text for hunter mode
 func GetHunterModeBadge(capabilities *management.HunterCapabilities, theme themes.Theme) string {
-	if IsVoIPHunter(capabilities) {
+	mode := GetProtocolMode(capabilities)
+	switch mode {
+	case "voip":
 		return "VoIP"
+	case "dns":
+		return "DNS"
+	case "email":
+		return "Email"
+	case "http":
+		return "HTTP"
+	case "tls":
+		return "TLS"
+	default:
+		return "Generic"
 	}
-	return "Generic"
 }
 
 // RenderBox renders a box with rounded corners around the given lines

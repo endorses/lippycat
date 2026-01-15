@@ -73,17 +73,19 @@ go func() {
 
 **File:** `internal/pkg/tui/store/packet_store.go`
 
-- [ ] Add `GetRecentPackets(sinceIndex int)` method returning only new packets
-- [ ] Track high-water mark in packet list component
-- [ ] Update `PacketList.AppendPackets()` to use incremental data
+- [x] Add `GetNewPackets(sinceTotal int64)` method returning only new packets
+- [x] Add `GetNewFilteredPackets(sinceCount int)` method for filtered incremental sync
+- [x] Track high-water mark (`lastSyncedTotal`, `lastSyncedFilteredCount`) in Model
+- [x] Add `PacketList.AppendPackets()` for efficient incremental updates
+- [x] Add `PacketList.TrimOldPackets()` for buffer wrap handling
 
 ### 3.2 Lazy Filtered Packet Generation
 
 **File:** `internal/pkg/tui/store/packet_store.go`
 
-- [ ] Only recompute filtered list when filter changes
-- [ ] Incrementally add matching packets to filtered list
-- [ ] Avoid full re-filter on every batch
+- [x] Only recompute filtered list when filter changes (detect via `lastFilterState`)
+- [x] Incrementally add matching packets to filtered list (already done in AddPacketBatch)
+- [x] Avoid full re-filter on every batch (use `updatePacketListIncremental()`)
 
 ## Phase 4: Low Priority - Memory Optimization
 

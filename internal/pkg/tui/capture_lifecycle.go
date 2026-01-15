@@ -103,6 +103,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	m.packetStore.MatchedPackets = 0
 	m.uiState.PacketList.Reset() // Reset packet list including autoscroll state
 
+	// Reset incremental sync tracking
+	m.lastSyncedTotal = 0
+	m.lastSyncedFilteredCount = 0
+	m.lastFilterState = false
+
 	// Reset statistics (bounded counters)
 	m.statistics.ProtocolCounts.Clear()
 	m.statistics.SourceCounts.Clear()

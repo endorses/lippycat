@@ -65,3 +65,106 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 func (m *Model) generateDefaultFilename() string {
 	return fmt.Sprintf("capture_%s.pcap", time.Now().Format("20060102_150405"))
 }
+
+// updatePacketListIncremental updates the packet list using incremental sync.
+// This is more efficient than full updates for normal packet flow.
+// Falls back to full update when filter changes or buffer wraps significantly.
+func (m *Model) updatePacketListIncremental() {
+	hasFilter := m.packetStore.HasFilter()
+
+	// Detect filter state change (requires full refresh)
+	filterStateChanged := hasFilter != m.lastFilterState
+	m.lastFilterState = hasFilter
+
+	if filterStateChanged {
+		// Filter was added or removed - do full refresh
+		m.doFullPacketListRefresh(hasFilter)
+		return
+	}
+
+	if !hasFilter {
+		// Unfiltered mode - use incremental sync based on TotalPackets
+		m.updatePacketListUnfiltered()
+	} else {
+		// Filtered mode - use incremental sync based on filtered count
+		m.updatePacketListFiltered()
+	}
+}
+
+// updatePacketListUnfiltered handles incremental updates in unfiltered mode
+func (m *Model) updatePacketListUnfiltered() {
+	newPackets, newTotal, needsFullRefresh := m.packetStore.GetNewPackets(m.lastSyncedTotal)
+
+	if needsFullRefresh {
+		// Buffer wrapped significantly - do full refresh
+		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		m.lastSyncedTotal = newTotal
+		return
+	}
+
+	if len(newPackets) == 0 {
+		// No new packets
+		return
+	}
+
+	// Check if we need to trim old packets (buffer at capacity)
+	maxPackets := m.packetStore.MaxPackets
+	currentListLen := m.uiState.PacketList.Len()
+	newListLen := currentListLen + len(newPackets)
+
+	if newListLen > maxPackets {
+		// Need to trim old packets from the front
+		trimCount := newListLen - maxPackets
+		m.uiState.PacketList.TrimOldPackets(trimCount)
+	}
+
+	// Append new packets
+	m.uiState.PacketList.AppendPackets(newPackets)
+	m.lastSyncedTotal = newTotal
+}
+
+// updatePacketListFiltered handles incremental updates in filtered mode
+func (m *Model) updatePacketListFiltered() {
+	newPackets, newCount, needsFullRefresh := m.packetStore.GetNewFilteredPackets(m.lastSyncedFilteredCount)
+
+	if needsFullRefresh {
+		// Significant trimming occurred - do full refresh
+		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
+		m.lastSyncedFilteredCount = newCount
+		return
+	}
+
+	if len(newPackets) == 0 {
+		// No new filtered packets
+		return
+	}
+
+	// Check if we need to trim old packets (buffer at capacity)
+	maxPackets := m.packetStore.MaxPackets
+	currentListLen := m.uiState.PacketList.Len()
+	newListLen := currentListLen + len(newPackets)
+
+	if newListLen > maxPackets {
+		// Need to trim old packets from the front
+		trimCount := newListLen - maxPackets
+		m.uiState.PacketList.TrimOldPackets(trimCount)
+	}
+
+	// Append new filtered packets
+	m.uiState.PacketList.AppendPackets(newPackets)
+	m.lastSyncedFilteredCount = newCount
+}
+
+// doFullPacketListRefresh performs a full packet list refresh
+func (m *Model) doFullPacketListRefresh(hasFilter bool) {
+	if !hasFilter {
+		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		_, _, total, _ := m.packetStore.GetBufferInfo()
+		m.lastSyncedTotal = total
+		m.lastSyncedFilteredCount = 0
+	} else {
+		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
+		m.lastSyncedFilteredCount = m.packetStore.FilteredCount()
+		m.lastSyncedTotal = 0
+	}
+}

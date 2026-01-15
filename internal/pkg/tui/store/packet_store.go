@@ -377,3 +377,77 @@ func (ps *PacketStore) UpdateMatchedCount() {
 		ps.MatchedPackets = int64(len(ps.FilteredPackets))
 	}
 }
+
+// GetNewPackets returns packets added since lastSyncedTotal.
+// Returns:
+//   - packets: new packets in chronological order (may be empty if buffer wrapped significantly)
+//   - newTotal: current TotalPackets value (use this for next call)
+//   - needsFullRefresh: true if the buffer has wrapped significantly and a full refresh is needed
+//
+// If needsFullRefresh is true, the caller should call GetPacketsInOrder() instead.
+func (ps *PacketStore) GetNewPackets(lastSyncedTotal int64) (packets []components.PacketDisplay, newTotal int64, needsFullRefresh bool) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+
+	newTotal = ps.TotalPackets
+	newPacketCount := newTotal - lastSyncedTotal
+
+	// No new packets
+	if newPacketCount <= 0 {
+		return nil, newTotal, false
+	}
+
+	// If we've received more packets than the buffer can hold since last sync,
+	// we need a full refresh because old packets have been overwritten
+	if newPacketCount >= int64(ps.MaxPackets) {
+		return nil, newTotal, true
+	}
+
+	// Calculate how many new packets we can return
+	// This is the minimum of newPacketCount and what's actually in the buffer
+	count := int(newPacketCount)
+	if count > ps.PacketsCount {
+		count = ps.PacketsCount
+	}
+
+	// Get the newest 'count' packets from the ring buffer
+	// These are at positions (head - count) to (head - 1) in wrap-around order
+	packets = make([]components.PacketDisplay, count)
+	bufferLen := len(ps.Packets)
+	for i := 0; i < count; i++ {
+		// Calculate index: (head - count + i) with wrap-around
+		idx := (ps.PacketsHead - count + i + bufferLen) % bufferLen
+		packets[i] = ps.Packets[idx]
+	}
+
+	return packets, newTotal, false
+}
+
+// GetNewFilteredPackets returns filtered packets added since lastSyncedCount.
+// Returns:
+//   - packets: new filtered packets (may be empty)
+//   - newCount: current filtered packet count (use this for next call)
+//   - needsFullRefresh: true if significant trimming occurred and full refresh is needed
+func (ps *PacketStore) GetNewFilteredPackets(lastSyncedCount int) (packets []components.PacketDisplay, newCount int, needsFullRefresh bool) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+
+	newCount = len(ps.FilteredPackets)
+
+	// If filtered list shrank (due to trimming), need full refresh
+	if newCount < lastSyncedCount {
+		return nil, newCount, true
+	}
+
+	// No new packets
+	if newCount == lastSyncedCount {
+		return nil, newCount, false
+	}
+
+	// Return only the new packets
+	newPackets := newCount - lastSyncedCount
+	packets = make([]components.PacketDisplay, newPackets)
+	copy(packets, ps.FilteredPackets[lastSyncedCount:])
+
+	return packets, newCount, false
+}

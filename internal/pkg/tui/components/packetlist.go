@@ -281,6 +281,69 @@ func (p *PacketList) Reset() {
 	p.autoScroll = true
 }
 
+// AppendPackets efficiently adds new packets to the list without full cursor recalculation.
+// This is used for incremental updates when only new packets need to be added.
+// For filter changes or buffer wrap-arounds, use SetPackets instead.
+func (p *PacketList) AppendPackets(packets []PacketDisplay) {
+	if len(packets) == 0 {
+		return
+	}
+
+	oldLen := len(p.packets)
+	wasAtBottom := (oldLen == 0) || (p.cursor >= oldLen-1)
+
+	// Append new packets
+	p.packets = append(p.packets, packets...)
+
+	// Auto-scroll to bottom if enabled and was at bottom
+	if p.autoScroll && wasAtBottom {
+		p.cursor = len(p.packets) - 1
+		p.adjustOffset()
+	}
+	// Otherwise keep cursor at same position (already valid)
+}
+
+// TrimOldPackets removes packets from the front of the list when buffer wraps.
+// This maintains the packet list at the same size as the backing store.
+// The trimCount should match the number of packets removed from the store.
+func (p *PacketList) TrimOldPackets(trimCount int) {
+	if trimCount <= 0 || len(p.packets) == 0 {
+		return
+	}
+
+	if trimCount >= len(p.packets) {
+		// Trim everything - use Reset instead
+		p.Reset()
+		return
+	}
+
+	wasAtBottom := p.cursor >= len(p.packets)-1
+
+	// Remove packets from front
+	p.packets = p.packets[trimCount:]
+
+	// Adjust cursor
+	if !wasAtBottom {
+		p.cursor -= trimCount
+		if p.cursor < 0 {
+			p.cursor = 0
+		}
+	} else {
+		// Was at bottom, stay at bottom
+		p.cursor = len(p.packets) - 1
+		if p.cursor < 0 {
+			p.cursor = 0
+		}
+	}
+
+	p.adjustOffset()
+}
+
+// Len returns the current number of packets in the list
+func (p *PacketList) Len() int {
+	return len(p.packets)
+}
+
 // SetSize sets the display size
 func (p *PacketList) SetSize(width, height int) {
 	if p.width != width || p.height != height {

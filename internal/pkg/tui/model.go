@@ -107,6 +107,11 @@ type Model struct {
 	lastPacketListUpdate     time.Time     // Last time packet list was updated
 	packetListUpdateInterval time.Duration // Minimum interval between updates (e.g., 100ms = 10 Hz)
 
+	// Incremental packet list sync tracking
+	lastSyncedTotal         int64 // Last synced TotalPackets for unfiltered mode
+	lastSyncedFilteredCount int   // Last synced filtered packet count for filtered mode
+	lastFilterState         bool  // Was filter active on last sync (to detect filter changes)
+
 	// Call aggregation (offline and live modes)
 	offlineCallAggregator *LocalCallAggregator // Call aggregator for offline PCAP analysis
 	liveCallAggregator    *LocalCallAggregator // Call aggregator for live capture

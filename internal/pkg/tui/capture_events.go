@@ -79,7 +79,7 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 		underPressure := bridgeStats.BatchesDropped > 0 && bridgeStats.BatchesSent > 0 &&
 			float64(bridgeStats.BatchesDropped)/float64(bridgeStats.BatchesSent) > 0.01
 
-		// Update packet list with adaptive throttling
+		// Update packet list with adaptive throttling and incremental updates
 		now := time.Now()
 		updateInterval := m.packetListUpdateInterval
 		if underPressure {
@@ -88,11 +88,7 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 		}
 
 		if now.Sub(m.lastPacketListUpdate) >= updateInterval {
-			if !m.packetStore.HasFilter() {
-				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-			} else {
-				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-			}
+			m.updatePacketListIncremental()
 			m.lastPacketListUpdate = now
 		}
 
@@ -149,7 +145,7 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		underPressure := bridgeStats.BatchesDropped > 0 && bridgeStats.BatchesSent > 0 &&
 			float64(bridgeStats.BatchesDropped)/float64(bridgeStats.BatchesSent) > 0.01
 
-		// Update packet list with adaptive throttling
+		// Update packet list with adaptive throttling and incremental updates
 		now := time.Now()
 		updateInterval := m.packetListUpdateInterval
 		if underPressure {
@@ -157,11 +153,7 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		}
 
 		if now.Sub(m.lastPacketListUpdate) >= updateInterval {
-			if !m.packetStore.HasFilter() {
-				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-			} else {
-				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-			}
+			m.updatePacketListIncremental()
 			m.lastPacketListUpdate = now
 		}
 

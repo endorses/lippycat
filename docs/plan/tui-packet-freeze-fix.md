@@ -95,7 +95,7 @@ go func() {
 
 - [x] Compact `recentPackets` slice after trimming old entries
 - [x] Periodically reallocate when capacity >> length
-- [ ] Consider using ring buffer instead of slice
+- [x] Consider using ring buffer instead of slice
 
 ## Phase 5: Diagnostics
 

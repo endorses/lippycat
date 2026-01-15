@@ -21,6 +21,68 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
+// timeRingBuffer is a fixed-size circular buffer for storing timestamps.
+// Used for rolling window rate calculation with O(1) operations and fixed memory.
+type timeRingBuffer struct {
+	data     []time.Time
+	capacity int
+	head     int // Next write position
+	count    int // Number of valid entries
+}
+
+// newTimeRingBuffer creates a ring buffer with the given capacity.
+func newTimeRingBuffer(capacity int) *timeRingBuffer {
+	return &timeRingBuffer{
+		data:     make([]time.Time, capacity),
+		capacity: capacity,
+	}
+}
+
+// push adds a timestamp to the buffer, overwriting oldest if full.
+func (rb *timeRingBuffer) push(t time.Time) {
+	rb.data[rb.head] = t
+	rb.head = (rb.head + 1) % rb.capacity
+	if rb.count < rb.capacity {
+		rb.count++
+	}
+}
+
+// trimBefore removes all entries before the cutoff time.
+// Returns the number of valid entries remaining.
+func (rb *timeRingBuffer) trimBefore(cutoff time.Time) int {
+	if rb.count == 0 {
+		return 0
+	}
+
+	// Find how many entries from the tail are before cutoff
+	trimCount := 0
+	for trimCount < rb.count {
+		// Calculate tail position
+		tailIdx := (rb.head - rb.count + trimCount + rb.capacity) % rb.capacity
+		if !rb.data[tailIdx].Before(cutoff) {
+			break
+		}
+		trimCount++
+	}
+
+	rb.count -= trimCount
+	return rb.count
+}
+
+// oldest returns the oldest timestamp in the buffer, or zero time if empty.
+func (rb *timeRingBuffer) oldest() time.Time {
+	if rb.count == 0 {
+		return time.Time{}
+	}
+	tailIdx := (rb.head - rb.count + rb.capacity) % rb.capacity
+	return rb.data[tailIdx]
+}
+
+// len returns the number of valid entries.
+func (rb *timeRingBuffer) len() int {
+	return rb.count
+}
+
 // Offline call tracker for RTP-to-CallID mapping in offline mode
 var (
 	offlineCallTracker *OfflineCallTracker
@@ -194,14 +256,16 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		batchInterval          = constants.TUITickInterval // Batch interval
 		rateWindowSize         = 2 * time.Second           // Rolling window for rate calculation (react quickly)
 		tuiQueueSize           = 10                        // Buffered channel capacity for TUI batches
+		// Ring buffer capacity: 2s window at max 10k pps = 20k entries, with some headroom
+		ringBufferCapacity = 25000
 	)
 
 	batch := make([]components.PacketDisplay, 0, 100)
 	packetCount := int64(0)
 	displayedCount := int64(0)
 
-	// Rolling window for recent packet rate calculation
-	var recentPackets []time.Time
+	// Ring buffer for rolling window rate calculation (fixed memory, O(1) operations)
+	recentPackets := newTimeRingBuffer(ringBufferCapacity)
 	lastRateCheck := time.Now()
 
 	ticker := time.NewTicker(batchInterval)
@@ -251,38 +315,25 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 		// Update rolling window every 100ms to avoid overhead
 		if now.Sub(lastRateCheck) > constants.TUITickInterval {
-			// Remove packets older than window
+			// Remove packets older than window using ring buffer O(1) trim
 			cutoff := now.Add(-rateWindowSize)
-			i := 0
-			for i < len(recentPackets) && recentPackets[i].Before(cutoff) {
-				i++
-			}
-			if i > 0 {
-				// Compact slice to reclaim memory (fix for rolling window memory leak)
-				copy(recentPackets, recentPackets[i:])
-				recentPackets = recentPackets[:len(recentPackets)-i]
-
-				// Periodically reallocate when capacity is much larger than length
-				if cap(recentPackets) > 10000 && len(recentPackets) < cap(recentPackets)/4 {
-					newSlice := make([]time.Time, len(recentPackets))
-					copy(newSlice, recentPackets)
-					recentPackets = newSlice
-				}
-			}
+			recentPackets.trimBefore(cutoff)
 			lastRateCheck = now
 		}
 
 		// Calculate rate from rolling window
-		if len(recentPackets) < 10 {
+		count := recentPackets.len()
+		if count < 10 {
 			return 1.0 // Not enough data, use full mode
 		}
 
-		windowDuration := now.Sub(recentPackets[0]).Seconds()
+		oldest := recentPackets.oldest()
+		windowDuration := now.Sub(oldest).Seconds()
 		if windowDuration < 0.1 {
 			return 1.0 // Too short, use full mode
 		}
 
-		currentRate := float64(len(recentPackets)) / windowDuration
+		currentRate := float64(count) / windowDuration
 		if currentRate <= float64(targetPacketsPerSecond) {
 			return 1.0 // Show all packets if under target
 		}
@@ -310,7 +361,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			atomic.AddInt64(&bridgeStats.PacketsReceived, 1)
 
 			// Track packet timestamp for rolling window rate calculation
-			recentPackets = append(recentPackets, time.Now())
+			recentPackets.push(time.Now())
 
 			// Adaptive sampling based on load
 			samplingRatio := getSamplingRatio()

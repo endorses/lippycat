@@ -220,6 +220,9 @@ type BridgeStats struct {
 	PacketsDisplayed int64 // Packets sent to TUI for display
 	BatchesSent      int64 // Batches successfully queued for TUI
 	BatchesDropped   int64 // Batches dropped due to TUI backpressure
+	QueueDepth       int64 // Current batch queue depth (0-tuiQueueSize)
+	MaxQueueDepth    int64 // Peak queue depth seen
+	SamplingRatio    int64 // Current sampling ratio * 1000 (e.g., 1000 = 100%, 500 = 50%)
 }
 
 // bridgeStats holds global bridge statistics for diagnostics
@@ -232,6 +235,9 @@ func GetBridgeStats() BridgeStats {
 		PacketsDisplayed: atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
 		BatchesSent:      atomic.LoadInt64(&bridgeStats.BatchesSent),
 		BatchesDropped:   atomic.LoadInt64(&bridgeStats.BatchesDropped),
+		QueueDepth:       atomic.LoadInt64(&bridgeStats.QueueDepth),
+		MaxQueueDepth:    atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
+		SamplingRatio:    atomic.LoadInt64(&bridgeStats.SamplingRatio),
 	}
 }
 
@@ -241,6 +247,9 @@ func ResetBridgeStats() {
 	atomic.StoreInt64(&bridgeStats.PacketsDisplayed, 0)
 	atomic.StoreInt64(&bridgeStats.BatchesSent, 0)
 	atomic.StoreInt64(&bridgeStats.BatchesDropped, 0)
+	atomic.StoreInt64(&bridgeStats.QueueDepth, 0)
+	atomic.StoreInt64(&bridgeStats.MaxQueueDepth, 0)
+	atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // Default to 100%
 }
 
 // StartPacketBridge creates a bridge between packet capture and TUI.
@@ -305,6 +314,20 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			}
 			displayedCount += int64(len(batch))
 			batch = make([]components.PacketDisplay, 0, 100)
+
+			// Update queue depth stats
+			depth := int64(len(tuiBatchChan))
+			atomic.StoreInt64(&bridgeStats.QueueDepth, depth)
+			// Update max if current depth is higher
+			for {
+				maxDepth := atomic.LoadInt64(&bridgeStats.MaxQueueDepth)
+				if depth <= maxDepth {
+					break
+				}
+				if atomic.CompareAndSwapInt64(&bridgeStats.MaxQueueDepth, maxDepth, depth) {
+					break
+				}
+			}
 		}
 	}
 
@@ -324,18 +347,21 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		// Calculate rate from rolling window
 		count := recentPackets.len()
 		if count < 10 {
-			return 1.0 // Not enough data, use full mode
+			atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // 100%
+			return 1.0                                          // Not enough data, use full mode
 		}
 
 		oldest := recentPackets.oldest()
 		windowDuration := now.Sub(oldest).Seconds()
 		if windowDuration < 0.1 {
-			return 1.0 // Too short, use full mode
+			atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // 100%
+			return 1.0                                          // Too short, use full mode
 		}
 
 		currentRate := float64(count) / windowDuration
 		if currentRate <= float64(targetPacketsPerSecond) {
-			return 1.0 // Show all packets if under target
+			atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // 100%
+			return 1.0                                          // Show all packets if under target
 		}
 
 		// Sample to achieve target rate
@@ -343,6 +369,9 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		if ratio < 0.01 {
 			ratio = 0.01 // Show at least 1%
 		}
+
+		// Store sampling ratio as integer (ratio * 1000 for precision)
+		atomic.StoreInt64(&bridgeStats.SamplingRatio, int64(ratio*1000))
 		return ratio
 	}
 

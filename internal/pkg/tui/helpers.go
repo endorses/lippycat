@@ -59,6 +59,23 @@ func (m *Model) updateStatistics(pkt components.PacketDisplay) {
 
 	// Update statistics view with new data
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
+
+	// Update bridge statistics
+	m.updateBridgeStats()
+}
+
+// updateBridgeStats updates the bridge statistics in the statistics view
+func (m *Model) updateBridgeStats() {
+	stats := GetBridgeStats()
+	m.uiState.StatisticsView.SetBridgeStats(&components.BridgeStatistics{
+		PacketsReceived:  stats.PacketsReceived,
+		PacketsDisplayed: stats.PacketsDisplayed,
+		BatchesSent:      stats.BatchesSent,
+		BatchesDropped:   stats.BatchesDropped,
+		QueueDepth:       stats.QueueDepth,
+		MaxQueueDepth:    stats.MaxQueueDepth,
+		SamplingRatio:    stats.SamplingRatio,
+	})
 }
 
 // generateDefaultFilename creates a timestamp-based filename for saving captures

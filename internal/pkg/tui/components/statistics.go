@@ -26,14 +26,28 @@ type Statistics struct {
 	MaxPacketSize  int
 }
 
+// BridgeStatistics holds packet bridge statistics for diagnostics.
+// These stats help identify backpressure issues where the TUI can't keep up
+// with packet ingestion rate.
+type BridgeStatistics struct {
+	PacketsReceived  int64 // Total packets received from capture
+	PacketsDisplayed int64 // Packets sent to TUI for display
+	BatchesSent      int64 // Batches successfully queued for TUI
+	BatchesDropped   int64 // Batches dropped due to TUI backpressure
+	QueueDepth       int64 // Current batch queue depth
+	MaxQueueDepth    int64 // Peak queue depth seen
+	SamplingRatio    int64 // Current sampling ratio * 1000 (1000 = 100%)
+}
+
 // StatisticsView displays statistics
 type StatisticsView struct {
-	viewport viewport.Model
-	width    int
-	height   int
-	theme    themes.Theme
-	stats    *Statistics
-	ready    bool
+	viewport    viewport.Model
+	width       int
+	height      int
+	theme       themes.Theme
+	stats       *Statistics
+	bridgeStats *BridgeStatistics
+	ready       bool
 }
 
 // NewStatisticsView creates a new statistics view
@@ -73,6 +87,15 @@ func (s *StatisticsView) SetSize(width, height int) {
 // SetStatistics updates the statistics data
 func (s *StatisticsView) SetStatistics(stats *Statistics) {
 	s.stats = stats
+	// Update viewport content when stats change (only if viewport is ready)
+	if s.ready {
+		s.viewport.SetContent(s.renderContent())
+	}
+}
+
+// SetBridgeStats updates the bridge statistics data
+func (s *StatisticsView) SetBridgeStats(bridgeStats *BridgeStatistics) {
+	s.bridgeStats = bridgeStats
 	// Update viewport content when stats change (only if viewport is ready)
 	if s.ready {
 		s.viewport.SetContent(s.renderContent())
@@ -179,6 +202,58 @@ func (s *StatisticsView) renderContent() string {
 	topDests := s.stats.DestCounts.GetTopN(5)
 	for _, dc := range topDests {
 		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", dc.Key, dc.Count))
+	}
+	result.WriteString("\n")
+
+	// Section: Bridge Performance (only if bridge stats available)
+	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
+		result.WriteString(titleStyle.Render("🌉 Bridge Performance"))
+		result.WriteString("\n\n")
+
+		// Packets received vs displayed
+		result.WriteString(labelStyle.Render("Packets Received: "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsReceived)))
+		result.WriteString("\n")
+		result.WriteString(labelStyle.Render("Packets Displayed: "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsDisplayed)))
+		if s.bridgeStats.PacketsReceived > 0 {
+			displayPct := float64(s.bridgeStats.PacketsDisplayed) / float64(s.bridgeStats.PacketsReceived) * 100
+			result.WriteString(valueStyle.Render(fmt.Sprintf(" (%.1f%%)", displayPct)))
+		}
+		result.WriteString("\n")
+
+		// Sampling ratio
+		result.WriteString(labelStyle.Render("Sampling Ratio: "))
+		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0 // Convert from 1000-scale to percentage
+		if samplingPct >= 100.0 {
+			result.WriteString(valueStyle.Render("100% (full)"))
+		} else {
+			result.WriteString(valueStyle.Render(fmt.Sprintf("%.1f%%", samplingPct)))
+		}
+		result.WriteString("\n")
+
+		// Batches dropped (backpressure indicator)
+		result.WriteString(labelStyle.Render("Batches Sent/Dropped: "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d / %d", s.bridgeStats.BatchesSent, s.bridgeStats.BatchesDropped)))
+		if s.bridgeStats.BatchesDropped > 0 {
+			dropPct := float64(s.bridgeStats.BatchesDropped) / float64(s.bridgeStats.BatchesSent+s.bridgeStats.BatchesDropped) * 100
+			// Color-code based on drop rate
+			if dropPct > 10 {
+				warnStyle := lipgloss.NewStyle().Foreground(s.theme.ErrorColor)
+				result.WriteString(warnStyle.Render(fmt.Sprintf(" (%.1f%% dropped)", dropPct)))
+			} else if dropPct > 1 {
+				warnStyle := lipgloss.NewStyle().Foreground(s.theme.WarningColor)
+				result.WriteString(warnStyle.Render(fmt.Sprintf(" (%.1f%% dropped)", dropPct)))
+			} else {
+				result.WriteString(valueStyle.Render(fmt.Sprintf(" (%.1f%% dropped)", dropPct)))
+			}
+		}
+		result.WriteString("\n")
+
+		// Queue depth
+		result.WriteString(labelStyle.Render("Queue Depth: "))
+		result.WriteString(valueStyle.Render(fmt.Sprintf("%d (max: %d)", s.bridgeStats.QueueDepth, s.bridgeStats.MaxQueueDepth)))
+		result.WriteString("\n")
 	}
 
 	return result.String()

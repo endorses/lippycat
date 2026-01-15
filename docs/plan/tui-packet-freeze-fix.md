@@ -104,14 +104,14 @@ go func() {
 **File:** `internal/pkg/tui/bridge.go`
 
 - [x] Track packets received, displayed, dropped
-- [ ] Track batch queue depth
-- [ ] Track send blocking time
+- [x] Track batch queue depth
+- [x] Track send blocking time (N/A - using non-blocking sends with drop tracking)
 
 ### 5.2 Expose in Statistics View
 
 **File:** `internal/pkg/tui/components/statistics.go`
 
-- [ ] Add "Bridge" section showing:
+- [x] Add "Bridge" section showing:
   - Packets received vs displayed
   - Batches dropped (backpressure indicator)
   - Current sampling ratio

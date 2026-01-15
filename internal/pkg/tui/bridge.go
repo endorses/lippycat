@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/google/gopacket"
@@ -148,14 +150,50 @@ func ClearOfflineCallTracker() {
 	}
 }
 
-// StartPacketBridge creates a bridge between packet capture and TUI
-// It converts capture.PacketInfo to PacketMsg for the TUI
-// Uses intelligent sampling and throttling to handle high packet rates
+// BridgeStats contains statistics about the packet bridge for diagnostics.
+// These stats help identify backpressure issues where the TUI can't keep up
+// with packet ingestion rate.
+type BridgeStats struct {
+	PacketsReceived  int64 // Total packets received from capture
+	PacketsDisplayed int64 // Packets sent to TUI for display
+	BatchesSent      int64 // Batches successfully queued for TUI
+	BatchesDropped   int64 // Batches dropped due to TUI backpressure
+}
+
+// bridgeStats holds global bridge statistics for diagnostics
+var bridgeStats BridgeStats
+
+// GetBridgeStats returns a copy of the current bridge statistics.
+func GetBridgeStats() BridgeStats {
+	return BridgeStats{
+		PacketsReceived:  atomic.LoadInt64(&bridgeStats.PacketsReceived),
+		PacketsDisplayed: atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
+		BatchesSent:      atomic.LoadInt64(&bridgeStats.BatchesSent),
+		BatchesDropped:   atomic.LoadInt64(&bridgeStats.BatchesDropped),
+	}
+}
+
+// ResetBridgeStats resets bridge statistics to zero.
+func ResetBridgeStats() {
+	atomic.StoreInt64(&bridgeStats.PacketsReceived, 0)
+	atomic.StoreInt64(&bridgeStats.PacketsDisplayed, 0)
+	atomic.StoreInt64(&bridgeStats.BatchesSent, 0)
+	atomic.StoreInt64(&bridgeStats.BatchesDropped, 0)
+}
+
+// StartPacketBridge creates a bridge between packet capture and TUI.
+// It converts capture.PacketInfo to PacketMsg for the TUI.
+// Uses intelligent sampling and throttling to handle high packet rates.
+//
+// The bridge uses a buffered channel and separate consumer goroutine to
+// prevent blocking when the TUI's Update() loop falls behind. This avoids
+// the producer-consumer deadlock that can occur with direct program.Send().
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program) {
 	const (
 		targetPacketsPerSecond = 1000                      // Target display rate (increased for bulk transfers)
 		batchInterval          = constants.TUITickInterval // Batch interval
 		rateWindowSize         = 2 * time.Second           // Rolling window for rate calculation (react quickly)
+		tuiQueueSize           = 10                        // Buffered channel capacity for TUI batches
 	)
 
 	batch := make([]components.PacketDisplay, 0, 100)
@@ -169,10 +207,38 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
 
+	// Buffered channel to decouple packet conversion from TUI rendering.
+	// This prevents program.Send() from blocking the bridge when TUI is slow.
+	tuiBatchChan := make(chan PacketBatchMsg, tuiQueueSize)
+
+	// Consumer goroutine: reads from tuiBatchChan and sends to TUI.
+	// This runs in a separate goroutine so blocking on program.Send()
+	// doesn't affect packet ingestion.
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		for msg := range tuiBatchChan {
+			program.Send(msg)
+		}
+	}()
+
+	// sendBatch queues a batch for the TUI consumer.
+	// Uses non-blocking send to prevent deadlock when TUI is slow.
 	sendBatch := func() {
 		if len(batch) > 0 {
-			// Send entire batch as single message to reduce Update() calls
-			program.Send(PacketBatchMsg{Packets: batch})
+			msg := PacketBatchMsg{Packets: batch}
+			select {
+			case tuiBatchChan <- msg:
+				// Successfully queued
+				atomic.AddInt64(&bridgeStats.BatchesSent, 1)
+				atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(batch)))
+			default:
+				// TUI is behind - drop batch to prevent blocking
+				atomic.AddInt64(&bridgeStats.BatchesDropped, 1)
+				logger.Debug("TUI backpressure: dropped packet batch",
+					"batch_size", len(batch),
+					"total_dropped", atomic.LoadInt64(&bridgeStats.BatchesDropped))
+			}
 			displayedCount += int64(len(batch))
 			batch = make([]components.PacketDisplay, 0, 100)
 		}
@@ -191,7 +257,18 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			for i < len(recentPackets) && recentPackets[i].Before(cutoff) {
 				i++
 			}
-			recentPackets = recentPackets[i:]
+			if i > 0 {
+				// Compact slice to reclaim memory (fix for rolling window memory leak)
+				copy(recentPackets, recentPackets[i:])
+				recentPackets = recentPackets[:len(recentPackets)-i]
+
+				// Periodically reallocate when capacity is much larger than length
+				if cap(recentPackets) > 10000 && len(recentPackets) < cap(recentPackets)/4 {
+					newSlice := make([]time.Time, len(recentPackets))
+					copy(newSlice, recentPackets)
+					recentPackets = newSlice
+				}
+			}
 			lastRateCheck = now
 		}
 
@@ -222,12 +299,15 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		select {
 		case pktInfo, ok := <-packetChan:
 			if !ok {
-				// Channel closed, send remaining batch
+				// Channel closed, send remaining batch and shutdown consumer
 				sendBatch()
+				close(tuiBatchChan)
+				<-consumerDone // Wait for consumer to finish
 				return
 			}
 
 			packetCount++
+			atomic.AddInt64(&bridgeStats.PacketsReceived, 1)
 
 			// Track packet timestamp for rolling window rate calculation
 			recentPackets = append(recentPackets, time.Now())

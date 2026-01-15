@@ -13,11 +13,11 @@ Fix the producer-consumer deadlock in TUI live capture that causes packets to st
 
 **File:** `internal/pkg/tui/bridge.go`
 
-- [ ] Add intermediate buffered channel between bridge and TUI (capacity ~10 batches)
-- [ ] Replace direct `program.Send()` with non-blocking channel send
-- [ ] Add dropped batch counter for diagnostics
-- [ ] Start consumer goroutine that reads from buffer and calls `program.Send()`
-- [ ] Handle graceful shutdown of consumer goroutine
+- [x] Add intermediate buffered channel between bridge and TUI (capacity ~10 batches)
+- [x] Replace direct `program.Send()` with non-blocking channel send
+- [x] Add dropped batch counter for diagnostics
+- [x] Start consumer goroutine that reads from buffer and calls `program.Send()`
+- [x] Handle graceful shutdown of consumer goroutine
 
 ```go
 // Target pattern:
@@ -91,8 +91,8 @@ go func() {
 
 **File:** `internal/pkg/tui/bridge.go`
 
-- [ ] Compact `recentPackets` slice after trimming old entries
-- [ ] Periodically reallocate when capacity >> length
+- [x] Compact `recentPackets` slice after trimming old entries
+- [x] Periodically reallocate when capacity >> length
 - [ ] Consider using ring buffer instead of slice
 
 ## Phase 5: Diagnostics
@@ -101,7 +101,7 @@ go func() {
 
 **File:** `internal/pkg/tui/bridge.go`
 
-- [ ] Track packets received, displayed, dropped
+- [x] Track packets received, displayed, dropped
 - [ ] Track batch queue depth
 - [ ] Track send blocking time
 

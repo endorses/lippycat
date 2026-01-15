@@ -24,81 +24,70 @@ import (
 func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 	// Handle batch of packets more efficiently
 	if !m.uiState.Paused {
-		for _, packet := range msg.Packets {
+		// Filter packets by capture mode and set NodeID
+		filteredPackets := make([]components.PacketDisplay, 0, len(msg.Packets))
+		for i := range msg.Packets {
+			packet := &msg.Packets[i]
+
 			// Set NodeID to "Local" if not already set (for local/offline capture)
 			if packet.NodeID == "" {
 				packet.NodeID = "Local"
 			}
 
 			// Only process packets that match current capture mode
-			// Live/Offline mode: only accept local packets
-			// Remote mode: only accept remote packets
 			if m.captureMode == components.CaptureModeRemote {
-				// In remote mode, skip local packets
 				if packet.NodeID == "Local" {
 					continue
 				}
 			} else {
-				// In live/offline mode, skip remote packets
 				if packet.NodeID != "Local" {
 					continue
 				}
 			}
 
-			// Add packet using PacketStore method
-			m.packetStore.AddPacket(packet)
-
-			// Process packet through call aggregator (live and offline modes)
-			if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
-				// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
-				typesPacket := types.PacketDisplay(packet)
-				m.offlineCallAggregator.ProcessPacket(&typesPacket)
-			} else if m.captureMode == components.CaptureModeLive && m.liveCallAggregator != nil {
-				// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
-				typesPacket := types.PacketDisplay(packet)
-				m.liveCallAggregator.ProcessPacket(&typesPacket)
-			}
-
-			// Update DNS queries view if this is a DNS packet
-			// Parse DNS from raw data if not already parsed
-			if packet.DNSData == nil && packet.Protocol == "DNS" && len(packet.RawData) > 0 {
-				packet.DNSData = parseDNSFromRawData(packet.RawData, packet.LinkType)
-			}
-			if packet.DNSData != nil {
-				typesPacket := types.PacketDisplay(packet)
-				m.uiState.DNSQueriesView.UpdateFromPacket(&typesPacket)
-			}
-
-			// Update Email sessions view if this is an email packet
-			if packet.EmailData != nil {
-				typesPacket := types.PacketDisplay(packet)
-				m.uiState.EmailView.UpdateFromPacket(&typesPacket)
-			}
-
-			// Update HTTP requests view if this is an HTTP packet
-			// Parse HTTP from raw data if not already parsed
-			if packet.HTTPData == nil && packet.Protocol == "HTTP" && len(packet.RawData) > 0 {
-				packet.HTTPData = parseHTTPFromRawData(packet.RawData, packet.LinkType)
-			}
-			if packet.HTTPData != nil {
-				typesPacket := types.PacketDisplay(packet)
-				m.uiState.HTTPView.UpdateFromPacket(&typesPacket)
-			}
-
-			// Write to streaming save if active
-			if m.activeWriter != nil {
-				// WritePacket will apply filter internally if configured (best-effort)
-				_ = m.activeWriter.WritePacket(packet)
-			}
-
-			// Update statistics (lightweight)
-			m.updateStatistics(packet)
+			filteredPackets = append(filteredPackets, *packet)
 		}
 
-		// Update packet list with moderate throttling for smooth display
-		// Throttle to 10 Hz (100ms) to balance responsiveness with performance
+		if len(filteredPackets) == 0 {
+			return m, nil
+		}
+
+		// Add packets to store in batch (single lock acquisition)
+		m.packetStore.AddPacketBatch(filteredPackets)
+
+		// Update statistics for all packets (lightweight counters only)
+		for i := range filteredPackets {
+			m.updateStatistics(filteredPackets[i])
+
+			// Write to streaming save if active (must be synchronous)
+			if m.activeWriter != nil {
+				_ = m.activeWriter.WritePacket(filteredPackets[i])
+			}
+		}
+
+		// Submit packets for non-critical background processing
+		// (DNS/HTTP parsing, call aggregator, email view updates)
+		if m.backgroundProcessor != nil {
+			// Use first packet's LinkType (all packets in batch should have same link type)
+			linkType := filteredPackets[0].LinkType
+			m.backgroundProcessor.SubmitBatch(filteredPackets, linkType)
+		}
+
+		// Adaptive throttling based on bridge backpressure
+		// Check if bridge is dropping batches (indicates TUI can't keep up)
+		bridgeStats := GetBridgeStats()
+		underPressure := bridgeStats.BatchesDropped > 0 && bridgeStats.BatchesSent > 0 &&
+			float64(bridgeStats.BatchesDropped)/float64(bridgeStats.BatchesSent) > 0.01
+
+		// Update packet list with adaptive throttling
 		now := time.Now()
-		if now.Sub(m.lastPacketListUpdate) >= m.packetListUpdateInterval {
+		updateInterval := m.packetListUpdateInterval
+		if underPressure {
+			// Double the update interval when under pressure (100ms -> 200ms)
+			updateInterval *= 2
+		}
+
+		if now.Sub(m.lastPacketListUpdate) >= updateInterval {
 			if !m.packetStore.HasFilter() {
 				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 			} else {
@@ -108,9 +97,8 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 		}
 
 		// Update details panel if showing details (throttled to reduce CPU usage)
-		// Only update at configured interval (default 20 Hz) to avoid rendering
-		// expensive hex dumps on every packet during high packet rate
-		if m.uiState.ShowDetails {
+		// Skip details updates entirely when under pressure (expensive hex dumps)
+		if m.uiState.ShowDetails && !underPressure {
 			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
 				m.updateDetailsPanel()
 				m.lastDetailsPanelUpdate = now
@@ -130,15 +118,11 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		}
 
 		// Only process packets that match current capture mode
-		// Live/Offline mode: only accept local packets
-		// Remote mode: only accept remote packets
 		if m.captureMode == components.CaptureModeRemote {
-			// In remote mode, skip local packets
 			if packet.NodeID == "Local" {
 				return m, nil
 			}
 		} else {
-			// In live/offline mode, skip remote packets
 			if packet.NodeID != "Local" {
 				return m, nil
 			}
@@ -147,30 +131,32 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		// Add packet using PacketStore method
 		m.packetStore.AddPacket(packet)
 
-		// Process packet through call aggregator (live and offline modes)
-		if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
-			// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
-			typesPacket := types.PacketDisplay(packet)
-			m.offlineCallAggregator.ProcessPacket(&typesPacket)
-		} else if m.captureMode == components.CaptureModeLive && m.liveCallAggregator != nil {
-			// Convert components.PacketDisplay to types.PacketDisplay (they're aliased, so direct cast)
-			typesPacket := types.PacketDisplay(packet)
-			m.liveCallAggregator.ProcessPacket(&typesPacket)
-		}
-
-		// Write to streaming save if active
-		if m.activeWriter != nil {
-			// WritePacket will apply filter internally if configured (best-effort)
-			_ = m.activeWriter.WritePacket(packet)
-		}
-
 		// Update statistics (lightweight)
 		m.updateStatistics(packet)
 
-		// Update packet list with moderate throttling for smooth display
-		// Throttle to 10 Hz (100ms) to balance responsiveness with performance
+		// Write to streaming save if active (must be synchronous)
+		if m.activeWriter != nil {
+			_ = m.activeWriter.WritePacket(packet)
+		}
+
+		// Submit for non-critical background processing
+		if m.backgroundProcessor != nil {
+			m.backgroundProcessor.Submit(packet, packet.LinkType)
+		}
+
+		// Adaptive throttling based on bridge backpressure
+		bridgeStats := GetBridgeStats()
+		underPressure := bridgeStats.BatchesDropped > 0 && bridgeStats.BatchesSent > 0 &&
+			float64(bridgeStats.BatchesDropped)/float64(bridgeStats.BatchesSent) > 0.01
+
+		// Update packet list with adaptive throttling
 		now := time.Now()
-		if now.Sub(m.lastPacketListUpdate) >= m.packetListUpdateInterval {
+		updateInterval := m.packetListUpdateInterval
+		if underPressure {
+			updateInterval *= 2
+		}
+
+		if now.Sub(m.lastPacketListUpdate) >= updateInterval {
 			if !m.packetStore.HasFilter() {
 				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 			} else {
@@ -179,10 +165,8 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 			m.lastPacketListUpdate = now
 		}
 
-		// Update details panel if showing details (throttled to reduce CPU usage)
-		// Only update at configured interval (default 20 Hz) to avoid rendering
-		// expensive hex dumps on every packet during high packet rate
-		if m.uiState.ShowDetails {
+		// Update details panel if showing details (skip when under pressure)
+		if m.uiState.ShowDetails && !underPressure {
 			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
 				m.updateDetailsPanel()
 				m.lastDetailsPanelUpdate = now

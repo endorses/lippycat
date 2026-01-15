@@ -48,6 +48,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 		m.liveCallAggregator = nil
 	}
 
+	// Clear call aggregator from background processor
+	if m.backgroundProcessor != nil {
+		m.backgroundProcessor.SetCallAggregator(nil, components.CaptureModeLive)
+	}
+
 	// Clear call tracker (used by both live and offline modes)
 	ClearOfflineCallTracker()
 
@@ -124,6 +129,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				m.liveCallAggregator = NewLocalCallAggregator(program)
 				m.liveCallAggregator.Start()
 
+				// Update background processor with the new call aggregator
+				if m.backgroundProcessor != nil {
+					m.backgroundProcessor.SetCallAggregator(m.liveCallAggregator, components.CaptureModeLive)
+				}
+
 				// Initialize call tracker for RTP-to-CallID mapping (shared with offline mode)
 				liveTracker := NewOfflineCallTracker()
 				SetOfflineCallTracker(liveTracker)
@@ -133,6 +143,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				// Initialize offline call aggregator for VoIP analysis
 				m.offlineCallAggregator = NewLocalCallAggregator(program)
 				m.offlineCallAggregator.Start()
+
+				// Update background processor with the new call aggregator
+				if m.backgroundProcessor != nil {
+					m.backgroundProcessor.SetCallAggregator(m.offlineCallAggregator, components.CaptureModeOffline)
+				}
 
 				// Initialize offline call tracker for RTP-to-CallID mapping
 				offlineTracker := NewOfflineCallTracker()

@@ -60,6 +60,45 @@ func (ps *PacketStore) AddPacket(packet components.PacketDisplay) {
 	}
 }
 
+// AddPacketBatch adds multiple packets to the store efficiently with a single lock.
+// This reduces lock contention compared to calling AddPacket repeatedly.
+func (ps *PacketStore) AddPacketBatch(packets []components.PacketDisplay) {
+	if len(packets) == 0 {
+		return
+	}
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	// Pre-allocate space for filtered packets that may match
+	filterActive := !ps.FilterChain.IsEmpty()
+
+	for i := range packets {
+		packet := &packets[i]
+
+		// Add to ring buffer
+		ps.Packets[ps.PacketsHead] = *packet
+		ps.PacketsHead = (ps.PacketsHead + 1) % ps.MaxPackets
+		if ps.PacketsCount < ps.MaxPackets {
+			ps.PacketsCount++
+		}
+
+		ps.TotalPackets++
+
+		// Apply filter (batch evaluation)
+		if !filterActive || ps.FilterChain.Match(*packet) {
+			ps.FilteredPackets = append(ps.FilteredPackets, *packet)
+			ps.MatchedPackets++
+		}
+	}
+
+	// Trim filtered packets if needed (single trim at end is more efficient)
+	if len(ps.FilteredPackets) > ps.MaxPackets {
+		excess := len(ps.FilteredPackets) - ps.MaxPackets
+		ps.FilteredPackets = ps.FilteredPackets[excess:]
+	}
+}
+
 // GetPacketsInOrder returns packets from the circular buffer in chronological order
 func (ps *PacketStore) GetPacketsInOrder() []components.PacketDisplay {
 	ps.mu.RLock()

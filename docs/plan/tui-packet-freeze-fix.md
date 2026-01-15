@@ -44,17 +44,17 @@ go func() {
 
 **File:** `internal/pkg/tui/store/packet_store.go`
 
-- [ ] Add `AddPacketBatch(packets []PacketDisplay)` method
-- [ ] Single mutex acquisition for entire batch
-- [ ] Batch filter evaluation
+- [x] Add `AddPacketBatch(packets []PacketDisplay)` method
+- [x] Single mutex acquisition for entire batch
+- [x] Batch filter evaluation
 
 ### 2.2 Defer Non-Critical Processing
 
 **File:** `internal/pkg/tui/capture_events.go`
 
-- [ ] Move DNS/HTTP parsing to background goroutine
-- [ ] Move call aggregator processing to background goroutine
-- [ ] Keep only essential operations in `handlePacketBatchMsg()`:
+- [x] Move DNS/HTTP parsing to background goroutine
+- [x] Move call aggregator processing to background goroutine
+- [x] Keep only essential operations in `handlePacketBatchMsg()`:
   - Packet store addition
   - Basic statistics update
   - Throttled UI refresh
@@ -63,9 +63,9 @@ go func() {
 
 **File:** `internal/pkg/tui/capture_events.go`
 
-- [ ] Implement adaptive throttling based on batch queue depth
-- [ ] Skip details panel updates when queue is backing up
-- [ ] Increase packet list update interval under load (100ms → 200ms)
+- [x] Implement adaptive throttling based on batch queue depth
+- [x] Skip details panel updates when queue is backing up
+- [x] Increase packet list update interval under load (100ms → 200ms)
 
 ## Phase 3: Medium Priority - Optimize Packet List
 

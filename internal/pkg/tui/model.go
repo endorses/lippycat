@@ -111,6 +111,9 @@ type Model struct {
 	offlineCallAggregator *LocalCallAggregator // Call aggregator for offline PCAP analysis
 	liveCallAggregator    *LocalCallAggregator // Call aggregator for live capture
 
+	// Background processor for non-critical packet processing (DNS, HTTP, call aggregator)
+	backgroundProcessor *BackgroundProcessor
+
 	// Test state
 	testToastCycle int // Cycles through toast types for testing
 }
@@ -209,6 +212,15 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		})
 	}
 
+	// Create background processor for non-critical packet processing
+	bgProcessor := NewBackgroundProcessor()
+	bgProcessor.Configure(BackgroundProcessorConfig{
+		DNSView:     uiState.DNSQueriesView,
+		HTTPView:    uiState.HTTPView,
+		EmailView:   uiState.EmailView,
+		CaptureMode: initialMode,
+	})
+
 	return Model{
 		packetStore:                packetStore,
 		callStore:                  callStore,
@@ -222,6 +234,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		insecure:                   insecure,
 		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
 		packetListUpdateInterval:   constants.TUITickInterval, // 10 Hz throttle for packet list (prevents freeze)
+		backgroundProcessor:        bgProcessor,
 	}
 }
 

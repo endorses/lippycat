@@ -19,16 +19,16 @@ Based on [research](../research/build-tagged-cli-flags.md).
 
 ### 1.2 cmd/hunt - GPU Flags
 
-- [ ] Create `cmd/hunt/flags_gpu.go` (`//go:build cuda`)
+- [x] Create `cmd/hunt/flags_gpu.go` (`//go:build cuda`)
   - Move vars: `gpuBackend`, `gpuBatchSize`, `enableVoIPFilter`
   - Implement: `RegisterGPUFlags()`, `BindGPUViperFlags()`, `GetGPUConfig()`
-- [ ] Create `cmd/hunt/flags_gpu_stub.go` (`//go:build !cuda`)
+- [x] Create `cmd/hunt/flags_gpu_stub.go` (`//go:build !cuda`)
   - No-op implementations
-- [ ] Update `cmd/hunt/hunt.go`
-  - Remove GPU flag vars and registration (lines 60-62, 100-102, 134-135)
+- [x] Update `cmd/hunt/hunt.go` and `cmd/hunt/voip.go`
+  - Remove GPU flag vars and registration
   - Call registration functions in `init()`
-  - Update `runHunt()` to use `GetGPUConfig()`
-- [ ] Verify: `make hunter && ./bin/lc-hunter hunt --help | grep -c gpu` → 0
+  - Update `runHunt()` and `runVoIPHunt()` to use `GetGPUConfig()`
+- [x] Verify: `./lc hunt --help | grep -c gpu` → 0
 
 ## Phase 2: LI Flags
 

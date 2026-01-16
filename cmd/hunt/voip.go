@@ -141,8 +141,8 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 		BatchQueueSize:   getIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:         true, // VoIP hunter mode (with call buffering)
 		EnableVoIPFilter: true, // Always enable VoIP filtering in voip mode
-		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
-		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
+		GPUBackend:       GetGPUConfig().GPUBackend,
+		GPUBatchSize:     GetGPUConfig().GPUBatchSize,
 		// TLS configuration (enabled by default unless --insecure is set)
 		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),

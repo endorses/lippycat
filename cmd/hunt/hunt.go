@@ -57,9 +57,6 @@ var (
 	batchTimeout       int
 	batchQueueSize     int
 	promiscuous        bool
-	enableVoIPFilter   bool
-	gpuBackend         string
-	gpuBatchSize       int
 	// Disk buffer flags (nuclear-proof resilience)
 	diskBufferEnabled bool
 	diskBufferDir     string
@@ -96,10 +93,8 @@ func init() {
 	HuntCmd.PersistentFlags().IntVarP(&batchTimeout, "batch-timeout", "", 100, "Batch timeout in milliseconds")
 	HuntCmd.PersistentFlags().IntVarP(&batchQueueSize, "batch-queue-size", "", 0, "Batch queue buffer size (0 = default: 1000)")
 
-	// VoIP filtering with GPU acceleration (persistent for subcommands)
-	HuntCmd.PersistentFlags().BoolVar(&enableVoIPFilter, "enable-voip-filter", false, "Enable GPU-accelerated VoIP filtering")
-	HuntCmd.PersistentFlags().StringVarP(&gpuBackend, "gpu-backend", "g", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
-	HuntCmd.PersistentFlags().IntVar(&gpuBatchSize, "gpu-batch-size", 100, "Batch size for GPU processing")
+	// VoIP filtering with GPU acceleration (only registered in CUDA builds)
+	RegisterGPUFlags(HuntCmd)
 
 	// Disk overflow buffer (nuclear-proof resilience) - persistent for subcommands
 	HuntCmd.PersistentFlags().BoolVar(&diskBufferEnabled, "disk-buffer", false, "Enable disk overflow buffer (for extended disconnections)")
@@ -130,9 +125,8 @@ func init() {
 	_ = viper.BindPFlag("hunter.batch_queue_size", HuntCmd.PersistentFlags().Lookup("batch-queue-size"))
 	_ = viper.BindPFlag("promiscuous", HuntCmd.PersistentFlags().Lookup("promisc"))
 	_ = viper.BindPFlag("pcap_buffer_size", HuntCmd.PersistentFlags().Lookup("pcap-buffer-size"))
-	_ = viper.BindPFlag("hunter.voip_filter.enabled", HuntCmd.PersistentFlags().Lookup("enable-voip-filter"))
-	_ = viper.BindPFlag("hunter.voip_filter.gpu_backend", HuntCmd.PersistentFlags().Lookup("gpu-backend"))
-	_ = viper.BindPFlag("hunter.voip_filter.gpu_batch_size", HuntCmd.PersistentFlags().Lookup("gpu-batch-size"))
+	// GPU viper bindings (only in CUDA builds)
+	BindGPUViperFlags(HuntCmd)
 	_ = viper.BindPFlag("hunter.disk_buffer.enabled", HuntCmd.PersistentFlags().Lookup("disk-buffer"))
 	_ = viper.BindPFlag("hunter.disk_buffer.dir", HuntCmd.PersistentFlags().Lookup("disk-buffer-dir"))
 	_ = viper.BindPFlag("hunter.disk_buffer.max_mb", HuntCmd.PersistentFlags().Lookup("disk-buffer-max-mb"))
@@ -167,9 +161,9 @@ func runHunt(cmd *cobra.Command, args []string) error {
 		BatchTimeout:     time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
 		BatchQueueSize:   getIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:         false, // Generic hunter mode (no call buffering)
-		EnableVoIPFilter: getBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
-		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
-		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
+		EnableVoIPFilter: GetGPUConfig().EnableVoIPFilter,
+		GPUBackend:       GetGPUConfig().GPUBackend,
+		GPUBatchSize:     GetGPUConfig().GPUBatchSize,
 		// Disk overflow buffer (nuclear-proof resilience)
 		DiskBufferEnabled: getBoolConfig("hunter.disk_buffer.enabled", diskBufferEnabled),
 		DiskBufferDir:     getStringConfig("hunter.disk_buffer.dir", diskBufferDir),

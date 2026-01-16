@@ -6,16 +6,16 @@ Based on [research](../research/build-tagged-cli-flags.md).
 
 ### 1.1 cmd/sniff - GPU Flags
 
-- [ ] Create `cmd/sniff/flags_gpu.go` (`//go:build cuda`)
+- [x] Create `cmd/sniff/flags_gpu.go` (`//go:build cuda`)
   - Move vars: `gpuBackend`, `gpuBatchSize`, `gpuMaxMemory`, `gpuEnable`
   - Implement: `RegisterGPUFlags()`, `BindGPUViperFlags()`, `ApplyGPUConfig()`
-- [ ] Create `cmd/sniff/flags_gpu_stub.go` (`//go:build !cuda`)
+- [x] Create `cmd/sniff/flags_gpu_stub.go` (`//go:build !cuda`)
   - No-op implementations of same functions
-- [ ] Update `cmd/sniff/voip.go`
+- [x] Update `cmd/sniff/voip.go`
   - Remove GPU flag vars and registration (lines 45-49, 242-271)
   - Call `RegisterGPUFlags(voipCmd)` and `BindGPUViperFlags(voipCmd)` in `init()`
   - Call `ApplyGPUConfig(cmd)` in `voipHandler()`
-- [ ] Verify: `make build && ./bin/lc sniff voip --help | grep -c gpu` → 0
+- [x] Verify: `make build && ./bin/lc sniff voip --help | grep -c gpu` → 0
 
 ### 1.2 cmd/hunt - GPU Flags
 

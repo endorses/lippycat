@@ -1,9 +1,9 @@
 # lippycat - Network Traffic Sniffer
 
 ## Project Overview
-lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It is a general-purpose network packet analyzer with a **plugin architecture** that allows it to support different protocol-specific analysis modules. It captures traffic from network interfaces or PCAP files and provides both CLI and TUI (Terminal User Interface) modes for real-time monitoring.
+lippycat is a Go-based CLI tool for sniffing and analyzing network traffic. It captures traffic from network interfaces or PCAP files and provides both CLI and TUI modes for real-time monitoring.
 
-**Current Protocol Support**: As of now, lippycat includes a VoIP plugin that analyzes SIP (Session Initiation Protocol) and RTP (Real-time Transport Protocol) traffic.
+**Protocol Subcommands**: `sniff`, `hunt`, and `tap` have protocol-specific subcommands (dns, tls, http, email, voip) with dedicated filtering and analysis.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ This architecture allows for:
   - `internal/pkg/tui/`: Terminal User Interface with Bubbletea framework
   - `internal/pkg/types/`: Shared domain types (PacketDisplay, VoIPMetadata, EventHandler)
   - `internal/pkg/capture/`: Network packet capture functionality using gopacket
-  - `internal/pkg/voip/`: VoIP protocol plugin (SIP, RTP, call tracking)
+  - `internal/pkg/{dns,tls,http,email,voip}/`: Protocol-specific analyzers
   - `internal/pkg/hunter/`: Hunter node core logic and gRPC client
   - `internal/pkg/processor/`: Processor node core logic, gRPC server, per-call PCAP writing, and auto-rotating PCAP writing
   - `internal/pkg/remotecapture/`: Remote capture infrastructure with EventHandler pattern
@@ -405,10 +405,8 @@ The TUI (Terminal User Interface) provides interactive real-time packet monitori
 
 **For TUI architecture and development, see [internal/pkg/tui/CLAUDE.md](internal/pkg/tui/CLAUDE.md) (Bubbletea patterns, EventHandler integration, component architecture).**
 
-## Plugin Architecture
-lippycat is designed with extensibility in mind. Protocol-specific analyzers can be added as plugins to support different types of traffic analysis beyond VoIP.
-
-The hunter node includes protocol detection for multiple protocols (HTTP, DNS, TLS, MySQL, PostgreSQL, VoIP, VPN) with signature-based matching and GPU acceleration support for filtering at the edge.
+## Protocol Detection
+The hunter node includes signature-based protocol detection (HTTP, DNS, TLS, MySQL, PostgreSQL, VoIP, VPN, and more) with GPU acceleration support for filtering at the edge.
 
 ## Lawful Interception (LI)
 

@@ -143,6 +143,14 @@ func ExtractPacketFields(pkt gopacket.Packet) PacketFields {
 			} else {
 				fields.Info = "IGMP packet"
 			}
+		} else if vrrpLayer := pkt.Layer(layers.LayerTypeVRRP); vrrpLayer != nil {
+			vrrp, ok := vrrpLayer.(*layers.VRRPv2)
+			fields.Protocol = "VRRP"
+			if ok && vrrp != nil {
+				fields.Info = FormatVRRPInfo(vrrp)
+			} else {
+				fields.Info = "VRRP packet"
+			}
 		}
 	}
 
@@ -217,6 +225,26 @@ func FormatARPInfo(arp *layers.ARP, srcIP, dstIP string) string {
 	default:
 		return fmt.Sprintf("Operation %d", arp.Operation)
 	}
+}
+
+// FormatVRRPInfo generates info string for VRRP packet.
+func FormatVRRPInfo(vrrp *layers.VRRPv2) string {
+	// Priority 0 means master is resigning
+	if vrrp.Priority == 0 {
+		return fmt.Sprintf("VRID %d Pri 0 (resign)", vrrp.VirtualRtrID)
+	}
+
+	info := fmt.Sprintf("VRID %d Pri %d", vrrp.VirtualRtrID, vrrp.Priority)
+
+	// Add first virtual IP if available
+	if len(vrrp.IPAddress) > 0 {
+		info += " " + vrrp.IPAddress[0].String()
+		if len(vrrp.IPAddress) > 1 {
+			info += fmt.Sprintf(" +%d", len(vrrp.IPAddress)-1)
+		}
+	}
+
+	return info
 }
 
 // PayloadTypeToCodec maps RTP payload type to codec name.

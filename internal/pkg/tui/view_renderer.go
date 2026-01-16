@@ -230,7 +230,7 @@ func (m Model) renderBottomArea(footerView string) string {
 		return toastView + "\n" + footerView
 	}
 
-	// All tabs: 3 blank lines + footer (1 line) = 4 lines
+	// All tabs: 3 blank lines + footer (2 lines) = 5 lines for bottomArea
 	// (Nodes tab hints bar is part of mainContent, not bottomArea)
 	return "\n\n\n" + footerView
 }

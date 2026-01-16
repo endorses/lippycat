@@ -4,6 +4,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -256,7 +257,7 @@ func (f *Footer) renderGeneralSection() string {
 	return containerStyle.Render(content)
 }
 
-// View renders the footer with two sections: tab-specific (left) and general (right)
+// View renders the footer with two lines: horizontal separator + keybindings
 func (f *Footer) View() string {
 	// Special case: filter mode shows filter keybinds only
 	if f.filterMode {
@@ -284,31 +285,35 @@ func (f *Footer) View() string {
 	generalSectionWidth := lipgloss.Width(generalSection)
 	versionWidth := lipgloss.Width(versionRendered)
 
-	// Build footer with sections
-	var footer string
+	// Build footer content with sections
+	var footerContent string
 
 	if tabSectionWidth+separatorWidth+generalSectionWidth+versionWidth <= f.width {
 		// Enough space for all: tab section, separator, general section, and version
 		spacerWidth := f.width - tabSectionWidth - separatorWidth - generalSectionWidth - versionWidth
 		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footer = tabSection + separator + generalSection + spacer + versionRendered
+		footerContent = tabSection + separator + generalSection + spacer + versionRendered
 	} else if tabSectionWidth+separatorWidth+generalSectionWidth <= f.width {
 		// Enough space for both sections with separator, skip version
 		spacerWidth := f.width - tabSectionWidth - separatorWidth - generalSectionWidth
 		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		footer = tabSection + separator + generalSection + spacer
+		footerContent = tabSection + separator + generalSection + spacer
 	} else {
 		// Not enough space - show tab section only and pad to width
 		spacerWidth := f.width - tabSectionWidth
 		if spacerWidth > 0 {
 			spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-			footer = tabSection + spacer
+			footerContent = tabSection + spacer
 		} else {
-			footer = tabSection
+			footerContent = tabSection
 		}
 	}
 
-	return footer
+	// Render horizontal line above footer content
+	lineStyle := lipgloss.NewStyle().Foreground(f.theme.BorderColor)
+	horizontalLine := lineStyle.Render(strings.Repeat("─", f.width))
+
+	return horizontalLine + "\n" + footerContent
 }
 
 // renderFilterModeFooter renders the footer when filter input is active
@@ -346,11 +351,18 @@ func (f *Footer) renderFilterModeFooter() string {
 	leftWidth := lipgloss.Width(leftContent)
 
 	// Pad to full width
+	var footerContent string
 	if leftWidth < f.width {
 		spacerWidth := f.width - leftWidth
 		spacer := lipgloss.NewStyle().Width(spacerWidth).Render("")
-		return leftContent + spacer
+		footerContent = leftContent + spacer
+	} else {
+		footerContent = leftContent
 	}
 
-	return leftContent
+	// Render horizontal line above footer content
+	lineStyle := lipgloss.NewStyle().Foreground(f.theme.BorderColor)
+	horizontalLine := lineStyle.Render(strings.Repeat("─", f.width))
+
+	return horizontalLine + "\n" + footerContent
 }

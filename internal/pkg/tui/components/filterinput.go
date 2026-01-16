@@ -208,7 +208,7 @@ func (f *FilterInput) View() string {
 		Border(borderStyle).
 		BorderForeground(borderColor).
 		Padding(0, 1).
-		Width(f.width - 4)
+		Width(f.width - 2)
 
 	inputStyle := lipgloss.NewStyle().
 		Foreground(f.theme.Foreground)

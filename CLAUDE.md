@@ -12,6 +12,7 @@ lippycat supports a distributed capture architecture with two node types:
 
 - **Hunter Nodes**: Lightweight capture agents that sniff and filter packets on network interfaces and forward them to processor nodes for analysis. Hunters can be deployed across multiple network segments or hosts.
 - **Processor Nodes**: Central analysis nodes that receive packets from multiple hunters, perform protocol analysis, write PCAP files (unified, per-call for VoIP, or auto-rotating for non-VoIP), and provide the TUI/CLI interface for monitoring and analysis.
+- **Tap Nodes**: Standalone nodes combining hunter and processor capabilities. **`tap = process + hunt - gRPC`** — tap must have all features of both node types, running locally without gRPC overhead.
 
 This architecture allows for:
 - **Distributed packet capture** across multiple network segments

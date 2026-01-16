@@ -11,10 +11,14 @@ Tap mode provides **standalone capture with processor capabilities**:
 4. Serves TUI connections via gRPC
 5. Optionally forwards to upstream processors (hierarchical mode)
 
-**Key Difference from Hunt/Process:**
-- `hunt` captures and forwards to remote processor
-- `process` receives from remote hunters
-- `tap` captures AND processes locally (no network hop)
+**Architectural Principle: `tap = process + hunt - gRPC`**
+
+Tap must have **all capabilities** of both processor and hunter nodes, running locally without gRPC overhead between them:
+- Everything `hunt` can do (capture, GPU filtering, protocol detection)
+- Everything `process` can do (analysis, PCAP writing, LI, TUI serving, command hooks)
+- Minus gRPC transport between hunter and processor (they're in the same process)
+
+When adding features to `hunt` or `process`, the same features must be added to `tap`. If `process` gets a new flag, `tap` needs it. If `hunt` gets GPU acceleration, `tap` needs it.
 
 ## Architecture Overview
 

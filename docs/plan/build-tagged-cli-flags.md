@@ -34,16 +34,16 @@ Based on [research](../research/build-tagged-cli-flags.md).
 
 ### 2.1 cmd/process - LI Flags
 
-- [ ] Create `cmd/process/flags_li.go` (`//go:build li`)
+- [x] Create `cmd/process/flags_li.go` (`//go:build li`)
   - Move 14 LI vars (lines 121-136)
   - Implement: `RegisterLIFlags()`, `BindLIViperFlags()`, `GetLIConfig()`
-- [ ] Create `cmd/process/flags_li_stub.go` (`//go:build !li`)
+- [x] Create `cmd/process/flags_li_stub.go` (`//go:build !li`)
   - No-op implementations, `GetLIConfig()` returns `nil`
-- [ ] Update `cmd/process/process.go`
+- [x] Update `cmd/process/process.go`
   - Remove LI flag vars and registration (lines 120-139, 205-221, 269-284)
   - Call registration functions in `init()`
   - Update `runProcess()` to use `GetLIConfig()`
-- [ ] Verify: `make processor && ./bin/lc-processor process --help | grep -c "li-"` → 0
+- [x] Verify: LI flags not available in non-LI builds (flags error on use)
 
 ### 2.2 cmd/tap - LI Flags (Prep)
 

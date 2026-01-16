@@ -117,23 +117,6 @@ var (
 	tunnelingCommand   string
 	tunnelingThreshold float64
 	tunnelingDebounce  string
-	// LI (Lawful Interception) flags - requires -tags li build
-	liEnabled       bool
-	liX1ListenAddr  string
-	liX1TLSCertFile string
-	liX1TLSKeyFile  string
-	liX1TLSCAFile   string
-	liADMFEndpoint  string
-	// LI ADMF client (X1 notifications) TLS flags
-	liADMFTLSCertFile string
-	liADMFTLSKeyFile  string
-	liADMFTLSCAFile   string
-	liADMFKeepalive   string
-	// LI Delivery (X2/X3) TLS flags
-	liDeliveryTLSCertFile   string
-	liDeliveryTLSKeyFile    string
-	liDeliveryTLSCAFile     string
-	liDeliveryTLSPinnedCert []string
 	// TLS keylog flags (for decryption support)
 	tlsKeylogDir string
 )
@@ -203,22 +186,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&tunnelingDebounce, "tunneling-debounce", "5m", "Minimum time between alerts per domain (e.g., 5m, 30s)")
 
 	// LI (Lawful Interception) flags - requires build with -tags li
-	ProcessCmd.Flags().BoolVar(&liEnabled, "li-enabled", false, "Enable ETSI LI (Lawful Interception) support (requires -tags li build)")
-	ProcessCmd.Flags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
-	ProcessCmd.Flags().StringVar(&liX1TLSCertFile, "li-x1-tls-cert", "", "Path to X1 server TLS certificate")
-	ProcessCmd.Flags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
-	ProcessCmd.Flags().StringVar(&liX1TLSCAFile, "li-x1-tls-ca", "", "Path to CA certificate for X1 client verification (mutual TLS)")
-	ProcessCmd.Flags().StringVar(&liADMFEndpoint, "li-admf-endpoint", "", "ADMF endpoint for X1 notifications (e.g., https://admf:8443)")
-	// LI ADMF client (X1 notifications) TLS flags - for connecting to ADMF
-	ProcessCmd.Flags().StringVar(&liADMFTLSCertFile, "li-admf-tls-cert", "", "Path to client TLS certificate for ADMF notifications (mutual TLS)")
-	ProcessCmd.Flags().StringVar(&liADMFTLSKeyFile, "li-admf-tls-key", "", "Path to client TLS key for ADMF notifications")
-	ProcessCmd.Flags().StringVar(&liADMFTLSCAFile, "li-admf-tls-ca", "", "Path to CA certificate for verifying ADMF server")
-	ProcessCmd.Flags().StringVar(&liADMFKeepalive, "li-admf-keepalive", "30s", "Keepalive interval for ADMF notifications (0 to disable)")
-	// LI Delivery (X2/X3) TLS flags - mutual TLS is required for delivery
-	ProcessCmd.Flags().StringVar(&liDeliveryTLSCertFile, "li-delivery-tls-cert", "", "Path to client TLS certificate for X2/X3 delivery (mutual TLS required)")
-	ProcessCmd.Flags().StringVar(&liDeliveryTLSKeyFile, "li-delivery-tls-key", "", "Path to client TLS key for X2/X3 delivery")
-	ProcessCmd.Flags().StringVar(&liDeliveryTLSCAFile, "li-delivery-tls-ca", "", "Path to CA certificate for verifying MDF servers")
-	ProcessCmd.Flags().StringSliceVar(&liDeliveryTLSPinnedCert, "li-delivery-tls-pinned-cert", nil, "Pinned certificate fingerprints for MDF servers (SHA256, hex encoded, comma-separated)")
+	RegisterLIFlags(ProcessCmd)
 
 	// TLS keylog flags (for decryption support)
 	ProcessCmd.Flags().StringVar(&tlsKeylogDir, "tls-keylog-dir", "", "Directory to write TLS session keys (NSS keylog format, Wireshark-compatible)")
@@ -265,23 +233,8 @@ func init() {
 	_ = viper.BindPFlag("processor.tunneling_command", ProcessCmd.Flags().Lookup("tunneling-command"))
 	_ = viper.BindPFlag("processor.tunneling_threshold", ProcessCmd.Flags().Lookup("tunneling-threshold"))
 	_ = viper.BindPFlag("processor.tunneling_debounce", ProcessCmd.Flags().Lookup("tunneling-debounce"))
-	// LI viper bindings
-	_ = viper.BindPFlag("processor.li.enabled", ProcessCmd.Flags().Lookup("li-enabled"))
-	_ = viper.BindPFlag("processor.li.x1_listen_addr", ProcessCmd.Flags().Lookup("li-x1-listen"))
-	_ = viper.BindPFlag("processor.li.x1_tls_cert", ProcessCmd.Flags().Lookup("li-x1-tls-cert"))
-	_ = viper.BindPFlag("processor.li.x1_tls_key", ProcessCmd.Flags().Lookup("li-x1-tls-key"))
-	_ = viper.BindPFlag("processor.li.x1_tls_ca", ProcessCmd.Flags().Lookup("li-x1-tls-ca"))
-	_ = viper.BindPFlag("processor.li.admf_endpoint", ProcessCmd.Flags().Lookup("li-admf-endpoint"))
-	// LI ADMF client (X1 notifications) viper bindings
-	_ = viper.BindPFlag("processor.li.admf_tls_cert", ProcessCmd.Flags().Lookup("li-admf-tls-cert"))
-	_ = viper.BindPFlag("processor.li.admf_tls_key", ProcessCmd.Flags().Lookup("li-admf-tls-key"))
-	_ = viper.BindPFlag("processor.li.admf_tls_ca", ProcessCmd.Flags().Lookup("li-admf-tls-ca"))
-	_ = viper.BindPFlag("processor.li.admf_keepalive", ProcessCmd.Flags().Lookup("li-admf-keepalive"))
-	// LI Delivery (X2/X3) viper bindings
-	_ = viper.BindPFlag("processor.li.delivery_tls_cert", ProcessCmd.Flags().Lookup("li-delivery-tls-cert"))
-	_ = viper.BindPFlag("processor.li.delivery_tls_key", ProcessCmd.Flags().Lookup("li-delivery-tls-key"))
-	_ = viper.BindPFlag("processor.li.delivery_tls_ca", ProcessCmd.Flags().Lookup("li-delivery-tls-ca"))
-	_ = viper.BindPFlag("processor.li.delivery_tls_pinned_cert", ProcessCmd.Flags().Lookup("li-delivery-tls-pinned-cert"))
+	// LI viper bindings - requires build with -tags li
+	BindLIViperFlags(ProcessCmd)
 	// TLS keylog viper bindings
 	_ = viper.BindPFlag("processor.tls_keylog.output_dir", ProcessCmd.Flags().Lookup("tls-keylog-dir"))
 }
@@ -445,25 +398,26 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		VifBufferSize:         getIntConfig("processor.vif_buffer_size", vifBufferSize),
 		VifNetNS:              getStringConfig("processor.vif_netns", vifNetNS),
 		VifDropPrivilegesUser: getStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
-		// LI configuration
-		LIEnabled:       getBoolConfig("processor.li.enabled", liEnabled),
-		LIX1ListenAddr:  getStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
-		LIX1TLSCertFile: getStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
-		LIX1TLSKeyFile:  getStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
-		LIX1TLSCAFile:   getStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
-		LIADMFEndpoint:  getStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
-		// LI ADMF client (X1 notifications) TLS configuration
-		LIADMFTLSCertFile: getStringConfig("processor.li.admf_tls_cert", liADMFTLSCertFile),
-		LIADMFTLSKeyFile:  getStringConfig("processor.li.admf_tls_key", liADMFTLSKeyFile),
-		LIADMFTLSCAFile:   getStringConfig("processor.li.admf_tls_ca", liADMFTLSCAFile),
-		LIADMFKeepalive:   getStringConfig("processor.li.admf_keepalive", liADMFKeepalive),
-		// LI Delivery (X2/X3) TLS configuration - mutual TLS is required
-		LIDeliveryTLSCertFile:   getStringConfig("processor.li.delivery_tls_cert", liDeliveryTLSCertFile),
-		LIDeliveryTLSKeyFile:    getStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
-		LIDeliveryTLSCAFile:     getStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
-		LIDeliveryTLSPinnedCert: getStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
 		// TLS keylog configuration (for decryption support)
 		TLSKeylogConfig: tlsKeylogConfig,
+	}
+
+	// Apply LI configuration (only available in -tags li builds)
+	if liConfig := GetLIConfig(); liConfig != nil {
+		config.LIEnabled = liConfig.Enabled
+		config.LIX1ListenAddr = liConfig.X1ListenAddr
+		config.LIX1TLSCertFile = liConfig.X1TLSCertFile
+		config.LIX1TLSKeyFile = liConfig.X1TLSKeyFile
+		config.LIX1TLSCAFile = liConfig.X1TLSCAFile
+		config.LIADMFEndpoint = liConfig.ADMFEndpoint
+		config.LIADMFTLSCertFile = liConfig.ADMFTLSCertFile
+		config.LIADMFTLSKeyFile = liConfig.ADMFTLSKeyFile
+		config.LIADMFTLSCAFile = liConfig.ADMFTLSCAFile
+		config.LIADMFKeepalive = liConfig.ADMFKeepalive
+		config.LIDeliveryTLSCertFile = liConfig.DeliveryTLSCertFile
+		config.LIDeliveryTLSKeyFile = liConfig.DeliveryTLSKeyFile
+		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
+		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
 	}
 
 	// Validate TLS configuration: cert and key required when TLS is enabled

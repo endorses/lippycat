@@ -291,8 +291,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Protocol selector modal
 	if m.uiState.ProtocolSelector.IsActive() {
-		cmd := m.uiState.ProtocolSelector.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		// Only intercept user input (KeyMsg, MouseMsg), let internal messages pass through
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.ProtocolSelector.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (TickMsg, PacketBatchMsg, etc.)
 	}
 
 	// Hunter selector modal
@@ -319,26 +324,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Settings file dialog modal (for opening PCAP files)
 	if m.uiState.SettingsView.IsFileDialogActive() {
-		cmd := m.uiState.SettingsView.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.SettingsView.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (TickMsg, etc.)
 	}
 
 	// File dialog modal (for saving packets)
 	if m.uiState.FileDialog.IsActive() {
-		cmd := m.uiState.FileDialog.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.FileDialog.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (TickMsg, etc.)
 	}
 
 	// Confirm dialog modal
 	if m.uiState.ConfirmDialog.IsActive() {
-		cmd := m.uiState.ConfirmDialog.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.ConfirmDialog.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (TickMsg, etc.)
 	}
 
 	// Add node modal
 	if m.uiState.NodesView.IsModalOpen() {
-		cmd := m.uiState.NodesView.Update(msg)
-		return m, tea.Batch(toastCmd, cmd)
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			cmd := m.uiState.NodesView.Update(msg)
+			return m, tea.Batch(toastCmd, cmd)
+		}
+		// Fall through for internal messages (TickMsg, etc.)
 	}
 
 	// Route messages to appropriate handlers

@@ -121,9 +121,9 @@ go func() {
 - [ ] Test with `tcpreplay` at 1,000 pps - should run indefinitely
 - [ ] Test with `tcpreplay` at 10,000 pps - should run indefinitely with sampling
 - [ ] Test with `tcpreplay` at 50,000 pps - should run with high drop rate but no freeze
-- [ ] Verify restart still works correctly after changes
-- [ ] Verify filter changes work correctly
-- [ ] Verify mode switching works correctly
+- [x] Verify restart still works correctly after changes
+- [x] Verify filter changes work correctly
+- [x] Verify mode switching works correctly
 - [ ] Run extended test (1+ hour) at moderate rate
 
 ## Rollback Plan

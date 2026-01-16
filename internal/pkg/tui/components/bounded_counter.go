@@ -22,7 +22,7 @@ func NewBoundedCounter(capacity int) *BoundedCounter {
 }
 
 // Increment increases the count for the given key
-// If capacity is reached, evicts the key with the lowest count
+// If capacity is reached, new keys are ignored (O(1) instead of O(n) eviction)
 func (bc *BoundedCounter) Increment(key string) {
 	// If key already exists, just increment
 	if _, exists := bc.counts[key]; exists {
@@ -36,22 +36,8 @@ func (bc *BoundedCounter) Increment(key string) {
 		return
 	}
 
-	// Capacity reached - find and evict the key with lowest count
-	minKey := ""
-	var minCount int64 = 1<<63 - 1 // max int64
-	for k, count := range bc.counts {
-		if count < minCount {
-			minCount = count
-			minKey = k
-		}
-	}
-
-	// Only add new key if it would have higher count than evicted key
-	// (start new keys at count 1)
-	if minKey != "" {
-		delete(bc.counts, minKey)
-		bc.counts[key] = 1
-	}
+	// Capacity reached - ignore new keys to avoid O(n) eviction scan
+	// For high-traffic capture, we already have the most common keys tracked
 }
 
 // Get returns the count for a key (0 if not present)

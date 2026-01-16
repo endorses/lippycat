@@ -32,6 +32,10 @@ func (m Model) handleFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 			m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+			// Reset sync counters for incremental updates
+			_, _, total, _ := m.packetStore.GetBufferInfo()
+			m.lastSyncedTotal = total
+			m.lastSyncedFilteredCount = 0
 		}
 		m.uiState.FilterMode = false
 		m.uiState.FilterInput.Deactivate()

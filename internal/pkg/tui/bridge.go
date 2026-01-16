@@ -223,6 +223,154 @@ type BridgeStats struct {
 	QueueDepth       int64 // Current batch queue depth (0-tuiQueueSize)
 	MaxQueueDepth    int64 // Peak queue depth seen
 	SamplingRatio    int64 // Current sampling ratio * 1000 (e.g., 1000 = 100%, 500 = 50%)
+	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s window, for throttling)
+}
+
+// recentDropTracker tracks batch drops over a sliding window for throttling
+type recentDropTracker struct {
+	mu           sync.Mutex
+	windowSize   time.Duration
+	events       []dropEvent
+	totalSent    int
+	totalDropped int
+}
+
+type dropEvent struct {
+	timestamp time.Time
+	dropped   bool
+}
+
+var dropTracker = &recentDropTracker{
+	windowSize: 5 * time.Second,
+	events:     make([]dropEvent, 0, 1000),
+}
+
+// pendingPacketBuffer holds packets ready for the TUI to pull.
+// This decouples packet production from TUI rendering - the TUI
+// pulls packets when it's ready rather than being pushed to.
+type pendingPacketBuffer struct {
+	mu      sync.Mutex
+	packets []components.PacketDisplay
+}
+
+var pendingPackets = &pendingPacketBuffer{
+	packets: make([]components.PacketDisplay, 0, 2000),
+}
+
+// addPackets adds packets to the pending buffer (called by bridge consumer)
+func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	pb.packets = append(pb.packets, packets...)
+	// Cap buffer size to prevent unbounded growth
+	const maxPending = 5000
+	if len(pb.packets) > maxPending {
+		pb.packets = pb.packets[len(pb.packets)-maxPending:]
+	}
+}
+
+// drainPackets returns up to maxPackets pending packets.
+// Called by TUI on a timer to pull new packets.
+// Limiting per-tick processing prevents UI stutter during high traffic.
+func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketDisplay {
+	pb.mu.Lock()
+	defer pb.mu.Unlock()
+	if len(pb.packets) == 0 {
+		return nil
+	}
+
+	// Take at most maxPackets from the front (oldest first)
+	count := len(pb.packets)
+	if count > maxPackets {
+		count = maxPackets
+	}
+
+	result := make([]components.PacketDisplay, count)
+	copy(result, pb.packets[:count])
+
+	// Keep remaining packets in buffer
+	if count < len(pb.packets) {
+		remaining := make([]components.PacketDisplay, len(pb.packets)-count)
+		copy(remaining, pb.packets[count:])
+		pb.packets = remaining
+	} else {
+		pb.packets = pb.packets[:0] // Reuse backing array
+	}
+
+	return result
+}
+
+// DrainPendingPackets returns pending packets for the TUI to process.
+// This is the public API called by the TUI's tick handler.
+// Limited to 50 packets per tick (1000/sec at 50ms ticks) to prevent UI stutter.
+// This matches the visible packet count and the bridge's target sampling rate.
+func DrainPendingPackets() []components.PacketDisplay {
+	const maxPacketsPerTick = 50
+	return pendingPackets.drainPackets(maxPacketsPerTick)
+}
+
+// recordBatchResult records a batch send result (success or drop)
+func (dt *recentDropTracker) recordBatchResult(dropped bool) {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+
+	now := time.Now()
+	dt.events = append(dt.events, dropEvent{timestamp: now, dropped: dropped})
+	if dropped {
+		dt.totalDropped++
+	} else {
+		dt.totalSent++
+	}
+
+	// Trim old events
+	cutoff := now.Add(-dt.windowSize)
+	trimIdx := 0
+	for trimIdx < len(dt.events) && dt.events[trimIdx].timestamp.Before(cutoff) {
+		if dt.events[trimIdx].dropped {
+			dt.totalDropped--
+		} else {
+			dt.totalSent--
+		}
+		trimIdx++
+	}
+	if trimIdx > 0 {
+		dt.events = dt.events[trimIdx:]
+	}
+
+	// Compact if too much slack
+	if cap(dt.events) > 2000 && len(dt.events) < cap(dt.events)/4 {
+		newEvents := make([]dropEvent, len(dt.events), 1000)
+		copy(newEvents, dt.events)
+		dt.events = newEvents
+	}
+}
+
+// getRecentDropRate returns the drop rate over the recent window (0-1000 scale)
+func (dt *recentDropTracker) getRecentDropRate() int64 {
+	dt.mu.Lock()
+	defer dt.mu.Unlock()
+
+	// Trim stale events first
+	now := time.Now()
+	cutoff := now.Add(-dt.windowSize)
+	trimIdx := 0
+	for trimIdx < len(dt.events) && dt.events[trimIdx].timestamp.Before(cutoff) {
+		if dt.events[trimIdx].dropped {
+			dt.totalDropped--
+		} else {
+			dt.totalSent--
+		}
+		trimIdx++
+	}
+	if trimIdx > 0 {
+		dt.events = dt.events[trimIdx:]
+	}
+
+	total := dt.totalSent + dt.totalDropped
+	if total < 10 {
+		return 0 // Not enough data
+	}
+	return int64(dt.totalDropped) * 1000 / int64(total)
 }
 
 // bridgeStats holds global bridge statistics for diagnostics
@@ -238,6 +386,7 @@ func GetBridgeStats() BridgeStats {
 		QueueDepth:       atomic.LoadInt64(&bridgeStats.QueueDepth),
 		MaxQueueDepth:    atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
 		SamplingRatio:    atomic.LoadInt64(&bridgeStats.SamplingRatio),
+		RecentDropRate:   dropTracker.getRecentDropRate(),
 	}
 }
 
@@ -277,6 +426,11 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	recentPackets := newTimeRingBuffer(ringBufferCapacity)
 	lastRateCheck := time.Now()
 
+	// Cache sampling ratio to avoid recalculating for every packet
+	cachedSamplingRatio := 1.0
+	lastSamplingUpdateCount := int64(0)
+	const samplingUpdateEveryN = 1000 // Update sampling ratio every 1000 packets
+
 	ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
 
@@ -284,14 +438,22 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	// This prevents program.Send() from blocking the bridge when TUI is slow.
 	tuiBatchChan := make(chan PacketBatchMsg, tuiQueueSize)
 
-	// Consumer goroutine: reads from tuiBatchChan and sends to TUI.
-	// This runs in a separate goroutine so blocking on program.Send()
-	// doesn't affect packet ingestion.
+	// Consumer goroutine: reads from tuiBatchChan and adds to pending buffer.
+	// The TUI pulls from the pending buffer on its own timer, so this never blocks.
 	consumerDone := make(chan struct{})
 	go func() {
 		defer close(consumerDone)
-		for msg := range tuiBatchChan {
-			program.Send(msg)
+
+		for {
+			select {
+			case msg, ok := <-tuiBatchChan:
+				if !ok {
+					// Channel closed
+					return
+				}
+				// Add to pending buffer (never blocks - TUI pulls when ready)
+				pendingPackets.addPackets(msg.Packets)
+			}
 		}
 	}()
 
@@ -305,9 +467,11 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				// Successfully queued
 				atomic.AddInt64(&bridgeStats.BatchesSent, 1)
 				atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(batch)))
+				dropTracker.recordBatchResult(false) // Record success for recent tracking
 			default:
 				// TUI is behind - drop batch to prevent blocking
 				atomic.AddInt64(&bridgeStats.BatchesDropped, 1)
+				dropTracker.recordBatchResult(true) // Record drop for recent tracking
 				logger.Debug("TUI backpressure: dropped packet batch",
 					"batch_size", len(batch),
 					"total_dropped", atomic.LoadInt64(&bridgeStats.BatchesDropped))
@@ -389,11 +553,16 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			packetCount++
 			atomic.AddInt64(&bridgeStats.PacketsReceived, 1)
 
-			// Track packet timestamp for rolling window rate calculation
-			recentPackets.push(time.Now())
+			// Update rate tracking and sampling ratio every N packets (not every packet)
+			// This reduces overhead from 100k+ time.Now() calls/sec to 100 calls/sec
+			if packetCount-lastSamplingUpdateCount >= samplingUpdateEveryN {
+				recentPackets.push(time.Now())
+				cachedSamplingRatio = getSamplingRatio()
+				lastSamplingUpdateCount = packetCount
+			}
 
-			// Adaptive sampling based on load
-			samplingRatio := getSamplingRatio()
+			// Use cached sampling ratio
+			samplingRatio := cachedSamplingRatio
 
 			// Use fast conversion for sampled packets, full for important ones
 			var packet components.PacketDisplay

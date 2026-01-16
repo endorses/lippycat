@@ -5,6 +5,7 @@ package components
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,6 +38,7 @@ type BridgeStatistics struct {
 	QueueDepth       int64 // Current batch queue depth
 	MaxQueueDepth    int64 // Peak queue depth seen
 	SamplingRatio    int64 // Current sampling ratio * 1000 (1000 = 100%)
+	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s, for throttling)
 }
 
 // StatisticsView displays statistics
@@ -48,6 +50,9 @@ type StatisticsView struct {
 	stats       *Statistics
 	bridgeStats *BridgeStatistics
 	ready       bool
+	dirty       bool      // Content needs re-render
+	lastRender  time.Time // Last time content was rendered
+	isVisible   bool      // Tab is currently visible
 }
 
 // NewStatisticsView creates a new statistics view
@@ -87,18 +92,20 @@ func (s *StatisticsView) SetSize(width, height int) {
 // SetStatistics updates the statistics data
 func (s *StatisticsView) SetStatistics(stats *Statistics) {
 	s.stats = stats
-	// Update viewport content when stats change (only if viewport is ready)
-	if s.ready {
-		s.viewport.SetContent(s.renderContent())
-	}
+	s.dirty = true // Mark for lazy re-render
 }
 
 // SetBridgeStats updates the bridge statistics data
 func (s *StatisticsView) SetBridgeStats(bridgeStats *BridgeStatistics) {
 	s.bridgeStats = bridgeStats
-	// Update viewport content when stats change (only if viewport is ready)
-	if s.ready {
-		s.viewport.SetContent(s.renderContent())
+	s.dirty = true // Mark for lazy re-render
+}
+
+// SetVisible marks whether the statistics tab is currently visible
+func (s *StatisticsView) SetVisible(visible bool) {
+	s.isVisible = visible
+	if visible {
+		s.dirty = true // Force re-render when becoming visible
 	}
 }
 
@@ -122,6 +129,15 @@ func (s *StatisticsView) View() string {
 			Width(s.width).
 			Height(s.height)
 		return emptyStyle.Render("No statistics available yet...")
+	}
+
+	// Lazy rendering: only re-render if dirty and throttle to max 2Hz (500ms)
+	// This avoids expensive GetTopN() sorts on every 50ms tick
+	const renderThrottle = 500 * time.Millisecond
+	if s.dirty && time.Since(s.lastRender) >= renderThrottle {
+		s.viewport.SetContent(s.renderContent())
+		s.dirty = false
+		s.lastRender = time.Now()
 	}
 
 	return s.viewport.View()
@@ -253,6 +269,22 @@ func (s *StatisticsView) renderContent() string {
 		// Queue depth
 		result.WriteString(labelStyle.Render("Queue Depth: "))
 		result.WriteString(valueStyle.Render(fmt.Sprintf("%d (max: %d)", s.bridgeStats.QueueDepth, s.bridgeStats.MaxQueueDepth)))
+		result.WriteString("\n")
+
+		// Recent drop rate (used for throttling)
+		result.WriteString(labelStyle.Render("Recent Drop Rate: "))
+		recentDropPct := float64(s.bridgeStats.RecentDropRate) / 10.0 // Convert from 0-1000 to percentage
+		if recentDropPct < 0.1 {
+			result.WriteString(valueStyle.Render("0% (no throttling)"))
+		} else if recentDropPct < 1.0 {
+			result.WriteString(valueStyle.Render(fmt.Sprintf("%.1f%% (mild throttling)", recentDropPct)))
+		} else if recentDropPct < 10.0 {
+			warnStyle := lipgloss.NewStyle().Foreground(s.theme.WarningColor)
+			result.WriteString(warnStyle.Render(fmt.Sprintf("%.1f%% (moderate throttling)", recentDropPct)))
+		} else {
+			warnStyle := lipgloss.NewStyle().Foreground(s.theme.ErrorColor)
+			result.WriteString(warnStyle.Render(fmt.Sprintf("%.1f%% (heavy throttling)", recentDropPct)))
+		}
 		result.WriteString("\n")
 	}
 

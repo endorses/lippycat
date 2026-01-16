@@ -301,6 +301,11 @@ func (m Model) handleClearAllFilters() (Model, tea.Cmd) {
 		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
 
+		// Reset sync counters for incremental updates
+		_, _, total, _ := m.packetStore.GetBufferInfo()
+		m.lastSyncedTotal = total
+		m.lastSyncedFilteredCount = 0
+
 		// Show toast notification with count
 		msg := fmt.Sprintf("All filters cleared (%d removed)", filterCount)
 		if filterCount == 1 {
@@ -323,11 +328,16 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 			// Reapply remaining filters
 			m.applyFilters()
 
-			// Update display
+			// Update display and reset sync counters
 			if !m.packetStore.HasFilter() {
 				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+				_, _, total, _ := m.packetStore.GetBufferInfo()
+				m.lastSyncedTotal = total
+				m.lastSyncedFilteredCount = 0
 			} else {
 				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
+				m.lastSyncedFilteredCount = m.packetStore.FilteredCount()
+				m.lastSyncedTotal = 0
 			}
 
 			// Show toast notification
@@ -358,6 +368,11 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 	m.packetStore.TotalPackets = 0
 	m.packetStore.MatchedPackets = 0
 	m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+
+	// Reset incremental sync counters so new packets will be added
+	m.lastSyncedTotal = 0
+	m.lastSyncedFilteredCount = 0
+
 	// Reset bounded counters
 	m.statistics.ProtocolCounts.Clear()
 	m.statistics.SourceCounts.Clear()

@@ -144,7 +144,7 @@ const (
 // UI/TUI configuration
 const (
 	// TUITickInterval is the interval for TUI screen refresh
-	TUITickInterval = 100 * time.Millisecond
+	TUITickInterval = 50 * time.Millisecond
 
 	// TUICleanupInterval is the interval for TUI cleanup operations (stale data removal)
 	TUICleanupInterval = 30 * time.Second

@@ -92,23 +92,23 @@ func (m Model) handleResumeMsg(msg tea.ResumeMsg) (Model, tea.Cmd) {
 func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 	// Only run tick when capturing and not paused
 	if !m.uiState.Paused && m.uiState.Capturing {
-		// Periodic UI refresh (10 times per second)
-		if m.uiState.NeedsUIUpdate {
-			// Update packet list component with filtered packets
-			// No need to reapply filters - they're applied per-packet now
-			if !m.packetStore.HasFilter() {
-				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-			} else {
-				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-			}
+		// PULL-BASED ARCHITECTURE: Drain pending packets from buffer
+		// This ensures TUI is never blocked by incoming packets - it pulls when ready
+		pendingPackets := DrainPendingPackets()
 
-			// Update details panel if showing details
-			if m.uiState.ShowDetails {
-				m.updateDetailsPanel()
-			}
-
-			m.uiState.NeedsUIUpdate = false
+		if len(pendingPackets) > 0 {
+			m.processPendingPackets(pendingPackets)
 		}
+
+		// Use incremental updates to avoid O(n) copies on every tick
+		// This only copies new packets instead of the entire buffer
+		m.updatePacketListIncremental()
+
+		// Update details panel if showing details
+		if m.uiState.ShowDetails {
+			m.updateDetailsPanel()
+		}
+
 		return m, tickCmd()
 	}
 	// When paused, stop ticking to save CPU
@@ -203,13 +203,22 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 	// Apply BPF filter if protocol has one
 	var filterErrorCmd tea.Cmd
 	if msg.Protocol.BPFFilter != "" {
+		// Protocol selection REPLACES existing filters (not stacking)
+		m.packetStore.ClearFilter()
 		filterErrorCmd = m.parseAndApplyFilter(msg.Protocol.BPFFilter)
+		// Reset sync counters for incremental updates
+		m.lastSyncedFilteredCount = m.packetStore.FilteredCount()
+		m.lastSyncedTotal = 0
 	} else {
 		// "All" protocol - clear filters
 		m.packetStore.ClearFilter()
 		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
 		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
 		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
+		// Reset sync counters for incremental updates
+		_, _, total, _ := m.packetStore.GetBufferInfo()
+		m.lastSyncedTotal = total
+		m.lastSyncedFilteredCount = 0
 	}
 
 	// Switch to calls view if VoIP protocol selected

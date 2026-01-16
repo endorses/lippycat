@@ -31,14 +31,14 @@ func TestBoundedCounter_CapacityLimit(t *testing.T) {
 
 	assert.Equal(t, 3, bc.Len())
 
-	// Add 4th item - should evict lowest count ("a", "b", or "c")
+	// Add 4th item - should be ignored at capacity (O(1) instead of O(n) eviction)
 	bc.Increment("d")
 
 	assert.Equal(t, 3, bc.Len(), "should maintain capacity limit")
-	assert.Equal(t, int64(1), bc.Get("d"), "new item should be added")
+	assert.Equal(t, int64(0), bc.Get("d"), "new item should be ignored at capacity")
 }
 
-func TestBoundedCounter_EvictsLowestCount(t *testing.T) {
+func TestBoundedCounter_IgnoresNewKeysAtCapacity(t *testing.T) {
 	bc := NewBoundedCounter(3)
 
 	// Add items with different counts
@@ -51,13 +51,13 @@ func TestBoundedCounter_EvictsLowestCount(t *testing.T) {
 
 	assert.Equal(t, 3, bc.Len())
 
-	// Add new item - should evict "low" (count=1)
+	// Add new item - should be ignored at capacity (O(1) operation)
 	bc.Increment("new")
 
-	assert.Equal(t, int64(0), bc.Get("low"), "lowest count item should be evicted")
+	assert.Equal(t, int64(1), bc.Get("low"), "existing items should be preserved")
 	assert.Equal(t, int64(3), bc.Get("high"))
 	assert.Equal(t, int64(2), bc.Get("medium"))
-	assert.Equal(t, int64(1), bc.Get("new"))
+	assert.Equal(t, int64(0), bc.Get("new"), "new items should be ignored at capacity")
 }
 
 func TestBoundedCounter_IncrementExistingDoesNotEvict(t *testing.T) {
@@ -189,9 +189,9 @@ func TestBoundedCounter_SingleCapacity(t *testing.T) {
 	assert.Equal(t, 1, bc.Len())
 	assert.Equal(t, int64(1), bc.Get("first"))
 
-	// Add second item - should replace first
+	// Add second item - should be ignored at capacity
 	bc.Increment("second")
 	assert.Equal(t, 1, bc.Len())
-	assert.Equal(t, int64(0), bc.Get("first"))
-	assert.Equal(t, int64(1), bc.Get("second"))
+	assert.Equal(t, int64(1), bc.Get("first"), "first item should be preserved")
+	assert.Equal(t, int64(0), bc.Get("second"), "new item should be ignored at capacity")
 }

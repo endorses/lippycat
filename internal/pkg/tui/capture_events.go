@@ -55,15 +55,32 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 		// Add packets to store in batch (single lock acquisition)
 		m.packetStore.AddPacketBatch(filteredPackets)
 
-		// Update statistics for all packets (lightweight counters only)
+		// Update statistics for all packets in batch (single view update at the end)
 		for i := range filteredPackets {
-			m.updateStatistics(filteredPackets[i])
+			pkt := filteredPackets[i]
+
+			// Update counters without triggering view rebuild
+			m.statistics.ProtocolCounts.Increment(pkt.Protocol)
+			m.statistics.SourceCounts.Increment(pkt.SrcIP)
+			m.statistics.DestCounts.Increment(pkt.DstIP)
+			m.statistics.TotalBytes += int64(pkt.Length)
+			m.statistics.TotalPackets++
+			if pkt.Length < m.statistics.MinPacketSize {
+				m.statistics.MinPacketSize = pkt.Length
+			}
+			if pkt.Length > m.statistics.MaxPacketSize {
+				m.statistics.MaxPacketSize = pkt.Length
+			}
 
 			// Write to streaming save if active (must be synchronous)
 			if m.activeWriter != nil {
-				_ = m.activeWriter.WritePacket(filteredPackets[i])
+				_ = m.activeWriter.WritePacket(pkt)
 			}
 		}
+
+		// Update statistics view ONCE after processing entire batch
+		m.uiState.StatisticsView.SetStatistics(m.statistics)
+		m.updateBridgeStats()
 
 		// Submit packets for non-critical background processing
 		// (DNS/HTTP parsing, call aggregator, email view updates)
@@ -73,17 +90,28 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 			m.backgroundProcessor.SubmitBatch(filteredPackets, linkType)
 		}
 
-		// Adaptive throttling based on bridge backpressure
-		// Check if bridge is dropping batches (indicates TUI can't keep up)
+		// Adaptive throttling based on RECENT bridge backpressure
+		// Uses recent drop rate (last 5s) instead of cumulative to be responsive
 		bridgeStats := GetBridgeStats()
-		underPressure := bridgeStats.BatchesDropped > 0 && bridgeStats.BatchesSent > 0 &&
-			float64(bridgeStats.BatchesDropped)/float64(bridgeStats.BatchesSent) > 0.01
+		recentDropRate := float64(bridgeStats.RecentDropRate) / 1000.0 // Convert from 0-1000 to 0-1
+
+		// Multi-level pressure detection based on RECENT drop rate
+		// >1% drops: mild pressure, >10% drops: moderate, >30% drops: severe
+		mildPressure := recentDropRate > 0.01
+		moderatePressure := recentDropRate > 0.10
+		severePressure := recentDropRate > 0.30
 
 		// Update packet list with adaptive throttling and incremental updates
 		now := time.Now()
 		updateInterval := m.packetListUpdateInterval
-		if underPressure {
-			// Double the update interval when under pressure (100ms -> 200ms)
+		if severePressure {
+			// Severe pressure: update only every 500ms
+			updateInterval = 500 * time.Millisecond
+		} else if moderatePressure {
+			// Moderate pressure: update every 250ms
+			updateInterval = 250 * time.Millisecond
+		} else if mildPressure {
+			// Mild pressure: double the update interval (100ms -> 200ms)
 			updateInterval *= 2
 		}
 
@@ -93,8 +121,8 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 		}
 
 		// Update details panel if showing details (throttled to reduce CPU usage)
-		// Skip details updates entirely when under pressure (expensive hex dumps)
-		if m.uiState.ShowDetails && !underPressure {
+		// Skip details updates entirely when under moderate/severe pressure (expensive hex dumps)
+		if m.uiState.ShowDetails && !moderatePressure {
 			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
 				m.updateDetailsPanel()
 				m.lastDetailsPanelUpdate = now
@@ -127,8 +155,20 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 		// Add packet using PacketStore method
 		m.packetStore.AddPacket(packet)
 
-		// Update statistics (lightweight)
-		m.updateStatistics(packet)
+		// Update statistics counters (lightweight, no view rebuild)
+		m.statistics.ProtocolCounts.Increment(packet.Protocol)
+		m.statistics.SourceCounts.Increment(packet.SrcIP)
+		m.statistics.DestCounts.Increment(packet.DstIP)
+		m.statistics.TotalBytes += int64(packet.Length)
+		m.statistics.TotalPackets++
+		if packet.Length < m.statistics.MinPacketSize {
+			m.statistics.MinPacketSize = packet.Length
+		}
+		if packet.Length > m.statistics.MaxPacketSize {
+			m.statistics.MaxPacketSize = packet.Length
+		}
+		m.uiState.StatisticsView.SetStatistics(m.statistics)
+		m.updateBridgeStats()
 
 		// Write to streaming save if active (must be synchronous)
 		if m.activeWriter != nil {
@@ -140,15 +180,21 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 			m.backgroundProcessor.Submit(packet, packet.LinkType)
 		}
 
-		// Adaptive throttling based on bridge backpressure
+		// Adaptive throttling based on RECENT bridge backpressure
 		bridgeStats := GetBridgeStats()
-		underPressure := bridgeStats.BatchesDropped > 0 && bridgeStats.BatchesSent > 0 &&
-			float64(bridgeStats.BatchesDropped)/float64(bridgeStats.BatchesSent) > 0.01
+		recentDropRate := float64(bridgeStats.RecentDropRate) / 1000.0 // Convert from 0-1000 to 0-1
+		mildPressure := recentDropRate > 0.01
+		moderatePressure := recentDropRate > 0.10
+		severePressure := recentDropRate > 0.30
 
 		// Update packet list with adaptive throttling and incremental updates
 		now := time.Now()
 		updateInterval := m.packetListUpdateInterval
-		if underPressure {
+		if severePressure {
+			updateInterval = 500 * time.Millisecond
+		} else if moderatePressure {
+			updateInterval = 250 * time.Millisecond
+		} else if mildPressure {
 			updateInterval *= 2
 		}
 
@@ -157,8 +203,8 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 			m.lastPacketListUpdate = now
 		}
 
-		// Update details panel if showing details (skip when under pressure)
-		if m.uiState.ShowDetails && !underPressure {
+		// Update details panel if showing details (skip when under moderate/severe pressure)
+		if m.uiState.ShowDetails && !moderatePressure {
 			if now.Sub(m.lastDetailsPanelUpdate) >= m.detailsPanelUpdateInterval {
 				m.updateDetailsPanel()
 				m.lastDetailsPanelUpdate = now

@@ -75,6 +75,7 @@ func (m *Model) updateBridgeStats() {
 		QueueDepth:       stats.QueueDepth,
 		MaxQueueDepth:    stats.MaxQueueDepth,
 		SamplingRatio:    stats.SamplingRatio,
+		RecentDropRate:   stats.RecentDropRate,
 	})
 }
 
@@ -170,6 +171,78 @@ func (m *Model) updatePacketListFiltered() {
 	// Append new filtered packets
 	m.uiState.PacketList.AppendPackets(newPackets)
 	m.lastSyncedFilteredCount = newCount
+}
+
+// processPendingPackets processes packets pulled from the pending buffer.
+// This is the core of the pull-based architecture - TUI pulls when ready.
+func (m *Model) processPendingPackets(packets []components.PacketDisplay) {
+	// Filter packets by capture mode and set NodeID
+	filteredPackets := make([]components.PacketDisplay, 0, len(packets))
+	for i := range packets {
+		packet := &packets[i]
+
+		// Set NodeID to "Local" if not already set (for local/offline capture)
+		if packet.NodeID == "" {
+			packet.NodeID = "Local"
+		}
+
+		// Only process packets that match current capture mode
+		if m.captureMode == components.CaptureModeRemote {
+			if packet.NodeID == "Local" {
+				continue
+			}
+		} else {
+			if packet.NodeID != "Local" {
+				continue
+			}
+		}
+
+		filteredPackets = append(filteredPackets, *packet)
+	}
+
+	if len(filteredPackets) == 0 {
+		return
+	}
+
+	// Add packets to store in batch (single lock acquisition)
+	m.packetStore.AddPacketBatch(filteredPackets)
+
+	// Update statistics for all packets in batch (single view update at the end)
+	for i := range filteredPackets {
+		pkt := filteredPackets[i]
+
+		// Update counters without triggering view rebuild
+		m.statistics.ProtocolCounts.Increment(pkt.Protocol)
+		m.statistics.SourceCounts.Increment(pkt.SrcIP)
+		m.statistics.DestCounts.Increment(pkt.DstIP)
+		m.statistics.TotalBytes += int64(pkt.Length)
+		m.statistics.TotalPackets++
+		if pkt.Length < m.statistics.MinPacketSize {
+			m.statistics.MinPacketSize = pkt.Length
+		}
+		if pkt.Length > m.statistics.MaxPacketSize {
+			m.statistics.MaxPacketSize = pkt.Length
+		}
+
+		// Write to streaming save if active (must be synchronous)
+		if m.activeWriter != nil {
+			_ = m.activeWriter.WritePacket(pkt)
+		}
+	}
+
+	// Update statistics view ONCE after processing entire batch
+	m.uiState.StatisticsView.SetStatistics(m.statistics)
+	m.updateBridgeStats()
+
+	// Submit packets for non-critical background processing
+	if m.backgroundProcessor != nil && len(filteredPackets) > 0 {
+		linkType := filteredPackets[0].LinkType
+		m.backgroundProcessor.SubmitBatch(filteredPackets, linkType)
+	}
+
+	// Note: Packet list and details panel are updated in handleTickMsg
+	// after all pending packets are processed. This keeps the logic simple
+	// and ensures consistent display.
 }
 
 // doFullPacketListRefresh performs a full packet list refresh

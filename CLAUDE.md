@@ -114,6 +114,12 @@ Each specialized build is stripped (`-s -w`) and optimized to reduce binary size
 
 The stub file is NOT an indicator of missing GPU support - it exists only so non-CUDA builds compile cleanly.
 
+**LI Build Tag Pattern:** The `li` build tag controls Lawful Interception support. CLI flags follow this pattern:
+- `flags_li.go` (`//go:build li`) - Flag variables, `RegisterLIFlags()`, `BindLIViperFlags()`, `GetLIConfig()`
+- `flags_li_stub.go` (`//go:build !li`) - No-op stubs, `GetLIConfig()` returns `nil`
+
+Commands call `RegisterLIFlags(cmd)` and `BindLIViperFlags(cmd)` in `init()`, and use `GetLIConfig()` to retrieve configuration (checking for `nil` in non-LI builds).
+
 ### Install
 ```bash
 # Install to GOPATH/bin

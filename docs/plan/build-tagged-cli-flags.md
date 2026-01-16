@@ -47,21 +47,20 @@ Based on [research](../research/build-tagged-cli-flags.md).
 
 ### 2.2 cmd/tap - LI Flags (Prep)
 
-- [ ] Update `cmd/tap/tap.go` help text
-  - Remove LI example (lines 59-64) until LI is implemented
-- [ ] Create `cmd/tap/flags_li.go` (`//go:build li`) - empty placeholder
-- [ ] Create `cmd/tap/flags_li_stub.go` (`//go:build !li`) - empty placeholder
+**OBSOLETE**: This phase was incorrectly scoped. Tap requires full LI support, not placeholders.
+
+Per the architectural principle `tap = process + hunt - gRPC`, tap must have all processor capabilities including LI. See [tap-capability-gap-analysis.md](../research/tap-capability-gap-analysis.md) for the complete audit of missing tap capabilities that need to be addressed in a separate plan.
 
 ## Phase 3: Verification
 
-- [ ] Run full test suite: `make test`
-- [ ] Build all variants and verify flag visibility:
+- [x] Run full test suite: `make test`
+- [x] Build all variants and verify flag visibility:
   ```bash
   make build        # non-CUDA, non-LI
   make build-cuda   # CUDA
   make build-li     # LI
   make binaries     # all variants
   ```
-- [ ] Verify GPU flags appear only in CUDA builds
-- [ ] Verify LI flags appear only in LI builds
-- [ ] Update CLAUDE.md if needed to document the pattern
+- [x] Verify GPU flags appear only in CUDA builds
+- [x] Verify LI flags appear only in LI builds
+- [x] Update CLAUDE.md if needed to document the pattern

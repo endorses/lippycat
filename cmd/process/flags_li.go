@@ -91,19 +91,19 @@ func BindLIViperFlags(cmd *cobra.Command) {
 // GetLIConfig returns the LI configuration from flags and viper.
 func GetLIConfig() *LIConfig {
 	return &LIConfig{
-		Enabled:               getBoolConfig("processor.li.enabled", liEnabled),
-		X1ListenAddr:          getStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
-		X1TLSCertFile:         getStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
-		X1TLSKeyFile:          getStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
-		X1TLSCAFile:           getStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
-		ADMFEndpoint:          getStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
-		ADMFTLSCertFile:       getStringConfig("processor.li.admf_tls_cert", liADMFTLSCertFile),
-		ADMFTLSKeyFile:        getStringConfig("processor.li.admf_tls_key", liADMFTLSKeyFile),
-		ADMFTLSCAFile:         getStringConfig("processor.li.admf_tls_ca", liADMFTLSCAFile),
-		ADMFKeepalive:         getStringConfig("processor.li.admf_keepalive", liADMFKeepalive),
-		DeliveryTLSCertFile:   getStringConfig("processor.li.delivery_tls_cert", liDeliveryTLSCertFile),
-		DeliveryTLSKeyFile:    getStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
-		DeliveryTLSCAFile:     getStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
-		DeliveryTLSPinnedCert: getStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
+		Enabled:               cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),
+		X1ListenAddr:          cmdutil.GetStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
+		X1TLSCertFile:         cmdutil.GetStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
+		X1TLSKeyFile:          cmdutil.GetStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
+		X1TLSCAFile:           cmdutil.GetStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
+		ADMFEndpoint:          cmdutil.GetStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
+		ADMFTLSCertFile:       cmdutil.GetStringConfig("processor.li.admf_tls_cert", liADMFTLSCertFile),
+		ADMFTLSKeyFile:        cmdutil.GetStringConfig("processor.li.admf_tls_key", liADMFTLSKeyFile),
+		ADMFTLSCAFile:         cmdutil.GetStringConfig("processor.li.admf_tls_ca", liADMFTLSCAFile),
+		ADMFKeepalive:         cmdutil.GetStringConfig("processor.li.admf_keepalive", liADMFKeepalive),
+		DeliveryTLSCertFile:   cmdutil.GetStringConfig("processor.li.delivery_tls_cert", liDeliveryTLSCertFile),
+		DeliveryTLSKeyFile:    cmdutil.GetStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
+		DeliveryTLSCAFile:     cmdutil.GetStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
+		DeliveryTLSPinnedCert: cmdutil.GetStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
 	}
 }

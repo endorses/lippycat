@@ -193,7 +193,46 @@ if productionMode {
 
 ## Missing Hunter Capabilities
 
-### 1. GPU Acceleration
+### 1. Automatic Own-Traffic BPF Exclusion
+
+**Severity: High**
+
+Hunter automatically excludes its processor communication port from packet capture at the kernel BPF level. Tap has no such filtering for its own gRPC traffic.
+
+**Hunter implementation:** `internal/pkg/hunter/capture/manager.go` lines 172-187
+```go
+// buildProcessorPortExclusionFilter builds a BPF filter to exclude the processor communication port.
+// This prevents the hunter from capturing its own gRPC traffic to the processor.
+func (m *Manager) buildProcessorPortExclusionFilter() string {
+    port := m.extractPortFromAddr(m.processorAddr)
+    if port == "" {
+        return ""
+    }
+    return fmt.Sprintf("not port %s", port)
+}
+```
+
+**What tap needs to exclude:**
+| Traffic Type | Flag | Purpose |
+|-------------|------|---------|
+| TUI subscriber connections | `--listen` (default `:50051`) | Inbound gRPC from TUI clients |
+| Upstream processor traffic | `--processor` | Outbound gRPC to upstream processor |
+
+**Missing infrastructure:**
+- No `buildOwnTrafficExclusionFilter()` or equivalent in tap's capture setup
+- Tap uses `internal/pkg/capture/` directly without the hunter's filter composition logic
+- No exclusion for `ListenAddr` port (TUI connections)
+- No exclusion for `UpstreamAddr` port (processor forwarding)
+
+**Impact:**
+Without this exclusion, tap will:
+1. Capture its own gRPC traffic to TUI subscribers, creating noise
+2. Capture its own gRPC traffic to upstream processors, creating feedback loops
+3. Waste CPU cycles processing and displaying its own management traffic
+
+**Note:** This is particularly problematic in hierarchical deployments where tap forwards to a processor on the same network segment.
+
+### 2. GPU Acceleration
 
 **Severity: High**
 
@@ -217,7 +256,7 @@ Hunt has GPU-accelerated filtering via CUDA/OpenCL. Tap has no GPU support.
 - `hunter.voip_filter.gpu_backend`
 - `hunter.voip_filter.gpu_batch_size`
 
-### 2. Advanced Pattern Matching Configuration
+### 3. Advanced Pattern Matching Configuration
 
 **Severity: Low**
 
@@ -238,6 +277,7 @@ Hunt's voip subcommand has pattern matching algorithm selection. Tap voip does n
 | Severity | Category | Missing Flags |
 |----------|----------|---------------|
 | Critical | LI (Lawful Interception) | 14 |
+| High | Own-Traffic BPF Exclusion | 0 (logic gap) |
 | High | GPU Acceleration | 3 |
 | Medium | TLS Keylog | 1 |
 | Medium | DNS Tunneling | 3 |
@@ -246,14 +286,14 @@ Hunt's voip subcommand has pattern matching algorithm selection. Tap voip does n
 | Low | Stats Display | 1 |
 | Low | Pattern Matching | 2 |
 
-**Total missing flags: 25**
+**Total missing flags: 25** (plus 2 logic gaps requiring implementation)
 
 ### By Source
 
-| Source | Missing Flags | Missing Config Fields |
+| Source | Missing Flags | Missing Logic/Config |
 |--------|---------------|----------------------|
-| Process | 20 | 18+ |
-| Hunt | 5 | 3+ |
+| Process | 20 | 18+ config fields, 1 logic gap (mTLS) |
+| Hunt | 5 | 3+ config fields, 1 logic gap (BPF exclusion) |
 
 ### Infrastructure Gaps
 
@@ -281,6 +321,7 @@ Files that need to be created for tap:
 The `lc tap` command significantly violates its architectural contract of `tap = process + hunt - gRPC`. It is missing:
 
 - **100% of LI capabilities** from process
+- **100% of own-traffic BPF exclusion** from hunt (will capture its own gRPC traffic)
 - **100% of GPU acceleration** from hunt
 - **100% of TLS keylog** from process
 - **100% of DNS tunneling detection** from process

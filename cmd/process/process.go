@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -245,7 +246,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if getBoolConfig("insecure", insecureAllowed) {
+		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
 		if !tlsClientAuth && !viper.GetBool("processor.tls.client_auth") {
@@ -256,11 +257,11 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Build per-call PCAP config if enabled
 	var pcapWriterConfig *processor.PcapWriterConfig
-	if getBoolConfig("processor.per_call_pcap.enabled", perCallPcapEnabled) {
+	if cmdutil.GetBoolConfig("processor.per_call_pcap.enabled", perCallPcapEnabled) {
 		pcapWriterConfig = &processor.PcapWriterConfig{
 			Enabled:         true,
-			OutputDir:       getStringConfig("processor.per_call_pcap.output_dir", perCallPcapDir),
-			FilePattern:     getStringConfig("processor.per_call_pcap.file_pattern", perCallPcapPattern),
+			OutputDir:       cmdutil.GetStringConfig("processor.per_call_pcap.output_dir", perCallPcapDir),
+			FilePattern:     cmdutil.GetStringConfig("processor.per_call_pcap.file_pattern", perCallPcapPattern),
 			MaxFileSize:     100 * 1024 * 1024, // 100MB default
 			MaxFilesPerCall: 10,
 			BufferSize:      4096,
@@ -270,25 +271,25 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Build auto-rotate PCAP config if enabled
 	var autoRotateConfig *processor.AutoRotateConfig
-	if getBoolConfig("processor.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
+	if cmdutil.GetBoolConfig("processor.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
 		// Parse idle timeout
-		idleTimeoutStr := getStringConfig("processor.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
+		idleTimeoutStr := cmdutil.GetStringConfig("processor.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
 		idleTimeout, err := time.ParseDuration(idleTimeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid auto-rotate-idle-timeout: %w", err)
 		}
 
 		// Parse max size (supports K, M, G suffixes)
-		maxSizeStr := getStringConfig("processor.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
-		maxSize, err := parseSizeString(maxSizeStr)
+		maxSizeStr := cmdutil.GetStringConfig("processor.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
+		maxSize, err := cmdutil.ParseSizeString(maxSizeStr)
 		if err != nil {
 			return fmt.Errorf("invalid auto-rotate-max-size: %w", err)
 		}
 
 		autoRotateConfig = &processor.AutoRotateConfig{
 			Enabled:      true,
-			OutputDir:    getStringConfig("processor.auto_rotate_pcap.output_dir", autoRotatePcapDir),
-			FilePattern:  getStringConfig("processor.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
+			OutputDir:    cmdutil.GetStringConfig("processor.auto_rotate_pcap.output_dir", autoRotatePcapDir),
+			FilePattern:  cmdutil.GetStringConfig("processor.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
 			MaxIdleTime:  idleTimeout,
 			MaxFileSize:  maxSize,
 			MaxDuration:  1 * time.Hour,    // Fixed: 1 hour max per file
@@ -300,12 +301,12 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Build command executor config if commands are configured
 	var commandExecutorConfig *processor.CommandExecutorConfig
-	pcapCmd := getStringConfig("processor.pcap_command", pcapCommand)
-	voipCmd := getStringConfig("processor.voip_command", voipCommand)
-	tunnelingCmd := getStringConfig("processor.tunneling_command", tunnelingCommand)
+	pcapCmd := cmdutil.GetStringConfig("processor.pcap_command", pcapCommand)
+	voipCmd := cmdutil.GetStringConfig("processor.voip_command", voipCommand)
+	tunnelingCmd := cmdutil.GetStringConfig("processor.tunneling_command", tunnelingCommand)
 	if pcapCmd != "" || voipCmd != "" || tunnelingCmd != "" {
 		// Parse command timeout
-		timeoutStr := getStringConfig("processor.command_timeout", commandTimeout)
+		timeoutStr := cmdutil.GetStringConfig("processor.command_timeout", commandTimeout)
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid command-timeout: %w", err)
@@ -316,13 +317,13 @@ func runProcess(cmd *cobra.Command, args []string) error {
 			VoipCommand:      voipCmd,
 			TunnelingCommand: tunnelingCmd,
 			Timeout:          timeout,
-			Concurrency:      getIntConfig("processor.command_concurrency", commandConcurrency),
+			Concurrency:      cmdutil.GetIntConfig("processor.command_concurrency", commandConcurrency),
 		}
 	}
 
 	// Parse tunneling debounce duration
 	var tunnelingDebounceDuration time.Duration
-	tunnelingDebounceStr := getStringConfig("processor.tunneling_debounce", tunnelingDebounce)
+	tunnelingDebounceStr := cmdutil.GetStringConfig("processor.tunneling_debounce", tunnelingDebounce)
 	if tunnelingDebounceStr != "" {
 		var err error
 		tunnelingDebounceDuration, err = time.ParseDuration(tunnelingDebounceStr)
@@ -333,7 +334,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Build auth config if enabled
 	var authConfig *auth.Config
-	if getBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
+	if cmdutil.GetBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
 		// Load API keys from config file
 		var apiKeys []auth.APIKey
 		if err := viper.UnmarshalKey("security.api_keys.keys", &apiKeys); err != nil {
@@ -356,7 +357,7 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Build TLS keylog config if output directory is specified
 	var tlsKeylogConfig *processor.TLSKeylogWriterConfig
-	keylogDir := getStringConfig("processor.tls_keylog.output_dir", tlsKeylogDir)
+	keylogDir := cmdutil.GetStringConfig("processor.tls_keylog.output_dir", tlsKeylogDir)
 	if keylogDir != "" {
 		tlsKeylogConfig = &processor.TLSKeylogWriterConfig{
 			OutputDir:   keylogDir,
@@ -369,35 +370,35 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := processor.Config{
-		ListenAddr:            getStringConfig("processor.listen_addr", listenAddr),
-		ProcessorID:           getStringConfig("processor.processor_id", processorID),
-		UpstreamAddr:          getStringConfig("processor.processor_addr", processorAddr),
-		MaxHunters:            getIntConfig("processor.max_hunters", maxHunters),
-		MaxSubscribers:        getIntConfig("processor.max_subscribers", maxSubscribers),
-		WriteFile:             getStringConfig("processor.write_file", writeFile),
-		DisplayStats:          getBoolConfig("processor.display_stats", displayStats),
+		ListenAddr:            cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
+		ProcessorID:           cmdutil.GetStringConfig("processor.processor_id", processorID),
+		UpstreamAddr:          cmdutil.GetStringConfig("processor.processor_addr", processorAddr),
+		MaxHunters:            cmdutil.GetIntConfig("processor.max_hunters", maxHunters),
+		MaxSubscribers:        cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
+		WriteFile:             cmdutil.GetStringConfig("processor.write_file", writeFile),
+		DisplayStats:          cmdutil.GetBoolConfig("processor.display_stats", displayStats),
 		PcapWriterConfig:      pcapWriterConfig,
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
-		TunnelingThreshold:    getFloat64Config("processor.tunneling_threshold", tunnelingThreshold),
+		TunnelingThreshold:    cmdutil.GetFloat64Config("processor.tunneling_threshold", tunnelingThreshold),
 		TunnelingDebounce:     tunnelingDebounceDuration,
-		EnableDetection:       getBoolConfig("processor.enable_detection", enableDetection),
-		FilterFile:            getStringConfig("processor.filter_file", filterFile),
+		EnableDetection:       cmdutil.GetBoolConfig("processor.enable_detection", enableDetection),
+		FilterFile:            cmdutil.GetStringConfig("processor.filter_file", filterFile),
 		// TLS configuration (enabled by default unless --insecure is set)
-		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   getStringConfig("processor.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    getStringConfig("processor.tls.key_file", tlsKeyFile),
-		TLSCAFile:     getStringConfig("processor.tls.ca_file", tlsCAFile),
-		TLSClientAuth: getBoolConfig("processor.tls.client_auth", tlsClientAuth),
+		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:   cmdutil.GetStringConfig("processor.tls.cert_file", tlsCertFile),
+		TLSKeyFile:    cmdutil.GetStringConfig("processor.tls.key_file", tlsKeyFile),
+		TLSCAFile:     cmdutil.GetStringConfig("processor.tls.ca_file", tlsCAFile),
+		TLSClientAuth: cmdutil.GetBoolConfig("processor.tls.client_auth", tlsClientAuth),
 		// API Key Authentication
 		AuthConfig: authConfig,
 		// Virtual interface configuration
-		VirtualInterface:      getBoolConfig("processor.virtual_interface", virtualInterface),
-		VirtualInterfaceName:  getStringConfig("processor.vif_name", virtualInterfaceName),
-		VirtualInterfaceType:  getStringConfig("processor.vif_type", vifType),
-		VifBufferSize:         getIntConfig("processor.vif_buffer_size", vifBufferSize),
-		VifNetNS:              getStringConfig("processor.vif_netns", vifNetNS),
-		VifDropPrivilegesUser: getStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
+		VirtualInterface:      cmdutil.GetBoolConfig("processor.virtual_interface", virtualInterface),
+		VirtualInterfaceName:  cmdutil.GetStringConfig("processor.vif_name", virtualInterfaceName),
+		VirtualInterfaceType:  cmdutil.GetStringConfig("processor.vif_type", vifType),
+		VifBufferSize:         cmdutil.GetIntConfig("processor.vif_buffer_size", vifBufferSize),
+		VifNetNS:              cmdutil.GetStringConfig("processor.vif_netns", vifNetNS),
+		VifDropPrivilegesUser: cmdutil.GetStringConfig("processor.vif_drop_privileges", vifDropPrivileges),
 		// TLS keylog configuration (for decryption support)
 		TLSKeylogConfig: tlsKeylogConfig,
 	}
@@ -535,79 +536,4 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Processor stopped")
 	return nil
-}
-
-// Helper functions to get config values with fallback to flags
-func getStringConfig(key, flagValue string) string {
-	if flagValue != "" {
-		return flagValue
-	}
-	return viper.GetString(key)
-}
-
-func getIntConfig(key string, flagValue int) int {
-	// Simplified version without circular reference
-	if viper.IsSet(key) {
-		return viper.GetInt(key)
-	}
-	return flagValue
-}
-
-func getBoolConfig(key string, flagValue bool) bool {
-	// Simplified version without circular reference
-	if viper.IsSet(key) {
-		return viper.GetBool(key)
-	}
-	return flagValue
-}
-
-func getStringSliceConfig(key string, flagValue []string) []string {
-	// Check actual config value instead of viper.IsSet() which returns true
-	// for bound flags even when config file doesn't define them
-	if configValue := viper.GetStringSlice(key); len(configValue) > 0 {
-		return configValue
-	}
-	return flagValue
-}
-
-func getFloat64Config(key string, flagValue float64) float64 {
-	if viper.IsSet(key) {
-		return viper.GetFloat64(key)
-	}
-	return flagValue
-}
-
-// parseSizeString parses a size string (e.g., "100M", "1G", "500K") and returns bytes
-func parseSizeString(s string) (int64, error) {
-	if s == "" {
-		return 0, fmt.Errorf("empty size string")
-	}
-
-	// Check last character for suffix
-	lastChar := s[len(s)-1]
-	var multiplier int64 = 1
-
-	switch lastChar {
-	case 'K', 'k':
-		multiplier = 1024
-		s = s[:len(s)-1]
-	case 'M', 'm':
-		multiplier = 1024 * 1024
-		s = s[:len(s)-1]
-	case 'G', 'g':
-		multiplier = 1024 * 1024 * 1024
-		s = s[:len(s)-1]
-	case 'T', 't':
-		multiplier = 1024 * 1024 * 1024 * 1024
-		s = s[:len(s)-1]
-	}
-
-	// Parse number
-	var value int64
-	_, err := fmt.Sscanf(s, "%d", &value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid size value: %w", err)
-	}
-
-	return value * multiplier, nil
 }

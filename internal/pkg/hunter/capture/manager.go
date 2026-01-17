@@ -5,11 +5,11 @@ package capture
 import (
 	"context"
 	"fmt"
-	"net"
 	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -152,23 +152,6 @@ func (m *Manager) Stop() {
 	}
 }
 
-// extractPortFromAddr extracts the port from a "host:port" address string.
-// Returns empty string if the address is invalid or has no port.
-func extractPortFromAddr(addr string) string {
-	if addr == "" {
-		return ""
-	}
-
-	_, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		// If parsing fails, log debug message but continue without port exclusion
-		logger.Debug("Failed to parse processor address for port extraction", "addr", addr, "error", err)
-		return ""
-	}
-
-	return port
-}
-
 // buildProcessorPortExclusionFilter builds a BPF filter to exclude the processor communication port.
 // This prevents the hunter from capturing its own gRPC traffic to the processor.
 // Returns empty string if no processor address is configured.
@@ -177,7 +160,7 @@ func (m *Manager) buildProcessorPortExclusionFilter() string {
 		return ""
 	}
 
-	port := extractPortFromAddr(m.processorAddr)
+	port := bpfutil.ExtractPortFromAddr(m.processorAddr)
 	if port == "" {
 		return ""
 	}

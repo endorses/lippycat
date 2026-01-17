@@ -3,6 +3,7 @@
 package hunt
 
 import (
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -37,8 +38,8 @@ type GPUConfig struct {
 // GetGPUConfig returns GPU configuration from flags/viper.
 func GetGPUConfig() GPUConfig {
 	return GPUConfig{
-		EnableVoIPFilter: getBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
-		GPUBackend:       getStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
-		GPUBatchSize:     getIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
+		EnableVoIPFilter: cmdutil.GetBoolConfig("hunter.voip_filter.enabled", enableVoIPFilter),
+		GPUBackend:       cmdutil.GetStringConfig("hunter.voip_filter.gpu_backend", gpuBackend),
+		GPUBatchSize:     cmdutil.GetIntConfig("hunter.voip_filter.gpu_batch_size", gpuBatchSize),
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/email"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
@@ -118,7 +119,7 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if getBoolConfig("insecure", insecureAllowed) {
+		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
 		logger.Info("Production mode: TLS encryption enforced")
@@ -187,7 +188,7 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 
 	// Build email filter
 	filterBuilder := email.NewFilterBuilder()
-	baseBPFFilter := getStringConfig("hunter.bpf_filter", bpfFilter)
+	baseBPFFilter := cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter)
 	filterConfig := email.FilterConfig{
 		Ports:      ports,
 		Protocol:   protocol,
@@ -202,23 +203,23 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (reuse flags from parent command)
 	config := hunter.Config{
-		ProcessorAddr:  getStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:       getStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:     getStringSliceConfig("hunter.interfaces", interfaces),
+		ProcessorAddr:  cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
+		HunterID:       cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
+		Interfaces:     cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
 		BPFFilter:      effectiveBPFFilter,
-		BufferSize:     getIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:      getIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:   time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BatchQueueSize: getIntConfig("hunter.batch_queue_size", batchQueueSize),
+		BufferSize:     cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
+		BatchSize:      cmdutil.GetIntConfig("hunter.batch_size", batchSize),
+		BatchTimeout:   time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BatchQueueSize: cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:       false, // Not VoIP mode
 		// Email hunter supports BPF, IP, email address, and email subject filters
 		SupportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"},
 		// TLS configuration (enabled by default unless --insecure is set)
-		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
-		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
-		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:   cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
+		TLSKeyFile:    cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
+		TLSCAFile:     cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
+		TLSSkipVerify: cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
 	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled

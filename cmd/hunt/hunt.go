@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -144,7 +145,7 @@ func runHunt(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if getBoolConfig("insecure", insecureAllowed) {
+		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
 		logger.Info("Production mode: TLS encryption enforced")
@@ -152,30 +153,30 @@ func runHunt(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := hunter.Config{
-		ProcessorAddr:    getStringConfig("hunter.processor_addr", processorAddr),
-		HunterID:         getStringConfig("hunter.hunter_id", hunterID),
-		Interfaces:       getStringSliceConfig("hunter.interfaces", interfaces),
-		BPFFilter:        getStringConfig("hunter.bpf_filter", bpfFilter),
-		BufferSize:       getIntConfig("hunter.buffer_size", bufferSize),
-		BatchSize:        getIntConfig("hunter.batch_size", batchSize),
-		BatchTimeout:     time.Duration(getIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BatchQueueSize:   getIntConfig("hunter.batch_queue_size", batchQueueSize),
+		ProcessorAddr:    cmdutil.GetStringConfig("hunter.processor_addr", processorAddr),
+		HunterID:         cmdutil.GetStringConfig("hunter.hunter_id", hunterID),
+		Interfaces:       cmdutil.GetStringSliceConfig("hunter.interfaces", interfaces),
+		BPFFilter:        cmdutil.GetStringConfig("hunter.bpf_filter", bpfFilter),
+		BufferSize:       cmdutil.GetIntConfig("hunter.buffer_size", bufferSize),
+		BatchSize:        cmdutil.GetIntConfig("hunter.batch_size", batchSize),
+		BatchTimeout:     time.Duration(cmdutil.GetIntConfig("hunter.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BatchQueueSize:   cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:         false, // Generic hunter mode (no call buffering)
 		EnableVoIPFilter: GetGPUConfig().EnableVoIPFilter,
 		GPUBackend:       GetGPUConfig().GPUBackend,
 		GPUBatchSize:     GetGPUConfig().GPUBatchSize,
 		// Disk overflow buffer (nuclear-proof resilience)
-		DiskBufferEnabled: getBoolConfig("hunter.disk_buffer.enabled", diskBufferEnabled),
-		DiskBufferDir:     getStringConfig("hunter.disk_buffer.dir", diskBufferDir),
-		DiskBufferMaxSize: uint64(getIntConfig("hunter.disk_buffer.max_mb", diskBufferMaxSize)) * 1024 * 1024, // Convert MB to bytes
+		DiskBufferEnabled: cmdutil.GetBoolConfig("hunter.disk_buffer.enabled", diskBufferEnabled),
+		DiskBufferDir:     cmdutil.GetStringConfig("hunter.disk_buffer.dir", diskBufferDir),
+		DiskBufferMaxSize: uint64(cmdutil.GetIntConfig("hunter.disk_buffer.max_mb", diskBufferMaxSize)) * 1024 * 1024, // Convert MB to bytes
 		// TLS configuration (enabled by default unless --insecure is set)
-		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   getStringConfig("hunter.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    getStringConfig("hunter.tls.key_file", tlsKeyFile),
-		TLSCAFile:     getStringConfig("hunter.tls.ca_file", tlsCAFile),
-		TLSSkipVerify: getBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
+		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:   cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
+		TLSKeyFile:    cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),
+		TLSCAFile:     cmdutil.GetStringConfig("hunter.tls.ca_file", tlsCAFile),
+		TLSSkipVerify: cmdutil.GetBoolConfig("hunter.tls.skip_verify", tlsSkipVerify),
 		// Filter policy
-		NoFilterPolicy: getStringConfig("hunter.no_filter_policy", noFilterPolicy),
+		NoFilterPolicy: cmdutil.GetStringConfig("hunter.no_filter_policy", noFilterPolicy),
 	}
 
 	// Validate TLS configuration: CA file required when TLS is enabled
@@ -260,38 +261,4 @@ func runHunt(cmd *cobra.Command, args []string) error {
 
 	logger.Info("Hunter stopped")
 	return nil
-}
-
-// Helper functions to get config values with fallback to flags
-func getStringConfig(key, flagValue string) string {
-	if flagValue != "" {
-		return flagValue
-	}
-	return viper.GetString(key)
-}
-
-func getStringSliceConfig(key string, flagValue []string) []string {
-	if len(flagValue) > 0 && flagValue[0] != "any" {
-		return flagValue
-	}
-	// Check actual config value instead of viper.IsSet() which returns true
-	// for bound flags even when config file doesn't define them
-	if configValue := viper.GetStringSlice(key); len(configValue) > 0 {
-		return configValue
-	}
-	return flagValue
-}
-
-func getIntConfig(key string, flagValue int) int {
-	if viper.IsSet(key) {
-		return viper.GetInt(key)
-	}
-	return flagValue
-}
-
-func getBoolConfig(key string, flagValue bool) bool {
-	if viper.IsSet(key) {
-		return viper.GetBool(key)
-	}
-	return flagValue
 }

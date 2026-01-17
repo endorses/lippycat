@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,7 +62,7 @@ func TestExtractPortFromAddr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractPortFromAddr(tt.addr)
+			result := bpfutil.ExtractPortFromAddr(tt.addr)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

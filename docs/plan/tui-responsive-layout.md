@@ -48,18 +48,18 @@ Fix resize re-rendering bugs and implement progressive disclosure for TUI compon
   - Force narrower mode if needed regardless of breakpoint
 - [x] Add `shortLabel` field to `Tab` struct
 
-### Phase 4: Footer Component
+### Phase 4: Footer Component ✓
 
 **File:** `internal/pkg/tui/components/footer.go`
 
-- [ ] Add 4th responsive tier for narrow terminals:
+- [x] Add 4th responsive tier for narrow terminals:
   - Show only essential keybindings (2-3 max)
   - Use single-char descriptions or omit descriptions
-- [ ] Implement abbreviated descriptions:
+- [x] Implement abbreviated descriptions:
   - Wide: "filter", "details", "pause"
   - Medium: "flt", "det", "pse"
   - Narrow: keys only, no descriptions
-- [ ] Add responsive method: `getResponsiveKeybinds(width int) []TabKeybind`
+- [x] Add responsive method: `getResponsiveKeybinds(width int) []TabKeybind`
 
 ### Phase 5: Header Component
 

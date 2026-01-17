@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/tui/responsive"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/version"
 )
@@ -15,6 +16,8 @@ import (
 type TabKeybind struct {
 	Key         string // Display key (e.g., "/", "Space", "Enter")
 	Description string // Action description (e.g., "filter", "pause")
+	ShortDesc   string // Abbreviated description (e.g., "flt", "pse")
+	Essential   bool   // If true, show even in narrow mode
 }
 
 // Footer displays the bottom footer bar with keybindings
@@ -114,59 +117,58 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	switch tabIndex {
 	case 0: // Capture tab
 		keybinds := []TabKeybind{
-			{Key: "/", Description: "filter"},
+			{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true},
 		}
 		// Conditional keybinds
 		if f.hasFilter {
-			keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear"})
+			keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false})
 			if f.filterCount > 1 {
-				keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear all"})
+				keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear all", ShortDesc: "all", Essential: false})
 			}
 		}
-		keybinds = append(keybinds, TabKeybind{Key: "d", Description: "details"})
+		keybinds = append(keybinds, TabKeybind{Key: "d", Description: "details", ShortDesc: "det", Essential: true})
 
 		if f.hasProtocolSelection {
-			keybinds = append(keybinds, TabKeybind{Key: "v", Description: "view"})
+			keybinds = append(keybinds, TabKeybind{Key: "v", Description: "view", ShortDesc: "vw", Essential: false})
 		}
 		keybinds = append(keybinds,
-			TabKeybind{Key: "w", Description: "save"},
-			TabKeybind{Key: "x", Description: "flush"},
+			TabKeybind{Key: "w", Description: "save", ShortDesc: "sav", Essential: true},
+			TabKeybind{Key: "x", Description: "flush", ShortDesc: "flsh", Essential: false},
 		)
 		return keybinds
 
 	case 1: // Nodes tab
-		keybinds := []TabKeybind{
-			{Key: "f", Description: "filters"},
-			{Key: "a", Description: "add"},
-			{Key: "d", Description: "delete"},
-			{Key: "s", Description: "select"},
-			{Key: "v", Description: "view"},
+		return []TabKeybind{
+			{Key: "f", Description: "filters", ShortDesc: "flt", Essential: true},
+			{Key: "a", Description: "add", ShortDesc: "add", Essential: true},
+			{Key: "d", Description: "delete", ShortDesc: "del", Essential: false},
+			{Key: "s", Description: "select", ShortDesc: "sel", Essential: true},
+			{Key: "v", Description: "view", ShortDesc: "vw", Essential: false},
 		}
-		return keybinds
 
 	case 2: // Statistics tab
-		keybinds := []TabKeybind{}
-		keybinds = append(keybinds, TabKeybind{Key: "v", Description: "view"})
-		return keybinds
+		return []TabKeybind{
+			{Key: "v", Description: "view", ShortDesc: "vw", Essential: true},
+		}
 
 	case 3: // Settings tab
 		return []TabKeybind{
-			{Key: "Enter", Description: "edit/toggle"},
-			{Key: "Esc", Description: "cancel"},
-			{Key: "←/→", Description: "switch"},
+			{Key: "Enter", Description: "edit/toggle", ShortDesc: "edit", Essential: true},
+			{Key: "Esc", Description: "cancel", ShortDesc: "esc", Essential: true},
+			{Key: "←/→", Description: "switch", ShortDesc: "sw", Essential: false},
 		}
 
 	case 4: // Help tab
 		keybinds := []TabKeybind{
-			{Key: "/", Description: "search"},
+			{Key: "/", Description: "search", ShortDesc: "srch", Essential: true},
 		}
 		if f.hasHelpSearch {
 			keybinds = append(keybinds,
-				TabKeybind{Key: "n/N", Description: "next/prev"},
-				TabKeybind{Key: "c", Description: "clear"},
+				TabKeybind{Key: "n/N", Description: "next/prev", ShortDesc: "n/p", Essential: true},
+				TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false},
 			)
 		}
-		keybinds = append(keybinds, TabKeybind{Key: "1-3", Description: "sections"})
+		keybinds = append(keybinds, TabKeybind{Key: "1-3", Description: "sections", ShortDesc: "sec", Essential: false})
 		return keybinds
 
 	default:
@@ -174,9 +176,49 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	}
 }
 
+// getResponsiveKeybinds returns keybinds filtered and formatted for the current width
+// Wide: all keybinds with full descriptions
+// Medium: all keybinds with abbreviated descriptions
+// Narrow: essential keybinds only, keys only (no descriptions)
+func (f *Footer) getResponsiveKeybinds(tabIndex int) ([]TabKeybind, responsive.WidthClass) {
+	keybinds := f.getTabKeybinds(tabIndex)
+	widthClass := responsive.GetWidthClass(f.width)
+
+	switch widthClass {
+	case responsive.Narrow:
+		// Filter to essential keybinds only
+		essential := make([]TabKeybind, 0, len(keybinds))
+		for _, kb := range keybinds {
+			if kb.Essential {
+				essential = append(essential, kb)
+			}
+		}
+		return essential, widthClass
+	default:
+		// Wide and Medium return all keybinds (description format handled in render)
+		return keybinds, widthClass
+	}
+}
+
+// getGeneralKeybinds returns the general keybinds (Space, p, q) with responsive formatting
+func (f *Footer) getGeneralKeybinds() []TabKeybind {
+	pauseText := "pause"
+	pauseShort := "pse"
+	if f.paused {
+		pauseText = "resume"
+		pauseShort = "rsm"
+	}
+
+	return []TabKeybind{
+		{Key: "Space", Description: pauseText, ShortDesc: pauseShort, Essential: true},
+		{Key: "p", Description: "protocol", ShortDesc: "prt", Essential: true},
+		{Key: "q", Description: "quit", ShortDesc: "qt", Essential: true},
+	}
+}
+
 // renderTabSpecificSection renders the tab-specific keybinds section (left side)
 func (f *Footer) renderTabSpecificSection(tabIndex int) string {
-	keybinds := f.getTabKeybinds(tabIndex)
+	keybinds, widthClass := f.getResponsiveKeybinds(tabIndex)
 	if len(keybinds) == 0 {
 		return "" // No keybinds for this tab
 	}
@@ -195,17 +237,37 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 	separatorStyle := lipgloss.NewStyle().
 		Foreground(f.theme.BorderColor)
 
-	// Build keybinds string with styled components
+	// Build keybinds string with styled components based on width class
 	var parts []string
 	for _, kb := range keybinds {
-		parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(": "+kb.Description))
+		switch widthClass {
+		case responsive.Narrow:
+			// Keys only, no description
+			parts = append(parts, keyStyle.Render(kb.Key))
+		case responsive.Medium:
+			// Use short description
+			desc := kb.ShortDesc
+			if desc == "" {
+				desc = kb.Description // Fall back to full description
+			}
+			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(":"+desc))
+		default: // Wide
+			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(": "+kb.Description))
+		}
 	}
 
-	// Join with separators
+	// Join with separators (narrower separator for narrow width)
 	var content string
+	sep := separatorStyle.Render("  │  ")
+	if widthClass == responsive.Narrow {
+		sep = separatorStyle.Render(" │ ")
+	} else if widthClass == responsive.Medium {
+		sep = separatorStyle.Render(" │ ")
+	}
+
 	for i, part := range parts {
 		if i > 0 {
-			content += separatorStyle.Render("  │  ")
+			content += sep
 		}
 		content += part
 	}
@@ -218,6 +280,9 @@ func (f *Footer) renderTabSpecificSection(tabIndex int) string {
 
 // renderGeneralSection renders the general keybinds section (right side)
 func (f *Footer) renderGeneralSection() string {
+	widthClass := responsive.GetWidthClass(f.width)
+	keybinds := f.getGeneralKeybinds()
+
 	// Styles for general section (violet keys)
 	keyStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6c71c4")). // Solarized Violet
@@ -227,27 +292,39 @@ func (f *Footer) renderGeneralSection() string {
 		Foreground(f.theme.Foreground)
 
 	separatorStyle := lipgloss.NewStyle().
-		Foreground(f.theme.BorderColor).
-		Render("│")
+		Foreground(f.theme.BorderColor)
 
-	// General keybinds (work on all tabs)
-	pauseText := "pause"
-	if f.paused {
-		pauseText = "resume"
-	}
-	bindings := []string{
-		keyStyle.Render("Space") + descStyle.Render(": "+pauseText),
-		keyStyle.Render("p") + descStyle.Render(": protocol"),
-		keyStyle.Render("q") + descStyle.Render(": quit"),
-	}
-
-	// Join bindings with separators
-	var content string
-	for i, binding := range bindings {
-		if i > 0 {
-			content += "  " + separatorStyle + "  "
+	// Build bindings based on width class
+	var parts []string
+	for _, kb := range keybinds {
+		switch widthClass {
+		case responsive.Narrow:
+			// Keys only, no description
+			parts = append(parts, keyStyle.Render(kb.Key))
+		case responsive.Medium:
+			// Use short description
+			desc := kb.ShortDesc
+			if desc == "" {
+				desc = kb.Description
+			}
+			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(":"+desc))
+		default: // Wide
+			parts = append(parts, keyStyle.Render(kb.Key)+descStyle.Render(": "+kb.Description))
 		}
-		content += binding
+	}
+
+	// Join bindings with separators (narrower for narrow/medium)
+	sep := separatorStyle.Render("  │  ")
+	if widthClass == responsive.Narrow || widthClass == responsive.Medium {
+		sep = separatorStyle.Render(" │ ")
+	}
+
+	var content string
+	for i, part := range parts {
+		if i > 0 {
+			content += sep
+		}
+		content += part
 	}
 
 	// Add padding

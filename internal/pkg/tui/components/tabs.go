@@ -6,14 +6,25 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/tui/responsive"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
 // Tab represents a single tab
 type Tab struct {
-	Label string
-	Icon  string
+	Label      string // Full label for wide terminals (e.g., "Live Capture")
+	ShortLabel string // Abbreviated label for medium terminals (e.g., "Capture")
+	Icon       string // Icon/emoji (e.g., "📡")
 }
+
+// tabDisplayMode represents how tabs should be rendered
+type tabDisplayMode int
+
+const (
+	tabDisplayWide   tabDisplayMode = iota // Icon + full label
+	tabDisplayMedium                       // Icon + short label
+	tabDisplayNarrow                       // Icon only
+)
 
 // Tabs displays a tab bar for switching views
 type Tabs struct {
@@ -57,24 +68,17 @@ func (t *Tabs) GetActive() int {
 
 // GetTabAtX returns the tab index at the given X coordinate, or -1 if not on a tab
 func (t *Tabs) GetTabAtX(x int) int {
-	// Calculate the rendered width of each tab
-	// Active tab: padding 0,3,1,3 + borders + icon + " " + label
-	// Inactive tab: padding 0,3 + borders + icon + " " + label
+	// Use the same display mode as rendering for accurate click detection
+	displayMode := t.determineDisplayMode()
 
 	currentX := 0
 
 	for i, tab := range t.tabs {
-		label := tab.Icon + " " + tab.Label
+		content := t.getTabContent(tab, displayMode)
+		contentWidth := lipgloss.Width(content)
 
-		// Calculate tab width including padding and borders
-		var tabWidth int
-		if i == t.active {
-			// Active: left border(1) + left padding(3) + text + right padding(3) + right border(1) = 8 + text
-			tabWidth = 1 + 3 + lipgloss.Width(label) + 3 + 1
-		} else {
-			// Inactive: left border(1) + left padding(3) + text + right padding(3) + right border(1) = 8 + text
-			tabWidth = 1 + 3 + lipgloss.Width(label) + 3 + 1
-		}
+		// Tab width: left border(1) + left padding(3) + content + right padding(3) + right border(1)
+		tabWidth := 1 + 3 + contentWidth + 3 + 1
 
 		// Check if click is within this tab's bounds
 		if x >= currentX && x < currentX+tabWidth {
@@ -104,6 +108,70 @@ func (t *Tabs) UpdateTab(index int, label string, icon string) {
 		t.tabs[index].Label = label
 		t.tabs[index].Icon = icon
 	}
+}
+
+// getTabContent returns the content string for a tab at the given display mode
+func (t *Tabs) getTabContent(tab Tab, mode tabDisplayMode) string {
+	switch mode {
+	case tabDisplayNarrow:
+		return tab.Icon
+	case tabDisplayMedium:
+		label := tab.ShortLabel
+		if label == "" {
+			label = tab.Label // Fall back to full label if no short label
+		}
+		return tab.Icon + " " + label
+	default: // tabDisplayWide
+		return tab.Icon + " " + tab.Label
+	}
+}
+
+// calculateTabsWidth calculates the total width needed for all tabs at a given display mode
+// Active tabs have extra padding (0,3,1,3) vs inactive (0,3), plus 1 char gap between tabs
+func (t *Tabs) calculateTabsWidth(mode tabDisplayMode) int {
+	totalWidth := 0
+	for i, tab := range t.tabs {
+		content := t.getTabContent(tab, mode)
+		contentWidth := lipgloss.Width(content)
+
+		// Tab width: left border(1) + left padding(3) + content + right padding(3) + right border(1)
+		tabWidth := 1 + 3 + contentWidth + 3 + 1
+
+		totalWidth += tabWidth
+
+		// Add gap between tabs (except after last)
+		if i < len(t.tabs)-1 {
+			totalWidth++
+		}
+	}
+	return totalWidth
+}
+
+// determineDisplayMode determines the best display mode based on available width
+// It starts with the mode suggested by breakpoints, then falls back to narrower modes if needed
+func (t *Tabs) determineDisplayMode() tabDisplayMode {
+	// Start with the mode based on terminal width breakpoints
+	widthClass := responsive.GetWidthClass(t.width)
+
+	var startMode tabDisplayMode
+	switch widthClass {
+	case responsive.Wide:
+		startMode = tabDisplayWide
+	case responsive.Medium:
+		startMode = tabDisplayMedium
+	default: // Narrow
+		startMode = tabDisplayNarrow
+	}
+
+	// Check if we need to fall back to a narrower mode due to overflow
+	for mode := startMode; mode <= tabDisplayNarrow; mode++ {
+		if t.calculateTabsWidth(mode) <= t.width {
+			return mode
+		}
+	}
+
+	// Even narrow mode overflows, but we can't go narrower
+	return tabDisplayNarrow
 }
 
 // View renders the tabs
@@ -169,20 +237,36 @@ func (t *Tabs) View() string {
 
 	var tabParts []string
 
+	// Determine the display mode based on width and overflow
+	displayMode := t.determineDisplayMode()
+
 	for i, tab := range t.tabs {
 		var content string
 		if i == t.active {
-			// For active tab: icon (no underline) + space + label (underlined)
+			// For active tab: apply underline styling to label (if visible)
 			labelStyle := lipgloss.NewStyle().
 				Underline(true).
 				Bold(true).
 				Foreground(t.theme.Foreground)
-				// Background()
-			content = tab.Icon + " " + labelStyle.Render(tab.Label)
+
+			switch displayMode {
+			case tabDisplayNarrow:
+				// Icon only - no label to underline
+				content = tab.Icon
+			case tabDisplayMedium:
+				// Use short label if available
+				label := tab.ShortLabel
+				if label == "" {
+					label = tab.Label
+				}
+				content = tab.Icon + " " + labelStyle.Render(label)
+			default: // tabDisplayWide
+				content = tab.Icon + " " + labelStyle.Render(tab.Label)
+			}
 			tabParts = append(tabParts, getActiveStyle(i).Render(content))
 		} else {
-			// For inactive tab: icon + space + label (no underline)
-			content = tab.Icon + " " + tab.Label
+			// For inactive tab: use getTabContent for consistent display
+			content = t.getTabContent(tab, displayMode)
 			tabParts = append(tabParts, getInactiveStyle(i).Render(content))
 		}
 	}

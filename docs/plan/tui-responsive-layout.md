@@ -35,18 +35,18 @@ Fix resize re-rendering bugs and implement progressive disclosure for TUI compon
 | Medium | 80-119 | Abbreviated labels |
 | Wide | >= 120 | Full display |
 
-### Phase 3: Tabs Component
+### Phase 3: Tabs Component ✓
 
 **File:** `internal/pkg/tui/components/tabs.go`
 
-- [ ] Add responsive label rendering:
+- [x] Add responsive label rendering:
   - Wide: Full labels (e.g., "Live Capture", "Statistics")
   - Medium: Short labels (e.g., "Capture", "Stats")
   - Narrow: Icons only (e.g., just the emoji)
-- [ ] Handle overflow when tabs exceed width:
+- [x] Handle overflow when tabs exceed width:
   - Detect total tab width vs available width
   - Force narrower mode if needed regardless of breakpoint
-- [ ] Add `shortLabel` field to `Tab` struct
+- [x] Add `shortLabel` field to `Tab` struct
 
 ### Phase 4: Footer Component
 

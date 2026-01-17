@@ -76,11 +76,11 @@ func NewUIState(theme themes.Theme) *UIState {
 	footer.SetTheme(theme)
 
 	tabs := components.NewTabs([]components.Tab{
-		{Label: "Live Capture", Icon: "📡"},
-		{Label: "Nodes", Icon: "🔗"},
-		{Label: "Statistics", Icon: "📊"},
-		{Label: "Settings", Icon: "🔧"},
-		{Label: "Help", Icon: "?"},
+		{Label: "Live Capture", ShortLabel: "Capture", Icon: "📡"},
+		{Label: "Nodes", ShortLabel: "Nodes", Icon: "🔗"},
+		{Label: "Statistics", ShortLabel: "Stats", Icon: "📊"},
+		{Label: "Settings", ShortLabel: "Settings", Icon: "🔧"},
+		{Label: "Help", ShortLabel: "Help", Icon: "?"},
 	})
 	tabs.SetTheme(theme)
 

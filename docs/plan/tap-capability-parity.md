@@ -79,20 +79,20 @@ Prevent tap from capturing its own gRPC traffic.
 
 ### Phase 3: LI Support (Critical)
 
-- [ ] Create `cmd/tap/flags_li.go` (build tag: `li`)
-- [ ] Create `cmd/tap/flags_li_stub.go` (build tag: `!li`)
-- [ ] Call `RegisterLIFlags(TapCmd)` in init
-- [ ] Call `BindLIViperFlags(TapCmd)` in init
-- [ ] Wire `GetLIConfig()` to `processor.Config{}` in runTap
-- [ ] Remove misleading LI examples from `tap.go` docstring (lines 59-64)
+- [x] Create `cmd/tap/flags_li.go` (build tag: `li`)
+- [x] Create `cmd/tap/flags_li_stub.go` (build tag: `!li`)
+- [x] Call `RegisterLIFlags(TapCmd)` in init
+- [x] Call `BindLIViperFlags(TapCmd)` in init
+- [x] Wire `GetLIConfig()` to `processor.Config{}` in runTap
+- [x] LI examples in `tap.go` docstring are now accurate (no removal needed)
 
 **Viper keys:** `tap.li.enabled`, `tap.li.x1_listen_addr`, etc.
 
 ### Phase 4: TLS Keylog (Medium)
 
-- [ ] Add `--tls-keylog-dir` flag in `cmd/tap/tap.go`
-- [ ] Bind to `tap.tls_keylog.output_dir`
-- [ ] Wire to `processor.Config.TLSKeylogConfig` in runTap
+- [x] Add `--tls-keylog-dir` flag in `cmd/tap/tap.go`
+- [x] Bind to `tap.tls_keylog.output_dir`
+- [x] Wire to `processor.Config.TLSKeylogConfig` in runTap
 
 ### Phase 5: DNS Tunneling (Medium)
 

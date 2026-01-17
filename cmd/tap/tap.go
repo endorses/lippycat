@@ -152,6 +152,9 @@ var (
 
 	// Filter policy
 	noFilterPolicy string
+
+	// TLS keylog (for decryption support)
+	tlsKeylogDir string
 )
 
 func init() {
@@ -231,6 +234,9 @@ func init() {
 	TapCmd.PersistentFlags().StringVar(&tlsCAFile, "tls-ca", "", "Path to CA certificate for client verification")
 	TapCmd.PersistentFlags().BoolVar(&tlsClientAuth, "tls-client-auth", false, "Require client certificate authentication")
 
+	// TLS keylog flags (for decryption support)
+	TapCmd.PersistentFlags().StringVar(&tlsKeylogDir, "tls-keylog-dir", "", "Directory to write TLS session keys (NSS keylog format, Wireshark-compatible)")
+
 	// API Key Authentication (persistent for voip subcommand)
 	TapCmd.PersistentFlags().BoolVar(&apiKeyAuthEnabled, "api-key-auth", false, "Enable API key authentication")
 
@@ -300,6 +306,8 @@ func init() {
 	_ = viper.BindPFlag("tap.tls.ca_file", TapCmd.PersistentFlags().Lookup("tls-ca"))
 	_ = viper.BindPFlag("tap.tls.client_auth", TapCmd.PersistentFlags().Lookup("tls-client-auth"))
 	_ = viper.BindPFlag("tap.insecure", TapCmd.PersistentFlags().Lookup("insecure"))
+	// TLS keylog viper bindings
+	_ = viper.BindPFlag("tap.tls_keylog.output_dir", TapCmd.PersistentFlags().Lookup("tls-keylog-dir"))
 	_ = viper.BindPFlag("security.api_keys.enabled", TapCmd.PersistentFlags().Lookup("api-key-auth"))
 
 	// Filter policy
@@ -310,6 +318,12 @@ func init() {
 	// ============================================================
 	RegisterGPUFlags(TapCmd)
 	BindGPUViperFlags(TapCmd)
+
+	// ============================================================
+	// LI (Lawful Interception) - requires -tags li build
+	// ============================================================
+	RegisterLIFlags(TapCmd)
+	BindLIViperFlags(TapCmd)
 }
 
 func runTap(cmd *cobra.Command, args []string) error {
@@ -366,6 +380,17 @@ func runTap(cmd *cobra.Command, args []string) error {
 			PcapCommand: pcapCmd,
 			Timeout:     timeout,
 			Concurrency: cmdutil.GetIntConfig("tap.command_concurrency", commandConcurrency),
+		}
+	}
+
+	// Build TLS keylog config if output directory is specified
+	var tlsKeylogConfig *processor.TLSKeylogWriterConfig
+	keylogDir := cmdutil.GetStringConfig("tap.tls_keylog.output_dir", tlsKeylogDir)
+	if keylogDir != "" {
+		tlsKeylogConfig = &processor.TLSKeylogWriterConfig{
+			OutputDir:   keylogDir,
+			FilePattern: "session_{timestamp}.keys",
+			MaxEntries:  10000,
 		}
 	}
 
@@ -428,6 +453,26 @@ func runTap(cmd *cobra.Command, args []string) error {
 		VifBufferSize:         cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
 		VifNetNS:              cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
 		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+		// TLS keylog configuration (for decryption support)
+		TLSKeylogConfig: tlsKeylogConfig,
+	}
+
+	// Apply LI configuration (only available in -tags li builds)
+	if liConfig := GetLIConfig(); liConfig != nil {
+		config.LIEnabled = liConfig.Enabled
+		config.LIX1ListenAddr = liConfig.X1ListenAddr
+		config.LIX1TLSCertFile = liConfig.X1TLSCertFile
+		config.LIX1TLSKeyFile = liConfig.X1TLSKeyFile
+		config.LIX1TLSCAFile = liConfig.X1TLSCAFile
+		config.LIADMFEndpoint = liConfig.ADMFEndpoint
+		config.LIADMFTLSCertFile = liConfig.ADMFTLSCertFile
+		config.LIADMFTLSKeyFile = liConfig.ADMFTLSKeyFile
+		config.LIADMFTLSCAFile = liConfig.ADMFTLSCAFile
+		config.LIADMFKeepalive = liConfig.ADMFKeepalive
+		config.LIDeliveryTLSCertFile = liConfig.DeliveryTLSCertFile
+		config.LIDeliveryTLSKeyFile = liConfig.DeliveryTLSKeyFile
+		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
+		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled

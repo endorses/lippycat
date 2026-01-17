@@ -182,6 +182,7 @@ func (n *NodesView) ToggleView() bool {
 
 // SetSize updates the view dimensions
 func (n *NodesView) SetSize(width, height int) {
+	widthChanged := n.width != width
 	n.width = width
 	n.height = height
 
@@ -196,6 +197,10 @@ func (n *NodesView) SetSize(width, height int) {
 	} else {
 		n.viewport.Width = width
 		n.viewport.Height = viewportHeight
+		// Re-render content when width changes (for centering, line wrapping, etc.)
+		if widthChanged {
+			n.updateViewportContent()
+		}
 	}
 }
 

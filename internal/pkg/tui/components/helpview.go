@@ -69,8 +69,9 @@ func (h *HelpView) SetTheme(theme themes.Theme) {
 	}
 }
 
-// SetSize sets the display size
-func (h *HelpView) SetSize(width, height int) {
+// SetSize sets the display size and returns a command if content needs re-rendering
+func (h *HelpView) SetSize(width, height int) tea.Cmd {
+	widthChanged := h.width != width
 	h.width = width
 	h.height = height
 
@@ -78,10 +79,17 @@ func (h *HelpView) SetSize(width, height int) {
 		h.viewport = viewport.New(width, height-1)
 		h.ready = true
 		// Don't load content here - use LoadContentAsync() to avoid blocking
-	} else {
-		h.viewport.Width = width
-		h.viewport.Height = height - 1
+		return nil
 	}
+
+	h.viewport.Width = width
+	h.viewport.Height = height - 1
+
+	// Re-render content when width changes (glamour word-wrap depends on width)
+	if widthChanged && h.contentLoaded {
+		return h.LoadContentAsync()
+	}
+	return nil
 }
 
 // NeedsContentLoad returns true if content needs to be loaded

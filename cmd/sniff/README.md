@@ -478,7 +478,7 @@ sudo lc sniff voip -i eth0 --virtual-interface
 ## Best Practices
 
 1. **Start with profiles** - Use `--tcp-performance-mode` instead of manual tuning
-2. **Monitor memory usage** - Check `lc debug metrics` to verify profile fits your environment
+2. **Monitor memory usage** - Use system tools (`top`, `ps`) to verify profile fits your environment
 3. **Use GPU acceleration** - Significant performance improvement for SIP parsing (default: enabled)
 4. **Enable backpressure** - Prevents memory exhaustion under heavy load
 5. **Test with sample traffic** - Validate configuration with representative PCAP files first
@@ -487,5 +487,5 @@ sudo lc sniff voip -i eth0 --virtual-interface
 
 - [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md) - Detailed performance tuning guide
 - [docs/VIRTUAL_INTERFACE.md](../../docs/VIRTUAL_INTERFACE.md) - Virtual interface guide and tool integration
-- [cmd/debug/CLAUDE.md](../debug/CLAUDE.md) - Debug commands for monitoring TCP health
+- [cmd/show/README.md](../show/README.md) - Show commands for diagnostics
 - [docs/SECURITY.md](../../docs/SECURITY.md) - Security features and configuration

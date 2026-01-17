@@ -311,7 +311,6 @@ security:
 LIPPYCAT_PRODUCTION=true \
   lc process \
   --config /etc/lippycat/processor-config.yaml \
-  --tls \
   --api-key-auth
 ```
 
@@ -321,7 +320,6 @@ LIPPYCAT_PRODUCTION=true \
 # Hunter connects with API key
 lc hunt \
   --processor central-processor:50051 \
-  --tls \
   --tls-ca /etc/lippycat/certs/ca.crt \
   --api-key "${HUNTER_API_KEY}"
 ```
@@ -330,8 +328,7 @@ lc hunt \
 
 ```bash
 # TUI monitors remotely with API key
-lc tui \
-  --remote \
+lc watch remote \
   --nodes-file nodes.yaml \
   --api-key "${TUI_API_KEY}"
 ```

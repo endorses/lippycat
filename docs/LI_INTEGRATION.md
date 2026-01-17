@@ -65,7 +65,7 @@ See [LI_CERTIFICATES.md](LI_CERTIFICATES.md) for detailed certificate setup.
 
 ```bash
 lc process --listen :50051 \
-  --tls --tls-cert=server.crt --tls-key=server.key \
+  --tls-cert=server.crt --tls-key=server.key \
   --li-enabled \
   --li-x1-listen :8443 \
   --li-x1-tls-cert x1-server.crt \

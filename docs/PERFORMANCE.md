@@ -553,11 +553,10 @@ lc sniff voip --tcp-performance-mode minimal
 
 ```bash
 # Monitor memory over time
-watch -n 10 'ps aux | grep lippycat'
+watch -n 10 'ps aux | grep lc'
 
-# Check debug metrics
-lc debug buffers
-lc debug metrics
+# Monitor process stats
+top -p $(pgrep -f 'lc (sniff|hunt|process|tap)')
 ```
 
 ## Monitoring and Diagnostics
@@ -565,38 +564,32 @@ lc debug metrics
 ### Real-Time Monitoring
 
 ```bash
-# Health monitoring
-watch -n 2 'lc debug health'
+# Processor health monitoring (requires connection to processor)
+watch -n 5 'lc show status -P localhost:50051 --insecure'
 
-# Comprehensive summary
-watch -n 5 'lc debug summary'
-
-# Buffer statistics
-watch -n 5 'lc debug buffers'
+# Hunter status
+watch -n 5 'lc show hunters -P localhost:50051 --insecure'
 ```
 
-### Performance Metrics
+### Configuration Verification
 
 ```bash
-# Stream metrics
-lc debug streams
+# Show local TCP SIP configuration
+lc show config
 
-# Alert monitoring
-lc debug alerts --active-only
-
-# Configuration verification
-lc debug config
+# Show processor topology
+lc show topology -P processor:50051 --tls-ca ca.crt
 ```
 
 ### Integration with Monitoring Systems
 
 **Prometheus/Grafana:**
 ```bash
-# Export metrics periodically
-*/5 * * * * lc debug metrics --json > /var/metrics/lippycat.json
+# Export processor status periodically
+*/5 * * * * lc show status -P localhost:50051 --insecure > /var/metrics/lippycat-status.json
 ```
 
-See [cmd/debug/CLAUDE.md](../cmd/debug/CLAUDE.md) for complete debug command reference.
+See [cmd/show/README.md](../cmd/show/README.md) for complete show command reference.
 
 ## Environment-Specific Tuning
 
@@ -739,20 +732,20 @@ lc sniff voip \
 ## Best Practices
 
 1. **Start with profiles** - Use predefined profiles before manual tuning
-2. **Monitor continuously** - Use `lc debug` commands during testing
+2. **Monitor continuously** - Use `lc show` commands during testing
 3. **Test with real traffic** - Validate with representative PCAP files
 4. **Use BPF filters** - Reduce capture scope to what's needed
 5. **Enable GPU acceleration** - Significant performance improvement
 6. **Distribute when possible** - Use hunter/processor for scale
 7. **Match resources to traffic** - Choose profile based on expected load
-8. **Monitor alerts** - Watch for capacity warnings
+8. **Monitor processor status** - Watch for capacity warnings
 9. **Baseline performance** - Establish baseline before production
 10. **Document configuration** - Save working configs for reproducibility
 
 ## See Also
 
 - [cmd/sniff/CLAUDE.md](../cmd/sniff/CLAUDE.md) - Sniff command reference
-- [cmd/debug/CLAUDE.md](../cmd/debug/CLAUDE.md) - Debug commands
+- [cmd/show/README.md](../cmd/show/README.md) - Show commands for diagnostics
 - [docs/tcp-troubleshooting.md](tcp-troubleshooting.md) - TCP troubleshooting
 - [docs/GPU_ACCELERATION.md](GPU_ACCELERATION.md) - GPU acceleration guide
 - [docs/DISTRIBUTED_MODE.md](DISTRIBUTED_MODE.md) - Distributed mode guide

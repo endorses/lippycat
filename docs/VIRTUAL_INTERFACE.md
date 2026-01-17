@@ -69,13 +69,13 @@ snort -i lc0 -c voip-rules.conf &
 
 ```bash
 # Edge site 1: Hunter
-sudo lc hunt --processor central:50051 --interface eth0 --tls --tls-ca ca.crt
+sudo lc hunt --processor central:50051 -i eth0 --tls-ca ca.crt
 
 # Edge site 2: Hunter
-sudo lc hunt --processor central:50051 --interface eth0 --tls --tls-ca ca.crt
+sudo lc hunt --processor central:50051 -i eth0 --tls-ca ca.crt
 
 # Central site: Processor with virtual interface
-lc process --listen 0.0.0.0:50051 --virtual-interface --tls --tls-cert server.crt --tls-key server.key
+lc process --listen 0.0.0.0:50051 --virtual-interface --tls-cert server.crt --tls-key server.key
 
 # Monitor aggregated stream from all edge sites
 wireshark -i lc0

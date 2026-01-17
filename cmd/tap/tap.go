@@ -8,9 +8,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/bpfutil"
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -308,7 +311,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if getBoolConfig("insecure", insecureAllowed) {
+		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
@@ -316,23 +319,23 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 	// Build auto-rotate PCAP config if enabled
 	var autoRotateConfig *processor.AutoRotateConfig
-	if getBoolConfig("tap.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
-		idleTimeoutStr := getStringConfig("tap.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
+	if cmdutil.GetBoolConfig("tap.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
+		idleTimeoutStr := cmdutil.GetStringConfig("tap.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
 		idleTimeout, err := time.ParseDuration(idleTimeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid auto-rotate-idle-timeout: %w", err)
 		}
 
-		maxSizeStr := getStringConfig("tap.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
-		maxSize, err := parseSizeString(maxSizeStr)
+		maxSizeStr := cmdutil.GetStringConfig("tap.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
+		maxSize, err := cmdutil.ParseSizeString(maxSizeStr)
 		if err != nil {
 			return fmt.Errorf("invalid auto-rotate-max-size: %w", err)
 		}
 
 		autoRotateConfig = &processor.AutoRotateConfig{
 			Enabled:      true,
-			OutputDir:    getStringConfig("tap.auto_rotate_pcap.output_dir", autoRotatePcapDir),
-			FilePattern:  getStringConfig("tap.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
+			OutputDir:    cmdutil.GetStringConfig("tap.auto_rotate_pcap.output_dir", autoRotatePcapDir),
+			FilePattern:  cmdutil.GetStringConfig("tap.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
 			MaxIdleTime:  idleTimeout,
 			MaxFileSize:  maxSize,
 			MaxDuration:  1 * time.Hour,
@@ -344,9 +347,9 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 	// Build command executor config if configured
 	var commandExecutorConfig *processor.CommandExecutorConfig
-	pcapCmd := getStringConfig("tap.pcap_command", pcapCommand)
+	pcapCmd := cmdutil.GetStringConfig("tap.pcap_command", pcapCommand)
 	if pcapCmd != "" {
-		timeoutStr := getStringConfig("tap.command_timeout", commandTimeout)
+		timeoutStr := cmdutil.GetStringConfig("tap.command_timeout", commandTimeout)
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid command-timeout: %w", err)
@@ -355,13 +358,13 @@ func runTap(cmd *cobra.Command, args []string) error {
 		commandExecutorConfig = &processor.CommandExecutorConfig{
 			PcapCommand: pcapCmd,
 			Timeout:     timeout,
-			Concurrency: getIntConfig("tap.command_concurrency", commandConcurrency),
+			Concurrency: cmdutil.GetIntConfig("tap.command_concurrency", commandConcurrency),
 		}
 	}
 
 	// Build auth config if enabled
 	var authConfig *auth.Config
-	if getBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
+	if cmdutil.GetBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
 		var apiKeys []auth.APIKey
 		if err := viper.UnmarshalKey("security.api_keys.keys", &apiKeys); err != nil {
 			return fmt.Errorf("failed to load API keys from config: %w", err)
@@ -380,7 +383,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set default tap ID to hostname if not specified
-	effectiveTapID := getStringConfig("tap.tap_id", tapID)
+	effectiveTapID := cmdutil.GetStringConfig("tap.tap_id", tapID)
 	if effectiveTapID == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -391,33 +394,33 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 	// Build processor configuration
 	config := processor.Config{
-		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
+		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          getStringConfig("tap.processor_addr", processorAddr),
+		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:            0, // Not accepting hunters in tap mode
-		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
-		WriteFile:             getStringConfig("tap.write_file", writeFile),
+		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
+		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:          true,
 		PcapWriterConfig:      nil, // Per-call PCAP is VoIP-specific, use tap voip
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
-		EnableDetection:       getBoolConfig("tap.enable_detection", enableDetection),
-		FilterFile:            getStringConfig("tap.filter_file", filterFile),
+		EnableDetection:       cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
+		FilterFile:            cmdutil.GetStringConfig("tap.filter_file", filterFile),
 		// TLS configuration (TLS enabled by default unless --insecure is set)
-		TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:   getStringConfig("tap.tls.cert_file", tlsCertFile),
-		TLSKeyFile:    getStringConfig("tap.tls.key_file", tlsKeyFile),
-		TLSCAFile:     getStringConfig("tap.tls.ca_file", tlsCAFile),
-		TLSClientAuth: getBoolConfig("tap.tls.client_auth", tlsClientAuth),
+		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:   cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
+		TLSKeyFile:    cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),
+		TLSCAFile:     cmdutil.GetStringConfig("tap.tls.ca_file", tlsCAFile),
+		TLSClientAuth: cmdutil.GetBoolConfig("tap.tls.client_auth", tlsClientAuth),
 		// API Key Authentication
 		AuthConfig: authConfig,
 		// Virtual interface configuration
-		VirtualInterface:      getBoolConfig("tap.virtual_interface", virtualInterface),
-		VirtualInterfaceName:  getStringConfig("tap.vif_name", virtualInterfaceName),
-		VirtualInterfaceType:  getStringConfig("tap.vif_type", vifType),
-		VifBufferSize:         getIntConfig("tap.vif_buffer_size", vifBufferSize),
-		VifNetNS:              getStringConfig("tap.vif_netns", vifNetNS),
-		VifDropPrivilegesUser: getStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+		VirtualInterface:      cmdutil.GetBoolConfig("tap.virtual_interface", virtualInterface),
+		VirtualInterfaceName:  cmdutil.GetStringConfig("tap.vif_name", virtualInterfaceName),
+		VirtualInterfaceType:  cmdutil.GetStringConfig("tap.vif_type", vifType),
+		VifBufferSize:         cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
+		VifNetNS:              cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
+		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled
@@ -458,13 +461,24 @@ func runTap(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create processor: %w", err)
 	}
 
+	// Build effective BPF filter with own-traffic exclusion
+	baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
+	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
+	effectiveBPFFilter := combineFiltersWithExclusion(baseBPFFilter, exclusionFilter)
+
+	if exclusionFilter != "" {
+		logger.Info("Own-traffic BPF exclusion applied",
+			"exclusion", exclusionFilter,
+			"effective_filter", effectiveBPFFilter)
+	}
+
 	// Create LocalSource for local packet capture
 	localSourceConfig := source.LocalSourceConfig{
-		Interfaces:   getStringSliceConfig("tap.interfaces", interfaces),
-		BPFFilter:    getStringConfig("tap.bpf_filter", bpfFilter),
-		BatchSize:    getIntConfig("tap.batch_size", batchSize),
-		BatchTimeout: time.Duration(getIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
+		Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
+		BPFFilter:    effectiveBPFFilter,
+		BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
+		BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
 		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
 		ProtocolMode: "generic",
@@ -473,7 +487,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 	// Create LocalTarget for local BPF filtering
 	localTargetConfig := filtering.LocalTargetConfig{
-		BaseBPF: localSourceConfig.BPFFilter,
+		BaseBPF: effectiveBPFFilter,
 	}
 	localTarget := filtering.NewLocalTarget(localTargetConfig)
 
@@ -544,47 +558,6 @@ func runTap(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// Helper functions to get config values with fallback to flags
-func getStringConfig(key, flagValue string) string {
-	if flagValue != "" {
-		return flagValue
-	}
-	return viper.GetString(key)
-}
-
-func getStringSliceConfig(key string, flagValue []string) []string {
-	if len(flagValue) > 0 && flagValue[0] != "any" {
-		return flagValue
-	}
-	// Check actual config value instead of viper.IsSet() which returns true
-	// for bound flags even when config file doesn't define them
-	if configValue := viper.GetStringSlice(key); len(configValue) > 0 {
-		return configValue
-	}
-	return flagValue
-}
-
-func getIntConfig(key string, flagValue int) int {
-	if viper.IsSet(key) {
-		return viper.GetInt(key)
-	}
-	return flagValue
-}
-
-func getBoolConfig(key string, flagValue bool) bool {
-	if viper.IsSet(key) {
-		return viper.GetBool(key)
-	}
-	return flagValue
-}
-
-func getFloat64Config(key string, flagValue float64) float64 {
-	if viper.IsSet(key) {
-		return viper.GetFloat64(key)
-	}
-	return flagValue
-}
-
 // createApplicationFilter creates an ApplicationFilter with the no-filter policy applied.
 // This is a shared helper for all tap subcommands to avoid duplication.
 func createApplicationFilter() (*hunter.ApplicationFilter, error) {
@@ -594,7 +567,7 @@ func createApplicationFilter() (*hunter.ApplicationFilter, error) {
 	}
 
 	// Apply no-filter policy if configured
-	effectiveNoFilterPolicy := getStringConfig("tap.no_filter_policy", noFilterPolicy)
+	effectiveNoFilterPolicy := cmdutil.GetStringConfig("tap.no_filter_policy", noFilterPolicy)
 	if effectiveNoFilterPolicy == "deny" {
 		appFilter.SetNoFilterPolicy(hunter.NoFilterPolicyDeny)
 	}
@@ -602,35 +575,37 @@ func createApplicationFilter() (*hunter.ApplicationFilter, error) {
 	return appFilter, nil
 }
 
-// parseSizeString parses a size string (e.g., "100M", "1G", "500K") and returns bytes
-func parseSizeString(s string) (int64, error) {
-	if s == "" {
-		return 0, fmt.Errorf("empty size string")
+// buildOwnTrafficExclusionFilter builds a BPF exclusion filter to prevent tap from
+// capturing its own gRPC traffic (management interface and upstream forwarding).
+// Returns an empty string if no exclusions are needed.
+func buildOwnTrafficExclusionFilter(effectiveListenAddr, effectiveProcessorAddr string) string {
+	var exclusions []string
+
+	// Exclude management interface port (TUI serving)
+	if port := bpfutil.ExtractPortFromAddr(effectiveListenAddr); port != "" {
+		exclusions = append(exclusions, fmt.Sprintf("not port %s", port))
 	}
 
-	lastChar := s[len(s)-1]
-	var multiplier int64 = 1
-
-	switch lastChar {
-	case 'K', 'k':
-		multiplier = 1024
-		s = s[:len(s)-1]
-	case 'M', 'm':
-		multiplier = 1024 * 1024
-		s = s[:len(s)-1]
-	case 'G', 'g':
-		multiplier = 1024 * 1024 * 1024
-		s = s[:len(s)-1]
-	case 'T', 't':
-		multiplier = 1024 * 1024 * 1024 * 1024
-		s = s[:len(s)-1]
+	// Exclude upstream processor port
+	if port := bpfutil.ExtractPortFromAddr(effectiveProcessorAddr); port != "" {
+		exclusions = append(exclusions, fmt.Sprintf("not port %s", port))
 	}
 
-	var value int64
-	_, err := fmt.Sscanf(s, "%d", &value)
-	if err != nil {
-		return 0, fmt.Errorf("invalid size value: %w", err)
+	if len(exclusions) == 0 {
+		return ""
 	}
 
-	return value * multiplier, nil
+	return strings.Join(exclusions, " and ")
+}
+
+// combineFiltersWithExclusion combines a base BPF filter with own-traffic exclusion.
+// Returns the combined filter, handling empty cases appropriately.
+func combineFiltersWithExclusion(baseBPF, exclusionBPF string) string {
+	if exclusionBPF == "" {
+		return baseBPF
+	}
+	if baseBPF == "" {
+		return exclusionBPF
+	}
+	return fmt.Sprintf("(%s) and (%s)", baseBPF, exclusionBPF)
 }

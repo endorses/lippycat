@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -151,14 +152,14 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if getBoolConfig("insecure", insecureAllowed) {
+		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
 	}
 
 	// Build optimized BPF filter using VoIPFilterBuilder
-	baseBPFFilter := getStringConfig("tap.bpf_filter", bpfFilter)
+	baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
 	effectiveBPFFilter := baseBPFFilter
 
 	// Parse BPF filter optimization flags
@@ -195,12 +196,12 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set TCP performance mode in viper for VoIP processing
-	viper.Set("voip.tcp_performance_mode", getStringConfig("tap.voip.tcp_performance_mode", tcpPerformanceMode))
-	viper.Set("voip.pattern_algorithm", getStringConfig("tap.voip.pattern_algorithm", patternAlgorithm))
-	viper.Set("voip.pattern_buffer_mb", getIntConfig("tap.voip.pattern_buffer_mb", patternBufferMB))
+	viper.Set("voip.tcp_performance_mode", cmdutil.GetStringConfig("tap.voip.tcp_performance_mode", tcpPerformanceMode))
+	viper.Set("voip.pattern_algorithm", cmdutil.GetStringConfig("tap.voip.pattern_algorithm", patternAlgorithm))
+	viper.Set("voip.pattern_buffer_mb", cmdutil.GetIntConfig("tap.voip.pattern_buffer_mb", patternBufferMB))
 
 	// Default to enabling per-call PCAP for VoIP mode if not explicitly set
-	effectivePerCallPcap := getBoolConfig("tap.per_call_pcap.enabled", perCallPcapEnabled)
+	effectivePerCallPcap := cmdutil.GetBoolConfig("tap.per_call_pcap.enabled", perCallPcapEnabled)
 	if !cmd.Flags().Changed("per-call-pcap") && !viper.IsSet("tap.per_call_pcap.enabled") {
 		// VoIP mode should default to per-call PCAP enabled
 		effectivePerCallPcap = true
@@ -211,8 +212,8 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	if effectivePerCallPcap {
 		pcapWriterConfig = &processor.PcapWriterConfig{
 			Enabled:         true,
-			OutputDir:       getStringConfig("tap.per_call_pcap.output_dir", perCallPcapDir),
-			FilePattern:     getStringConfig("tap.per_call_pcap.file_pattern", perCallPcapPattern),
+			OutputDir:       cmdutil.GetStringConfig("tap.per_call_pcap.output_dir", perCallPcapDir),
+			FilePattern:     cmdutil.GetStringConfig("tap.per_call_pcap.file_pattern", perCallPcapPattern),
 			MaxFileSize:     100 * 1024 * 1024,
 			MaxFilesPerCall: 10,
 			BufferSize:      4096,
@@ -222,23 +223,23 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	// Build auto-rotate PCAP config if enabled
 	var autoRotateConfig *processor.AutoRotateConfig
-	if getBoolConfig("tap.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
-		idleTimeoutStr := getStringConfig("tap.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
+	if cmdutil.GetBoolConfig("tap.auto_rotate_pcap.enabled", autoRotatePcapEnabled) {
+		idleTimeoutStr := cmdutil.GetStringConfig("tap.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
 		idleTimeout, err := time.ParseDuration(idleTimeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid auto-rotate-idle-timeout: %w", err)
 		}
 
-		maxSizeStr := getStringConfig("tap.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
-		maxSize, err := parseSizeString(maxSizeStr)
+		maxSizeStr := cmdutil.GetStringConfig("tap.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
+		maxSize, err := cmdutil.ParseSizeString(maxSizeStr)
 		if err != nil {
 			return fmt.Errorf("invalid auto-rotate-max-size: %w", err)
 		}
 
 		autoRotateConfig = &processor.AutoRotateConfig{
 			Enabled:      true,
-			OutputDir:    getStringConfig("tap.auto_rotate_pcap.output_dir", autoRotatePcapDir),
-			FilePattern:  getStringConfig("tap.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
+			OutputDir:    cmdutil.GetStringConfig("tap.auto_rotate_pcap.output_dir", autoRotatePcapDir),
+			FilePattern:  cmdutil.GetStringConfig("tap.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
 			MaxIdleTime:  idleTimeout,
 			MaxFileSize:  maxSize,
 			MaxDuration:  1 * time.Hour,
@@ -250,10 +251,10 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	// Build command executor config if configured
 	var commandExecutorConfig *processor.CommandExecutorConfig
-	pcapCmd := getStringConfig("tap.pcap_command", pcapCommand)
-	voipCmd := getStringConfig("tap.voip_command", voipCommand)
+	pcapCmd := cmdutil.GetStringConfig("tap.pcap_command", pcapCommand)
+	voipCmd := cmdutil.GetStringConfig("tap.voip_command", voipCommand)
 	if pcapCmd != "" || voipCmd != "" {
-		timeoutStr := getStringConfig("tap.command_timeout", commandTimeout)
+		timeoutStr := cmdutil.GetStringConfig("tap.command_timeout", commandTimeout)
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid command-timeout: %w", err)
@@ -263,13 +264,13 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 			PcapCommand: pcapCmd,
 			VoipCommand: voipCmd,
 			Timeout:     timeout,
-			Concurrency: getIntConfig("tap.command_concurrency", commandConcurrency),
+			Concurrency: cmdutil.GetIntConfig("tap.command_concurrency", commandConcurrency),
 		}
 	}
 
 	// Build auth config if enabled
 	var authConfig *auth.Config
-	if getBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
+	if cmdutil.GetBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
 		var apiKeys []auth.APIKey
 		if err := viper.UnmarshalKey("security.api_keys.keys", &apiKeys); err != nil {
 			return fmt.Errorf("failed to load API keys from config: %w", err)
@@ -286,7 +287,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set default tap ID
-	effectiveTapID := getStringConfig("tap.tap_id", tapID)
+	effectiveTapID := cmdutil.GetStringConfig("tap.tap_id", tapID)
 	if effectiveTapID == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -297,30 +298,30 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	// Build processor configuration
 	config := processor.Config{
-		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
+		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          getStringConfig("tap.processor_addr", processorAddr),
+		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:            0,
-		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
-		WriteFile:             getStringConfig("tap.write_file", writeFile),
+		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
+		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:          true,
 		PcapWriterConfig:      pcapWriterConfig,
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
-		EnableDetection:       getBoolConfig("tap.enable_detection", enableDetection),
-		FilterFile:            getStringConfig("tap.filter_file", filterFile),
-		TLSEnabled:            !getBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:           getStringConfig("tap.tls.cert_file", tlsCertFile),
-		TLSKeyFile:            getStringConfig("tap.tls.key_file", tlsKeyFile),
-		TLSCAFile:             getStringConfig("tap.tls.ca_file", tlsCAFile),
-		TLSClientAuth:         getBoolConfig("tap.tls.client_auth", tlsClientAuth),
+		EnableDetection:       cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
+		FilterFile:            cmdutil.GetStringConfig("tap.filter_file", filterFile),
+		TLSEnabled:            !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:           cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
+		TLSKeyFile:            cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),
+		TLSCAFile:             cmdutil.GetStringConfig("tap.tls.ca_file", tlsCAFile),
+		TLSClientAuth:         cmdutil.GetBoolConfig("tap.tls.client_auth", tlsClientAuth),
 		AuthConfig:            authConfig,
-		VirtualInterface:      getBoolConfig("tap.virtual_interface", virtualInterface),
-		VirtualInterfaceName:  getStringConfig("tap.vif_name", virtualInterfaceName),
-		VirtualInterfaceType:  getStringConfig("tap.vif_type", vifType),
-		VifBufferSize:         getIntConfig("tap.vif_buffer_size", vifBufferSize),
-		VifNetNS:              getStringConfig("tap.vif_netns", vifNetNS),
-		VifDropPrivilegesUser: getStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+		VirtualInterface:      cmdutil.GetBoolConfig("tap.virtual_interface", virtualInterface),
+		VirtualInterfaceName:  cmdutil.GetStringConfig("tap.vif_name", virtualInterfaceName),
+		VirtualInterfaceType:  cmdutil.GetStringConfig("tap.vif_type", vifType),
+		VifBufferSize:         cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
+		VifNetNS:              cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
+		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled
@@ -351,13 +352,23 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create processor: %w", err)
 	}
 
+	// Apply own-traffic BPF exclusion
+	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
+	effectiveBPFFilter = combineFiltersWithExclusion(effectiveBPFFilter, exclusionFilter)
+
+	if exclusionFilter != "" {
+		logger.Info("Own-traffic BPF exclusion applied",
+			"exclusion", exclusionFilter,
+			"effective_filter", effectiveBPFFilter)
+	}
+
 	// Create LocalSource for local packet capture with optimized VoIP filter
 	localSourceConfig := source.LocalSourceConfig{
-		Interfaces:   getStringSliceConfig("tap.interfaces", interfaces),
+		Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
 		BPFFilter:    effectiveBPFFilter,
-		BatchSize:    getIntConfig("tap.batch_size", batchSize),
-		BatchTimeout: time.Duration(getIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
+		BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
+		BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
 		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
 		ProtocolMode: "voip",

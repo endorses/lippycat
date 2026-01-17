@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -90,7 +91,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	// Production mode enforcement
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
-		if getBoolConfig("insecure", insecureAllowed) {
+		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
 			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
 		}
 		logger.Info("Production mode: TLS enforcement enabled")
@@ -103,7 +104,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --dns-port value: %w", err)
 	}
 
-	baseBPFFilter := getStringConfig("tap.bpf_filter", bpfFilter)
+	baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
 	filterConfig := dns.FilterConfig{
 		Ports:      ports,
 		UDPOnly:    dnsTapUDPOnly,
@@ -112,8 +113,8 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	effectiveBPFFilter := filterBuilder.Build(filterConfig)
 
 	// Get domain pattern for filtering
-	domainPattern := getStringConfig("tap.dns.domain_pattern", dnsTapDomainPattern)
-	domainsFile := getStringConfig("tap.dns.domains_file", dnsTapDomainsFile)
+	domainPattern := cmdutil.GetStringConfig("tap.dns.domain_pattern", dnsTapDomainPattern)
+	domainsFile := cmdutil.GetStringConfig("tap.dns.domains_file", dnsTapDomainsFile)
 
 	// Store domain pattern in viper for processor-level DNS filtering
 	if domainPattern != "" {
@@ -131,7 +132,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set tunneling detection config for processor-level DNS analysis
-	detectTunneling := getBoolConfig("dns.detect_tunneling", dnsTapDetectTunneling)
+	detectTunneling := cmdutil.GetBoolConfig("dns.detect_tunneling", dnsTapDetectTunneling)
 	viper.Set("dns.detect_tunneling", detectTunneling)
 
 	logger.Info("DNS BPF filter configured",
@@ -144,29 +145,29 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 
 	// Build auto-rotate PCAP config - default for DNS mode
 	var autoRotateConfig *processor.AutoRotateConfig
-	effectiveAutoRotate := getBoolConfig("tap.auto_rotate_pcap.enabled", autoRotatePcapEnabled)
+	effectiveAutoRotate := cmdutil.GetBoolConfig("tap.auto_rotate_pcap.enabled", autoRotatePcapEnabled)
 	if !cmd.Flags().Changed("auto-rotate-pcap") && !viper.IsSet("tap.auto_rotate_pcap.enabled") {
 		// DNS mode should default to auto-rotate PCAP enabled
 		effectiveAutoRotate = true
 	}
 
 	if effectiveAutoRotate {
-		idleTimeoutStr := getStringConfig("tap.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
+		idleTimeoutStr := cmdutil.GetStringConfig("tap.auto_rotate_pcap.idle_timeout", autoRotatePcapIdleTimeout)
 		idleTimeout, err := time.ParseDuration(idleTimeoutStr)
 		if err != nil {
 			idleTimeout = 5 * time.Minute
 		}
 
-		maxSizeStr := getStringConfig("tap.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
-		maxSize, err := parseSizeString(maxSizeStr)
+		maxSizeStr := cmdutil.GetStringConfig("tap.auto_rotate_pcap.max_size", autoRotatePcapMaxSize)
+		maxSize, err := cmdutil.ParseSizeString(maxSizeStr)
 		if err != nil {
 			maxSize = 100 * 1024 * 1024 // 100MB default
 		}
 
 		autoRotateConfig = &processor.AutoRotateConfig{
 			Enabled:      true,
-			OutputDir:    getStringConfig("tap.auto_rotate_pcap.output_dir", autoRotatePcapDir),
-			FilePattern:  getStringConfig("tap.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
+			OutputDir:    cmdutil.GetStringConfig("tap.auto_rotate_pcap.output_dir", autoRotatePcapDir),
+			FilePattern:  cmdutil.GetStringConfig("tap.auto_rotate_pcap.file_pattern", autoRotatePcapPattern),
 			MaxIdleTime:  idleTimeout,
 			MaxFileSize:  maxSize,
 			MaxDuration:  1 * time.Hour,
@@ -178,7 +179,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 
 	// Build auth config if enabled
 	var authConfig *auth.Config
-	if getBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
+	if cmdutil.GetBoolConfig("security.api_keys.enabled", apiKeyAuthEnabled) {
 		var apiKeys []auth.APIKey
 		if err := viper.UnmarshalKey("security.api_keys.keys", &apiKeys); err != nil {
 			return fmt.Errorf("failed to load API keys from config: %w", err)
@@ -195,7 +196,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set default tap ID
-	effectiveTapID := getStringConfig("tap.tap_id", tapID)
+	effectiveTapID := cmdutil.GetStringConfig("tap.tap_id", tapID)
 	if effectiveTapID == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -206,7 +207,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 
 	// Build command executor config if tunneling command is configured
 	var commandExecutorConfig *processor.CommandExecutorConfig
-	tunnelingCmd := getStringConfig("processor.tunneling_command", dnsTunnelingCommand)
+	tunnelingCmd := cmdutil.GetStringConfig("processor.tunneling_command", dnsTunnelingCommand)
 	if tunnelingCmd != "" {
 		commandExecutorConfig = &processor.CommandExecutorConfig{
 			TunnelingCommand: tunnelingCmd,
@@ -217,7 +218,7 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 
 	// Parse tunneling debounce duration
 	var tunnelingDebounceDuration time.Duration
-	tunnelingDebounceStr := getStringConfig("processor.tunneling_debounce", dnsTunnelingDebounce)
+	tunnelingDebounceStr := cmdutil.GetStringConfig("processor.tunneling_debounce", dnsTunnelingDebounce)
 	if tunnelingDebounceStr != "" {
 		var err error
 		tunnelingDebounceDuration, err = time.ParseDuration(tunnelingDebounceStr)
@@ -228,31 +229,31 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 
 	// Build processor configuration
 	config := processor.Config{
-		ListenAddr:            getStringConfig("tap.listen_addr", listenAddr),
+		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          getStringConfig("tap.processor_addr", processorAddr),
+		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
 		MaxHunters:            0,
-		MaxSubscribers:        getIntConfig("tap.max_subscribers", maxSubscribers),
-		WriteFile:             getStringConfig("tap.write_file", writeFile),
+		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
+		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:          true,
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,
-		TunnelingThreshold:    getFloat64Config("processor.tunneling_threshold", dnsTunnelingThreshold),
+		TunnelingThreshold:    cmdutil.GetFloat64Config("processor.tunneling_threshold", dnsTunnelingThreshold),
 		TunnelingDebounce:     tunnelingDebounceDuration,
 		EnableDetection:       true, // Enable protocol detection for DNS
-		FilterFile:            getStringConfig("tap.filter_file", filterFile),
-		TLSEnabled:            !getBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:           getStringConfig("tap.tls.cert_file", tlsCertFile),
-		TLSKeyFile:            getStringConfig("tap.tls.key_file", tlsKeyFile),
-		TLSCAFile:             getStringConfig("tap.tls.ca_file", tlsCAFile),
-		TLSClientAuth:         getBoolConfig("tap.tls.client_auth", tlsClientAuth),
+		FilterFile:            cmdutil.GetStringConfig("tap.filter_file", filterFile),
+		TLSEnabled:            !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:           cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
+		TLSKeyFile:            cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),
+		TLSCAFile:             cmdutil.GetStringConfig("tap.tls.ca_file", tlsCAFile),
+		TLSClientAuth:         cmdutil.GetBoolConfig("tap.tls.client_auth", tlsClientAuth),
 		AuthConfig:            authConfig,
-		VirtualInterface:      getBoolConfig("tap.virtual_interface", virtualInterface),
-		VirtualInterfaceName:  getStringConfig("tap.vif_name", virtualInterfaceName),
-		VirtualInterfaceType:  getStringConfig("tap.vif_type", vifType),
-		VifBufferSize:         getIntConfig("tap.vif_buffer_size", vifBufferSize),
-		VifNetNS:              getStringConfig("tap.vif_netns", vifNetNS),
-		VifDropPrivilegesUser: getStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+		VirtualInterface:      cmdutil.GetBoolConfig("tap.virtual_interface", virtualInterface),
+		VirtualInterfaceName:  cmdutil.GetStringConfig("tap.vif_name", virtualInterfaceName),
+		VirtualInterfaceType:  cmdutil.GetStringConfig("tap.vif_type", vifType),
+		VifBufferSize:         cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
+		VifNetNS:              cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
+		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled
@@ -283,13 +284,23 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create processor: %w", err)
 	}
 
+	// Apply own-traffic BPF exclusion
+	exclusionFilter := buildOwnTrafficExclusionFilter(config.ListenAddr, config.UpstreamAddr)
+	effectiveBPFFilter = combineFiltersWithExclusion(effectiveBPFFilter, exclusionFilter)
+
+	if exclusionFilter != "" {
+		logger.Info("Own-traffic BPF exclusion applied",
+			"exclusion", exclusionFilter,
+			"effective_filter", effectiveBPFFilter)
+	}
+
 	// Create LocalSource for local packet capture with DNS filter
 	localSourceConfig := source.LocalSourceConfig{
-		Interfaces:   getStringSliceConfig("tap.interfaces", interfaces),
+		Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
 		BPFFilter:    effectiveBPFFilter,
-		BatchSize:    getIntConfig("tap.batch_size", batchSize),
-		BatchTimeout: time.Duration(getIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-		BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
+		BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
+		BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+		BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
 		BatchBuffer:  1000,
 		ProcessorID:  effectiveTapID, // For virtual hunter ID generation
 		ProtocolMode: "dns",

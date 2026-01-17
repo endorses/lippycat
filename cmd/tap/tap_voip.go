@@ -385,7 +385,11 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	localTarget.SetBPFUpdater(localSource)
 
 	// Create ApplicationFilter for VoIP/content filtering (same as hunt mode)
-	appFilter, err := createApplicationFilter()
+	// In VoIP mode, enable GPU filtering by default if available
+	gpuConfig := GetGPUConfig()
+	// VoIP mode should always enable VoIP filtering
+	gpuConfig.EnableVoIPFilter = true
+	appFilter, err := createApplicationFilter(gpuConfig)
 	if err != nil {
 		return err
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -303,6 +304,12 @@ func init() {
 
 	// Filter policy
 	_ = viper.BindPFlag("tap.no_filter_policy", TapCmd.PersistentFlags().Lookup("no-filter-policy"))
+
+	// ============================================================
+	// GPU Acceleration (CUDA build only)
+	// ============================================================
+	RegisterGPUFlags(TapCmd)
+	BindGPUViperFlags(TapCmd)
 }
 
 func runTap(cmd *cobra.Command, args []string) error {
@@ -495,7 +502,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 	localTarget.SetBPFUpdater(localSource)
 
 	// Create ApplicationFilter for VoIP/content filtering (same as hunt mode)
-	appFilter, err := createApplicationFilter()
+	appFilter, err := createApplicationFilter(GetGPUConfig())
 	if err != nil {
 		return err
 	}
@@ -560,8 +567,19 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 // createApplicationFilter creates an ApplicationFilter with the no-filter policy applied.
 // This is a shared helper for all tap subcommands to avoid duplication.
-func createApplicationFilter() (*hunter.ApplicationFilter, error) {
-	appFilter, err := hunter.NewApplicationFilter(nil)
+// The gpuConfig parameter controls GPU acceleration for VoIP filtering.
+func createApplicationFilter(gpuConfig GPUConfig) (*hunter.ApplicationFilter, error) {
+	// Convert tap GPUConfig to voip.GPUConfig
+	var voipGPUConfig *voip.GPUConfig
+	if gpuConfig.EnableVoIPFilter {
+		voipGPUConfig = &voip.GPUConfig{
+			Enabled:      true,
+			Backend:      gpuConfig.GPUBackend,
+			MaxBatchSize: gpuConfig.GPUBatchSize,
+		}
+	}
+
+	appFilter, err := hunter.NewApplicationFilter(voipGPUConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create application filter: %w", err)
 	}

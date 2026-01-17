@@ -69,11 +69,11 @@ Prevent tap from capturing its own gRPC traffic.
 
 ### Phase 2: GPU Acceleration (High)
 
-- [ ] Create `cmd/tap/flags_gpu.go` (build tag: `cuda`)
-- [ ] Create `cmd/tap/flags_gpu_stub.go` (build tag: `!cuda`)
-- [ ] Call `RegisterGPUFlags(TapCmd)` in init
-- [ ] Call `BindGPUViperFlags(TapCmd)` in init
-- [ ] Wire `GetGPUConfig()` to capture config in `tap_voip.go`
+- [x] Create `cmd/tap/flags_gpu.go` (build tag: `cuda`)
+- [x] Create `cmd/tap/flags_gpu_stub.go` (build tag: `!cuda`)
+- [x] Call `RegisterGPUFlags(TapCmd)` in init
+- [x] Call `BindGPUViperFlags(TapCmd)` in init
+- [x] Wire `GetGPUConfig()` to capture config in `tap_voip.go`
 
 **Viper keys:** `tap.voip_filter.enabled`, `tap.voip_filter.gpu_backend`, `tap.voip_filter.gpu_batch_size`
 

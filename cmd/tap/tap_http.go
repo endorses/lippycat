@@ -406,7 +406,7 @@ func runHTTPTap(cmd *cobra.Command, args []string) error {
 	localTarget.SetBPFUpdater(localSource)
 
 	// Create ApplicationFilter for content filtering (same as hunt mode)
-	appFilter, err := createApplicationFilter()
+	appFilter, err := createApplicationFilter(GetGPUConfig())
 	if err != nil {
 		return err
 	}

@@ -20,12 +20,12 @@ Fix resize re-rendering bugs and implement progressive disclosure for TUI compon
 - [x] Track previous width to detect when re-render is needed
 - [x] Return a `tea.Cmd` from `SetSize()` to trigger async re-render
 
-### Phase 2: Shared Responsive Utilities
+### Phase 2: Shared Responsive Utilities ✓
 
-- [ ] Create `internal/pkg/tui/responsive/breakpoints.go`:
+- [x] Create `internal/pkg/tui/responsive/breakpoints.go`:
   - Define `WidthClass` type (Narrow, Medium, Wide)
   - `GetWidthClass(width int) WidthClass` function
-  - Shared constants for breakpoint thresholds
+  - Shared constants for breakpoint thresholds (Narrow ≤79, Medium ≤119, Wide ≥120)
 
 ## Breakpoints
 

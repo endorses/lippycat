@@ -94,11 +94,11 @@ lc watch remote
 # With custom nodes file
 lc watch remote --nodes-file /path/to/nodes.yaml
 
-# With TLS encryption
-lc watch remote --tls --tls-ca ca.crt
+# With TLS (CA verification)
+lc watch remote --tls-ca ca.crt
 
 # With mutual TLS (mTLS)
-lc watch remote --tls --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+lc watch remote --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
 
 # Insecure mode for testing
 lc watch remote --insecure
@@ -107,10 +107,10 @@ lc watch remote --insecure
 **Flags:**
 - `-n, --nodes-file` - Path to nodes YAML file (default: `~/.config/lippycat/nodes.yaml` or `./nodes.yaml`)
 - `--insecure` - Allow insecure connections without TLS (testing only)
-- `-T, --tls` - Enable TLS encryption
 - `--tls-ca` - CA certificate for server verification
 - `--tls-cert` - Client certificate for mutual TLS
 - `--tls-key` - Client private key for mutual TLS
+- `--tls-skip-verify` - Skip TLS certificate verification (INSECURE - testing only)
 - `--buffer-size` - Maximum packets in memory (default: 10000)
 
 ## TUI Navigation

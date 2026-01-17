@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/tui/responsive"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
@@ -85,8 +86,78 @@ func (h *Header) SetTLSDecryption(active bool) {
 	h.tlsDecryption = active
 }
 
+// Section width constants
+const (
+	// Minimum widths to prevent text from being too cramped
+	minLeftWidth  = 12
+	minRightWidth = 12
+
+	// Proportional percentages (out of 100)
+	leftPercent  = 20
+	rightPercent = 20
+	// Middle takes remaining space (100 - left - right)
+)
+
+// calculateSectionWidths returns proportional widths for left, middle, and right sections
+// Accounts for padding (2 chars per section = 6 total) and enforces minimum widths
+func (h *Header) calculateSectionWidths() (left, middle, right int) {
+	paddingTotal := 6 // 2 per section (Padding(0, 1) = 1 left + 1 right)
+	available := h.width - paddingTotal
+
+	// Calculate proportional widths
+	left = available * leftPercent / 100
+	right = available * rightPercent / 100
+	middle = available - left - right
+
+	// Enforce minimums
+	if left < minLeftWidth {
+		left = minLeftWidth
+	}
+	if right < minRightWidth {
+		right = minRightWidth
+	}
+
+	// Recalculate middle after enforcing minimums
+	middle = available - left - right
+	if middle < 10 {
+		middle = 10
+	}
+
+	return left, middle, right
+}
+
+// truncateWithEllipsis truncates text to maxWidth, adding ellipsis if needed
+func truncateWithEllipsis(text string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(text) <= maxWidth {
+		return text
+	}
+	if maxWidth <= 3 {
+		return text[:maxWidth]
+	}
+
+	// Truncate and add ellipsis
+	ellipsis := "…"
+	targetWidth := maxWidth - 1 // Reserve space for ellipsis
+
+	// Handle multi-byte characters properly
+	result := ""
+	for _, r := range text {
+		if lipgloss.Width(result+string(r)) > targetWidth {
+			break
+		}
+		result += string(r)
+	}
+
+	return result + ellipsis
+}
+
 // View renders the header
 func (h *Header) View() string {
+	widthClass := responsive.GetWidthClass(h.width)
+
 	// Clean header with visible text
 	leftStyle := lipgloss.NewStyle().
 		Foreground(h.theme.Foreground).
@@ -132,12 +203,8 @@ func (h *Header) View() string {
 
 	statusStyle := leftStyle.Foreground(statusColor)
 
-	// Fixed width sections to prevent shifting
-	// Account for padding (0,1) = 2 chars per section = 6 total
-	// Left: 25 chars (extra space for "TLS" indicator), Middle: flexible, Right: 20 chars
-	leftWidth := 25
-	rightWidth := 20
-	paddingTotal := 6 // 2 per section * 3 sections
+	// Calculate proportional section widths
+	leftWidth, middleWidth, rightWidth := h.calculateSectionWidths()
 
 	// Create fixed-width left section (status)
 	leftContent := statusStyle.Render(statusText)
@@ -147,44 +214,76 @@ func (h *Header) View() string {
 	var middleText string
 	switch h.captureMode {
 	case CaptureModeOffline:
-		middleText = fmt.Sprintf("File: %s", h.iface)
+		if widthClass == responsive.Narrow {
+			// Narrow: just the filename
+			middleText = h.iface
+		} else {
+			middleText = fmt.Sprintf("File: %s", h.iface)
+		}
 	case CaptureModeRemote:
 		if h.nodeCount > 0 || h.processorCount > 0 {
 			// Show processor and hunter counts
 			if h.processorCount > 0 {
-				processorWord := "processor"
-				if h.processorCount > 1 {
-					processorWord = "processors"
+				if widthClass == responsive.Narrow {
+					// Narrow: compact format
+					middleText = fmt.Sprintf("%dP | %dH", h.processorCount, h.nodeCount)
+				} else {
+					processorWord := "processor"
+					if h.processorCount > 1 {
+						processorWord = "processors"
+					}
+					hunterWord := "hunter"
+					if h.nodeCount > 1 {
+						hunterWord = "hunters"
+					}
+					middleText = fmt.Sprintf("Nodes: %d %s | %d %s", h.processorCount, processorWord, h.nodeCount, hunterWord)
 				}
-				hunterWord := "hunter"
-				if h.nodeCount > 1 {
-					hunterWord = "hunters"
-				}
-				middleText = fmt.Sprintf("Nodes: %d %s | %d %s", h.processorCount, processorWord, h.nodeCount, hunterWord)
 			} else {
 				// Direct hunter connections (no processors)
-				hunterWord := "hunter"
-				if h.nodeCount > 1 {
-					hunterWord = "hunters"
+				if widthClass == responsive.Narrow {
+					middleText = fmt.Sprintf("%dH (direct)", h.nodeCount)
+				} else {
+					hunterWord := "hunter"
+					if h.nodeCount > 1 {
+						hunterWord = "hunters"
+					}
+					middleText = fmt.Sprintf("Nodes: %d %s (direct)", h.nodeCount, hunterWord)
 				}
-				middleText = fmt.Sprintf("Nodes: %d %s (direct)", h.nodeCount, hunterWord)
 			}
 		} else if h.iface != "" {
-			middleText = fmt.Sprintf("Nodes: %s", h.iface)
+			if widthClass == responsive.Narrow {
+				middleText = h.iface
+			} else {
+				middleText = fmt.Sprintf("Nodes: %s", h.iface)
+			}
 		} else {
-			middleText = "Nodes: add nodes via Nodes tab"
+			if widthClass == responsive.Narrow {
+				middleText = "add nodes"
+			} else {
+				middleText = "Nodes: add nodes via Nodes tab"
+			}
 		}
 	default:
-		middleText = fmt.Sprintf("Interface: %s", h.iface)
+		if widthClass == responsive.Narrow {
+			// Narrow: just the interface name
+			middleText = h.iface
+		} else {
+			middleText = fmt.Sprintf("Interface: %s", h.iface)
+		}
 	}
-	middleWidth := h.width - leftWidth - rightWidth - paddingTotal
-	if middleWidth < 10 {
-		middleWidth = 10 // Minimum width
-	}
+
+	// Truncate middle text if it exceeds available width
+	middleText = truncateWithEllipsis(middleText, middleWidth)
 	middlePart := middleStyle.Width(middleWidth).Align(lipgloss.Center).Render(middleText)
 
 	// Right part - packet count (fixed width) with color based on buffer utilization
-	rightText := fmt.Sprintf("Packets: %s", formatNumber(h.packets))
+	// Narrow: just the number, Wide: "Packets: 1,234"
+	var rightText string
+	if widthClass == responsive.Narrow {
+		rightText = formatNumber(h.packets)
+	} else {
+		rightText = fmt.Sprintf("Packets: %s", formatNumber(h.packets))
+	}
 
 	// Calculate buffer utilization percentage and select color
 	var packetCountColor lipgloss.Color

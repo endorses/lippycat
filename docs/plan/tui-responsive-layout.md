@@ -61,18 +61,18 @@ Fix resize re-rendering bugs and implement progressive disclosure for TUI compon
   - Narrow: keys only, no descriptions
 - [x] Add responsive method: `getResponsiveKeybinds(width int) []TabKeybind`
 
-### Phase 5: Header Component
+### Phase 5: Header Component ✓
 
 **File:** `internal/pkg/tui/components/header.go`
 
-- [ ] Make section widths proportional:
+- [x] Make section widths proportional:
   - Replace hardcoded `leftWidth := 25`, `rightWidth := 20`
   - Use percentages: left 20%, middle 60%, right 20%
   - Enforce minimum widths (left: 12, right: 12)
-- [ ] Add text truncation for middle section:
+- [x] Add text truncation for middle section:
   - Truncate long interface names with ellipsis
   - At narrow: hide "Interface:" label, show only name
-- [ ] Simplify packet display at narrow widths:
+- [x] Simplify packet display at narrow widths:
   - Wide: "Packets: 1,234"
   - Narrow: "1,234"
 

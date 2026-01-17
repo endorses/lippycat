@@ -28,6 +28,7 @@ type PacketBuffer struct {
 	dropped    int64
 	bufferSize int
 	closed     int32          // atomic flag: 0 = open, 1 = closed
+	sendersMu  sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
 	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
 }
 
@@ -43,19 +44,22 @@ func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 }
 
 func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
-	// Fast path: check if already closed
+	// Fast path: check if already closed (no lock needed for read)
 	if atomic.LoadInt32(&pb.closed) == 1 {
 		return false
 	}
 
-	// Register this sender to prevent channel close race
+	// Use mutex to ensure closed-check-and-add is atomic with respect to Close()
+	// This prevents the race between Add() and Wait() on sendersWg
+	pb.sendersMu.Lock()
+	if atomic.LoadInt32(&pb.closed) == 1 {
+		pb.sendersMu.Unlock()
+		return false
+	}
 	pb.sendersWg.Add(1)
-	defer pb.sendersWg.Done()
+	pb.sendersMu.Unlock()
 
-	// Double-check closed flag after registering (in case Close() was called concurrently)
-	if atomic.LoadInt32(&pb.closed) == 1 {
-		return false
-	}
+	defer pb.sendersWg.Done()
 
 	// Check context cancellation first with higher priority
 	select {
@@ -96,12 +100,16 @@ func (pb *PacketBuffer) Cap() int {
 }
 
 func (pb *PacketBuffer) Close() {
-	// Set closed flag atomically before closing channel
+	// Use mutex to ensure no Send() can Add() after we set closed and before Wait()
+	pb.sendersMu.Lock()
 	if !atomic.CompareAndSwapInt32(&pb.closed, 0, 1) {
 		// Already closed, return early
+		pb.sendersMu.Unlock()
 		return
 	}
+	pb.sendersMu.Unlock()
 
+	// Now no new Add() calls can happen because Send() checks closed under lock
 	pb.cancel()
 
 	// Wait for all active Send() operations to complete

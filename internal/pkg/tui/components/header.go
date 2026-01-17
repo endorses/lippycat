@@ -107,7 +107,6 @@ func (h *Header) calculateSectionWidths() (left, middle, right int) {
 	// Calculate proportional widths
 	left = available * leftPercent / 100
 	right = available * rightPercent / 100
-	middle = available - left - right
 
 	// Enforce minimums
 	if left < minLeftWidth {
@@ -117,7 +116,7 @@ func (h *Header) calculateSectionWidths() (left, middle, right int) {
 		right = minRightWidth
 	}
 
-	// Recalculate middle after enforcing minimums
+	// Calculate middle after enforcing minimums for left and right
 	middle = available - left - right
 	if middle < 10 {
 		middle = 10

@@ -96,11 +96,11 @@ Prevent tap from capturing its own gRPC traffic.
 
 ### Phase 5: DNS Tunneling (Medium)
 
-- [ ] Add flags in `cmd/tap/tap_dns.go`:
+- [x] Add flags in `cmd/tap/tap_dns.go`:
   - `--tunneling-command`
   - `--tunneling-threshold`
   - `--tunneling-debounce`
-- [ ] Wire to `processor.Config` and `CommandExecutorConfig`
+- [x] Wire to `processor.Config` and `CommandExecutorConfig`
 
 ### Phase 6: Production mTLS (Medium)
 

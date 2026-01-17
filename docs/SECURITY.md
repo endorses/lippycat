@@ -118,16 +118,14 @@ chmod 644 *-cert.pem
 
 ```bash
 # Server TLS (one-way authentication)
-lippycat process \
+lc process \
   --listen 0.0.0.0:50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server-cert.pem \
   --tls-key /etc/lippycat/certs/server-key.pem
 
 # Mutual TLS (two-way authentication - recommended)
-lippycat process \
+lc process \
   --listen 0.0.0.0:50051 \
-  --tls \
   --tls-cert /etc/lippycat/certs/server-cert.pem \
   --tls-key /etc/lippycat/certs/server-key.pem \
   --tls-client-auth \
@@ -138,17 +136,15 @@ lippycat process \
 
 ```bash
 # Basic TLS (verify server certificate)
-lippycat hunt \
+lc hunt \
   --processor processor.example.com:50051 \
-  --interface eth0 \
-  --tls \
+  -i eth0 \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
 
 # Mutual TLS (present client certificate)
-lippycat hunt \
+lc hunt \
   --processor processor.example.com:50051 \
-  --interface eth0 \
-  --tls \
+  -i eth0 \
   --tls-cert /etc/lippycat/certs/client-cert.pem \
   --tls-key /etc/lippycat/certs/client-key.pem \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
@@ -165,7 +161,6 @@ For production deployments, use configuration files:
 processor:
   listen_addr: "0.0.0.0:50051"
   tls:
-    enabled: true
     cert_file: "/etc/lippycat/certs/server-cert.pem"
     key_file: "/etc/lippycat/certs/server-key.pem"
     ca_file: "/etc/lippycat/certs/ca-cert.pem"
@@ -175,17 +170,19 @@ processor:
 hunter:
   processor_addr: "processor.example.com:50051"
   tls:
-    enabled: true
     cert_file: "/etc/lippycat/certs/client-cert.pem"
     key_file: "/etc/lippycat/certs/client-key.pem"
     ca_file: "/etc/lippycat/certs/ca-cert.pem"
+
+# To disable TLS (not recommended):
+# insecure: true
 ```
 
 Then start without command-line flags:
 
 ```bash
-lippycat process  # Uses config file
-lippycat hunt --interface eth0  # Uses config file
+lc process  # Uses config file
+lc hunt -i eth0  # Uses config file
 ```
 
 ### TLS Modes
@@ -207,10 +204,10 @@ Hunter                    Processor
 
 ```bash
 # Processor: Present server certificate
-lippycat process --tls --tls-cert server.crt --tls-key server.key
+lc process --tls-cert server.crt --tls-key server.key
 
 # Hunter: Verify server certificate
-lippycat hunt --tls --tls-ca ca.crt --processor host:50051
+lc hunt --tls-ca ca.crt --processor host:50051
 ```
 
 **Security:** Protects against eavesdropping, but hunters are not authenticated.
@@ -234,16 +231,14 @@ Hunter                    Processor
 
 ```bash
 # Processor: Require client certificates
-lippycat process \
-  --tls \
+lc process \
   --tls-cert server.crt \
   --tls-key server.key \
   --tls-client-auth \
   --tls-ca ca.crt
 
 # Hunter: Present client certificate
-lippycat hunt \
-  --tls \
+lc hunt \
   --tls-cert client.crt \
   --tls-key client.key \
   --tls-ca ca.crt \
@@ -258,10 +253,10 @@ lippycat hunt \
 
 ```bash
 # Processor: Explicitly allow insecure
-lippycat process --insecure
+lc process --insecure
 
 # Hunter: Explicitly allow insecure
-lippycat hunt --insecure --processor localhost:50051
+lc hunt --insecure --processor localhost:50051
 ```
 
 **Warning:** Prominent security banners displayed on startup:
@@ -271,7 +266,7 @@ lippycat hunt --insecure --processor localhost:50051
   SECURITY WARNING: TLS ENCRYPTION DISABLED
   Packet data will be transmitted in CLEARTEXT
   This mode should ONLY be used in trusted networks
-  Enable TLS for production: --tls --tls-ca=/path/to/ca.crt
+  TLS is enabled by default - remove --insecure for production
 ═══════════════════════════════════════════════════════════
 ```
 
@@ -343,7 +338,7 @@ For internet-facing deployments:
 
 ```bash
 # No --tls-ca needed for well-known CAs
-lippycat hunt --tls --processor processor.example.com:50051
+lc hunt --processor processor.example.com:50051
 ```
 
 ### Certificate Management
@@ -395,15 +390,15 @@ To revoke compromised certificates:
 
 #### "TLS is disabled but --insecure flag not set"
 
-**Cause:** Attempting to start without TLS or explicit insecure flag
+**Cause:** Attempting to start without TLS certificates or explicit insecure flag
 
 **Solution:**
 ```bash
-# Enable TLS (recommended)
-lippycat hunt --tls --tls-ca ca.crt --processor host:50051
+# Provide CA certificate for server verification (TLS is enabled by default)
+lc hunt --tls-ca ca.crt --processor host:50051
 
 # OR explicitly allow insecure (testing only)
-lippycat hunt --insecure --processor host:50051
+lc hunt --insecure --processor host:50051
 ```
 
 #### "certificate relies on legacy Common Name field, use SANs instead"
@@ -454,7 +449,7 @@ openssl x509 -in server-cert.pem -noout -subject
 openssl x509 -in server-cert.pem -noout -text | grep -A1 "Subject Alternative Name"
 
 # For testing, skip verification (INSECURE)
-lippycat hunt --tls --tls-skip-verify --processor host:50051
+lc hunt --tls-skip-verify --processor host:50051
 ```
 
 #### "No client certificate provided"
@@ -464,8 +459,7 @@ lippycat hunt --tls --tls-skip-verify --processor host:50051
 **Solution:**
 ```bash
 # Provide client certificate
-lippycat hunt \
-  --tls \
+lc hunt \
   --tls-cert client.crt \
   --tls-key client.key \
   --tls-ca ca.crt \
@@ -797,11 +791,11 @@ ls -l /var/lib/lippycat/pcaps/*.pcap
 Monitor security feature usage:
 
 ```bash
-# Check if encryption is working
-lippycat debug metrics | grep -i encrypt
+# Verify Call-ID sanitization in logs
+journalctl -u lippycat -f | grep call_id
 
-# Verify Call-ID sanitization
-tail -f /var/log/lippycat.log | grep call_id
+# Check PCAP file permissions
+ls -l /var/lib/lippycat/pcaps/*.pcap
 ```
 
 ### Compliance
@@ -850,7 +844,7 @@ voip:
 Check logs for security-related messages:
 
 ```bash
-grep -i "encryption\|sanitiz" /var/log/lippycat.log
+journalctl -u lippycat | grep -i "encryption\|sanitiz"
 ```
 
 ## Performance Impact
@@ -888,13 +882,13 @@ grep -i "encryption\|sanitiz" /var/log/lippycat.log
 2. **Test in Development**
    ```bash
    # Test with sample traffic
-   lippycat sniff --config dev-secure.yaml
+   lc sniff --config dev-secure.yaml
    ```
 
 3. **Deploy to Production**
    ```bash
    # Restart with new config
-   systemctl reload lippycat
+   systemctl restart lippycat
    ```
 
 ### Disabling Security Features

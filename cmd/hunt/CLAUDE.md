@@ -19,6 +19,10 @@ Hunters are **edge capture agents** that:
 ├──────────────────────────────────────────────────────────────┤
 │  cmd/hunt/                                                   │
 │    ├── hunt.go          - Base hunter command                │
+│    ├── dns.go           - DNS hunter (query forwarding)      │
+│    ├── email.go         - Email hunter (SMTP/IMAP/POP3)      │
+│    ├── http.go          - HTTP hunter (content filtering)    │
+│    ├── tls.go           - TLS hunter (fingerprint forwarding)│
 │    └── voip.go          - VoIP hunter with call buffering    │
 ├──────────────────────────────────────────────────────────────┤
 │  Uses internal/pkg/                                          │

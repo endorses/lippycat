@@ -28,7 +28,11 @@ When adding features to `hunt` or `process`, the same features must be added to 
 ├─────────────────────────────────────────────────────────────────┤
 │  cmd/tap/                                                       │
 │    ├── tap.go           - Base tap command                      │
-│    └── tap_voip.go      - VoIP-optimized tap                    │
+│    ├── tap_dns.go       - DNS tap (tunneling detection)         │
+│    ├── tap_email.go     - Email tap (SMTP/IMAP/POP3)            │
+│    ├── tap_http.go      - HTTP tap (content filtering)          │
+│    ├── tap_tls.go       - TLS tap (fingerprint analysis)        │
+│    └── tap_voip.go      - VoIP tap (per-call PCAP)              │
 ├─────────────────────────────────────────────────────────────────┤
 │  Uses internal/pkg/                                             │
 │    ├── processor/       - Core processor logic                  │

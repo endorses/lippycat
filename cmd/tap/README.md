@@ -70,6 +70,79 @@ sudo lc tap dns -i eth0 \
   --insecure
 ```
 
+### `lc tap email` - Email Standalone Capture
+
+Email-optimized capture for SMTP, IMAP, and POP3 protocols.
+
+```bash
+# Email capture (all protocols)
+sudo lc tap email --interface eth0 --insecure
+
+# SMTP only
+sudo lc tap email -i eth0 --protocol smtp --insecure
+
+# IMAP only with mailbox filtering
+sudo lc tap email -i eth0 --protocol imap --mailbox "INBOX" --insecure
+
+# Filter by sender/recipient
+sudo lc tap email -i eth0 --sender "*@suspicious.com" --insecure
+sudo lc tap email -i eth0 --recipient "admin@*" --insecure
+
+# Email capture with auto-rotating PCAP
+sudo lc tap email -i eth0 \
+  --auto-rotate-pcap \
+  --auto-rotate-pcap-dir /var/email/pcaps \
+  --insecure
+```
+
+### `lc tap http` - HTTP Standalone Capture
+
+HTTP-optimized capture with content filtering and HTTPS decryption support.
+
+```bash
+# HTTP capture
+sudo lc tap http --interface eth0 --insecure
+
+# Filter by host
+sudo lc tap http -i eth0 --host "*.example.com" --insecure
+
+# Filter by path
+sudo lc tap http -i eth0 --path "/api/*" --insecure
+
+# Filter by method
+sudo lc tap http -i eth0 --method "POST,PUT,DELETE" --insecure
+
+# HTTPS decryption with keylog
+sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log --insecure
+
+# HTTP capture with auto-rotating PCAP
+sudo lc tap http -i eth0 \
+  --auto-rotate-pcap \
+  --auto-rotate-pcap-dir /var/http/pcaps \
+  --insecure
+```
+
+### `lc tap tls` - TLS Standalone Capture
+
+TLS-optimized capture with fingerprint analysis and SNI filtering.
+
+```bash
+# TLS capture
+sudo lc tap tls --interface eth0 --insecure
+
+# Filter by SNI pattern
+sudo lc tap tls -i eth0 --sni "*.example.com" --insecure
+
+# Multiple TLS ports
+sudo lc tap tls -i eth0 --tls-port 443,8443 --insecure
+
+# TLS capture with auto-rotating PCAP
+sudo lc tap tls -i eth0 \
+  --auto-rotate-pcap \
+  --auto-rotate-pcap-dir /var/tls/pcaps \
+  --insecure
+```
+
 ## Command Flags
 
 ### Capture Configuration
@@ -209,6 +282,90 @@ These flags are only available with the `lc tap dns` subcommand:
 - `--tunneling-command` - Command to execute when DNS tunneling is detected
 - `--tunneling-threshold` - DNS tunneling score threshold for triggering command (0.0-1.0, default: `0.7`)
 - `--tunneling-debounce` - Minimum time between alerts per domain (default: `5m`)
+
+### Email-Specific Flags (tap email only)
+
+These flags are only available with the `lc tap email` subcommand:
+
+#### Protocol Selection
+
+- `--protocol` - Email protocol to capture: `smtp`, `imap`, `pop3`, `all` (default: `all`)
+
+#### Port Configuration
+
+- `--smtp-port` - SMTP port(s) to capture, comma-separated (default: `25,587,465`)
+- `--imap-port` - IMAP port(s) to capture, comma-separated (default: `143,993`)
+- `--pop3-port` - POP3 port(s) to capture, comma-separated (default: `110,995`)
+
+#### Email Filtering
+
+- `--address` - Filter by email address pattern (matches sender OR recipient, glob-style)
+- `--sender` - Filter by sender address pattern (MAIL FROM, glob-style)
+- `--recipient` - Filter by recipient address pattern (RCPT TO, glob-style)
+- `--subject` - Filter by subject pattern (glob-style)
+- `--mailbox` - Filter by IMAP mailbox name (glob-style)
+- `--command` - Filter by IMAP/POP3 command (glob-style, e.g., `FETCH`, `RETR`)
+
+#### Email Pattern Files
+
+- `--addresses-file` - Load address patterns from file (one per line)
+- `--senders-file` - Load sender patterns from file (one per line)
+- `--recipients-file` - Load recipient patterns from file (one per line)
+- `--subjects-file` - Load subject patterns from file (one per line)
+- `--keywords-file` - Load keywords from file for subject/body matching (Aho-Corasick)
+
+#### Body Capture
+
+- `--capture-body` - Enable email body content capture (for keyword matching)
+- `--max-body-size` - Maximum body size to capture in bytes (default: 64KB)
+
+### HTTP-Specific Flags (tap http only)
+
+These flags are only available with the `lc tap http` subcommand:
+
+#### Port Configuration
+
+- `--http-port` - HTTP port(s) to capture, comma-separated (default: `80,8080,8000,3000,8888`)
+
+#### HTTP Filtering
+
+- `--host` - Filter by host pattern (glob-style)
+- `--path` - Filter by path/URL pattern (glob-style)
+- `--method` - Filter by HTTP methods (comma-separated, e.g., `GET,POST`)
+- `--status` - Filter by status codes (e.g., `404`, `4xx`, `400-499`)
+- `--user-agent` - Filter by User-Agent pattern (glob-style)
+- `--content-type` - Filter by Content-Type pattern (glob-style)
+
+#### HTTP Pattern Files
+
+- `--hosts-file` - Load host patterns from file (one per line)
+- `--paths-file` - Load path patterns from file (one per line)
+- `--user-agents-file` - Load user-agent patterns from file (one per line)
+- `--content-types-file` - Load content-type patterns from file (one per line)
+- `--keywords-file` - Load keywords from file for body matching (Aho-Corasick)
+
+#### Body Capture
+
+- `--capture-body` - Enable HTTP body content capture (for keyword matching)
+- `--max-body-size` - Maximum body size to capture in bytes (default: 64KB)
+
+#### TLS Decryption (HTTPS)
+
+- `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)
+- `--tls-keylog-pipe` - Path to named pipe for real-time TLS key injection
+
+### TLS-Specific Flags (tap tls only)
+
+These flags are only available with the `lc tap tls` subcommand:
+
+#### Port Configuration
+
+- `--tls-port` - TLS port(s) to capture, comma-separated (default: `443`)
+
+#### SNI Filtering
+
+- `--sni` - Filter by SNI pattern (glob-style, e.g., `*.example.com`)
+- `--sni-file` - Load SNI patterns from file (one per line)
 
 ```bash
 # Alert on DNS tunneling detection
@@ -427,17 +584,19 @@ processor:
 
 ## Comparison with Other Modes
 
-| Feature | `lc sniff` | `lc tap` | `lc tap voip` | `lc tap dns` | `lc hunt` + `lc process` |
-|---------|-----------|----------|---------------|--------------|--------------------------|
-| Local capture | Yes | Yes | Yes | Yes | Hunt only |
-| TUI server | No | Yes | Yes | Yes | Process only |
-| Per-call PCAP | No | No | Yes (default) | No | Process only |
-| Auto-rotate PCAP | No | Yes | Yes | Yes (default) | Process only |
-| DNS tunneling detection | No | No | No | Yes | Process only |
-| Upstream forwarding | No | Yes | Yes | Yes | Process only |
-| Distributed capture | No | No | No | No | Yes |
-| Deployment | Single machine | Single machine | Single machine | Single machine | Multi-machine |
-| Use case | Quick analysis | General capture | VoIP capture | DNS monitoring | Distributed production |
+| Feature | `lc sniff` | `lc tap` | `lc tap voip` | `lc tap dns` | `lc tap email` | `lc tap http` | `lc tap tls` | `lc hunt` + `lc process` |
+|---------|-----------|----------|---------------|--------------|----------------|---------------|--------------|--------------------------|
+| Local capture | Yes | Yes | Yes | Yes | Yes | Yes | Yes | Hunt only |
+| TUI server | No | Yes | Yes | Yes | Yes | Yes | Yes | Process only |
+| Per-call PCAP | No | No | Yes (default) | No | No | No | No | Process only |
+| Auto-rotate PCAP | No | Yes | Yes | Yes (default) | Yes (default) | Yes (default) | Yes (default) | Process only |
+| DNS tunneling detection | No | No | No | Yes | No | No | No | Process only |
+| HTTPS decryption | No | No | No | No | No | Yes | No | Process only |
+| Fingerprinting | No | No | No | No | No | No | JA3/JA3S/JA4 | Process only |
+| Upstream forwarding | No | Yes | Yes | Yes | Yes | Yes | Yes | Process only |
+| Distributed capture | No | No | No | No | No | No | No | Yes |
+| Deployment | Single machine | Single machine | Single machine | Single machine | Single machine | Single machine | Single machine | Multi-machine |
+| Use case | Quick analysis | General capture | VoIP calls | DNS monitoring | Email capture | HTTP/HTTPS | TLS analysis | Distributed production |
 
 ## Performance Tuning
 

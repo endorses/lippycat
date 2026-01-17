@@ -112,7 +112,201 @@ lc sniff -r capture.pcap 2>/dev/null | head -100
 lc sniff -r capture.pcap -f "port 5060" 2>/dev/null | jq -c .
 ```
 
-### VoIP-Specific Capture
+### DNS Capture
+
+```bash
+# Basic DNS capture
+lc sniff dns -i eth0
+
+# Filter by domain pattern
+lc sniff dns -i eth0 --domain "*.example.com"
+
+# UDP-only (ignore TCP DNS)
+lc sniff dns -i eth0 --udp-only
+
+# With tunneling detection
+lc sniff dns -i eth0 --detect-tunneling
+
+# Read from PCAP file
+lc sniff dns -r capture.pcap
+
+# Write to output file
+lc sniff dns -i eth0 -w dns-output.pcap
+```
+
+**DNS-Specific Flags:**
+- `--domain` - Filter by domain pattern (glob-style, e.g., `*.example.com`)
+- `--domains-file` - Load domain patterns from file (one per line, # for comments)
+- `--udp-only` - Capture UDP DNS only (ignore TCP DNS)
+- `--dns-port` - DNS port(s) to capture, comma-separated (default: `53`)
+- `--track-queries` - Enable query/response correlation (default: true)
+- `--detect-tunneling` - Enable DNS tunneling detection (default: true)
+- `-w, --write-file` - Write captured DNS packets to PCAP file
+
+**Features:**
+- Query/response correlation with response time tracking
+- DNS tunneling detection via entropy analysis
+- Domain pattern filtering (glob-style wildcards)
+- Top queried domains statistics
+
+### Email Capture (SMTP/IMAP/POP3)
+
+```bash
+# Basic email capture (all protocols)
+lc sniff email -i eth0
+
+# SMTP only
+lc sniff email -i eth0 --protocol smtp
+
+# IMAP only
+lc sniff email -i eth0 --protocol imap
+
+# POP3 only
+lc sniff email -i eth0 --protocol pop3
+
+# Filter by sender domain
+lc sniff email -i eth0 --sender "*@example.com"
+
+# Filter by recipient
+lc sniff email -i eth0 --recipient "admin@*"
+
+# Filter by subject containing keyword
+lc sniff email -i eth0 --subject "*invoice*"
+
+# Use keyword file for body matching
+lc sniff email -i eth0 --keywords-file keywords.txt --capture-body
+
+# Read from PCAP file
+lc sniff email -r capture.pcap
+```
+
+**Email-Specific Flags:**
+- `--protocol` - Email protocol to capture: `smtp`, `imap`, `pop3`, `all` (default: `all`)
+- `--address` - Filter by email address pattern (matches sender OR recipient, glob-style)
+- `--sender` - Filter by sender address pattern (MAIL FROM, glob-style)
+- `--recipient` - Filter by recipient address pattern (RCPT TO, glob-style)
+- `--subject` - Filter by subject pattern (glob-style)
+- `--mailbox` - Filter by IMAP mailbox name (glob-style)
+- `--command` - Filter by IMAP/POP3 command (glob-style, e.g., `FETCH`, `RETR`)
+- `--keywords-file` - Load keywords from file for subject/body matching (Aho-Corasick)
+- `--capture-body` - Enable email body content capture (for keyword matching)
+- `--max-body-size` - Maximum body size to capture in bytes (default: 64KB)
+- `--smtp-port` - SMTP port(s) to capture, comma-separated (default: `25,587,465`)
+- `--imap-port` - IMAP port(s) to capture, comma-separated (default: `143,993`)
+- `--pop3-port` - POP3 port(s) to capture, comma-separated (default: `110,995`)
+- `--track-sessions` - Enable session tracking (default: true)
+- `-w, --write-file` - Write captured email packets to PCAP file
+
+**Pattern Files:** Load patterns from files (one per line, # for comments):
+- `--addresses-file`, `--senders-file`, `--recipients-file`, `--subjects-file`
+
+**Features:**
+- SMTP command/response parsing
+- IMAP command/response parsing
+- POP3 command/response parsing
+- Session tracking and correlation
+- MAIL FROM/RCPT TO extraction
+- STARTTLS detection
+- Message-ID correlation
+
+### HTTP Capture
+
+```bash
+# Basic HTTP capture
+lc sniff http -i eth0
+
+# Filter by host
+lc sniff http -i eth0 --host "*.example.com"
+
+# Filter by path
+lc sniff http -i eth0 --path "/api/*"
+
+# Filter by method
+lc sniff http -i eth0 --method "POST,PUT,DELETE"
+
+# Filter by status code
+lc sniff http -i eth0 --status "4xx,5xx"
+
+# Use keyword file for body matching
+lc sniff http -i eth0 --keywords-file keywords.txt --capture-body
+
+# HTTPS decryption with keylog file
+lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
+
+# Read from PCAP file with decryption
+lc sniff http -r capture.pcap --tls-keylog keys.log
+```
+
+**HTTP-Specific Flags:**
+- `--host` - Filter by host pattern (glob-style, e.g., `*.example.com`)
+- `--path` - Filter by path/URL pattern (glob-style, e.g., `/api/*`)
+- `--method` - Filter by HTTP methods (comma-separated, e.g., `GET,POST`)
+- `--status` - Filter by status codes (e.g., `404`, `4xx`, `400-499`)
+- `--user-agent` - Filter by User-Agent pattern (glob-style)
+- `--content-type` - Filter by Content-Type pattern (glob-style)
+- `--keywords-file` - Load keywords from file for body matching (Aho-Corasick)
+- `--capture-body` - Enable HTTP body content capture (for keyword matching)
+- `--max-body-size` - Maximum body size to capture in bytes (default: 64KB)
+- `--http-port` - HTTP port(s) to capture, comma-separated (default: `80,8080,8000,3000,8888`)
+- `--track-requests` - Enable request/response tracking (default: true)
+- `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)
+- `--tls-keylog-pipe` - Path to named pipe for real-time TLS key injection
+- `-w, --write-file` - Write captured HTTP packets to PCAP file
+
+**Pattern Files:** Load patterns from files (one per line, # for comments):
+- `--hosts-file`, `--paths-file`, `--user-agents-file`, `--content-types-file`
+
+**Features:**
+- HTTP request/response parsing
+- Request/response correlation with RTT measurement
+- TCP stream reassembly
+- Host/path extraction
+- Content-type detection
+- HTTPS decryption via SSLKEYLOGFILE
+
+### TLS Capture
+
+```bash
+# Basic TLS capture
+lc sniff tls -i eth0
+
+# Filter by SNI pattern
+lc sniff tls -i eth0 --sni "*.example.com"
+
+# Filter by JA3 fingerprint
+lc sniff tls -i eth0 --ja3 "e35d9e5ba41e1b6e51ba3ee8..."
+
+# Multiple TLS ports
+lc sniff tls -i eth0 --tls-port 443,8443
+
+# Read from PCAP file
+lc sniff tls -r capture.pcap
+
+# Write matching packets to file
+lc sniff tls -i eth0 -w tls-output.pcap
+```
+
+**TLS-Specific Flags:**
+- `--sni` - Filter by SNI pattern (glob-style, e.g., `*.example.com`)
+- `--sni-file` - Load SNI patterns from file (one per line)
+- `--ja3` - Filter by JA3 fingerprint hash (32-char hex)
+- `--ja3-file` - Load JA3 hashes from file (one per line)
+- `--ja3s` - Filter by JA3S fingerprint hash (32-char hex)
+- `--ja3s-file` - Load JA3S hashes from file (one per line)
+- `--ja4` - Filter by JA4 fingerprint (e.g., `t13d1516h2_...`)
+- `--ja4-file` - Load JA4 fingerprints from file (one per line)
+- `--tls-port` - TLS port(s) to capture, comma-separated (default: `443`)
+- `--track-connections` - Enable ClientHello/ServerHello correlation (default: true)
+- `-w, --write-file` - Write captured TLS packets to PCAP file
+
+**Features:**
+- JA3/JA3S/JA4 fingerprint calculation
+- SNI (Server Name Indication) extraction
+- ClientHello/ServerHello correlation
+- TLS version and cipher suite analysis
+- Fingerprint-based filtering
+
+### VoIP Capture (SIP/RTP)
 
 ```bash
 lc sniff voip --interface eth0 --sip-user alicent

@@ -14,7 +14,11 @@ The `sniff` command provides **standalone local packet capture** - both general-
 ├─────────────────────────────────────────────────────────────┤
 │  cmd/sniff/                                                 │
 │    ├── sniff.go         - Base sniff command (general)      │
-│    └── voip.go          - VoIP-specific subcommand          │
+│    ├── dns.go           - DNS subcommand (query/response)   │
+│    ├── email.go         - Email subcommand (SMTP/IMAP/POP3) │
+│    ├── http.go          - HTTP subcommand (request/response)│
+│    ├── tls.go           - TLS subcommand (handshake/fingerprint)│
+│    └── voip.go          - VoIP subcommand (SIP/RTP)         │
 ├─────────────────────────────────────────────────────────────┤
 │  Uses internal/pkg/                                         │
 │    ├── capture/         - gopacket integration              │

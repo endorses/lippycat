@@ -71,6 +71,141 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `--tls-skip-verify` - Skip TLS certificate verification (INSECURE - testing only)
 - `--insecure` - Disable TLS encryption (must be explicitly set, NOT RECOMMENDED)
 
+### `lc hunt dns` - DNS Hunter Mode
+
+DNS hunter mode captures and forwards DNS queries/responses to the processor.
+
+**Features:**
+- DNS query/response capture
+- Domain pattern filtering at edge
+- DNS tunneling detection forwarding
+- UDP and TCP DNS support
+
+**DNS-Specific Flags:**
+- `--dns-port` - DNS port(s) to capture, comma-separated (default: `53`)
+- `--udp-only` - Capture UDP DNS only (ignore TCP DNS)
+
+**Example:**
+
+```bash
+# DNS hunter with TLS
+lc hunt dns \
+  --processor processor:50051 \
+  -i eth0 \
+  --tls-ca ca.crt
+
+# DNS hunter UDP-only with custom port
+lc hunt dns \
+  --processor processor:50051 \
+  -i eth0 \
+  --dns-port 53,5353 \
+  --udp-only \
+  --tls-ca ca.crt
+```
+
+### `lc hunt email` - Email Hunter Mode
+
+Email hunter mode captures and forwards email protocol traffic (SMTP, IMAP, POP3) to the processor.
+
+**Features:**
+- SMTP, IMAP, POP3 capture
+- Protocol-specific filtering at edge
+- Session correlation forwarding
+- Address pattern matching
+
+**Email-Specific Flags:**
+- `--protocol` - Email protocol: `smtp`, `imap`, `pop3`, `all` (default: `all`)
+- `--smtp-port` - SMTP port(s) (default: `25,587,465`)
+- `--imap-port` - IMAP port(s) (default: `143,993`)
+- `--pop3-port` - POP3 port(s) (default: `110,995`)
+- `--address` - Filter by email address pattern (glob-style)
+- `--sender` - Filter by sender address pattern (glob-style)
+- `--recipient` - Filter by recipient address pattern (glob-style)
+
+**Example:**
+
+```bash
+# Email hunter capturing all protocols
+lc hunt email \
+  --processor processor:50051 \
+  -i eth0 \
+  --tls-ca ca.crt
+
+# SMTP-only hunter with sender filtering
+lc hunt email \
+  --processor processor:50051 \
+  -i eth0 \
+  --protocol smtp \
+  --sender "*@suspicious.com" \
+  --tls-ca ca.crt
+```
+
+### `lc hunt http` - HTTP Hunter Mode
+
+HTTP hunter mode captures and forwards HTTP traffic to the processor for content analysis.
+
+**Features:**
+- HTTP request/response capture
+- Host/path filtering at edge
+- Method and status filtering
+- TCP stream forwarding
+
+**HTTP-Specific Flags:**
+- `--http-port` - HTTP port(s) (default: `80,8080,8000,3000,8888`)
+- `--host` - Filter by host pattern (glob-style)
+- `--path` - Filter by path pattern (glob-style)
+- `--method` - Filter by HTTP methods (comma-separated)
+
+**Example:**
+
+```bash
+# HTTP hunter
+lc hunt http \
+  --processor processor:50051 \
+  -i eth0 \
+  --tls-ca ca.crt
+
+# HTTP hunter with host filtering
+lc hunt http \
+  --processor processor:50051 \
+  -i eth0 \
+  --host "*.example.com" \
+  --http-port 80,8080 \
+  --tls-ca ca.crt
+```
+
+### `lc hunt tls` - TLS Hunter Mode
+
+TLS hunter mode captures TLS handshakes and forwards them to the processor for fingerprint analysis.
+
+**Features:**
+- TLS ClientHello/ServerHello capture
+- JA3/JA3S/JA4 fingerprint extraction
+- SNI filtering at edge
+- Efficient forwarding to processor
+
+**Note:** SNI and fingerprint filtering is managed by the processor and pushed to hunters.
+
+**TLS-Specific Flags:**
+- `--tls-port` - TLS port(s) to capture, comma-separated (default: `443`)
+
+**Example:**
+
+```bash
+# TLS hunter
+lc hunt tls \
+  --processor processor:50051 \
+  -i eth0 \
+  --tls-ca ca.crt
+
+# TLS hunter with multiple ports
+lc hunt tls \
+  --processor processor:50051 \
+  -i eth0 \
+  --tls-port 443,8443 \
+  --tls-ca ca.crt
+```
+
 ### `lc hunt voip` - VoIP Hunter Mode
 
 VoIP hunter mode provides intelligent call buffering and filtering:

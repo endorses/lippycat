@@ -265,39 +265,39 @@ sudo lc tap voip -i eth0 --sip-user alicent --insecure
 # Tap with TLS for production (TUI clients can connect)
 sudo lc tap voip -i eth0 \
   --per-call-pcap --per-call-pcap-dir /var/voip/calls \
-  --tls --tls-cert server.crt --tls-key server.key
+  --tls-cert server.crt --tls-key server.key
 
 # Tap with upstream forwarding (edge node)
 sudo lc tap voip -i eth0 \
   --processor central-processor:50051 \
-  --tls --tls-ca ca.crt
+  --tls-ca ca.crt
 ```
 
 **Distributed Capture:**
 ```bash
 # Processor (central aggregation)
 lc process --listen 0.0.0.0:50051 \
-  --tls --tls-cert server.crt --tls-key server.key
+  --tls-cert server.crt --tls-key server.key
 
 # Processor with per-call PCAP and command hooks
 lc process --listen 0.0.0.0:50051 \
   --per-call-pcap --per-call-pcap-dir /var/capture/calls \
   --pcap-command 'gzip %pcap%' \
   --voip-command '/opt/scripts/process-call.sh %callid% %dirname%' \
-  --tls --tls-cert server.crt --tls-key server.key
+  --tls-cert server.crt --tls-key server.key
 
 # Hunter (edge capture)
 sudo lc hunt --processor processor:50051 \
-  --interface eth0 \
-  --tls --tls-ca ca.crt
+  -i eth0 \
+  --tls-ca ca.crt
 
 # VoIP hunter with call filtering
-sudo lc hunt voip --processor processor:50051 --tls --tls-ca ca.crt
+sudo lc hunt voip --processor processor:50051 --tls-ca ca.crt
 
 # VoIP hunter with BPF filter optimization (UDP-only)
 sudo lc hunt voip --processor processor:50051 \
   --udp-only --sip-port 5060 \
-  --tls --tls-ca ca.crt
+  --tls-ca ca.crt
 ```
 
 **Interactive Monitoring:**
@@ -314,7 +314,7 @@ lc watch remote --nodes-file nodes.yaml
 
 ### Environment Variables
 
-- `LIPPYCAT_PRODUCTION=true` - Enforces TLS encryption (hunters and processors require `--tls`)
+- `LIPPYCAT_PRODUCTION=true` - Enforces TLS encryption (blocks `--insecure` flag)
 
 ### Configuration
 
@@ -463,7 +463,7 @@ make build-li       # Complete suite with LI
 ```bash
 # Start processor with LI enabled
 lc process --listen :50051 \
-  --tls --tls-cert=server.crt --tls-key=server.key \
+  --tls-cert=server.crt --tls-key=server.key \
   --li-enabled \
   --li-x1-listen :8443 \
   --li-x1-tls-cert x1-server.crt \

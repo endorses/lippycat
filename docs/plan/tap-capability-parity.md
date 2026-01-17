@@ -111,9 +111,9 @@ Prevent tap from capturing its own gRPC traffic.
 
 ### Phase 7: Minor Gaps (Low)
 
-- [ ] Add `--voip-command` to CommandExecutorConfig in `tap.go`
-- [ ] Add `--stats` flag (replace hardcoded `DisplayStats: true`)
-- [ ] Add `--pattern-algorithm`, `--pattern-buffer-mb` to `tap_voip.go`
+- [x] Add `--voip-command` to CommandExecutorConfig in `tap.go`
+- [x] Add `--stats` flag (replace hardcoded `DisplayStats: true`)
+- [x] Add `--pattern-algorithm`, `--pattern-buffer-mb` to `tap_voip.go` (already implemented)
 
 ## File Summary
 

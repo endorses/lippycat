@@ -45,9 +45,6 @@ var (
 	perCallPcapEnabled bool
 	perCallPcapDir     string
 	perCallPcapPattern string
-
-	// VoIP command hook
-	voipCommand string
 )
 
 var voipTapCmd = &cobra.Command{
@@ -112,10 +109,8 @@ func init() {
 	voipTapCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
 	voipTapCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files")
 
-	// VoIP command hook
-	voipTapCmd.Flags().StringVar(&voipCommand, "voip-command", "", "Command to execute when VoIP call completes (supports %callid%, %dirname%, etc.)")
-
 	// Bind VoIP-specific flags to viper
+	// Note: --voip-command is a persistent flag from TapCmd, already bound to tap.voip_command
 	_ = viper.BindPFlag("tap.voip.sip_user", voipTapCmd.Flags().Lookup("sip-user"))
 	// Also bind to old key for backward compatibility with config files
 	_ = viper.BindPFlag("tap.voip.sipuser", voipTapCmd.Flags().Lookup("sip-user"))
@@ -128,7 +123,6 @@ func init() {
 	_ = viper.BindPFlag("tap.per_call_pcap.enabled", voipTapCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", voipTapCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("tap.per_call_pcap.file_pattern", voipTapCmd.Flags().Lookup("per-call-pcap-pattern"))
-	_ = viper.BindPFlag("tap.voip_command", voipTapCmd.Flags().Lookup("voip-command"))
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {

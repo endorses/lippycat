@@ -128,8 +128,12 @@ var (
 
 	// Command hook flags (general)
 	pcapCommand        string
+	voipCommand        string
 	commandTimeout     string
 	commandConcurrency int
+
+	// Statistics display
+	displayStats bool
 
 	// Protocol detection
 	enableDetection bool
@@ -212,6 +216,7 @@ func init() {
 	// Command Hooks Configuration (persistent for voip subcommand)
 	// ============================================================
 	TapCmd.PersistentFlags().StringVar(&pcapCommand, "pcap-command", "", "Command to execute when PCAP file closes (supports %pcap% placeholder)")
+	TapCmd.PersistentFlags().StringVar(&voipCommand, "voip-command", "", "Command to execute when VoIP call completes (supports %callid%, %dirname%, %caller%, %called%, %calldate%)")
 	TapCmd.PersistentFlags().StringVar(&commandTimeout, "command-timeout", "30s", "Timeout for command execution")
 	TapCmd.PersistentFlags().IntVar(&commandConcurrency, "command-concurrency", 10, "Maximum concurrent command executions")
 
@@ -219,6 +224,11 @@ func init() {
 	// Protocol Detection (persistent for voip subcommand)
 	// ============================================================
 	TapCmd.PersistentFlags().BoolVarP(&enableDetection, "detect", "d", true, "Enable protocol detection")
+
+	// ============================================================
+	// Statistics Display (persistent for voip subcommand)
+	// ============================================================
+	TapCmd.PersistentFlags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")
 
 	// ============================================================
 	// Filter Persistence (persistent for voip subcommand)
@@ -291,11 +301,15 @@ func init() {
 
 	// Command hooks
 	_ = viper.BindPFlag("tap.pcap_command", TapCmd.PersistentFlags().Lookup("pcap-command"))
+	_ = viper.BindPFlag("tap.voip_command", TapCmd.PersistentFlags().Lookup("voip-command"))
 	_ = viper.BindPFlag("tap.command_timeout", TapCmd.PersistentFlags().Lookup("command-timeout"))
 	_ = viper.BindPFlag("tap.command_concurrency", TapCmd.PersistentFlags().Lookup("command-concurrency"))
 
 	// Detection
 	_ = viper.BindPFlag("tap.enable_detection", TapCmd.PersistentFlags().Lookup("detect"))
+
+	// Statistics
+	_ = viper.BindPFlag("tap.display_stats", TapCmd.PersistentFlags().Lookup("stats"))
 
 	// Filter persistence
 	_ = viper.BindPFlag("tap.filter_file", TapCmd.PersistentFlags().Lookup("filter-file"))
@@ -372,7 +386,8 @@ func runTap(cmd *cobra.Command, args []string) error {
 	// Build command executor config if configured
 	var commandExecutorConfig *processor.CommandExecutorConfig
 	pcapCmd := cmdutil.GetStringConfig("tap.pcap_command", pcapCommand)
-	if pcapCmd != "" {
+	voipCmd := cmdutil.GetStringConfig("tap.voip_command", voipCommand)
+	if pcapCmd != "" || voipCmd != "" {
 		timeoutStr := cmdutil.GetStringConfig("tap.command_timeout", commandTimeout)
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
@@ -381,6 +396,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 
 		commandExecutorConfig = &processor.CommandExecutorConfig{
 			PcapCommand: pcapCmd,
+			VoipCommand: voipCmd,
 			Timeout:     timeout,
 			Concurrency: cmdutil.GetIntConfig("tap.command_concurrency", commandConcurrency),
 		}
@@ -435,7 +451,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 		MaxHunters:            0, // Not accepting hunters in tap mode
 		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
-		DisplayStats:          true,
+		DisplayStats:          cmdutil.GetBoolConfig("tap.display_stats", displayStats),
 		PcapWriterConfig:      nil, // Per-call PCAP is VoIP-specific, use tap voip
 		AutoRotateConfig:      autoRotateConfig,
 		CommandExecutorConfig: commandExecutorConfig,

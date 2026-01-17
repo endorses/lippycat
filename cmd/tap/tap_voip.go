@@ -149,13 +149,16 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Production mode enforcement
+	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
 		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
-		logger.Info("Production mode: TLS enforcement enabled")
+		if !tlsClientAuth && !viper.GetBool("tap.tls.client_auth") {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)")
+		}
+		logger.Info("Production mode: TLS mutual authentication enforced")
 	}
 
 	// Build optimized BPF filter using VoIPFilterBuilder
@@ -322,6 +325,24 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		VifBufferSize:         cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
 		VifNetNS:              cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
 		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+	}
+
+	// Apply LI configuration (only available in -tags li builds)
+	if liConfig := GetLIConfig(); liConfig != nil {
+		config.LIEnabled = liConfig.Enabled
+		config.LIX1ListenAddr = liConfig.X1ListenAddr
+		config.LIX1TLSCertFile = liConfig.X1TLSCertFile
+		config.LIX1TLSKeyFile = liConfig.X1TLSKeyFile
+		config.LIX1TLSCAFile = liConfig.X1TLSCAFile
+		config.LIADMFEndpoint = liConfig.ADMFEndpoint
+		config.LIADMFTLSCertFile = liConfig.ADMFTLSCertFile
+		config.LIADMFTLSKeyFile = liConfig.ADMFTLSKeyFile
+		config.LIADMFTLSCAFile = liConfig.ADMFTLSCAFile
+		config.LIADMFKeepalive = liConfig.ADMFKeepalive
+		config.LIDeliveryTLSCertFile = liConfig.DeliveryTLSCertFile
+		config.LIDeliveryTLSKeyFile = liConfig.DeliveryTLSKeyFile
+		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
+		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled

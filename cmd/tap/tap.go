@@ -329,13 +329,16 @@ func init() {
 func runTap(cmd *cobra.Command, args []string) error {
 	logger.Info("Starting lippycat in standalone tap mode")
 
-	// Production mode enforcement
+	// Production mode enforcement: check early before creating config
 	productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 	if productionMode {
 		if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
-			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS (do not use --insecure)")
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
 		}
-		logger.Info("Production mode: TLS enforcement enabled")
+		if !tlsClientAuth && !viper.GetBool("tap.tls.client_auth") {
+			return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)")
+		}
+		logger.Info("Production mode: TLS mutual authentication enforced")
 	}
 
 	// Build auto-rotate PCAP config if enabled

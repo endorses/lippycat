@@ -104,17 +104,10 @@ Prevent tap from capturing its own gRPC traffic.
 
 ### Phase 6: Production mTLS (Medium)
 
-- [ ] Add mTLS enforcement in `cmd/tap/tap.go`:
-  ```go
-  if productionMode {
-      if getBoolConfig("insecure", insecureAllowed) {
-          return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires TLS")
-      }
-      if !tlsClientAuth {
-          return fmt.Errorf("LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)")
-      }
-  }
-  ```
+- [x] Add mTLS enforcement in `cmd/tap/tap.go` and all subcommands:
+  - tap.go, tap_dns.go, tap_email.go, tap_http.go, tap_tls.go, tap_voip.go
+  - Checks `!tlsClientAuth && !viper.GetBool("tap.tls.client_auth")`
+  - Error: `LIPPYCAT_PRODUCTION=true requires mutual TLS (--tls-client-auth)`
 
 ### Phase 7: Minor Gaps (Low)
 

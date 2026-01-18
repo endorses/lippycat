@@ -33,12 +33,15 @@ type HunterJSON struct {
 
 // HunterStatsJSON represents hunter statistics in JSON-friendly format
 type HunterStatsJSON struct {
-	PacketsCaptured  uint64 `json:"packets_captured"`
-	PacketsMatched   uint64 `json:"packets_matched"`
-	PacketsForwarded uint64 `json:"packets_forwarded"`
-	PacketsDropped   uint64 `json:"packets_dropped"`
-	BufferBytes      uint64 `json:"buffer_bytes"`
-	ActiveFilters    uint32 `json:"active_filters"`
+	PacketsCaptured  uint64  `json:"packets_captured"`
+	PacketsMatched   uint64  `json:"packets_matched"`
+	PacketsForwarded uint64  `json:"packets_forwarded"`
+	PacketsDropped   uint64  `json:"packets_dropped"`
+	BufferBytes      uint64  `json:"buffer_bytes"`
+	ActiveFilters    uint32  `json:"active_filters"`
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryRSSBytes   uint64  `json:"memory_rss_bytes"`
+	MemoryLimitBytes uint64  `json:"memory_limit_bytes,omitempty"`
 }
 
 // CapabilitiesJSON represents hunter capabilities in JSON-friendly format
@@ -127,6 +130,9 @@ func hunterToJSON(h *management.ConnectedHunter) *HunterJSON {
 			PacketsDropped:   h.Stats.PacketsDropped,
 			BufferBytes:      h.Stats.BufferBytes,
 			ActiveFilters:    h.Stats.ActiveFilters,
+			CPUPercent:       float64(h.Stats.CpuPercent),
+			MemoryRSSBytes:   h.Stats.MemoryRssBytes,
+			MemoryLimitBytes: h.Stats.MemoryLimitBytes,
 		}
 	}
 

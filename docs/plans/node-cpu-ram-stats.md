@@ -290,16 +290,16 @@ Add CPU/RAM lines to hunter box rendering.
 
 ### Phase 7: Tests
 
-- [ ] `internal/pkg/sysmetrics/collector_test.go` - Unit tests for metrics collection
+- [x] `internal/pkg/sysmetrics/collector_test.go` - Unit tests for metrics collection
 - [ ] `internal/pkg/hunter/stats/collector_test.go` - Update for new fields
 - [ ] `internal/pkg/tui/components/nodesview/rendering_test.go` - Update column width tests
 
 ## Files Modified
 
-- [ ] `api/proto/management.proto` - Add CPU/RAM fields to HunterStats
-- [ ] `internal/pkg/sysmetrics/collector.go` - New: interface and types
-- [ ] `internal/pkg/sysmetrics/collector_linux.go` - New: Linux implementation
-- [ ] `internal/pkg/sysmetrics/collector_other.go` - New: Non-Linux fallback
+- [x] `api/proto/management.proto` - Add CPU/RAM fields to HunterStats
+- [x] `internal/pkg/sysmetrics/collector.go` - New: interface and types
+- [x] `internal/pkg/sysmetrics/collector_linux.go` - New: Linux implementation
+- [x] `internal/pkg/sysmetrics/collector_other.go` - New: Non-Linux fallback
 - [ ] `internal/pkg/hunter/stats/collector.go` - Add CPU/RAM fields
 - [ ] `internal/pkg/hunter/hunter.go` - Start metrics collection
 - [ ] `internal/pkg/processor/source/source.go` - Add CPU/RAM to Stats

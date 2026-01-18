@@ -958,8 +958,14 @@ type HunterStats struct {
 	BufferBytes uint64 `protobuf:"varint,5,opt,name=buffer_bytes,json=bufferBytes,proto3" json:"buffer_bytes,omitempty"`
 	// Active filters count
 	ActiveFilters uint32 `protobuf:"varint,6,opt,name=active_filters,json=activeFilters,proto3" json:"active_filters,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// CPU usage percentage (0-100, -1 if unavailable)
+	CpuPercent float32 `protobuf:"fixed32,7,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	// Process resident set size in bytes
+	MemoryRssBytes uint64 `protobuf:"varint,8,opt,name=memory_rss_bytes,json=memoryRssBytes,proto3" json:"memory_rss_bytes,omitempty"`
+	// Memory limit in bytes (from cgroup, 0 if unavailable)
+	MemoryLimitBytes uint64 `protobuf:"varint,9,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *HunterStats) Reset() {
@@ -1030,6 +1036,27 @@ func (x *HunterStats) GetBufferBytes() uint64 {
 func (x *HunterStats) GetActiveFilters() uint32 {
 	if x != nil {
 		return x.ActiveFilters
+	}
+	return 0
+}
+
+func (x *HunterStats) GetCpuPercent() float32 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *HunterStats) GetMemoryRssBytes() uint64 {
+	if x != nil {
+		return x.MemoryRssBytes
+	}
+	return 0
+}
+
+func (x *HunterStats) GetMemoryLimitBytes() uint64 {
+	if x != nil {
+		return x.MemoryLimitBytes
 	}
 	return 0
 }
@@ -3083,14 +3110,18 @@ const file_management_proto_rawDesc = "" +
 	"\thunter_id\x18\x01 \x01(\tR\bhunterId\x12!\n" +
 	"\ftimestamp_ns\x18\x02 \x01(\x03R\vtimestampNs\x129\n" +
 	"\x06status\x18\x03 \x01(\x0e2!.lippycat.management.HunterStatusR\x06status\x126\n" +
-	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\x81\x02\n" +
+	"\x05stats\x18\x04 \x01(\v2 .lippycat.management.HunterStatsR\x05stats\"\xfa\x02\n" +
 	"\vHunterStats\x12)\n" +
 	"\x10packets_captured\x18\x01 \x01(\x04R\x0fpacketsCaptured\x12'\n" +
 	"\x0fpackets_matched\x18\x02 \x01(\x04R\x0epacketsMatched\x12+\n" +
 	"\x11packets_forwarded\x18\x03 \x01(\x04R\x10packetsForwarded\x12'\n" +
 	"\x0fpackets_dropped\x18\x04 \x01(\x04R\x0epacketsDropped\x12!\n" +
 	"\fbuffer_bytes\x18\x05 \x01(\x04R\vbufferBytes\x12%\n" +
-	"\x0eactive_filters\x18\x06 \x01(\rR\ractiveFilters\"\xc5\x01\n" +
+	"\x0eactive_filters\x18\x06 \x01(\rR\ractiveFilters\x12\x1f\n" +
+	"\vcpu_percent\x18\a \x01(\x02R\n" +
+	"cpuPercent\x12(\n" +
+	"\x10memory_rss_bytes\x18\b \x01(\x04R\x0ememoryRssBytes\x12,\n" +
+	"\x12memory_limit_bytes\x18\t \x01(\x04R\x10memoryLimitBytes\"\xc5\x01\n" +
 	"\x12ProcessorHeartbeat\x12!\n" +
 	"\ftimestamp_ns\x18\x01 \x01(\x03R\vtimestampNs\x12<\n" +
 	"\x06status\x18\x02 \x01(\x0e2$.lippycat.management.ProcessorStatusR\x06status\x12+\n" +

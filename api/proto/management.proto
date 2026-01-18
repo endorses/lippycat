@@ -209,6 +209,15 @@ message HunterStats {
 
     // Active filters count
     uint32 active_filters = 6;
+
+    // CPU usage percentage (0-100, -1 if unavailable)
+    float cpu_percent = 7;
+
+    // Process resident set size in bytes
+    uint64 memory_rss_bytes = 8;
+
+    // Memory limit in bytes (from cgroup, 0 if unavailable)
+    uint64 memory_limit_bytes = 9;
 }
 
 // ProcessorHeartbeat response from processor

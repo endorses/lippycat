@@ -298,6 +298,9 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 				PacketsCaptured:  h.PacketsCaptured,  // From hunter's heartbeat stats
 				PacketsForwarded: h.PacketsForwarded, // From hunter's heartbeat stats
 				ActiveFilters:    h.ActiveFilters,
+				CpuPercent:       h.CpuPercent,
+				MemoryRssBytes:   h.MemoryRssBytes,
+				MemoryLimitBytes: h.MemoryLimitBytes,
 			},
 			Interfaces:   h.Interfaces,
 			Capabilities: h.Capabilities, // Hunter capabilities (filter types, etc.)

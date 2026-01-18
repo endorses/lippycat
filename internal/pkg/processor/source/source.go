@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/google/gopacket"
 )
 
@@ -95,6 +96,15 @@ type Stats struct {
 
 	// StartTime is when the source started
 	StartTime time.Time
+
+	// CPUPercent is the CPU usage percentage (0-100, -1 if unavailable)
+	CPUPercent float64
+
+	// MemoryRSSBytes is the process resident set size in bytes
+	MemoryRSSBytes uint64
+
+	// MemoryLimitBytes is the memory limit from cgroup (0 if unavailable)
+	MemoryLimitBytes uint64
 }
 
 // AtomicStats provides thread-safe access to Stats fields.
@@ -107,13 +117,20 @@ type AtomicStats struct {
 	batchesReceived  atomic.Uint64
 	lastPacketTime   atomic.Int64 // Unix nano
 	startTime        int64        // Set once at start
+
+	// System metrics (CPU/RAM)
+	cpuPercent       atomic.Value // stores float64
+	memoryRSSBytes   atomic.Uint64
+	memoryLimitBytes atomic.Uint64
 }
 
 // NewAtomicStats creates a new AtomicStats initialized with the current time.
 func NewAtomicStats() *AtomicStats {
-	return &AtomicStats{
+	s := &AtomicStats{
 		startTime: time.Now().UnixNano(),
 	}
+	s.cpuPercent.Store(float64(-1)) // Initialize as unavailable
+	return s
 }
 
 // AddCaptured records a packet received from the capture buffer (before filtering).
@@ -138,6 +155,13 @@ func (s *AtomicStats) AddBatch() {
 	s.batchesReceived.Add(1)
 }
 
+// SetSystemMetrics updates the system metrics (CPU/RAM) from sysmetrics collector.
+func (s *AtomicStats) SetSystemMetrics(m sysmetrics.Metrics) {
+	s.cpuPercent.Store(m.CPUPercent)
+	s.memoryRSSBytes.Store(m.MemoryRSSBytes)
+	s.memoryLimitBytes.Store(m.MemoryLimitBytes)
+}
+
 // Snapshot returns a copy of the current stats.
 func (s *AtomicStats) Snapshot() Stats {
 	lastNano := s.lastPacketTime.Load()
@@ -154,6 +178,9 @@ func (s *AtomicStats) Snapshot() Stats {
 		BatchesReceived:  s.batchesReceived.Load(),
 		LastPacketTime:   lastTime,
 		StartTime:        time.Unix(0, s.startTime),
+		CPUPercent:       s.cpuPercent.Load().(float64),
+		MemoryRSSBytes:   s.memoryRSSBytes.Load(),
+		MemoryLimitBytes: s.memoryLimitBytes.Load(),
 	}
 }
 

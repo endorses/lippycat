@@ -302,9 +302,9 @@ Add CPU/RAM lines to hunter box rendering.
 - [x] `internal/pkg/sysmetrics/collector_other.go` - New: Non-Linux fallback
 - [x] `internal/pkg/hunter/stats/collector.go` - Add CPU/RAM fields
 - [x] `internal/pkg/hunter/hunter.go` - Start metrics collection
-- [ ] `internal/pkg/processor/source/source.go` - Add CPU/RAM to Stats
-- [ ] `internal/pkg/processor/source/local.go` - Integrate sysmetrics
-- [ ] `internal/pkg/processor/processor.go` - Update SynthesizeVirtualHunter()
+- [x] `internal/pkg/processor/source/source.go` - Add CPU/RAM to Stats
+- [x] `internal/pkg/processor/source/local.go` - Integrate sysmetrics
+- [x] `internal/pkg/processor/processor.go` - Update SynthesizeVirtualHunter()
 - [ ] `internal/pkg/types/packet.go` - Add CPU/RAM to HunterInfo
 - [ ] `internal/pkg/remotecapture/client_conversion.go` - Map new fields
 - [ ] `internal/pkg/statusclient/json.go` - Add CPU/RAM to JSON output

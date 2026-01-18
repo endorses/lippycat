@@ -22,6 +22,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 )
@@ -204,6 +205,27 @@ func (s *LocalSource) Start(ctx context.Context) error {
 		"interfaces", s.config.Interfaces,
 		"bpf_filter", s.config.BPFFilter,
 		"batch_size", s.config.BatchSize)
+
+	// Start system metrics collection (CPU/RAM monitoring)
+	metricsCollector := sysmetrics.New()
+	metricsCollector.Start(s.ctx)
+
+	// Periodically update stats with system metrics
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer metricsCollector.Stop()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				s.stats.SetSystemMetrics(metricsCollector.Get())
+			}
+		}
+	}()
 
 	// Create packet buffer
 	s.packetBuffer = capture.NewPacketBuffer(s.ctx, s.config.BufferSize)

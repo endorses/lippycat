@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -152,6 +153,27 @@ func (h *Hunter) Start(ctx context.Context) error {
 	defer h.cancel()
 
 	logger.Info("Hunter starting", "hunter_id", h.config.HunterID)
+
+	// Start system metrics collection (CPU/RAM monitoring)
+	metricsCollector := sysmetrics.New()
+	metricsCollector.Start(h.ctx)
+	defer metricsCollector.Stop()
+
+	// Periodically update stats with system metrics
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-ticker.C:
+				h.statsCollector.SetSystemMetrics(metricsCollector.Get())
+			}
+		}
+	}()
 
 	// Initialize application filter (always, for hot-reload support)
 	// GPU acceleration is only enabled if VoIP filtering is enabled

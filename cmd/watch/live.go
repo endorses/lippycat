@@ -109,7 +109,7 @@ func init() {
 	liveCmd.Flags().IntVar(&liveGPUBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
 
 	_ = viper.BindPFlag("promiscuous", liveCmd.Flags().Lookup("promiscuous"))
-	_ = viper.BindPFlag("watch.gpu.enabled", liveCmd.Flags().Lookup("enable-gpu"))
-	_ = viper.BindPFlag("watch.gpu.backend", liveCmd.Flags().Lookup("gpu-backend"))
-	_ = viper.BindPFlag("watch.gpu.batch_size", liveCmd.Flags().Lookup("gpu-batch-size"))
+	_ = viper.BindPFlag("tui.gpu.enabled", liveCmd.Flags().Lookup("enable-gpu"))
+	_ = viper.BindPFlag("tui.gpu.backend", liveCmd.Flags().Lookup("gpu-backend"))
+	_ = viper.BindPFlag("tui.gpu.batch_size", liveCmd.Flags().Lookup("gpu-batch-size"))
 }

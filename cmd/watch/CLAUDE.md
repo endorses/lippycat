@@ -72,18 +72,18 @@ func runMode(cmd *cobra.Command, args []string) {
 ## Viper Configuration
 
 ```yaml
-watch:
+tui:
   buffer_size: 10000
   gpu:
     enabled: false
     backend: "auto"
     batch_size: 100
-tui:
   tls:
     enabled: false
     ca_file: ""
     cert_file: ""
     key_file: ""
+  tls_keylog: ""  # SSLKEYLOGFILE path for TLS decryption
 ```
 
 Flags use `Changed()` check to allow config file defaults:

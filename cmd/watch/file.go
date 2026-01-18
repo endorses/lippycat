@@ -130,5 +130,5 @@ func init() {
 	_ = fileCmd.MarkFlagRequired("read-file")
 
 	// Bind to viper for config file support
-	_ = viper.BindPFlag("watch.file.tls_keylog", fileCmd.Flags().Lookup("tls-keylog"))
+	_ = viper.BindPFlag("tui.tls_keylog", fileCmd.Flags().Lookup("tls-keylog"))
 }

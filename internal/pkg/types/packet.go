@@ -275,6 +275,9 @@ type HunterInfo struct {
 	PacketsForwarded uint64
 	PacketsDropped   uint64
 	ActiveFilters    uint32
+	CPUPercent       float64 // CPU usage percentage (0-100, -1 if unavailable)
+	MemoryRSSBytes   uint64  // Process resident set size in bytes
+	MemoryLimitBytes uint64  // Memory limit from cgroup (0 if unavailable)
 	Interfaces       []string
 	ProcessorAddr    string                         // Address of processor this hunter belongs to
 	Capabilities     *management.HunterCapabilities // Hunter capabilities (filter types, etc.)

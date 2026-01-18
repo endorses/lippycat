@@ -258,6 +258,9 @@ func (c *Client) convertToHunterInfo(h *management.ConnectedHunter) types.Hunter
 		PacketsForwarded: h.Stats.PacketsForwarded,
 		PacketsDropped:   h.Stats.PacketsDropped,
 		ActiveFilters:    h.Stats.ActiveFilters,
+		CPUPercent:       float64(h.Stats.CpuPercent),
+		MemoryRSSBytes:   h.Stats.MemoryRssBytes,
+		MemoryLimitBytes: h.Stats.MemoryLimitBytes,
 		Interfaces:       h.Interfaces,
 		ProcessorAddr:    c.addr,         // Address of processor this client is connected to
 		Capabilities:     h.Capabilities, // Hunter capabilities (filter types, etc.)

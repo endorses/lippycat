@@ -305,8 +305,8 @@ Add CPU/RAM lines to hunter box rendering.
 - [x] `internal/pkg/processor/source/source.go` - Add CPU/RAM to Stats
 - [x] `internal/pkg/processor/source/local.go` - Integrate sysmetrics
 - [x] `internal/pkg/processor/processor.go` - Update SynthesizeVirtualHunter()
-- [ ] `internal/pkg/types/packet.go` - Add CPU/RAM to HunterInfo
-- [ ] `internal/pkg/remotecapture/client_conversion.go` - Map new fields
+- [x] `internal/pkg/types/packet.go` - Add CPU/RAM to HunterInfo
+- [x] `internal/pkg/remotecapture/client_conversion.go` - Map new fields
 - [ ] `internal/pkg/statusclient/json.go` - Add CPU/RAM to JSON output
 - [ ] `internal/pkg/tui/components/nodesview/rendering.go` - FormatCPU, FormatMemory, columns
 - [ ] `internal/pkg/tui/components/nodesview/table_view.go` - Add columns

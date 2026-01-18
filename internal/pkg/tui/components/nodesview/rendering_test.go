@@ -171,8 +171,8 @@ func TestRenderBox_EmptyLines(t *testing.T) {
 }
 
 func TestColumnWidthCalculator_SufficientSpace(t *testing.T) {
-	calc := ColumnWidthCalculator{Width: 100}
-	id, host, status, _, _, _, _ := calc.GetColumnWidths()
+	calc := ColumnWidthCalculator{Width: 120}
+	id, host, status, _, cpu, ram, _, _, _ := calc.GetColumnWidths()
 
 	// With sufficient space, should use preferred widths
 	if id != 15 {
@@ -184,11 +184,17 @@ func TestColumnWidthCalculator_SufficientSpace(t *testing.T) {
 	if status != 8 {
 		t.Errorf("Expected status column 8, got %d", status)
 	}
+	if cpu != 5 {
+		t.Errorf("Expected cpu column 5, got %d", cpu)
+	}
+	if ram != 5 {
+		t.Errorf("Expected ram column 5, got %d", ram)
+	}
 }
 
 func TestColumnWidthCalculator_InsufficientSpace(t *testing.T) {
 	calc := ColumnWidthCalculator{Width: 50}
-	id, host, status, uptime, captured, forwarded, filters := calc.GetColumnWidths()
+	id, host, status, uptime, cpu, ram, captured, forwarded, filters := calc.GetColumnWidths()
 
 	// With insufficient space, should use minimum widths
 	if id < 8 {
@@ -202,18 +208,81 @@ func TestColumnWidthCalculator_InsufficientSpace(t *testing.T) {
 	}
 
 	// Verify all values are returned
-	if uptime < 0 || captured < 0 || forwarded < 0 || filters < 0 {
+	if uptime < 0 || cpu < 0 || ram < 0 || captured < 0 || forwarded < 0 || filters < 0 {
 		t.Error("Expected all column widths to be non-negative")
 	}
 }
 
 func TestColumnWidthCalculator_VeryNarrow(t *testing.T) {
 	calc := ColumnWidthCalculator{Width: 20}
-	id, host, status, uptime, captured, forwarded, filters := calc.GetColumnWidths()
+	id, host, status, uptime, cpu, ram, captured, forwarded, filters := calc.GetColumnWidths()
 
 	// Even with very narrow width, should return minimum widths
-	totalWidth := id + host + status + uptime + captured + forwarded + filters
+	totalWidth := id + host + status + uptime + cpu + ram + captured + forwarded + filters
 	if totalWidth <= 0 {
 		t.Error("Expected positive total width even in narrow space")
+	}
+}
+
+func TestFormatCPU_Negative(t *testing.T) {
+	result := FormatCPU(-1)
+	if result != "-" {
+		t.Errorf("Expected '-', got '%s'", result)
+	}
+}
+
+func TestFormatCPU_Zero(t *testing.T) {
+	result := FormatCPU(0)
+	if result != "0%" {
+		t.Errorf("Expected '0%%', got '%s'", result)
+	}
+}
+
+func TestFormatCPU_Normal(t *testing.T) {
+	result := FormatCPU(45.7)
+	if result != "46%" {
+		t.Errorf("Expected '46%%', got '%s'", result)
+	}
+}
+
+func TestFormatCPU_Max(t *testing.T) {
+	result := FormatCPU(100)
+	if result != "100%" {
+		t.Errorf("Expected '100%%', got '%s'", result)
+	}
+}
+
+func TestFormatMemory_Zero(t *testing.T) {
+	result := FormatMemory(0)
+	if result != "-" {
+		t.Errorf("Expected '-', got '%s'", result)
+	}
+}
+
+func TestFormatMemory_Bytes(t *testing.T) {
+	result := FormatMemory(500)
+	if result != "500" {
+		t.Errorf("Expected '500', got '%s'", result)
+	}
+}
+
+func TestFormatMemory_Kilobytes(t *testing.T) {
+	result := FormatMemory(1500)
+	if result != "1.5K" {
+		t.Errorf("Expected '1.5K', got '%s'", result)
+	}
+}
+
+func TestFormatMemory_Megabytes(t *testing.T) {
+	result := FormatMemory(104857600) // 100 MB
+	if result != "104.9M" {
+		t.Errorf("Expected '104.9M', got '%s'", result)
+	}
+}
+
+func TestFormatMemory_Gigabytes(t *testing.T) {
+	result := FormatMemory(2147483648) // 2 GB
+	if result != "2.1G" {
+		t.Errorf("Expected '2.1G', got '%s'", result)
 	}
 }

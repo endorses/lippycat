@@ -129,7 +129,7 @@ func RenderTreeView(params TableViewParams) (string, int) {
 
 	// Calculate column widths
 	calc := ColumnWidthCalculator{Width: params.Width}
-	idCol, hostCol, _, uptimeCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
+	idCol, hostCol, _, uptimeCol, cpuCol, ramCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
 
 	// Build hierarchical processor structure (same as graph view)
 	sortedProcs := buildProcessorHierarchy(params.Processors)
@@ -366,12 +366,14 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			// Style the tree prefix in gray, rest of header in bold
 			treePrefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 			headerTreePrefixStyled := treePrefixStyle.Render(headerTreePrefix)
-			headerLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+			headerLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 				"S", // Status
 				idCol, "Hunter ID",
 				8, "Mode", // Mode column (Generic/VoIP)
 				hostCol, "IP Address",
 				uptimeCol, "Uptime",
+				cpuCol, "CPU",
+				ramCol, "RAM",
 				capturedCol, "Captured",
 				forwardedCol, "Forwarded",
 				filtersCol, "Filters",
@@ -482,6 +484,8 @@ func RenderTreeView(params TableViewParams) (string, int) {
 			// Format table columns
 			idStr := TruncateString(hunter.ID, idCol)
 			hostnameStr := TruncateString(hunter.Hostname, hostCol)
+			cpuStr := FormatCPU(hunter.CPUPercent)
+			ramStr := FormatMemory(hunter.MemoryRSSBytes)
 			capturedStr := FormatPacketNumber(hunter.PacketsCaptured)
 			forwardedStr := FormatPacketNumber(hunter.PacketsForwarded)
 			filtersStr := fmt.Sprintf("%d", hunter.ActiveFilters)
@@ -502,12 +506,14 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				selectedNodeLine = linesRendered
 				// For selected row: build plain text line, then apply full-width background
 				// Prefix is styled gray separately, status is 1 char, then space before next column
-				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 					statusIcon,
 					idCol, idStr,
 					8, modeStr,
 					hostCol, hostnameStr,
 					uptimeCol, uptimeStr,
+					cpuCol, cpuStr,
+					ramCol, ramStr,
 					capturedCol, capturedStr,
 					forwardedCol, forwardedStr,
 					filtersCol, filtersStr,
@@ -519,12 +525,14 @@ func RenderTreeView(params TableViewParams) (string, int) {
 				// For non-selected: style the status icon and prefix separately
 				statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusIcon)
 				// Prefix is styled gray separately, status is colored, then space before next column
-				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+				hunterLine := fmt.Sprintf("%-1s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 					statusStyled,
 					idCol, idStr,
 					8, modeStr,
 					hostCol, hostnameStr,
 					uptimeCol, uptimeStr,
+					cpuCol, cpuStr,
+					ramCol, ramStr,
 					capturedCol, capturedStr,
 					forwardedCol, forwardedStr,
 					filtersCol, filtersStr,
@@ -596,15 +604,17 @@ func RenderFlatView(params TableViewParams) (string, int) {
 	// This is a fallback case - shouldn't normally be used with current architecture
 	// Get responsive column widths
 	calc := ColumnWidthCalculator{Width: params.Width}
-	idCol, hostCol, statusCol, uptimeCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
+	idCol, hostCol, statusCol, uptimeCol, cpuCol, ramCol, capturedCol, forwardedCol, filtersCol := calc.GetColumnWidths()
 
 	// Table header
 	header := fmt.Sprintf(
-		" %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+		" %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 		idCol, "Hunter ID",
 		hostCol, "IP Address",
 		statusCol, "Status",
 		uptimeCol, "Uptime",
+		cpuCol, "CPU",
+		ramCol, "RAM",
 		capturedCol, "Captured",
 		forwardedCol, "Forwarded",
 		filtersCol, "Filters",
@@ -654,13 +664,19 @@ func RenderFlatView(params TableViewParams) (string, int) {
 			}
 		}
 
+		// Format CPU and RAM
+		cpuStr := FormatCPU(hunter.CPUPercent)
+		ramStr := FormatMemory(hunter.MemoryRSSBytes)
+
 		// Format row string
 		row := fmt.Sprintf(
-			" %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+			" %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 			idCol, TruncateString(hunter.ID, idCol),
 			hostCol, TruncateString(hunter.Hostname, hostCol),
 			statusCol, statusText,
 			uptimeCol, uptime,
+			cpuCol, cpuStr,
+			ramCol, ramStr,
 			capturedCol, FormatPacketNumber(hunter.PacketsCaptured),
 			forwardedCol, FormatPacketNumber(hunter.PacketsForwarded),
 			filtersCol, fmt.Sprintf("%d", hunter.ActiveFilters),

@@ -49,6 +49,22 @@ func FormatPacketNumber(n uint64) string {
 	return fmt.Sprintf("%d", n)
 }
 
+// FormatCPU formats CPU percentage for display
+func FormatCPU(percent float64) string {
+	if percent < 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.0f%%", percent)
+}
+
+// FormatMemory formats memory bytes for display using K/M/G suffixes
+func FormatMemory(bytes uint64) string {
+	if bytes == 0 {
+		return "-"
+	}
+	return FormatPacketNumber(bytes)
+}
+
 // FormatDuration formats a duration in nanoseconds to human-readable string
 func FormatDuration(ns int64) string {
 	d := time.Duration(ns)
@@ -262,8 +278,8 @@ type ColumnWidthCalculator struct {
 }
 
 // GetColumnWidths returns responsive column widths based on available width
-func (c *ColumnWidthCalculator) GetColumnWidths() (idCol, hostCol, statusCol, uptimeCol, capturedCol, forwardedCol, filtersCol int) {
-	// Account for spacing between columns (7 columns = 6 spaces)
+func (c *ColumnWidthCalculator) GetColumnWidths() (idCol, hostCol, statusCol, uptimeCol, cpuCol, ramCol, capturedCol, forwardedCol, filtersCol int) {
+	// Account for spacing between columns (9 columns = 8 spaces)
 	availableWidth := c.Width - 2 // Account for left/right padding
 
 	// Minimum widths
@@ -271,6 +287,8 @@ func (c *ColumnWidthCalculator) GetColumnWidths() (idCol, hostCol, statusCol, up
 	minHostCol := 8
 	minStatusCol := 7
 	minUptimeCol := 6
+	minCPUCol := 4
+	minRAMCol := 4
 	minCapturedCol := 8
 	minForwardedCol := 9
 	minFiltersCol := 7
@@ -280,12 +298,14 @@ func (c *ColumnWidthCalculator) GetColumnWidths() (idCol, hostCol, statusCol, up
 	hostCol = 20
 	statusCol = 8
 	uptimeCol = 10
+	cpuCol = 5
+	ramCol = 5
 	capturedCol = 10
 	forwardedCol = 10
 	filtersCol = 8
 
 	// Calculate total preferred width
-	totalPreferred := idCol + hostCol + statusCol + uptimeCol + capturedCol + forwardedCol + filtersCol
+	totalPreferred := idCol + hostCol + statusCol + uptimeCol + cpuCol + ramCol + capturedCol + forwardedCol + filtersCol
 
 	// If we have enough space, use preferred widths
 	if totalPreferred <= availableWidth {
@@ -297,11 +317,13 @@ func (c *ColumnWidthCalculator) GetColumnWidths() (idCol, hostCol, statusCol, up
 	hostCol = minHostCol
 	statusCol = minStatusCol
 	uptimeCol = minUptimeCol
+	cpuCol = minCPUCol
+	ramCol = minRAMCol
 	capturedCol = minCapturedCol
 	forwardedCol = minForwardedCol
 	filtersCol = minFiltersCol
 
-	minTotal := idCol + hostCol + statusCol + uptimeCol + capturedCol + forwardedCol + filtersCol
+	minTotal := idCol + hostCol + statusCol + uptimeCol + cpuCol + ramCol + capturedCol + forwardedCol + filtersCol
 
 	// If even minimum doesn't fit, use minimum and let it overflow
 	if minTotal >= availableWidth {

@@ -456,6 +456,10 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					uptimeStr = "-"
 				}
 
+				// CPU and RAM
+				cpuStr := FormatCPU(hunter.CPUPercent)
+				ramStr := FormatMemory(hunter.MemoryRSSBytes)
+
 				// Captured and Forwarded
 				capturedStr := FormatPacketNumber(hunter.PacketsCaptured)
 				forwardedStr := FormatPacketNumber(hunter.PacketsForwarded)
@@ -464,12 +468,15 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 					// Condensed format without labels for narrow boxes
 					bodyLines = append(bodyLines, TruncateString(iface, hunterBoxWidth-4))
 					bodyLines = append(bodyLines, uptimeStr)
+					bodyLines = append(bodyLines, fmt.Sprintf("%s %s", cpuStr, ramStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%s/%s", forwardedStr, capturedStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%d", hunter.ActiveFilters))
 				} else {
 					// Full format with aligned labels for wider boxes
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, ifaceLabel, TruncateString(iface, hunterBoxWidth-labelWidth-2)))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Uptime:", uptimeStr))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "CPU:", cpuStr))
+					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "RAM:", ramStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Captured:", capturedStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %s", labelWidth, "Forwarded:", forwardedStr))
 					bodyLines = append(bodyLines, fmt.Sprintf("%-*s %d", labelWidth, "Filters:", hunter.ActiveFilters))

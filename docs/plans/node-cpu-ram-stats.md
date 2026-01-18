@@ -292,7 +292,7 @@ Add CPU/RAM lines to hunter box rendering.
 
 - [x] `internal/pkg/sysmetrics/collector_test.go` - Unit tests for metrics collection
 - [ ] `internal/pkg/hunter/stats/collector_test.go` - Update for new fields
-- [ ] `internal/pkg/tui/components/nodesview/rendering_test.go` - Update column width tests
+- [x] `internal/pkg/tui/components/nodesview/rendering_test.go` - Update column width tests
 
 ## Files Modified
 
@@ -308,10 +308,10 @@ Add CPU/RAM lines to hunter box rendering.
 - [x] `internal/pkg/types/packet.go` - Add CPU/RAM to HunterInfo
 - [x] `internal/pkg/remotecapture/client_conversion.go` - Map new fields
 - [x] `internal/pkg/statusclient/json.go` - Add CPU/RAM to JSON output
-- [ ] `internal/pkg/tui/components/nodesview/rendering.go` - FormatCPU, FormatMemory, columns
-- [ ] `internal/pkg/tui/components/nodesview/table_view.go` - Add columns
-- [ ] `internal/pkg/tui/components/nodesview/graph_view.go` - Add to hunter boxes
-- [ ] `internal/pkg/tui/components/nodesview/rendering_test.go` - Update tests
+- [x] `internal/pkg/tui/components/nodesview/rendering.go` - FormatCPU, FormatMemory, columns
+- [x] `internal/pkg/tui/components/nodesview/table_view.go` - Add columns
+- [x] `internal/pkg/tui/components/nodesview/graph_view.go` - Add to hunter boxes
+- [x] `internal/pkg/tui/components/nodesview/rendering_test.go` - Update tests
 
 ## Verification
 

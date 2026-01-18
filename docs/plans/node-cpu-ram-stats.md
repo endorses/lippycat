@@ -291,7 +291,7 @@ Add CPU/RAM lines to hunter box rendering.
 ### Phase 7: Tests
 
 - [x] `internal/pkg/sysmetrics/collector_test.go` - Unit tests for metrics collection
-- [ ] `internal/pkg/hunter/stats/collector_test.go` - Update for new fields
+- [x] `internal/pkg/hunter/stats/collector_test.go` - Update for new fields
 - [x] `internal/pkg/tui/components/nodesview/rendering_test.go` - Update column width tests
 
 ## Files Modified

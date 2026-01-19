@@ -86,12 +86,11 @@ func runFile(cmd *cobra.Command, args []string) {
 
 	// Create TUI model for offline file mode
 	// Pass insecureAllowed so TLS settings work if user switches to remote mode in TUI
-	// TODO: Pass args slice when TUI model supports multiple files (phase 2)
 	model := tui.NewModel(
 		bufferSize,
 		"", // interfaceName - not used for file mode
 		fileFilter,
-		args[0],         // pcapFile - first file for now, multi-file in phase 2
+		args,            // pcapFiles - all files from args
 		false,           // promiscuous - not applicable
 		false,           // startInRemoteMode
 		"",              // nodesFilePath

@@ -75,7 +75,7 @@ func runRemote(cmd *cobra.Command, args []string) {
 		bufferSize,
 		"",              // interfaceName - not used for remote mode
 		"",              // bpfFilter - not used for remote mode
-		"",              // pcapFile - not used for remote mode
+		nil,             // pcapFiles - not used for remote mode
 		false,           // promiscuous - not applicable
 		true,            // startInRemoteMode
 		remoteNodesFile, // nodesFilePath

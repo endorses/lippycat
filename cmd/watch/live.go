@@ -55,13 +55,13 @@ func runLive(cmd *cobra.Command, args []string) {
 	}
 
 	// Create TUI model for live capture mode
-	// Live mode: no pcapFile, not remote, no nodesFile
+	// Live mode: no pcapFiles, not remote, no nodesFile
 	// Pass insecureAllowed so TLS settings work if user switches to remote mode in TUI
 	model := tui.NewModel(
 		bufferSize,
 		liveInterfaces,
 		liveFilter,
-		"", // pcapFile - empty for live mode
+		nil, // pcapFiles - nil for live mode
 		livePromiscuous,
 		false,           // startInRemoteMode
 		"",              // nodesFilePath

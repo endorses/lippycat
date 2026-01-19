@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -92,6 +93,7 @@ type Model struct {
 	captureMode   components.CaptureMode // Current capture mode (live or offline)
 	nodesFilePath string                 // Path to nodes YAML file for remote mode
 	insecure      bool                   // Allow insecure connections (no TLS)
+	pcapFiles     []string               // PCAP files for offline mode (stored for header/restart)
 
 	// Save state
 	activeWriter    pcap.PcapWriter // Active streaming writer (nil if not saving)
@@ -124,7 +126,7 @@ type Model struct {
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
-func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
+func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFiles []string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
 	// Load theme from config, default to Solarized Dark
 	themeName := viper.GetString("tui.theme")
 	if themeName == "" {
@@ -144,10 +146,11 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 	// Determine initial capture mode and interface name
 	initialMode := components.CaptureModeLive
 	initialInterfaceName := interfaceName
-	initialPCAPFile := pcapFile
-	if pcapFile != "" {
+	initialPCAPFile := ""
+	if len(pcapFiles) > 0 {
 		initialMode = components.CaptureModeOffline
-		initialInterfaceName = pcapFile
+		initialPCAPFile = pcapFiles[0] // First file for settings (until phase 3.3)
+		initialInterfaceName = formatPCAPFilesDisplay(pcapFiles)
 		// Update first tab for offline mode
 		uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
 	} else if startInRemoteMode {
@@ -237,10 +240,27 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFile s
 		captureMode:                initialMode,
 		nodesFilePath:              nodesFilePath,
 		insecure:                   insecure,
+		pcapFiles:                  pcapFiles,
 		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
 		packetListUpdateInterval:   constants.TUITickInterval, // 10 Hz throttle for packet list (prevents freeze)
 		backgroundProcessor:        bgProcessor,
 	}
+}
+
+// formatPCAPFilesDisplay formats PCAP files for display in the header.
+// For single file: returns the basename (e.g., "capture.pcap")
+// For multiple files: returns "file1.pcap +N more" if >2 files, or "file1.pcap, file2.pcap" if 2 files
+func formatPCAPFilesDisplay(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	if len(files) == 1 {
+		return filepath.Base(files[0])
+	}
+	if len(files) == 2 {
+		return filepath.Base(files[0]) + ", " + filepath.Base(files[1])
+	}
+	return filepath.Base(files[0]) + " +" + fmt.Sprintf("%d", len(files)-1) + " more"
 }
 
 // Init initializes the model

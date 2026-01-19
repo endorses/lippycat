@@ -34,9 +34,9 @@
 ## Phase 2: TUI Model and Lifecycle
 
 ### 2.1 Update TUI Model (`internal/pkg/tui/model.go`)
-- [ ] Change `NewModel()` parameter from `pcapFile string` to `pcapFiles []string`
-- [ ] Store files for header display
-- [ ] Set `interfaceName` to joined basenames or summary
+- [x] Change `NewModel()` parameter from `pcapFile string` to `pcapFiles []string`
+- [x] Store files for header display
+- [x] Set `interfaceName` to joined basenames or summary
 
 ### 2.2 Update Settings Message (`internal/pkg/tui/components/settings/mode.go`)
 - [ ] Change `PCAPFile string` to `PCAPFiles []string` in `RestartCaptureMsg`

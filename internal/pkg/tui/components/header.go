@@ -24,6 +24,7 @@ type Header struct {
 	nodeCount      int  // Number of connected remote nodes (hunters)
 	processorCount int  // Number of connected processors
 	tlsDecryption  bool // True when TLS decryption is active
+	pcapFileCount  int  // Number of PCAP files (for offline mode header display)
 }
 
 // NewHeader creates a new header component
@@ -84,6 +85,11 @@ func (h *Header) SetProcessorCount(count int) {
 // SetTLSDecryption sets whether TLS decryption is active
 func (h *Header) SetTLSDecryption(active bool) {
 	h.tlsDecryption = active
+}
+
+// SetPCAPFileCount sets the number of PCAP files (for offline mode display)
+func (h *Header) SetPCAPFileCount(count int) {
+	h.pcapFileCount = count
 }
 
 // Section width constants
@@ -214,10 +220,15 @@ func (h *Header) View() string {
 	switch h.captureMode {
 	case CaptureModeOffline:
 		if widthClass == responsive.Narrow {
-			// Narrow: just the filename
+			// Narrow: just the filename(s)
 			middleText = h.iface
 		} else {
-			middleText = fmt.Sprintf("File: %s", h.iface)
+			// Use "File:" for single file, "Files:" for multiple
+			if h.pcapFileCount > 1 {
+				middleText = fmt.Sprintf("Files: %s", h.iface)
+			} else {
+				middleText = fmt.Sprintf("File: %s", h.iface)
+			}
 		}
 	case CaptureModeRemote:
 		if h.nodeCount > 0 || h.processorCount > 0 {

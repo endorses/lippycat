@@ -51,9 +51,9 @@
 ## Phase 3: TUI Display
 
 ### 3.1 Update Header (`internal/pkg/tui/components/header.go`)
-- [ ] For single file: `"File: capture.pcap"`
-- [ ] For multiple: `"Files: sip.pcap +2 more"` or `"Files: sip.pcap, rtp.pcap"` (if fits)
-- [ ] Use basenames only
+- [x] For single file: `"File: capture.pcap"`
+- [x] For multiple: `"Files: sip.pcap +2 more"` or `"Files: sip.pcap, rtp.pcap"` (if fits)
+- [x] Use basenames only
 
 ### 3.2 Update Offline Settings (`internal/pkg/tui/components/settings/offline.go`)
 - [ ] Change input to accept space-separated paths

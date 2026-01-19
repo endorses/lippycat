@@ -18,6 +18,7 @@ func (m Model) View() string {
 	m.uiState.Header.SetPacketCount(m.packetStore.PacketsCount, m.packetStore.MaxPackets)
 	m.uiState.Header.SetInterface(m.interfaceName)
 	m.uiState.Header.SetCaptureMode(m.captureMode)
+	m.uiState.Header.SetPCAPFileCount(len(m.pcapFiles))
 	// Use hunter count (not remote client count) for accurate node display
 	m.uiState.Header.SetNodeCount(m.uiState.NodesView.GetHunterCount())
 	m.uiState.Header.SetProcessorCount(m.uiState.NodesView.GetProcessorCount())

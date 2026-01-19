@@ -56,10 +56,10 @@
 - [x] Use basenames only
 
 ### 3.2 Update Offline Settings (`internal/pkg/tui/components/settings/offline.go`)
-- [ ] Change input to accept space-separated paths
-- [ ] Update placeholder: `"file1.pcap file2.pcap ..."`
-- [ ] Update validation to check all files
-- [ ] Update `ToRestartMsg()` to return `PCAPFiles []string`
+- [x] Change input to accept space-separated paths
+- [x] Update placeholder: `"file1.pcap file2.pcap ..."`
+- [x] Update validation to check all files
+- [x] Update `ToRestartMsg()` to return `PCAPFiles []string`
 
 ### 3.3 Update Settings View (`internal/pkg/tui/components/settings.go`)
 - [ ] Update `GetPCAPFile()` → `GetPCAPFiles()` returning `[]string`

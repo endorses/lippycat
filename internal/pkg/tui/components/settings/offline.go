@@ -4,7 +4,9 @@ package settings
 
 import (
 	"fmt"
+	stdos "os"
 	"strconv"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,10 +24,10 @@ type OfflineSettings struct {
 func NewOfflineSettings(pcapFile string, bufferSize int, filter string, theme themes.Theme) *OfflineSettings {
 	bufferInput, filterInput := CreateCommonInputs(bufferSize, filter)
 
-	// PCAP file input
+	// PCAP file input (supports space-separated paths for multiple files)
 	pcapFileInput := textinput.New()
-	pcapFileInput.Placeholder = "/path/to/file.pcap"
-	pcapFileInput.CharLimit = 512
+	pcapFileInput.Placeholder = "file1.pcap file2.pcap ..."
+	pcapFileInput.CharLimit = 1024 // Increased for multiple file paths
 	pcapFileInput.Width = 80
 	pcapFileInput.SetValue(pcapFile)
 
@@ -36,24 +38,52 @@ func NewOfflineSettings(pcapFile string, bufferSize int, filter string, theme th
 	}
 }
 
+// parsePCAPFiles parses space-separated file paths from the input value.
+// Returns a slice of non-empty file paths.
+func (os *OfflineSettings) parsePCAPFiles() []string {
+	input := strings.TrimSpace(os.pcapFileInput.Value())
+	if input == "" {
+		return nil
+	}
+	// Split on whitespace (handles multiple spaces between paths)
+	fields := strings.Fields(input)
+	// Filter out empty strings (shouldn't happen with Fields, but be safe)
+	var files []string
+	for _, f := range fields {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
 // Validate checks if offline settings are valid
 func (os *OfflineSettings) Validate() error {
-	if os.pcapFileInput.Value() == "" {
-		return fmt.Errorf("PCAP file path required for offline capture")
+	files := os.parsePCAPFiles()
+	if len(files) == 0 {
+		return fmt.Errorf("at least one PCAP file path required for offline capture")
+	}
+	// Check that all files exist
+	var missing []string
+	for _, file := range files {
+		if _, err := stdos.Stat(file); stdos.IsNotExist(err) {
+			missing = append(missing, file)
+		}
+	}
+	if len(missing) > 0 {
+		if len(missing) == 1 {
+			return fmt.Errorf("file not found: %s", missing[0])
+		}
+		return fmt.Errorf("files not found: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }
 
 // ToRestartMsg converts offline settings to a restart message
 func (os *OfflineSettings) ToRestartMsg() RestartCaptureMsg {
-	// Wrap single file in slice (multi-file input support will be added in Phase 3.2)
-	var pcapFiles []string
-	if file := os.pcapFileInput.Value(); file != "" {
-		pcapFiles = []string{file}
-	}
 	return RestartCaptureMsg{
 		Mode:       1, // CaptureModeOffline
-		PCAPFiles:  pcapFiles,
+		PCAPFiles:  os.parsePCAPFiles(),
 		Filter:     os.GetBPFFilter(),
 		BufferSize: os.GetBufferSize(),
 	}
@@ -98,7 +128,7 @@ func (os *OfflineSettings) Render(params RenderParams) []string {
 	}
 
 	sections = append(sections, pcapStyle.Width(boxWidth).Render(
-		params.LabelStyle.Render("PCAP File:")+" "+os.pcapFileInput.View(),
+		params.LabelStyle.Render("PCAP File(s):")+" "+os.pcapFileInput.View(),
 	))
 
 	// Buffer field (focus index 2)

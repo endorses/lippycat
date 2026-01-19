@@ -3,6 +3,8 @@
 package settings
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -13,6 +15,19 @@ import (
 func TestOfflineSettings_Validate(t *testing.T) {
 	theme := themes.Solarized()
 
+	// Create temporary files for testing
+	tmpDir := t.TempDir()
+	pcapFile := filepath.Join(tmpDir, "capture.pcap")
+	pcapngFile := filepath.Join(tmpDir, "capture.pcapng")
+	file1 := filepath.Join(tmpDir, "file1.pcap")
+	file2 := filepath.Join(tmpDir, "file2.pcap")
+
+	// Create test files
+	for _, f := range []string{pcapFile, pcapngFile, file1, file2} {
+		err := os.WriteFile(f, []byte("test"), 0644)
+		require.NoError(t, err, "failed to create test file: %s", f)
+	}
+
 	tests := []struct {
 		name            string
 		pcapFile        string
@@ -20,20 +35,37 @@ func TestOfflineSettings_Validate(t *testing.T) {
 		wantErrContains string
 	}{
 		{
-			name:     "valid with pcap file",
-			pcapFile: "/tmp/capture.pcap",
+			name:     "valid with single pcap file",
+			pcapFile: pcapFile,
 			wantErr:  false,
 		},
 		{
-			name:     "valid with pcapng file",
-			pcapFile: "/tmp/capture.pcapng",
+			name:     "valid with single pcapng file",
+			pcapFile: pcapngFile,
+			wantErr:  false,
+		},
+		{
+			name:     "valid with multiple space-separated files",
+			pcapFile: file1 + " " + file2,
 			wantErr:  false,
 		},
 		{
 			name:            "invalid - empty pcap file",
 			pcapFile:        "",
 			wantErr:         true,
-			wantErrContains: "PCAP file path required",
+			wantErrContains: "at least one PCAP file path required",
+		},
+		{
+			name:            "invalid - file not found",
+			pcapFile:        "/nonexistent/path/to/file.pcap",
+			wantErr:         true,
+			wantErrContains: "file not found",
+		},
+		{
+			name:            "invalid - one of multiple files not found",
+			pcapFile:        file1 + " /nonexistent/file.pcap",
+			wantErr:         true,
+			wantErrContains: "file not found",
 		},
 	}
 
@@ -147,7 +179,7 @@ func TestOfflineSettings_ToRestartMsg(t *testing.T) {
 		pcapFile       string
 		bufferSize     int
 		filter         string
-		wantPCAPFile   string
+		wantPCAPFiles  []string
 		wantBufferSize int
 		wantFilter     string
 	}{
@@ -156,7 +188,7 @@ func TestOfflineSettings_ToRestartMsg(t *testing.T) {
 			pcapFile:       "/tmp/capture.pcap",
 			bufferSize:     8000,
 			filter:         "tcp",
-			wantPCAPFile:   "/tmp/capture.pcap",
+			wantPCAPFiles:  []string{"/tmp/capture.pcap"},
 			wantBufferSize: 8000,
 			wantFilter:     "tcp",
 		},
@@ -165,9 +197,27 @@ func TestOfflineSettings_ToRestartMsg(t *testing.T) {
 			pcapFile:       "/home/user/captures/test.pcapng",
 			bufferSize:     15000,
 			filter:         "tcp port 80 or tcp port 443",
-			wantPCAPFile:   "/home/user/captures/test.pcapng",
+			wantPCAPFiles:  []string{"/home/user/captures/test.pcapng"},
 			wantBufferSize: 15000,
 			wantFilter:     "tcp port 80 or tcp port 443",
+		},
+		{
+			name:           "multiple space-separated files",
+			pcapFile:       "/tmp/file1.pcap /tmp/file2.pcap /tmp/file3.pcap",
+			bufferSize:     10000,
+			filter:         "",
+			wantPCAPFiles:  []string{"/tmp/file1.pcap", "/tmp/file2.pcap", "/tmp/file3.pcap"},
+			wantBufferSize: 10000,
+			wantFilter:     "",
+		},
+		{
+			name:           "empty pcap file",
+			pcapFile:       "",
+			bufferSize:     10000,
+			filter:         "",
+			wantPCAPFiles:  nil,
+			wantBufferSize: 10000,
+			wantFilter:     "",
 		},
 	}
 
@@ -178,12 +228,7 @@ func TestOfflineSettings_ToRestartMsg(t *testing.T) {
 			msg := os.ToRestartMsg()
 
 			assert.Equal(t, 1, msg.Mode, "Mode should be 1 (Offline)")
-			if tt.wantPCAPFile != "" {
-				require.Len(t, msg.PCAPFiles, 1, "PCAPFiles should have one element")
-				assert.Equal(t, tt.wantPCAPFile, msg.PCAPFiles[0], "PCAPFile should match")
-			} else {
-				assert.Empty(t, msg.PCAPFiles, "PCAPFiles should be empty")
-			}
+			assert.Equal(t, tt.wantPCAPFiles, msg.PCAPFiles, "PCAPFiles should match")
 			assert.Equal(t, tt.wantBufferSize, msg.BufferSize, "BufferSize should match")
 			assert.Equal(t, tt.wantFilter, msg.Filter, "Filter should match")
 		})

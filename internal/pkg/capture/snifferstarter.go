@@ -35,25 +35,52 @@ func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pca
 	startSniffer(devices, filter)
 }
 
-func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
-	// #nosec G304 -- readFile is from CLI --read-file flag, intentional user-specified path
-	file, err := os.Open(readFile)
-	if err != nil {
-		logger.Error("Could not read file",
-			"file", readFile,
-			"error", err)
+func StartOfflineSniffer(readFiles []string, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
+	if len(readFiles) == 0 {
+		logger.Error("No files provided for offline capture")
 		return
 	}
 
+	// Open all files and create interfaces
+	var files []*os.File
+	var devices []pcaptypes.PcapInterface
+
+	for _, readFile := range readFiles {
+		// #nosec G304 -- readFile is from CLI positional args, intentional user-specified path
+		file, err := os.Open(readFile)
+		if err != nil {
+			logger.Error("Could not read file",
+				"file", readFile,
+				"error", err)
+			// Close any files we already opened
+			for _, f := range files {
+				f.Close()
+			}
+			return
+		}
+		files = append(files, file)
+		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
+	}
+
+	// Log multi-file capture info
+	if len(readFiles) > 1 {
+		logger.Info("Starting multi-file offline capture",
+			"file_count", len(readFiles),
+			"files", readFiles)
+	}
+
 	// Create a context with timeout to prevent indefinite blocking
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Scale timeout with number of files
+	timeout := time.Duration(len(readFiles)) * 5 * time.Minute
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	// Ensure file is always closed, even if startSniffer blocks
-	defer file.Close()
-
-	iface := pcaptypes.CreateOfflineInterface(file)
-	devices := []pcaptypes.PcapInterface{iface}
+	// Ensure all files are closed when done
+	defer func() {
+		for _, f := range files {
+			f.Close()
+		}
+	}()
 
 	// Run startSniffer in a goroutine with context monitoring
 	done := make(chan struct{})
@@ -68,7 +95,7 @@ func StartOfflineSniffer(readFile, filter string, startSniffer func(devices []pc
 		// Completed normally
 	case <-ctx.Done():
 		logger.Error("Offline sniffer timed out, forcing cleanup",
-			"file", readFile,
+			"files", readFiles,
 			"error", ctx.Err())
 	}
 }

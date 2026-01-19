@@ -72,7 +72,7 @@ func sniff(cmd *cobra.Command, args []string) {
 	if readFile == "" {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
 	} else {
-		capture.StartOfflineSniffer(readFile, filter, capture.StartSniffer)
+		capture.StartOfflineSniffer([]string{readFile}, filter, capture.StartSniffer)
 	}
 }
 

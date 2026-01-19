@@ -271,7 +271,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			capturedFilter = filter
 		}
 
-		StartOfflineSniffer(testFile, "tcp port 5060", mockStartSniffer)
+		StartOfflineSniffer([]string{testFile}, "tcp port 5060", mockStartSniffer)
 
 		assert.True(t, startSnifferCalled.Load(), "startSniffer should be called")
 		assert.Equal(t, 1, len(capturedDevices), "Should create one offline device")
@@ -285,7 +285,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			startSnifferCalled.Store(true)
 		}
 
-		StartOfflineSniffer("/nonexistent/file.pcap", "tcp", mockStartSniffer)
+		StartOfflineSniffer([]string{"/nonexistent/file.pcap"}, "tcp", mockStartSniffer)
 
 		// Function should return early without calling startSniffer
 		assert.False(t, startSnifferCalled.Load(), "startSniffer should not be called for nonexistent file")
@@ -299,7 +299,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 
-		StartOfflineSniffer(testFile, "tcp", blockingStartSniffer)
+		StartOfflineSniffer([]string{testFile}, "tcp", blockingStartSniffer)
 
 		// Should complete (either normally or via timeout context)
 		assert.True(t, startSnifferCalled.Load(), "startSniffer should have been called")

@@ -111,8 +111,7 @@ func runFile(cmd *cobra.Command, args []string) {
 
 	go func() {
 		defer close(done)
-		// TODO: Pass args slice when StartOfflineSniffer supports multiple files (phase 1.2)
-		capture.StartOfflineSniffer(args[0], fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+		capture.StartOfflineSniffer(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 			startFileSniffer(ctx, devices, filter, p)
 		})
 	}()

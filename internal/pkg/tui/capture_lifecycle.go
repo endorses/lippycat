@@ -203,7 +203,7 @@ func startLiveCapture(ctx context.Context, interfaceName string, filter string, 
 // startOfflineCapture starts packet capture from a PCAP file
 func startOfflineCapture(ctx context.Context, pcapFile string, filter string, program *tea.Program, done chan struct{}) {
 	defer close(done) // Signal completion when capture goroutine exits
-	capture.StartOfflineSniffer(pcapFile, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+	capture.StartOfflineSniffer([]string{pcapFile}, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTUISniffer(ctx, devices, filter, program)
 	})
 }

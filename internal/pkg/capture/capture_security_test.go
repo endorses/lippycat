@@ -145,7 +145,7 @@ func TestStartOfflineSniffer_FileHandling(t *testing.T) {
 			// in the actual implementation, but it verifies the parameter handling
 			if !tt.expectError {
 				assert.NotPanics(t, func() {
-					StartOfflineSniffer(filePath, tt.filter, mockStartSniffer)
+					StartOfflineSniffer([]string{filePath}, tt.filter, mockStartSniffer)
 				}, tt.description)
 			}
 		})

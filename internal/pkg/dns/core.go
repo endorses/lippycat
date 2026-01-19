@@ -288,7 +288,7 @@ func StartLiveDNSSniffer(interfaces, filter string) {
 
 // StartOfflineDNSSniffer starts DNS capture from a PCAP file.
 func StartOfflineDNSSniffer(readFile, filter string) {
-	capture.StartOfflineSniffer(readFile, filter, StartDNSSniffer)
+	capture.StartOfflineSniffer([]string{readFile}, filter, StartDNSSniffer)
 }
 
 // printStatistics prints capture statistics.

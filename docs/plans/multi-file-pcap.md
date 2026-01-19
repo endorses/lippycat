@@ -16,14 +16,18 @@
 - [x] Add upfront file existence validation
 
 ### 1.2 Update StartOfflineSniffer (`internal/pkg/capture/snifferstarter.go`)
-- [ ] Change signature: `StartOfflineSniffer(readFiles []string, filter string, ...)`
-- [ ] Loop through files, validate each exists
-- [ ] Create `offlineInterface` for each file
-- [ ] Collect into `[]pcaptypes.PcapInterface`
+- [x] Change signature: `StartOfflineSniffer(readFiles []string, filter string, ...)`
+- [x] Loop through files, open each, create `offlineInterface` for each
+- [x] Collect into `[]pcaptypes.PcapInterface`
+- [x] Handle cleanup: close all files on error or completion
+- [x] Scale timeout with number of files
+- [x] Log multi-file capture info
+- [x] Update all callers (sniff, tui, voip, dns, tls, http, email)
+- [x] Update tests
 
 ### 1.3 Update file.go capture call
-- [ ] Update `runFile()` to pass `args` slice to capture functions
-- [ ] Update `startFileSniffer` if needed
+- [x] Update `runFile()` to pass `args` slice to `StartOfflineSniffer`
+- [x] `startFileSniffer` unchanged (receives devices from capture layer)
 
 ---
 

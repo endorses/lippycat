@@ -140,7 +140,7 @@ func TestStartOfflineSnifferErrorHandling(t *testing.T) {
 				t.Skip("Cannot easily test log.Fatal without modifying source")
 			} else {
 				assert.NotPanics(t, func() {
-					StartOfflineSniffer(filePath, tt.filter, mockStartSniffer)
+					StartOfflineSniffer([]string{filePath}, tt.filter, mockStartSniffer)
 				})
 				assert.True(t, startSnifferCalled, "startSniffer should be called for valid file")
 			}

@@ -168,8 +168,8 @@ func StartLiveVoipSniffer(interfaces, filter string) {
 	capture.StartLiveSniffer(interfaces, filter, StartVoipSniffer)
 }
 
-func StartOfflineVoipSniffer(interfaces, filter string) {
-	capture.StartOfflineSniffer(interfaces, filter, StartVoipSniffer)
+func StartOfflineVoipSniffer(readFile, filter string) {
+	capture.StartOfflineSniffer([]string{readFile}, filter, StartVoipSniffer)
 }
 
 func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {

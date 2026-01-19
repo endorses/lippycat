@@ -7,14 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0] - 2026-01-19
 
+### Breaking Changes
+- **`watch file` command**: Removed `-r`/`--read-file` flag in favor of positional arguments
+  - Old: `lc watch file -r capture.pcap`
+  - New: `lc watch file capture.pcap`
+  - Now supports multiple files: `lc watch file sip.pcap rtp.pcap`
+- **CLI flag normalization**: Standardized flag naming with short flags
+  - `--sipuser` → `--sip-user` (`-u`) for sniff voip, tap voip commands
+  - `--upstream` → `--processor` (`-P`) for tap, process commands
+  - `--hunter-id` → `--id` (`-I`) for hunt command
+  - `--processor-id` → `--id` (`-I`) for process command
+  - `--tap-id` → `--id` (`-I`) for tap command
+  - Old flag names are deprecated and will show warning messages, but continue to work
+
 ### Added
-- Breaking changes and new features: multi-file PCAP support, node CPU/RAM metrics, responsive TUI
+- **Multi-file PCAP support**: Analyze multiple PCAP files simultaneously in TUI
+  - Space-separated files in offline settings dialog
+  - Header displays "Files:" when multiple files loaded
+  - Merged packet display across all files
+- **Node CPU/RAM statistics**: Real-time system metrics for hunters and tap nodes
+  - New sysmetrics package for CPU/RAM collection
+  - CPU/RAM columns in TUI nodes display
+  - CPU/RAM fields in CLI JSON output
+  - Metrics forwarded via gRPC proto
+- **Tap command enhancements**:
+  - GPU acceleration support (`--gpu-backend`)
+  - LI support in LI builds (`--li-*` flags)
+  - TLS keylog support (`--sslkeylogfile`)
+  - Production mTLS enforcement
+  - `--voip-command` and `--stats` flags
+  - Own-traffic BPF exclusion to prevent capture loops
+- **TUI responsive layout**: Adaptive layout for different terminal sizes
+  - Responsive header with proportional column widths
+  - Responsive footer with progressive disclosure
+  - Responsive tabs with progressive disclosure
+  - Terminal resize re-renders content properly
+- **TUI performance optimizations**:
+  - High-traffic capture optimization for smooth 50ms updates
+  - Memory optimization with ring buffer
+  - Non-blocking bridge to prevent packet freeze
+  - Bridge diagnostics in statistics view
+- **Protocol mode display**: Hunter/tap nodes show protocol badges in TUI
+  - Protocol-specific filter validation
+  - Protocol mode detection for badge display
+- **VRRP support**: VRRP info extraction in packet list
+- **Build-tagged CLI flags**: GPU flags for sniff/hunt, LI flags for process
+- **JSON output for `list interfaces`**: Structured output for scripting
+- **New short flags**: Added short flags for commonly used options
+  - `-T` for `--tls` across all commands
+  - `-V` for `--virtual-interface` in sniff, tap, process commands
+  - `-P` for `--processor` in hunt, tap, process commands
+  - `-I` for `--id` in hunt, tap, process commands
+  - `-u` for `--sip-user` in sniff voip, tap voip commands
+  - `-n` for `--nodes-file` in watch remote command
 
 ### Changed
-- TODO: Add detailed changelog entries
+- Renamed `docs/plan` directory to `docs/plans`
 
 ### Fixed
-- TODO: Add fixed items
+- **Hunter metrics forwarding**: Store and forward CPU/RAM metrics in processor
+- **Non-amd64 SIMD**: Added fallback implementation for non-amd64 architectures
+- **Config consistency**: Use consistent `tui.*` viper config prefix
+- **CI failures**: Fixed lint ineffassign and data race issues
+- **TAP virtual hunter**: Show correct capture stats and filter count
+- **Watch TLS config**: Support TLS config from config file
+- **Viper bindings**: Added viper binding for insecure flag in hunt, process, tap
+- **Interface filtering**: Unified filtering between CLI and TUI
+- **TUI resize**: Re-render content on terminal resize
+- **TUI filter input**: Make filter input span full terminal width
+- **TUI protocol mode**: Show protocol mode in tree view
 
 ## [0.7.3] - 2026-01-13
 
@@ -75,32 +136,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`show config` command**: Refactored to display all Viper settings
   - JSON-only output format for easier parsing
   - Shows complete configuration state including defaults
-
-## [Unreleased]
-
-### Breaking Changes
-- **`watch file` command**: Removed `-r`/`--read-file` flag in favor of positional arguments
-  - Old: `lc watch file -r capture.pcap`
-  - New: `lc watch file capture.pcap`
-  - Now supports multiple files: `lc watch file sip.pcap rtp.pcap`
-
-### Breaking Changes (with deprecation warnings)
-- **CLI flag normalization**: Standardized flag naming with short flags
-  - `--sipuser` → `--sip-user` (`-u`) for sniff voip, tap voip commands
-  - `--upstream` → `--processor` (`-P`) for tap, process commands
-  - `--hunter-id` → `--id` (`-I`) for hunt command
-  - `--processor-id` → `--id` (`-I`) for process command
-  - `--tap-id` → `--id` (`-I`) for tap command
-  - Old flag names are deprecated and will show warning messages, but continue to work
-
-### Added
-- **New short flags**: Added short flags for commonly used options
-  - `-T` for `--tls` across all commands
-  - `-V` for `--virtual-interface` in sniff, tap, process commands
-  - `-P` for `--processor` in hunt, tap, process commands
-  - `-I` for `--id` in hunt, tap, process commands
-  - `-u` for `--sip-user` in sniff voip, tap voip commands
-  - `-n` for `--nodes-file` in watch remote command
 
 ## [0.7.0] - 2026-01-10
 

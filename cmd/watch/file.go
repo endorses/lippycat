@@ -19,31 +19,38 @@ import (
 )
 
 var fileCmd = &cobra.Command{
-	Use:   "file",
-	Short: "Analyze PCAP file in TUI",
-	Long: `Open a PCAP file for interactive analysis in the TUI.
+	Use:   "file [files...]",
+	Short: "Analyze PCAP file(s) in TUI",
+	Long: `Open one or more PCAP files for interactive analysis in the TUI.
+
+When multiple files are provided, packets are merged and displayed together.
+Each packet shows its source file in the interface column.
 
 TLS Decryption:
   Use --tls-keylog to provide an SSLKEYLOGFILE for decrypting HTTPS traffic.
   This enables viewing decrypted HTTP content from encrypted PCAP captures.
 
 Examples:
-  lc watch file -r capture.pcap
-  lc watch file -r capture.pcap -f "port 5060"  # With BPF filter
-  lc watch file -r capture.pcap --tls-keylog keys.log  # With TLS decryption`,
-	Run: runFile,
+  lc watch file capture.pcap
+  lc watch file sip.pcap rtp.pcap                # Merge multiple files
+  lc watch file capture.pcap -f "port 5060"      # With BPF filter
+  lc watch file capture.pcap --tls-keylog keys.log  # With TLS decryption`,
+	Args: cobra.MinimumNArgs(1),
+	Run:  runFile,
 }
 
 var (
-	fileReadFile  string
 	fileFilter    string
 	fileTLSKeylog string
 )
 
 func runFile(cmd *cobra.Command, args []string) {
-	if fileReadFile == "" {
-		fmt.Fprintln(os.Stderr, "Error: --read-file/-r is required for file mode")
-		os.Exit(1)
+	// Validate all files exist
+	for _, filePath := range args {
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Error: file not found: %s\n", filePath)
+			os.Exit(1)
+		}
 	}
 
 	// Set TLS configuration in viper for use by TUI components (if user switches to remote mode)
@@ -79,11 +86,12 @@ func runFile(cmd *cobra.Command, args []string) {
 
 	// Create TUI model for offline file mode
 	// Pass insecureAllowed so TLS settings work if user switches to remote mode in TUI
+	// TODO: Pass args slice when TUI model supports multiple files (phase 2)
 	model := tui.NewModel(
 		bufferSize,
 		"", // interfaceName - not used for file mode
 		fileFilter,
-		fileReadFile,    // pcapFile
+		args[0],         // pcapFile - first file for now, multi-file in phase 2
 		false,           // promiscuous - not applicable
 		false,           // startInRemoteMode
 		"",              // nodesFilePath
@@ -103,7 +111,8 @@ func runFile(cmd *cobra.Command, args []string) {
 
 	go func() {
 		defer close(done)
-		capture.StartOfflineSniffer(fileReadFile, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+		// TODO: Pass args slice when StartOfflineSniffer supports multiple files (phase 1.2)
+		capture.StartOfflineSniffer(args[0], fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 			startFileSniffer(ctx, devices, filter, p)
 		})
 	}()
@@ -123,11 +132,8 @@ func startFileSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fi
 }
 
 func init() {
-	fileCmd.Flags().StringVarP(&fileReadFile, "read-file", "r", "", "PCAP file to analyze (required)")
 	fileCmd.Flags().StringVarP(&fileFilter, "filter", "f", "", "BPF filter to apply")
 	fileCmd.Flags().StringVar(&fileTLSKeylog, "tls-keylog", "", "Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)")
-
-	_ = fileCmd.MarkFlagRequired("read-file")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("tui.tls_keylog", fileCmd.Flags().Lookup("tls-keylog"))

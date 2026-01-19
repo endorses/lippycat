@@ -70,13 +70,13 @@ type ModeSettings interface {
 
 // RestartCaptureMsg is sent when capture needs to be restarted with new settings.
 type RestartCaptureMsg struct {
-	Mode        int    // 0=Live, 1=Offline, 2=Remote
-	Interface   string // Comma-separated interface names (live mode)
-	PCAPFile    string // Path to PCAP file (offline mode)
-	NodesFile   string // Path to nodes YAML file (remote mode)
-	Filter      string // BPF filter expression
-	BufferSize  int    // Packet buffer size
-	Promiscuous bool   // Promiscuous mode enabled (live mode)
+	Mode        int      // 0=Live, 1=Offline, 2=Remote
+	Interface   string   // Comma-separated interface names (live mode)
+	PCAPFiles   []string // Paths to PCAP files (offline mode)
+	NodesFile   string   // Path to nodes YAML file (remote mode)
+	Filter      string   // BPF filter expression
+	BufferSize  int      // Packet buffer size
+	Promiscuous bool     // Promiscuous mode enabled (live mode)
 }
 
 // RenderParams contains parameters needed for rendering mode-specific fields.

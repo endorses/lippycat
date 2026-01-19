@@ -178,7 +178,12 @@ func TestOfflineSettings_ToRestartMsg(t *testing.T) {
 			msg := os.ToRestartMsg()
 
 			assert.Equal(t, 1, msg.Mode, "Mode should be 1 (Offline)")
-			assert.Equal(t, tt.wantPCAPFile, msg.PCAPFile, "PCAPFile should match")
+			if tt.wantPCAPFile != "" {
+				require.Len(t, msg.PCAPFiles, 1, "PCAPFiles should have one element")
+				assert.Equal(t, tt.wantPCAPFile, msg.PCAPFiles[0], "PCAPFile should match")
+			} else {
+				assert.Empty(t, msg.PCAPFiles, "PCAPFiles should be empty")
+			}
 			assert.Equal(t, tt.wantBufferSize, msg.BufferSize, "BufferSize should match")
 			assert.Equal(t, tt.wantFilter, msg.Filter, "Filter should match")
 		})

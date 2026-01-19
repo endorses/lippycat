@@ -71,10 +71,17 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			components.ToastDurationShort,
 		)
 	case components.CaptureModeOffline:
-		m.interfaceName = msg.PCAPFile
+		m.interfaceName = formatPCAPFilesDisplay(msg.PCAPFiles)
+		m.pcapFiles = msg.PCAPFiles
 		m.uiState.Tabs.UpdateTab(0, "Offline Capture", "📄")
+		toastMsg := "Opening PCAP file..."
+		if len(msg.PCAPFiles) == 1 {
+			toastMsg = fmt.Sprintf("Opening %s...", filepath.Base(msg.PCAPFiles[0]))
+		} else if len(msg.PCAPFiles) > 1 {
+			toastMsg = fmt.Sprintf("Opening %d PCAP files...", len(msg.PCAPFiles))
+		}
 		toastCmd = m.uiState.Toast.Show(
-			fmt.Sprintf("Opening %s...", filepath.Base(msg.PCAPFile)),
+			toastMsg,
 			components.ToastInfo,
 			components.ToastDurationShort,
 		)
@@ -158,7 +165,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				offlineTracker := NewOfflineCallTracker()
 				SetOfflineCallTracker(offlineTracker)
 
-				go startOfflineCapture(ctx, msg.PCAPFile, m.bpfFilter, program, done)
+				go startOfflineCapture(ctx, msg.PCAPFiles, m.bpfFilter, program, done)
 			}
 
 			// Mark capture as active for live/offline modes
@@ -200,10 +207,10 @@ func startLiveCapture(ctx context.Context, interfaceName string, filter string, 
 	})
 }
 
-// startOfflineCapture starts packet capture from a PCAP file
-func startOfflineCapture(ctx context.Context, pcapFile string, filter string, program *tea.Program, done chan struct{}) {
+// startOfflineCapture starts packet capture from PCAP files
+func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}) {
 	defer close(done) // Signal completion when capture goroutine exits
-	capture.StartOfflineSniffer([]string{pcapFile}, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+	capture.StartOfflineSniffer(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTUISniffer(ctx, devices, filter, program)
 	})
 }

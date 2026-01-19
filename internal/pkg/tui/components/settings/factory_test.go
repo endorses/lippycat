@@ -155,7 +155,7 @@ func TestModeFactory_SwitchMode(t *testing.T) {
 				assert.Equal(t, "any", msg.Interface, "interface should be reset to 'any'")
 				assert.False(t, msg.Promiscuous, "promiscuous should be reset to false")
 			case CaptureModeOffline:
-				assert.Empty(t, msg.PCAPFile, "pcap file should be reset")
+				assert.Empty(t, msg.PCAPFiles, "pcap files should be reset")
 			case CaptureModeRemote:
 				assert.Empty(t, msg.NodesFile, "nodes file should be reset")
 			}

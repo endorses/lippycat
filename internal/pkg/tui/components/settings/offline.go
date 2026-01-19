@@ -46,9 +46,14 @@ func (os *OfflineSettings) Validate() error {
 
 // ToRestartMsg converts offline settings to a restart message
 func (os *OfflineSettings) ToRestartMsg() RestartCaptureMsg {
+	// Wrap single file in slice (multi-file input support will be added in Phase 3.2)
+	var pcapFiles []string
+	if file := os.pcapFileInput.Value(); file != "" {
+		pcapFiles = []string{file}
+	}
 	return RestartCaptureMsg{
 		Mode:       1, // CaptureModeOffline
-		PCAPFile:   os.pcapFileInput.Value(),
+		PCAPFiles:  pcapFiles,
 		Filter:     os.GetBPFFilter(),
 		BufferSize: os.GetBufferSize(),
 	}

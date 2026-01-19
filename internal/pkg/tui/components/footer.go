@@ -351,7 +351,7 @@ func (f *Footer) View() string {
 	separator := separatorStyle.Render(" ║ ")
 
 	// Version info for far right (only show if enough space)
-	versionText := fmt.Sprintf("🫦🐱 %s ", version.GetVersion())
+	versionText := fmt.Sprintf("🫦🐱 v%s ", version.GetVersion())
 	versionStyle := lipgloss.NewStyle().
 		Foreground(f.theme.BorderColor)
 	versionRendered := versionStyle.Render(versionText)

@@ -29,8 +29,8 @@ const (
 type RestartCaptureMsg struct {
 	Mode        CaptureMode
 	Interface   string
-	PCAPFile    string
-	NodesFile   string // For remote mode: path to nodes YAML file
+	PCAPFiles   []string // Paths to PCAP files (offline mode)
+	NodesFile   string   // For remote mode: path to nodes YAML file
 	Filter      string
 	BufferSize  int
 	Promiscuous bool
@@ -192,11 +192,14 @@ func (s *SettingsView) GetBPFFilter() string {
 	return s.currentMode.GetBPFFilter()
 }
 
-// GetPCAPFile returns the configured PCAP file path
+// GetPCAPFile returns the first configured PCAP file path (for backward compatibility).
+// Use GetPCAPFiles() to get all files (Phase 3.3).
 func (s *SettingsView) GetPCAPFile() string {
 	if s.modeType == settings.CaptureModeOffline {
 		msg := s.currentMode.ToRestartMsg()
-		return msg.PCAPFile
+		if len(msg.PCAPFiles) > 0 {
+			return msg.PCAPFiles[0]
+		}
 	}
 	return ""
 }
@@ -265,7 +268,7 @@ func (s *SettingsView) restartCapture() tea.Cmd {
 		return RestartCaptureMsg{
 			Mode:        s.modeType,
 			Interface:   modeMsg.Interface,
-			PCAPFile:    modeMsg.PCAPFile,
+			PCAPFiles:   modeMsg.PCAPFiles,
 			NodesFile:   modeMsg.NodesFile,
 			Filter:      modeMsg.Filter,
 			BufferSize:  modeMsg.BufferSize,
@@ -916,7 +919,11 @@ func (s *SettingsView) GetSettings() string {
 	if s.modeType == settings.CaptureModeLive {
 		details = fmt.Sprintf("Interface: %s\nPromiscuous: %t", msg.Interface, msg.Promiscuous)
 	} else if s.modeType == settings.CaptureModeOffline {
-		details = fmt.Sprintf("PCAP File: %s", msg.PCAPFile)
+		if len(msg.PCAPFiles) == 1 {
+			details = fmt.Sprintf("PCAP File: %s", msg.PCAPFiles[0])
+		} else if len(msg.PCAPFiles) > 1 {
+			details = fmt.Sprintf("PCAP Files: %d files", len(msg.PCAPFiles))
+		}
 	} else if s.modeType == settings.CaptureModeRemote {
 		details = fmt.Sprintf("Nodes File: %s", msg.NodesFile)
 	}

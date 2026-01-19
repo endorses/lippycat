@@ -39,12 +39,12 @@
 - [x] Set `interfaceName` to joined basenames or summary
 
 ### 2.2 Update Settings Message (`internal/pkg/tui/components/settings/mode.go`)
-- [ ] Change `PCAPFile string` to `PCAPFiles []string` in `RestartCaptureMsg`
+- [x] Change `PCAPFile string` to `PCAPFiles []string` in `RestartCaptureMsg`
 
 ### 2.3 Update Capture Lifecycle (`internal/pkg/tui/capture_lifecycle.go`)
-- [ ] Update `startOfflineCapture()` to accept `[]string`
-- [ ] Pass slice to `StartOfflineSniffer`
-- [ ] Update all `RestartCaptureMsg` handlers
+- [x] Update `startOfflineCapture()` to accept `[]string`
+- [x] Pass slice to `StartOfflineSniffer`
+- [x] Update all `RestartCaptureMsg` handlers
 
 ---
 

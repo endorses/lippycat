@@ -254,11 +254,17 @@ func TestStartLiveSniffer_MultipleInterfaces(t *testing.T) {
 
 // TestStartOfflineSniffer_ErrorHandling tests StartOfflineSniffer error paths
 func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
-	// Create a test PCAP file
-	testFile := filepath.Join(t.TempDir(), "test.pcap")
-	f, err := os.Create(testFile)
-	require.NoError(t, err)
-	f.Close()
+	// Create test PCAP files
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.pcap")
+	testFile2 := filepath.Join(tmpDir, "test2.pcap")
+	testFile3 := filepath.Join(tmpDir, "test3.pcap")
+
+	for _, f := range []string{testFile, testFile2, testFile3} {
+		file, err := os.Create(f)
+		require.NoError(t, err)
+		file.Close()
+	}
 
 	t.Run("success", func(t *testing.T) {
 		var capturedDevices []pcaptypes.PcapInterface
@@ -279,6 +285,27 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 		assert.Equal(t, "tcp port 5060", capturedFilter, "Filter should be passed through")
 	})
 
+	t.Run("multiple files success", func(t *testing.T) {
+		var capturedDevices []pcaptypes.PcapInterface
+		var capturedFilter string
+		var startSnifferCalled atomic.Bool
+
+		mockStartSniffer := func(devices []pcaptypes.PcapInterface, filter string) {
+			startSnifferCalled.Store(true)
+			capturedDevices = devices
+			capturedFilter = filter
+		}
+
+		StartOfflineSniffer([]string{testFile, testFile2, testFile3}, "udp port 5060", mockStartSniffer)
+
+		assert.True(t, startSnifferCalled.Load(), "startSniffer should be called")
+		assert.Equal(t, 3, len(capturedDevices), "Should create three offline devices")
+		assert.Contains(t, capturedDevices[0].Name(), "test.pcap", "First device name should contain filename")
+		assert.Contains(t, capturedDevices[1].Name(), "test2.pcap", "Second device name should contain filename")
+		assert.Contains(t, capturedDevices[2].Name(), "test3.pcap", "Third device name should contain filename")
+		assert.Equal(t, "udp port 5060", capturedFilter, "Filter should be passed through")
+	})
+
 	t.Run("file not found", func(t *testing.T) {
 		var startSnifferCalled atomic.Bool
 		mockStartSniffer := func(devices []pcaptypes.PcapInterface, filter string) {
@@ -289,6 +316,19 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 
 		// Function should return early without calling startSniffer
 		assert.False(t, startSnifferCalled.Load(), "startSniffer should not be called for nonexistent file")
+	})
+
+	t.Run("multiple files one not found", func(t *testing.T) {
+		var startSnifferCalled atomic.Bool
+		mockStartSniffer := func(devices []pcaptypes.PcapInterface, filter string) {
+			startSnifferCalled.Store(true)
+		}
+
+		// Mix of existing and non-existing files
+		StartOfflineSniffer([]string{testFile, "/nonexistent/file.pcap", testFile2}, "tcp", mockStartSniffer)
+
+		// Function should return early without calling startSniffer when any file is missing
+		assert.False(t, startSnifferCalled.Load(), "startSniffer should not be called when one file is missing")
 	})
 
 	t.Run("timeout handling", func(t *testing.T) {

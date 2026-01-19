@@ -70,9 +70,9 @@
 ## Phase 4: Tests and Documentation
 
 ### 4.1 Update Tests
-- [ ] `internal/pkg/tui/components/settings/offline_test.go`
-- [ ] `internal/pkg/tui/components/settings/factory_test.go`
-- [ ] Add test for multiple files in capture layer
+- [x] `internal/pkg/tui/components/settings/offline_test.go`
+- [x] `internal/pkg/tui/components/settings/factory_test.go`
+- [x] Add test for multiple files in capture layer
 
 ### 4.2 Update Documentation
 - [ ] `cmd/watch/README.md` - update examples

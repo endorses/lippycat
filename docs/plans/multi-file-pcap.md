@@ -62,8 +62,8 @@
 - [x] Update `ToRestartMsg()` to return `PCAPFiles []string`
 
 ### 3.3 Update Settings View (`internal/pkg/tui/components/settings.go`)
-- [ ] Update `GetPCAPFile()` → `GetPCAPFiles()` returning `[]string`
-- [ ] Update any callers
+- [x] Update `GetPCAPFile()` → `GetPCAPFiles()` returning `[]string`
+- [x] Update any callers
 
 ---
 

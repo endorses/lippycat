@@ -193,7 +193,7 @@ func (s *SettingsView) GetBPFFilter() string {
 }
 
 // GetPCAPFile returns the first configured PCAP file path (for backward compatibility).
-// Use GetPCAPFiles() to get all files (Phase 3.3).
+// Use GetPCAPFiles() to get all files.
 func (s *SettingsView) GetPCAPFile() string {
 	if s.modeType == settings.CaptureModeOffline {
 		msg := s.currentMode.ToRestartMsg()
@@ -202,6 +202,15 @@ func (s *SettingsView) GetPCAPFile() string {
 		}
 	}
 	return ""
+}
+
+// GetPCAPFiles returns all configured PCAP file paths.
+func (s *SettingsView) GetPCAPFiles() []string {
+	if s.modeType == settings.CaptureModeOffline {
+		msg := s.currentMode.ToRestartMsg()
+		return msg.PCAPFiles
+	}
+	return nil
 }
 
 // GetInterface returns the selected interfaces as comma-separated string

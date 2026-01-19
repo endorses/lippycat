@@ -306,7 +306,10 @@ sudo lc hunt voip --processor processor:50051 \
 sudo lc watch
 
 # Analyze PCAP file
-lc watch file -r capture.pcap
+lc watch file capture.pcap
+
+# Analyze multiple PCAP files (merged display)
+lc watch file sip.pcap rtp.pcap
 
 # Remote TUI (monitor distributed nodes)
 lc watch remote --nodes-file nodes.yaml

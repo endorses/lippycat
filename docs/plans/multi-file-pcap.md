@@ -75,9 +75,9 @@
 - [x] Add test for multiple files in capture layer
 
 ### 4.2 Update Documentation
-- [ ] `cmd/watch/README.md` - update examples
-- [ ] `CLAUDE.md` - update CLI examples
-- [ ] `CHANGELOG.md` - document breaking change (removal of `-r`)
+- [x] `cmd/watch/README.md` - update examples
+- [x] `CLAUDE.md` - update CLI examples
+- [x] `CHANGELOG.md` - document breaking change (removal of `-r`)
 
 ---
 

@@ -67,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+- **`watch file` command**: Removed `-r`/`--read-file` flag in favor of positional arguments
+  - Old: `lc watch file -r capture.pcap`
+  - New: `lc watch file capture.pcap`
+  - Now supports multiple files: `lc watch file sip.pcap rtp.pcap`
+
 ### Breaking Changes (with deprecation warnings)
 - **CLI flag normalization**: Standardized flag naming with short flags
   - `--sipuser` → `--sip-user` (`-u`) for sniff voip, tap voip commands

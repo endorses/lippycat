@@ -35,18 +35,26 @@ lc watch live -i eth0 -p
 ### File Analysis
 
 ```bash
-# Analyze PCAP file
-lc watch file -r capture.pcap
+# Analyze single PCAP file
+lc watch file capture.pcap
+
+# Analyze multiple PCAP files (merged display)
+lc watch file sip.pcap rtp.pcap signaling.pcap
 
 # With BPF filter
-lc watch file -r capture.pcap -f "port 5060"
+lc watch file capture.pcap -f "port 5060"
 
 # With TLS decryption (for HTTPS, SMTPS, etc.)
-lc watch file -r https-capture.pcap --tls-keylog sslkeys.log
+lc watch file https-capture.pcap --tls-keylog sslkeys.log
+
+# Multiple files with filter
+lc watch file call1.pcap call2.pcap -f "udp"
 ```
 
+**Arguments:**
+- `files...` - One or more PCAP files to analyze (required)
+
 **Flags:**
-- `-r, --read-file` - PCAP file to analyze (required)
 - `-f, --filter` - BPF filter expression
 - `--tls-keylog` - Path to SSLKEYLOGFILE for TLS decryption
 - `--buffer-size` - Maximum packets in memory (default: 10000)
@@ -78,7 +86,7 @@ sslkeylog.set_keylog("sslkeys.log")
 tcpdump -i eth0 -w https.pcap port 443
 
 # Analyze with decryption
-lc watch file -r https.pcap --tls-keylog /tmp/sslkeys.log
+lc watch file https.pcap --tls-keylog /tmp/sslkeys.log
 ```
 
 The TUI will show a "TLS" indicator in the header when decryption is enabled. In the packet details panel, decrypted content appears in a dedicated "Decrypted Content" section with HTTP syntax highlighting.
@@ -196,10 +204,13 @@ lc watch remote
 
 ```bash
 # Analyze captured VoIP traffic
-lc watch file -r voip-capture.pcap
+lc watch file voip-capture.pcap
 
 # Filter for specific SIP traffic
-lc watch file -r voip-capture.pcap -f "port 5060"
+lc watch file voip-capture.pcap -f "port 5060"
+
+# Analyze multiple related captures
+lc watch file signaling.pcap media.pcap
 ```
 
 ## See Also

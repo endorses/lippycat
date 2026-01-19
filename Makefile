@@ -9,7 +9,8 @@ CUDA_DIR=internal/pkg/voip
 
 # Version information
 # Try git tag first, then VERSION file, then git commit, finally "dev"
-VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || cat VERSION 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "dev")
+# Strip leading 'v' prefix from git tags to avoid "vv0.x.x" in footer
+VERSION ?= $(shell (git describe --tags --exact-match 2>/dev/null || cat VERSION 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "dev") | sed 's/^v//')
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 

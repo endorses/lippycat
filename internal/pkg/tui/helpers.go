@@ -176,6 +176,10 @@ func (m *Model) updatePacketListFiltered() {
 // processPendingPackets processes packets pulled from the pending buffer.
 // This is the core of the pull-based architecture - TUI pulls when ready.
 func (m *Model) processPendingPackets(packets []components.PacketDisplay) {
+	// Ensure call aggregator is initialized for VoIP tracking (lazy initialization)
+	// This is the main packet processing path for live/offline capture
+	m.ensureCallAggregator()
+
 	// Filter packets by capture mode and set NodeID
 	filteredPackets := make([]components.PacketDisplay, 0, len(packets))
 	for i := range packets {

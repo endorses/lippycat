@@ -20,10 +20,64 @@ import (
 	"github.com/spf13/viper"
 )
 
+// ensureCallAggregator lazily initializes the call aggregator for live/offline capture modes.
+// This is needed because the call aggregator requires a tea.Program reference, which isn't
+// available when NewModel() is called. The program is set later via SetCurrentProgram().
+func (m *Model) ensureCallAggregator() {
+	// Only for live/offline modes - remote mode uses processor-side call tracking
+	if m.captureMode != components.CaptureModeLive && m.captureMode != components.CaptureModeOffline {
+		return
+	}
+
+	// Check if already initialized
+	if m.captureMode == components.CaptureModeLive && m.liveCallAggregator != nil {
+		return
+	}
+	if m.captureMode == components.CaptureModeOffline && m.offlineCallAggregator != nil {
+		return
+	}
+
+	// Get program reference (set via SetCurrentProgram)
+	program := globalCaptureState.GetProgram()
+	if program == nil {
+		return
+	}
+
+	// Initialize call aggregator based on mode
+	switch m.captureMode {
+	case components.CaptureModeLive:
+		m.liveCallAggregator = NewLocalCallAggregator(program)
+		m.liveCallAggregator.Start()
+		if m.backgroundProcessor != nil {
+			m.backgroundProcessor.SetCallAggregator(m.liveCallAggregator, components.CaptureModeLive)
+		}
+		// Initialize call tracker for RTP-to-CallID mapping
+		if GetOfflineCallTracker() == nil {
+			liveTracker := NewOfflineCallTracker()
+			SetOfflineCallTracker(liveTracker)
+		}
+
+	case components.CaptureModeOffline:
+		m.offlineCallAggregator = NewLocalCallAggregator(program)
+		m.offlineCallAggregator.Start()
+		if m.backgroundProcessor != nil {
+			m.backgroundProcessor.SetCallAggregator(m.offlineCallAggregator, components.CaptureModeOffline)
+		}
+		// Initialize call tracker for RTP-to-CallID mapping
+		if GetOfflineCallTracker() == nil {
+			offlineTracker := NewOfflineCallTracker()
+			SetOfflineCallTracker(offlineTracker)
+		}
+	}
+}
+
 // handlePacketBatchMsg processes a batch of packets
 func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 	// Handle batch of packets more efficiently
 	if !m.uiState.Paused {
+		// Ensure call aggregator is initialized for VoIP tracking (lazy initialization)
+		m.ensureCallAggregator()
+
 		// Filter packets by capture mode and set NodeID
 		filteredPackets := make([]components.PacketDisplay, 0, len(msg.Packets))
 		for i := range msg.Packets {
@@ -135,6 +189,9 @@ func (m Model) handlePacketBatchMsg(msg PacketBatchMsg) (Model, tea.Cmd) {
 // handlePacketMsg processes a single packet
 func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 	if !m.uiState.Paused {
+		// Ensure call aggregator is initialized for VoIP tracking (lazy initialization)
+		m.ensureCallAggregator()
+
 		// Set NodeID to "Local" if not already set (for local/offline capture)
 		packet := msg.Packet
 		if packet.NodeID == "" {

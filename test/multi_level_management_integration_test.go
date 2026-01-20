@@ -36,8 +36,9 @@ func TestIntegration_MultiLevel_FilterUpdate2Level(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// Start root processor
-	rootAddr := "127.0.0.1:51001"
+	// Start root processor with dynamic port
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc", "")
 	require.NoError(t, err, "Failed to start root processor")
 	defer shutdownProcessorWithPortCleanup(rootProc)
@@ -45,8 +46,9 @@ func TestIntegration_MultiLevel_FilterUpdate2Level(t *testing.T) {
 		defer rootConn.Close()
 	}
 
-	// Start downstream processor connected to root
-	downstreamAddr := "127.0.0.1:51002"
+	// Start downstream processor connected to root with dynamic port
+	downstreamAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for downstream processor")
 	downstreamProc, downstreamConn, err := startProcessorHierarchy(ctx, downstreamAddr, "downstream-proc", rootAddr)
 	require.NoError(t, err, "Failed to start downstream processor")
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
@@ -129,8 +131,9 @@ func TestIntegration_MultiLevel_FilterUpdate3Level(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Start root processor
-	rootAddr := "127.0.0.1:51011"
+	// Start root processor with dynamic port
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc-3l", "")
 	require.NoError(t, err, "Failed to start root processor")
 	defer shutdownProcessorWithPortCleanup(rootProc)
@@ -138,15 +141,17 @@ func TestIntegration_MultiLevel_FilterUpdate3Level(t *testing.T) {
 		defer rootConn.Close()
 	}
 
-	// Start intermediate processor connected to root
-	intermediateAddr := "127.0.0.1:51012"
+	// Start intermediate processor connected to root with dynamic port
+	intermediateAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for intermediate processor")
 	intermediateProc, intermediateConn, err := startProcessorHierarchy(ctx, intermediateAddr, "intermediate-proc", rootAddr)
 	require.NoError(t, err, "Failed to start intermediate processor")
 	defer shutdownProcessorWithPortCleanup(intermediateProc)
 	defer intermediateConn.Close()
 
-	// Start leaf processor connected to intermediate
-	leafAddr := "127.0.0.1:51013"
+	// Start leaf processor connected to intermediate with dynamic port
+	leafAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for leaf processor")
 	leafProc, leafConn, err := startProcessorHierarchy(ctx, leafAddr, "leaf-proc", intermediateAddr)
 	require.NoError(t, err, "Failed to start leaf processor")
 	defer shutdownProcessorWithPortCleanup(leafProc)
@@ -228,8 +233,9 @@ func TestIntegration_MultiLevel_FilterDelete(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// Start root processor
-	rootAddr := "127.0.0.1:51021"
+	// Start root processor with dynamic port
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc-del", "")
 	require.NoError(t, err, "Failed to start root processor")
 	defer shutdownProcessorWithPortCleanup(rootProc)
@@ -237,8 +243,9 @@ func TestIntegration_MultiLevel_FilterDelete(t *testing.T) {
 		defer rootConn.Close()
 	}
 
-	// Start downstream processor
-	downstreamAddr := "127.0.0.1:51022"
+	// Start downstream processor with dynamic port
+	downstreamAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for downstream processor")
 	downstreamProc, downstreamConn, err := startProcessorHierarchy(ctx, downstreamAddr, "downstream-proc-del", rootAddr)
 	require.NoError(t, err, "Failed to start downstream processor")
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
@@ -334,8 +341,9 @@ func TestIntegration_MultiLevel_ExpiredToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start processors
-	rootAddr := "127.0.0.1:51031"
+	// Start processors with dynamic ports
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc-expiry", "")
 	require.NoError(t, err, "Failed to start root processor")
 	defer shutdownProcessorWithPortCleanup(rootProc)
@@ -343,7 +351,8 @@ func TestIntegration_MultiLevel_ExpiredToken(t *testing.T) {
 		defer rootConn.Close()
 	}
 
-	downstreamAddr := "127.0.0.1:51032"
+	downstreamAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for downstream processor")
 	downstreamProc, downstreamConn, err := startProcessorHierarchy(ctx, downstreamAddr, "downstream-proc-expiry", rootAddr)
 	require.NoError(t, err, "Failed to start downstream processor")
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
@@ -404,8 +413,9 @@ func TestIntegration_MultiLevel_InvalidToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start processors with TLS credentials
-	rootAddr := "127.0.0.1:51041"
+	// Start processors with TLS credentials and dynamic ports
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchyWithTLS(ctx, rootAddr, "root-proc-invalid", "")
 	require.NoError(t, err, "Failed to start root processor with TLS")
 	defer shutdownProcessorWithPortCleanup(rootProc)
@@ -413,7 +423,8 @@ func TestIntegration_MultiLevel_InvalidToken(t *testing.T) {
 		defer rootConn.Close()
 	}
 
-	downstreamAddr := "127.0.0.1:51042"
+	downstreamAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for downstream processor")
 	downstreamProc, downstreamConn, err := startProcessorHierarchyWithTLS(ctx, downstreamAddr, "downstream-proc-invalid", rootAddr)
 	require.NoError(t, err, "Failed to start downstream processor with TLS")
 	defer shutdownProcessorWithPortCleanup(downstreamProc)
@@ -474,8 +485,9 @@ func TestIntegration_MultiLevel_NonExistentProcessor(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start root processor only
-	rootAddr := "127.0.0.1:51051"
+	// Start root processor only with dynamic port
+	rootAddr, err := getFreePort()
+	require.NoError(t, err, "Failed to get free port for root processor")
 	rootProc, rootConn, err := startProcessorHierarchy(ctx, rootAddr, "root-proc-nonexist", "")
 	require.NoError(t, err, "Failed to start root processor")
 	defer shutdownProcessorWithPortCleanup(rootProc)

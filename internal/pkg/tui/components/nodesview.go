@@ -80,11 +80,13 @@ type NodesView struct {
 
 	// Graph view click regions
 	hunterBoxRegions []struct {
-		startLine   int
-		endLine     int
-		startCol    int
-		endCol      int
-		hunterIndex int
+		startLine     int
+		endLine       int
+		startCol      int
+		endCol        int
+		hunterIndex   int
+		hunterID      string // Hunter ID for lookup in global hunters list
+		processorAddr string // Processor address this hunter belongs to
 	}
 	processorBoxRegions []struct {
 		startLine     int
@@ -518,27 +520,36 @@ func (n *NodesView) getHierarchicalProcessors() []ProcessorInfo {
 func (n *NodesView) getFilteredGraphData() ([]ProcessorInfo, []HunterInfo) {
 	var filteredProcessors []ProcessorInfo
 	var filteredHunters []HunterInfo
+	var targetProcIdx int = -1
 
 	// Use the fixed graph target (set when entering graph view)
 	// This ensures the graph doesn't change as you navigate
 	targetProcessorAddr := n.graphViewTargetAddr
 
-	// Find the target processor
-	var selectedProc *ProcessorInfo
+	// Find the target processor and make a copy (we may modify its Hunters field)
 	for i := range n.processors {
 		if n.processors[i].Address == targetProcessorAddr {
-			selectedProc = &n.processors[i]
-			filteredProcessors = append(filteredProcessors, n.processors[i])
+			procCopy := n.processors[i]
+			// Make a copy of the Hunters slice so we don't modify the original
+			procCopy.Hunters = make([]HunterInfo, len(n.processors[i].Hunters))
+			copy(procCopy.Hunters, n.processors[i].Hunters)
+			filteredProcessors = append(filteredProcessors, procCopy)
+			targetProcIdx = len(filteredProcessors) - 1
 			break
 		}
 	}
 
-	// Add upstream processor if it exists
-	if selectedProc != nil && selectedProc.UpstreamAddr != "" {
+	// Add upstream processor if it exists (without its hunters - they're not relevant for this view)
+	if targetProcIdx >= 0 && filteredProcessors[targetProcIdx].UpstreamAddr != "" {
+		upstreamAddr := filteredProcessors[targetProcIdx].UpstreamAddr
 		for i := range n.processors {
-			if n.processors[i].Address == selectedProc.UpstreamAddr {
+			if n.processors[i].Address == upstreamAddr {
+				// Make a copy without hunters - we only show the upstream for context
+				upstreamCopy := n.processors[i]
+				upstreamCopy.Hunters = nil
 				// Insert upstream at the beginning (so it renders first)
-				filteredProcessors = append([]ProcessorInfo{n.processors[i]}, filteredProcessors...)
+				filteredProcessors = append([]ProcessorInfo{upstreamCopy}, filteredProcessors...)
+				targetProcIdx++ // Adjust index since we prepended
 				break
 			}
 		}
@@ -548,6 +559,24 @@ func (n *NodesView) getFilteredGraphData() ([]ProcessorInfo, []HunterInfo) {
 	for _, hunter := range n.hunters {
 		if hunter.ProcessorAddr == targetProcessorAddr {
 			filteredHunters = append(filteredHunters, hunter)
+		}
+	}
+
+	// Add virtual hunters from downstream TAP nodes
+	// TAP nodes appear as "hunters" in the graph view, using their virtual hunter data
+	for i := range n.processors {
+		proc := &n.processors[i]
+		if proc.UpstreamAddr == targetProcessorAddr && proc.NodeType == management.NodeType_NODE_TYPE_TAP {
+			// This is a downstream TAP - get its virtual hunter(s)
+			for _, hunter := range n.hunters {
+				if hunter.ProcessorAddr == proc.Address {
+					filteredHunters = append(filteredHunters, hunter)
+					// Also add to the target processor's Hunters for navigation
+					if targetProcIdx >= 0 {
+						filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+					}
+				}
+			}
 		}
 	}
 
@@ -845,34 +874,61 @@ func (n *NodesView) renderContent() string {
 		// Graph view: Only show the fixed target processor, its hunters, and its upstream
 		// Use graphViewTargetAddr which was set when entering graph view
 		var filteredProcessors []ProcessorInfo
-		var selectedProc *ProcessorInfo
 		targetProcessorAddr := n.graphViewTargetAddr
+		var targetProcIdx int = -1
 
-		// Find the target processor
+		// Find the target processor and make a copy (we may modify its Hunters field)
 		for i := range n.processors {
 			if n.processors[i].Address == targetProcessorAddr {
-				selectedProc = &n.processors[i]
-				filteredProcessors = append(filteredProcessors, n.processors[i])
+				procCopy := n.processors[i]
+				// Make a copy of the Hunters slice so we don't modify the original
+				procCopy.Hunters = make([]HunterInfo, len(n.processors[i].Hunters))
+				copy(procCopy.Hunters, n.processors[i].Hunters)
+				filteredProcessors = append(filteredProcessors, procCopy)
+				targetProcIdx = len(filteredProcessors) - 1
 				break
 			}
 		}
 
-		// Add upstream processor if it exists
-		if selectedProc != nil && selectedProc.UpstreamAddr != "" {
+		// Add upstream processor if it exists (without its hunters - they're not relevant for this view)
+		if targetProcIdx >= 0 && filteredProcessors[targetProcIdx].UpstreamAddr != "" {
+			upstreamAddr := filteredProcessors[targetProcIdx].UpstreamAddr
 			for i := range n.processors {
-				if n.processors[i].Address == selectedProc.UpstreamAddr {
+				if n.processors[i].Address == upstreamAddr {
+					// Make a copy without hunters - we only show the upstream for context
+					upstreamCopy := n.processors[i]
+					upstreamCopy.Hunters = nil // Don't show upstream's hunters in downstream view
 					// Insert upstream at the beginning (so it renders first)
-					filteredProcessors = append([]ProcessorInfo{n.processors[i]}, filteredProcessors...)
+					filteredProcessors = append([]ProcessorInfo{upstreamCopy}, filteredProcessors...)
+					targetProcIdx++ // Adjust index since we prepended
 					break
 				}
 			}
 		}
 
-		// Filter hunters to only show those from the target processor
+		// Collect hunters for the target processor
 		var filteredHunters []HunterInfo
 		for _, hunter := range n.hunters {
 			if hunter.ProcessorAddr == targetProcessorAddr {
 				filteredHunters = append(filteredHunters, hunter)
+			}
+		}
+
+		// Add virtual hunters from downstream TAP nodes
+		// TAP nodes appear as "hunters" side-by-side in the graph view
+		for i := range n.processors {
+			proc := &n.processors[i]
+			if proc.UpstreamAddr == targetProcessorAddr && proc.NodeType == management.NodeType_NODE_TYPE_TAP {
+				// This is a downstream TAP - get its virtual hunter(s)
+				for _, hunter := range n.hunters {
+					if hunter.ProcessorAddr == proc.Address {
+						filteredHunters = append(filteredHunters, hunter)
+						// Also add to the target processor's Hunters for graph rendering
+						if targetProcIdx >= 0 {
+							filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+						}
+					}
+				}
 			}
 		}
 
@@ -914,25 +970,31 @@ func (n *NodesView) renderContent() string {
 
 		// Update click regions from result
 		n.hunterBoxRegions = make([]struct {
-			startLine   int
-			endLine     int
-			startCol    int
-			endCol      int
-			hunterIndex int
+			startLine     int
+			endLine       int
+			startCol      int
+			endCol        int
+			hunterIndex   int
+			hunterID      string
+			processorAddr string
 		}, len(result.HunterBoxRegions))
 		for i, region := range result.HunterBoxRegions {
 			n.hunterBoxRegions[i] = struct {
-				startLine   int
-				endLine     int
-				startCol    int
-				endCol      int
-				hunterIndex int
+				startLine     int
+				endLine       int
+				startCol      int
+				endCol        int
+				hunterIndex   int
+				hunterID      string
+				processorAddr string
 			}{
-				startLine:   region.StartLine,
-				endLine:     region.EndLine,
-				startCol:    region.StartCol,
-				endCol:      region.EndCol,
-				hunterIndex: region.HunterIndex,
+				startLine:     region.StartLine,
+				endLine:       region.EndLine,
+				startCol:      region.StartCol,
+				endCol:        region.EndCol,
+				hunterIndex:   region.HunterIndex,
+				hunterID:      region.HunterID,
+				processorAddr: region.ProcessorAddr,
 			}
 		}
 
@@ -1106,11 +1168,13 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 	hunterBoxRegions := make([]nodesview.HunterBoxRegion, len(n.hunterBoxRegions))
 	for i, region := range n.hunterBoxRegions {
 		hunterBoxRegions[i] = nodesview.HunterBoxRegion{
-			StartLine:   region.startLine,
-			EndLine:     region.endLine,
-			StartCol:    region.startCol,
-			EndCol:      region.endCol,
-			HunterIndex: region.hunterIndex,
+			StartLine:     region.startLine,
+			EndLine:       region.endLine,
+			StartCol:      region.startCol,
+			EndCol:        region.endCol,
+			HunterIndex:   region.hunterIndex,
+			HunterID:      region.hunterID,
+			ProcessorAddr: region.processorAddr,
 		}
 	}
 
@@ -1139,7 +1203,20 @@ func (n *NodesView) handleMouseClick(msg tea.MouseMsg) tea.Cmd {
 
 	// Apply the result if the click was handled
 	if result.WasHandled {
-		n.selectedIndex = result.SelectedIndex
+		// For graph view hunter clicks, use hunter ID to find correct index in n.hunters
+		if n.viewMode == "graph" && result.SelectedHunterID != "" {
+			// Look up the hunter by ID in the global hunters list
+			foundIndex := -1
+			for i, hunter := range n.hunters {
+				if hunter.ID == result.SelectedHunterID && hunter.ProcessorAddr == result.SelectedHunterProcAddr {
+					foundIndex = i
+					break
+				}
+			}
+			n.selectedIndex = foundIndex
+		} else {
+			n.selectedIndex = result.SelectedIndex
+		}
 		n.selectedProcessorAddr = result.SelectedProcessorAddr
 		n.updateViewportContent() // Refresh to show selection
 	}

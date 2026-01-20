@@ -436,6 +436,25 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 		"processor_id", req.ProcessorId,
 		"listen_address", req.ListenAddress)
 
+	// Query the downstream's topology to get its hunters (including virtual hunter for TAPs)
+	// This is done after registration so we have a client connection to the downstream
+	var hunters []*management.ConnectedHunter
+	if downstream := p.downstreamManager.Get(req.ProcessorId); downstream != nil && downstream.Client != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := downstream.Client.GetTopology(ctx, &management.TopologyRequest{})
+		cancel()
+		if err == nil && resp.Processor != nil {
+			hunters = resp.Processor.Hunters
+			logger.Debug("Retrieved hunters from downstream processor",
+				"processor_id", req.ProcessorId,
+				"hunter_count", len(hunters))
+		} else if err != nil {
+			logger.Debug("Could not query downstream topology for hunters",
+				"processor_id", req.ProcessorId,
+				"error", err)
+		}
+	}
+
 	// Publish topology update event so upstream processors learn about this new processor
 	topologyUpdate := &management.TopologyUpdate{
 		UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
@@ -450,7 +469,7 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 					UpstreamProcessor: p.config.ProcessorID,
 					HierarchyDepth:    uint32(hierarchyDepth),
 					Reachable:         true,
-					Hunters:           []*management.ConnectedHunter{}, // Will be populated as hunters connect
+					Hunters:           hunters,
 				},
 			},
 		},

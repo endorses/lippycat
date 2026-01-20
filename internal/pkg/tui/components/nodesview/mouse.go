@@ -23,6 +23,9 @@ type MouseClickResult struct {
 	SelectedIndex         int    // -1 means nothing selected, >= 0 means hunter is selected
 	SelectedProcessorAddr string // Non-empty means a processor is selected (instead of hunter)
 	WasHandled            bool   // true if click was on a selectable region
+	// Hunter identification for proper lookup (graph view)
+	SelectedHunterID       string // Hunter ID for lookup in global hunters list
+	SelectedHunterProcAddr string // Processor address the selected hunter belongs to
 }
 
 // HandleMouseClick processes mouse click events and determines what was clicked.
@@ -73,9 +76,11 @@ func HandleMouseClick(params MouseClickParams) MouseClickResult {
 		for _, region := range params.HunterBoxRegions {
 			if contentLineY >= region.StartLine && contentLineY <= region.EndLine &&
 				clickX >= region.StartCol && clickX <= region.EndCol {
-				// Select this hunter
+				// Select this hunter - include ID for proper lookup
 				result.SelectedIndex = region.HunterIndex
 				result.SelectedProcessorAddr = "" // Deselect processors
+				result.SelectedHunterID = region.HunterID
+				result.SelectedHunterProcAddr = region.ProcessorAddr
 				result.WasHandled = true
 				return result
 			}

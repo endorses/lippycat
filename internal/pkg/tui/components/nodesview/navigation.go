@@ -55,7 +55,7 @@ func SelectNext(params NavigationParams) NavigationResult {
 
 		if currentProc != nil && len(currentProc.Hunters) > 0 {
 			// Move to first hunter of this processor
-			newIndex := GetGlobalHunterIndex(params.Hunters, currentProc.Hunters[0].ID, currentProc.Address)
+			newIndex := GetGlobalHunterIndex(params.Hunters, currentProc.Hunters[0].ID, currentProc.Hunters[0].ProcessorAddr)
 			return NavigationResult{
 				SelectedIndex:           newIndex,
 				SelectedProcessorAddr:   "",
@@ -91,7 +91,7 @@ func SelectNext(params NavigationParams) NavigationResult {
 					// Found the hunter, check if there's a next hunter in this processor
 					if hunterIdx < len(proc.Hunters)-1 {
 						// Move to next hunter in same processor
-						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[hunterIdx+1].ID, proc.Address)
+						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[hunterIdx+1].ID, proc.Hunters[hunterIdx+1].ProcessorAddr)
 						return NavigationResult{
 							SelectedIndex:           newIndex,
 							SelectedProcessorAddr:   "",
@@ -136,7 +136,7 @@ func SelectPrevious(params NavigationParams) NavigationResult {
 			// If last processor has hunters, select its last hunter
 			if len(lastProc.Hunters) > 0 {
 				lastHunter := lastProc.Hunters[len(lastProc.Hunters)-1]
-				newIndex := GetGlobalHunterIndex(params.Hunters, lastHunter.ID, lastProc.Address)
+				newIndex := GetGlobalHunterIndex(params.Hunters, lastHunter.ID, lastHunter.ProcessorAddr)
 				return NavigationResult{
 					SelectedIndex:           newIndex,
 					SelectedProcessorAddr:   "",
@@ -173,7 +173,7 @@ func SelectPrevious(params NavigationParams) NavigationResult {
 			prevProc := params.Processors[currentProcIdx-1]
 			if len(prevProc.Hunters) > 0 {
 				lastHunter := prevProc.Hunters[len(prevProc.Hunters)-1]
-				newIndex := GetGlobalHunterIndex(params.Hunters, lastHunter.ID, prevProc.Address)
+				newIndex := GetGlobalHunterIndex(params.Hunters, lastHunter.ID, lastHunter.ProcessorAddr)
 				return NavigationResult{
 					SelectedIndex:           newIndex,
 					SelectedProcessorAddr:   "",
@@ -207,7 +207,7 @@ func SelectPrevious(params NavigationParams) NavigationResult {
 				if hunter.ID == currentHunter.ID && hunter.ProcessorAddr == currentHunter.ProcessorAddr {
 					if hunterIdx > 0 {
 						// Move to previous hunter in same processor
-						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[hunterIdx-1].ID, proc.Address)
+						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[hunterIdx-1].ID, proc.Hunters[hunterIdx-1].ProcessorAddr)
 						return NavigationResult{
 							SelectedIndex:           newIndex,
 							SelectedProcessorAddr:   "",
@@ -291,7 +291,7 @@ func SelectUp(params NavigationParams) NavigationResult {
 				if !exists || hunterIdx >= len(prevProc.Hunters) {
 					hunterIdx = 0 // Default to first hunter
 				}
-				newIndex := GetGlobalHunterIndex(params.Hunters, prevProc.Hunters[hunterIdx].ID, prevProc.Address)
+				newIndex := GetGlobalHunterIndex(params.Hunters, prevProc.Hunters[hunterIdx].ID, prevProc.Hunters[hunterIdx].ProcessorAddr)
 				return NavigationResult{
 					SelectedIndex:           newIndex,
 					SelectedProcessorAddr:   "",
@@ -354,7 +354,7 @@ func SelectDown(params NavigationParams) NavigationResult {
 				if !exists || hunterIdx >= len(currentProc.Hunters) {
 					hunterIdx = 0 // Default to first hunter
 				}
-				newIndex := GetGlobalHunterIndex(params.Hunters, currentProc.Hunters[hunterIdx].ID, currentProc.Address)
+				newIndex := GetGlobalHunterIndex(params.Hunters, currentProc.Hunters[hunterIdx].ID, currentProc.Hunters[hunterIdx].ProcessorAddr)
 				return NavigationResult{
 					SelectedIndex:           newIndex,
 					SelectedProcessorAddr:   "",
@@ -426,7 +426,7 @@ func SelectLeft(params NavigationParams) NavigationResult {
 					if hunterIdx > 0 {
 						// Move to previous hunter in same processor
 						newHunterIdx := hunterIdx - 1
-						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[newHunterIdx].ID, proc.Address)
+						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[newHunterIdx].ID, proc.Hunters[newHunterIdx].ProcessorAddr)
 
 						// Remember this new position
 						updatedLastSelected := make(map[string]int)
@@ -472,7 +472,7 @@ func SelectRight(params NavigationParams) NavigationResult {
 					if hunterIdx < len(proc.Hunters)-1 {
 						// Move to next hunter in same processor
 						newHunterIdx := hunterIdx + 1
-						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[newHunterIdx].ID, proc.Address)
+						newIndex := GetGlobalHunterIndex(params.Hunters, proc.Hunters[newHunterIdx].ID, proc.Hunters[newHunterIdx].ProcessorAddr)
 
 						// Remember this new position
 						updatedLastSelected := make(map[string]int)

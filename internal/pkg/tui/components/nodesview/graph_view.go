@@ -15,11 +15,13 @@ import (
 
 // HunterBoxRegion represents a clickable hunter box region in graph view
 type HunterBoxRegion struct {
-	StartLine   int
-	EndLine     int
-	StartCol    int
-	EndCol      int
-	HunterIndex int
+	StartLine     int
+	EndLine       int
+	StartCol      int
+	EndCol        int
+	HunterIndex   int    // Index within filtered view (may not match global index)
+	HunterID      string // Hunter ID for lookup in global hunters list
+	ProcessorAddr string // Processor address this hunter belongs to
 }
 
 // ProcessorBoxRegion represents a clickable processor box region in graph view
@@ -563,13 +565,16 @@ func RenderGraphView(params GraphViewParams) GraphViewResult {
 				}
 				endCol := startCol + hunterBoxWidth
 
-				// Register click region
+				// Register click region with hunter ID for proper lookup
+				hunter := proc.Hunters[hIdx]
 				result.HunterBoxRegions = append(result.HunterBoxRegions, HunterBoxRegion{
-					StartLine:   hunterStartLine,
-					EndLine:     hunterStartLine + maxBoxLines - 1,
-					StartCol:    startCol,
-					EndCol:      endCol,
-					HunterIndex: globalIndex,
+					StartLine:     hunterStartLine,
+					EndLine:       hunterStartLine + maxBoxLines - 1,
+					StartCol:      startCol,
+					EndCol:        endCol,
+					HunterIndex:   globalIndex,
+					HunterID:      hunter.ID,
+					ProcessorAddr: hunter.ProcessorAddr,
 				})
 			}
 

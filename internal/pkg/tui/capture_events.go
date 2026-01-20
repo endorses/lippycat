@@ -439,7 +439,15 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 			logger.Debug("Retrieved processor topology",
 				"processor_id", processorID,
 				"node_type", nodeType,
-				"capture_interfaces", captureInterfaces)
+				"capture_interfaces", captureInterfaces,
+				"downstream_count", len(topology.DownstreamProcessors),
+				"hunter_count", len(topology.Hunters))
+
+			// Send full topology for processing (includes downstream processors and their hunters)
+			globalCaptureState.SendMessage(TopologyReceivedMsg{
+				Address:  msg.Address,
+				Topology: topology,
+			})
 		}
 
 		// Connection successful
@@ -819,6 +827,39 @@ func (m *Model) addProcessorFromTopologyUpdate(processor *management.ProcessorNo
 		proc.CaptureInterfaces = processor.CaptureInterfaces
 		// Invalidate cache when hierarchy changes
 		m.connectionMgr.InvalidateRootProcessorCache("")
+	}
+
+	// Convert and store hunters for this processor (e.g., TAP virtual hunters)
+	if len(processor.Hunters) > 0 {
+		hunters := make([]components.HunterInfo, 0, len(processor.Hunters))
+		for _, h := range processor.Hunters {
+			if h == nil {
+				continue
+			}
+			hunterInfo := components.HunterInfo{
+				ID:             h.HunterId,
+				Hostname:       h.Hostname,
+				RemoteAddr:     h.RemoteAddr,
+				Status:         h.Status,
+				ConnectedAt:    time.Now().UnixNano() - int64(h.ConnectedDurationSec*1e9),
+				LastHeartbeat:  h.LastHeartbeatNs,
+				PacketsMatched: 0,
+				PacketsDropped: 0,
+				Interfaces:     h.Interfaces,
+				ProcessorAddr:  nodeAddr,
+				Capabilities:   h.Capabilities,
+			}
+			if h.Stats != nil {
+				hunterInfo.PacketsCaptured = h.Stats.PacketsCaptured
+				hunterInfo.PacketsForwarded = h.Stats.PacketsForwarded
+				hunterInfo.ActiveFilters = h.Stats.ActiveFilters
+			}
+			hunters = append(hunters, hunterInfo)
+		}
+		m.connectionMgr.HuntersByProcessor[nodeAddr] = hunters
+		logger.Debug("Stored hunters from topology update",
+			"processor", nodeAddr,
+			"hunter_count", len(hunters))
 	}
 }
 

@@ -8,13 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.2] - 2026-01-20
 
 ### Added
-- TUI bug fixes and improvements
-
-### Changed
-- TODO: Add detailed changelog entries
+- **TUI calls view auto-scroll**: Automatically follows new calls when scrolled to bottom
+- **TUI calls view navigation**: Added GotoTop, GotoBottom methods for keyboard navigation
 
 ### Fixed
-- TODO: Add fixed items
+- **TUI UI freeze at high packet rates**: Fixed two issues causing UI freeze when using filters like `has:voip` at 300-400 Mbit/s traffic rates. GetNewFilteredPackets now uses monotonically increasing counter instead of buffer length, and MetadataFilter for `has:voip` also matches by Protocol name (SIP/RTP)
+- **TUI VoIP call tracking**: Fixed LocalCallAggregator not being initialized on startup for live and offline capture modes, causing "No active VoIP calls" despite SIP/RTP packets being captured
+- **TUI mouse click handling**: Fixed mouse clicks selecting incorrect rows in calls view; moved to central mouse_handler.go for consistent coordinate calculation
+- **TUI node column display**: Show interface name instead of "offline" in Node column for local capture modes
 
 ## [0.8.1] - 2026-01-20
 

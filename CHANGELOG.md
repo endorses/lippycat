@@ -8,13 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.1] - 2026-01-20
 
 ### Added
-- Bug fixes and documentation improvements
-
-### Changed
-- TODO: Add detailed changelog entries
+- **TUI filter documentation**: Comprehensive filter syntax help in the TUI help tab covering BPF, port, IP, and protocol filters
 
 ### Fixed
-- TODO: Add fixed items
+- **TUI TAP node display**: Correct TAP node visualization and selection behavior in the graph view
+- **Signal handler panic**: Prevent panic on early cleanup when service fails to start
+- **CI test stability**: Use dynamic port allocation in integration tests to prevent port conflicts
+- **Makefile version parsing**: Strip 'v' prefix from git tags when extracting version
 
 ## [0.8.0] - 2026-01-19
 

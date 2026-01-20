@@ -54,17 +54,7 @@ Vim-style navigation works in list views.
 | `Esc` | Cancel |
 | `Up/Down` | Browse filter history |
 
-### Filter Syntax
-
-- `ip:192.168.1.1` - Filter by IP address
-- `port:5060` - Filter by port
-- `proto:sip` - Filter by protocol
-- `method:INVITE` - Filter by SIP method
-- `callid:abc123` - Filter by Call-ID
-- `from:alice` - Filter by From header
-- `to:bob` - Filter by To header
-
-Combine filters: Each filter stacks (AND logic).
+See the **Filters** section (press `2`) for complete filter syntax.
 
 ## Nodes Tab
 

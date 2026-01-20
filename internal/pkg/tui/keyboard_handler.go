@@ -117,10 +117,13 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		case "1": // Keybindings section
 			cmd := m.uiState.HelpView.SetSection(components.SectionKeybindings)
 			return m, cmd
-		case "2": // Commands section
+		case "2": // Filters section
+			cmd := m.uiState.HelpView.SetSection(components.SectionFilters)
+			return m, cmd
+		case "3": // Commands section
 			cmd := m.uiState.HelpView.SetSection(components.SectionCommands)
 			return m, cmd
-		case "3": // Workflows section
+		case "4": // Workflows section
 			cmd := m.uiState.HelpView.SetSection(components.SectionWorkflows)
 			return m, cmd
 		case "j", "down":

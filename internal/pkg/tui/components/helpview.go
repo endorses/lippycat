@@ -20,6 +20,7 @@ type HelpSection int
 
 const (
 	SectionKeybindings HelpSection = iota
+	SectionFilters
 	SectionCommands
 	SectionWorkflows
 )
@@ -106,6 +107,8 @@ func (h *HelpView) LoadContentAsync() tea.Cmd {
 		switch section {
 		case SectionKeybindings:
 			filename = "keybindings.md"
+		case SectionFilters:
+			filename = "filters.md"
 		case SectionCommands:
 			filename = "commands.md"
 		case SectionWorkflows:
@@ -338,6 +341,8 @@ func (h *HelpView) loadSection(section HelpSection) {
 	switch section {
 	case SectionKeybindings:
 		filename = "keybindings.md"
+	case SectionFilters:
+		filename = "filters.md"
 	case SectionCommands:
 		filename = "commands.md"
 	case SectionWorkflows:
@@ -501,8 +506,9 @@ func (h *HelpView) renderSectionTabs() string {
 		label string
 	}{
 		{"1", "Keybindings"},
-		{"2", "Commands"},
-		{"3", "Workflows"},
+		{"2", "Filters"},
+		{"3", "Commands"},
+		{"4", "Workflows"},
 	}
 
 	activeStyle := lipgloss.NewStyle().

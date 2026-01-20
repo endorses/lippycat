@@ -42,8 +42,15 @@ func (lca *LocalCallAggregator) ProcessPacket(pkt *types.PacketDisplay) {
 		return
 	}
 
+	// Use the packet's interface name as the source identifier
+	// This shows which interface captured the packet in local modes
+	sourceID := pkt.Interface
+	if sourceID == "" {
+		sourceID = "local"
+	}
+
 	// Process the packet through the aggregator
-	lca.aggregator.ProcessPacketDisplay(pkt, "offline")
+	lca.aggregator.ProcessPacketDisplay(pkt, sourceID)
 
 	// Schedule a call update notification
 	lca.scheduleCallUpdate()
@@ -120,10 +127,10 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 		jitter = call.RTPStats.Jitter
 	}
 
-	// Build NodeID from hunters list
-	nodeID := "offline"
+	// Build NodeID from hunters list (contains interface names for local capture)
+	nodeID := "local"
 	if len(call.Hunters) > 0 {
-		nodeID = call.Hunters[0] // Use first hunter as node ID
+		nodeID = call.Hunters[0] // Use first interface/hunter as node ID
 	}
 
 	return types.CallInfo{

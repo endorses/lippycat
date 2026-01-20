@@ -132,9 +132,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	// Capture tab clicks (tab 0 - can be packet list or calls view)
 	if m.uiState.Tabs.GetActive() == 0 {
 		if m.uiState.ViewMode == "calls" {
-			// Forward to calls view
-			cmd := m.uiState.CallsView.Update(msg)
-			return m, cmd
+			return m.handleCallsViewClick(msg, contentStartY, contentHeight)
 		}
 		return m.handlePacketListClick(msg, contentStartY, contentHeight)
 	}
@@ -252,6 +250,27 @@ func (m Model) handlePacketListClick(msg tea.MouseMsg, contentStartY, contentHei
 					m = m.toggleDetailsPanel()
 				}
 			}
+		}
+	}
+	return m, nil
+}
+
+// handleCallsViewClick processes clicks on the calls view
+func (m Model) handleCallsViewClick(msg tea.MouseMsg, contentStartY, contentHeight int) (Model, tea.Cmd) {
+	// Calculate row position using the same approach as packet list
+	// Use same formula as handlePacketListClick for consistency
+	tableHeaderY := contentStartY + 1
+
+	if msg.Y > tableHeaderY {
+		// Calculate which row was clicked (relative to visible area)
+		visibleRow := msg.Y - tableHeaderY - 1
+
+		// Add scroll offset to get actual call index
+		actualCallIndex := m.uiState.CallsView.GetOffset() + visibleRow
+
+		calls := m.uiState.CallsView.GetCalls()
+		if actualCallIndex >= 0 && actualCallIndex < len(calls) {
+			m.uiState.CallsView.SetSelected(actualCallIndex)
 		}
 	}
 	return m, nil

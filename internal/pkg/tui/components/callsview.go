@@ -101,6 +101,7 @@ type CallsView struct {
 	height           int
 	theme            themes.Theme
 	showDetails      bool
+	autoScroll       bool                       // Whether to auto-scroll to bottom when new calls arrive
 	correlatedCalls  map[string]*CorrelatedCall // Map from Call-ID to correlated call data
 	correlatedCallMu sync.RWMutex               // Protect concurrent access to correlatedCalls
 }
@@ -137,6 +138,7 @@ func NewCallsView() CallsView {
 		selected:        0,
 		offset:          0,
 		showDetails:     false,
+		autoScroll:      true, // Start with auto-scroll enabled
 		theme:           themes.Solarized(),
 		correlatedCalls: make(map[string]*CorrelatedCall),
 	}
@@ -155,6 +157,9 @@ func (cv *CallsView) SetSize(width, height int) {
 
 // SetCalls updates the call list
 func (cv *CallsView) SetCalls(calls []Call) {
+	oldLen := len(cv.calls)
+	wasAtBottom := (oldLen == 0) || (cv.selected >= oldLen-1)
+
 	// Sort calls: first by start timestamp, then by call ID
 	sort.Slice(calls, func(i, j int) bool {
 		if calls[i].StartTime.Equal(calls[j].StartTime) {
@@ -164,10 +169,22 @@ func (cv *CallsView) SetCalls(calls []Call) {
 	})
 
 	cv.calls = calls
-	// Adjust selection if needed
-	if cv.selected >= len(cv.calls) && len(cv.calls) > 0 {
+
+	// Auto-scroll to bottom only if:
+	// 1. autoScroll is enabled AND
+	// 2. cursor was already at the bottom of the old list (or list was empty)
+	if cv.autoScroll && len(cv.calls) > 0 && wasAtBottom {
 		cv.selected = len(cv.calls) - 1
+		cv.adjustOffset()
+	} else if cv.selected >= len(cv.calls) && len(cv.calls) > 0 {
+		// Cursor is now out of bounds, adjust it to the last valid position
+		cv.selected = len(cv.calls) - 1
+		cv.adjustOffset()
+	} else {
+		// Just adjust offset to keep cursor visible
+		cv.adjustOffset()
 	}
+
 	if cv.selected < 0 {
 		cv.selected = 0
 	}
@@ -185,9 +202,12 @@ func (cv *CallsView) GetSelected() *Call {
 func (cv *CallsView) SelectNext() {
 	if cv.selected < len(cv.calls)-1 {
 		cv.selected++
-		// Auto-scroll
-		if cv.selected-cv.offset >= cv.height-4 {
-			cv.offset++
+		cv.adjustOffset()
+		// Re-enable auto-scroll if we reached the bottom
+		if cv.selected == len(cv.calls)-1 {
+			cv.autoScroll = true
+		} else {
+			cv.autoScroll = false
 		}
 	}
 }
@@ -196,10 +216,9 @@ func (cv *CallsView) SelectNext() {
 func (cv *CallsView) SelectPrevious() {
 	if cv.selected > 0 {
 		cv.selected--
-		// Auto-scroll
-		if cv.selected < cv.offset {
-			cv.offset = cv.selected
-		}
+		cv.adjustOffset()
+		// Disable auto-scroll when user manually navigates up
+		cv.autoScroll = false
 	}
 }
 
@@ -211,6 +230,62 @@ func (cv *CallsView) ToggleDetails() {
 // IsShowingDetails returns whether the details panel is visible
 func (cv *CallsView) IsShowingDetails() bool {
 	return cv.showDetails
+}
+
+// GotoTop moves to the first call
+func (cv *CallsView) GotoTop() {
+	if len(cv.calls) > 0 {
+		cv.selected = 0
+		cv.offset = 0
+		// Disable auto-scroll when jumping to top
+		cv.autoScroll = false
+	}
+}
+
+// GotoBottom moves to the last call
+func (cv *CallsView) GotoBottom() {
+	if len(cv.calls) > 0 {
+		cv.selected = len(cv.calls) - 1
+		cv.adjustOffset()
+		// Re-enable auto-scroll when going to bottom
+		cv.autoScroll = true
+	}
+}
+
+// IsAutoScrolling returns whether auto-scroll is enabled
+func (cv *CallsView) IsAutoScrolling() bool {
+	return cv.autoScroll
+}
+
+// GetOffset returns the current scroll offset
+func (cv *CallsView) GetOffset() int {
+	return cv.offset
+}
+
+// GetCalls returns the current call list
+func (cv *CallsView) GetCalls() []Call {
+	return cv.calls
+}
+
+// SetSelected sets the selected call index directly (for mouse clicks)
+func (cv *CallsView) SetSelected(index int) {
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(cv.calls) {
+		index = len(cv.calls) - 1
+	}
+	if index < 0 {
+		index = 0
+	}
+	cv.selected = index
+	cv.adjustOffset()
+	// Disable auto-scroll when manually selecting
+	cv.autoScroll = false
+	// Re-enable auto-scroll if we're at the bottom
+	if len(cv.calls) > 0 && cv.selected == len(cv.calls)-1 {
+		cv.autoScroll = true
+	}
 }
 
 // SetCorrelatedCalls updates the correlated calls data
@@ -264,43 +339,16 @@ func (cv *CallsView) Update(msg tea.Msg) tea.Cmd {
 		case "d":
 			cv.ToggleDetails()
 		case "home", "g":
-			if len(cv.calls) > 0 {
-				cv.selected = 0
-				cv.offset = 0
-			}
+			cv.GotoTop()
 		case "end", "G":
-			if len(cv.calls) > 0 {
-				cv.selected = len(cv.calls) - 1
-				cv.adjustOffset()
-			}
+			cv.GotoBottom()
 		case "pgup":
 			cv.PageUp()
 		case "pgdown":
 			cv.PageDown()
 		}
-	case tea.MouseMsg:
-		if msg.Type == tea.MouseLeft {
-			cv.HandleMouseClick(msg.Y)
-		}
 	}
 	return nil
-}
-
-// HandleMouseClick handles mouse clicks on call rows
-func (cv *CallsView) HandleMouseClick(mouseY int) {
-	// Calculate which row was clicked
-	// Header is at row 3 (border top + padding + header line)
-	// Content starts at row 4
-	headerOffset := 4
-	if mouseY < headerOffset {
-		return // Clicked on header or above
-	}
-
-	clickedRow := mouseY - headerOffset + cv.offset
-	if clickedRow >= 0 && clickedRow < len(cv.calls) {
-		cv.selected = clickedRow
-		cv.adjustOffset()
-	}
 }
 
 // adjustOffset ensures the selected call is visible
@@ -340,6 +388,8 @@ func (cv *CallsView) PageUp() {
 		cv.selected = 0
 	}
 	cv.adjustOffset()
+	// Disable auto-scroll when paging up
+	cv.autoScroll = false
 }
 
 // PageDown moves down one page
@@ -358,6 +408,12 @@ func (cv *CallsView) PageDown() {
 		cv.selected = 0
 	}
 	cv.adjustOffset()
+	// Re-enable auto-scroll if we reached the bottom
+	if cv.selected == len(cv.calls)-1 {
+		cv.autoScroll = true
+	} else {
+		cv.autoScroll = false
+	}
 }
 
 // View renders the calls view (full width)

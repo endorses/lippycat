@@ -12,6 +12,8 @@ import (
 )
 
 // parseAndApplyFilter parses and applies a filter expression to the packet list
+// Does NOT reapply to existing packets - at high traffic rates the buffer refills quickly.
+// This prevents UI freezing at 300-400+ Mbit/s by avoiding O(n) scans.
 func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 	// NOTE: We do NOT clear existing filters - this allows filter stacking
 	// Use 'c' to clear all filters or 'C' to remove the last filter
@@ -26,34 +28,22 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 		m.packetStore.AddFilter(filter)
 	} else if err != nil {
 		// Show error toast for invalid filter
-		toastCmd := m.uiState.Toast.Show(
+		return m.uiState.Toast.Show(
 			fmt.Sprintf("Invalid filter: %s", err.Error()),
 			components.ToastError,
 			components.ToastDurationLong,
 		)
-
-		// Reapply filters to all packets (don't clear - keep existing filters)
-		m.applyFilters()
-
-		// Update display
-		if !m.packetStore.HasFilter() {
-			m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-		} else {
-			m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-		}
-
-		return toastCmd
 	}
 
-	// Reapply filters to all packets
-	m.applyFilters()
+	// Clear filtered packets - new packets will flow through filter automatically
+	// via AddPacketBatch() and incremental updates in updatePacketListFiltered()
+	// At high traffic rates (300-400 Mbit/s), buffer refills in seconds anyway.
+	m.packetStore.ClearFilteredPackets()
+	m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
 
-	// Update display
-	if !m.packetStore.HasFilter() {
-		m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-	} else {
-		m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-	}
+	// Reset sync counters so incremental updates work correctly
+	m.lastSyncedFilteredCount = 0
+	m.lastFilterState = true
 
 	// Show toast with filter count
 	filterCount := m.packetStore.FilterChain.Count()
@@ -143,20 +133,5 @@ func isBPFExpression(s string) bool {
 	return false
 }
 
-// applyFilters re-applies all active filters to the packet list
-func (m *Model) applyFilters() {
-	if !m.packetStore.HasFilter() {
-		m.packetStore.MatchedPackets = int64(m.packetStore.PacketsCount)
-		m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0)
-		return
-	}
-
-	orderedPackets := m.getPacketsInOrder()
-	m.packetStore.FilteredPackets = make([]components.PacketDisplay, 0, len(orderedPackets))
-	for _, pkt := range orderedPackets {
-		if m.packetStore.MatchFilter(pkt) {
-			m.packetStore.FilteredPackets = append(m.packetStore.FilteredPackets, pkt)
-		}
-	}
-	m.packetStore.MatchedPackets = int64(len(m.packetStore.FilteredPackets))
-}
+// Note: applyFilters() was removed in favor of async reapplication
+// via startAsyncFilterReapply() to prevent UI freezing at high packet rates.

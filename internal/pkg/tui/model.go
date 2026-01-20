@@ -111,7 +111,7 @@ type Model struct {
 
 	// Incremental packet list sync tracking
 	lastSyncedTotal         int64 // Last synced TotalPackets for unfiltered mode
-	lastSyncedFilteredCount int   // Last synced filtered packet count for filtered mode
+	lastSyncedFilteredCount int64 // Last synced MatchedPackets value for filtered mode
 	lastFilterState         bool  // Was filter active on last sync (to detect filter changes)
 
 	// Call aggregation (offline and live modes)

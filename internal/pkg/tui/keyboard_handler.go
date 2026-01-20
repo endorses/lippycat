@@ -328,32 +328,36 @@ func (m Model) handleRemoveLastFilter() (Model, tea.Cmd) {
 	if m.packetStore.HasFilter() {
 		filterCount := m.packetStore.FilterChain.Count()
 		if m.packetStore.FilterChain.RemoveLast() {
-			// Reapply remaining filters
-			m.applyFilters()
-
-			// Update display and reset sync counters
-			if !m.packetStore.HasFilter() {
-				m.uiState.PacketList.SetPackets(m.getPacketsInOrder())
-				_, _, total, _ := m.packetStore.GetBufferInfo()
-				m.lastSyncedTotal = total
-				m.lastSyncedFilteredCount = 0
-			} else {
-				m.uiState.PacketList.SetPackets(m.packetStore.FilteredPackets)
-				m.lastSyncedFilteredCount = m.packetStore.FilteredCount()
-				m.lastSyncedTotal = 0
-			}
-
-			// Show toast notification
+			// Show toast notification first
 			remainingCount := filterCount - 1
 			msg := "Last filter removed"
 			if remainingCount > 0 {
 				msg = fmt.Sprintf("Last filter removed (%d remaining)", remainingCount)
 			}
-			return m, m.uiState.Toast.Show(
+			toastCmd := m.uiState.Toast.Show(
 				msg,
 				components.ToastInfo,
 				components.ToastDurationShort,
 			)
+
+			// If no filters remain, show all packets via incremental updates
+			if !m.packetStore.HasFilter() {
+				// Reset to unfiltered mode - incremental updates will handle the rest
+				m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
+				m.lastSyncedTotal = 0
+				m.lastSyncedFilteredCount = 0
+				m.lastFilterState = false
+				return m, toastCmd
+			}
+
+			// Clear filtered packets - new packets will flow through remaining filters
+			// via AddPacketBatch() and incremental updates in updatePacketListFiltered()
+			m.packetStore.ClearFilteredPackets()
+			m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
+			m.lastSyncedFilteredCount = 0
+			m.lastFilterState = true
+
+			return m, toastCmd
 		}
 	}
 	return m, nil

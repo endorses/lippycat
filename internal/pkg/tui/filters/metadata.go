@@ -25,14 +25,16 @@ func NewMetadataFilter(metadataType string) *MetadataFilter {
 func (f *MetadataFilter) Match(packet components.PacketDisplay) bool {
 	switch f.metadataType {
 	case "voip":
-		// Check if packet has VoIP metadata (set by hunter/processor)
-		// This is more reliable than protocol detection because it's based on
-		// the hunter's analysis of SIP signaling and RTP port tracking
-		//
-		// We trust the hunter/processor's analysis completely - if they marked
-		// it as VoIP traffic, it IS VoIP traffic, even if the TUI can't parse
-		// the link layer correctly.
-		return packet.VoIPData != nil
+		// Check if packet has VoIP metadata OR is a VoIP protocol
+		// VoIPData is set when full packet parsing is done (convertPacket)
+		// but at high rates, convertPacketFast is used which only sets Protocol
+		// The background processor uses Protocol to send to call aggregator,
+		// so we should also accept packets based on Protocol for consistency.
+		if packet.VoIPData != nil {
+			return true
+		}
+		// Also match by protocol name for packets from fast conversion path
+		return packet.Protocol == "SIP" || packet.Protocol == "RTP"
 
 	default:
 		return false

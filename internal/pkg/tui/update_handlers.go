@@ -207,7 +207,8 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 		m.packetStore.ClearFilter()
 		filterErrorCmd = m.parseAndApplyFilter(msg.Protocol.BPFFilter)
 		// Reset sync counters for incremental updates
-		m.lastSyncedFilteredCount = m.packetStore.FilteredCount()
+		_, _, _, matchedPackets := m.packetStore.GetBufferInfo()
+		m.lastSyncedFilteredCount = matchedPackets
 		m.lastSyncedTotal = 0
 	} else {
 		// "All" protocol - clear filters

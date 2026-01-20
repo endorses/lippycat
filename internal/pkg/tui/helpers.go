@@ -143,12 +143,12 @@ func (m *Model) updatePacketListUnfiltered() {
 
 // updatePacketListFiltered handles incremental updates in filtered mode
 func (m *Model) updatePacketListFiltered() {
-	newPackets, newCount, needsFullRefresh := m.packetStore.GetNewFilteredPackets(m.lastSyncedFilteredCount)
+	newPackets, newTotal, needsFullRefresh := m.packetStore.GetNewFilteredPackets(m.lastSyncedFilteredCount)
 
 	if needsFullRefresh {
-		// Significant trimming occurred - do full refresh
+		// Buffer wrapped significantly - do full refresh
 		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
-		m.lastSyncedFilteredCount = newCount
+		m.lastSyncedFilteredCount = newTotal
 		return
 	}
 
@@ -170,7 +170,7 @@ func (m *Model) updatePacketListFiltered() {
 
 	// Append new filtered packets
 	m.uiState.PacketList.AppendPackets(newPackets)
-	m.lastSyncedFilteredCount = newCount
+	m.lastSyncedFilteredCount = newTotal
 }
 
 // processPendingPackets processes packets pulled from the pending buffer.
@@ -258,7 +258,8 @@ func (m *Model) doFullPacketListRefresh(hasFilter bool) {
 		m.lastSyncedFilteredCount = 0
 	} else {
 		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
-		m.lastSyncedFilteredCount = m.packetStore.FilteredCount()
+		_, _, _, matchedPackets := m.packetStore.GetBufferInfo()
+		m.lastSyncedFilteredCount = matchedPackets
 		m.lastSyncedTotal = 0
 	}
 }

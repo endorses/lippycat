@@ -100,6 +100,44 @@ func TestSetupHandlerWithCallback_CleansUpOnContextCancellation(t *testing.T) {
 	cleanup()
 }
 
+func TestSetupHandler_EarlyCleanupNoPanic(t *testing.T) {
+	// This test ensures that calling cleanup() early (before any signal or context cancellation)
+	// does not cause a panic. This is the scenario that occurs when a service fails to start
+	// (e.g., "address already in use") and cleanup is called via defer.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cleanup := SetupHandler(ctx, cancel)
+
+	// Immediately call cleanup without any signal or context cancellation
+	// This used to panic due to nil pointer dereference when reading from closed channel
+	cleanup()
+
+	// Give the goroutine time to process the closed channel
+	time.Sleep(50 * time.Millisecond)
+
+	// If we get here, no panic occurred - test passes
+}
+
+func TestSetupHandlerWithCallback_EarlyCleanupNoPanic(t *testing.T) {
+	// Same test for the callback variant
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	callbackInvoked := false
+	callback := func() {
+		callbackInvoked = true
+	}
+
+	cleanup := SetupHandlerWithCallback(ctx, callback)
+
+	// Immediately call cleanup without any signal or context cancellation
+	cleanup()
+
+	// Callback should not have been invoked
+	assert.False(t, callbackInvoked, "Callback should not be invoked on early cleanup")
+}
+
 func TestWaitForSignal_BlocksUntilSignal(t *testing.T) {
 	// This test needs to run in a goroutine since WaitForSignal blocks
 	done := make(chan os.Signal, 1)

@@ -18,9 +18,12 @@ func SetupHandler(ctx context.Context, cancel context.CancelFunc) (cleanup func(
 
 	go func() {
 		select {
-		case sig := <-sigCh:
-			logger.Info("Received signal, initiating shutdown", "signal", sig.String())
-			cancel()
+		case sig, ok := <-sigCh:
+			if ok && sig != nil {
+				logger.Info("Received signal, initiating shutdown", "signal", sig.String())
+				cancel()
+			}
+			// Channel closed or nil signal - cleanup is happening, do nothing
 		case <-ctx.Done():
 			// Context already cancelled, clean up
 		}
@@ -43,9 +46,12 @@ func SetupHandlerWithCallback(ctx context.Context, onSignal func()) (cleanup fun
 	go func() {
 		defer close(done)
 		select {
-		case sig := <-sigCh:
-			logger.Info("Received signal, invoking callback", "signal", sig.String())
-			onSignal()
+		case sig, ok := <-sigCh:
+			if ok && sig != nil {
+				logger.Info("Received signal, invoking callback", "signal", sig.String())
+				onSignal()
+			}
+			// Channel closed or nil signal - cleanup is happening, do nothing
 		case <-ctx.Done():
 			// Context cancelled, no callback needed
 		}

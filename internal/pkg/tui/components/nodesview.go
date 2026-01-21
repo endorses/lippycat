@@ -568,12 +568,32 @@ func (n *NodesView) getFilteredGraphData() ([]ProcessorInfo, []HunterInfo) {
 		proc := &n.processors[i]
 		if proc.UpstreamAddr == targetProcessorAddr && proc.NodeType == management.NodeType_NODE_TYPE_TAP {
 			// This is a downstream TAP - get its virtual hunter(s)
+			// Virtual hunters have ProcessorAddr set to the TAP's ProcessorID, not its listen address
+			// First check if this processor has hunters directly attached
+			for _, hunter := range proc.Hunters {
+				filteredHunters = append(filteredHunters, hunter)
+				// Also add to the target processor's Hunters for navigation
+				if targetProcIdx >= 0 {
+					filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+				}
+			}
+			// Also check the flat hunters list for any that might be keyed by ProcessorID or Address
 			for _, hunter := range n.hunters {
-				if hunter.ProcessorAddr == proc.Address {
-					filteredHunters = append(filteredHunters, hunter)
-					// Also add to the target processor's Hunters for navigation
-					if targetProcIdx >= 0 {
-						filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+				if hunter.ProcessorAddr == proc.ProcessorID || hunter.ProcessorAddr == proc.Address {
+					// Avoid duplicates - check if already added from proc.Hunters
+					alreadyAdded := false
+					for _, fh := range filteredHunters {
+						if fh.ID == hunter.ID && fh.ProcessorAddr == hunter.ProcessorAddr {
+							alreadyAdded = true
+							break
+						}
+					}
+					if !alreadyAdded {
+						filteredHunters = append(filteredHunters, hunter)
+						// Also add to the target processor's Hunters for navigation
+						if targetProcIdx >= 0 {
+							filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+						}
 					}
 				}
 			}
@@ -920,12 +940,31 @@ func (n *NodesView) renderContent() string {
 			proc := &n.processors[i]
 			if proc.UpstreamAddr == targetProcessorAddr && proc.NodeType == management.NodeType_NODE_TYPE_TAP {
 				// This is a downstream TAP - get its virtual hunter(s)
+				// First check if this processor has hunters directly attached
+				for _, hunter := range proc.Hunters {
+					filteredHunters = append(filteredHunters, hunter)
+					// Also add to the target processor's Hunters for graph rendering
+					if targetProcIdx >= 0 {
+						filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+					}
+				}
+				// Also check the flat hunters list for any that might be keyed by ProcessorID or Address
 				for _, hunter := range n.hunters {
-					if hunter.ProcessorAddr == proc.Address {
-						filteredHunters = append(filteredHunters, hunter)
-						// Also add to the target processor's Hunters for graph rendering
-						if targetProcIdx >= 0 {
-							filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+					if hunter.ProcessorAddr == proc.ProcessorID || hunter.ProcessorAddr == proc.Address {
+						// Avoid duplicates - check if already added from proc.Hunters
+						alreadyAdded := false
+						for _, fh := range filteredHunters {
+							if fh.ID == hunter.ID && fh.ProcessorAddr == hunter.ProcessorAddr {
+								alreadyAdded = true
+								break
+							}
+						}
+						if !alreadyAdded {
+							filteredHunters = append(filteredHunters, hunter)
+							// Also add to the target processor's Hunters for graph rendering
+							if targetProcIdx >= 0 {
+								filteredProcessors[targetProcIdx].Hunters = append(filteredProcessors[targetProcIdx].Hunters, hunter)
+							}
 						}
 					}
 				}

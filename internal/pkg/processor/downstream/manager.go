@@ -118,6 +118,66 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		existing.LastSeen = now
 		existing.ListenAddress = listenAddress // Update in case it changed
 		existing.Version = version
+
+		// Create new gRPC client FIRST before closing old connection
+		// This ensures the existing goroutine can use the new client immediately
+		var opts []grpc.DialOption
+		if m.tlsInsecure {
+			opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		} else {
+			tlsCreds, err := tlsutil.BuildClientCredentials(tlsutil.ClientConfig{
+				CAFile:             m.tlsCAFile,
+				CertFile:           m.tlsCertFile,
+				KeyFile:            m.tlsKeyFile,
+				SkipVerify:         m.tlsSkipVerify,
+				ServerNameOverride: m.tlsServerName,
+			})
+			if err != nil {
+				logger.Error("Failed to build TLS credentials for downstream processor on re-registration",
+					"processor_id", processorID,
+					"address", listenAddress,
+					"error", err)
+				return fmt.Errorf("build TLS credentials: %w", err)
+			}
+			opts = append(opts, grpc.WithTransportCredentials(tlsCreds))
+		}
+
+		// Create fresh connection directly (not through pool) to ensure it's valid
+		conn, err := grpc.DialContext(m.ctx, listenAddress, opts...)
+		if err != nil {
+			logger.Error("Failed to create client for downstream processor on re-registration",
+				"processor_id", processorID,
+				"address", listenAddress,
+				"error", err)
+			return err
+		}
+
+		// Store old connection to close after updating the client
+		oldConn := existing.Conn
+
+		// Update client atomically - the existing goroutine will use the new client
+		existing.Client = management.NewManagementServiceClient(conn)
+		existing.Conn = conn
+
+		// Now close old connection
+		if oldConn != nil {
+			if err := oldConn.Close(); err != nil {
+				logger.Debug("Error closing old downstream connection",
+					"processor_id", processorID,
+					"error", err)
+			}
+		}
+
+		// DO NOT cancel topology stream or start new subscription!
+		// The existing receiveTopologyUpdates goroutine will detect the connection
+		// issue, wait for backoff, then reconnect using the updated Client.
+		// Starting a new goroutine causes a race where both goroutines fight
+		// over the topology stream context.
+
+		// Reset reconnect attempts so the existing goroutine reconnects quickly
+		existing.reconnectAttempts = 0
+		existing.reconnectBackoff = 0
+
 		return nil
 	}
 
@@ -426,8 +486,8 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 }
 
 // reconnectTopologyStream attempts to reconnect the topology stream for a downstream processor.
-// After reconnection, it performs a full topology re-sync by waiting for the initial snapshot
-// from the topology stream.
+// After reconnection, it queries GetTopology() to get the full state (including hunters)
+// and publishes a PROCESSOR_CONNECTED event with the complete topology.
 func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -459,33 +519,62 @@ func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 	proc.TopologyStream = stream
 	proc.TopologyStreamActive = true
 
-	logger.Info("Topology stream reconnected, waiting for initial snapshot",
+	logger.Info("Topology stream reconnected",
 		"processor_id", proc.ProcessorID)
 
-	// Perform full topology re-sync
-	// The first message in a topology subscription is always a snapshot
-	// This will be handled by receiveTopologyUpdates goroutine
-	// Mark processor as reachable again if publisher is set
+	// Query GetTopology() to get the full state including hunters
+	// SubscribeTopology only sends updates, not an initial snapshot
 	if m.topologyPublisher != nil {
-		// Publish processor reconnected event
-		update := &management.TopologyUpdate{
-			TimestampNs: time.Now().UnixNano(),
-			ProcessorId: proc.ProcessorID,
-			UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
-			Event: &management.TopologyUpdate_ProcessorConnected{
-				ProcessorConnected: &management.ProcessorConnectedEvent{
-					Processor: &management.ProcessorNode{
-						ProcessorId: proc.ProcessorID,
-						Address:     proc.ListenAddress,
-						Reachable:   true,
+		// Use a short timeout for the topology query
+		queryCtx, queryCancel := context.WithTimeout(m.ctx, 5*time.Second)
+		defer queryCancel()
+
+		topologyResp, err := proc.Client.GetTopology(queryCtx, &management.TopologyRequest{})
+		if err != nil {
+			logger.Warn("Failed to query topology after reconnection, publishing minimal event",
+				"processor_id", proc.ProcessorID,
+				"error", err)
+			// Fall back to minimal event
+			update := &management.TopologyUpdate{
+				TimestampNs: time.Now().UnixNano(),
+				ProcessorId: proc.ProcessorID,
+				UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
+				Event: &management.TopologyUpdate_ProcessorConnected{
+					ProcessorConnected: &management.ProcessorConnectedEvent{
+						Processor: &management.ProcessorNode{
+							ProcessorId: proc.ProcessorID,
+							Address:     proc.ListenAddress,
+							Reachable:   true,
+						},
 					},
 				},
-			},
-		}
-		m.topologyPublisher.PublishTopologyUpdate(update)
+			}
+			m.topologyPublisher.PublishTopologyUpdate(update)
+		} else if topologyResp.Processor != nil {
+			// Publish full topology with hunters
+			processor := topologyResp.Processor
+			// Ensure address is set
+			if processor.Address == "" {
+				processor.Address = proc.ListenAddress
+			}
+			processor.Reachable = true
 
-		logger.Info("Published processor reconnected event",
-			"processor_id", proc.ProcessorID)
+			update := &management.TopologyUpdate{
+				TimestampNs: time.Now().UnixNano(),
+				ProcessorId: proc.ProcessorID,
+				UpdateType:  management.TopologyUpdateType_TOPOLOGY_PROCESSOR_CONNECTED,
+				Event: &management.TopologyUpdate_ProcessorConnected{
+					ProcessorConnected: &management.ProcessorConnectedEvent{
+						Processor: processor,
+					},
+				},
+			}
+			m.topologyPublisher.PublishTopologyUpdate(update)
+
+			logger.Info("Published processor reconnected event with full topology",
+				"processor_id", proc.ProcessorID,
+				"hunter_count", len(processor.Hunters))
+		}
 	}
 
 	return nil

@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/remotecapture"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
@@ -368,8 +369,41 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	// Update hunters for this processor
-	m.connectionMgr.HuntersByProcessor[processorAddr] = msg.Hunters
+	// Update hunters - merge stats into existing hunters (from topology) or add new ones
+	// This handles downstream hunters whose stats come via GetHunterStatus but whose
+	// structure (ProcessorAddr) comes from topology updates
+	for _, hunter := range msg.Hunters {
+		// Try to find existing hunter by ID across all processors
+		found := false
+		for procAddr, hunters := range m.connectionMgr.HuntersByProcessor {
+			for i, existing := range hunters {
+				if existing.ID == hunter.ID {
+					// Update stats for existing hunter (preserve ProcessorAddr from topology)
+					hunters[i].Status = hunter.Status
+					hunters[i].PacketsCaptured = hunter.PacketsCaptured
+					hunters[i].PacketsForwarded = hunter.PacketsForwarded
+					hunters[i].ActiveFilters = hunter.ActiveFilters
+					hunters[i].CPUPercent = hunter.CPUPercent
+					hunters[i].MemoryRSSBytes = hunter.MemoryRSSBytes
+					hunters[i].LastHeartbeat = hunter.LastHeartbeat
+					hunters[i].ConnectedAt = hunter.ConnectedAt
+					m.connectionMgr.HuntersByProcessor[procAddr] = hunters
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+
+		// If not found, add to connected processor's list (directly connected hunter)
+		if !found {
+			hunters := m.connectionMgr.HuntersByProcessor[processorAddr]
+			hunters = append(hunters, hunter)
+			m.connectionMgr.HuntersByProcessor[processorAddr] = hunters
+		}
+	}
 
 	// Update NodesView with processor info (includes processor IDs, status, and hierarchy)
 	m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
@@ -1052,94 +1086,10 @@ func parseDNSFromRawData(rawData []byte, linkType layers.LinkType) *types.DNSMet
 		NoCopy: true,
 	})
 
-	// Extract DNS layer
-	dnsLayer := packet.Layer(layers.LayerTypeDNS)
-	if dnsLayer == nil {
-		return nil
-	}
-
-	dns, ok := dnsLayer.(*layers.DNS)
-	if !ok {
-		return nil
-	}
-
-	metadata := &types.DNSMetadata{
-		TransactionID:      dns.ID,
-		IsResponse:         dns.QR,
-		ResponseCode:       rcodeToString(dns.ResponseCode),
-		Authoritative:      dns.AA,
-		Truncated:          dns.TC,
-		RecursionDesired:   dns.RD,
-		RecursionAvailable: dns.RA,
-		QuestionCount:      dns.QDCount,
-		AnswerCount:        dns.ANCount,
-		AuthorityCount:     dns.NSCount,
-		AdditionalCount:    dns.ARCount,
-	}
-
-	// Extract query information
-	if len(dns.Questions) > 0 {
-		q := dns.Questions[0]
-		metadata.QueryName = string(q.Name)
-		metadata.QueryType = q.Type.String()
-		metadata.QueryClass = q.Class.String()
-	}
-
-	// Extract answers
-	for _, answer := range dns.Answers {
-		a := types.DNSAnswer{
-			Name:  string(answer.Name),
-			Type:  answer.Type.String(),
-			Class: answer.Class.String(),
-			TTL:   answer.TTL,
-		}
-
-		// Extract answer data based on type
-		switch answer.Type {
-		case layers.DNSTypeA:
-			if len(answer.IP) == 4 {
-				a.Data = answer.IP.String()
-			}
-		case layers.DNSTypeAAAA:
-			if len(answer.IP) == 16 {
-				a.Data = answer.IP.String()
-			}
-		case layers.DNSTypeCNAME, layers.DNSTypeNS, layers.DNSTypePTR:
-			a.Data = string(answer.CNAME)
-		case layers.DNSTypeMX:
-			a.Data = string(answer.MX.Name)
-		case layers.DNSTypeTXT:
-			for _, txt := range answer.TXTs {
-				a.Data += string(txt) + " "
-			}
-		default:
-			a.Data = fmt.Sprintf("<%s data>", answer.Type.String())
-		}
-
-		metadata.Answers = append(metadata.Answers, a)
-	}
-
-	return metadata
-}
-
-// rcodeToString converts DNS response code to string
-func rcodeToString(rcode layers.DNSResponseCode) string {
-	switch rcode {
-	case layers.DNSResponseCodeNoErr:
-		return "NOERROR"
-	case layers.DNSResponseCodeFormErr:
-		return "FORMERR"
-	case layers.DNSResponseCodeServFail:
-		return "SERVFAIL"
-	case layers.DNSResponseCodeNXDomain:
-		return "NXDOMAIN"
-	case layers.DNSResponseCodeNotImp:
-		return "NOTIMP"
-	case layers.DNSResponseCodeRefused:
-		return "REFUSED"
-	default:
-		return fmt.Sprintf("RCODE%d", rcode)
-	}
+	// Use the DNS parser which handles both gopacket auto-decoded DNS
+	// and manual parsing from UDP/TCP payload
+	parser := dns.NewParser()
+	return parser.Parse(packet)
 }
 
 // parseHTTPFromRawData parses HTTP metadata from raw packet bytes.

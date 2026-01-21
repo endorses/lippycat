@@ -278,6 +278,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 }
 
 // GetHunterStatus retrieves status of connected hunters (Management Service)
+// This includes hunters from this processor AND all downstream processors in the hierarchy.
 func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusRequest) (*management.StatusResponse, error) {
 	hunters := p.hunterManager.GetAll(req.HunterId)
 
@@ -313,6 +314,33 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 		if req.HunterId == "" || req.HunterId == virtualHunter.HunterId {
 			// Prepend virtual hunter so it appears first
 			connectedHunters = append([]*management.ConnectedHunter{virtualHunter}, connectedHunters...)
+		}
+	}
+
+	// Query downstream processors for their hunters (aggregates the full hierarchy)
+	if p.downstreamManager != nil {
+		downstreams := p.downstreamManager.GetAll()
+		for _, downstream := range downstreams {
+			if downstream.Client == nil {
+				continue
+			}
+
+			// Use short timeout to avoid blocking on slow/unavailable downstream
+			queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			resp, err := downstream.Client.GetHunterStatus(queryCtx, &management.StatusRequest{
+				HunterId: req.HunterId, // Pass through any filter
+			})
+			cancel()
+
+			if err != nil {
+				logger.Debug("Failed to query downstream processor for hunter status",
+					"downstream_id", downstream.ProcessorID,
+					"error", err)
+				continue
+			}
+
+			// Append downstream hunters to our response
+			connectedHunters = append(connectedHunters, resp.Hunters...)
 		}
 	}
 

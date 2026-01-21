@@ -450,24 +450,43 @@ func TestProcessor_Shutdown_WithSubscribers(t *testing.T) {
 func TestProcessor_Shutdown_WithUpstream(t *testing.T) {
 	// This test requires a mock upstream processor
 	// For now, we'll test that creating processor with upstream doesn't crash on shutdown
+	// The upstream connection manager now handles reconnection in the background
 
 	processor, err := New(Config{
 		ProcessorID:  "test-processor",
 		ListenAddr:   "localhost:0",
 		MaxHunters:   10,
-		UpstreamAddr: "upstream:50051", // Non-existent upstream (won't connect)
+		UpstreamAddr: "upstream:50051", // Non-existent upstream (will retry in background)
 	})
 	require.NoError(t, err)
 	require.NotNil(t, processor.upstreamManager)
 
-	// Start processor - will try to connect to upstream but should handle failure
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Start processor - upstream connection manager starts in background
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = processor.Start(ctx)
-	// Should fail to connect to upstream, but that's expected in this test
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to connect to upstream")
+	// Start in goroutine since it blocks waiting for shutdown
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- processor.Start(ctx)
+	}()
+
+	// Give it time to start attempting connections
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify upstream manager was started
+	assert.True(t, processor.upstreamManager != nil)
+
+	// Shutdown should clean up gracefully
+	cancel()
+
+	select {
+	case err := <-errCh:
+		// Should complete without error (context cancelled is normal)
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown timed out")
+	}
 }
 
 // TestProcessor_Start_WithTLSProductionMode tests production mode requirements

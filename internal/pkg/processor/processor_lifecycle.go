@@ -195,10 +195,11 @@ func (p *Processor) Start(ctx context.Context) error {
 		}
 	}()
 
-	// Connect to upstream if configured (hierarchical mode)
+	// Start upstream connection manager if configured (hierarchical mode)
+	// The connection manager handles automatic reconnection on failure
 	if p.upstreamManager != nil {
-		if err := p.upstreamManager.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to upstream: %w", err)
+		if err := p.upstreamManager.Start(); err != nil {
+			return fmt.Errorf("failed to start upstream connection manager: %w", err)
 		}
 		defer p.upstreamManager.Disconnect()
 	}

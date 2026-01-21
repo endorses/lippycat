@@ -49,6 +49,13 @@ type Manager struct {
 	// Packet forwarding stats
 	packetsForwarded *atomic.Uint64
 
+	// Reconnection state
+	reconnecting         bool
+	reconnectMu          sync.Mutex
+	reconnectAttempts    int
+	consecutiveFailures  atomic.Int32
+	maxReconnectAttempts int // 0 = unlimited
+
 	// Context for goroutines
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -67,12 +74,87 @@ func NewManager(config Config, packetsForwarded *atomic.Uint64) *Manager {
 	}
 }
 
-// Connect establishes connection to upstream processor
-func (m *Manager) Connect() error {
+// Start begins the upstream connection manager (runs in background)
+// It handles initial connection and automatic reconnection on failure.
+func (m *Manager) Start() error {
 	if m.config.Address == "" {
 		return fmt.Errorf("upstream address not configured")
 	}
 
+	m.wg.Add(1)
+	go m.connectionManager()
+
+	return nil
+}
+
+// connectionManager manages upstream connection lifecycle with automatic reconnection
+func (m *Manager) connectionManager() {
+	defer m.wg.Done()
+
+	logger.Info("Upstream connection manager started", "addr", m.config.Address)
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			logger.Info("Upstream connection manager stopping")
+			return
+		default:
+		}
+
+		// Attempt to connect
+		err := m.connectAndRegister()
+		if err == nil {
+			// Successfully connected
+			logger.Info("Connected to upstream processor", "addr", m.config.Address)
+
+			// Reset reconnection state
+			m.reconnectMu.Lock()
+			m.reconnecting = false
+			m.reconnectAttempts = 0
+			m.reconnectMu.Unlock()
+			m.consecutiveFailures.Store(0)
+
+			// Monitor for disconnection
+			m.monitorConnection()
+
+			// If we get here, connection was lost - clean up before reconnecting
+			logger.Warn("Upstream connection lost, cleaning up before retry")
+			m.cleanup()
+			continue
+		}
+
+		// Connection failed
+		logger.Error("Failed to connect to upstream processor", "error", err)
+
+		// Exponential backoff
+		m.reconnectMu.Lock()
+		m.reconnectAttempts++
+		attempts := m.reconnectAttempts
+		m.reconnectMu.Unlock()
+
+		if m.maxReconnectAttempts > 0 && attempts >= m.maxReconnectAttempts {
+			logger.Error("Max upstream reconnection attempts reached, giving up",
+				"attempts", attempts,
+				"max", m.maxReconnectAttempts)
+			return
+		}
+
+		backoff := min(time.Duration(1<<uint(min(attempts-1, 6)))*time.Second, 60*time.Second) // #nosec G115
+
+		logger.Info("Retrying upstream connection",
+			"attempt", attempts,
+			"backoff", backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-m.ctx.Done():
+			return
+		}
+	}
+}
+
+// connectAndRegister establishes connection to upstream processor and registers
+func (m *Manager) connectAndRegister() error {
 	logger.Info("Connecting to upstream processor", "addr", m.config.Address)
 
 	// Create gRPC connection with TLS if enabled
@@ -151,22 +233,70 @@ func (m *Manager) Connect() error {
 	m.stream = stream
 	m.mu.Unlock()
 
-	// Start goroutine to receive upstream acks
-	m.wg.Add(1)
+	// Start goroutine to receive upstream acks (connection-scoped)
 	go m.receiveAcks()
 
-	logger.Info("Connected to upstream processor", "addr", m.config.Address)
 	return nil
+}
+
+// monitorConnection monitors for disconnections and returns when reconnection is needed
+func (m *Manager) monitorConnection() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+
+		case <-ticker.C:
+			// Check if we need to reconnect
+			m.reconnectMu.Lock()
+			needsReconnect := m.reconnecting
+			m.reconnectMu.Unlock()
+
+			if needsReconnect {
+				// Return to let connectionManager retry
+				return
+			}
+		}
+	}
 }
 
 // Disconnect closes upstream connection
 func (m *Manager) Disconnect() {
 	m.cancel() // Cancel context to stop goroutines
 
+	m.wg.Wait() // Wait for goroutines to finish
+
+	m.cleanup()
+
+	// Close the connection pool
+	grpcpool.Close(m.connPool)
+
+	logger.Info("Disconnected from upstream processor")
+}
+
+// MarkDisconnected marks the connection as disconnected and triggers reconnection
+func (m *Manager) MarkDisconnected() {
+	m.reconnectMu.Lock()
+	defer m.reconnectMu.Unlock()
+
+	if m.reconnecting {
+		// Already reconnecting
+		return
+	}
+
+	m.reconnecting = true
+	logger.Warn("Upstream connection lost, will attempt reconnection")
+}
+
+// cleanup closes current connection resources (called before reconnect or shutdown)
+func (m *Manager) cleanup() {
 	m.mu.Lock()
 	if m.stream != nil {
 		if err := m.stream.CloseSend(); err != nil {
-			logger.Error("Failed to close gRPC stream during shutdown", "error", err)
+			logger.Error("Failed to close gRPC stream during cleanup", "error", err)
 		}
 		m.stream = nil
 	}
@@ -177,13 +307,6 @@ func (m *Manager) Disconnect() {
 		grpcpool.Release(m.connPool, m.config.Address)
 		m.conn = nil
 	}
-
-	m.wg.Wait() // Wait for goroutines to finish
-
-	// Close the connection pool
-	grpcpool.Close(m.connPool)
-
-	logger.Info("Disconnected from upstream processor")
 }
 
 // Forward forwards packet batch to upstream processor
@@ -193,15 +316,19 @@ func (m *Manager) Forward(batch *data.PacketBatch) {
 	m.mu.Unlock()
 
 	if stream == nil {
-		logger.Warn("Upstream stream not available, dropping batch")
+		logger.Debug("Upstream stream not available, dropping batch")
 		return
 	}
 
 	// Forward batch (keeping original hunter ID for traceability)
 	if err := stream.Send(batch); err != nil {
+		m.recordSendFailure()
 		logger.Error("Failed to forward batch to upstream", "error", err)
 		return
 	}
+
+	// Reset consecutive failures on successful send
+	m.consecutiveFailures.Store(0)
 
 	// Update forwarded stats (atomic increment)
 	if m.packetsForwarded != nil {
@@ -214,9 +341,19 @@ func (m *Manager) Forward(batch *data.PacketBatch) {
 		"packets", len(batch.Packets))
 }
 
-// receiveAcks receives acknowledgments from upstream
+// recordSendFailure records a send failure and triggers reconnection if threshold exceeded
+func (m *Manager) recordSendFailure() {
+	failures := m.consecutiveFailures.Add(1)
+	if failures >= constants.MaxConsecutiveSendFailures {
+		logger.Warn("Too many consecutive upstream send failures, triggering reconnection",
+			"consecutive_failures", failures)
+		m.MarkDisconnected()
+		m.consecutiveFailures.Store(0)
+	}
+}
+
+// receiveAcks receives acknowledgments from upstream (connection-scoped goroutine)
 func (m *Manager) receiveAcks() {
-	defer m.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Recovered from panic in receiveAcks", "panic", r)
@@ -249,6 +386,8 @@ func (m *Manager) receiveAcks() {
 				return
 			}
 			logger.Error("Upstream ack receive error", "error", err)
+			// Trigger reconnection
+			m.MarkDisconnected()
 			return
 		}
 

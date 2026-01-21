@@ -33,10 +33,11 @@ func NewParser() *Parser {
 // Parse extracts DNS metadata from a packet.
 // Returns nil if the packet is not a DNS packet or parsing fails.
 func (p *Parser) Parse(packet gopacket.Packet) *types.DNSMetadata {
-	// Try to get DNS layer from gopacket
+	// Try to get DNS layer from gopacket (may not be auto-decoded)
 	dnsLayer := packet.Layer(layers.LayerTypeDNS)
 	if dnsLayer == nil {
-		return nil
+		// gopacket doesn't auto-decode DNS - extract from UDP/TCP payload
+		return p.parseFromTransportPayload(packet)
 	}
 
 	dns, ok := dnsLayer.(*layers.DNS)
@@ -83,6 +84,46 @@ func (p *Parser) Parse(packet gopacket.Packet) *types.DNSMetadata {
 	}
 
 	return metadata
+}
+
+// parseFromTransportPayload extracts DNS from UDP/TCP payload when gopacket
+// doesn't auto-decode DNS. Returns nil if not a DNS packet.
+func (p *Parser) parseFromTransportPayload(packet gopacket.Packet) *types.DNSMetadata {
+	transportLayer := packet.TransportLayer()
+	if transportLayer == nil {
+		return nil
+	}
+
+	// Check if it's UDP or TCP on DNS ports (53, 5353 for mDNS)
+	var isDNSPort bool
+	switch t := transportLayer.(type) {
+	case *layers.UDP:
+		isDNSPort = t.SrcPort == 53 || t.DstPort == 53 || t.SrcPort == 5353 || t.DstPort == 5353
+	case *layers.TCP:
+		isDNSPort = t.SrcPort == 53 || t.DstPort == 53
+	default:
+		return nil
+	}
+
+	if !isDNSPort {
+		return nil
+	}
+
+	payload := transportLayer.LayerPayload()
+	if len(payload) < 12 {
+		return nil
+	}
+
+	// For TCP, DNS messages are prefixed with 2-byte length
+	if _, ok := transportLayer.(*layers.TCP); ok {
+		if len(payload) < 14 {
+			return nil
+		}
+		// Skip the 2-byte length prefix
+		payload = payload[2:]
+	}
+
+	return p.ParseRaw(payload)
 }
 
 // ParseRaw parses DNS from raw payload bytes (without gopacket).

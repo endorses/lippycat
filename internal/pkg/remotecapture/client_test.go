@@ -1312,7 +1312,8 @@ func TestDeriveSIPState_StateTransitions(t *testing.T) {
 				State:  tt.initialState,
 			}
 
-			deriveSIPState(call, tt.method, tt.responseCode)
+			timestamp := time.Now()
+			deriveSIPState(call, tt.method, tt.responseCode, timestamp)
 
 			assert.Equal(t, tt.expectedState, call.State)
 		})

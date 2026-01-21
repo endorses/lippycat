@@ -373,11 +373,12 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
 
 	// Update state based on SIP method and response code
 	call.PacketCount++
-	deriveSIPState(call, sip.Method, sip.ResponseCode)
+	timestamp := time.Unix(0, pkt.TimestampNs)
+	deriveSIPState(call, sip.Method, sip.ResponseCode, timestamp)
 }
 
 // deriveSIPState updates call state based on SIP message
-func deriveSIPState(call *types.CallInfo, method string, responseCode uint32) {
+func deriveSIPState(call *types.CallInfo, method string, responseCode uint32, timestamp time.Time) {
 	switch method {
 	case "INVITE":
 		if call.State == "NEW" {
@@ -390,12 +391,12 @@ func deriveSIPState(call *types.CallInfo, method string, responseCode uint32) {
 	case "BYE":
 		call.State = "ENDED"
 		if call.EndTime.IsZero() {
-			call.EndTime = time.Now()
+			call.EndTime = timestamp
 		}
 	case "CANCEL":
 		call.State = "FAILED"
 		if call.EndTime.IsZero() {
-			call.EndTime = time.Now()
+			call.EndTime = timestamp
 		}
 	}
 
@@ -409,7 +410,7 @@ func deriveSIPState(call *types.CallInfo, method string, responseCode uint32) {
 		// 4xx/5xx/6xx Error
 		call.State = "FAILED"
 		if call.EndTime.IsZero() {
-			call.EndTime = time.Now()
+			call.EndTime = timestamp
 		}
 	}
 }

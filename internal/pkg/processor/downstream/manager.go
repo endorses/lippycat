@@ -27,13 +27,16 @@ type ProcessorInfo struct {
 	Client management.ManagementServiceClient
 	Conn   *grpc.ClientConn
 
-	// Topology streaming fields
+	// mu protects the fields below from concurrent access
+	mu sync.Mutex
+
+	// Topology streaming fields (protected by mu)
 	TopologyStream       management.ManagementService_SubscribeTopologyClient
 	TopologyCancel       context.CancelFunc
 	TopologyUpdateChan   chan *management.TopologyUpdate
 	TopologyStreamActive bool
 
-	// Reconnection state for exponential backoff
+	// Reconnection state for exponential backoff (protected by mu)
 	reconnectAttempts int           // Number of consecutive reconnection attempts
 	reconnectBackoff  time.Duration // Current backoff duration
 }
@@ -175,8 +178,11 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		// over the topology stream context.
 
 		// Reset reconnect attempts so the existing goroutine reconnects quickly
+		// Use processor-level mutex to avoid race with receiveTopologyUpdates
+		existing.mu.Lock()
 		existing.reconnectAttempts = 0
 		existing.reconnectBackoff = 0
+		existing.mu.Unlock()
 
 		return nil
 	}
@@ -250,10 +256,12 @@ func (m *Manager) Unregister(processorID string) {
 	if proc, exists := m.downstreams[processorID]; exists {
 		logger.Info("Unregistering downstream processor", "processor_id", processorID)
 
-		// Cancel topology subscription
+		// Cancel topology subscription (protected by proc.mu)
+		proc.mu.Lock()
 		if proc.TopologyCancel != nil {
 			proc.TopologyCancel()
 		}
+		proc.mu.Unlock()
 
 		// Release connection back to pool
 		if proc.Conn != nil {
@@ -338,8 +346,11 @@ func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatu
 func (m *Manager) SubscribeToDownstream(proc *ProcessorInfo) error {
 	// Create context for this subscription
 	ctx, cancel := context.WithCancel(m.ctx)
+
+	proc.mu.Lock()
 	proc.TopologyCancel = cancel
 	proc.TopologyUpdateChan = make(chan *management.TopologyUpdate, 100)
+	proc.mu.Unlock()
 
 	// Subscribe to topology updates
 	req := &management.TopologySubscribeRequest{
@@ -359,8 +370,10 @@ func (m *Manager) SubscribeToDownstream(proc *ProcessorInfo) error {
 		return nil
 	}
 
+	proc.mu.Lock()
 	proc.TopologyStream = stream
 	proc.TopologyStreamActive = true
+	proc.mu.Unlock()
 
 	logger.Info("Subscribed to downstream processor topology",
 		"processor_id", proc.ProcessorID,
@@ -378,30 +391,37 @@ func (m *Manager) SubscribeToDownstream(proc *ProcessorInfo) error {
 func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.ManagementService_SubscribeTopologyClient) {
 	defer m.wg.Done()
 	defer func() {
+		proc.mu.Lock()
 		proc.TopologyStreamActive = false
+		proc.mu.Unlock()
 		close(proc.TopologyUpdateChan)
 	}()
 
 	// If stream is nil, immediately try to establish connection
 	if stream == nil {
+		proc.mu.Lock()
 		proc.reconnectAttempts = 0
 		proc.reconnectBackoff = 500 * time.Millisecond
+		backoff := proc.reconnectBackoff
+		proc.mu.Unlock()
 
 		logger.Info("Attempting initial topology subscription",
 			"processor_id", proc.ProcessorID,
-			"backoff", proc.reconnectBackoff)
+			"backoff", backoff)
 
 		select {
 		case <-m.ctx.Done():
 			return
-		case <-time.After(proc.reconnectBackoff):
+		case <-time.After(backoff):
 			if err := m.reconnectTopologyStream(proc); err != nil {
 				logger.Error("Failed initial topology subscription",
 					"processor_id", proc.ProcessorID,
 					"error", err)
 				// Will retry in main loop below
 			} else {
+				proc.mu.Lock()
 				stream = proc.TopologyStream
+				proc.mu.Unlock()
 				logger.Info("Initial topology subscription successful",
 					"processor_id", proc.ProcessorID)
 			}
@@ -427,6 +447,7 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 
 			// Attempt automatic reconnection with exponential backoff
 			// Start at 500ms, double each time, max 60s
+			proc.mu.Lock()
 			proc.reconnectAttempts++
 			if proc.reconnectBackoff == 0 {
 				proc.reconnectBackoff = 500 * time.Millisecond
@@ -436,28 +457,36 @@ func (m *Manager) receiveTopologyUpdates(proc *ProcessorInfo, stream management.
 					proc.reconnectBackoff = 60 * time.Second
 				}
 			}
+			attempts := proc.reconnectAttempts
+			backoff := proc.reconnectBackoff
+			proc.mu.Unlock()
 
 			logger.Info("Waiting before reconnection attempt",
 				"processor_id", proc.ProcessorID,
-				"attempt", proc.reconnectAttempts,
-				"backoff", proc.reconnectBackoff)
+				"attempt", attempts,
+				"backoff", backoff)
 
 			select {
 			case <-m.ctx.Done():
 				return
-			case <-time.After(proc.reconnectBackoff):
+			case <-time.After(backoff):
 				if err := m.reconnectTopologyStream(proc); err != nil {
+					proc.mu.Lock()
+					currentAttempts := proc.reconnectAttempts
+					proc.mu.Unlock()
 					logger.Error("Failed to reconnect topology stream",
 						"processor_id", proc.ProcessorID,
-						"attempt", proc.reconnectAttempts,
+						"attempt", currentAttempts,
 						"error", err)
 					// Continue loop to retry with next backoff
 					continue
 				}
 				// Successfully reconnected, reset backoff and update local stream variable
+				proc.mu.Lock()
 				proc.reconnectAttempts = 0
 				proc.reconnectBackoff = 0
 				stream = proc.TopologyStream
+				proc.mu.Unlock()
 				logger.Info("Topology stream reconnected successfully",
 					"processor_id", proc.ProcessorID)
 				continue
@@ -496,13 +525,14 @@ func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 		"processor_id", proc.ProcessorID)
 
 	// Cancel old stream if it exists
+	proc.mu.Lock()
 	if proc.TopologyCancel != nil {
 		proc.TopologyCancel()
 	}
+	proc.mu.Unlock()
 
 	// Create new context for subscription
 	ctx, cancel := context.WithCancel(m.ctx)
-	proc.TopologyCancel = cancel
 
 	// Subscribe to topology updates
 	req := &management.TopologySubscribeRequest{
@@ -516,8 +546,12 @@ func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 		return err
 	}
 
+	// Update protected fields under proc.mu
+	proc.mu.Lock()
+	proc.TopologyCancel = cancel
 	proc.TopologyStream = stream
 	proc.TopologyStreamActive = true
+	proc.mu.Unlock()
 
 	logger.Info("Topology stream reconnected",
 		"processor_id", proc.ProcessorID)
@@ -625,10 +659,12 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 		logger.Debug("Releasing downstream connection",
 			"processor_id", processorID)
 
-		// Cancel topology subscription
+		// Cancel topology subscription (protected by proc.mu)
+		proc.mu.Lock()
 		if proc.TopologyCancel != nil {
 			proc.TopologyCancel()
 		}
+		proc.mu.Unlock()
 
 		// Release connection back to pool
 		if proc.Conn != nil {
@@ -861,12 +897,16 @@ func (m *Manager) performHealthCheck(interval time.Duration) {
 	m.mu.RLock()
 	snapshots := make([]procSnapshot, 0, len(m.downstreams))
 	for _, proc := range m.downstreams {
-		snapshots = append(snapshots, procSnapshot{
+		// Acquire proc.mu to safely read protected fields
+		proc.mu.Lock()
+		snap := procSnapshot{
 			ProcessorID:          proc.ProcessorID,
 			LastSeen:             proc.LastSeen,
 			TopologyStreamActive: proc.TopologyStreamActive,
 			ReconnectAttempts:    proc.reconnectAttempts,
-		})
+		}
+		proc.mu.Unlock()
+		snapshots = append(snapshots, snap)
 	}
 	m.mu.RUnlock()
 
@@ -933,10 +973,12 @@ func (m *Manager) Close() {
 
 	m.mu.Lock()
 	for _, proc := range m.downstreams {
-		// Cancel topology subscription
+		// Cancel topology subscription (protected by proc.mu)
+		proc.mu.Lock()
 		if proc.TopologyCancel != nil {
 			proc.TopologyCancel()
 		}
+		proc.mu.Unlock()
 
 		// Release connection back to pool
 		if proc.Conn != nil {

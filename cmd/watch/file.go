@@ -103,15 +103,22 @@ func runFile(cmd *cobra.Command, args []string) {
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
 
-	// Start packet capture in background
+	// Initialize offline call tracker for RTP-to-CallID mapping BEFORE starting capture
+	// This is critical - the bridge needs the tracker available when processing SIP packets
+	offlineTracker := tui.NewOfflineCallTracker()
+	tui.SetOfflineCallTracker(offlineTracker)
+
+	// Start packet capture in background using timestamp-ordered processing
+	// This ensures SIP packets are processed before their corresponding RTP packets,
+	// which is essential for proper call tracking
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	tui.SetCaptureHandle(cancel, done)
 
 	go func() {
 		defer close(done)
-		capture.StartOfflineSniffer(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			startFileSniffer(ctx, devices, filter, p)
+		capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
+			startFileSnifferOrdered(ctx, devices, filter, p)
 		})
 	}()
 
@@ -122,11 +129,15 @@ func runFile(cmd *cobra.Command, args []string) {
 	}
 }
 
-func startFileSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+// startFileSnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
+// This ensures SIP packets are processed before their corresponding RTP packets,
+// which is essential for proper call tracking and RTP-to-CallID mapping.
+func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
 		tui.StartPacketBridge(ch, program)
 	}
-	capture.InitWithContext(ctx, devices, filter, processor, nil)
+	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
+	capture.RunOfflineOrdered(devices, filter, processor, nil)
 }
 
 func init() {

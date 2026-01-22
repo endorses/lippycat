@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,53 @@ func StartLiveSniffer(interfaces, filter string, startSniffer func(devices []pca
 		iface := pcaptypes.CreateLiveInterface(device)
 		devices = append(devices, iface)
 	}
+	startSniffer(devices, filter)
+}
+
+// StartOfflineSnifferOrdered opens PCAP files and starts a timestamp-ordered sniffer.
+// This ensures packets from multiple files are processed in chronological order,
+// which is essential for VoIP analysis where SIP signaling must precede RTP.
+func StartOfflineSnifferOrdered(readFiles []string, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
+	if len(readFiles) == 0 {
+		logger.Error("No files provided for offline capture")
+		return
+	}
+
+	// Open all files and create interfaces
+	var files []*os.File
+	var devices []pcaptypes.PcapInterface
+
+	for _, readFile := range readFiles {
+		// #nosec G304 -- readFile is from CLI positional args, intentional user-specified path
+		file, err := os.Open(readFile)
+		if err != nil {
+			logger.Error("Could not read file",
+				"file", readFile,
+				"error", err)
+			// Close any files we already opened
+			for _, f := range files {
+				f.Close()
+			}
+			return
+		}
+		files = append(files, file)
+		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
+	}
+
+	// Log multi-file capture info
+	if len(readFiles) > 1 {
+		logger.Info("Starting timestamp-ordered multi-file offline capture",
+			"file_count", len(readFiles))
+	}
+
+	// Ensure all files are closed when done
+	defer func() {
+		for _, f := range files {
+			f.Close()
+		}
+	}()
+
+	// Run the sniffer (blocks until complete)
 	startSniffer(devices, filter)
 }
 
@@ -290,6 +338,142 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 
 	// Wait for processor to finish draining
 	processorWg.Wait()
+}
+
+// RunOfflineOrdered reads all packets from multiple PCAP files, sorts them by timestamp,
+// and processes them in chronological order. This is essential for VoIP analysis where
+// SIP signaling must be processed before corresponding RTP packets to establish call mappings.
+//
+// Unlike RunOffline which processes files in parallel (non-deterministic order),
+// this function ensures proper temporal ordering across all files.
+func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
+	processor func(ch <-chan PacketInfo, asm *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+
+	logger.Info("Starting timestamp-ordered offline capture",
+		"file_count", len(devices))
+
+	// Phase 1: Read all packets from all files into memory
+	var allPackets []PacketInfo
+	for _, dev := range devices {
+		packets, err := readAllPacketsFromDevice(dev, filter)
+		if err != nil {
+			logger.Error("Error reading packets from file",
+				"file", dev.Name(),
+				"error", err)
+			continue
+		}
+		logger.Debug("Read packets from file",
+			"file", dev.Name(),
+			"count", len(packets))
+		allPackets = append(allPackets, packets...)
+	}
+
+	if len(allPackets) == 0 {
+		logger.Error("No packets read from any file")
+		return
+	}
+
+	// Phase 2: Sort all packets by timestamp
+	sort.Slice(allPackets, func(i, j int) bool {
+		return allPackets[i].Packet.Metadata().Timestamp.Before(
+			allPackets[j].Packet.Metadata().Timestamp)
+	})
+
+	logger.Info("Sorted packets by timestamp",
+		"total_packets", len(allPackets),
+		"first_timestamp", allPackets[0].Packet.Metadata().Timestamp,
+		"last_timestamp", allPackets[len(allPackets)-1].Packet.Metadata().Timestamp)
+
+	// Phase 3: Create buffer and send packets in order
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bufferSize := getPacketBufferSize()
+	packetBuffer := NewPacketBuffer(ctx, bufferSize)
+	defer packetBuffer.Close()
+
+	// Start processor
+	var processorWg sync.WaitGroup
+	processorWg.Add(1)
+	go func() {
+		defer processorWg.Done()
+		processor(packetBuffer.Receive(), assembler)
+	}()
+
+	// Send all packets in timestamp order
+	for _, pkt := range allPackets {
+		if !packetBuffer.Send(pkt) {
+			// Buffer closed or context cancelled
+			break
+		}
+	}
+
+	// Flush TCP assembler if present
+	if assembler != nil {
+		_, _ = assembler.FlushOlderThan(time.Now())
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Close the buffer so processor can exit
+	packetBuffer.Close()
+
+	// Wait for processor to finish
+	processorWg.Wait()
+
+	logger.Info("Timestamp-ordered offline capture completed",
+		"total_packets", len(allPackets))
+}
+
+// readAllPacketsFromDevice reads all packets from a single PCAP device/file
+func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]PacketInfo, error) {
+	err := dev.SetHandle()
+	if err != nil {
+		return nil, fmt.Errorf("failed to set handle: %w", err)
+	}
+
+	handle, err := dev.Handle()
+	if err != nil || handle == nil {
+		return nil, fmt.Errorf("failed to get handle: %w", err)
+	}
+	defer handle.Close()
+
+	// Apply BPF filter if specified
+	if filter != "" {
+		if err := handle.SetBPFFilter(filter); err != nil {
+			logger.Warn("Could not apply BPF filter",
+				"filter", filter,
+				"error", err)
+		}
+	}
+
+	linkType := handle.LinkType()
+	ifaceName := dev.Name()
+
+	packetSource := gopacket.NewPacketSource(handle, linkType)
+	packetSource.NoCopy = true
+	packetSource.DecodeStreamsAsDatagrams = true
+
+	var packets []PacketInfo
+	for packet := range packetSource.Packets() {
+		// Make a copy of the packet data since NoCopy=true
+		data := make([]byte, len(packet.Data()))
+		copy(data, packet.Data())
+
+		// Re-decode with the copied data
+		newPacket := gopacket.NewPacket(data, linkType, gopacket.Default)
+		// Copy metadata
+		newPacket.Metadata().Timestamp = packet.Metadata().Timestamp
+		newPacket.Metadata().CaptureLength = packet.Metadata().CaptureLength
+		newPacket.Metadata().Length = packet.Metadata().Length
+
+		packets = append(packets, PacketInfo{
+			LinkType:  linkType,
+			Packet:    newPacket,
+			Interface: ifaceName,
+		})
+	}
+
+	return packets, nil
 }
 
 // processPacketSimple is a lightweight processor without TCP reassembly

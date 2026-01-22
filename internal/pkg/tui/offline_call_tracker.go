@@ -6,29 +6,45 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
 // OfflineCallTracker tracks RTP-to-CallID mappings for offline PCAP analysis
 // It parses SDP from SIP packets to extract RTP connection information
 type OfflineCallTracker struct {
-	// Map: (srcIP:srcPort -> dstIP:dstPort) -> CallID
-	rtpFlowToCallID map[string]string
-	// Map: CallID -> list of RTP flows
-	callIDToFlows map[string][]string
-	mu            sync.RWMutex
+	// Map: IP:port -> CallID (simplified: just store media endpoint)
+	rtpEndpointToCallID map[string]string
+	// Map: CallID -> list of endpoints
+	callIDToEndpoints map[string][]string
+	mu                sync.RWMutex
 }
 
 // NewOfflineCallTracker creates a new offline call tracker
 func NewOfflineCallTracker() *OfflineCallTracker {
 	return &OfflineCallTracker{
-		rtpFlowToCallID: make(map[string]string),
-		callIDToFlows:   make(map[string][]string),
+		rtpEndpointToCallID: make(map[string]string),
+		callIDToEndpoints:   make(map[string][]string),
+	}
+}
+
+// RegisterMediaPorts registers RTP media ports from SIP detector metadata
+// This is the preferred method as it uses already-parsed SDP data from the detector
+func (t *OfflineCallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) {
+	if callID == "" || len(ports) == 0 {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, port := range ports {
+		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
+		t.rtpEndpointToCallID[endpoint] = callID
+		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
 	}
 }
 
 // ProcessSIPPacket processes a SIP packet to extract RTP connection info from SDP
+// Deprecated: Use RegisterMediaPorts with detector metadata instead
 func (t *OfflineCallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload string) {
 	if callID == "" {
 		return
@@ -51,44 +67,24 @@ func (t *OfflineCallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload stri
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// For each RTP port, create bidirectional flow mappings
+	// Determine the RTP endpoint IP from SDP
+	// The c= line in SDP specifies where RTP should be sent
+	var rtpIP string
+	if connectionIP != "" && connectionIP != "0.0.0.0" {
+		rtpIP = connectionIP
+	} else {
+		// Fall back to the source IP of the SIP packet
+		rtpIP = srcIP
+	}
+
+	// Register each port as an RTP endpoint for this call
+	// Simple mapping: IP:port -> CallID
+	// This works because RTP packets will have either src or dst matching this endpoint
 	for _, port := range rtpPorts {
-		// Determine which IP is sending RTP (typically the one that sent the SDP)
-		// This is usually in the 200 OK response (dstIP) or INVITE (srcIP)
-		// We'll create mappings for both directions to handle different scenarios
+		endpoint := fmt.Sprintf("%s:%s", rtpIP, port)
 
-		var rtpSourceIP string
-		if connectionIP != "" && connectionIP != "0.0.0.0" {
-			// Use the connection IP from SDP if available
-			rtpSourceIP = connectionIP
-		} else {
-			// Fall back to the source IP of the SIP packet
-			rtpSourceIP = srcIP
-		}
-
-		// Create flow keys for both directions
-		// Direction 1: RTP source -> original destination
-		flowKey1 := fmt.Sprintf("%s:%s->%s:any", rtpSourceIP, port, dstIP)
-		// Direction 2: Original destination -> RTP source (for bidirectional flows)
-		flowKey2 := fmt.Sprintf("%s:any->%s:%s", dstIP, rtpSourceIP, port)
-
-		// Also handle the reverse scenario where dstIP is the RTP source
-		flowKey3 := fmt.Sprintf("%s:%s->%s:any", dstIP, port, srcIP)
-		flowKey4 := fmt.Sprintf("%s:any->%s:%s", srcIP, dstIP, port)
-
-		t.rtpFlowToCallID[flowKey1] = callID
-		t.rtpFlowToCallID[flowKey2] = callID
-		t.rtpFlowToCallID[flowKey3] = callID
-		t.rtpFlowToCallID[flowKey4] = callID
-
-		// Track flows for this call
-		t.callIDToFlows[callID] = append(t.callIDToFlows[callID], flowKey1, flowKey2, flowKey3, flowKey4)
-
-		logger.Debug("Registered RTP flow for offline tracking",
-			"call_id", callID,
-			"rtp_port", port,
-			"connection_ip", rtpSourceIP,
-			"flow_keys", []string{flowKey1, flowKey2, flowKey3, flowKey4})
+		t.rtpEndpointToCallID[endpoint] = callID
+		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
 	}
 }
 
@@ -97,33 +93,56 @@ func (t *OfflineCallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPor
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	// Try exact port match first
-	flowKey1 := fmt.Sprintf("%s:%s->%s:%s", srcIP, srcPort, dstIP, dstPort)
-	if callID, ok := t.rtpFlowToCallID[flowKey1]; ok {
+	// SDP ports are RECEIVE ports - RTP sent TO this port
+	// So we primarily match on DESTINATION of RTP packets
+
+	// Check if destination endpoint matches exactly (this is the most reliable)
+	dstEndpoint := fmt.Sprintf("%s:%s", dstIP, dstPort)
+	if callID, ok := t.rtpEndpointToCallID[dstEndpoint]; ok {
 		return callID
 	}
 
-	// Try source IP:port -> destination IP (wildcard dest port)
-	flowKey2 := fmt.Sprintf("%s:%s->%s:any", srcIP, srcPort, dstIP)
-	if callID, ok := t.rtpFlowToCallID[flowKey2]; ok {
+	// Check if source endpoint matches (less common - would mean we captured the receive side)
+	srcEndpoint := fmt.Sprintf("%s:%s", srcIP, srcPort)
+	if callID, ok := t.rtpEndpointToCallID[srcEndpoint]; ok {
 		return callID
 	}
 
-	// Try destination IP -> source IP:port (wildcard source port)
-	flowKey3 := fmt.Sprintf("%s:any->%s:%s", dstIP, srcIP, srcPort)
-	if callID, ok := t.rtpFlowToCallID[flowKey3]; ok {
-		return callID
+	// Fallback: match by source IP only (RTP sender = SDP sender)
+	// Only use this if there's exactly ONE call from this IP to avoid ambiguity
+	var matchedCallID string
+	matchCount := 0
+	for endpoint, callID := range t.rtpEndpointToCallID {
+		if idx := strings.LastIndex(endpoint, ":"); idx > 0 {
+			registeredIP := endpoint[:idx]
+			if registeredIP == srcIP {
+				if matchedCallID == "" || matchedCallID == callID {
+					matchedCallID = callID
+					matchCount++
+				} else {
+					// Multiple different calls from same IP - can't disambiguate
+					matchCount++
+				}
+			}
+		}
 	}
 
-	// Try reverse direction
-	flowKey4 := fmt.Sprintf("%s:%s->%s:any", dstIP, dstPort, srcIP)
-	if callID, ok := t.rtpFlowToCallID[flowKey4]; ok {
-		return callID
-	}
-
-	flowKey5 := fmt.Sprintf("%s:any->%s:%s", srcIP, dstIP, dstPort)
-	if callID, ok := t.rtpFlowToCallID[flowKey5]; ok {
-		return callID
+	// Only return if we found exactly one unique call from this IP
+	if matchCount > 0 && matchedCallID != "" {
+		// Check if all matches point to the same call
+		uniqueCall := true
+		for endpoint, callID := range t.rtpEndpointToCallID {
+			if idx := strings.LastIndex(endpoint, ":"); idx > 0 {
+				registeredIP := endpoint[:idx]
+				if registeredIP == srcIP && callID != matchedCallID {
+					uniqueCall = false
+					break
+				}
+			}
+		}
+		if uniqueCall {
+			return matchedCallID
+		}
 	}
 
 	return ""
@@ -134,8 +153,8 @@ func (t *OfflineCallTracker) Clear() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.rtpFlowToCallID = make(map[string]string)
-	t.callIDToFlows = make(map[string][]string)
+	t.rtpEndpointToCallID = make(map[string]string)
+	t.callIDToEndpoints = make(map[string][]string)
 }
 
 // extractSDPBody extracts the SDP body from a SIP message

@@ -216,9 +216,9 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 			StartTime:      timestamp, // Use packet timestamp instead of time.Now()
 			LastPacketTime: timestamp, // Initialize with first packet timestamp
 			Hunters:        make([]string, 0),
-			RTPStats: &RTPQualityStats{
-				Codec: "unknown",
-			},
+			// Note: RTPStats is intentionally not initialized here.
+			// It will be created when the first RTP packet arrives,
+			// allowing proper codec detection from RTP payload type.
 		}
 
 		// Add to ring buffer (FIFO)
@@ -328,14 +328,24 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
 
-	// Find the associated call
+	// Find or create the associated call
 	call, exists := ca.calls[callID]
 	if !exists {
-		logger.Debug("RTP packet for unknown call, skipping",
+		// Create a minimal call entry from RTP - SIP details will be filled in later if/when SIP arrives
+		call = &AggregatedCall{
+			CallID:         callID,
+			State:          CallStateActive, // Assume active since we're seeing RTP
+			StartTime:      timestamp,
+			LastPacketTime: timestamp,
+			Hunters:        []string{hunterID},
+			// Note: From/To will be empty until SIP packet arrives
+			// Note: RTPStats is intentionally not initialized here - will be done below
+		}
+		ca.calls[callID] = call
+		logger.Debug("Created call entry from RTP packet",
 			"call_id", callID,
 			"ssrc", rtp.Ssrc,
 			"hunter", hunterID)
-		return
 	}
 
 	// Update last packet time

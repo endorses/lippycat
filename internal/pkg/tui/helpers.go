@@ -238,8 +238,19 @@ func (m *Model) processPendingPackets(packets []components.PacketDisplay) {
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
 	m.updateBridgeStats()
 
-	// Submit packets for non-critical background processing
-	if m.backgroundProcessor != nil && len(filteredPackets) > 0 {
+	// Process VoIP packets for call aggregation
+	// For offline mode: process synchronously to ensure all packets are handled
+	// For live mode: use background processor (non-blocking, may drop under load)
+	if m.captureMode == components.CaptureModeOffline {
+		// Synchronous processing for offline mode - ensures reliable call tracking
+		callAgg := m.offlineCallAggregator
+		if callAgg != nil {
+			for i := range filteredPackets {
+				callAgg.ProcessPacket(&filteredPackets[i])
+			}
+		}
+	} else if m.backgroundProcessor != nil && len(filteredPackets) > 0 {
+		// Async processing for live mode - non-blocking, acceptable to drop under load
 		linkType := filteredPackets[0].LinkType
 		m.backgroundProcessor.SubmitBatch(filteredPackets, linkType)
 	}

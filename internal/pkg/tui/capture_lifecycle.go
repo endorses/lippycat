@@ -208,10 +208,12 @@ func startLiveCapture(ctx context.Context, interfaceName string, filter string, 
 }
 
 // startOfflineCapture starts packet capture from PCAP files
+// Uses timestamp-ordered processing to ensure SIP packets register media ports
+// before their corresponding RTP packets are processed (critical for VoIP analysis)
 func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}) {
 	defer close(done) // Signal completion when capture goroutine exits
-	capture.StartOfflineSniffer(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTUISniffer(ctx, devices, filter, program)
+	capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+		startTUISnifferOrdered(ctx, devices, filter, program)
 	})
 }
 
@@ -226,4 +228,17 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	// For offline: blocks until file is read (StartOfflineSniffer keeps file open)
 	// For live: caller uses goroutine for non-blocking behavior
 	capture.InitWithContext(ctx, devices, filter, processor, nil)
+}
+
+// startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
+// This ensures SIP packets are processed before their corresponding RTP packets,
+// which is essential for proper call tracking and RTP-to-CallID mapping.
+func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+	// Create a simple processor that forwards packets to TUI
+	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+		StartPacketBridge(ch, program)
+	}
+
+	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes
+	capture.RunOfflineOrdered(devices, filter, processor, nil)
 }

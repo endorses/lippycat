@@ -4,6 +4,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -262,10 +263,15 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	pb.packets = append(pb.packets, packets...)
-	// Cap buffer size to prevent unbounded growth
-	const maxPending = 5000
-	if len(pb.packets) > maxPending {
-		pb.packets = pb.packets[len(pb.packets)-maxPending:]
+
+	// Cap buffer size to prevent unbounded growth (only for live capture)
+	// In offline mode, we MUST NOT drop packets - let the buffer grow
+	isOfflineMode := GetOfflineCallTracker() != nil
+	if !isOfflineMode {
+		const maxPending = 5000
+		if len(pb.packets) > maxPending {
+			pb.packets = pb.packets[len(pb.packets)-maxPending:]
+		}
 	}
 }
 
@@ -302,9 +308,15 @@ func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketD
 
 // DrainPendingPackets returns pending packets for the TUI to process.
 // This is the public API called by the TUI's tick handler.
-// Limited to 50 packets per tick (1000/sec at 50ms ticks) to prevent UI stutter.
-// This matches the visible packet count and the bridge's target sampling rate.
+// For live capture: Limited to 50 packets per tick to prevent UI stutter.
+// For offline capture: Returns ALL pending packets to ensure complete processing.
 func DrainPendingPackets() []components.PacketDisplay {
+	// In offline mode, drain all packets to ensure none are lost
+	isOfflineMode := GetOfflineCallTracker() != nil
+	if isOfflineMode {
+		return pendingPackets.drainPackets(100000) // Large number = all packets
+	}
+	// Live mode: limit to prevent UI stutter
 	const maxPacketsPerTick = 50
 	return pendingPackets.drainPackets(maxPacketsPerTick)
 }
@@ -458,23 +470,38 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	}()
 
 	// sendBatch queues a batch for the TUI consumer.
-	// Uses non-blocking send to prevent deadlock when TUI is slow.
+	// For live capture: Uses non-blocking send to prevent deadlock when TUI is slow.
+	// For offline capture: Uses blocking send to ensure all packets are processed.
 	sendBatch := func() {
 		if len(batch) > 0 {
 			msg := PacketBatchMsg{Packets: batch}
-			select {
-			case tuiBatchChan <- msg:
-				// Successfully queued
+
+			// Check if we're in offline mode (reading from PCAP files)
+			// In offline mode, we MUST NOT drop packets - use blocking send
+			isOfflineMode := GetOfflineCallTracker() != nil
+
+			if isOfflineMode {
+				// Blocking send - wait until TUI is ready (offline mode)
+				tuiBatchChan <- msg
 				atomic.AddInt64(&bridgeStats.BatchesSent, 1)
 				atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(batch)))
-				dropTracker.recordBatchResult(false) // Record success for recent tracking
-			default:
-				// TUI is behind - drop batch to prevent blocking
-				atomic.AddInt64(&bridgeStats.BatchesDropped, 1)
-				dropTracker.recordBatchResult(true) // Record drop for recent tracking
-				logger.Debug("TUI backpressure: dropped packet batch",
-					"batch_size", len(batch),
-					"total_dropped", atomic.LoadInt64(&bridgeStats.BatchesDropped))
+				dropTracker.recordBatchResult(false)
+			} else {
+				// Non-blocking send - drop if TUI is slow (live capture)
+				select {
+				case tuiBatchChan <- msg:
+					// Successfully queued
+					atomic.AddInt64(&bridgeStats.BatchesSent, 1)
+					atomic.AddInt64(&bridgeStats.PacketsDisplayed, int64(len(batch)))
+					dropTracker.recordBatchResult(false)
+				default:
+					// TUI is behind - drop batch to prevent blocking
+					atomic.AddInt64(&bridgeStats.BatchesDropped, 1)
+					dropTracker.recordBatchResult(true)
+					logger.Debug("TUI backpressure: dropped packet batch",
+						"batch_size", len(batch),
+						"total_dropped", atomic.LoadInt64(&bridgeStats.BatchesDropped))
+				}
 			}
 			displayedCount += int64(len(batch))
 			batch = make([]components.PacketDisplay, 0, 100)
@@ -561,20 +588,23 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				lastSamplingUpdateCount = packetCount
 			}
 
-			// Use cached sampling ratio
+			// Check if we're in offline mode (reading from PCAP files)
+			// In offline mode, process ALL packets - no sampling needed
+			isOfflineMode := GetOfflineCallTracker() != nil
+
+			// Use cached sampling ratio (only for live capture)
 			samplingRatio := cachedSamplingRatio
+			if isOfflineMode {
+				samplingRatio = 1.0 // Process all packets in offline mode
+			}
 
 			// Use fast conversion for sampled packets, full for important ones
 			var packet components.PacketDisplay
-			if samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1) {
-				// This packet should be displayed
-				if samplingRatio < 0.2 {
-					// Very high load - use fast conversion (only when rate > 5000 pps)
-					packet = convertPacketFast(pktInfo)
-				} else {
-					// Normal/moderate load - full conversion with raw data
-					packet = convertPacket(pktInfo)
-				}
+			shouldDisplay := samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1)
+
+			if shouldDisplay {
+				// Full conversion to extract all metadata (SDP, etc.)
+				packet = convertPacket(pktInfo)
 				batch = append(batch, packet)
 			}
 
@@ -692,24 +722,30 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, display *components.PacketDisplay) string {
 	switch result.Protocol {
 	case "SIP":
+		// Convert metadata to VoIPData for compatibility
+		display.VoIPData = metadataToVoIPData(result.Metadata)
+
+		// Feed SIP packet to offline tracker for RTP-to-CallID mapping
+		// Use media_ports and media_ip from detector metadata (parsed from SDP)
+		if tracker := GetOfflineCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
+			if mediaPorts, ok := result.Metadata["media_ports"].([]uint16); ok && len(mediaPorts) > 0 {
+				// Determine RTP endpoint IP:
+				// 1. Prefer media_ip from SDP c= line (most accurate)
+				// 2. Fall back to SIP packet source IP
+				rtpIP := display.SrcIP
+				if mediaIP, ok := result.Metadata["media_ip"].(string); ok && mediaIP != "" {
+					rtpIP = mediaIP
+				}
+				tracker.RegisterMediaPorts(display.VoIPData.CallID, rtpIP, mediaPorts)
+			}
+		}
+
 		if firstLine, ok := result.Metadata["first_line"].(string); ok {
 			if len(firstLine) > 60 {
 				firstLine = firstLine[:60] + "..."
 			}
-			// Convert metadata to VoIPData for compatibility
-			display.VoIPData = metadataToVoIPData(result.Metadata)
-
-			// Feed SIP packet to offline tracker for RTP-to-CallID mapping
-			if tracker := GetOfflineCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
-				// Get payload for SDP parsing
-				if appLayer := pkt.ApplicationLayer(); appLayer != nil {
-					payload := string(appLayer.Payload())
-					tracker.ProcessSIPPacket(display.VoIPData.CallID, display.SrcIP, display.DstIP, payload)
-				}
-			}
 			return firstLine
 		}
-		display.VoIPData = metadataToVoIPData(result.Metadata)
 		return "SIP message"
 
 	case "RTP":
@@ -1027,6 +1063,13 @@ func metadataToVoIPData(metadata map[string]interface{}) *components.VoIPMetadat
 	}
 	if toTag, ok := metadata["to_tag"].(string); ok {
 		voipData.ToTag = toTag
+	}
+
+	// SIP response status code (e.g., 200 for "200 OK")
+	if statusCode, ok := metadata["status_code"].(string); ok {
+		if code, err := strconv.Atoi(statusCode); err == nil {
+			voipData.Status = code
+		}
 	}
 
 	// RTP-specific fields

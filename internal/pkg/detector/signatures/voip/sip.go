@@ -63,9 +63,9 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 			payloadStr := string(ctx.Payload)
 			metadata := s.extractMetadata(payloadStr)
 
-			// Extract SDP media ports for RTP correlation
-			mediaPorts := s.extractSDPMediaPorts(payloadStr)
-			if len(mediaPorts) > 0 {
+			// Extract SDP info (media ports and connection IP) for RTP correlation
+			sdpInfo := s.extractSDPInfo(payloadStr)
+			if len(sdpInfo.MediaPorts) > 0 {
 				// Store in flow context for RTP correlation
 				if ctx.Flow != nil {
 					// Get or create SIP flow state
@@ -86,7 +86,7 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 					}
 
 					// Add new media ports (avoid duplicates)
-					for _, port := range mediaPorts {
+					for _, port := range sdpInfo.MediaPorts {
 						found := false
 						for _, existing := range sipState.MediaPorts {
 							if existing == port {
@@ -99,7 +99,11 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 						}
 					}
 
-					metadata["media_ports"] = mediaPorts
+					metadata["media_ports"] = sdpInfo.MediaPorts
+					// Store connection IP for RTP endpoint registration
+					if sdpInfo.ConnectionIP != "" {
+						metadata["media_ip"] = sdpInfo.ConnectionIP
+					}
 				}
 			}
 
@@ -310,10 +314,17 @@ func extractTagFromHeader(header string) string {
 	return value
 }
 
-// extractSDPMediaPorts extracts RTP media ports from SDP (Session Description Protocol)
-// embedded in SIP messages
-func (s *SIPSignature) extractSDPMediaPorts(payload string) []uint16 {
-	ports := make([]uint16, 0)
+// SDPInfo contains parsed SDP information for RTP correlation
+type SDPInfo struct {
+	MediaPorts   []uint16
+	ConnectionIP string // From c= line
+}
+
+// extractSDPInfo extracts RTP media ports and connection IP from SDP
+func (s *SIPSignature) extractSDPInfo(payload string) SDPInfo {
+	info := SDPInfo{
+		MediaPorts: make([]uint16, 0),
+	}
 
 	// Look for SDP content (appears after empty line in SIP message)
 	lines := strings.Split(payload, "\n")
@@ -332,6 +343,26 @@ func (s *SIPSignature) extractSDPMediaPorts(payload string) []uint16 {
 			continue
 		}
 
+		// SDP connection line: c=IN IP4 10.0.0.5
+		// Format: c=<nettype> <addrtype> <connection-address>
+		if strings.HasPrefix(line, "c=") {
+			parts := strings.Fields(line)
+			if len(parts) >= 3 {
+				// parts[0] = "c=IN"
+				// parts[1] = "IP4" or "IP6"
+				// parts[2] = IP address (may have TTL suffix like /127)
+				ip := parts[2]
+				// Remove TTL suffix if present (e.g., "224.2.1.1/127" -> "224.2.1.1")
+				if idx := strings.Index(ip, "/"); idx > 0 {
+					ip = ip[:idx]
+				}
+				// Only use non-zero IPs
+				if ip != "0.0.0.0" && ip != "" {
+					info.ConnectionIP = ip
+				}
+			}
+		}
+
 		// SDP media lines: m=audio 49170 RTP/AVP 0
 		// Format: m=<media> <port> <proto> <fmt>
 		if strings.HasPrefix(line, "m=") {
@@ -345,12 +376,19 @@ func (s *SIPSignature) extractSDPMediaPorts(payload string) []uint16 {
 				var port int
 				if _, err := fmt.Sscanf(parts[1], "%d", &port); err == nil {
 					if port > 0 && port <= 65535 {
-						ports = append(ports, uint16(port))
+						info.MediaPorts = append(info.MediaPorts, uint16(port))
 					}
 				}
 			}
 		}
 	}
 
-	return ports
+	return info
+}
+
+// extractSDPMediaPorts extracts RTP media ports from SDP (Session Description Protocol)
+// embedded in SIP messages
+// Deprecated: Use extractSDPInfo for full SDP parsing including connection IP
+func (s *SIPSignature) extractSDPMediaPorts(payload string) []uint16 {
+	return s.extractSDPInfo(payload).MediaPorts
 }

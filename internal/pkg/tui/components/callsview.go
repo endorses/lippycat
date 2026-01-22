@@ -609,7 +609,7 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		durationWidth, truncateCallsView("Duration", durationWidth),
 		codecWidth, truncateCallsView("Codec", codecWidth),
 		qualityWidth, truncateCallsView("Quality", qualityWidth),
-		nodeWidth, truncateCallsView("Node", nodeWidth))
+		nodeWidth, truncateCallsView("Origin", nodeWidth))
 
 	// Border width depends on whether we're in split view or full width
 	// Full width: width - 2
@@ -648,11 +648,11 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 			duration = time.Since(call.StartTime)
 		}
 
-		// Format timestamps
-		startTime := call.StartTime.Format("2006-01-02 15:04:05.000")
+		// Format timestamps (time only for table, full timestamp in details panel)
+		startTime := call.StartTime.Format("15:04:05.000")
 		endTime := "N/A"
 		if !call.EndTime.IsZero() {
-			endTime = call.EndTime.Format("2006-01-02 15:04:05.000")
+			endTime = call.EndTime.Format("15:04:05.000")
 		} else if call.State == CallStateActive {
 			endTime = "Active"
 		}

@@ -116,7 +116,7 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 	from := call.From
 	to := call.To
 	if (from == "" || to == "") && call.CallID != "" {
-		if tracker := GetOfflineCallTracker(); tracker != nil {
+		if tracker := GetCallTracker(); tracker != nil {
 			trackerFrom, trackerTo := tracker.GetCallPartyInfo(call.CallID)
 			if from == "" && trackerFrom != "" {
 				from = trackerFrom

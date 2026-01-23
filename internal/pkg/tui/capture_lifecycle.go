@@ -54,7 +54,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	}
 
 	// Clear call tracker (used by both live and offline modes)
-	ClearOfflineCallTracker()
+	ClearCallTracker()
 
 	// Keep all remote clients connected regardless of mode
 	// Users can switch between modes without losing node connections
@@ -147,8 +147,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				}
 
 				// Initialize call tracker for RTP-to-CallID mapping (shared with offline mode)
-				liveTracker := NewOfflineCallTracker()
-				SetOfflineCallTracker(liveTracker)
+				liveTracker := NewCallTracker()
+				SetCallTracker(liveTracker)
 
 				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, program, done)
 			case components.CaptureModeOffline:
@@ -162,8 +162,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				}
 
 				// Initialize offline call tracker for RTP-to-CallID mapping
-				offlineTracker := NewOfflineCallTracker()
-				SetOfflineCallTracker(offlineTracker)
+				offlineTracker := NewCallTracker()
+				SetCallTracker(offlineTracker)
 
 				go startOfflineCapture(ctx, msg.PCAPFiles, m.bpfFilter, program, done)
 			}

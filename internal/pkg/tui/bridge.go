@@ -84,10 +84,10 @@ func (rb *timeRingBuffer) len() int {
 	return rb.count
 }
 
-// Offline call tracker for RTP-to-CallID mapping in offline mode
+// Call tracker for RTP-to-CallID mapping in TUI capture modes
 var (
-	offlineCallTracker *OfflineCallTracker
-	offlineTrackerMu   sync.RWMutex
+	callTracker   *CallTracker
+	callTrackerMu sync.RWMutex
 
 	// String interning for protocol names (reduce memory footprint)
 	protocolStrings = map[string]string{
@@ -189,27 +189,27 @@ func isSIPBytes(payload []byte) bool {
 	return false
 }
 
-// SetOfflineCallTracker sets the offline call tracker for use during offline mode
-func SetOfflineCallTracker(tracker *OfflineCallTracker) {
-	offlineTrackerMu.Lock()
-	defer offlineTrackerMu.Unlock()
-	offlineCallTracker = tracker
+// SetCallTracker sets the call tracker for RTP-to-CallID mapping
+func SetCallTracker(tracker *CallTracker) {
+	callTrackerMu.Lock()
+	defer callTrackerMu.Unlock()
+	callTracker = tracker
 }
 
-// GetOfflineCallTracker returns the current offline call tracker
-func GetOfflineCallTracker() *OfflineCallTracker {
-	offlineTrackerMu.RLock()
-	defer offlineTrackerMu.RUnlock()
-	return offlineCallTracker
+// GetCallTracker returns the current call tracker
+func GetCallTracker() *CallTracker {
+	callTrackerMu.RLock()
+	defer callTrackerMu.RUnlock()
+	return callTracker
 }
 
-// ClearOfflineCallTracker clears the offline call tracker
-func ClearOfflineCallTracker() {
-	offlineTrackerMu.Lock()
-	defer offlineTrackerMu.Unlock()
-	if offlineCallTracker != nil {
-		offlineCallTracker.Clear()
-		offlineCallTracker = nil
+// ClearCallTracker clears the call tracker
+func ClearCallTracker() {
+	callTrackerMu.Lock()
+	defer callTrackerMu.Unlock()
+	if callTracker != nil {
+		callTracker.Clear()
+		callTracker = nil
 	}
 }
 
@@ -266,8 +266,8 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 
 	// Cap buffer size to prevent unbounded growth (only for live capture)
 	// In offline mode, we MUST NOT drop packets - let the buffer grow
-	isOfflineMode := GetOfflineCallTracker() != nil
-	if !isOfflineMode {
+	hasCallTracker := GetCallTracker() != nil
+	if !hasCallTracker {
 		const maxPending = 5000
 		if len(pb.packets) > maxPending {
 			pb.packets = pb.packets[len(pb.packets)-maxPending:]
@@ -312,8 +312,8 @@ func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketD
 // For offline capture: Returns ALL pending packets to ensure complete processing.
 func DrainPendingPackets() []components.PacketDisplay {
 	// In offline mode, drain all packets to ensure none are lost
-	isOfflineMode := GetOfflineCallTracker() != nil
-	if isOfflineMode {
+	hasCallTracker := GetCallTracker() != nil
+	if hasCallTracker {
 		return pendingPackets.drainPackets(100000) // Large number = all packets
 	}
 	// Live mode: limit to prevent UI stutter
@@ -478,9 +478,9 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, we MUST NOT drop packets - use blocking send
-			isOfflineMode := GetOfflineCallTracker() != nil
+			hasCallTracker := GetCallTracker() != nil
 
-			if isOfflineMode {
+			if hasCallTracker {
 				// Blocking send - wait until TUI is ready (offline mode)
 				tuiBatchChan <- msg
 				atomic.AddInt64(&bridgeStats.BatchesSent, 1)
@@ -590,11 +590,11 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, process ALL packets - no sampling needed
-			isOfflineMode := GetOfflineCallTracker() != nil
+			hasCallTracker := GetCallTracker() != nil
 
 			// Use cached sampling ratio (only for live capture)
 			samplingRatio := cachedSamplingRatio
-			if isOfflineMode {
+			if hasCallTracker {
 				samplingRatio = 1.0 // Process all packets in offline mode
 			}
 
@@ -727,7 +727,7 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 
 		// Feed SIP packet to offline tracker for RTP-to-CallID mapping
 		// Use media_ports and media_ip from detector metadata (parsed from SDP)
-		if tracker := GetOfflineCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
+		if tracker := GetCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
 			if mediaPorts, ok := result.Metadata["media_ports"].([]uint16); ok && len(mediaPorts) > 0 {
 				// Determine RTP endpoint IP:
 				// 1. Prefer media_ip from SDP c= line (most accurate)
@@ -756,7 +756,7 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 		display.VoIPData = metadataToVoIPData(result.Metadata)
 
 		// Query offline tracker for CallID based on IP/port
-		if tracker := GetOfflineCallTracker(); tracker != nil && display.VoIPData != nil {
+		if tracker := GetCallTracker(); tracker != nil && display.VoIPData != nil {
 			callID := tracker.GetCallIDForRTPPacket(display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
 			if callID != "" {
 				display.VoIPData.CallID = callID

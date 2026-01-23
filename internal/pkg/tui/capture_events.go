@@ -53,9 +53,9 @@ func (m *Model) ensureCallAggregator() {
 			m.backgroundProcessor.SetCallAggregator(m.liveCallAggregator, components.CaptureModeLive)
 		}
 		// Initialize call tracker for RTP-to-CallID mapping
-		if GetOfflineCallTracker() == nil {
-			liveTracker := NewOfflineCallTracker()
-			SetOfflineCallTracker(liveTracker)
+		if GetCallTracker() == nil {
+			liveTracker := NewCallTracker()
+			SetCallTracker(liveTracker)
 		}
 
 	case components.CaptureModeOffline:
@@ -65,9 +65,9 @@ func (m *Model) ensureCallAggregator() {
 			m.backgroundProcessor.SetCallAggregator(m.offlineCallAggregator, components.CaptureModeOffline)
 		}
 		// Initialize call tracker for RTP-to-CallID mapping
-		if GetOfflineCallTracker() == nil {
-			offlineTracker := NewOfflineCallTracker()
-			SetOfflineCallTracker(offlineTracker)
+		if GetCallTracker() == nil {
+			offlineTracker := NewCallTracker()
+			SetCallTracker(offlineTracker)
 		}
 	}
 }

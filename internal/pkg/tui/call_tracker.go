@@ -14,9 +14,9 @@ type CallPartyInfo struct {
 	To   string
 }
 
-// OfflineCallTracker tracks RTP-to-CallID mappings for offline PCAP analysis
+// CallTracker tracks RTP-to-CallID mappings for TUI capture modes (live and offline)
 // It parses SDP from SIP packets to extract RTP connection information
-type OfflineCallTracker struct {
+type CallTracker struct {
 	// Map: IP:port -> CallID (simplified: just store media endpoint)
 	rtpEndpointToCallID map[string]string
 	// Map: CallID -> list of endpoints
@@ -26,9 +26,9 @@ type OfflineCallTracker struct {
 	mu            sync.RWMutex
 }
 
-// NewOfflineCallTracker creates a new offline call tracker
-func NewOfflineCallTracker() *OfflineCallTracker {
-	return &OfflineCallTracker{
+// NewCallTracker creates a new call tracker for RTP-to-CallID mapping
+func NewCallTracker() *CallTracker {
+	return &CallTracker{
 		rtpEndpointToCallID: make(map[string]string),
 		callIDToEndpoints:   make(map[string][]string),
 		callPartyInfo:       make(map[string]*CallPartyInfo),
@@ -37,7 +37,7 @@ func NewOfflineCallTracker() *OfflineCallTracker {
 
 // RegisterMediaPorts registers RTP media ports from SIP detector metadata
 // This is the preferred method as it uses already-parsed SDP data from the detector
-func (t *OfflineCallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) {
+func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) {
 	if callID == "" || len(ports) == 0 {
 		return
 	}
@@ -53,7 +53,7 @@ func (t *OfflineCallTracker) RegisterMediaPorts(callID, rtpIP string, ports []ui
 }
 
 // RegisterCallPartyInfo stores From/To information for a call
-func (t *OfflineCallTracker) RegisterCallPartyInfo(callID, from, to string) {
+func (t *CallTracker) RegisterCallPartyInfo(callID, from, to string) {
 	if callID == "" {
 		return
 	}
@@ -77,7 +77,7 @@ func (t *OfflineCallTracker) RegisterCallPartyInfo(callID, from, to string) {
 }
 
 // GetCallPartyInfo returns the From/To information for a call
-func (t *OfflineCallTracker) GetCallPartyInfo(callID string) (from, to string) {
+func (t *CallTracker) GetCallPartyInfo(callID string) (from, to string) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -89,7 +89,7 @@ func (t *OfflineCallTracker) GetCallPartyInfo(callID string) (from, to string) {
 
 // ProcessSIPPacket processes a SIP packet to extract RTP connection info from SDP
 // Deprecated: Use RegisterMediaPorts with detector metadata instead
-func (t *OfflineCallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload string) {
+func (t *CallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload string) {
 	if callID == "" {
 		return
 	}
@@ -133,7 +133,7 @@ func (t *OfflineCallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload stri
 }
 
 // GetCallIDForRTPPacket returns the CallID for an RTP packet based on IP/port
-func (t *OfflineCallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort string) string {
+func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort string) string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -193,7 +193,7 @@ func (t *OfflineCallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPor
 }
 
 // Clear removes all tracked mappings
-func (t *OfflineCallTracker) Clear() {
+func (t *CallTracker) Clear() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

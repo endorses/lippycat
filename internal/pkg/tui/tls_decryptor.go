@@ -25,7 +25,7 @@ type TLSDecryptor struct {
 	mu             sync.RWMutex
 }
 
-// Global TLS decryptor for TUI (similar to offlineCallTracker)
+// Global TLS decryptor for TUI (similar to callTracker)
 var (
 	globalTLSDecryptor *TLSDecryptor
 	tlsDecryptorMu     sync.RWMutex

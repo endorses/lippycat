@@ -103,10 +103,10 @@ func runFile(cmd *cobra.Command, args []string) {
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
 
-	// Initialize offline call tracker for RTP-to-CallID mapping BEFORE starting capture
+	// Initialize call tracker for RTP-to-CallID mapping BEFORE starting capture
 	// This is critical - the bridge needs the tracker available when processing SIP packets
-	offlineTracker := tui.NewOfflineCallTracker()
-	tui.SetOfflineCallTracker(offlineTracker)
+	callTracker := tui.NewCallTracker()
+	tui.SetCallTracker(callTracker)
 
 	// Start packet capture in background using timestamp-ordered processing
 	// This ensures SIP packets are processed before their corresponding RTP packets,

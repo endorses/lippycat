@@ -149,3 +149,74 @@ Each filter entered with `/` is AND-ed with existing filters:
 3. Result: SIP packets from alice on port 5060
 
 Use `c` to remove the last filter, `C` to clear all.
+
+---
+
+# Call Filters
+
+Press `/` on the VoIP Calls view to filter calls.
+
+## Call State
+
+Filter by call state (case-insensitive):
+
+```
+state:active
+state:ringing
+state:ended
+state:failed
+state:ringing,active    # Multiple states (OR)
+```
+
+## Numeric Comparisons
+
+Filter by numeric fields with operators (`>`, `<`, `>=`, `<=`, `=`):
+
+**Duration** (supports time units: `s`, `m`, `h`):
+
+```
+duration:>30s
+duration:>=5m
+duration:<1h
+duration:>1h30m
+```
+
+**Quality metrics:**
+
+```
+mos:>3.5          # Mean Opinion Score
+mos:<=4.0
+jitter:<50        # Jitter in ms
+loss:>5           # Packet loss %
+packets:>100      # Packet count
+```
+
+## Text Fields
+
+Filter by text fields (substring match):
+
+```
+from:alice        # From URI contains
+to:bob            # To URI contains
+user:alice        # From OR To contains
+callid:abc123     # Call-ID contains
+codec:g711        # Codec contains
+```
+
+## Node Filter
+
+Filter by origin node (distributed mode):
+
+```
+node:hunter-1     # Exact match
+node:edge-*       # Prefix wildcard
+```
+
+## Text Search
+
+Plain text searches all call fields (callid, from, to, state, codec, node):
+
+```
+alice
+sip:bob@example.com
+```

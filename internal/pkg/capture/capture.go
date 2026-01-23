@@ -30,6 +30,8 @@ type PacketBuffer struct {
 	closed     int32          // atomic flag: 0 = open, 1 = closed
 	sendersMu  sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
 	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
+	pauseFn    func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
+	pauseMu    sync.RWMutex   // protects pauseFn
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
@@ -43,7 +45,24 @@ func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 	}
 }
 
+// SetPauseFn sets an optional pause check function.
+// If set and returns true, Send() will skip packets (drop them silently).
+// This is used by the TUI to pause packet capture without stopping the capture source.
+func (pb *PacketBuffer) SetPauseFn(fn func() bool) {
+	pb.pauseMu.Lock()
+	defer pb.pauseMu.Unlock()
+	pb.pauseFn = fn
+}
+
 func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
+	// Fast path: check pause state first (skip packet if paused)
+	pb.pauseMu.RLock()
+	pauseFn := pb.pauseFn
+	pb.pauseMu.RUnlock()
+	if pauseFn != nil && pauseFn() {
+		return false // Paused - drop packet silently
+	}
+
 	// Fast path: check if already closed (no lock needed for read)
 	if atomic.LoadInt32(&pb.closed) == 1 {
 		return false
@@ -128,15 +147,20 @@ func (pb *PacketBuffer) IsClosed() bool {
 }
 
 func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
-	InitWithContext(context.Background(), ifaces, filter, packetProcessor, assembler)
+	InitWithContext(context.Background(), ifaces, filter, packetProcessor, assembler, nil)
 }
 
-// InitWithContext starts packet capture with a cancellable context
+// InitWithContext starts packet capture with a cancellable context.
+// The optional pauseFn parameter, if provided, allows the caller to pause packet capture.
+// When pauseFn returns true, packets are dropped at the source to reduce CPU usage.
 // Note: Signal handling should be done by the caller. This function only respects context cancellation.
-func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler, pauseFn func() bool) {
 	// Use a configurable buffer size with proper backpressure handling
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
+	if pauseFn != nil {
+		packetBuffer.SetPauseFn(pauseFn)
+	}
 	defer packetBuffer.Close()
 
 	InitWithBuffer(ctx, ifaces, filter, packetBuffer, packetProcessor, assembler)

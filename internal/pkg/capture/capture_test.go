@@ -271,3 +271,40 @@ func TestGetPacketBufferSize_Default(t *testing.T) {
 	size := getPacketBufferSize()
 	assert.Equal(t, DefaultPacketBufferSize, size, "Should return default buffer size")
 }
+
+func TestPacketBuffer_PauseFn(t *testing.T) {
+	ctx := context.Background()
+	buffer := NewPacketBuffer(ctx, 10)
+	defer buffer.Close()
+
+	pkt := PacketInfo{}
+
+	// Without pause function, Send should succeed
+	assert.True(t, buffer.Send(pkt), "Send should succeed without pause function")
+
+	// Set pause function that returns false (not paused)
+	paused := false
+	buffer.SetPauseFn(func() bool { return paused })
+
+	assert.True(t, buffer.Send(pkt), "Send should succeed when not paused")
+
+	// Set paused to true
+	paused = true
+	assert.False(t, buffer.Send(pkt), "Send should fail when paused")
+
+	// Unpause
+	paused = false
+	assert.True(t, buffer.Send(pkt), "Send should succeed after unpause")
+}
+
+func TestPacketBuffer_PauseFn_NilSafe(t *testing.T) {
+	ctx := context.Background()
+	buffer := NewPacketBuffer(ctx, 10)
+	defer buffer.Close()
+
+	// Explicitly set nil pause function
+	buffer.SetPauseFn(nil)
+
+	pkt := PacketInfo{}
+	assert.True(t, buffer.Send(pkt), "Send should succeed with nil pause function")
+}

@@ -166,7 +166,7 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 
 	// Run capture in background (like hunter nodes do)
 	go func() {
-		InitWithContext(ctx, devices, filter, processor, assembler)
+		InitWithContext(ctx, devices, filter, processor, assembler, nil)
 		close(captureDone)
 	}()
 

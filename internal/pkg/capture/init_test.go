@@ -77,7 +77,7 @@ func TestInitWithContext(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			InitWithContext(ctx, ifaces, "", processor, nil)
+			InitWithContext(ctx, ifaces, "", processor, nil, nil)
 		}()
 
 		// Wait for some packets to be processed
@@ -121,7 +121,7 @@ func TestInitWithContext(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			InitWithContext(ctx, ifaces, "", processor, nil)
+			InitWithContext(ctx, ifaces, "", processor, nil, nil)
 		}()
 
 		// Cancel after short time
@@ -166,7 +166,7 @@ func TestInitWithContext(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			InitWithContext(ctx, ifaces, filter, processor, nil)
+			InitWithContext(ctx, ifaces, filter, processor, nil, nil)
 		}()
 
 		time.Sleep(500 * time.Millisecond)
@@ -206,7 +206,7 @@ func TestInitWithContext(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			InitWithContext(ctx, ifaces, "", processor, nil)
+			InitWithContext(ctx, ifaces, "", processor, nil, nil)
 		}()
 
 		// Give it time to start

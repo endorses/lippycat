@@ -10,13 +10,14 @@ import (
 
 // TextFilter filters records by text content
 type TextFilter struct {
-	searchText  string
-	fields      []string // which fields to search: "all", "src", "dst", "info", "protocol"
-	searchAll   bool     // optimized flag for "all" field search
-	searchSrc   bool
-	searchDst   bool
-	searchInfo  bool
-	searchProto bool
+	searchText    string
+	fields        []string // which fields to search: "all", "src", "dst", "info", "protocol", or generic fields
+	searchAll     bool     // optimized flag for "all" field search
+	searchSrc     bool
+	searchDst     bool
+	searchInfo    bool
+	searchProto   bool
+	genericFields []string // fields not matching packet-specific optimizations
 }
 
 // NewTextFilter creates a new text filter
@@ -26,8 +27,9 @@ func NewTextFilter(searchText string, fields []string) *TextFilter {
 	}
 
 	f := &TextFilter{
-		searchText: strings.ToLower(searchText),
-		fields:     fields,
+		searchText:    strings.ToLower(searchText),
+		fields:        fields,
+		genericFields: make([]string, 0),
 	}
 
 	// Pre-calculate field flags for faster matching
@@ -43,6 +45,9 @@ func NewTextFilter(searchText string, fields []string) *TextFilter {
 			f.searchInfo = true
 		case "protocol":
 			f.searchProto = true
+		default:
+			// Generic fields (call-specific: from, to, user, callid, codec, etc.)
+			f.genericFields = append(f.genericFields, field)
 		}
 	}
 
@@ -64,7 +69,7 @@ func (f *TextFilter) Match(record Filterable) bool {
 		return false
 	}
 
-	// Search specific fields
+	// Search packet-specific fields (optimized paths)
 	if f.searchSrc {
 		if simd.StringContains(strings.ToLower(record.GetStringField("src")), f.searchText) ||
 			simd.StringContains(strings.ToLower(record.GetStringField("srcport")), f.searchText) {
@@ -91,11 +96,23 @@ func (f *TextFilter) Match(record Filterable) bool {
 		}
 	}
 
+	// Search generic fields (call-specific: from, to, user, callid, codec, etc.)
+	for _, field := range f.genericFields {
+		fieldValue := record.GetStringField(field)
+		if simd.StringContains(strings.ToLower(fieldValue), f.searchText) {
+			return true
+		}
+	}
+
 	return false
 }
 
 // String returns a human-readable representation
 func (f *TextFilter) String() string {
+	// If we have a single specific field, include it in the output
+	if len(f.fields) == 1 && f.fields[0] != "all" {
+		return f.fields[0] + ":" + f.searchText
+	}
 	return f.searchText
 }
 

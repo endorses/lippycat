@@ -525,3 +525,36 @@ func BenchmarkCallStore_GetCallsInOrder_Uncached(b *testing.B) {
 		_ = store.GetCallsInOrder()
 	}
 }
+
+func TestCallStore_GetCallsInOrder_OutOfOrderAddition(t *testing.T) {
+	// This test verifies that GetCallsInOrder returns calls sorted by StartTime
+	// even when calls are added in a different order (e.g., newest first)
+	store := NewCallStore(100)
+
+	baseTime := time.Now()
+
+	// Add calls OUT OF ORDER (newest first, then oldest, then middle)
+	store.AddOrUpdateCall(makeCall("call-3", baseTime.Add(3*time.Second))) // Added first but latest
+	store.AddOrUpdateCall(makeCall("call-1", baseTime.Add(1*time.Second))) // Earliest
+	store.AddOrUpdateCall(makeCall("call-2", baseTime.Add(2*time.Second))) // Middle
+
+	// GetCallsInOrder should return sorted by StartTime (oldest first)
+	calls := store.GetCallsInOrder()
+	require.Len(t, calls, 3)
+
+	assert.Equal(t, "call-1", calls[0].CallID, "first call should be earliest (call-1)")
+	assert.Equal(t, "call-2", calls[1].CallID, "second call should be middle (call-2)")
+	assert.Equal(t, "call-3", calls[2].CallID, "third call should be latest (call-3)")
+
+	// Add another call that should be at the very beginning
+	store.AddOrUpdateCall(makeCall("call-0", baseTime))
+
+	// Should still be sorted correctly
+	calls = store.GetCallsInOrder()
+	require.Len(t, calls, 4)
+
+	assert.Equal(t, "call-0", calls[0].CallID, "call-0 should be first (earliest)")
+	assert.Equal(t, "call-1", calls[1].CallID)
+	assert.Equal(t, "call-2", calls[2].CallID)
+	assert.Equal(t, "call-3", calls[3].CallID)
+}

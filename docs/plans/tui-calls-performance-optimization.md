@@ -276,23 +276,30 @@ Currently uses `strings.HasPrefix(callID, "rtp-")` in hot paths.
 
 **File:** `internal/pkg/tui/components/callsview.go`
 
-`SetCalls()` performs O(n) linear search to find selected call index.
+`SetCalls()` was performing O(n) linear search to find selected call index.
 
 ### Changes
 
-- [ ] Build index during SetCalls:
+- [x] Add `callIndex map[string]int` field to `CallsView` struct
+
+- [x] Initialize map in `NewCallsView()`
+
+- [x] Build index during `SetCalls()`:
   ```go
-  type CallsView struct {
-      // existing fields...
-      callIndex map[string]int    // callID -> index in calls slice
+  cv.callIndex = make(map[string]int, len(calls))
+  for i, call := range calls {
+      cv.callIndex[call.CallID] = i
   }
   ```
 
-- [ ] Replace linear search (lines 249-256) with map lookup
+- [x] Replace linear search with O(1) map lookup:
+  ```go
+  if idx, ok := cv.callIndex[selectedCallID]; ok {
+      newIndex = idx
+  }
+  ```
 
-- [ ] Update index when calls change
-
-**Expected improvement:** O(n) → O(1) for selected call lookup
+**Expected improvement:** O(n) → O(1) for selected call lookup ✅
 
 ---
 

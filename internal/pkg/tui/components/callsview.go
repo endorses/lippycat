@@ -178,6 +178,7 @@ func (c Call) RecordType() string {
 // CallsView displays active VoIP calls
 type CallsView struct {
 	calls            []Call
+	callIndex        map[string]int // callID -> index in calls slice for O(1) lookup
 	selected         int
 	offset           int
 	width            int
@@ -218,6 +219,7 @@ type CallLeg struct {
 func NewCallsView() CallsView {
 	return CallsView{
 		calls:           make([]Call, 0),
+		callIndex:       make(map[string]int),
 		selected:        0,
 		offset:          0,
 		showDetails:     false,
@@ -254,14 +256,17 @@ func (cv *CallsView) SetCalls(calls []Call) {
 	// Calls are pre-sorted by upstream (CallStore/CallAggregator) by StartTime then CallID
 	cv.calls = calls
 
-	// Try to maintain selection on the same call by ID
+	// Build callID -> index map for O(1) lookup
+	cv.callIndex = make(map[string]int, len(calls))
+	for i, call := range calls {
+		cv.callIndex[call.CallID] = i
+	}
+
+	// Try to maintain selection on the same call by ID using O(1) map lookup
 	newIndex := -1
 	if selectedCallID != "" {
-		for i, call := range cv.calls {
-			if call.CallID == selectedCallID {
-				newIndex = i
-				break
-			}
+		if idx, ok := cv.callIndex[selectedCallID]; ok {
+			newIndex = idx
 		}
 	}
 

@@ -19,7 +19,6 @@ type LocalCallAggregator struct {
 	lastNotifyTime  time.Time
 	notifyThrottle  time.Duration
 	mu              sync.Mutex
-	knownCalls      map[string]bool // Track which calls we've already notified about
 	callUpdateTimer *time.Timer
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
@@ -31,7 +30,6 @@ func NewLocalCallAggregator(program *tea.Program) *LocalCallAggregator {
 		aggregator:     voip.NewCallAggregator(),
 		program:        program,
 		notifyThrottle: 500 * time.Millisecond, // Throttle call updates
-		knownCalls:     make(map[string]bool),
 		stopCh:         make(chan struct{}),
 	}
 }
@@ -79,13 +77,6 @@ func (lca *LocalCallAggregator) notifyCallUpdates() {
 	// Convert all calls to types.CallInfo and send in a single batch
 	callInfos := make([]types.CallInfo, 0, len(calls))
 	for _, call := range calls {
-		lca.mu.Lock()
-		// Track known calls
-		if !lca.knownCalls[call.CallID] {
-			lca.knownCalls[call.CallID] = true
-		}
-		lca.mu.Unlock()
-
 		// Convert voip.AggregatedCall to types.CallInfo
 		callInfo := lca.convertToTUICall(call)
 		callInfos = append(callInfos, callInfo)

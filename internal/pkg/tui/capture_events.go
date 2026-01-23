@@ -274,6 +274,11 @@ func (m Model) handlePacketMsg(msg PacketMsg) (Model, tea.Cmd) {
 
 // handleCallUpdateMsg processes VoIP call state updates
 func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
+	// Skip call updates when paused to maintain stable view state
+	if m.uiState.Paused {
+		return m, nil
+	}
+
 	// Add or update calls in the call store (maintains history across processor restarts)
 	tuiCalls := make([]components.Call, len(msg.Calls))
 	for i, call := range msg.Calls {
@@ -324,6 +329,11 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 
 // handleCorrelatedCallUpdateMsg processes correlated call updates from processor
 func (m Model) handleCorrelatedCallUpdateMsg(msg CorrelatedCallUpdateMsg) (Model, tea.Cmd) {
+	// Skip correlated call updates when paused to maintain stable view state
+	if m.uiState.Paused {
+		return m, nil
+	}
+
 	// Pass correlated calls to CallsView for display in detail panel
 	m.uiState.CallsView.SetCorrelatedCalls(msg.CorrelatedCalls)
 

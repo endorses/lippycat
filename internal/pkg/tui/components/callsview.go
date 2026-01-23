@@ -262,18 +262,20 @@ func (cv *CallsView) SetCalls(calls []Call) {
 		// Previously selected call still exists - keep it selected
 		cv.selected = newIndex
 
-		// Check if the selected call is now at the bottom (e.g., calls above it were removed)
-		// If so and autoScroll was enabled, keep auto-scrolling
+		// Handle auto-scroll behavior when the selected call is found
 		if cv.autoScroll && cv.selected == len(cv.calls)-1 {
-			// Already at bottom with autoScroll, stay there
+			// Already at bottom with autoScroll enabled - stay there
 		} else if cv.selected != len(cv.calls)-1 {
-			// No longer at bottom, so if we were auto-scrolling, we should
-			// continue to follow new calls only if we WERE at the bottom before
-			// and the list grew (not shrunk due to filtering)
+			// Selected call is no longer at the bottom (new calls arrived after it)
 			if cv.autoScroll && wasAtBottom && len(cv.calls) > oldLen {
+				// Auto-scroll was enabled and user was at the bottom when list grew
+				// Move selection to the new bottom to follow new calls
 				cv.selected = len(cv.calls) - 1
 			}
+			// If autoScroll was off, or user wasn't at bottom, or list didn't grow:
+			// keep selection on the same call (no change needed)
 		}
+		// Note: if autoScroll is false and selected is at bottom, no special handling needed
 	} else {
 		// Selected call was removed from the filtered list
 		if cv.autoScroll && wasAtBottom {

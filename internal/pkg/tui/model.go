@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pcap"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
@@ -475,9 +477,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // determineSaveMode determines whether to use one-shot or streaming save
 
 // mapCallState converts string state to components.CallState
+// Uses case-insensitive matching to handle different state string formats
 func mapCallState(state string) components.CallState {
-	switch state {
-	case "RINGING":
+	switch strings.ToUpper(state) {
+	case "NEW", "RINGING":
+		// NEW is the initial state before INVITE is processed, treat as Ringing
 		return components.CallStateRinging
 	case "ACTIVE":
 		return components.CallStateActive
@@ -486,6 +490,10 @@ func mapCallState(state string) components.CallState {
 	case "FAILED":
 		return components.CallStateFailed
 	default:
+		// Log unexpected state values for debugging
+		if state != "" {
+			logger.Debug("Unknown call state, defaulting to Ringing", "state", state)
+		}
 		return components.CallStateRinging
 	}
 }

@@ -20,9 +20,8 @@ type CallStore struct {
 	maxCalls      int                         // Maximum calls to keep in memory
 	totalCalls    int                         // Total calls seen (ever)
 	FilterChain   *filters.FilterChain        // Active filters
-	filteredCalls []components.Call           // Filtered calls for display
+	filteredCalls []components.Call           // Filtered calls for display (always sorted)
 	filteredIndex map[string]int              // callID -> index in filteredCalls for O(1) lookup
-	filteredDirty bool                        // True if filtered cache needs re-sort
 	matchedCalls  int64                       // Calls matching filter
 	cachedCalls   []components.Call           // Cached sorted copy of all calls
 	callsDirty    bool                        // True if cache needs rebuild
@@ -38,7 +37,6 @@ func NewCallStore(bufferSize int) *CallStore {
 		FilterChain:   filters.NewFilterChain(),
 		filteredCalls: []components.Call{},
 		filteredIndex: make(map[string]int),
-		filteredDirty: true, // Start dirty so first GetFilteredCalls sorts
 		callsDirty:    true, // Start dirty so first GetCallsInOrder builds cache
 	}
 }
@@ -216,28 +214,12 @@ func (cs *CallStore) HasFilter() bool {
 }
 
 // GetFilteredCalls returns filtered calls for display, sorted by StartTime.
-// Uses lazy sorting - only re-sorts when data has changed (filteredDirty flag).
+// The list is maintained in sorted order via binary search insert, so no sorting needed here.
 func (cs *CallStore) GetFilteredCalls() []components.Call {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	// Re-sort if dirty
-	if cs.filteredDirty && len(cs.filteredCalls) > 0 {
-		sort.Slice(cs.filteredCalls, func(i, j int) bool {
-			if cs.filteredCalls[i].StartTime.Equal(cs.filteredCalls[j].StartTime) {
-				return cs.filteredCalls[i].CallID < cs.filteredCalls[j].CallID
-			}
-			return cs.filteredCalls[i].StartTime.Before(cs.filteredCalls[j].StartTime)
-		})
-
-		// Rebuild index after sorting
-		for i, call := range cs.filteredCalls {
-			cs.filteredIndex[call.CallID] = i
-		}
-
-		cs.filteredDirty = false
-	}
-
+	// List is always sorted via binary search insert - just return a copy
 	result := make([]components.Call, len(cs.filteredCalls))
 	copy(result, cs.filteredCalls)
 	return result
@@ -258,28 +240,29 @@ func (cs *CallStore) GetMatchedCalls() int64 {
 }
 
 // removeFromFilteredLocked removes a call from filtered calls by ID (must hold lock)
-// Uses swap-with-last technique for O(1) removal
+// Uses shift removal to maintain sorted order.
 func (cs *CallStore) removeFromFilteredLocked(callID string) {
 	idx, exists := cs.filteredIndex[callID]
 	if !exists {
 		return
 	}
 
-	lastIdx := len(cs.filteredCalls) - 1
-	if idx != lastIdx {
-		// Swap with last element
-		cs.filteredCalls[idx] = cs.filteredCalls[lastIdx]
-		// Update the swapped element's index
-		cs.filteredIndex[cs.filteredCalls[idx].CallID] = idx
-	}
-
-	// Truncate slice and remove from index
-	cs.filteredCalls = cs.filteredCalls[:lastIdx]
+	// Remove from index first
 	delete(cs.filteredIndex, callID)
+
+	// Shift elements left to fill the gap (maintains sort order)
+	copy(cs.filteredCalls[idx:], cs.filteredCalls[idx+1:])
+	cs.filteredCalls = cs.filteredCalls[:len(cs.filteredCalls)-1]
+
+	// Update index map for all calls after the removed position
+	for i := idx; i < len(cs.filteredCalls); i++ {
+		cs.filteredIndex[cs.filteredCalls[i].CallID] = i
+	}
 }
 
 // updateFilteredCallLocked applies filter to a call and updates filtered list (must hold lock)
-// Uses index for O(1) lookup. Sets filteredDirty flag when list is modified.
+// Uses binary search for sorted insert to maintain chronological order at all times.
+// This eliminates race conditions where unsorted data could be rendered.
 func (cs *CallStore) updateFilteredCallLocked(call components.Call) {
 	// Check if call matches filter
 	matches := cs.FilterChain.Match(call)
@@ -291,19 +274,49 @@ func (cs *CallStore) updateFilteredCallLocked(call components.Call) {
 		if exists {
 			// Update existing entry in place
 			cs.filteredCalls[existingIdx] = call
+			// Note: StartTime shouldn't change for existing calls, so no re-sort needed
 		} else {
-			// Add new matching call - append and mark dirty for re-sort
-			cs.filteredIndex[call.CallID] = len(cs.filteredCalls)
-			cs.filteredCalls = append(cs.filteredCalls, call)
-			cs.filteredDirty = true // New call needs sorting
+			// Add new matching call using binary search sorted insert
+			// This maintains chronological order immediately, no lazy sort needed
+			insertIdx := cs.findInsertPosition(call)
+			cs.insertAtPosition(call, insertIdx)
 			cs.matchedCalls++
 		}
 	} else {
 		if exists {
-			// Call no longer matches, remove it using O(1) swap-with-last
+			// Call no longer matches, remove it
 			cs.removeFromFilteredLocked(call.CallID)
-			cs.filteredDirty = true // Swap-with-last breaks order
 		}
+	}
+}
+
+// findInsertPosition uses binary search to find the correct sorted position for a call.
+// Sorts by StartTime ascending, with CallID as tiebreaker.
+func (cs *CallStore) findInsertPosition(call components.Call) int {
+	return sort.Search(len(cs.filteredCalls), func(i int) bool {
+		existing := cs.filteredCalls[i]
+		if existing.StartTime.Equal(call.StartTime) {
+			return existing.CallID >= call.CallID
+		}
+		return existing.StartTime.After(call.StartTime)
+	})
+}
+
+// insertAtPosition inserts a call at the given index, shifting subsequent elements.
+// Updates the index map for all affected calls.
+func (cs *CallStore) insertAtPosition(call components.Call, idx int) {
+	// Grow slice by one
+	cs.filteredCalls = append(cs.filteredCalls, components.Call{})
+
+	// Shift elements right from idx onward
+	copy(cs.filteredCalls[idx+1:], cs.filteredCalls[idx:])
+
+	// Insert the new call
+	cs.filteredCalls[idx] = call
+
+	// Update index map for all calls from idx onward
+	for i := idx; i < len(cs.filteredCalls); i++ {
+		cs.filteredIndex[cs.filteredCalls[i].CallID] = i
 	}
 }
 
@@ -317,26 +330,12 @@ func (cs *CallStore) reapplyFiltersLocked() {
 		return
 	}
 
-	// Collect all matching calls
+	// Collect all matching calls using sorted insert to maintain order
 	for _, call := range cs.calls {
 		if cs.FilterChain.Match(*call) {
-			cs.filteredCalls = append(cs.filteredCalls, *call)
+			insertIdx := cs.findInsertPosition(*call)
+			cs.insertAtPosition(*call, insertIdx)
 			cs.matchedCalls++
 		}
 	}
-
-	// Sort by StartTime for chronological display order, then by CallID as tiebreaker
-	sort.Slice(cs.filteredCalls, func(i, j int) bool {
-		if cs.filteredCalls[i].StartTime.Equal(cs.filteredCalls[j].StartTime) {
-			return cs.filteredCalls[i].CallID < cs.filteredCalls[j].CallID
-		}
-		return cs.filteredCalls[i].StartTime.Before(cs.filteredCalls[j].StartTime)
-	})
-
-	// Rebuild index after sorting
-	for i, call := range cs.filteredCalls {
-		cs.filteredIndex[call.CallID] = i
-	}
-
-	cs.filteredDirty = false // Just sorted, so not dirty
 }

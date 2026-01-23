@@ -284,6 +284,92 @@ func TestCallStore_GetFilteredCalls_Sorting(t *testing.T) {
 	assert.Equal(t, "call-3", calls[3].CallID)
 }
 
+func TestCallStore_ImmediateSortedInsert(t *testing.T) {
+	// This test verifies that calls are in sorted order IMMEDIATELY after each insert,
+	// not via lazy sorting. This eliminates race conditions where unsorted data could be rendered.
+	store := NewCallStore(100)
+
+	baseTime := time.Now()
+
+	// Helper to check if filtered calls are sorted at current moment
+	checkSorted := func(step string) {
+		calls := store.GetFilteredCalls()
+		for i := 1; i < len(calls); i++ {
+			prev := calls[i-1]
+			curr := calls[i]
+
+			// Check StartTime ordering
+			if curr.StartTime.Before(prev.StartTime) {
+				t.Errorf("%s: calls[%d] StartTime (%v) is before calls[%d] StartTime (%v)",
+					step, i, curr.StartTime, i-1, prev.StartTime)
+			}
+
+			// If same StartTime, check CallID ordering
+			if curr.StartTime.Equal(prev.StartTime) && curr.CallID < prev.CallID {
+				t.Errorf("%s: same StartTime but calls[%d] CallID (%s) < calls[%d] CallID (%s)",
+					step, i, curr.CallID, i-1, prev.CallID)
+			}
+		}
+	}
+
+	// Add calls in random order and verify sorting after each add
+	store.AddOrUpdateCall(makeCall("call-5", baseTime.Add(5*time.Second)))
+	checkSorted("after call-5")
+
+	store.AddOrUpdateCall(makeCall("call-2", baseTime.Add(2*time.Second)))
+	checkSorted("after call-2")
+
+	store.AddOrUpdateCall(makeCall("call-8", baseTime.Add(8*time.Second)))
+	checkSorted("after call-8")
+
+	store.AddOrUpdateCall(makeCall("call-1", baseTime.Add(1*time.Second)))
+	checkSorted("after call-1")
+
+	store.AddOrUpdateCall(makeCall("call-3", baseTime.Add(3*time.Second)))
+	checkSorted("after call-3")
+
+	// Add at the beginning
+	store.AddOrUpdateCall(makeCall("call-0", baseTime))
+	checkSorted("after call-0")
+
+	// Add at the end
+	store.AddOrUpdateCall(makeCall("call-9", baseTime.Add(9*time.Second)))
+	checkSorted("after call-9")
+
+	// Verify final order
+	calls := store.GetFilteredCalls()
+	require.Len(t, calls, 7)
+	assert.Equal(t, "call-0", calls[0].CallID)
+	assert.Equal(t, "call-1", calls[1].CallID)
+	assert.Equal(t, "call-2", calls[2].CallID)
+	assert.Equal(t, "call-3", calls[3].CallID)
+	assert.Equal(t, "call-5", calls[4].CallID)
+	assert.Equal(t, "call-8", calls[5].CallID)
+	assert.Equal(t, "call-9", calls[6].CallID)
+}
+
+func TestCallStore_ImmediateSortedInsert_SameStartTime(t *testing.T) {
+	// When calls have the same StartTime, they should be ordered by CallID
+	store := NewCallStore(100)
+
+	baseTime := time.Now()
+
+	// Add calls with same StartTime in random CallID order
+	store.AddOrUpdateCall(makeCall("call-c", baseTime))
+	store.AddOrUpdateCall(makeCall("call-a", baseTime))
+	store.AddOrUpdateCall(makeCall("call-d", baseTime))
+	store.AddOrUpdateCall(makeCall("call-b", baseTime))
+
+	calls := store.GetFilteredCalls()
+	require.Len(t, calls, 4)
+
+	// Should be sorted by CallID since all have same StartTime
+	assert.Equal(t, "call-a", calls[0].CallID)
+	assert.Equal(t, "call-b", calls[1].CallID)
+	assert.Equal(t, "call-c", calls[2].CallID)
+	assert.Equal(t, "call-d", calls[3].CallID)
+}
+
 func TestCallStore_GetFilteredCalls_SortingWithFilter(t *testing.T) {
 	store := NewCallStore(100)
 

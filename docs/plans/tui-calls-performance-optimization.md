@@ -374,11 +374,27 @@ Recommended order by impact:
 
 Issues discovered after initial optimization implementation:
 
-### Issue 1: Filtered calls not sorted (Fixed)
+### Issue 1: Filtered calls not sorted (Fixed - Revised)
 
-**Problem:** The swap-with-last removal technique in Phase 2 broke sort order of `filteredCalls`. New calls were appended at the end without maintaining chronological order.
+**Problem:** The original lazy sorting approach (dirty flag + sort on get) still allowed a window where calls could appear unsorted in the TUI. New calls were appended to the end and only sorted when `GetFilteredCalls()` was called, causing calls to visually jump positions.
 
-**Solution:** Added `filteredDirty` flag to `CallStore`. When calls are added or removed, set `filteredDirty = true`. In `GetFilteredCalls()`, re-sort and rebuild index lazily when dirty flag is set.
+**Original solution (v1):** Added `filteredDirty` flag to `CallStore`. When calls are added or removed, set `filteredDirty = true`. In `GetFilteredCalls()`, re-sort and rebuild index lazily when dirty flag is set.
+
+**Revised solution (v2):** Replaced lazy sorting with **binary search sorted insert**. Calls are now inserted at their correct sorted position immediately using `sort.Search()`. This eliminates the race condition entirely because the list is always in sorted order.
+
+**Key changes:**
+- `updateFilteredCallLocked()`: Uses `findInsertPosition()` + `insertAtPosition()` instead of append
+- `removeFromFilteredLocked()`: Uses shift removal instead of swap-with-last to maintain order
+- `GetFilteredCalls()`: Simplified to just return a copy (no sorting needed)
+- `reapplyFiltersLocked()`: Uses sorted insert instead of collect-then-sort
+- Removed `filteredDirty` field (no longer needed)
+
+**Tradeoffs:**
+- Insert: O(log n) search + O(n) shift (was O(1) append + O(n log n) lazy sort)
+- Remove: O(n) shift (was O(1) swap)
+- Get: O(n) copy only (was O(n log n) sort + O(n) copy when dirty)
+
+For typical TUI usage where inserts are frequent and gets are on every render, this provides better consistency without significant performance loss.
 
 **Files modified:**
 - `internal/pkg/tui/store/call_store.go`

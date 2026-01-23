@@ -466,6 +466,16 @@ func (cv *CallsView) adjustOffset() {
 		visibleLines = 1
 	}
 
+	// Scroll up if there's blank space at the bottom (list shrunk)
+	// This ensures we don't show empty space when calls are removed
+	maxOffset := len(cv.calls) - visibleLines
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if cv.offset > maxOffset {
+		cv.offset = maxOffset
+	}
+
 	// Cursor above visible area
 	if cv.selected < cv.offset {
 		cv.offset = cv.selected

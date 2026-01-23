@@ -155,6 +155,22 @@ func internProtocol(protocol string) string {
 	return protocol
 }
 
+// isSIPPacket performs fast SIP detection on a raw packet.
+// Used to prioritize SIP packets over RTP in sampling decisions.
+// SIP packets are critical for call setup - losing a SIP INVITE causes
+// subsequent RTP to appear as "RTP-only" calls.
+func isSIPPacket(pkt gopacket.Packet) bool {
+	if transLayer := pkt.TransportLayer(); transLayer != nil {
+		switch trans := transLayer.(type) {
+		case *layers.TCP:
+			return isSIPBytes(trans.LayerPayload())
+		case *layers.UDP:
+			return isSIPBytes(trans.LayerPayload())
+		}
+	}
+	return false
+}
+
 // isSIPBytes performs fast SIP detection using SIMD-optimized byte comparison
 // This is used in the fast conversion path to avoid full protocol detection overhead
 func isSIPBytes(payload []byte) bool {
@@ -618,13 +634,24 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				samplingRatio = 1.0 // Process all packets in offline mode
 			}
 
-			// Use fast conversion for sampled packets, full for important ones
-			var packet components.PacketDisplay
-			shouldDisplay := samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1)
+			// Fast SIP detection BEFORE sampling decision
+			// SIP packets are NEVER sampled/dropped because losing a SIP INVITE
+			// causes subsequent RTP to appear as "RTP-only" calls
+			isSIP := isSIPPacket(pktInfo.Packet)
+
+			// Determine if packet should be displayed:
+			// - SIP packets: always displayed (critical for call setup)
+			// - Other packets: subject to sampling when rate is high
+			var shouldDisplay bool
+			if isSIP {
+				shouldDisplay = true // Never drop SIP packets
+			} else {
+				shouldDisplay = samplingRatio >= 1.0 || (float64(packetCount)*samplingRatio) >= float64(displayedCount+int64(len(batch))+1)
+			}
 
 			if shouldDisplay {
 				// Full conversion to extract all metadata (SDP, etc.)
-				packet = convertPacket(pktInfo)
+				packet := convertPacket(pktInfo)
 				batch = append(batch, packet)
 			}
 

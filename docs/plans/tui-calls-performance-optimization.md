@@ -392,3 +392,23 @@ Issues discovered after initial optimization implementation:
 
 **Files modified:**
 - `internal/pkg/tui/bridge.go`
+
+### Issue 3: SIP packets dropped during high traffic causing false RTP-only calls (Fixed)
+
+**Problem:** During high packet rates, the TUI bridge sampling logic could drop SIP INVITE packets along with RTP packets. When a SIP INVITE is dropped:
+1. RTP port mappings are never registered in the CallTracker
+2. Subsequent RTP packets for that call have no CallID association
+3. The call incorrectly appears as "RTP-only"
+
+**Root cause:** The sampling decision (`shouldDisplay`) was made BEFORE protocol detection. SIP and RTP packets were sampled equally based on packet count, not importance.
+
+**Solution:** Added `isSIPPacket()` function for fast SIP detection BEFORE the sampling decision. SIP packets now bypass sampling entirely and are always processed, while RTP packets remain subject to rate-based sampling when traffic is high.
+
+**Key insight:** It's acceptable to drop some RTP packets (media continuity can survive packet loss), but dropping SIP signaling breaks call setup/tracking entirely.
+
+**Files modified:**
+- `internal/pkg/tui/bridge.go`
+  - Added `isSIPPacket(pkt gopacket.Packet) bool` helper function
+  - Modified sampling logic to check `isSIP` before deciding `shouldDisplay`
+
+**Future consideration:** For even more robustness under extreme load, Phase 2 could add priority queuing at the `PacketBuffer` level in `capture.go`, ensuring SIP packets survive buffer pressure too.

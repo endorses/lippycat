@@ -40,13 +40,14 @@ File: `internal/pkg/voip/call_aggregator.go`
 
 File: `internal/pkg/tui/store/call_store.go`
 
-- [ ] Replace ring buffer fields with LRU structure (same as Phase 1)
-- [ ] Update `NewCallStore()` to initialize LRU
-- [ ] Update `AddOrUpdateCall()`:
+- [x] Replace ring buffer fields with LRU structure (same as Phase 1)
+- [x] Update `NewCallStore()` to initialize LRU
+- [x] Update `AddOrUpdateCall()`:
   - New call: push to front, evict from back if full
   - Existing call: move to front
-- [ ] Keep `GetCallsInOrder()` returning chronological order (sort by StartTime)
-- [ ] Verify filter chain integration still works
+- [x] Keep `GetCallsInOrder()` returning chronological order (sort by StartTime)
+- [x] Update `reapplyFiltersLocked()` to sort filtered calls by StartTime
+- [x] Verify filter chain integration still works (TUI tests pass)
 
 ### Phase 3: CallTracker (sniff/tap/hunt)
 

@@ -3,19 +3,20 @@
 package store
 
 import (
+	"container/list"
+	"sort"
 	"sync"
 
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/filters"
 )
 
-// CallStore manages call storage with a ring buffer (similar to PacketStore)
+// CallStore manages call storage with LRU eviction
 type CallStore struct {
 	mu            sync.RWMutex
 	calls         map[string]*components.Call // callID -> call (for quick updates)
-	callRing      []string                    // Ring buffer of CallIDs in chronological order
-	ringHead      int                         // Head index for circular buffer
-	ringCount     int                         // Current number of calls in buffer
+	lruList       *list.List                  // LRU list (front = most recently used)
+	lruIndex      map[string]*list.Element    // callID -> list element for O(1) lookup
 	maxCalls      int                         // Maximum calls to keep in memory
 	totalCalls    int                         // Total calls seen (ever)
 	FilterChain   *filters.FilterChain        // Active filters
@@ -27,7 +28,8 @@ type CallStore struct {
 func NewCallStore(bufferSize int) *CallStore {
 	return &CallStore{
 		calls:         make(map[string]*components.Call),
-		callRing:      make([]string, bufferSize),
+		lruList:       list.New(),
+		lruIndex:      make(map[string]*list.Element),
 		maxCalls:      bufferSize,
 		FilterChain:   filters.NewFilterChain(),
 		filteredCalls: []components.Call{},
@@ -42,21 +44,29 @@ func (cs *CallStore) AddOrUpdateCall(call components.Call) {
 	_, exists := cs.calls[call.CallID]
 
 	if !exists {
-		// New call - add to ring buffer
-		if cs.ringCount >= cs.maxCalls {
-			// Ring buffer is full, remove oldest call
-			oldestCallID := cs.callRing[cs.ringHead]
-			delete(cs.calls, oldestCallID)
-			// Remove from filtered calls if present
-			cs.removeFromFilteredLocked(oldestCallID)
-		} else {
-			cs.ringCount++
+		// Evict LRU (least recently used) if at capacity
+		if cs.lruList.Len() >= cs.maxCalls {
+			// Remove from back (least recently used)
+			oldest := cs.lruList.Back()
+			if oldest != nil {
+				oldestCallID := oldest.Value.(string)
+				cs.lruList.Remove(oldest)
+				delete(cs.lruIndex, oldestCallID)
+				delete(cs.calls, oldestCallID)
+				// Remove from filtered calls if present
+				cs.removeFromFilteredLocked(oldestCallID)
+			}
 		}
 
-		// Add new call to ring buffer
-		cs.callRing[cs.ringHead] = call.CallID
-		cs.ringHead = (cs.ringHead + 1) % cs.maxCalls
+		// Add new call to front (most recently used)
+		elem := cs.lruList.PushFront(call.CallID)
+		cs.lruIndex[call.CallID] = elem
 		cs.totalCalls++
+	} else {
+		// Move existing call to front (most recently used)
+		if elem, ok := cs.lruIndex[call.CallID]; ok {
+			cs.lruList.MoveToFront(elem)
+		}
 	}
 
 	// Store/update the call
@@ -73,35 +83,25 @@ func (cs *CallStore) AddOrUpdateCalls(calls []components.Call) {
 	}
 }
 
-// GetCallsInOrder returns calls from the ring buffer in chronological order
+// GetCallsInOrder returns calls sorted by StartTime (chronological order).
+// LRU is the eviction policy only; display order is always chronological.
 func (cs *CallStore) GetCallsInOrder() []components.Call {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 
-	if cs.ringCount == 0 {
+	if cs.lruList.Len() == 0 {
 		return nil
 	}
 
-	result := make([]components.Call, 0, cs.ringCount)
-
-	if cs.ringCount < cs.maxCalls {
-		// Buffer not full yet, calls are in order from ring start
-		for i := range cs.ringCount {
-			callID := cs.callRing[i]
-			if call, exists := cs.calls[callID]; exists {
-				result = append(result, *call)
-			}
-		}
-	} else {
-		// Buffer is full, need to wrap around from ringHead
-		for i := range cs.maxCalls {
-			idx := (cs.ringHead + i) % cs.maxCalls
-			callID := cs.callRing[idx]
-			if call, exists := cs.calls[callID]; exists {
-				result = append(result, *call)
-			}
-		}
+	result := make([]components.Call, 0, cs.lruList.Len())
+	for _, call := range cs.calls {
+		result = append(result, *call)
 	}
+
+	// Sort by StartTime for chronological display order
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].StartTime.Before(result[j].StartTime)
+	})
 
 	return result
 }
@@ -122,7 +122,7 @@ func (cs *CallStore) GetCall(callID string) (*components.Call, bool) {
 func (cs *CallStore) GetCallCount() int {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
-	return cs.ringCount
+	return cs.lruList.Len()
 }
 
 // GetTotalCalls returns the total number of calls ever seen
@@ -138,9 +138,8 @@ func (cs *CallStore) Clear() {
 	defer cs.mu.Unlock()
 
 	cs.calls = make(map[string]*components.Call)
-	cs.callRing = make([]string, cs.maxCalls)
-	cs.ringHead = 0
-	cs.ringCount = 0
+	cs.lruList = list.New()
+	cs.lruIndex = make(map[string]*list.Element)
 	cs.filteredCalls = []components.Call{}
 	cs.matchedCalls = 0
 }
@@ -253,33 +252,20 @@ func (cs *CallStore) reapplyFiltersLocked() {
 	cs.filteredCalls = []components.Call{}
 	cs.matchedCalls = 0
 
-	// Iterate through calls in chronological order
-	if cs.ringCount == 0 {
+	if cs.lruList.Len() == 0 {
 		return
 	}
 
-	if cs.ringCount < cs.maxCalls {
-		// Buffer not full yet, calls are in order from ring start
-		for i := range cs.ringCount {
-			callID := cs.callRing[i]
-			if call, exists := cs.calls[callID]; exists {
-				if cs.FilterChain.Match(*call) {
-					cs.filteredCalls = append(cs.filteredCalls, *call)
-					cs.matchedCalls++
-				}
-			}
-		}
-	} else {
-		// Buffer is full, need to wrap around from ringHead
-		for i := range cs.maxCalls {
-			idx := (cs.ringHead + i) % cs.maxCalls
-			callID := cs.callRing[idx]
-			if call, exists := cs.calls[callID]; exists {
-				if cs.FilterChain.Match(*call) {
-					cs.filteredCalls = append(cs.filteredCalls, *call)
-					cs.matchedCalls++
-				}
-			}
+	// Collect all matching calls
+	for _, call := range cs.calls {
+		if cs.FilterChain.Match(*call) {
+			cs.filteredCalls = append(cs.filteredCalls, *call)
+			cs.matchedCalls++
 		}
 	}
+
+	// Sort by StartTime for chronological display order
+	sort.Slice(cs.filteredCalls, func(i, j int) bool {
+		return cs.filteredCalls[i].StartTime.Before(cs.filteredCalls[j].StartTime)
+	})
 }

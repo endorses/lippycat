@@ -223,6 +223,13 @@ func (cv *CallsView) SetCalls(calls []Call) {
 	oldLen := len(cv.calls)
 	wasAtBottom := (oldLen == 0) || (cv.selected >= oldLen-1)
 
+	// Remember the selected call ID before updating the list
+	// This allows us to maintain selection when calls are removed/reordered
+	var selectedCallID string
+	if cv.selected >= 0 && cv.selected < oldLen {
+		selectedCallID = cv.calls[cv.selected].CallID
+	}
+
 	// Sort calls: first by start timestamp, then by call ID
 	sort.Slice(calls, func(i, j int) bool {
 		if calls[i].StartTime.Equal(calls[j].StartTime) {
@@ -233,20 +240,57 @@ func (cv *CallsView) SetCalls(calls []Call) {
 
 	cv.calls = calls
 
-	// Auto-scroll to bottom only if:
-	// 1. autoScroll is enabled AND
-	// 2. cursor was already at the bottom of the old list (or list was empty)
-	if cv.autoScroll && len(cv.calls) > 0 && wasAtBottom {
-		cv.selected = len(cv.calls) - 1
-		cv.adjustOffset()
-	} else if cv.selected >= len(cv.calls) && len(cv.calls) > 0 {
-		// Cursor is now out of bounds, adjust it to the last valid position
-		cv.selected = len(cv.calls) - 1
-		cv.adjustOffset()
-	} else {
-		// Just adjust offset to keep cursor visible
-		cv.adjustOffset()
+	// Try to maintain selection on the same call by ID
+	newIndex := -1
+	if selectedCallID != "" {
+		for i, call := range cv.calls {
+			if call.CallID == selectedCallID {
+				newIndex = i
+				break
+			}
+		}
 	}
+
+	if len(cv.calls) == 0 {
+		// Empty list
+		cv.selected = 0
+		cv.offset = 0
+		return
+	}
+
+	if newIndex >= 0 {
+		// Previously selected call still exists - keep it selected
+		cv.selected = newIndex
+
+		// Check if the selected call is now at the bottom (e.g., calls above it were removed)
+		// If so and autoScroll was enabled, keep auto-scrolling
+		if cv.autoScroll && cv.selected == len(cv.calls)-1 {
+			// Already at bottom with autoScroll, stay there
+		} else if cv.selected != len(cv.calls)-1 {
+			// No longer at bottom, so if we were auto-scrolling, we should
+			// continue to follow new calls only if we WERE at the bottom before
+			// and the list grew (not shrunk due to filtering)
+			if cv.autoScroll && wasAtBottom && len(cv.calls) > oldLen {
+				cv.selected = len(cv.calls) - 1
+			}
+		}
+	} else {
+		// Selected call was removed from the filtered list
+		if cv.autoScroll && wasAtBottom {
+			// Was auto-scrolling at bottom - go to new bottom
+			cv.selected = len(cv.calls) - 1
+		} else {
+			// Keep selection at same index position (or clamp to end)
+			// This provides better UX when a call in the middle is removed
+			if cv.selected >= len(cv.calls) {
+				cv.selected = len(cv.calls) - 1
+			}
+			// Selection moved due to removal, disable auto-scroll
+			// (the call they were watching is gone, they need to re-orient)
+		}
+	}
+
+	cv.adjustOffset()
 
 	if cv.selected < 0 {
 		cv.selected = 0

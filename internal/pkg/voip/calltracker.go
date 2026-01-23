@@ -1,6 +1,7 @@
 package voip
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -95,11 +96,10 @@ func (c *CallInfo) Close() error {
 
 type CallTracker struct {
 	callMap           map[string]*CallInfo
-	portToCallID      map[string]string // key = port, value = CallID
-	callRing          []string          // Ring buffer of CallIDs in chronological order
-	ringHead          int               // Current position in ring buffer
-	ringCount         int               // Number of calls in ring buffer
-	maxCalls          int               // Maximum calls to keep (ring buffer size)
+	portToCallID      map[string]string        // key = port, value = CallID
+	lruList           *list.List               // LRU list (front = most recently used)
+	lruIndex          map[string]*list.Element // callID -> list element for O(1) lookup
+	maxCalls          int                      // Maximum calls to keep
 	mu                sync.RWMutex
 	janitorCtx        context.Context
 	janitorCancel     context.CancelFunc
@@ -129,9 +129,8 @@ func NewCallTracker() *CallTracker {
 	tracker := &CallTracker{
 		callMap:        make(map[string]*CallInfo),
 		portToCallID:   make(map[string]string),
-		callRing:       make([]string, maxCalls),
-		ringHead:       0,
-		ringCount:      0,
+		lruList:        list.New(),
+		lruIndex:       make(map[string]*list.Element),
 		maxCalls:       maxCalls,
 		janitorCtx:     ctx,
 		janitorCancel:  cancel,
@@ -259,35 +258,45 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 			}
 		}
 
-		// Add to ring buffer (FIFO)
-		if tracker.ringCount >= tracker.maxCalls {
-			// Ring buffer is full, remove oldest call
-			oldestCallID := tracker.callRing[tracker.ringHead]
-			oldCall := tracker.callMap[oldestCallID]
+		// Evict LRU (least recently used) if at capacity
+		if tracker.lruList.Len() >= tracker.maxCalls {
+			// Remove from back (least recently used)
+			oldest := tracker.lruList.Back()
+			if oldest != nil {
+				oldestCallID := oldest.Value.(string)
+				oldCall := tracker.callMap[oldestCallID]
 
-			// Clean up the old call's resources
-			if oldCall != nil {
-				if err := oldCall.Close(); err != nil {
-					logger.Error("Error closing call files",
-						"call_id", SanitizeCallIDForLogging(oldestCallID),
-						"error", err)
-				}
-				// Remove from port mapping
-				for port, cid := range tracker.portToCallID {
-					if cid == oldestCallID {
-						delete(tracker.portToCallID, port)
+				// Clean up the old call's resources
+				if oldCall != nil {
+					if err := oldCall.Close(); err != nil {
+						logger.Error("Error closing call files",
+							"call_id", SanitizeCallIDForLogging(oldestCallID),
+							"error", err)
 					}
+					// Remove from port mapping
+					for port, cid := range tracker.portToCallID {
+						if cid == oldestCallID {
+							delete(tracker.portToCallID, port)
+						}
+					}
+					delete(tracker.callMap, oldestCallID)
 				}
-				delete(tracker.callMap, oldestCallID)
+				tracker.lruList.Remove(oldest)
+				delete(tracker.lruIndex, oldestCallID)
+				logger.Debug("Evicted LRU call (buffer full)",
+					"call_id", SanitizeCallIDForLogging(oldestCallID))
 			}
-		} else {
-			tracker.ringCount++
 		}
 
-		// Add new call to ring buffer
-		tracker.callRing[tracker.ringHead] = callID
-		tracker.ringHead = (tracker.ringHead + 1) % tracker.maxCalls
+		// Add new call to front (most recently used)
+		elem := tracker.lruList.PushFront(callID)
+		tracker.lruIndex[callID] = elem
 		tracker.callMap[callID] = call
+	} else {
+		// Move existing call to front (most recently used)
+		if elem, ok := tracker.lruIndex[callID]; ok {
+			tracker.lruList.MoveToFront(elem)
+		}
 	}
 	return call
 }

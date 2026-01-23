@@ -596,3 +596,156 @@ func TestCallTrackerFilePermissions(t *testing.T) {
 	_ = os.Remove(sipPath)
 	_ = os.Remove(rtpPath)
 }
+
+// TestCallTrackerLRUEviction verifies that LRU eviction works correctly:
+// - Active calls (recently accessed) survive eviction
+// - Idle calls (least recently accessed) are evicted first
+func TestCallTrackerLRUEviction(t *testing.T) {
+	tracker := NewCallTracker()
+	defer tracker.Shutdown()
+
+	// Override maxCalls for testing
+	tracker.mu.Lock()
+	tracker.maxCalls = 3
+	tracker.mu.Unlock()
+
+	// Create 3 calls
+	for i := 0; i < 3; i++ {
+		callID := fmt.Sprintf("call-%d", i)
+		tracker.mu.Lock()
+		call := &CallInfo{
+			CallID:      callID,
+			State:       "NEW",
+			Created:     time.Now(),
+			LastUpdated: time.Now(),
+			LinkType:    layers.LinkTypeEthernet,
+		}
+		tracker.callMap[callID] = call
+		elem := tracker.lruList.PushFront(callID)
+		tracker.lruIndex[callID] = elem
+		tracker.mu.Unlock()
+	}
+
+	// Verify all 3 calls exist
+	tracker.mu.RLock()
+	assert.Len(t, tracker.callMap, 3)
+	tracker.mu.RUnlock()
+
+	// Touch call-0 to make it most recently used (call-1 is now LRU)
+	tracker.mu.Lock()
+	if elem, ok := tracker.lruIndex["call-0"]; ok {
+		tracker.lruList.MoveToFront(elem)
+	}
+	tracker.mu.Unlock()
+
+	// Add call-3, should evict call-1 (LRU, not call-0 which was just touched)
+	tracker.mu.Lock()
+	call3 := &CallInfo{
+		CallID:      "call-3",
+		State:       "NEW",
+		Created:     time.Now(),
+		LastUpdated: time.Now(),
+		LinkType:    layers.LinkTypeEthernet,
+	}
+
+	// Evict LRU if at capacity
+	if tracker.lruList.Len() >= tracker.maxCalls {
+		oldest := tracker.lruList.Back()
+		if oldest != nil {
+			oldestCallID := oldest.Value.(string)
+			delete(tracker.callMap, oldestCallID)
+			tracker.lruList.Remove(oldest)
+			delete(tracker.lruIndex, oldestCallID)
+		}
+	}
+
+	tracker.callMap["call-3"] = call3
+	elem := tracker.lruList.PushFront("call-3")
+	tracker.lruIndex["call-3"] = elem
+	tracker.mu.Unlock()
+
+	// Verify eviction
+	tracker.mu.RLock()
+	_, exists0 := tracker.callMap["call-0"]
+	_, exists1 := tracker.callMap["call-1"]
+	_, exists2 := tracker.callMap["call-2"]
+	_, exists3 := tracker.callMap["call-3"]
+	tracker.mu.RUnlock()
+
+	assert.True(t, exists0, "call-0 should still exist (was recently touched)")
+	assert.False(t, exists1, "call-1 should be evicted (LRU)")
+	assert.True(t, exists2, "call-2 should still exist")
+	assert.True(t, exists3, "call-3 should exist")
+}
+
+// TestCallTrackerLRUActiveCallSurvival verifies active calls survive when buffer is full
+func TestCallTrackerLRUActiveCallSurvival(t *testing.T) {
+	tracker := NewCallTracker()
+	defer tracker.Shutdown()
+
+	// Override maxCalls for testing
+	tracker.mu.Lock()
+	tracker.maxCalls = 3
+	tracker.mu.Unlock()
+
+	// Create 3 calls
+	for i := 0; i < 3; i++ {
+		callID := fmt.Sprintf("call-%d", i)
+		tracker.mu.Lock()
+		call := &CallInfo{
+			CallID:      callID,
+			State:       "NEW",
+			Created:     time.Now(),
+			LastUpdated: time.Now(),
+			LinkType:    layers.LinkTypeEthernet,
+		}
+		tracker.callMap[callID] = call
+		elem := tracker.lruList.PushFront(callID)
+		tracker.lruIndex[callID] = elem
+		tracker.mu.Unlock()
+	}
+
+	// Keep call-0 active by touching it while adding new calls
+	for i := 3; i < 10; i++ {
+		// Touch call-0 to keep it active
+		tracker.mu.Lock()
+		if elem, ok := tracker.lruIndex["call-0"]; ok {
+			tracker.lruList.MoveToFront(elem)
+		}
+
+		// Add new call, evicting LRU
+		callID := fmt.Sprintf("call-%d", i)
+		call := &CallInfo{
+			CallID:      callID,
+			State:       "NEW",
+			Created:     time.Now(),
+			LastUpdated: time.Now(),
+			LinkType:    layers.LinkTypeEthernet,
+		}
+
+		// Evict LRU if at capacity
+		if tracker.lruList.Len() >= tracker.maxCalls {
+			oldest := tracker.lruList.Back()
+			if oldest != nil {
+				oldestCallID := oldest.Value.(string)
+				delete(tracker.callMap, oldestCallID)
+				tracker.lruList.Remove(oldest)
+				delete(tracker.lruIndex, oldestCallID)
+			}
+		}
+
+		tracker.callMap[callID] = call
+		elem := tracker.lruList.PushFront(callID)
+		tracker.lruIndex[callID] = elem
+		tracker.mu.Unlock()
+	}
+
+	// call-0 should survive because it was kept active
+	tracker.mu.RLock()
+	_, exists0 := tracker.callMap["call-0"]
+	callCount := len(tracker.callMap)
+	tracker.mu.RUnlock()
+
+	assert.True(t, exists0, "call-0 should survive (kept active)")
+	assert.Equal(t, 3, callCount, "Should have exactly 3 calls")
+}

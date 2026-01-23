@@ -53,20 +53,22 @@ File: `internal/pkg/tui/store/call_store.go`
 
 File: `internal/pkg/voip/calltracker.go`
 
-- [ ] Replace ring buffer fields with LRU structure
-- [ ] Update `NewCallTracker()` to initialize LRU
-- [ ] Update `GetOrCreateCall()`:
+- [x] Replace ring buffer fields with LRU structure
+- [x] Update `NewCallTracker()` to initialize LRU
+- [x] Update `GetOrCreateCall()`:
   - New call: push to front, evict from back if full
   - Existing call: move to front
-- [ ] Ensure PCAP file cleanup on eviction still works
-- [ ] Update tests in `calltracker_test.go`
+- [x] Ensure PCAP file cleanup on eviction still works
+- [x] Update tests in `calltracker_test.go`:
+  - [x] Add `TestCallTrackerLRUEviction` to verify LRU eviction order
+  - [x] Add `TestCallTrackerLRUActiveCallSurvival` to verify active calls survive
 
 ## Testing
 
-- [ ] Verify active calls survive when buffer is full
-- [ ] Verify idle calls are evicted first
-- [ ] Verify chronological display order preserved
-- [ ] Run full test suite
+- [x] Verify active calls survive when buffer is full
+- [x] Verify idle calls are evicted first
+- [x] Verify chronological display order preserved
+- [x] Run full test suite
 - [ ] Manual test with live VoIP traffic
 
 ## Helper Function

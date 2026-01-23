@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 )
+
+// rtpStalenessThreshold is the duration after which an RTP-only call
+// with no recent packets is considered ended/stale.
+const rtpStalenessThreshold = 10 * time.Second
 
 // LocalCallAggregator wraps voip.CallAggregator for TUI local capture modes (live and offline)
 type LocalCallAggregator struct {
@@ -102,6 +107,25 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 		duration = call.LastPacketTime.Sub(call.StartTime)
 	}
 
+	// Determine call state, with special handling for RTP-only calls
+	// RTP-only calls don't have SIP signaling, so we detect activity based on
+	// whether we've received RTP packets recently
+	state := call.State.String()
+	if strings.HasPrefix(call.CallID, "rtp-") {
+		// RTP-only call - determine state based on packet activity
+		if !call.LastPacketTime.IsZero() && time.Since(call.LastPacketTime) < rtpStalenessThreshold {
+			// Recent RTP activity - show as active
+			state = "ACTIVE"
+		} else {
+			// No recent RTP - show as ended
+			state = "ENDED"
+			// Set end time if not already set
+			if call.EndTime.IsZero() && !call.LastPacketTime.IsZero() {
+				call.EndTime = call.LastPacketTime
+			}
+		}
+	}
+
 	// Get From/To from call, or fall back to tracker's party info
 	// This handles RTP-created calls where SIP hasn't updated the call aggregator yet
 	from := call.From
@@ -144,7 +168,7 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 		CallID:      call.CallID,
 		From:        from,
 		To:          to,
-		State:       call.State.String(), // Convert to string
+		State:       state,
 		StartTime:   call.StartTime,
 		EndTime:     call.EndTime,
 		Duration:    duration,

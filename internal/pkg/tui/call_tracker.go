@@ -139,6 +139,7 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) (
 
 // RegisterRTPOnlyEndpoints registers RTP endpoints for an RTP-only (synthetic) call.
 // This allows the endpoint to be matched when SIP arrives later.
+// Also stores party info (IP:port pairs as From/To) for display purposes.
 func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, dstIP, dstPort string) {
 	if syntheticCallID == "" || !strings.HasPrefix(syntheticCallID, "rtp-") {
 		return
@@ -158,6 +159,15 @@ func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, 
 	t.rtpEndpointToCallID[srcEndpoint] = syntheticCallID
 	t.rtpEndpointToCallID[dstEndpoint] = syntheticCallID
 	t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], srcEndpoint, dstEndpoint)
+
+	// Also store party info for RTP-only calls (used as fallback in convertToTUICall)
+	// Use IP:port as From/To since we don't have SIP headers
+	if t.callPartyInfo[syntheticCallID] == nil {
+		t.callPartyInfo[syntheticCallID] = &CallPartyInfo{
+			From: srcEndpoint,
+			To:   dstEndpoint,
+		}
+	}
 }
 
 // RegisterCallPartyInfo stores From/To information for a call

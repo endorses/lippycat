@@ -29,24 +29,24 @@
 ## Phase 2: Filter Interface Changes
 
 ### 2.1 Update Filter Interface (`internal/pkg/tui/filters/filters.go`)
-- [ ] Change `Match(packet components.PacketDisplay) bool` to `Match(record Filterable) bool`
-- [ ] Add `SupportedRecordTypes() []string` (nil = all types)
+- [x] Change `Match(packet components.PacketDisplay) bool` to `Match(record Filterable) bool`
+- [x] Add `SupportedRecordTypes() []string` (nil = all types)
 
 ### 2.2 Update FilterChain (`internal/pkg/tui/filters/filters.go`)
-- [ ] Change `Match()` to accept `Filterable`
+- [x] Change `Match()` to accept `Filterable`
 
 ### 2.3 Update Existing Filters
-- [ ] `text.go` - Use `GetStringField()` instead of direct field access
-- [ ] `voip.go` - Use `GetStringField()` for sip.* fields, add `SupportedRecordTypes() []string{"packet"}`
-- [ ] `bpf.go` - Add `SupportedRecordTypes() []string{"packet"}`, return false for non-packets
-- [ ] `metadata.go` - Update to use `Filterable`
-- [ ] `node.go` - Update to use `GetStringField("node")`
-- [ ] `boolean.go` - Update `Match()` signature
+- [x] `text.go` - Use `GetStringField()` and `GetCommonFields()` for generic field access
+- [x] `voip.go` - Use `GetStringField()` for sip.* fields, add `SupportedRecordTypes() []string{"packet"}`
+- [x] `bpf.go` - Add `SupportedRecordTypes() []string{"packet"}`, return false for non-packets
+- [x] `metadata.go` - Update to use `Filterable` and `HasField()`
+- [x] `node.go` - Update to use `GetStringField("node")`
+- [x] `boolean.go` - Update `Match()` signature
 
 ### 2.4 Update Tests
-- [ ] `filters_test.go` - Update to use Filterable
-- [ ] `voip_test.go` - Update test cases
-- [ ] `node_test.go` - Update test cases
+- [x] `filters_test.go` - Tests pass with Filterable (PacketDisplay implements interface)
+- [x] `voip_test.go` - Tests pass with Filterable
+- [x] `node_test.go` - Tests pass with Filterable
 
 ---
 

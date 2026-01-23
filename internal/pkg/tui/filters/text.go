@@ -6,10 +6,9 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/simd"
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
-// TextFilter filters packets by text content
+// TextFilter filters records by text content
 type TextFilter struct {
 	searchText  string
 	fields      []string // which fields to search: "all", "src", "dst", "info", "protocol"
@@ -50,46 +49,44 @@ func NewTextFilter(searchText string, fields []string) *TextFilter {
 	return f
 }
 
-// Match checks if the packet matches the text filter
-// Optimized: no allocations, direct field checks with flags
-func (f *TextFilter) Match(packet components.PacketDisplay) bool {
-	// Fast path: check each field directly based on pre-calculated flags
-	// Avoids slice allocation and repeated ToLower calls
-
+// Match checks if the record matches the text filter
+// Uses Filterable interface for generic record access
+func (f *TextFilter) Match(record Filterable) bool {
+	// Search all common fields for this record type
 	if f.searchAll {
-		// Check all fields - use SIMD-optimized contains
-		if simd.StringContains(strings.ToLower(packet.SrcIP), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.DstIP), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.SrcPort), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.DstPort), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.Protocol), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.Info), f.searchText) {
-			return true
+		commonFields := GetCommonFields(record.RecordType())
+		for _, field := range commonFields {
+			fieldValue := record.GetStringField(field)
+			if simd.StringContains(strings.ToLower(fieldValue), f.searchText) {
+				return true
+			}
 		}
+		return false
 	}
 
+	// Search specific fields
 	if f.searchSrc {
-		if simd.StringContains(strings.ToLower(packet.SrcIP), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.SrcPort), f.searchText) {
+		if simd.StringContains(strings.ToLower(record.GetStringField("src")), f.searchText) ||
+			simd.StringContains(strings.ToLower(record.GetStringField("srcport")), f.searchText) {
 			return true
 		}
 	}
 
 	if f.searchDst {
-		if simd.StringContains(strings.ToLower(packet.DstIP), f.searchText) ||
-			simd.StringContains(strings.ToLower(packet.DstPort), f.searchText) {
+		if simd.StringContains(strings.ToLower(record.GetStringField("dst")), f.searchText) ||
+			simd.StringContains(strings.ToLower(record.GetStringField("dstport")), f.searchText) {
 			return true
 		}
 	}
 
 	if f.searchInfo {
-		if simd.StringContains(strings.ToLower(packet.Info), f.searchText) {
+		if simd.StringContains(strings.ToLower(record.GetStringField("info")), f.searchText) {
 			return true
 		}
 	}
 
 	if f.searchProto {
-		if simd.StringContains(strings.ToLower(packet.Protocol), f.searchText) {
+		if simd.StringContains(strings.ToLower(record.GetStringField("protocol")), f.searchText) {
 			return true
 		}
 	}
@@ -115,4 +112,9 @@ func (f *TextFilter) Selectivity() float64 {
 	}
 	// Searching specific fields is more selective
 	return 0.6
+}
+
+// SupportedRecordTypes returns nil to indicate this filter supports all record types
+func (f *TextFilter) SupportedRecordTypes() []string {
+	return nil // Generic filter - supports all record types
 }

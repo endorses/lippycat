@@ -4,8 +4,6 @@ package filters
 
 import (
 	"strings"
-
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
 // BooleanOperator represents logical operators
@@ -36,14 +34,14 @@ func NewBooleanFilter(operator BooleanOperator, left, right Filter, expr string)
 }
 
 // Match implements the Filter interface
-func (bf *BooleanFilter) Match(packet components.PacketDisplay) bool {
+func (bf *BooleanFilter) Match(record Filterable) bool {
 	switch bf.operator {
 	case OpAND:
-		return bf.left.Match(packet) && bf.right.Match(packet)
+		return bf.left.Match(record) && bf.right.Match(record)
 	case OpOR:
-		return bf.left.Match(packet) || bf.right.Match(packet)
+		return bf.left.Match(record) || bf.right.Match(record)
 	case OpNOT:
-		return !bf.left.Match(packet)
+		return !bf.left.Match(record)
 	default:
 		return false
 	}
@@ -102,6 +100,11 @@ func (bf *BooleanFilter) Selectivity() float64 {
 	default:
 		return 0.5
 	}
+}
+
+// SupportedRecordTypes returns nil as boolean filters delegate to their children
+func (bf *BooleanFilter) SupportedRecordTypes() []string {
+	return nil // Inherits supported types from child filters
 }
 
 // ParseBooleanExpression parses a filter expression with boolean operators

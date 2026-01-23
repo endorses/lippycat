@@ -5,11 +5,9 @@ package filters
 import (
 	"fmt"
 	"strings"
-
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
-// VoIPFilter filters based on VoIP-specific criteria
+// VoIPFilter filters based on VoIP-specific criteria (packet-only filter)
 type VoIPFilter struct {
 	field    string // "user", "from", "to", "fromtag", "totag", "method", "callid", "codec"
 	value    string // value to match (supports wildcards like "555*")
@@ -26,59 +24,68 @@ func NewVoIPFilter(field, value string) *VoIPFilter {
 	}
 }
 
-// Match checks if the packet matches the VoIP filter
-func (f *VoIPFilter) Match(packet components.PacketDisplay) bool {
-	// Only match SIP packets for now
-	if packet.Protocol != "SIP" {
+// Match checks if the record matches the VoIP filter
+// This filter only supports packet records
+func (f *VoIPFilter) Match(record Filterable) bool {
+	// VoIP filter only works on packets
+	if record.RecordType() != "packet" {
 		return false
 	}
 
-	// Prefer VoIPData when available (more reliable than parsing Info)
-	var fieldValue string
-	if packet.VoIPData != nil {
-		switch f.field {
-		case "user", "from":
-			fieldValue = packet.VoIPData.User // Username from From header
-		case "to":
-			fieldValue = packet.VoIPData.To
-		case "fromtag":
-			fieldValue = packet.VoIPData.FromTag
-		case "totag":
-			fieldValue = packet.VoIPData.ToTag
-		case "method":
-			fieldValue = packet.VoIPData.Method
-		case "callid":
-			fieldValue = packet.VoIPData.CallID
-		}
+	// Check protocol - only match SIP packets
+	if record.GetStringField("protocol") != "SIP" {
+		return false
 	}
 
-	// Fall back to parsing Info string if VoIPData not available
+	// Get field value using Filterable interface
+	var fieldValue string
+	switch f.field {
+	case "user", "from":
+		fieldValue = record.GetStringField("sip.user")
+		if fieldValue == "" {
+			fieldValue = record.GetStringField("sip.from")
+		}
+	case "to":
+		fieldValue = record.GetStringField("sip.to")
+	case "fromtag":
+		fieldValue = record.GetStringField("sip.fromtag")
+	case "totag":
+		fieldValue = record.GetStringField("sip.totag")
+	case "method":
+		fieldValue = record.GetStringField("sip.method")
+	case "callid":
+		fieldValue = record.GetStringField("sip.callid")
+	case "codec":
+		fieldValue = record.GetStringField("sip.codec")
+	}
+
+	// Fall back to parsing Info string if field value not available
 	if fieldValue == "" {
-		info := strings.ToLower(packet.Info)
+		info := strings.ToLower(record.GetStringField("info"))
 		switch f.field {
 		case "user", "from":
 			// Look for "From: " or "sip:" in the info
 			if idx := strings.Index(info, "from:"); idx != -1 {
-				fieldValue = extractSIPField(packet.Info[idx:])
+				fieldValue = extractSIPField(record.GetStringField("info")[idx:])
 			} else if idx := strings.Index(info, "sip:"); idx != -1 {
-				fieldValue = extractSIPField(packet.Info[idx:])
+				fieldValue = extractSIPField(record.GetStringField("info")[idx:])
 			}
 
 		case "to":
 			if idx := strings.Index(info, "to:"); idx != -1 {
-				fieldValue = extractSIPField(packet.Info[idx:])
+				fieldValue = extractSIPField(record.GetStringField("info")[idx:])
 			}
 
 		case "method":
 			// SIP methods appear at the start of the info
-			words := strings.Fields(packet.Info)
+			words := strings.Fields(record.GetStringField("info"))
 			if len(words) > 0 {
 				fieldValue = words[0]
 			}
 
 		case "callid":
 			if idx := strings.Index(info, "call-id:"); idx != -1 {
-				fieldValue = extractSIPField(packet.Info[idx:])
+				fieldValue = extractSIPField(record.GetStringField("info")[idx:])
 			}
 		}
 	}
@@ -131,6 +138,11 @@ func (f *VoIPFilter) Type() string {
 // VoIP filters are moderately selective - they pre-filter by SIP protocol
 func (f *VoIPFilter) Selectivity() float64 {
 	return 0.7 // Moderately selective - only applies to SIP packets
+}
+
+// SupportedRecordTypes returns ["packet"] as VoIP filters only work on packets
+func (f *VoIPFilter) SupportedRecordTypes() []string {
+	return []string{"packet"}
 }
 
 // extractSIPField extracts a SIP field value from a string

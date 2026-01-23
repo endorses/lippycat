@@ -306,6 +306,14 @@ func (p PacketDisplay) GetStringField(name string) string {
 		if p.VoIPData != nil {
 			return p.VoIPData.Codec
 		}
+	case "sip.fromtag":
+		if p.VoIPData != nil {
+			return p.VoIPData.FromTag
+		}
+	case "sip.totag":
+		if p.VoIPData != nil {
+			return p.VoIPData.ToTag
+		}
 	// DNS fields (from DNSData)
 	case "dns.query", "dns.name":
 		if p.DNSData != nil {

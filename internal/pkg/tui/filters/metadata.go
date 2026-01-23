@@ -2,14 +2,10 @@
 
 package filters
 
-import (
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
-)
-
 // MetadataFilter filters packets based on metadata presence
 // Used to filter packets that have specific metadata attached (e.g., VoIP metadata)
 type MetadataFilter struct {
-	metadataType      string // "voip", etc.
+	metadataType      string // "voip", "dns", "tls", "http", "email"
 	excludeParseError bool   // exclude packets with parse errors
 }
 
@@ -21,21 +17,30 @@ func NewMetadataFilter(metadataType string) *MetadataFilter {
 	}
 }
 
-// Match checks if the packet has the specified metadata
-func (f *MetadataFilter) Match(packet components.PacketDisplay) bool {
+// Match checks if the record has the specified metadata
+func (f *MetadataFilter) Match(record Filterable) bool {
+	// Metadata filter only works on packets
+	if record.RecordType() != "packet" {
+		return false
+	}
+
 	switch f.metadataType {
 	case "voip":
-		// Check if packet has VoIP metadata OR is a VoIP protocol
-		// VoIPData is set when full packet parsing is done (convertPacket)
-		// but at high rates, convertPacketFast is used which only sets Protocol
-		// The background processor uses Protocol to send to call aggregator,
-		// so we should also accept packets based on Protocol for consistency.
-		if packet.VoIPData != nil {
+		// Check if packet has VoIP metadata using HasField
+		if record.HasField("voip") {
 			return true
 		}
 		// Also match by protocol name for packets from fast conversion path
-		return packet.Protocol == "SIP" || packet.Protocol == "RTP"
-
+		protocol := record.GetStringField("protocol")
+		return protocol == "SIP" || protocol == "RTP"
+	case "dns":
+		return record.HasField("dns")
+	case "tls":
+		return record.HasField("tls")
+	case "http":
+		return record.HasField("http")
+	case "email":
+		return record.HasField("email")
 	default:
 		return false
 	}
@@ -55,4 +60,9 @@ func (f *MetadataFilter) Type() string {
 // Metadata filters are highly selective
 func (f *MetadataFilter) Selectivity() float64 {
 	return 0.85
+}
+
+// SupportedRecordTypes returns ["packet"] as MetadataFilter only works on packets
+func (f *MetadataFilter) SupportedRecordTypes() []string {
+	return []string{"packet"}
 }

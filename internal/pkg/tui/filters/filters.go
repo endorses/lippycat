@@ -2,14 +2,10 @@
 
 package filters
 
-import (
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
-)
-
-// Filter represents a packet filter
+// Filter represents a filter that operates on any Filterable record
 type Filter interface {
-	// Match returns true if the packet matches the filter
-	Match(packet components.PacketDisplay) bool
+	// Match returns true if the record matches the filter
+	Match(record Filterable) bool
 	// String returns a human-readable representation of the filter
 	String() string
 	// Type returns the filter type (bpf, voip, etc.)
@@ -17,6 +13,10 @@ type Filter interface {
 	// Selectivity returns how selective this filter is (0.0 = least selective, 1.0 = most selective)
 	// More selective filters reject packets faster and should run first
 	Selectivity() float64
+	// SupportedRecordTypes returns which record types this filter supports.
+	// Returns nil to indicate all record types are supported (generic filter).
+	// Returns a slice of type names (e.g., ["packet"]) to restrict to specific types.
+	SupportedRecordTypes() []string
 }
 
 // filterWithOrder wraps a filter with its insertion order
@@ -68,8 +68,8 @@ func (fc *FilterChain) Clear() {
 	fc.nextOrderIndex = 0
 }
 
-// Match checks if a packet matches all filters in the chain
-func (fc *FilterChain) Match(packet components.PacketDisplay) bool {
+// Match checks if a record matches all filters in the chain
+func (fc *FilterChain) Match(record Filterable) bool {
 	// If no filters, match everything
 	if len(fc.filters) == 0 {
 		return true
@@ -77,7 +77,7 @@ func (fc *FilterChain) Match(packet components.PacketDisplay) bool {
 
 	// All filters must match (AND logic)
 	for _, fwo := range fc.filters {
-		if !fwo.filter.Match(packet) {
+		if !fwo.filter.Match(record) {
 			return false
 		}
 	}

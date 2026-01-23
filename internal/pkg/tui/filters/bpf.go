@@ -7,8 +7,6 @@ import (
 	"net"
 	"regexp"
 	"strings"
-
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
 var (
@@ -89,59 +87,71 @@ func NewBPFFilter(expression string) (*BPFFilter, error) {
 	return f, nil
 }
 
-// Match checks if the packet matches the BPF filter
+// Match checks if the record matches the BPF filter
+// BPF filters only work on packet records
 // Optimized: uses pre-parsed fields to avoid regex matching on every packet
-func (f *BPFFilter) Match(packet components.PacketDisplay) bool {
+func (f *BPFFilter) Match(record Filterable) bool {
+	// BPF filter only works on packets
+	if record.RecordType() != "packet" {
+		return false
+	}
+
 	// Use pre-parsed matchType for fast dispatch
 	switch f.matchType {
 	case "protocol":
-		return packet.Protocol == f.protocol
+		return record.GetStringField("protocol") == f.protocol
 
 	case "port":
+		srcPort := record.GetStringField("srcport")
+		dstPort := record.GetStringField("dstport")
 		switch f.direction {
 		case "src":
-			return packet.SrcPort == f.value
+			return srcPort == f.value
 		case "dst":
-			return packet.DstPort == f.value
+			return dstPort == f.value
 		default:
-			return packet.SrcPort == f.value || packet.DstPort == f.value
+			return srcPort == f.value || dstPort == f.value
 		}
 
 	case "host":
+		srcIP := record.GetStringField("src")
+		dstIP := record.GetStringField("dst")
 		switch f.direction {
 		case "src":
-			return strings.Contains(packet.SrcIP, f.value)
+			return strings.Contains(srcIP, f.value)
 		case "dst":
-			return strings.Contains(packet.DstIP, f.value)
+			return strings.Contains(dstIP, f.value)
 		default:
-			return strings.Contains(packet.SrcIP, f.value) || strings.Contains(packet.DstIP, f.value)
+			return strings.Contains(srcIP, f.value) || strings.Contains(dstIP, f.value)
 		}
 
 	case "net":
+		srcIP := record.GetStringField("src")
+		dstIP := record.GetStringField("dst")
 		// Use pre-parsed CIDR if available
 		if f.ipnet != nil {
 			switch f.direction {
 			case "src":
-				return ipInCIDR(packet.SrcIP, f.ipnet)
+				return ipInCIDR(srcIP, f.ipnet)
 			case "dst":
-				return ipInCIDR(packet.DstIP, f.ipnet)
+				return ipInCIDR(dstIP, f.ipnet)
 			default:
-				return ipInCIDR(packet.SrcIP, f.ipnet) || ipInCIDR(packet.DstIP, f.ipnet)
+				return ipInCIDR(srcIP, f.ipnet) || ipInCIDR(dstIP, f.ipnet)
 			}
 		}
 		// Fallback to substring match
 		switch f.direction {
 		case "src":
-			return strings.Contains(packet.SrcIP, f.value)
+			return strings.Contains(srcIP, f.value)
 		case "dst":
-			return strings.Contains(packet.DstIP, f.value)
+			return strings.Contains(dstIP, f.value)
 		default:
-			return strings.Contains(packet.SrcIP, f.value) || strings.Contains(packet.DstIP, f.value)
+			return strings.Contains(srcIP, f.value) || strings.Contains(dstIP, f.value)
 		}
 
 	default:
 		// For complex BPF expressions, we can't match post-capture
-		// Return true to show all packets
+		// Return true to show all packets (only if it's a packet)
 		return true
 	}
 }
@@ -171,6 +181,11 @@ func (f *BPFFilter) String() string {
 // Type returns the filter type
 func (f *BPFFilter) Type() string {
 	return "bpf"
+}
+
+// SupportedRecordTypes returns ["packet"] as BPF filters only work on packets
+func (f *BPFFilter) SupportedRecordTypes() []string {
+	return []string{"packet"}
 }
 
 // GetExpression returns the BPF expression for use in live capture

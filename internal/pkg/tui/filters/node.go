@@ -4,12 +4,11 @@ package filters
 
 import (
 	"strings"
-
-	"github.com/endorses/lippycat/internal/pkg/tui/components"
 )
 
-// NodeFilter filters packets by node/hunter ID
+// NodeFilter filters records by node/hunter ID
 // Supports wildcards: node:* matches all nodes, node:edge-* matches all edge hunters
+// This filter works on any record type that has a "node" field
 type NodeFilter struct {
 	nodePattern string
 	isWildcard  bool
@@ -37,9 +36,9 @@ func NewNodeFilter(pattern string) *NodeFilter {
 	return f
 }
 
-// Match checks if the packet's NodeID matches the filter pattern
-func (f *NodeFilter) Match(packet components.PacketDisplay) bool {
-	nodeID := packet.NodeID
+// Match checks if the record's NodeID matches the filter pattern
+func (f *NodeFilter) Match(record Filterable) bool {
+	nodeID := record.GetStringField("node")
 
 	// Exact match (fast path)
 	if !f.isWildcard {
@@ -93,4 +92,10 @@ func (f *NodeFilter) Selectivity() float64 {
 	}
 	// Specific node/hunter - highly selective
 	return 0.9
+}
+
+// SupportedRecordTypes returns nil to indicate this filter supports all record types
+// (any record with a "node" field)
+func (f *NodeFilter) SupportedRecordTypes() []string {
+	return nil // Generic filter - supports all record types with node field
 }

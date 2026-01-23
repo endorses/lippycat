@@ -254,6 +254,84 @@ func TestCallStore_ConcurrentAccess(t *testing.T) {
 	assert.Equal(t, 1000, store.GetCallCount())
 }
 
+func TestCallStore_GetFilteredCalls_Sorting(t *testing.T) {
+	store := NewCallStore(100)
+
+	// Add calls out of order (newer calls added first)
+	baseTime := time.Now()
+	store.AddOrUpdateCall(makeCall("call-3", baseTime.Add(3*time.Second))) // Added first but latest
+	store.AddOrUpdateCall(makeCall("call-1", baseTime.Add(1*time.Second))) // Earliest
+	store.AddOrUpdateCall(makeCall("call-2", baseTime.Add(2*time.Second))) // Middle
+
+	// GetFilteredCalls should return sorted by StartTime
+	calls := store.GetFilteredCalls()
+	require.Len(t, calls, 3)
+
+	assert.Equal(t, "call-1", calls[0].CallID, "first call should be earliest")
+	assert.Equal(t, "call-2", calls[1].CallID, "second call should be middle")
+	assert.Equal(t, "call-3", calls[2].CallID, "third call should be latest")
+
+	// Add another call out of order (earlier than all existing)
+	store.AddOrUpdateCall(makeCall("call-0", baseTime))
+
+	// Should still be sorted
+	calls = store.GetFilteredCalls()
+	require.Len(t, calls, 4)
+
+	assert.Equal(t, "call-0", calls[0].CallID, "call-0 should be first after re-sort")
+	assert.Equal(t, "call-1", calls[1].CallID)
+	assert.Equal(t, "call-2", calls[2].CallID)
+	assert.Equal(t, "call-3", calls[3].CallID)
+}
+
+func TestCallStore_GetFilteredCalls_SortingWithFilter(t *testing.T) {
+	store := NewCallStore(100)
+
+	// Add a filter that only matches calls with "alice" in any field
+	// Note: "alice" should not appear in calls we want to filter out
+	filter := filters.NewTextFilter("alice", []string{"all"})
+	store.AddFilter(filter)
+
+	baseTime := time.Now()
+	// Add some calls that match and some that don't, in mixed order
+	store.AddOrUpdateCall(components.Call{
+		CallID:    "call-3",
+		From:      "alice@example.com",
+		To:        "bob@example.com",
+		StartTime: baseTime.Add(3 * time.Second),
+		State:     components.CallStateActive,
+	})
+	store.AddOrUpdateCall(components.Call{
+		CallID:    "call-1",
+		From:      "alice@example.com",
+		To:        "bob@example.com",
+		StartTime: baseTime.Add(1 * time.Second),
+		State:     components.CallStateActive,
+	})
+	store.AddOrUpdateCall(components.Call{
+		CallID:    "call-skip",
+		From:      "charlie@example.com", // Doesn't match filter (no "alice" anywhere)
+		To:        "dave@example.com",
+		StartTime: baseTime.Add(2 * time.Second),
+		State:     components.CallStateActive,
+	})
+	store.AddOrUpdateCall(components.Call{
+		CallID:    "call-2",
+		From:      "alice@example.com",
+		To:        "bob@example.com",
+		StartTime: baseTime.Add(2 * time.Second),
+		State:     components.CallStateActive,
+	})
+
+	// GetFilteredCalls should return only matching calls, sorted
+	calls := store.GetFilteredCalls()
+	require.Len(t, calls, 3, "should have 3 matching calls")
+
+	assert.Equal(t, "call-1", calls[0].CallID, "first call should be earliest matching")
+	assert.Equal(t, "call-2", calls[1].CallID, "second call should be middle")
+	assert.Equal(t, "call-3", calls[2].CallID, "third call should be latest")
+}
+
 // Benchmarks
 
 func BenchmarkCallStore_AddOrUpdateCall(b *testing.B) {

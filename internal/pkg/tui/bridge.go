@@ -792,16 +792,21 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 		if display.VoIPData != nil && display.VoIPData.CallID == "" && display.VoIPData.SSRC != 0 {
 			// Generate synthetic CallID from SSRC
 			display.VoIPData.CallID = fmt.Sprintf("rtp-%08x", display.VoIPData.SSRC)
-			// Use IP:port for From/To since we don't have SIP headers
-			display.VoIPData.From = fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort)
-			display.VoIPData.To = fmt.Sprintf("%s:%s", display.DstIP, display.DstPort)
-			// Mark as RTP-only by setting a special method indicator
-			display.VoIPData.Method = "RTP-ONLY"
 
 			// Register endpoints so SIP can find and merge this call later
 			if tracker := GetCallTracker(); tracker != nil {
 				tracker.RegisterRTPOnlyEndpoints(display.VoIPData.CallID, display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
 			}
+		}
+
+		// For all RTP-only calls (synthetic CallID), ensure From/To are set
+		// This handles both newly created calls AND subsequent packets for existing calls
+		if display.VoIPData != nil && strings.HasPrefix(display.VoIPData.CallID, "rtp-") {
+			// Use IP:port for From/To since RTP-only calls don't have SIP headers
+			display.VoIPData.From = fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort)
+			display.VoIPData.To = fmt.Sprintf("%s:%s", display.DstIP, display.DstPort)
+			// Mark as RTP-only by setting a special method indicator
+			display.VoIPData.Method = "RTP-ONLY"
 		}
 
 		if codec, ok := result.Metadata["codec"].(string); ok {

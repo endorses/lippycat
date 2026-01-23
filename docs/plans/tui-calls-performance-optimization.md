@@ -367,3 +367,28 @@ Recommended order by impact:
 - Call update cycle: < 10ms for 5000 calls (currently ~50ms)
 - Memory allocations: < 10KB per update cycle (currently ~250KB)
 - No visible TUI lag with 5000 active calls
+
+---
+
+## Post-Optimization Bug Fixes
+
+Issues discovered after initial optimization implementation:
+
+### Issue 1: Filtered calls not sorted (Fixed)
+
+**Problem:** The swap-with-last removal technique in Phase 2 broke sort order of `filteredCalls`. New calls were appended at the end without maintaining chronological order.
+
+**Solution:** Added `filteredDirty` flag to `CallStore`. When calls are added or removed, set `filteredDirty = true`. In `GetFilteredCalls()`, re-sort and rebuild index lazily when dirty flag is set.
+
+**Files modified:**
+- `internal/pkg/tui/store/call_store.go`
+- `internal/pkg/tui/store/call_store_test.go`
+
+### Issue 2: RTP-only calls missing From/To (Fixed)
+
+**Problem:** In `bridge.go`, From/To fields were only set when initially generating a synthetic CallID. Subsequent RTP packets for the same stream got the CallID from the tracker lookup but didn't set From/To, resulting in empty From/To being passed to the call aggregator.
+
+**Solution:** Moved From/To assignment to run for ALL `rtp-` prefixed CallIDs, not just newly generated ones. This ensures every RTP-only packet carries From/To (IP:port pairs).
+
+**Files modified:**
+- `internal/pkg/tui/bridge.go`

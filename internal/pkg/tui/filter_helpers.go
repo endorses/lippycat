@@ -135,3 +135,75 @@ func isBPFExpression(s string) bool {
 
 // Note: applyFilters() was removed in favor of async reapplication
 // via startAsyncFilterReapply() to prevent UI freezing at high packet rates.
+
+// parseCallFilter parses a filter expression for call filtering
+// Supports:
+//   - state:active, state:ringing,ended -> CallStateFilter
+//   - duration:>30s, duration:>=5m -> NumericComparisonFilter
+//   - mos:>3.5, jitter:<50, loss:>5, packets:>100 -> NumericComparisonFilter
+//   - from:alice, to:bob, user:alice, callid:abc123, codec:g711 -> TextFilter
+//   - node:hunter-1, node:edge-* -> NodeFilter
+//   - plain text -> TextFilter on all call fields
+func parseCallFilter(filterStr string) (filters.Filter, error) {
+	filterStr = strings.TrimSpace(filterStr)
+	if filterStr == "" {
+		return nil, nil
+	}
+
+	lowerStr := strings.ToLower(filterStr)
+
+	// Check for state: prefix
+	if strings.HasPrefix(lowerStr, "state:") {
+		statesStr := strings.TrimPrefix(filterStr, "state:")
+		statesStr = strings.TrimPrefix(statesStr, "State:") // handle case variations
+		return filters.NewCallStateFilter(statesStr), nil
+	}
+
+	// Check for numeric comparison fields
+	numericFields := map[string]bool{
+		"duration": true,
+		"mos":      true,
+		"jitter":   true,
+		"loss":     true,
+		"packets":  true,
+	}
+
+	// Parse field:operator syntax for numeric fields
+	if colonIdx := strings.Index(filterStr, ":"); colonIdx != -1 {
+		field := strings.ToLower(strings.TrimSpace(filterStr[:colonIdx]))
+		value := strings.TrimSpace(filterStr[colonIdx+1:])
+
+		// Check if this is a numeric field with an operator
+		if numericFields[field] && len(value) > 0 {
+			// Check if value starts with a comparison operator
+			if value[0] == '>' || value[0] == '<' || value[0] == '=' {
+				filter, err := filters.NewNumericComparisonFilter(field, value)
+				if err != nil {
+					return nil, fmt.Errorf("invalid %s filter: %v", field, err)
+				}
+				return filter, nil
+			}
+		}
+
+		// Check for node: prefix
+		if field == "node" {
+			return filters.NewNodeFilter(value), nil
+		}
+
+		// Check for text field filters
+		textFields := map[string][]string{
+			"from":   {"from"},
+			"to":     {"to"},
+			"user":   {"user"}, // searches both from and to
+			"callid": {"callid"},
+			"codec":  {"codec"},
+		}
+
+		if searchFields, ok := textFields[field]; ok {
+			return filters.NewTextFilter(value, searchFields), nil
+		}
+	}
+
+	// Default: plain text search on all call fields
+	return filters.NewTextFilter(filterStr, []string{"all"}), nil
+}

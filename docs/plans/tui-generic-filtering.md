@@ -92,13 +92,13 @@
 ## Phase 5: Call Filter Parsing
 
 ### 5.1 Add Call Filter Parser (`internal/pkg/tui/filter_helpers.go`)
-- [ ] Add `parseCallFilter(filterStr string) filters.Filter`
-- [ ] Handle `state:active` → CallStateFilter
-- [ ] Handle `duration:>30s` → NumericComparisonFilter
-- [ ] Handle `mos:>3.5`, `jitter:<50`, `loss:>5` → NumericComparisonFilter
-- [ ] Handle `from:`, `to:`, `user:`, `callid:`, `codec:` → TextFilter
-- [ ] Handle `node:` → NodeFilter
-- [ ] Default: TextFilter on all fields
+- [x] Add `parseCallFilter(filterStr string) filters.Filter`
+- [x] Handle `state:active` → CallStateFilter
+- [x] Handle `duration:>30s` → NumericComparisonFilter
+- [x] Handle `mos:>3.5`, `jitter:<50`, `loss:>5` → NumericComparisonFilter
+- [x] Handle `from:`, `to:`, `user:`, `callid:`, `codec:` → TextFilter
+- [x] Handle `node:` → NodeFilter
+- [x] Default: TextFilter on all fields
 
 ---
 

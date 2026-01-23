@@ -264,8 +264,9 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 	defer pb.mu.Unlock()
 	pb.packets = append(pb.packets, packets...)
 
-	// Cap buffer size to prevent unbounded growth (only for live capture)
-	// In offline mode, we MUST NOT drop packets - let the buffer grow
+	// Cap buffer size to prevent unbounded growth (only for live capture).
+	// In offline mode (VoIP with CallTracker), we preserve all packets.
+	// Note: Pause is now handled upstream (source + bridge), so no pause check needed here.
 	hasCallTracker := GetCallTracker() != nil
 	if !hasCallTracker {
 		const maxPending = 5000
@@ -420,7 +421,10 @@ func ResetBridgeStats() {
 // The bridge uses a buffered channel and separate consumer goroutine to
 // prevent blocking when the TUI's Update() loop falls behind. This avoids
 // the producer-consumer deadlock that can occur with direct program.Send().
-func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program) {
+//
+// The pause signal allows the bridge to block when capture is paused,
+// reducing CPU usage to near-idle.
+func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal) {
 	const (
 		targetPacketsPerSecond = 1000                      // Target display rate (increased for bulk transfers)
 		batchInterval          = constants.TUITickInterval // Batch interval
@@ -452,6 +456,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 	// Consumer goroutine: reads from tuiBatchChan and adds to pending buffer.
 	// The TUI pulls from the pending buffer on its own timer, so this never blocks.
+	// When paused, packets are discarded (the bridge is blocked, so minimal packets arrive).
 	consumerDone := make(chan struct{})
 	go func() {
 		defer close(consumerDone)
@@ -462,6 +467,10 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				if !ok {
 					// Channel closed
 					return
+				}
+				// Discard packets when paused (bridge is blocked, so minimal arrive)
+				if pause != nil && pause.IsPaused() {
+					continue
 				}
 				// Add to pending buffer (never blocks - TUI pulls when ready)
 				pendingPackets.addPackets(msg.Packets)
@@ -567,7 +576,18 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	}
 
 	for {
+		// Check pause state at loop start - block until resumed
+		if pause != nil && pause.IsPaused() {
+			sendBatch()  // Flush current batch before blocking
+			pause.Wait() // Block until resumed
+			continue
+		}
+
 		select {
+		case <-pause.C():
+			// Pause signaled mid-select, loop back to check and block
+			continue
+
 		case pktInfo, ok := <-packetChan:
 			if !ok {
 				// Channel closed, send remaining batch and shutdown consumer

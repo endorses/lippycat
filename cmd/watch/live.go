@@ -94,10 +94,12 @@ func runLive(cmd *cobra.Command, args []string) {
 }
 
 func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
-		tui.StartPacketBridge(ch, program)
+		tui.StartPacketBridge(ch, program, pauseSignal)
 	}
-	capture.InitWithContext(ctx, devices, filter, processor, nil)
+	// Pass pause function to drop packets at source when paused (reduces CPU)
+	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)
 }
 
 func init() {

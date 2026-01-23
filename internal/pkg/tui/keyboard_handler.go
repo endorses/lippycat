@@ -53,6 +53,13 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, tea.Suspend
 		case " ": // Allow space to pause/resume capture
 			m.uiState.Paused = !m.uiState.Paused
+			// Notify capture pipeline to pause/resume
+			pauseSignal := globalCaptureState.GetPauseSignal()
+			if m.uiState.Paused {
+				pauseSignal.Pause()
+			} else {
+				pauseSignal.Resume()
+			}
 			// Show toast and resume ticking when unpausing
 			if !m.uiState.Paused {
 				toastCmd := m.uiState.Toast.Show(
@@ -419,6 +426,13 @@ func (m Model) handleClearPackets() (Model, tea.Cmd) {
 // handlePauseResume toggles capture pause state
 func (m Model) handlePauseResume() (Model, tea.Cmd) {
 	m.uiState.Paused = !m.uiState.Paused
+	// Notify capture pipeline to pause/resume
+	pauseSignal := globalCaptureState.GetPauseSignal()
+	if m.uiState.Paused {
+		pauseSignal.Pause()
+	} else {
+		pauseSignal.Resume()
+	}
 	// Show toast and resume ticking when unpausing
 	if !m.uiState.Paused {
 		toastCmd := m.uiState.Toast.Show(

@@ -133,8 +133,9 @@ func runFile(cmd *cobra.Command, args []string) {
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
 func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
-		tui.StartPacketBridge(ch, program)
+		tui.StartPacketBridge(ch, program, pauseSignal)
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrdered(devices, filter, processor, nil)

@@ -13,14 +13,17 @@ import (
 // This replaces the previous global variables to ensure thread-safe access
 // from goroutines that need to send messages back to the TUI.
 type CaptureState struct {
-	mu      sync.RWMutex
-	handle  *captureHandle
-	program *tea.Program
+	mu          sync.RWMutex
+	handle      *captureHandle
+	program     *tea.Program
+	pauseSignal *PauseSignal
 }
 
 // globalCaptureState is the package-level synchronized capture state.
 // While still a singleton, it provides thread-safe access via accessor methods.
-var globalCaptureState = &CaptureState{}
+var globalCaptureState = &CaptureState{
+	pauseSignal: NewPauseSignal(),
+}
 
 // SetProgram sets the tea.Program reference used by event handlers.
 // This must be called before starting packet capture to enable message sending.
@@ -91,4 +94,18 @@ func (cs *CaptureState) SendMessage(msg tea.Msg) bool {
 	}
 	p.Send(msg)
 	return true
+}
+
+// GetPauseSignal returns the pause signal for controlling capture pause/resume.
+// The pause signal is shared across the capture pipeline (bridge, consumer).
+func (cs *CaptureState) GetPauseSignal() *PauseSignal {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.pauseSignal
+}
+
+// GetGlobalPauseSignal returns the global pause signal for external callers.
+// This is used by cmd/watch to pass to StartPacketBridge.
+func GetGlobalPauseSignal() *PauseSignal {
+	return globalCaptureState.GetPauseSignal()
 }

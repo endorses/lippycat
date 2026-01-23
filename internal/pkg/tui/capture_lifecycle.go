@@ -98,8 +98,9 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 
 	// Update mode BEFORE starting new capture so packet handlers check the right mode
 	m.captureMode = msg.Mode
-	m.packetStore.MaxPackets = msg.BufferSize // Apply the new buffer size
-	m.uiState.Paused = false                  // Unpause when restarting capture
+	m.packetStore.MaxPackets = msg.BufferSize    // Apply the new buffer size
+	m.uiState.Paused = false                     // Unpause when restarting capture
+	globalCaptureState.GetPauseSignal().Resume() // Reset pause state for new capture
 
 	// Clear old packets with new buffer size
 	m.packetStore.Packets = make([]components.PacketDisplay, m.packetStore.MaxPackets)
@@ -219,24 +220,31 @@ func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string,
 
 // startTUISniffer initializes packet capture and bridges packets to the TUI
 func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+	// Get pause signal for bridge to respect pause/resume
+	pauseSignal := globalCaptureState.GetPauseSignal()
+
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
-		StartPacketBridge(ch, program)
+		StartPacketBridge(ch, program, pauseSignal)
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
 	// For offline: blocks until file is read (StartOfflineSniffer keeps file open)
 	// For live: caller uses goroutine for non-blocking behavior
-	capture.InitWithContext(ctx, devices, filter, processor, nil)
+	// Pass pause function to drop packets at source when paused (reduces CPU)
+	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)
 }
 
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
 func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+	// Get pause signal for bridge to respect pause/resume
+	pauseSignal := globalCaptureState.GetPauseSignal()
+
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
-		StartPacketBridge(ch, program)
+		StartPacketBridge(ch, program, pauseSignal)
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes

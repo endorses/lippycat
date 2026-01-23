@@ -19,21 +19,22 @@ Convert call tracking from FIFO ring buffers to LRU to keep active calls in buff
 
 File: `internal/pkg/voip/call_aggregator.go`
 
-- [ ] Replace ring buffer fields with LRU structure:
+- [x] Replace ring buffer fields with LRU structure:
   ```go
   lruList  *list.List                  // container/list
   lruIndex map[string]*list.Element    // callID -> element
   ```
-- [ ] Update `NewCallAggregatorWithCapacity()` to initialize LRU
-- [ ] Update `processSIPPacket()`:
+- [x] Update `NewCallAggregatorWithCapacity()` to initialize LRU
+- [x] Update `processSIPPacket()`:
   - New call: push to front, add to lruIndex
   - Existing call: move element to front
   - Evict from back when full
-- [ ] Update `processRTPPacketInternal()` with same logic
-- [ ] Keep `GetCalls()` returning chronological order (sort by StartTime)
-- [ ] Update tests in `call_aggregator_test.go`:
-  - [ ] Change `TestCallAggregator_EvictionOrder` to verify LRU
-  - [ ] Update `TestCallAggregator_RingBufferEvictionRace` for LRU
+- [x] Update `processRTPPacketInternal()` with same logic
+- [x] Keep `GetCalls()` returning chronological order (sort by StartTime)
+- [x] Update tests in `call_aggregator_test.go`:
+  - [x] Change `TestCallAggregator_EvictionOrder` to verify LRU
+  - [x] Update `TestCallAggregator_RingBufferEvictionRace` for LRU (renamed to `TestCallAggregator_LRUEvictionRace`)
+  - [x] Add `TestCallAggregator_LRUActiveCallSurvival` to verify active calls survive
 
 ### Phase 2: CallStore (TUI-side)
 

@@ -709,25 +709,25 @@ func TestCallAggregator_DeepCopyRaceCondition(t *testing.T) {
 	assert.Contains(t, []CallState{CallStateRinging, CallStateActive}, call.State, "State should be valid")
 }
 
-// TestCallAggregator_RingBufferEvictionRace tests that concurrent reads during ring buffer
+// TestCallAggregator_LRUEvictionRace tests that concurrent reads during LRU
 // eviction are safe. This specifically tests the scenario where:
 // 1. Reader holds a reference to a call
-// 2. Writer evicts that call from the ring buffer
+// 2. Writer evicts that call from the LRU cache
 // 3. Reader's copy remains valid and isolated from internal state changes
 //
-// This test exercises the fix for the ring buffer race condition documented in
+// This test exercises the fix for the eviction race condition documented in
 // the code review (issue #8).
-func TestCallAggregator_RingBufferEvictionRace(t *testing.T) {
-	// Use small ring buffer to trigger frequent evictions
-	const ringSize = 10
-	ca := NewCallAggregatorWithCapacity(ringSize)
+func TestCallAggregator_LRUEvictionRace(t *testing.T) {
+	// Use small LRU capacity to trigger frequent evictions
+	const lruCapacity = 10
+	ca := NewCallAggregatorWithCapacity(lruCapacity)
 
 	// Track successful reads of evicted calls
 	var successfulReadsAfterEviction atomic.Int64
 	var evictedCallsRead atomic.Int64
 
-	// First, fill the ring buffer completely
-	for i := 0; i < ringSize; i++ {
+	// First, fill the LRU cache completely
+	for i := 0; i < lruCapacity; i++ {
 		callID := fmt.Sprintf("call-%03d", i)
 		packet := &data.CapturedPacket{
 			TimestampNs: time.Now().UnixNano(),
@@ -758,7 +758,7 @@ func TestCallAggregator_RingBufferEvictionRace(t *testing.T) {
 		ca.ProcessPacket(rtpPacket, "hunter-1")
 	}
 
-	require.Equal(t, ringSize, ca.GetCallCount(), "Ring buffer should be full")
+	require.Equal(t, lruCapacity, ca.GetCallCount(), "LRU cache should be full")
 
 	var wg sync.WaitGroup
 	done := make(chan struct{})
@@ -775,7 +775,7 @@ func TestCallAggregator_RingBufferEvictionRace(t *testing.T) {
 					return
 				default:
 					// Try to read older calls that are likely to be evicted
-					for i := 0; i < ringSize*2; i++ {
+					for i := 0; i < lruCapacity*2; i++ {
 						callID := fmt.Sprintf("call-%03d", i)
 						call, exists := ca.GetCall(callID)
 						if exists {
@@ -809,7 +809,7 @@ func TestCallAggregator_RingBufferEvictionRace(t *testing.T) {
 	// Writer goroutines: continuously add new calls, causing evictions
 	writerCount := 3
 	callCounter := atomic.Int64{}
-	callCounter.Store(int64(ringSize)) // Start after initial calls
+	callCounter.Store(int64(lruCapacity)) // Start after initial calls
 
 	for w := 0; w < writerCount; w++ {
 		wg.Add(1)
@@ -849,9 +849,9 @@ func TestCallAggregator_RingBufferEvictionRace(t *testing.T) {
 	close(done)
 	wg.Wait()
 
-	// Verify ring buffer maintained correct size
+	// Verify LRU cache maintained correct size
 	finalCount := ca.GetCallCount()
-	assert.LessOrEqual(t, finalCount, ringSize, "Should not exceed ring buffer size")
+	assert.LessOrEqual(t, finalCount, lruCapacity, "Should not exceed LRU capacity")
 
 	// Verify we had meaningful concurrent activity
 	t.Logf("Successful isolated reads: %d", successfulReadsAfterEviction.Load())
@@ -937,7 +937,7 @@ func TestNewCallAggregatorWithCapacity(t *testing.T) {
 	}
 }
 
-// TestCallAggregator_EvictionOrder verifies FIFO eviction behavior
+// TestCallAggregator_EvictionOrder verifies LRU eviction behavior
 func TestCallAggregator_EvictionOrder(t *testing.T) {
 	ca := NewCallAggregatorWithCapacity(3)
 
@@ -962,7 +962,21 @@ func TestCallAggregator_EvictionOrder(t *testing.T) {
 		assert.True(t, exists, "call-%d should exist", i)
 	}
 
-	// Add call 3, should evict call 0 (FIFO)
+	// Touch call-0 to make it most recently used
+	// (call-1 is now least recently used)
+	packet0Update := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call-0",
+				Method:   "ACK",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
+			},
+		},
+	}
+	ca.ProcessPacket(packet0Update, "hunter-1")
+
+	// Add call 3, should evict call-1 (LRU, not call-0 which was just touched)
 	packet3 := &data.CapturedPacket{
 		Metadata: &data.PacketMetadata{
 			Sip: &data.SIPMetadata{
@@ -975,12 +989,12 @@ func TestCallAggregator_EvictionOrder(t *testing.T) {
 	}
 	ca.ProcessPacket(packet3, "hunter-1")
 
-	// Verify eviction
+	// Verify eviction - call-1 should be evicted (LRU)
 	_, exists0 := ca.GetCall("call-0")
-	assert.False(t, exists0, "call-0 should be evicted (FIFO)")
+	assert.True(t, exists0, "call-0 should still exist (was recently touched)")
 
 	_, exists1 := ca.GetCall("call-1")
-	assert.True(t, exists1, "call-1 should still exist")
+	assert.False(t, exists1, "call-1 should be evicted (LRU)")
 
 	_, exists2 := ca.GetCall("call-2")
 	assert.True(t, exists2, "call-2 should still exist")
@@ -988,7 +1002,20 @@ func TestCallAggregator_EvictionOrder(t *testing.T) {
 	_, exists3 := ca.GetCall("call-3")
 	assert.True(t, exists3, "call-3 should exist")
 
-	// Add call 4, should evict call 1
+	// Touch call-2 to make it most recently used
+	packet2Update := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "call-2",
+				Method:   "ACK",
+				FromUser: "alicent@example.com",
+				ToUser:   "robb@example.com",
+			},
+		},
+	}
+	ca.ProcessPacket(packet2Update, "hunter-1")
+
+	// Add call 4, should evict call-0 (now LRU since call-2 was touched)
 	packet4 := &data.CapturedPacket{
 		Metadata: &data.PacketMetadata{
 			Sip: &data.SIPMetadata{
@@ -1001,9 +1028,70 @@ func TestCallAggregator_EvictionOrder(t *testing.T) {
 	}
 	ca.ProcessPacket(packet4, "hunter-1")
 
-	_, exists1After := ca.GetCall("call-1")
-	assert.False(t, exists1After, "call-1 should be evicted")
+	_, exists0After := ca.GetCall("call-0")
+	assert.False(t, exists0After, "call-0 should be evicted (now LRU)")
+
+	_, exists2After := ca.GetCall("call-2")
+	assert.True(t, exists2After, "call-2 should still exist (was recently touched)")
 
 	// Final state should be: call-2, call-3, call-4
+	assert.Equal(t, 3, ca.GetCallCount())
+}
+
+// TestCallAggregator_LRUActiveCallSurvival verifies active calls survive when buffer is full
+func TestCallAggregator_LRUActiveCallSurvival(t *testing.T) {
+	ca := NewCallAggregatorWithCapacity(3)
+
+	// Add 3 calls
+	for i := 0; i < 3; i++ {
+		packet := &data.CapturedPacket{
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:   fmt.Sprintf("call-%d", i),
+					Method:   "INVITE",
+					FromUser: "alicent@example.com",
+					ToUser:   "robb@example.com",
+				},
+			},
+		}
+		ca.ProcessPacket(packet, "hunter-1")
+	}
+
+	// Keep call-0 active with RTP packets while adding new calls
+	// This simulates an active call that keeps receiving packets
+	for i := 3; i < 10; i++ {
+		// Touch call-0 with RTP
+		rtpPacket := &data.CapturedPacket{
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{CallId: "call-0"},
+				Rtp: &data.RTPMetadata{
+					Ssrc:        12345,
+					Sequence:    uint32(100 + i),
+					Timestamp:   uint32(1000 + i*160),
+					PayloadType: 0,
+				},
+			},
+		}
+		ca.ProcessPacket(rtpPacket, "hunter-1")
+
+		// Add new call
+		newPacket := &data.CapturedPacket{
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:   fmt.Sprintf("call-%d", i),
+					Method:   "INVITE",
+					FromUser: "alicent@example.com",
+					ToUser:   "robb@example.com",
+				},
+			},
+		}
+		ca.ProcessPacket(newPacket, "hunter-1")
+	}
+
+	// call-0 should survive because it was kept active
+	_, exists0 := ca.GetCall("call-0")
+	assert.True(t, exists0, "call-0 should survive (kept active with RTP)")
+
+	// Should have exactly 3 calls
 	assert.Equal(t, 3, ca.GetCallCount())
 }

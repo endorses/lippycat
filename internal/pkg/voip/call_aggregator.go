@@ -1,6 +1,8 @@
 package voip
 
 import (
+	"container/list"
+	"sort"
 	"sync"
 	"time"
 
@@ -66,12 +68,11 @@ type RTPQualityStats struct {
 
 // CallAggregator aggregates call state from packet streams
 type CallAggregator struct {
-	calls     map[string]*AggregatedCall // callID -> call state
-	callRing  []string                   // Ring buffer of CallIDs in chronological order
-	ringHead  int                        // Current position in ring buffer
-	ringCount int                        // Number of calls in ring buffer
-	maxCalls  int                        // Maximum calls to keep (ring buffer size)
-	mu        sync.RWMutex
+	calls    map[string]*AggregatedCall // callID -> call state
+	lruList  *list.List                 // LRU list (front = most recently used)
+	lruIndex map[string]*list.Element   // callID -> list element for O(1) lookup
+	maxCalls int                        // Maximum calls to keep
+	mu       sync.RWMutex
 }
 
 // NewCallAggregator creates a new call aggregator with default capacity (1000 calls)
@@ -79,18 +80,17 @@ func NewCallAggregator() *CallAggregator {
 	return NewCallAggregatorWithCapacity(1000)
 }
 
-// NewCallAggregatorWithCapacity creates a new call aggregator with specified ring buffer capacity.
+// NewCallAggregatorWithCapacity creates a new call aggregator with specified capacity.
 // This is primarily useful for testing eviction behavior with smaller buffers.
 func NewCallAggregatorWithCapacity(maxCalls int) *CallAggregator {
 	if maxCalls <= 0 {
 		maxCalls = 1000
 	}
 	return &CallAggregator{
-		calls:     make(map[string]*AggregatedCall),
-		callRing:  make([]string, maxCalls),
-		ringHead:  0,
-		ringCount: 0,
-		maxCalls:  maxCalls,
+		calls:    make(map[string]*AggregatedCall),
+		lruList:  list.New(),
+		lruIndex: make(map[string]*list.Element),
+		maxCalls: maxCalls,
 	}
 }
 
@@ -221,20 +221,23 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 			// allowing proper codec detection from RTP payload type.
 		}
 
-		// Add to ring buffer (FIFO)
-		if ca.ringCount >= ca.maxCalls {
-			// Ring buffer is full, remove oldest call
-			oldestCallID := ca.callRing[ca.ringHead]
-			delete(ca.calls, oldestCallID)
-			logger.Debug("Removed oldest call from ring buffer (buffer full)",
-				"call_id", oldestCallID)
-		} else {
-			ca.ringCount++
+		// Evict LRU (least recently used) if at capacity
+		if ca.lruList.Len() >= ca.maxCalls {
+			// Remove from back (least recently used)
+			oldest := ca.lruList.Back()
+			if oldest != nil {
+				oldestCallID := oldest.Value.(string)
+				ca.lruList.Remove(oldest)
+				delete(ca.lruIndex, oldestCallID)
+				delete(ca.calls, oldestCallID)
+				logger.Debug("Evicted LRU call (buffer full)",
+					"call_id", oldestCallID)
+			}
 		}
 
-		// Add new call to ring buffer
-		ca.callRing[ca.ringHead] = sip.CallId
-		ca.ringHead = (ca.ringHead + 1) % ca.maxCalls
+		// Add new call to front (most recently used)
+		elem := ca.lruList.PushFront(sip.CallId)
+		ca.lruIndex[sip.CallId] = elem
 
 		ca.calls[sip.CallId] = call
 		logger.Debug("New call detected",
@@ -243,6 +246,10 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 			"to", sip.ToUser,
 			"hunter", hunterID)
 	} else {
+		// Move existing call to front (most recently used)
+		if elem, ok := ca.lruIndex[sip.CallId]; ok {
+			ca.lruList.MoveToFront(elem)
+		}
 		// Call already exists (may have been created from RTP)
 		// Update From/To if they're empty and we have SIP data
 		from := sip.FromUri
@@ -366,26 +373,34 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 			// Note: RTPStats is intentionally not initialized here - will be done below
 		}
 
-		// Add to ring buffer (FIFO) - same as SIP path to maintain consistency
-		if ca.ringCount >= ca.maxCalls {
-			// Ring buffer is full, remove oldest call
-			oldestCallID := ca.callRing[ca.ringHead]
-			delete(ca.calls, oldestCallID)
-			logger.Debug("Removed oldest call from ring buffer (buffer full, RTP path)",
-				"call_id", oldestCallID)
-		} else {
-			ca.ringCount++
+		// Evict LRU (least recently used) if at capacity
+		if ca.lruList.Len() >= ca.maxCalls {
+			// Remove from back (least recently used)
+			oldest := ca.lruList.Back()
+			if oldest != nil {
+				oldestCallID := oldest.Value.(string)
+				ca.lruList.Remove(oldest)
+				delete(ca.lruIndex, oldestCallID)
+				delete(ca.calls, oldestCallID)
+				logger.Debug("Evicted LRU call (buffer full, RTP path)",
+					"call_id", oldestCallID)
+			}
 		}
 
-		// Add new call to ring buffer
-		ca.callRing[ca.ringHead] = callID
-		ca.ringHead = (ca.ringHead + 1) % ca.maxCalls
+		// Add new call to front (most recently used)
+		elem := ca.lruList.PushFront(callID)
+		ca.lruIndex[callID] = elem
 
 		ca.calls[callID] = call
 		logger.Debug("Created call entry from RTP packet",
 			"call_id", callID,
 			"ssrc", rtp.Ssrc,
 			"hunter", hunterID)
+	} else {
+		// Move existing call to front (most recently used)
+		if elem, ok := ca.lruIndex[callID]; ok {
+			ca.lruList.MoveToFront(elem)
+		}
 	}
 
 	// Update last packet time
@@ -532,7 +547,8 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 		"mos", stats.MOS)
 }
 
-// GetCalls returns all tracked calls
+// GetCalls returns all tracked calls sorted by StartTime (chronological order).
+// LRU is the eviction policy only; display order is always chronological.
 func (ca *CallAggregator) GetCalls() []AggregatedCall {
 	ca.mu.RLock()
 	defer ca.mu.RUnlock()
@@ -542,6 +558,11 @@ func (ca *CallAggregator) GetCalls() []AggregatedCall {
 		// Create a deep copy to avoid race conditions
 		calls = append(calls, ca.deepCopyCall(call))
 	}
+
+	// Sort by StartTime for chronological display order
+	sort.Slice(calls, func(i, j int) bool {
+		return calls[i].StartTime.Before(calls[j].StartTime)
+	})
 
 	return calls
 }

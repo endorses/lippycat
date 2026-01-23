@@ -26,12 +26,16 @@ type Footer struct {
 	theme                themes.Theme
 	filterMode           bool
 	hasFilter            bool
-	filterCount          int  // Number of stacked filters
-	streamingSave        bool // True when streaming save is active
-	activeTab            int  // Active tab index
-	hasProtocolSelection bool // True when a protocol is selected
-	paused               bool // True when capture is paused
-	hasHelpSearch        bool // True when Help tab has active search
+	filterCount          int    // Number of stacked filters
+	streamingSave        bool   // True when streaming save is active
+	activeTab            int    // Active tab index
+	hasProtocolSelection bool   // True when a protocol is selected
+	paused               bool   // True when capture is paused
+	hasHelpSearch        bool   // True when Help tab has active search
+	viewMode             string // "packets" or "calls" for Capture tab
+	callFilterMode       bool   // True when call filter input is active
+	hasCallFilter        bool   // True when call filters are applied
+	callFilterCount      int    // Number of stacked call filters
 }
 
 // NewFooter creates a new footer component
@@ -94,6 +98,26 @@ func (f *Footer) SetHasHelpSearch(hasSearch bool) {
 	f.hasHelpSearch = hasSearch
 }
 
+// SetViewMode sets the current view mode (packets/calls)
+func (f *Footer) SetViewMode(mode string) {
+	f.viewMode = mode
+}
+
+// SetCallFilterMode sets whether call filter input is active
+func (f *Footer) SetCallFilterMode(active bool) {
+	f.callFilterMode = active
+}
+
+// SetHasCallFilter sets whether call filters are currently applied
+func (f *Footer) SetHasCallFilter(hasFilter bool) {
+	f.hasCallFilter = hasFilter
+}
+
+// SetCallFilterCount sets the number of stacked call filters
+func (f *Footer) SetCallFilterCount(count int) {
+	f.callFilterCount = count
+}
+
 // getTabColor returns the background color for a given tab index
 func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 	// Map tab index to theme color
@@ -119,11 +143,23 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		keybinds := []TabKeybind{
 			{Key: "/", Description: "filter", ShortDesc: "flt", Essential: true},
 		}
-		// Conditional keybinds
-		if f.hasFilter {
-			keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false})
-			if f.filterCount > 1 {
-				keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear all", ShortDesc: "all", Essential: false})
+
+		// Conditional keybinds based on view mode
+		if f.viewMode == "calls" {
+			// Calls view: use call filter state
+			if f.hasCallFilter {
+				keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false})
+				if f.callFilterCount > 1 {
+					keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear all", ShortDesc: "all", Essential: false})
+				}
+			}
+		} else {
+			// Packets view: use packet filter state
+			if f.hasFilter {
+				keybinds = append(keybinds, TabKeybind{Key: "c", Description: "clear", ShortDesc: "clr", Essential: false})
+				if f.filterCount > 1 {
+					keybinds = append(keybinds, TabKeybind{Key: "C", Description: "clear all", ShortDesc: "all", Essential: false})
+				}
 			}
 		}
 		keybinds = append(keybinds, TabKeybind{Key: "d", Description: "details", ShortDesc: "det", Essential: true})
@@ -337,7 +373,7 @@ func (f *Footer) renderGeneralSection() string {
 // View renders the footer with two lines: horizontal separator + keybindings
 func (f *Footer) View() string {
 	// Special case: filter mode shows filter keybinds only
-	if f.filterMode {
+	if f.filterMode || f.callFilterMode {
 		return f.renderFilterModeFooter()
 	}
 

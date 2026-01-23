@@ -12,9 +12,15 @@ import (
 
 // handleKeyboard processes keyboard events for the TUI
 func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
-	// Handle filter input mode
+	// Handle filter input mode (packet filters)
 	if m.uiState.FilterMode {
 		model, cmd := m.handleFilterInput(msg)
+		return model.(Model), cmd
+	}
+
+	// Handle call filter input mode
+	if m.uiState.CallFilterMode {
+		model, cmd := m.handleCallFilterInput(msg)
 		return model.(Model), cmd
 	}
 
@@ -165,6 +171,10 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "/": // Enter filter mode (Capture tab) or search mode (Help tab)
 		if m.uiState.Tabs.GetActive() == 0 {
+			// Check if we're in calls view mode
+			if m.uiState.ViewMode == "calls" {
+				return m.handleEnterCallFilterMode()
+			}
 			return m.handleEnterFilterMode()
 		}
 		if m.uiState.Tabs.GetActive() == 4 {
@@ -175,12 +185,20 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "C": // Clear all filters (Shift+C) - Capture tab only
 		if m.uiState.Tabs.GetActive() == 0 {
+			// Check if we're in calls view mode
+			if m.uiState.ViewMode == "calls" {
+				return m.handleClearAllCallFilters()
+			}
 			return m.handleClearAllFilters()
 		}
 		return m, nil
 
 	case "c": // Remove last filter - Capture tab only
 		if m.uiState.Tabs.GetActive() == 0 {
+			// Check if we're in calls view mode
+			if m.uiState.ViewMode == "calls" {
+				return m.handleRemoveLastCallFilter()
+			}
 			return m.handleRemoveLastFilter()
 		}
 		return m, nil

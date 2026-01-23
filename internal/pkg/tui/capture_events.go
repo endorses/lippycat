@@ -312,9 +312,12 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 	// Add/update calls in the store (doesn't replace entire list)
 	m.callStore.AddOrUpdateCalls(tuiCalls)
 
-	// Update the CallsView with all calls from the store
-	allCalls := m.callStore.GetCallsInOrder()
-	m.uiState.CallsView.SetCalls(allCalls)
+	// Update the CallsView with filtered or all calls
+	if m.callStore.HasFilter() {
+		m.uiState.CallsView.SetCalls(m.callStore.GetFilteredCalls())
+	} else {
+		m.uiState.CallsView.SetCalls(m.callStore.GetCallsInOrder())
+	}
 
 	return m, nil
 }

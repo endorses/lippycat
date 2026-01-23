@@ -32,6 +32,10 @@ func (m Model) View() string {
 	m.uiState.Footer.SetHasProtocolSelection(m.uiState.SelectedProtocol.Name != "All")
 	m.uiState.Footer.SetPaused(m.uiState.Paused)
 	m.uiState.Footer.SetHasHelpSearch(m.uiState.HelpView.HasActiveSearch())
+	m.uiState.Footer.SetViewMode(m.uiState.ViewMode)
+	m.uiState.Footer.SetCallFilterMode(m.uiState.CallFilterMode)
+	m.uiState.Footer.SetHasCallFilter(m.callStore.HasFilter())
+	m.uiState.Footer.SetCallFilterCount(m.callStore.FilterChain.Count())
 
 	// Render components
 	headerView := m.uiState.Header.View()
@@ -219,8 +223,14 @@ func (m Model) renderBottomArea(footerView string) string {
 		m.uiState.NodesView.IsModalOpen()
 
 	if m.uiState.FilterMode {
-		// Filter (3 lines) + footer (1 line) = 4 lines
+		// Packet filter (3 lines) + footer (1 line) = 4 lines
 		filterView := m.uiState.FilterInput.View()
+		return filterView + "\n" + footerView
+	}
+
+	if m.uiState.CallFilterMode {
+		// Call filter (3 lines) + footer (1 line) = 4 lines
+		filterView := m.uiState.CallFilterInput.View()
 		return filterView + "\n" + footerView
 	}
 

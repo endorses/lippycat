@@ -104,32 +104,32 @@
 
 ## Phase 6: UI Integration
 
-### 6.1 Add Filter State to Model (`internal/pkg/tui/model.go`)
-- [ ] Add `callFilterMode bool`
-- [ ] Add `callFilterInput *components.FilterInput` (separate instance)
+### 6.1 Add Filter State to Model (`internal/pkg/tui/store/ui_state.go`)
+- [x] Add `CallFilterMode bool`
+- [x] Add `CallFilterInput components.FilterInput` (separate instance)
 
 ### 6.2 Keyboard Handler (`internal/pkg/tui/keyboard_handler.go`)
-- [ ] Add `/` handler for VoIP subtab (calls view)
-- [ ] Route to `handleEnterCallFilterMode()`
-- [ ] Add `c`/`C` handlers for call filter clear
+- [x] Add `/` handler for VoIP subtab (calls view)
+- [x] Route to `handleEnterCallFilterMode()`
+- [x] Add `c`/`C` handlers for call filter clear
 
 ### 6.3 Call Filter Operations (`internal/pkg/tui/filter_operations.go`)
-- [ ] Add `handleCallFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd)`
-- [ ] Add `handleEnterCallFilterMode() (Model, tea.Cmd)`
-- [ ] Add `handleRemoveLastCallFilter() (Model, tea.Cmd)`
-- [ ] Add `handleClearAllCallFilters() (Model, tea.Cmd)`
-- [ ] Add `parseAndApplyCallFilter(filterStr string) tea.Cmd`
+- [x] Add `handleCallFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd)`
+- [x] Add `handleEnterCallFilterMode() (Model, tea.Cmd)`
+- [x] Add `handleRemoveLastCallFilter() (Model, tea.Cmd)`
+- [x] Add `handleClearAllCallFilters() (Model, tea.Cmd)`
+- [x] Add `parseAndApplyCallFilter(filterStr string) tea.Cmd`
 
-### 6.4 CallsView Updates (`internal/pkg/tui/components/callsview.go`)
-- [ ] Display filtered calls when filter active
-- [ ] Show filter count in view (or rely on footer)
+### 6.4 CallsView Updates (`internal/pkg/tui/capture_events.go`)
+- [x] Display filtered calls when filter active
+- [x] Show filter count in view (via footer)
 
 ### 6.5 Footer Updates (`internal/pkg/tui/components/footer.go`)
-- [ ] Show filter keybinds when on VoIP calls view: `[/] Filter  [c] Clear last  [C] Clear all`
-- [ ] Show active filter count
+- [x] Show filter keybinds when on VoIP calls view: `[/] Filter  [c] Clear last  [C] Clear all`
+- [x] Show active filter count (via viewMode-aware keybinds)
 
 ### 6.6 View Renderer (`internal/pkg/tui/view_renderer.go`)
-- [ ] Render call filter input when `callFilterMode` is true
+- [x] Render call filter input when `callFilterMode` is true
 
 ---
 

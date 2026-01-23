@@ -46,6 +46,8 @@ type UIState struct {
 	Quitting         bool
 	Theme            themes.Theme
 	FilterMode       bool
+	CallFilterMode   bool // Filter mode for calls view
+	CallFilterInput  components.FilterInput
 	ShowDetails      bool
 	FocusedPane      string // "left" (packet list) or "right" (details/hex)
 	NeedsUIUpdate    bool
@@ -122,6 +124,9 @@ func NewUIState(theme themes.Theme) *UIState {
 	filterInput := components.NewFilterInput("/")
 	filterInput.SetTheme(theme)
 
+	callFilterInput := components.NewFilterInput("/")
+	callFilterInput.SetTheme(theme)
+
 	// Initialize FileDialog for saving PCAP files
 	// Use current working directory
 	var initialPath string
@@ -159,6 +164,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		HunterSelector:   hunterSelector,
 		FilterManager:    filterManager,
 		FilterInput:      filterInput,
+		CallFilterInput:  callFilterInput,
 		FileDialog:       fileDialog,
 		ConfirmDialog:    confirmDialog,
 		Toast:            toast,
@@ -170,6 +176,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		Quitting:         false,
 		Theme:            theme,
 		FilterMode:       false,
+		CallFilterMode:   false,
 		ShowDetails:      false,
 		FocusedPane:      "left",
 		NeedsUIUpdate:    false,
@@ -199,6 +206,7 @@ func (ui *UIState) SetTheme(theme themes.Theme) {
 	ui.HTTPView.SetTheme(theme)
 	ui.ProtocolSelector.SetTheme(theme)
 	ui.FilterInput.SetTheme(theme)
+	ui.CallFilterInput.SetTheme(theme)
 	ui.Toast.SetTheme(theme)
 }
 

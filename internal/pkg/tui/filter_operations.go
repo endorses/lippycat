@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/remotecapture"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/tui/filters"
 )
 
 // handleFilterInput handles key input when in filter mode
@@ -343,4 +344,195 @@ func (m *Model) executeFilterOperation(msg components.FilterOperationMsg) tea.Cm
 			HuntersUpdated: result.HuntersUpdated,
 		}
 	}
+}
+
+// handleCallFilterInput handles key input when in call filter mode
+func (m Model) handleCallFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		// Apply the filter
+		filterValue := m.uiState.CallFilterInput.Value()
+		var filterCmd tea.Cmd
+		if filterValue != "" {
+			filterCmd = m.parseAndApplyCallFilter(filterValue)
+			m.uiState.CallFilterInput.AddToHistory(filterValue)
+		} else {
+			// Empty filter = clear all filters
+			m.callStore.ClearFilter()
+			// Refresh calls view
+			if m.callStore.HasFilter() {
+				m.uiState.CallsView.SetCalls(m.callStore.GetFilteredCalls())
+			} else {
+				m.uiState.CallsView.SetCalls(m.callStore.GetCallsInOrder())
+			}
+		}
+		m.uiState.CallFilterMode = false
+		m.uiState.CallFilterInput.Deactivate()
+		return m, filterCmd
+
+	case "esc", "ctrl+c":
+		// Cancel filter input
+		m.uiState.CallFilterMode = false
+		m.uiState.CallFilterInput.Deactivate()
+		return m, nil
+
+	case "up", "ctrl+p":
+		m.uiState.CallFilterInput.HistoryUp()
+		return m, nil
+
+	case "down", "ctrl+n":
+		m.uiState.CallFilterInput.HistoryDown()
+		return m, nil
+
+	case "left", "ctrl+b":
+		m.uiState.CallFilterInput.CursorLeft()
+		return m, nil
+
+	case "right", "ctrl+f":
+		m.uiState.CallFilterInput.CursorRight()
+		return m, nil
+
+	case "home", "ctrl+a":
+		m.uiState.CallFilterInput.CursorHome()
+		return m, nil
+
+	case "end", "ctrl+e":
+		m.uiState.CallFilterInput.CursorEnd()
+		return m, nil
+
+	case "backspace":
+		m.uiState.CallFilterInput.Backspace()
+		return m, nil
+
+	case "delete", "ctrl+d":
+		m.uiState.CallFilterInput.Delete()
+		return m, nil
+
+	case "ctrl+u":
+		m.uiState.CallFilterInput.DeleteToBeginning()
+		return m, nil
+
+	case "ctrl+k":
+		m.uiState.CallFilterInput.DeleteToEnd()
+		return m, nil
+
+	default:
+		// Insert character(s) - handles both single keypress and paste
+		if len(msg.Runes) > 0 {
+			for _, r := range msg.Runes {
+				m.uiState.CallFilterInput.InsertRune(r)
+			}
+		}
+		return m, nil
+	}
+}
+
+// handleEnterCallFilterMode enters call filter input mode
+func (m Model) handleEnterCallFilterMode() (Model, tea.Cmd) {
+	m.uiState.CallFilterMode = true
+	m.uiState.CallFilterInput.Activate()
+	m.uiState.CallFilterInput.Clear()
+	// Update filter input with current active filters
+	filterCount := m.callStore.FilterChain.Count()
+	filterDescs := m.callStore.FilterChain.GetFilterDescriptions()
+	m.uiState.CallFilterInput.SetActiveFilters(filterCount, filterDescs)
+	return m, nil
+}
+
+// handleRemoveLastCallFilter removes the last call filter in the stack
+func (m Model) handleRemoveLastCallFilter() (Model, tea.Cmd) {
+	if m.callStore.HasFilter() {
+		filterCount := m.callStore.FilterChain.Count()
+		if m.callStore.RemoveLastFilter() {
+			// Show toast notification
+			remainingCount := filterCount - 1
+			msg := "Last call filter removed"
+			if remainingCount > 0 {
+				msg = fmt.Sprintf("Last call filter removed (%d remaining)", remainingCount)
+			}
+			toastCmd := m.uiState.Toast.Show(
+				msg,
+				components.ToastInfo,
+				components.ToastDurationShort,
+			)
+
+			// Refresh calls view
+			if m.callStore.HasFilter() {
+				m.uiState.CallsView.SetCalls(m.callStore.GetFilteredCalls())
+			} else {
+				m.uiState.CallsView.SetCalls(m.callStore.GetCallsInOrder())
+			}
+
+			return m, toastCmd
+		}
+	}
+	return m, nil
+}
+
+// handleClearAllCallFilters clears all active call filters
+func (m Model) handleClearAllCallFilters() (Model, tea.Cmd) {
+	if m.callStore.HasFilter() {
+		filterCount := m.callStore.FilterChain.Count()
+		m.callStore.ClearFilter()
+
+		// Refresh calls view
+		m.uiState.CallsView.SetCalls(m.callStore.GetCallsInOrder())
+
+		// Show toast notification with count
+		msg := fmt.Sprintf("All call filters cleared (%d removed)", filterCount)
+		if filterCount == 1 {
+			msg = "Call filter cleared"
+		}
+		return m, m.uiState.Toast.Show(
+			msg,
+			components.ToastInfo,
+			components.ToastDurationShort,
+		)
+	}
+	return m, nil
+}
+
+// parseAndApplyCallFilter parses and applies a filter expression to the call list
+func (m *Model) parseAndApplyCallFilter(filterStr string) tea.Cmd {
+	if filterStr == "" {
+		return nil
+	}
+
+	// Try to parse as boolean expression first
+	filter, err := filters.ParseBooleanExpression(filterStr, func(s string) filters.Filter {
+		f, _ := parseCallFilter(s)
+		return f
+	})
+	if err == nil && filter != nil {
+		m.callStore.AddFilter(filter)
+	} else if err != nil {
+		// Try simple filter parse
+		simpleFilter, parseErr := parseCallFilter(filterStr)
+		if parseErr != nil {
+			// Show error toast for invalid filter
+			return m.uiState.Toast.Show(
+				fmt.Sprintf("Invalid call filter: %s", parseErr.Error()),
+				components.ToastError,
+				components.ToastDurationLong,
+			)
+		}
+		if simpleFilter != nil {
+			m.callStore.AddFilter(simpleFilter)
+		}
+	}
+
+	// Refresh calls view with filtered calls
+	m.uiState.CallsView.SetCalls(m.callStore.GetFilteredCalls())
+
+	// Show toast with filter count
+	filterCount := m.callStore.FilterChain.Count()
+	if filterCount > 1 {
+		return m.uiState.Toast.Show(
+			fmt.Sprintf("Call filter added (%d filters active)", filterCount),
+			components.ToastSuccess,
+			components.ToastDurationShort,
+		)
+	}
+
+	return nil
 }

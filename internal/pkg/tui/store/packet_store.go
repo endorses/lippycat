@@ -312,6 +312,16 @@ func (ps *PacketStore) AddFilter(filter filters.Filter) {
 	ps.FilterChain.Add(filter)
 }
 
+// ReapplyFilters re-evaluates all packets against the current filter chain.
+// Call this after AddFilter() when you need immediate results (e.g., offline mode).
+// For live capture at high traffic rates, this is typically not needed as new
+// packets will flow through the filter automatically.
+func (ps *PacketStore) ReapplyFilters() {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.reapplyFilters()
+}
+
 // GetPackets returns the raw packets (not in order, for direct access)
 func (ps *PacketStore) GetPackets() []components.PacketDisplay {
 	ps.mu.RLock()

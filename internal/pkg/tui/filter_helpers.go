@@ -11,8 +11,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tui/filters"
 )
 
-// parseAndApplyFilter parses and applies a filter expression to the packet list
-// Does NOT reapply to existing packets - at high traffic rates the buffer refills quickly.
+// parseAndApplyFilter parses and applies a filter expression to the packet list.
+// For offline mode: Reapplies filter to existing packets immediately.
+// For live mode: Does NOT reapply - at high traffic rates the buffer refills quickly.
 // This prevents UI freezing at 300-400+ Mbit/s by avoiding O(n) scans.
 func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 	// NOTE: We do NOT clear existing filters - this allows filter stacking
@@ -35,15 +36,25 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 		)
 	}
 
-	// Clear filtered packets - new packets will flow through filter automatically
-	// via AddPacketBatch() and incremental updates in updatePacketListFiltered()
-	// At high traffic rates (300-400 Mbit/s), buffer refills in seconds anyway.
-	m.packetStore.ClearFilteredPackets()
-	m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
-
-	// Reset sync counters so incremental updates work correctly
-	m.lastSyncedFilteredCount = 0
-	m.lastFilterState = true
+	// For offline mode, reapply filters to existing packets immediately
+	// since no new packets will arrive.
+	if m.captureMode == components.CaptureModeOffline {
+		m.packetStore.ReapplyFilters()
+		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
+		// Reset sync counters for incremental updates
+		_, _, _, matchedPackets := m.packetStore.GetBufferInfo()
+		m.lastSyncedFilteredCount = matchedPackets
+		m.lastFilterState = true
+	} else {
+		// For live mode, clear filtered packets - new packets will flow through
+		// filter automatically via AddPacketBatch() and incremental updates.
+		// At high traffic rates (300-400 Mbit/s), buffer refills in seconds anyway.
+		m.packetStore.ClearFilteredPackets()
+		m.uiState.PacketList.SetPackets([]components.PacketDisplay{})
+		// Reset sync counters so incremental updates work correctly
+		m.lastSyncedFilteredCount = 0
+		m.lastFilterState = true
+	}
 
 	// Show toast with filter count
 	filterCount := m.packetStore.FilterChain.Count()

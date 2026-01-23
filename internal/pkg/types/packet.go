@@ -51,6 +51,9 @@ type VoIPMetadata struct {
 	SeqNumber   uint16 // Alias for SequenceNum (for compatibility)
 	Timestamp   uint32 // RTP timestamp
 	Codec       string // RTP codec (if applicable)
+
+	// Merge field - set when SIP arrives for an existing RTP-only call
+	MergeFromCallID string // Synthetic CallID (rtp-*) to merge from
 }
 
 // DNSMetadata contains parsed DNS protocol information.

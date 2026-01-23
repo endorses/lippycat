@@ -128,7 +128,7 @@ type Model struct {
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
-func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFiles []string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
+func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter string, pcapFiles []string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
 	// Load theme from config, default to Solarized Dark
 	themeName := viper.GetString("tui.theme")
 	if themeName == "" {
@@ -138,7 +138,7 @@ func NewModel(bufferSize int, interfaceName string, bpfFilter string, pcapFiles 
 
 	// Initialize data stores
 	packetStore := store.NewPacketStore(bufferSize)
-	callStore := store.NewCallStore(1000) // Keep 1000 calls in history
+	callStore := store.NewCallStore(maxCalls)
 	connectionMgr := store.NewConnectionManager()
 	uiState := store.NewUIState(theme)
 

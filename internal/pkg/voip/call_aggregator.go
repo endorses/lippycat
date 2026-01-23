@@ -3,6 +3,7 @@ package voip
 import (
 	"container/list"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ const (
 	CallStateActive
 	CallStateEnded
 	CallStateFailed
+	CallStateRTPOnly // RTP stream detected without SIP signaling
 )
 
 func (cs CallState) String() string {
@@ -34,6 +36,8 @@ func (cs CallState) String() string {
 		return "ENDED"
 	case CallStateFailed:
 		return "FAILED"
+	case CallStateRTPOnly:
+		return "RTP-ONLY"
 	default:
 		return "UNKNOWN"
 	}
@@ -124,8 +128,13 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 	// Use packet timestamp from capture
 	timestamp := pkt.Timestamp
 
-	// Handle SIP packets
-	if voip.CallID != "" && (voip.Method != "" || voip.Status > 0) {
+	// Handle SIP packets (but not RTP-ONLY synthetic calls)
+	if voip.CallID != "" && voip.Method != "RTP-ONLY" && (voip.Method != "" || voip.Status > 0) {
+		// Check if we need to merge from an RTP-only call
+		if voip.MergeFromCallID != "" {
+			ca.mergeRTPOnlyCall(voip.MergeFromCallID, voip.CallID)
+		}
+
 		// Convert types.VoIPMetadata to data.SIPMetadata format
 		// Validate Status can fit in uint32 (int is either 32 or 64 bit depending on platform)
 		var responseCode uint32
@@ -169,11 +178,20 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 		}
 
 		// Create a minimal CapturedPacket with both SIP (for CallID) and RTP metadata
+		// Include From/To for RTP-only calls (synthetic CallIDs start with "rtp-")
+		sipMeta := &data.SIPMetadata{
+			CallId: voip.CallID,
+		}
+		// For RTP-only calls, preserve From/To (which are IP:port pairs)
+		if strings.HasPrefix(voip.CallID, "rtp-") {
+			sipMeta.FromUri = voip.From
+			sipMeta.ToUri = voip.To
+			sipMeta.Method = "RTP-ONLY"
+		}
+
 		capturedPkt := &data.CapturedPacket{
 			Metadata: &data.PacketMetadata{
-				Sip: &data.SIPMetadata{
-					CallId: voip.CallID,
-				},
+				Sip: sipMeta,
 				Rtp: rtpMeta,
 			},
 		}
@@ -362,14 +380,30 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 	// Find or create the associated call
 	call, exists := ca.calls[callID]
 	if !exists {
+		// Determine if this is an RTP-only call (synthetic CallID)
+		isRTPOnly := strings.HasPrefix(callID, "rtp-")
+		callState := CallStateActive
+		if isRTPOnly {
+			callState = CallStateRTPOnly
+		}
+
+		// For RTP-only calls, extract From/To from SIP metadata (contains IP:port pairs)
+		var from, to string
+		if isRTPOnly && sip != nil {
+			from = sip.FromUri
+			to = sip.ToUri
+		}
+
 		// Create a minimal call entry from RTP - SIP details will be filled in later if/when SIP arrives
 		call = &AggregatedCall{
 			CallID:         callID,
-			State:          CallStateActive, // Assume active since we're seeing RTP
+			State:          callState,
+			From:           from,
+			To:             to,
 			StartTime:      timestamp,
 			LastPacketTime: timestamp,
 			Hunters:        []string{hunterID},
-			// Note: From/To will be empty until SIP packet arrives
+			// Note: For non-RTP-only calls, From/To will be empty until SIP packet arrives
 			// Note: RTPStats is intentionally not initialized here - will be done below
 		}
 
@@ -633,6 +667,82 @@ func (ca *CallAggregator) deepCopyCall(call *AggregatedCall) AggregatedCall {
 	}
 
 	return callCopy
+}
+
+// mergeRTPOnlyCall merges data from an RTP-only (synthetic) call into a real SIP call.
+// This is called when SIP signaling arrives for an endpoint that was already
+// tracked as an RTP-only stream. The RTP stats, packet counts, and timing from
+// the synthetic call are transferred to the real call, and the synthetic call is removed.
+func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
+	if syntheticCallID == "" || realCallID == "" || syntheticCallID == realCallID {
+		return
+	}
+
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+
+	syntheticCall, exists := ca.calls[syntheticCallID]
+	if !exists {
+		logger.Debug("Synthetic call not found for merge",
+			"synthetic_call_id", syntheticCallID,
+			"real_call_id", realCallID)
+		return
+	}
+
+	// Get or create the real call
+	realCall, realExists := ca.calls[realCallID]
+	if !realExists {
+		// Real call doesn't exist yet - this shouldn't happen normally
+		// since processSIPPacket is called after merge, but handle it gracefully
+		logger.Debug("Real call not found during merge, synthetic data will be lost",
+			"synthetic_call_id", syntheticCallID,
+			"real_call_id", realCallID)
+	} else {
+		// Merge data from synthetic to real call
+		// Use earlier start time
+		if syntheticCall.StartTime.Before(realCall.StartTime) {
+			realCall.StartTime = syntheticCall.StartTime
+		}
+
+		// Transfer RTP stats if the real call doesn't have any yet
+		if realCall.RTPStats == nil && syntheticCall.RTPStats != nil {
+			realCall.RTPStats = syntheticCall.RTPStats
+		} else if realCall.RTPStats != nil && syntheticCall.RTPStats != nil {
+			// Merge stats - add packet counts
+			realCall.RTPStats.TotalPackets += syntheticCall.RTPStats.TotalPackets
+			realCall.RTPStats.LostPackets += syntheticCall.RTPStats.LostPackets
+			// Recalculate packet loss percentage
+			if realCall.RTPStats.TotalPackets > 0 {
+				realCall.RTPStats.PacketLoss = (float64(realCall.RTPStats.LostPackets) / float64(realCall.RTPStats.TotalPackets)) * 100.0
+			}
+			// Keep codec if real call doesn't have one
+			if realCall.RTPStats.Codec == "" || realCall.RTPStats.Codec == "Unknown" {
+				realCall.RTPStats.Codec = syntheticCall.RTPStats.Codec
+			}
+		}
+
+		// Add packet count
+		realCall.PacketCount += syntheticCall.PacketCount
+
+		// Merge hunters list
+		for _, hunter := range syntheticCall.Hunters {
+			if !contains(realCall.Hunters, hunter) {
+				realCall.Hunters = append(realCall.Hunters, hunter)
+			}
+		}
+
+		logger.Info("Merged RTP-only call into SIP call",
+			"synthetic_call_id", syntheticCallID,
+			"real_call_id", realCallID,
+			"merged_packets", syntheticCall.PacketCount)
+	}
+
+	// Remove synthetic call from tracking
+	delete(ca.calls, syntheticCallID)
+	if elem, ok := ca.lruIndex[syntheticCallID]; ok {
+		ca.lruList.Remove(elem)
+		delete(ca.lruIndex, syntheticCallID)
+	}
 }
 
 // CleanupEndedCalls removes ended calls older than the specified duration

@@ -3,10 +3,14 @@
 package tui
 
 import (
+	"container/list"
 	"fmt"
 	"strings"
 	"sync"
 )
+
+// DefaultMaxTrackedCalls is the default maximum number of calls to track
+const DefaultMaxTrackedCalls = 5000
 
 // CallPartyInfo stores From/To information for a call
 type CallPartyInfo struct {
@@ -15,7 +19,8 @@ type CallPartyInfo struct {
 }
 
 // CallTracker tracks RTP-to-CallID mappings for TUI capture modes (live and offline)
-// It parses SDP from SIP packets to extract RTP connection information
+// It parses SDP from SIP packets to extract RTP connection information.
+// Uses LRU eviction to prevent unbounded memory growth.
 type CallTracker struct {
 	// Map: IP:port -> CallID (simplified: just store media endpoint)
 	rtpEndpointToCallID map[string]string
@@ -23,33 +28,136 @@ type CallTracker struct {
 	callIDToEndpoints map[string][]string
 	// Map: CallID -> From/To party info
 	callPartyInfo map[string]*CallPartyInfo
-	mu            sync.RWMutex
+	// LRU tracking by CallID
+	lruList  *list.List               // LRU list (front = most recently used)
+	lruIndex map[string]*list.Element // callID -> list element for O(1) lookup
+	maxCalls int                      // Maximum calls to keep
+	mu       sync.RWMutex
 }
 
 // NewCallTracker creates a new call tracker for RTP-to-CallID mapping
 func NewCallTracker() *CallTracker {
+	return NewCallTrackerWithCapacity(DefaultMaxTrackedCalls)
+}
+
+// NewCallTrackerWithCapacity creates a new call tracker with specified capacity
+func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
+	if maxCalls <= 0 {
+		maxCalls = DefaultMaxTrackedCalls
+	}
 	return &CallTracker{
 		rtpEndpointToCallID: make(map[string]string),
 		callIDToEndpoints:   make(map[string][]string),
 		callPartyInfo:       make(map[string]*CallPartyInfo),
+		lruList:             list.New(),
+		lruIndex:            make(map[string]*list.Element),
+		maxCalls:            maxCalls,
 	}
 }
 
-// RegisterMediaPorts registers RTP media ports from SIP detector metadata
-// This is the preferred method as it uses already-parsed SDP data from the detector
-func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) {
+// touchCallLocked moves a call to the front of the LRU list (most recently used).
+// If the call doesn't exist in the LRU, it adds it.
+// Must be called with mu held.
+func (t *CallTracker) touchCallLocked(callID string) {
+	if elem, ok := t.lruIndex[callID]; ok {
+		// Move existing call to front
+		t.lruList.MoveToFront(elem)
+	} else {
+		// Evict LRU (least recently used) if at capacity
+		if t.lruList.Len() >= t.maxCalls {
+			oldest := t.lruList.Back()
+			if oldest != nil {
+				oldestCallID := oldest.Value.(string)
+				t.evictCallLocked(oldestCallID)
+				t.lruList.Remove(oldest)
+				delete(t.lruIndex, oldestCallID)
+			}
+		}
+		// Add new call to front
+		elem := t.lruList.PushFront(callID)
+		t.lruIndex[callID] = elem
+	}
+}
+
+// evictCallLocked removes all data associated with a call.
+// Must be called with mu held.
+func (t *CallTracker) evictCallLocked(callID string) {
+	// Remove all endpoints for this call
+	endpoints := t.callIDToEndpoints[callID]
+	for _, endpoint := range endpoints {
+		delete(t.rtpEndpointToCallID, endpoint)
+	}
+	delete(t.callIDToEndpoints, callID)
+	delete(t.callPartyInfo, callID)
+}
+
+// RegisterMediaPorts registers RTP media ports from SIP detector metadata.
+// This is the preferred method as it uses already-parsed SDP data from the detector.
+// Returns a synthetic CallID (rtp-*) if the endpoint was previously registered for an
+// RTP-only call, allowing the caller to merge the calls.
+func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) (syntheticCallID string) {
 	if callID == "" || len(ports) == 0 {
+		return ""
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Check if any endpoint already has a synthetic (RTP-only) CallID
+	for _, port := range ports {
+		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
+		if existingCallID, ok := t.rtpEndpointToCallID[endpoint]; ok {
+			if strings.HasPrefix(existingCallID, "rtp-") && syntheticCallID == "" {
+				syntheticCallID = existingCallID
+			}
+		}
+	}
+
+	// If we found a synthetic call, clean up its endpoint mappings
+	// (they will be re-registered under the real CallID)
+	if syntheticCallID != "" {
+		t.evictCallLocked(syntheticCallID)
+		// Also remove from LRU
+		if elem, ok := t.lruIndex[syntheticCallID]; ok {
+			t.lruList.Remove(elem)
+			delete(t.lruIndex, syntheticCallID)
+		}
+	}
+
+	// Touch the call in LRU (adds if new, evicts oldest if at capacity)
+	t.touchCallLocked(callID)
+
+	// Register endpoints for the real CallID
+	for _, port := range ports {
+		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
+		t.rtpEndpointToCallID[endpoint] = callID
+		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
+	}
+
+	return syntheticCallID
+}
+
+// RegisterRTPOnlyEndpoints registers RTP endpoints for an RTP-only (synthetic) call.
+// This allows the endpoint to be matched when SIP arrives later.
+func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, dstIP, dstPort string) {
+	if syntheticCallID == "" || !strings.HasPrefix(syntheticCallID, "rtp-") {
 		return
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	for _, port := range ports {
-		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
-		t.rtpEndpointToCallID[endpoint] = callID
-		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
-	}
+	// Touch the call in LRU
+	t.touchCallLocked(syntheticCallID)
+
+	// Register both source and destination endpoints
+	// SDP typically specifies the destination port (where to send RTP)
+	srcEndpoint := fmt.Sprintf("%s:%s", srcIP, srcPort)
+	dstEndpoint := fmt.Sprintf("%s:%s", dstIP, dstPort)
+
+	t.rtpEndpointToCallID[srcEndpoint] = syntheticCallID
+	t.rtpEndpointToCallID[dstEndpoint] = syntheticCallID
+	t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], srcEndpoint, dstEndpoint)
 }
 
 // RegisterCallPartyInfo stores From/To information for a call
@@ -60,6 +168,9 @@ func (t *CallTracker) RegisterCallPartyInfo(callID, from, to string) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Touch the call in LRU (adds if new, evicts oldest if at capacity)
+	t.touchCallLocked(callID)
 
 	// Only store if we don't have info yet, or update if new info is better
 	existing := t.callPartyInfo[callID]
@@ -110,6 +221,9 @@ func (t *CallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload string) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	// Touch the call in LRU (adds if new, evicts oldest if at capacity)
+	t.touchCallLocked(callID)
 
 	// Determine the RTP endpoint IP from SDP
 	// The c= line in SDP specifies where RTP should be sent
@@ -192,6 +306,13 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 	return ""
 }
 
+// GetTrackedCallCount returns the number of tracked calls
+func (t *CallTracker) GetTrackedCallCount() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.lruList.Len()
+}
+
 // Clear removes all tracked mappings
 func (t *CallTracker) Clear() {
 	t.mu.Lock()
@@ -200,6 +321,8 @@ func (t *CallTracker) Clear() {
 	t.rtpEndpointToCallID = make(map[string]string)
 	t.callIDToEndpoints = make(map[string][]string)
 	t.callPartyInfo = make(map[string]*CallPartyInfo)
+	t.lruList = list.New()
+	t.lruIndex = make(map[string]*list.Element)
 }
 
 // extractSDPBody extracts the SDP body from a SIP message

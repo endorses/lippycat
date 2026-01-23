@@ -756,7 +756,11 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 				if mediaIP, ok := result.Metadata["media_ip"].(string); ok && mediaIP != "" {
 					rtpIP = mediaIP
 				}
-				tracker.RegisterMediaPorts(display.VoIPData.CallID, rtpIP, mediaPorts)
+				// RegisterMediaPorts returns a synthetic CallID if the endpoint was
+				// previously registered for an RTP-only call (enables call merging)
+				if syntheticCallID := tracker.RegisterMediaPorts(display.VoIPData.CallID, rtpIP, mediaPorts); syntheticCallID != "" {
+					display.VoIPData.MergeFromCallID = syntheticCallID
+				}
 			}
 			// Store From/To info for RTP-created calls to inherit
 			if display.VoIPData.From != "" || display.VoIPData.To != "" {
@@ -780,6 +784,23 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 			callID := tracker.GetCallIDForRTPPacket(display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
 			if callID != "" {
 				display.VoIPData.CallID = callID
+			}
+		}
+
+		// If no CallID from SIP, generate synthetic CallID for RTP-only tracking
+		// This allows RTP streams to appear in call list even without SIP signaling
+		if display.VoIPData != nil && display.VoIPData.CallID == "" && display.VoIPData.SSRC != 0 {
+			// Generate synthetic CallID from SSRC
+			display.VoIPData.CallID = fmt.Sprintf("rtp-%08x", display.VoIPData.SSRC)
+			// Use IP:port for From/To since we don't have SIP headers
+			display.VoIPData.From = fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort)
+			display.VoIPData.To = fmt.Sprintf("%s:%s", display.DstIP, display.DstPort)
+			// Mark as RTP-only by setting a special method indicator
+			display.VoIPData.Method = "RTP-ONLY"
+
+			// Register endpoints so SIP can find and merge this call later
+			if tracker := GetCallTracker(); tracker != nil {
+				tracker.RegisterRTPOnlyEndpoints(display.VoIPData.CallID, display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
 			}
 		}
 

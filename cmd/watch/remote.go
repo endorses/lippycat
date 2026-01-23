@@ -70,9 +70,16 @@ func runRemote(cmd *cobra.Command, args []string) {
 		bufferSize = configBufferSize
 	}
 
+	// Load max calls from config, use flag value as fallback
+	configMaxCalls := viper.GetInt("tui.max_calls")
+	if configMaxCalls > 0 {
+		maxCalls = configMaxCalls
+	}
+
 	// Create TUI model for remote monitoring mode
 	model := tui.NewModel(
 		bufferSize,
+		maxCalls,
 		"",              // interfaceName - not used for remote mode
 		"",              // bpfFilter - not used for remote mode
 		nil,             // pcapFiles - not used for remote mode

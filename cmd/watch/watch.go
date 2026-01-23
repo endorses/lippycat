@@ -36,6 +36,7 @@ Examples:
 // Shared flags across all watch modes
 var (
 	bufferSize int
+	maxCalls   int
 
 	// TLS flags (TLS is enabled by default unless --insecure is set)
 	insecureAllowed   bool
@@ -54,6 +55,7 @@ func init() {
 
 	// Shared flags (inherited by subcommands)
 	WatchCmd.PersistentFlags().IntVar(&bufferSize, "buffer-size", 10000, "maximum number of packets to keep in memory")
+	WatchCmd.PersistentFlags().IntVar(&maxCalls, "max-calls", 5000, "maximum number of VoIP calls to keep in memory")
 
 	// TLS configuration (enabled by default unless --insecure)
 	WatchCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "allow insecure connections without TLS (testing only)")
@@ -64,6 +66,7 @@ func init() {
 	WatchCmd.PersistentFlags().StringVar(&tlsServerOverride, "tls-server-name", "", "override server name for TLS verification")
 
 	_ = viper.BindPFlag("tui.buffer_size", WatchCmd.PersistentFlags().Lookup("buffer-size"))
+	_ = viper.BindPFlag("tui.max_calls", WatchCmd.PersistentFlags().Lookup("max-calls"))
 
 	// Bind TLS flags to viper for config file support
 	_ = viper.BindPFlag("tui.tls.ca_file", WatchCmd.PersistentFlags().Lookup("tls-ca"))

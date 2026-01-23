@@ -54,11 +54,18 @@ func runLive(cmd *cobra.Command, args []string) {
 		bufferSize = configBufferSize
 	}
 
+	// Load max calls from config, use flag value as fallback
+	configMaxCalls := viper.GetInt("tui.max_calls")
+	if configMaxCalls > 0 {
+		maxCalls = configMaxCalls
+	}
+
 	// Create TUI model for live capture mode
 	// Live mode: no pcapFiles, not remote, no nodesFile
 	// Pass insecureAllowed so TLS settings work if user switches to remote mode in TUI
 	model := tui.NewModel(
 		bufferSize,
+		maxCalls,
 		liveInterfaces,
 		liveFilter,
 		nil, // pcapFiles - nil for live mode

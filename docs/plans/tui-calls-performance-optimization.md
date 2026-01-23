@@ -472,3 +472,43 @@ This demonstrates that under buffer pressure, SIP packets are preserved while re
   - Updated accounting tests for dual-channel drops
 - `internal/pkg/capture/init_test.go`
   - Fixed race condition in shutdown test
+
+### Issue 5: Filtered calls become unsorted when StartTime changes (Fixed)
+
+**Problem:** When a call's StartTime changes during an update (e.g., RTP-only call merges with SIP call in `voip.CallAggregator`), the filtered call list becomes unsorted. The binary search insert (Issue 1 fix) only worked for NEW calls, but existing calls were updated in-place without re-sorting.
+
+**Root cause:** In `updateFilteredCallLocked()`, when a call already existed in the filtered list:
+```go
+if exists {
+    // Update existing entry in place
+    cs.filteredCalls[existingIdx] = call
+    // Note: StartTime shouldn't change for existing calls, so no re-sort needed  <-- WRONG
+}
+```
+
+The assumption "StartTime shouldn't change" was incorrect. StartTime CAN change during:
+1. RTP-only to SIP merge (earlier StartTime from synthetic call is used)
+2. Other call correlation/merge scenarios
+
+**Solution:** When updating an existing call, compare the old and new StartTime. If they differ, remove the call from its current position and re-insert at the correct sorted position:
+```go
+if exists {
+    oldCall := cs.filteredCalls[existingIdx]
+    if !oldCall.StartTime.Equal(call.StartTime) {
+        // StartTime changed - remove and re-insert at correct position
+        cs.removeFromFilteredLocked(call.CallID)
+        insertIdx := cs.findInsertPosition(call)
+        cs.insertAtPosition(call, insertIdx)
+    } else {
+        // StartTime unchanged, safe to update in place
+        cs.filteredCalls[existingIdx] = call
+    }
+}
+```
+
+**Files modified:**
+- `internal/pkg/tui/store/call_store.go`
+  - `updateFilteredCallLocked()`: Added StartTime change detection and re-sort logic
+- `internal/pkg/tui/store/call_store_test.go`
+  - Added `TestCallStore_GetFilteredCalls_StartTimeChange`
+  - Added `TestCallStore_GetFilteredCalls_StartTimeChangeMiddle`

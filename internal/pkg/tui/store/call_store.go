@@ -272,9 +272,18 @@ func (cs *CallStore) updateFilteredCallLocked(call components.Call) {
 
 	if matches {
 		if exists {
-			// Update existing entry in place
-			cs.filteredCalls[existingIdx] = call
-			// Note: StartTime shouldn't change for existing calls, so no re-sort needed
+			// Check if StartTime changed - if so, we need to re-sort
+			oldCall := cs.filteredCalls[existingIdx]
+			if !oldCall.StartTime.Equal(call.StartTime) {
+				// StartTime changed (e.g., during RTP-only to SIP merge)
+				// Remove from old position and re-insert at correct position
+				cs.removeFromFilteredLocked(call.CallID)
+				insertIdx := cs.findInsertPosition(call)
+				cs.insertAtPosition(call, insertIdx)
+			} else {
+				// StartTime unchanged, safe to update in place
+				cs.filteredCalls[existingIdx] = call
+			}
 		} else {
 			// Add new matching call using binary search sorted insert
 			// This maintains chronological order immediately, no lazy sort needed

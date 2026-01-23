@@ -558,3 +558,66 @@ func TestCallStore_GetCallsInOrder_OutOfOrderAddition(t *testing.T) {
 	assert.Equal(t, "call-2", calls[2].CallID)
 	assert.Equal(t, "call-3", calls[3].CallID)
 }
+
+func TestCallStore_GetFilteredCalls_StartTimeChange(t *testing.T) {
+	// This test verifies that when a call's StartTime changes (e.g., during
+	// RTP-only to SIP merge), the filtered list is re-sorted correctly
+	store := NewCallStore(100)
+
+	baseTime := time.Now()
+
+	// Add calls in chronological order
+	store.AddOrUpdateCall(makeCall("call-1", baseTime.Add(1*time.Second)))
+	store.AddOrUpdateCall(makeCall("call-2", baseTime.Add(2*time.Second)))
+	store.AddOrUpdateCall(makeCall("call-3", baseTime.Add(3*time.Second)))
+
+	// Verify initial order in filtered calls
+	calls := store.GetFilteredCalls()
+	require.Len(t, calls, 3)
+	assert.Equal(t, "call-1", calls[0].CallID)
+	assert.Equal(t, "call-2", calls[1].CallID)
+	assert.Equal(t, "call-3", calls[2].CallID)
+
+	// Now update call-3's StartTime to be EARLIER than call-1
+	// This simulates the RTP-only to SIP merge scenario where StartTime changes
+	updatedCall := makeCall("call-3", baseTime) // Now the earliest!
+	store.AddOrUpdateCall(updatedCall)
+
+	// The filtered list should be re-sorted: call-3 should now be first
+	calls = store.GetFilteredCalls()
+	require.Len(t, calls, 3)
+	assert.Equal(t, "call-3", calls[0].CallID, "call-3 should now be first (StartTime changed to earliest)")
+	assert.Equal(t, "call-1", calls[1].CallID)
+	assert.Equal(t, "call-2", calls[2].CallID)
+}
+
+func TestCallStore_GetFilteredCalls_StartTimeChangeMiddle(t *testing.T) {
+	// Test StartTime change that moves a call to the middle of the list
+	store := NewCallStore(100)
+
+	baseTime := time.Now()
+
+	// Add calls
+	store.AddOrUpdateCall(makeCall("call-1", baseTime.Add(1*time.Second)))
+	store.AddOrUpdateCall(makeCall("call-2", baseTime.Add(2*time.Second)))
+	store.AddOrUpdateCall(makeCall("call-3", baseTime.Add(3*time.Second)))
+	store.AddOrUpdateCall(makeCall("call-4", baseTime.Add(4*time.Second)))
+
+	// Verify initial order
+	calls := store.GetFilteredCalls()
+	require.Len(t, calls, 4)
+	assert.Equal(t, "call-1", calls[0].CallID)
+	assert.Equal(t, "call-4", calls[3].CallID)
+
+	// Update call-4's StartTime to be between call-1 and call-2
+	updatedCall := makeCall("call-4", baseTime.Add(1500*time.Millisecond))
+	store.AddOrUpdateCall(updatedCall)
+
+	// call-4 should now be at index 1 (between call-1 and call-2)
+	calls = store.GetFilteredCalls()
+	require.Len(t, calls, 4)
+	assert.Equal(t, "call-1", calls[0].CallID)
+	assert.Equal(t, "call-4", calls[1].CallID, "call-4 should be at index 1 after StartTime change")
+	assert.Equal(t, "call-2", calls[2].CallID)
+	assert.Equal(t, "call-3", calls[3].CallID)
+}

@@ -71,21 +71,21 @@
 ## Phase 4: CallStore Filtering
 
 ### 4.1 Add Filter Support to CallStore (`internal/pkg/tui/store/call_store.go`)
-- [ ] Add `FilterChain *filters.FilterChain`
-- [ ] Add `filteredCalls []components.Call`
-- [ ] Add `matchedCalls int64`
+- [x] Add `FilterChain *filters.FilterChain`
+- [x] Add `filteredCalls []components.Call`
+- [x] Add `matchedCalls int64`
 
 ### 4.2 Filter Methods
-- [ ] `AddFilter(filter filters.Filter)` - add and reapply to existing calls
-- [ ] `RemoveLastFilter() bool`
-- [ ] `ClearFilter()`
-- [ ] `HasFilter() bool`
-- [ ] `GetFilteredCalls() []components.Call`
-- [ ] `GetFilteredCallCount() int`
+- [x] `AddFilter(filter filters.Filter)` - add and reapply to existing calls
+- [x] `RemoveLastFilter() bool`
+- [x] `ClearFilter()`
+- [x] `HasFilter() bool`
+- [x] `GetFilteredCalls() []components.Call`
+- [x] `GetFilteredCallCount() int`
 
 ### 4.3 Update AddOrUpdateCall
-- [ ] Apply filter on new/updated calls
-- [ ] Update filtered calls list
+- [x] Apply filter on new/updated calls
+- [x] Update filtered calls list
 
 ---
 

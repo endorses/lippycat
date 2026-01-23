@@ -53,18 +53,18 @@
 ## Phase 3: New Filter Types
 
 ### 3.1 CallStateFilter (`internal/pkg/tui/filters/call_state.go`)
-- [ ] Match calls by state: `state:active`, `state:ringing,ended`
-- [ ] Case-insensitive matching
-- [ ] `SupportedRecordTypes() []string{"call"}`
+- [x] Match calls by state: `state:active`, `state:ringing,ended`
+- [x] Case-insensitive matching
+- [x] `SupportedRecordTypes() []string{"call"}`
 
 ### 3.2 NumericComparisonFilter (`internal/pkg/tui/filters/numeric.go`)
-- [ ] Operators: `>`, `<`, `>=`, `<=`, `=`
-- [ ] Fields: duration, mos, jitter, loss, packets
-- [ ] Duration parsing: `30s`, `5m`, `1h`, `1h30m`
+- [x] Operators: `>`, `<`, `>=`, `<=`, `=`
+- [x] Fields: duration, mos, jitter, loss, packets
+- [x] Duration parsing: `30s`, `5m`, `1h`, `1h30m`
 
 ### 3.3 Tests
-- [ ] `call_state_test.go`
-- [ ] `numeric_test.go`
+- [x] `call_state_test.go`
+- [x] `numeric_test.go`
 
 ---
 

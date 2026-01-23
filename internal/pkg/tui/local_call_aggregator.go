@@ -114,8 +114,8 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 	if strings.HasPrefix(call.CallID, "rtp-") {
 		// RTP-only call - determine state based on packet activity
 		if !call.LastPacketTime.IsZero() && time.Since(call.LastPacketTime) < rtpStalenessThreshold {
-			// Recent RTP activity - show as active
-			state = "ACTIVE"
+			// Recent RTP activity - show as RTP-only (distinct from SIP-based Active)
+			state = "RTP-ONLY"
 		} else {
 			// No recent RTP - show as ended
 			state = "ENDED"

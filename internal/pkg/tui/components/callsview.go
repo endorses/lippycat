@@ -58,6 +58,7 @@ const (
 	CallStateActive
 	CallStateEnded
 	CallStateFailed
+	CallStateRTPOnly // RTP stream detected without SIP signaling
 )
 
 func (cs CallState) String() string {
@@ -70,6 +71,8 @@ func (cs CallState) String() string {
 		return "Ended"
 	case CallStateFailed:
 		return "Failed"
+	case CallStateRTPOnly:
+		return "RTP-only"
 	default:
 		return "Unknown"
 	}
@@ -123,7 +126,7 @@ func (c Call) GetNumericField(name string) float64 {
 	switch name {
 	case "duration":
 		// Return duration in seconds
-		if c.State == CallStateActive {
+		if c.State == CallStateActive || c.State == CallStateRTPOnly {
 			return time.Since(c.StartTime).Seconds()
 		}
 		return c.Duration.Seconds()
@@ -772,7 +775,7 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 
 		// Calculate duration
 		duration := call.Duration
-		if call.State == CallStateActive {
+		if call.State == CallStateActive || call.State == CallStateRTPOnly {
 			duration = time.Since(call.StartTime)
 		}
 
@@ -814,10 +817,13 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 			content.WriteString(selectedStyle.Render(row))
 		} else {
 			// Color by state
+			// Colors match packet list: RTP=green, SIP=blue
 			style := rowStyle
 			switch call.State {
 			case CallStateActive:
-				style = style.Foreground(cv.theme.SuccessColor)
+				style = style.Foreground(cv.theme.InfoColor) // Blue - matches SIP packets
+			case CallStateRTPOnly:
+				style = style.Foreground(cv.theme.SuccessColor) // Green - matches RTP packets
 			case CallStateFailed:
 				style = style.Foreground(cv.theme.ErrorColor)
 			case CallStateEnded:
@@ -927,7 +933,7 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 
 	// Calculate duration
 	duration := selectedCall.Duration
-	if selectedCall.State == CallStateActive {
+	if selectedCall.State == CallStateActive || selectedCall.State == CallStateRTPOnly {
 		duration = time.Since(selectedCall.StartTime)
 	}
 	content.WriteString(fmt.Sprintf("Duration: %s\n", nodesview.FormatDuration(int64(duration))))

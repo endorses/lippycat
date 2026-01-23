@@ -489,6 +489,8 @@ func mapCallState(state string) components.CallState {
 		return components.CallStateEnded
 	case "FAILED":
 		return components.CallStateFailed
+	case "RTP-ONLY":
+		return components.CallStateRTPOnly
 	default:
 		// Log unexpected state values for debugging
 		if state != "" {

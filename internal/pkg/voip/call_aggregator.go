@@ -242,6 +242,30 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 			"from", sip.FromUser,
 			"to", sip.ToUser,
 			"hunter", hunterID)
+	} else {
+		// Call already exists (may have been created from RTP)
+		// Update From/To if they're empty and we have SIP data
+		from := sip.FromUri
+		if from == "" {
+			from = sip.FromUser
+		}
+		to := sip.ToUri
+		if to == "" {
+			to = sip.ToUser
+		}
+
+		if call.From == "" && from != "" {
+			call.From = from
+			logger.Debug("Updated call From from SIP packet",
+				"call_id", sip.CallId,
+				"from", from)
+		}
+		if call.To == "" && to != "" {
+			call.To = to
+			logger.Debug("Updated call To from SIP packet",
+				"call_id", sip.CallId,
+				"to", to)
+		}
 	}
 
 	// Add hunter if not already tracking

@@ -21,27 +21,142 @@ type PacketInfo struct {
 	Interface string // Name of the interface where packet was captured
 }
 
+// SIP method prefixes for fast detection (no allocations)
+var (
+	sipMethodINVITE   = []byte("INVITE")
+	sipMethodREGISTER = []byte("REGISTER")
+	sipMethodOPTIONS  = []byte("OPTIONS")
+	sipMethodACK      = []byte("ACK")
+	sipMethodBYE      = []byte("BYE")
+	sipMethodCANCEL   = []byte("CANCEL")
+	sipResponse       = []byte("SIP/2.0")
+)
+
+// Default SIP priority buffer size (SIP is low volume, doesn't need large buffer)
+const DefaultSIPBufferSize = 1000
+
 type PacketBuffer struct {
 	ch         chan PacketInfo
+	sipCh      chan PacketInfo // High-priority channel for SIP packets
+	mergedCh   chan PacketInfo // Merged output channel (prioritizes SIP)
 	ctx        context.Context
 	cancel     context.CancelFunc
 	dropped    int64
+	sipDropped int64 // Separate counter for dropped SIP packets (should be rare)
 	bufferSize int
 	closed     int32          // atomic flag: 0 = open, 1 = closed
 	sendersMu  sync.Mutex     // protects closed-check-and-add sequence to prevent race with Wait()
 	sendersWg  sync.WaitGroup // tracks active Send() operations to prevent race on channel close
+	mergerWg   sync.WaitGroup // tracks merger goroutine
 	pauseFn    func() bool    // optional: if set and returns true, Send skips packet (for TUI pause)
 	pauseMu    sync.RWMutex   // protects pauseFn
 }
 
 func NewPacketBuffer(ctx context.Context, bufferSize int) *PacketBuffer {
 	ctx, cancel := context.WithCancel(ctx)
-	return &PacketBuffer{
+	pb := &PacketBuffer{
 		ch:         make(chan PacketInfo, bufferSize),
+		sipCh:      make(chan PacketInfo, DefaultSIPBufferSize),
+		mergedCh:   make(chan PacketInfo, bufferSize), // Same size as main for smooth flow
 		ctx:        ctx,
 		cancel:     cancel,
 		bufferSize: bufferSize,
 		closed:     0,
+	}
+
+	// Start merger goroutine that prioritizes SIP packets
+	pb.mergerWg.Add(1)
+	go pb.mergeChannels()
+
+	return pb
+}
+
+// mergeChannels reads from both sipCh and ch, prioritizing SIP packets.
+// This ensures SIP packets are delivered first even when the main buffer is full.
+func (pb *PacketBuffer) mergeChannels() {
+	defer pb.mergerWg.Done()
+	defer close(pb.mergedCh)
+
+	for {
+		// Priority select: always check SIP channel first
+		select {
+		case pkt, ok := <-pb.sipCh:
+			if !ok {
+				// SIP channel closed, drain main channel
+				pb.drainMainChannel()
+				return
+			}
+			select {
+			case pb.mergedCh <- pkt:
+			case <-pb.ctx.Done():
+				return
+			}
+		default:
+			// No SIP packet available, check both channels
+			select {
+			case pkt, ok := <-pb.sipCh:
+				if !ok {
+					pb.drainMainChannel()
+					return
+				}
+				select {
+				case pb.mergedCh <- pkt:
+				case <-pb.ctx.Done():
+					return
+				}
+			case pkt, ok := <-pb.ch:
+				if !ok {
+					// Main channel closed, drain SIP channel
+					pb.drainSIPChannel()
+					return
+				}
+				select {
+				case pb.mergedCh <- pkt:
+				case <-pb.ctx.Done():
+					return
+				}
+			case <-pb.ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// drainMainChannel drains remaining packets from main channel after SIP channel closes
+func (pb *PacketBuffer) drainMainChannel() {
+	for {
+		select {
+		case pkt, ok := <-pb.ch:
+			if !ok {
+				return
+			}
+			select {
+			case pb.mergedCh <- pkt:
+			case <-pb.ctx.Done():
+				return
+			}
+		case <-pb.ctx.Done():
+			return
+		}
+	}
+}
+
+// drainSIPChannel drains remaining packets from SIP channel after main channel closes
+func (pb *PacketBuffer) drainSIPChannel() {
+	for {
+		select {
+		case pkt, ok := <-pb.sipCh:
+			if !ok {
+				return
+			}
+			select {
+			case pb.mergedCh <- pkt:
+			case <-pb.ctx.Done():
+				return
+			}
+		case <-pb.ctx.Done():
+			return
+		}
 	}
 }
 
@@ -87,7 +202,37 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	default:
 	}
 
-	// Now attempt send with context check
+	// Fast SIP detection - route SIP to priority channel
+	isSIP := pb.isSIPPacket(pkt.Packet)
+
+	if isSIP {
+		// Try SIP priority channel first
+		select {
+		case pb.sipCh <- pkt:
+			return true
+		case <-pb.ctx.Done():
+			return false
+		default:
+			// SIP channel full - this is bad but rare
+			// Try main channel as fallback
+			select {
+			case pb.ch <- pkt:
+				return true
+			case <-pb.ctx.Done():
+				return false
+			default:
+				// Both channels full - drop SIP packet (very rare)
+				dropped := atomic.AddInt64(&pb.sipDropped, 1)
+				if dropped%100 == 0 {
+					logger.Warn("SIP packets dropped due to buffer overflow (critical)",
+						"sip_dropped", dropped)
+				}
+				return false
+			}
+		}
+	}
+
+	// Regular packet - send to main channel
 	select {
 	case pb.ch <- pkt:
 		return true
@@ -104,18 +249,110 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	}
 }
 
+// isSIPPacket performs fast SIP detection on a packet.
+// Checks for common SIP methods and responses in TCP/UDP payload.
+func (pb *PacketBuffer) isSIPPacket(pkt gopacket.Packet) bool {
+	if pkt == nil {
+		return false
+	}
+
+	transLayer := pkt.TransportLayer()
+	if transLayer == nil {
+		return false
+	}
+
+	var payload []byte
+	switch trans := transLayer.(type) {
+	case *layers.TCP:
+		payload = trans.LayerPayload()
+	case *layers.UDP:
+		payload = trans.LayerPayload()
+	default:
+		return false
+	}
+
+	return isSIPBytes(payload)
+}
+
+// isSIPBytes performs fast SIP detection using byte comparison.
+// Checks for common SIP methods (INVITE, REGISTER, etc.) and responses (SIP/2.0).
+func isSIPBytes(payload []byte) bool {
+	if len(payload) < 3 {
+		return false
+	}
+
+	// Check for common SIP methods and responses
+	if len(payload) >= len(sipMethodINVITE) && bytesEqual(payload[:len(sipMethodINVITE)], sipMethodINVITE) {
+		return true
+	}
+	if len(payload) >= len(sipMethodREGISTER) && bytesEqual(payload[:len(sipMethodREGISTER)], sipMethodREGISTER) {
+		return true
+	}
+	if len(payload) >= len(sipMethodOPTIONS) && bytesEqual(payload[:len(sipMethodOPTIONS)], sipMethodOPTIONS) {
+		return true
+	}
+	if len(payload) >= len(sipResponse) && bytesEqual(payload[:len(sipResponse)], sipResponse) {
+		return true
+	}
+	if len(payload) >= len(sipMethodACK) && bytesEqual(payload[:len(sipMethodACK)], sipMethodACK) {
+		return true
+	}
+	if len(payload) >= len(sipMethodBYE) && bytesEqual(payload[:len(sipMethodBYE)], sipMethodBYE) {
+		return true
+	}
+	if len(payload) >= len(sipMethodCANCEL) && bytesEqual(payload[:len(sipMethodCANCEL)], sipMethodCANCEL) {
+		return true
+	}
+
+	return false
+}
+
+// bytesEqual compares two byte slices for equality.
+// This is a simple implementation; for high performance, SIMD could be used.
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func (pb *PacketBuffer) Receive() <-chan PacketInfo {
-	return pb.ch
+	return pb.mergedCh
 }
 
-// Len returns the current number of buffered packets
+// Len returns the current number of buffered packets (all channels including merged output)
 func (pb *PacketBuffer) Len() int {
-	return len(pb.ch)
+	return len(pb.ch) + len(pb.sipCh) + len(pb.mergedCh)
 }
 
-// Cap returns the capacity of the packet buffer
+// Cap returns the capacity of the packet buffer (main channel only)
 func (pb *PacketBuffer) Cap() int {
 	return cap(pb.ch)
+}
+
+// SIPLen returns the current number of buffered SIP packets
+func (pb *PacketBuffer) SIPLen() int {
+	return len(pb.sipCh)
+}
+
+// SIPCap returns the capacity of the SIP priority buffer
+func (pb *PacketBuffer) SIPCap() int {
+	return cap(pb.sipCh)
+}
+
+// GetSIPDropped returns the number of dropped SIP packets (should be rare/zero)
+func (pb *PacketBuffer) GetSIPDropped() int64 {
+	return atomic.LoadInt64(&pb.sipDropped)
+}
+
+// GetDropped returns the number of dropped regular packets
+func (pb *PacketBuffer) GetDropped() int64 {
+	return atomic.LoadInt64(&pb.dropped)
 }
 
 func (pb *PacketBuffer) Close() {
@@ -135,10 +372,20 @@ func (pb *PacketBuffer) Close() {
 	// This prevents closing the channel while senders are still active
 	pb.sendersWg.Wait()
 
+	// Close both input channels (order matters: close sipCh first to drain priority packets)
+	close(pb.sipCh)
 	close(pb.ch)
-	if dropped := atomic.LoadInt64(&pb.dropped); dropped > 0 {
+
+	// Wait for merger goroutine to finish (it will close mergedCh)
+	pb.mergerWg.Wait()
+
+	// Log drop statistics
+	dropped := atomic.LoadInt64(&pb.dropped)
+	sipDropped := atomic.LoadInt64(&pb.sipDropped)
+	if dropped > 0 || sipDropped > 0 {
 		logger.Info("Packet buffer closed with drops",
-			"total_dropped", dropped)
+			"regular_dropped", dropped,
+			"sip_dropped", sipDropped)
 	}
 }
 

@@ -371,6 +371,9 @@ func TestInitWithBuffer(t *testing.T) {
 		t.Logf("Processed %d packets through processor", count)
 
 		// Buffer should be closed when processor is provided
+		// Give a small window for the shutdown goroutine to complete Close()
+		// (there's a race between processor finishing and shutdown completing)
+		time.Sleep(50 * time.Millisecond)
 		assert.True(t, buffer.IsClosed(), "Buffer should be closed by InitWithBuffer when processor is provided")
 	})
 

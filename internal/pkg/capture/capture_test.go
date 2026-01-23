@@ -189,17 +189,29 @@ func TestPacketBuffer_DropLogging(t *testing.T) {
 
 	pkt := createTestPacket()
 
-	// Fill the buffer first
-	buffer.Send(pkt)
-
-	// Now cause drops - every 1000th drop should be logged
-	// We'll cause enough drops to trigger logging
-	for i := 0; i < 1001; i++ {
-		buffer.Send(pkt) // These should fail and increment drop count
+	// Fill all buffers first (main + merged channel)
+	// The merger goroutine moves packets from ch to mergedCh, so we need to
+	// fill both to cause drops. With capacity 1+1=2 (ch + mergedCh),
+	// we need to wait for the merger to stabilize.
+	for i := 0; i < 10; i++ {
+		buffer.Send(pkt)
+		time.Sleep(time.Millisecond) // Let merger process
 	}
 
-	dropped := atomic.LoadInt64(&buffer.dropped)
-	assert.Equal(t, int64(1001), dropped, "Should have correct number of dropped packets")
+	// Now cause drops - the buffers should be full
+	// Send many packets to ensure we get at least 1000 drops for logging
+	sentCount := 0
+	for i := 0; i < 2000; i++ {
+		buffer.Send(pkt)
+		sentCount++
+	}
+
+	// Check that drops occurred (exact number depends on timing with merger goroutine)
+	dropped := buffer.GetDropped()
+	sipDropped := buffer.GetSIPDropped()
+	totalDropped := dropped + sipDropped
+
+	assert.Greater(t, totalDropped, int64(1000), "Should have at least 1000 dropped packets to trigger logging")
 }
 
 func TestPacketBuffer_HighThroughput(t *testing.T) {

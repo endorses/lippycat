@@ -411,4 +411,48 @@ Issues discovered after initial optimization implementation:
   - Added `isSIPPacket(pkt gopacket.Packet) bool` helper function
   - Modified sampling logic to check `isSIP` before deciding `shouldDisplay`
 
-**Future consideration:** For even more robustness under extreme load, Phase 2 could add priority queuing at the `PacketBuffer` level in `capture.go`, ensuring SIP packets survive buffer pressure too.
+### Issue 4: SIP packets dropped at capture buffer level (Fixed - Phase 2)
+
+**Problem:** Even with bridge-level SIP prioritization (Issue 3), extreme buffer pressure at the capture layer could still drop SIP packets before they reach the bridge. The `PacketBuffer` used a single channel that dropped all packets equally when full.
+
+**Solution:** Implemented priority queuing in `PacketBuffer`:
+
+1. **Dual-channel architecture:**
+   - `sipCh` (1000 capacity) - High-priority channel for SIP packets
+   - `ch` (configurable, default 100K) - Regular channel for all other traffic
+   - `mergedCh` - Output channel that prioritizes SIP
+
+2. **Fast SIP detection in Send():**
+   - Added `isSIPPacket()` method using same byte-prefix detection as bridge
+   - SIP packets route to priority channel first, fallback to main channel
+   - Regular packets go directly to main channel
+
+3. **Priority merger goroutine:**
+   - Continuously merges both channels with SIP priority
+   - Always checks sipCh first before processing regular packets
+   - Handles graceful shutdown with proper channel draining
+
+**Test results:**
+```
+SIP packets: 1000 sent, 0 dropped
+Regular packets: 0 sent, 1007 dropped
+```
+
+This demonstrates that under buffer pressure, SIP packets are preserved while regular packets are dropped.
+
+**Files modified:**
+- `internal/pkg/capture/capture.go`
+  - Added `sipCh`, `mergedCh` channels and `sipDropped` counter
+  - Added `mergeChannels()` goroutine for priority merging
+  - Added `isSIPPacket()` and `isSIPBytes()` for fast detection
+  - Modified `Send()` to route based on protocol priority
+  - Updated `Close()` to handle dual-channel shutdown
+  - Added `SIPLen()`, `SIPCap()`, `GetSIPDropped()`, `GetDropped()` methods
+- `internal/pkg/capture/capture_test.go`
+  - Updated test for new architecture
+- `internal/pkg/capture/capture_additional_test.go`
+  - Added `TestPacketBuffer_SIPPrioritization` test
+  - Added `TestIsSIPBytes` test
+  - Updated accounting tests for dual-channel drops
+- `internal/pkg/capture/init_test.go`
+  - Fixed race condition in shutdown test

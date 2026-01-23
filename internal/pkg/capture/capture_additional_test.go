@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 )
@@ -409,14 +411,20 @@ func TestPacketBuffer_HighPacketRate(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	receivedCount := received.Load()
-	dropped := atomic.LoadInt64(&buffer.dropped)
+	dropped := buffer.GetDropped()
+	sipDropped := buffer.GetSIPDropped()
+	totalDropped := dropped + sipDropped
 
 	rate := float64(sent) / duration.Seconds()
 	t.Logf("Sent %d packets in %v (%.0f packets/sec)", sent, duration, rate)
-	t.Logf("Received: %d, Dropped: %d", receivedCount, dropped)
+	t.Logf("Attempted: %d, Sent: %d, Received: %d, Dropped: %d (regular: %d, SIP: %d)",
+		targetPackets, sent, receivedCount, totalDropped, dropped, sipDropped)
 
-	// Verify accounting
-	assert.Equal(t, int64(sent), receivedCount+dropped, "Received + Dropped should equal Sent")
+	// Verify accounting:
+	// - sent + dropped = targetPackets (all attempts accounted for)
+	// - received = sent (all sent packets were received, since receiver is fast)
+	assert.Equal(t, int64(targetPackets), int64(sent)+totalDropped, "Sent + Dropped should equal total attempts")
+	assert.Equal(t, int64(sent), receivedCount, "Received should equal successfully sent")
 
 	// We should achieve reasonably high throughput
 	assert.Greater(t, rate, 10000.0, "Should achieve > 10k packets/sec")
@@ -480,4 +488,136 @@ func TestPacketBuffer_Send_RaceWithClose(t *testing.T) {
 	}
 
 	// If we get here without panic or race detector errors, test passes
+}
+
+// TestPacketBuffer_SIPPrioritization tests that SIP packets are prioritized over regular packets
+func TestPacketBuffer_SIPPrioritization(t *testing.T) {
+	ctx := context.Background()
+	// Very small buffer to force drops
+	buffer := NewPacketBuffer(ctx, 1)
+	defer buffer.Close()
+
+	// Create a SIP INVITE packet
+	sipPayload := []byte("INVITE sip:alice@example.com SIP/2.0\r\nVia: SIP/2.0/UDP test\r\n\r\n")
+	sipPkt := createTestPacketWithPayload(sipPayload)
+
+	// Create a regular packet (non-SIP)
+	regularPayload := []byte("This is regular data, not SIP")
+	regularPkt := createTestPacketWithPayload(regularPayload)
+
+	// Fill up the main buffer with regular packets
+	// The merger goroutine moves packets from ch to mergedCh
+	for i := 0; i < 10; i++ {
+		buffer.Send(regularPkt)
+		time.Sleep(time.Millisecond)
+	}
+
+	// Now send many more packets - SIP should have priority
+	sipSent := 0
+	regularSent := 0
+
+	// Send alternating SIP and regular packets
+	for i := 0; i < 1000; i++ {
+		if buffer.Send(sipPkt) {
+			sipSent++
+		}
+		if buffer.Send(regularPkt) {
+			regularSent++
+		}
+	}
+
+	// Check drops - SIP should have fewer drops than regular packets
+	// because SIP has its own priority channel (1000 capacity by default)
+	sipDropped := buffer.GetSIPDropped()
+	regularDropped := buffer.GetDropped()
+
+	t.Logf("SIP: sent=%d, dropped=%d", sipSent, sipDropped)
+	t.Logf("Regular: sent=%d, dropped=%d", regularSent, regularDropped)
+
+	// SIP drops should be very low (ideally zero) since SIP channel has 1000 capacity
+	assert.LessOrEqual(t, sipDropped, int64(10), "SIP drops should be minimal (priority channel)")
+	// Regular drops will be higher due to small buffer
+	assert.Greater(t, regularDropped, int64(0), "Some regular packets should be dropped")
+}
+
+// TestIsSIPBytes tests the SIP detection function
+func TestIsSIPBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  []byte
+		expected bool
+	}{
+		{"INVITE request", []byte("INVITE sip:alice@example.com SIP/2.0\r\n"), true},
+		{"REGISTER request", []byte("REGISTER sip:registrar.example.com SIP/2.0\r\n"), true},
+		{"OPTIONS request", []byte("OPTIONS sip:alice@example.com SIP/2.0\r\n"), true},
+		{"ACK request", []byte("ACK sip:alice@example.com SIP/2.0\r\n"), true},
+		{"BYE request", []byte("BYE sip:alice@example.com SIP/2.0\r\n"), true},
+		{"CANCEL request", []byte("CANCEL sip:alice@example.com SIP/2.0\r\n"), true},
+		{"SIP response", []byte("SIP/2.0 200 OK\r\n"), true},
+		{"HTTP request", []byte("GET /index.html HTTP/1.1\r\n"), false},
+		{"Random data", []byte("Hello World"), false},
+		{"Empty payload", []byte{}, false},
+		{"Short payload", []byte("AB"), false},
+		{"RTP packet", []byte{0x80, 0x00, 0x00, 0x01}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSIPBytes(tt.payload)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// createTestPacketWithPayload creates a test packet with a specific payload
+func createTestPacketWithPayload(payload []byte) PacketInfo {
+	// Build a simple UDP packet with the given payload
+	// Ethernet header (14 bytes) + IP header (20 bytes) + UDP header (8 bytes) + payload
+	ethernetHeader := []byte{
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x02, // Dst MAC
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // Src MAC
+		0x08, 0x00, // EtherType: IPv4
+	}
+
+	ipHeader := []byte{
+		0x45, 0x00, // Version, IHL, DSCP, ECN
+		0x00, 0x00, // Total length (will be set)
+		0x00, 0x00, // Identification
+		0x00, 0x00, // Flags, Fragment offset
+		0x40, 0x11, // TTL=64, Protocol=UDP
+		0x00, 0x00, // Header checksum (0 for simplicity)
+		192, 168, 1, 1, // Source IP
+		192, 168, 1, 2, // Dest IP
+	}
+
+	udpHeader := []byte{
+		0x13, 0xc4, // Source port (5060 - SIP)
+		0x13, 0xc4, // Dest port (5060 - SIP)
+		0x00, 0x00, // Length (will be set)
+		0x00, 0x00, // Checksum (0 for simplicity)
+	}
+
+	// Set lengths
+	udpLen := 8 + len(payload)
+	udpHeader[4] = byte(udpLen >> 8)
+	udpHeader[5] = byte(udpLen)
+
+	ipLen := 20 + udpLen
+	ipHeader[2] = byte(ipLen >> 8)
+	ipHeader[3] = byte(ipLen)
+
+	// Combine all parts
+	packetData := make([]byte, 0, 14+20+8+len(payload))
+	packetData = append(packetData, ethernetHeader...)
+	packetData = append(packetData, ipHeader...)
+	packetData = append(packetData, udpHeader...)
+	packetData = append(packetData, payload...)
+
+	// Parse with gopacket
+	packet := gopacket.NewPacket(packetData, layers.LayerTypeEthernet, gopacket.Default)
+
+	return PacketInfo{
+		LinkType: layers.LinkTypeEthernet,
+		Packet:   packet,
+	}
 }

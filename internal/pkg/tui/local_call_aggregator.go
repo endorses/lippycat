@@ -3,7 +3,6 @@
 package tui
 
 import (
-	"strings"
 	"sync"
 	"time"
 
@@ -111,7 +110,7 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 	// RTP-only calls don't have SIP signaling, so we detect activity based on
 	// whether we've received RTP packets recently
 	state := call.State.String()
-	if strings.HasPrefix(call.CallID, "rtp-") {
+	if call.State == voip.CallStateRTPOnly {
 		// RTP-only call - determine state based on packet activity
 		if !call.LastPacketTime.IsZero() && time.Since(call.LastPacketTime) < rtpStalenessThreshold {
 			// Recent RTP activity - show as RTP-only (distinct from SIP-based Active)

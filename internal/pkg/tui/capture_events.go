@@ -301,6 +301,8 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 			CallID:      call.CallID,
 			From:        call.From,
 			To:          call.To,
+			FromURI:     components.ExtractSIPURI(call.From), // Pre-parse for display
+			ToURI:       components.ExtractSIPURI(call.To),   // Pre-parse for display
 			State:       mapCallState(call.State),
 			StartTime:   call.StartTime,
 			EndTime:     call.EndTime,

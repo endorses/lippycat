@@ -16,11 +16,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
-// extractSIPURI extracts the SIP URI from a header value, removing display names and parameters
+// ExtractSIPURI extracts the SIP URI from a header value, removing display names and parameters
 // Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "sip:alicent@domain.com"
 // Example: "<sip:robb@example.org>;tag=456" -> "sip:robb@example.org"
 // Example: "sip:robb@example.org;tag=456" -> "sip:robb@example.org"
-func extractSIPURI(header string) string {
+func ExtractSIPURI(header string) string {
 	// Find the URI between < and > if present
 	start := strings.Index(header, "<")
 	if start != -1 {
@@ -83,6 +83,8 @@ type Call struct {
 	CallID      string
 	From        string
 	To          string
+	FromURI     string // Pre-parsed SIP URI for display (cached result of ExtractSIPURI(From))
+	ToURI       string // Pre-parsed SIP URI for display (cached result of ExtractSIPURI(To))
 	State       CallState
 	StartTime   time.Time
 	EndTime     time.Time
@@ -102,13 +104,28 @@ func (c Call) GetStringField(name string) string {
 	case "callid", "call_id":
 		return c.CallID
 	case "from":
-		return extractSIPURI(c.From)
+		// Use cached URI if available, otherwise parse
+		if c.FromURI != "" {
+			return c.FromURI
+		}
+		return ExtractSIPURI(c.From)
 	case "to":
-		return extractSIPURI(c.To)
+		// Use cached URI if available, otherwise parse
+		if c.ToURI != "" {
+			return c.ToURI
+		}
+		return ExtractSIPURI(c.To)
 	case "user":
 		// Search both from and to for user matching
-		fromURI := extractSIPURI(c.From)
-		toURI := extractSIPURI(c.To)
+		// Use cached URIs if available
+		fromURI := c.FromURI
+		if fromURI == "" {
+			fromURI = ExtractSIPURI(c.From)
+		}
+		toURI := c.ToURI
+		if toURI == "" {
+			toURI = ExtractSIPURI(c.To)
+		}
 		return fromURI + " " + toURI
 	case "state":
 		return c.State.String()
@@ -234,14 +251,7 @@ func (cv *CallsView) SetCalls(calls []Call) {
 		selectedCallID = cv.calls[cv.selected].CallID
 	}
 
-	// Sort calls: first by start timestamp, then by call ID
-	sort.Slice(calls, func(i, j int) bool {
-		if calls[i].StartTime.Equal(calls[j].StartTime) {
-			return calls[i].CallID < calls[j].CallID
-		}
-		return calls[i].StartTime.Before(calls[j].StartTime)
-	})
-
+	// Calls are pre-sorted by upstream (CallStore/CallAggregator) by StartTime then CallID
 	cv.calls = calls
 
 	// Try to maintain selection on the same call by ID
@@ -797,9 +807,15 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		// State string
 		state := call.State.String()
 
-		// Extract clean SIP URIs (remove display names and tag parameters)
-		fromURI := extractSIPURI(call.From)
-		toURI := extractSIPURI(call.To)
+		// Use cached SIP URIs if available, otherwise extract them
+		fromURI := call.FromURI
+		if fromURI == "" {
+			fromURI = ExtractSIPURI(call.From)
+		}
+		toURI := call.ToURI
+		if toURI == "" {
+			toURI = ExtractSIPURI(call.To)
+		}
 
 		row := fmt.Sprintf("%-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s %-*s",
 			callIDWidth, truncateCallsView(call.CallID, callIDWidth),
@@ -917,8 +933,17 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 	content.WriteString(titleStyle.Render("📞 Call Details"))
 	content.WriteString("\n")
 	content.WriteString(fmt.Sprintf("Call-ID: %s\n", selectedCall.CallID))
-	content.WriteString(fmt.Sprintf("From: %s\n", extractSIPURI(selectedCall.From)))
-	content.WriteString(fmt.Sprintf("To: %s\n", extractSIPURI(selectedCall.To)))
+	// Use cached URIs if available
+	fromURI := selectedCall.FromURI
+	if fromURI == "" {
+		fromURI = ExtractSIPURI(selectedCall.From)
+	}
+	toURI := selectedCall.ToURI
+	if toURI == "" {
+		toURI = ExtractSIPURI(selectedCall.To)
+	}
+	content.WriteString(fmt.Sprintf("From: %s\n", fromURI))
+	content.WriteString(fmt.Sprintf("To: %s\n", toURI))
 	content.WriteString(fmt.Sprintf("State: %s\n", selectedCall.State.String()))
 
 	// Show start time

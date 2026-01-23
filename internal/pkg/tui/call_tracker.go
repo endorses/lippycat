@@ -26,6 +26,8 @@ type CallTracker struct {
 	rtpEndpointToCallID map[string]string
 	// Map: CallID -> list of endpoints
 	callIDToEndpoints map[string][]string
+	// Map: IP -> set of CallIDs (for O(1) IP-based fallback lookup)
+	ipToCallIDs map[string]map[string]struct{}
 	// Map: CallID -> From/To party info
 	callPartyInfo map[string]*CallPartyInfo
 	// LRU tracking by CallID
@@ -48,6 +50,7 @@ func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 	return &CallTracker{
 		rtpEndpointToCallID: make(map[string]string),
 		callIDToEndpoints:   make(map[string][]string),
+		ipToCallIDs:         make(map[string]map[string]struct{}),
 		callPartyInfo:       make(map[string]*CallPartyInfo),
 		lruList:             list.New(),
 		lruIndex:            make(map[string]*list.Element),
@@ -82,13 +85,42 @@ func (t *CallTracker) touchCallLocked(callID string) {
 // evictCallLocked removes all data associated with a call.
 // Must be called with mu held.
 func (t *CallTracker) evictCallLocked(callID string) {
-	// Remove all endpoints for this call
+	// Remove all endpoints for this call and clean up IP index
 	endpoints := t.callIDToEndpoints[callID]
 	for _, endpoint := range endpoints {
 		delete(t.rtpEndpointToCallID, endpoint)
+		// Clean up IP index
+		if ip := extractIPFromEndpoint(endpoint); ip != "" {
+			if callIDs, ok := t.ipToCallIDs[ip]; ok {
+				delete(callIDs, callID)
+				if len(callIDs) == 0 {
+					delete(t.ipToCallIDs, ip)
+				}
+			}
+		}
 	}
 	delete(t.callIDToEndpoints, callID)
 	delete(t.callPartyInfo, callID)
+}
+
+// registerIPForCallLocked adds a callID to the IP index.
+// Must be called with mu held.
+func (t *CallTracker) registerIPForCallLocked(ip, callID string) {
+	if ip == "" {
+		return
+	}
+	if t.ipToCallIDs[ip] == nil {
+		t.ipToCallIDs[ip] = make(map[string]struct{})
+	}
+	t.ipToCallIDs[ip][callID] = struct{}{}
+}
+
+// extractIPFromEndpoint extracts the IP from an "IP:port" endpoint string.
+func extractIPFromEndpoint(endpoint string) string {
+	if idx := strings.LastIndex(endpoint, ":"); idx > 0 {
+		return endpoint[:idx]
+	}
+	return ""
 }
 
 // RegisterMediaPorts registers RTP media ports from SIP detector metadata.
@@ -134,6 +166,9 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16) (
 		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
 	}
 
+	// Register IP in the IP index for O(1) fallback lookup
+	t.registerIPForCallLocked(rtpIP, callID)
+
 	return syntheticCallID
 }
 
@@ -159,6 +194,10 @@ func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, 
 	t.rtpEndpointToCallID[srcEndpoint] = syntheticCallID
 	t.rtpEndpointToCallID[dstEndpoint] = syntheticCallID
 	t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], srcEndpoint, dstEndpoint)
+
+	// Register IPs in the IP index for O(1) fallback lookup
+	t.registerIPForCallLocked(srcIP, syntheticCallID)
+	t.registerIPForCallLocked(dstIP, syntheticCallID)
 
 	// Also store party info for RTP-only calls (used as fallback in convertToTUICall)
 	// Use IP:port as From/To since we don't have SIP headers
@@ -254,6 +293,9 @@ func (t *CallTracker) ProcessSIPPacket(callID, srcIP, dstIP, payload string) {
 		t.rtpEndpointToCallID[endpoint] = callID
 		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
 	}
+
+	// Register IP in the IP index for O(1) fallback lookup
+	t.registerIPForCallLocked(rtpIP, callID)
 }
 
 // GetCallIDForRTPPacket returns the CallID for an RTP packet based on IP/port
@@ -276,40 +318,19 @@ func (t *CallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPort strin
 		return callID
 	}
 
-	// Fallback: match by source IP only (RTP sender = SDP sender)
+	// Fallback: match by source IP only using O(1) IP index lookup
 	// Only use this if there's exactly ONE call from this IP to avoid ambiguity
-	var matchedCallID string
-	matchCount := 0
-	for endpoint, callID := range t.rtpEndpointToCallID {
-		if idx := strings.LastIndex(endpoint, ":"); idx > 0 {
-			registeredIP := endpoint[:idx]
-			if registeredIP == srcIP {
-				if matchedCallID == "" || matchedCallID == callID {
-					matchedCallID = callID
-					matchCount++
-				} else {
-					// Multiple different calls from same IP - can't disambiguate
-					matchCount++
-				}
-			}
+	if callIDs, ok := t.ipToCallIDs[srcIP]; ok && len(callIDs) == 1 {
+		// Exactly one call from this IP - return it
+		for callID := range callIDs {
+			return callID
 		}
 	}
 
-	// Only return if we found exactly one unique call from this IP
-	if matchCount > 0 && matchedCallID != "" {
-		// Check if all matches point to the same call
-		uniqueCall := true
-		for endpoint, callID := range t.rtpEndpointToCallID {
-			if idx := strings.LastIndex(endpoint, ":"); idx > 0 {
-				registeredIP := endpoint[:idx]
-				if registeredIP == srcIP && callID != matchedCallID {
-					uniqueCall = false
-					break
-				}
-			}
-		}
-		if uniqueCall {
-			return matchedCallID
+	// Try destination IP as fallback
+	if callIDs, ok := t.ipToCallIDs[dstIP]; ok && len(callIDs) == 1 {
+		for callID := range callIDs {
+			return callID
 		}
 	}
 
@@ -330,6 +351,7 @@ func (t *CallTracker) Clear() {
 
 	t.rtpEndpointToCallID = make(map[string]string)
 	t.callIDToEndpoints = make(map[string][]string)
+	t.ipToCallIDs = make(map[string]map[string]struct{})
 	t.callPartyInfo = make(map[string]*CallPartyInfo)
 	t.lruList = list.New()
 	t.lruIndex = make(map[string]*list.Element)

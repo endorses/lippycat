@@ -72,11 +72,13 @@ type RTPQualityStats struct {
 
 // CallAggregator aggregates call state from packet streams
 type CallAggregator struct {
-	calls    map[string]*AggregatedCall // callID -> call state
-	lruList  *list.List                 // LRU list (front = most recently used)
-	lruIndex map[string]*list.Element   // callID -> list element for O(1) lookup
-	maxCalls int                        // Maximum calls to keep
-	mu       sync.RWMutex
+	calls       map[string]*AggregatedCall // callID -> call state
+	lruList     *list.List                 // LRU list (front = most recently used)
+	lruIndex    map[string]*list.Element   // callID -> list element for O(1) lookup
+	maxCalls    int                        // Maximum calls to keep
+	mu          sync.RWMutex
+	cachedCalls []AggregatedCall // Cached sorted copy of calls
+	callsDirty  bool             // True if cache needs rebuild
 }
 
 // NewCallAggregator creates a new call aggregator with default capacity (1000 calls)
@@ -91,10 +93,11 @@ func NewCallAggregatorWithCapacity(maxCalls int) *CallAggregator {
 		maxCalls = 1000
 	}
 	return &CallAggregator{
-		calls:    make(map[string]*AggregatedCall),
-		lruList:  list.New(),
-		lruIndex: make(map[string]*list.Element),
-		maxCalls: maxCalls,
+		calls:      make(map[string]*AggregatedCall),
+		lruList:    list.New(),
+		lruIndex:   make(map[string]*list.Element),
+		maxCalls:   maxCalls,
+		callsDirty: true, // Start dirty so first GetCalls builds cache
 	}
 }
 
@@ -213,6 +216,7 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
+	ca.callsDirty = true // Invalidate cache on potential mutation
 
 	call, exists := ca.calls[sip.CallId]
 	if !exists {
@@ -376,6 +380,7 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
+	ca.callsDirty = true // Invalidate cache on potential mutation
 
 	// Find or create the associated call
 	call, exists := ca.calls[callID]
@@ -583,22 +588,35 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 
 // GetCalls returns all tracked calls sorted by StartTime (chronological order).
 // LRU is the eviction policy only; display order is always chronological.
+// Uses caching to avoid repeated deep-copy and sort operations.
 func (ca *CallAggregator) GetCalls() []AggregatedCall {
-	ca.mu.RLock()
-	defer ca.mu.RUnlock()
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
 
-	calls := make([]AggregatedCall, 0, len(ca.calls))
-	for _, call := range ca.calls {
-		// Create a deep copy to avoid race conditions
-		calls = append(calls, ca.deepCopyCall(call))
+	// Rebuild cache if dirty
+	if ca.callsDirty {
+		ca.cachedCalls = make([]AggregatedCall, 0, len(ca.calls))
+		for _, call := range ca.calls {
+			// Create a deep copy to avoid race conditions
+			ca.cachedCalls = append(ca.cachedCalls, ca.deepCopyCall(call))
+		}
+
+		// Sort by StartTime for chronological display order, then by CallID as tiebreaker
+		sort.Slice(ca.cachedCalls, func(i, j int) bool {
+			if ca.cachedCalls[i].StartTime.Equal(ca.cachedCalls[j].StartTime) {
+				return ca.cachedCalls[i].CallID < ca.cachedCalls[j].CallID
+			}
+			return ca.cachedCalls[i].StartTime.Before(ca.cachedCalls[j].StartTime)
+		})
+
+		ca.callsDirty = false
 	}
 
-	// Sort by StartTime for chronological display order
-	sort.Slice(calls, func(i, j int) bool {
-		return calls[i].StartTime.Before(calls[j].StartTime)
-	})
-
-	return calls
+	// Return a copy of the cached slice
+	// Since AggregatedCall is a value type, this copies the values
+	result := make([]AggregatedCall, len(ca.cachedCalls))
+	copy(result, ca.cachedCalls)
+	return result
 }
 
 // GetActiveCalls returns only active calls (not ended or failed)
@@ -680,6 +698,7 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
+	ca.callsDirty = true // Invalidate cache on potential mutation
 
 	syntheticCall, exists := ca.calls[syntheticCallID]
 	if !exists {

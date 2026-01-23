@@ -738,6 +738,10 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 				}
 				tracker.RegisterMediaPorts(display.VoIPData.CallID, rtpIP, mediaPorts)
 			}
+			// Store From/To info for RTP-created calls to inherit
+			if display.VoIPData.From != "" || display.VoIPData.To != "" {
+				tracker.RegisterCallPartyInfo(display.VoIPData.CallID, display.VoIPData.From, display.VoIPData.To)
+			}
 		}
 
 		if firstLine, ok := result.Metadata["first_line"].(string); ok {

@@ -8,21 +8,33 @@ import (
 	"sync"
 )
 
+// CallPartyInfo stores From/To information for a call
+type CallPartyInfo struct {
+	From string
+	To   string
+}
+
 // OfflineCallTracker tracks RTP-to-CallID mappings for offline PCAP analysis
 // It parses SDP from SIP packets to extract RTP connection information
 type OfflineCallTracker struct {
 	// Map: IP:port -> CallID (simplified: just store media endpoint)
 	rtpEndpointToCallID map[string]string
+	// Map: port only -> CallID (fallback for NAT scenarios)
+	rtpPortToCallID map[string]string
 	// Map: CallID -> list of endpoints
 	callIDToEndpoints map[string][]string
-	mu                sync.RWMutex
+	// Map: CallID -> From/To party info
+	callPartyInfo map[string]*CallPartyInfo
+	mu            sync.RWMutex
 }
 
 // NewOfflineCallTracker creates a new offline call tracker
 func NewOfflineCallTracker() *OfflineCallTracker {
 	return &OfflineCallTracker{
 		rtpEndpointToCallID: make(map[string]string),
+		rtpPortToCallID:     make(map[string]string),
 		callIDToEndpoints:   make(map[string][]string),
+		callPartyInfo:       make(map[string]*CallPartyInfo),
 	}
 }
 
@@ -40,7 +52,46 @@ func (t *OfflineCallTracker) RegisterMediaPorts(callID, rtpIP string, ports []ui
 		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
 		t.rtpEndpointToCallID[endpoint] = callID
 		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
+
+		// Also register port-only mapping as fallback for NAT scenarios
+		portStr := fmt.Sprintf("%d", port)
+		t.rtpPortToCallID[portStr] = callID
 	}
+}
+
+// RegisterCallPartyInfo stores From/To information for a call
+func (t *OfflineCallTracker) RegisterCallPartyInfo(callID, from, to string) {
+	if callID == "" {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Only store if we don't have info yet, or update if new info is better
+	existing := t.callPartyInfo[callID]
+	if existing == nil {
+		t.callPartyInfo[callID] = &CallPartyInfo{From: from, To: to}
+	} else {
+		// Update if existing values are empty
+		if existing.From == "" && from != "" {
+			existing.From = from
+		}
+		if existing.To == "" && to != "" {
+			existing.To = to
+		}
+	}
+}
+
+// GetCallPartyInfo returns the From/To information for a call
+func (t *OfflineCallTracker) GetCallPartyInfo(callID string) (from, to string) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if info := t.callPartyInfo[callID]; info != nil {
+		return info.From, info.To
+	}
+	return "", ""
 }
 
 // ProcessSIPPacket processes a SIP packet to extract RTP connection info from SDP
@@ -108,6 +159,15 @@ func (t *OfflineCallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPor
 		return callID
 	}
 
+	// Port-only fallback for NAT scenarios where IP doesn't match SDP
+	// This is less reliable but helps when NAT rewrites source IPs
+	if callID, ok := t.rtpPortToCallID[dstPort]; ok {
+		return callID
+	}
+	if callID, ok := t.rtpPortToCallID[srcPort]; ok {
+		return callID
+	}
+
 	// Fallback: match by source IP only (RTP sender = SDP sender)
 	// Only use this if there's exactly ONE call from this IP to avoid ambiguity
 	var matchedCallID string
@@ -154,7 +214,9 @@ func (t *OfflineCallTracker) Clear() {
 	defer t.mu.Unlock()
 
 	t.rtpEndpointToCallID = make(map[string]string)
+	t.rtpPortToCallID = make(map[string]string)
 	t.callIDToEndpoints = make(map[string][]string)
+	t.callPartyInfo = make(map[string]*CallPartyInfo)
 }
 
 // extractSDPBody extracts the SDP body from a SIP message

@@ -111,6 +111,22 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 		duration = call.LastPacketTime.Sub(call.StartTime)
 	}
 
+	// Get From/To from call, or fall back to tracker's party info
+	// This handles RTP-created calls where SIP hasn't updated the call aggregator yet
+	from := call.From
+	to := call.To
+	if (from == "" || to == "") && call.CallID != "" {
+		if tracker := GetOfflineCallTracker(); tracker != nil {
+			trackerFrom, trackerTo := tracker.GetCallPartyInfo(call.CallID)
+			if from == "" && trackerFrom != "" {
+				from = trackerFrom
+			}
+			if to == "" && trackerTo != "" {
+				to = trackerTo
+			}
+		}
+	}
+
 	// Get codec
 	codec := "Unknown"
 	if call.RTPStats != nil && call.RTPStats.Codec != "" {
@@ -135,8 +151,8 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 
 	return types.CallInfo{
 		CallID:      call.CallID,
-		From:        call.From,
-		To:          call.To,
+		From:        from,
+		To:          to,
 		State:       call.State.String(), // Convert to string
 		StartTime:   call.StartTime,
 		EndTime:     call.EndTime,

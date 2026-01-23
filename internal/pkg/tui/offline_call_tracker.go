@@ -19,8 +19,6 @@ type CallPartyInfo struct {
 type OfflineCallTracker struct {
 	// Map: IP:port -> CallID (simplified: just store media endpoint)
 	rtpEndpointToCallID map[string]string
-	// Map: port only -> CallID (fallback for NAT scenarios)
-	rtpPortToCallID map[string]string
 	// Map: CallID -> list of endpoints
 	callIDToEndpoints map[string][]string
 	// Map: CallID -> From/To party info
@@ -32,7 +30,6 @@ type OfflineCallTracker struct {
 func NewOfflineCallTracker() *OfflineCallTracker {
 	return &OfflineCallTracker{
 		rtpEndpointToCallID: make(map[string]string),
-		rtpPortToCallID:     make(map[string]string),
 		callIDToEndpoints:   make(map[string][]string),
 		callPartyInfo:       make(map[string]*CallPartyInfo),
 	}
@@ -52,10 +49,6 @@ func (t *OfflineCallTracker) RegisterMediaPorts(callID, rtpIP string, ports []ui
 		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
 		t.rtpEndpointToCallID[endpoint] = callID
 		t.callIDToEndpoints[callID] = append(t.callIDToEndpoints[callID], endpoint)
-
-		// Also register port-only mapping as fallback for NAT scenarios
-		portStr := fmt.Sprintf("%d", port)
-		t.rtpPortToCallID[portStr] = callID
 	}
 }
 
@@ -159,15 +152,6 @@ func (t *OfflineCallTracker) GetCallIDForRTPPacket(srcIP, srcPort, dstIP, dstPor
 		return callID
 	}
 
-	// Port-only fallback for NAT scenarios where IP doesn't match SDP
-	// This is less reliable but helps when NAT rewrites source IPs
-	if callID, ok := t.rtpPortToCallID[dstPort]; ok {
-		return callID
-	}
-	if callID, ok := t.rtpPortToCallID[srcPort]; ok {
-		return callID
-	}
-
 	// Fallback: match by source IP only (RTP sender = SDP sender)
 	// Only use this if there's exactly ONE call from this IP to avoid ambiguity
 	var matchedCallID string
@@ -214,7 +198,6 @@ func (t *OfflineCallTracker) Clear() {
 	defer t.mu.Unlock()
 
 	t.rtpEndpointToCallID = make(map[string]string)
-	t.rtpPortToCallID = make(map[string]string)
 	t.callIDToEndpoints = make(map[string][]string)
 	t.callPartyInfo = make(map[string]*CallPartyInfo)
 }

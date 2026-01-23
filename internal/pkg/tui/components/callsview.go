@@ -221,6 +221,7 @@ func (cv *CallsView) SetSize(width, height int) {
 // SetCalls updates the call list
 func (cv *CallsView) SetCalls(calls []Call) {
 	oldLen := len(cv.calls)
+	wasAtTop := (oldLen == 0) || (cv.selected == 0)
 	wasAtBottom := (oldLen == 0) || (cv.selected >= oldLen-1)
 
 	// Remember the selected call ID before updating the list
@@ -262,7 +263,15 @@ func (cv *CallsView) SetCalls(calls []Call) {
 		// Previously selected call still exists - keep it selected
 		cv.selected = newIndex
 
-		// Handle auto-scroll behavior when the selected call is found
+		// Handle top-of-list behavior: if user was at top and a new call took the top spot,
+		// keep selection at top (follow new oldest calls)
+		if wasAtTop && cv.selected > 0 && len(cv.calls) > oldLen {
+			// User was at top, but their call moved down (new call inserted at top)
+			// Stay at top to follow new calls
+			cv.selected = 0
+		}
+
+		// Handle bottom auto-scroll behavior when the selected call is found
 		if cv.autoScroll && cv.selected == len(cv.calls)-1 {
 			// Already at bottom with autoScroll enabled - stay there
 		} else if cv.selected != len(cv.calls)-1 {

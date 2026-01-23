@@ -307,25 +307,26 @@ Currently uses `strings.HasPrefix(callID, "rtp-")` in hot paths.
 
 **File:** `internal/pkg/tui/local_call_aggregator.go`
 
-`notifyCallUpdates()` allocates new slices on every cycle (500ms-1s).
+`notifyCallUpdates()` was allocating new slices on every cycle (500ms-1s).
 
 ### Changes
 
-- [ ] Add reusable buffer:
+- [x] Add double-buffer for safe reuse:
   ```go
   type LocalCallAggregator struct {
       // existing fields...
-      callInfoBuffer []types.CallInfo    // Reusable slice
+      callInfoBuffers [2][]types.CallInfo  // Double-buffer pattern
+      activeBuffer    int                   // Index of buffer being filled (0 or 1)
   }
   ```
 
-- [ ] Refactor `notifyCallUpdates()`:
-  - Reuse buffer slice (reset length, keep capacity)
-  - Only reallocate if capacity insufficient
+- [x] Refactor `notifyCallUpdates()`:
+  - Use double-buffer pattern: one buffer for TUI, one for building
+  - Reuse buffer (reset length, keep capacity)
+  - Grow with 50% headroom when capacity insufficient
+  - Swap buffers after sending to ensure safe handoff
 
-- [ ] Consider: object pool for CallInfo if still allocating heavily
-
-**Expected improvement:** O(n) allocations per cycle → amortized O(1)
+**Expected improvement:** O(n) allocations per cycle → amortized O(1) once buffers reach steady-state ✅
 
 ---
 

@@ -26,6 +26,10 @@ type LocalCallAggregator struct {
 	callUpdateTimer *time.Timer
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
+	// Double-buffer for call updates to reduce allocations
+	// We alternate between buffers so one can be processed by TUI while we fill the other
+	callInfoBuffers [2][]types.CallInfo
+	activeBuffer    int // Index of buffer currently being used for building (0 or 1)
 }
 
 // NewLocalCallAggregator creates a new local call aggregator for live or offline mode
@@ -78,13 +82,44 @@ func (lca *LocalCallAggregator) scheduleCallUpdate() {
 func (lca *LocalCallAggregator) notifyCallUpdates() {
 	calls := lca.aggregator.GetCalls()
 
-	// Convert all calls to types.CallInfo and send in a single batch
-	callInfos := make([]types.CallInfo, 0, len(calls))
-	for _, call := range calls {
-		// Convert voip.AggregatedCall to types.CallInfo
-		callInfo := lca.convertToTUICall(call)
-		callInfos = append(callInfos, callInfo)
+	lca.mu.Lock()
+	// Use double-buffer pattern to reduce allocations:
+	// - One buffer is being processed by TUI
+	// - We fill the other buffer with new data
+	// - Swap buffers after sending
+	// This eliminates per-cycle allocations once buffers reach steady-state size
+
+	bufIdx := lca.activeBuffer
+	buf := &lca.callInfoBuffers[bufIdx]
+
+	// Ensure buffer has sufficient capacity, grow if needed
+	needed := len(calls)
+	if cap(*buf) < needed {
+		// Grow with headroom to reduce future reallocations
+		newCap := needed
+		if newCap < 64 {
+			newCap = 64
+		} else {
+			newCap = newCap * 3 / 2 // 50% growth factor
+		}
+		*buf = make([]types.CallInfo, 0, newCap)
 	}
+	// Reset length but keep capacity
+	*buf = (*buf)[:0]
+
+	// Convert all calls to types.CallInfo
+	for _, call := range calls {
+		callInfo := lca.convertToTUICall(call)
+		*buf = append(*buf, callInfo)
+	}
+
+	// Get the slice to send (references the buffer we just filled)
+	callInfos := *buf
+
+	// Swap to the other buffer for next cycle
+	// This ensures the TUI can safely process callInfos while we fill the other buffer
+	lca.activeBuffer = 1 - bufIdx
+	lca.mu.Unlock()
 
 	// Send all call updates in a single message
 	if lca.program != nil && len(callInfos) > 0 {

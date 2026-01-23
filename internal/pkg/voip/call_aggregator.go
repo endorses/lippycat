@@ -365,6 +365,22 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 			// Note: From/To will be empty until SIP packet arrives
 			// Note: RTPStats is intentionally not initialized here - will be done below
 		}
+
+		// Add to ring buffer (FIFO) - same as SIP path to maintain consistency
+		if ca.ringCount >= ca.maxCalls {
+			// Ring buffer is full, remove oldest call
+			oldestCallID := ca.callRing[ca.ringHead]
+			delete(ca.calls, oldestCallID)
+			logger.Debug("Removed oldest call from ring buffer (buffer full, RTP path)",
+				"call_id", oldestCallID)
+		} else {
+			ca.ringCount++
+		}
+
+		// Add new call to ring buffer
+		ca.callRing[ca.ringHead] = callID
+		ca.ringHead = (ca.ringHead + 1) % ca.maxCalls
+
 		ca.calls[callID] = call
 		logger.Debug("Created call entry from RTP packet",
 			"call_id", callID,

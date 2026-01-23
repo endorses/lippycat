@@ -136,8 +136,8 @@
 ## Phase 7: PacketStore Migration
 
 ### 7.1 Update PacketStore (`internal/pkg/tui/store/packet_store.go`)
-- [ ] Update `Match()` calls to pass packet as `Filterable`
-- [ ] Verify no breakage
+- [x] Update `Match()` calls to pass packet as `Filterable`
+- [x] Verify no breakage
 
 ---
 

@@ -261,6 +261,167 @@ type HTTPMetadata struct {
 	BodyTruncated bool   // True if body was truncated due to size limit
 }
 
+// GetStringField returns a string field value by name for filtering.
+// Returns empty string if field doesn't exist.
+func (p PacketDisplay) GetStringField(name string) string {
+	switch name {
+	case "src", "srcip":
+		return p.SrcIP
+	case "dst", "dstip":
+		return p.DstIP
+	case "srcport":
+		return p.SrcPort
+	case "dstport":
+		return p.DstPort
+	case "protocol":
+		return p.Protocol
+	case "info":
+		return p.Info
+	case "node", "nodeid":
+		return p.NodeID
+	case "interface":
+		return p.Interface
+	// VoIP fields (from VoIPData)
+	case "sip.user":
+		if p.VoIPData != nil {
+			return p.VoIPData.User
+		}
+	case "sip.from":
+		if p.VoIPData != nil {
+			return p.VoIPData.From
+		}
+	case "sip.to":
+		if p.VoIPData != nil {
+			return p.VoIPData.To
+		}
+	case "sip.callid":
+		if p.VoIPData != nil {
+			return p.VoIPData.CallID
+		}
+	case "sip.method":
+		if p.VoIPData != nil {
+			return p.VoIPData.Method
+		}
+	case "sip.codec":
+		if p.VoIPData != nil {
+			return p.VoIPData.Codec
+		}
+	// DNS fields (from DNSData)
+	case "dns.query", "dns.name":
+		if p.DNSData != nil {
+			return p.DNSData.QueryName
+		}
+	case "dns.type":
+		if p.DNSData != nil {
+			return p.DNSData.QueryType
+		}
+	// TLS fields (from TLSData)
+	case "tls.sni":
+		if p.TLSData != nil {
+			return p.TLSData.SNI
+		}
+	case "tls.ja3":
+		if p.TLSData != nil {
+			return p.TLSData.JA3Fingerprint
+		}
+	// HTTP fields (from HTTPData)
+	case "http.host":
+		if p.HTTPData != nil {
+			return p.HTTPData.Host
+		}
+	case "http.path":
+		if p.HTTPData != nil {
+			return p.HTTPData.Path
+		}
+	case "http.method":
+		if p.HTTPData != nil {
+			return p.HTTPData.Method
+		}
+	}
+	return ""
+}
+
+// GetNumericField returns a numeric field value by name for filtering.
+// Returns 0 if field doesn't exist or isn't numeric.
+func (p PacketDisplay) GetNumericField(name string) float64 {
+	switch name {
+	case "length", "len":
+		return float64(p.Length)
+	// VoIP numeric fields
+	case "sip.status":
+		if p.VoIPData != nil {
+			return float64(p.VoIPData.Status)
+		}
+	case "rtp.seq", "rtp.sequence":
+		if p.VoIPData != nil && p.VoIPData.IsRTP {
+			return float64(p.VoIPData.SequenceNum)
+		}
+	case "rtp.ssrc":
+		if p.VoIPData != nil && p.VoIPData.IsRTP {
+			return float64(p.VoIPData.SSRC)
+		}
+	// DNS numeric fields
+	case "dns.ttl":
+		if p.DNSData != nil && len(p.DNSData.Answers) > 0 {
+			return float64(p.DNSData.Answers[0].TTL)
+		}
+	case "dns.latency":
+		if p.DNSData != nil {
+			return float64(p.DNSData.QueryResponseTimeMs)
+		}
+	// HTTP numeric fields
+	case "http.status":
+		if p.HTTPData != nil {
+			return float64(p.HTTPData.StatusCode)
+		}
+	case "http.contentlength":
+		if p.HTTPData != nil {
+			return float64(p.HTTPData.ContentLength)
+		}
+	}
+	return 0
+}
+
+// HasField returns true if the packet has the named field.
+func (p PacketDisplay) HasField(name string) bool {
+	switch name {
+	case "src", "srcip", "dst", "dstip", "srcport", "dstport", "protocol", "info", "node", "nodeid", "interface", "length", "len":
+		return true
+	case "voip", "sip", "rtp":
+		return p.VoIPData != nil
+	case "dns":
+		return p.DNSData != nil
+	case "tls":
+		return p.TLSData != nil
+	case "http":
+		return p.HTTPData != nil
+	case "email":
+		return p.EmailData != nil
+	}
+	// Check protocol-specific fields
+	if len(name) > 4 && name[:4] == "sip." {
+		return p.VoIPData != nil
+	}
+	if len(name) > 4 && name[:4] == "rtp." {
+		return p.VoIPData != nil && p.VoIPData.IsRTP
+	}
+	if len(name) > 4 && name[:4] == "dns." {
+		return p.DNSData != nil
+	}
+	if len(name) > 4 && name[:4] == "tls." {
+		return p.TLSData != nil
+	}
+	if len(name) > 5 && name[:5] == "http." {
+		return p.HTTPData != nil
+	}
+	return false
+}
+
+// RecordType returns "packet" for PacketDisplay records.
+func (p PacketDisplay) RecordType() string {
+	return "packet"
+}
+
 // HunterInfo represents a hunter node's status information.
 // This type is shared between processor, remote capture client, and TUI.
 type HunterInfo struct {

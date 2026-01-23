@@ -92,6 +92,69 @@ type Call struct {
 	NodeID      string  // Which hunter/processor captured this
 }
 
+// GetStringField returns a string field value by name for filtering.
+// Returns empty string if field doesn't exist.
+func (c Call) GetStringField(name string) string {
+	switch name {
+	case "callid", "call_id":
+		return c.CallID
+	case "from":
+		return extractSIPURI(c.From)
+	case "to":
+		return extractSIPURI(c.To)
+	case "user":
+		// Search both from and to for user matching
+		fromURI := extractSIPURI(c.From)
+		toURI := extractSIPURI(c.To)
+		return fromURI + " " + toURI
+	case "state":
+		return c.State.String()
+	case "codec":
+		return c.Codec
+	case "node", "nodeid":
+		return c.NodeID
+	}
+	return ""
+}
+
+// GetNumericField returns a numeric field value by name for filtering.
+// Returns 0 if field doesn't exist or isn't numeric.
+func (c Call) GetNumericField(name string) float64 {
+	switch name {
+	case "duration":
+		// Return duration in seconds
+		if c.State == CallStateActive {
+			return time.Since(c.StartTime).Seconds()
+		}
+		return c.Duration.Seconds()
+	case "mos":
+		return c.MOS
+	case "jitter":
+		return c.Jitter
+	case "loss", "packetloss":
+		return c.PacketLoss
+	case "packets", "packetcount":
+		return float64(c.PacketCount)
+	}
+	return 0
+}
+
+// HasField returns true if the call has the named field.
+func (c Call) HasField(name string) bool {
+	switch name {
+	case "callid", "call_id", "from", "to", "user", "state", "codec", "node", "nodeid":
+		return true
+	case "duration", "mos", "jitter", "loss", "packetloss", "packets", "packetcount":
+		return true
+	}
+	return false
+}
+
+// RecordType returns "call" for Call records.
+func (c Call) RecordType() string {
+	return "call"
+}
+
 // CallsView displays active VoIP calls
 type CallsView struct {
 	calls            []Call

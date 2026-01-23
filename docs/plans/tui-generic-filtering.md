@@ -9,20 +9,20 @@
 ## Phase 1: Filterable Interface
 
 ### 1.1 Create Filterable Interface (`internal/pkg/tui/filters/filterable.go`)
-- [ ] Define `Filterable` interface with `GetStringField()`, `GetNumericField()`, `HasField()`, `RecordType()`
-- [ ] Define `getCommonFields(recordType string) []string` helper for "search all" behavior
+- [x] Define `Filterable` interface with `GetStringField()`, `GetNumericField()`, `HasField()`, `RecordType()`
+- [x] Define `getCommonFields(recordType string) []string` helper for "search all" behavior
 
-### 1.2 Implement Filterable on PacketDisplay (`internal/pkg/tui/components/packetlist.go`)
-- [ ] Add `GetStringField(name string) string` - map src, dst, protocol, info, node, sip.* fields
-- [ ] Add `GetNumericField(name string) float64` - return 0 (packets have no numeric filters)
-- [ ] Add `HasField(name string) bool`
-- [ ] Add `RecordType() string` returning `"packet"`
+### 1.2 Implement Filterable on PacketDisplay (`internal/pkg/types/packet.go`)
+- [x] Add `GetStringField(name string) string` - map src, dst, protocol, info, node, sip.* fields
+- [x] Add `GetNumericField(name string) float64` - map length, sip.status, rtp fields, dns/http fields
+- [x] Add `HasField(name string) bool`
+- [x] Add `RecordType() string` returning `"packet"`
 
 ### 1.3 Implement Filterable on Call (`internal/pkg/tui/components/callsview.go`)
-- [ ] Add `GetStringField(name string) string` - map callid, from, to, state, codec, node
-- [ ] Add `GetNumericField(name string) float64` - map duration, mos, jitter, loss, packets
-- [ ] Add `HasField(name string) bool`
-- [ ] Add `RecordType() string` returning `"call"`
+- [x] Add `GetStringField(name string) string` - map callid, from, to, state, codec, node
+- [x] Add `GetNumericField(name string) float64` - map duration, mos, jitter, loss, packets
+- [x] Add `HasField(name string) bool`
+- [x] Add `RecordType() string` returning `"call"`
 
 ---
 

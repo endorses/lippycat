@@ -2,6 +2,7 @@ package voip
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/tcpassembly"
 	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
@@ -27,6 +29,306 @@ type SIPMessageHandler interface {
 	// Returns:
 	//   - bool: true if message was accepted/matched filter (for metrics)
 	HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool
+}
+
+// bufferedSIPStream implements tcpassembly.Stream with a buffered channel.
+// This guarantees Reassembled() NEVER blocks, which is critical because:
+// 1. tcpreader.ReaderStream uses an unbuffered channel
+// 2. The assembler calls Reassembled() synchronously from the packet loop
+// 3. If Reassembled() blocks, the entire packet capture freezes
+//
+// By using a buffered channel with non-blocking sends, we ensure the
+// packet capture loop always continues, even if processing is slow.
+// Data is dropped only when the buffer is full (better than freezing).
+type bufferedSIPStream struct {
+	dataChan       chan []byte
+	ctx            context.Context
+	cancel         context.CancelFunc
+	factory        *sipStreamFactory
+	callIDDetector *CallIDDetector
+	flow           gopacket.Flow
+	createdAt      time.Time
+	processedBytes int64
+	processedMsgs  int64
+	closed         int32 // atomic flag
+}
+
+// Buffer size for reassembled data chunks.
+// Each TCP segment creates one entry, so this should handle bursts.
+const streamBufferSize = 64
+
+// newBufferedSIPStream creates a new buffered stream that implements tcpassembly.Stream.
+// The stream immediately starts a processing goroutine.
+func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, detector *CallIDDetector, flow gopacket.Flow) *bufferedSIPStream {
+	ctx, cancel := context.WithCancel(parentCtx)
+	s := &bufferedSIPStream{
+		dataChan:       make(chan []byte, streamBufferSize),
+		ctx:            ctx,
+		cancel:         cancel,
+		factory:        factory,
+		callIDDetector: detector,
+		flow:           flow,
+		createdAt:      time.Now(),
+	}
+	// Start processing goroutine immediately
+	go s.processLoop()
+	return s
+}
+
+// Reassembled implements tcpassembly.Stream.
+// Called by the assembler when TCP data is reassembled.
+// NEVER BLOCKS - uses non-blocking send to buffered channel.
+func (s *bufferedSIPStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
+	if atomic.LoadInt32(&s.closed) != 0 {
+		return
+	}
+
+	for _, r := range reassemblies {
+		if len(r.Bytes) == 0 {
+			continue
+		}
+		// Copy the data since reassembly buffers may be reused
+		data := make([]byte, len(r.Bytes))
+		copy(data, r.Bytes)
+
+		// Non-blocking send - drop data if buffer is full
+		// This is better than blocking the packet capture loop
+		select {
+		case s.dataChan <- data:
+			// Successfully queued
+		default:
+			// Buffer full - drop this chunk (log at debug level to avoid spam)
+			logger.Debug("TCP stream buffer full, dropping data", "bytes", len(data))
+		}
+	}
+}
+
+// ReassemblyComplete implements tcpassembly.Stream.
+// Called when the TCP stream is closed (FIN/RST or timeout).
+func (s *bufferedSIPStream) ReassemblyComplete() {
+	if atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
+		close(s.dataChan)
+	}
+}
+
+// processLoop reads from the buffered channel and processes SIP messages.
+func (s *bufferedSIPStream) processLoop() {
+	logger.Debug("SIP stream starting", "flow", s.flow.String())
+
+	defer func() {
+		// Decrement goroutine counter
+		if s.factory != nil {
+			atomic.AddInt64(&s.factory.activeGoroutines, -1)
+		}
+
+		// Update metrics
+		tcpStreamMetrics.mu.Lock()
+		atomic.AddInt64(&tcpStreamMetrics.activeStreams, -1)
+		if r := recover(); r != nil {
+			tcpStreamMetrics.totalStreamsFailed++
+			logger.Error("SIP stream panic recovered",
+				"panic_value", r,
+				"stack_trace", string(debug.Stack()),
+				"stream_context", s.ctx.Err(),
+				"stream_age", time.Since(s.createdAt),
+				"processed_bytes", atomic.LoadInt64(&s.processedBytes),
+				"processed_messages", atomic.LoadInt64(&s.processedMsgs))
+		} else {
+			tcpStreamMetrics.totalStreamsCompleted++
+		}
+		tcpStreamMetrics.mu.Unlock()
+
+		// Cleanup
+		if s.callIDDetector != nil {
+			s.callIDDetector.Close()
+		}
+		s.cancel()
+
+		logger.Debug("TCP SIP stream completed",
+			"stream_age", time.Since(s.createdAt),
+			"processed_bytes", atomic.LoadInt64(&s.processedBytes),
+			"processed_messages", atomic.LoadInt64(&s.processedMsgs))
+	}()
+
+	// Create a pipe to convert channel data to io.Reader
+	pipeReader, pipeWriter := io.Pipe()
+
+	// Goroutine to pump data from channel to pipe
+	go func() {
+		defer pipeWriter.Close()
+		// Timeout for initial data - non-SIP streams send nothing useful
+		initialTimer := time.NewTimer(initialReadTimeout)
+		defer initialTimer.Stop()
+		gotData := false
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case data, ok := <-s.dataChan:
+				if !ok {
+					return // Channel closed
+				}
+				gotData = true
+				if _, err := pipeWriter.Write(data); err != nil {
+					return
+				}
+			case <-initialTimer.C:
+				if !gotData {
+					// No data received in initial timeout - likely not SIP
+					logger.Debug("Read timeout, closing stream")
+					pipeWriter.CloseWithError(errReadTimeout)
+					return
+				}
+			}
+		}
+	}()
+
+	// Process SIP messages from the pipe
+	s.processSIPFromReader(pipeReader)
+}
+
+// processSIPFromReader reads SIP messages from an io.Reader and processes them.
+func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
+	bufReader := bufio.NewReader(reader)
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+		}
+
+		sipMessage, err := s.readCompleteSipMessageFromReader(bufReader)
+		if err != nil {
+			if errors.Is(err, errNotSIP) {
+				logger.Debug("Non-SIP data detected, closing stream")
+			} else if errors.Is(err, errReadTimeout) {
+				logger.Debug("Read timeout, closing stream")
+			} else if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) && s.ctx.Err() == nil {
+				logger.Debug("Error reading SIP message", "error", err)
+			}
+			return
+		}
+
+		if len(sipMessage) == 0 {
+			continue
+		}
+
+		atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
+		atomic.AddInt64(&s.processedMsgs, 1)
+
+		s.processSipMessage(sipMessage)
+	}
+}
+
+// readCompleteSipMessageFromReader reads a complete SIP message from a buffered reader
+func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Reader) ([]byte, error) {
+	var message strings.Builder
+	var contentLength int
+	headersDone := false
+	firstLine := true
+	headerCount := 0
+
+	for {
+		if headersDone && contentLength == 0 {
+			break
+		}
+
+		if headersDone && contentLength > 0 {
+			content := make([]byte, contentLength)
+			_, err := io.ReadFull(bufReader, content)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read SIP message content: %w", err)
+			}
+			message.Write(content)
+			break
+		}
+
+		select {
+		case <-s.ctx.Done():
+			return nil, s.ctx.Err()
+		default:
+		}
+
+		line, err := bufReader.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("failed to read SIP message line: %w", err)
+		}
+
+		if len(line) > maxSIPHeaderLineLength {
+			return nil, errNotSIP
+		}
+
+		if firstLine {
+			firstLine = false
+			trimmedLine := strings.TrimRight(line, "\r\n")
+			if !isSIPRequestLine(trimmedLine) && !isSIPResponseLine(trimmedLine) {
+				return nil, errNotSIP
+			}
+		}
+
+		message.WriteString(line)
+		headerCount++
+
+		if headerCount > maxSIPHeaders {
+			return nil, errNotSIP
+		}
+
+		if !headersDone && (line == "\r\n" || line == "\n") {
+			headersDone = true
+			continue
+		}
+
+		if !headersDone {
+			if strings.HasPrefix(strings.ToLower(line), "content-length:") {
+				lengthStr := strings.TrimSpace(line[15:])
+				if length, parseErr := ParseContentLengthSecurely(lengthStr); parseErr == nil {
+					contentLength = length
+				} else {
+					logger.Warn("Content-Length security validation failed",
+						"value", lengthStr,
+						"error", parseErr,
+						"source", "tcp_stream")
+					return nil, fmt.Errorf("invalid Content-Length: %w", parseErr)
+				}
+			}
+		}
+	}
+
+	messageBytes := []byte(message.String())
+
+	if err := ValidateMessageSize(len(messageBytes)); err != nil {
+		logger.Warn("SIP message size security validation failed",
+			"size", len(messageBytes),
+			"error", err,
+			"source", "tcp_stream")
+		return nil, fmt.Errorf("SIP message too large: %w", err)
+	}
+
+	return messageBytes, nil
+}
+
+// processSipMessage processes a complete SIP message (shared with bufferedSIPStream)
+func (s *bufferedSIPStream) processSipMessage(sipMessage []byte) {
+	lines := bytes.Split(sipMessage, []byte("\n"))
+	var callID string
+
+	for _, line := range lines {
+		if detectCallIDHeader(string(line), &callID) {
+			break
+		}
+	}
+
+	if callID != "" {
+		if s.callIDDetector != nil {
+			s.callIDDetector.SetCallID(callID)
+		}
+
+		if s.factory != nil && s.factory.handler != nil {
+			s.factory.handler.HandleSIPMessage(sipMessage, callID, s.flow)
+		}
+	}
 }
 
 // CallIDDetector manages Call-ID detection with timeout support.
@@ -133,14 +435,22 @@ type SIPStream struct {
 	createdAt      time.Time
 	processedBytes int64
 	processedMsgs  int64
+	readySignal    chan<- struct{} // closed when reader is actively listening
 }
 
 // errReadTimeout is returned when a read operation times out waiting for data.
 // This indicates the TCP connection has stalled mid-message.
 var errReadTimeout = errors.New("read timeout: no data received")
 
+// Initial timeout for first data on a new TCP stream.
+// SIP sends data immediately after connection - if nothing arrives quickly,
+// it's likely not SIP traffic. This prevents non-SIP connections from
+// holding goroutines for extended periods.
+const initialReadTimeout = 2 * time.Second
+
 // Default read timeout for TCP streams - time to wait for next data chunk
-// This catches stalled connections mid-message while allowing idle time between messages
+// after initial data has been received. This catches stalled connections
+// mid-message while allowing idle time between messages.
 const defaultReadTimeout = 10 * time.Second
 
 // safeReader wraps a tcpreader.ReaderStream to provide interruptible reads
@@ -162,7 +472,10 @@ type safeReader struct {
 	readTimeout time.Duration
 }
 
-func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTimeout time.Duration) *safeReader {
+// newSafeReader creates a safe reader wrapper with optional ready signaling.
+// If readySignal is non-nil, it will be closed just before the first Read() call,
+// allowing the caller to wait until the reader is actively listening.
+func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTimeout time.Duration, readySignal chan<- struct{}) *safeReader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -187,16 +500,23 @@ func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTime
 	go sr.watchdog(activity)
 
 	// Start copy goroutine that moves data from tcpreader to pipe
-	go sr.copyLoop(reader, activity)
+	go sr.copyLoop(reader, activity, readySignal)
 
 	return sr
 }
 
 // watchdog monitors for read activity and closes the pipe if idle too long.
 // This catches stalled TCP connections that stop sending data mid-message.
+//
+// Uses a two-phase timeout strategy:
+// 1. Initial phase: Short timeout (2s) - SIP sends data immediately, non-SIP doesn't
+// 2. Active phase: Longer timeout (10s) - allows gaps between SIP messages
 func (sr *safeReader) watchdog(activity <-chan struct{}) {
-	timer := time.NewTimer(sr.readTimeout)
+	// Start with short initial timeout - non-SIP connections get closed quickly
+	timer := time.NewTimer(initialReadTimeout)
 	defer timer.Stop()
+
+	firstActivity := true
 
 	for {
 		select {
@@ -210,6 +530,10 @@ func (sr *safeReader) watchdog(activity <-chan struct{}) {
 				default:
 				}
 			}
+			// After first activity, switch to longer timeout for subsequent reads
+			if firstActivity {
+				firstActivity = false
+			}
 			timer.Reset(sr.readTimeout)
 		case <-timer.C:
 			// Timeout - close pipe to unblock any pending reads
@@ -221,16 +545,29 @@ func (sr *safeReader) watchdog(activity <-chan struct{}) {
 }
 
 // copyLoop reads from tcpreader and writes to the pipe, signaling activity.
-func (sr *safeReader) copyLoop(reader *tcpreader.ReaderStream, activity chan<- struct{}) {
+// If readySignal is non-nil, it is closed just before the first Read() to signal
+// that the reader is actively listening (critical for unbuffered channel synchronization).
+func (sr *safeReader) copyLoop(reader *tcpreader.ReaderStream, activity chan<- struct{}, readySignal chan<- struct{}) {
 	defer close(sr.copyDone)
 	defer sr.pipeWriter.Close()
 
 	// Handle nil reader gracefully
 	if reader == nil {
+		// Still signal ready even on error, so caller doesn't block forever
+		if readySignal != nil {
+			close(readySignal)
+		}
 		sr.pipeWriter.CloseWithError(fmt.Errorf("nil reader"))
 		return
 	}
 	defer reader.Close()
+
+	// Signal that we're ready to receive data - this happens just before
+	// the first Read() call, guaranteeing the unbuffered channel is being
+	// actively listened to before the assembler calls Reassembled().
+	if readySignal != nil {
+		close(readySignal)
+	}
 
 	buf := make([]byte, 4096)
 	for {
@@ -303,7 +640,9 @@ func (s *SIPStream) run() {
 	// The wrapper performs reads in goroutines and uses channels for coordination,
 	// allowing context cancellation to properly interrupt blocking reads.
 	// The read timeout catches stalled connections that stop sending data mid-message.
-	s.readerWrapper = newSafeReader(s.reader, s.ctx, defaultReadTimeout)
+	// The readySignal is closed just before the first Read(), ensuring the unbuffered
+	// channel is being actively listened to before this function returns.
+	s.readerWrapper = newSafeReader(s.reader, s.ctx, defaultReadTimeout, s.readySignal)
 
 	defer func() {
 		// Close the reader wrapper to clean up any pending read goroutines

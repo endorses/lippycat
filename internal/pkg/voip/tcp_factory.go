@@ -262,55 +262,39 @@ drainLoop:
 }
 
 func (f *sipStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	r := tcpreader.NewReaderStream()
 	detector := NewCallIDDetector()
 
-	// Check current goroutine count
+	// CRITICAL: We use bufferedSIPStream instead of tcpreader.ReaderStream.
+	//
+	// tcpreader.ReaderStream has an UNBUFFERED channel, which means:
+	// 1. The assembler calls Reassembled() synchronously from the packet loop
+	// 2. Reassembled() sends to the unbuffered channel
+	// 3. If no goroutine is actively blocking on Read(), Reassembled() BLOCKS
+	// 4. This freezes the entire packet capture loop
+	//
+	// bufferedSIPStream solves this by using a BUFFERED channel with non-blocking
+	// sends. Reassembled() NEVER blocks - data is dropped only if the buffer is full.
+	// This guarantees the packet capture loop always continues.
+
+	// Log if we're over the soft limit (for monitoring, not enforcement)
 	current := atomic.LoadInt64(&f.activeGoroutines)
 	if current >= int64(f.config.MaxGoroutines) {
-		// Log goroutine limit reached
 		f.logGoroutineLimit()
-
-		// Try to queue the stream for later processing
-		queuedStream := &queuedStream{
-			reader:    &r,
-			detector:  detector,
-			flow:      net,
-			createdAt: time.Now(),
-		}
-
-		select {
-		case f.streamQueue <- queuedStream:
-			// Successfully queued
-			tcpStreamMetrics.mu.Lock()
-			tcpStreamMetrics.queuedStreams++
-			tcpStreamMetrics.mu.Unlock()
-		default:
-			// Queue is full, drop the stream
-			tcpStreamMetrics.mu.Lock()
-			tcpStreamMetrics.droppedStreams++
-			tcpStreamMetrics.mu.Unlock()
-			logger.Warn("Dropped TCP stream due to full queue",
-				"active_goroutines", current,
-				"max_goroutines", f.config.MaxGoroutines,
-				"queue_length", len(f.streamQueue))
-		}
-
-		return &r
 	}
 
-	// Create stream immediately
-	stream := createSIPStream(&r, detector, f.ctx, f, net)
-
-	// Increment goroutine counter before starting
+	// Increment goroutine counter before creating stream (stream starts goroutine)
 	atomic.AddInt64(&f.activeGoroutines, 1)
 	// Update metrics
 	tcpStreamMetrics.mu.Lock()
 	atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
 	tcpStreamMetrics.totalStreamsCreated++
 	tcpStreamMetrics.mu.Unlock()
-	go stream.run()
-	return &r
+
+	// Create buffered stream - starts processing goroutine immediately
+	// but Reassembled() never blocks due to buffered channel
+	stream := newBufferedSIPStream(f.ctx, f, detector, net)
+
+	return stream
 }
 
 // GetActiveGoroutines returns the current number of active goroutines

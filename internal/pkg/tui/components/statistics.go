@@ -986,7 +986,7 @@ func (s *StatisticsView) renderOverviewNarrow() string {
 	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
 	result.WriteString("\n\n")
 
-	result.WriteString(s.renderProtocolDistribution(5))
+	result.WriteString(s.renderProtocolDistribution(5, s.width))
 	result.WriteString("\n")
 
 	// Section: Top Sources (compact, 5 items)
@@ -1051,7 +1051,7 @@ func (s *StatisticsView) renderOverviewMedium() string {
 	result.WriteString("\n")
 
 	// Row 3: Protocol Distribution
-	protocolContent := s.renderProtocolDistribution(5)
+	protocolContent := s.renderProtocolDistribution(5, s.width-10) // Account for card borders/padding
 	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
 		dashboard.WithIcon("🔌"),
 		dashboard.WithWidth(s.width-4))
@@ -1104,7 +1104,7 @@ func (s *StatisticsView) renderOverviewWide() string {
 
 	// Row 2: TUI Process card (left) + Protocol Distribution card (right)
 	tuiContent := s.buildTUIContentWide()
-	protocolContent := s.renderProtocolDistribution(5)
+	protocolContent := s.renderProtocolDistribution(5, colWidth-6) // Account for card borders/padding
 
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
@@ -1459,7 +1459,7 @@ func (s *StatisticsView) renderTrafficSubView() string {
 	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
 	result.WriteString("\n\n")
 
-	result.WriteString(s.renderProtocolDistribution(10))
+	result.WriteString(s.renderProtocolDistribution(10, s.width))
 
 	return result.String()
 }
@@ -1621,10 +1621,40 @@ func (s *StatisticsView) renderTopTalkersSubView() string {
 		items = s.stats.DestCounts.GetTopN(s.maxTalkersShown)
 	}
 
+	// Calculate dynamic column widths based on available space
+	// Layout: "  IP COUNT packets\n" or "▶ IP COUNT packets\n"
+	// Fixed: 2 (prefix) + 1 (space) + 8 (count) + 8 (" packets") = 19 chars minimum
+	const (
+		prefixWidth = 2
+		countWidth  = 8
+		suffixWidth = 8 // " packets"
+		spacing     = 1
+		minIPWidth  = 15
+		maxIPWidth  = 45
+	)
+
+	ipWidth := maxIPWidth
+	if s.width > 0 {
+		available := s.width - prefixWidth - spacing - countWidth - suffixWidth - 2
+		if available < minIPWidth {
+			ipWidth = minIPWidth
+		} else if available < maxIPWidth {
+			ipWidth = available
+		}
+	}
+
+	// Format string for consistent alignment
+	lineFormat := fmt.Sprintf("%%-%ds %%%dd packets", ipWidth, countWidth)
+
 	// Render items with selection highlighting
 	for i, item := range items {
 		prefix := "  "
-		line := fmt.Sprintf("%-45s %8d packets", item.Key, item.Count)
+		// Truncate IP if needed
+		ip := item.Key
+		if len(ip) > ipWidth {
+			ip = ip[:ipWidth-3] + "..."
+		}
+		line := fmt.Sprintf(lineFormat, ip, item.Count)
 
 		if i == s.selectedIndex {
 			result.WriteString(selectedStyle.Render("▶ " + line))
@@ -1883,8 +1913,43 @@ func (s *StatisticsView) renderLoadDistribution() string {
 		maxContrib = 100 // Avoid division by zero
 	}
 
-	barWidth := 30 // Width of the bar in characters
-	labelWidth := 20
+	// Calculate dynamic widths based on available space
+	// Layout: "  ● LABEL BAR PERCENT\n"
+	// Fixed: 2 (indent) + 2 (status icon + space) + 1 (space) + 1 (space) + 7 (percent " 100.0%") = 13 chars
+	const (
+		fixedWidth    = 13
+		minBarWidth   = 15
+		maxBarWidth   = 40
+		minLabelWidth = 12
+		maxLabelWidth = 25
+	)
+
+	barWidth := 30   // default bar width
+	labelWidth := 20 // default label width
+
+	if s.width > 0 {
+		available := s.width - fixedWidth
+		if available > minBarWidth+minLabelWidth {
+			// Distribute: 40% to label, 60% to bar
+			labelWidth = available * 4 / 10
+			barWidth = available - labelWidth
+
+			// Apply constraints
+			if labelWidth < minLabelWidth {
+				labelWidth = minLabelWidth
+			}
+			if labelWidth > maxLabelWidth {
+				labelWidth = maxLabelWidth
+				barWidth = available - labelWidth
+			}
+			if barWidth < minBarWidth {
+				barWidth = minBarWidth
+			}
+			if barWidth > maxBarWidth {
+				barWidth = maxBarWidth
+			}
+		}
+	}
 
 	for i := 0; i < maxHunters; i++ {
 		contrib := ds.HunterContributions[i]
@@ -1982,7 +2047,9 @@ func (s *StatisticsView) getProtocolColor(protocol string) lipgloss.Color {
 }
 
 // renderProtocolDistribution renders a horizontal bar chart showing protocol distribution
-func (s *StatisticsView) renderProtocolDistribution(maxProtocols int) string {
+// renderProtocolDistribution renders protocol distribution with dynamic bar widths.
+// availableWidth is the total width available for rendering (0 uses default).
+func (s *StatisticsView) renderProtocolDistribution(maxProtocols, availableWidth int) string {
 	topProtocols := s.stats.ProtocolCounts.GetTopN(maxProtocols)
 	if len(topProtocols) == 0 {
 		return "  No protocol data available\n"
@@ -2001,8 +2068,45 @@ func (s *StatisticsView) renderProtocolDistribution(maxProtocols int) string {
 		maxCount = 1 // Avoid division by zero
 	}
 
-	barWidth := 30
-	labelWidth := 10
+	// Calculate dynamic widths based on available space
+	// Layout: "  LABEL BAR PERCENT\n"
+	// Fixed: 2 (indent) + 1 (space) + 1 (space) + 7 (percent " 100.0%") = 11 chars
+	const (
+		indent        = 2
+		spacing       = 2  // spaces between elements
+		percentWidth  = 7  // " 100.0%"
+		minBarWidth   = 10 // minimum bar width
+		maxBarWidth   = 50 // maximum bar width
+		minLabelWidth = 8  // minimum label width (for "UNKNOWN")
+	)
+
+	labelWidth := 10 // default label width
+	barWidth := 30   // default bar width
+
+	if availableWidth > 0 {
+		// Calculate bar width from available space
+		fixedWidth := indent + spacing + percentWidth + minLabelWidth
+		remaining := availableWidth - fixedWidth
+
+		if remaining > minBarWidth {
+			// Distribute remaining space: 30% to label expansion, 70% to bar
+			extraForLabel := remaining * 3 / 10
+			extraForBar := remaining - extraForLabel
+
+			labelWidth = minLabelWidth + extraForLabel
+			if labelWidth > 15 {
+				labelWidth = 15 // cap label width
+			}
+
+			barWidth = extraForBar
+			if barWidth < minBarWidth {
+				barWidth = minBarWidth
+			}
+			if barWidth > maxBarWidth {
+				barWidth = maxBarWidth
+			}
+		}
+	}
 
 	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	pctStyle := lipgloss.NewStyle().Foreground(s.theme.StatusBarFg).Bold(true)

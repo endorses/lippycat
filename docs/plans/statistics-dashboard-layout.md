@@ -160,7 +160,7 @@ Current issues with the Overview sub-view:
 
 ### Phase 5: Dynamic Bar Widths
 
-- [ ] Update `renderProtocolDistribution()` to calculate bar width from available space:
+- [x] Update `renderProtocolDistribution()` to calculate bar width from available space:
   ```go
   func (s *StatisticsView) renderProtocolDistribution(count int, availableWidth int) string {
       labelWidth := 8  // "UNKNOWN " max
@@ -169,8 +169,8 @@ Current issues with the Overview sub-view:
       // ...
   }
   ```
-- [ ] Update `renderTopTalkers()` to use available width for IP/count columns
-- [ ] Update `renderLoadDistribution()` for distributed mode
+- [x] Update `renderTopTalkers()` to use available width for IP/count columns
+- [x] Update `renderLoadDistribution()` for distributed mode
 
 ### Phase 6: Polish & Testing
 

@@ -2,12 +2,24 @@ package enrichment
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
+
+// sanitizeUTF8 replaces invalid UTF-8 sequences with the replacement character.
+// This is necessary because protocol metadata can contain arbitrary bytes (especially
+// SSH version strings), but protobuf string fields require valid UTF-8.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
 
 // Enricher handles packet metadata enrichment through protocol detection
 type Enricher struct {
@@ -44,7 +56,8 @@ func (e *Enricher) Enrich(packets []*data.CapturedPacket) {
 			pkt.Metadata.Protocol = result.Protocol
 
 			// Build info string for display (same logic as TUI bridge)
-			pkt.Metadata.Info = buildInfoString(result.Protocol, result.Metadata)
+			// Sanitize UTF-8 to prevent gRPC marshaling failures on binary protocol data
+			pkt.Metadata.Info = sanitizeUTF8(buildInfoString(result.Protocol, result.Metadata))
 
 			// Extract network layer info
 			if netLayer := goPacket.NetworkLayer(); netLayer != nil {

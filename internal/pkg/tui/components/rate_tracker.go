@@ -93,6 +93,15 @@ func (rt *RateTracker) Record(totalPackets, totalBytes int64) {
 	deltaPackets := totalPackets - rt.lastPackets
 	deltaBytes := totalBytes - rt.lastBytes
 
+	// Detect counter reset (e.g., after reconnection to processor)
+	// If counters decreased, re-baseline instead of recording negative rates
+	if deltaPackets < 0 || deltaBytes < 0 {
+		rt.lastPackets = totalPackets
+		rt.lastBytes = totalBytes
+		rt.lastTime = now
+		return // Skip this sample, next one will be valid
+	}
+
 	packetsPerSec := float64(deltaPackets) / elapsed
 	bytesPerSec := float64(deltaBytes) / elapsed
 

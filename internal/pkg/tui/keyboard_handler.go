@@ -143,17 +143,19 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			// Forward to viewport for scrolling
 			cmd := m.uiState.StatisticsView.Update(tea.KeyMsg{Type: tea.KeyUp})
 			return m, cmd
-		case "tab": // Toggle talker section (TopTalkers view)
+		case "h", "l", "left", "right": // Toggle talker section (TopTalkers view)
 			if m.uiState.StatisticsView.GetSubView() == components.SubViewTopTalkers {
 				m.uiState.StatisticsView.ToggleTalkerSection()
 				return m, nil
 			}
-			// Let tab switch through to next tab
+			// Forward to viewport for scrolling
+			cmd := m.uiState.StatisticsView.Update(msg)
+			return m, cmd
 		case "enter": // Apply filter from selected talker
 			return m.handleApplyTalkerFilter()
 		case " ": // Pause/resume
 			return m.handlePauseResume()
-		case "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "p", "?":
+		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "p", "?":
 			// Let these fall through to normal handling
 		default:
 			// Forward to viewport for other keys

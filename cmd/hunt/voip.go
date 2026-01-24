@@ -59,7 +59,9 @@ func init() {
 	HuntCmd.AddCommand(voipHuntCmd)
 
 	// BPF Filter Optimization Flags (VoIP-specific)
-	voipHuntCmd.Flags().BoolVarP(&hunterUDPOnly, "udp-only", "U", false, "Capture UDP only, bypass TCP SIP (reduces CPU on TCP-heavy networks)")
+	voipHuntCmd.Flags().BoolVarP(&hunterUDPOnly, "udp-only", "U", false, "")
+	voipHuntCmd.Flags().Lookup("udp-only").Deprecated = "this flag misses TCP SIP traffic; use --sip-port instead for proper BPF filtering"
+	voipHuntCmd.Flags().Lookup("udp-only").Hidden = true
 	voipHuntCmd.Flags().StringVarP(&hunterSIPPorts, "sip-port", "S", "", "Restrict SIP capture to specific port(s), comma-separated (e.g., '5060' or '5060,5061,5080')")
 	voipHuntCmd.Flags().StringVarP(&hunterRTPPortRanges, "rtp-port-range", "R", "", "Custom RTP port range(s), comma-separated (e.g., '8000-9000' or '8000-9000,40000-50000'). Default: 10000-32768")
 
@@ -98,6 +100,12 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 	voipUDPOnly := viper.GetBool("hunter.voip.udp_only")
 	voipSIPPorts := viper.GetString("hunter.voip.sip_ports")
 	voipRTPPortRanges := viper.GetString("hunter.voip.rtp_port_ranges")
+
+	// Warn if no SIP port filter is specified - all TCP will be captured
+	if voipSIPPorts == "" && !voipUDPOnly {
+		logger.Warn("No --sip-port specified: capturing all TCP traffic for SIP detection")
+		logger.Warn("For better performance, use: --sip-port 5060 (or your SIP port)")
+	}
 
 	// Only build VoIP filter if any optimization flags are set
 	if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {

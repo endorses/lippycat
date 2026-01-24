@@ -129,6 +129,23 @@ var (
 	sipMethodBYE      = []byte("BYE")
 	sipMethodCANCEL   = []byte("CANCEL")
 	sipResponse       = []byte("SIP/2.0")
+
+	// SIP header patterns for enhanced detection (looking anywhere in payload)
+	// Used to detect TCP SIP continuation packets that don't start with a method
+	sipHeaderCallID  = []byte("Call-ID:")
+	sipHeaderCallIDc = []byte("i:") // Compact form
+	sipHeaderVia     = []byte("Via:")
+	sipHeaderViac    = []byte("v:") // Compact form
+	sipHeaderFrom    = []byte("From:")
+	sipHeaderFromc   = []byte("f:") // Compact form
+	sipHeaderTo      = []byte("To:")
+	sipHeaderToc     = []byte("t:") // Compact form
+	sipHeaderCSeq    = []byte("CSeq:")
+
+	// TCP SIP flow cache for hybrid detection
+	// Once a TCP flow is identified as SIP, subsequent packets are treated as SIP
+	tcpSIPFlowCache   = make(map[string]tcpSIPFlowEntry)
+	tcpSIPFlowCacheMu sync.RWMutex
 )
 
 // internProtocol returns an interned protocol string to reduce allocations
@@ -203,6 +220,132 @@ func isSIPBytes(payload []byte) bool {
 	}
 
 	return false
+}
+
+// tcpSIPFlowEntry tracks a TCP flow that has been identified as SIP
+type tcpSIPFlowEntry struct {
+	lastSeen time.Time
+}
+
+// tcpSIPFlowCacheMaxAge is the maximum age for flow cache entries
+const tcpSIPFlowCacheMaxAge = 5 * time.Minute
+
+// tcpSIPFlowCacheMaxSize limits cache size to prevent unbounded growth
+const tcpSIPFlowCacheMaxSize = 10000
+
+// getTCPFlowKey generates a flow key from packet 5-tuple (src/dst IP:port + protocol)
+// Uses a symmetric key so both directions of the flow map to the same entry
+func getTCPFlowKey(srcIP, dstIP, srcPort, dstPort string) string {
+	// Sort to make key symmetric (same key for both directions)
+	if srcIP < dstIP || (srcIP == dstIP && srcPort < dstPort) {
+		return srcIP + ":" + srcPort + "-" + dstIP + ":" + dstPort
+	}
+	return dstIP + ":" + dstPort + "-" + srcIP + ":" + srcPort
+}
+
+// isTCPSIPFlow checks if a TCP flow is cached as SIP
+func isTCPSIPFlow(flowKey string) bool {
+	tcpSIPFlowCacheMu.RLock()
+	entry, ok := tcpSIPFlowCache[flowKey]
+	tcpSIPFlowCacheMu.RUnlock()
+
+	if !ok {
+		return false
+	}
+
+	// Check if entry is still valid
+	if time.Since(entry.lastSeen) > tcpSIPFlowCacheMaxAge {
+		// Entry expired, remove it
+		tcpSIPFlowCacheMu.Lock()
+		delete(tcpSIPFlowCache, flowKey)
+		tcpSIPFlowCacheMu.Unlock()
+		return false
+	}
+
+	return true
+}
+
+// markTCPSIPFlow marks a TCP flow as SIP in the cache
+func markTCPSIPFlow(flowKey string) {
+	tcpSIPFlowCacheMu.Lock()
+	defer tcpSIPFlowCacheMu.Unlock()
+
+	// Cleanup old entries if cache is too large
+	if len(tcpSIPFlowCache) >= tcpSIPFlowCacheMaxSize {
+		now := time.Now()
+		for k, v := range tcpSIPFlowCache {
+			if now.Sub(v.lastSeen) > tcpSIPFlowCacheMaxAge {
+				delete(tcpSIPFlowCache, k)
+			}
+		}
+	}
+
+	tcpSIPFlowCache[flowKey] = tcpSIPFlowEntry{lastSeen: time.Now()}
+}
+
+// updateTCPSIPFlowTimestamp updates the last seen time for a flow
+func updateTCPSIPFlowTimestamp(flowKey string) {
+	tcpSIPFlowCacheMu.Lock()
+	if entry, ok := tcpSIPFlowCache[flowKey]; ok {
+		entry.lastSeen = time.Now()
+		tcpSIPFlowCache[flowKey] = entry
+	}
+	tcpSIPFlowCacheMu.Unlock()
+}
+
+// isTCPOnSIPPort checks if the packet is TCP on a standard SIP port
+func isTCPOnSIPPort(srcPort, dstPort string) bool {
+	return srcPort == "5060" || srcPort == "5061" || dstPort == "5060" || dstPort == "5061"
+}
+
+// containsSIPHeaders looks for SIP headers anywhere in the payload
+// Used to detect TCP SIP continuation packets
+func containsSIPHeaders(payload []byte) bool {
+	if len(payload) < 4 {
+		return false
+	}
+
+	// Look for key SIP headers anywhere in payload
+	// This catches continuation packets that don't start with a method
+
+	// Call-ID is the most reliable indicator
+	if containsBytes(payload, sipHeaderCallID) || containsBytes(payload, sipHeaderCallIDc) {
+		return true
+	}
+
+	// Via header is also very reliable for SIP
+	if containsBytes(payload, sipHeaderVia) || containsBytes(payload, sipHeaderViac) {
+		return true
+	}
+
+	// CSeq is SIP-specific
+	if containsBytes(payload, sipHeaderCSeq) {
+		return true
+	}
+
+	return false
+}
+
+// containsBytes checks if needle is found anywhere in haystack
+func containsBytes(haystack, needle []byte) bool {
+	if len(needle) > len(haystack) {
+		return false
+	}
+
+	// Simple byte search - could be optimized with SIMD or Boyer-Moore if needed
+	for i := 0; i <= len(haystack)-len(needle); i++ {
+		if simd.BytesEqual(haystack[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClearTCPSIPFlowCache clears the TCP SIP flow cache (used on session reset)
+func ClearTCPSIPFlowCache() {
+	tcpSIPFlowCacheMu.Lock()
+	tcpSIPFlowCache = make(map[string]tcpSIPFlowEntry)
+	tcpSIPFlowCacheMu.Unlock()
 }
 
 // SetCallTracker sets the call tracker for RTP-to-CallID mapping
@@ -694,8 +837,29 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 		if transLayer := pkt.TransportLayer(); transLayer != nil {
 			switch trans := transLayer.(type) {
 			case *layers.TCP:
-				if isSIPBytes(trans.LayerPayload()) {
+				payload := trans.LayerPayload()
+				if isSIPBytes(payload) {
 					display.Protocol = internProtocol("SIP")
+					// Cache the flow for future packets
+					flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
+					markTCPSIPFlow(flowKey)
+				} else {
+					// Hybrid TCP SIP detection for continuation packets
+					flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
+
+					if isTCPSIPFlow(flowKey) {
+						// Flow already known to be SIP
+						updateTCPSIPFlowTimestamp(flowKey)
+						display.Protocol = internProtocol("SIP")
+					} else if isTCPOnSIPPort(fields.SrcPort, fields.DstPort) {
+						// Port-based hinting
+						markTCPSIPFlow(flowKey)
+						display.Protocol = internProtocol("SIP")
+					} else if containsSIPHeaders(payload) {
+						// Header-based detection
+						markTCPSIPFlow(flowKey)
+						display.Protocol = internProtocol("SIP")
+					}
 				}
 			case *layers.UDP:
 				if isSIPBytes(trans.LayerPayload()) {
@@ -744,6 +908,42 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 		// Generate display info from metadata
 		display.Info = buildProtocolInfo(detectionResult, pkt, &display)
+
+		// If detected as SIP over TCP, cache the flow for future packets
+		if detectionResult.Protocol == "SIP" && fields.Protocol == "TCP" {
+			flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
+			markTCPSIPFlow(flowKey)
+		}
+	}
+
+	// Hybrid TCP SIP detection for continuation packets
+	// This catches TCP SIP packets that don't start with a SIP method
+	if fields.Protocol == "TCP" && (detectionResult == nil || detectionResult.Protocol == "unknown" || display.Protocol == "TCP") {
+		flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
+
+		// Check 1: Is this flow already known to be SIP?
+		if isTCPSIPFlow(flowKey) {
+			updateTCPSIPFlowTimestamp(flowKey)
+			display.Protocol = "SIP"
+			display.Info = "TCP SIP (continuation)"
+		} else {
+			// Check 2: Is this on a standard SIP port?
+			if isTCPOnSIPPort(fields.SrcPort, fields.DstPort) {
+				// Port-based hinting: treat as SIP and cache the flow
+				markTCPSIPFlow(flowKey)
+				display.Protocol = "SIP"
+				display.Info = "TCP SIP (port-based)"
+			} else {
+				// Check 3: Does payload contain SIP headers?
+				if tcp, ok := pkt.TransportLayer().(*layers.TCP); ok {
+					if containsSIPHeaders(tcp.LayerPayload()) {
+						markTCPSIPFlow(flowKey)
+						display.Protocol = "SIP"
+						display.Info = "TCP SIP (header-based)"
+					}
+				}
+			}
+		}
 	}
 
 	// Final fallback: if still unknown, list what layers we detected

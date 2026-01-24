@@ -88,16 +88,16 @@ Current issues with the Overview sub-view:
 
 ### Phase 2: Layout Infrastructure
 
-- [ ] Create `internal/pkg/tui/components/dashboard/` package:
+- [x] Create `internal/pkg/tui/components/dashboard/` package:
   - `card.go` - Card component with border, title, content
   - `grid.go` - Grid layout helper (rows, columns, gaps)
   - `stat_box.go` - Compact stat display (value + label)
-- [ ] Add width breakpoint constants to `responsive/breakpoints.go`:
-  - `DashboardNarrow = 80`
-  - `DashboardMedium = 120`
-  - `DashboardWide = 160`
-- [ ] Create `LayoutMode` type: `LayoutNarrow`, `LayoutMedium`, `LayoutWide`
-- [ ] Add `getLayoutMode(width int) LayoutMode` helper
+- [x] Add width breakpoint constants to `responsive/breakpoints.go`:
+  - `DashboardNarrowMax = 80`
+  - `DashboardMediumMax = 120`
+  - `DashboardWideMin = 160`
+- [x] Create `LayoutMode` type: `LayoutNarrow`, `LayoutMedium`, `LayoutWide`
+- [x] Add `GetLayoutMode(width int) LayoutMode` helper
 
 ### Phase 3: Card Components
 

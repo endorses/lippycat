@@ -1337,13 +1337,11 @@ func (s *StatisticsView) buildTUIContentWide(availableWidth, targetHeight int) s
 			sparklineHeight := strings.Count(sparkline, "\n") + 1
 
 			// If targetHeight is set, add padding to push sparkline to bottom
-			// Content so far: 1 line (CPU/RAM)
-			// We need: targetHeight total lines
-			// Sparkline takes: sparklineHeight lines
-			// Padding needed: targetHeight - 1 - sparklineHeight
+			// Total lines = newlines + sparklineHeight (since countLines = newlines + 1,
+			// and sparkline has sparklineHeight-1 internal newlines)
+			// To get targetHeight lines: newlines = targetHeight - sparklineHeight
 			if targetHeight > 0 {
-				headerLines := 1 // CPU/RAM line
-				paddingLines := targetHeight - headerLines - sparklineHeight
+				paddingLines := targetHeight - sparklineHeight
 				for i := 0; i < paddingLines; i++ {
 					content.WriteString("\n")
 				}

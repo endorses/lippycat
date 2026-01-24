@@ -35,6 +35,7 @@ func InitDefault() *Detector {
 		// Register application signatures (in priority order)
 		DefaultDetector.RegisterSignature(application.NewGRPCSignature())       // Priority 130
 		DefaultDetector.RegisterSignature(application.NewDNSSignature())        // Priority 120
+		DefaultDetector.RegisterSignature(application.NewQUICSignature())       // Priority 115
 		DefaultDetector.RegisterSignature(application.NewDHCPSignature())       // Priority 110
 		DefaultDetector.RegisterSignature(application.NewNTPSignature())        // Priority 105
 		DefaultDetector.RegisterSignature(application.NewSSHSignature())        // Priority 100

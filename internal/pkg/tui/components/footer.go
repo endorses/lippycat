@@ -26,16 +26,17 @@ type Footer struct {
 	theme                themes.Theme
 	filterMode           bool
 	hasFilter            bool
-	filterCount          int    // Number of stacked filters
-	streamingSave        bool   // True when streaming save is active
-	activeTab            int    // Active tab index
-	hasProtocolSelection bool   // True when a protocol is selected
-	paused               bool   // True when capture is paused
-	hasHelpSearch        bool   // True when Help tab has active search
-	viewMode             string // "packets" or "calls" for Capture tab
-	callFilterMode       bool   // True when call filter input is active
-	hasCallFilter        bool   // True when call filters are applied
-	callFilterCount      int    // Number of stacked call filters
+	filterCount          int     // Number of stacked filters
+	streamingSave        bool    // True when streaming save is active
+	activeTab            int     // Active tab index
+	hasProtocolSelection bool    // True when a protocol is selected
+	paused               bool    // True when capture is paused
+	hasHelpSearch        bool    // True when Help tab has active search
+	viewMode             string  // "packets" or "calls" for Capture tab
+	callFilterMode       bool    // True when call filter input is active
+	hasCallFilter        bool    // True when call filters are applied
+	callFilterCount      int     // Number of stacked call filters
+	statsSubView         SubView // Current sub-view in Statistics tab
 }
 
 // NewFooter creates a new footer component
@@ -118,6 +119,11 @@ func (f *Footer) SetCallFilterCount(count int) {
 	f.callFilterCount = count
 }
 
+// SetStatsSubView sets the current statistics sub-view for context-sensitive keybindings
+func (f *Footer) SetStatsSubView(sv SubView) {
+	f.statsSubView = sv
+}
+
 // getTabColor returns the background color for a given tab index
 func (f *Footer) getTabColor(tabIndex int) lipgloss.Color {
 	// Map tab index to theme color
@@ -183,9 +189,17 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		}
 
 	case 2: // Statistics tab
-		return []TabKeybind{
+		keybinds := []TabKeybind{
 			{Key: "v", Description: "view", ShortDesc: "vw", Essential: true},
+			{Key: "1-5", Description: "sections", ShortDesc: "sec", Essential: false},
+			{Key: "t", Description: "time", ShortDesc: "tm", Essential: true},
+			{Key: "e", Description: "export", ShortDesc: "exp", Essential: false},
 		}
+		// Add filter keybind when in TopTalkers view
+		if f.statsSubView == SubViewTopTalkers {
+			keybinds = append(keybinds, TabKeybind{Key: "Enter", Description: "filter", ShortDesc: "flt", Essential: true})
+		}
+		return keybinds
 
 	case 3: // Settings tab
 		return []TabKeybind{

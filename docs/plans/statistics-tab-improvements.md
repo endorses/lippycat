@@ -34,15 +34,15 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 
 ### Phase 3: Interactivity
 
-- [ ] Add sub-view navigation in `statistics.go`:
+- [x] Add sub-view navigation in `statistics.go`:
   - `v` key cycles views: Overview → Traffic → Health → Top Talkers → Distributed
   - `1`-`5` for direct access to sub-views
-- [ ] Implement click-to-filter for top talkers:
+- [x] Implement click-to-filter for top talkers:
   - Track selected section/index
   - Enter key applies filter (e.g., `host 192.168.1.100`)
-- [ ] Add time window selector (`t` key cycles through windows)
-- [ ] Add JSON export functionality (`e` key)
-- [ ] Update `footer.go` with Statistics tab keybindings
+- [x] Add time window selector (`t` key cycles through windows)
+- [x] Add JSON export functionality (`e` key)
+- [x] Update `footer.go` with Statistics tab keybindings
 
 ### Phase 4: Distributed Mode
 

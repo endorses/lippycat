@@ -36,6 +36,7 @@ func (m Model) View() string {
 	m.uiState.Footer.SetCallFilterMode(m.uiState.CallFilterMode)
 	m.uiState.Footer.SetHasCallFilter(m.callStore.HasFilter())
 	m.uiState.Footer.SetCallFilterCount(m.callStore.FilterChain.Count())
+	m.uiState.Footer.SetStatsSubView(m.uiState.StatisticsView.GetSubView())
 
 	// Render components
 	headerView := m.uiState.Header.View()

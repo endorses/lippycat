@@ -163,6 +163,14 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 
 	// If this is a filter change, try to preserve the selected packet
 	if isFilterChange {
+		// If user was auto-scrolling at the bottom, stay at bottom after filter
+		if wasAtBottom && p.autoScroll && len(p.packets) > 0 {
+			p.cursor = len(p.packets) - 1
+			p.adjustOffset()
+			// Keep autoScroll enabled so new packets continue to scroll
+			return
+		}
+
 		// Reset offset first - we'll recalculate it after finding the packet
 		p.offset = 0
 
@@ -225,14 +233,22 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 					p.offset = idealOffset
 				}
 
-				p.autoScroll = false
+				// Enable auto-scroll if cursor ended up at the bottom
+				p.autoScroll = (p.cursor == len(p.packets)-1)
 				return
 			}
 		}
-		// No packets or couldn't find anything - go to top
-		p.cursor = 0
-		p.offset = 0
-		p.autoScroll = false
+		// No packets or couldn't find anything - go to bottom with auto-scroll
+		// so new matching packets will be visible when capture resumes
+		if len(p.packets) > 0 {
+			p.cursor = len(p.packets) - 1
+			p.adjustOffset()
+			p.autoScroll = true
+		} else {
+			p.cursor = 0
+			p.offset = 0
+			p.autoScroll = true // Enable so new packets auto-scroll when they arrive
+		}
 		return
 	}
 
@@ -270,6 +286,13 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 	} else {
 		// Just adjust offset to keep cursor visible
 		p.adjustOffset()
+	}
+
+	// Ensure auto-scroll state matches cursor position:
+	// If cursor is at the bottom, enable auto-scroll so new packets will be shown
+	// If cursor is not at the bottom, disable auto-scroll to preserve user's position
+	if len(p.packets) > 0 {
+		p.autoScroll = (p.cursor == len(p.packets)-1)
 	}
 }
 

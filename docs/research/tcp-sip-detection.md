@@ -1,7 +1,7 @@
 # TCP SIP Detection: Analysis and Improvement Options
 
 **Date:** 2026-01-24
-**Status:** Complete - All Components Addressed
+**Status:** Complete - Full TCP Reassembly Implemented
 **Related Issues:** TCP SIP packets incorrectly categorized, RTP-only calls in TUI
 
 ## Executive Summary
@@ -40,8 +40,8 @@ This **fails** when:
 |------|------------------|-----------|-------------|
 | `sniff voip` | TCP reassembly | **No** | Full SIP parsing on reassembled streams |
 | `tap voip` | TCP reassembly | **No** | Full SIP parsing on reassembled streams |
-| `hunt voip` | Per-packet detection | **Yes** | VoIP filters may not match, packets dropped |
-| `watch live` | Per-packet detection | **Yes** | Calls appear as RTP-only, missing SIP signaling |
+| `hunt voip` | TCP reassembly | **No** | Full SIP parsing on reassembled streams (implemented 2026-01-24) |
+| `watch live` | Hybrid detection | **No** | Port-based + header-based + flow cache detection |
 
 ## Technical Analysis
 
@@ -125,21 +125,24 @@ The detector operates on **individual packet payloads**, not reassembled TCP str
 
 ## Improvement Options
 
-### Option A: Full TCP Reassembly in Hunter/TUI
+### Option A: Full TCP Reassembly in Hunter (IMPLEMENTED)
 
-Add `tcpassembly.Assembler` to hunter and TUI bridge.
+Add `tcpassembly.Assembler` to hunter, identical to sniff/tap modes.
 
 **Pros:**
 - Most accurate - handles all fragmentation cases
 - Consistent with sniff/tap voip
+- Reuses existing `sipStreamFactory`, `SIPStream`, and `HunterForwardHandler`
 
 **Cons:**
-- Significant memory overhead (stream buffers per flow)
-- Added latency (must wait for reassembly)
-- Complexity in hunter which should be lightweight
-- Hunter needs to forward individual packets anyway (for PCAP writing at processor)
+- Memory overhead (stream buffers per flow) - mitigated by periodic flushing
+- Added latency (must wait for reassembly) - acceptable for accurate filtering
 
-**Recommendation:** Not recommended for hunter due to complexity and overhead.
+**Implementation:** This option was implemented on 2026-01-24:
+- `VoIPPacketProcessor.SetAssembler()` wires the assembler
+- TCP packets are buffered and fed to the assembler
+- `HunterForwardHandler` receives reassembled SIP messages
+- Background goroutine flushes old streams every 30 seconds
 
 ### Option B: Flow-based Protocol Memory
 
@@ -290,10 +293,22 @@ Added tests in `bridge_test.go`:
 
 | Component | Status | Solution |
 |-----------|--------|----------|
-| `sniff voip` | Working | Uses TCP reassembly |
-| `tap voip` | Working | Uses TCP reassembly |
-| `hunt voip` | Mitigated | Use `--sip-port` flag for BPF filtering |
-| `watch live` | **Implemented** | Hybrid detection (Option E) |
+| `sniff voip` | ✅ Working | Uses TCP reassembly |
+| `tap voip` | ✅ Working | Uses TCP reassembly |
+| `hunt voip` | ✅ **Implemented** | Full TCP reassembly (Option A) - same as sniff/tap |
+| `watch live` | ✅ **Implemented** | Hybrid detection (Option E) |
+
+### Hunter TCP Reassembly Implementation (2026-01-24)
+
+The hunter node now uses the same TCP reassembly approach as sniff/tap modes:
+
+1. **`cmd/hunt/voip.go`**: Creates `tcpassembly.StreamPool` and `Assembler`
+2. **`internal/pkg/voip/voip_packet_processor.go`**: Feeds TCP packets to assembler
+3. **Background flusher**: Periodically flushes old TCP streams (every 30s, 2min timeout)
+4. **Reused components**: `sipStreamFactory`, `SIPStream`, `HunterForwardHandler`
+
+This ensures TCP SIP messages are properly reassembled before filter matching, eliminating
+the fragmentation issues that previously caused TCP SIP to be missed.
 
 ## References
 

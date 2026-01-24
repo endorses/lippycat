@@ -6,12 +6,14 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/tcpassembly"
 )
 
 // VoIPPacketProcessor processes VoIP packets (SIP/RTP) with buffering for hunter mode
 type VoIPPacketProcessor struct {
 	udpHandler *UDPPacketHandler
-	tcpHandler *HunterForwardHandler // Optional: for wiring ApplicationFilter to TCP handler
+	tcpHandler *HunterForwardHandler  // Optional: for wiring ApplicationFilter to TCP handler
+	assembler  *tcpassembly.Assembler // TCP stream assembler for SIP reassembly
 }
 
 // NewVoIPPacketProcessor creates a packet processor for VoIP buffering in hunter mode
@@ -25,6 +27,12 @@ func NewVoIPPacketProcessor(forwarder PacketForwarder, bufferMgr *BufferManager)
 // This allows SetApplicationFilter to propagate to both UDP and TCP handlers.
 func (p *VoIPPacketProcessor) SetTCPHandler(handler *HunterForwardHandler) {
 	p.tcpHandler = handler
+}
+
+// SetAssembler sets the TCP stream assembler for SIP message reassembly.
+// When set, TCP packets are fed to the assembler for stream reconstruction.
+func (p *VoIPPacketProcessor) SetAssembler(assembler *tcpassembly.Assembler) {
+	p.assembler = assembler
 }
 
 // SetApplicationFilter sets the application filter for proper filter matching.
@@ -62,10 +70,29 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 	// Handle based on transport protocol
 	switch layer := packet.TransportLayer().(type) {
 	case *layers.TCP:
-		// TCP packets are handled by the TCP stream assembler (NewSipStreamFactory)
-		// which reassembles SIP messages and checks filters via HunterForwardHandler.
-		// Return false to let the assembler handle them - don't forward raw TCP packets.
-		// The assembler will forward complete, filtered SIP messages.
+		// TCP packets are fed to the TCP stream assembler for SIP reassembly.
+		// The assembler reconstructs complete SIP messages and calls HunterForwardHandler.
+		// HunterForwardHandler checks filters and forwards matched calls to processor.
+		if p.assembler != nil {
+			// Get the network flow for buffering and assembly
+			flow := packet.NetworkLayer().NetworkFlow()
+
+			// Buffer the raw packet for later forwarding when SIP message is matched
+			bufferTCPPacket(flow, pktInfo)
+
+			// Feed the packet to the TCP assembler for stream reconstruction
+			p.assembler.AssembleWithTimestamp(
+				flow,
+				layer,
+				packet.Metadata().Timestamp,
+			)
+		} else {
+			logger.Debug("TCP packet received but no assembler configured - dropping",
+				"src_port", layer.SrcPort,
+				"dst_port", layer.DstPort)
+		}
+		// Return false - TCP packets are handled asynchronously via the assembler
+		// The HunterForwardHandler will forward matched packets when SIP is reassembled
 		return false
 
 	case *layers.UDP:

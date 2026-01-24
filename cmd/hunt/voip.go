@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/endorses/lippycat/internal/pkg/voip"
+	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -246,11 +247,17 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 // runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly
 func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager) error {
 	// Create TCP SIP handler for hunter mode
+	// This handler is called when complete SIP messages are reassembled from TCP streams
 	tcpHandler := voip.NewHunterForwardHandler(h, bufferMgr)
 
 	// Create TCP stream factory with hunter handler
-	// The factory will be automatically cleaned up when context is cancelled
-	_ = voip.NewSipStreamFactory(ctx, tcpHandler)
+	// The factory creates SIPStream instances that parse TCP streams for SIP messages
+	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
+
+	// Create stream pool and assembler for TCP reassembly
+	// This is the same pattern used in sniff/tap modes (see voip/core.go)
+	streamPool := tcpassembly.NewStreamPool(streamFactory)
+	assembler := tcpassembly.NewAssembler(streamPool)
 
 	// Create VoIP packet processor for UDP buffering
 	// This handles UDP SIP/RTP packets with buffering and filtering
@@ -261,13 +268,23 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 	// for both UDP and TCP SIP traffic
 	processor.SetTCPHandler(tcpHandler)
 
+	// Wire the TCP assembler to the processor
+	// TCP packets will be fed to the assembler for stream reconstruction
+	processor.SetAssembler(assembler)
+
 	h.SetPacketProcessor(processor)
 
-	logger.Info("VoIP hunter initialized with complete buffering support",
+	logger.Info("VoIP hunter initialized with full TCP reassembly",
 		"tcp_handler", "HunterForwardHandler",
+		"tcp_assembler", "tcpassembly.Assembler",
 		"udp_handler", "UDPPacketHandler",
 		"buffer_manager", "enabled",
 		"features", "TCP SIP reassembly, UDP SIP buffering, UDP RTP buffering")
+
+	// Start background goroutine to periodically flush old TCP streams
+	// This prevents memory leaks from incomplete streams and ensures
+	// timely processing of SIP messages in slow connections
+	go runTCPStreamFlusher(ctx, assembler)
 
 	// Start the hunter's normal operation
 	// The hunter will capture packets and forward them via its existing pipeline:
@@ -280,5 +297,36 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 	// Block until context is done
 	<-ctx.Done()
+
+	// Flush all remaining TCP streams on shutdown
+	logger.Debug("Flushing TCP assembler streams on shutdown")
+	flushed, closed := assembler.FlushOlderThan(time.Now())
+	logger.Debug("TCP streams flushed on shutdown", "flushed", flushed, "closed", closed)
+
 	return nil
+}
+
+// runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks
+// and ensure timely processing of SIP messages in slow or incomplete connections.
+func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) {
+	// Flush streams older than 2 minutes every 30 seconds
+	// This matches the behavior in sniff/tap modes
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Flush streams that haven't received data in 2 minutes
+			cutoff := time.Now().Add(-2 * time.Minute)
+			flushed, closed := assembler.FlushOlderThan(cutoff)
+			if flushed > 0 || closed > 0 {
+				logger.Debug("Flushed old TCP streams",
+					"flushed", flushed,
+					"closed", closed)
+			}
+		}
+	}
 }

@@ -53,16 +53,26 @@ type StatisticsView struct {
 	dirty       bool      // Content needs re-render
 	lastRender  time.Time // Last time content was rendered
 	isVisible   bool      // Tab is currently visible
+
+	// Phase 1: Core infrastructure
+	rateTracker *RateTracker // Time-series rate sampling
+	dropStats   *DropStats   // Aggregated drop statistics
+	timeWindow  TimeWindow   // Current time window for display
+	startTime   time.Time    // Session start time for "All" window
 }
 
 // NewStatisticsView creates a new statistics view
 func NewStatisticsView() StatisticsView {
 	return StatisticsView{
-		width:  80,
-		height: 20,
-		theme:  themes.Solarized(),
-		stats:  nil,
-		ready:  false,
+		width:       80,
+		height:      20,
+		theme:       themes.Solarized(),
+		stats:       nil,
+		ready:       false,
+		rateTracker: DefaultRateTracker(),
+		dropStats:   NewDropStats(),
+		timeWindow:  TimeWindow1Min,
+		startTime:   time.Now(),
 	}
 }
 
@@ -106,6 +116,61 @@ func (s *StatisticsView) SetVisible(visible bool) {
 	s.isVisible = visible
 	if visible {
 		s.dirty = true // Force re-render when becoming visible
+	}
+}
+
+// GetTimeWindow returns the current time window.
+func (s *StatisticsView) GetTimeWindow() TimeWindow {
+	return s.timeWindow
+}
+
+// SetTimeWindow sets the time window for statistics display.
+func (s *StatisticsView) SetTimeWindow(tw TimeWindow) {
+	s.timeWindow = tw
+	s.dirty = true
+}
+
+// CycleTimeWindow advances to the next time window.
+func (s *StatisticsView) CycleTimeWindow() TimeWindow {
+	s.timeWindow = s.timeWindow.Next()
+	s.dirty = true
+	return s.timeWindow
+}
+
+// RecordRates records rate samples based on current statistics.
+// Should be called periodically (e.g., every second) from the TUI update loop.
+func (s *StatisticsView) RecordRates() {
+	if s.stats == nil || s.rateTracker == nil {
+		return
+	}
+	s.rateTracker.Record(s.stats.TotalPackets, s.stats.TotalBytes)
+}
+
+// GetRateStats returns current rate statistics.
+func (s *StatisticsView) GetRateStats() RateStats {
+	if s.rateTracker == nil {
+		return RateStats{}
+	}
+	return s.rateTracker.GetStats()
+}
+
+// GetDropStats returns the drop statistics aggregator.
+func (s *StatisticsView) GetDropStats() *DropStats {
+	return s.dropStats
+}
+
+// GetDropSummary returns a summary of drop statistics.
+func (s *StatisticsView) GetDropSummary() DropSummary {
+	if s.dropStats == nil {
+		return DropSummary{}
+	}
+	return s.dropStats.GetSummary()
+}
+
+// UpdateDropsFromBridge updates drop stats from bridge statistics.
+func (s *StatisticsView) UpdateDropsFromBridge() {
+	if s.dropStats != nil && s.bridgeStats != nil {
+		s.dropStats.UpdateFromBridgeStats(s.bridgeStats)
 	}
 }
 
@@ -166,11 +231,15 @@ func (s *StatisticsView) renderContent() string {
 	valueStyle := lipgloss.NewStyle().
 		Foreground(s.theme.StatusBarFg)
 
+	// Time window header
+	result.WriteString(s.renderTimeWindowHeader())
+	result.WriteString("\n\n")
+
 	// Section: Overview
 	result.WriteString(titleStyle.Render("📊 Overview"))
 	result.WriteString("\n\n")
 	result.WriteString(labelStyle.Render("Total Packets: "))
-	result.WriteString(valueStyle.Render(fmt.Sprintf("%d", s.stats.TotalPackets)))
+	result.WriteString(valueStyle.Render(formatNumber64(s.stats.TotalPackets)))
 	result.WriteString("\n")
 	result.WriteString(labelStyle.Render("Total Bytes: "))
 	result.WriteString(valueStyle.Render(formatBytes(s.stats.TotalBytes)))
@@ -184,7 +253,14 @@ func (s *StatisticsView) renderContent() string {
 	result.WriteString("\n")
 	result.WriteString(labelStyle.Render("Min/Max Size: "))
 	result.WriteString(valueStyle.Render(fmt.Sprintf("%d / %d bytes", s.stats.MinPacketSize, s.stats.MaxPacketSize)))
+	result.WriteString("\n")
+	result.WriteString(labelStyle.Render("Session Duration: "))
+	result.WriteString(valueStyle.Render(formatDuration(time.Since(s.startTime))))
 	result.WriteString("\n\n")
+
+	// Section: Traffic Rate
+	result.WriteString(s.renderRateSection(titleStyle, labelStyle, valueStyle))
+	result.WriteString("\n")
 
 	// Section: Protocol Distribution
 	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
@@ -303,4 +379,128 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// formatNumber64 formats an int64 number with thousand separators
+func formatNumber64(n int64) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+
+	// Build string from right to left with commas
+	s := fmt.Sprintf("%d", n)
+	result := make([]byte, 0, len(s)+len(s)/3)
+
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, byte(c))
+	}
+	return string(result)
+}
+
+// formatDuration formats a duration in a human-readable way
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		m := int(d.Minutes())
+		s := int(d.Seconds()) % 60
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	return fmt.Sprintf("%dh %dm", h, m)
+}
+
+// formatRate formats a rate value with appropriate units
+func formatRate(rate float64) string {
+	if rate < 1 {
+		return fmt.Sprintf("%.2f", rate)
+	}
+	if rate < 1000 {
+		return fmt.Sprintf("%.0f", rate)
+	}
+	if rate < 1000000 {
+		return fmt.Sprintf("%.1fK", rate/1000)
+	}
+	return fmt.Sprintf("%.1fM", rate/1000000)
+}
+
+// formatBytesPerSec formats bytes/second with appropriate units
+func formatBytesPerSec(bytesPerSec float64) string {
+	if bytesPerSec < 1024 {
+		return fmt.Sprintf("%.0f B/s", bytesPerSec)
+	}
+	if bytesPerSec < 1024*1024 {
+		return fmt.Sprintf("%.1f KB/s", bytesPerSec/1024)
+	}
+	if bytesPerSec < 1024*1024*1024 {
+		return fmt.Sprintf("%.1f MB/s", bytesPerSec/(1024*1024))
+	}
+	return fmt.Sprintf("%.1f GB/s", bytesPerSec/(1024*1024*1024))
+}
+
+// renderTimeWindowHeader renders the time window selector header
+func (s *StatisticsView) renderTimeWindowHeader() string {
+	var result strings.Builder
+
+	// Style for selected window
+	selectedStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(s.theme.SelectionFg)
+
+	// Style for unselected windows
+	normalStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	result.WriteString("Time Window: ")
+
+	for _, tw := range AllTimeWindows() {
+		if tw == s.timeWindow {
+			result.WriteString(selectedStyle.Render("[" + tw.String() + "]"))
+		} else {
+			result.WriteString(normalStyle.Render(" " + tw.String() + " "))
+		}
+		result.WriteString(" ")
+	}
+
+	result.WriteString(normalStyle.Render("  (t to cycle)"))
+
+	return result.String()
+}
+
+// renderRateSection renders the traffic rate section
+func (s *StatisticsView) renderRateSection(titleStyle, labelStyle, valueStyle lipgloss.Style) string {
+	var result strings.Builder
+
+	rateStats := s.GetRateStats()
+
+	result.WriteString(titleStyle.Render("📈 Traffic Rate"))
+	result.WriteString("\n\n")
+
+	// Current rates
+	result.WriteString(labelStyle.Render("Current: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
+		formatRate(rateStats.CurrentPacketsPerSec),
+		formatBytesPerSec(rateStats.CurrentBytesPerSec))))
+	result.WriteString("\n")
+
+	// Average rates
+	result.WriteString(labelStyle.Render("Average: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
+		formatRate(rateStats.AvgPacketsPerSec),
+		formatBytesPerSec(rateStats.AvgBytesPerSec))))
+	result.WriteString("\n")
+
+	// Peak rates
+	result.WriteString(labelStyle.Render("Peak:    "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
+		formatRate(rateStats.PeakPacketsPerSec),
+		formatBytesPerSec(rateStats.PeakBytesPerSec))))
+	result.WriteString("\n")
+
+	return result.String()
 }

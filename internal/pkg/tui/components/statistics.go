@@ -933,12 +933,7 @@ func (s *StatisticsView) renderOverviewSubView() string {
 	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
 	result.WriteString("\n\n")
 
-	topProtocols := s.stats.ProtocolCounts.GetTopN(5)
-	for _, pc := range topProtocols {
-		percentage := float64(pc.Count) / float64(s.stats.TotalPackets) * 100
-		result.WriteString(fmt.Sprintf("  %-10s %6d packets  (%.1f%%)\n",
-			pc.Key, pc.Count, percentage))
-	}
+	result.WriteString(s.renderProtocolDistribution(5))
 	result.WriteString("\n")
 
 	// Section: Top Sources (compact, 5 items)
@@ -1040,12 +1035,7 @@ func (s *StatisticsView) renderTrafficSubView() string {
 	result.WriteString(titleStyle.Render("🔌 Protocol Distribution"))
 	result.WriteString("\n\n")
 
-	topProtocols := s.stats.ProtocolCounts.GetTopN(10)
-	for _, pc := range topProtocols {
-		percentage := float64(pc.Count) / float64(s.stats.TotalPackets) * 100
-		result.WriteString(fmt.Sprintf("  %-12s %8d packets  (%5.1f%%)\n",
-			pc.Key, pc.Count, percentage))
-	}
+	result.WriteString(s.renderProtocolDistribution(10))
 
 	return result.String()
 }
@@ -1196,7 +1186,7 @@ func (s *StatisticsView) renderTopTalkersSubView() string {
 		result.WriteString(" ")
 		result.WriteString(activeTabStyle.Render("⬇️ Destinations"))
 	}
-	result.WriteString(hintStyle.Render("  (Tab to switch, Enter to filter)"))
+	result.WriteString(hintStyle.Render("  (h/l or ←/→ to switch, Enter to filter)"))
 	result.WriteString("\n\n")
 
 	// Get items based on section
@@ -1528,6 +1518,98 @@ func (s *StatisticsView) renderLoadDistribution() string {
 	if len(ds.HunterContributions) > maxHunters {
 		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 		result.WriteString(dimStyle.Render(fmt.Sprintf("  ... and %d more hunters\n", len(ds.HunterContributions)-maxHunters)))
+	}
+
+	return result.String()
+}
+
+// getProtocolColor returns the theme color for a protocol
+func (s *StatisticsView) getProtocolColor(protocol string) lipgloss.Color {
+	switch protocol {
+	case "TCP":
+		return s.theme.TCPColor
+	case "UDP":
+		return s.theme.UDPColor
+	case "SIP":
+		return s.theme.SIPColor
+	case "RTP":
+		return s.theme.RTPColor
+	case "DNS":
+		return s.theme.DNSColor
+	case "HTTP", "HTTPS", "HTTP2", "gRPC":
+		return s.theme.HTTPColor
+	case "TLS", "SSL":
+		return s.theme.TLSColor
+	case "SSH":
+		return s.theme.SSHColor
+	case "ICMP":
+		return s.theme.ICMPColor
+	case "ICMPv6":
+		return s.theme.ICMPv6Color
+	case "ARP":
+		return s.theme.ARPColor
+	case "OpenVPN", "WireGuard", "IKEv2", "IKEv1", "L2TP", "PPTP":
+		return s.theme.VPNColor
+	case "NTP":
+		return s.theme.InfoColor
+	default:
+		return s.theme.Foreground
+	}
+}
+
+// renderProtocolDistribution renders a horizontal bar chart showing protocol distribution
+func (s *StatisticsView) renderProtocolDistribution(maxProtocols int) string {
+	topProtocols := s.stats.ProtocolCounts.GetTopN(maxProtocols)
+	if len(topProtocols) == 0 {
+		return "  No protocol data available\n"
+	}
+
+	var result strings.Builder
+
+	// Find max count for scaling
+	maxCount := int64(0)
+	for _, pc := range topProtocols {
+		if pc.Count > maxCount {
+			maxCount = pc.Count
+		}
+	}
+	if maxCount < 1 {
+		maxCount = 1 // Avoid division by zero
+	}
+
+	barWidth := 30
+	labelWidth := 10
+
+	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	pctStyle := lipgloss.NewStyle().Foreground(s.theme.StatusBarFg).Bold(true)
+
+	for _, pc := range topProtocols {
+		// Get protocol-specific color
+		protocolColor := s.getProtocolColor(pc.Key)
+		barStyle := lipgloss.NewStyle().Foreground(protocolColor)
+		labelStyle := lipgloss.NewStyle().Foreground(protocolColor)
+
+		// Calculate bar length
+		barLen := int(float64(pc.Count) / float64(maxCount) * float64(barWidth))
+		if barLen < 1 && pc.Count > 0 {
+			barLen = 1
+		}
+
+		// Build the bar
+		bar := strings.Repeat("█", barLen)
+		empty := strings.Repeat("░", barWidth-barLen)
+
+		// Calculate percentage
+		percentage := float64(pc.Count) / float64(s.stats.TotalPackets) * 100
+
+		result.WriteString("  ")
+		result.WriteString(labelStyle.Render(fmt.Sprintf("%-*s", labelWidth, pc.Key)))
+		result.WriteString(" ")
+		result.WriteString(barStyle.Render(bar))
+		result.WriteString(emptyStyle.Render(empty))
+		result.WriteString(" ")
+		result.WriteString(pctStyle.Render(fmt.Sprintf("%5.1f%%", percentage)))
+		result.WriteString("\n")
 	}
 
 	return result.String()

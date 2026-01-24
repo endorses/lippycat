@@ -76,6 +76,7 @@ func (m *Model) updateBridgeStats() {
 		MaxQueueDepth:    stats.MaxQueueDepth,
 		SamplingRatio:    stats.SamplingRatio,
 		RecentDropRate:   stats.RecentDropRate,
+		Running:          stats.Running,
 	})
 }
 

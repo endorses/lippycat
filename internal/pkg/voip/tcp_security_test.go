@@ -284,37 +284,37 @@ func TestSIPStream_CallIDParsing(t *testing.T) {
 	}{
 		{
 			name:           "Standard Call-ID header",
-			input:          "Call-ID: abc123@example.com\r\n\r\n",
+			input:          "INVITE sip:user@example.com SIP/2.0\r\nCall-ID: abc123@example.com\r\n\r\n",
 			expectedCallID: "abc123@example.com",
 			description:    "Standard Call-ID should be parsed",
 		},
 		{
 			name:           "Short form Call-ID (i:)",
-			input:          "i: short-call-id\r\n\r\n",
+			input:          "SIP/2.0 200 OK\r\ni: short-call-id\r\n\r\n",
 			expectedCallID: "short-call-id",
 			description:    "Short form Call-ID should be parsed",
 		},
 		{
 			name:           "Call-ID with extra whitespace",
-			input:          "Call-ID:   whitespace-call-id   \r\n\r\n",
+			input:          "REGISTER sip:registrar.example.com SIP/2.0\r\nCall-ID:   whitespace-call-id   \r\n\r\n",
 			expectedCallID: "whitespace-call-id",
 			description:    "Whitespace should be trimmed",
 		},
 		{
 			name:           "Call-ID with special characters",
-			input:          "Call-ID: call-id-with-@#$%^&*()_+\r\n\r\n",
+			input:          "OPTIONS sip:user@example.com SIP/2.0\r\nCall-ID: call-id-with-@#$%^&*()_+\r\n\r\n",
 			expectedCallID: "call-id-with-@#$%^&*()_+",
 			description:    "Special characters should be preserved",
 		},
 		{
 			name:           "Empty Call-ID",
-			input:          "Call-ID: \r\n\r\n",
+			input:          "BYE sip:user@example.com SIP/2.0\r\nCall-ID: \r\n\r\n",
 			expectedCallID: "",
 			description:    "Empty Call-ID should be handled",
 		},
 		{
 			name:           "Non-Call-ID line",
-			input:          "From: user@example.com\r\n\r\n",
+			input:          "ACK sip:user@example.com SIP/2.0\r\nFrom: user@example.com\r\n\r\n",
 			expectedCallID: "",
 			description:    "Non-Call-ID lines should be ignored",
 		},

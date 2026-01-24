@@ -38,15 +38,27 @@ var (
 	liveEnableGPU    bool
 	liveGPUBackend   string
 	liveGPUBatchSize int
+	liveDebugLog     string
 )
 
 func runLive(cmd *cobra.Command, args []string) {
 	// Set TLS configuration in viper for use by TUI components (if user switches to remote mode)
 	configureTLSViper(cmd)
 
-	// Disable logging to prevent corrupting TUI display
-	logger.Disable()
-	defer logger.Enable()
+	// Handle debug logging - if specified, write logs to file instead of disabling
+	if liveDebugLog != "" {
+		f, err := os.OpenFile(liveDebugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening debug log file: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		logger.UseFile(f)
+	} else {
+		// Disable logging to prevent corrupting TUI display
+		logger.Disable()
+		defer logger.Enable()
+	}
 
 	// Load buffer size from config, use flag value as fallback
 	configBufferSize := viper.GetInt("tui.buffer_size")
@@ -116,6 +128,7 @@ func init() {
 	liveCmd.Flags().BoolVar(&liveEnableGPU, "enable-gpu", false, "enable GPU-accelerated VoIP parsing")
 	liveCmd.Flags().StringVarP(&liveGPUBackend, "gpu-backend", "g", "auto", "GPU backend: 'auto', 'cuda', 'opencl', 'cpu-simd'")
 	liveCmd.Flags().IntVar(&liveGPUBatchSize, "gpu-batch-size", 100, "batch size for GPU processing")
+	liveCmd.Flags().StringVar(&liveDebugLog, "debug-log", "", "write debug logs to file (helps diagnose capture issues)")
 
 	_ = viper.BindPFlag("promiscuous", liveCmd.Flags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("tui.gpu.enabled", liveCmd.Flags().Lookup("enable-gpu"))

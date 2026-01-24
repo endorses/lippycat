@@ -92,6 +92,11 @@ var (
 	callTracker   *CallTracker
 	callTrackerMu sync.RWMutex
 
+	// VoIP mode flag - controls whether TCP reassembly is active
+	// Only when VoIP protocol is selected should TCP be reassembled for SIP
+	// This mirrors the behavior of `lc hunt` vs `lc hunt voip`
+	voipModeEnabled int32 // atomic: 0 = disabled, 1 = enabled
+
 	// String interning for protocol names (reduce memory footprint)
 	protocolStrings = map[string]string{
 		"TCP":       "TCP",
@@ -315,6 +320,22 @@ func ClearCallTracker() {
 	}
 }
 
+// SetVoIPModeEnabled enables or disables VoIP mode for TCP reassembly.
+// When enabled, TCP traffic is passed through the SIP reassembler.
+// When disabled, TCP traffic is not reassembled (matching `lc hunt` behavior).
+func SetVoIPModeEnabled(enabled bool) {
+	if enabled {
+		atomic.StoreInt32(&voipModeEnabled, 1)
+	} else {
+		atomic.StoreInt32(&voipModeEnabled, 0)
+	}
+}
+
+// IsVoIPModeEnabled returns whether VoIP mode is active for TCP reassembly.
+func IsVoIPModeEnabled() bool {
+	return atomic.LoadInt32(&voipModeEnabled) == 1
+}
+
 // BridgeStats contains statistics about the packet bridge for diagnostics.
 // These stats help identify backpressure issues where the TUI can't keep up
 // with packet ingestion rate.
@@ -327,6 +348,7 @@ type BridgeStats struct {
 	MaxQueueDepth    int64 // Peak queue depth seen
 	SamplingRatio    int64 // Current sampling ratio * 1000 (e.g., 1000 = 100%, 500 = 50%)
 	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s window, for throttling)
+	Running          int32 // 1 if bridge is running, 0 if stopped
 }
 
 // recentDropTracker tracks batch drops over a sliding window for throttling
@@ -502,6 +524,7 @@ func GetBridgeStats() BridgeStats {
 		MaxQueueDepth:    atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
 		SamplingRatio:    atomic.LoadInt64(&bridgeStats.SamplingRatio),
 		RecentDropRate:   dropTracker.getRecentDropRate(),
+		Running:          atomic.LoadInt32(&bridgeStats.Running),
 	}
 }
 
@@ -514,6 +537,7 @@ func ResetBridgeStats() {
 	atomic.StoreInt64(&bridgeStats.QueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.MaxQueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // Default to 100%
+	// Note: Running is not reset here - it reflects actual bridge state
 }
 
 // StartPacketBridge creates a bridge between packet capture and TUI.
@@ -527,6 +551,10 @@ func ResetBridgeStats() {
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal) {
+	// Mark bridge as running
+	atomic.StoreInt32(&bridgeStats.Running, 1)
+	defer atomic.StoreInt32(&bridgeStats.Running, 0)
+
 	const (
 		targetPacketsPerSecond = 1000                      // Target display rate (increased for bulk transfers)
 		batchInterval          = constants.TUITickInterval // Batch interval
@@ -707,6 +735,9 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		case pktInfo, ok := <-packetChan:
 			if !ok {
 				// Channel closed, send remaining batch and shutdown consumer
+				logger.Info("Bridge: packet channel closed, shutting down",
+					"packets_received", atomic.LoadInt64(&bridgeStats.PacketsReceived),
+					"batches_sent", atomic.LoadInt64(&bridgeStats.BatchesSent))
 				sendBatch()
 				close(tuiBatchChan)
 				<-consumerDone // Wait for consumer to finish
@@ -729,12 +760,17 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			hasCallTracker := GetCallTracker() != nil
 
 			// Feed TCP packets to the assembler for SIP reassembly
-			// This detects complete SIP messages and marks flows in the cache
-			if tcpLayer := pktInfo.Packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-				tcp := tcpLayer.(*layers.TCP)
-				// Get network flow for assembler
-				if netFlow := pktInfo.Packet.NetworkLayer(); netFlow != nil {
-					assembler.AssembleWithTimestamp(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
+			// Only when VoIP mode is enabled - this mirrors the behavior of
+			// `lc hunt` (no TCP reassembly) vs `lc hunt voip` (with TCP reassembly)
+			// Without this check, ALL TCP traffic would be processed through the
+			// SIP reassembler, causing blocking/hanging with non-SIP traffic
+			if IsVoIPModeEnabled() {
+				if tcpLayer := pktInfo.Packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+					tcp := tcpLayer.(*layers.TCP)
+					// Get network flow for assembler
+					if netFlow := pktInfo.Packet.NetworkLayer(); netFlow != nil {
+						assembler.AssembleWithTimestamp(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
+					}
 				}
 			}
 

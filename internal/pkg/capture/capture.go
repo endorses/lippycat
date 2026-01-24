@@ -358,39 +358,57 @@ func (pb *PacketBuffer) GetDropped() int64 {
 func (pb *PacketBuffer) Close() {
 	// Use mutex to ensure no Send() can Add() after we set closed and before Wait()
 	pb.sendersMu.Lock()
-	if !atomic.CompareAndSwapInt32(&pb.closed, 0, 1) {
-		// Already closed, return early
-		pb.sendersMu.Unlock()
-		return
-	}
+	alreadyClosed := !atomic.CompareAndSwapInt32(&pb.closed, 0, 1)
 	pb.sendersMu.Unlock()
 
-	// Now no new Add() calls can happen because Send() checks closed under lock
-	pb.cancel()
+	if !alreadyClosed {
+		// First Close() call - do full cleanup
+		pb.cancel()
 
-	// Wait for all active Send() operations to complete
-	// This prevents closing the channel while senders are still active
-	pb.sendersWg.Wait()
+		// Wait for all active Send() operations to complete
+		pb.sendersWg.Wait()
 
-	// Close both input channels (order matters: close sipCh first to drain priority packets)
-	close(pb.sipCh)
-	close(pb.ch)
+		// Close both input channels (order matters: close sipCh first to drain priority packets)
+		close(pb.sipCh)
+		close(pb.ch)
+	}
 
-	// Wait for merger goroutine to finish (it will close mergedCh)
+	// Always wait for merger goroutine to finish (it will close mergedCh)
 	pb.mergerWg.Wait()
 
-	// Log drop statistics
-	dropped := atomic.LoadInt64(&pb.dropped)
-	sipDropped := atomic.LoadInt64(&pb.sipDropped)
-	if dropped > 0 || sipDropped > 0 {
-		logger.Info("Packet buffer closed with drops",
-			"regular_dropped", dropped,
-			"sip_dropped", sipDropped)
+	// Log drop statistics (only on first close to avoid duplicate logs)
+	if !alreadyClosed {
+		dropped := atomic.LoadInt64(&pb.dropped)
+		sipDropped := atomic.LoadInt64(&pb.sipDropped)
+		if dropped > 0 || sipDropped > 0 {
+			logger.Info("Packet buffer closed with drops",
+				"regular_dropped", dropped,
+				"sip_dropped", sipDropped)
+		}
 	}
 }
 
 func (pb *PacketBuffer) IsClosed() bool {
 	return atomic.LoadInt32(&pb.closed) == 1
+}
+
+// CloseInputs signals that no more packets will be sent to this buffer.
+// Unlike Close(), this does NOT cancel the context, allowing the merger
+// to drain remaining packets before closing the output channel.
+func (pb *PacketBuffer) CloseInputs() {
+	pb.sendersMu.Lock()
+	if !atomic.CompareAndSwapInt32(&pb.closed, 0, 1) {
+		pb.sendersMu.Unlock()
+		return
+	}
+	pb.sendersMu.Unlock()
+
+	// Wait for all active Send() operations to complete
+	pb.sendersWg.Wait()
+
+	// Close input channels - merger will drain and close mergedCh
+	close(pb.sipCh)
+	close(pb.ch)
 }
 
 func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
@@ -476,20 +494,25 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 		processorWg.Done()
 	}
 
-	// Monitor for capture failures - exit early if all captures fail
-	captureFailureCh := make(chan struct{})
+	// Monitor for capture completion - close inputs when all captures finish
+	// This handles both failed starts AND normal completion (PCAP EOF, interface down)
+	captureFinishedCh := make(chan struct{})
 	go func() {
-		// Wait for all capture goroutines to complete their initialization
 		wg.Wait()
-		// If no captures succeeded, all goroutines failed (likely permission error)
+
+		// Signal end of input so processor can drain and exit
+		if packetProcessor != nil {
+			packetBuffer.CloseInputs()
+		}
+
 		if captureSuccessCount.Load() == 0 {
 			logger.Error("All capture interfaces failed to start - exiting")
-			// Close buffer immediately so processor can exit
-			if packetProcessor != nil {
-				packetBuffer.Close()
-			}
-			close(captureFailureCh)
+		} else {
+			logger.Info("All capture interfaces finished",
+				"interfaces_started", captureSuccessCount.Load())
 		}
+
+		close(captureFinishedCh)
 	}()
 
 	shutdownCh := make(chan struct{})
@@ -514,14 +537,13 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 		close(done)
 	}()
 
-	// Wait for either completion, shutdown, or capture failure
+	// Wait for either completion, shutdown, or capture finish
 	select {
 	case <-done:
 		// Completed normally (before or after shutdown)
 		return
-	case <-captureFailureCh:
-		// All captures failed - exit immediately
-		// Wait briefly for processor to finish draining
+	case <-captureFinishedCh:
+		// All captures finished - wait for processor to drain
 		select {
 		case <-done:
 			return
@@ -588,10 +610,12 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				// Include both flushed and unflushed counts for accurate reporting
 				count := packetCount.Load() + localCount.Load()
 				dropped := atomic.LoadInt64(&buffer.dropped)
-				logger.Info("Interface packet statistics",
+				logger.Info("Capture heartbeat",
 					"interface", iface.Name(),
 					"packets_processed", count,
-					"packets_dropped", dropped)
+					"packets_dropped", dropped,
+					"buffer_len", buffer.Len(),
+					"buffer_closed", buffer.IsClosed())
 			}
 		}
 	}()
@@ -626,7 +650,9 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			return
 		case packet, ok := <-packetCh:
 			if !ok {
-				logger.Debug("Packet channel closed", "interface", iface.Name())
+				logger.Info("Capture: packet channel closed unexpectedly",
+					"interface", iface.Name(),
+					"packets_processed", packetCount.Load()+localCount.Load())
 				// Channel closed, flush and exit
 				if lc := localCount.Load(); lc > 0 {
 					packetCount.Add(lc)

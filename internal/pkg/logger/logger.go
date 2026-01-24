@@ -76,6 +76,19 @@ func UseStderr() {
 	defaultLogger = slog.New(handler)
 }
 
+// UseFile reconfigures the logger to write to a file (useful for TUI debug mode)
+// The caller is responsible for closing the file when done.
+func UseFile(w io.Writer) {
+	disabledMux.Lock()
+	defer disabledMux.Unlock()
+	disabled = false
+	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: false,
+	})
+	defaultLogger = slog.New(handler)
+}
+
 // IsDisabled returns whether logging is disabled
 func IsDisabled() bool {
 	disabledMux.RLock()

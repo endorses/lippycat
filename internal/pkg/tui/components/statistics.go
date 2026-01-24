@@ -214,6 +214,7 @@ type BridgeStatistics struct {
 	MaxQueueDepth    int64 // Peak queue depth seen
 	SamplingRatio    int64 // Current sampling ratio * 1000 (1000 = 100%)
 	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s, for throttling)
+	Running          int32 // 1 if bridge is running, 0 if stopped
 }
 
 // StatisticsView displays statistics
@@ -2406,6 +2407,14 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 	var items []struct {
 		Label string
 		Level HealthLevel
+	}
+
+	// Bridge running status - CRITICAL if not running
+	if s.bridgeStats != nil && s.bridgeStats.Running == 0 && s.bridgeStats.PacketsReceived > 0 {
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Bridge", HealthCritical})
 	}
 
 	// Drop rate health (inverted: high drop rate = bad)

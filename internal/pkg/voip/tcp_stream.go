@@ -135,71 +135,130 @@ type SIPStream struct {
 	processedMsgs  int64
 }
 
+// errReadTimeout is returned when a read operation times out waiting for data.
+// This indicates the TCP connection has stalled mid-message.
+var errReadTimeout = errors.New("read timeout: no data received")
+
+// Default read timeout for TCP streams - time to wait for next data chunk
+// This catches stalled connections mid-message while allowing idle time between messages
+const defaultReadTimeout = 10 * time.Second
+
 // safeReader wraps a tcpreader.ReaderStream to provide interruptible reads
 // without data races. The tcpreader package's Close() method races with Read(),
 // so this wrapper uses an io.Pipe to decouple the underlying reader from the
 // consumer. A background goroutine copies data from tcpreader to the pipe,
 // and closing the pipe writer is thread-safe.
+//
+// The safeReader includes a watchdog that enforces read timeouts - if no data
+// is received within the timeout period, the pipe is closed to unblock consumers.
 type safeReader struct {
-	pipeReader *io.PipeReader
-	pipeWriter *io.PipeWriter
-	bufReader  *bufio.Reader
-	ctx        context.Context
-	cancel     context.CancelFunc
-	copyDone   chan struct{}
-	closeOnce  sync.Once
+	pipeReader  *io.PipeReader
+	pipeWriter  *io.PipeWriter
+	bufReader   *bufio.Reader
+	ctx         context.Context
+	cancel      context.CancelFunc
+	copyDone    chan struct{}
+	closeOnce   sync.Once
+	readTimeout time.Duration
 }
 
-func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context) *safeReader {
+func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTimeout time.Duration) *safeReader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
-	sr := &safeReader{
-		pipeReader: pipeReader,
-		pipeWriter: pipeWriter,
-		bufReader:  bufio.NewReader(pipeReader),
-		ctx:        ctx,
-		cancel:     cancel,
-		copyDone:   make(chan struct{}),
+	if readTimeout <= 0 {
+		readTimeout = defaultReadTimeout
 	}
 
-	// Start a goroutine that copies data from tcpreader to the pipe.
-	// This goroutine owns the tcpreader and will close it when done.
-	go func() {
-		defer close(sr.copyDone)
-		defer pipeWriter.Close()
+	sr := &safeReader{
+		pipeReader:  pipeReader,
+		pipeWriter:  pipeWriter,
+		bufReader:   bufio.NewReader(pipeReader),
+		ctx:         ctx,
+		cancel:      cancel,
+		copyDone:    make(chan struct{}),
+		readTimeout: readTimeout,
+	}
 
-		// Handle nil reader gracefully
-		if reader == nil {
-			pipeWriter.CloseWithError(fmt.Errorf("nil reader"))
+	// Channel to signal data activity from copy goroutine to watchdog
+	activity := make(chan struct{}, 1)
+
+	// Start watchdog goroutine to enforce read timeouts
+	go sr.watchdog(activity)
+
+	// Start copy goroutine that moves data from tcpreader to pipe
+	go sr.copyLoop(reader, activity)
+
+	return sr
+}
+
+// watchdog monitors for read activity and closes the pipe if idle too long.
+// This catches stalled TCP connections that stop sending data mid-message.
+func (sr *safeReader) watchdog(activity <-chan struct{}) {
+	timer := time.NewTimer(sr.readTimeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-sr.ctx.Done():
+			return
+		case <-activity:
+			// Reset timer on activity
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(sr.readTimeout)
+		case <-timer.C:
+			// Timeout - close pipe to unblock any pending reads
+			sr.pipeWriter.CloseWithError(errReadTimeout)
+			sr.cancel()
 			return
 		}
-		defer reader.Close()
+	}
+}
 
-		buf := make([]byte, 4096)
-		for {
+// copyLoop reads from tcpreader and writes to the pipe, signaling activity.
+func (sr *safeReader) copyLoop(reader *tcpreader.ReaderStream, activity chan<- struct{}) {
+	defer close(sr.copyDone)
+	defer sr.pipeWriter.Close()
+
+	// Handle nil reader gracefully
+	if reader == nil {
+		sr.pipeWriter.CloseWithError(fmt.Errorf("nil reader"))
+		return
+	}
+	defer reader.Close()
+
+	buf := make([]byte, 4096)
+	for {
+		select {
+		case <-sr.ctx.Done():
+			return
+		default:
+		}
+
+		n, err := reader.Read(buf)
+		if n > 0 {
+			// Signal activity to watchdog (non-blocking)
 			select {
-			case <-ctx.Done():
-				return
+			case activity <- struct{}{}:
 			default:
 			}
 
-			n, err := reader.Read(buf)
-			if n > 0 {
-				if _, writeErr := pipeWriter.Write(buf[:n]); writeErr != nil {
-					return
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					pipeWriter.CloseWithError(err)
-				}
+			if _, writeErr := sr.pipeWriter.Write(buf[:n]); writeErr != nil {
 				return
 			}
 		}
-	}()
-
-	return sr
+		if err != nil {
+			if err != io.EOF {
+				sr.pipeWriter.CloseWithError(err)
+			}
+			return
+		}
+	}
 }
 
 // shouldStop returns true if the reader should stop reading
@@ -240,10 +299,11 @@ func (sr *safeReader) ReadFull(buf []byte) (int, error) {
 func (s *SIPStream) run() {
 	logger.Debug("SIP stream starting", "flow", s.flow.String())
 
-	// Create a safe reader wrapper that handles context cancellation.
+	// Create a safe reader wrapper that handles context cancellation and read timeouts.
 	// The wrapper performs reads in goroutines and uses channels for coordination,
 	// allowing context cancellation to properly interrupt blocking reads.
-	s.readerWrapper = newSafeReader(s.reader, s.ctx)
+	// The read timeout catches stalled connections that stop sending data mid-message.
+	s.readerWrapper = newSafeReader(s.reader, s.ctx, defaultReadTimeout)
 
 	defer func() {
 		// Close the reader wrapper to clean up any pending read goroutines
@@ -295,32 +355,53 @@ func (s *SIPStream) run() {
 }
 
 // processSingle handles single message processing (latency optimized)
+// Loops until EOF or error to handle persistent TCP connections properly.
 func (s *SIPStream) processSingle() {
 	logger.Debug("processSingle starting")
-	// Read and buffer the complete SIP message
-	sipMessage, err := s.readCompleteSipMessage()
-	if err != nil {
-		// Don't log errors during context cancellation (normal shutdown)
-		if !errors.Is(err, io.EOF) && s.ctx.Err() == nil {
-			logger.Error("Error reading complete SIP message", "error", err)
-		} else {
-			logger.Debug("EOF reading SIP message")
+
+	for {
+		// Check context before each message
+		select {
+		case <-s.ctx.Done():
+			logger.Debug("Context done in processSingle")
+			return
+		default:
 		}
-		return
+
+		// Read and buffer the complete SIP message
+		sipMessage, err := s.readCompleteSipMessage()
+		if err != nil {
+			// Don't log errors during context cancellation (normal shutdown)
+			// or for non-SIP traffic (expected when filtering)
+			if errors.Is(err, errNotSIP) {
+				logger.Debug("Non-SIP data detected, closing stream")
+				return
+			}
+			if errors.Is(err, errReadTimeout) {
+				logger.Debug("Read timeout, closing stream")
+				return
+			}
+			if !errors.Is(err, io.EOF) && s.ctx.Err() == nil {
+				logger.Error("Error reading complete SIP message", "error", err)
+			} else {
+				logger.Debug("EOF reading SIP message")
+			}
+			return
+		}
+
+		if len(sipMessage) == 0 {
+			logger.Debug("Empty SIP message read")
+			continue
+		}
+
+		logger.Debug("Read complete SIP message", "bytes", len(sipMessage))
+
+		// Update processing statistics atomically
+		atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
+		atomic.AddInt64(&s.processedMsgs, 1)
+
+		s.processSipMessage(sipMessage)
 	}
-
-	if len(sipMessage) == 0 {
-		logger.Debug("Empty SIP message read")
-		return
-	}
-
-	logger.Debug("Read complete SIP message", "bytes", len(sipMessage))
-
-	// Update processing statistics atomically
-	atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
-	atomic.AddInt64(&s.processedMsgs, 1)
-
-	s.processSipMessage(sipMessage)
 }
 
 // MessageBatch represents a batch of SIP messages for processing
@@ -331,47 +412,106 @@ type MessageBatch struct {
 }
 
 // processBatched handles batch message processing (throughput optimized)
+// Loops until EOF or error to handle persistent TCP connections properly.
 func (s *SIPStream) processBatched(batchSize int) {
 	logger.Debug("processBatched starting", "batch_size", batchSize)
-	batch := &MessageBatch{
-		messages: make([][]byte, 0, batchSize),
-		maxSize:  batchSize,
-	}
 
-	for batch.size < batchSize {
-		select {
-		case <-s.ctx.Done():
-			logger.Debug("Context done in batch loop")
-			return
-		default:
+	for {
+		batch := &MessageBatch{
+			messages: make([][]byte, 0, batchSize),
+			maxSize:  batchSize,
 		}
 
-		logger.Debug("About to read SIP message", "current_batch_size", batch.size)
-		sipMessage, err := s.readCompleteSipMessage()
-		if err != nil {
-			// Don't log errors during context cancellation (normal shutdown)
-			if !errors.Is(err, io.EOF) && s.ctx.Err() == nil {
-				logger.Error("Error reading SIP message in batch", "error", err)
-			} else {
-				logger.Debug("EOF in batch read", "messages_read", batch.size)
+		// Fill the batch
+		for batch.size < batchSize {
+			select {
+			case <-s.ctx.Done():
+				logger.Debug("Context done in batch loop")
+				// Process any messages we have before exiting
+				for _, message := range batch.messages {
+					s.processSipMessage(message)
+				}
+				return
+			default:
 			}
-			break
+
+			sipMessage, err := s.readCompleteSipMessage()
+			if err != nil {
+				// Don't log errors during context cancellation (normal shutdown)
+				// or for non-SIP traffic (expected when filtering)
+				if errors.Is(err, errNotSIP) {
+					logger.Debug("Non-SIP data detected, closing stream")
+					// Process any messages we have before exiting
+					for _, message := range batch.messages {
+						s.processSipMessage(message)
+					}
+					return
+				}
+				if errors.Is(err, errReadTimeout) {
+					logger.Debug("Read timeout, closing stream")
+					// Process any messages we have before exiting
+					for _, message := range batch.messages {
+						s.processSipMessage(message)
+					}
+					return
+				}
+				if !errors.Is(err, io.EOF) && s.ctx.Err() == nil {
+					logger.Error("Error reading SIP message in batch", "error", err)
+				} else {
+					logger.Debug("EOF in batch read", "messages_read", batch.size)
+				}
+				// Process any messages we have before exiting
+				for _, message := range batch.messages {
+					s.processSipMessage(message)
+				}
+				return
+			}
+
+			if len(sipMessage) > 0 {
+				logger.Debug("Read SIP message in batch", "bytes", len(sipMessage), "batch_size", batch.size+1)
+				batch.messages = append(batch.messages, sipMessage)
+				batch.size++
+				atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
+				atomic.AddInt64(&s.processedMsgs, 1)
+			}
 		}
 
-		if len(sipMessage) > 0 {
-			logger.Debug("Read SIP message in batch", "bytes", len(sipMessage), "batch_size", batch.size+1)
-			batch.messages = append(batch.messages, sipMessage)
-			batch.size++
-			atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
-			atomic.AddInt64(&s.processedMsgs, 1)
+		logger.Debug("Processing batch", "messages", len(batch.messages))
+		// Process the entire batch
+		for _, message := range batch.messages {
+			s.processSipMessage(message)
 		}
 	}
+}
 
-	logger.Debug("Processing batch", "messages", len(batch.messages))
-	// Process the entire batch
-	for _, message := range batch.messages {
-		s.processSipMessage(message)
+// errNotSIP is returned when TCP stream data doesn't look like SIP protocol.
+// This is not logged as an error - it's expected for non-SIP TCP traffic.
+var errNotSIP = errors.New("not SIP protocol")
+
+// SIP protocol limits for early rejection of non-SIP streams
+const (
+	// Maximum reasonable SIP header line length (RFC 3261 recommends support for 4KB)
+	maxSIPHeaderLineLength = 4096
+	// Maximum number of headers in a SIP message (reasonable limit)
+	maxSIPHeaders = 200
+)
+
+// isSIPRequestLine checks if a line looks like a SIP request (e.g., "INVITE sip:... SIP/2.0")
+func isSIPRequestLine(line string) bool {
+	// SIP requests: METHOD SP Request-URI SP SIP-Version CRLF
+	// Common methods: INVITE, REGISTER, OPTIONS, ACK, BYE, CANCEL, UPDATE, REFER, SUBSCRIBE, NOTIFY, INFO, MESSAGE, PRACK
+	sipMethods := []string{"INVITE ", "REGISTER ", "OPTIONS ", "ACK ", "BYE ", "CANCEL ", "UPDATE ", "REFER ", "SUBSCRIBE ", "NOTIFY ", "INFO ", "MESSAGE ", "PRACK "}
+	for _, method := range sipMethods {
+		if strings.HasPrefix(line, method) && strings.Contains(line, "SIP/2.0") {
+			return true
+		}
 	}
+	return false
+}
+
+// isSIPResponseLine checks if a line looks like a SIP response (e.g., "SIP/2.0 200 OK")
+func isSIPResponseLine(line string) bool {
+	return strings.HasPrefix(line, "SIP/2.0 ")
 }
 
 // readCompleteSipMessage reads a complete SIP message from the TCP stream
@@ -384,6 +524,8 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 	var message strings.Builder
 	var contentLength int
 	headersDone := false
+	firstLine := true
+	headerCount := 0
 
 	for {
 		// If headers are done and no content-length, we're done
@@ -412,7 +554,28 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 			return nil, fmt.Errorf("failed to read SIP message line from TCP stream: %w", err)
 		}
 
+		// Early rejection: line too long for SIP header (likely binary data)
+		if len(line) > maxSIPHeaderLineLength {
+			return nil, errNotSIP
+		}
+
+		// Validate first line is a valid SIP request or response
+		// This prevents buffering non-SIP data (TLS, HTTP/2, binary protocols)
+		if firstLine {
+			firstLine = false
+			trimmedLine := strings.TrimRight(line, "\r\n")
+			if !isSIPRequestLine(trimmedLine) && !isSIPResponseLine(trimmedLine) {
+				return nil, errNotSIP
+			}
+		}
+
 		message.WriteString(line)
+		headerCount++
+
+		// Sanity check: too many headers indicates non-SIP or malformed data
+		if headerCount > maxSIPHeaders {
+			return nil, errNotSIP
+		}
 
 		// Check for end of headers (empty line)
 		if !headersDone && (line == "\r\n" || line == "\n") {

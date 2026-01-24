@@ -243,10 +243,13 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 	}
 
 	// Switch to calls view if VoIP protocol selected
+	// Also enable/disable TCP reassembly for SIP detection
 	if msg.Protocol.Name == "VoIP (SIP/RTP)" {
 		m.uiState.ViewMode = "calls"
+		SetVoIPModeEnabled(true) // Enable TCP reassembly for SIP
 	} else {
 		m.uiState.ViewMode = "packets"
+		SetVoIPModeEnabled(false) // Disable TCP reassembly (matches `lc hunt` behavior)
 	}
 
 	// Show toast notification (only if no filter error)

@@ -421,7 +421,17 @@ func (m Model) handleHunterStatusMsg(msg HunterStatusMsg) (Model, tea.Cmd) {
 	}
 
 	// Update NodesView with processor info (includes processor IDs, status, and hierarchy)
-	m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
+	procInfos := m.getProcessorInfoList()
+	m.uiState.NodesView.SetProcessors(procInfos)
+
+	// Update distributed stats for Statistics tab
+	// Collect all hunters from connection manager into a flat slice
+	allHunters := make([]components.HunterInfo, 0)
+	for _, hunters := range m.connectionMgr.HuntersByProcessor {
+		allHunters = append(allHunters, hunters...)
+	}
+	m.uiState.StatisticsView.UpdateDistributedStats(allHunters, procInfos)
+
 	return m, nil
 }
 
@@ -757,6 +767,13 @@ func (m Model) handleTopologyReceivedMsg(msg TopologyReceivedMsg) (Model, tea.Cm
 	procInfos := m.getProcessorInfoList()
 	m.uiState.NodesView.SetProcessors(procInfos)
 
+	// Update distributed stats for Statistics tab
+	allHunters := make([]components.HunterInfo, 0)
+	for _, hunters := range m.connectionMgr.HuntersByProcessor {
+		allHunters = append(allHunters, hunters...)
+	}
+	m.uiState.StatisticsView.UpdateDistributedStats(allHunters, procInfos)
+
 	return m, nil
 }
 
@@ -817,6 +834,13 @@ func (m Model) handleTopologyUpdateMsg(msg TopologyUpdateMsg) (Model, tea.Cmd) {
 	// Update NodesView with the updated topology
 	procInfos := m.getProcessorInfoList()
 	m.uiState.NodesView.SetProcessors(procInfos)
+
+	// Update distributed stats for Statistics tab
+	allHunters := make([]components.HunterInfo, 0)
+	for _, hunters := range m.connectionMgr.HuntersByProcessor {
+		allHunters = append(allHunters, hunters...)
+	}
+	m.uiState.StatisticsView.UpdateDistributedStats(allHunters, procInfos)
 
 	return m, nil
 }

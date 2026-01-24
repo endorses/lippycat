@@ -5,6 +5,7 @@ package components
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -115,6 +116,76 @@ type ExportStatsMsg struct {
 	Error   error
 }
 
+// HunterContribution represents a hunter's contribution to overall traffic.
+type HunterContribution struct {
+	ID               string
+	Hostname         string
+	ProcessorAddr    string
+	Status           string // "healthy", "warning", "error"
+	PacketsCaptured  uint64
+	PacketsForwarded uint64
+	PacketsDropped   uint64
+	DropRate         float64 // Percentage of packets dropped
+	Contribution     float64 // Percentage of total fleet packets
+	CPUPercent       float64
+	MemoryRSSBytes   uint64
+	MemoryLimitBytes uint64
+}
+
+// ProcessorSummary represents aggregated stats for a processor.
+type ProcessorSummary struct {
+	Address          string
+	ProcessorID      string
+	Status           string // "healthy", "warning", "error", "disconnected"
+	HunterCount      int
+	TotalPackets     uint64
+	TotalDropped     uint64
+	AvgCPUPercent    float64
+	TotalMemoryRSS   uint64
+	TotalMemoryLimit uint64
+}
+
+// DistributedStats holds aggregated statistics from distributed nodes.
+type DistributedStats struct {
+	// Fleet overview
+	TotalProcessors   int
+	HealthyProcessors int
+	TotalHunters      int
+	HealthyHunters    int
+	WarningHunters    int
+	ErrorHunters      int
+
+	// Combined throughput
+	TotalPacketsCaptured  uint64
+	TotalPacketsForwarded uint64
+	TotalPacketsDropped   uint64
+	OverallDropRate       float64 // Percentage
+
+	// Resource usage
+	FleetCPUPercent    float64 // Average CPU across all hunters
+	FleetMemoryRSS     uint64  // Sum of memory RSS across all hunters
+	FleetMemoryLimit   uint64  // Sum of memory limits across all hunters
+	FleetMemoryPercent float64 // Overall memory usage percentage
+
+	// Per-hunter contributions (sorted by packets captured, descending)
+	HunterContributions []HunterContribution
+
+	// Per-processor summaries
+	ProcessorSummaries []ProcessorSummary
+
+	// Last update timestamp
+	LastUpdate time.Time
+}
+
+// NewDistributedStats creates an empty DistributedStats instance.
+func NewDistributedStats() *DistributedStats {
+	return &DistributedStats{
+		HunterContributions: make([]HunterContribution, 0),
+		ProcessorSummaries:  make([]ProcessorSummary, 0),
+		LastUpdate:          time.Now(),
+	}
+}
+
 // Statistics holds aggregated packet statistics
 // Uses bounded counters to prevent unbounded memory growth
 // Note: int64 counters ensure consistent behavior across 32-bit and 64-bit platforms
@@ -171,26 +242,30 @@ type StatisticsView struct {
 	talkerSection   TalkerSection // Which section in TopTalkers is active
 	selectedIndex   int           // Selected item index in TopTalkers
 	maxTalkersShown int           // Number of top talkers to show (default 10)
+
+	// Phase 4: Distributed mode
+	distributedStats *DistributedStats // Aggregated distributed fleet statistics
 }
 
 // NewStatisticsView creates a new statistics view
 func NewStatisticsView() StatisticsView {
 	return StatisticsView{
-		width:           80,
-		height:          20,
-		theme:           themes.Solarized(),
-		stats:           nil,
-		ready:           false,
-		rateTracker:     DefaultRateTracker(),
-		dropStats:       NewDropStats(),
-		timeWindow:      TimeWindow1Min,
-		startTime:       time.Now(),
-		queueBar:        NewUtilizationBar(30),
-		healthIndicator: NewHealthIndicator(),
-		currentSubView:  SubViewOverview,
-		talkerSection:   TalkerSectionSources,
-		selectedIndex:   0,
-		maxTalkersShown: 10,
+		width:            80,
+		height:           20,
+		theme:            themes.Solarized(),
+		stats:            nil,
+		ready:            false,
+		rateTracker:      DefaultRateTracker(),
+		dropStats:        NewDropStats(),
+		timeWindow:       TimeWindow1Min,
+		startTime:        time.Now(),
+		queueBar:         NewUtilizationBar(30),
+		healthIndicator:  NewHealthIndicator(),
+		currentSubView:   SubViewOverview,
+		talkerSection:    TalkerSectionSources,
+		selectedIndex:    0,
+		maxTalkersShown:  10,
+		distributedStats: NewDistributedStats(),
 	}
 }
 
@@ -296,6 +371,171 @@ func (s *StatisticsView) UpdateDropsFromBridge() {
 	if s.dropStats != nil && s.bridgeStats != nil {
 		s.dropStats.UpdateFromBridgeStats(s.bridgeStats)
 	}
+}
+
+// GetDistributedStats returns the distributed fleet statistics.
+func (s *StatisticsView) GetDistributedStats() *DistributedStats {
+	return s.distributedStats
+}
+
+// UpdateDistributedStats updates the distributed stats from hunter/processor data.
+// This is called when HunterStatusMsg is received.
+func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors []ProcessorInfo) {
+	if s.distributedStats == nil {
+		s.distributedStats = NewDistributedStats()
+	}
+
+	ds := s.distributedStats
+
+	// Reset counters
+	ds.TotalProcessors = len(processors)
+	ds.HealthyProcessors = 0
+	ds.TotalHunters = 0
+	ds.HealthyHunters = 0
+	ds.WarningHunters = 0
+	ds.ErrorHunters = 0
+	ds.TotalPacketsCaptured = 0
+	ds.TotalPacketsForwarded = 0
+	ds.TotalPacketsDropped = 0
+	ds.FleetMemoryRSS = 0
+	ds.FleetMemoryLimit = 0
+
+	var totalCPU float64
+	var cpuCount int
+
+	// Aggregate processor summaries
+	ds.ProcessorSummaries = make([]ProcessorSummary, 0, len(processors))
+	for _, proc := range processors {
+		summary := ProcessorSummary{
+			Address:     proc.Address,
+			ProcessorID: proc.ProcessorID,
+			HunterCount: len(proc.Hunters),
+		}
+
+		// Map processor status
+		switch proc.ConnectionState {
+		case ProcessorConnectionStateConnected:
+			switch proc.Status {
+			case 0: // PROCESSOR_HEALTHY
+				summary.Status = "healthy"
+				ds.HealthyProcessors++
+			case 1: // PROCESSOR_WARNING
+				summary.Status = "warning"
+			case 2: // PROCESSOR_ERROR
+				summary.Status = "error"
+			default:
+				summary.Status = "unknown"
+			}
+		case ProcessorConnectionStateDisconnected, ProcessorConnectionStateFailed:
+			summary.Status = "disconnected"
+		case ProcessorConnectionStateConnecting:
+			summary.Status = "connecting"
+		default:
+			summary.Status = "unknown"
+		}
+
+		// Aggregate hunter stats for this processor
+		var procCPU float64
+		var procCPUCount int
+		for _, hunter := range proc.Hunters {
+			summary.TotalPackets += hunter.PacketsCaptured
+			summary.TotalDropped += hunter.PacketsDropped
+			summary.TotalMemoryRSS += hunter.MemoryRSSBytes
+			summary.TotalMemoryLimit += hunter.MemoryLimitBytes
+			if hunter.CPUPercent >= 0 {
+				procCPU += hunter.CPUPercent
+				procCPUCount++
+			}
+		}
+		if procCPUCount > 0 {
+			summary.AvgCPUPercent = procCPU / float64(procCPUCount)
+		}
+
+		ds.ProcessorSummaries = append(ds.ProcessorSummaries, summary)
+	}
+
+	// Aggregate hunter contributions
+	ds.HunterContributions = make([]HunterContribution, 0, len(hunters))
+	for _, hunter := range hunters {
+		ds.TotalHunters++
+		ds.TotalPacketsCaptured += hunter.PacketsCaptured
+		ds.TotalPacketsForwarded += hunter.PacketsForwarded
+		ds.TotalPacketsDropped += hunter.PacketsDropped
+		ds.FleetMemoryRSS += hunter.MemoryRSSBytes
+		ds.FleetMemoryLimit += hunter.MemoryLimitBytes
+
+		if hunter.CPUPercent >= 0 {
+			totalCPU += hunter.CPUPercent
+			cpuCount++
+		}
+
+		// Count by status
+		var statusStr string
+		switch hunter.Status {
+		case 0: // HUNTER_HEALTHY
+			statusStr = "healthy"
+			ds.HealthyHunters++
+		case 1: // HUNTER_WARNING
+			statusStr = "warning"
+			ds.WarningHunters++
+		case 2: // HUNTER_ERROR
+			statusStr = "error"
+			ds.ErrorHunters++
+		default:
+			statusStr = "unknown"
+		}
+
+		var dropRate float64
+		if hunter.PacketsCaptured > 0 {
+			dropRate = float64(hunter.PacketsDropped) / float64(hunter.PacketsCaptured) * 100
+		}
+
+		contrib := HunterContribution{
+			ID:               hunter.ID,
+			Hostname:         hunter.Hostname,
+			ProcessorAddr:    hunter.ProcessorAddr,
+			Status:           statusStr,
+			PacketsCaptured:  hunter.PacketsCaptured,
+			PacketsForwarded: hunter.PacketsForwarded,
+			PacketsDropped:   hunter.PacketsDropped,
+			DropRate:         dropRate,
+			CPUPercent:       hunter.CPUPercent,
+			MemoryRSSBytes:   hunter.MemoryRSSBytes,
+			MemoryLimitBytes: hunter.MemoryLimitBytes,
+		}
+		ds.HunterContributions = append(ds.HunterContributions, contrib)
+	}
+
+	// Calculate contribution percentages
+	if ds.TotalPacketsCaptured > 0 {
+		for i := range ds.HunterContributions {
+			ds.HunterContributions[i].Contribution = float64(ds.HunterContributions[i].PacketsCaptured) / float64(ds.TotalPacketsCaptured) * 100
+		}
+	}
+
+	// Sort hunters by packets captured (descending)
+	sort.Slice(ds.HunterContributions, func(i, j int) bool {
+		return ds.HunterContributions[i].PacketsCaptured > ds.HunterContributions[j].PacketsCaptured
+	})
+
+	// Calculate fleet averages
+	if cpuCount > 0 {
+		ds.FleetCPUPercent = totalCPU / float64(cpuCount)
+	}
+	if ds.FleetMemoryLimit > 0 {
+		ds.FleetMemoryPercent = float64(ds.FleetMemoryRSS) / float64(ds.FleetMemoryLimit) * 100
+	}
+	if ds.TotalPacketsCaptured > 0 {
+		ds.OverallDropRate = float64(ds.TotalPacketsDropped) / float64(ds.TotalPacketsCaptured) * 100
+	}
+
+	ds.LastUpdate = time.Now()
+	s.dirty = true
+}
+
+// HasDistributedData returns true if there is distributed data available.
+func (s *StatisticsView) HasDistributedData() bool {
+	return s.distributedStats != nil && s.distributedStats.TotalHunters > 0
 }
 
 // GetSubView returns the current sub-view.
@@ -946,19 +1186,298 @@ func (s *StatisticsView) renderDistributedSubView() string {
 		Foreground(s.theme.InfoColor).
 		MarginBottom(1)
 
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+
 	valueStyle := lipgloss.NewStyle().
 		Foreground(s.theme.StatusBarFg)
+
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	healthyStyle := lipgloss.NewStyle().
+		Foreground(s.theme.SuccessColor).
+		Bold(true)
+
+	warningStyle := lipgloss.NewStyle().
+		Foreground(s.theme.WarningColor).
+		Bold(true)
+
+	errorStyle := lipgloss.NewStyle().
+		Foreground(s.theme.ErrorColor).
+		Bold(true)
 
 	result.WriteString(titleStyle.Render("🌐 Distributed Mode Statistics"))
 	result.WriteString("\n\n")
 
-	// Placeholder for Phase 4
-	result.WriteString(valueStyle.Render("  Distributed mode statistics will be available in Phase 4.\n"))
-	result.WriteString(valueStyle.Render("  Connect to a processor node to see:\n"))
-	result.WriteString(valueStyle.Render("    • Fleet overview (hunters/processors)\n"))
-	result.WriteString(valueStyle.Render("    • Combined throughput\n"))
-	result.WriteString(valueStyle.Render("    • Per-hunter contribution\n"))
-	result.WriteString(valueStyle.Render("    • Load distribution\n"))
+	// Check if we have distributed data
+	if s.distributedStats == nil || s.distributedStats.TotalHunters == 0 {
+		result.WriteString(valueStyle.Render("  No distributed nodes connected.\n"))
+		result.WriteString(valueStyle.Render("  Connect to a processor node to see:\n"))
+		result.WriteString(dimStyle.Render("    • Fleet overview (hunters/processors)\n"))
+		result.WriteString(dimStyle.Render("    • Combined throughput\n"))
+		result.WriteString(dimStyle.Render("    • Per-hunter contribution\n"))
+		result.WriteString(dimStyle.Render("    • Load distribution\n"))
+		return result.String()
+	}
+
+	ds := s.distributedStats
+
+	// Fleet Overview Section
+	result.WriteString(titleStyle.Render("📊 Fleet Overview"))
+	result.WriteString("\n\n")
+
+	// Processors status
+	result.WriteString(labelStyle.Render("Processors: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%d total", ds.TotalProcessors)))
+	if ds.HealthyProcessors > 0 {
+		result.WriteString("  ")
+		result.WriteString(healthyStyle.Render(fmt.Sprintf("✓ %d healthy", ds.HealthyProcessors)))
+	}
+	if ds.TotalProcessors-ds.HealthyProcessors > 0 {
+		result.WriteString("  ")
+		result.WriteString(warningStyle.Render(fmt.Sprintf("⚠ %d issues", ds.TotalProcessors-ds.HealthyProcessors)))
+	}
+	result.WriteString("\n")
+
+	// Hunters status
+	result.WriteString(labelStyle.Render("Hunters:    "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%d total", ds.TotalHunters)))
+	if ds.HealthyHunters > 0 {
+		result.WriteString("  ")
+		result.WriteString(healthyStyle.Render(fmt.Sprintf("✓ %d healthy", ds.HealthyHunters)))
+	}
+	if ds.WarningHunters > 0 {
+		result.WriteString("  ")
+		result.WriteString(warningStyle.Render(fmt.Sprintf("⚠ %d warning", ds.WarningHunters)))
+	}
+	if ds.ErrorHunters > 0 {
+		result.WriteString("  ")
+		result.WriteString(errorStyle.Render(fmt.Sprintf("✗ %d error", ds.ErrorHunters)))
+	}
+	result.WriteString("\n\n")
+
+	// Fleet Health Summary
+	result.WriteString(s.renderFleetHealthSummary())
+	result.WriteString("\n")
+
+	// Combined Throughput Section
+	result.WriteString(titleStyle.Render("📈 Combined Throughput"))
+	result.WriteString("\n\n")
+
+	result.WriteString(labelStyle.Render("Packets Captured:  "))
+	result.WriteString(valueStyle.Render(formatNumber64(int64(ds.TotalPacketsCaptured))))
+	result.WriteString("\n")
+
+	result.WriteString(labelStyle.Render("Packets Forwarded: "))
+	result.WriteString(valueStyle.Render(formatNumber64(int64(ds.TotalPacketsForwarded))))
+	result.WriteString("\n")
+
+	result.WriteString(labelStyle.Render("Packets Dropped:   "))
+	result.WriteString(valueStyle.Render(formatNumber64(int64(ds.TotalPacketsDropped))))
+	if ds.OverallDropRate > 0 {
+		dropColor := s.theme.SuccessColor
+		if ds.OverallDropRate > 1 {
+			dropColor = s.theme.WarningColor
+		}
+		if ds.OverallDropRate > 5 {
+			dropColor = s.theme.ErrorColor
+		}
+		dropStyle := lipgloss.NewStyle().Foreground(dropColor)
+		result.WriteString(dropStyle.Render(fmt.Sprintf(" (%.2f%%)", ds.OverallDropRate)))
+	}
+	result.WriteString("\n\n")
+
+	// Resource Usage
+	result.WriteString(titleStyle.Render("💻 Fleet Resources"))
+	result.WriteString("\n\n")
+
+	result.WriteString(labelStyle.Render("Avg CPU Usage:     "))
+	if ds.FleetCPUPercent >= 0 {
+		cpuColor := s.theme.SuccessColor
+		if ds.FleetCPUPercent > 70 {
+			cpuColor = s.theme.WarningColor
+		}
+		if ds.FleetCPUPercent > 90 {
+			cpuColor = s.theme.ErrorColor
+		}
+		cpuStyle := lipgloss.NewStyle().Foreground(cpuColor)
+		result.WriteString(cpuStyle.Render(fmt.Sprintf("%.1f%%", ds.FleetCPUPercent)))
+	} else {
+		result.WriteString(dimStyle.Render("N/A"))
+	}
+	result.WriteString("\n")
+
+	result.WriteString(labelStyle.Render("Total Memory RSS:  "))
+	result.WriteString(valueStyle.Render(formatBytes(int64(ds.FleetMemoryRSS))))
+	if ds.FleetMemoryLimit > 0 {
+		memColor := s.theme.SuccessColor
+		if ds.FleetMemoryPercent > 70 {
+			memColor = s.theme.WarningColor
+		}
+		if ds.FleetMemoryPercent > 90 {
+			memColor = s.theme.ErrorColor
+		}
+		memStyle := lipgloss.NewStyle().Foreground(memColor)
+		result.WriteString(memStyle.Render(fmt.Sprintf(" (%.1f%% of %s)", ds.FleetMemoryPercent, formatBytes(int64(ds.FleetMemoryLimit)))))
+	}
+	result.WriteString("\n\n")
+
+	// Load Distribution Section (horizontal bar chart)
+	result.WriteString(titleStyle.Render("📊 Load Distribution"))
+	result.WriteString("\n\n")
+	result.WriteString(s.renderLoadDistribution())
+
+	// Last update
+	result.WriteString("\n")
+	result.WriteString(dimStyle.Render(fmt.Sprintf("Last update: %s", ds.LastUpdate.Format("15:04:05"))))
+	result.WriteString("\n")
+
+	return result.String()
+}
+
+// renderFleetHealthSummary renders a health summary with color-coded indicators
+func (s *StatisticsView) renderFleetHealthSummary() string {
+	if s.distributedStats == nil {
+		return ""
+	}
+
+	ds := s.distributedStats
+
+	// Calculate overall fleet health
+	var items []struct {
+		Label string
+		Level HealthLevel
+	}
+
+	// Drop rate health
+	dropLevel := HealthFromRatio(ds.OverallDropRate/100, 0.01, 0.05, true)
+	items = append(items, struct {
+		Label string
+		Level HealthLevel
+	}{"Drops", dropLevel})
+
+	// CPU health
+	if ds.FleetCPUPercent >= 0 {
+		cpuLevel := HealthFromRatio(ds.FleetCPUPercent/100, 0.7, 0.9, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"CPU", cpuLevel})
+	}
+
+	// Memory health
+	if ds.FleetMemoryPercent > 0 {
+		memLevel := HealthFromRatio(ds.FleetMemoryPercent/100, 0.7, 0.9, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Memory", memLevel})
+	}
+
+	// Hunter health ratio
+	if ds.TotalHunters > 0 {
+		healthyRatio := float64(ds.HealthyHunters) / float64(ds.TotalHunters)
+		hunterLevel := HealthFromRatio(healthyRatio, 0.9, 0.5, false) // Inverted: high healthy = good
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Hunters", hunterLevel})
+	}
+
+	if len(items) > 0 {
+		return RenderHealthSummary(s.theme, items)
+	}
+	return ""
+}
+
+// renderLoadDistribution renders a horizontal bar chart showing per-hunter contribution
+func (s *StatisticsView) renderLoadDistribution() string {
+	if s.distributedStats == nil || len(s.distributedStats.HunterContributions) == 0 {
+		return "  No hunter data available\n"
+	}
+
+	var result strings.Builder
+	ds := s.distributedStats
+
+	// Show top 5 hunters by contribution
+	maxHunters := 5
+	if len(ds.HunterContributions) < maxHunters {
+		maxHunters = len(ds.HunterContributions)
+	}
+
+	// Find max contribution for scaling
+	maxContrib := 0.0
+	for i := 0; i < maxHunters; i++ {
+		if ds.HunterContributions[i].Contribution > maxContrib {
+			maxContrib = ds.HunterContributions[i].Contribution
+		}
+	}
+	if maxContrib < 1 {
+		maxContrib = 100 // Avoid division by zero
+	}
+
+	barWidth := 30 // Width of the bar in characters
+	labelWidth := 20
+
+	for i := 0; i < maxHunters; i++ {
+		contrib := ds.HunterContributions[i]
+
+		// Truncate or pad hostname/ID
+		label := contrib.Hostname
+		if label == "" {
+			label = contrib.ID
+		}
+		if len(label) > labelWidth-1 {
+			label = label[:labelWidth-4] + "..."
+		}
+
+		// Status indicator
+		statusIcon := "●"
+		var statusStyle lipgloss.Style
+		switch contrib.Status {
+		case "healthy":
+			statusStyle = lipgloss.NewStyle().Foreground(s.theme.SuccessColor)
+		case "warning":
+			statusStyle = lipgloss.NewStyle().Foreground(s.theme.WarningColor)
+		case "error":
+			statusStyle = lipgloss.NewStyle().Foreground(s.theme.ErrorColor)
+		default:
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		}
+
+		// Calculate bar length
+		barLen := int(contrib.Contribution / maxContrib * float64(barWidth))
+		if barLen < 1 && contrib.Contribution > 0 {
+			barLen = 1
+		}
+
+		// Build the bar
+		bar := strings.Repeat("█", barLen)
+		empty := strings.Repeat("░", barWidth-barLen)
+
+		barStyle := lipgloss.NewStyle().Foreground(s.theme.InfoColor)
+		emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		labelStyle := lipgloss.NewStyle().Foreground(s.theme.StatusBarFg)
+		pctStyle := lipgloss.NewStyle().Foreground(s.theme.StatusBarFg).Bold(true)
+
+		result.WriteString("  ")
+		result.WriteString(statusStyle.Render(statusIcon))
+		result.WriteString(" ")
+		result.WriteString(labelStyle.Render(fmt.Sprintf("%-*s", labelWidth, label)))
+		result.WriteString(" ")
+		result.WriteString(barStyle.Render(bar))
+		result.WriteString(emptyStyle.Render(empty))
+		result.WriteString(" ")
+		result.WriteString(pctStyle.Render(fmt.Sprintf("%5.1f%%", contrib.Contribution)))
+		result.WriteString("\n")
+	}
+
+	if len(ds.HunterContributions) > maxHunters {
+		dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+		result.WriteString(dimStyle.Render(fmt.Sprintf("  ... and %d more hunters\n", len(ds.HunterContributions)-maxHunters)))
+	}
 
 	return result.String()
 }

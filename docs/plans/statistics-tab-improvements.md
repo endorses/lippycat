@@ -46,13 +46,13 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 
 ### Phase 4: Distributed Mode
 
-- [ ] Create `DistributedStats` struct in `statistics.go`:
+- [x] Create `DistributedStats` struct in `statistics.go`:
   - Fleet overview (total/healthy hunters, processors)
   - Combined throughput (aggregate packet/byte rates)
   - Per-hunter contribution percentages
-- [ ] Add load distribution visualization (horizontal bar chart per hunter)
-- [ ] Add fleet health summary with color-coded indicators
-- [ ] Wire up processor stats collector to TUI via EventHandler
+- [x] Add load distribution visualization (horizontal bar chart per hunter)
+- [x] Add fleet health summary with color-coded indicators
+- [x] Wire up processor stats collector to TUI via EventHandler
 
 ### Phase 5: Protocol-Specific Stats (Extensible)
 
@@ -83,16 +83,18 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 - `internal/pkg/tui/components/progressbar.go` - progress bar component with health indicators
 - `internal/pkg/tui/components/progressbar_test.go` - progress bar tests
 
-**New files (Phase 3-5 pending):**
+**New files (Phase 5 pending):**
 - `internal/pkg/tui/components/protocol_stats.go` - provider interface/registry
 - `internal/pkg/tui/components/voip_stats_provider.go` - VoIP-specific stats
 
-**Modified files (Phase 1 complete):**
-- `internal/pkg/tui/components/statistics.go` - added RateTracker, DropStats, TimeWindow integration
-
-**Modified files (Phase 2-5 pending):**
+**Modified files (Phase 1-4 complete):**
+- `internal/pkg/tui/components/statistics.go` - added RateTracker, DropStats, TimeWindow, SubView navigation, DistributedStats
 - `go.mod` - ntcharts dependency
 - `internal/pkg/tui/components/footer.go` - Statistics tab keybindings
+- `internal/pkg/tui/keyboard_handler.go` - Statistics tab key handling
+- `internal/pkg/tui/capture_events.go` - HunterStatusMsg updates DistributedStats
+
+**Modified files (Phase 5 pending):**
 - `internal/pkg/tui/store/ui_state.go` - time window, selected protocol tracking
 
 ## Design Decisions

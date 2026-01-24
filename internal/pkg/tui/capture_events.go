@@ -320,11 +320,15 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 	m.callStore.AddOrUpdateCalls(tuiCalls)
 
 	// Update the CallsView with filtered or all calls
+	allCalls := m.callStore.GetCallsInOrder()
 	if m.callStore.HasFilter() {
 		m.uiState.CallsView.SetCalls(m.callStore.GetFilteredCalls())
 	} else {
-		m.uiState.CallsView.SetCalls(m.callStore.GetCallsInOrder())
+		m.uiState.CallsView.SetCalls(allCalls)
 	}
+
+	// Update VoIP stats provider for Statistics tab
+	m.uiState.StatisticsView.UpdateVoIPCalls(allCalls)
 
 	return m, nil
 }

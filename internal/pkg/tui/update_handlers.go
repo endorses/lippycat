@@ -210,6 +210,9 @@ func (m Model) handleProtocolSelectedMsg(msg components.ProtocolSelectedMsg) (Mo
 	// User selected a protocol from the protocol selector
 	m.uiState.SelectedProtocol = msg.Protocol
 
+	// Update statistics view with selected protocol for protocol-specific stats
+	m.uiState.StatisticsView.SetSelectedProtocol(msg.Protocol.Name)
+
 	// Apply BPF filter if protocol has one
 	var filterErrorCmd tea.Cmd
 	if msg.Protocol.BPFFilter != "" {

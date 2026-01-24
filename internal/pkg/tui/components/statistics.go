@@ -245,10 +245,20 @@ type StatisticsView struct {
 
 	// Phase 4: Distributed mode
 	distributedStats *DistributedStats // Aggregated distributed fleet statistics
+
+	// Phase 5: Protocol-specific stats
+	protocolRegistry *ProtocolStatsRegistry // Registry of protocol stats providers
+	voipProvider     *VoIPStatsProvider     // VoIP-specific stats provider
+	selectedProtocol string                 // Currently selected protocol filter
 }
 
 // NewStatisticsView creates a new statistics view
 func NewStatisticsView() StatisticsView {
+	// Create protocol stats registry and register providers
+	registry := NewProtocolStatsRegistry()
+	voipProvider := NewVoIPStatsProvider()
+	registry.Register(voipProvider)
+
 	return StatisticsView{
 		width:            80,
 		height:           20,
@@ -266,6 +276,9 @@ func NewStatisticsView() StatisticsView {
 		selectedIndex:    0,
 		maxTalkersShown:  10,
 		distributedStats: NewDistributedStats(),
+		protocolRegistry: registry,
+		voipProvider:     voipProvider,
+		selectedProtocol: "All",
 	}
 }
 
@@ -277,6 +290,9 @@ func (s *StatisticsView) SetTheme(theme themes.Theme) {
 	}
 	if s.healthIndicator != nil {
 		s.healthIndicator.SetTheme(theme)
+	}
+	if s.protocolRegistry != nil {
+		s.protocolRegistry.SetTheme(theme)
 	}
 }
 
@@ -536,6 +552,35 @@ func (s *StatisticsView) UpdateDistributedStats(hunters []HunterInfo, processors
 // HasDistributedData returns true if there is distributed data available.
 func (s *StatisticsView) HasDistributedData() bool {
 	return s.distributedStats != nil && s.distributedStats.TotalHunters > 0
+}
+
+// UpdateVoIPCalls updates the VoIP stats provider with current call data.
+// This should be called whenever the call list changes.
+func (s *StatisticsView) UpdateVoIPCalls(calls []Call) {
+	if s.voipProvider != nil {
+		s.voipProvider.UpdateCalls(calls)
+		s.dirty = true
+	}
+}
+
+// SetSelectedProtocol sets the currently selected protocol filter.
+func (s *StatisticsView) SetSelectedProtocol(protocolName string) {
+	s.selectedProtocol = protocolName
+	s.dirty = true
+}
+
+// GetSelectedProtocol returns the currently selected protocol filter.
+func (s *StatisticsView) GetSelectedProtocol() string {
+	return s.selectedProtocol
+}
+
+// HasProtocolStats returns true if there are protocol-specific stats to show.
+func (s *StatisticsView) HasProtocolStats() bool {
+	if s.protocolRegistry == nil || s.selectedProtocol == "All" {
+		return false
+	}
+	provider := s.protocolRegistry.Get(s.selectedProtocol)
+	return provider != nil && provider.IsActive()
 }
 
 // GetSubView returns the current sub-view.
@@ -915,6 +960,12 @@ func (s *StatisticsView) renderOverviewSubView() string {
 		result.WriteString(fmt.Sprintf("  %-45s %6d packets\n", dc.Key, dc.Count))
 	}
 	result.WriteString("\n")
+
+	// Section: Protocol-Specific Stats (if protocol filter is active)
+	if s.HasProtocolStats() {
+		result.WriteString(s.renderProtocolStats())
+		result.WriteString("\n")
+	}
 
 	// Section: System Health (compact)
 	result.WriteString(s.renderHealthSection(titleStyle))
@@ -1704,4 +1755,18 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 	}
 
 	return result.String()
+}
+
+// renderProtocolStats renders protocol-specific statistics from the active provider.
+func (s *StatisticsView) renderProtocolStats() string {
+	if s.protocolRegistry == nil || s.selectedProtocol == "All" {
+		return ""
+	}
+
+	provider := s.protocolRegistry.Get(s.selectedProtocol)
+	if provider == nil || !provider.IsActive() {
+		return ""
+	}
+
+	return provider.Render(s.width, s.theme)
 }

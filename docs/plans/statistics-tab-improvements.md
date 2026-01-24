@@ -1,7 +1,7 @@
 # Statistics Tab Improvements
 
 **Date:** 2026-01-24
-**Status:** Pending
+**Status:** Complete
 **Research:** [docs/research/statistics-tab-improvements.md](../research/statistics-tab-improvements.md)
 
 ## Overview
@@ -56,16 +56,16 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 
 ### Phase 5: Protocol-Specific Stats (Extensible)
 
-- [ ] Create `internal/pkg/tui/components/protocol_stats.go`:
+- [x] Create `internal/pkg/tui/components/protocol_stats.go`:
   - `ProtocolStatsProvider` interface (`ProtocolName`, `IsActive`, `Render`, `GetMetrics`)
   - `ProtocolStatsRegistry` for provider registration and lookup
-- [ ] Create `internal/pkg/tui/components/voip_stats_provider.go`:
+- [x] Create `internal/pkg/tui/components/voip_stats_provider.go`:
   - Active/total/completed/failed calls
   - Success rate
   - Codec distribution (bar chart)
   - Quality metrics (jitter, loss, MOS)
-- [ ] Integrate with Protocol Selector in `statistics.go` - show provider section when protocol active
-- [ ] Document pattern for adding future protocol providers (DNS, HTTP, etc.)
+- [x] Integrate with Protocol Selector in `statistics.go` - show provider section when protocol active
+- [x] Document pattern for adding future protocol providers (DNS, HTTP, etc.)
 
 ## File Summary
 
@@ -83,19 +83,19 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 - `internal/pkg/tui/components/progressbar.go` - progress bar component with health indicators
 - `internal/pkg/tui/components/progressbar_test.go` - progress bar tests
 
-**New files (Phase 5 pending):**
+**New files (Phase 5 complete):**
 - `internal/pkg/tui/components/protocol_stats.go` - provider interface/registry
+- `internal/pkg/tui/components/protocol_stats_test.go` - protocol stats tests
 - `internal/pkg/tui/components/voip_stats_provider.go` - VoIP-specific stats
+- `internal/pkg/tui/components/voip_stats_provider_test.go` - VoIP provider tests
 
-**Modified files (Phase 1-4 complete):**
-- `internal/pkg/tui/components/statistics.go` - added RateTracker, DropStats, TimeWindow, SubView navigation, DistributedStats
+**Modified files (Phase 1-5 complete):**
+- `internal/pkg/tui/components/statistics.go` - added RateTracker, DropStats, TimeWindow, SubView navigation, DistributedStats, protocol stats registry
 - `go.mod` - ntcharts dependency
 - `internal/pkg/tui/components/footer.go` - Statistics tab keybindings
 - `internal/pkg/tui/keyboard_handler.go` - Statistics tab key handling
-- `internal/pkg/tui/capture_events.go` - HunterStatusMsg updates DistributedStats
-
-**Modified files (Phase 5 pending):**
-- `internal/pkg/tui/store/ui_state.go` - time window, selected protocol tracking
+- `internal/pkg/tui/capture_events.go` - HunterStatusMsg updates DistributedStats, VoIP calls update provider
+- `internal/pkg/tui/update_handlers.go` - Protocol selection updates statistics view
 
 ## Design Decisions
 

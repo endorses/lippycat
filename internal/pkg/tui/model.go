@@ -111,6 +111,9 @@ type Model struct {
 	lastPacketListUpdate     time.Time     // Last time packet list was updated
 	packetListUpdateInterval time.Duration // Minimum interval between updates (e.g., 100ms = 10 Hz)
 
+	// Rate tracking - record rates every 1 second for statistics sparklines
+	lastRateRecord time.Time // Last time rate was recorded
+
 	// Incremental packet list sync tracking
 	lastSyncedTotal         int64 // Last synced TotalPackets for unfiltered mode
 	lastSyncedFilteredCount int64 // Last synced MatchedPackets value for filtered mode

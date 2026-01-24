@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/api/gen/management"
@@ -108,6 +109,14 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 		// Update details panel if showing details
 		if m.uiState.ShowDetails {
 			m.updateDetailsPanel()
+		}
+
+		// Record rates for statistics sparklines (~1 Hz)
+		// Rate tracker expects samples at ~1 second intervals
+		now := time.Now()
+		if now.Sub(m.lastRateRecord) >= time.Second {
+			m.uiState.StatisticsView.RecordRates()
+			m.lastRateRecord = now
 		}
 
 		return m, tickCmd()

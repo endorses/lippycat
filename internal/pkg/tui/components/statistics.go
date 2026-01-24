@@ -12,6 +12,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/endorses/lippycat/internal/pkg/tui/components/dashboard"
+	"github.com/endorses/lippycat/internal/pkg/tui/responsive"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
@@ -917,8 +919,21 @@ func (s *StatisticsView) renderSubViewHeader() string {
 	return result.String()
 }
 
-// renderOverviewSubView renders the overview dashboard with all sections
+// renderOverviewSubView renders the overview dashboard with responsive layout
 func (s *StatisticsView) renderOverviewSubView() string {
+	mode := responsive.GetLayoutMode(s.width)
+	switch mode {
+	case responsive.LayoutWide:
+		return s.renderOverviewWide()
+	case responsive.LayoutMedium:
+		return s.renderOverviewMedium()
+	default:
+		return s.renderOverviewNarrow()
+	}
+}
+
+// renderOverviewNarrow renders the overview in single-column layout for narrow terminals
+func (s *StatisticsView) renderOverviewNarrow() string {
 	var result strings.Builder
 
 	// Title style
@@ -1004,6 +1019,377 @@ func (s *StatisticsView) renderOverviewSubView() string {
 	result.WriteString(s.renderHealthSection(titleStyle))
 
 	return result.String()
+}
+
+// renderOverviewMedium renders the overview in 2-column layout for medium terminals (80-119 chars)
+func (s *StatisticsView) renderOverviewMedium() string {
+	var result strings.Builder
+	gap := 2
+	colWidth := (s.width - gap) / 2
+
+	// Row 1: Capture stats + TUI metrics (inline in cards)
+	captureContent := s.buildCaptureContent()
+	tuiContent := s.buildTUIContent()
+
+	captureCard := dashboard.NewCard("CAPTURE", captureContent, s.theme,
+		dashboard.WithIcon("📊"),
+		dashboard.WithWidth(colWidth))
+	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
+		dashboard.WithIcon("🖥"),
+		dashboard.WithWidth(colWidth))
+
+	layout := dashboard.NewColumnLayout(gap)
+	result.WriteString(layout.JoinSideBySide(captureCard.Render(), tuiCard.Render(), colWidth, colWidth))
+	result.WriteString("\n")
+
+	// Row 2: Traffic Rate with sparkline
+	rateContent := s.buildTrafficRateContent(colWidth * 2)
+	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
+		dashboard.WithIcon("📈"),
+		dashboard.WithWidth(s.width-4))
+	result.WriteString(rateCard.Render())
+	result.WriteString("\n")
+
+	// Row 3: Protocol Distribution
+	protocolContent := s.renderProtocolDistribution(5)
+	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
+		dashboard.WithIcon("🔌"),
+		dashboard.WithWidth(s.width-4))
+	result.WriteString(protocolCard.Render())
+	result.WriteString("\n")
+
+	// Row 4: Top Sources (left) + Top Destinations (right)
+	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), colWidth-6)
+	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), colWidth-6)
+
+	sourcesCard := dashboard.NewCard("TOP SOURCES", sourcesContent, s.theme,
+		dashboard.WithIcon("⬆"),
+		dashboard.WithWidth(colWidth))
+	destsCard := dashboard.NewCard("TOP DESTINATIONS", destsContent, s.theme,
+		dashboard.WithIcon("⬇"),
+		dashboard.WithWidth(colWidth))
+
+	result.WriteString(layout.JoinSideBySide(sourcesCard.Render(), destsCard.Render(), colWidth, colWidth))
+
+	// Section: Protocol-Specific Stats (if protocol filter is active)
+	if s.HasProtocolStats() {
+		result.WriteString("\n")
+		result.WriteString(s.renderProtocolStats())
+	}
+
+	return result.String()
+}
+
+// renderOverviewWide renders the overview in optimal 2-column layout for wide terminals (>=120 chars)
+func (s *StatisticsView) renderOverviewWide() string {
+	var result strings.Builder
+	gap := 2
+	colWidth := (s.width - gap) / 2
+
+	layout := dashboard.NewColumnLayout(gap)
+
+	// Row 1: Capture card (left) + Traffic Rate card (right)
+	captureContent := s.buildCaptureContentWide()
+	rateContent := s.buildTrafficRateContentCompact()
+
+	captureCard := dashboard.NewCard("CAPTURE", captureContent, s.theme,
+		dashboard.WithIcon("📊"),
+		dashboard.WithWidth(colWidth))
+	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
+		dashboard.WithIcon("📈"),
+		dashboard.WithWidth(colWidth))
+
+	result.WriteString(layout.JoinSideBySide(captureCard.Render(), rateCard.Render(), colWidth, colWidth))
+	result.WriteString("\n")
+
+	// Row 2: TUI Process card (left) + Protocol Distribution card (right)
+	tuiContent := s.buildTUIContentWide()
+	protocolContent := s.renderProtocolDistribution(5)
+
+	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
+		dashboard.WithIcon("🖥"),
+		dashboard.WithWidth(colWidth))
+	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
+		dashboard.WithIcon("🔌"),
+		dashboard.WithWidth(colWidth))
+
+	result.WriteString(layout.JoinSideBySide(tuiCard.Render(), protocolCard.Render(), colWidth, colWidth))
+	result.WriteString("\n")
+
+	// Row 3: Top Sources (left) + Top Destinations (right)
+	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), colWidth-6)
+	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), colWidth-6)
+
+	sourcesCard := dashboard.NewCard("TOP SOURCES", sourcesContent, s.theme,
+		dashboard.WithIcon("⬆"),
+		dashboard.WithWidth(colWidth))
+	destsCard := dashboard.NewCard("TOP DESTINATIONS", destsContent, s.theme,
+		dashboard.WithIcon("⬇"),
+		dashboard.WithWidth(colWidth))
+
+	result.WriteString(layout.JoinSideBySide(sourcesCard.Render(), destsCard.Render(), colWidth, colWidth))
+
+	// Section: Protocol-Specific Stats (if protocol filter is active)
+	if s.HasProtocolStats() {
+		result.WriteString("\n")
+		result.WriteString(s.renderProtocolStats())
+	}
+
+	// Section: System Health (compact, only if there's data)
+	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
+		result.WriteString("\n")
+		titleStyle := lipgloss.NewStyle().
+			Bold(true).
+			Foreground(s.theme.InfoColor).
+			MarginBottom(1)
+		result.WriteString(s.renderHealthSection(titleStyle))
+	}
+
+	return result.String()
+}
+
+// buildCaptureContent builds the capture stats content for cards
+func (s *StatisticsView) buildCaptureContent() string {
+	var content strings.Builder
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg)
+
+	content.WriteString(labelStyle.Render("Packets: "))
+	content.WriteString(valueStyle.Render(formatNumber64(s.stats.TotalPackets)))
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Bytes:   "))
+	content.WriteString(valueStyle.Render(formatBytes(s.stats.TotalBytes)))
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Duration:"))
+	content.WriteString(valueStyle.Render(formatDuration(time.Since(s.startTime))))
+
+	return content.String()
+}
+
+// buildCaptureContentWide builds the capture stats content for wide layout with stat boxes
+func (s *StatisticsView) buildCaptureContentWide() string {
+	var content strings.Builder
+
+	// Create stat boxes for key metrics
+	packetsBox := dashboard.NewStatBox(
+		formatNumber64(s.stats.TotalPackets),
+		"packets",
+		s.theme,
+	)
+	bytesBox := dashboard.NewStatBox(
+		formatBytes(s.stats.TotalBytes),
+		"bytes",
+		s.theme,
+	)
+	durationBox := dashboard.NewStatBox(
+		formatDuration(time.Since(s.startTime)),
+		"duration",
+		s.theme,
+	)
+
+	// Render boxes in a row
+	content.WriteString(dashboard.StatBoxRow([]*dashboard.StatBox{packetsBox, bytesBox, durationBox}, 1))
+
+	// Add avg/min/max below
+	var avgSize int64
+	if s.stats.TotalPackets > 0 {
+		avgSize = s.stats.TotalBytes / s.stats.TotalPackets
+	}
+
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	content.WriteString("\n")
+	content.WriteString(dimStyle.Render(fmt.Sprintf("  %d avg  •  %d-%d bytes",
+		avgSize, s.stats.MinPacketSize, s.stats.MaxPacketSize)))
+
+	return content.String()
+}
+
+// buildTUIContent builds the TUI process metrics content for cards
+func (s *StatisticsView) buildTUIContent() string {
+	var content strings.Builder
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg)
+
+	cpuStr := "N/A"
+	if s.tuiMetrics != nil && s.tuiMetrics.CPUPercent >= 0 {
+		cpuStr = fmt.Sprintf("%.1f%%", s.tuiMetrics.CPUPercent)
+	}
+
+	memStr := "N/A"
+	if s.tuiMetrics != nil {
+		memStr = formatBytes(int64(s.tuiMetrics.MemoryRSSBytes))
+	}
+
+	content.WriteString(labelStyle.Render("CPU: "))
+	content.WriteString(valueStyle.Render(cpuStr))
+	content.WriteString("  ")
+	content.WriteString(labelStyle.Render("RAM: "))
+	content.WriteString(valueStyle.Render(memStr))
+
+	return content.String()
+}
+
+// buildTUIContentWide builds the TUI process metrics content for wide layout with sparkline
+func (s *StatisticsView) buildTUIContentWide() string {
+	var content strings.Builder
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg)
+
+	cpuStr := "N/A"
+	if s.tuiMetrics != nil && s.tuiMetrics.CPUPercent >= 0 {
+		cpuStr = fmt.Sprintf("%.1f%%", s.tuiMetrics.CPUPercent)
+	}
+
+	memStr := "N/A"
+	if s.tuiMetrics != nil {
+		memStr = formatBytes(int64(s.tuiMetrics.MemoryRSSBytes))
+	}
+
+	content.WriteString(labelStyle.Render("  CPU: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%-8s", cpuStr)))
+	content.WriteString(labelStyle.Render("  RAM: "))
+	content.WriteString(valueStyle.Render(memStr))
+
+	// Add CPU sparkline if we have enough samples
+	if s.cpuTracker != nil && s.cpuTracker.SampleCount() > 2 {
+		sparklineWidth := 30
+		samples := s.cpuTracker.GetSamples(sparklineWidth)
+		if len(samples) > 0 {
+			content.WriteString("\n\n")
+			sparkline := RenderCPUSparkline(samples, sparklineWidth, 2, s.theme)
+			content.WriteString(sparkline)
+		}
+	}
+
+	return content.String()
+}
+
+// buildTrafficRateContent builds the traffic rate content for cards
+func (s *StatisticsView) buildTrafficRateContent(availableWidth int) string {
+	var content strings.Builder
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg)
+
+	rateStats := s.GetRateStats()
+
+	content.WriteString(labelStyle.Render("Current: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
+		formatRate(rateStats.CurrentPacketsPerSec),
+		formatBytesPerSec(rateStats.CurrentBytesPerSec))))
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Average: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
+		formatRate(rateStats.AvgPacketsPerSec),
+		formatBytesPerSec(rateStats.AvgBytesPerSec))))
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Peak:    "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
+		formatRate(rateStats.PeakPacketsPerSec),
+		formatBytesPerSec(rateStats.PeakBytesPerSec))))
+
+	// Add sparkline if we have enough samples
+	if s.rateTracker != nil && s.rateTracker.SampleCount() > 2 {
+		sparklineWidth := availableWidth - 10
+		if sparklineWidth > 60 {
+			sparklineWidth = 60
+		}
+		if sparklineWidth < 20 {
+			sparklineWidth = 20
+		}
+
+		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		if len(rates) > 0 {
+			content.WriteString("\n\n")
+			sparkline := RenderRateSparkline(rates, sparklineWidth, 3, s.theme, rateStats.PeakPacketsPerSec)
+			content.WriteString(sparkline)
+		}
+	}
+
+	return content.String()
+}
+
+// buildTrafficRateContentCompact builds compact traffic rate content for wide layout
+func (s *StatisticsView) buildTrafficRateContentCompact() string {
+	var content strings.Builder
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg)
+
+	rateStats := s.GetRateStats()
+
+	// Compact format: label aligned with values
+	content.WriteString(labelStyle.Render("Current: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%-10s | %s",
+		formatRate(rateStats.CurrentPacketsPerSec)+" pkt/s",
+		formatBytesPerSec(rateStats.CurrentBytesPerSec))))
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Average: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%-10s | %s",
+		formatRate(rateStats.AvgPacketsPerSec)+" pkt/s",
+		formatBytesPerSec(rateStats.AvgBytesPerSec))))
+	content.WriteString("\n")
+	content.WriteString(labelStyle.Render("Peak:    "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%-10s | %s",
+		formatRate(rateStats.PeakPacketsPerSec)+" pkt/s",
+		formatBytesPerSec(rateStats.PeakBytesPerSec))))
+
+	// Add sparkline for wide layout
+	if s.rateTracker != nil && s.rateTracker.SampleCount() > 2 {
+		sparklineWidth := 40
+
+		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		if len(rates) > 0 {
+			content.WriteString("\n\n")
+			sparkline := RenderRateSparkline(rates, sparklineWidth, 2, s.theme, rateStats.PeakPacketsPerSec)
+			content.WriteString(sparkline)
+		}
+	}
+
+	return content.String()
+}
+
+// buildTopTalkersContent builds the top talkers content for cards
+func (s *StatisticsView) buildTopTalkersContent(items []KeyCount, availableWidth int) string {
+	var content strings.Builder
+
+	// Calculate widths
+	ipWidth := availableWidth - 12 // Leave room for count
+	if ipWidth < 15 {
+		ipWidth = 15
+	}
+	if ipWidth > 40 {
+		ipWidth = 40
+	}
+
+	for _, item := range items {
+		ip := item.Key
+		// Truncate IP if needed
+		if len(ip) > ipWidth {
+			ip = ip[:ipWidth-3] + "..."
+		}
+		content.WriteString(fmt.Sprintf("%-*s %8d\n", ipWidth, ip, item.Count))
+	}
+
+	return strings.TrimSuffix(content.String(), "\n")
 }
 
 // renderTrafficSubView renders detailed traffic rate information

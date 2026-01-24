@@ -133,7 +133,7 @@ Current issues with the Overview sub-view:
 
 ### Phase 4: Overview Refactoring
 
-- [ ] Refactor `renderOverviewSubView()` to use layout mode:
+- [x] Refactor `renderOverviewSubView()` to use layout mode:
   ```go
   func (s *StatisticsView) renderOverviewSubView() string {
       mode := getLayoutMode(s.width)
@@ -147,16 +147,16 @@ Current issues with the Overview sub-view:
       }
   }
   ```
-- [ ] Implement `renderOverviewWide()`:
+- [x] Implement `renderOverviewWide()`:
   - Row 1: Capture card (left) + Traffic Rate card (right)
   - Row 2: TUI Process card (left) + Protocol Distribution card (right)
   - Row 3: Top Sources (left) + Top Destinations (right)
-- [ ] Implement `renderOverviewMedium()`:
+- [x] Implement `renderOverviewMedium()`:
   - Row 1: Capture stats + TUI metrics (inline)
   - Row 2: Traffic Rate with sparkline
   - Row 3: Protocol Distribution
   - Row 4: Top Sources (left) + Top Destinations (right)
-- [ ] Keep `renderOverviewNarrow()` as current implementation (single column)
+- [x] Keep `renderOverviewNarrow()` as current implementation (single column)
 
 ### Phase 5: Dynamic Bar Widths
 

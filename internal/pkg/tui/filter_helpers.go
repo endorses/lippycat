@@ -12,8 +12,8 @@ import (
 )
 
 // parseAndApplyFilter parses and applies a filter expression to the packet list.
-// For offline mode: Reapplies filter to existing packets immediately.
-// For live mode: Does NOT reapply - at high traffic rates the buffer refills quickly.
+// For offline mode or paused: Reapplies filter to existing packets immediately.
+// For live mode (not paused): Does NOT reapply - at high traffic rates the buffer refills quickly.
 // This prevents UI freezing at 300-400+ Mbit/s by avoiding O(n) scans.
 func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 	// NOTE: We do NOT clear existing filters - this allows filter stacking
@@ -36,9 +36,9 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 		)
 	}
 
-	// For offline mode, reapply filters to existing packets immediately
+	// For offline mode or when paused, reapply filters to existing packets immediately
 	// since no new packets will arrive.
-	if m.captureMode == components.CaptureModeOffline {
+	if m.captureMode == components.CaptureModeOffline || m.uiState.IsPaused() {
 		m.packetStore.ReapplyFilters()
 		m.uiState.PacketList.SetPackets(m.packetStore.GetFilteredPackets())
 		// Reset sync counters for incremental updates
@@ -46,7 +46,7 @@ func (m *Model) parseAndApplyFilter(filterStr string) tea.Cmd {
 		m.lastSyncedFilteredCount = matchedPackets
 		m.lastFilterState = true
 	} else {
-		// For live mode, clear filtered packets - new packets will flow through
+		// For live mode (not paused), clear filtered packets - new packets will flow through
 		// filter automatically via AddPacketBatch() and incremental updates.
 		// At high traffic rates (300-400 Mbit/s), buffer refills in seconds anyway.
 		m.packetStore.ClearFilteredPackets()

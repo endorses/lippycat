@@ -48,8 +48,8 @@ func InitDefault() *Detector {
 		DefaultDetector.RegisterSignature(application.NewPostgreSQLSignature()) // Priority 90
 		DefaultDetector.RegisterSignature(application.NewMongoDBSignature())    // Priority 90
 		DefaultDetector.RegisterSignature(application.NewRedisSignature())      // Priority 90
+		DefaultDetector.RegisterSignature(application.NewTLSSignature())        // Priority 110
 		DefaultDetector.RegisterSignature(application.NewTelnetSignature())     // Priority 85
-		DefaultDetector.RegisterSignature(application.NewTLSSignature())        // Priority 85
 		DefaultDetector.RegisterSignature(application.NewHTTPSignature())       // Priority 80
 
 		// Register network-layer signatures

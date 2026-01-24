@@ -47,6 +47,13 @@ func (o *OpenVPNSignature) Detect(ctx *signatures.DetectionContext) *signatures.
 		return nil
 	}
 
+	// Exclude well-known TLS/HTTPS ports to prevent false positives on encrypted TLS data.
+	// Mid-stream TLS application data looks like random bytes and can match OpenVPN patterns.
+	// OpenVPN on these ports is extremely rare compared to TLS.
+	if o.isWellKnownTLSPort(ctx.SrcPort) || o.isWellKnownTLSPort(ctx.DstPort) {
+		return nil
+	}
+
 	payload := ctx.Payload
 
 	// Exclude TLS traffic (content types 0x14-0x18)
@@ -247,4 +254,27 @@ func (o *OpenVPNSignature) opcodeToString(opcode byte) string {
 		return name
 	}
 	return "Unknown"
+}
+
+// isWellKnownTLSPort returns true if the port is commonly used for TLS/HTTPS traffic.
+// OpenVPN detection is skipped on these ports to prevent false positives from
+// encrypted TLS application data that can look like valid OpenVPN packets.
+func (o *OpenVPNSignature) isWellKnownTLSPort(port uint16) bool {
+	switch port {
+	case 443, // HTTPS
+		8443, // HTTPS alternate
+		465,  // SMTPS
+		563,  // NNTPS
+		636,  // LDAPS
+		853,  // DNS over TLS
+		989,  // FTPS data
+		990,  // FTPS control
+		992,  // Telnet over TLS
+		993,  // IMAPS
+		994,  // IRC over TLS
+		995:  // POP3S
+		return true
+	default:
+		return false
+	}
 }

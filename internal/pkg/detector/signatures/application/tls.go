@@ -48,7 +48,7 @@ func (t *TLSSignature) Protocols() []string {
 }
 
 func (t *TLSSignature) Priority() int {
-	return 85 // High priority, often encapsulates other protocols
+	return 110 // Higher than VPN protocols (100) - TLS is far more common on port 443
 }
 
 func (t *TLSSignature) Layer() signatures.LayerType {
@@ -72,7 +72,8 @@ func (t *TLSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	// Validate content type
 	contentTypeName, validContentType := t.contentTypes[contentType]
 	if !validContentType {
-		return nil
+		// Not a valid TLS record header - check for mid-stream encrypted TLS
+		return t.detectMidStreamTLS(ctx)
 	}
 
 	// Validate TLS/SSL version
@@ -82,15 +83,15 @@ func (t *TLSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	// TLS 1.2: 0x0303
 	// TLS 1.3: 0x0304
 	if majorVersion != 0x03 {
-		return nil
+		return t.detectMidStreamTLS(ctx)
 	}
 	if minorVersion > 0x04 {
-		return nil
+		return t.detectMidStreamTLS(ctx)
 	}
 
 	// Validate length is reasonable (max TLS record is 16KB)
 	if length > 16384 {
-		return nil
+		return t.detectMidStreamTLS(ctx)
 	}
 
 	// Determine version string
@@ -137,10 +138,11 @@ func (t *TLSSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	})
 
 	return &signatures.DetectionResult{
-		Protocol:    "TLS",
-		Confidence:  confidence,
-		Metadata:    metadata,
-		ShouldCache: true,
+		Protocol:      "TLS",
+		Confidence:    confidence,
+		Metadata:      metadata,
+		ShouldCache:   true,
+		CacheStrategy: signatures.CacheSession, // TLS connections are session-based
 	}
 }
 
@@ -249,4 +251,117 @@ func (t *TLSSignature) parseSNIExtension(data []byte) string {
 	}
 
 	return string(data[5 : 5+nameLen])
+}
+
+// detectMidStreamTLS detects encrypted TLS traffic that doesn't start with a TLS record header.
+// This handles TCP segments in the middle of an ongoing TLS session where the payload
+// is encrypted application data without a visible TLS header.
+func (t *TLSSignature) detectMidStreamTLS(ctx *signatures.DetectionContext) *signatures.DetectionResult {
+	// Only detect mid-stream TLS on well-known TLS ports
+	if !t.isWellKnownTLSPort(ctx.SrcPort) && !t.isWellKnownTLSPort(ctx.DstPort) {
+		return nil
+	}
+
+	// Require TCP transport (TLS runs over TCP)
+	if ctx.Transport != "TCP" {
+		return nil
+	}
+
+	// Need enough data to analyze
+	if len(ctx.Payload) < 20 {
+		return nil
+	}
+
+	// Check if payload looks like encrypted data (high entropy, no ASCII text patterns)
+	if !t.looksEncrypted(ctx.Payload) {
+		return nil
+	}
+
+	// Return lower-confidence TLS detection for mid-stream traffic
+	return &signatures.DetectionResult{
+		Protocol:   "TLS",
+		Confidence: signatures.ConfidenceMedium, // Lower confidence for mid-stream
+		Metadata: map[string]any{
+			"mid_stream":   true,
+			"content_type": "ApplicationData (mid-stream)",
+		},
+		ShouldCache:   true,
+		CacheStrategy: signatures.CacheSession,
+	}
+}
+
+// isWellKnownTLSPort returns true if the port is commonly used for TLS traffic.
+func (t *TLSSignature) isWellKnownTLSPort(port uint16) bool {
+	switch port {
+	case 443, 8443, // HTTPS
+		465, // SMTPS
+		563, // NNTPS
+		636, // LDAPS
+		853, // DNS over TLS
+		989, // FTPS data
+		990, // FTPS control
+		992, // Telnet over TLS
+		993, // IMAPS
+		994, // IRC over TLS
+		995: // POP3S
+		return true
+	default:
+		return false
+	}
+}
+
+// looksEncrypted checks if payload appears to be encrypted data.
+// Encrypted data has high entropy and lacks ASCII text patterns.
+func (t *TLSSignature) looksEncrypted(payload []byte) bool {
+	if len(payload) < 20 {
+		return false
+	}
+
+	// Check first 64 bytes (or less if payload is smaller)
+	checkLen := 64
+	if len(payload) < checkLen {
+		checkLen = len(payload)
+	}
+
+	// Count printable ASCII characters and check byte distribution
+	printableCount := 0
+	var byteFreq [256]int
+
+	for i := 0; i < checkLen; i++ {
+		b := payload[i]
+		byteFreq[b]++
+
+		// Printable ASCII range (space to tilde)
+		if b >= 0x20 && b <= 0x7E {
+			printableCount++
+		}
+	}
+
+	// If >70% printable ASCII, likely not encrypted (probably plaintext HTTP, etc.)
+	if float64(printableCount)/float64(checkLen) > 0.7 {
+		return false
+	}
+
+	// Check for common plaintext protocol signatures that should NOT be detected as TLS
+	// HTTP methods
+	if len(payload) >= 4 {
+		prefix := string(payload[:4])
+		if prefix == "GET " || prefix == "POST" || prefix == "HTTP" || prefix == "HEAD" ||
+			prefix == "PUT " || prefix == "DELE" || prefix == "OPTI" {
+			return false
+		}
+	}
+
+	// Encrypted data should have relatively uniform byte distribution
+	// Count how many unique byte values appear
+	uniqueBytes := 0
+	for _, count := range byteFreq {
+		if count > 0 {
+			uniqueBytes++
+		}
+	}
+
+	// Encrypted data should use many different byte values
+	// If only a small number of unique bytes, probably not encrypted
+	return uniqueBytes >= 30
 }

@@ -250,6 +250,16 @@ type StatisticsView struct {
 	protocolRegistry *ProtocolStatsRegistry // Registry of protocol stats providers
 	voipProvider     *VoIPStatsProvider     // VoIP-specific stats provider
 	selectedProtocol string                 // Currently selected protocol filter
+
+	// Phase 6: TUI process metrics
+	cpuTracker *CPUTracker // CPU usage history for sparkline
+	tuiMetrics *TUIMetrics // Current TUI process metrics
+}
+
+// TUIMetrics holds the current TUI process resource usage.
+type TUIMetrics struct {
+	CPUPercent     float64 // CPU usage as percentage (0-100, -1 if unavailable)
+	MemoryRSSBytes uint64  // Resident set size in bytes
 }
 
 // NewStatisticsView creates a new statistics view
@@ -279,6 +289,8 @@ func NewStatisticsView() StatisticsView {
 		protocolRegistry: registry,
 		voipProvider:     voipProvider,
 		selectedProtocol: "All",
+		cpuTracker:       DefaultCPUTracker(),
+		tuiMetrics:       &TUIMetrics{CPUPercent: -1},
 	}
 }
 
@@ -359,6 +371,28 @@ func (s *StatisticsView) RecordRates() {
 		return
 	}
 	s.rateTracker.Record(s.stats.TotalPackets, s.stats.TotalBytes)
+}
+
+// UpdateTUIMetrics updates the TUI process resource metrics.
+// Should be called periodically (e.g., every second) with metrics from sysmetrics.Collector.
+func (s *StatisticsView) UpdateTUIMetrics(cpuPercent float64, memoryRSSBytes uint64) {
+	if s.tuiMetrics == nil {
+		s.tuiMetrics = &TUIMetrics{CPUPercent: -1}
+	}
+	s.tuiMetrics.CPUPercent = cpuPercent
+	s.tuiMetrics.MemoryRSSBytes = memoryRSSBytes
+
+	// Record CPU sample for sparkline
+	if s.cpuTracker != nil {
+		s.cpuTracker.Record(cpuPercent)
+	}
+
+	s.dirty = true
+}
+
+// GetTUIMetrics returns the current TUI process metrics.
+func (s *StatisticsView) GetTUIMetrics() *TUIMetrics {
+	return s.tuiMetrics
 }
 
 // GetRateStats returns current rate statistics.
@@ -927,6 +961,10 @@ func (s *StatisticsView) renderOverviewSubView() string {
 
 	// Section: Traffic Rate (compact)
 	result.WriteString(s.renderRateSection(titleStyle, labelStyle, valueStyle))
+	result.WriteString("\n")
+
+	// Section: TUI Process Metrics
+	result.WriteString(s.renderTUIMetrics(titleStyle, labelStyle, valueStyle))
 	result.WriteString("\n")
 
 	// Section: Protocol Distribution
@@ -1834,6 +1872,52 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 		result.WriteString("\n")
 	} else {
 		result.WriteString("  No health data available\n")
+	}
+
+	return result.String()
+}
+
+// renderTUIMetrics renders the TUI process CPU and memory metrics with sparkline.
+func (s *StatisticsView) renderTUIMetrics(titleStyle, labelStyle, valueStyle lipgloss.Style) string {
+	var result strings.Builder
+
+	result.WriteString(titleStyle.Render("🖥 TUI Process"))
+	result.WriteString("\n\n")
+
+	if s.tuiMetrics == nil {
+		result.WriteString("  No metrics available\n")
+		return result.String()
+	}
+
+	// CPU percentage
+	cpuStr := "N/A"
+	if s.tuiMetrics.CPUPercent >= 0 {
+		cpuStr = fmt.Sprintf("%.1f%%", s.tuiMetrics.CPUPercent)
+	}
+
+	// Memory RSS
+	memStr := formatBytes(int64(s.tuiMetrics.MemoryRSSBytes))
+
+	// Render metrics inline
+	result.WriteString(labelStyle.Render("  CPU: "))
+	result.WriteString(valueStyle.Render(fmt.Sprintf("%-8s", cpuStr)))
+	result.WriteString(labelStyle.Render("  RAM: "))
+	result.WriteString(valueStyle.Render(memStr))
+	result.WriteString("\n\n")
+
+	// Render CPU sparkline if we have enough samples
+	if s.cpuTracker != nil && s.cpuTracker.SampleCount() > 2 {
+		sparklineWidth := 30
+		if s.width > 0 && s.width < 80 {
+			sparklineWidth = s.width - 20
+		}
+
+		samples := s.cpuTracker.GetSamples(sparklineWidth)
+		if len(samples) > 0 {
+			sparkline := RenderCPUSparkline(samples, sparklineWidth, 2, s.theme)
+			result.WriteString(sparkline)
+			result.WriteString("\n")
+		}
 	}
 
 	return result.String()

@@ -33,6 +33,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.uiState.SettingsView.IsEditing() {
 			switch msg.String() {
 			case "q", "ctrl+c":
+				m.Shutdown()
 				m.uiState.Quitting = true
 				return m, tea.Quit
 			case "ctrl+z":
@@ -249,6 +250,7 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Suspend
 
 	case "q", "ctrl+c":
+		m.Shutdown()
 		m.uiState.Quitting = true
 		return m, tea.Quit
 

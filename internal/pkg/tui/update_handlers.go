@@ -116,6 +116,13 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 		now := time.Now()
 		if now.Sub(m.lastRateRecord) >= time.Second {
 			m.uiState.StatisticsView.RecordRates()
+
+			// Update TUI process metrics (CPU/RAM)
+			if m.metricsCollector != nil {
+				metrics := m.metricsCollector.Get()
+				m.uiState.StatisticsView.UpdateTUIMetrics(metrics.CPUPercent, metrics.MemoryRSSBytes)
+			}
+
 			m.lastRateRecord = now
 		}
 

@@ -212,3 +212,38 @@ func RenderBytesRateSparkline(rates []float64, width, height int, theme themes.T
 	sl.DrawColumnsOnly()
 	return sl.View()
 }
+
+// RenderCPUSparkline renders a CPU percentage sparkline with utilization-based colors.
+// Uses green for low CPU (<30%), yellow for moderate (30-70%), red for high (>70%).
+func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme) string {
+	if len(samples) == 0 {
+		return ""
+	}
+
+	// Determine color based on current CPU percentage
+	var color lipgloss.Color
+	if len(samples) > 0 {
+		current := samples[len(samples)-1]
+		switch {
+		case current > 70:
+			color = theme.ErrorColor // High CPU
+		case current > 30:
+			color = theme.WarningColor // Moderate CPU
+		default:
+			color = theme.SuccessColor // Low CPU
+		}
+	} else {
+		color = theme.InfoColor
+	}
+
+	style := lipgloss.NewStyle().Foreground(color)
+	opts := []sparkline.Option{
+		sparkline.WithStyle(style),
+		sparkline.WithData(samples),
+		sparkline.WithMaxValue(100), // CPU is always 0-100%
+	}
+
+	sl := sparkline.New(width, height, opts...)
+	sl.DrawColumnsOnly()
+	return sl.View()
+}

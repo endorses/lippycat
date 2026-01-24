@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pcap"
+	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
@@ -125,6 +126,9 @@ type Model struct {
 
 	// Background processor for non-critical packet processing (DNS, HTTP, call aggregator)
 	backgroundProcessor *BackgroundProcessor
+
+	// System metrics collector for TUI process CPU/RAM
+	metricsCollector sysmetrics.Collector
 
 	// Test state
 	testToastCycle int // Cycles through toast types for testing
@@ -249,6 +253,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
 		packetListUpdateInterval:   constants.TUITickInterval, // 10 Hz throttle for packet list (prevents freeze)
 		backgroundProcessor:        bgProcessor,
+		metricsCollector:           sysmetrics.New(),
 	}
 }
 
@@ -270,11 +275,25 @@ func formatPCAPFilesDisplay(files []string) string {
 
 // Init initializes the model
 func (m Model) Init() tea.Cmd {
+	// Start system metrics collector for TUI CPU/RAM tracking
+	if m.metricsCollector != nil {
+		m.metricsCollector.Start(context.Background())
+	}
+
 	// Load remote nodes if in remote mode
 	if m.captureMode == components.CaptureModeRemote && m.nodesFilePath != "" {
 		return tea.Batch(tickCmd(), cleanupProcessorsCmd(), loadNodesFile(m.nodesFilePath))
 	}
 	return tea.Batch(tickCmd(), cleanupProcessorsCmd())
+}
+
+// Shutdown cleans up resources before quitting.
+// Call this before tea.Quit to ensure proper cleanup.
+func (m *Model) Shutdown() {
+	// Stop system metrics collector
+	if m.metricsCollector != nil {
+		m.metricsCollector.Stop()
+	}
 }
 
 // Update handles messages and updates the model
@@ -298,6 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
 				case "q", "ctrl+c":
+					m.Shutdown()
 					m.uiState.Quitting = true
 					return m, tea.Quit
 				case "ctrl+z":

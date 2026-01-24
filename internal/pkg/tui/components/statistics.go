@@ -1025,7 +1025,17 @@ func (s *StatisticsView) renderOverviewNarrow() string {
 func (s *StatisticsView) renderOverviewMedium() string {
 	var result strings.Builder
 	gap := 2
+	// colWidth is the total column width including card border
 	colWidth := (s.width - gap) / 2
+	// cardWidth is the lipgloss Width() value (excludes border, includes padding)
+	cardWidth := colWidth - 2
+	// contentWidth is the actual content area inside the card (excludes border and padding)
+	contentWidth := cardWidth - 2
+	// For full-width cards
+	fullCardWidth := s.width - 2
+	fullContentWidth := fullCardWidth - 2
+
+	layout := dashboard.NewColumnLayout(gap)
 
 	// Row 1: Capture stats + TUI metrics (inline in cards)
 	captureContent := s.buildCaptureContent()
@@ -1033,41 +1043,50 @@ func (s *StatisticsView) renderOverviewMedium() string {
 
 	captureCard := dashboard.NewCard("CAPTURE", captureContent, s.theme,
 		dashboard.WithIcon("📊"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
 
-	layout := dashboard.NewColumnLayout(gap)
+	// Set matching heights for row 1
+	row1Height := maxInt(captureCard.ContentHeight(), tuiCard.ContentHeight())
+	captureCard.Height = row1Height
+	tuiCard.Height = row1Height
+
 	result.WriteString(layout.JoinSideBySide(captureCard.Render(), tuiCard.Render(), colWidth, colWidth))
 	result.WriteString("\n")
 
-	// Row 2: Traffic Rate with sparkline
-	rateContent := s.buildTrafficRateContent(colWidth * 2)
+	// Row 2: Traffic Rate with sparkline (full width)
+	rateContent := s.buildTrafficRateContent(fullContentWidth)
 	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
 		dashboard.WithIcon("📈"),
-		dashboard.WithWidth(s.width-4))
+		dashboard.WithWidth(fullCardWidth))
 	result.WriteString(rateCard.Render())
 	result.WriteString("\n")
 
-	// Row 3: Protocol Distribution
-	protocolContent := s.renderProtocolDistribution(5, s.width-10) // Account for card borders/padding
+	// Row 3: Protocol Distribution (full width)
+	protocolContent := s.renderProtocolDistribution(5, fullContentWidth)
 	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
 		dashboard.WithIcon("🔌"),
-		dashboard.WithWidth(s.width-4))
+		dashboard.WithWidth(fullCardWidth))
 	result.WriteString(protocolCard.Render())
 	result.WriteString("\n")
 
 	// Row 4: Top Sources (left) + Top Destinations (right)
-	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), colWidth-6)
-	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), colWidth-6)
+	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), contentWidth)
+	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), contentWidth)
 
 	sourcesCard := dashboard.NewCard("TOP SOURCES", sourcesContent, s.theme,
 		dashboard.WithIcon("⬆"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
 	destsCard := dashboard.NewCard("TOP DESTINATIONS", destsContent, s.theme,
 		dashboard.WithIcon("⬇"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
+
+	// Set matching heights for row 4
+	row4Height := maxInt(sourcesCard.ContentHeight(), destsCard.ContentHeight())
+	sourcesCard.Height = row4Height
+	destsCard.Height = row4Height
 
 	result.WriteString(layout.JoinSideBySide(sourcesCard.Render(), destsCard.Render(), colWidth, colWidth))
 
@@ -1084,48 +1103,68 @@ func (s *StatisticsView) renderOverviewMedium() string {
 func (s *StatisticsView) renderOverviewWide() string {
 	var result strings.Builder
 	gap := 2
+	// colWidth is the total column width including card border
 	colWidth := (s.width - gap) / 2
+	// cardWidth is the lipgloss Width() value (excludes border, includes padding)
+	cardWidth := colWidth - 2
+	// contentWidth is the actual content area inside the card (excludes border and padding)
+	contentWidth := cardWidth - 2
 
 	layout := dashboard.NewColumnLayout(gap)
 
 	// Row 1: Capture card (left) + Traffic Rate card (right)
-	captureContent := s.buildCaptureContentWide()
-	rateContent := s.buildTrafficRateContentCompact()
+	captureContent := s.buildCaptureContentWide(contentWidth)
+	rateContent := s.buildTrafficRateContentCompact(contentWidth)
 
 	captureCard := dashboard.NewCard("CAPTURE", captureContent, s.theme,
 		dashboard.WithIcon("📊"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
 	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
 		dashboard.WithIcon("📈"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
+
+	// Set matching heights for row 1
+	row1Height := maxInt(captureCard.ContentHeight(), rateCard.ContentHeight())
+	captureCard.Height = row1Height
+	rateCard.Height = row1Height
 
 	result.WriteString(layout.JoinSideBySide(captureCard.Render(), rateCard.Render(), colWidth, colWidth))
 	result.WriteString("\n")
 
 	// Row 2: TUI Process card (left) + Protocol Distribution card (right)
-	tuiContent := s.buildTUIContentWide()
-	protocolContent := s.renderProtocolDistribution(5, colWidth-6) // Account for card borders/padding
+	tuiContent := s.buildTUIContentWide(contentWidth)
+	protocolContent := s.renderProtocolDistribution(5, contentWidth)
 
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
 	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
 		dashboard.WithIcon("🔌"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
+
+	// Set matching heights for row 2
+	row2Height := maxInt(tuiCard.ContentHeight(), protocolCard.ContentHeight())
+	tuiCard.Height = row2Height
+	protocolCard.Height = row2Height
 
 	result.WriteString(layout.JoinSideBySide(tuiCard.Render(), protocolCard.Render(), colWidth, colWidth))
 	result.WriteString("\n")
 
 	// Row 3: Top Sources (left) + Top Destinations (right)
-	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), colWidth-6)
-	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), colWidth-6)
+	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), contentWidth)
+	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), contentWidth)
 
 	sourcesCard := dashboard.NewCard("TOP SOURCES", sourcesContent, s.theme,
 		dashboard.WithIcon("⬆"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
 	destsCard := dashboard.NewCard("TOP DESTINATIONS", destsContent, s.theme,
 		dashboard.WithIcon("⬇"),
-		dashboard.WithWidth(colWidth))
+		dashboard.WithWidth(cardWidth))
+
+	// Set matching heights for row 3
+	row3Height := maxInt(sourcesCard.ContentHeight(), destsCard.ContentHeight())
+	sourcesCard.Height = row3Height
+	destsCard.Height = row3Height
 
 	result.WriteString(layout.JoinSideBySide(sourcesCard.Render(), destsCard.Render(), colWidth, colWidth))
 
@@ -1171,28 +1210,41 @@ func (s *StatisticsView) buildCaptureContent() string {
 }
 
 // buildCaptureContentWide builds the capture stats content for wide layout with stat boxes
-func (s *StatisticsView) buildCaptureContentWide() string {
+func (s *StatisticsView) buildCaptureContentWide(availableWidth int) string {
 	var content strings.Builder
 
-	// Create stat boxes for key metrics
+	// Calculate stat box width: divide available width among 3 boxes with gaps
+	// Each box has 2 chars of border, so we need to account for that
+	numBoxes := 3
+	gap := 1
+	totalGaps := gap * (numBoxes - 1)
+	boxWidth := (availableWidth - totalGaps) / numBoxes
+	if boxWidth < 10 {
+		boxWidth = 10 // minimum
+	}
+
+	// Create stat boxes for key metrics with explicit widths
 	packetsBox := dashboard.NewStatBox(
 		formatNumber64(s.stats.TotalPackets),
 		"packets",
 		s.theme,
+		dashboard.WithStatBoxWidth(boxWidth),
 	)
 	bytesBox := dashboard.NewStatBox(
 		formatBytes(s.stats.TotalBytes),
 		"bytes",
 		s.theme,
+		dashboard.WithStatBoxWidth(boxWidth),
 	)
 	durationBox := dashboard.NewStatBox(
 		formatDuration(time.Since(s.startTime)),
 		"duration",
 		s.theme,
+		dashboard.WithStatBoxWidth(boxWidth),
 	)
 
 	// Render boxes in a row
-	content.WriteString(dashboard.StatBoxRow([]*dashboard.StatBox{packetsBox, bytesBox, durationBox}, 1))
+	content.WriteString(dashboard.StatBoxRow([]*dashboard.StatBox{packetsBox, bytesBox, durationBox}, gap))
 
 	// Add avg/min/max below
 	var avgSize int64
@@ -1238,7 +1290,7 @@ func (s *StatisticsView) buildTUIContent() string {
 }
 
 // buildTUIContentWide builds the TUI process metrics content for wide layout with sparkline
-func (s *StatisticsView) buildTUIContentWide() string {
+func (s *StatisticsView) buildTUIContentWide(availableWidth int) string {
 	var content strings.Builder
 
 	labelStyle := lipgloss.NewStyle().
@@ -1264,7 +1316,11 @@ func (s *StatisticsView) buildTUIContentWide() string {
 
 	// Add CPU sparkline if we have enough samples
 	if s.cpuTracker != nil && s.cpuTracker.SampleCount() > 2 {
-		sparklineWidth := 30
+		// Use available width for sparkline, leaving some margin
+		sparklineWidth := availableWidth - 4
+		if sparklineWidth < 20 {
+			sparklineWidth = 20
+		}
 		samples := s.cpuTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
 			content.WriteString("\n\n")
@@ -1325,7 +1381,7 @@ func (s *StatisticsView) buildTrafficRateContent(availableWidth int) string {
 }
 
 // buildTrafficRateContentCompact builds compact traffic rate content for wide layout
-func (s *StatisticsView) buildTrafficRateContentCompact() string {
+func (s *StatisticsView) buildTrafficRateContentCompact(availableWidth int) string {
 	var content strings.Builder
 
 	labelStyle := lipgloss.NewStyle().
@@ -1354,7 +1410,11 @@ func (s *StatisticsView) buildTrafficRateContentCompact() string {
 
 	// Add sparkline for wide layout
 	if s.rateTracker != nil && s.rateTracker.SampleCount() > 2 {
-		sparklineWidth := 40
+		// Use available width for sparkline, leaving some margin
+		sparklineWidth := availableWidth - 4
+		if sparklineWidth < 20 {
+			sparklineWidth = 20
+		}
 
 		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
 		if len(rates) > 0 {
@@ -2141,6 +2201,14 @@ func (s *StatisticsView) renderProtocolDistribution(maxProtocols, availableWidth
 	}
 
 	return result.String()
+}
+
+// maxInt returns the maximum of two integers.
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // formatBytes formats bytes into human-readable format

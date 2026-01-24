@@ -57,6 +57,7 @@ func (s *StatBox) SetTheme(theme themes.Theme) {
 //	└─────────┘
 func (s *StatBox) Render() string {
 	// Calculate width
+	// width is the TOTAL visible width including border
 	width := s.Width
 	if width <= 0 {
 		valueWidth := lipgloss.Width(s.Value)
@@ -65,7 +66,13 @@ func (s *StatBox) Render() string {
 		if labelWidth > width {
 			width = labelWidth
 		}
-		width += 4 // padding
+		width += 4 // +2 for padding (inside Width), +2 for border (outside Width)
+	}
+
+	// Inner width for content: total width - 2 (border) - 2 (padding)
+	innerWidth := width - 4
+	if innerWidth < 4 {
+		innerWidth = 4
 	}
 
 	// Value style (bold, prominent)
@@ -73,18 +80,20 @@ func (s *StatBox) Render() string {
 		Bold(true).
 		Foreground(s.theme.Foreground).
 		Align(lipgloss.Center).
-		Width(width - 2) // account for border
+		Width(innerWidth)
 
 	// Label style (dimmer, below value)
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240")).
 		Align(lipgloss.Center).
-		Width(width - 2)
+		Width(innerWidth)
 
 	// Box style with border
+	// Width is set to (total - border) because lipgloss adds border outside the Width
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(s.theme.BorderColor).
+		Width(width-2).
 		Padding(0, 1)
 
 	var content strings.Builder

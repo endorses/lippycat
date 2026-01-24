@@ -15,6 +15,7 @@ type Card struct {
 	Title   string         // Card title (displayed in header)
 	Icon    string         // Optional icon prefix for title
 	Width   int            // Card width in characters (0 = auto)
+	Height  int            // Card height in lines (0 = auto, content determines height)
 	Content string         // Pre-rendered content to display inside the card
 	theme   themes.Theme   // Theme for styling
 	style   lipgloss.Style // Optional custom style override
@@ -34,6 +35,13 @@ func WithIcon(icon string) CardOption {
 func WithWidth(width int) CardOption {
 	return func(c *Card) {
 		c.Width = width
+	}
+}
+
+// WithHeight sets the card height (content lines, excluding border).
+func WithHeight(height int) CardOption {
+	return func(c *Card) {
+		c.Height = height
 	}
 }
 
@@ -118,7 +126,13 @@ func (c *Card) Render() string {
 	}
 	content.WriteString(c.Content)
 
-	return borderStyle.Render(content.String())
+	// Apply height padding if specified
+	cardContent := content.String()
+	if c.Height > 0 {
+		cardContent = padToHeight(cardContent, c.Height)
+	}
+
+	return borderStyle.Render(cardContent)
 }
 
 // RenderInline returns the card without borders, suitable for inline display.
@@ -154,4 +168,37 @@ func maxLineWidth(s string) int {
 		}
 	}
 	return maxWidth
+}
+
+// countLines returns the number of lines in a string.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+// padToHeight pads the content with empty lines to reach the target height.
+func padToHeight(content string, targetHeight int) string {
+	currentLines := countLines(content)
+	if currentLines >= targetHeight {
+		return content
+	}
+
+	var result strings.Builder
+	result.WriteString(content)
+	for i := currentLines; i < targetHeight; i++ {
+		result.WriteString("\n")
+	}
+	return result.String()
+}
+
+// ContentHeight returns the number of lines in the card content (including title).
+func (c *Card) ContentHeight() int {
+	var content strings.Builder
+	if c.Icon != "" || c.Title != "" {
+		content.WriteString("title\n") // Title line
+	}
+	content.WriteString(c.Content)
+	return countLines(content.String())
 }

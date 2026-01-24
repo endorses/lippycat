@@ -171,6 +171,16 @@ Current issues with the Overview sub-view:
   ```
 - [x] Update `renderTopTalkers()` to use available width for IP/count columns
 - [x] Update `renderLoadDistribution()` for distributed mode
+- [x] Fix card width calculations (account for border in colWidth → cardWidth → contentWidth)
+- [x] Update content builders to accept and use available width:
+  - `buildCaptureContentWide(availableWidth int)` - pass width to stat boxes
+  - `buildTUIContentWide(availableWidth int)` - use width for sparkline
+  - `buildTrafficRateContentCompact(availableWidth int)` - use width for sparkline
+- [x] Fix StatBox rendering to properly control total width with border
+- [x] Add Card height matching for side-by-side cards:
+  - Added `Height` field and `WithHeight()` option to Card
+  - Added `ContentHeight()` method to measure card content
+  - Added `padToHeight()` helper for vertical alignment
 
 ### Phase 6: Polish & Testing
 

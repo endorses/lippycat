@@ -1132,14 +1132,22 @@ func (s *StatisticsView) renderOverviewWide() string {
 	result.WriteString("\n")
 
 	// Row 2: TUI Process card (left) + Protocol Distribution card (right)
-	tuiContent := s.buildTUIContentWide(contentWidth)
+	// Build protocol card first to determine target height for TUI content
 	protocolContent := s.renderProtocolDistribution(5, contentWidth)
+	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
+		dashboard.WithIcon("🔌"),
+		dashboard.WithWidth(cardWidth))
+
+	// Get protocol card's content height (for positioning TUI sparkline at bottom)
+	protocolContentHeight := protocolCard.ContentHeight()
+
+	// Build TUI content with target height to position sparkline at bottom
+	// Subtract 1 for the card title line
+	tuiTargetContentHeight := protocolContentHeight - 1
+	tuiContent := s.buildTUIContentWide(contentWidth, tuiTargetContentHeight)
 
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
-		dashboard.WithWidth(cardWidth))
-	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
-		dashboard.WithIcon("🔌"),
 		dashboard.WithWidth(cardWidth))
 
 	// Set matching heights for row 2
@@ -1289,8 +1297,9 @@ func (s *StatisticsView) buildTUIContent() string {
 	return content.String()
 }
 
-// buildTUIContentWide builds the TUI process metrics content for wide layout with sparkline
-func (s *StatisticsView) buildTUIContentWide(availableWidth int) string {
+// buildTUIContentWide builds the TUI process metrics content for wide layout with sparkline.
+// If targetHeight > 0, the sparkline is positioned at the bottom with padding in between.
+func (s *StatisticsView) buildTUIContentWide(availableWidth, targetHeight int) string {
 	var content strings.Builder
 
 	labelStyle := lipgloss.NewStyle().
@@ -1323,8 +1332,23 @@ func (s *StatisticsView) buildTUIContentWide(availableWidth int) string {
 		}
 		samples := s.cpuTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
-			content.WriteString("\n\n")
 			sparkline := RenderCPUSparkline(samples, sparklineWidth, 2, s.theme)
+			sparklineHeight := strings.Count(sparkline, "\n") + 1
+
+			// If targetHeight is set, add padding to push sparkline to bottom
+			// Content so far: 1 line (CPU/RAM)
+			// We need: targetHeight total lines
+			// Sparkline takes: sparklineHeight lines
+			// Padding needed: targetHeight - 1 - sparklineHeight
+			if targetHeight > 0 {
+				headerLines := 1 // CPU/RAM line
+				paddingLines := targetHeight - headerLines - sparklineHeight
+				for i := 0; i < paddingLines; i++ {
+					content.WriteString("\n")
+				}
+			} else {
+				content.WriteString("\n\n")
+			}
 			content.WriteString(sparkline)
 		}
 	}

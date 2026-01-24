@@ -24,10 +24,10 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 
 ### Phase 2: Visualization
 
-- [ ] Add `github.com/NimbleMarkets/ntcharts` dependency to `go.mod`
-- [ ] Create `internal/pkg/tui/components/sparkline.go` - ntcharts wrapper for styled sparklines
-- [ ] Create `internal/pkg/tui/components/progressbar.go` - progress bar component for utilization metrics
-- [ ] Update `statistics.go`:
+- [x] Add `github.com/NimbleMarkets/ntcharts` dependency to `go.mod`
+- [x] Create `internal/pkg/tui/components/sparkline.go` - ntcharts wrapper for styled sparklines
+- [x] Create `internal/pkg/tui/components/progressbar.go` - progress bar component for utilization metrics
+- [x] Update `statistics.go`:
   - Add sparkline for packet/byte rate trends
   - Add progress bars for buffer utilization, queue depth, memory
   - Add health indicator (green/yellow/red) with threshold logic
@@ -77,9 +77,13 @@ Enhance the Statistics tab with time-series metrics, system health visualization
 - `internal/pkg/tui/components/time_window.go` - time window type and methods
 - `internal/pkg/tui/components/time_window_test.go` - time window tests
 
-**New files (Phase 2-5 pending):**
+**New files (Phase 2 complete):**
 - `internal/pkg/tui/components/sparkline.go` - ntcharts sparkline wrapper
-- `internal/pkg/tui/components/progressbar.go` - progress bar component
+- `internal/pkg/tui/components/sparkline_test.go` - sparkline tests
+- `internal/pkg/tui/components/progressbar.go` - progress bar component with health indicators
+- `internal/pkg/tui/components/progressbar_test.go` - progress bar tests
+
+**New files (Phase 3-5 pending):**
 - `internal/pkg/tui/components/protocol_stats.go` - provider interface/registry
 - `internal/pkg/tui/components/voip_stats_provider.go` - VoIP-specific stats
 

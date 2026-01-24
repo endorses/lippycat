@@ -59,26 +59,38 @@ type StatisticsView struct {
 	dropStats   *DropStats   // Aggregated drop statistics
 	timeWindow  TimeWindow   // Current time window for display
 	startTime   time.Time    // Session start time for "All" window
+
+	// Phase 2: Visualization components
+	queueBar        *UtilizationBar  // Queue depth progress bar
+	healthIndicator *HealthIndicator // Health status indicator
 }
 
 // NewStatisticsView creates a new statistics view
 func NewStatisticsView() StatisticsView {
 	return StatisticsView{
-		width:       80,
-		height:      20,
-		theme:       themes.Solarized(),
-		stats:       nil,
-		ready:       false,
-		rateTracker: DefaultRateTracker(),
-		dropStats:   NewDropStats(),
-		timeWindow:  TimeWindow1Min,
-		startTime:   time.Now(),
+		width:           80,
+		height:          20,
+		theme:           themes.Solarized(),
+		stats:           nil,
+		ready:           false,
+		rateTracker:     DefaultRateTracker(),
+		dropStats:       NewDropStats(),
+		timeWindow:      TimeWindow1Min,
+		startTime:       time.Now(),
+		queueBar:        NewUtilizationBar(30),
+		healthIndicator: NewHealthIndicator(),
 	}
 }
 
 // SetTheme updates the theme
 func (s *StatisticsView) SetTheme(theme themes.Theme) {
 	s.theme = theme
+	if s.queueBar != nil {
+		s.queueBar.SetTheme(theme)
+	}
+	if s.healthIndicator != nil {
+		s.healthIndicator.SetTheme(theme)
+	}
 }
 
 // SetSize sets the display size
@@ -297,6 +309,10 @@ func (s *StatisticsView) renderContent() string {
 	}
 	result.WriteString("\n")
 
+	// Section: System Health (always show if we have any data)
+	result.WriteString(s.renderHealthSection(titleStyle))
+	result.WriteString("\n")
+
 	// Section: Bridge Performance (only if bridge stats available)
 	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
 		result.WriteString(titleStyle.Render("🌉 Bridge Performance"))
@@ -314,7 +330,7 @@ func (s *StatisticsView) renderContent() string {
 		}
 		result.WriteString("\n")
 
-		// Sampling ratio
+		// Sampling ratio with progress bar
 		result.WriteString(labelStyle.Render("Sampling Ratio: "))
 		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0 // Convert from 1000-scale to percentage
 		if samplingPct >= 100.0 {
@@ -342,10 +358,18 @@ func (s *StatisticsView) renderContent() string {
 		}
 		result.WriteString("\n")
 
-		// Queue depth
-		result.WriteString(labelStyle.Render("Queue Depth: "))
-		result.WriteString(valueStyle.Render(fmt.Sprintf("%d (max: %d)", s.bridgeStats.QueueDepth, s.bridgeStats.MaxQueueDepth)))
-		result.WriteString("\n")
+		// Queue depth with progress bar visualization
+		if s.bridgeStats.MaxQueueDepth > 0 && s.queueBar != nil {
+			result.WriteString(s.queueBar.RenderQueue(
+				s.bridgeStats.QueueDepth,
+				s.bridgeStats.MaxQueueDepth,
+				"Queue Depth"))
+			result.WriteString("\n")
+		} else {
+			result.WriteString(labelStyle.Render("Queue Depth: "))
+			result.WriteString(valueStyle.Render(fmt.Sprintf("%d (max: %d)", s.bridgeStats.QueueDepth, s.bridgeStats.MaxQueueDepth)))
+			result.WriteString("\n")
+		}
 
 		// Recent drop rate (used for throttling)
 		result.WriteString(labelStyle.Render("Recent Drop Rate: "))
@@ -472,7 +496,7 @@ func (s *StatisticsView) renderTimeWindowHeader() string {
 	return result.String()
 }
 
-// renderRateSection renders the traffic rate section
+// renderRateSection renders the traffic rate section with sparklines
 func (s *StatisticsView) renderRateSection(titleStyle, labelStyle, valueStyle lipgloss.Style) string {
 	var result strings.Builder
 
@@ -500,7 +524,93 @@ func (s *StatisticsView) renderRateSection(titleStyle, labelStyle, valueStyle li
 	result.WriteString(valueStyle.Render(fmt.Sprintf("%s pkt/s  |  %s",
 		formatRate(rateStats.PeakPacketsPerSec),
 		formatBytesPerSec(rateStats.PeakBytesPerSec))))
-	result.WriteString("\n")
+	result.WriteString("\n\n")
+
+	// Render sparkline for packet rate trend
+	if s.rateTracker != nil && s.rateTracker.SampleCount() > 2 {
+		// Get rate data for the current time window
+		sparklineWidth := 50
+		if s.width > 0 && s.width < 80 {
+			sparklineWidth = s.width - 20
+		}
+
+		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		if len(rates) > 0 {
+			result.WriteString(labelStyle.Render("Packet Rate Trend:"))
+			result.WriteString("\n")
+			sparkline := RenderRateSparkline(rates, sparklineWidth, 3, s.theme, rateStats.PeakPacketsPerSec)
+			result.WriteString(sparkline)
+			result.WriteString("\n")
+		}
+	}
+
+	return result.String()
+}
+
+// renderHealthSection renders the system health summary section
+func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
+	var result strings.Builder
+
+	result.WriteString(titleStyle.Render("🩺 System Health"))
+	result.WriteString("\n\n")
+
+	if s.healthIndicator == nil {
+		return result.String()
+	}
+
+	// Calculate health levels based on available metrics
+	var items []struct {
+		Label string
+		Level HealthLevel
+	}
+
+	// Drop rate health (inverted: high drop rate = bad)
+	dropSummary := s.GetDropSummary()
+	if s.stats != nil && s.stats.TotalPackets > 0 {
+		dropLevel := HealthFromRatio(dropSummary.TotalDropRate/100, 0.01, 0.05, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Drops", dropLevel})
+	}
+
+	// Queue depth health (if available)
+	if s.bridgeStats != nil && s.bridgeStats.MaxQueueDepth > 0 {
+		queueRatio := float64(s.bridgeStats.QueueDepth) / float64(s.bridgeStats.MaxQueueDepth)
+		queueLevel := HealthFromRatio(queueRatio, 0.5, 0.85, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Queue", queueLevel})
+	}
+
+	// Sampling health (inverted: low sampling = bad)
+	if s.bridgeStats != nil && s.bridgeStats.SamplingRatio > 0 {
+		samplingRatio := float64(s.bridgeStats.SamplingRatio) / 1000.0 // Convert from 1000-scale
+		samplingLevel := HealthFromRatio(samplingRatio, 0.5, 0.2, false)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Sampling", samplingLevel})
+	}
+
+	// Throttling health
+	if s.bridgeStats != nil {
+		recentDropPct := float64(s.bridgeStats.RecentDropRate) / 1000.0 // Convert from 1000-scale
+		throttleLevel := HealthFromRatio(recentDropPct, 0.01, 0.10, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Throttle", throttleLevel})
+	}
+
+	// Render health indicators
+	if len(items) > 0 {
+		result.WriteString(RenderHealthSummary(s.theme, items))
+		result.WriteString("\n")
+	} else {
+		result.WriteString("  No health data available\n")
+	}
 
 	return result.String()
 }

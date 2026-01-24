@@ -101,7 +101,7 @@ Current issues with the Overview sub-view:
 
 ### Phase 3: Card Components
 
-- [ ] Implement `Card` struct:
+- [x] Implement `Card` struct:
   ```go
   type Card struct {
       Title    string
@@ -112,7 +112,7 @@ Current issues with the Overview sub-view:
   }
   func (c Card) Render() string
   ```
-- [ ] Implement `StatBox` for compact metrics:
+- [x] Implement `StatBox` for compact metrics:
   ```go
   type StatBox struct {
       Value string
@@ -121,7 +121,7 @@ Current issues with the Overview sub-view:
   }
   func (s StatBox) Render() string
   ```
-- [ ] Implement `Grid` for layout:
+- [x] Implement `Grid` for layout:
   ```go
   type Grid struct {
       Columns int

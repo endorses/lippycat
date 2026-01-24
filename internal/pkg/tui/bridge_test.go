@@ -251,94 +251,9 @@ func TestGetTCPFlowKey(t *testing.T) {
 	assert.Equal(t, forward, reverse, "Flow keys should be symmetric")
 }
 
-// TestIsTCPOnSIPPort tests port-based SIP detection
-func TestIsTCPOnSIPPort(t *testing.T) {
-	tests := []struct {
-		srcPort  string
-		dstPort  string
-		expected bool
-	}{
-		{"5060", "12345", true},   // Source is SIP port
-		{"12345", "5060", true},   // Dest is SIP port
-		{"5061", "12345", true},   // Source is SIP/TLS port
-		{"12345", "5061", true},   // Dest is SIP/TLS port
-		{"5060", "5061", true},    // Both are SIP ports
-		{"12345", "54321", false}, // Neither is SIP port
-		{"80", "443", false},      // HTTP/HTTPS ports
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.srcPort+"-"+tt.dstPort, func(t *testing.T) {
-			result := isTCPOnSIPPort(tt.srcPort, tt.dstPort)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestContainsSIPHeaders tests SIP header detection in payload
-func TestContainsSIPHeaders(t *testing.T) {
-	tests := []struct {
-		name     string
-		payload  []byte
-		expected bool
-	}{
-		{
-			name:     "Full SIP INVITE",
-			payload:  []byte("INVITE sip:bob@example.com SIP/2.0\r\nVia: SIP/2.0/TCP 192.168.1.1:5060\r\nCall-ID: abc123@example.com\r\n"),
-			expected: true,
-		},
-		{
-			name:     "SIP continuation with Call-ID",
-			payload:  []byte("Content-Length: 100\r\nCall-ID: xyz789@example.com\r\n\r\nv=0"),
-			expected: true,
-		},
-		{
-			name:     "SIP continuation with Via header",
-			payload:  []byte("some other header\r\nVia: SIP/2.0/TCP 10.0.0.1:5060\r\n"),
-			expected: true,
-		},
-		{
-			name:     "SIP continuation with compact Call-ID",
-			payload:  []byte("f: alice@example.com\r\ni: call123\r\n"),
-			expected: true,
-		},
-		{
-			name:     "SIP continuation with CSeq",
-			payload:  []byte("random data\r\nCSeq: 1 INVITE\r\n"),
-			expected: true,
-		},
-		{
-			name:     "HTTP request",
-			payload:  []byte("GET /index.html HTTP/1.1\r\nHost: example.com\r\n"),
-			expected: false,
-		},
-		{
-			name:     "Random binary data",
-			payload:  []byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05},
-			expected: false,
-		},
-		{
-			name:     "Empty payload",
-			payload:  []byte{},
-			expected: false,
-		},
-		{
-			name:     "Short payload",
-			payload:  []byte("Hi"),
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := containsSIPHeaders(tt.payload)
-			assert.Equal(t, tt.expected, result, "Payload: %s", string(tt.payload))
-		})
-	}
-}
-
-// TestConvertPacketFast_TCPSIPContinuation tests detection of TCP SIP
-// continuation packets that don't start with a SIP method
+// TestConvertPacketFast_TCPSIPContinuation tests that TCP SIP continuation
+// packets are only detected as SIP when the flow is already marked in the cache.
+// Note: TCP SIP detection now relies on TCP reassembly, not heuristics.
 func TestConvertPacketFast_TCPSIPContinuation(t *testing.T) {
 	// Clear cache before test
 	ClearTCPSIPFlowCache()
@@ -388,11 +303,20 @@ func TestConvertPacketFast_TCPSIPContinuation(t *testing.T) {
 		Interface: "test0",
 	}
 
+	// Without flow being marked, continuation packets should NOT be detected as SIP
+	// (TCP reassembly would mark the flow when complete SIP messages are detected)
 	display := convertPacketFast(pktInfo)
+	assert.Equal(t, "TCP", display.Protocol,
+		"TCP SIP continuation should NOT be detected without flow cache entry (relies on TCP reassembly)")
 
-	// Should be detected as SIP due to port-based hinting (5060)
+	// Now mark the flow as SIP (simulating what TCP reassembly handler would do)
+	flowKey := getTCPFlowKey("192.168.1.1", "192.168.1.2", "5060", "5060")
+	markTCPSIPFlow(flowKey)
+
+	// Now the same packet should be detected as SIP
+	display = convertPacketFast(pktInfo)
 	assert.Equal(t, "SIP", display.Protocol,
-		"TCP SIP on port 5060 should be detected as SIP even without method prefix")
+		"TCP SIP continuation should be detected as SIP when flow is cached")
 
 	// Clean up
 	ClearTCPSIPFlowCache()

@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,8 +19,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/tcpassembly"
 )
 
 // timeRingBuffer is a fixed-size circular buffer for storing timestamps.
@@ -130,20 +133,8 @@ var (
 	sipMethodCANCEL   = []byte("CANCEL")
 	sipResponse       = []byte("SIP/2.0")
 
-	// SIP header patterns for enhanced detection (looking anywhere in payload)
-	// Used to detect TCP SIP continuation packets that don't start with a method
-	sipHeaderCallID  = []byte("Call-ID:")
-	sipHeaderCallIDc = []byte("i:") // Compact form
-	sipHeaderVia     = []byte("Via:")
-	sipHeaderViac    = []byte("v:") // Compact form
-	sipHeaderFrom    = []byte("From:")
-	sipHeaderFromc   = []byte("f:") // Compact form
-	sipHeaderTo      = []byte("To:")
-	sipHeaderToc     = []byte("t:") // Compact form
-	sipHeaderCSeq    = []byte("CSeq:")
-
-	// TCP SIP flow cache for hybrid detection
-	// Once a TCP flow is identified as SIP, subsequent packets are treated as SIP
+	// TCP SIP flow cache for TCP reassembly-based detection
+	// Flows are marked as SIP when the TCP reassembly handler detects complete SIP messages
 	tcpSIPFlowCache   = make(map[string]tcpSIPFlowEntry)
 	tcpSIPFlowCacheMu sync.RWMutex
 )
@@ -291,54 +282,6 @@ func updateTCPSIPFlowTimestamp(flowKey string) {
 		tcpSIPFlowCache[flowKey] = entry
 	}
 	tcpSIPFlowCacheMu.Unlock()
-}
-
-// isTCPOnSIPPort checks if the packet is TCP on a standard SIP port
-func isTCPOnSIPPort(srcPort, dstPort string) bool {
-	return srcPort == "5060" || srcPort == "5061" || dstPort == "5060" || dstPort == "5061"
-}
-
-// containsSIPHeaders looks for SIP headers anywhere in the payload
-// Used to detect TCP SIP continuation packets
-func containsSIPHeaders(payload []byte) bool {
-	if len(payload) < 4 {
-		return false
-	}
-
-	// Look for key SIP headers anywhere in payload
-	// This catches continuation packets that don't start with a method
-
-	// Call-ID is the most reliable indicator
-	if containsBytes(payload, sipHeaderCallID) || containsBytes(payload, sipHeaderCallIDc) {
-		return true
-	}
-
-	// Via header is also very reliable for SIP
-	if containsBytes(payload, sipHeaderVia) || containsBytes(payload, sipHeaderViac) {
-		return true
-	}
-
-	// CSeq is SIP-specific
-	if containsBytes(payload, sipHeaderCSeq) {
-		return true
-	}
-
-	return false
-}
-
-// containsBytes checks if needle is found anywhere in haystack
-func containsBytes(haystack, needle []byte) bool {
-	if len(needle) > len(haystack) {
-		return false
-	}
-
-	// Simple byte search - could be optimized with SIMD or Boyer-Moore if needed
-	for i := 0; i <= len(haystack)-len(needle); i++ {
-		if simd.BytesEqual(haystack[i:i+len(needle)], needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // ClearTCPSIPFlowCache clears the TCP SIP flow cache (used on session reset)
@@ -593,6 +536,20 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		ringBufferCapacity = 25000
 	)
 
+	// Set up TCP reassembly for accurate SIP detection
+	// This replaces heuristic detection (port-based, header-based) which caused false positives
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tcpHandler := NewTUISIPHandler()
+	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
+	streamPool := tcpassembly.NewStreamPool(streamFactory)
+	assembler := tcpassembly.NewAssembler(streamPool)
+
+	// Start background goroutine to periodically flush old TCP streams
+	// This prevents memory leaks from incomplete streams
+	go runTCPStreamFlusher(ctx, assembler)
+
 	batch := make([]components.PacketDisplay, 0, 100)
 	packetCount := int64(0)
 	displayedCount := int64(0)
@@ -771,6 +728,16 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			// In offline mode, process ALL packets - no sampling needed
 			hasCallTracker := GetCallTracker() != nil
 
+			// Feed TCP packets to the assembler for SIP reassembly
+			// This detects complete SIP messages and marks flows in the cache
+			if tcpLayer := pktInfo.Packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+				tcp := tcpLayer.(*layers.TCP)
+				// Get network flow for assembler
+				if netFlow := pktInfo.Packet.NetworkLayer(); netFlow != nil {
+					assembler.AssembleWithTimestamp(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
+				}
+			}
+
 			// Use cached sampling ratio (only for live capture)
 			samplingRatio := cachedSamplingRatio
 			if hasCallTracker {
@@ -810,6 +777,36 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	}
 }
 
+// runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks.
+// This ensures that incomplete or idle TCP streams don't accumulate indefinitely.
+func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Final flush on shutdown
+			flushed, closed := assembler.FlushOlderThan(time.Now())
+			if flushed > 0 || closed > 0 {
+				logger.Debug("TCP streams flushed on shutdown",
+					"flushed", flushed,
+					"closed", closed)
+			}
+			return
+		case <-ticker.C:
+			// Flush streams that haven't received data in 2 minutes
+			cutoff := time.Now().Add(-2 * time.Minute)
+			flushed, closed := assembler.FlushOlderThan(cutoff)
+			if flushed > 0 || closed > 0 {
+				logger.Debug("Flushed old TCP streams",
+					"flushed", flushed,
+					"closed", closed)
+			}
+		}
+	}
+}
+
 // convertPacketFast is a lightweight version for high-speed scenarios
 // Uses shared extraction logic with TUI-specific fast SIP detection
 func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
@@ -844,20 +841,12 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 					flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
 					markTCPSIPFlow(flowKey)
 				} else {
-					// Hybrid TCP SIP detection for continuation packets
+					// Check flow cache - populated by TCP reassembly handler
+					// This replaces heuristic detection (port-based, header-based)
+					// which caused false positives with encrypted traffic
 					flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
-
 					if isTCPSIPFlow(flowKey) {
-						// Flow already known to be SIP
 						updateTCPSIPFlowTimestamp(flowKey)
-						display.Protocol = internProtocol("SIP")
-					} else if isTCPOnSIPPort(fields.SrcPort, fields.DstPort) {
-						// Port-based hinting
-						markTCPSIPFlow(flowKey)
-						display.Protocol = internProtocol("SIP")
-					} else if containsSIPHeaders(payload) {
-						// Header-based detection
-						markTCPSIPFlow(flowKey)
 						display.Protocol = internProtocol("SIP")
 					}
 				}
@@ -916,33 +905,15 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		}
 	}
 
-	// Hybrid TCP SIP detection for continuation packets
-	// This catches TCP SIP packets that don't start with a SIP method
+	// TCP SIP detection via flow cache
+	// The flow cache is populated by TCP reassembly handler when complete SIP messages are detected.
+	// This replaces heuristic detection (port-based, header-based) which caused false positives.
 	if fields.Protocol == "TCP" && (detectionResult == nil || detectionResult.Protocol == "unknown" || display.Protocol == "TCP") {
 		flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
-
-		// Check 1: Is this flow already known to be SIP?
 		if isTCPSIPFlow(flowKey) {
 			updateTCPSIPFlowTimestamp(flowKey)
 			display.Protocol = "SIP"
 			display.Info = "TCP SIP (continuation)"
-		} else {
-			// Check 2: Is this on a standard SIP port?
-			if isTCPOnSIPPort(fields.SrcPort, fields.DstPort) {
-				// Port-based hinting: treat as SIP and cache the flow
-				markTCPSIPFlow(flowKey)
-				display.Protocol = "SIP"
-				display.Info = "TCP SIP (port-based)"
-			} else {
-				// Check 3: Does payload contain SIP headers?
-				if tcp, ok := pkt.TransportLayer().(*layers.TCP); ok {
-					if containsSIPHeaders(tcp.LayerPayload()) {
-						markTCPSIPFlow(flowKey)
-						display.Protocol = "SIP"
-						display.Info = "TCP SIP (header-based)"
-					}
-				}
-			}
 		}
 	}
 

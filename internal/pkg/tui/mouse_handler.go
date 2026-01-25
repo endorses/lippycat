@@ -63,6 +63,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 			// On statistics tab - pass to StatisticsView
 			cmd := m.uiState.StatisticsView.Update(msg)
 			return m, cmd
+		} else if m.uiState.Tabs.GetActive() == 4 {
+			// On help tab - pass to HelpView
+			cmd := m.uiState.HelpView.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	}
@@ -104,6 +108,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		} else if m.uiState.Tabs.GetActive() == 2 {
 			// On statistics tab - pass to StatisticsView
 			cmd := m.uiState.StatisticsView.Update(msg)
+			return m, cmd
+		} else if m.uiState.Tabs.GetActive() == 4 {
+			// On help tab - pass to HelpView
+			cmd := m.uiState.HelpView.Update(msg)
 			return m, cmd
 		}
 		return m, nil
@@ -168,6 +176,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 3 {
 		// Forward mouse events to the settings view
 		cmd := m.uiState.SettingsView.Update(msg)
+		return m, cmd
+	}
+
+	// Help tab clicks (tab 4)
+	if m.uiState.Tabs.GetActive() == 4 {
+		// Forward mouse events to the help view
+		cmd := m.uiState.HelpView.Update(msg)
 		return m, cmd
 	}
 

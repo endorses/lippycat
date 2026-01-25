@@ -40,6 +40,9 @@ type HelpView struct {
 	rawContent      string
 	renderedContent string
 	contentLoaded   bool // True once content has been loaded
+
+	// Click regions for mouse interaction
+	sectionRegions []ClickRegion // Click regions for section tabs (line 0)
 }
 
 // HelpContentLoadedMsg is sent when help content finishes loading
@@ -261,8 +264,38 @@ func (h *HelpView) GetMatchInfo() (int, int) {
 	return h.currentMatch + 1, len(h.searchMatches)
 }
 
-// Update handles viewport messages for scrolling
+// Update handles viewport messages for scrolling and mouse clicks
 func (h *HelpView) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// Handle mouse clicks for section selection (only when not in search mode)
+		if !h.searchMode && msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			// Content starts at Y=5 (header=2 + tabs=3)
+			relativeY := msg.Y - 5
+
+			// Account for viewport scroll offset
+			contentY := relativeY + h.viewport.YOffset
+
+			// Line 0: Section tabs
+			if contentY == 0 {
+				sections := []HelpSection{SectionKeybindings, SectionFilters, SectionCommands, SectionWorkflows}
+				for i, region := range h.sectionRegions {
+					if msg.X >= region.StartX && msg.X < region.EndX {
+						if i < len(sections) && sections[i] != h.activeSection {
+							h.activeSection = sections[i]
+							h.clearSearch()
+							h.contentLoaded = false
+							if h.ready {
+								return h.LoadContentAsync()
+							}
+						}
+						return nil
+					}
+				}
+			}
+		}
+	}
+
 	var cmd tea.Cmd
 	h.viewport, cmd = h.viewport.Update(msg)
 	return cmd
@@ -511,31 +544,50 @@ func (h *HelpView) renderSectionTabs() string {
 		{"4", "Workflows"},
 	}
 
-	activeStyle := lipgloss.NewStyle().
+	// Style for selected section (includes number)
+	selectedStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(h.theme.CursorFg). // Bright (Base3) for contrast
 		Background(h.theme.TLSColor). // Magenta
-		Padding(0, 2)
+		Padding(0, 1)
 
-	inactiveStyle := lipgloss.NewStyle().
-		Foreground(h.theme.StatusBarFg).
-		Padding(0, 2)
+	// Style for unselected sections
+	normalStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Padding(0, 1)
 
+	// Style for number keys (magenta)
 	keyStyle := lipgloss.NewStyle().
-		Foreground(h.theme.WarningColor).
+		Foreground(h.theme.TLSColor).
 		Bold(true)
 
-	var tabs []string
+	var result strings.Builder
+	currentX := 0
+
+	// Reset and rebuild click regions
+	h.sectionRegions = make([]ClickRegion, 0, len(sections))
+
 	for i, sec := range sections {
-		style := inactiveStyle
+		label := sec.key + ":" + sec.label
+		// Width = content + padding (1 left + 1 right)
+		itemWidth := len(label) + 2
+
+		// Track click region before rendering
+		h.sectionRegions = append(h.sectionRegions, ClickRegion{
+			StartX: currentX,
+			EndX:   currentX + itemWidth,
+		})
+
 		if HelpSection(i) == h.activeSection {
-			style = activeStyle
+			result.WriteString(selectedStyle.Render(label))
+		} else {
+			result.WriteString(normalStyle.Render(keyStyle.Render(sec.key) + ":" + sec.label))
 		}
-		tab := keyStyle.Render(sec.key) + " " + style.Render(sec.label)
-		tabs = append(tabs, tab)
+		result.WriteString(" ")
+		currentX += itemWidth + 1 // +1 for the space after
 	}
 
-	return strings.Join(tabs, "  ")
+	return result.String()
 }
 
 // solarizedGlamourStyle creates a glamour style using Solarized colors

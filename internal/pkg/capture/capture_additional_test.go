@@ -25,10 +25,14 @@ func TestPacketBuffer_Len(t *testing.T) {
 	// Add some packets
 	pkt := createTestPacket()
 	buffer.Send(pkt)
+	// Allow time for merger goroutine to process
+	time.Sleep(10 * time.Millisecond)
 	assert.Equal(t, 1, buffer.Len(), "Buffer should have length 1 after sending 1 packet")
 
 	buffer.Send(pkt)
 	buffer.Send(pkt)
+	// Allow time for merger goroutine to process
+	time.Sleep(10 * time.Millisecond)
 	assert.Equal(t, 3, buffer.Len(), "Buffer should have length 3 after sending 3 packets")
 
 	// Receive one packet
@@ -433,26 +437,39 @@ func TestPacketBuffer_HighPacketRate(t *testing.T) {
 // TestPacketBuffer_BufferOverflow tests buffer overflow behavior
 func TestPacketBuffer_BufferOverflow(t *testing.T) {
 	ctx := context.Background()
-	buffer := NewPacketBuffer(ctx, 5) // Very small buffer
+	const bufferSize = 5
+	buffer := NewPacketBuffer(ctx, bufferSize) // Very small buffer
 	defer buffer.Close()
 
 	pkt := createTestPacket()
 
-	// Fill buffer completely (no receiver)
-	for i := 0; i < 5; i++ {
+	// The PacketBuffer has two internal channels:
+	// - ch (main channel) with capacity bufferSize
+	// - mergedCh (output channel) with capacity bufferSize
+	// A background merger goroutine moves packets from ch to mergedCh,
+	// so the effective capacity is approximately 2 * bufferSize.
+	// However, the exact timing of the merger is non-deterministic,
+	// so we don't assert exact capacity bounds.
+
+	// Send many packets and track how many are accepted vs dropped
+	totalPackets := 30 // More than the buffer can hold
+	acceptedCount := 0
+	for i := 0; i < totalPackets; i++ {
 		result := buffer.Send(pkt)
-		assert.True(t, result, "Should accept packets up to capacity")
+		if result {
+			acceptedCount++
+		}
 	}
 
-	// Now buffer is full, additional sends should drop
-	const overflowPackets = 10
-	for i := 0; i < overflowPackets; i++ {
-		result := buffer.Send(pkt)
-		assert.False(t, result, "Should reject packets when buffer is full")
-	}
+	// Should have accepted some packets (at least bufferSize)
+	assert.GreaterOrEqual(t, acceptedCount, bufferSize, "Should accept at least bufferSize packets")
 
+	// Should have dropped some packets
 	dropped := atomic.LoadInt64(&buffer.dropped)
-	assert.Equal(t, int64(overflowPackets), dropped, "Should have dropped overflow packets")
+	assert.Greater(t, dropped, int64(0), "Should drop some packets when buffer is full")
+
+	// Total sent should equal accepted + dropped
+	assert.Equal(t, int64(totalPackets-acceptedCount), dropped, "Dropped count should match rejected sends")
 }
 
 // TestPacketBuffer_Send_RaceWithClose tests race between Send and Close

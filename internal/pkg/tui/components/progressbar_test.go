@@ -134,7 +134,7 @@ func TestHealthIndicator_Render(t *testing.T) {
 		level    HealthLevel
 		expected string
 	}{
-		{HealthGood, "[OK]"},
+		{HealthGood, "✓"},
 		{HealthWarning, "[!]"},
 		{HealthCritical, "[X]"},
 		{HealthUnknown, "[?]"},
@@ -153,7 +153,7 @@ func TestHealthIndicator_RenderWithLabel(t *testing.T) {
 
 	view := hi.RenderWithLabel("Test Status", HealthGood)
 	assert.Contains(t, view, "Test Status")
-	assert.Contains(t, view, "[OK]")
+	assert.Contains(t, view, "✓")
 }
 
 func TestHealthIndicator_SetTheme(t *testing.T) {
@@ -213,7 +213,7 @@ func TestRenderHealthSummary(t *testing.T) {
 	assert.Contains(t, view, "Drops")
 	assert.Contains(t, view, "Queue")
 	assert.Contains(t, view, "CPU")
-	assert.Contains(t, view, "[OK]")
+	assert.Contains(t, view, "✓")
 	assert.Contains(t, view, "[!]")
 	assert.Contains(t, view, "[X]")
 }

@@ -899,7 +899,7 @@ func (s *StatisticsView) renderSubViewHeader() string {
 
 	// Style for number keys
 	keyStyle := lipgloss.NewStyle().
-		Foreground(s.theme.InfoColor).
+		Foreground(s.theme.SuccessColor).
 		Bold(true)
 
 	result.WriteString("View: ")
@@ -2317,7 +2317,7 @@ func (s *StatisticsView) renderTimeWindowHeader() string {
 	// Style for selected window
 	selectedStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(s.theme.SelectionFg)
+		Foreground(s.theme.SuccessColor)
 
 	// Style for unselected windows
 	normalStyle := lipgloss.NewStyle().

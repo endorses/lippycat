@@ -51,6 +51,7 @@ type bufferedSIPStream struct {
 	processedBytes int64
 	processedMsgs  int64
 	closed         int32 // atomic flag
+	discard        int32 // atomic flag - set when stream is determined to be non-SIP
 }
 
 // Buffer size for reassembled data chunks.
@@ -79,6 +80,11 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 // Called by the assembler when TCP data is reassembled.
 // NEVER BLOCKS - uses non-blocking send to buffered channel.
 func (s *bufferedSIPStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
+	// Check discard flag first - once we know it's not SIP, stop buffering entirely
+	if atomic.LoadInt32(&s.discard) != 0 {
+		return
+	}
+
 	if atomic.LoadInt32(&s.closed) != 0 {
 		return
 	}
@@ -202,8 +208,12 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 		sipMessage, err := s.readCompleteSipMessageFromReader(bufReader)
 		if err != nil {
 			if errors.Is(err, errNotSIP) {
+				// Set discard flag so Reassembled() stops buffering data immediately
+				atomic.StoreInt32(&s.discard, 1)
 				logger.Debug("Non-SIP data detected, closing stream")
 			} else if errors.Is(err, errReadTimeout) {
+				// Also discard on timeout - no point buffering if nothing is being processed
+				atomic.StoreInt32(&s.discard, 1)
 				logger.Debug("Read timeout, closing stream")
 			} else if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) && s.ctx.Err() == nil {
 				logger.Debug("Error reading SIP message", "error", err)

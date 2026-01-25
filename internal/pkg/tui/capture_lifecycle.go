@@ -126,6 +126,9 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	m.statistics.MaxPacketSize = 0
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
 
+	// Reset bridge stats (clears stale PacketsReceived from previous capture mode)
+	ResetBridgeStats()
+
 	// Start new capture in background using synchronized program reference
 	program := globalCaptureState.GetProgram()
 	if program != nil {

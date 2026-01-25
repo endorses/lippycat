@@ -1066,74 +1066,63 @@ func (s *StatisticsView) renderOverviewNarrow() string {
 	return result.String()
 }
 
-// renderOverviewMedium renders the overview in 2-column layout for medium terminals (80-119 chars)
+// renderOverviewMedium renders the overview in single-column layout for medium terminals (80-119 chars)
 func (s *StatisticsView) renderOverviewMedium() string {
 	var result strings.Builder
-	gap := 2
-	// colWidth is the total column width including card border
-	colWidth := (s.width - gap) / 2
-	// cardWidth is the lipgloss Width() value (excludes border, includes padding)
-	cardWidth := colWidth - 2
-	// contentWidth is the actual content area inside the card (excludes border and padding)
+
+	// Full-width cards
+	cardWidth := s.width - 2
 	contentWidth := cardWidth - 2
 
-	layout := dashboard.NewColumnLayout(gap)
-
-	// Row 1: Capture (left) + Traffic Rate (right)
+	// 1. Capture
 	captureContent := s.buildCaptureContent()
-	rateContent := s.buildTrafficRateContentCompact(contentWidth)
-
 	captureCard := dashboard.NewCard("CAPTURE", captureContent, s.theme,
 		dashboard.WithIcon("📊"),
 		dashboard.WithWidth(cardWidth))
-	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
-		dashboard.WithIcon("📈"),
-		dashboard.WithWidth(cardWidth))
-
-	row1Height := maxInt(captureCard.ContentHeight(), rateCard.ContentHeight())
-	captureCard.Height = row1Height
-	rateCard.Height = row1Height
-
-	result.WriteString(layout.JoinSideBySide(captureCard.Render(), rateCard.Render(), colWidth, colWidth))
+	result.WriteString(captureCard.Render())
 	result.WriteString("\n")
 
-	// Row 2: System Health (left) + TUI Process (right)
+	// 2. System Health
 	healthContent := s.buildHealthContent()
-	tuiContent := s.buildTUIContent()
-
 	healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
 		dashboard.WithIcon("🩺"),
 		dashboard.WithWidth(cardWidth))
+	result.WriteString(healthCard.Render())
+	result.WriteString("\n")
+
+	// 3. Traffic Rate
+	rateContent := s.buildTrafficRateContentCompact(contentWidth)
+	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
+		dashboard.WithIcon("📈"),
+		dashboard.WithWidth(cardWidth))
+	result.WriteString(rateCard.Render())
+	result.WriteString("\n")
+
+	// 4. TUI Process (with CPU sparkline)
+	tuiContent := s.buildTUIContentWide(contentWidth, 0)
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
 		dashboard.WithWidth(cardWidth))
-
-	row2Height := maxInt(healthCard.ContentHeight(), tuiCard.ContentHeight())
-	healthCard.Height = row2Height
-	tuiCard.Height = row2Height
-
-	result.WriteString(layout.JoinSideBySide(healthCard.Render(), tuiCard.Render(), colWidth, colWidth))
+	result.WriteString(tuiCard.Render())
 	result.WriteString("\n")
 
-	// Row 3: Top Talkers (left) + Protocol Distribution (right)
+	// 5. Top Talkers
 	talkersContent := s.buildTopTalkersCombinedContent(
 		s.stats.SourceCounts.GetTopN(5),
 		s.stats.DestCounts.GetTopN(5),
 		contentWidth)
-	protocolContent := s.renderProtocolDistribution(5, contentWidth)
-
 	talkersCard := dashboard.NewCard("TOP TALKERS", talkersContent, s.theme,
 		dashboard.WithIcon("🔊"),
 		dashboard.WithWidth(cardWidth))
+	result.WriteString(talkersCard.Render())
+	result.WriteString("\n")
+
+	// 6. Protocol Distribution
+	protocolContent := s.renderProtocolDistribution(5, contentWidth)
 	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
 		dashboard.WithIcon("🔌"),
 		dashboard.WithWidth(cardWidth))
-
-	row3Height := maxInt(talkersCard.ContentHeight(), protocolCard.ContentHeight())
-	talkersCard.Height = row3Height
-	protocolCard.Height = row3Height
-
-	result.WriteString(layout.JoinSideBySide(talkersCard.Render(), protocolCard.Render(), colWidth, colWidth))
+	result.WriteString(protocolCard.Render())
 
 	// Section: Protocol-Specific Stats (if protocol filter is active)
 	if s.HasProtocolStats() {

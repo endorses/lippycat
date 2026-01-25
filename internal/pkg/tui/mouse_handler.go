@@ -59,6 +59,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 			// On nodes tab - pass to NodesView
 			cmd := m.uiState.NodesView.Update(msg)
 			return m, cmd
+		} else if m.uiState.Tabs.GetActive() == 2 {
+			// On statistics tab - pass to StatisticsView
+			cmd := m.uiState.StatisticsView.Update(msg)
+			return m, cmd
 		}
 		return m, nil
 	}
@@ -96,6 +100,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		} else if m.uiState.Tabs.GetActive() == 1 {
 			// On nodes tab - pass to NodesView
 			cmd := m.uiState.NodesView.Update(msg)
+			return m, cmd
+		} else if m.uiState.Tabs.GetActive() == 2 {
+			// On statistics tab - pass to StatisticsView
+			cmd := m.uiState.StatisticsView.Update(msg)
 			return m, cmd
 		}
 		return m, nil
@@ -146,6 +154,13 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		// }
 		// Forward mouse events to the nodes view (like settings tab, let it handle coordinate adjustment)
 		cmd := m.uiState.NodesView.Update(msg)
+		return m, cmd
+	}
+
+	// Statistics tab clicks (tab 2)
+	if m.uiState.Tabs.GetActive() == 2 {
+		// Forward mouse events to the statistics view
+		cmd := m.uiState.StatisticsView.Update(msg)
 		return m, cmd
 	}
 

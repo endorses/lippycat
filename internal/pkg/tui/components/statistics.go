@@ -17,6 +17,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 )
 
+// ClickRegion represents a clickable horizontal region on a specific line.
+type ClickRegion struct {
+	StartX int // Inclusive start X position
+	EndX   int // Exclusive end X position
+}
+
 // SubView represents a sub-view within the Statistics tab.
 type SubView int
 
@@ -257,6 +263,10 @@ type StatisticsView struct {
 	// Phase 6: TUI process metrics
 	cpuTracker *CPUTracker // CPU usage history for sparkline
 	tuiMetrics *TUIMetrics // Current TUI process metrics
+
+	// Click regions for mouse interaction
+	subViewRegions    []ClickRegion // Click regions for sub-view buttons (line 0)
+	timeWindowRegions []ClickRegion // Click regions for time window buttons (line 1)
 }
 
 // TUIMetrics holds the current TUI process resource usage.
@@ -814,8 +824,48 @@ func (s *StatisticsView) ExportJSON() ([]byte, error) {
 	return json.MarshalIndent(export, "", "  ")
 }
 
-// Update handles viewport messages for scrolling
+// Update handles viewport messages for scrolling and mouse clicks
 func (s *StatisticsView) Update(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// Handle mouse clicks for sub-view and time window selection
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			// Content starts at Y=5 (header=2 + tabs=3)
+			relativeY := msg.Y - 5
+
+			// Account for viewport scroll offset
+			contentY := relativeY + s.viewport.YOffset
+
+			// Line 0: Sub-view header
+			if contentY == 0 {
+				for i, region := range s.subViewRegions {
+					if msg.X >= region.StartX && msg.X < region.EndX {
+						allViews := AllSubViews()
+						if i < len(allViews) {
+							s.currentSubView = allViews[i]
+							s.dirty = true
+						}
+						return nil
+					}
+				}
+			}
+
+			// Line 1: Time window header
+			if contentY == 1 {
+				allWindows := AllTimeWindows()
+				for i, region := range s.timeWindowRegions {
+					if msg.X >= region.StartX && msg.X < region.EndX {
+						if i < len(allWindows) {
+							s.timeWindow = allWindows[i]
+							s.dirty = true
+						}
+						return nil
+					}
+				}
+			}
+		}
+	}
+
 	var cmd tea.Cmd
 	s.viewport, cmd = s.viewport.Update(msg)
 	return cmd
@@ -888,7 +938,7 @@ func (s *StatisticsView) renderSubViewHeader() string {
 	// Style for selected view
 	selectedStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(s.theme.SelectionFg).
+		Foreground(s.theme.CursorFg).
 		Background(s.theme.SuccessColor).
 		Padding(0, 1)
 
@@ -903,15 +953,30 @@ func (s *StatisticsView) renderSubViewHeader() string {
 		Bold(true)
 
 	result.WriteString("View: ")
+	currentX := 6 // "View: " is 6 chars
+
+	// Reset and rebuild click regions
+	s.subViewRegions = make([]ClickRegion, 0, len(AllSubViews()))
 
 	for i, sv := range AllSubViews() {
 		keyNum := fmt.Sprintf("%d", i+1)
+		label := keyNum + ":" + sv.ShortString()
+		// Width = content + padding (1 left + 1 right)
+		itemWidth := len(label) + 2
+
+		// Track click region before rendering
+		s.subViewRegions = append(s.subViewRegions, ClickRegion{
+			StartX: currentX,
+			EndX:   currentX + itemWidth,
+		})
+
 		if sv == s.currentSubView {
-			result.WriteString(selectedStyle.Render(keyNum + ":" + sv.ShortString()))
+			result.WriteString(selectedStyle.Render(label))
 		} else {
 			result.WriteString(normalStyle.Render(keyStyle.Render(keyNum) + ":" + sv.ShortString()))
 		}
 		result.WriteString(" ")
+		currentX += itemWidth + 1 // +1 for the space after
 	}
 
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
@@ -2324,14 +2389,29 @@ func (s *StatisticsView) renderTimeWindowHeader() string {
 		Foreground(lipgloss.Color("240"))
 
 	result.WriteString("Time Window: ")
+	currentX := 13 // "Time Window: " is 13 chars
+
+	// Reset and rebuild click regions
+	s.timeWindowRegions = make([]ClickRegion, 0, len(AllTimeWindows()))
 
 	for _, tw := range AllTimeWindows() {
+		label := tw.String()
+		// Both selected "[X]" and unselected " X " have same visual width: label + 2
+		itemWidth := len(label) + 2
+
+		// Track click region before rendering
+		s.timeWindowRegions = append(s.timeWindowRegions, ClickRegion{
+			StartX: currentX,
+			EndX:   currentX + itemWidth,
+		})
+
 		if tw == s.timeWindow {
-			result.WriteString(selectedStyle.Render("[" + tw.String() + "]"))
+			result.WriteString(selectedStyle.Render("[" + label + "]"))
 		} else {
-			result.WriteString(normalStyle.Render(" " + tw.String() + " "))
+			result.WriteString(normalStyle.Render(" " + label + " "))
 		}
 		result.WriteString(" ")
+		currentX += itemWidth + 1 // +1 for the space after
 	}
 
 	result.WriteString(normalStyle.Render("  (t to cycle)"))

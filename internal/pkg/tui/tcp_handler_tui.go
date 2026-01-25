@@ -143,7 +143,6 @@ func extractFromToFromSIP(msg []byte) (from, to string) {
 
 			// Empty line = end of headers
 			if len(line) == 0 {
-				inHeaders = false
 				break
 			}
 

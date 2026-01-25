@@ -2748,8 +2748,6 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 		return leftColumn
 	}
 
-	rightColumn := strings.Join(rightLines, "\n")
-
 	// Pad columns to equal height
 	leftHeight := len(leftLines)
 	rightHeight := len(rightLines)
@@ -2766,7 +2764,7 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 	for len(rightLines) < maxHeight {
 		rightLines = append(rightLines, "")
 	}
-	rightColumn = strings.Join(rightLines, "\n")
+	rightColumn := strings.Join(rightLines, "\n")
 
 	// Calculate column widths - left column fixed width, right gets the rest
 	leftWidth := 18 // Comfortable spacing for "✓ Throttle"

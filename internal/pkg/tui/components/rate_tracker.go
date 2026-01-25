@@ -244,12 +244,6 @@ func (rt *RateTracker) GetSamples(maxPoints int) []float64 {
 		return nil
 	}
 
-	// Determine how many samples to return
-	sampleCount := rt.count
-	if sampleCount > maxPoints {
-		sampleCount = maxPoints
-	}
-
 	// If we have fewer samples than maxPoints, use all samples
 	if rt.count <= maxPoints {
 		rates := make([]float64, rt.count)

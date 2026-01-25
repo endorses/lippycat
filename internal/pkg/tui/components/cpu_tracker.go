@@ -71,12 +71,6 @@ func (ct *CPUTracker) GetSamples(maxPoints int) []float64 {
 		return nil
 	}
 
-	// Determine how many samples to return
-	sampleCount := ct.count
-	if sampleCount > maxPoints {
-		sampleCount = maxPoints
-	}
-
 	// If we have fewer samples than maxPoints, use all samples
 	if ct.count <= maxPoints {
 		samples := make([]float64, ct.count)

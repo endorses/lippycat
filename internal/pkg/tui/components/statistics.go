@@ -1185,10 +1185,10 @@ func (s *StatisticsView) renderOverviewWide() string {
 
 	// Row 3: Top Talkers (left) + Protocol Distribution (right)
 	talkersContent := s.buildTopTalkersCombinedContent(
-		s.stats.SourceCounts.GetTopN(5),
-		s.stats.DestCounts.GetTopN(5),
+		s.stats.SourceCounts.GetTopN(10),
+		s.stats.DestCounts.GetTopN(10),
 		contentWidth)
-	protocolContent := s.renderProtocolDistribution(5, contentWidth)
+	protocolContent := s.renderProtocolDistribution(10, contentWidth)
 
 	talkersCard := dashboard.NewCard("TOP TALKERS", talkersContent, s.theme,
 		dashboard.WithIcon("🔊"),

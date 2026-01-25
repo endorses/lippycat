@@ -2658,19 +2658,28 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 	// Build left column: vertical health indicators
 	hi := s.healthIndicator
 	var leftLines []string
+	titleStyle := lipgloss.NewStyle().Foreground(s.theme.InfoColor).Bold(true)
+
+	// Left column header
+	leftLines = append(leftLines, titleStyle.Render("🖥 Local"))
 	for _, item := range items {
 		leftLines = append(leftLines, hi.RenderWithLabel(item.Label, item.Level))
 	}
 	leftColumn := strings.Join(leftLines, "\n")
 
-	// Build right column: bridge performance stats (excluding Packets Received)
+	// Build right column: bridge performance stats or fleet health stats
 	var rightLines []string
+	labelStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg).
+		Bold(true)
+	valueStyle := lipgloss.NewStyle().
+		Foreground(s.theme.StatusBarFg)
+
 	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
-		labelStyle := lipgloss.NewStyle().
-			Foreground(s.theme.StatusBarFg).
-			Bold(true)
-		valueStyle := lipgloss.NewStyle().
-			Foreground(s.theme.StatusBarFg)
+		// Local/Offline capture: show bridge performance stats
+
+		// Bridge header
+		rightLines = append(rightLines, titleStyle.Render("🌉 Bridge"))
 
 		// Packets Displayed
 		displayedLine := labelStyle.Render("Displayed: ") +
@@ -2724,6 +2733,65 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 			}
 		}
 		rightLines = append(rightLines, labelStyle.Render("Drop Rate: ")+valueStyle.Render(dropText))
+
+	} else if s.distributedStats != nil && s.distributedStats.TotalHunters > 0 {
+		// Remote capture: show fleet health stats
+		ds := s.distributedStats
+		healthyStyle := lipgloss.NewStyle().Foreground(s.theme.SuccessColor)
+		warningStyle := lipgloss.NewStyle().Foreground(s.theme.WarningColor)
+		errorStyle := lipgloss.NewStyle().Foreground(s.theme.ErrorColor)
+
+		// Fleet header
+		rightLines = append(rightLines, titleStyle.Render("🌐 Fleet"))
+
+		// Processors line
+		procLine := labelStyle.Render("Processors:") +
+			valueStyle.Render(fmt.Sprintf(" %d total", ds.TotalProcessors))
+		if ds.HealthyProcessors == ds.TotalProcessors && ds.TotalProcessors > 0 {
+			procLine += healthyStyle.Render(fmt.Sprintf("  ✓ %d healthy", ds.HealthyProcessors))
+		} else if ds.HealthyProcessors > 0 {
+			procLine += healthyStyle.Render(fmt.Sprintf("  ✓ %d", ds.HealthyProcessors))
+		}
+		rightLines = append(rightLines, procLine)
+
+		// Hunters line
+		hunterLine := labelStyle.Render("Hunters:   ") +
+			valueStyle.Render(fmt.Sprintf(" %d total", ds.TotalHunters))
+		if ds.HealthyHunters == ds.TotalHunters && ds.TotalHunters > 0 {
+			hunterLine += healthyStyle.Render(fmt.Sprintf("  ✓ %d healthy", ds.HealthyHunters))
+		} else {
+			if ds.HealthyHunters > 0 {
+				hunterLine += healthyStyle.Render(fmt.Sprintf("  ✓ %d", ds.HealthyHunters))
+			}
+			if ds.WarningHunters > 0 {
+				hunterLine += warningStyle.Render(fmt.Sprintf("  ⚠ %d", ds.WarningHunters))
+			}
+			if ds.ErrorHunters > 0 {
+				hunterLine += errorStyle.Render(fmt.Sprintf("  ✗ %d", ds.ErrorHunters))
+			}
+		}
+		rightLines = append(rightLines, hunterLine)
+
+		// Fleet health indicators (vertical, like left column)
+		hi := s.healthIndicator
+		if hi != nil {
+			// Drop rate health
+			dropLevel := HealthFromRatio(ds.OverallDropRate/100, 0.01, 0.05, true)
+			rightLines = append(rightLines, hi.RenderWithLabel("Drops", dropLevel))
+
+			// CPU health
+			if ds.FleetCPUPercent >= 0 {
+				cpuLevel := HealthFromRatio(ds.FleetCPUPercent/100, 0.7, 0.9, true)
+				rightLines = append(rightLines, hi.RenderWithLabel("CPU", cpuLevel))
+			}
+
+			// Hunter health ratio
+			if ds.TotalHunters > 0 {
+				healthyRatio := float64(ds.HealthyHunters) / float64(ds.TotalHunters)
+				hunterLevel := HealthFromRatio(healthyRatio, 0.9, 0.5, false)
+				rightLines = append(rightLines, hi.RenderWithLabel("Hunters", hunterLevel))
+			}
+		}
 	}
 
 	// If no bridge stats, just return the left column

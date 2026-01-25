@@ -63,14 +63,13 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			} else {
 				pauseSignal.Resume()
 			}
-			// Show toast and resume ticking when unpausing
+			// Show toast when unpausing (existing tick will transition to fast tick)
 			if !m.uiState.Paused {
-				toastCmd := m.uiState.Toast.Show(
+				return m, m.uiState.Toast.Show(
 					"Capture resumed",
 					components.ToastSuccess,
 					components.ToastDurationShort,
 				)
-				return m, tea.Batch(toastCmd, tickCmd())
 			}
 			// Show toast for pause
 			return m, m.uiState.Toast.Show(
@@ -528,12 +527,12 @@ func (m Model) handlePauseResume() (Model, tea.Cmd) {
 	}
 	// Show toast and resume ticking when unpausing
 	if !m.uiState.Paused {
-		toastCmd := m.uiState.Toast.Show(
+		// Existing tick will transition to fast tick
+		return m, m.uiState.Toast.Show(
 			"Capture resumed",
 			components.ToastSuccess,
 			components.ToastDurationShort,
 		)
-		return m, tea.Batch(toastCmd, tickCmd())
 	}
 	// Show toast for pause
 	return m, m.uiState.Toast.Show(

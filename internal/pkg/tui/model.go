@@ -62,6 +62,14 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+// slowTickCmd returns a tick command at 1 second interval for when capture is paused.
+// This allows TUI metrics (CPU chart) to continue updating without the overhead of 20 Hz ticks.
+func slowTickCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return TickMsg{}
+	})
+}
+
 // CleanupOldProcessorsMsg is sent periodically to clean up old disconnected processors
 type CleanupOldProcessorsMsg struct{}
 

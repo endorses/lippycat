@@ -92,7 +92,7 @@ func (m Model) handleResumeMsg(msg tea.ResumeMsg) (Model, tea.Cmd) {
 
 // handleTickMsg handles periodic UI refresh ticks
 func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
-	// Only run tick when capturing and not paused
+	// When capturing and not paused: full processing
 	if !m.uiState.Paused && m.uiState.Capturing {
 		// PULL-BASED ARCHITECTURE: Drain pending packets from buffer
 		// This ensures TUI is never blocked by incoming packets - it pulls when ready
@@ -128,7 +128,17 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 
 		return m, tickCmd()
 	}
-	// When paused, stop ticking to save CPU
+
+	// When paused but still capturing: only update TUI metrics
+	if m.uiState.Paused && m.uiState.Capturing {
+		if m.metricsCollector != nil {
+			metrics := m.metricsCollector.Get()
+			m.uiState.StatisticsView.UpdateTUIMetrics(metrics.CPUPercent, metrics.MemoryRSSBytes)
+		}
+		return m, slowTickCmd()
+	}
+
+	// When not capturing, stop ticking
 	return m, nil
 }
 

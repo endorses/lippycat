@@ -43,8 +43,8 @@ func TestHandleTickMsg_WhenPaused(t *testing.T) {
 
 	updatedModel, cmd := m.handleTickMsg(TickMsg{})
 
-	// When paused, tick should return nil command (no more ticks)
-	assert.Nil(t, cmd, "Should not schedule next tick when paused")
+	// When paused, should continue slow ticking to update TUI metrics (CPU chart)
+	assert.NotNil(t, cmd, "Should schedule slow tick when paused to update TUI metrics")
 	assert.Equal(t, true, updatedModel.uiState.Paused, "Model should remain paused")
 }
 

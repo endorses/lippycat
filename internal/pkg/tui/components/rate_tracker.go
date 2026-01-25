@@ -190,7 +190,7 @@ func (rt *RateTracker) GetRatesForWindow(window TimeWindow, maxPoints int) []flo
 		return nil
 	}
 
-	// If we have fewer samples than maxPoints, use all samples
+	// If we have fewer samples than maxPoints, return all samples
 	if samplesInWindow <= maxPoints {
 		rates := make([]float64, samplesInWindow)
 		for i := 0; i < samplesInWindow; i++ {
@@ -231,6 +231,100 @@ func (rt *RateTracker) SampleCount() int {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return rt.count
+}
+
+// GetSamples returns rate samples for sparkline rendering.
+// Returns samples from oldest to newest, up to maxPoints.
+// This is the width-based version that doesn't depend on time windows.
+func (rt *RateTracker) GetSamples(maxPoints int) []float64 {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+
+	if rt.count == 0 || maxPoints <= 0 {
+		return nil
+	}
+
+	// Determine how many samples to return
+	sampleCount := rt.count
+	if sampleCount > maxPoints {
+		sampleCount = maxPoints
+	}
+
+	// If we have fewer samples than maxPoints, use all samples
+	if rt.count <= maxPoints {
+		rates := make([]float64, rt.count)
+		for i := 0; i < rt.count; i++ {
+			// Read from oldest to newest
+			idx := (rt.head - rt.count + i + rt.maxSamples) % rt.maxSamples
+			rates[i] = float64(rt.samples[idx].Packets) / rt.interval.Seconds()
+		}
+		return rates
+	}
+
+	// Downsample by averaging groups
+	rates := make([]float64, maxPoints)
+	groupSize := rt.count / maxPoints
+	remainder := rt.count % maxPoints
+
+	sampleIdx := 0
+	for i := 0; i < maxPoints; i++ {
+		// Some groups get an extra sample to distribute remainder evenly
+		currentGroupSize := groupSize
+		if i < remainder {
+			currentGroupSize++
+		}
+
+		var sum float64
+		for j := 0; j < currentGroupSize; j++ {
+			idx := (rt.head - rt.count + sampleIdx + rt.maxSamples) % rt.maxSamples
+			sum += float64(rt.samples[idx].Packets)
+			sampleIdx++
+		}
+		rates[i] = (sum / float64(currentGroupSize)) / rt.interval.Seconds()
+	}
+
+	return rates
+}
+
+// Resize changes the tracker capacity, preserving existing samples.
+// If newCapacity is smaller than current count, oldest samples are discarded.
+func (rt *RateTracker) Resize(newCapacity int) {
+	if newCapacity <= 0 {
+		return
+	}
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	if newCapacity == rt.maxSamples {
+		return // No change needed
+	}
+
+	// Extract current samples in order (oldest to newest)
+	oldSamples := make([]RateSample, rt.count)
+	for i := 0; i < rt.count; i++ {
+		idx := (rt.head - rt.count + i + rt.maxSamples) % rt.maxSamples
+		oldSamples[i] = rt.samples[idx]
+	}
+
+	// Create new buffer
+	rt.samples = make([]RateSample, newCapacity)
+	rt.maxSamples = newCapacity
+
+	// Copy samples, keeping most recent if we're shrinking
+	copyCount := rt.count
+	startIdx := 0
+	if copyCount > newCapacity {
+		startIdx = copyCount - newCapacity
+		copyCount = newCapacity
+	}
+
+	for i := 0; i < copyCount; i++ {
+		rt.samples[i] = oldSamples[startIdx+i]
+	}
+
+	rt.head = copyCount % newCapacity
+	rt.count = copyCount
 }
 
 // Reset clears all samples and resets the tracker.

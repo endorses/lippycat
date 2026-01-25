@@ -123,9 +123,6 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.uiState.StatisticsView.SetSubView(components.SubViewDistributed)
 			m.uiState.Footer.SetStatsSubView(components.SubViewDistributed)
 			return m, nil
-		case "t": // Cycle time window
-			m.uiState.StatisticsView.CycleTimeWindow()
-			return m, nil
 		case "e": // Export statistics to JSON
 			return m.handleExportStatistics()
 		case "j", "down": // Move selection down (TopTalkers view)

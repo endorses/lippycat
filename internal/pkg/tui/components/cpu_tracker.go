@@ -167,3 +167,44 @@ func (ct *CPUTracker) Reset() {
 	ct.count = 0
 	ct.peakCPUPercent = 0
 }
+
+// Resize changes the tracker capacity, preserving existing samples.
+// If newCapacity is smaller than current count, oldest samples are discarded.
+func (ct *CPUTracker) Resize(newCapacity int) {
+	if newCapacity <= 0 {
+		return
+	}
+
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+
+	if newCapacity == ct.maxSamples {
+		return // No change needed
+	}
+
+	// Extract current samples in order (oldest to newest)
+	oldSamples := make([]float64, ct.count)
+	for i := 0; i < ct.count; i++ {
+		idx := (ct.head - ct.count + i + ct.maxSamples) % ct.maxSamples
+		oldSamples[i] = ct.samples[idx]
+	}
+
+	// Create new buffer
+	ct.samples = make([]float64, newCapacity)
+	ct.maxSamples = newCapacity
+
+	// Copy samples, keeping most recent if we're shrinking
+	copyCount := ct.count
+	startIdx := 0
+	if copyCount > newCapacity {
+		startIdx = copyCount - newCapacity
+		copyCount = newCapacity
+	}
+
+	for i := 0; i < copyCount; i++ {
+		ct.samples[i] = oldSamples[startIdx+i]
+	}
+
+	ct.head = copyCount % newCapacity
+	ct.count = copyCount
+}

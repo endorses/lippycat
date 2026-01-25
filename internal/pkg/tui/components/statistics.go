@@ -239,8 +239,7 @@ type StatisticsView struct {
 	// Phase 1: Core infrastructure
 	rateTracker *RateTracker // Time-series rate sampling
 	dropStats   *DropStats   // Aggregated drop statistics
-	timeWindow  TimeWindow   // Current time window for display
-	startTime   time.Time    // Session start time for "All" window
+	startTime   time.Time    // Session start time
 
 	// Phase 2: Visualization components
 	queueBar        *UtilizationBar  // Queue depth progress bar
@@ -265,8 +264,7 @@ type StatisticsView struct {
 	tuiMetrics *TUIMetrics // Current TUI process metrics
 
 	// Click regions for mouse interaction
-	subViewRegions    []ClickRegion // Click regions for sub-view buttons (line 0)
-	timeWindowRegions []ClickRegion // Click regions for time window buttons (line 1)
+	subViewRegions []ClickRegion // Click regions for sub-view buttons (line 0)
 }
 
 // TUIMetrics holds the current TUI process resource usage.
@@ -290,7 +288,6 @@ func NewStatisticsView() StatisticsView {
 		ready:            false,
 		rateTracker:      DefaultRateTracker(),
 		dropStats:        NewDropStats(),
-		timeWindow:       TimeWindow1Min,
 		startTime:        time.Now(),
 		queueBar:         NewUtilizationBar(30),
 		healthIndicator:  NewHealthIndicator(),
@@ -326,6 +323,25 @@ func (s *StatisticsView) SetSize(width, height int) {
 	s.width = width
 	s.height = height
 
+	// Resize trackers to match content width for sparklines
+	// For wide layout (>=120): contentWidth = (width - 2) / 2 - 2 (card padding)
+	// For narrow layout: use width - 4 (border + padding)
+	var targetCapacity int
+	if width >= 120 {
+		targetCapacity = (width-2)/2 - 2
+	} else {
+		targetCapacity = width - 4
+	}
+	if targetCapacity < 60 {
+		targetCapacity = 60 // minimum capacity
+	}
+	if s.cpuTracker != nil {
+		s.cpuTracker.Resize(targetCapacity)
+	}
+	if s.rateTracker != nil {
+		s.rateTracker.Resize(targetCapacity)
+	}
+
 	if !s.ready {
 		s.viewport = viewport.New(width, height)
 		s.ready = true
@@ -357,24 +373,6 @@ func (s *StatisticsView) SetVisible(visible bool) {
 	if visible {
 		s.dirty = true // Force re-render when becoming visible
 	}
-}
-
-// GetTimeWindow returns the current time window.
-func (s *StatisticsView) GetTimeWindow() TimeWindow {
-	return s.timeWindow
-}
-
-// SetTimeWindow sets the time window for statistics display.
-func (s *StatisticsView) SetTimeWindow(tw TimeWindow) {
-	s.timeWindow = tw
-	s.dirty = true
-}
-
-// CycleTimeWindow advances to the next time window.
-func (s *StatisticsView) CycleTimeWindow() TimeWindow {
-	s.timeWindow = s.timeWindow.Next()
-	s.dirty = true
-	return s.timeWindow
 }
 
 // RecordRates records rate samples based on current statistics.
@@ -723,7 +721,6 @@ func (s *StatisticsView) ExportJSON() ([]byte, error) {
 
 	export := struct {
 		Timestamp    string `json:"timestamp"`
-		TimeWindow   string `json:"time_window"`
 		SessionStart string `json:"session_start"`
 
 		Overview struct {
@@ -766,7 +763,6 @@ func (s *StatisticsView) ExportJSON() ([]byte, error) {
 		} `json:"top_destinations"`
 	}{
 		Timestamp:    time.Now().Format(time.RFC3339),
-		TimeWindow:   s.timeWindow.String(),
 		SessionStart: s.startTime.Format(time.RFC3339),
 	}
 
@@ -850,19 +846,6 @@ func (s *StatisticsView) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 
-			// Line 1: Time window header
-			if contentY == 1 {
-				allWindows := AllTimeWindows()
-				for i, region := range s.timeWindowRegions {
-					if msg.X >= region.StartX && msg.X < region.EndX {
-						if i < len(allWindows) {
-							s.timeWindow = allWindows[i]
-							s.dirty = true
-						}
-						return nil
-					}
-				}
-			}
 		}
 	}
 
@@ -908,10 +891,6 @@ func (s *StatisticsView) renderContent() string {
 
 	// Render sub-view navigation header
 	result.WriteString(s.renderSubViewHeader())
-	result.WriteString("\n")
-
-	// Time window header
-	result.WriteString(s.renderTimeWindowHeader())
 	result.WriteString("\n\n")
 
 	// Render content based on current sub-view
@@ -1394,14 +1373,14 @@ func (s *StatisticsView) buildTUIContentWide(availableWidth, targetHeight int) s
 
 	// Add CPU sparkline if we have enough samples
 	if s.cpuTracker != nil && s.cpuTracker.SampleCount() > 2 {
-		// Use available width for sparkline, leaving some margin
-		sparklineWidth := availableWidth - 4
+		// Use full available width for sparkline
+		sparklineWidth := availableWidth
 		if sparklineWidth < 20 {
 			sparklineWidth = 20
 		}
 		samples := s.cpuTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
-			sparkline := RenderCPUSparkline(samples, sparklineWidth, 2, s.theme)
+			sparkline := RenderCPUSparkline(samples, sparklineWidth, 5, s.theme)
 			sparklineHeight := strings.Count(sparkline, "\n") + 1
 
 			// If targetHeight is set, add padding to push sparkline to bottom
@@ -1460,9 +1439,15 @@ func (s *StatisticsView) buildTrafficRateContent(availableWidth int) string {
 			sparklineWidth = 20
 		}
 
-		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		rates := s.rateTracker.GetSamples(sparklineWidth)
 		if len(rates) > 0 {
 			content.WriteString("\n\n")
+			// Pad with zeros at the beginning for right-alignment (newest data on right)
+			if len(rates) < sparklineWidth {
+				padded := make([]float64, sparklineWidth)
+				copy(padded[sparklineWidth-len(rates):], rates)
+				rates = padded
+			}
 			sparkline := RenderRateSparkline(rates, sparklineWidth, 3, s.theme, rateStats.PeakPacketsPerSec)
 			content.WriteString(sparkline)
 		}
@@ -1480,37 +1465,45 @@ func (s *StatisticsView) buildTrafficRateContentCompact(availableWidth int) stri
 		Bold(true)
 	valueStyle := lipgloss.NewStyle().
 		Foreground(s.theme.StatusBarFg)
+	sepStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
 
 	rateStats := s.GetRateStats()
 
-	// Compact format: label aligned with values
-	content.WriteString(labelStyle.Render("Current: "))
-	content.WriteString(valueStyle.Render(fmt.Sprintf("%-10s | %s",
-		formatRate(rateStats.CurrentPacketsPerSec)+" pkt/s",
-		formatBytesPerSec(rateStats.CurrentBytesPerSec))))
-	content.WriteString("\n")
-	content.WriteString(labelStyle.Render("Average: "))
-	content.WriteString(valueStyle.Render(fmt.Sprintf("%-10s | %s",
-		formatRate(rateStats.AvgPacketsPerSec)+" pkt/s",
-		formatBytesPerSec(rateStats.AvgBytesPerSec))))
-	content.WriteString("\n")
-	content.WriteString(labelStyle.Render("Peak:    "))
-	content.WriteString(valueStyle.Render(fmt.Sprintf("%-10s | %s",
-		formatRate(rateStats.PeakPacketsPerSec)+" pkt/s",
-		formatBytesPerSec(rateStats.PeakBytesPerSec))))
+	// Single line format: Cur | Avg | Peak - fixed width columns for stability
+	content.WriteString(labelStyle.Render("Cur: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s/s %s",
+		formatRateFixed(rateStats.CurrentPacketsPerSec),
+		formatBitsPerSec(rateStats.CurrentBytesPerSec))))
+	content.WriteString(sepStyle.Render(" • "))
+	content.WriteString(labelStyle.Render("Avg: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s/s %s",
+		formatRateFixed(rateStats.AvgPacketsPerSec),
+		formatBitsPerSec(rateStats.AvgBytesPerSec))))
+	content.WriteString(sepStyle.Render(" • "))
+	content.WriteString(labelStyle.Render("Peak: "))
+	content.WriteString(valueStyle.Render(fmt.Sprintf("%s/s %s",
+		formatRateFixed(rateStats.PeakPacketsPerSec),
+		formatBitsPerSec(rateStats.PeakBytesPerSec))))
 
 	// Add sparkline for wide layout
 	if s.rateTracker != nil && s.rateTracker.SampleCount() > 2 {
-		// Use available width for sparkline, leaving some margin
-		sparklineWidth := availableWidth - 4
+		// Use full available width for sparkline
+		sparklineWidth := availableWidth
 		if sparklineWidth < 20 {
 			sparklineWidth = 20
 		}
 
-		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		rates := s.rateTracker.GetSamples(sparklineWidth)
 		if len(rates) > 0 {
 			content.WriteString("\n\n")
-			sparkline := RenderRateSparkline(rates, sparklineWidth, 2, s.theme, rateStats.PeakPacketsPerSec)
+			// Pad with zeros at the beginning for right-alignment (newest data on right)
+			if len(rates) < sparklineWidth {
+				padded := make([]float64, sparklineWidth)
+				copy(padded[sparklineWidth-len(rates):], rates)
+				rates = padded
+			}
+			sparkline := RenderRateSparkline(rates, sparklineWidth, 5, s.theme, rateStats.PeakPacketsPerSec)
 			content.WriteString(sparkline)
 		}
 	}
@@ -1595,10 +1588,16 @@ func (s *StatisticsView) renderTrafficSubView() string {
 			sparklineWidth = s.width - 20
 		}
 
-		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		rates := s.rateTracker.GetSamples(sparklineWidth)
 		if len(rates) > 0 {
 			result.WriteString(labelStyle.Render("Packet Rate Trend:"))
 			result.WriteString("\n")
+			// Pad with zeros at the beginning for right-alignment (newest data on right)
+			if len(rates) < sparklineWidth {
+				padded := make([]float64, sparklineWidth)
+				copy(padded[sparklineWidth-len(rates):], rates)
+				rates = padded
+			}
 			sparkline := RenderRateSparkline(rates, sparklineWidth, 5, s.theme, rateStats.PeakPacketsPerSec)
 			result.WriteString(sparkline)
 			result.WriteString("\n")
@@ -2370,6 +2369,20 @@ func formatRate(rate float64) string {
 	return fmt.Sprintf("%.1fM", rate/1000000)
 }
 
+// formatRateFixed formats packet rate with fixed width (6 chars) for stable display
+func formatRateFixed(rate float64) string {
+	if rate < 1 {
+		return fmt.Sprintf("%6.2f", rate)
+	}
+	if rate < 1000 {
+		return fmt.Sprintf("%6.0f", rate)
+	}
+	if rate < 1000000 {
+		return fmt.Sprintf("%5.1fK", rate/1000)
+	}
+	return fmt.Sprintf("%5.1fM", rate/1000000)
+}
+
 // formatBytesPerSec formats bytes/second with appropriate units
 func formatBytesPerSec(bytesPerSec float64) string {
 	if bytesPerSec < 1024 {
@@ -2384,48 +2397,19 @@ func formatBytesPerSec(bytesPerSec float64) string {
 	return fmt.Sprintf("%.1f GB/s", bytesPerSec/(1024*1024*1024))
 }
 
-// renderTimeWindowHeader renders the time window selector header
-func (s *StatisticsView) renderTimeWindowHeader() string {
-	var result strings.Builder
-
-	// Style for selected window
-	selectedStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(s.theme.SuccessColor)
-
-	// Style for unselected windows
-	normalStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
-
-	result.WriteString("Time Window: ")
-	currentX := 13 // "Time Window: " is 13 chars
-
-	// Reset and rebuild click regions
-	s.timeWindowRegions = make([]ClickRegion, 0, len(AllTimeWindows()))
-
-	for _, tw := range AllTimeWindows() {
-		label := tw.String()
-		// Both selected "[X]" and unselected " X " have same visual width: label + 2
-		itemWidth := len(label) + 2
-
-		// Track click region before rendering
-		s.timeWindowRegions = append(s.timeWindowRegions, ClickRegion{
-			StartX: currentX,
-			EndX:   currentX + itemWidth,
-		})
-
-		if tw == s.timeWindow {
-			result.WriteString(selectedStyle.Render("[" + label + "]"))
-		} else {
-			result.WriteString(normalStyle.Render(" " + label + " "))
-		}
-		result.WriteString(" ")
-		currentX += itemWidth + 1 // +1 for the space after
+// formatBitsPerSec formats bytes/second as bits/second with appropriate units and fixed width
+func formatBitsPerSec(bytesPerSec float64) string {
+	bitsPerSec := bytesPerSec * 8
+	if bitsPerSec < 1000 {
+		return fmt.Sprintf("%5.0f bit/s", bitsPerSec)
 	}
-
-	result.WriteString(normalStyle.Render("  (t to cycle)"))
-
-	return result.String()
+	if bitsPerSec < 1000*1000 {
+		return fmt.Sprintf("%5.1f Kbit/s", bitsPerSec/1000)
+	}
+	if bitsPerSec < 1000*1000*1000 {
+		return fmt.Sprintf("%5.1f Mbit/s", bitsPerSec/(1000*1000))
+	}
+	return fmt.Sprintf("%5.1f Gbit/s", bitsPerSec/(1000*1000*1000))
 }
 
 // renderRateSection renders the traffic rate section with sparklines
@@ -2466,10 +2450,16 @@ func (s *StatisticsView) renderRateSection(titleStyle, labelStyle, valueStyle li
 			sparklineWidth = s.width - 20
 		}
 
-		rates := s.rateTracker.GetRatesForWindow(s.timeWindow, sparklineWidth)
+		rates := s.rateTracker.GetSamples(sparklineWidth)
 		if len(rates) > 0 {
 			result.WriteString(labelStyle.Render("Packet Rate Trend:"))
 			result.WriteString("\n")
+			// Pad with zeros at the beginning for right-alignment (newest data on right)
+			if len(rates) < sparklineWidth {
+				padded := make([]float64, sparklineWidth)
+				copy(padded[sparklineWidth-len(rates):], rates)
+				rates = padded
+			}
 			sparkline := RenderRateSparkline(rates, sparklineWidth, 3, s.theme, rateStats.PeakPacketsPerSec)
 			result.WriteString(sparkline)
 			result.WriteString("\n")
@@ -2592,7 +2582,7 @@ func (s *StatisticsView) renderTUIMetrics(titleStyle, labelStyle, valueStyle lip
 
 		samples := s.cpuTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
-			sparkline := RenderCPUSparkline(samples, sparklineWidth, 2, s.theme)
+			sparkline := RenderCPUSparkline(samples, sparklineWidth, 5, s.theme)
 			result.WriteString(sparkline)
 			result.WriteString("\n")
 		}

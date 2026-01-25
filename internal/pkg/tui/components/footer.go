@@ -192,7 +192,6 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 		keybinds := []TabKeybind{
 			{Key: "v", Description: "view", ShortDesc: "vw", Essential: true},
 			{Key: "1-5", Description: "sections", ShortDesc: "sec", Essential: false},
-			{Key: "t", Description: "time", ShortDesc: "tm", Essential: true},
 			{Key: "e", Description: "export", ShortDesc: "exp", Essential: false},
 		}
 		// Add filter keybind when in TopTalkers view

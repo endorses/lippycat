@@ -1287,6 +1287,9 @@ func (s *StatisticsView) buildCaptureContent() string {
 func (s *StatisticsView) buildCaptureContentWide(availableWidth int) string {
 	var content strings.Builder
 
+	// Add empty line between heading and content
+	content.WriteString("\n")
+
 	// Calculate stat box width: divide available width among 3 boxes with gaps
 	// Each box has 2 chars of border, so we need to account for that
 	numBoxes := 3
@@ -2259,7 +2262,10 @@ func (s *StatisticsView) renderProtocolDistribution(maxProtocols, availableWidth
 	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 	pctStyle := lipgloss.NewStyle().Foreground(s.theme.StatusBarFg).Bold(true)
 
-	for _, pc := range topProtocols {
+	// Add empty line between heading and chart content
+	result.WriteString("\n")
+
+	for i, pc := range topProtocols {
 		// Get protocol-specific color
 		protocolColor := s.getProtocolColor(pc.Key)
 		barStyle := lipgloss.NewStyle().Foreground(protocolColor)
@@ -2285,7 +2291,10 @@ func (s *StatisticsView) renderProtocolDistribution(maxProtocols, availableWidth
 		result.WriteString(emptyStyle.Render(empty))
 		result.WriteString(" ")
 		result.WriteString(pctStyle.Render(fmt.Sprintf("%5.1f%%", percentage)))
-		result.WriteString("\n")
+		// Add newline after each bar except the last one
+		if i < len(topProtocols)-1 {
+			result.WriteString("\n")
+		}
 	}
 
 	return result.String()

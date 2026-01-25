@@ -1083,7 +1083,7 @@ func (s *StatisticsView) renderOverviewMedium() string {
 	result.WriteString("\n")
 
 	// 2. System Health
-	healthContent := s.buildHealthContent()
+	healthContent := s.buildHealthContent(contentWidth)
 	healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
 		dashboard.WithIcon("🩺"),
 		dashboard.WithWidth(cardWidth))
@@ -1165,7 +1165,7 @@ func (s *StatisticsView) renderOverviewWide() string {
 	result.WriteString("\n")
 
 	// Row 2: System Health (left) + TUI Process (right)
-	healthContent := s.buildHealthContent()
+	healthContent := s.buildHealthContent(contentWidth)
 	// Build TUI card first to determine target height
 	tuiContent := s.buildTUIContentWide(contentWidth, 0)
 
@@ -2590,7 +2590,8 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 }
 
 // buildHealthContent builds the health content for card display (without title).
-func (s *StatisticsView) buildHealthContent() string {
+// contentWidth is used for laying out the two-column display with bridge performance.
+func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 	if s.healthIndicator == nil {
 		return "No health data available"
 	}
@@ -2649,11 +2650,120 @@ func (s *StatisticsView) buildHealthContent() string {
 		}{"Throttle", throttleLevel})
 	}
 
-	// Render health indicators
-	if len(items) > 0 {
-		return RenderHealthSummary(s.theme, items)
+	// No health data
+	if len(items) == 0 {
+		return "No health data available"
 	}
-	return "No health data available"
+
+	// Build left column: vertical health indicators
+	hi := s.healthIndicator
+	var leftLines []string
+	for _, item := range items {
+		leftLines = append(leftLines, hi.RenderWithLabel(item.Label, item.Level))
+	}
+	leftColumn := strings.Join(leftLines, "\n")
+
+	// Build right column: bridge performance stats (excluding Packets Received)
+	var rightLines []string
+	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
+		labelStyle := lipgloss.NewStyle().
+			Foreground(s.theme.StatusBarFg).
+			Bold(true)
+		valueStyle := lipgloss.NewStyle().
+			Foreground(s.theme.StatusBarFg)
+
+		// Packets Displayed
+		displayedLine := labelStyle.Render("Displayed: ") +
+			valueStyle.Render(fmt.Sprintf("%d", s.bridgeStats.PacketsDisplayed))
+		if s.bridgeStats.PacketsReceived > 0 {
+			displayPct := float64(s.bridgeStats.PacketsDisplayed) / float64(s.bridgeStats.PacketsReceived) * 100
+			displayedLine += valueStyle.Render(fmt.Sprintf(" (%.0f%%)", displayPct))
+		}
+		rightLines = append(rightLines, displayedLine)
+
+		// Sampling Ratio
+		samplingPct := float64(s.bridgeStats.SamplingRatio) / 10.0
+		samplingText := fmt.Sprintf("%.0f%%", samplingPct)
+		if samplingPct >= 100.0 {
+			samplingText = "100% (full)"
+		}
+		rightLines = append(rightLines, labelStyle.Render("Sampling:  ")+valueStyle.Render(samplingText))
+
+		// Batches Sent/Dropped
+		rightLines = append(rightLines, labelStyle.Render("Batches:   ")+
+			valueStyle.Render(fmt.Sprintf("%d sent", s.bridgeStats.BatchesSent)))
+		if s.bridgeStats.BatchesDropped > 0 {
+			dropPct := float64(s.bridgeStats.BatchesDropped) / float64(s.bridgeStats.BatchesSent+s.bridgeStats.BatchesDropped) * 100
+			warnStyle := valueStyle
+			if dropPct > 10 {
+				warnStyle = lipgloss.NewStyle().Foreground(s.theme.ErrorColor)
+			} else if dropPct > 1 {
+				warnStyle = lipgloss.NewStyle().Foreground(s.theme.WarningColor)
+			}
+			rightLines = append(rightLines, labelStyle.Render("           ")+
+				warnStyle.Render(fmt.Sprintf("%d dropped (%.1f%%)", s.bridgeStats.BatchesDropped, dropPct)))
+		}
+
+		// Queue Depth with mini progress bar
+		if s.bridgeStats.MaxQueueDepth > 0 && s.queueBar != nil {
+			ratio := float64(s.bridgeStats.QueueDepth) / float64(s.bridgeStats.MaxQueueDepth)
+			queueLine := labelStyle.Render("Queue:     ") +
+				s.queueBar.Render(ratio) +
+				valueStyle.Render(fmt.Sprintf("  %d/%d", s.bridgeStats.QueueDepth, s.bridgeStats.MaxQueueDepth))
+			rightLines = append(rightLines, queueLine)
+		}
+
+		// Recent Drop Rate
+		recentDropPct := float64(s.bridgeStats.RecentDropRate) / 10.0
+		dropText := "0% (no throttling)"
+		if recentDropPct >= 0.1 {
+			if recentDropPct < 1.0 {
+				dropText = fmt.Sprintf("%.1f%% (mild)", recentDropPct)
+			} else {
+				dropText = fmt.Sprintf("%.1f%% (throttling)", recentDropPct)
+			}
+		}
+		rightLines = append(rightLines, labelStyle.Render("Drop Rate: ")+valueStyle.Render(dropText))
+	}
+
+	// If no bridge stats, just return the left column
+	if len(rightLines) == 0 {
+		return leftColumn
+	}
+
+	rightColumn := strings.Join(rightLines, "\n")
+
+	// Pad columns to equal height
+	leftHeight := len(leftLines)
+	rightHeight := len(rightLines)
+	maxHeight := leftHeight
+	if rightHeight > maxHeight {
+		maxHeight = rightHeight
+	}
+
+	for len(leftLines) < maxHeight {
+		leftLines = append(leftLines, "")
+	}
+	leftColumn = strings.Join(leftLines, "\n")
+
+	for len(rightLines) < maxHeight {
+		rightLines = append(rightLines, "")
+	}
+	rightColumn = strings.Join(rightLines, "\n")
+
+	// Calculate column widths - left column fixed width, right gets the rest
+	leftWidth := 18 // Comfortable spacing for "✓ Throttle"
+	gap := 2
+	rightWidth := contentWidth - leftWidth - gap
+	if rightWidth < 20 {
+		rightWidth = 20 // minimum
+	}
+
+	// Style columns with fixed widths
+	leftStyled := lipgloss.NewStyle().Width(leftWidth).Render(leftColumn)
+	rightStyled := lipgloss.NewStyle().Width(rightWidth).Render(rightColumn)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, leftStyled, strings.Repeat(" ", gap), rightStyled)
 }
 
 // renderTUIMetrics renders the TUI process CPU and memory metrics with sparkline.

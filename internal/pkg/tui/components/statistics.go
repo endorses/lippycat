@@ -29,12 +29,6 @@ type SubView int
 const (
 	// SubViewOverview shows the overview dashboard with all sections
 	SubViewOverview SubView = iota
-	// SubViewTraffic shows traffic rate details
-	SubViewTraffic
-	// SubViewHealth shows system health details
-	SubViewHealth
-	// SubViewTopTalkers shows top sources/destinations with selection
-	SubViewTopTalkers
 	// SubViewDistributed shows distributed mode aggregates
 	SubViewDistributed
 )
@@ -44,12 +38,6 @@ func (sv SubView) String() string {
 	switch sv {
 	case SubViewOverview:
 		return "Overview"
-	case SubViewTraffic:
-		return "Traffic"
-	case SubViewHealth:
-		return "Health"
-	case SubViewTopTalkers:
-		return "Top Talkers"
 	case SubViewDistributed:
 		return "Distributed"
 	default:
@@ -62,12 +50,6 @@ func (sv SubView) ShortString() string {
 	switch sv {
 	case SubViewOverview:
 		return "Ovw"
-	case SubViewTraffic:
-		return "Trf"
-	case SubViewHealth:
-		return "Hlt"
-	case SubViewTopTalkers:
-		return "Top"
 	case SubViewDistributed:
 		return "Dst"
 	default:
@@ -79,12 +61,6 @@ func (sv SubView) ShortString() string {
 func (sv SubView) Next() SubView {
 	switch sv {
 	case SubViewOverview:
-		return SubViewTraffic
-	case SubViewTraffic:
-		return SubViewHealth
-	case SubViewHealth:
-		return SubViewTopTalkers
-	case SubViewTopTalkers:
 		return SubViewDistributed
 	case SubViewDistributed:
 		return SubViewOverview
@@ -97,9 +73,6 @@ func (sv SubView) Next() SubView {
 func AllSubViews() []SubView {
 	return []SubView{
 		SubViewOverview,
-		SubViewTraffic,
-		SubViewHealth,
-		SubViewTopTalkers,
 		SubViewDistributed,
 	}
 }
@@ -691,23 +664,8 @@ func (s *StatisticsView) MoveSelectionDown() {
 // GetSelectedFilter returns the filter expression for the currently selected talker.
 // Returns empty string if no valid selection.
 func (s *StatisticsView) GetSelectedFilter() string {
-	if s.stats == nil || s.currentSubView != SubViewTopTalkers {
-		return ""
-	}
-
-	var items []KeyCount
-	if s.talkerSection == TalkerSectionSources {
-		items = s.stats.SourceCounts.GetTopN(s.maxTalkersShown)
-	} else {
-		items = s.stats.DestCounts.GetTopN(s.maxTalkersShown)
-	}
-
-	if s.selectedIndex >= len(items) {
-		return ""
-	}
-
-	ip := items[s.selectedIndex].Key
-	return fmt.Sprintf("host %s", ip)
+	// TopTalkers view has been removed
+	return ""
 }
 
 // ExportJSON exports statistics to JSON format.
@@ -897,12 +855,6 @@ func (s *StatisticsView) renderContent() string {
 	switch s.currentSubView {
 	case SubViewOverview:
 		result.WriteString(s.renderOverviewSubView())
-	case SubViewTraffic:
-		result.WriteString(s.renderTrafficSubView())
-	case SubViewHealth:
-		result.WriteString(s.renderHealthSubView())
-	case SubViewTopTalkers:
-		result.WriteString(s.renderTopTalkersSubView())
 	case SubViewDistributed:
 		result.WriteString(s.renderDistributedSubView())
 	}
@@ -957,9 +909,6 @@ func (s *StatisticsView) renderSubViewHeader() string {
 		result.WriteString(" ")
 		currentX += itemWidth + 1 // +1 for the space after
 	}
-
-	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	result.WriteString(hintStyle.Render("  (v to cycle)"))
 
 	return result.String()
 }
@@ -1280,9 +1229,9 @@ func (s *StatisticsView) buildCaptureContentWide(availableWidth int) string {
 		avgSize = s.stats.TotalBytes / s.stats.TotalPackets
 	}
 
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	avgStyle := lipgloss.NewStyle().Foreground(s.theme.StatusBarFg)
 	content.WriteString("\n")
-	content.WriteString(dimStyle.Render(fmt.Sprintf("  %d avg  •  %d-%d bytes",
+	content.WriteString(avgStyle.Render(fmt.Sprintf("  %d avg  •  %d-%d bytes",
 		avgSize, s.stats.MinPacketSize, s.stats.MaxPacketSize)))
 
 	return content.String()

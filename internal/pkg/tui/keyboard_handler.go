@@ -106,50 +106,21 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.uiState.StatisticsView.SetSubView(components.SubViewOverview)
 			m.uiState.Footer.SetStatsSubView(components.SubViewOverview)
 			return m, nil
-		case "2": // Traffic sub-view
-			m.uiState.StatisticsView.SetSubView(components.SubViewTraffic)
-			m.uiState.Footer.SetStatsSubView(components.SubViewTraffic)
-			return m, nil
-		case "3": // Health sub-view
-			m.uiState.StatisticsView.SetSubView(components.SubViewHealth)
-			m.uiState.Footer.SetStatsSubView(components.SubViewHealth)
-			return m, nil
-		case "4": // Top Talkers sub-view
-			m.uiState.StatisticsView.SetSubView(components.SubViewTopTalkers)
-			m.uiState.Footer.SetStatsSubView(components.SubViewTopTalkers)
-			return m, nil
-		case "5": // Distributed sub-view
+		case "2": // Distributed sub-view
 			m.uiState.StatisticsView.SetSubView(components.SubViewDistributed)
 			m.uiState.Footer.SetStatsSubView(components.SubViewDistributed)
 			return m, nil
 		case "e": // Export statistics to JSON
 			return m.handleExportStatistics()
-		case "j", "down": // Move selection down (TopTalkers view)
-			if m.uiState.StatisticsView.GetSubView() == components.SubViewTopTalkers {
-				m.uiState.StatisticsView.MoveSelectionDown()
-				return m, nil
-			}
-			// Forward to viewport for scrolling
+		case "j", "down": // Scroll down
 			cmd := m.uiState.StatisticsView.Update(tea.KeyMsg{Type: tea.KeyDown})
 			return m, cmd
-		case "k", "up": // Move selection up (TopTalkers view)
-			if m.uiState.StatisticsView.GetSubView() == components.SubViewTopTalkers {
-				m.uiState.StatisticsView.MoveSelectionUp()
-				return m, nil
-			}
-			// Forward to viewport for scrolling
+		case "k", "up": // Scroll up
 			cmd := m.uiState.StatisticsView.Update(tea.KeyMsg{Type: tea.KeyUp})
 			return m, cmd
-		case "h", "l", "left", "right": // Toggle talker section (TopTalkers view)
-			if m.uiState.StatisticsView.GetSubView() == components.SubViewTopTalkers {
-				m.uiState.StatisticsView.ToggleTalkerSection()
-				return m, nil
-			}
-			// Forward to viewport for scrolling
+		case "h", "l", "left", "right": // Forward to viewport for scrolling
 			cmd := m.uiState.StatisticsView.Update(msg)
 			return m, cmd
-		case "enter": // Apply filter from selected talker
-			return m.handleApplyTalkerFilter()
 		case " ": // Pause/resume
 			return m.handlePauseResume()
 		case "tab", "shift+tab", "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "p", "?":
@@ -751,45 +722,6 @@ func (m Model) handleExportStatistics() (Model, tea.Cmd) {
 		components.ToastSuccess,
 		components.ToastDurationShort,
 	)
-}
-
-// handleApplyTalkerFilter applies a filter from the selected talker in Statistics tab
-func (m Model) handleApplyTalkerFilter() (Model, tea.Cmd) {
-	// Only on Statistics tab in TopTalkers sub-view
-	if m.uiState.Tabs.GetActive() != 2 {
-		return m, nil
-	}
-	if m.uiState.StatisticsView.GetSubView() != components.SubViewTopTalkers {
-		return m, nil
-	}
-
-	filter := m.uiState.StatisticsView.GetSelectedFilter()
-	if filter == "" {
-		return m, m.uiState.Toast.Show(
-			"No talker selected",
-			components.ToastWarning,
-			components.ToastDurationShort,
-		)
-	}
-
-	// Switch to Capture tab
-	m.uiState.Tabs.SetActive(0)
-
-	// Apply the filter using parseAndApplyFilter (handles filter parsing and packet list update)
-	cmd := m.parseAndApplyFilter(filter)
-
-	// Show toast with the applied filter
-	toastCmd := m.uiState.Toast.Show(
-		fmt.Sprintf("Applied filter: %s", filter),
-		components.ToastSuccess,
-		components.ToastDurationShort,
-	)
-
-	// Batch commands if both are non-nil
-	if cmd != nil {
-		return m, tea.Batch(cmd, toastCmd)
-	}
-	return m, toastCmd
 }
 
 // Navigation and tab handling methods continue in next part...

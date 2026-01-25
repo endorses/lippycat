@@ -191,12 +191,8 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 	case 2: // Statistics tab
 		keybinds := []TabKeybind{
 			{Key: "v", Description: "view", ShortDesc: "vw", Essential: true},
-			{Key: "1-5", Description: "sections", ShortDesc: "sec", Essential: false},
+			{Key: "1-2", Description: "sections", ShortDesc: "sec", Essential: false},
 			{Key: "e", Description: "export", ShortDesc: "exp", Essential: false},
-		}
-		// Add filter keybind when in TopTalkers view
-		if f.statsSubView == SubViewTopTalkers {
-			keybinds = append(keybinds, TabKeybind{Key: "Enter", Description: "filter", ShortDesc: "flt", Essential: true})
 		}
 		return keybinds
 

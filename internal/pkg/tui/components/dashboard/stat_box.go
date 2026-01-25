@@ -82,9 +82,9 @@ func (s *StatBox) Render() string {
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
-	// Label style (dimmer, below value)
+	// Label style (same color as value, not bold)
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(s.theme.Foreground).
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
@@ -112,7 +112,7 @@ func (s *StatBox) RenderCompact() string {
 		Foreground(s.theme.Foreground)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(s.theme.Foreground)
 
 	return valueStyle.Render(s.Value) + " " + labelStyle.Render(s.Label)
 }
@@ -124,7 +124,7 @@ func (s *StatBox) RenderInline() string {
 		Foreground(s.theme.Foreground)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(s.theme.Foreground)
 
 	return valueStyle.Render(s.Value) + "\n" + labelStyle.Render(s.Label)
 }

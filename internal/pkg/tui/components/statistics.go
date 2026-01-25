@@ -1076,79 +1076,69 @@ func (s *StatisticsView) renderOverviewMedium() string {
 	cardWidth := colWidth - 2
 	// contentWidth is the actual content area inside the card (excludes border and padding)
 	contentWidth := cardWidth - 2
-	// For full-width cards
-	fullCardWidth := s.width - 2
-	fullContentWidth := fullCardWidth - 2
 
 	layout := dashboard.NewColumnLayout(gap)
 
-	// Row 1: Capture stats + TUI metrics (inline in cards)
+	// Row 1: Capture (left) + Traffic Rate (right)
 	captureContent := s.buildCaptureContent()
-	tuiContent := s.buildTUIContent()
+	rateContent := s.buildTrafficRateContentCompact(contentWidth)
 
 	captureCard := dashboard.NewCard("CAPTURE", captureContent, s.theme,
 		dashboard.WithIcon("📊"),
+		dashboard.WithWidth(cardWidth))
+	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
+		dashboard.WithIcon("📈"),
+		dashboard.WithWidth(cardWidth))
+
+	row1Height := maxInt(captureCard.ContentHeight(), rateCard.ContentHeight())
+	captureCard.Height = row1Height
+	rateCard.Height = row1Height
+
+	result.WriteString(layout.JoinSideBySide(captureCard.Render(), rateCard.Render(), colWidth, colWidth))
+	result.WriteString("\n")
+
+	// Row 2: System Health (left) + TUI Process (right)
+	healthContent := s.buildHealthContent()
+	tuiContent := s.buildTUIContent()
+
+	healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
+		dashboard.WithIcon("🩺"),
 		dashboard.WithWidth(cardWidth))
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
 		dashboard.WithWidth(cardWidth))
 
-	// Set matching heights for row 1
-	row1Height := maxInt(captureCard.ContentHeight(), tuiCard.ContentHeight())
-	captureCard.Height = row1Height
-	tuiCard.Height = row1Height
+	row2Height := maxInt(healthCard.ContentHeight(), tuiCard.ContentHeight())
+	healthCard.Height = row2Height
+	tuiCard.Height = row2Height
 
-	result.WriteString(layout.JoinSideBySide(captureCard.Render(), tuiCard.Render(), colWidth, colWidth))
+	result.WriteString(layout.JoinSideBySide(healthCard.Render(), tuiCard.Render(), colWidth, colWidth))
 	result.WriteString("\n")
 
-	// Row 2: Traffic Rate with sparkline (full width)
-	rateContent := s.buildTrafficRateContent(fullContentWidth)
-	rateCard := dashboard.NewCard("TRAFFIC RATE", rateContent, s.theme,
-		dashboard.WithIcon("📈"),
-		dashboard.WithWidth(fullCardWidth))
-	result.WriteString(rateCard.Render())
-	result.WriteString("\n")
+	// Row 3: Top Talkers (left) + Protocol Distribution (right)
+	talkersContent := s.buildTopTalkersCombinedContent(
+		s.stats.SourceCounts.GetTopN(5),
+		s.stats.DestCounts.GetTopN(5),
+		contentWidth)
+	protocolContent := s.renderProtocolDistribution(5, contentWidth)
 
-	// Row 3: Protocol Distribution (full width)
-	protocolContent := s.renderProtocolDistribution(5, fullContentWidth)
+	talkersCard := dashboard.NewCard("TOP TALKERS", talkersContent, s.theme,
+		dashboard.WithIcon("🔊"),
+		dashboard.WithWidth(cardWidth))
 	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
 		dashboard.WithIcon("🔌"),
-		dashboard.WithWidth(fullCardWidth))
-	result.WriteString(protocolCard.Render())
-	result.WriteString("\n")
-
-	// Row 4: Top Sources (left) + Top Destinations (right)
-	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), contentWidth)
-	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), contentWidth)
-
-	sourcesCard := dashboard.NewCard("TOP SOURCES", sourcesContent, s.theme,
-		dashboard.WithIcon("⬆"),
-		dashboard.WithWidth(cardWidth))
-	destsCard := dashboard.NewCard("TOP DESTINATIONS", destsContent, s.theme,
-		dashboard.WithIcon("⬇"),
 		dashboard.WithWidth(cardWidth))
 
-	// Set matching heights for row 4
-	row4Height := maxInt(sourcesCard.ContentHeight(), destsCard.ContentHeight())
-	sourcesCard.Height = row4Height
-	destsCard.Height = row4Height
+	row3Height := maxInt(talkersCard.ContentHeight(), protocolCard.ContentHeight())
+	talkersCard.Height = row3Height
+	protocolCard.Height = row3Height
 
-	result.WriteString(layout.JoinSideBySide(sourcesCard.Render(), destsCard.Render(), colWidth, colWidth))
+	result.WriteString(layout.JoinSideBySide(talkersCard.Render(), protocolCard.Render(), colWidth, colWidth))
 
 	// Section: Protocol-Specific Stats (if protocol filter is active)
 	if s.HasProtocolStats() {
 		result.WriteString("\n")
 		result.WriteString(s.renderProtocolStats())
-	}
-
-	// Section: System Health (card, only if there's data)
-	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
-		result.WriteString("\n")
-		healthContent := s.buildHealthContent()
-		healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
-			dashboard.WithIcon("🩺"),
-			dashboard.WithWidth(cardWidth))
-		result.WriteString(healthCard.Render())
 	}
 
 	return result.String()
@@ -1167,7 +1157,7 @@ func (s *StatisticsView) renderOverviewWide() string {
 
 	layout := dashboard.NewColumnLayout(gap)
 
-	// Row 1: Capture card (left) + Traffic Rate card (right)
+	// Row 1: Capture (left) + Traffic Rate (right)
 	captureContent := s.buildCaptureContentWide(contentWidth)
 	rateContent := s.buildTrafficRateContentCompact(contentWidth)
 
@@ -1178,7 +1168,6 @@ func (s *StatisticsView) renderOverviewWide() string {
 		dashboard.WithIcon("📈"),
 		dashboard.WithWidth(cardWidth))
 
-	// Set matching heights for row 1
 	row1Height := maxInt(captureCard.ContentHeight(), rateCard.ContentHeight())
 	captureCard.Height = row1Height
 	rateCard.Height = row1Height
@@ -1186,65 +1175,49 @@ func (s *StatisticsView) renderOverviewWide() string {
 	result.WriteString(layout.JoinSideBySide(captureCard.Render(), rateCard.Render(), colWidth, colWidth))
 	result.WriteString("\n")
 
-	// Row 2: TUI Process card (left) + Protocol Distribution card (right)
-	// Build protocol card first to determine target height for TUI content
-	protocolContent := s.renderProtocolDistribution(5, contentWidth)
-	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
-		dashboard.WithIcon("🔌"),
+	// Row 2: System Health (left) + TUI Process (right)
+	healthContent := s.buildHealthContent()
+	// Build TUI card first to determine target height
+	tuiContent := s.buildTUIContentWide(contentWidth, 0)
+
+	healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
+		dashboard.WithIcon("🩺"),
 		dashboard.WithWidth(cardWidth))
-
-	// Get protocol card's content height (for positioning TUI sparkline at bottom)
-	protocolContentHeight := protocolCard.ContentHeight()
-
-	// Build TUI content with target height to position sparkline at bottom
-	// Subtract 1 for the card title line
-	tuiTargetContentHeight := protocolContentHeight - 1
-	tuiContent := s.buildTUIContentWide(contentWidth, tuiTargetContentHeight)
-
 	tuiCard := dashboard.NewCard("TUI PROCESS", tuiContent, s.theme,
 		dashboard.WithIcon("🖥"),
 		dashboard.WithWidth(cardWidth))
 
-	// Set matching heights for row 2
-	row2Height := maxInt(tuiCard.ContentHeight(), protocolCard.ContentHeight())
+	row2Height := maxInt(healthCard.ContentHeight(), tuiCard.ContentHeight())
+	healthCard.Height = row2Height
 	tuiCard.Height = row2Height
-	protocolCard.Height = row2Height
 
-	result.WriteString(layout.JoinSideBySide(tuiCard.Render(), protocolCard.Render(), colWidth, colWidth))
+	result.WriteString(layout.JoinSideBySide(healthCard.Render(), tuiCard.Render(), colWidth, colWidth))
 	result.WriteString("\n")
 
-	// Row 3: Top Sources (left) + Top Destinations (right)
-	sourcesContent := s.buildTopTalkersContent(s.stats.SourceCounts.GetTopN(5), contentWidth)
-	destsContent := s.buildTopTalkersContent(s.stats.DestCounts.GetTopN(5), contentWidth)
+	// Row 3: Top Talkers (left) + Protocol Distribution (right)
+	talkersContent := s.buildTopTalkersCombinedContent(
+		s.stats.SourceCounts.GetTopN(5),
+		s.stats.DestCounts.GetTopN(5),
+		contentWidth)
+	protocolContent := s.renderProtocolDistribution(5, contentWidth)
 
-	sourcesCard := dashboard.NewCard("TOP SOURCES", sourcesContent, s.theme,
-		dashboard.WithIcon("⬆"),
+	talkersCard := dashboard.NewCard("TOP TALKERS", talkersContent, s.theme,
+		dashboard.WithIcon("🔊"),
 		dashboard.WithWidth(cardWidth))
-	destsCard := dashboard.NewCard("TOP DESTINATIONS", destsContent, s.theme,
-		dashboard.WithIcon("⬇"),
+	protocolCard := dashboard.NewCard("PROTOCOL DISTRIBUTION", protocolContent, s.theme,
+		dashboard.WithIcon("🔌"),
 		dashboard.WithWidth(cardWidth))
 
-	// Set matching heights for row 3
-	row3Height := maxInt(sourcesCard.ContentHeight(), destsCard.ContentHeight())
-	sourcesCard.Height = row3Height
-	destsCard.Height = row3Height
+	row3Height := maxInt(talkersCard.ContentHeight(), protocolCard.ContentHeight())
+	talkersCard.Height = row3Height
+	protocolCard.Height = row3Height
 
-	result.WriteString(layout.JoinSideBySide(sourcesCard.Render(), destsCard.Render(), colWidth, colWidth))
+	result.WriteString(layout.JoinSideBySide(talkersCard.Render(), protocolCard.Render(), colWidth, colWidth))
 
 	// Section: Protocol-Specific Stats (if protocol filter is active)
 	if s.HasProtocolStats() {
 		result.WriteString("\n")
 		result.WriteString(s.renderProtocolStats())
-	}
-
-	// Section: System Health (card, only if there's data)
-	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
-		result.WriteString("\n")
-		healthContent := s.buildHealthContent()
-		healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
-			dashboard.WithIcon("🩺"),
-			dashboard.WithWidth(cardWidth))
-		result.WriteString(healthCard.Render())
 	}
 
 	return result.String()
@@ -1544,6 +1517,78 @@ func (s *StatisticsView) buildTopTalkersContent(items []KeyCount, availableWidth
 	}
 
 	return strings.TrimSuffix(content.String(), "\n")
+}
+
+// buildTopTalkersCombinedContent builds combined sources and destinations content side by side.
+func (s *StatisticsView) buildTopTalkersCombinedContent(sources, dests []KeyCount, availableWidth int) string {
+	var content strings.Builder
+
+	// Calculate column width (split available width in half with gap)
+	gap := 2
+	colWidth := (availableWidth - gap) / 2
+	ipWidth := colWidth - 9 // Leave room for count (8 digits + 1 space)
+	if ipWidth < 12 {
+		ipWidth = 12
+	}
+	if ipWidth > 30 {
+		ipWidth = 30
+	}
+
+	// Column headers
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(s.theme.InfoColor)
+
+	srcHeader := headerStyle.Render("⬆ SOURCES")
+	dstHeader := headerStyle.Render("⬇ DESTINATIONS")
+
+	// Write headers - pad source header to align destination header with its column
+	content.WriteString(srcHeader)
+	// Calculate padding: we need to reach the start of destination column
+	// Source column width = ipWidth + 1 (space) + 8 (count) = ipWidth + 9
+	srcHeaderVisualWidth := lipgloss.Width(srcHeader)
+	paddingNeeded := (ipWidth + 9) - srcHeaderVisualWidth + gap
+	if paddingNeeded > 0 {
+		content.WriteString(strings.Repeat(" ", paddingNeeded))
+	}
+	content.WriteString(dstHeader)
+	content.WriteString("\n")
+
+	// Build rows
+	maxRows := len(sources)
+	if len(dests) > maxRows {
+		maxRows = len(dests)
+	}
+
+	for i := 0; i < maxRows; i++ {
+		// Source column
+		if i < len(sources) {
+			ip := sources[i].Key
+			if len(ip) > ipWidth {
+				ip = ip[:ipWidth-3] + "..."
+			}
+			content.WriteString(fmt.Sprintf("%-*s %8d", ipWidth, ip, sources[i].Count))
+		} else {
+			content.WriteString(strings.Repeat(" ", ipWidth+9))
+		}
+
+		content.WriteString(strings.Repeat(" ", gap))
+
+		// Destination column
+		if i < len(dests) {
+			ip := dests[i].Key
+			if len(ip) > ipWidth {
+				ip = ip[:ipWidth-3] + "..."
+			}
+			content.WriteString(fmt.Sprintf("%-*s %8d", ipWidth, ip, dests[i].Count))
+		}
+
+		if i < maxRows-1 {
+			content.WriteString("\n")
+		}
+	}
+
+	return content.String()
 }
 
 // renderTrafficSubView renders detailed traffic rate information

@@ -205,7 +205,7 @@ func (hi *HealthIndicator) Render(level HealthLevel) string {
 
 	switch level {
 	case HealthGood:
-		symbol = "[OK]"
+		symbol = "✓"
 		color = hi.theme.SuccessColor
 	case HealthWarning:
 		symbol = "[!]"

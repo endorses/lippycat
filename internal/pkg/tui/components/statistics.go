@@ -1141,6 +1141,16 @@ func (s *StatisticsView) renderOverviewMedium() string {
 		result.WriteString(s.renderProtocolStats())
 	}
 
+	// Section: System Health (card, only if there's data)
+	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
+		result.WriteString("\n")
+		healthContent := s.buildHealthContent()
+		healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
+			dashboard.WithIcon("🩺"),
+			dashboard.WithWidth(cardWidth))
+		result.WriteString(healthCard.Render())
+	}
+
 	return result.String()
 }
 
@@ -1227,14 +1237,14 @@ func (s *StatisticsView) renderOverviewWide() string {
 		result.WriteString(s.renderProtocolStats())
 	}
 
-	// Section: System Health (compact, only if there's data)
+	// Section: System Health (card, only if there's data)
 	if s.bridgeStats != nil && s.bridgeStats.PacketsReceived > 0 {
 		result.WriteString("\n")
-		titleStyle := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(s.theme.InfoColor).
-			MarginBottom(1)
-		result.WriteString(s.renderHealthSection(titleStyle))
+		healthContent := s.buildHealthContent()
+		healthCard := dashboard.NewCard("SYSTEM HEALTH", healthContent, s.theme,
+			dashboard.WithIcon("🩺"),
+			dashboard.WithWidth(cardWidth))
+		result.WriteString(healthCard.Render())
 	}
 
 	return result.String()
@@ -2543,6 +2553,73 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 	}
 
 	return result.String()
+}
+
+// buildHealthContent builds the health content for card display (without title).
+func (s *StatisticsView) buildHealthContent() string {
+	if s.healthIndicator == nil {
+		return "No health data available"
+	}
+
+	// Calculate health levels based on available metrics
+	var items []struct {
+		Label string
+		Level HealthLevel
+	}
+
+	// Bridge running status - CRITICAL if not running
+	if s.bridgeStats != nil && s.bridgeStats.Running == 0 && s.bridgeStats.PacketsReceived > 0 {
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Bridge", HealthCritical})
+	}
+
+	// Drop rate health (inverted: high drop rate = bad)
+	dropSummary := s.GetDropSummary()
+	if s.stats != nil && s.stats.TotalPackets > 0 {
+		dropLevel := HealthFromRatio(dropSummary.TotalDropRate/100, 0.01, 0.05, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Drops", dropLevel})
+	}
+
+	// Queue depth health (if available)
+	if s.bridgeStats != nil && s.bridgeStats.MaxQueueDepth > 0 {
+		queueRatio := float64(s.bridgeStats.QueueDepth) / float64(s.bridgeStats.MaxQueueDepth)
+		queueLevel := HealthFromRatio(queueRatio, 0.5, 0.85, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Queue", queueLevel})
+	}
+
+	// Sampling health (inverted: low sampling = bad)
+	if s.bridgeStats != nil && s.bridgeStats.SamplingRatio > 0 {
+		samplingRatio := float64(s.bridgeStats.SamplingRatio) / 1000.0 // Convert from 1000-scale
+		samplingLevel := HealthFromRatio(samplingRatio, 0.5, 0.2, false)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Sampling", samplingLevel})
+	}
+
+	// Throttling health
+	if s.bridgeStats != nil {
+		recentDropPct := float64(s.bridgeStats.RecentDropRate) / 1000.0 // Convert from 1000-scale
+		throttleLevel := HealthFromRatio(recentDropPct, 0.01, 0.10, true)
+		items = append(items, struct {
+			Label string
+			Level HealthLevel
+		}{"Throttle", throttleLevel})
+	}
+
+	// Render health indicators
+	if len(items) > 0 {
+		return RenderHealthSummary(s.theme, items)
+	}
+	return "No health data available"
 }
 
 // renderTUIMetrics renders the TUI process CPU and memory metrics with sparkline.

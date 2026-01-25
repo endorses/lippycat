@@ -46,21 +46,23 @@ func TestPacketBuffer_Send_BackpressureHandling(t *testing.T) {
 
 	pkt := createTestPacket()
 
-	// Fill the buffer
-	for i := 0; i < bufferSize; i++ {
-		result := buffer.Send(pkt)
-		assert.True(t, result, "Send %d should succeed", i+1)
+	// The PacketBuffer has two internal channels (ch and mergedCh), each with
+	// capacity bufferSize. A background merger goroutine moves packets between them.
+	// The effective capacity is approximately 2 * bufferSize, though timing-dependent.
+
+	// Send enough packets to fill both internal channels
+	totalToSend := 20 // More than could possibly be buffered
+	successCount := 0
+	for i := 0; i < totalToSend; i++ {
+		if buffer.Send(pkt) {
+			successCount++
+		}
 	}
 
-	// Next send should fail due to backpressure and increment dropped count
-	result := buffer.Send(pkt)
-	assert.False(t, result, "Send should fail when buffer is full")
-	assert.Equal(t, int64(1), atomic.LoadInt64(&buffer.dropped), "Should have 1 dropped packet")
-
-	// Additional sends should continue to fail and increment drop count
-	result = buffer.Send(pkt)
-	assert.False(t, result, "Send should continue to fail")
-	assert.Equal(t, int64(2), atomic.LoadInt64(&buffer.dropped), "Should have 2 dropped packets")
+	// Should have dropped some packets due to backpressure
+	dropped := atomic.LoadInt64(&buffer.dropped)
+	assert.Greater(t, dropped, int64(0), "Should have dropped some packets due to backpressure")
+	assert.Equal(t, int64(totalToSend-successCount), dropped, "Dropped count should match failed sends")
 }
 
 func TestPacketBuffer_Send_ContextCancellation(t *testing.T) {

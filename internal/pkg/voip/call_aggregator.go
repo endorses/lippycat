@@ -612,10 +612,12 @@ func (ca *CallAggregator) GetCalls() []AggregatedCall {
 		ca.callsDirty = false
 	}
 
-	// Return a copy of the cached slice
-	// Since AggregatedCall is a value type, this copies the values
+	// Return a deep copy of each call to avoid races when callers modify the returned data
+	// (AggregatedCall contains pointer/slice fields that would be shared with shallow copy)
 	result := make([]AggregatedCall, len(ca.cachedCalls))
-	copy(result, ca.cachedCalls)
+	for i := range ca.cachedCalls {
+		result[i] = ca.deepCopyCall(&ca.cachedCalls[i])
+	}
 	return result
 }
 

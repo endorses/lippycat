@@ -17,6 +17,11 @@ type CPUTracker struct {
 
 	// Peak tracking
 	peakCPUPercent float64
+
+	// Cached samples for sparkline rendering
+	cachedSamples      []float64
+	cachedSamplesWidth int
+	samplesValid       bool
 }
 
 // NewCPUTracker creates a new CPU tracker with the specified capacity.
@@ -59,50 +64,66 @@ func (ct *CPUTracker) Record(cpuPercent float64) {
 	if ct.count < ct.maxSamples {
 		ct.count++
 	}
+
+	// Invalidate samples cache
+	ct.samplesValid = false
 }
 
 // GetSamples returns CPU samples for sparkline rendering.
 // Returns samples from oldest to newest, up to maxPoints.
+// Results are cached and reused if maxPoints matches the cached width.
 func (ct *CPUTracker) GetSamples(maxPoints int) []float64 {
-	ct.mu.RLock()
-	defer ct.mu.RUnlock()
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
 
 	if ct.count == 0 || maxPoints <= 0 {
 		return nil
 	}
 
+	// Return cached samples if valid and width matches
+	if ct.samplesValid && ct.cachedSamplesWidth == maxPoints && len(ct.cachedSamples) > 0 {
+		return ct.cachedSamples
+	}
+
+	// Compute samples
+	var samples []float64
+
 	// If we have fewer samples than maxPoints, use all samples
 	if ct.count <= maxPoints {
-		samples := make([]float64, ct.count)
+		samples = make([]float64, ct.count)
 		for i := 0; i < ct.count; i++ {
 			// Read from oldest to newest
 			idx := (ct.head - ct.count + i + ct.maxSamples) % ct.maxSamples
 			samples[i] = ct.samples[idx]
 		}
-		return samples
+	} else {
+		// Downsample by averaging groups
+		samples = make([]float64, maxPoints)
+		groupSize := ct.count / maxPoints
+		remainder := ct.count % maxPoints
+
+		sampleIdx := 0
+		for i := 0; i < maxPoints; i++ {
+			// Some groups get an extra sample to distribute remainder evenly
+			currentGroupSize := groupSize
+			if i < remainder {
+				currentGroupSize++
+			}
+
+			var sum float64
+			for j := 0; j < currentGroupSize; j++ {
+				idx := (ct.head - ct.count + sampleIdx + ct.maxSamples) % ct.maxSamples
+				sum += ct.samples[idx]
+				sampleIdx++
+			}
+			samples[i] = sum / float64(currentGroupSize)
+		}
 	}
 
-	// Downsample by averaging groups
-	samples := make([]float64, maxPoints)
-	groupSize := ct.count / maxPoints
-	remainder := ct.count % maxPoints
-
-	sampleIdx := 0
-	for i := 0; i < maxPoints; i++ {
-		// Some groups get an extra sample to distribute remainder evenly
-		currentGroupSize := groupSize
-		if i < remainder {
-			currentGroupSize++
-		}
-
-		var sum float64
-		for j := 0; j < currentGroupSize; j++ {
-			idx := (ct.head - ct.count + sampleIdx + ct.maxSamples) % ct.maxSamples
-			sum += ct.samples[idx]
-			sampleIdx++
-		}
-		samples[i] = sum / float64(currentGroupSize)
-	}
+	// Cache the result
+	ct.cachedSamples = samples
+	ct.cachedSamplesWidth = maxPoints
+	ct.samplesValid = true
 
 	return samples
 }
@@ -160,6 +181,8 @@ func (ct *CPUTracker) Reset() {
 	ct.head = 0
 	ct.count = 0
 	ct.peakCPUPercent = 0
+	ct.samplesValid = false
+	ct.cachedSamples = nil
 }
 
 // Resize changes the tracker capacity, preserving existing samples.
@@ -201,4 +224,8 @@ func (ct *CPUTracker) Resize(newCapacity int) {
 
 	ct.head = copyCount % newCapacity
 	ct.count = copyCount
+
+	// Invalidate cache
+	ct.samplesValid = false
+	ct.cachedSamples = nil
 }

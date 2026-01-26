@@ -43,6 +43,19 @@ type RateTracker struct {
 	// Peak tracking
 	peakPacketsPerSec float64
 	peakBytesPerSec   float64
+
+	// Running totals for O(1) average calculation
+	sumPackets int64 // Sum of all packets in ring buffer
+	sumBytes   int64 // Sum of all bytes in ring buffer
+
+	// Cached stats to avoid recomputation
+	cachedStats RateStats
+	statsValid  bool // Whether cachedStats is valid
+
+	// Cached samples for sparkline rendering
+	cachedSamples      []float64
+	cachedSamplesWidth int
+	samplesValid       bool
 }
 
 // NewRateTracker creates a new rate tracker with the specified capacity and sampling interval.
@@ -113,6 +126,18 @@ func (rt *RateTracker) Record(totalPackets, totalBytes int64) {
 		rt.peakBytesPerSec = bytesPerSec
 	}
 
+	// Update running totals for O(1) average calculation
+	// If buffer is full, subtract the value being overwritten
+	if rt.count == rt.maxSamples {
+		oldSample := rt.samples[rt.head]
+		rt.sumPackets -= oldSample.Packets
+		rt.sumBytes -= oldSample.Bytes
+	}
+
+	// Add new values to running totals
+	rt.sumPackets += deltaPackets
+	rt.sumBytes += deltaBytes
+
 	// Store sample
 	rt.samples[rt.head] = RateSample{
 		Timestamp: now,
@@ -129,9 +154,34 @@ func (rt *RateTracker) Record(totalPackets, totalBytes int64) {
 	rt.lastPackets = totalPackets
 	rt.lastBytes = totalBytes
 	rt.lastTime = now
+
+	// Update cached stats (O(1) now that we have running totals)
+	rt.updateCachedStats(packetsPerSec, bytesPerSec)
+
+	// Invalidate samples cache (will be recomputed on demand)
+	rt.samplesValid = false
+}
+
+// updateCachedStats updates the cached stats using running totals (O(1)).
+// Must be called with rt.mu held.
+func (rt *RateTracker) updateCachedStats(currentPacketsPerSec, currentBytesPerSec float64) {
+	elapsed := rt.interval.Seconds()
+	avgPacketsPerSec := float64(rt.sumPackets) / (float64(rt.count) * elapsed)
+	avgBytesPerSec := float64(rt.sumBytes) / (float64(rt.count) * elapsed)
+
+	rt.cachedStats = RateStats{
+		CurrentPacketsPerSec: currentPacketsPerSec,
+		CurrentBytesPerSec:   currentBytesPerSec,
+		AvgPacketsPerSec:     avgPacketsPerSec,
+		AvgBytesPerSec:       avgBytesPerSec,
+		PeakPacketsPerSec:    rt.peakPacketsPerSec,
+		PeakBytesPerSec:      rt.peakBytesPerSec,
+	}
+	rt.statsValid = true
 }
 
 // GetStats returns computed rate statistics.
+// Returns cached stats (O(1)) that are updated on each Record() call.
 func (rt *RateTracker) GetStats() RateStats {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
@@ -140,25 +190,20 @@ func (rt *RateTracker) GetStats() RateStats {
 		return RateStats{}
 	}
 
-	// Get most recent sample for current rate
+	// Return cached stats if valid
+	if rt.statsValid {
+		return rt.cachedStats
+	}
+
+	// Fallback: compute stats (only if cache somehow invalid)
 	lastIdx := (rt.head - 1 + rt.maxSamples) % rt.maxSamples
 	lastSample := rt.samples[lastIdx]
 	elapsed := rt.interval.Seconds()
 
-	// Calculate current rate from most recent sample
 	currentPacketsPerSec := float64(lastSample.Packets) / elapsed
 	currentBytesPerSec := float64(lastSample.Bytes) / elapsed
-
-	// Calculate average across all samples
-	var totalPackets, totalBytes int64
-	for i := 0; i < rt.count; i++ {
-		idx := (rt.head - 1 - i + rt.maxSamples) % rt.maxSamples
-		totalPackets += rt.samples[idx].Packets
-		totalBytes += rt.samples[idx].Bytes
-	}
-
-	avgPacketsPerSec := float64(totalPackets) / (float64(rt.count) * elapsed)
-	avgBytesPerSec := float64(totalBytes) / (float64(rt.count) * elapsed)
+	avgPacketsPerSec := float64(rt.sumPackets) / (float64(rt.count) * elapsed)
+	avgBytesPerSec := float64(rt.sumBytes) / (float64(rt.count) * elapsed)
 
 	return RateStats{
 		CurrentPacketsPerSec: currentPacketsPerSec,
@@ -236,46 +281,59 @@ func (rt *RateTracker) SampleCount() int {
 // GetSamples returns rate samples for sparkline rendering.
 // Returns samples from oldest to newest, up to maxPoints.
 // This is the width-based version that doesn't depend on time windows.
+// Results are cached and reused if maxPoints matches the cached width.
 func (rt *RateTracker) GetSamples(maxPoints int) []float64 {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
 
 	if rt.count == 0 || maxPoints <= 0 {
 		return nil
 	}
 
+	// Return cached samples if valid and width matches
+	if rt.samplesValid && rt.cachedSamplesWidth == maxPoints && len(rt.cachedSamples) > 0 {
+		return rt.cachedSamples
+	}
+
+	// Compute samples
+	var rates []float64
+
 	// If we have fewer samples than maxPoints, use all samples
 	if rt.count <= maxPoints {
-		rates := make([]float64, rt.count)
+		rates = make([]float64, rt.count)
 		for i := 0; i < rt.count; i++ {
 			// Read from oldest to newest
 			idx := (rt.head - rt.count + i + rt.maxSamples) % rt.maxSamples
 			rates[i] = float64(rt.samples[idx].Packets) / rt.interval.Seconds()
 		}
-		return rates
+	} else {
+		// Downsample by averaging groups
+		rates = make([]float64, maxPoints)
+		groupSize := rt.count / maxPoints
+		remainder := rt.count % maxPoints
+
+		sampleIdx := 0
+		for i := 0; i < maxPoints; i++ {
+			// Some groups get an extra sample to distribute remainder evenly
+			currentGroupSize := groupSize
+			if i < remainder {
+				currentGroupSize++
+			}
+
+			var sum float64
+			for j := 0; j < currentGroupSize; j++ {
+				idx := (rt.head - rt.count + sampleIdx + rt.maxSamples) % rt.maxSamples
+				sum += float64(rt.samples[idx].Packets)
+				sampleIdx++
+			}
+			rates[i] = (sum / float64(currentGroupSize)) / rt.interval.Seconds()
+		}
 	}
 
-	// Downsample by averaging groups
-	rates := make([]float64, maxPoints)
-	groupSize := rt.count / maxPoints
-	remainder := rt.count % maxPoints
-
-	sampleIdx := 0
-	for i := 0; i < maxPoints; i++ {
-		// Some groups get an extra sample to distribute remainder evenly
-		currentGroupSize := groupSize
-		if i < remainder {
-			currentGroupSize++
-		}
-
-		var sum float64
-		for j := 0; j < currentGroupSize; j++ {
-			idx := (rt.head - rt.count + sampleIdx + rt.maxSamples) % rt.maxSamples
-			sum += float64(rt.samples[idx].Packets)
-			sampleIdx++
-		}
-		rates[i] = (sum / float64(currentGroupSize)) / rt.interval.Seconds()
-	}
+	// Cache the result
+	rt.cachedSamples = rates
+	rt.cachedSamplesWidth = maxPoints
+	rt.samplesValid = true
 
 	return rates
 }
@@ -313,12 +371,22 @@ func (rt *RateTracker) Resize(newCapacity int) {
 		copyCount = newCapacity
 	}
 
+	// Recalculate running totals from copied samples
+	rt.sumPackets = 0
+	rt.sumBytes = 0
 	for i := 0; i < copyCount; i++ {
 		rt.samples[i] = oldSamples[startIdx+i]
+		rt.sumPackets += oldSamples[startIdx+i].Packets
+		rt.sumBytes += oldSamples[startIdx+i].Bytes
 	}
 
 	rt.head = copyCount % newCapacity
 	rt.count = copyCount
+
+	// Invalidate caches
+	rt.statsValid = false
+	rt.samplesValid = false
+	rt.cachedSamples = nil
 }
 
 // Reset clears all samples and resets the tracker.
@@ -334,4 +402,9 @@ func (rt *RateTracker) Reset() {
 	rt.lastTime = time.Time{}
 	rt.peakPacketsPerSec = 0
 	rt.peakBytesPerSec = 0
+	rt.sumPackets = 0
+	rt.sumBytes = 0
+	rt.statsValid = false
+	rt.samplesValid = false
+	rt.cachedSamples = nil
 }

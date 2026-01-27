@@ -928,6 +928,31 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 	// Use centralized detector for application layer protocols
 	detectionResult := detector.GetDefault().Detect(pkt)
+
+	// DEBUG: Log UDP packets in RTP port range that aren't detected as RTP
+	if fields.Protocol == "UDP" && detectionResult != nil && detectionResult.Protocol == "unknown" {
+		srcPort, _ := strconv.Atoi(fields.SrcPort)
+		dstPort, _ := strconv.Atoi(fields.DstPort)
+		inRange := (srcPort >= 16384 && srcPort <= 32768) || (dstPort >= 16384 && dstPort <= 32768) ||
+			(srcPort >= 10000 && srcPort <= 20000) || (dstPort >= 10000 && dstPort <= 20000)
+		if inRange {
+			if transLayer := pkt.TransportLayer(); transLayer != nil {
+				payload := transLayer.LayerPayload()
+				if len(payload) >= 12 {
+					version := (payload[0] >> 6) & 0x03
+					pt := payload[1] & 0x7F
+					logger.Warn("DEBUG: Potential RTP not detected",
+						"src", fields.SrcIP+":"+fields.SrcPort,
+						"dst", fields.DstIP+":"+fields.DstPort,
+						"payload_len", len(payload),
+						"first_byte", fmt.Sprintf("0x%02x", payload[0]),
+						"rtp_version", version,
+						"payload_type", pt)
+				}
+			}
+		}
+	}
+
 	if detectionResult != nil && detectionResult.Protocol != "unknown" {
 		display.Protocol = detectionResult.Protocol
 

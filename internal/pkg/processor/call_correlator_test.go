@@ -660,6 +660,58 @@ func TestCallCorrelator_DeepCopyRaceCondition(t *testing.T) {
 	assert.Contains(t, []CallState{CallStateTrying, CallStateRinging, CallStateEstablished}, call.State, "State should be valid")
 }
 
+// TestExtractSIPUserPart tests SIP URI user part extraction
+func TestExtractSIPUserPart(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Full SIP URI with IP",
+			input:    "sip:+15551234567@192.168.1.100",
+			expected: "+15551234567",
+		},
+		{
+			name:     "Full SIP URI with IP and port",
+			input:    "sip:72412345678901@10.0.0.1:5060",
+			expected: "72412345678901",
+		},
+		{
+			name:     "SIPS URI with domain",
+			input:    "sips:alice@sip.example.com",
+			expected: "alice",
+		},
+		{
+			name:     "TEL URI",
+			input:    "tel:+1-555-123-4567",
+			expected: "+1-555-123-4567",
+		},
+		{
+			name:     "Plain phone number",
+			input:    "+15559876543",
+			expected: "+15559876543",
+		},
+		{
+			name:     "Username without scheme",
+			input:    "alice@example.com",
+			expected: "alice",
+		},
+		{
+			name:     "SIP URI with cloud provider domain",
+			input:    "sip:+15551112222@voice.example.com",
+			expected: "+15551112222",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractSIPUserPart(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // TestExtractPhoneSuffix tests phone number suffix extraction
 func TestExtractPhoneSuffix(t *testing.T) {
 	tests := []struct {
@@ -713,6 +765,30 @@ func TestExtractPhoneSuffix(t *testing.T) {
 		{
 			name:      "International format",
 			phone:     "+49 170 1234567",
+			minDigits: 7,
+			expected:  "1234567",
+		},
+		{
+			name:      "Full SIP URI with IP address",
+			phone:     "sip:+15551234567@192.168.1.100",
+			minDigits: 7,
+			expected:  "1234567", // Must be from phone, not IP!
+		},
+		{
+			name:      "Full SIP URI with IP and port",
+			phone:     "sip:72412345678901@10.0.0.1:5060",
+			minDigits: 7,
+			expected:  "5678901", // Must be from phone, not IP:port!
+		},
+		{
+			name:      "SIPS URI with domain",
+			phone:     "sips:+1234567890@sip.example.com",
+			minDigits: 7,
+			expected:  "4567890",
+		},
+		{
+			name:      "TEL URI",
+			phone:     "tel:+1-555-123-4567",
 			minDigits: 7,
 			expected:  "1234567",
 		},

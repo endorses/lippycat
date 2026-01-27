@@ -535,14 +535,42 @@ func generateCorrelationID(tag1, tag2 string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// extractSIPUserPart extracts the user part from a SIP URI.
+// For "sip:+4915888364154@185.202.20.192", returns "+4915888364154".
+// For plain values like "+4915888364154", returns the input unchanged.
+// This prevents IP addresses and ports from polluting phone number extraction.
+func extractSIPUserPart(sipURI string) string {
+	// Remove sip: or sips: prefix if present
+	s := sipURI
+	if len(s) > 4 && (s[:4] == "sip:" || s[:4] == "tel:") {
+		s = s[4:]
+	} else if len(s) > 5 && s[:5] == "sips:" {
+		s = s[5:]
+	}
+
+	// Find @ and extract user part (everything before @)
+	for i := 0; i < len(s); i++ {
+		if s[i] == '@' {
+			return s[:i]
+		}
+	}
+
+	// No @ found, return as-is (might be just a phone number)
+	return s
+}
+
 // extractPhoneSuffix extracts the last N digits from a phone number/SIP user.
 // It strips prefixes, country codes, and non-digit characters.
 // Returns empty string if insufficient digits found.
 func extractPhoneSuffix(phoneNumber string, minDigits int) string {
-	// Extract only digits
+	// First extract just the user part if this is a SIP URI
+	// This prevents IP addresses from polluting the suffix
+	userPart := extractSIPUserPart(phoneNumber)
+
+	// Extract only digits from the user part
 	var digits []byte
-	for i := 0; i < len(phoneNumber); i++ {
-		c := phoneNumber[i]
+	for i := 0; i < len(userPart); i++ {
+		c := userPart[i]
 		if c >= '0' && c <= '9' {
 			digits = append(digits, c)
 		}

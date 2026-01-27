@@ -43,7 +43,8 @@ func DefaultCPUTracker() *CPUTracker {
 }
 
 // Record adds a new CPU percentage sample.
-// cpuPercent should be 0-100 (or -1 if unavailable).
+// cpuPercent can exceed 100% on multi-core systems (e.g., 200% = 2 cores fully utilized).
+// Value of -1 indicates unavailable reading.
 func (ct *CPUTracker) Record(cpuPercent float64) {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()

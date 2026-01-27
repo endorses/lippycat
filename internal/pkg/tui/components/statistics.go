@@ -1306,7 +1306,7 @@ func (s *StatisticsView) buildTUIContentWide(availableWidth, targetHeight int) s
 		}
 		samples := s.cpuTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
-			sparkline := RenderCPUSparkline(samples, sparklineWidth, 5, s.theme)
+			sparkline := RenderCPUSparkline(samples, sparklineWidth, 5, s.theme, s.cpuTracker.GetPeak())
 			sparklineHeight := strings.Count(sparkline, "\n") + 1
 
 			// If targetHeight is set, add padding to push sparkline to bottom
@@ -2823,7 +2823,7 @@ func (s *StatisticsView) renderTUIMetrics(titleStyle, labelStyle, valueStyle lip
 
 		samples := s.cpuTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
-			sparkline := RenderCPUSparkline(samples, sparklineWidth, 5, s.theme)
+			sparkline := RenderCPUSparkline(samples, sparklineWidth, 5, s.theme, s.cpuTracker.GetPeak())
 			result.WriteString(sparkline)
 			result.WriteString("\n")
 		}

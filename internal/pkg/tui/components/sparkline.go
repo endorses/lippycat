@@ -215,7 +215,8 @@ func RenderBytesRateSparkline(rates []float64, width, height int, theme themes.T
 
 // RenderCPUSparkline renders a CPU percentage sparkline with utilization-based colors.
 // Uses green for low CPU (<30%), yellow for moderate (30-70%), red for high (>70%).
-func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme) string {
+// peakCPU is the highest CPU value seen, used for scaling (can exceed 100% on multi-core systems).
+func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme, peakCPU float64) string {
 	if len(samples) == 0 {
 		return ""
 	}
@@ -240,8 +241,14 @@ func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme
 	opts := []sparkline.Option{
 		sparkline.WithStyle(style),
 		sparkline.WithData(samples),
-		sparkline.WithMaxValue(100), // CPU is always 0-100%
 	}
+
+	// Scale based on peak CPU with 10% headroom, minimum 100%
+	maxValue := peakCPU * 1.1
+	if maxValue < 100 {
+		maxValue = 100
+	}
+	opts = append(opts, sparkline.WithMaxValue(maxValue))
 
 	sl := sparkline.New(width, height, opts...)
 	sl.DrawColumnsOnly()

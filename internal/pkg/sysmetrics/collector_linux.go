@@ -55,11 +55,9 @@ func (c *collector) collectPlatform() Metrics {
 		cpuSeconds := float64(cpuDelta) / float64(c.platformData.clockTicksHz)
 		m.CPUPercent = (cpuSeconds / wallDelta) * 100.0
 
-		// Clamp to reasonable range (can exceed 100% briefly due to timing)
+		// Clamp lower bound (CPU can exceed 100% with multiple goroutines on multi-core systems)
 		if m.CPUPercent < 0 {
 			m.CPUPercent = 0
-		} else if m.CPUPercent > 100 {
-			m.CPUPercent = 100
 		}
 	} else {
 		m.CPUPercent = -1 // Not enough data yet

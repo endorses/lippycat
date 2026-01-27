@@ -1090,8 +1090,53 @@ func (s *StatisticsView) renderOverviewMedium() string {
 	return result.String()
 }
 
+// calculateAdaptiveTopListLimit determines the optimal number of items to show in the
+// top talkers and protocol distribution lists to fit within the viewport height.
+// Returns a value between 5 (minimum) and 10 (maximum).
+//
+// If the dashboard cards don't fit and the overflow is small (1-5 lines), this reduces
+// the top list items to make everything fit without scrolling. For larger overflows,
+// it returns the default limit and lets the user scroll.
+func (s *StatisticsView) calculateAdaptiveTopListLimit() int {
+	const (
+		defaultLimit   = 10
+		minLimit       = 5
+		maxAdaptiveGap = 5 // Only adapt if overflow is 1-5 lines
+		headerOverhead = 2 // renderContent adds: header line + blank line
+	)
+
+	// Render with default limit to measure height
+	content := s.renderOverviewWideWithLimit(defaultLimit)
+	contentHeight := strings.Count(content, "\n") + 1
+
+	// Calculate total needed height (content + header overhead)
+	totalNeeded := contentHeight + headerOverhead
+
+	// Calculate overflow
+	overflow := totalNeeded - s.height
+
+	// If fits or overflow too large, use default
+	if overflow <= 0 || overflow > maxAdaptiveGap {
+		return defaultLimit
+	}
+
+	// Calculate reduced limit
+	newLimit := defaultLimit - overflow
+	if newLimit < minLimit {
+		newLimit = minLimit
+	}
+
+	return newLimit
+}
+
 // renderOverviewWide renders the overview in optimal 2-column layout for wide terminals (>=120 chars)
 func (s *StatisticsView) renderOverviewWide() string {
+	topListLimit := s.calculateAdaptiveTopListLimit()
+	return s.renderOverviewWideWithLimit(topListLimit)
+}
+
+// renderOverviewWideWithLimit renders the wide overview with a specified top list item limit.
+func (s *StatisticsView) renderOverviewWideWithLimit(topListLimit int) string {
 	var result strings.Builder
 	gap := 2
 	// colWidth is the total column width including card border
@@ -1142,10 +1187,10 @@ func (s *StatisticsView) renderOverviewWide() string {
 
 	// Row 3: Top Talkers (left) + Protocol Distribution (right)
 	talkersContent := s.buildTopTalkersCombinedContent(
-		s.stats.SourceCounts.GetTopN(10),
-		s.stats.DestCounts.GetTopN(10),
+		s.stats.SourceCounts.GetTopN(topListLimit),
+		s.stats.DestCounts.GetTopN(topListLimit),
 		contentWidth)
-	protocolContent := s.renderProtocolDistribution(10, contentWidth)
+	protocolContent := s.renderProtocolDistribution(topListLimit, contentWidth)
 
 	talkersCard := dashboard.NewCard("TOP TALKERS", talkersContent, s.theme,
 		dashboard.WithIcon("🔊"),

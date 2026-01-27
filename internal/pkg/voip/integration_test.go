@@ -173,7 +173,7 @@ func TestEndToEndSipCallProcessing(t *testing.T) {
 	// Clear any existing state
 	tracker.mu.Lock()
 	tracker.callMap = make(map[string]*CallInfo)
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	// Setup surveillance
@@ -217,12 +217,12 @@ a=rtpmap:0 PCMU/8000`)
 
 	// Verify RTP port was extracted and tracked
 	tracker.mu.RLock()
-	trackedCallID, portTracked := tracker.portToCallID["8000"]
+	trackedCallIDs, portTracked := tracker.portToCallID["8000"]
 	tracker.mu.RUnlock()
 
 	if portTracked {
-		assert.Equal(t, "end-to-end-test-call@example.com", trackedCallID)
-		t.Logf("Successfully tracked RTP port 8000 for call %s", trackedCallID)
+		assert.Contains(t, trackedCallIDs, "end-to-end-test-call@example.com")
+		t.Logf("Successfully tracked RTP port 8000 for call %v", trackedCallIDs)
 	}
 
 	// Test RTP packet handling for tracked port
@@ -269,7 +269,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	// Clear any existing state
 	tracker.mu.Lock()
 	tracker.callMap = make(map[string]*CallInfo)
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	// Setup surveillance
@@ -516,7 +516,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 	// Clear any existing state
 	tracker.mu.Lock()
 	tracker.callMap = make(map[string]*CallInfo)
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	tests := []struct {

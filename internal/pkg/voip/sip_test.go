@@ -298,7 +298,7 @@ func TestHandleSipMessage_Integration(t *testing.T) {
 	// Clear any existing state
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.callMap = make(map[string]*CallInfo)
 	tracker.mu.Unlock()
 

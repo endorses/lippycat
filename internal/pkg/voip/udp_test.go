@@ -13,7 +13,7 @@ func TestHandleUdpPackets(t *testing.T) {
 	// Clear existing state
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -104,9 +104,9 @@ func TestHandleUdpPackets_RTPTracking(t *testing.T) {
 	// Setup RTP port tracking
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
-	tracker.portToCallID["8000"] = "rtp-test-call-1"
-	tracker.portToCallID["8002"] = "rtp-test-call-2"
+	tracker.portToCallID = make(map[string][]string)
+	tracker.portToCallID["8000"] = []string{"rtp-test-call-1"}
+	tracker.portToCallID["8002"] = []string{"rtp-test-call-2"}
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -202,7 +202,7 @@ a=rtpmap:0 PCMU/8000`
 	// Clear existing state
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	// Test UDP handling with SIP content

@@ -314,6 +314,9 @@ func (s *StatisticsView) SetSize(width, height int) {
 	if s.rateTracker != nil {
 		s.rateTracker.Resize(targetCapacity)
 	}
+	if s.voipProvider != nil {
+		s.voipProvider.ResizeTracker(targetCapacity)
+	}
 
 	if !s.ready {
 		s.viewport = viewport.New(width, height)

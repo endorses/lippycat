@@ -137,16 +137,26 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 		}
 	}
 
-	// Add port mappings for RTP streams
+	// Add port mappings for RTP streams (multi-value for B2BUA)
 	if result.Protocol == "rtp" || result.Protocol == "sip" {
 		if srcPort, ok := result.Metadata["src_port"].(string); ok {
 			if IsLockFreeModeEnabled() {
 				AddPortMappingLockFree(srcPort, result.CallID)
 			} else {
-				// Use traditional method
+				// Use traditional method (multi-value for B2BUA)
 				tracker := getTracker()
 				tracker.mu.Lock()
-				tracker.portToCallID[srcPort] = result.CallID
+				existing := tracker.portToCallID[srcPort]
+				alreadyRegistered := false
+				for _, cid := range existing {
+					if cid == result.CallID {
+						alreadyRegistered = true
+						break
+					}
+				}
+				if !alreadyRegistered {
+					tracker.portToCallID[srcPort] = append(existing, result.CallID)
+				}
 				tracker.mu.Unlock()
 			}
 		}
@@ -155,10 +165,20 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 			if IsLockFreeModeEnabled() {
 				AddPortMappingLockFree(dstPort, result.CallID)
 			} else {
-				// Use traditional method
+				// Use traditional method (multi-value for B2BUA)
 				tracker := getTracker()
 				tracker.mu.Lock()
-				tracker.portToCallID[dstPort] = result.CallID
+				existing := tracker.portToCallID[dstPort]
+				alreadyRegistered := false
+				for _, cid := range existing {
+					if cid == result.CallID {
+						alreadyRegistered = true
+						break
+					}
+				}
+				if !alreadyRegistered {
+					tracker.portToCallID[dstPort] = append(existing, result.CallID)
+				}
 				tracker.mu.Unlock()
 			}
 		}

@@ -88,7 +88,7 @@ func BenchmarkCallTracking(b *testing.B) {
 		tracker := getTracker()
 		tracker.mu.Lock()
 		tracker.callMap = make(map[string]*CallInfo)
-		tracker.portToCallID = make(map[string]string)
+		tracker.portToCallID = make(map[string][]string)
 		tracker.mu.Unlock()
 	}()
 
@@ -104,7 +104,7 @@ func BenchmarkCallIDExtraction(b *testing.B) {
 	// Create a packet with stored Call-ID mapping
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID["5060"] = "benchmark-call-mapping"
+	tracker.portToCallID["5060"] = []string{"benchmark-call-mapping"}
 	tracker.mu.Unlock()
 
 	// Create test packet

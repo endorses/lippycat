@@ -186,3 +186,48 @@ func (act *ActiveCallTracker) Reset() {
 	act.samplesValid = false
 	act.cachedSamples = nil
 }
+
+// Resize changes the tracker capacity, preserving existing samples.
+// If newCapacity is smaller than current count, oldest samples are discarded.
+func (act *ActiveCallTracker) Resize(newCapacity int) {
+	if newCapacity <= 0 {
+		return
+	}
+
+	act.mu.Lock()
+	defer act.mu.Unlock()
+
+	if newCapacity == act.maxSamples {
+		return // No change needed
+	}
+
+	// Extract current samples in order (oldest to newest)
+	oldSamples := make([]float64, act.count)
+	for i := 0; i < act.count; i++ {
+		idx := (act.head - act.count + i + act.maxSamples) % act.maxSamples
+		oldSamples[i] = act.samples[idx]
+	}
+
+	// Create new buffer
+	act.samples = make([]float64, newCapacity)
+	act.maxSamples = newCapacity
+
+	// Copy samples, keeping most recent if we're shrinking
+	copyCount := act.count
+	startIdx := 0
+	if copyCount > newCapacity {
+		startIdx = copyCount - newCapacity
+		copyCount = newCapacity
+	}
+
+	for i := 0; i < copyCount; i++ {
+		act.samples[i] = oldSamples[startIdx+i]
+	}
+
+	act.head = copyCount % newCapacity
+	act.count = copyCount
+
+	// Invalidate cache
+	act.samplesValid = false
+	act.cachedSamples = nil
+}

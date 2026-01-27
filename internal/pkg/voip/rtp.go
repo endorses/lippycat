@@ -24,10 +24,22 @@ func ExtractPortFromSdp(sdpBody string, callID string) {
 	defer tracker.mu.Unlock()
 
 	for _, endpoint := range endpoints {
-		tracker.portToCallID[endpoint] = callID
-		logger.Debug("Registered RTP endpoint mapping",
-			"endpoint", endpoint,
-			"call_id", SanitizeCallIDForLogging(callID))
+		// Append to slice, avoiding duplicates (supports B2BUA with shared ports)
+		existing := tracker.portToCallID[endpoint]
+		alreadyRegistered := false
+		for _, cid := range existing {
+			if cid == callID {
+				alreadyRegistered = true
+				break
+			}
+		}
+		if !alreadyRegistered {
+			tracker.portToCallID[endpoint] = append(existing, callID)
+			logger.Debug("Registered RTP endpoint mapping",
+				"endpoint", endpoint,
+				"call_id", SanitizeCallIDForLogging(callID),
+				"total_calls_on_port", len(tracker.portToCallID[endpoint]))
+		}
 	}
 }
 
@@ -145,24 +157,36 @@ func IsTracked(packet gopacket.Packet) bool {
 		dstEndpoint := dstIP + ":" + dstPort
 		srcEndpoint := srcIP + ":" + srcPort
 
-		if _, ok := tracker.portToCallID[dstEndpoint]; ok {
+		if callIDs := tracker.portToCallID[dstEndpoint]; len(callIDs) > 0 {
 			return true
 		}
-		if _, ok := tracker.portToCallID[srcEndpoint]; ok {
+		if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
 			return true
 		}
 	}
 
 	// Fall back to port-only lookups (for NAT scenarios)
-	_, dstOk := tracker.portToCallID[dstPort]
-	_, srcOk := tracker.portToCallID[srcPort]
-	return dstOk || srcOk
+	dstCallIDs := tracker.portToCallID[dstPort]
+	srcCallIDs := tracker.portToCallID[srcPort]
+	return len(dstCallIDs) > 0 || len(srcCallIDs) > 0
 }
 
+// GetCallIDForPacket returns the first call ID associated with a packet's port.
+// For B2BUA scenarios where multiple calls share a port, use GetAllCallIDsForPacket.
 func GetCallIDForPacket(packet gopacket.Packet) string {
+	callIDs := GetAllCallIDsForPacket(packet)
+	if len(callIDs) > 0 {
+		return callIDs[0]
+	}
+	return ""
+}
+
+// GetAllCallIDsForPacket returns all call IDs associated with a packet's port.
+// This supports B2BUA scenarios where multiple call legs share the same RTP port.
+func GetAllCallIDsForPacket(packet gopacket.Packet) []string {
 	transportLayer := packet.TransportLayer()
 	if transportLayer == nil {
-		return ""
+		return nil
 	}
 	networkLayer := packet.NetworkLayer()
 
@@ -181,22 +205,22 @@ func GetCallIDForPacket(packet gopacket.Packet) string {
 		dstEndpoint := dstIP + ":" + dstPort
 		srcEndpoint := srcIP + ":" + srcPort
 
-		if callID, ok := tracker.portToCallID[dstEndpoint]; ok {
-			return callID
+		if callIDs := tracker.portToCallID[dstEndpoint]; len(callIDs) > 0 {
+			return callIDs
 		}
-		if callID, ok := tracker.portToCallID[srcEndpoint]; ok {
-			return callID
+		if callIDs := tracker.portToCallID[srcEndpoint]; len(callIDs) > 0 {
+			return callIDs
 		}
 	}
 
 	// Fall back to port-only lookups (for NAT scenarios)
-	if callID, ok := tracker.portToCallID[dstPort]; ok {
-		return callID
+	if callIDs := tracker.portToCallID[dstPort]; len(callIDs) > 0 {
+		return callIDs
 	}
-	if callID, ok := tracker.portToCallID[srcPort]; ok {
-		return callID
+	if callIDs := tracker.portToCallID[srcPort]; len(callIDs) > 0 {
+		return callIDs
 	}
-	return ""
+	return nil
 }
 
 // CleanupPortMappings removes all port-to-callID mappings for a given callID.
@@ -207,11 +231,19 @@ func CleanupPortMappings(callID string) {
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
-	// Find and remove all port mappings for this callID
+	// Find and remove this callID from all port mappings
 	var removed []string
-	for key, cid := range tracker.portToCallID {
-		if cid == callID {
-			removed = append(removed, key)
+	for key, callIDs := range tracker.portToCallID {
+		for i, cid := range callIDs {
+			if cid == callID {
+				// Remove this call ID from the slice
+				tracker.portToCallID[key] = append(callIDs[:i], callIDs[i+1:]...)
+				removed = append(removed, key)
+				break
+			}
+		}
+		// Clean up empty slices
+		if len(tracker.portToCallID[key]) == 0 {
 			delete(tracker.portToCallID, key)
 		}
 	}

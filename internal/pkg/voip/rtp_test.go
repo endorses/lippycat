@@ -13,7 +13,7 @@ func TestExtractPortFromSdp(t *testing.T) {
 	// Clear existing port mappings
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -68,9 +68,9 @@ func TestIsTracked(t *testing.T) {
 	// Clear existing port mappings
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
-	tracker.portToCallID["8000"] = "test-call-1"
-	tracker.portToCallID["8002"] = "test-call-2"
+	tracker.portToCallID = make(map[string][]string)
+	tracker.portToCallID["8000"] = []string{"test-call-1"}
+	tracker.portToCallID["8002"] = []string{"test-call-2"}
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -118,9 +118,9 @@ func TestGetCallIDForPacket(t *testing.T) {
 	// Clear existing port mappings and setup test data
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
-	tracker.portToCallID["8000"] = "test-call-packet-1"
-	tracker.portToCallID["8002"] = "test-call-packet-2"
+	tracker.portToCallID = make(map[string][]string)
+	tracker.portToCallID["8000"] = []string{"test-call-packet-1"}
+	tracker.portToCallID["8002"] = []string{"test-call-packet-2"}
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -172,8 +172,8 @@ func TestRTPPacketProcessing_Integration(t *testing.T) {
 	// Setup port mapping
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
-	tracker.portToCallID["8000"] = testCallID
+	tracker.portToCallID = make(map[string][]string)
+	tracker.portToCallID["8000"] = []string{testCallID}
 	tracker.mu.Unlock()
 
 	// Create test packet
@@ -195,10 +195,10 @@ func TestRTPPortTracking_EdgeCases(t *testing.T) {
 	// Test edge cases in port tracking
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
-	tracker.portToCallID["65534"] = "test-high-port"
-	tracker.portToCallID["1024"] = "test-port-1024"
-	tracker.portToCallID["0"] = "test-port-zero"
+	tracker.portToCallID = make(map[string][]string)
+	tracker.portToCallID["65534"] = []string{"test-high-port"}
+	tracker.portToCallID["1024"] = []string{"test-port-1024"}
+	tracker.portToCallID["0"] = []string{"test-port-zero"}
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -242,7 +242,7 @@ func TestExtractPortFromSdp_MultiStream(t *testing.T) {
 	// Now registers both IP:PORT endpoints (more specific) and port-only (NAT fallback)
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -330,7 +330,7 @@ a=inactive`,
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear tracker before each test
 			tracker.mu.Lock()
-			tracker.portToCallID = make(map[string]string)
+			tracker.portToCallID = make(map[string][]string)
 			tracker.mu.Unlock()
 
 			// Extract ports from SDP
@@ -342,16 +342,16 @@ a=inactive`,
 
 			// Check port-only entries
 			for _, expectedPort := range tt.expectedPorts {
-				registeredCallID, exists := tracker.portToCallID[expectedPort]
+				registeredCallIDs, exists := tracker.portToCallID[expectedPort]
 				assert.True(t, exists, "Port %s should be registered", expectedPort)
-				assert.Equal(t, tt.callID, registeredCallID, "Port %s should map to correct call ID", expectedPort)
+				assert.Contains(t, registeredCallIDs, tt.callID, "Port %s should map to correct call ID", expectedPort)
 			}
 
 			// Check IP:PORT endpoint entries
 			for _, expectedEndpoint := range tt.expectedEndpoints {
-				registeredCallID, exists := tracker.portToCallID[expectedEndpoint]
+				registeredCallIDs, exists := tracker.portToCallID[expectedEndpoint]
 				assert.True(t, exists, "Endpoint %s should be registered", expectedEndpoint)
-				assert.Equal(t, tt.callID, registeredCallID, "Endpoint %s should map to correct call ID", expectedEndpoint)
+				assert.Contains(t, registeredCallIDs, tt.callID, "Endpoint %s should map to correct call ID", expectedEndpoint)
 			}
 
 			// Verify total entries (both port-only and IP:PORT)

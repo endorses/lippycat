@@ -97,6 +97,14 @@ func (v *VoIPStatsProvider) RecordActiveCallSample() {
 	}
 }
 
+// ResizeTracker resizes the active call tracker buffer to match sparkline width.
+// This should be called when terminal dimensions change.
+func (v *VoIPStatsProvider) ResizeTracker(capacity int) {
+	if v.activeCallTracker != nil {
+		v.activeCallTracker.Resize(capacity)
+	}
+}
+
 // recalculateMetrics recalculates all metrics from the current call list.
 // Must be called with lock held.
 func (v *VoIPStatsProvider) recalculateMetrics() {
@@ -557,14 +565,7 @@ func (v *VoIPStatsProvider) RenderColumnar(width int, theme themes.Theme) string
 
 		samples := v.activeCallTracker.GetSamples(sparklineWidth)
 		if len(samples) > 0 {
-			// Pad with zeros at the beginning for right-alignment (newest data on right)
-			if len(samples) < sparklineWidth {
-				padded := make([]float64, sparklineWidth)
-				copy(padded[sparklineWidth-len(samples):], samples)
-				samples = padded
-			}
-
-			// Build sparkline
+			// Build sparkline (no padding - data grows left-to-right like CPU/traffic sparklines)
 			sparkline := RenderActiveCallsSparkline(samples, sparklineWidth, 5, theme, v.activeCallTracker.GetPeak())
 
 			// Build sparkline column with title

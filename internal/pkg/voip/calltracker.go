@@ -96,7 +96,7 @@ func (c *CallInfo) Close() error {
 
 type CallTracker struct {
 	callMap           map[string]*CallInfo
-	portToCallID      map[string]string        // key = port, value = CallID
+	portToCallID      map[string][]string      // key = port, value = []CallID (multi-value for B2BUA)
 	lruList           *list.List               // LRU list (front = most recently used)
 	lruIndex          map[string]*list.Element // callID -> list element for O(1) lookup
 	maxCalls          int                      // Maximum calls to keep
@@ -128,7 +128,7 @@ func NewCallTracker() *CallTracker {
 	maxCalls := DefaultMaxCalls
 	tracker := &CallTracker{
 		callMap:        make(map[string]*CallInfo),
-		portToCallID:   make(map[string]string),
+		portToCallID:   make(map[string][]string),
 		lruList:        list.New(),
 		lruIndex:       make(map[string]*list.Element),
 		maxCalls:       maxCalls,
@@ -274,8 +274,16 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 							"error", err)
 					}
 					// Remove from port mapping
-					for port, cid := range tracker.portToCallID {
-						if cid == oldestCallID {
+					for port, callIDs := range tracker.portToCallID {
+						for i, cid := range callIDs {
+							if cid == oldestCallID {
+								// Remove this call ID from the slice
+								tracker.portToCallID[port] = append(callIDs[:i], callIDs[i+1:]...)
+								break
+							}
+						}
+						// Clean up empty slices
+						if len(tracker.portToCallID[port]) == 0 {
 							delete(tracker.portToCallID, port)
 						}
 					}

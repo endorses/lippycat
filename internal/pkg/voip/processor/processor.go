@@ -124,7 +124,7 @@ type Processor struct {
 
 	// Call tracking
 	calls        map[string]*callState
-	portToCallID map[string]string // RTP port -> CallID
+	portToCallID map[string][]string // RTP port -> []CallID (multi-value for B2BUA)
 	mu           sync.RWMutex
 
 	// Optional application filter for call selection
@@ -155,7 +155,7 @@ func New(cfg Config) *Processor {
 	p := &Processor{
 		config:       cfg,
 		calls:        make(map[string]*callState),
-		portToCallID: make(map[string]string),
+		portToCallID: make(map[string][]string),
 		appFilter:    cfg.ApplicationFilter,
 		janitorCtx:   make(chan struct{}),
 	}
@@ -240,9 +240,9 @@ func (p *Processor) cleanupExpiredCalls() {
 	now := time.Now()
 	for callID, state := range p.calls {
 		if now.Sub(state.lastUpdated) > p.config.CallTimeout {
-			// Remove port mappings
+			// Remove this callID from port mappings (multi-value for B2BUA)
 			for _, port := range state.rtpPorts {
-				delete(p.portToCallID, port)
+				p.removeCallIDFromPort(port, callID)
 			}
 			delete(p.calls, callID)
 		}
@@ -292,23 +292,49 @@ func (p *Processor) evictOldestCallLocked() {
 	if oldestID != "" {
 		state := p.calls[oldestID]
 		for _, port := range state.rtpPorts {
-			delete(p.portToCallID, port)
+			p.removeCallIDFromPort(port, oldestID)
 		}
 		delete(p.calls, oldestID)
 	}
 }
 
-// registerRTPPort associates an RTP port with a call.
+// removeCallIDFromPort removes a specific callID from a port's mapping (must hold mu lock).
+func (p *Processor) removeCallIDFromPort(port, callID string) {
+	callIDs := p.portToCallID[port]
+	for i, cid := range callIDs {
+		if cid == callID {
+			p.portToCallID[port] = append(callIDs[:i], callIDs[i+1:]...)
+			break
+		}
+	}
+	// Clean up empty slices
+	if len(p.portToCallID[port]) == 0 {
+		delete(p.portToCallID, port)
+	}
+}
+
+// registerRTPPort associates an RTP port with a call (multi-value for B2BUA).
 func (p *Processor) registerRTPPort(callID, port string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.portToCallID[port] = callID
+	// Append to slice, avoiding duplicates (supports B2BUA with shared ports)
+	existing := p.portToCallID[port]
+	alreadyRegistered := false
+	for _, cid := range existing {
+		if cid == callID {
+			alreadyRegistered = true
+			break
+		}
+	}
+	if !alreadyRegistered {
+		p.portToCallID[port] = append(existing, callID)
+	}
 
 	if state, exists := p.calls[callID]; exists {
-		// Avoid duplicates
-		for _, p := range state.rtpPorts {
-			if p == port {
+		// Avoid duplicates in call's port list
+		for _, pt := range state.rtpPorts {
+			if pt == port {
 				return
 			}
 		}
@@ -316,12 +342,24 @@ func (p *Processor) registerRTPPort(callID, port string) {
 	}
 }
 
-// getCallIDForPort looks up the CallID for an RTP port.
+// getCallIDForPort looks up the first CallID for an RTP port.
+// For B2BUA scenarios with multiple calls on same port, use getAllCallIDsForPort.
 func (p *Processor) getCallIDForPort(port string) (string, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	callID, exists := p.portToCallID[port]
-	return callID, exists
+	callIDs := p.portToCallID[port]
+	if len(callIDs) > 0 {
+		return callIDs[0], true
+	}
+	return "", false
+}
+
+// getAllCallIDsForPort returns all CallIDs associated with an RTP port.
+// This supports B2BUA scenarios where multiple call legs share the same port.
+func (p *Processor) getAllCallIDsForPort(port string) []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.portToCallID[port]
 }
 
 // CleanupCallPorts removes all port-to-callID mappings for a given callID.
@@ -335,9 +373,9 @@ func (p *Processor) CleanupCallPorts(callID string) {
 		return
 	}
 
-	// Remove all port mappings for this call
+	// Remove this callID from all port mappings (multi-value for B2BUA)
 	for _, port := range state.rtpPorts {
-		delete(p.portToCallID, port)
+		p.removeCallIDFromPort(port, callID)
 	}
 
 	// Clear the ports list but keep the call state for reference

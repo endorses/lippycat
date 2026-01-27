@@ -17,7 +17,7 @@ func TestExtractPortFromSdp_ComprehensiveParsing(t *testing.T) {
 	// Reset port map before tests
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	tests := []struct {
@@ -125,18 +125,18 @@ m=audio 65535 RTP/AVP 0`,
 			// Clear port map for each test
 			tracker := getTracker()
 			tracker.mu.Lock()
-			tracker.portToCallID = make(map[string]string)
+			tracker.portToCallID = make(map[string][]string)
 			tracker.mu.Unlock()
 
 			ExtractPortFromSdp(tt.sdpBody, tt.callID)
 
 			tracker.mu.Lock()
-			actualCallID, exists := tracker.portToCallID[tt.expectedPort]
+			actualCallIDs, exists := tracker.portToCallID[tt.expectedPort]
 			tracker.mu.Unlock()
 
 			if tt.shouldExtract {
 				assert.True(t, exists, tt.description+" - port should be mapped")
-				assert.Equal(t, tt.callID, actualCallID, tt.description+" - call ID should match")
+				assert.Contains(t, actualCallIDs, tt.callID, tt.description+" - call ID should match")
 			} else {
 				assert.False(t, exists, tt.description+" - port should not be mapped")
 			}
@@ -148,7 +148,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 	// Reset port map
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	t.Run("Concurrent port extraction", func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 	t.Run("Concurrent read while extracting", func(t *testing.T) {
 		// Reset map
 		tracker.mu.Lock()
-		tracker.portToCallID = make(map[string]string)
+		tracker.portToCallID = make(map[string][]string)
 		tracker.mu.Unlock()
 
 		var wg sync.WaitGroup
@@ -234,10 +234,10 @@ func TestIsTracked_EdgeCases(t *testing.T) {
 	// Setup port mappings for testing
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = map[string]string{
-		"5004": "call-audio-1",
-		"5006": "call-audio-2",
-		"5008": "call-video-1",
+	tracker.portToCallID = map[string][]string{
+		"5004": {"call-audio-1"},
+		"5006": {"call-audio-2"},
+		"5008": {"call-video-1"},
 	}
 	tracker.mu.Unlock()
 
@@ -285,10 +285,10 @@ func TestGetCallIDForPacket_PortMapping(t *testing.T) {
 	// Setup port mappings
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = map[string]string{
-		"5004": "call-audio-1",
-		"5006": "call-audio-2",
-		"5008": "call-video-1",
+	tracker.portToCallID = map[string][]string{
+		"5004": {"call-audio-1"},
+		"5006": {"call-audio-2"},
+		"5008": {"call-video-1"},
 	}
 	tracker.mu.Unlock()
 
@@ -331,7 +331,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 		// Reset map
 		tracker := getTracker()
 		tracker.mu.Lock()
-		tracker.portToCallID = make(map[string]string)
+		tracker.portToCallID = make(map[string][]string)
 		tracker.mu.Unlock()
 
 		// Add many port mappings with valid numeric ports
@@ -351,7 +351,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 
 		// Clear map to prevent memory leaks in other tests
 		tracker.mu.Lock()
-		tracker.portToCallID = make(map[string]string)
+		tracker.portToCallID = make(map[string][]string)
 		tracker.mu.Unlock()
 	})
 }
@@ -360,7 +360,7 @@ func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 	// Reset port map
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID = make(map[string]string)
+	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
 
 	securityTests := []struct {
@@ -431,7 +431,7 @@ func TestPortMapping_Cleanup(t *testing.T) {
 		tracker := getTracker()
 		tracker.mu.Lock()
 		initialSize := len(tracker.portToCallID)
-		tracker.portToCallID["test-isolation"] = "test-call"
+		tracker.portToCallID["test-isolation"] = []string{"test-call"}
 		tracker.mu.Unlock()
 
 		// Verify isolation doesn't affect other tests

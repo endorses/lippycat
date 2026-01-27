@@ -96,14 +96,24 @@ func (h *HybridCallTracker) AddPortMapping(port, callID string) {
 		return
 	}
 
-	// Traditional method - direct access to tracker
+	// Traditional method - direct access to tracker (multi-value for B2BUA)
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID[port] = callID
+	existing := tracker.portToCallID[port]
+	alreadyRegistered := false
+	for _, cid := range existing {
+		if cid == callID {
+			alreadyRegistered = true
+			break
+		}
+	}
+	if !alreadyRegistered {
+		tracker.portToCallID[port] = append(existing, callID)
+	}
 	tracker.mu.Unlock()
 }
 
-// GetCallIDByPort retrieves call ID by port
+// GetCallIDByPort retrieves call ID by port (returns first if multiple)
 func (h *HybridCallTracker) GetCallIDByPort(port string) (string, bool) {
 	if h.enabled.Load() {
 		globalLockFreeMetrics.IncrementReads()
@@ -112,18 +122,24 @@ func (h *HybridCallTracker) GetCallIDByPort(port string) (string, bool) {
 			// Check traditional tracker as fallback for mappings created before mode switch
 			tracker := getTracker()
 			tracker.mu.RLock()
-			callID, found = tracker.portToCallID[port]
+			callIDs := tracker.portToCallID[port]
 			tracker.mu.RUnlock()
+			if len(callIDs) > 0 {
+				return callIDs[0], true
+			}
 		}
 		return callID, found
 	}
 
-	// Traditional method
+	// Traditional method (returns first if multiple for B2BUA)
 	tracker := getTracker()
 	tracker.mu.RLock()
-	callID, exists := tracker.portToCallID[port]
+	callIDs := tracker.portToCallID[port]
 	tracker.mu.RUnlock()
-	return callID, exists
+	if len(callIDs) > 0 {
+		return callIDs[0], true
+	}
+	return "", false
 }
 
 // RemovePortMapping removes a port mapping
@@ -244,9 +260,19 @@ func AddPortMappingLockFree(port, callID string) {
 		return
 	}
 
-	// Traditional method
+	// Traditional method (multi-value for B2BUA)
 	tracker := getTracker()
 	tracker.mu.Lock()
-	tracker.portToCallID[port] = callID
+	existing := tracker.portToCallID[port]
+	alreadyRegistered := false
+	for _, cid := range existing {
+		if cid == callID {
+			alreadyRegistered = true
+			break
+		}
+	}
+	if !alreadyRegistered {
+		tracker.portToCallID[port] = append(existing, callID)
+	}
 	tracker.mu.Unlock()
 }

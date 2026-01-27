@@ -356,6 +356,8 @@ func (m Model) handleCallFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if filterValue != "" {
 			filterCmd = m.parseAndApplyCallFilter(filterValue)
 			m.uiState.CallFilterInput.AddToHistory(filterValue)
+			// Save call filter history to config
+			saveCallFilterHistory(&m.uiState.CallFilterInput)
 		} else {
 			// Empty filter = clear all filters
 			m.callStore.ClearFilter()

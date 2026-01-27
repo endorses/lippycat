@@ -247,3 +247,32 @@ func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme
 	sl.DrawColumnsOnly()
 	return sl.View()
 }
+
+// RenderActiveCallsSparkline renders an active calls sparkline with VoIP-themed color.
+// Uses cyan to distinguish from CPU (green) and traffic (blue) sparklines.
+func RenderActiveCallsSparkline(samples []float64, width, height int, theme themes.Theme, peakCalls int) string {
+	if len(samples) == 0 {
+		return ""
+	}
+
+	// Use TCP color (cyan) for VoIP active calls sparkline
+	style := lipgloss.NewStyle().Foreground(theme.TCPColor)
+	opts := []sparkline.Option{
+		sparkline.WithStyle(style),
+		sparkline.WithData(samples),
+	}
+
+	// Set max value if peak is known for consistent scaling
+	if peakCalls > 0 {
+		// Add 10% headroom, minimum of 1 for proper scaling
+		maxVal := float64(peakCalls) * 1.1
+		if maxVal < 1 {
+			maxVal = 1
+		}
+		opts = append(opts, sparkline.WithMaxValue(maxVal))
+	}
+
+	sl := sparkline.New(width, height, opts...)
+	sl.DrawColumnsOnly()
+	return sl.View()
+}

@@ -42,13 +42,17 @@ type VoIPStatsProvider struct {
 	goodCalls      int // MOS >= 3.5
 	fairCalls      int // MOS >= 3.0
 	poorCalls      int // MOS < 3.0
+
+	// Active call tracking for sparkline
+	activeCallTracker *ActiveCallTracker
 }
 
 // NewVoIPStatsProvider creates a new VoIP stats provider.
 func NewVoIPStatsProvider() *VoIPStatsProvider {
 	return &VoIPStatsProvider{
-		theme:       themes.Solarized(),
-		codecCounts: make(map[string]int64),
+		theme:             themes.Solarized(),
+		codecCounts:       make(map[string]int64),
+		activeCallTracker: DefaultActiveCallTracker(),
 	}
 }
 
@@ -79,6 +83,18 @@ func (v *VoIPStatsProvider) UpdateCalls(calls []Call) {
 
 	v.calls = calls
 	v.recalculateMetrics()
+}
+
+// RecordActiveCallSample records the current active call count for sparkline.
+// This should be called on the same tick as CPU metrics for synchronized display.
+func (v *VoIPStatsProvider) RecordActiveCallSample() {
+	v.mu.RLock()
+	activeCalls := v.activeCalls + v.ringingCalls
+	v.mu.RUnlock()
+
+	if v.activeCallTracker != nil {
+		v.activeCallTracker.Record(activeCalls)
+	}
 }
 
 // recalculateMetrics recalculates all metrics from the current call list.
@@ -236,17 +252,14 @@ func (v *VoIPStatsProvider) GetMetrics() ProtocolMetrics {
 	}
 }
 
-// Render renders the VoIP statistics section.
-func (v *VoIPStatsProvider) Render(width int, theme themes.Theme) string {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
+// renderCallOverview renders the call overview section.
+// Must be called with lock held.
+func (v *VoIPStatsProvider) renderCallOverview(theme themes.Theme) string {
 	var result strings.Builder
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(theme.InfoColor).
-		MarginBottom(1)
+		Foreground(theme.InfoColor)
 
 	labelStyle := lipgloss.NewStyle().
 		Foreground(theme.StatusBarFg).
@@ -258,36 +271,30 @@ func (v *VoIPStatsProvider) Render(width int, theme themes.Theme) string {
 	dimStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240"))
 
-	if v.totalCalls == 0 {
-		result.WriteString(valueStyle.Render("  No VoIP calls detected.\n"))
-		return result.String()
-	}
-
-	// Call Overview Section
-	result.WriteString(titleStyle.Render("📞 Call Overview"))
+	result.WriteString(titleStyle.Render("Call Overview"))
 	result.WriteString("\n\n")
 
 	// Total and status breakdown
-	result.WriteString(labelStyle.Render("Total Calls:    "))
+	result.WriteString(labelStyle.Render("Total Calls:  "))
 	result.WriteString(valueStyle.Render(fmt.Sprintf("%d", v.totalCalls)))
 	result.WriteString("\n")
 
 	// Active calls with status breakdown
-	result.WriteString(labelStyle.Render("Active:         "))
+	result.WriteString(labelStyle.Render("Active:       "))
 	activeStyle := lipgloss.NewStyle().Foreground(theme.SuccessColor).Bold(true)
 	result.WriteString(activeStyle.Render(fmt.Sprintf("%d", v.activeCalls)))
 	if v.ringingCalls > 0 {
-		result.WriteString(dimStyle.Render(fmt.Sprintf(" (+ %d ringing)", v.ringingCalls)))
+		result.WriteString(dimStyle.Render(fmt.Sprintf(" (+%d)", v.ringingCalls)))
 	}
 	result.WriteString("\n")
 
 	// Completed calls
-	result.WriteString(labelStyle.Render("Completed:      "))
+	result.WriteString(labelStyle.Render("Completed:    "))
 	result.WriteString(valueStyle.Render(fmt.Sprintf("%d", v.completedCalls)))
 	result.WriteString("\n")
 
 	// Failed calls
-	result.WriteString(labelStyle.Render("Failed:         "))
+	result.WriteString(labelStyle.Render("Failed:       "))
 	if v.failedCalls > 0 {
 		failStyle := lipgloss.NewStyle().Foreground(theme.ErrorColor).Bold(true)
 		result.WriteString(failStyle.Render(fmt.Sprintf("%d", v.failedCalls)))
@@ -298,7 +305,7 @@ func (v *VoIPStatsProvider) Render(width int, theme themes.Theme) string {
 
 	// RTP-only calls (if any)
 	if v.rtpOnlyCalls > 0 {
-		result.WriteString(labelStyle.Render("RTP Only:       "))
+		result.WriteString(labelStyle.Render("RTP Only:     "))
 		result.WriteString(dimStyle.Render(fmt.Sprintf("%d", v.rtpOnlyCalls)))
 		result.WriteString("\n")
 	}
@@ -307,119 +314,286 @@ func (v *VoIPStatsProvider) Render(width int, theme themes.Theme) string {
 	totalCompleted := v.completedCalls + v.failedCalls
 	if totalCompleted > 0 {
 		successRate := float64(v.completedCalls) / float64(totalCompleted) * 100
-		result.WriteString(labelStyle.Render("Success Rate:   "))
+		result.WriteString(labelStyle.Render("Success Rate: "))
 		result.WriteString(RenderSuccessRate(successRate, theme))
 		result.WriteString("\n")
 	}
 
-	result.WriteString("\n")
+	return result.String()
+}
 
-	// Quality Metrics Section (only if we have data)
-	if v.avgMOS > 0 || v.avgJitter > 0 || v.avgPacketLoss > 0 {
-		result.WriteString(titleStyle.Render("📊 Quality Metrics"))
-		result.WriteString("\n\n")
+// renderQualityMetrics renders the quality metrics section.
+// Must be called with lock held.
+func (v *VoIPStatsProvider) renderQualityMetrics(theme themes.Theme) string {
+	if v.avgMOS == 0 && v.avgJitter == 0 && v.avgPacketLoss == 0 {
+		return ""
+	}
 
-		// MOS (Mean Opinion Score)
-		if v.avgMOS > 0 {
-			result.WriteString(labelStyle.Render("Avg MOS:        "))
-			// MOS scale: 4.0+ excellent, 3.5+ good, 3.0+ fair, <3.0 poor
-			result.WriteString(RenderQualityMetric(v.avgMOS, 4.0, 3.0, true, theme))
-			result.WriteString(dimStyle.Render(" / 5.0"))
-			result.WriteString("\n")
+	var result strings.Builder
 
-			// Quality distribution
-			result.WriteString(labelStyle.Render("Quality Dist:   "))
-			if v.excellentCalls > 0 {
-				result.WriteString(lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("★%d ", v.excellentCalls)))
-			}
-			if v.goodCalls > 0 {
-				result.WriteString(lipgloss.NewStyle().Foreground(theme.InfoColor).Render(fmt.Sprintf("●%d ", v.goodCalls)))
-			}
-			if v.fairCalls > 0 {
-				result.WriteString(lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("◐%d ", v.fairCalls)))
-			}
-			if v.poorCalls > 0 {
-				result.WriteString(lipgloss.NewStyle().Foreground(theme.ErrorColor).Render(fmt.Sprintf("○%d", v.poorCalls)))
-			}
-			result.WriteString("\n")
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.InfoColor)
+
+	labelStyle := lipgloss.NewStyle().
+		Foreground(theme.StatusBarFg).
+		Bold(true)
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(theme.StatusBarFg)
+
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	result.WriteString(titleStyle.Render("Quality Metrics"))
+	result.WriteString("\n\n")
+
+	// MOS (Mean Opinion Score)
+	if v.avgMOS > 0 {
+		result.WriteString(labelStyle.Render("Avg MOS:      "))
+		result.WriteString(RenderQualityMetric(v.avgMOS, 4.0, 3.0, true, theme))
+		result.WriteString(dimStyle.Render(" / 5.0"))
+		result.WriteString("\n")
+
+		// Quality distribution
+		result.WriteString(labelStyle.Render("Quality:      "))
+		if v.excellentCalls > 0 {
+			result.WriteString(lipgloss.NewStyle().Foreground(theme.SuccessColor).Render(fmt.Sprintf("★%d ", v.excellentCalls)))
 		}
-
-		// Jitter
-		if v.avgJitter > 0 {
-			result.WriteString(labelStyle.Render("Avg Jitter:     "))
-			// Jitter: <20ms good, <50ms acceptable, >50ms poor
-			result.WriteString(RenderQualityMetric(v.avgJitter, 20, 50, false, theme))
-			result.WriteString(dimStyle.Render(" ms"))
-			result.WriteString("\n")
+		if v.goodCalls > 0 {
+			result.WriteString(lipgloss.NewStyle().Foreground(theme.InfoColor).Render(fmt.Sprintf("●%d ", v.goodCalls)))
 		}
-
-		// Packet Loss
-		if v.avgPacketLoss > 0 {
-			result.WriteString(labelStyle.Render("Avg Packet Loss:"))
-			// Packet loss: <1% good, <3% acceptable, >3% poor
-			result.WriteString(RenderQualityMetric(v.avgPacketLoss, 1.0, 3.0, false, theme))
-			result.WriteString(dimStyle.Render("%"))
-			result.WriteString("\n")
+		if v.fairCalls > 0 {
+			result.WriteString(lipgloss.NewStyle().Foreground(theme.WarningColor).Render(fmt.Sprintf("◐%d ", v.fairCalls)))
 		}
-
-		// Average duration
-		if v.avgDuration > 0 {
-			result.WriteString(labelStyle.Render("Avg Duration:   "))
-			result.WriteString(valueStyle.Render(formatCallDuration(v.avgDuration)))
-			result.WriteString("\n")
+		if v.poorCalls > 0 {
+			result.WriteString(lipgloss.NewStyle().Foreground(theme.ErrorColor).Render(fmt.Sprintf("○%d", v.poorCalls)))
 		}
-
 		result.WriteString("\n")
 	}
 
-	// Codec Distribution Section (only if we have data)
-	if len(v.codecCounts) > 0 {
-		result.WriteString(titleStyle.Render("🎵 Codec Distribution"))
-		result.WriteString("\n\n")
+	// Jitter
+	if v.avgJitter > 0 {
+		result.WriteString(labelStyle.Render("Avg Jitter:   "))
+		result.WriteString(RenderQualityMetric(v.avgJitter, 20, 50, false, theme))
+		result.WriteString(dimStyle.Render(" ms"))
+		result.WriteString("\n")
+	}
 
-		// Sort codecs by count for display
-		type codecCount struct {
-			name  string
-			count int64
-		}
-		codecs := make([]codecCount, 0, len(v.codecCounts))
-		var maxCount int64
-		for name, count := range v.codecCounts {
-			codecs = append(codecs, codecCount{name, count})
-			if count > maxCount {
-				maxCount = count
-			}
-		}
-		sort.Slice(codecs, func(i, j int) bool {
-			return codecs[i].count > codecs[j].count
-		})
+	// Packet Loss
+	if v.avgPacketLoss > 0 {
+		result.WriteString(labelStyle.Render("Packet Loss:  "))
+		result.WriteString(RenderQualityMetric(v.avgPacketLoss, 1.0, 3.0, false, theme))
+		result.WriteString(dimStyle.Render("%"))
+		result.WriteString("\n")
+	}
 
-		// Render bar chart (top 5 codecs)
-		maxCodecs := 5
-		if len(codecs) < maxCodecs {
-			maxCodecs = len(codecs)
-		}
-
-		barWidth := 25
-		for i := 0; i < maxCodecs; i++ {
-			codec := codecs[i]
-			result.WriteString("  ")
-			result.WriteString(RenderDistributionBar(
-				fmt.Sprintf("%-8s", codec.name),
-				codec.count,
-				maxCount,
-				barWidth,
-				theme,
-			))
-			result.WriteString("\n")
-		}
-
-		if len(codecs) > maxCodecs {
-			result.WriteString(dimStyle.Render(fmt.Sprintf("  ... and %d more codecs\n", len(codecs)-maxCodecs)))
-		}
+	// Average duration
+	if v.avgDuration > 0 {
+		result.WriteString(labelStyle.Render("Avg Duration: "))
+		result.WriteString(valueStyle.Render(formatCallDuration(v.avgDuration)))
+		result.WriteString("\n")
 	}
 
 	return result.String()
+}
+
+// renderCodecDistribution renders the codec distribution section.
+// Must be called with lock held.
+func (v *VoIPStatsProvider) renderCodecDistribution(theme themes.Theme, barWidth int) string {
+	if len(v.codecCounts) == 0 {
+		return ""
+	}
+
+	var result strings.Builder
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(theme.InfoColor)
+
+	dimStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	result.WriteString(titleStyle.Render("Codecs"))
+	result.WriteString("\n\n")
+
+	// Sort codecs by count for display
+	type codecCount struct {
+		name  string
+		count int64
+	}
+	codecs := make([]codecCount, 0, len(v.codecCounts))
+	var maxCount int64
+	for name, count := range v.codecCounts {
+		codecs = append(codecs, codecCount{name, count})
+		if count > maxCount {
+			maxCount = count
+		}
+	}
+	sort.Slice(codecs, func(i, j int) bool {
+		return codecs[i].count > codecs[j].count
+	})
+
+	// Render bar chart (top 5 codecs)
+	maxCodecs := 5
+	if len(codecs) < maxCodecs {
+		maxCodecs = len(codecs)
+	}
+
+	for i := 0; i < maxCodecs; i++ {
+		codec := codecs[i]
+		result.WriteString(RenderDistributionBar(
+			fmt.Sprintf("%-8s", codec.name),
+			codec.count,
+			maxCount,
+			barWidth,
+			theme,
+		))
+		result.WriteString("\n")
+	}
+
+	if len(codecs) > maxCodecs {
+		result.WriteString(dimStyle.Render(fmt.Sprintf("... +%d more", len(codecs)-maxCodecs)))
+	}
+
+	return result.String()
+}
+
+// Render renders the VoIP statistics section (stacked layout for narrow screens).
+func (v *VoIPStatsProvider) Render(width int, theme themes.Theme) string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(theme.StatusBarFg)
+
+	if v.totalCalls == 0 {
+		return valueStyle.Render("  No VoIP calls detected.\n")
+	}
+
+	var result strings.Builder
+
+	// Call Overview
+	result.WriteString(v.renderCallOverview(theme))
+
+	// Quality Metrics
+	if qualitySection := v.renderQualityMetrics(theme); qualitySection != "" {
+		result.WriteString("\n")
+		result.WriteString(qualitySection)
+	}
+
+	// Codec Distribution
+	if codecSection := v.renderCodecDistribution(theme, 25); codecSection != "" {
+		result.WriteString("\n")
+		result.WriteString(codecSection)
+	}
+
+	return result.String()
+}
+
+// RenderColumnar renders the VoIP statistics in a columnar layout for wide screens.
+// Returns the content to be placed inside a card.
+func (v *VoIPStatsProvider) RenderColumnar(width int, theme themes.Theme) string {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	valueStyle := lipgloss.NewStyle().
+		Foreground(theme.StatusBarFg)
+
+	if v.totalCalls == 0 {
+		return valueStyle.Render("No VoIP calls detected.")
+	}
+
+	// Build each stats column
+	callOverview := v.renderCallOverview(theme)
+	qualityMetrics := v.renderQualityMetrics(theme)
+	codecDist := v.renderCodecDistribution(theme, 20)
+
+	// Collect non-empty stats columns
+	var statsColumns []string
+	if callOverview != "" {
+		statsColumns = append(statsColumns, strings.TrimRight(callOverview, "\n"))
+	}
+	if qualityMetrics != "" {
+		statsColumns = append(statsColumns, strings.TrimRight(qualityMetrics, "\n"))
+	}
+	if codecDist != "" {
+		statsColumns = append(statsColumns, strings.TrimRight(codecDist, "\n"))
+	}
+
+	if len(statsColumns) == 0 {
+		return valueStyle.Render("No VoIP calls detected.")
+	}
+
+	// Join stats columns horizontally
+	statsContent := lipgloss.JoinHorizontal(lipgloss.Top, insertColumnGaps(statsColumns, 4)...)
+	statsWidth := lipgloss.Width(statsContent)
+
+	// Add active calls sparkline as a 4th column if we have enough samples
+	if v.activeCallTracker != nil && v.activeCallTracker.SampleCount() > 2 {
+		// Sparkline width must match CPU/traffic sparklines exactly.
+		// CPU sparkline width = ((s.width - 2) / 2) - 4
+		// Our width param = s.width - 4, so sparklineWidth = width/2 - 3
+		sparklineWidth := width/2 - 3
+		if sparklineWidth < 20 {
+			sparklineWidth = 20
+		}
+
+		samples := v.activeCallTracker.GetSamples(sparklineWidth)
+		if len(samples) > 0 {
+			// Pad with zeros at the beginning for right-alignment (newest data on right)
+			if len(samples) < sparklineWidth {
+				padded := make([]float64, sparklineWidth)
+				copy(padded[sparklineWidth-len(samples):], samples)
+				samples = padded
+			}
+
+			// Build sparkline
+			sparkline := RenderActiveCallsSparkline(samples, sparklineWidth, 5, theme, v.activeCallTracker.GetPeak())
+
+			// Build sparkline column with title
+			titleStyle := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(theme.InfoColor)
+
+			var sparklineCol strings.Builder
+			sparklineCol.WriteString(titleStyle.Render("Active Calls"))
+			sparklineCol.WriteString("\n\n")
+			sparklineCol.WriteString(sparkline)
+
+			// Sparkline must end at right edge (position = width)
+			// So sparkline must start at: width - sparklineWidth
+			sparklineStartPos := width - sparklineWidth
+			gap := sparklineStartPos - statsWidth
+			if gap < 2 {
+				gap = 2
+			}
+
+			gapStr := strings.Repeat(" ", gap)
+			return lipgloss.JoinHorizontal(lipgloss.Top, statsContent, gapStr, sparklineCol.String())
+		}
+	}
+
+	return statsContent
+}
+
+// insertColumnGaps inserts gap spacing between columns.
+func insertColumnGaps(items []string, gap int) []string {
+	if len(items) <= 1 || gap <= 0 {
+		return items
+	}
+
+	gapStr := strings.Repeat(" ", gap)
+	result := make([]string, 0, len(items)*2-1)
+
+	for i, item := range items {
+		result = append(result, item)
+		if i < len(items)-1 {
+			result = append(result, gapStr)
+		}
+	}
+
+	return result
 }
 
 // formatCallDuration formats a duration in seconds to a human-readable string.

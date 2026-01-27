@@ -371,6 +371,11 @@ func (s *StatisticsView) UpdateTUIMetrics(cpuPercent float64, memoryRSSBytes uin
 		s.cpuTracker.Record(cpuPercent)
 	}
 
+	// Record active call sample for VoIP sparkline (synchronized with CPU)
+	if s.voipProvider != nil {
+		s.voipProvider.RecordActiveCallSample()
+	}
+
 	s.dirty = true
 }
 
@@ -2828,6 +2833,7 @@ func (s *StatisticsView) renderTUIMetrics(titleStyle, labelStyle, valueStyle lip
 }
 
 // renderProtocolStats renders protocol-specific statistics from the active provider.
+// Returns a full-width card with protocol stats in columnar layout.
 func (s *StatisticsView) renderProtocolStats() string {
 	if s.protocolRegistry == nil || s.selectedProtocol == "All" {
 		return ""
@@ -2838,5 +2844,22 @@ func (s *StatisticsView) renderProtocolStats() string {
 		return ""
 	}
 
-	return provider.Render(s.width, s.theme)
+	// Use columnar layout for medium/wide screens
+	cardWidth := s.width - 2
+	contentWidth := cardWidth - 2 // Card has Padding(0, 1) = 1 char each side
+	var content string
+
+	// Check if provider supports columnar rendering (VoIP)
+	if voipProvider, ok := provider.(*VoIPStatsProvider); ok {
+		content = voipProvider.RenderColumnar(contentWidth, s.theme)
+	} else {
+		content = provider.Render(contentWidth, s.theme)
+	}
+
+	// Wrap in a full-width card
+	card := dashboard.NewCard("VOIP STATISTICS", content, s.theme,
+		dashboard.WithIcon("📞"),
+		dashboard.WithWidth(cardWidth))
+
+	return card.Render()
 }

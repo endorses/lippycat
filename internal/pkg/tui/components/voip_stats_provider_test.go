@@ -152,7 +152,7 @@ func TestVoIPStatsProvider_Render(t *testing.T) {
 	assert.Contains(t, result, "Completed")
 	assert.Contains(t, result, "Quality Metrics")
 	assert.Contains(t, result, "MOS")
-	assert.Contains(t, result, "Codec Distribution")
+	assert.Contains(t, result, "Codecs")
 }
 
 func TestVoIPStatsProvider_SetTheme(t *testing.T) {

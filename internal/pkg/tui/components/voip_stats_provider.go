@@ -529,14 +529,30 @@ func (v *VoIPStatsProvider) RenderColumnar(width int, theme themes.Theme) string
 	statsContent := lipgloss.JoinHorizontal(lipgloss.Top, insertColumnGaps(statsColumns, 4)...)
 	statsWidth := lipgloss.Width(statsContent)
 
-	// Add active calls sparkline as a 4th column if we have enough samples
+	// Add active calls sparkline if we have enough samples
 	if v.activeCallTracker != nil && v.activeCallTracker.SampleCount() > 2 {
-		// Sparkline width must match CPU/traffic sparklines exactly.
+		// Wide layout sparkline width must match CPU/traffic sparklines exactly.
 		// CPU sparkline width = ((s.width - 2) / 2) - 4
 		// Our width param = s.width - 4, so sparklineWidth = width/2 - 3
-		sparklineWidth := width/2 - 3
-		if sparklineWidth < 20 {
-			sparklineWidth = 20
+		wideSparklineWidth := width/2 - 3
+		if wideSparklineWidth < 20 {
+			wideSparklineWidth = 20
+		}
+
+		// Check if there's enough space for sparkline beside stats (as 4th column)
+		// Minimum gap of 4 chars between stats and sparkline
+		minGap := 4
+		sparklineStartPos := width - wideSparklineWidth
+		gap := sparklineStartPos - statsWidth
+		useWideLayout := gap >= minGap
+
+		// Determine actual sparkline width based on layout
+		var sparklineWidth int
+		if useWideLayout {
+			sparklineWidth = wideSparklineWidth
+		} else {
+			// Medium layout: full width
+			sparklineWidth = width
 		}
 
 		samples := v.activeCallTracker.GetSamples(sparklineWidth)
@@ -561,16 +577,14 @@ func (v *VoIPStatsProvider) RenderColumnar(width int, theme themes.Theme) string
 			sparklineCol.WriteString("\n\n")
 			sparklineCol.WriteString(sparkline)
 
-			// Sparkline must end at right edge (position = width)
-			// So sparkline must start at: width - sparklineWidth
-			sparklineStartPos := width - sparklineWidth
-			gap := sparklineStartPos - statsWidth
-			if gap < 2 {
-				gap = 2
+			if useWideLayout {
+				// Wide layout: sparkline as 4th column, right-aligned
+				gapStr := strings.Repeat(" ", gap)
+				return lipgloss.JoinHorizontal(lipgloss.Top, statsContent, gapStr, sparklineCol.String())
 			}
 
-			gapStr := strings.Repeat(" ", gap)
-			return lipgloss.JoinHorizontal(lipgloss.Top, statsContent, gapStr, sparklineCol.String())
+			// Medium layout: sparkline below stats columns, full width
+			return lipgloss.JoinVertical(lipgloss.Left, statsContent, "", sparklineCol.String())
 		}
 	}
 

@@ -8,12 +8,14 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/tui"
 	"github.com/google/gopacket/tcpassembly"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -103,6 +105,12 @@ func runFile(cmd *cobra.Command, args []string) {
 		"",              // nodesFilePath
 		insecureAllowed, // insecure - passed for remote mode switching
 	)
+
+	// Full terminal reset (RIS) to clear any corrupted state including color palette
+	fmt.Print("\033c")
+
+	// Force color profile since termenv may have detected wrong profile during init
+	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	// Start bubbletea program with mouse support
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())

@@ -66,12 +66,18 @@ func (act *ActiveCallTracker) Record(activeCalls int) {
 // GetSamples returns active call samples for sparkline rendering.
 // Returns samples from oldest to newest, up to maxPoints.
 // Results are cached and reused if maxPoints matches the cached width.
+// If maxPoints exceeds the current buffer capacity, the buffer is grown automatically.
 func (act *ActiveCallTracker) GetSamples(maxPoints int) []float64 {
 	act.mu.Lock()
 	defer act.mu.Unlock()
 
 	if act.count == 0 || maxPoints <= 0 {
 		return nil
+	}
+
+	// Grow buffer if sparkline width exceeds current capacity
+	if maxPoints > act.maxSamples {
+		act.growBufferLocked(maxPoints)
 	}
 
 	// Return cached samples if valid and width matches
@@ -120,6 +126,25 @@ func (act *ActiveCallTracker) GetSamples(maxPoints int) []float64 {
 	act.samplesValid = true
 
 	return samples
+}
+
+// growBufferLocked increases the buffer capacity to accommodate larger sparkline widths.
+// Must be called with lock held.
+func (act *ActiveCallTracker) growBufferLocked(newSize int) {
+	// Create new buffer
+	newSamples := make([]float64, newSize)
+
+	// Copy existing samples in order (oldest to newest)
+	for i := 0; i < act.count; i++ {
+		oldIdx := (act.head - act.count + i + act.maxSamples) % act.maxSamples
+		newSamples[i] = act.samples[oldIdx]
+	}
+
+	// Update state - samples are now stored linearly starting at index 0
+	act.samples = newSamples
+	act.maxSamples = newSize
+	act.head = act.count // Next write position is right after existing samples
+	act.samplesValid = false
 }
 
 // GetCurrent returns the most recent active call count.

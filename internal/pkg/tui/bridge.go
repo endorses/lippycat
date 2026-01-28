@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -349,6 +350,7 @@ type BridgeStats struct {
 	SamplingRatio    int64 // Current sampling ratio * 1000 (e.g., 1000 = 100%, 500 = 50%)
 	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s window, for throttling)
 	Running          int32 // 1 if bridge is running, 0 if stopped
+	CaptureComplete  int32 // 1 if capture completed successfully (offline mode), 0 otherwise
 }
 
 // recentDropTracker tracks batch drops over a sliding window for throttling
@@ -386,6 +388,7 @@ var pendingPackets = &pendingPacketBuffer{
 func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
+	beforeLen := len(pb.packets)
 	pb.packets = append(pb.packets, packets...)
 
 	// Cap buffer size to prevent unbounded growth (only for live capture).
@@ -395,8 +398,22 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 	if !hasCallTracker {
 		const maxPending = 5000
 		if len(pb.packets) > maxPending {
+			dropped := len(pb.packets) - maxPending
 			pb.packets = pb.packets[len(pb.packets)-maxPending:]
+			logger.Warn("pendingPackets: buffer capped, packets dropped",
+				"dropped", dropped,
+				"has_call_tracker", hasCallTracker)
 		}
+	}
+
+	// DEBUG: Log pending buffer state periodically
+	afterLen := len(pb.packets)
+	if afterLen%500 == 0 || afterLen < 100 {
+		logger.Debug("pendingPackets: buffer state",
+			"before", beforeLen,
+			"added", len(packets),
+			"after", afterLen,
+			"has_call_tracker", hasCallTracker)
 	}
 }
 
@@ -525,7 +542,16 @@ func GetBridgeStats() BridgeStats {
 		SamplingRatio:    atomic.LoadInt64(&bridgeStats.SamplingRatio),
 		RecentDropRate:   dropTracker.getRecentDropRate(),
 		Running:          atomic.LoadInt32(&bridgeStats.Running),
+		CaptureComplete:  atomic.LoadInt32(&bridgeStats.CaptureComplete),
 	}
+}
+
+// ClearPendingPackets clears any leftover packets from previous capture sessions.
+// This should be called when starting a new capture to avoid mixing old and new packets.
+func ClearPendingPackets() {
+	pendingPackets.mu.Lock()
+	defer pendingPackets.mu.Unlock()
+	pendingPackets.packets = pendingPackets.packets[:0]
 }
 
 // ResetBridgeStats resets bridge statistics to zero.
@@ -537,6 +563,7 @@ func ResetBridgeStats() {
 	atomic.StoreInt64(&bridgeStats.QueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.MaxQueueDepth, 0)
 	atomic.StoreInt64(&bridgeStats.SamplingRatio, 1000) // Default to 100%
+	atomic.StoreInt32(&bridgeStats.CaptureComplete, 0)
 	// Note: Running is not reset here - it reflects actual bridge state
 }
 
@@ -551,6 +578,12 @@ func ResetBridgeStats() {
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
 func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal) {
+	// Wait for TUI to be fully initialized before processing packets.
+	// This prevents race conditions where messages are sent before
+	// Bubbletea has completed terminal setup, which can cause
+	// "kevent: bad file descriptor" errors.
+	WaitForTUIReady()
+
 	// Mark bridge as running
 	atomic.StoreInt32(&bridgeStats.Running, 1)
 	defer atomic.StoreInt32(&bridgeStats.Running, 0)
@@ -602,8 +635,13 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	// The TUI pulls from the pending buffer on its own timer, so this never blocks.
 	// When paused, packets are discarded (the bridge is blocked, so minimal packets arrive).
 	consumerDone := make(chan struct{})
+	var consumerPacketsReceived int64
 	go func() {
 		defer close(consumerDone)
+		defer func() {
+			logger.Debug("Bridge consumer: shutting down",
+				"total_packets_added_to_pending", consumerPacketsReceived)
+		}()
 
 		for {
 			select {
@@ -614,9 +652,12 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				}
 				// Discard packets when paused (bridge is blocked, so minimal arrive)
 				if pause != nil && pause.IsPaused() {
+					logger.Debug("Bridge consumer: discarding batch due to pause",
+						"batch_size", len(msg.Packets))
 					continue
 				}
 				// Add to pending buffer (never blocks - TUI pulls when ready)
+				consumerPacketsReceived += int64(len(msg.Packets))
 				pendingPackets.addPackets(msg.Packets)
 			}
 		}
@@ -632,6 +673,12 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, we MUST NOT drop packets - use blocking send
 			hasCallTracker := GetCallTracker() != nil
+
+			// DEBUG: Log batch send details
+			logger.Debug("Bridge: sending batch",
+				"batch_size", len(batch),
+				"has_call_tracker", hasCallTracker,
+				"packets_received_so_far", atomic.LoadInt64(&bridgeStats.PacketsReceived))
 
 			if hasCallTracker {
 				// Blocking send - wait until TUI is ready (offline mode)
@@ -735,12 +782,38 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		case pktInfo, ok := <-packetChan:
 			if !ok {
 				// Channel closed, send remaining batch and shutdown consumer
-				logger.Info("Bridge: packet channel closed, shutting down",
-					"packets_received", atomic.LoadInt64(&bridgeStats.PacketsReceived),
-					"batches_sent", atomic.LoadInt64(&bridgeStats.BatchesSent))
-				sendBatch()
+				pendingBatchSize := len(batch)
+				sendBatch() // Send final batch before capturing stats
+				logger.Debug("Bridge: final batch sent, closing consumer channel")
 				close(tuiBatchChan)
 				<-consumerDone // Wait for consumer to finish
+
+				// Capture final stats AFTER sending the last batch
+				finalPacketsReceived := atomic.LoadInt64(&bridgeStats.PacketsReceived)
+				finalPacketsDisplayed := atomic.LoadInt64(&bridgeStats.PacketsDisplayed)
+				finalBatchesSent := atomic.LoadInt64(&bridgeStats.BatchesSent)
+				finalBatchesDropped := atomic.LoadInt64(&bridgeStats.BatchesDropped)
+
+				logger.Info("Bridge: packet channel closed, shutting down",
+					"packets_received", finalPacketsReceived,
+					"packets_displayed", finalPacketsDisplayed,
+					"batches_sent", finalBatchesSent,
+					"batches_dropped", finalBatchesDropped,
+					"final_batch_size", pendingBatchSize)
+
+				// Write debug summary to file (useful when logger is disabled in TUI mode)
+				// #nosec G304 -- Debug output file path is hardcoded
+				if f, err := os.OpenFile("/tmp/lippycat_bridge_debug.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+					fmt.Fprintf(f, "[%s] Bridge shutdown: received=%d, displayed=%d, batches_sent=%d, batches_dropped=%d\n",
+						time.Now().Format(time.RFC3339),
+						finalPacketsReceived, finalPacketsDisplayed, finalBatchesSent, finalBatchesDropped)
+					f.Close()
+				}
+
+				// Mark capture as successfully completed (for health indicator)
+				atomic.StoreInt32(&bridgeStats.CaptureComplete, 1)
+
+				logger.Debug("Bridge: consumer finished, exiting")
 				return
 			}
 

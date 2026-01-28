@@ -194,6 +194,7 @@ type BridgeStatistics struct {
 	SamplingRatio    int64 // Current sampling ratio * 1000 (1000 = 100%)
 	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s, for throttling)
 	Running          int32 // 1 if bridge is running, 0 if stopped
+	CaptureComplete  int32 // 1 if capture completed successfully (offline mode), 0 otherwise
 }
 
 // StatisticsView displays statistics
@@ -2532,8 +2533,9 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 		Level HealthLevel
 	}
 
-	// Bridge running status - CRITICAL if not running
-	if s.bridgeStats != nil && s.bridgeStats.Running == 0 && s.bridgeStats.PacketsReceived > 0 {
+	// Bridge running status - CRITICAL if not running (unless capture completed successfully)
+	// For offline capture, the bridge stops after reading all packets, which is normal
+	if s.bridgeStats != nil && s.bridgeStats.Running == 0 && s.bridgeStats.PacketsReceived > 0 && s.bridgeStats.CaptureComplete == 0 {
 		items = append(items, struct {
 			Label string
 			Level HealthLevel
@@ -2550,8 +2552,9 @@ func (s *StatisticsView) renderHealthSection(titleStyle lipgloss.Style) string {
 		}{"Drops", dropLevel})
 	}
 
-	// Queue depth health (if available)
-	if s.bridgeStats != nil && s.bridgeStats.MaxQueueDepth > 0 {
+	// Queue depth health (if available and capture is running)
+	// Skip for completed offline captures since queue depth is not relevant
+	if s.bridgeStats != nil && s.bridgeStats.MaxQueueDepth > 0 && s.bridgeStats.CaptureComplete == 0 {
 		queueRatio := float64(s.bridgeStats.QueueDepth) / float64(s.bridgeStats.MaxQueueDepth)
 		queueLevel := HealthFromRatio(queueRatio, 0.5, 0.85, true)
 		items = append(items, struct {
@@ -2604,8 +2607,9 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 		Level HealthLevel
 	}
 
-	// Bridge running status - CRITICAL if not running
-	if s.bridgeStats != nil && s.bridgeStats.Running == 0 && s.bridgeStats.PacketsReceived > 0 {
+	// Bridge running status - CRITICAL if not running (unless capture completed successfully)
+	// For offline capture, the bridge stops after reading all packets, which is normal
+	if s.bridgeStats != nil && s.bridgeStats.Running == 0 && s.bridgeStats.PacketsReceived > 0 && s.bridgeStats.CaptureComplete == 0 {
 		items = append(items, struct {
 			Label string
 			Level HealthLevel
@@ -2622,8 +2626,9 @@ func (s *StatisticsView) buildHealthContent(contentWidth int) string {
 		}{"Drops", dropLevel})
 	}
 
-	// Queue depth health (if available)
-	if s.bridgeStats != nil && s.bridgeStats.MaxQueueDepth > 0 {
+	// Queue depth health (if available and capture is running)
+	// Skip for completed offline captures since queue depth is not relevant
+	if s.bridgeStats != nil && s.bridgeStats.MaxQueueDepth > 0 && s.bridgeStats.CaptureComplete == 0 {
 		queueRatio := float64(s.bridgeStats.QueueDepth) / float64(s.bridgeStats.MaxQueueDepth)
 		queueLevel := HealthFromRatio(queueRatio, 0.5, 0.85, true)
 		items = append(items, struct {

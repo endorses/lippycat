@@ -126,8 +126,9 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	m.statistics.MaxPacketSize = 0
 	m.uiState.StatisticsView.SetStatistics(m.statistics)
 
-	// Reset bridge stats (clears stale PacketsReceived from previous capture mode)
+	// Reset bridge state (clears stale data from previous capture mode)
 	ResetBridgeStats()
+	ClearPendingPackets()
 
 	// Start new capture in background using synchronized program reference
 	program := globalCaptureState.GetProgram()
@@ -219,6 +220,15 @@ func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string,
 	capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
 		startTUISnifferOrdered(ctx, devices, filter, program)
 	})
+
+	// Notify TUI that capture is complete so it can drain remaining packets
+	// This is critical for offline capture where files are read quickly
+	stats := GetBridgeStats()
+	if program != nil {
+		program.Send(CaptureCompleteMsg{
+			PacketsReceived: stats.PacketsReceived,
+		})
+	}
 }
 
 // startTUISniffer initializes packet capture and bridges packets to the TUI

@@ -49,10 +49,15 @@ func TestHandleTickMsg_WhenPaused(t *testing.T) {
 }
 
 func TestHandleTickMsg_WhenActive(t *testing.T) {
+	// Clear any leftover state from previous tests
+	ClearPendingPackets()
+
 	theme := themes.Solarized()
+	uiState := store.NewUIState(theme)
 	m := Model{
-		uiState:     store.NewUIState(theme),
+		uiState:     uiState,
 		packetStore: store.NewPacketStore(100),
+		statistics:  uiState.Statistics,
 	}
 	m.uiState.Paused = false
 	m.uiState.Capturing = true

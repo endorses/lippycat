@@ -507,6 +507,97 @@ func TestPacketBuffer_Send_RaceWithClose(t *testing.T) {
 	// If we get here without panic or race detector errors, test passes
 }
 
+// TestPacketBuffer_SendBlocking tests that SendBlocking does not drop packets
+func TestPacketBuffer_SendBlocking(t *testing.T) {
+	ctx := context.Background()
+	buffer := NewPacketBuffer(ctx, 100)
+
+	pkt := createTestPacket()
+
+	// Start reader first to prevent blocking
+	var received int64
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for pkt := range buffer.Receive() {
+			_ = pkt
+			atomic.AddInt64(&received, 1)
+		}
+	}()
+
+	// Send many packets using SendBlocking
+	const numPackets = 500
+	sent := 0
+	for i := 0; i < numPackets; i++ {
+		if buffer.SendBlocking(pkt) {
+			sent++
+		}
+	}
+
+	// Close buffer to stop reader
+	buffer.CloseInputs()
+	buffer.Close()
+	<-done
+
+	// Check that NO packets were dropped (that's the point of SendBlocking)
+	assert.Equal(t, int64(0), buffer.GetDropped(), "SendBlocking should NOT drop regular packets")
+	assert.Equal(t, int64(0), buffer.GetSIPDropped(), "SendBlocking should NOT drop SIP packets")
+	assert.Equal(t, numPackets, sent, "All SendBlocking calls should succeed")
+	assert.Equal(t, int64(numPackets), atomic.LoadInt64(&received), "All packets should be received")
+
+	t.Logf("Sent: %d, Received: %d", sent, atomic.LoadInt64(&received))
+}
+
+// TestPacketBuffer_SendBlocking_vs_Send tests that SendBlocking doesn't drop while Send does
+func TestPacketBuffer_SendBlocking_vs_Send(t *testing.T) {
+	ctx := context.Background()
+	// Very small buffer to force Send() to drop
+	buffer := NewPacketBuffer(ctx, 1)
+
+	pkt := createTestPacket()
+
+	// Don't read - let buffer fill up
+	// Use non-blocking Send which should drop packets
+	sendSuccesses := 0
+	for i := 0; i < 100; i++ {
+		if buffer.Send(pkt) {
+			sendSuccesses++
+		}
+	}
+
+	// Non-blocking Send should have dropped some
+	droppedRegular := buffer.GetDropped()
+	t.Logf("Non-blocking Send: successes=%d, dropped=%d", sendSuccesses, droppedRegular)
+
+	// Now close this buffer
+	buffer.Close()
+
+	// The key difference: with a slow consumer, Send drops while SendBlocking waits
+	// We verified Send drops above; SendBlocking is tested in TestPacketBuffer_SendBlocking
+	assert.Greater(t, droppedRegular, int64(0), "Non-blocking Send should drop packets when buffer is full")
+}
+
+// TestPacketBuffer_SendBlocking_ContextCancellation tests that SendBlocking respects context
+func TestPacketBuffer_SendBlocking_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	buffer := NewPacketBuffer(ctx, 1)
+	defer buffer.Close()
+
+	pkt := createTestPacket()
+
+	// Fill buffer without reading (use non-blocking Send to fill quickly)
+	for i := 0; i < 10; i++ {
+		buffer.Send(pkt)
+	}
+
+	// Now cancel context
+	cancel()
+
+	// SendBlocking should return false immediately when context is cancelled
+	result := buffer.SendBlocking(pkt)
+	assert.False(t, result, "SendBlocking should return false when context is cancelled")
+}
+
 // TestPacketBuffer_SIPPrioritization tests that SIP packets are prioritized over regular packets
 func TestPacketBuffer_SIPPrioritization(t *testing.T) {
 	ctx := context.Background()

@@ -17,21 +17,57 @@ type CaptureState struct {
 	handle      *captureHandle
 	program     *tea.Program
 	pauseSignal *PauseSignal
+	ready       chan struct{} // Closed when TUI is ready to receive messages
+	readyOnce   sync.Once     // Ensures ready channel is closed only once
 }
 
 // globalCaptureState is the package-level synchronized capture state.
 // While still a singleton, it provides thread-safe access via accessor methods.
 var globalCaptureState = &CaptureState{
 	pauseSignal: NewPauseSignal(),
+	ready:       make(chan struct{}),
 }
 
 // SetProgram sets the tea.Program reference used by event handlers.
 // This must be called before starting packet capture to enable message sending.
 // The program reference is typically set once at startup and not changed.
+// When a new program is set, the ready state is reset.
 func (cs *CaptureState) SetProgram(p *tea.Program) {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	cs.program = p
+	// Reset ready state for new program
+	if p != nil {
+		cs.ready = make(chan struct{})
+		cs.readyOnce = sync.Once{}
+	}
+}
+
+// SignalReady signals that the TUI is fully initialized and ready to receive messages.
+// This should be called after the first WindowSizeMsg is processed.
+// Safe to call multiple times - only the first call has any effect.
+func (cs *CaptureState) SignalReady() {
+	cs.readyOnce.Do(func() {
+		close(cs.ready)
+	})
+}
+
+// WaitForReady blocks until the TUI is ready to receive messages.
+// This should be called by capture goroutines before sending messages.
+// Returns immediately if the TUI is already ready.
+func (cs *CaptureState) WaitForReady() {
+	<-cs.ready
+}
+
+// IsReady returns true if the TUI is ready to receive messages.
+// This is a non-blocking check.
+func (cs *CaptureState) IsReady() bool {
+	select {
+	case <-cs.ready:
+		return true
+	default:
+		return false
+	}
 }
 
 // GetProgram returns the tea.Program reference for sending messages.

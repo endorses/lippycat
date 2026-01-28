@@ -77,6 +77,7 @@ func (m *Model) updateBridgeStats() {
 		SamplingRatio:    stats.SamplingRatio,
 		RecentDropRate:   stats.RecentDropRate,
 		Running:          stats.Running,
+		CaptureComplete:  stats.CaptureComplete,
 	})
 }
 

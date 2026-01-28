@@ -386,10 +386,13 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 
 	// Phase 3: Create buffer and send packets in order
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
+	// IMPORTANT: defer order matters! Close() must run BEFORE cancel()
+	// because Close() needs the context to still be active for proper draining.
+	// Defers run in LIFO order, so we set cancel() first (runs last).
+	defer cancel()
 	defer packetBuffer.Close()
 
 	// Start processor
@@ -400,9 +403,12 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 		processor(packetBuffer.Receive(), assembler)
 	}()
 
-	// Send all packets in timestamp order
+	// Send all packets in timestamp order using blocking send.
+	// CRITICAL: For offline mode, we MUST use SendBlocking() to ensure all packets
+	// are processed. The non-blocking Send() would drop packets if the consumer
+	// (TUI bridge) hasn't started reading yet, causing inconsistent packet counts.
 	for _, pkt := range allPackets {
-		if !packetBuffer.Send(pkt) {
+		if !packetBuffer.SendBlocking(pkt) {
 			// Buffer closed or context cancelled
 			break
 		}
@@ -414,10 +420,15 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Close the buffer so processor can exit
-	packetBuffer.Close()
+	// Signal end of input by closing input channels.
+	// CRITICAL: Use CloseInputs() NOT Close()!
+	// Close() cancels the context which causes the merger goroutine to exit early,
+	// losing any packets still in the pipeline. CloseInputs() just closes the
+	// input channels, allowing the merger to drain them properly before closing
+	// the output channel (mergedCh), which signals the processor to exit.
+	packetBuffer.CloseInputs()
 
-	// Wait for processor to finish
+	// Wait for processor to finish (it will exit when mergedCh closes after draining)
 	processorWg.Wait()
 
 	logger.Info("Timestamp-ordered offline capture completed",

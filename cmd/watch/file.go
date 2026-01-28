@@ -106,9 +106,6 @@ func runFile(cmd *cobra.Command, args []string) {
 		insecureAllowed, // insecure - passed for remote mode switching
 	)
 
-	// Full terminal reset (RIS) to clear any corrupted state including color palette
-	fmt.Print("\033c")
-
 	// Force color profile since termenv may have detected wrong profile during init
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
@@ -132,9 +129,18 @@ func runFile(cmd *cobra.Command, args []string) {
 
 	go func() {
 		defer close(done)
+		// Wait for TUI to be fully initialized before starting capture.
+		// This prevents "kevent: bad file descriptor" errors that occur when
+		// capture runs before Bubbletea has completed terminal setup.
+		tui.WaitForTUIReady()
+
 		capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 			startFileSnifferOrdered(ctx, devices, filter, p)
 		})
+
+		// Notify TUI that capture is complete so it can drain remaining packets
+		stats := tui.GetBridgeStats()
+		tui.SendCaptureCompleteMsg(stats.PacketsReceived)
 	}()
 
 	// Run TUI

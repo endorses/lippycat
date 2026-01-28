@@ -22,6 +22,11 @@ type FileOverwriteData struct {
 
 // handleWindowSizeMsg handles terminal window resize events
 func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
+	// Signal that TUI is ready to receive messages (first WindowSizeMsg indicates
+	// Bubbletea has completed terminal setup). This unblocks capture goroutines
+	// that are waiting to send messages.
+	SignalTUIReady()
+
 	m.uiState.Width = msg.Width
 	m.uiState.Height = msg.Height
 
@@ -455,4 +460,48 @@ func (m Model) handleFiltersLoadedMsg(msg components.FiltersLoadedMsg) (Model, t
 func (m Model) handleFilterOperationMsg(msg components.FilterOperationMsg) (Model, tea.Cmd) {
 	// Execute filter operation via gRPC
 	return m, m.executeFilterOperation(msg)
+}
+
+// handleCaptureCompleteMsg handles offline capture completion.
+// This is critical for ensuring all packets are processed when reading PCAP files,
+// which can complete faster than the TUI tick interval (100ms).
+func (m Model) handleCaptureCompleteMsg(msg CaptureCompleteMsg) (Model, tea.Cmd) {
+	logger.Debug("Offline capture complete, draining remaining packets",
+		"packets_received", msg.PacketsReceived)
+
+	// Drain ALL remaining packets from pending buffer
+	// Unlike the tick handler which drains a limited number, we drain everything
+	// to ensure no packets are lost when capture completes
+	for {
+		pendingPackets := DrainPendingPackets()
+		if len(pendingPackets) == 0 {
+			break
+		}
+		m.processPendingPackets(pendingPackets)
+	}
+
+	// Do a final packet list update
+	m.updatePacketListIncremental()
+
+	// Update details panel if showing
+	if m.uiState.ShowDetails {
+		m.updateDetailsPanel()
+	}
+
+	// Get final packet count from store for the toast message
+	_, _, totalPackets, _ := m.packetStore.GetBufferInfo()
+
+	// Show completion toast
+	toastCmd := m.uiState.Toast.Show(
+		fmt.Sprintf("Capture complete: %d packets loaded", totalPackets),
+		components.ToastSuccess,
+		components.ToastDurationLong,
+	)
+
+	// Note: We don't set Capturing = false here because:
+	// 1. The user might want to continue viewing/filtering packets
+	// 2. The tick handler continues updating the UI as needed
+	// 3. Setting it to false would stop all UI updates
+
+	return m, toastCmd
 }

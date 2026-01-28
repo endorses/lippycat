@@ -249,6 +249,64 @@ func (pb *PacketBuffer) Send(pkt PacketInfo) bool {
 	}
 }
 
+// SendBlocking sends a packet to the buffer, blocking until there's space.
+// Unlike Send(), this will NOT drop packets due to buffer full conditions.
+// Use this for offline PCAP reading where all packets MUST be processed.
+// Returns false only if the buffer is closed or context is cancelled.
+func (pb *PacketBuffer) SendBlocking(pkt PacketInfo) bool {
+	// Check pause state first (skip packet if paused)
+	pb.pauseMu.RLock()
+	pauseFn := pb.pauseFn
+	pb.pauseMu.RUnlock()
+	if pauseFn != nil && pauseFn() {
+		return false // Paused - drop packet silently
+	}
+
+	// Check if already closed
+	if atomic.LoadInt32(&pb.closed) == 1 {
+		return false
+	}
+
+	// Use mutex to ensure closed-check-and-add is atomic with respect to Close()
+	pb.sendersMu.Lock()
+	if atomic.LoadInt32(&pb.closed) == 1 {
+		pb.sendersMu.Unlock()
+		return false
+	}
+	pb.sendersWg.Add(1)
+	pb.sendersMu.Unlock()
+
+	defer pb.sendersWg.Done()
+
+	// Check context cancellation first
+	select {
+	case <-pb.ctx.Done():
+		return false
+	default:
+	}
+
+	// Fast SIP detection - route SIP to priority channel
+	isSIP := pb.isSIPPacket(pkt.Packet)
+
+	if isSIP {
+		// Try SIP priority channel first (blocking)
+		select {
+		case pb.sipCh <- pkt:
+			return true
+		case <-pb.ctx.Done():
+			return false
+		}
+	}
+
+	// Regular packet - send to main channel (blocking)
+	select {
+	case pb.ch <- pkt:
+		return true
+	case <-pb.ctx.Done():
+		return false
+	}
+}
+
 // isSIPPacket performs fast SIP detection on a packet.
 // Checks for common SIP methods and responses in TCP/UDP payload.
 func (pb *PacketBuffer) isSIPPacket(pkt gopacket.Packet) bool {

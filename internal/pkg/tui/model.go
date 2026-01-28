@@ -88,6 +88,12 @@ type SaveCompleteMsg struct {
 	Streaming    bool // True if this was a streaming save stop
 }
 
+// CaptureCompleteMsg is sent when offline capture finishes reading all files.
+// This triggers a final drain of pending packets to ensure none are lost.
+type CaptureCompleteMsg struct {
+	PacketsReceived int64 // Total packets received by bridge
+}
+
 // Model represents the TUI application state
 // Data management is delegated to specialized stores
 type Model struct {
@@ -300,6 +306,13 @@ func (m Model) Init() tea.Cmd {
 // Shutdown cleans up resources before quitting.
 // Call this before tea.Quit to ensure proper cleanup.
 func (m *Model) Shutdown() {
+	// Clear program reference FIRST to prevent goroutines from sending
+	// messages to a terminated program (causes "kevent: bad file descriptor")
+	ClearCurrentProgram()
+
+	// Stop capture to prevent more packets from being processed
+	globalCaptureState.StopCapture()
+
 	// Stop system metrics collector
 	if m.metricsCollector != nil {
 		m.metricsCollector.Stop()
@@ -308,6 +321,13 @@ func (m *Model) Shutdown() {
 
 // Update handles messages and updates the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Recover from any panics to prevent cryptic "kevent: bad file descriptor" errors
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("Panic in TUI Update", "panic", r, "msg_type", fmt.Sprintf("%T", msg))
+		}
+	}()
+
 	// If settings tab is active and editing interface, pass messages to settings
 	// (this is needed for list filtering to work properly)
 	// Handle toast messages FIRST (even when modals are active)
@@ -486,6 +506,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleFiltersLoadedMsg(msg)
 	case components.FilterOperationMsg:
 		return m.handleFilterOperationMsg(msg)
+	case CaptureCompleteMsg:
+		return m.handleCaptureCompleteMsg(msg)
 	}
 
 	// Return toast command if active

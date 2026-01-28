@@ -108,6 +108,11 @@ func runLive(cmd *cobra.Command, args []string) {
 
 	go func() {
 		defer close(done)
+		// Wait for TUI to be fully initialized before starting capture.
+		// This prevents "kevent: bad file descriptor" errors that occur when
+		// capture runs before Bubbletea has completed terminal setup.
+		tui.WaitForTUIReady()
+
 		capture.StartLiveSniffer(liveInterfaces, liveFilter, func(devices []pcaptypes.PcapInterface, filter string) {
 			startLiveSniffer(ctx, devices, filter, p)
 		})

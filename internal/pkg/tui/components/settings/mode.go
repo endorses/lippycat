@@ -66,6 +66,11 @@ type ModeSettings interface {
 	// Used to update text inputs, lists, etc.
 	// Returns a tea.Cmd if the mode component needs to send commands.
 	Update(msg tea.Msg, focusIndex int) tea.Cmd
+
+	// FocusField focuses the text input at the given field index.
+	// Used when entering edit mode via mouse double-click.
+	// Does nothing for non-text-input fields (toggles, lists, etc.).
+	FocusField(fieldIndex int)
 }
 
 // RestartCaptureMsg is sent when capture needs to be restarted with new settings.

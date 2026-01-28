@@ -27,6 +27,10 @@ type LiveSettings struct {
 	// For interface editing state
 	savedInterfaceIndex int
 	savedSelectedIfaces map[string]bool
+
+	// For text input editing state (restore on Escape)
+	savedBufferValue string
+	savedFilterValue string
 }
 
 // NewLiveSettings creates a new LiveSettings instance
@@ -282,6 +286,7 @@ func (ls *LiveSettings) HandleKey(key string, params KeyHandlerParams) KeyHandle
 		case 3: // Buffer size
 			result.Editing = !params.Editing
 			if result.Editing {
+				ls.savedBufferValue = ls.bufferInput.Value()
 				ls.bufferInput.Focus()
 			} else {
 				ls.bufferInput.Blur()
@@ -291,6 +296,7 @@ func (ls *LiveSettings) HandleKey(key string, params KeyHandlerParams) KeyHandle
 		case 4: // Filter
 			result.Editing = !params.Editing
 			if result.Editing {
+				ls.savedFilterValue = ls.filterInput.Value()
 				ls.filterInput.Focus()
 			} else {
 				ls.filterInput.Blur()
@@ -301,14 +307,14 @@ func (ls *LiveSettings) HandleKey(key string, params KeyHandlerParams) KeyHandle
 	case "esc":
 		if params.Editing {
 			switch params.FocusIndex {
-			case 3: // Buffer - cancel edit, don't save
+			case 3: // Buffer - cancel edit, restore original value
+				ls.bufferInput.SetValue(ls.savedBufferValue)
 				ls.bufferInput.Blur()
 				result.Editing = false
-				// Don't trigger update - cancel the edit
-			case 4: // Filter - cancel edit, don't save
+			case 4: // Filter - cancel edit, restore original value
+				ls.filterInput.SetValue(ls.savedFilterValue)
 				ls.filterInput.Blur()
 				result.Editing = false
-				// Don't trigger restart - cancel the edit
 			}
 		}
 	}
@@ -396,6 +402,21 @@ func (ls *LiveSettings) Update(msg tea.Msg, focusIndex int) tea.Cmd {
 		ls.filterInput, cmd = ls.filterInput.Update(msg)
 	}
 	return cmd
+}
+
+// FocusField focuses the text input at the given field index.
+// Live mode: field 3 = buffer, field 4 = filter.
+// Fields 1 (interface list) and 2 (promiscuous toggle) are not text inputs.
+// Also saves the current value for restoration on Escape.
+func (ls *LiveSettings) FocusField(fieldIndex int) {
+	switch fieldIndex {
+	case 3:
+		ls.savedBufferValue = ls.bufferInput.Value()
+		ls.bufferInput.Focus()
+	case 4:
+		ls.savedFilterValue = ls.filterInput.Value()
+		ls.filterInput.Focus()
+	}
 }
 
 // UpdateInterfaceList handles updates for the interface list during editing

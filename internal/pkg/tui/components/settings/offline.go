@@ -18,6 +18,11 @@ type OfflineSettings struct {
 	pcapFileInput textinput.Model
 	bufferInput   textinput.Model
 	filterInput   textinput.Model
+
+	// For text input editing state (restore on Escape)
+	savedPcapFileValue string
+	savedBufferValue   string
+	savedFilterValue   string
 }
 
 // NewOfflineSettings creates a new OfflineSettings instance
@@ -175,6 +180,7 @@ func (os *OfflineSettings) HandleKey(key string, params KeyHandlerParams) KeyHan
 			} else {
 				result.Editing = !params.Editing
 				if result.Editing {
+					os.savedPcapFileValue = os.pcapFileInput.Value()
 					os.pcapFileInput.Focus()
 				} else {
 					os.pcapFileInput.Blur()
@@ -185,6 +191,7 @@ func (os *OfflineSettings) HandleKey(key string, params KeyHandlerParams) KeyHan
 		case 2: // Buffer size
 			result.Editing = !params.Editing
 			if result.Editing {
+				os.savedBufferValue = os.bufferInput.Value()
 				os.bufferInput.Focus()
 			} else {
 				os.bufferInput.Blur()
@@ -194,6 +201,7 @@ func (os *OfflineSettings) HandleKey(key string, params KeyHandlerParams) KeyHan
 		case 3: // Filter
 			result.Editing = !params.Editing
 			if result.Editing {
+				os.savedFilterValue = os.filterInput.Value()
 				os.filterInput.Focus()
 			} else {
 				os.filterInput.Blur()
@@ -204,18 +212,18 @@ func (os *OfflineSettings) HandleKey(key string, params KeyHandlerParams) KeyHan
 	case "esc":
 		if params.Editing {
 			switch params.FocusIndex {
-			case 1: // PCAP File - cancel edit, don't save
+			case 1: // PCAP File - cancel edit, restore original value
+				os.pcapFileInput.SetValue(os.savedPcapFileValue)
 				os.pcapFileInput.Blur()
 				result.Editing = false
-				// Don't trigger restart - cancel the edit
-			case 2: // Buffer - cancel edit, don't save
+			case 2: // Buffer - cancel edit, restore original value
+				os.bufferInput.SetValue(os.savedBufferValue)
 				os.bufferInput.Blur()
 				result.Editing = false
-				// Don't trigger update - cancel the edit
-			case 3: // Filter - cancel edit, don't save
+			case 3: // Filter - cancel edit, restore original value
+				os.filterInput.SetValue(os.savedFilterValue)
 				os.filterInput.Blur()
 				result.Editing = false
-				// Don't trigger restart - cancel the edit
 			}
 		}
 	}
@@ -245,4 +253,21 @@ func (os *OfflineSettings) Update(msg tea.Msg, focusIndex int) tea.Cmd {
 		os.filterInput, cmd = os.filterInput.Update(msg)
 	}
 	return cmd
+}
+
+// FocusField focuses the text input at the given field index.
+// Offline mode: field 1 = pcap file, field 2 = buffer, field 3 = filter.
+// Also saves the current value for restoration on Escape.
+func (os *OfflineSettings) FocusField(fieldIndex int) {
+	switch fieldIndex {
+	case 1:
+		os.savedPcapFileValue = os.pcapFileInput.Value()
+		os.pcapFileInput.Focus()
+	case 2:
+		os.savedBufferValue = os.bufferInput.Value()
+		os.bufferInput.Focus()
+	case 3:
+		os.savedFilterValue = os.filterInput.Value()
+		os.filterInput.Focus()
+	}
 }

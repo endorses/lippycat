@@ -497,8 +497,9 @@ func (s *SettingsView) Update(msg tea.Msg) tea.Cmd {
 					s.nodesFileDialog.Activate()
 					return nil
 				} else {
-					// For other fields, enter edit mode
+					// For other fields, enter edit mode and focus the input
 					s.editing = true
+					s.currentMode.FocusField(clickedField)
 				}
 			}
 

@@ -14,6 +14,10 @@ import (
 type RemoteSettings struct {
 	nodesFileInput textinput.Model
 	bufferInput    textinput.Model
+
+	// For text input editing state (restore on Escape)
+	savedNodesFileValue string
+	savedBufferValue    string
 }
 
 // NewRemoteSettings creates a new RemoteSettings instance
@@ -123,6 +127,7 @@ func (rs *RemoteSettings) HandleKey(key string, params KeyHandlerParams) KeyHand
 			} else {
 				result.Editing = !params.Editing
 				if result.Editing {
+					rs.savedNodesFileValue = rs.nodesFileInput.Value()
 					rs.nodesFileInput.Focus()
 				} else {
 					rs.nodesFileInput.Blur()
@@ -133,6 +138,7 @@ func (rs *RemoteSettings) HandleKey(key string, params KeyHandlerParams) KeyHand
 		case 2: // Buffer size
 			result.Editing = !params.Editing
 			if result.Editing {
+				rs.savedBufferValue = rs.bufferInput.Value()
 				rs.bufferInput.Focus()
 			} else {
 				rs.bufferInput.Blur()
@@ -143,14 +149,14 @@ func (rs *RemoteSettings) HandleKey(key string, params KeyHandlerParams) KeyHand
 	case "esc":
 		if params.Editing {
 			switch params.FocusIndex {
-			case 1: // Nodes File - cancel edit, don't save
+			case 1: // Nodes File - cancel edit, restore original value
+				rs.nodesFileInput.SetValue(rs.savedNodesFileValue)
 				rs.nodesFileInput.Blur()
 				result.Editing = false
-				// Don't trigger restart - cancel the edit
-			case 2: // Buffer - cancel edit, don't save
+			case 2: // Buffer - cancel edit, restore original value
+				rs.bufferInput.SetValue(rs.savedBufferValue)
 				rs.bufferInput.Blur()
 				result.Editing = false
-				// Don't trigger update - cancel the edit
 			}
 		}
 	}
@@ -178,4 +184,18 @@ func (rs *RemoteSettings) Update(msg tea.Msg, focusIndex int) tea.Cmd {
 		rs.bufferInput, cmd = rs.bufferInput.Update(msg)
 	}
 	return cmd
+}
+
+// FocusField focuses the text input at the given field index.
+// Remote mode: field 1 = nodes file, field 2 = buffer.
+// Also saves the current value for restoration on Escape.
+func (rs *RemoteSettings) FocusField(fieldIndex int) {
+	switch fieldIndex {
+	case 1:
+		rs.savedNodesFileValue = rs.nodesFileInput.Value()
+		rs.nodesFileInput.Focus()
+	case 2:
+		rs.savedBufferValue = rs.bufferInput.Value()
+		rs.bufferInput.Focus()
+	}
 }

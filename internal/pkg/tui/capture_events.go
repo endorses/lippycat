@@ -463,10 +463,11 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 	} else {
 		toastMsg = fmt.Sprintf("Connecting to %s...", msg.Address)
 	}
-	toastCmd := m.uiState.Toast.Show(
+	toastCmd := m.uiState.Toast.ShowWithKey(
 		toastMsg,
 		components.ToastInfo,
 		components.ToastDurationShort,
+		components.ToastKeyConnection(msg.Address),
 	)
 
 	// Capture insecure flag for use in goroutine
@@ -625,10 +626,11 @@ func (m Model) handleProcessorConnectedMsg(msg ProcessorConnectedMsg) (Model, te
 			toastType = components.ToastSuccess
 		}
 
-		return m, m.uiState.Toast.Show(
+		return m, m.uiState.Toast.ShowWithKey(
 			toastMsg,
 			toastType,
 			components.ToastDurationShort,
+			components.ToastKeyConnection(msg.Address),
 		)
 	}
 	return m, nil
@@ -682,10 +684,11 @@ func (m Model) handleProcessorDisconnectedMsg(msg ProcessorDisconnectedMsg) (Mod
 		}
 
 		// Show error toast
-		toastCmd := m.uiState.Toast.Show(
+		toastCmd := m.uiState.Toast.ShowWithKey(
 			fmt.Sprintf("Disconnected from %s", msg.Address),
 			components.ToastError,
 			components.ToastDurationNormal,
+			components.ToastKeyConnection(msg.Address),
 		)
 
 		// Schedule reconnection with exponential backoff
@@ -707,10 +710,11 @@ func (m Model) handleProcessorDisconnectedMsg(msg ProcessorDisconnectedMsg) (Mod
 			})
 		} else {
 			// Max retries reached - show warning and stop auto-reconnect
-			toastCmd = m.uiState.Toast.Show(
+			toastCmd = m.uiState.Toast.ShowWithKey(
 				fmt.Sprintf("Max reconnection attempts reached for %s - use Nodes view to manually reconnect", msg.Address),
 				components.ToastWarning,
 				components.ToastDurationLong,
+				components.ToastKeyConnection(msg.Address),
 			)
 		}
 

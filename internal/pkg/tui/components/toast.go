@@ -28,24 +28,40 @@ const (
 	ToastDurationLong   = 5 * time.Second // Long notification (e.g., operation completed, error messages)
 )
 
+// Toast supersession key constants
+// Toasts with the same key will supersede each other (newer replaces older)
+const (
+	ToastKeyCaptureState = "capture-state" // pause/resume
+	ToastKeyFileSave     = "file-save"     // saving.../saved/error
+	ToastKeyFilter       = "filter"        // applying/applied/error
+)
+
+// ToastKeyConnection returns a supersession key for connection state toasts.
+// Each processor address gets its own key to allow independent state tracking.
+func ToastKeyConnection(addr string) string {
+	return "connection:" + addr
+}
+
 // toastQueueItem represents a queued toast notification
 type toastQueueItem struct {
-	message   string
-	toastType ToastType
-	duration  time.Duration
+	message         string
+	toastType       ToastType
+	duration        time.Duration
+	supersessionKey string // Optional key for supersession (empty = no supersession)
 }
 
 // Toast represents a temporary notification that appears at the top-center of the screen
 type Toast struct {
-	active    bool
-	message   string
-	toastType ToastType
-	startTime time.Time
-	duration  time.Duration
-	theme     themes.Theme
-	width     int
-	height    int
-	queue     []toastQueueItem // Queue of pending toasts
+	active     bool
+	message    string
+	toastType  ToastType
+	startTime  time.Time
+	duration   time.Duration
+	currentKey string // Supersession key of the currently displayed toast
+	theme      themes.Theme
+	width      int
+	height     int
+	queue      []toastQueueItem // Queue of pending toasts
 }
 
 // ToastTickMsg is sent periodically to check if the toast should be dismissed
@@ -64,12 +80,37 @@ func NewToast() Toast {
 // Show displays a toast notification with the given message, type, and duration
 // If a toast is already active, the new one is queued
 func (t *Toast) Show(message string, toastType ToastType, duration time.Duration) tea.Cmd {
+	return t.ShowWithKey(message, toastType, duration, "")
+}
+
+// ShowWithKey displays a toast with a supersession key.
+// If a toast with the same key is currently displayed or queued, it will be superseded.
+// This prevents obsolete toasts (e.g., "paused" followed by "resumed") from stacking up.
+func (t *Toast) ShowWithKey(message string, toastType ToastType, duration time.Duration, key string) tea.Cmd {
+	// If key is provided, remove all queued toasts with the same key
+	if key != "" {
+		filtered := make([]toastQueueItem, 0, len(t.queue))
+		for _, item := range t.queue {
+			if item.supersessionKey != key {
+				filtered = append(filtered, item)
+			}
+		}
+		t.queue = filtered
+	}
+
+	// If current toast has the same key, dismiss it immediately and show new one
+	if t.active && key != "" && t.currentKey == key {
+		t.active = false
+		// Fall through to show the new toast immediately
+	}
+
 	if t.active {
 		// Already showing a toast - add to queue
 		t.queue = append(t.queue, toastQueueItem{
-			message:   message,
-			toastType: toastType,
-			duration:  duration,
+			message:         message,
+			toastType:       toastType,
+			duration:        duration,
+			supersessionKey: key,
 		})
 		return nil // No command needed - will show when current toast expires
 	}
@@ -80,6 +121,7 @@ func (t *Toast) Show(message string, toastType ToastType, duration time.Duration
 	t.toastType = toastType
 	t.startTime = time.Now()
 	t.duration = duration
+	t.currentKey = key
 
 	// Start a ticker to check for auto-dismiss
 	return t.tickCmd()
@@ -88,6 +130,7 @@ func (t *Toast) Show(message string, toastType ToastType, duration time.Duration
 // Hide immediately dismisses the toast
 func (t *Toast) Hide() {
 	t.active = false
+	t.currentKey = ""
 }
 
 // IsActive returns whether the toast is currently visible
@@ -136,7 +179,7 @@ func (t *Toast) Update(msg tea.Msg) tea.Cmd {
 				if len(t.queue) > 0 {
 					next := t.queue[0]
 					t.queue = t.queue[1:]
-					return t.Show(next.message, next.toastType, next.duration)
+					return t.ShowWithKey(next.message, next.toastType, next.duration, next.supersessionKey)
 				}
 				return nil
 			}
@@ -155,7 +198,7 @@ func (t *Toast) Update(msg tea.Msg) tea.Cmd {
 				t.queue = t.queue[1:] // Remove from queue
 
 				// Show the next toast
-				return t.Show(next.message, next.toastType, next.duration)
+				return t.ShowWithKey(next.message, next.toastType, next.duration, next.supersessionKey)
 			}
 			return nil
 		}

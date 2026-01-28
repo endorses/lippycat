@@ -34,10 +34,11 @@ func (m *Model) proceedWithSave(filePath string) tea.Cmd {
 		// One-shot save (offline or paused)
 		m.uiState.SaveInProgress = true
 		// Show info toast
-		toastCmd := m.uiState.Toast.Show(
+		toastCmd := m.uiState.Toast.ShowWithKey(
 			"Saving packets...",
 			components.ToastInfo,
 			0, // Will be replaced when complete
+			components.ToastKeyFileSave,
 		)
 		// Start save
 		saveCmd := m.startOneShotSave(filePath)
@@ -197,10 +198,11 @@ func (m *Model) startStreamingSave(filePath string) tea.Cmd {
 	}()
 
 	// Show toast notification
-	return m.uiState.Toast.Show(
+	return m.uiState.Toast.ShowWithKey(
 		fmt.Sprintf("Recording to %s...", filepath.Base(filePath)),
 		components.ToastInfo,
 		components.ToastDurationNormal, // Show for 3 seconds to notify user streaming has started
+		components.ToastKeyFileSave,
 	)
 }
 

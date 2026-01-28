@@ -65,17 +65,19 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 			// Show toast when unpausing (existing tick will transition to fast tick)
 			if !m.uiState.Paused {
-				return m, m.uiState.Toast.Show(
+				return m, m.uiState.Toast.ShowWithKey(
 					"Capture resumed",
 					components.ToastSuccess,
 					components.ToastDurationShort,
+					components.ToastKeyCaptureState,
 				)
 			}
 			// Show toast for pause
-			return m, m.uiState.Toast.Show(
+			return m, m.uiState.Toast.ShowWithKey(
 				"Capture paused",
 				components.ToastInfo,
 				components.ToastDurationShort,
+				components.ToastKeyCaptureState,
 			)
 		case "t": // Allow theme toggle
 			return m.handleThemeToggle()
@@ -499,17 +501,19 @@ func (m Model) handlePauseResume() (Model, tea.Cmd) {
 	// Show toast and resume ticking when unpausing
 	if !m.uiState.Paused {
 		// Existing tick will transition to fast tick
-		return m, m.uiState.Toast.Show(
+		return m, m.uiState.Toast.ShowWithKey(
 			"Capture resumed",
 			components.ToastSuccess,
 			components.ToastDurationShort,
+			components.ToastKeyCaptureState,
 		)
 	}
 	// Show toast for pause
-	return m, m.uiState.Toast.Show(
+	return m, m.uiState.Toast.ShowWithKey(
 		"Capture paused",
 		components.ToastInfo,
 		components.ToastDurationShort,
+		components.ToastKeyCaptureState,
 	)
 }
 

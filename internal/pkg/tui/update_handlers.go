@@ -369,19 +369,21 @@ func (m Model) handleSaveCompleteMsg(msg SaveCompleteMsg) (Model, tea.Cmd) {
 	if msg.Success {
 		// Show success toast
 		toastMsg := fmt.Sprintf("Saved %d packets to %s", msg.PacketsSaved, filepath.Base(msg.Path))
-		cmd := m.uiState.Toast.Show(
+		cmd := m.uiState.Toast.ShowWithKey(
 			toastMsg,
 			components.ToastSuccess,
 			components.ToastDurationLong,
+			components.ToastKeyFileSave,
 		)
 		return m, cmd
 	} else {
 		// Show error toast
 		toastMsg := fmt.Sprintf("Failed to save: %s", msg.Error.Error())
-		cmd := m.uiState.Toast.Show(
+		cmd := m.uiState.Toast.ShowWithKey(
 			toastMsg,
 			components.ToastError,
 			components.ToastDurationLong,
+			components.ToastKeyFileSave,
 		)
 		return m, cmd
 	}

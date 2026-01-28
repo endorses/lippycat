@@ -857,8 +857,8 @@ func (n *NodesView) renderContent() string {
 		var emptyContent strings.Builder
 		emptyContent.WriteString("No nodes connected\n\n")
 		emptyContent.WriteString("Press 'a' to add a node\n\n")
-		emptyContent.WriteString("Or start a hunter with:\n")
-		emptyContent.WriteString("lc hunt --processor <processor-addr>")
+		emptyContent.WriteString("Or start a tap with:\n")
+		emptyContent.WriteString("lc tap -i <interface>")
 
 		content := emptyContent.String()
 

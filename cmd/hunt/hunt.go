@@ -111,7 +111,7 @@ func init() {
 	HuntCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 
 	// Filter policy configuration
-	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "allow", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
+	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("hunter.processor_addr", HuntCmd.PersistentFlags().Lookup("processor"))

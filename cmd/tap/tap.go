@@ -256,7 +256,7 @@ func init() {
 	// ============================================================
 	// Filter Policy Configuration (persistent for voip subcommand)
 	// ============================================================
-	TapCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "allow", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
+	TapCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
 
 	// ============================================================
 	// Viper Bindings

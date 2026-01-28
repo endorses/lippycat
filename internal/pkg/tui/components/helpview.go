@@ -176,6 +176,7 @@ func (h *HelpView) SetSection(section HelpSection) tea.Cmd {
 		h.activeSection = section
 		h.clearSearch()
 		h.contentLoaded = false // Mark for reload
+		h.viewport.SetYOffset(0)
 		if h.ready {
 			return h.LoadContentAsync()
 		}
@@ -273,11 +274,8 @@ func (h *HelpView) Update(msg tea.Msg) tea.Cmd {
 			// Content starts at Y=5 (header=2 + tabs=3)
 			relativeY := msg.Y - 5
 
-			// Account for viewport scroll offset
-			contentY := relativeY + h.viewport.YOffset
-
-			// Line 0: Section tabs
-			if contentY == 0 {
+			// Line 0: Section tabs (fixed header, outside viewport - don't add scroll offset)
+			if relativeY == 0 {
 				sections := []HelpSection{SectionKeybindings, SectionFilters, SectionCommands, SectionWorkflows}
 				for i, region := range h.sectionRegions {
 					if msg.X >= region.StartX && msg.X < region.EndX {
@@ -285,6 +283,7 @@ func (h *HelpView) Update(msg tea.Msg) tea.Cmd {
 							h.activeSection = sections[i]
 							h.clearSearch()
 							h.contentLoaded = false
+							h.viewport.SetYOffset(0)
 							if h.ready {
 								return h.LoadContentAsync()
 							}

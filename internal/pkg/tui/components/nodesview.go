@@ -104,6 +104,10 @@ type NodesView struct {
 
 	// Real-time topology updates
 	lastTopologyChange time.Time // Timestamp of last topology change (hunter/processor add/remove/status update)
+
+	// Node address history
+	nodeHistory    []string // History of entered node addresses
+	nodeHistoryIdx int      // Current position in history (-1 = not browsing history)
 }
 
 // NewNodesView creates a new nodes view component
@@ -128,6 +132,8 @@ func NewNodesView() NodesView {
 		processorLines:          make(map[int]int),
 		lastSelectedHunterIndex: make(map[string]int),
 		selectedNodeLine:        -1,
+		nodeHistory:             make([]string, 0, 20),
+		nodeHistoryIdx:          -1,
 	}
 }
 
@@ -141,6 +147,7 @@ func (n *NodesView) ShowAddNodeModal() {
 	n.showModal = true
 	n.nodeInput.Focus()
 	n.nodeInput.SetValue("")
+	n.nodeHistoryIdx = -1
 }
 
 // HideAddNodeModal hides the add node modal
@@ -148,6 +155,62 @@ func (n *NodesView) HideAddNodeModal() {
 	n.showModal = false
 	n.nodeInput.Blur()
 	n.nodeInput.SetValue("")
+}
+
+// AddNodeToHistory adds a node address to history
+func (n *NodesView) AddNodeToHistory(value string) {
+	if value == "" {
+		return
+	}
+	// Remove duplicate if exists (move to front)
+	for i, h := range n.nodeHistory {
+		if h == value {
+			n.nodeHistory = append(n.nodeHistory[:i], n.nodeHistory[i+1:]...)
+			break
+		}
+	}
+	n.nodeHistory = append([]string{value}, n.nodeHistory...)
+	// Keep last 20
+	if len(n.nodeHistory) > 20 {
+		n.nodeHistory = n.nodeHistory[:20]
+	}
+}
+
+// GetNodeHistory returns the node address history
+func (n *NodesView) GetNodeHistory() []string {
+	return n.nodeHistory
+}
+
+// SetNodeHistory sets the node address history
+func (n *NodesView) SetNodeHistory(history []string) {
+	n.nodeHistory = history
+	if len(n.nodeHistory) > 20 {
+		n.nodeHistory = n.nodeHistory[:20]
+	}
+}
+
+// nodeHistoryUp navigates up in history
+func (n *NodesView) nodeHistoryUp() {
+	if len(n.nodeHistory) == 0 {
+		return
+	}
+	if n.nodeHistoryIdx < len(n.nodeHistory)-1 {
+		n.nodeHistoryIdx++
+		n.nodeInput.SetValue(n.nodeHistory[n.nodeHistoryIdx])
+		n.nodeInput.CursorEnd()
+	}
+}
+
+// nodeHistoryDown navigates down in history
+func (n *NodesView) nodeHistoryDown() {
+	if n.nodeHistoryIdx > 0 {
+		n.nodeHistoryIdx--
+		n.nodeInput.SetValue(n.nodeHistory[n.nodeHistoryIdx])
+		n.nodeInput.CursorEnd()
+	} else if n.nodeHistoryIdx == 0 {
+		n.nodeHistoryIdx = -1
+		n.nodeInput.SetValue("")
+	}
 }
 
 // IsModalOpen returns whether the add node modal is open
@@ -717,6 +780,7 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 				// Submit node address
 				addr := n.nodeInput.Value()
 				if addr != "" {
+					n.AddNodeToHistory(addr)
 					n.HideAddNodeModal()
 					return func() tea.Msg {
 						return AddNodeMsg{Address: addr}
@@ -728,6 +792,14 @@ func (n *NodesView) Update(msg tea.Msg) tea.Cmd {
 			case "esc":
 				// Cancel and close modal
 				n.HideAddNodeModal()
+				return nil
+			case "up":
+				// Navigate history up
+				n.nodeHistoryUp()
+				return nil
+			case "down":
+				// Navigate history down
+				n.nodeHistoryDown()
 				return nil
 			default:
 				// Pass other keys to input field
@@ -1189,11 +1261,17 @@ func (n *NodesView) renderAddNodeModal(width, height int) string {
 		Padding(0, 1)
 	content.WriteString(inputStyle.Render(n.nodeInput.View()))
 
+	// Build footer with history hint if history exists
+	footer := "Enter: confirm | Esc: cancel"
+	if len(n.nodeHistory) > 0 {
+		footer = "Enter: confirm | Esc: cancel | Up/Down: history"
+	}
+
 	// Use unified modal rendering
 	return RenderModal(ModalRenderOptions{
 		Title:      "Add Node",
 		Content:    content.String(),
-		Footer:     "Enter: confirm | Esc: cancel",
+		Footer:     footer,
 		Width:      width,
 		Height:     height,
 		Theme:      n.theme,

@@ -177,6 +177,9 @@ func (m Model) handleAddNodeMsg(msg components.AddNodeMsg) (Model, tea.Cmd) {
 			// Update nodes view to show the new processor immediately
 			m.uiState.NodesView.SetProcessors(m.getProcessorInfoList())
 
+			// Save node history to config
+			saveNodeHistory(m.uiState.NodesView)
+
 			// Trigger connection attempt
 			return m, func() tea.Msg {
 				return ProcessorReconnectMsg{Address: msg.Address}

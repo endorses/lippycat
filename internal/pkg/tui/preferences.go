@@ -126,3 +126,42 @@ func saveCallFilterHistory(filterInput *components.FilterInput) {
 		}
 	}
 }
+
+// loadNodeHistory loads node address history from config
+func loadNodeHistory(nodesView *components.NodesView) {
+	history := viper.GetStringSlice("tui.node_history")
+	if len(history) > 0 {
+		nodesView.SetNodeHistory(history)
+	}
+}
+
+// saveNodeHistory saves node address history to config
+func saveNodeHistory(nodesView *components.NodesView) {
+	history := nodesView.GetNodeHistory()
+	viper.Set("tui.node_history", history)
+
+	// Write to config file
+	if err := viper.WriteConfig(); err != nil {
+		// If config file doesn't exist, create it
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return
+			}
+
+			// Use ~/.config/lippycat/config.yaml as primary location
+			configDir := filepath.Join(home, ".config", "lippycat")
+			if err := os.MkdirAll(configDir, 0750); err != nil {
+				return
+			}
+
+			configPath := filepath.Join(configDir, "config.yaml")
+			viper.SetConfigFile(configPath)
+
+			if err := viper.SafeWriteConfig(); err != nil {
+				// Silently ignore errors - history will still work for this session
+				return
+			}
+		}
+	}
+}

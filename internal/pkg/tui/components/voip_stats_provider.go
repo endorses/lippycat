@@ -448,10 +448,16 @@ func (v *VoIPStatsProvider) renderCodecDistribution(theme themes.Theme, barWidth
 		maxCodecs = len(codecs)
 	}
 
+	const codecLabelWidth = 12
 	for i := 0; i < maxCodecs; i++ {
 		codec := codecs[i]
+		// Truncate long codec names to fit
+		name := codec.name
+		if len(name) > codecLabelWidth {
+			name = name[:codecLabelWidth-1] + "…"
+		}
 		result.WriteString(RenderDistributionBar(
-			fmt.Sprintf("%-8s", codec.name),
+			fmt.Sprintf("%-*s", codecLabelWidth, name),
 			codec.count,
 			maxCount,
 			barWidth,

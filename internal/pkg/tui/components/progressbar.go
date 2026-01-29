@@ -118,16 +118,12 @@ func (pb *ProgressBar) Render(ratio float64) string {
 	// Get appropriate color
 	fillColor := pb.getColor(ratio)
 
-	// Build the bar
-	filledStyle := lipgloss.NewStyle().
-		Background(fillColor).
-		Foreground(lipgloss.Color("0"))
-	emptyStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("236")). // Dark gray
-		Foreground(lipgloss.Color("240"))
+	// Build the bar using block characters (matches protocol distribution bars)
+	filledStyle := lipgloss.NewStyle().Foreground(fillColor)
+	emptyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
-	filled := filledStyle.Render(strings.Repeat(" ", filledWidth))
-	empty := emptyStyle.Render(strings.Repeat(" ", emptyWidth))
+	filled := filledStyle.Render(strings.Repeat("█", filledWidth))
+	empty := emptyStyle.Render(strings.Repeat("░", emptyWidth))
 
 	var result strings.Builder
 	result.WriteString(filled)

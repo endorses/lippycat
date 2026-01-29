@@ -552,6 +552,12 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 
 		// Otherwise, toggle packet details panel
 		m.uiState.ShowDetails = !m.uiState.ShowDetails
+
+		// When hiding details, return focus to packet list
+		if !m.uiState.ShowDetails && m.uiState.FocusedPane == "right" {
+			m.uiState.FocusedPane = "left"
+		}
+
 		// Recalculate packet list size based on new showDetails state
 		headerHeight := 2
 		tabsHeight := 4

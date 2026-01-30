@@ -1,7 +1,7 @@
 # TUI Layer Summary
 
 **Date:** 2026-01-30
-**Status:** Planned
+**Status:** Complete
 
 ## Overview
 
@@ -41,26 +41,26 @@ Parse layers from `RawData` + `LinkType` in the details panel renderer using gop
 
 ### Phase 1: Layer Parsing
 
-- [ ] Add `renderLayerSummary()` method to `detailspanel.go`
-- [ ] Parse Ethernet layer (MACs, EtherType for non-IP)
-- [ ] Parse IPv4/IPv6 layer (addresses, TTL/HopLimit)
-- [ ] Parse TCP layer (ports, flags, seq/ack)
-- [ ] Parse UDP layer (ports, length)
-- [ ] Parse ICMP layer (type, code)
-- [ ] Handle VLAN tags (802.1Q) if present
+- [x] Add `renderLayerSummary()` method to `detailspanel.go`
+- [x] Parse Ethernet layer (MACs, EtherType for non-IP)
+- [x] Parse IPv4/IPv6 layer (addresses, TTL/HopLimit)
+- [x] Parse TCP layer (ports, flags, seq/ack)
+- [x] Parse UDP layer (ports, length)
+- [x] Parse ICMP layer (type, code)
+- [x] Handle VLAN tags (802.1Q) if present
 
 ### Phase 2: Integration
 
-- [ ] Insert layer summary section after "Packet Details", before protocol-specific sections
-- [ ] Use section header style: `─── Layers ───`
-- [ ] Color-code by layer type (link=gray, network=blue, transport=cyan)
-- [ ] Truncate long MACs/IPs on narrow terminals
+- [x] Insert layer summary section after "Packet Details", before protocol-specific sections
+- [x] Use section header style: `─── Layers ───`
+- [x] Color-code by layer type (link=gray, network=blue, transport=cyan)
+- [x] Truncate long MACs/IPs on narrow terminals
 
 ### Phase 3: Edge Cases
 
-- [ ] Handle missing RawData gracefully (skip section)
-- [ ] Handle unknown/unsupported link types
-- [ ] Handle truncated packets (show available layers only)
+- [x] Handle missing RawData gracefully (skip section)
+- [x] Handle unknown/unsupported link types
+- [x] Handle truncated packets (show available layers only)
 
 ## File Changes
 

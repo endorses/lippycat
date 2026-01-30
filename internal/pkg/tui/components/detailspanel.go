@@ -4,6 +4,7 @@ package components
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"unicode"
 
@@ -11,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // DecryptedDataGetter is a callback function type for retrieving decrypted TLS data.
@@ -218,6 +221,12 @@ func (d *DetailsPanel) renderContent() string {
 			content.WriteString("\n      ")
 		}
 		content.WriteString(valueStyle.Render(line))
+	}
+
+	// Layer Summary Section (parsed from raw packet data)
+	if layerSummary := d.renderLayerSummary(contentWidth); layerSummary != "" {
+		content.WriteString("\n\n")
+		content.WriteString(layerSummary)
 	}
 
 	// VoIP Details Section (only for VoIP protocols)
@@ -732,4 +741,186 @@ func isHTTPHeaderName(s string) bool {
 		}
 	}
 	return true
+}
+
+// renderLayerSummary renders a compact protocol layer summary showing the packet's
+// layer stack (Ethernet → IPv4 → TCP → HTTP) with key fields from each layer.
+func (d *DetailsPanel) renderLayerSummary(contentWidth int) string {
+	if d.packet == nil || d.packet.RawData == nil || len(d.packet.RawData) == 0 {
+		return ""
+	}
+
+	// Determine the decoder based on LinkType
+	var decoder gopacket.Decoder
+	switch d.packet.LinkType {
+	case layers.LinkTypeEthernet:
+		decoder = layers.LayerTypeEthernet
+	case layers.LinkTypeRaw, layers.LinkTypeIPv4:
+		decoder = layers.LayerTypeIPv4
+	case layers.LinkTypeIPv6:
+		decoder = layers.LayerTypeIPv6
+	case layers.LinkTypeLinuxSLL:
+		decoder = layers.LayerTypeLinuxSLL
+	default:
+		// Unknown link type, skip layer summary
+		return ""
+	}
+
+	// Parse the packet
+	packet := gopacket.NewPacket(d.packet.RawData, decoder, gopacket.DecodeOptions{
+		Lazy:   true,
+		NoCopy: true,
+	})
+
+	var sb strings.Builder
+
+	// Layer colors
+	linkColor := lipgloss.Color("#657b83")      // gray (base00)
+	networkColor := lipgloss.Color("#268bd2")   // blue
+	transportColor := lipgloss.Color("#2aa198") // cyan
+	appColor := lipgloss.Color("#859900")       // green
+
+	linkStyle := lipgloss.NewStyle().Foreground(linkColor)
+	networkStyle := lipgloss.NewStyle().Foreground(networkColor)
+	transportStyle := lipgloss.NewStyle().Foreground(transportColor)
+	appStyle := lipgloss.NewStyle().Foreground(appColor)
+	labelStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg).Bold(true)
+
+	// Section header with line filling available width
+	headerText := "─── Layers "
+	remainingWidth := contentWidth - len(headerText)
+	if remainingWidth < 0 {
+		remainingWidth = 0
+	}
+	header := headerText + strings.Repeat("─", remainingWidth)
+	sb.WriteString(lipgloss.NewStyle().Foreground(d.theme.InfoColor).Render(header))
+	sb.WriteString("\n")
+
+	// Link layer (Ethernet, Linux SLL, etc.)
+	if eth := packet.Layer(layers.LayerTypeEthernet); eth != nil {
+		ethLayer := eth.(*layers.Ethernet)
+		line := fmt.Sprintf("%-10s %s → %s", "Ethernet", ethLayer.SrcMAC, ethLayer.DstMAC)
+		// Add EtherType if not IP
+		if ethLayer.EthernetType != layers.EthernetTypeIPv4 && ethLayer.EthernetType != layers.EthernetTypeIPv6 {
+			line += fmt.Sprintf("  [%s]", ethLayer.EthernetType)
+		}
+		sb.WriteString(labelStyle.Render("Ethernet  "))
+		sb.WriteString(linkStyle.Render(fmt.Sprintf("%s → %s", ethLayer.SrcMAC, ethLayer.DstMAC)))
+		sb.WriteString("\n")
+	} else if sll := packet.Layer(layers.LayerTypeLinuxSLL); sll != nil {
+		sllLayer := sll.(*layers.LinuxSLL)
+		sb.WriteString(labelStyle.Render("LinuxSLL  "))
+		sb.WriteString(linkStyle.Render(fmt.Sprintf("%s", net.HardwareAddr(sllLayer.Addr[:sllLayer.AddrLen]))))
+		sb.WriteString("\n")
+	}
+
+	// VLAN layer (802.1Q) if present
+	if vlan := packet.Layer(layers.LayerTypeDot1Q); vlan != nil {
+		vlanLayer := vlan.(*layers.Dot1Q)
+		sb.WriteString(labelStyle.Render("VLAN      "))
+		sb.WriteString(linkStyle.Render(fmt.Sprintf("ID=%d  Pri=%d", vlanLayer.VLANIdentifier, vlanLayer.Priority)))
+		sb.WriteString("\n")
+	}
+
+	// Network layer (IPv4 or IPv6)
+	if ipv4 := packet.Layer(layers.LayerTypeIPv4); ipv4 != nil {
+		ip := ipv4.(*layers.IPv4)
+		info := fmt.Sprintf("%s → %s  TTL=%d", ip.SrcIP, ip.DstIP, ip.TTL)
+		// Add fragment info if fragmented
+		if ip.Flags&layers.IPv4MoreFragments != 0 || ip.FragOffset != 0 {
+			info += fmt.Sprintf("  Frag(ID=%d,Off=%d)", ip.Id, ip.FragOffset)
+		}
+		sb.WriteString(labelStyle.Render("IPv4      "))
+		sb.WriteString(networkStyle.Render(info))
+		sb.WriteString("\n")
+	} else if ipv6 := packet.Layer(layers.LayerTypeIPv6); ipv6 != nil {
+		ip := ipv6.(*layers.IPv6)
+		sb.WriteString(labelStyle.Render("IPv6      "))
+		sb.WriteString(networkStyle.Render(fmt.Sprintf("%s → %s  Hop=%d", ip.SrcIP, ip.DstIP, ip.HopLimit)))
+		sb.WriteString("\n")
+	}
+
+	// Transport layer (TCP, UDP, ICMP)
+	if tcp := packet.Layer(layers.LayerTypeTCP); tcp != nil {
+		tcpLayer := tcp.(*layers.TCP)
+		flags := d.formatTCPFlags(tcpLayer)
+		info := fmt.Sprintf("%d → %d  %s Seq=%d", tcpLayer.SrcPort, tcpLayer.DstPort, flags, tcpLayer.Seq)
+		if tcpLayer.ACK {
+			info += fmt.Sprintf(" Ack=%d", tcpLayer.Ack)
+		}
+		sb.WriteString(labelStyle.Render("TCP       "))
+		sb.WriteString(transportStyle.Render(info))
+		sb.WriteString("\n")
+	} else if udp := packet.Layer(layers.LayerTypeUDP); udp != nil {
+		udpLayer := udp.(*layers.UDP)
+		sb.WriteString(labelStyle.Render("UDP       "))
+		sb.WriteString(transportStyle.Render(fmt.Sprintf("%d → %d  Len=%d", udpLayer.SrcPort, udpLayer.DstPort, udpLayer.Length)))
+		sb.WriteString("\n")
+	} else if icmp4 := packet.Layer(layers.LayerTypeICMPv4); icmp4 != nil {
+		icmpLayer := icmp4.(*layers.ICMPv4)
+		info := fmt.Sprintf("Type=%d Code=%d", icmpLayer.TypeCode.Type(), icmpLayer.TypeCode.Code())
+		// Add ID/Seq for echo request/reply
+		if icmpLayer.TypeCode.Type() == layers.ICMPv4TypeEchoRequest || icmpLayer.TypeCode.Type() == layers.ICMPv4TypeEchoReply {
+			info += fmt.Sprintf("  ID=%d Seq=%d", icmpLayer.Id, icmpLayer.Seq)
+		}
+		sb.WriteString(labelStyle.Render("ICMPv4    "))
+		sb.WriteString(transportStyle.Render(info))
+		sb.WriteString("\n")
+	} else if icmp6 := packet.Layer(layers.LayerTypeICMPv6); icmp6 != nil {
+		icmpLayer := icmp6.(*layers.ICMPv6)
+		sb.WriteString(labelStyle.Render("ICMPv6    "))
+		sb.WriteString(transportStyle.Render(fmt.Sprintf("Type=%d Code=%d", icmpLayer.TypeCode.Type(), icmpLayer.TypeCode.Code())))
+		sb.WriteString("\n")
+	}
+
+	// Application layer - use the packet's Protocol field and Info
+	if d.packet.Protocol != "" && d.packet.Protocol != "TCP" && d.packet.Protocol != "UDP" && d.packet.Protocol != "ICMP" {
+		// Truncate info if too long
+		info := d.packet.Info
+		maxInfoLen := contentWidth - 12 // Account for label width
+		if maxInfoLen < 20 {
+			maxInfoLen = 20
+		}
+		if len(info) > maxInfoLen {
+			info = info[:maxInfoLen-3] + "..."
+		}
+		sb.WriteString(labelStyle.Render(fmt.Sprintf("%-10s", d.packet.Protocol)))
+		sb.WriteString(appStyle.Render(info))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// formatTCPFlags formats TCP flags into a bracketed string like [SYN,ACK]
+func (d *DetailsPanel) formatTCPFlags(tcp *layers.TCP) string {
+	var flags []string
+	if tcp.SYN {
+		flags = append(flags, "SYN")
+	}
+	if tcp.ACK {
+		flags = append(flags, "ACK")
+	}
+	if tcp.FIN {
+		flags = append(flags, "FIN")
+	}
+	if tcp.RST {
+		flags = append(flags, "RST")
+	}
+	if tcp.PSH {
+		flags = append(flags, "PSH")
+	}
+	if tcp.URG {
+		flags = append(flags, "URG")
+	}
+	if tcp.ECE {
+		flags = append(flags, "ECE")
+	}
+	if tcp.CWR {
+		flags = append(flags, "CWR")
+	}
+	if len(flags) == 0 {
+		return "[]"
+	}
+	return "[" + strings.Join(flags, ",") + "]"
 }

@@ -873,23 +873,80 @@ func (d *DetailsPanel) renderLayerSummary(contentWidth int) string {
 		sb.WriteString("\n")
 	}
 
-	// Application layer - use the packet's Protocol field and Info
+	// Application layer - build a meaningful summary from protocol-specific metadata
 	if d.packet.Protocol != "" && d.packet.Protocol != "TCP" && d.packet.Protocol != "UDP" && d.packet.Protocol != "ICMP" {
-		// Truncate info if too long
-		info := d.packet.Info
-		maxInfoLen := contentWidth - 12 // Account for label width
-		if maxInfoLen < 20 {
-			maxInfoLen = 20
+		info := d.getApplicationLayerInfo()
+		if info != "" {
+			maxInfoLen := contentWidth - 12 // Account for label width
+			if maxInfoLen < 20 {
+				maxInfoLen = 20
+			}
+			if len(info) > maxInfoLen {
+				info = info[:maxInfoLen-3] + "..."
+			}
+			sb.WriteString(labelStyle.Render(fmt.Sprintf("%-10s", d.packet.Protocol)))
+			sb.WriteString(appStyle.Render(info))
+			sb.WriteString("\n")
 		}
-		if len(info) > maxInfoLen {
-			info = info[:maxInfoLen-3] + "..."
-		}
-		sb.WriteString(labelStyle.Render(fmt.Sprintf("%-10s", d.packet.Protocol)))
-		sb.WriteString(appStyle.Render(info))
-		sb.WriteString("\n")
 	}
 
 	return sb.String()
+}
+
+// getApplicationLayerInfo extracts a meaningful one-liner for the application layer
+// from protocol-specific metadata, avoiding redundant display of the protocol name.
+func (d *DetailsPanel) getApplicationLayerInfo() string {
+	// Try protocol-specific metadata first
+	if d.packet.HTTPData != nil {
+		if d.packet.HTTPData.Method != "" && d.packet.HTTPData.Path != "" {
+			return fmt.Sprintf("%s %s", d.packet.HTTPData.Method, d.packet.HTTPData.Path)
+		}
+		if d.packet.HTTPData.StatusCode > 0 {
+			return fmt.Sprintf("%d %s", d.packet.HTTPData.StatusCode, d.packet.HTTPData.StatusReason)
+		}
+	}
+	if d.packet.DNSData != nil {
+		qType := "Query"
+		if d.packet.DNSData.IsResponse {
+			qType = "Response"
+		}
+		if d.packet.DNSData.QueryName != "" {
+			return fmt.Sprintf("%s %s %s", qType, d.packet.DNSData.QueryType, d.packet.DNSData.QueryName)
+		}
+	}
+	if d.packet.TLSData != nil {
+		if d.packet.TLSData.SNI != "" {
+			return fmt.Sprintf("%s → %s", d.packet.TLSData.HandshakeType, d.packet.TLSData.SNI)
+		}
+		if d.packet.TLSData.HandshakeType != "" {
+			return d.packet.TLSData.HandshakeType
+		}
+	}
+	if d.packet.VoIPData != nil {
+		if d.packet.VoIPData.IsRTP {
+			return fmt.Sprintf("SSRC=0x%08x Seq=%d", d.packet.VoIPData.SSRC, d.packet.VoIPData.SeqNumber)
+		}
+		if d.packet.VoIPData.Method != "" {
+			if d.packet.VoIPData.User != "" {
+				return fmt.Sprintf("%s %s", d.packet.VoIPData.Method, d.packet.VoIPData.User)
+			}
+			return d.packet.VoIPData.Method
+		}
+	}
+	if d.packet.EmailData != nil {
+		if d.packet.EmailData.Command != "" {
+			return d.packet.EmailData.Command
+		}
+	}
+
+	// Fall back to Info field, but only if it's not just the protocol name repeated
+	info := strings.TrimSpace(d.packet.Info)
+	if info != "" && !strings.EqualFold(info, d.packet.Protocol) {
+		return info
+	}
+
+	// No meaningful info available
+	return ""
 }
 
 // formatTCPFlags formats TCP flags into a bracketed string like [SYN,ACK]

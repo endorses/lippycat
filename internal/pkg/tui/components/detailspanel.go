@@ -945,7 +945,66 @@ func (d *DetailsPanel) getApplicationLayerInfo() string {
 		return info
 	}
 
+	// Last resort: try to extract info from raw payload for HTTP
+	if d.packet.Protocol == "HTTP" && len(d.packet.RawData) > 0 {
+		if httpInfo := d.extractHTTPFromPayload(); httpInfo != "" {
+			return httpInfo
+		}
+	}
+
 	// No meaningful info available
+	return ""
+}
+
+// extractHTTPFromPayload attempts to extract HTTP request/response line from raw packet payload.
+func (d *DetailsPanel) extractHTTPFromPayload() string {
+	if d.packet.RawData == nil {
+		return ""
+	}
+
+	// Find the start of HTTP payload (after TCP header)
+	// Look for HTTP methods or response
+	data := string(d.packet.RawData)
+
+	// Try to find HTTP request line
+	httpMethods := []string{"GET ", "POST ", "PUT ", "DELETE ", "HEAD ", "OPTIONS ", "PATCH ", "CONNECT "}
+	for _, method := range httpMethods {
+		if idx := strings.Index(data, method); idx != -1 {
+			// Extract until end of line
+			endIdx := strings.Index(data[idx:], "\r\n")
+			if endIdx == -1 {
+				endIdx = strings.Index(data[idx:], "\n")
+			}
+			if endIdx == -1 {
+				endIdx = min(len(data[idx:]), 80)
+			}
+			line := data[idx : idx+endIdx]
+			// Remove HTTP version suffix for brevity
+			if spaceIdx := strings.LastIndex(line, " HTTP/"); spaceIdx != -1 {
+				line = line[:spaceIdx]
+			}
+			return line
+		}
+	}
+
+	// Try to find HTTP response line
+	if idx := strings.Index(data, "HTTP/"); idx != -1 {
+		endIdx := strings.Index(data[idx:], "\r\n")
+		if endIdx == -1 {
+			endIdx = strings.Index(data[idx:], "\n")
+		}
+		if endIdx == -1 {
+			endIdx = min(len(data[idx:]), 80)
+		}
+		line := data[idx : idx+endIdx]
+		// Simplify "HTTP/1.1 200 OK" to "200 OK"
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+		return line
+	}
+
 	return ""
 }
 

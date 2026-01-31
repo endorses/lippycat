@@ -270,6 +270,11 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
 	defer packetBuffer.Close()
 
+	// Create a single shared IPv4 defragmenter for all interfaces.
+	// This is critical for multi-interface capture: IP fragments from the same
+	// packet may arrive on different interfaces (e.g., due to port mirror splits).
+	sharedDefragmenter := NewIPv4Defragmenter()
+
 	// Track if any capture succeeded (for error handling)
 	var captureSuccessCount atomic.Int32
 
@@ -295,7 +300,7 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 			// Mark that at least one capture succeeded
 			captureSuccessCount.Add(1)
 
-			captureFromInterface(ctx, pif, filter, packetBuffer)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter)
 		}(iface)
 	}
 

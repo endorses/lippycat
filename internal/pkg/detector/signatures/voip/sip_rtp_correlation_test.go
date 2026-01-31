@@ -100,6 +100,79 @@ a=rtpmap:0 PCMU/8000
 	assert.Equal(t, "a84b4c76e66710@pc33.atlanta.com", rtpResult.Metadata["call_id"])
 }
 
+// TestRTPRejectsDNSPort tests that DNS traffic on port 53 is not misdetected as RTP
+func TestRTPRejectsDNSPort(t *testing.T) {
+	rtpSig := NewRTPSignature()
+
+	// DNS response that could accidentally match RTP header pattern:
+	// - First byte 0x94 has version bits = 10 (matches RTP version 2)
+	// - Second byte 0x89 has payload type 9 (G.722, valid static type)
+	// This is a real scenario where DNS transaction IDs can look like RTP headers
+	dnsPayload := []byte{
+		0x94, 0x89, // DNS transaction ID + flags that match RTP V=2, PT=9
+		0x84, 0x13, // More DNS flags/counts
+		0x00, 0x01, 0x00, 0x00, // DNS counts
+		0x00, 0x08, 0x00, 0x01, // More DNS data
+		0x03, 0x6e, 0x65, 0x74, // "net" in DNS name
+	}
+
+	tests := []struct {
+		name    string
+		srcPort uint16
+		dstPort uint16
+	}{
+		{"DNS server source", 53, 17108},  // Response from DNS server
+		{"DNS server dest", 45788, 53},    // Query to DNS server
+		{"DNS both ports", 53, 53},        // Unusual but possible
+		{"NTP server source", 123, 32000}, // NTP response
+		{"DHCP server", 67, 68},           // DHCP traffic
+		{"SNMP", 161, 49000},              // SNMP
+		{"SNMP trap", 50000, 162},         // SNMP trap
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &signatures.DetectionContext{
+				Payload:   dnsPayload,
+				Transport: "UDP",
+				SrcPort:   tt.srcPort,
+				DstPort:   tt.dstPort,
+			}
+
+			result := rtpSig.Detect(ctx)
+			assert.Nil(t, result, "Should NOT detect RTP on well-known UDP port")
+		})
+	}
+}
+
+// TestRTPAllowsLegitimateTraffic ensures the UDP port filter doesn't break real RTP
+func TestRTPAllowsLegitimateTraffic(t *testing.T) {
+	rtpSig := NewRTPSignature()
+
+	// Valid RTP packet with static payload type 0 (PCMU)
+	rtpPayload := []byte{
+		0x80,       // V=2, P=0, X=0, CC=0
+		0x00,       // M=0, PT=0 (PCMU)
+		0x12, 0x34, // Sequence number
+		0x00, 0x00, 0x00, 0x10, // Timestamp
+		0x12, 0x34, 0x56, 0x78, // SSRC
+		// Payload data
+		0xFF, 0xFF, 0xFF, 0xFF,
+	}
+
+	// RTP on typical port range should still be detected
+	ctx := &signatures.DetectionContext{
+		Payload:   rtpPayload,
+		Transport: "UDP",
+		SrcPort:   16384, // IANA RTP range
+		DstPort:   5004,
+	}
+
+	result := rtpSig.Detect(ctx)
+	assert.NotNil(t, result, "Should detect RTP on typical RTP ports")
+	assert.Equal(t, "RTP", result.Protocol)
+}
+
 // TestSIPSDPExtraction tests SDP port extraction
 func TestSIPSDPExtraction(t *testing.T) {
 	sig := NewSIPSignature()

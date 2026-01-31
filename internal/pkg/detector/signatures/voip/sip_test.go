@@ -94,3 +94,91 @@ Call-ID: abc123@example.com
 	assert.Equal(t, "alicent", metadata["from_user"])
 	assert.Contains(t, metadata, "headers")
 }
+
+// TestSIPSignature_CaseInsensitiveHeaders verifies that SIP header parsing
+// is case-insensitive as required by RFC 3261 Section 7.3.1
+func TestSIPSignature_CaseInsensitiveHeaders(t *testing.T) {
+	sig := NewSIPSignature()
+
+	tests := []struct {
+		name           string
+		payload        string
+		expectedCallID string
+		expectedFrom   string
+		expectedTo     string
+	}{
+		{
+			name: "Standard case (Call-ID)",
+			payload: `INVITE sip:bob@example.com SIP/2.0
+From: Alice <sip:alice@example.com>
+To: Bob <sip:bob@example.com>
+Call-ID: standard-case-123
+
+`,
+			expectedCallID: "standard-case-123",
+			expectedFrom:   "Alice <sip:alice@example.com>",
+			expectedTo:     "Bob <sip:bob@example.com>",
+		},
+		{
+			name: "Lowercase headers (call-id, from, to)",
+			payload: `INVITE sip:bob@example.com SIP/2.0
+from: Alice <sip:alice@example.com>
+to: Bob <sip:bob@example.com>
+call-id: lowercase-456
+
+`,
+			expectedCallID: "lowercase-456",
+			expectedFrom:   "Alice <sip:alice@example.com>",
+			expectedTo:     "Bob <sip:bob@example.com>",
+		},
+		{
+			name: "Uppercase headers (CALL-ID, FROM, TO)",
+			payload: `INVITE sip:bob@example.com SIP/2.0
+FROM: Alice <sip:alice@example.com>
+TO: Bob <sip:bob@example.com>
+CALL-ID: uppercase-789
+
+`,
+			expectedCallID: "uppercase-789",
+			expectedFrom:   "Alice <sip:alice@example.com>",
+			expectedTo:     "Bob <sip:bob@example.com>",
+		},
+		{
+			name: "Mixed case headers (Call-Id, call-ID)",
+			payload: `INVITE sip:bob@example.com SIP/2.0
+FrOm: Alice <sip:alice@example.com>
+tO: Bob <sip:bob@example.com>
+Call-Id: mixedcase-abc
+
+`,
+			expectedCallID: "mixedcase-abc",
+			expectedFrom:   "Alice <sip:alice@example.com>",
+			expectedTo:     "Bob <sip:bob@example.com>",
+		},
+		{
+			name: "Compact form headers (i, f, t)",
+			payload: `INVITE sip:bob@example.com SIP/2.0
+f: Alice <sip:alice@example.com>
+t: Bob <sip:bob@example.com>
+i: compact-form-xyz
+
+`,
+			expectedCallID: "compact-form-xyz",
+			expectedFrom:   "Alice <sip:alice@example.com>",
+			expectedTo:     "Bob <sip:bob@example.com>",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata := sig.extractMetadata(tt.payload)
+
+			assert.Equal(t, tt.expectedCallID, metadata["call_id"],
+				"Call-ID should be extracted regardless of header case")
+			assert.Equal(t, tt.expectedFrom, metadata["from"],
+				"From should be extracted regardless of header case")
+			assert.Equal(t, tt.expectedTo, metadata["to"],
+				"To should be extracted regardless of header case")
+		})
+	}
+}

@@ -32,20 +32,22 @@ type EventHandler interface {
 
 // CallInfo represents a VoIP call for display
 type CallInfo struct {
-	CallID      string
-	From        string
-	To          string
-	State       string // "NEW", "RINGING", "ACTIVE", "ENDED", "FAILED"
-	StartTime   time.Time
-	EndTime     time.Time
-	Duration    time.Duration
-	Codec       string
-	PacketCount int
-	PacketLoss  float64
-	Jitter      float64
-	MOS         float64 // Mean Opinion Score
-	NodeID      string  // Processor or "Local"
-	Hunters     []string
+	CallID           string
+	From             string
+	To               string
+	State            string // "NEW", "RINGING", "ACTIVE", "ENDED", "FAILED"
+	LastResponseCode uint32 // Last SIP response code (for failed/busy calls, e.g., 401, 486, 503)
+	StartTime        time.Time
+	EndTime          time.Time
+	Duration         time.Duration
+	Codec            string
+	PacketCount      int
+	PacketLoss       float64
+	Jitter           float64
+	MOS              float64 // Mean Opinion Score
+	NodeID           string  // Processor or "Local"
+	Hunters          []string
+	SDPEndpoints     []string // RTP endpoints from SDP (IP:port) for debugging correlation
 }
 
 // CorrelatedCallInfo represents a correlated call across multiple hops/hunters

@@ -378,14 +378,21 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
 }
 
 // deriveSIPState updates call state based on SIP message
+// This mirrors the logic in voip.CallAggregator.updateCallState
 func deriveSIPState(call *types.CallInfo, method string, responseCode uint32, timestamp time.Time) {
+	// Don't transition from terminal states
+	switch call.State {
+	case "ENDED", "FAILED", "CANCELLED", "BUSY":
+		return
+	}
+
 	switch method {
 	case "INVITE":
 		if call.State == "NEW" {
-			call.State = "RINGING"
+			call.State = "TRYING"
 		}
 	case "ACK":
-		if call.State == "RINGING" {
+		if call.State == "TRYING" || call.State == "RINGING" || call.State == "PROGRESS" {
 			call.State = "ACTIVE"
 		}
 	case "BYE":
@@ -394,21 +401,44 @@ func deriveSIPState(call *types.CallInfo, method string, responseCode uint32, ti
 			call.EndTime = timestamp
 		}
 	case "CANCEL":
-		call.State = "FAILED"
+		call.State = "CANCELLED"
 		if call.EndTime.IsZero() {
 			call.EndTime = timestamp
 		}
 	}
 
-	// Handle response codes
+	// Handle provisional responses (1xx)
+	if responseCode == 180 {
+		if call.State == "TRYING" {
+			call.State = "RINGING"
+		}
+	} else if responseCode == 183 {
+		if call.State == "TRYING" || call.State == "RINGING" {
+			call.State = "PROGRESS"
+		}
+	}
+
+	// Handle success responses (2xx)
 	if responseCode >= 200 && responseCode < 300 {
-		// 2xx Success
-		if call.State == "RINGING" {
+		if call.State == "TRYING" || call.State == "RINGING" || call.State == "PROGRESS" {
 			call.State = "ACTIVE"
 		}
+	} else if responseCode == 486 {
+		// 486 Busy Here
+		call.State = "BUSY"
+		if call.EndTime.IsZero() {
+			call.EndTime = timestamp
+		}
+	} else if responseCode == 487 {
+		// 487 Request Terminated (response to CANCEL)
+		call.State = "CANCELLED"
+		if call.EndTime.IsZero() {
+			call.EndTime = timestamp
+		}
 	} else if responseCode >= 400 {
-		// 4xx/5xx/6xx Error
+		// Other 4xx/5xx/6xx errors - store code for display
 		call.State = "FAILED"
+		call.LastResponseCode = responseCode
 		if call.EndTime.IsZero() {
 			call.EndTime = timestamp
 		}

@@ -46,6 +46,12 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
+	// Reject well-known UDP service ports (DNS, NTP, DHCP, etc.)
+	// These can have payloads that accidentally match RTP header patterns
+	if isWellKnownUDPPort(ctx.SrcPort) || isWellKnownUDPPort(ctx.DstPort) {
+		return nil
+	}
+
 	// Check RTP version (must be 2)
 	version := (ctx.Payload[0] >> 6) & 0x03
 	if version != 2 {
@@ -433,6 +439,25 @@ func isWellKnownTCPPort(port uint16) bool {
 		5432:  true, // PostgreSQL
 		6379:  true, // Redis
 		27017: true, // MongoDB
+	}
+	return wellKnownPorts[port]
+}
+
+// isWellKnownUDPPort checks if a port is a well-known UDP service port
+// to avoid false RTP detection on DNS, NTP, DHCP, etc.
+func isWellKnownUDPPort(port uint16) bool {
+	wellKnownPorts := map[uint16]bool{
+		53:  true, // DNS
+		67:  true, // DHCP server
+		68:  true, // DHCP client
+		69:  true, // TFTP
+		123: true, // NTP
+		137: true, // NetBIOS Name Service
+		138: true, // NetBIOS Datagram Service
+		161: true, // SNMP
+		162: true, // SNMP Trap
+		500: true, // IKE (IPSec)
+		514: true, // Syslog
 	}
 	return wellKnownPorts[port]
 }

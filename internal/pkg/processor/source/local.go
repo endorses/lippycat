@@ -25,6 +25,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // ApplicationFilter provides application-layer packet filtering.
@@ -41,6 +42,22 @@ type ApplicationFilter interface {
 // VoIPProcessor is an alias for voipprocessor.SourceAdapter.
 // It provides VoIP packet processing for SIP/RTP detection.
 type VoIPProcessor = *voipprocessor.SourceAdapter
+
+// InjectedPacket represents a packet with pre-attached metadata
+// for injection into the batch processing pipeline.
+// Used by TCP SIP handlers to inject reassembled packets with metadata.
+type InjectedPacket struct {
+	PacketInfo capture.PacketInfo
+	Metadata   *data.PacketMetadata
+}
+
+// TCPAssembler handles TCP packets for stream reassembly.
+// This interface decouples LocalSource from specific TCP reassembly implementations.
+type TCPAssembler interface {
+	// AssemblePacket processes a TCP packet for stream reconstruction.
+	// Returns true if the packet was handled (don't process further).
+	AssemblePacket(pktInfo capture.PacketInfo) bool
+}
 
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
@@ -69,6 +86,14 @@ type LocalSource struct {
 
 	// Optional DNS processing for DNS parsing and tunneling detection
 	dnsProcessor DNSProcessor
+
+	// Optional TCP packet injection channel for TCP SIP reassembly
+	// When set, TCP SIP packets with metadata are received from this channel
+	tcpInjectionChan <-chan InjectedPacket
+
+	// Optional TCP assembler for TCP stream reassembly (e.g., TCP SIP)
+	// When set, TCP packets are routed to the assembler instead of direct processing
+	tcpAssembler TCPAssembler
 
 	// Stats tracking
 	stats *AtomicStats
@@ -190,6 +215,26 @@ func (s *LocalSource) GetDNSProcessor() DNSProcessor {
 	return s.dnsProcessor
 }
 
+// SetTCPInjectionChannel sets a channel for receiving TCP packets with pre-attached metadata.
+// This is used for TCP SIP reassembly where complete SIP messages spanning multiple TCP
+// segments need to be processed and injected into the batch with proper metadata.
+// The channel should send InjectedPacket structs with PacketInfo and Metadata already set.
+func (s *LocalSource) SetTCPInjectionChannel(ch <-chan InjectedPacket) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tcpInjectionChan = ch
+}
+
+// SetTCPAssembler sets a TCP assembler for TCP stream reassembly.
+// When set, TCP packets are routed to the assembler instead of direct processing.
+// This is used for TCP SIP reassembly where SIP messages span multiple TCP segments.
+// The assembler should buffer packets and call back with complete messages.
+func (s *LocalSource) SetTCPAssembler(assembler TCPAssembler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tcpAssembler = assembler
+}
+
 // Start begins packet capture. Blocks until ctx is cancelled.
 func (s *LocalSource) Start(ctx context.Context) error {
 	s.mu.Lock()
@@ -300,12 +345,43 @@ func (s *LocalSource) batchingLoop() {
 	ticker := time.NewTicker(s.config.BatchTimeout)
 	defer ticker.Stop()
 
+	// Get TCP injection channel and assembler (may be nil - nil channels block forever in select)
+	s.mu.Lock()
+	tcpChan := s.tcpInjectionChan
+	tcpAssembler := s.tcpAssembler
+	s.mu.Unlock()
+
 	for {
 		select {
 		case <-s.ctx.Done():
 			// Send remaining batch before shutdown
 			s.sendBatch()
 			return
+
+		case injectedPkt := <-tcpChan:
+			// TCP SIP packet injected from TCP reassembly handler
+			// These packets already have metadata attached, so skip VoIP/DNS processing
+			s.stats.AddCaptured()
+
+			// Convert to protobuf format
+			pbPkt := convertPacketInfo(injectedPkt.PacketInfo)
+
+			// Attach the pre-computed metadata from TCP handler
+			pbPkt.Metadata = injectedPkt.Metadata
+
+			// Update stats
+			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
+
+			// Add to batch
+			s.batchMu.Lock()
+			s.currentBatch = append(s.currentBatch, pbPkt)
+			batchLen := len(s.currentBatch)
+			s.batchMu.Unlock()
+
+			// Send if batch is full
+			if batchLen >= s.config.BatchSize {
+				s.sendBatch()
+			}
 
 		case pktInfo, ok := <-s.packetBuffer.Receive():
 			if !ok {
@@ -316,6 +392,17 @@ func (s *LocalSource) batchingLoop() {
 
 			// Count ALL packets received from buffer (before filtering)
 			s.stats.AddCaptured()
+
+			// Route TCP packets to assembler if set (for TCP SIP reassembly)
+			// TCP packets will come back via tcpInjectionChan when SIP messages are complete
+			if tcpAssembler != nil && pktInfo.Packet != nil && pktInfo.Packet.TransportLayer() != nil {
+				if _, isTCP := pktInfo.Packet.TransportLayer().(*layers.TCP); isTCP {
+					if tcpAssembler.AssemblePacket(pktInfo) {
+						// TCP packet handled by assembler, don't process further
+						continue
+					}
+				}
+			}
 
 			s.mu.Lock()
 			filter := s.appFilter

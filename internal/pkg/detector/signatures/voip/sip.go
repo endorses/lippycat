@@ -178,31 +178,32 @@ func (s *SIPSignature) extractMetadata(payload string) map[string]interface{} {
 		// Parse header
 		colonIdx := strings.Index(line, ":")
 		if colonIdx > 0 {
-			key := strings.TrimSpace(line[:colonIdx])
+			// SIP headers are case-insensitive (RFC 3261)
+			key := strings.ToLower(strings.TrimSpace(line[:colonIdx]))
 			value := strings.TrimSpace(line[colonIdx+1:])
 			headers[key] = value
 
-			// Extract important fields
+			// Extract important fields (all keys are now lowercase)
 			switch key {
-			case "From", "f":
+			case "from", "f":
 				metadata["from"] = value
 				metadata["from_user"] = extractUserFromURI(value)
 				metadata["from_tag"] = extractTagFromHeader(value)
-			case "To", "t":
+			case "to", "t":
 				metadata["to"] = value
 				metadata["to_user"] = extractUserFromURI(value)
 				metadata["to_tag"] = extractTagFromHeader(value)
-			case "Call-ID", "i":
+			case "call-id", "i":
 				metadata["call_id"] = value
-			case "CSeq":
+			case "cseq":
 				metadata["cseq"] = value
-			case "Via", "v":
+			case "via", "v":
 				if _, ok := metadata["via"]; !ok {
 					metadata["via"] = value
 				}
-			case "Contact", "m":
+			case "contact", "m":
 				metadata["contact"] = value
-			case "User-Agent":
+			case "user-agent":
 				metadata["user_agent"] = value
 			}
 		}

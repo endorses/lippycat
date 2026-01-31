@@ -346,6 +346,17 @@ func (d *Detector) buildContext(packet gopacket.Packet) *signatures.DetectionCon
 		}
 	}
 
+	// For protocols like SIP, gopacket may decode headers but not the message body.
+	// When gopacket parses SIP, ApplicationLayer().LayerContents() returns only headers,
+	// missing the SDP body. The full message (headers + body) is in TransportLayer.
+	// Use the larger payload to ensure we have the complete message for SDP extraction.
+	if transLayer := packet.TransportLayer(); transLayer != nil {
+		transportPayload := transLayer.LayerPayload()
+		if len(transportPayload) > len(ctx.Payload) {
+			ctx.Payload = transportPayload
+		}
+	}
+
 	// Generate flow ID
 	ctx.FlowID = generateFlowID(ctx.SrcIP, ctx.DstIP, ctx.SrcPort, ctx.DstPort, ctx.Transport)
 

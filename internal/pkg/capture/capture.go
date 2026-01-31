@@ -502,6 +502,29 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	// Track if any capture succeeded (for error handling)
 	var captureSuccessCount atomic.Int32
 
+	// Create a single shared IPv4 defragmenter for all interfaces.
+	// This is critical for multi-interface capture: IP fragments from the same
+	// packet may arrive on different interfaces (e.g., due to port mirror splits).
+	// A per-interface defragmenter would never reassemble such packets.
+	sharedDefragmenter := NewIPv4Defragmenter()
+
+	// Start a single cleanup goroutine for stale fragments (shared across all interfaces)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				discarded := sharedDefragmenter.DiscardOlderThan(time.Now().Add(-30 * time.Second))
+				if discarded > 0 {
+					logger.Debug("Discarded stale IP fragments", "count", discarded)
+				}
+			}
+		}
+	}()
+
 	for _, iface := range ifaces {
 		wg.Add(1)
 		go func(pif pcaptypes.PcapInterface) {
@@ -536,7 +559,7 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 				handle.Close() // This will cause packetSource.Packets() channel to close
 			}()
 
-			captureFromInterface(ctx, pif, filter, packetBuffer)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter)
 		}(iface)
 	}
 
@@ -625,7 +648,7 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	}
 }
 
-func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer) {
+func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter) {
 	logger.Debug("captureFromInterface starting", "interface", iface.Name())
 	defer logger.Debug("captureFromInterface exiting", "interface", iface.Name())
 
@@ -646,15 +669,20 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 	}
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
+	// Note: defragmenter is shared across all interfaces to correctly reassemble
+	// IP fragments that may arrive on different interfaces (e.g., due to port mirror splits)
+
 	// Add periodic stats logging
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	// Batched atomic updates: use local counter and periodically sync to atomic
 	// Both counters are atomic so the stats goroutine can safely read the total
-	var packetCount atomic.Int64 // flushed counter
-	var localCount atomic.Int64  // unflushed counter (for accurate stats reporting)
-	const batchThreshold = 100   // flush to packetCount every N packets
+	var packetCount atomic.Int64        // flushed counter
+	var localCount atomic.Int64         // unflushed counter (for accurate stats reporting)
+	var fragmentsReceived atomic.Int64  // IP fragments received
+	var packetsReassembled atomic.Int64 // Successfully reassembled packets
+	const batchThreshold = 100          // flush to packetCount every N packets
 
 	go func() {
 		logger.Debug("Stats logging goroutine starting", "interface", iface.Name())
@@ -665,13 +693,20 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				logger.Debug("Stats goroutine received context cancellation", "interface", iface.Name())
 				return
 			case <-ticker.C:
+				// Note: stale fragment cleanup is handled by a single shared goroutine
+				// in InitWithBuffer to avoid duplicate cleanup across interfaces
+
 				// Include both flushed and unflushed counts for accurate reporting
 				count := packetCount.Load() + localCount.Load()
 				dropped := atomic.LoadInt64(&buffer.dropped)
+				frags := fragmentsReceived.Load()
+				reassembled := packetsReassembled.Load()
 				logger.Info("Capture heartbeat",
 					"interface", iface.Name(),
 					"packets_processed", count,
 					"packets_dropped", dropped,
+					"ip_fragments", frags,
+					"reassembled", reassembled,
 					"buffer_len", buffer.Len(),
 					"buffer_closed", buffer.IsClosed())
 			}
@@ -718,6 +753,44 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				}
 				return
 			}
+
+			// Handle IPv4 fragmentation - reassemble fragmented packets
+			// This is critical for SIP messages that exceed MTU (>1500 bytes)
+			// Without reassembly, the second fragment (containing SDP with media ports)
+			// would be dropped, causing RTP-only calls
+			if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+				ip4 := ipLayer.(*layers.IPv4)
+				// Check if this is a fragment (more fragments flag or non-zero offset)
+				if ip4.Flags&layers.IPv4MoreFragments != 0 || ip4.FragOffset > 0 {
+					fragmentsReceived.Add(1)
+
+					// Feed fragment to defragmenter
+					reassembledIP, err := defragmenter.DefragIPv4(ip4)
+					if err != nil {
+						logger.Debug("IPv4 defragmentation error",
+							"error", err,
+							"src", ip4.SrcIP,
+							"dst", ip4.DstIP,
+							"id", ip4.Id)
+						continue // Skip this fragment
+					}
+					if reassembledIP == nil {
+						// Still waiting for more fragments - don't forward yet
+						continue
+					}
+
+					// Successfully reassembled - rebuild the packet
+					packetsReassembled.Add(1)
+					logger.Debug("IPv4 packet reassembled",
+						"src", reassembledIP.SrcIP,
+						"dst", reassembledIP.DstIP,
+						"payload_len", len(reassembledIP.Payload))
+
+					// Rebuild packet from reassembled IP layer
+					packet = rebuildReassembledPacket(packet, reassembledIP, handle.LinkType())
+				}
+			}
+
 			pktInfo := PacketInfo{
 				LinkType:  handle.LinkType(),
 				Packet:    packet,
@@ -769,4 +842,77 @@ func GetPcapTimeout() time.Duration {
 
 	// Fall back to default
 	return defaultTimeout
+}
+
+// rebuildReassembledPacket creates a new gopacket.Packet from a reassembled IPv4 layer.
+// This is used after IP defragmentation to produce a complete packet that can be
+// decoded with transport layer (UDP/TCP) intact.
+//
+// The original packet is used to preserve metadata (timestamp, capture info).
+// The reassembled IPv4 layer contains the complete payload across all fragments.
+func rebuildReassembledPacket(original gopacket.Packet, reassembledIP *layers.IPv4, linkType layers.LinkType) gopacket.Packet {
+	// Serialize the reassembled IPv4 layer back to bytes
+	// We need to build a complete packet: Ethernet + IPv4 + payload
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+
+	// Get the link layer from original packet (Ethernet header)
+	var ethLayer *layers.Ethernet
+	if eth := original.Layer(layers.LayerTypeEthernet); eth != nil {
+		ethLayer = eth.(*layers.Ethernet)
+	}
+
+	// Check for VLAN tag (802.1Q) - must be preserved for proper packet reconstruction
+	// VLAN tags sit between Ethernet and IP layers and must be included in serialization
+	var dot1qLayer *layers.Dot1Q
+	if dot1q := original.Layer(layers.LayerTypeDot1Q); dot1q != nil {
+		dot1qLayer = dot1q.(*layers.Dot1Q)
+	}
+
+	// Serialize the packet layers
+	var err error
+	if ethLayer != nil && dot1qLayer != nil {
+		// Packet with VLAN tag: Ethernet + Dot1Q + IPv4 + payload
+		err = gopacket.SerializeLayers(buf, opts,
+			ethLayer,
+			dot1qLayer,
+			reassembledIP,
+			gopacket.Payload(reassembledIP.Payload),
+		)
+	} else if ethLayer != nil {
+		// Standard Ethernet packet without VLAN: Ethernet + IPv4 + payload
+		err = gopacket.SerializeLayers(buf, opts,
+			ethLayer,
+			reassembledIP,
+			gopacket.Payload(reassembledIP.Payload),
+		)
+	} else {
+		// No Ethernet layer (e.g., loopback or raw IP capture)
+		err = gopacket.SerializeLayers(buf, opts,
+			reassembledIP,
+			gopacket.Payload(reassembledIP.Payload),
+		)
+	}
+
+	if err != nil {
+		logger.Debug("Failed to serialize reassembled packet", "error", err)
+		// Return original packet as fallback (incomplete, but better than nothing)
+		return original
+	}
+
+	// Create new packet from serialized bytes
+	newPacket := gopacket.NewPacket(buf.Bytes(), linkType, gopacket.Default)
+
+	// Preserve original packet metadata (timestamp, capture length, etc.)
+	if original.Metadata() != nil {
+		newMeta := newPacket.Metadata()
+		newMeta.Timestamp = original.Metadata().Timestamp
+		newMeta.CaptureLength = len(buf.Bytes())
+		newMeta.Length = len(buf.Bytes())
+	}
+
+	return newPacket
 }

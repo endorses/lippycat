@@ -51,7 +51,8 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	defer proc.Shutdown()
 
 	// Wait for processor to be ready (TLS needs more time to initialize)
-	time.Sleep(3 * time.Second)
+	// CI with race detector can be slow
+	time.Sleep(5 * time.Second)
 
 	// Load hunter client certificate
 	hunterCert, err := tls.LoadX509KeyPair(
@@ -71,7 +72,7 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	// Connect to processor with TLS
 	creds := credentials.NewTLS(hunterTLSConfig)
 
-	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	dialCtx, dialCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer dialCancel()
 
 	conn, err := grpc.DialContext(dialCtx, processorAddr,
@@ -526,7 +527,8 @@ func startTLSProcessor(t *testing.T, ctx context.Context, addr, certsDir string,
 	}()
 
 	// Give processor time to start listening
-	time.Sleep(500 * time.Millisecond)
+	// CI with race detector needs more time
+	time.Sleep(2 * time.Second)
 
 	return proc, nil
 }

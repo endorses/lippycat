@@ -93,6 +93,10 @@ var (
 	callTracker   *CallTracker
 	callTrackerMu sync.RWMutex
 
+	// Local call aggregator for direct merge triggering from TCP reassembly
+	localCallAggregator   *LocalCallAggregator
+	localCallAggregatorMu sync.RWMutex
+
 	// VoIP mode flag - controls whether TCP reassembly is active
 	// Only when VoIP protocol is selected should TCP be reassembled for SIP
 	// This mirrors the behavior of `lc hunt` vs `lc hunt voip`
@@ -242,6 +246,8 @@ func getTCPFlowKey(srcIP, dstIP, srcPort, dstPort string) string {
 
 // isTCPSIPFlow checks if a TCP flow is cached as SIP
 func isTCPSIPFlow(flowKey string) bool {
+	atomic.AddInt64(&bridgeStats.TCPSIPFlowLookups, 1)
+
 	tcpSIPFlowCacheMu.RLock()
 	entry, ok := tcpSIPFlowCache[flowKey]
 	tcpSIPFlowCacheMu.RUnlock()
@@ -259,11 +265,19 @@ func isTCPSIPFlow(flowKey string) bool {
 		return false
 	}
 
+	atomic.AddInt64(&bridgeStats.TCPSIPFlowHits, 1)
 	return true
+}
+
+// incrementSIPMessagesDetected increments the SIP messages detected counter
+func incrementSIPMessagesDetected() {
+	atomic.AddInt64(&bridgeStats.SIPMessagesDetected, 1)
 }
 
 // markTCPSIPFlow marks a TCP flow as SIP in the cache
 func markTCPSIPFlow(flowKey string) {
+	atomic.AddInt64(&bridgeStats.TCPSIPFlowsMarked, 1)
+
 	tcpSIPFlowCacheMu.Lock()
 	defer tcpSIPFlowCacheMu.Unlock()
 
@@ -321,14 +335,273 @@ func ClearCallTracker() {
 	}
 }
 
+// SetLocalCallAggregator sets the local call aggregator for direct merge triggering
+func SetLocalCallAggregator(agg *LocalCallAggregator) {
+	localCallAggregatorMu.Lock()
+	defer localCallAggregatorMu.Unlock()
+	localCallAggregator = agg
+}
+
+// GetLocalCallAggregator returns the current local call aggregator
+func GetLocalCallAggregator() *LocalCallAggregator {
+	localCallAggregatorMu.RLock()
+	defer localCallAggregatorMu.RUnlock()
+	return localCallAggregator
+}
+
+// ClearLocalCallAggregator clears the local call aggregator
+func ClearLocalCallAggregator() {
+	localCallAggregatorMu.Lock()
+	defer localCallAggregatorMu.Unlock()
+	localCallAggregator = nil
+}
+
+// Per-packet SIP extraction counters (for diagnostics)
+var (
+	perPacketExtractCalls int64
+	perPacketCallIDFound  int64
+	perPacketMediaFound   int64
+	perPacketConnIPFound  int64
+	perPacketRegistered   int64
+	// SIP request vs response tracking
+	sipRequestsProcessed  int64 // INVITE, REGISTER, etc.
+	sipRequestsWithSDP    int64 // Requests that had media ports (INVITEs)
+	sipResponsesProcessed int64 // SIP/2.0 responses
+	sipResponsesWithSDP   int64 // Responses that had media ports
+)
+
+// Merge diagnostic counters
+var (
+	detectorMediaPortsFound int64 // Detector provided media_ports
+	mergeFromCallIDSet      int64 // MergeFromCallID was set on packet
+	rtpOnlyRegistered       int64 // RTP-only endpoints registered
+)
+
+// GetPerPacketStats returns per-packet extraction statistics
+func GetPerPacketStats() (calls, callIDs, media, connIP, registered int64) {
+	return atomic.LoadInt64(&perPacketExtractCalls),
+		atomic.LoadInt64(&perPacketCallIDFound),
+		atomic.LoadInt64(&perPacketMediaFound),
+		atomic.LoadInt64(&perPacketConnIPFound),
+		atomic.LoadInt64(&perPacketRegistered)
+}
+
+// GetSIPTypeStats returns SIP request vs response statistics
+func GetSIPTypeStats() (requests, requestsWithSDP, responses, responsesWithSDP int64) {
+	return atomic.LoadInt64(&sipRequestsProcessed),
+		atomic.LoadInt64(&sipRequestsWithSDP),
+		atomic.LoadInt64(&sipResponsesProcessed),
+		atomic.LoadInt64(&sipResponsesWithSDP)
+}
+
+// getRTPLookupStats returns RTP lookup statistics from CallTracker
+// Returns: attempts, dstMatch, srcMatch, failed
+func getRTPLookupStats() (attempts, dstMatch, srcMatch, failed int64) {
+	return GetRTPLookupStats()
+}
+
+// GetMergeStats returns merge diagnostic statistics
+func GetMergeStats() (detMediaPorts, mergeSet, rtpReg int64) {
+	return atomic.LoadInt64(&detectorMediaPortsFound),
+		atomic.LoadInt64(&mergeFromCallIDSet),
+		atomic.LoadInt64(&rtpOnlyRegistered)
+}
+
+// GetMergeAggregatorStats returns merge statistics from CallAggregator (wrapper)
+func GetMergeAggregatorStats() (attempts, syntheticFound, realFound, success int64) {
+	return voip.GetMergeAggregatorStats()
+}
+
+// extractAndRegisterSIPFromPacket extracts Call-ID, media ports, and From/To from a SIP packet
+// and registers them with the CallTracker for RTP correlation.
+// This provides a backup path when TCP reassembly fails (mid-stream captures, fragmentation, etc.)
+func extractAndRegisterSIPFromPacket(payload []byte, srcIP, dstIP string) {
+	atomic.AddInt64(&perPacketExtractCalls, 1)
+
+	if len(payload) == 0 {
+		return
+	}
+
+	// Track whether this is a request or response
+	isResponse := len(payload) >= 7 && payload[0] == 'S' && payload[1] == 'I' && payload[2] == 'P' && payload[3] == '/'
+	if isResponse {
+		atomic.AddInt64(&sipResponsesProcessed, 1)
+	} else {
+		atomic.AddInt64(&sipRequestsProcessed, 1)
+	}
+
+	tracker := GetCallTracker()
+	if tracker == nil {
+		return
+	}
+
+	// Extract Call-ID from packet payload
+	callID := extractCallIDFromPayload(payload)
+	if callID == "" {
+		return
+	}
+	atomic.AddInt64(&perPacketCallIDFound, 1)
+
+	// Extract media ports from SDP (if present)
+	mediaPorts := extractMediaPortsFromSIP(payload)
+	if len(mediaPorts) > 0 {
+		atomic.AddInt64(&perPacketMediaFound, 1)
+
+		// Track responses with SDP (these are critical for bidirectional RTP correlation)
+		if isResponse {
+			atomic.AddInt64(&sipResponsesWithSDP, 1)
+		} else {
+			atomic.AddInt64(&sipRequestsWithSDP, 1)
+		}
+
+		// Extract the SDP c= line IP (connection address) - this is where RTP should go
+		// In SBC/B2BUA environments, the signaling IP (srcIP) differs from media IP
+		mediaIP := extractConnectionIPFromPayload(payload)
+
+		// Register with BOTH IPs to handle different environments:
+		// - SBC/B2BUA: media_ip is correct, srcIP is wrong
+		// - Direct/simple: srcIP is correct, media_ip might be 0.0.0.0
+		registered := false
+		if mediaIP != "" && mediaIP != "0.0.0.0" {
+			tracker.RegisterMediaPorts(callID, mediaIP, mediaPorts, isResponse)
+			registered = true
+		}
+		if srcIP != "" && srcIP != mediaIP {
+			tracker.RegisterMediaPorts(callID, srcIP, mediaPorts, isResponse)
+			registered = true
+		}
+		if registered {
+			atomic.AddInt64(&perPacketRegistered, 1)
+		}
+	}
+
+	// Extract From/To for call display
+	from, to := extractFromToFromSIP(payload)
+	if from != "" || to != "" {
+		tracker.RegisterCallPartyInfo(callID, from, to)
+	}
+}
+
+// extractConnectionIPFromPayload extracts the connection IP from SDP c= line in a byte payload
+// Format: c=IN IP4 <ip_address>
+func extractConnectionIPFromPayload(payload []byte) string {
+	// Find SDP body (after blank line in SIP message)
+	// SDP starts after \r\n\r\n
+	sdpStart := -1
+	for i := 0; i < len(payload)-3; i++ {
+		if payload[i] == '\r' && payload[i+1] == '\n' && payload[i+2] == '\r' && payload[i+3] == '\n' {
+			sdpStart = i + 4
+			break
+		}
+	}
+	if sdpStart < 0 || sdpStart >= len(payload) {
+		return ""
+	}
+
+	// Scan for c= line in SDP body
+	lineStart := sdpStart
+	for i := sdpStart; i <= len(payload); i++ {
+		if i == len(payload) || payload[i] == '\n' {
+			line := payload[lineStart:i]
+			// Trim \r if present
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+
+			// Check for c= line: "c=IN IP4 x.x.x.x"
+			if len(line) > 7 && line[0] == 'c' && line[1] == '=' {
+				// Parse: c=IN IP4 10.0.0.1
+				// Skip "c=" and find the IP (third field)
+				fieldStart := 2
+				fieldNum := 0
+				for j := 2; j <= len(line); j++ {
+					if j == len(line) || line[j] == ' ' {
+						if fieldNum == 2 && j > fieldStart {
+							// Third field is the IP address
+							return string(line[fieldStart:j])
+						}
+						fieldNum++
+						fieldStart = j + 1
+					}
+				}
+			}
+			lineStart = i + 1
+		}
+	}
+	return ""
+}
+
+// extractCallIDFromPayload extracts Call-ID header from SIP message payload
+// Handles both full form "Call-ID:" and compact form "i:"
+func extractCallIDFromPayload(payload []byte) string {
+	lineStart := 0
+	for i := 0; i <= len(payload); i++ {
+		if i == len(payload) || payload[i] == '\n' {
+			line := payload[lineStart:i]
+			// Trim \r if present
+			if len(line) > 0 && line[len(line)-1] == '\r' {
+				line = line[:len(line)-1]
+			}
+
+			// Empty line = end of headers
+			if len(line) == 0 {
+				break
+			}
+
+			// Check for Call-ID header (case-insensitive)
+			if len(line) > 8 {
+				// "Call-ID:" (8 chars)
+				if (line[0] == 'C' || line[0] == 'c') &&
+					(line[1] == 'a' || line[1] == 'A') &&
+					(line[2] == 'l' || line[2] == 'L') &&
+					(line[3] == 'l' || line[3] == 'L') &&
+					line[4] == '-' &&
+					(line[5] == 'I' || line[5] == 'i') &&
+					(line[6] == 'D' || line[6] == 'd') &&
+					line[7] == ':' {
+					return extractHeaderValue(line[8:])
+				}
+			}
+
+			// Compact form "i:"
+			if len(line) > 2 && (line[0] == 'i' || line[0] == 'I') && line[1] == ':' {
+				return extractHeaderValue(line[2:])
+			}
+
+			lineStart = i + 1
+		}
+	}
+	return ""
+}
+
+// extractHeaderValue extracts and trims the value from a header line
+func extractHeaderValue(value []byte) string {
+	// Skip leading whitespace
+	start := 0
+	for start < len(value) && (value[start] == ' ' || value[start] == '\t') {
+		start++
+	}
+	// Trim trailing whitespace
+	end := len(value)
+	for end > start && (value[end-1] == ' ' || value[end-1] == '\t' || value[end-1] == '\r' || value[end-1] == '\n') {
+		end--
+	}
+	if start >= end {
+		return ""
+	}
+	return string(value[start:end])
+}
+
 // SetVoIPModeEnabled enables or disables VoIP mode for TCP reassembly.
 // When enabled, TCP traffic is passed through the SIP reassembler.
 // When disabled, TCP traffic is not reassembled (matching `lc hunt` behavior).
 func SetVoIPModeEnabled(enabled bool) {
 	if enabled {
 		atomic.StoreInt32(&voipModeEnabled, 1)
+		logger.Debug("VoIP mode ENABLED - TCP packets will be fed to SIP assembler")
 	} else {
 		atomic.StoreInt32(&voipModeEnabled, 0)
+		logger.Debug("VoIP mode DISABLED - TCP packets will NOT be fed to SIP assembler")
 	}
 }
 
@@ -351,6 +624,13 @@ type BridgeStats struct {
 	RecentDropRate   int64 // Recent drop rate * 1000 (last 5s window, for throttling)
 	Running          int32 // 1 if bridge is running, 0 if stopped
 	CaptureComplete  int32 // 1 if capture completed successfully (offline mode), 0 otherwise
+
+	// TCP SIP diagnostic counters
+	TCPPacketsToAssembler int64 // TCP packets fed to the assembler
+	SIPMessagesDetected   int64 // SIP messages detected via TCP reassembly
+	TCPSIPFlowsMarked     int64 // TCP flows marked as SIP
+	TCPSIPFlowLookups     int64 // Times isTCPSIPFlow was called
+	TCPSIPFlowHits        int64 // Times isTCPSIPFlow returned true
 }
 
 // recentDropTracker tracks batch drops over a sliding window for throttling
@@ -533,16 +813,21 @@ var bridgeStats BridgeStats
 // GetBridgeStats returns a copy of the current bridge statistics.
 func GetBridgeStats() BridgeStats {
 	return BridgeStats{
-		PacketsReceived:  atomic.LoadInt64(&bridgeStats.PacketsReceived),
-		PacketsDisplayed: atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
-		BatchesSent:      atomic.LoadInt64(&bridgeStats.BatchesSent),
-		BatchesDropped:   atomic.LoadInt64(&bridgeStats.BatchesDropped),
-		QueueDepth:       atomic.LoadInt64(&bridgeStats.QueueDepth),
-		MaxQueueDepth:    atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
-		SamplingRatio:    atomic.LoadInt64(&bridgeStats.SamplingRatio),
-		RecentDropRate:   dropTracker.getRecentDropRate(),
-		Running:          atomic.LoadInt32(&bridgeStats.Running),
-		CaptureComplete:  atomic.LoadInt32(&bridgeStats.CaptureComplete),
+		PacketsReceived:       atomic.LoadInt64(&bridgeStats.PacketsReceived),
+		PacketsDisplayed:      atomic.LoadInt64(&bridgeStats.PacketsDisplayed),
+		BatchesSent:           atomic.LoadInt64(&bridgeStats.BatchesSent),
+		BatchesDropped:        atomic.LoadInt64(&bridgeStats.BatchesDropped),
+		QueueDepth:            atomic.LoadInt64(&bridgeStats.QueueDepth),
+		MaxQueueDepth:         atomic.LoadInt64(&bridgeStats.MaxQueueDepth),
+		SamplingRatio:         atomic.LoadInt64(&bridgeStats.SamplingRatio),
+		RecentDropRate:        dropTracker.getRecentDropRate(),
+		Running:               atomic.LoadInt32(&bridgeStats.Running),
+		CaptureComplete:       atomic.LoadInt32(&bridgeStats.CaptureComplete),
+		TCPPacketsToAssembler: atomic.LoadInt64(&bridgeStats.TCPPacketsToAssembler),
+		SIPMessagesDetected:   atomic.LoadInt64(&bridgeStats.SIPMessagesDetected),
+		TCPSIPFlowsMarked:     atomic.LoadInt64(&bridgeStats.TCPSIPFlowsMarked),
+		TCPSIPFlowLookups:     atomic.LoadInt64(&bridgeStats.TCPSIPFlowLookups),
+		TCPSIPFlowHits:        atomic.LoadInt64(&bridgeStats.TCPSIPFlowHits),
 	}
 }
 
@@ -673,12 +958,6 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, we MUST NOT drop packets - use blocking send
 			hasCallTracker := GetCallTracker() != nil
-
-			// DEBUG: Log batch send details
-			logger.Debug("Bridge: sending batch",
-				"batch_size", len(batch),
-				"has_call_tracker", hasCallTracker,
-				"packets_received_so_far", atomic.LoadInt64(&bridgeStats.PacketsReceived))
 
 			if hasCallTracker {
 				// Blocking send - wait until TUI is ready (offline mode)
@@ -842,6 +1121,13 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 					tcp := tcpLayer.(*layers.TCP)
 					// Get network flow for assembler
 					if netFlow := pktInfo.Packet.NetworkLayer(); netFlow != nil {
+						count := atomic.AddInt64(&bridgeStats.TCPPacketsToAssembler, 1)
+						// Log every 100th TCP packet to assembler
+						if count%100 == 1 {
+							logger.Debug("TCP packets fed to assembler",
+								"total_count", count,
+								"payload_len", len(tcp.Payload))
+						}
 						assembler.AssembleWithTimestamp(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
 					}
 				}
@@ -949,6 +1235,10 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 					// Cache the flow for future packets
 					flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
 					markTCPSIPFlow(flowKey)
+					// NOTE: Don't call extractAndRegisterSIPFromPacket for TCP here.
+					// TCP packets may contain partial SIP messages, leading to incorrect
+					// CallID extraction that overwrites correct registrations from TCP reassembly.
+					// Let TCP reassembly handle registration with complete messages.
 				} else {
 					// Check flow cache - populated by TCP reassembly handler
 					// This replaces heuristic detection (port-based, header-based)
@@ -960,8 +1250,11 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 					}
 				}
 			case *layers.UDP:
-				if isSIPBytes(trans.LayerPayload()) {
+				payload := trans.LayerPayload()
+				if isSIPBytes(payload) {
 					display.Protocol = internProtocol("SIP")
+					// Extract Call-ID and register with CallTracker for RTP correlation
+					extractAndRegisterSIPFromPacket(payload, fields.SrcIP, fields.DstIP)
 				}
 			}
 		}
@@ -1003,40 +1296,22 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 	detectionResult := detector.GetDefault().Detect(pkt)
 
 	// DEBUG: Log UDP packets in RTP port range that aren't detected as RTP
-	if fields.Protocol == "UDP" && detectionResult != nil && detectionResult.Protocol == "unknown" {
-		srcPort, _ := strconv.Atoi(fields.SrcPort)
-		dstPort, _ := strconv.Atoi(fields.DstPort)
-		inRange := (srcPort >= 16384 && srcPort <= 32768) || (dstPort >= 16384 && dstPort <= 32768) ||
-			(srcPort >= 10000 && srcPort <= 20000) || (dstPort >= 10000 && dstPort <= 20000)
-		if inRange {
-			if transLayer := pkt.TransportLayer(); transLayer != nil {
-				payload := transLayer.LayerPayload()
-				if len(payload) >= 12 {
-					version := (payload[0] >> 6) & 0x03
-					pt := payload[1] & 0x7F
-					logger.Warn("DEBUG: Potential RTP not detected",
-						"src", fields.SrcIP+":"+fields.SrcPort,
-						"dst", fields.DstIP+":"+fields.DstPort,
-						"payload_len", len(payload),
-						"first_byte", fmt.Sprintf("0x%02x", payload[0]),
-						"rtp_version", version,
-						"payload_type", pt)
-				}
-			}
-		}
-	}
-
 	if detectionResult != nil && detectionResult.Protocol != "unknown" {
 		display.Protocol = detectionResult.Protocol
 
 		// Generate display info from metadata
 		display.Info = buildProtocolInfo(detectionResult, pkt, &display)
 
-		// If detected as SIP over TCP, cache the flow for future packets
+		// If detected as SIP over TCP, cache the flow (but don't extract per-packet)
+		// TCP packets may contain partial SIP messages - let TCP reassembly handle registration
 		if detectionResult.Protocol == "SIP" && fields.Protocol == "TCP" {
 			flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
 			markTCPSIPFlow(flowKey)
 		}
+		// NOTE: UDP SIP endpoint registration is now handled in buildProtocolInfo() via detector path.
+		// This avoids potential CallID mismatches between detector and extractCallIDFromPayload().
+		// The detector path uses display.VoIPData.CallID which is also used for call creation,
+		// ensuring endpoints are registered under the correct CallID.
 	}
 
 	// TCP SIP detection via flow cache
@@ -1081,17 +1356,59 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 		// Use media_ports and media_ip from detector metadata (parsed from SDP)
 		if tracker := GetCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
 			if mediaPorts, ok := result.Metadata["media_ports"].([]uint16); ok && len(mediaPorts) > 0 {
-				// Determine RTP endpoint IP:
-				// 1. Prefer media_ip from SDP c= line (most accurate)
-				// 2. Fall back to SIP packet source IP
-				rtpIP := display.SrcIP
-				if mediaIP, ok := result.Metadata["media_ip"].(string); ok && mediaIP != "" {
-					rtpIP = mediaIP
+				atomic.AddInt64(&detectorMediaPortsFound, 1)
+				// Log SDP port registration
+				mediaIP, _ := result.Metadata["media_ip"].(string)
+				method, _ := result.Metadata["method"].(string)
+				statusCode, hasStatus := result.Metadata["status_code"]
+				msgType := method
+				if hasStatus {
+					msgType = fmt.Sprintf("%v", statusCode)
 				}
-				// RegisterMediaPorts returns a synthetic CallID if the endpoint was
-				// previously registered for an RTP-only call (enables call merging)
-				if syntheticCallID := tracker.RegisterMediaPorts(display.VoIPData.CallID, rtpIP, mediaPorts); syntheticCallID != "" {
+				logger.Debug("SIP with SDP ports",
+					"call_id", display.VoIPData.CallID,
+					"msg_type", msgType,
+					"media_ip", mediaIP,
+					"ports", mediaPorts,
+					"src_ip", display.SrcIP)
+				// Determine if this is a response (has status_code) or request (has method)
+				// Responses are typically 200 OK with callee's SDP
+				_, isResponse := result.Metadata["status_code"]
+
+				// Register with BOTH IPs to handle different environments:
+				// - SBC/B2BUA: media_ip differs from signaling IP
+				// - Direct/simple: srcIP is correct, media_ip might be 0.0.0.0
+				// Check for existing RTP-only calls and trigger merge if found
+				var syntheticCallID string
+				if mediaIP != "" && mediaIP != "0.0.0.0" {
+					if sid := tracker.RegisterMediaPorts(display.VoIPData.CallID, mediaIP, mediaPorts, isResponse); sid != "" && syntheticCallID == "" {
+						syntheticCallID = sid
+					}
+				}
+				if display.SrcIP != "" && display.SrcIP != mediaIP {
+					if sid := tracker.RegisterMediaPorts(display.VoIPData.CallID, display.SrcIP, mediaPorts, isResponse); sid != "" && syntheticCallID == "" {
+						syntheticCallID = sid
+					}
+				}
+				if syntheticCallID != "" {
 					display.VoIPData.MergeFromCallID = syntheticCallID
+					atomic.AddInt64(&mergeFromCallIDSet, 1)
+				}
+			} else {
+				// SIP message without SDP (late offer INVITE, or non-SDP response)
+				method, _ := result.Metadata["method"].(string)
+				statusCode, hasStatus := result.Metadata["status_code"]
+				// Only log INVITEs without SDP and 200 responses without SDP
+				// (these are the interesting late-offer cases)
+				if method == "INVITE" || (hasStatus && statusCode == 200) {
+					msgType := method
+					if hasStatus {
+						msgType = fmt.Sprintf("%v", statusCode)
+					}
+					logger.Debug("SIP without SDP ports",
+						"call_id", display.VoIPData.CallID,
+						"msg_type", msgType,
+						"src_ip", display.SrcIP)
 				}
 			}
 			// Store From/To info for RTP-created calls to inherit
@@ -1116,6 +1433,19 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 			callID := tracker.GetCallIDForRTPPacket(display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
 			if callID != "" {
 				display.VoIPData.CallID = callID
+
+				// For calls with SIP CallIDs (non-synthetic), also query party info
+				// This ensures From/To is populated when RTP creates/updates a call
+				// that was registered by TCP SIP (which doesn't flow through CallAggregator)
+				if !strings.HasPrefix(callID, "rtp-") {
+					from, to := tracker.GetCallPartyInfo(callID)
+					if from != "" {
+						display.VoIPData.From = from
+					}
+					if to != "" {
+						display.VoIPData.To = to
+					}
+				}
 			}
 		}
 
@@ -1125,9 +1455,17 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 			// Generate synthetic CallID from SSRC
 			display.VoIPData.CallID = fmt.Sprintf("rtp-%08x", display.VoIPData.SSRC)
 
+			// Log RTP-only call creation
+			logger.Debug("RTP-only call created",
+				"call_id", display.VoIPData.CallID,
+				"ssrc", display.VoIPData.SSRC,
+				"src", fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort),
+				"dst", fmt.Sprintf("%s:%s", display.DstIP, display.DstPort))
+
 			// Register endpoints so SIP can find and merge this call later
 			if tracker := GetCallTracker(); tracker != nil {
 				tracker.RegisterRTPOnlyEndpoints(display.VoIPData.CallID, display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
+				atomic.AddInt64(&rtpOnlyRegistered, 1)
 			}
 		}
 

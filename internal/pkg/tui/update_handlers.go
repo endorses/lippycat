@@ -40,6 +40,11 @@ func (m Model) handleWindowSizeMsg(msg tea.WindowSizeMsg) (Model, tea.Cmd) {
 	m.uiState.ConfirmDialog.SetSize(msg.Width, msg.Height)
 	m.uiState.Toast.SetSize(msg.Width, msg.Height)
 
+	// Set dev console size (full screen when visible)
+	if m.uiState.DevConsole != nil {
+		m.uiState.DevConsole.SetSize(msg.Width, msg.Height)
+	}
+
 	// Calculate available space for main content
 	headerHeight := 2 // header (2 lines: text + border)
 	tabsHeight := 4   // tabs (4 lines: top border + content + bottom corners + bottom line)

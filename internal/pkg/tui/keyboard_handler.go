@@ -8,12 +8,53 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 )
 
 // handleKeyboard processes keyboard events for the TUI
 func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Dev console has highest priority when visible (LOG_LEVEL=DEBUG only)
+	if m.uiState.DevConsole != nil && m.uiState.DevConsole.IsVisible() {
+		switch msg.String() {
+		case "`", "~":
+			// Toggle console off
+			m.uiState.DevConsole.Toggle()
+			return m, nil
+		case "pgup":
+			m.uiState.DevConsole.ScrollUp(10)
+			return m, nil
+		case "pgdown":
+			m.uiState.DevConsole.ScrollDown(10)
+			return m, nil
+		case "end":
+			m.uiState.DevConsole.ScrollToBottom()
+			return m, nil
+		case "c":
+			m.uiState.DevConsole.Clear()
+			return m, nil
+		case "D":
+			// Dump diagnostics
+			return m.handleDiagDump()
+		case "q", "ctrl+c":
+			// Still allow quit
+			m.Shutdown()
+			m.uiState.Quitting = true
+			return m, tea.Quit
+		default:
+			// Consume all other keys while console is visible
+			return m, nil
+		}
+	}
+
+	// Toggle dev console with backtick (only when LOG_LEVEL=DEBUG)
+	if msg.String() == "`" && m.uiState.DevConsole != nil && logger.IsDebugEnabled() {
+		m.uiState.DevConsole.Toggle()
+		return m, nil
+	}
+
 	// Handle filter input mode (packet filters)
 	if m.uiState.FilterMode {
 		model, cmd := m.handleFilterInput(msg)
@@ -332,7 +373,34 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case "f": // Open filter manager (only on Nodes tab when hunter selected)
 		return m.handleFilterManagerKey()
+
+	case "B": // Show bridge/TCP SIP diagnostic stats
+		return m.handleBridgeStats()
+
+	case "D": // Dump RTP-SIP correlation diagnostic events
+		return m.handleDiagDump()
 	}
+
+	return m, nil
+}
+
+// handleDiagDump shows recent RTP-SIP correlation diagnostic events
+func (m Model) handleDiagDump() (Model, tea.Cmd) {
+	events := GetRecentDiagEvents()
+	if len(events) == 0 {
+		logger.Info("No diagnostic events yet")
+		return m, nil
+	}
+
+	logger.Info("=== RTP-SIP Correlation Diagnostics ===")
+	for _, e := range events {
+		if e.Type == "REG" {
+			logger.Info("REG", "callID", e.CallID, "endpoint", e.Endpoint, "type", e.Extra)
+		} else if e.Type == "MISS" {
+			logger.Info("MISS", "src", e.Endpoint, "dst", e.Extra)
+		}
+	}
+	logger.Info("=== End Diagnostics ===")
 
 	return m, nil
 }
@@ -695,6 +763,58 @@ func (m Model) handleTestToast() (Model, tea.Cmd) {
 	)
 
 	m.testToastCycle++ // Increment for next test
+	return m, cmd
+}
+
+// handleBridgeStats shows TCP SIP diagnostic statistics (press B to see stats)
+func (m Model) handleBridgeStats() (Model, tea.Cmd) {
+	stats := GetBridgeStats()
+	tcpStats := voip.GetTCPStreamMetrics()
+	_, rtpDst, rtpSrc, rtpFail := getRTPLookupStats()
+	detMediaPorts, mergeSet, rtpReg := GetMergeStats()
+	mergeAtt, _, _, mergeOK := GetMergeAggregatorStats()
+	// Get SIP request/response breakdown
+	tcpReq, tcpResp, tcpReqSDP, tcpRespSDP, tcpMerge := GetTCPSIPTypeStats()
+
+	// Show stats: SIP=reassembly, Mark=flow cache,
+	// Det SDP=detector found media_ports (SIP with SDP)
+	// RTP Reg=RTP-only endpoints registered (for later SIP merge)
+	// TCP Req+SDP/Rsp+SDP for diagnosing where SDP is
+	// RTP lookup: D=dst, S=src, F=fail (pure IP:port matching)
+	// Mrg S=MergeFromCallID set (found synthetic), A=attempts, OK=success, T=TCP handler triggered
+	msg := fmt.Sprintf("SIP:%d Mark:%d | Det SDP:%d RTP Reg:%d | TCP Req:%d+SDP:%d Rsp:%d+SDP:%d | RTP D:%d S:%d F:%d | Mrg S:%d A:%d OK:%d T:%d",
+		tcpStats.SIPMessagesDetected,
+		stats.TCPSIPFlowsMarked,
+		detMediaPorts,
+		rtpReg,
+		tcpReq, tcpReqSDP, tcpResp, tcpRespSDP,
+		rtpDst, rtpSrc, rtpFail,
+		mergeSet, mergeAtt, mergeOK, tcpMerge)
+
+	// Also log detailed stats to help with debugging
+	logger.Debug("SIP correlation stats",
+		"sip_messages_detected", tcpStats.SIPMessagesDetected,
+		"tcp_sip_flows_marked", stats.TCPSIPFlowsMarked,
+		"detector_media_ports", detMediaPorts,
+		"rtp_only_registered", rtpReg,
+		"tcp_requests", tcpReq,
+		"tcp_requests_with_sdp", tcpReqSDP,
+		"tcp_responses", tcpResp,
+		"tcp_responses_with_sdp", tcpRespSDP,
+		"tcp_merges_triggered", tcpMerge,
+		"rtp_dst_matches", rtpDst,
+		"rtp_src_matches", rtpSrc,
+		"rtp_failed", rtpFail,
+		"merge_set", mergeSet,
+		"merge_attempts", mergeAtt,
+		"merge_success", mergeOK)
+
+	cmd := m.uiState.Toast.Show(
+		msg,
+		components.ToastInfo,
+		components.ToastDurationLong,
+	)
+
 	return m, cmd
 }
 

@@ -4,6 +4,7 @@ package tui
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +12,22 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 )
+
+// CallTracker fallback counters for diagnostics
+var (
+	trackerFallbackAttempts int64 // Calls with empty From/To that tried CallTracker
+	trackerFallbackFromHit  int64 // Times CallTracker provided From
+	trackerFallbackToHit    int64 // Times CallTracker provided To
+	trackerFallbackMiss     int64 // Times CallTracker had no party info
+)
+
+// GetTrackerFallbackStats returns CallTracker fallback statistics
+func GetTrackerFallbackStats() (attempts, fromHit, toHit, miss int64) {
+	return atomic.LoadInt64(&trackerFallbackAttempts),
+		atomic.LoadInt64(&trackerFallbackFromHit),
+		atomic.LoadInt64(&trackerFallbackToHit),
+		atomic.LoadInt64(&trackerFallbackMiss)
+}
 
 // rtpStalenessThreshold is the duration after which an RTP-only call
 // with no recent packets is considered ended/stale.
@@ -165,13 +182,29 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 	from := call.From
 	to := call.To
 	if (from == "" || to == "") && call.CallID != "" {
+		atomic.AddInt64(&trackerFallbackAttempts, 1)
 		if tracker := GetCallTracker(); tracker != nil {
 			trackerFrom, trackerTo := tracker.GetCallPartyInfo(call.CallID)
+			foundAny := false
 			if from == "" && trackerFrom != "" {
 				from = trackerFrom
+				atomic.AddInt64(&trackerFallbackFromHit, 1)
+				foundAny = true
 			}
 			if to == "" && trackerTo != "" {
 				to = trackerTo
+				atomic.AddInt64(&trackerFallbackToHit, 1)
+				foundAny = true
+			}
+			if !foundAny && (from == "" || to == "") {
+				atomic.AddInt64(&trackerFallbackMiss, 1)
+				// Log missed fallback for debugging
+				logger.Debug("CallTracker fallback miss - no party info found",
+					"call_id", voip.SanitizeCallIDForLogging(call.CallID),
+					"call_from", call.From,
+					"call_to", call.To,
+					"tracker_from", trackerFrom,
+					"tracker_to", trackerTo)
 			}
 		}
 	}
@@ -198,21 +231,29 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 		nodeID = call.Hunters[0] // Use first interface/hunter as node ID
 	}
 
+	// Get SDP endpoints from CallTracker for debugging correlation
+	var sdpEndpoints []string
+	if tracker := GetCallTracker(); tracker != nil {
+		sdpEndpoints = tracker.GetEndpointsForCall(call.CallID)
+	}
+
 	return types.CallInfo{
-		CallID:      call.CallID,
-		From:        from,
-		To:          to,
-		State:       state,
-		StartTime:   call.StartTime,
-		EndTime:     call.EndTime,
-		Duration:    duration,
-		Codec:       codec,
-		PacketCount: call.PacketCount,
-		PacketLoss:  packetLoss,
-		Jitter:      jitter,
-		MOS:         mos,
-		NodeID:      nodeID,
-		Hunters:     call.Hunters,
+		CallID:           call.CallID,
+		From:             from,
+		To:               to,
+		State:            state,
+		LastResponseCode: call.LastResponseCode,
+		StartTime:        call.StartTime,
+		EndTime:          call.EndTime,
+		Duration:         duration,
+		Codec:            codec,
+		PacketCount:      call.PacketCount,
+		PacketLoss:       packetLoss,
+		Jitter:           jitter,
+		MOS:              mos,
+		NodeID:           nodeID,
+		Hunters:          call.Hunters,
+		SDPEndpoints:     sdpEndpoints,
 	}
 }
 
@@ -261,4 +302,14 @@ func (lca *LocalCallAggregator) GetCalls() []voip.AggregatedCall {
 // GetCallCount returns the number of tracked calls
 func (lca *LocalCallAggregator) GetCallCount() int {
 	return lca.aggregator.GetCallCount()
+}
+
+// TriggerMerge triggers a merge from an RTP-only (synthetic) call to a real SIP call.
+// This is called by HandleSIPMessage when TCP reassembly detects a SIP message
+// with SDP that matches an existing RTP-only call.
+func (lca *LocalCallAggregator) TriggerMerge(syntheticCallID, realCallID string) {
+	if syntheticCallID == "" || realCallID == "" {
+		return
+	}
+	lca.aggregator.TriggerMerge(syntheticCallID, realCallID)
 }

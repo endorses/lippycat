@@ -535,22 +535,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Uses case-insensitive matching to handle different state string formats
 func mapCallState(state string) components.CallState {
 	switch strings.ToUpper(state) {
-	case "NEW", "RINGING":
-		// NEW is the initial state before INVITE is processed, treat as Ringing
+	case "NEW":
+		return components.CallStateNew
+	case "TRYING":
+		return components.CallStateTrying
+	case "RINGING":
 		return components.CallStateRinging
+	case "PROGRESS":
+		return components.CallStateProgress
 	case "ACTIVE":
 		return components.CallStateActive
-	case "ENDED":
+	case "ENDING", "ENDED":
 		return components.CallStateEnded
 	case "FAILED":
 		return components.CallStateFailed
+	case "CANCELLED":
+		return components.CallStateCancelled
+	case "BUSY":
+		return components.CallStateBusy
 	case "RTP-ONLY":
 		return components.CallStateRTPOnly
 	default:
 		// Log unexpected state values for debugging
 		if state != "" {
-			logger.Debug("Unknown call state, defaulting to Ringing", "state", state)
+			logger.Debug("Unknown call state, defaulting to Trying", "state", state)
 		}
-		return components.CallStateRinging
+		return components.CallStateTrying
 	}
 }

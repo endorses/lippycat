@@ -507,7 +507,10 @@ func (dv *DNSQueriesView) renderTableWithSize(width, height int) string {
 	}
 
 	visibleStart := dv.offset
-	visibleEnd := dv.offset + visibleLines
+	if visibleStart > len(dv.queries) {
+		visibleStart = len(dv.queries)
+	}
+	visibleEnd := visibleStart + visibleLines
 	if visibleEnd > len(dv.queries) {
 		visibleEnd = len(dv.queries)
 	}

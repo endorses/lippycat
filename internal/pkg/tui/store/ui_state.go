@@ -37,6 +37,7 @@ type UIState struct {
 	ConfirmDialog    components.ConfirmDialog
 	Toast            components.Toast
 	Statistics       *components.Statistics
+	DevConsole       *components.DevConsole // Debug console (only when LOG_LEVEL=DEBUG)
 
 	// UI State
 	Capturing        bool
@@ -144,6 +145,10 @@ func NewUIState(theme themes.Theme) *UIState {
 	confirmDialog := components.NewConfirmDialog()
 	confirmDialog.SetTheme(theme)
 
+	// DevConsole is created but only shown when LOG_LEVEL=DEBUG
+	devConsole := components.NewDevConsole()
+	devConsole.SetTheme(theme)
+
 	nodesViewPtr := &nodesView
 
 	return &UIState{
@@ -169,6 +174,7 @@ func NewUIState(theme themes.Theme) *UIState {
 		ConfirmDialog:    confirmDialog,
 		Toast:            toast,
 		Statistics:       nil, // Initialized separately by caller
+		DevConsole:       devConsole,
 		Capturing:        false,
 		Paused:           false,
 		Width:            120, // Reasonable default until WindowSizeMsg arrives

@@ -3,10 +3,32 @@
 package tui
 
 import (
+	"sync/atomic"
+	"time"
+
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 )
+
+// TCP SIP message type counters
+var (
+	tcpSIPRequestsProcessed  int64
+	tcpSIPResponsesProcessed int64
+	tcpSIPRequestsWithSDP    int64
+	tcpSIPResponsesWithSDP   int64
+	tcpSIPMergesTriggered    int64 // Merges triggered from TCP SIP handler
+)
+
+// GetTCPSIPTypeStats returns TCP SIP request vs response statistics
+func GetTCPSIPTypeStats() (requests, responses, requestsWithSDP, responsesWithSDP, mergesTriggered int64) {
+	return atomic.LoadInt64(&tcpSIPRequestsProcessed),
+		atomic.LoadInt64(&tcpSIPResponsesProcessed),
+		atomic.LoadInt64(&tcpSIPRequestsWithSDP),
+		atomic.LoadInt64(&tcpSIPResponsesWithSDP),
+		atomic.LoadInt64(&tcpSIPMergesTriggered)
+}
 
 // TUISIPHandler handles SIP messages for TUI live capture mode.
 // It marks TCP flows as SIP when complete messages are detected via TCP reassembly.
@@ -20,29 +42,73 @@ func NewTUISIPHandler() *TUISIPHandler {
 
 // HandleSIPMessage processes a complete SIP message detected via TCP reassembly.
 // It marks the flow as SIP so subsequent packets on this flow are displayed correctly.
-func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool {
+// srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
+// netFlow is not used by TUI handler but required by the interface for other handlers.
+func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, _ gopacket.Flow) bool {
 	if len(sipMessage) == 0 {
 		return false
 	}
 
-	// Extract flow endpoints for cache key
-	// flow.Src() and flow.Dst() give us the TCP endpoints
-	srcEndpoint := flow.Src().String()
-	dstEndpoint := flow.Dst().String()
+	// Track whether this is a request or response, and extract method/status code
+	isResponse := len(sipMessage) >= 7 && sipMessage[0] == 'S' && sipMessage[1] == 'I' && sipMessage[2] == 'P' && sipMessage[3] == '/'
+	var method string
+	var responseCode int
+	if isResponse {
+		atomic.AddInt64(&tcpSIPResponsesProcessed, 1)
+		responseCode = extractResponseCodeFromSIP(sipMessage)
+	} else {
+		atomic.AddInt64(&tcpSIPRequestsProcessed, 1)
+		method = extractMethodFromSIP(sipMessage)
+	}
 
-	// Create flow key (same format as getTCPFlowKey but from gopacket.Flow)
-	// We need to mark both directions
-	flowKey := srcEndpoint + "->" + dstEndpoint
-	reverseFlowKey := dstEndpoint + "->" + srcEndpoint
+	// Increment SIP messages detected counter (diagnostic)
+	incrementSIPMessagesDetected()
 
-	// Mark both directions as SIP flows
+	// Extract IP and port from endpoints to use getTCPFlowKey
+	// This ensures the same key format is used for marking and lookup
+	srcIP := extractIPFromEndpoint(srcEndpoint)
+	srcPort := extractPortFromEndpoint(srcEndpoint)
+	dstIP := extractIPFromEndpoint(dstEndpoint)
+	dstPort := extractPortFromEndpoint(dstEndpoint)
+
+	// Use getTCPFlowKey which creates a symmetric, sorted key
+	// This matches the format used in bridge.go for lookups
+	flowKey := getTCPFlowKey(srcIP, dstIP, srcPort, dstPort)
+
+	// Mark the flow as SIP (only need to mark once since key is symmetric)
 	markTCPSIPFlow(flowKey)
-	markTCPSIPFlow(reverseFlowKey)
 
 	logger.Debug("TCP SIP message detected via reassembly",
 		"call_id", voip.SanitizeCallIDForLogging(callID),
-		"flow", flow.String(),
-		"message_len", len(sipMessage))
+		"flow", srcEndpoint+"->"+dstEndpoint,
+		"message_len", len(sipMessage),
+		"is_response", isResponse,
+		"method", method,
+		"response_code", responseCode)
+
+	// Feed the SIP message to LocalCallAggregator for call state tracking
+	// This ensures TCP SIP responses update call state (e.g., 401 → Failed with error code)
+	if callID != "" {
+		if agg := GetLocalCallAggregator(); agg != nil {
+			from, to := extractFromToFromSIP(sipMessage)
+			pkt := &components.PacketDisplay{
+				Timestamp: time.Now(), // TCP reassembly doesn't preserve original timestamp
+				SrcIP:     srcIP,
+				SrcPort:   srcPort,
+				DstIP:     dstIP,
+				DstPort:   dstPort,
+				Protocol:  "SIP",
+				VoIPData: &components.VoIPMetadata{
+					CallID: callID,
+					Method: method,
+					Status: responseCode,
+					From:   from,
+					To:     to,
+				},
+			}
+			agg.ProcessPacket(pkt)
+		}
+	}
 
 	// Register with CallTracker if available (for RTP-to-CallID mapping)
 	if callID != "" {
@@ -51,11 +117,54 @@ func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, flow 
 			// This is a lightweight parse - just looking for SDP m= lines
 			mediaPorts := extractMediaPortsFromSIP(sipMessage)
 			if len(mediaPorts) > 0 {
-				// Use source IP from flow as the RTP endpoint
-				// In SIP, the media ports advertised are typically for the sender
-				srcIP := extractIPFromEndpoint(srcEndpoint)
-				if srcIP != "" {
-					tracker.RegisterMediaPorts(callID, srcIP, mediaPorts)
+				// Track requests/responses with SDP
+				if isResponse {
+					atomic.AddInt64(&tcpSIPResponsesWithSDP, 1)
+				} else {
+					atomic.AddInt64(&tcpSIPRequestsWithSDP, 1)
+				}
+
+				// Extract the SDP c= line IP (connection address) - this is where RTP should go
+				// In SBC/B2BUA environments, the signaling IP (srcIP) differs from media IP
+				mediaIP := extractConnectionIPFromPayload(sipMessage)
+
+				// Log TCP SIP with SDP
+				msgType := "request"
+				if isResponse {
+					msgType = "response"
+				}
+				logger.Debug("TCP SIP with SDP ports",
+					"call_id", voip.SanitizeCallIDForLogging(callID),
+					"msg_type", msgType,
+					"media_ip", mediaIP,
+					"ports", mediaPorts,
+					"src_ip", srcIP)
+
+				// Register with BOTH IPs to handle different environments:
+				// - SBC/B2BUA: media_ip is correct, srcIP is wrong
+				// - Direct/simple: srcIP is correct, media_ip might be 0.0.0.0
+				// Check for existing RTP-only calls and trigger merge if found
+				var syntheticCallID string
+				if mediaIP != "" && mediaIP != "0.0.0.0" {
+					if sid := tracker.RegisterMediaPorts(callID, mediaIP, mediaPorts, isResponse); sid != "" && syntheticCallID == "" {
+						syntheticCallID = sid
+					}
+				}
+				if srcIP != "" && srcIP != mediaIP {
+					if sid := tracker.RegisterMediaPorts(callID, srcIP, mediaPorts, isResponse); sid != "" && syntheticCallID == "" {
+						syntheticCallID = sid
+					}
+				}
+
+				// If we found an RTP-only call, trigger merge via LocalCallAggregator
+				if syntheticCallID != "" {
+					if agg := GetLocalCallAggregator(); agg != nil {
+						agg.TriggerMerge(syntheticCallID, callID)
+						atomic.AddInt64(&tcpSIPMergesTriggered, 1)
+						logger.Debug("TCP SIP triggered RTP-only merge",
+							"synthetic_call_id", syntheticCallID,
+							"real_call_id", voip.SanitizeCallIDForLogging(callID))
+					}
 				}
 			}
 
@@ -206,4 +315,55 @@ func extractSIPURI(value []byte) string {
 	}
 
 	return string(value)
+}
+
+// extractResponseCodeFromSIP extracts the status code from SIP response
+// Format: "SIP/2.0 <code> <reason>"
+func extractResponseCodeFromSIP(msg []byte) int {
+	// Must start with "SIP/"
+	if len(msg) < 12 || msg[0] != 'S' || msg[1] != 'I' || msg[2] != 'P' || msg[3] != '/' {
+		return 0
+	}
+
+	// Find first space after "SIP/2.0"
+	spaceIdx := -1
+	for i := 4; i < len(msg) && i < 20; i++ {
+		if msg[i] == ' ' {
+			spaceIdx = i
+			break
+		}
+	}
+	if spaceIdx < 0 || spaceIdx >= len(msg)-1 {
+		return 0
+	}
+
+	// Parse 3-digit status code
+	code := 0
+	for i := spaceIdx + 1; i < len(msg) && i < spaceIdx+4; i++ {
+		if msg[i] >= '0' && msg[i] <= '9' {
+			code = code*10 + int(msg[i]-'0')
+		} else {
+			break
+		}
+	}
+
+	return code
+}
+
+// extractMethodFromSIP extracts the method from SIP request
+// Format: "<METHOD> sip:... SIP/2.0"
+func extractMethodFromSIP(msg []byte) string {
+	// Find first space
+	spaceIdx := -1
+	for i := 0; i < len(msg) && i < 20; i++ {
+		if msg[i] == ' ' {
+			spaceIdx = i
+			break
+		}
+	}
+	if spaceIdx <= 0 {
+		return ""
+	}
+
+	return string(msg[:spaceIdx])
 }

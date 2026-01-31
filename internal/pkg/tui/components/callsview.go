@@ -51,26 +51,42 @@ func ExtractSIPURI(header string) string {
 }
 
 // CallState represents the state of a VoIP call
+// NOTE: These values must match voip.CallState in internal/pkg/voip/call_aggregator.go
 type CallState int
 
 const (
-	CallStateRinging CallState = iota
-	CallStateActive
-	CallStateEnded
-	CallStateFailed
-	CallStateRTPOnly // RTP stream detected without SIP signaling
+	CallStateNew       CallState = iota // Initial state (not displayed)
+	CallStateTrying                     // INVITE sent, waiting for response
+	CallStateRinging                    // 180 Ringing - phone is actually ringing
+	CallStateProgress                   // 183 Session Progress - early media established
+	CallStateActive                     // Call answered and active
+	CallStateEnded                      // Call ended (BYE received or RTP timed out)
+	CallStateFailed                     // Actual failure (4xx/5xx errors except 486)
+	CallStateCancelled                  // INVITE cancelled before answer (CANCEL method)
+	CallStateBusy                       // Callee busy (486 Busy Here)
+	CallStateRTPOnly                    // RTP stream detected without SIP signaling
 )
 
 func (cs CallState) String() string {
 	switch cs {
+	case CallStateNew:
+		return "New"
+	case CallStateTrying:
+		return "Trying"
 	case CallStateRinging:
 		return "Ringing"
+	case CallStateProgress:
+		return "Progress"
 	case CallStateActive:
 		return "Active"
 	case CallStateEnded:
 		return "Ended"
 	case CallStateFailed:
 		return "Failed"
+	case CallStateCancelled:
+		return "Cancelled"
+	case CallStateBusy:
+		return "Busy"
 	case CallStateRTPOnly:
 		return "RTP-only"
 	default:
@@ -80,21 +96,23 @@ func (cs CallState) String() string {
 
 // Call represents a tracked VoIP call
 type Call struct {
-	CallID      string
-	From        string
-	To          string
-	FromURI     string // Pre-parsed SIP URI for display (cached result of ExtractSIPURI(From))
-	ToURI       string // Pre-parsed SIP URI for display (cached result of ExtractSIPURI(To))
-	State       CallState
-	StartTime   time.Time
-	EndTime     time.Time
-	Duration    time.Duration
-	Codec       string
-	PacketCount int
-	PacketLoss  float64
-	Jitter      float64
-	MOS         float64 // Mean Opinion Score
-	NodeID      string  // Which hunter/processor captured this
+	CallID           string
+	From             string
+	To               string
+	FromURI          string // Pre-parsed SIP URI for display (cached result of ExtractSIPURI(From))
+	ToURI            string // Pre-parsed SIP URI for display (cached result of ExtractSIPURI(To))
+	State            CallState
+	LastResponseCode uint32 // Last SIP response code (for failed/busy calls, e.g., 401, 486, 503)
+	StartTime        time.Time
+	EndTime          time.Time
+	Duration         time.Duration
+	Codec            string
+	PacketCount      int
+	PacketLoss       float64
+	Jitter           float64
+	MOS              float64  // Mean Opinion Score
+	NodeID           string   // Which hunter/processor captured this
+	SDPEndpoints     []string // RTP endpoints from SDP (IP:port) for debugging correlation
 }
 
 // GetStringField returns a string field value by name for filtering.
@@ -128,6 +146,10 @@ func (c Call) GetStringField(name string) string {
 		}
 		return fromURI + " " + toURI
 	case "state":
+		// Return error code format for failed calls (matches display: "E:404")
+		if c.State == CallStateFailed && c.LastResponseCode > 0 {
+			return fmt.Sprintf("E:%d", c.LastResponseCode)
+		}
 		return c.State.String()
 	case "codec":
 		return c.Codec
@@ -283,7 +305,9 @@ func (cv *CallsView) SetCalls(calls []Call) {
 
 		// Handle top-of-list behavior: if user was at top and a new call took the top spot,
 		// keep selection at top (follow new oldest calls)
-		if wasAtTop && cv.selected > 0 && len(cv.calls) > oldLen {
+		// Note: We don't check len(cv.calls) > oldLen because at max capacity
+		// with LRU eviction, the list size stays constant even as new calls arrive.
+		if wasAtTop && cv.selected > 0 {
 			// User was at top, but their call moved down (new call inserted at top)
 			// Stay at top to follow new calls
 			cv.selected = 0
@@ -294,12 +318,14 @@ func (cv *CallsView) SetCalls(calls []Call) {
 			// Already at bottom with autoScroll enabled - stay there
 		} else if cv.selected != len(cv.calls)-1 {
 			// Selected call is no longer at the bottom (new calls arrived after it)
-			if cv.autoScroll && wasAtBottom && len(cv.calls) > oldLen {
-				// Auto-scroll was enabled and user was at the bottom when list grew
-				// Move selection to the new bottom to follow new calls
+			if cv.autoScroll && wasAtBottom {
+				// Auto-scroll was enabled and user was at the bottom
+				// Move selection to the new bottom to follow new calls.
+				// Note: We don't check len(cv.calls) > oldLen because at max capacity
+				// with LRU eviction, the list size stays constant even as new calls arrive.
 				cv.selected = len(cv.calls) - 1
 			}
-			// If autoScroll was off, or user wasn't at bottom, or list didn't grow:
+			// If autoScroll was off or user wasn't at bottom:
 			// keep selection on the same call (no change needed)
 		}
 		// Note: if autoScroll is false and selected is at bottom, no special handling needed
@@ -314,8 +340,10 @@ func (cv *CallsView) SetCalls(calls []Call) {
 			if cv.selected >= len(cv.calls) {
 				cv.selected = len(cv.calls) - 1
 			}
-			// Selection moved due to removal, disable auto-scroll
-			// (the call they were watching is gone, they need to re-orient)
+			// The call they were watching is gone - disable auto-scroll so they
+			// can re-orient. Without this, subsequent updates could unexpectedly
+			// jump the selection to the bottom.
+			cv.autoScroll = false
 		}
 	}
 
@@ -809,8 +837,11 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 			quality = "N/A"
 		}
 
-		// State string
+		// State string - show error code for failed calls (e.g., "E:401", "E:503")
 		state := call.State.String()
+		if call.State == CallStateFailed && call.LastResponseCode > 0 {
+			state = fmt.Sprintf("E:%d", call.LastResponseCode)
+		}
 
 		// Use cached SIP URIs if available, otherwise extract them
 		fromURI := call.FromURI
@@ -838,17 +869,22 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 			content.WriteString(selectedStyle.Render(row))
 		} else {
 			// Color by state
-			// Colors match packet list: RTP=green, SIP=blue
 			style := rowStyle
 			switch call.State {
+			case CallStateTrying, CallStateRinging, CallStateProgress:
+				style = style.Foreground(cv.theme.TCPColor) // Cyan - pre-answer states
 			case CallStateActive:
-				style = style.Foreground(cv.theme.InfoColor) // Blue - matches SIP packets
+				style = style.Foreground(cv.theme.InfoColor) // Blue - active call
 			case CallStateRTPOnly:
-				style = style.Foreground(cv.theme.SuccessColor) // Green - matches RTP packets
+				style = style.Foreground(cv.theme.SuccessColor) // Green - RTP only
 			case CallStateFailed:
-				style = style.Foreground(cv.theme.ErrorColor)
+				style = style.Foreground(cv.theme.ErrorColor) // Red - actual errors
+			case CallStateCancelled:
+				style = style.Foreground(cv.theme.DNSColor) // Yellow - cancelled before answer
+			case CallStateBusy:
+				style = style.Foreground(cv.theme.WarningColor) // Orange - callee busy
 			case CallStateEnded:
-				style = style.Foreground(cv.theme.StatusBarFg)
+				style = style.Foreground(cv.theme.FilterColor) // Violet - ended normally
 			}
 			content.WriteString(style.Render(row))
 		}
@@ -949,7 +985,12 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 	}
 	content.WriteString(fmt.Sprintf("From: %s\n", fromURI))
 	content.WriteString(fmt.Sprintf("To: %s\n", toURI))
-	content.WriteString(fmt.Sprintf("State: %s\n", selectedCall.State.String()))
+	// Show state with error code for failed calls
+	if selectedCall.State == CallStateFailed && selectedCall.LastResponseCode > 0 {
+		content.WriteString(fmt.Sprintf("State: Failed (SIP %d)\n", selectedCall.LastResponseCode))
+	} else {
+		content.WriteString(fmt.Sprintf("State: %s\n", selectedCall.State.String()))
+	}
 
 	// Show start time
 	if !selectedCall.StartTime.IsZero() {
@@ -973,6 +1014,18 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 	}
 	if selectedCall.MOS > 0 {
 		content.WriteString(fmt.Sprintf("Quality (MOS): %.1f\n", selectedCall.MOS))
+	}
+
+	// SDP Endpoints section (for debugging RTP correlation)
+	content.WriteString("\n")
+	content.WriteString(sectionHeaderStyle.Render("SDP RTP Endpoints:"))
+	content.WriteString("\n")
+	if len(selectedCall.SDPEndpoints) > 0 {
+		for _, endpoint := range selectedCall.SDPEndpoints {
+			content.WriteString(fmt.Sprintf("  • %s\n", endpoint))
+		}
+	} else {
+		content.WriteString("  (none registered)\n")
 	}
 
 	// Correlation section (if available)

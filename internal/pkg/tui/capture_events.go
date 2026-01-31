@@ -49,6 +49,8 @@ func (m *Model) ensureCallAggregator() {
 	case components.CaptureModeLive:
 		m.liveCallAggregator = NewLocalCallAggregator(program)
 		m.liveCallAggregator.Start()
+		// Set global accessor for TCP reassembly handler to trigger merges
+		SetLocalCallAggregator(m.liveCallAggregator)
 		if m.backgroundProcessor != nil {
 			m.backgroundProcessor.SetCallAggregator(m.liveCallAggregator, components.CaptureModeLive)
 		}
@@ -61,6 +63,8 @@ func (m *Model) ensureCallAggregator() {
 	case components.CaptureModeOffline:
 		m.offlineCallAggregator = NewLocalCallAggregator(program)
 		m.offlineCallAggregator.Start()
+		// Set global accessor for TCP reassembly handler to trigger merges
+		SetLocalCallAggregator(m.offlineCallAggregator)
 		if m.backgroundProcessor != nil {
 			m.backgroundProcessor.SetCallAggregator(m.offlineCallAggregator, components.CaptureModeOffline)
 		}
@@ -282,13 +286,6 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 	// Add or update calls in the call store (maintains history across processor restarts)
 	tuiCalls := make([]components.Call, len(msg.Calls))
 	for i, call := range msg.Calls {
-		// Debug logging to see what data we're receiving
-		logger.Debug("Processing call update",
-			"call_id", call.CallID,
-			"node_id", call.NodeID,
-			"hunters", call.Hunters,
-			"hunters_count", len(call.Hunters))
-
 		// Use hunter IDs as the node identifier (comma-separated if multiple hunters)
 		nodeID := call.NodeID // Default to processor ID if no hunters
 		if len(call.Hunters) > 0 {
@@ -298,21 +295,23 @@ func (m Model) handleCallUpdateMsg(msg CallUpdateMsg) (Model, tea.Cmd) {
 		}
 
 		tuiCalls[i] = components.Call{
-			CallID:      call.CallID,
-			From:        call.From,
-			To:          call.To,
-			FromURI:     components.ExtractSIPURI(call.From), // Pre-parse for display
-			ToURI:       components.ExtractSIPURI(call.To),   // Pre-parse for display
-			State:       mapCallState(call.State),
-			StartTime:   call.StartTime,
-			EndTime:     call.EndTime,
-			Duration:    call.Duration,
-			Codec:       call.Codec,
-			PacketCount: call.PacketCount,
-			PacketLoss:  call.PacketLoss,
-			Jitter:      call.Jitter,
-			MOS:         call.MOS,
-			NodeID:      nodeID,
+			CallID:           call.CallID,
+			From:             call.From,
+			To:               call.To,
+			FromURI:          components.ExtractSIPURI(call.From), // Pre-parse for display
+			ToURI:            components.ExtractSIPURI(call.To),   // Pre-parse for display
+			State:            mapCallState(call.State),
+			LastResponseCode: call.LastResponseCode,
+			StartTime:        call.StartTime,
+			EndTime:          call.EndTime,
+			Duration:         call.Duration,
+			Codec:            call.Codec,
+			PacketCount:      call.PacketCount,
+			PacketLoss:       call.PacketLoss,
+			Jitter:           call.Jitter,
+			MOS:              call.MOS,
+			NodeID:           nodeID,
+			SDPEndpoints:     call.SDPEndpoints,
 		}
 	}
 

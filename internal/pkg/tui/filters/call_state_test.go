@@ -107,4 +107,159 @@ func TestCallStateFilter_Selectivity(t *testing.T) {
 	// Three+ states should be least selective
 	three := NewCallStateFilter("active,ringing,ended")
 	assert.Equal(t, 0.3, three.Selectivity())
+
+	// Single wildcard is less selective than exact match
+	wildcard := NewCallStateFilter("E:*")
+	assert.Equal(t, 0.5, wildcard.Selectivity())
+}
+
+func TestCallStateFilter_ErrorCode(t *testing.T) {
+	// Filter for specific error code
+	filter := NewCallStateFilter("E:404")
+
+	// Should match E:404
+	failedCall404 := components.Call{
+		CallID:           "test-call-1",
+		State:            components.CallStateFailed,
+		LastResponseCode: 404,
+	}
+	assert.True(t, filter.Match(failedCall404), "Should match E:404 call")
+
+	// Should NOT match E:503
+	failedCall503 := components.Call{
+		CallID:           "test-call-2",
+		State:            components.CallStateFailed,
+		LastResponseCode: 503,
+	}
+	assert.False(t, filter.Match(failedCall503), "Should NOT match E:503 call")
+
+	// Should NOT match active calls
+	activeCall := components.Call{
+		CallID: "test-call-3",
+		State:  components.CallStateActive,
+	}
+	assert.False(t, filter.Match(activeCall), "Should NOT match active call")
+}
+
+func TestCallStateFilter_WildcardAnyError(t *testing.T) {
+	// Filter for any error state with E:*
+	filter := NewCallStateFilter("E:*")
+
+	// Should match E:404
+	failedCall404 := components.Call{
+		CallID:           "test-call-1",
+		State:            components.CallStateFailed,
+		LastResponseCode: 404,
+	}
+	assert.True(t, filter.Match(failedCall404), "Should match E:404 call")
+
+	// Should match E:503
+	failedCall503 := components.Call{
+		CallID:           "test-call-2",
+		State:            components.CallStateFailed,
+		LastResponseCode: 503,
+	}
+	assert.True(t, filter.Match(failedCall503), "Should match E:503 call")
+
+	// Should match E:401
+	failedCall401 := components.Call{
+		CallID:           "test-call-3",
+		State:            components.CallStateFailed,
+		LastResponseCode: 401,
+	}
+	assert.True(t, filter.Match(failedCall401), "Should match E:401 call")
+
+	// Should NOT match active calls
+	activeCall := components.Call{
+		CallID: "test-call-4",
+		State:  components.CallStateActive,
+	}
+	assert.False(t, filter.Match(activeCall), "Should NOT match active call")
+}
+
+func TestCallStateFilter_Wildcard4xxErrors(t *testing.T) {
+	// Filter for 4xx errors only with E:4*
+	filter := NewCallStateFilter("E:4*")
+
+	// Should match E:404
+	failedCall404 := components.Call{
+		CallID:           "test-call-1",
+		State:            components.CallStateFailed,
+		LastResponseCode: 404,
+	}
+	assert.True(t, filter.Match(failedCall404), "Should match E:404 call")
+
+	// Should match E:401
+	failedCall401 := components.Call{
+		CallID:           "test-call-2",
+		State:            components.CallStateFailed,
+		LastResponseCode: 401,
+	}
+	assert.True(t, filter.Match(failedCall401), "Should match E:401 call")
+
+	// Should NOT match E:503 (5xx error)
+	failedCall503 := components.Call{
+		CallID:           "test-call-3",
+		State:            components.CallStateFailed,
+		LastResponseCode: 503,
+	}
+	assert.False(t, filter.Match(failedCall503), "Should NOT match E:503 call")
+}
+
+func TestCallStateFilter_FailedAlias(t *testing.T) {
+	// "failed" should be an alias for "E:*"
+	filter := NewCallStateFilter("failed")
+
+	// Should match E:404
+	failedCall404 := components.Call{
+		CallID:           "test-call-1",
+		State:            components.CallStateFailed,
+		LastResponseCode: 404,
+	}
+	assert.True(t, filter.Match(failedCall404), "Should match E:404 call with 'failed' filter")
+
+	// Should match E:503
+	failedCall503 := components.Call{
+		CallID:           "test-call-2",
+		State:            components.CallStateFailed,
+		LastResponseCode: 503,
+	}
+	assert.True(t, filter.Match(failedCall503), "Should match E:503 call with 'failed' filter")
+
+	// Should NOT match active calls
+	activeCall := components.Call{
+		CallID: "test-call-3",
+		State:  components.CallStateActive,
+	}
+	assert.False(t, filter.Match(activeCall), "Should NOT match active call with 'failed' filter")
+
+	// String representation should show the expanded pattern
+	assert.Equal(t, "state:e:*", filter.String())
+}
+
+func TestCallStateFilter_CombinedStatesAndErrors(t *testing.T) {
+	// Filter for active OR any error
+	filter := NewCallStateFilter("active,E:*")
+
+	// Should match active calls
+	activeCall := components.Call{
+		CallID: "test-call-1",
+		State:  components.CallStateActive,
+	}
+	assert.True(t, filter.Match(activeCall), "Should match active call")
+
+	// Should match E:404
+	failedCall := components.Call{
+		CallID:           "test-call-2",
+		State:            components.CallStateFailed,
+		LastResponseCode: 404,
+	}
+	assert.True(t, filter.Match(failedCall), "Should match E:404 call")
+
+	// Should NOT match ringing calls
+	ringingCall := components.Call{
+		CallID: "test-call-3",
+		State:  components.CallStateRinging,
+	}
+	assert.False(t, filter.Match(ringingCall), "Should NOT match ringing call")
 }

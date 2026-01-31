@@ -83,6 +83,11 @@ func (m Model) View() string {
 		return modalView
 	}
 
+	// Render dev console overlay if visible (LOG_LEVEL=DEBUG only)
+	if m.uiState.DevConsole != nil && m.uiState.DevConsole.IsVisible() {
+		return m.uiState.DevConsole.View()
+	}
+
 	return fullView
 }
 

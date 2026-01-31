@@ -145,6 +145,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				// Initialize live call aggregator for VoIP analysis
 				m.liveCallAggregator = NewLocalCallAggregator(program)
 				m.liveCallAggregator.Start()
+				// Set global accessor for TCP reassembly handler to trigger merges
+				SetLocalCallAggregator(m.liveCallAggregator)
 
 				// Update background processor with the new call aggregator
 				if m.backgroundProcessor != nil {
@@ -160,6 +162,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				// Initialize offline call aggregator for VoIP analysis
 				m.offlineCallAggregator = NewLocalCallAggregator(program)
 				m.offlineCallAggregator.Start()
+				// Set global accessor for TCP reassembly handler to trigger merges
+				SetLocalCallAggregator(m.offlineCallAggregator)
 
 				// Update background processor with the new call aggregator
 				if m.backgroundProcessor != nil {

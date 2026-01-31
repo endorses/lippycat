@@ -318,6 +318,9 @@ func (m Model) handleKeyboard(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "v": // Toggle view mode
 		return m.handleToggleView()
 
+	case "t": // Toggle time display mode (clock/relative) - Capture tab only
+		return m.handleToggleTimeDisplay()
+
 	case "w": // Save packets to file (or stop streaming save)
 		return m.handleSavePackets()
 
@@ -648,6 +651,31 @@ func (m Model) handleDKey() (Model, tea.Cmd) {
 
 	// Other tabs: no action
 	return m, nil
+}
+
+// handleToggleTimeDisplay toggles between clock and relative time display
+func (m Model) handleToggleTimeDisplay() (Model, tea.Cmd) {
+	// Only on Capture tab
+	if m.uiState.Tabs.GetActive() != 0 {
+		return m, nil
+	}
+
+	m.uiState.PacketList.ToggleTimeDisplay()
+
+	// Show toast indicating the new mode (use key to auto-dismiss previous time toasts)
+	var msg string
+	if m.uiState.PacketList.GetTimeDisplayMode() == components.TimeDisplayRelative {
+		msg = "Time: relative (from capture start)"
+	} else {
+		msg = "Time: clock"
+	}
+
+	return m, m.uiState.Toast.ShowWithKey(
+		msg,
+		components.ToastInfo,
+		components.ToastDurationShort,
+		components.ToastKeyTimeDisplay,
+	)
 }
 
 // handleToggleView toggles between different view modes

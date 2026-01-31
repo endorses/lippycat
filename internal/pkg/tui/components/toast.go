@@ -34,6 +34,7 @@ const (
 	ToastKeyCaptureState = "capture-state" // pause/resume
 	ToastKeyFileSave     = "file-save"     // saving.../saved/error
 	ToastKeyFilter       = "filter"        // applying/applied/error
+	ToastKeyTimeDisplay  = "time-display"  // clock/relative toggle
 )
 
 // ToastKeyConnection returns a supersession key for connection state toasts.

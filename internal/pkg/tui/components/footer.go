@@ -168,7 +168,10 @@ func (f *Footer) getTabKeybinds(tabIndex int) []TabKeybind {
 				}
 			}
 		}
-		keybinds = append(keybinds, TabKeybind{Key: "d", Description: "details", ShortDesc: "det", Essential: true})
+		keybinds = append(keybinds,
+			TabKeybind{Key: "d", Description: "details", ShortDesc: "det", Essential: true},
+			TabKeybind{Key: "t", Description: "time", ShortDesc: "tm", Essential: false},
+		)
 
 		if f.hasProtocolSelection {
 			keybinds = append(keybinds, TabKeybind{Key: "v", Description: "view", ShortDesc: "vw", Essential: false})

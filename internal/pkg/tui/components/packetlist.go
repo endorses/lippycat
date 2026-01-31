@@ -5,10 +5,21 @@ package components
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/themes"
 	"github.com/endorses/lippycat/internal/pkg/types"
+)
+
+// TimeDisplayMode determines how timestamps are shown in the packet list
+type TimeDisplayMode int
+
+const (
+	// TimeDisplayClock shows wall-clock time (e.g., "14:32:05.123")
+	TimeDisplayClock TimeDisplayMode = iota
+	// TimeDisplayRelative shows time since capture start (e.g., "0.123456")
+	TimeDisplayRelative
 )
 
 // Type aliases for backward compatibility within TUI
@@ -32,6 +43,10 @@ type PacketList struct {
 	autoScroll     bool         // Whether to auto-scroll to bottom (like chat)
 	theme          themes.Theme // Color theme
 	detailsVisible bool         // Whether details panel is visible (affects column widths)
+
+	// Time display settings
+	timeDisplayMode  TimeDisplayMode // Clock or relative time
+	captureStartTime time.Time       // First packet timestamp for relative mode
 
 	// Cached rendering state (invalidated on size/theme change)
 	cachedStyles      map[string]lipgloss.Style // protocol -> style
@@ -160,6 +175,11 @@ func (p *PacketList) SetPackets(packets []PacketDisplay) {
 	// Store old packets before updating
 	oldPackets := p.packets
 	p.packets = packets
+
+	// Set capture start time from first packet if not already set
+	if p.captureStartTime.IsZero() && len(packets) > 0 {
+		p.captureStartTime = packets[0].Timestamp
+	}
 
 	// If this is a filter change, try to preserve the selected packet
 	if isFilterChange {
@@ -302,6 +322,26 @@ func (p *PacketList) Reset() {
 	p.cursor = 0
 	p.offset = 0
 	p.autoScroll = true
+	p.captureStartTime = time.Time{} // Reset capture start time
+}
+
+// ToggleTimeDisplay cycles between clock and relative time display modes
+func (p *PacketList) ToggleTimeDisplay() {
+	if p.timeDisplayMode == TimeDisplayClock {
+		p.timeDisplayMode = TimeDisplayRelative
+	} else {
+		p.timeDisplayMode = TimeDisplayClock
+	}
+}
+
+// GetTimeDisplayMode returns the current time display mode
+func (p *PacketList) GetTimeDisplayMode() TimeDisplayMode {
+	return p.timeDisplayMode
+}
+
+// SetCaptureStartTime sets the reference time for relative time display
+func (p *PacketList) SetCaptureStartTime(t time.Time) {
+	p.captureStartTime = t
 }
 
 // AppendPackets efficiently adds new packets to the list without full cursor recalculation.
@@ -310,6 +350,11 @@ func (p *PacketList) Reset() {
 func (p *PacketList) AppendPackets(packets []PacketDisplay) {
 	if len(packets) == 0 {
 		return
+	}
+
+	// Set capture start time from first packet if not already set
+	if p.captureStartTime.IsZero() {
+		p.captureStartTime = packets[0].Timestamp
 	}
 
 	oldLen := len(p.packets)
@@ -635,10 +680,10 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	// Content width = box_width - padding - border
 	// Details hidden: (p.width - 2) - 4 (padding) - 2 (border) = p.width - 8
 	// Details visible: (p.width - 4) - 4 (padding) - 2 (border) = p.width - 10
-	// We add 1 char back for better spacing
-	availableWidth := p.width - 8
+	// Extra -1 for the additional space after Time column
+	availableWidth := p.width - 9
 	if !p.detailsVisible { // Full-width mode (details hidden)
-		availableWidth = p.width - 6
+		availableWidth = p.width - 7
 	}
 
 	// Define minimum, preferred, and maximum widths
@@ -646,8 +691,8 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 		nodeMin  = 5  // "Local" or short ID
 		nodePref = 12 // Full node ID
 
-		timeMin  = 8  // HH:MM:SS
-		timePref = 19 // YYYY-MM-DD HH:MM:SS (2025-10-23 07:48:29)
+		timeMin  = 8  // HH:MM:SS or short relative
+		timePref = 15 // HH:MM:SS.000000 or relative with microseconds
 
 		srcMin  = 9  // Short IP or partial
 		srcPref = 22 // Full IP:Port
@@ -680,7 +725,7 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	} else if availableWidth < 150 {
 		// Narrow/medium (split view with details) - keep columns compact, give space to Info
 		nodeMax = 13
-		timeMax = 19
+		timeMax = 15 // Time-only with microseconds
 		srcMax = 22
 		dstMax = 22
 		protoMax = 10
@@ -688,7 +733,7 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 	} else {
 		// Wide (full width, no details) - generous max
 		nodeMax = 25
-		timeMax = 23
+		timeMax = 15 // Time-only with microseconds (no date needed)
 		srcMax = 35
 		dstMax = 35
 		protoMax = 12
@@ -813,7 +858,7 @@ func (p *PacketList) renderHeader() string {
 	nodeWidth, timeWidth, srcWidth, dstWidth, protoWidth, lenWidth, infoWidth := p.getColumnWidths()
 
 	header := fmt.Sprintf(
-		"%-*s %-*s %-*s %-*s %-*s %-*s %-*s",
+		"%-*s %-*s  %-*s %-*s %-*s %-*s %-*s",
 		nodeWidth, truncate("Origin", nodeWidth),
 		timeWidth, truncate("Time", timeWidth),
 		srcWidth, truncate("Src IP:Port", srcWidth),
@@ -944,20 +989,40 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 	}
 	source = truncate(source, nodeWidth)
 
-	// Format timestamp based on available width
+	// Format timestamp based on display mode and available width
 	var timeStr string
-	if timeWidth >= 23 {
-		// Full date + time + milliseconds: "2025-10-23 07:48:29.123"
-		timeStr = pkt.Timestamp.Format("2006-01-02 15:04:05.000")
-	} else if timeWidth >= 19 {
-		// Date + time without milliseconds: "2025-10-23 07:48:29"
-		timeStr = pkt.Timestamp.Format("2006-01-02 15:04:05")
-	} else if timeWidth >= 15 {
-		timeStr = pkt.Timestamp.Format("15:04:05.000000")
-	} else if timeWidth >= 12 {
-		timeStr = pkt.Timestamp.Format("15:04:05.000")
+	// For relative mode, determine the reference time
+	refTime := p.captureStartTime
+	if p.timeDisplayMode == TimeDisplayRelative && refTime.IsZero() && len(p.packets) > 0 {
+		// Fallback: use first packet's timestamp if captureStartTime not set
+		refTime = p.packets[0].Timestamp
+	}
+	if p.timeDisplayMode == TimeDisplayRelative && !refTime.IsZero() {
+		// Relative time since capture start
+		delta := pkt.Timestamp.Sub(refTime)
+		secs := delta.Seconds()
+		if timeWidth >= 15 {
+			// Full precision: "123.456789"
+			timeStr = fmt.Sprintf("%10.6f", secs)
+		} else if timeWidth >= 12 {
+			// Millisecond precision: "123.456"
+			timeStr = fmt.Sprintf("%8.3f", secs)
+		} else {
+			// Second precision: "123"
+			timeStr = fmt.Sprintf("%6.1f", secs)
+		}
 	} else {
-		timeStr = pkt.Timestamp.Format("15:04:05")
+		// Wall-clock time (no date - date is shown in details panel)
+		if timeWidth >= 15 {
+			// Microsecond precision: "14:32:05.123456"
+			timeStr = pkt.Timestamp.Format("15:04:05.000000")
+		} else if timeWidth >= 12 {
+			// Millisecond precision: "14:32:05.123"
+			timeStr = pkt.Timestamp.Format("15:04:05.000")
+		} else {
+			// Second precision: "14:32:05"
+			timeStr = pkt.Timestamp.Format("15:04:05")
+		}
 	}
 
 	// Format source and destination
@@ -974,9 +1039,9 @@ func (p *PacketList) renderPacket(index int, selected bool) string {
 	// Truncate info
 	info := truncate(pkt.Info, infoWidth)
 
-	// Format row
+	// Format row (extra space after time for visual separation)
 	row := fmt.Sprintf(
-		"%-*s %-*s %-*s %-*s %-*s %-*d %-*s",
+		"%-*s %-*s  %-*s %-*s %-*s %-*d %-*s",
 		nodeWidth, source,
 		timeWidth, timeStr,
 		srcWidth, src,

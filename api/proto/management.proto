@@ -340,6 +340,18 @@ enum FilterType {
     // HTTP URL path (with glob-style wildcard support)
     // Examples: /api/*, */admin/*, /login*
     FILTER_HTTP_URL = 15;
+
+    // IMSI (International Mobile Subscriber Identity)
+    // 15 digits from Authorization header or P-Asserted-Identity
+    // Format in SIP: username@ims.mnc<MNC>.mcc<MCC>.3gppnetwork.org
+    // Example: 234150999999999 (MCC=234, MNC=15, MSIN=0999999999)
+    FILTER_IMSI = 16;
+
+    // IMEI (International Mobile Equipment Identity)
+    // 15 digits from Contact header +sip.instance parameter
+    // Format in SIP: urn:gsma:imei:<TAC>-<SNR>-<CD>
+    // Example: 353456789012345 (normalized, without dashes)
+    FILTER_IMEI = 17;
 }
 
 // FilterUpdate pushed to hunters in real-time

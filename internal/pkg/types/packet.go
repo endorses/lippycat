@@ -44,6 +44,10 @@ type VoIPMetadata struct {
 	Body        string            // SIP message body (for MESSAGE method, limited size)
 	Headers     map[string]string // All SIP headers
 
+	// 3GPP IMS identifiers (for LI filtering)
+	IMSI string // International Mobile Subscriber Identity (15 digits from Authorization/P-Asserted-Identity)
+	IMEI string // International Mobile Equipment Identity (15 digits from Contact +sip.instance)
+
 	// RTP fields
 	IsRTP       bool   // Whether this is an RTP packet
 	SSRC        uint32 // RTP SSRC
@@ -317,6 +321,14 @@ func (p PacketDisplay) GetStringField(name string) string {
 	case "sip.totag":
 		if p.VoIPData != nil {
 			return p.VoIPData.ToTag
+		}
+	case "sip.imsi":
+		if p.VoIPData != nil {
+			return p.VoIPData.IMSI
+		}
+	case "sip.imei":
+		if p.VoIPData != nil {
+			return p.VoIPData.IMEI
 		}
 	// DNS fields (from DNSData)
 	case "dns.query", "dns.name":

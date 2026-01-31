@@ -76,9 +76,9 @@ Additionally, **3GPP IMS headers** (P-Access-Network-Info, P-Visited-Network-ID)
 
 #### Step 3.1: Add filter types to `api/proto/management.proto`
 
-- [ ] Add `FILTER_IMSI = 17`
-- [ ] Add `FILTER_IMEI = 18`
-- [ ] Regenerate: `make proto`
+- [x] Add `FILTER_IMSI = 16`
+- [x] Add `FILTER_IMEI = 17`
+- [x] Regenerate: `make proto`
 
 #### Step 3.2: Add IMSI/IMEI extraction to SIP parser
 
@@ -86,21 +86,24 @@ Location of identifiers in SIP:
 - **IMSI:** Authorization header username or P-Asserted-Identity (format: `<IMSI>@ims.mnc<MNC>.mcc<MCC>.3gppnetwork.org`)
 - **IMEI:** Contact header `+sip.instance` parameter (format: `urn:gsma:imei:<TAC>-<SNR>-<CD>`)
 
-- [ ] Add `extractIMSI()` function parsing IMPI format from Authorization/P-Asserted-Identity
-- [ ] Add `extractIMEI()` function parsing URN format from Contact header
-- [ ] Add `IMSI` and `IMEI` fields to VoIPMetadata
-- [ ] Run: `go test -race ./internal/pkg/voip/...`
+- [x] Add `ExtractIMSI()` function parsing IMPI format from Authorization/P-Asserted-Identity
+- [x] Add `ExtractIMEI()` function parsing URN format from Contact header
+- [x] Add `IMSI` and `IMEI` fields to VoIPMetadata
+- [x] Run: `go test -race ./internal/pkg/voip/...`
 
 #### Step 3.3: Update filter mapping in `internal/pkg/li/filters.go`
 
-- [ ] Add `TargetTypeIMSI` and `TargetTypeIMEI` cases to `mapTargetToFilterType()`
-- [ ] Normalize IMEI (remove dashes from URN format)
+- [x] Add `TargetTypeIMSI` and `TargetTypeIMEI` to `internal/pkg/li/types.go`
+- [x] Add `TargetTypeIMSI` and `TargetTypeIMEI` cases to `mapTargetToFilterType()`
+- [x] Add `normalizeIMSI()` and `normalizeIMEI()` helper functions
 
-#### Step 3.4: Add filter matchers in `internal/pkg/hunter/filters/`
+#### Step 3.4: Add filter matchers in `internal/pkg/hunter/application_filter.go`
 
-- [ ] Create `imsi_filter.go` with exact match (15 digits)
-- [ ] Create `imei_filter.go` with exact match (15 digits)
-- [ ] Run: `go test -race ./internal/pkg/hunter/...`
+- [x] Add `imsiFilters` and `imeiFilters` maps to ApplicationFilter
+- [x] Handle `FILTER_IMSI` and `FILTER_IMEI` in `UpdateFilters()`
+- [x] Add Authorization and Contact header extraction to `extractSIPHeaders()`
+- [x] Add `matchIMSIIMEI()` and `matchIMSIIMEIWithIDs()` methods
+- [x] Run: `go test -race ./internal/pkg/hunter/...`
 
 ---
 

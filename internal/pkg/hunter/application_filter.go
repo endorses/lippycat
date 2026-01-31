@@ -49,10 +49,12 @@ type ApplicationFilter struct {
 	gpuAccel       *voip.GPUAccelerator
 	detector       *detector.Detector // Protocol detector for accurate protocol detection
 	config         *voip.GPUConfig
-	sipUsers       []parsedFilter // Parsed SIP user patterns (user part only, suffix matching)
-	sipURIs        []parsedFilter // Parsed SIP URI patterns (user@domain, exact/contains matching)
-	phoneNumbers   []parsedFilter // Parsed phone number patterns
-	ipAddresses    []string       // IP addresses as strings (for display/logging)
+	sipUsers       []parsedFilter    // Parsed SIP user patterns (user part only, suffix matching)
+	sipURIs        []parsedFilter    // Parsed SIP URI patterns (user@domain, exact/contains matching)
+	phoneNumbers   []parsedFilter    // Parsed phone number patterns
+	ipAddresses    []string          // IP addresses as strings (for display/logging)
+	imsiFilters    map[string]string // IMSI (15 digits) -> filter ID
+	imeiFilters    map[string]string // IMEI (15 digits) -> filter ID
 	patterns       []voip.GPUPattern
 	acPatterns     []ahocorasick.Pattern        // AC patterns for GPU backend (SIP users only)
 	acMatcher      *ahocorasick.BufferedMatcher // Aho-Corasick matcher for SIP user matching (alphanumeric)
@@ -108,6 +110,8 @@ func NewApplicationFilter(config *voip.GPUConfig) (*ApplicationFilter, error) {
 		sipURIs:                 make([]parsedFilter, 0),
 		phoneNumbers:            make([]parsedFilter, 0),
 		ipAddresses:             make([]string, 0),
+		imsiFilters:             make(map[string]string),
+		imeiFilters:             make(map[string]string),
 		patterns:                make([]voip.GPUPattern, 0),
 		acPatterns:              make([]ahocorasick.Pattern, 0),
 		acMatcher:               ahocorasick.NewBufferedMatcherWithAlgorithm(acAlgorithm), // Aho-Corasick for SIP users
@@ -215,6 +219,8 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 	af.acPatternToFilterID = make(map[int]string)
 	af.phoneNumberToFilterID = make(map[string]string)
 	af.sipURIPatternToFilterID = make(map[int]string)
+	af.imsiFilters = make(map[string]string)
+	af.imeiFilters = make(map[string]string)
 
 	// Build new filter lists
 	// Note: BPF filters are NOT handled here - they require capture restart
@@ -329,6 +335,33 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 			// Future: Add other protocol-specific filters here
 			// case management.FilterType_FILTER_HTTP_HOST:
 			// case management.FilterType_FILTER_HTTP_URL:
+
+		case management.FilterType_FILTER_IMSI:
+			// IMSI filter: 15 digits from Authorization or P-Asserted-Identity
+			// Normalize to remove non-digits and validate length
+			normalized := normalizeIdentifier(filter.Pattern, 15)
+			if normalized != "" {
+				af.imsiFilters[normalized] = filter.Id
+			} else {
+				logger.Warn("Invalid IMSI filter pattern (expected 15 digits)", "pattern", filter.Pattern)
+			}
+
+		case management.FilterType_FILTER_IMEI:
+			// IMEI filter: 14-15 digits from Contact +sip.instance
+			// Normalize to remove non-digits and validate length
+			normalized := normalizeIdentifier(filter.Pattern, 15)
+			if normalized == "" {
+				// Try 14 digits (without check digit)
+				normalized = normalizeIdentifier(filter.Pattern, 14)
+				if normalized != "" {
+					normalized = normalized + "0" // Pad to 15 with placeholder check digit
+				}
+			}
+			if normalized != "" {
+				af.imeiFilters[normalized] = filter.Id
+			} else {
+				logger.Warn("Invalid IMEI filter pattern (expected 14-15 digits)", "pattern", filter.Pattern)
+			}
 		}
 	}
 
@@ -352,6 +385,8 @@ func (af *ApplicationFilter) UpdateFilters(filters []*management.Filter) {
 		"sip_uris", len(af.sipURIs),
 		"phone_numbers", len(af.phoneNumbers),
 		"ip_addresses", len(af.ipAddresses),
+		"imsi_filters", len(af.imsiFilters),
+		"imei_filters", len(af.imeiFilters),
 		"dns_domains", af.dnsMatcher.HasFilters(),
 		"email_filters", af.emailMatcher.HasFilters(),
 		"tls_filters", af.tlsMatcher.HasFilters(),
@@ -467,10 +502,12 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
+	hasIMSIFilters := len(af.imsiFilters) > 0
+	hasIMEIFilters := len(af.imeiFilters) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, use the no-filter policy
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
 		return af.noFilterPolicy == NoFilterPolicyAllow
 	}
 
@@ -506,8 +543,8 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 		}
 	}
 
-	// Check VoIP packets
-	if hasVoIPFilters {
+	// Check VoIP packets (including IMSI/IMEI which are in SIP headers)
+	if hasVoIPFilters || hasIMSIFilters || hasIMEIFilters {
 		// Check if this is a SIP or RTP packet
 		if af.isVoIPPacket(packet) {
 			// Get payload - use LayerContents() to get full message including headers
@@ -516,13 +553,23 @@ func (af *ApplicationFilter) MatchPacket(packet gopacket.Packet) bool {
 			if appLayer != nil {
 				payload := appLayer.LayerContents()
 
-				// Use GPU if enabled and at least one GPU automaton is built
-				if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
-					return af.matchWithGPU([]byte(payload))
+				// Check IMSI/IMEI first (separate from other VoIP filters)
+				if hasIMSIFilters || hasIMEIFilters {
+					if af.matchIMSIIMEI(payload) {
+						return true
+					}
 				}
 
-				// CPU fallback
-				return af.matchWithCPU(string(payload))
+				// Check other VoIP filters
+				if hasVoIPFilters {
+					// Use GPU if enabled and at least one GPU automaton is built
+					if af.enabled && af.gpuAccel != nil && (af.gpuACBuilt || af.gpuSIPURIACBuilt) {
+						return af.matchWithGPU([]byte(payload))
+					}
+
+					// CPU fallback
+					return af.matchWithCPU(string(payload))
+				}
 			}
 		}
 	}
@@ -544,10 +591,12 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 	hasEmailFilters := af.emailMatcher != nil && af.emailMatcher.HasFilters()
 	hasTLSFilters := af.tlsMatcher != nil && af.tlsMatcher.HasFilters()
 	hasVoIPFilters := len(af.sipUsers) > 0 || len(af.sipURIs) > 0 || len(af.phoneNumbers) > 0
+	hasIMSIFilters := len(af.imsiFilters) > 0
+	hasIMEIFilters := len(af.imeiFilters) > 0
 	hasIPFilters := len(af.ipAddresses) > 0
 
 	// If no filters, use the no-filter policy (but no specific filter IDs)
-	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters {
+	if !hasIPFilters && !hasVoIPFilters && !hasDNSFilters && !hasEmailFilters && !hasTLSFilters && !hasIMSIFilters && !hasIMEIFilters {
 		return af.noFilterPolicy == NoFilterPolicyAllow, nil
 	}
 
@@ -580,8 +629,8 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 		}
 	}
 
-	// Check VoIP packets
-	if hasVoIPFilters {
+	// Check VoIP packets (including IMSI/IMEI)
+	if hasVoIPFilters || hasIMSIFilters || hasIMEIFilters {
 		// Check if this is a SIP or RTP packet
 		if af.isVoIPPacket(packet) {
 			// Get payload - use LayerContents() to get full message including headers
@@ -589,9 +638,17 @@ func (af *ApplicationFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, [
 			if appLayer != nil {
 				payload := appLayer.LayerContents()
 
-				// Match VoIP filters and collect filter IDs
-				voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
-				matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
+				// Match IMSI/IMEI filters and collect filter IDs
+				if hasIMSIFilters || hasIMEIFilters {
+					imsiImeiFilterIDs := af.matchIMSIIMEIWithIDs(payload)
+					matchedFilterIDs = append(matchedFilterIDs, imsiImeiFilterIDs...)
+				}
+
+				// Match other VoIP filters and collect filter IDs
+				if hasVoIPFilters {
+					voipFilterIDs := af.matchWithCPUAndReturnIDs(payload)
+					matchedFilterIDs = append(matchedFilterIDs, voipFilterIDs...)
+				}
 			}
 		}
 	}
@@ -1050,6 +1107,8 @@ type sipHeaders struct {
 	from              []byte
 	to                []byte
 	pAssertedIdentity []byte
+	authorization     []byte // For IMSI extraction
+	contact           []byte // For IMEI extraction
 }
 
 // extractSIPHeaders extracts From, To, and P-Asserted-Identity headers from SIP message
@@ -1106,6 +1165,29 @@ func extractSIPHeaders(payload []byte) sipHeaders {
 				headers.pAssertedIdentity = extractHeaderValue(line)
 				continue
 			}
+		}
+
+		// Check for Authorization header (case-insensitive)
+		if len(line) >= 14 {
+			lineUpper := bytes.ToUpper(line[:14])
+			if bytes.Equal(lineUpper, []byte("AUTHORIZATION:")) {
+				headers.authorization = extractHeaderValue(line)
+				continue
+			}
+		}
+
+		// Check for Contact header (case-insensitive)
+		if len(line) >= 8 {
+			lineUpper := bytes.ToUpper(line[:8])
+			if bytes.Equal(lineUpper, []byte("CONTACT:")) {
+				headers.contact = extractHeaderValue(line)
+				continue
+			}
+		}
+		// Short form: m: (Contact can be abbreviated as m in SIP)
+		if len(line) >= 2 && (line[0] == 'm' || line[0] == 'M') && line[1] == ':' {
+			headers.contact = extractHeaderValue(line)
+			continue
 		}
 	}
 
@@ -1521,6 +1603,80 @@ func extractSubjectLine(payload string) string {
 	}
 
 	return strings.TrimSpace(subject)
+}
+
+// matchIMSIIMEI checks if the packet contains IMSI or IMEI matching any filter.
+// Returns true if either IMSI or IMEI matches.
+func (af *ApplicationFilter) matchIMSIIMEI(payload []byte) bool {
+	sipHeaders := extractSIPHeaders(payload)
+
+	// Extract and match IMSI
+	if len(af.imsiFilters) > 0 {
+		imsi := voip.ExtractIMSI(string(sipHeaders.authorization), string(sipHeaders.pAssertedIdentity))
+		if imsi != "" {
+			if _, found := af.imsiFilters[imsi]; found {
+				return true
+			}
+		}
+	}
+
+	// Extract and match IMEI
+	if len(af.imeiFilters) > 0 {
+		imei := voip.ExtractIMEI(string(sipHeaders.contact))
+		if imei != "" {
+			if _, found := af.imeiFilters[imei]; found {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// matchIMSIIMEIWithIDs checks if the packet contains IMSI or IMEI matching any filter.
+// Returns matched filter IDs for LI correlation.
+func (af *ApplicationFilter) matchIMSIIMEIWithIDs(payload []byte) []string {
+	var matchedFilterIDs []string
+	sipHeaders := extractSIPHeaders(payload)
+
+	// Extract and match IMSI
+	if len(af.imsiFilters) > 0 {
+		imsi := voip.ExtractIMSI(string(sipHeaders.authorization), string(sipHeaders.pAssertedIdentity))
+		if imsi != "" {
+			if filterID, found := af.imsiFilters[imsi]; found {
+				matchedFilterIDs = append(matchedFilterIDs, filterID)
+			}
+		}
+	}
+
+	// Extract and match IMEI
+	if len(af.imeiFilters) > 0 {
+		imei := voip.ExtractIMEI(string(sipHeaders.contact))
+		if imei != "" {
+			if filterID, found := af.imeiFilters[imei]; found {
+				matchedFilterIDs = append(matchedFilterIDs, filterID)
+			}
+		}
+	}
+
+	return matchedFilterIDs
+}
+
+// normalizeIdentifier extracts digits from a pattern and validates the length.
+// Used for IMSI (15 digits) and IMEI (14-15 digits) normalization.
+// Returns empty string if the number of digits doesn't match expectedLen.
+func normalizeIdentifier(pattern string, expectedLen int) string {
+	var digits strings.Builder
+	for _, c := range pattern {
+		if c >= '0' && c <= '9' {
+			digits.WriteRune(c)
+		}
+	}
+	result := digits.String()
+	if len(result) != expectedLen {
+		return ""
+	}
+	return result
 }
 
 // Close cleans up GPU resources

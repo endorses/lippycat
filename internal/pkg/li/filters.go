@@ -336,6 +336,22 @@ func (m *FilterManager) mapTargetToFilterType(target TargetIdentity) (management
 		// SIP user part only (existing SIP_USER filter)
 		return management.FilterType_FILTER_SIP_USER, target.Value, nil
 
+	case TargetTypeIMSI:
+		// IMSI (15 digits) from Authorization or P-Asserted-Identity
+		pattern := normalizeIMSI(target.Value)
+		if pattern == "" {
+			return 0, "", fmt.Errorf("invalid IMSI format: %s", target.Value)
+		}
+		return management.FilterType_FILTER_IMSI, pattern, nil
+
+	case TargetTypeIMEI:
+		// IMEI (15 digits) from Contact +sip.instance
+		pattern := normalizeIMEI(target.Value)
+		if pattern == "" {
+			return 0, "", fmt.Errorf("invalid IMEI format: %s", target.Value)
+		}
+		return management.FilterType_FILTER_IMEI, pattern, nil
+
 	default:
 		return 0, "", fmt.Errorf("unsupported target type: %s", target.Type)
 	}
@@ -372,6 +388,66 @@ func extractSIPURIPattern(uri string) string {
 	}
 
 	return pattern
+}
+
+// normalizeIMSI validates and normalizes an IMSI to 15 digits.
+// Returns empty string if the IMSI is invalid.
+func normalizeIMSI(imsi string) string {
+	// Extract only digits
+	var digits strings.Builder
+	for _, r := range imsi {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+
+	result := digits.String()
+
+	// IMSI must be exactly 15 digits
+	if len(result) != 15 {
+		return ""
+	}
+
+	return result
+}
+
+// normalizeIMEI validates and normalizes an IMEI.
+// Accepts various formats:
+//   - Plain digits: "353456789012345"
+//   - URN format: "urn:gsma:imei:35345678-9012345-0"
+//   - With dashes: "35-345678-9012345-0"
+//
+// Returns empty string if the IMEI is invalid.
+func normalizeIMEI(imei string) string {
+	// Remove urn:gsma:imei: prefix if present
+	lower := strings.ToLower(imei)
+	if strings.HasPrefix(lower, "urn:gsma:imei:") {
+		imei = imei[14:]
+	} else if strings.HasPrefix(lower, "urn:urn-7:3gpp-imei:") {
+		imei = imei[20:]
+	}
+
+	// Extract only digits
+	var digits strings.Builder
+	for _, r := range imei {
+		if r >= '0' && r <= '9' {
+			digits.WriteRune(r)
+		}
+	}
+
+	result := digits.String()
+
+	// IMEI should be 14 or 15 digits (with or without check digit)
+	if len(result) != 14 && len(result) != 15 {
+		return ""
+	}
+
+	// Pad to 15 if only 14 digits (append 0 as placeholder check digit)
+	if len(result) == 14 {
+		result = result + "0"
+	}
+
+	return result
 }
 
 // extractPhonePattern extracts the phone number from a tel: URI.

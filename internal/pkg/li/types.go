@@ -95,6 +95,10 @@ const (
 	TargetTypeIPv6CIDR
 	// TargetTypeUsername identifies a target by username (SIP user part).
 	TargetTypeUsername
+	// TargetTypeIMSI identifies a target by IMSI (International Mobile Subscriber Identity).
+	TargetTypeIMSI
+	// TargetTypeIMEI identifies a target by IMEI (International Mobile Equipment Identity).
+	TargetTypeIMEI
 )
 
 // String returns the string representation of TargetType.
@@ -116,6 +120,10 @@ func (t TargetType) String() string {
 		return "IPv6CIDR"
 	case TargetTypeUsername:
 		return "Username"
+	case TargetTypeIMSI:
+		return "IMSI"
+	case TargetTypeIMEI:
+		return "IMEI"
 	default:
 		return "Unknown"
 	}

@@ -178,6 +178,16 @@ const (
 	// HTTP URL path (with glob-style wildcard support)
 	// Examples: /api/*, */admin/*, /login*
 	FilterType_FILTER_HTTP_URL FilterType = 15
+	// IMSI (International Mobile Subscriber Identity)
+	// 15 digits from Authorization header or P-Asserted-Identity
+	// Format in SIP: username@ims.mnc<MNC>.mcc<MCC>.3gppnetwork.org
+	// Example: 234150999999999 (MCC=234, MNC=15, MSIN=0999999999)
+	FilterType_FILTER_IMSI FilterType = 16
+	// IMEI (International Mobile Equipment Identity)
+	// 15 digits from Contact header +sip.instance parameter
+	// Format in SIP: urn:gsma:imei:<TAC>-<SNR>-<CD>
+	// Example: 353456789012345 (normalized, without dashes)
+	FilterType_FILTER_IMEI FilterType = 17
 )
 
 // Enum value maps for FilterType.
@@ -199,6 +209,8 @@ var (
 		13: "FILTER_TLS_JA4",
 		14: "FILTER_HTTP_HOST",
 		15: "FILTER_HTTP_URL",
+		16: "FILTER_IMSI",
+		17: "FILTER_IMEI",
 	}
 	FilterType_value = map[string]int32{
 		"FILTER_SIP_USER":      0,
@@ -217,6 +229,8 @@ var (
 		"FILTER_TLS_JA4":       13,
 		"FILTER_HTTP_HOST":     14,
 		"FILTER_HTTP_URL":      15,
+		"FILTER_IMSI":          16,
+		"FILTER_IMEI":          17,
 	}
 )
 
@@ -3274,7 +3288,7 @@ const file_management_proto_rawDesc = "" +
 	"\x0fProcessorStatus\x12\x15\n" +
 	"\x11PROCESSOR_HEALTHY\x10\x00\x12\x15\n" +
 	"\x11PROCESSOR_WARNING\x10\x01\x12\x13\n" +
-	"\x0fPROCESSOR_ERROR\x10\x02*\xe2\x02\n" +
+	"\x0fPROCESSOR_ERROR\x10\x02*\x84\x03\n" +
 	"\n" +
 	"FilterType\x12\x13\n" +
 	"\x0fFILTER_SIP_USER\x10\x00\x12\x17\n" +
@@ -3294,7 +3308,9 @@ const file_management_proto_rawDesc = "" +
 	"\x0fFILTER_TLS_JA3S\x10\f\x12\x12\n" +
 	"\x0eFILTER_TLS_JA4\x10\r\x12\x14\n" +
 	"\x10FILTER_HTTP_HOST\x10\x0e\x12\x13\n" +
-	"\x0fFILTER_HTTP_URL\x10\x0f*H\n" +
+	"\x0fFILTER_HTTP_URL\x10\x0f\x12\x0f\n" +
+	"\vFILTER_IMSI\x10\x10\x12\x0f\n" +
+	"\vFILTER_IMEI\x10\x11*H\n" +
 	"\x10FilterUpdateType\x12\x0e\n" +
 	"\n" +
 	"UPDATE_ADD\x10\x00\x12\x11\n" +

@@ -95,11 +95,13 @@ func (d *DevConsole) View() string {
 	}
 
 	// Calculate usable area (leave room for border and title)
-	contentHeight := d.height - 4 // title bar + borders + status
+	// Height: top border (1) + title (1) + content (N) + bottom border (1) = N + 3
+	contentHeight := d.height - 3
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
-	contentWidth := d.width - 4 // borders + padding
+	// Width: left border (1) + content (W) + right border (1) = W + 2
+	contentWidth := d.width - 2
 	if contentWidth < 20 {
 		contentWidth = 20
 	}

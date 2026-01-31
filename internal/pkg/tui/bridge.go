@@ -668,7 +668,6 @@ var pendingPackets = &pendingPacketBuffer{
 func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
-	beforeLen := len(pb.packets)
 	pb.packets = append(pb.packets, packets...)
 
 	// Cap buffer size to prevent unbounded growth (only for live capture).
@@ -686,15 +685,6 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 		}
 	}
 
-	// DEBUG: Log pending buffer state periodically
-	afterLen := len(pb.packets)
-	if afterLen%500 == 0 || afterLen < 100 {
-		logger.Debug("pendingPackets: buffer state",
-			"before", beforeLen,
-			"added", len(packets),
-			"after", afterLen,
-			"has_call_tracker", hasCallTracker)
-	}
 }
 
 // drainPackets returns up to maxPackets pending packets.

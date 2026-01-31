@@ -28,6 +28,9 @@ var (
 	// Pattern matching flags for VoIP hunter
 	hunterPatternAlgorithm string
 	hunterPatternBufferMB  int
+
+	// TCP SIP configuration
+	hunterTCPSIPIdleTimeout time.Duration
 )
 
 var voipHuntCmd = &cobra.Command{
@@ -70,6 +73,9 @@ func init() {
 	voipHuntCmd.Flags().StringVar(&hunterPatternAlgorithm, "pattern-algorithm", "auto", "Pattern matching algorithm: 'auto', 'linear', 'aho-corasick' (default: auto)")
 	voipHuntCmd.Flags().IntVar(&hunterPatternBufferMB, "pattern-buffer-mb", 64, "Memory budget for pattern buffer in MB (default: 64)")
 
+	// TCP SIP configuration
+	voipHuntCmd.Flags().DurationVar(&hunterTCPSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
+
 	// Bind BPF filter optimization flags to viper under hunter.voip.* namespace
 	_ = viper.BindPFlag("hunter.voip.udp_only", voipHuntCmd.Flags().Lookup("udp-only"))
 	_ = viper.BindPFlag("hunter.voip.sip_ports", voipHuntCmd.Flags().Lookup("sip-port"))
@@ -78,6 +84,7 @@ func init() {
 	// Bind pattern algorithm flags to viper
 	_ = viper.BindPFlag("voip.pattern_algorithm", voipHuntCmd.Flags().Lookup("pattern-algorithm"))
 	_ = viper.BindPFlag("voip.pattern_buffer_mb", voipHuntCmd.Flags().Lookup("pattern-buffer-mb"))
+	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipHuntCmd.Flags().Lookup("tcp-sip-idle-timeout"))
 }
 
 func runVoIPHunt(cmd *cobra.Command, args []string) error {

@@ -71,9 +71,15 @@ func runFile(cmd *cobra.Command, args []string) {
 		viper.Set("tui.tls_decryption_enabled", true)
 	}
 
-	// Disable logging to prevent corrupting TUI display
-	logger.Disable()
-	defer logger.Enable()
+	// Handle logging for TUI mode
+	if logger.InitConsole() {
+		// LOG_LEVEL=DEBUG - capture to in-memory console buffer for TUI display
+		logger.EnableConsoleCapture()
+	} else {
+		// Normal mode - disable logging to prevent corrupting TUI display
+		logger.Disable()
+		defer logger.Enable()
+	}
 
 	// Initialize TLS decryptor if enabled
 	if tui.InitTLSDecryptorFromConfig() {

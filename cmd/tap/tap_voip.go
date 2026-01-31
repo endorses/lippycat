@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -20,9 +21,47 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// TapTCPAssembler implements source.TCPAssembler for tap mode.
+// It buffers TCP packets and feeds them to the tcpassembly for SIP stream reconstruction.
+type TapTCPAssembler struct {
+	assembler *tcpassembly.Assembler
+}
+
+// NewTapTCPAssembler creates a TCP assembler wrapper for tap mode.
+func NewTapTCPAssembler(assembler *tcpassembly.Assembler) *TapTCPAssembler {
+	return &TapTCPAssembler{assembler: assembler}
+}
+
+// AssemblePacket implements source.TCPAssembler.
+// It buffers the TCP packet and feeds it to the tcpassembly for stream reconstruction.
+func (a *TapTCPAssembler) AssemblePacket(pktInfo capture.PacketInfo) bool {
+	packet := pktInfo.Packet
+	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+		return false
+	}
+
+	tcpLayer, ok := packet.TransportLayer().(*layers.TCP)
+	if !ok {
+		return false
+	}
+
+	// Get the network flow for assembly
+	netFlow := packet.NetworkLayer().NetworkFlow()
+
+	// Buffer the raw packet for later retrieval by the handler
+	voip.BufferTCPPacket(netFlow, pktInfo)
+
+	// Feed the packet to the TCP assembler for stream reconstruction
+	a.assembler.AssembleWithTimestamp(netFlow, tcpLayer, packet.Metadata().Timestamp)
+
+	return true
+}
 
 var (
 	// VoIP-specific flags
@@ -40,11 +79,13 @@ var (
 
 	// TCP-specific configuration flags
 	tcpPerformanceMode string
+	tcpSIPIdleTimeout  time.Duration
 
 	// Per-call PCAP flags (VoIP-specific)
 	perCallPcapEnabled bool
 	perCallPcapDir     string
 	perCallPcapPattern string
+	pcapGracePeriod    time.Duration
 )
 
 var voipTapCmd = &cobra.Command{
@@ -105,11 +146,13 @@ func init() {
 
 	// TCP Performance Mode
 	voipTapCmd.Flags().StringVarP(&tcpPerformanceMode, "tcp-performance-mode", "M", "balanced", "TCP performance mode: 'minimal', 'balanced', 'high_performance', 'low_latency'")
+	voipTapCmd.Flags().DurationVar(&tcpSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
 
 	// Per-call PCAP (VoIP-specific)
 	voipTapCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic (default: enabled for tap voip)")
 	voipTapCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
 	voipTapCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files")
+	voipTapCmd.Flags().DurationVar(&pcapGracePeriod, "pcap-grace-period", 5*time.Second, "Grace period before closing PCAP files after call ends (for trailing RTP)")
 
 	// Bind VoIP-specific flags to viper
 	// Note: --voip-command is a persistent flag from TapCmd, already bound to tap.voip_command
@@ -122,9 +165,11 @@ func init() {
 	_ = viper.BindPFlag("tap.voip.pattern_algorithm", voipTapCmd.Flags().Lookup("pattern-algorithm"))
 	_ = viper.BindPFlag("tap.voip.pattern_buffer_mb", voipTapCmd.Flags().Lookup("pattern-buffer-mb"))
 	_ = viper.BindPFlag("tap.voip.tcp_performance_mode", voipTapCmd.Flags().Lookup("tcp-performance-mode"))
+	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipTapCmd.Flags().Lookup("tcp-sip-idle-timeout"))
 	_ = viper.BindPFlag("tap.per_call_pcap.enabled", voipTapCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", voipTapCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("tap.per_call_pcap.file_pattern", voipTapCmd.Flags().Lookup("per-call-pcap-pattern"))
+	_ = viper.BindPFlag("tap.per_call_pcap.grace_period", voipTapCmd.Flags().Lookup("pcap-grace-period"))
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
@@ -431,7 +476,36 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	voipProc := voipprocessor.New(voipProcConfig)
 	voipAdapter := voipprocessor.NewSourceAdapter(voipProc)
 	localSource.SetVoIPProcessor(voipAdapter)
-	logger.Info("VoIP processor enabled for tap mode")
+	logger.Info("VoIP processor enabled for tap mode (UDP SIP/RTP)")
+
+	// Set up TCP SIP reassembly for tap mode
+	// This enables TCP SIP support (the same as hunt mode) following the principle: tap = process + hunt - gRPC
+	tcpInjectionChan := make(chan source.InjectedPacket, 1000)
+
+	// Create TapTCPHandler that sends processed TCP packets to the injection channel
+	tapTCPHandler := voip.NewTapTCPHandler(tcpInjectionChan)
+	tapTCPHandler.SetApplicationFilter(appFilter)
+
+	// Create SipStreamFactory with the tap TCP handler
+	// Use a background context for the stream factory - it runs for the lifetime of the tap node
+	tapCtx := context.Background()
+	streamFactory := voip.NewSipStreamFactory(tapCtx, tapTCPHandler)
+
+	// Create tcpassembly stream pool and assembler
+	streamPool := tcpassembly.NewStreamPool(streamFactory)
+	tcpAssembler := tcpassembly.NewAssembler(streamPool)
+
+	// Create TapTCPAssembler wrapper that implements source.TCPAssembler
+	tapTCPAssemblerWrapper := NewTapTCPAssembler(tcpAssembler)
+
+	// Wire TCP injection channel and assembler to LocalSource
+	localSource.SetTCPInjectionChannel(tcpInjectionChan)
+	localSource.SetTCPAssembler(tapTCPAssemblerWrapper)
+
+	logger.Info("TCP SIP reassembly enabled for tap mode",
+		"tcp_handler", "TapTCPHandler",
+		"tcp_assembler", "tcpassembly.Assembler",
+		"injection_buffer", 1000)
 
 	// Set the local source and target on the processor
 	p.SetPacketSource(localSource)
@@ -469,6 +543,10 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Start TCP stream flusher goroutine to prevent memory leaks
+	// This periodically flushes old TCP streams that haven't received data
+	go runTCPStreamFlusher(ctx, tcpAssembler)
+
 	logger.Info("VoIP Tap node started successfully",
 		"listen", config.ListenAddr,
 		"mode", mode)
@@ -484,4 +562,33 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	logger.Info("VoIP Tap node stopped")
 	return nil
+}
+
+// runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks
+// and ensure timely processing of SIP messages in slow or incomplete connections.
+func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) {
+	// Flush streams older than 2 minutes every 30 seconds
+	// This matches the behavior in hunt mode
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Flush all remaining streams on shutdown
+			logger.Debug("Flushing TCP assembler streams on shutdown")
+			flushed, closed := assembler.FlushOlderThan(time.Now())
+			logger.Debug("TCP streams flushed on shutdown", "flushed", flushed, "closed", closed)
+			return
+		case <-ticker.C:
+			// Flush streams that haven't received data in 2 minutes
+			cutoff := time.Now().Add(-2 * time.Minute)
+			flushed, closed := assembler.FlushOlderThan(cutoff)
+			if flushed > 0 || closed > 0 {
+				logger.Debug("Flushed old TCP streams",
+					"flushed", flushed,
+					"closed", closed)
+			}
+		}
+	}
 }

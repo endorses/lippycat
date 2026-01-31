@@ -56,8 +56,11 @@ func runLive(cmd *cobra.Command, args []string) {
 		}
 		defer f.Close()
 		logger.UseFile(f)
+	} else if logger.InitConsole() {
+		// LOG_LEVEL=DEBUG - capture to in-memory console buffer for TUI display
+		logger.EnableConsoleCapture()
 	} else {
-		// Disable logging to prevent corrupting TUI display
+		// Normal mode - disable logging to prevent corrupting TUI display
 		logger.Disable()
 		defer logger.Enable()
 	}

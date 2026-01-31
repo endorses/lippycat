@@ -58,6 +58,10 @@ var (
 	tcpBufferStrategy     string
 	enableBackpressure    bool
 	memoryOptimization    bool
+	tcpSIPIdleTimeout     time.Duration
+
+	// PCAP completion flags
+	pcapGracePeriod time.Duration
 
 	// Virtual interface flags inherited from parent SniffCmd
 	// (defined in sniff.go as PersistentFlags)
@@ -135,6 +139,12 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	}
 	if cmd.Flags().Changed("memory-optimization") {
 		viper.Set("voip.memory_optimization", memoryOptimization)
+	}
+	if cmd.Flags().Changed("tcp-sip-idle-timeout") {
+		viper.Set("voip.tcp_sip_idle_timeout", tcpSIPIdleTimeout)
+	}
+	if cmd.Flags().Changed("pcap-grace-period") {
+		viper.Set("voip.pcap_grace_period", pcapGracePeriod)
 	}
 
 	// Virtual interface flags are inherited from parent SniffCmd
@@ -251,6 +261,10 @@ func init() {
 	voipCmd.Flags().StringVar(&tcpBufferStrategy, "tcp-buffer-strategy", "", "TCP buffering strategy: 'adaptive', 'fixed', 'ring' (default: adaptive)")
 	voipCmd.Flags().BoolVar(&enableBackpressure, "enable-backpressure", false, "Enable backpressure handling for TCP streams")
 	voipCmd.Flags().BoolVar(&memoryOptimization, "memory-optimization", false, "Enable memory usage optimizations")
+	voipCmd.Flags().DurationVar(&tcpSIPIdleTimeout, "tcp-sip-idle-timeout", 0, "Idle timeout for SIP TCP connections (default: 120s, 0 = use default)")
+
+	// PCAP completion flags
+	voipCmd.Flags().DurationVar(&pcapGracePeriod, "pcap-grace-period", 5*time.Second, "Grace period before closing PCAP files after call ends (for trailing RTP)")
 
 	// Bind GPU flags to viper (only in CUDA builds)
 	BindGPUViperFlags(voipCmd)
@@ -271,6 +285,8 @@ func init() {
 	_ = viper.BindPFlag("voip.tcp_buffer_strategy", voipCmd.Flags().Lookup("tcp-buffer-strategy"))
 	_ = viper.BindPFlag("voip.enable_backpressure", voipCmd.Flags().Lookup("enable-backpressure"))
 	_ = viper.BindPFlag("voip.memory_optimization", voipCmd.Flags().Lookup("memory-optimization"))
+	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipCmd.Flags().Lookup("tcp-sip-idle-timeout"))
+	_ = viper.BindPFlag("voip.pcap_grace_period", voipCmd.Flags().Lookup("pcap-grace-period"))
 
 	// Virtual Interface Flags are inherited from parent SniffCmd (sniff.go)
 	// No need to register them here - they're PersistentFlags on the parent

@@ -62,9 +62,15 @@ func runRemote(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Disable logging to prevent corrupting TUI display
-	logger.Disable()
-	defer logger.Enable()
+	// Handle logging for TUI mode
+	if logger.InitConsole() {
+		// LOG_LEVEL=DEBUG - capture to in-memory console buffer for TUI display
+		logger.EnableConsoleCapture()
+	} else {
+		// Normal mode - disable logging to prevent corrupting TUI display
+		logger.Disable()
+		defer logger.Enable()
+	}
 
 	// Load buffer size from config, use flag value as fallback
 	configBufferSize := viper.GetInt("tui.buffer_size")

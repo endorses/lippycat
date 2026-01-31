@@ -786,15 +786,12 @@ func (d *DetailsPanel) renderLayerSummary(contentWidth int) string {
 	appStyle := lipgloss.NewStyle().Foreground(appColor)
 	labelStyle := lipgloss.NewStyle().Foreground(d.theme.StatusBarFg).Bold(true)
 
-	// Section header with line filling available width
-	headerText := "─── Layers "
-	remainingWidth := contentWidth - len(headerText)
-	if remainingWidth < 0 {
-		remainingWidth = 0
-	}
-	header := headerText + strings.Repeat("─", remainingWidth)
-	sb.WriteString(lipgloss.NewStyle().Foreground(d.theme.InfoColor).Render(header))
-	sb.WriteString("\n")
+	sectionStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(d.theme.InfoColor)
+
+	sb.WriteString(sectionStyle.Render("📑 Layers"))
+	sb.WriteString("\n\n")
 
 	// Link layer (Ethernet, Linux SLL, etc.)
 	if eth := packet.Layer(layers.LayerTypeEthernet); eth != nil {

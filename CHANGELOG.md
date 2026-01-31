@@ -8,13 +8,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.0] - 2026-01-31
 
 ### Added
-- Major TUI enhancements with statistics dashboard and VoIP improvements
+- **TUI statistics dashboard**: Complete statistics tab with interactive dashboard
+  - Protocol distribution bar charts with colored bars
+  - CPU/RAM sparklines for TUI process monitoring
+  - Active calls sparkline for VoIP monitoring
+  - Top talkers navigation with h/l and arrow keys
+  - Fleet health stats for remote mode
+  - Bridge performance statistics
+  - Responsive layouts for different terminal sizes
+  - Clickable view and time window selectors
+- **VoIP call filtering**: Generic filtering system for call list
+  - Call filter syntax with state and numeric comparison filters
+  - Filter syntax documentation in help tab
+  - Persistent filter history
+- **RTP-only call support**: Display calls detected from RTP before SIP arrives
+  - RTP-only call state with distinct styling
+  - Auto-merge with SIP when signaling arrives
+  - LRU eviction for CallStore, CallTracker, and CallAggregator
+- **Capture pause coordination**: PauseSignal type for synchronized pause/resume
+  - Source-level pause support in PacketBuffer
+  - Call updates pause when capture is paused
+- **Protocol detection improvements**:
+  - QUIC protocol detector
+  - Heuristic RTP detection for edge cases
+  - TCP SIP injection support
+  - Protocol layer summary in details panel
+- **TUI usability improvements**:
+  - Node address history in Add Node modal
+  - Toast supersession for auto-dismissing obsolete messages
+  - Top-of-list auto-scroll for call view
+  - Dev console for debugging
+- **Hunter TCP reassembly**: Full TCP reassembly for VoIP hunter mode
+- **TCP SIP timeout flags**: Configurable timeouts for TCP SIP handling
 
 ### Changed
-- TODO: Add detailed changelog entries
+- **Default gRPC port**: Changed from 50051 to 55555
+- **Default filter policy**: Changed `--no-filter-policy` default to `deny` for hunt and tap commands
+- **Statistics tab redesign**: Simplified to Overview and Distributed views
 
 ### Fixed
-- TODO: Add fixed items
+- **IPv4 defragmentation**: Fixed handling of fragmented SIP messages
+- **TCP SIP handling**: Multiple improvements to TCP stream handling
+  - Replaced tcpreader with buffered stream to prevent capture freeze
+  - Added TCP stream read timeout for persistent connections
+  - Hybrid TCP SIP detection for continuation packets
+  - TCP reassembly for SIP detection instead of heuristics
+- **TUI stability fixes**:
+  - Prevent crash when interacting during startup
+  - Reset terminal SGR attributes before starting TUI
+  - Return focus to packet list when hiding details panel
+  - Help tab section selector clicks when scrolled
+  - Settings input field mouse and escape behavior
+- **VoIP fixes**:
+  - Extract phone suffix from SIP user part only, not full URI
+  - Add discard flag to stop buffering non-SIP streams immediately
+  - Update call From/To when SIP arrives after RTP
+  - Inherit From/To from tracker for RTP-created calls
+- **TUI layout fixes**:
+  - Consistent bar style for bridge queue indicator
+  - Truncate long codec names in VoIP statistics
+  - Correct sparkline padding calculation
+  - Card width and height calculations for dashboard layout
+  - CPU sparkline positioning in TUI PROCESS card
+  - Allow CPU usage display to exceed 100% on multi-core systems
+- **Filtering fixes**:
+  - Reapply packet filters when paused instead of clearing
+  - Reapply packet filters in offline mode
+  - Auto-scroll state matching cursor position after filter
+  - Re-sort filtered calls when StartTime changes
+- **Call list fixes**:
+  - Eliminate race condition with sorted insert
+  - Track selected call by ID for correct auto-scroll on removal
+  - Scroll up when filtered call list shrinks
+  - Make offline VoIP call tracking deterministic
+- **Protocol detection**: Prevent OpenVPN false positives on TLS traffic
+- **Remote capture**: Use packet timestamp for call EndTime instead of time.Now()
+- **HTTP info**: Extract HTTP info from payload when metadata unavailable
+- **Invalid UTF-8 handling**: Handle invalid UTF-8 and rate calculation after reconnection
+
+### Performance
+- **Statistics caching**: Cache statistics computations to eliminate CPU spikes
+- **Call view optimization**: Multi-phase performance improvements
+  - Double-buffer pattern to reduce allocations
+  - Index map for selected call lookup
+  - SIP packet priority queue for sampling
 
 ## [0.8.3] - 2026-01-21
 

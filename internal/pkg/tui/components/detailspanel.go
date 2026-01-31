@@ -796,13 +796,13 @@ func (d *DetailsPanel) renderLayerSummary(contentWidth int) string {
 	// Link layer (Ethernet, Linux SLL, etc.)
 	if eth := packet.Layer(layers.LayerTypeEthernet); eth != nil {
 		ethLayer := eth.(*layers.Ethernet)
-		line := fmt.Sprintf("%-10s %s → %s", "Ethernet", ethLayer.SrcMAC, ethLayer.DstMAC)
+		sb.WriteString(labelStyle.Render("Ethernet  "))
 		// Add EtherType if not IP
 		if ethLayer.EthernetType != layers.EthernetTypeIPv4 && ethLayer.EthernetType != layers.EthernetTypeIPv6 {
-			line += fmt.Sprintf("  [%s]", ethLayer.EthernetType)
+			sb.WriteString(linkStyle.Render(fmt.Sprintf("%s → %s  [%s]", ethLayer.SrcMAC, ethLayer.DstMAC, ethLayer.EthernetType)))
+		} else {
+			sb.WriteString(linkStyle.Render(fmt.Sprintf("%s → %s", ethLayer.SrcMAC, ethLayer.DstMAC)))
 		}
-		sb.WriteString(labelStyle.Render("Ethernet  "))
-		sb.WriteString(linkStyle.Render(fmt.Sprintf("%s → %s", ethLayer.SrcMAC, ethLayer.DstMAC)))
 		sb.WriteString("\n")
 	} else if sll := packet.Layer(layers.LayerTypeLinuxSLL); sll != nil {
 		sllLayer := sll.(*layers.LinuxSLL)

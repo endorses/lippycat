@@ -98,11 +98,11 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 
 	// Note: We need to trigger stats callback after releasing lock to avoid deadlock
 	// since the callback might call GetHealthStats() which needs a read lock
-	shouldTriggerCallback := !isReconnect && m.onStatsChanged != nil
+	shouldTriggerCallback := m.onStatsChanged != nil
 
 	m.mu.Unlock() // Release lock before callback
 
-	// Trigger stats update for new registrations
+	// Trigger stats update for registrations (including reconnects, which reset ERROR→HEALTHY)
 	if shouldTriggerCallback {
 		m.onStatsChanged()
 	}

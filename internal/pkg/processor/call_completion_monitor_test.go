@@ -126,6 +126,7 @@ func TestCallCompletionMonitor_StartWithNilComponents(t *testing.T) {
 
 func TestCallCompletionMonitor_DetectsEndedCalls(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	pcapConfig := &PcapWriterConfig{
@@ -208,6 +209,7 @@ func TestCallCompletionMonitor_DetectsEndedCalls(t *testing.T) {
 
 func TestCallCompletionMonitor_GracePeriodRespected(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	// Track when CloseCallWriter is called
@@ -299,6 +301,7 @@ func TestCallCompletionMonitor_GracePeriodRespected(t *testing.T) {
 
 func TestCallCompletionMonitor_CancelPendingClose(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	pcapConfig := &PcapWriterConfig{
@@ -367,6 +370,7 @@ func TestCallCompletionMonitor_CancelPendingClose(t *testing.T) {
 
 func TestCallCompletionMonitor_MultipleCalls(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	pcapConfig := &PcapWriterConfig{
@@ -437,6 +441,7 @@ func TestCallCompletionMonitor_MultipleCalls(t *testing.T) {
 
 func TestCallCompletionMonitor_ShutdownClosesPending(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	pcapConfig := &PcapWriterConfig{
@@ -516,6 +521,7 @@ func TestCallCompletionMonitor_CancelPendingClose_NilMonitor(t *testing.T) {
 
 func TestCallCompletionMonitor_ConcurrentAccess(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	pcapConfig := &PcapWriterConfig{
@@ -597,6 +603,7 @@ func TestCallCompletionMonitor_ConcurrentAccess(t *testing.T) {
 
 func TestCallCompletionMonitor_FailedCallStateDetection(t *testing.T) {
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	tmpDir := t.TempDir()
 
 	pcapConfig := &PcapWriterConfig{
@@ -682,6 +689,7 @@ func TestCallCompletionMonitor_WaitsForRTPBeforeClosing(t *testing.T) {
 	require.NoError(t, err)
 
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	config := &CallCompletionMonitorConfig{
 		GracePeriod:    100 * time.Millisecond,
 		CheckInterval:  50 * time.Millisecond,
@@ -808,6 +816,7 @@ func TestCallCompletionMonitor_RTPWaitTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	aggregator := voip.NewCallAggregator()
+	aggregator.SetBYETimewait(10 * time.Millisecond) // Short timewait for testing
 	config := &CallCompletionMonitorConfig{
 		GracePeriod:    50 * time.Millisecond,
 		CheckInterval:  25 * time.Millisecond,

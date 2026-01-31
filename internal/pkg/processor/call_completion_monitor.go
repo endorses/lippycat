@@ -146,6 +146,11 @@ func (m *CallCompletionMonitor) monitorLoop() {
 
 // checkEndedCalls looks for calls that have ended and schedules them for closure
 func (m *CallCompletionMonitor) checkEndedCalls() {
+	// First, process timewait expiry to transition ENDING calls to ENDED
+	// This is necessary because BYE puts calls in ENDING state with a timewait
+	// period before transitioning to ENDED state.
+	m.aggregator.ProcessTimewaitExpiry()
+
 	calls := m.aggregator.GetCalls()
 	now := time.Now()
 
@@ -163,10 +168,11 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 			continue
 		}
 
-		// Check if call has ended
-		if call.State == voip.CallStateEnded || call.State == voip.CallStateFailed {
+		// Check if call has ended (any terminal state)
+		if call.State == voip.CallStateEnded || call.State == voip.CallStateFailed ||
+			call.State == voip.CallStateCancelled || call.State == voip.CallStateBusy {
 			// RTP is expected for successful calls (ENDED state).
-			// Failed calls (FAILED state) typically don't have RTP (e.g., 486 BUSY, CANCEL).
+			// Failed/cancelled/busy calls typically don't have RTP.
 			// For ENDED calls, we wait for RTP even if we haven't seen any yet,
 			// because RTP packets may arrive after the SIP BYE.
 			rtpExpected := call.State == voip.CallStateEnded

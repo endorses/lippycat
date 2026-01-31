@@ -1255,11 +1255,11 @@ func TestDeriveSIPState_StateTransitions(t *testing.T) {
 		expectedState string
 	}{
 		{
-			name:          "INVITE transitions NEW to RINGING",
+			name:          "INVITE transitions NEW to TRYING",
 			initialState:  "NEW",
 			method:        "INVITE",
 			responseCode:  0,
-			expectedState: "RINGING",
+			expectedState: "TRYING",
 		},
 		{
 			name:          "ACK transitions RINGING to ACTIVE",
@@ -1276,11 +1276,11 @@ func TestDeriveSIPState_StateTransitions(t *testing.T) {
 			expectedState: "ENDED",
 		},
 		{
-			name:          "CANCEL transitions to FAILED",
+			name:          "CANCEL transitions to CANCELLED",
 			initialState:  "RINGING",
 			method:        "CANCEL",
 			responseCode:  0,
-			expectedState: "FAILED",
+			expectedState: "CANCELLED",
 		},
 		{
 			name:          "200 OK transitions RINGING to ACTIVE",
@@ -1474,7 +1474,7 @@ func TestUpdateCallState_NewCall(t *testing.T) {
 	assert.Equal(t, "test-call-id-1", call.CallID)
 	assert.Equal(t, "sip:alice@example.com", call.From)
 	assert.Equal(t, "sip:bob@example.com", call.To)
-	assert.Equal(t, "RINGING", call.State) // INVITE transitions NEW -> RINGING
+	assert.Equal(t, "TRYING", call.State) // INVITE transitions NEW -> TRYING
 	assert.Contains(t, call.Hunters, "hunter-1")
 }
 

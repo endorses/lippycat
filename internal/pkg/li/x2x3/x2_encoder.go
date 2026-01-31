@@ -105,6 +105,27 @@ func (e *X2Encoder) classifyIRIType(voip *types.VoIPMetadata) (IRIType, bool) {
 		return IRISessionAttempt, true
 	case "REGISTER":
 		return IRIRegistration, true
+	case "MESSAGE":
+		// SMS-over-IMS, instant messaging
+		return IRIMessage, true
+	case "SUBSCRIBE":
+		// Presence, MWI, dialog event subscriptions
+		return IRISubscription, true
+	case "NOTIFY":
+		// Subscription notifications
+		return IRINotification, true
+	case "PUBLISH":
+		// Presence state publication
+		return IRIPresence, true
+	case "REFER":
+		// Call transfer initiation
+		return IRITransfer, true
+	case "INFO", "UPDATE", "PRACK", "ACK":
+		// Mid-dialog signaling
+		return IRISessionContinue, true
+	case "OPTIONS":
+		// Capability query / keepalive
+		return IRIReport, true
 	}
 
 	// Handle SIP responses

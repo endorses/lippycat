@@ -314,6 +314,27 @@ const (
 
 	// IRIRegistrationEnd indicates a SIP de-registration event.
 	IRIRegistrationEnd IRIType = 6
+
+	// IRISessionContinue indicates mid-dialog signaling (INFO, UPDATE, PRACK, ACK, re-INVITE).
+	IRISessionContinue IRIType = 7
+
+	// IRIMessage indicates a SIP MESSAGE event (SMS-over-IMS, instant messaging).
+	IRIMessage IRIType = 8
+
+	// IRISubscription indicates a SIP SUBSCRIBE event (presence, MWI, dialog events).
+	IRISubscription IRIType = 9
+
+	// IRINotification indicates a SIP NOTIFY event (subscription notification).
+	IRINotification IRIType = 10
+
+	// IRIPresence indicates a SIP PUBLISH event (presence state publication).
+	IRIPresence IRIType = 11
+
+	// IRITransfer indicates a SIP REFER event (call transfer initiation).
+	IRITransfer IRIType = 12
+
+	// IRIReport indicates a non-session SIP event (OPTIONS, other diagnostic).
+	IRIReport IRIType = 13
 )
 
 // String returns the string representation of the IRI type.
@@ -331,6 +352,20 @@ func (t IRIType) String() string {
 		return "Registration"
 	case IRIRegistrationEnd:
 		return "RegistrationEnd"
+	case IRISessionContinue:
+		return "SessionContinue"
+	case IRIMessage:
+		return "Message"
+	case IRISubscription:
+		return "Subscription"
+	case IRINotification:
+		return "Notification"
+	case IRIPresence:
+		return "Presence"
+	case IRITransfer:
+		return "Transfer"
+	case IRIReport:
+		return "Report"
 	default:
 		return fmt.Sprintf("Unknown(%d)", t)
 	}

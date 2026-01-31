@@ -28,25 +28,25 @@ Additionally, **3GPP IMS headers** (P-Access-Network-Info, P-Visited-Network-ID)
 
 #### Step 1.1: Add new IRI types to `internal/pkg/li/x2x3/pdu.go`
 
-- [ ] Add `IRISessionContinue` (7) for INFO, UPDATE, re-INVITE, PRACK, ACK
-- [ ] Add `IRIMessage` (8) for MESSAGE method
-- [ ] Add `IRISubscription` (9) for SUBSCRIBE
-- [ ] Add `IRINotification` (10) for NOTIFY
-- [ ] Add `IRIPresence` (11) for PUBLISH
-- [ ] Add `IRITransfer` (12) for REFER
-- [ ] Add `IRIReport` (13) for OPTIONS and other non-session events
+- [x] Add `IRISessionContinue` (7) for INFO, UPDATE, re-INVITE, PRACK, ACK
+- [x] Add `IRIMessage` (8) for MESSAGE method
+- [x] Add `IRISubscription` (9) for SUBSCRIBE
+- [x] Add `IRINotification` (10) for NOTIFY
+- [x] Add `IRIPresence` (11) for PUBLISH
+- [x] Add `IRITransfer` (12) for REFER
+- [x] Add `IRIReport` (13) for OPTIONS and other non-session events
 
 #### Step 1.2: Update `classifyIRIType()` in `internal/pkg/li/x2x3/x2_encoder.go`
 
-- [ ] Add MESSAGE → IRIMessage mapping
-- [ ] Add SUBSCRIBE → IRISubscription mapping
-- [ ] Add NOTIFY → IRINotification mapping
-- [ ] Add PUBLISH → IRIPresence mapping
-- [ ] Add INFO, UPDATE, PRACK → IRISessionContinue mapping
-- [ ] Add REFER → IRITransfer mapping
-- [ ] Add OPTIONS → IRIReport mapping
-- [ ] Add ACK → IRISessionContinue mapping
-- [ ] Run: `go test -race ./internal/pkg/li/...`
+- [x] Add MESSAGE → IRIMessage mapping
+- [x] Add SUBSCRIBE → IRISubscription mapping
+- [x] Add NOTIFY → IRINotification mapping
+- [x] Add PUBLISH → IRIPresence mapping
+- [x] Add INFO, UPDATE, PRACK → IRISessionContinue mapping
+- [x] Add REFER → IRITransfer mapping
+- [x] Add OPTIONS → IRIReport mapping
+- [x] Add ACK → IRISessionContinue mapping
+- [x] Run: `go test -race ./internal/pkg/li/...`
 
 ---
 

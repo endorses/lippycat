@@ -290,6 +290,17 @@ const (
 	// AttrStreamID contains an identifier linking X3 CC to corresponding X2 IRI.
 	// 8 bytes, typically derived from Call-ID or SSRC for correlation.
 	AttrStreamID AttributeType = 0x0210
+
+	// MESSAGE-specific attribute types for SMS-over-IMS interception.
+	// These are used in X2 IRI PDUs for MESSAGE method content.
+
+	// AttrMessageContent contains the SIP MESSAGE body content.
+	// Variable length, the actual message content (text, multimedia).
+	AttrMessageContent AttributeType = 0x0300
+
+	// AttrMessageContentType contains the Content-Type of the MESSAGE body.
+	// Variable length string (e.g., "text/plain", "application/vnd.3gpp.sms").
+	AttrMessageContentType AttributeType = 0x0301
 )
 
 // IRIType identifies the type of Intercept Related Information event.

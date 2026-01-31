@@ -78,6 +78,8 @@ type CallMetadata struct {
 	Method            string
 	ResponseCode      uint32
 	SDPBody           string
+	ContentType       string // Content-Type header
+	Body              string // Message body (for MESSAGE method, size-limited)
 }
 
 // ApplicationFilter is an optional filter interface for VoIP call filtering.

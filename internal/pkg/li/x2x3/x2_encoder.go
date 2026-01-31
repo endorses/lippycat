@@ -215,6 +215,16 @@ func (e *X2Encoder) addSIPAttributes(pdu *PDU, voip *types.VoIPMetadata) {
 	if voip.ToTag != "" {
 		pdu.AddAttribute(encoder.EncodeString(AttrSIPToTag, voip.ToTag))
 	}
+
+	// MESSAGE content (for SMS-over-IMS)
+	if voip.Method == "MESSAGE" {
+		if voip.ContentType != "" {
+			pdu.AddAttribute(encoder.EncodeString(AttrMessageContentType, voip.ContentType))
+		}
+		if voip.Body != "" {
+			pdu.AddAttribute(encoder.EncodeString(AttrMessageContent, voip.Body))
+		}
+	}
 }
 
 // addNetworkAttributes adds network layer attributes to the PDU.

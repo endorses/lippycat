@@ -41,6 +41,7 @@ type VoIPMetadata struct {
 	ToTag       string            // SIP To tag parameter (for dialog correlation)
 	User        string            // Username from URI
 	ContentType string            // Content-Type header
+	Body        string            // SIP message body (for MESSAGE method, limited size)
 	Headers     map[string]string // All SIP headers
 
 	// RTP fields

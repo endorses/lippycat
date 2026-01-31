@@ -62,6 +62,9 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	// Detect SIP method
 	method := detectSIPMethod(payload)
 
+	// Extract Content-Type header
+	contentType := headers["content-type"]
+
 	// Extract metadata
 	metadata := &CallMetadata{
 		CallID:            callID,
@@ -73,6 +76,12 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		Method:            method,
 		ResponseCode:      extractSIPResponseCode(payload),
 		SDPBody:           body,
+		ContentType:       contentType,
+	}
+
+	// For MESSAGE method, extract body with size limit for LI compliance
+	if method == "MESSAGE" && body != "" {
+		metadata.Body = extractMessageBody(body)
 	}
 
 	// Update call state
@@ -409,6 +418,18 @@ var (
 	errCallIDTooLong      = &callIDError{"call-id too long"}
 	errCallIDInvalidChars = &callIDError{"call-id contains invalid characters"}
 )
+
+// MaxMessageBodySize is the maximum size of MESSAGE body to extract (64KB).
+// This prevents excessive memory usage while capturing SMS-over-IMS content.
+const MaxMessageBodySize = 65536
+
+// extractMessageBody extracts the body of a SIP MESSAGE with size limit.
+func extractMessageBody(body string) string {
+	if len(body) <= MaxMessageBodySize {
+		return body
+	}
+	return body[:MaxMessageBodySize]
+}
 
 type callIDError struct {
 	msg string

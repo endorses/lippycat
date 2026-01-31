@@ -52,23 +52,23 @@ Additionally, **3GPP IMS headers** (P-Access-Network-Info, P-Visited-Network-ID)
 
 ### Phase 2: MESSAGE Body Extraction (SMS-over-IMS)
 
-#### Step 2.1: Extend VoIPMetadata in `internal/pkg/types/voip.go`
+#### Step 2.1: Extend VoIPMetadata in `internal/pkg/types/packet.go`
 
-- [ ] Add `Body string` field for SIP message body
-- [ ] Add `ContentType string` field
-- [ ] Update JSON tags
+- [x] Add `Body string` field for SIP message body
+- [x] Add `ContentType string` field (already existed)
+- [x] Update JSON tags (not needed, existing pattern followed)
 
 #### Step 2.2: Update SIP parser in `internal/pkg/voip/processor/sip_detector.go`
 
-- [ ] Extract body for MESSAGE method
-- [ ] Extract Content-Type header
-- [ ] Limit body extraction to reasonable size (e.g., 64KB)
+- [x] Extract body for MESSAGE method
+- [x] Extract Content-Type header
+- [x] Limit body extraction to reasonable size (64KB via MaxMessageBodySize)
 
 #### Step 2.3: Include body in X2 IRI encoding
 
-- [ ] Add `AttrMessageContent` and `AttrContentType` attributes to PDU
-- [ ] Encode body in `EncodeIRI()` for MESSAGE method
-- [ ] Run: `go test -race ./internal/pkg/li/...`
+- [x] Add `AttrMessageContent` and `AttrMessageContentType` attributes to PDU
+- [x] Encode body in `addSIPAttributes()` for MESSAGE method
+- [x] Run: `go test -race ./internal/pkg/li/...`
 
 ---
 

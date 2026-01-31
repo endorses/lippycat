@@ -84,13 +84,15 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 	}
 
 	// Register/re-register hunter
+	now := time.Now().UnixNano()
 	hunter := &ConnectedHunter{
-		ID:           hunterID,
-		Hostname:     hostname,
-		Interfaces:   interfaces,
-		Capabilities: capabilities,
-		ConnectedAt:  time.Now().UnixNano(),
-		Status:       management.HunterStatus_STATUS_HEALTHY,
+		ID:            hunterID,
+		Hostname:      hostname,
+		Interfaces:    interfaces,
+		Capabilities:  capabilities,
+		ConnectedAt:   now,
+		LastHeartbeat: now, // Initialize to connection time so stale detection works
+		Status:        management.HunterStatus_STATUS_HEALTHY,
 	}
 	m.hunters[hunterID] = hunter
 

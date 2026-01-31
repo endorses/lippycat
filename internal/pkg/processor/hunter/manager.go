@@ -116,12 +116,12 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 			Event: &management.TopologyUpdate_HunterConnected{
 				HunterConnected: &management.HunterConnectedEvent{
 					Hunter: &management.ConnectedHunter{
-						HunterId:   hunterID,
-						Hostname:   hostname,
-						RemoteAddr: "", // Will be set by the processor when receiving registration
-						Status:     management.HunterStatus_STATUS_HEALTHY,
-						// Note: Other fields like connected_duration_sec, interfaces, capabilities
-						// are not part of the ConnectedHunter proto definition
+						HunterId:     hunterID,
+						Hostname:     hostname,
+						RemoteAddr:   "", // Will be set by the processor when receiving registration
+						Status:       management.HunterStatus_STATUS_HEALTHY,
+						Interfaces:   interfaces,
+						Capabilities: capabilities,
 					},
 				},
 			},

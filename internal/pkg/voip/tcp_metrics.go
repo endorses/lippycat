@@ -19,6 +19,17 @@ type tcpStreamMetricsInternal struct {
 	queuedStreams         int64
 	droppedStreams        int64
 	lastMetricsUpdate     time.Time
+
+	// Diagnostic counters for SIP detection failures
+	streamsRejectedNonSIP int64 // Streams that returned errNotSIP (first line not SIP)
+	streamsTimedOut       int64 // Streams that timed out waiting for data
+	sipMessagesDetected   int64 // SIP messages successfully detected and processed
+
+	// Reassembled() call tracking
+	reassembledCalls       int64 // Total Reassembled() calls from assembler
+	reassembledWithData    int64 // Reassembled() calls that received actual data
+	reassembledEmptyData   int64 // Reassembled() calls with no payload (SYN/ACK)
+	reassembledDataDropped int64 // Data dropped due to full buffer
 }
 
 // TCPStreamMetrics represents TCP stream statistics without mutexes for external use
@@ -30,6 +41,17 @@ type TCPStreamMetrics struct {
 	QueuedStreams         int64     `json:"queued_streams"`
 	DroppedStreams        int64     `json:"dropped_streams"`
 	LastMetricsUpdate     time.Time `json:"last_metrics_update"`
+
+	// Diagnostic counters for SIP detection failures
+	StreamsRejectedNonSIP int64 `json:"streams_rejected_non_sip"`
+	StreamsTimedOut       int64 `json:"streams_timed_out"`
+	SIPMessagesDetected   int64 `json:"sip_messages_detected"`
+
+	// Reassembled() call tracking
+	ReassembledCalls       int64 `json:"reassembled_calls"`
+	ReassembledWithData    int64 `json:"reassembled_with_data"`
+	ReassembledEmptyData   int64 `json:"reassembled_empty_data"`
+	ReassembledDataDropped int64 `json:"reassembled_data_dropped"`
 }
 
 var tcpStreamMetrics = &tcpStreamMetricsInternal{
@@ -49,7 +71,56 @@ func GetTCPStreamMetrics() TCPStreamMetrics {
 		QueuedStreams:         tcpStreamMetrics.queuedStreams,
 		DroppedStreams:        tcpStreamMetrics.droppedStreams,
 		LastMetricsUpdate:     tcpStreamMetrics.lastMetricsUpdate,
+		StreamsRejectedNonSIP: tcpStreamMetrics.streamsRejectedNonSIP,
+		StreamsTimedOut:       tcpStreamMetrics.streamsTimedOut,
+		SIPMessagesDetected:   tcpStreamMetrics.sipMessagesDetected,
+
+		ReassembledCalls:       atomic.LoadInt64(&tcpStreamMetrics.reassembledCalls),
+		ReassembledWithData:    atomic.LoadInt64(&tcpStreamMetrics.reassembledWithData),
+		ReassembledEmptyData:   atomic.LoadInt64(&tcpStreamMetrics.reassembledEmptyData),
+		ReassembledDataDropped: atomic.LoadInt64(&tcpStreamMetrics.reassembledDataDropped),
 	}
+}
+
+// IncrementNonSIPRejection increments the counter for streams rejected as non-SIP
+func IncrementNonSIPRejection() {
+	tcpStreamMetrics.mu.Lock()
+	tcpStreamMetrics.streamsRejectedNonSIP++
+	tcpStreamMetrics.mu.Unlock()
+}
+
+// IncrementStreamTimeout increments the counter for streams that timed out
+func IncrementStreamTimeout() {
+	tcpStreamMetrics.mu.Lock()
+	tcpStreamMetrics.streamsTimedOut++
+	tcpStreamMetrics.mu.Unlock()
+}
+
+// IncrementSIPMessagesDetected increments the counter for SIP messages detected
+func IncrementSIPMessagesDetected() {
+	tcpStreamMetrics.mu.Lock()
+	tcpStreamMetrics.sipMessagesDetected++
+	tcpStreamMetrics.mu.Unlock()
+}
+
+// IncrementReassembledCalls increments counter for ALL Reassembled() calls from assembler
+func IncrementReassembledCalls() {
+	atomic.AddInt64(&tcpStreamMetrics.reassembledCalls, 1)
+}
+
+// IncrementReassembledWithData increments counter for Reassembled() calls with data
+func IncrementReassembledWithData() {
+	atomic.AddInt64(&tcpStreamMetrics.reassembledWithData, 1)
+}
+
+// IncrementReassembledEmptyData increments counter for Reassembled() calls without data
+func IncrementReassembledEmptyData() {
+	atomic.AddInt64(&tcpStreamMetrics.reassembledEmptyData, 1)
+}
+
+// IncrementReassembledDataDropped increments counter for dropped data due to full buffer
+func IncrementReassembledDataDropped() {
+	atomic.AddInt64(&tcpStreamMetrics.reassembledDataDropped, 1)
 }
 
 // Global TCP assembler monitoring

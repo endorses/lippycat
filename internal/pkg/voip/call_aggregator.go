@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -12,30 +13,83 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
+// Merge diagnostic counters
+var (
+	mergeAttempts       int64 // Times mergeRTPOnlyCall was called
+	mergeSyntheticFound int64 // Synthetic call was found
+	mergeRealFound      int64 // Real call was found
+	mergeSuccess        int64 // Merge completed successfully
+)
+
+// From/To diagnostic counters
+var (
+	callsCreatedTotal     int64 // Total calls created from INVITE
+	callsCreatedEmptyFrom int64 // Calls created with empty From
+	callsCreatedEmptyTo   int64 // Calls created with empty To
+	callsUpdatedFrom      int64 // Calls where From was updated from empty
+	callsUpdatedTo        int64 // Calls where To was updated from empty
+)
+
+// GetFromToStats returns From/To diagnostic statistics
+func GetFromToStats() (total, emptyFrom, emptyTo, updatedFrom, updatedTo int64) {
+	return atomic.LoadInt64(&callsCreatedTotal),
+		atomic.LoadInt64(&callsCreatedEmptyFrom),
+		atomic.LoadInt64(&callsCreatedEmptyTo),
+		atomic.LoadInt64(&callsUpdatedFrom),
+		atomic.LoadInt64(&callsUpdatedTo)
+}
+
+// GetMergeAggregatorStats returns merge statistics from CallAggregator
+func GetMergeAggregatorStats() (attempts, syntheticFound, realFound, success int64) {
+	return atomic.LoadInt64(&mergeAttempts),
+		atomic.LoadInt64(&mergeSyntheticFound),
+		atomic.LoadInt64(&mergeRealFound),
+		atomic.LoadInt64(&mergeSuccess)
+}
+
 // CallState represents the state of a VoIP call
 type CallState int
 
 const (
-	CallStateNew CallState = iota
-	CallStateRinging
+	CallStateNew      CallState = iota
+	CallStateTrying             // INVITE sent, waiting for response
+	CallStateRinging            // 180 Ringing - phone is actually ringing
+	CallStateProgress           // 183 Session Progress - early media established
 	CallStateActive
+	CallStateEnding // BYE received, in timewait period (still accepting RTP)
 	CallStateEnded
-	CallStateFailed
-	CallStateRTPOnly // RTP stream detected without SIP signaling
+	CallStateFailed    // Actual failure (4xx/5xx errors except 486)
+	CallStateCancelled // INVITE cancelled before answer (CANCEL method)
+	CallStateBusy      // Callee busy (486 Busy Here)
+	CallStateRTPOnly   // RTP stream detected without SIP signaling
 )
+
+// DefaultBYETimewait is the default timewait period after BYE (30 seconds)
+// During this period, the call continues accepting RTP packets for trailing media.
+const DefaultBYETimewait = 30 * time.Second
 
 func (cs CallState) String() string {
 	switch cs {
 	case CallStateNew:
 		return "NEW"
+	case CallStateTrying:
+		return "TRYING"
 	case CallStateRinging:
 		return "RINGING"
+	case CallStateProgress:
+		return "PROGRESS"
 	case CallStateActive:
 		return "ACTIVE"
+	case CallStateEnding:
+		return "ENDING"
 	case CallStateEnded:
 		return "ENDED"
 	case CallStateFailed:
 		return "FAILED"
+	case CallStateCancelled:
+		return "CANCELLED"
+	case CallStateBusy:
+		return "BUSY"
 	case CallStateRTPOnly:
 		return "RTP-ONLY"
 	default:
@@ -45,17 +99,19 @@ func (cs CallState) String() string {
 
 // AggregatedCall represents a call tracked by the processor
 type AggregatedCall struct {
-	CallID         string
-	From           string
-	To             string
-	State          CallState
-	StartTime      time.Time
-	EndTime        time.Time
-	LastPacketTime time.Time // Timestamp of last packet seen for this call
-	RTPStats       *RTPQualityStats
-	Hunters        []string // Which hunters saw this call
-	PacketCount    int
-	SIPMethod      string // Last SIP method seen
+	CallID           string
+	From             string
+	To               string
+	State            CallState
+	StartTime        time.Time
+	EndTime          time.Time
+	LastPacketTime   time.Time // Timestamp of last packet seen for this call
+	TimewaitStart    time.Time // When BYE timewait period started (for CallStateEnding)
+	LastResponseCode uint32    // Last SIP response code (especially for failed/busy calls)
+	RTPStats         *RTPQualityStats
+	Hunters          []string // Which hunters saw this call
+	PacketCount      int
+	SIPMethod        string // Last SIP method seen
 }
 
 // RTPQualityStats contains RTP quality metrics
@@ -76,6 +132,7 @@ type CallAggregator struct {
 	lruList     *list.List                 // LRU list (front = most recently used)
 	lruIndex    map[string]*list.Element   // callID -> list element for O(1) lookup
 	maxCalls    int                        // Maximum calls to keep
+	byeTimewait time.Duration              // How long to wait after BYE before transitioning to ENDED
 	mu          sync.RWMutex
 	cachedCalls []AggregatedCall // Cached sorted copy of calls
 	callsDirty  bool             // True if cache needs rebuild
@@ -93,11 +150,12 @@ func NewCallAggregatorWithCapacity(maxCalls int) *CallAggregator {
 		maxCalls = 1000
 	}
 	return &CallAggregator{
-		calls:      make(map[string]*AggregatedCall),
-		lruList:    list.New(),
-		lruIndex:   make(map[string]*list.Element),
-		maxCalls:   maxCalls,
-		callsDirty: true, // Start dirty so first GetCalls builds cache
+		calls:       make(map[string]*AggregatedCall),
+		lruList:     list.New(),
+		lruIndex:    make(map[string]*list.Element),
+		maxCalls:    maxCalls,
+		byeTimewait: DefaultBYETimewait,
+		callsDirty:  true, // Start dirty so first GetCalls builds cache
 	}
 }
 
@@ -133,11 +191,6 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 
 	// Handle SIP packets (but not RTP-ONLY synthetic calls)
 	if voip.CallID != "" && voip.Method != "RTP-ONLY" && (voip.Method != "" || voip.Status > 0) {
-		// Check if we need to merge from an RTP-only call
-		if voip.MergeFromCallID != "" {
-			ca.mergeRTPOnlyCall(voip.MergeFromCallID, voip.CallID)
-		}
-
 		// Convert types.VoIPMetadata to data.SIPMetadata format
 		// Validate Status can fit in uint32 (int is either 32 or 64 bit depending on platform)
 		var responseCode uint32
@@ -167,7 +220,13 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 			},
 		}
 
+		// Process SIP packet first to create/update the call
 		ca.processSIPPacket(capturedPkt, nodeID, timestamp)
+
+		// Now merge from RTP-only call if needed (after real call exists)
+		if voip.MergeFromCallID != "" {
+			ca.mergeRTPOnlyCall(voip.MergeFromCallID, voip.CallID)
+		}
 	}
 
 	// Handle RTP packets
@@ -181,14 +240,15 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 		}
 
 		// Create a minimal CapturedPacket with both SIP (for CallID) and RTP metadata
-		// Include From/To for RTP-only calls (synthetic CallIDs start with "rtp-")
+		// Include From/To for all calls - this enables CallAggregator to populate
+		// From/To when creating calls from RTP with SIP CallIDs
 		sipMeta := &data.SIPMetadata{
-			CallId: voip.CallID,
+			CallId:  voip.CallID,
+			FromUri: voip.From,
+			ToUri:   voip.To,
 		}
-		// For RTP-only calls, preserve From/To (which are IP:port pairs)
+		// For RTP-only calls (synthetic CallID), mark the method
 		if strings.HasPrefix(voip.CallID, "rtp-") {
-			sipMeta.FromUri = voip.From
-			sipMeta.ToUri = voip.To
 			sipMeta.Method = "RTP-ONLY"
 		}
 
@@ -216,10 +276,19 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
-	ca.callsDirty = true // Invalidate cache on potential mutation
 
 	call, exists := ca.calls[sip.CallId]
 	if !exists {
+		// Only create new calls for INVITE requests
+		// Other methods (OPTIONS, REGISTER, SUBSCRIBE, BYE, ACK, etc.) don't create calls
+		// Responses also don't create calls - they can only update existing calls
+		// (If we miss the INVITE, we'll create the call from RTP when SDP is parsed)
+		if sip.Method != "INVITE" {
+			return
+		}
+
+		ca.callsDirty = true // Invalidate cache on mutation
+
 		// Prefer full URIs if available, fallback to username only
 		from := sip.FromUri
 		if from == "" {
@@ -262,12 +331,36 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 		ca.lruIndex[sip.CallId] = elem
 
 		ca.calls[sip.CallId] = call
-		logger.Debug("New call detected",
-			"call_id", sip.CallId,
-			"from", sip.FromUser,
-			"to", sip.ToUser,
-			"hunter", hunterID)
+
+		// Track From/To population statistics
+		atomic.AddInt64(&callsCreatedTotal, 1)
+		if from == "" {
+			atomic.AddInt64(&callsCreatedEmptyFrom, 1)
+		}
+		if to == "" {
+			atomic.AddInt64(&callsCreatedEmptyTo, 1)
+		}
+
+		// Log with full From/To values for debugging
+		if from == "" || to == "" {
+			logger.Warn("New call created with empty From/To",
+				"call_id", SanitizeCallIDForLogging(sip.CallId),
+				"from_uri", sip.FromUri,
+				"from_user", sip.FromUser,
+				"to_uri", sip.ToUri,
+				"to_user", sip.ToUser,
+				"method", sip.Method,
+				"hunter", hunterID)
+		} else {
+			logger.Debug("New call detected",
+				"call_id", SanitizeCallIDForLogging(sip.CallId),
+				"from", from,
+				"to", to,
+				"method", sip.Method,
+				"hunter", hunterID)
+		}
 	} else {
+		ca.callsDirty = true // Invalidate cache on mutation
 		// Move existing call to front (most recently used)
 		if elem, ok := ca.lruIndex[sip.CallId]; ok {
 			ca.lruList.MoveToFront(elem)
@@ -285,15 +378,19 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 
 		if call.From == "" && from != "" {
 			call.From = from
-			logger.Debug("Updated call From from SIP packet",
-				"call_id", sip.CallId,
-				"from", from)
+			atomic.AddInt64(&callsUpdatedFrom, 1)
+			logger.Info("Updated call From from SIP packet",
+				"call_id", SanitizeCallIDForLogging(sip.CallId),
+				"from", from,
+				"method", sip.Method)
 		}
 		if call.To == "" && to != "" {
 			call.To = to
-			logger.Debug("Updated call To from SIP packet",
-				"call_id", sip.CallId,
-				"to", to)
+			atomic.AddInt64(&callsUpdatedTo, 1)
+			logger.Info("Updated call To from SIP packet",
+				"call_id", SanitizeCallIDForLogging(sip.CallId),
+				"to", to,
+				"method", sip.Method)
 		}
 	}
 
@@ -317,27 +414,67 @@ func (ca *CallAggregator) updateCallState(call *AggregatedCall, method string, r
 	switch method {
 	case "INVITE":
 		if call.State == CallStateNew {
-			call.State = CallStateRinging
+			call.State = CallStateTrying
 		}
 	case "ACK":
-		if call.State == CallStateRinging {
+		if call.State == CallStateTrying || call.State == CallStateRinging || call.State == CallStateProgress {
 			call.State = CallStateActive
 		}
 	case "BYE":
-		call.State = CallStateEnded
-		call.EndTime = timestamp // Use packet timestamp instead of time.Now()
+		// Transition to ENDING state with timewait instead of immediate ENDED.
+		// This allows trailing RTP packets to be captured after BYE.
+		// The call will transition to ENDED after the timewait period expires
+		// (checked by IsTimewaitExpired and CompleteTimewait methods).
+		// Don't transition from terminal states (Failed, Cancelled, Busy, Ended, Ending).
+		switch call.State {
+		case CallStateEnding, CallStateEnded, CallStateFailed, CallStateCancelled, CallStateBusy:
+			// Already in a terminal state, ignore BYE
+		default:
+			call.State = CallStateEnding
+			call.TimewaitStart = timestamp
+			call.EndTime = timestamp // EndTime is set when BYE is received
+		}
 	case "CANCEL":
-		call.State = CallStateFailed
-		call.EndTime = timestamp // Use packet timestamp instead of time.Now()
+		// Don't transition from terminal states
+		switch call.State {
+		case CallStateEnded, CallStateFailed, CallStateCancelled, CallStateBusy:
+			// Already in a terminal state, ignore CANCEL
+		default:
+			call.State = CallStateCancelled
+			call.EndTime = timestamp // Use packet timestamp instead of time.Now()
+		}
 	}
 
-	// Handle responses
+	// Handle provisional responses (1xx)
+	if responseCode == 180 {
+		// 180 Ringing - phone is actually ringing
+		if call.State == CallStateTrying {
+			call.State = CallStateRinging
+		}
+	} else if responseCode == 183 {
+		// 183 Session Progress - early media established
+		if call.State == CallStateTrying || call.State == CallStateRinging {
+			call.State = CallStateProgress
+		}
+	}
+
+	// Handle success responses (2xx)
 	if responseCode >= 200 && responseCode < 300 {
-		if call.State == CallStateRinging {
+		if call.State == CallStateTrying || call.State == CallStateRinging || call.State == CallStateProgress {
 			call.State = CallStateActive
 		}
+	} else if responseCode == 486 {
+		// 486 Busy Here - callee is busy
+		call.State = CallStateBusy
+		call.EndTime = timestamp
+	} else if responseCode == 487 {
+		// 487 Request Terminated - server's response to CANCEL
+		call.State = CallStateCancelled
+		call.EndTime = timestamp
 	} else if responseCode >= 400 {
+		// Other 4xx/5xx errors - store the code for display (e.g., "E:401", "E:503")
 		call.State = CallStateFailed
+		call.LastResponseCode = responseCode
 		call.EndTime = timestamp // Use packet timestamp instead of time.Now()
 	}
 
@@ -392,14 +529,16 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 			callState = CallStateRTPOnly
 		}
 
-		// For RTP-only calls, extract From/To from SIP metadata (contains IP:port pairs)
+		// Extract From/To from SIP metadata if available
+		// For RTP-only calls: contains IP:port pairs set by bridge.go
+		// For SIP-correlated calls: contains party info from CallTracker lookup
 		var from, to string
-		if isRTPOnly && sip != nil {
+		if sip != nil {
 			from = sip.FromUri
 			to = sip.ToUri
 		}
 
-		// Create a minimal call entry from RTP - SIP details will be filled in later if/when SIP arrives
+		// Create a minimal call entry from RTP
 		call = &AggregatedCall{
 			CallID:         callID,
 			State:          callState,
@@ -408,7 +547,6 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 			StartTime:      timestamp,
 			LastPacketTime: timestamp,
 			Hunters:        []string{hunterID},
-			// Note: For non-RTP-only calls, From/To will be empty until SIP packet arrives
 			// Note: RTPStats is intentionally not initialized here - will be done below
 		}
 
@@ -575,15 +713,6 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 	stats.MOS = calculateMOS(stats.PacketLoss, stats.Jitter)
 
 	call.PacketCount++
-
-	logger.Debug("Updated RTP stats",
-		"call_id", callID,
-		"codec", stats.Codec,
-		"total_packets", stats.TotalPackets,
-		"lost_packets", stats.LostPackets,
-		"packet_loss_pct", stats.PacketLoss,
-		"jitter_ms", stats.Jitter,
-		"mos", stats.MOS)
 }
 
 // GetCalls returns all tracked calls sorted by StartTime (chronological order).
@@ -621,14 +750,16 @@ func (ca *CallAggregator) GetCalls() []AggregatedCall {
 	return result
 }
 
-// GetActiveCalls returns only active calls (not ended or failed)
+// GetActiveCalls returns only active calls (not ended, failed, cancelled, or busy).
+// Note: Calls in ENDING state (BYE timewait) are included as they are still accepting packets.
 func (ca *CallAggregator) GetActiveCalls() []AggregatedCall {
 	ca.mu.RLock()
 	defer ca.mu.RUnlock()
 
 	calls := make([]AggregatedCall, 0)
 	for _, call := range ca.calls {
-		if call.State != CallStateEnded && call.State != CallStateFailed {
+		if call.State != CallStateEnded && call.State != CallStateFailed &&
+			call.State != CallStateCancelled && call.State != CallStateBusy {
 			// Create a deep copy to avoid race conditions
 			calls = append(calls, ca.deepCopyCall(call))
 		}
@@ -663,15 +794,17 @@ func (ca *CallAggregator) GetCallCount() int {
 // Caller must hold at least a read lock (ca.mu.RLock()).
 func (ca *CallAggregator) deepCopyCall(call *AggregatedCall) AggregatedCall {
 	callCopy := AggregatedCall{
-		CallID:         call.CallID,
-		From:           call.From,
-		To:             call.To,
-		State:          call.State,
-		StartTime:      call.StartTime,
-		EndTime:        call.EndTime,
-		LastPacketTime: call.LastPacketTime,
-		PacketCount:    call.PacketCount,
-		SIPMethod:      call.SIPMethod,
+		CallID:           call.CallID,
+		From:             call.From,
+		To:               call.To,
+		State:            call.State,
+		LastResponseCode: call.LastResponseCode,
+		StartTime:        call.StartTime,
+		EndTime:          call.EndTime,
+		LastPacketTime:   call.LastPacketTime,
+		TimewaitStart:    call.TimewaitStart,
+		PacketCount:      call.PacketCount,
+		SIPMethod:        call.SIPMethod,
 	}
 
 	// Deep copy pointer fields (RTPStats)
@@ -689,6 +822,13 @@ func (ca *CallAggregator) deepCopyCall(call *AggregatedCall) AggregatedCall {
 	return callCopy
 }
 
+// TriggerMerge is a public method to trigger merging of an RTP-only call into a real SIP call.
+// This is called by the TUI's TCP reassembly handler when SIP with SDP is detected
+// and an existing RTP-only call is found for that endpoint.
+func (ca *CallAggregator) TriggerMerge(syntheticCallID, realCallID string) {
+	ca.mergeRTPOnlyCall(syntheticCallID, realCallID)
+}
+
 // mergeRTPOnlyCall merges data from an RTP-only (synthetic) call into a real SIP call.
 // This is called when SIP signaling arrives for an endpoint that was already
 // tracked as an RTP-only stream. The RTP stats, packet counts, and timing from
@@ -697,6 +837,8 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 	if syntheticCallID == "" || realCallID == "" || syntheticCallID == realCallID {
 		return
 	}
+
+	atomic.AddInt64(&mergeAttempts, 1)
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
@@ -709,16 +851,45 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 			"real_call_id", realCallID)
 		return
 	}
+	atomic.AddInt64(&mergeSyntheticFound, 1)
 
 	// Get or create the real call
 	realCall, realExists := ca.calls[realCallID]
 	if !realExists {
-		// Real call doesn't exist yet - this shouldn't happen normally
-		// since processSIPPacket is called after merge, but handle it gracefully
-		logger.Debug("Real call not found during merge, synthetic data will be lost",
+		// Real call doesn't exist yet - this happens for late-offer calls where
+		// 200 OK (response) arrives with SDP but INVITE was missed or had no SDP.
+		// Instead of losing the data, rename the synthetic call to the real CallID.
+		logger.Debug("Real call not found during merge, renaming synthetic call",
 			"synthetic_call_id", syntheticCallID,
 			"real_call_id", realCallID)
+
+		// Rename the synthetic call to use the real CallID
+		syntheticCall.CallID = realCallID
+
+		// Update state from RTP-only to Active since we now have SIP correlation
+		if syntheticCall.State == CallStateRTPOnly {
+			syntheticCall.State = CallStateActive
+		}
+
+		// Update maps: remove old key, add new key
+		delete(ca.calls, syntheticCallID)
+		ca.calls[realCallID] = syntheticCall
+
+		// Update LRU index
+		if elem, ok := ca.lruIndex[syntheticCallID]; ok {
+			elem.Value = realCallID // Update the value in the list element
+			delete(ca.lruIndex, syntheticCallID)
+			ca.lruIndex[realCallID] = elem
+		}
+
+		atomic.AddInt64(&mergeSuccess, 1)
+		logger.Info("Renamed RTP-only call to SIP call (late-offer)",
+			"synthetic_call_id", syntheticCallID,
+			"real_call_id", realCallID,
+			"packets", syntheticCall.PacketCount)
+		return // Already handled, don't delete below
 	} else {
+		atomic.AddInt64(&mergeRealFound, 1)
 		// Merge data from synthetic to real call
 		// Use earlier start time
 		if syntheticCall.StartTime.Before(realCall.StartTime) {
@@ -752,6 +923,7 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 			}
 		}
 
+		atomic.AddInt64(&mergeSuccess, 1)
 		logger.Info("Merged RTP-only call into SIP call",
 			"synthetic_call_id", syntheticCallID,
 			"real_call_id", realCallID,
@@ -771,6 +943,119 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 // This function is kept for API compatibility but does not expire calls based on time
 func (ca *CallAggregator) CleanupEndedCalls(maxAge time.Duration) int {
 	return 0
+}
+
+// SetBYETimewait sets the timewait duration for calls after BYE is received.
+// This allows trailing RTP packets to be captured before the call fully ends.
+func (ca *CallAggregator) SetBYETimewait(d time.Duration) {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	ca.byeTimewait = d
+}
+
+// GetBYETimewait returns the current BYE timewait duration.
+func (ca *CallAggregator) GetBYETimewait() time.Duration {
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+	return ca.byeTimewait
+}
+
+// IsTimewaitExpired checks if a call in ENDING state has completed its timewait period.
+// Returns false if the call is not in ENDING state or timewait has not expired.
+func (ca *CallAggregator) IsTimewaitExpired(callID string) bool {
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+
+	call, exists := ca.calls[callID]
+	if !exists {
+		return false
+	}
+
+	if call.State != CallStateEnding {
+		return false
+	}
+
+	// Check if timewait has expired
+	return time.Since(call.TimewaitStart) >= ca.byeTimewait
+}
+
+// CompleteTimewait transitions a call from ENDING to ENDED state if timewait has expired.
+// Returns true if the transition was made, false otherwise.
+func (ca *CallAggregator) CompleteTimewait(callID string) bool {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+
+	call, exists := ca.calls[callID]
+	if !exists {
+		return false
+	}
+
+	if call.State != CallStateEnding {
+		return false
+	}
+
+	// Check if timewait has expired
+	if time.Since(call.TimewaitStart) < ca.byeTimewait {
+		return false
+	}
+
+	// Transition to ENDED
+	oldState := call.State
+	call.State = CallStateEnded
+	ca.callsDirty = true
+
+	logger.Info("Call timewait completed",
+		"call_id", callID,
+		"from_state", oldState.String(),
+		"to_state", call.State.String(),
+		"timewait_duration", time.Since(call.TimewaitStart))
+
+	return true
+}
+
+// GetEndingCalls returns a list of call IDs that are in ENDING state (BYE timewait).
+// This is useful for monitoring and completing timewait periods.
+func (ca *CallAggregator) GetEndingCalls() []string {
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
+
+	var callIDs []string
+	for callID, call := range ca.calls {
+		if call.State == CallStateEnding {
+			callIDs = append(callIDs, callID)
+		}
+	}
+	return callIDs
+}
+
+// ProcessTimewaitExpiry checks all calls in ENDING state and transitions
+// those with expired timewait to ENDED state. Returns the number of calls transitioned.
+func (ca *CallAggregator) ProcessTimewaitExpiry() int {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+
+	count := 0
+	for callID, call := range ca.calls {
+		if call.State != CallStateEnding {
+			continue
+		}
+
+		// Check if timewait has expired
+		if time.Since(call.TimewaitStart) >= ca.byeTimewait {
+			oldState := call.State
+			call.State = CallStateEnded
+			ca.callsDirty = true
+			count++
+
+			logger.Info("Call timewait completed (batch)",
+				"call_id", callID,
+				"from_state", oldState.String(),
+				"to_state", call.State.String(),
+				"timewait_duration", time.Since(call.TimewaitStart))
+		}
+	}
+
+	return count
 }
 
 // contains checks if a slice contains a string

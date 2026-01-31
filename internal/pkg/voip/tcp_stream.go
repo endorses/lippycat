@@ -25,10 +25,12 @@ type SIPMessageHandler interface {
 	// Parameters:
 	//   - sipMessage: complete SIP message bytes (headers + body)
 	//   - callID: extracted Call-ID from message headers
-	//   - flow: network flow identifier (for associating with buffered TCP packets)
+	//   - srcEndpoint: source IP:port (e.g., "192.168.1.1:5060")
+	//   - dstEndpoint: destination IP:port (e.g., "192.168.1.2:5060")
+	//   - netFlow: network layer flow (IP addresses only) - used for TCP packet buffer lookup
 	// Returns:
 	//   - bool: true if message was accepted/matched filter (for metrics)
-	HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool
+	HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool
 }
 
 // bufferedSIPStream implements tcpassembly.Stream with a buffered channel.
@@ -46,12 +48,18 @@ type bufferedSIPStream struct {
 	cancel         context.CancelFunc
 	factory        *sipStreamFactory
 	callIDDetector *CallIDDetector
-	flow           gopacket.Flow
+	netFlow        gopacket.Flow // Network layer flow (IP addresses)
+	transportFlow  gopacket.Flow // Transport layer flow (ports)
 	createdAt      time.Time
 	processedBytes int64
 	processedMsgs  int64
 	closed         int32 // atomic flag
 	discard        int32 // atomic flag - set when stream is determined to be non-SIP
+
+	// State-based timeout support (Phase 3)
+	state     TCPState      // Current TCP state
+	stateMu   sync.Mutex    // Protects state field
+	stateChan chan TCPState // Channel to notify timeout goroutine of state changes
 }
 
 // Buffer size for reassembled data chunks.
@@ -60,7 +68,9 @@ const streamBufferSize = 64
 
 // newBufferedSIPStream creates a new buffered stream that implements tcpassembly.Stream.
 // The stream immediately starts a processing goroutine.
-func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, detector *CallIDDetector, flow gopacket.Flow) *bufferedSIPStream {
+// Both netFlow (IP addresses) and transportFlow (ports) are needed to construct
+// proper IP:port endpoints for the SIP message handler.
+func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, detector *CallIDDetector, netFlow, transportFlow gopacket.Flow) *bufferedSIPStream {
 	ctx, cancel := context.WithCancel(parentCtx)
 	s := &bufferedSIPStream{
 		dataChan:       make(chan []byte, streamBufferSize),
@@ -68,9 +78,17 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 		cancel:         cancel,
 		factory:        factory,
 		callIDDetector: detector,
-		flow:           flow,
+		netFlow:        netFlow,
+		transportFlow:  transportFlow,
 		createdAt:      time.Now(),
+		state:          TCPStateOpening,
 	}
+
+	// Create state change channel if state-based timeouts are enabled
+	if factory != nil && factory.config != nil && factory.config.EnableStateTCPTimeouts {
+		s.stateChan = make(chan TCPState, 1)
+	}
+
 	// Start processing goroutine immediately
 	go s.processLoop()
 	return s
@@ -80,6 +98,9 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 // Called by the assembler when TCP data is reassembled.
 // NEVER BLOCKS - uses non-blocking send to buffered channel.
 func (s *bufferedSIPStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
+	// Count ALL Reassembled() calls immediately (before any early returns)
+	IncrementReassembledCalls()
+
 	// Check discard flag first - once we know it's not SIP, stop buffering entirely
 	if atomic.LoadInt32(&s.discard) != 0 {
 		return
@@ -89,10 +110,14 @@ func (s *bufferedSIPStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
 		return
 	}
 
+	// Track whether this call had any data
+	hadData := false
+
 	for _, r := range reassemblies {
 		if len(r.Bytes) == 0 {
 			continue
 		}
+		hadData = true
 		// Copy the data since reassembly buffers may be reused
 		data := make([]byte, len(r.Bytes))
 		copy(data, r.Bytes)
@@ -102,10 +127,24 @@ func (s *bufferedSIPStream) Reassembled(reassemblies []tcpassembly.Reassembly) {
 		select {
 		case s.dataChan <- data:
 			// Successfully queued
+			logger.Debug("TCP data queued to stream",
+				"bytes", len(data),
+				"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
 		default:
 			// Buffer full - drop this chunk (log at debug level to avoid spam)
+			IncrementReassembledDataDropped()
 			logger.Debug("TCP stream buffer full, dropping data", "bytes", len(data))
 		}
+	}
+
+	// Track Reassembled() calls with/without data
+	if hadData {
+		IncrementReassembledWithData()
+		logger.Debug("TCP Reassembled with data",
+			"reassembly_count", len(reassemblies),
+			"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
+	} else {
+		IncrementReassembledEmptyData()
 	}
 }
 
@@ -119,7 +158,8 @@ func (s *bufferedSIPStream) ReassemblyComplete() {
 
 // processLoop reads from the buffered channel and processes SIP messages.
 func (s *bufferedSIPStream) processLoop() {
-	logger.Debug("SIP stream starting", "flow", s.flow.String())
+	srcEndpoint, dstEndpoint := s.getEndpoints()
+	logger.Debug("SIP stream starting", "flow", srcEndpoint+"->"+dstEndpoint)
 
 	defer func() {
 		// Decrement goroutine counter
@@ -159,32 +199,111 @@ func (s *bufferedSIPStream) processLoop() {
 	// Create a pipe to convert channel data to io.Reader
 	pipeReader, pipeWriter := io.Pipe()
 
-	// Goroutine to pump data from channel to pipe
+	// Determine if state-based timeouts are enabled
+	stateTimeoutsEnabled := s.factory != nil && s.factory.config != nil && s.factory.config.EnableStateTCPTimeouts
+
+	// Goroutine to pump data from channel to pipe with state-based timeouts
 	go func() {
 		defer pipeWriter.Close()
-		// Timeout for initial data - non-SIP streams send nothing useful
-		initialTimer := time.NewTimer(initialReadTimeout)
-		defer initialTimer.Stop()
+
+		// Start with short initial timeout for quick rejection of non-SIP traffic
+		// After first valid data, switch to state-based or configured timeout
+		timer := time.NewTimer(initialReadTimeout)
+		defer timer.Stop()
+
 		gotData := false
+		currentState := TCPStateOpening
 
 		for {
-			select {
-			case <-s.ctx.Done():
-				return
-			case data, ok := <-s.dataChan:
-				if !ok {
-					return // Channel closed
-				}
-				gotData = true
-				if _, err := pipeWriter.Write(data); err != nil {
+			// Build select based on whether state channel exists
+			if s.stateChan != nil {
+				select {
+				case <-s.ctx.Done():
 					return
-				}
-			case <-initialTimer.C:
-				if !gotData {
-					// No data received in initial timeout - likely not SIP
-					logger.Debug("Read timeout, closing stream")
+				case newState := <-s.stateChan:
+					// State changed - update timeout
+					currentState = newState
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(s.getTimeoutForState(currentState))
+					logger.Debug("TCP state changed, timeout updated",
+						"state", currentState,
+						"timeout", s.getTimeoutForState(currentState))
+				case data, ok := <-s.dataChan:
+					if !ok {
+						return // Channel closed
+					}
+					gotData = true
+					// Reset timer on data activity
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					// Transition to ESTABLISHED after first data if state-based timeouts enabled
+					if stateTimeoutsEnabled && currentState == TCPStateOpening {
+						currentState = TCPStateEstablished
+						s.stateMu.Lock()
+						s.state = TCPStateEstablished
+						s.stateMu.Unlock()
+					}
+					timer.Reset(s.getTimeoutForState(currentState))
+
+					if _, err := pipeWriter.Write(data); err != nil {
+						return
+					}
+				case <-timer.C:
+					if !gotData {
+						// No data received in initial timeout - likely not SIP
+						logger.Debug("Read timeout, closing stream (no data)")
+						pipeWriter.CloseWithError(errReadTimeout)
+						return
+					}
+
+					// Call-aware timeout: if the call is still active, extend timeout
+					if s.isAssociatedCallActive() {
+						logger.Debug("Timeout but call still active, extending timeout",
+							"state", currentState,
+							"timeout", s.getTimeoutForState(currentState))
+						timer.Reset(s.getTimeoutForState(currentState))
+						continue
+					}
+
+					// Timeout with established connection - close stream
+					logger.Debug("Read timeout, closing stream",
+						"state", currentState,
+						"timeout", s.getTimeoutForState(currentState))
 					pipeWriter.CloseWithError(errReadTimeout)
 					return
+				}
+			} else {
+				// Original behavior when state-based timeouts are disabled
+				select {
+				case <-s.ctx.Done():
+					return
+				case data, ok := <-s.dataChan:
+					if !ok {
+						return // Channel closed
+					}
+					gotData = true
+					if _, err := pipeWriter.Write(data); err != nil {
+						return
+					}
+				case <-timer.C:
+					if !gotData {
+						// No data received in initial timeout - likely not SIP
+						logger.Debug("Read timeout, closing stream")
+						pipeWriter.CloseWithError(errReadTimeout)
+						return
+					}
+					// After initial data, disable timer (original behavior)
+					// Reset to a very long timeout (effectively disabled)
+					timer.Reset(24 * time.Hour)
 				}
 			}
 		}
@@ -210,10 +329,12 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 			if errors.Is(err, errNotSIP) {
 				// Set discard flag so Reassembled() stops buffering data immediately
 				atomic.StoreInt32(&s.discard, 1)
+				IncrementNonSIPRejection()
 				logger.Debug("Non-SIP data detected, closing stream")
 			} else if errors.Is(err, errReadTimeout) {
 				// Also discard on timeout - no point buffering if nothing is being processed
 				atomic.StoreInt32(&s.discard, 1)
+				IncrementStreamTimeout()
 				logger.Debug("Read timeout, closing stream")
 			} else if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) && s.ctx.Err() == nil {
 				logger.Debug("Error reading SIP message", "error", err)
@@ -271,8 +392,13 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 		}
 
 		if firstLine {
-			firstLine = false
 			trimmedLine := strings.TrimRight(line, "\r\n")
+			// Skip empty lines (SIP keepalives) - RFC 5626 defines CRLF keepalives
+			// These can appear before real SIP messages on persistent connections
+			if trimmedLine == "" {
+				continue // Don't update firstLine, keep waiting for real SIP message
+			}
+			firstLine = false
 			if !isSIPRequestLine(trimmedLine) && !isSIPResponseLine(trimmedLine) {
 				return nil, errNotSIP
 			}
@@ -319,6 +445,85 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 	return messageBytes, nil
 }
 
+// getEndpoints constructs IP:port endpoint strings from the network and transport flows
+func (s *bufferedSIPStream) getEndpoints() (srcEndpoint, dstEndpoint string) {
+	srcEndpoint = fmt.Sprintf("%s:%s", s.netFlow.Src().String(), s.transportFlow.Src().String())
+	dstEndpoint = fmt.Sprintf("%s:%s", s.netFlow.Dst().String(), s.transportFlow.Dst().String())
+	return
+}
+
+// SetState updates the TCP connection state for state-based timeouts.
+func (s *bufferedSIPStream) SetState(newState TCPState) {
+	if s.stateChan == nil {
+		return // State-based timeouts not enabled
+	}
+
+	s.stateMu.Lock()
+	if s.state == newState {
+		s.stateMu.Unlock()
+		return // No change
+	}
+	s.state = newState
+	s.stateMu.Unlock()
+
+	// Notify timeout goroutine of state change (non-blocking)
+	select {
+	case s.stateChan <- newState:
+	default:
+	}
+}
+
+// getTimeoutForState returns the appropriate timeout for the given TCP state.
+func (s *bufferedSIPStream) getTimeoutForState(state TCPState) time.Duration {
+	if s.factory == nil || s.factory.config == nil || !s.factory.config.EnableStateTCPTimeouts {
+		// Fall back to configured idle timeout or default
+		if s.factory != nil && s.factory.config != nil && s.factory.config.TCPSIPIdleTimeout > 0 {
+			return s.factory.config.TCPSIPIdleTimeout
+		}
+		return defaultReadTimeout
+	}
+
+	config := s.factory.config
+	switch state {
+	case TCPStateOpening:
+		return config.TCPOpeningTimeout
+	case TCPStateEstablished:
+		return config.TCPEstablishedTimeout
+	case TCPStateClosing:
+		return config.TCPClosingTimeout
+	default:
+		return defaultReadTimeout
+	}
+}
+
+// isAssociatedCallActive checks if the call associated with this stream is still active.
+// Returns true if the call is active and the stream should remain open, false otherwise.
+// Used for call-aware adaptive timeout (Phase 3.2).
+func (s *bufferedSIPStream) isAssociatedCallActive() bool {
+	// Check if call-aware timeout is enabled
+	if s.factory == nil || s.factory.config == nil || !s.factory.config.EnableCallAwareTimeout {
+		return false
+	}
+
+	// Get the Call-ID from the detector
+	if s.callIDDetector == nil {
+		return false
+	}
+
+	// Check if Call-ID has been detected (non-blocking)
+	s.callIDDetector.mu.Lock()
+	callID := s.callIDDetector.callID
+	hasCallID := s.callIDDetector.set
+	s.callIDDetector.mu.Unlock()
+
+	if !hasCallID || callID == "" {
+		return false
+	}
+
+	// Check if the call is still active
+	return IsCallActive(callID)
+}
+
 // processSipMessage processes a complete SIP message (shared with bufferedSIPStream)
 func (s *bufferedSIPStream) processSipMessage(sipMessage []byte) {
 	lines := bytes.Split(sipMessage, []byte("\n"))
@@ -331,12 +536,16 @@ func (s *bufferedSIPStream) processSipMessage(sipMessage []byte) {
 	}
 
 	if callID != "" {
+		// Increment SIP messages detected counter (voip package)
+		IncrementSIPMessagesDetected()
+
 		if s.callIDDetector != nil {
 			s.callIDDetector.SetCallID(callID)
 		}
 
 		if s.factory != nil && s.factory.handler != nil {
-			s.factory.handler.HandleSIPMessage(sipMessage, callID, s.flow)
+			srcEndpoint, dstEndpoint := s.getEndpoints()
+			s.factory.handler.HandleSIPMessage(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow)
 		}
 	}
 }
@@ -441,7 +650,8 @@ type SIPStream struct {
 	callIDDetector *CallIDDetector
 	ctx            context.Context
 	factory        *sipStreamFactory
-	flow           gopacket.Flow
+	netFlow        gopacket.Flow // Network layer flow (IP addresses)
+	transportFlow  gopacket.Flow // Transport layer flow (ports)
 	createdAt      time.Time
 	processedBytes int64
 	processedMsgs  int64
@@ -452,16 +662,35 @@ type SIPStream struct {
 // This indicates the TCP connection has stalled mid-message.
 var errReadTimeout = errors.New("read timeout: no data received")
 
+// TCPState represents the state of a TCP SIP connection for timeout purposes.
+// Used when EnableStateTCPTimeouts is enabled.
+type TCPState int
+
+const (
+	// TCPStateOpening indicates a new connection that hasn't seen valid SIP data yet.
+	// Uses TCPOpeningTimeout (default: 5 minutes).
+	TCPStateOpening TCPState = iota
+
+	// TCPStateEstablished indicates a connection with validated SIP traffic.
+	// Uses TCPEstablishedTimeout (default: 30 minutes).
+	TCPStateEstablished
+
+	// TCPStateClosing indicates a connection that has received FIN/RST or is shutting down.
+	// Uses TCPClosingTimeout (default: 5 minutes).
+	TCPStateClosing
+)
+
 // Initial timeout for first data on a new TCP stream.
 // SIP sends data immediately after connection - if nothing arrives quickly,
 // it's likely not SIP traffic. This prevents non-SIP connections from
 // holding goroutines for extended periods.
 const initialReadTimeout = 2 * time.Second
 
-// Default read timeout for TCP streams - time to wait for next data chunk
-// after initial data has been received. This catches stalled connections
-// mid-message while allowing idle time between messages.
-const defaultReadTimeout = 10 * time.Second
+// defaultReadTimeout is the fallback read timeout for TCP streams if not configured.
+// Set to 120 seconds to align with RFC 5626 CRLF keep-alive interval (95-120 seconds).
+// This allows SIP persistent connections to survive keep-alive intervals during long calls.
+// This value can be overridden via --tcp-sip-idle-timeout flag or voip.tcp_sip_idle_timeout config.
+const defaultReadTimeout = 120 * time.Second
 
 // safeReader wraps a tcpreader.ReaderStream to provide interruptible reads
 // without data races. The tcpreader package's Close() method races with Read(),
@@ -471,6 +700,11 @@ const defaultReadTimeout = 10 * time.Second
 //
 // The safeReader includes a watchdog that enforces read timeouts - if no data
 // is received within the timeout period, the pipe is closed to unblock consumers.
+//
+// When EnableStateTCPTimeouts is enabled, the watchdog uses state-based timeouts:
+// - OPENING: Short timeout for connections without valid SIP data
+// - ESTABLISHED: Long timeout for validated SIP connections
+// - CLOSING: Moderate timeout for connections being torn down
 type safeReader struct {
 	pipeReader  *io.PipeReader
 	pipeWriter  *io.PipeWriter
@@ -480,12 +714,30 @@ type safeReader struct {
 	copyDone    chan struct{}
 	closeOnce   sync.Once
 	readTimeout time.Duration
+
+	// State-based timeout support (Phase 3)
+	config    *Config
+	state     TCPState      // Current TCP state
+	stateMu   sync.Mutex    // Protects state field
+	stateChan chan TCPState // Channel to notify watchdog of state changes
+
+	// Call-aware timeout support (Phase 3.2)
+	callIDDetector *CallIDDetector // Reference for checking if call is active
 }
 
 // newSafeReader creates a safe reader wrapper with optional ready signaling.
 // If readySignal is non-nil, it will be closed just before the first Read() call,
 // allowing the caller to wait until the reader is actively listening.
 func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTimeout time.Duration, readySignal chan<- struct{}) *safeReader {
+	return newSafeReaderWithConfig(reader, ctx, readTimeout, readySignal, nil, nil)
+}
+
+// newSafeReaderWithConfig creates a safe reader wrapper with config for state-based timeouts.
+// When config is provided and EnableStateTCPTimeouts is true, the watchdog will use
+// different timeouts based on connection state (OPENING, ESTABLISHED, CLOSING).
+// When callIDDetector is provided and EnableCallAwareTimeout is true, the watchdog will
+// keep connections open as long as the associated call is still active.
+func newSafeReaderWithConfig(reader *tcpreader.ReaderStream, ctx context.Context, readTimeout time.Duration, readySignal chan<- struct{}, config *Config, callIDDetector *CallIDDetector) *safeReader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -494,13 +746,21 @@ func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTime
 	}
 
 	sr := &safeReader{
-		pipeReader:  pipeReader,
-		pipeWriter:  pipeWriter,
-		bufReader:   bufio.NewReader(pipeReader),
-		ctx:         ctx,
-		cancel:      cancel,
-		copyDone:    make(chan struct{}),
-		readTimeout: readTimeout,
+		pipeReader:     pipeReader,
+		pipeWriter:     pipeWriter,
+		bufReader:      bufio.NewReader(pipeReader),
+		ctx:            ctx,
+		cancel:         cancel,
+		copyDone:       make(chan struct{}),
+		readTimeout:    readTimeout,
+		config:         config,
+		state:          TCPStateOpening, // Start in OPENING state
+		callIDDetector: callIDDetector,
+	}
+
+	// Create state change channel if state-based timeouts are enabled
+	if config != nil && config.EnableStateTCPTimeouts {
+		sr.stateChan = make(chan TCPState, 1)
 	}
 
 	// Channel to signal data activity from copy goroutine to watchdog
@@ -518,38 +778,107 @@ func newSafeReader(reader *tcpreader.ReaderStream, ctx context.Context, readTime
 // watchdog monitors for read activity and closes the pipe if idle too long.
 // This catches stalled TCP connections that stop sending data mid-message.
 //
-// Uses a two-phase timeout strategy:
+// Uses a multi-phase timeout strategy:
 // 1. Initial phase: Short timeout (2s) - SIP sends data immediately, non-SIP doesn't
-// 2. Active phase: Longer timeout (10s) - allows gaps between SIP messages
+// 2. Active phase: Longer timeout based on configuration
+//
+// When EnableStateTCPTimeouts is enabled, the watchdog also listens for state changes
+// and adjusts the timeout accordingly:
+// - OPENING: TCPOpeningTimeout (default: 5 minutes)
+// - ESTABLISHED: TCPEstablishedTimeout (default: 30 minutes)
+// - CLOSING: TCPClosingTimeout (default: 5 minutes)
 func (sr *safeReader) watchdog(activity <-chan struct{}) {
 	// Start with short initial timeout - non-SIP connections get closed quickly
 	timer := time.NewTimer(initialReadTimeout)
 	defer timer.Stop()
 
 	firstActivity := true
+	currentState := TCPStateOpening
 
 	for {
-		select {
-		case <-sr.ctx.Done():
-			return
-		case <-activity:
-			// Reset timer on activity
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
+		// Build select cases dynamically based on whether state channel exists
+		if sr.stateChan != nil {
+			select {
+			case <-sr.ctx.Done():
+				return
+			case newState := <-sr.stateChan:
+				// State changed - update timeout
+				currentState = newState
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
+				timer.Reset(sr.getTimeoutForState(currentState))
+				logger.Debug("TCP state changed, timeout updated",
+					"state", currentState,
+					"timeout", sr.getTimeoutForState(currentState))
+			case <-activity:
+				// Reset timer on activity
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				// After first activity, switch to state-based or configured timeout
+				if firstActivity {
+					firstActivity = false
+					// Transition to ESTABLISHED on first valid data if state-based timeouts enabled
+					if sr.config != nil && sr.config.EnableStateTCPTimeouts {
+						currentState = TCPStateEstablished
+						sr.stateMu.Lock()
+						sr.state = TCPStateEstablished
+						sr.stateMu.Unlock()
+					}
+				}
+				timer.Reset(sr.getTimeoutForState(currentState))
+			case <-timer.C:
+				// Call-aware timeout: if the call is still active, extend timeout
+				if sr.isAssociatedCallActive() {
+					logger.Debug("Timeout but call still active, extending timeout",
+						"state", currentState,
+						"timeout", sr.getTimeoutForState(currentState))
+					timer.Reset(sr.getTimeoutForState(currentState))
+					continue
+				}
+				// Timeout - close pipe to unblock any pending reads
+				sr.pipeWriter.CloseWithError(errReadTimeout)
+				sr.cancel()
+				return
 			}
-			// After first activity, switch to longer timeout for subsequent reads
-			if firstActivity {
-				firstActivity = false
+		} else {
+			// Original behavior when state-based timeouts are disabled
+			select {
+			case <-sr.ctx.Done():
+				return
+			case <-activity:
+				// Reset timer on activity
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				// After first activity, switch to longer timeout for subsequent reads
+				if firstActivity {
+					firstActivity = false
+				}
+				timer.Reset(sr.readTimeout)
+			case <-timer.C:
+				// Call-aware timeout: if the call is still active, extend timeout
+				if sr.isAssociatedCallActive() {
+					logger.Debug("Timeout but call still active, extending timeout",
+						"timeout", sr.readTimeout)
+					timer.Reset(sr.readTimeout)
+					continue
+				}
+				// Timeout - close pipe to unblock any pending reads
+				sr.pipeWriter.CloseWithError(errReadTimeout)
+				sr.cancel()
+				return
 			}
-			timer.Reset(sr.readTimeout)
-		case <-timer.C:
-			// Timeout - close pipe to unblock any pending reads
-			sr.pipeWriter.CloseWithError(errReadTimeout)
-			sr.cancel()
-			return
 		}
 	}
 }
@@ -613,6 +942,75 @@ func (sr *safeReader) shouldStop() bool {
 	return sr.ctx.Err() != nil
 }
 
+// SetState updates the TCP connection state for state-based timeouts.
+// This triggers the watchdog to adjust its timeout accordingly.
+func (sr *safeReader) SetState(newState TCPState) {
+	if sr.stateChan == nil {
+		return // State-based timeouts not enabled
+	}
+
+	sr.stateMu.Lock()
+	if sr.state == newState {
+		sr.stateMu.Unlock()
+		return // No change
+	}
+	sr.state = newState
+	sr.stateMu.Unlock()
+
+	// Notify watchdog of state change (non-blocking)
+	select {
+	case sr.stateChan <- newState:
+	default:
+		// Watchdog will pick up latest state on next check
+	}
+}
+
+// getTimeoutForState returns the appropriate timeout for the given TCP state.
+func (sr *safeReader) getTimeoutForState(state TCPState) time.Duration {
+	if sr.config == nil || !sr.config.EnableStateTCPTimeouts {
+		return sr.readTimeout // Fall back to configured timeout
+	}
+
+	switch state {
+	case TCPStateOpening:
+		return sr.config.TCPOpeningTimeout
+	case TCPStateEstablished:
+		return sr.config.TCPEstablishedTimeout
+	case TCPStateClosing:
+		return sr.config.TCPClosingTimeout
+	default:
+		return sr.readTimeout
+	}
+}
+
+// isAssociatedCallActive checks if the call associated with this stream is still active.
+// Returns true if the call is active and the stream should remain open, false otherwise.
+// Used for call-aware adaptive timeout (Phase 3.2).
+func (sr *safeReader) isAssociatedCallActive() bool {
+	// Check if call-aware timeout is enabled
+	if sr.config == nil || !sr.config.EnableCallAwareTimeout {
+		return false
+	}
+
+	// Get the Call-ID from the detector
+	if sr.callIDDetector == nil {
+		return false
+	}
+
+	// Check if Call-ID has been detected (non-blocking)
+	sr.callIDDetector.mu.Lock()
+	callID := sr.callIDDetector.callID
+	hasCallID := sr.callIDDetector.set
+	sr.callIDDetector.mu.Unlock()
+
+	if !hasCallID || callID == "" {
+		return false
+	}
+
+	// Check if the call is still active
+	return IsCallActive(callID)
+}
+
 // close shuts down the safe reader. The copy goroutine will exit when
 // its blocked read returns (either from data arrival or stream close).
 func (sr *safeReader) close() {
@@ -643,8 +1041,16 @@ func (sr *safeReader) ReadFull(buf []byte) (int, error) {
 	return io.ReadFull(sr.bufReader, buf)
 }
 
+// getEndpoints constructs IP:port endpoint strings from the network and transport flows
+func (s *SIPStream) getEndpoints() (srcEndpoint, dstEndpoint string) {
+	srcEndpoint = fmt.Sprintf("%s:%s", s.netFlow.Src().String(), s.transportFlow.Src().String())
+	dstEndpoint = fmt.Sprintf("%s:%s", s.netFlow.Dst().String(), s.transportFlow.Dst().String())
+	return
+}
+
 func (s *SIPStream) run() {
-	logger.Debug("SIP stream starting", "flow", s.flow.String())
+	srcEndpoint, dstEndpoint := s.getEndpoints()
+	logger.Debug("SIP stream starting", "flow", srcEndpoint+"->"+dstEndpoint)
 
 	// Create a safe reader wrapper that handles context cancellation and read timeouts.
 	// The wrapper performs reads in goroutines and uses channels for coordination,
@@ -652,7 +1058,20 @@ func (s *SIPStream) run() {
 	// The read timeout catches stalled connections that stop sending data mid-message.
 	// The readySignal is closed just before the first Read(), ensuring the unbuffered
 	// channel is being actively listened to before this function returns.
-	s.readerWrapper = newSafeReader(s.reader, s.ctx, defaultReadTimeout, s.readySignal)
+	//
+	// When EnableStateTCPTimeouts is true, the reader uses state-based timeouts:
+	// - OPENING: TCPOpeningTimeout (default: 5 min) for new connections
+	// - ESTABLISHED: TCPEstablishedTimeout (default: 30 min) for validated SIP
+	// - CLOSING: TCPClosingTimeout (default: 5 min) for teardown
+	readTimeout := defaultReadTimeout
+	var config *Config
+	if s.factory != nil && s.factory.config != nil {
+		config = s.factory.config
+		if config.TCPSIPIdleTimeout > 0 {
+			readTimeout = config.TCPSIPIdleTimeout
+		}
+	}
+	s.readerWrapper = newSafeReaderWithConfig(s.reader, s.ctx, readTimeout, s.readySignal, config, s.callIDDetector)
 
 	defer func() {
 		// Close the reader wrapper to clean up any pending read goroutines
@@ -723,10 +1142,12 @@ func (s *SIPStream) processSingle() {
 			// Don't log errors during context cancellation (normal shutdown)
 			// or for non-SIP traffic (expected when filtering)
 			if errors.Is(err, errNotSIP) {
+				IncrementNonSIPRejection()
 				logger.Debug("Non-SIP data detected, closing stream")
 				return
 			}
 			if errors.Is(err, errReadTimeout) {
+				IncrementStreamTimeout()
 				logger.Debug("Read timeout, closing stream")
 				return
 			}
@@ -789,6 +1210,7 @@ func (s *SIPStream) processBatched(batchSize int) {
 				// Don't log errors during context cancellation (normal shutdown)
 				// or for non-SIP traffic (expected when filtering)
 				if errors.Is(err, errNotSIP) {
+					IncrementNonSIPRejection()
 					logger.Debug("Non-SIP data detected, closing stream")
 					// Process any messages we have before exiting
 					for _, message := range batch.messages {
@@ -797,6 +1219,7 @@ func (s *SIPStream) processBatched(batchSize int) {
 					return
 				}
 				if errors.Is(err, errReadTimeout) {
+					IncrementStreamTimeout()
 					logger.Debug("Read timeout, closing stream")
 					// Process any messages we have before exiting
 					for _, message := range batch.messages {
@@ -911,8 +1334,13 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 		// Validate first line is a valid SIP request or response
 		// This prevents buffering non-SIP data (TLS, HTTP/2, binary protocols)
 		if firstLine {
-			firstLine = false
 			trimmedLine := strings.TrimRight(line, "\r\n")
+			// Skip empty lines (SIP keepalives) - RFC 5626 defines CRLF keepalives
+			// These can appear before real SIP messages on persistent connections
+			if trimmedLine == "" {
+				continue // Don't update firstLine, keep waiting for real SIP message
+			}
+			firstLine = false
 			if !isSIPRequestLine(trimmedLine) && !isSIPResponseLine(trimmedLine) {
 				return nil, errNotSIP
 			}
@@ -1081,6 +1509,9 @@ func (s *SIPStream) processSipMessage(sipMessage []byte) {
 	}
 
 	if callID != "" {
+		// Increment SIP messages detected counter (voip package)
+		IncrementSIPMessagesDetected()
+
 		// Notify the Call-ID detector
 		if s.callIDDetector != nil {
 			s.callIDDetector.SetCallID(callID)
@@ -1094,7 +1525,8 @@ func (s *SIPStream) processSipMessage(sipMessage []byte) {
 			"message_len", len(sipMessage))
 
 		if s.factory != nil && s.factory.handler != nil {
-			s.factory.handler.HandleSIPMessage(sipMessage, callID, s.flow)
+			srcEndpoint, dstEndpoint := s.getEndpoints()
+			s.factory.handler.HandleSIPMessage(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow)
 		} else {
 			logger.Warn("No handler available for SIP message",
 				"call_id", callID,
@@ -1104,13 +1536,14 @@ func (s *SIPStream) processSipMessage(sipMessage []byte) {
 }
 
 // Helper function to create SIP stream for factory
-func createSIPStream(reader *tcpreader.ReaderStream, detector *CallIDDetector, ctx context.Context, factory *sipStreamFactory, flow gopacket.Flow) *SIPStream {
+func createSIPStream(reader *tcpreader.ReaderStream, detector *CallIDDetector, ctx context.Context, factory *sipStreamFactory, netFlow, transportFlow gopacket.Flow) *SIPStream {
 	return &SIPStream{
 		reader:         reader,
 		callIDDetector: detector,
 		ctx:            ctx,
 		factory:        factory,
-		flow:           flow,
+		netFlow:        netFlow,
+		transportFlow:  transportFlow,
 		createdAt:      time.Now(),
 	}
 }

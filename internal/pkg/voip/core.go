@@ -23,6 +23,26 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		"device_count", len(devices),
 		"filter", filter)
 
+	// Initialize sniff completion monitor for PCAP file closure when writing is enabled
+	if viper.GetBool("writeVoip") {
+		gracePeriod := viper.GetDuration("voip.pcap_grace_period")
+		if gracePeriod <= 0 {
+			gracePeriod = 5 * time.Second
+		}
+		monitor := NewSniffCompletionMonitor(&SniffCompletionMonitorConfig{
+			GracePeriod:   gracePeriod,
+			CheckInterval: 1 * time.Second,
+		})
+		SetSniffCompletionMonitor(monitor)
+		monitor.Start()
+		defer func() {
+			monitor.Stop()
+			SetSniffCompletionMonitor(nil)
+		}()
+		logger.Info("Sniff completion monitor initialized",
+			"grace_period", gracePeriod)
+	}
+
 	// Initialize virtual interface FIRST if enabled (before processing any packets)
 	// This allows early permission check and avoids wasting time processing packets
 	if viper.GetBool("sniff.virtual_interface") {

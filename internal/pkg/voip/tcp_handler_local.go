@@ -15,11 +15,13 @@ func NewLocalFileHandler() *LocalFileHandler {
 }
 
 // HandleSIPMessage processes a complete SIP message for local file writing
-func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool {
+// srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
+// netFlow is used for TCP packet buffer lookup.
+func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool {
 	logger.Debug("TCP HandleSIPMessage called",
 		"call_id", SanitizeCallIDForLogging(callID),
 		"message_len", len(sipMessage),
-		"flow", flow.String())
+		"flow", srcEndpoint+"->"+dstEndpoint)
 
 	if callID == "" {
 		logger.Debug("Empty call-ID, skipping")
@@ -52,11 +54,11 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, fl
 		"call_id", SanitizeCallIDForLogging(callID))
 
 	// Now flush buffered TCP packets to file
-	flushTCPPacketsToCall(flow, callID, true)
+	flushTCPPacketsToCall(netFlow, callID, true)
 
 	logger.Info("TCP SIP message matched filter and written to file",
 		"call_id", SanitizeCallIDForLogging(callID),
-		"flow", flow.String())
+		"flow", srcEndpoint+"->"+dstEndpoint)
 
 	return true
 }

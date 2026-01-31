@@ -12,6 +12,22 @@ const (
 	DefaultRTPPortRangeEnd   = 32768
 )
 
+// IPFragmentClause is a BPF expression that matches IP fragments.
+// This is critical for capturing fragmented SIP packets (e.g., large INVITEs
+// with SDP bodies that exceed MTU). Without this clause, BPF filters like
+// "port 5060 or udp" will drop the second fragment of fragmented UDP packets
+// because subsequent fragments have no UDP header - only IP header with
+// fragment offset > 0. The BPF "udp" primitive checks Protocol=17 in IP header
+// but the port check requires a UDP header, causing "port X" to reject fragments.
+//
+// The expression (ip[6:2] & 0x1fff > 0) matches packets where:
+// - ip[6:2] reads the 16-bit flags/fragment offset field at IP header offset 6
+// - & 0x1fff masks out the flags bits, keeping only the 13-bit fragment offset
+// - > 0 matches any packet with non-zero fragment offset (i.e., not the first fragment)
+//
+// Combined with "udp", this also captures first fragments (which have MF=1, offset=0).
+const IPFragmentClause = "(ip[6:2] & 0x1fff > 0)"
+
 // PortRange represents a port range with start and end values
 type PortRange struct {
 	Start int
@@ -47,17 +63,29 @@ func DefaultRTPPortRange() PortRange {
 // 3. Build RTP port range filter (always UDP)
 // 4. Combine SIP and RTP with OR
 // 5. Apply UDP-only constraint if requested
-// 6. Combine with base filter if present
+// 6. Add IP fragment clause to capture fragmented SIP packets
+// 7. Combine with base filter if present
+//
+// IMPORTANT: All filters include the IP fragment clause (ip[6:2] & 0x1fff > 0) to
+// capture subsequent fragments of fragmented UDP packets. Without this, BPF filters
+// like "port 5060" or "udp" will drop the second fragment of large SIP packets because
+// subsequent fragments have no UDP header - only IP header with fragment offset > 0.
 func (b *VoIPFilterBuilder) Build(config VoIPFilterConfig) string {
 	// No VoIP-specific filtering requested
 	if len(config.SIPPorts) == 0 && len(config.RTPPortRanges) == 0 {
 		if config.UDPOnly {
 			if config.BaseFilter != "" {
-				return fmt.Sprintf("(%s) and udp", config.BaseFilter)
+				// Add fragment clause to capture fragmented UDP packets
+				return fmt.Sprintf("((%s) and udp) or %s", config.BaseFilter, IPFragmentClause)
 			}
-			return "udp"
+			// udp alone won't capture subsequent fragments - add fragment clause
+			return fmt.Sprintf("udp or %s", IPFragmentClause)
 		}
-		return config.BaseFilter
+		if config.BaseFilter != "" {
+			// Add fragment clause to base filter
+			return fmt.Sprintf("(%s) or %s", config.BaseFilter, IPFragmentClause)
+		}
+		return ""
 	}
 
 	var parts []string
@@ -100,7 +128,12 @@ func (b *VoIPFilterBuilder) Build(config VoIPFilterConfig) string {
 		voipFilter = fmt.Sprintf("udp and (%s)", voipFilter)
 	}
 
-	// 5. Combine with base filter if present
+	// 5. Add IP fragment clause to capture fragmented SIP packets
+	// This is critical for large SIP INVITEs that exceed MTU - the second fragment
+	// has no UDP header and would be dropped by port-based filters
+	voipFilter = fmt.Sprintf("(%s) or %s", voipFilter, IPFragmentClause)
+
+	// 6. Combine with base filter if present
 	if config.BaseFilter != "" {
 		return fmt.Sprintf("(%s) and (%s)", config.BaseFilter, voipFilter)
 	}

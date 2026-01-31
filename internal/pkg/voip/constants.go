@@ -31,6 +31,13 @@ const (
 	DefaultMaxTCPBuffers         = 10000             // Maximum number of TCP packet buffers
 	DefaultTCPStreamTimeout      = 600 * time.Second // Timeout for TCP stream processing
 	DefaultTCPAssemblerMaxPages  = 100               // Maximum pages for TCP assembler
+	DefaultTCPSIPIdleTimeout     = 120 * time.Second // Idle timeout for SIP TCP connections (RFC 5626)
+
+	// Phase 3: State-based TCP timeout defaults
+	// These are used when EnableStateTCPTimeouts is true
+	DefaultTCPOpeningTimeout     = 5 * time.Minute  // Timeout for connections that haven't seen SIP data yet
+	DefaultTCPEstablishedTimeout = 30 * time.Minute // Timeout for established connections with valid SIP
+	DefaultTCPClosingTimeout     = 5 * time.Minute  // Timeout for connections in closing state (FIN/RST seen)
 
 	// TCP Performance defaults
 	DefaultTCPPerformanceMode     = "balanced"        // Default performance mode

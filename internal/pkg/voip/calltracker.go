@@ -217,6 +217,11 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 				"call_id", SanitizeCallIDForLogging(c.CallID),
 				"method", newState,
 				"duration", now.Sub(c.Created))
+
+			// Schedule PCAP closure via sniff completion monitor (if active)
+			if monitor := getSniffCompletionMonitor(); monitor != nil {
+				monitor.ScheduleClose(c.CallID)
+			}
 		}
 	}
 }
@@ -232,6 +237,33 @@ func getCall(callID string) (*CallInfo, error) {
 	}
 
 	return result, nil
+}
+
+// IsCallActive checks if a call with the given Call-ID is currently active.
+// A call is considered active if it exists and has not received a BYE or CANCEL.
+// This is used by call-aware TCP timeouts to keep connections open for active calls.
+func IsCallActive(callID string) bool {
+	if callID == "" {
+		return false
+	}
+
+	tracker := getTracker()
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
+
+	call, exists := tracker.callMap[callID]
+	if !exists {
+		return false
+	}
+
+	// Call is active if EndTime is not set (no BYE/CANCEL received)
+	return call.EndTime == nil
+}
+
+// GetCallTracker returns the default call tracker instance.
+// Used for call-aware timeout checks in TCP streams.
+func GetCallTracker() *CallTracker {
+	return getTracker()
 }
 
 func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {

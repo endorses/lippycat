@@ -39,7 +39,9 @@ func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
 }
 
 // HandleSIPMessage processes a complete SIP message for hunter forwarding
-func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string, flow gopacket.Flow) bool {
+// srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
+// netFlow is used for TCP packet buffer lookup.
+func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool {
 	if callID == "" {
 		return false
 	}
@@ -67,7 +69,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 			}
 
 			// Get buffered TCP packets for this message
-			bufferedPackets := getTCPBufferedPackets(flow)
+			bufferedPackets := getTCPBufferedPackets(netFlow)
 
 			pbMetadata := &data.PacketMetadata{
 				Sip: &data.SIPMetadata{
@@ -100,19 +102,19 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 			return true
 		}
 		// Call not tracked, discard
-		discardTCPBufferedPackets(flow)
+		discardTCPBufferedPackets(netFlow)
 		return false
 	}
 
 	// Check if this call matches tracked users
 	// Use ApplicationFilter if available (supports phone_number, sip_user, etc.)
 	// Fall back to legacy containsUserInHeaders() if no ApplicationFilter is set
-	if !h.matchesFilter(flow, headers) {
+	if !h.matchesFilter(netFlow, headers) {
 		// Call doesn't match filter - discard buffered TCP packets
-		discardTCPBufferedPackets(flow)
+		discardTCPBufferedPackets(netFlow)
 		logger.Debug("TCP SIP call filtered out",
 			"call_id", SanitizeCallIDForLogging(callID),
-			"flow", flow.String())
+			"flow", srcEndpoint+"->"+dstEndpoint)
 		return false
 	}
 
@@ -130,7 +132,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	}
 
 	// Get buffered TCP packets
-	bufferedPackets := getTCPBufferedPackets(flow)
+	bufferedPackets := getTCPBufferedPackets(netFlow)
 
 	logger.Info("TCP SIP call matched filter, forwarding to processor",
 		"call_id", SanitizeCallIDForLogging(callID),
@@ -185,12 +187,12 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 // matchesFilter checks if a TCP SIP call matches any configured filter.
 // Uses ApplicationFilter if available (supports phone_number, sip_user, etc.)
 // Falls back to legacy containsUserInHeaders() if no ApplicationFilter is set.
-func (h *HunterForwardHandler) matchesFilter(flow gopacket.Flow, headers map[string]string) bool {
+func (h *HunterForwardHandler) matchesFilter(netFlow gopacket.Flow, headers map[string]string) bool {
 	// Use ApplicationFilter if available (Phase 2: proper multi-filter support)
 	if h.appFilter != nil {
 		// For TCP SIP, we need a packet to pass to ApplicationFilter.
 		// Use one of the buffered TCP packets if available.
-		bufferedPackets := getTCPBufferedPackets(flow)
+		bufferedPackets := getTCPBufferedPackets(netFlow)
 		if len(bufferedPackets) > 0 {
 			// Use the first buffered packet for filter matching
 			// The ApplicationFilter will extract SIP headers from the packet

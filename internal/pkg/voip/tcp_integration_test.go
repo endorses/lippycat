@@ -489,7 +489,7 @@ Content-Length: 0
 						netFlow := gopacket.NewFlow(layers.EndpointIPv4, ip.SrcIP, ip.DstIP)
 
 						// Buffer the packet using correct flow
-						bufferTCPPacket(netFlow, pktInfo)
+						BufferTCPPacket(netFlow, pktInfo)
 
 						// Handle through assembler as well
 						handleTcpPackets(pktInfo, tcp, assembler)

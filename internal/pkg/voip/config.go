@@ -35,6 +35,14 @@ type Config struct {
 	MaxTCPBuffers         int           `mapstructure:"max_tcp_buffers"`
 	TCPStreamTimeout      time.Duration `mapstructure:"tcp_stream_timeout"`
 	TCPAssemblerMaxPages  int           `mapstructure:"tcp_assembler_max_pages"`
+	TCPSIPIdleTimeout     time.Duration `mapstructure:"tcp_sip_idle_timeout"` // Idle timeout for SIP TCP connections
+
+	// Phase 3: State-based TCP timeout configurations
+	EnableStateTCPTimeouts bool          `mapstructure:"enable_state_tcp_timeouts"` // Enable state-based timeouts
+	TCPOpeningTimeout      time.Duration `mapstructure:"tcp_opening_timeout"`       // Timeout for OPENING state (no SIP yet)
+	TCPEstablishedTimeout  time.Duration `mapstructure:"tcp_established_timeout"`   // Timeout for ESTABLISHED state (valid SIP)
+	TCPClosingTimeout      time.Duration `mapstructure:"tcp_closing_timeout"`       // Timeout for CLOSING state
+	EnableCallAwareTimeout bool          `mapstructure:"enable_call_aware_timeout"` // Keep streams open for active calls
 
 	// TCP Performance configurations
 	TCPPerformanceMode string `mapstructure:"tcp_performance_mode"`
@@ -86,6 +94,14 @@ func initConfigDefaults() {
 	viper.SetDefault("voip.max_tcp_buffers", DefaultMaxTCPBuffers)
 	viper.SetDefault("voip.tcp_stream_timeout", DefaultTCPStreamTimeout)
 	viper.SetDefault("voip.tcp_assembler_max_pages", DefaultTCPAssemblerMaxPages)
+	viper.SetDefault("voip.tcp_sip_idle_timeout", DefaultTCPSIPIdleTimeout)
+
+	// Phase 3: State-based TCP timeout defaults
+	viper.SetDefault("voip.enable_state_tcp_timeouts", false) // Disabled by default for backward compatibility
+	viper.SetDefault("voip.tcp_opening_timeout", DefaultTCPOpeningTimeout)
+	viper.SetDefault("voip.tcp_established_timeout", DefaultTCPEstablishedTimeout)
+	viper.SetDefault("voip.tcp_closing_timeout", DefaultTCPClosingTimeout)
+	viper.SetDefault("voip.enable_call_aware_timeout", false) // Disabled by default for backward compatibility
 
 	// TCP Performance defaults
 	viper.SetDefault("voip.tcp_performance_mode", DefaultTCPPerformanceMode)
@@ -166,6 +182,14 @@ func GetConfig() *Config {
 		MaxTCPBuffers:         getPositiveInt("voip.max_tcp_buffers", DefaultMaxTCPBuffers),
 		TCPStreamTimeout:      getPositiveDuration("voip.tcp_stream_timeout", DefaultTCPStreamTimeout),
 		TCPAssemblerMaxPages:  getPositiveInt("voip.tcp_assembler_max_pages", DefaultTCPAssemblerMaxPages),
+		TCPSIPIdleTimeout:     getPositiveDuration("voip.tcp_sip_idle_timeout", DefaultTCPSIPIdleTimeout),
+
+		// Phase 3: State-based TCP timeout configurations
+		EnableStateTCPTimeouts: viper.GetBool("voip.enable_state_tcp_timeouts"),
+		TCPOpeningTimeout:      getPositiveDuration("voip.tcp_opening_timeout", DefaultTCPOpeningTimeout),
+		TCPEstablishedTimeout:  getPositiveDuration("voip.tcp_established_timeout", DefaultTCPEstablishedTimeout),
+		TCPClosingTimeout:      getPositiveDuration("voip.tcp_closing_timeout", DefaultTCPClosingTimeout),
+		EnableCallAwareTimeout: viper.GetBool("voip.enable_call_aware_timeout"),
 
 		// TCP Performance configurations
 		TCPPerformanceMode:     viper.GetString("voip.tcp_performance_mode"),

@@ -13,22 +13,31 @@ import (
 
 // BufferManager manages per-call packet buffers
 type BufferManager struct {
-	buffers   map[string]*CallBuffer // callID -> buffer
-	mu        sync.RWMutex
-	maxAge    time.Duration // Max time to buffer before decision
-	maxSize   int           // Max packets per buffer
-	janitorCh chan struct{} // Signal channel for janitor
-	stopCh    chan struct{} // Stop channel
+	buffers      map[string]*CallBuffer // callID -> buffer (temporary until filter decision)
+	matchedCalls map[string]time.Time   // callID -> matchTime (persists after buffer cleanup)
+	mu           sync.RWMutex
+	maxAge       time.Duration // Max time to buffer before decision
+	maxSize      int           // Max packets per buffer
+	matchedTTL   time.Duration // How long to remember matched calls (default: 24h)
+	janitorCh    chan struct{} // Signal channel for janitor
+	stopCh       chan struct{} // Stop channel
 }
+
+// DefaultMatchedTTL is how long to remember matched calls after filter decision.
+// This allows BYE messages to be correctly associated with calls even after
+// the temporary buffer has been cleaned up. 24 hours covers very long calls.
+const DefaultMatchedTTL = 24 * time.Hour
 
 // NewBufferManager creates a new buffer manager
 func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 	bm := &BufferManager{
-		buffers:   make(map[string]*CallBuffer),
-		maxAge:    maxAge,
-		maxSize:   maxSize,
-		janitorCh: make(chan struct{}),
-		stopCh:    make(chan struct{}),
+		buffers:      make(map[string]*CallBuffer),
+		matchedCalls: make(map[string]time.Time),
+		maxAge:       maxAge,
+		maxSize:      maxSize,
+		matchedTTL:   DefaultMatchedTTL,
+		janitorCh:    make(chan struct{}),
+		stopCh:       make(chan struct{}),
 	}
 
 	// Start janitor goroutine for cleanup
@@ -114,6 +123,9 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 	buffer.SetFilterResult(matched)
 
 	if matched {
+		// Record in matchedCalls so BYE can be processed even after buffer cleanup
+		bm.matchedCalls[callID] = time.Now()
+
 		// Return all buffered packets for flushing
 		packets = buffer.GetAllPackets()
 		logger.Info("Call matched filter, flushing buffer",
@@ -152,6 +164,9 @@ func (bm *BufferManager) CheckFilterWithCallback(
 	buffer.SetFilterResult(matched)
 
 	if matched {
+		// Record in matchedCalls so BYE can be processed even after buffer cleanup
+		bm.matchedCalls[callID] = time.Now()
+
 		// Get all buffered packets
 		packets := buffer.GetAllPackets()
 		logger.Info("Call matched filter, invoking callback",
@@ -175,11 +190,19 @@ func (bm *BufferManager) CheckFilterWithCallback(
 	return matched
 }
 
-// IsCallMatched checks if a call has been evaluated and matched the filter
+// IsCallMatched checks if a call has been evaluated and matched the filter.
+// This checks both the persistent matchedCalls map (for calls whose buffers
+// have been cleaned up) and the active buffers (for recent calls).
 func (bm *BufferManager) IsCallMatched(callID string) bool {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 
+	// First check the persistent matchedCalls map - this survives buffer cleanup
+	if _, exists := bm.matchedCalls[callID]; exists {
+		return true
+	}
+
+	// Fall back to buffer check for recent calls
 	buffer, exists := bm.buffers[callID]
 	if !exists {
 		return false
@@ -217,11 +240,15 @@ func (bm *BufferManager) janitor() {
 	}
 }
 
-// cleanupOldBuffers removes buffers that are too old or too large
+// cleanupOldBuffers removes buffers that are too old or too large,
+// and cleans up old entries from the matchedCalls map.
 func (bm *BufferManager) cleanupOldBuffers() {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
+	now := time.Now()
+
+	// Clean up old buffers (temporary packet storage before filter decision)
 	for callID, buffer := range bm.buffers {
 		age := buffer.GetAge()
 		packetCount := buffer.GetPacketCount()
@@ -243,6 +270,16 @@ func (bm *BufferManager) cleanupOldBuffers() {
 				"packet_count", packetCount,
 				"max_size", bm.maxSize)
 			delete(bm.buffers, callID)
+		}
+	}
+
+	// Clean up old matchedCalls entries (persistent call tracking)
+	for callID, matchTime := range bm.matchedCalls {
+		if now.Sub(matchTime) > bm.matchedTTL {
+			logger.Debug("Removing expired matched call entry",
+				"call_id", SanitizeCallIDForLogging(callID),
+				"age_hours", int(now.Sub(matchTime).Hours()))
+			delete(bm.matchedCalls, callID)
 		}
 	}
 }

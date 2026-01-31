@@ -109,7 +109,9 @@ func releaseBuffer(buffer *TCPPacketBuffer) {
 	// If pool is full, buffer will be garbage collected
 }
 
-func bufferTCPPacket(flow gopacket.Flow, pkt capture.PacketInfo) {
+// BufferTCPPacket buffers a TCP packet for a network flow.
+// This is used by TCP SIP handlers to buffer packets before reassembly completes.
+func BufferTCPPacket(flow gopacket.Flow, pkt capture.PacketInfo) {
 	tcpPacketBuffersMu.Lock()
 	defer tcpPacketBuffersMu.Unlock()
 

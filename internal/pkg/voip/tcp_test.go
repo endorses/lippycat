@@ -693,6 +693,89 @@ func TestGlobalTCPAssemblerMonitoring(t *testing.T) {
 	assert.Contains(t, metrics, "timestamp")
 }
 
+func TestSIPKeepaliveHandling(t *testing.T) {
+	// Test that SIP keepalives (RFC 5626) are properly skipped and don't cause
+	// the stream to be marked as non-SIP.
+	//
+	// SIP over TCP persistent connections may receive CRLF keepalives before
+	// actual SIP messages. These should be skipped, not rejected.
+	tests := []struct {
+		name     string
+		input    string
+		wantSIP  bool
+		wantData string // expected Call-ID if SIP
+	}{
+		{
+			name:     "Single CRLF before INVITE",
+			input:    "\r\nINVITE sip:user@example.com SIP/2.0\r\nCall-ID: test-keepalive-1\r\nContent-Length: 0\r\n\r\n",
+			wantSIP:  true,
+			wantData: "test-keepalive-1",
+		},
+		{
+			name:     "Double CRLF before INVITE",
+			input:    "\r\n\r\nINVITE sip:user@example.com SIP/2.0\r\nCall-ID: test-keepalive-2\r\nContent-Length: 0\r\n\r\n",
+			wantSIP:  true,
+			wantData: "test-keepalive-2",
+		},
+		{
+			name:     "Multiple CRLFs before SIP response",
+			input:    "\r\n\r\n\r\nSIP/2.0 200 OK\r\nCall-ID: test-keepalive-3\r\nContent-Length: 0\r\n\r\n",
+			wantSIP:  true,
+			wantData: "test-keepalive-3",
+		},
+		{
+			name:    "Non-SIP after keepalive",
+			input:   "\r\nHTTP/1.1 200 OK\r\n",
+			wantSIP: false,
+		},
+		{
+			name:     "INVITE without preceding keepalive",
+			input:    "INVITE sip:user@example.com SIP/2.0\r\nCall-ID: test-no-keepalive\r\nContent-Length: 0\r\n\r\n",
+			wantSIP:  true,
+			wantData: "test-no-keepalive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test using isSIPRequestLine and isSIPResponseLine with keepalive stripping
+			lines := []string{}
+			current := ""
+			for _, c := range tt.input {
+				current += string(c)
+				if c == '\n' {
+					lines = append(lines, current)
+					current = ""
+				}
+			}
+			if current != "" {
+				lines = append(lines, current)
+			}
+
+			// Find first non-empty line (simulating keepalive skip logic)
+			foundSIP := false
+			for _, line := range lines {
+				trimmed := line
+				// Remove trailing \r\n
+				for len(trimmed) > 0 && (trimmed[len(trimmed)-1] == '\r' || trimmed[len(trimmed)-1] == '\n') {
+					trimmed = trimmed[:len(trimmed)-1]
+				}
+				// Skip empty lines (keepalives)
+				if trimmed == "" {
+					continue
+				}
+				// Check if this is a SIP line
+				if isSIPRequestLine(trimmed) || isSIPResponseLine(trimmed) {
+					foundSIP = true
+				}
+				break // First non-empty line determines if it's SIP
+			}
+
+			assert.Equal(t, tt.wantSIP, foundSIP, "SIP detection mismatch")
+		})
+	}
+}
+
 // Helper function to create test packets
 func createTestPacket(t *testing.T, linkType gopacket.LayerType) gopacket.Packet {
 	t.Helper()

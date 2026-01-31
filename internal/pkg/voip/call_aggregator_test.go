@@ -42,7 +42,7 @@ func TestCallAggregator_ProcessSIPInvite(t *testing.T) {
 	assert.Equal(t, "test-call-123", calls[0].CallID)
 	assert.Equal(t, "alicent@example.com", calls[0].From)
 	assert.Equal(t, "robb@example.com", calls[0].To)
-	assert.Equal(t, CallStateRinging, calls[0].State)
+	assert.Equal(t, CallStateTrying, calls[0].State)
 	assert.Contains(t, calls[0].Hunters, "hunter-1")
 }
 
@@ -57,10 +57,22 @@ func TestCallAggregator_CallStateTransitions(t *testing.T) {
 		expectedState CallState
 	}{
 		{
-			name:          "INVITE -> RINGING",
+			name:          "INVITE -> TRYING",
 			method:        "INVITE",
 			responseCode:  0,
+			expectedState: CallStateTrying,
+		},
+		{
+			name:          "180 Ringing -> RINGING",
+			method:        "",
+			responseCode:  180,
 			expectedState: CallStateRinging,
+		},
+		{
+			name:          "183 Session Progress -> PROGRESS",
+			method:        "",
+			responseCode:  183,
+			expectedState: CallStateProgress,
 		},
 		{
 			name:          "200 OK -> ACTIVE",
@@ -75,10 +87,10 @@ func TestCallAggregator_CallStateTransitions(t *testing.T) {
 			expectedState: CallStateActive,
 		},
 		{
-			name:          "BYE -> ENDED",
+			name:          "BYE -> ENDING",
 			method:        "BYE",
 			responseCode:  0,
-			expectedState: CallStateEnded,
+			expectedState: CallStateEnding,
 		},
 	}
 
@@ -110,28 +122,39 @@ func TestCallAggregator_FailedCallStates(t *testing.T) {
 	callID := "test-call-failed"
 
 	tests := []struct {
-		name         string
-		method       string
-		responseCode uint32
-		description  string
+		name          string
+		method        string
+		responseCode  uint32
+		description   string
+		expectedState CallState
 	}{
 		{
-			name:         "CANCEL",
-			method:       "CANCEL",
-			responseCode: 0,
-			description:  "Call cancelled by caller",
+			name:          "CANCEL",
+			method:        "CANCEL",
+			responseCode:  0,
+			description:   "Call cancelled before answer",
+			expectedState: CallStateCancelled,
 		},
 		{
-			name:         "4xx Response",
-			method:       "",
-			responseCode: 404,
-			description:  "Not found",
+			name:          "486 Busy",
+			method:        "",
+			responseCode:  486,
+			description:   "Callee busy",
+			expectedState: CallStateBusy,
 		},
 		{
-			name:         "5xx Response",
-			method:       "",
-			responseCode: 503,
-			description:  "Service unavailable",
+			name:          "4xx Response",
+			method:        "",
+			responseCode:  404,
+			description:   "Not found",
+			expectedState: CallStateFailed,
+		},
+		{
+			name:          "5xx Response",
+			method:        "",
+			responseCode:  503,
+			description:   "Service unavailable",
+			expectedState: CallStateFailed,
 		},
 	}
 
@@ -153,7 +176,7 @@ func TestCallAggregator_FailedCallStates(t *testing.T) {
 			}
 			ca.ProcessPacket(invitePacket, "hunter-1")
 
-			// Then send failure
+			// Then send failure/cancel/busy
 			failPacket := &data.CapturedPacket{
 				Metadata: &data.PacketMetadata{
 					Sip: &data.SIPMetadata{
@@ -167,7 +190,7 @@ func TestCallAggregator_FailedCallStates(t *testing.T) {
 
 			call, exists := ca.GetCall(callID)
 			assert.True(t, exists, "Call should exist")
-			assert.Equal(t, CallStateFailed, call.State, "State should be FAILED")
+			assert.Equal(t, tt.expectedState, call.State, "State should be %s", tt.expectedState.String())
 			assert.NotZero(t, call.EndTime, "End time should be set")
 		})
 	}
@@ -375,7 +398,7 @@ func TestCallAggregator_CallDuration(t *testing.T) {
 	ca.ProcessPacket(byePacket, "hunter-1")
 
 	call2, _ := ca.GetCall(callID)
-	assert.Equal(t, CallStateEnded, call2.State)
+	assert.Equal(t, CallStateEnding, call2.State, "BYE transitions to ENDING state for timewait")
 	assert.NotZero(t, call2.EndTime, "End time should be set")
 	assert.True(t, call2.EndTime.After(startTime), "End time should be after start time")
 }
@@ -386,10 +409,16 @@ func TestCallStateString(t *testing.T) {
 		expected string
 	}{
 		{CallStateNew, "NEW"},
+		{CallStateTrying, "TRYING"},
 		{CallStateRinging, "RINGING"},
+		{CallStateProgress, "PROGRESS"},
 		{CallStateActive, "ACTIVE"},
+		{CallStateEnding, "ENDING"},
 		{CallStateEnded, "ENDED"},
 		{CallStateFailed, "FAILED"},
+		{CallStateCancelled, "CANCELLED"},
+		{CallStateBusy, "BUSY"},
+		{CallStateRTPOnly, "RTP-ONLY"},
 		{CallState(999), "UNKNOWN"},
 	}
 
@@ -418,7 +447,7 @@ func TestCallAggregator_UpdateExistingCall(t *testing.T) {
 	ca.ProcessPacket(packet1, "hunter-1")
 
 	call1, _ := ca.GetCall(callID)
-	assert.Equal(t, CallStateRinging, call1.State)
+	assert.Equal(t, CallStateTrying, call1.State)
 	assert.Equal(t, 1, call1.PacketCount)
 
 	// 200 OK response
@@ -491,32 +520,32 @@ func TestCallAggregator_ResponseCodesTransitions(t *testing.T) {
 		{
 			name:          "180 Ringing",
 			responseCode:  180,
-			initialState:  CallStateRinging,
+			initialState:  CallStateTrying,
 			expectedState: CallStateRinging,
 		},
 		{
 			name:          "183 Session Progress",
 			responseCode:  183,
-			initialState:  CallStateRinging,
-			expectedState: CallStateRinging,
+			initialState:  CallStateTrying,
+			expectedState: CallStateProgress,
 		},
 		{
 			name:          "200 OK",
 			responseCode:  200,
-			initialState:  CallStateRinging,
+			initialState:  CallStateTrying,
 			expectedState: CallStateActive,
 		},
 		{
 			name:          "486 Busy",
 			responseCode:  486,
-			initialState:  CallStateRinging,
-			expectedState: CallStateFailed,
+			initialState:  CallStateTrying,
+			expectedState: CallStateBusy,
 		},
 		{
-			name:          "487 Cancelled",
+			name:          "487 Request Terminated",
 			responseCode:  487,
-			initialState:  CallStateRinging,
-			expectedState: CallStateFailed,
+			initialState:  CallStateTrying,
+			expectedState: CallStateCancelled,
 		},
 	}
 
@@ -706,7 +735,7 @@ func TestCallAggregator_DeepCopyRaceCondition(t *testing.T) {
 	}
 
 	// Verify state is reasonable
-	assert.Contains(t, []CallState{CallStateRinging, CallStateActive}, call.State, "State should be valid")
+	assert.Contains(t, []CallState{CallStateTrying, CallStateRinging, CallStateProgress, CallStateActive}, call.State, "State should be valid")
 }
 
 // TestCallAggregator_LRUEvictionRace tests that concurrent reads during LRU
@@ -1094,4 +1123,135 @@ func TestCallAggregator_LRUActiveCallSurvival(t *testing.T) {
 
 	// Should have exactly 3 calls
 	assert.Equal(t, 3, ca.GetCallCount())
+}
+
+func TestCallAggregator_NonCallMethodsIgnored(t *testing.T) {
+	// Verify that non-call SIP methods (OPTIONS, REGISTER, etc.) don't create call entries
+	ca := NewCallAggregator()
+
+	nonCallMethods := []string{"OPTIONS", "REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH", "MESSAGE", "INFO", "PRACK", "UPDATE", "REFER"}
+
+	for _, method := range nonCallMethods {
+		packet := &data.CapturedPacket{
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:       fmt.Sprintf("non-call-%s", method),
+					Method:       method,
+					FromUser:     "alicent@example.com",
+					ToUser:       "robb@example.com",
+					ResponseCode: 0,
+				},
+			},
+		}
+		ca.ProcessPacket(packet, "hunter-1")
+	}
+
+	// None of these should create call entries
+	assert.Equal(t, 0, ca.GetCallCount(), "Non-call methods should not create call entries")
+
+	// Now add an INVITE - this should create a call
+	invitePacket := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "real-call-123",
+				Method:       "INVITE",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+				ResponseCode: 0,
+			},
+		},
+	}
+	ca.ProcessPacket(invitePacket, "hunter-1")
+
+	assert.Equal(t, 1, ca.GetCallCount(), "INVITE should create a call entry")
+
+	// Subsequent non-call methods with same Call-ID should update the existing call
+	optionsPacket := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "real-call-123",
+				Method:       "OPTIONS",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+				ResponseCode: 0,
+			},
+		},
+	}
+	ca.ProcessPacket(optionsPacket, "hunter-1")
+
+	// Should still only have 1 call (OPTIONS updated existing call)
+	assert.Equal(t, 1, ca.GetCallCount(), "OPTIONS on existing call should not create new entry")
+}
+
+func TestCallAggregator_ResponseDoesNotCreateCall(t *testing.T) {
+	// Verify that responses alone don't create calls (only INVITE does)
+	ca := NewCallAggregator()
+
+	// 180 Ringing response without prior INVITE should NOT create a call
+	packet := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "missed-invite-call",
+				Method:       "",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+				ResponseCode: 180,
+			},
+		},
+	}
+	ca.ProcessPacket(packet, "hunter-1")
+
+	assert.Equal(t, 0, ca.GetCallCount(), "180 Ringing without INVITE should not create call")
+
+	// 200 OK response (e.g., to OPTIONS) should NOT create calls
+	okPacket := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "options-response-call",
+				Method:       "",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+				ResponseCode: 200,
+			},
+		},
+	}
+	ca.ProcessPacket(okPacket, "hunter-1")
+
+	assert.Equal(t, 0, ca.GetCallCount(), "200 OK without INVITE should not create call")
+
+	// But responses SHOULD update existing calls
+	// First create a call with INVITE
+	invitePacket := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "real-call",
+				Method:       "INVITE",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+				ResponseCode: 0,
+			},
+		},
+	}
+	ca.ProcessPacket(invitePacket, "hunter-1")
+	assert.Equal(t, 1, ca.GetCallCount(), "INVITE should create call")
+
+	call, _ := ca.GetCall("real-call")
+	assert.Equal(t, CallStateTrying, call.State)
+
+	// Now 200 OK should update it to ACTIVE
+	okResponsePacket := &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "real-call",
+				Method:       "",
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+				ResponseCode: 200,
+			},
+		},
+	}
+	ca.ProcessPacket(okResponsePacket, "hunter-1")
+
+	call, _ = ca.GetCall("real-call")
+	assert.Equal(t, CallStateActive, call.State, "200 OK should update existing call to ACTIVE")
 }

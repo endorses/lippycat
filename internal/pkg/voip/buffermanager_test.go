@@ -321,6 +321,82 @@ func TestBufferManager_JanitorCleanup(t *testing.T) {
 	assert.Equal(t, 0, bm.GetBufferCount(), "Old buffer should be cleaned up")
 }
 
+// TestBufferManager_MatchedCallsPersistAfterBufferCleanup verifies that matched calls
+// remain accessible via IsCallMatched() even after their buffers are cleaned up.
+// This is critical for BYE handling - BYE messages often arrive long after the
+// INVITE buffer has been cleaned up.
+func TestBufferManager_MatchedCallsPersistAfterBufferCleanup(t *testing.T) {
+	// Use very short maxAge for buffer cleanup testing
+	bm := NewBufferManager(100*time.Millisecond, 200)
+	defer bm.Close()
+
+	callID := "test-call-123"
+
+	// Add SIP packet
+	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
+	metadata := &CallMetadata{
+		CallID: callID,
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
+		Method: "INVITE",
+	}
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
+
+	// Check filter - should match
+	filterFunc := func(m *CallMetadata) bool {
+		return m.From == "alicent@example.com"
+	}
+	matched, _ := bm.CheckFilter(callID, filterFunc)
+	require.True(t, matched, "Should match filter")
+
+	// Verify call is matched
+	assert.True(t, bm.IsCallMatched(callID), "Call should be matched initially")
+
+	// Wait for buffer to age out and trigger cleanup
+	time.Sleep(150 * time.Millisecond)
+	bm.cleanupOldBuffers()
+
+	// Buffer should be gone
+	assert.Equal(t, 0, bm.GetBufferCount(), "Buffer should be cleaned up")
+
+	// But call should STILL be matched via matchedCalls map
+	assert.True(t, bm.IsCallMatched(callID),
+		"Call should remain matched after buffer cleanup (via matchedCalls)")
+}
+
+// TestBufferManager_MatchedCallsExpireAfterTTL verifies that matched calls
+// are eventually removed after the TTL expires.
+func TestBufferManager_MatchedCallsExpireAfterTTL(t *testing.T) {
+	bm := NewBufferManager(100*time.Millisecond, 200)
+	// Override TTL to very short value for testing
+	bm.matchedTTL = 200 * time.Millisecond
+	defer bm.Close()
+
+	callID := "test-call-123"
+
+	// Add and match a call
+	sipPacket := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
+	metadata := &CallMetadata{
+		CallID: callID,
+		From:   "alicent@example.com",
+		To:     "robb@example.com",
+	}
+	bm.AddSIPPacket(callID, sipPacket, metadata, "eth0", layers.LinkTypeEthernet)
+
+	filterFunc := func(m *CallMetadata) bool { return true }
+	bm.CheckFilter(callID, filterFunc)
+
+	assert.True(t, bm.IsCallMatched(callID), "Call should be matched")
+
+	// Wait for matchedTTL to expire
+	time.Sleep(250 * time.Millisecond)
+	bm.cleanupOldBuffers()
+
+	// Call should no longer be matched
+	assert.False(t, bm.IsCallMatched(callID),
+		"Call should be removed after matchedTTL expires")
+}
+
 func TestBufferManager_CleanupOversizedBuffer(t *testing.T) {
 	// Use small maxSize for testing
 	bm := NewBufferManager(5*time.Second, 3)

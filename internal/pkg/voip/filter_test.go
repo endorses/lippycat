@@ -22,8 +22,16 @@ func TestNewVoIPFilterBuilder(t *testing.T) {
 
 // TestVoIPFilterBuilder_Build tests all filter construction combinations
 // from the research report (§3 and §4)
+//
+// NOTE: All filters now include the IP fragment clause (ip[6:2] & 0x1fff > 0)
+// to capture subsequent fragments of fragmented UDP packets. This is critical
+// for capturing large SIP INVITEs that exceed MTU. See Fix #12 in
+// docs/debug/rtp-sip-correlation.md for details.
 func TestVoIPFilterBuilder_Build(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
+
+	// Helper constant for readability
+	const frag = IPFragmentClause // "(ip[6:2] & 0x1fff > 0)"
 
 	tests := []struct {
 		name     string
@@ -41,7 +49,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 			config: VoIPFilterConfig{
 				BaseFilter: "host 10.0.0.1",
 			},
-			expected: "host 10.0.0.1",
+			expected: "(host 10.0.0.1) or " + frag,
 		},
 
 		// UDP-only flag
@@ -50,7 +58,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 			config: VoIPFilterConfig{
 				UDPOnly: true,
 			},
-			expected: "udp",
+			expected: "udp or " + frag,
 		},
 		{
 			name: "udp-only with base filter",
@@ -58,7 +66,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				UDPOnly:    true,
 				BaseFilter: "host 10.0.0.1",
 			},
-			expected: "(host 10.0.0.1) and udp",
+			expected: "((host 10.0.0.1) and udp) or " + frag,
 		},
 
 		// SIP port flag (with default RTP range)
@@ -67,21 +75,21 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 			config: VoIPFilterConfig{
 				SIPPorts: []int{5060},
 			},
-			expected: "(port 5060) or (udp portrange 10000-32768)",
+			expected: "((port 5060) or (udp portrange 10000-32768)) or " + frag,
 		},
 		{
 			name: "multiple SIP ports",
 			config: VoIPFilterConfig{
 				SIPPorts: []int{5060, 5080},
 			},
-			expected: "(port 5060 or port 5080) or (udp portrange 10000-32768)",
+			expected: "((port 5060 or port 5080) or (udp portrange 10000-32768)) or " + frag,
 		},
 		{
 			name: "three SIP ports",
 			config: VoIPFilterConfig{
 				SIPPorts: []int{5060, 5061, 5080},
 			},
-			expected: "(port 5060 or port 5061 or port 5080) or (udp portrange 10000-32768)",
+			expected: "((port 5060 or port 5061 or port 5080) or (udp portrange 10000-32768)) or " + frag,
 		},
 
 		// SIP port + UDP-only
@@ -91,7 +99,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				SIPPorts: []int{5060},
 				UDPOnly:  true,
 			},
-			expected: "udp and ((port 5060) or (portrange 10000-32768))",
+			expected: "(udp and ((port 5060) or (portrange 10000-32768))) or " + frag,
 		},
 		{
 			name: "multiple SIP ports with udp-only",
@@ -99,7 +107,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				SIPPorts: []int{5060, 5080},
 				UDPOnly:  true,
 			},
-			expected: "udp and ((port 5060 or port 5080) or (portrange 10000-32768))",
+			expected: "(udp and ((port 5060 or port 5080) or (portrange 10000-32768))) or " + frag,
 		},
 
 		// Custom RTP port range
@@ -108,7 +116,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 			config: VoIPFilterConfig{
 				RTPPortRanges: []PortRange{{Start: 8000, End: 9000}},
 			},
-			expected: "(udp portrange 8000-9000)",
+			expected: "((udp portrange 8000-9000)) or " + frag,
 		},
 		{
 			name: "SIP port with custom RTP range",
@@ -116,7 +124,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				SIPPorts:      []int{5060},
 				RTPPortRanges: []PortRange{{Start: 8000, End: 9000}},
 			},
-			expected: "(port 5060) or (udp portrange 8000-9000)",
+			expected: "((port 5060) or (udp portrange 8000-9000)) or " + frag,
 		},
 		{
 			name: "multiple custom RTP ranges",
@@ -127,7 +135,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 					{Start: 40000, End: 50000},
 				},
 			},
-			expected: "(port 5060) or (udp portrange 8000-9000) or (udp portrange 40000-50000)",
+			expected: "((port 5060) or (udp portrange 8000-9000) or (udp portrange 40000-50000)) or " + frag,
 		},
 		{
 			name: "multiple SIP ports with multiple RTP ranges",
@@ -138,7 +146,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 					{Start: 40000, End: 50000},
 				},
 			},
-			expected: "(port 5060 or port 5080) or (udp portrange 8000-9000) or (udp portrange 40000-50000)",
+			expected: "((port 5060 or port 5080) or (udp portrange 8000-9000) or (udp portrange 40000-50000)) or " + frag,
 		},
 
 		// Custom RTP range + UDP-only
@@ -148,7 +156,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				RTPPortRanges: []PortRange{{Start: 8000, End: 9000}},
 				UDPOnly:       true,
 			},
-			expected: "udp and ((portrange 8000-9000))",
+			expected: "(udp and ((portrange 8000-9000))) or " + frag,
 		},
 		{
 			name: "SIP port + custom RTP range + udp-only",
@@ -157,7 +165,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				RTPPortRanges: []PortRange{{Start: 8000, End: 9000}},
 				UDPOnly:       true,
 			},
-			expected: "udp and ((port 5060) or (portrange 8000-9000))",
+			expected: "(udp and ((port 5060) or (portrange 8000-9000))) or " + frag,
 		},
 		{
 			name: "multiple RTP ranges with udp-only",
@@ -169,7 +177,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				},
 				UDPOnly: true,
 			},
-			expected: "udp and ((port 5060) or (portrange 8000-9000) or (portrange 40000-50000))",
+			expected: "(udp and ((port 5060) or (portrange 8000-9000) or (portrange 40000-50000))) or " + frag,
 		},
 
 		// Combined with base filter
@@ -179,7 +187,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				SIPPorts:   []int{5060},
 				BaseFilter: "host 10.0.0.1",
 			},
-			expected: "(host 10.0.0.1) and ((port 5060) or (udp portrange 10000-32768))",
+			expected: "(host 10.0.0.1) and (((port 5060) or (udp portrange 10000-32768)) or " + frag + ")",
 		},
 		{
 			name: "SIP port + udp-only with base filter",
@@ -188,7 +196,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				UDPOnly:    true,
 				BaseFilter: "host 10.0.0.1",
 			},
-			expected: "(host 10.0.0.1) and (udp and ((port 5060) or (portrange 10000-32768)))",
+			expected: "(host 10.0.0.1) and ((udp and ((port 5060) or (portrange 10000-32768))) or " + frag + ")",
 		},
 		{
 			name: "SIP port + custom RTP with base filter",
@@ -197,7 +205,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				RTPPortRanges: []PortRange{{Start: 8000, End: 9000}},
 				BaseFilter:    "not port 22",
 			},
-			expected: "(not port 22) and ((port 5060) or (udp portrange 8000-9000))",
+			expected: "(not port 22) and (((port 5060) or (udp portrange 8000-9000)) or " + frag + ")",
 		},
 		{
 			name: "complex combination",
@@ -210,7 +218,7 @@ func TestVoIPFilterBuilder_Build(t *testing.T) {
 				UDPOnly:    true,
 				BaseFilter: "net 192.168.0.0/24",
 			},
-			expected: "(net 192.168.0.0/24) and (udp and ((port 5060 or port 5080) or (portrange 8000-9000) or (portrange 40000-50000)))",
+			expected: "(net 192.168.0.0/24) and ((udp and ((port 5060 or port 5080) or (portrange 8000-9000) or (portrange 40000-50000))) or " + frag + ")",
 		},
 	}
 
@@ -541,6 +549,7 @@ func TestValidatePortRange(t *testing.T) {
 // TestVoIPFilterBuilder_Build_EdgeCases tests edge cases not covered in the main test
 func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
+	frag := IPFragmentClause
 
 	t.Run("empty port list has no effect", func(t *testing.T) {
 		result := builder.Build(VoIPFilterConfig{
@@ -556,7 +565,7 @@ func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 			SIPPorts:      []int{5060},
 			RTPPortRanges: []PortRange{},
 		})
-		assert.Equal(t, "(port 5060) or (udp portrange 10000-32768)", result)
+		assert.Equal(t, "((port 5060) or (udp portrange 10000-32768)) or "+frag, result)
 	})
 
 	t.Run("base filter with complex expression", func(t *testing.T) {
@@ -564,7 +573,7 @@ func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 			SIPPorts:   []int{5060},
 			BaseFilter: "(host 10.0.0.1 or host 10.0.0.2) and not port 22",
 		})
-		assert.Equal(t, "((host 10.0.0.1 or host 10.0.0.2) and not port 22) and ((port 5060) or (udp portrange 10000-32768))", result)
+		assert.Equal(t, "((host 10.0.0.1 or host 10.0.0.2) and not port 22) and (((port 5060) or (udp portrange 10000-32768)) or "+frag+")", result)
 	})
 
 	t.Run("single port in RTP range (start equals end)", func(t *testing.T) {
@@ -572,8 +581,17 @@ func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 			SIPPorts:      []int{5060},
 			RTPPortRanges: []PortRange{{Start: 5004, End: 5004}},
 		})
-		assert.Equal(t, "(port 5060) or (udp portrange 5004-5004)", result)
+		assert.Equal(t, "((port 5060) or (udp portrange 5004-5004)) or "+frag, result)
 	})
+}
+
+// TestIPFragmentClauseConstant verifies the fragment clause constant is correct
+func TestIPFragmentClauseConstant(t *testing.T) {
+	// The clause should match packets with non-zero fragment offset
+	// ip[6:2] reads the 16-bit flags/fragment offset field
+	// & 0x1fff masks to get the 13-bit fragment offset
+	// > 0 matches subsequent fragments (not first fragment)
+	assert.Equal(t, "(ip[6:2] & 0x1fff > 0)", IPFragmentClause)
 }
 
 // BenchmarkVoIPFilterBuilder_Build benchmarks filter building performance

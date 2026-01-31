@@ -28,10 +28,11 @@ type sipStreamFactory struct {
 }
 
 type queuedStream struct {
-	reader    *tcpreader.ReaderStream
-	detector  *CallIDDetector
-	flow      gopacket.Flow
-	createdAt time.Time
+	reader        *tcpreader.ReaderStream
+	detector      *CallIDDetector
+	netFlow       gopacket.Flow
+	transportFlow gopacket.Flow
+	createdAt     time.Time
 }
 
 func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) tcpassembly.StreamFactory {
@@ -152,7 +153,8 @@ func (f *sipStreamFactory) processQueue() {
 					queuedStream.detector,
 					f.ctx,
 					f,
-					queuedStream.flow,
+					queuedStream.netFlow,
+					queuedStream.transportFlow,
 				)
 				stream.createdAt = queuedStream.createdAt
 				atomic.AddInt64(&f.activeGoroutines, 1)
@@ -292,7 +294,8 @@ func (f *sipStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream 
 
 	// Create buffered stream - starts processing goroutine immediately
 	// but Reassembled() never blocks due to buffered channel
-	stream := newBufferedSIPStream(f.ctx, f, detector, net)
+	// Pass both network flow (IPs) and transport flow (ports) to construct proper endpoints
+	stream := newBufferedSIPStream(f.ctx, f, detector, net, transport)
 
 	return stream
 }

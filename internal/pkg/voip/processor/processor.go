@@ -80,6 +80,14 @@ type CallMetadata struct {
 	SDPBody           string
 	ContentType       string // Content-Type header
 	Body              string // Message body (for MESSAGE method, size-limited)
+
+	// 3GPP IMS network information (P-Access-Network-Info, P-Visited-Network-ID)
+	AccessType       string            // Access technology (e.g., "IEEE-802.11", "3GPP-E-UTRAN")
+	BSSID            string            // WiFi AP MAC address (from i-wlan-node-id)
+	CellID           string            // Cellular cell ID (from cgi-3gpp, ecgi, ncgi, etc.)
+	LocalIP          string            // UE local IP address
+	AccessParams     map[string]string // Additional P-Access-Network-Info parameters
+	VisitedNetworkID string            // P-Visited-Network-ID header value
 }
 
 // ApplicationFilter is an optional filter interface for VoIP call filtering.

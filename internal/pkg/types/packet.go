@@ -29,6 +29,16 @@ type PacketDisplay struct {
 	LinkType  layers.LinkType // Link layer type for PCAP writing
 }
 
+// AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).
+// This header provides access network information for VoLTE/VoWiFi sessions.
+type AccessNetworkInfo struct {
+	AccessType string            `json:"access_type"`          // "IEEE-802.11", "3GPP-E-UTRAN", "3GPP-GERAN", "3GPP-UTRAN", "3GPP-NR"
+	BSSID      string            `json:"bssid,omitempty"`      // WiFi AP MAC (from i-wlan-node-id)
+	CellID     string            `json:"cell_id,omitempty"`    // Cellular cell ID (from cgi-3gpp, utran-cell-id-3gpp, ecgi, ncgi)
+	LocalIP    string            `json:"local_ip,omitempty"`   // UE local IP address
+	Parameters map[string]string `json:"parameters,omitempty"` // Additional parameters
+}
+
 // VoIPMetadata contains parsed VoIP protocol information.
 type VoIPMetadata struct {
 	// SIP fields
@@ -47,6 +57,10 @@ type VoIPMetadata struct {
 	// 3GPP IMS identifiers (for LI filtering)
 	IMSI string // International Mobile Subscriber Identity (15 digits from Authorization/P-Asserted-Identity)
 	IMEI string // International Mobile Equipment Identity (15 digits from Contact +sip.instance)
+
+	// 3GPP IMS network information (for location/network context)
+	AccessNetworkInfo *AccessNetworkInfo // P-Access-Network-Info header data
+	VisitedNetworkID  string             // P-Visited-Network-ID header value (network name)
 
 	// RTP fields
 	IsRTP       bool   // Whether this is an RTP packet

@@ -280,6 +280,39 @@ func (d *DetailsPanel) renderContent() string {
 			content.WriteString(valueStyle.Render(fmt.Sprintf("%d", d.packet.VoIPData.SeqNumber)))
 			content.WriteString("\n")
 		}
+
+		// 3GPP IMS Access Network Info (VoLTE/VoWiFi location context)
+		if d.packet.VoIPData.AccessNetworkInfo != nil {
+			ani := d.packet.VoIPData.AccessNetworkInfo
+			content.WriteString("\n")
+			content.WriteString(labelStyle.Render("Access Type: "))
+			content.WriteString(valueStyle.Render(ani.AccessType))
+			content.WriteString("\n")
+
+			if ani.BSSID != "" {
+				content.WriteString(labelStyle.Render("BSSID: "))
+				content.WriteString(valueStyle.Render(ani.BSSID))
+				content.WriteString("\n")
+			}
+
+			if ani.CellID != "" {
+				content.WriteString(labelStyle.Render("Cell ID: "))
+				content.WriteString(valueStyle.Render(ani.CellID))
+				content.WriteString("\n")
+			}
+
+			if ani.LocalIP != "" {
+				content.WriteString(labelStyle.Render("Local IP: "))
+				content.WriteString(valueStyle.Render(ani.LocalIP))
+				content.WriteString("\n")
+			}
+		}
+
+		if d.packet.VoIPData.VisitedNetworkID != "" {
+			content.WriteString(labelStyle.Render("Visited Network: "))
+			content.WriteString(valueStyle.Render(d.packet.VoIPData.VisitedNetworkID))
+			content.WriteString("\n")
+		}
 	}
 
 	// DNS Details Section (only for DNS packets)

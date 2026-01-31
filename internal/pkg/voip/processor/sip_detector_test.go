@@ -399,3 +399,157 @@ func TestNormalizeHeaderName(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAccessNetworkInfo(t *testing.T) {
+	tests := []struct {
+		name           string
+		header         string
+		wantAccessType string
+		wantBSSID      string
+		wantCellID     string
+		wantLocalIP    string
+		wantParams     map[string]string
+	}{
+		{
+			name:           "WiFi with BSSID",
+			header:         "IEEE-802.11; i-wlan-node-id=00:11:22:33:44:55",
+			wantAccessType: "IEEE-802.11",
+			wantBSSID:      "00:11:22:33:44:55",
+			wantCellID:     "",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{"i-wlan-node-id": "00:11:22:33:44:55"},
+		},
+		{
+			name:           "LTE with CGI",
+			header:         "3GPP-E-UTRAN-FDD; cgi-3gpp=234150012345678901234",
+			wantAccessType: "3GPP-E-UTRAN-FDD",
+			wantBSSID:      "",
+			wantCellID:     "234150012345678901234",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{"cgi-3gpp": "234150012345678901234"},
+		},
+		{
+			name:           "5G NR with NCGI",
+			header:         "3GPP-NR; ncgi=234150123456789",
+			wantAccessType: "3GPP-NR",
+			wantBSSID:      "",
+			wantCellID:     "234150123456789",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{"ncgi": "234150123456789"},
+		},
+		{
+			name:           "GERAN with local IP",
+			header:         "3GPP-GERAN; cgi-3gpp=234150012345; local-ip=10.0.0.1",
+			wantAccessType: "3GPP-GERAN",
+			wantBSSID:      "",
+			wantCellID:     "234150012345",
+			wantLocalIP:    "10.0.0.1",
+			wantParams: map[string]string{
+				"cgi-3gpp": "234150012345",
+				"local-ip": "10.0.0.1",
+			},
+		},
+		{
+			name:           "WiFi with quoted BSSID",
+			header:         `IEEE-802.11; i-wlan-node-id="AA:BB:CC:DD:EE:FF"`,
+			wantAccessType: "IEEE-802.11",
+			wantBSSID:      "AA:BB:CC:DD:EE:FF",
+			wantCellID:     "",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{"i-wlan-node-id": "AA:BB:CC:DD:EE:FF"},
+		},
+		{
+			name:           "Access type only",
+			header:         "IEEE-802.11",
+			wantAccessType: "IEEE-802.11",
+			wantBSSID:      "",
+			wantCellID:     "",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{},
+		},
+		{
+			name:           "Empty header",
+			header:         "",
+			wantAccessType: "",
+			wantBSSID:      "",
+			wantCellID:     "",
+			wantLocalIP:    "",
+			wantParams:     nil,
+		},
+		{
+			name:           "UTRAN cell ID",
+			header:         "3GPP-UTRAN; utran-cell-id-3gpp=234150012345678",
+			wantAccessType: "3GPP-UTRAN",
+			wantBSSID:      "",
+			wantCellID:     "234150012345678",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{"utran-cell-id-3gpp": "234150012345678"},
+		},
+		{
+			name:           "ECGI format",
+			header:         "3GPP-E-UTRAN; ecgi=234150012345",
+			wantAccessType: "3GPP-E-UTRAN",
+			wantBSSID:      "",
+			wantCellID:     "234150012345",
+			wantLocalIP:    "",
+			wantParams:     map[string]string{"ecgi": "234150012345"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accessType, bssid, cellID, localIP, params := parseAccessNetworkInfo(tt.header)
+			assert.Equal(t, tt.wantAccessType, accessType)
+			assert.Equal(t, tt.wantBSSID, bssid)
+			assert.Equal(t, tt.wantCellID, cellID)
+			assert.Equal(t, tt.wantLocalIP, localIP)
+			assert.Equal(t, tt.wantParams, params)
+		})
+	}
+}
+
+func TestParseVisitedNetworkID(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected string
+	}{
+		{
+			name:     "Quoted network name",
+			header:   `"Visited Network Name"`,
+			expected: "Visited Network Name",
+		},
+		{
+			name:     "Unquoted domain",
+			header:   "visited.network.example.com",
+			expected: "visited.network.example.com",
+		},
+		{
+			name:     "With whitespace",
+			header:   "  carrier.example.org  ",
+			expected: "carrier.example.org",
+		},
+		{
+			name:     "Empty",
+			header:   "",
+			expected: "",
+		},
+		{
+			name:     "Whitespace only",
+			header:   "   ",
+			expected: "",
+		},
+		{
+			name:     "Quoted with spaces",
+			header:   `  "MNO Roaming Partner"  `,
+			expected: "MNO Roaming Partner",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseVisitedNetworkID(tt.header)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}

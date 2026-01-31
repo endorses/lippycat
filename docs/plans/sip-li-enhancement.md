@@ -109,7 +109,7 @@ Location of identifiers in SIP:
 
 ### Phase 4: 3GPP IMS Header Extraction
 
-#### Step 4.1: Add AccessNetworkInfo struct to `internal/pkg/types/voip.go`
+#### Step 4.1: Add AccessNetworkInfo struct to `internal/pkg/types/packet.go`
 
 ```go
 type AccessNetworkInfo struct {
@@ -121,31 +121,31 @@ type AccessNetworkInfo struct {
 }
 ```
 
-- [ ] Add `AccessNetworkInfo *AccessNetworkInfo` to VoIPMetadata
-- [ ] Add `VisitedNetworkID string` to VoIPMetadata
+- [x] Add `AccessNetworkInfo *AccessNetworkInfo` to VoIPMetadata
+- [x] Add `VisitedNetworkID string` to VoIPMetadata
 
 #### Step 4.2: Parse P-Access-Network-Info header
 
-- [ ] Add `parseAccessNetworkInfo()` to SIP parser
-- [ ] Handle IEEE-802.11 (extract i-wlan-node-id → BSSID)
-- [ ] Handle 3GPP-E-UTRAN (extract ecgi → CellID)
-- [ ] Handle 3GPP-GERAN, 3GPP-UTRAN, 3GPP-NR
+- [x] Add `parseAccessNetworkInfo()` to SIP parser
+- [x] Handle IEEE-802.11 (extract i-wlan-node-id → BSSID)
+- [x] Handle 3GPP-E-UTRAN (extract ecgi → CellID)
+- [x] Handle 3GPP-GERAN, 3GPP-UTRAN, 3GPP-NR
 
 #### Step 4.3: Parse P-Visited-Network-ID header
 
-- [ ] Extract quoted network name
-- [ ] Add to VoIPMetadata
+- [x] Extract quoted network name
+- [x] Add to VoIPMetadata
 
 #### Step 4.4: Update protobuf (optional, for gRPC transport)
 
-- [ ] Add `AccessNetworkInfo` message to `api/proto/data.proto`
-- [ ] Add fields to `SIPMetadata` message
-- [ ] Regenerate: `make proto`
+- [x] Add `AccessNetworkInfo` message to `api/proto/data.proto`
+- [x] Add fields to `SIPMetadata` message
+- [x] Regenerate: `cd api/proto && make all`
 
 #### Step 4.5: Display in TUI
 
-- [ ] Add access network info to `internal/pkg/tui/views/voip_detail.go`
-- [ ] Show access type, BSSID/CellID when available
+- [x] Add access network info to `internal/pkg/tui/components/detailspanel.go`
+- [x] Show access type, BSSID/CellID when available
 
 ---
 

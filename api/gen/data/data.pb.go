@@ -459,9 +459,13 @@ type SIPMetadata struct {
 	// Full From URI (for display)
 	FromUri string `protobuf:"bytes,9,opt,name=from_uri,json=fromUri,proto3" json:"from_uri,omitempty"`
 	// Full To URI (for display)
-	ToUri         string `protobuf:"bytes,10,opt,name=to_uri,json=toUri,proto3" json:"to_uri,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ToUri string `protobuf:"bytes,10,opt,name=to_uri,json=toUri,proto3" json:"to_uri,omitempty"`
+	// 3GPP IMS P-Access-Network-Info header (3GPP TS 24.229)
+	AccessNetworkInfo *AccessNetworkInfo `protobuf:"bytes,11,opt,name=access_network_info,json=accessNetworkInfo,proto3" json:"access_network_info,omitempty"`
+	// 3GPP IMS P-Visited-Network-ID header
+	VisitedNetworkId string `protobuf:"bytes,12,opt,name=visited_network_id,json=visitedNetworkId,proto3" json:"visited_network_id,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SIPMetadata) Reset() {
@@ -564,6 +568,103 @@ func (x *SIPMetadata) GetToUri() string {
 	return ""
 }
 
+func (x *SIPMetadata) GetAccessNetworkInfo() *AccessNetworkInfo {
+	if x != nil {
+		return x.AccessNetworkInfo
+	}
+	return nil
+}
+
+func (x *SIPMetadata) GetVisitedNetworkId() string {
+	if x != nil {
+		return x.VisitedNetworkId
+	}
+	return ""
+}
+
+// AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).
+// This provides access network information for VoLTE/VoWiFi sessions.
+type AccessNetworkInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Access technology type (e.g., "IEEE-802.11", "3GPP-E-UTRAN", "3GPP-NR")
+	AccessType string `protobuf:"bytes,1,opt,name=access_type,json=accessType,proto3" json:"access_type,omitempty"`
+	// WiFi AP MAC address (from i-wlan-node-id parameter)
+	Bssid string `protobuf:"bytes,2,opt,name=bssid,proto3" json:"bssid,omitempty"`
+	// Cellular cell ID (from cgi-3gpp, utran-cell-id-3gpp, ecgi, ncgi parameters)
+	CellId string `protobuf:"bytes,3,opt,name=cell_id,json=cellId,proto3" json:"cell_id,omitempty"`
+	// UE local IP address
+	LocalIp string `protobuf:"bytes,4,opt,name=local_ip,json=localIp,proto3" json:"local_ip,omitempty"`
+	// Additional parameters from the header
+	Parameters    map[string]string `protobuf:"bytes,5,rep,name=parameters,proto3" json:"parameters,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccessNetworkInfo) Reset() {
+	*x = AccessNetworkInfo{}
+	mi := &file_data_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccessNetworkInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccessNetworkInfo) ProtoMessage() {}
+
+func (x *AccessNetworkInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_data_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccessNetworkInfo.ProtoReflect.Descriptor instead.
+func (*AccessNetworkInfo) Descriptor() ([]byte, []int) {
+	return file_data_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AccessNetworkInfo) GetAccessType() string {
+	if x != nil {
+		return x.AccessType
+	}
+	return ""
+}
+
+func (x *AccessNetworkInfo) GetBssid() string {
+	if x != nil {
+		return x.Bssid
+	}
+	return ""
+}
+
+func (x *AccessNetworkInfo) GetCellId() string {
+	if x != nil {
+		return x.CellId
+	}
+	return ""
+}
+
+func (x *AccessNetworkInfo) GetLocalIp() string {
+	if x != nil {
+		return x.LocalIp
+	}
+	return ""
+}
+
+func (x *AccessNetworkInfo) GetParameters() map[string]string {
+	if x != nil {
+		return x.Parameters
+	}
+	return nil
+}
+
 // RTPMetadata for RTP packets
 type RTPMetadata struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -581,7 +682,7 @@ type RTPMetadata struct {
 
 func (x *RTPMetadata) Reset() {
 	*x = RTPMetadata{}
-	mi := &file_data_proto_msgTypes[4]
+	mi := &file_data_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -593,7 +694,7 @@ func (x *RTPMetadata) String() string {
 func (*RTPMetadata) ProtoMessage() {}
 
 func (x *RTPMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[4]
+	mi := &file_data_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -606,7 +707,7 @@ func (x *RTPMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RTPMetadata.ProtoReflect.Descriptor instead.
 func (*RTPMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{4}
+	return file_data_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RTPMetadata) GetSsrc() uint32 {
@@ -675,7 +776,7 @@ type DNSMetadata struct {
 
 func (x *DNSMetadata) Reset() {
 	*x = DNSMetadata{}
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -687,7 +788,7 @@ func (x *DNSMetadata) String() string {
 func (*DNSMetadata) ProtoMessage() {}
 
 func (x *DNSMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[5]
+	mi := &file_data_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -700,7 +801,7 @@ func (x *DNSMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DNSMetadata.ProtoReflect.Descriptor instead.
 func (*DNSMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{5}
+	return file_data_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DNSMetadata) GetTransactionId() uint32 {
@@ -871,7 +972,7 @@ type DNSAnswer struct {
 
 func (x *DNSAnswer) Reset() {
 	*x = DNSAnswer{}
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -883,7 +984,7 @@ func (x *DNSAnswer) String() string {
 func (*DNSAnswer) ProtoMessage() {}
 
 func (x *DNSAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[6]
+	mi := &file_data_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -896,7 +997,7 @@ func (x *DNSAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DNSAnswer.ProtoReflect.Descriptor instead.
 func (*DNSAnswer) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{6}
+	return file_data_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DNSAnswer) GetName() string {
@@ -957,7 +1058,7 @@ type EmailMetadata struct {
 
 func (x *EmailMetadata) Reset() {
 	*x = EmailMetadata{}
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -969,7 +1070,7 @@ func (x *EmailMetadata) String() string {
 func (*EmailMetadata) ProtoMessage() {}
 
 func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[7]
+	mi := &file_data_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -982,7 +1083,7 @@ func (x *EmailMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EmailMetadata.ProtoReflect.Descriptor instead.
 func (*EmailMetadata) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{7}
+	return file_data_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *EmailMetadata) GetMailFrom() string {
@@ -1051,7 +1152,7 @@ type BatchStats struct {
 
 func (x *BatchStats) Reset() {
 	*x = BatchStats{}
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1063,7 +1164,7 @@ func (x *BatchStats) String() string {
 func (*BatchStats) ProtoMessage() {}
 
 func (x *BatchStats) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[8]
+	mi := &file_data_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1076,7 +1177,7 @@ func (x *BatchStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchStats.ProtoReflect.Descriptor instead.
 func (*BatchStats) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{8}
+	return file_data_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *BatchStats) GetTotalCaptured() uint64 {
@@ -1122,7 +1223,7 @@ type StreamControl struct {
 
 func (x *StreamControl) Reset() {
 	*x = StreamControl{}
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1134,7 +1235,7 @@ func (x *StreamControl) String() string {
 func (*StreamControl) ProtoMessage() {}
 
 func (x *StreamControl) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[9]
+	mi := &file_data_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1147,7 +1248,7 @@ func (x *StreamControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamControl.ProtoReflect.Descriptor instead.
 func (*StreamControl) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{9}
+	return file_data_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *StreamControl) GetAckSequence() uint64 {
@@ -1192,7 +1293,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_data_proto_msgTypes[10]
+	mi := &file_data_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1204,7 +1305,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[10]
+	mi := &file_data_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1217,7 +1318,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{10}
+	return file_data_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SubscribeRequest) GetHunterIds() []string {
@@ -1273,7 +1374,7 @@ type CorrelatedCallUpdate struct {
 
 func (x *CorrelatedCallUpdate) Reset() {
 	*x = CorrelatedCallUpdate{}
-	mi := &file_data_proto_msgTypes[11]
+	mi := &file_data_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1285,7 +1386,7 @@ func (x *CorrelatedCallUpdate) String() string {
 func (*CorrelatedCallUpdate) ProtoMessage() {}
 
 func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[11]
+	mi := &file_data_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1298,7 +1399,7 @@ func (x *CorrelatedCallUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CorrelatedCallUpdate.ProtoReflect.Descriptor instead.
 func (*CorrelatedCallUpdate) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{11}
+	return file_data_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *CorrelatedCallUpdate) GetCorrelationId() string {
@@ -1384,7 +1485,7 @@ type CallLegInfo struct {
 
 func (x *CallLegInfo) Reset() {
 	*x = CallLegInfo{}
-	mi := &file_data_proto_msgTypes[12]
+	mi := &file_data_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1396,7 +1497,7 @@ func (x *CallLegInfo) String() string {
 func (*CallLegInfo) ProtoMessage() {}
 
 func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[12]
+	mi := &file_data_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1409,7 +1510,7 @@ func (x *CallLegInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallLegInfo.ProtoReflect.Descriptor instead.
 func (*CallLegInfo) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{12}
+	return file_data_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *CallLegInfo) GetCallId() string {
@@ -1513,7 +1614,7 @@ type TLSSessionKeys struct {
 
 func (x *TLSSessionKeys) Reset() {
 	*x = TLSSessionKeys{}
-	mi := &file_data_proto_msgTypes[13]
+	mi := &file_data_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1525,7 +1626,7 @@ func (x *TLSSessionKeys) String() string {
 func (*TLSSessionKeys) ProtoMessage() {}
 
 func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
-	mi := &file_data_proto_msgTypes[13]
+	mi := &file_data_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1538,7 +1639,7 @@ func (x *TLSSessionKeys) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TLSSessionKeys.ProtoReflect.Descriptor instead.
 func (*TLSSessionKeys) Descriptor() ([]byte, []int) {
-	return file_data_proto_rawDescGZIP(), []int{13}
+	return file_data_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *TLSSessionKeys) GetClientRandom() []byte {
@@ -1693,7 +1794,7 @@ const file_data_proto_rawDesc = "" +
 	"\x03dns\x18\f \x01(\v2\x1a.lippycat.data.DNSMetadataR\x03dns\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x03\n" +
 	"\vSIPMetadata\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x17\n" +
 	"\acall_id\x18\x02 \x01(\tR\x06callId\x12\x1b\n" +
@@ -1705,7 +1806,21 @@ const file_data_proto_rawDesc = "" +
 	"\x06to_tag\x18\b \x01(\tR\x05toTag\x12\x19\n" +
 	"\bfrom_uri\x18\t \x01(\tR\afromUri\x12\x15\n" +
 	"\x06to_uri\x18\n" +
-	" \x01(\tR\x05toUri\"~\n" +
+	" \x01(\tR\x05toUri\x12P\n" +
+	"\x13access_network_info\x18\v \x01(\v2 .lippycat.data.AccessNetworkInfoR\x11accessNetworkInfo\x12,\n" +
+	"\x12visited_network_id\x18\f \x01(\tR\x10visitedNetworkId\"\x8f\x02\n" +
+	"\x11AccessNetworkInfo\x12\x1f\n" +
+	"\vaccess_type\x18\x01 \x01(\tR\n" +
+	"accessType\x12\x14\n" +
+	"\x05bssid\x18\x02 \x01(\tR\x05bssid\x12\x17\n" +
+	"\acell_id\x18\x03 \x01(\tR\x06cellId\x12\x19\n" +
+	"\blocal_ip\x18\x04 \x01(\tR\alocalIp\x12P\n" +
+	"\n" +
+	"parameters\x18\x05 \x03(\v20.lippycat.data.AccessNetworkInfo.ParametersEntryR\n" +
+	"parameters\x1a=\n" +
+	"\x0fParametersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"~\n" +
 	"\vRTPMetadata\x12\x12\n" +
 	"\x04ssrc\x18\x01 \x01(\rR\x04ssrc\x12!\n" +
 	"\fpayload_type\x18\x02 \x01(\rR\vpayloadType\x12\x1a\n" +
@@ -1835,49 +1950,53 @@ func file_data_proto_rawDescGZIP() []byte {
 }
 
 var file_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_data_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_data_proto_goTypes = []any{
 	(FlowControl)(0),             // 0: lippycat.data.FlowControl
 	(*PacketBatch)(nil),          // 1: lippycat.data.PacketBatch
 	(*CapturedPacket)(nil),       // 2: lippycat.data.CapturedPacket
 	(*PacketMetadata)(nil),       // 3: lippycat.data.PacketMetadata
 	(*SIPMetadata)(nil),          // 4: lippycat.data.SIPMetadata
-	(*RTPMetadata)(nil),          // 5: lippycat.data.RTPMetadata
-	(*DNSMetadata)(nil),          // 6: lippycat.data.DNSMetadata
-	(*DNSAnswer)(nil),            // 7: lippycat.data.DNSAnswer
-	(*EmailMetadata)(nil),        // 8: lippycat.data.EmailMetadata
-	(*BatchStats)(nil),           // 9: lippycat.data.BatchStats
-	(*StreamControl)(nil),        // 10: lippycat.data.StreamControl
-	(*SubscribeRequest)(nil),     // 11: lippycat.data.SubscribeRequest
-	(*CorrelatedCallUpdate)(nil), // 12: lippycat.data.CorrelatedCallUpdate
-	(*CallLegInfo)(nil),          // 13: lippycat.data.CallLegInfo
-	(*TLSSessionKeys)(nil),       // 14: lippycat.data.TLSSessionKeys
-	nil,                          // 15: lippycat.data.PacketMetadata.DetailsEntry
+	(*AccessNetworkInfo)(nil),    // 5: lippycat.data.AccessNetworkInfo
+	(*RTPMetadata)(nil),          // 6: lippycat.data.RTPMetadata
+	(*DNSMetadata)(nil),          // 7: lippycat.data.DNSMetadata
+	(*DNSAnswer)(nil),            // 8: lippycat.data.DNSAnswer
+	(*EmailMetadata)(nil),        // 9: lippycat.data.EmailMetadata
+	(*BatchStats)(nil),           // 10: lippycat.data.BatchStats
+	(*StreamControl)(nil),        // 11: lippycat.data.StreamControl
+	(*SubscribeRequest)(nil),     // 12: lippycat.data.SubscribeRequest
+	(*CorrelatedCallUpdate)(nil), // 13: lippycat.data.CorrelatedCallUpdate
+	(*CallLegInfo)(nil),          // 14: lippycat.data.CallLegInfo
+	(*TLSSessionKeys)(nil),       // 15: lippycat.data.TLSSessionKeys
+	nil,                          // 16: lippycat.data.PacketMetadata.DetailsEntry
+	nil,                          // 17: lippycat.data.AccessNetworkInfo.ParametersEntry
 }
 var file_data_proto_depIdxs = []int32{
 	2,  // 0: lippycat.data.PacketBatch.packets:type_name -> lippycat.data.CapturedPacket
-	9,  // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
+	10, // 1: lippycat.data.PacketBatch.stats:type_name -> lippycat.data.BatchStats
 	3,  // 2: lippycat.data.CapturedPacket.metadata:type_name -> lippycat.data.PacketMetadata
-	14, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
+	15, // 3: lippycat.data.CapturedPacket.tls_keys:type_name -> lippycat.data.TLSSessionKeys
 	4,  // 4: lippycat.data.PacketMetadata.sip:type_name -> lippycat.data.SIPMetadata
-	5,  // 5: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
-	15, // 6: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
-	8,  // 7: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
-	6,  // 8: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
-	7,  // 9: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
-	0,  // 10: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
-	13, // 11: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
-	1,  // 12: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
-	11, // 13: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
-	11, // 14: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
-	10, // 15: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
-	1,  // 16: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
-	12, // 17: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
-	15, // [15:18] is the sub-list for method output_type
-	12, // [12:15] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	6,  // 5: lippycat.data.PacketMetadata.rtp:type_name -> lippycat.data.RTPMetadata
+	16, // 6: lippycat.data.PacketMetadata.details:type_name -> lippycat.data.PacketMetadata.DetailsEntry
+	9,  // 7: lippycat.data.PacketMetadata.email:type_name -> lippycat.data.EmailMetadata
+	7,  // 8: lippycat.data.PacketMetadata.dns:type_name -> lippycat.data.DNSMetadata
+	5,  // 9: lippycat.data.SIPMetadata.access_network_info:type_name -> lippycat.data.AccessNetworkInfo
+	17, // 10: lippycat.data.AccessNetworkInfo.parameters:type_name -> lippycat.data.AccessNetworkInfo.ParametersEntry
+	8,  // 11: lippycat.data.DNSMetadata.answers:type_name -> lippycat.data.DNSAnswer
+	0,  // 12: lippycat.data.StreamControl.flow_control:type_name -> lippycat.data.FlowControl
+	14, // 13: lippycat.data.CorrelatedCallUpdate.legs:type_name -> lippycat.data.CallLegInfo
+	1,  // 14: lippycat.data.DataService.StreamPackets:input_type -> lippycat.data.PacketBatch
+	12, // 15: lippycat.data.DataService.SubscribePackets:input_type -> lippycat.data.SubscribeRequest
+	12, // 16: lippycat.data.DataService.SubscribeCorrelatedCalls:input_type -> lippycat.data.SubscribeRequest
+	11, // 17: lippycat.data.DataService.StreamPackets:output_type -> lippycat.data.StreamControl
+	1,  // 18: lippycat.data.DataService.SubscribePackets:output_type -> lippycat.data.PacketBatch
+	13, // 19: lippycat.data.DataService.SubscribeCorrelatedCalls:output_type -> lippycat.data.CorrelatedCallUpdate
+	17, // [17:20] is the sub-list for method output_type
+	14, // [14:17] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_data_proto_init() }
@@ -1891,7 +2010,7 @@ func file_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_data_proto_rawDesc), len(file_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

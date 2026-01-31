@@ -84,6 +84,14 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		metadata.Body = extractMessageBody(body)
 	}
 
+	// Extract 3GPP IMS headers (P-Access-Network-Info, P-Visited-Network-ID)
+	if pani := headers["p-access-network-info"]; pani != "" {
+		metadata.AccessType, metadata.BSSID, metadata.CellID, metadata.LocalIP, metadata.AccessParams = parseAccessNetworkInfo(pani)
+	}
+	if pvni := headers["p-visited-network-id"]; pvni != "" {
+		metadata.VisitedNetworkID = parseVisitedNetworkID(pvni)
+	}
+
 	// Update call state
 	p.updateCallState(callID, method, metadata)
 
@@ -108,7 +116,19 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 			Method:            metadata.Method,
 			ResponseCode:      metadata.ResponseCode,
 			PAssertedIdentity: metadata.PAssertedIdentity,
+			VisitedNetworkId:  metadata.VisitedNetworkID,
 		},
+	}
+
+	// Add AccessNetworkInfo if present
+	if metadata.AccessType != "" {
+		pbMetadata.Sip.AccessNetworkInfo = &data.AccessNetworkInfo{
+			AccessType: metadata.AccessType,
+			Bssid:      metadata.BSSID,
+			CellId:     metadata.CellID,
+			LocalIp:    metadata.LocalIP,
+			Parameters: metadata.AccessParams,
+		}
 	}
 
 	return &ProcessResult{
@@ -437,4 +457,89 @@ type callIDError struct {
 
 func (e *callIDError) Error() string {
 	return e.msg
+}
+
+// parseAccessNetworkInfo parses the P-Access-Network-Info header (3GPP TS 24.229).
+// Format: <access-type> [; <parameter>=<value>]*
+// Examples:
+//   - IEEE-802.11; i-wlan-node-id=00:11:22:33:44:55
+//   - 3GPP-E-UTRAN; utran-cell-id-3gpp=23415001234567890
+//   - 3GPP-E-UTRAN-FDD; cgi-3gpp=23415001234567890
+//   - 3GPP-NR; ncgi=23415001234567890
+//   - 3GPP-GERAN; cgi-3gpp=234150012345; local-time-zone=+0100
+func parseAccessNetworkInfo(headerValue string) (accessType, bssid, cellID, localIP string, params map[string]string) {
+	if headerValue == "" {
+		return "", "", "", "", nil
+	}
+
+	// Split on semicolons to get access type and parameters
+	parts := strings.Split(headerValue, ";")
+	if len(parts) == 0 {
+		return "", "", "", "", nil
+	}
+
+	accessType = strings.TrimSpace(parts[0])
+	if accessType == "" {
+		return "", "", "", "", nil
+	}
+
+	params = make(map[string]string)
+
+	// Parse parameters
+	for i := 1; i < len(parts); i++ {
+		param := strings.TrimSpace(parts[i])
+		if param == "" {
+			continue
+		}
+
+		// Split on first '=' only
+		eqIdx := strings.Index(param, "=")
+		if eqIdx == -1 {
+			// Parameter without value (flag)
+			params[strings.ToLower(param)] = ""
+			continue
+		}
+
+		key := strings.TrimSpace(strings.ToLower(param[:eqIdx]))
+		value := strings.TrimSpace(param[eqIdx+1:])
+
+		// Remove quotes if present
+		value = strings.Trim(value, "\"")
+
+		params[key] = value
+
+		// Extract specific fields based on parameter name
+		switch key {
+		case "i-wlan-node-id":
+			// WiFi BSSID (MAC address)
+			bssid = value
+		case "cgi-3gpp", "utran-cell-id-3gpp", "ecgi", "ncgi":
+			// Cell ID (various formats for different radio technologies)
+			cellID = value
+		case "local-ip":
+			// UE local IP address
+			localIP = value
+		}
+	}
+
+	return accessType, bssid, cellID, localIP, params
+}
+
+// parseVisitedNetworkID parses the P-Visited-Network-ID header (3GPP TS 24.229).
+// Format: <network-id> (may be quoted)
+// Examples:
+//   - "Visited Network Name"
+//   - visited.network.example.com
+func parseVisitedNetworkID(headerValue string) string {
+	if headerValue == "" {
+		return ""
+	}
+
+	// Remove leading/trailing whitespace
+	value := strings.TrimSpace(headerValue)
+
+	// Remove quotes if present
+	value = strings.Trim(value, "\"")
+
+	return value
 }

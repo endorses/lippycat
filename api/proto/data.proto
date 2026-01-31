@@ -146,6 +146,31 @@ message SIPMetadata {
 
     // Full To URI (for display)
     string to_uri = 10;
+
+    // 3GPP IMS P-Access-Network-Info header (3GPP TS 24.229)
+    AccessNetworkInfo access_network_info = 11;
+
+    // 3GPP IMS P-Visited-Network-ID header
+    string visited_network_id = 12;
+}
+
+// AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).
+// This provides access network information for VoLTE/VoWiFi sessions.
+message AccessNetworkInfo {
+    // Access technology type (e.g., "IEEE-802.11", "3GPP-E-UTRAN", "3GPP-NR")
+    string access_type = 1;
+
+    // WiFi AP MAC address (from i-wlan-node-id parameter)
+    string bssid = 2;
+
+    // Cellular cell ID (from cgi-3gpp, utran-cell-id-3gpp, ecgi, ncgi parameters)
+    string cell_id = 3;
+
+    // UE local IP address
+    string local_ip = 4;
+
+    // Additional parameters from the header
+    map<string, string> parameters = 5;
 }
 
 // RTPMetadata for RTP packets

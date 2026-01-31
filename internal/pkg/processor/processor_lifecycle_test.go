@@ -456,7 +456,7 @@ func TestProcessor_Shutdown_WithUpstream(t *testing.T) {
 		ProcessorID:  "test-processor",
 		ListenAddr:   "localhost:0",
 		MaxHunters:   10,
-		UpstreamAddr: "upstream:50051", // Non-existent upstream (will retry in background)
+		UpstreamAddr: "upstream:55555", // Non-existent upstream (will retry in background)
 	})
 	require.NoError(t, err)
 	require.NotNil(t, processor.upstreamManager)

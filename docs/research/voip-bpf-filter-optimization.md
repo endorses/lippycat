@@ -554,7 +554,7 @@ sudo lc sniff voip -i eth0 --filter "host 10.0.0.50" --sip-port 5060
 ```bash
 # Hunter with UDP-only VoIP capture and custom RTP range
 
-sudo lc hunt voip --processor processor:50051 \
+sudo lc hunt voip --processor processor:55555 \
     --sip-port 5060 \
     --rtp-port-range 8000-9000 \
     --udp-only
@@ -619,7 +619,7 @@ voip:
 # Hunter node configuration
 
 hunter:
-  processor_addr: "processor.example.com:50051"
+  processor_addr: "processor.example.com:55555"
   interfaces: ["eth0"]
 
   # VoIP filter settings (same options as sniff)

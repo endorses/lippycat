@@ -402,7 +402,7 @@ make build
 
 # Non-LI build should work without LI flags
 make processor
-./bin/lc-processor process --listen :50051 --insecure  # Should work, no LI
+./bin/lc-processor process --listen :55555 --insecure  # Should work, no LI
 ```
 
 ## Consistency with Existing Patterns

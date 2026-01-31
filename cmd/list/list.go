@@ -18,8 +18,8 @@ Subcommands:
 
 Examples:
   lc list interfaces                              # List network interfaces
-  lc list filters -P proc:50051 --tls-ca ca.crt   # List filters (TLS)
-  lc list filters -P localhost:50051 --insecure   # Local testing`,
+  lc list filters -P proc:55555 --tls-ca ca.crt   # List filters (TLS)
+  lc list filters -P localhost:55555 --insecure   # Local testing`,
 	// No Run function - requires a subcommand
 }
 

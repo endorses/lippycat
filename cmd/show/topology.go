@@ -21,10 +21,10 @@ TLS is enabled by default. Use --insecure for local testing without TLS.
 
 Examples:
   # Show full topology (TLS with CA verification)
-  lc show topology -P processor.example.com:50051 --tls-ca ca.crt
+  lc show topology -P processor.example.com:55555 --tls-ca ca.crt
 
   # Local testing without TLS
-  lc show topology -P localhost:50051 --insecure`,
+  lc show topology -P localhost:55555 --insecure`,
 	Run: runShowTopology,
 }
 

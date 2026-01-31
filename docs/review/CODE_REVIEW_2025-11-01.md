@@ -186,7 +186,7 @@ func (p *Processor) RegisterHunter(ctx context.Context, req *management.HunterRe
 ```bash
 # Attacker connects to processor without TLS
 grpcurl -plaintext -d '{"hunter_id": "attacker", ...}' \
-  processor:50051 management.ManagementService/RegisterHunter
+  processor:55555 management.ManagementService/RegisterHunter
 
 # Now receives all packets for forwarding decisions
 ```
@@ -581,7 +581,7 @@ cleanupInterval := 5 * time.Minute      // Line 64
 maxCallHistory := 1000                  // Line 128
 
 // Scattered across codebase:
-defaultPort := 50051
+defaultPort := 55555
 bufferSize := 10000
 threshold := 0.70
 ```
@@ -595,7 +595,7 @@ import "time"
 
 const (
     // Network
-    DefaultGRPCPort         = 50051
+    DefaultGRPCPort         = 55555
     MaxGRPCMessageSize      = 100 * 1024 * 1024  // 100 MB
     GRPCKeepaliveInterval   = 10 * time.Second
 

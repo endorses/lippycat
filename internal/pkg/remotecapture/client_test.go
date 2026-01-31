@@ -69,11 +69,11 @@ func (m *MockEventHandler) OnTopologyUpdate(update *management.TopologyUpdate, p
 
 func TestClientConfig_Defaults(t *testing.T) {
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
-	assert.Equal(t, "localhost:50051", config.Address)
+	assert.Equal(t, "localhost:55555", config.Address)
 	assert.False(t, config.TLSEnabled)
 	assert.Empty(t, config.TLSCAFile)
 	assert.Empty(t, config.TLSCertFile)
@@ -82,7 +82,7 @@ func TestClientConfig_Defaults(t *testing.T) {
 
 func TestClientConfig_WithTLS(t *testing.T) {
 	config := &ClientConfig{
-		Address:     "processor.example.com:50051",
+		Address:     "processor.example.com:55555",
 		TLSEnabled:  true,
 		TLSCAFile:   "/path/to/ca.pem",
 		TLSCertFile: "/path/to/cert.pem",
@@ -97,7 +97,7 @@ func TestClientConfig_WithTLS(t *testing.T) {
 
 func TestClientConfig_SkipVerify(t *testing.T) {
 	config := &ClientConfig{
-		Address:       "localhost:50051",
+		Address:       "localhost:55555",
 		TLSEnabled:    true,
 		TLSSkipVerify: true,
 	}
@@ -108,7 +108,7 @@ func TestClientConfig_SkipVerify(t *testing.T) {
 
 func TestClientConfig_ServerNameOverride(t *testing.T) {
 	config := &ClientConfig{
-		Address:               "192.168.1.10:50051",
+		Address:               "192.168.1.10:55555",
 		TLSEnabled:            true,
 		TLSServerNameOverride: "processor.example.com",
 	}
@@ -140,7 +140,7 @@ func TestMockEventHandler_HunterStatus(t *testing.T) {
 
 	processorStatus := management.ProcessorStatus_PROCESSOR_HEALTHY
 
-	handler.OnHunterStatus(hunters, "processor-1", processorStatus, "localhost:50051", "")
+	handler.OnHunterStatus(hunters, "processor-1", processorStatus, "localhost:55555", "")
 
 	assert.Len(t, handler.HunterStatuses, 1)
 	assert.Equal(t, hunters, handler.HunterStatuses[0].Hunters)
@@ -151,10 +151,10 @@ func TestMockEventHandler_HunterStatus(t *testing.T) {
 func TestMockEventHandler_Disconnect(t *testing.T) {
 	handler := &MockEventHandler{}
 
-	handler.OnDisconnect("localhost:50051", assert.AnError)
+	handler.OnDisconnect("localhost:55555", assert.AnError)
 
 	assert.Len(t, handler.Disconnects, 1)
-	assert.Equal(t, "localhost:50051", handler.Disconnects[0].Address)
+	assert.Equal(t, "localhost:55555", handler.Disconnects[0].Address)
 	assert.Equal(t, assert.AnError, handler.Disconnects[0].Error)
 }
 
@@ -166,7 +166,7 @@ func TestMockEventHandler_MultipleEvents(t *testing.T) {
 	handler.OnPacketBatch([]types.PacketDisplay{{Protocol: "UDP"}})
 
 	// Multiple status updates
-	handler.OnHunterStatus([]types.HunterInfo{{ID: "h1"}}, "p1", management.ProcessorStatus_PROCESSOR_HEALTHY, "localhost:50051", "")
+	handler.OnHunterStatus([]types.HunterInfo{{ID: "h1"}}, "p1", management.ProcessorStatus_PROCESSOR_HEALTHY, "localhost:55555", "")
 	handler.OnHunterStatus([]types.HunterInfo{{ID: "h2"}}, "p2", management.ProcessorStatus_PROCESSOR_HEALTHY, "localhost:50052", "")
 
 	// Multiple disconnects
@@ -205,7 +205,7 @@ func TestNodeType_String(t *testing.T) {
 
 func TestBuildTLSCredentials_InvalidCAFile(t *testing.T) {
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: true,
 		TLSCAFile:  "/nonexistent/ca.pem",
 	}
@@ -217,7 +217,7 @@ func TestBuildTLSCredentials_InvalidCAFile(t *testing.T) {
 
 func TestBuildTLSCredentials_InvalidCertFile(t *testing.T) {
 	config := &ClientConfig{
-		Address:     "localhost:50051",
+		Address:     "localhost:55555",
 		TLSEnabled:  true,
 		TLSCertFile: "/nonexistent/cert.pem",
 		TLSKeyFile:  "/nonexistent/key.pem",
@@ -229,7 +229,7 @@ func TestBuildTLSCredentials_InvalidCertFile(t *testing.T) {
 
 func TestBuildTLSCredentials_SkipVerify(t *testing.T) {
 	config := &ClientConfig{
-		Address:       "localhost:50051",
+		Address:       "localhost:55555",
 		TLSEnabled:    true,
 		TLSSkipVerify: true,
 	}
@@ -244,7 +244,7 @@ func TestBuildTLSCredentials_SkipVerify(t *testing.T) {
 
 func TestBuildTLSCredentials_ServerNameOverride(t *testing.T) {
 	config := &ClientConfig{
-		Address:               "192.168.1.10:50051",
+		Address:               "192.168.1.10:55555",
 		TLSEnabled:            true,
 		TLSSkipVerify:         true,
 		TLSServerNameOverride: "processor.example.com",
@@ -359,7 +359,7 @@ func TestHunterInfo_Fields(t *testing.T) {
 	hunter := types.HunterInfo{
 		ID:               "hunter-1",
 		Hostname:         "edge-node-1",
-		RemoteAddr:       "192.168.1.10:50051",
+		RemoteAddr:       "192.168.1.10:55555",
 		Interfaces:       []string{"eth0", "eth1"},
 		PacketsCaptured:  1000,
 		PacketsMatched:   800,
@@ -371,7 +371,7 @@ func TestHunterInfo_Fields(t *testing.T) {
 
 	assert.Equal(t, "hunter-1", hunter.ID)
 	assert.Equal(t, "edge-node-1", hunter.Hostname)
-	assert.Equal(t, "192.168.1.10:50051", hunter.RemoteAddr)
+	assert.Equal(t, "192.168.1.10:55555", hunter.RemoteAddr)
 	assert.Len(t, hunter.Interfaces, 2)
 	assert.Equal(t, uint64(1000), hunter.PacketsCaptured)
 	assert.Equal(t, uint64(800), hunter.PacketsMatched)
@@ -385,7 +385,7 @@ func TestClient_CloseIdempotent(t *testing.T) {
 	// Test that calling Close() multiple times is safe
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -407,7 +407,7 @@ func TestNewClient_DeprecatedConstructor(t *testing.T) {
 	handler := &MockEventHandler{}
 
 	// Test deprecated constructor
-	client, err := NewClient("localhost:50051", handler)
+	client, err := NewClient("localhost:55555", handler)
 
 	if err != nil {
 		// Connection might fail in test environment - that's ok
@@ -416,7 +416,7 @@ func TestNewClient_DeprecatedConstructor(t *testing.T) {
 	}
 
 	assert.NotNil(t, client)
-	assert.Equal(t, "localhost:50051", client.GetAddr())
+	assert.Equal(t, "localhost:55555", client.GetAddr())
 
 	// Verify it created insecure connection (deprecated behavior)
 	client.Close()
@@ -431,7 +431,7 @@ func TestClientConfig_Validation(t *testing.T) {
 		{
 			name: "Valid insecure config",
 			config: &ClientConfig{
-				Address:    "localhost:50051",
+				Address:    "localhost:55555",
 				TLSEnabled: false,
 			},
 			isValid: true,
@@ -439,7 +439,7 @@ func TestClientConfig_Validation(t *testing.T) {
 		{
 			name: "Valid TLS config with skip verify",
 			config: &ClientConfig{
-				Address:       "localhost:50051",
+				Address:       "localhost:55555",
 				TLSEnabled:    true,
 				TLSSkipVerify: true,
 			},
@@ -492,7 +492,7 @@ func TestSlicesEqual_OrderMatters(t *testing.T) {
 func TestUpdateSubscription_NoChange(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -521,7 +521,7 @@ func TestUpdateSubscription_NoChange(t *testing.T) {
 func TestUpdateSubscription_SubscriptionChange(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -552,7 +552,7 @@ func TestUpdateSubscription_SubscriptionChange(t *testing.T) {
 func TestUpdateSubscription_NilToFiltered(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -580,7 +580,7 @@ func TestUpdateSubscription_NilToFiltered(t *testing.T) {
 func TestUpdateSubscription_FilteredToNil(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -613,7 +613,7 @@ func TestClient_ConnectAndStream_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -624,7 +624,7 @@ func TestClient_ConnectAndStream_Integration(t *testing.T) {
 
 	// Verify connection
 	assert.NotNil(t, client)
-	assert.Equal(t, "localhost:50051", client.GetAddr())
+	assert.Equal(t, "localhost:55555", client.GetAddr())
 
 	// Start streaming
 	err = client.StreamPackets()
@@ -652,7 +652,7 @@ func TestClient_FilteredStream_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -687,7 +687,7 @@ func TestClient_TopologyUpdates_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -754,7 +754,7 @@ func TestClient_SlowConsumer_Integration(t *testing.T) {
 	}
 
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -798,7 +798,7 @@ func TestClient_MultipleSubscribers_Integration(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		handlers[i] = &MockEventHandler{}
 		config := &ClientConfig{
-			Address:    "localhost:50051",
+			Address:    "localhost:55555",
 			TLSEnabled: false,
 		}
 
@@ -839,7 +839,7 @@ func TestClient_HotSwapSubscription_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -883,7 +883,7 @@ func TestClient_CorrelatedCalls_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -913,7 +913,7 @@ func TestClient_GetTopology_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -968,7 +968,7 @@ func TestClient_TLSConnection_Integration(t *testing.T) {
 
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:       "localhost:50051",
+		Address:       "localhost:55555",
 		TLSEnabled:    true,
 		TLSSkipVerify: true, // For testing only
 	}
@@ -993,7 +993,7 @@ func TestClient_TLSConnection_Integration(t *testing.T) {
 func TestClient_StreamPackets_ContextCancellation(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1026,7 +1026,7 @@ func TestClient_StreamPackets_ContextCancellation(t *testing.T) {
 func TestClient_GetTopology_HunterNode(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1048,7 +1048,7 @@ func TestClient_GetTopology_HunterNode(t *testing.T) {
 func TestClient_SubscribeTopology_HunterNode(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1070,7 +1070,7 @@ func TestClient_SubscribeTopology_HunterNode(t *testing.T) {
 func TestClient_SubscribeCorrelatedCalls_HunterNode(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1092,7 +1092,7 @@ func TestClient_SubscribeCorrelatedCalls_HunterNode(t *testing.T) {
 func TestClient_CloseWhileStreaming(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1118,7 +1118,7 @@ func TestClient_CloseWhileStreaming(t *testing.T) {
 func TestClient_GetConn(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1136,7 +1136,7 @@ func TestClient_GetConn(t *testing.T) {
 func TestClient_UpdateSubscription_Idempotent(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1165,7 +1165,7 @@ func TestClient_UpdateSubscription_Idempotent(t *testing.T) {
 func TestClient_StreamPackets_Wrapper(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1194,7 +1194,7 @@ func TestClient_DetectNodeType_Processor(t *testing.T) {
 	// We can only verify the logic indirectly
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1212,7 +1212,7 @@ func TestClient_DetectNodeType_Processor(t *testing.T) {
 func TestClient_GetAddr(t *testing.T) {
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 
@@ -1223,14 +1223,14 @@ func TestClient_GetAddr(t *testing.T) {
 	defer client.Close()
 
 	// Verify address
-	assert.Equal(t, "localhost:50051", client.GetAddr())
+	assert.Equal(t, "localhost:55555", client.GetAddr())
 }
 
 func TestClient_CallStateTracking(t *testing.T) {
 	// Test VoIP call state tracking logic
 	handler := &MockEventHandler{}
 	config := &ClientConfig{
-		Address:    "localhost:50051",
+		Address:    "localhost:55555",
 		TLSEnabled: false,
 	}
 

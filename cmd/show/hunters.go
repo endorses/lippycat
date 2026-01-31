@@ -26,13 +26,13 @@ TLS is enabled by default. Use --insecure for local testing without TLS.
 
 Examples:
   # List all connected hunters (TLS with CA verification)
-  lc show hunters -P processor.example.com:50051 --tls-ca ca.crt
+  lc show hunters -P processor.example.com:55555 --tls-ca ca.crt
 
   # Show a specific hunter
-  lc show hunters -P processor.example.com:50051 --tls-ca ca.crt --hunter edge-01
+  lc show hunters -P processor.example.com:55555 --tls-ca ca.crt --hunter edge-01
 
   # Local testing without TLS
-  lc show hunters -P localhost:50051 --insecure`,
+  lc show hunters -P localhost:55555 --insecure`,
 	Run: runShowHunters,
 }
 

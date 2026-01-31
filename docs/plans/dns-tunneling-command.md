@@ -248,14 +248,14 @@ sudo lc tap dns -i eth0 \
   --tunneling-debounce 5m
 
 # Process mode with all placeholders
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tunneling-command 'curl -X POST https://siem.example.com/alert \
     -d "domain=%domain%&score=%score%&entropy=%entropy%&queries=%queries%&srcips=%srcips%&hunter=%hunter%&time=%timestamp%"' \
   --tunneling-threshold 0.8 \
   --tunneling-debounce 10m
 
 # Combined with voip and pcap commands
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap \
   --pcap-command 'gzip %pcap%' \
   --voip-command 'notify-voip.sh %callid%' \

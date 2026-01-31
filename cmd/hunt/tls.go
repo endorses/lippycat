@@ -40,9 +40,9 @@ Features:
 Note: SNI and fingerprint filtering is managed by the processor and pushed to hunters.
 
 Example:
-  lc hunt tls --processor processor:50051
-  lc hunt tls --processor 192.168.1.100:50051 --interface eth0
-  lc hunt tls --processor processor:50051 --tls-port 443,8443`,
+  lc hunt tls --processor processor:55555
+  lc hunt tls --processor 192.168.1.100:55555 --interface eth0
+  lc hunt tls --processor processor:55555 --tls-port 443,8443`,
 	RunE: runTLSHunt,
 }
 

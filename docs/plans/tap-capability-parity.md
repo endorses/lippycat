@@ -149,8 +149,8 @@ make tap-li
 make tap-li-cuda
 
 # Test BPF exclusion
-sudo lc tap -i eth0 --listen :50051 --filter "port 5060" -v
-# Log should show: "(port 5060) and (not port 50051)"
+sudo lc tap -i eth0 --listen :55555 --filter "port 5060" -v
+# Log should show: "(port 5060) and (not port 55555)"
 
 # Test GPU
 sudo lc tap voip -i eth0 --gpu-backend cuda --enable-voip-filter

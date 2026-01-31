@@ -385,13 +385,13 @@ TLS is enabled by default. Use `--insecure` for local testing without TLS.
 
 ```bash
 # Edge tap (captures locally, forwards to regional)
-lc tap -i eth0 --processor regional:50051 --tls-ca ca.crt
+lc tap -i eth0 --processor regional:55555 --tls-ca ca.crt
 
 # Regional tap (captures locally, receives from edges, forwards to central)
-lc tap -i eth0 --processor central:50051 --tls-ca ca.crt
+lc tap -i eth0 --processor central:55555 --tls-ca ca.crt
 
 # Central processor (receives from all)
-lc process --listen 0.0.0.0:50051 --tls-cert server.crt --tls-key server.key
+lc process --listen 0.0.0.0:55555 --tls-cert server.crt --tls-key server.key
 ```
 
 ## Configuration Patterns
@@ -408,7 +408,7 @@ tap:
   buffer_size: 10000
   batch_size: 100
   batch_timeout_ms: 100
-  listen_addr: ":50051"
+  listen_addr: ":55555"
   id: "edge-tap"
   processor_addr: ""
 

@@ -46,13 +46,13 @@ TLS is enabled by default. Use --insecure for local testing without TLS.
 
 Examples:
   # Delete a single filter (TLS with CA verification)
-  lc rm filter --id myfilter -P processor.example.com:50051 --tls-ca ca.crt
+  lc rm filter --id myfilter -P processor.example.com:55555 --tls-ca ca.crt
 
   # Delete multiple filters from a file
-  lc rm filter -f filter-ids.txt -P processor.example.com:50051 --tls-ca ca.crt
+  lc rm filter -f filter-ids.txt -P processor.example.com:55555 --tls-ca ca.crt
 
   # Local testing without TLS
-  lc rm filter --id myfilter -P localhost:50051 --insecure`,
+  lc rm filter --id myfilter -P localhost:55555 --insecure`,
 	Run: runRmFilter,
 }
 

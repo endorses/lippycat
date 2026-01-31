@@ -27,7 +27,7 @@ sudo lc tap -i eth0 --tls-cert server.crt --tls-key server.key
 sudo lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
 # Hierarchical mode (forward to central processor)
-sudo lc tap -i eth0 --processor central-processor:50051 --tls-ca ca.crt
+sudo lc tap -i eth0 --processor central-processor:55555 --tls-ca ca.crt
 ```
 
 ## Commands
@@ -156,7 +156,7 @@ sudo lc tap tls -i eth0 \
 
 ### Management Interface
 
-- `-l, --listen` - Listen address for TUI connections (default: `:50051`)
+- `-l, --listen` - Listen address for TUI connections (default: `:55555`)
 - `-I, --id` - Unique tap identifier (default: hostname-tap)
 - `--max-subscribers` - Maximum concurrent TUI subscribers (default: 100, 0 = unlimited)
 
@@ -416,7 +416,7 @@ sudo lc tap voip -i eth0 \
 
 Monitor via TUI:
 ```bash
-lc watch remote --addr localhost:50051 --tls-ca ca.crt
+lc watch remote --addr localhost:55555 --tls-ca ca.crt
 ```
 
 ### Single-Machine DNS Capture
@@ -434,7 +434,7 @@ sudo lc tap dns -i eth0 \
 
 Monitor via TUI:
 ```bash
-lc watch remote --addr localhost:50051 --tls-ca ca.crt
+lc watch remote --addr localhost:55555 --tls-ca ca.crt
 ```
 
 ### Edge Node with Upstream Forwarding
@@ -444,11 +444,11 @@ Deploy tap nodes at edge locations, forwarding to central processor:
 ```bash
 # Edge tap node
 sudo lc tap voip -i eth0 \
-  --processor central-processor:50051 \
+  --processor central-processor:55555 \
   --tls-cert edge.crt --tls-key edge.key --tls-ca ca.crt
 
 # Central processor (receives from multiple edge taps)
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt \
   --tls-client-auth
 ```
@@ -522,7 +522,7 @@ tap:
   batch_timeout_ms: 100
 
   # Management interface
-  listen_addr: ":50051"
+  listen_addr: ":55555"
   id: "edge-tap-01"
   max_subscribers: 100
   processor_addr: ""
@@ -639,10 +639,10 @@ sudo setcap cap_net_raw,cap_net_admin+ep /usr/local/bin/lc
 
 ```bash
 # Verify tap is listening
-ss -tlnp | grep 50051
+ss -tlnp | grep 55555
 
 # Test TLS connection
-openssl s_client -connect localhost:50051 -CAfile ca.crt
+openssl s_client -connect localhost:55555 -CAfile ca.crt
 ```
 
 ### High Memory Usage

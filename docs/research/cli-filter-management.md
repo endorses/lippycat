@@ -40,7 +40,7 @@ This document captures research for implementing CLI-based filter management com
 ### `lc list filters`
 
 ```bash
-lc list filters -p processor:50051 \
+lc list filters -p processor:55555 \
   [--type <type>] \           # Filter by type
   [--hunter <hunter_id>] \    # Filter by target hunter
   [--enabled] \               # Only enabled filters
@@ -64,7 +64,7 @@ lc list filters -p processor:50051 \
 ### `lc show filter`
 
 ```bash
-lc show filter -p processor:50051 --id abc123
+lc show filter -p processor:55555 --id abc123
 ```
 
 **Output (JSON object):**
@@ -83,7 +83,7 @@ lc show filter -p processor:50051 --id abc123
 
 ```bash
 # Create new filter
-lc set filter -p processor:50051 \
+lc set filter -p processor:55555 \
   --type sip_user \
   --pattern "alice" \
   [--hunters h1,h2] \         # Empty = all hunters
@@ -91,13 +91,13 @@ lc set filter -p processor:50051 \
   [--enabled=true]            # Default: true
 
 # Update existing filter
-lc set filter -p processor:50051 \
+lc set filter -p processor:55555 \
   --id abc123 \
   --pattern "alice*" \
   [--enabled=false]
 
 # Batch set from file
-lc set filter -p processor:50051 --file filters.yaml
+lc set filter -p processor:55555 --file filters.yaml
 ```
 
 **Output (JSON):**
@@ -128,10 +128,10 @@ lc set filter -p processor:50051 --file filters.yaml
 
 ```bash
 # Delete single filter
-lc rm filter -p processor:50051 --id abc123
+lc rm filter -p processor:55555 --id abc123
 
 # Batch delete from file (by ID)
-lc rm filter -p processor:50051 --file filters.yaml
+lc rm filter -p processor:55555 --file filters.yaml
 ```
 
 **Output (JSON):**
@@ -357,7 +357,7 @@ Add remote processor configuration to config file.
 **New Viper keys:**
 ```yaml
 remote:
-  processor: "processor.example.com:50051"
+  processor: "processor.example.com:55555"
   tls:
     enabled: true
     ca_file: "/path/to/ca.crt"

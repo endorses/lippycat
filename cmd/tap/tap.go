@@ -52,10 +52,10 @@ Examples:
   lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insecure
 
   # Tap with upstream forwarding (hierarchical mode)
-  lc tap -i eth0 --processor central-processor:50051 --tls-ca ca.crt
+  lc tap -i eth0 --processor central-processor:55555 --tls-ca ca.crt
 
   # Tap with TUI serving (secure)
-  lc tap -i eth0 --listen 0.0.0.0:50051 --tls-cert server.crt --tls-key server.key
+  lc tap -i eth0 --listen 0.0.0.0:55555 --tls-cert server.crt --tls-key server.key
 
   # VoIP capture with per-call PCAP (use 'tap voip' subcommand)
   lc tap voip -i eth0 --per-call-pcap --per-call-pcap-dir /var/pcaps --insecure

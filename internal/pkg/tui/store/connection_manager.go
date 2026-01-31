@@ -207,7 +207,7 @@ func (cm *ConnectionManager) TotalHunterCount() int {
 //
 //	TUI -> Processor A (root) -> Processor B -> Processor C (target)
 //
-// GetRootProcessorForAddress("processor-c:50051") would return Processor A's address and client.
+// GetRootProcessorForAddress("processor-c:55555") would return Processor A's address and client.
 func (cm *ConnectionManager) GetRootProcessorForAddress(targetAddr string) (string, interface{ Close() }, error) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()

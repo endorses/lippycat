@@ -14,7 +14,7 @@ services:
     container_name: lippycat-test-processor
     hostname: processor.test.local
     ports:
-      - "50051:50051"
+      - "55555:55555"
     environment:
       - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
@@ -30,11 +30,11 @@ services:
     networks:
       - lippycat-test
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      test: ["CMD", "nc", "-z", "localhost", "55555"]
       interval: 5s
       timeout: 3s
       retries: 3
-    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/processor.pcap", "--tls-cert", "/certs/processor-cert.pem", "--tls-key", "/certs/processor-key.pem", "--tls-ca", "/certs/ca-cert.pem", "--tls-client-auth"]
+    command: ["process", "--listen", "0.0.0.0:55555", "--write-file", "/output/processor.pcap", "--tls-cert", "/certs/processor-cert.pem", "--tls-key", "/certs/processor-key.pem", "--tls-ca", "/certs/ca-cert.pem", "--tls-client-auth"]
 
   # Upstream processor (for hierarchical testing)
   upstream-processor:
@@ -44,7 +44,7 @@ services:
     container_name: lippycat-test-upstream
     hostname: upstream.test.local
     ports:
-      - "50052:50051"
+      - "50052:55555"
     environment:
       - LOG_LEVEL=debug
       - LIPPYCAT_TLS_ENABLED=true
@@ -59,11 +59,11 @@ services:
     networks:
       - lippycat-test
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "50051"]
+      test: ["CMD", "nc", "-z", "localhost", "55555"]
       interval: 5s
       timeout: 3s
       retries: 3
-    command: ["process", "--listen", "0.0.0.0:50051", "--write-file", "/output/upstream.pcap", "--tls-cert", "/certs/upstream-cert.pem", "--tls-key", "/certs/upstream-key.pem", "--tls-ca", "/certs/ca-cert.pem", "--tls-client-auth"]
+    command: ["process", "--listen", "0.0.0.0:55555", "--write-file", "/output/upstream.pcap", "--tls-cert", "/certs/upstream-cert.pem", "--tls-key", "/certs/upstream-key.pem", "--tls-ca", "/certs/ca-cert.pem", "--tls-client-auth"]
 
   # Hunter node 1
   hunter1:
@@ -88,7 +88,7 @@ services:
     depends_on:
       processor:
         condition: service_healthy
-    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter1", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
+    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:55555", "--hunter-id", "hunter1", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
 
   # Hunter node 2
   hunter2:
@@ -113,7 +113,7 @@ services:
     depends_on:
       processor:
         condition: service_healthy
-    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:50051", "--hunter-id", "hunter2", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
+    command: ["hunt", "--interface", "any", "--processor", "processor.test.local:55555", "--hunter-id", "hunter2", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
 
   # Hunter node 3 (connects to upstream processor for hierarchical testing)
   hunter3:
@@ -138,7 +138,7 @@ services:
     depends_on:
       upstream-processor:
         condition: service_healthy
-    command: ["hunt", "--interface", "any", "--processor", "upstream.test.local:50051", "--hunter-id", "hunter3", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
+    command: ["hunt", "--interface", "any", "--processor", "upstream.test.local:55555", "--hunter-id", "hunter3", "--tls-cert", "/certs/hunter-cert.pem", "--tls-key", "/certs/hunter-key.pem", "--tls-ca", "/certs/ca-cert.pem"]
 
   # Packet generator for testing
   packet-generator:

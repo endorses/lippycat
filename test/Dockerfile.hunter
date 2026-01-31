@@ -31,7 +31,7 @@ RUN mkdir -p /certs
 # Hunter needs elevated privileges for packet capture
 # Will run as root in container (isolated environment)
 
-EXPOSE 50051
+EXPOSE 55555
 
 ENTRYPOINT ["/usr/local/bin/lc"]
 CMD ["hunt", "--interface", "any"]

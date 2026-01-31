@@ -18,7 +18,7 @@ import (
 func TestProcessBatch(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -61,7 +61,7 @@ func TestProcessBatch(t *testing.T) {
 func TestProcessBatch_EmptyBatch(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -94,7 +94,7 @@ func TestProcessBatch_NilBatch(t *testing.T) {
 func TestHunterRegistration(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -124,7 +124,7 @@ func TestHunterRegistration(t *testing.T) {
 func TestMultipleHunters(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestMultipleHunters(t *testing.T) {
 func TestBroadcastToSubscribers(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -180,7 +180,7 @@ func TestBroadcastToSubscribers(t *testing.T) {
 func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -222,7 +222,7 @@ func TestBroadcastToSubscribers_MultipleSubscribers(t *testing.T) {
 func TestAddSubscriber(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -249,7 +249,7 @@ func TestAddSubscriber(t *testing.T) {
 func TestRemoveSubscriber(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -282,7 +282,7 @@ func TestRemoveSubscriber(t *testing.T) {
 func TestConcurrentBatchProcessing(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -329,7 +329,7 @@ func TestConcurrentBatchProcessing(t *testing.T) {
 func TestStatsAtomic(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 
@@ -360,7 +360,7 @@ func TestStatsAtomic(t *testing.T) {
 func TestHunterPacketCounting(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -400,7 +400,7 @@ func TestHunterPacketCounting(t *testing.T) {
 func TestProcessorStatsConcurrent(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 	})
 	require.NoError(t, err)
 

@@ -326,8 +326,8 @@ Standalone capture with processor capabilities.
 3. Press `Ctrl+C` to stop
 
 ## Distributed Capture
-1. Start processor: `lc process --listen :50051`
-2. Start hunter: `sudo lc hunt --processor localhost:50051`
+1. Start processor: `lc process --listen :55555`
+2. Start hunter: `sudo lc hunt --processor localhost:55555`
 3. Monitor: `lc watch remote --nodes-file nodes.yaml`
 ...
 ```

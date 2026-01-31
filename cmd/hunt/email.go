@@ -66,14 +66,14 @@ Filters can be specified locally (flags) or pushed from the processor.
 Local filters apply in addition to processor-pushed filters.
 
 Example:
-  lc hunt email --processor processor:50051
-  lc hunt email --processor 192.168.1.100:50051 --interface eth0
-  lc hunt email --processor processor:50051 --protocol imap
-  lc hunt email --processor processor:50051 --smtp-port 25,587,2525
-  lc hunt email --processor processor:50051 --sender "*@suspicious.com"
-  lc hunt email --processor processor:50051 --keywords "confidential,secret" --capture-body
-  lc hunt email --processor processor:50051 --protocol imap --mailbox "INBOX"
-  lc hunt email --processor processor:50051 --protocol pop3 --command "RETR"`,
+  lc hunt email --processor processor:55555
+  lc hunt email --processor 192.168.1.100:55555 --interface eth0
+  lc hunt email --processor processor:55555 --protocol imap
+  lc hunt email --processor processor:55555 --smtp-port 25,587,2525
+  lc hunt email --processor processor:55555 --sender "*@suspicious.com"
+  lc hunt email --processor processor:55555 --keywords "confidential,secret" --capture-body
+  lc hunt email --processor processor:55555 --protocol imap --mailbox "INBOX"
+  lc hunt email --processor processor:55555 --protocol pop3 --command "RETR"`,
 	RunE: runEmailHunt,
 }
 

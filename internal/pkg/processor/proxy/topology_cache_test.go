@@ -122,7 +122,7 @@ func TestTopologyCache_ProcessorConnected(t *testing.T) {
 			ProcessorConnected: &management.ProcessorConnectedEvent{
 				Processor: &management.ProcessorNode{
 					ProcessorId:       "proc-2",
-					Address:           "192.168.1.200:50051",
+					Address:           "192.168.1.200:55555",
 					UpstreamProcessor: "proc-1",
 					HierarchyDepth:    1,
 					Reachable:         true,
@@ -155,7 +155,7 @@ func TestTopologyCache_ProcessorConnected(t *testing.T) {
 	proc := cache.GetProcessor("proc-2")
 	require.NotNil(t, proc)
 	assert.Equal(t, "proc-2", proc.ID)
-	assert.Equal(t, "192.168.1.200:50051", proc.Address)
+	assert.Equal(t, "192.168.1.200:55555", proc.Address)
 	assert.Equal(t, "proc-1", proc.ParentID)
 	assert.Equal(t, int32(1), proc.HierarchyDepth)
 	assert.True(t, proc.Reachable)
@@ -186,7 +186,7 @@ func TestTopologyCache_ProcessorDisconnected(t *testing.T) {
 	// Add a processor with hunters and filters
 	cache.AddProcessor(&ProcessorNode{
 		ID:             "proc-2",
-		Address:        "192.168.1.200:50051",
+		Address:        "192.168.1.200:55555",
 		ParentID:       "proc-1",
 		HierarchyDepth: 1,
 		Reachable:      true,
@@ -223,7 +223,7 @@ func TestTopologyCache_ProcessorDisconnected(t *testing.T) {
 		Event: &management.TopologyUpdate_ProcessorDisconnected{
 			ProcessorDisconnected: &management.ProcessorDisconnectedEvent{
 				ProcessorId: "proc-2",
-				Address:     "192.168.1.200:50051",
+				Address:     "192.168.1.200:55555",
 				Reason:      "connection lost",
 			},
 		},
@@ -373,7 +373,7 @@ func TestTopologyCache_GetSnapshot(t *testing.T) {
 	// Add some data
 	cache.AddProcessor(&ProcessorNode{
 		ID:             "proc-1",
-		Address:        "192.168.1.200:50051",
+		Address:        "192.168.1.200:55555",
 		ParentID:       "",
 		HierarchyDepth: 0,
 		Reachable:      true,
@@ -417,7 +417,7 @@ func TestTopologyCache_MarkProcessorUnreachable(t *testing.T) {
 	// Add a processor
 	cache.AddProcessor(&ProcessorNode{
 		ID:             "proc-1",
-		Address:        "192.168.1.200:50051",
+		Address:        "192.168.1.200:55555",
 		ParentID:       "",
 		HierarchyDepth: 0,
 		Reachable:      true,
@@ -447,7 +447,7 @@ func TestTopologyCache_MarkProcessorReachable(t *testing.T) {
 	// Add an unreachable processor
 	cache.AddProcessor(&ProcessorNode{
 		ID:                "proc-1",
-		Address:           "192.168.1.200:50051",
+		Address:           "192.168.1.200:55555",
 		ParentID:          "",
 		HierarchyDepth:    0,
 		Reachable:         false,
@@ -601,7 +601,7 @@ func TestTopologyCache_ProcessorTTLExpiration(t *testing.T) {
 	// Add a processor with a hunter and filter
 	cache.AddProcessor(&ProcessorNode{
 		ID:             "proc-1",
-		Address:        "192.168.1.200:50051",
+		Address:        "192.168.1.200:55555",
 		ParentID:       "",
 		HierarchyDepth: 0,
 		Reachable:      true,

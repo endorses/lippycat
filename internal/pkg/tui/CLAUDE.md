@@ -547,14 +547,14 @@ Nodes loaded from YAML file:
 ```yaml
 processors:
   - name: "central"
-    address: "processor:50051"
+    address: "processor:55555"
     tls:
       enabled: true
       ca_file: "ca.crt"
 
 hunters:
   - name: "edge-01"
-    address: "hunter:50051"
+    address: "hunter:55555"
 ```
 
 **In-memory state:**

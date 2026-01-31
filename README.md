@@ -160,12 +160,12 @@ lc watch file -r capture.pcap
 lc watch remote --nodes-file nodes.yaml
 
 # Distributed capture (TLS enabled by default)
-lc process --listen :50051 --tls-cert server.crt --tls-key server.key  # Processor
-sudo lc hunt --interface eth0 --processor host:50051 --tls-ca ca.crt   # Hunter
+lc process --listen :55555 --tls-cert server.crt --tls-key server.key  # Processor
+sudo lc hunt --interface eth0 --processor host:55555 --tls-ca ca.crt   # Hunter
 
 # Local testing without TLS (not for production)
-lc process --listen :50051 --insecure
-sudo lc hunt --interface eth0 --processor host:50051 --insecure
+lc process --listen :55555 --insecure
+sudo lc hunt --interface eth0 --processor host:55555 --insecure
 ```
 
 ## Commands
@@ -270,7 +270,7 @@ flowchart TB
     end
 
     subgraph Processor["Processor Node"]
-        P[Processor<br/>monitor.internal:50051]
+        P[Processor<br/>monitor.internal:55555]
         VIRT[Virtual Interface<br/>lc0]
     end
 
@@ -302,20 +302,20 @@ flowchart TB
 
 ```bash
 # Processor (TLS enabled by default, requires cert/key)
-lc process --listen :50051 --write-file capture.pcap --virtual-interface \
+lc process --listen :55555 --write-file capture.pcap --virtual-interface \
   --tls-cert server.crt --tls-key server.key --tls-ca ca.crt
 
 # Hunter (TLS enabled by default, requires CA cert)
-sudo lc hunt --interface eth0 --processor processor:50051 --tls-ca ca.crt
+sudo lc hunt --interface eth0 --processor processor:55555 --tls-ca ca.crt
 
 # Mutual TLS (client certificate authentication)
-sudo lc hunt --interface eth0 --processor processor:50051 \
+sudo lc hunt --interface eth0 --processor processor:55555 \
   --tls-cert client.crt --tls-key client.key --tls-ca ca.crt
 
 # Protocol-specific hunters (all use TLS by default)
-sudo lc hunt voip --interface eth0 --processor processor:50051 --tls-ca ca.crt
-sudo lc hunt dns --interface eth0 --processor processor:50051 --tls-ca ca.crt
-sudo lc hunt tls --interface eth0 --processor processor:50051 --tls-ca ca.crt
+sudo lc hunt voip --interface eth0 --processor processor:55555 --tls-ca ca.crt
+sudo lc hunt dns --interface eth0 --processor processor:55555 --tls-ca ca.crt
+sudo lc hunt tls --interface eth0 --processor processor:55555 --tls-ca ca.crt
 
 # Analyze aggregated traffic on processor with external tools
 wireshark -i lc0     # Real-time analysis in Wireshark

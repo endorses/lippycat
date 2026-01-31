@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 			name: "valid configuration",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 			},
 			wantErr: false,
 		},
@@ -46,7 +46,7 @@ func TestNew(t *testing.T) {
 			name: "with protocol detection enabled",
 			config: Config{
 				ProcessorID:     "test-processor",
-				ListenAddr:      "localhost:50051",
+				ListenAddr:      "localhost:55555",
 				EnableDetection: true,
 			},
 			wantErr: false,
@@ -55,7 +55,7 @@ func TestNew(t *testing.T) {
 			name: "with upstream processor",
 			config: Config{
 				ProcessorID:  "test-processor",
-				ListenAddr:   "localhost:50051",
+				ListenAddr:   "localhost:55555",
 				UpstreamAddr: "upstream:50052",
 			},
 			wantErr: false,
@@ -264,7 +264,7 @@ func TestConfigValidation(t *testing.T) {
 			name: "valid minimal config",
 			config: Config{
 				ProcessorID: "proc-1",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 			},
 			wantErr: false,
 		},
@@ -272,7 +272,7 @@ func TestConfigValidation(t *testing.T) {
 			name: "valid with all options",
 			config: Config{
 				ProcessorID:     "proc-1",
-				ListenAddr:      "localhost:50051",
+				ListenAddr:      "localhost:55555",
 				MaxHunters:      10,
 				EnableDetection: true,
 				UpstreamAddr:    "upstream:50052",

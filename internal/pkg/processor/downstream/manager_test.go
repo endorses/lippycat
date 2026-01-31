@@ -95,7 +95,7 @@ func TestManager_Shutdown_ClosesConnections(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:   "processor-1",
-		ListenAddress: "localhost:50051",
+		ListenAddress: "localhost:55555",
 		// Note: Conn would normally be a real grpc.ClientConn
 		// For this test, we're just verifying the map is cleared
 	}
@@ -122,7 +122,7 @@ func TestManager_Shutdown_CancelsTopologySubscriptions(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:    "processor-1",
-		ListenAddress:  "localhost:50051",
+		ListenAddress:  "localhost:55555",
 		TopologyCancel: cancel,
 	}
 	mgr.mu.Unlock()
@@ -167,7 +167,7 @@ func TestManager_Shutdown_ClearsDownstreamsMap(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:   "processor-1",
-		ListenAddress: "localhost:50051",
+		ListenAddress: "localhost:55555",
 		Conn:          nil, // nil is acceptable for this test
 	}
 	mgr.downstreams["processor-2"] = &ProcessorInfo{
@@ -204,7 +204,7 @@ func TestManager_GetAll_MultipleProcessors(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:   "processor-1",
-		ListenAddress: "localhost:50051",
+		ListenAddress: "localhost:55555",
 		Version:       "1.0.0",
 	}
 	mgr.downstreams["processor-2"] = &ProcessorInfo{
@@ -234,7 +234,7 @@ func TestManager_Get_Existing(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:   "processor-1",
-		ListenAddress: "localhost:50051",
+		ListenAddress: "localhost:55555",
 		Version:       "1.0.0",
 	}
 	mgr.mu.Unlock()
@@ -242,7 +242,7 @@ func TestManager_Get_Existing(t *testing.T) {
 	proc := mgr.Get("processor-1")
 	require.NotNil(t, proc, "Get should return processor when it exists")
 	assert.Equal(t, "processor-1", proc.ProcessorID)
-	assert.Equal(t, "localhost:50051", proc.ListenAddress)
+	assert.Equal(t, "localhost:55555", proc.ListenAddress)
 }
 
 func TestManager_Get_NonExistent(t *testing.T) {
@@ -264,7 +264,7 @@ func TestManager_Unregister_Existing(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:    "processor-1",
-		ListenAddress:  "localhost:50051",
+		ListenAddress:  "localhost:55555",
 		TopologyCancel: cancel,
 	}
 	mgr.mu.Unlock()
@@ -318,7 +318,7 @@ func TestManager_PerformHealthCheck_ActiveStream(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:          "processor-1",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		LastSeen:             time.Now(),
 		TopologyStreamActive: true,
 	}
@@ -343,7 +343,7 @@ func TestManager_PerformHealthCheck_InactiveStream(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:          "processor-1",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		LastSeen:             time.Now().Add(-5 * time.Minute),
 		TopologyStreamActive: false,
 		reconnectAttempts:    3,
@@ -371,7 +371,7 @@ func TestManager_PerformHealthCheck_NoPublisher(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:          "processor-1",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		TopologyStreamActive: false,
 	}
 	mgr.mu.Unlock()
@@ -407,7 +407,7 @@ func TestManager_Close(t *testing.T) {
 	mgr.mu.Lock()
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:    "processor-1",
-		ListenAddress:  "localhost:50051",
+		ListenAddress:  "localhost:55555",
 		TopologyCancel: cancel,
 	}
 	mgr.mu.Unlock()
@@ -552,7 +552,7 @@ func TestManager_ConcurrentAccess(t *testing.T) {
 			mgr.mu.Lock()
 			mgr.downstreams[procID] = &ProcessorInfo{
 				ProcessorID:   procID,
-				ListenAddress: "localhost:50051",
+				ListenAddress: "localhost:55555",
 			}
 			mgr.mu.Unlock()
 

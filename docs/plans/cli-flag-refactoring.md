@@ -212,7 +212,7 @@ make test
 lc sniff voip -g cuda -S 5060 -M balanced -U -R 8000-9000
 
 # Test deprecated flags show warning
-lc tap --upstream localhost:50051  # Should warn
+lc tap --upstream localhost:55555  # Should warn
 
 # Test help shows new flags
 lc hunt --help

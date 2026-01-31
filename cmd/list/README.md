@@ -52,13 +52,13 @@ List filters configured on a remote processor (gRPC command).
 
 ```bash
 # List all filters (TLS with CA verification)
-lc list filters -P processor.example.com:50051 --tls-ca ca.crt
+lc list filters -P processor.example.com:55555 --tls-ca ca.crt
 
 # List filters for a specific hunter
-lc list filters -P processor.example.com:50051 --tls-ca ca.crt --hunter hunter-1
+lc list filters -P processor.example.com:55555 --tls-ca ca.crt --hunter hunter-1
 
 # Local testing without TLS
-lc list filters -P localhost:50051 --insecure
+lc list filters -P localhost:55555 --insecure
 ```
 
 **Output:** JSON array of filter objects to stdout.

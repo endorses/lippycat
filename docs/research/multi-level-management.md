@@ -61,7 +61,7 @@ TUI connects to → Upstream Processor A
 **Code Flow (Current - Fails):**
 ```
 TUI selects Hunter 3 (on Processor B)
-  ├─ hunter.ProcessorAddr = "processor-b:50051"
+  ├─ hunter.ProcessorAddr = "processor-b:55555"
   ├─ Look up processor-b in connectionMgr.Processors
   └─ NOT FOUND ✗ (only processor-a exists)
       └─ Error: "processor not connected"

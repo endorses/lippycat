@@ -59,7 +59,7 @@ sudo lc sniff http -i eth0 --tls-keylog /tmp/sslkeys.log
 sudo lc tap http -i eth0 --tls-keylog /tmp/sslkeys.log
 
 # Distributed hunter (decrypts for filtering, forwards encrypted + keys)
-sudo lc hunt http -i eth0 --processor central:50051 \
+sudo lc hunt http -i eth0 --processor central:55555 \
   --tls-keylog /tmp/sslkeys.log
 
 # Real-time key injection via named pipe
@@ -68,17 +68,17 @@ sudo lc tap http -i eth0 --tls-keylog-pipe /tmp/sslkeys.pipe &
 SSLKEYLOGFILE=/tmp/sslkeys.pipe ./myserver
 
 # Combined with content filtering (filter decrypted traffic)
-sudo lc hunt http -i eth0 --processor central:50051 \
+sudo lc hunt http -i eth0 --processor central:55555 \
   --tls-keylog /tmp/sslkeys.log \
   --host "*.example.com" --keywords-file sensitive.txt
 
 # Processor stores encrypted PCAP + keylog for Wireshark analysis
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap --per-call-pcap-dir /var/capture \
   --tls-keylog-dir /var/capture/keys
 
 # Works for any TLS-wrapped protocol
-sudo lc hunt email -i eth0 --processor central:50051 \
+sudo lc hunt email -i eth0 --processor central:55555 \
   --tls-keylog /tmp/sslkeys.log  # SMTPS, IMAPS, POP3S
 ```
 

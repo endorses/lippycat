@@ -133,7 +133,7 @@ jobs:
       - name: Test TLS connectivity
         run: |
           cd test
-          docker compose exec -T client openssl s_client -connect processor.test.local:50051 \
+          docker compose exec -T client openssl s_client -connect processor.test.local:55555 \
             -cert /certs/client-cert.pem \
             -key /certs/client-key.pem \
             -CAfile /certs/ca-cert.pem \

@@ -42,9 +42,9 @@ Features:
 Note: Domain filtering is managed by the processor and pushed to hunters.
 
 Example:
-  lc hunt dns --processor processor:50051
-  lc hunt dns --processor 192.168.1.100:50051 --interface eth0
-  lc hunt dns --processor processor:50051 --dns-port 53,5353`,
+  lc hunt dns --processor processor:55555
+  lc hunt dns --processor 192.168.1.100:55555 --interface eth0
+  lc hunt dns --processor processor:55555 --dns-port 53,5353`,
 	RunE: runDNSHunt,
 }
 

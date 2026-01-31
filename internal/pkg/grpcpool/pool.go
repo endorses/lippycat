@@ -106,11 +106,11 @@ func NewConnectionPool(config PoolConfig) *ConnectionPool {
 //
 // Example:
 //
-//	conn, err := pool.Get(ctx, "localhost:50051", dialOptions...)
+//	conn, err := pool.Get(ctx, "localhost:55555", dialOptions...)
 //	if err != nil {
 //	    return err
 //	}
-//	defer pool.Release("localhost:50051")
+//	defer pool.Release("localhost:55555")
 //
 //	// Use connection...
 //	client := service.NewClient(conn)

@@ -19,7 +19,7 @@ func TestConnectionPool_GetAndRelease(t *testing.T) {
 	defer Close(pool)
 
 	ctx := context.Background()
-	address := "localhost:50051"
+	address := "localhost:55555"
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
@@ -75,7 +75,7 @@ func TestConnectionPool_ReferenceCount(t *testing.T) {
 	defer Close(pool)
 
 	ctx := context.Background()
-	address := "localhost:50051"
+	address := "localhost:55555"
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
@@ -130,7 +130,7 @@ func TestConnectionPool_IdleCleanup(t *testing.T) {
 	defer Close(pool)
 
 	ctx := context.Background()
-	address := "localhost:50051"
+	address := "localhost:55555"
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
@@ -161,7 +161,7 @@ func TestConnectionPool_Close(t *testing.T) {
 	pool := NewConnectionPool(DefaultPoolConfig())
 
 	ctx := context.Background()
-	address := "localhost:50051"
+	address := "localhost:55555"
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
@@ -199,7 +199,7 @@ func TestConnectionPool_MultipleAddresses(t *testing.T) {
 	}
 
 	addresses := []string{
-		"localhost:50051",
+		"localhost:55555",
 		"localhost:50052",
 		"localhost:50053",
 	}
@@ -248,7 +248,7 @@ func TestConnectionPool_ReleaseUnknown(t *testing.T) {
 
 	// Release connection that was never acquired
 	// Should not panic
-	Release(pool, "unknown:50051")
+	Release(pool, "unknown:55555")
 
 	stats := GetStats(pool)
 	assert.Equal(t, 0, stats.TotalConnections)
@@ -259,7 +259,7 @@ func TestConnectionPool_DoubleRelease(t *testing.T) {
 	defer Close(pool)
 
 	ctx := context.Background()
-	address := "localhost:50051"
+	address := "localhost:55555"
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
@@ -299,7 +299,7 @@ func TestConnectionPool_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	address := "localhost:50051"
+	address := "localhost:55555"
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),

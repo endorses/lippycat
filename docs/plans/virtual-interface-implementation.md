@@ -64,7 +64,7 @@ snort -i lc0 -c voip-rules.conf &
 ### 3. Distributed Capture Aggregation
 ```bash
 # Processor aggregates from multiple hunters
-lc process --listen 0.0.0.0:50051 --virtual-interface
+lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Single interface shows traffic from all edge sites
 wireshark -i lc0  # See traffic from ALL hunters

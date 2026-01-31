@@ -29,9 +29,9 @@ Hunters apply local filters to reduce bandwidth and only send
 relevant packets upstream.
 
 Example:
-  lc hunt --processor processor.example.com:50051
-  lc hunt --processor 192.168.1.100:50051 --interface eth0
-  lc hunt --processor processor:50051 --id edge-01`,
+  lc hunt --processor processor.example.com:55555
+  lc hunt --processor 192.168.1.100:55555 --interface eth0
+  lc hunt --processor processor:55555 --id edge-01`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Handle deprecated --hunter-id flag migration to --id
 		if cmd.Flags().Changed("hunter-id") {

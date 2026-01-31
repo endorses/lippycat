@@ -1287,7 +1287,7 @@ func (e *Engine) matchRule(rule *gonids.Rule, pkt *types.PacketDisplay) bool {
 # ~/.config/lippycat/config.yaml
 
 processor:
-  listen: 0.0.0.0:50051
+  listen: 0.0.0.0:55555
   processor_id: proc-01
   enable_detection: true  # Required for protocol field extraction
 
@@ -1601,7 +1601,7 @@ func TestIDSPluginWithETRules(t *testing.T) {
 PROC_PID=$!
 
 # Start hunter
-sudo ./lc hunt --processor localhost:50051 --interface lo &
+sudo ./lc hunt --processor localhost:55555 --interface lo &
 HUNTER_PID=$!
 
 # Replay malicious traffic

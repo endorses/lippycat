@@ -22,11 +22,11 @@ Subcommands:
 TLS is enabled by default for remote commands. Use --insecure for local testing.
 
 Examples:
-  lc show status -P proc:50051 --tls-ca ca.crt   # Show processor status
-  lc show hunters -P proc:50051 --tls-ca ca.crt  # List connected hunters
-  lc show topology -P proc:50051 --tls-ca ca.crt # Show full topology
-  lc show filter --id myfilter -P proc:50051 --tls-ca ca.crt
-  lc show status -P localhost:50051 --insecure   # Local testing
+  lc show status -P proc:55555 --tls-ca ca.crt   # Show processor status
+  lc show hunters -P proc:55555 --tls-ca ca.crt  # List connected hunters
+  lc show topology -P proc:55555 --tls-ca ca.crt # Show full topology
+  lc show filter --id myfilter -P proc:55555 --tls-ca ca.crt
+  lc show status -P localhost:55555 --insecure   # Local testing
   lc show config                                 # Show local config`,
 	// No Run function - requires a subcommand
 }

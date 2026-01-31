@@ -64,7 +64,7 @@ See [LI_CERTIFICATES.md](LI_CERTIFICATES.md) for detailed certificate setup.
 ### 2. Start Processor with LI
 
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert=server.crt --tls-key=server.key \
   --li-enabled \
   --li-x1-listen :8443 \
@@ -85,7 +85,7 @@ lc process --listen :50051 \
 ```yaml
 # ~/.config/lippycat/config.yaml
 processor:
-  listen_addr: ":50051"
+  listen_addr: ":55555"
   tls:
     enabled: true
     cert_file: "/etc/lippycat/certs/server.crt"

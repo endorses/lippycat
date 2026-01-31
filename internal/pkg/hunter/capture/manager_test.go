@@ -20,8 +20,8 @@ func TestExtractPortFromAddr(t *testing.T) {
 	}{
 		{
 			name:     "standard port",
-			addr:     "processor.example.com:50051",
-			expected: "50051",
+			addr:     "processor.example.com:55555",
+			expected: "55555",
 		},
 		{
 			name:     "custom port",
@@ -35,8 +35,8 @@ func TestExtractPortFromAddr(t *testing.T) {
 		},
 		{
 			name:     "IPv6 with port",
-			addr:     "[::1]:50051",
-			expected: "50051",
+			addr:     "[::1]:55555",
+			expected: "55555",
 		},
 		{
 			name:     "IPv6 full address with port",
@@ -78,8 +78,8 @@ func TestBuildProcessorPortExclusionFilter(t *testing.T) {
 	}{
 		{
 			name:          "standard port",
-			processorAddr: "processor.example.com:50051",
-			expected:      "not port 50051",
+			processorAddr: "processor.example.com:55555",
+			expected:      "not port 55555",
 		},
 		{
 			name:          "custom port",
@@ -136,9 +136,9 @@ func TestBuildCombinedBPFFilter(t *testing.T) {
 		{
 			name:           "only processor port exclusion",
 			baseFilter:     "",
-			processorAddr:  "processor:50051",
+			processorAddr:  "processor:55555",
 			dynamicFilters: nil,
-			expected:       "not port 50051",
+			expected:       "not port 55555",
 		},
 		{
 			name:           "only base filter",
@@ -150,9 +150,9 @@ func TestBuildCombinedBPFFilter(t *testing.T) {
 		{
 			name:           "base filter and processor exclusion",
 			baseFilter:     "not port 22",
-			processorAddr:  "processor:50051",
+			processorAddr:  "processor:55555",
 			dynamicFilters: nil,
-			expected:       "(not port 22) and (not port 50051)",
+			expected:       "(not port 22) and (not port 55555)",
 		},
 		{
 			name:          "dynamic filter only",
@@ -166,30 +166,30 @@ func TestBuildCombinedBPFFilter(t *testing.T) {
 		{
 			name:          "dynamic filter with processor exclusion",
 			baseFilter:    "",
-			processorAddr: "processor:50051",
+			processorAddr: "processor:55555",
 			dynamicFilters: []*management.Filter{
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 443", Enabled: true},
 			},
-			expected: "((port 443)) and (not port 50051)",
+			expected: "((port 443)) and (not port 55555)",
 		},
 		{
 			name:          "dynamic filter with base filter and processor exclusion",
 			baseFilter:    "not port 22",
-			processorAddr: "processor:50051",
+			processorAddr: "processor:55555",
 			dynamicFilters: []*management.Filter{
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 443", Enabled: true},
 			},
-			expected: "((port 443)) and ((not port 22) and (not port 50051))",
+			expected: "((port 443)) and ((not port 22) and (not port 55555))",
 		},
 		{
 			name:          "multiple dynamic filters with processor exclusion",
 			baseFilter:    "",
-			processorAddr: "processor:50051",
+			processorAddr: "processor:55555",
 			dynamicFilters: []*management.Filter{
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 443", Enabled: true},
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 5060", Enabled: true},
 			},
-			expected: "((port 443) or (port 5060)) and (not port 50051)",
+			expected: "((port 443) or (port 5060)) and (not port 55555)",
 		},
 		{
 			name:          "multiple dynamic filters with base filter and processor exclusion",
@@ -204,31 +204,31 @@ func TestBuildCombinedBPFFilter(t *testing.T) {
 		{
 			name:          "disabled dynamic filter ignored",
 			baseFilter:    "",
-			processorAddr: "processor:50051",
+			processorAddr: "processor:55555",
 			dynamicFilters: []*management.Filter{
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 443", Enabled: true},
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 80", Enabled: false},
 			},
-			expected: "((port 443)) and (not port 50051)",
+			expected: "((port 443)) and (not port 55555)",
 		},
 		{
 			name:          "non-BPF filter ignored",
 			baseFilter:    "",
-			processorAddr: "processor:50051",
+			processorAddr: "processor:55555",
 			dynamicFilters: []*management.Filter{
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 443", Enabled: true},
 				{Type: management.FilterType_FILTER_SIP_USER, Pattern: "alice", Enabled: true},
 			},
-			expected: "((port 443)) and (not port 50051)",
+			expected: "((port 443)) and (not port 55555)",
 		},
 		{
 			name:          "IPv6 processor address",
 			baseFilter:    "",
-			processorAddr: "[2001:db8::1]:50051",
+			processorAddr: "[2001:db8::1]:55555",
 			dynamicFilters: []*management.Filter{
 				{Type: management.FilterType_FILTER_BPF, Pattern: "port 443", Enabled: true},
 			},
-			expected: "((port 443)) and (not port 50051)",
+			expected: "((port 443)) and (not port 55555)",
 		},
 	}
 
@@ -253,7 +253,7 @@ func TestManagerConfigPropagation(t *testing.T) {
 		Interfaces:    []string{"eth0", "eth1"},
 		BaseFilter:    "not port 22",
 		BufferSize:    1000,
-		ProcessorAddr: "processor.example.com:50051",
+		ProcessorAddr: "processor.example.com:55555",
 	}
 
 	m := New(config, ctx)

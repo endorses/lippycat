@@ -16,25 +16,25 @@ Processors are the central hub in lippycat's distributed architecture. They:
 
 ```bash
 # Start processor on default port
-lc process --listen :50051
+lc process --listen :55555
 
 # Processor with TLS (TLS enabled by default)
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key
 
 # Hierarchical mode (forward to upstream processor)
-lc process --listen :50051 --processor parent-processor:50051
+lc process --listen :55555 --processor parent-processor:55555
 
 # With PCAP writing
-lc process --listen :50051 --write-file /var/capture/packets.pcap
+lc process --listen :55555 --write-file /var/capture/packets.pcap
 ```
 
 ## Command Flags
 
 ### Required Flags
 
-- `-l, --listen` - Listen address for hunter connections (default: `:50051`)
+- `-l, --listen` - Listen address for hunter connections (default: `:55555`)
 
 ### Processor Configuration
 
@@ -55,7 +55,7 @@ Write all packets to a single continuous file:
 - `-w, --write-file` - Write all received packets to one PCAP file
 
 ```bash
-lc process --listen :50051 --write-file /var/capture/packets.pcap
+lc process --listen :55555 --write-file /var/capture/packets.pcap
 ```
 
 **Use Cases:** Compliance/audit trails, forensic analysis, traffic replay, long-term storage.
@@ -69,7 +69,7 @@ Write separate SIP and RTP PCAP files for each VoIP call:
 - `--per-call-pcap-pattern` - Filename pattern (default: `{timestamp}_{callid}.pcap`)
 
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap \
   --per-call-pcap-dir /var/capture/calls \
   --per-call-pcap-pattern "{timestamp}_{callid}.pcap"
@@ -100,7 +100,7 @@ Write non-VoIP packets to auto-rotating files based on activity:
 - `--auto-rotate-max-size` - Max file size before rotation (default: `100M`)
 
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --auto-rotate-pcap \
   --auto-rotate-pcap-dir /var/capture/bursts \
   --auto-rotate-idle-timeout 30s \
@@ -134,17 +134,17 @@ Execute custom commands when PCAP files are written or VoIP calls complete:
 
 ```bash
 # Execute script when PCAP files are written
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap \
   --pcap-command 'echo "%pcap%" >> /var/log/pcap-files.log'
 
 # Execute script when VoIP calls complete
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap \
   --voip-command '/opt/scripts/process-call.sh %callid% %dirname%'
 
 # Both hooks with custom timeout
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap \
   --pcap-command 'gzip %pcap%' \
   --voip-command 'notify.sh %callid% %caller% %called%' \
@@ -191,20 +191,20 @@ Execute custom commands when DNS tunneling is detected:
 
 ```bash
 # Alert on DNS tunneling detection
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tunneling-command 'echo "ALERT: %domain% score=%score%" >> /var/log/tunneling.log' \
   --tunneling-threshold 0.7 \
   --tunneling-debounce 5m
 
 # Send to SIEM
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tunneling-command 'curl -X POST https://siem.example.com/alert \
     -d "domain=%domain%&score=%score%&entropy=%entropy%&queries=%queries%&srcips=%srcips%&hunter=%hunter%&time=%timestamp%"' \
   --tunneling-threshold 0.8 \
   --tunneling-debounce 10m
 
 # Combined with PCAP and VoIP commands
-lc process --listen :50051 \
+lc process --listen :55555 \
   --per-call-pcap \
   --pcap-command 'gzip %pcap%' \
   --voip-command 'notify-voip.sh %callid%' \
@@ -340,15 +340,15 @@ Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag and require mutual
 export LIPPYCAT_PRODUCTION=true
 
 # ERROR: --insecure not allowed in production mode
-lc process --listen :50051 --insecure
+lc process --listen :55555 --insecure
 
 # ERROR: requires --tls-client-auth in production mode
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert server.crt \
   --tls-key server.key
 
 # OK: TLS with mutual authentication
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert server.crt \
   --tls-key server.key \
   --tls-ca ca.crt \
@@ -364,7 +364,7 @@ TLS is enabled by default. Processors support three security modes:
 Hunters verify processor's certificate (default when cert/key provided):
 
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key
 ```
@@ -374,7 +374,7 @@ lc process --listen :50051 \
 Both processor and hunters verify each other:
 
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert /etc/lippycat/certs/server.crt \
   --tls-key /etc/lippycat/certs/server.key \
   --tls-ca /etc/lippycat/certs/ca.crt \
@@ -388,7 +388,7 @@ This prevents unauthorized hunters from connecting.
 Only for testing on trusted networks. Must explicitly disable TLS:
 
 ```bash
-lc process --listen :50051 --insecure
+lc process --listen :55555 --insecure
 ```
 
 **Security Warning:** Displays prominent banner when TLS is disabled.
@@ -411,23 +411,23 @@ Processors can forward filtered traffic to upstream processors for multi-tier ag
 
 **Edge Processor:**
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --id edge-01 \
-  --processor regional-processor:50051 \
+  --processor regional-processor:55555 \
   --max-hunters 50
 ```
 
 **Regional Processor:**
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --id regional-west \
-  --processor central-processor:50051 \
+  --processor central-processor:55555 \
   --max-hunters 10  # Receives from edge processors
 ```
 
 **Central Processor:**
 ```bash
-lc process --listen :50051 \
+lc process --listen :55555 \
   --id central \
   --write-file /var/capture/all-traffic.pcap \
   --max-hunters 5
@@ -447,7 +447,7 @@ All flags can be specified in `~/.config/lippycat/config.yaml`:
 
 ```yaml
 processor:
-  listen_addr: "0.0.0.0:50051"
+  listen_addr: "0.0.0.0:55555"
   id: "prod-processor-01"
   processor_addr: ""  # Empty for no upstream
   max_hunters: 100
@@ -605,13 +605,13 @@ Processors are designed to survive network disruptions and temporary outages:
 
 ```bash
 # Check processor is listening
-ss -tlnp | grep 50051
+ss -tlnp | grep 55555
 
 # Verify TLS configuration
-openssl s_client -connect processor:50051 -CAfile ca.crt
+openssl s_client -connect processor:55555 -CAfile ca.crt
 
 # Check firewall
-sudo iptables -L -n | grep 50051
+sudo iptables -L -n | grep 55555
 ```
 
 ### High Memory Usage
@@ -654,10 +654,10 @@ Centralized monitoring of distributed capture from multiple edge sites.
 
 ```bash
 # Processor with virtual interface
-lc process --listen 0.0.0.0:50051 --virtual-interface --tls-cert server.crt --tls-key server.key
+lc process --listen 0.0.0.0:55555 --virtual-interface --tls-cert server.crt --tls-key server.key
 
 # Edge site hunters
-sudo lc hunt --processor processor:50051 --interface eth0 --tls-ca ca.crt
+sudo lc hunt --processor processor:55555 --interface eth0 --tls-ca ca.crt
 
 # Monitor aggregated stream from all hunters
 wireshark -i lc0
@@ -688,10 +688,10 @@ Requires `CAP_NET_ADMIN` capability:
 ```bash
 # Recommended: File capabilities
 sudo setcap cap_net_admin+ep /usr/local/bin/lc
-lc process --listen 0.0.0.0:50051 --virtual-interface
+lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Alternative: Run as root
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 ```
 
 ### Multi-Hunter Monitoring

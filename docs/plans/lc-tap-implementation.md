@@ -158,8 +158,8 @@ The tap command is a thin configuration layer reusing tested components.
 ## Validation Criteria
 
 1. `lc tap voip -i eth0` captures and processes VoIP traffic
-2. `lc watch remote --addr localhost:50051` connects to tap node
+2. `lc watch remote --addr localhost:55555` connects to tap node
 3. Per-call PCAP files are written correctly
-4. `lc tap --upstream processor:50051` forwards to upstream
+4. `lc tap --upstream processor:55555` forwards to upstream
 5. All existing processor and hunter tests pass
 6. No code duplication - only reuse

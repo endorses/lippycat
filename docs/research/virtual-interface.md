@@ -115,7 +115,7 @@ Third-Party Tools (only Alice's calls)
 **Distributed Aggregation:**
 ```bash
 # Terminal 1: Start processor with virtual interface (requires CAP_NET_ADMIN)
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Terminal 2: Monitor aggregated traffic
 tcpdump -i lc0 -nn
@@ -455,7 +455,7 @@ snort -i lc0 -c /etc/snort/voip-rules.conf -A fast
 **Setup (Distributed):**
 ```bash
 # Aggregate from hunters, expose to IDS
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 snort -i lc0 -c /etc/snort/snort.conf -A fast
 ```
 
@@ -477,7 +477,7 @@ wireshark -i lc0
 
 **Setup (Distributed):**
 ```bash
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 wireshark -i lc0
 ```
 
@@ -510,7 +510,7 @@ tshark -i lc0 -T fields -e sip.from.user -e sip.to.user
 **Setup:**
 ```bash
 # Start processor with virtual interface
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Run Zeek on the virtual interface
 zeek -i lc0 local
@@ -830,18 +830,18 @@ func NewManager(config Config) (Manager, error) {
 #### CLI Flags
 ```bash
 # Enable virtual interface (opt-in)
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Customize interface settings
 sudo lc process \
-  --listen 0.0.0.0:50051 \
+  --listen 0.0.0.0:55555 \
   --virtual-interface \
   --vif-name lippycat0 \
   --vif-type tap \
   --vif-buffer-size 4096
 
 # Without flag, processor runs without virtual interface (no root needed)
-lc process --listen 0.0.0.0:50051
+lc process --listen 0.0.0.0:55555
 ```
 
 #### YAML Configuration
@@ -1568,10 +1568,10 @@ func init() {
 
 ```bash
 # Terminal 1: Start processor with virtual interface (requires CAP_NET_ADMIN)
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Terminal 2: Start hunters
-sudo lc hunt --processor 192.168.1.100:50051 --interface eth0
+sudo lc hunt --processor 192.168.1.100:55555 --interface eth0
 
 # Terminal 3: Wireshark
 wireshark -i lippycat0
@@ -1581,7 +1581,7 @@ wireshark -i lippycat0
 
 ```bash
 # Terminal 1: Processor (requires CAP_NET_ADMIN)
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Terminal 2: Snort
 snort -i lippycat0 -c /etc/snort/snort.conf -A fast
@@ -1591,7 +1591,7 @@ snort -i lippycat0 -c /etc/snort/snort.conf -A fast
 
 ```bash
 # Terminal 1: Processor (requires CAP_NET_ADMIN)
-sudo lc process --listen 0.0.0.0:50051 --virtual-interface
+sudo lc process --listen 0.0.0.0:55555 --virtual-interface
 
 # Terminal 2: tcpdump (save to file)
 tcpdump -i lippycat0 -w /tmp/capture.pcap
@@ -1610,10 +1610,10 @@ snort -i lippycat0 -c /etc/snort/snort.conf -A fast
 ```bash
 # Processor with multiple outputs enabled
 sudo lc process \
-  --listen 0.0.0.0:50051 \
+  --listen 0.0.0.0:55555 \
   --virtual-interface \
   --pcap-output /var/pcaps \
-  --upstream upstream-processor:50051
+  --upstream upstream-processor:55555
 
 # Virtual interface, PCAP files, AND upstream forwarding all active
 ```

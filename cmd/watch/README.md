@@ -171,7 +171,7 @@ For remote monitoring, the nodes file specifies processor endpoints:
 ```yaml
 processors:
   - name: processor-1
-    address: processor1.example.com:50051
+    address: processor1.example.com:55555
     tls:
       enabled: true
       ca_file: /path/to/ca.crt
@@ -179,7 +179,7 @@ processors:
       key_file: /path/to/client.key
 
   - name: processor-2
-    address: processor2.example.com:50051
+    address: processor2.example.com:55555
     tls:
       enabled: true
       ca_file: /path/to/ca.crt
@@ -191,10 +191,10 @@ processors:
 
 ```bash
 # Terminal 1: Start processor
-lc process --listen :50051
+lc process --listen :55555
 
 # Terminal 2: Start hunter
-sudo lc hunt voip -i eth0 --processor localhost:50051
+sudo lc hunt voip -i eth0 --processor localhost:55555
 
 # Terminal 3: Watch traffic
 lc watch remote

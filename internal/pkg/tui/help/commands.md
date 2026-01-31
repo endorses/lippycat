@@ -69,10 +69,10 @@ Distributed edge capture (forwards to processor).
 
 ```bash
 # Basic hunter
-sudo lc hunt --processor host:50051 -i eth0
+sudo lc hunt --processor host:55555 -i eth0
 
 # VoIP hunter with TLS
-sudo lc hunt voip --processor host:50051 \
+sudo lc hunt voip --processor host:55555 \
   --tls --tls-ca ca.crt
 ```
 
@@ -82,10 +82,10 @@ Central aggregation node (receives from hunters).
 
 ```bash
 # Start processor
-lc process --listen 0.0.0.0:50051
+lc process --listen 0.0.0.0:55555
 
 # With per-call PCAP
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --per-call-pcap --per-call-pcap-dir /var/calls
 ```
 

@@ -36,7 +36,7 @@ func TestRegisterHunter(t *testing.T) {
 			name: "successful registration",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			},
 			req: &management.HunterRegistration{
@@ -67,7 +67,7 @@ func TestRegisterHunter(t *testing.T) {
 			name: "successful registration with GPU capabilities",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			},
 			req: &management.HunterRegistration{
@@ -93,7 +93,7 @@ func TestRegisterHunter(t *testing.T) {
 			name: "hunter re-registration (reconnect)",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			},
 			req: &management.HunterRegistration{
@@ -113,7 +113,7 @@ func TestRegisterHunter(t *testing.T) {
 			name: "registration with filters",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			},
 			req: &management.HunterRegistration{
@@ -136,7 +136,7 @@ func TestRegisterHunter(t *testing.T) {
 			name: "empty hunter ID",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			},
 			req: &management.HunterRegistration{
@@ -152,7 +152,7 @@ func TestRegisterHunter(t *testing.T) {
 			name: "minimal hunter registration",
 			config: Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			},
 			req: &management.HunterRegistration{
@@ -222,7 +222,7 @@ func TestRegisterHunter_MaxHuntersLimit(t *testing.T) {
 	// Create processor with max 2 hunters
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  2,
 	})
 	require.NoError(t, err)
@@ -270,7 +270,7 @@ func TestRegisterHunter_ReconnectDoesNotCountAgainstLimit(t *testing.T) {
 	// Create processor with max 1 hunter
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  1,
 	})
 	require.NoError(t, err)
@@ -310,7 +310,7 @@ func TestRegisterHunter_ReconnectDoesNotCountAgainstLimit(t *testing.T) {
 func TestRegisterHunter_FiltersInResponse(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -425,7 +425,7 @@ func TestRegisterHunter_FiltersInResponse(t *testing.T) {
 func TestRegisterHunter_ProcessorConfig(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "my-processor-id",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -455,7 +455,7 @@ func TestRegisterHunter_ProcessorConfig(t *testing.T) {
 func TestRegisterHunter_Concurrent(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  100,
 	})
 	require.NoError(t, err)
@@ -575,7 +575,7 @@ func TestStreamPackets_Success(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -650,7 +650,7 @@ func TestStreamPackets_MultipleConcurrentHunters(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -716,7 +716,7 @@ func TestStreamPackets_DisconnectHandling(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -769,7 +769,7 @@ func TestStreamPackets_FlowControl(t *testing.T) {
 	// Create processor with PCAP writer to trigger flow control
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 		WriteFile:   "/tmp/test-flow-control.pcap",
 	})
@@ -817,7 +817,7 @@ func TestStreamPackets_SendError(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -851,7 +851,7 @@ func TestStreamPackets_EmptyBatch(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -949,7 +949,7 @@ func TestSubscribePackets_Success(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 10,
 	})
@@ -1030,7 +1030,7 @@ func TestSubscribePackets_WithHunterFilter(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 10,
 	})
@@ -1115,7 +1115,7 @@ func TestSubscribePackets_EmptyHunterFilter(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 10,
 	})
@@ -1182,7 +1182,7 @@ func TestSubscribePackets_DisconnectHandling(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 10,
 	})
@@ -1233,7 +1233,7 @@ func TestSubscribePackets_SendError(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 10,
 	})
@@ -1292,7 +1292,7 @@ func TestSubscribePackets_MaxSubscribersLimit(t *testing.T) {
 	// Create processor with max 2 subscribers
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 2,
 	})
@@ -1356,7 +1356,7 @@ func TestSubscribePackets_AutoGeneratedClientID(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID:    "test-processor",
-		ListenAddr:     "localhost:50051",
+		ListenAddr:     "localhost:55555",
 		MaxHunters:     10,
 		MaxSubscribers: 10,
 	})
@@ -1536,7 +1536,7 @@ func TestUpdateFilter(t *testing.T) {
 			// Create processor
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			})
 			require.NoError(t, err)
@@ -1659,7 +1659,7 @@ func TestDeleteFilter(t *testing.T) {
 			// Create processor
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			})
 			require.NoError(t, err)
@@ -1717,7 +1717,7 @@ func TestUpdateDeleteFilterIntegration(t *testing.T) {
 	// Create processor
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -2009,7 +2009,7 @@ func TestGetHunterStatus_GRPCHandler(t *testing.T) {
 			// Create processor
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			})
 			require.NoError(t, err)
@@ -2286,7 +2286,7 @@ func TestListAvailableHunters(t *testing.T) {
 			// Create processor
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  100, // Enough for "many hunters" test
 			})
 			require.NoError(t, err)
@@ -2318,7 +2318,7 @@ func TestListAvailableHunters(t *testing.T) {
 func TestGetHunterStatusAndListAvailableHunters_Integration(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -2523,7 +2523,7 @@ func TestGetFilters(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 				MaxHunters:  10,
 			})
 			require.NoError(t, err)
@@ -2586,7 +2586,7 @@ func TestSubscribeFilters(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		processor, err := New(Config{
 			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
+			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
 		})
 		require.NoError(t, err)
@@ -2613,7 +2613,7 @@ func TestGetTopology(t *testing.T) {
 	t.Run("single processor no upstream", func(t *testing.T) {
 		processor, err := New(Config{
 			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
+			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
 		})
 		require.NoError(t, err)
@@ -2648,7 +2648,7 @@ func TestGetTopology(t *testing.T) {
 	t.Run("multiple hunters", func(t *testing.T) {
 		processor, err := New(Config{
 			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
+			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
 		})
 		require.NoError(t, err)
@@ -2688,7 +2688,7 @@ func TestGetTopology(t *testing.T) {
 	t.Run("no hunters registered", func(t *testing.T) {
 		processor, err := New(Config{
 			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
+			ListenAddr:  "localhost:55555",
 		})
 		require.NoError(t, err)
 		defer processor.Shutdown()
@@ -2706,7 +2706,7 @@ func TestRequestAuthToken(t *testing.T) {
 	t.Run("fails with internal error when not configured", func(t *testing.T) {
 		processor, err := New(Config{
 			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
+			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
 		})
 		require.NoError(t, err)
@@ -2762,7 +2762,7 @@ func TestSubscribeTopology(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		processor, err := New(Config{
 			ProcessorID: "test-processor",
-			ListenAddr:  "localhost:50051",
+			ListenAddr:  "localhost:55555",
 			MaxHunters:  10,
 		})
 		require.NoError(t, err)

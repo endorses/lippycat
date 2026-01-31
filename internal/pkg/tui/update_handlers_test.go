@@ -102,11 +102,11 @@ func TestHandleAddNodeMsg_NewProcessor(t *testing.T) {
 		connectionMgr: store.NewConnectionManager(),
 	}
 
-	msg := components.AddNodeMsg{Address: "processor1:50051"}
+	msg := components.AddNodeMsg{Address: "processor1:55555"}
 	updatedModel, cmd := m.handleAddNodeMsg(msg)
 
 	// Should add processor and trigger connection
-	assert.Contains(t, updatedModel.connectionMgr.Processors, "processor1:50051",
+	assert.Contains(t, updatedModel.connectionMgr.Processors, "processor1:55555",
 		"Processor should be added to connection manager")
 	assert.NotNil(t, cmd, "Should return reconnect command")
 }
@@ -119,13 +119,13 @@ func TestHandleAddNodeMsg_DuplicateProcessor(t *testing.T) {
 	}
 
 	// Add processor first time
-	m.connectionMgr.Processors["processor1:50051"] = &store.ProcessorConnection{
-		Address: "processor1:50051",
+	m.connectionMgr.Processors["processor1:55555"] = &store.ProcessorConnection{
+		Address: "processor1:55555",
 		State:   store.ProcessorStateConnected,
 	}
 
 	// Try to add same processor again
-	msg := components.AddNodeMsg{Address: "processor1:50051"}
+	msg := components.AddNodeMsg{Address: "processor1:55555"}
 	_, cmd := m.handleAddNodeMsg(msg)
 
 	// Should show warning toast, not add duplicate
@@ -335,7 +335,7 @@ func TestHandleHuntersLoadedMsg(t *testing.T) {
 	}
 
 	msg := components.HuntersLoadedMsg{
-		ProcessorAddr: "processor1:50051",
+		ProcessorAddr: "processor1:55555",
 		Hunters:       hunters,
 	}
 	updatedModel, cmd := m.handleHuntersLoadedMsg(msg)

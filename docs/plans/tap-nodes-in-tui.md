@@ -148,6 +148,6 @@ Update topology parsing to extract new fields when building ProcessorInfo.
 3. Run `make build` to verify compilation
 4. Manual testing:
    - Start a tap: `lc tap -i eth0 --insecure`
-   - Start a processor: `lc process --listen :50051 --insecure`
-   - Connect TUI: `lc watch remote --nodes processor:50051 --insecure`
+   - Start a processor: `lc process --listen :55555 --insecure`
+   - Connect TUI: `lc watch remote --nodes processor:55555 --insecure`
    - Verify tap shows `[TAP] eth0` and processor shows `[PROC]`

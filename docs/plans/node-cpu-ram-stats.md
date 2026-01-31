@@ -322,17 +322,17 @@ Add CPU/RAM lines to hunter box rendering.
 4. Manual testing - Hunter:
    ```bash
    # Start processor
-   lc process --listen :50051 --insecure
+   lc process --listen :55555 --insecure
 
    # Start hunter
-   sudo lc hunt --processor localhost:50051 -i eth0 --insecure
+   sudo lc hunt --processor localhost:55555 -i eth0 --insecure
 
    # Check CLI output
-   lc show hunters -P localhost:50051 --insecure
+   lc show hunters -P localhost:55555 --insecure
    # Verify cpu_percent and memory_rss_bytes in JSON
 
    # Check TUI
-   lc watch remote --nodes localhost:50051 --insecure
+   lc watch remote --nodes localhost:55555 --insecure
    # Verify CPU and RAM columns show values
    ```
 
@@ -340,10 +340,10 @@ Add CPU/RAM lines to hunter box rendering.
    ```bash
    sudo lc tap voip -i eth0 --insecure
 
-   lc show hunters -P localhost:50051 --insecure
+   lc show hunters -P localhost:55555 --insecure
    # Virtual hunter should show CPU/RAM
 
-   lc watch remote --nodes localhost:50051 --insecure
+   lc watch remote --nodes localhost:55555 --insecure
    # Virtual hunter row should show CPU/RAM
    ```
 

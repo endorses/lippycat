@@ -147,7 +147,7 @@ Hunt Mode:
 
 1. Build project: `make build`
 2. Start tap dns: `sudo lc tap dns -i lo --insecure`
-3. Connect TUI: `lc watch remote --node localhost:50051 --insecure`
+3. Connect TUI: `lc watch remote --node localhost:55555 --insecure`
 4. Run test script: `./scripts/test-dns-tunneling.sh --all -n 100`
 5. Verify TUI shows tunneling scores in "Tunnel" column
 6. Verify details panel shows tunneling warning for high-score packets

@@ -269,33 +269,33 @@ sudo lc tap voip -i eth0 \
 
 # Tap with upstream forwarding (edge node)
 sudo lc tap voip -i eth0 \
-  --processor central-processor:50051 \
+  --processor central-processor:55555 \
   --tls-ca ca.crt
 ```
 
 **Distributed Capture:**
 ```bash
 # Processor (central aggregation)
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --tls-cert server.crt --tls-key server.key
 
 # Processor with per-call PCAP and command hooks
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --per-call-pcap --per-call-pcap-dir /var/capture/calls \
   --pcap-command 'gzip %pcap%' \
   --voip-command '/opt/scripts/process-call.sh %callid% %dirname%' \
   --tls-cert server.crt --tls-key server.key
 
 # Hunter (edge capture)
-sudo lc hunt --processor processor:50051 \
+sudo lc hunt --processor processor:55555 \
   -i eth0 \
   --tls-ca ca.crt
 
 # VoIP hunter with call filtering
-sudo lc hunt voip --processor processor:50051 --tls-ca ca.crt
+sudo lc hunt voip --processor processor:55555 --tls-ca ca.crt
 
 # VoIP hunter with BPF filter optimization (UDP-only)
-sudo lc hunt voip --processor processor:50051 \
+sudo lc hunt voip --processor processor:55555 \
   --udp-only --sip-port 5060 \
   --tls-ca ca.crt
 ```
@@ -465,7 +465,7 @@ make build-li       # Complete suite with LI
 
 ```bash
 # Start processor with LI enabled
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert=server.crt --tls-key=server.key \
   --li-enabled \
   --li-x1-listen :8443 \

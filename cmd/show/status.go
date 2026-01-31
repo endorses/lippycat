@@ -23,10 +23,10 @@ TLS is enabled by default. Use --insecure for local testing without TLS.
 
 Examples:
   # Show processor status (TLS with CA verification)
-  lc show status -P processor.example.com:50051 --tls-ca ca.crt
+  lc show status -P processor.example.com:55555 --tls-ca ca.crt
 
   # Local testing without TLS
-  lc show status -P localhost:50051 --insecure`,
+  lc show status -P localhost:55555 --insecure`,
 	Run: runShowStatus,
 }
 

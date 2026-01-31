@@ -225,7 +225,7 @@ func (m *Manager) buildCombinedBPFFilter(filters []*management.Filter) string {
 		if exclusionPart != "" {
 			// Combine with base filter and processor exclusion using AND
 			// Logic: (dynamic filters) AND (base exclusions) AND (processor exclusion)
-			// Example: (port 443 or port 5060) and (not port 8080) and (not port 50051)
+			// Example: (port 443 or port 5060) and (not port 8080) and (not port 55555)
 			finalFilter = fmt.Sprintf("(%s) and (%s)", dynamicPart, exclusionPart)
 		} else {
 			// No base filter or processor exclusion - just use dynamic filters

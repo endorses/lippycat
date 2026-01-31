@@ -17,7 +17,7 @@ import (
 func TestProcessBatch_BasicFlow(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -53,7 +53,7 @@ func TestProcessBatch_BasicFlow(t *testing.T) {
 func TestProcessBatch_MultiplePackets(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestProcessBatch_MultiplePackets(t *testing.T) {
 func TestProcessBatch_ConcurrentProcessing(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestProcessBatch_ConcurrentProcessing(t *testing.T) {
 func TestProcessBatch_WithVoIPMetadata(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID:     "test-processor",
-		ListenAddr:      "localhost:50051",
+		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
 		EnableDetection: true,
 	})
@@ -204,7 +204,7 @@ func TestProcessBatch_WithVoIPMetadata(t *testing.T) {
 func TestProcessBatch_WithBroadcast(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -248,7 +248,7 @@ func TestProcessBatch_WithBroadcast(t *testing.T) {
 func TestProcessBatch_LargePackets(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -283,7 +283,7 @@ func TestProcessBatch_LargePackets(t *testing.T) {
 func TestProcessBatch_HighSequenceNumber(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -317,7 +317,7 @@ func TestProcessBatch_HighSequenceNumber(t *testing.T) {
 func TestProcessBatch_UnregisteredHunter(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -349,7 +349,7 @@ func TestProcessBatch_UnregisteredHunter(t *testing.T) {
 func TestProcessBatch_WithRTPMetadata(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID:     "test-processor",
-		ListenAddr:      "localhost:50051",
+		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
 		EnableDetection: true,
 	})
@@ -400,9 +400,9 @@ func TestProcessBatch_WithUpstreamForwarding(t *testing.T) {
 	// Create processor with upstream address (enables upstream forwarding)
 	processor, err := New(Config{
 		ProcessorID:  "test-processor",
-		ListenAddr:   "localhost:50051",
+		ListenAddr:   "localhost:55555",
 		MaxHunters:   10,
-		UpstreamAddr: "upstream:50051", // Enables upstream manager
+		UpstreamAddr: "upstream:55555", // Enables upstream manager
 	})
 	require.NoError(t, err)
 	defer processor.Shutdown()
@@ -439,7 +439,7 @@ func TestProcessBatch_WithAutoRotatePcapWriter(t *testing.T) {
 	// Create processor with auto-rotate PCAP writer
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 		AutoRotateConfig: &AutoRotateConfig{
 			Enabled:      true,
@@ -493,7 +493,7 @@ func TestProcessBatch_WithPerCallPcapWriter(t *testing.T) {
 	// Create processor with per-call PCAP writer
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 		PcapWriterConfig: &PcapWriterConfig{
 			Enabled:      true,
@@ -549,7 +549,7 @@ func TestProcessBatch_WithPerCallPcapWriter_RTPPacket(t *testing.T) {
 	// Create processor with per-call PCAP writer
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 		PcapWriterConfig: &PcapWriterConfig{
 			Enabled:      true,
@@ -608,7 +608,7 @@ func TestProcessBatch_MixedVoIPAndNonVoIP(t *testing.T) {
 	// Create processor with both per-call and auto-rotate PCAP writers
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 		PcapWriterConfig: &PcapWriterConfig{
 			Enabled:      true,
@@ -695,7 +695,7 @@ func TestProcessBatch_MixedVoIPAndNonVoIP(t *testing.T) {
 func TestProcessBatch_EmptyPacketData(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -729,7 +729,7 @@ func TestProcessBatch_EmptyPacketData(t *testing.T) {
 func TestProcessBatch_NilMetadata(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID:     "test-processor",
-		ListenAddr:      "localhost:50051",
+		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
 		EnableDetection: true,
 	})
@@ -765,7 +765,7 @@ func TestProcessBatch_NilMetadata(t *testing.T) {
 func TestProcessBatch_WithEnricher(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID:     "test-processor",
-		ListenAddr:      "localhost:50051",
+		ListenAddr:      "localhost:55555",
 		MaxHunters:      10,
 		EnableDetection: true, // Enables enricher
 	})
@@ -800,7 +800,7 @@ func TestProcessBatch_WithCallCorrelator(t *testing.T) {
 	// Call correlator is always enabled (initialized in New)
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)
@@ -847,7 +847,7 @@ func TestProcessBatch_WithCallCorrelator(t *testing.T) {
 func TestProcessor_GetStats(t *testing.T) {
 	processor, err := New(Config{
 		ProcessorID: "test-processor",
-		ListenAddr:  "localhost:50051",
+		ListenAddr:  "localhost:55555",
 		MaxHunters:  10,
 	})
 	require.NoError(t, err)

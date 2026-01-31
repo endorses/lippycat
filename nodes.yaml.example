@@ -4,7 +4,7 @@
 # Processor nodes (collect traffic from hunters)
 processors:
   - name: main-processor
-    address: processor.local:50051
+    address: processor.local:55555
     # Optional: Per-node TLS configuration (overrides global config)
     tls:
       enabled: true
@@ -19,11 +19,11 @@ processors:
       - edge-hunter-02
 
   - name: backup-processor
-    address: processor2.local:50051
+    address: processor2.local:55555
     # No TLS configured - will use plaintext connection
 
   - name: secure-processor
-    address: secure.example.com:50051
+    address: secure.example.com:55555
     tls:
       enabled: true
       ca_file: /etc/lippycat/certs/ca.crt
@@ -37,13 +37,13 @@ processors:
 # not directly to hunters. Hunters are discovered via processor.
 hunters:
   - name: edge-hunter-01
-    address: 192.168.1.10:50051
+    address: 192.168.1.10:55555
 
   - name: edge-hunter-02
-    address: 192.168.1.11:50051
+    address: 192.168.1.11:55555
 
   - name: datacenter-hunter
-    address: dc-hunter.example.com:50051
+    address: dc-hunter.example.com:55555
 
 # TLS Certificate Requirements:
 # - Certificates MUST include Subject Alternative Name (SAN) matching hostname/IP

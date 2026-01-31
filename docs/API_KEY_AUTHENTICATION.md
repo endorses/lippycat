@@ -64,7 +64,7 @@ security:
 ### Enable via Flag
 
 ```bash
-lc process --api-key-auth --listen :50051
+lc process --api-key-auth --listen :55555
 ```
 
 This enables API key authentication using keys defined in the config file.
@@ -85,21 +85,21 @@ Hunters must provide an API key when connecting to a processor with API key auth
 
 **Via Flag:**
 ```bash
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --api-key "hunter-production-abc123def456"
 ```
 
 **Via Config File:**
 ```yaml
 hunter:
-  processor_addr: "processor:50051"
+  processor_addr: "processor:55555"
   api_key: "hunter-production-abc123def456"
 ```
 
 **Via Environment Variable:**
 ```bash
 export LIPPYCAT_API_KEY="hunter-production-abc123def456"
-lc hunt --processor processor:50051
+lc hunt --processor processor:55555
 ```
 
 ### TUI Configuration
@@ -287,7 +287,7 @@ The following table shows which role is required for each gRPC method:
 ```yaml
 # /etc/lippycat/processor-config.yaml
 processor:
-  listen_addr: "0.0.0.0:50051"
+  listen_addr: "0.0.0.0:55555"
   processor_id: "central-processor"
   tls:
     enabled: true
@@ -319,7 +319,7 @@ LIPPYCAT_PRODUCTION=true \
 ```bash
 # Hunter connects with API key
 lc hunt \
-  --processor central-processor:50051 \
+  --processor central-processor:55555 \
   --tls-ca /etc/lippycat/certs/ca.crt \
   --api-key "${HUNTER_API_KEY}"
 ```

@@ -804,7 +804,7 @@ All flags bound to Viper:
 
 ```yaml
 processor:
-  listen_addr: "0.0.0.0:50051"
+  listen_addr: "0.0.0.0:55555"
   id: "central-proc"
   processor_addr: ""
   max_hunters: 100

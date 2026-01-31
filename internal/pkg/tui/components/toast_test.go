@@ -140,11 +140,11 @@ func TestToastSupersession_HideClearsCurrentKey(t *testing.T) {
 
 func TestToastKeyConnection(t *testing.T) {
 	// Test the helper function
-	key1 := ToastKeyConnection("192.168.1.1:50051")
-	key2 := ToastKeyConnection("192.168.1.2:50051")
+	key1 := ToastKeyConnection("192.168.1.1:55555")
+	key2 := ToastKeyConnection("192.168.1.2:55555")
 
-	assert.Equal(t, "connection:192.168.1.1:50051", key1)
-	assert.Equal(t, "connection:192.168.1.2:50051", key2)
+	assert.Equal(t, "connection:192.168.1.1:55555", key1)
+	assert.Equal(t, "connection:192.168.1.2:55555", key2)
 	assert.NotEqual(t, key1, key2)
 }
 

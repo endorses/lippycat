@@ -420,7 +420,7 @@ Config file support for all flags:
 
 ```yaml
 hunter:
-  processor_addr: "processor.example.com:50051"
+  processor_addr: "processor.example.com:55555"
   id: "edge-01"
   interfaces: ["eth0"]
   batch_size: 64

@@ -171,7 +171,7 @@ localSourceConfig := source.LocalSourceConfig{
    sudo lc tap voip -i eth0 --insecure
 
    # Connect TUI
-   lc watch remote --nodes localhost:50051 --insecure
+   lc watch remote --nodes localhost:55555 --insecure
 
    # Verify:
    # - Virtual hunter appears as "{processor-id}-local"

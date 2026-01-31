@@ -44,7 +44,7 @@ func TestTUIConnectsAndReceivesTopologySubscription(t *testing.T) {
 			ProcessorConnected: &management.ProcessorConnectedEvent{
 				Processor: &management.ProcessorNode{
 					ProcessorId:       "proc-root",
-					Address:           "localhost:50051",
+					Address:           "localhost:55555",
 					UpstreamProcessor: "",
 					HierarchyDepth:    0,
 					Reachable:         true,
@@ -137,7 +137,7 @@ func TestHunterConnectsToDownstreamTUIUpdatesImmediately(t *testing.T) {
 			ProcessorConnected: &management.ProcessorConnectedEvent{
 				Processor: &management.ProcessorNode{
 					ProcessorId:       "proc-downstream",
-					Address:           "downstream:50051",
+					Address:           "downstream:55555",
 					UpstreamProcessor: "proc-root",
 					HierarchyDepth:    1,
 					Reachable:         true,
@@ -302,7 +302,7 @@ func TestDownstreamProcessorDisconnectsTUIShowsUnreachable(t *testing.T) {
 			ProcessorConnected: &management.ProcessorConnectedEvent{
 				Processor: &management.ProcessorNode{
 					ProcessorId:       "proc-downstream",
-					Address:           "downstream:50051",
+					Address:           "downstream:55555",
 					UpstreamProcessor: "proc-root",
 					HierarchyDepth:    1,
 					Reachable:         true,
@@ -324,7 +324,7 @@ func TestDownstreamProcessorDisconnectsTUIShowsUnreachable(t *testing.T) {
 		Event: &management.TopologyUpdate_ProcessorDisconnected{
 			ProcessorDisconnected: &management.ProcessorDisconnectedEvent{
 				ProcessorId: "proc-downstream",
-				Address:     "downstream:50051",
+				Address:     "downstream:55555",
 				Reason:      "connection lost",
 			},
 		},
@@ -401,7 +401,7 @@ func TestFiveLevelHierarchyWithAllOperations(t *testing.T) {
 				ProcessorConnected: &management.ProcessorConnectedEvent{
 					Processor: &management.ProcessorNode{
 						ProcessorId:       proc.id,
-						Address:           fmt.Sprintf("%s:50051", proc.id),
+						Address:           fmt.Sprintf("%s:55555", proc.id),
 						UpstreamProcessor: proc.parent,
 						HierarchyDepth:    uint32(proc.depth),
 						Reachable:         true,
@@ -486,7 +486,7 @@ func TestFiveLevelHierarchyWithAllOperations(t *testing.T) {
 		Event: &management.TopologyUpdate_ProcessorDisconnected{
 			ProcessorDisconnected: &management.ProcessorDisconnectedEvent{
 				ProcessorId: "proc-level2",
-				Address:     "proc-level2:50051",
+				Address:     "proc-level2:55555",
 				Reason:      "connection timeout (network partition)",
 			},
 		},

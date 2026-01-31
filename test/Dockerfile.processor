@@ -35,7 +35,7 @@ RUN addgroup -g 1000 lippycat && \
 
 USER lippycat
 
-EXPOSE 50051
+EXPOSE 55555
 
 ENTRYPOINT ["/usr/local/bin/lc"]
-CMD ["process", "--listen", "0.0.0.0:50051"]
+CMD ["process", "--listen", "0.0.0.0:55555"]

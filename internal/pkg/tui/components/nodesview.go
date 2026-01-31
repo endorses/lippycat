@@ -113,7 +113,7 @@ type NodesView struct {
 // NewNodesView creates a new nodes view component
 func NewNodesView() NodesView {
 	ti := textinput.New()
-	ti.Placeholder = "e.g., localhost:50051"
+	ti.Placeholder = "e.g., localhost:55555"
 	ti.CharLimit = 256
 	ti.Width = 50
 

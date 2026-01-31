@@ -84,23 +84,23 @@ TLS is enabled by default. Use --insecure for local testing without TLS.
 
 Examples:
   # Create a SIP user filter (TLS with CA verification)
-  lc set filter -P processor.example.com:50051 --tls-ca ca.crt \
+  lc set filter -P processor.example.com:55555 --tls-ca ca.crt \
     --type sip_user --pattern alice@example.com
 
   # Create a DNS domain filter with wildcard
-  lc set filter -P processor.example.com:50051 --tls-ca ca.crt \
+  lc set filter -P processor.example.com:55555 --tls-ca ca.crt \
     --type dns_domain --pattern "*.malware-domain.com"
 
   # Create a TLS JA3 fingerprint filter
-  lc set filter -P processor.example.com:50051 --tls-ca ca.crt \
+  lc set filter -P processor.example.com:55555 --tls-ca ca.crt \
     --type tls_ja3 --pattern e7d705a3286e19ea42f587b344ee6865
 
   # Local testing without TLS
-  lc set filter -P localhost:50051 --insecure \
+  lc set filter -P localhost:55555 --insecure \
     --type sip_user --pattern alice@example.com
 
   # Import filters from a file (batch)
-  lc set filter -P processor.example.com:50051 --tls-ca ca.crt -f filters.yaml`,
+  lc set filter -P processor.example.com:55555 --tls-ca ca.crt -f filters.yaml`,
 	Run: runSetFilter,
 }
 

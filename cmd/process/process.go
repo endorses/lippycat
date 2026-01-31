@@ -32,18 +32,18 @@ provide monitoring APIs for TUI clients.
 
 Examples:
   # Basic processor with TLS (default, requires certs)
-  lc process --listen :50051 --tls-cert server.crt --tls-key server.key
+  lc process --listen :55555 --tls-cert server.crt --tls-key server.key
 
   # Hierarchical mode (forward to upstream processor)
-  lc process --listen :50051 --processor parent:50051 --tls-cert server.crt --tls-key server.key
+  lc process --listen :55555 --processor parent:55555 --tls-cert server.crt --tls-key server.key
 
   # With per-call PCAP and command hooks
-  lc process --listen :50051 \
+  lc process --listen :55555 \
     --per-call-pcap --per-call-pcap-dir /var/voip/calls \
     --pcap-command 'gzip %pcap%'
 
   # Lawful Interception (requires -tags li build)
-  lc process --listen :50051 --tls-cert server.crt --tls-key server.key \
+  lc process --listen :55555 --tls-cert server.crt --tls-key server.key \
     --li-enabled \
     --li-x1-listen :8443 \
     --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \

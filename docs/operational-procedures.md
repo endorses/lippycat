@@ -111,13 +111,13 @@ echo -e "\n=== Health Check Complete ==="
 #### For Distributed Deployments
 ```bash
 # Check processor status (requires running processor)
-lc show status -P processor:50051 --tls-ca ca.crt
+lc show status -P processor:55555 --tls-ca ca.crt
 
 # List connected hunters
-lc show hunters -P processor:50051 --tls-ca ca.crt
+lc show hunters -P processor:55555 --tls-ca ca.crt
 
 # View topology
-lc show topology -P processor:50051 --tls-ca ca.crt
+lc show topology -P processor:55555 --tls-ca ca.crt
 ```
 
 ### Log Management

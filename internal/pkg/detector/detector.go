@@ -82,7 +82,7 @@ func (d *Detector) getSignaturePorts(sig signatures.Signature) []uint16 {
 	case "SSH Detector":
 		return []uint16{22}
 	case "gRPC/HTTP2 Detector":
-		return []uint16{50051}
+		return []uint16{55555}
 	case "FTP Detector":
 		return []uint16{21, 20} // Control and data
 	case "SMTP Detector":

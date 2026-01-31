@@ -31,86 +31,86 @@ func TestGetRootProcessorForAddress(t *testing.T) {
 		{
 			name: "directly connected processor is its own root",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:  "processor-a:50051",
-			expectRoot:  "processor-a:50051",
+			targetAddr:  "processor-a:55555",
+			expectRoot:  "processor-a:55555",
 			expectError: false,
 		},
 		{
 			name: "two-level hierarchy",
 			setupHierarchy: func(cm *ConnectionManager) {
 				// Root processor (connected to TUI)
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 				// Downstream processor (not directly connected)
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr:  "processor-b:50051",
-			expectRoot:  "processor-a:50051",
+			targetAddr:  "processor-b:55555",
+			expectRoot:  "processor-a:55555",
 			expectError: false,
 		},
 		{
 			name: "three-level hierarchy",
 			setupHierarchy: func(cm *ConnectionManager) {
 				// Root processor (connected to TUI)
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 				// Intermediate processor (not directly connected)
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 				// Leaf processor (not directly connected)
-				cm.Processors["processor-c:50051"] = &ProcessorConnection{
-					Address:      "processor-c:50051",
+				cm.Processors["processor-c:55555"] = &ProcessorConnection{
+					Address:      "processor-c:55555",
 					ProcessorID:  "processor-c",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-b:50051",
+					UpstreamAddr: "processor-b:55555",
 				}
 			},
-			targetAddr:  "processor-c:50051",
-			expectRoot:  "processor-a:50051",
+			targetAddr:  "processor-c:55555",
+			expectRoot:  "processor-a:55555",
 			expectError: false,
 		},
 		{
 			name: "processor not found",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:    "processor-z:50051",
+			targetAddr:    "processor-z:55555",
 			expectRoot:    "",
 			expectError:   true,
 			errorContains: "not found in hierarchy",
@@ -118,15 +118,15 @@ func TestGetRootProcessorForAddress(t *testing.T) {
 		{
 			name: "no upstream and not connected",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateDisconnected,
 					Client:       nil,
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:    "processor-a:50051",
+			targetAddr:    "processor-a:55555",
 			expectRoot:    "",
 			expectError:   true,
 			errorContains: "has no upstream and is not connected",
@@ -135,29 +135,29 @@ func TestGetRootProcessorForAddress(t *testing.T) {
 			name: "cycle detection",
 			setupHierarchy: func(cm *ConnectionManager) {
 				// Create a cycle: A -> B -> C -> A
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-c:50051",
+					UpstreamAddr: "processor-c:55555",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
-				cm.Processors["processor-c:50051"] = &ProcessorConnection{
-					Address:      "processor-c:50051",
+				cm.Processors["processor-c:55555"] = &ProcessorConnection{
+					Address:      "processor-c:55555",
 					ProcessorID:  "processor-c",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-b:50051",
+					UpstreamAddr: "processor-b:55555",
 				}
 			},
-			targetAddr:    "processor-a:50051",
+			targetAddr:    "processor-a:55555",
 			expectRoot:    "",
 			expectError:   true,
 			errorContains: "cycle detected",
@@ -166,24 +166,24 @@ func TestGetRootProcessorForAddress(t *testing.T) {
 			name: "cache hit on second call",
 			setupHierarchy: func(cm *ConnectionManager) {
 				// Root processor (connected to TUI)
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 				// Downstream processor (not directly connected)
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr:  "processor-b:50051",
-			expectRoot:  "processor-a:50051",
+			targetAddr:  "processor-b:55555",
+			expectRoot:  "processor-a:55555",
 			expectError: false,
 		},
 	}
@@ -222,46 +222,46 @@ func TestInvalidateRootProcessorCache(t *testing.T) {
 	cm := NewConnectionManager()
 
 	// Setup hierarchy
-	cm.Processors["processor-a:50051"] = &ProcessorConnection{
-		Address:      "processor-a:50051",
+	cm.Processors["processor-a:55555"] = &ProcessorConnection{
+		Address:      "processor-a:55555",
 		ProcessorID:  "processor-a",
 		State:        ProcessorStateConnected,
 		Client:       &mockClient{},
 		UpstreamAddr: "",
 	}
-	cm.Processors["processor-b:50051"] = &ProcessorConnection{
-		Address:      "processor-b:50051",
+	cm.Processors["processor-b:55555"] = &ProcessorConnection{
+		Address:      "processor-b:55555",
 		ProcessorID:  "processor-b",
 		State:        ProcessorStateUnknown,
 		Client:       nil,
-		UpstreamAddr: "processor-a:50051",
+		UpstreamAddr: "processor-a:55555",
 	}
 
 	// Populate cache
-	rootAddr, _, err := cm.GetRootProcessorForAddress("processor-b:50051")
+	rootAddr, _, err := cm.GetRootProcessorForAddress("processor-b:55555")
 	require.NoError(t, err)
-	assert.Equal(t, "processor-a:50051", rootAddr)
+	assert.Equal(t, "processor-a:55555", rootAddr)
 
 	// Verify cache is populated
 	cm.mu.RLock()
-	assert.Contains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.Contains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Invalidate specific entry
-	cm.InvalidateRootProcessorCache("processor-b:50051")
+	cm.InvalidateRootProcessorCache("processor-b:55555")
 
 	// Verify cache entry is removed
 	cm.mu.RLock()
-	assert.NotContains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.NotContains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Populate cache again
-	_, _, err = cm.GetRootProcessorForAddress("processor-b:50051")
+	_, _, err = cm.GetRootProcessorForAddress("processor-b:55555")
 	require.NoError(t, err)
 
 	// Verify cache is populated
 	cm.mu.RLock()
-	assert.Contains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.Contains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Invalidate all entries
@@ -277,37 +277,37 @@ func TestAddProcessorInvalidatesCache(t *testing.T) {
 	cm := NewConnectionManager()
 
 	// Setup hierarchy
-	cm.Processors["processor-a:50051"] = &ProcessorConnection{
-		Address:      "processor-a:50051",
+	cm.Processors["processor-a:55555"] = &ProcessorConnection{
+		Address:      "processor-a:55555",
 		ProcessorID:  "processor-a",
 		State:        ProcessorStateConnected,
 		Client:       &mockClient{},
 		UpstreamAddr: "",
 	}
-	cm.Processors["processor-b:50051"] = &ProcessorConnection{
-		Address:      "processor-b:50051",
+	cm.Processors["processor-b:55555"] = &ProcessorConnection{
+		Address:      "processor-b:55555",
 		ProcessorID:  "processor-b",
 		State:        ProcessorStateUnknown,
 		Client:       nil,
-		UpstreamAddr: "processor-a:50051",
+		UpstreamAddr: "processor-a:55555",
 	}
 
 	// Populate cache
-	_, _, err := cm.GetRootProcessorForAddress("processor-b:50051")
+	_, _, err := cm.GetRootProcessorForAddress("processor-b:55555")
 	require.NoError(t, err)
 
 	// Verify cache is populated
 	cm.mu.RLock()
-	assert.Contains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.Contains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Add a new processor (should invalidate cache)
-	cm.AddProcessor("processor-c:50051", &ProcessorConnection{
-		Address:      "processor-c:50051",
+	cm.AddProcessor("processor-c:55555", &ProcessorConnection{
+		Address:      "processor-c:55555",
 		ProcessorID:  "processor-c",
 		State:        ProcessorStateUnknown,
 		Client:       nil,
-		UpstreamAddr: "processor-b:50051",
+		UpstreamAddr: "processor-b:55555",
 	})
 
 	// Verify cache is cleared
@@ -320,32 +320,32 @@ func TestRemoveProcessorInvalidatesCache(t *testing.T) {
 	cm := NewConnectionManager()
 
 	// Setup hierarchy
-	cm.Processors["processor-a:50051"] = &ProcessorConnection{
-		Address:      "processor-a:50051",
+	cm.Processors["processor-a:55555"] = &ProcessorConnection{
+		Address:      "processor-a:55555",
 		ProcessorID:  "processor-a",
 		State:        ProcessorStateConnected,
 		Client:       &mockClient{},
 		UpstreamAddr: "",
 	}
-	cm.Processors["processor-b:50051"] = &ProcessorConnection{
-		Address:      "processor-b:50051",
+	cm.Processors["processor-b:55555"] = &ProcessorConnection{
+		Address:      "processor-b:55555",
 		ProcessorID:  "processor-b",
 		State:        ProcessorStateUnknown,
 		Client:       nil,
-		UpstreamAddr: "processor-a:50051",
+		UpstreamAddr: "processor-a:55555",
 	}
 
 	// Populate cache
-	_, _, err := cm.GetRootProcessorForAddress("processor-b:50051")
+	_, _, err := cm.GetRootProcessorForAddress("processor-b:55555")
 	require.NoError(t, err)
 
 	// Verify cache is populated
 	cm.mu.RLock()
-	assert.Contains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.Contains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Remove a processor (should invalidate cache)
-	cm.RemoveProcessor("processor-b:50051")
+	cm.RemoveProcessor("processor-b:55555")
 
 	// Verify cache is cleared
 	cm.mu.RLock()
@@ -357,28 +357,28 @@ func TestCloseAllInvalidatesCache(t *testing.T) {
 	cm := NewConnectionManager()
 
 	// Setup hierarchy
-	cm.Processors["processor-a:50051"] = &ProcessorConnection{
-		Address:      "processor-a:50051",
+	cm.Processors["processor-a:55555"] = &ProcessorConnection{
+		Address:      "processor-a:55555",
 		ProcessorID:  "processor-a",
 		State:        ProcessorStateConnected,
 		Client:       &mockClient{},
 		UpstreamAddr: "",
 	}
-	cm.Processors["processor-b:50051"] = &ProcessorConnection{
-		Address:      "processor-b:50051",
+	cm.Processors["processor-b:55555"] = &ProcessorConnection{
+		Address:      "processor-b:55555",
 		ProcessorID:  "processor-b",
 		State:        ProcessorStateUnknown,
 		Client:       nil,
-		UpstreamAddr: "processor-a:50051",
+		UpstreamAddr: "processor-a:55555",
 	}
 
 	// Populate cache
-	_, _, err := cm.GetRootProcessorForAddress("processor-b:50051")
+	_, _, err := cm.GetRootProcessorForAddress("processor-b:55555")
 	require.NoError(t, err)
 
 	// Verify cache is populated
 	cm.mu.RLock()
-	assert.Contains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.Contains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Close all (should invalidate cache)
@@ -394,37 +394,37 @@ func TestGetRootProcessorForAddress_DisconnectedRootInCache(t *testing.T) {
 	cm := NewConnectionManager()
 
 	// Setup hierarchy with connected root
-	cm.Processors["processor-a:50051"] = &ProcessorConnection{
-		Address:      "processor-a:50051",
+	cm.Processors["processor-a:55555"] = &ProcessorConnection{
+		Address:      "processor-a:55555",
 		ProcessorID:  "processor-a",
 		State:        ProcessorStateConnected,
 		Client:       &mockClient{},
 		UpstreamAddr: "",
 	}
-	cm.Processors["processor-b:50051"] = &ProcessorConnection{
-		Address:      "processor-b:50051",
+	cm.Processors["processor-b:55555"] = &ProcessorConnection{
+		Address:      "processor-b:55555",
 		ProcessorID:  "processor-b",
 		State:        ProcessorStateUnknown,
 		Client:       nil,
-		UpstreamAddr: "processor-a:50051",
+		UpstreamAddr: "processor-a:55555",
 	}
 
 	// Populate cache
-	rootAddr, _, err := cm.GetRootProcessorForAddress("processor-b:50051")
+	rootAddr, _, err := cm.GetRootProcessorForAddress("processor-b:55555")
 	require.NoError(t, err)
-	assert.Equal(t, "processor-a:50051", rootAddr)
+	assert.Equal(t, "processor-a:55555", rootAddr)
 
 	// Verify cache is populated
 	cm.mu.RLock()
-	assert.Contains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.Contains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 
 	// Disconnect the root processor
-	cm.Processors["processor-a:50051"].State = ProcessorStateDisconnected
-	cm.Processors["processor-a:50051"].Client = nil
+	cm.Processors["processor-a:55555"].State = ProcessorStateDisconnected
+	cm.Processors["processor-a:55555"].Client = nil
 
 	// Try to get root again - should detect stale cache and return error
-	rootAddr, client, err := cm.GetRootProcessorForAddress("processor-b:50051")
+	rootAddr, client, err := cm.GetRootProcessorForAddress("processor-b:55555")
 	require.Error(t, err)
 	assert.Empty(t, rootAddr)
 	assert.Nil(t, client)
@@ -432,7 +432,7 @@ func TestGetRootProcessorForAddress_DisconnectedRootInCache(t *testing.T) {
 
 	// Verify stale cache entry was removed
 	cm.mu.RLock()
-	assert.NotContains(t, cm.rootProcessorCache, "processor-b:50051")
+	assert.NotContains(t, cm.rootProcessorCache, "processor-b:55555")
 	cm.mu.RUnlock()
 }
 
@@ -446,99 +446,99 @@ func TestGetHierarchyDepth(t *testing.T) {
 		{
 			name: "directly connected processor has depth 0",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:  "processor-a:50051",
+			targetAddr:  "processor-a:55555",
 			expectDepth: 0,
 		},
 		{
 			name: "two-level hierarchy",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr:  "processor-b:50051",
+			targetAddr:  "processor-b:55555",
 			expectDepth: 1,
 		},
 		{
 			name: "three-level hierarchy",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
-				cm.Processors["processor-c:50051"] = &ProcessorConnection{
-					Address:      "processor-c:50051",
+				cm.Processors["processor-c:55555"] = &ProcessorConnection{
+					Address:      "processor-c:55555",
 					ProcessorID:  "processor-c",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-b:50051",
+					UpstreamAddr: "processor-b:55555",
 				}
 			},
-			targetAddr:  "processor-c:50051",
+			targetAddr:  "processor-c:55555",
 			expectDepth: 2,
 		},
 		{
 			name: "processor not found returns -1",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:  "processor-z:50051",
+			targetAddr:  "processor-z:55555",
 			expectDepth: -1,
 		},
 		{
 			name: "cycle detected returns -1",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-b:50051",
+					UpstreamAddr: "processor-b:55555",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr:  "processor-a:50051",
+			targetAddr:  "processor-a:55555",
 			expectDepth: -1,
 		},
 	}
@@ -564,99 +564,99 @@ func TestGetProcessorPath(t *testing.T) {
 		{
 			name: "directly connected processor",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr: "processor-a:50051",
-			expectPath: []string{"processor-a:50051"},
+			targetAddr: "processor-a:55555",
+			expectPath: []string{"processor-a:55555"},
 		},
 		{
 			name: "two-level hierarchy",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr: "processor-b:50051",
-			expectPath: []string{"processor-a:50051", "processor-b:50051"},
+			targetAddr: "processor-b:55555",
+			expectPath: []string{"processor-a:55555", "processor-b:55555"},
 		},
 		{
 			name: "three-level hierarchy",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
-				cm.Processors["processor-c:50051"] = &ProcessorConnection{
-					Address:      "processor-c:50051",
+				cm.Processors["processor-c:55555"] = &ProcessorConnection{
+					Address:      "processor-c:55555",
 					ProcessorID:  "processor-c",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-b:50051",
+					UpstreamAddr: "processor-b:55555",
 				}
 			},
-			targetAddr: "processor-c:50051",
-			expectPath: []string{"processor-a:50051", "processor-b:50051", "processor-c:50051"},
+			targetAddr: "processor-c:55555",
+			expectPath: []string{"processor-a:55555", "processor-b:55555", "processor-c:55555"},
 		},
 		{
 			name: "processor not found returns nil",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr: "processor-z:50051",
+			targetAddr: "processor-z:55555",
 			expectPath: nil,
 		},
 		{
 			name: "cycle detected returns nil",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-b:50051",
+					UpstreamAddr: "processor-b:55555",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr: "processor-a:50051",
+			targetAddr: "processor-a:55555",
 			expectPath: nil,
 		},
 	}
@@ -682,51 +682,51 @@ func TestEstimateOperationLatency(t *testing.T) {
 		{
 			name: "directly connected processor (depth 0)",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:    "processor-a:50051",
+			targetAddr:    "processor-a:55555",
 			expectLatency: 100, // Base latency
 		},
 		{
 			name: "depth 1 processor",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
-				cm.Processors["processor-b:50051"] = &ProcessorConnection{
-					Address:      "processor-b:50051",
+				cm.Processors["processor-b:55555"] = &ProcessorConnection{
+					Address:      "processor-b:55555",
 					ProcessorID:  "processor-b",
 					State:        ProcessorStateUnknown,
 					Client:       nil,
-					UpstreamAddr: "processor-a:50051",
+					UpstreamAddr: "processor-a:55555",
 				}
 			},
-			targetAddr:    "processor-b:50051",
+			targetAddr:    "processor-b:55555",
 			expectLatency: 150, // 100 + (1 * 50)
 		},
 		{
 			name: "depth 7 processor (warning threshold)",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
-				currentUpstream := "processor-a:50051"
+				currentUpstream := "processor-a:55555"
 				for i := 1; i <= 7; i++ {
-					addr := fmt.Sprintf("processor-%d:50051", i)
+					addr := fmt.Sprintf("processor-%d:55555", i)
 					cm.Processors[addr] = &ProcessorConnection{
 						Address:      addr,
 						ProcessorID:  fmt.Sprintf("processor-%d", i),
@@ -737,21 +737,21 @@ func TestEstimateOperationLatency(t *testing.T) {
 					currentUpstream = addr
 				}
 			},
-			targetAddr:    "processor-7:50051",
+			targetAddr:    "processor-7:55555",
 			expectLatency: 450, // 100 + (7 * 50)
 		},
 		{
 			name: "processor not found returns -1",
 			setupHierarchy: func(cm *ConnectionManager) {
-				cm.Processors["processor-a:50051"] = &ProcessorConnection{
-					Address:      "processor-a:50051",
+				cm.Processors["processor-a:55555"] = &ProcessorConnection{
+					Address:      "processor-a:55555",
 					ProcessorID:  "processor-a",
 					State:        ProcessorStateConnected,
 					Client:       &mockClient{},
 					UpstreamAddr: "",
 				}
 			},
-			targetAddr:    "processor-z:50051",
+			targetAddr:    "processor-z:55555",
 			expectLatency: -1,
 		},
 	}

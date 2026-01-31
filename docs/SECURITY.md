@@ -119,13 +119,13 @@ chmod 644 *-cert.pem
 ```bash
 # Server TLS (one-way authentication)
 lc process \
-  --listen 0.0.0.0:50051 \
+  --listen 0.0.0.0:55555 \
   --tls-cert /etc/lippycat/certs/server-cert.pem \
   --tls-key /etc/lippycat/certs/server-key.pem
 
 # Mutual TLS (two-way authentication - recommended)
 lc process \
-  --listen 0.0.0.0:50051 \
+  --listen 0.0.0.0:55555 \
   --tls-cert /etc/lippycat/certs/server-cert.pem \
   --tls-key /etc/lippycat/certs/server-key.pem \
   --tls-client-auth \
@@ -137,13 +137,13 @@ lc process \
 ```bash
 # Basic TLS (verify server certificate)
 lc hunt \
-  --processor processor.example.com:50051 \
+  --processor processor.example.com:55555 \
   -i eth0 \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
 
 # Mutual TLS (present client certificate)
 lc hunt \
-  --processor processor.example.com:50051 \
+  --processor processor.example.com:55555 \
   -i eth0 \
   --tls-cert /etc/lippycat/certs/client-cert.pem \
   --tls-key /etc/lippycat/certs/client-key.pem \
@@ -159,7 +159,7 @@ For production deployments, use configuration files:
 
 # Processor configuration
 processor:
-  listen_addr: "0.0.0.0:50051"
+  listen_addr: "0.0.0.0:55555"
   tls:
     cert_file: "/etc/lippycat/certs/server-cert.pem"
     key_file: "/etc/lippycat/certs/server-key.pem"
@@ -168,7 +168,7 @@ processor:
 
 # Hunter configuration
 hunter:
-  processor_addr: "processor.example.com:50051"
+  processor_addr: "processor.example.com:55555"
   tls:
     cert_file: "/etc/lippycat/certs/client-cert.pem"
     key_file: "/etc/lippycat/certs/client-key.pem"
@@ -207,7 +207,7 @@ Hunter                    Processor
 lc process --tls-cert server.crt --tls-key server.key
 
 # Hunter: Verify server certificate
-lc hunt --tls-ca ca.crt --processor host:50051
+lc hunt --tls-ca ca.crt --processor host:55555
 ```
 
 **Security:** Protects against eavesdropping, but hunters are not authenticated.
@@ -242,7 +242,7 @@ lc hunt \
   --tls-cert client.crt \
   --tls-key client.key \
   --tls-ca ca.crt \
-  --processor host:50051
+  --processor host:55555
 ```
 
 **Security:** Strongest option - mutual authentication prevents unauthorized hunters.
@@ -256,7 +256,7 @@ lc hunt \
 lc process --insecure
 
 # Hunter: Explicitly allow insecure
-lc hunt --insecure --processor localhost:50051
+lc hunt --insecure --processor localhost:55555
 ```
 
 **Warning:** Prominent security banners displayed on startup:
@@ -338,7 +338,7 @@ For internet-facing deployments:
 
 ```bash
 # No --tls-ca needed for well-known CAs
-lc hunt --processor processor.example.com:50051
+lc hunt --processor processor.example.com:55555
 ```
 
 ### Certificate Management
@@ -374,7 +374,7 @@ vim /etc/lippycat/config.yaml
 systemctl reload lippycat-processor
 
 # 4. Verify new certificate in use
-openssl s_client -connect processor:50051 -showcerts
+openssl s_client -connect processor:55555 -showcerts
 ```
 
 #### Revocation
@@ -395,10 +395,10 @@ To revoke compromised certificates:
 **Solution:**
 ```bash
 # Provide CA certificate for server verification (TLS is enabled by default)
-lc hunt --tls-ca ca.crt --processor host:50051
+lc hunt --tls-ca ca.crt --processor host:55555
 
 # OR explicitly allow insecure (testing only)
-lc hunt --insecure --processor host:50051
+lc hunt --insecure --processor host:55555
 ```
 
 #### "certificate relies on legacy Common Name field, use SANs instead"
@@ -449,7 +449,7 @@ openssl x509 -in server-cert.pem -noout -subject
 openssl x509 -in server-cert.pem -noout -text | grep -A1 "Subject Alternative Name"
 
 # For testing, skip verification (INSECURE)
-lc hunt --tls-skip-verify --processor host:50051
+lc hunt --tls-skip-verify --processor host:55555
 ```
 
 #### "No client certificate provided"
@@ -463,7 +463,7 @@ lc hunt \
   --tls-cert client.crt \
   --tls-key client.key \
   --tls-ca ca.crt \
-  --processor host:50051
+  --processor host:55555
 ```
 
 #### "Certificate has expired"
@@ -1142,7 +1142,7 @@ sudo lc sniff voip -i eth0 --virtual-interface --vif-drop-privileges nobody
 sudo lc sniff voip -i eth0 --virtual-interface --vif-drop-privileges lippycat
 
 # Processor node with privilege dropping
-sudo lc process --listen :50051 --virtual-interface --vif-drop-privileges lippycat
+sudo lc process --listen :55555 --virtual-interface --vif-drop-privileges lippycat
 ```
 
 **Configuration file:**

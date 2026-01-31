@@ -127,7 +127,7 @@ go test -v ./test/... -run TestIntegration -timeout 5m
 
 - Go 1.21 or later
 - Network access (for gRPC tests)
-- Available ports: 50051-50057 (used by test processors)
+- Available ports: 55555-50057 (used by test processors)
 
 ### Dependencies
 
@@ -204,7 +204,7 @@ These integration tests implement recommendation 20 from the code review:
 
 ## Known Limitations
 
-1. **Network Tests**: Require available localhost ports (50051-50057)
+1. **Network Tests**: Require available localhost ports (55555-50057)
 2. **Timing**: Tests use `time.Sleep` for synchronization (brittle on slow systems)
 3. **RTP Detection**: Synthetic RTP packets may not match detector expectations (test disabled)
 4. **Real Traffic**: Tests use synthetic packets, not real network captures
@@ -318,7 +318,7 @@ If tests fail with "address already in use":
 
 ```bash
 # Find process using port
-lsof -i :50051
+lsof -i :55555
 
 # Kill process or wait for it to release
 kill -9 <PID>

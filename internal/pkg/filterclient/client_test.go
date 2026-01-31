@@ -171,7 +171,7 @@ func TestClientConfig_TLS(t *testing.T) {
 	t.Run("tls with invalid cert file fails", func(t *testing.T) {
 		// This should fail because the cert file doesn't exist
 		_, err := NewFilterClient(ClientConfig{
-			Address:     "localhost:50051",
+			Address:     "localhost:55555",
 			TLSEnabled:  true,
 			TLSCertFile: "/nonexistent/cert.pem",
 			TLSKeyFile:  "/nonexistent/key.pem",
@@ -183,7 +183,7 @@ func TestClientConfig_TLS(t *testing.T) {
 	t.Run("tls with only cert fails", func(t *testing.T) {
 		// This should fail because only cert is provided (not key)
 		_, err := NewFilterClient(ClientConfig{
-			Address:     "localhost:50051",
+			Address:     "localhost:55555",
 			TLSEnabled:  true,
 			TLSCertFile: "/some/cert.pem",
 			// Missing key file

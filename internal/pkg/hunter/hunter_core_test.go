@@ -25,7 +25,7 @@ func TestNew(t *testing.T) {
 			config: Config{
 				HunterID:      "test-hunter-1",
 				Interfaces:    []string{"eth0"},
-				ProcessorAddr: "localhost:50051",
+				ProcessorAddr: "localhost:55555",
 				BatchSize:     100,
 				BufferSize:    8192,
 			},
@@ -36,7 +36,7 @@ func TestNew(t *testing.T) {
 			config: Config{
 				HunterID:      "",
 				Interfaces:    []string{"eth0"},
-				ProcessorAddr: "localhost:50051",
+				ProcessorAddr: "localhost:55555",
 			},
 			wantErr:     true,
 			errContains: "hunter ID is required",
@@ -56,7 +56,7 @@ func TestNew(t *testing.T) {
 			config: Config{
 				HunterID:      "test-hunter-1",
 				Interfaces:    []string{"eth0"},
-				ProcessorAddr: "localhost:50051",
+				ProcessorAddr: "localhost:55555",
 				// MaxBufferedBatches and SendTimeout not set - should use defaults
 			},
 			wantErr: false,
@@ -111,7 +111,7 @@ func TestCapturedPacket(t *testing.T) {
 // TestGetStatsCollector tests statistics collector retrieval
 func TestGetStatsCollector(t *testing.T) {
 	hunter, err := New(Config{
-		ProcessorAddr: "localhost:50051",
+		ProcessorAddr: "localhost:55555",
 		HunterID:      "test-hunter",
 		Interfaces:    []string{"eth0"},
 		BatchSize:     10,
@@ -133,7 +133,7 @@ func TestGetStatsCollector(t *testing.T) {
 // TestStatsAtomic tests that stats can be safely updated from multiple goroutines
 func TestStatsAtomic(t *testing.T) {
 	hunter, err := New(Config{
-		ProcessorAddr: "localhost:50051",
+		ProcessorAddr: "localhost:55555",
 		HunterID:      "test-hunter",
 		Interfaces:    []string{"eth0"},
 		BatchSize:     10,
@@ -271,7 +271,7 @@ func TestBatchSizeConfiguration(t *testing.T) {
 			hunter, err := New(Config{
 				HunterID:      "test-hunter",
 				Interfaces:    []string{"eth0"},
-				ProcessorAddr: "localhost:50051",
+				ProcessorAddr: "localhost:55555",
 				BatchSize:     tt.batchSize,
 			})
 

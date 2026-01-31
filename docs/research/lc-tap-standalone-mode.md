@@ -687,7 +687,7 @@ func init() {
     tapCmd.Flags().Int("snaplen", 65535, "Snapshot length")
 
     // Management interface
-    tapCmd.Flags().String("listen", ":50051", "Management/TUI listen address")
+    tapCmd.Flags().String("listen", ":55555", "Management/TUI listen address")
     tapCmd.Flags().Int("max-subscribers", 10, "Maximum TUI subscribers")
 
     // PCAP writing
@@ -783,7 +783,7 @@ sudo lc tap voip -i eth0 \
     --per-call-pcap-dir /var/capture/calls
 
 # Monitor with TUI from remote machine
-lc watch remote --addr tap-node:50051
+lc watch remote --addr tap-node:55555
 ```
 
 ### LIaaS Deployment

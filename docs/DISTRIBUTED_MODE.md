@@ -84,7 +84,7 @@ flowchart TB
 sudo lc tap voip -i eth0 --sipuser alicent --insecure
 
 # Connect TUI
-lc watch remote --addr localhost:50051 --insecure
+lc watch remote --addr localhost:55555 --insecure
 ```
 
 ### Hub-and-Spoke Mode
@@ -297,12 +297,12 @@ make build
 
 **Terminal 1 - Start Processor:**
 ```bash
-sudo lc process --listen :50051 --write-file /tmp/captured.pcap --stats
+sudo lc process --listen :55555 --write-file /tmp/captured.pcap --stats
 ```
 
 **Terminal 2 - Start Hunter:**
 ```bash
-sudo lc hunt --processor localhost:50051 --interface any
+sudo lc hunt --processor localhost:55555 --interface any
 ```
 
 ### 3. Hierarchical Setup (3-Tier)
@@ -319,24 +319,24 @@ sudo lc process --listen :50052 --upstream localhost:50053
 
 **Terminal 3 - Edge Processor:**
 ```bash
-sudo lc process --listen :50051 --upstream localhost:50052
+sudo lc process --listen :55555 --upstream localhost:50052
 ```
 
 **Terminal 4 - Hunter:**
 ```bash
-sudo lc hunt --processor localhost:50051 --interface any
+sudo lc hunt --processor localhost:55555 --interface any
 ```
 
 ### 4. Multi-Level Management with TUI (v0.3.0+)
 
 **Terminal 1 - Root Processor:**
 ```bash
-sudo lc process --listen :50051 --write-file /tmp/root.pcap
+sudo lc process --listen :55555 --write-file /tmp/root.pcap
 ```
 
 **Terminal 2 - Downstream Processor:**
 ```bash
-sudo lc process --listen :50052 --upstream localhost:50051
+sudo lc process --listen :50052 --upstream localhost:55555
 ```
 
 **Terminal 3 - Hunter (connected to downstream):**
@@ -346,7 +346,7 @@ sudo lc hunt --processor localhost:50052 --interface any
 
 **Terminal 4 - TUI (connected to root, can manage all hunters):**
 ```bash
-lc watch remote --addr localhost:50051 --insecure
+lc watch remote --addr localhost:55555 --insecure
 ```
 
 **Features:**
@@ -385,7 +385,7 @@ lc process [flags]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--listen <host:port>` | Listen address for hunters | :50051 |
+| `--listen <host:port>` | Listen address for hunters | :55555 |
 | `--upstream <host:port>` | Upstream processor (hierarchical) | "" |
 | `--max-hunters <n>` | Maximum concurrent hunters | 100 |
 | `--write-file <path>` | PCAP output file | "" |
@@ -397,7 +397,7 @@ Create `~/.config/lippycat.yaml`:
 
 ```yaml
 hunter:
-  processor_addr: "processor.example.com:50051"
+  processor_addr: "processor.example.com:55555"
   hunter_id: "edge-node-01"
   interfaces:
     - eth0
@@ -408,8 +408,8 @@ hunter:
   batch_timeout_ms: 100
 
 processor:
-  listen_addr: ":50051"
-  upstream_addr: "central.example.com:50051"
+  listen_addr: ":55555"
+  upstream_addr: "central.example.com:55555"
   max_hunters: 100
   write_file: "/var/log/lippycat/captured.pcap"
   display_stats: true
@@ -474,7 +474,7 @@ grpcurl -plaintext -d '{
   "pattern": "192.168.1.0/24",
   "enabled": true,
   "description": "Local network filter"
-}' localhost:50051 lippycat.management.ManagementService/UpdateFilter
+}' localhost:55555 lippycat.management.ManagementService/UpdateFilter
 
 # Add filter to specific hunter
 grpcurl -plaintext -d '{
@@ -483,12 +483,12 @@ grpcurl -plaintext -d '{
   "pattern": "alicent@example.com",
   "target_hunters": ["hunter-1"],
   "enabled": true
-}' localhost:50051 lippycat.management.ManagementService/UpdateFilter
+}' localhost:55555 lippycat.management.ManagementService/UpdateFilter
 
 # Delete filter
 grpcurl -plaintext -d '{
   "filter_id": "filter-1"
-}' localhost:50051 lippycat.management.ManagementService/DeleteFilter
+}' localhost:55555 lippycat.management.ManagementService/DeleteFilter
 ```
 
 **Note:** Filters are currently distributed and stored but not yet applied to packet processing. Use BPF filters on hunters for active filtering.
@@ -637,7 +637,7 @@ hunter:
 
 # Regional processors forward to central
 processor:
-  upstream_addr: "central.company.com:50051"
+  upstream_addr: "central.company.com:55555"
 ```
 
 ### 2. DMZ and Internal Network Segmentation
@@ -697,7 +697,7 @@ flowchart LR
 - Go 1.21+ (for building)
 - Root/sudo access for packet capture
 - Network connectivity between nodes
-- Open port 50051 (or configured port)
+- Open port 55555 (or configured port)
 
 ### Installation
 
@@ -729,7 +729,7 @@ After=network.target
 [Service]
 Type=simple
 User=lippycat
-ExecStart=/usr/local/bin/lc process --listen :50051 --write-file /var/log/lippycat/capture.pcap
+ExecStart=/usr/local/bin/lc process --listen :55555 --write-file /var/log/lippycat/capture.pcap
 Restart=always
 RestartSec=10
 
@@ -746,7 +746,7 @@ After=network.target
 [Service]
 Type=simple
 User=lippycat
-ExecStart=/usr/local/bin/lc hunt --processor processor.example.com:50051
+ExecStart=/usr/local/bin/lc hunt --processor processor.example.com:55555
 Restart=always
 RestartSec=10
 
@@ -768,13 +768,13 @@ sudo systemctl start lippycat-hunter
 **Processor:**
 ```bash
 # Allow hunters to connect
-sudo iptables -A INPUT -p tcp --dport 50051 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 55555 -j ACCEPT
 ```
 
 **Hunter:**
 ```bash
 # Allow outbound to processor
-sudo iptables -A OUTPUT -p tcp --dport 50051 -j ACCEPT
+sudo iptables -A OUTPUT -p tcp --dport 55555 -j ACCEPT
 ```
 
 ### Monitoring
@@ -782,7 +782,7 @@ sudo iptables -A OUTPUT -p tcp --dport 50051 -j ACCEPT
 **Check status:**
 ```bash
 # Processor stats (every 5s)
-sudo lc process --listen :50051 --stats
+sudo lc process --listen :55555 --stats
 
 # Hunter logs
 sudo journalctl -u lippycat-hunter -f
@@ -814,7 +814,7 @@ For high packet rates:
 ```bash
 # Hunter: larger batches, higher buffer
 sudo lc hunt \
-  --processor localhost:50051 \
+  --processor localhost:55555 \
   --batch-size 256 \
   --buffer-size 50000 \
   --batch-timeout 500
@@ -827,7 +827,7 @@ For minimal latency:
 ```bash
 # Hunter: small batches, short timeout
 sudo lc hunt \
-  --processor localhost:50051 \
+  --processor localhost:55555 \
   --batch-size 16 \
   --batch-timeout 10
 ```
@@ -839,7 +839,7 @@ For limited memory:
 ```bash
 # Hunter: small buffer
 sudo lc hunt \
-  --processor localhost:50051 \
+  --processor localhost:55555 \
   --buffer-size 1000 \
   --batch-size 32
 ```
@@ -851,7 +851,7 @@ For many hunters:
 ```bash
 # Processor: increase limits
 sudo lc process \
-  --listen :50051 \
+  --listen :55555 \
   --max-hunters 1000 \
   --stats=false
 ```
@@ -867,17 +867,17 @@ sudo lc process \
 **Solutions:**
 1. Verify processor is running:
    ```bash
-   sudo netstat -tlnp | grep 50051
+   sudo netstat -tlnp | grep 55555
    ```
 
 2. Check firewall:
    ```bash
-   sudo iptables -L -n | grep 50051
+   sudo iptables -L -n | grep 55555
    ```
 
 3. Test connection:
    ```bash
-   telnet processor-host 50051
+   telnet processor-host 55555
    ```
 
 ### No Packets Being Forwarded
@@ -918,7 +918,7 @@ sudo lc process \
 
 2. Check processor is accepting connections:
    ```bash
-   sudo netstat -tlnp | grep 50051
+   sudo netstat -tlnp | grep 55555
    ```
 
 3. Check hunter logs for errors:
@@ -985,7 +985,7 @@ sudo lc process \
 2. Check network connectivity:
    ```bash
    # Test connection from upstream to downstream
-   telnet proc-b 50051
+   telnet proc-b 55555
    ```
 
 3. Verify TLS certificates (if enabled):
@@ -1098,7 +1098,7 @@ sudo lc process \
    ```bash
    # From upstream processor, test downstream connectivity
    ping downstream-processor
-   telnet downstream-processor 50051
+   telnet downstream-processor 55555
    ```
 
 2. Check processor status:
@@ -1123,7 +1123,7 @@ sudo lc process \
    ```
 
 5. Check for network policy changes:
-   - Firewall rules blocking port 50051
+   - Firewall rules blocking port 55555
    - Network segmentation changes
    - VPN/tunnel failures
 
@@ -1225,14 +1225,14 @@ sudo lc process \
 
 ### gRPC Services
 
-**Data Service (Port 50051):**
+**Data Service (Port 55555):**
 ```protobuf
 service DataService {
   rpc StreamPackets(stream PacketBatch) returns (stream StreamControl);
 }
 ```
 
-**Management Service (Port 50051):**
+**Management Service (Port 55555):**
 ```protobuf
 service ManagementService {
   rpc RegisterHunter(HunterRegistration) returns (RegistrationResponse);
@@ -1323,13 +1323,13 @@ All gRPC connections support TLS encryption with mutual authentication:
 **Command Line Flags:**
 ```bash
 # Processor with TLS
-lc process --listen :50051 \
+lc process --listen :55555 \
   --tls-cert /path/to/server.crt \
   --tls-key /path/to/server.key \
   --tls-ca /path/to/ca.crt
 
 # Hunter with TLS
-sudo lc hunt --processor processor.example.com:50051 \
+sudo lc hunt --processor processor.example.com:55555 \
   --tls-cert /path/to/client.crt \
   --tls-key /path/to/client.key \
   --tls-ca /path/to/ca.crt
@@ -1348,7 +1348,7 @@ tls:
 # Per-node TLS in nodes.yaml
 processors:
   - name: secure-processor
-    address: processor.local:50051
+    address: processor.local:55555
     tls:
       enabled: true
       ca_file: /certs/ca.crt

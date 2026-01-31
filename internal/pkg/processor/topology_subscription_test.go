@@ -152,7 +152,7 @@ func TestDownstreamProcessorConnectTopologyRefreshed(t *testing.T) {
 			ProcessorConnected: &management.ProcessorConnectedEvent{
 				Processor: &management.ProcessorNode{
 					ProcessorId:       "proc-downstream",
-					Address:           "192.168.1.200:50051",
+					Address:           "192.168.1.200:55555",
 					UpstreamProcessor: "proc-root",
 					HierarchyDepth:    1,
 					Reachable:         true,
@@ -193,7 +193,7 @@ func TestDownstreamProcessorConnectTopologyRefreshed(t *testing.T) {
 	proc := cache.GetProcessor("proc-downstream")
 	require.NotNil(t, proc)
 	assert.Equal(t, "proc-downstream", proc.ID)
-	assert.Equal(t, "192.168.1.200:50051", proc.Address)
+	assert.Equal(t, "192.168.1.200:55555", proc.Address)
 	assert.Equal(t, "proc-root", proc.ParentID)
 	assert.Equal(t, int32(1), proc.HierarchyDepth)
 	assert.True(t, proc.Reachable)

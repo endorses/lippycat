@@ -176,7 +176,7 @@ func (g *GRPCSignature) Detect(ctx *signatures.DetectionContext) *signatures.Det
 	protocol := "HTTP2"
 
 	// gRPC typically uses specific ports or has specific patterns
-	if ctx.DstPort == 50051 || ctx.SrcPort == 50051 {
+	if ctx.DstPort == 55555 || ctx.SrcPort == 55555 {
 		protocol = "gRPC"
 		confidence = signatures.ConfidenceVeryHigh
 	}

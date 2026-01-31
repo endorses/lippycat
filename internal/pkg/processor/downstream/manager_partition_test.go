@@ -77,7 +77,7 @@ func TestHealthCheckDetectsInactiveStream(t *testing.T) {
 	// Register a downstream processor manually (without topology subscription)
 	proc := &ProcessorInfo{
 		ProcessorID:          "test-processor",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		Version:              "0.1.0",
 		RegisteredAt:         time.Now(),
 		LastSeen:             time.Now(),
@@ -125,7 +125,7 @@ func TestHealthCheckPassesForActiveStream(t *testing.T) {
 	// Register a downstream processor with active stream
 	proc := &ProcessorInfo{
 		ProcessorID:          "test-processor",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		Version:              "0.1.0",
 		RegisteredAt:         time.Now(),
 		LastSeen:             time.Now(),
@@ -167,7 +167,7 @@ func TestReconnectionPublishesReachableEvent(t *testing.T) {
 
 	proc := &ProcessorInfo{
 		ProcessorID:   "test-processor",
-		ListenAddress: "localhost:50051",
+		ListenAddress: "localhost:55555",
 		Version:       "0.1.0",
 		RegisteredAt:  time.Now(),
 		LastSeen:      time.Now().Add(-2 * time.Minute), // Old last seen
@@ -222,7 +222,7 @@ func TestMultipleDownstreamsHealthCheck(t *testing.T) {
 	processors := []*ProcessorInfo{
 		{
 			ProcessorID:          "processor-1",
-			ListenAddress:        "localhost:50051",
+			ListenAddress:        "localhost:55555",
 			Version:              "0.1.0",
 			RegisteredAt:         time.Now(),
 			LastSeen:             time.Now(),
@@ -284,7 +284,7 @@ func TestHealthCheckWithoutPublisher(t *testing.T) {
 	// Register a downstream processor with inactive stream
 	proc := &ProcessorInfo{
 		ProcessorID:          "test-processor",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		Version:              "0.1.0",
 		RegisteredAt:         time.Now(),
 		LastSeen:             time.Now(),
@@ -312,7 +312,7 @@ func TestPerformHealthCheckDirectCall(t *testing.T) {
 	// Add a processor with old last seen time and inactive stream
 	proc := &ProcessorInfo{
 		ProcessorID:          "test-processor",
-		ListenAddress:        "localhost:50051",
+		ListenAddress:        "localhost:55555",
 		Version:              "0.1.0",
 		RegisteredAt:         time.Now().Add(-10 * time.Minute),
 		LastSeen:             time.Now().Add(-5 * time.Minute), // 5 minutes ago
@@ -378,7 +378,7 @@ func TestConcurrentHealthCheckAndRegistration(t *testing.T) {
 		for i := 0; ctx.Err() == nil; i++ {
 			proc := &ProcessorInfo{
 				ProcessorID:          "test-processor",
-				ListenAddress:        "localhost:50051",
+				ListenAddress:        "localhost:55555",
 				Version:              "0.1.0",
 				RegisteredAt:         time.Now(),
 				LastSeen:             time.Now(),

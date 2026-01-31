@@ -47,13 +47,13 @@
 ### On Each Edge Node (Hunter):
 ```bash
 sudo lc hunt voip -i eth0 \
-  --processor central:50051 \
+  --processor central:55555 \
   --tls --tls-ca ca.crt
 ```
 
 ### On Central Node (Processor):
 ```bash
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --per-call-pcap \
   --tls --tls-cert server.crt --tls-key server.key
 ```

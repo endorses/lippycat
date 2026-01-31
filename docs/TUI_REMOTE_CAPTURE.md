@@ -22,13 +22,13 @@ The lippycat TUI supports **remote capture mode**, allowing you to monitor distr
 1. **Running Nodes**: You need at least one processor or hunter node running:
    ```bash
    # Start a processor node
-   lc process --listen 0.0.0.0:50051
+   lc process --listen 0.0.0.0:55555
 
    # Start a hunter node
-   sudo lc hunt --interface eth0 --processor processor-host:50051
+   sudo lc hunt --interface eth0 --processor processor-host:55555
    ```
 
-2. **Network Access**: Ensure TUI host can reach nodes on configured ports (default: 50051)
+2. **Network Access**: Ensure TUI host can reach nodes on configured ports (default: 55555)
 
 ### Launch Remote Mode
 
@@ -51,7 +51,7 @@ lc watch remote
 # Then add nodes via the TUI:
 # 1. Navigate to "Nodes" tab
 # 2. Press Enter in the input field
-# 3. Type node address (e.g., "192.168.1.10:50051")
+# 3. Type node address (e.g., "192.168.1.10:55555")
 # 4. Press Enter to connect
 ```
 
@@ -75,7 +75,7 @@ Create a `nodes.yaml` file with the following structure:
 # Processor nodes (collect traffic from hunters)
 processors:
   - name: main-processor
-    address: 192.168.1.100:50051
+    address: 192.168.1.100:55555
     # Optional: Per-node TLS configuration
     tls:
       enabled: true
@@ -85,20 +85,20 @@ processors:
       skip_verify: false  # Only true for testing!
 
   - name: backup-processor
-    address: 192.168.1.101:50051
+    address: 192.168.1.101:55555
 
 # Hunter nodes (capture packets on network interfaces)
 # Note: Hunters connect to processors, not directly to TUI
 # TUI connects to processors to monitor hunters
 hunters:
   - name: edge-hunter-01
-    address: 192.168.1.10:50051
+    address: 192.168.1.10:55555
 
   - name: edge-hunter-02
-    address: 192.168.1.11:50051
+    address: 192.168.1.11:55555
 
   - name: datacenter-hunter
-    address: 10.0.0.50:50051
+    address: 10.0.0.50:55555
 ```
 
 ### Configuration Fields
@@ -106,7 +106,7 @@ hunters:
 | Field | Description | Required | Example |
 |-------|-------------|----------|---------|
 | `name` | Friendly display name for the node | Yes | `edge-hunter-01` |
-| `address` | Network address in `host:port` format | Yes | `192.168.1.10:50051` |
+| `address` | Network address in `host:port` format | Yes | `192.168.1.10:55555` |
 | `tls.enabled` | Enable TLS for this node | No | `true` |
 | `tls.ca_file` | Path to CA certificate | No | `/certs/ca.crt` |
 | `tls.cert_file` | Path to client certificate | No | `/certs/client.crt` |
@@ -129,12 +129,12 @@ Nodes are displayed in a tree structure:
 ```
 ┌─ Nodes ────────────────────────────────────────────┐
 │                                                    │
-│  Processor: 192.168.1.100:50051                    │
-│  ├─ edge-hunter-01 (192.168.1.10:50051)            │
+│  Processor: 192.168.1.100:55555                    │
+│  ├─ edge-hunter-01 (192.168.1.10:55555)            │
 │  │  Status: ACTIVE | Packets: 1,234 | Dropped: 0   │
 │  │  Interfaces: eth0                               │
 │  │                                                 │
-│  └─ edge-hunter-02 (192.168.1.11:50051)            │
+│  └─ edge-hunter-02 (192.168.1.11:55555)            │
 │     Status: ACTIVE | Packets: 5,678 | Dropped: 2   │
 │     Interfaces: eth1, wlan0                        │
 │                                                    │
@@ -225,7 +225,7 @@ The **Settings** tab allows you to configure the nodes file path:
 ### Communication Protocol
 
 - **Protocol**: gRPC (protocol buffers)
-- **Port**: Default 50051 (configurable per node)
+- **Port**: Default 55555 (configurable per node)
 - **Streaming**: Bidirectional streaming for real-time updates
 - **Heartbeat**: Periodic health checks (100ms interval)
 - **Status Updates**: Hunter status sent with each heartbeat
@@ -255,7 +255,7 @@ The **Settings** tab allows you to configure the nodes file path:
 ```yaml
 processors:
   - name: production-processor
-    address: processor.prod.local:50051
+    address: processor.prod.local:55555
     tls:
       enabled: true
       ca_file: /etc/lippycat/certs/ca.crt
@@ -282,7 +282,7 @@ processors:
 
 **Possible Causes**:
 1. Node is not running or crashed
-2. Firewall blocking port 50051
+2. Firewall blocking port 55555
 3. Incorrect address or port
 4. Network connectivity issues
 
@@ -292,13 +292,13 @@ processors:
 ps aux | grep lippycat
 
 # Test network connectivity
-nc -zv processor-host 50051
+nc -zv processor-host 55555
 
 # Check firewall rules (Linux)
-sudo iptables -L -n | grep 50051
+sudo iptables -L -n | grep 55555
 
 # Verify processor is listening
-sudo netstat -tlnp | grep 50051
+sudo netstat -tlnp | grep 55555
 ```
 
 ### No Packets Displayed
@@ -323,7 +323,7 @@ sudo tcpdump -i eth0 -c 10
 lc watch remote  # No filter
 
 # Check processor status
-lc show status -P processor-host:50051 --insecure
+lc show status -P processor-host:55555 --insecure
 ```
 
 ### High Latency
@@ -380,17 +380,17 @@ Deploy hunters at multiple physical locations and monitor centrally:
 # nodes.yaml for multi-site deployment
 processors:
   - name: central-processor
-    address: monitoring.company.com:50051
+    address: monitoring.company.com:55555
 
 hunters:
   - name: nyc-office
-    address: nyc-gateway.company.com:50051
+    address: nyc-gateway.company.com:55555
 
   - name: sf-office
-    address: sf-gateway.company.com:50051
+    address: sf-gateway.company.com:55555
 
   - name: london-office
-    address: lon-gateway.company.com:50051
+    address: lon-gateway.company.com:55555
 ```
 
 ### Network Segmentation
@@ -400,13 +400,13 @@ Monitor different network segments from a single pane:
 ```yaml
 hunters:
   - name: dmz-hunter
-    address: 192.168.1.10:50051  # DMZ network
+    address: 192.168.1.10:55555  # DMZ network
 
   - name: internal-hunter
-    address: 10.0.0.50:50051     # Internal network
+    address: 10.0.0.50:55555     # Internal network
 
   - name: guest-wifi-hunter
-    address: 172.16.0.20:50051   # Guest network
+    address: 172.16.0.20:55555   # Guest network
 ```
 
 ### High-Availability Setup
@@ -416,10 +416,10 @@ Use multiple processors for redundancy:
 ```yaml
 processors:
   - name: primary-processor
-    address: proc1.company.com:50051
+    address: proc1.company.com:55555
 
   - name: secondary-processor
-    address: proc2.company.com:50051
+    address: proc2.company.com:55555
 ```
 
 ## Advanced Configuration
@@ -443,7 +443,7 @@ hunters:
 # Testing on localhost with multiple ports
 hunters:
   - name: local-hunter-1
-    address: localhost:50051
+    address: localhost:55555
 
   - name: local-hunter-2
     address: localhost:50052
@@ -458,11 +458,11 @@ hunters:
 # Kubernetes service addresses
 processors:
   - name: k8s-processor
-    address: lippycat-processor.monitoring.svc.cluster.local:50051
+    address: lippycat-processor.monitoring.svc.cluster.local:55555
 
 hunters:
   - name: k8s-hunter-edge
-    address: lippycat-hunter-edge.monitoring.svc.cluster.local:50051
+    address: lippycat-hunter-edge.monitoring.svc.cluster.local:55555
 ```
 
 ## Performance Considerations
@@ -522,7 +522,7 @@ Recommended limits:
    # Production VoIP monitoring setup
    hunters:
      - name: sip-proxy-monitor  # Monitors SIP trunk traffic
-       address: 10.1.1.100:50051
+       address: 10.1.1.100:55555
    ```
 
 4. **Monitoring**: Track node health and connectivity

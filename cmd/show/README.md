@@ -12,10 +12,10 @@ Show processor status and statistics.
 
 ```bash
 # Show processor status (TLS with CA verification)
-lc show status -P processor.example.com:50051 --tls-ca ca.crt
+lc show status -P processor.example.com:55555 --tls-ca ca.crt
 
 # Local testing without TLS
-lc show status -P localhost:50051 --insecure
+lc show status -P localhost:55555 --insecure
 ```
 
 **Output:**
@@ -40,13 +40,13 @@ Show connected hunter details and statistics.
 
 ```bash
 # List all connected hunters (TLS with CA verification)
-lc show hunters -P processor.example.com:50051 --tls-ca ca.crt
+lc show hunters -P processor.example.com:55555 --tls-ca ca.crt
 
 # Show a specific hunter
-lc show hunters -P processor.example.com:50051 --tls-ca ca.crt --hunter edge-01
+lc show hunters -P processor.example.com:55555 --tls-ca ca.crt --hunter edge-01
 
 # Local testing without TLS
-lc show hunters -P localhost:50051 --insecure
+lc show hunters -P localhost:55555 --insecure
 ```
 
 **Output (list):**
@@ -82,17 +82,17 @@ Show the complete distributed topology.
 
 ```bash
 # Show full topology (TLS with CA verification)
-lc show topology -P processor.example.com:50051 --tls-ca ca.crt
+lc show topology -P processor.example.com:55555 --tls-ca ca.crt
 
 # Local testing without TLS
-lc show topology -P localhost:50051 --insecure
+lc show topology -P localhost:55555 --insecure
 ```
 
 **Output:**
 ```json
 {
   "processor_id": "central-proc",
-  "address": ":50051",
+  "address": ":55555",
   "status": "healthy",
   "hierarchy_depth": 0,
   "reachable": true,
@@ -100,7 +100,7 @@ lc show topology -P localhost:50051 --insecure
   "downstream_processors": [
     {
       "processor_id": "region-east",
-      "address": "10.0.2.1:50051",
+      "address": "10.0.2.1:55555",
       "status": "healthy",
       "hierarchy_depth": 1,
       "reachable": true,
@@ -116,10 +116,10 @@ Show filter details (see `cmd/filter` for full filter management).
 
 ```bash
 # Show a specific filter (TLS with CA verification)
-lc show filter --id myfilter -P processor.example.com:50051 --tls-ca ca.crt
+lc show filter --id myfilter -P processor.example.com:55555 --tls-ca ca.crt
 
 # Local testing without TLS
-lc show filter --id myfilter -P localhost:50051 --insecure
+lc show filter --id myfilter -P localhost:55555 --insecure
 ```
 
 ### Config
@@ -154,7 +154,7 @@ All remote commands support these flags. **TLS is enabled by default.**
 ```bash
 #!/bin/bash
 # Check processor health (assumes TLS config in environment or config file)
-status=$(lc show status -P processor:50051 --tls-ca /etc/lippycat/ca.crt 2>/dev/null | jq -r '.status')
+status=$(lc show status -P processor:55555 --tls-ca /etc/lippycat/ca.crt 2>/dev/null | jq -r '.status')
 if [ "$status" = "healthy" ]; then
     echo "OK"
 else
@@ -167,14 +167,14 @@ fi
 
 ```bash
 # Watch hunter connections (local testing)
-watch -n 5 'lc show status -P localhost:50051 --insecure | jq "{total: .total_hunters, healthy: .healthy_hunters}"'
+watch -n 5 'lc show status -P localhost:55555 --insecure | jq "{total: .total_hunters, healthy: .healthy_hunters}"'
 ```
 
 ### Export Topology
 
 ```bash
 # Save topology to file
-lc show topology -P processor:50051 --tls-ca ca.crt > topology-$(date +%Y%m%d).json
+lc show topology -P processor:55555 --tls-ca ca.crt > topology-$(date +%Y%m%d).json
 ```
 
 ## Error Handling

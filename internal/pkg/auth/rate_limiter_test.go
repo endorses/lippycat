@@ -21,7 +21,7 @@ func (m mockAddr) String() string  { return m.addr }
 
 func contextWithIP(ip string) context.Context {
 	return peer.NewContext(context.Background(), &peer.Peer{
-		Addr: mockAddr{addr: ip + ":50051"},
+		Addr: mockAddr{addr: ip + ":55555"},
 	})
 }
 
@@ -122,7 +122,7 @@ func TestRateLimiter_IPv6(t *testing.T) {
 
 	// IPv6 context
 	ctx := peer.NewContext(context.Background(), &peer.Peer{
-		Addr: mockAddr{addr: "[::1]:50051"},
+		Addr: mockAddr{addr: "[::1]:55555"},
 	})
 
 	rl.RecordFailure(ctx)
@@ -136,8 +136,8 @@ func TestExtractClientIP(t *testing.T) {
 		addr     string
 		expected string
 	}{
-		{"IPv4 with port", "192.168.1.1:50051", "192.168.1.1"},
-		{"IPv6 with port", "[::1]:50051", "::1"},
+		{"IPv4 with port", "192.168.1.1:55555", "192.168.1.1"},
+		{"IPv6 with port", "[::1]:55555", "::1"},
 		{"IPv6 full with port", "[2001:db8::1]:8080", "2001:db8::1"},
 		{"IPv4 no port", "192.168.1.1", "192.168.1.1"},
 	}

@@ -69,14 +69,14 @@ keys to the processor. The processor stores encrypted PCAP + keylog files
 (Wireshark-compatible) for audit integrity.
 
 Example:
-  lc hunt http --processor processor:50051
-  lc hunt http --processor 192.168.1.100:50051 --interface eth0
-  lc hunt http --processor processor:50051 --http-port 80,8080,3000
-  lc hunt http --processor processor:50051 --host "*.example.com"
-  lc hunt http --processor processor:50051 --path "/api/*"
-  lc hunt http --processor processor:50051 --method "POST,PUT"
-  lc hunt http --processor processor:50051 --keywords "password,secret" --capture-body
-  lc hunt http --processor processor:50051 --tls-keylog /tmp/sslkeys.log`,
+  lc hunt http --processor processor:55555
+  lc hunt http --processor 192.168.1.100:55555 --interface eth0
+  lc hunt http --processor processor:55555 --http-port 80,8080,3000
+  lc hunt http --processor processor:55555 --host "*.example.com"
+  lc hunt http --processor processor:55555 --path "/api/*"
+  lc hunt http --processor processor:55555 --method "POST,PUT"
+  lc hunt http --processor processor:55555 --keywords "password,secret" --capture-body
+  lc hunt http --processor processor:55555 --tls-keylog /tmp/sslkeys.log`,
 	RunE: runHTTPHunt,
 }
 

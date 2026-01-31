@@ -67,7 +67,7 @@ func TestRegisterProcessor_CycleDetection(t *testing.T) {
 			// Create processor with ID "test-processor"
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 			})
 			require.NoError(t, err)
 			require.NotNil(t, processor)
@@ -142,7 +142,7 @@ func TestRegisterProcessor_DepthLimit(t *testing.T) {
 			// Create processor
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 			})
 			require.NoError(t, err)
 			require.NotNil(t, processor)
@@ -206,7 +206,7 @@ func TestRegisterProcessor_CombinedValidation(t *testing.T) {
 			// Create processor with ID "test-processor"
 			processor, err := New(Config{
 				ProcessorID: "test-processor",
-				ListenAddr:  "localhost:50051",
+				ListenAddr:  "localhost:55555",
 			})
 			require.NoError(t, err)
 			require.NotNil(t, processor)

@@ -206,7 +206,7 @@ func extractClientIP(ctx context.Context) string {
 	// peer.Addr.String() returns "ip:port", we just want the IP
 	addr := p.Addr.String()
 
-	// Handle IPv6 addresses like "[::1]:50051"
+	// Handle IPv6 addresses like "[::1]:55555"
 	if len(addr) > 0 && addr[0] == '[' {
 		// IPv6 format: [ip]:port
 		for i := 1; i < len(addr); i++ {

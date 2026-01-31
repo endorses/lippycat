@@ -14,16 +14,16 @@ Hunters capture packets at the network edge and forward matched packets to proce
 
 ```bash
 # Standard hunter mode
-lc hunt --processor processor.example.com:50051 --interface eth0
+lc hunt --processor processor.example.com:55555 --interface eth0
 
 # Multiple interfaces
-lc hunt --processor 192.168.1.100:50051 -i eth0,eth1
+lc hunt --processor 192.168.1.100:55555 -i eth0,eth1
 
 # With custom hunter ID
-lc hunt --processor processor:50051 --id edge-01
+lc hunt --processor processor:55555 --id edge-01
 
 # VoIP hunter with call buffering
-lc hunt voip --processor processor:50051
+lc hunt voip --processor processor:55555
 ```
 
 ## Commands
@@ -90,13 +90,13 @@ DNS hunter mode captures and forwards DNS queries/responses to the processor.
 ```bash
 # DNS hunter with TLS
 lc hunt dns \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --tls-ca ca.crt
 
 # DNS hunter UDP-only with custom port
 lc hunt dns \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --dns-port 53,5353 \
   --udp-only \
@@ -127,13 +127,13 @@ Email hunter mode captures and forwards email protocol traffic (SMTP, IMAP, POP3
 ```bash
 # Email hunter capturing all protocols
 lc hunt email \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --tls-ca ca.crt
 
 # SMTP-only hunter with sender filtering
 lc hunt email \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --protocol smtp \
   --sender "*@suspicious.com" \
@@ -161,13 +161,13 @@ HTTP hunter mode captures and forwards HTTP traffic to the processor for content
 ```bash
 # HTTP hunter
 lc hunt http \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --tls-ca ca.crt
 
 # HTTP hunter with host filtering
 lc hunt http \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --host "*.example.com" \
   --http-port 80,8080 \
@@ -194,13 +194,13 @@ TLS hunter mode captures TLS handshakes and forwards them to the processor for f
 ```bash
 # TLS hunter
 lc hunt tls \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --tls-ca ca.crt
 
 # TLS hunter with multiple ports
 lc hunt tls \
-  --processor processor:50051 \
+  --processor processor:55555 \
   -i eth0 \
   --tls-port 443,8443 \
   --tls-ca ca.crt
@@ -238,34 +238,34 @@ VoIP hunter mode provides intelligent call buffering and filtering:
 ```bash
 # VoIP hunter with TLS (TLS enabled by default)
 lc hunt voip \
-  --processor processor.example.com:50051 \
+  --processor processor.example.com:55555 \
   --interface eth0 \
   --tls-ca /etc/lippycat/certs/ca.crt
 
 # VoIP hunter with client certificate (mutual TLS)
 lc hunt voip \
-  --processor processor:50051 \
+  --processor processor:55555 \
   --tls-cert /etc/lippycat/certs/hunter.crt \
   --tls-key /etc/lippycat/certs/hunter.key \
   --tls-ca /etc/lippycat/certs/ca.crt
 
 # VoIP hunter with BPF filter optimization (UDP-only)
 lc hunt voip \
-  --processor processor:50051 \
+  --processor processor:55555 \
   --interface eth0 \
   --udp-only \
   --tls-ca ca.crt
 
 # VoIP hunter with specific SIP port
 lc hunt voip \
-  --processor processor:50051 \
+  --processor processor:55555 \
   --interface eth0 \
   --sip-port 5060 \
   --tls-ca ca.crt
 
 # VoIP hunter with custom RTP port range
 lc hunt voip \
-  --processor processor:50051 \
+  --processor processor:55555 \
   --interface eth0 \
   --rtp-port-range 8000-9000 \
   --tls-ca ca.crt
@@ -297,8 +297,8 @@ Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag:
 
 ```bash
 export LIPPYCAT_PRODUCTION=true
-lc hunt --processor processor:50051 --insecure  # ERROR: --insecure not allowed
-lc hunt --processor processor:50051 --tls-ca ca.crt  # OK (TLS is default)
+lc hunt --processor processor:55555 --insecure  # ERROR: --insecure not allowed
+lc hunt --processor processor:55555 --tls-ca ca.crt  # OK (TLS is default)
 ```
 
 ### TLS Configuration
@@ -310,7 +310,7 @@ TLS is enabled by default. Hunters support three TLS modes:
 Hunter verifies processor's certificate (default when `--tls-ca` is provided):
 
 ```bash
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --tls-ca /etc/lippycat/certs/ca.crt
 ```
 
@@ -319,7 +319,7 @@ lc hunt --processor processor:50051 \
 Both hunter and processor verify each other:
 
 ```bash
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --tls-cert /etc/lippycat/certs/hunter.crt \
   --tls-key /etc/lippycat/certs/hunter.key \
   --tls-ca /etc/lippycat/certs/ca.crt
@@ -330,7 +330,7 @@ lc hunt --processor processor:50051 \
 Only for testing on trusted networks. Must explicitly disable TLS:
 
 ```bash
-lc hunt --processor localhost:50051 --insecure
+lc hunt --processor localhost:55555 --insecure
 ```
 
 **Security Warning:** Displays prominent banner when TLS is disabled.
@@ -345,7 +345,7 @@ When enabled, hunters buffer packets to disk when the memory queue is full (duri
 
 ```bash
 # Enable 2GB disk buffer
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --disk-buffer \
   --disk-buffer-max-mb 2048
 ```
@@ -379,17 +379,17 @@ Batching controls how hunters aggregate packets before sending to processor:
 
 ```bash
 # Low latency (send quickly, smaller batches)
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --batch-size 16 \
   --batch-timeout 50
 
 # High throughput (larger batches, less frequent sends)
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --batch-size 256 \
   --batch-timeout 500
 
 # Balanced (default)
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --batch-size 64 \
   --batch-timeout 100
 ```
@@ -426,7 +426,7 @@ All flags can be specified in `~/.config/lippycat/config.yaml`:
 
 ```yaml
 hunter:
-  processor_addr: "processor.example.com:50051"
+  processor_addr: "processor.example.com:55555"
   id: "edge-hunter-01"
   interfaces:
     - "eth0"
@@ -482,10 +482,10 @@ promiscuous: false
 
 ```bash
 # Test connectivity without TLS
-lc hunt --processor processor:50051 --insecure
+lc hunt --processor processor:55555 --insecure
 
 # Verify TLS certificate
-openssl s_client -connect processor:50051 -showcerts -CAfile ca.crt
+openssl s_client -connect processor:55555 -showcerts -CAfile ca.crt
 
 # Check DNS resolution
 ping processor.example.com
@@ -498,10 +498,10 @@ ping processor.example.com
 # (look for drop statistics in logs)
 
 # Increase buffer sizes
-lc hunt --processor processor:50051 --buffer-size 20000 --batch-queue-size 2000
+lc hunt --processor processor:55555 --buffer-size 20000 --batch-queue-size 2000
 
 # Reduce batch timeout for lower latency
-lc hunt --processor processor:50051 --batch-timeout 50
+lc hunt --processor processor:55555 --batch-timeout 50
 ```
 
 ### VoIP Filter Not Working

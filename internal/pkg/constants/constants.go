@@ -99,7 +99,7 @@ const (
 // Network configuration
 const (
 	// DefaultGRPCPort is the default port for gRPC communication between hunters and processors
-	DefaultGRPCPort = 50051
+	DefaultGRPCPort = 55555
 
 	// DefaultMaxHunters is the default maximum number of concurrent hunter connections per processor
 	DefaultMaxHunters = 100

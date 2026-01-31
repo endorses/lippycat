@@ -66,7 +66,7 @@ func (m *mockForwardingFactory) CreateForwardingManager(
 
 func TestNew(t *testing.T) {
 	config := Config{
-		ProcessorAddr:        "localhost:50051",
+		ProcessorAddr:        "localhost:55555",
 		HunterID:             "test-hunter",
 		Interfaces:           []string{"eth0"},
 		BufferSize:           1000,
@@ -95,7 +95,7 @@ func TestNew(t *testing.T) {
 
 func TestNew_WithTLS(t *testing.T) {
 	config := Config{
-		ProcessorAddr:         "localhost:50051",
+		ProcessorAddr:         "localhost:55555",
 		HunterID:              "test-hunter-tls",
 		TLSEnabled:            true,
 		TLSCertFile:           "/path/to/cert.pem",

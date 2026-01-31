@@ -215,7 +215,7 @@ func (m *Manager) buildProcessorPortExclusionFilter() string {
 **What tap needs to exclude:**
 | Traffic Type | Flag | Purpose |
 |-------------|------|---------|
-| TUI subscriber connections | `--listen` (default `:50051`) | Inbound gRPC from TUI clients |
+| TUI subscriber connections | `--listen` (default `:55555`) | Inbound gRPC from TUI clients |
 | Upstream processor traffic | `--processor` | Outbound gRPC to upstream processor |
 
 **Missing infrastructure:**

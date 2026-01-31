@@ -69,13 +69,13 @@ snort -i lc0 -c voip-rules.conf &
 
 ```bash
 # Edge site 1: Hunter
-sudo lc hunt --processor central:50051 -i eth0 --tls-ca ca.crt
+sudo lc hunt --processor central:55555 -i eth0 --tls-ca ca.crt
 
 # Edge site 2: Hunter
-sudo lc hunt --processor central:50051 -i eth0 --tls-ca ca.crt
+sudo lc hunt --processor central:55555 -i eth0 --tls-ca ca.crt
 
 # Central site: Processor with virtual interface
-lc process --listen 0.0.0.0:50051 --virtual-interface --tls-cert server.crt --tls-key server.key
+lc process --listen 0.0.0.0:55555 --virtual-interface --tls-cert server.crt --tls-key server.key
 
 # Monitor aggregated stream from all edge sites
 wireshark -i lc0
@@ -443,15 +443,15 @@ Combine distributed mode with virtual interface:
 
 ```bash
 # Level 1: Hunters at edge sites
-sudo lc hunt --processor region1:50051 --interface eth0
+sudo lc hunt --processor region1:55555 --interface eth0
 
 # Level 2: Regional processor with virtual interface
-lc process --listen 0.0.0.0:50051 \
-  --upstream central:50051 \
+lc process --listen 0.0.0.0:55555 \
+  --upstream central:55555 \
   --virtual-interface --vif-name lc-region1
 
 # Level 3: Central processor with virtual interface
-lc process --listen 0.0.0.0:50051 \
+lc process --listen 0.0.0.0:55555 \
   --virtual-interface --vif-name lc-central
 
 # Monitor centralized stream
@@ -493,7 +493,7 @@ wireshark -i lc-central
 3. **Use lippycat's built-in PCAP writer** in distributed mode:
    ```bash
    # Processor writes PCAP with hunter timestamps preserved
-   lc process --listen 0.0.0.0:50051 -w aggregated.pcap
+   lc process --listen 0.0.0.0:55555 -w aggregated.pcap
    ```
 
 **Why this is a kernel limitation:**

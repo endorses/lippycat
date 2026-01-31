@@ -310,7 +310,7 @@ package constants
 
 const (
     // Network
-    DefaultGRPCPort = 50051
+    DefaultGRPCPort = 55555
     MaxGRPCMessageSize = 100 * 1024 * 1024 // 100 MB
 
     // Flow Control

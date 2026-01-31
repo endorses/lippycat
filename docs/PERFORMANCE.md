@@ -397,7 +397,7 @@ For lawful intercept scale deployments (10K-100K patterns):
 
 ```bash
 # Recommended settings
-lc hunt voip --processor processor:50051 \
+lc hunt voip --processor processor:55555 \
   --pattern-algorithm aho-corasick \
   --pattern-buffer-mb 128 \
   --gpu-backend auto
@@ -416,10 +416,10 @@ lc hunt voip --processor processor:50051 \
 **Promiscuous Mode:**
 ```bash
 # Enable for shared network segments
-lc hunt --processor processor:50051 --promisc
+lc hunt --processor processor:55555 --promisc
 
 # Disable for switched networks (default)
-lc hunt --processor processor:50051
+lc hunt --processor processor:55555
 ```
 
 **Buffer Sizes:**
@@ -462,17 +462,17 @@ Use BPF filters to reduce capture scope and improve performance:
 
 ```bash
 # Low latency
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --batch-size 16 \
   --batch-timeout 50
 
 # Balanced
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --batch-size 64 \
   --batch-timeout 100
 
 # High throughput
-lc hunt --processor processor:50051 \
+lc hunt --processor processor:55555 \
   --batch-size 256 \
   --batch-timeout 500
 ```
@@ -482,7 +482,7 @@ lc hunt --processor processor:50051 \
 Enable VoIP filtering at hunters to reduce bandwidth:
 
 ```bash
-lc hunt voip --processor processor:50051 \
+lc hunt voip --processor processor:55555 \
   --enable-voip-filter \
   --gpu-backend auto
 ```
@@ -565,10 +565,10 @@ top -p $(pgrep -f 'lc (sniff|hunt|process|tap)')
 
 ```bash
 # Processor health monitoring (requires connection to processor)
-watch -n 5 'lc show status -P localhost:50051 --insecure'
+watch -n 5 'lc show status -P localhost:55555 --insecure'
 
 # Hunter status
-watch -n 5 'lc show hunters -P localhost:50051 --insecure'
+watch -n 5 'lc show hunters -P localhost:55555 --insecure'
 ```
 
 ### Configuration Verification
@@ -578,7 +578,7 @@ watch -n 5 'lc show hunters -P localhost:50051 --insecure'
 lc show config
 
 # Show processor topology
-lc show topology -P processor:50051 --tls-ca ca.crt
+lc show topology -P processor:55555 --tls-ca ca.crt
 ```
 
 ### Integration with Monitoring Systems
@@ -586,7 +586,7 @@ lc show topology -P processor:50051 --tls-ca ca.crt
 **Prometheus/Grafana:**
 ```bash
 # Export processor status periodically
-*/5 * * * * lc show status -P localhost:50051 --insecure > /var/metrics/lippycat-status.json
+*/5 * * * * lc show status -P localhost:55555 --insecure > /var/metrics/lippycat-status.json
 ```
 
 See [cmd/show/README.md](../cmd/show/README.md) for complete show command reference.

@@ -679,10 +679,11 @@ func TestCallAggregator_DeepCopyRaceCondition(t *testing.T) {
 				case 0:
 					calls := ca.GetCalls()
 					// Modify returned data to ensure it's truly a copy
+					// Use impossible values that can't occur from actual RTP processing
 					for idx := range calls {
 						calls[idx].PacketCount = 999999
 						if calls[idx].RTPStats != nil {
-							calls[idx].RTPStats.PacketLoss = 100.0
+							calls[idx].RTPStats.PacketLoss = -1.0 // Impossible value (packet loss can't be negative)
 						}
 						if len(calls[idx].Hunters) > 0 {
 							calls[idx].Hunters[0] = "modified-hunter"
@@ -724,7 +725,7 @@ func TestCallAggregator_DeepCopyRaceCondition(t *testing.T) {
 	assert.NotEqual(t, 999999, call.PacketCount, "PacketCount should not be 999999")
 
 	if call.RTPStats != nil {
-		assert.NotEqual(t, 100.0, call.RTPStats.PacketLoss, "RTPStats should not show 100% loss from reader modification")
+		assert.NotEqual(t, -1.0, call.RTPStats.PacketLoss, "RTPStats should not show -1 loss from reader modification")
 		assert.NotEqual(t, 999.0, call.RTPStats.Jitter, "RTPStats jitter should not be modified by readers")
 	}
 

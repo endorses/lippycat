@@ -116,14 +116,15 @@ type AggregatedCall struct {
 
 // RTPQualityStats contains RTP quality metrics
 type RTPQualityStats struct {
-	PacketLoss    float64
-	Jitter        float64
-	MOS           float64 // Mean Opinion Score
-	Codec         string
-	TotalPackets  int
-	LostPackets   int
-	LastSeqNum    uint16
-	LastTimestamp uint32
+	PacketLoss      float64
+	Jitter          float64
+	MOS             float64 // Mean Opinion Score
+	Codec           string
+	TotalPackets    int
+	LostPackets     int
+	LastSeqNum      uint16
+	LastTimestamp   uint32
+	LastArrivalTime time.Time // For RFC 3550 jitter calculation
 }
 
 // CallAggregator aggregates call state from packet streams
@@ -597,9 +598,10 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 		}
 
 		call.RTPStats = &RTPQualityStats{
-			Codec:         "Unknown",
-			LastSeqNum:    lastSeq,
-			LastTimestamp: rtp.Timestamp,
+			Codec:           "Unknown",
+			LastSeqNum:      lastSeq,
+			LastTimestamp:   rtp.Timestamp,
+			LastArrivalTime: timestamp,
 		}
 		logger.Debug("Initialized RTP stats for call",
 			"call_id", callID,
@@ -692,22 +694,30 @@ func (ca *CallAggregator) processRTPPacketInternal(packet *data.CapturedPacket, 
 	}
 
 	// Calculate jitter using RFC 3550 algorithm
-	if stats.TotalPackets > 1 && stats.LastTimestamp != 0 {
-		// Calculate inter-arrival jitter
-		// J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
-		// where D is the difference in packet spacing
+	// D(i,j) = (Rj - Ri) - (Sj - Si)
+	// J(i) = J(i-1) + (|D(i-1,i)| - J(i-1))/16
+	// where R is packet arrival time, S is RTP timestamp
+	if stats.TotalPackets > 0 && !stats.LastArrivalTime.IsZero() {
+		// Calculate arrival time difference in milliseconds
+		arrivalDiffMs := float64(timestamp.Sub(stats.LastArrivalTime).Microseconds()) / 1000.0
 
+		// Calculate RTP timestamp difference in milliseconds
+		// Assuming 8kHz clock rate (common for voice codecs like G.711, G.729)
 		timestampDiff := int64(rtp.Timestamp) - int64(stats.LastTimestamp)
-		timestampDiff = max(-timestampDiff, timestampDiff)
-
-		// Convert to milliseconds (assuming 8kHz clock rate for most codecs)
 		timestampDiffMs := float64(timestampDiff) / 8.0
 
+		// D = difference between actual arrival spacing and expected spacing
+		d := arrivalDiffMs - timestampDiffMs
+		if d < 0 {
+			d = -d
+		}
+
 		// Update jitter with smoothing factor (1/16 as per RFC 3550)
-		stats.Jitter = stats.Jitter + (timestampDiffMs-stats.Jitter)/16.0
+		stats.Jitter = stats.Jitter + (d-stats.Jitter)/16.0
 	}
 
 	stats.LastTimestamp = rtp.Timestamp
+	stats.LastArrivalTime = timestamp
 
 	// Calculate MOS (Mean Opinion Score) based on packet loss and jitter
 	stats.MOS = calculateMOS(stats.PacketLoss, stats.Jitter)

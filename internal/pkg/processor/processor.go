@@ -117,6 +117,7 @@ type Processor struct {
 	// gRPC server
 	grpcServer *grpc.Server
 	listener   net.Listener
+	listenerMu sync.RWMutex // protects listener access during startup
 
 	// Packet source abstraction (gRPC or local capture)
 	packetSource source.PacketSource

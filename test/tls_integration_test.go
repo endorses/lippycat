@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,15 +45,11 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	ok := caCertPool.AppendCertsFromPEM(caCert)
 	require.True(t, ok, "Failed to parse CA certificate")
 
-	// Start processor with TLS enabled
-	processorAddr := "127.0.0.1:50058"
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
+	// Start processor with TLS enabled (uses dynamic port allocation)
+	result, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err, "Failed to start TLS processor")
-	defer proc.Shutdown()
-
-	// Wait for processor to be ready (TLS needs more time to initialize)
-	// CI with race detector can be slow
-	time.Sleep(5 * time.Second)
+	defer result.proc.Shutdown()
+	processorAddr := result.addr
 
 	// Load hunter client certificate
 	hunterCert, err := tls.LoadX509KeyPair(
@@ -135,7 +132,7 @@ func TestIntegration_TLS_MutualAuth(t *testing.T) {
 	assert.NotNil(t, resp, "Stream control response is nil")
 
 	// Verify processor received packets
-	stats := proc.GetStats()
+	stats := result.proc.GetStats()
 	assert.GreaterOrEqual(t, stats.TotalPacketsReceived, uint64(10), "Processor should have received packets over TLS")
 
 	t.Logf("✓ TLS mutual auth test: Successfully exchanged packets over mTLS")
@@ -164,14 +161,11 @@ func TestIntegration_TLS_ClientAuthRequired(t *testing.T) {
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 
-	// Start processor with TLS and client auth required
-	processorAddr := "127.0.0.1:50059"
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
+	// Start processor with TLS and client auth required (uses dynamic port)
+	result, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err, "Failed to start TLS processor")
-	defer proc.Shutdown()
-
-	// Wait for processor
-	time.Sleep(500 * time.Millisecond)
+	defer result.proc.Shutdown()
+	processorAddr := result.addr
 
 	// Try to connect without client certificate (should fail)
 	noClientCertTLSConfig := &tls.Config{
@@ -237,13 +231,11 @@ func TestIntegration_TLS_TLS13Enforcement(t *testing.T) {
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 
-	// Start processor with TLS 1.3
-	processorAddr := "127.0.0.1:50060"
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
+	// Start processor with TLS 1.3 (uses dynamic port)
+	result, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err)
-	defer proc.Shutdown()
-
-	time.Sleep(500 * time.Millisecond)
+	defer result.proc.Shutdown()
+	processorAddr := result.addr
 
 	// Load client certificate
 	hunterCert, err := tls.LoadX509KeyPair(
@@ -309,13 +301,11 @@ func TestIntegration_TLS_InvalidCertificate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start processor with TLS
-	processorAddr := "127.0.0.1:50061"
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
+	// Start processor with TLS (uses dynamic port)
+	result, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err)
-	defer proc.Shutdown()
-
-	time.Sleep(500 * time.Millisecond)
+	defer result.proc.Shutdown()
+	processorAddr := result.addr
 
 	// Try to connect with self-signed cert (not signed by our CA)
 	selfSignedCert, err := tls.X509KeyPair([]byte(selfSignedCertPEM), []byte(selfSignedKeyPEM))
@@ -388,13 +378,11 @@ func TestIntegration_TLS_ServerNameVerification(t *testing.T) {
 	caCertPool := x509.NewCertPool()
 	caCertPool.AppendCertsFromPEM(caCert)
 
-	// Start processor
-	processorAddr := "127.0.0.1:50062"
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
+	// Start processor (uses dynamic port)
+	result, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err)
-	defer proc.Shutdown()
-
-	time.Sleep(500 * time.Millisecond)
+	defer result.proc.Shutdown()
+	processorAddr := result.addr
 
 	// Load client certificate
 	hunterCert, err := tls.LoadX509KeyPair(
@@ -465,13 +453,12 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 	defer cancel()
 
 	// Try to start processor without TLS in production mode
-	processorAddr := "127.0.0.1:50063"
 	config := &processor.Config{
-		ListenAddr:     processorAddr,
-		TLSEnabled:     false, // Insecure in production
+		ListenAddr:     "127.0.0.1:0", // Dynamic port
+		TLSEnabled:     false,         // Insecure in production
 		MaxHunters:     10,
 		MaxSubscribers: 5,
-		FilterFile:     "/tmp/lippycat-test-filters-does-not-exist.yaml", // Non-existent path to start with clean filter state
+		FilterFile:     filepath.Join(t.TempDir(), "filters.yaml"),
 	}
 
 	proc, err := processor.New(*config)
@@ -491,9 +478,17 @@ func TestIntegration_TLS_ProductionModeEnforcement(t *testing.T) {
 	t.Logf("✓ Production mode enforcement test: Insecure config correctly rejected")
 }
 
-// Helper function to start a TLS-enabled processor
-// Uses t.TempDir() for filter file to ensure test isolation
-func startTLSProcessor(t *testing.T, ctx context.Context, addr, certsDir string, requireClientAuth bool) (*processor.Processor, error) {
+// startTLSProcessorResult contains the result of starting a TLS processor
+type startTLSProcessorResult struct {
+	proc *processor.Processor
+	addr string // actual listening address (useful when using port :0)
+}
+
+// Helper function to start a TLS-enabled processor with proper startup signaling.
+// Uses dynamic port allocation (127.0.0.1:0) to avoid port conflicts.
+// Uses t.TempDir() for filter file to ensure test isolation.
+// Returns the processor and its actual listening address.
+func startTLSProcessor(t *testing.T, ctx context.Context, certsDir string, requireClientAuth bool) (*startTLSProcessorResult, error) {
 	serverCert := filepath.Join(certsDir, "processor-cert.pem")
 	serverKey := filepath.Join(certsDir, "processor-key.pem")
 	caCert := filepath.Join(certsDir, "ca-cert.pem")
@@ -501,8 +496,9 @@ func startTLSProcessor(t *testing.T, ctx context.Context, addr, certsDir string,
 	// Use t.TempDir() for filter file to ensure each test has isolated state
 	filterFile := filepath.Join(t.TempDir(), "filters.yaml")
 
+	// Use port 0 to let the OS allocate an available port
 	config := &processor.Config{
-		ListenAddr:     addr,
+		ListenAddr:     "127.0.0.1:0",
 		TLSEnabled:     true,
 		TLSCertFile:    serverCert,
 		TLSKeyFile:     serverKey,
@@ -518,19 +514,52 @@ func startTLSProcessor(t *testing.T, ctx context.Context, addr, certsDir string,
 		return nil, err
 	}
 
+	// Channel to signal startup completion or error
+	startupDone := make(chan error, 1)
+
 	// Start processor in background
 	go func() {
 		if err := proc.Start(ctx); err != nil {
-			// Processor stopped with error (non-fatal for tests)
-			// The test will handle any connection errors
+			// Only send error if context wasn't cancelled (normal shutdown)
+			if ctx.Err() == nil {
+				select {
+				case startupDone <- err:
+				default:
+				}
+			}
 		}
 	}()
 
-	// Give processor time to start listening
-	// CI with race detector needs more time
-	time.Sleep(2 * time.Second)
+	// Wait for processor to start listening by polling ListenAddr()
+	// This is more reliable than a fixed sleep
+	deadline := time.Now().Add(10 * time.Second)
+	var actualAddr string
+	for time.Now().Before(deadline) {
+		actualAddr = proc.ListenAddr()
+		if actualAddr != "" {
+			// Processor is listening
+			break
+		}
 
-	return proc, nil
+		// Check for startup error
+		select {
+		case err := <-startupDone:
+			return nil, fmt.Errorf("processor failed to start: %w", err)
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+			// Continue polling
+		}
+	}
+
+	if actualAddr == "" {
+		return nil, fmt.Errorf("processor did not start listening within timeout")
+	}
+
+	return &startTLSProcessorResult{
+		proc: proc,
+		addr: actualAddr,
+	}, nil
 }
 
 // Self-signed certificate for testing invalid cert scenarios

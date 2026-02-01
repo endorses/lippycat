@@ -102,7 +102,9 @@ func (p *Processor) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
+	p.listenerMu.Lock()
 	p.listener = listener
+	p.listenerMu.Unlock()
 
 	// Create gRPC server with TLS if configured
 	serverOpts := []grpc.ServerOption{
@@ -371,6 +373,19 @@ func (p *Processor) Shutdown() error {
 
 	logger.Info("Processor shutdown complete")
 	return nil
+}
+
+// ListenAddr returns the actual listening address of the processor.
+// This is useful when the processor was started with port ":0" to get a dynamically
+// allocated port. Returns an empty string if the processor hasn't started listening yet.
+// This method is safe for concurrent access during processor startup.
+func (p *Processor) ListenAddr() string {
+	p.listenerMu.RLock()
+	defer p.listenerMu.RUnlock()
+	if p.listener == nil {
+		return ""
+	}
+	return p.listener.Addr().String()
 }
 
 // createReuseAddrListener creates a TCP listener with SO_REUSEADDR enabled

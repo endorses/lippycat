@@ -448,15 +448,11 @@ func TestIntegration_FilterCLI_TLSConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start TLS-enabled processor
-	processorAddr, err := getFreePort()
+	// Start TLS-enabled processor (uses dynamic port allocation)
+	procResult, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err)
-
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
-	require.NoError(t, err)
-	defer proc.Shutdown()
-
-	time.Sleep(1 * time.Second)
+	defer procResult.proc.Shutdown()
+	processorAddr := procResult.addr
 
 	// Create filter client with TLS
 	client, err := filterclient.NewFilterClient(filterclient.ClientConfig{
@@ -513,15 +509,11 @@ func TestIntegration_FilterCLI_TLSInvalidCert(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start TLS-enabled processor
-	processorAddr, err := getFreePort()
+	// Start TLS-enabled processor (uses dynamic port allocation)
+	procResult, err := startTLSProcessor(t, ctx, certsDir, true)
 	require.NoError(t, err)
-
-	proc, err := startTLSProcessor(t, ctx, processorAddr, certsDir, true)
-	require.NoError(t, err)
-	defer proc.Shutdown()
-
-	time.Sleep(1 * time.Second)
+	defer procResult.proc.Shutdown()
+	processorAddr := procResult.addr
 
 	// Load CA for server verification
 	caCert, err := os.ReadFile(filepath.Join(certsDir, "ca-cert.pem"))

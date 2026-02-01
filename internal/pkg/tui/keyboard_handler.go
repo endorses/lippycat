@@ -759,6 +759,7 @@ func (m Model) handleSavePackets() (Model, tea.Cmd) {
 			m.savePath = ""
 			m.uiState.StreamingSave = false
 			m.uiState.Footer.SetStreamingSave(false) // Update footer hint
+			m.uiState.Header.SetStreamingSave(false) // Update header status
 			return m, cmd
 		}
 		// Update default filename with current timestamp before opening file dialog

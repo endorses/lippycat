@@ -25,6 +25,7 @@ type Header struct {
 	processorCount int  // Number of connected processors
 	tlsDecryption  bool // True when TLS decryption is active
 	pcapFileCount  int  // Number of PCAP files (for offline mode header display)
+	streamingSave  bool // True when streaming save to PCAP is active
 }
 
 // NewHeader creates a new header component
@@ -90,6 +91,11 @@ func (h *Header) SetTLSDecryption(active bool) {
 // SetPCAPFileCount sets the number of PCAP files (for offline mode display)
 func (h *Header) SetPCAPFileCount(count int) {
 	h.pcapFileCount = count
+}
+
+// SetStreamingSave sets whether streaming save to PCAP is active
+func (h *Header) SetStreamingSave(active bool) {
+	h.streamingSave = active
 }
 
 // Section width constants
@@ -180,7 +186,11 @@ func (h *Header) View() string {
 	// Status indicator with color
 	var statusText string
 	var statusColor lipgloss.Color
-	if h.paused {
+	if h.streamingSave {
+		// Recording to PCAP takes priority over other states
+		statusText = "● REC"
+		statusColor = h.theme.ErrorColor // Red for recording
+	} else if h.paused {
 		statusText = "|| PAUSED"
 		statusColor = h.theme.SuccessColor // Green for paused
 	} else if h.capturing {

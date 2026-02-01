@@ -175,6 +175,7 @@ func (m *Model) startStreamingSave(filePath string) tea.Cmd {
 	m.savePath = filePath
 	m.uiState.StreamingSave = true
 	m.uiState.Footer.SetStreamingSave(true) // Update footer hint
+	m.uiState.Header.SetStreamingSave(true) // Update header status
 
 	// Write existing packets in background to avoid blocking/dropping
 	// Channel buffer is 1000, so writing >1000 packets synchronously would drop packets

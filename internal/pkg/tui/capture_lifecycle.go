@@ -32,6 +32,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 		m.savePath = ""
 		m.uiState.StreamingSave = false
 		m.uiState.Footer.SetStreamingSave(false) // Update footer hint
+		m.uiState.Header.SetStreamingSave(false) // Update header status
 	}
 
 	// Stop current capture and wait for it to finish

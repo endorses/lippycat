@@ -371,9 +371,10 @@ func (m Model) handleSaveCompleteMsg(msg SaveCompleteMsg) (Model, tea.Cmd) {
 	// Save operation completed
 	m.uiState.SaveInProgress = false
 
-	// If this was a streaming save completion, update footer
+	// If this was a streaming save completion, update UI
 	if msg.Streaming {
 		m.uiState.Footer.SetStreamingSave(false)
+		m.uiState.Header.SetStreamingSave(false)
 	}
 
 	if msg.Success {

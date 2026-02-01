@@ -214,7 +214,7 @@ func RenderBytesRateSparkline(rates []float64, width, height int, theme themes.T
 }
 
 // RenderCPUSparkline renders a CPU percentage sparkline with utilization-based colors.
-// Uses green for low CPU (<30%), yellow for moderate (30-70%), red for high (>70%).
+// Uses green (≤25%), yellow (≤50%), orange (≤75%), red (>75%).
 // peakCPU is the highest CPU value seen, used for scaling (can exceed 100% on multi-core systems).
 func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme, peakCPU float64) string {
 	if len(samples) == 0 {
@@ -226,12 +226,14 @@ func RenderCPUSparkline(samples []float64, width, height int, theme themes.Theme
 	if len(samples) > 0 {
 		current := samples[len(samples)-1]
 		switch {
-		case current > 70:
-			color = theme.ErrorColor // High CPU
-		case current > 30:
-			color = theme.WarningColor // Moderate CPU
+		case current > 75:
+			color = theme.ErrorColor
+		case current > 50:
+			color = theme.WarningColor
+		case current > 25:
+			color = theme.CautionColor
 		default:
-			color = theme.SuccessColor // Low CPU
+			color = theme.SuccessColor
 		}
 	} else {
 		color = theme.InfoColor

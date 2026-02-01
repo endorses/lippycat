@@ -41,6 +41,7 @@ type Theme struct {
 
 	// Emphasis colors
 	WarningColor lipgloss.Color
+	CautionColor lipgloss.Color
 	SuccessColor lipgloss.Color
 	InfoColor    lipgloss.Color
 	FilterColor  lipgloss.Color
@@ -107,6 +108,7 @@ func Solarized() Theme {
 
 		// Emphasis
 		WarningColor: solarizedOrange,
+		CautionColor: solarizedYellow,
 		SuccessColor: solarizedGreen,
 		InfoColor:    solarizedBlue,
 		FilterColor:  solarizedViolet,

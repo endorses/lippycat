@@ -1988,10 +1988,13 @@ func (s *StatisticsView) renderDistributedSubView() string {
 	result.WriteString(labelStyle.Render("Avg CPU Usage:     "))
 	if ds.FleetCPUPercent >= 0 {
 		cpuColor := s.theme.SuccessColor
-		if ds.FleetCPUPercent > 70 {
+		if ds.FleetCPUPercent > 25 {
+			cpuColor = s.theme.CautionColor
+		}
+		if ds.FleetCPUPercent > 50 {
 			cpuColor = s.theme.WarningColor
 		}
-		if ds.FleetCPUPercent > 90 {
+		if ds.FleetCPUPercent > 75 {
 			cpuColor = s.theme.ErrorColor
 		}
 		cpuStyle := lipgloss.NewStyle().Foreground(cpuColor)

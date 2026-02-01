@@ -23,12 +23,12 @@ type ProcessorInfo struct {
 	RegisteredAt  time.Time
 	LastSeen      time.Time
 
-	// gRPC client for querying this downstream processor
-	Client management.ManagementServiceClient
-	Conn   *grpc.ClientConn
-
-	// mu protects the fields below from concurrent access
+	// mu protects all fields below from concurrent access
 	mu sync.Mutex
+
+	// gRPC client for querying this downstream processor (protected by mu)
+	client management.ManagementServiceClient
+	conn   *grpc.ClientConn
 
 	// Topology streaming fields (protected by mu)
 	TopologyStream       management.ManagementService_SubscribeTopologyClient
@@ -39,6 +39,32 @@ type ProcessorInfo struct {
 	// Reconnection state for exponential backoff (protected by mu)
 	reconnectAttempts int           // Number of consecutive reconnection attempts
 	reconnectBackoff  time.Duration // Current backoff duration
+}
+
+// GetClient returns the gRPC management client in a thread-safe manner.
+// Returns nil if the client is not initialized.
+func (p *ProcessorInfo) GetClient() management.ManagementServiceClient {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.client
+}
+
+// setClient sets the gRPC client and connection in a thread-safe manner.
+// Returns the old connection so it can be closed by the caller.
+func (p *ProcessorInfo) setClient(client management.ManagementServiceClient, conn *grpc.ClientConn) *grpc.ClientConn {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	oldConn := p.conn
+	p.client = client
+	p.conn = conn
+	return oldConn
+}
+
+// getConn returns the gRPC connection in a thread-safe manner.
+func (p *ProcessorInfo) getConn() *grpc.ClientConn {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.conn
 }
 
 // TopologyPublisher defines the interface for publishing topology updates upstream
@@ -155,12 +181,9 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 			return err
 		}
 
-		// Store old connection to close after updating the client
-		oldConn := existing.Conn
-
-		// Update client atomically - the existing goroutine will use the new client
-		existing.Client = management.NewManagementServiceClient(conn)
-		existing.Conn = conn
+		// Update client atomically using thread-safe setter
+		// Returns the old connection so we can close it
+		oldConn := existing.setClient(management.NewManagementServiceClient(conn), conn)
 
 		// Now close old connection
 		if oldConn != nil {
@@ -231,8 +254,8 @@ func (m *Manager) Register(processorID, listenAddress, version string) error {
 		Version:       version,
 		RegisteredAt:  now,
 		LastSeen:      now,
-		Client:        client,
-		Conn:          conn,
+		client:        client,
+		conn:          conn,
 	}
 
 	m.downstreams[processorID] = proc
@@ -264,7 +287,7 @@ func (m *Manager) Unregister(processorID string) {
 		proc.mu.Unlock()
 
 		// Release connection back to pool
-		if proc.Conn != nil {
+		if proc.getConn() != nil {
 			grpcpool.Release(m.connPool, proc.ListenAddress)
 		}
 
@@ -320,7 +343,13 @@ func (m *Manager) GetTopology(ctx context.Context, myProcessorID string, myStatu
 			"downstream_id", downstream.ProcessorID,
 			"address", downstream.ListenAddress)
 
-		resp, err := downstream.Client.GetTopology(ctx, &management.TopologyRequest{})
+		client := downstream.GetClient()
+		if client == nil {
+			logger.Error("No client available for downstream processor",
+				"downstream_id", downstream.ProcessorID)
+			continue
+		}
+		resp, err := client.GetTopology(ctx, &management.TopologyRequest{})
 		if err != nil {
 			logger.Error("Failed to get topology from downstream processor",
 				"downstream_id", downstream.ProcessorID,
@@ -358,7 +387,16 @@ func (m *Manager) SubscribeToDownstream(proc *ProcessorInfo) error {
 		ClientId:          m.getProcessorID(),
 	}
 
-	stream, err := proc.Client.SubscribeTopology(ctx, req)
+	client := proc.GetClient()
+	if client == nil {
+		logger.Warn("No client available for downstream topology subscription",
+			"processor_id", proc.ProcessorID)
+		m.wg.Add(1)
+		go m.receiveTopologyUpdates(proc, nil)
+		return nil
+	}
+
+	stream, err := client.SubscribeTopology(ctx, req)
 	if err != nil {
 		logger.Warn("Failed to subscribe to downstream topology (will retry)",
 			"processor_id", proc.ProcessorID,
@@ -540,7 +578,13 @@ func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 		ClientId:          m.getProcessorID(),
 	}
 
-	stream, err := proc.Client.SubscribeTopology(ctx, req)
+	client := proc.GetClient()
+	if client == nil {
+		cancel()
+		return fmt.Errorf("no client available for processor %s", proc.ProcessorID)
+	}
+
+	stream, err := client.SubscribeTopology(ctx, req)
 	if err != nil {
 		cancel()
 		return err
@@ -563,7 +607,7 @@ func (m *Manager) reconnectTopologyStream(proc *ProcessorInfo) error {
 		queryCtx, queryCancel := context.WithTimeout(m.ctx, 5*time.Second)
 		defer queryCancel()
 
-		topologyResp, err := proc.Client.GetTopology(queryCtx, &management.TopologyRequest{})
+		topologyResp, err := client.GetTopology(queryCtx, &management.TopologyRequest{})
 		if err != nil {
 			logger.Warn("Failed to query topology after reconnection, publishing minimal event",
 				"processor_id", proc.ProcessorID,
@@ -667,7 +711,7 @@ func (m *Manager) Shutdown(timeout time.Duration) {
 		proc.mu.Unlock()
 
 		// Release connection back to pool
-		if proc.Conn != nil {
+		if proc.getConn() != nil {
 			grpcpool.Release(m.connPool, proc.ListenAddress)
 		}
 	}
@@ -707,12 +751,17 @@ func (m *Manager) ForwardUpdateFilter(ctx context.Context, downstreamID string, 
 		"target_processor_id", req.ProcessorId,
 		"filter_id", req.Filter.Id)
 
+	client := downstream.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("no client available for downstream processor: %s", downstreamID)
+	}
+
 	var result *management.FilterUpdateResult
 	var err error
 
 	// Execute with retry logic for transient failures
 	retryErr := withRetry(ctx, func() error {
-		result, err = downstream.Client.UpdateFilterOnProcessor(ctx, req)
+		result, err = client.UpdateFilterOnProcessor(ctx, req)
 		return err
 	}, "UpdateFilter", req.ProcessorId)
 
@@ -757,12 +806,17 @@ func (m *Manager) ForwardDeleteFilter(ctx context.Context, downstreamID string, 
 		"target_processor_id", req.ProcessorId,
 		"filter_id", req.FilterId)
 
+	client := downstream.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("no client available for downstream processor: %s", downstreamID)
+	}
+
 	var result *management.FilterUpdateResult
 	var err error
 
 	// Execute with retry logic for transient failures
 	retryErr := withRetry(ctx, func() error {
-		result, err = downstream.Client.DeleteFilterOnProcessor(ctx, req)
+		result, err = client.DeleteFilterOnProcessor(ctx, req)
 		return err
 	}, "DeleteFilter", req.ProcessorId)
 
@@ -805,12 +859,17 @@ func (m *Manager) ForwardGetFilters(ctx context.Context, downstreamID string, re
 		"target_processor_id", req.ProcessorId,
 		"hunter_id", req.HunterId)
 
+	client := downstream.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("no client available for downstream processor: %s", downstreamID)
+	}
+
 	var result *management.FilterResponse
 	var err error
 
 	// Execute with retry logic for transient failures
 	retryErr := withRetry(ctx, func() error {
-		result, err = downstream.Client.GetFiltersFromProcessor(ctx, req)
+		result, err = client.GetFiltersFromProcessor(ctx, req)
 		return err
 	}, "GetFilters", req.ProcessorId)
 
@@ -981,7 +1040,7 @@ func (m *Manager) Close() {
 		proc.mu.Unlock()
 
 		// Release connection back to pool
-		if proc.Conn != nil {
+		if proc.getConn() != nil {
 			grpcpool.Release(m.connPool, proc.ListenAddress)
 		}
 	}

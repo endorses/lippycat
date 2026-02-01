@@ -168,12 +168,12 @@ func TestManager_Shutdown_ClearsDownstreamsMap(t *testing.T) {
 	mgr.downstreams["processor-1"] = &ProcessorInfo{
 		ProcessorID:   "processor-1",
 		ListenAddress: "localhost:55555",
-		Conn:          nil, // nil is acceptable for this test
+		conn:          nil, // nil is acceptable for this test
 	}
 	mgr.downstreams["processor-2"] = &ProcessorInfo{
 		ProcessorID:   "processor-2",
 		ListenAddress: "localhost:50052",
-		Conn:          nil,
+		conn:          nil,
 	}
 	mgr.mu.Unlock()
 

@@ -321,13 +321,14 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 	if p.downstreamManager != nil {
 		downstreams := p.downstreamManager.GetAll()
 		for _, downstream := range downstreams {
-			if downstream.Client == nil {
+			client := downstream.GetClient()
+			if client == nil {
 				continue
 			}
 
 			// Use short timeout to avoid blocking on slow/unavailable downstream
 			queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			resp, err := downstream.Client.GetHunterStatus(queryCtx, &management.StatusRequest{
+			resp, err := client.GetHunterStatus(queryCtx, &management.StatusRequest{
 				HunterId: req.HunterId, // Pass through any filter
 			})
 			cancel()
@@ -467,19 +468,21 @@ func (p *Processor) RegisterProcessor(ctx context.Context, req *management.Proce
 	// Query the downstream's topology to get its hunters (including virtual hunter for TAPs)
 	// This is done after registration so we have a client connection to the downstream
 	var hunters []*management.ConnectedHunter
-	if downstream := p.downstreamManager.Get(req.ProcessorId); downstream != nil && downstream.Client != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		resp, err := downstream.Client.GetTopology(ctx, &management.TopologyRequest{})
-		cancel()
-		if err == nil && resp.Processor != nil {
-			hunters = resp.Processor.Hunters
-			logger.Debug("Retrieved hunters from downstream processor",
-				"processor_id", req.ProcessorId,
-				"hunter_count", len(hunters))
-		} else if err != nil {
-			logger.Debug("Could not query downstream topology for hunters",
-				"processor_id", req.ProcessorId,
-				"error", err)
+	if downstream := p.downstreamManager.Get(req.ProcessorId); downstream != nil {
+		if client := downstream.GetClient(); client != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			resp, err := client.GetTopology(ctx, &management.TopologyRequest{})
+			cancel()
+			if err == nil && resp.Processor != nil {
+				hunters = resp.Processor.Hunters
+				logger.Debug("Retrieved hunters from downstream processor",
+					"processor_id", req.ProcessorId,
+					"hunter_count", len(hunters))
+			} else if err != nil {
+				logger.Debug("Could not query downstream topology for hunters",
+					"processor_id", req.ProcessorId,
+					"error", err)
+			}
 		}
 	}
 

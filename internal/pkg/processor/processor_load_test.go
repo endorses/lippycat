@@ -158,9 +158,9 @@ func TestProcessor_ManyHunters_100Concurrent(t *testing.T) {
 	elapsed := time.Since(start)
 	t.Logf("Registered %d hunters in %v", hunterCount, elapsed)
 
-	// Verify all hunters registered
-	stats := p.GetStats()
-	registeredCount := int(stats.TotalHunters)
+	// Verify all hunters registered using hunter manager directly (not async stats collector)
+	// The stats collector is updated asynchronously via callbacks, which can race with concurrent registrations
+	registeredCount := p.hunterManager.Count()
 
 	t.Logf("Successfully registered: %d/%d hunters", registeredCount, hunterCount)
 	assert.Equal(t, hunterCount, registeredCount, "All hunters should be registered")
@@ -193,9 +193,9 @@ func TestProcessor_ManyHunters_100Concurrent(t *testing.T) {
 	t.Logf("Processed %d packets from %d hunters in %v (%.0f packets/sec)",
 		totalPackets, hunterCount, elapsed, rate)
 
-	// Verify stats
-	stats = p.GetStats()
-	assert.Equal(t, uint32(hunterCount), stats.TotalHunters, "Active hunter count mismatch")
+	// Verify hunter count using hunter manager directly (not async stats collector)
+	finalCount := p.hunterManager.Count()
+	assert.Equal(t, hunterCount, finalCount, "Active hunter count mismatch")
 }
 
 // TestProcessor_ManySubscribers_100Concurrent tests processor with 100 TUI clients

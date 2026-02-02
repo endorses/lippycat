@@ -8,13 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.1] - 2026-02-02
 
 ### Added
-- Bug fixes and LI/TUI enhancements
-
-### Changed
-- TODO: Add detailed changelog entries
+- **TUI enhancements**:
+  - 4-color CPU indicators with adjusted thresholds for better resource visibility
+  - Permanent REC indicator when saving to PCAP
+  - Time display toggle between clock and relative time
+- **LI (Lawful Interception) improvements**:
+  - 3GPP IMS header extraction (P-Access-Network-Info, P-Visited-Network-ID)
+  - IMSI/IMEI target filtering support for mobile network interception
+  - MESSAGE body extraction for SMS-over-IMS
+  - Extended IRI types for full SIP method coverage
 
 ### Fixed
-- TODO: Add fixed items
+- Processor: Protected downstream Client/Conn fields from data race
+- Processor: Trigger stats callback on hunter reconnection
+- Processor: Include interfaces in hunter topology update
+- Processor: Initialize LastHeartbeat on hunter registration
+- VoIP: Correct jitter calculation to use RFC 3550 formula
+- TUI: Dev console fills terminal correctly, removed pendingPackets noise
+- Tests: Use proper startup signaling in TLS integration tests
 
 ## [0.9.0] - 2026-01-31
 

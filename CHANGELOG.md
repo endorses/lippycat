@@ -8,13 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.2] - 2026-02-03
 
 ### Added
-- TUI layout improvements and call details enhancements
-
-### Changed
-- TODO: Add detailed changelog entries
+- **TUI enhancements**:
+  - Origin and SIP reason phrases displayed in call details view
+  - Current/average/peak statistics in active calls chart
 
 ### Fixed
-- TODO: Add fixed items
+- TUI: Rewrote column width calculation for consistent layout across terminal widths
+- TUI: Ensure duration column has 7 chars for long durations (10h+)
+- TUI: More aggressive Call ID truncation when space is constrained
+- VoIP: Exclude early dialog calls from codec statistics
+- Tests: Use hunter manager count instead of async stats in load test
 
 ## [0.9.1] - 2026-02-02
 

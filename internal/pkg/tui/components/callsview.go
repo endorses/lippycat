@@ -820,30 +820,27 @@ func (cv *CallsView) renderEmpty() string {
 // renderTableWithSize shows the calls table with specified dimensions
 func (cv *CallsView) renderTableWithSize(width, height int) string {
 	// Calculate responsive column widths based on available width
-	// Match packet list calculation exactly
-	// Border width is adaptive: width - 2 when details hidden, width - 4 when details visible
-	// Content width = box_width - padding - border
-	// Details hidden: (width - 2) - 4 (padding) - 2 (border) = width - 8
-	// Details visible: (width - 4) - 4 (padding) - 2 (border) = width - 10
-	// We add 1 char back for better spacing
-	availableWidth := width - 6
+	// borderWidth = width - 2 (outer box width)
+	// Content width = borderWidth - 4 (padding: 2 left + 2 right) - 2 (border: 1 left + 1 right)
+	//               = width - 2 - 4 - 2 = width - 8
+	availableWidth := width - 8
 
 	// Define column width ranges
 	const (
 		startTimeMin = 12 // HH:MM:SS.ms
 		endTimeMin   = 12
-		fromMin      = 15
-		fromMax      = 40
-		toMin        = 15
-		toMax        = 40
-		stateMin     = 10
-		durationMin  = 8
-		codecMin     = 9
-		qualityMin   = 8
-		nodeMin      = 10
-		nodeMax      = 20
-		callIDMin    = 10 // Absolute minimum for CallID
-		callIDMax    = 36 // Full UUID length
+		fromMin      = 12
+		fromMax      = 35
+		toMin        = 12
+		toMax        = 35
+		stateMin     = 8
+		durationMin  = 7
+		codecMin     = 6
+		qualityMin   = 5
+		nodeMin      = 8
+		nodeMax      = 15
+		callIDMin    = 8  // Absolute minimum for CallID
+		callIDMax    = 30 // Reasonable max, not full UUID
 	)
 
 	// Calculate fixed columns total (these don't shrink below minimum)
@@ -859,20 +856,20 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 	if availableWidth < fixedMin+flexibleMin {
 		// Very narrow terminal - use absolute minimums
 		startTimeWidth = 8 // HH:MM:SS
-		endTimeWidth = 8
-		fromWidth = 8
-		toWidth = 8
+		endTimeWidth = 6
+		fromWidth = 7
+		toWidth = 7
 		stateWidth = 6
-		durationWidth = 6
+		durationWidth = 5
 		codecWidth = 4
 		qualityWidth = 3
-		nodeWidth = 8
+		nodeWidth = 6
 		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
 		callIDWidth = availableWidth - fixedNarrow
 		if callIDWidth < callIDMin {
 			callIDWidth = callIDMin
 		}
-	} else if availableWidth < fixedMin+flexibleMin+60 {
+	} else if availableWidth < fixedMin+flexibleMin+40 {
 		// Narrow/medium terminal (e.g., details panel shown) - use minimums, cap CallID
 		startTimeWidth = startTimeMin
 		endTimeWidth = endTimeMin
@@ -886,8 +883,8 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
 		callIDWidth = availableWidth - fixedNarrow
 		// Cap CallID at a reasonable width for narrow terminals
-		if callIDWidth > 25 {
-			callIDWidth = 25
+		if callIDWidth > 20 {
+			callIDWidth = 20
 		}
 		if callIDWidth < callIDMin {
 			callIDWidth = callIDMin

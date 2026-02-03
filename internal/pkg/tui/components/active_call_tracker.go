@@ -168,6 +168,24 @@ func (act *ActiveCallTracker) GetPeak() int {
 	return act.peakActiveCalls
 }
 
+// GetAverage returns the average active call count over all samples.
+// Returns 0 if no samples are available.
+func (act *ActiveCallTracker) GetAverage() float64 {
+	act.mu.RLock()
+	defer act.mu.RUnlock()
+
+	if act.count == 0 {
+		return 0
+	}
+
+	var sum float64
+	for i := 0; i < act.count; i++ {
+		idx := (act.head - act.count + i + act.maxSamples) % act.maxSamples
+		sum += act.samples[idx]
+	}
+	return sum / float64(act.count)
+}
+
 // SampleCount returns the number of samples currently stored.
 func (act *ActiveCallTracker) SampleCount() int {
 	act.mu.RLock()

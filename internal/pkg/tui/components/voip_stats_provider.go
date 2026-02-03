@@ -87,9 +87,10 @@ func (v *VoIPStatsProvider) UpdateCalls(calls []Call) {
 
 // RecordActiveCallSample records the current active call count for sparkline.
 // This should be called on the same tick as CPU metrics for synchronized display.
+// Only counts calls in CallStateActive, excluding ringing/trying/progress states.
 func (v *VoIPStatsProvider) RecordActiveCallSample() {
 	v.mu.RLock()
-	activeCalls := v.activeCalls + v.ringingCalls
+	activeCalls := v.activeCalls
 	v.mu.RUnlock()
 
 	if v.activeCallTracker != nil {
@@ -578,13 +579,34 @@ func (v *VoIPStatsProvider) RenderColumnar(width int, theme themes.Theme) string
 			// Build sparkline (no padding - data grows left-to-right like CPU/traffic sparklines)
 			sparkline := RenderActiveCallsSparkline(samples, sparklineWidth, 5, theme, v.activeCallTracker.GetPeak())
 
-			// Build sparkline column with title
+			// Build sparkline column with title and stats
 			titleStyle := lipgloss.NewStyle().
 				Bold(true).
 				Foreground(theme.InfoColor)
 
+			labelStyle := lipgloss.NewStyle().
+				Foreground(theme.StatusBarFg).
+				Bold(true)
+
+			valueStyle := lipgloss.NewStyle().
+				Foreground(theme.StatusBarFg)
+
+			sepStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240"))
+
 			var sparklineCol strings.Builder
 			sparklineCol.WriteString(titleStyle.Render("Active Calls"))
+			sparklineCol.WriteString("\n")
+
+			// Stats line: Cur | Avg | Peak
+			sparklineCol.WriteString(labelStyle.Render("Cur: "))
+			sparklineCol.WriteString(valueStyle.Render(fmt.Sprintf("%d", v.activeCallTracker.GetCurrent())))
+			sparklineCol.WriteString(sepStyle.Render(" • "))
+			sparklineCol.WriteString(labelStyle.Render("Avg: "))
+			sparklineCol.WriteString(valueStyle.Render(fmt.Sprintf("%.1f", v.activeCallTracker.GetAverage())))
+			sparklineCol.WriteString(sepStyle.Render(" • "))
+			sparklineCol.WriteString(labelStyle.Render("Peak: "))
+			sparklineCol.WriteString(valueStyle.Render(fmt.Sprintf("%d", v.activeCallTracker.GetPeak())))
 			sparklineCol.WriteString("\n\n")
 			sparklineCol.WriteString(sparkline)
 

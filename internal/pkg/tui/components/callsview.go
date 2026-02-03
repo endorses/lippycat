@@ -820,10 +820,9 @@ func (cv *CallsView) renderEmpty() string {
 // renderTableWithSize shows the calls table with specified dimensions
 func (cv *CallsView) renderTableWithSize(width, height int) string {
 	// Calculate responsive column widths based on available width
-	// borderWidth = width - 2 (outer box width)
-	// Content width = borderWidth - 4 (padding: 2 left + 2 right) - 2 (border: 1 left + 1 right)
-	//               = width - 2 - 4 - 2 = width - 8
-	availableWidth := width - 8
+	// borderWidth = width - 2, and lipgloss Width() includes padding but excludes border
+	// So: content = borderWidth - padding = (width - 2) - 4 = width - 6
+	availableWidth := width - 6
 
 	// Define column width ranges
 	const (

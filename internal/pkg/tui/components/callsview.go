@@ -821,8 +821,9 @@ func (cv *CallsView) renderEmpty() string {
 func (cv *CallsView) renderTableWithSize(width, height int) string {
 	// Calculate responsive column widths based on available width
 	// borderWidth = width - 2, and lipgloss Width() includes padding but excludes border
-	// So: content = borderWidth - padding = (width - 2) - 4 = width - 6
-	availableWidth := width - 6
+	// Content = borderWidth - padding = (width - 2) - 4 = width - 6
+	// Use width - 7 for 1-char safety margin to prevent edge-case wrapping
+	availableWidth := width - 7
 
 	// Define column width ranges
 	const (
@@ -854,21 +855,21 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 
 	if availableWidth < fixedMin+flexibleMin {
 		// Very narrow terminal - use absolute minimums
-		startTimeWidth = 8 // HH:MM:SS
-		endTimeWidth = 6
-		fromWidth = 7
-		toWidth = 7
+		startTimeWidth = 7
+		endTimeWidth = 5
+		fromWidth = 6
+		toWidth = 6
 		stateWidth = 6
-		durationWidth = 5
-		codecWidth = 4
+		durationWidth = 4
+		codecWidth = 3
 		qualityWidth = 3
-		nodeWidth = 6
+		nodeWidth = 5
 		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
 		callIDWidth = availableWidth - fixedNarrow
 		if callIDWidth < callIDMin {
 			callIDWidth = callIDMin
 		}
-	} else if availableWidth < fixedMin+flexibleMin+40 {
+	} else if availableWidth < fixedMin+flexibleMin+30 {
 		// Narrow/medium terminal (e.g., details panel shown) - use minimums, cap CallID
 		startTimeWidth = startTimeMin
 		endTimeWidth = endTimeMin
@@ -881,9 +882,10 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		nodeWidth = nodeMin
 		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
 		callIDWidth = availableWidth - fixedNarrow
-		// Cap CallID at a reasonable width for narrow terminals
-		if callIDWidth > 20 {
-			callIDWidth = 20
+		// Cap CallID to leave space for other columns
+		maxCallID := 18
+		if callIDWidth > maxCallID {
+			callIDWidth = maxCallID
 		}
 		if callIDWidth < callIDMin {
 			callIDWidth = callIDMin

@@ -832,15 +832,16 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 
 	if contentWidth < 80 {
 		// Very narrow - use minimal fixed widths, give rest to CallID
-		startTimeWidth = 7
+		// Duration needs 7 chars for "114h12m"
+		startTimeWidth = 6
 		endTimeWidth = 5
-		fromWidth = 6
-		toWidth = 6
+		fromWidth = 5
+		toWidth = 5
 		stateWidth = 6
-		durationWidth = 4
+		durationWidth = 7
 		codecWidth = 3
 		qualityWidth = 3
-		nodeWidth = 5
+		nodeWidth = 4
 		fixedCols := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth
 		callIDWidth = contentWidth - fixedCols
 		if callIDWidth < 6 {
@@ -848,24 +849,25 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		}
 	} else if contentWidth < 120 {
 		// Medium width - balanced columns
+		// Duration needs 7 chars for "114h12m"
 		startTimeWidth = 8
-		endTimeWidth = 8
-		fromWidth = 8
-		toWidth = 8
+		endTimeWidth = 6
+		fromWidth = 7
+		toWidth = 7
 		stateWidth = 7
-		durationWidth = 6
+		durationWidth = 7
 		codecWidth = 4
-		qualityWidth = 4
-		nodeWidth = 7
+		qualityWidth = 3
+		nodeWidth = 6
 		fixedCols := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth
 		callIDWidth = contentWidth - fixedCols
 		if callIDWidth < 8 {
 			callIDWidth = 8
 		}
-		if callIDWidth > 20 {
-			callIDWidth = 20
+		if callIDWidth > 18 {
+			callIDWidth = 18
 			// Redistribute excess to from/to
-			excess := contentWidth - fixedCols - 20
+			excess := contentWidth - fixedCols - 18
 			fromWidth += excess / 2
 			toWidth += excess - excess/2
 		}

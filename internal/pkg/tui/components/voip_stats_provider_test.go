@@ -57,18 +57,26 @@ func TestVoIPStatsProvider_CodecDistribution(t *testing.T) {
 	provider := NewVoIPStatsProvider()
 
 	calls := []Call{
-		{CallID: "call-1", Codec: "PCMU"},  // Should normalize to G.711u
-		{CallID: "call-2", Codec: "G711U"}, // Should normalize to G.711u
-		{CallID: "call-3", Codec: "G729"},  // Should normalize to G.729
-		{CallID: "call-4", Codec: "opus"},  // Should normalize to Opus
-		{CallID: "call-5", Codec: "PCMA"},  // Should normalize to G.711a
+		// Calls with RTP (Active, Ended, RTPOnly) - should be counted
+		{CallID: "call-1", State: CallStateActive, Codec: "PCMU"},  // Should normalize to G.711u
+		{CallID: "call-2", State: CallStateEnded, Codec: "G711U"},  // Should normalize to G.711u
+		{CallID: "call-3", State: CallStateRTPOnly, Codec: "G729"}, // Should normalize to G.729
+		{CallID: "call-4", State: CallStateActive, Codec: "opus"},  // Should normalize to Opus
+		{CallID: "call-5", State: CallStateEnded, Codec: "PCMA"},   // Should normalize to G.711a
+		// Early dialog calls (Trying, Ringing, Progress) - should NOT be counted
+		{CallID: "call-6", State: CallStateTrying, Codec: "Unknown"},
+		{CallID: "call-7", State: CallStateRinging, Codec: "Unknown"},
+		{CallID: "call-8", State: CallStateProgress, Codec: "Unknown"},
 	}
 	provider.UpdateCalls(calls)
 
+	// Only Active, Ended, RTPOnly calls should contribute to codec stats
 	assert.Equal(t, int64(2), provider.codecCounts["G.711u"])
 	assert.Equal(t, int64(1), provider.codecCounts["G.729"])
 	assert.Equal(t, int64(1), provider.codecCounts["Opus"])
 	assert.Equal(t, int64(1), provider.codecCounts["G.711a"])
+	// Early dialog calls should NOT contribute to Unknown count
+	assert.Equal(t, int64(0), provider.codecCounts["Unknown"])
 }
 
 func TestVoIPStatsProvider_QualityMetrics(t *testing.T) {

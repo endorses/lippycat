@@ -140,10 +140,14 @@ func (v *VoIPStatsProvider) recalculateMetrics() {
 			v.rtpOnlyCalls++
 		}
 
-		// Track codec distribution
+		// Track codec distribution - only for calls with established RTP
+		// Excludes early dialog states (Trying, Ringing, Progress) which may not have RTP yet
 		if call.Codec != "" {
-			codec := normalizeCodecName(call.Codec)
-			v.codecCounts[codec]++
+			switch call.State {
+			case CallStateActive, CallStateEnded, CallStateRTPOnly:
+				codec := normalizeCodecName(call.Codec)
+				v.codecCounts[codec]++
+			}
 		}
 
 		// Aggregate quality metrics from completed/active calls with valid data

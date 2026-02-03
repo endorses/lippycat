@@ -924,9 +924,8 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 			remaining -= nodeExtra
 			nodeWidth += nodeExtra
 
-			// Give remaining space to CallID, but cap at callIDMax
-			callIDExtra := min(remaining, callIDMax-callIDMin)
-			callIDWidth += callIDExtra
+			// Give ALL remaining space to CallID (wide terminal has room)
+			callIDWidth += remaining
 		}
 	}
 

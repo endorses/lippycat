@@ -819,42 +819,19 @@ func (cv *CallsView) renderEmpty() string {
 
 // renderTableWithSize shows the calls table with specified dimensions
 func (cv *CallsView) renderTableWithSize(width, height int) string {
-	// Calculate responsive column widths based on available width
-	// borderWidth = width - 2, and lipgloss Width() includes padding but excludes border
-	// Content = borderWidth - padding = (width - 2) - 4 = width - 6
-	// Use width - 7 for 1-char safety margin to prevent edge-case wrapping
-	availableWidth := width - 7
+	// Calculate available width for content
+	// borderWidth = width - 2, lipgloss Width() includes padding, so content = borderWidth - 4 = width - 6
+	availableWidth := width - 6
 
-	// Define column width ranges
-	const (
-		startTimeMin = 12 // HH:MM:SS.ms
-		endTimeMin   = 12
-		fromMin      = 12
-		fromMax      = 35
-		toMin        = 12
-		toMax        = 35
-		stateMin     = 8
-		durationMin  = 7
-		codecMin     = 6
-		qualityMin   = 5
-		nodeMin      = 8
-		nodeMax      = 15
-		callIDMin    = 8  // Absolute minimum for CallID
-		callIDMax    = 30 // Reasonable max, not full UUID
-	)
-
-	// Calculate fixed columns total (these don't shrink below minimum)
-	const fixedColumnsMin = startTimeMin + endTimeMin + stateMin + durationMin + codecMin + qualityMin
 	const spaceBetweenColumns = 9 // 10 columns = 9 spaces
 
 	var callIDWidth, startTimeWidth, endTimeWidth, fromWidth, toWidth, stateWidth, durationWidth, codecWidth, qualityWidth, nodeWidth int
 
-	// Calculate minimum widths for all columns
-	fixedMin := fixedColumnsMin + spaceBetweenColumns
-	flexibleMin := fromMin + toMin + nodeMin + callIDMin
+	// Calculate remaining width after spaces
+	contentWidth := availableWidth - spaceBetweenColumns
 
-	if availableWidth < fixedMin+flexibleMin {
-		// Very narrow terminal - use absolute minimums
+	if contentWidth < 80 {
+		// Very narrow - use minimal fixed widths, give rest to CallID
 		startTimeWidth = 7
 		endTimeWidth = 5
 		fromWidth = 6
@@ -864,70 +841,53 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		codecWidth = 3
 		qualityWidth = 3
 		nodeWidth = 5
-		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
-		callIDWidth = availableWidth - fixedNarrow
-		if callIDWidth < callIDMin {
-			callIDWidth = callIDMin
+		fixedCols := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth
+		callIDWidth = contentWidth - fixedCols
+		if callIDWidth < 6 {
+			callIDWidth = 6
 		}
-	} else if availableWidth < fixedMin+flexibleMin+30 {
-		// Narrow/medium terminal (e.g., details panel shown) - use minimums, cap CallID
-		startTimeWidth = startTimeMin
-		endTimeWidth = endTimeMin
-		fromWidth = fromMin
-		toWidth = toMin
-		stateWidth = stateMin
-		durationWidth = durationMin
-		codecWidth = codecMin
-		qualityWidth = qualityMin
-		nodeWidth = nodeMin
-		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
-		callIDWidth = availableWidth - fixedNarrow
-		// Cap CallID to leave space for other columns
-		maxCallID := 18
-		if callIDWidth > maxCallID {
-			callIDWidth = maxCallID
+	} else if contentWidth < 120 {
+		// Medium width - balanced columns
+		startTimeWidth = 8
+		endTimeWidth = 8
+		fromWidth = 8
+		toWidth = 8
+		stateWidth = 7
+		durationWidth = 6
+		codecWidth = 4
+		qualityWidth = 4
+		nodeWidth = 7
+		fixedCols := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth
+		callIDWidth = contentWidth - fixedCols
+		if callIDWidth < 8 {
+			callIDWidth = 8
 		}
-		if callIDWidth < callIDMin {
-			callIDWidth = callIDMin
+		if callIDWidth > 20 {
+			callIDWidth = 20
+			// Redistribute excess to from/to
+			excess := contentWidth - fixedCols - 20
+			fromWidth += excess / 2
+			toWidth += excess - excess/2
 		}
 	} else {
-		// Wide terminal - distribute extra space
-		// Fixed columns that don't expand
-		startTimeWidth = startTimeMin
-		endTimeWidth = endTimeMin
-		stateWidth = stateMin
-		durationWidth = durationMin
-		codecWidth = codecMin
-		qualityWidth = qualityMin
+		// Wide terminal - generous columns
+		startTimeWidth = 12
+		endTimeWidth = 12
+		stateWidth = 8
+		durationWidth = 7
+		codecWidth = 6
+		qualityWidth = 5
+		nodeWidth = 12
 
-		// Start flexible columns at minimums
-		callIDWidth = callIDMin
-		fromWidth = fromMin
-		toWidth = toMin
-		nodeWidth = nodeMin
+		// Flexible columns get remaining space
+		fixedCols := startTimeWidth + endTimeWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth
+		flexibleSpace := contentWidth - fixedCols
 
-		// Calculate what's left after fixed columns and minimums of flexible columns
-		fixedTotal := startTimeWidth + endTimeWidth + stateWidth + durationWidth + codecWidth + qualityWidth + spaceBetweenColumns
-		flexibleTotal := callIDWidth + fromWidth + toWidth + nodeWidth
-		remaining := availableWidth - fixedTotal - flexibleTotal
-
-		if remaining > 0 {
-			// Expand flexible columns toward max
-			fromExtra := min(remaining, fromMax-fromMin)
-			remaining -= fromExtra
-			fromWidth += fromExtra
-
-			toExtra := min(remaining, toMax-toMin)
-			remaining -= toExtra
-			toWidth += toExtra
-
-			nodeExtra := min(remaining, nodeMax-nodeMin)
-			remaining -= nodeExtra
-			nodeWidth += nodeExtra
-
-			// Give ALL remaining space to CallID (wide terminal has room)
-			callIDWidth += remaining
-		}
+		// Distribute: 40% callID, 25% from, 25% to, rest to node
+		callIDWidth = flexibleSpace * 40 / 100
+		fromWidth = flexibleSpace * 25 / 100
+		toWidth = flexibleSpace * 25 / 100
+		nodeWidth += flexibleSpace - callIDWidth - fromWidth - toWidth
 	}
 
 	// Header style - match packet list style (bold, reversed)

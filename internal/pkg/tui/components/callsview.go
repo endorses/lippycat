@@ -842,17 +842,22 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		qualityMin   = 8
 		nodeMin      = 10
 		nodeMax      = 20
-		callIDMin    = 20
-		callIDMax    = 40
+		callIDMin    = 10 // Absolute minimum for CallID
+		callIDMax    = 36 // Full UUID length
 	)
 
-	// Calculate total minimum width needed
-	minTotal := callIDMin + startTimeMin + endTimeMin + fromMin + toMin + stateMin + durationMin + codecMin + qualityMin + nodeMin // + 9
+	// Calculate fixed columns total (these don't shrink below minimum)
+	const fixedColumnsMin = startTimeMin + endTimeMin + stateMin + durationMin + codecMin + qualityMin
+	const spaceBetweenColumns = 9 // 10 columns = 9 spaces
 
 	var callIDWidth, startTimeWidth, endTimeWidth, fromWidth, toWidth, stateWidth, durationWidth, codecWidth, qualityWidth, nodeWidth int
 
-	if availableWidth < minTotal {
-		// Very narrow terminal - use absolute minimums and give remaining to CallID
+	// Calculate minimum widths for all columns
+	fixedMin := fixedColumnsMin + spaceBetweenColumns
+	flexibleMin := fromMin + toMin + nodeMin + callIDMin
+
+	if availableWidth < fixedMin+flexibleMin {
+		// Very narrow terminal - use absolute minimums
 		startTimeWidth = 8 // HH:MM:SS
 		endTimeWidth = 8
 		fromWidth = 8
@@ -862,14 +867,13 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		codecWidth = 4
 		qualityWidth = 3
 		nodeWidth = 8
-		// Give all remaining space to CallID
-		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + 9
+		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
 		callIDWidth = availableWidth - fixedNarrow
-		if callIDWidth < 10 {
-			callIDWidth = 10 // Minimum for CallID
+		if callIDWidth < callIDMin {
+			callIDWidth = callIDMin
 		}
-	} else if availableWidth < minTotal+40 {
-		// Narrow terminal - use minimums and give remaining to CallID
+	} else if availableWidth < fixedMin+flexibleMin+60 {
+		// Narrow/medium terminal (e.g., details panel shown) - use minimums, cap CallID
 		startTimeWidth = startTimeMin
 		endTimeWidth = endTimeMin
 		fromWidth = fromMin
@@ -879,9 +883,12 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		codecWidth = codecMin
 		qualityWidth = qualityMin
 		nodeWidth = nodeMin
-		// Give all remaining space to CallID
-		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + 9
+		fixedNarrow := startTimeWidth + endTimeWidth + fromWidth + toWidth + stateWidth + durationWidth + codecWidth + qualityWidth + nodeWidth + spaceBetweenColumns
 		callIDWidth = availableWidth - fixedNarrow
+		// Cap CallID at a reasonable width for narrow terminals
+		if callIDWidth > 25 {
+			callIDWidth = 25
+		}
 		if callIDWidth < callIDMin {
 			callIDWidth = callIDMin
 		}
@@ -895,20 +902,19 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 		codecWidth = codecMin
 		qualityWidth = qualityMin
 
-		// First, try to expand flexible columns up to their max
-		// Then give ALL remaining space to CallID (like Info column in PacketList)
+		// Start flexible columns at minimums
 		callIDWidth = callIDMin
 		fromWidth = fromMin
 		toWidth = toMin
 		nodeWidth = nodeMin
 
 		// Calculate what's left after fixed columns and minimums of flexible columns
-		fixedTotal := startTimeWidth + endTimeWidth + stateWidth + durationWidth + codecWidth + qualityWidth + 9
+		fixedTotal := startTimeWidth + endTimeWidth + stateWidth + durationWidth + codecWidth + qualityWidth + spaceBetweenColumns
 		flexibleTotal := callIDWidth + fromWidth + toWidth + nodeWidth
 		remaining := availableWidth - fixedTotal - flexibleTotal
 
 		if remaining > 0 {
-			// Expand flexible columns toward max, but keep track of unused space
+			// Expand flexible columns toward max
 			fromExtra := min(remaining, fromMax-fromMin)
 			remaining -= fromExtra
 			fromWidth += fromExtra
@@ -921,8 +927,9 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 			remaining -= nodeExtra
 			nodeWidth += nodeExtra
 
-			// Give ALL remaining space to CallID (no max limit)
-			callIDWidth += remaining
+			// Give remaining space to CallID, but cap at callIDMax
+			callIDExtra := min(remaining, callIDMax-callIDMin)
+			callIDWidth += callIDExtra
 		}
 	}
 

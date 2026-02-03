@@ -94,6 +94,177 @@ func (cs CallState) String() string {
 	}
 }
 
+// SIPReasonPhrase returns the official reason phrase for a SIP response code.
+// Based on RFC 3261 and common extensions.
+func SIPReasonPhrase(code uint32) string {
+	switch code {
+	// 1xx Provisional
+	case 100:
+		return "Trying"
+	case 180:
+		return "Ringing"
+	case 181:
+		return "Call Is Being Forwarded"
+	case 182:
+		return "Queued"
+	case 183:
+		return "Session Progress"
+	case 199:
+		return "Early Dialog Terminated"
+
+	// 2xx Success
+	case 200:
+		return "OK"
+	case 202:
+		return "Accepted"
+	case 204:
+		return "No Notification"
+
+	// 3xx Redirection
+	case 300:
+		return "Multiple Choices"
+	case 301:
+		return "Moved Permanently"
+	case 302:
+		return "Moved Temporarily"
+	case 305:
+		return "Use Proxy"
+	case 380:
+		return "Alternative Service"
+
+	// 4xx Client Failure
+	case 400:
+		return "Bad Request"
+	case 401:
+		return "Unauthorized"
+	case 402:
+		return "Payment Required"
+	case 403:
+		return "Forbidden"
+	case 404:
+		return "Not Found"
+	case 405:
+		return "Method Not Allowed"
+	case 406:
+		return "Not Acceptable"
+	case 407:
+		return "Proxy Authentication Required"
+	case 408:
+		return "Request Timeout"
+	case 409:
+		return "Conflict"
+	case 410:
+		return "Gone"
+	case 412:
+		return "Conditional Request Failed"
+	case 413:
+		return "Request Entity Too Large"
+	case 414:
+		return "Request-URI Too Long"
+	case 415:
+		return "Unsupported Media Type"
+	case 416:
+		return "Unsupported URI Scheme"
+	case 417:
+		return "Unknown Resource-Priority"
+	case 420:
+		return "Bad Extension"
+	case 421:
+		return "Extension Required"
+	case 422:
+		return "Session Interval Too Small"
+	case 423:
+		return "Interval Too Brief"
+	case 424:
+		return "Bad Location Information"
+	case 428:
+		return "Use Identity Header"
+	case 429:
+		return "Provide Referrer Identity"
+	case 430:
+		return "Flow Failed"
+	case 433:
+		return "Anonymity Disallowed"
+	case 436:
+		return "Bad Identity-Info"
+	case 437:
+		return "Unsupported Certificate"
+	case 438:
+		return "Invalid Identity Header"
+	case 439:
+		return "First Hop Lacks Outbound Support"
+	case 440:
+		return "Max-Breadth Exceeded"
+	case 469:
+		return "Bad Info Package"
+	case 470:
+		return "Consent Needed"
+	case 480:
+		return "Temporarily Unavailable"
+	case 481:
+		return "Call/Transaction Does Not Exist"
+	case 482:
+		return "Loop Detected"
+	case 483:
+		return "Too Many Hops"
+	case 484:
+		return "Address Incomplete"
+	case 485:
+		return "Ambiguous"
+	case 486:
+		return "Busy Here"
+	case 487:
+		return "Request Terminated"
+	case 488:
+		return "Not Acceptable Here"
+	case 489:
+		return "Bad Event"
+	case 491:
+		return "Request Pending"
+	case 493:
+		return "Undecipherable"
+	case 494:
+		return "Security Agreement Required"
+
+	// 5xx Server Failure
+	case 500:
+		return "Server Internal Error"
+	case 501:
+		return "Not Implemented"
+	case 502:
+		return "Bad Gateway"
+	case 503:
+		return "Service Unavailable"
+	case 504:
+		return "Server Time-out"
+	case 505:
+		return "Version Not Supported"
+	case 513:
+		return "Message Too Large"
+	case 555:
+		return "Push Notification Service Not Supported"
+	case 580:
+		return "Precondition Failure"
+
+	// 6xx Global Failure
+	case 600:
+		return "Busy Everywhere"
+	case 603:
+		return "Decline"
+	case 604:
+		return "Does Not Exist Anywhere"
+	case 606:
+		return "Not Acceptable"
+	case 607:
+		return "Unwanted"
+	case 608:
+		return "Rejected"
+
+	default:
+		return ""
+	}
+}
+
 // Call represents a tracked VoIP call
 type Call struct {
 	CallID           string
@@ -985,9 +1156,20 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 	}
 	content.WriteString(fmt.Sprintf("From: %s\n", fromURI))
 	content.WriteString(fmt.Sprintf("To: %s\n", toURI))
-	// Show state with error code for failed calls
-	if selectedCall.State == CallStateFailed && selectedCall.LastResponseCode > 0 {
-		content.WriteString(fmt.Sprintf("State: Failed (SIP %d)\n", selectedCall.LastResponseCode))
+
+	// Show origin (interface, node, or file)
+	if selectedCall.NodeID != "" {
+		content.WriteString(fmt.Sprintf("Origin: %s\n", selectedCall.NodeID))
+	}
+
+	// Show state with error code and reason phrase for failed/busy calls
+	if selectedCall.LastResponseCode > 0 {
+		reason := SIPReasonPhrase(selectedCall.LastResponseCode)
+		if reason != "" {
+			content.WriteString(fmt.Sprintf("State: %s (SIP %d %s)\n", selectedCall.State.String(), selectedCall.LastResponseCode, reason))
+		} else {
+			content.WriteString(fmt.Sprintf("State: %s (SIP %d)\n", selectedCall.State.String(), selectedCall.LastResponseCode))
+		}
 	} else {
 		content.WriteString(fmt.Sprintf("State: %s\n", selectedCall.State.String()))
 	}
@@ -1070,7 +1252,12 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 				legContent.WriteString(fmt.Sprintf("  Method: %s\n", leg.Method))
 			}
 			if leg.ResponseCode > 0 {
-				legContent.WriteString(fmt.Sprintf("  Response: %d\n", leg.ResponseCode))
+				reason := SIPReasonPhrase(leg.ResponseCode)
+				if reason != "" {
+					legContent.WriteString(fmt.Sprintf("  Response: %d %s\n", leg.ResponseCode, reason))
+				} else {
+					legContent.WriteString(fmt.Sprintf("  Response: %d\n", leg.ResponseCode))
+				}
 			}
 
 			content.WriteString(legStyle.Render(legContent.String()))

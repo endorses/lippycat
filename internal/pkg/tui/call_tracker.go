@@ -210,73 +210,64 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 // RegisterRTPOnlyEndpoints registers RTP endpoints for an RTP-only (synthetic) call.
 // This allows the endpoint to be matched when SIP arrives later.
 // Also stores party info (IP:port pairs as From/To) for display purposes.
-func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, dstIP, dstPort string) {
+//
+// Returns the real SIP call ID if any endpoint already belongs to a real call,
+// allowing the caller to use that instead of the synthetic ID. This handles
+// race conditions where SIP registers endpoints just before RTP arrives.
+func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, dstIP, dstPort string) (existingRealCallID string) {
 	if syntheticCallID == "" || !strings.HasPrefix(syntheticCallID, "rtp-") {
-		return
+		return ""
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	// Touch the call in LRU
-	t.touchCallLocked(syntheticCallID)
 
 	// Register both source and destination endpoints
 	// SDP typically specifies the destination port (where to send RTP)
 	srcEndpoint := fmt.Sprintf("%s:%s", srcIP, srcPort)
 	dstEndpoint := fmt.Sprintf("%s:%s", dstIP, dstPort)
 
-	// Only register endpoints if they don't already belong to a real SIP call.
-	// This prevents synthetic RTP-only calls from stealing endpoints from properly
-	// correlated SIP calls.
-	srcRegistered := false
-	dstRegistered := false
-
+	// Check if any endpoint already belongs to a real SIP call.
+	// If so, return that call ID so the caller can use it instead of synthetic.
+	// This handles the race where SIP registers endpoints just before RTP arrives.
 	if existingSrc, ok := t.rtpEndpointToCallID[srcEndpoint]; ok && !strings.HasPrefix(existingSrc, "rtp-") {
-		logger.Debug("RegisterRTPOnlyEndpoints: skipping src endpoint (belongs to SIP call)",
+		logger.Debug("RegisterRTPOnlyEndpoints: src endpoint belongs to SIP call, returning real call ID",
 			"endpoint", srcEndpoint,
-			"existing_call", existingSrc,
+			"real_call", existingSrc,
 			"synthetic_call", syntheticCallID)
-	} else {
-		t.rtpEndpointToCallID[srcEndpoint] = syntheticCallID
-		srcRegistered = true
+		return existingSrc
 	}
-
 	if existingDst, ok := t.rtpEndpointToCallID[dstEndpoint]; ok && !strings.HasPrefix(existingDst, "rtp-") {
-		logger.Debug("RegisterRTPOnlyEndpoints: skipping dst endpoint (belongs to SIP call)",
+		logger.Debug("RegisterRTPOnlyEndpoints: dst endpoint belongs to SIP call, returning real call ID",
 			"endpoint", dstEndpoint,
-			"existing_call", existingDst,
+			"real_call", existingDst,
 			"synthetic_call", syntheticCallID)
-	} else {
-		t.rtpEndpointToCallID[dstEndpoint] = syntheticCallID
-		dstRegistered = true
+		return existingDst
 	}
 
-	// Only add to callIDToEndpoints if we actually registered something
-	// and the endpoint is not already in the list (deduplicate)
-	if srcRegistered {
-		alreadyHasSrc := false
-		for _, ep := range t.callIDToEndpoints[syntheticCallID] {
-			if ep == srcEndpoint {
-				alreadyHasSrc = true
-				break
-			}
+	// No real call owns these endpoints yet - register for the synthetic call
+	// Touch the call in LRU
+	t.touchCallLocked(syntheticCallID)
+
+	t.rtpEndpointToCallID[srcEndpoint] = syntheticCallID
+	t.rtpEndpointToCallID[dstEndpoint] = syntheticCallID
+
+	// Add both endpoints to callIDToEndpoints (deduplicated)
+	existingEndpoints := t.callIDToEndpoints[syntheticCallID]
+	hasSrc, hasDst := false, false
+	for _, ep := range existingEndpoints {
+		if ep == srcEndpoint {
+			hasSrc = true
 		}
-		if !alreadyHasSrc {
-			t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], srcEndpoint)
+		if ep == dstEndpoint {
+			hasDst = true
 		}
 	}
-	if dstRegistered {
-		alreadyHasDst := false
-		for _, ep := range t.callIDToEndpoints[syntheticCallID] {
-			if ep == dstEndpoint {
-				alreadyHasDst = true
-				break
-			}
-		}
-		if !alreadyHasDst {
-			t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], dstEndpoint)
-		}
+	if !hasSrc {
+		t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], srcEndpoint)
+	}
+	if !hasDst {
+		t.callIDToEndpoints[syntheticCallID] = append(t.callIDToEndpoints[syntheticCallID], dstEndpoint)
 	}
 
 	// Store party info for RTP-only calls (used as fallback in convertToTUICall)
@@ -287,6 +278,8 @@ func (t *CallTracker) RegisterRTPOnlyEndpoints(syntheticCallID, srcIP, srcPort, 
 			To:   dstEndpoint,
 		}
 	}
+
+	return ""
 }
 
 // RegisterCallPartyInfo stores From/To information for a call

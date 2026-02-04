@@ -375,6 +375,7 @@ var (
 	detectorMediaPortsFound int64 // Detector provided media_ports
 	mergeFromCallIDSet      int64 // MergeFromCallID was set on packet
 	rtpOnlyRegistered       int64 // RTP-only endpoints registered
+	rtpRaceRecovered        int64 // RTP packets assigned to existing SIP call via race recovery
 )
 
 // GetPerPacketStats returns per-packet extraction statistics
@@ -401,10 +402,11 @@ func getRTPLookupStats() (attempts, dstMatch, srcMatch, failed int64) {
 }
 
 // GetMergeStats returns merge diagnostic statistics
-func GetMergeStats() (detMediaPorts, mergeSet, rtpReg int64) {
+func GetMergeStats() (detMediaPorts, mergeSet, rtpReg, raceRecovered int64) {
 	return atomic.LoadInt64(&detectorMediaPortsFound),
 		atomic.LoadInt64(&mergeFromCallIDSet),
-		atomic.LoadInt64(&rtpOnlyRegistered)
+		atomic.LoadInt64(&rtpOnlyRegistered),
+		atomic.LoadInt64(&rtpRaceRecovered)
 }
 
 // GetMergeAggregatorStats returns merge statistics from CallAggregator (wrapper)
@@ -1443,19 +1445,34 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 		// This allows RTP streams to appear in call list even without SIP signaling
 		if display.VoIPData != nil && display.VoIPData.CallID == "" && display.VoIPData.SSRC != 0 {
 			// Generate synthetic CallID from SSRC
-			display.VoIPData.CallID = fmt.Sprintf("rtp-%08x", display.VoIPData.SSRC)
+			syntheticCallID := fmt.Sprintf("rtp-%08x", display.VoIPData.SSRC)
 
-			// Log RTP-only call creation
-			logger.Debug("RTP-only call created",
-				"call_id", display.VoIPData.CallID,
-				"ssrc", display.VoIPData.SSRC,
-				"src", fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort),
-				"dst", fmt.Sprintf("%s:%s", display.DstIP, display.DstPort))
-
-			// Register endpoints so SIP can find and merge this call later
+			// Try to register endpoints - if they already belong to a real SIP call,
+			// use that call ID instead of the synthetic one. This handles race conditions
+			// where SIP registers endpoints just before RTP arrives.
 			if tracker := GetCallTracker(); tracker != nil {
-				tracker.RegisterRTPOnlyEndpoints(display.VoIPData.CallID, display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
-				atomic.AddInt64(&rtpOnlyRegistered, 1)
+				if realCallID := tracker.RegisterRTPOnlyEndpoints(syntheticCallID, display.SrcIP, display.SrcPort, display.DstIP, display.DstPort); realCallID != "" {
+					// Endpoint already belongs to a real SIP call - use that call ID
+					display.VoIPData.CallID = realCallID
+					logger.Debug("RTP packet assigned to existing SIP call (race recovery)",
+						"real_call_id", realCallID,
+						"synthetic_would_be", syntheticCallID,
+						"src", fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort),
+						"dst", fmt.Sprintf("%s:%s", display.DstIP, display.DstPort))
+					atomic.AddInt64(&rtpRaceRecovered, 1)
+				} else {
+					// New RTP-only call registered
+					display.VoIPData.CallID = syntheticCallID
+					logger.Debug("RTP-only call created",
+						"call_id", syntheticCallID,
+						"ssrc", display.VoIPData.SSRC,
+						"src", fmt.Sprintf("%s:%s", display.SrcIP, display.SrcPort),
+						"dst", fmt.Sprintf("%s:%s", display.DstIP, display.DstPort))
+					atomic.AddInt64(&rtpOnlyRegistered, 1)
+				}
+			} else {
+				// No tracker available - just use synthetic
+				display.VoIPData.CallID = syntheticCallID
 			}
 		}
 

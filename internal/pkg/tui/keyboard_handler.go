@@ -800,7 +800,7 @@ func (m Model) handleBridgeStats() (Model, tea.Cmd) {
 	stats := GetBridgeStats()
 	tcpStats := voip.GetTCPStreamMetrics()
 	_, rtpDst, rtpSrc, rtpFail := getRTPLookupStats()
-	detMediaPorts, mergeSet, rtpReg := GetMergeStats()
+	detMediaPorts, mergeSet, rtpReg, raceRecovered := GetMergeStats()
 	mergeAtt, _, _, mergeOK := GetMergeAggregatorStats()
 	// Get SIP request/response breakdown
 	tcpReq, tcpResp, tcpReqSDP, tcpRespSDP, tcpMerge := GetTCPSIPTypeStats()
@@ -808,14 +808,15 @@ func (m Model) handleBridgeStats() (Model, tea.Cmd) {
 	// Show stats: SIP=reassembly, Mark=flow cache,
 	// Det SDP=detector found media_ports (SIP with SDP)
 	// RTP Reg=RTP-only endpoints registered (for later SIP merge)
+	// RR=Race Recovered (RTP assigned to existing SIP call)
 	// TCP Req+SDP/Rsp+SDP for diagnosing where SDP is
 	// RTP lookup: D=dst, S=src, F=fail (pure IP:port matching)
 	// Mrg S=MergeFromCallID set (found synthetic), A=attempts, OK=success, T=TCP handler triggered
-	msg := fmt.Sprintf("SIP:%d Mark:%d | Det SDP:%d RTP Reg:%d | TCP Req:%d+SDP:%d Rsp:%d+SDP:%d | RTP D:%d S:%d F:%d | Mrg S:%d A:%d OK:%d T:%d",
+	msg := fmt.Sprintf("SIP:%d Mark:%d | Det SDP:%d RTP Reg:%d RR:%d | TCP Req:%d+SDP:%d Rsp:%d+SDP:%d | RTP D:%d S:%d F:%d | Mrg S:%d A:%d OK:%d T:%d",
 		tcpStats.SIPMessagesDetected,
 		stats.TCPSIPFlowsMarked,
 		detMediaPorts,
-		rtpReg,
+		rtpReg, raceRecovered,
 		tcpReq, tcpReqSDP, tcpResp, tcpRespSDP,
 		rtpDst, rtpSrc, rtpFail,
 		mergeSet, mergeAtt, mergeOK, tcpMerge)
@@ -826,6 +827,7 @@ func (m Model) handleBridgeStats() (Model, tea.Cmd) {
 		"tcp_sip_flows_marked", stats.TCPSIPFlowsMarked,
 		"detector_media_ports", detMediaPorts,
 		"rtp_only_registered", rtpReg,
+		"rtp_race_recovered", raceRecovered,
 		"tcp_requests", tcpReq,
 		"tcp_requests_with_sdp", tcpReqSDP,
 		"tcp_responses", tcpResp,

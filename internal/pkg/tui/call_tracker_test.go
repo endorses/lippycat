@@ -363,6 +363,8 @@ func TestCallTracker_EvictionDoesNotDeleteReassignedEndpoints(t *testing.T) {
 
 // TestCallTracker_RTPOnlyDoesNotOverwriteSIPCall ensures that registering an RTP-only
 // call doesn't overwrite endpoints that already belong to a real SIP call.
+// With race recovery: if any endpoint already belongs to a SIP call, the function
+// returns that call ID so the caller can use it instead of creating a synthetic call.
 func TestCallTracker_RTPOnlyDoesNotOverwriteSIPCall(t *testing.T) {
 	tracker := NewCallTrackerWithCapacity(100)
 
@@ -370,17 +372,39 @@ func TestCallTracker_RTPOnlyDoesNotOverwriteSIPCall(t *testing.T) {
 	tracker.RegisterMediaPorts("sip-call-123", "10.0.0.1", []uint16{10000}, false)
 	assert.Equal(t, "sip-call-123", tracker.GetCallIDForRTPPacket("x", "y", "10.0.0.1", "10000"))
 
-	// Try to register an RTP-only call with the same endpoint
-	tracker.RegisterRTPOnlyEndpoints("rtp-abc123", "10.0.0.1", "10000", "10.0.0.2", "20000")
+	// Try to register an RTP-only call with overlapping endpoint (src matches SIP call)
+	// This should return the SIP call ID (race recovery) instead of registering the synthetic call
+	realCallID := tracker.RegisterRTPOnlyEndpoints("rtp-abc123", "10.0.0.1", "10000", "10.0.0.2", "20000")
+	assert.Equal(t, "sip-call-123", realCallID, "Should return SIP call ID when endpoint overlaps")
 
 	// The SIP call should STILL own the endpoint
 	callID := tracker.GetCallIDForRTPPacket("x", "y", "10.0.0.1", "10000")
 	assert.Equal(t, "sip-call-123", callID, "SIP call should still own the endpoint")
 
-	// The RTP-only call should NOT have stolen the endpoint,
-	// but the OTHER endpoint (20000) should work
+	// The OTHER endpoint (20000) should NOT be registered for the RTP-only call
+	// because the RTP-only call was not created (race recovery returned SIP call ID)
 	callID = tracker.GetCallIDForRTPPacket("x", "y", "10.0.0.2", "20000")
-	assert.Equal(t, "rtp-abc123", callID, "RTP-only call should own the uncontested endpoint")
+	assert.Equal(t, "", callID, "No call should own the uncontested endpoint since RTP-only was not created")
+}
+
+// TestCallTracker_RTPOnlyRegisteredWhenNoOverlap ensures that RTP-only calls
+// are registered normally when there's no overlap with existing SIP calls.
+func TestCallTracker_RTPOnlyRegisteredWhenNoOverlap(t *testing.T) {
+	tracker := NewCallTrackerWithCapacity(100)
+
+	// Register a real SIP call with endpoint E1
+	tracker.RegisterMediaPorts("sip-call-123", "10.0.0.1", []uint16{10000}, false)
+
+	// Register an RTP-only call with completely different endpoints
+	realCallID := tracker.RegisterRTPOnlyEndpoints("rtp-abc123", "10.0.0.3", "30000", "10.0.0.4", "40000")
+	assert.Equal(t, "", realCallID, "Should return empty when no overlap (new RTP-only call created)")
+
+	// The RTP-only call should own both of its endpoints
+	callID := tracker.GetCallIDForRTPPacket("x", "y", "10.0.0.3", "30000")
+	assert.Equal(t, "rtp-abc123", callID, "RTP-only call should own its src endpoint")
+
+	callID = tracker.GetCallIDForRTPPacket("x", "y", "10.0.0.4", "40000")
+	assert.Equal(t, "rtp-abc123", callID, "RTP-only call should own its dst endpoint")
 }
 
 // TestCallTracker_GetEndpointsForCallTouchesLRU ensures that reading endpoints

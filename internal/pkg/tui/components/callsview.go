@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/endorses/lippycat/internal/pkg/tui/components/nodesview"
@@ -381,6 +382,11 @@ type CallsView struct {
 	autoScroll       bool                       // Whether to auto-scroll to bottom when new calls arrive
 	correlatedCalls  map[string]*CorrelatedCall // Map from Call-ID to correlated call data
 	correlatedCallMu sync.RWMutex               // Protect concurrent access to correlatedCalls
+
+	// Details viewport for scrollable content
+	detailsViewport      viewport.Model
+	detailsViewportReady bool
+	lastSelectedCallID   string // Track which call details are rendered
 }
 
 // CorrelatedCall represents a correlated call with multiple legs
@@ -592,6 +598,48 @@ func (cv *CallsView) IsAutoScrolling() bool {
 	return cv.autoScroll
 }
 
+// ScrollDetailsUp scrolls the details viewport up
+func (cv *CallsView) ScrollDetailsUp() {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.LineUp(1)
+	}
+}
+
+// ScrollDetailsDown scrolls the details viewport down
+func (cv *CallsView) ScrollDetailsDown() {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.LineDown(1)
+	}
+}
+
+// ScrollDetailsPageUp scrolls the details viewport up by a page
+func (cv *CallsView) ScrollDetailsPageUp() {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.ViewUp()
+	}
+}
+
+// ScrollDetailsPageDown scrolls the details viewport down by a page
+func (cv *CallsView) ScrollDetailsPageDown() {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.ViewDown()
+	}
+}
+
+// ScrollDetailsToTop scrolls the details viewport to the top
+func (cv *CallsView) ScrollDetailsToTop() {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.GotoTop()
+	}
+}
+
+// ScrollDetailsToBottom scrolls the details viewport to the bottom
+func (cv *CallsView) ScrollDetailsToBottom() {
+	if cv.detailsViewportReady {
+		cv.detailsViewport.GotoBottom()
+	}
+}
+
 // GetOffset returns the current scroll offset
 func (cv *CallsView) GetOffset() int {
 	return cv.offset
@@ -761,18 +809,18 @@ func (cv *CallsView) PageDown() {
 	}
 }
 
-// View renders the calls view (full width)
+// View renders the calls view (full width, unfocused)
 func (cv *CallsView) View() string {
 	if len(cv.calls) == 0 {
 		return cv.renderEmpty()
 	}
 
-	// Full width table
-	return cv.RenderTable(cv.width, cv.height)
+	// Full width table (unfocused when no details panel)
+	return cv.RenderTable(cv.width, cv.height, false)
 }
 
 // RenderTable renders just the calls table with specified width and height
-func (cv *CallsView) RenderTable(width, height int) string {
+func (cv *CallsView) RenderTable(width, height int, focused bool) string {
 	if len(cv.calls) == 0 {
 		style := lipgloss.NewStyle().
 			Foreground(cv.theme.StatusBarFg).
@@ -784,25 +832,72 @@ func (cv *CallsView) RenderTable(width, height int) string {
 		return style.Render("No active VoIP calls")
 	}
 
-	return cv.renderTableWithSize(width, height)
+	return cv.renderTableWithSize(width, height, focused)
 }
 
 // RenderDetails renders the call details panel
-func (cv *CallsView) RenderDetails(width, height int) string {
+func (cv *CallsView) RenderDetails(width, height int, focused bool) string {
 	selectedCall := cv.GetSelected()
-	if selectedCall == nil {
-		// No call selected
-		style := lipgloss.NewStyle().
-			Foreground(cv.theme.StatusBarFg).
-			Italic(true).
-			Width(width).
-			Height(height).
-			Align(lipgloss.Center, lipgloss.Center)
 
-		return style.Render("Select a call to view details")
+	// Initialize or resize viewport
+	viewportHeight := height - 4 // Account for border (2) and padding (2)
+	if viewportHeight < 5 {
+		viewportHeight = 5
+	}
+	viewportWidth := width - 6 // Account for border (2) and padding (4)
+	if viewportWidth < 40 {
+		viewportWidth = 40
 	}
 
-	return cv.renderCallDetails(selectedCall, width, height)
+	if !cv.detailsViewportReady {
+		cv.detailsViewport = viewport.New(viewportWidth, viewportHeight)
+		cv.detailsViewportReady = true
+	} else {
+		cv.detailsViewport.Width = viewportWidth
+		cv.detailsViewport.Height = viewportHeight
+	}
+
+	// Update viewport content if selected call changed
+	callID := ""
+	if selectedCall != nil {
+		callID = selectedCall.CallID
+	}
+	if callID != cv.lastSelectedCallID {
+		cv.lastSelectedCallID = callID
+		if selectedCall != nil {
+			cv.detailsViewport.SetContent(cv.renderCallDetailsContent(selectedCall, viewportWidth))
+			cv.detailsViewport.GotoTop()
+		} else {
+			cv.detailsViewport.SetContent("")
+		}
+	}
+
+	// Focus styling
+	borderColor := cv.theme.BorderColor
+	borderType := lipgloss.RoundedBorder()
+	if focused {
+		borderColor = cv.theme.SelectionBg  // Cyan when focused
+		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
+	}
+
+	borderStyle := lipgloss.NewStyle().
+		Border(borderType).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Width(width - 2).
+		Height(height - 2)
+
+	if selectedCall == nil {
+		// No call selected
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(cv.theme.StatusBarFg).
+			Italic(true).
+			Align(lipgloss.Center)
+		content := emptyStyle.Render("Select a call to view details")
+		return borderStyle.Render(content)
+	}
+
+	return borderStyle.Render(cv.detailsViewport.View())
 }
 
 // renderEmpty shows a message when no calls are present
@@ -818,7 +913,7 @@ func (cv *CallsView) renderEmpty() string {
 }
 
 // renderTableWithSize shows the calls table with specified dimensions
-func (cv *CallsView) renderTableWithSize(width, height int) string {
+func (cv *CallsView) renderTableWithSize(width, height int, focused bool) string {
 	// Calculate available width for content
 	// borderWidth = width - 2, lipgloss Width() includes padding, so content = borderWidth - 4 = width - 6
 	availableWidth := width - 6
@@ -927,9 +1022,17 @@ func (cv *CallsView) renderTableWithSize(width, height int) string {
 	// Split view: use passed width directly (already accounts for split)
 	borderWidth := width - 2
 
+	// Focus styling
+	borderColor := cv.theme.BorderColor
+	borderType := lipgloss.RoundedBorder()
+	if focused {
+		borderColor = cv.theme.SelectionBg  // Cyan when focused
+		borderType = lipgloss.ThickBorder() // Heavy box characters when focused
+	}
+
 	borderStyle := lipgloss.NewStyle().
-		Foreground(cv.theme.BorderColor).
-		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Border(borderType).
 		Padding(1, 2).
 		Width(borderWidth)
 
@@ -1085,9 +1188,8 @@ func truncateCallsView(s string, width int) string {
 	return s[:width-3] + "..."
 }
 
-// renderCallDetails shows call details panel with correlation information
-func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) string {
-
+// renderCallDetailsContent generates call details content for the viewport
+func (cv *CallsView) renderCallDetailsContent(selectedCall *Call, width int) string {
 	// Look up correlated call data
 	cv.correlatedCallMu.RLock()
 	correlatedCall, hasCorrelation := cv.correlatedCalls[selectedCall.CallID]
@@ -1242,15 +1344,7 @@ func (cv *CallsView) renderCallDetails(selectedCall *Call, width, height int) st
 		content.WriteString("Single leg call (no B2BUA hops detected)\n")
 	}
 
-	// Wrap in border
-	borderStyle := lipgloss.NewStyle().
-		Foreground(cv.theme.BorderColor).
-		Border(lipgloss.RoundedBorder()).
-		Padding(1, 2).
-		Width(width - 2).
-		Height(height - 2)
-
-	return borderStyle.Render(content.String())
+	return content.String()
 }
 
 // formatMilliseconds formats a duration as milliseconds with unit

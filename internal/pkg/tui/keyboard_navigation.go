@@ -37,7 +37,14 @@ func (m Model) handleMoveDown() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
 		if m.uiState.ViewMode == "calls" {
-			m.uiState.CallsView.SelectNext()
+			// Check if details panel is visible and focused
+			minWidthForDetails := 120
+			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
+			if detailsVisible && m.uiState.FocusedPane == "right" {
+				m.uiState.CallsView.ScrollDetailsDown()
+			} else {
+				m.uiState.CallsView.SelectNext()
+			}
 		} else if m.uiState.ViewMode == "queries" {
 			m.uiState.DNSQueriesView.SelectNext()
 		} else if m.uiState.ViewMode == "emails" {
@@ -67,7 +74,14 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 	switch m.uiState.Tabs.GetActive() {
 	case 0: // Capture tab
 		if m.uiState.ViewMode == "calls" {
-			m.uiState.CallsView.SelectPrevious()
+			// Check if details panel is visible and focused
+			minWidthForDetails := 120
+			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
+			if detailsVisible && m.uiState.FocusedPane == "right" {
+				m.uiState.CallsView.ScrollDetailsUp()
+			} else {
+				m.uiState.CallsView.SelectPrevious()
+			}
 		} else if m.uiState.ViewMode == "queries" {
 			m.uiState.DNSQueriesView.SelectPrevious()
 		} else if m.uiState.ViewMode == "emails" {
@@ -96,6 +110,13 @@ func (m Model) handleMoveUp() (Model, tea.Cmd) {
 func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
+			// Check if details panel is visible and focused
+			minWidthForDetails := 120
+			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
+			if detailsVisible && m.uiState.FocusedPane == "right" {
+				m.uiState.CallsView.ScrollDetailsToTop()
+				return m, nil
+			}
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyHome})
 		} else if m.uiState.ViewMode == "queries" {
 			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyHome})
@@ -120,6 +141,13 @@ func (m Model) handleJumpToTop() (Model, tea.Cmd) {
 func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
+			// Check if details panel is visible and focused
+			minWidthForDetails := 120
+			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
+			if detailsVisible && m.uiState.FocusedPane == "right" {
+				m.uiState.CallsView.ScrollDetailsToBottom()
+				return m, nil
+			}
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyEnd})
 		} else if m.uiState.ViewMode == "queries" {
 			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyEnd})
@@ -147,6 +175,13 @@ func (m Model) handleJumpToBottom() (Model, tea.Cmd) {
 func (m Model) handlePageUp() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
+			// Check if details panel is visible and focused
+			minWidthForDetails := 120
+			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
+			if detailsVisible && m.uiState.FocusedPane == "right" {
+				m.uiState.CallsView.ScrollDetailsPageUp()
+				return m, nil
+			}
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 		} else if m.uiState.ViewMode == "queries" {
 			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyPgUp})
@@ -171,6 +206,13 @@ func (m Model) handlePageUp() (Model, tea.Cmd) {
 func (m Model) handlePageDown() (Model, tea.Cmd) {
 	if m.uiState.Tabs.GetActive() == 0 { // Capture tab
 		if m.uiState.ViewMode == "calls" {
+			// Check if details panel is visible and focused
+			minWidthForDetails := 120
+			detailsVisible := m.uiState.CallsView.IsShowingDetails() && m.uiState.Width >= minWidthForDetails
+			if detailsVisible && m.uiState.FocusedPane == "right" {
+				m.uiState.CallsView.ScrollDetailsPageDown()
+				return m, nil
+			}
 			return m, m.uiState.CallsView.Update(tea.KeyMsg{Type: tea.KeyPgDown})
 		} else if m.uiState.ViewMode == "queries" {
 			return m, m.uiState.DNSQueriesView.Update(tea.KeyMsg{Type: tea.KeyPgDown})

@@ -29,7 +29,28 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		if m.uiState.Tabs.GetActive() == 0 {
 			// On capture tab - check if we're in calls view or packet list
 			if m.uiState.ViewMode == "calls" {
-				m.uiState.CallsView.SelectPrevious()
+				// Check if details panel is visible and determine which pane we're hovering
+				minWidthForDetails := 120
+				showDetails := m.uiState.CallsView.IsShowingDetails()
+				detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
+
+				if detailsVisible {
+					// Split pane mode - check X position to determine which pane
+					detailsWidth := 79
+					listWidth := m.uiState.Width - detailsWidth
+					detailsContentStart := listWidth - 2
+
+					if msg.X < detailsContentStart {
+						// Hovering over call list - scroll it
+						m.uiState.CallsView.SelectPrevious()
+					} else {
+						// Hovering over details panel - scroll it
+						m.uiState.CallsView.ScrollDetailsUp()
+					}
+				} else {
+					// Full width call list - just scroll it
+					m.uiState.CallsView.SelectPrevious()
+				}
 				return m, nil
 			}
 
@@ -75,7 +96,28 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		if m.uiState.Tabs.GetActive() == 0 {
 			// On capture tab - check if we're in calls view or packet list
 			if m.uiState.ViewMode == "calls" {
-				m.uiState.CallsView.SelectNext()
+				// Check if details panel is visible and determine which pane we're hovering
+				minWidthForDetails := 120
+				showDetails := m.uiState.CallsView.IsShowingDetails()
+				detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
+
+				if detailsVisible {
+					// Split pane mode - check X position to determine which pane
+					detailsWidth := 79
+					listWidth := m.uiState.Width - detailsWidth
+					detailsContentStart := listWidth - 2
+
+					if msg.X < detailsContentStart {
+						// Hovering over call list - scroll it
+						m.uiState.CallsView.SelectNext()
+					} else {
+						// Hovering over details panel - scroll it
+						m.uiState.CallsView.ScrollDetailsDown()
+					}
+				} else {
+					// Full width call list - just scroll it
+					m.uiState.CallsView.SelectNext()
+				}
 				return m, nil
 			}
 
@@ -287,20 +329,82 @@ func (m Model) handlePacketListClick(msg tea.MouseMsg, contentStartY, contentHei
 
 // handleCallsViewClick processes clicks on the calls view
 func (m Model) handleCallsViewClick(msg tea.MouseMsg, contentStartY, contentHeight int) (Model, tea.Cmd) {
-	// Calculate row position using the same approach as packet list
-	// Use same formula as handlePacketListClick for consistency
-	tableHeaderY := contentStartY + 1
+	minWidthForDetails := 120
+	showDetails := m.uiState.CallsView.IsShowingDetails()
+	detailsVisible := showDetails && m.uiState.Width >= minWidthForDetails
 
-	if msg.Y > tableHeaderY {
-		// Calculate which row was clicked (relative to visible area)
-		visibleRow := msg.Y - tableHeaderY - 1
+	// Check if we're in split pane mode
+	if detailsVisible {
+		// Split pane: call list on left, details on right
+		detailsWidth := 79
+		listWidth := m.uiState.Width - detailsWidth
+		detailsContentStart := listWidth - 2
 
-		// Add scroll offset to get actual call index
-		actualCallIndex := m.uiState.CallsView.GetOffset() + visibleRow
+		if msg.X < detailsContentStart {
+			// Click in call list area - switch focus to left pane
+			m.uiState.FocusedPane = "left"
 
-		calls := m.uiState.CallsView.GetCalls()
-		if actualCallIndex >= 0 && actualCallIndex < len(calls) {
-			m.uiState.CallsView.SetSelected(actualCallIndex)
+			// Calculate row position using the same approach as packet list
+			tableHeaderY := contentStartY + 1
+			if msg.Y > tableHeaderY {
+				// Calculate which row was clicked (relative to visible area)
+				visibleRow := msg.Y - tableHeaderY - 1
+
+				// Add scroll offset to get actual call index
+				actualCallIndex := m.uiState.CallsView.GetOffset() + visibleRow
+
+				calls := m.uiState.CallsView.GetCalls()
+				if actualCallIndex >= 0 && actualCallIndex < len(calls) {
+					// Check for double-click (same call clicked within 500ms)
+					now := time.Now()
+					isDoubleClick := actualCallIndex == m.uiState.LastClickPacket &&
+						now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
+
+					// Update last click tracking (reuse packet click tracking vars)
+					m.uiState.LastClickTime = now
+					m.uiState.LastClickPacket = actualCallIndex
+
+					m.uiState.CallsView.SetSelected(actualCallIndex)
+
+					// Toggle details panel on double-click
+					if isDoubleClick {
+						m.uiState.CallsView.ToggleDetails()
+					}
+				}
+			}
+		} else {
+			// Click inside details panel content - switch focus to right pane
+			m.uiState.FocusedPane = "right"
+		}
+	} else {
+		// Full width call list
+		tableHeaderY := contentStartY + 1
+		if msg.Y > tableHeaderY {
+			// Calculate which row was clicked (relative to visible area)
+			visibleRow := msg.Y - tableHeaderY - 1
+
+			// Add scroll offset to get actual call index
+			actualCallIndex := m.uiState.CallsView.GetOffset() + visibleRow
+
+			calls := m.uiState.CallsView.GetCalls()
+			if actualCallIndex >= 0 && actualCallIndex < len(calls) {
+				// Check for double-click (same call clicked within 500ms)
+				now := time.Now()
+				isDoubleClick := actualCallIndex == m.uiState.LastClickPacket &&
+					now.Sub(m.uiState.LastClickTime) < 500*time.Millisecond
+
+				// Update last click tracking (reuse packet click tracking vars)
+				m.uiState.LastClickTime = now
+				m.uiState.LastClickPacket = actualCallIndex
+
+				m.uiState.CallsView.SetSelected(actualCallIndex)
+				m.uiState.FocusedPane = "left"
+
+				// Toggle details panel on double-click
+				if isDoubleClick {
+					m.uiState.CallsView.ToggleDetails()
+				}
+			}
 		}
 	}
 	return m, nil

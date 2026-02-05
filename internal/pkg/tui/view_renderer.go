@@ -102,14 +102,17 @@ func (m Model) renderCaptureTab(contentHeight int) string {
 
 		if detailsVisible {
 			// Split pane layout for calls
+			leftFocused := m.uiState.FocusedPane == "left"
+			rightFocused := m.uiState.FocusedPane == "right"
+
 			detailsWidth := 79 // Call details panel width
 
 			// Calculate available width for calls table
 			tableWidth := m.uiState.Width - detailsWidth
 
 			// Render calls table and details side by side
-			callsTableView := m.uiState.CallsView.RenderTable(tableWidth, contentHeight)
-			callDetailsView := m.uiState.CallsView.RenderDetails(detailsWidth, contentHeight)
+			callsTableView := m.uiState.CallsView.RenderTable(tableWidth, contentHeight, leftFocused)
+			callDetailsView := m.uiState.CallsView.RenderDetails(detailsWidth, contentHeight, rightFocused)
 
 			return lipgloss.JoinHorizontal(lipgloss.Top, callsTableView, callDetailsView)
 		}

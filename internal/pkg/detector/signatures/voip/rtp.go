@@ -129,20 +129,10 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		// But don't reject outright as they are valid
 	}
 
-	// 3. Stricter payload type validation
-	//    Only accept well-known static types OR clearly dynamic types
-	isValidPayloadType := false
-	if payloadType <= 23 {
-		// Well-known static audio/video types (PCMU, GSM, G722, etc.)
-		isValidPayloadType = true
-	} else if payloadType >= 96 && payloadType <= 127 {
-		// Dynamic types - but require additional validation
-		// Dynamic types should only be accepted with SIP correlation or port hints
-		isValidPayloadType = false // Will be validated below
-	}
-
-	// 4. Check port ranges - RTP typically uses even ports 16384-32768
-	//    This is the IANA recommended range for RTP
+	// 3. Port range check - RTP typically uses even ports in well-known ranges.
+	//    IANA recommended range: 16384-32768.
+	//    Legacy implementations: 10000-20000.
+	//    IMS/VoLTE high ephemeral range: 32768-65534 (even ports only).
 	inTypicalRange := false
 	if (ctx.SrcPort >= 16384 && ctx.SrcPort <= 32768 && ctx.SrcPort%2 == 0) ||
 		(ctx.DstPort >= 16384 && ctx.DstPort <= 32768 && ctx.DstPort%2 == 0) {
@@ -152,6 +142,12 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	// Require even ports in this range too
 	if (ctx.SrcPort >= 10000 && ctx.SrcPort <= 20000 && ctx.SrcPort%2 == 0) ||
 		(ctx.DstPort >= 10000 && ctx.DstPort <= 20000 && ctx.DstPort%2 == 0) {
+		inTypicalRange = true
+	}
+	// Extended range for IMS/VoLTE: high ephemeral ports (32769-65534, even) are
+	// commonly allocated by SIP phones and softclients in IMS/VoLTE deployments.
+	if (ctx.SrcPort > 32768 && ctx.SrcPort < 65535 && ctx.SrcPort%2 == 0) ||
+		(ctx.DstPort > 32768 && ctx.DstPort < 65535 && ctx.DstPort%2 == 0) {
 		inTypicalRange = true
 	}
 
@@ -229,16 +225,14 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		}
 	}
 
-	// Require either correlation OR BOTH (typical port range AND valid static payload type)
-	// Correlation = SIP negotiation OR existing RTP flow (bidirectional support)
+	// Require either correlation OR a typical port range.
+	// Correlation = SIP negotiation OR existing RTP flow (bidirectional support).
+	// Dynamic payload types (96-127) are accepted when the port is in the typical
+	// range: IMS/VoLTE commonly uses PT 96-127, and the SSRC/timestamp checks above
+	// already provide sufficient false-positive protection.
 	if !hasSIPCorrelation && !hasRTPFlowCorrelation {
 		// Must have typical port range
 		if !inTypicalRange {
-			return nil
-		}
-		// Must have valid static payload type (not dynamic)
-		// Dynamic types (96-127) require SIP correlation
-		if !isValidPayloadType {
 			return nil
 		}
 	}
@@ -348,12 +342,17 @@ func (r *RTPSignature) calculateConfidence(ctx *signatures.DetectionContext, met
 		})
 	}
 
-	// Typical RTP port range (IANA recommended 16384-32768 or legacy 10000-20000)
+	// Typical RTP port range (IANA recommended 16384-32768, legacy 10000-20000,
+	// or high IMS/VoLTE ephemeral ports 32769-65534 even).
 	inTypicalRange := false
 	if (ctx.SrcPort >= 16384 && ctx.SrcPort <= 32768) || (ctx.DstPort >= 16384 && ctx.DstPort <= 32768) {
 		inTypicalRange = true
 	}
 	if (ctx.SrcPort >= 10000 && ctx.SrcPort <= 20000) || (ctx.DstPort >= 10000 && ctx.DstPort <= 20000) {
+		inTypicalRange = true
+	}
+	if (ctx.SrcPort > 32768 && ctx.SrcPort < 65535 && ctx.SrcPort%2 == 0) ||
+		(ctx.DstPort > 32768 && ctx.DstPort < 65535 && ctx.DstPort%2 == 0) {
 		inTypicalRange = true
 	}
 

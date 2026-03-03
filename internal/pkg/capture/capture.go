@@ -996,6 +996,89 @@ func decapsulateVXLAN(packet gopacket.Packet) (gopacket.Packet, bool) {
 	return innerPacket, true
 }
 
+// tryESPTrailerValidation attempts to identify the inner protocol of an ESP-NULL payload
+// by reading the ESP trailer: [pad bytes][pad_len][next_hdr][ICV].
+//
+// It tries common ICV sizes in order (12, 16, 8, 0 bytes). For each candidate:
+//  1. Reads next_hdr and pad_len from the trailer.
+//  2. Validates that the pad_len bytes immediately before the trailer are sequential
+//     (0x01, 0x02, ..., pad_len) — this discriminates NULL-cipher transport from random
+//     encrypted ciphertext, which is critical for avoiding false positives.
+//  3. If next_hdr is TCP (6) or UDP (17), validates the inner header and returns
+//     (proto, innerLen, true).
+//
+// Returns (0, 0, false) if no candidate matches.
+func tryESPTrailerValidation(espPayload []byte) (layers.IPProtocol, int, bool) {
+	// Common ICV (Integrity Check Value) sizes to try, in order of likelihood.
+	// HMAC-SHA1-96 → 12 bytes (most common in IMS/VoLTE).
+	// HMAC-SHA256-128 → 16 bytes. HMAC-MD5-96 → 8 bytes. NULL auth → 0 bytes.
+	icvSizes := []int{12, 16, 8, 0}
+
+	for _, icvSize := range icvSizes {
+		// Need at least: 1 byte next_hdr + 1 byte pad_len + ICV + some inner header.
+		minLen := icvSize + 2 + 1 // +1 so there is room for at least pad_len=0
+		if len(espPayload) < minLen {
+			continue
+		}
+
+		trailerEnd := len(espPayload) - icvSize
+		// next_hdr is the last byte before the ICV.
+		nextHdr := espPayload[trailerEnd-1]
+		// pad_len is the byte before next_hdr.
+		padLen := int(espPayload[trailerEnd-2])
+
+		// The region before pad_len+next_hdr is: [inner data][padding].
+		// innerEnd = trailerEnd - 2 - padLen
+		innerEnd := trailerEnd - 2 - padLen
+		if innerEnd <= 0 {
+			continue
+		}
+
+		// Validate padding bytes are sequential: 0x01, 0x02, ..., padLen.
+		// This is the key discriminator between NULL-cipher and encrypted traffic.
+		validPadding := true
+		for i := 0; i < padLen; i++ {
+			if espPayload[innerEnd+i] != byte(i+1) {
+				validPadding = false
+				break
+			}
+		}
+		if !validPadding {
+			continue
+		}
+
+		inner := espPayload[:innerEnd]
+
+		switch nextHdr {
+		case 6: // TCP
+			if len(inner) < 20 {
+				continue
+			}
+			tcpDataOff := int(inner[12] >> 4)
+			if tcpDataOff < 5 || tcpDataOff > 15 {
+				continue
+			}
+			tcpHeaderLen := tcpDataOff * 4
+			if tcpHeaderLen > len(inner) {
+				continue
+			}
+			return layers.IPProtocolTCP, innerEnd, true
+
+		case 17: // UDP
+			if len(inner) < 8 {
+				continue
+			}
+			udpLen := int(binary.BigEndian.Uint16(inner[4:6]))
+			if udpLen < 8 || udpLen > len(inner) {
+				continue
+			}
+			return layers.IPProtocolUDP, udpLen, true
+		}
+	}
+
+	return 0, 0, false
+}
+
 // decapsulateESPNull checks if a packet uses ESP with NULL cipher (RFC 3686 / RFC 4835),
 // where the ESP payload is unencrypted. This is common in IMS/VoLTE networks where
 // ESP transport mode provides integrity protection without encryption.
@@ -1110,6 +1193,16 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 					tryProto(layers.IPProtocolUDP)
 				}
 			}
+		}
+	}
+
+	// Final fallback: use the ESP trailer (pad bytes, pad_len, next_hdr) to identify
+	// the inner protocol. This handles TCP handshake packets (SYN/SYN-ACK/ACK) that
+	// carry no SIP/RTP payload, so the content heuristics above always fail.
+	if innerProto == 0 {
+		if proto, length, ok := tryESPTrailerValidation(espPayload); ok {
+			innerProto = proto
+			innerLen = length
 		}
 	}
 

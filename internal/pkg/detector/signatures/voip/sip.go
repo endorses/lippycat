@@ -3,15 +3,19 @@ package voip
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 	"github.com/endorses/lippycat/internal/pkg/simd"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // SIPSignature detects SIP (Session Initiation Protocol) traffic
 type SIPSignature struct {
-	methods      []string
-	methodsBytes [][]byte // Byte versions for SIMD matching
+	methods         []string
+	methodsBytes    [][]byte // Byte versions for SIMD matching
+	knownSIPIPPairs sync.Map // key: "ip1|ip2" (normalized) → struct{}
 }
 
 // NewSIPSignature creates a new SIP signature detector
@@ -52,6 +56,21 @@ func (s *SIPSignature) Layer() signatures.LayerType {
 
 func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
 	if len(ctx.Payload) < 8 {
+		// For TCP RST/FIN with no payload, check if this IP pair has carried SIP before.
+		// In IMS/VoLTE, ESP-NULL tunnels SIP-over-TCP sessions; the TCP teardown packet
+		// has no SIP payload but belongs to the same SIP signalling path.
+		if ctx.Transport == "TCP" && ctx.Packet != nil {
+			if tcp, ok := ctx.Packet.TransportLayer().(*layers.TCP); ok && (tcp.RST || tcp.FIN) {
+				if s.isKnownSIPIPPair(ctx.SrcIP, ctx.DstIP) && hasDSCPEF(ctx.Packet) {
+					return &signatures.DetectionResult{
+						Protocol:    "SIP",
+						Confidence:  signatures.ConfidenceLow,
+						Metadata:    map[string]interface{}{"type": "tcp_teardown"},
+						ShouldCache: false,
+					}
+				}
+			}
+		}
 		return nil
 	}
 
@@ -126,6 +145,9 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 			// Add method name to metadata from pre-computed list
 			metadata["matched_method"] = s.methods[i]
 
+			// Record this IP pair as a known SIP endpoint pair for future TCP teardown correlation.
+			s.recordSIPIPPair(ctx.SrcIP, ctx.DstIP)
+
 			return &signatures.DetectionResult{
 				Protocol:    "SIP",
 				Confidence:  confidence,
@@ -136,6 +158,45 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	}
 
 	return nil
+}
+
+// normalizeSIPIPPair returns a canonical key for an IP pair, direction-independent.
+func normalizeSIPIPPair(ip1, ip2 string) string {
+	if ip1 <= ip2 {
+		return ip1 + "|" + ip2
+	}
+	return ip2 + "|" + ip1
+}
+
+// recordSIPIPPair stores an IP pair as a known SIP endpoint pair.
+func (s *SIPSignature) recordSIPIPPair(srcIP, dstIP string) {
+	key := normalizeSIPIPPair(srcIP, dstIP)
+	s.knownSIPIPPairs.Store(key, struct{}{})
+}
+
+// isKnownSIPIPPair reports whether the given IP pair has previously been observed
+// carrying SIP traffic.
+func (s *SIPSignature) isKnownSIPIPPair(srcIP, dstIP string) bool {
+	key := normalizeSIPIPPair(srcIP, dstIP)
+	_, ok := s.knownSIPIPPairs.Load(key)
+	return ok
+}
+
+// hasDSCPEF reports whether the packet carries DSCP Expedited Forwarding marking
+// (traffic class / TOS byte == 0xb8, i.e. DSCP 46 with ECN bits clear).
+// VoIP signalling and media are standardly marked EF; general-purpose TCP traffic
+// (HTTP, SSH, …) is not, so this greatly reduces false positives when classifying
+// TCP teardowns on known SIP IP pairs.
+func hasDSCPEF(pkt gopacket.Packet) bool {
+	if netLayer := pkt.NetworkLayer(); netLayer != nil {
+		switch net := netLayer.(type) {
+		case *layers.IPv4:
+			return net.TOS == 0xb8
+		case *layers.IPv6:
+			return net.TrafficClass == 0xb8
+		}
+	}
+	return false
 }
 
 // extractMetadata extracts SIP-specific metadata from the payload

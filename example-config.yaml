@@ -1,23 +1,460 @@
-# Example lippycat configuration with Phase 3 TCP optimizations
+# lippycat Configuration Reference
+# Place this file at one of:
+#   1. ~/.config/lippycat/config.yaml (preferred)
+#   2. ~/.config/lippycat.yaml
+#   3. ~/.lippycat.yaml
+#
+# Priority: CLI flags > environment variables > config file > defaults
+# Environment: LIPPYCAT_PRODUCTION=true enforces TLS (blocks --insecure)
 
-# Packet Capture Configuration
-# pcap_timeout_ms: 200  # PCAP read timeout in milliseconds (default: 200)
-                        # Controls how often capture goroutines check for shutdown signals
-                        # Lower values (50-100ms) = faster shutdown response, potentially choppy display
-                        # Higher values (200-500ms) = smoother display, slightly slower shutdown
-                        # Can also be set via env var: LIPPYCAT_PCAP_TIMEOUT_MS=200
+# ============================================================================
+# GLOBAL SETTINGS
+# ============================================================================
 
-# Virtual Interface Configuration (for sniff and process commands)
-# virtual_interface:
-#   enabled: false              # Enable virtual network interface for packet injection
-#   name: "lc0"                 # Interface name (default: lc0)
-#   type: "tap"                 # Interface type: tap (Layer 2) or tun (Layer 3)
-#   buffer_size: 4096           # Injection queue buffer size (packets)
+# PCAP read timeout in milliseconds (default: 200)
+# Controls how often capture goroutines check for shutdown signals.
+# Lower values (50-100ms) = faster shutdown response, potentially choppy display
+# Higher values (200-500ms) = smoother display, slightly slower shutdown
+# Also settable via env: LIPPYCAT_PCAP_TIMEOUT_MS=200
+# pcap_timeout_ms: 200
 
-# Security Configuration (for processor nodes)
+# Enable promiscuous mode for packet capture (default: false)
+# promiscuous: false
+
+# Kernel PCAP buffer size in bytes (default: 16777216 = 16MB)
+# pcap_buffer_size: 16777216
+
+# ============================================================================
+# SNIFF COMMAND (lc sniff)
+# ============================================================================
+
+# sniff:
+#   quiet: false              # Suppress packet output (-q)
+#   format: json              # Output format: json, text
+#   write_file: ""            # Write captured packets to PCAP file (-w)
+#
+#   # Virtual Interface (packet injection into a virtual NIC)
+#   virtual_interface: false  # Enable virtual network interface (-V)
+#   vif_name: lc0             # Interface name
+#   vif_type: tap             # Interface type: tap (Layer 2) or tun (Layer 3)
+#   vif_buffer_size: 65536    # Injection queue buffer size (packets)
+#   vif_startup_delay: 3s     # Delay before packet injection starts
+#   vif_replay_timing: false  # Respect original PCAP packet timing
+#   vif_netns: ""             # Network namespace for isolation
+#   vif_drop_privileges: ""   # Drop privileges to this user after setup
+
+# ============================================================================
+# DNS SNIFF (lc sniff dns)
+# ============================================================================
+
+# dns:
+#   domain_pattern: ""         # Filter by domain pattern (glob, e.g. "*.example.com")
+#   domains_file: ""           # Load domain patterns from file (one per line)
+#   udp_only: false            # Capture UDP DNS only (skip TCP)
+#   ports: "53"                # DNS ports (comma-separated)
+#   track_queries: true        # Enable query/response correlation
+#   detect_tunneling: true     # Enable DNS tunneling detection
+#   write_file: ""             # Write captured packets to PCAP file
+
+# ============================================================================
+# TLS SNIFF (lc sniff tls)
+# ============================================================================
+
+# tls:
+#   sni_pattern: ""            # Filter by SNI pattern (glob, e.g. "*.example.com")
+#   sni_file: ""               # Load SNI patterns from file
+#   ja3: ""                    # Filter by JA3 hash (32-char hex)
+#   ja3_file: ""               # Load JA3 hashes from file
+#   ja3s: ""                   # Filter by JA3S hash (32-char hex)
+#   ja3s_file: ""              # Load JA3S hashes from file
+#   ja4: ""                    # Filter by JA4 fingerprint
+#   ja4_file: ""               # Load JA4 fingerprints from file
+#   ports: "443"               # TLS ports (comma-separated)
+#   track_connections: true    # Enable ClientHello/ServerHello correlation
+#   write_file: ""             # Write captured packets to PCAP file
+
+# ============================================================================
+# HTTP SNIFF (lc sniff http)
+# ============================================================================
+
+# http:
+#   host_pattern: ""           # Filter by host (glob, e.g. "*.example.com")
+#   path_pattern: ""           # Filter by URL path (glob, e.g. "/api/*")
+#   methods: ""                # HTTP methods (comma-separated, e.g. "GET,POST")
+#   status_codes: ""           # Status codes (e.g. "4xx,500")
+#   user_agent_pattern: ""     # Filter by User-Agent (glob)
+#   content_type_pattern: ""   # Filter by Content-Type (glob)
+#   hosts_file: ""             # Load host patterns from file
+#   paths_file: ""             # Load path patterns from file
+#   user_agents_file: ""       # Load User-Agent patterns from file
+#   content_types_file: ""     # Load Content-Type patterns from file
+#   keywords_file: ""          # Load keywords for body matching
+#   ports: "80,8080,8000,3000,8888"  # HTTP ports (comma-separated)
+#   track_requests: true       # Enable request/response tracking
+#   capture_body: false        # Capture HTTP body content
+#   max_body_size: 65536       # Maximum body capture size in bytes (64KB)
+#   tls_keylog: ""             # Path to SSLKEYLOGFILE for TLS decryption
+#   tls_keylog_pipe: ""        # Named pipe for live TLS key injection
+#   write_file: ""             # Write captured packets to PCAP file
+
+# ============================================================================
+# EMAIL SNIFF (lc sniff email)
+# ============================================================================
+
+# email:
+#   address_pattern: ""        # Filter by email address (glob)
+#   sender_pattern: ""         # Filter by sender (glob)
+#   recipient_pattern: ""      # Filter by recipient (glob)
+#   subject_pattern: ""        # Filter by subject (glob)
+#   mailbox_pattern: ""        # Filter by IMAP mailbox (glob)
+#   command_pattern: ""        # Filter by IMAP/POP3 command (glob)
+#   addresses_file: ""         # Load address patterns from file
+#   senders_file: ""           # Load sender patterns from file
+#   recipients_file: ""        # Load recipient patterns from file
+#   subjects_file: ""          # Load subject patterns from file
+#   keywords_file: ""          # Load keywords from file
+#   protocol: all              # Protocol filter: smtp, imap, pop3, all
+#   smtp_ports: "25,587,465"   # SMTP ports (comma-separated)
+#   imap_ports: "143,993"      # IMAP ports (comma-separated)
+#   pop3_ports: "110,995"      # POP3 ports (comma-separated)
+#   track_sessions: true       # Enable session tracking
+#   capture_body: false        # Capture email body content
+#   max_body_size: 65536       # Maximum body capture size in bytes (64KB)
+#   write_file: ""             # Write captured packets to PCAP file
+
+# ============================================================================
+# VOIP CONFIGURATION (lc sniff voip, shared with hunt/tap voip)
+# ============================================================================
+
+voip:
+  # SIP/RTP Port Configuration
+  # sip_ports: ""               # SIP ports (comma-separated, default: 5060)
+  # rtp_port_ranges: ""         # RTP port ranges (default: 10000-32768)
+  # udp_only: false             # UDP-only mode, skip TCP reassembly
+
+  # Pattern Matching
+  # pattern_algorithm: auto     # Algorithm: auto, linear, aho-corasick
+  # pattern_buffer_mb: 64       # Pattern buffer memory in MB
+
+  # TCP Stream Processing
+  max_goroutines: 1000          # Max concurrent TCP stream goroutines
+  tcp_cleanup_interval: 60s     # How often to clean up TCP resources
+  tcp_buffer_max_age: 300s      # Maximum age for TCP packet buffers
+  tcp_stream_max_queue_time: 120s  # Maximum time a stream can wait in queue
+  max_tcp_buffers: 10000        # Maximum number of TCP packet buffers
+  tcp_stream_timeout: 600s      # Timeout for TCP stream processing
+  tcp_assembler_max_pages: 100  # Maximum pages for TCP assembler
+  tcp_sip_idle_timeout: 120s    # SIP TCP idle timeout (RFC 5626)
+
+  # State-Based TCP Timeouts (advanced)
+  # enable_state_tcp_timeouts: false     # Enable state-based timeout management
+  # tcp_opening_timeout: 5m             # Timeout for connections without SIP data
+  # tcp_established_timeout: 30m        # Timeout for established SIP connections
+  # tcp_closing_timeout: 5m             # Timeout for connections in closing state
+  # enable_call_aware_timeout: false    # Keep streams open for active calls
+
+  # Performance Mode Selection
+  # Options: "balanced", "throughput", "latency", "memory"
+  tcp_performance_mode: "balanced"
+
+  # Buffer Strategy
+  # Options: "adaptive", "fixed", "ring"
+  tcp_buffer_strategy: "adaptive"
+
+  # Backpressure and Memory
+  enable_backpressure: true
+  memory_optimization: false
+
+  # Advanced Performance Tuning
+  tcp_buffer_pool_size: 1000
+  tcp_batch_size: 32
+  tcp_io_threads: 4
+  tcp_compression_level: 1         # 0=none, 1=fast
+  tcp_memory_limit: 104857600      # 100MB
+  tcp_latency_optimization: false
+  enable_auto_tuning: true
+
+  # PCAP Grace Period
+  # pcap_grace_period: 5s          # Grace period before closing per-call PCAP
+
+  # GPU Acceleration (CUDA builds only)
+  # gpu_enable: true               # Enable GPU acceleration
+  # gpu_backend: auto              # Backend: auto, cuda, opencl, cpu-simd, disabled
+  # gpu_batch_size: 1024           # GPU processing batch size
+  # gpu_max_memory: 0              # Max GPU memory in bytes (0=unlimited)
+
+  # VoIP Security
+  security:
+    sanitize_call_ids: false          # Enable Call-ID sanitization in logs
+    call_id_hash_length: 8            # Hash prefix length for sanitized Call-IDs
+    call_id_max_log_length: 16        # Max Call-ID length before sanitization
+    enable_pcap_encryption: false     # Enable PCAP file encryption
+    max_content_length: 1048576       # Max SIP Content-Length (1MB, DoS protection)
+    max_message_size: 2097152         # Max total SIP message size (2MB)
+
+  # PCAP Encryption (only when enable_pcap_encryption is true)
+  encryption:
+    enabled: false
+    key_file: "/etc/lippycat/keys/pcap.key"
+    algorithm: "aes-256-gcm"
+    key_derive: "pbkdf2"
+    pbkdf2_iterations: 100000
+
+  # Plugin System (disabled by default)
+  # plugins_enabled: false
+  # plugin_paths: []
+  # plugin_watch_enabled: false
+  # plugin_sip_enabled: true
+  # plugin_rtp_enabled: true
+  # plugin_generic_enabled: true
+
+  # Monitoring (disabled by default)
+  # monitoring_enabled: false
+  # metrics_enabled: false
+  # tracing_enabled: false
+  # monitoring_update_interval: 30s
+  # enable_runtime_metrics: true
+  # enable_system_metrics: false
+  # enable_plugin_metrics: true
+
+# ============================================================================
+# HUNTER NODE (lc hunt)
+# ============================================================================
+
+# hunter:
+#   processor_addr: ""           # Processor address, e.g. "processor:55555" (required)
+#   id: ""                       # Hunter identifier (default: hostname)
+#   interfaces:                  # Network interfaces to capture on
+#     - any
+#   bpf_filter: ""               # BPF filter expression
+#   buffer_size: 10000           # Packet buffer size
+#   batch_size: 64               # Packets per gRPC batch
+#   batch_timeout_ms: 100        # Max time before sending partial batch (ms)
+#   batch_queue_size: 0          # Batch queue buffer (0=default 1000)
+#   insecure: false              # Allow unencrypted connections
+#   no_filter_policy: deny       # Behavior when no filters active: allow, deny
+#
+#   # Disk Overflow Buffer
+#   disk_buffer:
+#     enabled: false             # Enable disk overflow when network is slow
+#     dir: /var/tmp/lippycat-buffer
+#     max_mb: 1024               # Maximum disk buffer size in MB
+#
+#   # TLS Client Configuration
+#   tls:
+#     cert_file: ""              # Client certificate for mTLS
+#     key_file: ""               # Client private key
+#     ca_file: ""                # CA certificate to verify processor
+#     skip_verify: false         # Skip server certificate verification (insecure!)
+#
+#   # VoIP-specific hunter settings
+#   voip:
+#     udp_only: false            # UDP-only mode
+#     sip_ports: ""              # SIP ports (comma-separated)
+#     rtp_port_ranges: ""        # RTP port ranges
+#
+#   # GPU VoIP Filtering (CUDA builds only)
+#   voip_filter:
+#     enabled: false             # Enable GPU-accelerated VoIP filtering
+#     gpu_backend: auto          # Backend: auto, cuda, opencl, cpu-simd
+#     gpu_batch_size: 100        # GPU batch size
+
+# ============================================================================
+# PROCESSOR NODE (lc process)
+# ============================================================================
+
+# processor:
+#   listen_addr: ":55555"        # Listen address for hunters and TUI clients
+#   id: ""                       # Processor identifier (default: hostname)
+#   processor_addr: ""           # Upstream processor for hierarchical mode
+#   max_hunters: 100             # Maximum hunter connections
+#   max_subscribers: 100         # Maximum TUI subscriber connections
+#   write_file: ""               # Write all packets to unified PCAP file
+#   display_stats: true          # Display statistics on stdout
+#   enable_detection: true       # Enable protocol detection
+#   filter_file: ""              # Filter persistence file (JSON)
+#   insecure: false              # Allow unencrypted connections
+#
+#   # TLS Server Configuration
+#   tls:
+#     cert_file: ""              # Server TLS certificate
+#     key_file: ""               # Server TLS private key
+#     ca_file: ""                # CA certificate for client verification (mTLS)
+#     client_auth: false         # Require client certificates (mutual TLS)
+#
+#   # Per-Call PCAP (VoIP)
+#   per_call_pcap:
+#     enabled: false             # Write individual PCAP per VoIP call
+#     output_dir: ./pcaps        # Output directory
+#     file_pattern: "{timestamp}_{callid}.pcap"  # Filename pattern
+#
+#   # Auto-Rotating PCAP (non-VoIP or general capture)
+#   auto_rotate_pcap:
+#     enabled: false             # Enable auto-rotating PCAP files
+#     output_dir: ./auto-rotate-pcaps
+#     file_pattern: "{timestamp}.pcap"
+#     idle_timeout: 30s          # Close file after this idle time
+#     max_size: 100M             # Max file size before rotation (K/M/G/T)
+#
+#   # Virtual Interface (packet injection)
+#   virtual_interface: false
+#   vif_name: lc0
+#   vif_type: tap
+#   vif_buffer_size: 65536
+#   vif_netns: ""
+#   vif_drop_privileges: ""
+#
+#   # Command Hooks (executed on events)
+#   pcap_command: ""             # Run on PCAP file close (placeholder: %pcap%)
+#   voip_command: ""             # Run on VoIP call complete (%callid%, %dirname%)
+#   command_timeout: 30s         # Max command execution time
+#   command_concurrency: 10      # Max concurrent command executions
+#
+#   # DNS Tunneling Detection
+#   tunneling_command: ""        # Run when DNS tunneling detected
+#   tunneling_threshold: 0.7    # Detection score threshold (0.0-1.0)
+#   tunneling_debounce: 5m      # Minimum time between alerts per domain
+#
+#   # TLS Keylog
+#   tls_keylog:
+#     output_dir: ""             # Directory for TLS keylog files
+#
+#   # Lawful Interception (LI builds only, requires -tags li)
+#   li:
+#     enabled: false
+#     x1_listen_addr: ":8443"          # X1 admin interface listen address
+#     x1_tls_cert: ""                  # X1 server certificate
+#     x1_tls_key: ""                   # X1 server key
+#     x1_tls_ca: ""                    # X1 client CA (ADMF verification)
+#     admf_endpoint: ""                # ADMF endpoint
+#     admf_tls_cert: ""                # ADMF client certificate
+#     admf_tls_key: ""                 # ADMF client key
+#     admf_tls_ca: ""                  # ADMF CA certificate
+#     admf_keepalive: 30s              # ADMF keepalive interval
+#     delivery_tls_cert: ""            # X2/X3 delivery certificate
+#     delivery_tls_key: ""             # X2/X3 delivery key
+#     delivery_tls_ca: ""              # X2/X3 delivery CA (MDF verification)
+#     delivery_tls_pinned_cert: []     # Pinned MDF certificates
+
+# ============================================================================
+# TAP NODE (lc tap) - Standalone capture + processor
+# ============================================================================
+
+# tap:
+#   interfaces:                  # Network interfaces to capture on
+#     - any
+#   bpf_filter: ""               # BPF filter expression
+#   promiscuous: false           # Enable promiscuous mode
+#   pcap_buffer_size: 16777216   # Kernel PCAP buffer size (16MB)
+#   buffer_size: 10000           # Packet buffer size
+#   batch_size: 100              # Packets per processing batch
+#   batch_timeout_ms: 100        # Max time before processing partial batch (ms)
+#   listen_addr: ":55555"        # Listen address for TUI clients
+#   id: ""                       # Tap identifier (default: hostname)
+#   max_subscribers: 100         # Maximum TUI subscriber connections
+#   processor_addr: ""           # Optional upstream processor for forwarding
+#   write_file: ""               # Write all packets to unified PCAP file
+#   display_stats: true          # Display statistics on stdout
+#   enable_detection: true       # Enable protocol detection
+#   filter_file: ""              # Filter persistence file (JSON)
+#   insecure: false              # Allow unencrypted connections
+#
+#   # TLS Server Configuration
+#   tls:
+#     cert_file: ""
+#     key_file: ""
+#     ca_file: ""
+#     client_auth: false
+#
+#   # Per-Call PCAP (VoIP tap mode)
+#   per_call_pcap:
+#     enabled: true              # Default true in VoIP tap mode
+#     output_dir: ./pcaps
+#     file_pattern: "{timestamp}_{callid}.pcap"
+#
+#   # Auto-Rotating PCAP
+#   auto_rotate_pcap:
+#     enabled: false
+#     output_dir: ./auto-rotate-pcaps
+#     file_pattern: "{timestamp}.pcap"
+#     idle_timeout: 30s
+#     max_size: 100M
+#
+#   # Virtual Interface
+#   virtual_interface: false
+#   vif_name: lc0
+#   vif_type: tap
+#   vif_buffer_size: 65536
+#   vif_netns: ""
+#   vif_drop_privileges: ""
+#
+#   # Command Hooks
+#   pcap_command: ""
+#   voip_command: ""
+#   command_timeout: 30s
+#   command_concurrency: 10
+#
+#   # VoIP-specific tap settings
+#   voip:
+#     udp_only: false
+#     sip_ports: ""
+#     rtp_port_ranges: ""
+#
+#   # GPU VoIP Filtering (CUDA builds only)
+#   voip_filter:
+#     enabled: false
+#     gpu_backend: auto
+#     gpu_batch_size: 100
+#
+#   # API Key Authentication
+#   api_keys:
+#     enabled: false
+#
+#   # TLS Keylog
+#   tls_keylog:
+#     output_dir: ""
+#
+#   # Lawful Interception (LI builds only)
+#   li:
+#     enabled: false
+#     # Same options as processor.li (see above)
+
+# ============================================================================
+# WATCH / TUI (lc watch)
+# ============================================================================
+
+# tui:
+#   buffer_size: 10000           # Maximum packets kept in memory
+#   max_calls: 5000              # Maximum VoIP calls kept in memory
+#   insecure: false              # Allow unencrypted connections to processors
+#
+#   # TLS Client Configuration (for remote mode)
+#   tls:
+#     ca_file: ""                # CA certificate to verify processor
+#     cert_file: ""              # Client certificate for mTLS
+#     key_file: ""               # Client private key
+#     skip_verify: false         # Skip server certificate verification
+#     server_name_override: ""   # Override expected server name in TLS
+#
+#   # TLS Keylog (for file mode decryption)
+#   # tls_keylog: ""             # Path to SSLKEYLOGFILE
+#
+#   # GPU Acceleration (live mode, CUDA builds only)
+#   gpu:
+#     enabled: false
+#     backend: auto
+#     batch_size: 100
+
+# ============================================================================
+# API KEY AUTHENTICATION
+# ============================================================================
+# Alternative to mTLS for processor/tap authentication.
+# Keys are defined in this config file; enable via --api-key-auth flag
+# or security.api_keys.enabled config key.
+
 # security:
 #   api_keys:
-#     enabled: false            # Enable API key authentication (alternative to mTLS)
+#     enabled: false
 #     keys:
 #       - key: "hunter-key-abc123"
 #         role: "hunter"
@@ -29,69 +466,21 @@
 #         role: "admin"
 #         description: "Administrative access"
 
-voip:
-  # Basic TCP configuration
-  max_goroutines: 1000
-  tcp_cleanup_interval: 60s
-  tcp_buffer_max_age: 300s
-  tcp_stream_max_queue_time: 120s
-  max_tcp_buffers: 10000
-  tcp_stream_timeout: 600s
-  tcp_assembler_max_pages: 100
+# ============================================================================
+# EXAMPLE CONFIGURATIONS
+# ============================================================================
 
-  # Performance Mode Selection
-  # Options: "balanced", "throughput", "latency", "memory"
-  tcp_performance_mode: "balanced"
-
-  # Buffer Strategy
-  # Options: "adaptive", "fixed", "ring"
-  tcp_buffer_strategy: "adaptive"
-
-  # Backpressure and Memory Optimization
-  enable_backpressure: true
-  memory_optimization: false
-
-  # Advanced Performance Tuning
-  tcp_buffer_pool_size: 1000
-  tcp_batch_size: 32
-  tcp_io_threads: 4
-  tcp_compression_level: 1
-  tcp_memory_limit: 104857600  # 100MB
-  tcp_latency_optimization: false
-
-  # Security Configuration
-  security:
-    # Call-ID Sanitization for preventing information leakage in logs
-    sanitize_call_ids: false          # Set to true to enable Call-ID sanitization
-    call_id_hash_length: 8            # Length of hash prefix for sanitized Call-IDs
-    call_id_max_log_length: 16        # Maximum Call-ID length before sanitization kicks in
-
-    # PCAP File Encryption for sensitive deployments
-    enable_pcap_encryption: false     # Set to true to enable PCAP encryption
-
-    # Content-Length Bounds Validation for DoS protection
-    max_content_length: 1048576       # Maximum Content-Length value (1MB default)
-    max_message_size: 2097152         # Maximum total SIP message size (2MB default)
-
-  # Encryption Configuration (only used when enable_pcap_encryption is true)
-  encryption:
-    enabled: false                    # Master encryption toggle
-    key_file: "/etc/lippycat/keys/pcap.key"  # Path to encryption key file (will be generated if missing)
-    algorithm: "aes-256-gcm"         # Encryption algorithm (only aes-256-gcm supported)
-    key_derive: "pbkdf2"             # Key derivation method (only pbkdf2 supported)
-    pbkdf2_iterations: 100000        # PBKDF2 iterations for key derivation
-
-# Performance Mode Examples:
-
-# High Throughput Configuration
+# --- High Throughput VoIP ---
 # voip:
 #   tcp_performance_mode: "throughput"
 #   tcp_buffer_strategy: "ring"
 #   max_goroutines: 2000
 #   tcp_batch_size: 64
 #   enable_backpressure: true
+#   tcp_io_threads: 8
+#   tcp_memory_limit: 524288000  # 500MB
 
-# Low Latency Configuration
+# --- Low Latency VoIP ---
 # voip:
 #   tcp_performance_mode: "latency"
 #   tcp_buffer_strategy: "fixed"
@@ -99,7 +488,7 @@ voip:
 #   tcp_latency_optimization: true
 #   tcp_cleanup_interval: 30s
 
-# Memory Optimized Configuration
+# --- Memory Optimized VoIP ---
 # voip:
 #   tcp_performance_mode: "memory"
 #   tcp_buffer_strategy: "adaptive"
@@ -108,17 +497,43 @@ voip:
 #   memory_optimization: true
 #   tcp_memory_limit: 52428800  # 50MB
 
-# Security Enhanced Configuration (for sensitive deployments)
+# --- Security Enhanced VoIP ---
 # voip:
 #   security:
-#     sanitize_call_ids: true           # Enable Call-ID sanitization in logs
-#     call_id_hash_length: 12          # Longer hash for better anonymization
-#     call_id_max_log_length: 8        # Shorter threshold for aggressive sanitization
-#     enable_pcap_encryption: true     # Enable PCAP file encryption
-#     max_content_length: 65536        # Strict 64KB Content-Length limit
-#     max_message_size: 131072         # Strict 128KB total message limit
+#     sanitize_call_ids: true
+#     call_id_hash_length: 12
+#     call_id_max_log_length: 8
+#     enable_pcap_encryption: true
+#     max_content_length: 65536       # 64KB strict limit
+#     max_message_size: 131072        # 128KB strict limit
 #   encryption:
-#     enabled: true                     # Master encryption toggle
-#     key_file: "/secure/keys/lippycat-pcap.key"  # Secure key file location
-#     algorithm: "aes-256-gcm"         # Strong encryption algorithm
-#     pbkdf2_iterations: 200000        # Higher iterations for stronger key derivation
+#     enabled: true
+#     key_file: "/secure/keys/lippycat-pcap.key"
+#     pbkdf2_iterations: 200000
+
+# --- Distributed Deployment (Processor + Hunters) ---
+# processor:
+#   listen_addr: "0.0.0.0:55555"
+#   max_hunters: 50
+#   per_call_pcap:
+#     enabled: true
+#     output_dir: /var/capture/calls
+#   pcap_command: "gzip %pcap%"
+#   voip_command: "/opt/scripts/process-call.sh %callid% %dirname%"
+#   tls:
+#     cert_file: /etc/lippycat/certs/server.crt
+#     key_file: /etc/lippycat/certs/server.key
+#     ca_file: /etc/lippycat/certs/ca.crt
+#     client_auth: true
+
+# --- Standalone Tap with Upstream Forwarding ---
+# tap:
+#   interfaces: ["eth0"]
+#   processor_addr: "central-processor:55555"
+#   per_call_pcap:
+#     enabled: true
+#     output_dir: /var/capture/local
+#   tls:
+#     cert_file: /etc/lippycat/certs/tap.crt
+#     key_file: /etc/lippycat/certs/tap.key
+#     ca_file: /etc/lippycat/certs/ca.crt

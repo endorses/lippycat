@@ -67,6 +67,10 @@ func TestConvertPacketFast_SIPDetection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Clear flow caches so sub-tests don't influence each other.
+			ClearUDPSIPFlowCache()
+			ClearTCPSIPFlowCache()
+
 			// Build a packet
 			eth := &layers.Ethernet{
 				SrcMAC:       net.HardwareAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x01},

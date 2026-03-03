@@ -304,11 +304,121 @@ func updateTCPSIPFlowTimestamp(flowKey string) {
 	tcpSIPFlowCacheMu.Unlock()
 }
 
+// udpSIPFlowCache tracks UDP flows that have been identified as SIP.
+// This is used to classify non-first IPv6 fragments that are reassembled as
+// synthetic UDP packets: the continuation bytes don't start with a SIP method,
+// but the flow was already seen as SIP when the first fragment was processed.
+var (
+	udpSIPFlowCache   = make(map[string]tcpSIPFlowEntry) // reuses the same entry type
+	udpSIPFlowCacheMu sync.RWMutex
+)
+
+// markUDPSIPFlow marks a UDP flow as SIP in the cache.
+func markUDPSIPFlow(flowKey string) {
+	udpSIPFlowCacheMu.Lock()
+	defer udpSIPFlowCacheMu.Unlock()
+
+	if len(udpSIPFlowCache) >= tcpSIPFlowCacheMaxSize {
+		now := time.Now()
+		for k, v := range udpSIPFlowCache {
+			if now.Sub(v.lastSeen) > tcpSIPFlowCacheMaxAge {
+				delete(udpSIPFlowCache, k)
+			}
+		}
+	}
+	udpSIPFlowCache[flowKey] = tcpSIPFlowEntry{lastSeen: time.Now()}
+}
+
+// isUDPSIPFlow checks if a UDP flow is cached as SIP.
+func isUDPSIPFlow(flowKey string) bool {
+	udpSIPFlowCacheMu.RLock()
+	entry, ok := udpSIPFlowCache[flowKey]
+	udpSIPFlowCacheMu.RUnlock()
+
+	if !ok {
+		return false
+	}
+	if time.Since(entry.lastSeen) > tcpSIPFlowCacheMaxAge {
+		udpSIPFlowCacheMu.Lock()
+		delete(udpSIPFlowCache, flowKey)
+		udpSIPFlowCacheMu.Unlock()
+		return false
+	}
+	return true
+}
+
 // ClearTCPSIPFlowCache clears the TCP SIP flow cache (used on session reset)
 func ClearTCPSIPFlowCache() {
 	tcpSIPFlowCacheMu.Lock()
 	tcpSIPFlowCache = make(map[string]tcpSIPFlowEntry)
 	tcpSIPFlowCacheMu.Unlock()
+}
+
+// ClearUDPSIPFlowCache clears the UDP SIP flow cache (used on session reset)
+func ClearUDPSIPFlowCache() {
+	udpSIPFlowCacheMu.Lock()
+	udpSIPFlowCache = make(map[string]tcpSIPFlowEntry)
+	udpSIPFlowCacheMu.Unlock()
+}
+
+// classifyICMPv6InnerPacket inspects the embedded invoking packet inside an ICMPv6
+// error message (Types 1-4: Destination Unreachable, Packet Too Big, Time Exceeded,
+// Parameter Problem) and returns a VoIP protocol name and info string when the inner
+// payload is recognisable as SIP or RTP.
+//
+// gopacket does not recursively expose the inner layers of ICMPv6 error messages as
+// regular packet layers, so pkt.TransportLayer() returns nil for these packets.
+// We have to parse the embedded IPv6/UDP/payload bytes by hand.
+func classifyICMPv6InnerPacket(pkt gopacket.Packet) (protocol, info string) {
+	icmp6Layer := pkt.Layer(layers.LayerTypeICMPv6)
+	if icmp6Layer == nil {
+		return "", ""
+	}
+	icmp6, ok := icmp6Layer.(*layers.ICMPv6)
+	if !ok {
+		return "", ""
+	}
+	// Only ICMPv6 error messages (Types 1-4) embed the invoking packet.
+	icmpType := icmp6.TypeCode.Type()
+	if icmpType < 1 || icmpType > 4 {
+		return "", ""
+	}
+	// LayerPayload() contains: unused(4 bytes for most types) + inner IPv6 packet.
+	// The IPv6 version nibble (0x60) is at offset 0 or offset 4; scan both.
+	payload := icmp6.LayerPayload()
+	var innerIPv6 []byte
+	for _, off := range []int{0, 4} {
+		if off+40 <= len(payload) && (payload[off]>>4) == 6 {
+			innerIPv6 = payload[off:]
+			break
+		}
+	}
+	if innerIPv6 == nil {
+		return "", ""
+	}
+	// Next Header field is at byte 6 of the IPv6 header.
+	// 17 = UDP.  Only check UDP inner packets for now (RTP/SIP are UDP).
+	if innerIPv6[6] != 17 {
+		return "", ""
+	}
+	// IPv6 header (40 bytes) + UDP header (8 bytes) = 48 bytes minimum.
+	if len(innerIPv6) < 48 {
+		return "", ""
+	}
+	udpPayload := innerIPv6[48:]
+	if isSIPBytes(udpPayload) {
+		return "SIP", "SIP (ICMPv6 error)"
+	}
+	// Minimal RTP header check: version=2, valid payload type (not RTCP 200-213).
+	if len(udpPayload) >= 12 {
+		if (udpPayload[0]>>6)&0x03 == 2 {
+			pt := udpPayload[1] & 0x7f
+			if pt <= 34 || (pt >= 96 && pt <= 127) {
+				return "RTP", "RTP (ICMPv6 error)"
+			}
+		}
+	}
+	return "", ""
 }
 
 // SetCallTracker sets the call tracker for RTP-to-CallID mapping
@@ -1243,12 +1353,26 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 				}
 			case *layers.UDP:
 				payload := trans.LayerPayload()
+				flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
 				if isSIPBytes(payload) {
 					display.Protocol = internProtocol("SIP")
+					// Mark the flow so non-first-fragment continuations are also classified as SIP.
+					markUDPSIPFlow(flowKey)
 					// Extract Call-ID and register with CallTracker for RTP correlation
 					extractAndRegisterSIPFromPacket(payload, fields.SrcIP, fields.DstIP)
+				} else if isUDPSIPFlow(flowKey) {
+					display.Protocol = internProtocol("SIP")
+					display.Info = "UDP SIP (continuation)"
 				}
 			}
+		}
+	}
+
+	// ICMPv6 error messages embed the invoking packet; classify by inner payload.
+	if display.Protocol == "ICMPv6" {
+		if proto, info := classifyICMPv6InnerPacket(pkt); proto != "" {
+			display.Protocol = internProtocol(proto)
+			display.Info = info
 		}
 	}
 
@@ -1294,11 +1418,17 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		// Generate display info from metadata
 		display.Info = buildProtocolInfo(detectionResult, pkt, &display)
 
-		// If detected as SIP over TCP, cache the flow (but don't extract per-packet)
-		// TCP packets may contain partial SIP messages - let TCP reassembly handle registration
-		if detectionResult.Protocol == "SIP" && fields.Protocol == "TCP" {
+		// If detected as SIP, cache the flow for continuation-segment classification.
+		if detectionResult.Protocol == "SIP" {
 			flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
-			markTCPSIPFlow(flowKey)
+			if fields.Protocol == "TCP" {
+				// TCP packets may contain partial SIP messages - let TCP reassembly handle
+				// registration; only cache the flow here.
+				markTCPSIPFlow(flowKey)
+			} else if fields.Protocol == "UDP" {
+				// Mark UDP flow so non-first IPv6 fragment continuations are classified as SIP.
+				markUDPSIPFlow(flowKey)
+			}
 		}
 		// NOTE: UDP SIP endpoint registration is now handled in buildProtocolInfo() via detector path.
 		// This avoids potential CallID mismatches between detector and extractCallIDFromPayload().
@@ -1315,6 +1445,23 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 			updateTCPSIPFlowTimestamp(flowKey)
 			display.Protocol = "SIP"
 			display.Info = "TCP SIP (continuation)"
+		}
+	}
+
+	// UDP SIP detection via flow cache (for non-first IPv6 fragment continuations).
+	if fields.Protocol == "UDP" && (detectionResult == nil || detectionResult.Protocol == "unknown" || display.Protocol == "UDP") {
+		flowKey := getTCPFlowKey(fields.SrcIP, fields.DstIP, fields.SrcPort, fields.DstPort)
+		if isUDPSIPFlow(flowKey) {
+			display.Protocol = "SIP"
+			display.Info = "UDP SIP (continuation)"
+		}
+	}
+
+	// ICMPv6 error messages embed the invoking packet; classify by inner payload.
+	if display.Protocol == "ICMPv6" {
+		if proto, info := classifyICMPv6InnerPacket(pkt); proto != "" {
+			display.Protocol = proto
+			display.Info = info
 		}
 	}
 

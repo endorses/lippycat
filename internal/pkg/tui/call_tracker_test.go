@@ -447,10 +447,11 @@ func TestCallTracker_EndpointDeduplication(t *testing.T) {
 	tracker.RegisterMediaPorts("call-123", "10.0.0.1", []uint16{10000}, true)  // 200 OK
 	tracker.RegisterMediaPorts("call-123", "10.0.0.1", []uint16{10000}, false) // re-INVITE
 
-	// Should only have one endpoint, not three
+	// Should have 2 endpoints (RTP + RTCP), not 6 (3 calls × 2)
 	endpoints := tracker.GetEndpointsForCall("call-123")
-	assert.Len(t, endpoints, 1, "duplicate endpoints should not be added")
-	assert.Equal(t, "10.0.0.1:10000", endpoints[0])
+	assert.Len(t, endpoints, 2, "duplicate endpoints should not be added")
+	assert.Contains(t, endpoints, "10.0.0.1:10000", "RTP endpoint should be present")
+	assert.Contains(t, endpoints, "10.0.0.1:10001", "RTCP endpoint should be present")
 }
 
 // TestCallTracker_EndpointDeduplicationWithMultiplePorts ensures deduplication
@@ -462,9 +463,13 @@ func TestCallTracker_EndpointDeduplicationWithMultiplePorts(t *testing.T) {
 	tracker.RegisterMediaPorts("call-123", "10.0.0.1", []uint16{10000, 10002}, false)
 	tracker.RegisterMediaPorts("call-123", "10.0.0.1", []uint16{10000, 10002}, true)
 
-	// Should have exactly 2 endpoints
+	// Should have exactly 4 endpoints (2 RTP + 2 RTCP), not 8 (2 calls × 4)
 	endpoints := tracker.GetEndpointsForCall("call-123")
-	assert.Len(t, endpoints, 2, "should have exactly 2 unique endpoints")
+	assert.Len(t, endpoints, 4, "should have exactly 4 unique endpoints (2 RTP + 2 RTCP)")
+	assert.Contains(t, endpoints, "10.0.0.1:10000", "RTP port 10000 should be present")
+	assert.Contains(t, endpoints, "10.0.0.1:10001", "RTCP port 10001 should be present")
+	assert.Contains(t, endpoints, "10.0.0.1:10002", "RTP port 10002 should be present")
+	assert.Contains(t, endpoints, "10.0.0.1:10003", "RTCP port 10003 should be present")
 }
 
 // TestCallTracker_RTPOnlyEndpointDeduplication ensures deduplication in

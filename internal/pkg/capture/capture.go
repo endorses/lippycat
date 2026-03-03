@@ -1,7 +1,9 @@
 package capture
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -31,6 +33,25 @@ var (
 	sipMethodCANCEL   = []byte("CANCEL")
 	sipResponse       = []byte("SIP/2.0")
 )
+
+// espNullSPICache maps ESP SPIs confirmed as NULL-encrypted to their inner IP protocol.
+// Once a SPI is confirmed via content heuristic (SIP/RTP detected), subsequent packets
+// from the same SPI are decapsulated without requiring a SIP/RTP payload at the start.
+// This handles TCP continuation segments that carry SDP or later SIP message fragments.
+var espNullSPICache sync.Map // key: uint32 SPI, value: layers.IPProtocol
+
+// ipv6FragInfo holds transport-layer information extracted from the first IPv6 fragment.
+// It is used to synthesise a complete transport header for non-first fragments, which
+// carry only the raw continuation bytes of the original datagram.
+type ipv6FragInfo struct {
+	innerProto layers.IPProtocol
+	srcPort    uint16
+	dstPort    uint16
+}
+
+// ipv6FragIDCache maps IPv6 Fragment Identification values to the transport info
+// that was extracted from the corresponding first fragment.
+var ipv6FragIDCache sync.Map // key: uint32 fragID, value: ipv6FragInfo
 
 // Default SIP priority buffer size (SIP is low volume, doesn't need large buffer)
 const DefaultSIPBufferSize = 1000
@@ -791,8 +812,26 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				}
 			}
 
+			// Handle VXLAN decapsulation - extract the inner Ethernet frame so all
+			// downstream processing (SIP detection, RTP correlation, etc.) sees the
+			// real traffic rather than the VXLAN tunnel wrapper.
+			linkType := handle.LinkType()
+			if inner, ok := decapsulateVXLAN(packet); ok {
+				packet = inner
+				linkType = layers.LinkTypeEthernet
+			}
+
+			// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
+			// mode provides integrity without encryption. Must run after VXLAN
+			// decapsulation so it sees the inner packets from VXLAN tunnels.
+			if inner, ok := decapsulateESPNull(packet); ok {
+				packet = inner
+			} else if inner, ok := decapsulateIPv6FragmentESP(packet); ok {
+				packet = inner
+			}
+
 			pktInfo := PacketInfo{
-				LinkType:  handle.LinkType(),
+				LinkType:  linkType,
 				Packet:    packet,
 				Interface: filepath.Base(iface.Name()), // Use basename for display (removes path for PCAP files)
 			}
@@ -915,4 +954,495 @@ func rebuildReassembledPacket(original gopacket.Packet, reassembledIP *layers.IP
 	}
 
 	return newPacket
+}
+
+// decapsulateVXLAN checks if a packet is VXLAN-encapsulated (outer UDP dst port 4789)
+// and if so, returns a new packet built from the inner Ethernet frame.
+// VXLAN (RFC 7348) always encapsulates an Ethernet frame.
+//
+// Returns (inner packet, true) on successful decapsulation, or (original, false) if
+// the packet is not VXLAN-encapsulated or decapsulation fails.
+func decapsulateVXLAN(packet gopacket.Packet) (gopacket.Packet, bool) {
+	vxlanLayer := packet.Layer(layers.LayerTypeVXLAN)
+	if vxlanLayer == nil {
+		return packet, false
+	}
+
+	vxlan, ok := vxlanLayer.(*layers.VXLAN)
+	if !ok {
+		return packet, false
+	}
+
+	innerData := vxlan.LayerPayload()
+	if len(innerData) == 0 {
+		return packet, false
+	}
+
+	// Inner VXLAN payload is always an Ethernet frame (RFC 7348)
+	innerPacket := gopacket.NewPacket(innerData, layers.LinkTypeEthernet, gopacket.Default)
+
+	// Preserve outer packet metadata (timestamp is critical for ordering)
+	if meta := packet.Metadata(); meta != nil {
+		innerMeta := innerPacket.Metadata()
+		innerMeta.Timestamp = meta.Timestamp
+		innerMeta.CaptureLength = len(innerData)
+		innerMeta.Length = len(innerData)
+	}
+
+	logger.Debug("VXLAN decapsulation",
+		"vni", vxlan.VNI,
+		"inner_bytes", len(innerData))
+
+	return innerPacket, true
+}
+
+// decapsulateESPNull checks if a packet uses ESP with NULL cipher (RFC 3686 / RFC 4835),
+// where the ESP payload is unencrypted. This is common in IMS/VoLTE networks where
+// ESP transport mode provides integrity protection without encryption.
+//
+// The heuristic parses the ESP payload as a UDP header, validates the length field, and
+// checks that the inner UDP payload looks like SIP or RTP. This avoids false positives
+// with genuinely encrypted ESP traffic.
+//
+// Returns (rebuilt packet, true) on success, or (original, false) if the packet is not
+// ESP-NULL-encapsulated, decapsulation fails, or the inner payload is not SIP/RTP.
+func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
+	espLayer := packet.Layer(layers.LayerTypeIPSecESP)
+	if espLayer == nil {
+		return packet, false
+	}
+
+	esp, ok := espLayer.(*layers.IPSecESP)
+	if !ok {
+		return packet, false
+	}
+
+	// gopacket puts all ESP bytes into LayerContents() and leaves LayerPayload() empty,
+	// because it cannot determine where the encrypted/NULLed payload ends without an SA.
+	// Layout: [SPI(4)][Seq(4)][inner data / NULL-cipher payload][pad][pad_len][next_hdr][ICV]
+	espContent := esp.LayerContents()
+	// Need the 8-byte SPI+Seq header plus ≥2 bytes for the ESP trailer.
+	if len(espContent) < 10 {
+		return packet, false
+	}
+
+	// The actual (potentially unencrypted) payload starts after the 8-byte SPI+Seq header.
+	espPayload := espContent[8:]
+
+	// Read the SPI (Security Parameter Index) from the first 4 bytes of the ESP header.
+	// SPIs are per-direction security association identifiers. We use them to remember
+	// which SPIs we have confirmed are NULL-encrypted (via successful SIP/RTP content match),
+	// so that subsequent packets — including TCP continuation segments that do not start with
+	// SIP text — can also be decapsulated.
+	spi := binary.BigEndian.Uint32(espContent[0:4])
+
+	// Determine the inner protocol and the number of bytes to splice into the rebuilt packet.
+	var innerProto layers.IPProtocol
+	var innerLen int
+
+	// Try UDP first: bytes 4-5 of the UDP header carry the total UDP length.
+	if len(espPayload) >= 10 {
+		udpLen := int(binary.BigEndian.Uint16(espPayload[4:6]))
+		// UDP length must include the 8-byte header and fit within the ESP payload,
+		// leaving at least 2 bytes for the ESP trailer (pad_len + next_header).
+		if udpLen >= 8 && udpLen <= len(espPayload)-2 {
+			udpPayload := espPayload[8:udpLen]
+			if mightBeSIPorRTP(udpPayload) {
+				innerProto = layers.IPProtocolUDP
+				innerLen = udpLen
+			}
+		}
+	}
+
+	// Try TCP if UDP did not match.
+	// The TCP data offset nibble (high 4 bits of byte 12) gives the TCP header length
+	// in 32-bit words; valid range is 5..15 (20..60 bytes).
+	if innerProto == 0 && len(espPayload) >= 20 {
+		tcpDataOff := int(espPayload[12] >> 4)
+		if tcpDataOff >= 5 && tcpDataOff <= 15 {
+			tcpHeaderLen := tcpDataOff * 4
+			if tcpHeaderLen <= len(espPayload) {
+				tcpPayload := espPayload[tcpHeaderLen:]
+				if mightBeSIPorRTP(tcpPayload) {
+					innerProto = layers.IPProtocolTCP
+					// Use the full espPayload length; any trailing ICV bytes fall past
+					// the SIP double-CRLF body terminator and do not affect SIP parsing.
+					innerLen = len(espPayload)
+				}
+			}
+		}
+	}
+
+	// If content heuristics did not match, check the SPI cache. A previously confirmed
+	// NULL SPI means this is a continuation segment (e.g., TCP SDP body without SIP header).
+	// A single SA can carry both UDP and TCP flows, so when the cached protocol fails we
+	// also try the alternative protocol before giving up.
+	if innerProto == 0 {
+		if cached, ok := espNullSPICache.Load(spi); ok {
+			proto := cached.(layers.IPProtocol)
+			// tryProto attempts to identify innerProto/innerLen for the given protocol.
+			tryProto := func(p layers.IPProtocol) {
+				switch p {
+				case layers.IPProtocolUDP:
+					if len(espPayload) >= 10 {
+						udpLen := int(binary.BigEndian.Uint16(espPayload[4:6]))
+						if udpLen >= 8 && udpLen <= len(espPayload) {
+							innerProto = layers.IPProtocolUDP
+							innerLen = udpLen
+						}
+					}
+				case layers.IPProtocolTCP:
+					if len(espPayload) >= 20 {
+						tcpDataOff := int(espPayload[12] >> 4)
+						if tcpDataOff >= 5 && tcpDataOff <= 15 {
+							innerProto = layers.IPProtocolTCP
+							innerLen = len(espPayload)
+						}
+					}
+				}
+			}
+			// Try the cached protocol first, then the alternative.
+			tryProto(proto)
+			if innerProto == 0 {
+				if proto == layers.IPProtocolUDP {
+					tryProto(layers.IPProtocolTCP)
+				} else {
+					tryProto(layers.IPProtocolUDP)
+				}
+			}
+		}
+	}
+
+	if innerProto == 0 {
+		return packet, false
+	}
+
+	// Record this SPI as NULL-encrypted on first confirmed detection.
+	// Subsequent packets (including TCP continuations) will bypass content checks.
+	espNullSPICache.Store(spi, innerProto)
+
+	rawData := packet.Data()
+	if len(rawData) == 0 {
+		return packet, false
+	}
+
+	// Calculate the byte offset of the ESP header within rawData.
+	// rawData = [pre-ESP bytes][ESP content (SPI+Seq+payload)]
+	espOffset := len(rawData) - len(espContent)
+	if espOffset <= 0 {
+		return packet, false
+	}
+
+	// Build new raw packet: [IP headers up to (not including) ESP][inner transport data]
+	newRaw := make([]byte, espOffset+innerLen)
+	copy(newRaw[:espOffset], rawData[:espOffset])
+	copy(newRaw[espOffset:], espPayload[:innerLen])
+
+	// Patch the IP Next Header / Protocol field to the inner protocol and fix the
+	// IP payload-length field so gopacket parses the new packet correctly.
+	switch ipLayer := packet.NetworkLayer().(type) {
+	case *layers.IPv6:
+		// Only handle direct IPv6/ESP (no extension headers between IPv6 and ESP).
+		if ipLayer.NextHeader != layers.IPProtocolESP {
+			return packet, false
+		}
+		ipv6Contents := ipLayer.LayerContents()
+		// IPv6 header offset: rawData = [eth][ipv6][esp][...]
+		ipv6Off := len(rawData) - len(ipv6Contents) - len(ipLayer.LayerPayload())
+		if ipv6Off < 0 || ipv6Off+8 > len(newRaw) {
+			return packet, false
+		}
+		newRaw[ipv6Off+6] = byte(innerProto) // Next Header
+		binary.BigEndian.PutUint16(newRaw[ipv6Off+4:], uint16(innerLen))
+
+	case *layers.IPv4:
+		if ipLayer.Protocol != layers.IPProtocolESP {
+			return packet, false
+		}
+		ipv4Contents := ipLayer.LayerContents()
+		ipv4Off := len(rawData) - len(ipv4Contents) - len(ipLayer.LayerPayload())
+		if ipv4Off < 0 || ipv4Off+20 > len(newRaw) {
+			return packet, false
+		}
+		newRaw[ipv4Off+9] = byte(innerProto) // Protocol
+		binary.BigEndian.PutUint16(newRaw[ipv4Off+2:], uint16(len(newRaw)-ipv4Off))
+		// Zero the checksum — gopacket accepts unchecked checksums.
+		newRaw[ipv4Off+10] = 0
+		newRaw[ipv4Off+11] = 0
+
+	default:
+		return packet, false
+	}
+
+	// Determine link type for re-parsing.
+	linkType := layers.LinkTypeEthernet
+	if packet.Layer(layers.LayerTypeEthernet) == nil {
+		if packet.Layer(layers.LayerTypeLinuxSLL) != nil {
+			linkType = layers.LinkTypeLinuxSLL
+		} else {
+			return packet, false
+		}
+	}
+
+	innerPacket := gopacket.NewPacket(newRaw, linkType, gopacket.Default)
+
+	// Verify the expected transport layer is present in the rebuilt packet.
+	switch innerProto {
+	case layers.IPProtocolUDP:
+		if innerPacket.Layer(layers.LayerTypeUDP) == nil {
+			return packet, false
+		}
+	case layers.IPProtocolTCP:
+		if innerPacket.Layer(layers.LayerTypeTCP) == nil {
+			return packet, false
+		}
+	default:
+		return packet, false
+	}
+
+	// Preserve capture metadata (timestamp is critical for ordering).
+	if meta := packet.Metadata(); meta != nil {
+		innerMeta := innerPacket.Metadata()
+		innerMeta.Timestamp = meta.Timestamp
+		innerMeta.CaptureLength = meta.CaptureLength
+		innerMeta.Length = meta.Length
+	}
+
+	logger.Debug("ESP-NULL decapsulation",
+		"proto", innerProto,
+		"inner_len", innerLen)
+
+	return innerPacket, true
+}
+
+// decapsulateIPv6FragmentESP handles IPv6 packets where a Fragment extension header
+// precedes an ESP-NULL-encrypted transport segment. This occurs in IMS/VoLTE when a
+// large SIP message is fragmented at the IPv6 layer before ESP encapsulation.
+//
+// For the first fragment (offset == 0), the fragment payload begins with the ESP header
+// (SPI+Seq) followed by the inner transport header (UDP/TCP) and the start of the SIP
+// body. We rebuild the packet as a plain IPv6/UDP or IPv6/TCP packet so downstream
+// protocol detectors see the SIP content.
+//
+// For non-first fragments the inner transport header is absent; we only detect them
+// when the SPI has already been cached from the first fragment, and we expose the raw
+// fragment bytes as a UDP payload so TCP reassembly or call-tracker see the continuation.
+func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) {
+	fragLayer := packet.Layer(layers.LayerTypeIPv6Fragment)
+	if fragLayer == nil {
+		return packet, false
+	}
+	frag, ok := fragLayer.(*layers.IPv6Fragment)
+	if !ok {
+		return packet, false
+	}
+	// Only handle the ESP protocol inside the fragment.
+	if frag.NextHeader != layers.IPProtocolESP {
+		return packet, false
+	}
+
+	// The fragment payload is the raw ESP data (SPI + Seq + inner content...).
+	fragPayload := frag.LayerPayload()
+	if len(fragPayload) < 10 {
+		return packet, false
+	}
+
+	spi := binary.BigEndian.Uint32(fragPayload[0:4])
+	// Inner content starts after the 8-byte ESP base header (SPI + Seq).
+	espInner := fragPayload[8:]
+
+	var innerProto layers.IPProtocol
+	var innerLen int
+	// syntheticTransport is non-nil when we build a fake transport header for a non-first
+	// fragment so that the gopacket decoder can parse the resulting packet correctly.
+	var syntheticTransport []byte
+
+	if frag.FragmentOffset == 0 {
+		// First fragment: the inner transport header is present.
+		// Try UDP. The UDP length field may exceed the fragment size when
+		// the payload spans multiple IPv6 fragments, so we cap at espInner length.
+		if len(espInner) >= 10 {
+			udpLen := int(binary.BigEndian.Uint16(espInner[4:6]))
+			// Cap: use whatever bytes are available in this fragment.
+			actualLen := min(udpLen, len(espInner))
+			if udpLen >= 8 && actualLen >= 8 {
+				udpPayload := espInner[8:actualLen]
+				if mightBeSIPorRTP(udpPayload) {
+					innerProto = layers.IPProtocolUDP
+					innerLen = actualLen
+					// Store transport port info for non-first fragment reconstruction.
+					ipv6FragIDCache.Store(frag.Identification, ipv6FragInfo{
+						innerProto: innerProto,
+						srcPort:    binary.BigEndian.Uint16(espInner[0:2]),
+						dstPort:    binary.BigEndian.Uint16(espInner[2:4]),
+					})
+				}
+			}
+		}
+		// Try TCP if UDP did not match.
+		if innerProto == 0 && len(espInner) >= 20 {
+			tcpDataOff := int(espInner[12] >> 4)
+			if tcpDataOff >= 5 && tcpDataOff <= 15 {
+				tcpHeaderLen := tcpDataOff * 4
+				if tcpHeaderLen <= len(espInner) {
+					tcpPayload := espInner[tcpHeaderLen:]
+					if mightBeSIPorRTP(tcpPayload) {
+						innerProto = layers.IPProtocolTCP
+						innerLen = len(espInner)
+						ipv6FragIDCache.Store(frag.Identification, ipv6FragInfo{
+							innerProto: innerProto,
+							srcPort:    binary.BigEndian.Uint16(espInner[0:2]),
+							dstPort:    binary.BigEndian.Uint16(espInner[2:4]),
+						})
+					}
+				}
+			}
+		}
+		if innerProto != 0 {
+			espNullSPICache.Store(spi, innerProto)
+		}
+	}
+
+	// For non-first fragments, use the fragment ID cache first (preferred: provides
+	// accurate port numbers so the synthetic packet is fully parseable), then fall
+	// back to the SPI cache (provides proto only; port numbers will be garbage).
+	if innerProto == 0 {
+		if cached, ok := ipv6FragIDCache.Load(frag.Identification); ok {
+			info := cached.(ipv6FragInfo)
+			innerProto = info.innerProto
+			// Build a synthetic transport header so gopacket can parse the packet
+			// and downstream flow caches can match it by port.
+			if innerProto == layers.IPProtocolUDP {
+				syntheticTransport = make([]byte, 8+len(espInner))
+				binary.BigEndian.PutUint16(syntheticTransport[0:2], info.srcPort)
+				binary.BigEndian.PutUint16(syntheticTransport[2:4], info.dstPort)
+				binary.BigEndian.PutUint16(syntheticTransport[4:6], uint16(8+len(espInner)))
+				// checksum left at 0 (unchecked)
+				copy(syntheticTransport[8:], espInner)
+				innerLen = len(syntheticTransport)
+			} else {
+				innerLen = len(espInner)
+			}
+		} else if cached, ok := espNullSPICache.Load(spi); ok {
+			innerProto = cached.(layers.IPProtocol)
+			innerLen = len(espInner)
+		}
+	}
+	if innerProto == 0 {
+		return packet, false
+	}
+
+	// Build a new raw packet: [Ethernet][IPv6 without Fragment ext hdr][inner transport]
+	// The IPv6 header immediately precedes the Fragment extension header in rawData.
+	rawData := packet.Data()
+	if len(rawData) == 0 {
+		return packet, false
+	}
+
+	ipv6Layer, isIPv6 := packet.NetworkLayer().(*layers.IPv6)
+	if !isIPv6 {
+		return packet, false
+	}
+
+	// Locate the IPv6 header in rawData.
+	ipv6Contents := ipv6Layer.LayerContents()
+	ipv6Off := len(rawData) - len(ipv6Contents) - len(ipv6Layer.LayerPayload())
+	if ipv6Off < 0 {
+		return packet, false
+	}
+
+	// The Fragment extension header (8 bytes, RFC 2460) sits between the IPv6 header
+	// and the ESP data; its start in rawData is derived from fragPayload's position.
+	espStartInRaw := len(rawData) - len(fragPayload)
+	if espStartInRaw < ipv6Off+len(ipv6Contents) {
+		return packet, false
+	}
+
+	// New raw packet layout: pre-IPv6 + IPv6(40) + inner transport data
+	// We splice out the Fragment extension header and ESP header, keeping only the inner.
+	preIPv6Len := ipv6Off
+	newRaw := make([]byte, preIPv6Len+len(ipv6Contents)+innerLen)
+	copy(newRaw[:preIPv6Len], rawData[:preIPv6Len])
+	copy(newRaw[preIPv6Len:preIPv6Len+len(ipv6Contents)], ipv6Contents)
+	if syntheticTransport != nil {
+		copy(newRaw[preIPv6Len+len(ipv6Contents):], syntheticTransport)
+	} else {
+		copy(newRaw[preIPv6Len+len(ipv6Contents):], espInner[:innerLen])
+	}
+
+	// Patch the IPv6 header: clear the Fragment extension header by setting
+	// Next Header directly to the inner protocol, and fix the payload length.
+	ipv6HdrOff := preIPv6Len
+	newRaw[ipv6HdrOff+6] = byte(innerProto)
+	binary.BigEndian.PutUint16(newRaw[ipv6HdrOff+4:], uint16(innerLen))
+
+	linkType := layers.LinkTypeEthernet
+	if packet.Layer(layers.LayerTypeEthernet) == nil {
+		if packet.Layer(layers.LayerTypeLinuxSLL) != nil {
+			linkType = layers.LinkTypeLinuxSLL
+		} else {
+			return packet, false
+		}
+	}
+
+	innerPacket := gopacket.NewPacket(newRaw, linkType, gopacket.Default)
+
+	// Verify the expected transport layer is present.
+	switch innerProto {
+	case layers.IPProtocolUDP:
+		if innerPacket.Layer(layers.LayerTypeUDP) == nil {
+			return packet, false
+		}
+	case layers.IPProtocolTCP:
+		if innerPacket.Layer(layers.LayerTypeTCP) == nil {
+			return packet, false
+		}
+	default:
+		return packet, false
+	}
+
+	if meta := packet.Metadata(); meta != nil {
+		innerMeta := innerPacket.Metadata()
+		innerMeta.Timestamp = meta.Timestamp
+		innerMeta.CaptureLength = meta.CaptureLength
+		innerMeta.Length = meta.Length
+	}
+
+	logger.Debug("IPv6-fragment ESP-NULL decapsulation",
+		"spi", spi,
+		"frag_offset", frag.FragmentOffset,
+		"proto", innerProto,
+		"inner_len", innerLen)
+
+	return innerPacket, true
+}
+
+// mightBeSIPorRTP is a heuristic that returns true when a payload byte slice looks like
+// cleartext SIP or RTP content. Used to guard ESP-NULL decapsulation from false-positives
+// on genuinely encrypted ESP traffic, whose payload bytes appear random.
+func mightBeSIPorRTP(payload []byte) bool {
+	if len(payload) == 0 {
+		return false
+	}
+
+	// SIP is a text protocol. Every SIP message starts with a method name or "SIP/2.0".
+	for _, prefix := range [][]byte{
+		[]byte("SIP/2.0"), []byte("INVITE "), []byte("BYE "), []byte("ACK "),
+		[]byte("REGISTER"), []byte("OPTIONS "), []byte("SUBSCRIBE"),
+		[]byte("NOTIFY "), []byte("CANCEL "), []byte("PRACK "),
+		[]byte("INFO "), []byte("REFER "), []byte("MESSAGE "),
+		[]byte("UPDATE "), []byte("PUBLISH "),
+	} {
+		if bytes.HasPrefix(payload, prefix) {
+			return true
+		}
+	}
+
+	// RTP (RFC 3550): version field occupies the top 2 bits of the first byte
+	// and must be 2. Minimum RTP header is 12 bytes.
+	if len(payload) >= 12 && (payload[0]>>6) == 2 {
+		return true
+	}
+
+	return false
 }

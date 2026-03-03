@@ -184,7 +184,12 @@ func (p *Processor) Process(packet gopacket.Packet) *ProcessResult {
 		return p.processUDP(packet, udp)
 	}
 
-	// TODO: Add TCP SIP support in future
+	// TCP SIP: handles packets decapsulated from ESP-NULL transport mode (IMS/VoLTE).
+	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		tcp := tcpLayer.(*layers.TCP)
+		return p.processTCP(packet, tcp)
+	}
+
 	return nil
 }
 
@@ -203,6 +208,12 @@ func (p *Processor) processUDP(packet gopacket.Packet, udp *layers.UDP) *Process
 	}
 
 	return nil
+}
+
+// processTCP processes a TCP packet for SIP content.
+// TCP SIP is used in IMS/VoLTE networks where SIP runs over TCP inside ESP-NULL tunnels.
+func (p *Processor) processTCP(packet gopacket.Packet, tcp *layers.TCP) *ProcessResult {
+	return p.detectSIP(packet, nil, tcp.Payload)
 }
 
 // ActiveCalls returns information about currently tracked calls.

@@ -29,9 +29,10 @@ func (r *RTPSignature) Layer() signatures.LayerType {
 }
 
 func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
-	// RTP requires minimum 12 bytes for header + some payload
-	// Require at least 16 bytes to reduce false positives
-	if len(ctx.Payload) < 16 {
+	// RTCP packets can be as small as 8 bytes; RTP requires at least 16 bytes.
+	// Use 8 as the common minimum and enforce the 16-byte floor for RTP only after
+	// the RTCP early-exit path below.
+	if len(ctx.Payload) < 8 {
 		return nil
 	}
 
@@ -52,9 +53,22 @@ func (r *RTPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 		return nil
 	}
 
-	// Check RTP version (must be 2)
+	// Check RTP/RTCP version (must be 2)
 	version := (ctx.Payload[0] >> 6) & 0x03
 	if version != 2 {
+		return nil
+	}
+
+	// Early RTCP detection: RTCP reuses the RTP version field (must be 2) but uses
+	// packet types 200-213 in the second byte WITHOUT a marker bit mask (unlike RTP).
+	// This check must come BEFORE the 16-byte RTP minimum, since RTCP packets can
+	// be as small as 8 bytes (e.g. RTCP BYE with no source descriptions).
+	if ctx.Payload[1] >= 200 && ctx.Payload[1] <= 213 {
+		return r.detectRTCP(ctx)
+	}
+
+	// RTP requires minimum 16 bytes to reduce false positives
+	if len(ctx.Payload) < 16 {
 		return nil
 	}
 
@@ -441,6 +455,40 @@ func isWellKnownTCPPort(port uint16) bool {
 		27017: true, // MongoDB
 	}
 	return wellKnownPorts[port]
+}
+
+// detectRTCP handles RTCP packets (packet types 200-213 per RFC 3550).
+// RTCP shares the RTP version field but uses a distinct packet type namespace
+// that the generic RTP payload-type validator would otherwise reject.
+func (r *RTPSignature) detectRTCP(ctx *signatures.DetectionContext) *signatures.DetectionResult {
+	if len(ctx.Payload) < 8 {
+		return nil
+	}
+
+	// RTCP header: version(2)|padding(1)|count(5)|PT(8)|length(16)|SSRC(32)
+	// length field = (total_bytes - 4) / 4. Validate the packet length.
+	declaredWords := int(uint16(ctx.Payload[2])<<8|uint16(ctx.Payload[3])) + 1
+	if declaredWords < 2 || len(ctx.Payload) < declaredWords*4 {
+		return nil
+	}
+
+	ssrc := uint32(ctx.Payload[4])<<24 | uint32(ctx.Payload[5])<<16 | uint32(ctx.Payload[6])<<8 | uint32(ctx.Payload[7])
+	if ssrc == 0 || ssrc == 0xFFFFFFFF {
+		return nil
+	}
+
+	metadata := map[string]interface{}{
+		"ssrc":    ssrc,
+		"is_rtcp": true,
+		"pt":      ctx.Payload[1],
+	}
+
+	return &signatures.DetectionResult{
+		Protocol:    "RTP",
+		Confidence:  signatures.ConfidenceMedium,
+		Metadata:    metadata,
+		ShouldCache: true,
+	}
 }
 
 // isWellKnownUDPPort checks if a port is a well-known UDP service port

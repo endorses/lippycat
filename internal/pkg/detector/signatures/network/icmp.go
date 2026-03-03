@@ -32,6 +32,13 @@ func (i *ICMPSignature) Layer() signatures.LayerType {
 }
 
 func (i *ICMPSignature) Detect(ctx *signatures.DetectionContext) *signatures.DetectionResult {
+	// ICMP is a network-layer protocol - it is not carried over TCP/UDP/SCTP.
+	// If a transport layer is present (e.g. outer UDP of a VXLAN tunnel), skip detection
+	// to avoid false positives from tunnel headers that happen to match ICMP type bytes.
+	if ctx.Transport == "TCP" || ctx.Transport == "UDP" || ctx.Transport == "SCTP" {
+		return nil
+	}
+
 	// ICMP requires minimum 8 bytes (type + code + checksum + rest of header)
 	if len(ctx.Payload) < 8 {
 		return nil

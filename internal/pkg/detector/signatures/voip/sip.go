@@ -85,17 +85,21 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 						sipState.CallID = callID
 					}
 
-					// Add new media ports (avoid duplicates)
+					// Add new media ports (avoid duplicates).
+					// Also register RTCP port (RTP+1) per RFC 3550 so RTCP packets
+					// can be correlated even without an explicit a=rtcp: SDP attribute.
 					for _, port := range sdpInfo.MediaPorts {
-						found := false
-						for _, existing := range sipState.MediaPorts {
-							if existing == port {
-								found = true
-								break
+						for _, candidate := range []uint16{port, port + 1} {
+							found := false
+							for _, existing := range sipState.MediaPorts {
+								if existing == candidate {
+									found = true
+									break
+								}
 							}
-						}
-						if !found {
-							sipState.MediaPorts = append(sipState.MediaPorts, port)
+							if !found {
+								sipState.MediaPorts = append(sipState.MediaPorts, candidate)
+							}
 						}
 					}
 

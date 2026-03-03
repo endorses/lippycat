@@ -194,7 +194,9 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 		registerEndpoint(endpoint, "merge")
 	}
 
-	// Then register the new SDP endpoints
+	// Then register the new SDP endpoints.
+	// Also register RTCP port (RTP+1) per RFC 3550 convention so RTCP
+	// packets can be correlated without an explicit a=rtcp: SDP attribute.
 	reqResp := "req"
 	if isResponse {
 		reqResp = "rsp"
@@ -202,6 +204,8 @@ func (t *CallTracker) RegisterMediaPorts(callID, rtpIP string, ports []uint16, i
 	for _, port := range ports {
 		endpoint := fmt.Sprintf("%s:%d", rtpIP, port)
 		registerEndpoint(endpoint, reqResp)
+		rtcpEndpoint := fmt.Sprintf("%s:%d", rtpIP, port+1)
+		registerEndpoint(rtcpEndpoint, reqResp+"-rtcp")
 	}
 
 	return syntheticCallID

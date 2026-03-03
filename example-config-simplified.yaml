@@ -1,102 +1,101 @@
-# Simplified VoIP Configuration for lippycat
-# Reduces complexity from 25+ parameters to 8 essential settings
+# Simplified lippycat Configuration
+# For users who want a quick setup without diving into 180+ options.
+# See example-config.yaml for the full reference.
 
-# ========================================
-# CAPTURE CONFIGURATION
-# ========================================
+# ============================================================================
+# QUICK START - Uncomment the section matching your deployment
+# ============================================================================
 
-# pcap_timeout_ms: 200  # PCAP read timeout in ms (default: 200, range: 50-1000)
+# --- Option 1: Standalone VoIP Capture (most common) ---
+# tap:
+#   interfaces: ["eth0"]
+#   insecure: true               # Use --tls-cert/--tls-key in production
+#   per_call_pcap:
+#     enabled: true
+#     output_dir: ./pcaps
 
-# ========================================
-# VIRTUAL INTERFACE CONFIGURATION
-# ========================================
+# --- Option 2: Distributed (Hunter → Processor) ---
+# hunter:
+#   processor_addr: "processor.local:55555"
+#   interfaces: ["eth0"]
+#   tls:
+#     ca_file: /path/to/ca.crt
+#
+# processor:
+#   listen_addr: ":55555"
+#   tls:
+#     cert_file: /path/to/server.crt
+#     key_file: /path/to/server.key
 
-# Virtual Interface (for sniff and process commands)
-# virtual_interface:
-#   enabled: false         # Enable virtual network interface for packet injection
-#   name: "lc0"           # Interface name (default: lc0)
-#   type: "tap"           # Interface type: tap (Layer 2) or tun (Layer 3)
-#   buffer_size: 4096     # Injection queue buffer size (packets)
-
-# ========================================
-# SIMPLIFIED TCP CONFIGURATION (8 parameters)
-# ========================================
+# ============================================================================
+# SIMPLIFIED VoIP TCP CONFIGURATION
+# ============================================================================
+# The simplified config system maps 8 settings to 25+ detailed parameters.
+# Use performance_profile to auto-configure most VoIP TCP settings.
 
 voip:
-  # Core Performance Profile - automatically sets 17+ detailed parameters
-  # Options: "minimal", "balanced", "high_performance", "low_latency"
+  # Performance Profile - automatically tunes 17+ parameters
+  # Options: "balanced" (default), "throughput", "latency", "memory"
+  #
+  # "balanced"         - 100MB memory, adaptive buffering, auto-tuning (recommended)
+  # "throughput"       - 500MB memory, ring buffers, 2x CPU threads
+  # "latency"          - 200MB memory, batch=1, aggressive cleanup
+  # "memory"           - 50MB memory, fixed buffers, memory optimization on
   performance_profile: "balanced"
 
   # Essential Resource Limits
-  max_memory_mb: 100        # Total memory limit in MB (10-2048)
-  max_active_streams: 1000  # Maximum concurrent TCP streams (10-50000)
-  stream_timeout: "5m"      # Stream processing timeout (30s-1h)
+  max_memory_mb: 100              # Total memory limit in MB (10-2048)
+  max_active_streams: 1000        # Maximum concurrent TCP streams (10-50000)
+  stream_timeout: "5m"            # Stream processing timeout (30s-1h)
 
   # Core Processing Settings
-  worker_threads: 0         # Worker threads (0=auto-detect CPU cores, max=4*CPU)
-  enable_metrics: true      # Enable performance metrics collection
+  worker_threads: 0               # Worker threads (0=auto-detect from CPU cores)
+  enable_metrics: true            # Enable performance metrics collection
 
-  # Advanced Settings (optional)
-  custom_buffer_size: 0     # Custom batch size (0=auto-calculate)
-  debug_mode: false         # Enable detailed debug logging
+  # Advanced (optional)
+  custom_buffer_size: 0           # Custom batch size (0=auto-calculate from profile)
+  debug_mode: false               # Enable detailed debug logging
 
-# ========================================
-# WHAT EACH PROFILE AUTOMATICALLY CONFIGURES
-# ========================================
+# ============================================================================
+# WHAT EACH PROFILE CONFIGURES
+# ============================================================================
 
-# "minimal" profile (for resource-constrained environments):
-#   - 25MB memory limit, 500 max buffers, memory optimization enabled
-#   - Fixed buffer strategy, 1 I/O thread, minimal cleanup intervals
-#   - Auto-configures 17 detailed parameters
+# "balanced" (recommended default):
+#   tcp_performance_mode: balanced, tcp_buffer_strategy: adaptive
+#   100MB memory limit, 10000 max buffers, auto-tuning enabled
+#   CPU-aware threading, backpressure enabled, balanced timeouts
 
-# "balanced" profile (recommended default):
-#   - 100MB memory limit, 5000 max buffers, adaptive strategy
-#   - CPU-aware threading, auto-tuning enabled, balanced timeouts
-#   - Auto-configures 19 detailed parameters
+# "throughput" (high-volume environments):
+#   tcp_performance_mode: throughput, tcp_buffer_strategy: ring
+#   500MB memory limit, 20000 max buffers, 2x CPU threads
+#   Backpressure disabled, no compression, larger batches
 
-# "high_performance" profile (for high-volume environments):
-#   - 500MB memory limit, 20000 max buffers, ring buffer strategy
-#   - 2x CPU threads, backpressure disabled, no compression
-#   - Auto-configures 19 detailed parameters
+# "latency" (real-time processing):
+#   tcp_performance_mode: latency, tcp_buffer_strategy: fixed
+#   200MB memory limit, batch=1 (immediate processing)
+#   Auto-tuning disabled, aggressive cleanup intervals
 
-# "low_latency" profile (for real-time processing):
-#   - 200MB memory limit, immediate processing (batch=1)
-#   - Fixed strategy, auto-tuning disabled, aggressive cleanup
-#   - Auto-configures 18 detailed parameters
+# "memory" (resource-constrained):
+#   tcp_performance_mode: memory, tcp_buffer_strategy: adaptive
+#   50MB memory limit, 500 max buffers, memory optimization on
+#   1 I/O thread, minimal goroutines, smaller pool sizes
 
-# ========================================
-# MIGRATION FROM OLD CONFIG
-# ========================================
+# ============================================================================
+# MIGRATION FROM DETAILED CONFIG
+# ============================================================================
 
-# OLD (25+ parameters):
-# voip:
-#   tcp_performance_mode: "balanced"
-#   tcp_batch_size: 32
-#   max_tcp_buffers: 5000
-#   tcp_buffer_strategy: "adaptive"
-#   tcp_memory_limit: 104857600
-#   stream_queue_buffer: 250
-#   tcp_stream_max_queue_time: "2m"
-#   tcp_buffer_max_age: "5m"
-#   tcp_cleanup_interval: "1m"
-#   memory_optimization: false
-#   enable_auto_tuning: true
-#   tcp_stream_timeout: "5m"
-#   tcp_assembler_max_pages: 100
-#   enable_backpressure: true
-#   tcp_buffer_pool_size: 1000
-#   tcp_io_threads: 8
-#   tcp_compression_level: 1
-#   tcp_latency_optimization: false
-#   # ... plus 7 more parameters
-
-# NEW (8 parameters):
-# voip:
-#   performance_profile: "balanced"  # Automatically sets all the above!
-#   max_memory_mb: 100
-#   max_active_streams: 1000
-#   stream_timeout: "5m"
-#   worker_threads: 8
-#   enable_metrics: true
-#   custom_buffer_size: 0
-#   debug_mode: false
+# If you previously used the detailed voip config (tcp_performance_mode,
+# tcp_batch_size, max_tcp_buffers, etc.), you can switch to this simplified
+# format. The performance_profile maps to all those parameters automatically.
+#
+# OLD (25+ parameters):              NEW (8 parameters):
+# voip:                              voip:
+#   tcp_performance_mode: balanced     performance_profile: balanced
+#   tcp_batch_size: 32                 max_memory_mb: 100
+#   max_tcp_buffers: 5000              max_active_streams: 1000
+#   tcp_buffer_strategy: adaptive      stream_timeout: "5m"
+#   tcp_memory_limit: 104857600        worker_threads: 8
+#   tcp_stream_timeout: 5m             enable_metrics: true
+#   tcp_io_threads: 8                  custom_buffer_size: 0
+#   enable_auto_tuning: true           debug_mode: false
+#   ... (17 more parameters)

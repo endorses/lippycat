@@ -482,8 +482,26 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 		newPacket.Metadata().CaptureLength = packet.Metadata().CaptureLength
 		newPacket.Metadata().Length = packet.Metadata().Length
 
+		// Handle VXLAN decapsulation - extract the inner Ethernet frame so all
+		// downstream processing (SIP detection, RTP correlation, etc.) sees the
+		// real traffic rather than the VXLAN tunnel wrapper.
+		effectiveLinkType := linkType
+		if inner, ok := decapsulateVXLAN(newPacket); ok {
+			newPacket = inner
+			effectiveLinkType = layers.LinkTypeEthernet
+		}
+
+		// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
+		// mode provides integrity without encryption. Must run after VXLAN
+		// decapsulation so it sees the inner packets from VXLAN tunnels.
+		if inner, ok := decapsulateESPNull(newPacket); ok {
+			newPacket = inner
+		} else if inner, ok := decapsulateIPv6FragmentESP(newPacket); ok {
+			newPacket = inner
+		}
+
 		packets = append(packets, PacketInfo{
-			LinkType:  linkType,
+			LinkType:  effectiveLinkType,
 			Packet:    newPacket,
 			Interface: ifaceName,
 		})

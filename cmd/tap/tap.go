@@ -159,6 +159,10 @@ var (
 
 	// TLS keylog (for decryption support)
 	tlsKeylogDir string
+
+	// ESP-NULL decapsulation flags
+	espNull    bool
+	espICVSize int
 )
 
 func init() {
@@ -172,6 +176,10 @@ func init() {
 	TapCmd.PersistentFlags().IntVarP(&bufferSize, "buffer-size", "b", 10000, "Packet buffer size")
 	TapCmd.PersistentFlags().IntVar(&batchSize, "batch-size", 100, "Packets per batch")
 	TapCmd.PersistentFlags().IntVar(&batchTimeout, "batch-timeout", 100, "Batch timeout in milliseconds")
+
+	// ESP-NULL Decapsulation (persistent for voip subcommand)
+	TapCmd.PersistentFlags().BoolVar(&espNull, "esp-null", false, "Assume all ESP traffic is NULL-encrypted (skip content heuristics)")
+	TapCmd.PersistentFlags().IntVar(&espICVSize, "esp-icv-size", -1, "ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires --esp-null")
 
 	// ============================================================
 	// Management Interface Configuration (persistent for voip subcommand)
@@ -272,6 +280,10 @@ func init() {
 	_ = viper.BindPFlag("tap.buffer_size", TapCmd.PersistentFlags().Lookup("buffer-size"))
 	_ = viper.BindPFlag("tap.batch_size", TapCmd.PersistentFlags().Lookup("batch-size"))
 	_ = viper.BindPFlag("tap.batch_timeout_ms", TapCmd.PersistentFlags().Lookup("batch-timeout"))
+
+	// ESP-NULL decapsulation
+	_ = viper.BindPFlag("esp_null", TapCmd.PersistentFlags().Lookup("esp-null"))
+	_ = viper.BindPFlag("esp_icv_size", TapCmd.PersistentFlags().Lookup("esp-icv-size"))
 
 	// Management interface
 	_ = viper.BindPFlag("tap.listen_addr", TapCmd.PersistentFlags().Lookup("listen"))

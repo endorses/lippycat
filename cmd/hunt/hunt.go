@@ -70,6 +70,10 @@ var (
 	insecureAllowed bool
 	// Filter policy
 	noFilterPolicy string
+
+	// ESP-NULL decapsulation flags
+	espNull    bool
+	espICVSize int
 )
 
 func init() {
@@ -110,6 +114,10 @@ func init() {
 	HuntCmd.PersistentFlags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (INSECURE - testing only)")
 	HuntCmd.PersistentFlags().BoolVar(&insecureAllowed, "insecure", false, "Allow insecure connections without TLS (must be explicitly set)")
 
+	// ESP-NULL Decapsulation (persistent for voip subcommand)
+	HuntCmd.PersistentFlags().BoolVar(&espNull, "esp-null", false, "Assume all ESP traffic is NULL-encrypted (skip content heuristics)")
+	HuntCmd.PersistentFlags().IntVar(&espICVSize, "esp-icv-size", -1, "ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires --esp-null")
+
 	// Filter policy configuration
 	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
 
@@ -137,6 +145,10 @@ func init() {
 	_ = viper.BindPFlag("hunter.tls.skip_verify", HuntCmd.PersistentFlags().Lookup("tls-skip-verify"))
 	_ = viper.BindPFlag("hunter.insecure", HuntCmd.PersistentFlags().Lookup("insecure"))
 	_ = viper.BindPFlag("hunter.no_filter_policy", HuntCmd.PersistentFlags().Lookup("no-filter-policy"))
+
+	// ESP-NULL decapsulation
+	_ = viper.BindPFlag("esp_null", HuntCmd.PersistentFlags().Lookup("esp-null"))
+	_ = viper.BindPFlag("esp_icv_size", HuntCmd.PersistentFlags().Lookup("esp-icv-size"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {

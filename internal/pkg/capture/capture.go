@@ -53,8 +53,46 @@ type ipv6FragInfo struct {
 // that was extracted from the corresponding first fragment.
 var ipv6FragIDCache sync.Map // key: uint32 fragID, value: ipv6FragInfo
 
+// espNullConfig caches the --esp-null and --esp-icv-size configuration.
+// Initialized once on first use via sync.Once to avoid per-packet Viper reads.
+var (
+	espNullConfigOnce sync.Once
+	espNullEnabled    bool // true when --esp-null flag is set
+	espFixedICVSize   int  // -1 = auto-detect, >=0 = fixed ICV size in bytes
+)
+
 // Default SIP priority buffer size (SIP is low volume, doesn't need large buffer)
 const DefaultSIPBufferSize = 1000
+
+// getESPNullConfig returns the cached ESP-NULL configuration, initializing it
+// from Viper on first call. This avoids per-packet Viper reads.
+func getESPNullConfig() (enabled bool, icvSize int) {
+	espNullConfigOnce.Do(func() {
+		espNullEnabled = viper.GetBool("esp_null")
+		if viper.IsSet("esp_icv_size") {
+			espFixedICVSize = viper.GetInt("esp_icv_size")
+		} else {
+			espFixedICVSize = -1 // auto-detect
+		}
+		// Validate ICV size.
+		validICVSizes := map[int]bool{-1: true, 0: true, 8: true, 12: true, 16: true}
+		if !validICVSizes[espFixedICVSize] {
+			logger.Error("Invalid --esp-icv-size value, using auto-detect",
+				"value", espFixedICVSize,
+				"valid", "0, 8, 12, 16 (or -1 for auto)")
+			espFixedICVSize = -1
+		}
+		// Warn if --esp-icv-size is set without --esp-null.
+		if !espNullEnabled && espFixedICVSize >= 0 {
+			logger.Warn("--esp-icv-size has no effect without --esp-null")
+		}
+		if espNullEnabled {
+			logger.Info("ESP-NULL explicit mode enabled",
+				"icv_size", espFixedICVSize)
+		}
+	})
+	return espNullEnabled, espFixedICVSize
+}
 
 type PacketBuffer struct {
 	ch         chan PacketInfo
@@ -1008,11 +1046,16 @@ func decapsulateVXLAN(packet gopacket.Packet) (gopacket.Packet, bool) {
 //     (proto, innerLen, true).
 //
 // Returns (0, 0, false) if no candidate matches.
-func tryESPTrailerValidation(espPayload []byte) (layers.IPProtocol, int, bool) {
+func tryESPTrailerValidation(espPayload []byte, fixedICVSize int) (layers.IPProtocol, int, bool) {
 	// Common ICV (Integrity Check Value) sizes to try, in order of likelihood.
 	// HMAC-SHA1-96 → 12 bytes (most common in IMS/VoLTE).
 	// HMAC-SHA256-128 → 16 bytes. HMAC-MD5-96 → 8 bytes. NULL auth → 0 bytes.
-	icvSizes := []int{12, 16, 8, 0}
+	var icvSizes []int
+	if fixedICVSize >= 0 {
+		icvSizes = []int{fixedICVSize}
+	} else {
+		icvSizes = []int{12, 16, 8, 0}
+	}
 
 	for _, icvSize := range icvSizes {
 		// Need at least: 1 byte next_hdr + 1 byte pad_len + ICV + some inner header.
@@ -1123,41 +1166,49 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 	var innerProto layers.IPProtocol
 	var innerLen int
 
-	// Try UDP first: bytes 4-5 of the UDP header carry the total UDP length.
-	if len(espPayload) >= 10 {
-		udpLen := int(binary.BigEndian.Uint16(espPayload[4:6]))
-		// UDP length must include the 8-byte header and fit within the ESP payload,
-		// leaving at least 2 bytes for the ESP trailer (pad_len + next_header).
-		if udpLen >= 8 && udpLen <= len(espPayload)-2 {
-			udpPayload := espPayload[8:udpLen]
-			if mightBeSIPorRTP(udpPayload) {
-				innerProto = layers.IPProtocolUDP
-				innerLen = udpLen
+	// Check if explicit ESP-NULL mode is enabled (--esp-null flag).
+	espNull, icvSize := getESPNullConfig()
+
+	if !espNull {
+		// Default heuristic path: try content detection first.
+
+		// Try UDP first: bytes 4-5 of the UDP header carry the total UDP length.
+		if len(espPayload) >= 10 {
+			udpLen := int(binary.BigEndian.Uint16(espPayload[4:6]))
+			// UDP length must include the 8-byte header and fit within the ESP payload,
+			// leaving at least 2 bytes for the ESP trailer (pad_len + next_header).
+			if udpLen >= 8 && udpLen <= len(espPayload)-2 {
+				udpPayload := espPayload[8:udpLen]
+				if mightBeSIPorRTP(udpPayload) {
+					innerProto = layers.IPProtocolUDP
+					innerLen = udpLen
+				}
 			}
 		}
-	}
 
-	// Try TCP if UDP did not match.
-	// The TCP data offset nibble (high 4 bits of byte 12) gives the TCP header length
-	// in 32-bit words; valid range is 5..15 (20..60 bytes).
-	if innerProto == 0 && len(espPayload) >= 20 {
-		tcpDataOff := int(espPayload[12] >> 4)
-		if tcpDataOff >= 5 && tcpDataOff <= 15 {
-			tcpHeaderLen := tcpDataOff * 4
-			if tcpHeaderLen <= len(espPayload) {
-				tcpPayload := espPayload[tcpHeaderLen:]
-				if mightBeSIPorRTP(tcpPayload) {
-					innerProto = layers.IPProtocolTCP
-					// Use the full espPayload length; any trailing ICV bytes fall past
-					// the SIP double-CRLF body terminator and do not affect SIP parsing.
-					innerLen = len(espPayload)
+		// Try TCP if UDP did not match.
+		// The TCP data offset nibble (high 4 bits of byte 12) gives the TCP header length
+		// in 32-bit words; valid range is 5..15 (20..60 bytes).
+		if innerProto == 0 && len(espPayload) >= 20 {
+			tcpDataOff := int(espPayload[12] >> 4)
+			if tcpDataOff >= 5 && tcpDataOff <= 15 {
+				tcpHeaderLen := tcpDataOff * 4
+				if tcpHeaderLen <= len(espPayload) {
+					tcpPayload := espPayload[tcpHeaderLen:]
+					if mightBeSIPorRTP(tcpPayload) {
+						innerProto = layers.IPProtocolTCP
+						// Use the full espPayload length; any trailing ICV bytes fall past
+						// the SIP double-CRLF body terminator and do not affect SIP parsing.
+						innerLen = len(espPayload)
+					}
 				}
 			}
 		}
 	}
 
-	// If content heuristics did not match, check the SPI cache. A previously confirmed
-	// NULL SPI means this is a continuation segment (e.g., TCP SDP body without SIP header).
+	// If content heuristics did not match (or were skipped in explicit mode),
+	// check the SPI cache. A previously confirmed NULL SPI means this is a
+	// continuation segment (e.g., TCP SDP body without SIP header).
 	// A single SA can carry both UDP and TCP flows, so when the cached protocol fails we
 	// also try the alternative protocol before giving up.
 	if innerProto == 0 {
@@ -1196,11 +1247,12 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 		}
 	}
 
-	// Final fallback: use the ESP trailer (pad bytes, pad_len, next_hdr) to identify
-	// the inner protocol. This handles TCP handshake packets (SYN/SYN-ACK/ACK) that
+	// Trailer validation: use the ESP trailer (pad bytes, pad_len, next_hdr) to identify
+	// the inner protocol. In explicit mode (--esp-null), this is the primary detection path.
+	// In heuristic mode, this handles TCP handshake packets (SYN/SYN-ACK/ACK) that
 	// carry no SIP/RTP payload, so the content heuristics above always fail.
 	if innerProto == 0 {
-		if proto, length, ok := tryESPTrailerValidation(espPayload); ok {
+		if proto, length, ok := tryESPTrailerValidation(espPayload, icvSize); ok {
 			innerProto = proto
 			innerLen = length
 		}
@@ -1350,38 +1402,26 @@ func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) 
 	// fragment so that the gopacket decoder can parse the resulting packet correctly.
 	var syntheticTransport []byte
 
+	// Check if explicit ESP-NULL mode is enabled (--esp-null flag).
+	espNull, icvSize := getESPNullConfig()
+
 	if frag.FragmentOffset == 0 {
-		// First fragment: the inner transport header is present.
-		// Try UDP. The UDP length field may exceed the fragment size when
-		// the payload spans multiple IPv6 fragments, so we cap at espInner length.
-		if len(espInner) >= 10 {
-			udpLen := int(binary.BigEndian.Uint16(espInner[4:6]))
-			// Cap: use whatever bytes are available in this fragment.
-			actualLen := min(udpLen, len(espInner))
-			if udpLen >= 8 && actualLen >= 8 {
-				udpPayload := espInner[8:actualLen]
-				if mightBeSIPorRTP(udpPayload) {
-					innerProto = layers.IPProtocolUDP
-					innerLen = actualLen
-					// Store transport port info for non-first fragment reconstruction.
-					ipv6FragIDCache.Store(frag.Identification, ipv6FragInfo{
-						innerProto: innerProto,
-						srcPort:    binary.BigEndian.Uint16(espInner[0:2]),
-						dstPort:    binary.BigEndian.Uint16(espInner[2:4]),
-					})
-				}
-			}
-		}
-		// Try TCP if UDP did not match.
-		if innerProto == 0 && len(espInner) >= 20 {
-			tcpDataOff := int(espInner[12] >> 4)
-			if tcpDataOff >= 5 && tcpDataOff <= 15 {
-				tcpHeaderLen := tcpDataOff * 4
-				if tcpHeaderLen <= len(espInner) {
-					tcpPayload := espInner[tcpHeaderLen:]
-					if mightBeSIPorRTP(tcpPayload) {
-						innerProto = layers.IPProtocolTCP
-						innerLen = len(espInner)
+		if !espNull {
+			// Default heuristic path: try content detection first.
+
+			// First fragment: the inner transport header is present.
+			// Try UDP. The UDP length field may exceed the fragment size when
+			// the payload spans multiple IPv6 fragments, so we cap at espInner length.
+			if len(espInner) >= 10 {
+				udpLen := int(binary.BigEndian.Uint16(espInner[4:6]))
+				// Cap: use whatever bytes are available in this fragment.
+				actualLen := min(udpLen, len(espInner))
+				if udpLen >= 8 && actualLen >= 8 {
+					udpPayload := espInner[8:actualLen]
+					if mightBeSIPorRTP(udpPayload) {
+						innerProto = layers.IPProtocolUDP
+						innerLen = actualLen
+						// Store transport port info for non-first fragment reconstruction.
 						ipv6FragIDCache.Store(frag.Identification, ipv6FragInfo{
 							innerProto: innerProto,
 							srcPort:    binary.BigEndian.Uint16(espInner[0:2]),
@@ -1390,7 +1430,43 @@ func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) 
 					}
 				}
 			}
+			// Try TCP if UDP did not match.
+			if innerProto == 0 && len(espInner) >= 20 {
+				tcpDataOff := int(espInner[12] >> 4)
+				if tcpDataOff >= 5 && tcpDataOff <= 15 {
+					tcpHeaderLen := tcpDataOff * 4
+					if tcpHeaderLen <= len(espInner) {
+						tcpPayload := espInner[tcpHeaderLen:]
+						if mightBeSIPorRTP(tcpPayload) {
+							innerProto = layers.IPProtocolTCP
+							innerLen = len(espInner)
+							ipv6FragIDCache.Store(frag.Identification, ipv6FragInfo{
+								innerProto: innerProto,
+								srcPort:    binary.BigEndian.Uint16(espInner[0:2]),
+								dstPort:    binary.BigEndian.Uint16(espInner[2:4]),
+							})
+						}
+					}
+				}
+			}
 		}
+
+		// Trailer validation: primary path in explicit mode, fallback in heuristic mode.
+		if innerProto == 0 {
+			if proto, length, ok := tryESPTrailerValidation(espInner, icvSize); ok {
+				innerProto = proto
+				innerLen = length
+				// Store transport port info for non-first fragment reconstruction.
+				if len(espInner) >= 4 {
+					ipv6FragIDCache.Store(frag.Identification, ipv6FragInfo{
+						innerProto: innerProto,
+						srcPort:    binary.BigEndian.Uint16(espInner[0:2]),
+						dstPort:    binary.BigEndian.Uint16(espInner[2:4]),
+					})
+				}
+			}
+		}
+
 		if innerProto != 0 {
 			espNullSPICache.Store(spi, innerProto)
 		}

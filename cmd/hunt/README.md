@@ -40,6 +40,8 @@ Captures all packets (or BPF-filtered packets) and forwards to processor.
 - `-i, --interface` - Network interfaces to capture (comma-separated, default: any)
 - `-f, --filter` - BPF filter expression
 - `-p, --promisc` - Enable promiscuous mode
+- `--esp-null` - Assume all ESP traffic is NULL-encrypted (skip content heuristics)
+- `--esp-icv-size` - ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires `--esp-null`
 
 **Performance Tuning:**
 - `-b, --buffer-size` - Packet buffer size (default: 10000)

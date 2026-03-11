@@ -24,6 +24,8 @@ lc sniff -i eth0 --format text
 - `-r, --read-file` - Read from PCAP file instead of live capture
 - `--format` - Output format: `json` (default), `text`
 - `-q, --quiet` - Quiet mode - don't print packets (only statistics to stderr)
+- `--esp-null` - Assume all ESP traffic is NULL-encrypted (skip content heuristics)
+- `--esp-icv-size` - ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires `--esp-null`
 
 ## Output Formats
 

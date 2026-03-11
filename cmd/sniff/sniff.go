@@ -26,6 +26,10 @@ var (
 	quiet       bool
 	format      string
 
+	// ESP-NULL decapsulation flags
+	espNull    bool
+	espICVSize int
+
 	// Virtual interface flags
 	virtualInterface     bool
 	virtualInterfaceName string
@@ -90,6 +94,10 @@ func init() {
 	SniffCmd.PersistentFlags().StringVar(&format, "format", "json", "output format: json, text")
 	SniffCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "write to pcap file")
 
+	// ESP-NULL Decapsulation Flags (inherited by voip subcommand)
+	SniffCmd.PersistentFlags().BoolVar(&espNull, "esp-null", false, "Assume all ESP traffic is NULL-encrypted (skip content heuristics)")
+	SniffCmd.PersistentFlags().IntVar(&espICVSize, "esp-icv-size", -1, "ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires --esp-null")
+
 	// Virtual Interface Flags (inherited by voip subcommand)
 	SniffCmd.PersistentFlags().BoolVarP(&virtualInterface, "virtual-interface", "V", false, "Enable virtual network interface for packet injection")
 	SniffCmd.PersistentFlags().StringVar(&virtualInterfaceName, "vif-name", "lc0", "Virtual interface name (default: lc0)")
@@ -103,6 +111,10 @@ func init() {
 	_ = viper.BindPFlag("promiscuous", SniffCmd.PersistentFlags().Lookup("promiscuous"))
 	_ = viper.BindPFlag("sniff.quiet", SniffCmd.PersistentFlags().Lookup("quiet"))
 	_ = viper.BindPFlag("sniff.format", SniffCmd.PersistentFlags().Lookup("format"))
+
+	// Bind ESP-NULL flags to viper
+	_ = viper.BindPFlag("esp_null", SniffCmd.PersistentFlags().Lookup("esp-null"))
+	_ = viper.BindPFlag("esp_icv_size", SniffCmd.PersistentFlags().Lookup("esp-icv-size"))
 
 	// Bind virtual interface flags to viper
 	_ = viper.BindPFlag("sniff.virtual_interface", SniffCmd.PersistentFlags().Lookup("virtual-interface"))

@@ -8,13 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.3] - 2026-03-11
 
 ### Added
-- Security fixes and VoIP classification improvements
-
-### Changed
-- TODO: Add detailed changelog entries
+- **ESP-NULL capture support**: `--esp-null` and `--esp-icv-size` flags for explicit ESP-NULL mode
+- **TUI call navigation**: Call list/details navigation with focus management
 
 ### Fixed
-- TODO: Add fixed items
+- VoIP: Classify TCP teardowns on known SIP IP pairs with DSCP EF guard
+- TUI: Classify ESP-NULL TCP handshakes and high-port RTP packets
+- TUI: Classify VoIP protocols in misclassified packet edge cases
+- TUI: Race recovery for RTP/SIP call correlation
+- CI: Bump Go to 1.25.8 to resolve stdlib vulnerabilities (GO-2026-4602, GO-2026-4601)
 
 ## [0.9.2] - 2026-02-03
 

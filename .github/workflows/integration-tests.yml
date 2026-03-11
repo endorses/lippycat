@@ -37,7 +37,8 @@ jobs:
           go test -v -race -tags=all -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
+        continue-on-error: true
         with:
           file: ./coverage.txt
           flags: unittests

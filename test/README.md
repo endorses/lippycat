@@ -125,7 +125,7 @@ go test -v ./test/... -run TestIntegration -timeout 5m
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.25 or later
 - Network access (for gRPC tests)
 - Available ports: 55555-50057 (used by test processors)
 

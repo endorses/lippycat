@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li manual manual-serve manual-clean
 
 # Build variables
 BINARY_NAME=lc
@@ -239,6 +239,23 @@ clean-cuda:
 	cd $(CUDA_DIR) && $(MAKE) -f Makefile.cuda clean
 	rm -f $(CUDA_BINARY_NAME)
 
+# mdBook binary (check PATH, then ~/.cargo/bin)
+MDBOOK := $(shell which mdbook 2>/dev/null || echo $(HOME)/.cargo/bin/mdbook)
+
+# Build user manual (requires mdbook)
+manual:
+	@echo "Building user manual..."
+	$(MDBOOK) build docs/manual
+
+# Serve user manual with live reload
+manual-serve:
+	@echo "Serving user manual at http://localhost:3000..."
+	$(MDBOOK) serve docs/manual
+
+# Clean manual build output
+manual-clean:
+	rm -rf docs/manual/book
+
 # Help
 help:
 	@echo "lippycat Makefile - Current version: $(VERSION)"
@@ -289,6 +306,11 @@ help:
 	@echo "  2. Run realistic workload with profiling"
 	@echo "  3. make pgo-prepare    - Convert profile to PGO format"
 	@echo "  4. make build-pgo      - Build optimized binary"
+	@echo ""
+	@echo "Documentation:"
+	@echo "  make manual         - Build user manual (requires mdbook)"
+	@echo "  make manual-serve   - Serve manual with live reload"
+	@echo "  make manual-clean   - Clean manual build output"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean          - Remove build artifacts"

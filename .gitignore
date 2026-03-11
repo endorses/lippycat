@@ -12,6 +12,7 @@ testdata/pcaps/*
 scripts/*
 !scripts/bump-version.sh
 bin/
+docs/manual/book/
 
 # Test coverage artifacts
 *.out

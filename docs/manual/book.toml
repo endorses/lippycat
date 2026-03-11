@@ -1,0 +1,14 @@
+[book]
+title = "lippycat Manual"
+authors = ["lippycat contributors"]
+description = "Comprehensive guide to network traffic capture and analysis with lippycat"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/endorses/lippycat"
+edit-url-template = "https://github.com/endorses/lippycat/edit/main/docs/manual/{path}"
+site-url = "https://🫦🐱.ws/"

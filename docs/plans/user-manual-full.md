@@ -108,36 +108,45 @@ The core of lippycat's value proposition. This is the largest and most important
 
 ### Chapter 10: CLI Administration (`part4-administration/cli-admin.md`)
 
-- [ ] `lc show` commands (all require `-P` processor address)
-  - [ ] `show status` — processor health and statistics
-  - [ ] `show hunters` — connected hunter list and status
-  - [ ] `show topology` — distributed topology visualization
-  - [ ] `show filter` — active filter details
-  - [ ] `show config` — local configuration display (no `-P` needed)
-- [ ] `lc list` commands
-  - [ ] `list interfaces` — network interface discovery
-  - [ ] `list filters` — filter listing on processor
+- [x] `lc show` commands (all require `-P` processor address except `show config`)
+  - [x] `show status` — processor health and statistics
+  - [x] `show hunters` — connected hunter list and status
+  - [x] `show topology` — distributed topology visualization
+  - [x] `show filter` — active filter details
+  - [x] `show config` — local configuration display (no `-P` needed)
+- [x] `lc list` commands
+  - [x] `list interfaces` — network interface discovery
+  - [x] `list filters` — filter listing on processor
+- [x] `lc set` commands
+  - [x] `set filter` — create or update a filter (upsert)
+  - [x] Inline mode (--type, --pattern) vs file mode (-f filters.yaml)
+  - [x] Filter types reference (VoIP, DNS, Email, TLS, HTTP, Universal)
+- [x] `lc rm` commands
+  - [x] `rm filter` — delete a filter by ID
+  - [x] Batch deletion from file (-f filter-ids.txt)
+- [x] Connection flags reference (shared across all remote commands)
+- [x] JSON output format and exit codes
 
-**Sources**: `cmd/show/README.md`, `cmd/show/CLAUDE.md`, `cmd/list/README.md`, `cmd/list/CLAUDE.md`
+**Sources**: `cmd/show/README.md`, `cmd/show/CLAUDE.md`, `cmd/list/README.md`, `cmd/list/CLAUDE.md`, `cmd/set/set.go`, `cmd/rm/rm.go`, `cmd/filter/`
 
 ### Chapter 11: Remote TUI Monitoring (`part4-administration/watch-remote.md`)
 
-- [ ] Connecting to a remote processor (`lc watch remote`)
-- [ ] Node file configuration (`nodes.yaml` format)
-- [ ] Multi-node monitoring (aggregated view)
-- [ ] Hunter subscription management (selective monitoring)
-- [ ] Filter management via TUI
-- [ ] TLS configuration for remote connections
+- [x] Connecting to a remote processor (`lc watch remote`)
+- [x] Node file configuration (`nodes.yaml` format)
+- [x] Multi-node monitoring (aggregated view)
+- [x] Hunter subscription management (selective monitoring)
+- [x] Filter management via TUI
+- [x] TLS configuration for remote connections
 
 **Sources**: `cmd/watch/README.md`, `docs/TUI_REMOTE_CAPTURE.md`
 
 ### Chapter 12: Operations Runbook (`part4-administration/operations.md`)
 
-- [ ] Health checks and monitoring
-- [ ] Log analysis and structured logging
-- [ ] Common operational issues and resolution
-- [ ] Capacity planning guidelines
-- [ ] Deployment checklists
+- [x] Health checks and monitoring
+- [x] Log analysis and structured logging
+- [x] Common operational issues and resolution
+- [x] Capacity planning guidelines
+- [x] Deployment checklists
 
 **Sources**: `docs/operational-procedures.md`
 

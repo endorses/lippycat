@@ -154,72 +154,72 @@ The core of lippycat's value proposition. This is the largest and most important
 
 ### Chapter 13: Security (`part5-advanced/security.md`)
 
-- [ ] TLS configuration for distributed mode
-  - [ ] Certificate requirements per node type
-  - [ ] Generating certificates (OpenSSL commands)
-- [ ] Mutual TLS (mTLS) setup
-  - [ ] CA setup, client certs, trust model
-- [ ] Certificate management lifecycle
-- [ ] Production mode enforcement (`LIPPYCAT_PRODUCTION=true`)
-- [ ] TLS decryption for captured traffic (`SSLKEYLOGFILE`, Wireshark integration)
+- [x] TLS configuration for distributed mode
+  - [x] Certificate requirements per node type
+  - [x] Generating certificates (OpenSSL commands)
+- [x] Mutual TLS (mTLS) setup
+  - [x] CA setup, client certs, trust model
+- [x] Certificate management lifecycle
+- [x] Production mode enforcement (`LIPPYCAT_PRODUCTION=true`)
+- [x] TLS decryption for captured traffic (`SSLKEYLOGFILE`, Wireshark integration)
 
 **Sources**: `docs/SECURITY.md`, `docs/TLS_DECRYPTION.md`
 
 ### Chapter 14: Performance Optimization (`part5-advanced/performance.md`)
 
-- [ ] TCP performance profiles (`--tcp-performance-mode`)
-  - [ ] balanced, high_performance, max_throughput
-  - [ ] When to use each
-- [ ] GPU acceleration
-  - [ ] Backend selection (CUDA, OpenCL, SIMD auto-detection)
-  - [ ] Benchmarks and expected throughput
-  - [ ] Hardware requirements
-- [ ] AF_XDP high-speed capture
-  - [ ] Kernel requirements, NIC support
-  - [ ] Setup and configuration
-- [ ] Distributed scaling patterns
+- [x] TCP performance profiles (`--tcp-performance-mode`)
+  - [x] balanced, high_performance, max_throughput
+  - [x] When to use each
+- [x] GPU acceleration
+  - [x] Backend selection (CUDA, OpenCL, SIMD auto-detection)
+  - [x] Benchmarks and expected throughput
+  - [x] Hardware requirements
+- [x] AF_XDP high-speed capture
+  - [x] Kernel requirements, NIC support
+  - [x] Setup and configuration
+- [x] Distributed scaling patterns
 
 **Sources**: `docs/PERFORMANCE.md`, `docs/GPU_ACCELERATION.md`, `docs/AF_XDP_SETUP.md`
 
 ### Chapter 15: Protocol Deep Dives (`part5-advanced/protocol-deep-dives.md`)
 
-- [ ] VoIP deep dive
-  - [ ] SIP signaling flow (mermaid diagram)
-  - [ ] RTP/SRTP media streams
-  - [ ] Call quality metrics (MOS, jitter, packet loss)
-  - [ ] Per-call PCAP workflow
-- [ ] DNS analysis patterns
-  - [ ] Query/response correlation
-  - [ ] Common DNS investigations
-- [ ] TLS inspection
-  - [ ] JA3/JA3S fingerprinting
-  - [ ] Certificate extraction
-  - [ ] SNI filtering
-- [ ] HTTP/Email analysis patterns
+- [x] VoIP deep dive
+  - [x] SIP signaling flow (mermaid diagram)
+  - [x] RTP/SRTP media streams
+  - [x] Call quality metrics (MOS, jitter, packet loss)
+  - [x] Per-call PCAP workflow
+- [x] DNS analysis patterns
+  - [x] Query/response correlation
+  - [x] Common DNS investigations
+- [x] TLS inspection
+  - [x] JA3/JA3S fingerprinting
+  - [x] Certificate extraction
+  - [x] SNI filtering
+- [x] HTTP/Email analysis patterns
 
 **Sources**: Protocol analyzer source code, `cmd/sniff/CLAUDE.md`, existing protocol docs
 
 ### Chapter 16: Lawful Interception (`part5-advanced/lawful-interception.md`)
 
-- [ ] ETSI X1/X2/X3 interface overview
-  - [ ] Mermaid diagram of ADMF → NE → MDF flow
-- [ ] Build requirements (`-tags li`)
-- [ ] Configuration and deployment
-  - [ ] X1 server setup
-  - [ ] X2/X3 delivery configuration
-  - [ ] Certificate setup for LI interfaces
-- [ ] Filter integration (how LI tasks map to capture filters)
-- [ ] Operational considerations
+- [x] ETSI X1/X2/X3 interface overview
+  - [x] Mermaid diagram of ADMF → NE → MDF flow
+- [x] Build requirements (`-tags li`)
+- [x] Configuration and deployment
+  - [x] X1 server setup
+  - [x] X2/X3 delivery configuration
+  - [x] Certificate setup for LI interfaces
+- [x] Filter integration (how LI tasks map to capture filters)
+- [x] Operational considerations
 
 **Sources**: `docs/LI_INTEGRATION.md`, `docs/LI_CERTIFICATES.md`, `internal/pkg/li/CLAUDE.md`
 
 ### Chapter 17: Troubleshooting (`part5-advanced/troubleshooting.md`)
 
-- [ ] Capture issues (permissions, interface selection, no packets)
-- [ ] TCP reassembly problems (SIP over TCP, stream handling)
-- [ ] Distributed connectivity (TLS handshake failures, flow control stalls)
-- [ ] GPU troubleshooting (driver issues, fallback, diagnostics)
-- [ ] VoIP-specific issues (missing RTP, one-way audio, codec handling)
+- [x] Capture issues (permissions, interface selection, no packets)
+- [x] TCP reassembly problems (SIP over TCP, stream handling)
+- [x] Distributed connectivity (TLS handshake failures, flow control stalls)
+- [x] GPU troubleshooting (driver issues, fallback, diagnostics)
+- [x] VoIP-specific issues (missing RTP, one-way audio, codec handling)
 
 **Sources**: `docs/tcp-troubleshooting.md`, `docs/GPU_TROUBLESHOOTING.md`
 

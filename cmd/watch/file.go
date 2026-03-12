@@ -67,8 +67,8 @@ func runFile(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(os.Stderr, "Error: invalid TLS keylog: %v\n", err)
 			os.Exit(1)
 		}
-		viper.Set("tui.tls_keylog", fileTLSKeylog)
-		viper.Set("tui.tls_decryption_enabled", true)
+		viper.Set("watch.tls_keylog", fileTLSKeylog)
+		viper.Set("watch.tls_decryption_enabled", true)
 	}
 
 	// Handle logging for TUI mode
@@ -87,13 +87,13 @@ func runFile(cmd *cobra.Command, args []string) {
 	}
 
 	// Load buffer size from config, use flag value as fallback
-	configBufferSize := viper.GetInt("tui.buffer_size")
+	configBufferSize := viper.GetInt("watch.buffer_size")
 	if configBufferSize > 0 {
 		bufferSize = configBufferSize
 	}
 
 	// Load max calls from config, use flag value as fallback
-	configMaxCalls := viper.GetInt("tui.max_calls")
+	configMaxCalls := viper.GetInt("watch.max_calls")
 	if configMaxCalls > 0 {
 		maxCalls = configMaxCalls
 	}
@@ -173,5 +173,5 @@ func init() {
 	fileCmd.Flags().StringVar(&fileTLSKeylog, "tls-keylog", "", "Path to SSLKEYLOGFILE for TLS decryption (HTTPS traffic)")
 
 	// Bind to viper for config file support
-	_ = viper.BindPFlag("tui.tls_keylog", fileCmd.Flags().Lookup("tls-keylog"))
+	_ = viper.BindPFlag("watch.tls_keylog", fileCmd.Flags().Lookup("tls-keylog"))
 }

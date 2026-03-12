@@ -151,7 +151,7 @@ type Model struct {
 // getPacketsInOrder returns packets from the circular buffer in chronological order
 func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter string, pcapFiles []string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
 	// Load theme from config, default to Solarized Dark
-	themeName := viper.GetString("tui.theme")
+	themeName := viper.GetString("watch.theme")
 	if themeName == "" {
 		themeName = "dark"
 	}
@@ -236,7 +236,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	}
 
 	// Set up TLS decryption data getter if decryption is enabled
-	if viper.GetBool("tui.tls_decryption_enabled") {
+	if viper.GetBool("watch.tls_decryption_enabled") {
 		uiState.DetailsPanel.SetDecryptedDataGetter(func(srcIP, dstIP, srcPort, dstPort string) (clientData, serverData []byte) {
 			if decryptor := GetTLSDecryptor(); decryptor != nil {
 				return decryptor.GetDecryptedData(srcIP, dstIP, srcPort, dstPort)

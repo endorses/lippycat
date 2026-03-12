@@ -21,7 +21,7 @@ func saveThemePreference(theme themes.Theme) {
 	}
 
 	// Set in viper
-	viper.Set("tui.theme", themeName)
+	viper.Set("watch.theme", themeName)
 
 	// Write to config file
 	if err := viper.WriteConfig(); err != nil {
@@ -51,7 +51,7 @@ func saveThemePreference(theme themes.Theme) {
 
 // loadFilterHistory loads filter history from config
 func loadFilterHistory(filterInput *components.FilterInput) {
-	history := viper.GetStringSlice("tui.filter_history")
+	history := viper.GetStringSlice("watch.filter_history")
 	if len(history) > 0 {
 		filterInput.SetHistory(history)
 	}
@@ -60,7 +60,7 @@ func loadFilterHistory(filterInput *components.FilterInput) {
 // saveFilterHistory saves filter history to config
 func saveFilterHistory(filterInput *components.FilterInput) {
 	history := filterInput.GetHistory()
-	viper.Set("tui.filter_history", history)
+	viper.Set("watch.filter_history", history)
 
 	// Write to config file
 	if err := viper.WriteConfig(); err != nil {
@@ -90,7 +90,7 @@ func saveFilterHistory(filterInput *components.FilterInput) {
 
 // loadCallFilterHistory loads call filter history from config
 func loadCallFilterHistory(filterInput *components.FilterInput) {
-	history := viper.GetStringSlice("tui.call_filter_history")
+	history := viper.GetStringSlice("watch.call_filter_history")
 	if len(history) > 0 {
 		filterInput.SetHistory(history)
 	}
@@ -99,7 +99,7 @@ func loadCallFilterHistory(filterInput *components.FilterInput) {
 // saveCallFilterHistory saves call filter history to config
 func saveCallFilterHistory(filterInput *components.FilterInput) {
 	history := filterInput.GetHistory()
-	viper.Set("tui.call_filter_history", history)
+	viper.Set("watch.call_filter_history", history)
 
 	// Write to config file
 	if err := viper.WriteConfig(); err != nil {
@@ -129,7 +129,7 @@ func saveCallFilterHistory(filterInput *components.FilterInput) {
 
 // loadNodeHistory loads node address history from config
 func loadNodeHistory(nodesView *components.NodesView) {
-	history := viper.GetStringSlice("tui.node_history")
+	history := viper.GetStringSlice("watch.node_history")
 	if len(history) > 0 {
 		nodesView.SetNodeHistory(history)
 	}
@@ -138,7 +138,7 @@ func loadNodeHistory(nodesView *components.NodesView) {
 // saveNodeHistory saves node address history to config
 func saveNodeHistory(nodesView *components.NodesView) {
 	history := nodesView.GetNodeHistory()
-	viper.Set("tui.node_history", history)
+	viper.Set("watch.node_history", history)
 
 	// Write to config file
 	if err := viper.WriteConfig(); err != nil {

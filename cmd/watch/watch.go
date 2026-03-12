@@ -65,15 +65,15 @@ func init() {
 	WatchCmd.PersistentFlags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "skip TLS certificate verification (INSECURE - testing only)")
 	WatchCmd.PersistentFlags().StringVar(&tlsServerOverride, "tls-server-name", "", "override server name for TLS verification")
 
-	_ = viper.BindPFlag("tui.buffer_size", WatchCmd.PersistentFlags().Lookup("buffer-size"))
-	_ = viper.BindPFlag("tui.max_calls", WatchCmd.PersistentFlags().Lookup("max-calls"))
+	_ = viper.BindPFlag("watch.buffer_size", WatchCmd.PersistentFlags().Lookup("buffer-size"))
+	_ = viper.BindPFlag("watch.max_calls", WatchCmd.PersistentFlags().Lookup("max-calls"))
 
 	// Bind TLS flags to viper for config file support
-	_ = viper.BindPFlag("tui.tls.ca_file", WatchCmd.PersistentFlags().Lookup("tls-ca"))
-	_ = viper.BindPFlag("tui.tls.cert_file", WatchCmd.PersistentFlags().Lookup("tls-cert"))
-	_ = viper.BindPFlag("tui.tls.key_file", WatchCmd.PersistentFlags().Lookup("tls-key"))
-	_ = viper.BindPFlag("tui.tls.skip_verify", WatchCmd.PersistentFlags().Lookup("tls-skip-verify"))
-	_ = viper.BindPFlag("tui.tls.server_name_override", WatchCmd.PersistentFlags().Lookup("tls-server-name"))
+	_ = viper.BindPFlag("watch.tls.ca_file", WatchCmd.PersistentFlags().Lookup("tls-ca"))
+	_ = viper.BindPFlag("watch.tls.cert_file", WatchCmd.PersistentFlags().Lookup("tls-cert"))
+	_ = viper.BindPFlag("watch.tls.key_file", WatchCmd.PersistentFlags().Lookup("tls-key"))
+	_ = viper.BindPFlag("watch.tls.skip_verify", WatchCmd.PersistentFlags().Lookup("tls-skip-verify"))
+	_ = viper.BindPFlag("watch.tls.server_name_override", WatchCmd.PersistentFlags().Lookup("tls-server-name"))
 }
 
 // configureTLSViper sets TLS configuration in viper for use by TUI components.
@@ -81,21 +81,21 @@ func init() {
 func configureTLSViper(cmd *cobra.Command) {
 	// TLS is enabled by default unless --insecure is set
 	tlsEnabled := !insecureAllowed
-	viper.Set("tui.tls.enabled", tlsEnabled)
+	viper.Set("watch.tls.enabled", tlsEnabled)
 
 	if cmd.Flags().Changed("tls-ca") {
-		viper.Set("tui.tls.ca_file", tlsCAFile)
+		viper.Set("watch.tls.ca_file", tlsCAFile)
 	}
 	if cmd.Flags().Changed("tls-cert") {
-		viper.Set("tui.tls.cert_file", tlsCertFile)
+		viper.Set("watch.tls.cert_file", tlsCertFile)
 	}
 	if cmd.Flags().Changed("tls-key") {
-		viper.Set("tui.tls.key_file", tlsKeyFile)
+		viper.Set("watch.tls.key_file", tlsKeyFile)
 	}
 	if cmd.Flags().Changed("tls-skip-verify") {
-		viper.Set("tui.tls.skip_verify", tlsSkipVerify)
+		viper.Set("watch.tls.skip_verify", tlsSkipVerify)
 	}
 	if cmd.Flags().Changed("tls-server-name") {
-		viper.Set("tui.tls.server_name_override", tlsServerOverride)
+		viper.Set("watch.tls.server_name_override", tlsServerOverride)
 	}
 }

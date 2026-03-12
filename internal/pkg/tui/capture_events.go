@@ -486,7 +486,7 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 
 		// Build client config with TLS settings from viper
 		// If --insecure flag is set, disable TLS entirely
-		tlsEnabled := viper.GetBool("tui.tls.enabled")
+		tlsEnabled := viper.GetBool("watch.tls.enabled")
 		if insecure {
 			tlsEnabled = false
 		}
@@ -494,11 +494,11 @@ func (m Model) handleProcessorReconnectMsg(msg ProcessorReconnectMsg) (Model, te
 		clientConfig := &remotecapture.ClientConfig{
 			Address:               msg.Address,
 			TLSEnabled:            tlsEnabled,
-			TLSCAFile:             viper.GetString("tui.tls.ca_file"),
-			TLSCertFile:           viper.GetString("tui.tls.cert_file"),
-			TLSKeyFile:            viper.GetString("tui.tls.key_file"),
-			TLSSkipVerify:         viper.GetBool("tui.tls.skip_verify"),
-			TLSServerNameOverride: viper.GetString("tui.tls.server_name_override"),
+			TLSCAFile:             viper.GetString("watch.tls.ca_file"),
+			TLSCertFile:           viper.GetString("watch.tls.cert_file"),
+			TLSKeyFile:            viper.GetString("watch.tls.key_file"),
+			TLSSkipVerify:         viper.GetBool("watch.tls.skip_verify"),
+			TLSServerNameOverride: viper.GetString("watch.tls.server_name_override"),
 		}
 
 		client, err := remotecapture.NewClientWithConfig(clientConfig, handler)

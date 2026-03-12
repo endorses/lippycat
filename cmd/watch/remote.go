@@ -52,8 +52,8 @@ func runRemote(cmd *cobra.Command, args []string) {
 
 	// Validate TLS configuration when TLS is enabled (remote mode requires server connection)
 	tlsEnabled := !insecureAllowed
-	effectiveCAFile := viper.GetString("tui.tls.ca_file")
-	effectiveSkipVerify := viper.GetBool("tui.tls.skip_verify")
+	effectiveCAFile := viper.GetString("watch.tls.ca_file")
+	effectiveSkipVerify := viper.GetBool("watch.tls.skip_verify")
 	if tlsEnabled && effectiveCAFile == "" && !effectiveSkipVerify {
 		fmt.Fprintln(os.Stderr, "Error: TLS is enabled but no CA certificate provided")
 		fmt.Fprintln(os.Stderr, "For TLS connections, provide a CA certificate: --tls-ca=/path/to/ca.crt")
@@ -73,13 +73,13 @@ func runRemote(cmd *cobra.Command, args []string) {
 	}
 
 	// Load buffer size from config, use flag value as fallback
-	configBufferSize := viper.GetInt("tui.buffer_size")
+	configBufferSize := viper.GetInt("watch.buffer_size")
 	if configBufferSize > 0 {
 		bufferSize = configBufferSize
 	}
 
 	// Load max calls from config, use flag value as fallback
-	configMaxCalls := viper.GetInt("tui.max_calls")
+	configMaxCalls := viper.GetInt("watch.max_calls")
 	if configMaxCalls > 0 {
 		maxCalls = configMaxCalls
 	}

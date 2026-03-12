@@ -72,7 +72,7 @@ func runMode(cmd *cobra.Command, args []string) {
 ## Viper Configuration
 
 ```yaml
-tui:
+watch:
   buffer_size: 10000
   gpu:
     enabled: false
@@ -90,7 +90,7 @@ Flags use `Changed()` check to allow config file defaults:
 
 ```go
 if cmd.Flags().Changed("tls") {
-    viper.Set("tui.tls.enabled", tlsEnabled)
+    viper.Set("watch.tls.enabled", tlsEnabled)
 }
 ```
 

@@ -227,28 +227,28 @@ The core of lippycat's value proposition. This is the largest and most important
 
 ### Appendix A: Command Reference (`appendices/command-reference.md`)
 
-- [ ] Complete command tree with all flags (generated from `--help` output)
-- [ ] Environment variables reference
-- [ ] Exit codes
+- [x] Complete command tree with all flags (generated from `--help` output)
+- [x] Environment variables reference
+- [x] Exit codes
 
 ### Appendix B: Configuration Reference (`appendices/config-reference.md`)
 
-- [ ] Full YAML schema with all fields
-- [ ] Configuration precedence order
-- [ ] Example configuration files (minimal, production, distributed)
+- [x] Full YAML schema with all fields
+- [x] Configuration precedence order
+- [x] Example configuration files (minimal, production, distributed)
 
 ### Appendix C: BPF Filter Reference (`appendices/bpf-reference.md`)
 
-- [ ] BPF syntax quick reference
-- [ ] Common filter patterns by use case (VoIP, DNS, HTTP, security)
-- [ ] Performance implications of filter complexity
-- [ ] lippycat-specific filter optimizations (`--udp-only`, `--sip-port`)
+- [x] BPF syntax quick reference
+- [x] Common filter patterns by use case (VoIP, DNS, HTTP, security)
+- [x] Performance implications of filter complexity
+- [x] lippycat-specific filter optimizations (`--udp-only`, `--sip-port`)
 
 ### Appendix D: Glossary (`appendices/glossary.md`)
 
-- [ ] Expand existing 8 terms to comprehensive glossary
-- [ ] Include all lippycat-specific terminology
-- [ ] Cross-reference to chapters where terms are defined
+- [x] Expand existing 8 terms to comprehensive glossary
+- [x] Include all lippycat-specific terminology
+- [x] Cross-reference to chapters where terms are defined
 
 ## Phase 5: Polish & Cross-References
 

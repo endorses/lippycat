@@ -289,7 +289,7 @@ func (s *SettingsView) restartCapture() tea.Cmd {
 // SaveBufferSize persists the buffer size to config file
 func (s *SettingsView) SaveBufferSize() {
 	bufferSize := s.GetBufferSize()
-	viper.Set("tui.buffer_size", bufferSize)
+	viper.Set("watch.buffer_size", bufferSize)
 
 	// Write to config file
 	if err := viper.WriteConfig(); err != nil {

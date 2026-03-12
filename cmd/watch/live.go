@@ -66,13 +66,13 @@ func runLive(cmd *cobra.Command, args []string) {
 	}
 
 	// Load buffer size from config, use flag value as fallback
-	configBufferSize := viper.GetInt("tui.buffer_size")
+	configBufferSize := viper.GetInt("watch.buffer_size")
 	if configBufferSize > 0 {
 		bufferSize = configBufferSize
 	}
 
 	// Load max calls from config, use flag value as fallback
-	configMaxCalls := viper.GetInt("tui.max_calls")
+	configMaxCalls := viper.GetInt("watch.max_calls")
 	if configMaxCalls > 0 {
 		maxCalls = configMaxCalls
 	}
@@ -147,7 +147,7 @@ func init() {
 	liveCmd.Flags().StringVar(&liveDebugLog, "debug-log", "", "write debug logs to file (helps diagnose capture issues)")
 
 	_ = viper.BindPFlag("promiscuous", liveCmd.Flags().Lookup("promiscuous"))
-	_ = viper.BindPFlag("tui.gpu.enabled", liveCmd.Flags().Lookup("enable-gpu"))
-	_ = viper.BindPFlag("tui.gpu.backend", liveCmd.Flags().Lookup("gpu-backend"))
-	_ = viper.BindPFlag("tui.gpu.batch_size", liveCmd.Flags().Lookup("gpu-batch-size"))
+	_ = viper.BindPFlag("watch.gpu.enabled", liveCmd.Flags().Lookup("enable-gpu"))
+	_ = viper.BindPFlag("watch.gpu.backend", liveCmd.Flags().Lookup("gpu-backend"))
+	_ = viper.BindPFlag("watch.gpu.batch_size", liveCmd.Flags().Lookup("gpu-batch-size"))
 }

@@ -285,11 +285,11 @@ func ClearTLSDecryptor() {
 // InitTLSDecryptorFromConfig initializes the global TLS decryptor from viper config.
 // Returns true if decryption is enabled and initialized successfully.
 func InitTLSDecryptorFromConfig() bool {
-	if !viper.GetBool("tui.tls_decryption_enabled") {
+	if !viper.GetBool("watch.tls_decryption_enabled") {
 		return false
 	}
 
-	keylogPath := viper.GetString("tui.tls_keylog")
+	keylogPath := viper.GetString("watch.tls_keylog")
 	if keylogPath == "" {
 		return false
 	}

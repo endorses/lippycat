@@ -71,14 +71,14 @@ func TestInitTLSDecryptorFromConfig_Disabled(t *testing.T) {
 	ClearTLSDecryptor()
 
 	// Ensure decryption is disabled in config
-	viper.Set("tui.tls_decryption_enabled", false)
+	viper.Set("watch.tls_decryption_enabled", false)
 
 	result := InitTLSDecryptorFromConfig()
 	assert.False(t, result)
 	assert.Nil(t, GetTLSDecryptor())
 
 	// Clean up viper state
-	viper.Set("tui.tls_decryption_enabled", nil)
+	viper.Set("watch.tls_decryption_enabled", nil)
 }
 
 func TestInitTLSDecryptorFromConfig_NoKeylog(t *testing.T) {
@@ -86,16 +86,16 @@ func TestInitTLSDecryptorFromConfig_NoKeylog(t *testing.T) {
 	ClearTLSDecryptor()
 
 	// Enable decryption but no keylog path
-	viper.Set("tui.tls_decryption_enabled", true)
-	viper.Set("tui.tls_keylog", "")
+	viper.Set("watch.tls_decryption_enabled", true)
+	viper.Set("watch.tls_keylog", "")
 
 	result := InitTLSDecryptorFromConfig()
 	assert.False(t, result)
 	assert.Nil(t, GetTLSDecryptor())
 
 	// Clean up viper state
-	viper.Set("tui.tls_decryption_enabled", nil)
-	viper.Set("tui.tls_keylog", nil)
+	viper.Set("watch.tls_decryption_enabled", nil)
+	viper.Set("watch.tls_keylog", nil)
 }
 
 func TestGetDecryptedData_NoSession(t *testing.T) {

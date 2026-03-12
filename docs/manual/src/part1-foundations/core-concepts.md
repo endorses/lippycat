@@ -103,16 +103,16 @@ This analysis happens in real time during capture and is displayed in both CLI a
 
 lippycat can operate as a **distributed system** for capturing traffic across multiple network segments:
 
-```
-┌─────────┐     ┌─────────┐
-│ Hunter  │────→│         │
-│ (edge)  │     │Processor│──→ TUI / PCAP / Analysis
-│         │     │(central)│
-└─────────┘     │         │
-┌─────────┐     │         │
-│ Hunter  │────→│         │
-│ (edge)  │     └─────────┘
-└─────────┘
+```mermaid
+graph LR
+    h1["Hunter<br>(edge)"]
+    h2["Hunter<br>(edge)"]
+    p["Processor<br>(central)"]
+    out["TUI / PCAP / Analysis"]
+
+    h1 -->|gRPC| p
+    h2 -->|gRPC| p
+    p --> out
 ```
 
 - **Hunters** capture packets at the network edge and forward them via gRPC

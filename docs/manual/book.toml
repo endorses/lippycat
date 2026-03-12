@@ -12,3 +12,7 @@ build-dir = "book"
 git-repository-url = "https://github.com/endorses/lippycat"
 edit-url-template = "https://github.com/endorses/lippycat/edit/main/docs/manual/{path}"
 site-url = "https://🫦🐱.ws/"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"

@@ -241,16 +241,17 @@ clean-cuda:
 
 # mdBook binary (check PATH, then ~/.cargo/bin)
 MDBOOK := $(shell which mdbook 2>/dev/null || echo $(HOME)/.cargo/bin/mdbook)
+CARGO_BIN := $(HOME)/.cargo/bin
 
-# Build user manual (requires mdbook)
+# Build user manual (requires mdbook + mdbook-mermaid)
 manual:
 	@echo "Building user manual..."
-	$(MDBOOK) build docs/manual
+	PATH="$(CARGO_BIN):$$PATH" $(MDBOOK) build docs/manual
 
 # Serve user manual with live reload
 manual-serve:
 	@echo "Serving user manual at http://localhost:3000..."
-	$(MDBOOK) serve docs/manual
+	PATH="$(CARGO_BIN):$$PATH" $(MDBOOK) serve docs/manual
 
 # Clean manual build output
 manual-clean:

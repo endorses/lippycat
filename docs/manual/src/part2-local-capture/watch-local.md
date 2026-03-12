@@ -87,7 +87,7 @@ Press `/` on the Capture tab to enter filter mode. Type a filter expression and 
 | Filter | Example | Description |
 |--------|---------|-------------|
 | Protocol | `protocol:voip` | Show only VoIP traffic |
-| Text (all) | `text:all alice` | Search all fields |
+| Text (all) | `text:all alicent` | Search all fields |
 | Text (src) | `text:src 10.0.0.1` | Search source |
 | Text (dst) | `text:dst 10.0.0.1` | Search destination |
 | Text (info) | `text:info INVITE` | Search info field |

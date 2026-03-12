@@ -181,9 +181,9 @@ VoIP is lippycat's most feature-rich protocol mode:
 sudo lc sniff voip -i eth0
 
 # Filter by SIP user (supports wildcards)
-sudo lc sniff voip -i eth0 -u alice
+sudo lc sniff voip -i eth0 -u alicent
 sudo lc sniff voip -i eth0 -u "*456789"    # suffix match
-sudo lc sniff voip -i eth0 -u "alice,bob"  # multiple users
+sudo lc sniff voip -i eth0 -u "alicent,robb"  # multiple users
 
 # Restrict to specific SIP port
 sudo lc sniff voip -i eth0 -S 5060

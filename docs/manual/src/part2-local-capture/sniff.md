@@ -229,7 +229,15 @@ sudo lc sniff voip -i eth0 -w voip-traffic.pcap
 
 ### Per-Call PCAP (VoIP)
 
-In VoIP mode, lippycat can write separate PCAP files for each call, named by Call-ID. This is configured at the processor/tap level (see [Central Aggregation with `lc process`](../part3-distributed/process.md) and [Standalone Mode with `lc tap`](../part3-distributed/tap.md)).
+In VoIP mode, the `-w` flag automatically creates separate PCAP files per call, split by SIP signaling and RTP media:
+
+```bash
+sudo lc sniff voip -i eth0 --sip-user alicent -w /var/capture/alicent
+# Creates: /var/capture/alicent_sip_<callid>.pcap
+#          /var/capture/alicent_rtp_<callid>.pcap
+```
+
+For more advanced per-call PCAP features (directory organization, filename patterns, completion hooks), see [Central Aggregation with `lc process`](../part3-distributed/process.md) and [Standalone Mode with `lc tap`](../part3-distributed/tap.md).
 
 ### ESP-NULL Decapsulation
 

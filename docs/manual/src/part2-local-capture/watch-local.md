@@ -181,7 +181,7 @@ Search with `/`, navigate results with `n`/`N`. Jump to sections with `1`-`4`.
 
 ### Toast Notifications
 
-Status messages appear as toast notifications at the top of the screen, auto-dismissing after 2-5 seconds. Types include success (green), error (red), info (blue), and warning (yellow). Related toasts supersede each other — for example, "Paused" is replaced by "Resumed".
+Status messages appear as toast notifications at the bottom of the screen, auto-dismissing after 2-5 seconds. Types include success (green), error (red), info (blue), and warning (yellow). Related toasts supersede each other — for example, "Paused" is replaced by "Resumed".
 
 ### Saving Packets
 

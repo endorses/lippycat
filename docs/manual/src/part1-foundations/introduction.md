@@ -62,6 +62,8 @@ lc [verb] [object] [flags]
 | `lc tap` | Standalone capture + processing | hunt + process in one |
 | `lc list` | List resources (interfaces, etc.) | |
 | `lc show` | Display diagnostics | |
+| `lc set` | Create or update resources (filters) | |
+| `lc rm` | Remove resources (filters) | |
 
 The learning path in this manual follows natural complexity:
 

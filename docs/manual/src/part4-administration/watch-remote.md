@@ -182,6 +182,53 @@ By default, connecting to a processor streams packets from all its hunters. Hunt
 - Focus on specific segments without noise from others
 - Multiple TUI clients can have independent subscriptions to the same processor
 
+## Filter Management
+
+The TUI provides interactive filter management for connected processors and their hunters. Filters control which traffic hunters capture and forward — they are the primary mechanism for targeting specific calls, domains, or hosts across a distributed deployment. Filters can be applied globally (all hunters) or targeted to specific hunters.
+
+### Managing Filters from the TUI
+
+From the Nodes tab, press `f` to open the filter management view. This lets you:
+
+- **View active filters** on the connected processor
+- **Create new filters** with type and pattern
+- **Enable/disable filters** without deleting them
+- **Delete filters** you no longer need
+
+Filter changes take effect immediately — the processor pushes updated filters to all connected hunters.
+
+### Filter Types
+
+The TUI supports all filter types available via the CLI:
+
+| Category | Types | Example Pattern |
+|----------|-------|-----------------|
+| VoIP | `sip_user`, `sip_uri`, `phone_number`, `call_id`, `codec` | `alicent@example.com` |
+| DNS | `dns_domain` | `*.malware-domain.com` |
+| TLS | `tls_sni`, `tls_ja3`, `tls_ja3s`, `tls_ja4` | `*.example.com` |
+| HTTP | `http_host`, `http_url` | `api.example.com` |
+| Email | `email_address`, `email_subject` | `*@example.com` |
+| Universal | `ip_address`, `bpf` | `10.0.1.0/24` |
+
+### CLI Alternative
+
+For scripted or batch filter operations, use the CLI commands instead (see [CLI Administration](cli-admin.md)):
+
+```bash
+# List current filters
+lc list filters -P processor:55555 --tls-ca ca.crt
+
+# Create a filter
+lc set filter -P processor:55555 --tls-ca ca.crt \
+  --type sip_user --pattern "alicent@example.com"
+
+# Show filter details
+lc show filter --id myfilter -P processor:55555 --tls-ca ca.crt
+
+# Delete a filter
+lc rm filter --id myfilter -P processor:55555 --tls-ca ca.crt
+```
+
 ## TLS Configuration
 
 ### Command-Line Flags
@@ -226,7 +273,7 @@ processors:
 TLS defaults can be set in the config file:
 
 ```yaml
-tui:
+watch:
   tls:
     enabled: true
     ca_file: "/etc/lippycat/certs/ca.crt"

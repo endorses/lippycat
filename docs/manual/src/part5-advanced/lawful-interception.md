@@ -24,7 +24,7 @@ The following diagram shows how the ADMF, lippycat processor, and MDF interact:
 flowchart TB
     ADMF["ADMF<br/>(Administration)"]
 
-    subgraph NE["lippycat Processor (Network Element)"]
+    subgraph NE["lippycat Processor"]
         X1["X1 Server :8443"]
         LIM["LI Manager"]
         ENC["X2/X3 Encoder"]

@@ -65,9 +65,28 @@ lc [verb] [object] [flags]
 
 The learning path in this manual follows natural complexity:
 
-```
-sniff → watch → hunt → process → tap → watch remote
- (local CLI)  (local TUI)  (------distributed------)
+```mermaid
+graph LR
+    sniff["lc sniff"]
+    watch["lc watch"]
+    hunt["lc hunt"]
+    process["lc process"]
+    tap["lc tap"]
+    remote["lc watch remote"]
+
+    sniff --> watch --> hunt --> process --> tap --> remote
+
+    subgraph Local
+        sniff
+        watch
+    end
+
+    subgraph Distributed
+        hunt
+        process
+        tap
+        remote
+    end
 ```
 
 Each command builds on concepts from the previous one, so working through the manual in order gives you the smoothest learning experience.

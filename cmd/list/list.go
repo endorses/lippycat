@@ -10,16 +10,18 @@ import (
 var ListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List resources",
-	Long: `List available resources such as network interfaces and filters.
+	Long: `List available resources such as network interfaces, filters, and hunters.
 
 Subcommands:
   interfaces  - List network interfaces available for monitoring
   filters     - List filters on a remote processor (TLS enabled by default)
+  hunters     - List connected hunters on a remote processor (TLS enabled by default)
 
 Examples:
-  lc list interfaces                              # List network interfaces
-  lc list filters -P proc:55555 --tls-ca ca.crt   # List filters (TLS)
-  lc list filters -P localhost:55555 --insecure   # Local testing`,
+  lc list interfaces                               # List network interfaces
+  lc list filters -P proc:55555 --tls-ca ca.crt    # List filters (TLS)
+  lc list hunters -P proc:55555 --tls-ca ca.crt    # List hunters (TLS)
+  lc list hunters -P localhost:55555 --insecure    # Local testing`,
 	// No Run function - requires a subcommand
 }
 

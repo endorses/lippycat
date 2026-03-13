@@ -210,8 +210,9 @@ VERBS:
 | `process` | Processor node (distributed aggregation) |
 | `list interfaces` | List available network interfaces |
 | `list filters` | List filters on a processor |
+| `list hunters` | List connected hunters |
 | `show status` | Show processor status |
-| `show hunters` | Show connected hunters |
+| `show hunter` | Show specific hunter details |
 | `show topology` | Show distributed topology |
 | `show filter` | Show filter details |
 | `show config` | Display local configuration |

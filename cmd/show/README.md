@@ -34,20 +34,19 @@ lc show status -P localhost:55555 --insecure
 }
 ```
 
-### Hunters
+### Hunter
 
-Show connected hunter details and statistics.
+Show details for a specific hunter.
 
 ```bash
-# List all connected hunters (TLS with CA verification)
-lc show hunters -P processor.example.com:55555 --tls-ca ca.crt
-
-# Show a specific hunter
-lc show hunters -P processor.example.com:55555 --tls-ca ca.crt --hunter edge-01
+# Show a specific hunter (TLS with CA verification)
+lc show hunter --id edge-01 -P processor.example.com:55555 --tls-ca ca.crt
 
 # Local testing without TLS
-lc show hunters -P localhost:55555 --insecure
+lc show hunter --id edge-01 -P localhost:55555 --insecure
 ```
+
+> **Note:** To list all connected hunters, use `lc list hunters -P processor:55555 --tls-ca ca.crt`.
 
 **Output (list):**
 ```json

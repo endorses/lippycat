@@ -30,10 +30,11 @@ lc
 │   └── remote             Remote node monitoring TUI
 ├── list                   List resources
 │   ├── interfaces         List network interfaces
+│   ├── hunters            List connected hunters
 │   └── filters            List active filters
 ├── show                   Display diagnostics
 │   ├── status             Processor status
-│   ├── hunters            Connected hunters
+│   ├── hunter             Specific hunter details
 │   ├── topology           Distributed topology
 │   ├── filter             Filter details
 │   └── config             Local configuration
@@ -677,6 +678,24 @@ See [Chapter 10: CLI Administration](../part4-administration/cli-admin.md).
 
 ---
 
+### `lc list hunters`
+
+List connected hunters on a processor node.
+
+```
+lc list hunters [flags]
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--processor` | `-P` | string | | Processor address |
+
+Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
+
+See [Chapter 10: CLI Administration](../part4-administration/cli-admin.md).
+
+---
+
 ### `lc show status`
 
 Display processor node status.
@@ -693,18 +712,18 @@ Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 
 ---
 
-### `lc show hunters`
+### `lc show hunter`
 
-Display connected hunters and their status.
+Display details for a specific hunter.
 
 ```
-lc show hunters [flags]
+lc show hunter [flags]
 ```
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--processor` | `-P` | string | **required** | Processor address |
-| `--hunter` | | string | | Filter by specific hunter ID |
+| `--id` | | string | **required** | Hunter ID to display |
 
 Plus [TLS Client Flags](#tls-client-flags) and `--insecure`.
 

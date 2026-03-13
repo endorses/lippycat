@@ -171,7 +171,7 @@ type HunterInfo struct {
 
 ### CLI Commands (lc show)
 
-The CLI commands `lc show topology`, `lc show hunters`, and `lc show status` output JSON via the `statusclient` package.
+The CLI commands `lc show topology`, `lc show hunter`, `lc list hunters`, and `lc show status` output JSON via the `statusclient` package.
 
 **File:** `internal/pkg/statusclient/json.go`
 
@@ -191,7 +191,8 @@ type HunterStatsJSON struct {
 The `hunterToJSON()` function (lines 112-143) maps proto fields to these JSON structures.
 
 **Commands affected:**
-- `lc show hunters` - Lists hunters with stats
+- `lc list hunters` - Lists all connected hunters
+- `lc show hunter --id <id>` - Shows specific hunter with stats
 - `lc show topology` - Shows full topology tree including hunter stats
 - `lc show status` - Shows processor summary (no hunter details)
 
@@ -362,7 +363,7 @@ if h.Stats != nil {
 }
 ```
 
-This ensures `lc show hunters` and `lc show topology` include CPU/RAM in JSON output.
+This ensures `lc list hunters`, `lc show hunter`, and `lc show topology` include CPU/RAM in JSON output.
 
 ### Layer 7: TUI Display
 

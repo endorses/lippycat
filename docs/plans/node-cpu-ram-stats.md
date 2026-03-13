@@ -328,7 +328,7 @@ Add CPU/RAM lines to hunter box rendering.
    sudo lc hunt --processor localhost:55555 -i eth0 --insecure
 
    # Check CLI output
-   lc show hunters -P localhost:55555 --insecure
+   lc list hunters -P localhost:55555 --insecure
    # Verify cpu_percent and memory_rss_bytes in JSON
 
    # Check TUI
@@ -340,7 +340,7 @@ Add CPU/RAM lines to hunter box rendering.
    ```bash
    sudo lc tap voip -i eth0 --insecure
 
-   lc show hunters -P localhost:55555 --insecure
+   lc list hunters -P localhost:55555 --insecure
    # Virtual hunter should show CPU/RAM
 
    lc watch remote --nodes localhost:55555 --insecure

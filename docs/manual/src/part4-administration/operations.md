@@ -128,7 +128,7 @@ systemctl is-active lippycat-processor
 lc show status -P localhost:55555 --tls-ca ca.crt
 
 # Hunters connected?
-lc show hunters -P localhost:55555 --tls-ca ca.crt
+lc list hunters -P localhost:55555 --tls-ca ca.crt
 ```
 
 ### Daily Health Check Script
@@ -397,7 +397,7 @@ Run monthly:
 - [ ] Config file has restrictive permissions (`ls -la /etc/lippycat/config.yaml`)
 - [ ] TLS certificates are not expired (`openssl x509 -enddate -noout -in cert.crt`)
 - [ ] `LIPPYCAT_PRODUCTION=true` is set (blocks `--insecure`)
-- [ ] No unauthorized hunters connected (`lc show hunters -P ...`)
+- [ ] No unauthorized hunters connected (`lc list hunters -P ...`)
 - [ ] PCAP directories have appropriate permissions
 - [ ] Firewall rules restrict port 55555 to authorized hosts
 

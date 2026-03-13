@@ -26,6 +26,7 @@ flowchart LR
     Show --> Topo
     Show --> Filters
     List --> Ifaces
+    List --> Hunters
     List --> Filters
     Set --> Filters
     Rm --> Filters
@@ -86,16 +87,13 @@ lc show status -P processor:55555 --tls-ca ca.crt
 }
 ```
 
-### `show hunters`
+### `show hunter`
 
-Display connected hunter details:
+Display details for a specific hunter:
 
 ```bash
-# All hunters
-lc show hunters -P processor:55555 --tls-ca ca.crt
-
 # Specific hunter
-lc show hunters -P processor:55555 --tls-ca ca.crt --hunter edge-01
+lc show hunter --id edge-01 -P processor:55555 --tls-ca ca.crt
 ```
 
 ```json
@@ -191,6 +189,15 @@ The command filters out interfaces not useful for monitoring (loopback, Docker/c
 
 ```bash
 sudo lc list interfaces
+```
+
+### `list hunters`
+
+List connected hunters on a remote processor:
+
+```bash
+# All connected hunters
+lc list hunters -P processor:55555 --tls-ca ca.crt
 ```
 
 ### `list filters`

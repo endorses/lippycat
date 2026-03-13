@@ -8,7 +8,7 @@ The `show` command provides remote processor diagnostics via gRPC, plus local co
 cmd/show/
 ├── show.go      - Base command (requires subcommand)
 ├── status.go    - Processor status (gRPC)
-├── hunters.go   - Hunter details (gRPC)
+├── hunter.go    - Specific hunter details (gRPC)
 ├── topology.go  - Distributed topology (gRPC)
 ├── filter.go    - Filter details (delegates to cmd/filter)
 └── config.go    - Local configuration display
@@ -22,7 +22,7 @@ cmd/show/
 
 Commands that query remote processors:
 - `show status` - Processor stats via `GetHunterStatus`
-- `show hunters` - Hunter details via `GetHunterStatus`
+- `show hunter` - Specific hunter details via `GetHunterStatus`
 - `show topology` - Full topology via `GetTopology`
 - `show filter` - Filter details (delegated to cmd/filter)
 
@@ -88,7 +88,7 @@ json, err := statusclient.TopologyToJSON(topo)
 | Command | gRPC Method | Response |
 |---------|-------------|----------|
 | `show status` | `GetHunterStatus` | ProcessorStats |
-| `show hunters` | `GetHunterStatus` | []ConnectedHunter |
+| `show hunter` | `GetHunterStatus` | ConnectedHunter |
 | `show topology` | `GetTopology` | ProcessorNode (recursive) |
 | `show filter` | `GetFilters` | Filter (via filterclient) |
 

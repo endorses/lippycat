@@ -236,7 +236,8 @@ VERBS:
 - **`lc list interfaces`** - List network interfaces ([docs](cmd/list/CLAUDE.md))
 - **`lc show`** - Processor diagnostics ([docs](cmd/show/CLAUDE.md))
   - `show status` - Processor status (requires `-P`)
-  - `show hunters` - Connected hunters (requires `-P`)
+  - `show hunter` - Specific hunter details (requires `-P`)
+  - `list hunters` - List connected hunters (requires `-P`)
   - `show topology` - Distributed topology (requires `-P`)
   - `show filter` - Filter details (requires `-P`)
   - `show config` - Local configuration display

@@ -110,7 +110,8 @@ The core of lippycat's value proposition. This is the largest and most important
 
 - [x] `lc show` commands (all require `-P` processor address except `show config`)
   - [x] `show status` — processor health and statistics
-  - [x] `show hunters` — connected hunter list and status
+  - [x] `show hunter` — specific hunter details
+  - [x] `list hunters` — connected hunter list
   - [x] `show topology` — distributed topology visualization
   - [x] `show filter` — active filter details
   - [x] `show config` — local configuration display (no `-P` needed)

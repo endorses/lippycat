@@ -568,7 +568,7 @@ top -p $(pgrep -f 'lc (sniff|hunt|process|tap)')
 watch -n 5 'lc show status -P localhost:55555 --insecure'
 
 # Hunter status
-watch -n 5 'lc show hunters -P localhost:55555 --insecure'
+watch -n 5 'lc list hunters -P localhost:55555 --insecure'
 ```
 
 ### Configuration Verification

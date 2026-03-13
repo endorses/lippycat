@@ -251,12 +251,13 @@ PART IV: ADMINISTRATION & MONITORING
 ├── Chapter 10: CLI Administration
 │   ├── lc show commands
 │   │   ├── show status
-│   │   ├── show hunters
+│   │   ├── show hunter
 │   │   ├── show topology
 │   │   └── show filter
 │   │
 │   ├── lc list commands
 │   │   ├── list interfaces
+│   │   ├── list hunters
 │   │   └── list filters
 │   │
 │   └── lc set/rm commands (filter management)

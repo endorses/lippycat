@@ -348,7 +348,7 @@ sudo iptables -L -n | grep 55555
 
 ### No Packets Displayed
 
-- Check that hunters are actually connected to the processor: `lc show hunters -P processor:55555 --tls-ca ca.crt`
+- Check that hunters are actually connected to the processor: `lc list hunters -P processor:55555 --tls-ca ca.crt`
 - Verify traffic exists on the hunter's interface: `sudo tcpdump -i eth0 -c 10`
 - Check if you're subscribed to any hunters (press `s` in Nodes tab)
 - Try without BPF filters to rule out over-filtering

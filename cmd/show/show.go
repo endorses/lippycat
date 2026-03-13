@@ -14,20 +14,19 @@ var ShowCmd = &cobra.Command{
 
 Subcommands:
   status   - Show processor status and statistics (requires -P)
-  hunters  - Show connected hunter details (requires -P)
+  hunter   - Show details for a specific hunter (requires -P, --id)
   topology - Show distributed topology (requires -P)
-  filter   - Show filter details (requires -P)
+  filter   - Show filter details (requires -P, --id)
   config   - Display local configuration
 
 TLS is enabled by default for remote commands. Use --insecure for local testing.
 
 Examples:
-  lc show status -P proc:55555 --tls-ca ca.crt   # Show processor status
-  lc show hunters -P proc:55555 --tls-ca ca.crt  # List connected hunters
-  lc show topology -P proc:55555 --tls-ca ca.crt # Show full topology
-  lc show filter --id myfilter -P proc:55555 --tls-ca ca.crt
-  lc show status -P localhost:55555 --insecure   # Local testing
-  lc show config                                 # Show local config`,
+  lc show status -P proc:55555 --tls-ca ca.crt                    # Processor status
+  lc show hunter --id edge-01 -P proc:55555 --tls-ca ca.crt       # Specific hunter
+  lc show topology -P proc:55555 --tls-ca ca.crt                  # Full topology
+  lc show filter --id myfilter -P proc:55555 --tls-ca ca.crt      # Specific filter
+  lc show config                                                   # Local config`,
 	// No Run function - requires a subcommand
 }
 

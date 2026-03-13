@@ -794,7 +794,7 @@ ls /proc/$(pgrep -f "lc ")/fd | wc -l
 lc show status -P processor:55555 --tls-ca ca.crt
 
 # List connected hunters
-lc show hunters -P processor:55555 --tls-ca ca.crt
+lc list hunters -P processor:55555 --tls-ca ca.crt
 
 # View network topology
 lc show topology -P processor:55555 --tls-ca ca.crt

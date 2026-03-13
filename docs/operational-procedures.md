@@ -114,7 +114,7 @@ echo -e "\n=== Health Check Complete ==="
 lc show status -P processor:55555 --tls-ca ca.crt
 
 # List connected hunters
-lc show hunters -P processor:55555 --tls-ca ca.crt
+lc list hunters -P processor:55555 --tls-ca ca.crt
 
 # View topology
 lc show topology -P processor:55555 --tls-ca ca.crt

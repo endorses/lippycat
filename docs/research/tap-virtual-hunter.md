@@ -25,7 +25,7 @@ Hunter information flows through three main gRPC methods:
 | Method | File | Lines | Used By |
 |--------|------|-------|---------|
 | `GetTopology()` | processor_grpc_handlers.go | 440-502 | TUI NodesView |
-| `GetHunterStatus()` | processor_grpc_handlers.go | 281-313 | CLI `show hunters` |
+| `GetHunterStatus()` | processor_grpc_handlers.go | 281-313 | CLI `list hunters`, `show hunter` |
 | `ListAvailableHunters()` | processor_grpc_handlers.go | 315-341 | TUI HunterSelector |
 
 All three would need virtual hunter injection for consistency.

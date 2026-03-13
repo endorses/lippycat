@@ -540,6 +540,15 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 
 ## Documentation Index
 
+### User Manual (mdBook)
+- [docs/manual/](docs/manual/) - Comprehensive mdBook documentation site (`mdbook serve` to preview)
+  - Part I: Foundations (introduction, core concepts, installation)
+  - Part II: Local Capture (sniff, watch local)
+  - Part III: Distributed Capture (architecture, hunt, process, tap)
+  - Part IV: Administration & Monitoring (CLI admin, remote TUI, operations runbook)
+  - Part V: Production & Advanced (security, performance, protocol deep dives, LI, troubleshooting)
+  - Appendices: Command reference, config reference, BPF filters, filter types, glossary
+
 ### User Documentation (README.md)
 - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage, flags, examples
 - [cmd/tap/README.md](cmd/tap/README.md) - Tap (standalone) command usage

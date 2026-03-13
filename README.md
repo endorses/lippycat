@@ -12,7 +12,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
 
-**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.9.3 - Early development. Expect breaking changes.
+**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.9.4 - Early development. Expect breaking changes.
 
 ## Table of Contents
 

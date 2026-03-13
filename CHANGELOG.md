@@ -8,13 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.4] - 2026-03-13
 
 ### Added
-- CLI refactoring, IMSI/IMEI filtering, test fixes, CI improvements, and user manual
+- **IMSI/IMEI filtering**: Added IMSI and IMEI to ValidFilterTypes for targeted subscriber filtering
+- **User manual**: Comprehensive user manual covering distributed capture (Part III), administration & monitoring (Part IV), production & advanced topics (Part V), and appendices (A-D)
+- **Filter Type Reference**: New appendix consolidating all filter types and their matching strategies
+- **Mermaid diagrams**: Added mermaid diagram support to user manual for distributed architecture visualization
 
 ### Changed
-- TODO: Add detailed changelog entries
+- **CLI refactoring**: Split `show hunters` into separate `list hunters` and `show hunter` commands for clearer semantics
+- Renamed `tui.*` config keys to `watch.*` in documentation
+- Updated website URL to HTTPS in CLI help text
 
 ### Fixed
-- TODO: Add fixed items
+- **Test race**: Resolved race condition in TestCallCompletionMonitor_CancelPendingClose
+- **CI**: Bumped codecov action to v5 and made non-blocking
+- **CI**: Corrected GitHub Actions versions in manual workflow
+- **CI**: Fixed trigger for manual deploy on workflow file changes
 
 ## [0.9.3] - 2026-03-11
 

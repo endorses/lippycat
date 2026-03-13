@@ -24,7 +24,7 @@ Subcommands:
 Examples:
   lc watch                          # Live capture (default)
   lc watch live -i eth0             # Live capture on eth0
-  lc watch file -r capture.pcap
+  lc watch file capture.pcap
   lc watch remote -n nodes.yaml --tls-ca ca.crt
   lc watch remote -n nodes.yaml --insecure  # Local testing only`,
 	Run: func(cmd *cobra.Command, args []string) {

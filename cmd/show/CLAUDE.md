@@ -21,8 +21,8 @@ cmd/show/
 ### Remote Commands (gRPC-based)
 
 Commands that query remote processors:
-- `show status` - Processor stats via `GetHunterStatus`
-- `show hunter` - Specific hunter details via `GetHunterStatus`
+- `show status` - Processor stats via `GetStatus`
+- `show hunter` - Specific hunter details via `GetHunters`
 - `show topology` - Full topology via `GetTopology`
 - `show filter` - Filter details (delegated to cmd/filter)
 
@@ -87,8 +87,8 @@ json, err := statusclient.TopologyToJSON(topo)
 
 | Command | gRPC Method | Response |
 |---------|-------------|----------|
-| `show status` | `GetHunterStatus` | ProcessorStats |
-| `show hunter` | `GetHunterStatus` | ConnectedHunter |
+| `show status` | `GetStatus` | ProcessorStats |
+| `show hunter` | `GetHunters` | ConnectedHunter |
 | `show topology` | `GetTopology` | ProcessorNode (recursive) |
 | `show filter` | `GetFilters` | Filter (via filterclient) |
 

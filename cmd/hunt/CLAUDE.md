@@ -27,13 +27,13 @@ Hunters are **edge capture agents** that:
 ├──────────────────────────────────────────────────────────────┤
 │  Uses internal/pkg/                                          │
 │    ├── hunter/          - Core hunter logic                  │
-│    │   ├── hunter.go    - Main hunter implementation         │
-│    │   ├── config.go    - Configuration                      │
-│    │   └── client.go    - gRPC client                        │
+│    │   ├── hunter.go    - Main hunter impl & config          │
+│    │   └── connection/manager.go - gRPC client               │
 │    ├── capture/         - Packet capture                     │
 │    ├── voip/            - VoIP filtering & buffering         │
-│    │   ├── buffer_manager.go  - Call buffering               │
-│    │   └── filter_matcher.go  - Filter matching              │
+│    │   ├── buffermanager.go   - Call buffering               │
+│    │   └── filter.go          - Filter builders              │
+│    ├── hunter/filter/matcher.go - Filter matching            │
 │    └── tlsutil/         - TLS configuration                  │
 ├──────────────────────────────────────────────────────────────┤
 │  gRPC Protocol: api/proto/                                   │
@@ -153,7 +153,7 @@ cancel()  // Triggers shutdown
 
 ### 2. VoIP Buffering Pattern
 
-**File:** `internal/pkg/voip/buffer_manager.go`
+**File:** `internal/pkg/voip/buffermanager.go`
 
 **Problem:** SIP calls take time to identify (need to parse SIP headers), but we must capture all packets (including RTP) from call start.
 
@@ -162,15 +162,18 @@ cancel()  // Triggers shutdown
 ```go
 bufferMgr := voip.NewBufferManager(maxAge, maxSize)
 
-// Buffer packet with call-ID
-bufferMgr.AddPacket(callID, packetData)
+// Buffer SIP packet with call-ID
+bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, linkType)
 
-// On filter match: flush buffered packets
-packets := bufferMgr.GetAndClearBuffer(callID)
+// Buffer RTP packet by port
+bufferMgr.AddRTPPacket(callID, port, packet)
+
+// On filter match: check and flush buffered packets
+matched, packets := bufferMgr.CheckFilter(callID, filterFunc)
 // Forward all packets to processor
 
 // On filter no-match: discard buffer
-bufferMgr.ClearBuffer(callID)
+bufferMgr.DiscardBuffer(callID)
 ```
 
 **Memory Safety:**
@@ -180,7 +183,7 @@ bufferMgr.ClearBuffer(callID)
 
 ### 3. Filter Subscription Pattern
 
-**File:** `internal/pkg/hunter/client.go`
+**File:** `internal/pkg/hunter/connection/manager.go`
 
 Hunters subscribe to filter updates from processor:
 
@@ -504,7 +507,7 @@ _ = voip.NewSipStreamFactory(ctx, tcpHandler)
 
 ### Reconnection Pattern
 
-**File:** `internal/pkg/hunter/client.go`
+**File:** `internal/pkg/hunter/connection/manager.go`
 
 ```go
 for {
@@ -560,7 +563,7 @@ message Filter {
 }
 ```
 
-2. Implement in `internal/pkg/voip/filter_matcher.go`:
+2. Implement in `internal/pkg/hunter/filter/matcher.go`:
 ```go
 case "newtype":
     return matchNewType(packet, pattern)

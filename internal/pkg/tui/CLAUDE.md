@@ -15,8 +15,7 @@ The TUI provides **interactive real-time monitoring** in three modes:
 ┌──────────────────────────────────────────────────────────────────┐
 │                          TUI Application                         │
 ├──────────────────────────────────────────────────────────────────┤
-│  cmd/tui/                                                        │
-│    ├── tui.go           - Command entry point                    │
+│  internal/pkg/tui/                                               │
 │    ├── model.go         - Bubbletea model (app state)            │
 │    ├── view_renderer.go - Main view rendering                    │
 │    └── components/      - Reusable UI components                 │
@@ -29,10 +28,10 @@ The TUI provides **interactive real-time monitoring** in three modes:
 │         ├── hunterselector.go   - Hunter subscription modal      │
 │         └── nodesview.go        - Remote nodes management        │
 ├──────────────────────────────────────────────────────────────────┤
-│  Three Capture Modes (polymorphic):                              │
-│    ├── live_capture.go     - Local interface capture             │
-│    ├── offline_capture.go  - PCAP file playback                  │
-│    └── remote_capture.go   - Distributed node monitoring         │
+│  Three Capture Modes (enum-based):                               │
+│    ├── CaptureModeLive     - Local interface capture             │
+│    ├── CaptureModeOffline  - PCAP file playback                  │
+│    └── CaptureModeRemote   - Distributed node monitoring         │
 │        Uses: internal/pkg/remotecapture (EventHandler pattern)   │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -69,15 +68,12 @@ NOT included in `hunter`, `processor`, or `cli` specialized builds.
 
 ### Core Components
 
-**File:** `cmd/tui/model.go`
+**File:** `internal/pkg/tui/model.go`
 
 ```go
-type model struct {
-    // Capture mode (polymorphic)
-    captureMode    CaptureMode  // Live/Offline/Remote
-    liveCapture    *LiveCapture
-    offlineCapture *OfflineCapture
-    remoteCapture  *RemoteCapture
+type Model struct {
+    // Capture mode
+    captureMode    CaptureMode  // CaptureModeLive/CaptureModeOffline/CaptureModeRemote
 
     // UI state
     width, height  int
@@ -94,61 +90,44 @@ type model struct {
 }
 ```
 
-**Polymorphic Capture:** Single interface, three implementations.
+**Mode-specific behavior:** Handled via switch on `captureMode` within Update/View methods.
 
-## Capture Mode Pattern (Polymorphism)
+## Capture Mode Pattern
 
-### Interface Design
+### Mode Selection
 
-Each capture mode implements common lifecycle:
+Capture modes are represented as enum constants (not a polymorphic interface):
 
 ```go
-type CaptureMode interface {
-    Start(ctx context.Context) error
-    Stop() error
-    GetPackets() []types.PacketDisplay
-    GetStats() Stats
-}
+// internal/pkg/tui/components/settings/factory.go
+const (
+    CaptureModeLive    CaptureMode = iota  // Local interface capture
+    CaptureModeOffline                      // PCAP file playback
+    CaptureModeRemote                       // Distributed node monitoring
+)
 ```
 
-### Live Mode
+The `cmd/watch/` subcommands (live, file, remote) create the TUI model with the appropriate mode flag. Mode-specific behavior is handled within the model's Update/View methods rather than through separate capture type implementations.
 
-**File:** `cmd/tui/live_capture.go`
+### Live Mode
 
 **Flow:**
 ```
 Interface → gopacket → VoIP Analysis → Display
 ```
 
-**Implementation:**
-```go
-type LiveCapture struct {
-    iface      string
-    packets    []types.PacketDisplay
-    packetChan chan types.PacketDisplay
-}
-
-func (lc *LiveCapture) Start(ctx context.Context) error {
-    // Start gopacket capture
-    // Feed packets to packetChan
-    // TUI receives via tea.Cmd
-}
-```
+Capture runs in a background goroutine started by `cmd/watch/live.go`.
 
 ### Offline Mode
 
-**File:** `cmd/tui/offline_capture.go`
-
 **Flow:**
 ```
-PCAP File → gopacket → Replay → Display
+PCAP File(s) → gopacket → Replay → Display
 ```
 
-**Challenge:** Timing control (pause/resume/seek)
+Supports multiple PCAP files merged into a single display.
 
 ### Remote Mode
-
-**File:** `cmd/tui/remote_capture.go`
 
 **Flow:**
 ```
@@ -181,7 +160,7 @@ func (m *model) OnDisconnect(address string, err error) {
 
 ### Unified Modal Pattern
 
-**File:** `cmd/tui/components/modal.go`
+**File:** `internal/pkg/tui/components/modal.go`
 
 **IMPORTANT:** All modals MUST use `RenderModal()` for consistency.
 
@@ -231,7 +210,7 @@ type ModalComponent interface {
 
 **Toast Notifications:**
 
-**File:** `cmd/tui/components/toast.go`
+**File:** `internal/pkg/tui/components/toast.go`
 
 **Pattern:** Queue-based, auto-dismiss
 
@@ -253,7 +232,7 @@ toast.Update(ToastTickMsg{})  // Decrements timer
 
 ### Context-Aware Footer
 
-**File:** `cmd/tui/components/footer.go`
+**File:** `internal/pkg/tui/components/footer.go`
 
 **Pattern:** Tab-specific keybindings with two sections
 
@@ -318,7 +297,7 @@ type ToastTickMsg struct {
 
 ### Message Routing
 
-**File:** `cmd/tui/model.go`
+**File:** `internal/pkg/tui/model.go`
 
 ```go
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -346,7 +325,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 ### 1. EventHandler Integration Pattern
 
-**File:** `cmd/tui/remote_capture.go`
+**File:** `internal/pkg/tui/remote_capture.go`
 
 TUI implements `types.EventHandler` interface:
 
@@ -408,7 +387,7 @@ component.Deactivate()
 
 ### 4. Selective Hunter Subscription Pattern
 
-**File:** `cmd/tui/components/hunterselector.go`
+**File:** `internal/pkg/tui/components/hunterselector.go`
 
 **Challenge:** Proto3 can't distinguish empty list from nil.
 
@@ -443,7 +422,7 @@ req := &pb.SubscribeRequest{
 
 ### 5. Theme Pattern
 
-**File:** `cmd/tui/components/modal.go`
+**File:** `internal/pkg/tui/components/modal.go`
 
 Centralized styling:
 
@@ -465,7 +444,7 @@ var DefaultTheme = Theme{
 
 ### 6. Processor Reconnection Pattern
 
-**File:** `cmd/tui/capture_events.go`
+**File:** `internal/pkg/tui/capture_events.go`
 
 **Challenge:** Handle extended network outages (laptop standby, network interruptions) without exhausting resources.
 
@@ -540,7 +519,7 @@ func (m *model) addPackets(packets []types.PacketDisplay) {
 
 ### Node Management
 
-**File:** `cmd/tui/components/nodesview.go`
+**File:** `internal/pkg/tui/components/nodesview.go`
 
 Nodes loaded from YAML file:
 
@@ -716,6 +695,5 @@ type model struct {
 ## Related Documentation
 
 - [README.md](README.md) - User-facing TUI documentation
-- [../process/CLAUDE.md](../process/CLAUDE.md) - Processor architecture (remote mode target)
-- [../../internal/pkg/remotecapture/CLAUDE.md](../../internal/pkg/remotecapture/CLAUDE.md) - Remote capture client (if exists)
+- [../../../cmd/process/CLAUDE.md](../../../cmd/process/CLAUDE.md) - Processor architecture (remote mode target)
 - [../../docs/TUI_REMOTE_CAPTURE.md](../../docs/TUI_REMOTE_CAPTURE.md) - Remote capture guide

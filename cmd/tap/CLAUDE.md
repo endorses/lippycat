@@ -244,18 +244,18 @@ func (t *LocalTarget) filterToBPF(f *management.Filter) string {
 
 ### 5. Tap Command Integration Pattern
 
-**File:** `cmd/tap/tap.go:407-435`
+**File:** `cmd/tap/tap.go`
 
 Wiring LocalSource and LocalTarget to the processor:
 
 ```go
 // Create LocalSource for local packet capture
 localSourceConfig := source.LocalSourceConfig{
-    Interfaces:   getStringSliceConfig("tap.interfaces", interfaces),
-    BPFFilter:    getStringConfig("tap.bpf_filter", bpfFilter),
-    BatchSize:    getIntConfig("tap.batch_size", batchSize),
-    BatchTimeout: time.Duration(getIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
-    BufferSize:   getIntConfig("tap.buffer_size", bufferSize),
+    Interfaces:   cmdutil.GetStringSliceConfig("tap.interfaces", interfaces),
+    BPFFilter:    cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter),
+    BatchSize:    cmdutil.GetIntConfig("tap.batch_size", batchSize),
+    BatchTimeout: time.Duration(cmdutil.GetIntConfig("tap.batch_timeout_ms", batchTimeout)) * time.Millisecond,
+    BufferSize:   cmdutil.GetIntConfig("tap.buffer_size", bufferSize),
     BatchBuffer:  1000,
 }
 localSource := source.NewLocalSource(localSourceConfig)
@@ -276,16 +276,16 @@ p.SetFilterTarget(localTarget)
 
 ### 6. VoIP Tap BPF Optimization Pattern
 
-**File:** `cmd/tap/tap_voip.go:122-157`
+**File:** `cmd/tap/tap_voip.go`
 
 VoIP mode builds optimized BPF filters for high-traffic networks:
 
 ```go
 // Build optimized BPF filter using VoIPFilterBuilder
-baseBPFFilter := getStringConfig("tap.bpf_filter", bpfFilter)
+baseBPFFilter := cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
 effectiveBPFFilter := baseBPFFilter
 
-if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {
+if viper.GetBool("tap.voip.udp_only") || viper.GetString("tap.voip.sip_ports") != "" || viper.GetString("tap.voip.rtp_port_ranges") != "" {
     builder := voip.NewVoIPFilterBuilder()
     filterConfig := voip.VoIPFilterConfig{
         SIPPorts:      parsedSIPPorts,
@@ -307,13 +307,13 @@ if voipUDPOnly || voipSIPPorts != "" || voipRTPPortRanges != "" {
 
 ### 7. Per-Call PCAP Default Pattern
 
-**File:** `cmd/tap/tap_voip.go:165-169`
+**File:** `cmd/tap/tap_voip.go`
 
 VoIP tap mode enables per-call PCAP by default:
 
 ```go
 // Default to enabling per-call PCAP for VoIP mode if not explicitly set
-effectivePerCallPcap := getBoolConfig("tap.per_call_pcap.enabled", perCallPcapEnabled)
+effectivePerCallPcap := cmdutil.GetBoolConfig("tap.per_call_pcap.enabled", perCallPcapEnabled)
 if !cmd.Flags().Changed("per-call-pcap") && !viper.IsSet("tap.per_call_pcap.enabled") {
     // VoIP mode should default to per-call PCAP enabled
     effectivePerCallPcap = true
@@ -322,7 +322,7 @@ if !cmd.Flags().Changed("per-call-pcap") && !viper.IsSet("tap.per_call_pcap.enab
 
 ### 8. Security Banner Pattern
 
-**File:** `cmd/tap/tap.go:376-400`
+**File:** `cmd/tap/tap.go`
 
 Prominent security warnings for insecure mode:
 
@@ -424,15 +424,14 @@ tap:
 
 ### Helper Functions Pattern
 
-Same pattern as hunt/process:
+Same pattern as hunt/process. Helper functions are in the `internal/pkg/cmdutil/` package and called as exported functions with the `cmdutil.` prefix:
 
 ```go
-func getStringConfig(key, flagValue string) string {
-    if flagValue != "" {
-        return flagValue
-    }
-    return viper.GetString(key)
-}
+// Example usage in tap commands:
+cmdutil.GetStringConfig("tap.bpf_filter", bpfFilter)
+cmdutil.GetIntConfig("tap.batch_size", batchSize)
+cmdutil.GetBoolConfig("tap.per_call_pcap.enabled", perCallPcapEnabled)
+cmdutil.GetStringSliceConfig("tap.interfaces", interfaces)
 ```
 
 ## Performance Considerations
@@ -539,7 +538,7 @@ _ = viper.BindPFlag("tap.new_option", TapCmd.Flags().Lookup("new-option"))
 2. Pass to LocalSourceConfig:
 ```go
 localSourceConfig := source.LocalSourceConfig{
-    NewOption: getIntConfig("tap.new_option", newOption),
+    NewOption: cmdutil.GetIntConfig("tap.new_option", newOption),
 }
 ```
 

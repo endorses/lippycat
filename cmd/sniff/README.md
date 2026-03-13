@@ -609,7 +609,7 @@ Expose filtered packet streams to third-party tools (Wireshark, tcpdump, Snort) 
 
 ```bash
 # PCAP replay with filtering (tcpreplay alternative)
-sudo lc sniff voip -r capture.pcap --sipuser alice --virtual-interface
+sudo lc sniff voip -r capture.pcap --sip-user alice --virtual-interface
 
 # Monitor in another terminal
 wireshark -i lc0
@@ -620,7 +620,7 @@ wireshark -i lc0
 #### 1. PCAP Replay Filtering
 ```bash
 # Replay large PCAP, filter for specific user
-sudo lc sniff voip -r 10GB-capture.pcap --sipuser alice --virtual-interface
+sudo lc sniff voip -r 10GB-capture.pcap --sip-user alice --virtual-interface
 
 # Capture filtered stream
 tcpdump -i lc0 -w alice-calls.pcap
@@ -651,7 +651,7 @@ tcpdump -i lc0 -tttt -n
 --virtual-interface              # Enable virtual interface
 --vif-name lc0                   # Interface name (default: lc0)
 --vif-type tap                   # Interface type: tap or tun (default: tap)
---vif-buffer-size 4096           # Injection queue size
+--vif-buffer-size 65536          # Injection queue size (default: 65536)
 --vif-startup-delay 3s           # Delay before injection starts
 --vif-replay-timing              # Respect PCAP timestamps
 ```

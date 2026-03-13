@@ -364,6 +364,6 @@ Each protocol module is independent and can be added without modifying existing 
 
 ## See Also
 
-- [Protocol Detector](../detector/README.md) - Signature-based protocol detection
-- [VoIP Analysis](../voip/README.md) - VoIP-specific call tracking
-- [Capture Pipeline](../capture/README.md) - Packet capture infrastructure
+- `internal/pkg/detector/` - Signature-based protocol detection
+- `internal/pkg/voip/` - VoIP-specific call tracking
+- `internal/pkg/capture/` - Packet capture infrastructure

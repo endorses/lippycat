@@ -25,12 +25,14 @@ Processors are **central aggregation nodes** that:
 │  Uses internal/pkg/                                            │
 │    ├── processor/       - Core processor logic                 │
 │    │   ├── processor.go                - Core types & constructor │
-│    │   ├── processor_lifecycle.go      - Server lifecycle     │
+│    │   ├── processor_lifecycle.go      - Server lifecycle & gRPC │
 │    │   ├── processor_packet_pipeline.go - Packet processing   │
 │    │   ├── processor_grpc_handlers.go  - gRPC services        │
 │    │   ├── config.go                   - Configuration        │
-│    │   ├── filters.go                  - Filter management    │
-│    │   └── subscribers.go              - TUI subscriber mgmt  │
+│    │   ├── subscriber/                 - TUI subscriber mgmt  │
+│    │   ├── filtering/                  - Filter management    │
+│    │   ├── flow/                       - Flow control logic   │
+│    │   └── upstream/                   - Upstream connection   │
 │    ├── detector/        - Protocol detection                   │
 │    └── tlsutil/         - TLS configuration                    │
 ├────────────────────────────────────────────────────────────────┤
@@ -47,14 +49,14 @@ The processor package has been refactored (v0.3.0+) from a single 1,921-line fil
 
 | File | Lines | Purpose | Key Contents |
 |------|-------|---------|--------------|
-| `processor.go` | ~270 | Core types & constructor | Config, Processor struct, New(), GetStats(), embedded gRPC interfaces |
-| `processor_lifecycle.go` | ~250 | Server lifecycle | Start(), Shutdown(), TCP listener creation, gRPC server setup |
-| `processor_packet_pipeline.go` | ~200 | Packet processing | processBatch(), PCAP coordination, call aggregation, protocol detection |
-| `processor_grpc_handlers.go` | ~1,200 | gRPC service implementations | 21 gRPC methods (data service, management service), helper functions |
+| `processor.go` | ~594 | Core types & constructor | Config, Processor struct, New(), GetStats(), embedded gRPC interfaces |
+| `processor_lifecycle.go` | ~408 | Server lifecycle | Start(), Shutdown(), TCP listener creation, gRPC server setup |
+| `processor_packet_pipeline.go` | ~252 | Packet processing | processBatch(), PCAP coordination, call aggregation, protocol detection |
+| `processor_grpc_handlers.go` | ~1,387 | gRPC service implementations | 21 gRPC methods (data service, management service), helper functions |
 
 **Benefits:**
 - **Easier navigation:** Methods grouped by purpose (lifecycle vs. processing vs. gRPC)
-- **Faster file loading:** Average file size reduced from 1,921 to ~480 lines
+- **Faster file loading:** Average file size reduced from 1,921 to ~660 lines
 - **Clearer separation:** Core types, lifecycle, processing pipeline, and API handlers in separate files
 - **Maintained architecture:** No structural changes, all tests pass unchanged
 
@@ -121,7 +123,7 @@ TUI Client 3 ──┘                  Hunter Status            ↓
 
 ### 1. Multi-Tenant Server Pattern
 
-**File:** `internal/pkg/processor/server.go`
+**File:** `internal/pkg/processor/processor_lifecycle.go`
 
 Processor manages multiple concurrent connections:
 
@@ -138,34 +140,17 @@ type Processor struct {
 
 ### 2. Packet Broadcasting Pattern
 
-**File:** `internal/pkg/processor/subscribers.go`
+**Package:** `internal/pkg/processor/subscriber/`
 
-Broadcast packets to all TUI subscribers without blocking:
+Subscriber management and packet broadcasting have been refactored into the `subscriber` sub-package. Broadcasting distributes packets to all TUI subscribers without blocking.
 
-```go
-func (p *Processor) broadcastPackets(packets []types.PacketDisplay) {
-    p.subscribersMu.RLock()
-    defer p.subscribersMu.RUnlock()
-
-    for _, sub := range p.subscribers {
-        select {
-        case sub.packetChan <- packets:
-            // Sent successfully
-        default:
-            // Channel full, drop packet (don't block other subscribers)
-            atomic.AddUint64(&sub.droppedPackets, 1)
-        }
-    }
-}
-```
-
-**Key Decision:** Slow subscribers don't block hunters or other subscribers.
+**Key Decision:** Slow subscribers don't block hunters or other subscribers. Each subscriber has a buffered channel; full channels cause selective drops rather than blocking.
 
 ### 3. Filter Management Pattern
 
-**File:** `internal/pkg/processor/filters.go`
+**Package:** `internal/pkg/processor/filtering/`
 
-Filters loaded from YAML file and distributed to hunters:
+Filter management has been refactored into the `filtering` sub-package. Filters are loaded from YAML file and distributed to hunters:
 
 ```yaml
 filters:
@@ -175,25 +160,11 @@ filters:
     enabled: true
 ```
 
-**Implementation:**
-
-```go
-// Load filters from file
-filters, err := loadFilters(filterFile)
-
-// Watch file for changes (optional)
-watcher.Add(filterFile)
-
-// On change: reload and redistribute
-newFilters := loadFilters(filterFile)
-p.broadcastFilterUpdate(newFilters)
-```
-
-**Pattern:** File-based with hot-reload (future: gRPC management API).
+**Pattern:** File-based with hot-reload. The `filtering.Manager` handles loading, watching for file changes, and broadcasting filter updates to connected hunters.
 
 ### 4. Per-Subscriber Buffering Pattern
 
-**File:** `internal/pkg/processor/subscribers.go`
+**Package:** `internal/pkg/processor/subscriber/`
 
 Each TUI subscriber has own buffered channel:
 
@@ -217,7 +188,7 @@ sub := &Subscriber{
 
 ### 5. Hunter Subscription Filtering Pattern
 
-**File:** `internal/pkg/processor/subscribers.go`
+**Package:** `internal/pkg/processor/subscriber/`
 
 TUI clients can subscribe to specific hunters:
 
@@ -237,46 +208,17 @@ if sub.hasHunterFilter && !sub.hunterFilter[hunterID] {
 
 ### 6. Flow Control Pattern
 
-**File:** `internal/pkg/processor/processor.go`
+**Package:** `internal/pkg/processor/flow/`
 
-Processor determines flow control based on own state:
-
-```go
-func (p *Processor) determineFlowControl() FlowControl {
-    // Check PCAP write queue utilization
-    queueUtil := float64(len(pcapQueue)) / float64(cap(pcapQueue))
-
-    if queueUtil > 0.90 {
-        return PAUSE
-    } else if queueUtil > 0.70 {
-        return SLOW
-    } else if queueUtil > 0.30 {
-        return CONTINUE
-    }
-    return CONTINUE
-}
-```
+Flow control has been refactored into the `flow` sub-package. The `flow.Controller` determines flow control state based on processor load (PCAP write queue utilization). States: CONTINUE, SLOW, PAUSE, RESUME based on queue utilization thresholds (30%, 70%, 90%).
 
 **Critical:** TUI subscriber drops do NOT trigger flow control (see Architecture Patterns in main CLAUDE.md).
 
 ### 7. Hierarchical Processor Pattern
 
-**File:** `internal/pkg/processor/processor.go`
+**Package:** `internal/pkg/processor/upstream/`
 
-Processor can act as hunter to upstream processor:
-
-```go
-if config.ProcessorAddr != "" {
-    // Create hunter client to upstream
-    upstreamHunter := hunter.New(hunter.Config{
-        ProcessorAddr: config.ProcessorAddr,
-        HunterID:      config.ID + "-upstream",
-    })
-
-    // Forward filtered packets to upstream
-    p.upstreamHunter = upstreamHunter
-}
-```
+Upstream connection management has been refactored into the `upstream` sub-package. A processor can act as a hunter to an upstream processor, forwarding filtered packets for hierarchical aggregation.
 
 **Use Case:** Regional aggregation before central.
 
@@ -737,12 +679,12 @@ Used by TUI clients for real-time monitoring.
 
 ### Production Mode Enforcement
 
-**File:** `cmd/process/process.go:279-289`
+**File:** `cmd/process/process.go`
 
 ```go
 productionMode := os.Getenv("LIPPYCAT_PRODUCTION") == "true"
 if productionMode {
-    if getBoolConfig("insecure", insecureAllowed) {
+    if cmdutil.GetBoolConfig("insecure", insecureAllowed) {
         return fmt.Errorf("LIPPYCAT_PRODUCTION=true does not allow --insecure flag")
     }
     if !tlsClientAuth && !viper.GetBool("processor.tls.client_auth") {
@@ -755,13 +697,13 @@ if productionMode {
 
 ### TLS Secure-by-Default
 
-**File:** `cmd/process/process.go:405-447`
+**File:** `cmd/process/process.go`
 
 TLS is enabled by default. The `--insecure` flag must be explicitly set to disable TLS:
 
 ```go
 // TLS configuration (enabled by default unless --insecure is set)
-TLSEnabled:    !getBoolConfig("insecure", insecureAllowed),
+TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 ```
 
 ```go
@@ -775,7 +717,7 @@ if config.TLSEnabled && (config.TLSCertFile == "" || config.TLSKeyFile == "") {
 
 ### TLS Server Configuration
 
-**File:** `internal/pkg/processor/server.go`
+**File:** `internal/pkg/processor/processor_lifecycle.go`
 
 ```go
 if config.TLSEnabled {
@@ -825,12 +767,10 @@ processor:
 Same pattern as hunter:
 
 ```go
-func getStringConfig(key, flagValue string) string {
-    if flagValue != "" {
-        return flagValue
-    }
-    return viper.GetString(key)
-}
+// From internal/pkg/cmdutil/ package
+cmdutil.GetStringConfig(key, flagValue)
+cmdutil.GetBoolConfig(key, flagValue)
+cmdutil.GetFloat64Config(key, flagValue)
 ```
 
 ## Performance Considerations
@@ -944,7 +884,7 @@ See hunter/CLAUDE.md - filters defined in proto shared by both.
 
 ### Modifying Broadcast Logic
 
-Edit `internal/pkg/processor/subscribers.go` broadcast functions.
+Edit `internal/pkg/processor/subscriber/` package broadcast functions.
 
 ## Dependencies
 

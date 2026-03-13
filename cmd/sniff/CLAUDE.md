@@ -733,7 +733,7 @@ for packet := range packets {
 --virtual-interface              # Enable virtual interface
 --vif-name lc0                   # Interface name
 --vif-type tap                   # Interface type: tap or tun
---vif-buffer-size 4096           # Injection queue size
+--vif-buffer-size 65536          # Injection queue size (default: 65536)
 --vif-startup-delay 3s           # Delay before injection starts
 --vif-replay-timing              # Respect PCAP timestamps
 ```
@@ -745,7 +745,7 @@ virtual_interface:
   enabled: true
   name: lc0
   type: tap
-  buffer_size: 4096
+  buffer_size: 65536
   startup_delay: 3s
   replay_timing: true
 ```

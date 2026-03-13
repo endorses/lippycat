@@ -8,7 +8,8 @@ The `list` command provides resource listing functionality.
 cmd/list/
 ├── list.go        - Base command (requires subcommand)
 ├── interfaces.go  - List network interfaces (local)
-└── filters.go     - List filters on processor (gRPC, delegates to cmd/filter)
+├── filters.go     - List filters on processor (gRPC, delegates to cmd/filter)
+└── hunters.go     - List connected hunter nodes (gRPC)
 ```
 
 **Build Tags:** `cli`, `tui`, `hunter`, or `all`
@@ -17,6 +18,7 @@ cmd/list/
 
 - `list interfaces` - Local command, lists network interfaces
 - `list filters` - Remote command, queries processor via gRPC
+- `list hunters` - Remote command, lists connected hunters via gRPC
 
 **Security:** For remote commands (filters), TLS is enabled by default. Use `--insecure` for local testing.
 

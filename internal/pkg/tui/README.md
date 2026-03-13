@@ -131,7 +131,7 @@ TUI survives network interruptions with intelligent reconnection:
 
 The TUI uses a standardized modal architecture to ensure consistency across all modal dialogs. There is ONE modal rendering function that all modal components must use:
 
-**Unified Modal Component:** `cmd/tui/components/modal.go`
+**Unified Modal Component:** `internal/pkg/tui/components/modal.go`
 
 The `RenderModal()` function provides consistent modal chrome (border, centering, title, footer) for all modals in the codebase.
 
@@ -175,9 +175,9 @@ The `RenderModal()` function provides consistent modal chrome (border, centering
 ### Current Modal Components
 
 All components use unified `RenderModal()`:
-- `ProtocolSelector` - Protocol filter selection (`cmd/tui/components/protocolselector.go`)
-- `HunterSelector` - Hunter subscription selection (`cmd/tui/components/hunterselector.go`)
-- `NodesView.renderAddNodeModal` - Add processor/hunter node (`cmd/tui/components/nodesview.go`)
+- `ProtocolSelector` - Protocol filter selection (`internal/pkg/tui/components/protocolselector.go`)
+- `HunterSelector` - Hunter subscription selection (`internal/pkg/tui/components/hunterselector.go`)
+- `NodesView.renderAddNodeModal` - Add processor/hunter node (`internal/pkg/tui/components/nodesview.go`)
 
 ### When Creating New Modals
 
@@ -198,7 +198,7 @@ All components use unified `RenderModal()`:
 
 ## FileDialog Component
 
-`FileDialog` (`cmd/tui/components/filedialog.go`) - Modal for file/directory operations with navigation and filtering.
+`FileDialog` (`internal/pkg/tui/components/filedialog.go`) - Modal for file/directory operations with navigation and filtering.
 
 **Architecture:**
 - Uses unified `RenderModal()` for consistent chrome
@@ -227,7 +227,7 @@ case FileSelectedMsg:
 
 ## Toast Notifications
 
-`Toast` (`cmd/tui/components/toast.go`) - Non-blocking temporary notifications at bottom-center of screen.
+`Toast` (`internal/pkg/tui/components/toast.go`) - Non-blocking temporary notifications at bottom-center of screen.
 
 **Architecture:**
 - Overlay component (NOT a modal)

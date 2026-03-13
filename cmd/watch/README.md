@@ -31,6 +31,7 @@ lc watch live -i eth0 -p
 - `--gpu-backend` - GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`
 - `--gpu-batch-size` - Batch size for GPU processing (default: 100)
 - `--buffer-size` - Maximum packets in memory (default: 10000)
+- `--debug-log` - Write debug logs to file (helps diagnose capture issues)
 
 ### File Analysis
 
@@ -119,6 +120,7 @@ lc watch remote --insecure
 - `--tls-cert` - Client certificate for mutual TLS
 - `--tls-key` - Client private key for mutual TLS
 - `--tls-skip-verify` - Skip TLS certificate verification (INSECURE - testing only)
+- `--tls-server-name` - Override server name for TLS verification
 - `--buffer-size` - Maximum packets in memory (default: 10000)
 
 ## TUI Navigation

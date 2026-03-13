@@ -29,11 +29,12 @@ func runMode(cmd *cobra.Command, args []string) {
 
     model := tui.NewModel(
         bufferSize,
+        maxCalls,
         interfaceName,
-        filter,
-        pcapFile,
+        bpfFilter,
+        pcapFiles,        // []string - supports multiple PCAP files
         promiscuous,
-        isRemoteMode,
+        startInRemoteMode,
         nodesFilePath,
         insecure,
     )

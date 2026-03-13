@@ -23,7 +23,7 @@ This architecture allows for:
 ### Core Architecture
 - **CLI Framework**: Uses Cobra CLI framework with Viper for configuration
 - **Plugin System**: Extensible architecture allowing protocol-specific analyzers to be added
-- **Build Tags**: Go build tags enable specialized binary variants (hunter, processor, cli, tui, all)
+- **Build Tags**: Go build tags enable specialized binary variants (hunter, processor, tap, cli, tui, all)
 - **Main Components**:
   - `cmd/`: CLI command definitions with build-tag-based variants
   - `cmd/sniff/`: Packet capture command (CLI output)
@@ -33,16 +33,30 @@ This architecture allows for:
   - `cmd/process/`: Processor node implementation for distributed analysis
   - `cmd/list/`: Resource listing commands
   - `cmd/show/`: Diagnostics and information commands
+  - `cmd/set/`: Create or update resources (e.g., `lc set filter`)
+  - `cmd/rm/`: Remove resources (e.g., `lc rm filter`)
+  - `cmd/filter/`: Shared utilities for filter management commands (not a top-level command)
   - `internal/pkg/tui/`: Terminal User Interface with Bubbletea framework
-  - `internal/pkg/types/`: Shared domain types (PacketDisplay, VoIPMetadata, EventHandler)
+  - `internal/pkg/types/`: Shared domain types (PacketDisplay, VoIPMetadata, CallInfo, EventHandler)
   - `internal/pkg/capture/`: Network packet capture functionality using gopacket
   - `internal/pkg/{dns,tls,http,email,voip}/`: Protocol-specific analyzers
+  - `internal/pkg/analyzer/`: Protocol-specific analysis
   - `internal/pkg/hunter/`: Hunter node core logic and gRPC client
   - `internal/pkg/processor/`: Processor node core logic, gRPC server, per-call PCAP writing, and auto-rotating PCAP writing
   - `internal/pkg/remotecapture/`: Remote capture infrastructure with EventHandler pattern
+  - `internal/pkg/filtering/`: Filter parsing, validation, and type conversion
   - `internal/pkg/detector/`: Protocol detection with signature-based matching
+  - `internal/pkg/vinterface/`: Virtual TAP/TUN interface for exposing filtered streams
   - `internal/pkg/simd/`: SIMD optimizations (AVX2/SSE4.2)
+  - `internal/pkg/ahocorasick/`: Aho-Corasick pattern matching
+  - `internal/pkg/phonematcher/`: Phone number matching (Bloom filter + suffix)
   - `internal/pkg/logger/`: Structured logging
+  - `internal/pkg/auth/`: Authentication and authorization
+  - `internal/pkg/tlsutil/`: TLS utilities
+  - `internal/pkg/grpcpool/`: gRPC connection pooling
+  - `internal/pkg/pcap/`: PCAP file handling
+  - `internal/pkg/bpfutil/`: BPF filter utilities
+  - `internal/pkg/sysmetrics/`: System metrics collection
   - `api/proto/`: gRPC protocol buffer definitions
   - `api/gen/data/`: Generated gRPC code for data services
   - `api/gen/management/`: Generated gRPC code for management services
@@ -218,29 +232,49 @@ VERBS:
   watch     Monitor traffic (TUI)
   list      List resources
   show      Display information/diagnostics
+  set       Create or update resources (e.g., set filter)
+  rm        Remove resources (e.g., rm filter)
 ```
 
 ### Available Commands
 
 - **`lc sniff`** - CLI mode packet capture ([docs](cmd/sniff/CLAUDE.md))
-- **`lc sniff voip`** - VoIP-specific capture with SIP/RTP analysis ([docs](cmd/sniff/CLAUDE.md))
+  - `sniff voip` - VoIP-specific capture with SIP/RTP analysis
+  - `sniff dns` - DNS query/response capture
+  - `sniff http` - HTTP request/response capture
+  - `sniff tls` - TLS handshake and fingerprinting
+  - `sniff email` - Email protocol capture (SMTP/IMAP/POP3)
 - **`lc tap`** - Standalone capture with processor capabilities ([docs](cmd/tap/CLAUDE.md))
-- **`lc tap voip`** - VoIP standalone capture with per-call PCAP ([docs](cmd/tap/CLAUDE.md))
+  - `tap voip` - VoIP standalone capture with per-call PCAP
+  - `tap dns` - DNS standalone capture
+  - `tap http` - HTTP standalone capture
+  - `tap tls` - TLS standalone capture
+  - `tap email` - Email standalone capture
 - **`lc watch`** - Interactive TUI, defaults to live mode ([docs](cmd/watch/CLAUDE.md))
-- **`lc watch live`** - Live capture TUI ([docs](cmd/watch/CLAUDE.md))
-- **`lc watch file`** - PCAP file analysis TUI ([docs](cmd/watch/CLAUDE.md))
-- **`lc watch remote`** - Remote node monitoring TUI ([docs](cmd/watch/CLAUDE.md))
+  - `watch live` - Live capture TUI
+  - `watch file` - PCAP file analysis TUI
+  - `watch remote` - Remote node monitoring TUI
 - **`lc hunt`** - Hunter node for distributed edge capture ([docs](cmd/hunt/CLAUDE.md))
-- **`lc hunt voip`** - VoIP hunter with call buffering ([docs](cmd/hunt/CLAUDE.md))
+  - `hunt voip` - VoIP hunter with call buffering
+  - `hunt dns` - DNS hunter
+  - `hunt http` - HTTP hunter
+  - `hunt tls` - TLS hunter
+  - `hunt email` - Email hunter
 - **`lc process`** - Processor node for central aggregation ([docs](cmd/process/CLAUDE.md))
-- **`lc list interfaces`** - List network interfaces ([docs](cmd/list/CLAUDE.md))
+- **`lc list`** - List resources ([docs](cmd/list/CLAUDE.md))
+  - `list interfaces` - List network interfaces
+  - `list hunters` - List connected hunters (requires `-P`)
+  - `list filters` - List remote processor filters (requires `-P`)
 - **`lc show`** - Processor diagnostics ([docs](cmd/show/CLAUDE.md))
   - `show status` - Processor status (requires `-P`)
   - `show hunter` - Specific hunter details (requires `-P`)
-  - `list hunters` - List connected hunters (requires `-P`)
   - `show topology` - Distributed topology (requires `-P`)
   - `show filter` - Filter details (requires `-P`)
   - `show config` - Local configuration display
+- **`lc set`** - Create or update resources
+  - `set filter` - Create or update a filter on a remote processor
+- **`lc rm`** - Remove resources
+  - `rm filter` - Remove a filter from a remote processor
 
 ### Quick Start Examples
 
@@ -356,8 +390,11 @@ The `internal/pkg/remotecapture` package uses the EventHandler pattern to decoup
 // internal/pkg/types/events.go
 type EventHandler interface {
     OnPacketBatch(packets []PacketDisplay)
-    OnHunterStatus(hunters []HunterInfo, processorID string)
+    OnHunterStatus(hunters []HunterInfo, processorID string, processorStatus ProcessorStatus, processorAddr string, upstreamProcessor string)
+    OnCallUpdate(calls []CallInfo)
+    OnCorrelatedCallUpdate(correlatedCalls []CorrelatedCallInfo)
     OnDisconnect(address string, err error)
+    OnTopologyUpdate(update *TopologyUpdate, processorAddr string)
 }
 ```
 
@@ -367,8 +404,12 @@ This allows the remote capture client to work with different frontends (TUI, CLI
 `internal/pkg/types` provides domain types shared across packages:
 - `PacketDisplay`: Common packet representation
 - `VoIPMetadata`: VoIP-specific packet metadata
+- `CallInfo`: VoIP call state (from/to, duration, codec, packet loss, jitter, MOS)
+- `CorrelatedCallInfo`: Multi-hop call correlation across hunters
+- `CallLegInfo`: Per-leg call information
 - `HunterInfo`: Hunter node status
 - `EventHandler`: Event notification interface
+- `NoopEventHandler`: No-op implementation for testing
 
 This prevents circular dependencies and maintains clean architecture boundaries (cmd ← internal, never internal → cmd).
 
@@ -377,6 +418,7 @@ Each command has build-tagged root files:
 - `cmd/root_all.go`: Complete suite (`//go:build all`)
 - `cmd/root_hunter.go`: Hunter only (`//go:build hunter && !all`)
 - `cmd/root_processor.go`: Processor only (`//go:build processor && !all`)
+- `cmd/root_tap.go`: Tap standalone (`//go:build tap && !all`)
 - `cmd/root_cli.go`: CLI only (`//go:build cli && !all`)
 - `cmd/root_tui.go`: TUI only (`//go:build tui && !all`)
 
@@ -500,6 +542,7 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 
 ### User Documentation (README.md)
 - [cmd/sniff/README.md](cmd/sniff/README.md) - Sniff command usage, flags, examples
+- [cmd/tap/README.md](cmd/tap/README.md) - Tap (standalone) command usage
 - [cmd/watch/README.md](cmd/watch/README.md) - Watch (TUI) command usage and keybindings
 - [cmd/hunt/README.md](cmd/hunt/README.md) - Hunter node setup and configuration
 - [cmd/process/README.md](cmd/process/README.md) - Processor node setup and management
@@ -508,12 +551,15 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 
 ### Architecture Documentation (CLAUDE.md - for AI assistants)
 - [cmd/sniff/CLAUDE.md](cmd/sniff/CLAUDE.md) - Sniff architecture, Viper patterns, TCP reassembly
+- [cmd/tap/CLAUDE.md](cmd/tap/CLAUDE.md) - Tap architecture & patterns
 - [cmd/watch/CLAUDE.md](cmd/watch/CLAUDE.md) - Watch command architecture
 - [cmd/hunt/CLAUDE.md](cmd/hunt/CLAUDE.md) - Hunter architecture, gRPC client, VoIP buffering
 - [cmd/process/CLAUDE.md](cmd/process/CLAUDE.md) - Processor architecture, gRPC server, broadcasting
 - [cmd/list/CLAUDE.md](cmd/list/CLAUDE.md) - List command architecture
 - [cmd/show/CLAUDE.md](cmd/show/CLAUDE.md) - Show command architecture
 - [internal/pkg/tui/CLAUDE.md](internal/pkg/tui/CLAUDE.md) - TUI architecture, Bubbletea, EventHandler pattern
+- [internal/pkg/vinterface/CLAUDE.md](internal/pkg/vinterface/CLAUDE.md) - Virtual interface (TAP/TUN) architecture
+- [internal/pkg/processor/proxy/CLAUDE.md](internal/pkg/processor/proxy/CLAUDE.md) - Hierarchical processor proxy
 
 ### Operational Guides
 - [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) - Complete distributed architecture guide (hub-and-spoke, hierarchical)
@@ -528,6 +574,8 @@ When tasks are activated via X1, the LI Manager creates filters that are pushed 
 - [docs/tcp-troubleshooting.md](docs/tcp-troubleshooting.md) - TCP SIP capture troubleshooting
 - [docs/TUI_REMOTE_CAPTURE.md](docs/TUI_REMOTE_CAPTURE.md) - Remote capture with TUI
 - [docs/AF_XDP_SETUP.md](docs/AF_XDP_SETUP.md) - AF_XDP high-performance capture setup
+- [docs/VIRTUAL_INTERFACE.md](docs/VIRTUAL_INTERFACE.md) - Virtual interface (TAP/TUN) for packet injection
+- [docs/API_KEY_AUTHENTICATION.md](docs/API_KEY_AUTHENTICATION.md) - API key authentication
 - [docs/voip-build-tag-optimization.md](docs/voip-build-tag-optimization.md) - VoIP build tag optimization
 
 ### Lawful Interception (LI)

@@ -322,7 +322,6 @@ func TestCallCompletionMonitor_CancelPendingClose(t *testing.T) {
 
 	monitor := NewCallCompletionMonitor(config, aggregator, pcapManager)
 	monitor.Start()
-	defer monitor.Stop()
 
 	// Simulate a call that ends
 	callID := "test-call-003"
@@ -360,6 +359,10 @@ func TestCallCompletionMonitor_CancelPendingClose(t *testing.T) {
 	// Wait for call to be scheduled for closure
 	time.Sleep(100 * time.Millisecond)
 	assert.Greater(t, monitor.GetPendingCount(), 0, "Call should be pending closure")
+
+	// Stop the monitor to prevent race between CancelPendingClose and re-scheduling.
+	// The monitor loop would otherwise immediately re-add the call since it's still ENDED.
+	monitor.Stop()
 
 	// Cancel the pending close
 	monitor.CancelPendingClose(callID)

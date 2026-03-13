@@ -199,16 +199,7 @@ Filter changes take effect immediately — the processor pushes updated filters 
 
 ### Filter Types
 
-The TUI supports all filter types available via the CLI:
-
-| Category | Types | Example Pattern |
-|----------|-------|-----------------|
-| VoIP | `sip_user`, `sip_uri`, `phone_number`, `call_id`, `codec`, `imsi`, `imei` | `alicent@example.com` |
-| DNS | `dns_domain` | `*.malware-domain.com` |
-| TLS | `tls_sni`, `tls_ja3`, `tls_ja3s`, `tls_ja4` | `*.example.com` |
-| HTTP | `http_host`, `http_url` | `api.example.com` |
-| Email | `email_address`, `email_subject` | `*@example.com` |
-| Universal | `ip_address`, `bpf` | `10.0.1.0/24` |
+The TUI supports all filter types available via the CLI (VoIP, DNS, TLS, HTTP, Email, and Universal filters). See [Appendix E: Filter Type Reference](../appendices/filter-reference.md) for the complete list.
 
 ### CLI Alternative
 

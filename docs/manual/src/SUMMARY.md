@@ -49,4 +49,5 @@
 - [Command Reference](appendices/command-reference.md)
 - [Configuration Reference](appendices/config-reference.md)
 - [BPF Filter Reference](appendices/bpf-reference.md)
+- [Filter Type Reference](appendices/filter-reference.md)
 - [Glossary](appendices/glossary.md)

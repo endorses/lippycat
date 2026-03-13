@@ -263,24 +263,16 @@ The YAML file uses the same format as the processor's filter file (see [Chapter 
 
 ### Filter Types
 
-| Category | Type | Description | Example Pattern |
-|----------|------|-------------|-----------------|
-| **VoIP** | `sip_user` | SIP user/extension (glob) | `alicent@example.com` |
-| | `sip_uri` | SIP URI (glob) | `sip:*@example.com` |
-| | `phone_number` | Phone number (prefix/suffix) | `*456789` |
-| | `call_id` | SIP Call-ID | `abc123@host` |
-| | `codec` | RTP codec | `PCMU` |
-| **DNS** | `dns_domain` | Domain name (glob) | `*.example.com` |
-| **Email** | `email_address` | Sender/recipient (glob) | `*@suspicious.com` |
-| | `email_subject` | Subject line (glob) | `*confidential*` |
-| **TLS** | `tls_sni` | SNI hostname (glob) | `*.example.com` |
-| | `tls_ja3` | JA3 client fingerprint | `e7d705a3286e19ea42f587b344ee6865` |
-| | `tls_ja3s` | JA3S server fingerprint | `eb1d94daa7e0344597e756a1fb6e7054` |
-| | `tls_ja4` | JA4 fingerprint | `t13d1516h2_8daaf6152771_...` |
-| **HTTP** | `http_host` | Host header (glob) | `*.example.com` |
-| | `http_url` | URL path (glob) | `/api/v1/*` |
-| **Universal** | `ip_address` | IP or CIDR | `192.168.1.0/24` |
-| | `bpf` | Raw BPF expression | `port 5060` |
+| Category | Common Types | Example Pattern |
+|----------|-------------|-----------------|
+| **VoIP** | `sip_user`, `phone_number`, `call_id`, `imsi`, `imei` | `alicent@example.com` |
+| **DNS** | `dns_domain` | `*.example.com` |
+| **TLS** | `tls_sni`, `tls_ja3`, `tls_ja4` | `*.example.com` |
+| **HTTP** | `http_host`, `http_url` | `*.example.com` |
+| **Email** | `email_address`, `email_subject` | `*@suspicious.com` |
+| **Universal** | `ip_address`, `bpf` | `192.168.1.0/24` |
+
+For the complete list of all filter types, descriptions, wildcard patterns, and matching details, see [Appendix E: Filter Type Reference](../appendices/filter-reference.md).
 
 ### `set filter` Flags
 

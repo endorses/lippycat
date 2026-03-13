@@ -162,6 +162,10 @@ func AbbreviateType(t management.FilterType) string {
 		return "BPF"
 	case management.FilterType_FILTER_SIP_URI:
 		return "SIP URI"
+	case management.FilterType_FILTER_IMSI:
+		return "IMSI"
+	case management.FilterType_FILTER_IMEI:
+		return "IMEI"
 	// DNS filters
 	case management.FilterType_FILTER_DNS_DOMAIN:
 		return "DNS Domain"

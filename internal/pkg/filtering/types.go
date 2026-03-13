@@ -35,6 +35,10 @@ var ValidFilterTypes = map[string]bool{
 	"FILTER_BPF":          true,
 	"sip_uri":             true,
 	"FILTER_SIP_URI":      true,
+	"imsi":                true,
+	"FILTER_IMSI":         true,
+	"imei":                true,
+	"FILTER_IMEI":         true,
 	// DNS filters
 	"dns_domain":        true,
 	"FILTER_DNS_DOMAIN": true,

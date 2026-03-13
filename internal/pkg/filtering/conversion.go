@@ -78,6 +78,10 @@ func ParseFilterType(typeStr string) (management.FilterType, error) {
 		return management.FilterType_FILTER_BPF, nil
 	case "FILTER_SIP_URI", "sip_uri":
 		return management.FilterType_FILTER_SIP_URI, nil
+	case "FILTER_IMSI", "imsi":
+		return management.FilterType_FILTER_IMSI, nil
+	case "FILTER_IMEI", "imei":
+		return management.FilterType_FILTER_IMEI, nil
 	// DNS filters
 	case "FILTER_DNS_DOMAIN", "dns_domain":
 		return management.FilterType_FILTER_DNS_DOMAIN, nil
@@ -123,6 +127,10 @@ func FilterTypeToString(filterType management.FilterType) string {
 		return "bpf"
 	case management.FilterType_FILTER_SIP_URI:
 		return "sip_uri"
+	case management.FilterType_FILTER_IMSI:
+		return "imsi"
+	case management.FilterType_FILTER_IMEI:
+		return "imei"
 	// DNS filters
 	case management.FilterType_FILTER_DNS_DOMAIN:
 		return "dns_domain"

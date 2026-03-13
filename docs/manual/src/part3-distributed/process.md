@@ -242,35 +242,52 @@ Default location: `~/.config/lippycat/filters.yaml`.
 ```yaml
 filters:
   - id: "filter-001"
-    type: "sipuser"
+    type: "sip_user"
     pattern: "alicent@example.com"
     action: "forward"
     enabled: true
 
   - id: "filter-002"
-    type: "sipuser"
+    type: "phone_number"
     pattern: "*456789"
     action: "forward"
     enabled: true
 
   - id: "filter-003"
-    type: "ip"
+    type: "ip_address"
     pattern: "192.168.1.0/24"
     action: "forward"
     enabled: false
+
+  - id: "filter-004"
+    type: "dns_domain"
+    pattern: "*.malware-domain.com"
+    action: "forward"
+    enabled: true
+
+  - id: "filter-005"
+    type: "tls_sni"
+    pattern: "*.example.com"
+    action: "forward"
+    enabled: true
 ```
 
 ### Filter Types
 
-| Type | Description | Example Pattern |
-|------|-------------|-----------------|
-| `sipuser` | SIP From/To/P-Asserted-Identity headers | `alicent@example.com` |
-| `callid` | SIP Call-ID | `abc123@host` |
-| `ip` | IP address or CIDR range | `192.168.1.0/24` |
+Filters cover all supported protocol categories:
+
+| Category | Types | Example Pattern |
+|----------|-------|-----------------|
+| **VoIP** | `sip_user`, `sip_uri`, `phone_number`, `call_id`, `codec`, `imsi`, `imei` | `alicent@example.com` |
+| **DNS** | `dns_domain` | `*.malware-domain.com` |
+| **TLS** | `tls_sni`, `tls_ja3`, `tls_ja3s`, `tls_ja4` | `*.example.com` |
+| **HTTP** | `http_host`, `http_url` | `api.example.com` |
+| **Email** | `email_address`, `email_subject` | `*@example.com` |
+| **Universal** | `ip_address`, `bpf` | `10.0.1.0/24` |
 
 ### Wildcard Patterns
 
-SIP user filters support wildcards for flexible matching:
+String-based filters (SIP users, domains, SNI, hosts, email addresses) support wildcards for flexible matching:
 
 | Pattern | Type | Matches |
 |---------|------|---------|

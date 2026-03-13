@@ -203,7 +203,7 @@ The TUI supports all filter types available via the CLI:
 
 | Category | Types | Example Pattern |
 |----------|-------|-----------------|
-| VoIP | `sip_user`, `sip_uri`, `phone_number`, `call_id`, `codec` | `alicent@example.com` |
+| VoIP | `sip_user`, `sip_uri`, `phone_number`, `call_id`, `codec`, `imsi`, `imei` | `alicent@example.com` |
 | DNS | `dns_domain` | `*.malware-domain.com` |
 | TLS | `tls_sni`, `tls_ja3`, `tls_ja3s`, `tls_ja4` | `*.example.com` |
 | HTTP | `http_host`, `http_url` | `api.example.com` |

@@ -25,7 +25,9 @@ func IsVoIPFilterType(filterType management.FilterType) bool {
 		filterType == management.FilterType_FILTER_PHONE_NUMBER ||
 		filterType == management.FilterType_FILTER_CALL_ID ||
 		filterType == management.FilterType_FILTER_CODEC ||
-		filterType == management.FilterType_FILTER_SIP_URI
+		filterType == management.FilterType_FILTER_SIP_URI ||
+		filterType == management.FilterType_FILTER_IMSI ||
+		filterType == management.FilterType_FILTER_IMEI
 }
 
 // IsDNSFilterType returns true if the filter type is DNS-related
@@ -384,6 +386,8 @@ func CycleFormFilterType(current management.FilterType, forward bool, availableH
 		management.FilterType_FILTER_CALL_ID,
 		management.FilterType_FILTER_CODEC,
 		management.FilterType_FILTER_SIP_URI,
+		management.FilterType_FILTER_IMSI,
+		management.FilterType_FILTER_IMEI,
 		// DNS filters
 		management.FilterType_FILTER_DNS_DOMAIN,
 		// Email filters

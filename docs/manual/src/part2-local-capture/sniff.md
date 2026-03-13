@@ -44,7 +44,7 @@ Use `-q` (quiet mode) to suppress packet output for better performance when you 
 
 ### Basic Filtering
 
-Use BPF filters with `-f` / `--filter` to focus on specific traffic:
+Use BPF filters with `-f` / `--filter` to focus on specific traffic (see [Appendix C: BPF Filter Reference](../appendices/bpf-reference.md) for the full syntax):
 
 ```bash
 # Only DNS traffic

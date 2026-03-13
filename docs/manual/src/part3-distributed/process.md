@@ -45,6 +45,36 @@ When hunters connect, the processor:
 
 Hunter health is monitored via heartbeats (5-second interval). Stale hunters are cleaned up after 5 minutes of no heartbeat.
 
+## Output Channels
+
+Every packet a processor receives can be sent to multiple destinations simultaneously. These output channels are independent — enable any combination:
+
+```mermaid
+flowchart LR
+    Hunters -->|gRPC| P[Processor]
+    P --> PCAP["PCAP Files<br/>(unified, per-call, auto-rotating)"]
+    P --> TUI["TUI Subscribers<br/>(lc watch remote)"]
+    P --> VIF["Virtual Interface<br/>(lc0 → Wireshark, Snort, etc.)"]
+    P --> UP["Upstream Processor<br/>(hierarchical forwarding)"]
+    P --> Hooks["Command Hooks<br/>(gzip, upload, alerting)"]
+    P --> LI["LI Delivery<br/>(X2/X3 to MDF)"]
+```
+
+| Channel | Flag(s) | Description |
+|---------|---------|-------------|
+| **Unified PCAP** | `-w` | All packets to a single file |
+| **Per-Call PCAP** | `--per-call-pcap` | Separate files per VoIP call (SIP + RTP) |
+| **Auto-Rotating PCAP** | `--auto-rotate-pcap` | Non-VoIP packets to time/size-rotated files |
+| **TUI subscribers** | (always on) | Real-time streaming to `lc watch remote` clients |
+| **Virtual interface** | `-V` | Inject into a tap/tun device for external tools |
+| **Upstream forwarding** | `-P` | Forward to another processor (hierarchical mode) |
+| **Command hooks** | `--pcap-command`, `--voip-command` | Run scripts on PCAP close or call completion |
+| **LI delivery** | `--li-enabled` | X2/X3 PDUs to MDF (requires `-tags li` build) |
+
+`lc tap` supports all the same output channels (see [Standalone Mode with `lc tap`](tap.md)).
+
+The following sections cover each channel in detail. For LI delivery, see [Lawful Interception](../part5-advanced/lawful-interception.md).
+
 ## PCAP Writing Modes
 
 Processors support three independent PCAP writing modes. All three can be active simultaneously.

@@ -146,6 +146,39 @@ flowchart LR
 
 **When to use**: Very large deployments where a single processor can't handle all traffic, or when you want independent monitoring domains.
 
+### DMZ Segmentation
+
+Capture from both DMZ and internal networks using hierarchical forwarding through the firewall:
+
+```mermaid
+flowchart TB
+    subgraph DMZ["DMZ"]
+        DH1[Hunter: web-01]
+        DH2[Hunter: web-02]
+        DP[DMZ Processor]
+    end
+
+    subgraph Internal["Internal Network"]
+        IH1[Hunter: app-01]
+        IH2[Hunter: db-01]
+        IP[Central Processor]
+    end
+
+    DH1 --> DP
+    DH2 --> DP
+    DP -->|"firewall (port 55555)"| IP
+    IH1 --> IP
+    IH2 --> IP
+```
+
+The DMZ processor forwards aggregated traffic through a single firewall port to the internal processor, which merges it with internal captures. This means:
+
+- Hunters in the DMZ never need direct access to the internal network
+- Only one firewall rule is needed (DMZ processor → internal processor on port 55555)
+- The internal processor has a unified view of both zones
+
+**When to use**: Security-sensitive environments where capture spans trust boundaries.
+
 ## Security Model
 
 All gRPC connections use **TLS by default**. You must explicitly pass `--insecure` to disable encryption (blocked when `LIPPYCAT_PRODUCTION=true`).

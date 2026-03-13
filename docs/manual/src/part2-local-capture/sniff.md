@@ -34,7 +34,7 @@ Press `Ctrl+C` to stop. lippycat prints a summary of packets captured.
 
 ### Output Format
 
-By default, output is JSON. Switch to text format for human-readable output:
+`lc sniff` prints each captured packet to stdout as one line of JSON. This makes it easy to pipe into `jq`, `grep`, or other tools. Switch to text format for human-readable output:
 
 ```bash
 sudo lc sniff -i eth0 --format text
@@ -206,8 +206,20 @@ sudo lc sniff voip -i eth0 -U
 | `--tcp-performance-mode` | `-M` | — | TCP profile: `balanced`, `throughput`, `latency`, `memory` |
 | `--gpu-backend` | `-g` | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
 | `--pcap-grace-period` | — | `5s` | Grace period before closing per-call PCAPs |
+| `--esp-null` | — | `false` | Assume all ESP traffic is NULL-encrypted |
+| `--esp-icv-size` | — | `-1` (auto) | ICV size in bytes: `0`, `8`, `12`, or `16` |
 
-## Output and PCAP
+#### ESP-NULL Decapsulation
+
+For VoIP traffic inside ESP-NULL encrypted tunnels (common in IPsec deployments where encryption is disabled but ESP framing remains):
+
+```bash
+sudo lc sniff voip -i eth0 --esp-null --esp-icv-size 12
+```
+
+lippycat strips the ESP header and ICV trailer, exposing the inner UDP/SIP/RTP packets for normal analysis. With `--esp-icv-size -1` (the default), the ICV size is auto-detected.
+
+## PCAP File Output
 
 ### Writing PCAP Files
 
@@ -238,19 +250,6 @@ sudo lc sniff voip -i eth0 --sip-user alicent -w /var/capture/alicent
 ```
 
 For more advanced per-call PCAP features (directory organization, filename patterns, completion hooks), see [Central Aggregation with `lc process`](../part3-distributed/process.md) and [Standalone Mode with `lc tap`](../part3-distributed/tap.md).
-
-### ESP-NULL Decapsulation
-
-For traffic inside ESP-NULL encrypted tunnels:
-
-```bash
-sudo lc sniff voip -i eth0 --esp-null --esp-icv-size 12
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--esp-null` | `false` | Assume all ESP traffic is NULL-encrypted |
-| `--esp-icv-size` | `-1` (auto) | ICV size in bytes: `0`, `8`, `12`, or `16` |
 
 ## Performance Tuning
 

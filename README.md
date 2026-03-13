@@ -12,7 +12,7 @@
 
 Network traffic sniffer and protocol analyzer built with Go. Supports VoIP (SIP/RTP), DNS, HTTP, TLS/JA3, and Email (SMTP/IMAP/POP3) analysis with distributed capture capabilities.
 
-**Status:** v0.9.3 - Early development. Expect breaking changes.
+**[Read the Manual](https://🫦🐱.ws)** | **Status:** v0.9.3 - Early development. Expect breaking changes.
 
 ## Table of Contents
 
@@ -332,6 +332,7 @@ See [docs/DISTRIBUTED_MODE.md](docs/DISTRIBUTED_MODE.md) for details.
 
 ## Documentation
 
+- **[User Manual](https://🫦🐱.ws)** - Comprehensive guide covering all features, deployment, and operations
 - [Virtual Interface](docs/VIRTUAL_INTERFACE.md) - Tool integration (Wireshark, Snort, tcpdump)
 - [Distributed Mode](docs/DISTRIBUTED_MODE.md) - Multi-node architecture
 - [TUI Remote Capture](docs/TUI_REMOTE_CAPTURE.md) - Remote monitoring setup

@@ -33,7 +33,7 @@ No critical security vulnerabilities or reliability issues were identified.
 
 ### 1. Race Condition in GetSecurityConfig (security.go)
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/voip/security.go`
+**File:** `internal/pkg/voip/security.go`
 **Lines:** 55-66
 
 **Issue:** Double-checked locking pattern has a race condition. The function releases the read lock before acquiring the write lock, allowing another goroutine to initialize `securityConfig` in between.
@@ -69,7 +69,7 @@ func GetSecurityConfig() *SecurityConfig {
 
 ### 2. API Key Authentication Method Mapping Mismatch
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/auth/interceptor.go`
+**File:** `internal/pkg/auth/interceptor.go`
 **Lines:** 12-28
 
 **Issue:** The `methodRoles` map uses method names that don't match the actual gRPC service definitions in the processor. For example:
@@ -86,7 +86,7 @@ This could allow unauthorized access to methods not in the map (defaults to Role
 
 ### 3. GenerateAPIKey Function Not Implemented
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/auth/validator.go`
+**File:** `internal/pkg/auth/validator.go`
 **Lines:** 151-160
 
 **Issue:** The `GenerateAPIKey()` function returns an error saying "not yet implemented" but exists in the public API.
@@ -105,7 +105,7 @@ func GenerateAPIKey() (string, error) {
 
 ### 4. LockFreeCallInfo Snapshot Shares Writer Pointers
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/voip/lockfree_calltracker.go`
+**File:** `internal/pkg/voip/lockfree_calltracker.go`
 **Lines:** 337-355
 
 **Issue:** The `getSnapshot()` method copies `SIPWriter` and `RTPWriter` pointers but intentionally zeroes the protecting mutexes. This creates a race condition if the snapshot's writers are used concurrently with the original.
@@ -126,7 +126,7 @@ snapshot := &CallInfo{
 
 ### 5. Missing Rate Limiting on Authentication
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/auth/interceptor.go`
+**File:** `internal/pkg/auth/interceptor.go`
 
 **Issue:** No rate limiting on authentication attempts allows brute-force attacks on API keys.
 
@@ -139,7 +139,7 @@ snapshot := &CallInfo{
 
 ### 6. RSA PKCS1v15 Instead of PSS
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/processor/proxy/auth.go:148`
+**File:** `internal/pkg/processor/proxy/auth.go:148`
 
 **Issue:** Using PKCS#1 v1.5 signature scheme instead of more secure PSS:
 
@@ -158,7 +158,7 @@ signature, err := rsa.SignPSS(rand.Reader, rsaKey, crypto.SHA256, hash[:], nil)
 
 ### 7. SIPStream Goroutine Leak on Blocking Reads
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/voip/tcp_stream.go`
+**File:** `internal/pkg/voip/tcp_stream.go`
 
 **Issue:** TCP reads use `bufio.Reader.ReadLine()` which blocks indefinitely if the stream stalls. Context cancellation cannot interrupt blocking I/O.
 
@@ -170,7 +170,7 @@ signature, err := rsa.SignPSS(rand.Reader, rsaKey, crypto.SHA256, hash[:], nil)
 
 ### 8. CallAggregator Ring Buffer Use-After-Free Risk
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/voip/call_aggregator.go:217-220`
+**File:** `internal/pkg/voip/call_aggregator.go:217-220`
 
 **Issue:** When ring buffer is full, call is deleted while external references may exist:
 
@@ -225,7 +225,7 @@ Several TODO items indicate incomplete functionality in production paths:
 
 ### 11. PCAP Sync Errors Ignored in syncLoop
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/processor/pcap_writer.go:357-360`
+**File:** `internal/pkg/processor/pcap_writer.go:357-360`
 
 **Issue:** The periodic sync loop ignores sync errors:
 
@@ -253,7 +253,7 @@ if err := writer.sipFile.Sync(); err != nil {
 
 ### 12. Virtual Interface Injection Logged at Debug Level
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/processor/processor_packet_pipeline.go:208-209`
+**File:** `internal/pkg/processor/processor_packet_pipeline.go:208-209`
 
 **Issue:** Failed packet injection is logged at Debug level:
 
@@ -271,7 +271,7 @@ if err := p.vifManager.InjectPacketBatch(displayPackets); err != nil {
 
 ### 13. Global Variables for Capture State
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/tui/model.go`
+**File:** `internal/pkg/tui/model.go`
 **Lines:** 29-32
 
 **Issue:** Global state for capture management can cause issues in testing and potential race conditions:
@@ -291,7 +291,7 @@ var (
 
 ### 14. Potential Memory Leak in TCP Stream Processing
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/voip/tcp_factory.go`
+**File:** `internal/pkg/voip/tcp_factory.go`
 **Lines:** 206-239
 
 **Issue:** The `cleanupStaleQueuedStreams` function has a potential issue where streams that are not stale get put back into the queue. If the queue is full during the re-queue operation, these valid streams are silently dropped.
@@ -326,7 +326,7 @@ var (
 
 ### 16. Statistics Counters Could Overflow
 
-**File:** `/home/grischa/Projects/lippycat/internal/pkg/tui/model.go`
+**File:** `internal/pkg/tui/model.go`
 **Lines:** 187-193
 
 **Issue:** The statistics counters use `BoundedCounter` with limits, but the packet counts are uint64 without bounds:

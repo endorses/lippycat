@@ -382,11 +382,3 @@ func TestSanitize_RealWorldCallIDs(t *testing.T) {
 		})
 	}
 }
-
-// Helper function for min (not available in older Go versions)
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

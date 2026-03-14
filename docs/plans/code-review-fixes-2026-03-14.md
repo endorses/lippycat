@@ -33,31 +33,32 @@ Based on [docs/reviews/CODE_REVIEW_2026-03-14.md](../reviews/CODE_REVIEW_2026-03
 ## Phase 2: Medium — Functional Gaps and Modernization
 
 ### M-5: Implement hunter flow control
-- [ ] In `internal/pkg/hunter/connection/manager.go` (line 548), implement handling for PAUSE, SLOW, RESUME signals from processor
-- [ ] Wire `handleStreamControl` to call `handleFlowControl` in `hunter.go`
-- [ ] Add tests for flow control state transitions
+- [x] In `internal/pkg/hunter/connection/manager.go`, call `flowControlHandler` in `handleStreamControl` instead of TODO comment
+- [x] Wiring already existed: `handleStreamControl` → `flowControlHandler` → `hunter.handleFlowControl` → `forwarding.Manager.HandleFlowControl`
+- [x] Add tests for flow control state transitions in `internal/pkg/hunter/forwarding/manager_test.go`
 
 ### M-6: Add tests for `tlsutil` package
-- [ ] Add unit tests for `internal/pkg/tlsutil/` covering certificate loading, TLS configuration, and the `InsecureSkipVerify` production-mode guard
+- [x] Add unit tests for `internal/pkg/tlsutil/` covering certificate loading, TLS configuration, and the `InsecureSkipVerify` production-mode guard
 
 ### M-1: Replace custom `replaceAll`/`indexSubstring` with stdlib
-- [ ] In `internal/pkg/processor/pcap_writer.go` (lines 614-635), replace `replaceAll()` with `strings.ReplaceAll()` and remove `indexSubstring()`
+- [x] Replaced `replaceAll()` with `strings.ReplaceAll()` in `pcap_writer.go`, `auto_rotate_pcap.go`, `tls_keylog_writer.go`
+- [x] Removed `replaceAll()` and `indexSubstring()` from `pcap_writer.go`
+- [x] Removed corresponding tests (`TestReplaceAll`, `TestIndexSubstring`) from `pcap_writer_test.go`
 
 ### M-2: Replace custom `bytesEqual` with `bytes.Equal`
-- [ ] In `internal/pkg/capture/capture.go` (lines 429-439), replace `bytesEqual()` with `bytes.Equal()`
-- [ ] Consider replacing SIP method prefix checks (lines 402-424) with `bytes.HasPrefix()`
+- [x] In `internal/pkg/capture/capture.go`, replaced `bytesEqual()` calls with `bytes.HasPrefix()` (simpler, no manual length check needed)
+- [x] Removed `bytesEqual()` function
 
 ### M-3: Remove custom `min()` functions shadowing builtin
-- [ ] Remove custom `min()` from:
-  - [ ] `internal/pkg/hunter/connection/manager.go` (line 783)
-  - [ ] `internal/pkg/tui/components/packetlist.go` (line 848)
-  - [ ] `internal/pkg/detector/signatures/application/utils.go` (line 4)
-  - [ ] `internal/pkg/voip/plugins/plugin_test.go` (line 389)
-  - [ ] `internal/pkg/voip/calltracker_security_test.go` (line 387)
+- [x] Remove custom `min()` from:
+  - [x] `internal/pkg/hunter/connection/manager.go`
+  - [x] `internal/pkg/tui/components/packetlist.go`
+  - [x] `internal/pkg/detector/signatures/application/utils.go` (file deleted, was only content)
+  - [x] `internal/pkg/voip/plugins/plugin_test.go`
+  - [x] `internal/pkg/voip/calltracker_security_test.go`
 
 ### M-4: Migrate `grpc.Dial` to `grpc.NewClient`
-- [ ] In `internal/pkg/hunter/connection/manager.go` (lines 375, 383), replace `grpc.Dial()` with `grpc.NewClient()`
-- [ ] Adjust options as needed for the new API
+- [x] In `internal/pkg/hunter/connection/manager.go`, replaced both `grpc.Dial()` calls with `grpc.NewClient()`
 
 ---
 

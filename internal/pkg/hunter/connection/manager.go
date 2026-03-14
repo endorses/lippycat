@@ -372,7 +372,7 @@ func (m *Manager) connectToProcessor() error {
 	}
 
 	// Connect data channel
-	dataConn, err := grpc.Dial(m.config.ProcessorAddr, opts...)
+	dataConn, err := grpc.NewClient(m.config.ProcessorAddr, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to dial processor data: %w", err)
 	}
@@ -380,7 +380,7 @@ func (m *Manager) connectToProcessor() error {
 	m.dataClient = data.NewDataServiceClient(dataConn)
 
 	// Connect management channel (same address for now, different service)
-	mgmtConn, err := grpc.Dial(m.config.ProcessorAddr, opts...)
+	mgmtConn, err := grpc.NewClient(m.config.ProcessorAddr, opts...)
 	if err != nil {
 		if closeErr := dataConn.Close(); closeErr != nil {
 			logger.Error("Failed to close data connection during error cleanup", "error", closeErr, "processor", m.config.ProcessorAddr)
@@ -545,8 +545,10 @@ func (m *Manager) handleStreamControl() {
 			"ack_sequence", ctrl.AckSequence,
 			"flow_control", ctrl.FlowControl)
 
-		// TODO: Implement flow control logic
-		// For now, just log acknowledgments
+		// Delegate to flow control handler (hunter → forwarding manager)
+		if m.flowControlHandler != nil {
+			m.flowControlHandler(ctrl)
+		}
 	}
 }
 
@@ -775,16 +777,6 @@ func (m *Manager) cleanup() {
 			logger.Error("Failed to close management connection during shutdown", "error", err, "processor", m.config.ProcessorAddr)
 		}
 	}
-}
-
-// Helper functions
-
-// min returns minimum of two ints
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // getConnectionLocalIP returns the local IP address used for the gRPC connection

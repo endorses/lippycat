@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -366,10 +367,10 @@ func (writer *CallPcapWriter) generateFilename(packetType string, fileIndex int)
 	pattern := writer.config.FilePattern
 
 	// Replace placeholders
-	pattern = replaceAll(pattern, "{callid}", sanitizeFilename(writer.callID))
-	pattern = replaceAll(pattern, "{from}", sanitizeFilename(writer.from))
-	pattern = replaceAll(pattern, "{to}", sanitizeFilename(writer.to))
-	pattern = replaceAll(pattern, "{timestamp}", writer.startTime.Format("20060102_150405"))
+	pattern = strings.ReplaceAll(pattern, "{callid}", sanitizeFilename(writer.callID))
+	pattern = strings.ReplaceAll(pattern, "{from}", sanitizeFilename(writer.from))
+	pattern = strings.ReplaceAll(pattern, "{to}", sanitizeFilename(writer.to))
+	pattern = strings.ReplaceAll(pattern, "{timestamp}", writer.startTime.Format("20060102_150405"))
 
 	// Add packet type (sip or rtp) before extension
 	ext := filepath.Ext(pattern)
@@ -609,27 +610,4 @@ func sanitizeFilename(s string) string {
 	}
 
 	return string(runes)
-}
-
-func replaceAll(s, old, new string) string {
-	result := ""
-	for {
-		idx := indexSubstring(s, old)
-		if idx == -1 {
-			result += s
-			break
-		}
-		result += s[:idx] + new
-		s = s[idx+len(old):]
-	}
-	return result
-}
-
-func indexSubstring(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
 }

@@ -385,14 +385,6 @@ func TestEventTypes(t *testing.T) {
 	}
 }
 
-// Helper function to create mock packets for testing
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func createMockPacket(payload []byte) gopacket.Packet {
 	return createMockPacketWithPorts(payload, 5060, 5060)
 }

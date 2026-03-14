@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -259,7 +260,7 @@ func (w *AutoRotatePcapWriter) generateFilename(timestamp time.Time) string {
 	pattern := w.config.FilePattern
 
 	// Replace {timestamp} placeholder
-	pattern = replaceAll(pattern, "{timestamp}", timestamp.Format("20060102_150405"))
+	pattern = strings.ReplaceAll(pattern, "{timestamp}", timestamp.Format("20060102_150405"))
 
 	// Add index suffix if needed (for multiple files with same timestamp)
 	if w.fileIndex > 0 {

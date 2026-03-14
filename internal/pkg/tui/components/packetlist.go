@@ -844,14 +844,6 @@ func (p *PacketList) getColumnWidths() (nodeWidth, timeWidth, srcWidth, dstWidth
 		p.cachedColWidths[3], p.cachedColWidths[4], p.cachedColWidths[5], p.cachedColWidths[6]
 }
 
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // renderHeader renders the table header
 func (p *PacketList) renderHeader() string {
 	// Get responsive column widths (cached if size hasn't changed)

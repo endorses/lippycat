@@ -401,43 +401,29 @@ func isSIPBytes(payload []byte) bool {
 	}
 
 	// Check for common SIP methods and responses
-	if len(payload) >= len(sipMethodINVITE) && bytesEqual(payload[:len(sipMethodINVITE)], sipMethodINVITE) {
+	if bytes.HasPrefix(payload, sipMethodINVITE) {
 		return true
 	}
-	if len(payload) >= len(sipMethodREGISTER) && bytesEqual(payload[:len(sipMethodREGISTER)], sipMethodREGISTER) {
+	if bytes.HasPrefix(payload, sipMethodREGISTER) {
 		return true
 	}
-	if len(payload) >= len(sipMethodOPTIONS) && bytesEqual(payload[:len(sipMethodOPTIONS)], sipMethodOPTIONS) {
+	if bytes.HasPrefix(payload, sipMethodOPTIONS) {
 		return true
 	}
-	if len(payload) >= len(sipResponse) && bytesEqual(payload[:len(sipResponse)], sipResponse) {
+	if bytes.HasPrefix(payload, sipResponse) {
 		return true
 	}
-	if len(payload) >= len(sipMethodACK) && bytesEqual(payload[:len(sipMethodACK)], sipMethodACK) {
+	if bytes.HasPrefix(payload, sipMethodACK) {
 		return true
 	}
-	if len(payload) >= len(sipMethodBYE) && bytesEqual(payload[:len(sipMethodBYE)], sipMethodBYE) {
+	if bytes.HasPrefix(payload, sipMethodBYE) {
 		return true
 	}
-	if len(payload) >= len(sipMethodCANCEL) && bytesEqual(payload[:len(sipMethodCANCEL)], sipMethodCANCEL) {
+	if bytes.HasPrefix(payload, sipMethodCANCEL) {
 		return true
 	}
 
 	return false
-}
-
-// bytesEqual compares two byte slices for equality.
-// This is a simple implementation; for high performance, SIMD could be used.
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func (pb *PacketBuffer) Receive() <-chan PacketInfo {

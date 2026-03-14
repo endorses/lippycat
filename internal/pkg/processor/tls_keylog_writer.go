@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -313,13 +314,13 @@ func replacePatternPlaceholders(pattern string, t time.Time, extra string) strin
 	result := pattern
 
 	// {timestamp} -> Unix timestamp
-	result = replaceAll(result, "{timestamp}", fmt.Sprintf("%d", t.Unix()))
+	result = strings.ReplaceAll(result, "{timestamp}", fmt.Sprintf("%d", t.Unix()))
 
 	// {date} -> YYYY-MM-DD
-	result = replaceAll(result, "{date}", t.Format("2006-01-02"))
+	result = strings.ReplaceAll(result, "{date}", t.Format("2006-01-02"))
 
 	// {datetime} -> YYYY-MM-DD_HH-MM-SS
-	result = replaceAll(result, "{datetime}", t.Format("2006-01-02_15-04-05"))
+	result = strings.ReplaceAll(result, "{datetime}", t.Format("2006-01-02_15-04-05"))
 
 	return result
 }

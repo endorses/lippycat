@@ -28,6 +28,8 @@ type Writer struct {
 	consecErrors    atomic.Uint64 // Consecutive write errors
 	lastErrorLogged atomic.Int64  // Timestamp of last error log
 
+	headerWritten bool // Whether the PCAP file header has been written
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -45,14 +47,8 @@ func NewWriter(filePath string) (*Writer, error) {
 
 	pcapWriter := pcapgo.NewWriter(file)
 
-	// Write PCAP header (Ethernet link type)
-	if err := pcapWriter.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
-		if closeErr := file.Close(); closeErr != nil {
-			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
-		}
-		return nil, fmt.Errorf("failed to write PCAP header: %w", err)
-	}
-
+	// Defer writing the PCAP file header until the first packet arrives,
+	// so we can use its actual link type instead of assuming Ethernet.
 	w := &Writer{
 		file:       file,
 		writer:     pcapWriter,
@@ -149,6 +145,19 @@ func (w *Writer) writeWorker() {
 // writePacketBatch writes a batch of packets to PCAP file (called by single writer)
 func (w *Writer) writePacketBatch(packets []*data.CapturedPacket) {
 	// No mutex needed - single writer goroutine ensures serial access
+
+	// Write PCAP file header on first batch, using the actual link type
+	if !w.headerWritten && len(packets) > 0 {
+		linkType := layers.LinkType(packets[0].LinkType)
+		if linkType == 0 {
+			linkType = layers.LinkTypeEthernet // fallback for legacy packets without LinkType
+		}
+		if err := w.writer.WriteFileHeader(65536, linkType); err != nil {
+			logger.Error("Failed to write PCAP header", "error", err, "link_type", linkType)
+			return
+		}
+		w.headerWritten = true
+	}
 
 	batchErrors := 0
 	for _, pkt := range packets {

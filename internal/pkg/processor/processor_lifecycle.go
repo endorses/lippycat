@@ -93,8 +93,6 @@ func (p *Processor) Start(ctx context.Context) error {
 
 		// Configure flow controller with PCAP queue metrics
 		p.flowController.SetPCAPQueue(p.pcapWriter.QueueDepth, p.pcapWriter.QueueCapacity)
-
-		defer p.pcapWriter.Stop()
 	}
 
 	// Create listener with SO_REUSEADDR for fast restarts
@@ -203,7 +201,6 @@ func (p *Processor) Start(ctx context.Context) error {
 		if err := p.upstreamManager.Start(); err != nil {
 			return fmt.Errorf("failed to start upstream connection manager: %w", err)
 		}
-		defer p.upstreamManager.Disconnect()
 	}
 
 	// Start hunter monitor (heartbeat monitoring and cleanup)
@@ -244,11 +241,6 @@ func (p *Processor) Start(ctx context.Context) error {
 			p.vifManager = nil
 		} else {
 			logger.Info("Virtual interface started", "interface", p.vifManager.Name())
-			defer func() {
-				if err := p.vifManager.Shutdown(); err != nil {
-					logger.Warn("Failed to shutdown virtual interface", "error", err)
-				}
-			}()
 		}
 	}
 
@@ -277,101 +269,106 @@ func (p *Processor) Start(ctx context.Context) error {
 		}()
 	}
 
-	// Wait for shutdown
+	// Wait for shutdown signal, then run consolidated cleanup
 	<-p.ctx.Done()
 
-	// Graceful shutdown
-	logger.Info("Shutting down processor")
-	p.grpcServer.GracefulStop()
-
-	// Stop hunter monitor
-	p.hunterMonitor.Stop()
-
-	p.wg.Wait()
-
-	logger.Info("Processor stopped")
-	return nil
+	return p.Shutdown()
 }
 
-// Shutdown gracefully shuts down the processor
-// This method is primarily used for testing and programmatic shutdown
+// Shutdown gracefully shuts down the processor.
+// Safe to call multiple times — only the first call performs cleanup.
 func (p *Processor) Shutdown() error {
-	logger.Info("Shutting down processor")
+	p.shutdownOnce.Do(func() {
+		logger.Info("Shutting down processor")
 
-	if p.cancel != nil {
-		p.cancel()
-	}
-
-	// Stop LI Manager (no-op if !li build)
-	p.stopLIManager()
-
-	// Shutdown detector to stop background goroutines
-	if p.detector != nil {
-		p.detector.Shutdown()
-	}
-
-	// Shutdown call correlator to stop cleanup goroutine
-	if p.callCorrelator != nil {
-		p.callCorrelator.Stop()
-	}
-
-	// Stop DNS tunneling detector to stop cleanup goroutine
-	if p.dnsTunneling != nil {
-		p.dnsTunneling.Stop()
-	}
-
-	// Stop call completion monitor (closes any pending PCAP files)
-	if p.callCompletionMonitor != nil {
-		p.callCompletionMonitor.Stop()
-	}
-
-	// Close per-call PCAP writer
-	if p.perCallPcapWriter != nil {
-		if err := p.perCallPcapWriter.Close(); err != nil {
-			logger.Warn("Failed to close per-call PCAP writer", "error", err)
+		if p.cancel != nil {
+			p.cancel()
 		}
-	}
 
-	// Close auto-rotate PCAP writer
-	if p.autoRotatePcapWriter != nil {
-		if err := p.autoRotatePcapWriter.Close(); err != nil {
-			logger.Warn("Failed to close auto-rotate PCAP writer", "error", err)
+		// Stop LI Manager (no-op if !li build)
+		p.stopLIManager()
+
+		// Shutdown detector to stop background goroutines
+		if p.detector != nil {
+			p.detector.Shutdown()
 		}
-	}
 
-	// Close TLS keylog writer
-	if p.tlsKeylogWriter != nil {
-		if err := p.tlsKeylogWriter.Close(); err != nil {
-			logger.Warn("Failed to close TLS keylog writer", "error", err)
+		// Shutdown call correlator to stop cleanup goroutine
+		if p.callCorrelator != nil {
+			p.callCorrelator.Stop()
 		}
-	}
 
-	// Shutdown virtual interface
-	if p.vifManager != nil {
-		if err := p.vifManager.Shutdown(); err != nil {
-			logger.Warn("Failed to shutdown virtual interface", "error", err)
+		// Stop DNS tunneling detector to stop cleanup goroutine
+		if p.dnsTunneling != nil {
+			p.dnsTunneling.Stop()
 		}
-	}
 
-	// Shutdown proxy manager (close all topology subscriptions)
-	if p.proxyManager != nil {
-		p.proxyManager.Shutdown(5 * time.Second)
-	}
+		// Stop call completion monitor (closes any pending PCAP files)
+		if p.callCompletionMonitor != nil {
+			p.callCompletionMonitor.Stop()
+		}
 
-	// Shutdown downstream manager (close all downstream connections)
-	if p.downstreamManager != nil {
-		p.downstreamManager.Shutdown(5 * time.Second)
-	}
+		// Close per-call PCAP writer
+		if p.perCallPcapWriter != nil {
+			if err := p.perCallPcapWriter.Close(); err != nil {
+				logger.Warn("Failed to close per-call PCAP writer", "error", err)
+			}
+		}
 
-	// Give time for graceful shutdown
-	if p.grpcServer != nil {
-		p.grpcServer.GracefulStop()
-	}
+		// Close auto-rotate PCAP writer
+		if p.autoRotatePcapWriter != nil {
+			if err := p.autoRotatePcapWriter.Close(); err != nil {
+				logger.Warn("Failed to close auto-rotate PCAP writer", "error", err)
+			}
+		}
 
-	// Wait for all goroutines to complete
-	p.wg.Wait()
+		// Stop unified PCAP writer
+		if p.pcapWriter != nil {
+			p.pcapWriter.Stop()
+		}
 
-	logger.Info("Processor shutdown complete")
+		// Close TLS keylog writer
+		if p.tlsKeylogWriter != nil {
+			if err := p.tlsKeylogWriter.Close(); err != nil {
+				logger.Warn("Failed to close TLS keylog writer", "error", err)
+			}
+		}
+
+		// Disconnect upstream connection
+		if p.upstreamManager != nil {
+			p.upstreamManager.Disconnect()
+		}
+
+		// Stop hunter monitor
+		p.hunterMonitor.Stop()
+
+		// Shutdown virtual interface
+		if p.vifManager != nil {
+			if err := p.vifManager.Shutdown(); err != nil {
+				logger.Warn("Failed to shutdown virtual interface", "error", err)
+			}
+		}
+
+		// Shutdown proxy manager (close all topology subscriptions)
+		if p.proxyManager != nil {
+			p.proxyManager.Shutdown(5 * time.Second)
+		}
+
+		// Shutdown downstream manager (close all downstream connections)
+		if p.downstreamManager != nil {
+			p.downstreamManager.Shutdown(5 * time.Second)
+		}
+
+		// Graceful gRPC shutdown
+		if p.grpcServer != nil {
+			p.grpcServer.GracefulStop()
+		}
+
+		// Wait for all goroutines to complete
+		p.wg.Wait()
+
+		logger.Info("Processor shutdown complete")
+	})
 	return nil
 }
 

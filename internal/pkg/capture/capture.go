@@ -38,7 +38,8 @@ var (
 // Once a SPI is confirmed via content heuristic (SIP/RTP detected), subsequent packets
 // from the same SPI are decapsulated without requiring a SIP/RTP payload at the start.
 // This handles TCP continuation segments that carry SDP or later SIP message fragments.
-var espNullSPICache sync.Map // key: uint32 SPI, value: layers.IPProtocol
+// Entries expire after 5 minutes to prevent unbounded growth.
+var espNullSPICache = newTTLCache[uint32, layers.IPProtocol](5 * time.Minute)
 
 // ipv6FragInfo holds transport-layer information extracted from the first IPv6 fragment.
 // It is used to synthesise a complete transport header for non-first fragments, which
@@ -51,7 +52,8 @@ type ipv6FragInfo struct {
 
 // ipv6FragIDCache maps IPv6 Fragment Identification values to the transport info
 // that was extracted from the corresponding first fragment.
-var ipv6FragIDCache sync.Map // key: uint32 fragID, value: ipv6FragInfo
+// Entries expire after 30 seconds (IPv6 fragments should reassemble quickly).
+var ipv6FragIDCache = newTTLCache[uint32, ipv6FragInfo](30 * time.Second)
 
 // espNullConfig caches the --esp-null and --esp-icv-size configuration.
 // Initialized once on first use via sync.Once to avoid per-packet Viper reads.
@@ -579,6 +581,13 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 				discarded := sharedDefragmenter.DiscardOlderThan(time.Now().Add(-30 * time.Second))
 				if discarded > 0 {
 					logger.Debug("Discarded stale IP fragments", "count", discarded)
+				}
+				// Sweep TTL caches to prevent unbounded growth
+				if swept := espNullSPICache.Sweep(); swept > 0 {
+					logger.Debug("Swept stale ESP SPI cache entries", "count", swept)
+				}
+				if swept := ipv6FragIDCache.Sweep(); swept > 0 {
+					logger.Debug("Swept stale IPv6 fragment cache entries", "count", swept)
 				}
 			}
 		}
@@ -1213,7 +1222,7 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 	// also try the alternative protocol before giving up.
 	if innerProto == 0 {
 		if cached, ok := espNullSPICache.Load(spi); ok {
-			proto := cached.(layers.IPProtocol)
+			proto := cached
 			// tryProto attempts to identify innerProto/innerLen for the given protocol.
 			tryProto := func(p layers.IPProtocol) {
 				switch p {
@@ -1476,8 +1485,7 @@ func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) 
 	// accurate port numbers so the synthetic packet is fully parseable), then fall
 	// back to the SPI cache (provides proto only; port numbers will be garbage).
 	if innerProto == 0 {
-		if cached, ok := ipv6FragIDCache.Load(frag.Identification); ok {
-			info := cached.(ipv6FragInfo)
+		if info, ok := ipv6FragIDCache.Load(frag.Identification); ok {
 			innerProto = info.innerProto
 			// Build a synthetic transport header so gopacket can parse the packet
 			// and downstream flow caches can match it by port.
@@ -1493,7 +1501,7 @@ func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) 
 				innerLen = len(espInner)
 			}
 		} else if cached, ok := espNullSPICache.Load(spi); ok {
-			innerProto = cached.(layers.IPProtocol)
+			innerProto = cached
 			innerLen = len(espInner)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 	"github.com/endorses/lippycat/internal/pkg/simd"
@@ -11,11 +12,17 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
+// sipIPEntry stores a timestamp for TTL-based eviction.
+type sipIPEntry struct {
+	timestamp time.Time
+}
+
 // SIPSignature detects SIP (Session Initiation Protocol) traffic
 type SIPSignature struct {
 	methods         []string
 	methodsBytes    [][]byte // Byte versions for SIMD matching
-	knownSIPIPPairs sync.Map // key: "ip1|ip2" (normalized) → struct{}
+	knownSIPIPPairs sync.Map // key: "ip1|ip2" (normalized) → sipIPEntry
+	sipIPPairTTL    time.Duration
 }
 
 // NewSIPSignature creates a new SIP signature detector
@@ -35,6 +42,7 @@ func NewSIPSignature() *SIPSignature {
 	return &SIPSignature{
 		methods:      methods,
 		methodsBytes: methodsBytes,
+		sipIPPairTTL: 30 * time.Minute,
 	}
 }
 
@@ -171,15 +179,39 @@ func normalizeSIPIPPair(ip1, ip2 string) string {
 // recordSIPIPPair stores an IP pair as a known SIP endpoint pair.
 func (s *SIPSignature) recordSIPIPPair(srcIP, dstIP string) {
 	key := normalizeSIPIPPair(srcIP, dstIP)
-	s.knownSIPIPPairs.Store(key, struct{}{})
+	s.knownSIPIPPairs.Store(key, sipIPEntry{timestamp: time.Now()})
 }
 
 // isKnownSIPIPPair reports whether the given IP pair has previously been observed
-// carrying SIP traffic.
+// carrying SIP traffic and the entry has not expired.
 func (s *SIPSignature) isKnownSIPIPPair(srcIP, dstIP string) bool {
 	key := normalizeSIPIPPair(srcIP, dstIP)
-	_, ok := s.knownSIPIPPairs.Load(key)
-	return ok
+	val, ok := s.knownSIPIPPairs.Load(key)
+	if !ok {
+		return false
+	}
+	entry := val.(sipIPEntry)
+	if time.Since(entry.timestamp) > s.sipIPPairTTL {
+		s.knownSIPIPPairs.Delete(key)
+		return false
+	}
+	return true
+}
+
+// SweepSIPIPPairs removes expired SIP IP pair entries. Called periodically
+// by the detector to prevent unbounded growth.
+func (s *SIPSignature) SweepSIPIPPairs() int {
+	now := time.Now()
+	removed := 0
+	s.knownSIPIPPairs.Range(func(key, value any) bool {
+		entry := value.(sipIPEntry)
+		if now.Sub(entry.timestamp) > s.sipIPPairTTL {
+			s.knownSIPIPPairs.Delete(key)
+			removed++
+		}
+		return true
+	})
+	return removed
 }
 
 // hasDSCPEF reports whether the packet carries DSCP Expedited Forwarding marking

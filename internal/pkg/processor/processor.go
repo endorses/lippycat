@@ -170,9 +170,10 @@ type Processor struct {
 	tlsKeylogWriter *TLSKeylogWriter
 
 	// Control
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 
 	// Embed gRPC service implementations
 	data.UnimplementedDataServiceServer

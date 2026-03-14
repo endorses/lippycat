@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"sync"
@@ -19,28 +20,13 @@ const (
 // Validator validates API keys and checks permissions.
 type Validator struct {
 	config Config
-	// keyMap maps API keys to their configuration for O(1) lookup.
-	keyMap map[string]*APIKey
 	mu     sync.RWMutex
 }
 
 // NewValidator creates a new API key validator.
 func NewValidator(config Config) *Validator {
-	v := &Validator{
+	return &Validator{
 		config: config,
-		keyMap: make(map[string]*APIKey),
-	}
-	v.rebuildKeyMap()
-	return v
-}
-
-// rebuildKeyMap rebuilds the internal key map from the config.
-// Must be called with write lock held or during initialization.
-func (v *Validator) rebuildKeyMap() {
-	v.keyMap = make(map[string]*APIKey, len(v.config.APIKeys))
-	for i := range v.config.APIKeys {
-		key := &v.config.APIKeys[i]
-		v.keyMap[key.Key] = key
 	}
 }
 
@@ -50,7 +36,6 @@ func (v *Validator) UpdateConfig(config Config) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.config = config
-	v.rebuildKeyMap()
 }
 
 // IsEnabled returns whether authentication is enabled.
@@ -90,9 +75,9 @@ func (v *Validator) ValidateContext(ctx context.Context, requiredRole Role) (*AP
 		return nil, ErrMissingAPIKey
 	}
 
-	// Look up the API key
-	apiKey, ok := v.keyMap[apiKeyStr]
-	if !ok {
+	// Look up the API key using constant-time comparison to prevent timing attacks.
+	apiKey := constantTimeLookup(v.config.APIKeys, apiKeyStr)
+	if apiKey == nil {
 		logger.Warn("Authentication failed: invalid API key", "key_prefix", maskAPIKey(apiKeyStr))
 		return nil, ErrInvalidAPIKey
 	}
@@ -146,6 +131,19 @@ func LogAuthFailure(ctx context.Context, err error, operation string) {
 		"operation", operation,
 		"error", err,
 		"client_info", clientInfo)
+}
+
+// constantTimeLookup finds a matching API key using constant-time comparison.
+// It always iterates over all keys to prevent timing side-channel leaks.
+func constantTimeLookup(keys []APIKey, candidate string) *APIKey {
+	candidateBytes := []byte(candidate)
+	var matched *APIKey
+	for i := range keys {
+		if subtle.ConstantTimeCompare(candidateBytes, []byte(keys[i].Key)) == 1 {
+			matched = &keys[i]
+		}
+	}
+	return matched
 }
 
 // GenerateAPIKey generates a cryptographically random API key.

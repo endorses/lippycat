@@ -60,26 +60,26 @@ func (v *Validator) ValidateContext(ctx context.Context, requiredRole Role) (*AP
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		logger.Warn("Authentication failed: no metadata in context")
-		return nil, ErrMissingAPIKey
+		return nil, ErrAuthenticationFailed
 	}
 
 	values := md.Get(APIKeyMetadataKey)
 	if len(values) == 0 {
 		logger.Warn("Authentication failed: no API key in metadata")
-		return nil, ErrMissingAPIKey
+		return nil, ErrAuthenticationFailed
 	}
 
 	apiKeyStr := values[0]
 	if apiKeyStr == "" {
 		logger.Warn("Authentication failed: empty API key")
-		return nil, ErrMissingAPIKey
+		return nil, ErrAuthenticationFailed
 	}
 
 	// Look up the API key using constant-time comparison to prevent timing attacks.
 	apiKey := constantTimeLookup(v.config.APIKeys, apiKeyStr)
 	if apiKey == nil {
 		logger.Warn("Authentication failed: invalid API key", "key_prefix", maskAPIKey(apiKeyStr))
-		return nil, ErrInvalidAPIKey
+		return nil, ErrAuthenticationFailed
 	}
 
 	// Check if the key has the required role
@@ -88,7 +88,7 @@ func (v *Validator) ValidateContext(ctx context.Context, requiredRole Role) (*AP
 			"description", apiKey.Description,
 			"has_role", apiKey.Role,
 			"required_role", requiredRole)
-		return nil, ErrInsufficientPermissions
+		return nil, ErrAuthenticationFailed
 	}
 
 	// Success

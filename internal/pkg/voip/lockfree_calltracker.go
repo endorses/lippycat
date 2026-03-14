@@ -115,7 +115,7 @@ func (lf *LockFreeCallTracker) createCallSafely(callID string, linkType layers.L
 				logger.Error("Failed to close RTP file during race condition cleanup", "error", err, "call_id", callID)
 			}
 		}
-		return actual.(*LockFreeCallInfo).CallInfo
+		return actual.(*LockFreeCallInfo).getSnapshot()
 	}
 
 	// We successfully stored our call

@@ -35,12 +35,6 @@ type Config struct {
 	APIKeys []APIKey `yaml:"api_keys" json:"api_keys"`
 }
 
-// Common errors
-var (
-	// ErrMissingAPIKey is returned when no API key is provided.
-	ErrMissingAPIKey = errors.New("missing API key in metadata")
-	// ErrInvalidAPIKey is returned when the API key is not recognized.
-	ErrInvalidAPIKey = errors.New("invalid API key")
-	// ErrInsufficientPermissions is returned when the API key doesn't have the required role.
-	ErrInsufficientPermissions = errors.New("insufficient permissions for this operation")
-)
+// ErrAuthenticationFailed is the single generic error returned to clients.
+// Specific failure reasons are logged server-side only to prevent information leakage.
+var ErrAuthenticationFailed = errors.New("authentication failed")

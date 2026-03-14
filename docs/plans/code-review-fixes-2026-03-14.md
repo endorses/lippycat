@@ -65,14 +65,14 @@ Based on [docs/reviews/CODE_REVIEW_2026-03-14.md](../reviews/CODE_REVIEW_2026-03
 ## Phase 3: Low — Hardening and Cleanup
 
 ### L-1: Use `atomic.Int64` for diagnostic counters
-- [ ] In `internal/pkg/voip/call_aggregator.go` (lines 17-31), change `int64` counters to `atomic.Int64` and update all access sites
+- [x] In `internal/pkg/voip/call_aggregator.go`, changed 9 `int64` counters to `atomic.Int64` and replaced `atomic.AddInt64`/`atomic.LoadInt64` with `.Add()`/`.Load()` methods
 
 ### L-3: Generic auth error to clients
-- [ ] In `internal/pkg/auth/validator.go` (lines 79-98), return a single generic "authentication failed" error to clients
-- [ ] Log the specific failure reason (missing key, invalid key, insufficient permissions) server-side only
+- [x] Replaced `ErrMissingAPIKey`, `ErrInvalidAPIKey`, `ErrInsufficientPermissions` with single `ErrAuthenticationFailed` in `internal/pkg/auth/types.go`
+- [x] All failure paths in `validator.go` now return generic error; specific reasons logged server-side via `logger.Warn`
 
 ### L-5: Fix `createCallSafely` returning internal pointer
-- [ ] In `internal/pkg/voip/lockfree_calltracker.go` (line 118), return a snapshot copy via `getSnapshot()` instead of the internal `CallInfo` pointer on the `LoadOrStore` existing-entry path
+- [x] In `internal/pkg/voip/lockfree_calltracker.go`, changed `LoadOrStore` existing-entry path to return `getSnapshot()` instead of internal `CallInfo` pointer
 
 ---
 

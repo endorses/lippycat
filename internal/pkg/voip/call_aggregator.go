@@ -15,36 +15,36 @@ import (
 
 // Merge diagnostic counters
 var (
-	mergeAttempts       int64 // Times mergeRTPOnlyCall was called
-	mergeSyntheticFound int64 // Synthetic call was found
-	mergeRealFound      int64 // Real call was found
-	mergeSuccess        int64 // Merge completed successfully
+	mergeAttempts       atomic.Int64 // Times mergeRTPOnlyCall was called
+	mergeSyntheticFound atomic.Int64 // Synthetic call was found
+	mergeRealFound      atomic.Int64 // Real call was found
+	mergeSuccess        atomic.Int64 // Merge completed successfully
 )
 
 // From/To diagnostic counters
 var (
-	callsCreatedTotal     int64 // Total calls created from INVITE
-	callsCreatedEmptyFrom int64 // Calls created with empty From
-	callsCreatedEmptyTo   int64 // Calls created with empty To
-	callsUpdatedFrom      int64 // Calls where From was updated from empty
-	callsUpdatedTo        int64 // Calls where To was updated from empty
+	callsCreatedTotal     atomic.Int64 // Total calls created from INVITE
+	callsCreatedEmptyFrom atomic.Int64 // Calls created with empty From
+	callsCreatedEmptyTo   atomic.Int64 // Calls created with empty To
+	callsUpdatedFrom      atomic.Int64 // Calls where From was updated from empty
+	callsUpdatedTo        atomic.Int64 // Calls where To was updated from empty
 )
 
 // GetFromToStats returns From/To diagnostic statistics
 func GetFromToStats() (total, emptyFrom, emptyTo, updatedFrom, updatedTo int64) {
-	return atomic.LoadInt64(&callsCreatedTotal),
-		atomic.LoadInt64(&callsCreatedEmptyFrom),
-		atomic.LoadInt64(&callsCreatedEmptyTo),
-		atomic.LoadInt64(&callsUpdatedFrom),
-		atomic.LoadInt64(&callsUpdatedTo)
+	return callsCreatedTotal.Load(),
+		callsCreatedEmptyFrom.Load(),
+		callsCreatedEmptyTo.Load(),
+		callsUpdatedFrom.Load(),
+		callsUpdatedTo.Load()
 }
 
 // GetMergeAggregatorStats returns merge statistics from CallAggregator
 func GetMergeAggregatorStats() (attempts, syntheticFound, realFound, success int64) {
-	return atomic.LoadInt64(&mergeAttempts),
-		atomic.LoadInt64(&mergeSyntheticFound),
-		atomic.LoadInt64(&mergeRealFound),
-		atomic.LoadInt64(&mergeSuccess)
+	return mergeAttempts.Load(),
+		mergeSyntheticFound.Load(),
+		mergeRealFound.Load(),
+		mergeSuccess.Load()
 }
 
 // CallState represents the state of a VoIP call
@@ -334,12 +334,12 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 		ca.calls[sip.CallId] = call
 
 		// Track From/To population statistics
-		atomic.AddInt64(&callsCreatedTotal, 1)
+		callsCreatedTotal.Add(1)
 		if from == "" {
-			atomic.AddInt64(&callsCreatedEmptyFrom, 1)
+			callsCreatedEmptyFrom.Add(1)
 		}
 		if to == "" {
-			atomic.AddInt64(&callsCreatedEmptyTo, 1)
+			callsCreatedEmptyTo.Add(1)
 		}
 
 		// Log with full From/To values for debugging
@@ -379,7 +379,7 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 
 		if call.From == "" && from != "" {
 			call.From = from
-			atomic.AddInt64(&callsUpdatedFrom, 1)
+			callsUpdatedFrom.Add(1)
 			logger.Info("Updated call From from SIP packet",
 				"call_id", SanitizeCallIDForLogging(sip.CallId),
 				"from", from,
@@ -387,7 +387,7 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 		}
 		if call.To == "" && to != "" {
 			call.To = to
-			atomic.AddInt64(&callsUpdatedTo, 1)
+			callsUpdatedTo.Add(1)
 			logger.Info("Updated call To from SIP packet",
 				"call_id", SanitizeCallIDForLogging(sip.CallId),
 				"to", to,
@@ -848,7 +848,7 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 		return
 	}
 
-	atomic.AddInt64(&mergeAttempts, 1)
+	mergeAttempts.Add(1)
 
 	ca.mu.Lock()
 	defer ca.mu.Unlock()
@@ -861,7 +861,7 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 			"real_call_id", realCallID)
 		return
 	}
-	atomic.AddInt64(&mergeSyntheticFound, 1)
+	mergeSyntheticFound.Add(1)
 
 	// Get or create the real call
 	realCall, realExists := ca.calls[realCallID]
@@ -892,14 +892,14 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 			ca.lruIndex[realCallID] = elem
 		}
 
-		atomic.AddInt64(&mergeSuccess, 1)
+		mergeSuccess.Add(1)
 		logger.Info("Renamed RTP-only call to SIP call (late-offer)",
 			"synthetic_call_id", syntheticCallID,
 			"real_call_id", realCallID,
 			"packets", syntheticCall.PacketCount)
 		return // Already handled, don't delete below
 	} else {
-		atomic.AddInt64(&mergeRealFound, 1)
+		mergeRealFound.Add(1)
 		// Merge data from synthetic to real call
 		// Use earlier start time
 		if syntheticCall.StartTime.Before(realCall.StartTime) {
@@ -933,7 +933,7 @@ func (ca *CallAggregator) mergeRTPOnlyCall(syntheticCallID, realCallID string) {
 			}
 		}
 
-		atomic.AddInt64(&mergeSuccess, 1)
+		mergeSuccess.Add(1)
 		logger.Info("Merged RTP-only call into SIP call",
 			"synthetic_call_id", syntheticCallID,
 			"real_call_id", realCallID,

@@ -72,28 +72,28 @@ func TestValidator_ValidateContext(t *testing.T) {
 			name:         "invalid key",
 			apiKey:       "invalid-key",
 			requiredRole: RoleHunter,
-			wantErr:      ErrInvalidAPIKey,
+			wantErr:      ErrAuthenticationFailed,
 			wantKey:      nil,
 		},
 		{
 			name:         "hunter key for subscriber role",
 			apiKey:       "hunter-key-123",
 			requiredRole: RoleSubscriber,
-			wantErr:      ErrInsufficientPermissions,
+			wantErr:      ErrAuthenticationFailed,
 			wantKey:      nil,
 		},
 		{
 			name:         "subscriber key for hunter role",
 			apiKey:       "subscriber-key-456",
 			requiredRole: RoleHunter,
-			wantErr:      ErrInsufficientPermissions,
+			wantErr:      ErrAuthenticationFailed,
 			wantKey:      nil,
 		},
 		{
 			name:         "missing API key",
 			apiKey:       "",
 			requiredRole: RoleHunter,
-			wantErr:      ErrMissingAPIKey,
+			wantErr:      ErrAuthenticationFailed,
 			wantKey:      nil,
 		},
 	}
@@ -190,7 +190,7 @@ func TestValidator_UpdateConfig(t *testing.T) {
 
 	// Old key should no longer work
 	_, err = validator.ValidateContext(ctx, RoleHunter)
-	assert.ErrorIs(t, err, ErrInvalidAPIKey)
+	assert.ErrorIs(t, err, ErrAuthenticationFailed)
 
 	// New key should work
 	ctx = metadata.NewIncomingContext(
@@ -220,7 +220,7 @@ func TestValidator_NoMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := validator.ValidateContext(ctx, RoleHunter)
-	assert.ErrorIs(t, err, ErrMissingAPIKey)
+	assert.ErrorIs(t, err, ErrAuthenticationFailed)
 }
 
 func TestHasRole(t *testing.T) {

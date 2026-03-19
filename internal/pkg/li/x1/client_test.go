@@ -90,7 +90,7 @@ func TestClient_SendKeepalive(t *testing.T) {
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			assert.Contains(t, string(body), "<X1Request")
-			assert.Contains(t, string(body), `xsi:type="keepaliveRequest"`)
+			assert.Contains(t, string(body), `xsi:type="KeepaliveRequest"`)
 
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("<KeepaliveResponse/>"))
@@ -146,7 +146,7 @@ func TestClient_ReportTaskError(t *testing.T) {
 		xid := uuid.New()
 		err = client.ReportTaskError(context.Background(), xid, 500, "Internal error")
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, `xsi:type="reportTaskIssueRequest"`)
+		assert.Contains(t, receivedBody, `xsi:type="ReportTaskIssueRequest"`)
 		assert.Contains(t, receivedBody, xid.String())
 		assert.Contains(t, receivedBody, "Error")
 		assert.Contains(t, receivedBody, "Internal error")
@@ -196,7 +196,7 @@ func TestClient_ReportTaskProgress(t *testing.T) {
 	xid := uuid.New()
 	err = client.ReportTaskProgress(context.Background(), xid, "Activation in progress")
 	assert.NoError(t, err)
-	assert.Contains(t, receivedBody, `xsi:type="reportTaskIssueRequest"`)
+	assert.Contains(t, receivedBody, `xsi:type="ReportTaskIssueRequest"`)
 	assert.Contains(t, receivedBody, "TaskProgress")
 	assert.Contains(t, receivedBody, "Activation in progress")
 }
@@ -219,7 +219,7 @@ func TestClient_ReportTaskImplicitDeactivation(t *testing.T) {
 	xid := uuid.New()
 	err = client.ReportTaskImplicitDeactivation(context.Background(), xid, "Task EndTime reached")
 	assert.NoError(t, err)
-	assert.Contains(t, receivedBody, `xsi:type="reportTaskIssueRequest"`)
+	assert.Contains(t, receivedBody, `xsi:type="ReportTaskIssueRequest"`)
 	assert.Contains(t, receivedBody, "ImplicitDeactivation")
 	assert.Contains(t, receivedBody, "Task EndTime reached")
 }
@@ -243,7 +243,7 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 		did := uuid.New()
 		err = client.ReportDeliveryError(context.Background(), did, 503, "Connection refused")
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, `xsi:type="reportDestinationIssueRequest"`)
+		assert.Contains(t, receivedBody, `xsi:type="ReportDestinationIssueRequest"`)
 		assert.Contains(t, receivedBody, did.String())
 		assert.Contains(t, receivedBody, "DeliveryError")
 		assert.Contains(t, receivedBody, "Connection refused")
@@ -332,7 +332,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 
 		err = client.ReportStartup(context.Background())
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, `xsi:type="reportNEIssueRequest"`)
+		assert.Contains(t, receivedBody, `xsi:type="ReportNEIssueRequest"`)
 		assert.Contains(t, receivedBody, "Startup")
 
 		stats := client.Stats()
@@ -1737,7 +1737,7 @@ func TestClient_X1RequestWrapping(t *testing.T) {
 	// Verify ETSI-compliant X1Request wrapping.
 	assert.Contains(t, receivedBody, xml.Header)
 	assert.Contains(t, receivedBody, `<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">`)
-	assert.Contains(t, receivedBody, `xsi:type="keepaliveRequest"`)
+	assert.Contains(t, receivedBody, `xsi:type="KeepaliveRequest"`)
 	assert.Contains(t, receivedBody, `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`)
 	assert.Contains(t, receivedBody, "</X1Request>")
 	assert.Contains(t, receivedBody, "test-ne")

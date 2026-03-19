@@ -444,7 +444,7 @@ func (c *Client) SendKeepalive(ctx context.Context) error {
 		X1RequestMessage: c.buildRequestMessage(),
 	}
 
-	return c.sendRequestWithRetry(ctx, "keepaliveRequest", req)
+	return c.sendRequestWithRetry(ctx, "KeepaliveRequest", req)
 }
 
 // ReportTaskError sends an error report for a task to ADMF.
@@ -462,7 +462,7 @@ func (c *Client) ReportTaskError(ctx context.Context, xid uuid.UUID, errorCode i
 		X1RequestMessage:   c.buildRequestMessage(),
 	}
 
-	err := c.sendRequestWithRetry(ctx, "reportTaskIssueRequest", req)
+	err := c.sendRequestWithRetry(ctx, "ReportTaskIssueRequest", req)
 	c.mu.Lock()
 	if err != nil {
 		c.stats.TaskReportsFailed++
@@ -489,7 +489,7 @@ func (c *Client) ReportTaskProgress(ctx context.Context, xid uuid.UUID, details 
 		X1RequestMessage: c.buildRequestMessage(),
 	}
 
-	err := c.sendRequestWithRetry(ctx, "reportTaskIssueRequest", req)
+	err := c.sendRequestWithRetry(ctx, "ReportTaskIssueRequest", req)
 	c.mu.Lock()
 	if err != nil {
 		c.stats.TaskReportsFailed++
@@ -517,7 +517,7 @@ func (c *Client) ReportTaskImplicitDeactivation(ctx context.Context, xid uuid.UU
 		X1RequestMessage: c.buildRequestMessage(),
 	}
 
-	err := c.sendRequestWithRetry(ctx, "reportTaskIssueRequest", req)
+	err := c.sendRequestWithRetry(ctx, "ReportTaskIssueRequest", req)
 	c.mu.Lock()
 	if err != nil {
 		c.stats.TaskReportsFailed++
@@ -558,7 +558,7 @@ func (c *Client) ReportDestinationIssue(ctx context.Context, did uuid.UUID, repo
 		X1RequestMessage:          c.buildRequestMessage(),
 	}
 
-	err := c.sendRequestWithRetry(ctx, "reportDestinationIssueRequest", req)
+	err := c.sendRequestWithRetry(ctx, "ReportDestinationIssueRequest", req)
 	c.mu.Lock()
 	if err != nil {
 		c.stats.DestinationReportsFailed++
@@ -605,7 +605,7 @@ func (c *Client) ReportNEIssue(ctx context.Context, issueType string, descriptio
 		X1RequestMessage:     c.buildRequestMessage(),
 	}
 
-	err := c.sendRequestWithRetry(ctx, "reportNEIssueRequest", req)
+	err := c.sendRequestWithRetry(ctx, "ReportNEIssueRequest", req)
 	c.mu.Lock()
 	if err != nil {
 		c.stats.NEReportsFailed++
@@ -711,7 +711,7 @@ func (c *Client) SetADMFIdentifier(id string) {
 // Per ETSI TS 103 221-1, requests must be wrapped as:
 //
 //	<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">
-//	  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="keepaliveRequest">
+//	  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="KeepaliveRequest">
 //	    ...fields...
 //	  </x1RequestMessage>
 //	</X1Request>

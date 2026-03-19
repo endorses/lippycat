@@ -6,6 +6,7 @@ package li
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -271,6 +272,28 @@ func (m *Manager) Start() error {
 		logger.Info("X1 client started", "admf_endpoint", m.config.ADMFEndpoint)
 	}
 
+	// Sync state from ADMF on startup if configured.
+	if m.config.SyncOnStartup && m.x1Client != nil {
+		syncTimeout := m.config.SyncTimeout
+		if syncTimeout == 0 {
+			syncTimeout = 30 * time.Second
+		}
+		syncCtx, syncCancel := context.WithTimeout(context.Background(), syncTimeout)
+		if err := m.syncStateFromADMF(syncCtx); err != nil {
+			logger.Warn("ADMF state sync failed, continuing without pre-loaded state",
+				"error", err,
+				"admf", m.config.ADMFEndpoint,
+			)
+		}
+		syncCancel()
+	}
+
+	// Start periodic reconciliation if configured.
+	if m.config.ReconcileInterval > 0 && m.x1Client != nil {
+		m.wg.Add(1)
+		go m.startReconciliation()
+	}
+
 	logger.Info("LI Manager started",
 		"x1_listen", m.config.X1ListenAddr,
 		"admf_endpoint", m.config.ADMFEndpoint,
@@ -319,6 +342,202 @@ func (m *Manager) Stop() {
 		"packets_processed", m.stats.PacketsProcessed,
 		"packets_matched", m.stats.PacketsMatched,
 	)
+}
+
+// syncStateFromADMF queries the ADMF for all tasks and destinations,
+// and restores them into the local registry. This is used on startup
+// to recover state after a restart without waiting for ADMF to re-push.
+func (m *Manager) syncStateFromADMF(ctx context.Context) error {
+	resp, err := m.x1Client.GetAllDetails(ctx)
+	if err != nil {
+		// If ADMF does not support this operation, log and return nil.
+		var admfErr *x1.ADMFError
+		if errors.As(err, &admfErr) && admfErr.IsUnsupportedOperation() {
+			logger.Warn("ADMF does not support GetAllDetails, skipping state sync",
+				"admf", m.config.ADMFEndpoint,
+			)
+			return nil
+		}
+		return fmt.Errorf("get all details from ADMF: %w", err)
+	}
+
+	var destCount, taskCount int
+	var destErrors, taskErrors int
+
+	// Register destinations first (tasks reference destinations by DID).
+	if resp.ListOfDestinationResponseDetails != nil {
+		for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
+			dest, convErr := DestinationResponseDetailsToDestination(dd)
+			if convErr != nil {
+				logger.Warn("Failed to convert ADMF destination, skipping",
+					"error", convErr,
+				)
+				destErrors++
+				continue
+			}
+			if createErr := m.registry.CreateDestination(dest); createErr != nil {
+				// Destination may already exist if sync is called multiple times.
+				if !errors.Is(createErr, ErrDestinationAlreadyExists) {
+					logger.Warn("Failed to register ADMF destination, skipping",
+						"did", dest.DID,
+						"error", createErr,
+					)
+					destErrors++
+				}
+				continue
+			}
+			destCount++
+		}
+	}
+
+	// Activate tasks.
+	if resp.ListOfTaskResponseDetails != nil {
+		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
+			task, convErr := TaskResponseDetailsToInterceptTask(td)
+			if convErr != nil {
+				logger.Warn("Failed to convert ADMF task, skipping",
+					"error", convErr,
+				)
+				taskErrors++
+				continue
+			}
+			if activateErr := m.ActivateTask(task); activateErr != nil {
+				// Task may already exist if sync is called multiple times.
+				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
+					logger.Warn("Failed to activate ADMF task, skipping",
+						"xid", task.XID,
+						"error", activateErr,
+					)
+					taskErrors++
+				}
+				continue
+			}
+			taskCount++
+		}
+	}
+
+	logger.Info("ADMF state sync complete",
+		"tasks", taskCount,
+		"destinations", destCount,
+		"task_errors", taskErrors,
+		"destination_errors", destErrors,
+	)
+
+	return nil
+}
+
+// startReconciliation runs periodic state reconciliation with the ADMF.
+// It compares local registry state with ADMF state and logs discrepancies.
+func (m *Manager) startReconciliation() {
+	defer m.wg.Done()
+
+	ticker := time.NewTicker(m.config.ReconcileInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.stopChan:
+			return
+		case <-ticker.C:
+			m.reconcileWithADMF()
+		}
+	}
+}
+
+// reconcileWithADMF queries the ADMF for current state and compares it
+// with the local registry, activating any tasks found in ADMF but missing
+// locally. Tasks present locally but not in ADMF are logged as warnings
+// but not automatically deactivated (could be a transient ADMF issue).
+func (m *Manager) reconcileWithADMF() {
+	syncTimeout := m.config.SyncTimeout
+	if syncTimeout == 0 {
+		syncTimeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+	defer cancel()
+
+	resp, err := m.x1Client.GetAllDetails(ctx)
+	if err != nil {
+		var admfErr *x1.ADMFError
+		if errors.As(err, &admfErr) && admfErr.IsUnsupportedOperation() {
+			logger.Debug("ADMF does not support GetAllDetails, skipping reconciliation")
+			return
+		}
+		logger.Warn("ADMF reconciliation failed",
+			"error", err,
+			"admf", m.config.ADMFEndpoint,
+		)
+		return
+	}
+
+	// Build set of ADMF task XIDs.
+	admfTasks := make(map[uuid.UUID]bool)
+	var activated int
+	if resp.ListOfTaskResponseDetails != nil {
+		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
+			task, convErr := TaskResponseDetailsToInterceptTask(td)
+			if convErr != nil {
+				logger.Warn("Reconciliation: failed to convert ADMF task, skipping",
+					"error", convErr,
+				)
+				continue
+			}
+			admfTasks[task.XID] = true
+
+			// If task is in ADMF but not in local registry, activate it.
+			if _, getErr := m.registry.GetTaskDetails(task.XID); getErr != nil {
+				// Register any missing destinations first.
+				if resp.ListOfDestinationResponseDetails != nil {
+					for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
+						dest, destErr := DestinationResponseDetailsToDestination(dd)
+						if destErr != nil {
+							continue
+						}
+						_ = m.registry.CreateDestination(dest) // Ignore already-exists
+					}
+				}
+
+				if activateErr := m.ActivateTask(task); activateErr != nil {
+					logger.Warn("Reconciliation: failed to activate missing task",
+						"xid", task.XID,
+						"error", activateErr,
+					)
+				} else {
+					activated++
+					logger.Info("Reconciliation: activated missing task from ADMF",
+						"xid", task.XID,
+					)
+				}
+			}
+		}
+	}
+
+	// Find tasks in local registry but not in ADMF (log warning only).
+	var localOnly int
+	m.registry.ListTasks(func(task *InterceptTask) bool {
+		if task.Status == TaskStatusActive || task.Status == TaskStatusPending {
+			if !admfTasks[task.XID] {
+				localOnly++
+				logger.Warn("Reconciliation: task exists locally but not in ADMF",
+					"xid", task.XID,
+					"status", task.Status.String(),
+				)
+			}
+		}
+		return true
+	})
+
+	if activated > 0 || localOnly > 0 {
+		logger.Info("ADMF reconciliation complete",
+			"activated", activated,
+			"local_only", localOnly,
+			"admf_tasks", len(admfTasks),
+		)
+	} else {
+		logger.Debug("ADMF reconciliation complete, no discrepancies",
+			"admf_tasks", len(admfTasks),
+		)
+	}
 }
 
 // SetPacketProcessor sets the callback for matched packets.

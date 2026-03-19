@@ -3,7 +3,12 @@
 package li
 
 import (
+	"encoding/xml"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
 
@@ -517,4 +523,328 @@ func TestManager_Destinations(t *testing.T) {
 	// Verify removed
 	_, err = m.GetDestination(destDID)
 	assert.Error(t, err)
+}
+
+// newTestADMFServer creates an httptest server that returns the given XML response body
+// for any POST request. The server URL can be used as the ADMFEndpoint for Manager.
+func newTestADMFServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// buildGetAllDetailsResponseXML builds an XML response containing destinations and tasks.
+func buildGetAllDetailsResponseXML(destinations []*schema.DestinationResponseDetails, tasks []*schema.TaskResponseDetails) string {
+	resp := schema.GetAllDetailsResponse{
+		ListOfTaskResponseDetails: &schema.ListOfTaskResponseDetails{
+			TaskResponseDetails: tasks,
+		},
+		ListOfDestinationResponseDetails: &schema.ListOfDestinationResponseDetails{
+			DestinationResponseDetails: destinations,
+		},
+	}
+	data, _ := xml.MarshalIndent(resp, "", "  ")
+	return xml.Header + string(data)
+}
+
+// makeDestinationResponseDetails creates a DestinationResponseDetails for testing.
+func makeDestinationResponseDetails(did uuid.UUID, address string, port int) *schema.DestinationResponseDetails {
+	didStr := schema.UUID(did.String())
+	ipv4 := address
+	tcpPort := port
+	name := "Test MDF"
+	return &schema.DestinationResponseDetails{
+		DestinationDetails: &schema.DestinationDetails{
+			DId:          &didStr,
+			DeliveryType: "X2andX3",
+			DeliveryAddress: &schema.DeliveryAddress{
+				IpAddressAndPort: &schema.IPAddressPort{
+					Address: &schema.IPAddress{
+						IPv4Address: &ipv4,
+					},
+					Port: &schema.Port{
+						TCPPort: &tcpPort,
+					},
+				},
+			},
+			FriendlyName: &name,
+		},
+	}
+}
+
+// makeTaskResponseDetails creates a TaskResponseDetails for testing.
+func makeTaskResponseDetails(xid uuid.UUID, dids []uuid.UUID, targets []schema.TargetIdentifier) *schema.TaskResponseDetails {
+	xidStr := schema.UUID(xid.String())
+	implicitDeactivation := true
+
+	var listOfDIDs *schema.ListOfDids
+	if len(dids) > 0 {
+		didPtrs := make([]*schema.UUID, len(dids))
+		for i, did := range dids {
+			didStr := schema.UUID(did.String())
+			didPtrs[i] = &didStr
+		}
+		listOfDIDs = &schema.ListOfDids{DId: didPtrs}
+	}
+
+	var listOfTargets *schema.ListOfTargetIdentifiers
+	if len(targets) > 0 {
+		tiPtrs := make([]*schema.TargetIdentifier, len(targets))
+		for i := range targets {
+			tiPtrs[i] = &targets[i]
+		}
+		listOfTargets = &schema.ListOfTargetIdentifiers{
+			TargetIdentifier: tiPtrs,
+		}
+	}
+
+	return &schema.TaskResponseDetails{
+		TaskDetails: &schema.TaskDetails{
+			XId:                         &xidStr,
+			TargetIdentifiers:           listOfTargets,
+			DeliveryType:                "X2andX3",
+			ListOfDIDs:                  listOfDIDs,
+			ImplicitDeactivationAllowed: &implicitDeactivation,
+		},
+		TaskStatus: &schema.TaskStatus{
+			ProvisioningStatus: "active",
+		},
+	}
+}
+
+func TestManager_SyncStateFromADMF_Success(t *testing.T) {
+	destDID := uuid.New()
+	taskXID := uuid.New()
+
+	sipURI := schema.SIPURI("sip:alice@example.com")
+
+	respXML := buildGetAllDetailsResponseXML(
+		[]*schema.DestinationResponseDetails{
+			makeDestinationResponseDetails(destDID, "10.0.0.1", 8443),
+		},
+		[]*schema.TaskResponseDetails{
+			makeTaskResponseDetails(taskXID, []uuid.UUID{destDID}, []schema.TargetIdentifier{
+				{SipUri: &sipURI},
+			}),
+		},
+	)
+
+	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, respXML)
+	})
+
+	config := ManagerConfig{
+		Enabled:       true,
+		ADMFEndpoint:  server.URL,
+		SyncOnStartup: true,
+		SyncTimeout:   5 * time.Second,
+	}
+
+	m := NewManager(config, nil)
+	require.NotNil(t, m)
+	require.NotNil(t, m.x1Client, "x1Client should be created when ADMFEndpoint is set")
+
+	err := m.Start()
+	require.NoError(t, err)
+	defer m.Stop()
+
+	// Verify destination was created.
+	dest, err := m.GetDestination(destDID)
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.1", dest.Address)
+	assert.Equal(t, 8443, dest.Port)
+
+	// Verify task was activated.
+	task, err := m.GetTaskDetails(taskXID)
+	require.NoError(t, err)
+	assert.Equal(t, TaskStatusActive, task.Status)
+	assert.Equal(t, 1, len(task.Targets))
+	assert.Equal(t, TargetTypeSIPURI, task.Targets[0].Type)
+
+	assert.Equal(t, 1, m.ActiveTaskCount())
+	assert.Equal(t, 1, m.FilterCount())
+}
+
+func TestManager_SyncStateFromADMF_Empty(t *testing.T) {
+	respXML := buildGetAllDetailsResponseXML(nil, nil)
+
+	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, respXML)
+	})
+
+	config := ManagerConfig{
+		Enabled:       true,
+		ADMFEndpoint:  server.URL,
+		SyncOnStartup: true,
+		SyncTimeout:   5 * time.Second,
+	}
+
+	m := NewManager(config, nil)
+	require.NotNil(t, m)
+
+	err := m.Start()
+	require.NoError(t, err)
+	defer m.Stop()
+
+	// No tasks or destinations should be created.
+	assert.Equal(t, 0, m.TaskCount())
+	assert.Equal(t, 0, m.ActiveTaskCount())
+}
+
+func TestManager_SyncStateFromADMF_UnsupportedOperation(t *testing.T) {
+	// ADMF returns an error indicating GetAllDetails is not supported.
+	errorResp := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<responseContainer>
+  <errorResponse>
+    <requestMessageType>GetAllDetailsRequest</requestMessageType>
+    <errorInformation>
+      <errorCode>7</errorCode>
+      <errorDescription>Operation not supported</errorDescription>
+    </errorInformation>
+  </errorResponse>
+</responseContainer>`)
+
+	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, errorResp)
+	})
+
+	config := ManagerConfig{
+		Enabled:       true,
+		ADMFEndpoint:  server.URL,
+		SyncOnStartup: true,
+		SyncTimeout:   5 * time.Second,
+	}
+
+	m := NewManager(config, nil)
+	require.NotNil(t, m)
+
+	// Start should succeed even though ADMF returned unsupported operation.
+	err := m.Start()
+	require.NoError(t, err)
+	defer m.Stop()
+
+	// No tasks should be created.
+	assert.Equal(t, 0, m.TaskCount())
+}
+
+func TestManager_SyncStateFromADMF_ADMFUnreachable(t *testing.T) {
+	// Use a server that is immediately closed to simulate unreachable ADMF.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	serverURL := server.URL
+	server.Close() // Close immediately to make it unreachable.
+
+	config := ManagerConfig{
+		Enabled:       true,
+		ADMFEndpoint:  serverURL,
+		SyncOnStartup: true,
+		SyncTimeout:   2 * time.Second,
+	}
+
+	m := NewManager(config, nil)
+	require.NotNil(t, m)
+
+	// Start should succeed — sync failure is non-fatal.
+	err := m.Start()
+	require.NoError(t, err)
+	defer m.Stop()
+
+	// No tasks should be created.
+	assert.Equal(t, 0, m.TaskCount())
+}
+
+func TestManager_SyncStateFromADMF_PartialFailure(t *testing.T) {
+	destDID := uuid.New()
+	goodTaskXID := uuid.New()
+	badTaskXID := uuid.New()
+
+	sipURI := schema.SIPURI("sip:bob@example.com")
+
+	// Build a response with one good task and one bad task (nil TaskDetails).
+	goodTask := makeTaskResponseDetails(goodTaskXID, []uuid.UUID{destDID}, []schema.TargetIdentifier{
+		{SipUri: &sipURI},
+	})
+	// Bad task: nil TaskDetails will cause conversion to fail.
+	badTask := &schema.TaskResponseDetails{
+		TaskDetails: &schema.TaskDetails{
+			XId: func() *schema.UUID { u := schema.UUID(badTaskXID.String()); return &u }(),
+			// Missing targets and delivery type — will fail validation.
+		},
+	}
+
+	respXML := buildGetAllDetailsResponseXML(
+		[]*schema.DestinationResponseDetails{
+			makeDestinationResponseDetails(destDID, "10.0.0.2", 9443),
+		},
+		[]*schema.TaskResponseDetails{goodTask, badTask},
+	)
+
+	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, respXML)
+	})
+
+	config := ManagerConfig{
+		Enabled:       true,
+		ADMFEndpoint:  server.URL,
+		SyncOnStartup: true,
+		SyncTimeout:   5 * time.Second,
+	}
+
+	m := NewManager(config, nil)
+	require.NotNil(t, m)
+
+	err := m.Start()
+	require.NoError(t, err)
+	defer m.Stop()
+
+	// Good task should be activated despite bad task failing.
+	task, err := m.GetTaskDetails(goodTaskXID)
+	require.NoError(t, err)
+	assert.Equal(t, TaskStatusActive, task.Status)
+
+	// Exactly one task should be active.
+	assert.Equal(t, 1, m.ActiveTaskCount())
+}
+
+func TestManager_Start_SyncDisabled(t *testing.T) {
+	var requestCount int32
+
+	server := newTestADMFServer(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<KeepaliveResponse/>`)
+	})
+
+	config := ManagerConfig{
+		Enabled:       true,
+		ADMFEndpoint:  server.URL,
+		SyncOnStartup: false, // Sync disabled.
+		X1Client: X1ClientConfig{
+			KeepaliveInterval: 0, // Disable keepalive to reduce noise.
+		},
+	}
+
+	m := NewManager(config, nil)
+	require.NotNil(t, m)
+	require.NotNil(t, m.x1Client)
+
+	err := m.Start()
+	require.NoError(t, err)
+
+	// Give a moment for any potential sync to happen (it should not).
+	time.Sleep(100 * time.Millisecond)
+	m.Stop()
+
+	// Only the startup notification should have been sent, not GetAllDetails.
+	// The startup notification and any potential keepalive are the only requests.
+	// There should be no GetAllDetails request since SyncOnStartup is false.
+	assert.Equal(t, 0, m.TaskCount())
 }

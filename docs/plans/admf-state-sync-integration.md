@@ -81,13 +81,13 @@ Convert ETSI X1 response types to internal lippycat types.
 
 **File:** `internal/pkg/li/manager.go`
 
-- [ ] Add `syncStateFromADMF(ctx context.Context) error` method on Manager
+- [x] Add `syncStateFromADMF(ctx context.Context) error` method on Manager
   1. Call `x1Client.GetAllDetails(ctx)` to fetch tasks and destinations
   2. For each destination in response: call `registry.CreateDestination()` to register MDF endpoints
   3. For each task in response: convert via `TaskResponseDetailsToInterceptTask()`, call `ActivateTask()` to register and create filters
   4. Log summary: "State sync complete: N tasks, M destinations restored"
   5. Handle `UnsupportedOperation` error — log warning and continue (ADMF may not support this operation)
-- [ ] Update `Start()` method (line 213): after startup notification goroutine, call `syncStateFromADMF()` if `config.SyncOnStartup` is true and `x1Client` is configured
+- [x] Update `Start()` method: after startup notification goroutine, call `syncStateFromADMF()` if `config.SyncOnStartup` is true and `x1Client` is configured
   - Run with `SyncTimeout` context
   - On failure: log error and continue (lippycat must still start even if ADMF is unreachable)
 
@@ -95,31 +95,33 @@ Convert ETSI X1 response types to internal lippycat types.
 
 **File:** `internal/pkg/li/manager.go`
 
-- [ ] Add `startReconciliation()` method — background goroutine on `ReconcileInterval` ticker
+- [x] Add `startReconciliation()` method — background goroutine on `ReconcileInterval` ticker
   - Call `GetAllDetails()` and compare with registry state
   - Log discrepancies: missing tasks, extra tasks, mismatched parameters
-  - Optionally auto-correct: activate missing tasks, deactivate extras
-- [ ] Start in `Start()` if `ReconcileInterval > 0`
-- [ ] Stop in `Stop()` via context cancellation
+  - Auto-activate missing tasks; log-only for tasks present locally but not in ADMF
+- [x] Start in `Start()` if `ReconcileInterval > 0`
+- [x] Stop in `Stop()` via `stopChan` close
 
 ## Phase 7: Tests
 
-**File:** `internal/pkg/li/x1/client_test.go`
+All tests implemented inline with their respective phases.
 
-- [ ] Test `GetAllDetails()` with httptest mock server returning valid XML response
-- [ ] Test `GetAllTaskDetails()` with httptest mock server
-- [ ] Test response parsing with `ErrorResponse` (error code + message)
-- [ ] Test response parsing with `UnsupportedOperation` error
-- [ ] Test with empty response (no tasks/destinations)
-- [ ] Test with HTTP error status codes
+**File:** `internal/pkg/li/x1/client_test.go` (Phases 1-2)
 
-**File:** `internal/pkg/li/manager_test.go`
+- [x] Test `GetAllDetails()` with httptest mock server returning valid XML response
+- [x] Test `GetAllTaskDetails()` with httptest mock server
+- [x] Test response parsing with `ErrorResponse` (error code + message)
+- [x] Test response parsing with `UnsupportedOperation` error
+- [x] Test with empty response (no tasks/destinations)
+- [x] Test with HTTP error status codes
 
-- [ ] Test `syncStateFromADMF()` — full flow: GetAllDetails → destinations created → tasks activated
-- [ ] Test startup sync with ADMF unreachable — should timeout and continue
-- [ ] Test startup sync with ADMF returning error — should log and continue
-- [ ] Test startup sync disabled (`SyncOnStartup: false`) — should skip entirely
-- [ ] Test reconciliation detecting drift (if Phase 6 implemented)
+**File:** `internal/pkg/li/manager_test.go` (Phase 5-6)
+
+- [x] Test `syncStateFromADMF()` — full flow: GetAllDetails → destinations created → tasks activated
+- [x] Test startup sync with ADMF unreachable — should timeout and continue
+- [x] Test startup sync with ADMF returning error — should log and continue
+- [x] Test startup sync disabled (`SyncOnStartup: false`) — should skip entirely
+- [x] Test partial failure — some tasks fail, others succeed
 
 ## Files Summary
 

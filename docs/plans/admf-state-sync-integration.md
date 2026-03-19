@@ -12,13 +12,13 @@ Enable lippycat to query the ADMF for current task/destination state on startup 
 
 The current `sendRequest()` (line 648) discards the response body after checking HTTP status. Query operations need to parse XML responses.
 
-- [ ] Add `sendQueryRequest(ctx context.Context, rootElement string, req any, resp any) error` method
+- [x] Add `sendQueryRequest(ctx context.Context, rootElement string, req any, resp any) error` method
   - Reuse marshaling/HTTP logic from `sendRequest()`
   - Read and unmarshal response body into `resp` (pointer to expected response type)
   - Handle `X1ResponseMessage` error responses (check `ErrorInformation` field) — return typed error
   - Handle HTTP error status codes with response body for diagnostics
   - Use `sendRequestWithRetry()` for retry logic
-- [ ] Add `sendQueryRequestWithRetry()` wrapper following existing retry pattern
+- [x] Add `sendQueryRequestWithRetry()` wrapper following existing retry pattern
 
 ## Phase 2: Query Methods
 

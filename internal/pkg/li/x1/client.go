@@ -102,6 +102,42 @@ var (
 
 	// ErrRequestFailed indicates an HTTP request to ADMF failed.
 	ErrRequestFailed = errors.New("ADMF request failed")
+
+	// ErrADMFError indicates the ADMF returned an X1 error response.
+	ErrADMFError = errors.New("ADMF error response")
+)
+
+// ADMFError represents a structured error response from the ADMF.
+type ADMFError struct {
+	// ErrorCode is the ETSI-defined error code.
+	ErrorCode int
+
+	// ErrorDescription is the human-readable error description.
+	ErrorDescription string
+
+	// RequestMessageType is the type of request that caused the error.
+	RequestMessageType string
+}
+
+// Error implements the error interface.
+func (e *ADMFError) Error() string {
+	return fmt.Sprintf("ADMF error %d: %s (request: %s)", e.ErrorCode, e.ErrorDescription, e.RequestMessageType)
+}
+
+// Unwrap allows errors.Is to match ErrADMFError.
+func (e *ADMFError) Unwrap() error {
+	return ErrADMFError
+}
+
+// IsUnsupportedOperation returns true if the ADMF returned an "unsupported operation" error.
+func (e *ADMFError) IsUnsupportedOperation() bool {
+	return e.ErrorCode == ErrorCodeUnsupportedOperation
+}
+
+// ETSI TS 103 221-1 error codes used by the client.
+const (
+	// ErrorCodeUnsupportedOperation indicates the ADMF does not support the requested operation.
+	ErrorCodeUnsupportedOperation = 7
 )
 
 // ClientConfig holds configuration for the X1 client.
@@ -602,6 +638,150 @@ func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
 		Version:          c.config.Version,
 		X1TransactionId:  &transID,
 	}
+}
+
+// responseContainer is used to unmarshal ADMF XML responses.
+// The ADMF wraps responses in <responseContainer> with child elements.
+type responseContainer struct {
+	// ErrorResponses captures any <errorResponse> elements.
+	ErrorResponses []schema.ErrorResponse `xml:"errorResponse"`
+
+	// RawMessages captures raw <x1ResponseMessage> elements for later unmarshaling.
+	RawMessages []rawXML `xml:"x1ResponseMessage"`
+}
+
+// rawXML captures raw XML content for deferred unmarshaling.
+type rawXML struct {
+	Inner []byte `xml:",innerxml"`
+}
+
+// sendQueryRequestWithRetry sends an X1 query request with exponential backoff retry
+// and parses the response into the provided response type.
+func (c *Client) sendQueryRequestWithRetry(ctx context.Context, rootElement string, req any, resp any) error {
+	backoff := c.config.InitialBackoff
+	var lastErr error
+
+	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-c.stopChan:
+				return ErrClientStopped
+			case <-time.After(backoff):
+			}
+
+			backoff = time.Duration(float64(backoff) * c.config.BackoffMultiplier)
+			if backoff > c.config.MaxBackoff {
+				backoff = c.config.MaxBackoff
+			}
+		}
+
+		err := c.sendQueryRequest(ctx, rootElement, req, resp)
+		if err == nil {
+			return nil
+		}
+
+		// Don't retry ADMF application-level errors (e.g., unsupported operation).
+		var admfErr *ADMFError
+		if errors.As(err, &admfErr) {
+			return err
+		}
+
+		lastErr = err
+		logger.Debug("X1 query request failed, will retry",
+			"attempt", attempt+1,
+			"max_retries", c.config.MaxRetries,
+			"error", err,
+			"backoff", backoff,
+		)
+	}
+
+	return fmt.Errorf("%w: after %d retries: %v", ErrRequestFailed, c.config.MaxRetries, lastErr)
+}
+
+// sendQueryRequest sends a single X1 query request and parses the response.
+// The resp parameter must be a pointer to the expected response type.
+func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req any, resp any) error {
+	// Marshal the request to XML.
+	body, err := xml.MarshalIndent(req, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	xmlData := []byte(xml.Header + string(body))
+
+	// Create HTTP request.
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.ADMFEndpoint, bytes.NewReader(xmlData))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", contentTypeXML)
+	httpReq.Header.Set("Accept", contentTypeXML)
+
+	// Send request.
+	httpResp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	// Read response body.
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 1024*1024)) // 1MB limit
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check HTTP status.
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return fmt.Errorf("HTTP status %d: %s", httpResp.StatusCode, string(respBody))
+	}
+
+	logger.Debug("X1 query response received",
+		"status", httpResp.StatusCode,
+		"body_length", len(respBody),
+	)
+
+	// Try to unmarshal as a responseContainer to check for error responses.
+	var container responseContainer
+	if err := xml.Unmarshal(respBody, &container); err != nil {
+		// If container parsing fails, try direct unmarshal into the response type.
+		// This handles ADMFs that don't wrap in responseContainer.
+		if xmlErr := xml.Unmarshal(respBody, resp); xmlErr != nil {
+			return fmt.Errorf("failed to parse response XML: %w (container parse: %v)", xmlErr, err)
+		}
+		return nil
+	}
+
+	// Check for error responses.
+	if len(container.ErrorResponses) > 0 {
+		errResp := container.ErrorResponses[0]
+		if errResp.ErrorInformation != nil {
+			return &ADMFError{
+				ErrorCode:          errResp.ErrorInformation.ErrorCode,
+				ErrorDescription:   errResp.ErrorInformation.ErrorDescription,
+				RequestMessageType: errResp.RequestMessageType,
+			}
+		}
+	}
+
+	// Unmarshal the first x1ResponseMessage into the expected response type.
+	if len(container.RawMessages) > 0 {
+		// Wrap the raw inner XML in a root element for unmarshaling.
+		wrappedXML := []byte("<x1ResponseMessage>" + string(container.RawMessages[0].Inner) + "</x1ResponseMessage>")
+		if err := xml.Unmarshal(wrappedXML, resp); err != nil {
+			return fmt.Errorf("failed to parse response message: %w", err)
+		}
+		return nil
+	}
+
+	// No messages in container — try direct unmarshal as fallback.
+	if err := xml.Unmarshal(respBody, resp); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return nil
 }
 
 // sendRequestWithRetry sends an X1 request with exponential backoff retry.

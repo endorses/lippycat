@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 )
 
 func TestNewClient(t *testing.T) {
@@ -1013,4 +1015,474 @@ func TestClient_Config(t *testing.T) {
 	assert.Equal(t, "test-ne", config.NEIdentifier)
 	assert.Equal(t, "v2.0.0", config.Version)
 	assert.Equal(t, 60*time.Second, config.KeepaliveInterval)
+}
+
+// ============================================================================
+// Phase 1: sendQueryRequest / sendQueryRequestWithRetry Tests
+// ============================================================================
+
+func TestClient_SendQueryRequest_Success(t *testing.T) {
+	t.Run("parses response in responseContainer", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <neStatusDetails>
+      <neStatus>operational</neStatus>
+    </neStatusDetails>
+    <listOfTaskResponseDetails>
+      <taskResponseDetails>
+        <taskDetails>
+          <xId>a1b2c3d4-e5f6-7890-abcd-ef1234567890</xId>
+          <deliveryType>X2andX3</deliveryType>
+        </taskDetails>
+        <taskStatus>
+          <provisioningStatus>complete</provisioningStatus>
+        </taskStatus>
+      </taskResponseDetails>
+    </listOfTaskResponseDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "POST", r.Method)
+			assert.Equal(t, contentTypeXML, r.Header.Get("Content-Type"))
+
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Contains(t, string(body), "GetAllDetailsRequest")
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.NoError(t, err)
+
+		require.NotNil(t, resp.NeStatusDetails)
+		assert.Equal(t, "operational", resp.NeStatusDetails.NeStatus)
+
+		require.NotNil(t, resp.ListOfTaskResponseDetails)
+		require.Len(t, resp.ListOfTaskResponseDetails.TaskResponseDetails, 1)
+		task := resp.ListOfTaskResponseDetails.TaskResponseDetails[0]
+		require.NotNil(t, task.TaskDetails)
+		require.NotNil(t, task.TaskDetails.XId)
+		assert.Equal(t, "a1b2c3d4-e5f6-7890-abcd-ef1234567890", string(*task.TaskDetails.XId))
+		assert.Equal(t, "X2andX3", task.TaskDetails.DeliveryType)
+		require.NotNil(t, task.TaskStatus)
+		assert.Equal(t, "complete", task.TaskStatus.ProvisioningStatus)
+	})
+
+	t.Run("parses empty response (no tasks)", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <neStatusDetails>
+      <neStatus>operational</neStatus>
+    </neStatusDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.NoError(t, err)
+
+		require.NotNil(t, resp.NeStatusDetails)
+		assert.Equal(t, "operational", resp.NeStatusDetails.NeStatus)
+		assert.Nil(t, resp.ListOfTaskResponseDetails)
+	})
+
+	t.Run("handles direct response without container", func(t *testing.T) {
+		responseXML := `<GetAllTaskDetailsResponse>
+  <listOfTaskResponseDetails>
+    <taskResponseDetails>
+      <taskDetails>
+        <xId>11111111-2222-3333-4444-555555555555</xId>
+        <deliveryType>X2Only</deliveryType>
+      </taskDetails>
+    </taskResponseDetails>
+  </listOfTaskResponseDetails>
+</GetAllTaskDetailsResponse>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllTaskDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllTaskDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllTaskDetailsRequest", req, &resp)
+		require.NoError(t, err)
+
+		require.NotNil(t, resp.ListOfTaskResponseDetails)
+		require.Len(t, resp.ListOfTaskResponseDetails.TaskResponseDetails, 1)
+	})
+
+	t.Run("parses multiple tasks and destinations", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <listOfTaskResponseDetails>
+      <taskResponseDetails>
+        <taskDetails>
+          <xId>aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee</xId>
+          <deliveryType>X2andX3</deliveryType>
+        </taskDetails>
+      </taskResponseDetails>
+      <taskResponseDetails>
+        <taskDetails>
+          <xId>11111111-2222-3333-4444-555555555555</xId>
+          <deliveryType>X2Only</deliveryType>
+        </taskDetails>
+      </taskResponseDetails>
+    </listOfTaskResponseDetails>
+    <listOfDestinationResponseDetails>
+      <destinationResponseDetails>
+        <destinationDetails>
+          <dId>dddddddd-1111-2222-3333-444444444444</dId>
+          <deliveryType>X2andX3</deliveryType>
+        </destinationDetails>
+      </destinationResponseDetails>
+    </listOfDestinationResponseDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.NoError(t, err)
+
+		require.NotNil(t, resp.ListOfTaskResponseDetails)
+		assert.Len(t, resp.ListOfTaskResponseDetails.TaskResponseDetails, 2)
+
+		require.NotNil(t, resp.ListOfDestinationResponseDetails)
+		assert.Len(t, resp.ListOfDestinationResponseDetails.DestinationResponseDetails, 1)
+	})
+}
+
+func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
+	t.Run("returns ADMFError for error response", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <errorResponse>
+    <requestMessageType>GetAllDetailsRequest</requestMessageType>
+    <errorInformation>
+      <errorCode>100</errorCode>
+      <errorDescription>Generic error occurred</errorDescription>
+    </errorInformation>
+  </errorResponse>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+
+		assert.ErrorIs(t, err, ErrADMFError)
+
+		var admfErr *ADMFError
+		require.ErrorAs(t, err, &admfErr)
+		assert.Equal(t, 100, admfErr.ErrorCode)
+		assert.Equal(t, "Generic error occurred", admfErr.ErrorDescription)
+		assert.Equal(t, "GetAllDetailsRequest", admfErr.RequestMessageType)
+	})
+
+	t.Run("returns ADMFError for unsupported operation", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <errorResponse>
+    <requestMessageType>GetAllDetailsRequest</requestMessageType>
+    <errorInformation>
+      <errorCode>7</errorCode>
+      <errorDescription>Unsupported operation</errorDescription>
+    </errorInformation>
+  </errorResponse>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+
+		var admfErr *ADMFError
+		require.ErrorAs(t, err, &admfErr)
+		assert.True(t, admfErr.IsUnsupportedOperation())
+		assert.Equal(t, ErrorCodeUnsupportedOperation, admfErr.ErrorCode)
+	})
+}
+
+func TestClient_SendQueryRequest_HTTPErrors(t *testing.T) {
+	t.Run("returns error on HTTP 500", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("internal server error"))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "HTTP status 500")
+	})
+
+	t.Run("returns error on context cancellation", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(500 * time.Millisecond)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint:   server.URL,
+			RequestTimeout: 2 * time.Second,
+			MaxRetries:     0,
+		})
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(ctx, "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+	})
+}
+
+func TestClient_SendQueryRequestWithRetry(t *testing.T) {
+	t.Run("retries on HTTP errors", func(t *testing.T) {
+		var requestCount int32
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <neStatusDetails><neStatus>ok</neStatus></neStatusDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			count := atomic.AddInt32(&requestCount, 1)
+			if count < 3 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint:      server.URL,
+			MaxRetries:        3,
+			InitialBackoff:    1 * time.Millisecond,
+			BackoffMultiplier: 2.0,
+			MaxBackoff:        100 * time.Millisecond,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequestWithRetry(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.NoError(t, err)
+		assert.Equal(t, int32(3), atomic.LoadInt32(&requestCount))
+	})
+
+	t.Run("does not retry ADMF error responses", func(t *testing.T) {
+		var requestCount int32
+		responseXML := `<responseContainer>
+  <errorResponse>
+    <requestMessageType>GetAllDetailsRequest</requestMessageType>
+    <errorInformation>
+      <errorCode>7</errorCode>
+      <errorDescription>Unsupported operation</errorDescription>
+    </errorInformation>
+  </errorResponse>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&requestCount, 1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint:   server.URL,
+			MaxRetries:     3,
+			InitialBackoff: 1 * time.Millisecond,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequestWithRetry(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+
+		// Should NOT have retried — only 1 request.
+		assert.Equal(t, int32(1), atomic.LoadInt32(&requestCount))
+
+		var admfErr *ADMFError
+		require.ErrorAs(t, err, &admfErr)
+		assert.True(t, admfErr.IsUnsupportedOperation())
+	})
+
+	t.Run("fails after max retries", func(t *testing.T) {
+		var requestCount int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&requestCount, 1)
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint:   server.URL,
+			MaxRetries:     2,
+			InitialBackoff: 1 * time.Millisecond,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequestWithRetry(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrRequestFailed)
+		assert.Equal(t, int32(3), atomic.LoadInt32(&requestCount))
+	})
+
+	t.Run("respects context cancellation during retry", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint:   server.URL,
+			MaxRetries:     10,
+			InitialBackoff: 100 * time.Millisecond,
+		})
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequestWithRetry(ctx, "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+func TestADMFError(t *testing.T) {
+	t.Run("implements error interface", func(t *testing.T) {
+		err := &ADMFError{
+			ErrorCode:          100,
+			ErrorDescription:   "Generic error",
+			RequestMessageType: "GetAllDetailsRequest",
+		}
+		assert.Contains(t, err.Error(), "100")
+		assert.Contains(t, err.Error(), "Generic error")
+		assert.Contains(t, err.Error(), "GetAllDetailsRequest")
+	})
+
+	t.Run("unwraps to ErrADMFError", func(t *testing.T) {
+		err := &ADMFError{ErrorCode: 100, ErrorDescription: "test"}
+		assert.ErrorIs(t, err, ErrADMFError)
+	})
+
+	t.Run("IsUnsupportedOperation", func(t *testing.T) {
+		supported := &ADMFError{ErrorCode: 100}
+		assert.False(t, supported.IsUnsupportedOperation())
+
+		unsupported := &ADMFError{ErrorCode: ErrorCodeUnsupportedOperation}
+		assert.True(t, unsupported.IsUnsupportedOperation())
+	})
 }

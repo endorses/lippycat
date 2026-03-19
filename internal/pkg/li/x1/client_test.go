@@ -1461,6 +1461,227 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
 	})
 }
 
+// ============================================================================
+// Phase 2: GetAllDetails / GetAllTaskDetails Tests
+// ============================================================================
+
+func TestClient_GetAllDetails(t *testing.T) {
+	t.Run("success with tasks and destinations", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <neStatusDetails>
+      <neStatus>operational</neStatus>
+    </neStatusDetails>
+    <listOfTaskResponseDetails>
+      <taskResponseDetails>
+        <taskDetails>
+          <xId>a1b2c3d4-e5f6-7890-abcd-ef1234567890</xId>
+          <deliveryType>X2andX3</deliveryType>
+        </taskDetails>
+        <taskStatus>
+          <provisioningStatus>complete</provisioningStatus>
+        </taskStatus>
+      </taskResponseDetails>
+    </listOfTaskResponseDetails>
+    <listOfDestinationResponseDetails>
+      <destinationResponseDetails>
+        <destinationDetails>
+          <dId>d1d2d3d4-e5f6-7890-abcd-ef1234567890</dId>
+          <deliveryAddress>10.0.0.1</deliveryAddress>
+        </destinationDetails>
+        <destinationStatus>
+          <destinationDeliveryStatus>active</destinationDeliveryStatus>
+        </destinationStatus>
+      </destinationResponseDetails>
+    </listOfDestinationResponseDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Contains(t, string(body), "GetAllDetailsRequest")
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		resp, err := client.GetAllDetails(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		// Verify NE status.
+		require.NotNil(t, resp.NeStatusDetails)
+		assert.Equal(t, "operational", resp.NeStatusDetails.NeStatus)
+
+		// Verify tasks.
+		require.NotNil(t, resp.ListOfTaskResponseDetails)
+		require.Len(t, resp.ListOfTaskResponseDetails.TaskResponseDetails, 1)
+		task := resp.ListOfTaskResponseDetails.TaskResponseDetails[0]
+		require.NotNil(t, task.TaskDetails)
+		require.NotNil(t, task.TaskDetails.XId)
+		assert.Equal(t, "a1b2c3d4-e5f6-7890-abcd-ef1234567890", string(*task.TaskDetails.XId))
+		assert.Equal(t, "X2andX3", task.TaskDetails.DeliveryType)
+
+		// Verify destinations.
+		require.NotNil(t, resp.ListOfDestinationResponseDetails)
+		require.Len(t, resp.ListOfDestinationResponseDetails.DestinationResponseDetails, 1)
+		dest := resp.ListOfDestinationResponseDetails.DestinationResponseDetails[0]
+		require.NotNil(t, dest.DestinationDetails)
+		require.NotNil(t, dest.DestinationDetails.DId)
+		assert.Equal(t, "d1d2d3d4-e5f6-7890-abcd-ef1234567890", string(*dest.DestinationDetails.DId))
+		require.NotNil(t, dest.DestinationStatus)
+		assert.Equal(t, "active", dest.DestinationStatus.DestinationDeliveryStatus)
+	})
+
+	t.Run("success with empty response", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <neStatusDetails>
+      <neStatus>operational</neStatus>
+    </neStatusDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		resp, err := client.GetAllDetails(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Nil(t, resp.ListOfTaskResponseDetails)
+		assert.Nil(t, resp.ListOfDestinationResponseDetails)
+	})
+
+	t.Run("error when stopped", func(t *testing.T) {
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: "https://admf.example.com",
+		})
+		require.NoError(t, err)
+		client.stopped.Store(true)
+
+		resp, err := client.GetAllDetails(context.Background())
+		assert.Nil(t, resp)
+		assert.ErrorIs(t, err, ErrClientStopped)
+	})
+}
+
+func TestClient_GetAllTaskDetails(t *testing.T) {
+	t.Run("success with tasks", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+    <listOfTaskResponseDetails>
+      <taskResponseDetails>
+        <taskDetails>
+          <xId>11111111-2222-3333-4444-555555555555</xId>
+          <deliveryType>X2Only</deliveryType>
+        </taskDetails>
+        <taskStatus>
+          <provisioningStatus>complete</provisioningStatus>
+        </taskStatus>
+      </taskResponseDetails>
+      <taskResponseDetails>
+        <taskDetails>
+          <xId>66666666-7777-8888-9999-aaaaaaaaaaaa</xId>
+          <deliveryType>X3Only</deliveryType>
+        </taskDetails>
+        <taskStatus>
+          <provisioningStatus>pending</provisioningStatus>
+        </taskStatus>
+      </taskResponseDetails>
+    </listOfTaskResponseDetails>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Contains(t, string(body), "GetAllTaskDetailsRequest")
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		resp, err := client.GetAllTaskDetails(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+
+		require.NotNil(t, resp.ListOfTaskResponseDetails)
+		require.Len(t, resp.ListOfTaskResponseDetails.TaskResponseDetails, 2)
+
+		task1 := resp.ListOfTaskResponseDetails.TaskResponseDetails[0]
+		require.NotNil(t, task1.TaskDetails)
+		require.NotNil(t, task1.TaskDetails.XId)
+		assert.Equal(t, "11111111-2222-3333-4444-555555555555", string(*task1.TaskDetails.XId))
+		assert.Equal(t, "X2Only", task1.TaskDetails.DeliveryType)
+
+		task2 := resp.ListOfTaskResponseDetails.TaskResponseDetails[1]
+		require.NotNil(t, task2.TaskDetails)
+		require.NotNil(t, task2.TaskDetails.XId)
+		assert.Equal(t, "66666666-7777-8888-9999-aaaaaaaaaaaa", string(*task2.TaskDetails.XId))
+		assert.Equal(t, "X3Only", task2.TaskDetails.DeliveryType)
+	})
+
+	t.Run("success with empty response", func(t *testing.T) {
+		responseXML := `<responseContainer>
+  <x1ResponseMessage>
+  </x1ResponseMessage>
+</responseContainer>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		resp, err := client.GetAllTaskDetails(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Nil(t, resp.ListOfTaskResponseDetails)
+	})
+
+	t.Run("error when stopped", func(t *testing.T) {
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: "https://admf.example.com",
+		})
+		require.NoError(t, err)
+		client.stopped.Store(true)
+
+		resp, err := client.GetAllTaskDetails(context.Background())
+		assert.Nil(t, resp)
+		assert.ErrorIs(t, err, ErrClientStopped)
+	})
+}
+
 func TestADMFError(t *testing.T) {
 	t.Run("implements error interface", func(t *testing.T) {
 		err := &ADMFError{

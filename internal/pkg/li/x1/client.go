@@ -627,6 +627,44 @@ func (c *Client) ReportError(ctx context.Context, errorCode int, description str
 	return c.ReportNEIssue(ctx, NEIssueTypeError, description, &errorCode)
 }
 
+// GetAllDetails queries ADMF for all task and destination details.
+// Returns the full state including NE status, tasks, and destinations.
+func (c *Client) GetAllDetails(ctx context.Context) (*schema.GetAllDetailsResponse, error) {
+	if c.stopped.Load() {
+		return nil, ErrClientStopped
+	}
+
+	req := &schema.GetAllDetailsRequest{
+		X1RequestMessage: c.buildRequestMessage(),
+	}
+
+	var resp schema.GetAllDetailsResponse
+	if err := c.sendQueryRequestWithRetry(ctx, "GetAllDetailsRequest", req, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
+// GetAllTaskDetails queries ADMF for all task details.
+// Returns only task information without destinations or NE status.
+func (c *Client) GetAllTaskDetails(ctx context.Context) (*schema.GetAllTaskDetailsResponse, error) {
+	if c.stopped.Load() {
+		return nil, ErrClientStopped
+	}
+
+	req := &schema.GetAllTaskDetailsRequest{
+		X1RequestMessage: c.buildRequestMessage(),
+	}
+
+	var resp schema.GetAllTaskDetailsResponse
+	if err := c.sendQueryRequestWithRetry(ctx, "GetAllTaskDetailsRequest", req, &resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
+
 // buildRequestMessage creates the base X1 request message.
 func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
 	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))

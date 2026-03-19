@@ -24,35 +24,35 @@ The current `sendRequest()` (line 648) discards the response body after checking
 
 **File:** `internal/pkg/li/x1/client.go`
 
-- [ ] Add `GetAllDetails(ctx context.Context) (*schema.GetAllDetailsResponse, error)`
+- [x] Add `GetAllDetails(ctx context.Context) (*schema.GetAllDetailsResponse, error)`
   - Build `GetAllDetailsRequest` using `buildRequestMessage()`
   - Call `sendQueryRequest()` with root element `"GetAllDetailsRequest"`
   - Return parsed `GetAllDetailsResponse`
-- [ ] Add `GetAllTaskDetails(ctx context.Context) (*schema.GetAllTaskDetailsResponse, error)`
+- [x] Add `GetAllTaskDetails(ctx context.Context) (*schema.GetAllTaskDetailsResponse, error)`
   - Same pattern, root element `"GetAllTaskDetailsRequest"`
 
 ## Phase 3: Response Type Conversion
 
-**New file:** `internal/pkg/li/x1/convert.go`
+**New file:** `internal/pkg/li/convert.go` (in `li` package to avoid circular dependency)
 
 Convert ETSI X1 response types to internal lippycat types.
 
-- [ ] `TaskResponseDetailsToInterceptTask(details *schema.TaskResponseDetails) (*li.InterceptTask, error)`
+- [x] `TaskResponseDetailsToInterceptTask(details *schema.TaskResponseDetails) (*InterceptTask, error)`
   - Map `TaskDetails.XId` → `InterceptTask.XID`
   - Map `TaskDetails.TargetIdentifiers` → `[]TargetIdentity` (iterate CHOICE fields: SipUri, TelUri, E164Number, Ipv4Address, etc.)
   - Map `TaskDetails.ListOfDIDs` → `[]uuid.UUID`
-  - Map `TaskDetails.DeliveryType` → `li.DeliveryType`
+  - Map `TaskDetails.DeliveryType` → `DeliveryType`
   - Map `TaskDetails.ImplicitDeactivationAllowed` → bool
   - Handle optional fields (StartTime, EndTime, ProductID)
-- [ ] `DestinationResponseDetailsToDestination(details *schema.DestinationResponseDetails) (*li.Destination, error)`
+- [x] `DestinationResponseDetailsToDestination(details *schema.DestinationResponseDetails) (*Destination, error)`
   - Map DID, address, port, TLS config, X2/X3 enabled flags
 
-**New file:** `internal/pkg/li/x1/convert_test.go`
+**New file:** `internal/pkg/li/convert_test.go`
 
-- [ ] Test conversion of fully populated task response
-- [ ] Test conversion with minimal/missing optional fields
-- [ ] Test each target identifier type maps correctly
-- [ ] Test destination conversion
+- [x] Test conversion of fully populated task response
+- [x] Test conversion with minimal/missing optional fields
+- [x] Test each target identifier type maps correctly
+- [x] Test destination conversion
 
 ## Phase 4: Configuration
 
@@ -60,22 +60,22 @@ Convert ETSI X1 response types to internal lippycat types.
 
 **File:** `internal/pkg/li/manager.go` (ManagerConfig, line 37)
 
-- [ ] Add `SyncOnStartup bool` (default: true) — query ADMF for state on startup
-- [ ] Add `SyncTimeout time.Duration` (default: 30s) — timeout for startup sync
-- [ ] Add `ReconcileInterval time.Duration` (default: 0) — periodic reconciliation (0 = disabled)
+- [x] Add `SyncOnStartup bool` (default: true) — query ADMF for state on startup
+- [x] Add `SyncTimeout time.Duration` (default: 30s) — timeout for startup sync
+- [x] Add `ReconcileInterval time.Duration` (default: 0) — periodic reconciliation (0 = disabled)
 
 **File:** `internal/pkg/li/manager_stub.go` (stub ManagerConfig, line 23)
 
-- [ ] Add matching fields to stub config (values ignored but needed for compilation)
+- [x] Add matching fields to stub config (values ignored but needed for compilation)
 
 ### CLI Flags
 
-**File:** `cmd/process/flags_li.go`
+**File:** `cmd/process/flags_li.go` and `cmd/tap/flags_li.go`
 
-- [ ] Add `--li-admf-sync-on-startup` flag (bool, default: true)
-- [ ] Add `--li-admf-sync-timeout` flag (duration, default: 30s)
-- [ ] Add `--li-admf-reconcile-interval` flag (duration, default: 0)
-- [ ] Bind flags to viper and wire into `GetLIConfig()` → `ManagerConfig`
+- [x] Add `--li-admf-sync-on-startup` flag (bool, default: true)
+- [x] Add `--li-admf-sync-timeout` flag (duration, default: 30s)
+- [x] Add `--li-admf-reconcile-interval` flag (duration, default: 0)
+- [x] Bind flags to viper and wire into `GetLIConfig()` → `ManagerConfig`
 
 ## Phase 5: Startup State Sync
 
@@ -126,8 +126,8 @@ Convert ETSI X1 response types to internal lippycat types.
 | File | Change |
 |------|--------|
 | `internal/pkg/li/x1/client.go` | `sendQueryRequest()`, `GetAllDetails()`, `GetAllTaskDetails()` |
-| `internal/pkg/li/x1/convert.go` | **New** — response type → internal type conversion |
-| `internal/pkg/li/x1/convert_test.go` | **New** — conversion tests |
+| `internal/pkg/li/convert.go` | **New** — response type → internal type conversion |
+| `internal/pkg/li/convert_test.go` | **New** — conversion tests |
 | `internal/pkg/li/x1/client_test.go` | Query method tests |
 | `internal/pkg/li/manager.go` | `syncStateFromADMF()`, `startReconciliation()`, ManagerConfig fields, Start() update |
 | `internal/pkg/li/manager_stub.go` | Stub ManagerConfig field additions |

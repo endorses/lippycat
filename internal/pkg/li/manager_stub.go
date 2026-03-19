@@ -21,10 +21,13 @@ var ErrLINotAvailable = errors.New("LI support not available: rebuild with -tags
 
 // ManagerConfig holds configuration for the LI Manager.
 type ManagerConfig struct {
-	Enabled      bool
-	X1ListenAddr string
-	ADMFEndpoint string
-	FilterPusher FilterPusher
+	Enabled           bool
+	X1ListenAddr      string
+	ADMFEndpoint      string
+	FilterPusher      FilterPusher
+	SyncOnStartup     bool
+	SyncTimeout       time.Duration
+	ReconcileInterval time.Duration
 }
 
 // PacketProcessor is the callback for processing matched packets.

@@ -3,6 +3,8 @@
 package process
 
 import (
+	"time"
+
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -26,6 +28,10 @@ var (
 	liDeliveryTLSKeyFile    string
 	liDeliveryTLSCAFile     string
 	liDeliveryTLSPinnedCert []string
+	// LI ADMF state sync flags
+	liADMFSyncOnStartup     bool
+	liADMFSyncTimeout       time.Duration
+	liADMFReconcileInterval time.Duration
 )
 
 // LIConfig holds all LI-related configuration.
@@ -46,6 +52,10 @@ type LIConfig struct {
 	DeliveryTLSKeyFile    string
 	DeliveryTLSCAFile     string
 	DeliveryTLSPinnedCert []string
+	// ADMF state sync
+	ADMFSyncOnStartup     bool
+	ADMFSyncTimeout       time.Duration
+	ADMFReconcileInterval time.Duration
 }
 
 // RegisterLIFlags adds LI-related flags to the command.
@@ -67,6 +77,10 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&liDeliveryTLSKeyFile, "li-delivery-tls-key", "", "Path to client TLS key for X2/X3 delivery")
 	cmd.Flags().StringVar(&liDeliveryTLSCAFile, "li-delivery-tls-ca", "", "Path to CA certificate for verifying MDF servers")
 	cmd.Flags().StringSliceVar(&liDeliveryTLSPinnedCert, "li-delivery-tls-pinned-cert", nil, "Pinned certificate fingerprints for MDF servers (SHA256, hex encoded, comma-separated)")
+	// LI ADMF state sync flags
+	cmd.Flags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
+	cmd.Flags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
+	cmd.Flags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 0, "Periodic reconciliation interval (0 = disabled)")
 }
 
 // BindLIViperFlags binds LI flags to viper for config file support.
@@ -87,6 +101,10 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("processor.li.delivery_tls_key", cmd.Flags().Lookup("li-delivery-tls-key"))
 	_ = viper.BindPFlag("processor.li.delivery_tls_ca", cmd.Flags().Lookup("li-delivery-tls-ca"))
 	_ = viper.BindPFlag("processor.li.delivery_tls_pinned_cert", cmd.Flags().Lookup("li-delivery-tls-pinned-cert"))
+	// LI ADMF state sync viper bindings
+	_ = viper.BindPFlag("processor.li.admf_sync_on_startup", cmd.Flags().Lookup("li-admf-sync-on-startup"))
+	_ = viper.BindPFlag("processor.li.admf_sync_timeout", cmd.Flags().Lookup("li-admf-sync-timeout"))
+	_ = viper.BindPFlag("processor.li.admf_reconcile_interval", cmd.Flags().Lookup("li-admf-reconcile-interval"))
 }
 
 // GetLIConfig returns the LI configuration from flags and viper.
@@ -106,5 +124,9 @@ func GetLIConfig() *LIConfig {
 		DeliveryTLSKeyFile:    cmdutil.GetStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
 		DeliveryTLSCAFile:     cmdutil.GetStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
 		DeliveryTLSPinnedCert: cmdutil.GetStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
+		// ADMF state sync
+		ADMFSyncOnStartup:     cmdutil.GetBoolConfig("processor.li.admf_sync_on_startup", liADMFSyncOnStartup),
+		ADMFSyncTimeout:       viper.GetDuration("processor.li.admf_sync_timeout"),
+		ADMFReconcileInterval: viper.GetDuration("processor.li.admf_reconcile_interval"),
 	}
 }

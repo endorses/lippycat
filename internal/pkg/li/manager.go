@@ -64,6 +64,18 @@ type ManagerConfig struct {
 
 	// FilterPusher integrates with the processor's filter management system.
 	FilterPusher FilterPusher
+
+	// SyncOnStartup enables querying the ADMF for task/destination state on startup.
+	// When true, the manager will call GetAllDetails to restore state after restart.
+	SyncOnStartup bool
+
+	// SyncTimeout is the timeout for the startup state sync operation.
+	// Defaults to 30s if zero.
+	SyncTimeout time.Duration
+
+	// ReconcileInterval is the interval for periodic state reconciliation with ADMF.
+	// Set to 0 to disable periodic reconciliation.
+	ReconcileInterval time.Duration
 }
 
 // PacketProcessor is the callback for processing matched packets.

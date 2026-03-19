@@ -2,7 +2,11 @@
 
 package tap
 
-import "github.com/spf13/cobra"
+import (
+	"time"
+
+	"github.com/spf13/cobra"
+)
 
 // LIConfig holds all LI-related configuration.
 // In non-LI builds, this is only used for the nil return type.
@@ -23,6 +27,10 @@ type LIConfig struct {
 	DeliveryTLSKeyFile    string
 	DeliveryTLSCAFile     string
 	DeliveryTLSPinnedCert []string
+	// ADMF state sync
+	ADMFSyncOnStartup     bool
+	ADMFSyncTimeout       time.Duration
+	ADMFReconcileInterval time.Duration
 }
 
 // RegisterLIFlags is a no-op in non-LI builds.

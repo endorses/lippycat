@@ -46,6 +46,9 @@ const (
 // X1 content type for XML.
 const contentTypeXML = "application/xml; charset=utf-8"
 
+// etsiX1Namespace is the ETSI TS 103 221-1 XML namespace for X1 messages.
+const etsiX1Namespace = "http://uri.etsi.org/03221/X1/2017/10"
+
 // X1 request message types.
 const (
 	MessageTypeCreateDestination = "CreateDestinationRequest"
@@ -523,24 +526,30 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 
 	var responses []any
 
-	// Check if it's a request container (batch) or a direct request
-	if rootDetector.XMLName.Local == "requestContainer" {
-		// Parse the request container
+	// Check if it's a request container (batch), X1Request envelope, or a direct request.
+	switch rootDetector.XMLName.Local {
+	case "requestContainer":
+		// Legacy container format.
 		var reqContainer schema.RequestContainer
 		if err := xml.Unmarshal(body, &reqContainer); err != nil {
 			s.sendErrorResponse(w, "", ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
 			return
 		}
 
-		// Process each request message in the container
-		// Note: In the container case, we'd need individual message bodies
-		// For now, we only support single requests per container
+		// Process each request message in the container.
+		// For now, we only support single requests per container.
 		if len(reqContainer.X1RequestMessage) > 0 {
 			resp := s.processRequestMessage(body, reqContainer.X1RequestMessage[0])
 			responses = append(responses, resp)
 		}
-	} else {
-		// Direct request (not wrapped in container)
+
+	case "X1Request":
+		// ETSI-compliant X1Request envelope with xsi:type on x1RequestMessage.
+		resp := s.processX1RequestEnvelope(body)
+		responses = append(responses, resp)
+
+	default:
+		// Direct request (not wrapped in container) for backward compatibility.
 		resp := s.processRequestMessage(body, nil)
 		responses = append(responses, resp)
 	}
@@ -578,9 +587,12 @@ type flexibleResponseContainer struct {
 
 // MarshalXML implements custom marshaling for the flexible response container.
 // Each response is marshaled with the appropriate xml element name based on its type.
+// Per ETSI TS 103 221-1, responses are wrapped in <X1Response xmlns="...">.
 func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-	// Start the responseContainer element
-	containerStart := xml.StartElement{Name: xml.Name{Local: "responseContainer"}}
+	// Start the X1Response element with ETSI namespace.
+	containerStart := xml.StartElement{
+		Name: xml.Name{Local: "X1Response", Space: etsiX1Namespace},
+	}
 	if err := e.EncodeToken(containerStart); err != nil {
 		return err
 	}
@@ -607,6 +619,40 @@ func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartEl
 	}
 
 	return e.Flush()
+}
+
+// x1RequestEnvelope represents the ETSI-compliant X1Request envelope.
+// The x1RequestMessage element uses xsi:type to indicate the concrete request type.
+type x1RequestEnvelope struct {
+	XMLName        xml.Name             `xml:"X1Request"`
+	RequestMessage x1RequestMessageAttr `xml:"x1RequestMessage"`
+}
+
+// x1RequestMessageAttr captures the xsi:type attribute and inner XML from x1RequestMessage.
+type x1RequestMessageAttr struct {
+	Type     string `xml:"type,attr"`
+	InnerXML []byte `xml:",innerxml"`
+}
+
+// processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
+// It extracts the xsi:type from x1RequestMessage and synthesizes a bare request
+// for processing by processRequestMessage.
+func (s *Server) processX1RequestEnvelope(body []byte) any {
+	var envelope x1RequestEnvelope
+	if err := xml.Unmarshal(body, &envelope); err != nil {
+		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())
+	}
+
+	messageType := envelope.RequestMessage.Type
+	if messageType == "" {
+		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
+	}
+
+	// Synthesize a bare request XML from the xsi:type and inner content
+	// so it can be processed by the existing processRequestMessage logic.
+	syntheticXML := []byte("<" + messageType + ">" + string(envelope.RequestMessage.InnerXML) + "</" + messageType + ">")
+
+	return s.processRequestMessage(syntheticXML, nil)
 }
 
 // processRequestMessage processes a single X1 request message.

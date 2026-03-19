@@ -2357,3 +2357,254 @@ func TestServer_ErrorResponse_XMLStructure(t *testing.T) {
 	assert.Contains(t, body, "destination not found")
 	assert.Contains(t, body, "RemoveDestination")
 }
+
+// ============================================================================
+// ETSI TS 103 221-1 X1Request/X1Response Compliance Tests
+// ============================================================================
+
+// TestServer_HandleX1Request_ETSIEnvelope tests that the server correctly
+// processes requests wrapped in the ETSI-compliant X1Request envelope.
+func TestServer_HandleX1Request_ETSIEnvelope(t *testing.T) {
+	t.Run("ping via X1Request envelope", func(t *testing.T) {
+		mock := newMockDestinationManager()
+		config := ServerConfig{
+			NEIdentifier: "test-ne",
+			Version:      "v1.13.1",
+		}
+		s := NewServer(config, mock, nil)
+
+		reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">
+  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="pingRequest">
+    <admfIdentifier>test-admf</admfIdentifier>
+    <neIdentifier>test-ne</neIdentifier>
+    <version>v1.13.1</version>
+  </x1RequestMessage>
+</X1Request>`
+
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+		req.Header.Set("Content-Type", "application/xml")
+		w := httptest.NewRecorder()
+
+		s.handleX1Request(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Response should be wrapped in X1Response with ETSI namespace.
+		body := w.Body.String()
+		assert.Contains(t, body, "X1Response")
+		assert.Contains(t, body, etsiX1Namespace)
+		assert.Contains(t, body, "x1ResponseMessage")
+
+		// Parse response to verify structure.
+		var respContainer schema.ResponseContainer
+		err := xml.Unmarshal(w.Body.Bytes(), &respContainer)
+		require.NoError(t, err)
+		require.Len(t, respContainer.X1ResponseMessage, 1)
+		assert.Equal(t, "test-ne", respContainer.X1ResponseMessage[0].NeIdentifier)
+	})
+
+	t.Run("activate task via X1Request envelope", func(t *testing.T) {
+		destMock := newMockDestinationManager()
+		taskMock := newMockTaskManager()
+		config := ServerConfig{
+			NEIdentifier: "test-ne",
+			Version:      "v1.13.1",
+		}
+		s := NewServer(config, destMock, taskMock)
+
+		xid := uuid.New()
+		did := uuid.New()
+
+		reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">
+  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="activateTaskRequest">
+    <admfIdentifier>test-admf</admfIdentifier>
+    <neIdentifier>test-ne</neIdentifier>
+    <version>v1.13.1</version>
+    <taskDetails>
+      <xId>` + xid.String() + `</xId>
+      <targetIdentifiers>
+        <targetIdentifier>
+          <sipUri>sip:alice@example.com</sipUri>
+        </targetIdentifier>
+      </targetIdentifiers>
+      <deliveryType>X2andX3</deliveryType>
+      <listOfDIDs>
+        <dId>` + did.String() + `</dId>
+      </listOfDIDs>
+    </taskDetails>
+  </x1RequestMessage>
+</X1Request>`
+
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+		req.Header.Set("Content-Type", "application/xml")
+		w := httptest.NewRecorder()
+
+		s.handleX1Request(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify task was created.
+		task, exists := taskMock.tasks[xid]
+		require.True(t, exists, "task should be created via X1Request envelope")
+		assert.Equal(t, xid, task.XID)
+		require.Len(t, task.Targets, 1)
+		assert.Equal(t, TargetTypeSIPURI, task.Targets[0].Type)
+		assert.Equal(t, "sip:alice@example.com", task.Targets[0].Value)
+		assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
+	})
+
+	t.Run("create destination via X1Request envelope", func(t *testing.T) {
+		mock := newMockDestinationManager()
+		config := ServerConfig{
+			NEIdentifier: "test-ne",
+			Version:      "v1.13.1",
+		}
+		s := NewServer(config, mock, nil)
+
+		did := uuid.New()
+
+		reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">
+  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="createDestinationRequest">
+    <admfIdentifier>test-admf</admfIdentifier>
+    <destinationDetails>
+      <dId>` + did.String() + `</dId>
+      <friendlyName>ETSI MDF</friendlyName>
+      <deliveryType>X2andX3</deliveryType>
+      <deliveryAddress>
+        <ipAddressAndPort>
+          <address>
+            <IPv4Address>10.0.0.1</IPv4Address>
+          </address>
+          <port>
+            <TCPPort>5443</TCPPort>
+          </port>
+        </ipAddressAndPort>
+      </deliveryAddress>
+    </destinationDetails>
+  </x1RequestMessage>
+</X1Request>`
+
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+		req.Header.Set("Content-Type", "application/xml")
+		w := httptest.NewRecorder()
+
+		s.handleX1Request(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify destination was created.
+		dest, exists := mock.destinations[did]
+		require.True(t, exists, "destination should be created via X1Request envelope")
+		assert.Equal(t, "10.0.0.1", dest.Address)
+		assert.Equal(t, 5443, dest.Port)
+		assert.Equal(t, "ETSI MDF", dest.Description)
+	})
+
+	t.Run("missing xsi:type returns error", func(t *testing.T) {
+		mock := newMockDestinationManager()
+		config := ServerConfig{
+			NEIdentifier: "test-ne",
+		}
+		s := NewServer(config, mock, nil)
+
+		reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">
+  <x1RequestMessage>
+    <admfIdentifier>test-admf</admfIdentifier>
+  </x1RequestMessage>
+</X1Request>`
+
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+		req.Header.Set("Content-Type", "application/xml")
+		w := httptest.NewRecorder()
+
+		s.handleX1Request(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		body := w.Body.String()
+		assert.Contains(t, body, "missing xsi:type")
+	})
+}
+
+// TestServer_X1Response_Format verifies the server response uses X1Response
+// with the ETSI namespace.
+func TestServer_X1Response_Format(t *testing.T) {
+	mock := newMockDestinationManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "v1.13.1",
+	}
+	s := NewServer(config, mock, nil)
+
+	// Send a bare ping request (backward compatibility).
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<pingRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <neIdentifier>test-ne</neIdentifier>
+  <version>v1.13.1</version>
+</pingRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	// Verify response uses X1Response with ETSI namespace.
+	assert.Contains(t, body, "<X1Response")
+	assert.Contains(t, body, etsiX1Namespace)
+	// Verify it does NOT use the old responseContainer.
+	assert.NotContains(t, body, "responseContainer")
+}
+
+// TestServer_BackwardCompatibility_BareRequests verifies the server still
+// accepts bare (non-wrapped) requests for backward compatibility.
+func TestServer_BackwardCompatibility_BareRequests(t *testing.T) {
+	destMock := newMockDestinationManager()
+	taskMock := newMockTaskManager()
+	config := ServerConfig{
+		NEIdentifier: "test-ne",
+		Version:      "v1.13.1",
+	}
+	s := NewServer(config, destMock, taskMock)
+
+	xid := uuid.New()
+	did := uuid.New()
+
+	// Bare activateTaskRequest (no X1Request wrapper).
+	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
+<activateTaskRequest>
+  <admfIdentifier>test-admf</admfIdentifier>
+  <taskDetails>
+    <xId>` + xid.String() + `</xId>
+    <targetIdentifiers>
+      <targetIdentifier>
+        <sipUri>sip:bob@example.com</sipUri>
+      </targetIdentifier>
+    </targetIdentifiers>
+    <deliveryType>X2Only</deliveryType>
+    <listOfDIDs>
+      <dId>` + did.String() + `</dId>
+    </listOfDIDs>
+  </taskDetails>
+</activateTaskRequest>`
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/xml")
+	w := httptest.NewRecorder()
+
+	s.handleX1Request(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Verify task was created (backward compatibility still works).
+	task, exists := taskMock.tasks[xid]
+	require.True(t, exists, "bare request should still be processed")
+	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
+}

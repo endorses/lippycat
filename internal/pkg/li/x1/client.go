@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -678,8 +679,48 @@ func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
 	}
 }
 
+// marshalWrappedRequest wraps an X1 request in the ETSI-compliant X1Request envelope.
+//
+// Per ETSI TS 103 221-1, requests must be wrapped as:
+//
+//	<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">
+//	  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="keepaliveRequest">
+//	    ...fields...
+//	  </x1RequestMessage>
+//	</X1Request>
+func marshalWrappedRequest(messageType string, req any) ([]byte, error) {
+	// Marshal the inner request to get its XML content.
+	inner, err := xml.MarshalIndent(req, "  ", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal inner request: %w", err)
+	}
+
+	// Extract inner XML content by stripping the root element tags.
+	innerStr := string(inner)
+	firstClose := strings.Index(innerStr, ">")
+	lastOpen := strings.LastIndex(innerStr, "</")
+	if firstClose < 0 || lastOpen < 0 || lastOpen <= firstClose {
+		return nil, fmt.Errorf("unexpected XML structure in marshaled request")
+	}
+	innerContent := innerStr[firstClose+1 : lastOpen]
+
+	var buf bytes.Buffer
+	buf.WriteString(xml.Header)
+	buf.WriteString(`<X1Request xmlns="`)
+	buf.WriteString(etsiX1Namespace)
+	buf.WriteString("\">\n")
+	buf.WriteString(`  <x1RequestMessage xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="`)
+	buf.WriteString(messageType)
+	buf.WriteString(`">`)
+	buf.WriteString(innerContent)
+	buf.WriteString("\n  </x1RequestMessage>\n")
+	buf.WriteString("</X1Request>")
+
+	return buf.Bytes(), nil
+}
+
 // responseContainer is used to unmarshal ADMF XML responses.
-// The ADMF wraps responses in <responseContainer> with child elements.
+// The ADMF wraps responses in <responseContainer> or <X1Response> with child elements.
 type responseContainer struct {
 	// ErrorResponses captures any <errorResponse> elements.
 	ErrorResponses []schema.ErrorResponse `xml:"errorResponse"`
@@ -741,13 +782,11 @@ func (c *Client) sendQueryRequestWithRetry(ctx context.Context, rootElement stri
 // sendQueryRequest sends a single X1 query request and parses the response.
 // The resp parameter must be a pointer to the expected response type.
 func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req any, resp any) error {
-	// Marshal the request to XML.
-	body, err := xml.MarshalIndent(req, "", "  ")
+	// Marshal the request wrapped in X1Request envelope.
+	xmlData, err := marshalWrappedRequest(rootElement, req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
-
-	xmlData := []byte(xml.Header + string(body))
 
 	// Create HTTP request.
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.ADMFEndpoint, bytes.NewReader(xmlData))
@@ -781,11 +820,29 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 		"body_length", len(respBody),
 	)
 
-	// Try to unmarshal as a responseContainer to check for error responses.
+	// Detect root element to handle top-level ErrorResponse from some ADMFs.
+	var rootDetector struct {
+		XMLName xml.Name
+	}
+	if err := xml.Unmarshal(respBody, &rootDetector); err == nil {
+		if rootDetector.XMLName.Local == "ErrorResponse" || rootDetector.XMLName.Local == "TopLevelErrorResponse" {
+			var errResp schema.ErrorResponse
+			if err := xml.Unmarshal(respBody, &errResp); err == nil && errResp.ErrorInformation != nil {
+				return &ADMFError{
+					ErrorCode:          errResp.ErrorInformation.ErrorCode,
+					ErrorDescription:   errResp.ErrorInformation.ErrorDescription,
+					RequestMessageType: errResp.RequestMessageType,
+				}
+			}
+		}
+	}
+
+	// Try to unmarshal as a response container (responseContainer or X1Response)
+	// to check for error responses.
 	var container responseContainer
 	if err := xml.Unmarshal(respBody, &container); err != nil {
 		// If container parsing fails, try direct unmarshal into the response type.
-		// This handles ADMFs that don't wrap in responseContainer.
+		// This handles ADMFs that don't wrap in a container.
 		if xmlErr := xml.Unmarshal(respBody, resp); xmlErr != nil {
 			return fmt.Errorf("failed to parse response XML: %w (container parse: %v)", xmlErr, err)
 		}
@@ -864,14 +921,11 @@ func (c *Client) sendRequestWithRetry(ctx context.Context, rootElement string, r
 
 // sendRequest sends a single X1 request to ADMF.
 func (c *Client) sendRequest(ctx context.Context, rootElement string, req any) error {
-	// Marshal the request to XML.
-	body, err := xml.MarshalIndent(req, "", "  ")
+	// Marshal the request wrapped in X1Request envelope.
+	xmlData, err := marshalWrappedRequest(rootElement, req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
-
-	// Add XML header.
-	xmlData := []byte(xml.Header + string(body))
 
 	// Create HTTP request.
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.config.ADMFEndpoint, bytes.NewReader(xmlData))

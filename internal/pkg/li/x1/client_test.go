@@ -86,10 +86,11 @@ func TestClient_SendKeepalive(t *testing.T) {
 			assert.Equal(t, contentTypeXML, r.Header.Get("Content-Type"))
 			assert.Equal(t, contentTypeXML, r.Header.Get("Accept"))
 
-			// Verify body contains keepalive
+			// Verify body contains X1Request wrapper and keepalive type
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
-			assert.Contains(t, string(body), "KeepaliveRequest")
+			assert.Contains(t, string(body), "<X1Request")
+			assert.Contains(t, string(body), `xsi:type="keepaliveRequest"`)
 
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("<KeepaliveResponse/>"))
@@ -145,7 +146,7 @@ func TestClient_ReportTaskError(t *testing.T) {
 		xid := uuid.New()
 		err = client.ReportTaskError(context.Background(), xid, 500, "Internal error")
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "ReportTaskIssueRequest")
+		assert.Contains(t, receivedBody, `xsi:type="reportTaskIssueRequest"`)
 		assert.Contains(t, receivedBody, xid.String())
 		assert.Contains(t, receivedBody, "Error")
 		assert.Contains(t, receivedBody, "Internal error")
@@ -195,7 +196,7 @@ func TestClient_ReportTaskProgress(t *testing.T) {
 	xid := uuid.New()
 	err = client.ReportTaskProgress(context.Background(), xid, "Activation in progress")
 	assert.NoError(t, err)
-	assert.Contains(t, receivedBody, "ReportTaskIssueRequest")
+	assert.Contains(t, receivedBody, `xsi:type="reportTaskIssueRequest"`)
 	assert.Contains(t, receivedBody, "TaskProgress")
 	assert.Contains(t, receivedBody, "Activation in progress")
 }
@@ -218,7 +219,7 @@ func TestClient_ReportTaskImplicitDeactivation(t *testing.T) {
 	xid := uuid.New()
 	err = client.ReportTaskImplicitDeactivation(context.Background(), xid, "Task EndTime reached")
 	assert.NoError(t, err)
-	assert.Contains(t, receivedBody, "ReportTaskIssueRequest")
+	assert.Contains(t, receivedBody, `xsi:type="reportTaskIssueRequest"`)
 	assert.Contains(t, receivedBody, "ImplicitDeactivation")
 	assert.Contains(t, receivedBody, "Task EndTime reached")
 }
@@ -242,7 +243,7 @@ func TestClient_ReportDestinationIssue(t *testing.T) {
 		did := uuid.New()
 		err = client.ReportDeliveryError(context.Background(), did, 503, "Connection refused")
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "ReportDestinationIssueRequest")
+		assert.Contains(t, receivedBody, `xsi:type="reportDestinationIssueRequest"`)
 		assert.Contains(t, receivedBody, did.String())
 		assert.Contains(t, receivedBody, "DeliveryError")
 		assert.Contains(t, receivedBody, "Connection refused")
@@ -331,7 +332,7 @@ func TestClient_ReportNEIssue(t *testing.T) {
 
 		err = client.ReportStartup(context.Background())
 		assert.NoError(t, err)
-		assert.Contains(t, receivedBody, "ReportNEIssueRequest")
+		assert.Contains(t, receivedBody, `xsi:type="reportNEIssueRequest"`)
 		assert.Contains(t, receivedBody, "Startup")
 
 		stats := client.Stats()
@@ -1023,7 +1024,7 @@ func TestClient_Config(t *testing.T) {
 
 func TestClient_SendQueryRequest_Success(t *testing.T) {
 	t.Run("parses response in responseContainer", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <neStatusDetails>
       <neStatus>operational</neStatus>
@@ -1040,7 +1041,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
       </taskResponseDetails>
     </listOfTaskResponseDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "POST", r.Method)
@@ -1083,13 +1084,13 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
 	})
 
 	t.Run("parses empty response (no tasks)", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <neStatusDetails>
       <neStatus>operational</neStatus>
     </neStatusDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1151,7 +1152,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
 	})
 
 	t.Run("parses multiple tasks and destinations", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <listOfTaskResponseDetails>
       <taskResponseDetails>
@@ -1176,7 +1177,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
       </destinationResponseDetails>
     </listOfDestinationResponseDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1207,7 +1208,7 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
 
 func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 	t.Run("returns ADMFError for error response", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <errorResponse>
     <requestMessageType>GetAllDetailsRequest</requestMessageType>
     <errorInformation>
@@ -1215,7 +1216,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
       <errorDescription>Generic error occurred</errorDescription>
     </errorInformation>
   </errorResponse>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1246,7 +1247,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 	})
 
 	t.Run("returns ADMFError for unsupported operation", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <errorResponse>
     <requestMessageType>GetAllDetailsRequest</requestMessageType>
     <errorInformation>
@@ -1254,7 +1255,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
       <errorDescription>Unsupported operation</errorDescription>
     </errorInformation>
   </errorResponse>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1334,11 +1335,11 @@ func TestClient_SendQueryRequest_HTTPErrors(t *testing.T) {
 func TestClient_SendQueryRequestWithRetry(t *testing.T) {
 	t.Run("retries on HTTP errors", func(t *testing.T) {
 		var requestCount int32
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <neStatusDetails><neStatus>ok</neStatus></neStatusDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			count := atomic.AddInt32(&requestCount, 1)
@@ -1371,7 +1372,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
 
 	t.Run("does not retry ADMF error responses", func(t *testing.T) {
 		var requestCount int32
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <errorResponse>
     <requestMessageType>GetAllDetailsRequest</requestMessageType>
     <errorInformation>
@@ -1379,7 +1380,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
       <errorDescription>Unsupported operation</errorDescription>
     </errorInformation>
   </errorResponse>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&requestCount, 1)
@@ -1467,7 +1468,7 @@ func TestClient_SendQueryRequestWithRetry(t *testing.T) {
 
 func TestClient_GetAllDetails(t *testing.T) {
 	t.Run("success with tasks and destinations", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <neStatusDetails>
       <neStatus>operational</neStatus>
@@ -1495,7 +1496,7 @@ func TestClient_GetAllDetails(t *testing.T) {
       </destinationResponseDetails>
     </listOfDestinationResponseDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
@@ -1542,13 +1543,13 @@ func TestClient_GetAllDetails(t *testing.T) {
 	})
 
 	t.Run("success with empty response", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <neStatusDetails>
       <neStatus>operational</neStatus>
     </neStatusDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1584,7 +1585,7 @@ func TestClient_GetAllDetails(t *testing.T) {
 
 func TestClient_GetAllTaskDetails(t *testing.T) {
 	t.Run("success with tasks", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
     <listOfTaskResponseDetails>
       <taskResponseDetails>
@@ -1607,7 +1608,7 @@ func TestClient_GetAllTaskDetails(t *testing.T) {
       </taskResponseDetails>
     </listOfTaskResponseDetails>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
@@ -1646,10 +1647,10 @@ func TestClient_GetAllTaskDetails(t *testing.T) {
 	})
 
 	t.Run("success with empty response", func(t *testing.T) {
-		responseXML := `<responseContainer>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
   <x1ResponseMessage>
   </x1ResponseMessage>
-</responseContainer>`
+</X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -1705,5 +1706,116 @@ func TestADMFError(t *testing.T) {
 
 		unsupported := &ADMFError{ErrorCode: ErrorCodeUnsupportedOperation}
 		assert.True(t, unsupported.IsUnsupportedOperation())
+	})
+}
+
+// ============================================================================
+// ETSI TS 103 221-1 X1Request/X1Response Compliance Tests
+// ============================================================================
+
+// TestClient_X1RequestWrapping verifies the client wraps requests in X1Request envelope.
+func TestClient_X1RequestWrapping(t *testing.T) {
+	var receivedBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(ClientConfig{
+		ADMFEndpoint: server.URL,
+		NEIdentifier: "test-ne",
+		Version:      "v1.13.1",
+		MaxRetries:   0,
+	})
+	require.NoError(t, err)
+
+	err = client.SendKeepalive(context.Background())
+	require.NoError(t, err)
+
+	// Verify ETSI-compliant X1Request wrapping.
+	assert.Contains(t, receivedBody, xml.Header)
+	assert.Contains(t, receivedBody, `<X1Request xmlns="http://uri.etsi.org/03221/X1/2017/10">`)
+	assert.Contains(t, receivedBody, `xsi:type="keepaliveRequest"`)
+	assert.Contains(t, receivedBody, `xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`)
+	assert.Contains(t, receivedBody, "</X1Request>")
+	assert.Contains(t, receivedBody, "test-ne")
+	assert.Contains(t, receivedBody, "v1.13.1")
+}
+
+// TestClient_TopLevelErrorResponse tests that the client handles
+// top-level ErrorResponse from ADMFs that don't wrap errors in a container.
+func TestClient_TopLevelErrorResponse(t *testing.T) {
+	t.Run("parses top-level ErrorResponse", func(t *testing.T) {
+		responseXML := `<?xml version="1.0" encoding="UTF-8"?>
+<ErrorResponse xmlns="http://uri.etsi.org/03221/X1/2017/10">
+  <requestMessageType>GetAllDetailsRequest</requestMessageType>
+  <errorInformation>
+    <errorCode>7</errorCode>
+    <errorDescription>Unsupported operation</errorDescription>
+  </errorInformation>
+</ErrorResponse>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+
+		var admfErr *ADMFError
+		require.ErrorAs(t, err, &admfErr)
+		assert.Equal(t, 7, admfErr.ErrorCode)
+		assert.Equal(t, "Unsupported operation", admfErr.ErrorDescription)
+		assert.Equal(t, "GetAllDetailsRequest", admfErr.RequestMessageType)
+	})
+
+	t.Run("parses X1Response with error", func(t *testing.T) {
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
+  <errorResponse>
+    <requestMessageType>GetAllDetailsRequest</requestMessageType>
+    <errorInformation>
+      <errorCode>100</errorCode>
+      <errorDescription>Generic error</errorDescription>
+    </errorInformation>
+  </errorResponse>
+</X1Response>`
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(responseXML))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(ClientConfig{
+			ADMFEndpoint: server.URL,
+			MaxRetries:   0,
+		})
+		require.NoError(t, err)
+
+		req := &schema.GetAllDetailsRequest{
+			X1RequestMessage: client.buildRequestMessage(),
+		}
+		var resp schema.GetAllDetailsResponse
+		err = client.sendQueryRequest(context.Background(), "GetAllDetailsRequest", req, &resp)
+		require.Error(t, err)
+
+		var admfErr *ADMFError
+		require.ErrorAs(t, err, &admfErr)
+		assert.Equal(t, 100, admfErr.ErrorCode)
+		assert.Equal(t, "Generic error", admfErr.ErrorDescription)
 	})
 }

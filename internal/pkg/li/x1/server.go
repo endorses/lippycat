@@ -222,6 +222,10 @@ type ServerConfig struct {
 
 	// XMLParseTimeout is the maximum time allowed for XML parsing (default: 5s).
 	XMLParseTimeout time.Duration
+
+	// OnADMFIdentified is called when the ADMF identifier is learned from an inbound request.
+	// This allows the client to include the ADMF identifier in outbound messages.
+	OnADMFIdentified func(admfID string)
 }
 
 // DestinationManager provides destination CRUD operations.
@@ -628,10 +632,11 @@ type x1RequestEnvelope struct {
 	RequestMessage x1RequestMessageAttr `xml:"x1RequestMessage"`
 }
 
-// x1RequestMessageAttr captures the xsi:type attribute and inner XML from x1RequestMessage.
+// x1RequestMessageAttr captures the xsi:type attribute, admfIdentifier, and inner XML from x1RequestMessage.
 type x1RequestMessageAttr struct {
-	Type     string `xml:"type,attr"`
-	InnerXML []byte `xml:",innerxml"`
+	Type           string `xml:"type,attr"`
+	AdmfIdentifier string `xml:"admfIdentifier"`
+	InnerXML       []byte `xml:",innerxml"`
 }
 
 // processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
@@ -648,6 +653,11 @@ func (s *Server) processX1RequestEnvelope(body []byte) any {
 		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
 	}
 
+	// Learn the ADMF identifier from the inbound request.
+	if envelope.RequestMessage.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
+		s.config.OnADMFIdentified(envelope.RequestMessage.AdmfIdentifier)
+	}
+
 	// Synthesize a bare request XML from the xsi:type and inner content
 	// so it can be processed by the existing processRequestMessage logic.
 	syntheticXML := []byte("<" + messageType + ">" + string(envelope.RequestMessage.InnerXML) + "</" + messageType + ">")
@@ -658,6 +668,11 @@ func (s *Server) processX1RequestEnvelope(body []byte) any {
 // processRequestMessage processes a single X1 request message.
 // Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
 func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) any {
+	// Learn the ADMF identifier from the inbound request.
+	if reqMsg != nil && reqMsg.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
+		s.config.OnADMFIdentified(reqMsg.AdmfIdentifier)
+	}
+
 	// First, detect the root element to determine the request type
 	var rootDetector xmlRootDetector
 	if err := xml.Unmarshal(body, &rootDetector); err != nil {

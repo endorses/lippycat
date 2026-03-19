@@ -210,6 +210,11 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 			TLSCAFile:    config.X1TLSCAFile,
 			NEIdentifier: config.NEIdentifier,
 		}
+		// Wire ADMF identifier learning: when the server receives a request
+		// from the ADMF, pass the identifier to the client for outbound messages.
+		if m.x1Client != nil {
+			x1Config.OnADMFIdentified = m.x1Client.SetADMFIdentifier
+		}
 		// Create adapters that implement x1.DestinationManager and x1.TaskManager.
 		destAdapter := &managerDestinationAdapter{m: m}
 		taskAdapter := &managerTaskAdapter{m: m}

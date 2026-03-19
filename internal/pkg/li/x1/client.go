@@ -146,6 +146,11 @@ type ClientConfig struct {
 	// ADMFEndpoint is the HTTPS URL of the ADMF (e.g., "https://admf.example.com:8443").
 	ADMFEndpoint string
 
+	// ADMFIdentifier is the ADMF identifier included in outbound X1 messages.
+	// Per ETSI TS 103 221-1, this identifies the ADMF the message is addressed to.
+	// If empty, it is learned from the first inbound X1 request from the ADMF.
+	ADMFIdentifier string
+
 	// NEIdentifier is the network element identifier for X1 messages.
 	NEIdentifier string
 
@@ -243,11 +248,15 @@ type Client struct {
 	// httpClient is the HTTP client for ADMF communication.
 	httpClient *http.Client
 
-	// mu protects stats.
+	// mu protects stats and admfIdentifier.
 	mu sync.RWMutex
 
 	// stats holds client statistics.
 	stats ClientStats
+
+	// admfIdentifier is the ADMF identifier for outbound messages.
+	// Initialized from config; updated when learned from inbound requests.
+	admfIdentifier string
 
 	// stopChan signals shutdown.
 	stopChan chan struct{}
@@ -312,9 +321,10 @@ func NewClient(config ClientConfig) (*Client, error) {
 	}
 
 	return &Client{
-		config:     config,
-		httpClient: httpClient,
-		stopChan:   make(chan struct{}),
+		config:         config,
+		httpClient:     httpClient,
+		stopChan:       make(chan struct{}),
+		admfIdentifier: config.ADMFIdentifier,
 	}, nil
 }
 
@@ -671,12 +681,29 @@ func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
 	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
 	transID := schema.UUID(uuid.New().String())
 
+	c.mu.RLock()
+	admfID := c.admfIdentifier
+	c.mu.RUnlock()
+
 	return &schema.X1RequestMessage{
+		AdmfIdentifier:   admfID,
 		NeIdentifier:     c.config.NEIdentifier,
 		MessageTimestamp: &now,
 		Version:          c.config.Version,
 		X1TransactionId:  &transID,
 	}
+}
+
+// SetADMFIdentifier updates the ADMF identifier used in outbound messages.
+// This is called when the ADMF identifies itself in an inbound X1 request.
+func (c *Client) SetADMFIdentifier(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.admfIdentifier == "" && id != "" {
+		logger.Info("Learned ADMF identifier from inbound request", "admf_id", id)
+	}
+	c.admfIdentifier = id
 }
 
 // marshalWrappedRequest wraps an X1 request in the ETSI-compliant X1Request envelope.

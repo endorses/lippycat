@@ -428,6 +428,9 @@ These settings require the `li` build tag. See [Lawful Interception](../part5-ad
 | `processor.li.admf_tls_cert` | string | `""` | TLS certificate for ADMF connection. |
 | `processor.li.admf_tls_key` | string | `""` | TLS private key for ADMF connection. |
 | `processor.li.admf_tls_ca` | string | `""` | CA certificate for ADMF verification. |
+| `processor.li.admf_sync_on_startup` | boolean | `true` | Query ADMF for task/destination state on startup. |
+| `processor.li.admf_sync_timeout` | duration | `"30s"` | Timeout for the startup state sync request. |
+| `processor.li.admf_reconcile_interval` | duration | `"0"` | Periodic ADMF reconciliation interval (0 = disabled). |
 | `processor.li.delivery_tls_cert` | string | `""` | TLS certificate for X2/X3 delivery connections. |
 | `processor.li.delivery_tls_key` | string | `""` | TLS private key for X2/X3 delivery. |
 | `processor.li.delivery_tls_ca` | string | `""` | CA certificate for MDF verification. |

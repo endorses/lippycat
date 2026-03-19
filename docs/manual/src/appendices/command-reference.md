@@ -161,7 +161,7 @@ Used by `tap` and `process` for writing captured packets to disk.
 
 ### LI Flags
 
-Used by `process` only. Requires the `li` build tag (`make processor-li` or `make build-li`).
+Used by `process` and `tap`. Requires the `li` build tag (`make processor-li`, `make tap-li`, or `make build-li`).
 
 See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) for details.
 
@@ -175,7 +175,14 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 | `--li-delivery-tls-cert` | string | | X2/X3 delivery client certificate |
 | `--li-delivery-tls-key` | string | | X2/X3 delivery client private key |
 | `--li-delivery-tls-ca` | string | | X2/X3 delivery CA certificate (MDF verification) |
-| `--li-admf-*` | | | ADMF-related configuration flags |
+| `--li-admf-endpoint` | string | | ADMF HTTPS endpoint URL |
+| `--li-admf-tls-cert` | string | | Client certificate for ADMF connection |
+| `--li-admf-tls-key` | string | | Client private key for ADMF connection |
+| `--li-admf-tls-ca` | string | | CA certificate for ADMF server verification |
+| `--li-admf-keepalive` | duration | `30s` | ADMF keepalive interval (0 = disabled) |
+| `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
+| `--li-admf-sync-timeout` | duration | `30s` | Timeout for startup state sync |
+| `--li-admf-reconcile-interval` | duration | `0` | Periodic ADMF reconciliation interval (0 = disabled) |
 
 ---
 

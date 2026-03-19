@@ -50,7 +50,7 @@ flowchart TB
 
 The flow works as follows:
 
-1. The ADMF sends an interception task to the processor via the X1 interface.
+1. The ADMF sends an interception task to the processor via the X1 interface (or the processor queries the ADMF for existing tasks on startup -- see [ADMF State Synchronization](#admf-state-synchronization)).
 2. The LI Manager translates the task's target identifiers into capture filters and pushes them to connected hunters.
 3. Hunters match packets against those filters at the edge and forward matching traffic to the processor.
 4. The processor encodes matched SIP signaling as X2 IRI PDUs and RTP media as X3 CC PDUs.
@@ -119,12 +119,17 @@ processor:
     x1_tls_key: "/etc/lippycat/li/x1-server.key"
     x1_tls_ca: "/etc/lippycat/li/admf-ca.crt"
 
-    # X1 client — sends notifications to ADMF
+    # X1 client — sends notifications to ADMF and queries state
     admf_endpoint: "https://admf.example.com:8443"
     admf_tls_cert: "/etc/lippycat/li/x1-client.crt"
     admf_tls_key: "/etc/lippycat/li/x1-client.key"
     admf_tls_ca: "/etc/lippycat/li/admf-ca.crt"
     admf_keepalive: "30s"
+
+    # ADMF state synchronization
+    admf_sync_on_startup: true    # Query ADMF for state on startup
+    admf_sync_timeout: "30s"      # Timeout for startup sync
+    admf_reconcile_interval: "0"  # Periodic reconciliation (0 = disabled)
 
     # X2/X3 delivery — sends intercept data to MDF
     delivery_tls_cert: "/etc/lippycat/li/delivery.crt"
@@ -220,6 +225,8 @@ The X1 interface is the control plane between the ADMF and the processor. The AD
 | ModifyTask | ADMF to NE | Update task targets, destinations, or delivery type |
 | DeactivateTask | ADMF to NE | Stop an interception task |
 | GetTaskDetails | ADMF to NE | Query current task status |
+| GetAllDetails | NE to ADMF | Query all tasks, destinations, and NE status |
+| GetAllTaskDetails | NE to ADMF | Query all task details |
 
 All requests use XML encoding per ETSI TS 103 221-1. For example, an `ActivateTask` request includes the task identifier (XID), target identifiers, destination IDs, and the delivery type:
 
@@ -235,7 +242,7 @@ All requests use XML encoding per ETSI TS 103 221-1. For example, an `ActivateTa
     <xId>a1b2c3d4-e5f6-7890-abcd-ef1234567890</xId>
     <targetIdentifiers>
       <targetIdentifier>
-        <sipUri>sip:alice@example.com</sipUri>
+        <sipUri>sip:alicent@example.com</sipUri>
       </targetIdentifier>
     </targetIdentifiers>
     <listOfDIDs>
@@ -300,6 +307,63 @@ Configure the keepalive interval with `--li-admf-keepalive`:
 ```bash
 --li-admf-keepalive 30s   # Send keepalive every 30 seconds
 --li-admf-keepalive 0     # Disable keepalive
+```
+
+### ADMF State Synchronization
+
+When lippycat restarts, all in-memory task and destination state is lost. To recover without waiting for the ADMF to re-push each task individually, the processor queries the ADMF for current state on startup using the standard `GetAllDetails` operation defined in ETSI TS 103 221-1.
+
+**Startup sync** is enabled by default. After sending the startup notification, the processor calls `GetAllDetails` on the ADMF, which returns all tasks and destinations assigned to this network element. The processor registers each destination and activates each task, recreating the full filter and delivery state automatically.
+
+```mermaid
+sequenceDiagram
+    participant P as Processor
+    participant A as ADMF
+    P->>A: ReportNEIssue (Startup)
+    P->>A: GetAllDetailsRequest
+    A-->>P: GetAllDetailsResponse<br/>(tasks + destinations + NE status)
+    Note over P: Register destinations
+    Note over P: Activate tasks & push filters
+    P->>P: Normal operation resumes
+```
+
+The sync is designed for graceful degradation:
+
+- **ADMF unreachable:** The sync times out (default 30 seconds) and the processor continues startup. The ADMF can push tasks later via `ActivateTask`.
+- **ADMF does not support GetAllDetails:** Some minimal ADMF implementations only support pushing state. When the ADMF returns an `UnsupportedOperation` error, the processor logs a warning and continues normally.
+- **Individual task failures:** If a specific task or destination fails to activate (for example, due to an unsupported target type), it is skipped with a warning and the remaining items are processed.
+
+**Configuration flags:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
+| `--li-admf-sync-timeout` | duration | `30s` | Timeout for the startup sync request |
+| `--li-admf-reconcile-interval` | duration | `0` | Periodic reconciliation interval (0 = disabled) |
+
+To disable startup sync (for example, in environments where the ADMF always pushes state):
+
+```bash
+--li-admf-sync-on-startup=false
+```
+
+**Periodic reconciliation** can be enabled to guard against configuration drift during long uptimes. When configured, the processor periodically queries the ADMF and compares the response with its local state:
+
+- Tasks present in the ADMF but missing locally are activated.
+- Tasks present locally but missing from the ADMF are logged as warnings (they are not automatically deactivated, since this could indicate a transient ADMF issue).
+
+```bash
+--li-admf-reconcile-interval 5m   # Reconcile every 5 minutes
+```
+
+YAML configuration:
+
+```yaml
+processor:
+  li:
+    admf_sync_on_startup: true
+    admf_sync_timeout: "30s"
+    admf_reconcile_interval: "0"   # Disabled by default
 ```
 
 ### X1 Error Codes
@@ -369,7 +433,7 @@ When the ADMF activates a task, the LI Manager translates target identifiers int
 
 | LI Target Type | X1 Element | Example | Filter System | Algorithm |
 |----------------|------------|---------|---------------|-----------|
-| SIP URI | `<sipUri>` | `sip:alice@example.com` | FILTER_SIP_URI | Aho-Corasick pattern matching |
+| SIP URI | `<sipUri>` | `sip:alicent@example.com` | FILTER_SIP_URI | Aho-Corasick pattern matching |
 | TEL URI | `<telUri>` | `tel:+15551234567` | FILTER_PHONE_NUMBER | Bloom filter + suffix matching |
 | E.164 Number | `<e164Number>` | `+15551234567` | FILTER_PHONE_NUMBER | Bloom filter + suffix matching |
 | IPv4 Address | `<ipv4Address>` | `192.168.1.100` | FILTER_IP_ADDRESS | Hash map, O(1) lookup |
@@ -419,7 +483,7 @@ To rotate certificates:
 
 1. Generate new certificates (or obtain them from your organizational PKI).
 2. Update the processor configuration to reference the new certificate files.
-3. Perform a graceful restart of the processor (active tasks will be preserved through the startup/shutdown notification cycle with the ADMF).
+3. Perform a graceful restart of the processor. Active tasks are automatically restored: the processor sends a shutdown notification, and on restart queries the ADMF via `GetAllDetails` to restore all task and destination state (see [ADMF State Synchronization](#admf-state-synchronization)).
 4. Verify connectivity to ADMF and MDF after restart.
 
 For production environments, consider using a Hardware Security Module (HSM) for private key storage and an automated certificate lifecycle management system.

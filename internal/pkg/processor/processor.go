@@ -91,6 +91,10 @@ type Config struct {
 	LIADMFTLSKeyFile  string // Path to client TLS key for ADMF notifications
 	LIADMFTLSCAFile   string // Path to CA certificate for verifying ADMF server
 	LIADMFKeepalive   string // Keepalive interval for ADMF notifications (e.g., "30s", "0" to disable)
+	// LI ADMF state sync settings
+	LIADMFSyncOnStartup     bool          // Query ADMF for task/destination state on startup
+	LIADMFSyncTimeout       time.Duration // Timeout for startup state sync
+	LIADMFReconcileInterval time.Duration // Periodic reconciliation interval (0 = disabled)
 	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
 	LIDeliveryTLSCertFile   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
 	LIDeliveryTLSKeyFile    string   // Path to client TLS key for X2/X3 delivery

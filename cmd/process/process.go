@@ -419,6 +419,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryTLSKeyFile = liConfig.DeliveryTLSKeyFile
 		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
 		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
+		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
+		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
+		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval
 	}
 
 	// Validate TLS configuration: cert and key required when TLS is enabled

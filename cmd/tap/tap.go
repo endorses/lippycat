@@ -504,6 +504,9 @@ func runTap(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryTLSKeyFile = liConfig.DeliveryTLSKeyFile
 		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
 		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
+		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
+		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
+		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval
 	}
 
 	// Security check: TLS is enabled by default, require cert/key when enabled

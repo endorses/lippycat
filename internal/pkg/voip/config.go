@@ -180,10 +180,13 @@ func GetConfig() *Config {
 
 	// Cache the assembled Config — viper reads in this function are expensive
 	// (reflection + path-shadow checks) and called from per-packet hot paths.
+	// Return a copy so callers (e.g. applyPerformanceModeOptimizations) can
+	// mutate without poisoning the cache for other goroutines.
 	cachedOnce.Do(func() {
 		cachedCfg = buildConfig()
 	})
-	return cachedCfg
+	cfg := *cachedCfg
+	return &cfg
 }
 
 func buildConfig() *Config {

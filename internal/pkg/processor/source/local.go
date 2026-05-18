@@ -59,6 +59,12 @@ type TCPAssembler interface {
 	AssemblePacket(pktInfo capture.PacketInfo) bool
 }
 
+// cachedFilterIDs stores filter IDs with a timestamp for TTL-based cleanup.
+type cachedFilterIDs struct {
+	filterIDs []string
+	storedAt  time.Time
+}
+
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
@@ -97,6 +103,11 @@ type LocalSource struct {
 
 	// Stats tracking
 	stats *AtomicStats
+
+	// LI: CallID → filterIDs cache for RTP packets
+	// SIP packets that match LI filters store their CallID→filterIDs mapping,
+	// so RTP packets for the same call can inherit the filter IDs.
+	callFilterCache sync.Map
 
 	// Lifecycle
 	ctx    context.Context
@@ -272,6 +283,30 @@ func (s *LocalSource) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Start periodic cleanup of callFilterCache (remove entries older than 5 minutes)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-ticker.C:
+				now := time.Now()
+				s.callFilterCache.Range(func(key, value any) bool {
+					if entry, ok := value.(cachedFilterIDs); ok {
+						if now.Sub(entry.storedAt) > 5*time.Minute {
+							s.callFilterCache.Delete(key)
+						}
+					}
+					return true
+				})
+			}
+		}
+	}()
+
 	// Create packet buffer
 	s.packetBuffer = capture.NewPacketBuffer(s.ctx, s.config.BufferSize)
 
@@ -369,6 +404,28 @@ func (s *LocalSource) batchingLoop() {
 			// Attach the pre-computed metadata from TCP handler
 			pbPkt.Metadata = injectedPkt.Metadata
 
+			// Apply filter to TCP SIP packets (same rules as UDP VoIP)
+			s.mu.Lock()
+			tcpFilter := s.appFilter
+			s.mu.Unlock()
+
+			if tcpFilter != nil {
+				matched, filterIDs := tcpFilter.MatchPacketWithIDs(injectedPkt.PacketInfo.Packet)
+				if matched && len(filterIDs) > 0 {
+					pbPkt.MatchedFilterIds = filterIDs
+					// Cache SIP CallID → filterIDs for RTP correlation
+					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
+						callID := pbPkt.Metadata.Sip.CallId
+						if callID != "" {
+							s.callFilterCache.Store(callID, cachedFilterIDs{filterIDs: filterIDs, storedAt: time.Now()})
+						}
+					}
+				} else {
+					// No match — drop the packet
+					continue
+				}
+			}
+
 			// Update stats
 			s.stats.AddForwarded(uint64(len(pbPkt.Data)))
 
@@ -437,16 +494,51 @@ func (s *LocalSource) batchingLoop() {
 			}
 
 			// Apply application filter if set
-			// VoIP packets (SIP and associated RTP) bypass the filter
-			// since they're already identified by the VoIP processor
+			// Both VoIP and non-VoIP packets are subject to filter drop decisions.
+			// Special case: RTP packets that don't directly match can pass if their
+			// CallID is in the callFilterCache (associated with a matched SIP call).
 			var matchedFilterIDs []string
 			if filter != nil && !isVoIPPacket {
+				// Non-VoIP: filter decides pass/drop
 				matched, filterIDs := filter.MatchPacketWithIDs(pktInfo.Packet)
 				if !matched {
-					// Packet filtered out
 					continue
 				}
 				matchedFilterIDs = filterIDs
+			} else if filter != nil && isVoIPPacket {
+				// VoIP: filter decides pass/drop, with cache fallback for RTP
+				matched, filterIDs := filter.MatchPacketWithIDs(pktInfo.Packet)
+
+				if matched {
+					matchedFilterIDs = filterIDs
+
+					// For SIP packets that match, cache CallID → filterIDs
+					// so RTP packets (same CallID) can inherit the filter IDs
+					if len(filterIDs) > 0 && pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil && pbPkt.Metadata.Rtp == nil {
+						callID := pbPkt.Metadata.Sip.CallId
+						if callID != "" {
+							s.callFilterCache.Store(callID, cachedFilterIDs{filterIDs: filterIDs, storedAt: time.Now()})
+						}
+					}
+				} else {
+					// No direct filter match — check cache for RTP packets
+					if pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil {
+						callID := ""
+						if pbPkt.Metadata.Sip != nil {
+							callID = pbPkt.Metadata.Sip.CallId
+						}
+						if callID != "" {
+							if cached, ok := s.callFilterCache.Load(callID); ok {
+								matchedFilterIDs = cached.(cachedFilterIDs).filterIDs
+							}
+						}
+					}
+
+					// If still no filter IDs, drop the packet
+					if len(matchedFilterIDs) == 0 {
+						continue
+					}
+				}
 			}
 
 			// Set matched filter IDs for LI correlation

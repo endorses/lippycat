@@ -124,12 +124,18 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			if len(pkt.MatchedFilterIds) == 0 {
 				continue
 			}
+			logger.Info("LI processing packet with filter IDs",
+				"filter_ids", pkt.MatchedFilterIds,
+				"has_sip", pkt.Metadata != nil && pkt.Metadata.Sip != nil,
+				"has_rtp", pkt.Metadata != nil && pkt.Metadata.Rtp != nil,
+			)
 
 			// Convert to PacketDisplay for LI processing
 			display := types.PacketDisplay{
 				Timestamp: time.Unix(0, pkt.TimestampNs),
 				RawData:   pkt.Data,
 				LinkType:  layers.LinkType(pkt.LinkType),
+				NodeID:    batch.SourceID,
 			}
 			if pkt.Metadata != nil {
 				display.SrcIP = pkt.Metadata.SrcIp
@@ -137,6 +143,45 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				display.Protocol = pkt.Metadata.Protocol
 				display.SrcPort = strconv.FormatUint(uint64(pkt.Metadata.SrcPort), 10)
 				display.DstPort = strconv.FormatUint(uint64(pkt.Metadata.DstPort), 10)
+
+				// Convert protobuf SIP/RTP metadata to VoIPMetadata for LI encoding
+				if pkt.Metadata.Rtp != nil {
+					// RTP packet (may also have SIP metadata for CallID correlation)
+					display.VoIPData = &types.VoIPMetadata{
+						IsRTP:       true,
+						SSRC:        pkt.Metadata.Rtp.Ssrc,
+						PayloadType: uint8(pkt.Metadata.Rtp.PayloadType),
+						SequenceNum: uint16(pkt.Metadata.Rtp.Sequence),
+						Timestamp:   pkt.Metadata.Rtp.Timestamp,
+					}
+					// Copy CallID from SIP metadata if present (VoIP processor sets this for correlated RTP)
+					if pkt.Metadata.Sip != nil {
+						display.VoIPData.CallID = pkt.Metadata.Sip.CallId
+					}
+				} else if pkt.Metadata.Sip != nil {
+					// SIP signaling packet
+					display.VoIPData = &types.VoIPMetadata{
+						CallID:  pkt.Metadata.Sip.CallId,
+						Method:  pkt.Metadata.Sip.Method,
+						Status:  int(pkt.Metadata.Sip.ResponseCode),
+						From:    pkt.Metadata.Sip.FromUri,
+						To:      pkt.Metadata.Sip.ToUri,
+						FromTag: pkt.Metadata.Sip.FromTag,
+						ToTag:   pkt.Metadata.Sip.ToTag,
+						User:    pkt.Metadata.Sip.FromUser,
+					}
+					if pkt.Metadata.Sip.AccessNetworkInfo != nil {
+						display.VoIPData.AccessNetworkInfo = &types.AccessNetworkInfo{
+							AccessType: pkt.Metadata.Sip.AccessNetworkInfo.AccessType,
+							CellID:     pkt.Metadata.Sip.AccessNetworkInfo.CellId,
+							BSSID:      pkt.Metadata.Sip.AccessNetworkInfo.Bssid,
+							LocalIP:    pkt.Metadata.Sip.AccessNetworkInfo.LocalIp,
+						}
+					}
+					if pkt.Metadata.Sip.VisitedNetworkId != "" {
+						display.VoIPData.VisitedNetworkID = pkt.Metadata.Sip.VisitedNetworkId
+					}
+				}
 			}
 
 			// Use per-packet filter IDs for LI correlation

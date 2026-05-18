@@ -24,8 +24,22 @@ var (
 	tcpPacketBuffersMu sync.RWMutex
 )
 
+// bufferedFrame stores the source-of-truth for one TCP packet without
+// pinning the decoded gopacket.Packet (and its layer allocations).
+// On retrieval, a Packet is reconstructed via gopacket.NewPacket with Lazy
+// decoding so layers are only allocated for matched (non-discarded) flows.
+type bufferedFrame struct {
+	data           []byte
+	timestamp      time.Time
+	captureLength  int
+	originalLength int
+	iface          string
+	linkType       layers.LinkType
+	ancillaryData  []interface{}
+}
+
 type TCPPacketBuffer struct {
-	packets    []capture.PacketInfo
+	packets    []bufferedFrame
 	createdAt  time.Time
 	lastAccess time.Time
 	flow       gopacket.Flow
@@ -84,9 +98,14 @@ func getOrCreateBuffer(strategy string, maxSize int) *TCPPacketBuffer {
 		return buffer
 	}
 
-	// Create a new buffer if pool is empty
+	// Create a new buffer if pool is empty.
+	// maxSize is the per-buffer packet limit, not the typical occupancy —
+	// most flows hold only a few packets before flush/discard. Letting the
+	// slice grow naturally avoids pre-allocating maxSize × sizeof(PacketInfo)
+	// for every flow (which on "balanced" profile = 5000 × ~100B ≈ 500KB
+	// per buffer × many flows = hundreds of MB of unused capacity).
 	buffer := &TCPPacketBuffer{
-		packets:    make([]capture.PacketInfo, 0, maxSize),
+		packets:    nil,
 		createdAt:  time.Now(),
 		lastAccess: time.Now(),
 		maxSize:    maxSize,
@@ -126,6 +145,17 @@ func BufferTCPPacket(flow gopacket.Flow, pkt capture.PacketInfo) {
 
 	buffer.lastAccess = time.Now()
 
+	md := pkt.Packet.Metadata()
+	frame := bufferedFrame{
+		data:           pkt.Packet.Data(),
+		timestamp:      md.Timestamp,
+		captureLength:  md.CaptureLength,
+		originalLength: md.Length,
+		iface:          pkt.Interface,
+		linkType:       pkt.LinkType,
+		ancillaryData:  md.AncillaryData,
+	}
+
 	// Handle different buffer strategies
 	switch buffer.strategy {
 	case "adaptive":
@@ -135,23 +165,40 @@ func BufferTCPPacket(flow gopacket.Flow, pkt capture.PacketInfo) {
 			copy(buffer.packets, buffer.packets[removeCount:])
 			buffer.packets = buffer.packets[:len(buffer.packets)-removeCount]
 		}
-		buffer.packets = append(buffer.packets, pkt)
+		buffer.packets = append(buffer.packets, frame)
 
 	case "ring":
 		// Circular buffer - overwrite oldest
 		if len(buffer.packets) >= buffer.maxSize {
 			// Shift all packets left and replace last
 			copy(buffer.packets, buffer.packets[1:])
-			buffer.packets[len(buffer.packets)-1] = pkt
+			buffer.packets[len(buffer.packets)-1] = frame
 		} else {
-			buffer.packets = append(buffer.packets, pkt)
+			buffer.packets = append(buffer.packets, frame)
 		}
 
 	default: // "fixed" strategy
 		// Drop new packets when full
 		if len(buffer.packets) < buffer.maxSize {
-			buffer.packets = append(buffer.packets, pkt)
+			buffer.packets = append(buffer.packets, frame)
 		}
+	}
+}
+
+// reconstructPacket rebuilds a capture.PacketInfo from a bufferedFrame.
+// Layers are decoded lazily so unused flows pay zero allocation cost.
+func reconstructPacket(frame bufferedFrame) capture.PacketInfo {
+	pkt := gopacket.NewPacket(frame.data, frame.linkType, gopacket.Lazy)
+	pkt.Metadata().CaptureInfo = gopacket.CaptureInfo{
+		Timestamp:     frame.timestamp,
+		CaptureLength: frame.captureLength,
+		Length:        frame.originalLength,
+		AncillaryData: frame.ancillaryData,
+	}
+	return capture.PacketInfo{
+		LinkType:  frame.linkType,
+		Packet:    pkt,
+		Interface: frame.iface,
 	}
 }
 
@@ -168,7 +215,8 @@ func flushTCPPacketsToCall(flow gopacket.Flow, callID string, writeVoip bool) {
 	buffer.callID = callID
 
 	// Write buffered packets to the call
-	for _, pkt := range buffer.packets {
+	for _, frame := range buffer.packets {
+		pkt := reconstructPacket(frame)
 		// Inject TCP SIP packet into virtual interface
 		injectPacketToVirtualInterface(pkt)
 
@@ -185,6 +233,21 @@ func flushTCPPacketsToCall(flow gopacket.Flow, callID string, writeVoip bool) {
 	releaseBuffer(buffer)
 }
 
+// peekFirstTCPBufferedPacket reconstructs the first buffered packet for a flow
+// without draining or modifying the buffer. Used by filter matching paths that
+// only need a single packet to evaluate against (e.g., MatchPacket on the
+// first packet in a SIP flow). Returns ok=false if no buffered packets exist.
+func peekFirstTCPBufferedPacket(flow gopacket.Flow) (capture.PacketInfo, bool) {
+	tcpPacketBuffersMu.Lock()
+	defer tcpPacketBuffersMu.Unlock()
+
+	buffer, exists := tcpPacketBuffers[flow]
+	if !exists || len(buffer.packets) == 0 {
+		return capture.PacketInfo{}, false
+	}
+	return reconstructPacket(buffer.packets[0]), true
+}
+
 // getTCPBufferedPackets returns buffered packets for a flow without clearing them
 // Used by hunter mode to forward packets to processor
 func getTCPBufferedPackets(flow gopacket.Flow) []capture.PacketInfo {
@@ -196,9 +259,11 @@ func getTCPBufferedPackets(flow gopacket.Flow) []capture.PacketInfo {
 		return nil
 	}
 
-	// Copy packet info to return slice (includes interface name)
+	// Reconstruct PacketInfo for each buffered frame
 	packets := make([]capture.PacketInfo, len(buffer.packets))
-	copy(packets, buffer.packets)
+	for i, frame := range buffer.packets {
+		packets[i] = reconstructPacket(frame)
+	}
 
 	// Clear and release buffer
 	buffer.packets = buffer.packets[:0]

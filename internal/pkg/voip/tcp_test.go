@@ -390,23 +390,23 @@ func TestTCPBufferStrategies(t *testing.T) {
 			assert.Equal(t, tt.strategy, buffer.strategy)
 			assert.Equal(t, tt.maxSize, buffer.maxSize)
 
-			// Create test packets
-			testPackets := make([]capture.PacketInfo, tt.packets)
+			// Create test frames (bufferedFrame mirrors what BufferTCPPacket stores)
+			testFrames := make([]bufferedFrame, tt.packets)
 			for i := 0; i < tt.packets; i++ {
-				testPackets[i] = capture.PacketInfo{
-					Packet: createTestPacket(t, layers.LayerTypeEthernet),
+				testFrames[i] = bufferedFrame{
+					linkType: layers.LinkTypeEthernet,
 				}
 			}
 
 			// Simulate packet buffering based on strategy
-			for _, pkt := range testPackets {
+			for _, frame := range testFrames {
 				switch tt.strategy {
 				case "ring":
 					if len(buffer.packets) >= buffer.maxSize {
-						buffer.packets[0] = pkt
+						buffer.packets[0] = frame
 						buffer.packets = append(buffer.packets[1:], buffer.packets[0])
 					} else {
-						buffer.packets = append(buffer.packets, pkt)
+						buffer.packets = append(buffer.packets, frame)
 					}
 				case "adaptive":
 					if len(buffer.packets) >= buffer.maxSize {
@@ -416,12 +416,12 @@ func TestTCPBufferStrategies(t *testing.T) {
 						}
 						buffer.packets = buffer.packets[removeCount:]
 					}
-					buffer.packets = append(buffer.packets, pkt)
+					buffer.packets = append(buffer.packets, frame)
 				default: // "fixed"
 					if len(buffer.packets) >= buffer.maxSize {
 						buffer.packets = buffer.packets[1:]
 					}
-					buffer.packets = append(buffer.packets, pkt)
+					buffer.packets = append(buffer.packets, frame)
 				}
 			}
 

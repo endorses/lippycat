@@ -112,16 +112,12 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 // matchesFilter checks if a TCP SIP call matches any configured filter.
 // Uses ApplicationFilter if available, falls back to legacy containsUserInHeaders().
 func (h *TapTCPHandler) matchesFilter(netFlow gopacket.Flow, headers map[string]string) bool {
-	// Use ApplicationFilter if available
+	// Use ApplicationFilter if available — peek the first buffered packet
+	// without draining the buffer. Draining + re-buffering is O(N) per SIP
+	// message and reconstructs every Packet only to throw them away.
 	if h.appFilter != nil {
-		bufferedPackets := getTCPBufferedPackets(netFlow)
-		if len(bufferedPackets) > 0 {
-			// Put packets back since we just want to check filter
-			for _, pkt := range bufferedPackets {
-				BufferTCPPacket(netFlow, pkt)
-			}
-			// Use the first buffered packet for filter matching
-			return h.appFilter.MatchPacket(bufferedPackets[0].Packet)
+		if pkt, ok := peekFirstTCPBufferedPacket(netFlow); ok {
+			return h.appFilter.MatchPacket(pkt.Packet)
 		}
 		logger.Debug("TCP SIP: No buffered packets for ApplicationFilter, falling back to legacy filter")
 	}

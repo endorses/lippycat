@@ -23,8 +23,10 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 		srcIP = netLayer.NetworkFlow().Src().String()
 	}
 
-	// Try IP:PORT endpoints (precise matching only — no port-only fallback
-	// to avoid matching unrelated RTP streams that happen to use the same port)
+	// Match only on IP:PORT endpoints. Port-only matching is intentionally
+	// disabled — on busy networks ports get reused across unrelated calls and
+	// a port-only fallback stamps the wrong CallID on RTP from a different
+	// host. SDP carries the c= connection address; we require it.
 	var callID string
 	var exists bool
 
@@ -95,8 +97,10 @@ func extractRTPMetadata(payload []byte) *data.RTPMetadata {
 	}
 }
 
-// extractRTPPortsFromSDP extracts RTP ports and IP:PORT endpoints from SDP body.
-// Returns both IP:PORT (for precise matching) and port-only (for NAT fallback).
+// extractRTPPortsFromSDP extracts IP:PORT RTP endpoints from an SDP body.
+// Media lines without an accompanying c= connection address are skipped —
+// port-only entries cause false correlations on busy networks where the same
+// RTP port is reused across unrelated calls.
 func extractRTPPortsFromSDP(sdp string) []string {
 	endpoints := make([]string, 0, 4)
 
@@ -107,21 +111,18 @@ func extractRTPPortsFromSDP(sdp string) []string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
-			// Format: c=IN IP4 <ip> or c=IN IP6 <ip>
 			fields := strings.Fields(line)
 			if len(fields) >= 3 {
 				sessionIP = fields[2]
-				break // Use first c= line as session-level
+				break
 			}
 		}
 	}
 
-	// Now extract media ports and combine with IP
 	currentIP := sessionIP
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 
-		// Update connection IP if we see a media-level c= line
 		if strings.HasPrefix(line, "c=IN IP4 ") || strings.HasPrefix(line, "c=IN IP6 ") {
 			fields := strings.Fields(line)
 			if len(fields) >= 3 {
@@ -130,21 +131,13 @@ func extractRTPPortsFromSDP(sdp string) []string {
 			continue
 		}
 
-		// Check for m=audio lines
 		// Format: m=audio <port> RTP/AVP <payload_types>
 		if strings.HasPrefix(line, "m=audio ") {
 			fields := strings.Fields(line)
 			if len(fields) >= 2 {
 				port := fields[1]
-				if isValidPort(port) {
-					if currentIP != "" {
-						// Register IP:port endpoint
-						endpoint := currentIP + ":" + port
-						endpoints = append(endpoints, endpoint)
-					}
-					// Also register port-only for backward compatibility
-					// (some RTP may come from unexpected IPs due to NAT)
-					endpoints = append(endpoints, port)
+				if isValidPort(port) && currentIP != "" {
+					endpoints = append(endpoints, currentIP+":"+port)
 				}
 			}
 		}

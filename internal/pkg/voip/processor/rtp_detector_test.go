@@ -84,11 +84,12 @@ func TestExtractRTPMetadata_TooShort(t *testing.T) {
 }
 
 func TestExtractRTPPortsFromSDP(t *testing.T) {
-	// Test extractRTPPortsFromSDP which now returns both IP:PORT and port-only entries
+	// extractRTPPortsFromSDP returns only IP:PORT entries — port-only matching
+	// would mis-correlate RTP across unrelated calls when ports are reused.
 	tests := []struct {
 		name     string
 		sdp      string
-		expected []string // Now includes both IP:PORT and port-only entries
+		expected []string
 	}{
 		{
 			name: "Single audio stream",
@@ -99,7 +100,7 @@ c=IN IP4 192.168.1.1
 t=0 0
 m=audio 16384 RTP/AVP 0 8
 `,
-			expected: []string{"192.168.1.1:16384", "16384"},
+			expected: []string{"192.168.1.1:16384"},
 		},
 		{
 			name: "Multiple audio streams",
@@ -111,7 +112,7 @@ t=0 0
 m=audio 16384 RTP/AVP 0
 m=audio 16386 RTP/AVP 8
 `,
-			expected: []string{"192.168.1.1:16384", "16384", "192.168.1.1:16386", "16386"},
+			expected: []string{"192.168.1.1:16384", "192.168.1.1:16386"},
 		},
 		{
 			name: "Video and audio",
@@ -123,7 +124,7 @@ t=0 0
 m=audio 16384 RTP/AVP 0
 m=video 16386 RTP/AVP 96
 `,
-			expected: []string{"192.168.1.1:16384", "16384"},
+			expected: []string{"192.168.1.1:16384"},
 		},
 		{
 			name:     "No media lines",

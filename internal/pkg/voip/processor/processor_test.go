@@ -139,8 +139,8 @@ m=audio 16384 RTP/AVP 0
 	require.NotNil(t, result)
 	assert.Equal(t, "def456@example.com", result.CallID)
 
-	// Verify RTP port was registered
-	callID, exists := p.getCallIDForPort("16384")
+	// Verify RTP IP:port endpoint was registered
+	callID, exists := p.getCallIDForPort("192.168.1.1:16384")
 	assert.True(t, exists)
 	assert.Equal(t, "def456@example.com", callID)
 }
@@ -170,14 +170,17 @@ func TestProcessor_ProcessRTPPacket(t *testing.T) {
 	require.NotNil(t, sipResult, "SIP packet should be processed")
 	require.Equal(t, "rtp-test@example.com", sipResult.CallID)
 
-	// Verify the port was registered
-	callID, exists := p.getCallIDForPort("20000")
-	require.True(t, exists, "RTP port 20000 should be registered")
+	// Verify the IP:port endpoint was registered
+	callID, exists := p.getCallIDForPort("192.168.1.1:20000")
+	require.True(t, exists, "RTP endpoint 192.168.1.1:20000 should be registered")
 	require.Equal(t, "rtp-test@example.com", callID)
 
-	// Now create an RTP packet to the registered port
+	// Now create an RTP packet from the advertised endpoint (symmetric RTP:
+	// the host that announced "c=192.168.1.1, m=audio 20000" sends from
+	// that same IP:port). createUDPPacket hardcodes srcIP=192.168.1.1, so
+	// srcPort=20000 makes srcIP:srcPort match the SDP-registered endpoint.
 	rtpPayload := createRTPPayload(2, 0, 1, 12345, 0x12345678)
-	rtpPacket := createUDPPacket(t, rtpPayload, 12345, 20000)
+	rtpPacket := createUDPPacket(t, rtpPayload, 20000, 12345)
 	result := p.Process(rtpPacket)
 
 	require.NotNil(t, result, "RTP packet should be detected")

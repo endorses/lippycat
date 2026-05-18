@@ -7,7 +7,19 @@ import (
 	"github.com/spf13/viper"
 )
 
-var configOnce sync.Once
+var (
+	configOnce sync.Once
+	cachedOnce sync.Once
+	cachedCfg  *Config
+)
+
+// ResetConfigCache forces the next GetConfig call to re-read from viper.
+// Only needed if viper values change at runtime (rare); call sites
+// must coordinate so readers don't observe a torn struct.
+func ResetConfigCache() {
+	cachedOnce = sync.Once{}
+	cachedCfg = nil
+}
 
 // Config holds all configurable VoIP processing parameters
 type Config struct {
@@ -166,6 +178,15 @@ func GetConfig() *Config {
 	// Initialize defaults only once to prevent race conditions
 	configOnce.Do(initConfigDefaults)
 
+	// Cache the assembled Config — viper reads in this function are expensive
+	// (reflection + path-shadow checks) and called from per-packet hot paths.
+	cachedOnce.Do(func() {
+		cachedCfg = buildConfig()
+	})
+	return cachedCfg
+}
+
+func buildConfig() *Config {
 	config := &Config{
 		MaxGoroutines:             getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
 		CallIDDetectionTimeout:    getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),

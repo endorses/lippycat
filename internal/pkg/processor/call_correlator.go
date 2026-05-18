@@ -109,7 +109,7 @@ func NewCallCorrelatorWithConfig(phoneConfig PhoneCorrelationConfig) *CallCorrel
 	}
 
 	// Start cleanup goroutine
-	cc.cleanupTicker = time.NewTicker(5 * time.Minute)
+	cc.cleanupTicker = time.NewTicker(1 * time.Minute)
 	go cc.cleanupLoop()
 
 	return cc
@@ -479,7 +479,7 @@ func (cc *CallCorrelator) cleanupLoop() {
 	for {
 		select {
 		case <-cc.cleanupTicker.C:
-			cc.cleanupStaleCalls(1 * time.Hour)
+			cc.cleanupStaleCalls(20 * time.Minute)
 		case <-cc.stopCleanup:
 			return
 		}

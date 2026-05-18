@@ -385,44 +385,45 @@ type RTPFlowState struct {
 	FirstSrcPort   uint16 // Port of first packet to determine direction
 }
 
+// payloadTypeCodecs maps RTP payload type to codec name (RFC 3551 + common dynamic).
+var payloadTypeCodecs = map[uint8]string{
+	0:   "G.711 µ-law (PCMU)",
+	3:   "GSM",
+	4:   "G.723",
+	5:   "DVI4 8kHz",
+	6:   "DVI4 16kHz",
+	7:   "LPC",
+	8:   "G.711 A-law (PCMA)",
+	9:   "G.722",
+	10:  "L16 Stereo",
+	11:  "L16 Mono",
+	12:  "QCELP",
+	13:  "Comfort Noise",
+	14:  "MPA",
+	15:  "G.728",
+	16:  "DVI4 11kHz",
+	17:  "DVI4 22kHz",
+	18:  "G.729",
+	25:  "CelB",
+	26:  "JPEG",
+	28:  "nv",
+	31:  "H.261",
+	32:  "MPV",
+	33:  "MP2T",
+	34:  "H.263",
+	96:  "Dynamic",
+	97:  "Dynamic",
+	98:  "Dynamic",
+	99:  "Dynamic",
+	100: "Dynamic",
+	101: "Dynamic (often telephone-event)",
+	102: "Dynamic",
+	103: "Dynamic",
+}
+
 // payloadTypeToCodec maps RTP payload type to codec name
 func payloadTypeToCodec(pt uint8) string {
-	codecs := map[uint8]string{
-		0:   "G.711 µ-law (PCMU)",
-		3:   "GSM",
-		4:   "G.723",
-		5:   "DVI4 8kHz",
-		6:   "DVI4 16kHz",
-		7:   "LPC",
-		8:   "G.711 A-law (PCMA)",
-		9:   "G.722",
-		10:  "L16 Stereo",
-		11:  "L16 Mono",
-		12:  "QCELP",
-		13:  "Comfort Noise",
-		14:  "MPA",
-		15:  "G.728",
-		16:  "DVI4 11kHz",
-		17:  "DVI4 22kHz",
-		18:  "G.729",
-		25:  "CelB",
-		26:  "JPEG",
-		28:  "nv",
-		31:  "H.261",
-		32:  "MPV",
-		33:  "MP2T",
-		34:  "H.263",
-		96:  "Dynamic",
-		97:  "Dynamic",
-		98:  "Dynamic",
-		99:  "Dynamic",
-		100: "Dynamic",
-		101: "Dynamic (often telephone-event)",
-		102: "Dynamic",
-		103: "Dynamic",
-	}
-
-	if codec, ok := codecs[pt]; ok {
+	if codec, ok := payloadTypeCodecs[pt]; ok {
 		return codec
 	}
 
@@ -433,27 +434,28 @@ func payloadTypeToCodec(pt uint8) string {
 	return "Unknown"
 }
 
+var wellKnownTCPPorts = map[uint16]bool{
+	80:    true, // HTTP
+	443:   true, // HTTPS
+	8080:  true, // HTTP alternate
+	8443:  true, // HTTPS alternate
+	22:    true, // SSH
+	21:    true, // FTP
+	25:    true, // SMTP
+	110:   true, // POP3
+	143:   true, // IMAP
+	993:   true, // IMAPS
+	995:   true, // POP3S
+	3306:  true, // MySQL
+	5432:  true, // PostgreSQL
+	6379:  true, // Redis
+	27017: true, // MongoDB
+}
+
 // isWellKnownTCPPort checks if a port is a well-known TCP port
 // to avoid false RTP detection on encrypted TCP protocols
 func isWellKnownTCPPort(port uint16) bool {
-	wellKnownPorts := map[uint16]bool{
-		80:    true, // HTTP
-		443:   true, // HTTPS
-		8080:  true, // HTTP alternate
-		8443:  true, // HTTPS alternate
-		22:    true, // SSH
-		21:    true, // FTP
-		25:    true, // SMTP
-		110:   true, // POP3
-		143:   true, // IMAP
-		993:   true, // IMAPS
-		995:   true, // POP3S
-		3306:  true, // MySQL
-		5432:  true, // PostgreSQL
-		6379:  true, // Redis
-		27017: true, // MongoDB
-	}
-	return wellKnownPorts[port]
+	return wellKnownTCPPorts[port]
 }
 
 // detectRTCP handles RTCP packets (packet types 200-213 per RFC 3550).
@@ -490,21 +492,22 @@ func (r *RTPSignature) detectRTCP(ctx *signatures.DetectionContext) *signatures.
 	}
 }
 
+var wellKnownUDPPorts = map[uint16]bool{
+	53:  true, // DNS
+	67:  true, // DHCP server
+	68:  true, // DHCP client
+	69:  true, // TFTP
+	123: true, // NTP
+	137: true, // NetBIOS Name Service
+	138: true, // NetBIOS Datagram Service
+	161: true, // SNMP
+	162: true, // SNMP Trap
+	500: true, // IKE (IPSec)
+	514: true, // Syslog
+}
+
 // isWellKnownUDPPort checks if a port is a well-known UDP service port
 // to avoid false RTP detection on DNS, NTP, DHCP, etc.
 func isWellKnownUDPPort(port uint16) bool {
-	wellKnownPorts := map[uint16]bool{
-		53:  true, // DNS
-		67:  true, // DHCP server
-		68:  true, // DHCP client
-		69:  true, // TFTP
-		123: true, // NTP
-		137: true, // NetBIOS Name Service
-		138: true, // NetBIOS Datagram Service
-		161: true, // SNMP
-		162: true, // SNMP Trap
-		500: true, // IKE (IPSec)
-		514: true, // Syslog
-	}
-	return wellKnownPorts[port]
+	return wellKnownUDPPorts[port]
 }

@@ -88,6 +88,18 @@ func (e *X2Encoder) EncodeIRI(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, er
 	// Add network layer attributes
 	e.addNetworkAttributes(pdu, pkt)
 
+	// Include raw SIP message as payload if available
+	if len(voip.RawSIP) > 0 {
+		pdu.Payload = voip.RawSIP
+		pdu.Header.PayloadLength = uint32(len(voip.RawSIP))
+	} else if len(pkt.RawData) > 0 {
+		// Fallback: try to extract SIP from raw packet by finding "SIP/" or method
+		if sipStart := findSIPStart(pkt.RawData); sipStart >= 0 {
+			pdu.Payload = pkt.RawData[sipStart:]
+			pdu.Header.PayloadLength = uint32(len(pdu.Payload))
+		}
+	}
+
 	return pdu, nil
 }
 
@@ -385,4 +397,47 @@ func (e *X2Encoder) EncodeRegistration(pkt *types.PacketDisplay, xid uuid.UUID) 
 // GetSequenceNumber returns the current sequence number (for testing/debugging).
 func (e *X2Encoder) GetSequenceNumber() uint32 {
 	return e.seqNum.Load()
+}
+
+// findSIPStart finds the start of a SIP message in raw packet data.
+// Returns the byte offset of the SIP message, or -1 if not found.
+func findSIPStart(data []byte) int {
+	// Look for common SIP request methods and "SIP/2.0" response prefix
+	markers := [][]byte{
+		[]byte("INVITE "),
+		[]byte("BYE "),
+		[]byte("ACK "),
+		[]byte("CANCEL "),
+		[]byte("REGISTER "),
+		[]byte("OPTIONS "),
+		[]byte("NOTIFY "),
+		[]byte("SUBSCRIBE "),
+		[]byte("MESSAGE "),
+		[]byte("INFO "),
+		[]byte("UPDATE "),
+		[]byte("REFER "),
+		[]byte("PRACK "),
+		[]byte("PUBLISH "),
+		[]byte("SIP/2.0 "),
+	}
+	for _, marker := range markers {
+		for i := 0; i <= len(data)-len(marker); i++ {
+			if bytesEqual(data[i:i+len(marker)], marker) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

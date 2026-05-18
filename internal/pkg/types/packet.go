@@ -53,6 +53,7 @@ type VoIPMetadata struct {
 	ContentType string            // Content-Type header
 	Body        string            // SIP message body (for MESSAGE method, limited size)
 	Headers     map[string]string // All SIP headers
+	RawSIP      []byte            // Raw SIP message bytes (application layer only, for LI)
 
 	// 3GPP IMS identifiers (for LI filtering)
 	IMSI string // International Mobile Subscriber Identity (15 digits from Authorization/P-Asserted-Identity)

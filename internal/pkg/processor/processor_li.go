@@ -7,20 +7,27 @@
 package processor
 
 import (
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/li/delivery"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/google/uuid"
 )
 
 // LI encoders and delivery - initialized when LI is enabled
 var (
-	liX2Encoder *x2x3.X2Encoder
-	liX3Encoder *x2x3.X3Encoder
+	liX2Encoder      *x2x3.X2Encoder
+	liX3Encoder      *x2x3.X3Encoder
+	liDeliveryMgr    *delivery.Manager
+	liDeliveryClient *delivery.Client
+	liReorderBuffers sync.Map // map[string]*delivery.ReorderBuffer keyed by "xid-destID"
 )
 
 // LI statistics
@@ -148,13 +155,38 @@ func (p *Processor) initLIManager() {
 	liX3Encoder = x2x3.NewX3Encoder()
 	logger.Info("LI X2/X3 encoders initialized")
 
-	// Set packet processor callback for X2/X3 delivery
+	// Initialize delivery client if TLS certs are configured
+	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
+		destConfig := delivery.DefaultConfig()
+		destConfig.TLSCertFile = p.config.LIDeliveryTLSCertFile
+		destConfig.TLSKeyFile = p.config.LIDeliveryTLSKeyFile
+		destConfig.TLSCAFile = p.config.LIDeliveryTLSCAFile
+		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
+			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert
+		}
+
+		var err error
+		liDeliveryMgr, err = delivery.NewManager(destConfig)
+		if err != nil {
+			logger.Error("Failed to create LI delivery manager", "error", err)
+		} else {
+			liDeliveryClient = delivery.NewClient(liDeliveryMgr, delivery.ClientConfig{})
+			logger.Info("LI delivery client initialized",
+				"cert", p.config.LIDeliveryTLSCertFile,
+				"ca", p.config.LIDeliveryTLSCAFile,
+			)
+		}
+	} else {
+		logger.Warn("LI delivery TLS certs not configured, X2/X3 PDUs will be encoded but not delivered")
+	}
+
+	// Set packet processor callback for X2/X3 encoding and delivery
 	p.liManager.SetPacketProcessor(func(task *li.InterceptTask, pkt *types.PacketDisplay) {
 		// Determine what to deliver based on task configuration
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
 		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
 
-		// Encode and log X2 (IRI - signaling) for SIP packets
+		// Encode and deliver X2 (IRI - signaling) for SIP packets
 		if deliverX2 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
 			pdu, err := liX2Encoder.EncodeIRI(pkt, task.XID)
 			if err != nil {
@@ -165,22 +197,39 @@ func (p *Processor) initLIManager() {
 				)
 			} else if pdu != nil {
 				liX2Encoded.Add(1)
-				// PDU is ready for delivery
-				// Note: Actual delivery requires delivery client with MDF connection
-				// For now, log the encoded PDU details for monitoring
-				logger.Debug("X2 IRI encoded",
-					"xid", task.XID,
-					"correlation_id", pdu.Header.CorrelationID,
-					"attributes", len(pdu.Attributes),
-					"destinations", len(task.DestinationIDs),
-				)
+				// Add NFID (processor/NE ID) and IPID (hunter/capture point)
+				attrBuilder := x2x3.NewAttributeBuilder()
+				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
+				if pkt.NodeID != "" {
+					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
+				}
+				data, err := pdu.MarshalBinary()
+				if err != nil {
+					logger.Warn("X2 PDU marshal error", "xid", task.XID, "error", err)
+				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
+					if err := liDeliveryClient.SendX2(task.XID, task.DestinationIDs, data); err != nil {
+						logger.Debug("X2 delivery queued failed", "xid", task.XID, "error", err)
+					} else {
+						logger.Debug("X2 IRI delivered",
+							"xid", task.XID,
+							"correlation_id", pdu.Header.CorrelationID,
+							"size", len(data),
+							"destinations", len(task.DestinationIDs),
+						)
+					}
+				} else {
+					logger.Debug("X2 IRI encoded (no delivery client or destinations)",
+						"xid", task.XID,
+						"correlation_id", pdu.Header.CorrelationID,
+						"attributes", len(pdu.Attributes),
+					)
+				}
 			} else {
-				// nil PDU means packet doesn't require IRI (e.g., 1xx response)
 				liX2Skipped.Add(1)
 			}
 		}
 
-		// Encode and log X3 (CC - content) for RTP packets
+		// Encode and deliver X3 (CC - content) for RTP packets
 		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.IsRTP {
 			pdu, err := liX3Encoder.EncodeCC(pkt, task.XID)
 			if err != nil {
@@ -191,15 +240,48 @@ func (p *Processor) initLIManager() {
 				)
 			} else if pdu != nil {
 				liX3Encoded.Add(1)
-				// PDU is ready for delivery
-				// Note: Actual delivery requires delivery client with MDF connection
-				// For now, log the encoded PDU details for monitoring
-				logger.Debug("X3 CC encoded",
-					"xid", task.XID,
-					"correlation_id", pdu.Header.CorrelationID,
-					"payload_size", len(pdu.Payload),
-					"destinations", len(task.DestinationIDs),
-				)
+				// Add NFID (processor/NE ID) and IPID (hunter/capture point)
+				attrBuilder := x2x3.NewAttributeBuilder()
+				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
+				if pkt.NodeID != "" {
+					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
+				}
+				data, err := pdu.MarshalBinary()
+				if err != nil {
+					logger.Warn("X3 PDU marshal error", "xid", task.XID, "error", err)
+				} else if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
+					// Route through reorder buffer per destination
+					ssrc := pkt.VoIPData.SSRC
+					rtpSeq := pkt.VoIPData.SequenceNum
+					for _, destID := range task.DestinationIDs {
+						did := destID // capture for closure
+						bufKey := fmt.Sprintf("%s-%s", task.XID, did)
+						buf, _ := liReorderBuffers.LoadOrStore(bufKey, delivery.NewReorderBuffer(
+							func(orderedPDU []byte) {
+								dids := []uuid.UUID{did}
+								if sendErr := liDeliveryClient.SendX3(task.XID, dids, orderedPDU); sendErr != nil {
+									logger.Debug("X3 delivery failed", "xid", task.XID, "error", sendErr)
+								}
+							},
+							60*time.Millisecond,
+						))
+						buf.(*delivery.ReorderBuffer).DeliverX3(ssrc, rtpSeq, data)
+					}
+					logger.Debug("X3 CC delivered via reorder buffer",
+						"xid", task.XID,
+						"correlation_id", pdu.Header.CorrelationID,
+						"ssrc", pkt.VoIPData.SSRC,
+						"rtp_seq", pkt.VoIPData.SequenceNum,
+						"size", len(data),
+						"destinations", len(task.DestinationIDs),
+					)
+				} else {
+					logger.Debug("X3 CC encoded (no delivery client or destinations)",
+						"xid", task.XID,
+						"correlation_id", pdu.Header.CorrelationID,
+						"payload_size", len(pdu.Payload),
+					)
+				}
 			} else {
 				liX3Skipped.Add(1)
 			}
@@ -209,25 +291,119 @@ func (p *Processor) initLIManager() {
 	logger.Info("LI Manager initialized",
 		"x1_listen", p.config.LIX1ListenAddr,
 		"admf_endpoint", p.config.LIADMFEndpoint,
+		"delivery_enabled", liDeliveryClient != nil,
 	)
 }
 
-// startLIManager starts the LI Manager.
+// startLIManager starts the LI Manager and delivery client.
 // Called during processor startup.
 func (p *Processor) startLIManager() error {
 	if p.liManager == nil {
 		return nil
 	}
-	return p.liManager.Start()
+
+	// Start delivery infrastructure
+	if liDeliveryMgr != nil {
+		liDeliveryMgr.Start()
+	}
+	if liDeliveryClient != nil {
+		liDeliveryClient.Start()
+	}
+
+	// Register destination callback to bridge new destinations to delivery manager
+	if liDeliveryMgr != nil {
+		p.liManager.SetDestinationCreatedCallback(func(dest *li.Destination) {
+			if err := liDeliveryMgr.AddDestination(dest); err != nil {
+				logger.Warn("Failed to add delivery destination",
+					"did", dest.DID,
+					"address", dest.Address,
+					"port", dest.Port,
+					"error", err,
+				)
+			} else {
+				logger.Info("Delivery destination added",
+					"did", dest.DID,
+					"address", dest.Address,
+					"port", dest.Port,
+				)
+			}
+		})
+	}
+
+	// Start periodic cleanup of idle reorder buffers (no packets for 60s)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-p.ctx.Done():
+				return
+			case <-ticker.C:
+				liReorderBuffers.Range(func(key, value any) bool {
+					buf := value.(*delivery.ReorderBuffer)
+					lastUsed := buf.LastUsed()
+					if lastUsed.IsZero() || time.Since(lastUsed) > 60*time.Second {
+						buf.Stop()
+						liReorderBuffers.Delete(key)
+						logger.Debug("Cleaned up idle reorder buffer", "key", key)
+						return true
+					}
+					// Buffer still active overall, but prune per-SSRC streams whose
+					// calls have ended. Without this the streams map grows by ~2
+					// entries per completed call for the lifetime of the XID.
+					if buf.CleanupIdleStreams(60 * time.Second) {
+						buf.Stop()
+						liReorderBuffers.Delete(key)
+					}
+					return true
+				})
+			}
+		}
+	}()
+
+	// Start the LI Manager (syncs tasks/destinations from ADMF)
+	if err := p.liManager.Start(); err != nil {
+		return err
+	}
+
+	// Bridge existing destinations from LI Manager registry to delivery manager
+	if liDeliveryMgr != nil {
+		dests := p.liManager.ListDestinations()
+		for _, dest := range dests {
+			if err := liDeliveryMgr.AddDestination(dest); err != nil {
+				logger.Warn("Failed to add delivery destination",
+					"did", dest.DID,
+					"address", dest.Address,
+					"port", dest.Port,
+					"error", err,
+				)
+			} else {
+				logger.Info("Delivery destination added",
+					"did", dest.DID,
+					"address", dest.Address,
+					"port", dest.Port,
+				)
+			}
+		}
+	}
+
+	return nil
 }
 
-// stopLIManager stops the LI Manager.
+// stopLIManager stops the LI Manager and delivery client.
 // Called during processor shutdown.
 func (p *Processor) stopLIManager() {
 	if p.liManager == nil {
 		return
 	}
 	p.liManager.Stop()
+
+	if liDeliveryClient != nil {
+		liDeliveryClient.Stop()
+	}
+	if liDeliveryMgr != nil {
+		liDeliveryMgr.Stop()
+	}
 }
 
 // processLIPacket processes a packet through the LI system.

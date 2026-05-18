@@ -114,6 +114,10 @@ type Manager struct {
 	// This allows the processor to handle X2/X3 delivery.
 	onPacketMatch PacketProcessor
 
+	// onDestinationCreated is called when a new destination is created via X1.
+	// This allows the processor to bridge destinations to the delivery manager.
+	onDestinationCreated func(dest *Destination)
+
 	// stats tracks LI processing statistics.
 	stats ManagerStats
 
@@ -554,6 +558,13 @@ func (m *Manager) SetPacketProcessor(processor PacketProcessor) {
 	m.onPacketMatch = processor
 }
 
+// SetDestinationCreatedCallback sets a callback invoked when destinations are created via X1.
+func (m *Manager) SetDestinationCreatedCallback(cb func(dest *Destination)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onDestinationCreated = cb
+}
+
 // ProcessPacket processes a packet that has already been matched by the
 // filter infrastructure.
 //
@@ -715,6 +726,17 @@ func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
 	return m.registry.ModifyDestination(did, dest)
 }
 
+// ListDestinations returns all registered destinations.
+func (m *Manager) ListDestinations() []*Destination {
+	m.registry.mu.RLock()
+	defer m.registry.mu.RUnlock()
+	dests := make([]*Destination, 0, len(m.registry.destinations))
+	for _, d := range m.registry.destinations {
+		dests = append(dests, d)
+	}
+	return dests
+}
+
 // managerDestinationAdapter adapts the Manager to the x1.DestinationManager interface.
 type managerDestinationAdapter struct {
 	m *Manager
@@ -762,8 +784,18 @@ func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
 		if errors.Is(err, ErrDestinationAlreadyExists) {
 			return x1.ErrDestinationAlreadyExists
 		}
+		return err
 	}
-	return err
+
+	// Notify delivery manager about new destination
+	m.mu.RLock()
+	cb := m.onDestinationCreated
+	m.mu.RUnlock()
+	if cb != nil {
+		cb(liDest)
+	}
+
+	return nil
 }
 
 // GetDestinationX1 retrieves a destination for X1 response.

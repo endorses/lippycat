@@ -196,8 +196,14 @@ func (s *bufferedSIPStream) processLoop() {
 			"processed_messages", atomic.LoadInt64(&s.processedMsgs))
 	}()
 
-	// Create a pipe to convert channel data to io.Reader
+	// Create a pipe to convert channel data to io.Reader.
+	// Close pipeReader when processLoop returns so any writer goroutine
+	// blocked mid-Write (e.g. because the reader exited on a parse error,
+	// timeout, or EOF) unblocks with io.ErrClosedPipe and can exit cleanly.
+	// Without this the writer pins its data slice (and the gopacket.Packet
+	// it references) for the lifetime of the process.
 	pipeReader, pipeWriter := io.Pipe()
+	defer pipeReader.Close()
 
 	// Determine if state-based timeouts are enabled
 	stateTimeoutsEnabled := s.factory != nil && s.factory.config != nil && s.factory.config.EnableStateTCPTimeouts
@@ -282,7 +288,9 @@ func (s *bufferedSIPStream) processLoop() {
 					return
 				}
 			} else {
-				// Original behavior when state-based timeouts are disabled
+				// Non-state-based path: use configured idle timeout
+				// (getTimeoutForState falls back to TCPSIPIdleTimeout / defaultReadTimeout
+				// when EnableStateTCPTimeouts is false).
 				select {
 				case <-s.ctx.Done():
 					return
@@ -291,6 +299,14 @@ func (s *bufferedSIPStream) processLoop() {
 						return // Channel closed
 					}
 					gotData = true
+					// Reset idle timer on data activity
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(s.getTimeoutForState(currentState))
 					if _, err := pipeWriter.Write(data); err != nil {
 						return
 					}
@@ -301,9 +317,16 @@ func (s *bufferedSIPStream) processLoop() {
 						pipeWriter.CloseWithError(errReadTimeout)
 						return
 					}
-					// After initial data, disable timer (original behavior)
-					// Reset to a very long timeout (effectively disabled)
-					timer.Reset(24 * time.Hour)
+					// Idle past TCPSIPIdleTimeout. If the call is still active,
+					// extend; otherwise close so the goroutines don't leak when
+					// gopacket never observes a FIN/RST.
+					if s.isAssociatedCallActive() {
+						timer.Reset(s.getTimeoutForState(currentState))
+						continue
+					}
+					logger.Debug("Read timeout (idle), closing stream")
+					pipeWriter.CloseWithError(errReadTimeout)
+					return
 				}
 			}
 		}
@@ -316,6 +339,13 @@ func (s *bufferedSIPStream) processLoop() {
 // processSIPFromReader reads SIP messages from an io.Reader and processes them.
 func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	bufReader := bufio.NewReader(reader)
+
+	// Release any per-flow buffered packets on exit. If a SIP message matched
+	// and drained the buffer, the map entry was already removed and this is a
+	// no-op; if the stream ended without a successful match (errNotSIP,
+	// errReadTimeout, ctx cancellation, EOF), this releases the packets
+	// immediately instead of waiting for TCPBufferMaxAge.
+	defer discardTCPBufferedPackets(s.netFlow)
 
 	for {
 		select {

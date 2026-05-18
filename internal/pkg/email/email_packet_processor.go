@@ -146,7 +146,7 @@ func (p *EmailPacketProcessor) cleanupRoutine() {
 			CleanupOldEmailBuffers(60 * time.Second)
 
 			// Flush old assembler connections
-			flushed, _ := p.assembler.FlushOlderThan(time.Now().Add(-60 * time.Second))
+			flushed, _ := capture.SafeFlushOlderThan(p.assembler, time.Now().Add(-60*time.Second))
 			if flushed > 0 {
 				logger.Debug("Flushed old email TCP streams", "count", flushed)
 			}

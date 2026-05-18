@@ -235,7 +235,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 		logger.Debug("Flushing and closing TCP assembler streams")
 		// Use FlushOlderThan with time.Now() to close ALL streams regardless of age
 		// This signals EOF to all stream readers so they stop blocking and process their buffers
-		flushed, closed := assembler.FlushOlderThan(time.Now())
+		flushed, closed := capture.SafeFlushOlderThan(assembler, time.Now())
 		logger.Debug("TCP streams flushed", "flushed", flushed, "closed", closed)
 
 		// Give stream goroutines time to process and finish

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
@@ -307,7 +308,7 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 	// Flush all remaining TCP streams on shutdown
 	logger.Debug("Flushing TCP assembler streams on shutdown")
-	flushed, closed := assembler.FlushOlderThan(time.Now())
+	flushed, closed := capture.SafeFlushOlderThan(assembler, time.Now())
 	logger.Debug("TCP streams flushed on shutdown", "flushed", flushed, "closed", closed)
 
 	return nil
@@ -328,7 +329,7 @@ func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) 
 		case <-ticker.C:
 			// Flush streams that haven't received data in 2 minutes
 			cutoff := time.Now().Add(-2 * time.Minute)
-			flushed, closed := assembler.FlushOlderThan(cutoff)
+			flushed, closed := capture.SafeFlushOlderThan(assembler, cutoff)
 			if flushed > 0 || closed > 0 {
 				logger.Debug("Flushed old TCP streams",
 					"flushed", flushed,

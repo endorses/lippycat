@@ -23,7 +23,8 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 		srcIP = netLayer.NetworkFlow().Src().String()
 	}
 
-	// Try IP:PORT endpoints first (more specific), then fall back to port-only
+	// Try IP:PORT endpoints (precise matching only — no port-only fallback
+	// to avoid matching unrelated RTP streams that happen to use the same port)
 	var callID string
 	var exists bool
 
@@ -32,13 +33,6 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 	}
 	if !exists && srcIP != "" {
 		callID, exists = p.getCallIDForPort(srcIP + ":" + srcPort)
-	}
-	// Fall back to port-only lookups
-	if !exists {
-		callID, exists = p.getCallIDForPort(dstPort)
-	}
-	if !exists {
-		callID, exists = p.getCallIDForPort(srcPort)
 	}
 
 	if !exists {

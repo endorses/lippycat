@@ -555,6 +555,11 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	// A per-interface defragmenter would never reassemble such packets.
 	sharedDefragmenter := NewIPv4Defragmenter()
 
+	// Shared IPv6 defragmenter — same rationale. gopacket has no built-in
+	// IPv6 reassembly, so without this a fragmented IPv6 SIP INVITE is
+	// dropped (transport header stranded behind the Fragment ext header).
+	sharedV6Defragmenter := NewIPv6Defragmenter()
+
 	// Start a single cleanup goroutine for stale fragments (shared across all interfaces)
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -567,6 +572,9 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 				discarded := sharedDefragmenter.DiscardOlderThan(time.Now().Add(-30 * time.Second))
 				if discarded > 0 {
 					logger.Debug("Discarded stale IP fragments", "count", discarded)
+				}
+				if v6discarded := sharedV6Defragmenter.DiscardOlderThan(time.Now().Add(-30 * time.Second)); v6discarded > 0 {
+					logger.Debug("Discarded stale IPv6 fragments", "count", v6discarded)
 				}
 				// Sweep TTL caches to prevent unbounded growth
 				if swept := espNullSPICache.Sweep(); swept > 0 {
@@ -613,7 +621,7 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 				handle.Close() // This will cause packetSource.Packets() channel to close
 			}()
 
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter)
 		}(iface)
 	}
 
@@ -702,7 +710,7 @@ func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filte
 	}
 }
 
-func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter) {
+func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, defragmenter *IPv4Defragmenter, v6defragmenter *IPv6Defragmenter) {
 	logger.Debug("captureFromInterface starting", "interface", iface.Name())
 	defer logger.Debug("captureFromInterface exiting", "interface", iface.Name())
 
@@ -842,6 +850,44 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 
 					// Rebuild packet from reassembled IP layer
 					packet = rebuildReassembledPacket(packet, reassembledIP, handle.LinkType())
+				}
+			}
+
+			// Handle plain IPv6 fragmentation. gopacket has no IPv6 defragmenter,
+			// so a fragmented IPv6 datagram (e.g. a large SIP INVITE on an
+			// IMS/VXLAN tunnel) arrives with its transport header stranded behind
+			// the Fragment extension header and would otherwise be dropped.
+			// ESP-encapsulated IPv6 fragments are left to decapsulateIPv6FragmentESP
+			// below; only non-ESP fragments are reassembled here.
+			if fragLayer := packet.Layer(layers.LayerTypeIPv6Fragment); fragLayer != nil {
+				if frag, ok := fragLayer.(*layers.IPv6Fragment); ok && frag.NextHeader != layers.IPProtocolESP {
+					if ip6Layer := packet.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
+						ip6 := ip6Layer.(*layers.IPv6)
+						fragmentsReceived.Add(1)
+
+						reassembledIP6, err := v6defragmenter.DefragIPv6(ip6, frag)
+						if err != nil {
+							logger.Debug("IPv6 defragmentation error",
+								"error", err,
+								"src", ip6.SrcIP,
+								"dst", ip6.DstIP,
+								"id", frag.Identification)
+							continue // Skip this fragment
+						}
+						if reassembledIP6 == nil {
+							// Still waiting for more fragments - don't forward yet
+							continue
+						}
+
+						// Successfully reassembled - rebuild the packet
+						packetsReassembled.Add(1)
+						logger.Debug("IPv6 packet reassembled",
+							"src", reassembledIP6.SrcIP,
+							"dst", reassembledIP6.DstIP,
+							"payload_len", len(reassembledIP6.Payload))
+
+						packet = rebuildReassembledIPv6Packet(packet, reassembledIP6, handle.LinkType())
+					}
 				}
 			}
 

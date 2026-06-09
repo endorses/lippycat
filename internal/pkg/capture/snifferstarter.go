@@ -275,6 +275,10 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 	// packet may arrive on different interfaces (e.g., due to port mirror splits).
 	sharedDefragmenter := NewIPv4Defragmenter()
 
+	// Shared IPv6 defragmenter — gopacket has no built-in IPv6 reassembly,
+	// so without this a fragmented IPv6 SIP INVITE is dropped.
+	sharedV6Defragmenter := NewIPv6Defragmenter()
+
 	// Track if any capture succeeded (for error handling)
 	var captureSuccessCount atomic.Int32
 
@@ -300,7 +304,7 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 			// Mark that at least one capture succeeded
 			captureSuccessCount.Add(1)
 
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter)
+			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter)
 		}(iface)
 	}
 

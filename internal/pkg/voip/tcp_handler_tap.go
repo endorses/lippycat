@@ -84,6 +84,7 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 			FromUri:           extractFullSIPURI(headers["from"]),
 			ToUri:             extractFullSIPURI(headers["to"]),
 			Method:            method,
+			CseqMethod:        extractCSeqMethod(headers["cseq"]),
 			ResponseCode:      extractSipResponseCode(sipMessage),
 			PAssertedIdentity: headers["p-asserted-identity"],
 		},

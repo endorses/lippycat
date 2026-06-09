@@ -64,6 +64,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 				ToTag:             extractTagFromHeader(headers["to"]),
 				PAssertedIdentity: headers["p-asserted-identity"],
 				Method:            method,
+				CSeqMethod:        extractCSeqMethod(headers["cseq"]),
 				ResponseCode:      extractSipResponseCode(sipMessage),
 				SDPBody:           body,
 			}
@@ -81,6 +82,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 					FromUri:           extractFullSIPURI(headers["from"]),
 					ToUri:             extractFullSIPURI(headers["to"]),
 					Method:            metadata.Method,
+					CseqMethod:        metadata.CSeqMethod,
 					ResponseCode:      metadata.ResponseCode,
 					PAssertedIdentity: metadata.PAssertedIdentity,
 				},
@@ -127,6 +129,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 		ToTag:             extractTagFromHeader(headers["to"]),
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            method,
+		CSeqMethod:        extractCSeqMethod(headers["cseq"]),
 		ResponseCode:      extractSipResponseCode(sipMessage),
 		SDPBody:           body,
 	}
@@ -151,6 +154,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 			FromUri:           extractFullSIPURI(headers["from"]),
 			ToUri:             extractFullSIPURI(headers["to"]),
 			Method:            metadata.Method,
+			CseqMethod:        metadata.CSeqMethod,
 			ResponseCode:      metadata.ResponseCode,
 			PAssertedIdentity: metadata.PAssertedIdentity,
 		},

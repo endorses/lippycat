@@ -464,8 +464,15 @@ type SIPMetadata struct {
 	AccessNetworkInfo *AccessNetworkInfo `protobuf:"bytes,11,opt,name=access_network_info,json=accessNetworkInfo,proto3" json:"access_network_info,omitempty"`
 	// 3GPP IMS P-Visited-Network-ID header
 	VisitedNetworkId string `protobuf:"bytes,12,opt,name=visited_network_id,json=visitedNetworkId,proto3" json:"visited_network_id,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// CSeq header method token (e.g. "INVITE" from "CSeq: 1 INVITE").
+	// Carries the originating transaction method, which is the only way to
+	// recover the method of a SIP response (the response status line has
+	// none of its own). Used to classify a call whose first observed
+	// message is a response — capture started mid-call, or packets
+	// reordered. Empty on hunters that predate this field.
+	CseqMethod    string `protobuf:"bytes,13,opt,name=cseq_method,json=cseqMethod,proto3" json:"cseq_method,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SIPMetadata) Reset() {
@@ -578,6 +585,13 @@ func (x *SIPMetadata) GetAccessNetworkInfo() *AccessNetworkInfo {
 func (x *SIPMetadata) GetVisitedNetworkId() string {
 	if x != nil {
 		return x.VisitedNetworkId
+	}
+	return ""
+}
+
+func (x *SIPMetadata) GetCseqMethod() string {
+	if x != nil {
+		return x.CseqMethod
 	}
 	return ""
 }
@@ -1794,7 +1808,7 @@ const file_data_proto_rawDesc = "" +
 	"\x03dns\x18\f \x01(\v2\x1a.lippycat.data.DNSMetadataR\x03dns\x1a:\n" +
 	"\fDetailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xad\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xce\x03\n" +
 	"\vSIPMetadata\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x17\n" +
 	"\acall_id\x18\x02 \x01(\tR\x06callId\x12\x1b\n" +
@@ -1808,7 +1822,9 @@ const file_data_proto_rawDesc = "" +
 	"\x06to_uri\x18\n" +
 	" \x01(\tR\x05toUri\x12P\n" +
 	"\x13access_network_info\x18\v \x01(\v2 .lippycat.data.AccessNetworkInfoR\x11accessNetworkInfo\x12,\n" +
-	"\x12visited_network_id\x18\f \x01(\tR\x10visitedNetworkId\"\x8f\x02\n" +
+	"\x12visited_network_id\x18\f \x01(\tR\x10visitedNetworkId\x12\x1f\n" +
+	"\vcseq_method\x18\r \x01(\tR\n" +
+	"cseqMethod\"\x8f\x02\n" +
 	"\x11AccessNetworkInfo\x12\x1f\n" +
 	"\vaccess_type\x18\x01 \x01(\tR\n" +
 	"accessType\x12\x14\n" +

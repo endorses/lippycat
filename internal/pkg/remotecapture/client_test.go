@@ -1251,6 +1251,7 @@ func TestDeriveSIPState_StateTransitions(t *testing.T) {
 		name          string
 		initialState  string
 		method        string
+		cseqMethod    string
 		responseCode  uint32
 		expectedState string
 	}{
@@ -1313,7 +1314,7 @@ func TestDeriveSIPState_StateTransitions(t *testing.T) {
 			}
 
 			timestamp := time.Now()
-			deriveSIPState(call, tt.method, tt.responseCode, timestamp)
+			deriveSIPState(call, tt.method, tt.cseqMethod, tt.responseCode, timestamp)
 
 			assert.Equal(t, tt.expectedState, call.State)
 		})

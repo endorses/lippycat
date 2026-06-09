@@ -207,6 +207,7 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 		sipMeta := &data.SIPMetadata{
 			CallId:       voip.CallID,
 			Method:       voip.Method,
+			CseqMethod:   voip.CSeqMethod,
 			ResponseCode: responseCode,
 			FromUser:     voip.From,
 			ToUser:       voip.To,
@@ -269,6 +270,35 @@ func (ca *CallAggregator) ProcessPacketDisplay(pkt *types.PacketDisplay, nodeID 
 	}
 }
 
+// isDialogMethod reports whether a SIP request method, observed on its
+// own, implies an INVITE dialog — and therefore may create a call even
+// when the originating INVITE was missed or arrived out of order. The
+// dialog-continuation methods (ACK/BYE/CANCEL/INFO/PRACK/UPDATE/REFER)
+// only ever occur inside an established INVITE dialog, so seeing one is
+// proof a dialog exists. REGISTER/OPTIONS/SUBSCRIBE/NOTIFY/PUBLISH are
+// deliberately excluded so they never spawn call entries.
+func isDialogMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "INVITE", "ACK", "BYE", "CANCEL", "INFO", "PRACK", "UPDATE", "REFER":
+		return true
+	default:
+		return false
+	}
+}
+
+// effectiveSIPMethod returns the method a SIP message should be classified
+// by. SIP responses carry no method on their status line, so fall back to
+// the CSeq method token — a "180 Ringing" with "CSeq: 1 INVITE" is an
+// INVITE-transaction message. Returns "" for a response whose CSeq method
+// is absent (older hunters that predate CSeq propagation), which callers
+// treat as "not a dialog method".
+func effectiveSIPMethod(sip *data.SIPMetadata) string {
+	if sip.Method != "" && sip.Method != "RESPONSE" {
+		return sip.Method
+	}
+	return sip.CseqMethod
+}
+
 func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID string, timestamp time.Time) {
 	sip := packet.Metadata.Sip
 	if sip.CallId == "" {
@@ -280,11 +310,17 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 
 	call, exists := ca.calls[sip.CallId]
 	if !exists {
-		// Only create new calls for INVITE requests
-		// Other methods (OPTIONS, REGISTER, SUBSCRIBE, BYE, ACK, etc.) don't create calls
-		// Responses also don't create calls - they can only update existing calls
-		// (If we miss the INVITE, we'll create the call from RTP when SDP is parsed)
-		if sip.Method != "INVITE" {
+		// A call is created from any message that belongs to an INVITE
+		// dialog: the INVITE itself, or — when the INVITE was missed or
+		// arrived out of order (capture started mid-call, or packets
+		// reordered across hunters) — any dialog-continuation request
+		// (ACK/BYE/CANCEL/INFO/PRACK/UPDATE/REFER) or a response whose
+		// CSeq names a dialog method.
+		//
+		// Non-dialog traffic (REGISTER/OPTIONS/SUBSCRIBE/NOTIFY/PUBLISH)
+		// never creates a call. If every SIP message is missed, the call
+		// is still created from RTP once SDP is parsed.
+		if !isDialogMethod(effectiveSIPMethod(sip)) {
 			return
 		}
 
@@ -405,11 +441,19 @@ func (ca *CallAggregator) processSIPPacket(packet *data.CapturedPacket, hunterID
 
 	// Update state based on SIP method
 	call.SIPMethod = sip.Method
-	ca.updateCallState(call, sip.Method, sip.ResponseCode, timestamp)
+	ca.updateCallState(call, sip.Method, sip.CseqMethod, sip.ResponseCode, timestamp)
 	call.PacketCount++
 }
 
-func (ca *CallAggregator) updateCallState(call *AggregatedCall, method string, responseCode uint32, timestamp time.Time) {
+// updateCallState advances a call's state from one SIP message. method is
+// the request method (empty/"RESPONSE" for responses); cseqMethod is the
+// CSeq method token, which scopes response handling to the right
+// transaction and is empty for older hunters that don't propagate it.
+//
+// NEW is accepted as a starting state throughout, so a call first observed
+// mid-dialog — capture started after the INVITE, or packets reordered —
+// still lands in a sensible state instead of being stuck in NEW.
+func (ca *CallAggregator) updateCallState(call *AggregatedCall, method, cseqMethod string, responseCode uint32, timestamp time.Time) {
 	oldState := call.State
 
 	switch method {
@@ -418,7 +462,18 @@ func (ca *CallAggregator) updateCallState(call *AggregatedCall, method string, r
 			call.State = CallStateTrying
 		}
 	case "ACK":
-		if call.State == CallStateTrying || call.State == CallStateRinging || call.State == CallStateProgress {
+		// ACK confirms a 2xx — the call is up. Accept it from the early
+		// dialog states, and from NEW: a call first observed via its ACK
+		// (the INVITE was missed or arrived out of order) is established.
+		switch call.State {
+		case CallStateNew, CallStateTrying, CallStateRinging, CallStateProgress:
+			call.State = CallStateActive
+		}
+	case "INFO", "PRACK", "UPDATE", "REFER":
+		// Mid-dialog requests only occur inside an established INVITE
+		// dialog. Seeing one as a call's first packet means the call is
+		// already up — pull a freshly-created call out of NEW.
+		if call.State == CallStateNew {
 			call.State = CallStateActive
 		}
 	case "BYE":
@@ -449,20 +504,41 @@ func (ca *CallAggregator) updateCallState(call *AggregatedCall, method string, r
 	// Handle provisional responses (1xx)
 	if responseCode == 180 {
 		// 180 Ringing - phone is actually ringing
-		if call.State == CallStateTrying {
+		switch call.State {
+		case CallStateNew, CallStateTrying:
 			call.State = CallStateRinging
 		}
 	} else if responseCode == 183 {
 		// 183 Session Progress - early media established
-		if call.State == CallStateTrying || call.State == CallStateRinging {
+		switch call.State {
+		case CallStateNew, CallStateTrying, CallStateRinging:
 			call.State = CallStateProgress
 		}
 	}
 
-	// Handle success responses (2xx)
+	// Handle success responses (2xx). The CSeq method scopes the
+	// transition: a 2xx for a BYE ends the call, a 2xx for an INVITE
+	// answers it. An empty cseqMethod (older hunters) keeps the historical
+	// INVITE-style behavior.
 	if responseCode >= 200 && responseCode < 300 {
-		if call.State == CallStateTrying || call.State == CallStateRinging || call.State == CallStateProgress {
-			call.State = CallStateActive
+		switch cseqMethod {
+		case "BYE":
+			// 2xx confirming a BYE. Leave a call already in ENDING alone so
+			// its timewait runs for trailing RTP; for a call first seen
+			// here (NEW) enter ENDING so trailing RTP is still captured.
+			if call.State == CallStateNew {
+				call.State = CallStateEnding
+				call.TimewaitStart = timestamp
+				call.EndTime = timestamp
+			}
+		case "CANCEL":
+			// 2xx for a CANCEL — the 487 finalizes the call; leave state.
+		default:
+			// INVITE (or unknown / older hunter) — the call was answered.
+			switch call.State {
+			case CallStateNew, CallStateTrying, CallStateRinging, CallStateProgress:
+				call.State = CallStateActive
+			}
 		}
 	} else if responseCode == 486 {
 		// 486 Busy Here - callee is busy

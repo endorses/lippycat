@@ -152,6 +152,14 @@ message SIPMetadata {
 
     // 3GPP IMS P-Visited-Network-ID header
     string visited_network_id = 12;
+
+    // CSeq header method token (e.g. "INVITE" from "CSeq: 1 INVITE").
+    // Carries the originating transaction method, which is the only way to
+    // recover the method of a SIP response (the response status line has
+    // none of its own). Used to classify a call whose first observed
+    // message is a response — capture started mid-call, or packets
+    // reordered. Empty on hunters that predate this field.
+    string cseq_method = 13;
 }
 
 // AccessNetworkInfo contains parsed P-Access-Network-Info header data (3GPP TS 24.229).

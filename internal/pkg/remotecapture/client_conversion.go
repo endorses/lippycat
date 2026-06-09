@@ -132,6 +132,7 @@ func (c *Client) convertToPacketDisplay(pkt *data.CapturedPacket, hunterID strin
 		if pkt.Metadata.Sip != nil {
 			voipData.CallID = pkt.Metadata.Sip.CallId
 			voipData.Method = pkt.Metadata.Sip.Method
+			voipData.CSeqMethod = pkt.Metadata.Sip.CseqMethod
 			voipData.Status = int(pkt.Metadata.Sip.ResponseCode)
 			voipData.From = pkt.Metadata.Sip.FromUser
 			voipData.To = pkt.Metadata.Sip.ToUser
@@ -374,12 +375,15 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
 	// Update state based on SIP method and response code
 	call.PacketCount++
 	timestamp := time.Unix(0, pkt.TimestampNs)
-	deriveSIPState(call, sip.Method, sip.ResponseCode, timestamp)
+	deriveSIPState(call, sip.Method, sip.CseqMethod, sip.ResponseCode, timestamp)
 }
 
-// deriveSIPState updates call state based on SIP message
-// This mirrors the logic in voip.CallAggregator.updateCallState
-func deriveSIPState(call *types.CallInfo, method string, responseCode uint32, timestamp time.Time) {
+// deriveSIPState updates call state based on SIP message.
+// This mirrors the logic in voip.CallAggregator.updateCallState — keep the
+// two in sync. cseqMethod is the CSeq method token, used to recover a
+// response's transaction method; NEW is accepted as a starting state so a
+// call first observed mid-dialog still advances out of NEW.
+func deriveSIPState(call *types.CallInfo, method, cseqMethod string, responseCode uint32, timestamp time.Time) {
 	// Don't transition from terminal states
 	switch call.State {
 	case "ENDED", "FAILED", "CANCELLED", "BUSY":
@@ -392,7 +396,15 @@ func deriveSIPState(call *types.CallInfo, method string, responseCode uint32, ti
 			call.State = "TRYING"
 		}
 	case "ACK":
-		if call.State == "TRYING" || call.State == "RINGING" || call.State == "PROGRESS" {
+		// ACK confirms a 2xx — the call is up. Accept it from NEW too: a
+		// call first observed via its ACK (INVITE missed or reordered).
+		switch call.State {
+		case "NEW", "TRYING", "RINGING", "PROGRESS":
+			call.State = "ACTIVE"
+		}
+	case "INFO", "PRACK", "UPDATE", "REFER":
+		// Mid-dialog requests only occur inside an established dialog.
+		if call.State == "NEW" {
 			call.State = "ACTIVE"
 		}
 	case "BYE":
@@ -409,19 +421,34 @@ func deriveSIPState(call *types.CallInfo, method string, responseCode uint32, ti
 
 	// Handle provisional responses (1xx)
 	if responseCode == 180 {
-		if call.State == "TRYING" {
+		switch call.State {
+		case "NEW", "TRYING":
 			call.State = "RINGING"
 		}
 	} else if responseCode == 183 {
-		if call.State == "TRYING" || call.State == "RINGING" {
+		switch call.State {
+		case "NEW", "TRYING", "RINGING":
 			call.State = "PROGRESS"
 		}
 	}
 
-	// Handle success responses (2xx)
+	// Handle success responses (2xx), scoped by the CSeq method.
 	if responseCode >= 200 && responseCode < 300 {
-		if call.State == "TRYING" || call.State == "RINGING" || call.State == "PROGRESS" {
-			call.State = "ACTIVE"
+		switch cseqMethod {
+		case "BYE":
+			// 2xx confirming a BYE — the dialog is torn down.
+			call.State = "ENDED"
+			if call.EndTime.IsZero() {
+				call.EndTime = timestamp
+			}
+		case "CANCEL":
+			// 2xx for a CANCEL — the 487 finalizes the call; leave state.
+		default:
+			// INVITE (or unknown / older hunter) — the call was answered.
+			switch call.State {
+			case "NEW", "TRYING", "RINGING", "PROGRESS":
+				call.State = "ACTIVE"
+			}
 		}
 	} else if responseCode == 486 {
 		// 486 Busy Here

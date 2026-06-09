@@ -215,6 +215,21 @@ func detectSipMethod(line string) string {
 	return SIPMethodMatchSIMD(lineBytes)
 }
 
+// extractCSeqMethod returns the method token from a CSeq header value.
+// SIP CSeq is "<sequence-number> <method>" (RFC 3261 §8.1.1.5), e.g.
+// "1 INVITE" -> "INVITE". Returns "" when the value is empty or malformed.
+// The method lets a SIP response — whose status line carries no method of
+// its own — still be attributed to its originating transaction, so a call
+// first observed via a response (capture started mid-call, or packets
+// reordered) can still be classified.
+func extractCSeqMethod(cseq string) string {
+	fields := strings.Fields(cseq)
+	if len(fields) < 2 {
+		return ""
+	}
+	return strings.ToUpper(fields[1])
+}
+
 // extractSipResponseCode extracts the response code from a SIP response message.
 // Returns 0 if this is not a response or if the response code cannot be parsed.
 // Example: "SIP/2.0 200 OK" returns 200

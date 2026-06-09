@@ -10,14 +10,8 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-// ApplicationFilter provides application-layer packet filtering for hunter mode.
-// This interface is implemented by hunter.ApplicationFilter but defined here
-// to avoid import cycles (voip cannot import hunter).
-type ApplicationFilter interface {
-	// MatchPacket checks if a packet matches any filter.
-	// Returns true if no filters are configured (promiscuous mode) OR if a match is found.
-	MatchPacket(packet gopacket.Packet) bool
-}
+// ApplicationFilter is defined in application_filter.go (build tag
+// hunter||tap||all) so both the hunter and tap packet handlers can use it.
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
@@ -137,6 +131,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		ToTag:             extractTagFromHeader(headers["to"]),
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            detectSipMethod(string(payload)),
+		CSeqMethod:        extractCSeqMethod(headers["cseq"]),
 		ResponseCode:      extractSipResponseCode(payload),
 		SDPBody:           body,
 	}
@@ -160,6 +155,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 					FromUri:           extractFullSIPURI(metadata.From),
 					ToUri:             extractFullSIPURI(metadata.To),
 					Method:            metadata.Method,
+					CseqMethod:        metadata.CSeqMethod,
 					ResponseCode:      metadata.ResponseCode,
 					PAssertedIdentity: metadata.PAssertedIdentity,
 				},
@@ -327,6 +323,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 					FromUri:           extractFullSIPURI(metadata.From),
 					ToUri:             extractFullSIPURI(metadata.To),
 					Method:            metadata.Method,
+					CseqMethod:        metadata.CSeqMethod,
 					ResponseCode:      metadata.ResponseCode,
 					PAssertedIdentity: metadata.PAssertedIdentity,
 				},

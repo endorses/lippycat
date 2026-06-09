@@ -161,14 +161,15 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				} else if pkt.Metadata.Sip != nil {
 					// SIP signaling packet
 					display.VoIPData = &types.VoIPMetadata{
-						CallID:  pkt.Metadata.Sip.CallId,
-						Method:  pkt.Metadata.Sip.Method,
-						Status:  int(pkt.Metadata.Sip.ResponseCode),
-						From:    pkt.Metadata.Sip.FromUri,
-						To:      pkt.Metadata.Sip.ToUri,
-						FromTag: pkt.Metadata.Sip.FromTag,
-						ToTag:   pkt.Metadata.Sip.ToTag,
-						User:    pkt.Metadata.Sip.FromUser,
+						CallID:     pkt.Metadata.Sip.CallId,
+						Method:     pkt.Metadata.Sip.Method,
+						CSeqMethod: pkt.Metadata.Sip.CseqMethod,
+						Status:     int(pkt.Metadata.Sip.ResponseCode),
+						From:       pkt.Metadata.Sip.FromUri,
+						To:         pkt.Metadata.Sip.ToUri,
+						FromTag:    pkt.Metadata.Sip.FromTag,
+						ToTag:      pkt.Metadata.Sip.ToTag,
+						User:       pkt.Metadata.Sip.FromUser,
 					}
 					if pkt.Metadata.Sip.AccessNetworkInfo != nil {
 						display.VoIPData.AccessNetworkInfo = &types.AccessNetworkInfo{

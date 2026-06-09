@@ -1127,10 +1127,13 @@ func TestCallAggregator_LRUActiveCallSurvival(t *testing.T) {
 }
 
 func TestCallAggregator_NonCallMethodsIgnored(t *testing.T) {
-	// Verify that non-call SIP methods (OPTIONS, REGISTER, etc.) don't create call entries
+	// Verify that non-dialog SIP methods don't create call entries.
+	// Dialog-continuation methods (ACK/BYE/CANCEL/INFO/PRACK/UPDATE/REFER)
+	// are deliberately excluded here — they DO create calls so a leg
+	// captured mid-dialog still surfaces (see TestCallAggregator_MidCall*).
 	ca := NewCallAggregator()
 
-	nonCallMethods := []string{"OPTIONS", "REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH", "MESSAGE", "INFO", "PRACK", "UPDATE", "REFER"}
+	nonCallMethods := []string{"OPTIONS", "REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH", "MESSAGE"}
 
 	for _, method := range nonCallMethods {
 		packet := &data.CapturedPacket{
@@ -1185,7 +1188,11 @@ func TestCallAggregator_NonCallMethodsIgnored(t *testing.T) {
 }
 
 func TestCallAggregator_ResponseDoesNotCreateCall(t *testing.T) {
-	// Verify that responses alone don't create calls (only INVITE does)
+	// Verify that a response carrying no CSeq method (older hunters that
+	// predate CSeq propagation) does not create a call — the transaction
+	// method is unknown, so it can't be attributed to a dialog. A response
+	// WITH a dialog CSeq method does create one: see
+	// TestCallAggregator_ResponseFirstCreatesCallViaCSeq.
 	ca := NewCallAggregator()
 
 	// 180 Ringing response without prior INVITE should NOT create a call
@@ -1255,4 +1262,104 @@ func TestCallAggregator_ResponseDoesNotCreateCall(t *testing.T) {
 
 	call, _ = ca.GetCall("real-call")
 	assert.Equal(t, CallStateActive, call.State, "200 OK should update existing call to ACTIVE")
+}
+
+// sipPacket builds a CapturedPacket carrying only SIP metadata, for the
+// out-of-order / mid-call aggregator tests.
+func sipPacket(callID, method, cseqMethod string, responseCode uint32) *data.CapturedPacket {
+	return &data.CapturedPacket{
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       callID,
+				Method:       method,
+				CseqMethod:   cseqMethod,
+				ResponseCode: responseCode,
+				FromUser:     "alicent@example.com",
+				ToUser:       "robb@example.com",
+			},
+		},
+	}
+}
+
+// A call whose first observed packet is an ACK — capture started mid-call,
+// or the INVITE was reordered behind the ACK — must still be created and
+// land in ACTIVE rather than being dropped.
+func TestCallAggregator_MidCallFirstPacketACK(t *testing.T) {
+	ca := NewCallAggregator()
+	ca.ProcessPacket(sipPacket("midcall-ack", "ACK", "INVITE", 0), "hunter-1")
+
+	call, exists := ca.GetCall("midcall-ack")
+	require.True(t, exists, "ACK-first call should be created")
+	assert.Equal(t, CallStateActive, call.State, "ACK-first call should be ACTIVE")
+}
+
+// A call first observed via a BYE must be created and land in ENDING so
+// trailing RTP is still captured during the timewait window.
+func TestCallAggregator_MidCallFirstPacketBYE(t *testing.T) {
+	ca := NewCallAggregator()
+	ca.ProcessPacket(sipPacket("midcall-bye", "BYE", "BYE", 0), "hunter-1")
+
+	call, exists := ca.GetCall("midcall-bye")
+	require.True(t, exists, "BYE-first call should be created")
+	assert.Equal(t, CallStateEnding, call.State, "BYE-first call should be ENDING")
+}
+
+// A call first observed via a response (no method on the status line) is
+// created when its CSeq names a dialog method — a "180 Ringing" with
+// "CSeq: 1 INVITE" is an INVITE-transaction message.
+func TestCallAggregator_ResponseFirstCreatesCallViaCSeq(t *testing.T) {
+	ca := NewCallAggregator()
+	ca.ProcessPacket(sipPacket("resp-first", "RESPONSE", "INVITE", 180), "hunter-1")
+
+	call, exists := ca.GetCall("resp-first")
+	require.True(t, exists, "response-first call with CSeq INVITE should be created")
+	assert.Equal(t, CallStateRinging, call.State, "180 Ringing should land in RINGING")
+}
+
+// A response whose CSeq names a non-dialog transaction (REGISTER) must not
+// spawn a call entry — it is registration traffic, not a dialog.
+func TestCallAggregator_ResponseFirstNonDialogCSeqNoCreate(t *testing.T) {
+	ca := NewCallAggregator()
+	ca.ProcessPacket(sipPacket("reg-resp", "RESPONSE", "REGISTER", 200), "hunter-1")
+
+	_, exists := ca.GetCall("reg-resp")
+	assert.False(t, exists, "200 OK for a REGISTER must not create a call")
+	assert.Empty(t, ca.GetCalls(), "no calls should be tracked")
+}
+
+// Non-dialog request methods must never create call entries, even though
+// the INVITE-only restriction has been relaxed.
+func TestCallAggregator_NonDialogMethodsCreateNoCall(t *testing.T) {
+	ca := NewCallAggregator()
+	for _, method := range []string{"REGISTER", "OPTIONS", "SUBSCRIBE", "NOTIFY", "PUBLISH"} {
+		ca.ProcessPacket(sipPacket("nondialog-"+method, method, method, 0), "hunter-1")
+		_, exists := ca.GetCall("nondialog-" + method)
+		assert.Falsef(t, exists, "%s must not create a call", method)
+	}
+	assert.Empty(t, ca.GetCalls(), "no calls should be tracked for non-dialog methods")
+}
+
+// The ordinary INVITE -> 180 -> 200 -> ACK -> BYE flow must be unaffected
+// by the out-of-order handling.
+func TestCallAggregator_NormalFlowUnchanged(t *testing.T) {
+	ca := NewCallAggregator()
+	const callID = "normal-flow"
+
+	steps := []struct {
+		packet *data.CapturedPacket
+		state  CallState
+	}{
+		{sipPacket(callID, "INVITE", "INVITE", 0), CallStateTrying},
+		{sipPacket(callID, "RESPONSE", "INVITE", 180), CallStateRinging},
+		{sipPacket(callID, "RESPONSE", "INVITE", 200), CallStateActive},
+		{sipPacket(callID, "ACK", "INVITE", 0), CallStateActive},
+		{sipPacket(callID, "BYE", "BYE", 0), CallStateEnding},
+	}
+	for i, step := range steps {
+		ca.ProcessPacket(step.packet, "hunter-1")
+		call, exists := ca.GetCall(callID)
+		require.Truef(t, exists, "call should exist after step %d", i)
+		assert.Equalf(t, step.state, call.State, "unexpected state after step %d", i)
+	}
+	assert.Len(t, ca.GetCalls(), 1, "normal flow should track exactly one call")
 }

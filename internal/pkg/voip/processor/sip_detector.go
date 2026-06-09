@@ -74,6 +74,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		ToTag:             extractTagFromHeader(headers["to"]),
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            method,
+		CSeqMethod:        extractCSeqMethod(headers["cseq"]),
 		ResponseCode:      extractSIPResponseCode(payload),
 		SDPBody:           body,
 		ContentType:       contentType,
@@ -114,6 +115,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 			FromUri:           extractFullSIPURI(metadata.From),
 			ToUri:             extractFullSIPURI(metadata.To),
 			Method:            metadata.Method,
+			CseqMethod:        metadata.CSeqMethod,
 			ResponseCode:      metadata.ResponseCode,
 			PAssertedIdentity: metadata.PAssertedIdentity,
 			VisitedNetworkId:  metadata.VisitedNetworkID,
@@ -317,6 +319,20 @@ func detectSIPMethod(payload []byte) string {
 	}
 
 	return ""
+}
+
+// extractCSeqMethod returns the method token from a CSeq header value.
+// SIP CSeq is "<sequence-number> <method>" (RFC 3261 §8.1.1.5), e.g.
+// "1 INVITE" -> "INVITE". Returns "" when the value is empty or malformed.
+// The method recovers the originating transaction method of a SIP response,
+// which the status line does not carry — letting a call first observed via
+// a response still be classified.
+func extractCSeqMethod(cseq string) string {
+	fields := strings.Fields(cseq)
+	if len(fields) < 2 {
+		return ""
+	}
+	return strings.ToUpper(fields[1])
 }
 
 // extractSIPResponseCode extracts the response code from a SIP response.

@@ -18,9 +18,9 @@ import (
 type XDPConfig struct {
 	Interface    string // Network interface name (e.g., "eth0")
 	QueueID      int    // Queue ID to bind to
-	UMEMSize     int    // UMEM area size in bytes (default: 4MB)
+	UMEMSize     int    // UMEM area size in bytes (must be >= NumFrames*FrameSize)
 	NumFrames    int    // Number of frames (default: 4096)
-	FrameSize    int    // Size of each frame (default: 2048)
+	FrameSize    int    // Size of each frame (default: 4096; see DefaultXDPFrameSize)
 	FillRingSize int    // Fill ring size (default: 2048)
 	CompRingSize int    // Completion ring size (default: 2048)
 	RXRingSize   int    // RX ring size (default: 2048)
@@ -31,14 +31,32 @@ type XDPConfig struct {
 	BatchSize    int    // Batch processing size (default: 64)
 }
 
-// DefaultXDPConfig returns sensible defaults
+// AF_XDP frame-size bounds. A UMEM frame is the per-packet buffer; a frame
+// smaller than the wire frame silently truncates the packet. The previous
+// hardcoded 2048 truncated jumbo frames and large tunnel-encapsulated
+// traffic. AF_XDP aligned-mode chunks must be a power of two and no larger
+// than the page size (4096 on x86-64); larger frames need unaligned UMEM,
+// which this implementation does not support.
+const (
+	// DefaultXDPFrameSize is the default per-frame UMEM chunk size. One
+	// page (4096) covers standard Ethernet, VLAN, and most tunnel overhead.
+	DefaultXDPFrameSize = 4096
+	// MinXDPFrameSize / MaxXDPFrameSize bound a configured frame size.
+	MinXDPFrameSize = 2048
+	MaxXDPFrameSize = 4096
+	// defaultXDPNumFrames is the default number of UMEM frames.
+	defaultXDPNumFrames = 4096
+)
+
+// DefaultXDPConfig returns sensible defaults. UMEMSize is derived from
+// NumFrames*FrameSize so the invariant newUMEM relies on always holds.
 func DefaultXDPConfig(iface string) *XDPConfig {
 	return &XDPConfig{
 		Interface:    iface,
 		QueueID:      0,
-		UMEMSize:     4 * 1024 * 1024, // 4MB
-		NumFrames:    4096,
-		FrameSize:    2048,
+		NumFrames:    defaultXDPNumFrames,
+		FrameSize:    DefaultXDPFrameSize,
+		UMEMSize:     defaultXDPNumFrames * DefaultXDPFrameSize,
 		FillRingSize: 2048,
 		CompRingSize: 2048,
 		RXRingSize:   2048,
@@ -48,6 +66,27 @@ func DefaultXDPConfig(iface string) *XDPConfig {
 		EnableStats:  true,
 		BatchSize:    64,
 	}
+}
+
+// validate checks the frame and UMEM invariants that AF_XDP and newUMEM
+// require. newUMEM slices area[i*FrameSize:(i+1)*FrameSize] for every
+// frame, so UMEMSize must cover NumFrames*FrameSize or it panics.
+func (c *XDPConfig) validate() error {
+	if c.NumFrames <= 0 {
+		return fmt.Errorf("xdp: num frames must be positive, got %d", c.NumFrames)
+	}
+	if c.FrameSize < MinXDPFrameSize || c.FrameSize > MaxXDPFrameSize {
+		return fmt.Errorf("xdp: frame size %d out of range [%d, %d] — frames above the page size need unaligned UMEM, which is unsupported",
+			c.FrameSize, MinXDPFrameSize, MaxXDPFrameSize)
+	}
+	if c.FrameSize&(c.FrameSize-1) != 0 {
+		return fmt.Errorf("xdp: frame size %d must be a power of two", c.FrameSize)
+	}
+	if c.UMEMSize < c.NumFrames*c.FrameSize {
+		return fmt.Errorf("xdp: UMEM size %d too small for %d frames of %d bytes (need >= %d)",
+			c.UMEMSize, c.NumFrames, c.FrameSize, c.NumFrames*c.FrameSize)
+	}
+	return nil
 }
 
 // XDPSocket represents an AF_XDP socket
@@ -114,6 +153,11 @@ func NewXDPSocket(config *XDPConfig) (*XDPSocket, error) {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
 
+	// Validate frame/UMEM invariants before touching the kernel.
+	if err := config.validate(); err != nil {
+		return nil, err
+	}
+
 	// Verify kernel support
 	if !IsXDPSupported() {
 		return nil, fmt.Errorf("AF_XDP not supported on this system (requires Linux 4.18+)")
@@ -167,6 +211,16 @@ func NewXDPSocket(config *XDPConfig) (*XDPSocket, error) {
 
 // newUMEM creates a new UMEM region
 func newUMEM(size, frameSize, numFrames int) (*UMEM, error) {
+	// The frame loop below slices area[i*frameSize:(i+1)*frameSize] for
+	// every frame; if size can't cover all frames that slice panics.
+	if frameSize <= 0 || numFrames <= 0 {
+		return nil, fmt.Errorf("invalid UMEM geometry: frameSize=%d numFrames=%d", frameSize, numFrames)
+	}
+	if size < numFrames*frameSize {
+		return nil, fmt.Errorf("UMEM size %d too small for %d frames of %d bytes (need >= %d)",
+			size, numFrames, frameSize, numFrames*frameSize)
+	}
+
 	// Allocate memory with mmap for zero-copy
 	area, err := unix.Mmap(-1, 0, size,
 		unix.PROT_READ|unix.PROT_WRITE,

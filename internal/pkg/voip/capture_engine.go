@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/spf13/viper"
 )
 
 // CaptureEngine provides unified packet capture with automatic fallback
@@ -31,6 +32,7 @@ type CaptureConfig struct {
 	Interface     string
 	UseXDP        bool // Try to use XDP if available
 	XDPQueueID    int  // XDP queue ID
+	XDPFrameSize  int  // AF_XDP per-frame UMEM size (0 = DefaultXDPFrameSize)
 	SnapLen       int  // Snapshot length
 	Promiscuous   bool // Promiscuous mode
 	BufferSize    int  // Channel buffer size
@@ -76,6 +78,7 @@ func DefaultCaptureConfig(iface string) *CaptureConfig {
 		Interface:     iface,
 		UseXDP:        true, // Try XDP by default
 		XDPQueueID:    0,
+		XDPFrameSize:  xdpFrameSizeFromConfig(),
 		SnapLen:       65536,
 		Promiscuous:   true,
 		BufferSize:    1000,
@@ -131,11 +134,28 @@ func (ce *CaptureEngine) initialize() error {
 	return ce.initializeStandard()
 }
 
+// xdpFrameSizeFromConfig resolves the AF_XDP per-frame UMEM size from the
+// "xdp_frame_size" config key (config file / LIPPYCAT_XDP_FRAME_SIZE env
+// var), falling back to DefaultXDPFrameSize. A non-positive value falls
+// back here; an out-of-range or non-power-of-two value is rejected later
+// by XDPConfig.validate() in NewXDPSocket.
+func xdpFrameSizeFromConfig() int {
+	if size := viper.GetInt("xdp_frame_size"); size > 0 {
+		return size
+	}
+	return DefaultXDPFrameSize
+}
+
 // initializeXDP sets up AF_XDP capture
 func (ce *CaptureEngine) initializeXDP() error {
 	xdpConfig := DefaultXDPConfig(ce.config.Interface)
 	xdpConfig.QueueID = ce.config.XDPQueueID
 	xdpConfig.BatchSize = ce.config.BatchSize
+	if ce.config.XDPFrameSize > 0 {
+		// Keep the UMEM invariant: UMEMSize must cover NumFrames*FrameSize.
+		xdpConfig.FrameSize = ce.config.XDPFrameSize
+		xdpConfig.UMEMSize = xdpConfig.NumFrames * xdpConfig.FrameSize
+	}
 
 	socket, err := NewXDPSocket(xdpConfig)
 	if err != nil {

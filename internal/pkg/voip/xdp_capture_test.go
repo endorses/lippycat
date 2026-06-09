@@ -11,11 +11,69 @@ func TestDefaultXDPConfig(t *testing.T) {
 
 	assert.Equal(t, "eth0", config.Interface)
 	assert.Equal(t, 0, config.QueueID)
-	assert.Equal(t, 4*1024*1024, config.UMEMSize)
 	assert.Equal(t, 4096, config.NumFrames)
-	assert.Equal(t, 2048, config.FrameSize)
+	assert.Equal(t, DefaultXDPFrameSize, config.FrameSize)
 	assert.True(t, config.EnableStats)
 	assert.Equal(t, 64, config.BatchSize)
+
+	// The UMEM must cover every frame: newUMEM slices
+	// area[i*FrameSize:(i+1)*FrameSize] for each of NumFrames frames.
+	assert.Equal(t, config.NumFrames*config.FrameSize, config.UMEMSize)
+	assert.GreaterOrEqual(t, config.UMEMSize, config.NumFrames*config.FrameSize,
+		"UMEM must be large enough for all frames")
+	assert.NoError(t, config.validate(), "default config must be valid")
+}
+
+func TestXDPConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*XDPConfig)
+		wantErr bool
+	}{
+		{"default is valid", func(*XDPConfig) {}, false},
+		{"frame size below minimum", func(c *XDPConfig) {
+			c.FrameSize = 1024
+			c.UMEMSize = c.NumFrames * c.FrameSize
+		}, true},
+		{"frame size above page size needs unaligned UMEM", func(c *XDPConfig) {
+			c.FrameSize = 8192
+			c.UMEMSize = c.NumFrames * c.FrameSize
+		}, true},
+		{"frame size not a power of two", func(c *XDPConfig) {
+			c.FrameSize = 3000
+			c.UMEMSize = c.NumFrames * c.FrameSize
+		}, true},
+		{"UMEM too small for frames", func(c *XDPConfig) {
+			c.UMEMSize = c.NumFrames*c.FrameSize - 1
+		}, true},
+		{"non-positive num frames", func(c *XDPConfig) {
+			c.NumFrames = 0
+		}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := DefaultXDPConfig("eth0")
+			tt.mutate(config)
+			err := config.validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// NewXDPSocket must reject an invalid frame size before touching the
+// kernel, regardless of whether AF_XDP is supported on the host.
+func TestNewXDPSocket_RejectsInvalidFrameSize(t *testing.T) {
+	config := DefaultXDPConfig("lo")
+	config.FrameSize = 8192 // above the page size
+	config.UMEMSize = config.NumFrames * config.FrameSize
+
+	socket, err := NewXDPSocket(config)
+	assert.Error(t, err, "oversized frame size must be rejected")
+	assert.Nil(t, socket)
 }
 
 func TestIsXDPSupported(t *testing.T) {

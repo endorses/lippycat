@@ -190,22 +190,35 @@ func GetConfig() *Config {
 }
 
 func buildConfig() *Config {
+	// Resolve the active TCP performance profile. The profile bundles every
+	// TCP-tuning value (per-buffer packet cap, eviction strategy, cleanup
+	// cadence, stream timeouts) and the `--tcp-performance-mode` flag selects
+	// it. These values used to be applied via ExpandSimplifiedConfig, which
+	// nothing ever called — so every mode silently fell back to the generic
+	// defaults (e.g. MaxTCPBuffers 10000 instead of "minimal"'s 500). Resolve
+	// and apply the profile here so the flag actually takes effect.
+	profiles := GetPerformanceProfiles()
+	profile, ok := profiles[viper.GetString("voip.tcp_performance_mode")]
+	if !ok {
+		profile = profiles["balanced"]
+	}
+
 	config := &Config{
 		MaxGoroutines:             getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
 		CallIDDetectionTimeout:    getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),
-		JanitorCleanupInterval:    getPositiveDuration("voip.janitor_cleanup_interval", DefaultJanitorCleanupInterval),
-		CallExpirationTime:        getPositiveDuration("voip.call_expiration_time", DefaultCallExpirationTime),
-		StreamQueueBuffer:         getPositiveInt("voip.stream_queue_buffer", DefaultStreamQueueBuffer),
+		JanitorCleanupInterval:    profile.TCPCleanupInterval / 2,
+		CallExpirationTime:        profile.TCPBufferMaxAge,
+		StreamQueueBuffer:         profile.StreamQueueBuffer,
 		MaxFilenameLength:         viper.GetInt("voip.max_filename_length"),
 		LogGoroutineLimitInterval: getPositiveDuration("voip.log_goroutine_limit_interval", 30*time.Second),
 
-		// TCP-specific configurations
-		TCPCleanupInterval:    getPositiveDuration("voip.tcp_cleanup_interval", DefaultTCPCleanupInterval),
-		TCPBufferMaxAge:       getPositiveDuration("voip.tcp_buffer_max_age", DefaultTCPBufferMaxAge),
-		TCPStreamMaxQueueTime: getPositiveDuration("voip.tcp_stream_max_queue_time", DefaultTCPStreamMaxQueueTime),
-		MaxTCPBuffers:         getPositiveInt("voip.max_tcp_buffers", DefaultMaxTCPBuffers),
-		TCPStreamTimeout:      getPositiveDuration("voip.tcp_stream_timeout", DefaultTCPStreamTimeout),
-		TCPAssemblerMaxPages:  getPositiveInt("voip.tcp_assembler_max_pages", DefaultTCPAssemblerMaxPages),
+		// TCP-specific configurations (from the selected performance profile)
+		TCPCleanupInterval:    profile.TCPCleanupInterval,
+		TCPBufferMaxAge:       profile.TCPBufferMaxAge,
+		TCPStreamMaxQueueTime: profile.TCPStreamMaxQueueTime,
+		MaxTCPBuffers:         profile.MaxTCPBuffers,
+		TCPStreamTimeout:      profile.TCPStreamTimeout,
+		TCPAssemblerMaxPages:  profile.TCPAssemblerMaxPages,
 		TCPSIPIdleTimeout:     getPositiveDuration("voip.tcp_sip_idle_timeout", DefaultTCPSIPIdleTimeout),
 
 		// Phase 3: State-based TCP timeout configurations
@@ -215,17 +228,17 @@ func buildConfig() *Config {
 		TCPClosingTimeout:      getPositiveDuration("voip.tcp_closing_timeout", DefaultTCPClosingTimeout),
 		EnableCallAwareTimeout: viper.GetBool("voip.enable_call_aware_timeout"),
 
-		// TCP Performance configurations
+		// TCP Performance configurations (from the selected performance profile)
 		TCPPerformanceMode:     viper.GetString("voip.tcp_performance_mode"),
-		TCPBufferStrategy:      viper.GetString("voip.tcp_buffer_strategy"),
-		EnableBackpressure:     viper.GetBool("voip.enable_backpressure"),
-		MemoryOptimization:     viper.GetBool("voip.memory_optimization"),
-		TCPBufferPoolSize:      getPositiveInt("voip.tcp_buffer_pool_size", DefaultTCPBufferPoolSize),
-		TCPBatchSize:           getPositiveInt("voip.tcp_batch_size", DefaultTCPBatchSize),
-		TCPIOThreads:           getPositiveInt("voip.tcp_io_threads", DefaultTCPIOThreads),
-		TCPCompressionLevel:    viper.GetInt("voip.tcp_compression_level"),
-		TCPMemoryLimit:         getPositiveInt64("voip.tcp_memory_limit", DefaultTCPMemoryLimit),
-		TCPLatencyOptimization: viper.GetBool("voip.tcp_latency_optimization"),
+		TCPBufferStrategy:      profile.TCPBufferStrategy,
+		EnableBackpressure:     profile.EnableBackpressure,
+		MemoryOptimization:     profile.MemoryOptimization,
+		TCPBufferPoolSize:      profile.TCPBufferPoolSize,
+		TCPBatchSize:           profile.TCPBatchSize,
+		TCPIOThreads:           profile.TCPIOThreads,
+		TCPCompressionLevel:    profile.TCPCompressionLevel,
+		TCPMemoryLimit:         profile.TCPMemoryLimit,
+		TCPLatencyOptimization: profile.TCPLatencyOptimization,
 
 		// Plugin system configurations
 		PluginsEnabled:       viper.GetBool("voip.plugins_enabled"),

@@ -8,19 +8,25 @@ import (
 	"github.com/google/gopacket/tcpassembly"
 )
 
-// SafeFlushOlderThan wraps tcpassembly.Assembler.FlushOlderThan with a
-// recover() because gopacket@v1.1.19 has an intermittent
-// "index out of range [-1]" panic in sendToConnection during flush bookkeeping.
-// On panic, the flush is aborted, (0, 0) is returned, and the stack trace is
-// logged. Letting the panic propagate kills the whole process.
+// SafeFlushOlderThan wraps tcpassembly.Assembler.FlushOlderThan to log the
+// stack trace on the intermittent gopacket@v1.1.19 "index out of range [-1]"
+// panic in sendToConnection, then re-panics so the process restarts cleanly.
+//
+// Why not absorb the panic: the panicking goroutine is holding the
+// assembler's internal connPool mutex when it explodes, and gopacket@v1.1.19
+// does not use `defer mu.Unlock()`. Recovering leaks the mutex; every
+// subsequent AssembleWithTimestamp/Flush call then deadlocks on it, and the
+// consumer wedges silently for the lifetime of the process. Crashing and
+// letting systemd restart the unit is the correct behaviour — the mutex
+// only releases when the assembler is recreated.
 func SafeFlushOlderThan(a *tcpassembly.Assembler, cutoff time.Time) (flushed, closed int) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Error("tcpassembly.FlushOlderThan recovered from panic",
+			logger.Error("tcpassembly.FlushOlderThan panicked; crashing for restart",
 				"panic", r,
 				"stack", string(debug.Stack()),
 			)
-			flushed, closed = 0, 0
+			panic(r)
 		}
 	}()
 	return a.FlushOlderThan(cutoff)

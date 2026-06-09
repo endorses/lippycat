@@ -426,6 +426,12 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 			// Skip empty lines (SIP keepalives) - RFC 5626 defines CRLF keepalives
 			// These can appear before real SIP messages on persistent connections
 			if trimmedLine == "" {
+				// A keepalive marks an idle gap with no message in flight.
+				// Release the per-flow packet buffer: anything captured before
+				// the keepalive cannot belong to a future call worth
+				// correlating, and on long-lived idle TCP connections this is
+				// the only thing that stops the buffer growing to its cap.
+				discardTCPBufferedPackets(s.netFlow)
 				continue // Don't update firstLine, keep waiting for real SIP message
 			}
 			firstLine = false
@@ -1368,6 +1374,12 @@ func (s *SIPStream) readCompleteSipMessage() ([]byte, error) {
 			// Skip empty lines (SIP keepalives) - RFC 5626 defines CRLF keepalives
 			// These can appear before real SIP messages on persistent connections
 			if trimmedLine == "" {
+				// A keepalive marks an idle gap with no message in flight.
+				// Release the per-flow packet buffer: anything captured before
+				// the keepalive cannot belong to a future call worth
+				// correlating, and on long-lived idle TCP connections this is
+				// the only thing that stops the buffer growing to its cap.
+				discardTCPBufferedPackets(s.netFlow)
 				continue // Don't update firstLine, keep waiting for real SIP message
 			}
 			firstLine = false

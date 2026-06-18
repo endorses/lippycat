@@ -83,6 +83,7 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 				// Convert entire batch to PacketDisplay and send to handler
 				if c.handler != nil && len(batch.Packets) > 0 {
 					displays := make([]types.PacketDisplay, 0, len(batch.Packets))
+					callEnded := false
 					for _, pkt := range batch.Packets {
 						display := c.convertToPacketDisplay(pkt, batch.HunterId)
 						displays = append(displays, display)
@@ -90,7 +91,9 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 						// Update call state from VoIP metadata
 						if pkt.Metadata != nil {
 							if pkt.Metadata.Sip != nil {
-								c.updateCallState(pkt, batch.HunterId)
+								if c.updateCallState(pkt, batch.HunterId) {
+									callEnded = true
+								}
 							}
 							// Update RTP quality metrics
 							if pkt.Metadata.Rtp != nil {
@@ -101,8 +104,10 @@ func (c *Client) StreamPacketsWithFilter(hunterIDs []string) error {
 					// Send entire batch to handler
 					c.handler.OnPacketBatch(displays)
 
-					// Periodically notify handler of call updates
-					c.maybeNotifyCallUpdates()
+					// Notify handler of call updates. Force the notification when
+					// a call just ended so the terminal state isn't lost to the
+					// throttle if this batch is the call's last traffic.
+					c.maybeNotifyCallUpdates(callEnded)
 				}
 			}
 		}

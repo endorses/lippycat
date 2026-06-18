@@ -521,16 +521,24 @@ func (s *LocalSource) batchingLoop() {
 						}
 					}
 				} else {
-					// No direct filter match — check cache for RTP packets
-					if pbPkt.Metadata != nil && pbPkt.Metadata.Rtp != nil {
-						callID := ""
-						if pbPkt.Metadata.Sip != nil {
-							callID = pbPkt.Metadata.Sip.CallId
-						}
-						if callID != "" {
-							if cached, ok := s.callFilterCache.Load(callID); ok {
-								matchedFilterIDs = cached.(cachedFilterIDs).filterIDs
-							}
+					// No direct filter match. Allow packets belonging to an
+					// already-matched call through by inheriting the filter IDs
+					// cached when the call's INVITE matched. This covers:
+					//   - trailing RTP for the call (media never matches a SIP filter)
+					//   - in-dialog SIP (BYE, ACK, re-INVITE, ...) that does not
+					//     re-carry the matched identity. In IMS the matched identity
+					//     (e.g. P-Asserted-Identity) often appears only in the INVITE,
+					//     so a BYE would otherwise be dropped here and the call would
+					//     never be reported as ended downstream — it stays "Active"
+					//     forever in the TUI.
+					// Mirrors the hunter's IsCallMatched() termination forwarding.
+					callID := ""
+					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
+						callID = pbPkt.Metadata.Sip.CallId
+					}
+					if callID != "" {
+						if cached, ok := s.callFilterCache.Load(callID); ok {
+							matchedFilterIDs = cached.(cachedFilterIDs).filterIDs
 						}
 					}
 

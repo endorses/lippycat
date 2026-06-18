@@ -3,9 +3,40 @@ package voip
 import (
 	"testing"
 
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestVoIPFilterBuilder_BPFCompiles verifies that the filters produced by the
+// builder - including the IPv4+IPv6 fragment clause - actually compile with
+// libpcap. A syntactically invalid clause (e.g. a bad IPv6 fragment expression)
+// would otherwise only surface at capture time. Guards the ip6[6]==44 clause.
+func TestVoIPFilterBuilder_BPFCompiles(t *testing.T) {
+	builder := NewVoIPFilterBuilder()
+	configs := []VoIPFilterConfig{
+		{SIPPorts: []int{5060}},
+		{SIPPorts: []int{5060, 5061}, RTPPortRanges: []PortRange{{Start: 10000, End: 32768}}},
+		{SIPPorts: []int{5060}, UDPOnly: true},
+		{UDPOnly: true},
+		{UDPOnly: true, BaseFilter: "host 2a03:9ec0::8c"},
+		{SIPPorts: []int{5060}, BaseFilter: "ip6"},
+	}
+
+	for _, cfg := range configs {
+		filter := builder.Build(cfg)
+		if filter == "" {
+			continue
+		}
+		_, err := pcap.CompileBPFFilter(layers.LinkTypeEthernet, 65536, filter)
+		require.NoError(t, err, "filter must compile: %q", filter)
+	}
+
+	// The fragment clause must compile on its own too.
+	_, err := pcap.CompileBPFFilter(layers.LinkTypeEthernet, 65536, IPFragmentClause)
+	require.NoError(t, err, "fragment clause must compile: %q", IPFragmentClause)
+}
 
 func TestDefaultRTPPortRange(t *testing.T) {
 	r := DefaultRTPPortRange()
@@ -23,15 +54,15 @@ func TestNewVoIPFilterBuilder(t *testing.T) {
 // TestVoIPFilterBuilder_Build tests all filter construction combinations
 // from the research report (§3 and §4)
 //
-// NOTE: All filters now include the IP fragment clause (ip[6:2] & 0x1fff > 0)
-// to capture subsequent fragments of fragmented UDP packets. This is critical
-// for capturing large SIP INVITEs that exceed MTU. See Fix #12 in
+// NOTE: All filters now include the IP fragment clause (IPv4 and IPv6) to
+// capture subsequent fragments of fragmented UDP packets. This is critical for
+// capturing large SIP INVITEs that exceed MTU. See Fix #12 in
 // docs/debug/rtp-sip-correlation.md for details.
 func TestVoIPFilterBuilder_Build(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
 
 	// Helper constant for readability
-	const frag = IPFragmentClause // "(ip[6:2] & 0x1fff > 0)"
+	const frag = IPFragmentClause // "((ip[6:2] & 0x1fff > 0) or (ip6[6] == 44))"
 
 	tests := []struct {
 		name     string
@@ -587,11 +618,10 @@ func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 
 // TestIPFragmentClauseConstant verifies the fragment clause constant is correct
 func TestIPFragmentClauseConstant(t *testing.T) {
-	// The clause should match packets with non-zero fragment offset
-	// ip[6:2] reads the 16-bit flags/fragment offset field
-	// & 0x1fff masks to get the 13-bit fragment offset
-	// > 0 matches subsequent fragments (not first fragment)
-	assert.Equal(t, "(ip[6:2] & 0x1fff > 0)", IPFragmentClause)
+	// The clause should match IPv4 and IPv6 fragments:
+	// IPv4: ip[6:2] & 0x1fff > 0 - non-zero 13-bit fragment offset (subsequent fragments)
+	// IPv6: ip6[6] == 44 - Next Header is the Fragment extension header
+	assert.Equal(t, "((ip[6:2] & 0x1fff > 0) or (ip6[6] == 44))", IPFragmentClause)
 }
 
 // BenchmarkVoIPFilterBuilder_Build benchmarks filter building performance

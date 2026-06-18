@@ -468,6 +468,14 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 	packetSource.NoCopy = true
 	packetSource.DecodeStreamsAsDatagrams = true
 
+	// IP defragmenters for this file. Fragments of a single datagram never span
+	// files, so per-file defragmenters are sufficient. This mirrors the live
+	// capture path (captureFromInterface): without reassembly the second fragment
+	// of a large SIP INVITE/200 OK (containing the SDP media ports) is dropped,
+	// so RTP never correlates to its call and shows up as an RTP-only call.
+	defragmenter := NewIPv4Defragmenter()
+	v6defragmenter := NewIPv6Defragmenter()
+
 	var packets []PacketInfo
 	for packet := range packetSource.Packets() {
 		// Make a copy of the packet data since NoCopy=true
@@ -480,6 +488,50 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 		newPacket.Metadata().Timestamp = packet.Metadata().Timestamp
 		newPacket.Metadata().CaptureLength = packet.Metadata().CaptureLength
 		newPacket.Metadata().Length = packet.Metadata().Length
+
+		// Reassemble IPv4 fragments before any further processing. A fragmented
+		// SIP message would otherwise have its SDP body stranded in a later
+		// fragment and never parsed.
+		if ipLayer := newPacket.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+			ip4 := ipLayer.(*layers.IPv4)
+			if ip4.Flags&layers.IPv4MoreFragments != 0 || ip4.FragOffset > 0 {
+				reassembledIP, err := defragmenter.DefragIPv4(ip4)
+				if err != nil {
+					logger.Debug("IPv4 defragmentation error (offline)",
+						"error", err, "src", ip4.SrcIP, "dst", ip4.DstIP, "id", ip4.Id)
+					continue // Skip this fragment
+				}
+				if reassembledIP == nil {
+					continue // Still waiting for more fragments
+				}
+				reassembled := rebuildReassembledPacket(newPacket, reassembledIP, linkType)
+				reassembled.Metadata().Timestamp = newPacket.Metadata().Timestamp
+				newPacket = reassembled
+			}
+		}
+
+		// Reassemble plain (non-ESP) IPv6 fragments. gopacket has no built-in
+		// IPv6 reassembly; ESP-encapsulated fragments are handled by
+		// decapsulateIPv6FragmentESP below.
+		if fragLayer := newPacket.Layer(layers.LayerTypeIPv6Fragment); fragLayer != nil {
+			if frag, ok := fragLayer.(*layers.IPv6Fragment); ok && frag.NextHeader != layers.IPProtocolESP {
+				if ip6Layer := newPacket.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
+					ip6 := ip6Layer.(*layers.IPv6)
+					reassembledIP6, err := v6defragmenter.DefragIPv6(ip6, frag)
+					if err != nil {
+						logger.Debug("IPv6 defragmentation error (offline)",
+							"error", err, "src", ip6.SrcIP, "dst", ip6.DstIP, "id", frag.Identification)
+						continue // Skip this fragment
+					}
+					if reassembledIP6 == nil {
+						continue // Still waiting for more fragments
+					}
+					reassembled := rebuildReassembledIPv6Packet(newPacket, reassembledIP6, linkType)
+					reassembled.Metadata().Timestamp = newPacket.Metadata().Timestamp
+					newPacket = reassembled
+				}
+			}
+		}
 
 		// Handle VXLAN decapsulation - extract the inner Ethernet frame so all
 		// downstream processing (SIP detection, RTP correlation, etc.) sees the

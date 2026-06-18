@@ -12,21 +12,30 @@ const (
 	DefaultRTPPortRangeEnd   = 32768
 )
 
-// IPFragmentClause is a BPF expression that matches IP fragments.
+// IPFragmentClause is a BPF expression that matches IP fragments (IPv4 and IPv6).
 // This is critical for capturing fragmented SIP packets (e.g., large INVITEs
 // with SDP bodies that exceed MTU). Without this clause, BPF filters like
 // "port 5060 or udp" will drop the second fragment of fragmented UDP packets
-// because subsequent fragments have no UDP header - only IP header with
-// fragment offset > 0. The BPF "udp" primitive checks Protocol=17 in IP header
-// but the port check requires a UDP header, causing "port X" to reject fragments.
+// because subsequent fragments have no UDP header - only an IP header (IPv4) or
+// a fragment extension header (IPv6) - so the port check has nothing to match.
+// A dropped second fragment means the SDP media ports are never parsed and RTP
+// can never be associated with the call.
 //
-// The expression (ip[6:2] & 0x1fff > 0) matches packets where:
-// - ip[6:2] reads the 16-bit flags/fragment offset field at IP header offset 6
-// - & 0x1fff masks out the flags bits, keeping only the 13-bit fragment offset
-// - > 0 matches any packet with non-zero fragment offset (i.e., not the first fragment)
+// IPv4: (ip[6:2] & 0x1fff > 0) matches packets where:
+//   - ip[6:2] reads the 16-bit flags/fragment offset field at IP header offset 6
+//   - & 0x1fff masks out the flags bits, keeping only the 13-bit fragment offset
+//   - > 0 matches any packet with non-zero fragment offset (not the first fragment)
 //
-// Combined with "udp", this also captures first fragments (which have MF=1, offset=0).
-const IPFragmentClause = "(ip[6:2] & 0x1fff > 0)"
+// IPv6: (ip6[6] == 44) matches packets whose IPv6 Next Header (byte 6) is the
+// Fragment extension header (protocol 44). Unlike IPv4, IPv6 carries the fragment
+// offset in an extension header rather than the base header, and BPF's ip[...]
+// primitive only matches IPv4 - so IPv6 fragments need their own clause. This
+// matches BOTH the first and subsequent IPv6 fragments (all fragments of an IPv6
+// datagram carry the Fragment header); the first is also caught by the port clause.
+//
+// Combined with "udp"/port clauses, first IPv4 fragments (MF=1, offset=0) are
+// captured by the port match and subsequent fragments by this clause.
+const IPFragmentClause = "((ip[6:2] & 0x1fff > 0) or (ip6[6] == 44))"
 
 // PortRange represents a port range with start and end values
 type PortRange struct {

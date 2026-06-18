@@ -238,6 +238,7 @@ func TestServer_HandleCreateDestination(t *testing.T) {
 	assert.Equal(t, 5443, dest.Port)
 	assert.True(t, dest.X2Enabled)
 	assert.True(t, dest.X3Enabled)
+	assert.Equal(t, "X2andX3", dest.ProtocolType)
 	assert.Equal(t, "Test MDF", dest.Description)
 }
 
@@ -345,6 +346,7 @@ func TestServer_HandleModifyDestination(t *testing.T) {
 	assert.Equal(t, 6443, dest.Port)
 	assert.True(t, dest.X2Enabled)
 	assert.True(t, dest.X3Enabled)
+	assert.Equal(t, "X2andX3", dest.ProtocolType)
 	assert.Equal(t, "Updated MDF", dest.Description)
 }
 

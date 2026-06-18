@@ -103,11 +103,12 @@ func DestinationResponseDetailsToDestination(details *schema.DestinationResponse
 	}
 
 	dest := &Destination{
-		DID:       did,
-		Address:   address,
-		Port:      port,
-		X2Enabled: dd.DeliveryType == "X2Only" || dd.DeliveryType == "X2andX3",
-		X3Enabled: dd.DeliveryType == "X3Only" || dd.DeliveryType == "X2andX3",
+		DID:          did,
+		Address:      address,
+		Port:         port,
+		X2Enabled:    dd.DeliveryType == "X2Only" || dd.DeliveryType == "X2andX3",
+		X3Enabled:    dd.DeliveryType == "X3Only" || dd.DeliveryType == "X2andX3",
+		ProtocolType: dd.DeliveryType,
 	}
 
 	if dd.FriendlyName != nil {

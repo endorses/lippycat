@@ -94,6 +94,8 @@ type Destination struct {
 	X2Enabled bool
 	// X3Enabled indicates this destination accepts X3 (CC) traffic.
 	X3Enabled bool
+	// ProtocolType preserves the X1 destination delivery type.
+	ProtocolType string
 	// Description is an optional human-readable description.
 	Description string
 }
@@ -771,11 +773,12 @@ func (s *Server) handleCreateDestination(req *schema.CreateDestinationRequest) a
 
 	// Build destination
 	dest := &Destination{
-		DID:       did,
-		Address:   address,
-		Port:      port,
-		X2Enabled: details.DeliveryType == "X2Only" || details.DeliveryType == "X2andX3",
-		X3Enabled: details.DeliveryType == "X3Only" || details.DeliveryType == "X2andX3",
+		DID:          did,
+		Address:      address,
+		Port:         port,
+		X2Enabled:    details.DeliveryType == "X2Only" || details.DeliveryType == "X2andX3",
+		X3Enabled:    details.DeliveryType == "X3Only" || details.DeliveryType == "X2andX3",
+		ProtocolType: details.DeliveryType,
 	}
 
 	if details.FriendlyName != nil {
@@ -841,6 +844,7 @@ func (s *Server) handleModifyDestination(req *schema.ModifyDestinationRequest) a
 	if details.DeliveryType != "" {
 		existing.X2Enabled = details.DeliveryType == "X2Only" || details.DeliveryType == "X2andX3"
 		existing.X3Enabled = details.DeliveryType == "X3Only" || details.DeliveryType == "X2andX3"
+		existing.ProtocolType = details.DeliveryType
 	}
 
 	if details.FriendlyName != nil {

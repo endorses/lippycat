@@ -214,6 +214,12 @@ type Destination struct {
 	// X3Enabled indicates this destination accepts X3 (CC) traffic.
 	X3Enabled bool
 
+	// ProtocolType preserves the X1 destination delivery type used to route
+	// X2 and X3 PDUs. Empty or unrecognized values are unrestricted for
+	// backward compatibility with destinations created before this field was
+	// persisted.
+	ProtocolType string
+
 	// Description is an optional human-readable description.
 	Description string
 

@@ -169,6 +169,125 @@ func TestPerDestinationQueueIsolation(t *testing.T) {
 	assert.Equal(t, int64(2), client.Stats().QueueDepth)
 }
 
+func TestProtocolTypeAwareFanout(t *testing.T) {
+	tests := []struct {
+		name     string
+		send     func(*Client, uuid.UUID, []uuid.UUID, []byte) error
+		expected []string
+	}{
+		{
+			name: "X2",
+			send: (*Client).SendX2,
+			expected: []string{
+				"X2",
+				"X2andX3",
+			},
+		},
+		{
+			name: "X3",
+			send: (*Client).SendX3,
+			expected: []string{
+				"X3",
+				"X2andX3",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager, err := NewManager(testConfigWithCerts(t))
+			require.NoError(t, err)
+			defer manager.Stop()
+
+			client := NewClient(manager, DefaultClientConfig())
+			destIDs := make([]uuid.UUID, 0, 4)
+			didsByProtocol := make(map[string]uuid.UUID, 4)
+			for i, protocolType := range []string{"X2", "X3", "X2andX3", "HI3"} {
+				did := uuid.New()
+				destIDs = append(destIDs, did)
+				didsByProtocol[protocolType] = did
+				require.NoError(t, manager.AddDestination(&li.Destination{
+					DID:          did,
+					Address:      "127.0.0.1",
+					Port:         20000 + i,
+					ProtocolType: protocolType,
+				}))
+			}
+
+			require.NoError(t, tt.send(client, uuid.New(), destIDs, []byte("test-pdu")))
+
+			stats := client.DestinationStats()
+			expected := make(map[string]bool, len(tt.expected))
+			for _, protocolType := range tt.expected {
+				expected[protocolType] = true
+			}
+			for protocolType, did := range didsByProtocol {
+				_, queued := stats[did]
+				assert.Equal(t, expected[protocolType], queued, protocolType)
+			}
+			assert.Equal(t, int64(len(tt.expected)), client.Stats().QueueDepth)
+		})
+	}
+}
+
+func TestProtocolTypeFanoutBackwardCompatibility(t *testing.T) {
+	tests := []struct {
+		name         string
+		protocolType string
+	}{
+		{name: "empty"},
+		{name: "unknown", protocolType: "future-protocol"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager, err := NewManager(testConfigWithCerts(t))
+			require.NoError(t, err)
+			defer manager.Stop()
+
+			did := uuid.New()
+			require.NoError(t, manager.AddDestination(&li.Destination{
+				DID:          did,
+				Address:      "127.0.0.1",
+				Port:         21000,
+				ProtocolType: tt.protocolType,
+			}))
+
+			client := NewClient(manager, DefaultClientConfig())
+			require.NoError(t, client.SendX2(uuid.New(), []uuid.UUID{did}, []byte("x2")))
+			require.NoError(t, client.SendX3(uuid.New(), []uuid.UUID{did}, []byte("x3")))
+
+			stats := client.DestinationStats()
+			assert.Equal(t, 2, stats[did].QueueDepth)
+			assert.Equal(t, int64(2), client.Stats().QueueDepth)
+		})
+	}
+}
+
+func TestProtocolTypeFanoutPreservesRedundantDestinations(t *testing.T) {
+	manager, err := NewManager(testConfigWithCerts(t))
+	require.NoError(t, err)
+	defer manager.Stop()
+
+	destIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	for _, did := range destIDs {
+		require.NoError(t, manager.AddDestination(&li.Destination{
+			DID:          did,
+			Address:      "mdf.example.com",
+			Port:         9443,
+			ProtocolType: "X3",
+		}))
+	}
+
+	client := NewClient(manager, DefaultClientConfig())
+	require.NoError(t, client.SendX3(uuid.New(), destIDs, []byte("x3")))
+
+	stats := client.DestinationStats()
+	assert.Equal(t, 1, stats[destIDs[0]].QueueDepth)
+	assert.Equal(t, 1, stats[destIDs[1]].QueueDepth)
+	assert.Equal(t, int64(2), client.Stats().QueueDepth)
+}
+
 func TestSendNoDestinations(t *testing.T) {
 	manager, err := NewManager(testConfigWithCerts(t))
 	require.NoError(t, err)

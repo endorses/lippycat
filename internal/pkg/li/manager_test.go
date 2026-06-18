@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/endorses/lippycat/internal/pkg/li/x1"
 	"github.com/endorses/lippycat/internal/pkg/li/x1/schema"
 	"github.com/endorses/lippycat/internal/pkg/types"
 )
@@ -74,6 +75,34 @@ func TestManager_DisabledMode(t *testing.T) {
 	m.ProcessPacket(pkt, nil)
 	m.ProcessPacket(nil, nil)
 	m.ProcessPacket(pkt, []string{"some-filter-id"})
+}
+
+func TestManager_DestinationLifecycleCallbacks(t *testing.T) {
+	m := NewManager(ManagerConfig{Enabled: true}, nil)
+	did := uuid.New()
+
+	var created, modified, removed bool
+	m.SetDestinationCreatedCallback(func(dest *Destination) {
+		created = dest.DID == did
+	})
+	m.SetDestinationModifiedCallback(func(dest *Destination) {
+		modified = dest.DID == did && dest.Port == 9444
+	})
+	m.SetDestinationRemovedCallback(func(removedDID uuid.UUID) {
+		removed = removedDID == did
+	})
+
+	require.NoError(t, m.CreateDestinationX1(&x1.Destination{
+		DID: did, Address: "mdf.example", Port: 9443, X2Enabled: true,
+	}))
+	require.NoError(t, m.ModifyDestinationX1(did, &x1.Destination{
+		DID: did, Address: "mdf.example", Port: 9444, X2Enabled: true,
+	}))
+	require.NoError(t, m.RemoveDestinationX1(did))
+
+	assert.True(t, created)
+	assert.True(t, modified)
+	assert.True(t, removed)
 }
 
 func TestManager_TaskLifecycle(t *testing.T) {

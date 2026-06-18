@@ -385,7 +385,11 @@ Check:
 1. Destination created via X1 `CreateDestination`
 2. MDF server is reachable
 3. Client certificates match MDF CA
-4. Delivery queue not full (check stats)
+4. Per-destination queue depth, oldest queued age, retries, and overflow drops
+5. Reconnect and peer-close logs for the destination DID
+
+Short MDF outages are buffered and flushed in order. A full queue drops the
+oldest PDU and increments the destination's `queue_overflow` drop counter.
 
 ### Task Not Matching
 

@@ -138,7 +138,9 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, DefaultMaxBackoff, config.MaxBackoff)
 	assert.Equal(t, DefaultBackoffMultiplier, config.BackoffMultiplier)
 	assert.Equal(t, DefaultMaxPoolSize, config.MaxPoolSize)
+	assert.Equal(t, DefaultKeepAliveIdle, config.KeepAliveIdle)
 	assert.Equal(t, DefaultKeepAliveInterval, config.KeepAliveInterval)
+	assert.Equal(t, DefaultKeepAliveCount, config.KeepAliveCount)
 }
 
 func TestAddRemoveDestination(t *testing.T) {

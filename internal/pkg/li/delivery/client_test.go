@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -66,6 +67,7 @@ func TestDefaultClientConfig(t *testing.T) {
 	assert.Equal(t, DefaultBatchSize, config.BatchSize)
 	assert.Equal(t, DefaultBatchTimeout, config.BatchTimeout)
 	assert.Equal(t, DefaultSendTimeout, config.SendTimeout)
+	assert.Equal(t, DefaultShutdownTimeout, config.ShutdownTimeout)
 }
 
 func TestClientConfigDefaults(t *testing.T) {
@@ -80,6 +82,7 @@ func TestClientConfigDefaults(t *testing.T) {
 	assert.Equal(t, DefaultBatchSize, client.config.BatchSize)
 	assert.Equal(t, DefaultBatchTimeout, client.config.BatchTimeout)
 	assert.Equal(t, DefaultSendTimeout, client.config.SendTimeout)
+	assert.Equal(t, DefaultShutdownTimeout, client.config.ShutdownTimeout)
 }
 
 func TestSendX2QueueFull(t *testing.T) {
@@ -102,13 +105,14 @@ func TestSendX2QueueFull(t *testing.T) {
 	err = client.SendX2(xid, destIDs, data)
 	require.NoError(t, err)
 
-	// Second should fail with queue full.
+	// Second is accepted and evicts the oldest queued item.
 	err = client.SendX2(xid, destIDs, data)
-	assert.ErrorIs(t, err, ErrQueueFull)
+	require.NoError(t, err)
 
 	stats := client.Stats()
-	assert.Equal(t, uint64(1), stats.X2Queued)
+	assert.Equal(t, uint64(2), stats.X2Queued)
 	assert.Equal(t, uint64(1), stats.X2Dropped)
+	assert.Equal(t, int64(1), stats.QueueDepth)
 }
 
 func TestSendX3QueueFull(t *testing.T) {
@@ -130,11 +134,39 @@ func TestSendX3QueueFull(t *testing.T) {
 	require.NoError(t, err)
 
 	err = client.SendX3(xid, destIDs, data)
-	assert.ErrorIs(t, err, ErrQueueFull)
+	require.NoError(t, err)
 
 	stats := client.Stats()
-	assert.Equal(t, uint64(1), stats.X3Queued)
+	assert.Equal(t, uint64(2), stats.X3Queued)
 	assert.Equal(t, uint64(1), stats.X3Dropped)
+	assert.Equal(t, int64(1), stats.QueueDepth)
+}
+
+func TestPerDestinationQueueIsolation(t *testing.T) {
+	manager, err := NewManager(testConfigWithCerts(t))
+	require.NoError(t, err)
+	defer manager.Stop()
+
+	config := DefaultClientConfig()
+	config.QueueSize = 1
+	client := NewClient(manager, config)
+
+	did1 := uuid.New()
+	did2 := uuid.New()
+	xid := uuid.New()
+
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{did1}, []byte("old1")))
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{did2}, []byte("keep")))
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{did1}, []byte("new1")))
+
+	stats := client.DestinationStats()
+	assert.Equal(t, 1, stats[did1].QueueDepth)
+	assert.Equal(t, uint64(1), stats[did1].QueueOverflows)
+	assert.Equal(t, uint64(1), stats[did1].DroppedByReason["queue_overflow"])
+	assert.Equal(t, uint64(1), stats[did1].X2Dropped)
+	assert.Equal(t, 1, stats[did2].QueueDepth)
+	assert.Equal(t, uint64(0), stats[did2].QueueOverflows)
+	assert.Equal(t, int64(2), client.Stats().QueueDepth)
 }
 
 func TestSendNoDestinations(t *testing.T) {
@@ -427,6 +459,7 @@ func TestDeliveryToMultipleDestinations(t *testing.T) {
 	clientConfig := DefaultClientConfig()
 	clientConfig.BatchSize = 1
 	clientConfig.BatchTimeout = 10 * time.Millisecond
+	clientConfig.ShutdownTimeout = 10 * time.Millisecond
 
 	client := NewClient(manager, clientConfig)
 	client.Start()
@@ -463,6 +496,7 @@ func TestDeliveryFailure(t *testing.T) {
 	clientConfig := DefaultClientConfig()
 	clientConfig.BatchSize = 1
 	clientConfig.BatchTimeout = 10 * time.Millisecond
+	clientConfig.ShutdownTimeout = 10 * time.Millisecond
 
 	client := NewClient(manager, clientConfig)
 	client.Start()
@@ -478,8 +512,10 @@ func TestDeliveryFailure(t *testing.T) {
 
 	stats := client.Stats()
 	assert.Equal(t, uint64(1), stats.X2Queued)
-	assert.Equal(t, uint64(1), stats.X2Failed)
+	assert.Equal(t, uint64(0), stats.X2Failed)
 	assert.Equal(t, uint64(0), stats.X2Sent)
+	assert.Equal(t, int64(1), stats.QueueDepth)
+	assert.Greater(t, stats.Retries, uint64(0))
 }
 
 func TestSendX2Sync(t *testing.T) {
@@ -705,6 +741,68 @@ func TestBatchDelivery(t *testing.T) {
 	assert.Equal(t, uint64(20), stats.X2Sent)
 }
 
+func TestDeliveryBufferedAcrossDestinationRestart(t *testing.T) {
+	certPEM, keyPEM := generateTestCert(t)
+	server := newRestartableMDF(t, certPEM, keyPEM, 4)
+	server.Start(t)
+	defer server.Close()
+
+	certPool := x509.NewCertPool()
+	require.True(t, certPool.AppendCertsFromPEM(certPEM))
+
+	managerConfig := testConfigWithCerts(t)
+	managerConfig.InitialBackoff = 25 * time.Millisecond
+	managerConfig.MaxBackoff = 100 * time.Millisecond
+	managerConfig.DialTimeout = 100 * time.Millisecond
+	manager, err := NewManager(managerConfig)
+	require.NoError(t, err)
+	defer manager.Stop()
+
+	did := uuid.New()
+	require.NoError(t, manager.AddDestination(&li.Destination{
+		DID:       did,
+		Address:   "127.0.0.1",
+		Port:      server.Port(),
+		X2Enabled: true,
+		TLSConfig: &tls.Config{
+			RootCAs:            certPool,
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS12,
+		},
+	}))
+	require.Eventually(t, func() bool { return manager.IsConnected(did) }, 2*time.Second, 10*time.Millisecond)
+
+	clientConfig := DefaultClientConfig()
+	clientConfig.BatchSize = 1
+	clientConfig.SendTimeout = 200 * time.Millisecond
+	clientConfig.ShutdownTimeout = time.Second
+	client := NewClient(manager, clientConfig)
+	client.Start()
+	defer client.Stop()
+
+	xid := uuid.New()
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{did}, []byte("0001")))
+	assert.Equal(t, "0001", server.Receive(t, time.Second))
+
+	server.Stop()
+	require.Eventually(t, func() bool { return !manager.IsConnected(did) }, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{did}, []byte("0002")))
+	require.NoError(t, client.SendX2(xid, []uuid.UUID{did}, []byte("0003")))
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, int64(2), client.Stats().QueueDepth)
+
+	server.Start(t)
+	assert.Equal(t, "0002", server.Receive(t, 2*time.Second))
+	assert.Equal(t, "0003", server.Receive(t, 2*time.Second))
+	require.Eventually(t, func() bool { return client.QueueDepth() == 0 }, time.Second, 10*time.Millisecond)
+
+	stats := client.Stats()
+	assert.Equal(t, uint64(3), stats.X2Sent)
+	assert.Equal(t, uint64(0), stats.X2Dropped)
+	assert.Greater(t, stats.Retries, uint64(0))
+}
+
 // startTestTLSServerWithCounter starts a TLS server that counts received bytes.
 func startTestTLSServerWithCounter(t *testing.T, certPEM, keyPEM []byte, counter *int64) (*countingListener, int) {
 	t.Helper()
@@ -738,6 +836,119 @@ type countingListener struct {
 	net.Listener
 	counter *int64
 	done    chan struct{}
+}
+
+type restartableMDF struct {
+	cert      tls.Certificate
+	frameSize int
+	address   string
+	received  chan string
+
+	mu       sync.Mutex
+	listener net.Listener
+	conns    map[net.Conn]struct{}
+}
+
+func newRestartableMDF(t *testing.T, certPEM, keyPEM []byte, frameSize int) *restartableMDF {
+	t.Helper()
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	return &restartableMDF{
+		cert:      cert,
+		frameSize: frameSize,
+		received:  make(chan string, 32),
+		conns:     make(map[net.Conn]struct{}),
+	}
+}
+
+func (s *restartableMDF) Start(t *testing.T) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	require.Nil(t, s.listener)
+
+	address := s.address
+	if address == "" {
+		address = "127.0.0.1:0"
+	}
+	raw, err := net.Listen("tcp", address)
+	require.NoError(t, err)
+	if s.address == "" {
+		s.address = raw.Addr().String()
+	}
+	s.listener = tls.NewListener(raw, &tls.Config{
+		Certificates: []tls.Certificate{s.cert},
+		ClientAuth:   tls.NoClientCert,
+		MinVersion:   tls.VersionTLS12,
+	})
+	go s.accept(s.listener)
+}
+
+func (s *restartableMDF) Stop() {
+	s.mu.Lock()
+	listener := s.listener
+	s.listener = nil
+	conns := make([]net.Conn, 0, len(s.conns))
+	for conn := range s.conns {
+		conns = append(conns, conn)
+	}
+	s.mu.Unlock()
+	if listener != nil {
+		_ = listener.Close()
+	}
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+}
+
+func (s *restartableMDF) Close() {
+	s.Stop()
+}
+
+func (s *restartableMDF) Port() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.listener.Addr().(*net.TCPAddr).Port
+}
+
+func (s *restartableMDF) Receive(t *testing.T, timeout time.Duration) string {
+	t.Helper()
+	select {
+	case value := <-s.received:
+		return value
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for MDF delivery")
+		return ""
+	}
+}
+
+func (s *restartableMDF) accept(listener net.Listener) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		s.mu.Lock()
+		s.conns[conn] = struct{}{}
+		s.mu.Unlock()
+		go s.read(conn)
+	}
+}
+
+func (s *restartableMDF) read(conn net.Conn) {
+	defer func() {
+		s.mu.Lock()
+		delete(s.conns, conn)
+		s.mu.Unlock()
+		_ = conn.Close()
+	}()
+	buf := make([]byte, s.frameSize)
+	for {
+		if _, err := io.ReadFull(conn, buf); err != nil {
+			return
+		}
+		s.received <- string(append([]byte(nil), buf...))
+	}
 }
 
 func (cl *countingListener) accept() {

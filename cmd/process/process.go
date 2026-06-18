@@ -419,6 +419,14 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryTLSKeyFile = liConfig.DeliveryTLSKeyFile
 		config.LIDeliveryTLSCAFile = liConfig.DeliveryTLSCAFile
 		config.LIDeliveryTLSPinnedCert = liConfig.DeliveryTLSPinnedCert
+		config.LIDeliveryQueueSize = liConfig.DeliveryQueueSize
+		config.LIDeliverySendTimeout = liConfig.DeliverySendTimeout
+		config.LIDeliveryInitialBackoff = liConfig.DeliveryInitialBackoff
+		config.LIDeliveryMaxBackoff = liConfig.DeliveryMaxBackoff
+		config.LIDeliveryKeepAliveIdle = liConfig.DeliveryKeepAliveIdle
+		config.LIDeliveryKeepAliveInterval = liConfig.DeliveryKeepAliveInterval
+		config.LIDeliveryKeepAliveCount = liConfig.DeliveryKeepAliveCount
+		config.LIDeliveryShutdownTimeout = liConfig.DeliveryShutdownTimeout
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval

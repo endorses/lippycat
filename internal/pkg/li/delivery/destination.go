@@ -43,10 +43,10 @@ const (
 	DefaultWriteTimeout = 5 * time.Second
 
 	// DefaultInitialBackoff is the initial backoff duration for reconnection.
-	DefaultInitialBackoff = 1 * time.Second
+	DefaultInitialBackoff = 500 * time.Millisecond
 
 	// DefaultMaxBackoff is the maximum backoff duration for reconnection.
-	DefaultMaxBackoff = 5 * time.Minute
+	DefaultMaxBackoff = 5 * time.Second
 
 	// DefaultBackoffMultiplier is the multiplier for exponential backoff.
 	DefaultBackoffMultiplier = 2.0
@@ -54,8 +54,14 @@ const (
 	// DefaultMaxPoolSize is the default maximum connections per destination.
 	DefaultMaxPoolSize = 4
 
-	// DefaultKeepAliveInterval is the interval for TCP keep-alives.
-	DefaultKeepAliveInterval = 30 * time.Second
+	// DefaultKeepAliveIdle is the idle period before TCP keep-alive probes start.
+	DefaultKeepAliveIdle = 15 * time.Second
+
+	// DefaultKeepAliveInterval is the interval between TCP keep-alive probes.
+	DefaultKeepAliveInterval = 5 * time.Second
+
+	// DefaultKeepAliveCount is the number of failed probes before disconnect.
+	DefaultKeepAliveCount = 3
 )
 
 // Errors returned by the destination manager.
@@ -125,6 +131,12 @@ type DestinationConfig struct {
 
 	// KeepAliveInterval is the interval for TCP keep-alives.
 	KeepAliveInterval time.Duration
+
+	// KeepAliveIdle is the idle period before TCP keep-alive probes start.
+	KeepAliveIdle time.Duration
+
+	// KeepAliveCount is the number of failed probes before disconnect.
+	KeepAliveCount int
 }
 
 // DefaultConfig returns a DestinationConfig with default values.
@@ -136,7 +148,9 @@ func DefaultConfig() DestinationConfig {
 		MaxBackoff:        DefaultMaxBackoff,
 		BackoffMultiplier: DefaultBackoffMultiplier,
 		MaxPoolSize:       DefaultMaxPoolSize,
+		KeepAliveIdle:     DefaultKeepAliveIdle,
 		KeepAliveInterval: DefaultKeepAliveInterval,
+		KeepAliveCount:    DefaultKeepAliveCount,
 	}
 }
 
@@ -164,6 +178,13 @@ type destinationState struct {
 
 	// reconnectTimer triggers reconnection attempts.
 	reconnectTimer *time.Timer
+
+	// connections tracks every live connection, including checked-out pool
+	// entries, so reader and writer failures can invalidate idempotently.
+	connections map[*tls.Conn]struct{}
+
+	// generation changes whenever endpoint connection state is replaced.
+	generation uint64
 
 	// stats holds connection statistics.
 	stats DestinationStats
@@ -257,7 +278,9 @@ func (p *connPool) put(conn *pooledConn) bool {
 		return false
 	}
 
-	p.inUse--
+	if p.inUse > 0 {
+		p.inUse--
+	}
 
 	if len(p.conns) >= p.maxSize {
 		return false
@@ -279,6 +302,21 @@ func (p *connPool) close() {
 		}
 	}
 	p.conns = nil
+}
+
+// remove discards a connection from the pool and fixes checked-out accounting.
+func (p *connPool) remove(conn *tls.Conn) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, pooled := range p.conns {
+		if pooled.conn == conn {
+			p.conns = append(p.conns[:i], p.conns[i+1:]...)
+			return
+		}
+	}
+	if p.inUse > 0 {
+		p.inUse--
+	}
 }
 
 // size returns the current pool size (available connections).
@@ -319,6 +357,38 @@ func NewManager(config DestinationConfig) (*Manager, error) {
 	// Mutual TLS is REQUIRED for X2/X3 delivery per ETSI TS 103 221-2.
 	if config.TLSCertFile == "" || config.TLSKeyFile == "" {
 		return nil, ErrMutualTLSRequired
+	}
+	defaults := DefaultConfig()
+	if config.DialTimeout <= 0 {
+		config.DialTimeout = defaults.DialTimeout
+	}
+	if config.WriteTimeout <= 0 {
+		config.WriteTimeout = defaults.WriteTimeout
+	}
+	if config.InitialBackoff <= 0 {
+		config.InitialBackoff = defaults.InitialBackoff
+	}
+	if config.MaxBackoff <= 0 {
+		config.MaxBackoff = defaults.MaxBackoff
+	}
+	if config.BackoffMultiplier <= 1 {
+		config.BackoffMultiplier = defaults.BackoffMultiplier
+	}
+	if config.MaxPoolSize <= 0 {
+		config.MaxPoolSize = defaults.MaxPoolSize
+	}
+	if config.KeepAliveIdle <= 0 {
+		config.KeepAliveIdle = defaults.KeepAliveIdle
+	}
+	if config.KeepAliveInterval <= 0 {
+		config.KeepAliveInterval = defaults.KeepAliveInterval
+	}
+	if config.KeepAliveCount <= 0 {
+		config.KeepAliveCount = defaults.KeepAliveCount
+	}
+	if config.InitialBackoff > config.MaxBackoff {
+		return nil, fmt.Errorf("initial reconnect backoff %s exceeds maximum %s",
+			config.InitialBackoff, config.MaxBackoff)
 	}
 
 	// Build TLS config.
@@ -459,10 +529,12 @@ func (m *Manager) AddDestination(dest *li.Destination) error {
 	}
 
 	state := &destinationState{
-		dest:    dest,
-		pool:    newConnPool(m.config.MaxPoolSize),
-		state:   connStateDisconnected,
-		backoff: m.config.InitialBackoff,
+		dest:        dest,
+		pool:        newConnPool(m.config.MaxPoolSize),
+		state:       connStateDisconnected,
+		backoff:     m.config.InitialBackoff,
+		connections: make(map[*tls.Conn]struct{}),
+		generation:  1,
 	}
 
 	m.destinations[dest.DID] = state
@@ -516,13 +588,18 @@ func (m *Manager) UpdateDestination(dest *li.Destination) error {
 	oldDest := state.dest
 	addressChanged := oldDest.Address != dest.Address || oldDest.Port != dest.Port
 	state.dest = dest
+	if addressChanged {
+		state.generation++
+	}
 	state.mu.Unlock()
 
 	// Reconnect if address changed.
 	if addressChanged {
 		m.closeDestinationLocked(dest.DID, state)
+		state.mu.Lock()
 		state.pool = newConnPool(m.config.MaxPoolSize)
 		state.backoff = m.config.InitialBackoff
+		state.mu.Unlock()
 
 		m.wg.Add(1)
 		go m.connectDestination(dest.DID)
@@ -575,8 +652,12 @@ func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, 
 		return nil, ErrDestinationNotFound
 	}
 
+	state.mu.RLock()
+	pool := state.pool
+	state.mu.RUnlock()
+
 	// Try to get from pool.
-	if pooled := state.pool.get(); pooled != nil {
+	if pooled := pool.get(); pooled != nil {
 		return pooled.conn, nil
 	}
 
@@ -590,6 +671,8 @@ func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, 
 	if err != nil {
 		return nil, err
 	}
+	m.registerConnection(state, conn)
+	m.watchConnection(did, conn)
 
 	return conn, nil
 }
@@ -607,13 +690,25 @@ func (m *Manager) ReleaseConnection(did uuid.UUID, conn *tls.Conn) {
 		return
 	}
 
+	state.mu.RLock()
+	_, healthy := state.connections[conn]
+	if !healthy {
+		state.mu.RUnlock()
+		if err := conn.Close(); err != nil {
+			logger.Debug("error closing invalid released connection", "error", err)
+		}
+		return
+	}
+
 	pooled := &pooledConn{
 		conn:      conn,
 		createdAt: time.Now(),
 		lastUsed:  time.Now(),
 	}
 
-	if !state.pool.put(pooled) {
+	put := state.pool.put(pooled)
+	state.mu.RUnlock()
+	if !put {
 		if err := conn.Close(); err != nil {
 			logger.Debug("error closing excess connection", "error", err)
 		}
@@ -622,25 +717,35 @@ func (m *Manager) ReleaseConnection(did uuid.UUID, conn *tls.Conn) {
 
 // InvalidateConnection closes a connection that encountered an error.
 func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
-	if err := conn.Close(); err != nil {
-		logger.Debug("error closing invalidated connection", "error", err)
-	}
-
 	m.mu.RLock()
 	state, exists := m.destinations[did]
 	m.mu.RUnlock()
 
 	if !exists {
+		if err := conn.Close(); err != nil {
+			logger.Debug("error closing invalidated connection", "error", err)
+		}
 		return
 	}
 
 	state.mu.Lock()
+	if _, exists := state.connections[conn]; !exists {
+		state.mu.Unlock()
+		return
+	}
+	delete(state.connections, conn)
 	state.stats.Disconnects++
+	remaining := len(state.connections)
+	pool := state.pool
 	state.mu.Unlock()
+	pool.remove(conn)
+
+	if err := conn.Close(); err != nil {
+		logger.Debug("error closing invalidated connection", "error", err)
+	}
 
 	// Check if we need to reconnect.
-	if state.pool.size() == 0 && atomic.LoadInt32(&state.state) == connStateConnected {
-		atomic.StoreInt32(&state.state, connStateDisconnected)
+	if remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) {
 		m.scheduleReconnect(did, state)
 	}
 }
@@ -712,12 +817,24 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	}
 
 	state.mu.Lock()
+	generation := state.generation
 	state.stats.ConnectAttempts++
 	state.lastConnectAttempt = time.Now()
 	state.mu.Unlock()
 
 	// Dial the destination.
 	conn, err := m.dialDestination(state)
+	state.mu.RLock()
+	currentGeneration := state.generation
+	state.mu.RUnlock()
+	if currentGeneration != generation {
+		if conn != nil {
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Debug("error closing superseded destination connection", "error", closeErr)
+			}
+		}
+		return
+	}
 	if err != nil {
 		atomic.StoreInt32(&state.state, connStateDisconnected)
 
@@ -737,12 +854,16 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	}
 
 	// Put the initial connection in the pool.
+	m.registerConnection(state, conn)
 	pooled := &pooledConn{
 		conn:      conn,
 		createdAt: time.Now(),
 		lastUsed:  time.Now(),
 	}
-	state.pool.put(pooled)
+	state.mu.RLock()
+	pool := state.pool
+	state.mu.RUnlock()
+	pool.put(pooled)
 
 	atomic.StoreInt32(&state.state, connStateConnected)
 
@@ -752,6 +873,8 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	state.lastError = nil
 	dest := state.dest
 	state.mu.Unlock()
+
+	m.watchConnection(did, conn)
 
 	logger.Info("destination connected",
 		"did", did,
@@ -777,9 +900,16 @@ func (m *Manager) dialDestinationWithContext(ctx context.Context, state *destina
 
 	address := fmt.Sprintf("%s:%d", dest.Address, dest.Port)
 
-	// Create dialer with keepalive.
+	// Create dialer with an explicit keepalive policy so idle half-closed peers
+	// are detected even when no LI traffic is being written.
 	dialer := &net.Dialer{
 		KeepAlive: m.config.KeepAliveInterval,
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     m.config.KeepAliveIdle,
+			Interval: m.config.KeepAliveInterval,
+			Count:    m.config.KeepAliveCount,
+		},
 	}
 
 	// Dial TCP using the provided context for timeout/cancellation.
@@ -847,6 +977,42 @@ func (m *Manager) dialDestinationWithContext(ctx context.Context, state *destina
 	return tlsConn, nil
 }
 
+// registerConnection tracks a live connection before it becomes available.
+func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn) {
+	state.mu.Lock()
+	if state.connections == nil {
+		state.connections = make(map[*tls.Conn]struct{})
+	}
+	state.connections[conn] = struct{}{}
+	state.mu.Unlock()
+}
+
+// watchConnection detects peer EOF while the unidirectional X2/X3 stream is
+// otherwise idle.
+func (m *Manager) watchConnection(did uuid.UUID, conn *tls.Conn) {
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		buf := make([]byte, 1)
+		for {
+			_, err := conn.Read(buf)
+			if err == nil {
+				// X2/X3 delivery is unidirectional. Ignore unexpected inbound
+				// bytes but continue watching for peer closure.
+				continue
+			}
+			if !m.shuttingDown.Load() {
+				logger.Info("destination connection closed by peer",
+					"did", did,
+					"error", err,
+				)
+			}
+			m.InvalidateConnection(did, conn)
+			return
+		}
+	}()
+}
+
 // scheduleReconnect schedules a reconnection attempt with exponential backoff.
 func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 	if m.shuttingDown.Load() {
@@ -888,9 +1054,24 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 		state.reconnectTimer.Stop()
 		state.reconnectTimer = nil
 	}
+	state.generation++
+	connections := make([]*tls.Conn, 0, len(state.connections))
+	for conn := range state.connections {
+		connections = append(connections, conn)
+		delete(state.connections, conn)
+	}
+	pool := state.pool
 	state.mu.Unlock()
 
-	state.pool.close()
+	pool.close()
+	for _, conn := range connections {
+		if err := conn.Close(); err != nil {
+			logger.Debug("error closing destination connection",
+				"did", did,
+				"error", err,
+			)
+		}
+	}
 	atomic.StoreInt32(&state.state, connStateDisconnected)
 }
 

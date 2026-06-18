@@ -24,10 +24,18 @@ var (
 	liADMFTLSCAFile   string
 	liADMFKeepalive   string
 	// LI Delivery (X2/X3) TLS flags
-	liDeliveryTLSCertFile   string
-	liDeliveryTLSKeyFile    string
-	liDeliveryTLSCAFile     string
-	liDeliveryTLSPinnedCert []string
+	liDeliveryTLSCertFile       string
+	liDeliveryTLSKeyFile        string
+	liDeliveryTLSCAFile         string
+	liDeliveryTLSPinnedCert     []string
+	liDeliveryQueueSize         int
+	liDeliverySendTimeout       time.Duration
+	liDeliveryInitialBackoff    time.Duration
+	liDeliveryMaxBackoff        time.Duration
+	liDeliveryKeepAliveIdle     time.Duration
+	liDeliveryKeepAliveInterval time.Duration
+	liDeliveryKeepAliveCount    int
+	liDeliveryShutdownTimeout   time.Duration
 	// LI ADMF state sync flags
 	liADMFSyncOnStartup     bool
 	liADMFSyncTimeout       time.Duration
@@ -48,10 +56,18 @@ type LIConfig struct {
 	ADMFTLSCAFile   string
 	ADMFKeepalive   string
 	// Delivery (X2/X3) TLS
-	DeliveryTLSCertFile   string
-	DeliveryTLSKeyFile    string
-	DeliveryTLSCAFile     string
-	DeliveryTLSPinnedCert []string
+	DeliveryTLSCertFile       string
+	DeliveryTLSKeyFile        string
+	DeliveryTLSCAFile         string
+	DeliveryTLSPinnedCert     []string
+	DeliveryQueueSize         int
+	DeliverySendTimeout       time.Duration
+	DeliveryInitialBackoff    time.Duration
+	DeliveryMaxBackoff        time.Duration
+	DeliveryKeepAliveIdle     time.Duration
+	DeliveryKeepAliveInterval time.Duration
+	DeliveryKeepAliveCount    int
+	DeliveryShutdownTimeout   time.Duration
 	// ADMF state sync
 	ADMFSyncOnStartup     bool
 	ADMFSyncTimeout       time.Duration
@@ -77,6 +93,14 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&liDeliveryTLSKeyFile, "li-delivery-tls-key", "", "Path to client TLS key for X2/X3 delivery")
 	cmd.Flags().StringVar(&liDeliveryTLSCAFile, "li-delivery-tls-ca", "", "Path to CA certificate for verifying MDF servers")
 	cmd.Flags().StringSliceVar(&liDeliveryTLSPinnedCert, "li-delivery-tls-pinned-cert", nil, "Pinned certificate fingerprints for MDF servers (SHA256, hex encoded, comma-separated)")
+	cmd.Flags().IntVar(&liDeliveryQueueSize, "li-delivery-queue-size", 10000, "Maximum queued X2/X3 PDUs per destination")
+	cmd.Flags().DurationVar(&liDeliverySendTimeout, "li-delivery-send-timeout", 5*time.Second, "Timeout for each X2/X3 delivery write")
+	cmd.Flags().DurationVar(&liDeliveryInitialBackoff, "li-delivery-reconnect-initial-backoff", 500*time.Millisecond, "Initial MDF reconnect backoff")
+	cmd.Flags().DurationVar(&liDeliveryMaxBackoff, "li-delivery-reconnect-max-backoff", 5*time.Second, "Maximum MDF reconnect backoff")
+	cmd.Flags().DurationVar(&liDeliveryKeepAliveIdle, "li-delivery-keepalive-idle", 15*time.Second, "Idle time before MDF TCP keepalive probes")
+	cmd.Flags().DurationVar(&liDeliveryKeepAliveInterval, "li-delivery-keepalive-interval", 5*time.Second, "Interval between MDF TCP keepalive probes")
+	cmd.Flags().IntVar(&liDeliveryKeepAliveCount, "li-delivery-keepalive-count", 3, "Failed MDF TCP keepalive probes before disconnect")
+	cmd.Flags().DurationVar(&liDeliveryShutdownTimeout, "li-delivery-shutdown-timeout", 10*time.Second, "Maximum time to flush LI delivery queues during shutdown")
 	// LI ADMF state sync flags
 	cmd.Flags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
 	cmd.Flags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
@@ -101,6 +125,14 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("processor.li.delivery_tls_key", cmd.Flags().Lookup("li-delivery-tls-key"))
 	_ = viper.BindPFlag("processor.li.delivery_tls_ca", cmd.Flags().Lookup("li-delivery-tls-ca"))
 	_ = viper.BindPFlag("processor.li.delivery_tls_pinned_cert", cmd.Flags().Lookup("li-delivery-tls-pinned-cert"))
+	_ = viper.BindPFlag("processor.li.delivery_queue_size", cmd.Flags().Lookup("li-delivery-queue-size"))
+	_ = viper.BindPFlag("processor.li.delivery_send_timeout", cmd.Flags().Lookup("li-delivery-send-timeout"))
+	_ = viper.BindPFlag("processor.li.delivery_reconnect_initial_backoff", cmd.Flags().Lookup("li-delivery-reconnect-initial-backoff"))
+	_ = viper.BindPFlag("processor.li.delivery_reconnect_max_backoff", cmd.Flags().Lookup("li-delivery-reconnect-max-backoff"))
+	_ = viper.BindPFlag("processor.li.delivery_keepalive_idle", cmd.Flags().Lookup("li-delivery-keepalive-idle"))
+	_ = viper.BindPFlag("processor.li.delivery_keepalive_interval", cmd.Flags().Lookup("li-delivery-keepalive-interval"))
+	_ = viper.BindPFlag("processor.li.delivery_keepalive_count", cmd.Flags().Lookup("li-delivery-keepalive-count"))
+	_ = viper.BindPFlag("processor.li.delivery_shutdown_timeout", cmd.Flags().Lookup("li-delivery-shutdown-timeout"))
 	// LI ADMF state sync viper bindings
 	_ = viper.BindPFlag("processor.li.admf_sync_on_startup", cmd.Flags().Lookup("li-admf-sync-on-startup"))
 	_ = viper.BindPFlag("processor.li.admf_sync_timeout", cmd.Flags().Lookup("li-admf-sync-timeout"))
@@ -110,20 +142,28 @@ func BindLIViperFlags(cmd *cobra.Command) {
 // GetLIConfig returns the LI configuration from flags and viper.
 func GetLIConfig() *LIConfig {
 	return &LIConfig{
-		Enabled:               cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),
-		X1ListenAddr:          cmdutil.GetStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
-		X1TLSCertFile:         cmdutil.GetStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
-		X1TLSKeyFile:          cmdutil.GetStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
-		X1TLSCAFile:           cmdutil.GetStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
-		ADMFEndpoint:          cmdutil.GetStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
-		ADMFTLSCertFile:       cmdutil.GetStringConfig("processor.li.admf_tls_cert", liADMFTLSCertFile),
-		ADMFTLSKeyFile:        cmdutil.GetStringConfig("processor.li.admf_tls_key", liADMFTLSKeyFile),
-		ADMFTLSCAFile:         cmdutil.GetStringConfig("processor.li.admf_tls_ca", liADMFTLSCAFile),
-		ADMFKeepalive:         cmdutil.GetStringConfig("processor.li.admf_keepalive", liADMFKeepalive),
-		DeliveryTLSCertFile:   cmdutil.GetStringConfig("processor.li.delivery_tls_cert", liDeliveryTLSCertFile),
-		DeliveryTLSKeyFile:    cmdutil.GetStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
-		DeliveryTLSCAFile:     cmdutil.GetStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
-		DeliveryTLSPinnedCert: cmdutil.GetStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
+		Enabled:                   cmdutil.GetBoolConfig("processor.li.enabled", liEnabled),
+		X1ListenAddr:              cmdutil.GetStringConfig("processor.li.x1_listen_addr", liX1ListenAddr),
+		X1TLSCertFile:             cmdutil.GetStringConfig("processor.li.x1_tls_cert", liX1TLSCertFile),
+		X1TLSKeyFile:              cmdutil.GetStringConfig("processor.li.x1_tls_key", liX1TLSKeyFile),
+		X1TLSCAFile:               cmdutil.GetStringConfig("processor.li.x1_tls_ca", liX1TLSCAFile),
+		ADMFEndpoint:              cmdutil.GetStringConfig("processor.li.admf_endpoint", liADMFEndpoint),
+		ADMFTLSCertFile:           cmdutil.GetStringConfig("processor.li.admf_tls_cert", liADMFTLSCertFile),
+		ADMFTLSKeyFile:            cmdutil.GetStringConfig("processor.li.admf_tls_key", liADMFTLSKeyFile),
+		ADMFTLSCAFile:             cmdutil.GetStringConfig("processor.li.admf_tls_ca", liADMFTLSCAFile),
+		ADMFKeepalive:             cmdutil.GetStringConfig("processor.li.admf_keepalive", liADMFKeepalive),
+		DeliveryTLSCertFile:       cmdutil.GetStringConfig("processor.li.delivery_tls_cert", liDeliveryTLSCertFile),
+		DeliveryTLSKeyFile:        cmdutil.GetStringConfig("processor.li.delivery_tls_key", liDeliveryTLSKeyFile),
+		DeliveryTLSCAFile:         cmdutil.GetStringConfig("processor.li.delivery_tls_ca", liDeliveryTLSCAFile),
+		DeliveryTLSPinnedCert:     cmdutil.GetStringSliceConfig("processor.li.delivery_tls_pinned_cert", liDeliveryTLSPinnedCert),
+		DeliveryQueueSize:         cmdutil.GetIntConfig("processor.li.delivery_queue_size", liDeliveryQueueSize),
+		DeliverySendTimeout:       viper.GetDuration("processor.li.delivery_send_timeout"),
+		DeliveryInitialBackoff:    viper.GetDuration("processor.li.delivery_reconnect_initial_backoff"),
+		DeliveryMaxBackoff:        viper.GetDuration("processor.li.delivery_reconnect_max_backoff"),
+		DeliveryKeepAliveIdle:     viper.GetDuration("processor.li.delivery_keepalive_idle"),
+		DeliveryKeepAliveInterval: viper.GetDuration("processor.li.delivery_keepalive_interval"),
+		DeliveryKeepAliveCount:    cmdutil.GetIntConfig("processor.li.delivery_keepalive_count", liDeliveryKeepAliveCount),
+		DeliveryShutdownTimeout:   viper.GetDuration("processor.li.delivery_shutdown_timeout"),
 		// ADMF state sync
 		ADMFSyncOnStartup:     cmdutil.GetBoolConfig("processor.li.admf_sync_on_startup", liADMFSyncOnStartup),
 		ADMFSyncTimeout:       viper.GetDuration("processor.li.admf_sync_timeout"),

@@ -5,6 +5,7 @@ package tap
 import (
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/spf13/cobra"
 )
 
@@ -23,10 +24,18 @@ type LIConfig struct {
 	ADMFTLSCAFile   string
 	ADMFKeepalive   string
 	// Delivery (X2/X3) TLS
-	DeliveryTLSCertFile   string
-	DeliveryTLSKeyFile    string
-	DeliveryTLSCAFile     string
-	DeliveryTLSPinnedCert []string
+	DeliveryTLSCertFile       string
+	DeliveryTLSKeyFile        string
+	DeliveryTLSCAFile         string
+	DeliveryTLSPinnedCert     []string
+	DeliveryQueueSize         int
+	DeliverySendTimeout       time.Duration
+	DeliveryInitialBackoff    time.Duration
+	DeliveryMaxBackoff        time.Duration
+	DeliveryKeepAliveIdle     time.Duration
+	DeliveryKeepAliveInterval time.Duration
+	DeliveryKeepAliveCount    int
+	DeliveryShutdownTimeout   time.Duration
 	// ADMF state sync
 	ADMFSyncOnStartup     bool
 	ADMFSyncTimeout       time.Duration
@@ -43,3 +52,5 @@ func BindLIViperFlags(cmd *cobra.Command) {}
 func GetLIConfig() *LIConfig {
 	return nil
 }
+
+func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {}

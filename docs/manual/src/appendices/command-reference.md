@@ -175,6 +175,14 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 | `--li-delivery-tls-cert` | string | | X2/X3 delivery client certificate |
 | `--li-delivery-tls-key` | string | | X2/X3 delivery client private key |
 | `--li-delivery-tls-ca` | string | | X2/X3 delivery CA certificate (MDF verification) |
+| `--li-delivery-queue-size` | int | `10000` | Maximum queued X2/X3 PDUs per destination |
+| `--li-delivery-send-timeout` | duration | `5s` | Timeout for each delivery write |
+| `--li-delivery-reconnect-initial-backoff` | duration | `500ms` | Initial MDF reconnect backoff |
+| `--li-delivery-reconnect-max-backoff` | duration | `5s` | Maximum MDF reconnect backoff |
+| `--li-delivery-keepalive-idle` | duration | `15s` | Idle time before TCP keepalive probes |
+| `--li-delivery-keepalive-interval` | duration | `5s` | TCP keepalive probe interval |
+| `--li-delivery-keepalive-count` | int | `3` | Failed probes before disconnect |
+| `--li-delivery-shutdown-timeout` | duration | `10s` | Maximum LI queue flush time during shutdown |
 | `--li-admf-endpoint` | string | | ADMF HTTPS endpoint URL |
 | `--li-admf-tls-cert` | string | | Client certificate for ADMF connection |
 | `--li-admf-tls-key` | string | | Client private key for ADMF connection |

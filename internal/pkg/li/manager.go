@@ -116,7 +116,9 @@ type Manager struct {
 
 	// onDestinationCreated is called when a new destination is created via X1.
 	// This allows the processor to bridge destinations to the delivery manager.
-	onDestinationCreated func(dest *Destination)
+	onDestinationCreated  func(dest *Destination)
+	onDestinationModified func(dest *Destination)
+	onDestinationRemoved  func(did uuid.UUID)
 
 	// stats tracks LI processing statistics.
 	stats ManagerStats
@@ -565,6 +567,20 @@ func (m *Manager) SetDestinationCreatedCallback(cb func(dest *Destination)) {
 	m.onDestinationCreated = cb
 }
 
+// SetDestinationModifiedCallback sets a callback invoked when destinations are modified via X1.
+func (m *Manager) SetDestinationModifiedCallback(cb func(dest *Destination)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onDestinationModified = cb
+}
+
+// SetDestinationRemovedCallback sets a callback invoked when destinations are removed via X1.
+func (m *Manager) SetDestinationRemovedCallback(cb func(did uuid.UUID)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onDestinationRemoved = cb
+}
+
 // ProcessPacket processes a packet that has already been matched by the
 // filter infrastructure.
 //
@@ -824,8 +840,15 @@ func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
 		}
+		return err
 	}
-	return err
+	m.mu.RLock()
+	cb := m.onDestinationRemoved
+	m.mu.RUnlock()
+	if cb != nil {
+		cb(did)
+	}
+	return nil
 }
 
 // ModifyDestinationX1 modifies a destination via X1 request.
@@ -843,8 +866,15 @@ func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
 		}
+		return err
 	}
-	return err
+	m.mu.RLock()
+	cb := m.onDestinationModified
+	m.mu.RUnlock()
+	if cb != nil {
+		cb(liDest)
+	}
+	return nil
 }
 
 // managerTaskAdapter adapts the Manager to the x1.TaskManager interface.

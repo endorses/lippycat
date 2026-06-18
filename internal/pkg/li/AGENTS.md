@@ -388,22 +388,24 @@ type destinationState struct {
 
 **File:** `delivery/client.go`
 
-Async delivery with backpressure:
+Ordered asynchronous delivery with reconnect buffering:
 
 ```go
 type Client struct {
-    manager   *Manager
-    queue     chan *deliveryItem    // Bounded queue
-    sequences map[streamKey]*uint32 // Per-stream sequence
+    manager           *Manager
+    destinationQueues map[uuid.UUID]*destinationQueue
+    sequences         map[streamKey]*uint32
 }
 ```
 
 **Key Features:**
-- Async queue with configurable size (default: 10K)
+- Bounded queue per destination (default: 10K)
+- FIFO delivery with one dispatcher per destination
+- Items remain queued across transient disconnects
+- Drop-oldest overflow with reason-labelled statistics
 - Batching for efficiency (default: 100 PDUs/batch)
 - Per-XID+destination sequence numbering
-- Multiple worker goroutines
-- Backpressure via queue full errors
+- At-least-once retry semantics after ambiguous writes
 
 **Methods:**
 - `SendX2(xid, destIDs, data)` - Queue X2 PDU (async)

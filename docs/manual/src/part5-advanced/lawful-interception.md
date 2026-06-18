@@ -423,7 +423,13 @@ The delivery subsystem uses asynchronous queuing with backpressure to handle hig
 | Delivery throughput (single destination) | ~100K PDUs/s |
 | Delivery throughput (multiple destinations) | ~50K PDUs/s per destination |
 
-Delivery uses connection pooling per MDF destination, batching (default: 100 PDUs per batch), and a bounded async queue (default: 10,000 items). When the queue fills, the system applies backpressure rather than dropping PDUs.
+Delivery uses connection pooling, one ordered dispatcher per MDF destination,
+batching (default: 100 PDUs per batch), and a bounded queue per destination
+(default: 10,000 items). PDUs remain queued while a destination reconnects and
+are flushed in FIFO order after recovery. If a sustained outage fills a queue,
+the oldest PDU is dropped and recorded in the destination delivery statistics.
+Retries provide at-least-once delivery; an ambiguous TCP write can therefore
+produce a duplicate at the MDF.
 
 ## Filter Integration
 

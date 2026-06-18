@@ -7,6 +7,7 @@
 package processor
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -161,6 +162,11 @@ func (p *Processor) initLIManager() {
 		destConfig.TLSCertFile = p.config.LIDeliveryTLSCertFile
 		destConfig.TLSKeyFile = p.config.LIDeliveryTLSKeyFile
 		destConfig.TLSCAFile = p.config.LIDeliveryTLSCAFile
+		destConfig.InitialBackoff = p.config.LIDeliveryInitialBackoff
+		destConfig.MaxBackoff = p.config.LIDeliveryMaxBackoff
+		destConfig.KeepAliveIdle = p.config.LIDeliveryKeepAliveIdle
+		destConfig.KeepAliveInterval = p.config.LIDeliveryKeepAliveInterval
+		destConfig.KeepAliveCount = p.config.LIDeliveryKeepAliveCount
 		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
 			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert
 		}
@@ -170,7 +176,11 @@ func (p *Processor) initLIManager() {
 		if err != nil {
 			logger.Error("Failed to create LI delivery manager", "error", err)
 		} else {
-			liDeliveryClient = delivery.NewClient(liDeliveryMgr, delivery.ClientConfig{})
+			clientConfig := delivery.DefaultClientConfig()
+			clientConfig.QueueSize = p.config.LIDeliveryQueueSize
+			clientConfig.SendTimeout = p.config.LIDeliverySendTimeout
+			clientConfig.ShutdownTimeout = p.config.LIDeliveryShutdownTimeout
+			liDeliveryClient = delivery.NewClient(liDeliveryMgr, clientConfig)
 			logger.Info("LI delivery client initialized",
 				"cert", p.config.LIDeliveryTLSCertFile,
 				"ca", p.config.LIDeliveryTLSCAFile,
@@ -210,7 +220,7 @@ func (p *Processor) initLIManager() {
 					if err := liDeliveryClient.SendX2(task.XID, task.DestinationIDs, data); err != nil {
 						logger.Debug("X2 delivery queued failed", "xid", task.XID, "error", err)
 					} else {
-						logger.Debug("X2 IRI delivered",
+						logger.Debug("X2 IRI queued",
 							"xid", task.XID,
 							"correlation_id", pdu.Header.CorrelationID,
 							"size", len(data),
@@ -267,7 +277,7 @@ func (p *Processor) initLIManager() {
 						))
 						buf.(*delivery.ReorderBuffer).DeliverX3(ssrc, rtpSeq, data)
 					}
-					logger.Debug("X3 CC delivered via reorder buffer",
+					logger.Debug("X3 CC queued via reorder buffer",
 						"xid", task.XID,
 						"correlation_id", pdu.Header.CorrelationID,
 						"ssrc", pkt.VoIPData.SSRC,
@@ -325,6 +335,28 @@ func (p *Processor) startLIManager() error {
 					"did", dest.DID,
 					"address", dest.Address,
 					"port", dest.Port,
+				)
+			}
+		})
+		p.liManager.SetDestinationModifiedCallback(func(dest *li.Destination) {
+			if err := liDeliveryMgr.UpdateDestination(dest); err != nil {
+				logger.Warn("Failed to update delivery destination",
+					"did", dest.DID,
+					"address", dest.Address,
+					"port", dest.Port,
+					"error", err,
+				)
+			}
+		})
+		p.liManager.SetDestinationRemovedCallback(func(did uuid.UUID) {
+			if liDeliveryClient != nil {
+				liDeliveryClient.RemoveDestination(did)
+			}
+			if err := liDeliveryMgr.RemoveDestination(did); err != nil &&
+				!errors.Is(err, delivery.ErrDestinationNotFound) {
+				logger.Warn("Failed to remove delivery destination",
+					"did", did,
+					"error", err,
 				)
 			}
 		})

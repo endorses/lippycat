@@ -357,6 +357,7 @@ func TestDestinationResponseDetailsToDestination_FullyPopulated(t *testing.T) {
 	assert.Equal(t, 9999, dest.Port)
 	assert.True(t, dest.X2Enabled)
 	assert.True(t, dest.X3Enabled)
+	assert.Equal(t, "X2andX3", dest.ProtocolType)
 	assert.Equal(t, "Test MDF Endpoint", dest.Description)
 }
 
@@ -382,6 +383,7 @@ func TestDestinationResponseDetailsToDestination_X2Only(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, dest.X2Enabled)
 	assert.False(t, dest.X3Enabled)
+	assert.Equal(t, "X2Only", dest.ProtocolType)
 }
 
 func TestDestinationResponseDetailsToDestination_X3Only(t *testing.T) {
@@ -406,6 +408,7 @@ func TestDestinationResponseDetailsToDestination_X3Only(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, dest.X2Enabled)
 	assert.True(t, dest.X3Enabled)
+	assert.Equal(t, "X3Only", dest.ProtocolType)
 }
 
 func TestDestinationResponseDetailsToDestination_IPv6(t *testing.T) {

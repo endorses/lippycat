@@ -8,12 +8,14 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -327,6 +329,10 @@ func (c *Client) enqueue(pduType PDUType, xid uuid.UUID, destIDs []uuid.UUID, da
 	immutableData := append([]byte(nil), data...)
 	now := time.Now()
 	for _, did := range append([]uuid.UUID(nil), destIDs...) {
+		dest, err := c.manager.GetDestination(did)
+		if err == nil && !destinationAcceptsPDU(dest, pduType) {
+			continue
+		}
 		q := c.getOrCreateQueue(did)
 		item := &deliveryItem{pduType: pduType, xid: xid, data: immutableData, queued: now}
 		dropped, ok := q.enqueue(item)
@@ -346,6 +352,21 @@ func (c *Client) enqueue(pduType PDUType, xid uuid.UUID, destIDs []uuid.UUID, da
 		atomic.AddUint64(&c.stats.X3Queued, 1)
 	}
 	return nil
+}
+
+func destinationAcceptsPDU(dest *li.Destination, pduType PDUType) bool {
+	switch strings.ToUpper(strings.TrimSpace(dest.ProtocolType)) {
+	case "X2", "X2ONLY":
+		return pduType == PDUTypeX2
+	case "X3", "X3ONLY":
+		return pduType == PDUTypeX3
+	case "X2ANDX3":
+		return pduType == PDUTypeX2 || pduType == PDUTypeX3
+	case "HI3":
+		return false
+	default:
+		return true
+	}
 }
 
 func (c *Client) getOrCreateQueue(did uuid.UUID) *destinationQueue {

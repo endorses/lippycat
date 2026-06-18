@@ -787,12 +787,13 @@ func (a *managerDestinationAdapter) ModifyDestination(did uuid.UUID, dest *x1.De
 // CreateDestinationX1 creates a destination from X1 request data.
 func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
 	liDest := &Destination{
-		DID:         dest.DID,
-		Address:     dest.Address,
-		Port:        dest.Port,
-		X2Enabled:   dest.X2Enabled,
-		X3Enabled:   dest.X3Enabled,
-		Description: dest.Description,
+		DID:          dest.DID,
+		Address:      dest.Address,
+		Port:         dest.Port,
+		X2Enabled:    dest.X2Enabled,
+		X3Enabled:    dest.X3Enabled,
+		ProtocolType: dest.ProtocolType,
+		Description:  dest.Description,
 	}
 	err := m.registry.CreateDestination(liDest)
 	if err != nil {
@@ -824,12 +825,13 @@ func (m *Manager) GetDestinationX1(did uuid.UUID) (*x1.Destination, error) {
 		return nil, err
 	}
 	return &x1.Destination{
-		DID:         liDest.DID,
-		Address:     liDest.Address,
-		Port:        liDest.Port,
-		X2Enabled:   liDest.X2Enabled,
-		X3Enabled:   liDest.X3Enabled,
-		Description: liDest.Description,
+		DID:          liDest.DID,
+		Address:      liDest.Address,
+		Port:         liDest.Port,
+		X2Enabled:    liDest.X2Enabled,
+		X3Enabled:    liDest.X3Enabled,
+		ProtocolType: liDest.ProtocolType,
+		Description:  liDest.Description,
 	}, nil
 }
 
@@ -854,12 +856,13 @@ func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
 // ModifyDestinationX1 modifies a destination via X1 request.
 func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error {
 	liDest := &Destination{
-		DID:         dest.DID,
-		Address:     dest.Address,
-		Port:        dest.Port,
-		X2Enabled:   dest.X2Enabled,
-		X3Enabled:   dest.X3Enabled,
-		Description: dest.Description,
+		DID:          dest.DID,
+		Address:      dest.Address,
+		Port:         dest.Port,
+		X2Enabled:    dest.X2Enabled,
+		X3Enabled:    dest.X3Enabled,
+		ProtocolType: dest.ProtocolType,
+		Description:  dest.Description,
 	}
 	err := m.registry.ModifyDestination(did, liDest)
 	if err != nil {

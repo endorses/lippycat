@@ -1754,18 +1754,18 @@ func TestMaybeNotifyCallUpdates_Throttling(t *testing.T) {
 	}
 
 	// First call should update
-	client.maybeNotifyCallUpdates()
+	client.maybeNotifyCallUpdates(false)
 	assert.Len(t, handler.CallUpdates, 1, "first call should notify")
 
 	// Immediate second call should be throttled
-	client.maybeNotifyCallUpdates()
+	client.maybeNotifyCallUpdates(false)
 	assert.Len(t, handler.CallUpdates, 1, "second call should be throttled")
 
 	// Wait for throttle period
 	time.Sleep(600 * time.Millisecond)
 
 	// Third call should update
-	client.maybeNotifyCallUpdates()
+	client.maybeNotifyCallUpdates(false)
 	assert.Len(t, handler.CallUpdates, 2, "third call should notify after throttle")
 }
 
@@ -1779,7 +1779,7 @@ func TestMaybeNotifyCallUpdates_EmptyCalls(t *testing.T) {
 	}
 
 	// No calls exist
-	client.maybeNotifyCallUpdates()
+	client.maybeNotifyCallUpdates(false)
 
 	// Handler should not be called with empty calls
 	assert.Empty(t, handler.CallUpdates)
@@ -1812,7 +1812,7 @@ func TestMaybeNotifyCallUpdates_DurationCalculation(t *testing.T) {
 		EndTime:   endTime,
 	}
 
-	client.maybeNotifyCallUpdates()
+	client.maybeNotifyCallUpdates(false)
 
 	assert.Len(t, handler.CallUpdates, 1)
 	calls := handler.CallUpdates[0]
@@ -1829,6 +1829,62 @@ func TestMaybeNotifyCallUpdates_DurationCalculation(t *testing.T) {
 			// Ended call duration should be approximately 5 seconds
 			assert.GreaterOrEqual(t, call.Duration, 5*time.Second)
 			assert.LessOrEqual(t, call.Duration, 6*time.Second)
+		}
+	}
+}
+
+// TestUpdateCallState_BYESignalsTerminalFlush verifies that a BYE transitions a
+// call to ENDED and signals (via the return value) that the update must be
+// flushed immediately, and that a forced notify is not throttled. This guards
+// the bug where a call's final BYE arrives in the last packet batch, the ENDED
+// state is swallowed by the throttle, and the TUI shows the call active forever.
+func TestUpdateCallState_BYESignalsTerminalFlush(t *testing.T) {
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// Establish an active call.
+	client.calls["call-xyz"] = &types.CallInfo{
+		CallID:    "call-xyz",
+		State:     "ACTIVE",
+		StartTime: time.Now().Add(-30 * time.Second),
+	}
+
+	// A non-terminal packet must NOT request a flush.
+	infoPkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata:    &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: "call-xyz", Method: "INFO"}},
+	}
+	assert.False(t, client.updateCallState(infoPkt, "hunter-1"), "INFO on an active call is not terminal")
+
+	// The BYE must end the call AND request a flush.
+	byePkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata:    &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: "call-xyz", Method: "BYE", CseqMethod: "BYE"}},
+	}
+	becameTerminal := client.updateCallState(byePkt, "hunter-1")
+	assert.True(t, becameTerminal, "BYE must signal a terminal transition for immediate flush")
+	assert.Equal(t, "ENDED", client.calls["call-xyz"].State)
+
+	// Simulate the throttle being "hot" (an update just went out), then force a
+	// notify as the streaming loop would on a terminal transition.
+	client.lastCallUpdate = time.Now()
+	client.maybeNotifyCallUpdates(true)
+
+	if assert.Len(t, handler.CallUpdates, 1, "forced notify must bypass the throttle") {
+		var ended *types.CallInfo
+		for i := range handler.CallUpdates[0] {
+			if handler.CallUpdates[0][i].CallID == "call-xyz" {
+				ended = &handler.CallUpdates[0][i]
+			}
+		}
+		if assert.NotNil(t, ended, "ended call must be included in the flush") {
+			assert.Equal(t, "ENDED", ended.State)
+			assert.False(t, ended.EndTime.IsZero(), "EndTime must be set so the TUI freezes the duration")
 		}
 	}
 }

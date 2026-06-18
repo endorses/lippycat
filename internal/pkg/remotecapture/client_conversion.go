@@ -332,11 +332,26 @@ func calculateMOS(packetLoss, jitter float64) float64 {
 	return mos
 }
 
-// updateCallState updates call state from SIP packet metadata
-func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
+// isTerminalCallState reports whether a call state string is terminal
+// (the call has ended and will not transition further).
+func isTerminalCallState(state string) bool {
+	switch state {
+	case "ENDED", "FAILED", "CANCELLED", "BUSY":
+		return true
+	default:
+		return false
+	}
+}
+
+// updateCallState updates call state from SIP packet metadata.
+// Returns true if this packet transitioned the call into a terminal state
+// (e.g. a BYE ending the call), so the caller can flush the update to the
+// handler immediately instead of waiting for the next (possibly never-arriving)
+// packet batch.
+func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) (becameTerminal bool) {
 	sip := pkt.Metadata.Sip
 	if sip == nil || sip.CallId == "" {
-		return
+		return false
 	}
 
 	c.callsMu.Lock()
@@ -375,7 +390,15 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) {
 	// Update state based on SIP method and response code
 	call.PacketCount++
 	timestamp := time.Unix(0, pkt.TimestampNs)
+	prevState := call.State
 	deriveSIPState(call, sip.Method, sip.CseqMethod, sip.ResponseCode, timestamp)
+
+	// A call that just ended must be pushed to the handler promptly. Call
+	// updates are otherwise throttled and only sent when a packet batch
+	// arrives — but a terminating call is frequently the last traffic for that
+	// dialog, so without an immediate flush the ENDED state can be swallowed by
+	// the throttle and the TUI shows the call active indefinitely.
+	return isTerminalCallState(call.State) && call.State != prevState
 }
 
 // deriveSIPState updates call state based on SIP message.
@@ -559,13 +582,14 @@ func (c *Client) updateRTPQuality(pkt *data.CapturedPacket) {
 }
 
 // maybeNotifyCallUpdates periodically notifies handler of call state updates
-func (c *Client) maybeNotifyCallUpdates() {
-	// Throttle updates to max every 500ms
+func (c *Client) maybeNotifyCallUpdates(force bool) {
+	// Throttle updates to max every 500ms, unless forced (e.g. a call just
+	// ended and the state must be flushed before traffic stops).
 	c.callsMu.RLock()
 	lastUpdate := c.lastCallUpdate
 	c.callsMu.RUnlock()
 
-	if time.Since(lastUpdate) < 500*time.Millisecond {
+	if !force && time.Since(lastUpdate) < 500*time.Millisecond {
 		return
 	}
 

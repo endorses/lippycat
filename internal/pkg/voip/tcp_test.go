@@ -338,9 +338,22 @@ func TestTCPBufferStats(t *testing.T) {
 
 func TestTCPStreamMetrics(t *testing.T) {
 	// Reset metrics for test
-	tcpStreamMetrics = &tcpStreamMetricsInternal{
-		lastMetricsUpdate: time.Now(),
-	}
+	tcpStreamMetrics.mu.Lock()
+	tcpStreamMetrics.activeStreams = 0
+	tcpStreamMetrics.totalStreamsCreated = 0
+	tcpStreamMetrics.totalStreamsCompleted = 0
+	tcpStreamMetrics.totalStreamsFailed = 0
+	tcpStreamMetrics.queuedStreams = 0
+	tcpStreamMetrics.droppedStreams = 0
+	tcpStreamMetrics.lastMetricsUpdate = time.Now()
+	tcpStreamMetrics.streamsRejectedNonSIP = 0
+	tcpStreamMetrics.streamsTimedOut = 0
+	tcpStreamMetrics.sipMessagesDetected = 0
+	atomic.StoreInt64(&tcpStreamMetrics.reassembledCalls, 0)
+	atomic.StoreInt64(&tcpStreamMetrics.reassembledWithData, 0)
+	atomic.StoreInt64(&tcpStreamMetrics.reassembledEmptyData, 0)
+	atomic.StoreInt64(&tcpStreamMetrics.reassembledDataDropped, 0)
+	tcpStreamMetrics.mu.Unlock()
 
 	metrics := GetTCPStreamMetrics()
 	assert.Equal(t, int64(0), metrics.ActiveStreams)

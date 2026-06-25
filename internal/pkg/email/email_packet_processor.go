@@ -10,7 +10,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/reassembly"
 )
 
 // EmailPacketProcessor processes email packets (SMTP) with TCP reassembly for hunter mode.
@@ -19,9 +19,9 @@ import (
 // and forwards matched sessions to the processor.
 type EmailPacketProcessor struct {
 	ctx       context.Context
-	assembler *tcpassembly.Assembler
+	assembler *capture.TCPAssembler
 	handler   *EmailHunterHandler
-	factory   tcpassembly.StreamFactory
+	factory   reassembly.StreamFactory
 }
 
 // NewEmailPacketProcessor creates a packet processor for email capture in hunter mode.
@@ -39,13 +39,8 @@ func NewEmailPacketProcessor(ctx context.Context, forwarder EmailPacketForwarder
 	// Create SMTP stream factory with hunter handler
 	factory := NewSMTPStreamFactory(ctx, handler, config)
 
-	// Create assembler with stream pool
-	streamPool := tcpassembly.NewStreamPool(factory)
-	assembler := tcpassembly.NewAssembler(streamPool)
-
-	// Configure assembler for SMTP traffic
-	assembler.MaxBufferedPagesPerConnection = 100 // Limit memory per connection
-	assembler.MaxBufferedPagesTotal = 10000       // Total memory limit
+	// Create assembler
+	assembler := capture.NewTCPAssembler(factory)
 
 	processor := &EmailPacketProcessor{
 		ctx:       ctx,
@@ -118,7 +113,7 @@ func (p *EmailPacketProcessor) handleTCPPacket(pktInfo capture.PacketInfo, tcpLa
 	BufferEmailTCPPacket(sessionID, pktInfo)
 
 	// Feed to TCP assembler for stream reconstruction
-	p.assembler.AssembleWithTimestamp(
+	p.assembler.Assemble(
 		netFlow,
 		tcpLayer,
 		packet.Metadata().Timestamp,
@@ -146,7 +141,7 @@ func (p *EmailPacketProcessor) cleanupRoutine() {
 			CleanupOldEmailBuffers(60 * time.Second)
 
 			// Flush old assembler connections
-			flushed, _ := capture.SafeFlushOlderThan(p.assembler, time.Now().Add(-60*time.Second))
+			flushed, _ := p.assembler.FlushCloseOlderThan(time.Now().Add(-60 * time.Second))
 			if flushed > 0 {
 				logger.Debug("Flushed old email TCP streams", "count", flushed)
 			}

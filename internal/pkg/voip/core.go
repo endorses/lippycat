@@ -13,7 +13,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/viper"
 )
 
@@ -159,8 +158,10 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	// Create handler for local file writing
 	handler := NewLocalFileHandler()
 	streamFactory := NewSipStreamFactory(ctx, handler)
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	// VoIP owns its (connection-aware reassembly) assembler internally rather
+	// than threading it through the shared capture-layer signatures, which stay
+	// typed to the legacy *tcpassembly.Assembler for the other protocols.
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Detect offline mode (reading from PCAP file)
 	// Offline interfaces have filenames as their Name(), not network interface names
@@ -192,7 +193,7 @@ func StartOfflineVoipSniffer(readFile, filter string) {
 	capture.StartOfflineSniffer([]string{readFile}, filter, StartVoipSniffer)
 }
 
-func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 	defer CloseWriters()
 
 	// Initialize buffer manager (5 second timeout, 200 packet max per call)
@@ -233,10 +234,10 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembl
 	// This is critical for offline mode where streams may not be closed with FIN/RST
 	if assembler != nil {
 		logger.Debug("Flushing and closing TCP assembler streams")
-		// Use FlushOlderThan with time.Now() to close ALL streams regardless of age
-		// This signals EOF to all stream readers so they stop blocking and process their buffers
-		flushed, closed := capture.SafeFlushOlderThan(assembler, time.Now())
-		logger.Debug("TCP streams flushed", "flushed", flushed, "closed", closed)
+		// Close ALL streams regardless of age. This signals EOF to all stream
+		// readers so they stop blocking and process their buffers.
+		closed := assembler.FlushAll()
+		logger.Debug("TCP streams flushed", "closed", closed)
 
 		// Give stream goroutines time to process and finish
 		time.Sleep(200 * time.Millisecond)

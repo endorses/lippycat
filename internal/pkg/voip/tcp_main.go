@@ -6,11 +6,10 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // handleTcpPackets processes TCP packets and feeds them to the assembler
-func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {
+func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *capture.TCPAssembler) {
 	// Set the current link type for TCP stream processing
 	if linkLayer := pkt.Packet.LinkLayer(); linkLayer != nil {
 		setCurrentLinkType(layers.LinkTypeEthernet) // Default to ethernet
@@ -26,7 +25,7 @@ func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpa
 	BufferTCPPacket(flow, pkt)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
-	assembler.AssembleWithTimestamp(
+	assembler.Assemble(
 		pkt.Packet.NetworkLayer().NetworkFlow(),
 		layer,
 		pkt.Packet.Metadata().Timestamp,

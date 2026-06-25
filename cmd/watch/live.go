@@ -13,7 +13,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -130,7 +129,7 @@ func runLive(cmd *cobra.Command, args []string) {
 
 func startLiveSniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
 	pauseSignal := tui.GetGlobalPauseSignal()
-	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 		tui.StartPacketBridge(ch, program, pauseSignal)
 	}
 	// Pass pause function to drop packets at source when paused (reduces CPU)

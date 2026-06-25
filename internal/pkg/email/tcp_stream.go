@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
 // SMTPMessageHandler processes SMTP lines after TCP reassembly.
@@ -28,7 +27,7 @@ type SMTPMessageHandler interface {
 
 // SMTPStream represents a TCP stream that processes SMTP protocol.
 type SMTPStream struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	safeReader   *safeSMTPReader
 	ctx          context.Context
 	factory      *smtpStreamFactory
@@ -58,7 +57,7 @@ type safeSMTPReader struct {
 	closeOnce  sync.Once
 }
 
-func newSafeSMTPReader(reader *tcpreader.ReaderStream, ctx context.Context) *safeSMTPReader {
+func newSafeSMTPReader(reader io.Reader, ctx context.Context) *safeSMTPReader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -80,7 +79,6 @@ func newSafeSMTPReader(reader *tcpreader.ReaderStream, ctx context.Context) *saf
 			pipeWriter.CloseWithError(io.ErrClosedPipe)
 			return
 		}
-		defer reader.Close()
 
 		buf := make([]byte, 4096)
 		for {
@@ -131,6 +129,8 @@ func (s *SMTPStream) run() {
 
 	defer func() {
 		s.safeReader.close()
+		// Close the reassembly reader so the adapter's pump goroutine unblocks.
+		_ = s.reader.Close()
 
 		if s.factory != nil {
 			atomic.AddInt64(&s.factory.activeGoroutines, -1)
@@ -305,7 +305,7 @@ func (s *SMTPStream) processDataContent(headerLines []string) {
 
 // createSMTPStream creates a new SMTP stream.
 func createSMTPStream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	ctx context.Context,
 	factory *smtpStreamFactory,
 	flow gopacket.Flow,

@@ -10,7 +10,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -68,8 +67,7 @@ func TestStartProcessor_UDPHandling(t *testing.T) {
 	handler := NewLocalFileHandler()
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Test the processor
 	startProcessor(ch, assembler)
@@ -131,8 +129,7 @@ func TestStartProcessor_TCPHandling(t *testing.T) {
 	handler := NewLocalFileHandler()
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Test the processor
 	startProcessor(ch, assembler)
@@ -158,8 +155,7 @@ func TestStartProcessor_InvalidPackets(t *testing.T) {
 	handler := NewLocalFileHandler()
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Should handle invalid packets gracefully
 	startProcessor(ch, assembler)
@@ -232,8 +228,7 @@ func TestProcessorChannelClosure(t *testing.T) {
 	handler := NewLocalFileHandler()
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Should complete without hanging
 	done := make(chan bool, 1)

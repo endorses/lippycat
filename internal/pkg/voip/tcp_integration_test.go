@@ -10,7 +10,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -101,8 +100,7 @@ a=rtpmap:0 PCMU/8000
 			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 			defer factory.(*sipStreamFactory).Shutdown()
 
-			streamPool := tcpassembly.NewStreamPool(factory)
-			assembler := tcpassembly.NewAssembler(streamPool)
+			assembler := capture.NewTCPAssembler(factory)
 
 			// Process all packets
 			for _, pkt := range packets {
@@ -314,8 +312,7 @@ Content-Length: 0
 			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 			defer factory.(*sipStreamFactory).Shutdown()
 
-			streamPool := tcpassembly.NewStreamPool(factory)
-			assembler := tcpassembly.NewAssembler(streamPool)
+			assembler := capture.NewTCPAssembler(factory)
 
 			// Process each packet through the TCP assembler
 			for _, pkt := range packets {
@@ -462,8 +459,7 @@ Content-Length: 0
 			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 			defer factory.(*sipStreamFactory).Shutdown()
 
-			streamPool := tcpassembly.NewStreamPool(factory)
-			assembler := tcpassembly.NewAssembler(streamPool)
+			assembler := capture.NewTCPAssembler(factory)
 
 			// Process each message in the call scenario
 			seqNum := uint32(1000)

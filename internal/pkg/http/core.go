@@ -17,7 +17,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/viper"
 )
 
@@ -29,8 +29,8 @@ var (
 	httpContentFilter *ContentFilter
 	httpPcapWriter    *pcapgo.Writer
 	httpOutputFile    *os.File
-	httpFactory       tcpassembly.StreamFactory
-	httpAssembler     *tcpassembly.Assembler
+	httpFactory       reassembly.StreamFactory
+	httpAssembler     *capture.TCPAssembler
 	httpHandler       *cliHTTPHandler
 )
 
@@ -167,8 +167,7 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	httpFactory = NewHTTPStreamFactory(ctx, httpHandler, factoryConfig)
 
 	// Create assembler
-	streamPool := tcpassembly.NewStreamPool(httpFactory)
-	httpAssembler = tcpassembly.NewAssembler(streamPool)
+	httpAssembler = capture.NewTCPAssembler(httpFactory)
 
 	// Detect offline mode
 	isOffline := false
@@ -181,7 +180,7 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function
-	processor := func(packetChan <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+	processor := func(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 		processHTTPPackets(packetChan, asm)
 	}
 
@@ -198,7 +197,7 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 // processHTTPPackets processes packets from the channel.
-func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 	for pktInfo := range packetChan {
 		packet := pktInfo.Packet
 
@@ -219,7 +218,7 @@ func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *tcpassembly.A
 		}
 
 		// Feed to assembler for reassembly
-		asm.AssembleWithTimestamp(netLayer.NetworkFlow(), tcp, packet.Metadata().Timestamp)
+		asm.Assemble(netLayer.NetworkFlow(), tcp, packet.Metadata().Timestamp)
 
 		// Write to PCAP if configured
 		if httpPcapWriter != nil {

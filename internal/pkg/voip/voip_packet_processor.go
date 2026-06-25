@@ -6,14 +6,13 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // VoIPPacketProcessor processes VoIP packets (SIP/RTP) with buffering for hunter mode
 type VoIPPacketProcessor struct {
 	udpHandler *UDPPacketHandler
-	tcpHandler *HunterForwardHandler  // Optional: for wiring ApplicationFilter to TCP handler
-	assembler  *tcpassembly.Assembler // TCP stream assembler for SIP reassembly
+	tcpHandler *HunterForwardHandler // Optional: for wiring ApplicationFilter to TCP handler
+	assembler  *capture.TCPAssembler // TCP stream assembler for SIP reassembly
 }
 
 // NewVoIPPacketProcessor creates a packet processor for VoIP buffering in hunter mode
@@ -31,7 +30,7 @@ func (p *VoIPPacketProcessor) SetTCPHandler(handler *HunterForwardHandler) {
 
 // SetAssembler sets the TCP stream assembler for SIP message reassembly.
 // When set, TCP packets are fed to the assembler for stream reconstruction.
-func (p *VoIPPacketProcessor) SetAssembler(assembler *tcpassembly.Assembler) {
+func (p *VoIPPacketProcessor) SetAssembler(assembler *capture.TCPAssembler) {
 	p.assembler = assembler
 }
 
@@ -81,7 +80,7 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 			BufferTCPPacket(flow, pktInfo)
 
 			// Feed the packet to the TCP assembler for stream reconstruction
-			p.assembler.AssembleWithTimestamp(
+			p.assembler.Assemble(
 				flow,
 				layer,
 				packet.Metadata().Timestamp,

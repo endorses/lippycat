@@ -13,7 +13,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/viper"
 )
 
@@ -516,7 +515,7 @@ func (pb *PacketBuffer) CloseInputs() {
 	close(pb.ch)
 }
 
-func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler) {
 	InitWithContext(context.Background(), ifaces, filter, packetProcessor, assembler, nil)
 }
 
@@ -524,7 +523,7 @@ func Init(ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(
 // The optional pauseFn parameter, if provided, allows the caller to pause packet capture.
 // When pauseFn returns true, packets are dropped at the source to reduce CPU usage.
 // Note: Signal handling should be done by the caller. This function only respects context cancellation.
-func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler, pauseFn func() bool) {
+func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler, pauseFn func() bool) {
 	// Use a configurable buffer size with proper backpressure handling
 	bufferSize := getPacketBufferSize()
 	packetBuffer := NewPacketBuffer(ctx, bufferSize)
@@ -539,7 +538,7 @@ func InitWithContext(ctx context.Context, ifaces []pcaptypes.PcapInterface, filt
 // InitWithBuffer starts packet capture with an external PacketBuffer
 // This allows the caller to own the buffer and read from it directly, avoiding
 // double-buffering when the processor would just copy packets to another buffer.
-func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+func InitWithBuffer(ctx context.Context, ifaces []pcaptypes.PcapInterface, filter string, buffer *PacketBuffer, packetProcessor func(ch <-chan PacketInfo, assembler *TCPAssembler), assembler *TCPAssembler) {
 	packetBuffer := buffer
 
 	var wg sync.WaitGroup

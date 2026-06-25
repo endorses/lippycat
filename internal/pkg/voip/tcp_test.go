@@ -12,7 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/reassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,7 +31,7 @@ func TestSipStreamFactoryNew(t *testing.T) {
 	var netFlow, transportFlow gopacket.Flow
 
 	// Test creating a new stream
-	stream := factory.New(netFlow, transportFlow)
+	stream := factory.New(netFlow, transportFlow, nil, nil)
 	assert.NotNil(t, stream, "Factory.New should return a non-nil stream")
 
 	// The function should return a tcpreader.ReaderStream, test that it's usable
@@ -157,7 +157,7 @@ func TestSipStreamFactory_ContextCancellation(t *testing.T) {
 
 	// Create a stream
 	var netFlow, transportFlow gopacket.Flow
-	stream := factory.New(netFlow, transportFlow)
+	stream := factory.New(netFlow, transportFlow, nil, nil)
 	assert.NotNil(t, stream, "Should create stream before cancellation")
 
 	// Cancel the context
@@ -165,7 +165,7 @@ func TestSipStreamFactory_ContextCancellation(t *testing.T) {
 
 	// Creating new streams should still work (factory doesn't prevent it)
 	// but the streams should handle context cancellation internally
-	stream2 := factory.New(netFlow, transportFlow)
+	stream2 := factory.New(netFlow, transportFlow, nil, nil)
 	assert.NotNil(t, stream2, "Should still create stream after cancellation")
 
 	// Close the factory
@@ -184,7 +184,7 @@ func TestSipStreamFactory_MultipleStreams(t *testing.T) {
 	}()
 
 	const numStreams = 100
-	streams := make([]tcpassembly.Stream, numStreams)
+	streams := make([]reassembly.Stream, numStreams)
 
 	// Create multiple streams concurrently
 	var wg sync.WaitGroup
@@ -193,7 +193,7 @@ func TestSipStreamFactory_MultipleStreams(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			var netFlow, transportFlow gopacket.Flow
-			stream := factory.New(netFlow, transportFlow)
+			stream := factory.New(netFlow, transportFlow, nil, nil)
 			streams[idx] = stream
 		}(i)
 	}
@@ -248,8 +248,7 @@ func TestHandleTcpPackets_Integration(t *testing.T) {
 	// Create assembler
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Test that handleTcpPackets doesn't panic
 	tcpLayer := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
@@ -304,8 +303,7 @@ func TestHandleTcpPackets_NonSipPort(t *testing.T) {
 	// Create assembler
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Should handle non-SIP packets gracefully (essentially ignore them)
 	tcpLayer := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
@@ -649,10 +647,6 @@ func TestSipStreamFactoryHealthChecks(t *testing.T) {
 	activeGoroutines, ok := status["active_goroutines"].(int64)
 	require.True(t, ok)
 	assert.Equal(t, int64(0), activeGoroutines)
-
-	queueLength, ok := status["queue_length"].(int)
-	require.True(t, ok)
-	assert.Equal(t, 0, queueLength)
 }
 
 func TestGlobalTCPAssemblerMonitoring(t *testing.T) {

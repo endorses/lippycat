@@ -14,7 +14,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,8 +44,7 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer streamFactory.(*sipStreamFactory).Shutdown()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Start processor in goroutine
 	var wg sync.WaitGroup
@@ -250,7 +248,7 @@ func TestStreamFactoryIntegration(t *testing.T) {
 
 	// This should not panic
 	assert.NotPanics(t, func() {
-		stream := streamFactory.New(netFlow, tcpFlow)
+		stream := streamFactory.New(netFlow, tcpFlow, nil, nil)
 		if stream != nil {
 			// If we get a stream, test that it can be closed safely
 			t.Logf("Created TCP stream successfully")
@@ -295,8 +293,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	ctx := context.Background()
 	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
 	defer streamFactory.(*sipStreamFactory).Shutdown()
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Process each packet
 	for _, pkt := range packets {

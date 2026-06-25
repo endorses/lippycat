@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sort"
 	"strings"
@@ -22,8 +21,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 	"github.com/spf13/viper"
 )
 
@@ -151,7 +148,7 @@ func StartOfflineSniffer(readFiles []string, filter string, startSniffer func(de
 // RunWithSignalHandler runs the capture in background and handles signals for graceful shutdown
 // This is the common pattern used by hunt, sniff, and sniff voip commands
 func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
-	processor func(ch <-chan PacketInfo, asm *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+	processor func(ch <-chan PacketInfo, asm *TCPAssembler), assembler *TCPAssembler) {
 
 	// Create cancellable context for capture
 	ctx, cancel := context.WithCancel(context.Background())
@@ -221,7 +218,7 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	// For basic sniffing, we don't need TCP stream reassembly
 	// Pass nil assembler to skip expensive TCP assembly
-	processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+	processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 		processPacketSimple(ch)
 	}
 
@@ -258,7 +255,7 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 // RunOffline runs the capture for offline PCAP files and exits when complete
 // Unlike RunWithSignalHandler, this cancels the context when all packets are read
 func RunOffline(devices []pcaptypes.PcapInterface, filter string,
-	processor func(ch <-chan PacketInfo, asm *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+	processor func(ch <-chan PacketInfo, asm *TCPAssembler), assembler *TCPAssembler) {
 
 	// For offline mode, we use a custom implementation that detects EOF
 	// and cancels the context to trigger cleanup
@@ -331,7 +328,7 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 
 	// Flush TCP assembler if present (forces reassembly of any remaining streams)
 	if assembler != nil {
-		_, _ = SafeFlushOlderThan(assembler, time.Now())
+		_, _ = assembler.FlushCloseOlderThan(time.Now())
 		// Give assembler time to process flushed streams
 		// This ensures SIP messages are extracted before we close the buffer
 		time.Sleep(100 * time.Millisecond)
@@ -351,7 +348,7 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 // Unlike RunOffline which processes files in parallel (non-deterministic order),
 // this function ensures proper temporal ordering across all files.
 func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
-	processor func(ch <-chan PacketInfo, asm *tcpassembly.Assembler), assembler *tcpassembly.Assembler) {
+	processor func(ch <-chan PacketInfo, asm *TCPAssembler), assembler *TCPAssembler) {
 
 	logger.Info("Starting timestamp-ordered offline capture",
 		"file_count", len(devices))
@@ -420,7 +417,7 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 
 	// Flush TCP assembler if present
 	if assembler != nil {
-		_, _ = SafeFlushOlderThan(assembler, time.Now())
+		_, _ = assembler.FlushCloseOlderThan(time.Now())
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -780,152 +777,4 @@ func processPacketSimple(packetChan <-chan PacketInfo) {
 	}
 
 	logger.Info("Packet processing completed", "total_packets", packetCount)
-}
-
-const maxStreamWorkers = 50 // Maximum concurrent stream processing goroutines
-
-type streamFactory struct {
-	workerPool chan struct{}
-	wg         sync.WaitGroup
-}
-
-func NewStreamFactory() tcpassembly.StreamFactory {
-	return &streamFactory{
-		workerPool: make(chan struct{}, maxStreamWorkers),
-	}
-}
-
-func (f *streamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	r := tcpreader.NewReaderStream()
-
-	// Try to acquire a worker from the pool (non-blocking)
-	select {
-	case f.workerPool <- struct{}{}:
-		// Got a worker slot, start processing
-		f.wg.Add(1)
-		go f.processStreamWithPool(&r)
-	default:
-		// Pool is full, log and skip processing to prevent goroutine explosion
-		logger.Warn("Stream worker pool exhausted, skipping stream processing",
-			"max_workers", maxStreamWorkers)
-	}
-
-	return &r
-}
-
-func (f *streamFactory) processStreamWithPool(r io.Reader) {
-	defer func() {
-		// Release worker slot back to pool
-		<-f.workerPool
-		f.wg.Done()
-
-		if rec := recover(); rec != nil {
-			logger.Error("Stream processing panic recovered",
-				"panic_value", rec)
-		}
-	}()
-
-	processStream(r)
-}
-
-// Shutdown waits for all active stream workers to complete
-func (f *streamFactory) Shutdown() {
-	f.wg.Wait()
-}
-
-func processStream(r io.Reader) {
-	// Process the stream data properly
-	buffer := make([]byte, 4096)
-	for {
-		n, err := r.Read(buffer)
-		if err != nil {
-			if err != io.EOF {
-				logger.Error("Error reading stream", "error", err)
-			}
-			return
-		}
-		if n == 0 {
-			return
-		}
-
-		// Process the data (this is a placeholder - real processing would depend on protocol)
-		data := buffer[:n]
-		if len(data) > 0 {
-			logger.Debug("Processed bytes from stream",
-				"bytes_count", len(data))
-			// Here you would implement actual protocol parsing
-		}
-	}
-}
-
-func processPacket(packetChan <-chan PacketInfo, assembler *tcpassembly.Assembler) {
-	packetCount := 0
-	lastPrintTime := time.Now()
-
-	for p := range packetChan {
-		packet := p.Packet
-		packetCount++
-
-		// Print summary less frequently to avoid blocking on I/O
-		if time.Since(lastPrintTime) >= 1*time.Second {
-			logger.Debug("Processed packets", "count", packetCount)
-			lastPrintTime = time.Now()
-		}
-
-		switch layer := packet.TransportLayer().(type) {
-		case *layers.TCP:
-			// Recover from any panics in the TCP assembler (e.g., malformed packets)
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						logger.Error("TCP assembler panic recovered",
-							"panic_value", r,
-							"packet", packet)
-					}
-				}()
-
-				// Validate network layer exists before passing to assembler
-				if netLayer := packet.NetworkLayer(); netLayer != nil {
-					assembler.AssembleWithTimestamp(
-						netLayer.NetworkFlow(),
-						layer,
-						packet.Metadata().Timestamp,
-					)
-				}
-			}()
-		case *layers.UDP:
-			// UDP packets - no processing needed for basic sniff
-		}
-	}
-
-	logger.Info("Packet processing completed", "total_packets", packetCount)
-}
-
-func processPacketWithContext(p PacketInfo, assembler *tcpassembly.Assembler, ctx context.Context) {
-	packet := p.Packet
-	switch layer := packet.TransportLayer().(type) {
-	case *layers.TCP:
-		// Recover from any panics in the TCP assembler (e.g., malformed packets)
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					logger.Error("TCP assembler panic recovered",
-						"panic_value", r,
-						"packet", packet)
-				}
-			}()
-
-			// Validate network layer exists before passing to assembler
-			if netLayer := packet.NetworkLayer(); netLayer != nil {
-				assembler.AssembleWithTimestamp(
-					netLayer.NetworkFlow(),
-					layer,
-					packet.Metadata().Timestamp,
-				)
-			}
-		}()
-	case *layers.UDP:
-		// fmt.Println("UDP")
-	}
-	fmt.Printf("%s\n", p.Packet)
 }

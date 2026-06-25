@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
 // BenchmarkCallIDDetector_SetCallID benchmarks Call-ID detection performance
@@ -43,14 +41,12 @@ func BenchmarkSIPStreamProcessing(b *testing.B) {
 	detector := NewCallIDDetector()
 	defer detector.Close()
 
-	readerStream := tcpreader.NewReaderStream()
 	config := GetConfig()
 	mockFactory := &sipStreamFactory{
 		config: config,
 	}
 
-	stream := &SIPStream{
-		reader:         &readerStream,
+	stream := &bufferedSIPStream{
 		callIDDetector: detector,
 		ctx:            ctx,
 		factory:        mockFactory,
@@ -140,9 +136,7 @@ Content-Length: 0
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		readerStream := tcpreader.NewReaderStream()
-		stream := &SIPStream{
-			reader:         &readerStream,
+		stream := &bufferedSIPStream{
 			callIDDetector: detector,
 			ctx:            ctx,
 			factory:        mockFactory,

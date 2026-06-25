@@ -4,15 +4,17 @@ package email
 
 import (
 	"context"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/reassembly"
 )
 
 // MultiProtocolFactory routes TCP streams to the appropriate email protocol handler.
@@ -80,9 +82,9 @@ func NewMultiProtocolFactory(ctx context.Context, handler *cliEmailHandler, conf
 	return factory
 }
 
-// New creates a new stream based on the port (implements tcpassembly.StreamFactory).
-func (f *MultiProtocolFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	r := tcpreader.NewReaderStream()
+// New creates a new stream based on the port (implements reassembly.StreamFactory).
+func (f *MultiProtocolFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	rs, reader := capture.NewTCPHalfStream()
 
 	// Check goroutine limit
 	current := atomic.LoadInt64(&f.activeGoroutines)
@@ -90,7 +92,8 @@ func (f *MultiProtocolFactory) New(net, transport gopacket.Flow) tcpassembly.Str
 		logger.Warn("Email stream dropped: goroutine limit reached",
 			"active", current,
 			"max", f.maxGoroutines)
-		return &r
+		_ = reader.Close()
+		return rs
 	}
 
 	// Determine protocol from port
@@ -99,8 +102,9 @@ func (f *MultiProtocolFactory) New(net, transport gopacket.Flow) tcpassembly.Str
 
 	protocol := f.detectProtocol(srcPort, dstPort)
 	if protocol == "" {
-		// Unknown protocol - still consume the stream but don't process
-		return &r
+		// Unknown protocol - nothing will consume it, so close the reader.
+		_ = reader.Close()
+		return rs
 	}
 
 	// Determine if this is from server
@@ -114,19 +118,19 @@ func (f *MultiProtocolFactory) New(net, transport gopacket.Flow) tcpassembly.Str
 
 	switch protocol {
 	case "SMTP":
-		stream := f.createSMTPStream(&r, net, transport, isFromServer, sessionID)
+		stream := f.createSMTPStream(reader, net, transport, isFromServer, sessionID)
 		go stream.run()
 	case "IMAP":
-		stream := f.createIMAPStream(&r, net, transport, isFromServer, sessionID)
+		stream := f.createIMAPStream(reader, net, transport, isFromServer, sessionID)
 		go stream.run()
 	case "POP3":
-		stream := f.createPOP3Stream(&r, net, transport, isFromServer, sessionID)
+		stream := f.createPOP3Stream(reader, net, transport, isFromServer, sessionID)
 		go stream.run()
 	default:
 		atomic.AddInt64(&f.activeGoroutines, -1)
 	}
 
-	return &r
+	return rs
 }
 
 // detectProtocol determines the email protocol based on ports.
@@ -151,7 +155,7 @@ func (f *MultiProtocolFactory) isServerPort(port uint16) bool {
 
 // createSMTPStream creates an SMTP stream.
 func (f *MultiProtocolFactory) createSMTPStream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	net, transport gopacket.Flow,
 	isFromServer bool,
 	sessionID string,
@@ -173,7 +177,7 @@ func (f *MultiProtocolFactory) createSMTPStream(
 
 // createIMAPStream creates an IMAP stream.
 func (f *MultiProtocolFactory) createIMAPStream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	net, transport gopacket.Flow,
 	isFromServer bool,
 	sessionID string,
@@ -193,7 +197,7 @@ func (f *MultiProtocolFactory) createIMAPStream(
 
 // createPOP3Stream creates a POP3 stream.
 func (f *MultiProtocolFactory) createPOP3Stream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	net, transport gopacket.Flow,
 	isFromServer bool,
 	sessionID string,
@@ -252,7 +256,7 @@ func (f *MultiProtocolFactory) GetActiveGoroutines() int64 {
 
 // smtpStreamWrapper wraps an SMTP stream for the multi-protocol factory.
 type smtpStreamWrapper struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	ctx          context.Context
 	factory      *MultiProtocolFactory
 	flow         gopacket.Flow
@@ -270,6 +274,7 @@ func (s *smtpStreamWrapper) run() {
 	defer func() {
 		atomic.AddInt64(&s.factory.activeGoroutines, -1)
 	}()
+	defer func() { _ = s.reader.Close() }()
 
 	sr := newSafeSMTPReader(s.reader, s.ctx)
 	defer sr.close()
@@ -314,7 +319,7 @@ func (s *smtpStreamWrapper) run() {
 
 // imapStreamWrapper wraps an IMAP stream for the multi-protocol factory.
 type imapStreamWrapper struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	ctx          context.Context
 	factory      *MultiProtocolFactory
 	flow         gopacket.Flow
@@ -329,6 +334,7 @@ func (s *imapStreamWrapper) run() {
 	defer func() {
 		atomic.AddInt64(&s.factory.activeGoroutines, -1)
 	}()
+	defer func() { _ = s.reader.Close() }()
 
 	sr := newSafeIMAPReader(s.reader, s.ctx)
 	defer sr.close()
@@ -359,7 +365,7 @@ func (s *imapStreamWrapper) run() {
 
 // pop3StreamWrapper wraps a POP3 stream for the multi-protocol factory.
 type pop3StreamWrapper struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	ctx          context.Context
 	factory      *MultiProtocolFactory
 	flow         gopacket.Flow
@@ -377,6 +383,7 @@ func (s *pop3StreamWrapper) run() {
 	defer func() {
 		atomic.AddInt64(&s.factory.activeGoroutines, -1)
 	}()
+	defer func() { _ = s.reader.Close() }()
 
 	sr := newSafePOP3Reader(s.reader, s.ctx)
 	defer sr.close()

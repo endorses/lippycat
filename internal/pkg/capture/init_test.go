@@ -13,7 +13,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -67,7 +66,7 @@ func TestInitWithContext(t *testing.T) {
 
 		// Track packets received by processor
 		var packetCount int64
-		processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 			for range ch {
 				atomic.AddInt64(&packetCount, 1)
 			}
@@ -113,7 +112,7 @@ func TestInitWithContext(t *testing.T) {
 		ifaces := []pcaptypes.PcapInterface{iface}
 
 		// Empty processor that doesn't read - buffer will fill and packets will drop
-		processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 			// Don't read - just wait for context
 			<-ctx.Done()
 		}
@@ -152,7 +151,7 @@ func TestInitWithContext(t *testing.T) {
 		filter := "udp port 5060"
 
 		var packetCount int64
-		processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 			for pkt := range ch {
 				atomic.AddInt64(&packetCount, 1)
 				// Verify packet matches filter
@@ -195,7 +194,7 @@ func TestInitWithContext(t *testing.T) {
 		ifaces := []pcaptypes.PcapInterface{iface}
 
 		var channelClosed atomic.Bool
-		processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 			for range ch {
 				// Just drain
 			}
@@ -343,7 +342,7 @@ func TestInitWithBuffer(t *testing.T) {
 		ifaces := []pcaptypes.PcapInterface{iface}
 
 		var packetCount int64
-		processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 			for range ch {
 				atomic.AddInt64(&packetCount, 1)
 			}
@@ -559,7 +558,7 @@ func TestInit_Legacy(t *testing.T) {
 		ifaces := []pcaptypes.PcapInterface{iface}
 
 		var packetCount int64
-		processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 			// Only read a few packets then return
 			for i := 0; i < 10; i++ {
 				pkt, ok := <-ch

@@ -8,8 +8,8 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/reassembly"
 )
 
 // sipStreamFactory manages TCP stream creation and lifecycle
@@ -20,22 +20,13 @@ type sipStreamFactory struct {
 	config           *Config
 	configMutex      sync.RWMutex
 	lastLogTime      int64
-	streamQueue      chan *queuedStream
 	allWorkers       sync.WaitGroup // tracks all background goroutines
 	cleanupTicker    *time.Ticker
 	closed           int32             // atomic flag to track if factory is closed
 	handler          SIPMessageHandler // handler for processing complete SIP messages
 }
 
-type queuedStream struct {
-	reader        *tcpreader.ReaderStream
-	detector      *CallIDDetector
-	netFlow       gopacket.Flow
-	transportFlow gopacket.Flow
-	createdAt     time.Time
-}
-
-func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) tcpassembly.StreamFactory {
+func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) reassembly.StreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 	config := GetConfig()
 
@@ -47,13 +38,8 @@ func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) tcpasse
 		cancel:        cancel,
 		config:        config,
 		handler:       handler,
-		streamQueue:   make(chan *queuedStream, config.StreamQueueBuffer),
 		cleanupTicker: time.NewTicker(config.TCPCleanupInterval),
 	}
-
-	// Start queue worker goroutine to process queued streams
-	factory.allWorkers.Add(1)
-	go factory.processQueue()
 
 	// Start cleanup goroutine for resource management
 	factory.allWorkers.Add(1)
@@ -131,57 +117,6 @@ func applyPerformanceModeOptimizations(config *Config) {
 	}
 }
 
-// processQueue handles queued stream processing with goroutine limits
-func (f *sipStreamFactory) processQueue() {
-	defer f.allWorkers.Done()
-
-	for {
-		select {
-		case <-f.ctx.Done():
-			return
-		case queuedStream, ok := <-f.streamQueue:
-			if !ok {
-				// Channel closed, exit gracefully
-				return
-			}
-			// Check if we can process immediately
-			current := atomic.LoadInt64(&f.activeGoroutines)
-			if current < int64(f.config.MaxGoroutines) {
-				// Create and start stream immediately
-				stream := createSIPStream(
-					queuedStream.reader,
-					queuedStream.detector,
-					f.ctx,
-					f,
-					queuedStream.netFlow,
-					queuedStream.transportFlow,
-				)
-				stream.createdAt = queuedStream.createdAt
-				atomic.AddInt64(&f.activeGoroutines, 1)
-				// Update metrics
-				tcpStreamMetrics.mu.Lock()
-				atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
-				tcpStreamMetrics.totalStreamsCreated++
-				tcpStreamMetrics.queuedStreams--
-				tcpStreamMetrics.mu.Unlock()
-				go stream.run()
-			} else {
-				// Still at capacity, put it back in queue or drop it
-				select {
-				case f.streamQueue <- queuedStream:
-					// Successfully re-queued
-				default:
-					// Queue is full, drop the stream
-					tcpStreamMetrics.mu.Lock()
-					tcpStreamMetrics.droppedStreams++
-					tcpStreamMetrics.mu.Unlock()
-					logger.Warn("Dropped TCP stream due to full queue and goroutine limit")
-				}
-			}
-		}
-	}
-}
-
 // cleanupRoutine performs periodic cleanup of resources
 func (f *sipStreamFactory) cleanupRoutine() {
 	defer f.allWorkers.Done()
@@ -198,85 +133,16 @@ func (f *sipStreamFactory) cleanupRoutine() {
 			if f.config.MemoryOptimization {
 				f.performMemoryOptimization()
 			}
-
-			// Clean up stale queued streams
-			f.cleanupStaleQueuedStreams()
 		}
 	}
 }
 
-// cleanupStaleQueuedStreams removes old queued streams
-func (f *sipStreamFactory) cleanupStaleQueuedStreams() {
-	maxAge := f.config.TCPStreamMaxQueueTime
-	staleCount := 0
-	validDroppedCount := 0
-
-	// Use a temporary buffer to hold valid (non-stale) streams during cleanup
-	// This prevents valid streams from being dropped due to queue contention
-	validStreams := make([]*queuedStream, 0, cap(f.streamQueue))
-
-	// Drain all streams from queue, separating stale from valid
-drainLoop:
-	for {
-		select {
-		case queuedStream := <-f.streamQueue:
-			if time.Since(queuedStream.createdAt) > maxAge {
-				staleCount++
-				// Update metrics for dropped stale stream
-				tcpStreamMetrics.mu.Lock()
-				tcpStreamMetrics.droppedStreams++
-				tcpStreamMetrics.queuedStreams--
-				tcpStreamMetrics.mu.Unlock()
-			} else {
-				// Keep valid stream for re-queuing
-				validStreams = append(validStreams, queuedStream)
-			}
-		default:
-			break drainLoop
-		}
-	}
-
-	// Re-queue valid streams
-	for _, queuedStream := range validStreams {
-		select {
-		case f.streamQueue <- queuedStream:
-			// Successfully re-queued
-		default:
-			// Queue is full, must drop valid stream
-			validDroppedCount++
-			tcpStreamMetrics.mu.Lock()
-			tcpStreamMetrics.droppedStreams++
-			tcpStreamMetrics.queuedStreams--
-			tcpStreamMetrics.mu.Unlock()
-		}
-	}
-
-	// Log cleanup results with appropriate severity
-	if staleCount > 0 {
-		logger.Debug("Cleaned up stale queued streams", "count", staleCount, "max_age", maxAge)
-	}
-	if validDroppedCount > 0 {
-		logger.Warn("Dropped valid TCP streams during cleanup due to queue capacity",
-			"dropped_count", validDroppedCount,
-			"queue_capacity", cap(f.streamQueue),
-			"stale_cleaned", staleCount)
-	}
-}
-
-func (f *sipStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
+func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
 	detector := NewCallIDDetector()
 
-	// CRITICAL: We use bufferedSIPStream instead of tcpreader.ReaderStream.
-	//
-	// tcpreader.ReaderStream has an UNBUFFERED channel, which means:
-	// 1. The assembler calls Reassembled() synchronously from the packet loop
-	// 2. Reassembled() sends to the unbuffered channel
-	// 3. If no goroutine is actively blocking on Read(), Reassembled() BLOCKS
-	// 4. This freezes the entire packet capture loop
-	//
-	// bufferedSIPStream solves this by using a BUFFERED channel with non-blocking
-	// sends. Reassembled() NEVER blocks - data is dropped only if the buffer is full.
-	// This guarantees the packet capture loop always continues.
+	// bufferedSIPStream uses a BUFFERED channel with non-blocking sends so
+	// ReassembledSG() NEVER blocks the packet capture loop - data is dropped only
+	// if the buffer is full. This guarantees the capture loop always continues.
 
 	// Log if we're over the soft limit (for monitoring, not enforcement)
 	current := atomic.LoadInt64(&f.activeGoroutines)
@@ -323,9 +189,6 @@ func (f *sipStreamFactory) Close() {
 
 	// Stop cleanup ticker
 	f.cleanupTicker.Stop()
-
-	// Close stream queue to signal processQueue to exit
-	close(f.streamQueue)
 
 	// Wait for all background workers to finish
 	f.allWorkers.Wait()

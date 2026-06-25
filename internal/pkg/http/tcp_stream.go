@@ -15,12 +15,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
 // HTTPStream represents a TCP stream that processes HTTP protocol.
 type HTTPStream struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	safeReader   *safeHTTPReader
 	ctx          context.Context
 	factory      *httpStreamFactory
@@ -41,7 +40,7 @@ type HTTPStream struct {
 	headerMetadata *types.HTTPMetadata // Metadata from headers
 }
 
-// safeHTTPReader wraps a tcpreader.ReaderStream to provide interruptible reads.
+// safeHTTPReader wraps a reassembled byte stream to provide interruptible reads.
 type safeHTTPReader struct {
 	pipeReader *io.PipeReader
 	pipeWriter *io.PipeWriter
@@ -52,7 +51,7 @@ type safeHTTPReader struct {
 	closeOnce  sync.Once
 }
 
-func newSafeHTTPReader(reader *tcpreader.ReaderStream, ctx context.Context) *safeHTTPReader {
+func newSafeHTTPReader(reader io.Reader, ctx context.Context) *safeHTTPReader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -74,7 +73,6 @@ func newSafeHTTPReader(reader *tcpreader.ReaderStream, ctx context.Context) *saf
 			pipeWriter.CloseWithError(io.ErrClosedPipe)
 			return
 		}
-		defer reader.Close()
 
 		buf := make([]byte, 4096)
 		for {
@@ -132,6 +130,8 @@ func (s *HTTPStream) run() {
 
 	defer func() {
 		s.safeReader.close()
+		// Close the reassembly reader so the adapter's pump goroutine unblocks.
+		_ = s.reader.Close()
 
 		if s.factory != nil {
 			atomic.AddInt64(&s.factory.activeGoroutines, -1)
@@ -338,7 +338,7 @@ func (s *HTTPStream) readChunkedBody(builder *strings.Builder, totalSize *int, m
 
 // createHTTPStream creates a new HTTP stream.
 func createHTTPStream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	ctx context.Context,
 	factory *httpStreamFactory,
 	flow gopacket.Flow,

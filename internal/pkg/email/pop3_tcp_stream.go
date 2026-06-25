@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
 // POP3MessageHandler processes POP3 lines after TCP reassembly.
@@ -23,7 +22,7 @@ type POP3MessageHandler interface {
 
 // POP3Stream represents a TCP stream that processes POP3 protocol.
 type POP3Stream struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	safeReader   *safePOP3Reader
 	ctx          context.Context
 	factory      *pop3StreamFactory
@@ -53,7 +52,7 @@ type safePOP3Reader struct {
 	closeOnce  sync.Once
 }
 
-func newSafePOP3Reader(reader *tcpreader.ReaderStream, ctx context.Context) *safePOP3Reader {
+func newSafePOP3Reader(reader io.Reader, ctx context.Context) *safePOP3Reader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -75,7 +74,6 @@ func newSafePOP3Reader(reader *tcpreader.ReaderStream, ctx context.Context) *saf
 			pipeWriter.CloseWithError(io.ErrClosedPipe)
 			return
 		}
-		defer reader.Close()
 
 		buf := make([]byte, 4096)
 		for {
@@ -126,6 +124,8 @@ func (s *POP3Stream) run() {
 
 	defer func() {
 		s.safeReader.close()
+		// Close the reassembly reader so the adapter's pump goroutine unblocks.
+		_ = s.reader.Close()
 
 		if s.factory != nil {
 			atomic.AddInt64(&s.factory.activeGoroutines, -1)
@@ -296,7 +296,7 @@ func (s *POP3Stream) extractHeadersFromBody(body string, metadata *types.EmailMe
 
 // createPOP3Stream creates a new POP3 stream.
 func createPOP3Stream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	ctx context.Context,
 	factory *pop3StreamFactory,
 	flow gopacket.Flow,

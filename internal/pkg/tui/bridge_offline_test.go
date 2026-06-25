@@ -10,7 +10,6 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // TestBridgeOfflinePacketCounting tests that the bridge correctly counts all packets
@@ -66,7 +65,7 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			var packetsInPending int64
 
 			// Create processor that uses the bridge (like TUI does)
-			processor := func(ch <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+			processor := func(ch <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 				// Run bridge (this is what TUI's startFileSnifferOrdered does)
 				StartPacketBridge(ch, nil, pauseSignal) // nil program is ok, we don't use it
 
@@ -150,7 +149,7 @@ func TestBridgeOfflineConsistency(t *testing.T) {
 
 		pauseSignal := NewPauseSignal()
 
-		processor := func(ch <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+		processor := func(ch <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 			StartPacketBridge(ch, nil, pauseSignal)
 		}
 

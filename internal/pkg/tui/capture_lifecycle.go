@@ -13,7 +13,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/tui/store"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // handleRestartCaptureMsg handles restarting capture with new settings
@@ -242,7 +241,7 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
-	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 		StartPacketBridge(ch, program, pauseSignal)
 	}
 
@@ -261,7 +260,7 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
-	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 		StartPacketBridge(ch, program, pauseSignal)
 	}
 

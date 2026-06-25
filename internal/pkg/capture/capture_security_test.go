@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -268,10 +267,8 @@ func TestInit_ComponentIntegration(t *testing.T) {
 	t.Run("Stream factory setup", func(t *testing.T) {
 		// Test that stream factory can be created
 		streamFactory := &MockStreamFactory{}
-		streamPool := tcpassembly.NewStreamPool(streamFactory)
-		assembler := tcpassembly.NewAssembler(streamPool)
+		assembler := NewTCPAssembler(streamFactory)
 
-		assert.NotNil(t, streamPool, "Stream pool should not be nil")
 		assert.NotNil(t, assembler, "Assembler should not be nil")
 	})
 }

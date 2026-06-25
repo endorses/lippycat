@@ -14,7 +14,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/endorses/lippycat/internal/pkg/tui"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -161,7 +160,7 @@ func runFile(cmd *cobra.Command, args []string) {
 // which is essential for proper call tracking and RTP-to-CallID mapping.
 func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
 	pauseSignal := tui.GetGlobalPauseSignal()
-	processor := func(ch <-chan capture.PacketInfo, assembler *tcpassembly.Assembler) {
+	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
 		tui.StartPacketBridge(ch, program, pauseSignal)
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes

@@ -23,7 +23,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // timeRingBuffer is a fixed-size circular buffer for storing timestamps.
@@ -991,8 +990,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 	tcpHandler := NewTUISIPHandler()
 	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Start background goroutine to periodically flush old TCP streams
 	// This prevents memory leaks from incomplete streams
@@ -1230,7 +1228,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 								"total_count", count,
 								"payload_len", len(tcp.Payload))
 						}
-						assembler.AssembleWithTimestamp(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
+						assembler.Assemble(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
 					}
 				}
 			}
@@ -1276,7 +1274,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 // runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks.
 // This ensures that incomplete or idle TCP streams don't accumulate indefinitely.
-func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) {
+func runTCPStreamFlusher(ctx context.Context, assembler *capture.TCPAssembler) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -1284,7 +1282,7 @@ func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) 
 		select {
 		case <-ctx.Done():
 			// Final flush on shutdown
-			flushed, closed := capture.SafeFlushOlderThan(assembler, time.Now())
+			flushed, closed := assembler.FlushCloseOlderThan(time.Now())
 			if flushed > 0 || closed > 0 {
 				logger.Debug("TCP streams flushed on shutdown",
 					"flushed", flushed,
@@ -1294,7 +1292,7 @@ func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) 
 		case <-ticker.C:
 			// Flush streams that haven't received data in 2 minutes
 			cutoff := time.Now().Add(-2 * time.Minute)
-			flushed, closed := capture.SafeFlushOlderThan(assembler, cutoff)
+			flushed, closed := assembler.FlushCloseOlderThan(cutoff)
 			if flushed > 0 || closed > 0 {
 				logger.Debug("Flushed old TCP streams",
 					"flushed", flushed,

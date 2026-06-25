@@ -21,12 +21,11 @@ package voip
 import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 // HandleTcpPackets is the main entry point for TCP packet processing
 // It processes TCP packets and feeds them to the assembler for VoIP analysis
-func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *tcpassembly.Assembler) {
+func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *capture.TCPAssembler) {
 	handleTcpPackets(pkt, layer, assembler)
 }
 

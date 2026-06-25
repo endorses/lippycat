@@ -17,7 +17,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/viper"
 )
 
@@ -92,7 +91,7 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function
-	processor := func(packetChan <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+	processor := func(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 		processDNSPackets(packetChan)
 	}
 

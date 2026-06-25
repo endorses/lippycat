@@ -17,7 +17,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/viper"
 )
 
@@ -31,10 +31,10 @@ var (
 	pop3Tracker     *POP3Tracker
 	emailPcapWriter *pcapgo.Writer
 	emailOutputFile *os.File
-	smtpFactory     tcpassembly.StreamFactory
-	imapFactory     tcpassembly.StreamFactory
-	pop3Factory     tcpassembly.StreamFactory
-	emailAssembler  *tcpassembly.Assembler
+	smtpFactory     reassembly.StreamFactory
+	imapFactory     reassembly.StreamFactory
+	pop3Factory     reassembly.StreamFactory
+	emailAssembler  *capture.TCPAssembler
 	emailHandler    *cliEmailHandler
 	activeProtocol  string
 	activeSmtpPorts map[uint16]bool
@@ -231,7 +231,7 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function with TCP reassembly
-	processor := func(packetChan <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+	processor := func(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 		processEmailPackets(packetChan, asm)
 	}
 
@@ -248,8 +248,7 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		IMAPPorts:   activeImapPorts,
 		POP3Ports:   activePop3Ports,
 	})
-	streamPool := tcpassembly.NewStreamPool(multiFactory)
-	emailAssembler = tcpassembly.NewAssembler(streamPool)
+	emailAssembler = capture.NewTCPAssembler(multiFactory)
 
 	// Run capture with appropriate mode
 	if isOffline {
@@ -316,7 +315,7 @@ func initializePortMaps() {
 }
 
 // processEmailPackets processes packets from the channel.
-func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *tcpassembly.Assembler) {
+func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
 	for pktInfo := range packetChan {
 		packet := pktInfo.Packet
 
@@ -339,7 +338,7 @@ func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *tcpassembly.
 
 		// Feed to assembler
 		if asm != nil {
-			asm.AssembleWithTimestamp(netLayer.NetworkFlow(), tcp, packet.Metadata().Timestamp)
+			asm.Assemble(netLayer.NetworkFlow(), tcp, packet.Metadata().Timestamp)
 		}
 
 		// Write to PCAP if configured

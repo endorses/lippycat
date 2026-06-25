@@ -13,7 +13,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -298,7 +297,7 @@ func TestCaptureIntegration_MockInterface(t *testing.T) {
 			&MockCaptureInterface{name: "mock1"},
 		}
 
-		mockProcessor := func(ch <-chan PacketInfo, assembler *tcpassembly.Assembler) {
+		mockProcessor := func(ch <-chan PacketInfo, assembler *TCPAssembler) {
 			// Consume any packets that might come through
 			for range ch {
 				// Just drain the channel
@@ -309,15 +308,13 @@ func TestCaptureIntegration_MockInterface(t *testing.T) {
 		assert.NotPanics(t, func() {
 			ctx := context.Background()
 			streamFactory := &MockStreamFactory{}
-			streamPool := tcpassembly.NewStreamPool(streamFactory)
-			assembler := tcpassembly.NewAssembler(streamPool)
+			assembler := NewTCPAssembler(streamFactory)
 
 			// Test that components can be created
 			buffer := NewPacketBuffer(ctx, 1000)
 			defer buffer.Close()
 
 			assert.NotNil(t, streamFactory)
-			assert.NotNil(t, streamPool)
 			assert.NotNil(t, assembler)
 			assert.NotNil(t, buffer)
 			assert.NotNil(t, devices)
@@ -342,40 +339,6 @@ func (m *MockCaptureInterface) SetHandle() error {
 
 func (m *MockCaptureInterface) Handle() (*pcap.Handle, error) {
 	return nil, errors.New("mock interface cannot provide handle") // Mock failure
-}
-
-func TestProcessStreamEnhanced(t *testing.T) {
-	t.Run("Stream with null bytes", func(t *testing.T) {
-		data := "test\x00data\x00with\x00nulls"
-		reader := strings.NewReader(data)
-
-		assert.NotPanics(t, func() {
-			processStream(reader)
-		}, "Should handle null bytes in stream")
-	})
-
-	t.Run("Stream with very long lines", func(t *testing.T) {
-		longLine := strings.Repeat("A", 100000) // 100KB line
-		reader := strings.NewReader(longLine)
-
-		assert.NotPanics(t, func() {
-			processStream(reader)
-		}, "Should handle very long lines")
-	})
-
-	t.Run("Stream with binary data", func(t *testing.T) {
-		// Create some binary data that might cause issues
-		binaryData := make([]byte, 1024)
-		for i := range binaryData {
-			binaryData[i] = byte(i % 256)
-		}
-
-		reader := strings.NewReader(string(binaryData))
-
-		assert.NotPanics(t, func() {
-			processStream(reader)
-		}, "Should handle binary data in stream")
-	})
 }
 
 func TestContextIntegration(t *testing.T) {

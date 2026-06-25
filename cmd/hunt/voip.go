@@ -15,7 +15,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/endorses/lippycat/internal/pkg/voip"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -262,10 +261,9 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 	// The factory creates SIPStream instances that parse TCP streams for SIP messages
 	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
 
-	// Create stream pool and assembler for TCP reassembly
+	// Create connection-aware reassembly assembler for TCP reassembly
 	// This is the same pattern used in sniff/tap modes (see voip/core.go)
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	assembler := tcpassembly.NewAssembler(streamPool)
+	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Create VoIP packet processor for UDP buffering
 	// This handles UDP SIP/RTP packets with buffering and filtering
@@ -284,7 +282,7 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 	logger.Info("VoIP hunter initialized with full TCP reassembly",
 		"tcp_handler", "HunterForwardHandler",
-		"tcp_assembler", "tcpassembly.Assembler",
+		"tcp_assembler", "reassembly.Assembler",
 		"udp_handler", "UDPPacketHandler",
 		"buffer_manager", "enabled",
 		"features", "TCP SIP reassembly, UDP SIP buffering, UDP RTP buffering")
@@ -308,7 +306,7 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 	// Flush all remaining TCP streams on shutdown
 	logger.Debug("Flushing TCP assembler streams on shutdown")
-	flushed, closed := capture.SafeFlushOlderThan(assembler, time.Now())
+	flushed, closed := assembler.FlushCloseOlderThan(time.Now())
 	logger.Debug("TCP streams flushed on shutdown", "flushed", flushed, "closed", closed)
 
 	return nil
@@ -316,7 +314,7 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 // runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks
 // and ensure timely processing of SIP messages in slow or incomplete connections.
-func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) {
+func runTCPStreamFlusher(ctx context.Context, assembler *capture.TCPAssembler) {
 	// Flush streams older than 2 minutes every 30 seconds
 	// This matches the behavior in sniff/tap modes
 	ticker := time.NewTicker(30 * time.Second)
@@ -329,7 +327,7 @@ func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) 
 		case <-ticker.C:
 			// Flush streams that haven't received data in 2 minutes
 			cutoff := time.Now().Add(-2 * time.Minute)
-			flushed, closed := capture.SafeFlushOlderThan(assembler, cutoff)
+			flushed, closed := assembler.FlushCloseOlderThan(cutoff)
 			if flushed > 0 || closed > 0 {
 				logger.Debug("Flushed old TCP streams",
 					"flushed", flushed,

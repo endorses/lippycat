@@ -22,19 +22,18 @@ import (
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 // TapTCPAssembler implements source.TCPAssembler for tap mode.
-// It buffers TCP packets and feeds them to the tcpassembly for SIP stream reconstruction.
+// It buffers TCP packets and feeds them to the assembler for SIP stream reconstruction.
 type TapTCPAssembler struct {
-	assembler *tcpassembly.Assembler
+	assembler *capture.TCPAssembler
 }
 
 // NewTapTCPAssembler creates a TCP assembler wrapper for tap mode.
-func NewTapTCPAssembler(assembler *tcpassembly.Assembler) *TapTCPAssembler {
+func NewTapTCPAssembler(assembler *capture.TCPAssembler) *TapTCPAssembler {
 	return &TapTCPAssembler{assembler: assembler}
 }
 
@@ -58,7 +57,7 @@ func (a *TapTCPAssembler) AssemblePacket(pktInfo capture.PacketInfo) bool {
 	voip.BufferTCPPacket(netFlow, pktInfo)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
-	a.assembler.AssembleWithTimestamp(netFlow, tcpLayer, packet.Metadata().Timestamp)
+	a.assembler.Assemble(netFlow, tcpLayer, packet.Metadata().Timestamp)
 
 	return true
 }
@@ -495,9 +494,8 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	tapCtx := context.Background()
 	streamFactory := voip.NewSipStreamFactory(tapCtx, tapTCPHandler)
 
-	// Create tcpassembly stream pool and assembler
-	streamPool := tcpassembly.NewStreamPool(streamFactory)
-	tcpAssembler := tcpassembly.NewAssembler(streamPool)
+	// Create connection-aware reassembly assembler
+	tcpAssembler := capture.NewTCPAssembler(streamFactory)
 
 	// Create TapTCPAssembler wrapper that implements source.TCPAssembler
 	tapTCPAssemblerWrapper := NewTapTCPAssembler(tcpAssembler)
@@ -508,7 +506,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	logger.Info("TCP SIP reassembly enabled for tap mode",
 		"tcp_handler", "TapTCPHandler",
-		"tcp_assembler", "tcpassembly.Assembler",
+		"tcp_assembler", "reassembly.Assembler",
 		"injection_buffer", 1000)
 
 	// Set the local source and target on the processor
@@ -570,7 +568,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 // runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks
 // and ensure timely processing of SIP messages in slow or incomplete connections.
-func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) {
+func runTCPStreamFlusher(ctx context.Context, assembler *capture.TCPAssembler) {
 	// Flush streams older than 2 minutes every 30 seconds
 	// This matches the behavior in hunt mode
 	ticker := time.NewTicker(30 * time.Second)
@@ -581,13 +579,13 @@ func runTCPStreamFlusher(ctx context.Context, assembler *tcpassembly.Assembler) 
 		case <-ctx.Done():
 			// Flush all remaining streams on shutdown
 			logger.Debug("Flushing TCP assembler streams on shutdown")
-			flushed, closed := capture.SafeFlushOlderThan(assembler, time.Now())
+			flushed, closed := assembler.FlushCloseOlderThan(time.Now())
 			logger.Debug("TCP streams flushed on shutdown", "flushed", flushed, "closed", closed)
 			return
 		case <-ticker.C:
 			// Flush streams that haven't received data in 2 minutes
 			cutoff := time.Now().Add(-2 * time.Minute)
-			flushed, closed := capture.SafeFlushOlderThan(assembler, cutoff)
+			flushed, closed := assembler.FlushCloseOlderThan(cutoff)
 			if flushed > 0 || closed > 0 {
 				logger.Debug("Flushed old TCP streams",
 					"flushed", flushed,

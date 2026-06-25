@@ -190,18 +190,12 @@ func (f *sipStreamFactory) GetHealthStatus() map[string]interface{} {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
 	maxGoroutines := int64(f.config.MaxGoroutines)
 
-	f.configMutex.RLock()
-	queueLength := len(f.streamQueue)
-	f.configMutex.RUnlock()
-
-	healthy := activeGoroutines < maxGoroutines*9/10 && queueLength < cap(f.streamQueue)*9/10
+	healthy := activeGoroutines < maxGoroutines*9/10
 
 	status := map[string]interface{}{
 		"healthy":           healthy,
 		"active_goroutines": activeGoroutines,
 		"max_goroutines":    maxGoroutines,
-		"queue_length":      queueLength,
-		"queue_capacity":    cap(f.streamQueue),
 		"performance_mode":  f.config.TCPPerformanceMode,
 		"last_updated":      time.Now(),
 	}
@@ -212,9 +206,6 @@ func (f *sipStreamFactory) GetHealthStatus() map[string]interface{} {
 		status["status"] = "degraded"
 		if activeGoroutines >= maxGoroutines {
 			status["warning"] = "goroutine limit reached"
-		}
-		if queueLength >= cap(f.streamQueue) {
-			status["warning"] = "queue capacity exceeded"
 		}
 	}
 
@@ -229,13 +220,8 @@ func (f *sipStreamFactory) IsHealthy() bool {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
 	maxGoroutines := int64(f.config.MaxGoroutines)
 
-	f.configMutex.RLock()
-	queueLength := len(f.streamQueue)
-	queueCapacity := cap(f.streamQueue)
-	f.configMutex.RUnlock()
-
-	// Consider healthy if under 90% of limits
-	return activeGoroutines < maxGoroutines*9/10 && queueLength < queueCapacity*9/10
+	// Consider healthy if under 90% of the goroutine limit
+	return activeGoroutines < maxGoroutines*9/10
 }
 
 func (f *sipStreamFactory) getGoroutineLimit() int64 {
@@ -247,8 +233,6 @@ func (f *sipStreamFactory) getGoroutineLimit() int64 {
 // updateMetrics updates the TCP stream metrics
 func (f *sipStreamFactory) updateMetrics() {
 	tcpStreamMetrics.mu.Lock()
-	// Keep activeStreams and activeGoroutines in sync via atomic operations
-	tcpStreamMetrics.queuedStreams = int64(len(f.streamQueue))
 	tcpStreamMetrics.lastMetricsUpdate = time.Now()
 	tcpStreamMetrics.mu.Unlock()
 }
@@ -268,8 +252,7 @@ func (f *sipStreamFactory) logGoroutineLimit() {
 			if atomic.CompareAndSwapInt64(&f.lastLogTime, lastLog, now) {
 				logger.Warn("TCP stream goroutine limit reached",
 					"active_goroutines", current,
-					"max_goroutines", f.config.MaxGoroutines,
-					"queue_length", len(f.streamQueue))
+					"max_goroutines", f.config.MaxGoroutines)
 			}
 		}
 	}
@@ -297,12 +280,11 @@ func (f *sipStreamFactory) performanceMonitor() {
 func (f *sipStreamFactory) performAutoTuning() {
 	activeGoroutines := atomic.LoadInt64(&f.activeGoroutines)
 	maxGoroutines := int64(f.config.MaxGoroutines)
-	queueLength := int64(len(f.streamQueue))
 
 	// Auto-tune based on load
-	if activeGoroutines > maxGoroutines*8/10 || queueLength > int64(cap(f.streamQueue))*7/10 {
+	if activeGoroutines > maxGoroutines*8/10 {
 		f.enableBackpressure()
-	} else if activeGoroutines < maxGoroutines*3/10 && queueLength < int64(cap(f.streamQueue))*2/10 {
+	} else if activeGoroutines < maxGoroutines*3/10 {
 		f.relaxBackpressure()
 	}
 
@@ -312,8 +294,7 @@ func (f *sipStreamFactory) performAutoTuning() {
 	}
 
 	logger.Debug("Performance auto-tuning completed",
-		"active_goroutines", activeGoroutines,
-		"queue_length", queueLength)
+		"active_goroutines", activeGoroutines)
 }
 
 // getCurrentBatchSize safely gets the current batch size

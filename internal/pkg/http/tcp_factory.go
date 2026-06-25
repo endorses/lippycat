@@ -9,11 +9,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/reassembly"
 )
 
 // HTTPMessageHandler processes HTTP messages after TCP reassembly.
@@ -65,7 +66,7 @@ func DefaultHTTPStreamFactoryConfig() HTTPStreamFactoryConfig {
 }
 
 // NewHTTPStreamFactory creates a new HTTP stream factory.
-func NewHTTPStreamFactory(ctx context.Context, handler HTTPMessageHandler, config HTTPStreamFactoryConfig) tcpassembly.StreamFactory {
+func NewHTTPStreamFactory(ctx context.Context, handler HTTPMessageHandler, config HTTPStreamFactoryConfig) reassembly.StreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 
 	if config.MaxGoroutines <= 0 {
@@ -107,9 +108,9 @@ func NewHTTPStreamFactory(ctx context.Context, handler HTTPMessageHandler, confi
 	return factory
 }
 
-// New creates a new HTTP stream (implements tcpassembly.StreamFactory).
-func (f *httpStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	r := tcpreader.NewReaderStream()
+// New creates a new HTTP stream (implements reassembly.StreamFactory).
+func (f *httpStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	rs, reader := capture.NewTCPHalfStream()
 
 	// Check goroutine limit
 	current := atomic.LoadInt64(&f.activeGoroutines)
@@ -117,7 +118,9 @@ func (f *httpStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream
 		logger.Warn("HTTP stream dropped: goroutine limit reached",
 			"active", current,
 			"max", f.maxGoroutines)
-		return &r
+		// Close the reader so the adapter's pump goroutine exits.
+		_ = reader.Close()
+		return rs
 	}
 
 	// Determine if this is from server (source port is a known server port)
@@ -129,12 +132,12 @@ func (f *httpStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream
 	sessionID := createHTTPSessionID(net, transport)
 
 	// Create and start stream
-	stream := createHTTPStream(&r, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
+	stream := createHTTPStream(reader, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
 
 	atomic.AddInt64(&f.activeGoroutines, 1)
 	go stream.run()
 
-	return &r
+	return rs
 }
 
 // isServerPort checks if a port is configured as a server port.

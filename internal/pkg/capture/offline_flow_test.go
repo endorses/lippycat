@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
-	"github.com/google/gopacket/tcpassembly"
 )
 
 func TestOfflineFlowIntegration(t *testing.T) {
@@ -42,7 +41,7 @@ func TestOfflineFlowIntegration(t *testing.T) {
 	var packetCount int
 	var mu sync.Mutex
 
-	processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
+	processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
 		for pkt := range ch {
 			mu.Lock()
 			packetCount++

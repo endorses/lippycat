@@ -6,10 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/reassembly"
 )
 
 // imapStreamFactory manages TCP stream creation for IMAP.
@@ -45,7 +46,7 @@ func DefaultIMAPStreamFactoryConfig() IMAPStreamFactoryConfig {
 }
 
 // NewIMAPStreamFactory creates a new IMAP stream factory.
-func NewIMAPStreamFactory(ctx context.Context, handler IMAPMessageHandler, config IMAPStreamFactoryConfig) tcpassembly.StreamFactory {
+func NewIMAPStreamFactory(ctx context.Context, handler IMAPMessageHandler, config IMAPStreamFactoryConfig) reassembly.StreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 
 	if config.MaxGoroutines <= 0 {
@@ -79,9 +80,9 @@ func NewIMAPStreamFactory(ctx context.Context, handler IMAPMessageHandler, confi
 	return factory
 }
 
-// New creates a new IMAP stream (implements tcpassembly.StreamFactory).
-func (f *imapStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	r := tcpreader.NewReaderStream()
+// New creates a new IMAP stream (implements reassembly.StreamFactory).
+func (f *imapStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	rs, reader := capture.NewTCPHalfStream()
 
 	// Check goroutine limit
 	current := atomic.LoadInt64(&f.activeGoroutines)
@@ -89,7 +90,8 @@ func (f *imapStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream
 		logger.Warn("IMAP stream dropped: goroutine limit reached",
 			"active", current,
 			"max", f.maxGoroutines)
-		return &r
+		_ = reader.Close()
+		return rs
 	}
 
 	// Determine if this is from server (source port is a known server port)
@@ -101,12 +103,12 @@ func (f *imapStreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream
 	sessionID := createSessionID(net, transport)
 
 	// Create and start stream
-	stream := createIMAPStream(&r, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
+	stream := createIMAPStream(reader, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
 
 	atomic.AddInt64(&f.activeGoroutines, 1)
 	go stream.run()
 
-	return &r
+	return rs
 }
 
 // isServerPort checks if a port is configured as a server port.

@@ -3,7 +3,7 @@ package capture
 import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/tcpassembly"
+	"github.com/google/gopacket/reassembly"
 )
 
 // Common test utilities shared across all test files
@@ -49,19 +49,24 @@ func createTestPacket() PacketInfo {
 	}
 }
 
-// Mock implementations for tcpassembly
+// Mock implementations for reassembly
 type MockStreamFactory struct{}
 
-func (m *MockStreamFactory) New(netFlow, tcpFlow gopacket.Flow) tcpassembly.Stream {
+func (m *MockStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
 	return &MockStream{}
 }
 
 type MockStream struct{}
 
-func (m *MockStream) Reassembled(reassembly []tcpassembly.Reassembly) {
+func (m *MockStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
+	*start = true
+	return true
+}
+
+func (m *MockStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
 	// Mock implementation - do nothing
 }
 
-func (m *MockStream) ReassemblyComplete() {
-	// Mock implementation - do nothing
+func (m *MockStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool {
+	return true
 }

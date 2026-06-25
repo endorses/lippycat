@@ -12,7 +12,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
 )
 
 // IMAPMessageHandler processes IMAP lines after TCP reassembly.
@@ -23,7 +22,7 @@ type IMAPMessageHandler interface {
 
 // IMAPStream represents a TCP stream that processes IMAP protocol.
 type IMAPStream struct {
-	reader       *tcpreader.ReaderStream
+	reader       io.ReadCloser
 	safeReader   *safeIMAPReader
 	ctx          context.Context
 	factory      *imapStreamFactory
@@ -51,7 +50,7 @@ type safeIMAPReader struct {
 	closeOnce  sync.Once
 }
 
-func newSafeIMAPReader(reader *tcpreader.ReaderStream, ctx context.Context) *safeIMAPReader {
+func newSafeIMAPReader(reader io.Reader, ctx context.Context) *safeIMAPReader {
 	pipeReader, pipeWriter := io.Pipe()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -73,7 +72,6 @@ func newSafeIMAPReader(reader *tcpreader.ReaderStream, ctx context.Context) *saf
 			pipeWriter.CloseWithError(io.ErrClosedPipe)
 			return
 		}
-		defer reader.Close()
 
 		buf := make([]byte, 4096)
 		for {
@@ -133,6 +131,8 @@ func (s *IMAPStream) run() {
 
 	defer func() {
 		s.safeReader.close()
+		// Close the reassembly reader so the adapter's pump goroutine unblocks.
+		_ = s.reader.Close()
 
 		if s.factory != nil {
 			atomic.AddInt64(&s.factory.activeGoroutines, -1)
@@ -283,7 +283,7 @@ func sscanf(s string, format string, args ...interface{}) (int, error) {
 
 // createIMAPStream creates a new IMAP stream.
 func createIMAPStream(
-	reader *tcpreader.ReaderStream,
+	reader io.ReadCloser,
 	ctx context.Context,
 	factory *imapStreamFactory,
 	flow gopacket.Flow,

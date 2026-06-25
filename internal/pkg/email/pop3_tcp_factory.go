@@ -6,10 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/tcpassembly"
-	"github.com/google/gopacket/tcpassembly/tcpreader"
+	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/reassembly"
 )
 
 // pop3StreamFactory manages TCP stream creation for POP3.
@@ -51,7 +52,7 @@ func DefaultPOP3StreamFactoryConfig() POP3StreamFactoryConfig {
 }
 
 // NewPOP3StreamFactory creates a new POP3 stream factory.
-func NewPOP3StreamFactory(ctx context.Context, handler POP3MessageHandler, config POP3StreamFactoryConfig) tcpassembly.StreamFactory {
+func NewPOP3StreamFactory(ctx context.Context, handler POP3MessageHandler, config POP3StreamFactoryConfig) reassembly.StreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 
 	if config.MaxGoroutines <= 0 {
@@ -93,9 +94,9 @@ func NewPOP3StreamFactory(ctx context.Context, handler POP3MessageHandler, confi
 	return factory
 }
 
-// New creates a new POP3 stream (implements tcpassembly.StreamFactory).
-func (f *pop3StreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream {
-	r := tcpreader.NewReaderStream()
+// New creates a new POP3 stream (implements reassembly.StreamFactory).
+func (f *pop3StreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	rs, reader := capture.NewTCPHalfStream()
 
 	// Check goroutine limit
 	current := atomic.LoadInt64(&f.activeGoroutines)
@@ -103,7 +104,8 @@ func (f *pop3StreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream
 		logger.Warn("POP3 stream dropped: goroutine limit reached",
 			"active", current,
 			"max", f.maxGoroutines)
-		return &r
+		_ = reader.Close()
+		return rs
 	}
 
 	// Determine if this is from server (source port is a known server port)
@@ -115,12 +117,12 @@ func (f *pop3StreamFactory) New(net, transport gopacket.Flow) tcpassembly.Stream
 	sessionID := createSessionID(net, transport)
 
 	// Create and start stream
-	stream := createPOP3Stream(&r, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
+	stream := createPOP3Stream(reader, f.ctx, f, net, transport.Reverse(), isFromServer, sessionID)
 
 	atomic.AddInt64(&f.activeGoroutines, 1)
 	go stream.run()
 
-	return &r
+	return rs
 }
 
 // isServerPort checks if a port is configured as a server port.

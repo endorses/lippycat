@@ -89,6 +89,9 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 	}
 
 	// Start processing goroutine immediately
+	if factory != nil {
+		factory.allWorkers.Add(1)
+	}
 	go s.processLoop()
 	return s
 }
@@ -164,6 +167,10 @@ func (s *bufferedSIPStream) processLoop() {
 	logger.Debug("SIP stream starting", "flow", srcEndpoint+"->"+dstEndpoint)
 
 	defer func() {
+		if s.factory != nil {
+			defer s.factory.allWorkers.Done()
+		}
+
 		// Decrement goroutine counter
 		if s.factory != nil {
 			atomic.AddInt64(&s.factory.activeGoroutines, -1)

@@ -247,7 +247,7 @@ func TestX3Encoder_CorrelationID_Deterministic(t *testing.T) {
 	assert.Equal(t, pdu1.Header.CorrelationID, pdu2.Header.CorrelationID)
 }
 
-func TestX3Encoder_CorrelationID_DifferentSSRC(t *testing.T) {
+func TestX3Encoder_CorrelationID_SameCallIDDifferentSSRC(t *testing.T) {
 	encoder := NewX3Encoder()
 	xid := uuid.New()
 
@@ -282,9 +282,10 @@ func TestX3Encoder_CorrelationID_DifferentSSRC(t *testing.T) {
 	pdu2, err := encoder.EncodeCC(pkt2, xid)
 	require.NoError(t, err)
 
-	// Same CallID but different SSRC = different correlation IDs
-	// (This allows distinguishing forward/reverse RTP streams)
-	assert.NotEqual(t, pdu1.Header.CorrelationID, pdu2.Header.CorrelationID)
+	// Same Call-ID = same correlation ID, regardless of SSRC. Both RTP streams
+	// (forward/reverse) belong to one call and must correlate with the single
+	// X2 IRI correlation ID, which is derived from the Call-ID alone.
+	assert.Equal(t, pdu1.Header.CorrelationID, pdu2.Header.CorrelationID)
 }
 
 func TestX3Encoder_SequenceNumber_Monotonic(t *testing.T) {
@@ -644,5 +645,39 @@ func BenchmarkX3Encoder_EncodeCCBatch(b *testing.B) {
 		if len(pdus) != batchSize {
 			b.Fatal("unexpected number of PDUs")
 		}
+	}
+}
+
+func TestX3Encoder_CorrelationID_MatchesX2WhenCallIDPresent(t *testing.T) {
+	x2 := NewX2Encoder()
+	x3 := NewX3Encoder()
+
+	const callID = "abc123@host.example.com"
+
+	x2Corr := x2.generateCorrelationID(callID)
+
+	// X3 correlation ID must equal X2's for the same Call-ID, regardless of SSRC.
+	for _, ssrc := range []uint32{0, 1, 0x12345678, 0xFFFFFFFF} {
+		x3Corr := x3.generateCorrelationID(ssrc, callID)
+		if x3Corr != x2Corr {
+			t.Errorf("X3 corr (ssrc=%#x) = %d, want X2 corr = %d", ssrc, x3Corr, x2Corr)
+		}
+	}
+}
+
+func TestX3Encoder_CorrelationID_SSRCFallbackWhenNoCallID(t *testing.T) {
+	x3 := NewX3Encoder()
+
+	// Deterministic per-SSRC value when no Call-ID is present.
+	a1 := x3.generateCorrelationID(0x11111111, "")
+	a2 := x3.generateCorrelationID(0x11111111, "")
+	if a1 != a2 {
+		t.Errorf("SSRC fallback not deterministic: %d != %d", a1, a2)
+	}
+
+	// Different SSRCs must yield different correlation IDs.
+	b := x3.generateCorrelationID(0x22222222, "")
+	if a1 == b {
+		t.Errorf("expected different correlation IDs for different SSRCs, both = %d", a1)
 	}
 }

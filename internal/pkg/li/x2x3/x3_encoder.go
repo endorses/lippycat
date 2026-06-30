@@ -131,18 +131,26 @@ func (e *X3Encoder) EncodeCCWithPayload(pkt *types.PacketDisplay, xid uuid.UUID,
 	return pdu, nil
 }
 
-// generateCorrelationID creates a deterministic correlation ID from SSRC and Call-ID.
+// generateCorrelationID creates a deterministic correlation ID for an X3 CC PDU.
 // This links X3 CC PDUs to their corresponding X2 IRI PDUs.
-// If Call-ID is available, it takes precedence for cross-stream correlation.
+//
+// When a Call-ID is available, it takes precedence: the correlation ID is the
+// FNV-1a hash of the Call-ID only (identical to X2Encoder.generateCorrelationID),
+// so the X3 correlation ID equals the X2 correlation ID for the same call and the
+// LEA/MDF can pair an IRI with its CC.
+//
+// Only when there is no Call-ID (RTP-only, no SIP signaling) do we fall back to a
+// deterministic per-SSRC hash for stream-level correlation.
 func (e *X3Encoder) generateCorrelationID(ssrc uint32, callID string) uint64 {
 	h := fnv.New64a()
 
-	// If we have a Call-ID, use it for correlation with SIP signaling
+	// If we have a Call-ID, hash it alone so X3 corr == X2 corr for the same call.
 	if callID != "" {
 		h.Write([]byte(callID))
+		return h.Sum64()
 	}
 
-	// Include SSRC for stream-level correlation
+	// No Call-ID: fall back to SSRC for stream-level correlation.
 	buf := [4]byte{
 		byte(ssrc >> 24),
 		byte(ssrc >> 16),

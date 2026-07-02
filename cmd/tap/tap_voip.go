@@ -242,6 +242,19 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 			"sip_ports", voipSIPPorts,
 			"rtp_port_ranges", voipRTPPortRanges,
 			"effective_filter", effectiveBPFFilter)
+	} else if baseBPFFilter != "" {
+		// No VoIP optimization flags were set, so the VoIPFilterBuilder (which
+		// admits ESP) is skipped and the raw base filter is used verbatim. A
+		// port/udp base filter drops IPsec ESP (IP proto 50) at the kernel BPF,
+		// which means ESP-NULL IMS SIP MESSAGE (SMS) never reaches the
+		// decapsulateESPNull stage. Explicitly OR in the ESP clause so ESP is
+		// admitted regardless of the --sip-port optimization. (An empty base
+		// filter already captures everything, including ESP, so it is left as-is.)
+		effectiveBPFFilter = fmt.Sprintf("(%s) or %s", baseBPFFilter, voip.ESPClause)
+
+		logger.Info("ESP admission applied to base BPF filter",
+			"base_filter", baseBPFFilter,
+			"effective_filter", effectiveBPFFilter)
 	}
 
 	// Set TCP performance mode in viper for VoIP processing

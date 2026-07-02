@@ -61,8 +61,10 @@ func TestNewVoIPFilterBuilder(t *testing.T) {
 func TestVoIPFilterBuilder_Build(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
 
-	// Helper constant for readability
-	const frag = IPFragmentClause // "((ip[6:2] & 0x1fff > 0) or (ip6[6] == 44))"
+	// Helper constant for readability. The builder always OR's the ESP clause
+	// (IPsec ESP / ESP-NULL IMS SMS) immediately after the IP fragment clause,
+	// so the trailing clause is "<fragment> or <esp>".
+	frag := IPFragmentClause + " or " + ESPClause
 
 	tests := []struct {
 		name     string
@@ -580,7 +582,7 @@ func TestValidatePortRange(t *testing.T) {
 // TestVoIPFilterBuilder_Build_EdgeCases tests edge cases not covered in the main test
 func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
-	frag := IPFragmentClause
+	frag := IPFragmentClause + " or " + ESPClause
 
 	t.Run("empty port list has no effect", func(t *testing.T) {
 		result := builder.Build(VoIPFilterConfig{
@@ -622,6 +624,32 @@ func TestIPFragmentClauseConstant(t *testing.T) {
 	// IPv4: ip[6:2] & 0x1fff > 0 - non-zero 13-bit fragment offset (subsequent fragments)
 	// IPv6: ip6[6] == 44 - Next Header is the Fragment extension header
 	assert.Equal(t, "((ip[6:2] & 0x1fff > 0) or (ip6[6] == 44))", IPFragmentClause)
+}
+
+// TestESPClauseConstant verifies the ESP clause constant matches ESP (IP proto
+// 50) over IPv4 and IPv6. Required so IPsec ESP-NULL (IMS SIP MESSAGE / SMS) is
+// admitted by the kernel BPF and can reach the decapsulateESPNull stage.
+func TestESPClauseConstant(t *testing.T) {
+	assert.Equal(t, "(ip proto 50 or ip6 proto 50)", ESPClause)
+}
+
+// TestVoIPFilterBuilder_AdmitsESP verifies every non-empty filter the builder
+// produces includes the ESP clause, regardless of the --sip-port optimization.
+func TestVoIPFilterBuilder_AdmitsESP(t *testing.T) {
+	builder := NewVoIPFilterBuilder()
+	configs := []VoIPFilterConfig{
+		{SIPPorts: []int{5060}},
+		{SIPPorts: []int{5060, 5061}, RTPPortRanges: []PortRange{{Start: 10000, End: 32768}}},
+		{SIPPorts: []int{5060}, UDPOnly: true},
+		{UDPOnly: true},
+		{UDPOnly: true, BaseFilter: "host 10.0.0.1"},
+		{BaseFilter: "host 10.0.0.1"},
+		{SIPPorts: []int{5060}, BaseFilter: "net 192.168.0.0/24"},
+	}
+	for _, cfg := range configs {
+		filter := builder.Build(cfg)
+		require.Contains(t, filter, ESPClause, "filter must admit ESP: %q", filter)
+	}
 }
 
 // BenchmarkVoIPFilterBuilder_Build benchmarks filter building performance

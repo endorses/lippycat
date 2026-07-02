@@ -1074,6 +1074,80 @@ func decapsulateVXLAN(packet gopacket.Packet) (gopacket.Packet, bool) {
 	return innerPacket, true
 }
 
+// espCommonICVSizes lists candidate ICV (Integrity Check Value) sizes to try when
+// the ICV size is not fixed via --esp-icv-size, in order of likelihood.
+// HMAC-SHA1-96 → 12 bytes (most common in IMS/VoLTE).
+// HMAC-SHA256-128 → 16 bytes. HMAC-MD5-96 → 8 bytes. NULL auth → 0 bytes.
+var espCommonICVSizes = []int{12, 16, 8, 0}
+
+// espTrailerInnerEnd parses the ESP-NULL trailer to find where the inner payload ends.
+//
+// ESP-NULL trailer layout (RFC 4303 §2), starting after the SPI+Seq header:
+//
+//	[inner payload][padding: pad_len bytes][pad_len (1B)][next_header (1B)][ICV (icvSize)]
+//
+// It returns the offset one past the last inner-payload byte (innerEnd), the ESP
+// next_header value, and ok=true only when the trailer is plausible: enough bytes
+// for the ICV+pad_len+next_header, a positive innerEnd, and the padding bytes form
+// the mandated sequential 0x01,0x02,…,pad_len pattern. The sequential-padding check
+// is the key discriminator between genuine NULL-cipher transport and random
+// encrypted ciphertext, so it doubles as validation. On any implausible trailer it
+// returns ok=false so callers can fall back safely rather than emit garbage.
+func espTrailerInnerEnd(espPayload []byte, icvSize int) (innerEnd int, nextHdr byte, ok bool) {
+	if icvSize < 0 {
+		return 0, 0, false
+	}
+	// Need at least: ICV + 1 byte pad_len + 1 byte next_hdr + ≥1 inner byte.
+	if len(espPayload) < icvSize+2+1 {
+		return 0, 0, false
+	}
+
+	trailerEnd := len(espPayload) - icvSize
+	// next_hdr is the last byte before the ICV.
+	nextHdr = espPayload[trailerEnd-1]
+	// pad_len is the byte before next_hdr.
+	padLen := int(espPayload[trailerEnd-2])
+
+	// The region before pad_len+next_hdr is: [inner data][padding].
+	innerEnd = trailerEnd - 2 - padLen
+	if innerEnd <= 0 {
+		return 0, 0, false
+	}
+
+	// Validate padding bytes are sequential: 0x01, 0x02, ..., padLen.
+	for i := 0; i < padLen; i++ {
+		if espPayload[innerEnd+i] != byte(i+1) {
+			return 0, 0, false
+		}
+	}
+
+	return innerEnd, nextHdr, true
+}
+
+// espStripTrailerLen returns the true inner-payload length for an ESP-NULL payload
+// whose inner protocol is already known (wantProto), by stripping the ESP trailer
+// (padding + pad_len + next_header + ICV). It is used by the content-heuristic and
+// SPI-cache detection paths, which otherwise cannot locate the end of a TCP segment
+// (TCP has no length field), so they historically used the full espPayload length —
+// leaving icvSize+2+pad_len trailer bytes appended and desynchronising TCP sequence
+// numbers downstream.
+//
+// icvSize may be -1 (auto-detect), in which case the common ICV sizes are tried.
+// If no candidate yields a plausible trailer whose next_header matches wantProto, it
+// falls back to len(espPayload) so a packet is never dropped on trailer-parse doubt.
+func espStripTrailerLen(espPayload []byte, icvSize int, wantProto layers.IPProtocol) int {
+	sizes := []int{icvSize}
+	if icvSize < 0 {
+		sizes = espCommonICVSizes
+	}
+	for _, s := range sizes {
+		if innerEnd, nextHdr, ok := espTrailerInnerEnd(espPayload, s); ok && layers.IPProtocol(nextHdr) == wantProto {
+			return innerEnd
+		}
+	}
+	return len(espPayload)
+}
+
 // tryESPTrailerValidation attempts to identify the inner protocol of an ESP-NULL payload
 // by reading the ESP trailer: [pad bytes][pad_len][next_hdr][ICV].
 //
@@ -1087,46 +1161,16 @@ func decapsulateVXLAN(packet gopacket.Packet) (gopacket.Packet, bool) {
 //
 // Returns (0, 0, false) if no candidate matches.
 func tryESPTrailerValidation(espPayload []byte, fixedICVSize int) (layers.IPProtocol, int, bool) {
-	// Common ICV (Integrity Check Value) sizes to try, in order of likelihood.
-	// HMAC-SHA1-96 → 12 bytes (most common in IMS/VoLTE).
-	// HMAC-SHA256-128 → 16 bytes. HMAC-MD5-96 → 8 bytes. NULL auth → 0 bytes.
 	var icvSizes []int
 	if fixedICVSize >= 0 {
 		icvSizes = []int{fixedICVSize}
 	} else {
-		icvSizes = []int{12, 16, 8, 0}
+		icvSizes = espCommonICVSizes
 	}
 
 	for _, icvSize := range icvSizes {
-		// Need at least: 1 byte next_hdr + 1 byte pad_len + ICV + some inner header.
-		minLen := icvSize + 2 + 1 // +1 so there is room for at least pad_len=0
-		if len(espPayload) < minLen {
-			continue
-		}
-
-		trailerEnd := len(espPayload) - icvSize
-		// next_hdr is the last byte before the ICV.
-		nextHdr := espPayload[trailerEnd-1]
-		// pad_len is the byte before next_hdr.
-		padLen := int(espPayload[trailerEnd-2])
-
-		// The region before pad_len+next_hdr is: [inner data][padding].
-		// innerEnd = trailerEnd - 2 - padLen
-		innerEnd := trailerEnd - 2 - padLen
-		if innerEnd <= 0 {
-			continue
-		}
-
-		// Validate padding bytes are sequential: 0x01, 0x02, ..., padLen.
-		// This is the key discriminator between NULL-cipher and encrypted traffic.
-		validPadding := true
-		for i := 0; i < padLen; i++ {
-			if espPayload[innerEnd+i] != byte(i+1) {
-				validPadding = false
-				break
-			}
-		}
-		if !validPadding {
+		innerEnd, nextHdr, ok := espTrailerInnerEnd(espPayload, icvSize)
+		if !ok {
 			continue
 		}
 
@@ -1237,9 +1281,11 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 					tcpPayload := espPayload[tcpHeaderLen:]
 					if mightBeSIPorRTP(tcpPayload) {
 						innerProto = layers.IPProtocolTCP
-						// Use the full espPayload length; any trailing ICV bytes fall past
-						// the SIP double-CRLF body terminator and do not affect SIP parsing.
-						innerLen = len(espPayload)
+						// Strip the ESP trailer (padding + pad_len + next_header + ICV) to
+						// get the true TCP segment length. Leaving the trailer bytes on the
+						// segment inflates its length and desyncs downstream TCP sequence
+						// numbers, breaking reassembly of the request half-connection.
+						innerLen = espStripTrailerLen(espPayload, icvSize, layers.IPProtocolTCP)
 					}
 				}
 			}
@@ -1270,7 +1316,12 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 						tcpDataOff := int(espPayload[12] >> 4)
 						if tcpDataOff >= 5 && tcpDataOff <= 15 {
 							innerProto = layers.IPProtocolTCP
-							innerLen = len(espPayload)
+							// Strip the ESP trailer to recover the true TCP segment
+							// length. This is the hot path in explicit --esp-null mode:
+							// once a SPI is confirmed, every TCP continuation segment
+							// arrives here, and appending the trailer bytes desyncs TCP
+							// sequence numbers so the request half never reassembles.
+							innerLen = espStripTrailerLen(espPayload, icvSize, layers.IPProtocolTCP)
 						}
 					}
 				}

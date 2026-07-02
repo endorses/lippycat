@@ -1888,3 +1888,60 @@ func TestUpdateCallState_BYESignalsTerminalFlush(t *testing.T) {
 		}
 	}
 }
+
+// TestUpdateCallState_MessageIsSMSTransaction verifies that a standalone SIP
+// MESSAGE (SMS / pager-mode) is classified as a terminal "SMS" transaction
+// rather than an ongoing call. Without this, a MESSAGE + 200 OK would leave the
+// entry stuck "ACTIVE" (no BYE ever arrives) and the TUI would count its
+// duration up forever. See the SMS-over-IMS capture on de.lyca.
+func TestUpdateCallState_MessageIsSMSTransaction(t *testing.T) {
+	client := &Client{
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	// The MESSAGE request: a new entry classified as SMS immediately, and the
+	// transition is terminal so it is flushed to the TUI without delay.
+	msgPkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata:    &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: "sms-1", Method: "MESSAGE", CseqMethod: "MESSAGE"}},
+	}
+	becameTerminal := client.updateCallState(msgPkt, "hunter-1")
+	assert.True(t, becameTerminal, "a MESSAGE must signal a terminal transition for immediate flush")
+	call := client.calls["sms-1"]
+	if assert.NotNil(t, call) {
+		assert.Equal(t, "SMS", call.State, "a standalone MESSAGE is an SMS transaction, not a call")
+		assert.False(t, call.EndTime.IsZero(), "EndTime must be set so the TUI freezes the duration")
+	}
+
+	// The trailing 200 OK (cseqMethod MESSAGE) must NOT promote it to ACTIVE.
+	okPkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata:    &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: "sms-1", Method: "", CseqMethod: "MESSAGE", ResponseCode: 200}},
+	}
+	client.updateCallState(okPkt, "hunter-1")
+	assert.Equal(t, "SMS", client.calls["sms-1"].State, "the 2xx acking a MESSAGE must not reactivate the SMS entry")
+}
+
+// TestUpdateCallState_MessageResponseFirst verifies that when only the 2xx for a
+// MESSAGE is observed (the request was missed/reordered), the entry is still
+// classified as an SMS transaction rather than promoted to ACTIVE.
+func TestUpdateCallState_MessageResponseFirst(t *testing.T) {
+	client := &Client{
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+	}
+
+	okPkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata:    &data.PacketMetadata{Sip: &data.SIPMetadata{CallId: "sms-2", Method: "", CseqMethod: "MESSAGE", ResponseCode: 202}},
+	}
+	client.updateCallState(okPkt, "hunter-1")
+	call := client.calls["sms-2"]
+	if assert.NotNil(t, call) {
+		assert.Equal(t, "SMS", call.State, "a lone 2xx for a MESSAGE must classify as SMS, not ACTIVE")
+		assert.False(t, call.EndTime.IsZero(), "EndTime must be set so the TUI freezes the duration")
+	}
+}

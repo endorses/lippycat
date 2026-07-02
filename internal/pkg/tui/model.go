@@ -555,6 +555,8 @@ func mapCallState(state string) components.CallState {
 		return components.CallStateBusy
 	case "RTP-ONLY":
 		return components.CallStateRTPOnly
+	case "SMS", "MESSAGE":
+		return components.CallStateMessage
 	default:
 		// Log unexpected state values for debugging
 		if state != "" {

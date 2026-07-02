@@ -66,6 +66,7 @@ const (
 	CallStateCancelled                  // INVITE cancelled before answer (CANCEL method)
 	CallStateBusy                       // Callee busy (486 Busy Here)
 	CallStateRTPOnly                    // RTP stream detected without SIP signaling
+	CallStateMessage                    // Standalone SIP MESSAGE transaction (SMS/pager mode) — no dialog, no duration
 )
 
 func (cs CallState) String() string {
@@ -90,6 +91,8 @@ func (cs CallState) String() string {
 		return "Busy"
 	case CallStateRTPOnly:
 		return "RTP-only"
+	case CallStateMessage:
+		return "SMS"
 	default:
 		return "Unknown"
 	}
@@ -1125,6 +1128,8 @@ func (cv *CallsView) renderTableWithSize(width, height int, focused bool) string
 				style = style.Foreground(cv.theme.WarningColor) // Orange - callee busy
 			case CallStateEnded:
 				style = style.Foreground(cv.theme.FilterColor) // Violet - ended normally
+			case CallStateMessage:
+				style = style.Foreground(cv.theme.FilterColor) // Violet - completed SMS/MESSAGE transaction
 			}
 			content.WriteString(style.Render(row))
 		}

@@ -336,7 +336,7 @@ func calculateMOS(packetLoss, jitter float64) float64 {
 // (the call has ended and will not transition further).
 func isTerminalCallState(state string) bool {
 	switch state {
-	case "ENDED", "FAILED", "CANCELLED", "BUSY":
+	case "ENDED", "FAILED", "CANCELLED", "BUSY", "SMS":
 		return true
 	default:
 		return false
@@ -409,7 +409,7 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) (bec
 func deriveSIPState(call *types.CallInfo, method, cseqMethod string, responseCode uint32, timestamp time.Time) {
 	// Don't transition from terminal states
 	switch call.State {
-	case "ENDED", "FAILED", "CANCELLED", "BUSY":
+	case "ENDED", "FAILED", "CANCELLED", "BUSY", "SMS":
 		return
 	}
 
@@ -417,6 +417,17 @@ func deriveSIPState(call *types.CallInfo, method, cseqMethod string, responseCod
 	case "INVITE":
 		if call.State == "NEW" {
 			call.State = "TRYING"
+		}
+	case "MESSAGE":
+		// A SIP MESSAGE is a standalone transaction (SMS / pager-mode), not a
+		// dialog: there is no BYE, so treating it as an ordinary call would
+		// leave it "Active" with an ever-climbing duration. Mark it terminal
+		// immediately and stamp EndTime so the duration freezes at the
+		// transaction time. The trailing 2xx (cseqMethod MESSAGE) is ignored
+		// by the terminal-state guard above.
+		call.State = "SMS"
+		if call.EndTime.IsZero() {
+			call.EndTime = timestamp
 		}
 	case "ACK":
 		// ACK confirms a 2xx — the call is up. Accept it from NEW too: a
@@ -466,6 +477,14 @@ func deriveSIPState(call *types.CallInfo, method, cseqMethod string, responseCod
 			}
 		case "CANCEL":
 			// 2xx for a CANCEL — the 487 finalizes the call; leave state.
+		case "MESSAGE":
+			// 2xx (200/202) acking a standalone SIP MESSAGE. If the MESSAGE
+			// request itself was missed and this response is the first packet
+			// seen, still classify it as an SMS transaction rather than a call.
+			call.State = "SMS"
+			if call.EndTime.IsZero() {
+				call.EndTime = timestamp
+			}
 		default:
 			// INVITE (or unknown / older hunter) — the call was answered.
 			switch call.State {

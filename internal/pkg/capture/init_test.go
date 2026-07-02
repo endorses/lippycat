@@ -47,7 +47,13 @@ func createTestPcapFile(t *testing.T, numPackets int) *os.File {
 	_, err = tmpFile.Seek(0, io.SeekStart)
 	require.NoError(t, err, "Should seek to start")
 
-	return tmpFile
+	require.NoError(t, tmpFile.Sync(), "Should sync PCAP file")
+	require.NoError(t, tmpFile.Close(), "Should close PCAP writer file")
+
+	readFile, err := os.Open(tmpFile.Name())
+	require.NoError(t, err, "Should reopen temp PCAP file for reading")
+
+	return readFile
 }
 
 // TestInitWithContext tests the traditional InitWithContext function

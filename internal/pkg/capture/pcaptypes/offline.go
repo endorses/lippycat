@@ -13,7 +13,7 @@ type offlineInterface struct {
 }
 
 func (iface *offlineInterface) SetHandle() error {
-	handle, err := pcap.OpenOfflineFile(iface.file)
+	handle, err := pcap.OpenOffline(iface.Name())
 	iface.handle = handle
 	return err
 }

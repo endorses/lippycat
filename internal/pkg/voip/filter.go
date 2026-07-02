@@ -37,6 +37,18 @@ const (
 // captured by the port match and subsequent fragments by this clause.
 const IPFragmentClause = "((ip[6:2] & 0x1fff > 0) or (ip6[6] == 44))"
 
+// ESPClause is a BPF expression that matches IPsec ESP packets (IP protocol 50)
+// over both IPv4 and IPv6. This is required to intercept IMS SMS, which is
+// carried as a SIP MESSAGE inside an ESP-NULL security association: the kernel
+// BPF drops ESP packets before lippycat's decapsulateESPNull stage can strip
+// the ESP header and expose the inner SIP. A port/udp-based VoIP filter never
+// matches ESP (there is no UDP/TCP header at the outer layer), so ESP must be
+// admitted with its own clause.
+//
+// IPv4: "ip proto 50" matches IPv4 datagrams whose protocol field is 50 (ESP).
+// IPv6: "ip6 proto 50" matches IPv6 datagrams whose (final) Next Header is 50.
+const ESPClause = "(ip proto 50 or ip6 proto 50)"
+
 // PortRange represents a port range with start and end values
 type PortRange struct {
 	Start int
@@ -84,15 +96,16 @@ func (b *VoIPFilterBuilder) Build(config VoIPFilterConfig) string {
 	if len(config.SIPPorts) == 0 && len(config.RTPPortRanges) == 0 {
 		if config.UDPOnly {
 			if config.BaseFilter != "" {
-				// Add fragment clause to capture fragmented UDP packets
-				return fmt.Sprintf("((%s) and udp) or %s", config.BaseFilter, IPFragmentClause)
+				// Add fragment clause to capture fragmented UDP packets, and
+				// the ESP clause to admit IPsec ESP (e.g. ESP-NULL IMS SMS).
+				return fmt.Sprintf("((%s) and udp) or %s or %s", config.BaseFilter, IPFragmentClause, ESPClause)
 			}
-			// udp alone won't capture subsequent fragments - add fragment clause
-			return fmt.Sprintf("udp or %s", IPFragmentClause)
+			// udp alone won't capture subsequent fragments or ESP - add both clauses
+			return fmt.Sprintf("udp or %s or %s", IPFragmentClause, ESPClause)
 		}
 		if config.BaseFilter != "" {
-			// Add fragment clause to base filter
-			return fmt.Sprintf("(%s) or %s", config.BaseFilter, IPFragmentClause)
+			// Add fragment and ESP clauses to base filter
+			return fmt.Sprintf("(%s) or %s or %s", config.BaseFilter, IPFragmentClause, ESPClause)
 		}
 		return ""
 	}
@@ -137,10 +150,14 @@ func (b *VoIPFilterBuilder) Build(config VoIPFilterConfig) string {
 		voipFilter = fmt.Sprintf("udp and (%s)", voipFilter)
 	}
 
-	// 5. Add IP fragment clause to capture fragmented SIP packets
-	// This is critical for large SIP INVITEs that exceed MTU - the second fragment
-	// has no UDP header and would be dropped by port-based filters
-	voipFilter = fmt.Sprintf("(%s) or %s", voipFilter, IPFragmentClause)
+	// 5. Add IP fragment clause to capture fragmented SIP packets, and the ESP
+	// clause to admit IPsec ESP packets (ESP-NULL carries IMS SIP MESSAGE / SMS).
+	// The fragment clause is critical for large SIP INVITEs that exceed MTU - the
+	// second fragment has no UDP header and would be dropped by port-based filters.
+	// The ESP clause is required because ESP packets have no outer UDP/TCP port
+	// for the SIP-port optimization to match; without it the kernel BPF drops them
+	// before decapsulateESPNull can run.
+	voipFilter = fmt.Sprintf("(%s) or %s or %s", voipFilter, IPFragmentClause, ESPClause)
 
 	// 6. Combine with base filter if present
 	if config.BaseFilter != "" {

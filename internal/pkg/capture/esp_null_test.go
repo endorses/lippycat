@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -174,6 +175,137 @@ func TestTryESPTrailerValidation_AllICVSizes(t *testing.T) {
 			assert.Equal(t, layers.IPProtocolUDP, proto)
 		})
 	}
+}
+
+// buildESPNullIPv6Packet assembles a full Ethernet/IPv6/ESP-NULL packet carrying the
+// given inner transport segment, matching the on-wire layout decapsulateESPNull expects.
+func buildESPNullIPv6Packet(spi uint32, innerTransport []byte, nextHdr byte, padLen, icvSize int) []byte {
+	espPayload := buildESPPayload(innerTransport, nextHdr, padLen, icvSize)
+	espFull := make([]byte, 8+len(espPayload))
+	binary.BigEndian.PutUint32(espFull[0:4], spi) // SPI
+	binary.BigEndian.PutUint32(espFull[4:8], 1)   // Seq
+	copy(espFull[8:], espPayload)
+
+	ip := make([]byte, 40)
+	ip[0] = 0x60                                              // version 6
+	binary.BigEndian.PutUint16(ip[4:6], uint16(len(espFull))) // payload length
+	ip[6] = 50                                                // Next Header = ESP
+	ip[7] = 64                                                // hop limit
+	ip[8] = 0x20                                              // non-zero src addr
+	ip[24] = 0x20                                             // non-zero dst addr
+
+	eth := make([]byte, 14)
+	binary.BigEndian.PutUint16(eth[12:14], 0x86DD) // EtherType IPv6
+
+	raw := make([]byte, 0, len(eth)+len(ip)+len(espFull))
+	raw = append(raw, eth...)
+	raw = append(raw, ip...)
+	raw = append(raw, espFull...)
+	return raw
+}
+
+// TestESPStripTrailerLen_TCP verifies espStripTrailerLen strips exactly
+// icvSize+2+pad_len bytes from a TCP inner segment across all valid ICV sizes.
+func TestESPStripTrailerLen_TCP(t *testing.T) {
+	tcpData := buildMinimalTCPHeader(5060, 5060, []byte("MESSAGE sip:x@y SIP/2.0\r\n\r\n"))
+	for _, padLen := range []int{0, 1, 2, 5} {
+		for _, icv := range []int{0, 8, 12, 16} {
+			espPayload := buildESPPayload(tcpData, 6, padLen, icv)
+			// Fixed ICV.
+			got := espStripTrailerLen(espPayload, icv, layers.IPProtocolTCP)
+			assert.Equal(t, len(tcpData), got, "icv=%d pad=%d fixed", icv, padLen)
+			assert.Equal(t, icv+2+padLen, len(espPayload)-got, "stripped bytes icv=%d pad=%d", icv, padLen)
+			// Auto-detect.
+			gotAuto := espStripTrailerLen(espPayload, -1, layers.IPProtocolTCP)
+			assert.Equal(t, len(tcpData), gotAuto, "icv=%d pad=%d auto", icv, padLen)
+		}
+	}
+}
+
+// TestESPStripTrailerLen_FallbackImplausible verifies that an implausible trailer
+// falls back to the full payload length rather than returning garbage.
+func TestESPStripTrailerLen_FallbackImplausible(t *testing.T) {
+	payload := make([]byte, 40)
+	for i := range payload {
+		payload[i] = byte(i*7 + 3)
+	}
+	payload[len(payload)-1] = 6   // next_hdr = TCP
+	payload[len(payload)-2] = 200 // pad_len absurdly large → innerEnd <= 0
+	got := espStripTrailerLen(payload, 12, layers.IPProtocolTCP)
+	assert.Equal(t, len(payload), got, "implausible trailer falls back to full length")
+}
+
+// TestDecapsulateESPNull_TCPStripsTrailerAndFixesLength is the regression test for the
+// trailer/ICV bug: a decapsulated TCP segment must carry the SIP payload with NO
+// trailing ESP trailer bytes, and the outer IPv6 payload length must match the stripped
+// segment length (otherwise TCP sequence numbers desync and requests never reassemble).
+func TestDecapsulateESPNull_TCPStripsTrailerAndFixesLength(t *testing.T) {
+	resetESPNullConfig()
+	viper.Reset()
+	viper.Set("esp_null", true)
+	viper.Set("esp_icv_size", 12)
+	defer func() {
+		resetESPNullConfig()
+		viper.Reset()
+	}()
+
+	sip := []byte("MESSAGE sip:+4915215940608@ims.example SIP/2.0\r\n" +
+		"Content-Type: text/plain\r\nContent-Length: 4\r\n\r\ntest")
+	tcpData := buildMinimalTCPHeader(5060, 5060, sip)
+	padLen, icvSize := 2, 12
+	raw := buildESPNullIPv6Packet(0xdeadbeef, tcpData, 6, padLen, icvSize)
+
+	pkt := gopacket.NewPacket(raw, layers.LinkTypeEthernet, gopacket.Default)
+	require.NotNil(t, pkt.Layer(layers.LayerTypeIPSecESP), "input must parse as ESP")
+
+	out, ok := decapsulateESPNull(pkt)
+	require.True(t, ok, "decapsulation should succeed")
+
+	ip6Layer := out.Layer(layers.LayerTypeIPv6)
+	require.NotNil(t, ip6Layer, "rebuilt packet must have IPv6 layer")
+	ip6 := ip6Layer.(*layers.IPv6)
+	assert.Equal(t, len(tcpData), int(ip6.Length),
+		"IPv6 payload length must equal stripped TCP segment length (no trailer)")
+	assert.Equal(t, layers.IPProtocolTCP, ip6.NextHeader)
+
+	tcpLayer := out.Layer(layers.LayerTypeTCP)
+	require.NotNil(t, tcpLayer, "rebuilt packet must have TCP layer")
+	tcp := tcpLayer.(*layers.TCP)
+	assert.Equal(t, sip, tcp.Payload, "TCP payload must be the SIP content with no trailer bytes")
+}
+
+// TestDecapsulateESPNull_CachedSPIStripsTrailer exercises the SPI-cache hot path used in
+// explicit --esp-null mode: after a SPI is confirmed, a TCP continuation segment whose
+// payload does not start with SIP text must still be stripped of its ESP trailer.
+func TestDecapsulateESPNull_CachedSPIStripsTrailer(t *testing.T) {
+	resetESPNullConfig()
+	viper.Reset()
+	viper.Set("esp_null", true)
+	viper.Set("esp_icv_size", 12)
+	defer func() {
+		resetESPNullConfig()
+		viper.Reset()
+	}()
+
+	const spi = uint32(0xcafef00d)
+	// Pre-seed the cache as if a prior packet on this SPI confirmed TCP.
+	espNullSPICache.Store(spi, layers.IPProtocolTCP)
+
+	// Continuation payload: not SIP text, so content heuristics fail and the cache path runs.
+	body := []byte("continuation body bytes that are not SIP")
+	tcpData := buildMinimalTCPHeader(5060, 5060, body)
+	padLen, icvSize := 3, 12
+	raw := buildESPNullIPv6Packet(spi, tcpData, 6, padLen, icvSize)
+
+	pkt := gopacket.NewPacket(raw, layers.LinkTypeEthernet, gopacket.Default)
+	out, ok := decapsulateESPNull(pkt)
+	require.True(t, ok)
+
+	ip6 := out.Layer(layers.LayerTypeIPv6).(*layers.IPv6)
+	assert.Equal(t, len(tcpData), int(ip6.Length),
+		"cache path must strip trailer so IPv6 length equals TCP segment length")
+	tcp := out.Layer(layers.LayerTypeTCP).(*layers.TCP)
+	assert.Equal(t, body, tcp.Payload)
 }
 
 func TestTryESPTrailerValidation_NonVoIPProtocol(t *testing.T) {

@@ -52,8 +52,11 @@ type bufferedSIPStream struct {
 	createdAt      time.Time
 	processedBytes int64
 	processedMsgs  int64
-	closed         int32 // atomic flag
+	closed         int32 // atomic flag - set permanently when ReassemblyComplete fires (gopacket evicts)
+	finished       int32 // atomic flag - set once the processing goroutine has fully exited (re-arm gate)
 	discard        int32 // atomic flag - set when stream is determined to be non-SIP
+	lockedOnSIP    int32 // atomic flag - set once at least one SIP message has been parsed
+	nonSIPBytes    int64 // atomic - bytes scanned as non-SIP since the last successful SIP message
 
 	// State-based timeout support (Phase 3)
 	state     TCPState      // Current TCP state
@@ -103,6 +106,19 @@ func newBufferedSIPStream(parentCtx context.Context, factory *sipStreamFactory, 
 // it is ignored once a start sequence is established). Connection-boundary
 // handling for TCP 4-tuple reuse is done via ReassemblyComplete eviction, not here.
 func (s *bufferedSIPStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
+	// A bare SYN (no ACK) on this 4-tuple signals a genuinely new connection —
+	// e.g. a reused inner port after the prior call closed. gopacket keeps the
+	// same Stream object for a reused 4-tuple (it only allocates a fresh Stream
+	// via factory.New once the pool has evicted the old connection, which in
+	// ESP-NULL tap mode rarely happens because FIN/RST is seldom observed). So
+	// give the new connection a clean slate here: clear any permanent discard and
+	// reset the non-SIP accounting so it can lock onto SIP even if the previous
+	// occupant of this 4-tuple was non-SIP (or was discarded).
+	if tcp != nil && tcp.SYN && !tcp.ACK {
+		atomic.StoreInt32(&s.discard, 0)
+		atomic.StoreInt32(&s.lockedOnSIP, 0)
+		atomic.StoreInt64(&s.nonSIPBytes, 0)
+	}
 	*start = true
 	return true
 }
@@ -114,12 +130,17 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	// Count ALL reassembly calls immediately (before any early returns)
 	IncrementReassembledCalls()
 
-	// Check discard flag first - once we know it's not SIP, stop buffering entirely
-	if atomic.LoadInt32(&s.discard) != 0 {
+	// Permanently closed by ReassemblyComplete (gopacket has evicted the
+	// connection); a reused 4-tuple gets a fresh Stream via factory.New, so there
+	// is nothing to do here.
+	if atomic.LoadInt32(&s.closed) != 0 {
 		return
 	}
 
-	if atomic.LoadInt32(&s.closed) != 0 {
+	// Fast drop for a still-live but condemned non-SIP stream (the bounded scan
+	// decided this connection is not SIP): stop buffering entirely without even
+	// copying the segment. A FINISHED stream is handled below (it may re-arm).
+	if atomic.LoadInt32(&s.finished) == 0 && atomic.LoadInt32(&s.discard) != 0 {
 		return
 	}
 
@@ -134,6 +155,30 @@ func (s *bufferedSIPStream) ReassembledSG(sg reassembly.ScatterGather, ac reasse
 	data := make([]byte, available)
 	copy(data, sg.Fetch(available))
 	IncrementReassembledWithData()
+
+	// 4-tuple reuse re-arm: gopacket keeps the SAME Stream object for a reused
+	// inner 4-tuple until the pool evicts it, which in ESP-NULL tap mode rarely
+	// happens because bare SYN/FIN/RST carry no inner payload and are never
+	// delivered — so neither factory.New (fresh stream) nor ReassemblyComplete
+	// (eviction) fires when a short-lived SIP-over-TCP connection is torn down and
+	// its ports are reused seconds/minutes later (e.g. a target's back-to-back MO
+	// SMS legs on the same ephemeral port). Meanwhile our processing goroutine has
+	// already exited (idle/read-timeout, or non-SIP discard), leaving a "zombie"
+	// stream: its dataChan has no reader and discard may be set, so the reused
+	// connection's SIP would be silently dropped.
+	//
+	// When the processing goroutine has fully exited (finished) and the incoming
+	// bytes begin a fresh SIP message, RE-ARM the stream — reset the per-message
+	// parser state and restart the reader — so the reused connection is parsed
+	// instead of dropped. An in-progress stream (finished == 0) is never re-armed,
+	// so a multi-message connection's later messages keep flowing through the
+	// existing, already-working per-message read loop.
+	if atomic.LoadInt32(&s.finished) != 0 {
+		if !looksLikeSIPStart(data) {
+			return // dead goroutine + non-SIP continuation: nothing can read it
+		}
+		s.rearm()
+	}
 
 	// Non-blocking send - drop data if buffer is full.
 	// This is better than blocking the packet capture loop.
@@ -161,15 +206,85 @@ func (s *bufferedSIPStream) ReassemblyComplete(ac reassembly.AssemblerContext) b
 	return true
 }
 
+// rearm resets a Stream whose processing goroutine has fully exited so it can
+// parse a fresh SIP message arriving on a reused TCP 4-tuple. It must only be
+// called from ReassembledSG (the single assembler goroutine) after the previous
+// processing goroutine has finished (s.finished == 1), which guarantees no other
+// goroutine is reading the fields reassigned here.
+//
+// It restores the same clean state newBufferedSIPStream would give a brand-new
+// stream — fresh context, data channel, Call-ID detector and per-message parser
+// flags — and restarts the processing goroutine. Metrics/goroutine accounting is
+// symmetric with the previous goroutine's teardown (which already did the
+// matching Done()/decrement), so a re-arm counts as a new stream.
+func (s *bufferedSIPStream) rearm() {
+	// Don't re-arm during factory shutdown: allWorkers.Add after Wait() has begun
+	// would panic, and the new goroutine would exit immediately anyway.
+	if s.factory != nil && atomic.LoadInt32(&s.factory.closed) != 0 {
+		return
+	}
+
+	parentCtx := context.Background()
+	if s.factory != nil {
+		parentCtx = s.factory.ctx
+	}
+	ctx, cancel := context.WithCancel(parentCtx)
+	s.ctx = ctx
+	s.cancel = cancel
+	s.dataChan = make(chan []byte, streamBufferSize)
+	s.callIDDetector = NewCallIDDetector()
+	s.stateChan = nil
+	if s.factory != nil && s.factory.config != nil && s.factory.config.EnableStateTCPTimeouts {
+		s.stateChan = make(chan TCPState, 1)
+	}
+	s.createdAt = time.Now()
+
+	// Reset per-message parser / lifecycle flags.
+	atomic.StoreInt32(&s.discard, 0)
+	atomic.StoreInt32(&s.lockedOnSIP, 0)
+	atomic.StoreInt64(&s.nonSIPBytes, 0)
+	atomic.StoreInt32(&s.finished, 0)
+	s.stateMu.Lock()
+	s.state = TCPStateOpening
+	s.stateMu.Unlock()
+
+	// Account for the restarted goroutine as a new stream (symmetric with the
+	// prior goroutine's teardown).
+	if s.factory != nil {
+		s.factory.allWorkers.Add(1)
+		atomic.AddInt64(&s.factory.activeGoroutines, 1)
+	}
+	tcpStreamMetrics.mu.Lock()
+	atomic.AddInt64(&tcpStreamMetrics.activeStreams, 1)
+	tcpStreamMetrics.totalStreamsCreated++
+	tcpStreamMetrics.mu.Unlock()
+
+	logger.Debug("Re-arming reused TCP stream for new SIP message",
+		"flow", fmt.Sprintf("%s:%s->%s:%s", s.netFlow.Src(), s.transportFlow.Src(), s.netFlow.Dst(), s.transportFlow.Dst()))
+
+	go s.processLoop()
+}
+
 // processLoop reads from the buffered channel and processes SIP messages.
 func (s *bufferedSIPStream) processLoop() {
 	srcEndpoint, dstEndpoint := s.getEndpoints()
 	logger.Debug("SIP stream starting", "flow", srcEndpoint+"->"+dstEndpoint)
 
+	// pumpWG tracks the data-pump goroutine started below. The deferred cleanup
+	// waits on it before setting the `finished` flag so that no goroutine is still
+	// reading s.ctx / s.dataChan when a subsequent ReassembledSG re-arms the
+	// stream (which reassigns those fields) — avoiding a data race on reuse.
+	var pumpWG sync.WaitGroup
+
 	defer func() {
 		if s.factory != nil {
 			defer s.factory.allWorkers.Done()
 		}
+
+		// Cancel the context first so an idle-blocked pump wakes up, then wait for
+		// it to exit before we touch shared fields / allow re-arm.
+		s.cancel()
+		pumpWG.Wait()
 
 		// Decrement goroutine counter
 		if s.factory != nil {
@@ -197,12 +312,15 @@ func (s *bufferedSIPStream) processLoop() {
 		if s.callIDDetector != nil {
 			s.callIDDetector.Close()
 		}
-		s.cancel()
 
 		logger.Debug("TCP SIP stream completed",
 			"stream_age", time.Since(s.createdAt),
 			"processed_bytes", atomic.LoadInt64(&s.processedBytes),
 			"processed_messages", atomic.LoadInt64(&s.processedMsgs))
+
+		// LAST: mark the goroutine fully exited. Only now may ReassembledSG
+		// re-arm this Stream for a reused 4-tuple.
+		atomic.StoreInt32(&s.finished, 1)
 	}()
 
 	// Create a pipe to convert channel data to io.Reader.
@@ -218,7 +336,9 @@ func (s *bufferedSIPStream) processLoop() {
 	stateTimeoutsEnabled := s.factory != nil && s.factory.config != nil && s.factory.config.EnableStateTCPTimeouts
 
 	// Goroutine to pump data from channel to pipe with state-based timeouts
+	pumpWG.Add(1)
 	go func() {
+		defer pumpWG.Done()
 		defer pipeWriter.Close()
 
 		// Start with short initial timeout for quick rejection of non-SIP traffic
@@ -366,10 +486,24 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 		sipMessage, err := s.readCompleteSipMessageFromReader(bufReader)
 		if err != nil {
 			if errors.Is(err, errNotSIP) {
-				// Set discard flag so Reassembled() stops buffering data immediately
-				atomic.StoreInt32(&s.discard, 1)
 				IncrementNonSIPRejection()
-				logger.Debug("Non-SIP data detected, closing stream")
+				// Recoverable discard: a connection we joined mid-message (or a
+				// reused 4-tuple whose bytes precede the next SIP message) may
+				// still carry SIP that only starts after the bytes seen so far.
+				// Do NOT condemn the whole connection on the first non-SIP
+				// result — keep reading so the bounded resync in
+				// readCompleteSipMessageFromReader can lock onto a later SIP
+				// message boundary. Only give up once we've scanned past the hard
+				// cap of non-SIP bytes with no SIP framing, so genuinely non-SIP
+				// traffic (e.g. TLS) is still discarded and buffering stops
+				// (bounded — no unbounded scan or buffer).
+				if atomic.LoadInt64(&s.nonSIPBytes) < maxNonSIPBytesBeforeDiscard {
+					logger.Debug("Non-SIP data (recoverable), continuing resync",
+						"non_sip_bytes", atomic.LoadInt64(&s.nonSIPBytes))
+					continue
+				}
+				atomic.StoreInt32(&s.discard, 1)
+				logger.Debug("Non-SIP data exceeded resync cap, closing stream")
 			} else if errors.Is(err, errReadTimeout) {
 				// Also discard on timeout - no point buffering if nothing is being processed
 				atomic.StoreInt32(&s.discard, 1)
@@ -385,6 +519,13 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 			continue
 		}
 
+		// A complete SIP message was parsed: this connection is confirmed SIP.
+		// Lock on (so it is treated as an established SIP stream) and reset the
+		// non-SIP accounting so a long-lived multi-message connection with the
+		// occasional resync gap never accumulates to the discard cap.
+		atomic.StoreInt32(&s.lockedOnSIP, 1)
+		atomic.StoreInt64(&s.nonSIPBytes, 0)
+
 		atomic.AddInt64(&s.processedBytes, int64(len(sipMessage)))
 		atomic.AddInt64(&s.processedMsgs, 1)
 
@@ -392,13 +533,35 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	}
 }
 
-// readCompleteSipMessageFromReader reads a complete SIP message from a buffered reader
+// readCompleteSipMessageFromReader reads a complete SIP message from a buffered reader.
+//
+// It first resynchronises to the next SIP message start line (see
+// readSIPStartLine): on an established connection whose first delivered line is
+// already a start line this is a no-op, so established behaviour is unchanged;
+// when the stream was joined mid-message (mid-stream tap start, or a reused
+// 4-tuple) it scans forward within a bounded window for the next message
+// boundary and resumes there instead of condemning the whole connection.
 func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Reader) ([]byte, error) {
+	startLine, scanned, err := s.readSIPStartLine(bufReader)
+	if err != nil {
+		if errors.Is(err, errNotSIP) {
+			// Account for the non-SIP bytes we scanned so the caller can decide
+			// whether to keep the connection recoverable or discard it.
+			atomic.AddInt64(&s.nonSIPBytes, int64(scanned))
+		}
+		return nil, err
+	}
+
 	var message strings.Builder
 	var contentLength int
 	headersDone := false
-	firstLine := true
 	headerCount := 0
+
+	// The start line has already been read and validated; seed the message with
+	// it (normalising the line ending — harmless for parsing).
+	message.WriteString(startLine)
+	message.WriteString("\r\n")
+	headerCount++
 
 	for {
 		if headersDone && contentLength == 0 {
@@ -428,25 +591,6 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 
 		if len(line) > maxSIPHeaderLineLength {
 			return nil, errNotSIP
-		}
-
-		if firstLine {
-			trimmedLine := strings.TrimRight(line, "\r\n")
-			// Skip empty lines (SIP keepalives) - RFC 5626 defines CRLF keepalives
-			// These can appear before real SIP messages on persistent connections
-			if trimmedLine == "" {
-				// A keepalive marks an idle gap with no message in flight.
-				// Release the per-flow packet buffer: anything captured before
-				// the keepalive cannot belong to a future call worth
-				// correlating, and on long-lived idle TCP connections this is
-				// the only thing that stops the buffer growing to its cap.
-				discardTCPBufferedPackets(s.netFlow)
-				continue // Don't update firstLine, keep waiting for real SIP message
-			}
-			firstLine = false
-			if !isSIPRequestLine(trimmedLine) && !isSIPResponseLine(trimmedLine) {
-				return nil, errNotSIP
-			}
 		}
 
 		message.WriteString(line)
@@ -488,6 +632,69 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 	}
 
 	return messageBytes, nil
+}
+
+// readSIPStartLine advances the reader to the next SIP message start line and
+// returns it (trimmed of its line ending), together with the number of bytes
+// consumed while scanning.
+//
+// On an established connection the first non-empty line is already a start line,
+// so this returns immediately with only that line consumed — established
+// behaviour is unchanged. When the stream was joined mid-message the leading
+// bytes are mid-message headers/body (not a start line); rather than declaring
+// the whole connection non-SIP, we scan forward within resyncWindowBytes for a
+// start line that sits on a message boundary (i.e. follows a blank line / the
+// start of stream) and resume parsing from there.
+//
+// errNotSIP is returned only after the entire bounded window has been scanned
+// with no SIP framing, so genuine non-SIP TCP (e.g. a TLS ClientHello) is still
+// rejected cheaply and without unbounded buffering.
+func (s *bufferedSIPStream) readSIPStartLine(bufReader *bufio.Reader) (string, int, error) {
+	scanned := 0
+	// The start of the stream (and the position right after a blank line) is a
+	// message boundary: a start line seen there begins a real SIP message.
+	atBoundary := true
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return "", scanned, s.ctx.Err()
+		default:
+		}
+
+		line, err := bufReader.ReadString('\n')
+		if err != nil {
+			return "", scanned, fmt.Errorf("failed to read SIP message line: %w", err)
+		}
+		scanned += len(line)
+
+		trimmed := strings.TrimRight(line, "\r\n")
+		if trimmed == "" {
+			// Blank line: a SIP keepalive (RFC 5626 CRLF keepalive) or a message
+			// boundary. Release any per-flow buffered packets captured before
+			// this boundary — on long-lived idle connections this is the only
+			// thing that stops the buffer growing to its cap — and remember we
+			// are at a boundary so a following start line is accepted.
+			discardTCPBufferedPackets(s.netFlow)
+			atBoundary = true
+			if scanned > resyncWindowBytes {
+				return "", scanned, errNotSIP
+			}
+			continue
+		}
+
+		if atBoundary && (isSIPRequestLine(trimmed) || isSIPResponseLine(trimmed)) {
+			return trimmed, scanned, nil
+		}
+
+		// Non-empty, non-start line: mid-message header/body bytes or genuine
+		// non-SIP data. Keep scanning for the next boundary, bounded by the
+		// window.
+		atBoundary = false
+		if scanned > resyncWindowBytes {
+			return "", scanned, errNotSIP
+		}
+	}
 }
 
 // getEndpoints constructs IP:port endpoint strings from the network and transport flows
@@ -732,6 +939,16 @@ const (
 	maxSIPHeaderLineLength = 4096
 	// Maximum number of headers in a SIP message (reasonable limit)
 	maxSIPHeaders = 200
+	// resyncWindowBytes bounds how far readSIPStartLine scans forward for the
+	// next SIP message boundary when a connection was joined mid-message, before
+	// declaring the scanned data non-SIP. Bounds the per-attempt scan.
+	resyncWindowBytes = 16 * 1024
+	// maxNonSIPBytesBeforeDiscard bounds the total non-SIP bytes tolerated on a
+	// connection that has never locked onto SIP before it is permanently
+	// discarded (which stops ReassembledSG buffering). Generous enough that real
+	// SIP locks on well within it, small enough to bound wasted work. Reset to 0
+	// whenever a full SIP message is parsed.
+	maxNonSIPBytesBeforeDiscard = 64 * 1024
 )
 
 // isSIPRequestLine checks if a line looks like a SIP request (e.g., "INVITE sip:... SIP/2.0")
@@ -750,6 +967,24 @@ func isSIPRequestLine(line string) bool {
 // isSIPResponseLine checks if a line looks like a SIP response (e.g., "SIP/2.0 200 OK")
 func isSIPResponseLine(line string) bool {
 	return strings.HasPrefix(line, "SIP/2.0 ")
+}
+
+// looksLikeSIPStart reports whether the first line of data is a SIP request or
+// response start line. Used by ReassembledSG to decide whether a reused,
+// already-finished stream should be re-armed (fresh SIP message) rather than
+// dropped. Only the first line (bounded) is inspected so it stays cheap.
+func looksLikeSIPStart(data []byte) bool {
+	const maxPeek = 256
+	peek := data
+	if len(peek) > maxPeek {
+		peek = peek[:maxPeek]
+	}
+	first := peek
+	if nl := bytes.IndexByte(peek, '\n'); nl >= 0 {
+		first = peek[:nl]
+	}
+	line := strings.TrimRight(string(first), "\r")
+	return isSIPRequestLine(line) || isSIPResponseLine(line)
 }
 
 // compareHeaderCI performs case-insensitive comparison without allocations

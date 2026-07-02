@@ -278,13 +278,26 @@ func isSipStartLine(line string) bool {
 		return false
 	}
 
-	// Check for valid SIP methods at the beginning
+	// Check for valid SIP methods at the beginning. This must include the
+	// message-oriented methods (MESSAGE, INFO, NOTIFY, ...) — IMS/VoLTE SMS is
+	// carried as a SIP MESSAGE request, and omitting it here caused reassembled
+	// MESSAGE requests to be rejected as "not a SIP start line" even though the
+	// request bytes reached the handler. Keep this in sync with the method list
+	// used by isSIPRequestLine in tcp_stream.go.
 	return BytesHasPrefixString(lineBytes, "INVITE ") ||
-		BytesHasPrefixString(lineBytes, "BYE ") ||
-		BytesHasPrefixString(lineBytes, "ACK ") ||
-		BytesHasPrefixString(lineBytes, "OPTIONS ") ||
 		BytesHasPrefixString(lineBytes, "REGISTER ") ||
-		BytesHasPrefixString(lineBytes, "CANCEL ")
+		BytesHasPrefixString(lineBytes, "OPTIONS ") ||
+		BytesHasPrefixString(lineBytes, "ACK ") ||
+		BytesHasPrefixString(lineBytes, "BYE ") ||
+		BytesHasPrefixString(lineBytes, "CANCEL ") ||
+		BytesHasPrefixString(lineBytes, "UPDATE ") ||
+		BytesHasPrefixString(lineBytes, "REFER ") ||
+		BytesHasPrefixString(lineBytes, "SUBSCRIBE ") ||
+		BytesHasPrefixString(lineBytes, "NOTIFY ") ||
+		BytesHasPrefixString(lineBytes, "INFO ") ||
+		BytesHasPrefixString(lineBytes, "MESSAGE ") ||
+		BytesHasPrefixString(lineBytes, "PRACK ") ||
+		BytesHasPrefixString(lineBytes, "PUBLISH ")
 }
 
 func parseSipHeaders(data []byte) (map[string]string, string) {

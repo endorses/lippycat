@@ -62,6 +62,7 @@ const (
 	CallStateCancelled // INVITE cancelled before answer (CANCEL method)
 	CallStateBusy      // Callee busy (486 Busy Here)
 	CallStateRTPOnly   // RTP stream detected without SIP signaling
+	CallStateMessage   // Standalone SIP MESSAGE transaction (SMS/pager mode) — no dialog, no duration
 )
 
 // DefaultBYETimewait is the default timewait period after BYE (30 seconds)
@@ -92,6 +93,8 @@ func (cs CallState) String() string {
 		return "BUSY"
 	case CallStateRTPOnly:
 		return "RTP-ONLY"
+	case CallStateMessage:
+		return "SMS"
 	default:
 		return "UNKNOWN"
 	}
@@ -499,6 +502,18 @@ func (ca *CallAggregator) updateCallState(call *AggregatedCall, method, cseqMeth
 			call.State = CallStateCancelled
 			call.EndTime = timestamp // Use packet timestamp instead of time.Now()
 		}
+	case "MESSAGE":
+		// A SIP MESSAGE is a standalone transaction (SMS / pager-mode), not a
+		// dialog — there is no BYE, so it must not be tracked as an ongoing
+		// call. Mark it terminal and stamp EndTime so the TUI freezes the
+		// duration. Don't transition out of a genuine call/terminal state.
+		switch call.State {
+		case CallStateEnding, CallStateEnded, CallStateFailed, CallStateCancelled, CallStateBusy, CallStateActive:
+			// Already an established/terminal call — ignore a stray MESSAGE.
+		default:
+			call.State = CallStateMessage
+			call.EndTime = timestamp
+		}
 	}
 
 	// Handle provisional responses (1xx)
@@ -533,6 +548,15 @@ func (ca *CallAggregator) updateCallState(call *AggregatedCall, method, cseqMeth
 			}
 		case "CANCEL":
 			// 2xx for a CANCEL — the 487 finalizes the call; leave state.
+		case "MESSAGE":
+			// 2xx (200/202) acking a standalone SIP MESSAGE. If the request was
+			// missed and this response is the first packet seen, classify it as
+			// an SMS transaction rather than promoting it to an active call.
+			switch call.State {
+			case CallStateNew, CallStateTrying:
+				call.State = CallStateMessage
+				call.EndTime = timestamp
+			}
 		default:
 			// INVITE (or unknown / older hunter) — the call was answered.
 			switch call.State {

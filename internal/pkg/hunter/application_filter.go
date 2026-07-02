@@ -665,22 +665,15 @@ func (af *ApplicationFilter) matchWithCPUAndReturnIDs(payload []byte) []string {
 	// Extract SIP headers for proper matching
 	sipHeaders := extractSIPHeaders(payload)
 
-	// Extract usernames for SIPUser and PhoneNumber matching
+	// Extract usernames for SIPUser and PhoneNumber matching.
+	// Cover all identity-bearing headers (From/To/P-Asserted-Identity/
+	// P-Preferred-Identity/P-Called-Party-ID/Request-URI) so the target matches
+	// whether it is the originator or the recipient of this message.
 	var usernames []string
 	if len(af.sipUsers) > 0 || len(af.phoneNumbers) > 0 {
-		usernames = make([]string, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
-				usernames = append(usernames, user)
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
-				usernames = append(usernames, user)
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+		usernames = make([]string, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if user := voip.ExtractUserFromHeaderBytes(v); user != "" {
 				usernames = append(usernames, user)
 			}
 		}
@@ -717,19 +710,9 @@ func (af *ApplicationFilter) matchWithCPUAndReturnIDs(payload []byte) []string {
 
 	// SIPURI matching: extract user@domain, use exact/contains matching
 	if len(af.sipURIs) > 0 {
-		sipURIValues := make([]string, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
-				sipURIValues = append(sipURIValues, uri)
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
-				sipURIValues = append(sipURIValues, uri)
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+		sipURIValues := make([]string, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if uri := voip.ExtractURIFromHeaderBytes(v); uri != "" {
 				sipURIValues = append(sipURIValues, uri)
 			}
 		}
@@ -794,20 +777,8 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 
 				for payloadIdx, payload := range voipPayloads {
 					sipHeaders := extractSIPHeaders(payload)
-					if len(sipHeaders.from) > 0 {
-						if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
-							allUsernames = append(allUsernames, []byte(user))
-							usernameToPacket = append(usernameToPacket, payloadIdx)
-						}
-					}
-					if len(sipHeaders.to) > 0 {
-						if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
-							allUsernames = append(allUsernames, []byte(user))
-							usernameToPacket = append(usernameToPacket, payloadIdx)
-						}
-					}
-					if len(sipHeaders.pAssertedIdentity) > 0 {
-						if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+					for _, v := range sipHeaders.identityValues() {
+						if user := voip.ExtractUserFromHeaderBytes(v); user != "" {
 							allUsernames = append(allUsernames, []byte(user))
 							usernameToPacket = append(usernameToPacket, payloadIdx)
 						}
@@ -837,20 +808,8 @@ func (af *ApplicationFilter) MatchBatch(packets []gopacket.Packet) []bool {
 						continue
 					}
 					sipHeaders := extractSIPHeaders(payload)
-					if len(sipHeaders.from) > 0 {
-						if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
-							allURIs = append(allURIs, []byte(uri))
-							uriToPacket = append(uriToPacket, payloadIdx)
-						}
-					}
-					if len(sipHeaders.to) > 0 {
-						if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
-							allURIs = append(allURIs, []byte(uri))
-							uriToPacket = append(uriToPacket, payloadIdx)
-						}
-					}
-					if len(sipHeaders.pAssertedIdentity) > 0 {
-						if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+					for _, v := range sipHeaders.identityValues() {
+						if uri := voip.ExtractURIFromHeaderBytes(v); uri != "" {
 							allURIs = append(allURIs, []byte(uri))
 							uriToPacket = append(uriToPacket, payloadIdx)
 						}
@@ -898,22 +857,15 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 	// Extract SIP headers for matching
 	sipHeaders := extractSIPHeaders(payload)
 
-	// Extract usernames once for both SIPUser and PhoneNumber matching
+	// Extract usernames once for both SIPUser and PhoneNumber matching.
+	// Cover all identity-bearing headers (From/To/P-Asserted-Identity/
+	// P-Preferred-Identity/P-Called-Party-ID/Request-URI) so the target matches
+	// whether it is the originator or the recipient of this message.
 	var usernameStrs []string
 	if len(af.sipUsers) > 0 || len(af.phoneNumbers) > 0 {
-		usernameStrs = make([]string, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
-				usernameStrs = append(usernameStrs, user)
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
-				usernameStrs = append(usernameStrs, user)
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+		usernameStrs = make([]string, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if user := voip.ExtractUserFromHeaderBytes(v); user != "" {
 				usernameStrs = append(usernameStrs, user)
 			}
 		}
@@ -959,19 +911,9 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 
 	// SIPURI matching via GPU (if we have those filters and GPU automaton is built)
 	if len(af.sipURIs) > 0 && af.gpuSIPURIACBuilt {
-		sipURIValues := make([][]byte, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
-				sipURIValues = append(sipURIValues, []byte(uri))
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
-				sipURIValues = append(sipURIValues, []byte(uri))
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+		sipURIValues := make([][]byte, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if uri := voip.ExtractURIFromHeaderBytes(v); uri != "" {
 				sipURIValues = append(sipURIValues, []byte(uri))
 			}
 		}
@@ -999,19 +941,9 @@ func (af *ApplicationFilter) matchWithGPU(payload []byte) bool {
 		}
 	} else if len(af.sipURIs) > 0 {
 		// GPU automaton not built, use CPU
-		sipURIValues := make([]string, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
-				sipURIValues = append(sipURIValues, uri)
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
-				sipURIValues = append(sipURIValues, uri)
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+		sipURIValues := make([]string, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if uri := voip.ExtractURIFromHeaderBytes(v); uri != "" {
 				sipURIValues = append(sipURIValues, uri)
 			}
 		}
@@ -1033,22 +965,15 @@ func (af *ApplicationFilter) matchWithCPU(payload string) bool {
 	// Extract SIP headers for proper matching
 	sipHeaders := extractSIPHeaders(payloadBytes)
 
-	// Extract usernames once for both SIPUser and PhoneNumber matching
+	// Extract usernames once for both SIPUser and PhoneNumber matching.
+	// Cover all identity-bearing headers (From/To/P-Asserted-Identity/
+	// P-Preferred-Identity/P-Called-Party-ID/Request-URI) so the target matches
+	// whether it is the originator or the recipient of this message.
 	var usernames []string
 	if len(af.sipUsers) > 0 || len(af.phoneNumbers) > 0 {
-		usernames = make([]string, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.from); user != "" {
-				usernames = append(usernames, user)
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.to); user != "" {
-				usernames = append(usernames, user)
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if user := voip.ExtractUserFromHeaderBytes(sipHeaders.pAssertedIdentity); user != "" {
+		usernames = make([]string, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if user := voip.ExtractUserFromHeaderBytes(v); user != "" {
 				usernames = append(usernames, user)
 			}
 		}
@@ -1076,19 +1001,9 @@ func (af *ApplicationFilter) matchWithCPU(payload string) bool {
 	// SIPURI matching: extract user@domain, use exact/contains matching
 	// Only run if we have SIPURI filters
 	if len(af.sipURIs) > 0 {
-		sipURIValues := make([]string, 0, 3)
-		if len(sipHeaders.from) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.from); uri != "" {
-				sipURIValues = append(sipURIValues, uri)
-			}
-		}
-		if len(sipHeaders.to) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.to); uri != "" {
-				sipURIValues = append(sipURIValues, uri)
-			}
-		}
-		if len(sipHeaders.pAssertedIdentity) > 0 {
-			if uri := voip.ExtractURIFromHeaderBytes(sipHeaders.pAssertedIdentity); uri != "" {
+		sipURIValues := make([]string, 0, 6)
+		for _, v := range sipHeaders.identityValues() {
+			if uri := voip.ExtractURIFromHeaderBytes(v); uri != "" {
 				sipURIValues = append(sipURIValues, uri)
 			}
 		}
@@ -1104,15 +1019,42 @@ func (af *ApplicationFilter) matchWithCPU(payload string) bool {
 
 // sipHeaders holds parsed SIP header values
 type sipHeaders struct {
-	from              []byte
-	to                []byte
-	pAssertedIdentity []byte
-	authorization     []byte // For IMSI extraction
-	contact           []byte // For IMEI extraction
+	from               []byte
+	to                 []byte
+	pAssertedIdentity  []byte
+	pPreferredIdentity []byte // Caller identity on originating (MO) legs
+	pCalledPartyID     []byte // Callee identity on terminating (MT) legs
+	requestURI         []byte // Request-URI from the request line (callee target)
+	authorization      []byte // For IMSI extraction
+	contact            []byte // For IMEI extraction
 }
 
-// extractSIPHeaders extracts From, To, and P-Asserted-Identity headers from SIP message
-// This is a fast, zero-allocation parser for filtering
+// identityValues returns the SIP header/URI values that may carry a target
+// identity, so the target matches whether it appears as the originator
+// (From / P-Asserted-Identity / P-Preferred-Identity) or the recipient
+// (To / P-Called-Party-ID / Request-URI). Empty values are omitted.
+func (h sipHeaders) identityValues() [][]byte {
+	candidates := [][]byte{
+		h.from,
+		h.to,
+		h.pAssertedIdentity,
+		h.pPreferredIdentity,
+		h.pCalledPartyID,
+		h.requestURI,
+	}
+	vals := make([][]byte, 0, len(candidates))
+	for _, v := range candidates {
+		if len(v) > 0 {
+			vals = append(vals, v)
+		}
+	}
+	return vals
+}
+
+// extractSIPHeaders extracts the identity-bearing headers (From, To,
+// P-Asserted-Identity, P-Preferred-Identity, P-Called-Party-ID), the
+// Request-URI, plus Authorization/Contact from a SIP message.
+// This is a fast, zero-allocation parser for filtering.
 func extractSIPHeaders(payload []byte) sipHeaders {
 	var headers sipHeaders
 
@@ -1122,6 +1064,17 @@ func extractSIPHeaders(payload []byte) sipHeaders {
 		lines = bytes.Split(payload, []byte("\r\n"))
 	} else {
 		lines = bytes.Split(payload, []byte("\n"))
+	}
+
+	// Request-URI: the middle token of a SIP request line
+	// ("METHOD SP Request-URI SP SIP-Version"). Responses ("SIP/2.0 ...") have
+	// no Request-URI. This is the callee target for MT requests (e.g. an MT
+	// SMS-DELIVER MESSAGE whose recipient appears only in the Request-URI).
+	if len(lines) > 0 {
+		fields := bytes.Fields(lines[0])
+		if len(fields) == 3 && bytes.HasPrefix(fields[2], []byte("SIP/")) {
+			headers.requestURI = fields[1]
+		}
 	}
 
 	for _, line := range lines {
@@ -1163,6 +1116,24 @@ func extractSIPHeaders(payload []byte) sipHeaders {
 			lineUpper := bytes.ToUpper(line[:20])
 			if bytes.Equal(lineUpper, []byte("P-ASSERTED-IDENTITY:")) {
 				headers.pAssertedIdentity = extractHeaderValue(line)
+				continue
+			}
+		}
+
+		// Check for P-Preferred-Identity header (case-insensitive)
+		if len(line) >= 21 {
+			lineUpper := bytes.ToUpper(line[:21])
+			if bytes.Equal(lineUpper, []byte("P-PREFERRED-IDENTITY:")) {
+				headers.pPreferredIdentity = extractHeaderValue(line)
+				continue
+			}
+		}
+
+		// Check for P-Called-Party-ID header (case-insensitive)
+		if len(line) >= 18 {
+			lineUpper := bytes.ToUpper(line[:18])
+			if bytes.Equal(lineUpper, []byte("P-CALLED-PARTY-ID:")) {
+				headers.pCalledPartyID = extractHeaderValue(line)
 				continue
 			}
 		}

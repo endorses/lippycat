@@ -550,6 +550,8 @@ func TestWritesDuringShutdown(t *testing.T) {
 // TestCallTrackerFilePermissions verifies that per-call PCAP files are created with secure permissions (0600)
 // This test addresses security concern from code review: Phase 1.4 - Fix PCAP File Permissions
 func TestCallTrackerFilePermissions(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
 	// Create tracker with PCAP writing enabled
 	tracker := NewCallTracker()
 	defer tracker.Shutdown()

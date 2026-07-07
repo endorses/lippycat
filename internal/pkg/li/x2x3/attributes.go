@@ -30,21 +30,6 @@ const (
 
 	// ProtocolSize is the size of an IP protocol number.
 	ProtocolSize = 1
-
-	// DirectionSize is the size of a direction indicator.
-	DirectionSize = 1
-)
-
-// Direction indicates the direction of traffic relative to the target.
-type Direction uint8
-
-const (
-	// DirectionUnknown indicates unknown direction.
-	DirectionUnknown Direction = 0
-	// DirectionFromTarget indicates traffic originating from the target.
-	DirectionFromTarget Direction = 1
-	// DirectionToTarget indicates traffic destined to the target.
-	DirectionToTarget Direction = 2
 )
 
 // Errors for attribute encoding/decoding.
@@ -201,14 +186,10 @@ func (b *AttributeBuilder) IPProtocol(proto uint8) TLVAttribute {
 	return b.encoder.EncodeUint8(AttrIPProtocol, proto)
 }
 
-// TargetIdentifier creates a target identifier attribute.
-func (b *AttributeBuilder) TargetIdentifier(id string) TLVAttribute {
-	return b.encoder.EncodeString(AttrTargetIdentifier, id)
-}
-
-// TrafficDirection creates a direction attribute.
-func (b *AttributeBuilder) TrafficDirection(dir Direction) TLVAttribute {
-	return b.encoder.EncodeUint8(AttrDirection, uint8(dir))
+// MatchedTargetIdentifier creates a matched target identifier attribute
+// (ETSI attribute 17) — the target identity that matched this intercept.
+func (b *AttributeBuilder) MatchedTargetIdentifier(id string) TLVAttribute {
+	return b.encoder.EncodeString(AttrMatchedTargetIdentifier, id)
 }
 
 // NFID creates a Network Function Identifier attribute.
@@ -221,15 +202,6 @@ func (b *AttributeBuilder) NFID(id string) TLVAttribute {
 // This identifies the specific POI within the NF (e.g., hunter-id).
 func (b *AttributeBuilder) IPID(id string) TLVAttribute {
 	return b.encoder.EncodeString(AttrIPID, id)
-}
-
-// CorrelationAttrID creates a correlation ID attribute.
-// Note: This is different from the header correlation ID field.
-// This attribute is used for additional correlation within the PDU.
-func (b *AttributeBuilder) CorrelationAttrID(id uint64) TLVAttribute {
-	// Use a dedicated attribute type if needed, for now reuse timestamp type
-	// for the ID. In practice, you'd define AttrCorrelationID.
-	return b.encoder.EncodeUint64(AttrTimestamp, id)
 }
 
 // AttributeParser provides methods for parsing common X2/X3 attributes.
@@ -318,21 +290,12 @@ func (p *AttributeParser) ParseIPProtocol(attr *TLVAttribute) (uint8, error) {
 	return p.decoder.DecodeUint8(attr)
 }
 
-// ParseTargetIdentifier extracts a target identifier from an attribute.
-func (p *AttributeParser) ParseTargetIdentifier(attr *TLVAttribute) (string, error) {
-	if attr.Type != AttrTargetIdentifier {
+// ParseMatchedTargetIdentifier extracts the matched target identifier from an attribute.
+func (p *AttributeParser) ParseMatchedTargetIdentifier(attr *TLVAttribute) (string, error) {
+	if attr.Type != AttrMatchedTargetIdentifier {
 		return "", ErrInvalidAttrLength
 	}
 	return p.decoder.DecodeString(attr), nil
-}
-
-// ParseDirection extracts a direction from an attribute.
-func (p *AttributeParser) ParseDirection(attr *TLVAttribute) (Direction, error) {
-	if attr.Type != AttrDirection {
-		return DirectionUnknown, ErrInvalidAttrLength
-	}
-	val, err := p.decoder.DecodeUint8(attr)
-	return Direction(val), err
 }
 
 // ParseNFID extracts a Network Function Identifier from an attribute.

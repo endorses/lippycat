@@ -84,24 +84,31 @@ func (e *X3Encoder) EncodeCC(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, err
 	// This links all RTP packets from the same stream
 	correlationID := e.generateCorrelationID(voip.SSRC, voip.CallID)
 
-	// Create PDU
-	pdu := NewPDU(PDUTypeX3, xid, correlationID)
+	// Create PDU carrying a raw RTP packet.
+	pdu := NewX3RTPPDU(xid, correlationID)
 
-	// Add common attributes
+	// Add standard conditional attributes (timestamp, sequence number).
 	e.addCommonAttributes(pdu, pkt)
 
-	// Add RTP-specific attributes
-	e.addRTPAttributes(pdu, voip)
-
-	// Add network layer attributes
+	// Add network layer attributes (5-tuple).
 	e.addNetworkAttributes(pdu, pkt)
 
-	// Set payload (raw RTP data including header)
+	// Set payload (raw RTP packet including header). The MDF reads SSRC /
+	// sequence / timestamp / payload-type directly from the RTP header.
 	if len(pkt.RawData) > 0 {
 		pdu.SetPayload(pkt.RawData)
 	}
 
 	return pdu, nil
+}
+
+// NewX3RTPPDU creates an X3 PDU carrying a raw RTP packet: PDU Type 2,
+// Payload Format 8 (RTP Packet), Payload Direction Unknown.
+func NewX3RTPPDU(xid uuid.UUID, correlationID uint64) *PDU {
+	pdu := NewPDU(PDUTypeX3, xid, correlationID)
+	pdu.Header.PayloadFormat = PayloadFormatRTP
+	pdu.Header.PayloadDirection = PayloadDirectionUnknown
+	return pdu
 }
 
 // EncodeCCWithPayload encodes an RTP packet with an explicit payload.
@@ -121,10 +128,9 @@ func (e *X3Encoder) EncodeCCWithPayload(pkt *types.PacketDisplay, xid uuid.UUID,
 	}
 
 	correlationID := e.generateCorrelationID(voip.SSRC, voip.CallID)
-	pdu := NewPDU(PDUTypeX3, xid, correlationID)
+	pdu := NewX3RTPPDU(xid, correlationID)
 
 	e.addCommonAttributes(pdu, pkt)
-	e.addRTPAttributes(pdu, voip)
 	e.addNetworkAttributes(pdu, pkt)
 	pdu.SetPayload(payload)
 
@@ -170,32 +176,6 @@ func (e *X3Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) {
 	// Sequence number (monotonically increasing)
 	seq := e.seqNum.Add(1)
 	pdu.AddAttribute(e.attrBuilder.SequenceNumber(seq))
-}
-
-// addRTPAttributes adds RTP-specific attributes to the PDU.
-func (e *X3Encoder) addRTPAttributes(pdu *PDU, voip *types.VoIPMetadata) {
-	encoder := TLVEncoder{}
-
-	// SSRC (required)
-	pdu.AddAttribute(encoder.EncodeUint32(AttrRTPSSRC, voip.SSRC))
-
-	// RTP Sequence Number
-	// Use SequenceNum if set, fallback to SeqNumber for compatibility
-	rtpSeq := voip.SequenceNum
-	if rtpSeq == 0 {
-		rtpSeq = voip.SeqNumber
-	}
-	pdu.AddAttribute(encoder.EncodeUint16(AttrRTPSequenceNumber, rtpSeq))
-
-	// RTP Timestamp
-	pdu.AddAttribute(encoder.EncodeUint32(AttrRTPTimestamp, voip.Timestamp))
-
-	// RTP Payload Type
-	pdu.AddAttribute(encoder.EncodeUint8(AttrRTPPayloadType, voip.PayloadType))
-
-	// Stream ID for correlation (derived from SSRC)
-	streamID := uint64(voip.SSRC)
-	pdu.AddAttribute(encoder.EncodeUint64(AttrStreamID, streamID))
 }
 
 // addNetworkAttributes adds network layer attributes to the PDU.

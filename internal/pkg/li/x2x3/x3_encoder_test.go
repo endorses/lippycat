@@ -51,37 +51,20 @@ func TestX3Encoder_EncodeCC_Basic(t *testing.T) {
 	assert.Equal(t, xid, pdu.Header.XID)
 	assert.Equal(t, uint16(Version), pdu.Header.Version)
 
-	// Verify payload
+	// RTP is carried via Payload Format 8 (RTP) + the raw RTP packet as payload,
+	// NOT via TLV attributes. The MDF reads SSRC / sequence / timestamp /
+	// payload-type directly from the RTP header in the payload.
+	assert.Equal(t, PayloadFormatRTP, pdu.Header.PayloadFormat)
+	assert.Equal(t, PayloadDirectionUnknown, pdu.Header.PayloadDirection)
 	assert.Equal(t, rtpPayload, pdu.Payload)
 
-	// Verify SSRC attribute
-	ssrcAttr := FindAttribute(pdu.Attributes, AttrRTPSSRC)
-	require.NotNil(t, ssrcAttr)
-	ssrc := uint32(ssrcAttr.Value[0])<<24 | uint32(ssrcAttr.Value[1])<<16 |
-		uint32(ssrcAttr.Value[2])<<8 | uint32(ssrcAttr.Value[3])
-	assert.Equal(t, uint32(0x12345678), ssrc)
-
-	// Verify RTP sequence number attribute
-	rtpSeqAttr := FindAttribute(pdu.Attributes, AttrRTPSequenceNumber)
-	require.NotNil(t, rtpSeqAttr)
-	rtpSeq := uint16(rtpSeqAttr.Value[0])<<8 | uint16(rtpSeqAttr.Value[1])
-	assert.Equal(t, uint16(1), rtpSeq)
-
-	// Verify RTP timestamp attribute
-	rtpTsAttr := FindAttribute(pdu.Attributes, AttrRTPTimestamp)
-	require.NotNil(t, rtpTsAttr)
-	rtpTs := uint32(rtpTsAttr.Value[0])<<24 | uint32(rtpTsAttr.Value[1])<<16 |
-		uint32(rtpTsAttr.Value[2])<<8 | uint32(rtpTsAttr.Value[3])
-	assert.Equal(t, uint32(160), rtpTs)
-
-	// Verify payload type attribute
-	ptAttr := FindAttribute(pdu.Attributes, AttrRTPPayloadType)
-	require.NotNil(t, ptAttr)
-	assert.Equal(t, uint8(0), ptAttr.Value[0])
-
-	// Verify stream ID attribute
-	streamAttr := FindAttribute(pdu.Attributes, AttrStreamID)
-	require.NotNil(t, streamAttr)
+	// Standard conditional attributes are present (timestamp, seq, 5-tuple).
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrTimestamp))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSequenceNumber))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourceIPv4))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestIPv4))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourcePort))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestPort))
 
 	// Verify sequence number incremented
 	assert.Equal(t, uint32(1), encoder.GetSequenceNumber())
@@ -452,13 +435,11 @@ func TestX3Encoder_EncodeCCBatch(t *testing.T) {
 	assert.Len(t, pdus, 5)
 	assert.Len(t, errs, 0)
 
-	// Verify each PDU
+	// Verify each PDU: X3 RTP format carrying the raw RTP packet as payload.
 	for i, pdu := range pdus {
 		assert.Equal(t, PDUTypeX3, pdu.Header.Type)
-		rtpSeqAttr := FindAttribute(pdu.Attributes, AttrRTPSequenceNumber)
-		require.NotNil(t, rtpSeqAttr)
-		rtpSeq := uint16(rtpSeqAttr.Value[0])<<8 | uint16(rtpSeqAttr.Value[1])
-		assert.Equal(t, uint16(i), rtpSeq)
+		assert.Equal(t, PayloadFormatRTP, pdu.Header.PayloadFormat)
+		assert.Equal(t, []byte{0x80, 0x00, byte(i), 0x00}, pdu.Payload)
 	}
 }
 
@@ -523,11 +504,14 @@ func TestX3Encoder_SeqNumber_Fallback(t *testing.T) {
 	encoder := NewX3Encoder()
 	xid := uuid.New()
 
-	// Test using SeqNumber when SequenceNum is 0
+	// The RTP sequence number is no longer emitted as a TLV attribute; it lives in
+	// the raw RTP header (payload). This packet still encodes to a valid X3 RTP PDU.
+	rtpPayload := []byte{0x80, 0x00, 0x30, 0x39} // seq 0x3039 = 12345 in the RTP header
 	pkt := &types.PacketDisplay{
 		Timestamp: time.Now(),
 		SrcIP:     "192.168.1.100",
 		DstIP:     "192.168.1.200",
+		RawData:   rtpPayload,
 		VoIPData: &types.VoIPMetadata{
 			IsRTP:       true,
 			SSRC:        0x12345678,
@@ -540,10 +524,8 @@ func TestX3Encoder_SeqNumber_Fallback(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pdu)
 
-	rtpSeqAttr := FindAttribute(pdu.Attributes, AttrRTPSequenceNumber)
-	require.NotNil(t, rtpSeqAttr)
-	rtpSeq := uint16(rtpSeqAttr.Value[0])<<8 | uint16(rtpSeqAttr.Value[1])
-	assert.Equal(t, uint16(12345), rtpSeq)
+	assert.Equal(t, PayloadFormatRTP, pdu.Header.PayloadFormat)
+	assert.Equal(t, rtpPayload, pdu.Payload)
 }
 
 func TestX3Encoder_NoRawData(t *testing.T) {

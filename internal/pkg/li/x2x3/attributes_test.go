@@ -253,16 +253,16 @@ func TestAttributeBuilder_IPProtocol(t *testing.T) {
 	assert.Equal(t, uint8(17), proto)
 }
 
-func TestAttributeBuilder_TargetIdentifier(t *testing.T) {
+func TestAttributeBuilder_MatchedTargetIdentifier(t *testing.T) {
 	builder := NewAttributeBuilder()
 	parser := NewAttributeParser()
 
 	target := "sip:alice@example.com"
-	attr := builder.TargetIdentifier(target)
-	assert.Equal(t, AttrTargetIdentifier, attr.Type)
+	attr := builder.MatchedTargetIdentifier(target)
+	assert.Equal(t, AttrMatchedTargetIdentifier, attr.Type)
 	assert.Equal(t, target, string(attr.Value))
 
-	parsed, err := parser.ParseTargetIdentifier(&attr)
+	parsed, err := parser.ParseMatchedTargetIdentifier(&attr)
 	require.NoError(t, err)
 	assert.Equal(t, target, parsed)
 }
@@ -306,28 +306,31 @@ func TestAttributeBuilder_IPID(t *testing.T) {
 	assert.Equal(t, ipid, parsed)
 }
 
-func TestAttributeBuilder_Direction(t *testing.T) {
-	builder := NewAttributeBuilder()
-	parser := NewAttributeParser()
-
+// TestPDU_PayloadDirection verifies that payload direction is now carried in the
+// fixed header (PayloadDirection field) rather than as a TLV attribute, and that
+// it survives a marshal/unmarshal round-trip.
+func TestPDU_PayloadDirection(t *testing.T) {
 	tests := []struct {
-		dir  Direction
+		dir  PayloadDirection
 		name string
 	}{
-		{DirectionUnknown, "Unknown"},
-		{DirectionFromTarget, "FromTarget"},
-		{DirectionToTarget, "ToTarget"},
+		{PayloadDirectionUnknown, "Unknown"},
+		{PayloadDirectionFromTarget, "FromTarget"},
+		{PayloadDirectionToTarget, "ToTarget"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			attr := builder.TrafficDirection(tt.dir)
-			assert.Equal(t, AttrDirection, attr.Type)
-			assert.Len(t, attr.Value, DirectionSize)
+			pdu := NewPDU(PDUTypeX2, [16]byte{1, 2, 3, 4}, 0x42)
+			pdu.Header.PayloadDirection = tt.dir
 
-			parsed, err := parser.ParseDirection(&attr)
+			data, err := pdu.MarshalBinary()
 			require.NoError(t, err)
-			assert.Equal(t, tt.dir, parsed)
+
+			var decoded PDU
+			err = decoded.UnmarshalBinary(data)
+			require.NoError(t, err)
+			assert.Equal(t, tt.dir, decoded.Header.PayloadDirection)
 		})
 	}
 }
@@ -338,7 +341,7 @@ func TestFindAttribute(t *testing.T) {
 		builder.SequenceNumber(1),
 		builder.SourcePort(5060),
 		builder.DestPort(5061),
-		builder.TargetIdentifier("test"),
+		builder.MatchedTargetIdentifier("test"),
 	}
 
 	t.Run("Found", func(t *testing.T) {
@@ -416,8 +419,7 @@ func TestAttributeBuilder_PDUIntegration(t *testing.T) {
 	pdu.AddAttribute(builder.SourcePort(5060))
 	pdu.AddAttribute(builder.DestPort(5061))
 	pdu.AddAttribute(builder.IPProtocol(17)) // UDP
-	pdu.AddAttribute(builder.TrafficDirection(DirectionFromTarget))
-	pdu.AddAttribute(builder.TargetIdentifier("sip:target@example.com"))
+	pdu.AddAttribute(builder.MatchedTargetIdentifier("sip:target@example.com"))
 
 	// Serialize and deserialize
 	data, err := pdu.MarshalBinary()
@@ -428,7 +430,7 @@ func TestAttributeBuilder_PDUIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify attributes
-	assert.Len(t, decoded.Attributes, 9)
+	assert.Len(t, decoded.Attributes, 8)
 
 	parser := NewAttributeParser()
 
@@ -446,10 +448,10 @@ func TestAttributeBuilder_PDUIntegration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, srcIP, parsedSrcIP)
 
-	// Find and parse target identifier
-	targetAttr := FindAttribute(decoded.Attributes, AttrTargetIdentifier)
+	// Find and parse matched target identifier
+	targetAttr := FindAttribute(decoded.Attributes, AttrMatchedTargetIdentifier)
 	require.NotNil(t, targetAttr)
-	target, err := parser.ParseTargetIdentifier(targetAttr)
+	target, err := parser.ParseMatchedTargetIdentifier(targetAttr)
 	require.NoError(t, err)
 	assert.Equal(t, "sip:target@example.com", target)
 }

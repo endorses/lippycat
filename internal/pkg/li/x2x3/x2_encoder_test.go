@@ -35,6 +35,7 @@ func TestX2Encoder_EncodeIRI_SessionBegin(t *testing.T) {
 			From:    "alice@example.com",
 			To:      "bob@example.com",
 			FromTag: "tag-from-123",
+			RawSIP:  []byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123@192.168.1.100\r\n\r\n"),
 		},
 	}
 
@@ -47,28 +48,19 @@ func TestX2Encoder_EncodeIRI_SessionBegin(t *testing.T) {
 	assert.Equal(t, xid, pdu.Header.XID)
 	assert.Equal(t, uint16(Version), pdu.Header.Version)
 
-	// Verify IRI type attribute
-	iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-	require.NotNil(t, iriTypeAttr)
-	iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-	assert.Equal(t, IRISessionBegin, iriType)
+	// SIP is carried via Payload Format 9 (SIP) + the raw SIP payload, NOT via
+	// per-header TLV attributes. The MDF derives the IRI type from the payload.
+	assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
+	assert.Equal(t, PayloadDirectionUnknown, pdu.Header.PayloadDirection)
+	assert.Equal(t, pkt.VoIPData.RawSIP, pdu.Payload)
 
-	// Verify SIP attributes
-	callIDAttr := FindAttribute(pdu.Attributes, AttrSIPCallID)
-	require.NotNil(t, callIDAttr)
-	assert.Equal(t, "abc123@192.168.1.100", string(callIDAttr.Value))
-
-	fromAttr := FindAttribute(pdu.Attributes, AttrSIPFromURI)
-	require.NotNil(t, fromAttr)
-	assert.Equal(t, "alice@example.com", string(fromAttr.Value))
-
-	toAttr := FindAttribute(pdu.Attributes, AttrSIPToURI)
-	require.NotNil(t, toAttr)
-	assert.Equal(t, "bob@example.com", string(toAttr.Value))
-
-	methodAttr := FindAttribute(pdu.Attributes, AttrSIPMethod)
-	require.NotNil(t, methodAttr)
-	assert.Equal(t, "INVITE", string(methodAttr.Value))
+	// Standard conditional attributes are present (timestamp, seq, 5-tuple).
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrTimestamp))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSequenceNumber))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourceIPv4))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestIPv4))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourcePort))
+	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestPort))
 
 	// Verify sequence number incremented
 	assert.Equal(t, uint32(1), encoder.GetSequenceNumber())
@@ -99,17 +91,10 @@ func TestX2Encoder_EncodeIRI_SessionAnswer(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pdu)
 
-	// Verify IRI type is SessionAnswer
-	iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-	require.NotNil(t, iriTypeAttr)
-	iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-	assert.Equal(t, IRISessionAnswer, iriType)
-
-	// Verify response code
-	respCodeAttr := FindAttribute(pdu.Attributes, AttrSIPResponseCode)
-	require.NotNil(t, respCodeAttr)
-	respCode := uint16(respCodeAttr.Value[0])<<8 | uint16(respCodeAttr.Value[1])
-	assert.Equal(t, uint16(200), respCode)
+	// A 200 OK with a To-tag still produces an X2 SIP PDU; the IRI type
+	// (SessionAnswer) and response code are derived by the MDF from the payload.
+	assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+	assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 }
 
 func TestX2Encoder_EncodeIRI_SessionEnd(t *testing.T) {
@@ -137,11 +122,9 @@ func TestX2Encoder_EncodeIRI_SessionEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pdu)
 
-	// Verify IRI type is SessionEnd
-	iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-	require.NotNil(t, iriTypeAttr)
-	iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-	assert.Equal(t, IRISessionEnd, iriType)
+	// A BYE produces an X2 SIP PDU; SessionEnd is derived by the MDF.
+	assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+	assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 }
 
 func TestX2Encoder_EncodeIRI_SessionAttempt_Cancel(t *testing.T) {
@@ -168,11 +151,9 @@ func TestX2Encoder_EncodeIRI_SessionAttempt_Cancel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pdu)
 
-	// Verify IRI type is SessionAttempt
-	iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-	require.NotNil(t, iriTypeAttr)
-	iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-	assert.Equal(t, IRISessionAttempt, iriType)
+	// A CANCEL produces an X2 SIP PDU; SessionAttempt is derived by the MDF.
+	assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+	assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 }
 
 func TestX2Encoder_EncodeIRI_SessionAttempt_Failure(t *testing.T) {
@@ -199,17 +180,10 @@ func TestX2Encoder_EncodeIRI_SessionAttempt_Failure(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pdu)
 
-	// Verify IRI type is SessionAttempt
-	iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-	require.NotNil(t, iriTypeAttr)
-	iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-	assert.Equal(t, IRISessionAttempt, iriType)
-
-	// Verify response code
-	respCodeAttr := FindAttribute(pdu.Attributes, AttrSIPResponseCode)
-	require.NotNil(t, respCodeAttr)
-	respCode := uint16(respCodeAttr.Value[0])<<8 | uint16(respCodeAttr.Value[1])
-	assert.Equal(t, uint16(486), respCode)
+	// A 486 failure response produces an X2 SIP PDU; SessionAttempt and the
+	// response code are derived by the MDF from the payload.
+	assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+	assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 }
 
 func TestX2Encoder_EncodeIRI_Registration(t *testing.T) {
@@ -235,11 +209,9 @@ func TestX2Encoder_EncodeIRI_Registration(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, pdu)
 
-	// Verify IRI type is Registration
-	iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-	require.NotNil(t, iriTypeAttr)
-	iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-	assert.Equal(t, IRIRegistration, iriType)
+	// A REGISTER produces an X2 SIP PDU; Registration is derived by the MDF.
+	assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+	assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 }
 
 func TestX2Encoder_EncodeIRI_NoVoIPData(t *testing.T) {
@@ -489,59 +461,46 @@ func TestX2Encoder_DirectMethods(t *testing.T) {
 		},
 	}
 
+	// Each direct method produces an X2 SIP PDU (Payload Format 9). The specific
+	// IRI type is derived by the MDF from the raw SIP payload, not a TLV attribute.
 	t.Run("EncodeSessionBegin", func(t *testing.T) {
 		pdu, err := encoder.EncodeSessionBegin(pkt, xid)
 		require.NoError(t, err)
 		require.NotNil(t, pdu)
-
-		iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-		require.NotNil(t, iriTypeAttr)
-		iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-		assert.Equal(t, IRISessionBegin, iriType)
+		assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+		assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 	})
 
 	t.Run("EncodeSessionAnswer", func(t *testing.T) {
 		pdu, err := encoder.EncodeSessionAnswer(pkt, xid)
 		require.NoError(t, err)
 		require.NotNil(t, pdu)
-
-		iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-		require.NotNil(t, iriTypeAttr)
-		iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-		assert.Equal(t, IRISessionAnswer, iriType)
+		assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+		assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 	})
 
 	t.Run("EncodeSessionEnd", func(t *testing.T) {
 		pdu, err := encoder.EncodeSessionEnd(pkt, xid)
 		require.NoError(t, err)
 		require.NotNil(t, pdu)
-
-		iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-		require.NotNil(t, iriTypeAttr)
-		iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-		assert.Equal(t, IRISessionEnd, iriType)
+		assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+		assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 	})
 
 	t.Run("EncodeSessionAttempt", func(t *testing.T) {
 		pdu, err := encoder.EncodeSessionAttempt(pkt, xid)
 		require.NoError(t, err)
 		require.NotNil(t, pdu)
-
-		iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-		require.NotNil(t, iriTypeAttr)
-		iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-		assert.Equal(t, IRISessionAttempt, iriType)
+		assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+		assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 	})
 
 	t.Run("EncodeRegistration", func(t *testing.T) {
 		pdu, err := encoder.EncodeRegistration(pkt, xid)
 		require.NoError(t, err)
 		require.NotNil(t, pdu)
-
-		iriTypeAttr := FindAttribute(pdu.Attributes, AttrIRIType)
-		require.NotNil(t, iriTypeAttr)
-		iriType := IRIType(uint16(iriTypeAttr.Value[0])<<8 | uint16(iriTypeAttr.Value[1]))
-		assert.Equal(t, IRIRegistration, iriType)
+		assert.Equal(t, PDUTypeX2, pdu.Header.Type)
+		assert.Equal(t, PayloadFormatSIP, pdu.Header.PayloadFormat)
 	})
 }
 

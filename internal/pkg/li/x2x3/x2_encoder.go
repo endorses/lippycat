@@ -66,41 +66,26 @@ func (e *X2Encoder) EncodeIRI(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, er
 		return nil, ErrNoCallID
 	}
 
-	// Determine IRI type from SIP message
-	iriType, ok := e.classifyIRIType(voip)
-	if !ok {
+	// Determine whether this SIP message generates an IRI event. The IRI type
+	// itself is derived by the MDF from the raw SIP payload (per TS 103 221-2,
+	// SIP semantics are conveyed via Payload Format 9 + the raw payload, not via
+	// proprietary attributes); we only use it here to gate emission.
+	if _, ok := e.classifyIRIType(voip); !ok {
 		// Not all SIP messages generate IRI events
 		return nil, nil
 	}
 
-	// Generate correlation ID from Call-ID (deterministic hash)
-	correlationID := e.generateCorrelationID(voip.CallID)
+	return e.buildSIPPDU(pkt, xid, voip), nil
+}
 
-	// Create PDU
+// NewX2SIPPDU creates an X2 PDU carrying a raw SIP message: PDU Type 1,
+// Payload Format 9 (SIP Message), Payload Direction Unknown (the MDF derives
+// direction and IRI type from the SIP payload).
+func NewX2SIPPDU(xid uuid.UUID, correlationID uint64) *PDU {
 	pdu := NewPDU(PDUTypeX2, xid, correlationID)
-
-	// Add common attributes
-	e.addCommonAttributes(pdu, pkt, iriType)
-
-	// Add SIP-specific attributes
-	e.addSIPAttributes(pdu, voip)
-
-	// Add network layer attributes
-	e.addNetworkAttributes(pdu, pkt)
-
-	// Include raw SIP message as payload if available
-	if len(voip.RawSIP) > 0 {
-		pdu.Payload = voip.RawSIP
-		pdu.Header.PayloadLength = uint32(len(voip.RawSIP))
-	} else if len(pkt.RawData) > 0 {
-		// Fallback: try to extract SIP from raw packet by finding "SIP/" or method
-		if sipStart := findSIPStart(pkt.RawData); sipStart >= 0 {
-			pdu.Payload = pkt.RawData[sipStart:]
-			pdu.Header.PayloadLength = uint32(len(pdu.Payload))
-		}
-	}
-
-	return pdu, nil
+	pdu.Header.PayloadFormat = PayloadFormatSIP
+	pdu.Header.PayloadDirection = PayloadDirectionUnknown
+	return pdu
 }
 
 // classifyIRIType determines the IRI type from the SIP message.
@@ -175,68 +160,15 @@ func (e *X2Encoder) generateCorrelationID(callID string) uint64 {
 	return h.Sum64()
 }
 
-// addCommonAttributes adds standard attributes to the PDU.
-func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay, iriType IRIType) {
-	// Timestamp from packet capture
+// addCommonAttributes adds the standard conditional attributes (timestamp and
+// sequence number) to the PDU per the ETSI TS 103 221-2 attribute dictionary.
+func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) {
+	// Timestamp from packet capture (attribute 9)
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
 
-	// Sequence number (monotonically increasing)
+	// Sequence number (attribute 8, monotonically increasing)
 	seq := e.seqNum.Add(1)
 	pdu.AddAttribute(e.attrBuilder.SequenceNumber(seq))
-
-	// IRI type
-	pdu.AddAttribute(TLVAttribute{
-		Type:  AttrIRIType,
-		Value: []byte{byte(iriType >> 8), byte(iriType)},
-	})
-}
-
-// addSIPAttributes adds SIP-specific attributes to the PDU.
-func (e *X2Encoder) addSIPAttributes(pdu *PDU, voip *types.VoIPMetadata) {
-	encoder := TLVEncoder{}
-
-	// Call-ID (required)
-	pdu.AddAttribute(encoder.EncodeString(AttrSIPCallID, voip.CallID))
-
-	// From URI
-	if voip.From != "" {
-		pdu.AddAttribute(encoder.EncodeString(AttrSIPFromURI, voip.From))
-	}
-
-	// To URI
-	if voip.To != "" {
-		pdu.AddAttribute(encoder.EncodeString(AttrSIPToURI, voip.To))
-	}
-
-	// SIP Method (for requests)
-	if voip.Method != "" {
-		pdu.AddAttribute(encoder.EncodeString(AttrSIPMethod, voip.Method))
-	}
-
-	// Response code (for responses)
-	if voip.Status > 0 {
-		pdu.AddAttribute(encoder.EncodeUint16(AttrSIPResponseCode, uint16(voip.Status)))
-	}
-
-	// From tag
-	if voip.FromTag != "" {
-		pdu.AddAttribute(encoder.EncodeString(AttrSIPFromTag, voip.FromTag))
-	}
-
-	// To tag
-	if voip.ToTag != "" {
-		pdu.AddAttribute(encoder.EncodeString(AttrSIPToTag, voip.ToTag))
-	}
-
-	// MESSAGE content (for SMS-over-IMS)
-	if voip.Method == "MESSAGE" {
-		if voip.ContentType != "" {
-			pdu.AddAttribute(encoder.EncodeString(AttrMessageContentType, voip.ContentType))
-		}
-		if voip.Body != "" {
-			pdu.AddAttribute(encoder.EncodeString(AttrMessageContent, voip.Body))
-		}
-	}
 }
 
 // addNetworkAttributes adds network layer attributes to the PDU.
@@ -294,6 +226,34 @@ func parsePort(s string) (uint16, bool) {
 	return uint16(port), true
 }
 
+// buildSIPPDU builds an X2 SIP PDU (Payload Format 9) with the standard
+// conditional attributes and the raw SIP message as payload. All IRI-type and
+// SIP-header semantics are recovered by the MDF from the raw payload.
+func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata) *PDU {
+	correlationID := e.generateCorrelationID(voip.CallID)
+
+	pdu := NewX2SIPPDU(xid, correlationID)
+	e.addCommonAttributes(pdu, pkt)
+	e.addNetworkAttributes(pdu, pkt)
+	e.setSIPPayload(pdu, pkt, voip)
+
+	return pdu
+}
+
+// setSIPPayload attaches the raw SIP message to the PDU, falling back to
+// scanning the raw packet data for a SIP start line.
+func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) {
+	if len(voip.RawSIP) > 0 {
+		pdu.SetPayload(voip.RawSIP)
+		return
+	}
+	if len(pkt.RawData) > 0 {
+		if sipStart := findSIPStart(pkt.RawData); sipStart >= 0 {
+			pdu.SetPayload(pkt.RawData[sipStart:])
+		}
+	}
+}
+
 // EncodeSessionBegin creates a Session Begin IRI for a SIP INVITE.
 func (e *X2Encoder) EncodeSessionBegin(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, error) {
 	if pkt.VoIPData == nil {
@@ -302,16 +262,7 @@ func (e *X2Encoder) EncodeSessionBegin(pkt *types.PacketDisplay, xid uuid.UUID) 
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-
-	voip := pkt.VoIPData
-	correlationID := e.generateCorrelationID(voip.CallID)
-
-	pdu := NewPDU(PDUTypeX2, xid, correlationID)
-	e.addCommonAttributes(pdu, pkt, IRISessionBegin)
-	e.addSIPAttributes(pdu, voip)
-	e.addNetworkAttributes(pdu, pkt)
-
-	return pdu, nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
 }
 
 // EncodeSessionAnswer creates a Session Answer IRI for a SIP 200 OK.
@@ -322,16 +273,7 @@ func (e *X2Encoder) EncodeSessionAnswer(pkt *types.PacketDisplay, xid uuid.UUID)
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-
-	voip := pkt.VoIPData
-	correlationID := e.generateCorrelationID(voip.CallID)
-
-	pdu := NewPDU(PDUTypeX2, xid, correlationID)
-	e.addCommonAttributes(pdu, pkt, IRISessionAnswer)
-	e.addSIPAttributes(pdu, voip)
-	e.addNetworkAttributes(pdu, pkt)
-
-	return pdu, nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
 }
 
 // EncodeSessionEnd creates a Session End IRI for a SIP BYE.
@@ -342,16 +284,7 @@ func (e *X2Encoder) EncodeSessionEnd(pkt *types.PacketDisplay, xid uuid.UUID) (*
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-
-	voip := pkt.VoIPData
-	correlationID := e.generateCorrelationID(voip.CallID)
-
-	pdu := NewPDU(PDUTypeX2, xid, correlationID)
-	e.addCommonAttributes(pdu, pkt, IRISessionEnd)
-	e.addSIPAttributes(pdu, voip)
-	e.addNetworkAttributes(pdu, pkt)
-
-	return pdu, nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
 }
 
 // EncodeSessionAttempt creates a Session Attempt IRI for failed calls.
@@ -362,16 +295,7 @@ func (e *X2Encoder) EncodeSessionAttempt(pkt *types.PacketDisplay, xid uuid.UUID
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-
-	voip := pkt.VoIPData
-	correlationID := e.generateCorrelationID(voip.CallID)
-
-	pdu := NewPDU(PDUTypeX2, xid, correlationID)
-	e.addCommonAttributes(pdu, pkt, IRISessionAttempt)
-	e.addSIPAttributes(pdu, voip)
-	e.addNetworkAttributes(pdu, pkt)
-
-	return pdu, nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
 }
 
 // EncodeRegistration creates a Registration IRI for a SIP REGISTER.
@@ -382,16 +306,7 @@ func (e *X2Encoder) EncodeRegistration(pkt *types.PacketDisplay, xid uuid.UUID) 
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-
-	voip := pkt.VoIPData
-	correlationID := e.generateCorrelationID(voip.CallID)
-
-	pdu := NewPDU(PDUTypeX2, xid, correlationID)
-	e.addCommonAttributes(pdu, pkt, IRIRegistration)
-	e.addSIPAttributes(pdu, voip)
-	e.addNetworkAttributes(pdu, pkt)
-
-	return pdu, nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
 }
 
 // GetSequenceNumber returns the current sequence number (for testing/debugging).

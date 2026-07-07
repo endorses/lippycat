@@ -213,6 +213,12 @@ func (p *Processor) initLIManager() {
 				if pkt.NodeID != "" {
 					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
 				}
+				// Matched target identifier (ETSI attr 17). Only set when the
+				// task has a single target, so the identity is unambiguous;
+				// with multiple targets the MDF falls back to the XID.
+				if len(task.Targets) == 1 {
+					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
+				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {
 					logger.Warn("X2 PDU marshal error", "xid", task.XID, "error", err)
@@ -255,6 +261,12 @@ func (p *Processor) initLIManager() {
 				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
 				if pkt.NodeID != "" {
 					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
+				}
+				// Matched target identifier (ETSI attr 17). Only set when the
+				// task has a single target, so the identity is unambiguous;
+				// with multiple targets the MDF falls back to the XID.
+				if len(task.Targets) == 1 {
+					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
 				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {

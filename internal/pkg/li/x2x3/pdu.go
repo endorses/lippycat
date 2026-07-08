@@ -21,7 +21,7 @@ import (
 // Protocol version per ETSI TS 103 221-2.
 // Version field: upper 8 bits = major, lower 8 bits = minor.
 // The major version 5 is the value mandated by the current published spec
-// (TS 103 221-2 V1.7.1, clause 5.2); it is incremented only on a
+// (TS 103 221-2 V1.9.1, clause 5.2); it is incremented only on a
 // backwards-incompatible change to the X2/X3 PDU structure.
 const (
 	VersionMajor = 5

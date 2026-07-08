@@ -213,11 +213,13 @@ func (p *Processor) initLIManager() {
 				if pkt.NodeID != "" {
 					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
 				}
-				// Matched target identifier (ETSI attr 17). Only set when the
-				// task has a single target, so the identity is unambiguous;
-				// with multiple targets the MDF falls back to the XID.
+				// Matched target identifier (ETSI attr 17) and Payload Direction.
+				// Only set when the task has a single target, so the identity is
+				// unambiguous; with multiple targets the MDF falls back to the XID
+				// and the direction stays Unknown.
 				if len(task.Targets) == 1 {
 					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
+					pdu.Header.PayloadDirection = li.PayloadDirectionForTarget(task.Targets[0], pkt)
 				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {
@@ -262,11 +264,14 @@ func (p *Processor) initLIManager() {
 				if pkt.NodeID != "" {
 					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
 				}
-				// Matched target identifier (ETSI attr 17). Only set when the
-				// task has a single target, so the identity is unambiguous;
-				// with multiple targets the MDF falls back to the XID.
+				// Matched target identifier (ETSI attr 17) and Payload Direction.
+				// Only set when the task has a single target, so the identity is
+				// unambiguous; with multiple targets the MDF falls back to the XID
+				// and the direction stays Unknown. For RTP targeted by SIP URI the
+				// direction resolves to Unknown (no per-packet SIP identity).
 				if len(task.Targets) == 1 {
 					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
+					pdu.Header.PayloadDirection = li.PayloadDirectionForTarget(task.Targets[0], pkt)
 				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {

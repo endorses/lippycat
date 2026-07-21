@@ -252,6 +252,54 @@ func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte, l
 	return nil
 }
 
+// perCallReopenWindow bounds how recently a per-call PCAP must have been written
+// for a re-created writer to append rather than truncate (so a stale leftover
+// file from an unrelated earlier call is not merged in).
+const perCallReopenWindow = 10 * time.Minute
+
+// openCallPcapFile opens filePath for a per-call PCAP. A new file is truncated
+// and given a PCAP header; an existing file written within perCallReopenWindow
+// is appended to without a header, so a re-created writer preserves the earlier
+// INVITE/SDP/media instead of wiping it. Returns the file, its writer, and the
+// pre-existing byte size.
+func (writer *CallPcapWriter) openCallPcapFile(filePath string) (*os.File, *pcapgo.Writer, int64, error) {
+	linkType := writer.linkType
+	if linkType == 0 {
+		linkType = layers.LinkTypeEthernet
+	}
+
+	var existingSize int64
+	appendMode := false
+	if fi, statErr := os.Stat(filePath); statErr == nil && fi.Size() > 0 &&
+		time.Since(fi.ModTime()) < perCallReopenWindow {
+		appendMode = true
+		existingSize = fi.Size()
+	}
+
+	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	if appendMode {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	}
+
+	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
+	file, err := os.OpenFile(filePath, flags, 0600)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	pcapWriter := pcapgo.NewWriter(file)
+	if !appendMode {
+		if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
+			if closeErr := file.Close(); closeErr != nil {
+				logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
+			}
+			return nil, nil, 0, err
+		}
+	}
+
+	return file, pcapWriter, existingSize, nil
+}
+
 // rotateSIPFile creates a new SIP PCAP file (called when size limit reached)
 func (writer *CallPcapWriter) rotateSIPFile() error {
 	// Close existing file and fire callback
@@ -275,34 +323,18 @@ func (writer *CallPcapWriter) rotateSIPFile() error {
 	filename := writer.generateFilename("sip", writer.sipFileIndex)
 	filePath := filepath.Join(writer.config.OutputDir, filename)
 
-	// Create file with restrictive permissions (owner read/write only)
-	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, pcapWriter, existingSize, err := writer.openCallPcapFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create SIP PCAP file: %w", err)
-	}
-
-	// Create PCAP writer with actual link type from captured packets
-	// Default to Ethernet if no packets received yet (shouldn't happen in normal flow)
-	linkType := writer.linkType
-	if linkType == 0 {
-		linkType = layers.LinkTypeEthernet
-	}
-	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
-		if closeErr := file.Close(); closeErr != nil {
-			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
-		}
-		return fmt.Errorf("failed to write SIP PCAP header: %w", err)
 	}
 
 	writer.sipFile = file
 	writer.sipWriter = pcapWriter
 	writer.sipFilePath = filePath
-	writer.sipSize = 0
+	writer.sipSize = existingSize
 	writer.sipFileIndex++
 
-	logger.Info("Created SIP PCAP file for call", "call_id", writer.callID, "file", filePath, "link_type", linkType)
+	logger.Info("Opened SIP PCAP file for call", "call_id", writer.callID, "file", filePath, "append", existingSize > 0)
 
 	return nil
 }
@@ -330,34 +362,18 @@ func (writer *CallPcapWriter) rotateRTPFile() error {
 	filename := writer.generateFilename("rtp", writer.rtpFileIndex)
 	filePath := filepath.Join(writer.config.OutputDir, filename)
 
-	// Create file with restrictive permissions (owner read/write only)
-	// #nosec G304 -- Path is safe: config OutputDir + generateFilename() with sanitization
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, pcapWriter, existingSize, err := writer.openCallPcapFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to create RTP PCAP file: %w", err)
-	}
-
-	// Create PCAP writer with actual link type from captured packets
-	// Default to Ethernet if no packets received yet (shouldn't happen in normal flow)
-	linkType := writer.linkType
-	if linkType == 0 {
-		linkType = layers.LinkTypeEthernet
-	}
-	pcapWriter := pcapgo.NewWriter(file)
-	if err := pcapWriter.WriteFileHeader(constants.DefaultPCAPSnapLen, linkType); err != nil {
-		if closeErr := file.Close(); closeErr != nil {
-			logger.Error("Failed to close file during error cleanup", "error", closeErr, "file", filePath)
-		}
-		return fmt.Errorf("failed to write RTP PCAP header: %w", err)
 	}
 
 	writer.rtpFile = file
 	writer.rtpWriter = pcapWriter
 	writer.rtpFilePath = filePath
-	writer.rtpSize = 0
+	writer.rtpSize = existingSize
 	writer.rtpFileIndex++
 
-	logger.Info("Created RTP PCAP file for call", "call_id", writer.callID, "file", filePath, "link_type", linkType)
+	logger.Info("Opened RTP PCAP file for call", "call_id", writer.callID, "file", filePath, "append", existingSize > 0)
 
 	return nil
 }

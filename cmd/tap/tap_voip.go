@@ -489,6 +489,15 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Pass the ApplicationFilter so only matching calls are tracked
 	voipProcConfig := voipprocessor.DefaultConfig()
 	voipProcConfig.ApplicationFilter = appFilter
+	// LocalSource reuses this verdict instead of re-matching each packet. It needs
+	// the IDs regardless of LI: they also key the CallID->filterIDs cache that lets
+	// RTP inherit its call's filter association.
+	voipProcConfig.NeedFilterIDs = true
+	// Concurrent tracked calls are capped; beyond the cap the oldest call is
+	// evicted, which drops its SDP-learned RTP port mapping. Only filter-matched
+	// calls are tracked, so the default suits a normal target set — make it
+	// tunable for deployments with many simultaneous targets.
+	voipProcConfig.MaxCalls = cmdutil.GetIntConfig("voip.max_calls", voipProcConfig.MaxCalls)
 	voipProc := voipprocessor.New(voipProcConfig)
 	voipAdapter := voipprocessor.NewSourceAdapter(voipProc)
 	localSource.SetVoIPProcessor(voipAdapter)

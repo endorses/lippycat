@@ -213,10 +213,11 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"vif_startup_delay", viper.GetDuration("sniff.vif_startup_delay"),
 		"vif_replay_timing", viper.GetBool("sniff.vif_replay_timing"))
 
-	if readFile == "" {
+	readFiles := collectReadFiles(readFile, args)
+	if len(readFiles) == 0 {
 		voip.StartLiveVoipSniffer(interfaces, effectiveFilter)
 	} else {
-		voip.StartOfflineVoipSniffer(readFile, effectiveFilter)
+		voip.StartOfflineVoipSniffer(readFiles, effectiveFilter)
 	}
 }
 

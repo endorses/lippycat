@@ -14,6 +14,7 @@ package source
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ import (
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/spf13/viper"
 )
 
 // ApplicationFilter provides application-layer packet filtering.
@@ -100,6 +102,10 @@ type LocalSource struct {
 	// Optional TCP assembler for TCP stream reassembly (e.g., TCP SIP)
 	// When set, TCP packets are routed to the assembler instead of direct processing
 	tcpAssembler TCPAssembler
+
+	// Guards tcpAssembler.AssemblePacket, which is not concurrency-safe, when the
+	// batching loop drains the packet buffer from multiple detection workers.
+	assemblerMu sync.Mutex
 
 	// Stats tracking
 	stats *AtomicStats
@@ -374,9 +380,95 @@ func (s *LocalSource) capturePackets() {
 }
 
 // batchingLoop reads from packet buffer, applies filtering, and creates batches.
+// detectionWorkerChanBuffer is the per-worker routed-packet channel depth.
+const detectionWorkerChanBuffer = 4096
+
+// batchingLoop drains the capture buffer and dispatches packets to detection
+// workers, lifting the single-goroutine ceiling that otherwise caps packet
+// processing to one CPU core — the bottleneck under a high-rate mirror.
+//
+// Packets are routed to a worker by a direction-independent flow hash, so every
+// packet of a flow (and thus a call leg) is handled by the same worker. This
+// keeps per-flow detector state (ctx.Flow: LastSeen/Protocols/State) single-
+// goroutine, which is required because that state is not internally locked. The
+// cross-flow shared state IS thread-safe (DetectionCache/FlowTracker RWMutex,
+// SIPSignature.knownSIPIPPairs sync.Map), so distinct flows parallelise safely.
+//
+// The dispatcher only hashes per packet (cheap); the expensive detection and
+// filtering run in the workers. Worker count is processor.detection_workers
+// (default NumCPU-2); a value of 1 keeps the original single-goroutine path.
 func (s *LocalSource) batchingLoop() {
 	defer s.wg.Done()
 
+	numWorkers := getDetectionWorkerCount()
+	if numWorkers <= 1 {
+		s.batchingWorker(s.packetBuffer.Receive())
+		return
+	}
+
+	logger.Info("LocalSource starting detection workers", "workers", numWorkers)
+	workerChans := make([]chan capture.PacketInfo, numWorkers)
+	var wg sync.WaitGroup
+	for i := range workerChans {
+		workerChans[i] = make(chan capture.PacketInfo, detectionWorkerChanBuffer)
+		wg.Add(1)
+		go func(in <-chan capture.PacketInfo) {
+			defer wg.Done()
+			s.batchingWorker(in)
+		}(workerChans[i])
+	}
+
+	for pktInfo := range s.packetBuffer.Receive() {
+		idx := 0
+		if pkt := pktInfo.Packet; pkt != nil {
+			netLayer := pkt.NetworkLayer()
+			transLayer := pkt.TransportLayer()
+			if netLayer != nil && transLayer != nil {
+				if _, isTCP := transLayer.(*layers.TCP); isTCP {
+					// TCP goes to worker 0: the reassembly assembler is not
+					// concurrency-safe, so all TCP is handled by a single worker.
+					idx = 0
+				} else {
+					h := netLayer.NetworkFlow().FastHash() ^ transLayer.TransportFlow().FastHash()
+					idx = int(h % uint64(numWorkers))
+				}
+			}
+		}
+		workerChans[idx] <- pktInfo
+	}
+
+	// Capture buffer closed: close worker channels so workers drain and exit.
+	for _, ch := range workerChans {
+		close(ch)
+	}
+	wg.Wait()
+}
+
+// getDetectionWorkerCount returns the number of concurrent detection/batching
+// workers. Configurable via voip processor.detection_workers; defaults to
+// NumCPU-2 (leaving headroom for the capture goroutine and downstream stages),
+// minimum 1.
+func getDetectionWorkerCount() int {
+	if viper.IsSet("processor.detection_workers") {
+		if n := viper.GetInt("processor.detection_workers"); n >= 1 {
+			return n
+		}
+	}
+	n := runtime.NumCPU() - 2
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// batchingWorker runs one detection/batching loop, consuming packets pre-routed
+// to it by flow (see batchingLoop). Because every packet of a flow arrives on the
+// same worker, per-flow detector state stays single-goroutine and in order.
+// Cross-worker shared state is concurrency-safe: the detector's cache/flow-tracker
+// (RWMutex) and SIP IP-pair map (sync.Map), callFilterCache (sync.Map),
+// currentBatch (batchMu), stats (atomic), and the TCP assembler (guarded by
+// assemblerMu; TCP is additionally pinned to a single worker).
+func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 	ticker := time.NewTicker(s.config.BatchTimeout)
 	defer ticker.Stop()
 
@@ -440,7 +532,7 @@ func (s *LocalSource) batchingLoop() {
 				s.sendBatch()
 			}
 
-		case pktInfo, ok := <-s.packetBuffer.Receive():
+		case pktInfo, ok := <-input:
 			if !ok {
 				// Channel closed
 				s.sendBatch()
@@ -454,7 +546,11 @@ func (s *LocalSource) batchingLoop() {
 			// TCP packets will come back via tcpInjectionChan when SIP messages are complete
 			if tcpAssembler != nil && pktInfo.Packet != nil && pktInfo.Packet.TransportLayer() != nil {
 				if _, isTCP := pktInfo.Packet.TransportLayer().(*layers.TCP); isTCP {
-					if tcpAssembler.AssemblePacket(pktInfo) {
+					// AssemblePacket is not concurrency-safe; serialise it across workers.
+					s.assemblerMu.Lock()
+					handled := tcpAssembler.AssemblePacket(pktInfo)
+					s.assemblerMu.Unlock()
+					if handled {
 						// TCP packet handled by assembler, don't process further
 						continue
 					}

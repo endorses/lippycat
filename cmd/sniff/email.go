@@ -302,10 +302,11 @@ func emailHandler(cmd *cobra.Command, args []string) {
 		"track_sessions", emailTrackSessions)
 
 	// Start email sniffer using appropriate mode
-	if readFile == "" {
+	readFiles := collectReadFiles(readFile, args)
+	if len(readFiles) == 0 {
 		email.StartLiveEmailSniffer(interfaces, effectiveFilter)
 	} else {
-		email.StartOfflineEmailSniffer(readFile, effectiveFilter)
+		email.StartOfflineEmailSniffer(readFiles, effectiveFilter)
 	}
 }
 

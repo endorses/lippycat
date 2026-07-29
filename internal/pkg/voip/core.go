@@ -5,7 +5,9 @@ package voip
 import (
 	"context"
 	"errors"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -189,8 +191,8 @@ func StartLiveVoipSniffer(interfaces, filter string) {
 	capture.StartLiveSniffer(interfaces, filter, StartVoipSniffer)
 }
 
-func StartOfflineVoipSniffer(readFile, filter string) {
-	capture.StartOfflineSniffer([]string{readFile}, filter, StartVoipSniffer)
+func StartOfflineVoipSniffer(readFiles []string, filter string) {
+	capture.StartOfflineSniffer(readFiles, filter, StartVoipSniffer)
 }
 
 func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
@@ -210,24 +212,56 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 	// Note: Virtual interface is now initialized in StartVoipSniffer() before packet processing begins
 	// This allows early permission checking and avoids wasting time if permissions are insufficient
 
-	packetCount := 0
-	for pkt := range ch {
-		packetCount++
-		logger.Debug("VoIP processor received packet", "count", packetCount, "has_network", pkt.Packet.NetworkLayer() != nil, "has_transport", pkt.Packet.TransportLayer() != nil)
-		packet := pkt.Packet
-		if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
-			logger.Debug("Skipping packet - missing network or transport layer")
-			continue
+	numWorkers := getProcessorWorkerCount()
+	if numWorkers <= 1 {
+		// Single-threaded path (original behaviour / offline-ordered mode).
+		for pkt := range ch {
+			processOnePacket(pkt, assembler)
+		}
+	} else {
+		// Flow-sharded worker pool. Each flow (both directions) is pinned to one
+		// worker via a symmetric hash, so RTP-stream ordering and per-call state
+		// stay consistent while distinct calls parallelise across cores. All shared
+		// state touched by the handlers is mutex-protected: CallTracker.callMap and
+		// portToCallID (tracker.mu), per-call PCAP writers (sipWriterMu/rtpWriterMu),
+		// the buffer manager (bm.mu) and the async writer. TCP is pinned to worker 0
+		// because the reassembly assembler is not concurrency-safe (TCP/SIP volume is
+		// negligible here).
+		logger.Info("VoIP processor starting flow-sharded workers", "workers", numWorkers)
+		workerBuf := getProcessorWorkerBuffer()
+		workers := make([]chan capture.PacketInfo, numWorkers)
+		var wg sync.WaitGroup
+		for i := range workers {
+			workers[i] = make(chan capture.PacketInfo, workerBuf)
+			wg.Add(1)
+			go func(in <-chan capture.PacketInfo) {
+				defer wg.Done()
+				for pkt := range in {
+					processOnePacket(pkt, assembler)
+				}
+			}(workers[i])
 		}
 
-		switch layer := packet.TransportLayer().(type) {
-		case *layers.TCP:
-			logger.Debug("Processing TCP packet")
-			handleTcpPackets(pkt, layer, assembler)
-		case *layers.UDP:
-			logger.Debug("Processing UDP packet")
-			handleUdpPackets(pkt, layer)
+		for pkt := range ch {
+			packet := pkt.Packet
+			netLayer := packet.NetworkLayer()
+			transLayer := packet.TransportLayer()
+			if netLayer == nil || transLayer == nil {
+				continue
+			}
+			idx := 0
+			if _, isTCP := transLayer.(*layers.TCP); !isTCP {
+				// FastHash() (uint64) is direction-independent, so both legs of a
+				// flow land on the same worker.
+				h := netLayer.NetworkFlow().FastHash() ^ transLayer.TransportFlow().FastHash()
+				idx = int(h % uint64(numWorkers))
+			}
+			workers[idx] <- pkt
 		}
+		for _, w := range workers {
+			close(w)
+		}
+		wg.Wait()
 	}
 
 	// Flush and close all TCP streams
@@ -243,5 +277,50 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 		time.Sleep(200 * time.Millisecond)
 	}
 
-	logger.Info("VoIP processor finished", "total_packets", packetCount)
+	logger.Info("VoIP processor finished")
+}
+
+// processOnePacket dispatches a single packet to the appropriate transport handler.
+// Safe to call from multiple worker goroutines concurrently as long as packets of
+// the same flow are delivered to the same worker (see startProcessor) and shared
+// call/registry/writer state remains mutex-protected.
+func processOnePacket(pkt capture.PacketInfo, assembler *capture.TCPAssembler) {
+	packet := pkt.Packet
+	if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
+		return
+	}
+	switch layer := packet.TransportLayer().(type) {
+	case *layers.TCP:
+		handleTcpPackets(pkt, layer, assembler)
+	case *layers.UDP:
+		handleUdpPackets(pkt, layer)
+	}
+}
+
+// getProcessorWorkerCount returns the number of flow-sharded VoIP processing
+// workers. Configurable via voip.processor_workers; defaults to NumCPU-2 (leaving
+// headroom for the capture/decode goroutine and async writers), minimum 1.
+// A value of 1 selects the original single-threaded path.
+func getProcessorWorkerCount() int {
+	if viper.IsSet("voip.processor_workers") {
+		if n := viper.GetInt("voip.processor_workers"); n >= 1 {
+			return n
+		}
+	}
+	n := runtime.NumCPU() - 2
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// getProcessorWorkerBuffer returns the per-worker input channel depth.
+// Configurable via voip.processor_worker_buffer; defaults to 8192.
+func getProcessorWorkerBuffer() int {
+	if viper.IsSet("voip.processor_worker_buffer") {
+		if b := viper.GetInt("voip.processor_worker_buffer"); b > 0 {
+			return b
+		}
+	}
+	return 8192
 }

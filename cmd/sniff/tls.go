@@ -159,10 +159,11 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 		"track_connections", tlsTrackConns)
 
 	// Start TLS sniffer using appropriate mode
-	if readFile == "" {
+	readFiles := collectReadFiles(readFile, args)
+	if len(readFiles) == 0 {
 		tls.StartLiveTLSSniffer(interfaces, effectiveFilter)
 	} else {
-		tls.StartOfflineTLSSniffer(readFile, effectiveFilter)
+		tls.StartOfflineTLSSniffer(readFiles, effectiveFilter)
 	}
 }
 

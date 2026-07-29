@@ -250,10 +250,11 @@ func httpHandler(cmd *cobra.Command, args []string) {
 		"tls_decryption", tlsKeylogPath != "")
 
 	// Start HTTP sniffer using appropriate mode
-	if readFile == "" {
+	readFiles := collectReadFiles(readFile, args)
+	if len(readFiles) == 0 {
 		http.StartLiveHTTPSniffer(interfaces, effectiveFilter)
 	} else {
-		http.StartOfflineHTTPSniffer(readFile, effectiveFilter)
+		http.StartOfflineHTTPSniffer(readFiles, effectiveFilter)
 	}
 }
 

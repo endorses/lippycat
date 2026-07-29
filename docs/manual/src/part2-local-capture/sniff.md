@@ -206,18 +206,23 @@ sudo lc sniff voip -i eth0 -U
 | `--tcp-performance-mode` | `-M` | — | TCP profile: `balanced`, `throughput`, `latency`, `memory` |
 | `--gpu-backend` | `-g` | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
 | `--pcap-grace-period` | — | `5s` | Grace period before closing per-call PCAPs |
-| `--esp-null` | — | `false` | Assume all ESP traffic is NULL-encrypted |
+| `--esp-null` | — | `false` | Decapsulate ESP via trailer/SPI validation |
+| `--esp-heuristic` | — | `false` | Decapsulate ESP by sniffing payload content |
 | `--esp-icv-size` | — | `-1` (auto) | ICV size in bytes: `0`, `8`, `12`, or `16` |
 
 #### ESP-NULL Decapsulation
 
-For VoIP traffic inside ESP-NULL encrypted tunnels (common in IPsec deployments where encryption is disabled but ESP framing remains):
+ESP decapsulation is off by default: without `--esp-null` or `--esp-heuristic`, ESP packets are passed through untouched and are not admitted by the VoIP BPF filter.
+
+Enable it for VoIP traffic inside ESP-NULL tunnels (common in IPsec deployments where encryption is disabled but ESP framing remains):
 
 ```bash
 sudo lc sniff voip -i eth0 --esp-null --esp-icv-size 12
 ```
 
 lippycat strips the ESP header and ICV trailer, exposing the inner UDP/SIP/RTP packets for normal analysis. With `--esp-icv-size -1` (the default), the ICV size is auto-detected.
+
+`--esp-heuristic` identifies ESP-NULL by inspecting payload content instead of the ESP trailer. Prefer `--esp-null` where the SA is known to be NULL-encrypted: on genuinely encrypted SAs the content heuristic can mistake ciphertext for inner traffic.
 
 ## PCAP File Output
 

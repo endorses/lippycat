@@ -59,6 +59,7 @@ var ipv6FragIDCache = newTTLCache[uint32, ipv6FragInfo](30 * time.Second)
 var (
 	espNullConfigOnce sync.Once
 	espNullEnabled    bool // true when --esp-null flag is set
+	espHeuristicOn    bool // true when --esp-heuristic flag is set
 	espFixedICVSize   int  // -1 = auto-detect, >=0 = fixed ICV size in bytes
 )
 
@@ -70,6 +71,7 @@ const DefaultSIPBufferSize = 1000
 func getESPNullConfig() (enabled bool, icvSize int) {
 	espNullConfigOnce.Do(func() {
 		espNullEnabled = viper.GetBool("esp_null")
+		espHeuristicOn = viper.GetBool("esp_heuristic")
 		if viper.IsSet("esp_icv_size") {
 			espFixedICVSize = viper.GetInt("esp_icv_size")
 		} else {
@@ -87,12 +89,28 @@ func getESPNullConfig() (enabled bool, icvSize int) {
 		if !espNullEnabled && espFixedICVSize >= 0 {
 			logger.Warn("--esp-icv-size has no effect without --esp-null")
 		}
-		if espNullEnabled {
-			logger.Info("ESP-NULL explicit mode enabled",
-				"icv_size", espFixedICVSize)
+		switch {
+		case espNullEnabled:
+			logger.Info("ESP-NULL explicit mode enabled", "icv_size", espFixedICVSize)
+		case espHeuristicOn:
+			logger.Info("ESP-NULL heuristic mode enabled")
 		}
 	})
 	return espNullEnabled, espFixedICVSize
+}
+
+// ESPDecapEnabled reports whether ESP decapsulation should run at all. ESP
+// rewriting is opt-in: --esp-null (trailer/SPI validation) or --esp-heuristic
+// (content sniffing). Without either, ESP packets are left untouched.
+func ESPDecapEnabled() bool {
+	getESPNullConfig()
+	return espNullEnabled || espHeuristicOn
+}
+
+// ResetESPConfigCache forces the ESP configuration to be re-read from Viper.
+// Only needed when the flags change after first use (tests).
+func ResetESPConfigCache() {
+	espNullConfigOnce = sync.Once{}
 }
 
 type PacketBuffer struct {
@@ -902,10 +920,12 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 			// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
 			// mode provides integrity without encryption. Must run after VXLAN
 			// decapsulation so it sees the inner packets from VXLAN tunnels.
-			if inner, ok := decapsulateESPNull(packet); ok {
-				packet = inner
-			} else if inner, ok := decapsulateIPv6FragmentESP(packet); ok {
-				packet = inner
+			if ESPDecapEnabled() {
+				if inner, ok := decapsulateESPNull(packet); ok {
+					packet = inner
+				} else if inner, ok := decapsulateIPv6FragmentESP(packet); ok {
+					packet = inner
+				}
 			}
 
 			pktInfo := PacketInfo{
@@ -1279,7 +1299,7 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 				tcpHeaderLen := tcpDataOff * 4
 				if tcpHeaderLen <= len(espPayload) {
 					tcpPayload := espPayload[tcpHeaderLen:]
-					if mightBeSIPorRTP(tcpPayload) {
+					if mightBeSIP(tcpPayload) {
 						innerProto = layers.IPProtocolTCP
 						// Strip the ESP trailer (padding + pad_len + next_header + ICV) to
 						// get the true TCP segment length. Leaving the trailer bytes on the
@@ -1297,8 +1317,10 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 	// continuation segment (e.g., TCP SDP body without SIP header).
 	// A single SA can carry both UDP and TCP flows, so when the cached protocol fails we
 	// also try the alternative protocol before giving up.
+	fromSPICache := false
 	if innerProto == 0 {
 		if cached, ok := espNullSPICache.Load(spi); ok {
+			fromSPICache = true
 			proto := cached
 			// tryProto attempts to identify innerProto/innerLen for the given protocol.
 			tryProto := func(p layers.IPProtocol) {
@@ -1343,6 +1365,7 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 	// In heuristic mode, this handles TCP handshake packets (SYN/SYN-ACK/ACK) that
 	// carry no SIP/RTP payload, so the content heuristics above always fail.
 	if innerProto == 0 {
+		fromSPICache = false
 		if proto, length, ok := tryESPTrailerValidation(espPayload, icvSize); ok {
 			innerProto = proto
 			innerLen = length
@@ -1353,9 +1376,14 @@ func decapsulateESPNull(packet gopacket.Packet) (gopacket.Packet, bool) {
 		return packet, false
 	}
 
-	// Record this SPI as NULL-encrypted on first confirmed detection.
-	// Subsequent packets (including TCP continuations) will bypass content checks.
-	espNullSPICache.Store(spi, innerProto)
+	// Record this SPI as NULL-encrypted on first confirmed detection, so later
+	// continuation segments bypass content checks. Only content- or trailer-
+	// validated detections refresh the entry: the cache path itself validates
+	// almost nothing, so refreshing from it would let a single false positive
+	// pin an encrypted SA into "inner TCP" mode for as long as it carries traffic.
+	if !fromSPICache {
+		espNullSPICache.Store(spi, innerProto)
+	}
 
 	rawData := packet.Data()
 	if len(rawData) == 0 {
@@ -1680,6 +1708,19 @@ func decapsulateIPv6FragmentESP(packet gopacket.Packet) (gopacket.Packet, bool) 
 // cleartext SIP or RTP content. Used to guard ESP-NULL decapsulation from false-positives
 // on genuinely encrypted ESP traffic, whose payload bytes appear random.
 func mightBeSIPorRTP(payload []byte) bool {
+	if mightBeSIP(payload) {
+		return true
+	}
+
+	// RTP (RFC 3550): version field occupies the top 2 bits of the first byte
+	// and must be 2. Minimum RTP header is 12 bytes.
+	return len(payload) >= 12 && (payload[0]>>6) == 2
+}
+
+// mightBeSIP reports whether the payload starts a SIP message. Unlike
+// mightBeSIPorRTP this has no RTP branch, which matches on 25% of random bytes
+// and is meaningless for a TCP segment (SIP-over-TCP never carries RTP).
+func mightBeSIP(payload []byte) bool {
 	if len(payload) == 0 {
 		return false
 	}
@@ -1695,12 +1736,6 @@ func mightBeSIPorRTP(payload []byte) bool {
 		if bytes.HasPrefix(payload, prefix) {
 			return true
 		}
-	}
-
-	// RTP (RFC 3550): version field occupies the top 2 bits of the first byte
-	// and must be 2. Minimum RTP header is 12 bytes.
-	if len(payload) >= 12 && (payload[0]>>6) == 2 {
-		return true
 	}
 
 	return false

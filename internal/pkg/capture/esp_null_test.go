@@ -56,7 +56,103 @@ func buildMinimalTCPHeader(srcPort, dstPort uint16, payload []byte) []byte {
 func resetESPNullConfig() {
 	espNullConfigOnce = sync.Once{}
 	espNullEnabled = false
+	espHeuristicOn = false
 	espFixedICVSize = -1
+}
+
+func TestESPDecapEnabled_OptIn(t *testing.T) {
+	cases := []struct {
+		name    string
+		set     map[string]bool
+		enabled bool
+	}{
+		{"off by default", nil, false},
+		{"esp-null", map[string]bool{"esp_null": true}, true},
+		{"esp-heuristic", map[string]bool{"esp_heuristic": true}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetESPNullConfig()
+			viper.Reset()
+			for k, v := range tc.set {
+				viper.Set(k, v)
+			}
+			defer func() {
+				resetESPNullConfig()
+				viper.Reset()
+			}()
+
+			assert.Equal(t, tc.enabled, ESPDecapEnabled())
+		})
+	}
+}
+
+// TestMightBeSIP_RejectsRTPLookalike guards the ESP TCP branch: the RTP check
+// matches any payload whose top two bits are 10, i.e. a quarter of all random
+// (encrypted) bytes, so it must not be used to identify inner TCP.
+func TestMightBeSIP_RejectsRTPLookalike(t *testing.T) {
+	rtpLike := append([]byte{0x80, 0x08}, make([]byte, 20)...)
+
+	assert.False(t, mightBeSIP(rtpLike), "RTP-like bytes are not SIP")
+	assert.True(t, mightBeSIPorRTP(rtpLike), "UDP path still accepts RTP")
+	assert.True(t, mightBeSIP([]byte("INVITE sip:bob@example.com SIP/2.0\r\n")))
+}
+
+// TestDecapsulateESPNull_HeuristicRejectsEncryptedTCPLookalike verifies that
+// encrypted ESP whose ciphertext happens to parse as a TCP header is not
+// decapsulated. Each false positive costs a bogus reassembly stream.
+func TestDecapsulateESPNull_HeuristicRejectsEncryptedTCPLookalike(t *testing.T) {
+	resetESPNullConfig()
+	viper.Reset()
+	viper.Set("esp_heuristic", true)
+	defer func() {
+		resetESPNullConfig()
+		viper.Reset()
+	}()
+
+	// Valid-looking TCP header whose payload passes the RTP version check,
+	// wrapped in a trailer whose next_hdr is neither TCP nor UDP.
+	rtpLike := append([]byte{0x80, 0x08}, make([]byte, 30)...)
+	tcpData := buildMinimalTCPHeader(5060, 5060, rtpLike)
+	raw := buildESPNullIPv6Packet(0x0badc0de, tcpData, 59 /* no next header */, 2, 12)
+
+	pkt := gopacket.NewPacket(raw, layers.LinkTypeEthernet, gopacket.Default)
+	require.NotNil(t, pkt.Layer(layers.LayerTypeIPSecESP), "input must parse as ESP")
+
+	_, ok := decapsulateESPNull(pkt)
+	assert.False(t, ok, "ciphertext resembling TCP+RTP must not be decapsulated")
+}
+
+// TestDecapsulateESPNull_CachePathDoesNotRefreshTTL ensures a confirmed SPI ages
+// out even while traffic keeps arriving: the cache path validates almost nothing,
+// so refreshing from it would pin a mistaken SA indefinitely.
+func TestDecapsulateESPNull_CachePathDoesNotRefreshTTL(t *testing.T) {
+	resetESPNullConfig()
+	viper.Reset()
+	viper.Set("esp_null", true)
+	viper.Set("esp_icv_size", 12)
+	defer func() {
+		resetESPNullConfig()
+		viper.Reset()
+	}()
+
+	const spi = uint32(0x51915191)
+	espNullSPICache.Store(spi, layers.IPProtocolTCP)
+	espNullSPICache.mu.RLock()
+	stored := espNullSPICache.entries[spi].timestamp
+	espNullSPICache.mu.RUnlock()
+
+	tcpData := buildMinimalTCPHeader(5060, 5060, []byte("continuation bytes, not SIP"))
+	raw := buildESPNullIPv6Packet(spi, tcpData, 6, 3, 12)
+	pkt := gopacket.NewPacket(raw, layers.LinkTypeEthernet, gopacket.Default)
+
+	_, ok := decapsulateESPNull(pkt)
+	require.True(t, ok, "cached SPI should still decapsulate continuation segments")
+
+	espNullSPICache.mu.RLock()
+	after := espNullSPICache.entries[spi].timestamp
+	espNullSPICache.mu.RUnlock()
+	assert.Equal(t, stored, after, "cache-path hit must not refresh the entry")
 }
 
 func TestTryESPTrailerValidation_AutoDetect(t *testing.T) {

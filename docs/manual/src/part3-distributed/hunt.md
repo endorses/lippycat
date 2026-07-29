@@ -24,6 +24,7 @@ The capture flags (`-i`, `-f`, `--sip-user`, `--udp-only`, `--sip-port`) carry o
 | `-f, --filter` | BPF filter | BPF filter | Yes |
 | `-p, --promisc` | Promiscuous mode | Promiscuous mode | Yes |
 | `--esp-null` | ESP-NULL decapsulation | ESP-NULL decapsulation | Yes |
+| `--esp-heuristic` | ESP-NULL detection by content | ESP-NULL detection by content | Yes |
 | `--esp-icv-size` | ESP ICV size | ESP ICV size | Yes |
 | `--udp-only` | UDP-only capture (VoIP) | UDP-only capture (VoIP) | Yes |
 | `--sip-port` | SIP port restriction (VoIP) | SIP port restriction (VoIP) | Yes |

@@ -242,7 +242,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 			"sip_ports", voipSIPPorts,
 			"rtp_port_ranges", voipRTPPortRanges,
 			"effective_filter", effectiveBPFFilter)
-	} else if baseBPFFilter != "" {
+	} else if baseBPFFilter != "" && capture.ESPDecapEnabled() {
 		// No VoIP optimization flags were set, so the VoIPFilterBuilder (which
 		// admits ESP) is skipped and the raw base filter is used verbatim. A
 		// port/udp base filter drops IPsec ESP (IP proto 50) at the kernel BPF,

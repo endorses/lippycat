@@ -153,7 +153,8 @@ sudo lc tap tls -i eth0 \
 - `-b, --buffer-size` - Packet buffer size (default: 10000)
 - `--batch-size` - Packets per batch (default: 100)
 - `--batch-timeout` - Batch timeout in milliseconds (default: 100)
-- `--esp-null` - Assume all ESP traffic is NULL-encrypted (skip content heuristics)
+- `--esp-null` - Decapsulate ESP as NULL-encrypted using ESP trailer/SPI validation (off by default)
+- `--esp-heuristic` - Decapsulate ESP by sniffing payload content for SIP (off by default)
 - `--esp-icv-size` - ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires `--esp-null`
 
 ### Management Interface

@@ -27,8 +27,9 @@ var (
 	format      string
 
 	// ESP-NULL decapsulation flags
-	espNull    bool
-	espICVSize int
+	espNull      bool
+	espHeuristic bool
+	espICVSize   int
 
 	// Virtual interface flags
 	virtualInterface     bool
@@ -111,6 +112,7 @@ func init() {
 
 	// ESP-NULL Decapsulation Flags (inherited by voip subcommand)
 	SniffCmd.PersistentFlags().BoolVar(&espNull, "esp-null", false, "Assume all ESP traffic is NULL-encrypted (skip content heuristics)")
+	SniffCmd.PersistentFlags().BoolVar(&espHeuristic, "esp-heuristic", false, "Detect ESP-NULL traffic by sniffing payload content (off by default)")
 	SniffCmd.PersistentFlags().IntVar(&espICVSize, "esp-icv-size", -1, "ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires --esp-null")
 
 	// Virtual Interface Flags (inherited by voip subcommand)
@@ -129,6 +131,7 @@ func init() {
 
 	// Bind ESP-NULL flags to viper
 	_ = viper.BindPFlag("esp_null", SniffCmd.PersistentFlags().Lookup("esp-null"))
+	_ = viper.BindPFlag("esp_heuristic", SniffCmd.PersistentFlags().Lookup("esp-heuristic"))
 	_ = viper.BindPFlag("esp_icv_size", SniffCmd.PersistentFlags().Lookup("esp-icv-size"))
 
 	// Bind virtual interface flags to viper

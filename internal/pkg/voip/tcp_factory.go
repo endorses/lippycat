@@ -20,10 +20,12 @@ type sipStreamFactory struct {
 	config           *Config
 	configMutex      sync.RWMutex
 	lastLogTime      int64
-	allWorkers       sync.WaitGroup // tracks all background goroutines
-	cleanupTicker    *time.Ticker
-	closed           int32             // atomic flag to track if factory is closed
-	handler          SIPMessageHandler // handler for processing complete SIP messages
+	// lastStreamLimitLogTime rate-limits the MaxStreams rejection warning
+	lastStreamLimitLogTime int64
+	allWorkers             sync.WaitGroup // tracks all background goroutines
+	cleanupTicker          *time.Ticker
+	closed                 int32             // atomic flag to track if factory is closed
+	handler                SIPMessageHandler // handler for processing complete SIP messages
 }
 
 func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) reassembly.StreamFactory {
@@ -138,8 +140,6 @@ func (f *sipStreamFactory) cleanupRoutine() {
 }
 
 func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
-	detector := NewCallIDDetector()
-
 	// bufferedSIPStream uses a BUFFERED channel with non-blocking sends so
 	// ReassembledSG() NEVER blocks the packet capture loop - data is dropped only
 	// if the buffer is full. This guarantees the capture loop always continues.
@@ -149,6 +149,19 @@ func (f *sipStreamFactory) New(net, transport gopacket.Flow, tcp *layers.TCP, ac
 	if current >= int64(f.config.MaxGoroutines) {
 		f.logGoroutineLimit()
 	}
+
+	// voip.max_streams is a hard cap (0 = unlimited): beyond it, new connections
+	// get a stream that discards data instead of spawning goroutines. Without it,
+	// a flood of short-lived or bogus TCP flows grows memory without bound.
+	if limit := f.config.MaxStreams; limit > 0 && current >= int64(limit) {
+		tcpStreamMetrics.mu.Lock()
+		tcpStreamMetrics.droppedStreams++
+		tcpStreamMetrics.mu.Unlock()
+		f.logStreamLimit(current)
+		return &discardStream{}
+	}
+
+	detector := NewCallIDDetector()
 
 	// Increment goroutine counter before creating stream (stream starts goroutine)
 	atomic.AddInt64(&f.activeGoroutines, 1)

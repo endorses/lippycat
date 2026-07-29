@@ -258,6 +258,29 @@ func (f *sipStreamFactory) logGoroutineLimit() {
 	}
 }
 
+// logStreamLimit logs when the hard stream cap rejects a connection, rate-limited
+// to the same interval as the goroutine limit warning.
+func (f *sipStreamFactory) logStreamLimit(current int64) {
+	now := time.Now().Unix()
+	lastLog := atomic.LoadInt64(&f.lastStreamLimitLogTime)
+
+	f.configMutex.RLock()
+	logInterval := int64(f.config.LogGoroutineLimitInterval.Seconds())
+	f.configMutex.RUnlock()
+
+	if now-lastLog >= logInterval {
+		if atomic.CompareAndSwapInt64(&f.lastStreamLimitLogTime, lastLog, now) {
+			tcpStreamMetrics.mu.RLock()
+			dropped := tcpStreamMetrics.droppedStreams
+			tcpStreamMetrics.mu.RUnlock()
+			logger.Warn("TCP stream limit reached, rejecting new streams",
+				"active_streams", current,
+				"max_streams", f.config.MaxStreams,
+				"dropped_streams", dropped)
+		}
+	}
+}
+
 // Performance monitoring and auto-tuning
 func (f *sipStreamFactory) performanceMonitor() {
 	defer f.allWorkers.Done()

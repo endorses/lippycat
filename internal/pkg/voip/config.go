@@ -26,6 +26,10 @@ type Config struct {
 	// Goroutine limits
 	MaxGoroutines int `mapstructure:"max_goroutines"`
 
+	// MaxStreams is a hard cap on concurrent TCP SIP streams. 0 = unlimited.
+	// Unlike MaxGoroutines (a warning threshold), exceeding this rejects new streams.
+	MaxStreams int `mapstructure:"max_streams"`
+
 	// Timeout configurations
 	CallIDDetectionTimeout time.Duration `mapstructure:"call_id_detection_timeout"`
 	JanitorCleanupInterval time.Duration `mapstructure:"janitor_cleanup_interval"`
@@ -92,6 +96,7 @@ type Config struct {
 // initConfigDefaults initializes viper defaults once
 func initConfigDefaults() {
 	viper.SetDefault("voip.max_goroutines", DefaultGoroutineLimit)
+	viper.SetDefault("voip.max_streams", DefaultMaxStreams)
 	viper.SetDefault("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout)
 	viper.SetDefault("voip.janitor_cleanup_interval", DefaultJanitorCleanupInterval)
 	viper.SetDefault("voip.call_expiration_time", DefaultCallExpirationTime)
@@ -205,6 +210,7 @@ func buildConfig() *Config {
 
 	config := &Config{
 		MaxGoroutines:             getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
+		MaxStreams:                viper.GetInt("voip.max_streams"),
 		CallIDDetectionTimeout:    getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),
 		JanitorCleanupInterval:    profile.TCPCleanupInterval / 2,
 		CallExpirationTime:        profile.TCPBufferMaxAge,

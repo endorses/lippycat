@@ -102,10 +102,11 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 		"detect_tunneling", dnsDetectTunnel)
 
 	// Start DNS sniffer using appropriate mode
-	if readFile == "" {
+	readFiles := collectReadFiles(readFile, args)
+	if len(readFiles) == 0 {
 		dns.StartLiveDNSSniffer(interfaces, effectiveFilter)
 	} else {
-		dns.StartOfflineDNSSniffer(readFile, effectiveFilter)
+		dns.StartOfflineDNSSniffer(readFiles, effectiveFilter)
 	}
 }
 

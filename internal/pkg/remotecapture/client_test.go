@@ -1525,6 +1525,72 @@ func TestUpdateCallState_ExistingCall_MultipleHunters(t *testing.T) {
 	assert.Equal(t, "ACTIVE", call.State) // ACK transitions RINGING -> ACTIVE
 }
 
+func TestUpdateCallState_NonDialogMethodsIgnored(t *testing.T) {
+	// Non-dialog SIP methods (SUBSCRIBE/NOTIFY/OPTIONS/REGISTER/PUBLISH) must
+	// not create call entries: they have no BYE to end them, so a stray
+	// SUBSCRIBE/NOTIFY dialog would otherwise sit "Active" in the TUI
+	// forever. This mirrors voip.TestCallAggregator_NonCallMethodsIgnored.
+	handler := &MockEventHandler{}
+	client := &Client{
+		handler:    handler,
+		calls:      make(map[string]*types.CallInfo),
+		rtpStats:   make(map[string]*rtpQualityStats),
+		interfaces: make(map[string][]string),
+		nodeID:     "test-processor",
+	}
+
+	nonDialogMethods := []string{"OPTIONS", "REGISTER", "SUBSCRIBE", "NOTIFY", "PUBLISH"}
+	for _, method := range nonDialogMethods {
+		pkt := &data.CapturedPacket{
+			TimestampNs: time.Now().UnixNano(),
+			Metadata: &data.PacketMetadata{
+				Sip: &data.SIPMetadata{
+					CallId:   "non-call-" + method,
+					Method:   method,
+					FromUser: "alice",
+					ToUser:   "bob",
+				},
+			},
+		}
+		client.updateCallState(pkt, "hunter-1")
+	}
+
+	assert.Empty(t, client.calls, "non-dialog SIP methods should not create call entries")
+
+	// A 200 OK responding to a SUBSCRIBE/NOTIFY transaction must not create
+	// a call either, and must not promote it straight to ACTIVE.
+	okPkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:       "subscribe-notify-dialog",
+				Method:       "",
+				CseqMethod:   "NOTIFY",
+				ResponseCode: 200,
+				FromUser:     "alice",
+				ToUser:       "bob",
+			},
+		},
+	}
+	client.updateCallState(okPkt, "hunter-1")
+	assert.Empty(t, client.calls, "2xx response to NOTIFY should not create a call entry")
+
+	// A real INVITE still creates a call as usual.
+	invitePkt := &data.CapturedPacket{
+		TimestampNs: time.Now().UnixNano(),
+		Metadata: &data.PacketMetadata{
+			Sip: &data.SIPMetadata{
+				CallId:   "real-call-123",
+				Method:   "INVITE",
+				FromUser: "alice",
+				ToUser:   "bob",
+			},
+		},
+	}
+	client.updateCallState(invitePkt, "hunter-1")
+	assert.Len(t, client.calls, 1, "INVITE should create a call entry")
+}
+
 func TestUpdateCallState_EmptyCallID(t *testing.T) {
 	handler := &MockEventHandler{}
 	client := &Client{

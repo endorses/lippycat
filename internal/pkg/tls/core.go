@@ -320,8 +320,8 @@ func StartLiveTLSSniffer(interfaces, filter string) {
 }
 
 // StartOfflineTLSSniffer starts TLS capture from a PCAP file.
-func StartOfflineTLSSniffer(readFile, filter string) {
-	capture.StartOfflineSniffer([]string{readFile}, filter, StartTLSSniffer)
+func StartOfflineTLSSniffer(readFiles []string, filter string) {
+	capture.StartOfflineSniffer(readFiles, filter, StartTLSSniffer)
 }
 
 // printStatistics prints capture statistics.

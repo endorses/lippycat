@@ -435,8 +435,8 @@ func StartLiveEmailSniffer(interfaces, filter string) {
 }
 
 // StartOfflineEmailSniffer starts email capture from a PCAP file.
-func StartOfflineEmailSniffer(readFile, filter string) {
-	capture.StartOfflineSniffer([]string{readFile}, filter, StartEmailSniffer)
+func StartOfflineEmailSniffer(readFiles []string, filter string) {
+	capture.StartOfflineSniffer(readFiles, filter, StartEmailSniffer)
 }
 
 // printStatistics prints capture statistics.

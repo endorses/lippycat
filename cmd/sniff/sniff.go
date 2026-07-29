@@ -73,11 +73,26 @@ func sniff(cmd *cobra.Command, args []string) {
 		viper.Set("sniff.vif_drop_privileges", vifDropPrivileges)
 	}
 
-	if readFile == "" {
+	files := collectReadFiles(readFile, args)
+	if len(files) == 0 {
 		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
 	} else {
-		capture.StartOfflineSniffer([]string{readFile}, filter, capture.StartSniffer)
+		capture.StartOfflineSniffer(files, filter, capture.StartSniffer)
 	}
+}
+
+// collectReadFiles combines the --read-file/-r flag value with any leftover
+// positional arguments into a single ordered file list. Cobra only ever
+// assigns one token to a plain string flag, so `-r a.pcap b.pcap` leaves
+// "b.pcap" as a positional argument rather than a second file — this
+// reunites them so multi-file offline reads work as typed.
+func collectReadFiles(flagValue string, positional []string) []string {
+	var files []string
+	if flagValue != "" {
+		files = append(files, flagValue)
+	}
+	files = append(files, positional...)
+	return files
 }
 
 func init() {

@@ -343,6 +343,44 @@ func isTerminalCallState(state string) bool {
 	}
 }
 
+// isDialogMethod reports whether a SIP request method, observed on its own,
+// may create a call entry even when the originating INVITE was missed or
+// arrived out of order. The dialog-continuation methods
+// (ACK/BYE/CANCEL/INFO/PRACK/UPDATE/REFER) only ever occur inside an
+// established INVITE dialog, so seeing one is proof a dialog exists. MESSAGE
+// is also allowed to create an entry: deriveSIPState immediately classifies
+// it as a terminal "SMS" transaction rather than an ongoing call, so it
+// never gets stuck "Active". REGISTER/OPTIONS/SUBSCRIBE/NOTIFY/PUBLISH are
+// deliberately excluded so they never spawn call entries — they have no
+// terminal transition of their own and would otherwise sit "Active" forever.
+//
+// This mirrors voip.isDialogMethod, except MESSAGE: voip.CallAggregator
+// drops standalone MESSAGE transactions entirely, while this client
+// surfaces them as SMS entries in the TUI. Keep the dialog-method set in
+// sync between the two; the MESSAGE divergence is intentional.
+func isDialogMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "INVITE", "ACK", "BYE", "CANCEL", "INFO", "PRACK", "UPDATE", "REFER", "MESSAGE":
+		return true
+	default:
+		return false
+	}
+}
+
+// effectiveSIPMethod returns the method a SIP message should be classified
+// by. SIP responses carry no method on their status line, so fall back to
+// the CSeq method token. Returns "" for a response whose CSeq method is
+// absent (older hunters that predate CSeq propagation), which callers treat
+// as "not a dialog method".
+//
+// This mirrors voip.effectiveSIPMethod — keep the two in sync.
+func effectiveSIPMethod(sip *data.SIPMetadata) string {
+	if sip.Method != "" && sip.Method != "RESPONSE" {
+		return sip.Method
+	}
+	return sip.CseqMethod
+}
+
 // updateCallState updates call state from SIP packet metadata.
 // Returns true if this packet transitioned the call into a terminal state
 // (e.g. a BYE ending the call), so the caller can flush the update to the
@@ -359,6 +397,17 @@ func (c *Client) updateCallState(pkt *data.CapturedPacket, hunterID string) (bec
 
 	call, exists := c.calls[sip.CallId]
 	if !exists {
+		// A call is created from any message that belongs to an INVITE
+		// dialog: the INVITE itself, or — when the INVITE was missed or
+		// arrived out of order — any dialog-continuation request or a
+		// response whose CSeq names a dialog method. Non-dialog traffic
+		// (REGISTER/OPTIONS/SUBSCRIBE/NOTIFY/PUBLISH) never creates a call,
+		// since it has no BYE to end it and would otherwise sit "Active"
+		// forever.
+		if !isDialogMethod(effectiveSIPMethod(sip)) {
+			return false
+		}
+
 		// Prefer full URIs if available, fallback to username only
 		from := sip.FromUri
 		if from == "" {

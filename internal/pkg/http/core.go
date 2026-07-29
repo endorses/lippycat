@@ -334,8 +334,8 @@ func StartLiveHTTPSniffer(interfaces, filter string) {
 }
 
 // StartOfflineHTTPSniffer starts HTTP capture from a PCAP file.
-func StartOfflineHTTPSniffer(readFile, filter string) {
-	capture.StartOfflineSniffer([]string{readFile}, filter, StartHTTPSniffer)
+func StartOfflineHTTPSniffer(readFiles []string, filter string) {
+	capture.StartOfflineSniffer(readFiles, filter, StartHTTPSniffer)
 }
 
 // printStatistics prints capture statistics.

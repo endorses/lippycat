@@ -593,7 +593,9 @@ func (p *Processor) SynthesizeVirtualHunter() *management.ConnectedHunter {
 		ConnectedDurationSec: durationSec,
 		LastHeartbeatNs:      time.Now().UnixNano(),
 		Stats: &management.HunterStats{
-			PacketsCaptured:  stats.PacketsCaptured,
+			PacketsCaptured: stats.PacketsCaptured,
+			// Local capture has no forwarding hop, so matched == forwarded.
+			PacketsMatched:   stats.PacketsForwarded,
 			PacketsForwarded: stats.PacketsForwarded,
 			PacketsDropped:   stats.PacketsDropped,
 			ActiveFilters:    activeFilters,

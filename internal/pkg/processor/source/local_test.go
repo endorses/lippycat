@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,6 +78,24 @@ func TestLocalSource_Stats(t *testing.T) {
 	assert.Equal(t, uint64(0), stats.PacketsDropped)
 	assert.Equal(t, uint64(0), stats.BytesReceived)
 	assert.Equal(t, uint64(0), stats.BatchesReceived)
+}
+
+func TestLocalSource_Stats_IncludesCaptureBufferDrops(t *testing.T) {
+	s := NewLocalSource(DefaultLocalSourceConfig())
+
+	pb := capture.NewPacketBuffer(t.Context(), 1)
+	defer pb.Close()
+	s.packetBuffer.Store(pb)
+
+	// Nothing drains the buffer, so sends overflow into the drop counter.
+	for i := 0; i < 100; i++ {
+		pb.Send(buildUDPPacket(t, 12345, "not sip"))
+	}
+	require.Positive(t, pb.GetDropped())
+
+	s.stats.AddDropped(5) // batch channel overflow
+
+	assert.Equal(t, uint64(pb.GetDropped())+5, s.Stats().PacketsDropped)
 }
 
 func TestLocalSource_SetBPFFilter_BeforeStart(t *testing.T) {

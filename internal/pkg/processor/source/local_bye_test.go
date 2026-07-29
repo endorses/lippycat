@@ -40,6 +40,11 @@ func (f *inviteOnlyFilter) MatchPacketWithIDs(packet gopacket.Packet) (bool, []s
 
 func buildUDPSIPPacket(t *testing.T, payload string) capture.PacketInfo {
 	t.Helper()
+	return buildUDPPacket(t, 5060, payload)
+}
+
+func buildUDPPacket(t *testing.T, port layers.UDPPort, payload string) capture.PacketInfo {
+	t.Helper()
 	eth := &layers.Ethernet{
 		SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 1},
 		DstMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 2},
@@ -52,7 +57,7 @@ func buildUDPSIPPacket(t *testing.T, payload string) capture.PacketInfo {
 		SrcIP:      net.ParseIP("2a03:9ec0::1"),
 		DstIP:      net.ParseIP("2a03:9ec0::2"),
 	}
-	udp := &layers.UDP{SrcPort: 5060, DstPort: 5060}
+	udp := &layers.UDP{SrcPort: port, DstPort: port}
 	require.NoError(t, udp.SetNetworkLayerForChecksum(ip6))
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
@@ -93,13 +98,14 @@ func TestLocalSource_ForwardsInDialogBYEForMatchedCall(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.ctx = ctx
-	s.packetBuffer = capture.NewPacketBuffer(ctx, 100)
+	packetBuffer := capture.NewPacketBuffer(ctx, 100)
+	s.packetBuffer.Store(packetBuffer)
 
 	s.wg.Add(1)
 	go s.batchingLoop()
 
-	require.True(t, s.packetBuffer.Send(buildUDPSIPPacket(t, invite)))
-	require.True(t, s.packetBuffer.Send(buildUDPSIPPacket(t, bye)))
+	require.True(t, packetBuffer.Send(buildUDPSIPPacket(t, invite)))
+	require.True(t, packetBuffer.Send(buildUDPSIPPacket(t, bye)))
 
 	// Collect forwarded packets for our call.
 	methods := map[string]bool{}

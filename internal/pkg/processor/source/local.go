@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -73,8 +74,8 @@ type LocalSource struct {
 	// Configuration
 	config LocalSourceConfig
 
-	// Capture state
-	packetBuffer  *capture.PacketBuffer
+	// Capture state (packetBuffer is atomic: Stats() reads it concurrently with Start())
+	packetBuffer  atomic.Pointer[capture.PacketBuffer]
 	captureCtx    context.Context
 	captureCancel context.CancelFunc
 
@@ -314,7 +315,7 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	}()
 
 	// Create packet buffer
-	s.packetBuffer = capture.NewPacketBuffer(s.ctx, s.config.BufferSize)
+	s.packetBuffer.Store(capture.NewPacketBuffer(s.ctx, s.config.BufferSize))
 
 	// Create capture context (separate from main context for restart support)
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
@@ -336,8 +337,8 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	}
 
 	// Close packet buffer to signal batchingLoop
-	if s.packetBuffer != nil {
-		s.packetBuffer.Close()
+	if pb := s.packetBuffer.Load(); pb != nil {
+		pb.Close()
 	}
 
 	// Wait for goroutines
@@ -349,7 +350,7 @@ func (s *LocalSource) Start(ctx context.Context) error {
 	logger.Info("LocalSource stopped",
 		"packets_captured", s.stats.packetsCaptured.Load(),
 		"packets_forwarded", s.stats.packetsForwarded.Load(),
-		"packets_dropped", s.stats.packetsDropped.Load())
+		"packets_dropped", s.droppedTotal())
 
 	return nil
 }
@@ -376,7 +377,7 @@ func (s *LocalSource) capturePackets() {
 
 	// Use InitWithBuffer to capture packets into our buffer
 	// nil processor means we own the buffer and read from it externally
-	capture.InitWithBuffer(s.captureCtx, devices, s.config.BPFFilter, s.packetBuffer, nil, nil)
+	capture.InitWithBuffer(s.captureCtx, devices, s.config.BPFFilter, s.packetBuffer.Load(), nil, nil)
 }
 
 // batchingLoop reads from packet buffer, applies filtering, and creates batches.
@@ -400,9 +401,11 @@ const detectionWorkerChanBuffer = 4096
 func (s *LocalSource) batchingLoop() {
 	defer s.wg.Done()
 
+	packetBuffer := s.packetBuffer.Load()
+
 	numWorkers := getDetectionWorkerCount()
 	if numWorkers <= 1 {
-		s.batchingWorker(s.packetBuffer.Receive())
+		s.batchingWorker(packetBuffer.Receive())
 		return
 	}
 
@@ -418,7 +421,7 @@ func (s *LocalSource) batchingLoop() {
 		}(workerChans[i])
 	}
 
-	for pktInfo := range s.packetBuffer.Receive() {
+	for pktInfo := range packetBuffer.Receive() {
 		idx := 0
 		if pkt := pktInfo.Packet; pkt != nil {
 			netLayer := pkt.NetworkLayer()
@@ -688,7 +691,7 @@ func (s *LocalSource) sendBatch() {
 		Stats: &data.BatchStats{
 			TotalCaptured:   s.stats.packetsCaptured.Load(),
 			FilteredMatched: s.stats.packetsForwarded.Load(),
-			Dropped:         s.stats.packetsDropped.Load(),
+			Dropped:         s.droppedTotal(),
 		},
 	}
 
@@ -718,7 +721,18 @@ func (s *LocalSource) Batches() <-chan *PacketBatch {
 
 // Stats returns current capture statistics.
 func (s *LocalSource) Stats() Stats {
-	return s.stats.Snapshot()
+	st := s.stats.Snapshot()
+	st.PacketsDropped = s.droppedTotal()
+	return st
+}
+
+// droppedTotal returns capture buffer overflow (regular + SIP) plus batch channel overflow.
+func (s *LocalSource) droppedTotal() uint64 {
+	dropped := s.stats.packetsDropped.Load()
+	if pb := s.packetBuffer.Load(); pb != nil {
+		dropped += uint64(pb.GetDropped()) + uint64(pb.GetSIPDropped()) // #nosec G115
+	}
+	return dropped
 }
 
 // SourceID returns the source identifier for this local capture.

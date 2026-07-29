@@ -296,8 +296,11 @@ func (p *Processor) GetHunterStatus(ctx context.Context, req *management.StatusR
 			ConnectedDurationSec: durationSec,
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
-				PacketsCaptured:  h.PacketsCaptured,  // From hunter's heartbeat stats
-				PacketsForwarded: h.PacketsForwarded, // From hunter's heartbeat stats
+				PacketsCaptured:  h.PacketsCaptured, // From hunter's heartbeat stats
+				PacketsMatched:   h.PacketsMatched,
+				PacketsForwarded: h.PacketsForwarded,
+				PacketsDropped:   h.PacketsDropped,
+				BufferBytes:      h.BufferBytes,
 				ActiveFilters:    h.ActiveFilters,
 				CpuPercent:       h.CpuPercent,
 				MemoryRssBytes:   h.MemoryRssBytes,
@@ -533,8 +536,14 @@ func (p *Processor) GetTopology(ctx context.Context, req *management.TopologyReq
 			LastHeartbeatNs:      h.LastHeartbeat,
 			Stats: &management.HunterStats{
 				PacketsCaptured:  h.PacketsCaptured,
+				PacketsMatched:   h.PacketsMatched,
 				PacketsForwarded: h.PacketsForwarded,
+				PacketsDropped:   h.PacketsDropped,
+				BufferBytes:      h.BufferBytes,
 				ActiveFilters:    h.ActiveFilters,
+				CpuPercent:       h.CpuPercent,
+				MemoryRssBytes:   h.MemoryRssBytes,
+				MemoryLimitBytes: h.MemoryLimitBytes,
 			},
 			Interfaces:   h.Interfaces,
 			Capabilities: h.Capabilities,

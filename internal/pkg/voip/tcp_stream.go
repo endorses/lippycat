@@ -68,6 +68,18 @@ type bufferedSIPStream struct {
 // Each TCP segment creates one entry, so this should handle bursts.
 const streamBufferSize = 64
 
+// discardStream is returned by the factory when the voip.max_streams cap is hit.
+// It satisfies reassembly.Stream without allocating buffers or goroutines.
+type discardStream struct{}
+
+func (d *discardStream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection, nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
+	return false
+}
+
+func (d *discardStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {}
+
+func (d *discardStream) ReassemblyComplete(ac reassembly.AssemblerContext) bool { return true }
+
 // newBufferedSIPStream creates a new buffered stream that implements reassembly.Stream.
 // The stream immediately starts a processing goroutine.
 // Both netFlow (IP addresses) and transportFlow (ports) are needed to construct

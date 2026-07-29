@@ -19,9 +19,12 @@ func NewSourceAdapter(proc *Processor) *SourceAdapter {
 // SourceProcessResult implements the source.VoIPResult interface.
 // It wraps the processor's ProcessResult for use with LocalSource.
 type SourceProcessResult struct {
-	isVoIP   bool
-	callID   string
-	metadata *data.PacketMetadata
+	isVoIP          bool
+	callID          string
+	metadata        *data.PacketMetadata
+	filterEvaluated bool
+	filterMatched   bool
+	filterIDs       []string
 }
 
 // IsVoIPPacket implements source.VoIPResult.
@@ -39,6 +42,12 @@ func (r *SourceProcessResult) GetMetadata() *data.PacketMetadata {
 	return r.metadata
 }
 
+// FilterVerdict reports whether the application filter was already evaluated for
+// this packet and, if so, the verdict and any matched filter IDs.
+func (r *SourceProcessResult) FilterVerdict() (evaluated, matched bool, ids []string) {
+	return r.filterEvaluated, r.filterMatched, r.filterIDs
+}
+
 // Process implements the source.VoIPProcessor interface.
 // It returns a result that implements source.VoIPResult.
 func (a *SourceAdapter) Process(packet gopacket.Packet) *SourceProcessResult {
@@ -48,9 +57,12 @@ func (a *SourceAdapter) Process(packet gopacket.Packet) *SourceProcessResult {
 	}
 
 	return &SourceProcessResult{
-		isVoIP:   result.IsVoIP,
-		callID:   result.CallID,
-		metadata: result.Metadata,
+		isVoIP:          result.IsVoIP,
+		callID:          result.CallID,
+		metadata:        result.Metadata,
+		filterEvaluated: result.FilterEvaluated,
+		filterMatched:   result.FilterMatched,
+		filterIDs:       result.FilterIDs,
 	}
 }
 

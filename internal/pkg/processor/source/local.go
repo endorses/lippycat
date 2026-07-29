@@ -572,12 +572,25 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// Apply VoIP processing BEFORE filtering
 			// This ensures RTP packets associated with calls are detected
 			// before the application filter can drop them
+			// The VoIP processor already evaluates the application filter while
+			// detecting SIP, so reuse its verdict rather than matching again.
 			var isVoIPPacket bool
+			var reuseVerdict, reuseMatched bool
+			var reuseIDs []string
 			if voipProc != nil {
-				if result := voipProc.Process(pktInfo.Packet); result != nil && result.IsVoIPPacket() {
-					pbPkt.Metadata = result.GetMetadata()
-					isVoIPPacket = true
+				if result := voipProc.Process(pktInfo.Packet); result != nil {
+					reuseVerdict, reuseMatched, reuseIDs = result.FilterVerdict()
+					if result.IsVoIPPacket() {
+						pbPkt.Metadata = result.GetMetadata()
+						isVoIPPacket = true
+					}
 				}
+			}
+			matchFilter := func() (bool, []string) {
+				if reuseVerdict {
+					return reuseMatched, reuseIDs
+				}
+				return filter.MatchPacketWithIDs(pktInfo.Packet)
 			}
 
 			// Apply DNS processing if enabled and not a VoIP packet
@@ -599,14 +612,14 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			var matchedFilterIDs []string
 			if filter != nil && !isVoIPPacket {
 				// Non-VoIP: filter decides pass/drop
-				matched, filterIDs := filter.MatchPacketWithIDs(pktInfo.Packet)
+				matched, filterIDs := matchFilter()
 				if !matched {
 					continue
 				}
 				matchedFilterIDs = filterIDs
 			} else if filter != nil && isVoIPPacket {
 				// VoIP: filter decides pass/drop, with cache fallback for RTP
-				matched, filterIDs := filter.MatchPacketWithIDs(pktInfo.Packet)
+				matched, filterIDs := matchFilter()
 
 				if matched {
 					matchedFilterIDs = filterIDs

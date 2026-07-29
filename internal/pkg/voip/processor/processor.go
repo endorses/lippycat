@@ -46,6 +46,16 @@ type ProcessResult struct {
 
 	// CallMetadata contains extracted SIP header information (for SIP packets only).
 	CallMetadata *CallMetadata
+
+	// FilterEvaluated reports that the application filter was already applied here;
+	// callers can reuse the verdict instead of matching the same packet again.
+	FilterEvaluated bool
+
+	// FilterMatched is the verdict, valid only when FilterEvaluated is true.
+	FilterMatched bool
+
+	// FilterIDs holds the matched filter IDs, populated only when NeedFilterIDs is set.
+	FilterIDs []string
 }
 
 // PacketType indicates the type of VoIP packet.
@@ -97,6 +107,9 @@ type CallMetadata struct {
 type ApplicationFilter interface {
 	// MatchPacket returns true if the packet matches any active filter.
 	MatchPacket(packet gopacket.Packet) bool
+
+	// MatchPacketWithIDs also returns the IDs of the filters that matched.
+	MatchPacketWithIDs(packet gopacket.Packet) (bool, []string)
 }
 
 // Config contains configuration for the VoIPProcessor.
@@ -117,6 +130,11 @@ type Config struct {
 	// ApplicationFilter is an optional filter for call selection.
 	// When set, only SIP packets matching the filter will be tracked.
 	ApplicationFilter ApplicationFilter
+
+	// NeedFilterIDs makes the processor collect matched filter IDs (required for
+	// LI correlation). Without it the cheaper boolean match is used, which can
+	// also take the GPU path.
+	NeedFilterIDs bool
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -139,7 +157,8 @@ type Processor struct {
 	mu           sync.RWMutex
 
 	// Optional application filter for call selection
-	appFilter ApplicationFilter
+	appFilter     ApplicationFilter
+	needFilterIDs bool
 
 	// Janitor for cleanup
 	janitorCtx    chan struct{}
@@ -164,11 +183,12 @@ func New(cfg Config) *Processor {
 	}
 
 	p := &Processor{
-		config:       cfg,
-		calls:        make(map[string]*callState),
-		portToCallID: make(map[string][]string),
-		appFilter:    cfg.ApplicationFilter,
-		janitorCtx:   make(chan struct{}),
+		config:        cfg,
+		calls:         make(map[string]*callState),
+		portToCallID:  make(map[string][]string),
+		appFilter:     cfg.ApplicationFilter,
+		needFilterIDs: cfg.NeedFilterIDs,
+		janitorCtx:    make(chan struct{}),
 	}
 
 	// Start janitor goroutine for cleanup

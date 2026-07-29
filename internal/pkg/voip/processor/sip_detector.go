@@ -42,16 +42,33 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		return nil
 	}
 
-	// Check if this packet matches the application filter (if set)
+	// Check if this packet matches the application filter (if set).
+	// The verdict is carried on the result so callers do not re-match the packet.
+	var filterEvaluated, filterMatched bool
+	var filterIDs []string
+	if p.appFilter != nil {
+		filterEvaluated = true
+		if p.needFilterIDs {
+			filterMatched, filterIDs = p.appFilter.MatchPacketWithIDs(packet)
+		} else {
+			filterMatched = p.appFilter.MatchPacket(packet)
+		}
+	}
+
 	// If filter is set and packet doesn't match, don't track this call
-	if p.appFilter != nil && !p.appFilter.MatchPacket(packet) {
+	if filterEvaluated && !filterMatched {
 		// Check if this call is already being tracked (subsequent SIP messages for matched calls)
 		p.mu.RLock()
 		_, exists := p.calls[callID]
 		p.mu.RUnlock()
 		if !exists {
-			// New call that doesn't match filter - don't track it
-			return nil
+			// New call that doesn't match filter - don't track it, but report the
+			// verdict so the caller can drop the packet without matching again.
+			return &ProcessResult{
+				PacketType:      PacketTypeSIP,
+				CallID:          callID,
+				FilterEvaluated: true,
+			}
 		}
 		// Existing call - continue processing (allow BYE, ACK, etc.)
 	}
@@ -134,11 +151,14 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	}
 
 	return &ProcessResult{
-		IsVoIP:       true,
-		PacketType:   PacketTypeSIP,
-		CallID:       callID,
-		Metadata:     pbMetadata,
-		CallMetadata: metadata,
+		IsVoIP:          true,
+		PacketType:      PacketTypeSIP,
+		CallID:          callID,
+		Metadata:        pbMetadata,
+		CallMetadata:    metadata,
+		FilterEvaluated: filterEvaluated,
+		FilterMatched:   filterMatched,
+		FilterIDs:       filterIDs,
 	}
 }
 

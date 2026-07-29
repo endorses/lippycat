@@ -542,10 +542,12 @@ func readAllPacketsFromDevice(dev pcaptypes.PcapInterface, filter string) ([]Pac
 		// Handle ESP with NULL cipher - common in IMS/VoLTE where ESP transport
 		// mode provides integrity without encryption. Must run after VXLAN
 		// decapsulation so it sees the inner packets from VXLAN tunnels.
-		if inner, ok := decapsulateESPNull(newPacket); ok {
-			newPacket = inner
-		} else if inner, ok := decapsulateIPv6FragmentESP(newPacket); ok {
-			newPacket = inner
+		if ESPDecapEnabled() {
+			if inner, ok := decapsulateESPNull(newPacket); ok {
+				newPacket = inner
+			} else if inner, ok := decapsulateIPv6FragmentESP(newPacket); ok {
+				newPacket = inner
+			}
 		}
 
 		packets = append(packets, PacketInfo{

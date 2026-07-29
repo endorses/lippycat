@@ -4,7 +4,18 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/endorses/lippycat/internal/pkg/capture"
 )
+
+// withESPClause ORs the ESP clause into filter, but only when ESP decapsulation
+// is enabled. Capturing ESP is pointless (and costly) when nothing decapsulates it.
+func withESPClause(filter string) string {
+	if !capture.ESPDecapEnabled() {
+		return filter
+	}
+	return fmt.Sprintf("%s or %s", filter, ESPClause)
+}
 
 // Default RTP port range constants (exported for documentation/testing)
 const (
@@ -98,14 +109,14 @@ func (b *VoIPFilterBuilder) Build(config VoIPFilterConfig) string {
 			if config.BaseFilter != "" {
 				// Add fragment clause to capture fragmented UDP packets, and
 				// the ESP clause to admit IPsec ESP (e.g. ESP-NULL IMS SMS).
-				return fmt.Sprintf("((%s) and udp) or %s or %s", config.BaseFilter, IPFragmentClause, ESPClause)
+				return withESPClause(fmt.Sprintf("((%s) and udp) or %s", config.BaseFilter, IPFragmentClause))
 			}
 			// udp alone won't capture subsequent fragments or ESP - add both clauses
-			return fmt.Sprintf("udp or %s or %s", IPFragmentClause, ESPClause)
+			return withESPClause(fmt.Sprintf("udp or %s", IPFragmentClause))
 		}
 		if config.BaseFilter != "" {
 			// Add fragment and ESP clauses to base filter
-			return fmt.Sprintf("(%s) or %s or %s", config.BaseFilter, IPFragmentClause, ESPClause)
+			return withESPClause(fmt.Sprintf("(%s) or %s", config.BaseFilter, IPFragmentClause))
 		}
 		return ""
 	}
@@ -157,7 +168,7 @@ func (b *VoIPFilterBuilder) Build(config VoIPFilterConfig) string {
 	// The ESP clause is required because ESP packets have no outer UDP/TCP port
 	// for the SIP-port optimization to match; without it the kernel BPF drops them
 	// before decapsulateESPNull can run.
-	voipFilter = fmt.Sprintf("(%s) or %s or %s", voipFilter, IPFragmentClause, ESPClause)
+	voipFilter = withESPClause(fmt.Sprintf("(%s) or %s", voipFilter, IPFragmentClause))
 
 	// 6. Combine with base filter if present
 	if config.BaseFilter != "" {

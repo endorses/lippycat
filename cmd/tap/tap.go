@@ -161,8 +161,9 @@ var (
 	tlsKeylogDir string
 
 	// ESP-NULL decapsulation flags
-	espNull    bool
-	espICVSize int
+	espNull      bool
+	espHeuristic bool
+	espICVSize   int
 )
 
 func init() {
@@ -179,6 +180,7 @@ func init() {
 
 	// ESP-NULL Decapsulation (persistent for voip subcommand)
 	TapCmd.PersistentFlags().BoolVar(&espNull, "esp-null", false, "Assume all ESP traffic is NULL-encrypted (skip content heuristics)")
+	TapCmd.PersistentFlags().BoolVar(&espHeuristic, "esp-heuristic", false, "Detect ESP-NULL traffic by sniffing payload content (off by default)")
 	TapCmd.PersistentFlags().IntVar(&espICVSize, "esp-icv-size", -1, "ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires --esp-null")
 
 	// ============================================================
@@ -283,6 +285,7 @@ func init() {
 
 	// ESP-NULL decapsulation
 	_ = viper.BindPFlag("esp_null", TapCmd.PersistentFlags().Lookup("esp-null"))
+	_ = viper.BindPFlag("esp_heuristic", TapCmd.PersistentFlags().Lookup("esp-heuristic"))
 	_ = viper.BindPFlag("esp_icv_size", TapCmd.PersistentFlags().Lookup("esp-icv-size"))
 
 	// Management interface

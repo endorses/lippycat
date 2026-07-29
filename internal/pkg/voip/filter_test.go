@@ -3,8 +3,10 @@ package voip
 import (
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,10 +62,11 @@ func TestNewVoIPFilterBuilder(t *testing.T) {
 // docs/debug/rtp-sip-correlation.md for details.
 func TestVoIPFilterBuilder_Build(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
+	enableESPDecap(t)
 
-	// Helper constant for readability. The builder always OR's the ESP clause
-	// (IPsec ESP / ESP-NULL IMS SMS) immediately after the IP fragment clause,
-	// so the trailing clause is "<fragment> or <esp>".
+	// Helper constant for readability. With ESP decapsulation enabled the builder
+	// OR's the ESP clause (IPsec ESP / ESP-NULL IMS SMS) immediately after the IP
+	// fragment clause, so the trailing clause is "<fragment> or <esp>".
 	frag := IPFragmentClause + " or " + ESPClause
 
 	tests := []struct {
@@ -582,6 +585,7 @@ func TestValidatePortRange(t *testing.T) {
 // TestVoIPFilterBuilder_Build_EdgeCases tests edge cases not covered in the main test
 func TestVoIPFilterBuilder_Build_EdgeCases(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
+	enableESPDecap(t)
 	frag := IPFragmentClause + " or " + ESPClause
 
 	t.Run("empty port list has no effect", func(t *testing.T) {
@@ -633,8 +637,20 @@ func TestESPClauseConstant(t *testing.T) {
 	assert.Equal(t, "(ip proto 50 or ip6 proto 50)", ESPClause)
 }
 
-// TestVoIPFilterBuilder_AdmitsESP verifies every non-empty filter the builder
-// produces includes the ESP clause, regardless of the --sip-port optimization.
+// enableESPDecap turns on ESP decapsulation for the duration of a test.
+func enableESPDecap(t *testing.T) {
+	t.Helper()
+	viper.Set("esp_null", true)
+	capture.ResetESPConfigCache()
+	t.Cleanup(func() {
+		viper.Set("esp_null", false)
+		capture.ResetESPConfigCache()
+	})
+}
+
+// TestVoIPFilterBuilder_AdmitsESP verifies that ESP admission follows the
+// opt-in flag: every non-empty filter carries the ESP clause when ESP
+// decapsulation is enabled, and none do when it is off (the default).
 func TestVoIPFilterBuilder_AdmitsESP(t *testing.T) {
 	builder := NewVoIPFilterBuilder()
 	configs := []VoIPFilterConfig{
@@ -646,6 +662,12 @@ func TestVoIPFilterBuilder_AdmitsESP(t *testing.T) {
 		{BaseFilter: "host 10.0.0.1"},
 		{SIPPorts: []int{5060}, BaseFilter: "net 192.168.0.0/24"},
 	}
+	for _, cfg := range configs {
+		filter := builder.Build(cfg)
+		require.NotContains(t, filter, ESPClause, "ESP must not be admitted by default: %q", filter)
+	}
+
+	enableESPDecap(t)
 	for _, cfg := range configs {
 		filter := builder.Build(cfg)
 		require.Contains(t, filter, ESPClause, "filter must admit ESP: %q", filter)

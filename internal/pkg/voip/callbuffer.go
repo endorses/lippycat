@@ -56,11 +56,24 @@ func (cb *CallBuffer) AddRTPPacket(packet gopacket.Packet) {
 	cb.rtpPackets = append(cb.rtpPackets, packet)
 }
 
-// GetAllPackets returns all buffered packets (SIP + RTP) in chronological order
+// GetAllPackets returns all buffered packets (SIP + RTP) without consuming them.
+// Callers that flush the buffer downstream must use DrainPackets instead,
+// otherwise a later flush re-emits packets that were already handled.
 func (cb *CallBuffer) GetAllPackets() []gopacket.Packet {
 	all := make([]gopacket.Packet, 0, len(cb.sipPackets)+len(cb.rtpPackets))
 	all = append(all, cb.sipPackets...)
 	all = append(all, cb.rtpPackets...)
+	return all
+}
+
+// DrainPackets returns all buffered packets (SIP + RTP) and empties the buffer.
+// Draining is what makes a flush idempotent: once a call is matched its packets
+// are handed to the caller exactly once, and every subsequent packet for that
+// call is written directly rather than accumulating for another flush.
+func (cb *CallBuffer) DrainPackets() []gopacket.Packet {
+	all := cb.GetAllPackets()
+	cb.sipPackets = cb.sipPackets[:0]
+	cb.rtpPackets = cb.rtpPackets[:0]
 	return all
 }
 

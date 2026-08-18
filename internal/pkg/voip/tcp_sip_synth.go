@@ -1,5 +1,3 @@
-//go:build hunter || tap || all
-
 package voip
 
 import (
@@ -18,7 +16,7 @@ import (
 // reassembled SIP message as the application payload of a well-formed
 // Ethernet/IP/TCP packet using the connection's real 5-tuple.
 //
-// This is used by the TCP SIP handlers (tap and hunter) so that each
+// This is used by all TCP SIP handlers (local, tap and hunter) so that each
 // reassembled SIP message on a persistent connection is an independently
 // matchable + forwardable unit: matching and forwarding operate on THIS
 // message rather than on the first raw packet buffered for the whole flow.

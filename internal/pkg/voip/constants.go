@@ -24,6 +24,7 @@ const (
 	DefaultJanitorCleanupInterval = 30 * time.Second   // How often to run cleanup
 	DefaultCallExpirationTime     = 3600 * time.Second // How long to keep calls in memory (1 hour)
 	DefaultStreamQueueBuffer      = 500                // Default stream queue buffer size
+	DefaultMaxFilenameLength      = 100                // Max chars of a sanitized Call-ID used in a per-call PCAP name
 
 	// TCP-specific defaults
 	DefaultTCPCleanupInterval    = 60 * time.Second  // How often to cleanup TCP resources

@@ -160,12 +160,34 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				SDPBody:           body,
 			}
 
-			// Buffer the SIP packet with link type for proper PCAP writing
-			globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface, pkt.LinkType)
+			// Buffer the SIP packet with link type for proper PCAP writing.
+			// Returns true once the call is matched, from which point every SIP
+			// packet of the call is written directly instead of buffered.
+			alreadyMatched := globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface, pkt.LinkType)
+
+			bodyBytes := StringToBytes(body)
+			hasSDP := BytesContains(bodyBytes, []byte("m=audio"))
+
+			if alreadyMatched {
+				// Call already passed the filter: write this packet now,
+				// whether or not it carries SDP.
+				injectPacketToVirtualInterface(pkt)
+
+				if viper.GetViper().GetBool("writeVoip") {
+					WriteSIP(callID, packet)
+				} else {
+					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
+				}
+
+				// A re-INVITE or delayed answer can move the media ports.
+				if hasSDP {
+					ExtractPortFromSdp(body, callID)
+				}
+				return
+			}
 
 			// Check filter if we have SDP (INVITE or 200 OK with m=audio)
-			bodyBytes := StringToBytes(body)
-			if BytesContains(bodyBytes, []byte("m=audio")) {
+			if hasSDP {
 				// Use callback-based filter check for flexible handling
 				matched := globalBufferMgr.CheckFilterWithCallback(
 					callID,

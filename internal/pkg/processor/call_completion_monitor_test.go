@@ -770,23 +770,26 @@ func TestCallCompletionMonitor_WaitsForRTPBeforeClosing(t *testing.T) {
 	}
 	aggregator.ProcessPacket(byePacket, "hunter-1")
 
-	// Wait for grace period to expire
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return monitor.GetPendingCount() > 0
+	}, 500*time.Millisecond, 10*time.Millisecond, "call should become pending closure")
 
 	// Call should still be pending (waiting for RTP in PCAP)
 	mu.Lock()
 	called := voipCommandCalled
 	mu.Unlock()
 	assert.False(t, called, "voipcommand should NOT have fired yet (waiting for RTP)")
-	assert.Greater(t, monitor.GetPendingCount(), 0, "Call should still be pending")
 
 	// Now write RTP to PCAP (simulates late-arriving RTP packets)
 	dummyRTPData := make([]byte, 100)
 	err = writer.WriteRTPPacket(time.Now(), dummyRTPData, 1) // LinkType 1 = Ethernet
 	require.NoError(t, err)
 
-	// Wait for next check interval
-	time.Sleep(100 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return voipCommandCalled
+	}, 500*time.Millisecond, 10*time.Millisecond, "voipcommand should fire after RTP is written")
 
 	// Now voipcommand should have fired
 	mu.Lock()
@@ -872,8 +875,11 @@ func TestCallCompletionMonitor_RTPWaitTimeout(t *testing.T) {
 	}
 	aggregator.ProcessPacket(byePacket, "hunter-1")
 
-	// Wait for timeout to expire (grace + RTP wait timeout)
-	time.Sleep(300 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return voipCommandCalled
+	}, 500*time.Millisecond, 10*time.Millisecond, "voipcommand should fire after RTP wait timeout")
 
 	// voipcommand should have fired due to timeout
 	mu.Lock()

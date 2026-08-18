@@ -118,6 +118,25 @@ type Manager struct {
 - `ActivateTask(task)` - Activate intercept via code (not X1)
 - `DeactivateTask(xid)` - Deactivate intercept
 
+### ADMF Reconciliation
+
+The ADMF is the source of truth for what may be intercepted, so `syncStateFromADMF`
+(startup) and `reconcileWithADMF` (periodic, default 5m) both **remove** local tasks
+and LI filters the ADMF no longer returns — an additive sync lets a lost
+`DeactivateTask` leave an intercept armed indefinitely, re-armed from disk on every
+restart.
+
+Teardown is suppressed when the picture may be wrong: on any `GetAllDetails` error
+(callers return before reaching it), on any task conversion error, and on a zero-task
+response while tasks are active locally. Periodic reconciliation also requires
+`ReconcileOrphanPolls` (default 2) consecutive agreeing polls; startup acts on the
+first response, since its state came off disk unverified. Every automatic
+deactivation is logged at WARN with the XID.
+
+Orphaned *filters* are swept only at startup, via the optional `FilterLister`
+capability on `FilterPusher`: filters outlive the registry across restarts, so an LI
+filter can exist with no task pointing at it. Non-LI filter IDs are never touched.
+
 ### Registry
 
 **File:** `registry.go`

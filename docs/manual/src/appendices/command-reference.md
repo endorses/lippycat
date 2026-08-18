@@ -190,7 +190,7 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 | `--li-admf-keepalive` | duration | `30s` | ADMF keepalive interval (0 = disabled) |
 | `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
 | `--li-admf-sync-timeout` | duration | `30s` | Timeout for startup state sync |
-| `--li-admf-reconcile-interval` | duration | `0` | Periodic ADMF reconciliation interval (0 = disabled) |
+| `--li-admf-reconcile-interval` | duration | `5m` | Periodic ADMF reconciliation interval (0 = disabled) |
 
 ---
 

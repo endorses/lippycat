@@ -52,6 +52,31 @@ type FilterPusher interface {
 	DeleteFilter(filterID string) error
 }
 
+// FilterLister is an optional FilterPusher capability reporting all installed
+// filter IDs, including ones restored from disk that this process did not
+// create. Startup reconciliation needs it: a persisted LI filter outlives the
+// registry, so no local task refers to it after a restart.
+type FilterLister interface {
+	ListFilterIDs() []string
+}
+
+// liFilterIDPrefix marks a filter as LI-owned: prefix + XID prefix + "-" + index.
+const liFilterIDPrefix = "li-"
+
+// liFilterXIDPrefix extracts the XID prefix from an LI filter ID
+// ("li-a1b2c3d4-0" -> "a1b2c3d4"). False for non-LI IDs.
+func liFilterXIDPrefix(filterID string) (string, bool) {
+	if !strings.HasPrefix(filterID, liFilterIDPrefix) {
+		return "", false
+	}
+	rest := filterID[len(liFilterIDPrefix):]
+	sep := strings.LastIndex(rest, "-")
+	if sep <= 0 || sep == len(rest)-1 {
+		return "", false
+	}
+	return rest[:sep], true
+}
+
 // NewFilterManager creates a new filter manager.
 //
 // The filterPusher is used to push filter updates to the processor's filter
@@ -296,7 +321,7 @@ func (m *FilterManager) targetToFilter(xid uuid.UUID, index int, target TargetId
 	}
 
 	// Generate a unique filter ID that includes the XID for traceability
-	filterID := fmt.Sprintf("li-%s-%d", xid.String()[:8], index)
+	filterID := fmt.Sprintf(liFilterIDPrefix+"%s-%d", xid.String()[:8], index)
 
 	return &management.Filter{
 		Id:          filterID,

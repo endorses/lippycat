@@ -77,7 +77,16 @@ type ManagerConfig struct {
 	// ReconcileInterval is the interval for periodic state reconciliation with ADMF.
 	// Set to 0 to disable periodic reconciliation.
 	ReconcileInterval time.Duration
+
+	// ReconcileOrphanPolls is how many consecutive reconciliation polls must
+	// agree a task is gone from the ADMF before it is torn down. Defaults to
+	// defaultReconcileOrphanPolls.
+	ReconcileOrphanPolls int
 }
+
+// defaultReconcileOrphanPolls trades one reconcile interval of over-collection
+// for immunity to single-poll flukes.
+const defaultReconcileOrphanPolls = 2
 
 // PacketProcessor is the callback for processing matched packets.
 // Called when a packet matches an active intercept task.
@@ -123,6 +132,11 @@ type Manager struct {
 	// stats tracks LI processing statistics.
 	stats ManagerStats
 
+	// orphanStreak counts consecutive polls in which a local task was absent
+	// from the ADMF response.
+	orphanMu     sync.Mutex
+	orphanStreak map[uuid.UUID]int
+
 	// stopChan signals shutdown.
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -143,9 +157,10 @@ type ManagerStats struct {
 // (e.g., EndTime expiration). This is used to notify ADMF via X1.
 func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback) *Manager {
 	m := &Manager{
-		config:   config,
-		filters:  NewFilterManager(config.FilterPusher),
-		stopChan: make(chan struct{}),
+		config:       config,
+		filters:      NewFilterManager(config.FilterPusher),
+		stopChan:     make(chan struct{}),
+		orphanStreak: make(map[uuid.UUID]int),
 	}
 
 	// Create X1 client if ADMF endpoint is configured.
@@ -402,6 +417,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	}
 
 	// Activate tasks.
+	snapshot := newADMFSnapshot()
 	if resp.ListOfTaskResponseDetails != nil {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
 			task, convErr := TaskResponseDetailsToInterceptTask(td)
@@ -410,8 +426,10 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 					"error", convErr,
 				)
 				taskErrors++
+				snapshot.convErrors++
 				continue
 			}
+			snapshot.tasks[task.XID] = true
 			if activateErr := m.ActivateTask(task); activateErr != nil {
 				// Task may already exist if sync is called multiple times.
 				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
@@ -427,14 +445,207 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 		}
 	}
 
+	// The ADMF defines what may be armed. Merging additively lets state that no
+	// ADMF ever authorised survive on disk and be re-armed every restart, so
+	// drop whatever the ADMF did not return.
+	removedTasks := m.removeOrphanedTasks(snapshot, false)
+	removedFilters := m.removeOrphanedLIFilters(snapshot)
+
 	logger.Info("ADMF state sync complete",
 		"tasks", taskCount,
 		"destinations", destCount,
 		"task_errors", taskErrors,
 		"destination_errors", destErrors,
+		"orphan_tasks_removed", removedTasks,
+		"orphan_filters_removed", removedFilters,
 	)
 
 	return nil
+}
+
+// admfSnapshot is one GetAllDetails response: the task XIDs it returned, plus
+// how many entries failed conversion.
+type admfSnapshot struct {
+	tasks      map[uuid.UUID]bool
+	convErrors int
+}
+
+func newADMFSnapshot() admfSnapshot {
+	return admfSnapshot{tasks: make(map[uuid.UUID]bool)}
+}
+
+// complete reports whether the snapshot can be trusted to say what the ADMF
+// does NOT have. A conversion error drops an XID for reasons unrelated to the
+// ADMF's intent, so a parsing bug must never deactivate a live warrant.
+func (s admfSnapshot) complete() bool { return s.convErrors == 0 }
+
+// removeOrphanedTasks deactivates local tasks the ADMF no longer has, so a lost
+// DeactivateTask cannot leave an intercept running without authorisation.
+//
+// requireStreak makes N consecutive polls agree before acting; startup passes
+// false because its local state came off disk and was never ADMF-checked.
+// A GetAllDetails failure never reaches here — callers return first.
+func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool) int {
+	if !snapshot.complete() {
+		logger.Warn("Reconciliation: incomplete ADMF response, skipping orphan removal",
+			"conversion_errors", snapshot.convErrors,
+			"admf_tasks", len(snapshot.tasks),
+		)
+		return 0
+	}
+
+	// Collect before deactivating: ListTasks holds the registry read lock for
+	// the callback, and DeactivateTask takes the write lock.
+	var orphans []uuid.UUID
+	var localActive int
+	m.registry.ListTasks(func(task *InterceptTask) bool {
+		if task.Status != TaskStatusActive && task.Status != TaskStatusPending {
+			return true
+		}
+		localActive++
+		if !snapshot.tasks[task.XID] {
+			orphans = append(orphans, task.XID)
+		}
+		return true
+	})
+
+	if len(orphans) == 0 {
+		m.clearOrphanStreaks()
+		return 0
+	}
+
+	// The ADMF recovery procedure truncates its tables and re-syncs, answering
+	// successfully with zero tasks meanwhile. Never disarm everything on that.
+	if len(snapshot.tasks) == 0 {
+		logger.Warn("Reconciliation: ADMF returned no tasks while tasks are active locally, "+
+			"keeping them (explicit DeactivateTask required to clear the last task)",
+			"local_active", localActive,
+		)
+		return 0
+	}
+
+	threshold := 1
+	if requireStreak {
+		threshold = m.orphanPollThreshold()
+	}
+
+	removed := 0
+	for _, xid := range m.recordOrphanStreaks(orphans, threshold) {
+		// Removing an intercept is auditable; never silent.
+		logger.Warn("Reconciliation: deactivating task absent from ADMF",
+			"xid", xid,
+			"admf_tasks", len(snapshot.tasks),
+		)
+		if err := m.DeactivateTask(xid); err != nil {
+			logger.Error("Reconciliation: failed to deactivate orphaned task",
+				"xid", xid,
+				"error", err,
+			)
+			continue
+		}
+		m.clearOrphanStreak(xid)
+		removed++
+	}
+	return removed
+}
+
+// removeOrphanedLIFilters deletes LI filters belonging to no task in the
+// snapshot. Startup-only: filters are reloaded from disk before the registry
+// exists, so an orphaned filter is armed with no task pointing at it — which is
+// what re-armed the stale filter across restarts.
+func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
+	lister, ok := m.config.FilterPusher.(FilterLister)
+	if !ok || !snapshot.complete() {
+		return 0
+	}
+
+	live := make(map[string]bool, len(snapshot.tasks))
+	for xid := range snapshot.tasks {
+		live[xid.String()[:8]] = true
+	}
+
+	var orphans []string
+	for _, id := range lister.ListFilterIDs() {
+		if prefix, isLI := liFilterXIDPrefix(id); isLI && !live[prefix] {
+			orphans = append(orphans, id)
+		}
+	}
+	if len(orphans) == 0 {
+		return 0
+	}
+
+	if len(snapshot.tasks) == 0 {
+		logger.Warn("Startup reconciliation: ADMF returned no tasks while LI filters are installed, "+
+			"keeping them (explicit DeactivateTask required)",
+			"li_filters", len(orphans),
+		)
+		return 0
+	}
+
+	removed := 0
+	for _, id := range orphans {
+		logger.Warn("Startup reconciliation: removing LI filter with no ADMF task", "filter_id", id)
+		if err := m.config.FilterPusher.DeleteFilter(id); err != nil {
+			logger.Error("Startup reconciliation: failed to remove orphaned LI filter",
+				"filter_id", id,
+				"error", err,
+			)
+			continue
+		}
+		removed++
+	}
+	return removed
+}
+
+func (m *Manager) orphanPollThreshold() int {
+	if m.config.ReconcileOrphanPolls > 0 {
+		return m.config.ReconcileOrphanPolls
+	}
+	return defaultReconcileOrphanPolls
+}
+
+// recordOrphanStreaks bumps each orphan's consecutive-absence count, resets
+// tasks that reappeared, and returns those that have reached threshold.
+func (m *Manager) recordOrphanStreaks(orphans []uuid.UUID, threshold int) []uuid.UUID {
+	m.orphanMu.Lock()
+	defer m.orphanMu.Unlock()
+
+	current := make(map[uuid.UUID]bool, len(orphans))
+	for _, xid := range orphans {
+		current[xid] = true
+	}
+	for xid := range m.orphanStreak {
+		if !current[xid] {
+			delete(m.orphanStreak, xid)
+		}
+	}
+
+	var due []uuid.UUID
+	for _, xid := range orphans {
+		m.orphanStreak[xid]++
+		if m.orphanStreak[xid] >= threshold {
+			due = append(due, xid)
+			continue
+		}
+		logger.Info("Reconciliation: task absent from ADMF, awaiting confirmation",
+			"xid", xid,
+			"polls", m.orphanStreak[xid],
+			"required", threshold,
+		)
+	}
+	return due
+}
+
+func (m *Manager) clearOrphanStreaks() {
+	m.orphanMu.Lock()
+	defer m.orphanMu.Unlock()
+	clear(m.orphanStreak)
+}
+
+func (m *Manager) clearOrphanStreak(xid uuid.UUID) {
+	m.orphanMu.Lock()
+	defer m.orphanMu.Unlock()
+	delete(m.orphanStreak, xid)
 }
 
 // startReconciliation runs periodic state reconciliation with the ADMF.
@@ -482,7 +693,7 @@ func (m *Manager) reconcileWithADMF() {
 	}
 
 	// Build set of ADMF task XIDs.
-	admfTasks := make(map[uuid.UUID]bool)
+	snapshot := newADMFSnapshot()
 	var activated int
 	if resp.ListOfTaskResponseDetails != nil {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
@@ -491,9 +702,10 @@ func (m *Manager) reconcileWithADMF() {
 				logger.Warn("Reconciliation: failed to convert ADMF task, skipping",
 					"error", convErr,
 				)
+				snapshot.convErrors++
 				continue
 			}
-			admfTasks[task.XID] = true
+			snapshot.tasks[task.XID] = true
 
 			// If task is in ADMF but not in local registry, activate it.
 			if _, getErr := m.registry.GetTaskDetails(task.XID); getErr != nil {
@@ -523,30 +735,19 @@ func (m *Manager) reconcileWithADMF() {
 		}
 	}
 
-	// Find tasks in local registry but not in ADMF (log warning only).
-	var localOnly int
-	m.registry.ListTasks(func(task *InterceptTask) bool {
-		if task.Status == TaskStatusActive || task.Status == TaskStatusPending {
-			if !admfTasks[task.XID] {
-				localOnly++
-				logger.Warn("Reconciliation: task exists locally but not in ADMF",
-					"xid", task.XID,
-					"status", task.Status.String(),
-				)
-			}
-		}
-		return true
-	})
+	// Tear down tasks the ADMF no longer has, rather than only warning: an
+	// intercept the ADMF has dropped is running without authorisation.
+	deactivated := m.removeOrphanedTasks(snapshot, true)
 
-	if activated > 0 || localOnly > 0 {
+	if activated > 0 || deactivated > 0 {
 		logger.Info("ADMF reconciliation complete",
 			"activated", activated,
-			"local_only", localOnly,
-			"admf_tasks", len(admfTasks),
+			"deactivated", deactivated,
+			"admf_tasks", len(snapshot.tasks),
 		)
 	} else {
 		logger.Debug("ADMF reconciliation complete, no discrepancies",
-			"admf_tasks", len(admfTasks),
+			"admf_tasks", len(snapshot.tasks),
 		)
 	}
 }

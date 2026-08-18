@@ -129,7 +129,7 @@ processor:
     # ADMF state synchronization
     admf_sync_on_startup: true    # Query ADMF for state on startup
     admf_sync_timeout: "30s"      # Timeout for startup sync
-    admf_reconcile_interval: "0"  # Periodic reconciliation (0 = disabled)
+    admf_reconcile_interval: "5m" # Periodic reconciliation (0 = disabled)
 
     # X2/X3 delivery — sends intercept data to MDF
     delivery_tls_cert: "/etc/lippycat/li/delivery.crt"
@@ -339,7 +339,7 @@ The sync is designed for graceful degradation:
 |------|------|---------|-------------|
 | `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
 | `--li-admf-sync-timeout` | duration | `30s` | Timeout for the startup sync request |
-| `--li-admf-reconcile-interval` | duration | `0` | Periodic reconciliation interval (0 = disabled) |
+| `--li-admf-reconcile-interval` | duration | `5m` | Periodic ADMF reconciliation interval (0 = disabled) |
 
 To disable startup sync (for example, in environments where the ADMF always pushes state):
 
@@ -347,13 +347,24 @@ To disable startup sync (for example, in environments where the ADMF always push
 --li-admf-sync-on-startup=false
 ```
 
-**Periodic reconciliation** can be enabled to guard against configuration drift during long uptimes. When configured, the processor periodically queries the ADMF and compares the response with its local state:
+**Periodic reconciliation** guards against configuration drift during long uptimes, and is **enabled by default (5m)**. The processor periodically queries the ADMF and reconciles its local state against the response:
 
 - Tasks present in the ADMF but missing locally are activated.
-- Tasks present locally but missing from the ADMF are logged as warnings (they are not automatically deactivated, since this could indicate a transient ADMF issue).
+- Tasks present locally but missing from the ADMF are deactivated, and their filters removed. A `DeactivateTask` that never arrives would otherwise leave an intercept running with no authorisation and no expiry.
+
+Teardown is deliberately conservative, because wrongly removing a live warrant is as serious as over-collecting. Nothing is removed when:
+
+- the ADMF request fails (an outage never reaches the teardown path);
+- any task in the response fails to parse, since the picture is then incomplete;
+- the response contains zero tasks while tasks are active locally — the ADMF recovery procedure answers this way while its tables are rebuilt, so clearing the last task requires an explicit `DeactivateTask`.
+
+A task must also be absent from two consecutive polls before it is removed (`ReconcileOrphanPolls`), which costs one interval of over-collection and removes single-poll flukes. Every automatic deactivation is logged at WARN with the XID.
+
+The same reconciliation runs during startup sync, where it acts on the first response: filters persist to disk and are reloaded before the registry exists, so a stale filter would otherwise be re-armed on every restart. Filters not owned by LI are never touched.
 
 ```bash
---li-admf-reconcile-interval 5m   # Reconcile every 5 minutes
+--li-admf-reconcile-interval 5m   # Reconcile every 5 minutes (default)
+--li-admf-reconcile-interval 0    # Disable; drift is then never corrected
 ```
 
 YAML configuration:
@@ -363,7 +374,7 @@ processor:
   li:
     admf_sync_on_startup: true
     admf_sync_timeout: "30s"
-    admf_reconcile_interval: "0"   # Disabled by default
+    admf_reconcile_interval: "5m"  # 0 disables; drift is then never corrected
 ```
 
 ### X1 Error Codes

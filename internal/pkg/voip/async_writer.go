@@ -37,12 +37,16 @@ type AsyncWriterPool struct {
 	workerTimeout time.Duration
 
 	// Worker management
-	ctx        context.Context
-	cancel     context.CancelFunc
-	workerWg   sync.WaitGroup
-	writeQueue chan PacketWriteRequest
-	started    atomic.Bool
-	stopped    atomic.Bool
+	ctx      context.Context
+	cancel   context.CancelFunc
+	workerWg sync.WaitGroup
+	// writeQueues holds one queue per worker. Requests are sharded by Call-ID
+	// so every packet of a call is written by the same worker, which is what
+	// keeps packet order in the per-call PCAP. A single shared queue drained by
+	// N workers reorders packets within a call.
+	writeQueues []chan PacketWriteRequest
+	started     atomic.Bool
+	stopped     atomic.Bool
 
 	// Statistics
 	stats AsyncWriterStats
@@ -73,13 +77,23 @@ func NewAsyncWriterPool(workerCount, bufferSize int) *AsyncWriterPool {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Each queue gets the full configured depth rather than a 1/workerCount
+	// slice of it: queues drop on overflow, and splitting would make a single
+	// busy call hit the drop threshold workerCount times sooner. The extra
+	// capacity costs only queue slots — the packet data behind them is
+	// in-flight either way.
+	writeQueues := make([]chan PacketWriteRequest, workerCount)
+	for i := range writeQueues {
+		writeQueues[i] = make(chan PacketWriteRequest, bufferSize)
+	}
+
 	return &AsyncWriterPool{
 		workerCount:   workerCount,
 		bufferSize:    bufferSize,
 		workerTimeout: 5 * time.Second,
 		ctx:           ctx,
 		cancel:        cancel,
-		writeQueue:    make(chan PacketWriteRequest, bufferSize),
+		writeQueues:   writeQueues,
 		onError: func(callID string, err error) {
 			logger.Error("Async write error",
 				"call_id", SanitizeCallIDForLogging(callID),
@@ -115,10 +129,15 @@ func (p *AsyncWriterPool) Stop() error {
 
 	logger.Info("Stopping async writer pool")
 	p.stopped.Store(true)
-	p.cancel()
 
-	// Close write queue to signal workers to stop
-	close(p.writeQueue)
+	// Close the write queues and let the workers drain what is still queued.
+	// Cancelling the context here instead would race the workers and silently
+	// discard packets that were accepted for writing, losing the tail of every
+	// capture. The context is only cancelled once draining is done (or has
+	// timed out), as an escape hatch for a wedged writer.
+	for _, q := range p.writeQueues {
+		close(q)
+	}
 
 	// Wait for all workers to finish with timeout
 	done := make(chan struct{})
@@ -131,8 +150,9 @@ func (p *AsyncWriterPool) Stop() error {
 	case <-done:
 		logger.Info("Async writer pool stopped gracefully")
 	case <-time.After(10 * time.Second):
-		logger.Warn("Async writer pool stop timeout")
+		logger.Warn("Async writer pool stop timeout, abandoning queued packets")
 	}
+	p.cancel()
 
 	return nil
 }
@@ -152,7 +172,7 @@ func (p *AsyncWriterPool) WritePacketAsync(callID string, packet gopacket.Packet
 
 	// Try to queue the request
 	select {
-	case p.writeQueue <- req:
+	case p.queueFor(callID) <- req:
 		p.stats.PacketsQueued.Add(1)
 		return nil
 	default:
@@ -180,7 +200,7 @@ func (p *AsyncWriterPool) WritePacketSync(callID string, packet gopacket.Packet,
 
 	// Try to queue the request
 	select {
-	case p.writeQueue <- req:
+	case p.queueFor(callID) <- req:
 		p.stats.PacketsQueued.Add(1)
 		// Wait for result
 		select {
@@ -197,7 +217,23 @@ func (p *AsyncWriterPool) WritePacketSync(callID string, packet gopacket.Packet,
 	}
 }
 
-// worker processes write requests from the queue
+// queueFor maps a Call-ID to a fixed worker queue (FNV-1a) so that all writes
+// for one call are serialised through a single worker and land in the per-call
+// PCAP in capture order.
+func (p *AsyncWriterPool) queueFor(callID string) chan PacketWriteRequest {
+	const (
+		fnvOffset32 = 2166136261
+		fnvPrime32  = 16777619
+	)
+	h := uint32(fnvOffset32)
+	for i := 0; i < len(callID); i++ {
+		h ^= uint32(callID[i])
+		h *= fnvPrime32
+	}
+	return p.writeQueues[h%uint32(len(p.writeQueues))]
+}
+
+// worker processes write requests from its own queue
 func (p *AsyncWriterPool) worker(workerID int) {
 	defer p.workerWg.Done()
 	p.stats.WorkersActive.Add(1)
@@ -205,13 +241,15 @@ func (p *AsyncWriterPool) worker(workerID int) {
 
 	logger.Debug("Async writer worker started", "worker_id", workerID)
 
+	queue := p.writeQueues[workerID]
+
 	for {
 		select {
 		case <-p.ctx.Done():
 			logger.Debug("Async writer worker stopping due to context cancellation", "worker_id", workerID)
 			return
 
-		case req, ok := <-p.writeQueue:
+		case req, ok := <-queue:
 			if !ok {
 				logger.Debug("Async writer worker stopping due to closed queue", "worker_id", workerID)
 				return

@@ -136,45 +136,36 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		SDPBody:           body,
 	}
 
-	// Buffer the SIP packet with link type for proper PCAP writing
-	h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, pkt.LinkType)
+	// Buffer the SIP packet with link type for proper PCAP writing.
+	// Returns true once the call is matched, from which point every SIP packet
+	// of the call is forwarded directly instead of buffered.
+	alreadyMatched := h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, pkt.LinkType)
 
-	// Check if this is a call termination message (BYE or CANCEL)
+	bodyBytes := StringToBytes(body)
+	hasSDP := BytesContains(bodyBytes, []byte("m=audio"))
 	method := metadata.Method
-	if method == "BYE" || method == "CANCEL" {
-		// For termination messages, only forward if call is already tracked
-		if h.bufferMgr != nil && h.bufferMgr.IsCallMatched(callID) {
-			// Create protobuf metadata for termination message
-			pbMetadata := &data.PacketMetadata{
-				Sip: &data.SIPMetadata{
-					CallId:            callID,
-					FromUser:          extractUserFromSIPURI(metadata.From),
-					ToUser:            extractUserFromSIPURI(metadata.To),
-					FromTag:           metadata.FromTag,
-					ToTag:             metadata.ToTag,
-					FromUri:           extractFullSIPURI(metadata.From),
-					ToUri:             extractFullSIPURI(metadata.To),
-					Method:            metadata.Method,
-					CseqMethod:        metadata.CSeqMethod,
-					ResponseCode:      metadata.ResponseCode,
-					PAssertedIdentity: metadata.PAssertedIdentity,
-				},
-			}
 
-			// Forward termination message immediately
-			if err := h.forwarder.ForwardPacketWithMetadata(packet, pbMetadata, interfaceName, pkt.LinkType); err != nil {
-				logger.Error("Failed to forward UDP call termination packet",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"method", method,
-					"error", err)
-			} else {
-				logger.Info("Forwarded UDP call termination packet",
-					"call_id", SanitizeCallIDForLogging(callID),
-					"method", method)
-			}
-			return true
+	if alreadyMatched {
+		// Call already passed the filter: forward this packet now, whether or
+		// not it carries SDP. This covers in-dialog signalling (100 Trying,
+		// 180 Ringing, ACK, BYE/CANCEL, 4xx/5xx) that has no SDP body.
+		if err := h.forwarder.ForwardPacketWithMetadata(packet, sipPacketMetadata(callID, metadata), interfaceName, pkt.LinkType); err != nil {
+			logger.Error("Failed to forward UDP SIP packet for matched call",
+				"call_id", SanitizeCallIDForLogging(callID),
+				"method", method,
+				"error", err)
 		}
-		// Call not tracked, discard termination message
+
+		// A re-INVITE or delayed answer can move the media ports.
+		if hasSDP {
+			ExtractPortFromSdp(metadata.SDPBody, callID)
+		}
+		return true
+	}
+
+	// Call termination for a call that never matched: nothing to correlate it
+	// with downstream, so discard rather than buffer it.
+	if method == "BYE" || method == "CANCEL" {
 		logger.Debug("UDP call termination message for untracked call, discarding",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"method", method)
@@ -182,8 +173,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	}
 
 	// Check filter if we have SDP (INVITE or 200 OK with m=audio)
-	bodyBytes := StringToBytes(body)
-	if BytesContains(bodyBytes, []byte("m=audio")) {
+	if hasSDP {
 		// Use callback-based filter check for flexible handling
 		// Note: 'packet' is captured by the closure for ApplicationFilter matching
 		matched := h.bufferMgr.CheckFilterWithCallback(
@@ -217,6 +207,26 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 
 	// SIP packet buffered, waiting for SDP to check filter
 	return false
+}
+
+// sipPacketMetadata builds the protobuf metadata carried alongside a forwarded
+// SIP packet, so the processor can correlate it with the rest of the dialog.
+func sipPacketMetadata(callID string, metadata *CallMetadata) *data.PacketMetadata {
+	return &data.PacketMetadata{
+		Sip: &data.SIPMetadata{
+			CallId:            callID,
+			FromUser:          extractUserFromSIPURI(metadata.From),
+			ToUser:            extractUserFromSIPURI(metadata.To),
+			FromTag:           metadata.FromTag,
+			ToTag:             metadata.ToTag,
+			FromUri:           extractFullSIPURI(metadata.From),
+			ToUri:             extractFullSIPURI(metadata.To),
+			Method:            metadata.Method,
+			CseqMethod:        metadata.CSeqMethod,
+			ResponseCode:      metadata.ResponseCode,
+			PAssertedIdentity: metadata.PAssertedIdentity,
+		},
+	}
 }
 
 // handleRTPPacket processes a potential RTP packet with buffering
@@ -313,21 +323,7 @@ func (h *UDPPacketHandler) forwardBufferedPackets(callID string, packets []gopac
 
 		// If not RTP, use SIP metadata only
 		if packetMetadata == nil {
-			packetMetadata = &data.PacketMetadata{
-				Sip: &data.SIPMetadata{
-					CallId:            callID,
-					FromUser:          extractUserFromSIPURI(metadata.From),
-					ToUser:            extractUserFromSIPURI(metadata.To),
-					FromTag:           metadata.FromTag,
-					ToTag:             metadata.ToTag,
-					FromUri:           extractFullSIPURI(metadata.From),
-					ToUri:             extractFullSIPURI(metadata.To),
-					Method:            metadata.Method,
-					CseqMethod:        metadata.CSeqMethod,
-					ResponseCode:      metadata.ResponseCode,
-					PAssertedIdentity: metadata.PAssertedIdentity,
-				},
-			}
+			packetMetadata = sipPacketMetadata(callID, metadata)
 		}
 
 		if err := h.forwarder.ForwardPacketWithMetadata(pkt, packetMetadata, interfaceName, linkType); err != nil {

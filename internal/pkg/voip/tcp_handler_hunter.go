@@ -156,15 +156,9 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 	}
 
 	// Register the call as matched so its RTP media and later in-dialog messages
-	// (BYE/CANCEL) are forwarded too. AddSIPPacket seeds the buffer metadata;
-	// CheckFilterWithCallback (filter already satisfied) records it in the
-	// persistent matchedCalls set.
+	// (BYE/CANCEL) are forwarded too.
 	if h.bufferMgr != nil {
-		h.bufferMgr.AddSIPPacket(callID, nil, metadata, "", layers.LinkTypeEthernet)
-		h.bufferMgr.CheckFilterWithCallback(callID,
-			func(m *CallMetadata) bool { return true }, // already matched
-			nil, // already forwarded above
-		)
+		h.bufferMgr.MarkCallMatched(callID, metadata, "", layers.LinkTypeEthernet)
 	}
 
 	discardTCPBufferedPackets(netFlow)

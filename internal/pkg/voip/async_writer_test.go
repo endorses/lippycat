@@ -3,6 +3,7 @@
 package voip
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -24,7 +25,11 @@ func TestNewAsyncWriterPool(t *testing.T) {
 	assert.Equal(t, 5*time.Second, pool.workerTimeout)
 	assert.NotNil(t, pool.ctx)
 	assert.NotNil(t, pool.cancel)
-	assert.NotNil(t, pool.writeQueue)
+	assert.Len(t, pool.writeQueues, 4, "one write queue per worker")
+	for i, q := range pool.writeQueues {
+		assert.NotNil(t, q, "queue %d should be initialized", i)
+		assert.Equal(t, 100, cap(q), "each queue gets the full configured depth")
+	}
 	assert.False(t, pool.started.Load())
 	assert.False(t, pool.stopped.Load())
 }
@@ -484,4 +489,58 @@ func BenchmarkAsyncWriterPool_WritePacketSync(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = pool.WritePacketSync(callID, packet, PacketTypeSIP)
 	}
+}
+
+// All writes for a given Call-ID must land on one queue, so a single worker
+// serialises them and the per-call PCAP keeps capture order. A shared queue
+// drained by N workers reorders packets within a call.
+func TestAsyncWriterPool_QueueShardingIsStablePerCall(t *testing.T) {
+	pool := NewAsyncWriterPool(4, 100)
+
+	// Same Call-ID always resolves to the same queue.
+	for _, callID := range []string{"a@example.com", "b@example.com", "", "long-call-id-0123456789"} {
+		want := pool.queueFor(callID)
+		for i := 0; i < 10; i++ {
+			assert.Equal(t, want, pool.queueFor(callID), "queue for %q should be stable", callID)
+		}
+	}
+
+	// And the hash spreads distinct calls over the available queues rather
+	// than pinning everything to one worker.
+	seen := make(map[chan PacketWriteRequest]bool)
+	for i := 0; i < 200; i++ {
+		seen[pool.queueFor(fmt.Sprintf("call-%d@example.com", i))] = true
+	}
+	assert.Len(t, seen, 4, "distinct calls should be distributed across all queues")
+}
+
+// Stop must drain what is already queued instead of racing the workers.
+// Regression test: Stop used to cancel the context before closing the queues,
+// so each worker iteration picked randomly between "drain" and "give up" and
+// the tail of every capture was silently lost.
+func TestAsyncWriterPool_StopDrainsQueuedPackets(t *testing.T) {
+	ResetConfigOnce()
+
+	tracker := getTracker()
+	tracker.shuttingDown.Store(0)
+
+	callID := "test-call-stop-drain"
+	setupTestCall(t, callID)
+	defer cleanupTestCall(callID)
+
+	pool := NewAsyncWriterPool(4, 200)
+	require.NoError(t, pool.Start())
+
+	packet := createTestPacketForAsync(t)
+	const queued = 100
+	for i := 0; i < queued; i++ {
+		require.NoError(t, pool.WritePacketAsync(callID, packet, PacketTypeSIP))
+	}
+
+	require.NoError(t, pool.Stop())
+
+	stats := pool.GetStats()
+	assert.Equal(t, int64(queued), stats.PacketsWritten.Load(),
+		"every accepted packet should be written before the pool stops")
+	assert.Equal(t, int64(0), stats.WriteErrors.Load())
 }

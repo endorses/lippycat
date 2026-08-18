@@ -101,7 +101,7 @@ func initConfigDefaults() {
 	viper.SetDefault("voip.janitor_cleanup_interval", DefaultJanitorCleanupInterval)
 	viper.SetDefault("voip.call_expiration_time", DefaultCallExpirationTime)
 	viper.SetDefault("voip.stream_queue_buffer", DefaultStreamQueueBuffer)
-	viper.SetDefault("voip.max_filename_length", 100)
+	viper.SetDefault("voip.max_filename_length", DefaultMaxFilenameLength)
 	viper.SetDefault("voip.log_goroutine_limit_interval", 30*time.Second)
 
 	// TCP-specific defaults
@@ -209,13 +209,16 @@ func buildConfig() *Config {
 	}
 
 	config := &Config{
-		MaxGoroutines:             getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
-		MaxStreams:                viper.GetInt("voip.max_streams"),
-		CallIDDetectionTimeout:    getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),
-		JanitorCleanupInterval:    profile.TCPCleanupInterval / 2,
-		CallExpirationTime:        profile.TCPBufferMaxAge,
-		StreamQueueBuffer:         profile.StreamQueueBuffer,
-		MaxFilenameLength:         viper.GetInt("voip.max_filename_length"),
+		MaxGoroutines:          getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
+		MaxStreams:             viper.GetInt("voip.max_streams"),
+		CallIDDetectionTimeout: getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),
+		JanitorCleanupInterval: profile.TCPCleanupInterval / 2,
+		CallExpirationTime:     profile.TCPBufferMaxAge,
+		StreamQueueBuffer:      profile.StreamQueueBuffer,
+		// Guarded like its neighbours: a zero/negative length truncates every
+		// sanitized Call-ID to "", which sanitize() maps to a single fixed
+		// filename — every call would then share one PCAP.
+		MaxFilenameLength:         getPositiveInt("voip.max_filename_length", DefaultMaxFilenameLength),
 		LogGoroutineLimitInterval: getPositiveDuration("voip.log_goroutine_limit_interval", 30*time.Second),
 
 		// TCP-specific configurations (from the selected performance profile)

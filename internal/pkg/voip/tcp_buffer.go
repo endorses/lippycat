@@ -202,36 +202,13 @@ func reconstructPacket(frame bufferedFrame) capture.PacketInfo {
 	}
 }
 
-func flushTCPPacketsToCall(flow gopacket.Flow, callID string, writeVoip bool) {
-	tcpPacketBuffersMu.Lock()
-	defer tcpPacketBuffersMu.Unlock()
-
-	buffer, exists := tcpPacketBuffers[flow]
-	if !exists || len(buffer.packets) == 0 {
-		return
-	}
-
-	// Update the buffer with call ID
-	buffer.callID = callID
-
-	// Write buffered packets to the call
-	for _, frame := range buffer.packets {
-		pkt := reconstructPacket(frame)
-		// Inject TCP SIP packet into virtual interface
-		injectPacketToVirtualInterface(pkt)
-
-		if writeVoip {
-			WriteSIP(callID, pkt.Packet)
-		}
-	}
-
-	// Clear the buffer after flushing
-	buffer.packets = buffer.packets[:0]
-
-	// Return buffer to pool
-	delete(tcpPacketBuffers, flow)
-	releaseBuffer(buffer)
-}
+// NOTE: there is deliberately no "flush this flow's packets to a call" helper.
+// The buffer is keyed by network flow (IP pair), so it holds every connection
+// and every call between two hosts; writing it under a single Call-ID mixed
+// unrelated calls into one PCAP and consumed segments that a following
+// pipelined message still needed. The TCP handlers instead write one
+// synthesized packet per reassembled SIP message (see buildSIPPacketInfo) and
+// use this buffer only for the capture timestamp before releasing it.
 
 // peekFirstTCPBufferedPacket reconstructs the first buffered packet for a flow
 // without draining or modifying the buffer. Used by filter matching paths that

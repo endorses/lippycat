@@ -46,29 +46,57 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 	return bm
 }
 
-// AddSIPPacket adds a SIP packet to the buffer
-func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
+// AddSIPPacket records a SIP packet for a call.
+//
+// It returns true when the call has already been matched, in which case the
+// packet is NOT buffered and the caller must write/forward it immediately.
+// Buffering only exists to hold packets until the filter decision is made; once
+// that decision is "matched", every further packet of the call must flow
+// straight through. Gating that on the packet carrying SDP would silently drop
+// all non-SDP signalling (100 Trying, 180 Ringing, ACK, BYE, 4xx/5xx).
+//
+// A nil packet is allowed: callers that have already delivered the packet
+// themselves use it to seed the buffer's metadata and RTP ports.
+func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) bool {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
+
+	_, alreadyMatched := bm.matchedCalls[callID]
 
 	buffer, exists := bm.buffers[callID]
 	if !exists {
 		buffer = NewCallBuffer(callID)
 		buffer.SetInterfaceName(interfaceName)
 		buffer.SetLinkType(linkType)
+		if alreadyMatched {
+			// The janitor reaps buffers by age, so a long call outlives its
+			// buffer. Restore the decision on the replacement buffer so RTP
+			// association keeps working for the rest of the call.
+			buffer.SetFilterResult(true)
+		}
 		bm.buffers[callID] = buffer
 	}
 
-	buffer.AddSIPPacket(packet)
 	buffer.SetMetadata(metadata)
 
-	// Extract RTP ports from SDP if present
+	// Extract RTP ports from SDP if present. Re-INVITEs and delayed-offer
+	// answers can introduce new ports mid-call, so this runs for every packet
+	// carrying SDP, matched or not.
 	if metadata.SDPBody != "" {
 		ports := extractRTPPortsFromSDP(metadata.SDPBody)
 		for _, port := range ports {
 			buffer.AddRTPPort(port)
 		}
 	}
+
+	if alreadyMatched || (buffer.IsFilterChecked() && buffer.IsMatched()) {
+		return true // Caller writes/forwards immediately; nothing to buffer
+	}
+
+	if packet != nil {
+		buffer.AddSIPPacket(packet)
+	}
+	return false
 }
 
 // AddRTPPacket adds an RTP packet to the buffer if call is being tracked
@@ -126,8 +154,9 @@ func (bm *BufferManager) CheckFilter(callID string, filterFunc func(*CallMetadat
 		// Record in matchedCalls so BYE can be processed even after buffer cleanup
 		bm.matchedCalls[callID] = time.Now()
 
-		// Return all buffered packets for flushing
-		packets = buffer.GetAllPackets()
+		// Hand over all buffered packets and empty the buffer, so a later
+		// filter check for the same call cannot re-emit them.
+		packets = buffer.DrainPackets()
 		logger.Info("Call matched filter, flushing buffer",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"packet_count", len(packets),
@@ -167,8 +196,9 @@ func (bm *BufferManager) CheckFilterWithCallback(
 		// Record in matchedCalls so BYE can be processed even after buffer cleanup
 		bm.matchedCalls[callID] = time.Now()
 
-		// Get all buffered packets
-		packets := buffer.GetAllPackets()
+		// Take all buffered packets and empty the buffer, so a later filter
+		// check for the same call cannot re-emit them.
+		packets := buffer.DrainPackets()
 		logger.Info("Call matched filter, invoking callback",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"packet_count", len(packets),
@@ -188,6 +218,38 @@ func (bm *BufferManager) CheckFilterWithCallback(
 	}
 
 	return matched
+}
+
+// MarkCallMatched records a call as matched without buffering a packet.
+//
+// TCP paths deliver each SIP message as the reassembler completes it, so they
+// have nothing to flush — but the call must still be remembered as matched, or
+// later in-dialog messages (ACK, BYE, responses) and the call's RTP would be
+// re-evaluated on their own headers and dropped when they carry no identity the
+// filter matches.
+func (bm *BufferManager) MarkCallMatched(callID string, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	buffer, exists := bm.buffers[callID]
+	if !exists {
+		buffer = NewCallBuffer(callID)
+		buffer.SetInterfaceName(interfaceName)
+		buffer.SetLinkType(linkType)
+		bm.buffers[callID] = buffer
+	}
+
+	if metadata != nil {
+		buffer.SetMetadata(metadata)
+		if metadata.SDPBody != "" {
+			for _, port := range extractRTPPortsFromSDP(metadata.SDPBody) {
+				buffer.AddRTPPort(port)
+			}
+		}
+	}
+
+	buffer.SetFilterResult(true)
+	bm.matchedCalls[callID] = time.Now()
 }
 
 // IsCallMatched checks if a call has been evaluated and matched the filter.

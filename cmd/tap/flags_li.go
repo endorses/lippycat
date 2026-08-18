@@ -105,7 +105,7 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	// LI ADMF state sync flags
 	cmd.PersistentFlags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
 	cmd.PersistentFlags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
-	cmd.PersistentFlags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 0, "Periodic reconciliation interval (0 = disabled)")
+	cmd.PersistentFlags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 5*time.Minute, "Periodic ADMF reconciliation interval (0 = disabled; drift is not corrected while off)")
 }
 
 // BindLIViperFlags binds LI flags to viper for config file support.

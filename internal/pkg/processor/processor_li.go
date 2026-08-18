@@ -72,6 +72,17 @@ func (pfp *processorFilterPusher) UpdateFilter(filter *management.Filter) error 
 	return err
 }
 
+// ListFilterIDs implements li.FilterLister, including filters loaded from disk
+// at startup that this process did not create.
+func (pfp *processorFilterPusher) ListFilterIDs() []string {
+	filters := pfp.p.filterManager.GetAll()
+	ids := make([]string, 0, len(filters))
+	for _, f := range filters {
+		ids = append(ids, f.Id)
+	}
+	return ids
+}
+
 // DeleteFilter implements li.FilterPusher.
 func (pfp *processorFilterPusher) DeleteFilter(filterID string) error {
 	_, err := pfp.p.filterManager.Delete(filterID)

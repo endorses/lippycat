@@ -248,6 +248,32 @@ Content is delivered to MDF using binary TLV encoding per TS 103 221-2.
 - Stream ID (for X2 correlation)
 - Media Payload
 
+### Payload Direction
+
+X2 and X3 PDUs carry the ETSI Payload Direction (`fromTarget` / `toTarget`), which a
+LEMF uses to build the two-channel audio product by pairing the two directions of a
+call. It is set only for tasks with **exactly one target** — with several targets the
+matched identity is ambiguous, so the direction is left `indeterminate` and the MDF
+correlates by XID instead.
+
+How it is derived:
+
+| Target type | Signaling (X2) | Media (X3) |
+|-------------|----------------|------------|
+| IP address / CIDR | packet source and destination address | packet source and destination address |
+| SIP URI, tel URI, NAI, username | SIP `From` / `To` identity | the call's SDP, resolved once per RTP SSRC |
+
+For identity targets the media direction comes from the signalling of the same call:
+which party of the dialog the target is, and which media endpoints each party
+advertised in SDP. It is therefore `indeterminate` when that signalling was not
+observed — most commonly when a task is activated **mid-call**, since the offer and
+answer have already passed. Media of calls set up after activation is labelled
+normally. A direction is never guessed: where the evidence is absent, the field stays
+`indeterminate`.
+
+Both legs of a relayed call (for example a target behind an IMS media gateway) are
+delivered and are labelled consistently, distinguished by their stream identifier.
+
 ## Task Lifecycle
 
 ### Task States
@@ -398,6 +424,18 @@ Check:
 2. Target format matches traffic (e.g., full SIP URI vs user only)
 3. Filters pushed to hunters
 4. Hunter receiving matching traffic
+
+### Media Delivered as `indeterminate`
+
+If CC PDUs carry no Payload Direction, the LEMF cannot pair the two audio channels
+automatically. Check:
+1. The task has exactly one target — direction is not set for multi-target tasks
+2. The call's INVITE and its answer were intercepted; a task activated mid-call has
+   no signalling to derive from
+3. The signalling carried SDP (both the offer and the answer)
+4. With debug logging, look for `LI media direction resolved for SSRC`; its absence
+   alongside `LI media direction: SDP owner not attributable` means the SDP could not
+   be attributed to a party
 
 ### Logs
 

@@ -29,6 +29,9 @@ var (
 	liDeliveryMgr    *delivery.Manager
 	liDeliveryClient *delivery.Client
 	liReorderBuffers sync.Map // map[string]*delivery.ReorderBuffer keyed by "xid-destID"
+	// liMediaDirection derives the Payload Direction of RTP media for
+	// identity-based targets from the call's observed SIP signalling.
+	liMediaDirection *li.MediaDirectionResolver
 )
 
 // LI statistics
@@ -156,6 +159,10 @@ func (p *Processor) initLIManager() {
 	liX3Encoder = x2x3.NewX3Encoder()
 	logger.Info("LI X2/X3 encoders initialized")
 
+	// Media direction resolver: RTP carries no SIP identity, so the direction of
+	// media for an identity target is derived from the call's signalling.
+	liMediaDirection = li.NewMediaDirectionResolver(li.MediaDirectionConfig{})
+
 	// Initialize delivery client if TLS certs are configured
 	if p.config.LIDeliveryTLSCertFile != "" && p.config.LIDeliveryTLSKeyFile != "" {
 		destConfig := delivery.DefaultConfig()
@@ -196,6 +203,13 @@ func (p *Processor) initLIManager() {
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
 		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
 
+		// Learn the target's media endpoints from signalling before any delivery
+		// gating: X3-only tasks deliver no IRI but their media still needs a
+		// direction, which only the signalling can supply.
+		if len(task.Targets) == 1 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
+			liMediaDirection.ObserveSIP(task.XID, task.Targets[0], pkt)
+		}
+
 		// Encode and deliver X2 (IRI - signaling) for SIP packets
 		if deliverX2 && pkt.VoIPData != nil && !pkt.VoIPData.IsRTP {
 			pdu, err := liX2Encoder.EncodeIRI(pkt, task.XID)
@@ -219,7 +233,7 @@ func (p *Processor) initLIManager() {
 				// and the direction stays Unknown.
 				if len(task.Targets) == 1 {
 					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
-					pdu.Header.PayloadDirection = li.PayloadDirectionForTarget(task.Targets[0], pkt)
+					pdu.Header.PayloadDirection = liMediaDirection.PayloadDirection(task.XID, task.Targets[0], pkt)
 				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {
@@ -267,11 +281,13 @@ func (p *Processor) initLIManager() {
 				// Matched target identifier (ETSI attr 17) and Payload Direction.
 				// Only set when the task has a single target, so the identity is
 				// unambiguous; with multiple targets the MDF falls back to the XID
-				// and the direction stays Unknown. For RTP targeted by SIP URI the
-				// direction resolves to Unknown (no per-packet SIP identity).
+				// and the direction stays Unknown. RTP carries no SIP identity, so
+				// for an identity target the direction comes from the media
+				// endpoints learned from the call's signalling, resolved once per
+				// SSRC; it stays Unknown when that signalling was not observed.
 				if len(task.Targets) == 1 {
 					pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(task.Targets[0].Value))
-					pdu.Header.PayloadDirection = li.PayloadDirectionForTarget(task.Targets[0], pkt)
+					pdu.Header.PayloadDirection = liMediaDirection.PayloadDirection(task.XID, task.Targets[0], pkt)
 				}
 				data, err := pdu.MarshalBinary()
 				if err != nil {
@@ -453,6 +469,7 @@ func (p *Processor) stopLIManager() {
 	if liDeliveryMgr != nil {
 		liDeliveryMgr.Stop()
 	}
+	liMediaDirection.Close()
 }
 
 // processLIPacket processes a packet through the LI system.
@@ -482,16 +499,25 @@ type LIEncodingStats struct {
 	X3Encoded uint64
 	X3Errors  uint64
 	X3Skipped uint64
+
+	// DirectionResolvedMedia counts RTP streams (SSRCs) whose Payload Direction
+	// was derived from the call's observed signalling.
+	DirectionResolvedMedia uint64
+	// DirectionUnknownRTP counts RTP packets delivered without a direction.
+	DirectionUnknownRTP uint64
 }
 
 // getLIEncodingStats returns current LI encoding statistics.
 func (p *Processor) getLIEncodingStats() LIEncodingStats {
+	dirStats := liMediaDirection.Stats()
 	return LIEncodingStats{
-		X2Encoded: liX2Encoded.Load(),
-		X2Errors:  liX2Errors.Load(),
-		X2Skipped: liX2Skipped.Load(),
-		X3Encoded: liX3Encoded.Load(),
-		X3Errors:  liX3Errors.Load(),
-		X3Skipped: liX3Skipped.Load(),
+		X2Encoded:              liX2Encoded.Load(),
+		X2Errors:               liX2Errors.Load(),
+		X2Skipped:              liX2Skipped.Load(),
+		X3Encoded:              liX3Encoded.Load(),
+		X3Errors:               liX3Errors.Load(),
+		X3Skipped:              liX3Skipped.Load(),
+		DirectionResolvedMedia: dirStats.ResolvedFromMedia,
+		DirectionUnknownRTP:    dirStats.UnknownRTP,
 	}
 }

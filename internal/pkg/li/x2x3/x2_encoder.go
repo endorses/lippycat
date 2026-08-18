@@ -248,7 +248,7 @@ func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *type
 		return
 	}
 	if len(pkt.RawData) > 0 {
-		if sipStart := findSIPStart(pkt.RawData); sipStart >= 0 {
+		if sipStart := FindSIPStart(pkt.RawData); sipStart >= 0 {
 			pdu.SetPayload(pkt.RawData[sipStart:])
 		}
 	}
@@ -314,9 +314,9 @@ func (e *X2Encoder) GetSequenceNumber() uint32 {
 	return e.seqNum.Load()
 }
 
-// findSIPStart finds the start of a SIP message in raw packet data.
+// FindSIPStart finds the start of a SIP message in raw packet data.
 // Returns the byte offset of the SIP message, or -1 if not found.
-func findSIPStart(data []byte) int {
+func FindSIPStart(data []byte) int {
 	// Look for common SIP request methods and "SIP/2.0" response prefix
 	markers := [][]byte{
 		[]byte("INVITE "),

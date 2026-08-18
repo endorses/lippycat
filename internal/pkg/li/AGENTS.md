@@ -19,6 +19,12 @@ internal/pkg/li/
 ├── registry_test.go       # Registry unit tests
 ├── filters.go             # XID ↔ filter mapping
 ├── filters_test.go        # Filter mapping tests
+├── direction.go           # Per-packet Payload Direction resolution
+├── direction_test.go      # Direction resolution tests
+├── mediadirection.go      # Per-SSRC Payload Direction for RTP media
+├── mediadirection_test.go # Media direction tests
+├── sdp.go                 # SDP media endpoint parsing
+├── sdp_test.go            # SDP parsing tests
 ├── manager.go             # Main coordinator (build tag: li)
 ├── manager_stub.go        # No-op stub (build tag: !li)
 ├── manager_test.go        # Manager unit tests
@@ -344,6 +350,38 @@ func (e *X3Encoder) Encode(xid uuid.UUID, rtp *RTPInfo, payload []byte) ([]byte,
 - RTP Payload Type (1 byte)
 - Stream ID (8 bytes) - for X2 correlation
 - Media Payload (variable)
+
+### Payload Direction
+
+The TS 103 221-2 Payload Direction header field is set on X2 and X3 PDUs only when
+the task has exactly one target (with several targets the matched identity is
+ambiguous, so the MDF falls back to the XID). LI product must never carry a guessed
+direction, so anything unresolvable stays `PayloadDirectionUnknown`.
+
+| Target type | Packet | Resolution |
+|-------------|--------|------------|
+| `IPv4/IPv6Address`, `IPv4/IPv6CIDR` | any | `direction.go` — match packet src/dst against the target |
+| `SIPURI`, `TELURI`, `NAI`, `Username` | SIP | `direction.go` — match target against the SIP `From` / `To` |
+| `SIPURI`, `TELURI`, `NAI`, `Username` | RTP | `mediadirection.go` — derived from the call's signalling, per SSRC |
+| `IMSI`, `IMEI` | any | none (Unknown) |
+
+**Media direction (`mediadirection.go`).** RTP carries no SIP identity, so for an
+identity target the direction comes from the SDP of the call: `ObserveSIP()` records
+which party of the dialog is the target (`From` / `To` match) and which media
+endpoints each party advertised; `PayloadDirection()` then resolves RTP.
+
+Resolution is **per SSRC**, not per packet, and only on the leg where *both*
+endpoints are known from SDP. This matters where the target sits behind a media
+gateway: the SDP the network sees carries the gateway's address, so on the
+gateway→handset leg the target's own SDP address is the packet *source* even though
+the audio is arriving at the target. Per-packet matching inverts that leg; requiring
+both endpoints excludes it from resolution, and — because relays preserve SSRC — the
+verdict from the network-side leg supplies its direction.
+
+State is keyed by `(XID, Call-ID)`, bounded by an idle TTL and a max-calls cap, and
+exposed via `Stats()`. Endpoints are only ever added, so a re-INVITE cannot
+invalidate an earlier verdict; re-INVITE/UPDATE SDP is attributed only when its
+connection address already belongs to one party.
 
 ### Buffer Pooling
 

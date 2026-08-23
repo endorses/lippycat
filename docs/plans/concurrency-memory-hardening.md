@@ -89,19 +89,19 @@ the remaining races in call buffering and keylog watching.
 
 ### Tasks
 
-- [ ] Extend `TCPBufferStats` with `PooledBuffers`, `PooledFrames`,
+- [x] Extend `TCPBufferStats` with `PooledBuffers`, `PooledFrames`,
       `PooledBytes`, `BufferedFrames`, and `BufferedBytes`.
-- [ ] Compute active buffered frame and byte counts from `tcpPacketBuffers`.
-- [ ] Compute pooled frame and byte counts from `tcpBufferPool`.
-- [ ] Surface the new fields through existing TCP metrics output in
+- [x] Compute active buffered frame and byte counts from `tcpPacketBuffers`.
+- [x] Compute pooled frame and byte counts from `tcpBufferPool`.
+- [x] Surface the new fields through existing TCP metrics output in
       `internal/pkg/voip/tcp_metrics.go`.
-- [ ] Add an explicit `--debug-listen <addr>` flag for `tap`, `process`, and
+- [x] Add an explicit `--debug-listen <addr>` flag for `tap`, `process`, and
       `hunt`, default off.
-- [ ] Keep `LC_PPROF_ADDR` as a compatibility fallback, but prefer the CLI flag.
-- [ ] Refuse non-loopback debug binds unless an explicit override flag or config
+- [x] Keep `LC_PPROF_ADDR` as a compatibility fallback, but prefer the CLI flag.
+- [x] Refuse non-loopback debug binds unless an explicit override flag or config
       setting is supplied.
-- [ ] Log pprof listener startup failures.
-- [ ] Update `docs/operational-procedures.md`, `docs/PERFORMANCE.md`,
+- [x] Log pprof listener startup failures.
+- [x] Update `docs/operational-procedures.md`, `docs/PERFORMANCE.md`,
       `docs/tcp-troubleshooting.md`, and manual performance docs so they all use
       the same supported pprof activation path.
 

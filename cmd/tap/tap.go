@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/bpfutil"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/debugserver"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
@@ -67,6 +68,12 @@ Examples:
     --li-x1-tls-cert x1-server.crt --li-x1-tls-key x1-server.key \
     --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := debugserver.StartPprofFromConfig(
+			cmdutil.GetStringConfig("tap.debug_listen", debugListen),
+			cmdutil.GetBoolConfig("tap.debug_allow_non_loopback", debugAllowNonLoopback),
+		); err != nil {
+			return err
+		}
 		// Handle deprecated --tap-id flag migration to --id
 		if cmd.Flags().Changed("tap-id") {
 			if cmd.Flags().Changed("id") {
@@ -164,6 +171,9 @@ var (
 	espNull      bool
 	espHeuristic bool
 	espICVSize   int
+	// Debug/pprof flags
+	debugListen           string
+	debugAllowNonLoopback bool
 )
 
 func init() {
@@ -267,6 +277,8 @@ func init() {
 	// Filter Policy Configuration (persistent for voip subcommand)
 	// ============================================================
 	TapCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
+	TapCmd.PersistentFlags().StringVar(&debugListen, "debug-listen", "", "Enable pprof debug HTTP listener on address (loopback only by default, e.g. 127.0.0.1:6060)")
+	TapCmd.PersistentFlags().BoolVar(&debugAllowNonLoopback, "debug-allow-non-loopback", false, "Allow pprof debug listener to bind non-loopback addresses")
 
 	// ============================================================
 	// Viper Bindings
@@ -341,6 +353,8 @@ func init() {
 
 	// Filter policy
 	_ = viper.BindPFlag("tap.no_filter_policy", TapCmd.PersistentFlags().Lookup("no-filter-policy"))
+	_ = viper.BindPFlag("tap.debug_listen", TapCmd.PersistentFlags().Lookup("debug-listen"))
+	_ = viper.BindPFlag("tap.debug_allow_non_loopback", TapCmd.PersistentFlags().Lookup("debug-allow-non-loopback"))
 
 	// ============================================================
 	// GPU Acceleration (CUDA build only)

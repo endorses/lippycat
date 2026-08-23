@@ -527,14 +527,19 @@ See [docs/DISTRIBUTED_MODE.md](DISTRIBUTED_MODE.md#hierarchical-mode) for comple
 
 ### Memory Profiling
 
-**Enable pprof:**
+**Enable pprof on loopback:**
 ```bash
-# Add to configuration
-export LIPPYCAT_PPROF_ENABLED=true
+# Start a node with the debug listener enabled
+lc tap voip -i eth0 --debug-listen 127.0.0.1:6060
 
 # Capture heap profile
 go tool pprof http://localhost:6060/debug/pprof/heap
 ```
+
+`--debug-listen` is available on `tap`, `process`, and `hunt`. Non-loopback
+binds are refused unless `--debug-allow-non-loopback` is set. Existing
+deployments may still use `LC_PPROF_ADDR=127.0.0.1:6060` as a compatibility
+fallback when the flag is omitted.
 
 ### Memory Optimization Flags
 

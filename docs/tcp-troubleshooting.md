@@ -73,9 +73,14 @@ ps aux | grep lippycat
 # Monitor TCP buffer statistics
 # (Use debugging commands to get real-time stats)
 
-# Check for memory leaks
+# Enable pprof on a loopback debug listener, then check for memory leaks
+sudo lc tap voip -i eth0 --debug-listen 127.0.0.1:6060
 go tool pprof http://localhost:6060/debug/pprof/heap
 ```
+
+`--debug-listen` is available on `tap`, `process`, and `hunt`. Non-loopback
+debug binds require `--debug-allow-non-loopback`. `LC_PPROF_ADDR=127.0.0.1:6060`
+is still accepted as a compatibility fallback when the flag is omitted.
 
 **Solutions:**
 1. **Enable Memory Optimization:**

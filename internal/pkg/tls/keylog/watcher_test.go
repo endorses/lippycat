@@ -4,8 +4,10 @@ package keylog
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -218,24 +220,35 @@ func TestWatcherNamedPipe(t *testing.T) {
 	err = watcher.Start(ctx)
 	require.NoError(t, err)
 
-	// Write to pipe in goroutine (opens for writing, unblocking reader)
+	// Open the pipe for writing and keep it open until the watcher consumes data.
+	writerReady := make(chan *os.File, 1)
 	writeErr := make(chan error, 1)
 	go func() {
-		// Open pipe for writing
 		f, err := os.OpenFile(pipePath, os.O_WRONLY, 0600)
 		if err != nil {
 			writeErr <- err
 			return
 		}
+		writerReady <- f
 
 		_, err = f.WriteString(testKeyLogContent)
-		if cerr := f.Close(); cerr != nil && err == nil {
-			err = cerr
-		}
 		writeErr <- err
 	}()
 
-	// Wait for write to complete
+	var writer *os.File
+	select {
+	case writer = <-writerReady:
+	case err := <-writeErr:
+		require.NoError(t, err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for pipe writer")
+	}
+	defer func() {
+		if writer != nil {
+			require.NoError(t, writer.Close())
+		}
+	}()
+
 	select {
 	case err := <-writeErr:
 		require.NoError(t, err)
@@ -243,8 +256,7 @@ func TestWatcherNamedPipe(t *testing.T) {
 		t.Fatal("timeout waiting for pipe write")
 	}
 
-	// Wait for watcher to process
-	time.Sleep(100 * time.Millisecond)
+	waitForStoreSize(t, store, 1, time.Second)
 
 	// Stop watcher (this should not block since ctx has timeout)
 	stopDone := make(chan struct{})
@@ -262,6 +274,123 @@ func TestWatcherNamedPipe(t *testing.T) {
 	}
 
 	assert.Equal(t, 1, store.Size())
+}
+
+func TestWatcherNamedPipeStopWithIdleWriter(t *testing.T) {
+	tmpDir := t.TempDir()
+	pipePath := filepath.Join(tmpDir, "keys.pipe")
+
+	err := syscall.Mkfifo(pipePath, 0600)
+	if err != nil {
+		t.Skip("named pipes not supported on this system")
+	}
+
+	storeConfig := DefaultStoreConfig()
+	storeConfig.CleanupInterval = 1 * time.Hour
+	store := NewStore(storeConfig)
+	defer store.Stop()
+
+	watcherConfig := DefaultWatcherConfig()
+	watcherConfig.PollInterval = 10 * time.Millisecond
+	watcher := NewWatcher(pipePath, store, watcherConfig)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	require.NoError(t, watcher.Start(ctx))
+
+	writerReady := make(chan *os.File, 1)
+	writerErr := make(chan error, 1)
+	go func() {
+		f, err := os.OpenFile(pipePath, os.O_WRONLY, 0600)
+		if err != nil {
+			writerErr <- err
+			return
+		}
+		writerReady <- f
+	}()
+
+	var writer *os.File
+	select {
+	case writer = <-writerReady:
+	case err := <-writerErr:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for pipe writer")
+	}
+	defer func() {
+		if writer != nil {
+			_ = writer.Close()
+		}
+	}()
+
+	waitForActivePipe(t, watcher, time.Second)
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- watcher.Stop()
+	}()
+
+	select {
+	case err := <-stopDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for watcher to stop")
+	}
+}
+
+func TestWatcherStatsRaceFree(t *testing.T) {
+	tmpDir := t.TempDir()
+	keylogPath := filepath.Join(tmpDir, "keys.log")
+
+	require.NoError(t, os.WriteFile(keylogPath, []byte(testKeyLogContent), 0600))
+
+	storeConfig := DefaultStoreConfig()
+	storeConfig.CleanupInterval = 1 * time.Hour
+	store := NewStore(storeConfig)
+	defer store.Stop()
+
+	watcherConfig := DefaultWatcherConfig()
+	watcherConfig.PollInterval = 10 * time.Millisecond
+	watcher := NewWatcher(keylogPath, store, watcherConfig)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	require.NoError(t, watcher.Start(ctx))
+	defer func() {
+		require.NoError(t, watcher.Stop())
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			deadline := time.After(200 * time.Millisecond)
+			for {
+				select {
+				case <-deadline:
+					return
+				default:
+					_ = watcher.Stats()
+				}
+			}
+		}()
+	}
+
+	f, err := os.OpenFile(keylogPath, os.O_APPEND|os.O_WRONLY, 0600)
+	require.NoError(t, err)
+	for i := 0; i < 50; i++ {
+		_, err := fmt.Fprintf(f, "INVALID_LINE_%d\n", i)
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+	require.NoError(t, f.Close())
+
+	wg.Wait()
+	stats := watcher.Stats()
+	assert.Greater(t, stats.LinesRead, uint64(0))
 }
 
 func TestWatcherStats(t *testing.T) {
@@ -360,4 +489,33 @@ func TestWatcherStopIdempotent(t *testing.T) {
 	// Second stop should be no-op
 	err = watcher.Stop()
 	assert.NoError(t, err)
+}
+
+func waitForStoreSize(t *testing.T, store *Store, expected int, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if store.Size() >= expected {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.GreaterOrEqual(t, store.Size(), expected)
+}
+
+func waitForActivePipe(t *testing.T, watcher *Watcher, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		watcher.mu.Lock()
+		active := watcher.file != nil
+		watcher.mu.Unlock()
+		if active {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timeout waiting for active pipe")
 }

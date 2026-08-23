@@ -210,33 +210,33 @@ the remaining races in call buffering and keylog watching.
 
 ### Tasks
 
-- [ ] Assign the active named-pipe `*os.File` to `Watcher.file` under `w.mu`.
-- [ ] Close the active pipe file from `Stop()` after closing `stopChan` so a blocked
+- [x] Assign the active named-pipe `*os.File` to `Watcher.file` under `w.mu`.
+- [x] Close the active pipe file from `Stop()` after closing `stopChan` so a blocked
       `scanner.Scan()` wakes up.
-- [ ] Clear `Watcher.file` when `readPipe` returns and the file is closed.
-- [ ] Treat pipe read errors after shutdown starts as normal shutdown.
-- [ ] Prevent `pipeReadLoop` from reopening the pipe after `stopChan` closes.
-- [ ] Convert `linesRead`, `entriesAdded`, and `errors` to `atomic.Uint64`, or guard
+- [x] Clear `Watcher.file` when `readPipe` returns and the file is closed.
+- [x] Treat pipe read errors after shutdown starts as normal shutdown.
+- [x] Prevent `pipeReadLoop` from reopening the pipe after `stopChan` closes.
+- [x] Convert `linesRead`, `entriesAdded`, and `errors` to `atomic.Uint64`, or guard
       every increment and read with the same mutex.
-- [ ] Deflake the named-pipe test by waiting for the expected entry count with a
+- [x] Deflake the named-pipe test by waiting for the expected entry count with a
       bounded timeout or holding the writer open until the watcher consumes data.
 
 ### Tests
 
-- [ ] `TestWatcherNamedPipeStopWithIdleWriter`
-- [ ] `TestWatcherStatsRaceFree`
-- [ ] Updated `TestWatcherNamedPipe`
+- [x] `TestWatcherNamedPipeStopWithIdleWriter`
+- [x] `TestWatcherStatsRaceFree`
+- [x] Updated `TestWatcherNamedPipe`
 
 ## Verification
 
-- [ ] `make fmt`
-- [ ] `go vet -tags all ./...`
+- [x] `make fmt`
+- [x] `go vet -tags all ./...`
 - [x] `go test -tags all ./...`
-- [ ] `go test -tags all -race ./internal/pkg/voip/...`
-- [ ] `go test -tags all -race ./internal/pkg/processor/...`
-- [ ] `go test -tags all -race ./internal/pkg/detector/...`
-- [ ] `go test -tags all -race ./internal/pkg/tls/keylog/...`
-- [ ] Full `go test -tags all -race ./...` before merging the complete series.
+- [x] `go test -tags all -race ./internal/pkg/voip/...`
+- [x] `go test -tags all -race ./internal/pkg/processor/...`
+- [x] `go test -tags all -race ./internal/pkg/detector/...`
+- [x] `go test -tags all -race ./internal/pkg/tls/keylog/...`
+- [x] Full `go test -tags all -race ./...` before merging the complete series.
 - [ ] Replay a TCP-SIP-heavy capture through `lc tap voip` and confirm RSS plateaus
       across several TCP buffer cleanup cycles.
 - [ ] Run a high-cardinality detector replay and confirm RSS plateaus at the

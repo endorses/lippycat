@@ -30,9 +30,14 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		if gracePeriod <= 0 {
 			gracePeriod = 5 * time.Second
 		}
+		closedCallTTL := viper.GetDuration("voip.pcap_closed_call_ttl")
+		if closedCallTTL <= 0 {
+			closedCallTTL = time.Hour
+		}
 		monitor := NewSniffCompletionMonitor(&SniffCompletionMonitorConfig{
 			GracePeriod:   gracePeriod,
 			CheckInterval: 1 * time.Second,
+			ClosedCallTTL: closedCallTTL,
 		})
 		SetSniffCompletionMonitor(monitor)
 		monitor.Start()
@@ -41,7 +46,8 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			SetSniffCompletionMonitor(nil)
 		}()
 		logger.Info("Sniff completion monitor initialized",
-			"grace_period", gracePeriod)
+			"grace_period", gracePeriod,
+			"closed_call_ttl", closedCallTTL)
 	}
 
 	// Initialize virtual interface FIRST if enabled (before processing any packets)

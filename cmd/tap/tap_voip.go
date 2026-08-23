@@ -81,10 +81,13 @@ var (
 	tcpSIPIdleTimeout  time.Duration
 
 	// Per-call PCAP flags (VoIP-specific)
-	perCallPcapEnabled bool
-	perCallPcapDir     string
-	perCallPcapPattern string
-	pcapGracePeriod    time.Duration
+	perCallPcapEnabled    bool
+	perCallPcapDir        string
+	perCallPcapPattern    string
+	pcapGracePeriod       time.Duration
+	perCallPcapMaxIdle    time.Duration
+	perCallPcapMaxWriters int
+	pcapClosedCallTTL     time.Duration
 )
 
 var voipTapCmd = &cobra.Command{
@@ -152,6 +155,9 @@ func init() {
 	voipTapCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
 	voipTapCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files")
 	voipTapCmd.Flags().DurationVar(&pcapGracePeriod, "pcap-grace-period", 5*time.Second, "Grace period before closing PCAP files after call ends (for trailing RTP)")
+	voipTapCmd.Flags().DurationVar(&perCallPcapMaxIdle, "per-call-pcap-max-idle", 10*time.Minute, "Close per-call PCAP writers after this idle time (0 = disabled)")
+	voipTapCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Maximum active per-call PCAP writers (0 = unlimited)")
+	voipTapCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
 
 	// Bind VoIP-specific flags to viper
 	// Note: --voip-command is a persistent flag from TapCmd, already bound to tap.voip_command
@@ -169,6 +175,9 @@ func init() {
 	_ = viper.BindPFlag("tap.per_call_pcap.output_dir", voipTapCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("tap.per_call_pcap.file_pattern", voipTapCmd.Flags().Lookup("per-call-pcap-pattern"))
 	_ = viper.BindPFlag("tap.per_call_pcap.grace_period", voipTapCmd.Flags().Lookup("pcap-grace-period"))
+	_ = viper.BindPFlag("tap.per_call_pcap.max_idle", voipTapCmd.Flags().Lookup("per-call-pcap-max-idle"))
+	_ = viper.BindPFlag("tap.per_call_pcap.max_writers", voipTapCmd.Flags().Lookup("per-call-pcap-max-writers"))
+	_ = viper.BindPFlag("tap.per_call_pcap.closed_call_ttl", voipTapCmd.Flags().Lookup("pcap-closed-call-ttl"))
 }
 
 func runVoIPTap(cmd *cobra.Command, args []string) error {
@@ -278,9 +287,16 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 			FilePattern:     cmdutil.GetStringConfig("tap.per_call_pcap.file_pattern", perCallPcapPattern),
 			MaxFileSize:     100 * 1024 * 1024,
 			MaxFilesPerCall: 10,
+			MaxIdle:         viper.GetDuration("tap.per_call_pcap.max_idle"),
+			MaxWriters:      cmdutil.GetIntConfig("tap.per_call_pcap.max_writers", perCallPcapMaxWriters),
 			BufferSize:      4096,
 			SyncInterval:    5 * time.Second,
 		}
+	}
+
+	callCompletionMonitorConfig := &processor.CallCompletionMonitorConfig{
+		GracePeriod:   viper.GetDuration("tap.per_call_pcap.grace_period"),
+		ClosedCallTTL: viper.GetDuration("tap.per_call_pcap.closed_call_ttl"),
 	}
 
 	// Build auto-rotate PCAP config if enabled
@@ -360,30 +376,31 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	// Build processor configuration
 	config := processor.Config{
-		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
-		ProcessorID:           effectiveTapID,
-		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
-		MaxHunters:            0,
-		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
-		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
-		DisplayStats:          true,
-		PcapWriterConfig:      pcapWriterConfig,
-		AutoRotateConfig:      autoRotateConfig,
-		CommandExecutorConfig: commandExecutorConfig,
-		EnableDetection:       cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
-		FilterFile:            cmdutil.GetStringConfig("tap.filter_file", filterFile),
-		TLSEnabled:            !cmdutil.GetBoolConfig("insecure", insecureAllowed),
-		TLSCertFile:           cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
-		TLSKeyFile:            cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),
-		TLSCAFile:             cmdutil.GetStringConfig("tap.tls.ca_file", tlsCAFile),
-		TLSClientAuth:         cmdutil.GetBoolConfig("tap.tls.client_auth", tlsClientAuth),
-		AuthConfig:            authConfig,
-		VirtualInterface:      cmdutil.GetBoolConfig("tap.virtual_interface", virtualInterface),
-		VirtualInterfaceName:  cmdutil.GetStringConfig("tap.vif_name", virtualInterfaceName),
-		VirtualInterfaceType:  cmdutil.GetStringConfig("tap.vif_type", vifType),
-		VifBufferSize:         cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
-		VifNetNS:              cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
-		VifDropPrivilegesUser: cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
+		ListenAddr:                  cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
+		ProcessorID:                 effectiveTapID,
+		UpstreamAddr:                cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
+		MaxHunters:                  0,
+		MaxSubscribers:              cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
+		WriteFile:                   cmdutil.GetStringConfig("tap.write_file", writeFile),
+		DisplayStats:                true,
+		PcapWriterConfig:            pcapWriterConfig,
+		AutoRotateConfig:            autoRotateConfig,
+		CallCompletionMonitorConfig: callCompletionMonitorConfig,
+		CommandExecutorConfig:       commandExecutorConfig,
+		EnableDetection:             cmdutil.GetBoolConfig("tap.enable_detection", enableDetection),
+		FilterFile:                  cmdutil.GetStringConfig("tap.filter_file", filterFile),
+		TLSEnabled:                  !cmdutil.GetBoolConfig("insecure", insecureAllowed),
+		TLSCertFile:                 cmdutil.GetStringConfig("tap.tls.cert_file", tlsCertFile),
+		TLSKeyFile:                  cmdutil.GetStringConfig("tap.tls.key_file", tlsKeyFile),
+		TLSCAFile:                   cmdutil.GetStringConfig("tap.tls.ca_file", tlsCAFile),
+		TLSClientAuth:               cmdutil.GetBoolConfig("tap.tls.client_auth", tlsClientAuth),
+		AuthConfig:                  authConfig,
+		VirtualInterface:            cmdutil.GetBoolConfig("tap.virtual_interface", virtualInterface),
+		VirtualInterfaceName:        cmdutil.GetStringConfig("tap.vif_name", virtualInterfaceName),
+		VirtualInterfaceType:        cmdutil.GetStringConfig("tap.vif_type", vifType),
+		VifBufferSize:               cmdutil.GetIntConfig("tap.vif_buffer_size", vifBufferSize),
+		VifNetNS:                    cmdutil.GetStringConfig("tap.vif_netns", vifNetNS),
+		VifDropPrivilegesUser:       cmdutil.GetStringConfig("tap.vif_drop_privileges", vifDropPrivileges),
 	}
 
 	// Apply LI configuration (only available in -tags li builds)

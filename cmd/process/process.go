@@ -100,9 +100,12 @@ var (
 	// API Key Authentication flags
 	apiKeyAuthEnabled bool
 	// Per-call PCAP flags
-	perCallPcapEnabled bool
-	perCallPcapDir     string
-	perCallPcapPattern string
+	perCallPcapEnabled    bool
+	perCallPcapDir        string
+	perCallPcapPattern    string
+	perCallPcapMaxIdle    time.Duration
+	perCallPcapMaxWriters int
+	pcapClosedCallTTL     time.Duration
 	// Auto-rotate PCAP flags
 	autoRotatePcapEnabled     bool
 	autoRotatePcapDir         string
@@ -169,6 +172,9 @@ func init() {
 	ProcessCmd.Flags().BoolVar(&perCallPcapEnabled, "per-call-pcap", false, "Enable per-call PCAP writing for VoIP traffic")
 	ProcessCmd.Flags().StringVar(&perCallPcapDir, "per-call-pcap-dir", "./pcaps", "Directory for per-call PCAP files")
 	ProcessCmd.Flags().StringVar(&perCallPcapPattern, "per-call-pcap-pattern", "{timestamp}_{callid}.pcap", "Filename pattern for per-call PCAP files (supports {callid}, {from}, {to}, {timestamp})")
+	ProcessCmd.Flags().DurationVar(&perCallPcapMaxIdle, "per-call-pcap-max-idle", 10*time.Minute, "Close per-call PCAP writers after this idle time (0 = disabled)")
+	ProcessCmd.Flags().IntVar(&perCallPcapMaxWriters, "per-call-pcap-max-writers", 0, "Maximum active per-call PCAP writers (0 = unlimited)")
+	ProcessCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
 
 	// Auto-rotate PCAP writing
 	ProcessCmd.Flags().BoolVar(&autoRotatePcapEnabled, "auto-rotate-pcap", false, "Enable auto-rotating PCAP writing for non-VoIP traffic")
@@ -227,6 +233,9 @@ func init() {
 	_ = viper.BindPFlag("processor.per_call_pcap.enabled", ProcessCmd.Flags().Lookup("per-call-pcap"))
 	_ = viper.BindPFlag("processor.per_call_pcap.output_dir", ProcessCmd.Flags().Lookup("per-call-pcap-dir"))
 	_ = viper.BindPFlag("processor.per_call_pcap.file_pattern", ProcessCmd.Flags().Lookup("per-call-pcap-pattern"))
+	_ = viper.BindPFlag("processor.per_call_pcap.max_idle", ProcessCmd.Flags().Lookup("per-call-pcap-max-idle"))
+	_ = viper.BindPFlag("processor.per_call_pcap.max_writers", ProcessCmd.Flags().Lookup("per-call-pcap-max-writers"))
+	_ = viper.BindPFlag("processor.per_call_pcap.closed_call_ttl", ProcessCmd.Flags().Lookup("pcap-closed-call-ttl"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.enabled", ProcessCmd.Flags().Lookup("auto-rotate-pcap"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.output_dir", ProcessCmd.Flags().Lookup("auto-rotate-pcap-dir"))
 	_ = viper.BindPFlag("processor.auto_rotate_pcap.file_pattern", ProcessCmd.Flags().Lookup("auto-rotate-pcap-pattern"))
@@ -278,9 +287,15 @@ func runProcess(cmd *cobra.Command, args []string) error {
 			FilePattern:     cmdutil.GetStringConfig("processor.per_call_pcap.file_pattern", perCallPcapPattern),
 			MaxFileSize:     100 * 1024 * 1024, // 100MB default
 			MaxFilesPerCall: 10,
+			MaxIdle:         viper.GetDuration("processor.per_call_pcap.max_idle"),
+			MaxWriters:      cmdutil.GetIntConfig("processor.per_call_pcap.max_writers", perCallPcapMaxWriters),
 			BufferSize:      4096,
 			SyncInterval:    5 * time.Second,
 		}
+	}
+
+	callCompletionMonitorConfig := &processor.CallCompletionMonitorConfig{
+		ClosedCallTTL: viper.GetDuration("processor.per_call_pcap.closed_call_ttl"),
 	}
 
 	// Build auto-rotate PCAP config if enabled
@@ -384,20 +399,21 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := processor.Config{
-		ListenAddr:            cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
-		ProcessorID:           cmdutil.GetStringConfig("processor.processor_id", processorID),
-		UpstreamAddr:          cmdutil.GetStringConfig("processor.processor_addr", processorAddr),
-		MaxHunters:            cmdutil.GetIntConfig("processor.max_hunters", maxHunters),
-		MaxSubscribers:        cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
-		WriteFile:             cmdutil.GetStringConfig("processor.write_file", writeFile),
-		DisplayStats:          cmdutil.GetBoolConfig("processor.display_stats", displayStats),
-		PcapWriterConfig:      pcapWriterConfig,
-		AutoRotateConfig:      autoRotateConfig,
-		CommandExecutorConfig: commandExecutorConfig,
-		TunnelingThreshold:    cmdutil.GetFloat64Config("processor.tunneling_threshold", tunnelingThreshold),
-		TunnelingDebounce:     tunnelingDebounceDuration,
-		EnableDetection:       cmdutil.GetBoolConfig("processor.enable_detection", enableDetection),
-		FilterFile:            cmdutil.GetStringConfig("processor.filter_file", filterFile),
+		ListenAddr:                  cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
+		ProcessorID:                 cmdutil.GetStringConfig("processor.processor_id", processorID),
+		UpstreamAddr:                cmdutil.GetStringConfig("processor.processor_addr", processorAddr),
+		MaxHunters:                  cmdutil.GetIntConfig("processor.max_hunters", maxHunters),
+		MaxSubscribers:              cmdutil.GetIntConfig("processor.max_subscribers", maxSubscribers),
+		WriteFile:                   cmdutil.GetStringConfig("processor.write_file", writeFile),
+		DisplayStats:                cmdutil.GetBoolConfig("processor.display_stats", displayStats),
+		PcapWriterConfig:            pcapWriterConfig,
+		AutoRotateConfig:            autoRotateConfig,
+		CallCompletionMonitorConfig: callCompletionMonitorConfig,
+		CommandExecutorConfig:       commandExecutorConfig,
+		TunnelingThreshold:          cmdutil.GetFloat64Config("processor.tunneling_threshold", tunnelingThreshold),
+		TunnelingDebounce:           tunnelingDebounceDuration,
+		EnableDetection:             cmdutil.GetBoolConfig("processor.enable_detection", enableDetection),
+		FilterFile:                  cmdutil.GetStringConfig("processor.filter_file", filterFile),
 		// TLS configuration (enabled by default unless --insecure is set)
 		TLSEnabled:    !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:   cmdutil.GetStringConfig("processor.tls.cert_file", tlsCertFile),

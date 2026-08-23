@@ -22,6 +22,7 @@ func TestDefaultCallCompletionMonitorConfig(t *testing.T) {
 	assert.NotNil(t, config)
 	assert.Equal(t, 5*time.Second, config.GracePeriod)
 	assert.Equal(t, 1*time.Second, config.CheckInterval)
+	assert.Equal(t, time.Hour, config.ClosedCallTTL)
 }
 
 func TestNewCallCompletionMonitor(t *testing.T) {
@@ -77,6 +78,29 @@ func TestNewCallCompletionMonitor(t *testing.T) {
 			assert.NotNil(t, monitor.pendingClose)
 		})
 	}
+}
+
+func TestCallCompletionMonitorPrunesClosedCalls(t *testing.T) {
+	monitor := NewCallCompletionMonitor(&CallCompletionMonitorConfig{
+		GracePeriod:   time.Second,
+		CheckInterval: time.Second,
+		ClosedCallTTL: time.Minute,
+	}, nil, nil)
+
+	now := time.Now()
+	monitor.closedCalls["expired-call"] = now.Add(-2 * time.Minute)
+	monitor.closedCalls["recent-call"] = now.Add(-30 * time.Second)
+
+	pruned := monitor.pruneClosedCalls(now)
+	assert.Equal(t, 1, pruned)
+
+	monitor.mu.Lock()
+	_, expiredExists := monitor.closedCalls["expired-call"]
+	_, recentExists := monitor.closedCalls["recent-call"]
+	monitor.mu.Unlock()
+
+	assert.False(t, expiredExists)
+	assert.True(t, recentExists)
 }
 
 func TestCallCompletionMonitor_StartStop(t *testing.T) {

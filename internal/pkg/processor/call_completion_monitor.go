@@ -15,6 +15,7 @@ type CallCompletionMonitorConfig struct {
 	GracePeriod    time.Duration // Time to wait after call ends before closing PCAP (default: 5s)
 	CheckInterval  time.Duration // How often to check for ended calls (default: 1s)
 	RTPWaitTimeout time.Duration // Max time to wait for RTP after grace period (default: 60s)
+	ClosedCallTTL  time.Duration // Time to retain completed call IDs for suppression (default: 1h)
 }
 
 // DefaultCallCompletionMonitorConfig returns default configuration
@@ -23,6 +24,7 @@ func DefaultCallCompletionMonitorConfig() *CallCompletionMonitorConfig {
 		GracePeriod:    5 * time.Second,
 		CheckInterval:  1 * time.Second,
 		RTPWaitTimeout: 60 * time.Second,
+		ClosedCallTTL:  1 * time.Hour,
 	}
 }
 
@@ -46,7 +48,7 @@ type CallCompletionMonitor struct {
 	pcapManager  *PcapWriterManager
 	voipCleaner  VoIPPortCleaner             // Optional voip processor for port cleanup
 	pendingClose map[string]*pendingCallInfo // callID -> pending closure info
-	closedCalls  map[string]struct{}         // callIDs that have already been closed (avoid re-scheduling)
+	closedCalls  map[string]time.Time        // callIDs that have already been closed (avoid re-scheduling)
 	mu           sync.Mutex
 	checkTicker  *time.Ticker
 	stopChan     chan struct{}
@@ -73,13 +75,16 @@ func NewCallCompletionMonitor(
 	if config.RTPWaitTimeout <= 0 {
 		config.RTPWaitTimeout = 60 * time.Second
 	}
+	if config.ClosedCallTTL <= 0 {
+		config.ClosedCallTTL = 1 * time.Hour
+	}
 
 	return &CallCompletionMonitor{
 		config:       config,
 		aggregator:   aggregator,
 		pcapManager:  pcapManager,
 		pendingClose: make(map[string]*pendingCallInfo),
-		closedCalls:  make(map[string]struct{}),
+		closedCalls:  make(map[string]time.Time),
 		stopChan:     make(chan struct{}),
 	}
 }
@@ -136,6 +141,8 @@ func (m *CallCompletionMonitor) monitorLoop() {
 		case <-m.checkTicker.C:
 			m.checkEndedCalls()
 			m.processPendingClose()
+			m.sweepIdleWriters()
+			m.pruneClosedCalls(time.Now())
 		case <-m.stopChan:
 			// Close any remaining pending calls on shutdown
 			m.closeAllPending()
@@ -264,7 +271,7 @@ func (m *CallCompletionMonitor) closeCallPcap(callID string) {
 	if m.pcapManager == nil {
 		// Even without PCAP manager, mark as closed to prevent re-scheduling
 		m.mu.Lock()
-		m.closedCalls[callID] = struct{}{}
+		m.closedCalls[callID] = time.Now()
 		m.mu.Unlock()
 		return
 	}
@@ -275,17 +282,55 @@ func (m *CallCompletionMonitor) closeCallPcap(callID string) {
 			"error", err)
 		// Still mark as closed to prevent infinite retry
 		m.mu.Lock()
-		m.closedCalls[callID] = struct{}{}
+		m.closedCalls[callID] = time.Now()
 		m.mu.Unlock()
 		return
 	}
 
 	// Mark as closed
 	m.mu.Lock()
-	m.closedCalls[callID] = struct{}{}
+	m.closedCalls[callID] = time.Now()
 	m.mu.Unlock()
 
 	logger.Info("Closed PCAP files for completed call", "call_id", callID)
+}
+
+func (m *CallCompletionMonitor) sweepIdleWriters() {
+	if m == nil || m.pcapManager == nil || m.pcapManager.config == nil {
+		return
+	}
+
+	maxIdle := m.pcapManager.config.MaxIdle
+	if maxIdle <= 0 {
+		return
+	}
+
+	closed := m.pcapManager.SweepIdle(maxIdle)
+	if closed > 0 {
+		logger.Warn("Closed idle per-call PCAP writers",
+			"count", closed,
+			"max_idle", maxIdle)
+	}
+}
+
+func (m *CallCompletionMonitor) pruneClosedCalls(now time.Time) int {
+	if m == nil || m.config == nil || m.config.ClosedCallTTL <= 0 {
+		return 0
+	}
+
+	cutoff := now.Add(-m.config.ClosedCallTTL)
+	pruned := 0
+
+	m.mu.Lock()
+	for callID, closedAt := range m.closedCalls {
+		if closedAt.Before(cutoff) {
+			delete(m.closedCalls, callID)
+			pruned++
+		}
+	}
+	m.mu.Unlock()
+
+	return pruned
 }
 
 // closeAllPending closes all pending calls immediately (used during shutdown)

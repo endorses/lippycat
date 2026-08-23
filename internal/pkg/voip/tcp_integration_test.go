@@ -483,9 +483,10 @@ Content-Length: 0
 						_ = ip // Use variable to avoid unused error
 
 						netFlow := gopacket.NewFlow(layers.EndpointIPv4, ip.SrcIP, ip.DstIP)
+						transportFlow := tcp.TransportFlow()
 
 						// Buffer the packet using correct flow
-						BufferTCPPacket(netFlow, pktInfo)
+						BufferTCPPacket(netFlow, transportFlow, pktInfo)
 
 						// Handle through assembler as well
 						handleTcpPackets(pktInfo, tcp, assembler)
@@ -614,7 +615,7 @@ func createTCPPacketWithPayload(t *testing.T, payload []byte, seqNum uint32, lin
 
 func resetGlobalStateForTest() {
 	// Reset TCP buffer state
-	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffers = make(map[tcpBufferKey]*TCPPacketBuffer)
 
 	// Reset buffer stats with proper locking (don't replace pointer)
 	tcpBufferStats.mu.Lock()

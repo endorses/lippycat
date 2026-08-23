@@ -55,9 +55,9 @@ func (h *TapTCPHandler) SetApplicationFilter(filter ApplicationFilter) {
 // P-Asserted-Identity) be delivered — not just the first. Because each message
 // is dispatched exactly once by the reassembler and forwarded as a single unit,
 // there is no whole-flow "drain-and-forget" and no double-forwarding.
-func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool {
+func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
 	if callID == "" {
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
@@ -78,14 +78,14 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 		logger.Warn("TCP SIP: failed to synthesize packet for message, dropping",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"flow", srcEndpoint+"->"+dstEndpoint)
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
 	// Check if THIS message matches filters (using the synthesized packet's SIP).
 	if !h.matchesMessage(pkt, headers) {
 		// Message doesn't match filter - release any per-flow buffered packets.
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		logger.Debug("TCP SIP message filtered out (tap mode)",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"method", method,
@@ -136,7 +136,7 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 	// multi-message connection does not accumulate buffered packets. Subsequent
 	// messages on this connection are re-buffered as their packets arrive and
 	// handled by their own HandleSIPMessage invocation.
-	discardTCPBufferedPackets(netFlow)
+	discardTCPBufferedPackets(netFlow, transportFlow)
 
 	return true
 }

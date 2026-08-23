@@ -44,7 +44,7 @@ func NewTUISIPHandler() *TUISIPHandler {
 // It marks the flow as SIP so subsequent packets on this flow are displayed correctly.
 // srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
 // netFlow is not used by TUI handler but required by the interface for other handlers.
-func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, _ gopacket.Flow) bool {
+func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, _, _ gopacket.Flow) bool {
 	if len(sipMessage) == 0 {
 		return false
 	}

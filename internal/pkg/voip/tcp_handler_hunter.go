@@ -55,9 +55,9 @@ func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
 // runs against THIS message's SIP (not the first buffered packet of the flow),
 // and forwarding delivers this message's own packet (not a drained whole-flow
 // buffer), so there is no match-once-per-connection and no double-forwarding.
-func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool {
+func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
 	if callID == "" {
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
@@ -73,7 +73,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 		logger.Warn("TCP SIP: failed to synthesize packet for message, dropping",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"flow", srcEndpoint+"->"+dstEndpoint)
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
@@ -119,17 +119,17 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 					"call_id", SanitizeCallIDForLogging(callID),
 					"method", method)
 			}
-			discardTCPBufferedPackets(netFlow)
+			discardTCPBufferedPackets(netFlow, transportFlow)
 			return true
 		}
 		// Call not tracked, discard
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
 	// Check if THIS message matches the filter (using the synthesized packet's SIP).
 	if !h.matchesMessage(pkt, headers) {
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		logger.Debug("TCP SIP message filtered out",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"method", method,
@@ -161,7 +161,7 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 		h.bufferMgr.MarkCallMatched(callID, metadata, "", layers.LinkTypeEthernet)
 	}
 
-	discardTCPBufferedPackets(netFlow)
+	discardTCPBufferedPackets(netFlow, transportFlow)
 	return true
 }
 

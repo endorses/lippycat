@@ -52,9 +52,10 @@ func (a *TapTCPAssembler) AssemblePacket(pktInfo capture.PacketInfo) bool {
 
 	// Get the network flow for assembly
 	netFlow := packet.NetworkLayer().NetworkFlow()
+	transportFlow := tcpLayer.TransportFlow()
 
 	// Buffer the raw packet for later retrieval by the handler
-	voip.BufferTCPPacket(netFlow, pktInfo)
+	voip.BufferTCPPacket(netFlow, transportFlow, pktInfo)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
 	a.assembler.Assemble(netFlow, tcpLayer, packet.Metadata().Timestamp)

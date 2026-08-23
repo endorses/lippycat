@@ -34,7 +34,7 @@ func NewLocalFileHandler() *LocalFileHandler {
 // has matched, its later in-dialog messages are written without having to match
 // on their own headers. Otherwise a target identified only by
 // P-Asserted-Identity on the INVITE would have the rest of its dialog dropped.
-func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool {
+func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
 	logger.Debug("TCP HandleSIPMessage called",
 		"call_id", SanitizeCallIDForLogging(callID),
 		"message_len", len(sipMessage),
@@ -42,7 +42,7 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 
 	if callID == "" {
 		logger.Debug("Empty call-ID, skipping")
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
@@ -50,7 +50,7 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 	// segments that carried this message, so their time is the message's time.
 	// Falling back to wall-clock would stamp an offline PCAP replay with today.
 	ts := time.Now()
-	if raw, ok := peekFirstTCPBufferedPacket(netFlow); ok && raw.Packet != nil {
+	if raw, ok := peekFirstTCPBufferedPacket(netFlow, transportFlow); ok && raw.Packet != nil {
 		if bufTS := raw.Packet.Metadata().Timestamp; !bufTS.IsZero() {
 			ts = bufTS
 		}
@@ -76,7 +76,7 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 	if !matched && !alreadyMatched {
 		// Release this message's packets rather than leaving them buffered,
 		// where a later matching call would have written them into its PCAP.
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		logger.Debug("Message didn't match filter, not writing")
 		return false
 	}
@@ -89,7 +89,7 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 		logger.Warn("TCP SIP: failed to synthesize packet for message, dropping",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"flow", srcEndpoint+"->"+dstEndpoint)
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
@@ -97,7 +97,7 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 	call := GetOrCreateCall(callID, layers.LinkTypeEthernet)
 	if call == nil {
 		logger.Warn("Failed to create call for TCP SIP message", "call_id", SanitizeCallIDForLogging(callID))
-		discardTCPBufferedPackets(netFlow)
+		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
@@ -127,7 +127,7 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 
 	// The synthesized packet is self-contained; release the raw buffer so a
 	// long-lived, multi-message connection does not accumulate packets.
-	discardTCPBufferedPackets(netFlow)
+	discardTCPBufferedPackets(netFlow, transportFlow)
 
 	logger.Info("TCP SIP message matched filter and written to file",
 		"call_id", SanitizeCallIDForLogging(callID),

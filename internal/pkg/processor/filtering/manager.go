@@ -259,6 +259,9 @@ func (m *Manager) AddChannel(hunterID string) chan *management.FilterUpdate {
 	ch := make(chan *management.FilterUpdate, constants.FilterUpdateChannelBuffer)
 
 	m.channelsMu.Lock()
+	if oldCh, exists := m.channels[hunterID]; exists {
+		close(oldCh)
+	}
 	m.channels[hunterID] = ch
 	m.channelsMu.Unlock()
 
@@ -266,11 +269,11 @@ func (m *Manager) AddChannel(hunterID string) chan *management.FilterUpdate {
 }
 
 // RemoveChannel removes and closes a filter update channel for a hunter
-func (m *Manager) RemoveChannel(hunterID string) {
+func (m *Manager) RemoveChannel(hunterID string, ch chan *management.FilterUpdate) {
 	m.channelsMu.Lock()
-	if ch, exists := m.channels[hunterID]; exists {
+	if storedCh, exists := m.channels[hunterID]; exists && storedCh == ch {
 		delete(m.channels, hunterID)
-		close(ch)
+		close(storedCh)
 	}
 	m.channelsMu.Unlock()
 }

@@ -335,7 +335,7 @@ func TestTCPBufferStats(t *testing.T) {
 	}
 	// Also clear the buffer map
 	tcpPacketBuffersMu.Lock()
-	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffers = make(map[tcpBufferKey]*TCPPacketBuffer)
 	tcpPacketBuffersMu.Unlock()
 
 	stats := GetTCPBufferStats()
@@ -349,7 +349,7 @@ func TestTCPBufferStatsIncludesLiveAndPooledMemory(t *testing.T) {
 	originalPool := tcpBufferPool
 	tcpPacketBuffersMu.Lock()
 	originalBuffers := tcpPacketBuffers
-	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffers = make(map[tcpBufferKey]*TCPPacketBuffer)
 	tcpPacketBuffersMu.Unlock()
 
 	tcpBufferPool = &TCPBufferPool{
@@ -364,8 +364,10 @@ func TestTCPBufferStatsIncludesLiveAndPooledMemory(t *testing.T) {
 	}()
 
 	activeFlow := gopacket.NewFlow(layers.EndpointIPv4, []byte{10, 0, 0, 1}, []byte{10, 0, 0, 2})
+	activeTransportFlow := gopacket.NewFlow(layers.EndpointTCPPort, []byte{0x13, 0xc4}, []byte{0x13, 0xc5})
+	activeKey := newTCPBufferKey(activeFlow, activeTransportFlow)
 	tcpPacketBuffersMu.Lock()
-	tcpPacketBuffers[activeFlow] = &TCPPacketBuffer{
+	tcpPacketBuffers[activeKey] = &TCPPacketBuffer{
 		packets: []bufferedFrame{
 			{data: []byte("INVITE")},
 			{data: []byte("BYE")},
@@ -540,7 +542,7 @@ func isolateTCPBufferPoolForTest(t *testing.T, poolSize int) {
 	originalPool := tcpBufferPool
 	tcpPacketBuffersMu.Lock()
 	originalBuffers := tcpPacketBuffers
-	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffers = make(map[tcpBufferKey]*TCPPacketBuffer)
 	tcpPacketBuffersMu.Unlock()
 
 	tcpBufferPool = &TCPBufferPool{
@@ -582,11 +584,12 @@ func TestReleaseBufferDropsFrameDataReferences(t *testing.T) {
 func TestCleanupOldTCPBuffersReleasesFrameData(t *testing.T) {
 	isolateTCPBufferPoolForTest(t, 10)
 
-	var flow gopacket.Flow
+	var flow, transportFlow gopacket.Flow
+	key := newTCPBufferKey(flow, transportFlow)
 	buffer := &TCPPacketBuffer{
 		packets:    make([]bufferedFrame, 2, 4),
 		lastAccess: time.Now().Add(-2 * time.Hour),
-		flow:       flow,
+		key:        key,
 		callID:     "expired-call",
 	}
 	full := buffer.packets[:cap(buffer.packets)]
@@ -595,13 +598,13 @@ func TestCleanupOldTCPBuffersReleasesFrameData(t *testing.T) {
 	}
 
 	tcpPacketBuffersMu.Lock()
-	tcpPacketBuffers[flow] = buffer
+	tcpPacketBuffers[key] = buffer
 	tcpPacketBuffersMu.Unlock()
 
 	cleanupOldTCPBuffers(time.Minute)
 
 	tcpPacketBuffersMu.RLock()
-	_, exists := tcpPacketBuffers[flow]
+	_, exists := tcpPacketBuffers[key]
 	tcpPacketBuffersMu.RUnlock()
 	assert.False(t, exists)
 

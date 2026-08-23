@@ -231,7 +231,7 @@ func (p *Processor) SubscribeFilters(req *management.FilterRequest, stream manag
 
 	// Cleanup on disconnect
 	defer func() {
-		p.filterManager.RemoveChannel(hunterID)
+		p.filterManager.RemoveChannel(hunterID, filterChan)
 		logger.Debug("SubscribeFilters exiting", "hunter_id", hunterID, "stream_context", stream.Context().Err())
 		logger.Info("Filter subscription ended", "hunter_id", hunterID)
 	}()

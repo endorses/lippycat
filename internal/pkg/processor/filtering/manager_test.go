@@ -24,7 +24,7 @@ func TestManager_AddAndRemoveChannel(t *testing.T) {
 	assert.True(t, exists, "channel should be registered")
 
 	// Remove channel
-	manager.RemoveChannel(hunterID)
+	manager.RemoveChannel(hunterID, ch)
 
 	// Verify channel is removed and closed
 	manager.channelsMu.RLock()
@@ -35,6 +35,45 @@ func TestManager_AddAndRemoveChannel(t *testing.T) {
 	// Verify channel is closed
 	_, ok := <-ch
 	assert.False(t, ok, "channel should be closed")
+}
+
+func TestAddChannelReplacesStaleSubscription(t *testing.T) {
+	manager := NewManager("", nil, nil, nil, nil)
+
+	hunterID := "hunter-1"
+	stale := manager.AddChannel(hunterID)
+	replacement := manager.AddChannel(hunterID)
+
+	assert.True(t, stale != replacement)
+	_, ok := <-stale
+	assert.False(t, ok, "replaced channel should be closed")
+
+	manager.channelsMu.RLock()
+	stored := manager.channels[hunterID]
+	manager.channelsMu.RUnlock()
+	assert.True(t, replacement == stored)
+}
+
+func TestRemoveChannelIgnoresSupersededChannel(t *testing.T) {
+	manager := NewManager("", nil, nil, nil, nil)
+
+	hunterID := "hunter-1"
+	stale := manager.AddChannel(hunterID)
+	replacement := manager.AddChannel(hunterID)
+
+	manager.RemoveChannel(hunterID, stale)
+
+	manager.channelsMu.RLock()
+	stored, exists := manager.channels[hunterID]
+	manager.channelsMu.RUnlock()
+	assert.True(t, exists, "replacement channel should remain registered")
+	assert.True(t, replacement == stored)
+
+	select {
+	case _, ok := <-replacement:
+		assert.True(t, ok, "replacement channel should not be closed")
+	default:
+	}
 }
 
 func TestManager_Update_SingleHunter(t *testing.T) {

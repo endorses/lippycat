@@ -103,8 +103,8 @@ func (t *HunterTarget) AddChannel(hunterID string) chan *management.FilterUpdate
 }
 
 // RemoveChannel removes and closes a filter update channel for a hunter.
-func (t *HunterTarget) RemoveChannel(hunterID string) {
-	t.manager.RemoveChannel(hunterID)
+func (t *HunterTarget) RemoveChannel(hunterID string, ch chan *management.FilterUpdate) {
+	t.manager.RemoveChannel(hunterID, ch)
 }
 
 // Load loads filters from the persistence file.

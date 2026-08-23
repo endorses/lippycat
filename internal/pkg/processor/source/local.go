@@ -421,6 +421,13 @@ func (s *LocalSource) batchingLoop() {
 		}(workerChans[i])
 	}
 
+	closeWorkers := func() {
+		for _, ch := range workerChans {
+			close(ch)
+		}
+		wg.Wait()
+	}
+
 	for pktInfo := range packetBuffer.Receive() {
 		idx := 0
 		if pkt := pktInfo.Packet; pkt != nil {
@@ -437,14 +444,16 @@ func (s *LocalSource) batchingLoop() {
 				}
 			}
 		}
-		workerChans[idx] <- pktInfo
+		select {
+		case workerChans[idx] <- pktInfo:
+		case <-s.ctx.Done():
+			closeWorkers()
+			return
+		}
 	}
 
 	// Capture buffer closed: close worker channels so workers drain and exit.
-	for _, ch := range workerChans {
-		close(ch)
-	}
-	wg.Wait()
+	closeWorkers()
 }
 
 // getDetectionWorkerCount returns the number of concurrent detection/batching

@@ -117,8 +117,11 @@ func (bm *BufferManager) AddRTPPacket(callID string, port string, packet gopacke
 
 	// Buffer the packet
 	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	if bm.buffers[callID] != buffer {
+		return false
+	}
 	buffer.AddRTPPacket(packet)
-	bm.mu.Unlock()
 
 	return false // Buffered, don't forward yet
 }

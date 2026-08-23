@@ -225,6 +225,66 @@ func TestDetector_FlowTracking(t *testing.T) {
 	assert.True(t, flow.LastSeen.After(flow.FirstSeen))
 }
 
+func TestFlowTrackerRespectsMaxEntries(t *testing.T) {
+	tracker := NewFlowTrackerWithMaxEntries(time.Hour, 2)
+	defer tracker.Close()
+
+	old := tracker.GetOrCreate("old")
+	old.LastSeen = time.Now().Add(-time.Hour)
+	newer := tracker.GetOrCreate("newer")
+	newer.LastSeen = time.Now()
+
+	tracker.GetOrCreate("newest")
+
+	assert.Equal(t, 2, tracker.Size())
+	assert.Nil(t, tracker.Get("old"))
+	assert.NotNil(t, tracker.Get("newer"))
+	assert.NotNil(t, tracker.Get("newest"))
+}
+
+func TestDetectionCacheRespectsMaxEntries(t *testing.T) {
+	cache := NewDetectionCacheWithMaxEntries(time.Hour, 2)
+	defer cache.Close()
+
+	result := &signatures.DetectionResult{
+		Protocol:      "TEST",
+		Confidence:    signatures.ConfidenceHigh,
+		Metadata:      map[string]interface{}{},
+		ShouldCache:   true,
+		CacheStrategy: signatures.CacheFlow,
+	}
+
+	cache.Set("old", result)
+	cache.entries["old"].expiresAt = time.Now().Add(1 * time.Minute)
+	cache.Set("newer", result)
+	cache.entries["newer"].expiresAt = time.Now().Add(2 * time.Minute)
+	cache.Set("newest", result)
+
+	assert.Equal(t, 2, cache.Size())
+	assert.Nil(t, cache.Get("old"))
+	assert.NotNil(t, cache.Get("newer"))
+	assert.NotNil(t, cache.Get("newest"))
+}
+
+func TestDetectionCacheDeletesOnExpiredGet(t *testing.T) {
+	cache := NewDetectionCacheWithMaxEntries(10*time.Millisecond, 10)
+	defer cache.Close()
+
+	result := &signatures.DetectionResult{
+		Protocol:      "TEST",
+		Confidence:    signatures.ConfidenceHigh,
+		Metadata:      map[string]interface{}{},
+		ShouldCache:   true,
+		CacheStrategy: signatures.CacheFlow,
+	}
+
+	cache.Set("expired", result)
+	time.Sleep(20 * time.Millisecond)
+
+	assert.Nil(t, cache.Get("expired"))
+	assert.Equal(t, 0, cache.Size())
+}
+
 func TestGenerateFlowID(t *testing.T) {
 	tests := []struct {
 		name      string

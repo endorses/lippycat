@@ -118,29 +118,29 @@ the remaining races in call buffering and keylog watching.
 
 ### Tasks
 
-- [ ] Add `sync.RWMutex` to `CallBuffer`.
-- [ ] Guard all `CallBuffer` methods that read or mutate packet slices, RTP ports,
+- [x] Add `sync.RWMutex` to `CallBuffer`.
+- [x] Guard all `CallBuffer` methods that read or mutate packet slices, RTP ports,
       metadata, filter state, interface name, and link type.
-- [ ] Add an unlocked helper for RTP port lookup so `AddRTPPort` does not recurse
+- [x] Add an unlocked helper for RTP port lookup so `AddRTPPort` does not recurse
       through a public locking method.
-- [ ] In `BufferManager.AddRTPPacket`, re-check `bm.buffers[callID] == buffer`
+- [x] In `BufferManager.AddRTPPacket`, re-check `bm.buffers[callID] == buffer`
       after acquiring `bm.mu.Lock()` before appending.
-- [ ] Keep lock order consistent: acquire `BufferManager.mu` before
+- [x] Keep lock order consistent: acquire `BufferManager.mu` before
       `CallBuffer.mu` whenever both are needed.
-- [ ] Add `maxEntries` to `FlowTracker` and `DetectionCache`.
-- [ ] Evict oldest `LastSeen` / oldest expiring entries when detector maps hit the
+- [x] Add `maxEntries` to `FlowTracker` and `DetectionCache`.
+- [x] Evict oldest `LastSeen` / oldest expiring entries when detector maps hit the
       cap.
-- [ ] Delete expired detection cache entries on `Get`.
-- [ ] Add detector defaults and viper overrides:
+- [x] Delete expired detection cache entries on `Get`.
+- [x] Add detector defaults and viper overrides:
       `detector.max_flows` and `detector.max_cache_entries`.
-- [ ] Log a rate-limited warning when a detector cap is first hit.
+- [x] Log a rate-limited warning when a detector cap is first hit.
 
 ### Tests
 
-- [ ] `TestBufferManagerConcurrentSIPAndRTP`
-- [ ] `TestFlowTrackerRespectsMaxEntries`
-- [ ] `TestDetectionCacheRespectsMaxEntries`
-- [ ] `TestDetectionCacheDeletesOnExpiredGet`
+- [x] `TestBufferManagerConcurrentSIPAndRTP`
+- [x] `TestFlowTrackerRespectsMaxEntries`
+- [x] `TestDetectionCacheRespectsMaxEntries`
+- [x] `TestDetectionCacheDeletesOnExpiredGet`
 
 ## Phase 3: PCAP Writer and Completion Lifecycle
 

@@ -1,6 +1,8 @@
 package voip
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -526,6 +528,59 @@ func TestBufferManager_ConcurrentAccess(t *testing.T) {
 
 	// Should not panic or deadlock
 	assert.True(t, true, "Concurrent access completed successfully")
+}
+
+func TestBufferManagerConcurrentSIPAndRTP(t *testing.T) {
+	bm := NewBufferManager(5*time.Second, 10000)
+	defer bm.Close()
+
+	const callCount = 25
+	const packetsPerCall = 40
+
+	var wg sync.WaitGroup
+	for i := 0; i < callCount; i++ {
+		i := i
+		callID := fmt.Sprintf("call-%d", i)
+		rtpPort := fmt.Sprintf("%d", 10000+i)
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < packetsPerCall; j++ {
+				packet := createTestUDPPacket(t, 5060, 5061, []byte("INVITE"))
+				metadata := &CallMetadata{
+					CallID:  callID,
+					From:    "alicent@example.com",
+					To:      "robb@example.com",
+					Method:  "INVITE",
+					SDPBody: "m=audio " + rtpPort + " RTP/AVP 0",
+				}
+				bm.AddSIPPacket(callID, packet, metadata, "eth0", layers.LinkTypeEthernet)
+			}
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < packetsPerCall; j++ {
+				packet := createTestUDPPacket(t, uint16(10000+i), 9000, []byte{0x80, byte(j)})
+				_ = bm.AddRTPPacket(callID, rtpPort, packet)
+			}
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < packetsPerCall; j++ {
+				_, _ = bm.GetCallIDForRTPPort(rtpPort)
+				_ = bm.IsCallMatched(callID)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	assert.LessOrEqual(t, bm.GetBufferCount(), callCount)
 }
 
 // Helper function to create test UDP packets

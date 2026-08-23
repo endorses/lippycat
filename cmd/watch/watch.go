@@ -25,8 +25,9 @@ Examples:
   lc watch                          # Live capture (default)
   lc watch live -i eth0             # Live capture on eth0
   lc watch file capture.pcap
+  lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
   lc watch remote -n nodes.yaml --tls-ca ca.crt
-  lc watch remote -n nodes.yaml --insecure  # Local testing only`,
+  lc watch remote -P localhost:55555 --insecure  # Local testing only`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Default to live mode if no subcommand is specified
 		runLive(cmd, args)

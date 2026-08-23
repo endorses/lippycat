@@ -5,6 +5,7 @@ package watch
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,15 +29,16 @@ The nodes configuration is loaded from a YAML file. Default locations:
   2. ~/.config/lippycat/nodes.yaml
 
 Examples:
-  lc watch remote --tls-ca ca.crt
+  lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
   lc watch remote -n /path/to/nodes.yaml --tls-ca ca.crt
-  lc watch remote --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
-  lc watch remote --insecure  # Local testing only`,
+  lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+  lc watch remote -P localhost:55555 --insecure  # Local testing only`,
 	Run: runRemote,
 }
 
 var (
 	remoteNodesFile string
+	remoteProcessor string
 )
 
 func runRemote(cmd *cobra.Command, args []string) {
@@ -84,6 +86,16 @@ func runRemote(cmd *cobra.Command, args []string) {
 		maxCalls = configMaxCalls
 	}
 
+	processorAddr := strings.TrimSpace(remoteProcessor)
+	if processorAddr == "" {
+		processorAddr = strings.TrimSpace(viper.GetString("remote.processor"))
+	}
+
+	var remoteProcessors []string
+	if processorAddr != "" {
+		remoteProcessors = []string{processorAddr}
+	}
+
 	// Create TUI model for remote monitoring mode
 	model := tui.NewModel(
 		bufferSize,
@@ -95,6 +107,7 @@ func runRemote(cmd *cobra.Command, args []string) {
 		true,            // startInRemoteMode
 		remoteNodesFile, // nodesFilePath
 		insecureAllowed, // insecure
+		remoteProcessors...,
 	)
 
 	// Full terminal reset (RIS) to clear any corrupted state including color palette
@@ -120,4 +133,6 @@ func runRemote(cmd *cobra.Command, args []string) {
 
 func init() {
 	remoteCmd.Flags().StringVarP(&remoteNodesFile, "nodes-file", "n", "", "path to nodes YAML file (default: ~/.config/lippycat/nodes.yaml or ./nodes.yaml)")
+	remoteCmd.Flags().StringVarP(&remoteProcessor, "processor", "P", "", "processor address (host:port) to connect directly")
+	_ = viper.BindPFlag("remote.processor", remoteCmd.Flags().Lookup("processor"))
 }

@@ -42,6 +42,13 @@ func testNetFlow(t *testing.T, src, dst string) gopacket.Flow {
 	return gopacket.NewFlow(layers.EndpointIPv4, srcIP.Raw(), dstIP.Raw())
 }
 
+func testTransportFlow(t *testing.T, src, dst layers.TCPPort) gopacket.Flow {
+	t.Helper()
+	srcPort := layers.NewTCPPortEndpoint(src)
+	dstPort := layers.NewTCPPortEndpoint(dst)
+	return gopacket.NewFlow(layers.EndpointTCPPort, srcPort.Raw(), dstPort.Raw())
+}
+
 func mustIP(t *testing.T, s string) []byte {
 	t.Helper()
 	ip := parseTestIPv4(s)
@@ -134,6 +141,7 @@ func TestTapHandler_MultipleMessagesEachForwarded(t *testing.T) {
 	netFlow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
 	const src = "10.0.0.1:5060"
 	const dst = "10.0.0.2:5060"
+	transportFlow := testTransportFlow(t, 5060, 5060)
 
 	type msg struct {
 		callID    string
@@ -150,7 +158,7 @@ func TestTapHandler_MultipleMessagesEachForwarded(t *testing.T) {
 
 	wantForwarded := 0
 	for _, m := range msgs {
-		got := h.HandleSIPMessage(m.bytes, m.callID, src, dst, netFlow)
+		got := h.HandleSIPMessage(m.bytes, m.callID, src, dst, netFlow, transportFlow)
 		if got != m.wantMatch {
 			t.Errorf("HandleSIPMessage(%s) = %v, want %v", m.callID, got, m.wantMatch)
 		}
@@ -218,9 +226,10 @@ func TestTapHandler_MOLegMatchesFromAndPAI(t *testing.T) {
 	h.SetApplicationFilter(filter)
 
 	netFlow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
+	transportFlow := testTransportFlow(t, 5060, 5060)
 	msg := moMessage("call-mo", target)
 
-	if !h.HandleSIPMessage(msg, "call-mo", "10.0.0.1:5060", "10.0.0.2:5060", netFlow) {
+	if !h.HandleSIPMessage(msg, "call-mo", "10.0.0.1:5060", "10.0.0.2:5060", netFlow, transportFlow) {
 		t.Fatal("MO leg (target in From/P-Asserted-Identity) was not matched")
 	}
 	forwarded := drainForwarded(ch)

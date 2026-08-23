@@ -22,7 +22,8 @@ func handleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *capt
 
 	// Buffer the packet for potential PCAP writing
 	flow := pkt.Packet.NetworkLayer().NetworkFlow()
-	BufferTCPPacket(flow, pkt)
+	transportFlow := layer.TransportFlow()
+	BufferTCPPacket(flow, transportFlow, pkt)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
 	assembler.Assemble(

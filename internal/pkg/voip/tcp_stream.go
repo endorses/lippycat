@@ -28,9 +28,10 @@ type SIPMessageHandler interface {
 	//   - srcEndpoint: source IP:port (e.g., "192.168.1.1:5060")
 	//   - dstEndpoint: destination IP:port (e.g., "192.168.1.2:5060")
 	//   - netFlow: network layer flow (IP addresses only) - used for TCP packet buffer lookup
+	//   - transportFlow: transport layer flow (TCP ports) - used for TCP packet buffer lookup
 	// Returns:
 	//   - bool: true if message was accepted/matched filter (for metrics)
-	HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow gopacket.Flow) bool
+	HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool
 }
 
 // bufferedSIPStream implements reassembly.Stream with a buffered channel.
@@ -486,7 +487,7 @@ func (s *bufferedSIPStream) processSIPFromReader(reader io.Reader) {
 	// no-op; if the stream ended without a successful match (errNotSIP,
 	// errReadTimeout, ctx cancellation, EOF), this releases the packets
 	// immediately instead of waiting for TCPBufferMaxAge.
-	defer discardTCPBufferedPackets(s.netFlow)
+	defer discardTCPBufferedPackets(s.netFlow, s.transportFlow)
 
 	for {
 		select {
@@ -687,7 +688,7 @@ func (s *bufferedSIPStream) readSIPStartLine(bufReader *bufio.Reader) (string, i
 			// this boundary — on long-lived idle connections this is the only
 			// thing that stops the buffer growing to its cap — and remember we
 			// are at a boundary so a following start line is accepted.
-			discardTCPBufferedPackets(s.netFlow)
+			discardTCPBufferedPackets(s.netFlow, s.transportFlow)
 			atBoundary = true
 			if scanned > resyncWindowBytes {
 				return "", scanned, errNotSIP
@@ -809,7 +810,7 @@ func (s *bufferedSIPStream) processSipMessage(sipMessage []byte) {
 
 		if s.factory != nil && s.factory.handler != nil {
 			srcEndpoint, dstEndpoint := s.getEndpoints()
-			s.factory.handler.HandleSIPMessage(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow)
+			s.factory.handler.HandleSIPMessage(sipMessage, callID, srcEndpoint, dstEndpoint, s.netFlow, s.transportFlow)
 		}
 	}
 }

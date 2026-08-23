@@ -27,7 +27,7 @@ type recordingSIPHandler struct {
 	payloads []string
 }
 
-func (r *recordingSIPHandler) HandleSIPMessage(sipMessage []byte, callID, src, dst string, netFlow gopacket.Flow) bool {
+func (r *recordingSIPHandler) HandleSIPMessage(sipMessage []byte, callID, src, dst string, _, _ gopacket.Flow) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.callIDs = append(r.callIDs, callID)

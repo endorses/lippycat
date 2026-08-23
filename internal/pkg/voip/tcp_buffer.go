@@ -21,9 +21,14 @@ const (
 var (
 	currentLinkType    layers.LinkType = layers.LinkTypeEthernet
 	currentLinkTypeMu  sync.RWMutex
-	tcpPacketBuffers   = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffers   = make(map[tcpBufferKey]*TCPPacketBuffer)
 	tcpPacketBuffersMu sync.RWMutex
 )
+
+type tcpBufferKey struct {
+	netFlow       gopacket.Flow
+	transportFlow gopacket.Flow
+}
 
 // bufferedFrame stores the source-of-truth for one TCP packet without
 // pinning the decoded gopacket.Packet (and its layer allocations).
@@ -43,7 +48,7 @@ type TCPPacketBuffer struct {
 	packets    []bufferedFrame
 	createdAt  time.Time
 	lastAccess time.Time
-	flow       gopacket.Flow
+	key        tcpBufferKey
 	callID     string
 	maxSize    int
 	strategy   string
@@ -90,7 +95,7 @@ func getOrCreateBuffer(strategy string, maxSize int) *TCPPacketBuffer {
 		// Reset the buffer for reuse
 		buffer.createdAt = time.Now()
 		buffer.lastAccess = time.Now()
-		buffer.flow = gopacket.Flow{}
+		buffer.key = tcpBufferKey{}
 		buffer.maxSize = maxSize
 		buffer.strategy = strategy
 		buffer.callID = ""
@@ -127,7 +132,7 @@ func releaseBuffer(buffer *TCPPacketBuffer) {
 	}
 	buffer.packets = buffer.packets[:0]
 	buffer.callID = ""
-	buffer.flow = gopacket.Flow{}
+	buffer.key = tcpBufferKey{}
 
 	if cap(buffer.packets) > maxPooledTCPBufferCapacity {
 		return
@@ -144,19 +149,42 @@ func releaseBuffer(buffer *TCPPacketBuffer) {
 	// If pool is full, buffer will be garbage collected
 }
 
-// BufferTCPPacket buffers a TCP packet for a network flow.
+func newTCPBufferKey(netFlow, transportFlow gopacket.Flow) tcpBufferKey {
+	if shouldReverseTCPBufferKey(netFlow, transportFlow) {
+		netFlow = netFlow.Reverse()
+		transportFlow = transportFlow.Reverse()
+	}
+	return tcpBufferKey{netFlow: netFlow, transportFlow: transportFlow}
+}
+
+func shouldReverseTCPBufferKey(netFlow, transportFlow gopacket.Flow) bool {
+	netSrc, netDst := netFlow.Endpoints()
+	if netDst.LessThan(netSrc) {
+		return true
+	}
+	if netSrc.LessThan(netDst) {
+		return false
+	}
+
+	transportSrc, transportDst := transportFlow.Endpoints()
+	return transportDst.LessThan(transportSrc)
+}
+
+// BufferTCPPacket buffers a TCP packet for a network and transport flow.
 // This is used by TCP SIP handlers to buffer packets before reassembly completes.
-func BufferTCPPacket(flow gopacket.Flow, pkt capture.PacketInfo) {
+func BufferTCPPacket(netFlow, transportFlow gopacket.Flow, pkt capture.PacketInfo) {
+	key := newTCPBufferKey(netFlow, transportFlow)
+
 	tcpPacketBuffersMu.Lock()
 	defer tcpPacketBuffersMu.Unlock()
 
-	buffer, exists := tcpPacketBuffers[flow]
+	buffer, exists := tcpPacketBuffers[key]
 	if !exists {
 		// Create new buffer with configured strategy and size
 		config := GetConfig()
 		buffer = getOrCreateBuffer(config.TCPBufferStrategy, config.MaxTCPBuffers)
-		buffer.flow = flow
-		tcpPacketBuffers[flow] = buffer
+		buffer.key = key
+		tcpPacketBuffers[key] = buffer
 	}
 
 	buffer.lastAccess = time.Now()
@@ -219,22 +247,22 @@ func reconstructPacket(frame bufferedFrame) capture.PacketInfo {
 }
 
 // NOTE: there is deliberately no "flush this flow's packets to a call" helper.
-// The buffer is keyed by network flow (IP pair), so it holds every connection
-// and every call between two hosts; writing it under a single Call-ID mixed
-// unrelated calls into one PCAP and consumed segments that a following
-// pipelined message still needed. The TCP handlers instead write one
-// synthesized packet per reassembled SIP message (see buildSIPPacketInfo) and
-// use this buffer only for the capture timestamp before releasing it.
+// The buffer is keyed by canonical network and transport flow, so it isolates
+// simultaneous TCP connections between the same hosts. The TCP handlers write
+// one synthesized packet per reassembled SIP message (see buildSIPPacketInfo)
+// and use this buffer only for the capture timestamp before releasing it.
 
 // peekFirstTCPBufferedPacket reconstructs the first buffered packet for a flow
 // without draining or modifying the buffer. Used by filter matching paths that
 // only need a single packet to evaluate against (e.g., MatchPacket on the
 // first packet in a SIP flow). Returns ok=false if no buffered packets exist.
-func peekFirstTCPBufferedPacket(flow gopacket.Flow) (capture.PacketInfo, bool) {
+func peekFirstTCPBufferedPacket(netFlow, transportFlow gopacket.Flow) (capture.PacketInfo, bool) {
+	key := newTCPBufferKey(netFlow, transportFlow)
+
 	tcpPacketBuffersMu.Lock()
 	defer tcpPacketBuffersMu.Unlock()
 
-	buffer, exists := tcpPacketBuffers[flow]
+	buffer, exists := tcpPacketBuffers[key]
 	if !exists || len(buffer.packets) == 0 {
 		return capture.PacketInfo{}, false
 	}
@@ -243,11 +271,13 @@ func peekFirstTCPBufferedPacket(flow gopacket.Flow) (capture.PacketInfo, bool) {
 
 // getTCPBufferedPackets returns buffered packets for a flow without clearing them
 // Used by hunter mode to forward packets to processor
-func getTCPBufferedPackets(flow gopacket.Flow) []capture.PacketInfo {
+func getTCPBufferedPackets(netFlow, transportFlow gopacket.Flow) []capture.PacketInfo {
+	key := newTCPBufferKey(netFlow, transportFlow)
+
 	tcpPacketBuffersMu.Lock()
 	defer tcpPacketBuffersMu.Unlock()
 
-	buffer, exists := tcpPacketBuffers[flow]
+	buffer, exists := tcpPacketBuffers[key]
 	if !exists || len(buffer.packets) == 0 {
 		return nil
 	}
@@ -258,7 +288,7 @@ func getTCPBufferedPackets(flow gopacket.Flow) []capture.PacketInfo {
 		packets[i] = reconstructPacket(frame)
 	}
 
-	delete(tcpPacketBuffers, flow)
+	delete(tcpPacketBuffers, key)
 	releaseBuffer(buffer)
 
 	return packets
@@ -266,16 +296,18 @@ func getTCPBufferedPackets(flow gopacket.Flow) []capture.PacketInfo {
 
 // discardTCPBufferedPackets removes buffered packets for a flow without writing them
 // Used when SIP message doesn't match filter
-func discardTCPBufferedPackets(flow gopacket.Flow) {
+func discardTCPBufferedPackets(netFlow, transportFlow gopacket.Flow) {
+	key := newTCPBufferKey(netFlow, transportFlow)
+
 	tcpPacketBuffersMu.Lock()
 	defer tcpPacketBuffersMu.Unlock()
 
-	buffer, exists := tcpPacketBuffers[flow]
+	buffer, exists := tcpPacketBuffers[key]
 	if !exists {
 		return
 	}
 
-	delete(tcpPacketBuffers, flow)
+	delete(tcpPacketBuffers, key)
 	releaseBuffer(buffer)
 }
 
@@ -369,21 +401,21 @@ func cleanupOldTCPBuffers(maxAge time.Duration) {
 	defer tcpPacketBuffersMu.Unlock()
 
 	now := time.Now()
-	expiredFlows := make([]gopacket.Flow, 0)
+	expiredKeys := make([]tcpBufferKey, 0)
 
-	for flow, buffer := range tcpPacketBuffers {
+	for key, buffer := range tcpPacketBuffers {
 		if now.Sub(buffer.lastAccess) > maxAge {
-			expiredFlows = append(expiredFlows, flow)
+			expiredKeys = append(expiredKeys, key)
 		}
 	}
 
-	for _, flow := range expiredFlows {
-		buffer := tcpPacketBuffers[flow]
-		delete(tcpPacketBuffers, flow)
+	for _, key := range expiredKeys {
+		buffer := tcpPacketBuffers[key]
+		delete(tcpPacketBuffers, key)
 		releaseBuffer(buffer)
 	}
 
-	if len(expiredFlows) > 0 {
-		logger.Debug("Cleaned up expired TCP buffers", "count", len(expiredFlows))
+	if len(expiredKeys) > 0 {
+		logger.Debug("Cleaned up expired TCP buffers", "count", len(expiredKeys))
 	}
 }

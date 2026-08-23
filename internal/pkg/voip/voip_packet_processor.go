@@ -75,9 +75,10 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 		if p.assembler != nil {
 			// Get the network flow for buffering and assembly
 			flow := packet.NetworkLayer().NetworkFlow()
+			transportFlow := layer.TransportFlow()
 
 			// Buffer the raw packet for later forwarding when SIP message is matched
-			BufferTCPPacket(flow, pktInfo)
+			BufferTCPPacket(flow, transportFlow, pktInfo)
 
 			// Feed the packet to the TCP assembler for stream reconstruction
 			p.assembler.Assemble(

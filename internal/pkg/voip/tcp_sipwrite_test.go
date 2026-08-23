@@ -52,7 +52,7 @@ func newTCPSIPHarness(t *testing.T) *tcpSIPHarness {
 	resetCallTracker()
 	t.Cleanup(resetCallTracker)
 
-	// tcpPacketBuffers is a process global keyed by network flow; a previous
+	// tcpPacketBuffers is a process global keyed by network and transport flow; a previous
 	// test's unflushed packets would otherwise land in this test's PCAP.
 	resetTCPBuffers()
 	t.Cleanup(resetTCPBuffers)
@@ -89,7 +89,7 @@ func resetCallTracker() {
 func resetTCPBuffers() {
 	tcpPacketBuffersMu.Lock()
 	defer tcpPacketBuffersMu.Unlock()
-	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffers = make(map[tcpBufferKey]*TCPPacketBuffer)
 }
 
 func (h *tcpSIPHarness) sipPath(callID string) string {
@@ -98,25 +98,41 @@ func (h *tcpSIPHarness) sipPath(callID string) string {
 
 // buffer records one raw TCP packet for its network flow, mirroring
 // handleTcpPackets. Returns the flow the reassembler would report.
-func (h *tcpSIPHarness) buffer(payload string, srcIP, dstIP string) gopacket.Flow {
+func (h *tcpSIPHarness) buffer(payload string, srcIP, dstIP string) (gopacket.Flow, gopacket.Flow) {
+	h.t.Helper()
+	return h.bufferWithPorts(payload, srcIP, dstIP, 5060, 5060)
+}
+
+func (h *tcpSIPHarness) bufferWithPorts(payload string, srcIP, dstIP string, srcPort, dstPort layers.TCPPort) (gopacket.Flow, gopacket.Flow) {
 	h.t.Helper()
 
-	pkt := createTCPSIPPacket(h.t, payload, srcIP, dstIP)
+	pkt := createTCPSIPPacketWithPorts(h.t, payload, srcIP, dstIP, srcPort, dstPort)
 	flow := pkt.NetworkLayer().NetworkFlow()
-	BufferTCPPacket(flow, capture.PacketInfo{
+	transportFlow := pkt.TransportLayer().TransportFlow()
+	BufferTCPPacket(flow, transportFlow, capture.PacketInfo{
 		Packet:   pkt,
 		LinkType: layers.LinkTypeEthernet,
 	})
-	return flow
+	return flow, transportFlow
 }
 
 // dispatch delivers a fully reassembled SIP message, as processSipMessage does.
-func (h *tcpSIPHarness) dispatch(msg, callID string, flow gopacket.Flow) bool {
+func (h *tcpSIPHarness) dispatch(msg, callID string, flow, transportFlow gopacket.Flow) bool {
 	h.t.Helper()
-	return h.handler.HandleSIPMessage([]byte(msg), callID, "192.168.1.100:5060", "192.168.1.101:5060", flow)
+	return h.handler.HandleSIPMessage([]byte(msg), callID, "192.168.1.100:5060", "192.168.1.101:5060", flow, transportFlow)
+}
+
+func (h *tcpSIPHarness) dispatchWithEndpoints(msg, callID, srcEndpoint, dstEndpoint string, flow, transportFlow gopacket.Flow) bool {
+	h.t.Helper()
+	return h.handler.HandleSIPMessage([]byte(msg), callID, srcEndpoint, dstEndpoint, flow, transportFlow)
 }
 
 func createTCPSIPPacket(t *testing.T, payload, srcIP, dstIP string) gopacket.Packet {
+	t.Helper()
+	return createTCPSIPPacketWithPorts(t, payload, srcIP, dstIP, 5060, 5060)
+}
+
+func createTCPSIPPacketWithPorts(t *testing.T, payload, srcIP, dstIP string, srcPort, dstPort layers.TCPPort) gopacket.Packet {
 	t.Helper()
 
 	eth := &layers.Ethernet{
@@ -130,7 +146,7 @@ func createTCPSIPPacket(t *testing.T, payload, srcIP, dstIP string) gopacket.Pac
 		SrcIP:    parseTestIP(t, srcIP),
 		DstIP:    parseTestIP(t, dstIP),
 	}
-	tcp := &layers.TCP{SrcPort: 5060, DstPort: 5060, Seq: 1000, Window: 8192, PSH: true, ACK: true}
+	tcp := &layers.TCP{SrcPort: srcPort, DstPort: dstPort, Seq: 1000, Window: 8192, PSH: true, ACK: true}
 	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
 
 	buf := gopacket.NewSerializeBuffer()
@@ -191,12 +207,12 @@ func TestTCPLocalPath_WritesInDialogMessagesOfMatchedCall(t *testing.T) {
 	pai := "<sip:alice@example.com>"
 
 	invite := tcpSIPMsg("INVITE sip:bob@example.com SIP/2.0", callID, anon, pai)
-	flow := h.buffer(invite, "192.168.1.100", "192.168.1.101")
-	require.True(t, h.dispatch(invite, callID, flow), "INVITE carrying PAI should match")
+	flow, transportFlow := h.buffer(invite, "192.168.1.100", "192.168.1.101")
+	require.True(t, h.dispatch(invite, callID, flow, transportFlow), "INVITE carrying PAI should match")
 
 	bye := tcpSIPMsg("BYE sip:bob@example.com SIP/2.0", callID, anon, "")
-	flow = h.buffer(bye, "192.168.1.100", "192.168.1.101")
-	h.dispatch(bye, callID, flow)
+	flow, transportFlow = h.buffer(bye, "192.168.1.100", "192.168.1.101")
+	h.dispatch(bye, callID, flow, transportFlow)
 
 	CloseWriters()
 	require.Equal(t, []string{
@@ -227,16 +243,51 @@ func TestTCPLocalPath_DoesNotWriteOtherCallsPacketsIntoMatchedCall(t *testing.T)
 	h.buffer(inviteB, "192.168.1.100", "192.168.1.101")
 
 	inviteA := tcpSIPMsg("INVITE sip:carol@example.com SIP/2.0", callA, alice, "")
-	flow := h.buffer(inviteA, "192.168.1.100", "192.168.1.101")
+	flow, transportFlow := h.buffer(inviteA, "192.168.1.100", "192.168.1.101")
 
 	// Call A's message completes first and flushes the shared flow buffer.
-	require.True(t, h.dispatch(inviteA, callA, flow))
+	require.True(t, h.dispatch(inviteA, callA, flow, transportFlow))
 
 	CloseWriters()
 	require.Equal(t, []string{
 		"INVITE sip:carol@example.com SIP/2.0",
 	}, sipStartLinesFromPcap(t, h.sipPath(callA)),
 		"call A's PCAP should not contain call B's packets")
+}
+
+func TestTCPBuffersAreIsolatedPerConnection(t *testing.T) {
+	h := newTCPSIPHarness(t)
+	callA := "tcp-conn-a@example.com"
+	callB := "tcp-conn-b@example.com"
+
+	for _, id := range []string{callA, callB} {
+		resetVoipWriteState(id)
+		t.Cleanup(func() { resetVoipWriteState(id) })
+	}
+	sipusers.ClearAll() // promiscuous: every message matches
+
+	alice := "<sip:alice@example.com>"
+	inviteA := tcpSIPMsg("INVITE sip:bob@example.com SIP/2.0", callA, alice, "")
+	inviteB := tcpSIPMsg("INVITE sip:carol@example.com SIP/2.0", callB, alice, "")
+
+	netFlowA, transportFlowA := h.bufferWithPorts(inviteA, "192.168.1.100", "192.168.1.101", 5060, 5060)
+	netFlowB, transportFlowB := h.bufferWithPorts(inviteB, "192.168.1.100", "192.168.1.101", 5070, 5060)
+
+	require.True(t, h.dispatchWithEndpoints(inviteA, callA, "192.168.1.100:5060", "192.168.1.101:5060", netFlowA, transportFlowA))
+
+	tcpPacketBuffersMu.RLock()
+	_, aExists := tcpPacketBuffers[newTCPBufferKey(netFlowA, transportFlowA)]
+	_, bExists := tcpPacketBuffers[newTCPBufferKey(netFlowB, transportFlowB)]
+	tcpPacketBuffersMu.RUnlock()
+
+	require.False(t, aExists, "dispatching connection A should release only connection A's buffer")
+	require.True(t, bExists, "connection B's buffer must survive connection A cleanup")
+
+	require.True(t, h.dispatchWithEndpoints(inviteB, callB, "192.168.1.100:5070", "192.168.1.101:5060", netFlowB, transportFlowB))
+
+	CloseWriters()
+	require.Equal(t, []string{"INVITE sip:bob@example.com SIP/2.0"}, sipStartLinesFromPcap(t, h.sipPath(callA)))
+	require.Equal(t, []string{"INVITE sip:carol@example.com SIP/2.0"}, sipStartLinesFromPcap(t, h.sipPath(callB)))
 }
 
 // A message that does not match the filter leaves its packets in the shared
@@ -255,12 +306,12 @@ func TestTCPLocalPath_DoesNotWriteFilteredOutMessageIntoNextMatchedCall(t *testi
 
 	// An unrelated subscriber's traffic on the same host pair: filtered out.
 	other := tcpSIPMsg("REGISTER sip:example.com SIP/2.0", "other@example.com", "<sip:mallory@example.com>", "")
-	flow := h.buffer(other, "192.168.1.100", "192.168.1.101")
-	require.False(t, h.dispatch(other, "other@example.com", flow), "unrelated REGISTER should not match")
+	flow, transportFlow := h.buffer(other, "192.168.1.100", "192.168.1.101")
+	require.False(t, h.dispatch(other, "other@example.com", flow, transportFlow), "unrelated REGISTER should not match")
 
 	invite := tcpSIPMsg("INVITE sip:bob@example.com SIP/2.0", callID, "<sip:alice@example.com>", "")
-	flow = h.buffer(invite, "192.168.1.100", "192.168.1.101")
-	require.True(t, h.dispatch(invite, callID, flow))
+	flow, transportFlow = h.buffer(invite, "192.168.1.100", "192.168.1.101")
+	require.True(t, h.dispatch(invite, callID, flow, transportFlow))
 
 	CloseWriters()
 	require.Equal(t, []string{
@@ -285,10 +336,10 @@ func TestTCPLocalPath_SharedSegmentReachesBothCalls(t *testing.T) {
 	msgB := tcpSIPMsg("INVITE sip:carol@example.com SIP/2.0", callB, alice, "")
 
 	// Both messages arrive coalesced in a single segment.
-	flow := h.buffer(msgA+msgB, "192.168.1.100", "192.168.1.101")
+	flow, transportFlow := h.buffer(msgA+msgB, "192.168.1.100", "192.168.1.101")
 
-	require.True(t, h.dispatch(msgA, callA, flow))
-	require.True(t, h.dispatch(msgB, callB, flow))
+	require.True(t, h.dispatch(msgA, callA, flow, transportFlow))
+	require.True(t, h.dispatch(msgB, callB, flow, transportFlow))
 
 	CloseWriters()
 	require.Equal(t, []string{"INVITE sip:bob@example.com SIP/2.0"},

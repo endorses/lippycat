@@ -176,32 +176,32 @@ the remaining races in call buffering and keylog watching.
 
 ### Tasks
 
-- [ ] Make the `LocalSource.batchingLoop` worker send cancellable with a `select`
+- [x] Make the `LocalSource.batchingLoop` worker send cancellable with a `select`
       on `workerChans[idx] <- pktInfo` and `<-s.ctx.Done()`.
-- [ ] Ensure the early cancellation path closes every worker channel and waits for
+- [x] Ensure the early cancellation path closes every worker channel and waits for
       workers before returning.
-- [ ] Change `filtering.Manager.AddChannel` to close any pre-existing hunter
+- [x] Change `filtering.Manager.AddChannel` to close any pre-existing hunter
       channel before replacing it.
-- [ ] Change `RemoveChannel` to accept the channel returned by `AddChannel` and
+- [x] Change `RemoveChannel` to accept the channel returned by `AddChannel` and
       delete/close only when the stored channel is the same instance.
-- [ ] Update `Processor.SubscribeFilters` and `HunterTarget` wrappers for the new
+- [x] Update `Processor.SubscribeFilters` and `HunterTarget` wrappers for the new
       remove signature.
-- [ ] Introduce a TCP buffer key that includes network flow and transport flow.
-- [ ] Update TCP buffering producers to pass both flows.
-- [ ] Update TCP SIP handlers and the `SIPMessageHandler` interface to carry the
+- [x] Introduce a TCP buffer key that includes network flow and transport flow.
+- [x] Update TCP buffering producers to pass both flows.
+- [x] Update TCP SIP handlers and the `SIPMessageHandler` interface to carry the
       transport flow for buffer lookup and discard.
-- [ ] Canonicalize TCP buffer keys or perform direction-aware lookup so assembler
+- [x] Canonicalize TCP buffer keys or perform direction-aware lookup so assembler
       direction changes do not split one connection into two buffers.
-- [ ] Add regression coverage for two simultaneous TCP SIP connections between the
+- [x] Add regression coverage for two simultaneous TCP SIP connections between the
       same IP pair.
 
 ### Tests
 
-- [ ] `TestLocalSourceShutdownWithFullWorkerChannels`
-- [ ] `TestAddChannelReplacesStaleSubscription`
-- [ ] `TestRemoveChannelIgnoresSupersededChannel`
-- [ ] `TestTCPBuffersAreIsolatedPerConnection`
-- [ ] A per-call PCAP regression test for concurrent TCP SIP calls between the same
+- [x] `TestLocalSourceShutdownWithFullWorkerChannels`
+- [x] `TestAddChannelReplacesStaleSubscription`
+- [x] `TestRemoveChannelIgnoresSupersededChannel`
+- [x] `TestTCPBuffersAreIsolatedPerConnection`
+- [x] A per-call PCAP regression test for concurrent TCP SIP calls between the same
       hosts.
 
 ## Phase 5: Keylog Watcher Robustness
@@ -231,7 +231,7 @@ the remaining races in call buffering and keylog watching.
 
 - [ ] `make fmt`
 - [ ] `go vet -tags all ./...`
-- [ ] `go test -tags all ./...`
+- [x] `go test -tags all ./...`
 - [ ] `go test -tags all -race ./internal/pkg/voip/...`
 - [ ] `go test -tags all -race ./internal/pkg/processor/...`
 - [ ] `go test -tags all -race ./internal/pkg/detector/...`

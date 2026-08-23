@@ -2,11 +2,16 @@ package source
 
 import (
 	"context"
+	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -161,6 +166,58 @@ func TestLocalSource_Stop_BeforeStart(t *testing.T) {
 	assert.False(t, s.IsStarted())
 }
 
+func TestLocalSourceShutdownWithFullWorkerChannels(t *testing.T) {
+	viper.Set("processor.detection_workers", 2)
+	t.Cleanup(viper.Reset)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	s := NewLocalSource(LocalSourceConfig{
+		BatchSize:    100,
+		BatchTimeout: time.Hour,
+		BufferSize:   detectionWorkerChanBuffer + 64,
+		BatchBuffer:  1,
+	})
+	s.ctx = ctx
+	s.cancel = cancel
+
+	blocker := &blockingTCPAssembler{entered: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(blocker.Release)
+	s.SetTCPAssembler(blocker)
+
+	pb := capture.NewPacketBuffer(ctx, detectionWorkerChanBuffer+64)
+	t.Cleanup(pb.Close)
+	s.packetBuffer.Store(pb)
+
+	for i := 0; i < detectionWorkerChanBuffer+32; i++ {
+		require.True(t, pb.Send(buildTCPPacket(t, uint32(1000+i))), "packet %d should enqueue", i)
+	}
+
+	done := make(chan struct{})
+	s.wg.Add(1)
+	go func() {
+		s.batchingLoop()
+		close(done)
+	}()
+
+	select {
+	case <-blocker.entered:
+	case <-time.After(time.Second):
+		t.Fatal("blocking assembler was not reached")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	blocker.Release()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batchingLoop did not exit after cancellation")
+	}
+}
+
 func TestLocalSource_StartMultipleTimes(t *testing.T) {
 	s := NewLocalSource(LocalSourceConfig{
 		Interfaces: []string{"lo"}, // Use loopback for test
@@ -202,6 +259,53 @@ func TestLocalSource_StartMultipleTimes(t *testing.T) {
 type mockAppFilter struct {
 	matchAll bool
 	calls    int
+}
+
+type blockingTCPAssembler struct {
+	entered     chan struct{}
+	release     chan struct{}
+	once        atomic.Bool
+	releaseOnce sync.Once
+}
+
+func (b *blockingTCPAssembler) AssemblePacket(_ capture.PacketInfo) bool {
+	if b.once.CompareAndSwap(false, true) {
+		close(b.entered)
+	}
+	<-b.release
+	return true
+}
+
+func (b *blockingTCPAssembler) Release() {
+	b.releaseOnce.Do(func() {
+		close(b.release)
+	})
+}
+
+func buildTCPPacket(t *testing.T, seq uint32) capture.PacketInfo {
+	t.Helper()
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 1},
+		DstMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 2},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	ip := &layers.IPv4{
+		Version:  4,
+		IHL:      5,
+		TTL:      64,
+		Protocol: layers.IPProtocolTCP,
+		SrcIP:    net.ParseIP("192.0.2.10").To4(),
+		DstIP:    net.ParseIP("192.0.2.20").To4(),
+	}
+	tcp := &layers.TCP{SrcPort: 5060, DstPort: 5060, Seq: seq, ACK: true, PSH: true, Window: 8192}
+	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+	require.NoError(t, gopacket.SerializeLayers(buf, opts, eth, ip, tcp, gopacket.Payload([]byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"))))
+
+	pkt := gopacket.NewPacket(buf.Bytes(), layers.LinkTypeEthernet, gopacket.Default)
+	return capture.PacketInfo{LinkType: layers.LinkTypeEthernet, Packet: pkt, Interface: "test"}
 }
 
 func (m *mockAppFilter) MatchPacket(_ gopacket.Packet) bool {

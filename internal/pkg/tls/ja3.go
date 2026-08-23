@@ -4,6 +4,7 @@ package tls
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -117,7 +118,7 @@ func CalculateJA3S(metadata *types.TLSMetadata) (ja3sString string, ja3sHash str
 // JA4 is a more modern fingerprint format that improves on JA3.
 //
 // Format: t{version}{sni}{ciphers}_{extensions}_{alpn}
-// Example: t13d1516h2_8daaf6152771_b186095e22bb
+// Example: t13d1516h2_8daaf6152771_e5627efa2ab1
 //
 // Reference: https://github.com/FoxIO-LLC/ja4
 func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint string) {
@@ -130,9 +131,16 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	// Part 1: Protocol type (t=TLS, q=QUIC)
 	proto := "t"
 
-	// Part 2: TLS version (2 chars)
+	// Part 2: TLS version (2 chars). JA4 uses the highest non-GREASE value
+	// from supported_versions when present, rather than the legacy_version field.
+	version := metadata.VersionRaw
+	for _, candidate := range metadata.SupportedVersions {
+		if !isGREASE(candidate) && candidate > version {
+			version = candidate
+		}
+	}
 	var versionCode string
-	switch metadata.VersionRaw {
+	switch version {
 	case VersionSSL30:
 		versionCode = "s3"
 	case VersionTLS10:
@@ -144,7 +152,7 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	case VersionTLS13:
 		versionCode = "13"
 	default:
-		if metadata.VersionRaw >= VersionTLS13D && metadata.VersionRaw < 0x7F20 {
+		if version >= VersionTLS13D && version < 0x7F20 {
 			versionCode = "13"
 		} else {
 			versionCode = "00"
@@ -153,7 +161,13 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 
 	// Part 3: SNI indicator (d=has domain, i=IP only)
 	sniIndicator := "i"
-	if metadata.SNI != "" {
+	for _, extension := range metadata.Extensions {
+		if extension == ExtensionSNI {
+			sniIndicator = "d"
+			break
+		}
+	}
+	if metadata.SNI != "" { // Preserve compatibility with manually-built metadata.
 		sniIndicator = "d"
 	}
 
@@ -183,10 +197,14 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	alpn := "00"
 	if len(metadata.ALPNProtocols) > 0 {
 		first := metadata.ALPNProtocols[0]
-		if len(first) >= 2 {
-			alpn = first[:2]
-		} else if len(first) == 1 {
-			alpn = first + "0"
+		if len(first) > 0 {
+			firstByte, lastByte := first[0], first[len(first)-1]
+			if isASCIIAlphaNumeric(firstByte) && isASCIIAlphaNumeric(lastByte) {
+				alpn = string([]byte{firstByte, lastByte})
+			} else {
+				hexALPN := hex.EncodeToString([]byte(first))
+				alpn = string([]byte{hexALPN[0], hexALPN[len(hexALPN)-1]})
+			}
 		}
 	}
 
@@ -246,13 +264,17 @@ func isGREASE(value uint16) bool {
 	return greaseValues[value]
 }
 
-// truncatedHash computes a truncated SHA256 hash for JA4.
+// truncatedHash computes the first 12 lowercase hex characters of SHA-256.
 func truncatedHash(input string) string {
 	if input == "" {
 		return "000000000000"
 	}
-	hash := md5.Sum([]byte(input))
+	hash := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(hash[:6]) // First 12 hex chars (6 bytes)
+}
+
+func isASCIIAlphaNumeric(value byte) bool {
+	return value >= '0' && value <= '9' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
 // IsValidJA3Hash checks if a string is a valid JA3/JA3S hash (32-char hex).

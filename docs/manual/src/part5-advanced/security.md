@@ -167,7 +167,7 @@ sudo lc hunt voip -i eth0 \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
 
 # TUI client — also presents a client certificate
-lc watch remote --nodes-file nodes.yaml \
+lc watch remote -P processor.example.com:55555 \
   --tls-cert /etc/lippycat/certs/tui-cert.pem \
   --tls-key /etc/lippycat/certs/tui-key.pem \
   --tls-ca /etc/lippycat/certs/ca-cert.pem
@@ -337,6 +337,25 @@ TLS adds minimal overhead on modern hardware with AES-NI support:
 
 There is no reason to disable TLS for performance.
 
+## API Key Authentication
+
+Processors and tap nodes can require API keys for gRPC management and streaming APIs. This is an alternative authentication layer for deployments where distributing client certificates is impractical, though TLS should still be used to protect the key in transit.
+
+Enable API key auth with `--api-key-auth` and define keys in the config file:
+
+```yaml
+security:
+  api_keys:
+    enabled: true
+    keys:
+      - name: "ops-tui"
+        key: "lc_live_generated_secret"
+        role: "viewer"
+        description: "Read-only remote TUI access"
+```
+
+Clients send the key as gRPC metadata named `x-api-key`. In production mode, lippycat requires either mTLS or API key authentication when mutual TLS is not enabled.
+
 ## Decrypting Captured TLS Traffic
 
 The previous sections covered TLS for lippycat's own gRPC connections. This section covers a different use case: decrypting TLS-encrypted traffic that lippycat has *captured* — HTTPS, SMTPS, IMAPS, and other TLS-wrapped protocols flowing through the monitored network.
@@ -414,7 +433,7 @@ Re-analyze stored captures with the paired key log:
 lc sniff http -r /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
 
 # TUI analysis
-lc watch file -r /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
+lc watch file /var/capture/session.pcap --tls-keylog /var/capture/keys/session.keys
 ```
 
 ### Wireshark Integration

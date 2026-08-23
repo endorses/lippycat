@@ -10,11 +10,13 @@ The transition from local capture to distributed capture is small. Compare:
 # What you learned with sniff:
 sudo lc sniff voip -i eth0 --sip-user alicent -w calls.pcap
 
-# The same thing, but forwarded to a processor:
-sudo lc hunt voip -i eth0 --sip-user alicent --processor central:55555 --tls-ca ca.crt
+# The distributed equivalent:
+lc set filter -P central:55555 --tls-ca ca.crt \
+  --type sip_user --pattern alicent
+sudo lc hunt voip -i eth0 --processor central:55555 --tls-ca ca.crt
 ```
 
-The capture flags (`-i`, `-f`, `--sip-user`, `--udp-only`, `--sip-port`) carry over. What changes is the output: instead of `-w` writing a local PCAP, `--processor` sends packets to a remote processor. The processor handles PCAP writing, TUI serving, and analysis (see [Chapter 8](process.md)).
+Most capture flags (`-i`, `-f`, `--sip-port`, `--rtp-port-range`) carry over. What changes is filtering and output: VoIP call filters are managed centrally on the processor with `lc set filter`, and `--processor` sends matching packets to that processor. The processor handles PCAP writing, TUI serving, and analysis (see [Chapter 8](process.md)).
 
 ### What Stays the Same
 
@@ -26,10 +28,10 @@ The capture flags (`-i`, `-f`, `--sip-user`, `--udp-only`, `--sip-port`) carry o
 | `--esp-null` | ESP-NULL decapsulation | ESP-NULL decapsulation | Yes |
 | `--esp-heuristic` | ESP-NULL detection by content | ESP-NULL detection by content | Yes |
 | `--esp-icv-size` | ESP ICV size | ESP ICV size | Yes |
-| `--udp-only` | UDP-only capture (VoIP) | UDP-only capture (VoIP) | Yes |
+| `--sip-user` | Local SIP-user filter | Processor-managed filter | No |
 | `--sip-port` | SIP port restriction (VoIP) | SIP port restriction (VoIP) | Yes |
 | `--rtp-port-range` | RTP port range (VoIP) | RTP port range (VoIP) | Yes |
-| `--gpu-backend` | GPU acceleration | GPU acceleration | Yes |
+| `--gpu-backend` | GPU acceleration in CUDA builds | GPU acceleration in CUDA builds | Yes |
 
 ### What's New
 
@@ -44,6 +46,8 @@ The capture flags (`-i`, `-f`, `--sip-user`, `--udp-only`, `--sip-port`) carry o
 | `--tls-cert`, `--tls-key`, `--tls-ca` | TLS certificates |
 | `--insecure` | Disable TLS (testing only) |
 | `--disk-buffer` | Enable disk overflow buffer |
+| `--no-filter-policy` | Whether to forward all or no packets when no filters exist (`deny` by default) |
+| `--debug-listen` | Optional pprof listener for diagnostics |
 
 ### Your First Distributed Capture
 
@@ -86,9 +90,9 @@ The VoIP hunter is the most commonly used mode. It captures SIP/RTP traffic with
 # VoIP hunter with TLS
 sudo lc hunt voip --processor processor:55555 -i eth0 --tls-ca ca.crt
 
-# VoIP hunter with BPF optimization (UDP-only, specific SIP port)
+# VoIP hunter with BPF optimization (specific SIP port)
 sudo lc hunt voip --processor processor:55555 -i eth0 \
-  --udp-only --sip-port 5060 --tls-ca ca.crt
+  --sip-port 5060 --tls-ca ca.crt
 
 # VoIP hunter with custom RTP port range
 sudo lc hunt voip --processor processor:55555 -i eth0 \
@@ -116,7 +120,7 @@ flowchart LR
 4. Buffered packets are matched against filters
 5. Only matched calls are forwarded — SIP signaling and associated RTP media
 
-Filters are managed centrally by the processor and pushed to hunters. Hunters don't configure filters locally. See [Chapter 8](process.md) for filter management.
+Filters are managed centrally by the processor and pushed to hunters. Hunters don't configure call filters locally. Use `lc set filter` / `lc rm filter` for live filter changes; see [Chapter 10](../part4-administration/cli-admin.md) for CLI administration.
 
 ### DNS Hunter (`hunt dns`)
 
@@ -253,6 +257,8 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 ### GPU Acceleration
 
+These flags are available in CUDA builds.
+
 Enable GPU-accelerated VoIP pattern matching at the edge:
 
 ```bash
@@ -276,18 +282,16 @@ GPU acceleration is most valuable at high packet rates (>10,000 pps) with many c
 For VoIP hunters on TCP-heavy networks, use BPF flags to skip TCP traffic and focus on SIP/RTP:
 
 ```bash
-# UDP-only mode (bypass TCP, reduces CPU significantly)
-sudo lc hunt voip --processor processor:55555 -i eth0 \
-  --udp-only --tls-ca ca.crt
-
-# Restrict to specific SIP port
+# Restrict to a specific SIP port
 sudo lc hunt voip --processor processor:55555 -i eth0 \
   --sip-port 5060 --tls-ca ca.crt
 
-# Combined: UDP-only with specific SIP port
+# Restrict SIP and RTP ranges
 sudo lc hunt voip --processor processor:55555 -i eth0 \
-  --udp-only --sip-port 5060 --tls-ca ca.crt
+  --sip-port 5060 --rtp-port-range 10000-20000 --tls-ca ca.crt
 ```
+
+The older VoIP `--udp-only` flag is still accepted for compatibility but hidden and deprecated because it can miss TCP SIP traffic.
 
 ### Pattern Matching Algorithm
 

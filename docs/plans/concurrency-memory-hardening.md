@@ -148,27 +148,27 @@ the remaining races in call buffering and keylog watching.
 
 ### Tasks
 
-- [ ] Add `lastWrite time.Time` to `CallPcapWriter`, updated in
+- [x] Add `lastWrite time.Time` to `CallPcapWriter`, updated in
       `WriteSIPPacket` and `WriteRTPPacket` under `writer.mu`.
-- [ ] Add `MaxIdle` and `MaxWriters` to `PcapWriterConfig`.
-- [ ] Implement `PcapWriterManager.SweepIdle(maxIdle time.Duration) int`, closing
+- [x] Add `MaxIdle` and `MaxWriters` to `PcapWriterConfig`.
+- [x] Implement `PcapWriterManager.SweepIdle(maxIdle time.Duration) int`, closing
       idle writers through `CloseCallWriter` so close hooks still run.
-- [ ] Enforce `MaxWriters` in `GetOrCreateWriter` by closing the least recently
+- [x] Enforce `MaxWriters` in `GetOrCreateWriter` by closing the least recently
       written writer before admitting a new one.
-- [ ] Drive idle sweeping from the existing `CallCompletionMonitor.monitorLoop`
+- [x] Drive idle sweeping from the existing `CallCompletionMonitor.monitorLoop`
       ticker.
-- [ ] Log warnings when idle or overflow reclamation closes a writer.
-- [ ] Change `closedCalls` in processor and sniff completion monitors from
+- [x] Log warnings when idle or overflow reclamation closes a writer.
+- [x] Change `closedCalls` in processor and sniff completion monitors from
       `map[string]struct{}` to `map[string]time.Time`.
-- [ ] Prune closed-call suppression entries older than a configurable TTL from
+- [x] Prune closed-call suppression entries older than a configurable TTL from
       existing monitor tickers.
 
 ### Tests
 
-- [ ] `TestPcapWriterManagerSweepIdle`
-- [ ] `TestPcapWriterManagerMaxWriters`
-- [ ] `TestCallCompletionMonitorPrunesClosedCalls`
-- [ ] `TestSniffCompletionMonitorPrunesClosedCalls`
+- [x] `TestPcapWriterManagerSweepIdle`
+- [x] `TestPcapWriterManagerMaxWriters`
+- [x] `TestCallCompletionMonitorPrunesClosedCalls`
+- [x] `TestSniffCompletionMonitorPrunesClosedCalls`
 
 ## Phase 4: Shutdown, Reconnect, and TCP Connection Isolation
 

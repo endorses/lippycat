@@ -24,6 +24,8 @@ func TestDefaultPcapWriterConfig(t *testing.T) {
 	assert.Equal(t, "{timestamp}_{callid}.pcap", config.FilePattern)
 	assert.Equal(t, int64(100*1024*1024), config.MaxFileSize) // 100MB
 	assert.Equal(t, 10, config.MaxFilesPerCall)
+	assert.Equal(t, 10*time.Minute, config.MaxIdle)
+	assert.Equal(t, 0, config.MaxWriters)
 	assert.Equal(t, 4096, config.BufferSize)
 	assert.Equal(t, 5*time.Second, config.SyncInterval)
 }
@@ -152,6 +154,8 @@ func TestPcapWriterConfig(t *testing.T) {
 		FilePattern:     "call_{callid}.pcap",
 		MaxFileSize:     50 * 1024 * 1024, // 50MB
 		MaxFilesPerCall: 5,
+		MaxIdle:         time.Minute,
+		MaxWriters:      100,
 		BufferSize:      8192,
 		SyncInterval:    10 * time.Second,
 	}
@@ -161,8 +165,92 @@ func TestPcapWriterConfig(t *testing.T) {
 	assert.Equal(t, "call_{callid}.pcap", config.FilePattern)
 	assert.Equal(t, int64(50*1024*1024), config.MaxFileSize)
 	assert.Equal(t, 5, config.MaxFilesPerCall)
+	assert.Equal(t, time.Minute, config.MaxIdle)
+	assert.Equal(t, 100, config.MaxWriters)
 	assert.Equal(t, 8192, config.BufferSize)
 	assert.Equal(t, 10*time.Second, config.SyncInterval)
+}
+
+func TestPcapWriterManagerSweepIdle(t *testing.T) {
+	var completed []CallMetadata
+	config := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    t.TempDir(),
+		FilePattern:  "{timestamp}_{callid}.pcap",
+		MaxIdle:      time.Minute,
+		SyncInterval: time.Hour,
+		OnCallComplete: func(meta CallMetadata) {
+			completed = append(completed, meta)
+		},
+	}
+
+	manager, err := NewPcapWriterManager(config)
+	require.NoError(t, err)
+	defer manager.Close()
+
+	idleWriter, err := manager.GetOrCreateWriter("idle-call", "alice", "bob")
+	require.NoError(t, err)
+	activeWriter, err := manager.GetOrCreateWriter("active-call", "carol", "dave")
+	require.NoError(t, err)
+
+	idleWriter.mu.Lock()
+	idleWriter.lastWrite = time.Now().Add(-2 * time.Minute)
+	idleWriter.mu.Unlock()
+	activeWriter.mu.Lock()
+	activeWriter.lastWrite = time.Now()
+	activeWriter.mu.Unlock()
+
+	closed := manager.SweepIdle(time.Minute)
+	assert.Equal(t, 1, closed)
+	assert.Len(t, completed, 1)
+	assert.Equal(t, "idle-call", completed[0].CallID)
+
+	manager.mu.RLock()
+	_, idleExists := manager.writers["idle-call"]
+	_, activeExists := manager.writers["active-call"]
+	manager.mu.RUnlock()
+	assert.False(t, idleExists)
+	assert.True(t, activeExists)
+}
+
+func TestPcapWriterManagerMaxWriters(t *testing.T) {
+	var completed []CallMetadata
+	config := &PcapWriterConfig{
+		Enabled:      true,
+		OutputDir:    t.TempDir(),
+		FilePattern:  "{timestamp}_{callid}.pcap",
+		MaxWriters:   1,
+		SyncInterval: time.Hour,
+		OnCallComplete: func(meta CallMetadata) {
+			completed = append(completed, meta)
+		},
+	}
+
+	manager, err := NewPcapWriterManager(config)
+	require.NoError(t, err)
+	defer manager.Close()
+
+	firstWriter, err := manager.GetOrCreateWriter("first-call", "alice", "bob")
+	require.NoError(t, err)
+	firstWriter.mu.Lock()
+	firstWriter.lastWrite = time.Now().Add(-time.Minute)
+	firstWriter.mu.Unlock()
+
+	secondWriter, err := manager.GetOrCreateWriter("second-call", "carol", "dave")
+	require.NoError(t, err)
+	require.NotNil(t, secondWriter)
+
+	assert.Len(t, completed, 1)
+	assert.Equal(t, "first-call", completed[0].CallID)
+
+	manager.mu.RLock()
+	_, firstExists := manager.writers["first-call"]
+	_, secondExists := manager.writers["second-call"]
+	writerCount := len(manager.writers)
+	manager.mu.RUnlock()
+	assert.False(t, firstExists)
+	assert.True(t, secondExists)
+	assert.Equal(t, 1, writerCount)
 }
 
 // TestGetOrCreateWriter_Disabled tests that no writer is created when disabled

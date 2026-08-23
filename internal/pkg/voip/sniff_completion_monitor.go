@@ -32,6 +32,7 @@ func getSniffCompletionMonitor() *SniffCompletionMonitor {
 type SniffCompletionMonitorConfig struct {
 	GracePeriod   time.Duration // Time to wait after call ends before closing PCAP (default: 5s)
 	CheckInterval time.Duration // How often to check for ended calls (default: 1s)
+	ClosedCallTTL time.Duration // Time to retain completed call IDs for suppression (default: 1h)
 }
 
 // DefaultSniffCompletionMonitorConfig returns default configuration
@@ -39,6 +40,7 @@ func DefaultSniffCompletionMonitorConfig() *SniffCompletionMonitorConfig {
 	return &SniffCompletionMonitorConfig{
 		GracePeriod:   5 * time.Second,
 		CheckInterval: 1 * time.Second,
+		ClosedCallTTL: 1 * time.Hour,
 	}
 }
 
@@ -54,7 +56,7 @@ type sniffPendingCallInfo struct {
 type SniffCompletionMonitor struct {
 	config       *SniffCompletionMonitorConfig
 	pendingClose map[string]*sniffPendingCallInfo // callID -> pending closure info
-	closedCalls  map[string]struct{}              // callIDs that have already been closed
+	closedCalls  map[string]time.Time             // callIDs that have already been closed
 	mu           sync.Mutex
 	checkTicker  *time.Ticker
 	stopChan     chan struct{}
@@ -74,11 +76,14 @@ func NewSniffCompletionMonitor(config *SniffCompletionMonitorConfig) *SniffCompl
 	if config.CheckInterval <= 0 {
 		config.CheckInterval = 1 * time.Second
 	}
+	if config.ClosedCallTTL <= 0 {
+		config.ClosedCallTTL = 1 * time.Hour
+	}
 
 	return &SniffCompletionMonitor{
 		config:       config,
 		pendingClose: make(map[string]*sniffPendingCallInfo),
-		closedCalls:  make(map[string]struct{}),
+		closedCalls:  make(map[string]time.Time),
 		stopChan:     make(chan struct{}),
 	}
 }
@@ -154,6 +159,7 @@ func (m *SniffCompletionMonitor) monitorLoop() {
 		select {
 		case <-m.checkTicker.C:
 			m.processPendingClose()
+			m.pruneClosedCalls(time.Now())
 		case <-m.stopChan:
 			// Close any remaining pending calls on shutdown
 			m.closeAllPending()
@@ -200,7 +206,7 @@ func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
 	if err != nil {
 		// Call may have already been evicted from LRU, just mark as closed
 		m.mu.Lock()
-		m.closedCalls[callID] = struct{}{}
+		m.closedCalls[callID] = time.Now()
 		m.mu.Unlock()
 		logger.Debug("Call not found for PCAP closure (may have been evicted)",
 			"call_id", SanitizeCallIDForLogging(callID))
@@ -214,18 +220,38 @@ func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
 			"error", err)
 		// Still mark as closed to prevent infinite retry
 		m.mu.Lock()
-		m.closedCalls[callID] = struct{}{}
+		m.closedCalls[callID] = time.Now()
 		m.mu.Unlock()
 		return
 	}
 
 	// Mark as closed
 	m.mu.Lock()
-	m.closedCalls[callID] = struct{}{}
+	m.closedCalls[callID] = time.Now()
 	m.mu.Unlock()
 
 	logger.Info("Closed PCAP files for completed call",
 		"call_id", SanitizeCallIDForLogging(callID))
+}
+
+func (m *SniffCompletionMonitor) pruneClosedCalls(now time.Time) int {
+	if m == nil || m.config == nil || m.config.ClosedCallTTL <= 0 {
+		return 0
+	}
+
+	cutoff := now.Add(-m.config.ClosedCallTTL)
+	pruned := 0
+
+	m.mu.Lock()
+	for callID, closedAt := range m.closedCalls {
+		if closedAt.Before(cutoff) {
+			delete(m.closedCalls, callID)
+			pruned++
+		}
+	}
+	m.mu.Unlock()
+
+	return pruned
 }
 
 // closeAllPending closes all pending calls immediately (used during shutdown)

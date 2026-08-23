@@ -24,6 +24,8 @@ type PcapWriterConfig struct {
 	FilePattern     string        // File naming pattern (supports {callid}, {from}, {to}, {timestamp})
 	MaxFileSize     int64         // Max PCAP file size in bytes (0 = unlimited)
 	MaxFilesPerCall int           // Max number of PCAP files per call (for rotation)
+	MaxIdle         time.Duration // Max idle time before a call writer is reclaimed (0 = disabled)
+	MaxWriters      int           // Max active call writers (0 = unlimited)
 	BufferSize      int           // Write buffer size
 	SyncInterval    time.Duration // How often to sync to disk
 
@@ -40,6 +42,8 @@ func DefaultPcapWriterConfig() *PcapWriterConfig {
 		FilePattern:     "{timestamp}_{callid}.pcap",
 		MaxFileSize:     constants.DefaultPCAPMaxFileSize,
 		MaxFilesPerCall: constants.DefaultMaxFilesPerCall,
+		MaxIdle:         10 * time.Minute,
+		MaxWriters:      0,
 		BufferSize:      constants.DefaultPCAPBufferSize,
 		SyncInterval:    constants.DefaultPCAPSyncInterval,
 	}
@@ -52,6 +56,7 @@ type CallPcapWriter struct {
 	from      string
 	to        string
 	startTime time.Time
+	lastWrite time.Time
 	linkType  layers.LinkType // Link type for PCAP files (set from first packet)
 	// SIP file
 	sipFile        *os.File
@@ -114,6 +119,19 @@ func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallP
 		return writer, nil
 	}
 
+	if pwm.config.MaxWriters > 0 && len(pwm.writers) >= pwm.config.MaxWriters {
+		evictCallID, evictWriter := pwm.leastRecentlyWrittenLocked()
+		if evictWriter != nil {
+			delete(pwm.writers, evictCallID)
+			logger.Warn("Closing per-call PCAP writer due to max writer limit",
+				"call_id", evictCallID,
+				"max_writers", pwm.config.MaxWriters)
+			if err := evictWriter.CloseCall(); err != nil {
+				return nil, fmt.Errorf("failed to close overflow PCAP writer %q: %w", evictCallID, err)
+			}
+		}
+	}
+
 	// Create new writer
 	writer, err := pwm.createWriter(callID, from, to)
 	if err != nil {
@@ -126,12 +144,14 @@ func (pwm *PcapWriterManager) GetOrCreateWriter(callID, from, to string) (*CallP
 
 // createWriter creates a new PCAP writer for a call with separate SIP and RTP files
 func (pwm *PcapWriterManager) createWriter(callID, from, to string) (*CallPcapWriter, error) {
+	now := time.Now()
 	writer := &CallPcapWriter{
 		config:    pwm.config,
 		callID:    callID,
 		from:      from,
 		to:        to,
-		startTime: time.Now(),
+		startTime: now,
+		lastWrite: now,
 		stopSync:  make(chan struct{}),
 	}
 
@@ -201,6 +221,7 @@ func (writer *CallPcapWriter) WriteSIPPacket(timestamp time.Time, data []byte, l
 
 	writer.sipSize += int64(len(data))
 	writer.sipPacketCount++
+	writer.lastWrite = time.Now()
 
 	return nil
 }
@@ -248,8 +269,69 @@ func (writer *CallPcapWriter) WriteRTPPacket(timestamp time.Time, data []byte, l
 
 	writer.rtpSize += int64(len(data))
 	writer.rtpPacketCount++
+	writer.lastWrite = time.Now()
 
 	return nil
+}
+
+func (pwm *PcapWriterManager) leastRecentlyWrittenLocked() (string, *CallPcapWriter) {
+	var (
+		oldestCallID string
+		oldestWriter *CallPcapWriter
+		oldestWrite  time.Time
+	)
+
+	for callID, writer := range pwm.writers {
+		writer.mu.Lock()
+		lastWrite := writer.lastWrite
+		writer.mu.Unlock()
+
+		if oldestWriter == nil || lastWrite.Before(oldestWrite) {
+			oldestCallID = callID
+			oldestWriter = writer
+			oldestWrite = lastWrite
+		}
+	}
+
+	return oldestCallID, oldestWriter
+}
+
+// SweepIdle closes writers that have not received SIP or RTP packets within maxIdle.
+func (pwm *PcapWriterManager) SweepIdle(maxIdle time.Duration) int {
+	if pwm == nil || maxIdle <= 0 {
+		return 0
+	}
+
+	now := time.Now()
+	toClose := make([]string, 0)
+
+	pwm.mu.RLock()
+	for callID, writer := range pwm.writers {
+		writer.mu.Lock()
+		idleFor := now.Sub(writer.lastWrite)
+		writer.mu.Unlock()
+
+		if idleFor >= maxIdle {
+			toClose = append(toClose, callID)
+		}
+	}
+	pwm.mu.RUnlock()
+
+	closed := 0
+	for _, callID := range toClose {
+		logger.Warn("Closing idle per-call PCAP writer",
+			"call_id", callID,
+			"max_idle", maxIdle)
+		if err := pwm.CloseCallWriter(callID); err != nil {
+			logger.Warn("Failed to close idle per-call PCAP writer",
+				"call_id", callID,
+				"error", err)
+			continue
+		}
+		closed++
+	}
+
+	return closed
 }
 
 // perCallReopenWindow bounds how recently a per-call PCAP must have been written

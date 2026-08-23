@@ -199,11 +199,16 @@ func (p *Parser) parseClientHello(data []byte, metadata *types.TLSMetadata) {
 	}
 	extensionsLen := int(binary.BigEndian.Uint16(data[pos : pos+2]))
 	pos += 2
+	if pos+extensionsLen > len(data) {
+		return
+	}
 
 	p.parseExtensions(data[pos:pos+extensionsLen], metadata)
 
-	// Calculate JA3 fingerprint
+	// Calculate exact-match fingerprints after all contributing extensions have
+	// been parsed. JA3 uses legacy_version; JA4 considers supported_versions.
 	metadata.JA3String, metadata.JA3Fingerprint = CalculateJA3(metadata)
+	metadata.JA4String, metadata.JA4Fingerprint = CalculateJA4(metadata)
 }
 
 // parseServerHello parses a ServerHello message.
@@ -295,9 +300,10 @@ func (p *Parser) parseExtensions(data []byte, metadata *types.TLSMetadata) {
 		case ExtensionALPN:
 			metadata.ALPNProtocols = p.parseALPN(extData)
 		case ExtensionSupportedVer:
-			// TLS 1.3 uses supported_versions extension for real version
-			if realVersion := p.parseSupportedVersions(extData); realVersion != 0 {
-				metadata.VersionRaw = realVersion
+			metadata.SupportedVersions = p.parseSupportedVersions(extData)
+			// Keep VersionRaw as ClientHello legacy_version for JA3 compatibility,
+			// while presenting the highest advertised version to users.
+			if realVersion := highestSupportedVersion(metadata.SupportedVersions); realVersion != 0 {
 				metadata.Version = p.versionString(realVersion)
 			}
 		}
@@ -448,19 +454,32 @@ func (p *Parser) parseALPN(data []byte) []string {
 }
 
 // parseSupportedVersions extracts the real TLS version from supported_versions extension.
-func (p *Parser) parseSupportedVersions(data []byte) uint16 {
+func (p *Parser) parseSupportedVersions(data []byte) []uint16 {
 	if len(data) < 1 {
-		return 0
+		return nil
 	}
 
 	// In ClientHello, this is a list; take the first/highest
 	versionsLen := int(data[0])
 	if versionsLen+1 > len(data) || versionsLen < 2 {
-		return 0
+		return nil
 	}
 
-	// Return first version (typically the highest)
-	return binary.BigEndian.Uint16(data[1:3])
+	versions := make([]uint16, 0, versionsLen/2)
+	for pos := 1; pos+1 < 1+versionsLen; pos += 2 {
+		versions = append(versions, binary.BigEndian.Uint16(data[pos:pos+2]))
+	}
+	return versions
+}
+
+func highestSupportedVersion(versions []uint16) uint16 {
+	var highest uint16
+	for _, version := range versions {
+		if !isGREASE(version) && version > highest {
+			highest = version
+		}
+	}
+	return highest
 }
 
 // handshakeTypeName returns a human-readable name for the handshake type.

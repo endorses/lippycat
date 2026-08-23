@@ -479,6 +479,108 @@ func TestTCPBufferPool(t *testing.T) {
 	assert.Equal(t, 200, buffer2.maxSize)
 }
 
+func isolateTCPBufferPoolForTest(t *testing.T, poolSize int) {
+	t.Helper()
+
+	originalPool := tcpBufferPool
+	tcpPacketBuffersMu.Lock()
+	originalBuffers := tcpPacketBuffers
+	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffersMu.Unlock()
+
+	tcpBufferPool = &TCPBufferPool{
+		buffers: make([]*TCPPacketBuffer, 0, poolSize),
+		maxSize: poolSize,
+	}
+
+	t.Cleanup(func() {
+		tcpBufferPool = originalPool
+		tcpPacketBuffersMu.Lock()
+		tcpPacketBuffers = originalBuffers
+		tcpPacketBuffersMu.Unlock()
+	})
+}
+
+func TestReleaseBufferDropsFrameDataReferences(t *testing.T) {
+	isolateTCPBufferPoolForTest(t, 10)
+
+	buffer := &TCPPacketBuffer{
+		packets: make([]bufferedFrame, 2, 4),
+		callID:  "call-with-payloads",
+	}
+	full := buffer.packets[:cap(buffer.packets)]
+	for i := range full {
+		full[i].data = []byte{byte(i + 1)}
+	}
+
+	releaseBuffer(buffer)
+
+	require.Len(t, tcpBufferPool.buffers, 1)
+	pooled := tcpBufferPool.buffers[0]
+	require.Zero(t, len(pooled.packets))
+	for i, frame := range pooled.packets[:cap(pooled.packets)] {
+		assert.Nil(t, frame.data, "pooled frame %d retained packet data", i)
+	}
+	assert.Empty(t, pooled.callID)
+}
+
+func TestCleanupOldTCPBuffersReleasesFrameData(t *testing.T) {
+	isolateTCPBufferPoolForTest(t, 10)
+
+	var flow gopacket.Flow
+	buffer := &TCPPacketBuffer{
+		packets:    make([]bufferedFrame, 2, 4),
+		lastAccess: time.Now().Add(-2 * time.Hour),
+		flow:       flow,
+		callID:     "expired-call",
+	}
+	full := buffer.packets[:cap(buffer.packets)]
+	for i := range full {
+		full[i].data = []byte{byte(i + 1)}
+	}
+
+	tcpPacketBuffersMu.Lock()
+	tcpPacketBuffers[flow] = buffer
+	tcpPacketBuffersMu.Unlock()
+
+	cleanupOldTCPBuffers(time.Minute)
+
+	tcpPacketBuffersMu.RLock()
+	_, exists := tcpPacketBuffers[flow]
+	tcpPacketBuffersMu.RUnlock()
+	assert.False(t, exists)
+
+	require.Len(t, tcpBufferPool.buffers, 1)
+	pooled := tcpBufferPool.buffers[0]
+	require.Zero(t, len(pooled.packets))
+	for i, frame := range pooled.packets[:cap(pooled.packets)] {
+		assert.Nil(t, frame.data, "expired pooled frame %d retained packet data", i)
+	}
+	assert.Empty(t, pooled.callID)
+}
+
+func TestReleaseBufferDropsOversizedArrays(t *testing.T) {
+	isolateTCPBufferPoolForTest(t, 10)
+
+	buffer := &TCPPacketBuffer{
+		packets: make([]bufferedFrame, 1, maxPooledTCPBufferCapacity+1),
+		callID:  "oversized-call",
+	}
+	full := buffer.packets[:cap(buffer.packets)]
+	for i := range full {
+		full[i].data = []byte{byte(i + 1)}
+	}
+
+	releaseBuffer(buffer)
+
+	assert.Empty(t, tcpBufferPool.buffers)
+	assert.Zero(t, len(buffer.packets))
+	for i, frame := range buffer.packets[:cap(buffer.packets)] {
+		assert.Nil(t, frame.data, "oversized frame %d retained packet data", i)
+	}
+	assert.Empty(t, buffer.callID)
+}
+
 func TestPerformanceModeOptimizations(t *testing.T) {
 	tests := []struct {
 		name             string

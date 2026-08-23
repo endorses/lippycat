@@ -13,7 +13,8 @@ import (
 
 // TCP packet buffer constants
 const (
-	DefaultTCPBufferSize = 10000
+	DefaultTCPBufferSize       = 10000
+	maxPooledTCPBufferCapacity = 512
 )
 
 // Buffer strategies
@@ -87,9 +88,9 @@ func getOrCreateBuffer(strategy string, maxSize int) *TCPPacketBuffer {
 		tcpBufferPool.buffers = tcpBufferPool.buffers[:len(tcpBufferPool.buffers)-1]
 
 		// Reset the buffer for reuse
-		buffer.packets = buffer.packets[:0]
 		buffer.createdAt = time.Now()
 		buffer.lastAccess = time.Now()
+		buffer.flow = gopacket.Flow{}
 		buffer.maxSize = maxSize
 		buffer.strategy = strategy
 		buffer.callID = ""
@@ -117,6 +118,21 @@ func getOrCreateBuffer(strategy string, maxSize int) *TCPPacketBuffer {
 }
 
 func releaseBuffer(buffer *TCPPacketBuffer) {
+	if buffer == nil {
+		return
+	}
+
+	if cap(buffer.packets) > 0 {
+		clear(buffer.packets[:cap(buffer.packets)])
+	}
+	buffer.packets = buffer.packets[:0]
+	buffer.callID = ""
+	buffer.flow = gopacket.Flow{}
+
+	if cap(buffer.packets) > maxPooledTCPBufferCapacity {
+		return
+	}
+
 	tcpBufferPool.mu.Lock()
 	defer tcpBufferPool.mu.Unlock()
 
@@ -242,8 +258,6 @@ func getTCPBufferedPackets(flow gopacket.Flow) []capture.PacketInfo {
 		packets[i] = reconstructPacket(frame)
 	}
 
-	// Clear and release buffer
-	buffer.packets = buffer.packets[:0]
 	delete(tcpPacketBuffers, flow)
 	releaseBuffer(buffer)
 
@@ -261,8 +275,6 @@ func discardTCPBufferedPackets(flow gopacket.Flow) {
 		return
 	}
 
-	// Clear and release buffer
-	buffer.packets = buffer.packets[:0]
 	delete(tcpPacketBuffers, flow)
 	releaseBuffer(buffer)
 }

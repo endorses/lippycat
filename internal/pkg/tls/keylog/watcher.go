@@ -10,7 +10,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -62,9 +64,9 @@ type Watcher struct {
 	running   bool
 
 	// Stats
-	linesRead    uint64
-	entriesAdded uint64
-	errors       uint64
+	linesRead    atomic.Uint64
+	entriesAdded atomic.Uint64
+	errors       atomic.Uint64
 }
 
 // NewWatcher creates a new key log file watcher.
@@ -222,15 +224,15 @@ func (w *Watcher) readExisting() error {
 	entries, errs := w.parser.Parse(file)
 	for _, err := range errs {
 		logger.Warn("key log parse error", "error", err)
-		w.errors++
+		w.errors.Add(1)
 	}
 
 	// Add entries to store
 	for _, entry := range entries {
 		w.store.Add(entry)
-		w.entriesAdded++
+		w.entriesAdded.Add(1)
 	}
-	w.linesRead += uint64(len(entries))
+	w.linesRead.Add(uint64(len(entries)))
 
 	// Get file size for offset tracking
 	info, err := file.Stat()
@@ -299,7 +301,7 @@ func (w *Watcher) fsWatchLoop(ctx context.Context) {
 				return
 			}
 			logger.Warn("fsnotify error", "error", err)
-			w.errors++
+			w.errors.Add(1)
 		}
 	}
 }
@@ -390,27 +392,44 @@ func (w *Watcher) pipeReadLoop(ctx context.Context) {
 			continue
 		}
 
-		// Clear non-blocking flag now that we have a connection
-		// This allows blocking reads to work correctly
-		if err := clearNonBlocking(file); err != nil {
-			logger.Warn("failed to clear non-blocking flag",
-				"path", w.path,
-				"error", err)
+		if w.isStopped() {
+			if err := file.Close(); err != nil {
+				logger.Error("failed to close key log pipe", "error", err)
+			}
+			return
 		}
 
-		// Read from pipe until EOF or error
+		w.mu.Lock()
+		if !w.running {
+			w.mu.Unlock()
+			if err := file.Close(); err != nil {
+				logger.Error("failed to close key log pipe", "error", err)
+			}
+			return
+		}
+		w.file = file
+		w.mu.Unlock()
+
+		// Keep the pipe non-blocking so shutdown can be observed without relying
+		// on cross-goroutine Close behavior to interrupt a blocked read.
 		w.readPipe(ctx, file)
 
-		if err := file.Close(); err != nil {
-			logger.Error("failed to close key log pipe", "error", err)
+		w.closeActivePipe(file)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-w.stopChan:
+			return
+		case <-time.After(w.config.PollInterval):
 		}
 	}
 }
 
 // readPipe reads entries from an open pipe.
 func (w *Watcher) readPipe(ctx context.Context, file *os.File) {
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, w.config.ReadBufferSize), w.config.MaxLineLength)
+	reader := bufio.NewReaderSize(file, w.config.ReadBufferSize)
+	pending := make([]byte, 0, w.config.MaxLineLength)
 
 	for {
 		select {
@@ -421,30 +440,67 @@ func (w *Watcher) readPipe(ctx context.Context, file *os.File) {
 		default:
 		}
 
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil && err != io.EOF {
-				logger.Warn("key log pipe read error", "error", err)
-				w.errors++
+		chunk, err := reader.ReadBytes('\n')
+		if len(chunk) > 0 {
+			pending = append(pending, chunk...)
+			if len(pending) > w.config.MaxLineLength {
+				logger.Debug("key log parse error",
+					"error", fmt.Errorf("line exceeds maximum length"),
+					"line", string(pending[:w.config.MaxLineLength]))
+				w.errors.Add(1)
+				pending = pending[:0]
+			} else if pending[len(pending)-1] == '\n' {
+				w.processPipeLine(strings.TrimRight(string(pending), "\r\n"))
+				pending = pending[:0]
+			}
+		}
+
+		if err == nil {
+			continue
+		}
+
+		if errors.Is(err, io.EOF) {
+			if len(pending) > 0 {
+				w.processPipeLine(strings.TrimRight(string(pending), "\r\n"))
 			}
 			return
 		}
 
-		w.linesRead++
-		entry, err := w.parser.ParseLine(scanner.Text())
-		if err != nil {
-			logger.Debug("key log parse error",
-				"error", err,
-				"line", scanner.Text())
-			w.errors++
-			continue
+		if isWouldBlock(err) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-w.stopChan:
+				return
+			case <-time.After(w.config.PollInterval):
+				continue
+			}
 		}
-		if entry != nil {
-			w.store.Add(entry)
-			w.entriesAdded++
-			logger.Debug("added key from pipe",
-				"label", entry.Label.String(),
-				"client_random", entry.ClientRandomHex()[:16]+"...")
+
+		if !w.isStopped() {
+			logger.Warn("key log pipe read error", "error", err)
+			w.errors.Add(1)
 		}
+		return
+	}
+}
+
+func (w *Watcher) processPipeLine(line string) {
+	w.linesRead.Add(1)
+	entry, err := w.parser.ParseLine(line)
+	if err != nil {
+		logger.Debug("key log parse error",
+			"error", err,
+			"line", line)
+		w.errors.Add(1)
+		return
+	}
+	if entry != nil {
+		w.store.Add(entry)
+		w.entriesAdded.Add(1)
+		logger.Debug("added key from pipe",
+			"label", entry.Label.String(),
+			"client_random", entry.ClientRandomHex()[:16]+"...")
 	}
 }
 
@@ -487,18 +543,18 @@ func (w *Watcher) readNew() error {
 
 	newEntries := 0
 	for scanner.Scan() {
-		w.linesRead++
+		w.linesRead.Add(1)
 		entry, err := w.parser.ParseLine(scanner.Text())
 		if err != nil {
 			logger.Debug("key log parse error",
 				"error", err,
 				"line", scanner.Text())
-			w.errors++
+			w.errors.Add(1)
 			continue
 		}
 		if entry != nil {
 			w.store.Add(entry)
-			w.entriesAdded++
+			w.entriesAdded.Add(1)
 			newEntries++
 			logger.Debug("added new key",
 				"label", entry.Label.String(),
@@ -538,6 +594,16 @@ func (w *Watcher) Stop() error {
 
 	close(w.stopChan)
 
+	w.mu.Lock()
+	file := w.file
+	w.file = nil
+	w.mu.Unlock()
+	if file != nil {
+		if err := file.Close(); err != nil {
+			logger.Error("failed to close key log pipe", "error", err)
+		}
+	}
+
 	if w.fsWatcher != nil {
 		if err := w.fsWatcher.Close(); err != nil {
 			logger.Error("failed to close fsnotify watcher", "error", err)
@@ -548,7 +614,7 @@ func (w *Watcher) Stop() error {
 
 	logger.Info("stopped key log watcher",
 		"path", w.path,
-		"entries_added", w.entriesAdded)
+		"entries_added", w.entriesAdded.Load())
 
 	return nil
 }
@@ -561,10 +627,38 @@ func (w *Watcher) Stats() WatcherStats {
 	return WatcherStats{
 		Path:         w.path,
 		Offset:       w.offset,
-		LinesRead:    w.linesRead,
-		EntriesAdded: w.entriesAdded,
-		Errors:       w.errors,
+		LinesRead:    w.linesRead.Load(),
+		EntriesAdded: w.entriesAdded.Load(),
+		Errors:       w.errors.Load(),
 		Running:      w.running,
+	}
+}
+
+func (w *Watcher) isStopped() bool {
+	select {
+	case <-w.stopChan:
+		return true
+	default:
+		return false
+	}
+}
+
+func isWouldBlock(err error) bool {
+	return errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK)
+}
+
+func (w *Watcher) closeActivePipe(file *os.File) {
+	w.mu.Lock()
+	shouldClose := w.file == file
+	if shouldClose {
+		w.file = nil
+	}
+	w.mu.Unlock()
+
+	if shouldClose {
+		if err := file.Close(); err != nil && !w.isStopped() {
+			logger.Error("failed to close key log pipe", "error", err)
+		}
 	}
 }
 
@@ -576,21 +670,4 @@ type WatcherStats struct {
 	EntriesAdded uint64
 	Errors       uint64
 	Running      bool
-}
-
-// clearNonBlocking clears the O_NONBLOCK flag from a file using unix-specific syscall.
-// On Linux, we use the SYS_FCNTL syscall directly.
-func clearNonBlocking(f *os.File) error {
-	fd := f.Fd()
-	// Get current flags
-	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
-	if errno != 0 {
-		return fmt.Errorf("fcntl F_GETFL: %v", errno)
-	}
-	// Clear O_NONBLOCK
-	_, _, errno = syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_SETFL, flags & ^uintptr(syscall.O_NONBLOCK))
-	if errno != 0 {
-		return fmt.Errorf("fcntl F_SETFL: %v", errno)
-	}
-	return nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/debugserver"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
@@ -33,6 +34,12 @@ Example:
   lc hunt --processor 192.168.1.100:55555 --interface eth0
   lc hunt --processor processor:55555 --id edge-01`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := debugserver.StartPprofFromConfig(
+			cmdutil.GetStringConfig("hunter.debug_listen", debugListen),
+			cmdutil.GetBoolConfig("hunter.debug_allow_non_loopback", debugAllowNonLoopback),
+		); err != nil {
+			return err
+		}
 		// Handle deprecated --hunter-id flag migration to --id
 		if cmd.Flags().Changed("hunter-id") {
 			if cmd.Flags().Changed("id") {
@@ -75,6 +82,9 @@ var (
 	espNull      bool
 	espHeuristic bool
 	espICVSize   int
+	// Debug/pprof flags
+	debugListen           string
+	debugAllowNonLoopback bool
 )
 
 func init() {
@@ -119,6 +129,8 @@ func init() {
 	HuntCmd.PersistentFlags().BoolVar(&espNull, "esp-null", false, "Assume all ESP traffic is NULL-encrypted (skip content heuristics)")
 	HuntCmd.PersistentFlags().BoolVar(&espHeuristic, "esp-heuristic", false, "Detect ESP-NULL traffic by sniffing payload content (off by default)")
 	HuntCmd.PersistentFlags().IntVar(&espICVSize, "esp-icv-size", -1, "ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires --esp-null")
+	HuntCmd.PersistentFlags().StringVar(&debugListen, "debug-listen", "", "Enable pprof debug HTTP listener on address (loopback only by default, e.g. 127.0.0.1:6060)")
+	HuntCmd.PersistentFlags().BoolVar(&debugAllowNonLoopback, "debug-allow-non-loopback", false, "Allow pprof debug listener to bind non-loopback addresses")
 
 	// Filter policy configuration
 	HuntCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
@@ -152,6 +164,8 @@ func init() {
 	_ = viper.BindPFlag("esp_null", HuntCmd.PersistentFlags().Lookup("esp-null"))
 	_ = viper.BindPFlag("esp_heuristic", HuntCmd.PersistentFlags().Lookup("esp-heuristic"))
 	_ = viper.BindPFlag("esp_icv_size", HuntCmd.PersistentFlags().Lookup("esp-icv-size"))
+	_ = viper.BindPFlag("hunter.debug_listen", HuntCmd.PersistentFlags().Lookup("debug-listen"))
+	_ = viper.BindPFlag("hunter.debug_allow_non_loopback", HuntCmd.PersistentFlags().Lookup("debug-allow-non-loopback"))
 }
 
 func runHunt(cmd *cobra.Command, args []string) error {

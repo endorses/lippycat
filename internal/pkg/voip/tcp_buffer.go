@@ -294,6 +294,11 @@ type TCPBufferStats struct {
 	TotalBuffersCreated  int64     `json:"total_buffers_created"`
 	TotalBuffersReleased int64     `json:"total_buffers_released"`
 	ActiveBuffers        int64     `json:"active_buffers"`
+	PooledBuffers        int64     `json:"pooled_buffers"`
+	PooledFrames         int64     `json:"pooled_frames"`
+	PooledBytes          int64     `json:"pooled_bytes"`
+	BufferedFrames       int64     `json:"buffered_frames"`
+	BufferedBytes        int64     `json:"buffered_bytes"`
 	TotalPacketsBuffered int64     `json:"total_packets_buffered"`
 	TotalPacketsFlushed  int64     `json:"total_packets_flushed"`
 	LastStatsUpdate      time.Time `json:"last_stats_update"`
@@ -314,12 +319,40 @@ func GetTCPBufferStats() TCPBufferStats {
 
 	created := atomic.LoadInt64(&bufferCreationCount)
 	released := atomic.LoadInt64(&bufferReleaseCount)
+
+	tcpPacketBuffersMu.RLock()
 	active := int64(len(tcpPacketBuffers))
+	var bufferedFrames int64
+	var bufferedBytes int64
+	for _, buffer := range tcpPacketBuffers {
+		bufferedFrames += int64(len(buffer.packets))
+		for _, frame := range buffer.packets {
+			bufferedBytes += int64(len(frame.data))
+		}
+	}
+	tcpPacketBuffersMu.RUnlock()
+
+	tcpBufferPool.mu.Lock()
+	pooledBuffers := int64(len(tcpBufferPool.buffers))
+	var pooledFrames int64
+	var pooledBytes int64
+	for _, buffer := range tcpBufferPool.buffers {
+		pooledFrames += int64(cap(buffer.packets))
+		for _, frame := range buffer.packets[:cap(buffer.packets)] {
+			pooledBytes += int64(len(frame.data))
+		}
+	}
+	tcpBufferPool.mu.Unlock()
 
 	return TCPBufferStats{
 		TotalBuffersCreated:  created,
 		TotalBuffersReleased: released,
 		ActiveBuffers:        active,
+		PooledBuffers:        pooledBuffers,
+		PooledFrames:         pooledFrames,
+		PooledBytes:          pooledBytes,
+		BufferedFrames:       bufferedFrames,
+		BufferedBytes:        bufferedBytes,
 		TotalPacketsBuffered: tcpBufferStats.totalPacketsBuffered,
 		TotalPacketsFlushed:  tcpBufferStats.totalPacketsFlushed,
 		LastStatsUpdate:      tcpBufferStats.lastStatsUpdate,

@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/debugserver"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/signals"
@@ -51,6 +52,12 @@ Examples:
     --li-delivery-tls-cert delivery.crt --li-delivery-tls-key delivery.key \
     --li-delivery-tls-ca mdf-ca.crt`,
 	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := debugserver.StartPprofFromConfig(
+			cmdutil.GetStringConfig("processor.debug_listen", debugListen),
+			cmdutil.GetBoolConfig("processor.debug_allow_non_loopback", debugAllowNonLoopback),
+		); err != nil {
+			return err
+		}
 		// Handle deprecated --processor-id flag migration to --id
 		if cmd.Flags().Changed("processor-id") {
 			if cmd.Flags().Changed("id") {
@@ -120,6 +127,9 @@ var (
 	tunnelingDebounce  string
 	// TLS keylog flags (for decryption support)
 	tlsKeylogDir string
+	// Debug/pprof flags
+	debugListen           string
+	debugAllowNonLoopback bool
 )
 
 func init() {
@@ -191,6 +201,8 @@ func init() {
 
 	// TLS keylog flags (for decryption support)
 	ProcessCmd.Flags().StringVar(&tlsKeylogDir, "tls-keylog-dir", "", "Directory to write TLS session keys (NSS keylog format, Wireshark-compatible)")
+	ProcessCmd.Flags().StringVar(&debugListen, "debug-listen", "", "Enable pprof debug HTTP listener on address (loopback only by default, e.g. 127.0.0.1:6060)")
+	ProcessCmd.Flags().BoolVar(&debugAllowNonLoopback, "debug-allow-non-loopback", false, "Allow pprof debug listener to bind non-loopback addresses")
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -238,6 +250,8 @@ func init() {
 	BindLIViperFlags(ProcessCmd)
 	// TLS keylog viper bindings
 	_ = viper.BindPFlag("processor.tls_keylog.output_dir", ProcessCmd.Flags().Lookup("tls-keylog-dir"))
+	_ = viper.BindPFlag("processor.debug_listen", ProcessCmd.Flags().Lookup("debug-listen"))
+	_ = viper.BindPFlag("processor.debug_allow_non_loopback", ProcessCmd.Flags().Lookup("debug-allow-non-loopback"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {

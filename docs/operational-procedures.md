@@ -175,7 +175,18 @@ grep -i "error\|critical\|fatal" "$LOG_FILE" |
    top -p $(pgrep -f "lc.*sniff")
    ```
 
-2. If memory continues growing:
+2. Capture a heap profile if the node was started with a loopback debug listener:
+   ```bash
+   # Supported on tap, process, and hunt
+   lc tap voip -i eth0 --debug-listen 127.0.0.1:6060
+   go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+   ```
+
+   `LC_PPROF_ADDR=127.0.0.1:6060` remains available as a compatibility fallback
+   when `--debug-listen` is omitted. Non-loopback debug listeners require
+   `--debug-allow-non-loopback`.
+
+3. If memory continues growing:
    ```bash
    # Switch to memory optimization mode
    sudo systemctl stop lippycat
@@ -183,7 +194,7 @@ grep -i "error\|critical\|fatal" "$LOG_FILE" |
    sudo systemctl start lippycat
    ```
 
-3. If memory critical (>1GB):
+4. If memory critical (>1GB):
    ```bash
    # Emergency restart
    sudo systemctl restart lippycat

@@ -560,12 +560,16 @@ The `minimal` profile keeps memory low. BPF filtering (`--udp-only`) reduces cap
 When tuning, it helps to observe actual memory usage. Enable pprof for Go's built-in memory profiler:
 
 ```bash
-export LIPPYCAT_PPROF_ENABLED=true
-sudo lc sniff voip -i eth0
+sudo lc tap voip -i eth0 --debug-listen 127.0.0.1:6060
 
 # In another terminal, capture a heap profile
 go tool pprof http://localhost:6060/debug/pprof/heap
 ```
+
+The `--debug-listen` flag is available on `tap`, `process`, and `hunt`, and
+accepts loopback addresses by default. To expose pprof on a non-loopback
+address, add `--debug-allow-non-loopback`. Existing deployments can keep using
+`LC_PPROF_ADDR=127.0.0.1:6060` when the flag is omitted.
 
 For quick checks without pprof:
 

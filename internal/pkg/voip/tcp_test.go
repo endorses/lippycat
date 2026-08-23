@@ -320,6 +320,15 @@ func TestHandleTcpPackets_NonSipPort(t *testing.T) {
 // Phase 3 Performance Optimization Tests
 
 func TestTCPBufferStats(t *testing.T) {
+	originalPool := tcpBufferPool
+	tcpBufferPool = &TCPBufferPool{
+		buffers: make([]*TCPPacketBuffer, 0, DefaultTCPBufferPoolSize),
+		maxSize: DefaultTCPBufferPoolSize,
+	}
+	defer func() {
+		tcpBufferPool = originalPool
+	}()
+
 	// Reset stats for test
 	tcpBufferStats = &tcpBufferStatsInternal{
 		lastStatsUpdate: time.Now(),
@@ -334,6 +343,52 @@ func TestTCPBufferStats(t *testing.T) {
 	assert.Equal(t, int64(0), stats.TotalPackets)
 	assert.Equal(t, int64(0), stats.BuffersDropped)
 	// PacketsDropped field was removed, use BuffersDropped instead
+}
+
+func TestTCPBufferStatsIncludesLiveAndPooledMemory(t *testing.T) {
+	originalPool := tcpBufferPool
+	tcpPacketBuffersMu.Lock()
+	originalBuffers := tcpPacketBuffers
+	tcpPacketBuffers = make(map[gopacket.Flow]*TCPPacketBuffer)
+	tcpPacketBuffersMu.Unlock()
+
+	tcpBufferPool = &TCPBufferPool{
+		buffers: make([]*TCPPacketBuffer, 0, DefaultTCPBufferPoolSize),
+		maxSize: DefaultTCPBufferPoolSize,
+	}
+	defer func() {
+		tcpBufferPool = originalPool
+		tcpPacketBuffersMu.Lock()
+		tcpPacketBuffers = originalBuffers
+		tcpPacketBuffersMu.Unlock()
+	}()
+
+	activeFlow := gopacket.NewFlow(layers.EndpointIPv4, []byte{10, 0, 0, 1}, []byte{10, 0, 0, 2})
+	tcpPacketBuffersMu.Lock()
+	tcpPacketBuffers[activeFlow] = &TCPPacketBuffer{
+		packets: []bufferedFrame{
+			{data: []byte("INVITE")},
+			{data: []byte("BYE")},
+		},
+		lastAccess: time.Now(),
+	}
+	tcpPacketBuffersMu.Unlock()
+
+	pooledFrames := make([]bufferedFrame, 0, 4)
+	pooledFrames = pooledFrames[:1]
+	pooledFrames[0] = bufferedFrame{data: []byte("retained")}
+	pooledFrames = pooledFrames[:0]
+	tcpBufferPool.buffers = append(tcpBufferPool.buffers, &TCPPacketBuffer{
+		packets: pooledFrames,
+	})
+
+	stats := GetTCPBufferStats()
+	assert.Equal(t, int64(1), stats.ActiveBuffers)
+	assert.Equal(t, int64(2), stats.BufferedFrames)
+	assert.Equal(t, int64(len("INVITE")+len("BYE")), stats.BufferedBytes)
+	assert.Equal(t, int64(1), stats.PooledBuffers)
+	assert.Equal(t, int64(4), stats.PooledFrames)
+	assert.Equal(t, int64(len("retained")), stats.PooledBytes)
 }
 
 func TestTCPStreamMetrics(t *testing.T) {

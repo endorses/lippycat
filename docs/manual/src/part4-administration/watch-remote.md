@@ -23,6 +23,9 @@ flowchart LR
 ## Quick Start
 
 ```bash
+# Connect directly to one processor
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
+
 # Connect using a nodes file
 lc watch remote --nodes-file nodes.yaml
 
@@ -30,16 +33,18 @@ lc watch remote --nodes-file nodes.yaml
 lc watch remote
 
 # With TLS
-lc watch remote --tls-ca ca.crt
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
 
 # With mutual TLS
-lc watch remote --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
 
 # For local testing
-lc watch remote --insecure
+lc watch remote -P localhost:55555 --insecure
 ```
 
 ## Node File Configuration
+
+Use `--processor` (`-P`) when you want to connect to a single processor or tap node directly. Use `--nodes-file` when you want the TUI to load one or more processors from YAML at startup. You can provide both; the TUI will queue connections from both sources.
 
 The nodes file tells the TUI which processors and hunters to connect to.
 
@@ -226,16 +231,16 @@ lc rm filter --id myfilter -P processor:55555 --tls-ca ca.crt
 
 ```bash
 # Server TLS (verify processor certificate)
-lc watch remote --tls-ca ca.crt
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
 
 # Mutual TLS (both sides authenticate)
-lc watch remote --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
 
 # Skip verification (encrypted but no identity check, testing only)
-lc watch remote --tls-skip-verify
+lc watch remote -P processor.example.com:55555 --tls-skip-verify
 
 # No TLS at all (testing only, blocked in production mode)
-lc watch remote --insecure
+lc watch remote -P localhost:55555 --insecure
 ```
 
 ### Per-Node TLS in Nodes File

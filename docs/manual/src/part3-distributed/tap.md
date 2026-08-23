@@ -44,10 +44,12 @@ sudo lc tap -i eth0 --tls-cert server.crt --tls-key server.key
 sudo lc tap -i eth0 --insecure
 
 # Connect TUI to tap node
-lc watch remote --addr localhost:55555 --tls-ca ca.crt
+lc watch remote -P tap-host:55555 --tls-ca ca.crt
 # Or without TLS:
-lc watch remote --addr localhost:55555 --insecure
+lc watch remote -P localhost:55555 --insecure
 ```
+
+`lc watch remote` can connect directly with `--processor` (`-P`) or read target processors and tap nodes from a nodes YAML file. See [Remote TUI Monitoring](../part4-administration/watch-remote.md) for the file format and default search paths.
 
 ## Protocol Subcommands
 
@@ -66,8 +68,8 @@ sudo lc tap voip -i eth0 \
   --per-call-pcap-dir /var/voip/calls \
   --tls-cert server.crt --tls-key server.key
 
-# UDP-only VoIP capture (bypass TCP reassembly)
-sudo lc tap voip -i eth0 --udp-only --sip-port 5060 --insecure
+# VoIP capture narrowed to a SIP port
+sudo lc tap voip -i eth0 --sip-port 5060 --insecure
 
 # High-performance VoIP capture
 sudo lc tap voip -i eth0 --tcp-performance-mode high_performance --insecure
@@ -165,14 +167,14 @@ Tap nodes serve a management gRPC API on `--listen` (default: `:55555`), allowin
 sudo lc tap voip -i eth0 --tls-cert server.crt --tls-key server.key
 
 # Connect TUI from another terminal
-lc watch remote --addr tap-host:55555 --tls-ca ca.crt
+lc watch remote -P tap-host:55555 --tls-ca ca.crt
 ```
 
 For local development, use `--insecure` on both tap and TUI:
 
 ```bash
 sudo lc tap voip -i eth0 --insecure
-lc watch remote --addr localhost:55555 --insecure
+lc watch remote -P localhost:55555 --insecure
 ```
 
 ## Upstream Forwarding

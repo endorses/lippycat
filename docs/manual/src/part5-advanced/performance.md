@@ -8,13 +8,13 @@ TCP performance profiles are pre-tuned parameter sets that configure 17-19 inter
 
 ### Choosing a Profile
 
-Set the profile with `--tcp-performance-mode` on any capture command (`sniff`, `hunt`, `tap`):
+Set the profile with `--tcp-performance-mode` on commands that perform local SIP-over-TCP reassembly. `sniff voip` uses `balanced`, `throughput`, `latency`, and `memory`; `tap voip` uses `minimal`, `balanced`, `high_performance`, and `low_latency`.
 
 ```bash
 sudo lc sniff voip -i eth0 --tcp-performance-mode balanced
 ```
 
-The four profiles target different operating points:
+For `tap voip`, the four profiles target different operating points:
 
 | | Minimal | Balanced | High Performance | Low Latency |
 |---|---|---|---|---|
@@ -46,12 +46,12 @@ sudo lc sniff voip -i eth0 \
 
 # High performance with backpressure re-enabled for safety
 sudo lc sniff voip -i eth0 \
-  --tcp-performance-mode high_performance \
+  --tcp-performance-mode throughput \
   --enable-backpressure
 
-# Minimal profile with a longer stream timeout for slow SIP dialogs
+# Memory profile with a longer stream timeout for slow SIP dialogs
 sudo lc sniff voip -i eth0 \
-  --tcp-performance-mode minimal \
+  --tcp-performance-mode memory \
   --tcp-stream-timeout 300s
 ```
 
@@ -67,7 +67,7 @@ voip:
 
 In a distributed deployment ([Chapter 6](../part3-distributed/architecture.md)), hunters and processors have different tuning needs:
 
-- **Hunters** do TCP reassembly at the edge. If the hunter is on a constrained host, use `minimal` or `balanced`. If the hunter sits on a high-bandwidth trunk, use `high_performance`.
+- **Hunters** use SIP TCP idle-timeout tuning and processor-managed filters, but do not expose `--tcp-performance-mode`.
 - **Processors** receive already-reassembled packets over gRPC, so the TCP profile primarily affects any local capture the processor may do (relevant in tap mode, [Chapter 9](../part3-distributed/tap.md)).
 - **Tap nodes** combine both roles. Match the profile to the local traffic volume.
 
@@ -102,6 +102,8 @@ sudo lc sniff voip -i eth0 --gpu-backend cpu-simd
 # Disable acceleration entirely
 sudo lc sniff voip -i eth0 --gpu-backend disabled
 ```
+
+For `sniff voip`, `hunt`, and `tap`, these GPU flags are registered only in CUDA builds. `watch live` exposes its own GPU flags in standard builds.
 
 ### Backend Requirements
 
@@ -228,11 +230,11 @@ sudo lc hunt voip --processor central:55555 \
 sudo lc sniff voip -i eth0 -f "host 192.168.1.100 and port 5060"
 ```
 
-In VoIP deployments, the `--udp-only` flag is a shorthand for a BPF filter that excludes TCP entirely. On networks with heavy TCP traffic (web, database), this can reduce CPU load significantly:
+In VoIP deployments, explicit SIP and RTP port constraints are the safest way to reduce userspace load without dropping SIP-over-TCP:
 
 ```bash
 sudo lc hunt voip --processor central:55555 \
-  -i eth0 --udp-only --sip-port 5060
+  -i eth0 --sip-port 5060 --rtp-port-range 10000-20000
 ```
 
 See [Appendix C: BPF Filter Reference](../appendices/bpf-reference.md) for the full filter syntax.
@@ -267,13 +269,15 @@ One of the biggest performance wins in distributed mode is filtering at the edge
 
 ```bash
 # Hunter with edge filtering and GPU acceleration
+lc set filter -P central:55555 --tls-ca ca.crt \
+  --type sip_user --pattern alicent
+
 sudo lc hunt voip --processor central:55555 \
-  --sip-user alicent \
-  --gpu-backend auto \
-  --udp-only --sip-port 5060
+  --sip-port 5060 \
+  --rtp-port-range 10000-20000
 ```
 
-This hunter captures only VoIP traffic matching the `alicent` SIP user, discarding everything else before it reaches the network. The processor receives a fraction of the raw traffic.
+The processor pushes the `alicent` SIP-user filter to the hunter. The hunter buffers calls at the edge and forwards only matching calls, so the processor receives a fraction of the raw traffic.
 
 ### Processor Capacity
 
@@ -487,36 +491,31 @@ Different deployment environments call for different combinations of the techniq
 
 ```bash
 sudo lc sniff voip -i eth0 \
-  --tcp-performance-mode minimal \
-  --gpu-backend disabled \
-  --buffer-size 5000 \
+  --tcp-performance-mode memory \
   --memory-optimization
 ```
 
-Expect 10-50 concurrent calls. The `minimal` profile keeps memory under 25 MB. Disable GPU acceleration (no benefit on ARM without SIMD extensions). Enable `--memory-optimization` to aggressively reclaim buffers.
+Expect 10-50 concurrent calls. The `memory` profile keeps TCP buffers conservative. Enable `--memory-optimization` to aggressively reclaim buffers.
 
 ### Virtual Machines
 
 ```bash
 sudo lc sniff voip -i eth0 \
   --tcp-performance-mode balanced \
-  --gpu-backend cpu-simd \
-  --buffer-size 10000
+  --max-tcp-buffers 5000
 ```
 
-CPU SIMD works well in VMs — avoid GPU passthrough unless the VM already has it configured. AF_XDP generally does not work in VMs because the virtual NIC driver lacks XDP support. Adjust buffer sizes based on the RAM allocated to the VM.
+AF_XDP generally does not work in VMs because the virtual NIC driver lacks XDP support. Adjust TCP buffer limits based on the RAM allocated to the VM.
 
 ### Bare Metal Servers
 
 ```bash
 sudo lc sniff voip -i eth0 \
-  --tcp-performance-mode high_performance \
-  --gpu-backend auto \
-  --buffer-size 50000 \
+  --tcp-performance-mode throughput \
   --max-tcp-buffers 20000
 ```
 
-On dedicated hardware with 8+ GB RAM and a modern CPU, use the `high_performance` profile and let GPU auto-detection choose the best backend. If you have an NVIDIA GPU and have built with `-tags cuda`, CUDA will be selected automatically. For 10GbE+ interfaces, add AF_XDP as described above.
+On dedicated hardware with 8+ GB RAM and a modern CPU, use the `throughput` profile. If you have an NVIDIA GPU and have built with `-tags cuda`, add `--gpu-backend auto` to let CUDA/OpenCL/SIMD selection pick the best backend. For 10GbE+ interfaces, add AF_XDP as described above.
 
 ### Kubernetes / Containers
 
@@ -534,11 +533,10 @@ resources:
 ```bash
 lc sniff voip -i eth0 \
   --tcp-performance-mode balanced \
-  --gpu-backend cpu-simd \
   --max-tcp-buffers 5000
 ```
 
-Match the TCP profile to the container's memory limit — the `balanced` profile's 100 MB fits comfortably within a 2 GB container. GPU passthrough to containers is possible but complex; CPU SIMD is the practical choice. AF_XDP requires host networking and `CAP_NET_ADMIN`, which may conflict with container security policies.
+Match the TCP profile to the container's memory limit — the `balanced` profile's 100 MB fits comfortably within a 2 GB container. GPU passthrough to containers is possible but complex. AF_XDP requires host networking and `CAP_NET_ADMIN`, which may conflict with container security policies.
 
 ### Distributed Hunter on Constrained Edge
 
@@ -546,14 +544,12 @@ For hunters deployed on small edge devices that forward to a central processor:
 
 ```bash
 sudo lc hunt voip --processor central:55555 \
-  --tcp-performance-mode minimal \
-  --gpu-backend cpu-simd \
   --batch-size 32 --batch-timeout 200 \
-  --udp-only --sip-port 5060 \
+  --sip-port 5060 --rtp-port-range 10000-20000 \
   --tls-ca ca.crt
 ```
 
-The `minimal` profile keeps memory low. BPF filtering (`--udp-only`) reduces capture load. Small batch sizes keep memory usage predictable. CPU SIMD still provides pattern matching acceleration without GPU hardware.
+SIP/RTP port constraints reduce capture load without dropping TCP SIP. Small batch sizes keep memory usage predictable. If you are using a CUDA build, add `--enable-voip-filter --gpu-backend cpu-simd` for accelerated edge matching without GPU hardware.
 
 ## Memory Profiling
 
@@ -588,8 +584,8 @@ If memory grows continuously, check for:
 | Goal | What to Tune |
 |---|---|
 | Reduce memory usage | `--tcp-performance-mode minimal`, `--memory-optimization`, `--max-tcp-buffers` |
-| Increase throughput | `--tcp-performance-mode high_performance`, `--gpu-backend auto`, AF_XDP |
-| Reduce latency | `--tcp-performance-mode low_latency`, `--gpu-batch-size 256` |
+| Increase throughput | `--tcp-performance-mode throughput` for `sniff voip`, `--tcp-performance-mode high_performance` for `tap voip`, AF_XDP |
+| Reduce latency | `--tcp-performance-mode latency` for `sniff voip`, `--tcp-performance-mode low_latency` for `tap voip` |
 | Scale across segments | Distribute hunters, filter at edge, hierarchical processors |
 | Handle large filter lists | `--pattern-algorithm aho-corasick`, `--pattern-buffer-mb 128` |
 | Capture at 10GbE+ | AF_XDP with NIC tuning, NUMA pinning, huge pages |

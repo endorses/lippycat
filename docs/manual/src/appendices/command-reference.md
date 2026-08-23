@@ -22,7 +22,10 @@ lc
 │   └── email              Email standalone capture
 ├── hunt                   Distributed edge capture
 │   ├── voip               VoIP hunter
-│   └── dns                DNS hunter
+│   ├── dns                DNS hunter
+│   ├── tls                TLS hunter
+│   ├── http               HTTP hunter
+│   └── email              Email hunter
 ├── process                Central aggregation node
 ├── watch                  Interactive TUI
 │   ├── live               Live capture TUI
@@ -95,11 +98,12 @@ Used by `process` and `tap` for serving gRPC with TLS.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--tls` | bool | `false` | Enable TLS for the gRPC server |
 | `--tls-cert` | string | | Server certificate file |
 | `--tls-key` | string | | Server private key file |
 | `--tls-ca` | string | | CA certificate for client verification (mTLS) |
 | `--tls-client-auth` | bool | `false` | Require client certificates (mTLS) |
+
+TLS is enabled by default for `process` and `tap` unless `--insecure` is set. Provide `--tls-cert` and `--tls-key` for encrypted serving.
 
 ### Connection Flags
 
@@ -114,15 +118,15 @@ Plus the [TLS Client Flags](#tls-client-flags) above.
 
 ### GPU Flags
 
-Used by `sniff voip`, `hunt`, and `tap` for GPU-accelerated filtering.
+Used by CUDA builds of `sniff voip`, `hunt`, and `tap` for GPU-accelerated filtering. In non-CUDA builds these flags are not registered, except `watch live` has its own local GPU flags.
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--gpu-backend` | `-g` | string | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `simd`, `none` |
+| `--gpu-backend` | `-g` | string | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
 | `--gpu-batch-size` | | int | varies | Packets per GPU batch (default 1024 for sniff, 100 for hunt) |
-| `--gpu-enable` | | bool | `true` | Enable GPU acceleration (sniff voip) |
+| `--gpu-enable` | | bool | `true` | Enable GPU acceleration (`sniff voip`, CUDA builds only) |
 | `--gpu-max-memory` | | string | | Maximum GPU memory allocation |
-| `--enable-voip-filter` | | bool | | Enable VoIP packet filtering on hunter |
+| `--enable-voip-filter` | | bool | `false` | Enable GPU-accelerated VoIP filtering on hunter/tap (CUDA builds only) |
 
 ### Virtual Interface Flags
 
@@ -134,7 +138,7 @@ Used by `sniff`, `process`, and `tap` for virtual network interface output.
 | `--vif-name` | | string | `lc0` | Virtual interface name |
 | `--vif-type` | | string | `tap` | Interface type: `tap` or `tun` |
 | `--vif-buffer-size` | | int | `65536` | Write buffer size in bytes |
-| `--vif-drop-privileges` | | bool | `false` | Drop root privileges after interface creation |
+| `--vif-drop-privileges` | | string | | Drop privileges to this user after interface creation |
 | `--vif-netns` | | string | | Target network namespace |
 | `--vif-replay-timing` | | bool | `false` | Replay with original packet timing (sniff only) |
 | `--vif-startup-delay` | | duration | `3s` | Delay before writing to allow consumers to attach (sniff only) |
@@ -235,24 +239,23 @@ Inherits all `lc sniff` flags, plus:
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--sip-user` | | string | | Filter by SIP user |
-| `--sip-user-file` | | string | | File containing SIP users (one per line) |
-| `--codec` | | string | | Filter by codec name |
-| `--sip-port` | `-S` | int | `5060` | SIP signaling port |
+| `--sip-port` | `-S` | string | | SIP signaling port(s), comma-separated |
 | `--rtp-port-range` | `-R` | string | | RTP port range (e.g., `10000-20000`) |
-| `--udp-only` | `-U` | bool | `false` | Capture UDP only (skip TCP) |
+
+`--udp-only` still exists for backward compatibility, but is hidden and deprecated in VoIP modes because it can miss TCP SIP traffic. Prefer `--sip-port` and `--rtp-port-range` for BPF narrowing.
 
 **TCP Performance**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--tcp-performance-mode` | string | `balanced` | TCP mode: `balanced`, `high_performance`, `conservative` |
+| `--tcp-performance-mode` | string | `balanced` | TCP mode: `balanced`, `throughput`, `latency`, `memory` |
 | `--tcp-*` | | | Various TCP reassembly tuning flags |
 
 **GPU Acceleration**
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--gpu-backend` | `-g` | string | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `simd`, `none` |
+| `--gpu-backend` | `-g` | string | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
 | `--gpu-batch-size` | | int | `1024` | Packets per GPU batch |
 | `--gpu-enable` | | bool | `true` | Enable GPU acceleration |
 | `--gpu-max-memory` | | string | | Maximum GPU memory allocation |
@@ -261,11 +264,8 @@ Inherits all `lc sniff` flags, plus:
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--per-call-pcap` | bool | `false` | Write per-call PCAP files |
-| `--per-call-pcap-dir` | string | `./pcaps` | Directory for per-call PCAPs |
-| `--per-call-pcap-pattern` | string | | Filename pattern |
-| `--pcap-command` | string | | Post-capture command (`%pcap%` placeholder) |
-| `--voip-command` | string | | Post-call command (`%callid%`, `%dirname%` placeholders) |
+| `--pcap-grace-period` | duration | `5s` | Grace period before closing call PCAP files after call end |
+| `--pcap-closed-call-ttl` | duration | `1h` | Suppress duplicate close handling for completed calls |
 
 See [Chapter 4: CLI Capture with `lc sniff`](../part2-local-capture/sniff.md) and [Chapter 13: Performance Optimization](../part5-advanced/performance.md).
 
@@ -285,9 +285,9 @@ Inherits all `lc sniff` flags, plus:
 |------|------|---------|-------------|
 | `--dns-port` | string | `53` | DNS port(s) to monitor |
 | `--domain` | string | | Filter by domain name |
-| `--domain-file` | string | | File containing domains (one per line) |
-| `--detect-tunneling` | bool | `false` | Enable DNS tunneling detection |
-| `--track-queries` | bool | `false` | Track query/response pairs |
+| `--domains-file` | string | | File containing domains (one per line) |
+| `--detect-tunneling` | bool | `true` | Enable DNS tunneling detection |
+| `--track-queries` | bool | `true` | Track query/response pairs |
 | `--udp-only` | bool | `false` | Capture UDP only |
 
 ---
@@ -313,7 +313,7 @@ Inherits all `lc sniff` flags, plus:
 | `--ja3s-file` | string | | File containing JA3S fingerprints |
 | `--ja4` | string | | Filter by JA4 fingerprint |
 | `--ja4-file` | string | | File containing JA4 fingerprints |
-| `--track-connections` | bool | `false` | Track TLS connection state |
+| `--track-connections` | bool | `true` | Track TLS connection state |
 
 ---
 
@@ -343,7 +343,7 @@ Inherits all `lc sniff` flags, plus:
 | `--keywords-file` | string | | File containing body keyword filters |
 | `--capture-body` | bool | `false` | Capture HTTP request/response body |
 | `--max-body-size` | int | `65536` | Maximum body size to capture (bytes) |
-| `--track-requests` | bool | `false` | Track request/response pairs |
+| `--track-requests` | bool | `true` | Track request/response pairs |
 | `--tls-keylog` | string | | TLS key log file for HTTPS decryption |
 | `--tls-keylog-pipe` | string | | Named pipe for TLS key log |
 
@@ -390,7 +390,7 @@ Inherits all `lc sniff` flags, plus:
 | `--capture-body` | bool | `false` | Capture message body |
 | `--max-body-size` | int | `65536` | Maximum body size to capture (bytes) |
 | `--keywords-file` | string | | File containing body keyword filters |
-| `--track-sessions` | bool | `false` | Track protocol sessions |
+| `--track-sessions` | bool | `true` | Track protocol sessions |
 
 ---
 
@@ -423,10 +423,13 @@ lc tap [flags]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--listen` | `-l` | string | `:50051` | gRPC listen address for TUI clients |
+| `--listen` | `-l` | string | `:55555` | gRPC listen address for TUI clients |
 | `--id` | `-I` | string | | Node identifier |
 | `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers |
 | `--insecure` | | bool | `false` | Disable TLS for gRPC server |
+| `--api-key-auth` | | bool | `false` | Enable API key authentication |
+| `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
+| `--debug-allow-non-loopback` | | bool | `false` | Permit pprof listener on non-loopback addresses |
 
 **Upstream Forwarding**
 
@@ -438,8 +441,9 @@ lc tap [flags]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--enable-detection` | `-d` | bool | `true` | Enable protocol detection |
+| `--detect` | `-d` | bool | `true` | Enable protocol detection |
 | `--filter-file` | | string | | Filter definition file |
+| `--no-filter-policy` | | string | `deny` | Behavior when no filters exist: `allow` or `deny` |
 
 Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags), [Virtual Interface Flags](#virtual-interface-flags), and [GPU Flags](#gpu-flags).
 
@@ -462,10 +466,74 @@ Inherits all `lc tap` flags, plus:
 | `--sip-user` | string | | Filter by SIP user |
 | `--sip-port` | int | `5060` | SIP signaling port |
 | `--rtp-port-range` | string | | RTP port range |
-| `--udp-only` | bool | `false` | Capture UDP only |
-| `--tcp-performance-mode` | string | `balanced` | TCP mode: `balanced`, `high_performance`, `conservative` |
-| `--pattern-algorithm` | string | `auto` | Pattern matching algorithm: `auto`, `aho-corasick`, `bloom` |
+| `--tcp-performance-mode` | string | `balanced` | TCP mode: `minimal`, `balanced`, `high_performance`, `low_latency` |
+| `--pattern-algorithm` | string | `auto` | Pattern matching algorithm: `auto`, `linear`, `aho-corasick` |
 | `--pattern-buffer-mb` | int | `64` | Pattern buffer size (MB) |
+
+---
+
+### `lc tap dns`
+
+DNS-specific standalone capture with tunneling detection.
+
+```
+lc tap dns [flags]
+```
+
+Inherits all `lc tap` flags, plus:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--dns-port` | string | `53` | DNS port(s) to monitor |
+| `--domain` | string | | Filter by domain pattern |
+| `--domains-file` | string | | File containing domain patterns |
+| `--detect-tunneling` | bool | `true` | Enable DNS tunneling detection |
+| `--udp-only` | bool | `false` | Capture UDP DNS only |
+| `--tunneling-command` | string | | Command to execute when tunneling is detected |
+| `--tunneling-threshold` | float | `0.7` | DNS tunneling score threshold |
+| `--tunneling-debounce` | duration | `5m` | Minimum time between alerts per domain |
+
+---
+
+### `lc tap http`
+
+HTTP-specific standalone capture.
+
+```
+lc tap http [flags]
+```
+
+Inherits all `lc tap` flags, plus the same HTTP filtering flags as `lc sniff http`: `--http-port`, `--host`, `--path`, `--method`, `--status`, `--user-agent`, `--content-type`, pattern file flags, `--capture-body`, `--max-body-size`, `--tls-keylog`, and `--tls-keylog-pipe`.
+
+---
+
+### `lc tap tls`
+
+TLS-specific standalone capture.
+
+```
+lc tap tls [flags]
+```
+
+Inherits all `lc tap` flags, plus:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--tls-port` | string | `443` | TLS port(s) to monitor |
+| `--sni` | string | | Filter by SNI pattern |
+| `--sni-file` | string | | File containing SNI patterns |
+
+---
+
+### `lc tap email`
+
+Email-specific standalone capture.
+
+```
+lc tap email [flags]
+```
+
+Inherits all `lc tap` flags, plus the same email filtering flags as `lc sniff email`: protocol and port flags, address/sender/recipient/subject filters, pattern file flags, `--mailbox`, `--command`, `--capture-body`, `--max-body-size`, and `--keywords-file`.
 
 ---
 
@@ -495,6 +563,9 @@ lc hunt [flags]
 | `--enable-voip-filter` | | bool | `false` | Enable VoIP packet filtering |
 | `--gpu-backend` | `-g` | string | `auto` | GPU backend |
 | `--gpu-batch-size` | | int | `100` | Packets per GPU batch |
+| `--no-filter-policy` | | string | `deny` | Behavior when no filters exist: `allow` or `deny` |
+| `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
+| `--debug-allow-non-loopback` | | bool | `false` | Permit pprof listener on non-loopback addresses |
 | `--insecure` | | bool | `false` | Disable TLS |
 
 Plus [TLS Client Flags](#tls-client-flags) (`--tls-ca`, `--tls-cert`, `--tls-key`, `--tls-skip-verify`).
@@ -517,9 +588,11 @@ Inherits all `lc hunt` flags, plus:
 |------|-------|------|---------|-------------|
 | `--sip-port` | `-S` | int | `5060` | SIP signaling port |
 | `--rtp-port-range` | `-R` | string | | RTP port range |
-| `--udp-only` | `-U` | bool | `false` | Capture UDP only |
-| `--pattern-algorithm` | | string | `auto` | Pattern matching: `auto`, `aho-corasick`, `bloom` |
+| `--pattern-algorithm` | | string | `auto` | Pattern matching: `auto`, `linear`, `aho-corasick` |
 | `--pattern-buffer-mb` | | int | `64` | Pattern buffer size (MB) |
+| `--tcp-sip-idle-timeout` | | duration | | Idle timeout for SIP TCP connections |
+
+`--udp-only` is hidden and deprecated for VoIP hunters; use `--sip-port` and `--rtp-port-range` instead.
 
 ---
 
@@ -540,6 +613,74 @@ Inherits all `lc hunt` flags, plus:
 
 ---
 
+### `lc hunt http`
+
+HTTP-specific hunter with edge filtering.
+
+```
+lc hunt http [flags]
+```
+
+Inherits all `lc hunt` flags, plus:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--http-port` | string | `80,8080,8000,3000,8888` | HTTP port(s) to monitor |
+| `--host` | string | | Host patterns |
+| `--path` | string | | Path patterns |
+| `--method` | string | | HTTP methods |
+| `--status` | string | | Status codes |
+| `--keywords` | string | | Body/URL keywords |
+| `--capture-body` | bool | `false` | Enable body capture |
+| `--max-body-size` | int | `65536` | Maximum body capture size |
+| `--tls-keylog` | string | | TLS key log file |
+| `--tls-keylog-pipe` | string | | TLS key log named pipe |
+
+---
+
+### `lc hunt tls`
+
+TLS-specific hunter.
+
+```
+lc hunt tls [flags]
+```
+
+Inherits all `lc hunt` flags, plus:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--tls-port` | string | `443` | TLS port(s) to monitor |
+
+---
+
+### `lc hunt email`
+
+Email-specific hunter with edge filtering.
+
+```
+lc hunt email [flags]
+```
+
+Inherits all `lc hunt` flags, plus:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--protocol` | string | `all` | Email protocol: `smtp`, `imap`, `pop3`, or `all` |
+| `--smtp-port` | string | `25,587,465` | SMTP ports |
+| `--imap-port` | string | `143,993` | IMAP ports |
+| `--pop3-port` | string | `110,995` | POP3 ports |
+| `--sender` | string | | Sender patterns |
+| `--recipient` | string | | Recipient patterns |
+| `--subject` | string | | Subject patterns |
+| `--mailbox` | string | | IMAP mailbox patterns |
+| `--command` | string | | IMAP/POP3 command patterns |
+| `--keywords` | string | | Body/subject keywords |
+| `--capture-body` | bool | `false` | Enable body capture |
+| `--max-body-size` | int | `65536` | Maximum body capture size |
+
+---
+
 ### `lc process`
 
 Processor node for central aggregation. Receives packets from hunters via gRPC, performs protocol analysis, writes PCAP files, and serves TUI clients.
@@ -552,12 +693,14 @@ lc process [flags]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--listen` | `-l` | string | `:50051` | gRPC listen address |
+| `--listen` | `-l` | string | `:55555` | gRPC listen address |
 | `--id` | `-I` | string | | Processor identifier |
 | `--max-hunters` | `-m` | int | `100` | Maximum connected hunters |
 | `--max-subscribers` | | int | `100` | Maximum TUI subscribers |
 | `--insecure` | | bool | `false` | Disable TLS |
 | `--api-key-auth` | | bool | `false` | Enable API key authentication |
+| `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |
+| `--debug-allow-non-loopback` | | bool | `false` | Permit pprof listener on non-loopback addresses |
 
 **Detection & Filtering**
 
@@ -654,8 +797,8 @@ lc watch remote [flags]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--processor` | `-P` | string | | Processor address (`host:port`) |
-| `--nodes-file` | | string | | YAML file listing remote nodes |
+| `--processor` | `-P` | string | | Processor address (host:port) to connect directly |
+| `--nodes-file` | `-n` | string | | YAML file listing remote nodes |
 | `--insecure` | | bool | `false` | Disable TLS |
 
 See [Chapter 11: Remote TUI Monitoring](../part4-administration/watch-remote.md).
@@ -670,7 +813,9 @@ List available network interfaces with their addresses and status.
 lc list interfaces
 ```
 
-No additional flags.
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--json` | bool | `false` | Output interface data as JSON |
 
 ---
 

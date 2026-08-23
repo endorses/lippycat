@@ -152,7 +152,7 @@ grep -i "tcp\|sip\|stream" debug.log
 
 If `tcpdump` shows TCP SIP traffic:
 
-1. Ensure you have not set `--udp-only`, which skips TCP entirely.
+1. Ensure your BPF filter and `--sip-port` settings include the TCP SIP port.
 2. Try `--interface any` to rule out interface selection.
 3. Check that no BPF filter is excluding TCP.
 
@@ -327,7 +327,7 @@ For hostname mismatch, either regenerate the certificate with the correct SAN en
 
 **Symptom:** Hunter connects but is immediately disconnected. Processor logs show `client certificate required` or `bad certificate`.
 
-**Cause:** The processor is configured for mutual TLS (`--tls-client-ca`) but the hunter did not provide a client certificate, or the client certificate was not signed by the expected CA.
+**Cause:** The processor is configured for mutual TLS (`--tls-client-auth` with `--tls-ca`) but the hunter did not provide a client certificate, or the client certificate was not signed by the expected CA.
 
 **Solution:**
 
@@ -341,7 +341,7 @@ sudo lc hunt voip -i eth0 \
   --tls-ca ca.crt
 ```
 
-Ensure the hunter certificate was signed by the CA specified in the processor's `--tls-client-ca`.
+Ensure the hunter certificate was signed by the CA specified in the processor's `--tls-ca`.
 
 ### Hunter Cannot Reach Processor
 
@@ -652,11 +652,11 @@ If the SDP says `c=IN IP4 10.0.1.100` but actual RTP comes from `203.0.113.50`, 
 
 **Symptom:** SIP calls using TCP transport are not detected, but UDP SIP works fine.
 
-**Cause:** TCP SIP requires reassembly. If `--udp-only` is set, TCP is skipped entirely. Without it, the TCP reassembly engine must be functioning correctly.
+**Cause:** TCP SIP requires reassembly. If a BPF filter excludes TCP, or if only UDP SIP ports are admitted, TCP SIP cannot be detected. Otherwise, the TCP reassembly engine must be functioning correctly.
 
 **Solution:**
 
-1. Ensure `--udp-only` is **not** set.
+1. Ensure your BPF filter and `--sip-port` settings include TCP SIP traffic.
 2. Select an appropriate TCP performance mode:
 
    ```bash
@@ -683,13 +683,13 @@ dmesg | grep -i "drop\|overflow"
 
 **Solution:**
 
-1. Use `--udp-only` if TCP SIP is not needed — this eliminates TCP reassembly overhead:
+1. Narrow capture to known SIP and RTP ports so unrelated traffic is dropped in the kernel:
 
    ```bash
-   sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
+   sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000
    ```
 
-2. Enable GPU acceleration for protocol detection:
+2. In CUDA builds, enable GPU acceleration for protocol detection:
 
    ```bash
    sudo lc sniff voip -i eth0 --gpu-backend auto
@@ -699,7 +699,7 @@ dmesg | grep -i "drop\|overflow"
 
    ```bash
    # Hunter handles capture and filtering
-   sudo lc hunt voip -i eth0 --processor central:55555 --gpu-backend auto --tls-ca ca.crt
+   sudo lc hunt voip -i eth0 --processor central:55555 --sip-port 5060 --tls-ca ca.crt
 
    # Processor handles analysis and PCAP writing
    lc process --listen :55555 --per-call-pcap --per-call-pcap-dir /var/capture/calls \

@@ -190,9 +190,6 @@ sudo lc sniff voip -i eth0 -S 5060
 
 # Custom RTP port range
 sudo lc sniff voip -i eth0 -R 8000-9000
-
-# UDP-only mode (skip TCP reassembly, lower CPU)
-sudo lc sniff voip -i eth0 -U
 ```
 
 **Key flags:**
@@ -202,9 +199,9 @@ sudo lc sniff voip -i eth0 -U
 | `--sip-user` | `-u` | — | SIP user/phone to match (wildcards, comma-separated) |
 | `--sip-port` | `-S` | — | SIP port(s), comma-separated |
 | `--rtp-port-range` | `-R` | `10000-32768` | RTP port range(s) |
-| `--udp-only` | `-U` | `false` | Skip TCP SIP processing |
+| `--udp-only` | `-U` | `false` | Legacy UDP-only mode; hidden and deprecated |
 | `--tcp-performance-mode` | `-M` | — | TCP profile: `balanced`, `throughput`, `latency`, `memory` |
-| `--gpu-backend` | `-g` | `auto` | GPU backend: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
+| `--gpu-backend` | `-g` | `auto` | GPU backend in CUDA builds: `auto`, `cuda`, `opencl`, `cpu-simd`, `disabled` |
 | `--pcap-grace-period` | — | `5s` | Grace period before closing per-call PCAPs |
 | `--esp-null` | — | `false` | Decapsulate ESP via trailer/SPI validation |
 | `--esp-heuristic` | — | `false` | Decapsulate ESP by sniffing payload content |
@@ -275,15 +272,15 @@ sudo lc sniff voip -i eth0 -M throughput
 
 For fine-grained control, individual TCP parameters can be tuned (goroutine limits, buffer sizes, timeouts). See `lc sniff voip --help` for the full list.
 
-### UDP-Only Mode
+### Port Narrowing
 
-If you're monitoring VoIP on a TCP-heavy network, skip TCP processing entirely:
+On TCP-heavy networks, use explicit SIP and RTP port constraints to keep the capture focused while still allowing SIP-over-TCP when it exists:
 
 ```bash
-sudo lc sniff voip -i eth0 -U -S 5060
+sudo lc sniff voip -i eth0 -S 5060 -R 10000-20000
 ```
 
-This generates an optimized BPF filter that excludes all TCP packets, significantly reducing CPU usage.
+The older `--udp-only` VoIP flag is still accepted for compatibility but hidden and deprecated because it can miss TCP SIP traffic.
 
 ### GPU Acceleration
 
@@ -292,6 +289,8 @@ Offload protocol detection and pattern matching to the GPU for high-throughput c
 ```bash
 sudo lc sniff voip -i eth0 -g auto
 ```
+
+The `sniff voip` GPU flags are registered only in CUDA builds, such as binaries built with `make build-cuda`.
 
 | Backend | Flag Value | Requirements |
 |---------|-----------|-------------|

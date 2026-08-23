@@ -289,7 +289,18 @@ For the complete list of filter types, wildcard patterns, and matching details, 
 
 ### Filter Distribution
 
-When filters are loaded, the processor automatically distributes them to all connected hunters. Hunters receive filter updates via gRPC streaming and apply them to their local packet processing. Currently, filter changes require editing the YAML file and restarting the processor.
+When filters are loaded, the processor automatically distributes them to all connected hunters. Hunters receive filter updates via gRPC streaming and apply them to their local packet processing.
+
+For live changes, use the administration commands:
+
+```bash
+lc set filter -P processor:55555 --tls-ca ca.crt \
+  --type sip_user --pattern alicent
+
+lc rm filter -P processor:55555 --tls-ca ca.crt --id filter-001
+```
+
+The YAML filter file remains useful for startup state and batch import, but routine filter updates do not require a processor restart.
 
 ## Advanced Topologies
 

@@ -153,8 +153,8 @@ For TCP performance profile details, see [Performance Optimization](../part5-adv
 |-----|------|---------|-------------|
 | `voip.sip_ports` | string | `""` | Comma-separated SIP ports. Empty uses default detection. |
 | `voip.rtp_port_ranges` | string | `""` | RTP port ranges (e.g., `"10000-20000"`). Empty uses default detection. |
-| `voip.udp_only` | boolean | `false` | Only capture UDP SIP/RTP traffic (skip TCP SIP). Significantly reduces CPU on TCP-heavy networks. |
-| `voip.pattern_algorithm` | string | `"auto"` | Pattern matching algorithm: `"auto"`, `"aho-corasick"`, `"regex"`, or `"simple"`. |
+| `voip.udp_only` | boolean | `false` | Legacy UDP-only VoIP capture. The corresponding CLI flag is hidden and deprecated; prefer `sip_ports` and `rtp_port_ranges` to narrow BPF filters without losing TCP SIP. |
+| `voip.pattern_algorithm` | string | `"auto"` | Pattern matching algorithm: `"auto"`, `"linear"`, or `"aho-corasick"`. |
 | `voip.pattern_buffer_mb` | integer | `64` | Memory budget for pattern matching buffers in MB. |
 | `voip.max_filename_length` | integer | `100` | Maximum length for generated PCAP filenames. |
 
@@ -174,7 +174,7 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `voip.tcp_performance_mode` | string | `"balanced"` | Performance profile: `"minimal"`, `"balanced"`, `"high_performance"`, or `"low_latency"`. See [Performance Optimization](../part5-advanced/performance.md#tcp-performance-profiles). |
+| `voip.tcp_performance_mode` | string | `"balanced"` | `sniff voip` TCP profile: `"balanced"`, `"throughput"`, `"latency"`, or `"memory"`. `tap.voip.tcp_performance_mode` has tap-specific profile names. See [Performance Optimization](../part5-advanced/performance.md#tcp-performance-profiles). |
 | `voip.max_tcp_buffers` | integer | `10000` | Maximum TCP stream buffers. |
 | `voip.tcp_memory_limit` | integer | `104857600` (100 MB) | Memory limit for TCP reassembly in bytes. |
 | `voip.tcp_batch_size` | integer | `32` | Number of TCP segments to process per batch. |
@@ -209,7 +209,7 @@ These settings control TCP stream reassembly for SIP-over-TCP. The `tcp_performa
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `voip.gpu_enable` | boolean | `true` | Enable GPU acceleration for pattern matching. Falls back to CPU if no GPU is available. |
-| `voip.gpu_backend` | string | `"auto"` | GPU backend: `"auto"`, `"cuda"`, `"opencl"`, or `"simd"`. |
+| `voip.gpu_backend` | string | `"auto"` | GPU backend: `"auto"`, `"cuda"`, `"opencl"`, `"cpu-simd"`, or `"disabled"`. |
 | `voip.gpu_batch_size` | integer | `1024` | Number of packets per GPU processing batch. |
 | `voip.gpu_max_memory` | integer | `0` | Maximum GPU memory in bytes (0 = unlimited). |
 
@@ -257,17 +257,20 @@ Hunter nodes capture packets at the network edge and forward them to a processor
 | `hunter.batch_size` | integer | `64` | Number of packets per gRPC batch to the processor. |
 | `hunter.batch_timeout_ms` | integer | `100` | Maximum time in ms to wait before sending an incomplete batch. |
 | `hunter.batch_queue_size` | integer | `0` | Size of the batch send queue (0 = default). |
+| `hunter.no_filter_policy` | string | `"deny"` | Behavior when no processor filters are configured: `"allow"` forwards all packets, `"deny"` forwards none. |
+| `hunter.debug_listen` | string | `""` | Optional pprof debug HTTP listen address. Loopback-only unless `hunter.debug_allow_non_loopback` is true. |
+| `hunter.debug_allow_non_loopback` | boolean | `false` | Allow the pprof listener to bind non-loopback addresses. |
 
 #### Hunter TLS
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `hunter.tls.enabled` | boolean | `false` | Enable TLS for the processor connection. |
 | `hunter.tls.cert_file` | string | `""` | Path to client TLS certificate (for mTLS). |
 | `hunter.tls.key_file` | string | `""` | Path to client TLS private key. |
 | `hunter.tls.ca_file` | string | `""` | Path to CA certificate for verifying the processor. |
 | `hunter.tls.skip_verify` | boolean | `false` | Skip TLS certificate verification (insecure, testing only). |
 | `hunter.tls.ports` | string | `"443"` | TLS ports for protocol detection. |
+| `hunter.insecure` | boolean | `false` | Disable TLS for local testing. Blocked when `LIPPYCAT_PRODUCTION=true`. |
 
 #### Hunter Protocol Filters
 
@@ -348,9 +351,9 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 |-----|------|---------|-------------|
 | `processor.id` | string | `""` | Processor identifier. Auto-generated from hostname if empty. |
 | `processor.processor_id` | string | `""` | Alias for `processor.id`. |
-| `processor.listen_addr` | string | `":50051"` | Address to listen on for hunter and TUI connections. |
-| `processor.processor_addr` | string | `""` | Alias for `processor.listen_addr`. |
-| `processor.upstream_addr` | string | `""` | Address of an upstream processor for hierarchical forwarding. |
+| `processor.listen_addr` | string | `":55555"` | Address to listen on for hunter and TUI connections. |
+| `processor.processor_addr` | string | `""` | Address of an upstream processor for hierarchical forwarding. |
+| `processor.upstream_addr` | string | `""` | Alias for `processor.processor_addr`. |
 | `processor.max_hunters` | integer | `100` | Maximum concurrent hunter connections. |
 | `processor.max_subscribers` | integer | `100` | Maximum TUI subscriber connections (0 = unlimited). |
 | `processor.display_stats` | boolean | `true` | Display periodic statistics to stdout. |
@@ -359,16 +362,20 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.write_file` | string | `""` | Path for unified PCAP output (all traffic to one file). |
 | `processor.command_concurrency` | integer | `10` | Maximum concurrent command hook executions. |
 | `processor.command_timeout` | duration | `"30s"` | Timeout for command hook execution. |
+| `processor.debug_listen` | string | `""` | Optional pprof debug HTTP listen address. Loopback-only unless `processor.debug_allow_non_loopback` is true. |
+| `processor.debug_allow_non_loopback` | boolean | `false` | Allow the pprof listener to bind non-loopback addresses. |
 
 #### Processor TLS
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `processor.tls.enabled` | boolean | `false` | Enable TLS for incoming connections. |
 | `processor.tls.cert_file` | string | `""` | Path to server TLS certificate. |
 | `processor.tls.key_file` | string | `""` | Path to server TLS private key. |
 | `processor.tls.ca_file` | string | `""` | Path to CA certificate for client verification (mTLS). |
 | `processor.tls.client_auth` | boolean | `false` | Require client certificates (mutual TLS). |
+| `processor.insecure` | boolean | `false` | Disable TLS for local testing. Blocked when `LIPPYCAT_PRODUCTION=true`. |
+
+TLS is enabled by default unless `processor.insecure` is true. Provide `processor.tls.cert_file` and `processor.tls.key_file` for encrypted serving.
 
 #### Per-Call PCAP (VoIP)
 
@@ -377,6 +384,9 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.per_call_pcap.enabled` | boolean | `false` | Write separate PCAP files per VoIP call. |
 | `processor.per_call_pcap.output_dir` | string | `"./pcaps"` | Directory for per-call PCAP files. |
 | `processor.per_call_pcap.file_pattern` | string | `"{timestamp}_{callid}.pcap"` | Filename pattern. Placeholders: `{timestamp}`, `{callid}`. |
+| `processor.per_call_pcap.max_idle` | duration | `"10m"` | Close idle per-call PCAP writers after this duration (0 disables idle close). |
+| `processor.per_call_pcap.max_writers` | integer | `0` | Maximum active per-call PCAP writers (0 = unlimited). |
+| `processor.per_call_pcap.closed_call_ttl` | duration | `"1h"` | Suppress duplicate close handling for completed calls for this duration. |
 
 #### Auto-Rotating PCAP
 
@@ -394,6 +404,9 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 |-----|------|---------|-------------|
 | `processor.pcap_command` | string | `""` | Command to run when a per-call PCAP file is completed. Placeholder: `%pcap%` is replaced with the file path. |
 | `processor.voip_command` | string | `""` | Command to run when a VoIP call ends. Placeholders: `%callid%`, `%dirname%`. |
+| `processor.tunneling_command` | string | `""` | Command to run when DNS tunneling is detected. |
+| `processor.tunneling_threshold` | float | `0.7` | DNS tunneling score threshold for `processor.tunneling_command`. |
+| `processor.tunneling_debounce` | duration | `"5m"` | Minimum time between DNS tunneling command executions per domain. |
 
 #### Virtual Interface
 
@@ -457,18 +470,23 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.write_file` | string | `""` | Path for unified PCAP output. |
 | `tap.command_concurrency` | integer | `10` | Max concurrent command hook executions. |
 | `tap.command_timeout` | duration | `"30s"` | Command hook timeout. |
+| `tap.no_filter_policy` | string | `"deny"` | Behavior when no filters are configured: `"allow"` captures all matching packets, `"deny"` captures none. |
+| `tap.debug_listen` | string | `""` | Optional pprof debug HTTP listen address. Loopback-only unless `tap.debug_allow_non_loopback` is true. |
+| `tap.debug_allow_non_loopback` | boolean | `false` | Allow the pprof listener to bind non-loopback addresses. |
 
 #### Tap TLS and Serving
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `tap.listen_addr` | string | `":50051"` | Listen address for TUI client connections. |
+| `tap.listen_addr` | string | `":55555"` | Listen address for TUI client connections. |
 | `tap.max_subscribers` | integer | `100` | Maximum TUI subscriber connections. |
-| `tap.tls.enabled` | boolean | `false` | Enable TLS for TUI connections. |
 | `tap.tls.cert_file` | string | `""` | Server TLS certificate. |
 | `tap.tls.key_file` | string | `""` | Server TLS private key. |
 | `tap.tls.ca_file` | string | `""` | CA certificate for client verification. |
 | `tap.tls.client_auth` | boolean | `false` | Require client certificates. |
+| `tap.insecure` | boolean | `false` | Disable TLS for local testing. Blocked when `LIPPYCAT_PRODUCTION=true`. |
+
+TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_file` and `tap.tls.key_file` for encrypted serving.
 
 #### Tap Upstream Forwarding
 
@@ -484,6 +502,9 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 | `tap.per_call_pcap.enabled` | boolean | `false` | Write separate PCAP files per VoIP call. |
 | `tap.per_call_pcap.output_dir` | string | `"./pcaps"` | Directory for per-call PCAP files. |
 | `tap.per_call_pcap.file_pattern` | string | `"{timestamp}_{callid}.pcap"` | Filename pattern. |
+| `tap.per_call_pcap.max_idle` | duration | `"10m"` | Close idle per-call PCAP writers after this duration (0 disables idle close). |
+| `tap.per_call_pcap.max_writers` | integer | `0` | Maximum active per-call PCAP writers (0 = unlimited). |
+| `tap.per_call_pcap.closed_call_ttl` | duration | `"1h"` | Suppress duplicate close handling for completed calls for this duration. |
 
 #### Tap Auto-Rotating PCAP
 
@@ -525,6 +546,10 @@ Tap supports the same protocol-specific subcommands as hunter. The configuration
 | `tap.dns.udp_only` | boolean | `false` | UDP-only DNS capture. |
 | `tap.dns.domain_pattern` | string | `""` | Domain filter pattern. |
 | `tap.dns.domains_file` | string | `""` | Domain patterns file. |
+| `tap.dns.detect_tunneling` | boolean | `true` | Enable DNS tunneling detection. |
+| `tap.dns.tunneling_command` | string | `""` | Command to run when DNS tunneling is detected. |
+| `tap.dns.tunneling_threshold` | float | `0.7` | DNS tunneling score threshold for command execution. |
+| `tap.dns.tunneling_debounce` | duration | `"5m"` | Minimum time between DNS tunneling command executions per domain. |
 
 **`tap.voip`:**
 
@@ -534,10 +559,26 @@ Tap supports the same protocol-specific subcommands as hunter. The configuration
 | `tap.voip.sip_user` | string | `""` | Filter by SIP user. |
 | `tap.voip.sipuser` | string | `""` | Alias for `tap.voip.sip_user`. |
 | `tap.voip.rtp_port_ranges` | string | `""` | RTP port ranges. |
-| `tap.voip.udp_only` | boolean | `false` | UDP-only VoIP capture. |
+| `tap.voip.udp_only` | boolean | `false` | Legacy UDP-only VoIP capture. The CLI flag is hidden and deprecated; prefer `tap.voip.sip_ports` and `tap.voip.rtp_port_ranges`. |
 | `tap.voip.tcp_performance_mode` | string | `"balanced"` | TCP performance profile for tap VoIP. |
-| `tap.voip.pattern_algorithm` | string | `"auto"` | Pattern matching algorithm. |
+| `tap.voip.pattern_algorithm` | string | `"auto"` | Pattern matching algorithm: `"auto"`, `"linear"`, or `"aho-corasick"`. |
 | `tap.voip.pattern_buffer_mb` | integer | `64` | Pattern buffer memory in MB. |
+
+#### Tap TLS Key Log
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `tap.tls_keylog.output_dir` | string | `""` | Directory for TLS session keys received from local capture paths, in NSS key log format. |
+
+#### Tap VoIP Filter Acceleration
+
+These keys are available in CUDA builds.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `tap.voip_filter.enabled` | boolean | `false` | Enable GPU-accelerated VoIP filtering. |
+| `tap.voip_filter.gpu_backend` | string | `"auto"` | GPU backend: `"auto"`, `"cuda"`, `"opencl"`, or `"cpu-simd"`. |
+| `tap.voip_filter.gpu_batch_size` | integer | `100` | Batch size for GPU filter processing. |
 
 Tap also supports `tap.http` and `tap.email` sections with the same keys as `hunter.http` and `hunter.email` respectively.
 
@@ -613,6 +654,7 @@ Settings for connecting `lc watch remote` to a processor or tap node. See [Remot
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `security.api_keys.enabled` | boolean | `false` | Enable API key authentication for gRPC connections. |
+| `security.api_keys.keys` | list | `[]` | Configured API keys. Each entry includes `key`, `name`, `role`, and optional `description`. Clients send the key as gRPC metadata `x-api-key`. |
 
 ---
 
@@ -625,7 +667,7 @@ A simple configuration for capturing VoIP traffic on a single machine:
 ```yaml
 voip:
   sip_ports: "5060"
-  udp_only: true
+  rtp_port_ranges: "10000-20000"
 ```
 
 Use with: `sudo lc sniff voip -i eth0` or `sudo lc tap voip -i eth0 --insecure`
@@ -685,9 +727,9 @@ hunter:
     max_mb: 2048
 
 voip:
-  tcp_performance_mode: "high_performance"
-  udp_only: true
+  tcp_performance_mode: "throughput"
   sip_ports: "5060"
+  rtp_port_ranges: "10000-20000"
   gpu_enable: true
   gpu_backend: "cuda"
   gpu_batch_size: 2048

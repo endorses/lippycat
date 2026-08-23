@@ -106,12 +106,13 @@ The `--sip-port` convenience flag generates optimized port filters without manua
 sudo lc sniff voip -i eth0 --sip-port 5060,5061,5080
 ```
 
-On networks where SIP runs exclusively over UDP, `--udp-only` drops all TCP traffic at the kernel level. This eliminates TCP processing overhead entirely:
+For VoIP, prefer explicit SIP and RTP port constraints. This narrows traffic at the kernel level while still allowing SIP-over-TCP:
 
 ```bash
-# UDP-only VoIP capture — skips TCP reassembly
-sudo lc sniff voip -i eth0 --udp-only --sip-port 5060
+sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000
 ```
+
+The older VoIP `--udp-only` flag is still accepted for compatibility, but it is hidden and deprecated because it can miss TCP SIP traffic.
 
 ### DNS Analysis
 
@@ -213,7 +214,7 @@ sudo lc hunt --processor processor:55555 -i eth0 \
 
 # VoIP hunter with convenience flags
 sudo lc hunt voip --processor processor:55555 -i eth0 \
-  --udp-only --sip-port 5060 \
+  --sip-port 5060 --rtp-port-range 10000-20000 \
   --tls-ca ca.crt
 
 # Tap node with filter
@@ -224,12 +225,13 @@ sudo lc tap voip -i eth0 \
 
 ## lippycat Convenience Flags
 
-lippycat provides protocol-aware flags that generate optimized BPF filters. These flags handle edge cases (port lists, UDP-only mode) and combine cleanly with any manual `-f` filter you provide.
+lippycat provides protocol-aware flags that generate optimized BPF filters. These flags handle edge cases such as port lists and combine cleanly with any manual `-f` filter you provide.
 
 | Flag | Equivalent BPF | Available On |
 |------|---------------|--------------|
-| `--udp-only` | Adds `udp` to the filter | `sniff voip`, `hunt voip`, `tap voip`, `hunt dns` |
-| `--sip-port 5060,5080` | `udp port 5060 or udp port 5080` | `sniff voip`, `hunt voip`, `tap voip` |
+| `--sip-port 5060,5080` | SIP port narrowing for TCP and UDP | `sniff voip`, `hunt voip`, `tap voip` |
+| `--rtp-port-range 10000-20000` | RTP port range narrowing | `sniff voip`, `hunt voip`, `tap voip` |
+| `--udp-only` | Adds `udp` to the filter | `sniff dns`, `hunt dns`, `tap dns`; legacy hidden flag in VoIP modes |
 | `--dns-port 53,5353` | `udp port 53 or udp port 5353` | `sniff dns`, `hunt dns`, `tap dns` |
 | `--http-port 80,8080` | `tcp port 80 or tcp port 8080` | `sniff http`, `tap http` |
 | `--tls-port 443,8443` | `tcp port 443 or tcp port 8443` | `sniff tls`, `tap tls` |
@@ -245,8 +247,8 @@ sudo lc sniff voip -i eth0 --sip-port 5060,5080 -f "net 10.0.1.0/24"
 # DNS on standard port, excluding a chatty host
 sudo lc sniff dns -i eth0 --dns-port 53 -f "not host 10.0.1.100"
 
-# UDP-only VoIP from a specific PBX
-sudo lc sniff voip -i eth0 --udp-only --sip-port 5060 -f "host 10.0.1.50"
+# VoIP from a specific PBX, constrained to known SIP/RTP ports
+sudo lc sniff voip -i eth0 --sip-port 5060 --rtp-port-range 10000-20000 -f "host 10.0.1.50"
 ```
 
 ## Performance Implications
@@ -288,7 +290,7 @@ BPF filtering works alongside other lippycat performance features:
 
 - **GPU acceleration** — GPU backends process packets that have already passed the BPF filter. A narrower BPF filter means fewer packets enter the GPU pipeline, leaving GPU resources for the protocol analysis that matters.
 
-- **TCP performance profiles** — BPF filters that exclude TCP (`--udp-only`) eliminate TCP reassembly overhead entirely. On TCP-heavy networks where you only need UDP protocols (SIP, RTP, DNS), this is a significant optimization.
+- **TCP performance profiles** — BPF filters that narrow SIP and RTP ports reduce userspace work before TCP reassembly. For DNS-only captures, `--udp-only` can still exclude TCP DNS when zone transfers or large TCP DNS responses are not needed.
 
 - **AF_XDP** — In AF_XDP mode, BPF programs are compiled for the XDP hook in the kernel's network stack, running even earlier than standard socket-level BPF. The filter syntax is identical. See [Performance Optimization](../part5-advanced/performance.md) for AF_XDP setup.
 

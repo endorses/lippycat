@@ -100,20 +100,24 @@ The TUI will show a "TLS" indicator in the header when decryption is enabled. In
 # Remote monitoring with default nodes file
 lc watch remote
 
+# Connect directly to one processor
+lc watch remote --processor processor.example.com:55555 --tls-ca ca.crt
+
 # With custom nodes file
 lc watch remote --nodes-file /path/to/nodes.yaml
 
 # With TLS (CA verification)
-lc watch remote --tls-ca ca.crt
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt
 
 # With mutual TLS (mTLS)
-lc watch remote --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
+lc watch remote -P processor.example.com:55555 --tls-ca ca.crt --tls-cert client.crt --tls-key client.key
 
 # Insecure mode for testing
-lc watch remote --insecure
+lc watch remote -P localhost:55555 --insecure
 ```
 
 **Flags:**
+- `-P, --processor` - Processor address (host:port) to connect directly
 - `-n, --nodes-file` - Path to nodes YAML file (default: `~/.config/lippycat/nodes.yaml` or `./nodes.yaml`)
 - `--insecure` - Allow insecure connections without TLS (testing only)
 - `--tls-ca` - CA certificate for server verification
@@ -193,13 +197,13 @@ processors:
 
 ```bash
 # Terminal 1: Start processor
-lc process --listen :55555
+lc process --listen :55555 --insecure
 
 # Terminal 2: Start hunter
-sudo lc hunt voip -i eth0 --processor localhost:55555
+sudo lc hunt voip -i eth0 --processor localhost:55555 --insecure
 
 # Terminal 3: Watch traffic
-lc watch remote
+lc watch remote -P localhost:55555 --insecure
 ```
 
 ### PCAP Analysis Workflow

@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -117,6 +118,29 @@ func (m *Model) getProcessorInfoList() []components.ProcessorInfo {
 		})
 	}
 	return procInfos
+}
+
+// loadProcessorAddresses adds direct processor addresses for connection.
+func loadProcessorAddresses(addresses []string) tea.Cmd {
+	return func() tea.Msg {
+		cmds := make([]tea.Cmd, 0, len(addresses))
+		for _, address := range addresses {
+			addr := strings.TrimSpace(address)
+			if addr == "" {
+				continue
+			}
+			cmds = append(cmds, func() tea.Msg {
+				return components.AddNodeMsg{Address: addr}
+			})
+		}
+		if len(cmds) == 0 {
+			return NodesLoadedMsg{
+				NodeCount: 0,
+				FilePath:  "--processor",
+			}
+		}
+		return tea.Batch(cmds...)()
+	}
 }
 
 // loadNodesFile loads processors from a YAML file and adds them for connection

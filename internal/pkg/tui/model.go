@@ -109,6 +109,7 @@ type Model struct {
 	bpfFilter     string                 // Current BPF filter
 	captureMode   components.CaptureMode // Current capture mode (live or offline)
 	nodesFilePath string                 // Path to nodes YAML file for remote mode
+	remoteNodes   []string               // Direct remote processor addresses for remote mode
 	insecure      bool                   // Allow insecure connections (no TLS)
 	pcapFiles     []string               // PCAP files for offline mode (stored for header/restart)
 
@@ -149,7 +150,7 @@ type Model struct {
 }
 
 // getPacketsInOrder returns packets from the circular buffer in chronological order
-func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter string, pcapFiles []string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool) Model {
+func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter string, pcapFiles []string, promiscuous bool, startInRemoteMode bool, nodesFilePath string, insecure bool, remoteNodes ...string) Model {
 	// Load theme from config, default to Solarized Dark
 	themeName := viper.GetString("watch.theme")
 	if themeName == "" {
@@ -264,6 +265,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 		bpfFilter:                  bpfFilter,
 		captureMode:                initialMode,
 		nodesFilePath:              nodesFilePath,
+		remoteNodes:                remoteNodes,
 		insecure:                   insecure,
 		pcapFiles:                  pcapFiles,
 		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
@@ -297,8 +299,15 @@ func (m Model) Init() tea.Cmd {
 	}
 
 	// Load remote nodes if in remote mode
-	if m.captureMode == components.CaptureModeRemote && m.nodesFilePath != "" {
-		return tea.Batch(tickCmd(), cleanupProcessorsCmd(), loadNodesFile(m.nodesFilePath))
+	if m.captureMode == components.CaptureModeRemote {
+		cmds := []tea.Cmd{tickCmd(), cleanupProcessorsCmd()}
+		if m.nodesFilePath != "" {
+			cmds = append(cmds, loadNodesFile(m.nodesFilePath))
+		}
+		if len(m.remoteNodes) > 0 {
+			cmds = append(cmds, loadProcessorAddresses(m.remoteNodes))
+		}
+		return tea.Batch(cmds...)
 	}
 	return tea.Batch(tickCmd(), cleanupProcessorsCmd())
 }

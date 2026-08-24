@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-25
+
+### Added
+- Parallel multi-file PCAP processing for `sniff`
+- Direct `--processor` connection option for `watch remote`
+- ADMF startup state synchronization and periodic reconciliation for LI deployments
+- Protocol-aware X2/X3 delivery over TLS with reconnect buffering and RTP reordering
+- Optional pprof diagnostics endpoint via `LC_PPROF_ADDR`
+
+### Changed
+- Migrated TCP stream handling to `gopacket` reassembly for port reuse and fragmented SIP support
+- Aligned X1 and X2/X3 messages with ETSI TS 103 221 formats
+- Propagated hunter packet-drop and filter-match statistics to processors
+- Made ESP decapsulation explicitly opt-in
+- Updated the Go CI toolchain to 1.25.12 and refreshed dependencies
+
+### Fixed
+- Hardened capture, detector, call-buffer, PCAP-writer, TLS keylog, and processor concurrency and memory handling
+- Improved SIP identity matching, mid-call recovery, terminal call updates, and SIP `MESSAGE` display
+- Corrected RTP correlation, LI payload direction, and X3 correlation IDs
+- Fixed offline PCAP opening, IPv6 fragment reassembly, TCP buffer leaks, and per-call PCAP reopening
+- Updated gRPC and Goldmark to address published security vulnerabilities
+
 ## [0.9.4] - 2026-03-13
 
 ### Added

@@ -38,9 +38,12 @@ var (
 	liDeliveryKeepAliveCount    int
 	liDeliveryShutdownTimeout   time.Duration
 	// LI ADMF state sync flags
-	liADMFSyncOnStartup     bool
-	liADMFSyncTimeout       time.Duration
-	liADMFReconcileInterval time.Duration
+	liADMFSyncOnStartup         bool
+	liADMFSyncTimeout           time.Duration
+	liADMFReconcileInterval     time.Duration
+	liMetadataEventsEnabled     bool
+	liMetadataDeliveryProfile   string
+	liMetadataAllowFileMetadata bool
 )
 
 // LIConfig holds all LI-related configuration.
@@ -70,9 +73,12 @@ type LIConfig struct {
 	DeliveryKeepAliveCount    int
 	DeliveryShutdownTimeout   time.Duration
 	// ADMF state sync
-	ADMFSyncOnStartup     bool
-	ADMFSyncTimeout       time.Duration
-	ADMFReconcileInterval time.Duration
+	ADMFSyncOnStartup         bool
+	ADMFSyncTimeout           time.Duration
+	ADMFReconcileInterval     time.Duration
+	MetadataEventsEnabled     bool
+	MetadataDeliveryProfile   string
+	MetadataAllowFileMetadata bool
 }
 
 // RegisterLIFlags adds LI-related flags to the command.
@@ -106,6 +112,9 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVar(&liADMFSyncOnStartup, "li-admf-sync-on-startup", true, "Query ADMF for task/destination state on startup")
 	cmd.PersistentFlags().DurationVar(&liADMFSyncTimeout, "li-admf-sync-timeout", 30*time.Second, "Timeout for startup state sync")
 	cmd.PersistentFlags().DurationVar(&liADMFReconcileInterval, "li-admf-reconcile-interval", 5*time.Minute, "Periodic ADMF reconciliation interval (0 = disabled; drift is not corrected while off)")
+	cmd.PersistentFlags().BoolVar(&liMetadataEventsEnabled, "li-metadata-events", false, "Deliver authorized normalized protocol metadata over X2")
+	cmd.PersistentFlags().StringVar(&liMetadataDeliveryProfile, "li-metadata-delivery-profile", "internet_metadata", "LI metadata delivery profile")
+	cmd.PersistentFlags().BoolVar(&liMetadataAllowFileMetadata, "li-metadata-allow-file-metadata", false, "Allow file metadata (never file content) in the LI metadata profile")
 }
 
 // BindLIViperFlags binds LI flags to viper for config file support.
@@ -138,6 +147,9 @@ func BindLIViperFlags(cmd *cobra.Command) {
 	_ = viper.BindPFlag("tap.li.admf_sync_on_startup", cmd.PersistentFlags().Lookup("li-admf-sync-on-startup"))
 	_ = viper.BindPFlag("tap.li.admf_sync_timeout", cmd.PersistentFlags().Lookup("li-admf-sync-timeout"))
 	_ = viper.BindPFlag("tap.li.admf_reconcile_interval", cmd.PersistentFlags().Lookup("li-admf-reconcile-interval"))
+	_ = viper.BindPFlag("tap.li.metadata_events.enabled", cmd.PersistentFlags().Lookup("li-metadata-events"))
+	_ = viper.BindPFlag("tap.li.metadata_events.delivery_profile", cmd.PersistentFlags().Lookup("li-metadata-delivery-profile"))
+	_ = viper.BindPFlag("tap.li.metadata_events.allow_file_metadata", cmd.PersistentFlags().Lookup("li-metadata-allow-file-metadata"))
 }
 
 // GetLIConfig returns the LI configuration from flags and viper.
@@ -166,13 +178,19 @@ func GetLIConfig() *LIConfig {
 		DeliveryKeepAliveCount:    cmdutil.GetIntConfig("tap.li.delivery_keepalive_count", liDeliveryKeepAliveCount),
 		DeliveryShutdownTimeout:   viper.GetDuration("tap.li.delivery_shutdown_timeout"),
 		// ADMF state sync
-		ADMFSyncOnStartup:     cmdutil.GetBoolConfig("tap.li.admf_sync_on_startup", liADMFSyncOnStartup),
-		ADMFSyncTimeout:       viper.GetDuration("tap.li.admf_sync_timeout"),
-		ADMFReconcileInterval: viper.GetDuration("tap.li.admf_reconcile_interval"),
+		ADMFSyncOnStartup:         cmdutil.GetBoolConfig("tap.li.admf_sync_on_startup", liADMFSyncOnStartup),
+		ADMFSyncTimeout:           viper.GetDuration("tap.li.admf_sync_timeout"),
+		ADMFReconcileInterval:     viper.GetDuration("tap.li.admf_reconcile_interval"),
+		MetadataEventsEnabled:     cmdutil.GetBoolConfig("tap.li.metadata_events.enabled", liMetadataEventsEnabled),
+		MetadataDeliveryProfile:   cmdutil.GetStringConfig("tap.li.metadata_events.delivery_profile", liMetadataDeliveryProfile),
+		MetadataAllowFileMetadata: cmdutil.GetBoolConfig("tap.li.metadata_events.allow_file_metadata", liMetadataAllowFileMetadata),
 	}
 }
 
 func applyLIDeliveryConfig(config *processor.Config, liConfig *LIConfig) {
+	config.LIMetadataEventsEnabled = liConfig.MetadataEventsEnabled
+	config.LIMetadataDeliveryProfile = liConfig.MetadataDeliveryProfile
+	config.LIMetadataAllowFileMetadata = liConfig.MetadataAllowFileMetadata
 	config.LIDeliveryQueueSize = liConfig.DeliveryQueueSize
 	config.LIDeliverySendTimeout = liConfig.DeliverySendTimeout
 	config.LIDeliveryInitialBackoff = liConfig.DeliveryInitialBackoff

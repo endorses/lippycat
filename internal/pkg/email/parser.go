@@ -189,6 +189,9 @@ func (p *Parser) parseClientCommand(line string, metadata *types.EmailMetadata) 
 
 // ParseDataHeader parses headers from the DATA section of an SMTP message.
 func (p *Parser) ParseDataHeader(line string, metadata *types.EmailMetadata) {
+	if name, value, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(name), "content-type") {
+		metadata.ContentType = strings.TrimSpace(value)
+	}
 	// Check for Message-ID
 	if match := p.messageIDReg.FindStringSubmatch(line); match != nil {
 		metadata.MessageID = match[1]

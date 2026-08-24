@@ -170,6 +170,9 @@ message HTTPMetadata {
     int64 request_response_time_ms = 18;
     map<string, string> headers = 19;
     string query_string = 20;
+    bytes body_preview = 21;
+    uint64 body_size = 22;
+    bool body_truncated = 23;
 }
 
 // SIPMetadata for SIP packets
@@ -323,6 +326,8 @@ message EmailMetadata {
 
     // True if body was truncated due to size limit
     bool body_truncated = 7;
+
+    string content_type = 8;
 }
 
 // BatchStats contains statistics about a hunter's capture

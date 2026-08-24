@@ -113,6 +113,10 @@ func (p *Parser) ParsePayload(payload []byte) *types.HTTPMetadata {
 	// Try to parse as response
 	if metadata := p.parseStatusLine(firstLine); metadata != nil {
 		p.parseHeaders(payload[idx+1:], metadata)
+		if bodyAt := bytes.Index(payload, []byte("\r\n\r\n")); bodyAt >= 0 && bodyAt+4 < len(payload) {
+			metadata.BodyPreview = string(payload[bodyAt+4:])
+			metadata.BodySize = len(payload) - bodyAt - 4
+		}
 		return metadata
 	}
 

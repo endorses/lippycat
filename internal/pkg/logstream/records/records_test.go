@@ -53,3 +53,32 @@ func TestSSLAndHTTPRecords(t *testing.T) {
 	require.Len(t, httpRecord.Values, 32)
 	require.Equal(t, "GET", httpRecord.Values[7])
 }
+
+func TestConnRecord(t *testing.T) {
+	env := events.Envelope{Timestamp: time.Unix(1, 0), UID: "Ctest", CommunityID: "1:test", NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered, Partial: true, Flow: events.FlowTuple{Protocol: 6, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 50000, DestinationPort: 443}}
+	ev := events.NewConnEvent(env)
+	ev.Service, ev.State, ev.Duration = "ssl", "S1", time.Second
+	ev.OriginPackets, ev.OriginIPBytes = 2, 100
+	record, emit, err := Conn(ev)
+	require.NoError(t, err)
+	require.True(t, emit)
+	require.Len(t, record.Values, 24)
+	require.Equal(t, "tcp", record.Values[6])
+	require.Equal(t, "1:test", record.Values[20])
+	require.Equal(t, true, record.Values[23])
+}
+
+func TestFilesRecordRejectsContent(t *testing.T) {
+	env := events.Envelope{Timestamp: time.Unix(1, 0), UID: "Ctest", CommunityID: "1:test", NodeID: "hunter-a"}
+	ev := events.NewFileMetadataEvent(env)
+	ev.FileID, ev.Source, ev.MIMEType, ev.SHA256 = "FTEST", "HTTP", "text/plain", "abc"
+	record, emit, err := Files(ev)
+	require.NoError(t, err)
+	require.True(t, emit)
+	require.Len(t, record.Values, 23)
+	require.Equal(t, "FTEST", record.Values[1])
+	require.Equal(t, "hunter-a", record.Values[22])
+	_, emit, err = Files(events.NewFileContentEvent(env))
+	require.Error(t, err)
+	require.False(t, emit)
+}

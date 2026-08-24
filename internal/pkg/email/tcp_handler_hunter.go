@@ -45,6 +45,7 @@ type emailSession struct {
 	bodyPreview   string
 	bodySize      int
 	bodyTruncated bool
+	contentType   string
 
 	// State
 	matched  bool // Already matched and forwarded
@@ -103,6 +104,7 @@ func (h *EmailHunterHandler) HandleSMTPLine(line string, metadata *types.EmailMe
 		session.bodyPreview = metadata.BodyPreview
 		session.bodySize = metadata.BodySize
 		session.bodyTruncated = metadata.BodyTruncated
+		session.contentType = metadata.ContentType
 		session.complete = true
 
 		// Now apply content filter
@@ -169,6 +171,7 @@ func (h *EmailHunterHandler) checkAndForward(session *emailSession) {
 			BodyPreview:   session.bodyPreview,
 			BodySize:      int32(session.bodySize),
 			BodyTruncated: session.bodyTruncated,
+			ContentType:   session.contentType,
 		},
 	}
 

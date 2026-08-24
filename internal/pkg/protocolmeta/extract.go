@@ -60,7 +60,7 @@ func httpToProto(m *types.HTTPMetadata, includeHeaders bool) *data.HTTPMetadata 
 	if m == nil {
 		return nil
 	}
-	result := &data.HTTPMetadata{Type: m.Type, IsServer: m.IsServer, Method: m.Method, Path: m.Path, Version: m.Version, StatusCode: uint32(m.StatusCode), StatusReason: m.StatusReason, Host: m.Host, Server: m.Server, ContentType: m.ContentType, ContentLength: m.ContentLength, UserAgent: m.UserAgent, RequestTime: m.RequestTime, ResponseTime: m.ResponseTime, IsHttps: m.IsHTTPS, HasAuth: m.HasAuth, CorrelatedResponse: m.CorrelatedResponse, RequestResponseTimeMs: m.RequestResponseTimeMs, QueryString: m.QueryString} // #nosec G115 -- validated HTTP status
+	result := &data.HTTPMetadata{Type: m.Type, IsServer: m.IsServer, Method: m.Method, Path: m.Path, Version: m.Version, StatusCode: uint32(m.StatusCode), StatusReason: m.StatusReason, Host: m.Host, Server: m.Server, ContentType: m.ContentType, ContentLength: m.ContentLength, UserAgent: m.UserAgent, RequestTime: m.RequestTime, ResponseTime: m.ResponseTime, IsHttps: m.IsHTTPS, HasAuth: m.HasAuth, CorrelatedResponse: m.CorrelatedResponse, RequestResponseTimeMs: m.RequestResponseTimeMs, QueryString: m.QueryString, BodyPreview: []byte(m.BodyPreview), BodySize: uint64(m.BodySize), BodyTruncated: m.BodyTruncated} // #nosec G115 -- parser validated bounded values
 	if includeHeaders && len(m.Headers) > 0 {
 		result.Headers = make(map[string]string, len(m.Headers))
 		for key, value := range m.Headers {

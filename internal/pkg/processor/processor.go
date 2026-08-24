@@ -34,9 +34,11 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/auth"
+	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -84,12 +86,15 @@ type Config struct {
 	// API Key Authentication (for non-mTLS deployments)
 	AuthConfig *auth.Config // API key authentication configuration (alternative to mTLS)
 	// LI (Lawful Interception) settings - only functional with -tags li build
-	LIEnabled       bool   // Enable LI processing
-	LIX1ListenAddr  string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
-	LIX1TLSCertFile string // Path to X1 server TLS certificate
-	LIX1TLSKeyFile  string // Path to X1 server TLS key
-	LIX1TLSCAFile   string // Path to CA certificate for X1 client verification (mutual TLS)
-	LIADMFEndpoint  string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
+	LIEnabled                   bool // Enable LI processing
+	LIMetadataEventsEnabled     bool
+	LIMetadataDeliveryProfile   string
+	LIMetadataAllowFileMetadata bool
+	LIX1ListenAddr              string // Address for X1 administration interface (e.g., "0.0.0.0:8443")
+	LIX1TLSCertFile             string // Path to X1 server TLS certificate
+	LIX1TLSKeyFile              string // Path to X1 server TLS key
+	LIX1TLSCAFile               string // Path to CA certificate for X1 client verification (mutual TLS)
+	LIADMFEndpoint              string // ADMF endpoint for X1 notifications (e.g., "https://admf:8443")
 	// LI ADMF client (X1 notifications) TLS settings - for connecting to ADMF
 	LIADMFTLSCertFile string // Path to client TLS certificate for ADMF notifications (mutual TLS)
 	LIADMFTLSKeyFile  string // Path to client TLS key for ADMF notifications
@@ -132,6 +137,9 @@ type StructuredLogConfig struct {
 	Streams                                              []string
 	RotateInterval                                       time.Duration
 	QueueSize                                            int
+	ExtractFiles                                         bool
+	ExtractionDirectory                                  string
+	FileMaxSize, FileTotalSize                           int64
 }
 
 // Processor represents a processor node
@@ -197,7 +205,10 @@ type Processor struct {
 	tlsKeylogWriter *TLSKeylogWriter
 	eventDispatcher *events.Dispatcher
 	flowIdentity    *flowid.Cache
+	connTracker     *conntrack.Tracker
+	connExpireAt    atomic.Int64
 	logSink         *logstream.Sink
+	fileAnalyzer    *fileanalysis.Analyzer
 
 	// Control
 	ctx          context.Context
@@ -235,8 +246,16 @@ func New(config Config) (*Processor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize flow identity cache: %w", err)
 	}
+	p.connTracker, err = conntrack.New(conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second})
+	if err != nil {
+		return nil, fmt.Errorf("initialize connection tracker: %w", err)
+	}
 	if shouldEmitStructuredLogs(config) {
 		logCfg := config.LogConfig
+		p.fileAnalyzer, err = fileanalysis.New(fileanalysis.Config{MaxFileSize: logCfg.FileMaxSize, MaxTotalSize: logCfg.FileTotalSize, Extract: logCfg.ExtractFiles, Directory: logCfg.ExtractionDirectory})
+		if err != nil {
+			return nil, fmt.Errorf("initialize file analyzer: %w", err)
+		}
 		queueSize := logCfg.QueueSize
 		if queueSize <= 0 {
 			queueSize = 10000
@@ -251,7 +270,7 @@ func New(config Config) (*Processor, error) {
 		}
 		streams := logCfg.Streams
 		if len(streams) == 0 {
-			streams = []string{"dns", "ssl", "http", "smtp"}
+			streams = []string{"conn", "dns", "ssl", "http", "smtp"}
 		}
 		for _, stream := range streams {
 			switch stream {
@@ -263,6 +282,10 @@ func New(config Config) (*Processor, error) {
 				err = p.logSink.Register(events.KindTLS, "ssl", logrecords.SSL)
 			case "http":
 				err = p.logSink.Register(events.KindHTTP, "http", logrecords.HTTP)
+			case "conn":
+				err = p.logSink.Register(events.KindConn, "conn", logrecords.Conn)
+			case "files":
+				err = p.logSink.Register(events.KindFileMetadata, "files", logrecords.Files)
 			default:
 				continue // Later phases own the other documented streams.
 			}
@@ -270,7 +293,7 @@ func New(config Config) (*Processor, error) {
 				return nil, fmt.Errorf("register %s structured log: %w", stream, err)
 			}
 		}
-		if err = p.eventDispatcher.Register(p.logSink, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP); err != nil {
+		if err = p.eventDispatcher.Register(p.logSink, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}

@@ -30,9 +30,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/conntrack"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
@@ -72,6 +76,8 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	if p.enricher != nil {
 		p.enricher.Enrich(batch.Packets)
 	}
+
+	p.trackConnections(sourceID, batch.Packets)
 
 	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
 	p.emitProtocolEvents(sourceID, batch.Packets)
@@ -298,4 +304,54 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 			logger.Warn("Failed to inject packet batch to virtual interface", "error", err)
 		}
 	}
+}
+
+func (p *Processor) trackConnections(sourceID string, packets []*data.CapturedPacket) {
+	if p.connTracker == nil || p.eventDispatcher == nil {
+		return
+	}
+	var newest time.Time
+	for _, raw := range packets {
+		if raw == nil || raw.Metadata == nil {
+			continue
+		}
+		flow, err := flowTuple(raw.Metadata)
+		if err != nil {
+			continue
+		}
+		ts := time.Unix(0, raw.TimestampNs)
+		if raw.TimestampNs == 0 {
+			ts = time.Now()
+		}
+		if ts.After(newest) {
+			newest = ts
+		}
+		scope := events.CaptureScopeFull
+		if len(raw.MatchedFilterIds) > 0 {
+			scope = events.CaptureScopeFiltered
+		}
+		env, err := p.flowIdentity.Enrich(events.Envelope{Timestamp: ts, NodeID: sourceID, Flow: flow, CaptureScope: scope})
+		if err != nil {
+			continue
+		}
+		packet := gopacket.NewPacket(raw.Data, layers.LinkType(raw.LinkType), gopacket.NoCopy) // #nosec G115 -- pcap link type
+		for _, ev := range mustObserve(p.connTracker, conntrack.FromPacket(packet, env, raw.Metadata.Protocol)) {
+			p.eventDispatcher.Enqueue(ev)
+		}
+	}
+	if !newest.IsZero() && newest.UnixNano() >= p.connExpireAt.Load() {
+		p.connExpireAt.Store(newest.Add(time.Second).UnixNano())
+		for _, ev := range p.connTracker.Expire(newest) {
+			p.eventDispatcher.Enqueue(ev)
+		}
+	}
+}
+
+func mustObserve(t *conntrack.Tracker, o conntrack.Observation) []events.ConnEvent {
+	evs, err := t.Observe(o)
+	if err != nil {
+		logger.Debug("Skipping invalid connection observation", "error", err)
+		return nil
+	}
+	return evs
 }

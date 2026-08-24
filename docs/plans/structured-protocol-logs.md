@@ -1,7 +1,8 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** Complete (Phases 0-10 complete)
+**Status:** Substantially complete (follow-up work remains in Phases 1, 4, 5, 9,
+and 10)
 **Priority:** High
 
 ## Overview
@@ -398,7 +399,11 @@ Build the typed event model and async dispatcher before any output sink.
 - [x] Implement per-sink registration by event kind.
 - [x] Implement drop accounting and periodic warnings.
 - [x] Implement lifecycle: `Start`, `Stop`, `Flush`, and `Close`.
-- [x] Expose dispatcher queue depth/capacity for flow control.
+- [ ] Expose dispatcher queue depth/capacity for flow control, including the
+      per-sink queues. The main dispatcher queue is exposed today, but its
+      bounded per-sink queues are not observable by the processor flow
+      controller. A slow LI or future sink can therefore drop events without
+      contributing backpressure.
 - [x] Add unit tests for dispatch, sink filtering, shutdown flush, queue-full
       behavior, and sink error handling.
 
@@ -487,9 +492,20 @@ in the processor path.
 - [x] Respect `logs.streams`.
 - [x] Update processor initialization and shutdown lifecycle.
 - [x] Update `flow.Controller` to accept multiple named queue pressure sources.
-- [x] Register active event and log queues with flow control.
-- [x] Add config and flags for `process` and `tap`.
+- [ ] Register all active event and log queues with flow control. The dispatcher
+      input queue and lazy logstream queues are registered, but dispatcher
+      per-sink queues are not exposed or registered.
+- [ ] Add config and flags for `process` and `tap`. Most planned settings are
+      implemented, but `events.drop_policy`,
+      `logs.include_email_body_preview`, and
+      `--log-include-email-body-preview` are missing. Drop-new is currently
+      hard-coded, and the unused `IncludeEmailBodyPreview` config field does
+      not provide an operator control.
 - [x] Add packet-metadata integration tests asserting record counts and key fields.
+- [ ] Propagate filtered-capture provenance to every normalized event. Connection
+      events inspect `CapturedPacket.MatchedFilterIds`, but DNS, SMTP, TLS, HTTP,
+      and file events currently set `capture_scope=full` unconditionally. This
+      can make records derived from the same packet disagree about visibility.
 
 ### Acceptance Criteria
 
@@ -524,7 +540,10 @@ Add the missing distributed and local processor metadata needed for `TLSEvent`,
 - [x] Add `records/http.go`.
 - [x] Map `events.TLSEvent` into `ssl.log` records.
 - [x] Map `events.HTTPEvent` into `http.log` records.
-- [x] Add integration tests for distributed and tap/local paths.
+- [ ] Add integration tests for distributed and tap/local paths. Existing
+      processor tests inject constructed protobuf metadata directly into
+      `emitProtocolEvents`; they do not exercise actual hunter-to-processor
+      transport or the complete tap/local capture pipeline.
 
 ### Acceptance Criteria
 
@@ -692,12 +711,24 @@ Out of scope:
 - [x] Add LI metadata sink support for `FileMetadataEvent` only where authorized.
 - [x] Add tests for hash correctness, MIME detection, truncation, and extraction
       limits.
+- [ ] Define and implement honest hash semantics for partial bodies. File analysis
+      currently receives bounded `BodyPreview` buffers and hashes the observed
+      prefix when a body is truncated. The schema/docs must clearly identify
+      partial hashes, or complete hashes must only be emitted after complete body
+      recovery.
+- [ ] Make distributed file analysis operationally configurable from the logging
+      feature. Processor-side file analysis requires hunters to opt into
+      protocol-specific body capture separately; enabling `files` logging or
+      extraction on the processor does not cause HTTP/SMTP bodies to be sent.
 
 ### Acceptance Criteria
 
 - `files.log` emits bounded, privacy-aware file observations.
 - Extraction cannot exceed configured per-file or total limits.
 - Hashes are computed incrementally without loading large bodies into memory.
+  **Not yet satisfied end-to-end:** hashing uses streaming hash writers, but the
+  HTTP/SMTP body has already been accumulated into a bounded in-memory preview
+  before `fileanalysis` receives it.
 - Metadata-only LI profiles cannot receive file content.
 
 ## Phase 10: Documentation and Operations
@@ -716,6 +747,10 @@ and filtered capture.
 - [x] Document SIEM ingestion examples.
 - [x] Document `capture_scope` and `partial` semantics.
 - [x] Document privacy considerations and conservative defaults.
+- [ ] Reconcile the documented structured-log configuration with the implemented
+      flags and behavior, including the missing email-body-preview control,
+      fixed drop-new policy, distributed body-capture prerequisite, and partial
+      file-hash semantics.
 - [x] Update `cmd/process/README.md`.
 - [x] Update `cmd/tap/README.md`.
 - [x] Update `cmd/sniff/README.md`.

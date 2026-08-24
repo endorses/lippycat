@@ -363,13 +363,14 @@ func (h *Hunter) CreateForwardingManager(connCtx context.Context, stream data.Da
 
 	fwdMgr := forwarding.New(
 		forwarding.Config{
-			HunterID:          h.config.HunterID,
-			BatchSize:         h.config.BatchSize,
-			BatchTimeout:      h.config.BatchTimeout,
-			BufferSize:        h.config.BufferSize,
-			DiskBufferEnabled: h.config.DiskBufferEnabled,
-			DiskBufferDir:     h.config.DiskBufferDir,
-			DiskBufferMaxSize: h.config.DiskBufferMaxSize,
+			HunterID:           h.config.HunterID,
+			BatchSize:          h.config.BatchSize,
+			BatchTimeout:       h.config.BatchTimeout,
+			BufferSize:         h.config.BufferSize,
+			DiskBufferEnabled:  h.config.DiskBufferEnabled,
+			DiskBufferDir:      h.config.DiskBufferDir,
+			DiskBufferMaxSize:  h.config.DiskBufferMaxSize,
+			IncludeHTTPHeaders: viper.GetBool("logs.include_http_headers"),
 			// BatchQueueSize omitted - we pass the queue directly
 		},
 		h.statsCollector,

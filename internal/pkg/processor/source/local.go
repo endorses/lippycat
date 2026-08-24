@@ -24,6 +24,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket"
@@ -577,6 +578,7 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 
 			// Convert to protobuf format first
 			pbPkt := convertPacketInfo(pktInfo)
+			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, viper.GetBool("logs.include_http_headers"))
 
 			// Apply VoIP processing BEFORE filtering
 			// This ensures RTP packets associated with calls are detected

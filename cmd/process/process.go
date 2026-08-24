@@ -141,6 +141,7 @@ var (
 	logQueueSize          int
 	logEmitStage          string
 	logPostRotateCommand  string
+	logIncludeHTTPHeaders bool
 )
 
 func init() {
@@ -220,7 +221,8 @@ func init() {
 	ProcessCmd.Flags().IntVar(&eventQueueSize, "event-queue-size", 20000, "Normalized protocol event queue size")
 	ProcessCmd.Flags().StringVar(&logDir, "log-dir", "", "Write structured protocol logs to this directory")
 	ProcessCmd.Flags().StringVar(&logFormat, "log-format", "tsv", "Structured log format: tsv or json")
-	ProcessCmd.Flags().StringSliceVar(&logStreams, "log-streams", []string{"dns", "smtp"}, "Structured log streams")
+	ProcessCmd.Flags().StringSliceVar(&logStreams, "log-streams", []string{"dns", "ssl", "http", "smtp"}, "Structured log streams")
+	ProcessCmd.Flags().BoolVar(&logIncludeHTTPHeaders, "log-include-http-headers", false, "Include full HTTP header maps in transported metadata")
 	ProcessCmd.Flags().DurationVar(&logRotateInterval, "log-rotate-interval", time.Hour, "Structured log rotation interval")
 	ProcessCmd.Flags().IntVar(&logQueueSize, "log-queue-size", 10000, "Per-stream structured log queue size")
 	ProcessCmd.Flags().StringVar(&logEmitStage, "log-emit-stage", "terminal", "Structured log emission stage: terminal, all, or none")
@@ -279,6 +281,7 @@ func init() {
 	_ = viper.BindPFlag("processor.debug_allow_non_loopback", ProcessCmd.Flags().Lookup("debug-allow-non-loopback"))
 	_ = viper.BindPFlag("events.queue_size", ProcessCmd.Flags().Lookup("event-queue-size"))
 	_ = viper.BindPFlag("logs.dir", ProcessCmd.Flags().Lookup("log-dir"))
+	_ = viper.BindPFlag("logs.include_http_headers", ProcessCmd.Flags().Lookup("log-include-http-headers"))
 	_ = viper.BindPFlag("logs.format", ProcessCmd.Flags().Lookup("log-format"))
 	_ = viper.BindPFlag("logs.streams", ProcessCmd.Flags().Lookup("log-streams"))
 	_ = viper.BindPFlag("logs.rotate_interval", ProcessCmd.Flags().Lookup("log-rotate-interval"))
@@ -429,7 +432,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 			Directory: cmdutil.GetStringConfig("logs.dir", logDir), Format: cmdutil.GetStringConfig("logs.format", logFormat),
 			Streams: viper.GetStringSlice("logs.streams"), RotateInterval: viper.GetDuration("logs.rotate_interval"),
 			QueueSize: cmdutil.GetIntConfig("logs.queue_size", logQueueSize), EmitStage: cmdutil.GetStringConfig("logs.emit_stage", logEmitStage),
-			PostRotateCommand: cmdutil.GetStringConfig("logs.post_rotate_command", logPostRotateCommand),
+			PostRotateCommand:  cmdutil.GetStringConfig("logs.post_rotate_command", logPostRotateCommand),
+			IncludeHTTPHeaders: cmdutil.GetBoolConfig("logs.include_http_headers", logIncludeHTTPHeaders),
 		},
 		ListenAddr:                  cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
 		ProcessorID:                 cmdutil.GetStringConfig("processor.processor_id", processorID),

@@ -1,7 +1,7 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** In progress (Phases 0-4 complete)
+**Status:** In progress (Phases 0-5 complete)
 **Priority:** High
 
 ## Overview
@@ -508,23 +508,23 @@ Add the missing distributed and local processor metadata needed for `TLSEvent`,
 
 ### Tasks
 
-- [ ] Add `TLSMetadata` to `api/proto/data.proto` without reusing field numbers.
-- [ ] Add `HTTPMetadata` to `api/proto/data.proto` without reusing field numbers.
-- [ ] Regenerate `api/gen/data`.
-- [ ] Populate TLS metadata hunter-side from existing TLS parsing.
-- [ ] Populate HTTP metadata hunter-side from existing HTTP parsing.
-- [ ] Populate TLS metadata in the tap/local processor source path.
-- [ ] Populate HTTP metadata in the tap/local processor source path.
-- [ ] Gate full HTTP header maps behind explicit config.
-- [ ] Confirm older hunters without TLS/HTTP fields still interoperate.
-- [ ] Measure protobuf batch size with and without HTTP headers.
-- [ ] Map TLS metadata into `events.TLSEvent`.
-- [ ] Map HTTP metadata into `events.HTTPEvent`.
-- [ ] Add `records/ssl.go`.
-- [ ] Add `records/http.go`.
-- [ ] Map `events.TLSEvent` into `ssl.log` records.
-- [ ] Map `events.HTTPEvent` into `http.log` records.
-- [ ] Add integration tests for distributed and tap/local paths.
+- [x] Add `TLSMetadata` to `api/proto/data.proto` without reusing field numbers.
+- [x] Add `HTTPMetadata` to `api/proto/data.proto` without reusing field numbers.
+- [x] Regenerate `api/gen/data`.
+- [x] Populate TLS metadata hunter-side from existing TLS parsing.
+- [x] Populate HTTP metadata hunter-side from existing HTTP parsing.
+- [x] Populate TLS metadata in the tap/local processor source path.
+- [x] Populate HTTP metadata in the tap/local processor source path.
+- [x] Gate full HTTP header maps behind explicit config.
+- [x] Confirm older hunters without TLS/HTTP fields still interoperate.
+- [x] Measure protobuf batch size with and without HTTP headers.
+- [x] Map TLS metadata into `events.TLSEvent`.
+- [x] Map HTTP metadata into `events.HTTPEvent`.
+- [x] Add `records/ssl.go`.
+- [x] Add `records/http.go`.
+- [x] Map `events.TLSEvent` into `ssl.log` records.
+- [x] Map `events.HTTPEvent` into `http.log` records.
+- [x] Add integration tests for distributed and tap/local paths.
 
 ### Acceptance Criteria
 

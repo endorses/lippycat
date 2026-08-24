@@ -34,3 +34,22 @@ func TestSMTPRecord(t *testing.T) {
 	require.Equal(t, "sender@example.test", record.Values[8])
 	require.Equal(t, "tap-a", record.Values[28])
 }
+
+func TestSSLAndHTTPRecords(t *testing.T) {
+	env := events.Envelope{Timestamp: time.Unix(1, 0), UID: "Ctest", CommunityID: "1:test", NodeID: "node-a", Flow: events.FlowTuple{Protocol: 6, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 50000, DestinationPort: 443}}
+	tlsEvent := events.NewTLSEvent(env)
+	tlsEvent.ServerName = "example.test"
+	sslRecord, emit, err := SSL(tlsEvent)
+	require.NoError(t, err)
+	require.True(t, emit)
+	require.Len(t, sslRecord.Values, 26)
+	require.Equal(t, "example.test", sslRecord.Values[9])
+
+	httpEvent := events.NewHTTPEvent(env)
+	httpEvent.Method, httpEvent.URI = "GET", "/"
+	httpRecord, emit, err := HTTP(httpEvent)
+	require.NoError(t, err)
+	require.True(t, emit)
+	require.Len(t, httpRecord.Values, 32)
+	require.Equal(t, "GET", httpRecord.Values[7])
+}

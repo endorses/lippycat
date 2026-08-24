@@ -179,6 +179,7 @@ var (
 	logStreams                                            []string
 	logRotateInterval                                     time.Duration
 	logQueueSize                                          int
+	logIncludeHTTPHeaders                                 bool
 )
 
 func init() {
@@ -286,7 +287,8 @@ func init() {
 	TapCmd.PersistentFlags().IntVar(&eventQueueSize, "event-queue-size", 20000, "Normalized protocol event queue size")
 	TapCmd.PersistentFlags().StringVar(&logDir, "log-dir", "", "Write structured protocol logs to this directory")
 	TapCmd.PersistentFlags().StringVar(&logFormat, "log-format", "tsv", "Structured log format: tsv or json")
-	TapCmd.PersistentFlags().StringSliceVar(&logStreams, "log-streams", []string{"dns", "smtp"}, "Structured log streams")
+	TapCmd.PersistentFlags().StringSliceVar(&logStreams, "log-streams", []string{"dns", "ssl", "http", "smtp"}, "Structured log streams")
+	TapCmd.PersistentFlags().BoolVar(&logIncludeHTTPHeaders, "log-include-http-headers", false, "Include full HTTP header maps in transported metadata")
 	TapCmd.PersistentFlags().DurationVar(&logRotateInterval, "log-rotate-interval", time.Hour, "Structured log rotation interval")
 	TapCmd.PersistentFlags().IntVar(&logQueueSize, "log-queue-size", 10000, "Per-stream structured log queue size")
 	TapCmd.PersistentFlags().StringVar(&logEmitStage, "log-emit-stage", "terminal", "Structured log emission stage: terminal, all, or none")
@@ -370,6 +372,7 @@ func init() {
 	_ = viper.BindPFlag("tap.debug_allow_non_loopback", TapCmd.PersistentFlags().Lookup("debug-allow-non-loopback"))
 	_ = viper.BindPFlag("events.queue_size", TapCmd.PersistentFlags().Lookup("event-queue-size"))
 	_ = viper.BindPFlag("logs.dir", TapCmd.PersistentFlags().Lookup("log-dir"))
+	_ = viper.BindPFlag("logs.include_http_headers", TapCmd.PersistentFlags().Lookup("log-include-http-headers"))
 	_ = viper.BindPFlag("logs.format", TapCmd.PersistentFlags().Lookup("log-format"))
 	_ = viper.BindPFlag("logs.streams", TapCmd.PersistentFlags().Lookup("log-streams"))
 	_ = viper.BindPFlag("logs.rotate_interval", TapCmd.PersistentFlags().Lookup("log-rotate-interval"))
@@ -397,6 +400,7 @@ func structuredLoggingConfig() (int, *processor.StructuredLogConfig) {
 		Format: cmdutil.GetStringConfig("logs.format", logFormat), Streams: viper.GetStringSlice("logs.streams"),
 		RotateInterval: viper.GetDuration("logs.rotate_interval"), QueueSize: cmdutil.GetIntConfig("logs.queue_size", logQueueSize),
 		EmitStage: cmdutil.GetStringConfig("logs.emit_stage", logEmitStage), PostRotateCommand: cmdutil.GetStringConfig("logs.post_rotate_command", logPostRotateCommand),
+		IncludeHTTPHeaders: cmdutil.GetBoolConfig("logs.include_http_headers", logIncludeHTTPHeaders),
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/li/delivery"
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
@@ -206,6 +207,17 @@ func (p *Processor) initLIManager() {
 		}
 	} else {
 		logger.Warn("LI delivery TLS certs not configured, X2/X3 PDUs will be encoded but not delivered")
+	}
+
+	if p.config.LIMetadataEventsEnabled {
+		sink, err := li.NewMetadataSink(li.MetadataSinkConfig{Enabled: true, Profile: p.config.LIMetadataDeliveryProfile, Manager: p.liManager, Sender: liDeliveryClient, NFID: p.config.ProcessorID, AllowFileMetadata: p.config.LIMetadataAllowFileMetadata})
+		if err != nil {
+			logger.Error("Failed to initialize LI metadata event sink", "error", err)
+		} else if err := p.eventDispatcher.Register(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata, events.KindFileContent); err != nil {
+			logger.Error("Failed to register LI metadata event sink", "error", err)
+		} else {
+			logger.Info("LI metadata event sink initialized", "profile", p.config.LIMetadataDeliveryProfile)
+		}
 	}
 
 	// Set packet processor callback for X2/X3 encoding and delivery

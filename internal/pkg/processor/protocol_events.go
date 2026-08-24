@@ -4,12 +4,14 @@ package processor
 
 import (
 	"fmt"
+	"mime"
 	"net/netip"
 	"strings"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -48,13 +50,60 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 			smtpEvent.Subject = meta.Email.Subject
 			smtpEvent.MessageID = meta.Email.MessageId
 			p.eventDispatcher.Enqueue(smtpEvent)
+			p.emitSMTPFiles(env, meta.Email)
 		}
 		if meta.Tls != nil {
 			p.eventDispatcher.Enqueue(mapTLSEvent(env, meta.Tls))
 		}
 		if meta.Http != nil {
 			p.eventDispatcher.Enqueue(mapHTTPEvent(env, meta.Http, p.config.LogConfig != nil && p.config.LogConfig.IncludeHTTPHeaders))
+			p.emitHTTPFile(env, meta.Http)
 		}
+	}
+}
+
+func (p *Processor) emitSMTPFiles(env events.Envelope, meta *data.EmailMetadata) {
+	if p.fileAnalyzer == nil || len(meta.BodyPreview) == 0 || !strings.HasPrefix(strings.ToLower(meta.ContentType), "multipart/") {
+		return
+	}
+	items, err := fileanalysis.SMTPAttachments([]byte(meta.BodyPreview), meta.ContentType, p.config.LogConfig.FileMaxSize)
+	if err != nil {
+		logger.Debug("Skipping malformed SMTP MIME body", "error", err)
+		return
+	}
+	for _, item := range items {
+		item.Envelope, item.TotalBytes, item.Truncated = env, uint64(len(item.Content)), item.Truncated || meta.BodyTruncated
+		ev, content, err := p.fileAnalyzer.Analyze(item)
+		if err != nil {
+			logger.Warn("Failed to analyze SMTP attachment", "error", err)
+			continue
+		}
+		p.eventDispatcher.Enqueue(ev)
+		if content != nil {
+			p.eventDispatcher.Enqueue(*content)
+		}
+	}
+}
+
+func (p *Processor) emitHTTPFile(env events.Envelope, meta *data.HTTPMetadata) {
+	if p.fileAnalyzer == nil || len(meta.BodyPreview) == 0 || !(meta.IsServer || strings.EqualFold(meta.Type, "response")) {
+		return
+	}
+	reverseFlow(&env.Flow)
+	filename := ""
+	if disposition := meta.Headers["content-disposition"]; disposition != "" {
+		if _, params, err := mime.ParseMediaType(disposition); err == nil {
+			filename = params["filename"]
+		}
+	}
+	ev, content, err := p.fileAnalyzer.Analyze(fileanalysis.Observation{Envelope: env, Source: "HTTP", Filename: filename, ContentType: meta.ContentType, ContentEncoding: meta.Headers["content-encoding"], Content: meta.BodyPreview, TotalBytes: meta.BodySize, Truncated: meta.BodyTruncated})
+	if err != nil {
+		logger.Warn("Failed to analyze HTTP file", "error", err)
+		return
+	}
+	p.eventDispatcher.Enqueue(ev)
+	if content != nil {
+		p.eventDispatcher.Enqueue(*content)
 	}
 }
 

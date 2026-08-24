@@ -410,6 +410,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 			QueueSize: cmdutil.GetIntConfig("logs.queue_size", structuredLogFlags.QueueSize), EmitStage: cmdutil.GetStringConfig("logs.emit_stage", structuredLogFlags.EmitStage),
 			PostRotateCommand:  cmdutil.GetStringConfig("logs.post_rotate_command", structuredLogFlags.PostRotateCommand),
 			IncludeHTTPHeaders: cmdutil.GetBoolConfig("logs.include_http_headers", structuredLogFlags.IncludeHTTPHeaders),
+			ExtractFiles:       cmdutil.GetBoolConfig("files.extract", structuredLogFlags.ExtractFiles), ExtractionDirectory: cmdutil.GetStringConfig("files.extract_dir", structuredLogFlags.ExtractionDirectory),
+			FileMaxSize: viper.GetInt64("files.max_size"), FileTotalSize: viper.GetInt64("files.total_size"),
 		},
 		ListenAddr:                  cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
 		ProcessorID:                 cmdutil.GetStringConfig("processor.processor_id", processorID),
@@ -469,6 +471,9 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryKeepAliveInterval = liConfig.DeliveryKeepAliveInterval
 		config.LIDeliveryKeepAliveCount = liConfig.DeliveryKeepAliveCount
 		config.LIDeliveryShutdownTimeout = liConfig.DeliveryShutdownTimeout
+		config.LIMetadataEventsEnabled = liConfig.MetadataEventsEnabled
+		config.LIMetadataDeliveryProfile = liConfig.MetadataDeliveryProfile
+		config.LIMetadataAllowFileMetadata = liConfig.MetadataAllowFileMetadata
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval

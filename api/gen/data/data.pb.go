@@ -699,6 +699,9 @@ type HTTPMetadata struct {
 	RequestResponseTimeMs int64                  `protobuf:"varint,18,opt,name=request_response_time_ms,json=requestResponseTimeMs,proto3" json:"request_response_time_ms,omitempty"`
 	Headers               map[string]string      `protobuf:"bytes,19,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	QueryString           string                 `protobuf:"bytes,20,opt,name=query_string,json=queryString,proto3" json:"query_string,omitempty"`
+	BodyPreview           []byte                 `protobuf:"bytes,21,opt,name=body_preview,json=bodyPreview,proto3" json:"body_preview,omitempty"`
+	BodySize              uint64                 `protobuf:"varint,22,opt,name=body_size,json=bodySize,proto3" json:"body_size,omitempty"`
+	BodyTruncated         bool                   `protobuf:"varint,23,opt,name=body_truncated,json=bodyTruncated,proto3" json:"body_truncated,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -871,6 +874,27 @@ func (x *HTTPMetadata) GetQueryString() string {
 		return x.QueryString
 	}
 	return ""
+}
+
+func (x *HTTPMetadata) GetBodyPreview() []byte {
+	if x != nil {
+		return x.BodyPreview
+	}
+	return nil
+}
+
+func (x *HTTPMetadata) GetBodySize() uint64 {
+	if x != nil {
+		return x.BodySize
+	}
+	return 0
+}
+
+func (x *HTTPMetadata) GetBodyTruncated() bool {
+	if x != nil {
+		return x.BodyTruncated
+	}
+	return false
 }
 
 // SIPMetadata for SIP packets
@@ -1501,7 +1525,8 @@ type EmailMetadata struct {
 	// Full body size in bytes
 	BodySize int32 `protobuf:"varint,6,opt,name=body_size,json=bodySize,proto3" json:"body_size,omitempty"`
 	// True if body was truncated due to size limit
-	BodyTruncated bool `protobuf:"varint,7,opt,name=body_truncated,json=bodyTruncated,proto3" json:"body_truncated,omitempty"`
+	BodyTruncated bool   `protobuf:"varint,7,opt,name=body_truncated,json=bodyTruncated,proto3" json:"body_truncated,omitempty"`
+	ContentType   string `protobuf:"bytes,8,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1583,6 +1608,13 @@ func (x *EmailMetadata) GetBodyTruncated() bool {
 		return x.BodyTruncated
 	}
 	return false
+}
+
+func (x *EmailMetadata) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
 }
 
 // BatchStats contains statistics about a hunter's capture
@@ -2277,7 +2309,7 @@ const file_data_proto_rawDesc = "" +
 	"\n" +
 	"risk_score\x18\x16 \x01(\x01R\triskScore\x12\x1d\n" +
 	"\n" +
-	"risk_flags\x18\x17 \x01(\x05R\triskFlags\"\xeb\x05\n" +
+	"risk_flags\x18\x17 \x01(\x05R\triskFlags\"\xd2\x06\n" +
 	"\fHTTPMetadata\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1b\n" +
 	"\tis_server\x18\x02 \x01(\bR\bisServer\x12\x16\n" +
@@ -2301,7 +2333,10 @@ const file_data_proto_rawDesc = "" +
 	"\x13correlated_response\x18\x11 \x01(\bR\x12correlatedResponse\x127\n" +
 	"\x18request_response_time_ms\x18\x12 \x01(\x03R\x15requestResponseTimeMs\x12B\n" +
 	"\aheaders\x18\x13 \x03(\v2(.lippycat.data.HTTPMetadata.HeadersEntryR\aheaders\x12!\n" +
-	"\fquery_string\x18\x14 \x01(\tR\vqueryString\x1a:\n" +
+	"\fquery_string\x18\x14 \x01(\tR\vqueryString\x12!\n" +
+	"\fbody_preview\x18\x15 \x01(\fR\vbodyPreview\x12\x1b\n" +
+	"\tbody_size\x18\x16 \x01(\x04R\bbodySize\x12%\n" +
+	"\x0ebody_truncated\x18\x17 \x01(\bR\rbodyTruncated\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xce\x03\n" +
@@ -2371,7 +2406,7 @@ const file_data_proto_rawDesc = "" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x14\n" +
 	"\x05class\x18\x03 \x01(\tR\x05class\x12\x10\n" +
 	"\x03ttl\x18\x04 \x01(\rR\x03ttl\x12\x12\n" +
-	"\x04data\x18\x05 \x01(\tR\x04data\"\xe5\x01\n" +
+	"\x04data\x18\x05 \x01(\tR\x04data\"\x88\x02\n" +
 	"\rEmailMetadata\x12\x1b\n" +
 	"\tmail_from\x18\x01 \x01(\tR\bmailFrom\x12\x17\n" +
 	"\arcpt_to\x18\x02 \x03(\tR\x06rcptTo\x12\x18\n" +
@@ -2380,7 +2415,8 @@ const file_data_proto_rawDesc = "" +
 	"message_id\x18\x04 \x01(\tR\tmessageId\x12!\n" +
 	"\fbody_preview\x18\x05 \x01(\tR\vbodyPreview\x12\x1b\n" +
 	"\tbody_size\x18\x06 \x01(\x05R\bbodySize\x12%\n" +
-	"\x0ebody_truncated\x18\a \x01(\bR\rbodyTruncated\"\x9b\x01\n" +
+	"\x0ebody_truncated\x18\a \x01(\bR\rbodyTruncated\x12!\n" +
+	"\fcontent_type\x18\b \x01(\tR\vcontentType\"\x9b\x01\n" +
 	"\n" +
 	"BatchStats\x12%\n" +
 	"\x0etotal_captured\x18\x01 \x01(\x04R\rtotalCaptured\x12)\n" +

@@ -292,7 +292,8 @@ func (s *HTTPStream) readChunkedBody(builder *strings.Builder, totalSize *int, m
 
 		line = strings.TrimRight(line, "\r\n")
 		// Parse chunk size (hex)
-		size, err := strconv.ParseInt(strings.TrimSpace(line), 16, 64)
+		sizeText, _, _ := strings.Cut(strings.TrimSpace(line), ";")
+		size, err := strconv.ParseInt(sizeText, 16, 64)
 		if err != nil || size < 0 {
 			return
 		}

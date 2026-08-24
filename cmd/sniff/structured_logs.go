@@ -11,8 +11,10 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	dnsparser "github.com/endorses/lippycat/internal/pkg/dns"
 	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -33,8 +35,10 @@ func registerStructuredLogFlags(cmd *cobra.Command) {
 type sniffLogSession struct {
 	dispatcher     *events.Dispatcher
 	identity       *flowid.Cache
+	connections    *conntrack.Tracker
 	dns            *dnsparser.Parser
 	includeHeaders bool
+	files          *fileanalysis.Analyzer
 }
 
 func withStructuredLogs(run func()) {
@@ -51,6 +55,9 @@ func withStructuredLogs(run func()) {
 	restore := capture.SetPacketObserver(s.observe)
 	defer restore()
 	defer func() {
+		for _, ev := range s.connections.Close() {
+			s.dispatcher.Enqueue(ev)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := s.dispatcher.Close(ctx); err != nil {
@@ -83,6 +90,8 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 	}{
 		"dns": {events.KindDNS, logrecords.DNS}, "ssl": {events.KindTLS, logrecords.SSL},
 		"http": {events.KindHTTP, logrecords.HTTP}, "smtp": {events.KindSMTP, logrecords.SMTP},
+		"conn":  {events.KindConn, logrecords.Conn},
+		"files": {events.KindFileMetadata, logrecords.Files},
 	}
 	for _, stream := range viper.GetStringSlice("logs.streams") {
 		binding, ok := builders[strings.ToLower(stream)]
@@ -93,10 +102,18 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 			return nil, err
 		}
 	}
-	if err := d.Register(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP); err != nil {
+	if err := d.Register(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
 		return nil, err
 	}
 	identity, err := flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
+	if err != nil {
+		return nil, err
+	}
+	connections, err := conntrack.New(conntrack.Config{MaxFlows: 100000, IdleTimeout: 5 * time.Minute, HalfOpenTimeout: 30 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+	files, err := fileanalysis.New(fileanalysis.Config{MaxFileSize: viper.GetInt64("files.max_size"), MaxTotalSize: viper.GetInt64("files.total_size"), Extract: viper.GetBool("files.extract"), Directory: viper.GetString("files.extract_dir")})
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +124,7 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 		_ = sink.Close(context.Background())
 		return nil, err
 	}
-	return &sniffLogSession{dispatcher: d, identity: identity, dns: dnsparser.NewParser(), includeHeaders: viper.GetBool("logs.include_http_headers")}, nil
+	return &sniffLogSession{dispatcher: d, identity: identity, connections: connections, dns: dnsparser.NewParser(), includeHeaders: viper.GetBool("logs.include_http_headers"), files: files}, nil
 }
 
 func (s *sniffLogSession) observe(info capture.PacketInfo) {
@@ -127,6 +144,9 @@ func (s *sniffLogSession) observe(info capture.PacketInfo) {
 	env, err := s.identity.Enrich(events.Envelope{Timestamp: ts, NodeID: "local", Flow: flow, CaptureScope: events.CaptureScopeFull})
 	if err != nil {
 		return
+	}
+	for _, ev := range observeConnection(s.connections, conntrack.FromPacket(pkt, env, meta.Protocol)) {
+		s.dispatcher.Enqueue(ev)
 	}
 	if dm := s.dns.Parse(pkt); dm != nil {
 		if dm.IsResponse {
@@ -148,10 +168,30 @@ func (s *sniffLogSession) observe(info capture.PacketInfo) {
 	}
 	if meta.Http != nil {
 		s.dispatcher.Enqueue(sniffHTTP(env, meta.Http, s.includeHeaders))
+		if len(meta.Http.BodyPreview) > 0 && meta.Http.IsServer {
+			fileEnv := env
+			reverseEnvelope(&fileEnv)
+			ev, content, analyzeErr := s.files.Analyze(fileanalysis.Observation{Envelope: fileEnv, Source: "HTTP", ContentType: meta.Http.ContentType, ContentEncoding: meta.Http.Headers["content-encoding"], Content: meta.Http.BodyPreview, TotalBytes: meta.Http.BodySize, Truncated: meta.Http.BodyTruncated})
+			if analyzeErr == nil {
+				s.dispatcher.Enqueue(ev)
+				if content != nil {
+					s.dispatcher.Enqueue(*content)
+				}
+			}
+		}
 	}
 	if tcp, ok := pkt.Layer(layers.LayerTypeTCP).(*layers.TCP); ok {
 		s.emitSMTP(env, string(tcp.Payload))
 	}
+}
+
+func observeConnection(t *conntrack.Tracker, observation conntrack.Observation) []events.ConnEvent {
+	eventsOut, err := t.Observe(observation)
+	if err != nil {
+		logger.Debug("Skipping invalid connection observation", "error", err)
+		return nil
+	}
+	return eventsOut
 }
 
 func dnsCode(v string, values map[string]uint16) uint16 { return values[strings.ToUpper(v)] }

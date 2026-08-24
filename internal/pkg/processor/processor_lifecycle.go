@@ -295,6 +295,11 @@ func (p *Processor) Shutdown() error {
 	p.shutdownOnce.Do(func() {
 		logger.Info("Shutting down processor")
 
+		if p.connTracker != nil && p.eventDispatcher != nil {
+			for _, ev := range p.connTracker.Close() {
+				p.eventDispatcher.Enqueue(ev)
+			}
+		}
 		if p.eventDispatcher != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := p.eventDispatcher.Close(shutdownCtx); err != nil {

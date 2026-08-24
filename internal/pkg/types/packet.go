@@ -132,10 +132,11 @@ type EmailMetadata struct {
 	IsServer bool   // True if from server, false if from client
 
 	// SMTP envelope (extracted during SMTP transaction)
-	MailFrom  string   // MAIL FROM address
-	RcptTo    []string // RCPT TO addresses
-	Subject   string   // Subject header from DATA
-	MessageID string   // Message-ID header for correlation
+	MailFrom    string   // MAIL FROM address
+	RcptTo      []string // RCPT TO addresses
+	Subject     string   // Subject header from DATA
+	MessageID   string   // Message-ID header for correlation
+	ContentType string   // MIME Content-Type header
 
 	// SMTP transaction state
 	Command      string // Current command (HELO, EHLO, MAIL, RCPT, DATA, etc.)

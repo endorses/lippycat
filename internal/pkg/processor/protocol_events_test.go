@@ -73,6 +73,26 @@ func TestEmitDNSAndSMTPEvents(t *testing.T) {
 	}
 }
 
+func TestConnectionAndProtocolEventsShareFlowIdentity(t *testing.T) {
+	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	require.NoError(t, err)
+	sink := &collectingSink{}
+	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindConn))
+	require.NoError(t, p.eventDispatcher.Start(context.Background()))
+	packet := &data.CapturedPacket{TimestampNs: time.Unix(10, 0).UnixNano(), LinkType: 1, Metadata: &data.PacketMetadata{SrcIp: "192.0.2.10", DstIp: "192.0.2.53", SrcPort: 53000, DstPort: 53, Transport: "udp", Protocol: "DNS", Dns: &data.DNSMetadata{QueryName: "example.test", QueryType: "A", QueryClass: "IN"}}}
+	p.trackConnections("hunter-a", []*data.CapturedPacket{packet})
+	p.emitProtocolEvents("hunter-a", []*data.CapturedPacket{packet})
+	for _, event := range p.connTracker.Close() {
+		p.eventDispatcher.Enqueue(event)
+	}
+	require.NoError(t, p.eventDispatcher.Close(context.Background()))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Len(t, sink.events, 2)
+	require.Equal(t, sink.events[0].Envelope().UID, sink.events[1].Envelope().UID)
+	require.Equal(t, sink.events[0].Envelope().CommunityID, sink.events[1].Envelope().CommunityID)
+}
+
 func TestEmitTLSAndHTTPEventsNormalizesResponseDirection(t *testing.T) {
 	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
 	require.NoError(t, err)

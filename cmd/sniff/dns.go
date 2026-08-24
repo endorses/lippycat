@@ -103,11 +103,13 @@ func dnsHandler(cmd *cobra.Command, args []string) {
 
 	// Start DNS sniffer using appropriate mode
 	readFiles := collectReadFiles(readFile, args)
-	if len(readFiles) == 0 {
-		dns.StartLiveDNSSniffer(interfaces, effectiveFilter)
-	} else {
-		dns.StartOfflineDNSSniffer(readFiles, effectiveFilter)
-	}
+	withStructuredLogs(func() {
+		if len(readFiles) == 0 {
+			dns.StartLiveDNSSniffer(interfaces, effectiveFilter)
+		} else {
+			dns.StartOfflineDNSSniffer(readFiles, effectiveFilter)
+		}
+	})
 }
 
 func init() {

@@ -75,11 +75,13 @@ func sniff(cmd *cobra.Command, args []string) {
 	}
 
 	files := collectReadFiles(readFile, args)
-	if len(files) == 0 {
-		capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
-	} else {
-		capture.StartOfflineSniffer(files, filter, capture.StartSniffer)
-	}
+	withStructuredLogs(func() {
+		if len(files) == 0 {
+			capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
+		} else {
+			capture.StartOfflineSniffer(files, filter, capture.StartSniffer)
+		}
+	})
 }
 
 // collectReadFiles combines the --read-file/-r flag value with any leftover
@@ -97,6 +99,7 @@ func collectReadFiles(flagValue string, positional []string) []string {
 }
 
 func init() {
+	registerStructuredLogFlags(SniffCmd)
 	SniffCmd.AddCommand(voipCmd)
 	SniffCmd.AddCommand(dnsCmd)
 	SniffCmd.AddCommand(emailCmd)

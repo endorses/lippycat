@@ -251,11 +251,13 @@ func httpHandler(cmd *cobra.Command, args []string) {
 
 	// Start HTTP sniffer using appropriate mode
 	readFiles := collectReadFiles(readFile, args)
-	if len(readFiles) == 0 {
-		http.StartLiveHTTPSniffer(interfaces, effectiveFilter)
-	} else {
-		http.StartOfflineHTTPSniffer(readFiles, effectiveFilter)
-	}
+	withStructuredLogs(func() {
+		if len(readFiles) == 0 {
+			http.StartLiveHTTPSniffer(interfaces, effectiveFilter)
+		} else {
+			http.StartOfflineHTTPSniffer(readFiles, effectiveFilter)
+		}
+	})
 }
 
 func init() {

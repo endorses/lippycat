@@ -303,11 +303,13 @@ func emailHandler(cmd *cobra.Command, args []string) {
 
 	// Start email sniffer using appropriate mode
 	readFiles := collectReadFiles(readFile, args)
-	if len(readFiles) == 0 {
-		email.StartLiveEmailSniffer(interfaces, effectiveFilter)
-	} else {
-		email.StartOfflineEmailSniffer(readFiles, effectiveFilter)
-	}
+	withStructuredLogs(func() {
+		if len(readFiles) == 0 {
+			email.StartLiveEmailSniffer(interfaces, effectiveFilter)
+		} else {
+			email.StartOfflineEmailSniffer(readFiles, effectiveFilter)
+		}
+	})
 }
 
 func init() {

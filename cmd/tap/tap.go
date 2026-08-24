@@ -172,8 +172,13 @@ var (
 	espHeuristic bool
 	espICVSize   int
 	// Debug/pprof flags
-	debugListen           string
-	debugAllowNonLoopback bool
+	debugListen                                           string
+	debugAllowNonLoopback                                 bool
+	eventQueueSize                                        int
+	logDir, logFormat, logEmitStage, logPostRotateCommand string
+	logStreams                                            []string
+	logRotateInterval                                     time.Duration
+	logQueueSize                                          int
 )
 
 func init() {
@@ -278,6 +283,14 @@ func init() {
 	// ============================================================
 	TapCmd.PersistentFlags().StringVar(&noFilterPolicy, "no-filter-policy", "deny", "Behavior when no filters are configured: 'allow' (match all) or 'deny' (match none)")
 	TapCmd.PersistentFlags().StringVar(&debugListen, "debug-listen", "", "Enable pprof debug HTTP listener on address (loopback only by default, e.g. 127.0.0.1:6060)")
+	TapCmd.PersistentFlags().IntVar(&eventQueueSize, "event-queue-size", 20000, "Normalized protocol event queue size")
+	TapCmd.PersistentFlags().StringVar(&logDir, "log-dir", "", "Write structured protocol logs to this directory")
+	TapCmd.PersistentFlags().StringVar(&logFormat, "log-format", "tsv", "Structured log format: tsv or json")
+	TapCmd.PersistentFlags().StringSliceVar(&logStreams, "log-streams", []string{"dns", "smtp"}, "Structured log streams")
+	TapCmd.PersistentFlags().DurationVar(&logRotateInterval, "log-rotate-interval", time.Hour, "Structured log rotation interval")
+	TapCmd.PersistentFlags().IntVar(&logQueueSize, "log-queue-size", 10000, "Per-stream structured log queue size")
+	TapCmd.PersistentFlags().StringVar(&logEmitStage, "log-emit-stage", "terminal", "Structured log emission stage: terminal, all, or none")
+	TapCmd.PersistentFlags().StringVar(&logPostRotateCommand, "log-post-rotate-command", "", "Command after log rotation (%log% is replaced with the file path)")
 	TapCmd.PersistentFlags().BoolVar(&debugAllowNonLoopback, "debug-allow-non-loopback", false, "Allow pprof debug listener to bind non-loopback addresses")
 
 	// ============================================================
@@ -355,6 +368,14 @@ func init() {
 	_ = viper.BindPFlag("tap.no_filter_policy", TapCmd.PersistentFlags().Lookup("no-filter-policy"))
 	_ = viper.BindPFlag("tap.debug_listen", TapCmd.PersistentFlags().Lookup("debug-listen"))
 	_ = viper.BindPFlag("tap.debug_allow_non_loopback", TapCmd.PersistentFlags().Lookup("debug-allow-non-loopback"))
+	_ = viper.BindPFlag("events.queue_size", TapCmd.PersistentFlags().Lookup("event-queue-size"))
+	_ = viper.BindPFlag("logs.dir", TapCmd.PersistentFlags().Lookup("log-dir"))
+	_ = viper.BindPFlag("logs.format", TapCmd.PersistentFlags().Lookup("log-format"))
+	_ = viper.BindPFlag("logs.streams", TapCmd.PersistentFlags().Lookup("log-streams"))
+	_ = viper.BindPFlag("logs.rotate_interval", TapCmd.PersistentFlags().Lookup("log-rotate-interval"))
+	_ = viper.BindPFlag("logs.queue_size", TapCmd.PersistentFlags().Lookup("log-queue-size"))
+	_ = viper.BindPFlag("logs.emit_stage", TapCmd.PersistentFlags().Lookup("log-emit-stage"))
+	_ = viper.BindPFlag("logs.post_rotate_command", TapCmd.PersistentFlags().Lookup("log-post-rotate-command"))
 
 	// ============================================================
 	// GPU Acceleration (CUDA build only)
@@ -367,6 +388,16 @@ func init() {
 	// ============================================================
 	RegisterLIFlags(TapCmd)
 	BindLIViperFlags(TapCmd)
+}
+
+func structuredLoggingConfig() (int, *processor.StructuredLogConfig) {
+	dir := cmdutil.GetStringConfig("logs.dir", logDir)
+	return cmdutil.GetIntConfig("events.queue_size", eventQueueSize), &processor.StructuredLogConfig{
+		Enabled: dir != "" || viper.GetBool("logs.enabled"), Directory: dir,
+		Format: cmdutil.GetStringConfig("logs.format", logFormat), Streams: viper.GetStringSlice("logs.streams"),
+		RotateInterval: viper.GetDuration("logs.rotate_interval"), QueueSize: cmdutil.GetIntConfig("logs.queue_size", logQueueSize),
+		EmitStage: cmdutil.GetStringConfig("logs.emit_stage", logEmitStage), PostRotateCommand: cmdutil.GetStringConfig("logs.post_rotate_command", logPostRotateCommand),
+	}
 }
 
 func runTap(cmd *cobra.Command, args []string) error {
@@ -473,7 +504,10 @@ func runTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build processor configuration
+	eventQueue, structuredLogs := structuredLoggingConfig()
 	config := processor.Config{
+		EventQueueSize:        eventQueue,
+		LogConfig:             structuredLogs,
 		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
 		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),

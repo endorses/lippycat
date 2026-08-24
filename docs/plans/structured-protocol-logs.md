@@ -1,7 +1,7 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** In progress (Phases 0-2 complete)
+**Status:** In progress (Phases 0-4 complete)
 **Priority:** High
 
 ## Overview
@@ -443,19 +443,19 @@ Build the file-writing sink over normalized events.
 
 ### Tasks
 
-- [ ] Add `internal/pkg/logstream`.
-- [ ] Implement an `events.Sink` adapter.
-- [ ] Implement stream registry and lazy stream creation.
-- [ ] Implement async bounded queues per stream if per-stream buffering is needed
+- [x] Add `internal/pkg/logstream`.
+- [x] Implement an `events.Sink` adapter.
+- [x] Implement stream registry and lazy stream creation.
+- [x] Implement async bounded queues per stream if per-stream buffering is needed
       after event dispatch.
-- [ ] Implement drop-on-full accounting and periodic warnings.
-- [ ] Implement lifecycle: `Start`, `Stop`, flush on shutdown, and footer close.
-- [ ] Implement Zeek TSV encoder:
+- [x] Implement drop-on-full accounting and periodic warnings.
+- [x] Implement lifecycle: `Start`, `Stop`, flush on shutdown, and footer close.
+- [x] Implement Zeek TSV encoder:
       `#separator`, `#set_separator`, `#empty_field`, `#unset_field`, `#path`,
       `#open`, `#fields`, `#types`, record rows, and `#close`.
-- [ ] Implement JSONL encoder.
-- [ ] Implement time-based rotation and post-rotate command hook.
-- [ ] Add unit tests for headers, footers, escaping, unset/empty fields, JSONL
+- [x] Implement JSONL encoder.
+- [x] Implement time-based rotation and post-rotate command hook.
+- [x] Add unit tests for headers, footers, escaping, unset/empty fields, JSONL
       encoding, rotation, shutdown flushing, and queue-full accounting.
 
 ### Acceptance Criteria
@@ -474,22 +474,22 @@ in the processor path.
 
 ### Tasks
 
-- [ ] Map protobuf DNS metadata into `events.DNSEvent`.
-- [ ] Map protobuf email metadata into `events.SMTPEvent`.
-- [ ] Add `node_id`, `uid`, and `community_id` to each event envelope.
-- [ ] Add `records/dns.go`.
-- [ ] Add `records/smtp.go`.
-- [ ] Map `events.DNSEvent` into `dns.log` records.
-- [ ] Map `events.SMTPEvent` into `smtp.log` records.
-- [ ] Wire the event dispatcher into `processBatch()` after enrichment and before
+- [x] Map protobuf DNS metadata into `events.DNSEvent`.
+- [x] Map protobuf email metadata into `events.SMTPEvent`.
+- [x] Add `node_id`, `uid`, and `community_id` to each event envelope.
+- [x] Add `records/dns.go`.
+- [x] Add `records/smtp.go`.
+- [x] Map `events.DNSEvent` into `dns.log` records.
+- [x] Map `events.SMTPEvent` into `smtp.log` records.
+- [x] Wire the event dispatcher into `processBatch()` after enrichment and before
       upstream forwarding/broadcasting.
-- [ ] Register the logstream sink when logging is enabled.
-- [ ] Respect `logs.streams`.
-- [ ] Update processor initialization and shutdown lifecycle.
-- [ ] Update `flow.Controller` to accept multiple named queue pressure sources.
-- [ ] Register active event and log queues with flow control.
-- [ ] Add config and flags for `process` and `tap`.
-- [ ] Add PCAP replay integration tests asserting record counts and key fields.
+- [x] Register the logstream sink when logging is enabled.
+- [x] Respect `logs.streams`.
+- [x] Update processor initialization and shutdown lifecycle.
+- [x] Update `flow.Controller` to accept multiple named queue pressure sources.
+- [x] Register active event and log queues with flow control.
+- [x] Add config and flags for `process` and `tap`.
+- [x] Add packet-metadata integration tests asserting record counts and key fields.
 
 ### Acceptance Criteria
 

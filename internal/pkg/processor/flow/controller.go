@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -10,9 +11,8 @@ import (
 
 // Controller manages flow control signals to hunters
 type Controller struct {
-	// PCAP writer queue metrics (if enabled)
-	pcapQueueDepth    func() int
-	pcapQueueCapacity func() int
+	mu      sync.RWMutex
+	sources map[string]QueuePressureSource
 
 	// Upstream forwarding metrics (if enabled)
 	packetsReceived  *atomic.Uint64
@@ -20,9 +20,17 @@ type Controller struct {
 	hasUpstream      bool
 }
 
+// QueuePressureSource describes a processor-level bounded queue.
+type QueuePressureSource struct {
+	Name     string
+	Depth    func() int
+	Capacity func() int
+}
+
 // NewController creates a new flow controller
 func NewController(packetsReceived, packetsForwarded *atomic.Uint64, hasUpstream bool) *Controller {
 	return &Controller{
+		sources:          make(map[string]QueuePressureSource),
 		packetsReceived:  packetsReceived,
 		packetsForwarded: packetsForwarded,
 		hasUpstream:      hasUpstream,
@@ -31,8 +39,17 @@ func NewController(packetsReceived, packetsForwarded *atomic.Uint64, hasUpstream
 
 // SetPCAPQueue sets the PCAP queue metrics functions
 func (c *Controller) SetPCAPQueue(depthFn func() int, capacityFn func() int) {
-	c.pcapQueueDepth = depthFn
-	c.pcapQueueCapacity = capacityFn
+	c.SetQueueSource(QueuePressureSource{Name: "pcap", Depth: depthFn, Capacity: capacityFn})
+}
+
+// SetQueueSource adds or replaces a named processor-level pressure source.
+func (c *Controller) SetQueueSource(source QueuePressureSource) {
+	if source.Name == "" || source.Depth == nil || source.Capacity == nil {
+		return
+	}
+	c.mu.Lock()
+	c.sources[source.Name] = source
+	c.mu.Unlock()
 }
 
 // Determine determines appropriate flow control signal based on processor load
@@ -40,10 +57,18 @@ func (c *Controller) SetPCAPQueue(depthFn func() int, capacityFn func() int) {
 func (c *Controller) Determine() data.FlowControl {
 	mostSevere := data.FlowControl_FLOW_CONTINUE
 
-	// Check PCAP write queue depth if configured
-	if c.pcapQueueDepth != nil && c.pcapQueueCapacity != nil {
-		queueDepth := c.pcapQueueDepth()
-		queueCapacity := c.pcapQueueCapacity()
+	c.mu.RLock()
+	sources := make([]QueuePressureSource, 0, len(c.sources))
+	for _, source := range c.sources {
+		sources = append(sources, source)
+	}
+	c.mu.RUnlock()
+	if len(sources) > 0 {
+		mostSevere = data.FlowControl_FLOW_RESUME
+	}
+	for _, source := range sources {
+		queueDepth := source.Depth()
+		queueCapacity := source.Capacity()
 
 		if queueCapacity > 0 {
 			utilization := float64(queueDepth) / float64(queueCapacity)
@@ -51,25 +76,25 @@ func (c *Controller) Determine() data.FlowControl {
 
 			// Pause if queue is critically full (>90%)
 			if utilization > constants.FlowControlPauseThreshold {
-				logger.Warn("PCAP write queue critically full - requesting pause",
+				logger.Warn("Processor queue critically full - requesting pause",
+					"queue", source.Name,
 					"queue_depth", queueDepth,
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
-				mostSevere = data.FlowControl_FLOW_PAUSE
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_PAUSE)
 			} else if utilization > constants.FlowControlSlowThreshold {
 				// Slow down if queue is getting full (>70%)
-				logger.Debug("PCAP write queue filling - requesting slowdown",
+				logger.Debug("Processor queue filling - requesting slowdown",
+					"queue", source.Name,
 					"queue_depth", queueDepth,
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
-				if mostSevere < data.FlowControl_FLOW_SLOW {
-					mostSevere = data.FlowControl_FLOW_SLOW
-				}
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			} else if utilization < constants.FlowControlResumeThreshold {
 				// Resume if queue has drained (< 30%)
-				if mostSevere < data.FlowControl_FLOW_RESUME {
-					mostSevere = data.FlowControl_FLOW_RESUME
-				}
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
+			} else {
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_CONTINUE)
 			}
 		}
 	}
@@ -93,12 +118,29 @@ func (c *Controller) Determine() data.FlowControl {
 			if backlog > constants.FlowControlUpstreamBacklogThreshold {
 				logger.Warn("Large packet backlog detected - requesting slowdown",
 					"backlog", backlog)
-				if mostSevere < data.FlowControl_FLOW_SLOW {
-					mostSevere = data.FlowControl_FLOW_SLOW
-				}
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			}
 		}
 	}
 
 	return mostSevere
+}
+
+func moreSevere(current, candidate data.FlowControl) data.FlowControl {
+	rank := func(value data.FlowControl) int {
+		switch value {
+		case data.FlowControl_FLOW_PAUSE:
+			return 3
+		case data.FlowControl_FLOW_SLOW:
+			return 2
+		case data.FlowControl_FLOW_CONTINUE:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(candidate) > rank(current) {
+		return candidate
+	}
+	return current
 }

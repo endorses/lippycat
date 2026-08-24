@@ -73,6 +73,9 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 		p.enricher.Enrich(batch.Packets)
 	}
 
+	// Normalize protocol metadata after enrichment and before forwarding/broadcasting.
+	p.emitProtocolEvents(sourceID, batch.Packets)
+
 	// Aggregate VoIP call state from packet metadata
 	if p.callAggregator != nil {
 		for _, packet := range batch.Packets {

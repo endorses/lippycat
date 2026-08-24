@@ -1,7 +1,7 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** In progress (Phase 0 complete)
+**Status:** In progress (Phases 0-1 complete)
 **Priority:** High
 
 ## Overview
@@ -389,17 +389,17 @@ Build the typed event model and async dispatcher before any output sink.
 
 ### Tasks
 
-- [ ] Add `internal/pkg/events`.
-- [ ] Define `Event`, `Sink`, `Envelope`, `Kind`, and `FlowTuple`.
-- [ ] Define initial typed events: `DNSEvent`, `SMTPEvent`, `TLSEvent`,
+- [x] Add `internal/pkg/events`.
+- [x] Define `Event`, `Sink`, `Envelope`, `Kind`, and `FlowTuple`.
+- [x] Define initial typed events: `DNSEvent`, `SMTPEvent`, `TLSEvent`,
       `HTTPEvent`, `ConnEvent`, `FileMetadataEvent`, `FileContentEvent`.
-- [ ] Keep metadata and content as distinct event classes.
-- [ ] Implement async bounded dispatcher queues.
-- [ ] Implement per-sink registration by event kind.
-- [ ] Implement drop accounting and periodic warnings.
-- [ ] Implement lifecycle: `Start`, `Stop`, `Flush`, and `Close`.
-- [ ] Expose dispatcher queue depth/capacity for flow control.
-- [ ] Add unit tests for dispatch, sink filtering, shutdown flush, queue-full
+- [x] Keep metadata and content as distinct event classes.
+- [x] Implement async bounded dispatcher queues.
+- [x] Implement per-sink registration by event kind.
+- [x] Implement drop accounting and periodic warnings.
+- [x] Implement lifecycle: `Start`, `Stop`, `Flush`, and `Close`.
+- [x] Expose dispatcher queue depth/capacity for flow control.
+- [x] Add unit tests for dispatch, sink filtering, shutdown flush, queue-full
       behavior, and sink error handling.
 
 ### Acceptance Criteria

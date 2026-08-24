@@ -1,7 +1,7 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** In progress (Phases 0-1 complete)
+**Status:** In progress (Phases 0-2 complete)
 **Priority:** High
 
 ## Overview
@@ -417,16 +417,16 @@ Add stable flow identity for protocol events before implementing full `conn.log`
 
 ### Tasks
 
-- [ ] Add `internal/pkg/flowid`.
-- [ ] Implement normalized flow keys for TCP, UDP, and ICMP.
-- [ ] Implement Zeek-style UID generation: `C` plus 17 base62 characters.
-- [ ] Implement Community ID v1.
-- [ ] Add a bounded UID cache with idle expiration.
-- [ ] Add cache size, eviction, and lookup metrics.
-- [ ] Attach `uid` and `community_id` to event envelopes.
-- [ ] Add tests for tuple normalization.
-- [ ] Add tests using public Community ID vectors.
-- [ ] Benchmark UID lookup at high flow counts.
+- [x] Add `internal/pkg/flowid`.
+- [x] Implement normalized flow keys for TCP, UDP, and ICMP.
+- [x] Implement Zeek-style UID generation: `C` plus 17 base62 characters.
+- [x] Implement Community ID v1.
+- [x] Add a bounded UID cache with idle expiration.
+- [x] Add cache size, eviction, and lookup metrics.
+- [x] Attach `uid` and `community_id` to event envelopes.
+- [x] Add tests for tuple normalization.
+- [x] Add tests using public Community ID vectors.
+- [x] Benchmark UID lookup at high flow counts.
 
 ### Acceptance Criteria
 

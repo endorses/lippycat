@@ -231,7 +231,10 @@ func runDNSTap(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build processor configuration
+	eventQueue, structuredLogs := structuredLoggingConfig()
 	config := processor.Config{
+		EventQueueSize:        eventQueue,
+		LogConfig:             structuredLogs,
 		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
 		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),

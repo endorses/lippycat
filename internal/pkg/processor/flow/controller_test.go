@@ -18,6 +18,13 @@ func TestController_Determine_NoPCAPQueue(t *testing.T) {
 		"should return CONTINUE when no PCAP queue configured")
 }
 
+func TestControllerUsesMostSevereNamedQueue(t *testing.T) {
+	c := NewController(nil, nil, false)
+	c.SetQueueSource(QueuePressureSource{Name: "events", Depth: func() int { return 95 }, Capacity: func() int { return 100 }})
+	c.SetQueueSource(QueuePressureSource{Name: "logs", Depth: func() int { return 1 }, Capacity: func() int { return 100 }})
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, c.Determine())
+}
+
 func TestController_Determine_QueueEmpty(t *testing.T) {
 	queueSize := 100
 	currentDepth := 0

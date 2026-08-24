@@ -36,8 +36,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/dns"
+	"github.com/endorses/lippycat/internal/pkg/events"
+	"github.com/endorses/lippycat/internal/pkg/flowid"
 	"github.com/endorses/lippycat/internal/pkg/li"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/logstream"
+	logrecords "github.com/endorses/lippycat/internal/pkg/logstream/records"
 	"github.com/endorses/lippycat/internal/pkg/processor/downstream"
 	"github.com/endorses/lippycat/internal/pkg/processor/enrichment"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -117,6 +121,17 @@ type Config struct {
 	VifDropPrivilegesUser string // User to drop privileges to after interface creation
 	// TLS keylog settings (for decryption support)
 	TLSKeylogConfig *TLSKeylogWriterConfig // TLS session key storage and file writing
+	EventQueueSize  int
+	LogConfig       *StructuredLogConfig
+}
+
+// StructuredLogConfig configures normalized protocol file logs.
+type StructuredLogConfig struct {
+	Enabled, IncludeHTTPHeaders, IncludeEmailBodyPreview bool
+	Directory, Format, EmitStage, PostRotateCommand      string
+	Streams                                              []string
+	RotateInterval                                       time.Duration
+	QueueSize                                            int
 }
 
 // Processor represents a processor node
@@ -180,6 +195,9 @@ type Processor struct {
 
 	// TLS keylog writer for session key storage and file output
 	tlsKeylogWriter *TLSKeylogWriter
+	eventDispatcher *events.Dispatcher
+	flowIdentity    *flowid.Cache
+	logSink         *logstream.Sink
 
 	// Control
 	ctx          context.Context
@@ -203,6 +221,54 @@ func New(config Config) (*Processor, error) {
 		callAggregator: voip.NewCallAggregator(),                               // Initialize call aggregator
 		callCorrelator: NewCallCorrelator(),                                    // Initialize call correlator
 		dnsTunneling:   dns.NewTunnelingDetector(dns.DefaultTunnelingConfig()), // Initialize DNS tunneling aggregator
+	}
+	eventQueueSize := config.EventQueueSize
+	if eventQueueSize <= 0 {
+		eventQueueSize = 20000
+	}
+	var err error
+	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize})
+	if err != nil {
+		return nil, fmt.Errorf("initialize event dispatcher: %w", err)
+	}
+	p.flowIdentity, err = flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
+	if err != nil {
+		return nil, fmt.Errorf("initialize flow identity cache: %w", err)
+	}
+	if shouldEmitStructuredLogs(config) {
+		logCfg := config.LogConfig
+		queueSize := logCfg.QueueSize
+		if queueSize <= 0 {
+			queueSize = 10000
+		}
+		format := logstream.Format(logCfg.Format)
+		if format == "" {
+			format = logstream.FormatTSV
+		}
+		p.logSink, err = logstream.New(logstream.Config{Directory: logCfg.Directory, Format: format, QueueSize: queueSize, RotateInterval: logCfg.RotateInterval, PostRotate: logstream.CommandHook(logCfg.PostRotateCommand, 30*time.Second)})
+		if err != nil {
+			return nil, fmt.Errorf("initialize structured log sink: %w", err)
+		}
+		streams := logCfg.Streams
+		if len(streams) == 0 {
+			streams = []string{"dns", "smtp"}
+		}
+		for _, stream := range streams {
+			switch stream {
+			case "dns":
+				err = p.logSink.Register(events.KindDNS, "dns", logrecords.DNS)
+			case "smtp":
+				err = p.logSink.Register(events.KindSMTP, "smtp", logrecords.SMTP)
+			default:
+				continue // Later phases own the other documented streams.
+			}
+			if err != nil {
+				return nil, fmt.Errorf("register %s structured log: %w", stream, err)
+			}
+		}
+		if err = p.eventDispatcher.Register(p.logSink, events.KindDNS, events.KindSMTP); err != nil {
+			return nil, fmt.Errorf("register structured log event sink: %w", err)
+		}
 	}
 
 	// Initialize protocol detector and enricher if enabled
@@ -480,6 +546,27 @@ func New(config Config) (*Processor, error) {
 	p.initLIManager()
 
 	return p, nil
+}
+
+func shouldEmitStructuredLogs(config Config) bool {
+	if config.LogConfig == nil || !config.LogConfig.Enabled || config.LogConfig.Directory == "" {
+		return false
+	}
+	switch config.LogConfig.EmitStage {
+	case "none":
+		return false
+	case "all":
+		return true
+	case "", "terminal":
+		return config.UpstreamAddr == ""
+	default:
+		return false
+	}
+}
+
+// RegisterEventSink subscribes an output-neutral sink before Start is called.
+func (p *Processor) RegisterEventSink(sink events.Sink, kinds ...events.Kind) error {
+	return p.eventDispatcher.Register(sink, kinds...)
 }
 
 // SetProxyTLSCredentials sets TLS credentials on the proxy manager for authorization token signing.

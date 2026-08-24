@@ -40,6 +40,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/auth"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/processor/flow"
 	"github.com/endorses/lippycat/internal/pkg/processor/pcap"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
@@ -53,7 +54,6 @@ func (p *Processor) Start(ctx context.Context) error {
 	defer p.cancel()
 
 	logger.Info("Processor starting", "processor_id", p.config.ProcessorID, "listen_addr", p.config.ListenAddr)
-
 	// Load filters from persistence file
 	if err := p.filterManager.Load(); err != nil {
 		logger.Warn("Failed to load filters from file", "error", err)
@@ -103,6 +103,20 @@ func (p *Processor) Start(ctx context.Context) error {
 	p.listenerMu.Lock()
 	p.listener = listener
 	p.listenerMu.Unlock()
+	if p.logSink != nil {
+		if err := p.logSink.Start(p.ctx); err != nil {
+			return fmt.Errorf("start structured log sink: %w", err)
+		}
+	}
+	if p.eventDispatcher != nil {
+		if err := p.eventDispatcher.Start(p.ctx); err != nil {
+			return fmt.Errorf("start event dispatcher: %w", err)
+		}
+		p.flowController.SetQueueSource(flow.QueuePressureSource{Name: "events", Depth: p.eventDispatcher.QueueDepth, Capacity: p.eventDispatcher.QueueCapacity})
+	}
+	if p.logSink != nil {
+		p.flowController.SetQueueSource(flow.QueuePressureSource{Name: "structured_logs", Depth: p.logSink.QueueDepth, Capacity: p.logSink.QueueCapacity})
+	}
 
 	// Create gRPC server with TLS if configured
 	serverOpts := []grpc.ServerOption{
@@ -281,6 +295,13 @@ func (p *Processor) Shutdown() error {
 	p.shutdownOnce.Do(func() {
 		logger.Info("Shutting down processor")
 
+		if p.eventDispatcher != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := p.eventDispatcher.Close(shutdownCtx); err != nil {
+				logger.Warn("Failed to close protocol event dispatcher", "error", err)
+			}
+			cancel()
+		}
 		if p.cancel != nil {
 			p.cancel()
 		}

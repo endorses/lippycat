@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/hunter/buffer"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolmeta"
 	"github.com/google/gopacket"
 )
 
@@ -67,11 +68,12 @@ type PacketBufferProvider interface {
 
 // Config contains forwarding configuration
 type Config struct {
-	HunterID       string
-	BatchSize      int
-	BatchTimeout   time.Duration
-	BufferSize     int
-	BatchQueueSize int // Number of batches to buffer for async sending (0 = default)
+	HunterID           string
+	BatchSize          int
+	BatchTimeout       time.Duration
+	BufferSize         int
+	BatchQueueSize     int // Number of batches to buffer for async sending (0 = default)
+	IncludeHTTPHeaders bool
 
 	// Disk overflow buffer (optional)
 	DiskBufferEnabled bool   // Enable disk overflow buffer
@@ -291,6 +293,7 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 
 			// Convert to protobuf packet
 			pbPkt := convertPacket(pktInfo, matchedFilterIDs)
+			pbPkt.Metadata = protocolmeta.Enrich(pktInfo.Packet, pbPkt.Metadata, m.config.IncludeHTTPHeaders)
 
 			// Add DNS metadata if DNS processor is set
 			if m.dnsMetadataProvider != nil {

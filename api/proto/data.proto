@@ -113,6 +113,63 @@ message PacketMetadata {
 
     // DNS-specific metadata (if applicable)
     DNSMetadata dns = 12;
+
+    // TLS handshake metadata. Added after the original metadata fields so old
+    // hunters/processors safely ignore it on the protobuf wire.
+    TLSMetadata tls = 13;
+
+    // HTTP request/response metadata. Full headers are omitted unless the
+    // sender explicitly enables structured-log HTTP header collection.
+    HTTPMetadata http = 14;
+}
+
+message TLSMetadata {
+    string version = 1;
+    uint32 version_raw = 2;
+    uint32 record_version = 3;
+    string handshake_type = 4;
+    bool is_server = 5;
+    string session_id = 6;
+    string sni = 7;
+    repeated uint32 cipher_suites = 8;
+    repeated uint32 extensions = 9;
+    repeated uint32 supported_groups = 10;
+    repeated uint32 signature_algorithms = 11;
+    repeated uint32 ec_point_formats = 12;
+    repeated string alpn_protocols = 13;
+    repeated uint32 supported_versions = 14;
+    uint32 selected_cipher = 15;
+    uint32 compression = 16;
+    string ja3 = 17;
+    string ja3s = 18;
+    string ja4 = 19;
+    bool correlated_peer = 20;
+    int64 handshake_time_ms = 21;
+    double risk_score = 22;
+    int32 risk_flags = 23;
+}
+
+message HTTPMetadata {
+    string type = 1;
+    bool is_server = 2;
+    string method = 3;
+    string path = 4;
+    string version = 5;
+    uint32 status_code = 6;
+    string status_reason = 7;
+    string host = 8;
+    string server = 9;
+    string content_type = 10;
+    int64 content_length = 11;
+    string user_agent = 12;
+    int64 request_time = 13;
+    int64 response_time = 14;
+    bool is_https = 15;
+    bool has_auth = 16;
+    bool correlated_response = 17;
+    int64 request_response_time_ms = 18;
+    map<string, string> headers = 19;
+    string query_string = 20;
 }
 
 // SIPMetadata for SIP packets

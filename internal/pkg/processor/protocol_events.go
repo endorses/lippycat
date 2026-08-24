@@ -49,7 +49,68 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 			smtpEvent.MessageID = meta.Email.MessageId
 			p.eventDispatcher.Enqueue(smtpEvent)
 		}
+		if meta.Tls != nil {
+			p.eventDispatcher.Enqueue(mapTLSEvent(env, meta.Tls))
+		}
+		if meta.Http != nil {
+			p.eventDispatcher.Enqueue(mapHTTPEvent(env, meta.Http, p.config.LogConfig != nil && p.config.LogConfig.IncludeHTTPHeaders))
+		}
 	}
+}
+
+func mapTLSEvent(env events.Envelope, meta *data.TLSMetadata) events.TLSEvent {
+	// A ServerHello travels responder-to-originator; ssl.log retains the
+	// connection's client/originator orientation.
+	if meta.IsServer {
+		reverseFlow(&env.Flow)
+	}
+	ev := events.NewTLSEvent(env)
+	ev.Version, ev.ServerName = meta.Version, meta.Sni
+	if meta.SelectedCipher != 0 {
+		ev.Cipher = fmt.Sprintf("0x%04x", meta.SelectedCipher)
+	}
+	if len(meta.SupportedGroups) > 0 {
+		ev.Curve = fmt.Sprintf("0x%04x", meta.SupportedGroups[0])
+	}
+	if len(meta.AlpnProtocols) > 0 {
+		ev.NextProtocol = meta.AlpnProtocols[0]
+	}
+	ev.Established = meta.CorrelatedPeer || strings.EqualFold(meta.HandshakeType, "ServerHello")
+	ev.JA3, ev.JA3S, ev.JA4 = meta.Ja3, meta.Ja3S, meta.Ja4
+	return ev
+}
+
+func mapHTTPEvent(env events.Envelope, meta *data.HTTPMetadata, includeHeaders bool) events.HTTPEvent {
+	if meta.IsServer || strings.EqualFold(meta.Type, "response") {
+		reverseFlow(&env.Flow)
+	}
+	ev := events.NewHTTPEvent(env)
+	ev.Method, ev.Host, ev.Version, ev.UserAgent = meta.Method, meta.Host, meta.Version, meta.UserAgent
+	ev.URI = meta.Path
+	if meta.QueryString != "" {
+		ev.URI += "?" + meta.QueryString
+	}
+	if meta.ContentLength > 0 {
+		if meta.IsServer {
+			ev.ResponseBodyLength = uint64(meta.ContentLength)
+		} else {
+			ev.RequestBodyLength = uint64(meta.ContentLength)
+		}
+	}
+	ev.StatusCode, ev.StatusMessage = uint16(meta.StatusCode), meta.StatusReason // #nosec G115 -- protobuf HTTP status is parser validated
+	if includeHeaders {
+		ev.Headers = make(map[string][]string, len(meta.Headers))
+		for key, value := range meta.Headers {
+			ev.Headers[key] = []string{value}
+		}
+		ev.Referrer, ev.Origin = meta.Headers["referer"], meta.Headers["origin"]
+	}
+	return ev
+}
+
+func reverseFlow(flow *events.FlowTuple) {
+	flow.SourceAddress, flow.DestinationAddress = flow.DestinationAddress, flow.SourceAddress
+	flow.SourcePort, flow.DestinationPort = flow.DestinationPort, flow.SourcePort
 }
 
 func flowTuple(meta *data.PacketMetadata) (events.FlowTuple, error) {

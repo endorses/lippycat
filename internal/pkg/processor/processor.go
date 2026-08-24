@@ -251,7 +251,7 @@ func New(config Config) (*Processor, error) {
 		}
 		streams := logCfg.Streams
 		if len(streams) == 0 {
-			streams = []string{"dns", "smtp"}
+			streams = []string{"dns", "ssl", "http", "smtp"}
 		}
 		for _, stream := range streams {
 			switch stream {
@@ -259,6 +259,10 @@ func New(config Config) (*Processor, error) {
 				err = p.logSink.Register(events.KindDNS, "dns", logrecords.DNS)
 			case "smtp":
 				err = p.logSink.Register(events.KindSMTP, "smtp", logrecords.SMTP)
+			case "ssl":
+				err = p.logSink.Register(events.KindTLS, "ssl", logrecords.SSL)
+			case "http":
+				err = p.logSink.Register(events.KindHTTP, "http", logrecords.HTTP)
 			default:
 				continue // Later phases own the other documented streams.
 			}
@@ -266,7 +270,7 @@ func New(config Config) (*Processor, error) {
 				return nil, fmt.Errorf("register %s structured log: %w", stream, err)
 			}
 		}
-		if err = p.eventDispatcher.Register(p.logSink, events.KindDNS, events.KindSMTP); err != nil {
+		if err = p.eventDispatcher.Register(p.logSink, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}

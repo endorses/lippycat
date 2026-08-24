@@ -409,6 +409,7 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	// are processed. The non-blocking Send() would drop packets if the consumer
 	// (TUI bridge) hasn't started reading yet, causing inconsistent packet counts.
 	for _, pkt := range allPackets {
+		observePacket(pkt)
 		if !packetBuffer.SendBlocking(pkt) {
 			// Buffer closed or context cancelled
 			break

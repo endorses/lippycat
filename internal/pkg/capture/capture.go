@@ -933,6 +933,7 @@ func captureFromInterface(ctx context.Context, iface pcaptypes.PcapInterface, fi
 				Packet:    packet,
 				Interface: filepath.Base(iface.Name()), // Use basename for display (removes path for PCAP files)
 			}
+			observePacket(pktInfo)
 			buffer.Send(pktInfo)
 
 			// Batched atomic update: increment local counter

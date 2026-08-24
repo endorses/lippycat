@@ -218,11 +218,13 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"vif_replay_timing", viper.GetBool("sniff.vif_replay_timing"))
 
 	readFiles := collectReadFiles(readFile, args)
-	if len(readFiles) == 0 {
-		voip.StartLiveVoipSniffer(interfaces, effectiveFilter)
-	} else {
-		voip.StartOfflineVoipSniffer(readFiles, effectiveFilter)
-	}
+	withStructuredLogs(func() {
+		if len(readFiles) == 0 {
+			voip.StartLiveVoipSniffer(interfaces, effectiveFilter)
+		} else {
+			voip.StartOfflineVoipSniffer(readFiles, effectiveFilter)
+		}
+	})
 }
 
 func init() {

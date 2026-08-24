@@ -1,4 +1,4 @@
-//go:build hunter || tap || all
+//go:build cli || hunter || tap || all
 
 // Package protocolmeta converts packet-level analyzer output to the protobuf
 // metadata transported between capture and processor nodes.

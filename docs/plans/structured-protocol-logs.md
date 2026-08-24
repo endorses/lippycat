@@ -1,7 +1,7 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** In progress (Phases 0-5 complete)
+**Status:** In progress (Phases 0-6 complete)
 **Priority:** High
 
 ## Overview
@@ -537,6 +537,12 @@ Add the missing distributed and local processor metadata needed for `TLSEvent`,
 
 **Priority:** Medium-high
 
+**Status:** Complete. Structured-log flags are registered as persistent flags
+on the general `sniff` command, so they work for `lc sniff` without a named
+protocol and are inherited by `dns`, `tls`, `http`, `email`, and `voip`.
+This matches `tap`, which also uses persistent parent flags. `process` has no
+protocol subcommands, so its equivalent flags remain local command flags.
+
 Allow standalone CLI captures to write the same structured logs as processor and tap
 without changing the subject-verb-object command grammar.
 
@@ -551,19 +557,23 @@ lc sniff http --log-dir ./logs --log-format json
 
 ### Tasks
 
-- [ ] Add shared log/event flag registration helpers usable by `process`, `tap`,
+- [x] Add shared log/event flag registration helpers usable by `process`, `tap`,
       and `sniff`.
-- [ ] Wire `internal/pkg/events` dispatcher into `cmd/sniff` capture paths.
-- [ ] Reuse `internal/pkg/flowid` for `sniff` event envelopes.
-- [ ] Register `logstream` sink when `sniff` logging is enabled.
-- [ ] Map existing sniff DNS metadata into `events.DNSEvent`.
-- [ ] Map existing sniff email metadata into `events.SMTPEvent`.
-- [ ] Map existing sniff TLS metadata into `events.TLSEvent`.
-- [ ] Map existing sniff HTTP metadata into `events.HTTPEvent`.
-- [ ] Ensure stdout/CLI output remains unchanged when logging is disabled.
-- [ ] Flush and close log streams on normal exit and signal shutdown.
-- [ ] Add integration tests for `lc sniff dns`, `lc sniff tls`, and `lc sniff http`
+- [x] Register general `sniff` log/event flags as persistent parent flags so
+      protocol subcommands inherit them.
+- [x] Wire `internal/pkg/events` dispatcher into `cmd/sniff` capture paths.
+- [x] Reuse `internal/pkg/flowid` for `sniff` event envelopes.
+- [x] Register `logstream` sink when `sniff` logging is enabled.
+- [x] Map sniff DNS metadata into `events.DNSEvent`.
+- [x] Map sniff email metadata into `events.SMTPEvent`.
+- [x] Map sniff TLS metadata into `events.TLSEvent`.
+- [x] Map sniff HTTP metadata into `events.HTTPEvent`.
+- [x] Ensure stdout/CLI output remains unchanged when logging is disabled.
+- [x] Flush and close log streams on normal exit and signal shutdown.
+- [x] Add integration tests for `lc sniff dns`, `lc sniff tls`, and `lc sniff http`
       log output from PCAP input where supported.
+- [x] Add coverage for inherited protocol-subcommand flags and DNS event-to-log
+      output with graceful dispatcher shutdown.
 
 ### Acceptance Criteria
 

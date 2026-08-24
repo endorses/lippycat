@@ -12,6 +12,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/signals"
@@ -133,15 +134,7 @@ var (
 	// Debug/pprof flags
 	debugListen           string
 	debugAllowNonLoopback bool
-	eventQueueSize        int
-	logDir                string
-	logFormat             string
-	logStreams            []string
-	logRotateInterval     time.Duration
-	logQueueSize          int
-	logEmitStage          string
-	logPostRotateCommand  string
-	logIncludeHTTPHeaders bool
+	structuredLogFlags    logflags.Values
 )
 
 func init() {
@@ -218,15 +211,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&tlsKeylogDir, "tls-keylog-dir", "", "Directory to write TLS session keys (NSS keylog format, Wireshark-compatible)")
 	ProcessCmd.Flags().StringVar(&debugListen, "debug-listen", "", "Enable pprof debug HTTP listener on address (loopback only by default, e.g. 127.0.0.1:6060)")
 	ProcessCmd.Flags().BoolVar(&debugAllowNonLoopback, "debug-allow-non-loopback", false, "Allow pprof debug listener to bind non-loopback addresses")
-	ProcessCmd.Flags().IntVar(&eventQueueSize, "event-queue-size", 20000, "Normalized protocol event queue size")
-	ProcessCmd.Flags().StringVar(&logDir, "log-dir", "", "Write structured protocol logs to this directory")
-	ProcessCmd.Flags().StringVar(&logFormat, "log-format", "tsv", "Structured log format: tsv or json")
-	ProcessCmd.Flags().StringSliceVar(&logStreams, "log-streams", []string{"dns", "ssl", "http", "smtp"}, "Structured log streams")
-	ProcessCmd.Flags().BoolVar(&logIncludeHTTPHeaders, "log-include-http-headers", false, "Include full HTTP header maps in transported metadata")
-	ProcessCmd.Flags().DurationVar(&logRotateInterval, "log-rotate-interval", time.Hour, "Structured log rotation interval")
-	ProcessCmd.Flags().IntVar(&logQueueSize, "log-queue-size", 10000, "Per-stream structured log queue size")
-	ProcessCmd.Flags().StringVar(&logEmitStage, "log-emit-stage", "terminal", "Structured log emission stage: terminal, all, or none")
-	ProcessCmd.Flags().StringVar(&logPostRotateCommand, "log-post-rotate-command", "", "Command after log rotation (%log% is replaced with the file path)")
+	logflags.Register(ProcessCmd.Flags(), &structuredLogFlags, true)
 
 	// Bind to viper for config file support
 	_ = viper.BindPFlag("processor.listen_addr", ProcessCmd.Flags().Lookup("listen"))
@@ -279,15 +264,6 @@ func init() {
 	_ = viper.BindPFlag("processor.tls_keylog.output_dir", ProcessCmd.Flags().Lookup("tls-keylog-dir"))
 	_ = viper.BindPFlag("processor.debug_listen", ProcessCmd.Flags().Lookup("debug-listen"))
 	_ = viper.BindPFlag("processor.debug_allow_non_loopback", ProcessCmd.Flags().Lookup("debug-allow-non-loopback"))
-	_ = viper.BindPFlag("events.queue_size", ProcessCmd.Flags().Lookup("event-queue-size"))
-	_ = viper.BindPFlag("logs.dir", ProcessCmd.Flags().Lookup("log-dir"))
-	_ = viper.BindPFlag("logs.include_http_headers", ProcessCmd.Flags().Lookup("log-include-http-headers"))
-	_ = viper.BindPFlag("logs.format", ProcessCmd.Flags().Lookup("log-format"))
-	_ = viper.BindPFlag("logs.streams", ProcessCmd.Flags().Lookup("log-streams"))
-	_ = viper.BindPFlag("logs.rotate_interval", ProcessCmd.Flags().Lookup("log-rotate-interval"))
-	_ = viper.BindPFlag("logs.queue_size", ProcessCmd.Flags().Lookup("log-queue-size"))
-	_ = viper.BindPFlag("logs.emit_stage", ProcessCmd.Flags().Lookup("log-emit-stage"))
-	_ = viper.BindPFlag("logs.post_rotate_command", ProcessCmd.Flags().Lookup("log-post-rotate-command"))
 }
 
 func runProcess(cmd *cobra.Command, args []string) error {
@@ -426,14 +402,14 @@ func runProcess(cmd *cobra.Command, args []string) error {
 
 	// Get configuration (flags override config file)
 	config := processor.Config{
-		EventQueueSize: cmdutil.GetIntConfig("events.queue_size", eventQueueSize),
+		EventQueueSize: cmdutil.GetIntConfig("events.queue_size", structuredLogFlags.EventQueueSize),
 		LogConfig: &processor.StructuredLogConfig{
-			Enabled:   cmdutil.GetStringConfig("logs.dir", logDir) != "" || viper.GetBool("logs.enabled"),
-			Directory: cmdutil.GetStringConfig("logs.dir", logDir), Format: cmdutil.GetStringConfig("logs.format", logFormat),
+			Enabled:   cmdutil.GetStringConfig("logs.dir", structuredLogFlags.Directory) != "" || viper.GetBool("logs.enabled"),
+			Directory: cmdutil.GetStringConfig("logs.dir", structuredLogFlags.Directory), Format: cmdutil.GetStringConfig("logs.format", structuredLogFlags.Format),
 			Streams: viper.GetStringSlice("logs.streams"), RotateInterval: viper.GetDuration("logs.rotate_interval"),
-			QueueSize: cmdutil.GetIntConfig("logs.queue_size", logQueueSize), EmitStage: cmdutil.GetStringConfig("logs.emit_stage", logEmitStage),
-			PostRotateCommand:  cmdutil.GetStringConfig("logs.post_rotate_command", logPostRotateCommand),
-			IncludeHTTPHeaders: cmdutil.GetBoolConfig("logs.include_http_headers", logIncludeHTTPHeaders),
+			QueueSize: cmdutil.GetIntConfig("logs.queue_size", structuredLogFlags.QueueSize), EmitStage: cmdutil.GetStringConfig("logs.emit_stage", structuredLogFlags.EmitStage),
+			PostRotateCommand:  cmdutil.GetStringConfig("logs.post_rotate_command", structuredLogFlags.PostRotateCommand),
+			IncludeHTTPHeaders: cmdutil.GetBoolConfig("logs.include_http_headers", structuredLogFlags.IncludeHTTPHeaders),
 		},
 		ListenAddr:                  cmdutil.GetStringConfig("processor.listen_addr", listenAddr),
 		ProcessorID:                 cmdutil.GetStringConfig("processor.processor_id", processorID),

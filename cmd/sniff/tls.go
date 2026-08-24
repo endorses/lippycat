@@ -160,11 +160,13 @@ func tlsHandler(cmd *cobra.Command, args []string) {
 
 	// Start TLS sniffer using appropriate mode
 	readFiles := collectReadFiles(readFile, args)
-	if len(readFiles) == 0 {
-		tls.StartLiveTLSSniffer(interfaces, effectiveFilter)
-	} else {
-		tls.StartOfflineTLSSniffer(readFiles, effectiveFilter)
-	}
+	withStructuredLogs(func() {
+		if len(readFiles) == 0 {
+			tls.StartLiveTLSSniffer(interfaces, effectiveFilter)
+		} else {
+			tls.StartOfflineTLSSniffer(readFiles, effectiveFilter)
+		}
+	})
 }
 
 func init() {

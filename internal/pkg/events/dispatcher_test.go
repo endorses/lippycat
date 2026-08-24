@@ -152,3 +152,20 @@ func TestTypedContentSeparation(t *testing.T) {
 	require.Equal(t, "metadata", metadata.Envelope().UID)
 	require.Equal(t, "content", content.Envelope().UID)
 }
+
+func TestDispatcherExposesPerSinkQueueMetrics(t *testing.T) {
+	d, err := NewDispatcher(Config{QueueSize: 3, SinkQueueSize: 2})
+	require.NoError(t, err)
+	require.NoError(t, d.Register(&testSink{}, KindDNS))
+	metrics := d.QueueMetrics()
+	require.Len(t, metrics, 2)
+	require.Equal(t, "events", metrics[0].Name)
+	require.Equal(t, 3, metrics[0].Capacity())
+	require.Equal(t, "event_sink_0", metrics[1].Name)
+	require.Equal(t, 2, metrics[1].Capacity())
+}
+
+func TestDispatcherRejectsUnsupportedDropPolicy(t *testing.T) {
+	_, err := NewDispatcher(Config{QueueSize: 1, DropPolicy: "block"})
+	require.ErrorContains(t, err, "unsupported event drop policy")
+}

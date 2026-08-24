@@ -20,5 +20,5 @@
 #types	time	string	addr	port	addr	port	count	string	string	set[string]	string	string	set[string]	set[string]	string	string	string	string	addr	string	string	string	vector[string]	string	bool	vector[string]	bool	string	string
 [files.log]
 #path	files
-#fields	ts	fuid	uid	source	depth	analyzers	mime_type	filename	duration	local_orig	is_orig	seen_bytes	total_bytes	missing_bytes	overflow_bytes	timedout	parent_fuid	md5	sha1	sha256	extracted	community_id	node_id
-#types	time	string	string	string	count	set[string]	string	string	interval	bool	bool	count	count	count	count	bool	string	string	string	string	string	string	string
+#fields	ts	fuid	uid	source	depth	analyzers	mime_type	filename	duration	local_orig	is_orig	seen_bytes	total_bytes	missing_bytes	overflow_bytes	timedout	parent_fuid	md5	sha1	sha256	hash_complete	extracted	community_id	node_id
+#types	time	string	string	string	count	set[string]	string	string	interval	bool	bool	count	count	count	count	bool	string	string	string	string	bool	string	string	string

@@ -33,7 +33,11 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 		if packet.TimestampNs == 0 {
 			timestamp = time.Now()
 		}
-		env := events.Envelope{Timestamp: timestamp, NodeID: batchSource, Flow: flow, CaptureScope: events.CaptureScopeFull}
+		scope := events.CaptureScopeFull
+		if len(packet.MatchedFilterIds) > 0 {
+			scope = events.CaptureScopeFiltered
+		}
+		env := events.Envelope{Timestamp: timestamp, NodeID: batchSource, Flow: flow, CaptureScope: scope, Partial: scope == events.CaptureScopeFiltered}
 		env, err = p.flowIdentity.Enrich(env)
 		if err != nil {
 			logger.Warn("Failed to assign protocol event flow identity", "error", err)
@@ -63,7 +67,7 @@ func (p *Processor) emitProtocolEvents(batchSource string, packets []*data.Captu
 }
 
 func (p *Processor) emitSMTPFiles(env events.Envelope, meta *data.EmailMetadata) {
-	if p.fileAnalyzer == nil || len(meta.BodyPreview) == 0 || !strings.HasPrefix(strings.ToLower(meta.ContentType), "multipart/") {
+	if p.fileAnalyzer == nil || p.config.LogConfig == nil || !p.config.LogConfig.IncludeEmailBodyPreview || len(meta.BodyPreview) == 0 || !strings.HasPrefix(strings.ToLower(meta.ContentType), "multipart/") {
 		return
 	}
 	items, err := fileanalysis.SMTPAttachments([]byte(meta.BodyPreview), meta.ContentType, p.config.LogConfig.FileMaxSize)

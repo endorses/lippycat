@@ -112,3 +112,20 @@ func TestEmitTLSAndHTTPEventsNormalizesResponseDirection(t *testing.T) {
 	require.Equal(t, uint16(204), httpEvent.StatusCode)
 	require.Equal(t, uint16(50001), httpEvent.Envelope().Flow.SourcePort)
 }
+
+func TestProtocolEventsPropagateFilteredCaptureProvenance(t *testing.T) {
+	p, err := New(Config{ListenAddr: ":0", ProcessorID: "processor-test", EventQueueSize: 16})
+	require.NoError(t, err)
+	sink := &collectingSink{}
+	require.NoError(t, p.RegisterEventSink(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP))
+	require.NoError(t, p.eventDispatcher.Start(context.Background()))
+	p.emitProtocolEvents("hunter-a", []*data.CapturedPacket{{TimestampNs: time.Unix(10, 0).UnixNano(), MatchedFilterIds: []string{"filter-a"}, Metadata: &data.PacketMetadata{SrcIp: "192.0.2.10", DstIp: "192.0.2.20", SrcPort: 50000, DstPort: 443, Transport: "tcp", Dns: &data.DNSMetadata{}, Tls: &data.TLSMetadata{}, Http: &data.HTTPMetadata{}, Email: &data.EmailMetadata{}}}})
+	require.NoError(t, p.eventDispatcher.Close(context.Background()))
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	require.Len(t, sink.events, 4)
+	for _, event := range sink.events {
+		require.Equal(t, events.CaptureScopeFiltered, event.Envelope().CaptureScope)
+		require.True(t, event.Envelope().Partial)
+	}
+}

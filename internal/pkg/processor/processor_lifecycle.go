@@ -112,7 +112,9 @@ func (p *Processor) Start(ctx context.Context) error {
 		if err := p.eventDispatcher.Start(p.ctx); err != nil {
 			return fmt.Errorf("start event dispatcher: %w", err)
 		}
-		p.flowController.SetQueueSource(flow.QueuePressureSource{Name: "events", Depth: p.eventDispatcher.QueueDepth, Capacity: p.eventDispatcher.QueueCapacity})
+		for _, metric := range p.eventDispatcher.QueueMetrics() {
+			p.flowController.SetQueueSource(flow.QueuePressureSource{Name: metric.Name, Depth: metric.Depth, Capacity: metric.Capacity})
+		}
 	}
 	if p.logSink != nil {
 		p.flowController.SetQueueSource(flow.QueuePressureSource{Name: "structured_logs", Depth: p.logSink.QueueDepth, Capacity: p.logSink.QueueCapacity})

@@ -59,7 +59,7 @@ var Streams = []Stream{
 		{"ts", "time"}, {"fuid", "string"}, {"uid", "string"}, {"source", "string"}, {"depth", "count"}, {"analyzers", "set[string]"},
 		{"mime_type", "string"}, {"filename", "string"}, {"duration", "interval"}, {"local_orig", "bool"}, {"is_orig", "bool"},
 		{"seen_bytes", "count"}, {"total_bytes", "count"}, {"missing_bytes", "count"}, {"overflow_bytes", "count"}, {"timedout", "bool"},
-		{"parent_fuid", "string"}, {"md5", "string"}, {"sha1", "string"}, {"sha256", "string"}, {"extracted", "string"},
+		{"parent_fuid", "string"}, {"md5", "string"}, {"sha1", "string"}, {"sha256", "string"}, {"hash_complete", "bool"}, {"extracted", "string"},
 		{"community_id", "string"}, {"node_id", "string"},
 	}),
 }

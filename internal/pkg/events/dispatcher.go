@@ -17,8 +17,21 @@ var ErrDispatcherStarted = errors.New("event dispatcher already started")
 type Config struct {
 	QueueSize       int
 	SinkQueueSize   int
+	DropPolicy      DropPolicy
 	WarningInterval time.Duration
 	Logger          *slog.Logger
+}
+
+type DropPolicy string
+
+const (
+	DropNew DropPolicy = "drop_new"
+)
+
+type QueueMetric struct {
+	Name     string
+	Depth    func() int
+	Capacity func() int
 }
 
 type Stats struct{ Enqueued, Dispatched, Dropped, SinkDropped, SinkErrors uint64 }
@@ -55,6 +68,12 @@ func NewDispatcher(cfg Config) (*Dispatcher, error) {
 	}
 	if cfg.SinkQueueSize <= 0 {
 		cfg.SinkQueueSize = cfg.QueueSize
+	}
+	if cfg.DropPolicy == "" {
+		cfg.DropPolicy = DropNew
+	}
+	if cfg.DropPolicy != DropNew {
+		return nil, fmt.Errorf("unsupported event drop policy %q", cfg.DropPolicy)
 	}
 	if cfg.WarningInterval <= 0 {
 		cfg.WarningInterval = 30 * time.Second
@@ -115,8 +134,9 @@ func (d *Dispatcher) Enqueue(ev Event) bool {
 		d.dropped.Add(1)
 		return false
 	}
+	item := dispatchItem{event: ev}
 	select {
-	case d.queue <- dispatchItem{event: ev}:
+	case d.queue <- item:
 		d.enqueued.Add(1)
 		return true
 	default:
@@ -259,6 +279,16 @@ func (d *Dispatcher) Close(ctx context.Context) error {
 
 func (d *Dispatcher) QueueDepth() int    { return len(d.queue) }
 func (d *Dispatcher) QueueCapacity() int { return cap(d.queue) }
+func (d *Dispatcher) QueueMetrics() []QueueMetric {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	metrics := []QueueMetric{{Name: "events", Depth: d.QueueDepth, Capacity: d.QueueCapacity}}
+	for i, reg := range d.registrations {
+		queue := reg.queue
+		metrics = append(metrics, QueueMetric{Name: fmt.Sprintf("event_sink_%d", i), Depth: func() int { return len(queue) }, Capacity: func() int { return cap(queue) }})
+	}
+	return metrics
+}
 func (d *Dispatcher) Stats() Stats {
 	return Stats{d.enqueued.Load(), d.dispatched.Load(), d.dropped.Load(), d.sinkDropped.Load(), d.sinkErrors.Load()}
 }

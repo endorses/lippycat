@@ -53,6 +53,7 @@ Every packet a processor receives can be sent to multiple destinations simultane
 flowchart LR
     Hunters -->|gRPC| P[Processor]
     P --> PCAP["PCAP Files<br/>(unified, per-call, auto-rotating)"]
+    P --> LOGS["Structured Logs<br/>(TSV or JSONL)"]
     P --> TUI["TUI Subscribers<br/>(lc watch remote)"]
     P --> VIF["Virtual Interface<br/>(lc0 → Wireshark, Snort, etc.)"]
     P --> UP["Upstream Processor<br/>(hierarchical forwarding)"]
@@ -65,6 +66,7 @@ flowchart LR
 | **Unified PCAP** | `-w` | All packets to a single file |
 | **Per-Call PCAP** | `--per-call-pcap` | Separate files per VoIP call (SIP + RTP) |
 | **Auto-Rotating PCAP** | `--auto-rotate-pcap` | Non-VoIP packets to time/size-rotated files |
+| **Structured logs** | `--log-dir` | Zeek-compatible connection and protocol metadata |
 | **TUI subscribers** | (always on) | Real-time streaming to `lc watch remote` clients |
 | **Virtual interface** | `-V` | Inject into a tap/tun device for external tools |
 | **Upstream forwarding** | `-P` | Forward to another processor (hierarchical mode) |
@@ -74,6 +76,22 @@ flowchart LR
 `lc tap` supports all the same output channels (see [Standalone Mode with `lc tap`](tap.md)).
 
 The following sections cover each channel in detail. For LI delivery, see [Lawful Interception](../part5-advanced/lawful-interception.md).
+
+### Structured protocol logs
+
+Set `--log-dir` to enable normalized `conn`, `dns`, `ssl`, `http`, `smtp`, and
+`files` streams. Logging is off by default and uses Zeek-style TSV unless
+`--log-format json` is selected:
+
+```bash
+lc process --listen :55555 --log-dir /var/log/lippycat \
+  --log-streams conn,dns,ssl --tls-cert server.crt --tls-key server.key
+```
+
+The default `--log-emit-stage terminal` prevents duplicate files in a processor
+hierarchy. Bounded queues protect packet processing, so operators must monitor
+drop warnings. See the full [Structured Protocol Logs](../../../STRUCTURED_LOGS.md)
+guide for schemas, rotation, completeness, SIEM ingestion, and privacy.
 
 ## PCAP Writing Modes
 

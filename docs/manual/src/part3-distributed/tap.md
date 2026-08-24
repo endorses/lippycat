@@ -34,6 +34,21 @@ The key question: **do you need to capture from multiple machines?** If yes, use
 
 ## Basic Usage
 
+### Structured protocol logs
+
+Tap shares the processor's structured-log pipeline. Parent flags are inherited
+by `tap dns`, `tap http`, and the other protocol subcommands:
+
+```bash
+sudo lc tap dns -i eth0 --insecure \
+  --log-dir /var/log/lippycat --log-streams conn,dns
+```
+
+Logging is disabled by default. When forwarding upstream, the default
+`--log-emit-stage terminal` emits only at the terminal processor. See
+[Structured Protocol Logs](../../../STRUCTURED_LOGS.md) for field schemas,
+TSV/JSONL behavior, rotation, lower-bound observations, and privacy controls.
+
 TLS is enabled by default for the management interface (TUI connections):
 
 ```bash

@@ -78,6 +78,20 @@ lc sniff -r capture.pcap
 
 No elevated privileges needed for reading files.
 
+### Structured protocol logs
+
+Set `--log-dir` to write normalized protocol files while retaining the existing
+packet output on stdout. These parent flags work on every protocol subcommand:
+
+```bash
+lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
+```
+
+Logging is off by default. Output is Zeek-style TSV by default, or JSONL with
+`--log-format json`. Queues are bounded, so heed drop warnings and use graceful
+shutdown to flush files. See [Structured Protocol Logs](../../../STRUCTURED_LOGS.md)
+for all schemas, flags, rotation, completeness semantics, and privacy guidance.
+
 ## Protocol Modes
 
 `lc sniff` has protocol-specific subcommands that enable deep analysis. Each adds protocol-aware filtering, correlation, and output.

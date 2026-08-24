@@ -30,6 +30,25 @@ sudo lc tap -i eth0 --auto-rotate-pcap --auto-rotate-pcap-dir /var/pcaps --insec
 sudo lc tap -i eth0 --processor central-processor:55555 --tls-ca ca.crt
 ```
 
+## Structured Protocol Logs
+
+Tap uses the same normalized event and file-log pipeline as `process`. Enable it
+on the parent command (flags are inherited by protocol subcommands):
+
+```bash
+sudo lc tap http -i eth0 --insecure \
+  --log-dir /var/log/lippycat \
+  --log-streams conn,http,files
+```
+
+Logging is off by default and writes Zeek-style TSV by default; use
+`--log-format json` for JSONL. When tap forwards upstream, the default
+`--log-emit-stage terminal` suppresses local logs. Use `all` only when both edge
+and terminal observations are intentional.
+
+See [Structured Protocol Logs](../../docs/STRUCTURED_LOGS.md) for schemas,
+rotation, extraction limits, completeness semantics, and privacy guidance.
+
 ## Commands
 
 ### `lc tap` - General Standalone Capture

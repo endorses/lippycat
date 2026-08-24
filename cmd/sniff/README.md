@@ -28,6 +28,26 @@ lc sniff -i eth0 --format text
 - `--esp-heuristic` - Decapsulate ESP by sniffing payload content for SIP (off by default)
 - `--esp-icv-size` - ESP ICV size in bytes (0, 8, 12, 16; -1 = auto-detect). Requires `--esp-null`
 
+## Structured Protocol Logs
+
+`sniff` can write the same normalized logs as `process` and `tap` without
+changing its packet output on stdout. The flags are inherited by protocol
+subcommands:
+
+```bash
+lc sniff dns -r capture.pcap --log-dir ./logs --log-streams conn,dns
+sudo lc sniff tls -i eth0 --log-dir /var/log/lippycat --log-format json
+```
+
+Logging is disabled until `--log-dir` is set. TSV is the default; JSON means
+JSONL records in the same `*.log` stream files. Event and per-stream queues are
+bounded, so overload warnings indicate incomplete logs. Stop with `SIGINT` or
+`SIGTERM` to drain and close files cleanly.
+
+See [Structured Protocol Logs](../../docs/STRUCTURED_LOGS.md) for every flag and
+field, rotation hooks, `partial` connection semantics, SIEM examples, and privacy
+guidance.
+
 ## Output Formats
 
 ### JSON Format (Default)

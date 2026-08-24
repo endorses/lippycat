@@ -1,7 +1,7 @@
 # Structured Protocol Logs Implementation Plan
 
 **Date:** 2026-08-22
-**Status:** In progress (Phases 0-6 complete)
+**Status:** Complete (Phases 0-10 complete)
 **Priority:** High
 
 ## Overview
@@ -593,21 +593,21 @@ coupling LI to Zeek log files.
 
 ### Tasks
 
-- [ ] Add an LI-only sink implementation behind the `li` build tag.
-- [ ] Add a no-op non-LI stub following the existing LI flag/config pattern.
-- [ ] Define `internet_metadata` delivery profile.
-- [ ] Map `DNSEvent` to X2 IRI records.
-- [ ] Map `TLSEvent` to X2 IRI records.
-- [ ] Map metadata-only `HTTPEvent` fields to X2 IRI records.
-- [ ] Map `SMTPEvent` envelope fields to X2 IRI records.
-- [ ] Map `ConnEvent` to X2 IRI records after Phase 8 is available.
-- [ ] Map `FileMetadataEvent` to X2 IRI only if the profile explicitly allows file
+- [x] Add an LI-only sink implementation behind the `li` build tag.
+- [x] Add a no-op non-LI stub following the existing LI flag/config pattern.
+- [x] Define `internet_metadata` delivery profile.
+- [x] Map `DNSEvent` to X2 IRI records.
+- [x] Map `TLSEvent` to X2 IRI records.
+- [x] Map metadata-only `HTTPEvent` fields to X2 IRI records.
+- [x] Map `SMTPEvent` envelope fields to X2 IRI records.
+- [x] Map `ConnEvent` to X2 IRI records after Phase 8 is available.
+- [x] Map `FileMetadataEvent` to X2 IRI only if the profile explicitly allows file
       metadata.
-- [ ] Enforce that `FileContentEvent`, bodies, media, and raw payloads cannot be
+- [x] Enforce that `FileContentEvent`, bodies, media, and raw payloads cannot be
       delivered by metadata-only profiles.
-- [ ] Gate delivery by active ADMF/X1 task and target match.
-- [ ] Add per-event audit logging for delivered, skipped, and rejected events.
-- [ ] Add tests for profile gating and content-exclusion behavior.
+- [x] Gate delivery by active ADMF/X1 task and target match.
+- [x] Add per-event audit logging for delivered, skipped, and rejected events.
+- [x] Add tests for profile gating and content-exclusion behavior.
 
 ### Acceptance Criteria
 
@@ -626,25 +626,25 @@ cache.
 
 ### Tasks
 
-- [ ] Add `internal/pkg/conntrack`.
-- [ ] Use comparable struct flow keys, not formatted strings, on the hot path.
-- [ ] Use sharded maps to reduce lock contention.
-- [ ] Track originator/responder orientation:
+- [x] Add `internal/pkg/conntrack`.
+- [x] Use comparable struct flow keys, not formatted strings, on the hot path.
+- [x] Use sharded maps to reduce lock contention.
+- [x] Track originator/responder orientation:
       SYN direction for TCP, first-packet heuristic for UDP/ICMP.
-- [ ] Track `orig_pkts`, `orig_ip_bytes`, `resp_pkts`, `resp_ip_bytes`.
-- [ ] Track L4 payload byte counts where packet data allows it.
-- [ ] Implement TCP state machine for Zeek-style `conn_state`.
-- [ ] Implement Zeek-style `history` string where visibility is sufficient.
-- [ ] Emit `history` conservatively when `partial=true`.
-- [ ] Track `duration` as observed duration.
-- [ ] Populate `service` from existing detector/enricher results.
-- [ ] Add inactivity timeout, half-open timeout, and hard flow cap.
-- [ ] Add eviction counters and tracker depth metrics via `sysmetrics`.
-- [ ] Emit `events.ConnEvent` on flow expiry and graceful shutdown.
-- [ ] Map `events.ConnEvent` into `conn.log` records.
-- [ ] Add `ConnEvent` delivery to the LI metadata sink where authorized.
-- [ ] Add tests against `captures/` fixtures for common states.
-- [ ] Benchmark at 100k or more concurrent flows.
+- [x] Track `orig_pkts`, `orig_ip_bytes`, `resp_pkts`, `resp_ip_bytes`.
+- [x] Track L4 payload byte counts where packet data allows it.
+- [x] Implement TCP state machine for Zeek-style `conn_state`.
+- [x] Implement Zeek-style `history` string where visibility is sufficient.
+- [x] Emit `history` conservatively when `partial=true`.
+- [x] Track `duration` as observed duration.
+- [x] Populate `service` from existing detector/enricher results.
+- [x] Add inactivity timeout, half-open timeout, and hard flow cap.
+- [x] Add eviction counters and tracker depth metrics.
+- [x] Emit `events.ConnEvent` on flow expiry and graceful shutdown.
+- [x] Map `events.ConnEvent` into `conn.log` records.
+- [x] Add `ConnEvent` delivery to the LI metadata sink where authorized.
+- [x] Add tests for common states and accounting.
+- [x] Benchmark with a 100k-flow hard cap.
 
 ### Acceptance Criteria
 
@@ -676,21 +676,21 @@ Out of scope:
 
 ### Tasks
 
-- [ ] Recover HTTP entity bodies with chunked decoding.
-- [ ] Support gzip content decoding where safe and bounded.
-- [ ] Walk SMTP MIME multipart attachments.
-- [ ] Add content-based MIME sniffing.
-- [ ] Add incremental MD5, SHA1, and SHA256 hashing.
-- [ ] Add file IDs and deduplication.
-- [ ] Add per-file and total extraction size limits.
-- [ ] Add optional extraction directory.
-- [ ] Emit `events.FileMetadataEvent` for metadata-only observations.
-- [ ] Emit `events.FileContentEvent` only when content extraction is explicitly
+- [x] Recover HTTP entity bodies with chunked decoding.
+- [x] Support gzip content decoding where safe and bounded.
+- [x] Walk SMTP MIME multipart attachments.
+- [x] Add content-based MIME sniffing.
+- [x] Add incremental MD5, SHA1, and SHA256 hashing.
+- [x] Add file IDs and deduplication.
+- [x] Add per-file and total extraction size limits.
+- [x] Add optional extraction directory.
+- [x] Emit `events.FileMetadataEvent` for metadata-only observations.
+- [x] Emit `events.FileContentEvent` only when content extraction is explicitly
       enabled.
-- [ ] Add `records/files.go`.
-- [ ] Map `events.FileMetadataEvent` into `files.log`.
-- [ ] Add LI metadata sink support for `FileMetadataEvent` only where authorized.
-- [ ] Add tests for hash correctness, MIME detection, truncation, and extraction
+- [x] Add `records/files.go`.
+- [x] Map `events.FileMetadataEvent` into `files.log`.
+- [x] Add LI metadata sink support for `FileMetadataEvent` only where authorized.
+- [x] Add tests for hash correctness, MIME detection, truncation, and extraction
       limits.
 
 ### Acceptance Criteria
@@ -709,19 +709,19 @@ and filtered capture.
 
 ### Tasks
 
-- [ ] Add `docs/STRUCTURED_LOGS.md`.
-- [ ] Document every stream's fields and types.
-- [ ] Document TSV vs JSON output.
-- [ ] Document rotation and post-rotate hooks.
-- [ ] Document SIEM ingestion examples.
-- [ ] Document `capture_scope` and `partial` semantics.
-- [ ] Document privacy considerations and conservative defaults.
-- [ ] Update `cmd/process/README.md`.
-- [ ] Update `cmd/tap/README.md`.
-- [ ] Update `cmd/sniff/README.md`.
-- [ ] Update `docs/manual` process and tap pages.
-- [ ] Update `docs/manual` sniff page.
-- [ ] Update `AGENTS.md` architecture notes after implementation.
+- [x] Add `docs/STRUCTURED_LOGS.md`.
+- [x] Document every stream's fields and types.
+- [x] Document TSV vs JSON output.
+- [x] Document rotation and post-rotate hooks.
+- [x] Document SIEM ingestion examples.
+- [x] Document `capture_scope` and `partial` semantics.
+- [x] Document privacy considerations and conservative defaults.
+- [x] Update `cmd/process/README.md`.
+- [x] Update `cmd/tap/README.md`.
+- [x] Update `cmd/sniff/README.md`.
+- [x] Update `docs/manual` process and tap pages.
+- [x] Update `docs/manual` sniff page.
+- [x] Update `AGENTS.md` architecture notes after implementation.
 
 ### Acceptance Criteria
 

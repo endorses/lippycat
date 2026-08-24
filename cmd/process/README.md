@@ -28,7 +28,32 @@ lc process --listen :55555 --processor parent-processor:55555
 
 # With PCAP writing
 lc process --listen :55555 --write-file /var/capture/packets.pcap
+
+# With Zeek-compatible structured protocol logs
+lc process --listen :55555 --log-dir /var/log/lippycat
 ```
+
+## Structured Protocol Logs
+
+Set `--log-dir` to write `conn.log`, `dns.log`, `ssl.log`, `http.log`,
+`smtp.log`, and `files.log`. Logging is disabled by default; TSV is the default
+encoding. Select streams and JSONL output when needed:
+
+```bash
+lc process --listen :55555 \
+  --log-dir /var/log/lippycat \
+  --log-format json \
+  --log-streams conn,dns,ssl
+```
+
+In hierarchical deployments, the default `--log-emit-stage terminal` writes only
+on the final processor, avoiding duplicate records. `all` writes at every enabled
+stage and `none` suppresses emission. Log queues are bounded and do not block
+packet processing; drop warnings mean the output is incomplete.
+
+See [Structured Protocol Logs](../../docs/STRUCTURED_LOGS.md) for all flags,
+schemas, rotation hooks, completeness semantics, SIEM examples, and privacy
+guidance.
 
 ## Command Flags
 

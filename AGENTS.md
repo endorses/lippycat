@@ -57,6 +57,12 @@ This architecture allows for:
   - `internal/pkg/pcap/`: PCAP file handling
   - `internal/pkg/bpfutil/`: BPF filter utilities
   - `internal/pkg/sysmetrics/`: System metrics collection
+  - `internal/pkg/events/`: Typed normalized protocol events and bounded async dispatch
+  - `internal/pkg/flowid/`: Stable flow UID and Community ID generation
+  - `internal/pkg/conntrack/`: Bounded connection lifecycle accounting for `conn.log`
+  - `internal/pkg/logstream/`: Zeek-style TSV and JSONL structured-log sink with rotation
+  - `internal/pkg/logschema/`: Versioned structured-log field and type contract
+  - `internal/pkg/fileanalysis/`: Bounded HTTP/SMTP file metadata, hashing, and optional extraction
   - `api/proto/`: gRPC protocol buffer definitions
   - `api/gen/data/`: Generated gRPC code for data services
   - `api/gen/management/`: Generated gRPC code for management services
@@ -412,6 +418,25 @@ This allows the remote capture client to work with different frontends (TUI, CLI
 - `NoopEventHandler`: No-op implementation for testing
 
 This prevents circular dependencies and maintains clean architecture boundaries (cmd ← internal, never internal → cmd).
+
+### Structured Protocol Event and Log Pipeline
+
+Processor, tap, and sniff paths map analyzer metadata into typed events in
+`internal/pkg/events`. Flow identity comes from `internal/pkg/flowid`, connection
+lifecycle summaries from `internal/pkg/conntrack`, and file observations from
+`internal/pkg/fileanalysis`. Optional sinks consume the same events:
+
+- `internal/pkg/logstream` writes bounded, rotating `conn`, `dns`, `ssl`, `http`,
+  `smtp`, and `files` streams as Zeek-style TSV or JSONL.
+- LI builds can map authorized metadata events directly to X2 IRI without
+  depending on file output; content events are separate and denied to the
+  metadata-only profile.
+
+Packet processing never waits for log I/O. Event and per-stream queues drop on
+overflow, expose pressure for processor flow control, and drain during graceful
+shutdown. Canonical field order belongs to `internal/pkg/logschema`; do not
+redefine schemas in writers. See `docs/STRUCTURED_LOGS.md` for operator behavior
+and `docs/structured-protocol-log-schema.md` for the compatibility contract.
 
 ### Build Tag Architecture
 Each command has build-tagged root files:

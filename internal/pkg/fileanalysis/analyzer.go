@@ -93,6 +93,7 @@ func (a *Analyzer) Analyze(obs Observation) (events.FileMetadataEvent, *events.F
 	ev.MissingBytes = total - min(total, uint64(len(content)))
 	ev.MD5, ev.SHA1, ev.SHA256 = hex.EncodeToString(hMD5.Sum(nil)), hex.EncodeToString(hSHA1.Sum(nil)), sha256Text
 	ev.TimedOut = obs.Truncated
+	ev.HashComplete = !obs.Truncated && ev.MissingBytes == 0 && ev.OverflowBytes == 0 && decodeErr == nil
 	var contentEvent *events.FileContentEvent
 	if a.cfg.Extract && duplicate {
 		path := filepath.Join(a.cfg.Directory, fuid)

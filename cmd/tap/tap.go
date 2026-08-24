@@ -379,8 +379,10 @@ func structuredLoggingConfig() (int, *processor.StructuredLogConfig) {
 		Format: cmdutil.GetStringConfig("logs.format", structuredLogFlags.Format), Streams: viper.GetStringSlice("logs.streams"),
 		RotateInterval: viper.GetDuration("logs.rotate_interval"), QueueSize: cmdutil.GetIntConfig("logs.queue_size", structuredLogFlags.QueueSize),
 		EmitStage: cmdutil.GetStringConfig("logs.emit_stage", structuredLogFlags.EmitStage), PostRotateCommand: cmdutil.GetStringConfig("logs.post_rotate_command", structuredLogFlags.PostRotateCommand),
-		IncludeHTTPHeaders: cmdutil.GetBoolConfig("logs.include_http_headers", structuredLogFlags.IncludeHTTPHeaders),
-		ExtractFiles:       cmdutil.GetBoolConfig("files.extract", structuredLogFlags.ExtractFiles), ExtractionDirectory: cmdutil.GetStringConfig("files.extract_dir", structuredLogFlags.ExtractionDirectory),
+		EventDropPolicy:         cmdutil.GetStringConfig("events.drop_policy", structuredLogFlags.EventDropPolicy),
+		IncludeHTTPHeaders:      cmdutil.GetBoolConfig("logs.include_http_headers", structuredLogFlags.IncludeHTTPHeaders),
+		IncludeEmailBodyPreview: cmdutil.GetBoolConfig("logs.include_email_body_preview", structuredLogFlags.IncludeEmailBodyPreview),
+		ExtractFiles:            cmdutil.GetBoolConfig("files.extract", structuredLogFlags.ExtractFiles), ExtractionDirectory: cmdutil.GetStringConfig("files.extract_dir", structuredLogFlags.ExtractionDirectory),
 		FileMaxSize: viper.GetInt64("files.max_size"), FileTotalSize: viper.GetInt64("files.total_size"),
 	}
 }

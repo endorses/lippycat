@@ -168,6 +168,7 @@ type FileMetadataEvent struct {
 	SeenBytes, TotalBytes, MissingBytes, OverflowBytes uint64
 	TimedOut                                           bool
 	ParentFileID, MD5, SHA1, SHA256, ExtractedPath     string
+	HashComplete                                       bool
 }
 
 func NewFileMetadataEvent(env Envelope) FileMetadataEvent {

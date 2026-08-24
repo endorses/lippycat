@@ -23,9 +23,11 @@ func TestAnalyzeHashesMIMETruncationAndDedup(t *testing.T) {
 	require.Equal(t, "5d41402abc4b2a76b9719d911017c592", one.MD5)
 	require.Equal(t, "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d", one.SHA1)
 	require.Equal(t, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", one.SHA256)
+	require.False(t, one.HashComplete)
 	two, _, err := a.Analyze(Observation{Content: []byte("hello")})
 	require.NoError(t, err)
 	require.Equal(t, one.FileID, two.FileID)
+	require.True(t, two.HashComplete)
 }
 
 func TestAnalyzeGzipAndExtractionTotalLimit(t *testing.T) {

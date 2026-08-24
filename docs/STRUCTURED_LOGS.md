@@ -190,15 +190,18 @@ message body.
 One bounded HTTP entity or SMTP attachment observation. `fuid` is the file ID;
 `source` names the carrying protocol; `depth` and `parent_fuid` describe nesting;
 `analyzers` describes processing. Size and loss columns report observed,
-declared, missing, and overflow bytes. Hashes cover the bounded recovered
-content. `extracted` is set only when explicit extraction succeeds.
+declared, missing, and overflow bytes. Hashes cover the recovered bytes;
+`hash_complete` is true only when those bytes are known to represent the entire
+decoded entity. A false value means the hashes identify an observed prefix and
+must not be compared as whole-file hashes. `extracted` is set only when explicit
+extraction succeeds.
 
 | Fields | Zeek types |
 |---|---|
 | `ts`, `fuid`, `uid`, `source`, `depth`, `analyzers` | `time`, `string`, `string`, `string`, `count`, `set[string]` |
 | `mime_type`, `filename`, `duration`, `local_orig`, `is_orig` | `string`, `string`, `interval`, `bool`, `bool` |
 | `seen_bytes`, `total_bytes`, `missing_bytes`, `overflow_bytes`, `timedout` | `count`, `count`, `count`, `count`, `bool` |
-| `parent_fuid`, `md5`, `sha1`, `sha256`, `extracted` | `string`, `string`, `string`, `string`, `string` |
+| `parent_fuid`, `md5`, `sha1`, `sha256`, `hash_complete`, `extracted` | `string`, `string`, `string`, `string`, `bool`, `string` |
 | `community_id`, `node_id` | `string`, `string` |
 
 ## Rotation and operations
@@ -206,7 +209,16 @@ content. `extracted` is set only when explicit extraction succeeds.
 Each enabled stream has a bounded, non-blocking queue and a single writer. A
 full event or stream queue drops new work and increments counters; periodic
 warnings summarize drops. Processor flow control considers sustained event and
-log queue pressure, but no logging configuration can guarantee lossless output.
+log queue pressure, including each dispatcher sink queue, but no logging
+configuration can guarantee lossless output. `events.drop_policy` currently
+accepts `drop_new`; unsupported policies fail during initialization.
+
+HTTP and SMTP file analysis requires body bytes at the capture analyzer. For a
+distributed deployment, start the relevant hunter protocol command with
+`--capture-body` and an appropriate `--max-body-size`; the processor cannot
+retroactively recover bodies that a hunter omitted. SMTP MIME parsing is also
+privacy-gated by `--log-include-email-body-preview`. HTTP headers and email body
+previews remain disabled unless their respective opt-in flags are set.
 
 Active files are named `conn.log`, `dns.log`, and so on. At the configured
 interval, an active file is closed and renamed, for example to

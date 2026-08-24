@@ -38,6 +38,8 @@ The extensions are:
   or accounting is otherwise a lower bound.
 - `ja3`, `ja3s`, and `ja4` are established fingerprint extensions carried by
   lippycat; they are not fields in Zeek's base `SSL::Info` record.
+- `hash_complete` (`bool`) is true only when file hashes cover the complete
+  decoded entity. When false, MD5/SHA1/SHA256 cover only the recovered prefix.
 
 `capture_scope` and `partial` apply to `conn.log`; the event envelope carries
 them for all event kinds so future schemas can expose them without inference.

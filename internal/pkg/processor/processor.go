@@ -137,6 +137,7 @@ type StructuredLogConfig struct {
 	Streams                                              []string
 	RotateInterval                                       time.Duration
 	QueueSize                                            int
+	EventDropPolicy                                      string
 	ExtractFiles                                         bool
 	ExtractionDirectory                                  string
 	FileMaxSize, FileTotalSize                           int64
@@ -238,7 +239,11 @@ func New(config Config) (*Processor, error) {
 		eventQueueSize = 20000
 	}
 	var err error
-	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize})
+	dropPolicy := ""
+	if config.LogConfig != nil {
+		dropPolicy = config.LogConfig.EventDropPolicy
+	}
+	p.eventDispatcher, err = events.NewDispatcher(events.Config{QueueSize: eventQueueSize, SinkQueueSize: eventQueueSize, DropPolicy: events.DropPolicy(dropPolicy)})
 	if err != nil {
 		return nil, fmt.Errorf("initialize event dispatcher: %w", err)
 	}

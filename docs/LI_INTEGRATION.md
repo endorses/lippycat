@@ -12,6 +12,21 @@ also reuses the correlation ID; the MDF must scope it with the XID and task time
 window. Changing this derivation is an interop-breaking protocol change and
 requires a coordinated MDF cutover.
 
+## X2/X3 sequence-number policy
+
+When attribute 8 is enabled, lippycat follows ETSI TS 103 221-2 clause 5.3.9.
+Each `(PDU type, XID, Domain ID, NFID, IPID, Correlation ID)` context starts at
+zero, increments independently, and wraps to zero after the maximum unsigned
+32-bit value. X2 and X3 are separate contexts. The X2/X3 Domain ID is not an X1
+delivery-destination `DId`, and fan-out of one encoded PDU to several MDFs does
+not change its sequence number.
+
+Sequence state is in memory. Task deactivation removes every context for its
+XID. A lippycat process restart establishes new delivery connections and starts
+new sequence contexts at zero; operators must confirm that the MDF treats a new
+connection after a POI restart as a new sequence epoch because TS 103 221-2 does
+not define a sequence-reset signal.
+
 ## Overview
 
 lippycat implements the following ETSI interfaces for lawful interception:

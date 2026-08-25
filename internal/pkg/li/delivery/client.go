@@ -53,11 +53,6 @@ type deliveryItem struct {
 	queued  time.Time
 }
 
-type streamKey struct {
-	xid uuid.UUID
-	did uuid.UUID
-}
-
 type ClientConfig struct {
 	// QueueSize is the queue capacity for each destination.
 	QueueSize int
@@ -308,9 +303,7 @@ type Client struct {
 	queuesMu sync.RWMutex
 	queues   map[uuid.UUID]*destinationQueue
 
-	sequences   map[streamKey]*uint32
-	sequencesMu sync.RWMutex
-	stats       ClientStats
+	stats ClientStats
 
 	started  atomic.Bool
 	stopped  atomic.Bool
@@ -354,10 +347,9 @@ func NewClient(manager *Manager, config ClientConfig) *Client {
 		config.RetrySuccessThreshold = defaults.RetrySuccessThreshold
 	}
 	return &Client{
-		manager:   manager,
-		config:    config,
-		queues:    make(map[uuid.UUID]*destinationQueue),
-		sequences: make(map[streamKey]*uint32),
+		manager: manager,
+		config:  config,
+		queues:  make(map[uuid.UUID]*destinationQueue),
 	}
 }
 
@@ -694,35 +686,6 @@ func (c *Client) DestinationStats() map[uuid.UUID]DestinationDeliveryStats {
 
 func (c *Client) QueueDepth() int {
 	return int(atomic.LoadInt64(&c.stats.QueueDepth))
-}
-
-func (c *Client) NextSequence(xid, did uuid.UUID) uint32 {
-	key := streamKey{xid: xid, did: did}
-	c.sequencesMu.RLock()
-	seq, exists := c.sequences[key]
-	c.sequencesMu.RUnlock()
-	if exists {
-		return atomic.AddUint32(seq, 1)
-	}
-	c.sequencesMu.Lock()
-	if seq, exists = c.sequences[key]; exists {
-		c.sequencesMu.Unlock()
-		return atomic.AddUint32(seq, 1)
-	}
-	var initial uint32 = 1
-	c.sequences[key] = &initial
-	c.sequencesMu.Unlock()
-	return 1
-}
-
-func (c *Client) ResetSequence(xid uuid.UUID) {
-	c.sequencesMu.Lock()
-	defer c.sequencesMu.Unlock()
-	for key := range c.sequences {
-		if key.xid == xid {
-			delete(c.sequences, key)
-		}
-	}
 }
 
 func (c *Client) SendX2Sync(ctx context.Context, xid uuid.UUID, destIDs []uuid.UUID, data []byte) error {

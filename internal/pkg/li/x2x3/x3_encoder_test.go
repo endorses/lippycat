@@ -66,8 +66,8 @@ func TestX3Encoder_EncodeCC_Basic(t *testing.T) {
 	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourcePort))
 	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestPort))
 
-	// Verify sequence number incremented
-	assert.Equal(t, uint32(1), encoder.GetSequenceNumber())
+	// The first sequence number in an ETSI context is zero.
+	assert.Equal(t, uint32(0), encoder.GetSequenceNumber())
 }
 
 func TestX3Encoder_EncodeCC_NotRTP(t *testing.T) {
@@ -287,7 +287,7 @@ func TestX3Encoder_SequenceNumber_Monotonic(t *testing.T) {
 	}
 
 	// Encode multiple CCs
-	for i := 1; i <= 10; i++ {
+	for i := 0; i < 10; i++ {
 		_, err := encoder.EncodeCC(pkt, xid)
 		require.NoError(t, err)
 		assert.Equal(t, uint32(i), encoder.GetSequenceNumber())

@@ -459,25 +459,53 @@ Tests:
 - [x] Mixed success/error responses retain transaction IDs.
 - [x] A nested container is rejected without affecting sibling messages.
 
-### 7.3 Coordinate per-XID/per-destination sequence numbers
+### 7.3 Use ETSI-context-scoped sequence numbers
 
 **Current code:** `internal/pkg/li/x2x3`, `internal/pkg/li/delivery/client.go`
 
-Do not deploy this change until MDF behavior and cutover are agreed.
+**Status (2026-08-25): Implemented; MDF migration confirmation remains.**
+The encoders share a bounded, fail-closed sequencer keyed by the complete ETSI
+context. Counters are zero-based, X2/X3-independent, wrap at 32 bits, and are
+cleared by XID deactivation. Destination fan-out continues to share one immutable
+encoding. Restart policy is an in-memory reset to zero on new delivery connections
+and is documented for operational agreement with the MDF.
 
-- [ ] Remove sequence ownership from the global X2/X3 encoder instances.
-- [ ] Assign attribute 8 for each `(XID, DID)` delivery stream using `Client.NextSequence` or a replacement owned by the delivery layer.
-- [ ] Because sequence differs by destination, marshal a destination-specific PDU after assigning the sequence.
-- [ ] Reset sequence state on task deactivation and destination removal.
-- [ ] Define restart behavior: persisted continuation or an explicitly signalled reset.
-- [ ] Add bounds/cleanup for sequence-map entries.
+ETSI TS 103 221-2 V1.10.1 clause 5.3.9 defines attribute 8 precisely. If the
+attribute is used, its sequence starts at zero and increments once for each PDU
+with the same `(XID, Domain ID, NFID, IPID, Correlation ID)` context. X2 and X3
+maintain separate sequences for an otherwise identical context. The unsigned
+32-bit value wraps to zero after its maximum value. See the
+[official specification](https://www.etsi.org/deliver/etsi_ts/103200_103299/10322102/01.10.01_60/ts_10322102v011001p.pdf).
+
+The X2/X3 Domain ID conditional attribute is not the X1 `DId` used to identify
+a delivery destination. Destination identity is not part of the sequence
+context defined by clause 5.3.9. A PDU fanned out to several MDF destinations
+therefore retains the same sequence attribute and serialized bytes.
+
+The normative runtime behavior no longer requires a peer decision. Coordinate
+deployment because existing MDFs may have adapted to lippycat's old global,
+one-based counters. Restart behavior is not defined by TS 103 221-2 and still
+requires an explicit operational policy agreed with the MDF.
+
+- [x] Remove sequence ownership from the global X2/X3 encoder instances.
+- [x] Replace `Client.NextSequence(xid, destinationDID)` with a sequencer keyed by PDU type plus `(XID, Domain ID, NFID, IPID, Correlation ID)`.
+- [x] Begin every new context at zero, increment by one per PDU, and wrap naturally from `math.MaxUint32` to zero.
+- [x] Maintain independent X2 and X3 sequences for the same remaining context fields.
+- [x] Retain the existing architecture decision to enable attribute 8 and include exactly one occurrence in every applicable content PDU.
+- [x] Assign the sequence before marshaling once; reuse that PDU unchanged when fanning it out to multiple MDF destinations.
+- [x] Reset sequence state when its XID is deactivated. Destination removal alone does not reset it.
+- [x] Define and document restart behavior: new process and delivery connections restart contexts at zero. TS 103 221-2 defines no reset signal, so MDF acceptance remains a rollout gate.
+- [x] Bound the sequence map and fail closed when capacity is reached rather than evicting and silently resetting a live context.
 
 Tests:
 
-- [ ] Two XIDs each begin at the agreed initial value for one DID.
-- [ ] The same XID has independent sequences across DIDs.
-- [ ] X2 and X3 follow the peer-agreed shared or separate stream rule.
-- [ ] Deactivation/reset and restart behavior are deterministic.
+- [x] Every new ETSI context begins at zero.
+- [x] Changing XID, Domain ID, NFID, IPID, or Correlation ID creates an independent sequence.
+- [x] X2 and X3 have independent sequences for an otherwise identical context.
+- [x] Two destination DIds receiving the same immutable PDU observe the same sequence value.
+- [x] The counter wraps from `math.MaxUint32` to zero.
+- [x] XID deactivation removes all of that task's sequence contexts; destination removal does not alter sequence state.
+- [x] Deactivation/reset and restart behavior are deterministic.
 
 ### 7.4 Add X2/X3 keepalive exchange
 
@@ -540,7 +568,7 @@ The following require agreement with the ADMF/MDF implementations before deploym
 - [ ] Decide the missing/zero `EndTime` policy.
 - [ ] Decide how to represent multiple mediation windows for one task and several DIDs.
 - [ ] Agree the raw-IP X3 payload format and MDF decoding behavior.
-- [ ] Agree attribute-8 scope, initial value, reset, and restart semantics.
+- [ ] Follow the attribute-8 scope, zero initial value, separate X2/X3 streams, and wrap behavior mandated by ETSI TS 103 221-2 clause 5.3.9; agree only restart behavior and migration cutover with the MDF.
 - [ ] Agree the X2/X3 keepalive interval and ACK behavior.
 - [ ] Agree the X1 declared version and compatibility validation.
 - [ ] Agree the XID reuse policy and audit-history expectations.

@@ -63,8 +63,8 @@ func TestX2Encoder_EncodeIRI_SessionBegin(t *testing.T) {
 	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourcePort))
 	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestPort))
 
-	// Verify sequence number incremented
-	assert.Equal(t, uint32(1), encoder.GetSequenceNumber())
+	// The first sequence number in an ETSI context is zero.
+	assert.Equal(t, uint32(0), encoder.GetSequenceNumber())
 }
 
 func TestX2Encoder_EncodeIRI_SessionAnswer(t *testing.T) {
@@ -339,7 +339,7 @@ func TestX2Encoder_SequenceNumber_Monotonic(t *testing.T) {
 	}
 
 	// Encode multiple IRIs
-	for i := 1; i <= 10; i++ {
+	for i := 0; i < 10; i++ {
 		_, err := encoder.EncodeIRI(pkt, xid)
 		require.NoError(t, err)
 		assert.Equal(t, uint32(i), encoder.GetSequenceNumber())

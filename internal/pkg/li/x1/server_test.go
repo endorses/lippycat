@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2065,9 +2066,10 @@ func TestServer_RateLimiting(t *testing.T) {
 func TestServer_RateLimiting_PerIP(t *testing.T) {
 	mock := newMockDestinationManager()
 	config := ServerConfig{
-		NEIdentifier:   "test-ne",
-		RateLimitPerIP: 1,
-		RateLimitBurst: 1,
+		NEIdentifier:      "test-ne",
+		RateLimitPerIP:    1,
+		RateLimitBurst:    1,
+		TrustedProxyCIDRs: []string{"192.168.1.0/24"},
 	}
 	s := NewServer(config, mock, nil)
 
@@ -2105,9 +2107,10 @@ func TestServer_RateLimiting_PerIP(t *testing.T) {
 func TestServer_RateLimiting_XForwardedFor(t *testing.T) {
 	mock := newMockDestinationManager()
 	config := ServerConfig{
-		NEIdentifier:   "test-ne",
-		RateLimitPerIP: 1,
-		RateLimitBurst: 1,
+		NEIdentifier:      "test-ne",
+		RateLimitPerIP:    1,
+		RateLimitBurst:    1,
+		TrustedProxyCIDRs: []string{"192.168.1.0/24"},
 	}
 	s := NewServer(config, mock, nil)
 
@@ -2148,9 +2151,10 @@ func TestServer_RateLimiting_XForwardedFor(t *testing.T) {
 func TestServer_RateLimiting_XForwardedFor_Chain(t *testing.T) {
 	mock := newMockDestinationManager()
 	config := ServerConfig{
-		NEIdentifier:   "test-ne",
-		RateLimitPerIP: 1,
-		RateLimitBurst: 1,
+		NEIdentifier:      "test-ne",
+		RateLimitPerIP:    1,
+		RateLimitBurst:    1,
+		TrustedProxyCIDRs: []string{"192.168.1.0/24"},
 	}
 	s := NewServer(config, mock, nil)
 
@@ -2256,6 +2260,38 @@ func TestServer_GetRateLimiter(t *testing.T) {
 	// Get limiter for different IP - should be different instance (pointer comparison)
 	limiter3 := s.getRateLimiter("192.168.1.200")
 	assert.True(t, limiter1 != limiter3, "should return different limiter instance for different IP")
+}
+
+func TestServer_UntrustedForwardedHeadersCannotGrowLimiterCache(t *testing.T) {
+	s := NewServer(ServerConfig{RateLimitPerIP: 100, RateLimitBurst: 100}, nil, nil)
+	for i := 0; i < 100; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "192.0.2.10:1234"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.0.0.%d", i+1))
+		s.getRateLimiter(s.clientIP(req))
+	}
+	entries, _ := s.RateLimiterStats()
+	assert.Equal(t, 1, entries)
+}
+
+func TestServer_TrustedProxyClientExtraction(t *testing.T) {
+	s := NewServer(ServerConfig{TrustedProxyCIDRs: []string{"192.0.2.0/24"}}, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	req.Header.Set("Forwarded", `for="[2001:db8::1]:4711";proto=https`)
+	assert.Equal(t, "2001:db8::1", s.clientIP(req))
+}
+
+func TestServer_RateLimiterCacheExpiresAndRemainsBounded(t *testing.T) {
+	s := NewServer(ServerConfig{RateLimiterMaxEntries: 2, RateLimiterTTL: time.Millisecond}, nil, nil)
+	s.getRateLimiter("192.0.2.1")
+	time.Sleep(2 * time.Millisecond)
+	s.getRateLimiter("192.0.2.2")
+	s.getRateLimiter("192.0.2.3")
+	s.getRateLimiter("192.0.2.4")
+	entries, evictions := s.RateLimiterStats()
+	assert.LessOrEqual(t, entries, 2)
+	assert.GreaterOrEqual(t, evictions, uint64(2))
 }
 
 // TestServer_DefaultConfig tests that default config values are applied.
@@ -2609,4 +2645,46 @@ func TestServer_BackwardCompatibility_BareRequests(t *testing.T) {
 	task, exists := taskMock.tasks[xid]
 	require.True(t, exists, "bare request should still be processed")
 	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
+}
+
+func TestServer_LegacyContainerProcessesEveryMessageInOrder(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne", Version: "v1.13.1"}, mock, nil)
+	firstID := uuid.New()
+	secondID := uuid.New()
+	body := `<requestContainer xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <x1RequestMessage xsi:type="pingRequest"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + firstID.String() + `</x1TransactionId></x1RequestMessage>
+  <x1RequestMessage xsi:type="pingRequest"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + secondID.String() + `</x1TransactionId></x1RequestMessage>
+</requestContainer>`
+
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var responses schema.ResponseContainer
+	require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &responses))
+	require.Len(t, responses.X1ResponseMessage, 2)
+	require.Equal(t, firstID.String(), string(*responses.X1ResponseMessage[0].X1TransactionId))
+	require.Equal(t, secondID.String(), string(*responses.X1ResponseMessage[1].X1TransactionId))
+}
+
+func TestServer_ContainerContinuesAfterErrorAndRejectsNestedMessage(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne", Version: "v1.13.1"}, mock, nil)
+	badID := uuid.New()
+	goodID := uuid.New()
+	body := `<requestContainer xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <x1RequestMessage xsi:type="requestContainer"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + badID.String() + `</x1TransactionId></x1RequestMessage>
+  <x1RequestMessage xsi:type="pingRequest"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + goodID.String() + `</x1TransactionId></x1RequestMessage>
+</requestContainer>`
+
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	responseBody := w.Body.String()
+	require.Contains(t, responseBody, "nested request containers not supported")
+	require.Contains(t, responseBody, badID.String())
+	require.Contains(t, responseBody, goodID.String())
+	require.Less(t, bytes.Index(w.Body.Bytes(), []byte(badID.String())), bytes.Index(w.Body.Bytes(), []byte(goodID.String())))
 }

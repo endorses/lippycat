@@ -3,6 +3,7 @@ package x2x3
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"net/netip"
 	"sync"
@@ -11,7 +12,38 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/google/gopacket/layers"
 )
+
+// EncodeRawIPCC encodes a matched non-VoIP packet as X3 content. RawData is
+// preserved byte-for-byte; PayloadFormat declares whether it is an Ethernet
+// frame or a network-layer IPv4/IPv6 packet.
+func (e *X3Encoder) EncodeRawIPCC(pkt *types.PacketDisplay, xid uuid.UUID, matchedTarget string) (*PDU, error) {
+	if len(pkt.RawData) == 0 {
+		return nil, ErrNoPayload
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(matchedTarget))
+	correlationID := h.Sum64()
+	pdu := NewPDU(PDUTypeX3, xid, correlationID)
+	switch {
+	case pkt.LinkType == layers.LinkTypeEthernet:
+		pdu.Header.PayloadFormat = PayloadFormatEthernet
+	case pkt.RawData[0]>>4 == 4:
+		pdu.Header.PayloadFormat = PayloadFormatIPv4
+	case pkt.RawData[0]>>4 == 6:
+		pdu.Header.PayloadFormat = PayloadFormatIPv6
+	default:
+		return nil, fmt.Errorf("%w: unknown network payload format", ErrNoPayload)
+	}
+	pdu.Header.PayloadDirection = PayloadDirectionUnknown
+	if err := e.addCommonAttributes(pdu, pkt); err != nil {
+		return nil, err
+	}
+	e.addNetworkAttributes(pdu, pkt)
+	pdu.SetPayload(pkt.RawData)
+	return pdu, nil
+}
 
 // X3 Encoder errors.
 var (
@@ -38,11 +70,12 @@ var (
 //
 // The encoder is safe for concurrent use.
 type X3Encoder struct {
-	// seqNum is the global sequence number for X3 PDUs.
-	seqNum atomic.Uint32
-
 	// attrBuilder is used to construct TLV attributes.
 	attrBuilder *AttributeBuilder
+	sequencer   *Sequencer
+	domainID    string
+	nfID        string
+	lastSeq     atomic.Uint32
 
 	// bufPool provides reusable buffers for PDU encoding.
 	bufPool sync.Pool
@@ -50,8 +83,18 @@ type X3Encoder struct {
 
 // NewX3Encoder creates a new X3 encoder.
 func NewX3Encoder() *X3Encoder {
+	return NewX3EncoderWithSequencer(NewSequencer(0), "", "")
+}
+
+func NewX3EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X3Encoder {
+	if sequencer == nil {
+		sequencer = NewSequencer(0)
+	}
 	return &X3Encoder{
 		attrBuilder: NewAttributeBuilder(),
+		sequencer:   sequencer,
+		domainID:    domainID,
+		nfID:        nfID,
 		bufPool: sync.Pool{
 			New: func() interface{} {
 				// Pre-allocate buffer for typical RTP packet + PDU overhead
@@ -88,7 +131,9 @@ func (e *X3Encoder) EncodeCC(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, err
 	pdu := NewX3RTPPDU(xid, correlationID)
 
 	// Add standard conditional attributes (timestamp, sequence number).
-	e.addCommonAttributes(pdu, pkt)
+	if err := e.addCommonAttributes(pdu, pkt); err != nil {
+		return nil, err
+	}
 
 	// Add network layer attributes (5-tuple).
 	e.addNetworkAttributes(pdu, pkt)
@@ -130,7 +175,9 @@ func (e *X3Encoder) EncodeCCWithPayload(pkt *types.PacketDisplay, xid uuid.UUID,
 	correlationID := e.generateCorrelationID(voip.SSRC, voip.CallID)
 	pdu := NewX3RTPPDU(xid, correlationID)
 
-	e.addCommonAttributes(pdu, pkt)
+	if err := e.addCommonAttributes(pdu, pkt); err != nil {
+		return nil, err
+	}
 	e.addNetworkAttributes(pdu, pkt)
 	pdu.SetPayload(payload)
 
@@ -169,13 +216,29 @@ func (e *X3Encoder) generateCorrelationID(ssrc uint32, callID string) uint64 {
 }
 
 // addCommonAttributes adds standard attributes to the PDU.
-func (e *X3Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) {
+func (e *X3Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) error {
 	// Timestamp from packet capture
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
 
-	// Sequence number (monotonically increasing)
-	seq := e.seqNum.Add(1)
+	if e.domainID != "" {
+		pdu.AddAttribute(e.attrBuilder.DomainID(e.domainID))
+	}
+	if e.nfID != "" {
+		pdu.AddAttribute(e.attrBuilder.NFID(e.nfID))
+	}
+	if pkt.NodeID != "" {
+		pdu.AddAttribute(e.attrBuilder.IPID(pkt.NodeID))
+	}
+	seq, err := e.sequencer.Next(SequenceContext{
+		PDUType: PDUTypeX3, XID: pdu.Header.XID, DomainID: e.domainID,
+		NFID: e.nfID, IPID: pkt.NodeID, CorrelationID: pdu.Header.CorrelationID,
+	})
+	if err != nil {
+		return err
+	}
+	e.lastSeq.Store(seq)
 	pdu.AddAttribute(e.attrBuilder.SequenceNumber(seq))
+	return nil
 }
 
 // addNetworkAttributes adds network layer attributes to the PDU.
@@ -215,7 +278,7 @@ func (e *X3Encoder) addNetworkAttributes(pdu *PDU, pkt *types.PacketDisplay) {
 
 // GetSequenceNumber returns the current sequence number (for testing/debugging).
 func (e *X3Encoder) GetSequenceNumber() uint32 {
-	return e.seqNum.Load()
+	return e.lastSeq.Load()
 }
 
 // EncodeCCBatch encodes multiple RTP packets efficiently.

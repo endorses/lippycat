@@ -14,6 +14,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
@@ -61,7 +64,9 @@ const (
 	DefaultKeepAliveInterval = 5 * time.Second
 
 	// DefaultKeepAliveCount is the number of failed probes before disconnect.
-	DefaultKeepAliveCount = 3
+	DefaultKeepAliveCount             = 3
+	DefaultApplicationKeepaliveTimeP1 = 60 * time.Second
+	DefaultApplicationKeepaliveTimeP2 = 180 * time.Second
 )
 
 // Errors returned by the destination manager.
@@ -89,6 +94,7 @@ var (
 
 	// ErrCertificatePinningFailed indicates the server certificate doesn't match pinned fingerprints.
 	ErrCertificatePinningFailed = errors.New("certificate pinning failed: server certificate fingerprint not in pinned list")
+	ErrInvalidKeepaliveTimer    = errors.New("enabled X2/X3 keepalive timers must be at least one second")
 )
 
 // DestinationConfig holds configuration for the destination manager.
@@ -125,6 +131,12 @@ type DestinationConfig struct {
 
 	// BackoffMultiplier is the multiplier for exponential backoff.
 	BackoffMultiplier float64
+	// BackoffJitter is the bounded fractional reconnect jitter (0..1).
+	BackoffJitter float64
+
+	// SuccessfulWritesBeforeBackoffReset avoids resetting reconnect backoff on
+	// connections that immediately fail again. Defaults to one completed write.
+	SuccessfulWritesBeforeBackoffReset int
 
 	// MaxPoolSize is the maximum number of connections per destination.
 	MaxPoolSize int
@@ -137,20 +149,36 @@ type DestinationConfig struct {
 
 	// KeepAliveCount is the number of failed probes before disconnect.
 	KeepAliveCount int
+
+	X2KeepaliveEnabled bool
+	X2KeepaliveTimeP1  time.Duration
+	X2KeepaliveTimeP2  time.Duration
+	X3KeepaliveEnabled bool
+	X3KeepaliveTimeP1  time.Duration
+	X3KeepaliveTimeP2  time.Duration
+	// DeliveryFault is invoked after TIME_P2 forces a disconnect. The LI
+	// manager wires this to the X1 delivery-error reporting path.
+	DeliveryFault func(did uuid.UUID, err error)
 }
 
 // DefaultConfig returns a DestinationConfig with default values.
 func DefaultConfig() DestinationConfig {
 	return DestinationConfig{
-		DialTimeout:       DefaultDialTimeout,
-		WriteTimeout:      DefaultWriteTimeout,
-		InitialBackoff:    DefaultInitialBackoff,
-		MaxBackoff:        DefaultMaxBackoff,
-		BackoffMultiplier: DefaultBackoffMultiplier,
-		MaxPoolSize:       DefaultMaxPoolSize,
-		KeepAliveIdle:     DefaultKeepAliveIdle,
-		KeepAliveInterval: DefaultKeepAliveInterval,
-		KeepAliveCount:    DefaultKeepAliveCount,
+		DialTimeout:                        DefaultDialTimeout,
+		WriteTimeout:                       DefaultWriteTimeout,
+		InitialBackoff:                     DefaultInitialBackoff,
+		MaxBackoff:                         DefaultMaxBackoff,
+		BackoffMultiplier:                  DefaultBackoffMultiplier,
+		BackoffJitter:                      0.20,
+		SuccessfulWritesBeforeBackoffReset: 1,
+		MaxPoolSize:                        DefaultMaxPoolSize,
+		KeepAliveIdle:                      DefaultKeepAliveIdle,
+		KeepAliveInterval:                  DefaultKeepAliveInterval,
+		KeepAliveCount:                     DefaultKeepAliveCount,
+		X2KeepaliveTimeP1:                  DefaultApplicationKeepaliveTimeP1,
+		X2KeepaliveTimeP2:                  DefaultApplicationKeepaliveTimeP2,
+		X3KeepaliveTimeP1:                  DefaultApplicationKeepaliveTimeP1,
+		X3KeepaliveTimeP2:                  DefaultApplicationKeepaliveTimeP2,
 	}
 }
 
@@ -168,13 +196,16 @@ type destinationState struct {
 	state int32
 
 	// backoff is the current backoff duration for reconnection.
-	backoff time.Duration
+	backoff          time.Duration
+	successfulWrites int
 
 	// lastError is the most recent connection error.
 	lastError error
 
 	// lastConnectAttempt is the time of the last connection attempt.
 	lastConnectAttempt time.Time
+	lastFailureLog     time.Time
+	failuresSinceLog   uint64
 
 	// reconnectTimer triggers reconnection attempts.
 	reconnectTimer *time.Timer
@@ -212,6 +243,35 @@ type DestinationStats struct {
 
 	// WriteErrors is the number of write errors.
 	WriteErrors uint64
+	X2Keepalive InterfaceKeepaliveStats
+	X3Keepalive InterfaceKeepaliveStats
+}
+
+type InterfaceKeepaliveStats struct {
+	Enabled         bool
+	TimeP1          time.Duration
+	TimeP2          time.Duration
+	LastSequence    uint32
+	LastSent        time.Time
+	LastValidACK    time.Time
+	ACKAge          time.Duration
+	Timeouts        uint64
+	ReconnectReason string
+}
+
+type connectionRuntime struct {
+	writeMu    sync.Mutex
+	mu         sync.Mutex
+	interfaces map[PDUType]*interfaceKeepaliveState
+}
+
+type interfaceKeepaliveState struct {
+	enabled           bool
+	timeP1, timeP2    time.Duration
+	next              uint32
+	outstanding       map[uint32]time.Time
+	lastSequence      uint32
+	lastSent, lastACK time.Time
 }
 
 // connPool manages a pool of TLS connections to a destination.
@@ -349,7 +409,8 @@ type Manager struct {
 	wg sync.WaitGroup
 
 	// shuttingDown indicates shutdown is in progress.
-	shuttingDown atomic.Bool
+	shuttingDown      atomic.Bool
+	connectionRuntime sync.Map // *tls.Conn -> *connectionRuntime
 }
 
 // NewManager creates a new destination manager.
@@ -374,6 +435,12 @@ func NewManager(config DestinationConfig) (*Manager, error) {
 	if config.BackoffMultiplier <= 1 {
 		config.BackoffMultiplier = defaults.BackoffMultiplier
 	}
+	if config.BackoffJitter <= 0 || config.BackoffJitter > 1 {
+		config.BackoffJitter = defaults.BackoffJitter
+	}
+	if config.SuccessfulWritesBeforeBackoffReset <= 0 {
+		config.SuccessfulWritesBeforeBackoffReset = defaults.SuccessfulWritesBeforeBackoffReset
+	}
 	if config.MaxPoolSize <= 0 {
 		config.MaxPoolSize = defaults.MaxPoolSize
 	}
@@ -385,6 +452,22 @@ func NewManager(config DestinationConfig) (*Manager, error) {
 	}
 	if config.KeepAliveCount <= 0 {
 		config.KeepAliveCount = defaults.KeepAliveCount
+	}
+	if config.X2KeepaliveTimeP1 == 0 {
+		config.X2KeepaliveTimeP1 = defaults.X2KeepaliveTimeP1
+	}
+	if config.X2KeepaliveTimeP2 == 0 {
+		config.X2KeepaliveTimeP2 = defaults.X2KeepaliveTimeP2
+	}
+	if config.X3KeepaliveTimeP1 == 0 {
+		config.X3KeepaliveTimeP1 = defaults.X3KeepaliveTimeP1
+	}
+	if config.X3KeepaliveTimeP2 == 0 {
+		config.X3KeepaliveTimeP2 = defaults.X3KeepaliveTimeP2
+	}
+	if (config.X2KeepaliveEnabled && (config.X2KeepaliveTimeP1 < time.Second || config.X2KeepaliveTimeP2 < time.Second)) ||
+		(config.X3KeepaliveEnabled && (config.X3KeepaliveTimeP1 < time.Second || config.X3KeepaliveTimeP2 < time.Second)) {
+		return nil, ErrInvalidKeepaliveTimer
 	}
 	if config.InitialBackoff > config.MaxBackoff {
 		return nil, fmt.Errorf("initial reconnect backoff %s exceeds maximum %s",
@@ -535,6 +618,10 @@ func (m *Manager) AddDestination(dest *li.Destination) error {
 		backoff:     m.config.InitialBackoff,
 		connections: make(map[*tls.Conn]struct{}),
 		generation:  1,
+		stats: DestinationStats{
+			X2Keepalive: InterfaceKeepaliveStats{Enabled: m.config.X2KeepaliveEnabled, TimeP1: m.config.X2KeepaliveTimeP1, TimeP2: m.config.X2KeepaliveTimeP2},
+			X3Keepalive: InterfaceKeepaliveStats{Enabled: m.config.X3KeepaliveEnabled, TimeP1: m.config.X3KeepaliveTimeP1, TimeP2: m.config.X3KeepaliveTimeP2},
+		},
 	}
 
 	m.destinations[dest.DID] = state
@@ -734,6 +821,7 @@ func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
 		return
 	}
 	delete(state.connections, conn)
+	m.connectionRuntime.Delete(conn)
 	state.stats.Disconnects++
 	remaining := len(state.connections)
 	pool := state.pool
@@ -775,7 +863,14 @@ func (m *Manager) Stats(did uuid.UUID) (DestinationStats, error) {
 
 	state.mu.RLock()
 	defer state.mu.RUnlock()
-	return state.stats, nil
+	stats := state.stats
+	if !stats.X2Keepalive.LastValidACK.IsZero() {
+		stats.X2Keepalive.ACKAge = time.Since(stats.X2Keepalive.LastValidACK)
+	}
+	if !stats.X3Keepalive.LastValidACK.IsZero() {
+		stats.X3Keepalive.ACKAge = time.Since(stats.X3Keepalive.LastValidACK)
+	}
+	return stats, nil
 }
 
 // AllStats returns statistics for all destinations.
@@ -841,13 +936,22 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 		state.mu.Lock()
 		state.stats.ConnectFailures++
 		state.lastError = err
+		state.failuresSinceLog++
+		failures := state.failuresSinceLog
+		shouldLog := state.lastFailureLog.IsZero() || time.Since(state.lastFailureLog) >= 30*time.Second
+		if shouldLog {
+			state.lastFailureLog = time.Now()
+			state.failuresSinceLog = 0
+		}
+		backoff := state.backoff
 		state.mu.Unlock()
 
-		logger.Warn("destination connection failed",
-			"did", did,
-			"error", err,
-			"backoff", state.backoff,
-		)
+		if shouldLog {
+			logger.Warn("destination connection failed",
+				"did", did, "error", err, "backoff", backoff,
+				"failures_since_last_log", failures,
+			)
+		}
 
 		m.scheduleReconnect(did, state)
 		return
@@ -869,7 +973,7 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 
 	state.mu.Lock()
 	state.stats.ConnectSuccesses++
-	state.backoff = m.config.InitialBackoff // Reset backoff on success.
+	state.successfulWrites = 0
 	state.lastError = nil
 	dest := state.dest
 	state.mu.Unlock()
@@ -985,20 +1089,26 @@ func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn) {
 	}
 	state.connections[conn] = struct{}{}
 	state.mu.Unlock()
+	runtime := &connectionRuntime{interfaces: map[PDUType]*interfaceKeepaliveState{
+		PDUTypeX2: {enabled: m.config.X2KeepaliveEnabled, timeP1: m.config.X2KeepaliveTimeP1, timeP2: m.config.X2KeepaliveTimeP2, outstanding: make(map[uint32]time.Time)},
+		PDUTypeX3: {enabled: m.config.X3KeepaliveEnabled, timeP1: m.config.X3KeepaliveTimeP1, timeP2: m.config.X3KeepaliveTimeP2, outstanding: make(map[uint32]time.Time)},
+	}}
+	m.connectionRuntime.Store(conn, runtime)
+	m.updateKeepaliveStatsForState(state, PDUTypeX2, runtime.interfaces[PDUTypeX2], "")
+	m.updateKeepaliveStatsForState(state, PDUTypeX3, runtime.interfaces[PDUTypeX3], "")
 }
 
-// watchConnection detects peer EOF while the unidirectional X2/X3 stream is
-// otherwise idle.
+// watchConnection runs the framed inbound reader and application keepalive
+// timers. Reads are never discarded: only valid ACKs for an outstanding
+// sequence refresh liveness.
 func (m *Manager) watchConnection(did uuid.UUID, conn *tls.Conn) {
-	m.wg.Add(1)
+	m.wg.Add(2)
 	go func() {
 		defer m.wg.Done()
-		buf := make([]byte, 1)
 		for {
-			_, err := conn.Read(buf)
+			pdu, err := x2x3.ReadPDU(conn)
 			if err == nil {
-				// X2/X3 delivery is unidirectional. Ignore unexpected inbound
-				// bytes but continue watching for peer closure.
+				m.handleInboundPDU(did, conn, pdu)
 				continue
 			}
 			if !m.shuttingDown.Load() {
@@ -1011,6 +1121,165 @@ func (m *Manager) watchConnection(did uuid.UUID, conn *tls.Conn) {
 			return
 		}
 	}()
+	go m.keepaliveLoop(did, conn)
+}
+
+func (m *Manager) handleInboundPDU(did uuid.UUID, conn *tls.Conn, pdu *x2x3.PDU) {
+	if pdu.Header.Type != x2x3.PDUTypeKeepaliveAck {
+		return
+	}
+	seq, err := pdu.KeepaliveSequence()
+	if err != nil {
+		logger.Warn("invalid MDF keepalive acknowledgement", "did", did, "error", err)
+		return
+	}
+	value, ok := m.connectionRuntime.Load(conn)
+	if !ok {
+		return
+	}
+	runtime := value.(*connectionRuntime)
+	runtime.mu.Lock()
+	now := time.Now()
+	for iface, state := range runtime.interfaces {
+		if _, exists := state.outstanding[seq]; !exists {
+			continue
+		}
+		delete(state.outstanding, seq)
+		state.lastACK = now
+		m.updateKeepaliveStats(did, iface, state, "")
+		// One ACK acknowledges one Keepalive. X2 and X3 sequences are
+		// independent and may legitimately have the same numeric value.
+		break
+	}
+	runtime.mu.Unlock()
+}
+
+func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
+	defer m.wg.Done()
+	ticker := time.NewTicker(time.Second / 4)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopChan:
+			return
+		case now := <-ticker.C:
+			value, ok := m.connectionRuntime.Load(conn)
+			if !ok {
+				return
+			}
+			runtime := value.(*connectionRuntime)
+			var frames [][]byte
+			var timeoutErr error
+			runtime.mu.Lock()
+			for iface, state := range runtime.interfaces {
+				if !state.enabled {
+					continue
+				}
+				for _, sent := range state.outstanding {
+					if now.Sub(sent) >= state.timeP2 {
+						timeoutErr = fmt.Errorf("interface %d keepalive acknowledgement timeout after %s", iface, state.timeP2)
+						break
+					}
+				}
+				if timeoutErr != nil {
+					m.updateKeepaliveStats(did, iface, state, timeoutErr.Error())
+					break
+				}
+				if state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1 {
+					seq := state.next
+					state.next++
+					pdu := x2x3.NewKeepalivePDUWithSequence(seq)
+					frame, err := pdu.MarshalBinary()
+					if err == nil {
+						frames = append(frames, frame)
+						state.outstanding[seq] = now
+						state.lastSequence = seq
+						state.lastSent = now
+						m.updateKeepaliveStats(did, iface, state, "")
+					}
+				}
+			}
+			runtime.mu.Unlock()
+			if timeoutErr != nil {
+				if m.config.DeliveryFault != nil {
+					m.config.DeliveryFault(did, timeoutErr)
+				}
+				m.InvalidateConnection(did, conn)
+				return
+			}
+			for _, frame := range frames {
+				if err := m.writeFrame(conn, frame, m.config.WriteTimeout); err != nil {
+					m.InvalidateConnection(did, conn)
+					return
+				}
+			}
+		}
+	}
+}
+
+func (m *Manager) updateKeepaliveStats(did uuid.UUID, iface PDUType, keepalive *interfaceKeepaliveState, reason string) {
+	m.mu.RLock()
+	state, ok := m.destinations[did]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	m.updateKeepaliveStatsForState(state, iface, keepalive, reason)
+}
+
+func (m *Manager) updateKeepaliveStatsForState(state *destinationState, iface PDUType, keepalive *interfaceKeepaliveState, reason string) {
+	stats := InterfaceKeepaliveStats{Enabled: keepalive.enabled, TimeP1: keepalive.timeP1, TimeP2: keepalive.timeP2, LastSequence: keepalive.lastSequence, LastSent: keepalive.lastSent, LastValidACK: keepalive.lastACK, ReconnectReason: reason}
+	if !keepalive.lastACK.IsZero() {
+		stats.ACKAge = time.Since(keepalive.lastACK)
+	}
+	state.mu.Lock()
+	if iface == PDUTypeX2 {
+		stats.Timeouts = state.stats.X2Keepalive.Timeouts
+		if reason == "" {
+			stats.ReconnectReason = state.stats.X2Keepalive.ReconnectReason
+		}
+		if reason != "" {
+			stats.Timeouts++
+		}
+		state.stats.X2Keepalive = stats
+	} else {
+		stats.Timeouts = state.stats.X3Keepalive.Timeouts
+		if reason == "" {
+			stats.ReconnectReason = state.stats.X3Keepalive.ReconnectReason
+		}
+		if reason != "" {
+			stats.Timeouts++
+		}
+		state.stats.X3Keepalive = stats
+	}
+	state.mu.Unlock()
+}
+
+func (m *Manager) writeFrame(conn *tls.Conn, data []byte, timeout time.Duration) error {
+	value, ok := m.connectionRuntime.Load(conn)
+	if !ok {
+		return ErrNotConnected
+	}
+	runtime := value.(*connectionRuntime)
+	runtime.writeMu.Lock()
+	defer runtime.writeMu.Unlock()
+	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	n, err := conn.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	clearErr := conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		return err
+	}
+	return clearErr
+}
+
+// WritePDU serializes content with control frames on the TLS connection.
+func (m *Manager) WritePDU(conn *tls.Conn, data []byte, timeout time.Duration) error {
+	return m.writeFrame(conn, data, timeout)
 }
 
 // scheduleReconnect schedules a reconnection attempt with exponential backoff.
@@ -1021,6 +1290,11 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 
 	state.mu.Lock()
 	backoff := state.backoff
+	wait := backoff
+	if m.config.BackoffJitter > 0 {
+		factor := 1 - m.config.BackoffJitter + rand.Float64()*(2*m.config.BackoffJitter)
+		wait = time.Duration(float64(backoff) * factor)
+	}
 	// Increase backoff for next attempt.
 	state.backoff = time.Duration(float64(state.backoff) * m.config.BackoffMultiplier)
 	if state.backoff > m.config.MaxBackoff {
@@ -1032,7 +1306,7 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 		state.reconnectTimer.Stop()
 	}
 
-	state.reconnectTimer = time.AfterFunc(backoff, func() {
+	state.reconnectTimer = time.AfterFunc(wait, func() {
 		if !m.shuttingDown.Load() {
 			m.wg.Add(1)
 			go m.connectDestination(did)
@@ -1042,7 +1316,7 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 
 	logger.Debug("reconnect scheduled",
 		"did", did,
-		"backoff", backoff,
+		"backoff", wait,
 	)
 }
 
@@ -1059,6 +1333,7 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 	for conn := range state.connections {
 		connections = append(connections, conn)
 		delete(state.connections, conn)
+		m.connectionRuntime.Delete(conn)
 	}
 	pool := state.pool
 	state.mu.Unlock()
@@ -1085,6 +1360,15 @@ func (m *Manager) RecordBytesSent(did uuid.UUID, bytes uint64) {
 		state.mu.Lock()
 		state.stats.BytesSent += bytes
 		state.stats.PDUsSent++
+		state.successfulWrites++
+		threshold := m.config.SuccessfulWritesBeforeBackoffReset
+		if threshold <= 0 {
+			threshold = 1
+		}
+		if state.successfulWrites >= threshold {
+			state.backoff = m.config.InitialBackoff
+			state.successfulWrites = 0
+		}
 		state.mu.Unlock()
 	}
 }

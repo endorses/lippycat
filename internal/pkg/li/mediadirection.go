@@ -125,6 +125,17 @@ type MediaDirectionResolver struct {
 	stop     chan struct{}
 }
 
+// ClearXID removes all call and SSRC state associated with a task lifecycle.
+func (r *MediaDirectionResolver) ClearXID(xid uuid.UUID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key := range r.calls {
+		if key.xid == xid {
+			delete(r.calls, key)
+		}
+	}
+}
+
 // NewMediaDirectionResolver creates a resolver and starts its eviction sweeper
 // (unless cfg.SweepInterval is negative). Call Close to release it.
 func NewMediaDirectionResolver(cfg MediaDirectionConfig) *MediaDirectionResolver {

@@ -29,6 +29,7 @@ func TestX2Encoder_EncodeIRI_SessionBegin(t *testing.T) {
 		SrcPort:   "5060",
 		DstPort:   "5060",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID:  "abc123@192.168.1.100",
 			Method:  "INVITE",
@@ -62,8 +63,8 @@ func TestX2Encoder_EncodeIRI_SessionBegin(t *testing.T) {
 	require.NotNil(t, FindAttribute(pdu.Attributes, AttrSourcePort))
 	require.NotNil(t, FindAttribute(pdu.Attributes, AttrDestPort))
 
-	// Verify sequence number incremented
-	assert.Equal(t, uint32(1), encoder.GetSequenceNumber())
+	// The first sequence number in an ETSI context is zero.
+	assert.Equal(t, uint32(0), encoder.GetSequenceNumber())
 }
 
 func TestX2Encoder_EncodeIRI_SessionAnswer(t *testing.T) {
@@ -77,6 +78,7 @@ func TestX2Encoder_EncodeIRI_SessionAnswer(t *testing.T) {
 		SrcPort:   "5060",
 		DstPort:   "5060",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID:  "abc123@192.168.1.100",
 			Status:  200,
@@ -108,6 +110,7 @@ func TestX2Encoder_EncodeIRI_SessionEnd(t *testing.T) {
 		SrcPort:   "5060",
 		DstPort:   "5060",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID:  "abc123@192.168.1.100",
 			Method:  "BYE",
@@ -138,6 +141,7 @@ func TestX2Encoder_EncodeIRI_SessionAttempt_Cancel(t *testing.T) {
 		SrcPort:   "5060",
 		DstPort:   "5060",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID:  "abc123@192.168.1.100",
 			Method:  "CANCEL",
@@ -167,6 +171,7 @@ func TestX2Encoder_EncodeIRI_SessionAttempt_Failure(t *testing.T) {
 		SrcPort:   "5060",
 		DstPort:   "5060",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID:  "abc123@192.168.1.100",
 			Status:  486, // Busy Here
@@ -197,6 +202,7 @@ func TestX2Encoder_EncodeIRI_Registration(t *testing.T) {
 		SrcPort:   "5060",
 		DstPort:   "5060",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "reg123@192.168.1.100",
 			Method: "REGISTER",
@@ -239,6 +245,7 @@ func TestX2Encoder_EncodeIRI_NoCallID(t *testing.T) {
 		SrcIP:     "192.168.1.100",
 		DstIP:     "192.168.1.200",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			Method: "INVITE",
 			// Missing CallID
@@ -260,6 +267,7 @@ func TestX2Encoder_EncodeIRI_ProvisionalResponse(t *testing.T) {
 		SrcIP:     "192.168.1.200",
 		DstIP:     "192.168.1.100",
 		Protocol:  "SIP",
+		RawData:   []byte("OPTIONS sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "abc123@192.168.1.100",
 			Status: 180, // Ringing
@@ -284,6 +292,7 @@ func TestX2Encoder_CorrelationID_Deterministic(t *testing.T) {
 		Timestamp: time.Now(),
 		SrcIP:     "192.168.1.100",
 		DstIP:     "192.168.1.200",
+		RawData:   []byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: callID,
 			Method: "INVITE",
@@ -294,6 +303,7 @@ func TestX2Encoder_CorrelationID_Deterministic(t *testing.T) {
 		Timestamp: time.Now(),
 		SrcIP:     "192.168.1.200",
 		DstIP:     "192.168.1.100",
+		RawData:   []byte("SIP/2.0 200 OK\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: callID,
 			Status: 200,
@@ -321,6 +331,7 @@ func TestX2Encoder_SequenceNumber_Monotonic(t *testing.T) {
 		Timestamp: time.Now(),
 		SrcIP:     "192.168.1.100",
 		DstIP:     "192.168.1.200",
+		RawData:   []byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "test@192.168.1.100",
 			Method: "INVITE",
@@ -328,7 +339,7 @@ func TestX2Encoder_SequenceNumber_Monotonic(t *testing.T) {
 	}
 
 	// Encode multiple IRIs
-	for i := 1; i <= 10; i++ {
+	for i := 0; i < 10; i++ {
 		_, err := encoder.EncodeIRI(pkt, xid)
 		require.NoError(t, err)
 		assert.Equal(t, uint32(i), encoder.GetSequenceNumber())
@@ -345,6 +356,7 @@ func TestX2Encoder_NetworkAttributes_IPv4(t *testing.T) {
 		DstIP:     "192.168.1.200",
 		SrcPort:   "5060",
 		DstPort:   "5061",
+		RawData:   []byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "test@192.168.1.100",
 			Method: "INVITE",
@@ -386,6 +398,7 @@ func TestX2Encoder_NetworkAttributes_IPv6(t *testing.T) {
 		DstIP:     "2001:db8::2",
 		SrcPort:   "5060",
 		DstPort:   "5060",
+		RawData:   []byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "test@example.com",
 			Method: "INVITE",
@@ -417,6 +430,7 @@ func TestX2Encoder_PDU_Serialization(t *testing.T) {
 		DstIP:     "192.168.1.200",
 		SrcPort:   "5060",
 		DstPort:   "5060",
+		RawData:   []byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "abc123@192.168.1.100",
 			Method: "INVITE",
@@ -453,6 +467,7 @@ func TestX2Encoder_DirectMethods(t *testing.T) {
 		Timestamp: time.Now(),
 		SrcIP:     "192.168.1.100",
 		DstIP:     "192.168.1.200",
+		RawData:   []byte("INVITE sip:test@example.com SIP/2.0\r\n\r\n"),
 		VoIPData: &types.VoIPMetadata{
 			CallID: "test@192.168.1.100",
 			Method: "INVITE",

@@ -113,6 +113,12 @@ func (b *AttributeBuilder) SequenceNumber(seq uint32) TLVAttribute {
 	return b.encoder.EncodeUint32(AttrSequenceNumber, seq)
 }
 
+// DomainID creates the ETSI X2/X3 Domain ID conditional attribute. This is
+// distinct from the X1 destination DId.
+func (b *AttributeBuilder) DomainID(id string) TLVAttribute {
+	return TLVAttribute{Type: AttrDomainID, Value: []byte(id)}
+}
+
 // SourceIPv4 creates a source IPv4 address attribute.
 func (b *AttributeBuilder) SourceIPv4(addr netip.Addr) (TLVAttribute, error) {
 	if !addr.Is4() {

@@ -85,6 +85,7 @@ type Registry struct {
 	destinations map[uuid.UUID]*Destination
 	auditHistory map[uuid.UUID][]InterceptTask
 	rollbackTask map[uuid.UUID]*InterceptTask
+	generations  map[uuid.UUID]uint64
 
 	// onDeactivation is called when a task is implicitly deactivated.
 	onDeactivation DeactivationCallback
@@ -105,6 +106,7 @@ func NewRegistry(deactivationCallback DeactivationCallback) *Registry {
 		destinations:   make(map[uuid.UUID]*Destination),
 		auditHistory:   make(map[uuid.UUID][]InterceptTask),
 		rollbackTask:   make(map[uuid.UUID]*InterceptTask),
+		generations:    make(map[uuid.UUID]uint64),
 		onDeactivation: deactivationCallback,
 		stopChan:       make(chan struct{}),
 	}
@@ -243,6 +245,8 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	// Create a copy to store
 	taskCopy := *task
 	taskCopy.ActivatedAt = time.Now()
+	r.generations[task.XID]++
+	taskCopy.ActivationGeneration = r.generations[task.XID]
 
 	// Determine initial status
 	if taskCopy.ShouldStart() {
@@ -253,6 +257,53 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 
 	r.tasks[task.XID] = &taskCopy
 	return nil
+}
+
+// restorePendingTask restores durable state without installing enforcement.
+func (r *Registry) restorePendingTask(task *InterceptTask) error {
+	if err := r.validateTask(task); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if task.Status != TaskStatusPending {
+		return fmt.Errorf("restore pending task %s: status is %s", task.XID, task.Status)
+	}
+	if _, exists := r.tasks[task.XID]; exists {
+		return fmt.Errorf("%w: XID %s", ErrTaskAlreadyExists, task.XID)
+	}
+	for _, did := range task.DestinationIDs {
+		if _, ok := r.destinations[did]; !ok {
+			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
+		}
+	}
+	copyTask := *task
+	copyTask.Targets = append([]TargetIdentity(nil), task.Targets...)
+	copyTask.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	r.tasks[task.XID] = &copyTask
+	if r.generations[task.XID] < task.ActivationGeneration {
+		r.generations[task.XID] = task.ActivationGeneration
+	}
+	return nil
+}
+
+func (r *Registry) restoreDestination(dest *Destination) error {
+	if dest == nil {
+		return fmt.Errorf("restore destination: nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copyDest := *dest
+	r.destinations[dest.DID] = &copyDest
+	return nil
+}
+
+func (r *Registry) seedGeneration(xid uuid.UUID, generation uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if generation > r.generations[xid] {
+		r.generations[xid] = generation
+	}
 }
 
 // rollbackActivation removes precisely the registry entry created by an

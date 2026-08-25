@@ -91,6 +91,9 @@ type ManagerConfig struct {
 	// LifecycleInterval controls pending promotion and tombstone maintenance.
 	// Zero uses 100 milliseconds.
 	LifecycleInterval time.Duration
+
+	// StateFile enables atomic local lifecycle persistence. Empty disables it.
+	StateFile string
 }
 
 // defaultReconcileOrphanPolls trades one reconcile interval of over-collection
@@ -144,8 +147,9 @@ type Manager struct {
 
 	// orphanStreak counts consecutive polls in which a local task was absent
 	// from the ADMF response.
-	orphanMu     sync.Mutex
-	orphanStreak map[uuid.UUID]int
+	orphanMu        sync.Mutex
+	orphanStreak    map[uuid.UUID]int
+	persistedActive map[uuid.UUID]*InterceptTask
 
 	// stopChan signals shutdown.
 	stopChan chan struct{}
@@ -178,10 +182,11 @@ type ManagerStats struct {
 // (e.g., EndTime expiration). This is used to notify ADMF via X1.
 func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback) *Manager {
 	m := &Manager{
-		config:       config,
-		filters:      NewFilterManager(config.FilterPusher),
-		stopChan:     make(chan struct{}),
-		orphanStreak: make(map[uuid.UUID]int),
+		config:          config,
+		filters:         NewFilterManager(config.FilterPusher),
+		stopChan:        make(chan struct{}),
+		orphanStreak:    make(map[uuid.UUID]int),
+		persistedActive: make(map[uuid.UUID]*InterceptTask),
 	}
 
 	// Create X1 client if ADMF endpoint is configured.
@@ -287,6 +292,14 @@ func (m *Manager) Start() error {
 		logger.Info("LI Manager disabled")
 		return nil
 	}
+	if err := m.restorePersistedState(); err != nil {
+		return fmt.Errorf("restore LI state (interception remains disarmed): %w", err)
+	}
+	// Verify the configured store is writable before starting any listener or
+	// lifecycle goroutine. A persistence fault must fail closed.
+	if err := m.persistState(); err != nil {
+		return fmt.Errorf("initialize LI state persistence (interception remains disarmed): %w", err)
+	}
 
 	// Start the registry's background task management
 	m.registry.Start()
@@ -356,7 +369,6 @@ func (m *Manager) Start() error {
 		"x1_listen", m.config.X1ListenAddr,
 		"admf_endpoint", m.config.ADMFEndpoint,
 	)
-
 	return nil
 }
 
@@ -421,6 +433,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 
 	var destCount, taskCount int
 	var destErrors, taskErrors int
+	snapshot := newADMFSnapshot()
 
 	// Register destinations first (tasks reference destinations by DID).
 	if resp.ListOfDestinationResponseDetails != nil {
@@ -431,11 +444,21 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 					"error", convErr,
 				)
 				destErrors++
+				snapshot.destinationConvErrors++
 				continue
 			}
+			snapshot.destinations[dest.DID] = true
 			if createErr := m.registry.CreateDestination(dest); createErr != nil {
 				// Destination may already exist if sync is called multiple times.
-				if !errors.Is(createErr, ErrDestinationAlreadyExists) {
+				if errors.Is(createErr, ErrDestinationAlreadyExists) {
+					current, getErr := m.registry.GetDestination(dest.DID)
+					if getErr == nil {
+						dest.CreatedAt = current.CreatedAt
+						if modifyErr := m.registry.ModifyDestination(dest.DID, dest); modifyErr != nil {
+							destErrors++
+						}
+					}
+				} else {
 					logger.Warn("Failed to register ADMF destination, skipping",
 						"did", dest.DID,
 						"error", createErr,
@@ -449,7 +472,6 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	}
 
 	// Activate tasks.
-	snapshot := newADMFSnapshot()
 	if resp.ListOfTaskResponseDetails != nil {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
 			task, convErr := TaskResponseDetailsToInterceptTask(td)
@@ -462,6 +484,13 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 				continue
 			}
 			snapshot.tasks[task.XID] = true
+			if restored := m.persistedActive[task.XID]; restored != nil {
+				generation := restored.ActivationGeneration
+				if generation > 0 {
+					generation-- // ActivateTask increments to the confirmed generation.
+				}
+				m.registry.seedGeneration(task.XID, generation)
+			}
 			if activateErr := m.ActivateTask(task); activateErr != nil {
 				// Task may already exist if sync is called multiple times.
 				if !errors.Is(activateErr, ErrTaskAlreadyExists) {
@@ -481,6 +510,7 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 	// ADMF ever authorised survive on disk and be re-armed every restart, so
 	// drop whatever the ADMF did not return.
 	removedTasks := m.removeOrphanedTasks(snapshot, false)
+	removedDestinations := m.removeOrphanedDestinations(snapshot)
 	removedFilters := m.removeOrphanedLIFilters(snapshot)
 
 	logger.Info("ADMF state sync complete",
@@ -489,27 +519,64 @@ func (m *Manager) syncStateFromADMF(ctx context.Context) error {
 		"task_errors", taskErrors,
 		"destination_errors", destErrors,
 		"orphan_tasks_removed", removedTasks,
+		"orphan_destinations_removed", removedDestinations,
 		"orphan_filters_removed", removedFilters,
 	)
 
 	return nil
 }
 
+func (m *Manager) removeOrphanedDestinations(snapshot admfSnapshot) int {
+	if !snapshot.destinationsComplete() {
+		logger.Warn("Reconciliation: incomplete ADMF destination response, skipping removal",
+			"conversion_errors", snapshot.destinationConvErrors)
+		return 0
+	}
+	local := m.ListDestinations()
+	if len(local) > 0 && len(snapshot.destinations) == 0 {
+		logger.Warn("Reconciliation: ADMF returned no destinations while destinations exist locally, keeping them",
+			"local_destinations", len(local))
+		return 0
+	}
+	removed := 0
+	for _, dest := range local {
+		if snapshot.destinations[dest.DID] {
+			continue
+		}
+		if err := m.registry.RemoveDestination(dest.DID); err != nil {
+			logger.Error("Reconciliation: failed to remove orphan destination", "did", dest.DID, "error", err)
+			continue
+		}
+		m.mu.RLock()
+		cb := m.onDestinationRemoved
+		m.mu.RUnlock()
+		if cb != nil {
+			cb(dest.DID)
+		}
+		removed++
+	}
+	return removed
+}
+
 // admfSnapshot is one GetAllDetails response: the task XIDs it returned, plus
 // how many entries failed conversion.
 type admfSnapshot struct {
-	tasks      map[uuid.UUID]bool
-	convErrors int
+	tasks                 map[uuid.UUID]bool
+	destinations          map[uuid.UUID]bool
+	convErrors            int
+	destinationConvErrors int
 }
 
 func newADMFSnapshot() admfSnapshot {
-	return admfSnapshot{tasks: make(map[uuid.UUID]bool)}
+	return admfSnapshot{tasks: make(map[uuid.UUID]bool), destinations: make(map[uuid.UUID]bool)}
 }
 
 // complete reports whether the snapshot can be trusted to say what the ADMF
 // does NOT have. A conversion error drops an XID for reasons unrelated to the
 // ADMF's intent, so a parsing bug must never deactivate a live warrant.
 func (s admfSnapshot) complete() bool { return s.convErrors == 0 }
+
+func (s admfSnapshot) destinationsComplete() bool { return s.destinationConvErrors == 0 }
 
 // removeOrphanedTasks deactivates local tasks the ADMF no longer has, so a lost
 // DeactivateTask cannot leave an intercept running without authorisation.
@@ -753,6 +820,36 @@ func (m *Manager) reconcileWithADMF() {
 
 	// Build set of ADMF task XIDs.
 	snapshot := newADMFSnapshot()
+	if resp.ListOfDestinationResponseDetails != nil {
+		for _, dd := range resp.ListOfDestinationResponseDetails.DestinationResponseDetails {
+			dest, convErr := DestinationResponseDetailsToDestination(dd)
+			if convErr != nil {
+				snapshot.destinationConvErrors++
+				continue
+			}
+			snapshot.destinations[dest.DID] = true
+			if current, getErr := m.registry.GetDestination(dest.DID); getErr != nil {
+				if err := m.registry.CreateDestination(dest); err == nil {
+					m.mu.RLock()
+					cb := m.onDestinationCreated
+					m.mu.RUnlock()
+					if cb != nil {
+						cb(dest)
+					}
+				}
+			} else if current.Address != dest.Address || current.Port != dest.Port || current.X2Enabled != dest.X2Enabled || current.X3Enabled != dest.X3Enabled || current.ProtocolType != dest.ProtocolType || current.Description != dest.Description {
+				dest.CreatedAt = current.CreatedAt
+				if err := m.registry.ModifyDestination(dest.DID, dest); err == nil {
+					m.mu.RLock()
+					cb := m.onDestinationModified
+					m.mu.RUnlock()
+					if cb != nil {
+						cb(dest)
+					}
+				}
+			}
+		}
+	}
 	var activated int
 	if resp.ListOfTaskResponseDetails != nil {
 		for _, td := range resp.ListOfTaskResponseDetails.TaskResponseDetails {
@@ -797,11 +894,16 @@ func (m *Manager) reconcileWithADMF() {
 	// Tear down tasks the ADMF no longer has, rather than only warning: an
 	// intercept the ADMF has dropped is running without authorisation.
 	deactivated := m.removeOrphanedTasks(snapshot, true)
+	removedDestinations := m.removeOrphanedDestinations(snapshot)
+	if err := m.persistState(); err != nil {
+		logger.Error("Reconciliation: persist LI state failed", "error", err)
+	}
 
-	if activated > 0 || deactivated > 0 {
+	if activated > 0 || deactivated > 0 || removedDestinations > 0 {
 		logger.Info("ADMF reconciliation complete",
 			"activated", activated,
 			"deactivated", deactivated,
+			"destinations_removed", removedDestinations,
 			"admf_tasks", len(snapshot.tasks),
 		)
 	} else {
@@ -929,7 +1031,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 			return err
 		}
 		logger.Info("LI task registered pending", "xid", task.XID, "start_time", registered.StartTime, "end_time", registered.EndTime)
-		return nil
+		return m.persistState()
 	}
 	filterIDs, err := m.filters.CreateFiltersForTask(registered)
 	if err != nil {
@@ -947,8 +1049,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		"filters", len(filterIDs),
 		"delivery_type", task.DeliveryType.String(),
 	)
-
-	return nil
+	return m.persistState()
 }
 
 func (m *Manager) completeExpiration(task *InterceptTask) error {
@@ -960,7 +1061,7 @@ func (m *Manager) completeExpiration(task *InterceptTask) error {
 		return err
 	}
 	logger.Info("LI task expired", "xid", task.XID, "end_time", task.EndTime, "filters", len(filterIDs), "cleanup", "complete")
-	return nil
+	return m.persistState()
 }
 
 // ModifyTask updates an existing task's parameters atomically.
@@ -993,7 +1094,7 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 
 	logger.Info("LI task modified", "xid", xid)
-	return nil
+	return m.persistState()
 }
 
 // DeactivateTask removes a task from active interception.
@@ -1019,7 +1120,7 @@ func (m *Manager) deactivateTask(xid uuid.UUID) error {
 	}
 
 	logger.Info("LI task deactivated", "xid", xid)
-	return nil
+	return m.persistState()
 }
 
 func (m *Manager) runLifecycleMaintenance() {
@@ -1076,6 +1177,9 @@ func (m *Manager) promotePendingTasks() {
 		}
 		m.lifecycleMu.Unlock()
 	}
+	if err := m.persistState(); err != nil {
+		logger.Error("Persist LI lifecycle state failed", "error", err)
+	}
 }
 
 // GetTaskDetails retrieves a task by its XID.
@@ -1090,7 +1194,10 @@ func (m *Manager) GetActiveTasks() []*InterceptTask {
 
 // CreateDestination adds a new X2/X3 delivery destination.
 func (m *Manager) CreateDestination(dest *Destination) error {
-	return m.registry.CreateDestination(dest)
+	if err := m.registry.CreateDestination(dest); err != nil {
+		return err
+	}
+	return m.persistState()
 }
 
 // GetDestination retrieves a destination by its DID.
@@ -1100,12 +1207,18 @@ func (m *Manager) GetDestination(did uuid.UUID) (*Destination, error) {
 
 // RemoveDestination removes a delivery destination.
 func (m *Manager) RemoveDestination(did uuid.UUID) error {
-	return m.registry.RemoveDestination(did)
+	if err := m.registry.RemoveDestination(did); err != nil {
+		return err
+	}
+	return m.persistState()
 }
 
 // ModifyDestination updates an existing delivery destination.
 func (m *Manager) ModifyDestination(did uuid.UUID, dest *Destination) error {
-	return m.registry.ModifyDestination(did, dest)
+	if err := m.registry.ModifyDestination(did, dest); err != nil {
+		return err
+	}
+	return m.persistState()
 }
 
 // ListDestinations returns all registered destinations.
@@ -1177,8 +1290,7 @@ func (m *Manager) CreateDestinationX1(dest *x1.Destination) error {
 	if cb != nil {
 		cb(liDest)
 	}
-
-	return nil
+	return m.persistState()
 }
 
 // GetDestinationX1 retrieves a destination for X1 response.
@@ -1216,7 +1328,7 @@ func (m *Manager) RemoveDestinationX1(did uuid.UUID) error {
 	if cb != nil {
 		cb(did)
 	}
-	return nil
+	return m.persistState()
 }
 
 // ModifyDestinationX1 modifies a destination via X1 request.
@@ -1243,7 +1355,7 @@ func (m *Manager) ModifyDestinationX1(did uuid.UUID, dest *x1.Destination) error
 	if cb != nil {
 		cb(liDest)
 	}
-	return nil
+	return m.persistState()
 }
 
 // managerTaskAdapter adapts the Manager to the x1.TaskManager interface.
@@ -1543,7 +1655,10 @@ func (m *Manager) MarkTaskFailed(xid uuid.UUID, errMsg string) error {
 		)
 	}
 
-	return m.registry.MarkTaskFailed(xid, errMsg)
+	if err := m.registry.MarkTaskFailed(xid, errMsg); err != nil {
+		return err
+	}
+	return m.persistState()
 }
 
 // PurgeDeactivatedTasks removes old deactivated tasks.

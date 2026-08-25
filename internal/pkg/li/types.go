@@ -179,6 +179,10 @@ type InterceptTask struct {
 
 	// LastError contains the most recent error message (if any).
 	LastError string
+
+	// ActivationGeneration distinguishes successive activations of the same XID.
+	// It is persisted so cleanup from an older activation cannot affect a newer one.
+	ActivationGeneration uint64
 }
 
 // TargetIdentity specifies a single target to intercept.

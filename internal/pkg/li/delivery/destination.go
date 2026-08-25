@@ -190,7 +190,8 @@ type destinationState struct {
 	dest *li.Destination
 
 	// pool holds the connection pool for this destination.
-	pool *connPool
+	pool           *connPool
+	interfacePools map[PDUType]*connPool
 
 	// state is the current connection state.
 	state int32
@@ -260,9 +261,10 @@ type InterfaceKeepaliveStats struct {
 }
 
 type connectionRuntime struct {
-	writeMu    sync.Mutex
-	mu         sync.Mutex
-	interfaces map[PDUType]*interfaceKeepaliveState
+	writeMu   sync.Mutex
+	mu        sync.Mutex
+	iface     PDUType
+	keepalive *interfaceKeepaliveState
 }
 
 type interfaceKeepaliveState struct {
@@ -612,12 +614,13 @@ func (m *Manager) AddDestination(dest *li.Destination) error {
 	}
 
 	state := &destinationState{
-		dest:        dest,
-		pool:        newConnPool(m.config.MaxPoolSize),
-		state:       connStateDisconnected,
-		backoff:     m.config.InitialBackoff,
-		connections: make(map[*tls.Conn]struct{}),
-		generation:  1,
+		dest:           dest,
+		pool:           newConnPool(m.config.MaxPoolSize),
+		interfacePools: map[PDUType]*connPool{PDUTypeX2: newConnPool(m.config.MaxPoolSize), PDUTypeX3: newConnPool(m.config.MaxPoolSize)},
+		state:          connStateDisconnected,
+		backoff:        m.config.InitialBackoff,
+		connections:    make(map[*tls.Conn]struct{}),
+		generation:     1,
 		stats: DestinationStats{
 			X2Keepalive: InterfaceKeepaliveStats{Enabled: m.config.X2KeepaliveEnabled, TimeP1: m.config.X2KeepaliveTimeP1, TimeP2: m.config.X2KeepaliveTimeP2},
 			X3Keepalive: InterfaceKeepaliveStats{Enabled: m.config.X3KeepaliveEnabled, TimeP1: m.config.X3KeepaliveTimeP1, TimeP2: m.config.X3KeepaliveTimeP2},
@@ -685,6 +688,7 @@ func (m *Manager) UpdateDestination(dest *li.Destination) error {
 		m.closeDestinationLocked(dest.DID, state)
 		state.mu.Lock()
 		state.pool = newConnPool(m.config.MaxPoolSize)
+		state.interfacePools = map[PDUType]*connPool{PDUTypeX2: newConnPool(m.config.MaxPoolSize), PDUTypeX3: newConnPool(m.config.MaxPoolSize)}
 		state.backoff = m.config.InitialBackoff
 		state.mu.Unlock()
 
@@ -720,6 +724,13 @@ func (m *Manager) GetDestination(did uuid.UUID) (*li.Destination, error) {
 // The caller must call ReleaseConnection when done.
 // The context is used for connection establishment timeout and cancellation.
 func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, error) {
+	return m.GetConnectionForInterface(ctx, did, PDUTypeX2)
+}
+
+// GetConnectionForInterface acquires a transport dedicated to X2 or X3. A
+// keepalive acknowledgement is therefore associated by its TLS connection,
+// even when the two interfaces use overlapping sequence numbers.
+func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, iface PDUType) (*tls.Conn, error) {
 	if m.shuttingDown.Load() {
 		return nil, ErrShuttingDown
 	}
@@ -740,8 +751,11 @@ func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, 
 	}
 
 	state.mu.RLock()
-	pool := state.pool
+	pool := state.interfacePools[iface]
 	state.mu.RUnlock()
+	if pool == nil {
+		return nil, fmt.Errorf("unsupported delivery interface %d", iface)
+	}
 
 	// Try to get from pool.
 	if pooled := pool.get(); pooled != nil {
@@ -758,7 +772,7 @@ func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, 
 	if err != nil {
 		return nil, err
 	}
-	m.registerConnection(state, conn)
+	m.registerConnection(state, conn, iface)
 	m.watchConnection(did, conn)
 
 	return conn, nil
@@ -766,6 +780,10 @@ func (m *Manager) GetConnection(ctx context.Context, did uuid.UUID) (*tls.Conn, 
 
 // ReleaseConnection returns a connection to the pool.
 func (m *Manager) ReleaseConnection(did uuid.UUID, conn *tls.Conn) {
+	m.releaseConnection(did, conn)
+}
+
+func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	m.mu.RLock()
 	state, exists := m.destinations[did]
 	m.mu.RUnlock()
@@ -793,7 +811,12 @@ func (m *Manager) ReleaseConnection(did uuid.UUID, conn *tls.Conn) {
 		lastUsed:  time.Now(),
 	}
 
-	put := state.pool.put(pooled)
+	value, runtimeOK := m.connectionRuntime.Load(conn)
+	pool := state.pool
+	if runtimeOK {
+		pool = state.interfacePools[value.(*connectionRuntime).iface]
+	}
+	put := pool.put(pooled)
 	state.mu.RUnlock()
 	if !put {
 		if err := conn.Close(); err != nil {
@@ -804,6 +827,10 @@ func (m *Manager) ReleaseConnection(did uuid.UUID, conn *tls.Conn) {
 
 // InvalidateConnection closes a connection that encountered an error.
 func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
+	m.invalidateConnection(did, conn, true)
+}
+
+func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectDestination bool) {
 	m.mu.RLock()
 	state, exists := m.destinations[did]
 	m.mu.RUnlock()
@@ -820,11 +847,15 @@ func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
 		state.mu.Unlock()
 		return
 	}
+	value, runtimeOK := m.connectionRuntime.Load(conn)
 	delete(state.connections, conn)
 	m.connectionRuntime.Delete(conn)
 	state.stats.Disconnects++
 	remaining := len(state.connections)
 	pool := state.pool
+	if runtimeOK {
+		pool = state.interfacePools[value.(*connectionRuntime).iface]
+	}
 	state.mu.Unlock()
 	pool.remove(conn)
 
@@ -833,7 +864,7 @@ func (m *Manager) InvalidateConnection(did uuid.UUID, conn *tls.Conn) {
 	}
 
 	// Check if we need to reconnect.
-	if remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) {
+	if remaining == 0 && atomic.CompareAndSwapInt32(&state.state, connStateConnected, connStateDisconnected) && reconnectDestination {
 		m.scheduleReconnect(did, state)
 	}
 }
@@ -958,14 +989,18 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 	}
 
 	// Put the initial connection in the pool.
-	m.registerConnection(state, conn)
+	iface := PDUTypeX2
+	if !m.config.X2KeepaliveEnabled && m.config.X3KeepaliveEnabled {
+		iface = PDUTypeX3
+	}
+	m.registerConnection(state, conn, iface)
 	pooled := &pooledConn{
 		conn:      conn,
 		createdAt: time.Now(),
 		lastUsed:  time.Now(),
 	}
 	state.mu.RLock()
-	pool := state.pool
+	pool := state.interfacePools[iface]
 	state.mu.RUnlock()
 	pool.put(pooled)
 
@@ -1082,20 +1117,22 @@ func (m *Manager) dialDestinationWithContext(ctx context.Context, state *destina
 }
 
 // registerConnection tracks a live connection before it becomes available.
-func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn) {
+func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn, iface PDUType) {
 	state.mu.Lock()
 	if state.connections == nil {
 		state.connections = make(map[*tls.Conn]struct{})
 	}
 	state.connections[conn] = struct{}{}
 	state.mu.Unlock()
-	runtime := &connectionRuntime{interfaces: map[PDUType]*interfaceKeepaliveState{
-		PDUTypeX2: {enabled: m.config.X2KeepaliveEnabled, timeP1: m.config.X2KeepaliveTimeP1, timeP2: m.config.X2KeepaliveTimeP2, outstanding: make(map[uint32]time.Time)},
-		PDUTypeX3: {enabled: m.config.X3KeepaliveEnabled, timeP1: m.config.X3KeepaliveTimeP1, timeP2: m.config.X3KeepaliveTimeP2, outstanding: make(map[uint32]time.Time)},
-	}}
+	keepalive := &interfaceKeepaliveState{outstanding: make(map[uint32]time.Time)}
+	if iface == PDUTypeX2 {
+		keepalive.enabled, keepalive.timeP1, keepalive.timeP2 = m.config.X2KeepaliveEnabled, m.config.X2KeepaliveTimeP1, m.config.X2KeepaliveTimeP2
+	} else {
+		keepalive.enabled, keepalive.timeP1, keepalive.timeP2 = m.config.X3KeepaliveEnabled, m.config.X3KeepaliveTimeP1, m.config.X3KeepaliveTimeP2
+	}
+	runtime := &connectionRuntime{iface: iface, keepalive: keepalive}
 	m.connectionRuntime.Store(conn, runtime)
-	m.updateKeepaliveStatsForState(state, PDUTypeX2, runtime.interfaces[PDUTypeX2], "")
-	m.updateKeepaliveStatsForState(state, PDUTypeX3, runtime.interfaces[PDUTypeX3], "")
+	m.updateKeepaliveStatsForState(state, iface, keepalive, "")
 }
 
 // watchConnection runs the framed inbound reader and application keepalive
@@ -1140,16 +1177,11 @@ func (m *Manager) handleInboundPDU(did uuid.UUID, conn *tls.Conn, pdu *x2x3.PDU)
 	runtime := value.(*connectionRuntime)
 	runtime.mu.Lock()
 	now := time.Now()
-	for iface, state := range runtime.interfaces {
-		if _, exists := state.outstanding[seq]; !exists {
-			continue
-		}
+	state := runtime.keepalive
+	if _, exists := state.outstanding[seq]; exists {
 		delete(state.outstanding, seq)
 		state.lastACK = now
-		m.updateKeepaliveStats(did, iface, state, "")
-		// One ACK acknowledges one Keepalive. X2 and X3 sequences are
-		// independent and may legitimately have the same numeric value.
-		break
+		m.updateKeepaliveStats(did, runtime.iface, state, "")
 	}
 	runtime.mu.Unlock()
 }
@@ -1171,32 +1203,30 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 			var frames [][]byte
 			var timeoutErr error
 			runtime.mu.Lock()
-			for iface, state := range runtime.interfaces {
-				if !state.enabled {
-					continue
-				}
-				for _, sent := range state.outstanding {
-					if now.Sub(sent) >= state.timeP2 {
-						timeoutErr = fmt.Errorf("interface %d keepalive acknowledgement timeout after %s", iface, state.timeP2)
-						break
-					}
-				}
-				if timeoutErr != nil {
-					m.updateKeepaliveStats(did, iface, state, timeoutErr.Error())
+			iface, state := runtime.iface, runtime.keepalive
+			if !state.enabled {
+				runtime.mu.Unlock()
+				continue
+			}
+			for _, sent := range state.outstanding {
+				if now.Sub(sent) >= state.timeP2 {
+					timeoutErr = fmt.Errorf("interface %d keepalive acknowledgement timeout after %s", iface, state.timeP2)
 					break
 				}
-				if state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1 {
-					seq := state.next
-					state.next++
-					pdu := x2x3.NewKeepalivePDUWithSequence(seq)
-					frame, err := pdu.MarshalBinary()
-					if err == nil {
-						frames = append(frames, frame)
-						state.outstanding[seq] = now
-						state.lastSequence = seq
-						state.lastSent = now
-						m.updateKeepaliveStats(did, iface, state, "")
-					}
+			}
+			if timeoutErr != nil {
+				m.updateKeepaliveStats(did, iface, state, timeoutErr.Error())
+			} else if state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1 {
+				seq := state.next
+				state.next++
+				pdu := x2x3.NewKeepalivePDUWithSequence(seq)
+				frame, err := pdu.MarshalBinary()
+				if err == nil {
+					frames = append(frames, frame)
+					state.outstanding[seq] = now
+					state.lastSequence = seq
+					state.lastSent = now
+					m.updateKeepaliveStats(did, iface, state, "")
 				}
 			}
 			runtime.mu.Unlock()
@@ -1204,7 +1234,9 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 				if m.config.DeliveryFault != nil {
 					m.config.DeliveryFault(did, timeoutErr)
 				}
-				m.InvalidateConnection(did, conn)
+				m.invalidateConnection(did, conn, false)
+				m.wg.Add(1)
+				go m.reconnectInterface(did, iface)
 				return
 			}
 			for _, frame := range frames {
@@ -1214,6 +1246,47 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 				}
 			}
 		}
+	}
+}
+
+// reconnectInterface restores only the timed-out X2 or X3 transport using a
+// capped, jittered backoff. The other interface remains untouched.
+func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
+	defer m.wg.Done()
+	backoff := m.config.InitialBackoff
+	for {
+		wait := backoff
+		if m.config.BackoffJitter > 0 {
+			factor := 1 - m.config.BackoffJitter + rand.Float64()*(2*m.config.BackoffJitter)
+			wait = time.Duration(float64(backoff) * factor)
+		}
+		select {
+		case <-m.stopChan:
+			return
+		case <-time.After(wait):
+		}
+		m.mu.RLock()
+		state, exists := m.destinations[did]
+		m.mu.RUnlock()
+		if !exists || m.shuttingDown.Load() {
+			return
+		}
+		conn, err := m.dialDestination(state)
+		if err != nil {
+			backoff = min(time.Duration(float64(backoff)*m.config.BackoffMultiplier), m.config.MaxBackoff)
+			continue
+		}
+		m.registerConnection(state, conn, iface)
+		m.watchConnection(did, conn)
+		state.mu.RLock()
+		pool := state.interfacePools[iface]
+		state.mu.RUnlock()
+		if !pool.put(&pooledConn{conn: conn, createdAt: time.Now(), lastUsed: time.Now()}) {
+			m.InvalidateConnection(did, conn)
+			return
+		}
+		atomic.StoreInt32(&state.state, connStateConnected)
+		return
 	}
 }
 
@@ -1336,9 +1409,13 @@ func (m *Manager) closeDestinationLocked(did uuid.UUID, state *destinationState)
 		m.connectionRuntime.Delete(conn)
 	}
 	pool := state.pool
+	interfacePools := state.interfacePools
 	state.mu.Unlock()
 
 	pool.close()
+	for _, interfacePool := range interfacePools {
+		interfacePool.close()
+	}
 	for _, conn := range connections {
 		if err := conn.Close(); err != nil {
 			logger.Debug("error closing destination connection",

@@ -100,6 +100,7 @@ type CallTracker struct {
 	lruList           *list.List               // LRU list (front = most recently used)
 	lruIndex          map[string]*list.Element // callID -> list element for O(1) lookup
 	pins              map[string]int           // callID -> active retention leases
+	recency           sync.Map                 // callID -> *atomic.Int64 Unix nanoseconds; RTP fast path
 	maxCalls          int                      // Maximum calls to keep
 	lastPinnedWarning time.Time
 	mu                sync.RWMutex
@@ -230,6 +231,7 @@ func (ct *CallTracker) Shutdown() {
 					"error", err)
 			}
 			delete(ct.callMap, id)
+			ct.recency.Delete(id)
 		}
 		logger.Info("Call tracker shutdown complete")
 	})
@@ -307,11 +309,26 @@ func GetCallTracker() *CallTracker {
 }
 
 func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
-	tracker := getTracker()
+	return getTracker().getOrCreateCall(callID, linkType)
+}
+
+func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
+	// Existing calls dominate the RTP packet path. Refresh their eviction
+	// recency atomically so every media packet does not take the tracker-wide
+	// write lock merely to promote an LRU element.
+	tracker.mu.RLock()
+	call, exists := tracker.callMap[callID]
+	if exists {
+		tracker.touchCall(callID)
+		tracker.mu.RUnlock()
+		return call
+	}
+	tracker.mu.RUnlock()
+
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
-	call, exists := tracker.callMap[callID]
+	call, exists = tracker.callMap[callID]
 	if !exists {
 		call = &CallInfo{
 			CallID:      callID,
@@ -342,12 +359,7 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 				}
 			}
 			if oldest == nil {
-				for e := tracker.lruList.Back(); e != nil; e = e.Prev() {
-					if tracker.pins[e.Value.(string)] == 0 {
-						oldest = e
-						break
-					}
-				}
+				oldest = tracker.leastRecentUnpinnedLocked()
 			}
 			if oldest != nil {
 				oldestCallID := oldest.Value.(string)
@@ -375,6 +387,7 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 						}
 					}
 					delete(tracker.callMap, oldestCallID)
+					tracker.recency.Delete(oldestCallID)
 				}
 				tracker.lruList.Remove(oldest)
 				delete(tracker.lruIndex, oldestCallID)
@@ -390,13 +403,37 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 		elem := tracker.lruList.PushFront(callID)
 		tracker.lruIndex[callID] = elem
 		tracker.callMap[callID] = call
+		tracker.touchCall(callID)
 	} else {
-		// Move existing call to front (most recently used)
-		if elem, ok := tracker.lruIndex[callID]; ok {
-			tracker.lruList.MoveToFront(elem)
-		}
+		tracker.touchCall(callID)
 	}
 	return call
+}
+
+func (ct *CallTracker) touchCall(callID string) {
+	value, _ := ct.recency.LoadOrStore(callID, &atomic.Int64{})
+	value.(*atomic.Int64).Store(time.Now().UnixNano())
+}
+
+// leastRecentUnpinnedLocked chooses using atomic packet recency while retaining
+// list order as a deterministic fallback for calls created by older/test paths.
+func (ct *CallTracker) leastRecentUnpinnedLocked() *list.Element {
+	var selected *list.Element
+	var selectedAt int64
+	for e := ct.lruList.Back(); e != nil; e = e.Prev() {
+		id := e.Value.(string)
+		if ct.pins[id] != 0 {
+			continue
+		}
+		at := int64(0)
+		if value, ok := ct.recency.Load(id); ok {
+			at = value.(*atomic.Int64).Load()
+		}
+		if selected == nil || at < selectedAt {
+			selected, selectedAt = e, at
+		}
+	}
+	return selected
 }
 
 func (c *CallInfo) initWriters() error {

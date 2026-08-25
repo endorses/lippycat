@@ -305,9 +305,9 @@ func convertDestinationIDs(list *schema.ListOfDids) ([]uuid.UUID, error) {
 // internal TaskStatus.
 func convertProvisioningStatus(status string) TaskStatus {
 	switch status {
-	case "active":
+	case "active", "complete":
 		return TaskStatusActive
-	case "pending":
+	case "pending", "awaitingProvisioning":
 		return TaskStatusPending
 	case "suspended":
 		return TaskStatusSuspended

@@ -828,11 +828,14 @@ func TestServer_HandleGetTaskDetails(t *testing.T) {
 
 	xid := uuid.New()
 
+	start := time.Date(2026, 8, 25, 10, 11, 12, 123000000, time.UTC)
+	end := start.Add(2 * time.Hour)
+	did := uuid.New()
 	// Pre-create task
 	taskMock.tasks[xid] = &Task{
-		XID:          xid,
-		Status:       TaskStatusActive,
-		DeliveryType: DeliveryX2andX3,
+		XID: xid, Status: TaskStatusActive, DeliveryType: DeliveryX2andX3,
+		StartTime: start, EndTime: end, DestinationIDs: []uuid.UUID{did},
+		Targets: []TargetIdentity{{Type: TargetTypeSIPURI, Value: "alice@example.test"}},
 	}
 
 	// Get task details
@@ -849,6 +852,12 @@ func TestServer_HandleGetTaskDetails(t *testing.T) {
 	s.handleX1Request(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), xid.String())
+	assert.Contains(t, w.Body.String(), did.String())
+	assert.Contains(t, w.Body.String(), "alice@example.test")
+	assert.Contains(t, w.Body.String(), start.Format(time.RFC3339Nano))
+	assert.Contains(t, w.Body.String(), end.Format(time.RFC3339Nano))
+	assert.Contains(t, w.Body.String(), "<provisioningStatus>complete</provisioningStatus>")
 }
 
 func TestServer_HandleGetTaskDetails_NotFound(t *testing.T) {

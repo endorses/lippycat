@@ -487,7 +487,13 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), c.config.SendTimeout)
-		conn, err := c.manager.GetConnection(ctx, q.did)
+		batch := q.peekBatch(c.config.BatchSize)
+		if len(batch) == 0 {
+			cancel()
+			continue
+		}
+		conn, err := c.manager.GetConnectionForInterface(ctx, q.did, batch[0].pduType)
+		connType := batch[0].pduType
 		cancel()
 		if err != nil {
 			if errors.Is(err, ErrDestinationNotFound) {
@@ -503,9 +509,22 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 			continue
 		}
 
-		batch := q.peekBatch(c.config.BatchSize)
 		failed := false
 		for _, item := range batch {
+			// An interface switch in the fair mixed batch must also switch TLS
+			// transports; X2 and X3 never share keepalive association state.
+			if item.pduType != connType {
+				c.manager.ReleaseConnection(q.did, conn)
+				ctx, cancel := context.WithTimeout(context.Background(), c.config.SendTimeout)
+				conn, err = c.manager.GetConnectionForInterface(ctx, q.did, item.pduType)
+				cancel()
+				if err != nil {
+					c.recordRetry(q, err)
+					failed = true
+					break
+				}
+				connType = item.pduType
+			}
 			if err := c.sendItem(conn, q.did, item); err != nil {
 				c.manager.InvalidateConnection(q.did, conn)
 				c.recordRetry(q, err)
@@ -703,7 +722,7 @@ func (c *Client) sendSync(ctx context.Context, pduType PDUType, xid uuid.UUID, d
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		conn, err := c.manager.GetConnection(ctx, did)
+		conn, err := c.manager.GetConnectionForInterface(ctx, did, pduType)
 		if err != nil {
 			continue
 		}

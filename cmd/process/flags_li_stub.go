@@ -39,6 +39,7 @@ type LIConfig struct {
 	ADMFSyncOnStartup     bool
 	ADMFSyncTimeout       time.Duration
 	ADMFReconcileInterval time.Duration
+	StateFile             string
 }
 
 // RegisterLIFlags is a no-op in non-LI builds.

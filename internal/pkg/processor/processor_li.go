@@ -156,6 +156,7 @@ func (p *Processor) initLIManager() {
 		SyncOnStartup:     p.config.LIADMFSyncOnStartup,
 		SyncTimeout:       p.config.LIADMFSyncTimeout,
 		ReconcileInterval: p.config.LIADMFReconcileInterval,
+		StateFile:         p.config.LIStateFile,
 	}
 
 	// Deactivation callback - called when a task is implicitly deactivated
@@ -210,6 +211,13 @@ func (p *Processor) initLIManager() {
 		destConfig.KeepAliveIdle = p.config.LIDeliveryKeepAliveIdle
 		destConfig.KeepAliveInterval = p.config.LIDeliveryKeepAliveInterval
 		destConfig.KeepAliveCount = p.config.LIDeliveryKeepAliveCount
+		destConfig.X2KeepaliveEnabled = p.config.LIDeliveryX2KeepaliveEnabled
+		destConfig.X2KeepaliveTimeP1 = p.config.LIDeliveryX2KeepaliveTimeP1
+		destConfig.X2KeepaliveTimeP2 = p.config.LIDeliveryX2KeepaliveTimeP2
+		destConfig.X3KeepaliveEnabled = p.config.LIDeliveryX3KeepaliveEnabled
+		destConfig.X3KeepaliveTimeP1 = p.config.LIDeliveryX3KeepaliveTimeP1
+		destConfig.X3KeepaliveTimeP2 = p.config.LIDeliveryX3KeepaliveTimeP2
+		destConfig.DeliveryFault = func(did uuid.UUID, err error) { p.liManager.ReportDeliveryError(did, 1, err.Error()) }
 		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
 			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert
 		}

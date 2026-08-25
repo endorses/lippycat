@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ADMF startup state synchronization and periodic reconciliation for LI deployments
 - Protocol-aware X2/X3 delivery over TLS with reconnect buffering and RTP reordering
 - Optional pprof diagnostics endpoint via `LC_PPROF_ADDR`
+- Independently configurable ETSI X2/X3 application keepalives with framed ACK validation and timeout-driven reconnect reporting
 
 ### Changed
 - Migrated TCP stream handling to `gopacket` reassembly for port reuse and fragmented SIP support
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Propagated hunter packet-drop and filter-match statistics to processors
 - Made ESP decapsulation explicitly opt-in
 - Updated the Go CI toolchain to 1.25.12 and refreshed dependencies
+- Declared X1 V1.22.1 to match the bundled schema; V1.13.1 remains accepted during coordinated ADMF migration, while unsupported revisions are rejected explicitly
 
 ### Fixed
 - Hardened capture, detector, call-buffer, PCAP-writer, TLS keylog, and processor concurrency and memory handling

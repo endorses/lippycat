@@ -456,10 +456,17 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryKeepAliveIdle = liConfig.DeliveryKeepAliveIdle
 		config.LIDeliveryKeepAliveInterval = liConfig.DeliveryKeepAliveInterval
 		config.LIDeliveryKeepAliveCount = liConfig.DeliveryKeepAliveCount
+		config.LIDeliveryX2KeepaliveEnabled = liConfig.DeliveryX2KeepaliveEnabled
+		config.LIDeliveryX2KeepaliveTimeP1 = liConfig.DeliveryX2KeepaliveTimeP1
+		config.LIDeliveryX2KeepaliveTimeP2 = liConfig.DeliveryX2KeepaliveTimeP2
+		config.LIDeliveryX3KeepaliveEnabled = liConfig.DeliveryX3KeepaliveEnabled
+		config.LIDeliveryX3KeepaliveTimeP1 = liConfig.DeliveryX3KeepaliveTimeP1
+		config.LIDeliveryX3KeepaliveTimeP2 = liConfig.DeliveryX3KeepaliveTimeP2
 		config.LIDeliveryShutdownTimeout = liConfig.DeliveryShutdownTimeout
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout
 		config.LIADMFReconcileInterval = liConfig.ADMFReconcileInterval
+		config.LIStateFile = liConfig.StateFile
 	}
 
 	// Validate TLS configuration: cert and key required when TLS is enabled

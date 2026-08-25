@@ -129,6 +129,8 @@ const (
 
 	// CorrelationIDSize is the size of the correlation ID field.
 	CorrelationIDSize = 8
+	// MaxPDUSize bounds allocations made by stream framing for malformed peers.
+	MaxPDUSize = 64 << 20
 )
 
 // Errors returned by PDU encoding/decoding functions.
@@ -486,10 +488,30 @@ func NewPDU(pduType PDUType, xid uuid.UUID, correlationID uint64) *PDU {
 // NewKeepalivePDU creates a keepalive PDU (PDU Type 3) per ETSI TS 103 221-2.
 // It carries a nil XID, empty payload, Payload Format 0 and Payload Direction 0.
 func NewKeepalivePDU() *PDU {
+	return NewKeepalivePDUWithSequence(0)
+}
+
+// NewKeepalivePDUWithSequence creates a Keepalive carrying exactly the
+// connection-scoped sequence-number attribute required by clause 5.1.
+func NewKeepalivePDUWithSequence(sequence uint32) *PDU {
+	pdu := newKeepaliveControlPDU(PDUTypeKeepalive)
+	pdu.AddAttribute((&TLVEncoder{}).EncodeUint32(AttrSequenceNumber, sequence))
+	return pdu
+}
+
+// NewKeepaliveAckPDU creates an acknowledgement which echoes the sequence of
+// the Keepalive it acknowledges.
+func NewKeepaliveAckPDU(sequence uint32) *PDU {
+	pdu := newKeepaliveControlPDU(PDUTypeKeepaliveAck)
+	pdu.AddAttribute((&TLVEncoder{}).EncodeUint32(AttrSequenceNumber, sequence))
+	return pdu
+}
+
+func newKeepaliveControlPDU(pduType PDUType) *PDU {
 	return &PDU{
 		Header: PDUHeader{
 			Version:          Version,
-			Type:             PDUTypeKeepalive,
+			Type:             pduType,
 			HeaderLength:     HeaderMinSize,
 			PayloadFormat:    PayloadFormatKeepalive,
 			PayloadDirection: PayloadDirectionKeepalive,
@@ -497,6 +519,53 @@ func NewKeepalivePDU() *PDU {
 			CorrelationID:    0,
 		},
 	}
+}
+
+// KeepaliveSequence validates a Keepalive control PDU and returns its sole
+// sequence number. Control PDUs have no payload and all non-control fixed
+// header fields are zero.
+func (p *PDU) KeepaliveSequence() (uint32, error) {
+	if p.Header.Type != PDUTypeKeepalive && p.Header.Type != PDUTypeKeepaliveAck {
+		return 0, fmt.Errorf("not a keepalive control PDU: %s", p.Header.Type)
+	}
+	if p.Header.PayloadLength != 0 || len(p.Payload) != 0 ||
+		p.Header.PayloadFormat != PayloadFormatKeepalive ||
+		p.Header.PayloadDirection != PayloadDirectionKeepalive ||
+		p.Header.XID != uuid.Nil || p.Header.CorrelationID != 0 {
+		return 0, fmt.Errorf("invalid keepalive fixed header")
+	}
+	if len(p.Attributes) != 1 || p.Attributes[0].Type != AttrSequenceNumber || len(p.Attributes[0].Value) != 4 {
+		return 0, fmt.Errorf("keepalive must contain exactly one sequence-number attribute")
+	}
+	return binary.BigEndian.Uint32(p.Attributes[0].Value), nil
+}
+
+// ReadPDU reads one length-delimited PDU from the stream. HeaderLength and
+// PayloadLength provide the framing; callers must not assume one Read is one
+// PDU on TLS/TCP.
+func ReadPDU(r io.Reader) (*PDU, error) {
+	header := make([]byte, HeaderMinSize)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return nil, err
+	}
+	var parsed PDUHeader
+	if err := parsed.UnmarshalBinary(header); err != nil {
+		return nil, err
+	}
+	total := uint64(parsed.HeaderLength) + uint64(parsed.PayloadLength)
+	if total > MaxPDUSize || total < HeaderMinSize {
+		return nil, ErrInvalidHeader
+	}
+	data := make([]byte, int(total))
+	copy(data, header)
+	if _, err := io.ReadFull(r, data[HeaderMinSize:]); err != nil {
+		return nil, err
+	}
+	pdu := new(PDU)
+	if err := pdu.UnmarshalBinary(data); err != nil {
+		return nil, err
+	}
+	return pdu, nil
 }
 
 // AddAttribute adds a TLV attribute to the PDU.

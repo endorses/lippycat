@@ -552,22 +552,11 @@ func jitterDuration(delay time.Duration, fraction float64) time.Duration {
 }
 
 func (c *Client) sendItem(conn *tls.Conn, did uuid.UUID, item *deliveryItem) error {
-	if err := conn.SetWriteDeadline(time.Now().Add(c.config.SendTimeout)); err != nil {
-		return fmt.Errorf("failed to set write deadline: %w", err)
-	}
-	n, err := conn.Write(item.data)
-	if err != nil {
+	if err := c.manager.WritePDU(conn, item.data, c.config.SendTimeout); err != nil {
 		c.manager.RecordWriteError(did)
 		return fmt.Errorf("write failed: %w", err)
 	}
-	if n != len(item.data) {
-		c.manager.RecordWriteError(did)
-		return fmt.Errorf("short write: wrote %d of %d bytes", n, len(item.data))
-	}
-	c.manager.RecordBytesSent(did, uint64(n))
-	if err := conn.SetWriteDeadline(time.Time{}); err != nil {
-		return fmt.Errorf("failed to clear write deadline: %w", err)
-	}
+	c.manager.RecordBytesSent(did, uint64(len(item.data)))
 	return nil
 }
 

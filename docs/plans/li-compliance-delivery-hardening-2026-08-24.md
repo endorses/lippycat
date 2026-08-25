@@ -419,7 +419,7 @@ Tests:
 
 ## 7. Phase 5 — Evidential correctness and interop
 
-**Status (2026-08-25): Partially implemented; coordinated protocol changes remain gated.**
+**Status (2026-08-25): Implemented locally; coordinated enablement remains gated.**
 Hunter forwarding now preserves capture timestamps, X1 handles ETSI envelopes and
 all legacy-container messages in order, and X2/X3 correlation has a documented
 wire invariant with an encoded-PDU regression test. Sequence ownership, X2/X3
@@ -509,27 +509,62 @@ Tests:
 
 ### 7.4 Add X2/X3 keepalive exchange
 
-- [ ] Add configurable keepalive interval and missed-ACK threshold per destination.
-- [ ] Send the existing ETSI keepalive PDU on idle connections.
-- [ ] Parse inbound keepalive ACKs instead of discarding all reads.
-- [ ] Reconnect after the configured number of missed acknowledgements.
-- [ ] Keep data delivery ordering independent from keepalive control frames.
-- [ ] Expose last ACK, missed ACKs, and reconnect reason in stats.
+ETSI TS 103 221-2 V1.10.1 clause 6.2.4 requires POIs and MDFs to support
+Keepalive and Keepalive Acknowledgement PDUs. When the TLS transport profile
+enables the mechanism, the POI sends a Keepalive at least every `TIME_P1`
+(default 60 seconds). The MDF acknowledges every Keepalive using the same
+sequence number. If no acknowledgement is observed within `TIME_P2` (default
+180 seconds), the POI disconnects, attempts to reconnect, and reports an error
+through X1. The mechanism may be used independently on X2 and X3. See the
+[official specification](https://www.etsi.org/deliver/etsi_ts/103200_103299/10322102/01.10.01_60/ts_10322102v011001p.pdf).
+
+The companion specifications are versioned independently: V1.10.1 is the
+current TS 103 221-2 revision governing X2/X3 delivery, while V1.23.1 is the
+current TS 103 221-1 revision governing X1 administration. The X1 revision
+number does not supersede the X2/X3 keepalive requirements in Part 2.
+
+Annex C defines X0 configuration independently for X2 and X3 using
+`keepaliveEnabled`, `keepaliveTimeP1`, and `keepaliveTimeP2`; both timer values
+have a minimum of one second when present. Until X0 configuration is supported,
+provide equivalent local configuration with the normative defaults. This is a
+time-based liveness rule, not a configurable count of missed ACKs.
+
+- [x] Add independently configurable X2 and X3 keepalive enablement, `TIME_P1`, and `TIME_P2`, defaulting to 60 seconds and 180 seconds respectively and rejecting enabled timer values below one second.
+- [ ] Send a Keepalive PDU at least once during every `TIME_P1` interval while the applicable X2/X3 TLS connection is established; ordinary data traffic does not replace the required application-level Keepalive.
+- [x] Encode Keepalive and Keepalive Acknowledgement PDUs as specified in clause 5.1: Version, PDU Type, and Header Length populated; all other mandatory header fields zero; exactly one Sequence Number attribute; no payload.
+- [ ] Maintain a zero-based 32-bit Keepalive sequence for each applicable X2/X3 connection/interface and require an acknowledgement to echo the corresponding Keepalive sequence number.
+- [x] Run a framed inbound-PDU reader instead of discarding reads; validate Keepalive Acknowledgements and update liveness only for a valid outstanding sequence.
+- [x] If no valid Keepalive Acknowledgement has been observed within `TIME_P2`, close the affected connection, enter the existing bounded reconnect path, and report the delivery fault through X1.
+- [x] Serialize Keepalive and content writes on each TLS connection so frames cannot interleave, without placing control PDUs in the bounded X2/X3 content queues or changing content ordering.
+- [ ] Treat X2 and X3 keepalive state independently even when they share an MDF destination.
+- [x] Expose enabled state, configured `TIME_P1`/`TIME_P2`, last Keepalive sequence/time, last valid ACK time, ACK age, timeout count, and reconnect reason in per-interface destination stats.
 
 Tests:
 
-- [ ] Keepalive and ACK maintain an idle connection.
-- [ ] Missed ACKs trigger reconnect.
-- [ ] Data delivery continues correctly around keepalive frames.
+- [ ] Defaults and minimum timer validation match clause 6.2.4 and Annex C.
+- [ ] Keepalives are sent at least every `TIME_P1` on both idle and data-active connections.
+- [ ] A matching ACK maintains the connection and updates liveness statistics.
+- [ ] A missing, malformed, stale, or wrong-sequence ACK does not satisfy liveness.
+- [ ] Absence of a valid ACK for `TIME_P2` closes the affected connection, triggers bounded reconnect, and reports an X1 delivery error.
+- [ ] X2 and X3 keepalive timers and sequences are independent.
+- [ ] Concurrent content and Keepalive writes always decode as complete ordered PDUs.
+- [ ] Data delivery continues in order around Keepalive control frames.
 
 ### 7.5 Align the X1 declared version
 
 Coordinate one declared X1 revision across lippycat, the ADMF, and the MDF before changing defaults.
 
-- [ ] Select the supported revision based on the actual XSD/schema behavior, not merely the newest string.
-- [ ] Update server/client defaults, tests, fixtures, and documentation together.
-- [ ] Optionally validate compatible inbound versions and return a precise error for unsupported revisions.
-- [ ] Include version negotiation/cutover guidance in release notes.
+The current published X1 specification is
+[ETSI TS 103 221-1 V1.23.1](https://www.etsi.org/deliver/etsi_ts/103200_103299/10322101/01.23.01_60/ts_10322101v012301p.pdf).
+Treat V1.23.1 as the candidate target, subject to a schema and behavior gap
+review; do not infer X1 support merely from implementing the independently
+versioned TS 103 221-2 V1.10.1 wire protocol.
+
+- [x] Compare the generated X1 schema, server behavior, client behavior, and fixtures against V1.23.1 and record every unsupported mandatory operation or field.
+- [x] Select V1.23.1 only if that gap review passes or the unsupported surface is explicitly version-gated; never change only the declared version string. (The review did not pass: the bundled schema is V1.22.1, so the truthful default is V1.22.1.)
+- [x] Update server/client defaults, tests, fixtures, and documentation together.
+- [x] Optionally validate compatible inbound versions and return a precise error for unsupported revisions.
+- [x] Include version negotiation/cutover guidance in release notes.
 
 ### 7.6 Protect X2/X3 correlation identity
 
@@ -539,27 +574,33 @@ Coordinate one declared X1 revision across lippycat, the ADMF, and the MDF befor
 
 ## 8. Phase 6 — State persistence and reconciliation completion
 
+**Status (2026-08-25): Implemented.** LI lifecycle state can now be persisted to a
+versioned, atomically replaced `0600` JSON file configured with `--li-state-file`.
+Pending tasks are restored disarmed, active tasks require ADMF confirmation, expired
+state remains disarmed, residual filter cleanup resumes before activation, and task
+and destination reconciliation both preserve incomplete/empty-snapshot safeguards.
+
 Current ADMF startup sync and periodic reconciliation already remove authoritative orphan tasks, guard incomplete/empty snapshots, and sweep orphan LI filters at startup. Preserve those behaviors.
 
 Add local persistence only after lifecycle semantics above are stable:
 
-- [ ] Persist tasks, destinations, status, effective time bounds, activation generation, and cleanup-needed state.
-- [ ] Write atomically with versioned schema and restrictive file permissions.
-- [ ] Do not persist secrets that need not be stored.
-- [ ] Treat the ADMF as authoritative when a complete response is available.
-- [ ] Keep the existing protections against conversion errors and transient empty-task responses.
-- [ ] Reconcile destinations in both directions, with the same authoritative-snapshot safeguards used for tasks.
-- [ ] Restore pending tasks without arming them early.
-- [ ] Restore active tasks only after confirming time validity and ADMF authority.
-- [ ] Resume cleanup for residual filters recorded after partial failure.
+- [x] Persist tasks, destinations, status, effective time bounds, activation generation, and cleanup-needed state.
+- [x] Write atomically with versioned schema and restrictive file permissions.
+- [x] Do not persist secrets that need not be stored.
+- [x] Treat the ADMF as authoritative when a complete response is available.
+- [x] Keep the existing protections against conversion errors and transient empty-task responses.
+- [x] Reconcile destinations in both directions, with the same authoritative-snapshot safeguards used for tasks.
+- [x] Restore pending tasks without arming them early.
+- [x] Restore active tasks only after confirming time validity and ADMF authority.
+- [x] Resume cleanup for residual filters recorded after partial failure.
 
 Tests:
 
-- [ ] Restart restores bounded active and pending tasks correctly.
-- [ ] Expired tasks are not re-armed.
-- [ ] A complete ADMF snapshot removes local-only tasks and destinations.
-- [ ] Incomplete or transiently empty snapshots do not cause mass teardown.
-- [ ] Corrupt persistence fails closed with actionable diagnostics.
+- [x] Restart restores bounded active and pending tasks correctly.
+- [x] Expired tasks are not re-armed.
+- [x] A complete ADMF snapshot removes local-only tasks and destinations.
+- [x] Incomplete or transiently empty snapshots do not cause mass teardown.
+- [x] Corrupt persistence fails closed with actionable diagnostics.
 
 ## 9. Cross-project decisions and rollout gates
 
@@ -569,7 +610,7 @@ The following require agreement with the ADMF/MDF implementations before deploym
 - [ ] Decide how to represent multiple mediation windows for one task and several DIDs.
 - [ ] Agree the raw-IP X3 payload format and MDF decoding behavior.
 - [ ] Follow the attribute-8 scope, zero initial value, separate X2/X3 streams, and wrap behavior mandated by ETSI TS 103 221-2 clause 5.3.9; agree only restart behavior and migration cutover with the MDF.
-- [ ] Agree the X2/X3 keepalive interval and ACK behavior.
+- [ ] Follow the X2/X3 Keepalive/ACK behavior and 60-second `TIME_P1` / 180-second `TIME_P2` defaults mandated by ETSI TS 103 221-2 clause 6.2.4; coordinate enablement, non-default timer configuration, X0 support, and rollout with the MDF.
 - [ ] Agree the X1 declared version and compatibility validation.
 - [ ] Agree the XID reuse policy and audit-history expectations.
 - [ ] Agree correlation-ID derivation and multi-SSRC behavior.
@@ -622,7 +663,7 @@ Expose at minimum:
 - [ ] Reorder-buffer streams, packets, bytes, timeout flushes, and forced cap flushes.
 - [ ] Pinned calls, soft-cap overage, and call evictions.
 - [ ] X1 rate-limiter entries and evictions.
-- [ ] Delivery keepalive ACK age and missed ACKs.
+- [ ] Delivery keepalive enabled state, `TIME_P1`/`TIME_P2`, last sequence/send/valid-ACK time, ACK age, timeout count, and reconnect reason per X2/X3 interface and destination.
 
 Operational acceptance requires:
 

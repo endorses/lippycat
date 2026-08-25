@@ -286,10 +286,21 @@ type limiterEntry struct {
 	lastSeen time.Time
 }
 
+const DefaultProtocolVersion = "v1.22.1"
+
+func supportedProtocolVersion(version string) bool {
+	switch version {
+	case "", "v1.13.1", "1.13.1", "v1.22.1", "1.22.1":
+		return true
+	default:
+		return false
+	}
+}
+
 // NewServer creates a new X1 server.
 func NewServer(config ServerConfig, destManager DestinationManager, taskManager TaskManager) *Server {
 	if config.Version == "" {
-		config.Version = "v1.13.1"
+		config.Version = DefaultProtocolVersion
 	}
 	if config.NEIdentifier == "" {
 		hostname, _ := os.Hostname()
@@ -833,6 +844,10 @@ func envelopeBaseMessage(message x1RequestMessageAttr) *schema.X1RequestMessage 
 // processRequestMessage processes a single X1 request message.
 // Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
 func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) any {
+	if reqMsg != nil && !supportedProtocolVersion(reqMsg.Version) {
+		return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError,
+			"unsupported X1 protocol version "+reqMsg.Version+"; supported revisions are v1.13.1 and "+DefaultProtocolVersion)
+	}
 	// Learn the ADMF identifier from the inbound request.
 	if reqMsg != nil && reqMsg.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
 		s.config.OnADMFIdentified(reqMsg.AdmfIdentifier)

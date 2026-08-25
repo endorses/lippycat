@@ -31,7 +31,7 @@ func TestNewClient(t *testing.T) {
 		assert.NotNil(t, client)
 		assert.Equal(t, "https://admf.example.com:8443", client.config.ADMFEndpoint)
 		assert.NotEmpty(t, client.config.NEIdentifier)
-		assert.Equal(t, "v1.13.1", client.config.Version)
+		assert.Equal(t, DefaultProtocolVersion, client.config.Version)
 		assert.Equal(t, DefaultKeepaliveInterval, client.config.KeepaliveInterval)
 	})
 

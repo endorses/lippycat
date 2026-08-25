@@ -26,6 +26,22 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/li"
 )
 
+func TestApplicationKeepaliveDefaultsAndValidation(t *testing.T) {
+	defaults := DefaultConfig()
+	assert.Equal(t, 60*time.Second, defaults.X2KeepaliveTimeP1)
+	assert.Equal(t, 180*time.Second, defaults.X2KeepaliveTimeP2)
+	assert.Equal(t, 60*time.Second, defaults.X3KeepaliveTimeP1)
+	assert.Equal(t, 180*time.Second, defaults.X3KeepaliveTimeP2)
+
+	config := DefaultConfig()
+	config.TLSCertFile = "unused-cert"
+	config.TLSKeyFile = "unused-key"
+	config.X2KeepaliveEnabled = true
+	config.X2KeepaliveTimeP1 = time.Millisecond
+	_, err := NewManager(config)
+	assert.ErrorIs(t, err, ErrInvalidKeepaliveTimer)
+}
+
 // testCertDirDest returns the path to the LI test certificates directory.
 func testCertDirDest() string {
 	return filepath.Join("..", "..", "..", "..", "test", "testcerts", "li")

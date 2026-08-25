@@ -2,6 +2,21 @@
 
 This guide covers the deployment and operation of lippycat's ETSI X1/X2/X3 lawful interception interfaces.
 
+## X1 version compatibility
+
+lippycat declares ETSI TS 103 221-1 `v1.22.1`, matching the bundled
+`TS_103_221_01.xsd` schema. It accepts `v1.13.1` during migration and rejects
+other revisions with an explicit X1 request-syntax error.
+
+The V1.23.1 gap review did not pass: the generated schema remains V1.22.1 and
+the implemented surface is destination create/modify/remove, task
+activate/modify/deactivate/details, ping/keepalive, lifecycle/error
+notifications, and state reconciliation—not every mandatory V1.23.1 operation
+and field. Do not advertise V1.23.1 until all X1 schemas are regenerated and
+the server, ADMF client, fixtures, and peer compatibility tests are upgraded
+together. Confirm ADMF peers accept V1.22.1 responses and notifications before
+cutover; remove V1.13.1 compatibility only in a coordinated release.
+
 ## X2/X3 correlation compatibility invariant
 
 For SIP/RTP interception, the wire-level X2/X3 correlation ID is the FNV-1a

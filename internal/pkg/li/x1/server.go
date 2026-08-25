@@ -959,14 +959,18 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 		DestinationIDs: destIDs,
 		DeliveryType:   deliveryType,
 	}
+	startTime, endTime, err := extractMediationWindow(details.ListOfMediationDetails)
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "invalid mediation window: "+err.Error())
+	}
+	task.StartTime = startTime
+	task.EndTime = endTime
 
 	// Parse implicit deactivation allowed
 	if details.ImplicitDeactivationAllowed != nil {
 		task.ImplicitDeactivationAllowed = *details.ImplicitDeactivationAllowed
 	}
-
-	// Note: StartTime and EndTime parsing from MediationDetails would go here
-	// For now, we use immediate activation and indefinite duration
 
 	// Activate task
 	if err := s.taskManager.ActivateTask(task); err != nil {
@@ -1053,6 +1057,14 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 
 	// Build modification
 	mod := &TaskModification{}
+	if details.ListOfMediationDetails != nil {
+		_, endTime, err := extractMediationWindow(details.ListOfMediationDetails)
+		if err != nil {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeRequestSyntaxError, "invalid mediation window: "+err.Error())
+		}
+		mod.EndTime = &endTime
+	}
 
 	// Update targets if provided
 	if details.TargetIdentifiers != nil {
@@ -1110,6 +1122,51 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 	logger.Info("X1 task modified", "xid", xid)
 
 	return s.buildOKResponse(req.X1RequestMessage, MessageTypeModifyTask)
+}
+
+// extractMediationWindow returns the single effective window representable by
+// the current task model. An absent EndTime explicitly means an indefinite task.
+func extractMediationWindow(list *schema.ListOfMediationDetails) (time.Time, time.Time, error) {
+	if list == nil || len(list.MediationDetails) == 0 {
+		return time.Time{}, time.Time{}, nil
+	}
+	var effectiveStart, effectiveEnd time.Time
+	initialized := false
+	for i, details := range list.MediationDetails {
+		if details == nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d is nil", i)
+		}
+		start, err := parseMediationTime(details.StartTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d StartTime: %w", i, err)
+		}
+		end, err := parseMediationTime(details.EndTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d EndTime: %w", i, err)
+		}
+		if !end.IsZero() && !end.After(start) {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d EndTime must be after StartTime", i)
+		}
+		if !initialized {
+			effectiveStart, effectiveEnd, initialized = start, end, true
+			continue
+		}
+		if !start.Equal(effectiveStart) || !end.Equal(effectiveEnd) {
+			return time.Time{}, time.Time{}, fmt.Errorf("mediation entries have inconsistent time windows")
+		}
+	}
+	return effectiveStart, effectiveEnd, nil
+}
+
+func parseMediationTime(value *schema.QualifiedMicrosecondDateTime) (time.Time, error) {
+	if value == nil || string(*value) == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, string(*value))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse %q: %w", string(*value), err)
+	}
+	return parsed, nil
 }
 
 // handleGetTaskDetails handles GetTaskDetailsRequest.

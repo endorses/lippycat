@@ -4,6 +4,7 @@ package li
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -57,6 +58,12 @@ func TaskResponseDetailsToInterceptTask(details *schema.TaskResponseDetails) (*I
 		DestinationIDs: destIDs,
 		DeliveryType:   deliveryType,
 	}
+	startTime, endTime, err := mediationWindowFromSchema(td.ListOfMediationDetails)
+	if err != nil {
+		return nil, fmt.Errorf("convert mediation window: %w", err)
+	}
+	task.StartTime = startTime
+	task.EndTime = endTime
 
 	// Parse implicit deactivation allowed.
 	if td.ImplicitDeactivationAllowed != nil {
@@ -72,6 +79,45 @@ func TaskResponseDetailsToInterceptTask(details *schema.TaskResponseDetails) (*I
 	}
 
 	return task, nil
+}
+
+func mediationWindowFromSchema(list *schema.ListOfMediationDetails) (time.Time, time.Time, error) {
+	if list == nil || len(list.MediationDetails) == 0 {
+		return time.Time{}, time.Time{}, nil
+	}
+	var start, end time.Time
+	for i, md := range list.MediationDetails {
+		if md == nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d is nil", i)
+		}
+		parse := func(name string, value *schema.QualifiedMicrosecondDateTime) (time.Time, error) {
+			if value == nil || string(*value) == "" {
+				return time.Time{}, nil
+			}
+			t, err := time.Parse(time.RFC3339Nano, string(*value))
+			if err != nil {
+				return time.Time{}, fmt.Errorf("entry %d %s: %w", i, name, err)
+			}
+			return t, nil
+		}
+		s, err := parse("StartTime", md.StartTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+		e, err := parse("EndTime", md.EndTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
+		if !e.IsZero() && !e.After(s) {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d EndTime must be after StartTime", i)
+		}
+		if i == 0 {
+			start, end = s, e
+		} else if !s.Equal(start) || !e.Equal(end) {
+			return time.Time{}, time.Time{}, fmt.Errorf("mediation entries have inconsistent time windows")
+		}
+	}
+	return start, end, nil
 }
 
 // DestinationResponseDetailsToDestination converts an ETSI X1

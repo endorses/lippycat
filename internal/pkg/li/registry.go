@@ -83,6 +83,8 @@ type Registry struct {
 	mu           sync.RWMutex
 	tasks        map[uuid.UUID]*InterceptTask
 	destinations map[uuid.UUID]*Destination
+	auditHistory map[uuid.UUID][]InterceptTask
+	rollbackTask map[uuid.UUID]*InterceptTask
 
 	// onDeactivation is called when a task is implicitly deactivated.
 	onDeactivation DeactivationCallback
@@ -101,6 +103,8 @@ func NewRegistry(deactivationCallback DeactivationCallback) *Registry {
 	r := &Registry{
 		tasks:          make(map[uuid.UUID]*InterceptTask),
 		destinations:   make(map[uuid.UUID]*Destination),
+		auditHistory:   make(map[uuid.UUID][]InterceptTask),
+		rollbackTask:   make(map[uuid.UUID]*InterceptTask),
 		onDeactivation: deactivationCallback,
 		stopChan:       make(chan struct{}),
 	}
@@ -140,11 +144,10 @@ func (r *Registry) runExpirationChecker() {
 // checkExpiredTasks deactivates tasks that have reached their EndTime.
 func (r *Registry) checkExpiredTasks() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	now := time.Now()
+	var expired []*InterceptTask
 	for _, task := range r.tasks {
-		if task.Status != TaskStatusActive {
+		if task.Status != TaskStatusActive && task.Status != TaskStatusSuspended {
 			continue
 		}
 		if !task.ImplicitDeactivationAllowed {
@@ -153,18 +156,53 @@ func (r *Registry) checkExpiredTasks() {
 		if task.EndTime.IsZero() {
 			continue
 		}
-		if now.After(task.EndTime) {
-			task.Status = TaskStatusDeactivated
-			task.DeactivatedAt = now
-			if r.onDeactivation != nil {
-				// Make a copy to avoid holding the lock during callback
-				taskCopy := *task
-				r.mu.Unlock()
-				r.onDeactivation(&taskCopy, DeactivationReasonExpired)
-				r.mu.Lock()
-			}
+		if !now.Before(task.EndTime) {
+			task.Status = TaskStatusSuspended // enforcement gate while filters withdraw
+			taskCopy := *task
+			expired = append(expired, &taskCopy)
 		}
 	}
+	r.mu.Unlock()
+	for _, task := range expired {
+		if r.onDeactivation != nil {
+			r.onDeactivation(task, DeactivationReasonExpired)
+		}
+		// Manager callbacks normally complete this after enforcement withdrawal;
+		// a plain registry callback has no enforcement layer, so finalize here.
+		_ = r.finishExpiration(task.XID)
+	}
+}
+
+func (r *Registry) finishExpiration(xid uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, ok := r.tasks[xid]
+	if !ok {
+		return fmt.Errorf("%w: XID %s", ErrTaskNotFound, xid)
+	}
+	if task.Status == TaskStatusDeactivated {
+		return nil
+	}
+	if task.Status != TaskStatusSuspended {
+		return fmt.Errorf("%w: task status is %s", ErrTaskNotActive, task.Status)
+	}
+	task.Status = TaskStatusDeactivated
+	task.DeactivatedAt = time.Now()
+	return nil
+}
+
+func (r *Registry) promotePending(xid uuid.UUID, activatedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, ok := r.tasks[xid]
+	if !ok {
+		return fmt.Errorf("%w: XID %s", ErrTaskNotFound, xid)
+	}
+	if !task.ActivatedAt.Equal(activatedAt) || task.Status != TaskStatusPending {
+		return fmt.Errorf("%w: pending task changed", ErrTaskNotActive)
+	}
+	task.Status = TaskStatusActive
+	return nil
 }
 
 // ActivateTask adds and activates a new intercept task.
@@ -184,8 +222,15 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.tasks[task.XID]; exists {
-		return fmt.Errorf("%w: XID %s", ErrTaskAlreadyExists, task.XID)
+	if existing, exists := r.tasks[task.XID]; exists {
+		if existing.Status != TaskStatusDeactivated {
+			return fmt.Errorf("%w: XID %s is %s", ErrTaskAlreadyExists, task.XID, existing.Status)
+		}
+		previous := *existing
+		previous.Targets = append([]TargetIdentity(nil), existing.Targets...)
+		previous.DestinationIDs = append([]uuid.UUID(nil), existing.DestinationIDs...)
+		r.rollbackTask[task.XID] = &previous
+		r.auditHistory[task.XID] = append(r.auditHistory[task.XID], previous)
 	}
 
 	// Validate destination IDs exist
@@ -223,7 +268,27 @@ func (r *Registry) rollbackActivation(xid uuid.UUID, activatedAt time.Time) erro
 	if !task.ActivatedAt.Equal(activatedAt) || (task.Status != TaskStatusActive && task.Status != TaskStatusPending) {
 		return fmt.Errorf("rollback activation for XID %s: registry entry no longer belongs to this activation", xid)
 	}
-	delete(r.tasks, xid)
+	if previous := r.rollbackTask[xid]; previous != nil {
+		r.tasks[xid] = previous
+		delete(r.rollbackTask, xid)
+		history := r.auditHistory[xid]
+		if len(history) > 0 {
+			r.auditHistory[xid] = history[:len(history)-1]
+		}
+	} else {
+		delete(r.tasks, xid)
+	}
+	return nil
+}
+
+func (r *Registry) commitActivation(xid uuid.UUID, activatedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, ok := r.tasks[xid]
+	if !ok || !task.ActivatedAt.Equal(activatedAt) {
+		return fmt.Errorf("commit activation for XID %s: registry entry changed", xid)
+	}
+	delete(r.rollbackTask, xid)
 	return nil
 }
 
@@ -313,6 +378,9 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 
 // validateModification checks if the requested modification is allowed.
 func (r *Registry) validateModification(task *InterceptTask, mod *TaskModification) error {
+	if mod == nil {
+		return fmt.Errorf("%w: modification is nil", ErrInvalidTask)
+	}
 	// Task must be active or pending to be modified
 	if task.Status != TaskStatusActive && task.Status != TaskStatusPending {
 		return fmt.Errorf("%w: task status is %s", ErrModifyNotAllowed, task.Status)
@@ -323,6 +391,15 @@ func (r *Registry) validateModification(task *InterceptTask, mod *TaskModificati
 		dt := *mod.DeliveryType
 		if dt != DeliveryX2Only && dt != DeliveryX3Only && dt != DeliveryX2andX3 {
 			return fmt.Errorf("%w: invalid delivery type %d", ErrInvalidTask, dt)
+		}
+	}
+	if mod.EndTime != nil && !mod.EndTime.IsZero() {
+		start := task.StartTime
+		if start.IsZero() {
+			start = time.Now()
+		}
+		if !mod.EndTime.After(start) {
+			return fmt.Errorf("%w: EndTime must be after StartTime and in the future", ErrInvalidTask)
 		}
 	}
 
@@ -476,6 +553,15 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 		task.DeliveryType != DeliveryX3Only &&
 		task.DeliveryType != DeliveryX2andX3 {
 		return fmt.Errorf("%w: invalid delivery type %d", ErrInvalidTask, task.DeliveryType)
+	}
+	if !task.EndTime.IsZero() {
+		start := task.StartTime
+		if start.IsZero() {
+			start = time.Now()
+		}
+		if !task.EndTime.After(start) {
+			return fmt.Errorf("%w: EndTime must be after StartTime and in the future", ErrInvalidTask)
+		}
 	}
 
 	return nil

@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,13 +21,15 @@ import (
 )
 
 const (
-	DefaultQueueSize       = 10000
-	DefaultWorkers         = 2 // Retained for configuration compatibility.
-	DefaultBatchSize       = 100
-	DefaultBatchTimeout    = 10 * time.Millisecond
-	DefaultSendTimeout     = 5 * time.Second
-	DefaultShutdownTimeout = 10 * time.Second
-	retryPollInterval      = 100 * time.Millisecond
+	DefaultQueueSize           = 10000
+	DefaultWorkers             = 2 // Retained for configuration compatibility.
+	DefaultBatchSize           = 100
+	DefaultBatchTimeout        = 10 * time.Millisecond
+	DefaultSendTimeout         = 5 * time.Second
+	DefaultShutdownTimeout     = 10 * time.Second
+	DefaultRetryInitialBackoff = 100 * time.Millisecond
+	DefaultRetryMaxBackoff     = 30 * time.Second
+	DefaultRetryJitter         = 0.20
 )
 
 var (
@@ -60,21 +63,29 @@ type ClientConfig struct {
 	QueueSize int
 	// Workers is retained for compatibility. Delivery is serialized per
 	// destination to preserve order.
-	Workers         int
-	BatchSize       int
-	BatchTimeout    time.Duration
-	SendTimeout     time.Duration
-	ShutdownTimeout time.Duration
+	Workers               int
+	BatchSize             int
+	BatchTimeout          time.Duration
+	SendTimeout           time.Duration
+	ShutdownTimeout       time.Duration
+	RetryInitialBackoff   time.Duration
+	RetryMaxBackoff       time.Duration
+	RetryJitter           float64
+	RetrySuccessThreshold int
 }
 
 func DefaultClientConfig() ClientConfig {
 	return ClientConfig{
-		QueueSize:       DefaultQueueSize,
-		Workers:         DefaultWorkers,
-		BatchSize:       DefaultBatchSize,
-		BatchTimeout:    DefaultBatchTimeout,
-		SendTimeout:     DefaultSendTimeout,
-		ShutdownTimeout: DefaultShutdownTimeout,
+		QueueSize:             DefaultQueueSize,
+		Workers:               DefaultWorkers,
+		BatchSize:             DefaultBatchSize,
+		BatchTimeout:          DefaultBatchTimeout,
+		SendTimeout:           DefaultSendTimeout,
+		ShutdownTimeout:       DefaultShutdownTimeout,
+		RetryInitialBackoff:   DefaultRetryInitialBackoff,
+		RetryMaxBackoff:       DefaultRetryMaxBackoff,
+		RetryJitter:           DefaultRetryJitter,
+		RetrySuccessThreshold: 1,
 	}
 }
 
@@ -327,6 +338,21 @@ func NewClient(manager *Manager, config ClientConfig) *Client {
 	if config.ShutdownTimeout <= 0 {
 		config.ShutdownTimeout = defaults.ShutdownTimeout
 	}
+	if config.RetryInitialBackoff <= 0 {
+		config.RetryInitialBackoff = defaults.RetryInitialBackoff
+	}
+	if config.RetryMaxBackoff <= 0 {
+		config.RetryMaxBackoff = defaults.RetryMaxBackoff
+	}
+	if config.RetryMaxBackoff < config.RetryInitialBackoff {
+		config.RetryMaxBackoff = config.RetryInitialBackoff
+	}
+	if config.RetryJitter <= 0 || config.RetryJitter > 1 {
+		config.RetryJitter = defaults.RetryJitter
+	}
+	if config.RetrySuccessThreshold <= 0 {
+		config.RetrySuccessThreshold = defaults.RetrySuccessThreshold
+	}
 	return &Client{
 		manager:   manager,
 		config:    config,
@@ -353,14 +379,6 @@ func (c *Client) Start() {
 func (c *Client) Stop() {
 	c.stopOnce.Do(func() {
 		c.stopped.Store(true)
-		deadline := time.Now().Add(c.config.ShutdownTimeout)
-		for time.Now().Before(deadline) {
-			if c.QueueDepth() == 0 {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-
 		c.queuesMu.Lock()
 		for did, q := range c.queues {
 			remaining := q.stopAndDrain()
@@ -464,6 +482,8 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 	defer c.wg.Done()
 	defer close(q.done)
 
+	backoff := c.config.RetryInitialBackoff
+	consecutiveSuccesses := 0
 	for {
 		if q.depth() == 0 {
 			select {
@@ -483,9 +503,11 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 				return
 			}
 			c.recordRetry(q, err)
-			if !waitForRetry(q, retryPollInterval) {
+			consecutiveSuccesses = 0
+			if !waitForRetry(q, jitterDuration(backoff, c.config.RetryJitter)) {
 				return
 			}
+			backoff = min(backoff*2, c.config.RetryMaxBackoff)
 			continue
 		}
 
@@ -495,16 +517,25 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 			if err := c.sendItem(conn, q.did, item); err != nil {
 				c.manager.InvalidateConnection(q.did, conn)
 				c.recordRetry(q, err)
+				consecutiveSuccesses = 0
 				failed = true
 				break
 			}
 			if q.pop(item) {
 				atomic.AddInt64(&c.stats.QueueDepth, -1)
 				c.recordSuccess(q, item)
+				consecutiveSuccesses++
+				if consecutiveSuccesses >= c.config.RetrySuccessThreshold {
+					backoff = c.config.RetryInitialBackoff
+				}
 			}
 		}
 		if !failed {
 			c.manager.ReleaseConnection(q.did, conn)
+		} else if !waitForRetry(q, jitterDuration(backoff, c.config.RetryJitter)) {
+			return
+		} else {
+			backoff = min(backoff*2, c.config.RetryMaxBackoff)
 		}
 	}
 }
@@ -515,11 +546,17 @@ func waitForRetry(q *destinationQueue, delay time.Duration) bool {
 	select {
 	case <-timer.C:
 		return true
-	case <-q.notify:
-		return true
 	case <-q.stop:
 		return false
 	}
+}
+
+func jitterDuration(delay time.Duration, fraction float64) time.Duration {
+	if fraction <= 0 {
+		return delay
+	}
+	factor := 1 - fraction + rand.Float64()*(2*fraction)
+	return time.Duration(float64(delay) * factor)
 }
 
 func (c *Client) sendItem(conn *tls.Conn, did uuid.UUID, item *deliveryItem) error {

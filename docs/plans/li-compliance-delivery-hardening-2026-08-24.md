@@ -345,15 +345,23 @@ Tests:
 
 ## 6. Phase 4 — Availability and resource controls
 
+**Status (2026-08-25): Implemented.** Delivery dispatch now uses capped exponential
+backoff with bounded jitter that enqueue notifications cannot bypass, and reconnect
+backoff resets only after successful writes. X1 client identity defaults to the
+immediate peer, trusts forwarding headers only for configured proxy CIDRs, and uses
+a bounded idle-expiring limiter cache with entry/eviction stats. LI packet counters
+and callback reads are atomic. VoIP flow-shard dispatch drops locally on saturation,
+with per-worker drop, depth, and high-water statistics and rate-limited warnings.
+
 ### 6.1 Apply real delivery retry backoff
 
 **Current code:** `internal/pkg/li/delivery/client.go`, `internal/pkg/li/delivery/destination.go`
 
-- [ ] Remove `q.notify` from the failed-connection retry wait. New traffic must not bypass backoff.
-- [ ] Use exponential backoff with configured initial and maximum durations and bounded jitter.
-- [ ] Reset backoff only after a successful connection/write threshold.
-- [ ] Stop promptly on destination removal or client shutdown.
-- [ ] Log state transitions and summarized failure counts, not every attempt.
+- [x] Remove `q.notify` from the failed-connection retry wait. New traffic must not bypass backoff.
+- [x] Use exponential backoff with configured initial and maximum durations and bounded jitter.
+- [x] Reset backoff only after a successful connection/write threshold.
+- [x] Stop promptly on destination removal or client shutdown.
+- [x] Log state transitions and summarized failure counts, not every attempt.
 
 Tests:
 
@@ -366,26 +374,26 @@ Tests:
 
 **Current code:** `internal/pkg/li/x1/server.go`
 
-- [ ] Use `RemoteAddr` by default.
-- [ ] Add a configured trusted-proxy CIDR list, empty by default.
-- [ ] Honour `Forwarded`/`X-Forwarded-For` only when the immediate peer is trusted and validate every parsed address.
-- [ ] Replace the unbounded `sync.Map` with a bounded TTL cache or periodically prune idle limiters.
-- [ ] Expose limiter entry count and eviction metrics.
+- [x] Use `RemoteAddr` by default.
+- [x] Add a configured trusted-proxy CIDR list, empty by default.
+- [x] Honour `Forwarded`/`X-Forwarded-For` only when the immediate peer is trusted and validate every parsed address.
+- [x] Replace the unbounded `sync.Map` with a bounded TTL cache or periodically prune idle limiters.
+- [x] Expose limiter entry count and eviction metrics.
 
 Tests:
 
-- [ ] Varying XFF from an untrusted peer cannot bypass limits or grow the cache.
-- [ ] Trusted proxy extraction selects the intended client address.
-- [ ] Idle entries expire and the cache remains bounded.
+- [x] Varying XFF from an untrusted peer cannot bypass limits or grow the cache.
+- [x] Trusted proxy extraction selects the intended client address.
+- [x] Idle entries expire and the cache remains bounded.
 
 ### 6.3 Remove manager-wide counter locks from the packet path
 
 **Current code:** `internal/pkg/li/manager.go`
 
-- [ ] Convert packet/match/error counters to typed atomics.
-- [ ] Store/load the packet callback without a per-packet exclusive mutex, using `atomic.Pointer`, `atomic.Value`, or immutable configuration after startup.
-- [ ] Audit all remaining manager locks reachable from `ProcessPacket`.
-- [ ] Preserve a consistent stats snapshot API.
+- [x] Convert packet/match/error counters to typed atomics.
+- [x] Store/load the packet callback without a per-packet exclusive mutex, using `atomic.Pointer`, `atomic.Value`, or immutable configuration after startup.
+- [x] Audit all remaining manager locks reachable from `ProcessPacket`.
+- [x] Preserve a consistent stats snapshot API.
 
 Tests and benchmarks:
 
@@ -396,12 +404,12 @@ Tests and benchmarks:
 
 **Current code:** `internal/pkg/voip/core.go`
 
-- [ ] Make worker dispatch non-blocking or use a bounded overflow policy.
-- [ ] Count drops by worker and reason.
-- [ ] Expose per-worker queue depth/high-water marks.
-- [ ] Rate-limit overload logs.
-- [ ] Preserve flow affinity; document that drops are preferable to globally stalling all flows.
-- [ ] Track TCP worker-0 concentration as a follow-up metric. Pipeline restructuring remains separate work.
+- [x] Make worker dispatch non-blocking or use a bounded overflow policy.
+- [x] Count drops by worker and reason.
+- [x] Expose per-worker queue depth/high-water marks.
+- [x] Rate-limit overload logs.
+- [x] Preserve flow affinity; document that drops are preferable to globally stalling all flows.
+- [x] Track TCP worker-0 concentration as a follow-up metric. Pipeline restructuring remains separate work. (Worker-0 depth, high-water, and drops provide this concentration signal.)
 
 Tests:
 

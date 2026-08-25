@@ -4,6 +4,60 @@
 **Code baseline:** `f045f6b` (`v0.9.4`)  
 **Scope:** ETSI X1 task lifecycle, LI filter enforcement, X2/X3 product generation and delivery, VoIP call retention, distributed timestamps, and related availability controls.
 
+## Implementation audit update — 2026-08-25 (post-hardening)
+
+The implementation was re-audited against this plan after the Phase 1–6 changes
+landed. The plan is **not complete** and must not be used to claim full LI
+compliance or operational acceptance yet.
+
+The following implementation gaps remain:
+
+- Ambiguous legacy filter ownership still fails safe by retaining and logging the
+  filter. Automated ownership identification and migration remain incomplete.
+  `FilterLister` currently exposes only IDs, so ownership of an ambiguous
+  eight-character legacy prefix cannot be proved without extending the API to
+  return authoritative ownership metadata. Do not delete these filters
+  heuristically.
+- Compliance-critical focused, socket-backed, and end-to-end tests listed in
+  sections 4, 6, 7, and 10 remain required. A sandboxed audit run of
+  `go test -race -tags 'all,li' ./internal/pkg/li/...` could not execute tests
+  requiring local TCP listeners (`socket: operation not permitted`); this is an
+  environment limitation, not evidence that those tests pass or fail.
+
+Completed checkboxes elsewhere in this document describe implemented local code,
+not peer interoperability approval or completion of the operational acceptance
+criteria in sections 9–11.
+
+Checkbox convention in this document:
+
+- `[x]` means the stated code change or named test has been implemented locally.
+- `[ ]` means it is not implemented, not covered by the named test, or still
+  requires external verification/coordination as described beside the item.
+- A checked implementation item does not imply that a separate unchecked test,
+  rollout gate, or operational-acceptance item has passed.
+
+The post-audit hardening completed the three previously identified local code
+gaps:
+
+- `GetTaskDetails` returns targets, destinations, schema-valid provisioning
+  status, unresolved faults, and effective mediation start/end bounds.
+- Existing RTP calls refresh atomic last-seen timestamps, which eviction uses
+  without taking the tracker-wide write lock for each media packet.
+- X2 and X3 content and keepalive traffic use distinct interface-scoped TLS
+  pools. ACK state belongs to one connection/interface, and a timeout closes and
+  reconnects only that interface using bounded jittered backoff.
+
+Post-hardening verification completed:
+
+- Race-enabled focused tests pass for X1 task-detail responses, delivery
+  keepalive configuration and interface-scoped ACK handling, X2/X3 control PDUs,
+  and RTP call recency/pinning.
+- All LI, VoIP, and processor packages compile with `-tags 'all li'`.
+- `go vet -tags 'all li' ./internal/pkg/li/... ./internal/pkg/voip/...` passes.
+- `git diff --check` passes.
+- The complete race-enabled LI suite remains unverified in this sandbox because
+  its `httptest` cases cannot bind local TCP listeners.
+
 ## 1. Objective
 
 Make LI task acknowledgement, packet interception, and delivery agree with one another under normal operation, partial failure, overload, restart, and task lifecycle transitions.
@@ -137,7 +191,7 @@ to be added.
 
 ## 4. Phase 2 — Enforce the complete task lifecycle
 
-**Status (2026-08-25): Implemented, with test and response follow-ups.** Mediation windows are parsed and validated,
+**Status (2026-08-25): Implemented, with focused test follow-ups.** Mediation windows are parsed and validated,
 future tasks remain unarmed until manager-driven promotion, expiry gates packet
 processing before transactional filter withdrawal, and deactivated XIDs may be
 deliberately reactivated. Zero `EndTime` explicitly means an indefinite task.
@@ -145,7 +199,8 @@ Manager maintenance purges operational tombstones after 24 hours by default;
 reactivation history is retained separately in the registry audit history.
 The full LI suite passes with `go test -tags li ./internal/pkg/li/...`. Dedicated
 regressions are still needed for the unchecked concurrency, cleanup-failure,
-packet-processing, and task-detail response cases below.
+and packet-processing cases below. Task-detail response content has focused
+coverage; full socket-backed X1 coverage remains part of the verification gap.
 
 ### 4.1 Parse mediation time bounds
 
@@ -159,7 +214,7 @@ packet-processing, and task-detail response cases below.
   - [x] permit indefinite tasks explicitly; or
   - [ ] require an end time and reject its absence.
 - [x] Define multi-DID mediation semantics. If mediation entries contain inconsistent time windows that cannot be represented by the current task model, reject the request rather than flattening them silently.
-- [ ] Include the effective start/end values in task-detail responses and reconciliation conversions. (Reconciliation conversion is complete; the X1 server still returns only its basic OK response for `GetTaskDetails`.)
+- [x] Include the effective start/end values in task-detail responses and reconciliation conversions.
 
 Tests:
 
@@ -233,14 +288,15 @@ Tests:
 
 ## 5. Phase 3 — Eliminate silent product loss
 
-**Status (2026-08-25): Implemented, with call-recency and integration-test follow-ups.** IP/CIDR
+**Status (2026-08-25): Implemented, with integration-test follow-ups.** IP/CIDR
 matches now produce raw-packet X3 PDUs and unsupported X2-only combinations are
 rejected before filter installation. RTP reordering is deadline-based and bounded,
 X2 and X3 use isolated queues with bounded-fair dispatch, empty SIP products fail
 encoding, and intercepted calls can be retained with generic tracker leases. The
-focused Phase 3 tests and race-enabled reorder tests pass. A dedicated RTP-only
-recency mechanism that avoids the global tracker write lock remains open, as do
-socket-backed end-to-end delivery tests in an environment that permits listeners.
+focused Phase 3 tests and race-enabled reorder tests pass. Existing RTP calls use
+atomic last-seen timestamps for eviction recency without a tracker-wide write lock.
+Socket-backed end-to-end delivery tests remain open in an environment that permits
+listeners.
 
 ### 5.1 Define supported delivery for every target type
 
@@ -333,12 +389,12 @@ Tests:
 - [x] The processor LI integration pins a Call-ID while at least one active task requires its media and releases it on call completion/task deactivation.
 - [x] Prefer evicting unpinned inactive calls, then unpinned least-recently-active calls.
 - [x] If all calls are pinned, allow controlled growth beyond the soft cap and emit a rate-limited WARN. (A dedicated controlled-growth metric remains a follow-up.)
-- [ ] Refresh RTP recency without taking the global write lock for every RTP packet, for example with atomic `lastSeen` values considered during eviction or a periodic promotion pass.
+- [x] Refresh RTP recency without taking the global write lock for every RTP packet, using atomic last-seen values considered during eviction.
 - [x] Wire the existing `voip.max_calls` configuration into this tracker rather than hard-coding `DefaultMaxCalls`.
 
 Tests:
 
-- [ ] An RTP-only active call remains eligible and recent. (Blocked on the recency follow-up above.)
+- [x] An RTP-only active call remains eligible and recent.
 - [x] An intercepted pinned call survives capacity pressure.
 - [x] Unpinned calls are still evicted.
 - [x] Pin release allows later eviction and does not leak state.
@@ -509,6 +565,14 @@ Tests:
 
 ### 7.4 Add X2/X3 keepalive exchange
 
+**Status (post-hardening 2026-08-25): Implemented locally; socket-backed protocol
+verification and coordinated MDF enablement remain open.** X2 and X3 use distinct
+interface-scoped TLS pools for both content and keepalive traffic. Each connection
+owns one zero-based keepalive sequence and outstanding-ACK set, making interface
+association unambiguous. A timeout invalidates and reconnects only the affected
+interface with capped jittered backoff. Production enablement remains gated on
+the section 9 coordination decisions and the unchecked socket-backed tests below.
+
 ETSI TS 103 221-2 V1.10.1 clause 6.2.4 requires POIs and MDFs to support
 Keepalive and Keepalive Acknowledgement PDUs. When the TLS transport profile
 enables the mechanism, the POI sends a Keepalive at least every `TIME_P1`
@@ -530,20 +594,21 @@ provide equivalent local configuration with the normative defaults. This is a
 time-based liveness rule, not a configurable count of missed ACKs.
 
 - [x] Add independently configurable X2 and X3 keepalive enablement, `TIME_P1`, and `TIME_P2`, defaulting to 60 seconds and 180 seconds respectively and rejecting enabled timer values below one second.
-- [ ] Send a Keepalive PDU at least once during every `TIME_P1` interval while the applicable X2/X3 TLS connection is established; ordinary data traffic does not replace the required application-level Keepalive.
+- [x] Send a Keepalive PDU at least once during every `TIME_P1` interval while the applicable X2/X3 TLS connection is established; ordinary data traffic does not replace the required application-level Keepalive.
 - [x] Encode Keepalive and Keepalive Acknowledgement PDUs as specified in clause 5.1: Version, PDU Type, and Header Length populated; all other mandatory header fields zero; exactly one Sequence Number attribute; no payload.
-- [ ] Maintain a zero-based 32-bit Keepalive sequence for each applicable X2/X3 connection/interface and require an acknowledgement to echo the corresponding Keepalive sequence number.
-- [x] Run a framed inbound-PDU reader instead of discarding reads; validate Keepalive Acknowledgements and update liveness only for a valid outstanding sequence.
-- [x] If no valid Keepalive Acknowledgement has been observed within `TIME_P2`, close the affected connection, enter the existing bounded reconnect path, and report the delivery fault through X1.
+- [x] Maintain a zero-based 32-bit Keepalive sequence for each applicable X2/X3 connection/interface and require an acknowledgement to echo the corresponding Keepalive sequence number.
+- [x] Run a framed inbound-PDU reader instead of discarding reads; validate Keepalive Acknowledgements and update liveness only for a valid outstanding sequence on the correct X2 or X3 interface.
+- [x] If no valid Keepalive Acknowledgement has been observed within `TIME_P2`, close only the affected interface connection, enter its bounded reconnect path, and report the delivery fault through X1.
 - [x] Serialize Keepalive and content writes on each TLS connection so frames cannot interleave, without placing control PDUs in the bounded X2/X3 content queues or changing content ordering.
-- [ ] Treat X2 and X3 keepalive state independently even when they share an MDF destination.
+- [x] Treat X2 and X3 keepalive state independently even when they share an MDF destination.
+- [x] Use distinct X2 and X3 TLS connections so an ACK's interface is unambiguous.
 - [x] Expose enabled state, configured `TIME_P1`/`TIME_P2`, last Keepalive sequence/time, last valid ACK time, ACK age, timeout count, and reconnect reason in per-interface destination stats.
 
 Tests:
 
-- [ ] Defaults and minimum timer validation match clause 6.2.4 and Annex C.
+- [x] Defaults and minimum timer validation match clause 6.2.4 and Annex C.
 - [ ] Keepalives are sent at least every `TIME_P1` on both idle and data-active connections.
-- [ ] A matching ACK maintains the connection and updates liveness statistics.
+- [x] A matching ACK is accepted only on its interface connection and updates liveness statistics. (Unit coverage; socket-backed connection-continuity coverage remains open.)
 - [ ] A missing, malformed, stale, or wrong-sequence ACK does not satisfy liveness.
 - [ ] Absence of a valid ACK for `TIME_P2` closes the affected connection, triggers bounded reconnect, and reports an X1 delivery error.
 - [ ] X2 and X3 keepalive timers and sequences are independent.

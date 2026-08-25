@@ -662,24 +662,24 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	// Check if it's a request container (batch), X1Request envelope, or a direct request.
 	switch rootDetector.XMLName.Local {
 	case "requestContainer":
-		// Legacy container format.
-		var reqContainer schema.RequestContainer
+		// Legacy container format. Decode the concrete message envelopes rather
+		// than schema.RequestContainer: the generated base-message slice drops
+		// xsi:type and operation-specific fields.
+		var reqContainer x1RequestEnvelope
 		if err := xml.Unmarshal(body, &reqContainer); err != nil {
 			s.sendErrorResponse(w, "", ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
 			return
 		}
-
-		// Process each request message in the container.
-		// For now, we only support single requests per container.
-		if len(reqContainer.X1RequestMessage) > 0 {
-			resp := s.processRequestMessage(body, reqContainer.X1RequestMessage[0])
-			responses = append(responses, resp)
+		for _, message := range reqContainer.RequestMessages {
+			responses = append(responses, s.processEnvelopeMessage(message))
+		}
+		if len(reqContainer.RequestMessages) == 0 {
+			responses = append(responses, s.buildErrorResponse(nil, "requestContainer", ErrorCodeRequestSyntaxError, "request container is empty"))
 		}
 
 	case "X1Request":
 		// ETSI-compliant X1Request envelope with xsi:type on x1RequestMessage.
-		resp := s.processX1RequestEnvelope(body)
-		responses = append(responses, resp)
+		responses = append(responses, s.processX1RequestEnvelope(body)...)
 
 	default:
 		// Direct request (not wrapped in container) for backward compatibility.
@@ -757,8 +757,8 @@ func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartEl
 // x1RequestEnvelope represents the ETSI-compliant X1Request envelope.
 // The x1RequestMessage element uses xsi:type to indicate the concrete request type.
 type x1RequestEnvelope struct {
-	XMLName        xml.Name             `xml:"X1Request"`
-	RequestMessage x1RequestMessageAttr `xml:"x1RequestMessage"`
+	XMLName         xml.Name
+	RequestMessages []x1RequestMessageAttr `xml:"x1RequestMessage"`
 }
 
 // x1RequestMessageAttr captures the xsi:type attribute, admfIdentifier, and inner XML from x1RequestMessage.
@@ -771,27 +771,63 @@ type x1RequestMessageAttr struct {
 // processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
 // It extracts the xsi:type from x1RequestMessage and synthesizes a bare request
 // for processing by processRequestMessage.
-func (s *Server) processX1RequestEnvelope(body []byte) any {
+func (s *Server) processX1RequestEnvelope(body []byte) []any {
 	var envelope x1RequestEnvelope
 	if err := xml.Unmarshal(body, &envelope); err != nil {
-		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())
+		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())}
 	}
+	if len(envelope.RequestMessages) == 0 {
+		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "X1Request envelope is empty")}
+	}
+	responses := make([]any, 0, len(envelope.RequestMessages))
+	for _, message := range envelope.RequestMessages {
+		responses = append(responses, s.processEnvelopeMessage(message))
+	}
+	return responses
+}
 
-	messageType := envelope.RequestMessage.Type
+func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr) any {
+	requestMessage := envelopeBaseMessage(message)
+	messageType := message.Type
 	if messageType == "" {
-		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
+		return s.buildErrorResponse(requestMessage, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
+	}
+	if strings.EqualFold(messageType, "requestContainer") || containsElement(message.InnerXML, "requestContainer") || containsElement(message.InnerXML, "X1Request") {
+		return s.buildErrorResponse(requestMessage, "requestContainer", ErrorCodeRequestSyntaxError, "nested request containers not supported")
 	}
 
 	// Learn the ADMF identifier from the inbound request.
-	if envelope.RequestMessage.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
-		s.config.OnADMFIdentified(envelope.RequestMessage.AdmfIdentifier)
+	if message.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
+		s.config.OnADMFIdentified(message.AdmfIdentifier)
 	}
 
 	// Synthesize a bare request XML from the xsi:type and inner content
 	// so it can be processed by the existing processRequestMessage logic.
-	syntheticXML := []byte("<" + messageType + ">" + string(envelope.RequestMessage.InnerXML) + "</" + messageType + ">")
+	syntheticXML := []byte("<" + messageType + ">" + string(message.InnerXML) + "</" + messageType + ">")
 
 	return s.processRequestMessage(syntheticXML, nil)
+}
+
+func containsElement(data []byte, localName string) bool {
+	decoder := xml.NewDecoder(strings.NewReader("<root>" + string(data) + "</root>"))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		if start, ok := token.(xml.StartElement); ok && strings.EqualFold(start.Name.Local, localName) {
+			return true
+		}
+	}
+}
+
+func envelopeBaseMessage(message x1RequestMessageAttr) *schema.X1RequestMessage {
+	var requestMessage schema.X1RequestMessage
+	syntheticXML := []byte("<x1RequestMessage>" + string(message.InnerXML) + "</x1RequestMessage>")
+	if err := xml.Unmarshal(syntheticXML, &requestMessage); err != nil {
+		return nil
+	}
+	return &requestMessage
 }
 
 // processRequestMessage processes a single X1 request message.

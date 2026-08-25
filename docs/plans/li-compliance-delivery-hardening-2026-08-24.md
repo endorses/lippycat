@@ -419,38 +419,45 @@ Tests:
 
 ## 7. Phase 5 — Evidential correctness and interop
 
+**Status (2026-08-25): Partially implemented; coordinated protocol changes remain gated.**
+Hunter forwarding now preserves capture timestamps, X1 handles ETSI envelopes and
+all legacy-container messages in order, and X2/X3 correlation has a documented
+wire invariant with an encoded-PDU regression test. Sequence ownership, X2/X3
+keepalive behavior, and the declared X1 revision remain unchanged pending the
+ADMF/MDF decisions explicitly required below.
+
 ### 7.1 Preserve capture timestamps across hunters
 
 **Current code:** `internal/pkg/hunter/hunter.go`
 
-- [ ] In `convertPacket`, use `pkt.Metadata().Timestamp` when available.
-- [ ] In `ForwardPacketWithMetadata`, use the original packet metadata timestamp.
-- [ ] Define a fallback for synthetic packets without capture metadata and mark/log that fallback distinctly.
-- [ ] Verify processor conversion preserves the nanosecond value into X2/X3 attribute 9.
+- [x] In `convertPacket`, use `pkt.Metadata().Timestamp` when available.
+- [x] In `ForwardPacketWithMetadata`, use the original packet metadata timestamp.
+- [x] Define a fallback for synthetic packets without capture metadata and mark/log that fallback distinctly.
+- [x] Verify processor conversion preserves the nanosecond value into X2/X3 attribute 9.
 
 Tests:
 
-- [ ] Forwarded protobuf timestamps equal fixture capture timestamps.
+- [x] Forwarded protobuf timestamps equal fixture capture timestamps.
 - [ ] Delayed forwarding and reconnect buffering do not change them.
-- [ ] X2/X3 decoded timestamp attributes match the source PCAP.
+- [x] X2/X3 decoded timestamp attributes match the source capture time.
 
 ### 7.2 Repair X1 request-container handling
 
 **Current code:** `internal/pkg/li/x1/server.go`, generated X1 schema types
 
-- [ ] Support the ETSI `X1Request` envelope as the primary format.
-- [ ] If legacy `requestContainer` remains supported, process every contained message, not only index zero.
-- [ ] Do not pass the complete container XML to a single-message router.
-- [ ] Preserve each message's concrete operation type and fields; the current generated base-message slice is insufficient on its own.
-- [ ] Return one ordered response per request and define whether processing continues after an individual error.
-- [ ] Reject truly nested containers explicitly.
+- [x] Support the ETSI `X1Request` envelope as the primary format.
+- [x] If legacy `requestContainer` remains supported, process every contained message, not only index zero.
+- [x] Do not pass the complete container XML to a single-message router.
+- [x] Preserve each message's concrete operation type and fields; the current generated base-message slice is insufficient on its own.
+- [x] Return one ordered response per request and define whether processing continues after an individual error.
+- [x] Reject truly nested containers explicitly.
 
 Tests:
 
-- [ ] Single-message envelope succeeds.
-- [ ] Multi-message container executes every request in order.
-- [ ] Mixed success/error responses retain transaction IDs.
-- [ ] A nested container is rejected without affecting sibling messages.
+- [x] Single-message envelope succeeds.
+- [x] Multi-message container executes every request in order.
+- [x] Mixed success/error responses retain transaction IDs.
+- [x] A nested container is rejected without affecting sibling messages.
 
 ### 7.3 Coordinate per-XID/per-destination sequence numbers
 
@@ -498,9 +505,9 @@ Coordinate one declared X1 revision across lippycat, the ADMF, and the MDF befor
 
 ### 7.6 Protect X2/X3 correlation identity
 
-- [ ] Add an end-to-end regression test proving that X2 SIP and X3 RTP for the same call carry the same correlation identity expected by the MDF.
-- [ ] Cover multiple SSRCs, both media directions, re-INVITE, and call-ID reuse.
-- [ ] Document the correlation derivation as a wire-level compatibility invariant.
+- [x] Add an end-to-end regression test proving that X2 SIP and X3 RTP for the same call carry the same correlation identity expected by the MDF.
+- [x] Cover multiple SSRCs, both media directions, re-INVITE, and call-ID reuse.
+- [x] Document the correlation derivation as a wire-level compatibility invariant.
 
 ## 8. Phase 6 — State persistence and reconciliation completion
 

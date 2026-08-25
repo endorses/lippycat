@@ -534,6 +534,8 @@ func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *data.
 	captureLen := 0
 	originalLen := 0
 	var packetData []byte
+	timestamp := time.Now()
+	hasCaptureTimestamp := false
 
 	if pkt != nil {
 		if pkt.Data() != nil {
@@ -543,13 +545,22 @@ func convertPacket(pktInfo capture.PacketInfo, matchedFilterIDs []string) *data.
 		if meta := pkt.Metadata(); meta != nil {
 			captureLen = meta.CaptureLength
 			originalLen = meta.Length
+			if !meta.Timestamp.IsZero() {
+				timestamp = meta.Timestamp
+				hasCaptureTimestamp = true
+			}
 		}
+	}
+	if !hasCaptureTimestamp {
+		logger.Debug("Packet has no capture timestamp; using forwarding time",
+			"interface", pktInfo.Interface,
+			"timestamp_source", "forwarding_fallback")
 	}
 
 	// Packet field conversions (safe: lengths are from pcap, LinkType is enum < 300)
 	return &data.CapturedPacket{
 		Data:             packetData,
-		TimestampNs:      time.Now().UnixNano(),
+		TimestampNs:      timestamp.UnixNano(),
 		CaptureLength:    uint32(captureLen),  // #nosec G115
 		OriginalLength:   uint32(originalLen), // #nosec G115
 		InterfaceIndex:   0,

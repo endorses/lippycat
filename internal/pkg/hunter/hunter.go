@@ -411,6 +411,8 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 	captureLen := 0
 	originalLen := 0
 	var packetData []byte
+	timestamp := time.Now()
+	hasCaptureTimestamp := false
 
 	if pkt != nil {
 		if pkt.Data() != nil {
@@ -420,13 +422,22 @@ func (h *Hunter) convertPacket(pktInfo capture.PacketInfo) *data.CapturedPacket 
 		if meta := pkt.Metadata(); meta != nil {
 			captureLen = meta.CaptureLength
 			originalLen = meta.Length
+			if !meta.Timestamp.IsZero() {
+				timestamp = meta.Timestamp
+				hasCaptureTimestamp = true
+			}
 		}
+	}
+	if !hasCaptureTimestamp {
+		logger.Debug("Packet has no capture timestamp; using forwarding time",
+			"interface", pktInfo.Interface,
+			"timestamp_source", "forwarding_fallback")
 	}
 
 	// Packet field conversions (safe: lengths are from pcap, LinkType is enum < 300)
 	return &data.CapturedPacket{
 		Data:           packetData,
-		TimestampNs:    time.Now().UnixNano(),
+		TimestampNs:    timestamp.UnixNano(),
 		CaptureLength:  uint32(captureLen),  // #nosec G115
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,
@@ -455,6 +466,8 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 	captureLen := 0
 	originalLen := 0
 	var packetData []byte
+	timestamp := time.Now()
+	hasCaptureTimestamp := false
 
 	if packet.Data() != nil {
 		packetData = packet.Data()
@@ -463,13 +476,22 @@ func (h *Hunter) ForwardPacketWithMetadata(packet gopacket.Packet, metadata *dat
 	if meta := packet.Metadata(); meta != nil {
 		captureLen = meta.CaptureLength
 		originalLen = meta.Length
+		if !meta.Timestamp.IsZero() {
+			timestamp = meta.Timestamp
+			hasCaptureTimestamp = true
+		}
+	}
+	if !hasCaptureTimestamp {
+		logger.Debug("Packet has no capture timestamp; using forwarding time",
+			"interface", interfaceName,
+			"timestamp_source", "forwarding_fallback")
 	}
 
 	// Create protobuf packet with embedded metadata
 	// Use the provided link type from the capture source (preserves Linux cooked, raw IP, etc.)
 	pbPkt := &data.CapturedPacket{
 		Data:           packetData,
-		TimestampNs:    time.Now().UnixNano(),
+		TimestampNs:    timestamp.UnixNano(),
 		CaptureLength:  uint32(captureLen),  // #nosec G115
 		OriginalLength: uint32(originalLen), // #nosec G115
 		InterfaceIndex: 0,

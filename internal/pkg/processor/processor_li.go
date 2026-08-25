@@ -29,6 +29,7 @@ import (
 var (
 	liX2Encoder      *x2x3.X2Encoder
 	liX3Encoder      *x2x3.X3Encoder
+	liSequencer      *x2x3.Sequencer
 	liDeliveryMgr    *delivery.Manager
 	liDeliveryClient *delivery.Client
 	liReorderBuffers sync.Map // map[string]*delivery.ReorderBuffer keyed by "xid-destID"
@@ -164,8 +165,8 @@ func (p *Processor) initLIManager() {
 		if calls, ok := liPinnedCalls.LoadAndDelete(task.XID); ok {
 			calls.(*sync.Map).Range(func(key, _ any) bool { voip.GetCallTracker().UnpinCall(key.(string)); return true })
 		}
-		if liDeliveryClient != nil {
-			liDeliveryClient.ResetSequence(task.XID)
+		if liSequencer != nil {
+			liSequencer.ClearXID(task.XID)
 		}
 		if liMediaDirection != nil {
 			liMediaDirection.ClearXID(task.XID)
@@ -189,8 +190,9 @@ func (p *Processor) initLIManager() {
 	p.liManager = li.NewManager(config, deactivationCallback)
 
 	// Initialize X2/X3 encoders
-	liX2Encoder = x2x3.NewX2Encoder()
-	liX3Encoder = x2x3.NewX3Encoder()
+	liSequencer = x2x3.NewSequencer(0)
+	liX2Encoder = x2x3.NewX2EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
+	liX3Encoder = x2x3.NewX3EncoderWithSequencer(liSequencer, "", p.config.ProcessorID)
 	logger.Info("LI X2/X3 encoders initialized")
 
 	// Media direction resolver: RTP carries no SIP identity, so the direction of
@@ -268,12 +270,7 @@ func (p *Processor) initLIManager() {
 				)
 			} else if pdu != nil {
 				liX2Encoded.Add(1)
-				// Add NFID (processor/NE ID) and IPID (hunter/capture point)
 				attrBuilder := x2x3.NewAttributeBuilder()
-				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
-				if pkt.NodeID != "" {
-					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
-				}
 				// Matched target identifier (ETSI attr 17) and Payload Direction.
 				// Only set when the task has a single target, so the identity is
 				// unambiguous; with multiple targets the MDF falls back to the XID
@@ -319,12 +316,7 @@ func (p *Processor) initLIManager() {
 				)
 			} else if pdu != nil {
 				liX3Encoded.Add(1)
-				// Add NFID (processor/NE ID) and IPID (hunter/capture point)
 				attrBuilder := x2x3.NewAttributeBuilder()
-				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
-				if pkt.NodeID != "" {
-					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
-				}
 				// Matched target identifier (ETSI attr 17) and Payload Direction.
 				// Only set when the task has a single target, so the identity is
 				// unambiguous; with multiple targets the MDF falls back to the XID
@@ -390,10 +382,6 @@ func (p *Processor) initLIManager() {
 					return
 				}
 				attrBuilder := x2x3.NewAttributeBuilder()
-				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
-				if pkt.NodeID != "" {
-					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
-				}
 				pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(matchedTarget))
 				if data, marshalErr := pdu.MarshalBinary(); marshalErr != nil {
 					liX3Errors.Add(1)

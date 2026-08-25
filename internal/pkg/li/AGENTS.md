@@ -451,7 +451,6 @@ Ordered asynchronous delivery with reconnect buffering:
 type Client struct {
     manager           *Manager
     destinationQueues map[uuid.UUID]*destinationQueue
-    sequences         map[streamKey]*uint32
 }
 ```
 
@@ -461,7 +460,7 @@ type Client struct {
 - Items remain queued across transient disconnects
 - Drop-oldest overflow with reason-labelled statistics
 - Batching for efficiency (default: 100 PDUs/batch)
-- Per-XID+destination sequence numbering
+- Immutable PDU fan-out: every destination receives identical encoded bytes
 - At-least-once retry semantics after ambiguous writes
 
 **Methods:**
@@ -469,6 +468,12 @@ type Client struct {
 - `SendX3(xid, destIDs, data)` - Queue X3 PDU (async)
 - `SendX2Sync(ctx, xid, destIDs, data)` - Synchronous X2 delivery
 - `SendX3Sync(ctx, xid, destIDs, data)` - Synchronous X3 delivery
+
+Sequence attribute 8 is owned by the shared `x2x3.Sequencer`, not delivery.
+Per ETSI TS 103 221-2 clause 5.3.9 it is keyed by PDU type plus
+`(XID, Domain ID, NFID, IPID, Correlation ID)`, starts at zero, and wraps at
+32 bits. X2 and X3 are separate sequences. The Domain ID is not an X1
+destination `DId`; destination fan-out does not alter the sequence.
 
 ## Processor Integration
 

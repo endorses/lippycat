@@ -38,17 +38,28 @@ var (
 //
 // The encoder is safe for concurrent use.
 type X2Encoder struct {
-	// seqNum is the global sequence number for X2 PDUs.
-	seqNum atomic.Uint32
-
 	// attrBuilder is used to construct TLV attributes.
 	attrBuilder *AttributeBuilder
+	sequencer   *Sequencer
+	domainID    string
+	nfID        string
+	lastSeq     atomic.Uint32
 }
 
 // NewX2Encoder creates a new X2 encoder.
 func NewX2Encoder() *X2Encoder {
+	return NewX2EncoderWithSequencer(NewSequencer(0), "", "")
+}
+
+func NewX2EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X2Encoder {
+	if sequencer == nil {
+		sequencer = NewSequencer(0)
+	}
 	return &X2Encoder{
 		attrBuilder: NewAttributeBuilder(),
+		sequencer:   sequencer,
+		domainID:    domainID,
+		nfID:        nfID,
 	}
 }
 
@@ -165,13 +176,28 @@ func (e *X2Encoder) generateCorrelationID(callID string) uint64 {
 
 // addCommonAttributes adds the standard conditional attributes (timestamp and
 // sequence number) to the PDU per the ETSI TS 103 221-2 attribute dictionary.
-func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) {
+func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) error {
 	// Timestamp from packet capture (attribute 9)
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
-
-	// Sequence number (attribute 8, monotonically increasing)
-	seq := e.seqNum.Add(1)
+	if e.domainID != "" {
+		pdu.AddAttribute(e.attrBuilder.DomainID(e.domainID))
+	}
+	if e.nfID != "" {
+		pdu.AddAttribute(e.attrBuilder.NFID(e.nfID))
+	}
+	if pkt.NodeID != "" {
+		pdu.AddAttribute(e.attrBuilder.IPID(pkt.NodeID))
+	}
+	seq, err := e.sequencer.Next(SequenceContext{
+		PDUType: PDUTypeX2, XID: pdu.Header.XID, DomainID: e.domainID,
+		NFID: e.nfID, IPID: pkt.NodeID, CorrelationID: pdu.Header.CorrelationID,
+	})
+	if err != nil {
+		return err
+	}
+	e.lastSeq.Store(seq)
 	pdu.AddAttribute(e.attrBuilder.SequenceNumber(seq))
+	return nil
 }
 
 // addNetworkAttributes adds network layer attributes to the PDU.
@@ -239,7 +265,9 @@ func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *t
 	if err := e.setSIPPayload(pdu, pkt, voip); err != nil {
 		return nil, err
 	}
-	e.addCommonAttributes(pdu, pkt)
+	if err := e.addCommonAttributes(pdu, pkt); err != nil {
+		return nil, err
+	}
 	e.addNetworkAttributes(pdu, pkt)
 
 	return pdu, nil
@@ -318,7 +346,7 @@ func (e *X2Encoder) EncodeRegistration(pkt *types.PacketDisplay, xid uuid.UUID) 
 
 // GetSequenceNumber returns the current sequence number (for testing/debugging).
 func (e *X2Encoder) GetSequenceNumber() uint32 {
-	return e.seqNum.Load()
+	return e.lastSeq.Load()
 }
 
 // FindSIPStart finds the start of a SIP message in raw packet data.

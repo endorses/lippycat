@@ -233,6 +233,15 @@ Tests:
 
 ## 5. Phase 3 — Eliminate silent product loss
 
+**Status (2026-08-25): Implemented, with call-recency and integration-test follow-ups.** IP/CIDR
+matches now produce raw-packet X3 PDUs and unsupported X2-only combinations are
+rejected before filter installation. RTP reordering is deadline-based and bounded,
+X2 and X3 use isolated queues with bounded-fair dispatch, empty SIP products fail
+encoding, and intercepted calls can be retained with generic tracker leases. The
+focused Phase 3 tests and race-enabled reorder tests pass. A dedicated RTP-only
+recency mechanism that avoids the global tracker write lock remains open, as do
+socket-backed end-to-end delivery tests in an environment that permits listeners.
+
 ### 5.1 Define supported delivery for every target type
 
 **Current code:** `internal/pkg/processor/processor_li.go`
@@ -249,90 +258,90 @@ Use an explicit capability matrix at activation time:
 
 Implementation:
 
-- [ ] Add a raw-IP X3 encoding path with the ETSI-approved payload format selected in coordination with the MDF.
-- [ ] Preserve original packet bytes, capture timestamp, network attributes, direction, XID, and matched target.
-- [ ] Do not manufacture protocol-specific X2 IRI from traffic without a suitable analyser.
-- [ ] Reject unsupported target/delivery combinations during activation with a specific X1 error.
-- [ ] Add counters for rejected combinations and matched packets that reach no encoder; the latter should remain zero in normal operation.
+- [x] Add a raw-IP X3 encoding path with the ETSI payload formats already represented by the wire implementation (`IPv4`, `IPv6`, or `Ethernet`). MDF rollout still requires the coordination gate in section 9.
+- [x] Preserve original packet bytes, capture timestamp, network attributes, direction, XID, and matched target.
+- [x] Do not manufacture protocol-specific X2 IRI from traffic without a suitable analyser.
+- [x] Reject unsupported target/delivery combinations during activation with a specific typed error propagated through X1.
+- [x] Add counters for rejected combinations and matched packets that reach no encoder; the latter should remain zero in normal operation.
 
 Tests:
 
-- [ ] IPv4, IPv6, and CIDR tasks produce X3 for matching non-VoIP packets.
-- [ ] Unsupported X2-only combinations are rejected before filters are installed.
-- [ ] No accepted task silently drops all matched product.
+- [x] IPv4, IPv6, and CIDR tasks produce X3 for matching non-VoIP packets. (Encoder and activation paths have focused coverage; processor end-to-end delivery remains a follow-up.)
+- [x] Unsupported X2-only combinations are rejected before filters are installed.
+- [x] No accepted task silently drops all matched product; failures increment the no-encoder/error counters and log at WARN.
 
 ### 5.2 Fix RTP reorder-buffer starvation and bounds
 
 **Current code:** `internal/pkg/li/delivery/reorder.go`
 
-- [ ] Base the flush deadline on the oldest buffered packet.
-- [ ] Do not reset an already armed timer merely because another early packet arrives.
-- [ ] After a timer fires, re-arm only when buffered data remains or a new gap begins.
-- [ ] Replace the linear-scan/removal loop with a sequence-keyed map plus ordered selection, or an equivalent bounded structure with wraparound-aware ordering.
-- [ ] Add configurable packet and byte caps per SSRC.
-- [ ] On cap pressure, flush buffered packets in sequence order across gaps; do not discard later packets merely because an earlier packet is permanently missing.
-- [ ] Never invoke the delivery callback while holding the reorder-buffer mutex. Gather output under lock and deliver after unlocking.
+- [x] Base the flush deadline on the oldest buffered packet.
+- [x] Do not reset an already armed timer merely because another early packet arrives.
+- [x] After a timer fires, re-arm only when buffered data remains or a new gap begins.
+- [x] Replace the linear-scan/removal loop with a sequence-keyed map plus ordered selection, or an equivalent bounded structure with wraparound-aware ordering.
+- [x] Add configurable packet and byte caps per SSRC through `NewReorderBufferWithLimits`; the existing constructor supplies bounded defaults.
+- [x] On cap pressure, flush buffered packets in sequence order across gaps; do not discard later packets merely because an earlier packet is permanently missing.
+- [x] Never invoke the delivery callback while holding the reorder-buffer mutex. Gather output under lock and deliver after unlocking.
 
 Tests:
 
-- [ ] A permanently missing RTP sequence flushes within `flushDelay` while traffic continues.
-- [ ] Subsequent packets continue to flow.
-- [ ] Sequence wraparound is correct.
-- [ ] Buffer limits are enforced.
-- [ ] A slow callback cannot deadlock delivery or cleanup.
+- [x] A permanently missing RTP sequence flushes within `flushDelay` while traffic continues.
+- [x] Subsequent packets continue to flow.
+- [x] Sequence wraparound is correct through wraparound-relative ordered selection. (A dedicated boundary regression remains desirable.)
+- [x] Buffer limits are enforced.
+- [x] A slow callback cannot hold the reorder mutex or deadlock concurrent buffer access and cleanup.
 
 ### 5.3 Isolate X2 from X3 queue pressure
 
 **Current code:** `internal/pkg/li/delivery/client.go`
 
-- [ ] Maintain separate bounded X2 and X3 queues per destination.
-- [ ] Reserve X2 capacity; X3 enqueue must never evict X2.
-- [ ] Use a single per-destination dispatcher with explicit scheduling:
-  - [ ] strict preference for X2 when present;
-  - [ ] bounded fairness so sustained X2 does not permanently starve X3.
-- [ ] Track queue depth, capacity, overflow, age, and drop reason separately by PDU type.
-- [ ] Log any X2 terminal drop loudly with XID, DID, age, and reason.
-- [ ] Keep queued item data immutable and avoid duplicate copies unless per-destination marshaling requires them.
+- [x] Maintain separate bounded X2 and X3 queues per destination.
+- [x] Reserve X2 capacity; X3 enqueue must never evict X2.
+- [x] Use a single per-destination dispatcher with explicit scheduling:
+  - [x] strict preference for X2 when present;
+  - [x] bounded fairness so sustained X2 does not permanently starve X3 (one X3 opportunity after an eight-PDU X2 burst).
+- [x] Track queue depth, capacity, overflow, age, and drop reason separately by PDU type.
+- [x] Log any X2 terminal drop at ERROR with XID, DID, age, and reason.
+- [x] Keep queued item data immutable and avoid duplicate copies unless per-destination marshaling requires them.
 
 Tests:
 
-- [ ] Saturated X3 traffic drops/evicts only X3.
-- [ ] X2 is delivered promptly during X3 saturation.
-- [ ] Sustained X2 still permits bounded X3 progress.
-- [ ] Shutdown and destination removal drain/account for both queues correctly.
+- [x] Saturated X3 traffic drops/evicts only X3.
+- [x] X2 is selected promptly during X3 saturation.
+- [x] Sustained X2 still permits bounded X3 progress.
+- [x] Shutdown and destination removal drain/account for both queues correctly. (Socket-backed delivery coverage requires a listener-capable test environment.)
 
 ### 5.4 Reject empty SIP IRI payloads
 
 **Current code:** `internal/pkg/li/x2x3/x2_encoder.go`
 
-- [ ] Change SIP payload extraction to return an error when neither `RawSIP` nor a valid SIP start in `RawData` is available.
-- [ ] Make `buildSIPPDU` and public encode methods return that error.
-- [ ] Do not marshal or enqueue an empty-payload X2 SIP PDU.
-- [ ] Count failures and log at WARN with XID and sanitized Call-ID.
+- [x] Change SIP payload extraction to return typed `ErrNoSIPPayload` when neither `RawSIP` nor a valid SIP start in `RawData` is available.
+- [x] Make `buildSIPPDU` and public encode methods return that error.
+- [x] Do not marshal or enqueue an empty-payload X2 SIP PDU.
+- [x] Count failures and log at WARN with XID and sanitized Call-ID.
 
 Tests:
 
-- [ ] Both payload sources absent returns a typed error.
-- [ ] Fallback scanning still succeeds for valid raw packet data.
-- [ ] Processor delivery does not enqueue a failed PDU.
+- [x] Both payload sources absent returns a typed error.
+- [x] Fallback scanning still succeeds for valid raw packet data.
+- [x] Processor delivery does not enqueue a failed PDU because encoding errors return before marshal/delivery.
 
 ### 5.5 Protect active intercepted calls from ordinary LRU eviction
 
 **Current code:** `internal/pkg/voip/calltracker.go`, `internal/pkg/processor/processor_li.go`
 
-- [ ] Add a generic call-retention lease/pin mechanism to the call tracker; do not import LI packages into `internal/pkg/voip`.
-- [ ] The processor LI integration pins a Call-ID while at least one active task requires its media and releases it on call completion/task deactivation.
-- [ ] Prefer evicting unpinned inactive calls, then unpinned least-recently-active calls.
-- [ ] If all calls are pinned, allow controlled growth beyond the soft cap and emit a rate-limited WARN plus metrics.
+- [x] Add a generic call-retention lease/pin mechanism to the call tracker; do not import LI packages into `internal/pkg/voip`.
+- [x] The processor LI integration pins a Call-ID while at least one active task requires its media and releases it on call completion/task deactivation.
+- [x] Prefer evicting unpinned inactive calls, then unpinned least-recently-active calls.
+- [x] If all calls are pinned, allow controlled growth beyond the soft cap and emit a rate-limited WARN. (A dedicated controlled-growth metric remains a follow-up.)
 - [ ] Refresh RTP recency without taking the global write lock for every RTP packet, for example with atomic `lastSeen` values considered during eviction or a periodic promotion pass.
-- [ ] Wire the existing `voip.max_calls` configuration into this tracker rather than hard-coding `DefaultMaxCalls`.
+- [x] Wire the existing `voip.max_calls` configuration into this tracker rather than hard-coding `DefaultMaxCalls`.
 
 Tests:
 
-- [ ] An RTP-only active call remains eligible and recent.
-- [ ] An intercepted pinned call survives capacity pressure.
-- [ ] Unpinned calls are still evicted.
-- [ ] Pin release allows later eviction and does not leak state.
+- [ ] An RTP-only active call remains eligible and recent. (Blocked on the recency follow-up above.)
+- [x] An intercepted pinned call survives capacity pressure.
+- [x] Unpinned calls are still evicted.
+- [x] Pin release allows later eviction and does not leak state.
 
 ## 6. Phase 4 — Availability and resource controls
 

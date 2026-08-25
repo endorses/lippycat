@@ -153,11 +153,12 @@ type Manager struct {
 
 // ManagerStats contains LI processing statistics.
 type ManagerStats struct {
-	PacketsProcessed uint64
-	PacketsMatched   uint64
-	X2EventsSent     uint64
-	X3EventsSent     uint64
-	MatchErrors      uint64
+	PacketsProcessed     uint64
+	PacketsMatched       uint64
+	X2EventsSent         uint64
+	X3EventsSent         uint64
+	MatchErrors          uint64
+	RejectedCombinations uint64
 }
 
 // NewManager creates a new LI Manager.
@@ -904,6 +905,11 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 func (m *Manager) activateTask(task *InterceptTask) error {
 	// First activate in registry (validates task)
 	if err := m.registry.ActivateTask(task); err != nil {
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			m.mu.Lock()
+			m.stats.RejectedCombinations++
+			m.mu.Unlock()
+		}
 		return err
 	}
 

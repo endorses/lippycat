@@ -94,15 +94,23 @@ type ClientStats struct {
 type DestinationDeliveryStats struct {
 	QueueDepth      int
 	QueueCapacity   int
+	X2QueueDepth    int
+	X2QueueCapacity int
+	X3QueueDepth    int
+	X3QueueCapacity int
 	X2Sent          uint64
 	X3Sent          uint64
 	Retries         uint64
 	QueueOverflows  uint64
+	X2Overflows     uint64
+	X3Overflows     uint64
 	TerminalDrops   uint64
 	X2Dropped       uint64
 	X3Dropped       uint64
 	DroppedByReason map[string]uint64
 	OldestQueuedAge time.Duration
+	X2OldestAge     time.Duration
+	X3OldestAge     time.Duration
 	LastSuccess     time.Time
 	LastError       string
 }
@@ -115,7 +123,9 @@ type destinationQueue struct {
 	done     chan struct{}
 
 	mu              sync.Mutex
-	items           []*deliveryItem
+	x2Items         []*deliveryItem
+	x3Items         []*deliveryItem
+	x2Burst         int
 	stopped         bool
 	stats           DestinationDeliveryStats
 	lastOverflowLog time.Time
@@ -128,7 +138,8 @@ func newDestinationQueue(did uuid.UUID, capacity int) *destinationQueue {
 		notify:   make(chan struct{}, 1),
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
-		items:    make([]*deliveryItem, 0, capacity),
+		x2Items:  make([]*deliveryItem, 0, capacity),
+		x3Items:  make([]*deliveryItem, 0, capacity),
 		stats: DestinationDeliveryStats{
 			QueueCapacity:   capacity,
 			DroppedByReason: make(map[string]uint64),
@@ -143,22 +154,32 @@ func (q *destinationQueue) signal() {
 	}
 }
 
-// enqueue appends item and atomically evicts the oldest item when full.
+// enqueue appends to a type-specific queue. X3 pressure can never consume or
+// evict reserved X2 capacity.
 func (q *destinationQueue) enqueue(item *deliveryItem) (dropped *deliveryItem, ok bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.stopped {
 		return nil, false
 	}
-	if len(q.items) == q.capacity {
-		dropped = q.items[0]
-		copy(q.items, q.items[1:])
-		q.items[len(q.items)-1] = item
-		q.stats.QueueOverflows++
-	} else {
-		q.items = append(q.items, item)
+	items := &q.x3Items
+	if item.pduType == PDUTypeX2 {
+		items = &q.x2Items
 	}
-	q.stats.QueueDepth = len(q.items)
+	if len(*items) == q.capacity {
+		dropped = (*items)[0]
+		copy(*items, (*items)[1:])
+		(*items)[len(*items)-1] = item
+		q.stats.QueueOverflows++
+		if item.pduType == PDUTypeX2 {
+			q.stats.X2Overflows++
+		} else {
+			q.stats.X3Overflows++
+		}
+	} else {
+		*items = append(*items, item)
+	}
+	q.updateDepthLocked()
 	q.signal()
 	return dropped, true
 }
@@ -166,33 +187,59 @@ func (q *destinationQueue) enqueue(item *deliveryItem) (dropped *deliveryItem, o
 func (q *destinationQueue) peekBatch(max int) []*deliveryItem {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 {
+	if len(q.x2Items)+len(q.x3Items) == 0 {
 		return nil
 	}
-	if max > len(q.items) {
-		max = len(q.items)
+	batch := make([]*deliveryItem, 0, max)
+	x2, x3, burst := 0, 0, q.x2Burst
+	for len(batch) < max && (x2 < len(q.x2Items) || x3 < len(q.x3Items)) {
+		// Prefer X2, but after eight X2 PDUs schedule one X3 when present.
+		if x2 < len(q.x2Items) && (burst < 8 || x3 >= len(q.x3Items)) {
+			batch = append(batch, q.x2Items[x2])
+			x2++
+			burst++
+		} else {
+			batch = append(batch, q.x3Items[x3])
+			x3++
+			burst = 0
+		}
 	}
-	batch := make([]*deliveryItem, max)
-	copy(batch, q.items[:max])
 	return batch
 }
 
 func (q *destinationQueue) pop(item *deliveryItem) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 || q.items[0] != item {
+	items := &q.x3Items
+	if item.pduType == PDUTypeX2 {
+		items = &q.x2Items
+	}
+	if len(*items) == 0 || (*items)[0] != item {
 		return false
 	}
-	q.items[0] = nil
-	q.items = q.items[1:]
-	q.stats.QueueDepth = len(q.items)
+	(*items)[0] = nil
+	*items = (*items)[1:]
+	if item.pduType == PDUTypeX2 {
+		q.x2Burst++
+	} else {
+		q.x2Burst = 0
+	}
+	q.updateDepthLocked()
 	return true
+}
+
+func (q *destinationQueue) updateDepthLocked() {
+	q.stats.X2QueueDepth = len(q.x2Items)
+	q.stats.X3QueueDepth = len(q.x3Items)
+	q.stats.X2QueueCapacity = q.capacity
+	q.stats.X3QueueCapacity = q.capacity
+	q.stats.QueueDepth = len(q.x2Items) + len(q.x3Items)
 }
 
 func (q *destinationQueue) depth() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.items)
+	return len(q.x2Items) + len(q.x3Items)
 }
 
 func (q *destinationQueue) snapshot() DestinationDeliveryStats {
@@ -203,9 +250,27 @@ func (q *destinationQueue) snapshot() DestinationDeliveryStats {
 	for reason, count := range q.stats.DroppedByReason {
 		stats.DroppedByReason[reason] = count
 	}
-	stats.QueueDepth = len(q.items)
-	if len(q.items) > 0 {
-		stats.OldestQueuedAge = time.Since(q.items[0].queued)
+	q.updateDepthLocked()
+	stats.QueueDepth = q.stats.QueueDepth
+	stats.X2QueueDepth = q.stats.X2QueueDepth
+	stats.X3QueueDepth = q.stats.X3QueueDepth
+	stats.X2QueueCapacity = q.capacity
+	stats.X3QueueCapacity = q.capacity
+	var oldest time.Time
+	if len(q.x2Items) > 0 {
+		oldest = q.x2Items[0].queued
+	}
+	if len(q.x3Items) > 0 && (oldest.IsZero() || q.x3Items[0].queued.Before(oldest)) {
+		oldest = q.x3Items[0].queued
+	}
+	if !oldest.IsZero() {
+		stats.OldestQueuedAge = time.Since(oldest)
+	}
+	if len(q.x2Items) > 0 {
+		stats.X2OldestAge = time.Since(q.x2Items[0].queued)
+	}
+	if len(q.x3Items) > 0 {
+		stats.X3OldestAge = time.Since(q.x3Items[0].queued)
 	}
 	return stats
 }
@@ -216,8 +281,9 @@ func (q *destinationQueue) stopAndDrain() []*deliveryItem {
 		q.stopped = true
 		close(q.stop)
 	}
-	items := q.items
-	q.items = nil
+	items := append(q.x2Items, q.x3Items...)
+	q.x2Items = nil
+	q.x3Items = nil
 	q.stats.QueueDepth = 0
 	q.mu.Unlock()
 	q.signal()
@@ -501,7 +567,7 @@ func (c *Client) recordRetry(q *destinationQueue, err error) {
 	q.mu.Unlock()
 }
 
-func (c *Client) recordTerminalDrop(_ uuid.UUID, q *destinationQueue, item *deliveryItem, reason string) {
+func (c *Client) recordTerminalDrop(did uuid.UUID, q *destinationQueue, item *deliveryItem, reason string) {
 	if item.pduType == PDUTypeX2 {
 		atomic.AddUint64(&c.stats.X2Dropped, 1)
 		atomic.AddUint64(&c.stats.X2Failed, 1)
@@ -518,6 +584,9 @@ func (c *Client) recordTerminalDrop(_ uuid.UUID, q *destinationQueue, item *deli
 	}
 	q.stats.DroppedByReason[reason]++
 	q.mu.Unlock()
+	if item.pduType == PDUTypeX2 {
+		logger.Error("LI X2 terminal drop", "xid", item.xid, "did", did, "age", time.Since(item.queued), "reason", reason)
+	}
 }
 
 func (c *Client) logOverflow(did uuid.UUID, q *destinationQueue, item *deliveryItem) {
@@ -527,7 +596,7 @@ func (c *Client) logOverflow(did uuid.UUID, q *destinationQueue, item *deliveryI
 		return
 	}
 	q.lastOverflowLog = time.Now()
-	depth := len(q.items)
+	depth := len(q.x2Items) + len(q.x3Items)
 	drops := q.stats.QueueOverflows
 	q.mu.Unlock()
 	logger.Warn("LI delivery queue overflow, dropped oldest item",

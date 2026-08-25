@@ -22,6 +22,9 @@ var (
 
 	// ErrUnknownIRIType is returned when the SIP message doesn't map to a known IRI type.
 	ErrUnknownIRIType = errors.New("unknown IRI type for SIP message")
+
+	// ErrNoSIPPayload is returned when no complete SIP message can be recovered.
+	ErrNoSIPPayload = errors.New("no SIP payload available")
 )
 
 // X2Encoder encodes VoIP signaling events into X2 IRI PDUs.
@@ -75,7 +78,7 @@ func (e *X2Encoder) EncodeIRI(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, er
 		return nil, nil
 	}
 
-	return e.buildSIPPDU(pkt, xid, voip), nil
+	return e.buildSIPPDU(pkt, xid, voip)
 }
 
 // NewX2SIPPDU creates an X2 PDU carrying a raw SIP message: PDU Type 1,
@@ -229,29 +232,33 @@ func parsePort(s string) (uint16, bool) {
 // buildSIPPDU builds an X2 SIP PDU (Payload Format 9) with the standard
 // conditional attributes and the raw SIP message as payload. All IRI-type and
 // SIP-header semantics are recovered by the MDF from the raw payload.
-func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata) *PDU {
+func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata) (*PDU, error) {
 	correlationID := e.generateCorrelationID(voip.CallID)
 
 	pdu := NewX2SIPPDU(xid, correlationID)
+	if err := e.setSIPPayload(pdu, pkt, voip); err != nil {
+		return nil, err
+	}
 	e.addCommonAttributes(pdu, pkt)
 	e.addNetworkAttributes(pdu, pkt)
-	e.setSIPPayload(pdu, pkt, voip)
 
-	return pdu
+	return pdu, nil
 }
 
 // setSIPPayload attaches the raw SIP message to the PDU, falling back to
 // scanning the raw packet data for a SIP start line.
-func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) {
+func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) error {
 	if len(voip.RawSIP) > 0 {
 		pdu.SetPayload(voip.RawSIP)
-		return
+		return nil
 	}
 	if len(pkt.RawData) > 0 {
 		if sipStart := FindSIPStart(pkt.RawData); sipStart >= 0 {
 			pdu.SetPayload(pkt.RawData[sipStart:])
+			return nil
 		}
 	}
+	return ErrNoSIPPayload
 }
 
 // EncodeSessionBegin creates a Session Begin IRI for a SIP INVITE.
@@ -262,7 +269,7 @@ func (e *X2Encoder) EncodeSessionBegin(pkt *types.PacketDisplay, xid uuid.UUID) 
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeSessionAnswer creates a Session Answer IRI for a SIP 200 OK.
@@ -273,7 +280,7 @@ func (e *X2Encoder) EncodeSessionAnswer(pkt *types.PacketDisplay, xid uuid.UUID)
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeSessionEnd creates a Session End IRI for a SIP BYE.
@@ -284,7 +291,7 @@ func (e *X2Encoder) EncodeSessionEnd(pkt *types.PacketDisplay, xid uuid.UUID) (*
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeSessionAttempt creates a Session Attempt IRI for failed calls.
@@ -295,7 +302,7 @@ func (e *X2Encoder) EncodeSessionAttempt(pkt *types.PacketDisplay, xid uuid.UUID
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeRegistration creates a Registration IRI for a SIP REGISTER.
@@ -306,7 +313,7 @@ func (e *X2Encoder) EncodeRegistration(pkt *types.PacketDisplay, xid uuid.UUID) 
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // GetSequenceNumber returns the current sequence number (for testing/debugging).

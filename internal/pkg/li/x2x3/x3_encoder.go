@@ -3,6 +3,7 @@ package x2x3
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"net/netip"
 	"sync"
@@ -11,7 +12,36 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/google/gopacket/layers"
 )
+
+// EncodeRawIPCC encodes a matched non-VoIP packet as X3 content. RawData is
+// preserved byte-for-byte; PayloadFormat declares whether it is an Ethernet
+// frame or a network-layer IPv4/IPv6 packet.
+func (e *X3Encoder) EncodeRawIPCC(pkt *types.PacketDisplay, xid uuid.UUID, matchedTarget string) (*PDU, error) {
+	if len(pkt.RawData) == 0 {
+		return nil, ErrNoPayload
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(matchedTarget))
+	correlationID := h.Sum64()
+	pdu := NewPDU(PDUTypeX3, xid, correlationID)
+	switch {
+	case pkt.LinkType == layers.LinkTypeEthernet:
+		pdu.Header.PayloadFormat = PayloadFormatEthernet
+	case pkt.RawData[0]>>4 == 4:
+		pdu.Header.PayloadFormat = PayloadFormatIPv4
+	case pkt.RawData[0]>>4 == 6:
+		pdu.Header.PayloadFormat = PayloadFormatIPv6
+	default:
+		return nil, fmt.Errorf("%w: unknown network payload format", ErrNoPayload)
+	}
+	pdu.Header.PayloadDirection = PayloadDirectionUnknown
+	e.addCommonAttributes(pdu, pkt)
+	e.addNetworkAttributes(pdu, pkt)
+	pdu.SetPayload(pkt.RawData)
+	return pdu, nil
+}
 
 // X3 Encoder errors.
 var (

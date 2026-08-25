@@ -1379,10 +1379,109 @@ func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) any {
 
 	logger.Debug("X1 task details retrieved", "xid", xid, "status", task.Status)
 
-	// Build GetTaskDetailsResponse
-	// Note: For now, we return a basic OK response. A full implementation would
-	// return the TaskResponseDetails with full task information.
-	return s.buildOKResponse(req.X1RequestMessage, MessageTypeGetTaskDetails)
+	return &schema.GetTaskDetailsResponse{
+		X1ResponseMessage: s.responseMessage(req.X1RequestMessage),
+		TaskResponseDetails: &schema.TaskResponseDetails{
+			TaskDetails: taskDetailsResponse(task),
+			TaskStatus: &schema.TaskStatus{
+				ProvisioningStatus: taskProvisioningStatus(task.Status),
+				ListOfFaults:       taskFaults(task.LastError),
+			},
+		},
+	}
+}
+
+func taskDetailsResponse(task *Task) *schema.TaskDetails {
+	xid := schema.UUID(task.XID.String())
+	details := &schema.TaskDetails{
+		XId:                         &xid,
+		DeliveryType:                deliveryTypeResponse(task.DeliveryType),
+		ImplicitDeactivationAllowed: &task.ImplicitDeactivationAllowed,
+		TargetIdentifiers:           &schema.ListOfTargetIdentifiers{},
+		ListOfDIDs:                  &schema.ListOfDids{},
+	}
+	for _, target := range task.Targets {
+		details.TargetIdentifiers.TargetIdentifier = append(details.TargetIdentifiers.TargetIdentifier, targetIdentifierResponse(target))
+	}
+	for _, id := range task.DestinationIDs {
+		did := schema.UUID(id.String())
+		details.ListOfDIDs.DId = append(details.ListOfDIDs.DId, &did)
+	}
+	mediation := &schema.MediationDetails{DeliveryType: deliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
+	if !task.StartTime.IsZero() {
+		start := schema.QualifiedMicrosecondDateTime(task.StartTime.Format(time.RFC3339Nano))
+		mediation.StartTime = &start
+	}
+	if !task.EndTime.IsZero() {
+		end := schema.QualifiedMicrosecondDateTime(task.EndTime.Format(time.RFC3339Nano))
+		mediation.EndTime = &end
+	}
+	details.ListOfMediationDetails = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{mediation}}
+	return details
+}
+
+func deliveryTypeResponse(deliveryType DeliveryType) string {
+	switch deliveryType {
+	case DeliveryX2Only:
+		return "X2Only"
+	case DeliveryX3Only:
+		return "X3Only"
+	case DeliveryX2andX3:
+		return "X2andX3"
+	default:
+		return ""
+	}
+}
+
+func targetIdentifierResponse(target TargetIdentity) *schema.TargetIdentifier {
+	result := &schema.TargetIdentifier{}
+	switch target.Type {
+	case TargetTypeSIPURI:
+		v := schema.SIPURI(target.Value)
+		result.SipUri = &v
+	case TargetTypeTELURI:
+		v := schema.TELURI(target.Value)
+		result.TelUri = &v
+	case TargetTypeIPv4Address:
+		v := schema.IPv4Address(target.Value)
+		result.Ipv4Address = &v
+	case TargetTypeIPv4CIDR:
+		v := target.Value
+		result.Ipv4Cidr = &schema.IPCIDR{IPv4CIDR: &v}
+	case TargetTypeIPv6Address:
+		v := schema.IPv6Address(target.Value)
+		result.Ipv6Address = &v
+	case TargetTypeIPv6CIDR:
+		v := schema.IPv6CIDR(target.Value)
+		result.Ipv6Cidr = &v
+	case TargetTypeNAI:
+		v := schema.NAI(target.Value)
+		result.Nai = &v
+	case TargetTypeE164:
+		v := schema.InternationalE164(target.Value)
+		result.E164Number = &v
+	}
+	return result
+}
+
+func taskProvisioningStatus(status TaskStatus) string {
+	switch status {
+	case TaskStatusPending:
+		return "awaitingProvisioning"
+	case TaskStatusActive, TaskStatusSuspended, TaskStatusDeactivated:
+		return "complete"
+	case TaskStatusFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
+func taskFaults(lastError string) *schema.ListOfFaults {
+	if lastError == "" {
+		return nil
+	}
+	return &schema.ListOfFaults{UnresolvedFault: []*schema.ErrorInformation{{ErrorCode: ErrorCodeGenericError, ErrorDescription: lastError}}}
 }
 
 // extractTargetIdentifiers extracts target identities from schema.
@@ -1521,6 +1620,10 @@ func parseDeliveryType(dt string) DeliveryType {
 
 // buildOKResponse creates a successful X1 response.
 func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType string) any {
+	return s.responseMessage(reqMsg)
+}
+
+func (s *Server) responseMessage(reqMsg *schema.X1RequestMessage) *schema.X1ResponseMessage {
 	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
 
 	admfID := ""

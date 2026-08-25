@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/endorses/lippycat/internal/pkg/li"
+	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 )
 
 func TestApplicationKeepaliveDefaultsAndValidation(t *testing.T) {
@@ -40,6 +41,23 @@ func TestApplicationKeepaliveDefaultsAndValidation(t *testing.T) {
 	config.X2KeepaliveTimeP1 = time.Millisecond
 	_, err := NewManager(config)
 	assert.ErrorIs(t, err, ErrInvalidKeepaliveTimer)
+}
+
+func TestKeepaliveAcknowledgementIsScopedToInterfaceConnection(t *testing.T) {
+	did := uuid.New()
+	x2Conn, x3Conn := &tls.Conn{}, &tls.Conn{}
+	x2 := &interfaceKeepaliveState{enabled: true, outstanding: map[uint32]time.Time{0: time.Now()}}
+	x3 := &interfaceKeepaliveState{enabled: true, outstanding: map[uint32]time.Time{0: time.Now()}}
+	state := &destinationState{stats: DestinationStats{}}
+	m := &Manager{destinations: map[uuid.UUID]*destinationState{did: state}}
+	m.connectionRuntime.Store(x2Conn, &connectionRuntime{iface: PDUTypeX2, keepalive: x2})
+	m.connectionRuntime.Store(x3Conn, &connectionRuntime{iface: PDUTypeX3, keepalive: x3})
+
+	m.handleInboundPDU(did, x3Conn, x2x3.NewKeepaliveAckPDU(0))
+
+	assert.Contains(t, x2.outstanding, uint32(0))
+	assert.NotZero(t, x3.lastACK)
+	assert.NotContains(t, x3.outstanding, uint32(0))
 }
 
 // testCertDirDest returns the path to the LI test certificates directory.

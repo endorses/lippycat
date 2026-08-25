@@ -1,6 +1,8 @@
 package voip
 
 import (
+	"time"
+
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -25,6 +27,26 @@ func TestPinnedCallSurvivesCapacityPressure(t *testing.T) {
 	_, pinned = ct.callMap["pinned"]
 	ct.mu.RUnlock()
 	assert.False(t, pinned)
+}
+
+func TestRTPOnlyCallAtomicRecencyProtectsItFromEviction(t *testing.T) {
+	ct := NewCallTrackerWithCapacity(2)
+	t.Cleanup(ct.Shutdown)
+	ct.getOrCreateCall("rtp-recent", layers.LinkTypeEthernet)
+	time.Sleep(time.Millisecond)
+	ct.getOrCreateCall("ordinary", layers.LinkTypeEthernet)
+
+	// A later RTP lookup refreshes recency without moving the locked LRU list.
+	time.Sleep(time.Millisecond)
+	ct.getOrCreateCall("rtp-recent", layers.LinkTypeEthernet)
+	ct.getOrCreateCall("new", layers.LinkTypeEthernet)
+
+	ct.mu.RLock()
+	_, recentExists := ct.callMap["rtp-recent"]
+	_, ordinaryExists := ct.callMap["ordinary"]
+	ct.mu.RUnlock()
+	assert.True(t, recentExists)
+	assert.False(t, ordinaryExists)
 }
 func createTrackedCall(ct *CallTracker, id string) {
 	ct.mu.Lock()

@@ -83,6 +83,13 @@ type ManagerConfig struct {
 	// agree a task is gone from the ADMF before it is torn down. Defaults to
 	// defaultReconcileOrphanPolls.
 	ReconcileOrphanPolls int
+
+	// TombstoneRetention controls operational retention of deactivated tasks.
+	// Zero uses 24 hours. Audit logging remains independent of this registry data.
+	TombstoneRetention time.Duration
+	// LifecycleInterval controls pending promotion and tombstone maintenance.
+	// Zero uses 100 milliseconds.
+	LifecycleInterval time.Duration
 }
 
 // defaultReconcileOrphanPolls trades one reconcile interval of over-collection
@@ -104,7 +111,8 @@ type PacketProcessor func(task *InterceptTask, pkt *types.PacketDisplay)
 //
 // The Manager is the main entry point for LI operations in the processor.
 type Manager struct {
-	mu sync.RWMutex
+	mu          sync.RWMutex
+	lifecycleMu sync.Mutex
 
 	config   ManagerConfig
 	registry *Registry
@@ -189,6 +197,15 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 
 	// Create deactivation callback that reports to ADMF and then calls user callback.
 	internalCallback := func(task *InterceptTask, reason DeactivationReason) {
+		if reason == DeactivationReasonExpired {
+			m.lifecycleMu.Lock()
+			if err := m.completeExpiration(task); err != nil {
+				logger.Error("LI task expiry enforcement failed", "xid", task.XID, "end_time", task.EndTime, "error", err)
+				m.lifecycleMu.Unlock()
+				return
+			}
+			m.lifecycleMu.Unlock()
+		}
 		// Report implicit deactivation to ADMF via X1 client.
 		if m.x1Client != nil && reason != DeactivationReasonADMF {
 			go func() {
@@ -261,6 +278,8 @@ func (m *Manager) Start() error {
 
 	// Start the registry's background task management
 	m.registry.Start()
+	m.wg.Add(1)
+	go m.runLifecycleMaintenance()
 
 	// Start X1 server if configured.
 	if m.x1Server != nil {
@@ -877,6 +896,12 @@ func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []str
 // This creates filters for the task's targets and pushes them
 // to the filter management system.
 func (m *Manager) ActivateTask(task *InterceptTask) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.activateTask(task)
+}
+
+func (m *Manager) activateTask(task *InterceptTask) error {
 	// First activate in registry (validates task)
 	if err := m.registry.ActivateTask(task); err != nil {
 		return err
@@ -887,10 +912,21 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 	if getErr != nil {
 		return fmt.Errorf("read activation identity for XID %s: %w", task.XID, getErr)
 	}
-	filterIDs, err := m.filters.CreateFiltersForTask(task)
+	if registered.Status == TaskStatusPending {
+		if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
+			return err
+		}
+		logger.Info("LI task registered pending", "xid", task.XID, "start_time", registered.StartTime, "end_time", registered.EndTime)
+		return nil
+	}
+	filterIDs, err := m.filters.CreateFiltersForTask(registered)
 	if err != nil {
 		rollbackErr := m.registry.rollbackActivation(task.XID, registered.ActivatedAt)
 		return errors.Join(fmt.Errorf("activate XID %s: %w", task.XID, err), rollbackErr)
+	}
+	if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
+		return errors.Join(fmt.Errorf("commit activation XID %s: %w", task.XID, err),
+			m.filters.RemoveFiltersForTask(task.XID), m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
 	}
 
 	logger.Info("LI task activated",
@@ -903,8 +939,22 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 	return nil
 }
 
+func (m *Manager) completeExpiration(task *InterceptTask) error {
+	filterIDs := m.filters.GetFiltersForXID(task.XID)
+	if err := m.filters.RemoveFiltersForTask(task.XID); err != nil {
+		return fmt.Errorf("withdraw %d filters: %w", len(filterIDs), err)
+	}
+	if err := m.registry.finishExpiration(task.XID); err != nil {
+		return err
+	}
+	logger.Info("LI task expired", "xid", task.XID, "end_time", task.EndTime, "filters", len(filterIDs), "cleanup", "complete")
+	return nil
+}
+
 // ModifyTask updates an existing task's parameters atomically.
 func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	previous, err := m.registry.GetTaskDetails(xid)
 	if err != nil {
 		return err
@@ -915,7 +965,7 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	}
 
 	// If targets changed, update filters
-	if mod.Targets != nil {
+	if mod.Targets != nil && previous.Status == TaskStatusActive {
 		task, err := m.registry.GetTaskDetails(xid)
 		if err != nil {
 			return err
@@ -936,6 +986,12 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 
 // DeactivateTask removes a task from active interception.
 func (m *Manager) DeactivateTask(xid uuid.UUID) error {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	return m.deactivateTask(xid)
+}
+
+func (m *Manager) deactivateTask(xid uuid.UUID) error {
 	// Remove filters first
 	if err := m.filters.RemoveFiltersForTask(xid); err != nil {
 		logger.Error("Failed to remove filters for task",
@@ -952,6 +1008,62 @@ func (m *Manager) DeactivateTask(xid uuid.UUID) error {
 
 	logger.Info("LI task deactivated", "xid", xid)
 	return nil
+}
+
+func (m *Manager) runLifecycleMaintenance() {
+	defer m.wg.Done()
+	interval := m.config.LifecycleInterval
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	retention := m.config.TombstoneRetention
+	if retention <= 0 {
+		retention = 24 * time.Hour
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopChan:
+			return
+		case <-ticker.C:
+			m.promotePendingTasks()
+			m.registry.PurgeDeactivatedTasks(retention)
+		}
+	}
+}
+
+func (m *Manager) promotePendingTasks() {
+	var pending []*InterceptTask
+	m.registry.ListTasks(func(task *InterceptTask) bool {
+		if task.Status == TaskStatusPending && task.ShouldStart() {
+			pending = append(pending, task)
+		}
+		return true
+	})
+	for _, task := range pending {
+		m.lifecycleMu.Lock()
+		current, err := m.registry.GetTaskDetails(task.XID)
+		if err == nil && current.Status == TaskStatusPending && current.ActivatedAt.Equal(task.ActivatedAt) {
+			var filterIDs []string
+			filterIDs, err = m.filters.CreateFiltersForTask(current)
+			if err == nil {
+				err = m.registry.promotePending(current.XID, current.ActivatedAt)
+			}
+			if err != nil {
+				if cleanupErr := m.filters.RemoveFiltersForTask(current.XID); cleanupErr != nil {
+					err = errors.Join(err, cleanupErr)
+				}
+				if markErr := m.registry.MarkTaskFailed(current.XID, err.Error()); markErr != nil {
+					err = errors.Join(err, markErr)
+				}
+				logger.Error("LI pending task promotion failed", "xid", current.XID, "error", err)
+			} else {
+				logger.Info("LI pending task promoted", "xid", current.XID, "filters", len(filterIDs), "start_time", current.StartTime)
+			}
+		}
+		m.lifecycleMu.Unlock()
+	}
 }
 
 // GetTaskDetails retrieves a task by its XID.

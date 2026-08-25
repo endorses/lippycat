@@ -9,6 +9,7 @@ package processor
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -156,6 +157,21 @@ func (p *Processor) initLIManager() {
 	// (e.g., EndTime expiration with ImplicitDeactivationAllowed=true)
 	// The LI Manager automatically reports these to ADMF via X1 client.
 	deactivationCallback := func(task *li.InterceptTask, reason li.DeactivationReason) {
+		if liDeliveryClient != nil {
+			liDeliveryClient.ResetSequence(task.XID)
+		}
+		if liMediaDirection != nil {
+			liMediaDirection.ClearXID(task.XID)
+		}
+		prefix := task.XID.String() + "-"
+		liReorderBuffers.Range(func(key, value any) bool {
+			keyString, ok := key.(string)
+			if ok && strings.HasPrefix(keyString, prefix) {
+				value.(*delivery.ReorderBuffer).Stop()
+				liReorderBuffers.Delete(key)
+			}
+			return true
+		})
 		logger.Info("LI task implicitly deactivated",
 			"xid", task.XID,
 			"reason", reason,

@@ -137,26 +137,36 @@ to be added.
 
 ## 4. Phase 2 — Enforce the complete task lifecycle
 
+**Status (2026-08-25): Implemented, with test and response follow-ups.** Mediation windows are parsed and validated,
+future tasks remain unarmed until manager-driven promotion, expiry gates packet
+processing before transactional filter withdrawal, and deactivated XIDs may be
+deliberately reactivated. Zero `EndTime` explicitly means an indefinite task.
+Manager maintenance purges operational tombstones after 24 hours by default;
+reactivation history is retained separately in the registry audit history.
+The full LI suite passes with `go test -tags li ./internal/pkg/li/...`. Dedicated
+regressions are still needed for the unchecked concurrency, cleanup-failure,
+packet-processing, and task-detail response cases below.
+
 ### 4.1 Parse mediation time bounds
 
 **Current code:** `internal/pkg/li/x1/server.go`, `internal/pkg/li/x1/schema`, `internal/pkg/li/convert.go`
 
-- [ ] Parse `StartTime` and `EndTime` from `TaskDetails.ListOfMediationDetails` for activation and modification.
-- [ ] Validate timestamp syntax, ordering, and representable range.
-- [ ] Reject `EndTime <= StartTime`.
-- [ ] Reject an activation whose non-zero `EndTime` is already in the past.
-- [ ] Decide and document zero-`EndTime` policy before implementation:
-  - [ ] either permit indefinite tasks explicitly; or
+- [x] Parse `StartTime` and `EndTime` from `TaskDetails.ListOfMediationDetails` for activation and modification.
+- [x] Validate timestamp syntax, ordering, and representable range.
+- [x] Reject `EndTime <= StartTime`.
+- [x] Reject an activation whose non-zero `EndTime` is already in the past.
+- [x] Decide and document zero-`EndTime` policy before implementation:
+  - [x] permit indefinite tasks explicitly; or
   - [ ] require an end time and reject its absence.
-- [ ] Define multi-DID mediation semantics. If mediation entries contain inconsistent time windows that cannot be represented by the current task model, reject the request rather than flattening them silently.
-- [ ] Include the effective start/end values in task-detail responses and reconciliation conversions.
+- [x] Define multi-DID mediation semantics. If mediation entries contain inconsistent time windows that cannot be represented by the current task model, reject the request rather than flattening them silently.
+- [ ] Include the effective start/end values in task-detail responses and reconciliation conversions. (Reconciliation conversion is complete; the X1 server still returns only its basic OK response for `GetTaskDetails`.)
 
 Tests:
 
-- [ ] Valid bounded activation populates both fields.
-- [ ] Malformed, reversed, and already-expired windows are rejected.
-- [ ] ModifyTask updates `EndTime` atomically.
-- [ ] Inconsistent per-destination windows are rejected until the domain model supports them.
+- [x] Valid bounded activation populates both fields.
+- [x] Malformed, reversed, and already-expired windows are rejected.
+- [x] ModifyTask updates `EndTime` atomically.
+- [x] Inconsistent per-destination windows are rejected until the domain model supports them.
 
 ### 4.2 Do not install filters for pending tasks
 
@@ -164,22 +174,22 @@ Tests:
 
 The registry can mark a task pending, but the manager currently installs its filters immediately.
 
-- [ ] Register a future-dated task with `TaskStatusPending` and no filters.
-- [ ] Add a lifecycle scheduler that promotes pending tasks when `StartTime` is reached.
-- [ ] Promotion must use the same transactional filter installation as immediate activation.
-- [ ] If promotion fails:
-  - [ ] mark the task failed;
-  - [ ] keep filters absent or roll them back fully;
-  - [ ] report the failure to ADMF;
-  - [ ] retain enough error state for diagnostics and an explicit retry policy.
-- [ ] Ensure periodic reconciliation does not repeatedly attempt to activate an already pending task as a duplicate.
+- [x] Register a future-dated task with `TaskStatusPending` and no filters.
+- [x] Add a lifecycle scheduler that promotes pending tasks when `StartTime` is reached.
+- [x] Promotion must use the same transactional filter installation as immediate activation.
+- [x] If promotion fails:
+  - [x] mark the task failed;
+  - [x] keep filters absent or roll them back fully;
+  - [x] report the failure to ADMF;
+  - [x] retain enough error state for diagnostics and an explicit retry policy. (No automatic retry; the failed task retains `LastError` and requires explicit recovery.)
+- [x] Ensure periodic reconciliation does not repeatedly attempt to activate an already pending task as a duplicate.
 
 Tests:
 
-- [ ] A future task has no local or pushed filters before its start.
-- [ ] Filters appear at the start boundary and matching packets are then processed.
+- [x] A future task has no local or pushed filters before its start.
+- [ ] Filters appear at the start boundary and matching packets are then processed. (Filter installation is covered; matched-packet processing after promotion needs a dedicated assertion.)
 - [ ] Promotion failure produces no partially armed task.
-- [ ] Deactivation before `StartTime` prevents later promotion.
+- [x] Deactivation before `StartTime` prevents later promotion.
 
 ### 4.3 Withdraw filters on expiry
 
@@ -187,39 +197,39 @@ Tests:
 
 The registry expiration loop currently changes task status without removing filters.
 
-- [ ] Move enforcement coordination into the manager, or make the registry emit an event that the manager handles synchronously.
-- [ ] At expiry:
-  - [ ] Prevent new packet processing for the task.
-  - [ ] Remove all task filters.
-  - [ ] Mark the task deactivated with reason `Expired`.
-  - [ ] Clear LI delivery/reorder/sequence state for the XID.
-  - [ ] Report implicit deactivation to ADMF.
-  - [ ] Log XID, effective end time, filter count, and cleanup result at INFO or above.
-- [ ] Failed filter withdrawal must be retried and surfaced as a compliance fault.
-- [ ] Avoid calling external callbacks while manually unlocking and relocking inside a ranged map mutation. Collect expiry actions under lock, then execute them outside the registry lock.
+- [x] Move enforcement coordination into the manager, or make the registry emit an event that the manager handles synchronously.
+- [x] At expiry:
+  - [x] Prevent new packet processing for the task.
+  - [x] Remove all task filters.
+  - [x] Mark the task deactivated with reason `Expired`.
+  - [x] Clear LI delivery/reorder/sequence state for the XID.
+  - [x] Report implicit deactivation to ADMF.
+  - [x] Log XID, effective end time, filter count, and cleanup result at INFO or above.
+- [x] Failed filter withdrawal must be retried and surfaced as a compliance fault.
+- [x] Avoid calling external callbacks while manually unlocking and relocking inside a ranged map mutation. Collect expiry actions under lock, then execute them outside the registry lock.
 
 Tests:
 
 - [ ] An expiring task stops invoking its packet processor.
-- [ ] Its local and pushed filters are removed.
+- [x] Its local and pushed filters are removed.
 - [ ] Reorder buffers and sequence state are cleared.
 - [ ] Removal failure is retried and reported.
 - [ ] Concurrent explicit deactivation and expiry are idempotent.
 
 ### 4.4 Support deliberate reactivation of a deactivated XID
 
-- [ ] Permit reactivation only when the existing task is in `Deactivated` state.
-- [ ] Replace/reset the task atomically while preserving its historical deactivation record in a separate audit trail.
-- [ ] Do not permit reactivation over active, pending, suspended, or failed state without an explicit recovery operation.
-- [ ] Recreate filters using the normal transactional activation path.
-- [ ] Add configurable tombstone retention, default 24 hours, and invoke purge from the manager maintenance loop.
-- [ ] Purging must not destroy the audit history required by the deployment; if the registry becomes persistent, separate operational tombstones from durable audit records.
+- [x] Permit reactivation only when the existing task is in `Deactivated` state.
+- [x] Replace/reset the task atomically while preserving its historical deactivation record in a separate audit trail.
+- [x] Do not permit reactivation over active, pending, suspended, or failed state without an explicit recovery operation.
+- [x] Recreate filters using the normal transactional activation path.
+- [x] Add configurable tombstone retention, default 24 hours, and invoke purge from the manager maintenance loop.
+- [x] Purging must not destroy the audit history required by the deployment; if the registry becomes persistent, separate operational tombstones from durable audit records.
 
 Tests:
 
-- [ ] Activate, deactivate, and reactivate the same XID.
-- [ ] Reactivation with changed targets replaces the prior task definition.
-- [ ] Purge does not affect active or pending tasks.
+- [x] Activate, deactivate, and reactivate the same XID.
+- [x] Reactivation with changed targets replaces the prior task definition.
+- [x] Purge does not affect active or pending tasks.
 
 ## 5. Phase 3 — Eliminate silent product loss
 

@@ -935,7 +935,7 @@ func TestIntegration_ImplicitDeactivation_EnforcesEndTime(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create task with EndTime in the past and ImplicitDeactivationAllowed=true
+	// Create task with a near-future EndTime and implicit deactivation enabled.
 	xid := uuid.New()
 	task := &li.InterceptTask{
 		XID: xid,
@@ -944,7 +944,7 @@ func TestIntegration_ImplicitDeactivation_EnforcesEndTime(t *testing.T) {
 		},
 		DestinationIDs:              []uuid.UUID{did},
 		DeliveryType:                li.DeliveryX2andX3,
-		EndTime:                     time.Now().Add(-1 * time.Second), // Already expired
+		EndTime:                     time.Now().Add(100 * time.Millisecond),
 		ImplicitDeactivationAllowed: true,
 	}
 
@@ -997,7 +997,7 @@ func TestIntegration_NoImplicitDeactivation_IgnoresEndTime(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Create task with EndTime in the past but ImplicitDeactivationAllowed=false
+	// Create task with a near-future EndTime but implicit deactivation disabled.
 	xid := uuid.New()
 	task := &li.InterceptTask{
 		XID: xid,
@@ -1006,8 +1006,8 @@ func TestIntegration_NoImplicitDeactivation_IgnoresEndTime(t *testing.T) {
 		},
 		DestinationIDs:              []uuid.UUID{did},
 		DeliveryType:                li.DeliveryX2andX3,
-		EndTime:                     time.Now().Add(-1 * time.Second), // Already expired
-		ImplicitDeactivationAllowed: false,                            // NOT allowed
+		EndTime:                     time.Now().Add(100 * time.Millisecond),
+		ImplicitDeactivationAllowed: false, // NOT allowed
 	}
 
 	err = manager.ActivateTask(task)

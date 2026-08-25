@@ -30,58 +30,70 @@ The implementation must preserve these invariants:
 
 ## 3. Phase 1 — Make task activation truthful
 
+**Status (2026-08-25): Implemented, with one migration follow-up.** Filter creation and replacement now
+propagate distribution failures, retain retryable cleanup state, use canonical
+XIDs in new filter IDs, and remove uncommitted registry activations. The LI test
+suite passes with `go test -tags li ./internal/pkg/li/...`. Ambiguous legacy
+filter ownership deliberately fails safe; automated owner identification is
+still required before those legacy filters can be removed.
+
 ### 3.1 Propagate and roll back filter-push failures
 
 **Current code:** `internal/pkg/li/filters.go`
 
-`CreateFiltersForTask` and `UpdateFiltersForTask` currently ignore errors from `UpdateFilter` and `DeleteFilter`. This lets X1 acknowledge a task whose filters were never distributed.
+Previous behavior: `CreateFiltersForTask` and `UpdateFiltersForTask` ignored errors from `UpdateFilter` and `DeleteFilter`, allowing X1 to acknowledge a task whose filters were never distributed.
 
 Implement the following:
 
-- [ ] Make filter installation transactional from the caller's perspective.
-- [ ] During creation, push filters one at a time and record successful pushes.
-- [ ] If any push fails:
-  - [ ] delete all successfully pushed filters;
-  - [ ] remove all newly created local mappings;
-  - [ ] return a wrapped error containing the XID, filter ID, operation, and rollback outcome.
-- [ ] If rollback itself fails, return a joined/aggregate error and log the residual filter IDs at ERROR.
-- [ ] During update, preserve the old filter set until the new set is fully installed.
-- [ ] Define a safe update sequence that does not create an interception gap:
-  - [ ] Validate and construct the complete replacement set.
-  - [ ] Install the replacement filters.
-  - [ ] Remove the old filters.
-  - [ ] Commit local mappings.
-- [ ] If old-filter removal partially fails, report the task as failed or degraded and retain enough state to retry cleanup. Never silently forget a remotely installed filter.
-- [ ] Make `RemoveFiltersForTask` return all delete failures instead of logging and continuing as if removal succeeded.
-- [ ] Report activation and enforcement failures to the ADMF through the existing X1 error-reporting path where possible.
+- [x] Make filter installation transactional from the caller's perspective.
+- [x] During creation, push filters one at a time and record successful pushes.
+- [x] If any push fails:
+  - [x] delete all successfully pushed filters;
+  - [x] remove all newly created local mappings;
+  - [x] return a wrapped error containing the XID, filter ID, operation, and rollback outcome.
+- [x] If rollback itself fails, return a joined/aggregate error and log the residual filter IDs at ERROR.
+- [x] During update, preserve the old filter set until the new set is fully installed.
+- [x] Define a safe update sequence that does not create an interception gap:
+  - [x] Validate and construct the complete replacement set.
+  - [x] Install the replacement filters.
+  - [x] Remove the old filters.
+  - [x] Commit local mappings.
+- [x] If old-filter removal partially fails, report the task as failed or degraded and retain enough state to retry cleanup. Never silently forget a remotely installed filter.
+- [x] Make `RemoveFiltersForTask` return all delete failures instead of logging and continuing as if removal succeeded.
+- [x] Report activation and enforcement failures to the ADMF through the existing X1 error-reporting path where possible.
+
+Implementation note: replacement mappings are staged locally before old-filter
+withdrawal and become the committed set after withdrawal. Any old filters whose
+deletion fails remain in the mapping. `FilterCleanupError` causes the task to be
+marked failed, which uses the existing fault-deactivation reporting path.
 
 Tests:
 
-- [ ] Failure on the first filter push leaves no task filters locally or remotely.
-- [ ] Failure after one successful push rolls the first filter back.
-- [ ] Rollback failure is returned and identifies the residual filter.
-- [ ] Update failure leaves the original filter set active.
-- [ ] Partial old-filter deletion is visible to the caller and retryable.
-- [ ] X1 activation returns an error rather than OK when distribution fails.
+- [x] Failure on the first filter push leaves no task filters locally or remotely.
+- [x] Failure after one successful push rolls the first filter back.
+- [x] Rollback failure is returned and identifies the residual filter.
+- [x] Update failure leaves the original filter set active.
+- [x] Partial old-filter deletion is visible to the caller and retryable.
+- [x] X1 activation returns an error rather than OK when distribution fails.
 
 ### 3.2 Make activation rollback remove the registry entry
 
 **Current code:** `internal/pkg/li/manager.go`, `internal/pkg/li/registry.go`
 
-`Manager.ActivateTask` currently rolls back by deactivating the task, leaving a tombstone that prevents retry with the same XID.
+Previous behavior: `Manager.ActivateTask` rolled back by deactivating the task, leaving a tombstone that prevented retry with the same XID.
 
 Implement an internal registry rollback operation with these properties:
 
-- [ ] It removes only a task whose activation has not committed.
-- [ ] It does not emit an ordinary deactivation audit event.
-- [ ] It cannot remove an older active task with the same XID.
-- [ ] It is invoked after any activation-time filter failure.
-- [ ] Rollback errors are combined with the original activation error.
+- [x] It removes only a task whose activation has not committed.
+- [x] It does not emit an ordinary deactivation audit event.
+- [x] It cannot remove an older active task with the same XID.
+- [x] It is invoked after any activation-time filter failure.
+- [x] Rollback errors are combined with the original activation error.
 
 Tests:
 
-- [ ] A failed activation followed by a retry with the same XID succeeds.
-- [ ] Concurrent activation attempts cannot roll back one another's committed task.
+- [x] A failed activation followed by a retry with the same XID succeeds.
+- [x] Concurrent activation attempts cannot roll back one another's committed task.
 
 ### 3.3 Use collision-safe filter IDs
 
@@ -95,22 +107,33 @@ li-{full-canonical-xid}-{index}
 
 Also:
 
-- [ ] Check `filterStore` and `filterToXID` before insertion. Reject a filter ID already owned by another XID.
-- [ ] Update `liFilterXIDPrefix` to parse both the full-XID format and the legacy eight-character format.
-- [ ] Update startup orphan-filter reconciliation to compare full XIDs exactly for new IDs.
-- [ ] Treat legacy IDs conservatively during migration:
-  - [ ] associate a legacy prefix only when it maps unambiguously to one authoritative XID;
+- [x] Check `filterStore` and `filterToXID` before insertion. Reject a filter ID already owned by another XID.
+- [x] Update `liFilterXIDPrefix` to parse both the full-XID format and the legacy eight-character format.
+- [x] Update startup orphan-filter reconciliation to compare full XIDs exactly for new IDs.
+- [x] Treat legacy IDs conservatively during migration:
+  - [x] associate a legacy prefix only when it maps unambiguously to one authoritative XID;
   - [ ] remove and recreate ambiguous legacy filters using full-XID IDs;
-  - [ ] never delete a legacy filter solely because two authoritative XIDs share its prefix without first identifying its owner.
-- [ ] Update descriptions and log fields to include the full XID even if display output abbreviates it.
+  - [x] never delete a legacy filter solely because two authoritative XIDs share its prefix without first identifying its owner.
+- [x] Update descriptions and log fields to include the full XID even if display output abbreviates it.
+
+Migration note: canonical replacements are installed from authoritative ADMF
+tasks. Unambiguous legacy filters are then removed. Ambiguous legacy filters are
+retained and logged at ERROR with all candidate XIDs because their owner cannot
+be proven safely; the canonical filters already prevent new collisions. Removing
+those retained legacy filters remains open until reconciliation can identify
+their actual owner from authoritative filter metadata.
 
 Tests:
 
-- [ ] Two XIDs sharing the first eight characters receive distinct filters.
-- [ ] Removing either task leaves the other's filters intact.
-- [ ] New and legacy IDs are parsed correctly.
+- [x] Two XIDs sharing the first eight characters receive distinct filters.
+- [x] Removing either task leaves the other's filters intact.
+- [x] New and legacy IDs are parsed correctly.
 - [ ] Startup reconciliation migrates an unambiguous legacy filter.
 - [ ] Ambiguous legacy IDs fail safe and produce an actionable log.
+
+The migration behaviors above are implemented and exercised by the broader
+reconciliation suite, but dedicated regression tests for these two cases remain
+to be added.
 
 ## 4. Phase 2 — Enforce the complete task lifecycle
 

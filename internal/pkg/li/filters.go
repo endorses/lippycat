@@ -2,6 +2,7 @@
 package li
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/endorses/lippycat/api/gen/management"
+	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
 // FilterManager handles the mapping between LI intercept tasks and lippycat filters.
@@ -60,11 +62,18 @@ type FilterLister interface {
 	ListFilterIDs() []string
 }
 
+// FilterCleanupError means replacement filters were installed but superseded
+// filters could not all be withdrawn. Residual IDs remain tracked for retry.
+type FilterCleanupError struct{ Err error }
+
+func (e *FilterCleanupError) Error() string { return e.Err.Error() }
+func (e *FilterCleanupError) Unwrap() error { return e.Err }
+
 // liFilterIDPrefix marks a filter as LI-owned: prefix + XID prefix + "-" + index.
 const liFilterIDPrefix = "li-"
 
-// liFilterXIDPrefix extracts the XID prefix from an LI filter ID
-// ("li-a1b2c3d4-0" -> "a1b2c3d4"). False for non-LI IDs.
+// liFilterXIDPrefix extracts the canonical XID from new filter IDs and the
+// eight-character prefix from legacy IDs. False is returned for malformed IDs.
 func liFilterXIDPrefix(filterID string) (string, bool) {
 	if !strings.HasPrefix(filterID, liFilterIDPrefix) {
 		return "", false
@@ -74,7 +83,16 @@ func liFilterXIDPrefix(filterID string) (string, bool) {
 	if sep <= 0 || sep == len(rest)-1 {
 		return "", false
 	}
-	return rest[:sep], true
+	owner := rest[:sep]
+	if len(owner) == 8 {
+		return owner, true
+	}
+	// A canonical UUID contains internal hyphens; validating it avoids treating
+	// arbitrary operator filter names beginning with li- as task ownership.
+	if xid, err := uuid.Parse(owner); err == nil && xid.String() == strings.ToLower(owner) {
+		return xid.String(), true
+	}
+	return "", false
 }
 
 // NewFilterManager creates a new filter manager.
@@ -125,27 +143,57 @@ func (m *FilterManager) CreateFiltersForTask(task *InterceptTask) ([]string, err
 			return nil, fmt.Errorf("failed to create filter for target %d: %w", i, err)
 		}
 
-		// Store the filter
-		m.filterStore[filter.Id] = filter
-		m.filterToXID[filter.Id] = task.XID
+		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
+			return nil, fmt.Errorf("create filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
+		}
+		if _, ok := m.filterStore[filter.Id]; ok {
+			return nil, fmt.Errorf("create filters for XID %s: filter ID %s already exists", task.XID, filter.Id)
+		}
 		filterIDs = append(filterIDs, filter.Id)
 		createdFilters = append(createdFilters, filter)
 	}
 
-	// Store the XID to filter IDs mapping
-	m.xidToFilters[task.XID] = filterIDs
-
-	// Push filters to hunters
+	var pushed []string
 	if m.filterPusher != nil {
 		for _, filter := range createdFilters {
 			if err := m.filterPusher.UpdateFilter(filter); err != nil {
-				// Log error but don't fail - filter is still stored locally
-				// In production, this would trigger a retry mechanism
+				pushErr := fmt.Errorf("install filters for XID %s: update filter %s: %w", task.XID, filter.Id, err)
+				rollbackErr := m.rollbackRemoteFiltersLocked(task.XID, pushed)
+				if rollbackErr != nil {
+					return nil, errors.Join(pushErr, rollbackErr)
+				}
+				return nil, fmt.Errorf("%w; rollback succeeded", pushErr)
 			}
+			pushed = append(pushed, filter.Id)
 		}
 	}
 
+	for _, filter := range createdFilters {
+		m.filterStore[filter.Id] = filter
+		m.filterToXID[filter.Id] = task.XID
+	}
+	m.xidToFilters[task.XID] = filterIDs
+
 	return filterIDs, nil
+}
+
+func (m *FilterManager) rollbackRemoteFiltersLocked(xid uuid.UUID, filterIDs []string) error {
+	if m.filterPusher == nil {
+		return nil
+	}
+	var errs []error
+	var residual []string
+	for i := len(filterIDs) - 1; i >= 0; i-- {
+		id := filterIDs[i]
+		if err := m.filterPusher.DeleteFilter(id); err != nil {
+			residual = append(residual, id)
+			errs = append(errs, fmt.Errorf("rollback XID %s delete filter %s: %w", xid, id, err))
+		}
+	}
+	if len(errs) != 0 {
+		logger.Error("LI filter rollback left remotely installed filters", "xid", xid, "residual_filter_ids", residual, "error", errors.Join(errs...))
+	}
+	return errors.Join(errs...)
 }
 
 // UpdateFiltersForTask atomically updates filters when a task is modified.
@@ -171,59 +219,78 @@ func (m *FilterManager) UpdateFiltersForTask(task *InterceptTask) error {
 	// From here on, we hold the lock until the end
 	defer m.mu.Unlock()
 
-	// Store existing filters for potential rollback
-	existingFilters := make([]*management.Filter, 0, len(existingIDs))
-	for _, id := range existingIDs {
-		if f, ok := m.filterStore[id]; ok {
-			existingFilters = append(existingFilters, proto.Clone(f).(*management.Filter))
-		}
-	}
-
-	// Remove existing filters from local store
-	for _, id := range existingIDs {
-		delete(m.filterStore, id)
-		delete(m.filterToXID, id)
-	}
-	delete(m.xidToFilters, task.XID)
-
-	// Create new filters
+	// Construct a complete replacement set before changing local or remote state.
 	var newFilterIDs []string
 	var newFilters []*management.Filter
-
+	nextIndex := 0
 	for i, target := range task.Targets {
-		filter, err := m.targetToFilter(task.XID, i, target)
-		if err != nil {
-			// Rollback: restore existing filters
-			for _, f := range existingFilters {
-				m.filterStore[f.Id] = f
-				m.filterToXID[f.Id] = task.XID
+		for {
+			candidate := fmt.Sprintf(liFilterIDPrefix+"%s-%d", task.XID.String(), nextIndex)
+			if _, used := m.filterStore[candidate]; !used {
+				break
 			}
-			m.xidToFilters[task.XID] = existingIDs
-			return fmt.Errorf("failed to create filter for target %d: %w", i, err)
+			nextIndex++
 		}
-
-		m.filterStore[filter.Id] = filter
-		m.filterToXID[filter.Id] = task.XID
+		filter, err := m.targetToFilter(task.XID, nextIndex, target)
+		if err != nil {
+			return fmt.Errorf("construct replacement filters for XID %s target %d: %w", task.XID, i, err)
+		}
+		nextIndex++
+		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
+			return fmt.Errorf("replace filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
+		}
+		if _, ok := m.filterStore[filter.Id]; ok {
+			return fmt.Errorf("replace filters for XID %s: filter ID %s already exists", task.XID, filter.Id)
+		}
 		newFilterIDs = append(newFilterIDs, filter.Id)
 		newFilters = append(newFilters, filter)
 	}
 
-	m.xidToFilters[task.XID] = newFilterIDs
-
-	// Push updates to hunters
+	// Arm all replacements before withdrawing any old filter, avoiding a gap.
 	if m.filterPusher != nil {
-		// Delete old filters
-		for _, id := range existingIDs {
-			if err := m.filterPusher.DeleteFilter(id); err != nil {
-				// Log error but continue
-			}
-		}
-		// Add new filters
+		var pushed []string
 		for _, filter := range newFilters {
 			if err := m.filterPusher.UpdateFilter(filter); err != nil {
-				// Log error but continue
+				pushErr := fmt.Errorf("install replacement filters for XID %s: update filter %s: %w", task.XID, filter.Id, err)
+				rollbackErr := m.rollbackRemoteFiltersLocked(task.XID, pushed)
+				if rollbackErr != nil {
+					// Ownership is uncertain after rollback failure. Retain all
+					// attempted IDs so later cleanup safely retries every one.
+					for _, pushedFilter := range newFilters[:len(pushed)] {
+						m.filterStore[pushedFilter.Id] = pushedFilter
+						m.filterToXID[pushedFilter.Id] = task.XID
+					}
+					m.xidToFilters[task.XID] = append(append([]string(nil), existingIDs...), pushed...)
+				}
+				return errors.Join(pushErr, rollbackErr)
+			}
+			pushed = append(pushed, filter.Id)
+		}
+	}
+
+	// Commit replacements locally before deleting old filters. If deletion is
+	// partial, residual IDs remain mapped so a later Remove/Update can retry.
+	for _, filter := range newFilters {
+		m.filterStore[filter.Id] = filter
+		m.filterToXID[filter.Id] = task.XID
+	}
+	committedIDs := append([]string(nil), newFilterIDs...)
+	var deleteErrs []error
+	for _, id := range existingIDs {
+		if m.filterPusher != nil {
+			if err := m.filterPusher.DeleteFilter(id); err != nil {
+				committedIDs = append(committedIDs, id)
+				deleteErrs = append(deleteErrs, fmt.Errorf("replace filters for XID %s: delete old filter %s: %w", task.XID, id, err))
+				continue
 			}
 		}
+		delete(m.filterStore, id)
+		delete(m.filterToXID, id)
+	}
+	m.xidToFilters[task.XID] = committedIDs
+	if len(deleteErrs) != 0 {
+		logger.Error("LI filter replacement left old filters installed", "xid", task.XID, "filter_ids", committedIDs[len(newFilterIDs):], "error", errors.Join(deleteErrs...))
+		return &FilterCleanupError{Err: errors.Join(deleteErrs...)}
 	}
 
 	return nil
@@ -241,20 +308,26 @@ func (m *FilterManager) RemoveFiltersForTask(xid uuid.UUID) error {
 		return nil // No filters to remove
 	}
 
-	// Remove from local store and notify hunters
+	var deleteErrs []error
+	var residual []string
 	for _, id := range filterIDs {
-		delete(m.filterStore, id)
-		delete(m.filterToXID, id)
-
 		if m.filterPusher != nil {
 			if err := m.filterPusher.DeleteFilter(id); err != nil {
-				// Log error but continue
+				residual = append(residual, id)
+				deleteErrs = append(deleteErrs, fmt.Errorf("remove filters for XID %s: delete filter %s: %w", xid, id, err))
+				continue
 			}
 		}
+		delete(m.filterStore, id)
+		delete(m.filterToXID, id)
 	}
-
-	delete(m.xidToFilters, xid)
-	return nil
+	if len(residual) == 0 {
+		delete(m.xidToFilters, xid)
+	} else {
+		m.xidToFilters[xid] = residual
+		logger.Error("LI task filter removal incomplete", "xid", xid, "residual_filter_ids", residual, "error", errors.Join(deleteErrs...))
+	}
+	return errors.Join(deleteErrs...)
 }
 
 // GetXIDForFilter returns the task XID associated with a filter.
@@ -321,14 +394,14 @@ func (m *FilterManager) targetToFilter(xid uuid.UUID, index int, target TargetId
 	}
 
 	// Generate a unique filter ID that includes the XID for traceability
-	filterID := fmt.Sprintf(liFilterIDPrefix+"%s-%d", xid.String()[:8], index)
+	filterID := fmt.Sprintf(liFilterIDPrefix+"%s-%d", xid.String(), index)
 
 	return &management.Filter{
 		Id:          filterID,
 		Type:        filterType,
 		Pattern:     pattern,
 		Enabled:     true,
-		Description: fmt.Sprintf("LI task %s target %d: %s", xid.String()[:8], index, target.Type),
+		Description: fmt.Sprintf("LI task %s target %d: %s", xid.String(), index, target.Type),
 	}, nil
 }
 

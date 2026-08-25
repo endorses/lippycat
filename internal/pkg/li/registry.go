@@ -210,6 +210,40 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	return nil
 }
 
+// rollbackActivation removes precisely the registry entry created by an
+// activation that has not committed its enforcement. activatedAt is the
+// activation identity, preventing a stale rollback from removing another task.
+func (r *Registry) rollbackActivation(xid uuid.UUID, activatedAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[xid]
+	if !exists {
+		return fmt.Errorf("rollback activation: %w: XID %s", ErrTaskNotFound, xid)
+	}
+	if !task.ActivatedAt.Equal(activatedAt) || (task.Status != TaskStatusActive && task.Status != TaskStatusPending) {
+		return fmt.Errorf("rollback activation for XID %s: registry entry no longer belongs to this activation", xid)
+	}
+	delete(r.tasks, xid)
+	return nil
+}
+
+func (r *Registry) restoreTask(task *InterceptTask) error {
+	if task == nil {
+		return fmt.Errorf("restore task: task is nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.tasks[task.XID]
+	if !exists || !current.ActivatedAt.Equal(task.ActivatedAt) {
+		return fmt.Errorf("restore task XID %s: registry entry changed concurrently", task.XID)
+	}
+	copyTask := *task
+	copyTask.Targets = append([]TargetIdentity(nil), task.Targets...)
+	copyTask.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	r.tasks[task.XID] = &copyTask
+	return nil
+}
+
 // ModifyTask updates an existing task's parameters atomically.
 //
 // Per ETSI TS 103 221-1, task modification:

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -560,17 +561,40 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 	}
 
 	live := make(map[string]bool, len(snapshot.tasks))
+	legacyOwners := make(map[string][]uuid.UUID)
 	for xid := range snapshot.tasks {
-		live[xid.String()[:8]] = true
+		live[xid.String()] = true
+		prefix := xid.String()[:8]
+		legacyOwners[prefix] = append(legacyOwners[prefix], xid)
 	}
 
 	var orphans []string
+	var migrations []string
 	for _, id := range lister.ListFilterIDs() {
-		if prefix, isLI := liFilterXIDPrefix(id); isLI && !live[prefix] {
+		owner, isLI := liFilterXIDPrefix(id)
+		if !isLI {
+			continue
+		}
+		if len(owner) == 8 {
+			matches := legacyOwners[owner]
+			switch len(matches) {
+			case 0:
+				orphans = append(orphans, id)
+			case 1:
+				// ActivateTask has installed the canonical replacement already.
+				migrations = append(migrations, id)
+			default:
+				logger.Error("Startup reconciliation: ambiguous legacy LI filter retained; ownership cannot be proven",
+					"filter_id", id, "xid_prefix", owner, "candidate_xids", matches)
+			}
+			continue
+		}
+		if !live[owner] {
 			orphans = append(orphans, id)
 		}
 	}
-	if len(orphans) == 0 {
+	orchans := append(orphans, migrations...)
+	if len(orchans) == 0 {
 		return 0
 	}
 
@@ -583,8 +607,12 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 	}
 
 	removed := 0
-	for _, id := range orphans {
-		logger.Warn("Startup reconciliation: removing LI filter with no ADMF task", "filter_id", id)
+	for _, id := range orchans {
+		reason := "orphan"
+		if slices.Contains(migrations, id) {
+			reason = "legacy_migration"
+		}
+		logger.Warn("Startup reconciliation: removing legacy or orphaned LI filter", "filter_id", id, "reason", reason)
 		if err := m.config.FilterPusher.DeleteFilter(id); err != nil {
 			logger.Error("Startup reconciliation: failed to remove orphaned LI filter",
 				"filter_id", id,
@@ -855,11 +883,14 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 	}
 
 	// Create filters for the task
+	registered, getErr := m.registry.GetTaskDetails(task.XID)
+	if getErr != nil {
+		return fmt.Errorf("read activation identity for XID %s: %w", task.XID, getErr)
+	}
 	filterIDs, err := m.filters.CreateFiltersForTask(task)
 	if err != nil {
-		// Rollback: deactivate the task
-		_ = m.registry.DeactivateTask(task.XID)
-		return err
+		rollbackErr := m.registry.rollbackActivation(task.XID, registered.ActivatedAt)
+		return errors.Join(fmt.Errorf("activate XID %s: %w", task.XID, err), rollbackErr)
 	}
 
 	logger.Info("LI task activated",
@@ -874,6 +905,10 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 
 // ModifyTask updates an existing task's parameters atomically.
 func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
+	previous, err := m.registry.GetTaskDetails(xid)
+	if err != nil {
+		return err
+	}
 	// First modify in registry
 	if err := m.registry.ModifyTask(xid, mod); err != nil {
 		return err
@@ -886,7 +921,12 @@ func (m *Manager) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 			return err
 		}
 		if err := m.filters.UpdateFiltersForTask(task); err != nil {
-			return err
+			var cleanupErr *FilterCleanupError
+			if errors.As(err, &cleanupErr) {
+				markErr := m.registry.MarkTaskFailed(xid, err.Error())
+				return errors.Join(fmt.Errorf("modify XID %s filter enforcement degraded: %w", xid, err), markErr)
+			}
+			return errors.Join(fmt.Errorf("modify XID %s filter enforcement: %w", xid, err), m.registry.restoreTask(previous))
 		}
 	}
 
@@ -902,6 +942,7 @@ func (m *Manager) DeactivateTask(xid uuid.UUID) error {
 			"xid", xid,
 			"error", err,
 		)
+		return err
 	}
 
 	// Then deactivate in registry

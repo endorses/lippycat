@@ -99,7 +99,9 @@ type CallTracker struct {
 	portToCallID      map[string][]string      // key = port, value = []CallID (multi-value for B2BUA)
 	lruList           *list.List               // LRU list (front = most recently used)
 	lruIndex          map[string]*list.Element // callID -> list element for O(1) lookup
+	pins              map[string]int           // callID -> active retention leases
 	maxCalls          int                      // Maximum calls to keep
+	lastPinnedWarning time.Time
 	mu                sync.RWMutex
 	janitorCtx        context.Context
 	janitorCancel     context.CancelFunc
@@ -124,13 +126,21 @@ func getTracker() *CallTracker {
 }
 
 func NewCallTracker() *CallTracker {
+	return NewCallTrackerWithCapacity(viper.GetInt("voip.max_calls"))
+}
+
+// NewCallTrackerWithCapacity creates a tracker with the configured soft cap.
+func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 	ctx, cancel := context.WithCancel(context.Background())
-	maxCalls := DefaultMaxCalls
+	if maxCalls <= 0 {
+		maxCalls = DefaultMaxCalls
+	}
 	tracker := &CallTracker{
 		callMap:        make(map[string]*CallInfo),
 		portToCallID:   make(map[string][]string),
 		lruList:        list.New(),
 		lruIndex:       make(map[string]*list.Element),
+		pins:           make(map[string]int),
 		maxCalls:       maxCalls,
 		janitorCtx:     ctx,
 		janitorCancel:  cancel,
@@ -144,6 +154,36 @@ func NewCallTracker() *CallTracker {
 	go tracker.setupSignalHandler()
 
 	return tracker
+}
+
+// PinCall acquires a generic retention lease. It is safe to pin before the call
+// is observed; the lease protects it as soon as it enters the tracker.
+func (ct *CallTracker) PinCall(callID string) {
+	if callID == "" {
+		return
+	}
+	ct.mu.Lock()
+	ct.pins[callID]++
+	ct.mu.Unlock()
+}
+
+// UnpinCall releases one retention lease.
+func (ct *CallTracker) UnpinCall(callID string) {
+	if callID == "" {
+		return
+	}
+	ct.mu.Lock()
+	if ct.pins[callID] <= 1 {
+		delete(ct.pins, callID)
+	} else {
+		ct.pins[callID]--
+	}
+	ct.mu.Unlock()
+}
+func (ct *CallTracker) IsPinned(callID string) bool {
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	return ct.pins[callID] > 0
 }
 
 func (ct *CallTracker) startJanitor() {
@@ -292,8 +332,23 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 
 		// Evict LRU (least recently used) if at capacity
 		if tracker.lruList.Len() >= tracker.maxCalls {
-			// Remove from back (least recently used)
-			oldest := tracker.lruList.Back()
+			// Prefer an unpinned inactive call, then any unpinned LRU call.
+			var oldest *list.Element
+			for e := tracker.lruList.Back(); e != nil; e = e.Prev() {
+				id := e.Value.(string)
+				if tracker.pins[id] == 0 && tracker.callMap[id] != nil && tracker.callMap[id].EndTime != nil {
+					oldest = e
+					break
+				}
+			}
+			if oldest == nil {
+				for e := tracker.lruList.Back(); e != nil; e = e.Prev() {
+					if tracker.pins[e.Value.(string)] == 0 {
+						oldest = e
+						break
+					}
+				}
+			}
 			if oldest != nil {
 				oldestCallID := oldest.Value.(string)
 				oldCall := tracker.callMap[oldestCallID]
@@ -325,6 +380,9 @@ func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
 				delete(tracker.lruIndex, oldestCallID)
 				logger.Debug("Evicted LRU call (buffer full)",
 					"call_id", SanitizeCallIDForLogging(oldestCallID))
+			} else if time.Since(tracker.lastPinnedWarning) > time.Minute {
+				tracker.lastPinnedWarning = time.Now()
+				logger.Warn("call tracker soft cap exceeded because all calls are pinned", "max_calls", tracker.maxCalls, "current_calls", tracker.lruList.Len())
 			}
 		}
 

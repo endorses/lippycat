@@ -9,6 +9,7 @@ package processor
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/li/x2x3"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/types"
+	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/uuid"
 )
 
@@ -33,6 +35,7 @@ var (
 	// liMediaDirection derives the Payload Direction of RTP media for
 	// identity-based targets from the call's observed SIP signalling.
 	liMediaDirection *li.MediaDirectionResolver
+	liPinnedCalls    sync.Map // map[uuid.UUID]*sync.Map of Call-ID retention leases
 )
 
 // LI statistics
@@ -43,6 +46,7 @@ var (
 	liX3Errors  atomic.Uint64
 	liX2Skipped atomic.Uint64
 	liX3Skipped atomic.Uint64
+	liNoEncoder atomic.Uint64
 )
 
 // processorFilterPusher adapts the processor's filter management system
@@ -157,6 +161,9 @@ func (p *Processor) initLIManager() {
 	// (e.g., EndTime expiration with ImplicitDeactivationAllowed=true)
 	// The LI Manager automatically reports these to ADMF via X1 client.
 	deactivationCallback := func(task *li.InterceptTask, reason li.DeactivationReason) {
+		if calls, ok := liPinnedCalls.LoadAndDelete(task.XID); ok {
+			calls.(*sync.Map).Range(func(key, _ any) bool { voip.GetCallTracker().UnpinCall(key.(string)); return true })
+		}
 		if liDeliveryClient != nil {
 			liDeliveryClient.ResetSequence(task.XID)
 		}
@@ -229,6 +236,18 @@ func (p *Processor) initLIManager() {
 		// Determine what to deliver based on task configuration
 		deliverX2 := task.DeliveryType == li.DeliveryX2Only || task.DeliveryType == li.DeliveryX2andX3
 		deliverX3 := task.DeliveryType == li.DeliveryX3Only || task.DeliveryType == li.DeliveryX2andX3
+		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.CallID != "" {
+			callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
+			calls := callsAny.(*sync.Map)
+			if _, loaded := calls.LoadOrStore(pkt.VoIPData.CallID, struct{}{}); !loaded {
+				voip.GetCallTracker().PinCall(pkt.VoIPData.CallID)
+			}
+			if pkt.VoIPData.Method == "BYE" || pkt.VoIPData.Method == "CANCEL" {
+				if _, loaded := calls.LoadAndDelete(pkt.VoIPData.CallID); loaded {
+					voip.GetCallTracker().UnpinCall(pkt.VoIPData.CallID)
+				}
+			}
+		}
 
 		// Learn the target's media endpoints from signalling before any delivery
 		// gating: X3-only tasks deliver no IRI but their media still needs a
@@ -242,8 +261,9 @@ func (p *Processor) initLIManager() {
 			pdu, err := liX2Encoder.EncodeIRI(pkt, task.XID)
 			if err != nil {
 				liX2Errors.Add(1)
-				logger.Debug("X2 encode error",
+				logger.Warn("X2 encode error",
 					"xid", task.XID,
+					"call_id", voip.SanitizeCallIDForLogging(pkt.VoIPData.CallID),
 					"error", err,
 				)
 			} else if pdu != nil {
@@ -354,6 +374,38 @@ func (p *Processor) initLIManager() {
 				}
 			} else {
 				liX3Skipped.Add(1)
+			}
+		}
+
+		// IP/CIDR targets carry matched ordinary traffic as raw X3 CC. They do
+		// not generate synthetic X2 IRI.
+		if deliverX3 && (pkt.VoIPData == nil || !pkt.VoIPData.IsRTP) {
+			matchedTarget, ok := matchedRawIPTarget(task.Targets, pkt)
+			if ok {
+				pdu, err := liX3Encoder.EncodeRawIPCC(pkt, task.XID, matchedTarget)
+				if err != nil {
+					liX3Errors.Add(1)
+					liNoEncoder.Add(1)
+					logger.Warn("LI raw X3 encode failed", "xid", task.XID, "target", matchedTarget, "error", err)
+					return
+				}
+				attrBuilder := x2x3.NewAttributeBuilder()
+				pdu.AddAttribute(attrBuilder.NFID(p.config.ProcessorID))
+				if pkt.NodeID != "" {
+					pdu.AddAttribute(attrBuilder.IPID(pkt.NodeID))
+				}
+				pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(matchedTarget))
+				if data, marshalErr := pdu.MarshalBinary(); marshalErr != nil {
+					liX3Errors.Add(1)
+					logger.Warn("raw X3 PDU marshal error", "xid", task.XID, "error", marshalErr)
+				} else {
+					liX3Encoded.Add(1)
+					if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
+						if sendErr := liDeliveryClient.SendX3(task.XID, task.DestinationIDs, data); sendErr != nil {
+							logger.Warn("raw X3 delivery enqueue failed", "xid", task.XID, "error", sendErr)
+						}
+					}
+				}
 			}
 		}
 	})
@@ -526,6 +578,7 @@ type LIEncodingStats struct {
 	X3Encoded uint64
 	X3Errors  uint64
 	X3Skipped uint64
+	NoEncoder uint64
 
 	// DirectionResolvedMedia counts RTP streams (SSRCs) whose Payload Direction
 	// was derived from the call's observed signalling.
@@ -544,7 +597,28 @@ func (p *Processor) getLIEncodingStats() LIEncodingStats {
 		X3Encoded:              liX3Encoded.Load(),
 		X3Errors:               liX3Errors.Load(),
 		X3Skipped:              liX3Skipped.Load(),
+		NoEncoder:              liNoEncoder.Load(),
 		DirectionResolvedMedia: dirStats.ResolvedFromMedia,
 		DirectionUnknownRTP:    dirStats.UnknownRTP,
 	}
+}
+
+func matchedRawIPTarget(targets []li.TargetIdentity, pkt *types.PacketDisplay) (string, bool) {
+	src, srcErr := netip.ParseAddr(pkt.SrcIP)
+	dst, dstErr := netip.ParseAddr(pkt.DstIP)
+	for _, target := range targets {
+		switch target.Type {
+		case li.TargetTypeIPv4Address, li.TargetTypeIPv6Address:
+			a, err := netip.ParseAddr(target.Value)
+			if err == nil && ((srcErr == nil && src == a) || (dstErr == nil && dst == a)) {
+				return target.Value, true
+			}
+		case li.TargetTypeIPv4CIDR, li.TargetTypeIPv6CIDR:
+			prefix, err := netip.ParsePrefix(target.Value)
+			if err == nil && ((srcErr == nil && prefix.Contains(src)) || (dstErr == nil && prefix.Contains(dst))) {
+				return target.Value, true
+			}
+		}
+	}
+	return "", false
 }

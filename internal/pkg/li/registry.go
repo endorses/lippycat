@@ -554,6 +554,17 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 		task.DeliveryType != DeliveryX2andX3 {
 		return fmt.Errorf("%w: invalid delivery type %d", ErrInvalidTask, task.DeliveryType)
 	}
+	for _, target := range task.Targets {
+		switch target.Type {
+		case TargetTypeIPv4Address, TargetTypeIPv4CIDR, TargetTypeIPv6Address, TargetTypeIPv6CIDR:
+			if task.DeliveryType == DeliveryX2Only {
+				return fmt.Errorf("%w: %s targets require X3 raw-packet delivery", ErrUnsupportedDeliveryCombination, target.Type)
+			}
+		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI:
+		default:
+			return fmt.Errorf("%w: target type %d has no encoder", ErrUnsupportedDeliveryCombination, target.Type)
+		}
+	}
 	if !task.EndTime.IsZero() {
 		start := task.StartTime
 		if start.IsZero() {

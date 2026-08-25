@@ -198,6 +198,7 @@ func TestManager_ModifyTask(t *testing.T) {
 		Address:   "mdf.example.com",
 		Port:      8443,
 		X2Enabled: true,
+		X3Enabled: true,
 	}
 	err = m.CreateDestination(dest)
 	require.NoError(t, err)
@@ -210,7 +211,7 @@ func TestManager_ModifyTask(t *testing.T) {
 			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
-		DeliveryType:   DeliveryX2Only,
+		DeliveryType:   DeliveryX3Only,
 	}
 
 	err = m.ActivateTask(task)
@@ -268,6 +269,7 @@ func TestManager_ProcessPacket_WithMatch(t *testing.T) {
 		Address:   "mdf.example.com",
 		Port:      8443,
 		X2Enabled: true,
+		X3Enabled: true,
 	})
 	require.NoError(t, err)
 
@@ -278,7 +280,7 @@ func TestManager_ProcessPacket_WithMatch(t *testing.T) {
 			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
-		DeliveryType:   DeliveryX2Only,
+		DeliveryType:   DeliveryX3Only,
 	})
 	require.NoError(t, err)
 
@@ -343,6 +345,7 @@ func TestManager_ProcessPacket_NoMatch(t *testing.T) {
 		Address:   "mdf.example.com",
 		Port:      8443,
 		X2Enabled: true,
+		X3Enabled: true,
 	})
 	require.NoError(t, err)
 
@@ -352,7 +355,7 @@ func TestManager_ProcessPacket_NoMatch(t *testing.T) {
 			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
-		DeliveryType:   DeliveryX2Only,
+		DeliveryType:   DeliveryX3Only,
 	})
 	require.NoError(t, err)
 
@@ -483,6 +486,7 @@ func TestManager_MarkTaskFailed(t *testing.T) {
 		Address:   "mdf.example.com",
 		Port:      8443,
 		X2Enabled: true,
+		X3Enabled: true,
 	})
 	require.NoError(t, err)
 
@@ -493,7 +497,7 @@ func TestManager_MarkTaskFailed(t *testing.T) {
 			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
-		DeliveryType:   DeliveryX2Only,
+		DeliveryType:   DeliveryX3Only,
 	})
 	require.NoError(t, err)
 

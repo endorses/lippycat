@@ -2,6 +2,16 @@
 
 This guide covers the deployment and operation of lippycat's ETSI X1/X2/X3 lawful interception interfaces.
 
+## X2/X3 correlation compatibility invariant
+
+For SIP/RTP interception, the wire-level X2/X3 correlation ID is the FNV-1a
+64-bit hash of the exact SIP Call-ID bytes. X2 signalling and every X3 media
+stream carrying that Call-ID use the same value, regardless of SSRC, packet
+direction, or SDP changes caused by a re-INVITE. Reuse of a Call-ID therefore
+also reuses the correlation ID; the MDF must scope it with the XID and task time
+window. Changing this derivation is an interop-breaking protocol change and
+requires a coordinated MDF cutover.
+
 ## Overview
 
 lippycat implements the following ETSI interfaces for lawful interception:

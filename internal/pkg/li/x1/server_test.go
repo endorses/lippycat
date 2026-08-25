@@ -2646,3 +2646,45 @@ func TestServer_BackwardCompatibility_BareRequests(t *testing.T) {
 	require.True(t, exists, "bare request should still be processed")
 	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
 }
+
+func TestServer_LegacyContainerProcessesEveryMessageInOrder(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne", Version: "v1.13.1"}, mock, nil)
+	firstID := uuid.New()
+	secondID := uuid.New()
+	body := `<requestContainer xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <x1RequestMessage xsi:type="pingRequest"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + firstID.String() + `</x1TransactionId></x1RequestMessage>
+  <x1RequestMessage xsi:type="pingRequest"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + secondID.String() + `</x1TransactionId></x1RequestMessage>
+</requestContainer>`
+
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var responses schema.ResponseContainer
+	require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &responses))
+	require.Len(t, responses.X1ResponseMessage, 2)
+	require.Equal(t, firstID.String(), string(*responses.X1ResponseMessage[0].X1TransactionId))
+	require.Equal(t, secondID.String(), string(*responses.X1ResponseMessage[1].X1TransactionId))
+}
+
+func TestServer_ContainerContinuesAfterErrorAndRejectsNestedMessage(t *testing.T) {
+	mock := newMockDestinationManager()
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne", Version: "v1.13.1"}, mock, nil)
+	badID := uuid.New()
+	goodID := uuid.New()
+	body := `<requestContainer xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <x1RequestMessage xsi:type="requestContainer"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + badID.String() + `</x1TransactionId></x1RequestMessage>
+  <x1RequestMessage xsi:type="pingRequest"><admfIdentifier>admf</admfIdentifier><x1TransactionId>` + goodID.String() + `</x1TransactionId></x1RequestMessage>
+</requestContainer>`
+
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	responseBody := w.Body.String()
+	require.Contains(t, responseBody, "nested request containers not supported")
+	require.Contains(t, responseBody, badID.String())
+	require.Contains(t, responseBody, goodID.String())
+	require.Less(t, bytes.Index(w.Body.Bytes(), []byte(badID.String())), bytes.Index(w.Body.Bytes(), []byte(goodID.String())))
+}

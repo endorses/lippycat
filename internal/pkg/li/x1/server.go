@@ -17,8 +17,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -222,6 +225,14 @@ type ServerConfig struct {
 	// RateLimitBurst is the maximum burst size for rate limiting (default: 20).
 	RateLimitBurst int
 
+	// TrustedProxyCIDRs are the only peers whose Forwarded or
+	// X-Forwarded-For headers are accepted. Empty means no trusted proxies.
+	TrustedProxyCIDRs []string
+	// RateLimiterMaxEntries bounds per-client limiter memory. Defaults to 4096.
+	RateLimiterMaxEntries int
+	// RateLimiterTTL expires idle client entries. Defaults to 15 minutes.
+	RateLimiterTTL time.Duration
+
 	// XMLParseTimeout is the maximum time allowed for XML parsing (default: 5s).
 	XMLParseTimeout time.Duration
 
@@ -264,8 +275,15 @@ type Server struct {
 	listener     net.Listener
 	shutdownOnce sync.Once
 
-	// rateLimiters stores per-IP rate limiters for request throttling.
-	rateLimiters sync.Map // map[string]*rate.Limiter
+	rateLimitersMu       sync.Mutex
+	rateLimiters         map[string]*limiterEntry
+	trustedProxies       []netip.Prefix
+	rateLimiterEvictions atomic.Uint64
+}
+
+type limiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 // NewServer creates a new X1 server.
@@ -286,11 +304,28 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 	if config.XMLParseTimeout <= 0 {
 		config.XMLParseTimeout = 5 * time.Second
 	}
+	if config.RateLimiterMaxEntries <= 0 {
+		config.RateLimiterMaxEntries = 4096
+	}
+	if config.RateLimiterTTL <= 0 {
+		config.RateLimiterTTL = 15 * time.Minute
+	}
+	trusted := make([]netip.Prefix, 0, len(config.TrustedProxyCIDRs))
+	for _, raw := range config.TrustedProxyCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			logger.Error("ignoring invalid trusted proxy CIDR", "cidr", raw, "error", err)
+			continue
+		}
+		trusted = append(trusted, prefix.Masked())
+	}
 
 	return &Server{
-		config:      config,
-		destManager: destManager,
-		taskManager: taskManager,
+		config:         config,
+		destManager:    destManager,
+		taskManager:    taskManager,
+		rateLimiters:   make(map[string]*limiterEntry),
+		trustedProxies: trusted,
 	}
 }
 
@@ -433,14 +468,41 @@ func (s *Server) buildTLSConfig() (*tls.Config, error) {
 
 // getRateLimiter returns the rate limiter for the given IP, creating one if necessary.
 func (s *Server) getRateLimiter(ip string) *rate.Limiter {
-	if limiter, ok := s.rateLimiters.Load(ip); ok {
-		return limiter.(*rate.Limiter)
+	now := time.Now()
+	s.rateLimitersMu.Lock()
+	defer s.rateLimitersMu.Unlock()
+	if entry := s.rateLimiters[ip]; entry != nil {
+		entry.lastSeen = now
+		return entry.limiter
 	}
-
-	// Create new limiter for this IP
+	for key, entry := range s.rateLimiters {
+		if now.Sub(entry.lastSeen) > s.config.RateLimiterTTL {
+			delete(s.rateLimiters, key)
+			s.rateLimiterEvictions.Add(1)
+		}
+	}
+	if len(s.rateLimiters) >= s.config.RateLimiterMaxEntries {
+		var oldestKey string
+		var oldest time.Time
+		for key, entry := range s.rateLimiters {
+			if oldestKey == "" || entry.lastSeen.Before(oldest) {
+				oldestKey, oldest = key, entry.lastSeen
+			}
+		}
+		delete(s.rateLimiters, oldestKey)
+		s.rateLimiterEvictions.Add(1)
+	}
 	limiter := rate.NewLimiter(rate.Limit(s.config.RateLimitPerIP), s.config.RateLimitBurst)
-	actual, _ := s.rateLimiters.LoadOrStore(ip, limiter)
-	return actual.(*rate.Limiter)
+	s.rateLimiters[ip] = &limiterEntry{limiter: limiter, lastSeen: now}
+	return limiter
+}
+
+// RateLimiterStats reports bounded-cache observability counters.
+func (s *Server) RateLimiterStats() (entries int, evictions uint64) {
+	s.rateLimitersMu.Lock()
+	entries = len(s.rateLimiters)
+	s.rateLimitersMu.Unlock()
+	return entries, s.rateLimiterEvictions.Load()
 }
 
 // extractClientIP extracts the client IP from the request, handling proxies.
@@ -464,10 +526,75 @@ func extractClientIP(r *http.Request) string {
 	return host
 }
 
+func (s *Server) clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer, err := netip.ParseAddr(strings.TrimSpace(host))
+	if err != nil {
+		return host
+	}
+	trusted := false
+	for _, prefix := range s.trustedProxies {
+		if prefix.Contains(peer) {
+			trusted = true
+			break
+		}
+	}
+	if !trusted {
+		return peer.String()
+	}
+	// RFC 7239 Forwarded takes precedence. Use the first valid client address.
+	if forwarded := r.Header.Values("Forwarded"); len(forwarded) > 0 {
+		for _, field := range strings.Split(strings.Join(forwarded, ","), ",") {
+			for _, param := range strings.Split(field, ";") {
+				key, value, ok := strings.Cut(strings.TrimSpace(param), "=")
+				if !ok || !strings.EqualFold(key, "for") {
+					continue
+				}
+				if addr, ok := parseForwardedAddr(value); ok {
+					return addr.String()
+				}
+			}
+		}
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for _, part := range parts {
+			addr, err := netip.ParseAddr(strings.TrimSpace(part))
+			if err != nil {
+				return peer.String()
+			}
+			if addr.IsValid() {
+				return addr.String()
+			}
+		}
+	}
+	return peer.String()
+}
+
+func parseForwardedAddr(raw string) (netip.Addr, bool) {
+	raw = strings.Trim(strings.TrimSpace(raw), `"`)
+	if strings.HasPrefix(raw, "[") {
+		if host, _, err := net.SplitHostPort(raw); err == nil {
+			raw = host
+		}
+	}
+	if addr, err := netip.ParseAddr(raw); err == nil {
+		return addr, true
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		addr, err := netip.ParseAddr(host)
+		return addr, err == nil
+	}
+	return netip.Addr{}, false
+}
+
 // handleX1Request handles incoming X1 requests.
 func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	// Extract client IP for rate limiting
-	clientIP := extractClientIP(r)
+	clientIP := s.clientIP(r)
 
 	// Check rate limit
 	limiter := s.getRateLimiter(clientIP)

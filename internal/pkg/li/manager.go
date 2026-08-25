@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -130,7 +131,7 @@ type Manager struct {
 
 	// onPacketMatch is called when a packet matches an intercept task.
 	// This allows the processor to handle X2/X3 delivery.
-	onPacketMatch PacketProcessor
+	onPacketMatch atomic.Pointer[packetProcessorHolder]
 
 	// onDestinationCreated is called when a new destination is created via X1.
 	// This allows the processor to bridge destinations to the delivery manager.
@@ -139,7 +140,7 @@ type Manager struct {
 	onDestinationRemoved  func(did uuid.UUID)
 
 	// stats tracks LI processing statistics.
-	stats ManagerStats
+	stats managerAtomicStats
 
 	// orphanStreak counts consecutive polls in which a local task was absent
 	// from the ADMF response.
@@ -149,6 +150,16 @@ type Manager struct {
 	// stopChan signals shutdown.
 	stopChan chan struct{}
 	wg       sync.WaitGroup
+}
+
+type packetProcessorHolder struct{ fn PacketProcessor }
+type managerAtomicStats struct {
+	packetsProcessed     atomic.Uint64
+	packetsMatched       atomic.Uint64
+	x2EventsSent         atomic.Uint64
+	x3EventsSent         atomic.Uint64
+	matchErrors          atomic.Uint64
+	rejectedCombinations atomic.Uint64
 }
 
 // ManagerStats contains LI processing statistics.
@@ -386,8 +397,8 @@ func (m *Manager) Stop() {
 	m.wg.Wait()
 
 	logger.Info("LI Manager stopped",
-		"packets_processed", m.stats.PacketsProcessed,
-		"packets_matched", m.stats.PacketsMatched,
+		"packets_processed", m.stats.packetsProcessed.Load(),
+		"packets_matched", m.stats.packetsMatched.Load(),
 	)
 }
 
@@ -804,9 +815,11 @@ func (m *Manager) reconcileWithADMF() {
 //
 // This is called by the processor to handle X2/X3 delivery.
 func (m *Manager) SetPacketProcessor(processor PacketProcessor) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.onPacketMatch = processor
+	if processor == nil {
+		m.onPacketMatch.Store(nil)
+		return
+	}
+	m.onPacketMatch.Store(&packetProcessorHolder{fn: processor})
 }
 
 // SetDestinationCreatedCallback sets a callback invoked when destinations are created via X1.
@@ -853,9 +866,7 @@ func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []str
 	}
 
 	// Update stats
-	m.mu.Lock()
-	m.stats.PacketsProcessed++
-	m.mu.Unlock()
+	m.stats.packetsProcessed.Add(1)
 
 	// Look up which LI tasks these filter IDs belong to
 	matches := m.filters.LookupMatches(matchedFilterIDs)
@@ -864,23 +875,20 @@ func (m *Manager) ProcessPacket(pkt *types.PacketDisplay, matchedFilterIDs []str
 	}
 
 	// Update match stats and get processor
-	m.mu.Lock()
-	m.stats.PacketsMatched++
-	processor := m.onPacketMatch
-	m.mu.Unlock()
+	m.stats.packetsMatched.Add(1)
+	holder := m.onPacketMatch.Load()
 
-	if processor == nil {
+	if holder == nil {
 		return
 	}
+	processor := holder.fn
 
 	// For each matching task, invoke the packet processor
 	for _, match := range matches {
 		task, err := m.registry.GetTaskDetails(match.XID)
 		if err != nil {
 			// Task may have been deactivated between match and lookup
-			m.mu.Lock()
-			m.stats.MatchErrors++
-			m.mu.Unlock()
+			m.stats.matchErrors.Add(1)
 			continue
 		}
 
@@ -906,9 +914,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 	// First activate in registry (validates task)
 	if err := m.registry.ActivateTask(task); err != nil {
 		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
-			m.mu.Lock()
-			m.stats.RejectedCombinations++
-			m.mu.Unlock()
+			m.stats.rejectedCombinations.Add(1)
 		}
 		return err
 	}
@@ -1492,9 +1498,14 @@ func convertTaskStatusToX1(s TaskStatus) x1.TaskStatus {
 
 // Stats returns current LI processing statistics.
 func (m *Manager) Stats() ManagerStats {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.stats
+	return ManagerStats{
+		PacketsProcessed:     m.stats.packetsProcessed.Load(),
+		PacketsMatched:       m.stats.packetsMatched.Load(),
+		X2EventsSent:         m.stats.x2EventsSent.Load(),
+		X3EventsSent:         m.stats.x3EventsSent.Load(),
+		MatchErrors:          m.stats.matchErrors.Load(),
+		RejectedCombinations: m.stats.rejectedCombinations.Load(),
+	}
 }
 
 // TaskCount returns the total number of tasks.

@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strings"
@@ -125,6 +126,12 @@ type DestinationConfig struct {
 
 	// BackoffMultiplier is the multiplier for exponential backoff.
 	BackoffMultiplier float64
+	// BackoffJitter is the bounded fractional reconnect jitter (0..1).
+	BackoffJitter float64
+
+	// SuccessfulWritesBeforeBackoffReset avoids resetting reconnect backoff on
+	// connections that immediately fail again. Defaults to one completed write.
+	SuccessfulWritesBeforeBackoffReset int
 
 	// MaxPoolSize is the maximum number of connections per destination.
 	MaxPoolSize int
@@ -142,15 +149,17 @@ type DestinationConfig struct {
 // DefaultConfig returns a DestinationConfig with default values.
 func DefaultConfig() DestinationConfig {
 	return DestinationConfig{
-		DialTimeout:       DefaultDialTimeout,
-		WriteTimeout:      DefaultWriteTimeout,
-		InitialBackoff:    DefaultInitialBackoff,
-		MaxBackoff:        DefaultMaxBackoff,
-		BackoffMultiplier: DefaultBackoffMultiplier,
-		MaxPoolSize:       DefaultMaxPoolSize,
-		KeepAliveIdle:     DefaultKeepAliveIdle,
-		KeepAliveInterval: DefaultKeepAliveInterval,
-		KeepAliveCount:    DefaultKeepAliveCount,
+		DialTimeout:                        DefaultDialTimeout,
+		WriteTimeout:                       DefaultWriteTimeout,
+		InitialBackoff:                     DefaultInitialBackoff,
+		MaxBackoff:                         DefaultMaxBackoff,
+		BackoffMultiplier:                  DefaultBackoffMultiplier,
+		BackoffJitter:                      0.20,
+		SuccessfulWritesBeforeBackoffReset: 1,
+		MaxPoolSize:                        DefaultMaxPoolSize,
+		KeepAliveIdle:                      DefaultKeepAliveIdle,
+		KeepAliveInterval:                  DefaultKeepAliveInterval,
+		KeepAliveCount:                     DefaultKeepAliveCount,
 	}
 }
 
@@ -168,13 +177,16 @@ type destinationState struct {
 	state int32
 
 	// backoff is the current backoff duration for reconnection.
-	backoff time.Duration
+	backoff          time.Duration
+	successfulWrites int
 
 	// lastError is the most recent connection error.
 	lastError error
 
 	// lastConnectAttempt is the time of the last connection attempt.
 	lastConnectAttempt time.Time
+	lastFailureLog     time.Time
+	failuresSinceLog   uint64
 
 	// reconnectTimer triggers reconnection attempts.
 	reconnectTimer *time.Timer
@@ -373,6 +385,12 @@ func NewManager(config DestinationConfig) (*Manager, error) {
 	}
 	if config.BackoffMultiplier <= 1 {
 		config.BackoffMultiplier = defaults.BackoffMultiplier
+	}
+	if config.BackoffJitter <= 0 || config.BackoffJitter > 1 {
+		config.BackoffJitter = defaults.BackoffJitter
+	}
+	if config.SuccessfulWritesBeforeBackoffReset <= 0 {
+		config.SuccessfulWritesBeforeBackoffReset = defaults.SuccessfulWritesBeforeBackoffReset
 	}
 	if config.MaxPoolSize <= 0 {
 		config.MaxPoolSize = defaults.MaxPoolSize
@@ -841,13 +859,22 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 		state.mu.Lock()
 		state.stats.ConnectFailures++
 		state.lastError = err
+		state.failuresSinceLog++
+		failures := state.failuresSinceLog
+		shouldLog := state.lastFailureLog.IsZero() || time.Since(state.lastFailureLog) >= 30*time.Second
+		if shouldLog {
+			state.lastFailureLog = time.Now()
+			state.failuresSinceLog = 0
+		}
+		backoff := state.backoff
 		state.mu.Unlock()
 
-		logger.Warn("destination connection failed",
-			"did", did,
-			"error", err,
-			"backoff", state.backoff,
-		)
+		if shouldLog {
+			logger.Warn("destination connection failed",
+				"did", did, "error", err, "backoff", backoff,
+				"failures_since_last_log", failures,
+			)
+		}
 
 		m.scheduleReconnect(did, state)
 		return
@@ -869,7 +896,7 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 
 	state.mu.Lock()
 	state.stats.ConnectSuccesses++
-	state.backoff = m.config.InitialBackoff // Reset backoff on success.
+	state.successfulWrites = 0
 	state.lastError = nil
 	dest := state.dest
 	state.mu.Unlock()
@@ -1021,6 +1048,11 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 
 	state.mu.Lock()
 	backoff := state.backoff
+	wait := backoff
+	if m.config.BackoffJitter > 0 {
+		factor := 1 - m.config.BackoffJitter + rand.Float64()*(2*m.config.BackoffJitter)
+		wait = time.Duration(float64(backoff) * factor)
+	}
 	// Increase backoff for next attempt.
 	state.backoff = time.Duration(float64(state.backoff) * m.config.BackoffMultiplier)
 	if state.backoff > m.config.MaxBackoff {
@@ -1032,7 +1064,7 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 		state.reconnectTimer.Stop()
 	}
 
-	state.reconnectTimer = time.AfterFunc(backoff, func() {
+	state.reconnectTimer = time.AfterFunc(wait, func() {
 		if !m.shuttingDown.Load() {
 			m.wg.Add(1)
 			go m.connectDestination(did)
@@ -1042,7 +1074,7 @@ func (m *Manager) scheduleReconnect(did uuid.UUID, state *destinationState) {
 
 	logger.Debug("reconnect scheduled",
 		"did", did,
-		"backoff", backoff,
+		"backoff", wait,
 	)
 }
 
@@ -1085,6 +1117,15 @@ func (m *Manager) RecordBytesSent(did uuid.UUID, bytes uint64) {
 		state.mu.Lock()
 		state.stats.BytesSent += bytes
 		state.stats.PDUsSent++
+		state.successfulWrites++
+		threshold := m.config.SuccessfulWritesBeforeBackoffReset
+		if threshold <= 0 {
+			threshold = 1
+		}
+		if state.successfulWrites >= threshold {
+			state.backoff = m.config.InitialBackoff
+			state.successfulWrites = 0
+		}
 		state.mu.Unlock()
 	}
 }

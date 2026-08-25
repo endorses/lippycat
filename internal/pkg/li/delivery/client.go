@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,13 +21,15 @@ import (
 )
 
 const (
-	DefaultQueueSize       = 10000
-	DefaultWorkers         = 2 // Retained for configuration compatibility.
-	DefaultBatchSize       = 100
-	DefaultBatchTimeout    = 10 * time.Millisecond
-	DefaultSendTimeout     = 5 * time.Second
-	DefaultShutdownTimeout = 10 * time.Second
-	retryPollInterval      = 100 * time.Millisecond
+	DefaultQueueSize           = 10000
+	DefaultWorkers             = 2 // Retained for configuration compatibility.
+	DefaultBatchSize           = 100
+	DefaultBatchTimeout        = 10 * time.Millisecond
+	DefaultSendTimeout         = 5 * time.Second
+	DefaultShutdownTimeout     = 10 * time.Second
+	DefaultRetryInitialBackoff = 100 * time.Millisecond
+	DefaultRetryMaxBackoff     = 30 * time.Second
+	DefaultRetryJitter         = 0.20
 )
 
 var (
@@ -50,31 +53,34 @@ type deliveryItem struct {
 	queued  time.Time
 }
 
-type streamKey struct {
-	xid uuid.UUID
-	did uuid.UUID
-}
-
 type ClientConfig struct {
 	// QueueSize is the queue capacity for each destination.
 	QueueSize int
 	// Workers is retained for compatibility. Delivery is serialized per
 	// destination to preserve order.
-	Workers         int
-	BatchSize       int
-	BatchTimeout    time.Duration
-	SendTimeout     time.Duration
-	ShutdownTimeout time.Duration
+	Workers               int
+	BatchSize             int
+	BatchTimeout          time.Duration
+	SendTimeout           time.Duration
+	ShutdownTimeout       time.Duration
+	RetryInitialBackoff   time.Duration
+	RetryMaxBackoff       time.Duration
+	RetryJitter           float64
+	RetrySuccessThreshold int
 }
 
 func DefaultClientConfig() ClientConfig {
 	return ClientConfig{
-		QueueSize:       DefaultQueueSize,
-		Workers:         DefaultWorkers,
-		BatchSize:       DefaultBatchSize,
-		BatchTimeout:    DefaultBatchTimeout,
-		SendTimeout:     DefaultSendTimeout,
-		ShutdownTimeout: DefaultShutdownTimeout,
+		QueueSize:             DefaultQueueSize,
+		Workers:               DefaultWorkers,
+		BatchSize:             DefaultBatchSize,
+		BatchTimeout:          DefaultBatchTimeout,
+		SendTimeout:           DefaultSendTimeout,
+		ShutdownTimeout:       DefaultShutdownTimeout,
+		RetryInitialBackoff:   DefaultRetryInitialBackoff,
+		RetryMaxBackoff:       DefaultRetryMaxBackoff,
+		RetryJitter:           DefaultRetryJitter,
+		RetrySuccessThreshold: 1,
 	}
 }
 
@@ -94,15 +100,23 @@ type ClientStats struct {
 type DestinationDeliveryStats struct {
 	QueueDepth      int
 	QueueCapacity   int
+	X2QueueDepth    int
+	X2QueueCapacity int
+	X3QueueDepth    int
+	X3QueueCapacity int
 	X2Sent          uint64
 	X3Sent          uint64
 	Retries         uint64
 	QueueOverflows  uint64
+	X2Overflows     uint64
+	X3Overflows     uint64
 	TerminalDrops   uint64
 	X2Dropped       uint64
 	X3Dropped       uint64
 	DroppedByReason map[string]uint64
 	OldestQueuedAge time.Duration
+	X2OldestAge     time.Duration
+	X3OldestAge     time.Duration
 	LastSuccess     time.Time
 	LastError       string
 }
@@ -115,7 +129,9 @@ type destinationQueue struct {
 	done     chan struct{}
 
 	mu              sync.Mutex
-	items           []*deliveryItem
+	x2Items         []*deliveryItem
+	x3Items         []*deliveryItem
+	x2Burst         int
 	stopped         bool
 	stats           DestinationDeliveryStats
 	lastOverflowLog time.Time
@@ -128,7 +144,8 @@ func newDestinationQueue(did uuid.UUID, capacity int) *destinationQueue {
 		notify:   make(chan struct{}, 1),
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
-		items:    make([]*deliveryItem, 0, capacity),
+		x2Items:  make([]*deliveryItem, 0, capacity),
+		x3Items:  make([]*deliveryItem, 0, capacity),
 		stats: DestinationDeliveryStats{
 			QueueCapacity:   capacity,
 			DroppedByReason: make(map[string]uint64),
@@ -143,22 +160,32 @@ func (q *destinationQueue) signal() {
 	}
 }
 
-// enqueue appends item and atomically evicts the oldest item when full.
+// enqueue appends to a type-specific queue. X3 pressure can never consume or
+// evict reserved X2 capacity.
 func (q *destinationQueue) enqueue(item *deliveryItem) (dropped *deliveryItem, ok bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.stopped {
 		return nil, false
 	}
-	if len(q.items) == q.capacity {
-		dropped = q.items[0]
-		copy(q.items, q.items[1:])
-		q.items[len(q.items)-1] = item
-		q.stats.QueueOverflows++
-	} else {
-		q.items = append(q.items, item)
+	items := &q.x3Items
+	if item.pduType == PDUTypeX2 {
+		items = &q.x2Items
 	}
-	q.stats.QueueDepth = len(q.items)
+	if len(*items) == q.capacity {
+		dropped = (*items)[0]
+		copy(*items, (*items)[1:])
+		(*items)[len(*items)-1] = item
+		q.stats.QueueOverflows++
+		if item.pduType == PDUTypeX2 {
+			q.stats.X2Overflows++
+		} else {
+			q.stats.X3Overflows++
+		}
+	} else {
+		*items = append(*items, item)
+	}
+	q.updateDepthLocked()
 	q.signal()
 	return dropped, true
 }
@@ -166,33 +193,59 @@ func (q *destinationQueue) enqueue(item *deliveryItem) (dropped *deliveryItem, o
 func (q *destinationQueue) peekBatch(max int) []*deliveryItem {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 {
+	if len(q.x2Items)+len(q.x3Items) == 0 {
 		return nil
 	}
-	if max > len(q.items) {
-		max = len(q.items)
+	batch := make([]*deliveryItem, 0, max)
+	x2, x3, burst := 0, 0, q.x2Burst
+	for len(batch) < max && (x2 < len(q.x2Items) || x3 < len(q.x3Items)) {
+		// Prefer X2, but after eight X2 PDUs schedule one X3 when present.
+		if x2 < len(q.x2Items) && (burst < 8 || x3 >= len(q.x3Items)) {
+			batch = append(batch, q.x2Items[x2])
+			x2++
+			burst++
+		} else {
+			batch = append(batch, q.x3Items[x3])
+			x3++
+			burst = 0
+		}
 	}
-	batch := make([]*deliveryItem, max)
-	copy(batch, q.items[:max])
 	return batch
 }
 
 func (q *destinationQueue) pop(item *deliveryItem) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if len(q.items) == 0 || q.items[0] != item {
+	items := &q.x3Items
+	if item.pduType == PDUTypeX2 {
+		items = &q.x2Items
+	}
+	if len(*items) == 0 || (*items)[0] != item {
 		return false
 	}
-	q.items[0] = nil
-	q.items = q.items[1:]
-	q.stats.QueueDepth = len(q.items)
+	(*items)[0] = nil
+	*items = (*items)[1:]
+	if item.pduType == PDUTypeX2 {
+		q.x2Burst++
+	} else {
+		q.x2Burst = 0
+	}
+	q.updateDepthLocked()
 	return true
+}
+
+func (q *destinationQueue) updateDepthLocked() {
+	q.stats.X2QueueDepth = len(q.x2Items)
+	q.stats.X3QueueDepth = len(q.x3Items)
+	q.stats.X2QueueCapacity = q.capacity
+	q.stats.X3QueueCapacity = q.capacity
+	q.stats.QueueDepth = len(q.x2Items) + len(q.x3Items)
 }
 
 func (q *destinationQueue) depth() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.items)
+	return len(q.x2Items) + len(q.x3Items)
 }
 
 func (q *destinationQueue) snapshot() DestinationDeliveryStats {
@@ -203,9 +256,27 @@ func (q *destinationQueue) snapshot() DestinationDeliveryStats {
 	for reason, count := range q.stats.DroppedByReason {
 		stats.DroppedByReason[reason] = count
 	}
-	stats.QueueDepth = len(q.items)
-	if len(q.items) > 0 {
-		stats.OldestQueuedAge = time.Since(q.items[0].queued)
+	q.updateDepthLocked()
+	stats.QueueDepth = q.stats.QueueDepth
+	stats.X2QueueDepth = q.stats.X2QueueDepth
+	stats.X3QueueDepth = q.stats.X3QueueDepth
+	stats.X2QueueCapacity = q.capacity
+	stats.X3QueueCapacity = q.capacity
+	var oldest time.Time
+	if len(q.x2Items) > 0 {
+		oldest = q.x2Items[0].queued
+	}
+	if len(q.x3Items) > 0 && (oldest.IsZero() || q.x3Items[0].queued.Before(oldest)) {
+		oldest = q.x3Items[0].queued
+	}
+	if !oldest.IsZero() {
+		stats.OldestQueuedAge = time.Since(oldest)
+	}
+	if len(q.x2Items) > 0 {
+		stats.X2OldestAge = time.Since(q.x2Items[0].queued)
+	}
+	if len(q.x3Items) > 0 {
+		stats.X3OldestAge = time.Since(q.x3Items[0].queued)
 	}
 	return stats
 }
@@ -216,8 +287,9 @@ func (q *destinationQueue) stopAndDrain() []*deliveryItem {
 		q.stopped = true
 		close(q.stop)
 	}
-	items := q.items
-	q.items = nil
+	items := append(q.x2Items, q.x3Items...)
+	q.x2Items = nil
+	q.x3Items = nil
 	q.stats.QueueDepth = 0
 	q.mu.Unlock()
 	q.signal()
@@ -231,9 +303,7 @@ type Client struct {
 	queuesMu sync.RWMutex
 	queues   map[uuid.UUID]*destinationQueue
 
-	sequences   map[streamKey]*uint32
-	sequencesMu sync.RWMutex
-	stats       ClientStats
+	stats ClientStats
 
 	started  atomic.Bool
 	stopped  atomic.Bool
@@ -261,11 +331,25 @@ func NewClient(manager *Manager, config ClientConfig) *Client {
 	if config.ShutdownTimeout <= 0 {
 		config.ShutdownTimeout = defaults.ShutdownTimeout
 	}
+	if config.RetryInitialBackoff <= 0 {
+		config.RetryInitialBackoff = defaults.RetryInitialBackoff
+	}
+	if config.RetryMaxBackoff <= 0 {
+		config.RetryMaxBackoff = defaults.RetryMaxBackoff
+	}
+	if config.RetryMaxBackoff < config.RetryInitialBackoff {
+		config.RetryMaxBackoff = config.RetryInitialBackoff
+	}
+	if config.RetryJitter <= 0 || config.RetryJitter > 1 {
+		config.RetryJitter = defaults.RetryJitter
+	}
+	if config.RetrySuccessThreshold <= 0 {
+		config.RetrySuccessThreshold = defaults.RetrySuccessThreshold
+	}
 	return &Client{
-		manager:   manager,
-		config:    config,
-		queues:    make(map[uuid.UUID]*destinationQueue),
-		sequences: make(map[streamKey]*uint32),
+		manager: manager,
+		config:  config,
+		queues:  make(map[uuid.UUID]*destinationQueue),
 	}
 }
 
@@ -287,14 +371,6 @@ func (c *Client) Start() {
 func (c *Client) Stop() {
 	c.stopOnce.Do(func() {
 		c.stopped.Store(true)
-		deadline := time.Now().Add(c.config.ShutdownTimeout)
-		for time.Now().Before(deadline) {
-			if c.QueueDepth() == 0 {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-
 		c.queuesMu.Lock()
 		for did, q := range c.queues {
 			remaining := q.stopAndDrain()
@@ -398,6 +474,8 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 	defer c.wg.Done()
 	defer close(q.done)
 
+	backoff := c.config.RetryInitialBackoff
+	consecutiveSuccesses := 0
 	for {
 		if q.depth() == 0 {
 			select {
@@ -417,9 +495,11 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 				return
 			}
 			c.recordRetry(q, err)
-			if !waitForRetry(q, retryPollInterval) {
+			consecutiveSuccesses = 0
+			if !waitForRetry(q, jitterDuration(backoff, c.config.RetryJitter)) {
 				return
 			}
+			backoff = min(backoff*2, c.config.RetryMaxBackoff)
 			continue
 		}
 
@@ -429,16 +509,25 @@ func (c *Client) destinationDispatcher(q *destinationQueue) {
 			if err := c.sendItem(conn, q.did, item); err != nil {
 				c.manager.InvalidateConnection(q.did, conn)
 				c.recordRetry(q, err)
+				consecutiveSuccesses = 0
 				failed = true
 				break
 			}
 			if q.pop(item) {
 				atomic.AddInt64(&c.stats.QueueDepth, -1)
 				c.recordSuccess(q, item)
+				consecutiveSuccesses++
+				if consecutiveSuccesses >= c.config.RetrySuccessThreshold {
+					backoff = c.config.RetryInitialBackoff
+				}
 			}
 		}
 		if !failed {
 			c.manager.ReleaseConnection(q.did, conn)
+		} else if !waitForRetry(q, jitterDuration(backoff, c.config.RetryJitter)) {
+			return
+		} else {
+			backoff = min(backoff*2, c.config.RetryMaxBackoff)
 		}
 	}
 }
@@ -449,30 +538,25 @@ func waitForRetry(q *destinationQueue, delay time.Duration) bool {
 	select {
 	case <-timer.C:
 		return true
-	case <-q.notify:
-		return true
 	case <-q.stop:
 		return false
 	}
 }
 
-func (c *Client) sendItem(conn *tls.Conn, did uuid.UUID, item *deliveryItem) error {
-	if err := conn.SetWriteDeadline(time.Now().Add(c.config.SendTimeout)); err != nil {
-		return fmt.Errorf("failed to set write deadline: %w", err)
+func jitterDuration(delay time.Duration, fraction float64) time.Duration {
+	if fraction <= 0 {
+		return delay
 	}
-	n, err := conn.Write(item.data)
-	if err != nil {
+	factor := 1 - fraction + rand.Float64()*(2*fraction)
+	return time.Duration(float64(delay) * factor)
+}
+
+func (c *Client) sendItem(conn *tls.Conn, did uuid.UUID, item *deliveryItem) error {
+	if err := c.manager.WritePDU(conn, item.data, c.config.SendTimeout); err != nil {
 		c.manager.RecordWriteError(did)
 		return fmt.Errorf("write failed: %w", err)
 	}
-	if n != len(item.data) {
-		c.manager.RecordWriteError(did)
-		return fmt.Errorf("short write: wrote %d of %d bytes", n, len(item.data))
-	}
-	c.manager.RecordBytesSent(did, uint64(n))
-	if err := conn.SetWriteDeadline(time.Time{}); err != nil {
-		return fmt.Errorf("failed to clear write deadline: %w", err)
-	}
+	c.manager.RecordBytesSent(did, uint64(len(item.data)))
 	return nil
 }
 
@@ -501,7 +585,7 @@ func (c *Client) recordRetry(q *destinationQueue, err error) {
 	q.mu.Unlock()
 }
 
-func (c *Client) recordTerminalDrop(_ uuid.UUID, q *destinationQueue, item *deliveryItem, reason string) {
+func (c *Client) recordTerminalDrop(did uuid.UUID, q *destinationQueue, item *deliveryItem, reason string) {
 	if item.pduType == PDUTypeX2 {
 		atomic.AddUint64(&c.stats.X2Dropped, 1)
 		atomic.AddUint64(&c.stats.X2Failed, 1)
@@ -518,6 +602,9 @@ func (c *Client) recordTerminalDrop(_ uuid.UUID, q *destinationQueue, item *deli
 	}
 	q.stats.DroppedByReason[reason]++
 	q.mu.Unlock()
+	if item.pduType == PDUTypeX2 {
+		logger.Error("LI X2 terminal drop", "xid", item.xid, "did", did, "age", time.Since(item.queued), "reason", reason)
+	}
 }
 
 func (c *Client) logOverflow(did uuid.UUID, q *destinationQueue, item *deliveryItem) {
@@ -527,7 +614,7 @@ func (c *Client) logOverflow(did uuid.UUID, q *destinationQueue, item *deliveryI
 		return
 	}
 	q.lastOverflowLog = time.Now()
-	depth := len(q.items)
+	depth := len(q.x2Items) + len(q.x3Items)
 	drops := q.stats.QueueOverflows
 	q.mu.Unlock()
 	logger.Warn("LI delivery queue overflow, dropped oldest item",
@@ -588,35 +675,6 @@ func (c *Client) DestinationStats() map[uuid.UUID]DestinationDeliveryStats {
 
 func (c *Client) QueueDepth() int {
 	return int(atomic.LoadInt64(&c.stats.QueueDepth))
-}
-
-func (c *Client) NextSequence(xid, did uuid.UUID) uint32 {
-	key := streamKey{xid: xid, did: did}
-	c.sequencesMu.RLock()
-	seq, exists := c.sequences[key]
-	c.sequencesMu.RUnlock()
-	if exists {
-		return atomic.AddUint32(seq, 1)
-	}
-	c.sequencesMu.Lock()
-	if seq, exists = c.sequences[key]; exists {
-		c.sequencesMu.Unlock()
-		return atomic.AddUint32(seq, 1)
-	}
-	var initial uint32 = 1
-	c.sequences[key] = &initial
-	c.sequencesMu.Unlock()
-	return 1
-}
-
-func (c *Client) ResetSequence(xid uuid.UUID) {
-	c.sequencesMu.Lock()
-	defer c.sequencesMu.Unlock()
-	for key := range c.sequences {
-		if key.xid == xid {
-			delete(c.sequences, key)
-		}
-	}
 }
 
 func (c *Client) SendX2Sync(ctx context.Context, xid uuid.UUID, destIDs []uuid.UUID, data []byte) error {

@@ -22,6 +22,9 @@ var (
 
 	// ErrUnknownIRIType is returned when the SIP message doesn't map to a known IRI type.
 	ErrUnknownIRIType = errors.New("unknown IRI type for SIP message")
+
+	// ErrNoSIPPayload is returned when no complete SIP message can be recovered.
+	ErrNoSIPPayload = errors.New("no SIP payload available")
 )
 
 // X2Encoder encodes VoIP signaling events into X2 IRI PDUs.
@@ -35,17 +38,28 @@ var (
 //
 // The encoder is safe for concurrent use.
 type X2Encoder struct {
-	// seqNum is the global sequence number for X2 PDUs.
-	seqNum atomic.Uint32
-
 	// attrBuilder is used to construct TLV attributes.
 	attrBuilder *AttributeBuilder
+	sequencer   *Sequencer
+	domainID    string
+	nfID        string
+	lastSeq     atomic.Uint32
 }
 
 // NewX2Encoder creates a new X2 encoder.
 func NewX2Encoder() *X2Encoder {
+	return NewX2EncoderWithSequencer(NewSequencer(0), "", "")
+}
+
+func NewX2EncoderWithSequencer(sequencer *Sequencer, domainID, nfID string) *X2Encoder {
+	if sequencer == nil {
+		sequencer = NewSequencer(0)
+	}
 	return &X2Encoder{
 		attrBuilder: NewAttributeBuilder(),
+		sequencer:   sequencer,
+		domainID:    domainID,
+		nfID:        nfID,
 	}
 }
 
@@ -75,7 +89,7 @@ func (e *X2Encoder) EncodeIRI(pkt *types.PacketDisplay, xid uuid.UUID) (*PDU, er
 		return nil, nil
 	}
 
-	return e.buildSIPPDU(pkt, xid, voip), nil
+	return e.buildSIPPDU(pkt, xid, voip)
 }
 
 // NewX2SIPPDU creates an X2 PDU carrying a raw SIP message: PDU Type 1,
@@ -162,13 +176,28 @@ func (e *X2Encoder) generateCorrelationID(callID string) uint64 {
 
 // addCommonAttributes adds the standard conditional attributes (timestamp and
 // sequence number) to the PDU per the ETSI TS 103 221-2 attribute dictionary.
-func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) {
+func (e *X2Encoder) addCommonAttributes(pdu *PDU, pkt *types.PacketDisplay) error {
 	// Timestamp from packet capture (attribute 9)
 	pdu.AddAttribute(e.attrBuilder.Timestamp(pkt.Timestamp))
-
-	// Sequence number (attribute 8, monotonically increasing)
-	seq := e.seqNum.Add(1)
+	if e.domainID != "" {
+		pdu.AddAttribute(e.attrBuilder.DomainID(e.domainID))
+	}
+	if e.nfID != "" {
+		pdu.AddAttribute(e.attrBuilder.NFID(e.nfID))
+	}
+	if pkt.NodeID != "" {
+		pdu.AddAttribute(e.attrBuilder.IPID(pkt.NodeID))
+	}
+	seq, err := e.sequencer.Next(SequenceContext{
+		PDUType: PDUTypeX2, XID: pdu.Header.XID, DomainID: e.domainID,
+		NFID: e.nfID, IPID: pkt.NodeID, CorrelationID: pdu.Header.CorrelationID,
+	})
+	if err != nil {
+		return err
+	}
+	e.lastSeq.Store(seq)
 	pdu.AddAttribute(e.attrBuilder.SequenceNumber(seq))
+	return nil
 }
 
 // addNetworkAttributes adds network layer attributes to the PDU.
@@ -229,29 +258,35 @@ func parsePort(s string) (uint16, bool) {
 // buildSIPPDU builds an X2 SIP PDU (Payload Format 9) with the standard
 // conditional attributes and the raw SIP message as payload. All IRI-type and
 // SIP-header semantics are recovered by the MDF from the raw payload.
-func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata) *PDU {
+func (e *X2Encoder) buildSIPPDU(pkt *types.PacketDisplay, xid uuid.UUID, voip *types.VoIPMetadata) (*PDU, error) {
 	correlationID := e.generateCorrelationID(voip.CallID)
 
 	pdu := NewX2SIPPDU(xid, correlationID)
-	e.addCommonAttributes(pdu, pkt)
+	if err := e.setSIPPayload(pdu, pkt, voip); err != nil {
+		return nil, err
+	}
+	if err := e.addCommonAttributes(pdu, pkt); err != nil {
+		return nil, err
+	}
 	e.addNetworkAttributes(pdu, pkt)
-	e.setSIPPayload(pdu, pkt, voip)
 
-	return pdu
+	return pdu, nil
 }
 
 // setSIPPayload attaches the raw SIP message to the PDU, falling back to
 // scanning the raw packet data for a SIP start line.
-func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) {
+func (e *X2Encoder) setSIPPayload(pdu *PDU, pkt *types.PacketDisplay, voip *types.VoIPMetadata) error {
 	if len(voip.RawSIP) > 0 {
 		pdu.SetPayload(voip.RawSIP)
-		return
+		return nil
 	}
 	if len(pkt.RawData) > 0 {
 		if sipStart := FindSIPStart(pkt.RawData); sipStart >= 0 {
 			pdu.SetPayload(pkt.RawData[sipStart:])
+			return nil
 		}
 	}
+	return ErrNoSIPPayload
 }
 
 // EncodeSessionBegin creates a Session Begin IRI for a SIP INVITE.
@@ -262,7 +297,7 @@ func (e *X2Encoder) EncodeSessionBegin(pkt *types.PacketDisplay, xid uuid.UUID) 
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeSessionAnswer creates a Session Answer IRI for a SIP 200 OK.
@@ -273,7 +308,7 @@ func (e *X2Encoder) EncodeSessionAnswer(pkt *types.PacketDisplay, xid uuid.UUID)
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeSessionEnd creates a Session End IRI for a SIP BYE.
@@ -284,7 +319,7 @@ func (e *X2Encoder) EncodeSessionEnd(pkt *types.PacketDisplay, xid uuid.UUID) (*
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeSessionAttempt creates a Session Attempt IRI for failed calls.
@@ -295,7 +330,7 @@ func (e *X2Encoder) EncodeSessionAttempt(pkt *types.PacketDisplay, xid uuid.UUID
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // EncodeRegistration creates a Registration IRI for a SIP REGISTER.
@@ -306,12 +341,12 @@ func (e *X2Encoder) EncodeRegistration(pkt *types.PacketDisplay, xid uuid.UUID) 
 	if pkt.VoIPData.CallID == "" {
 		return nil, ErrNoCallID
 	}
-	return e.buildSIPPDU(pkt, xid, pkt.VoIPData), nil
+	return e.buildSIPPDU(pkt, xid, pkt.VoIPData)
 }
 
 // GetSequenceNumber returns the current sequence number (for testing/debugging).
 func (e *X2Encoder) GetSequenceNumber() uint32 {
-	return e.seqNum.Load()
+	return e.lastSeq.Load()
 }
 
 // FindSIPStart finds the start of a SIP message in raw packet data.

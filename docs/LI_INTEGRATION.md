@@ -2,6 +2,46 @@
 
 This guide covers the deployment and operation of lippycat's ETSI X1/X2/X3 lawful interception interfaces.
 
+## X1 version compatibility
+
+lippycat declares ETSI TS 103 221-1 `v1.22.1`, matching the bundled
+`TS_103_221_01.xsd` schema. It accepts `v1.13.1` during migration and rejects
+other revisions with an explicit X1 request-syntax error.
+
+The V1.23.1 gap review did not pass: the generated schema remains V1.22.1 and
+the implemented surface is destination create/modify/remove, task
+activate/modify/deactivate/details, ping/keepalive, lifecycle/error
+notifications, and state reconciliation—not every mandatory V1.23.1 operation
+and field. Do not advertise V1.23.1 until all X1 schemas are regenerated and
+the server, ADMF client, fixtures, and peer compatibility tests are upgraded
+together. Confirm ADMF peers accept V1.22.1 responses and notifications before
+cutover; remove V1.13.1 compatibility only in a coordinated release.
+
+## X2/X3 correlation compatibility invariant
+
+For SIP/RTP interception, the wire-level X2/X3 correlation ID is the FNV-1a
+64-bit hash of the exact SIP Call-ID bytes. X2 signalling and every X3 media
+stream carrying that Call-ID use the same value, regardless of SSRC, packet
+direction, or SDP changes caused by a re-INVITE. Reuse of a Call-ID therefore
+also reuses the correlation ID; the MDF must scope it with the XID and task time
+window. Changing this derivation is an interop-breaking protocol change and
+requires a coordinated MDF cutover.
+
+## X2/X3 sequence-number policy
+
+When attribute 8 is enabled, lippycat follows ETSI TS 103 221-2 clause 5.3.9.
+Each `(PDU type, XID, Domain ID, NFID, IPID, Correlation ID)` context starts at
+zero, increments independently, and wraps to zero after the maximum unsigned
+32-bit value. X2 and X3 are separate contexts. The X2/X3 Domain ID is not an X1
+delivery-destination `DId`, and fan-out of one encoded PDU to several MDFs does
+not change its sequence number.
+
+Sequence state is in memory. Task deactivation removes every context for its
+XID. A lippycat process restart establishes new delivery connections and starts
+new sequence contexts at zero; operators must confirm that the MDF treats a new
+connection after a POI restart as a new sequence epoch because TS 103 221-2 does
+not define a sequence-reset signal.
+
 ## Overview
 
 lippycat implements the following ETSI interfaces for lawful interception:

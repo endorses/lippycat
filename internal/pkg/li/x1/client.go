@@ -280,7 +280,7 @@ func NewClient(config ClientConfig) (*Client, error) {
 		config.NEIdentifier = hostname
 	}
 	if config.Version == "" {
-		config.Version = "v1.13.1"
+		config.Version = DefaultProtocolVersion
 	}
 	if config.KeepaliveInterval == 0 {
 		config.KeepaliveInterval = DefaultKeepaliveInterval

@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
@@ -17,6 +18,34 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
 )
+
+// ProcessorWorkerStats describes bounded flow-shard queue pressure.
+type ProcessorWorkerStats struct {
+	QueueDepth    int
+	HighWaterMark uint64
+	Drops         uint64
+}
+
+type processorWorkerCounters struct {
+	highWater atomic.Uint64
+	drops     atomic.Uint64
+	queue     chan capture.PacketInfo
+}
+
+var currentProcessorWorkers atomic.Pointer[[]*processorWorkerCounters]
+
+// ProcessorWorkersStats returns a point-in-time snapshot for observability.
+func ProcessorWorkersStats() []ProcessorWorkerStats {
+	workers := currentProcessorWorkers.Load()
+	if workers == nil {
+		return nil
+	}
+	result := make([]ProcessorWorkerStats, len(*workers))
+	for i, worker := range *workers {
+		result[i] = ProcessorWorkerStats{QueueDepth: len(worker.queue), HighWaterMark: worker.highWater.Load(), Drops: worker.drops.Load()}
+	}
+	return result
+}
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	ctx := context.Background()
@@ -236,9 +265,12 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 		logger.Info("VoIP processor starting flow-sharded workers", "workers", numWorkers)
 		workerBuf := getProcessorWorkerBuffer()
 		workers := make([]chan capture.PacketInfo, numWorkers)
+		counters := make([]*processorWorkerCounters, numWorkers)
+		var lastOverloadLog atomic.Int64
 		var wg sync.WaitGroup
 		for i := range workers {
 			workers[i] = make(chan capture.PacketInfo, workerBuf)
+			counters[i] = &processorWorkerCounters{queue: workers[i]}
 			wg.Add(1)
 			go func(in <-chan capture.PacketInfo) {
 				defer wg.Done()
@@ -247,6 +279,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 				}
 			}(workers[i])
 		}
+		currentProcessorWorkers.Store(&counters)
 
 		for pkt := range ch {
 			packet := pkt.Packet
@@ -262,7 +295,19 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 				h := netLayer.NetworkFlow().FastHash() ^ transLayer.TransportFlow().FastHash()
 				idx = int(h % uint64(numWorkers))
 			}
-			workers[idx] <- pkt
+			select {
+			case workers[idx] <- pkt:
+				depth := uint64(len(workers[idx]))
+				for old := counters[idx].highWater.Load(); depth > old && !counters[idx].highWater.CompareAndSwap(old, depth); old = counters[idx].highWater.Load() {
+				}
+			default:
+				drops := counters[idx].drops.Add(1)
+				now := time.Now().UnixNano()
+				last := lastOverloadLog.Load()
+				if now-last >= int64(time.Second) && lastOverloadLog.CompareAndSwap(last, now) {
+					logger.Warn("VoIP processor worker queue full; dropping packet to preserve global progress", "worker", idx, "queue_capacity", workerBuf, "worker_drops", drops)
+				}
+			}
 		}
 		for _, w := range workers {
 			close(w)

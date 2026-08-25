@@ -108,7 +108,7 @@ func newLIProcessor(t *testing.T, deliveryType li.DeliveryType) (*Processor, uui
 		DeliveryType:   deliveryType,
 	}))
 
-	return p, xid, fmt.Sprintf("li-%s-0", xid.String()[:8])
+	return p, xid, fmt.Sprintf("li-%s-0", xid.String())
 }
 
 // feedIncomingCallSignalling replays the signalling of a call to the target: the

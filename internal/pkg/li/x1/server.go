@@ -17,8 +17,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -222,6 +225,14 @@ type ServerConfig struct {
 	// RateLimitBurst is the maximum burst size for rate limiting (default: 20).
 	RateLimitBurst int
 
+	// TrustedProxyCIDRs are the only peers whose Forwarded or
+	// X-Forwarded-For headers are accepted. Empty means no trusted proxies.
+	TrustedProxyCIDRs []string
+	// RateLimiterMaxEntries bounds per-client limiter memory. Defaults to 4096.
+	RateLimiterMaxEntries int
+	// RateLimiterTTL expires idle client entries. Defaults to 15 minutes.
+	RateLimiterTTL time.Duration
+
 	// XMLParseTimeout is the maximum time allowed for XML parsing (default: 5s).
 	XMLParseTimeout time.Duration
 
@@ -264,14 +275,32 @@ type Server struct {
 	listener     net.Listener
 	shutdownOnce sync.Once
 
-	// rateLimiters stores per-IP rate limiters for request throttling.
-	rateLimiters sync.Map // map[string]*rate.Limiter
+	rateLimitersMu       sync.Mutex
+	rateLimiters         map[string]*limiterEntry
+	trustedProxies       []netip.Prefix
+	rateLimiterEvictions atomic.Uint64
+}
+
+type limiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+const DefaultProtocolVersion = "v1.22.1"
+
+func supportedProtocolVersion(version string) bool {
+	switch version {
+	case "", "v1.13.1", "1.13.1", "v1.22.1", "1.22.1":
+		return true
+	default:
+		return false
+	}
 }
 
 // NewServer creates a new X1 server.
 func NewServer(config ServerConfig, destManager DestinationManager, taskManager TaskManager) *Server {
 	if config.Version == "" {
-		config.Version = "v1.13.1"
+		config.Version = DefaultProtocolVersion
 	}
 	if config.NEIdentifier == "" {
 		hostname, _ := os.Hostname()
@@ -286,11 +315,28 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 	if config.XMLParseTimeout <= 0 {
 		config.XMLParseTimeout = 5 * time.Second
 	}
+	if config.RateLimiterMaxEntries <= 0 {
+		config.RateLimiterMaxEntries = 4096
+	}
+	if config.RateLimiterTTL <= 0 {
+		config.RateLimiterTTL = 15 * time.Minute
+	}
+	trusted := make([]netip.Prefix, 0, len(config.TrustedProxyCIDRs))
+	for _, raw := range config.TrustedProxyCIDRs {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil {
+			logger.Error("ignoring invalid trusted proxy CIDR", "cidr", raw, "error", err)
+			continue
+		}
+		trusted = append(trusted, prefix.Masked())
+	}
 
 	return &Server{
-		config:      config,
-		destManager: destManager,
-		taskManager: taskManager,
+		config:         config,
+		destManager:    destManager,
+		taskManager:    taskManager,
+		rateLimiters:   make(map[string]*limiterEntry),
+		trustedProxies: trusted,
 	}
 }
 
@@ -433,14 +479,41 @@ func (s *Server) buildTLSConfig() (*tls.Config, error) {
 
 // getRateLimiter returns the rate limiter for the given IP, creating one if necessary.
 func (s *Server) getRateLimiter(ip string) *rate.Limiter {
-	if limiter, ok := s.rateLimiters.Load(ip); ok {
-		return limiter.(*rate.Limiter)
+	now := time.Now()
+	s.rateLimitersMu.Lock()
+	defer s.rateLimitersMu.Unlock()
+	if entry := s.rateLimiters[ip]; entry != nil {
+		entry.lastSeen = now
+		return entry.limiter
 	}
-
-	// Create new limiter for this IP
+	for key, entry := range s.rateLimiters {
+		if now.Sub(entry.lastSeen) > s.config.RateLimiterTTL {
+			delete(s.rateLimiters, key)
+			s.rateLimiterEvictions.Add(1)
+		}
+	}
+	if len(s.rateLimiters) >= s.config.RateLimiterMaxEntries {
+		var oldestKey string
+		var oldest time.Time
+		for key, entry := range s.rateLimiters {
+			if oldestKey == "" || entry.lastSeen.Before(oldest) {
+				oldestKey, oldest = key, entry.lastSeen
+			}
+		}
+		delete(s.rateLimiters, oldestKey)
+		s.rateLimiterEvictions.Add(1)
+	}
 	limiter := rate.NewLimiter(rate.Limit(s.config.RateLimitPerIP), s.config.RateLimitBurst)
-	actual, _ := s.rateLimiters.LoadOrStore(ip, limiter)
-	return actual.(*rate.Limiter)
+	s.rateLimiters[ip] = &limiterEntry{limiter: limiter, lastSeen: now}
+	return limiter
+}
+
+// RateLimiterStats reports bounded-cache observability counters.
+func (s *Server) RateLimiterStats() (entries int, evictions uint64) {
+	s.rateLimitersMu.Lock()
+	entries = len(s.rateLimiters)
+	s.rateLimitersMu.Unlock()
+	return entries, s.rateLimiterEvictions.Load()
 }
 
 // extractClientIP extracts the client IP from the request, handling proxies.
@@ -464,10 +537,75 @@ func extractClientIP(r *http.Request) string {
 	return host
 }
 
+func (s *Server) clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	peer, err := netip.ParseAddr(strings.TrimSpace(host))
+	if err != nil {
+		return host
+	}
+	trusted := false
+	for _, prefix := range s.trustedProxies {
+		if prefix.Contains(peer) {
+			trusted = true
+			break
+		}
+	}
+	if !trusted {
+		return peer.String()
+	}
+	// RFC 7239 Forwarded takes precedence. Use the first valid client address.
+	if forwarded := r.Header.Values("Forwarded"); len(forwarded) > 0 {
+		for _, field := range strings.Split(strings.Join(forwarded, ","), ",") {
+			for _, param := range strings.Split(field, ";") {
+				key, value, ok := strings.Cut(strings.TrimSpace(param), "=")
+				if !ok || !strings.EqualFold(key, "for") {
+					continue
+				}
+				if addr, ok := parseForwardedAddr(value); ok {
+					return addr.String()
+				}
+			}
+		}
+	}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for _, part := range parts {
+			addr, err := netip.ParseAddr(strings.TrimSpace(part))
+			if err != nil {
+				return peer.String()
+			}
+			if addr.IsValid() {
+				return addr.String()
+			}
+		}
+	}
+	return peer.String()
+}
+
+func parseForwardedAddr(raw string) (netip.Addr, bool) {
+	raw = strings.Trim(strings.TrimSpace(raw), `"`)
+	if strings.HasPrefix(raw, "[") {
+		if host, _, err := net.SplitHostPort(raw); err == nil {
+			raw = host
+		}
+	}
+	if addr, err := netip.ParseAddr(raw); err == nil {
+		return addr, true
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		addr, err := netip.ParseAddr(host)
+		return addr, err == nil
+	}
+	return netip.Addr{}, false
+}
+
 // handleX1Request handles incoming X1 requests.
 func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	// Extract client IP for rate limiting
-	clientIP := extractClientIP(r)
+	clientIP := s.clientIP(r)
 
 	// Check rate limit
 	limiter := s.getRateLimiter(clientIP)
@@ -535,24 +673,24 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 	// Check if it's a request container (batch), X1Request envelope, or a direct request.
 	switch rootDetector.XMLName.Local {
 	case "requestContainer":
-		// Legacy container format.
-		var reqContainer schema.RequestContainer
+		// Legacy container format. Decode the concrete message envelopes rather
+		// than schema.RequestContainer: the generated base-message slice drops
+		// xsi:type and operation-specific fields.
+		var reqContainer x1RequestEnvelope
 		if err := xml.Unmarshal(body, &reqContainer); err != nil {
 			s.sendErrorResponse(w, "", ErrorCodeRequestSyntaxError, "invalid XML: "+err.Error())
 			return
 		}
-
-		// Process each request message in the container.
-		// For now, we only support single requests per container.
-		if len(reqContainer.X1RequestMessage) > 0 {
-			resp := s.processRequestMessage(body, reqContainer.X1RequestMessage[0])
-			responses = append(responses, resp)
+		for _, message := range reqContainer.RequestMessages {
+			responses = append(responses, s.processEnvelopeMessage(message))
+		}
+		if len(reqContainer.RequestMessages) == 0 {
+			responses = append(responses, s.buildErrorResponse(nil, "requestContainer", ErrorCodeRequestSyntaxError, "request container is empty"))
 		}
 
 	case "X1Request":
 		// ETSI-compliant X1Request envelope with xsi:type on x1RequestMessage.
-		resp := s.processX1RequestEnvelope(body)
-		responses = append(responses, resp)
+		responses = append(responses, s.processX1RequestEnvelope(body)...)
 
 	default:
 		// Direct request (not wrapped in container) for backward compatibility.
@@ -630,8 +768,8 @@ func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartEl
 // x1RequestEnvelope represents the ETSI-compliant X1Request envelope.
 // The x1RequestMessage element uses xsi:type to indicate the concrete request type.
 type x1RequestEnvelope struct {
-	XMLName        xml.Name             `xml:"X1Request"`
-	RequestMessage x1RequestMessageAttr `xml:"x1RequestMessage"`
+	XMLName         xml.Name
+	RequestMessages []x1RequestMessageAttr `xml:"x1RequestMessage"`
 }
 
 // x1RequestMessageAttr captures the xsi:type attribute, admfIdentifier, and inner XML from x1RequestMessage.
@@ -644,32 +782,72 @@ type x1RequestMessageAttr struct {
 // processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
 // It extracts the xsi:type from x1RequestMessage and synthesizes a bare request
 // for processing by processRequestMessage.
-func (s *Server) processX1RequestEnvelope(body []byte) any {
+func (s *Server) processX1RequestEnvelope(body []byte) []any {
 	var envelope x1RequestEnvelope
 	if err := xml.Unmarshal(body, &envelope); err != nil {
-		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())
+		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())}
 	}
+	if len(envelope.RequestMessages) == 0 {
+		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "X1Request envelope is empty")}
+	}
+	responses := make([]any, 0, len(envelope.RequestMessages))
+	for _, message := range envelope.RequestMessages {
+		responses = append(responses, s.processEnvelopeMessage(message))
+	}
+	return responses
+}
 
-	messageType := envelope.RequestMessage.Type
+func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr) any {
+	requestMessage := envelopeBaseMessage(message)
+	messageType := message.Type
 	if messageType == "" {
-		return s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
+		return s.buildErrorResponse(requestMessage, "Unknown", ErrorCodeRequestSyntaxError, "missing xsi:type on x1RequestMessage")
+	}
+	if strings.EqualFold(messageType, "requestContainer") || containsElement(message.InnerXML, "requestContainer") || containsElement(message.InnerXML, "X1Request") {
+		return s.buildErrorResponse(requestMessage, "requestContainer", ErrorCodeRequestSyntaxError, "nested request containers not supported")
 	}
 
 	// Learn the ADMF identifier from the inbound request.
-	if envelope.RequestMessage.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
-		s.config.OnADMFIdentified(envelope.RequestMessage.AdmfIdentifier)
+	if message.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
+		s.config.OnADMFIdentified(message.AdmfIdentifier)
 	}
 
 	// Synthesize a bare request XML from the xsi:type and inner content
 	// so it can be processed by the existing processRequestMessage logic.
-	syntheticXML := []byte("<" + messageType + ">" + string(envelope.RequestMessage.InnerXML) + "</" + messageType + ">")
+	syntheticXML := []byte("<" + messageType + ">" + string(message.InnerXML) + "</" + messageType + ">")
 
 	return s.processRequestMessage(syntheticXML, nil)
+}
+
+func containsElement(data []byte, localName string) bool {
+	decoder := xml.NewDecoder(strings.NewReader("<root>" + string(data) + "</root>"))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		if start, ok := token.(xml.StartElement); ok && strings.EqualFold(start.Name.Local, localName) {
+			return true
+		}
+	}
+}
+
+func envelopeBaseMessage(message x1RequestMessageAttr) *schema.X1RequestMessage {
+	var requestMessage schema.X1RequestMessage
+	syntheticXML := []byte("<x1RequestMessage>" + string(message.InnerXML) + "</x1RequestMessage>")
+	if err := xml.Unmarshal(syntheticXML, &requestMessage); err != nil {
+		return nil
+	}
+	return &requestMessage
 }
 
 // processRequestMessage processes a single X1 request message.
 // Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
 func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) any {
+	if reqMsg != nil && !supportedProtocolVersion(reqMsg.Version) {
+		return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError,
+			"unsupported X1 protocol version "+reqMsg.Version+"; supported revisions are v1.13.1 and "+DefaultProtocolVersion)
+	}
 	// Learn the ADMF identifier from the inbound request.
 	if reqMsg != nil && reqMsg.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
 		s.config.OnADMFIdentified(reqMsg.AdmfIdentifier)
@@ -959,14 +1137,18 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 		DestinationIDs: destIDs,
 		DeliveryType:   deliveryType,
 	}
+	startTime, endTime, err := extractMediationWindow(details.ListOfMediationDetails)
+	if err != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			ErrorCodeRequestSyntaxError, "invalid mediation window: "+err.Error())
+	}
+	task.StartTime = startTime
+	task.EndTime = endTime
 
 	// Parse implicit deactivation allowed
 	if details.ImplicitDeactivationAllowed != nil {
 		task.ImplicitDeactivationAllowed = *details.ImplicitDeactivationAllowed
 	}
-
-	// Note: StartTime and EndTime parsing from MediationDetails would go here
-	// For now, we use immediate activation and indefinite duration
 
 	// Activate task
 	if err := s.taskManager.ActivateTask(task); err != nil {
@@ -1053,6 +1235,14 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 
 	// Build modification
 	mod := &TaskModification{}
+	if details.ListOfMediationDetails != nil {
+		_, endTime, err := extractMediationWindow(details.ListOfMediationDetails)
+		if err != nil {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeRequestSyntaxError, "invalid mediation window: "+err.Error())
+		}
+		mod.EndTime = &endTime
+	}
 
 	// Update targets if provided
 	if details.TargetIdentifiers != nil {
@@ -1110,6 +1300,51 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 	logger.Info("X1 task modified", "xid", xid)
 
 	return s.buildOKResponse(req.X1RequestMessage, MessageTypeModifyTask)
+}
+
+// extractMediationWindow returns the single effective window representable by
+// the current task model. An absent EndTime explicitly means an indefinite task.
+func extractMediationWindow(list *schema.ListOfMediationDetails) (time.Time, time.Time, error) {
+	if list == nil || len(list.MediationDetails) == 0 {
+		return time.Time{}, time.Time{}, nil
+	}
+	var effectiveStart, effectiveEnd time.Time
+	initialized := false
+	for i, details := range list.MediationDetails {
+		if details == nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d is nil", i)
+		}
+		start, err := parseMediationTime(details.StartTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d StartTime: %w", i, err)
+		}
+		end, err := parseMediationTime(details.EndTime)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d EndTime: %w", i, err)
+		}
+		if !end.IsZero() && !end.After(start) {
+			return time.Time{}, time.Time{}, fmt.Errorf("entry %d EndTime must be after StartTime", i)
+		}
+		if !initialized {
+			effectiveStart, effectiveEnd, initialized = start, end, true
+			continue
+		}
+		if !start.Equal(effectiveStart) || !end.Equal(effectiveEnd) {
+			return time.Time{}, time.Time{}, fmt.Errorf("mediation entries have inconsistent time windows")
+		}
+	}
+	return effectiveStart, effectiveEnd, nil
+}
+
+func parseMediationTime(value *schema.QualifiedMicrosecondDateTime) (time.Time, error) {
+	if value == nil || string(*value) == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, string(*value))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse %q: %w", string(*value), err)
+	}
+	return parsed, nil
 }
 
 // handleGetTaskDetails handles GetTaskDetailsRequest.

@@ -3,231 +3,220 @@
 package delivery
 
 import (
+	"sort"
 	"sync"
 	"time"
-
-	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
-// ReorderBuffer buffers X3 (RTP) PDUs per SSRC and delivers them in RTP
-// sequence order. X2 (SIP/IRI) PDUs bypass the buffer entirely.
-//
-// The buffer holds packets for up to FlushDelay, then flushes all buffered
-// packets in sequence order regardless of gaps.
+const (
+	defaultReorderPacketCap = 512
+	defaultReorderByteCap   = 2 << 20
+)
+
+// ReorderBuffer orders X3 RTP PDUs independently per SSRC. Delivery callbacks
+// are always invoked without the buffer lock held.
 type ReorderBuffer struct {
-	mu         sync.Mutex
-	streams    map[uint32]*rtpStream // keyed by SSRC
-	deliverFn  func(pdu []byte)      // callback to deliver a PDU
-	flushDelay time.Duration
-	stopped    bool
+	mu                 sync.Mutex
+	streams            map[uint32]*rtpStream
+	deliverFn          func([]byte)
+	flushDelay         time.Duration
+	packetCap, byteCap int
+	stopped            bool
 }
-
 type bufferedPDU struct {
-	seqNum uint16
-	pdu    []byte
+	seqNum  uint16
+	pdu     []byte
+	arrived time.Time
 }
-
 type rtpStream struct {
-	buffer      []bufferedPDU
+	buffer      map[uint16]bufferedPDU
+	bytes       int
 	lastFlushed uint16
-	hasBase     bool // whether lastFlushed has been initialized
+	hasBase     bool
 	timer       *time.Timer
+	deadline    time.Time
 	lastUsed    time.Time
 }
 
-// NewReorderBuffer creates a new reorder buffer.
-// deliverFn is called for each PDU in the correct order.
-// flushDelay controls how long to wait for out-of-order packets (e.g., 60ms).
-func NewReorderBuffer(deliverFn func(pdu []byte), flushDelay time.Duration) *ReorderBuffer {
-	return &ReorderBuffer{
-		streams:    make(map[uint32]*rtpStream),
-		deliverFn:  deliverFn,
-		flushDelay: flushDelay,
+func NewReorderBuffer(deliverFn func([]byte), flushDelay time.Duration) *ReorderBuffer {
+	return NewReorderBufferWithLimits(deliverFn, flushDelay, defaultReorderPacketCap, defaultReorderByteCap)
+}
+func NewReorderBufferWithLimits(deliverFn func([]byte), flushDelay time.Duration, packetCap, byteCap int) *ReorderBuffer {
+	if packetCap <= 0 {
+		packetCap = defaultReorderPacketCap
 	}
+	if byteCap <= 0 {
+		byteCap = defaultReorderByteCap
+	}
+	return &ReorderBuffer{streams: make(map[uint32]*rtpStream), deliverFn: deliverFn, flushDelay: flushDelay, packetCap: packetCap, byteCap: byteCap}
 }
-
-// DeliverX2 delivers an X2 (SIP/IRI) PDU immediately without buffering.
-func (rb *ReorderBuffer) DeliverX2(pdu []byte) {
-	rb.deliverFn(pdu)
-}
-
-// DeliverX3 buffers an X3 (RTP/CC) PDU and delivers it in sequence order.
-func (rb *ReorderBuffer) DeliverX3(ssrc uint32, rtpSeq uint16, pdu []byte) {
+func (rb *ReorderBuffer) DeliverX2(pdu []byte) { rb.deliverFn(pdu) }
+func (rb *ReorderBuffer) DeliverX3(ssrc uint32, seq uint16, pdu []byte) {
+	now := time.Now()
 	rb.mu.Lock()
-	defer rb.mu.Unlock()
-
 	if rb.stopped {
+		rb.mu.Unlock()
 		return
 	}
-
-	stream, ok := rb.streams[ssrc]
-	if !ok {
-		stream = &rtpStream{}
-		rb.streams[ssrc] = stream
+	s := rb.streams[ssrc]
+	if s == nil {
+		s = &rtpStream{buffer: make(map[uint16]bufferedPDU)}
+		rb.streams[ssrc] = s
 	}
-	stream.lastUsed = time.Now()
-
-	if !stream.hasBase {
-		// First packet for this stream — deliver immediately and set baseline
-		stream.lastFlushed = rtpSeq
-		stream.hasBase = true
-		rb.deliverFn(pdu)
-		rb.startFlushTimer(ssrc, stream)
-		return
-	}
-
-	// Check if this is the next expected packet
-	nextExpected := stream.lastFlushed + 1
-	if rtpSeq == nextExpected {
-		// In order — deliver and flush any consecutive buffered packets
-		stream.lastFlushed = rtpSeq
-		rb.deliverFn(pdu)
-		rb.flushConsecutive(stream)
-		rb.resetFlushTimer(ssrc, stream)
-		return
-	}
-
-	// Late packet (already past this sequence)
-	if seqBefore(rtpSeq, nextExpected) {
-		// Deliver late packet immediately — better late than dropped
-		logger.Debug("RTP reorder: late packet delivered",
-			"ssrc", ssrc, "seq", rtpSeq, "expected", nextExpected)
-		rb.deliverFn(pdu)
-		return
-	}
-
-	// Early packet (gap — waiting for earlier packets)
-	stream.buffer = append(stream.buffer, bufferedPDU{seqNum: rtpSeq, pdu: pdu})
-	// Always (re)arm the flush timer when buffering — otherwise packets can
-	// sit indefinitely if the previous timer already fired.
-	rb.resetFlushTimer(ssrc, stream)
-}
-
-// flushConsecutive delivers all consecutive packets from the buffer starting
-// from lastFlushed+1.
-func (rb *ReorderBuffer) flushConsecutive(stream *rtpStream) {
-	for {
-		nextExpected := stream.lastFlushed + 1
-		found := false
-		for i, bp := range stream.buffer {
-			if bp.seqNum == nextExpected {
-				stream.lastFlushed = bp.seqNum
-				rb.deliverFn(bp.pdu)
-				// Remove from buffer
-				stream.buffer = append(stream.buffer[:i], stream.buffer[i+1:]...)
-				found = true
-				break
+	s.lastUsed = now
+	var out [][]byte
+	if !s.hasBase {
+		s.hasBase = true
+		s.lastFlushed = seq
+		out = append(out, pdu)
+	} else {
+		next := s.lastFlushed + 1
+		switch {
+		case seq == next:
+			s.lastFlushed = seq
+			out = append(out, pdu)
+			out = append(out, drainConsecutive(s)...)
+		case seqBefore(seq, next):
+			out = append(out, pdu)
+		default:
+			if _, dup := s.buffer[seq]; !dup {
+				s.buffer[seq] = bufferedPDU{seq, pdu, now}
+				s.bytes += len(pdu)
+			}
+			rb.armTimerLocked(ssrc, s, now)
+			if len(s.buffer) > rb.packetCap || s.bytes > rb.byteCap {
+				out = append(out, drainAll(s)...)
+				rb.disarmLocked(s)
 			}
 		}
-		if !found {
-			break
+	}
+	rb.mu.Unlock()
+	rb.deliver(out)
+}
+func drainConsecutive(s *rtpStream) (out [][]byte) {
+	for {
+		next := s.lastFlushed + 1
+		bp, ok := s.buffer[next]
+		if !ok {
+			return
 		}
+		delete(s.buffer, next)
+		s.bytes -= len(bp.pdu)
+		s.lastFlushed = next
+		out = append(out, bp.pdu)
 	}
 }
-
-// flushAll delivers all buffered packets in sequence order, regardless of gaps.
-func (rb *ReorderBuffer) flushAll(ssrc uint32) {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
-
-	stream, ok := rb.streams[ssrc]
-	if !ok || len(stream.buffer) == 0 {
+func ordered(s *rtpStream) []bufferedPDU {
+	v := make([]bufferedPDU, 0, len(s.buffer))
+	for _, bp := range s.buffer {
+		v = append(v, bp)
+	}
+	sort.Slice(v, func(i, j int) bool {
+		return uint16(v[i].seqNum-(s.lastFlushed+1)) < uint16(v[j].seqNum-(s.lastFlushed+1))
+	})
+	return v
+}
+func drainAll(s *rtpStream) (out [][]byte) {
+	for _, bp := range ordered(s) {
+		out = append(out, bp.pdu)
+		s.lastFlushed = bp.seqNum
+	}
+	clear(s.buffer)
+	s.bytes = 0
+	return
+}
+func (rb *ReorderBuffer) armTimerLocked(ssrc uint32, s *rtpStream, now time.Time) {
+	if len(s.buffer) == 0 || s.timer != nil {
 		return
 	}
-
-	// Sort buffer by sequence number
-	sortBuffer(stream.buffer)
-
-	logger.Debug("RTP reorder: flush timeout, delivering buffered packets",
-		"ssrc", ssrc, "count", len(stream.buffer))
-
-	for _, bp := range stream.buffer {
-		stream.lastFlushed = bp.seqNum
-		rb.deliverFn(bp.pdu)
+	oldest := now
+	for _, bp := range s.buffer {
+		if bp.arrived.Before(oldest) {
+			oldest = bp.arrived
+		}
 	}
-	stream.buffer = stream.buffer[:0]
-}
-
-func (rb *ReorderBuffer) startFlushTimer(ssrc uint32, stream *rtpStream) {
-	stream.timer = time.AfterFunc(rb.flushDelay, func() {
-		rb.flushAll(ssrc)
-	})
-}
-
-func (rb *ReorderBuffer) resetFlushTimer(ssrc uint32, stream *rtpStream) {
-	if stream.timer != nil {
-		stream.timer.Stop()
+	s.deadline = oldest.Add(rb.flushDelay)
+	delay := time.Until(s.deadline)
+	if delay < 0 {
+		delay = 0
 	}
-	stream.timer = time.AfterFunc(rb.flushDelay, func() {
-		rb.flushAll(ssrc)
-	})
+	s.timer = time.AfterFunc(delay, func() { rb.flush(ssrc) })
 }
-
-// LastUsed returns the most recent lastUsed time across all streams.
-// Returns the zero time if there are no streams.
+func (rb *ReorderBuffer) disarmLocked(s *rtpStream) {
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	s.deadline = time.Time{}
+}
+func (rb *ReorderBuffer) flush(ssrc uint32) {
+	rb.mu.Lock()
+	s := rb.streams[ssrc]
+	if s == nil {
+		rb.mu.Unlock()
+		return
+	}
+	s.timer = nil
+	s.deadline = time.Time{}
+	out := drainAll(s)
+	rb.mu.Unlock()
+	rb.deliver(out)
+}
+func (rb *ReorderBuffer) deliver(out [][]byte) {
+	for _, p := range out {
+		rb.deliverFn(p)
+	}
+}
 func (rb *ReorderBuffer) LastUsed() time.Time {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 	var latest time.Time
-	for _, stream := range rb.streams {
-		if stream.lastUsed.After(latest) {
-			latest = stream.lastUsed
+	for _, s := range rb.streams {
+		if s.lastUsed.After(latest) {
+			latest = s.lastUsed
 		}
 	}
 	return latest
 }
-
-// CleanupIdleStreams removes streams where no packet has arrived in maxIdle
-// duration, stopping their timers. Returns true if all streams were removed
-// (i.e., the buffer is now empty).
 func (rb *ReorderBuffer) CleanupIdleStreams(maxIdle time.Duration) bool {
-	rb.mu.Lock()
-	defer rb.mu.Unlock()
 	now := time.Now()
-	for ssrc, stream := range rb.streams {
-		if now.Sub(stream.lastUsed) > maxIdle {
-			if stream.timer != nil {
-				stream.timer.Stop()
-			}
-			// Flush any remaining buffered packets before removing
-			sortBuffer(stream.buffer)
-			for _, bp := range stream.buffer {
-				rb.deliverFn(bp.pdu)
-			}
-			delete(rb.streams, ssrc)
+	rb.mu.Lock()
+	var out [][]byte
+	for id, s := range rb.streams {
+		if now.Sub(s.lastUsed) > maxIdle {
+			rb.disarmLocked(s)
+			out = append(out, drainAll(s)...)
+			delete(rb.streams, id)
 		}
 	}
-	return len(rb.streams) == 0
+	empty := len(rb.streams) == 0
+	rb.mu.Unlock()
+	rb.deliver(out)
+	return empty
 }
-
-// Stop flushes all streams and stops the buffer.
 func (rb *ReorderBuffer) Stop() {
 	rb.mu.Lock()
-	defer rb.mu.Unlock()
+	if rb.stopped {
+		rb.mu.Unlock()
+		return
+	}
 	rb.stopped = true
-	for _, stream := range rb.streams {
-		if stream.timer != nil {
-			stream.timer.Stop()
-		}
-		sortBuffer(stream.buffer)
-		for _, bp := range stream.buffer {
-			rb.deliverFn(bp.pdu)
-		}
-		stream.buffer = nil
+	var out [][]byte
+	for _, s := range rb.streams {
+		rb.disarmLocked(s)
+		out = append(out, drainAll(s)...)
 	}
+	clear(rb.streams)
+	rb.mu.Unlock()
+	rb.deliver(out)
 }
-
-// seqBefore returns true if a comes before b in the RTP sequence space
-// (handles uint16 wraparound).
-func seqBefore(a, b uint16) bool {
-	return int16(a-b) < 0
-}
-
-func sortBuffer(buf []bufferedPDU) {
-	// Simple insertion sort — buffer is typically very small (<10 items)
-	for i := 1; i < len(buf); i++ {
-		for j := i; j > 0 && seqBefore(buf[j].seqNum, buf[j-1].seqNum); j-- {
-			buf[j], buf[j-1] = buf[j-1], buf[j]
-		}
+func (rb *ReorderBuffer) Buffered() (packets, bytes int) {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	for _, s := range rb.streams {
+		packets += len(s.buffer)
+		bytes += s.bytes
 	}
+	return
 }
+func seqBefore(a, b uint16) bool { return int16(a-b) < 0 }

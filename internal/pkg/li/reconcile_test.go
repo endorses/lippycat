@@ -186,7 +186,7 @@ func TestReconcile_DeactivatesOrphanedTask(t *testing.T) {
 
 	requireTaskNotActive(t, m, orphanXID)
 	requireTaskActive(t, m, liveXID)
-	assert.Contains(t, store.deletes, fmt.Sprintf("li-%s-0", orphanXID.String()[:8]))
+	assert.Contains(t, store.deletes, fmt.Sprintf("li-%s-0", orphanXID.String()))
 }
 
 // A task that fails conversion is missing from the snapshot for reasons

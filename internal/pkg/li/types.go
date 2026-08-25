@@ -10,10 +10,15 @@ package li
 
 import (
 	"crypto/tls"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// ErrUnsupportedDeliveryCombination identifies a target/delivery pairing for
+// which the NE cannot produce any lawful-interception product.
+var ErrUnsupportedDeliveryCombination = errors.New("unsupported target and delivery combination")
 
 // DeliveryType specifies what content should be delivered for an intercept task.
 type DeliveryType int
@@ -174,6 +179,10 @@ type InterceptTask struct {
 
 	// LastError contains the most recent error message (if any).
 	LastError string
+
+	// ActivationGeneration distinguishes successive activations of the same XID.
+	// It is persisted so cleanup from an older activation cannot affect a newer one.
+	ActivationGeneration uint64
 }
 
 // TargetIdentity specifies a single target to intercept.

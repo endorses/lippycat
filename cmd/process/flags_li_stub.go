@@ -23,18 +23,24 @@ type LIConfig struct {
 	ADMFTLSCAFile   string
 	ADMFKeepalive   string
 	// Delivery (X2/X3) TLS
-	DeliveryTLSCertFile       string
-	DeliveryTLSKeyFile        string
-	DeliveryTLSCAFile         string
-	DeliveryTLSPinnedCert     []string
-	DeliveryQueueSize         int
-	DeliverySendTimeout       time.Duration
-	DeliveryInitialBackoff    time.Duration
-	DeliveryMaxBackoff        time.Duration
-	DeliveryKeepAliveIdle     time.Duration
-	DeliveryKeepAliveInterval time.Duration
-	DeliveryKeepAliveCount    int
-	DeliveryShutdownTimeout   time.Duration
+	DeliveryTLSCertFile        string
+	DeliveryTLSKeyFile         string
+	DeliveryTLSCAFile          string
+	DeliveryTLSPinnedCert      []string
+	DeliveryQueueSize          int
+	DeliverySendTimeout        time.Duration
+	DeliveryInitialBackoff     time.Duration
+	DeliveryMaxBackoff         time.Duration
+	DeliveryKeepAliveIdle      time.Duration
+	DeliveryKeepAliveInterval  time.Duration
+	DeliveryKeepAliveCount     int
+	DeliveryX2KeepaliveEnabled bool
+	DeliveryX2KeepaliveTimeP1  time.Duration
+	DeliveryX2KeepaliveTimeP2  time.Duration
+	DeliveryX3KeepaliveEnabled bool
+	DeliveryX3KeepaliveTimeP1  time.Duration
+	DeliveryX3KeepaliveTimeP2  time.Duration
+	DeliveryShutdownTimeout    time.Duration
 	// ADMF state sync
 	ADMFSyncOnStartup         bool
 	ADMFSyncTimeout           time.Duration
@@ -42,6 +48,7 @@ type LIConfig struct {
 	MetadataEventsEnabled     bool
 	MetadataDeliveryProfile   string
 	MetadataAllowFileMetadata bool
+	StateFile                 string
 }
 
 // RegisterLIFlags is a no-op in non-LI builds.

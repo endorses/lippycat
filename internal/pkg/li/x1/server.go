@@ -1655,11 +1655,11 @@ func taskDetailsResponse(task *Task) *schema.TaskDetails {
 	}
 	mediation := &schema.MediationDetails{DeliveryType: deliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
 	if !task.StartTime.IsZero() {
-		start := schema.QualifiedMicrosecondDateTime(task.StartTime.Format(time.RFC3339Nano))
+		start := formatQualifiedMicrosecondDateTime(task.StartTime)
 		mediation.StartTime = &start
 	}
 	if !task.EndTime.IsZero() {
-		end := schema.QualifiedMicrosecondDateTime(task.EndTime.Format(time.RFC3339Nano))
+		end := formatQualifiedMicrosecondDateTime(task.EndTime)
 		mediation.EndTime = &end
 	}
 	details.ListOfMediationDetails = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{mediation}}
@@ -1887,7 +1887,7 @@ func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType st
 }
 
 func (s *Server) responseMessage(reqMsg *schema.X1RequestMessage) *schema.X1ResponseMessage {
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 
 	admfID := ""
 	var transID *schema.UUID
@@ -1914,7 +1914,7 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 		"error_desc", errorDesc,
 	)
 
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 
 	admfID := ""
 	var transID *schema.UUID
@@ -1946,7 +1946,7 @@ func (s *Server) sendErrorResponse(w http.ResponseWriter, admfID string, errorCo
 		"error_desc", errorDesc,
 	)
 
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 	resp := &schema.TopLevelErrorResponse{
 		AdmfIdentifier:   admfID,
 		NeIdentifier:     s.config.NEIdentifier,

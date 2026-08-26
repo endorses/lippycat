@@ -19,6 +19,9 @@ var (
 	// ErrTaskDefinitionConflict indicates an activation retry reused an XID with
 	// a different enforcement definition. The caller must use ModifyTask.
 	ErrTaskDefinitionConflict = errors.New("task activation definition conflicts with existing task; use ModifyTask")
+	// ErrReactivationIdentityConflict indicates that an explicit activation for
+	// a retained task changed its protected interception identity.
+	ErrReactivationIdentityConflict = errors.New("retained task interception identity differs")
 	// ErrTaskNotActive indicates the operation requires an active task.
 	ErrTaskNotActive = errors.New("task is not active")
 	// ErrInvalidTask indicates the task parameters are invalid.

@@ -82,6 +82,9 @@ var (
 	// ErrTaskDefinitionConflict indicates that an existing XID was reasserted
 	// with different enforcement semantics and must be changed with ModifyTask.
 	ErrTaskDefinitionConflict = errors.New("task definition conflicts with existing task")
+	// ErrReactivationIdentityConflict indicates that a retained task was
+	// reasserted with different protected interception identity fields.
+	ErrReactivationIdentityConflict = errors.New("retained task interception identity differs")
 	// ErrInvalidTask indicates the task parameters are invalid.
 	ErrInvalidTask = errors.New("invalid task parameters")
 	// ErrModifyNotAllowed indicates the requested modification is not permitted.
@@ -1321,6 +1324,10 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 
 	// Activate task
 	if err := s.taskManager.ActivateTask(task); err != nil {
+		if errors.Is(err, ErrReactivationIdentityConflict) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeGenericError, "retained task's interception identity differs: "+xid.String())
+		}
 		if errors.Is(err, ErrTaskDefinitionConflict) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 				ErrorCodeXIDAlreadyExists, "task definition conflicts with existing XID; use ModifyTask: "+xid.String())

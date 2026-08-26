@@ -130,19 +130,43 @@ implemented and deployed before strict validation is restored because it
 changes invalid output into schema-conforming output without narrowing what is
 accepted.
 
-- [ ] Inventory all X1 timestamp builders in each emitting component.
-- [ ] Replace variable-width, millisecond-only, nanosecond, and fractionless
+- [x] Inventory all X1 timestamp builders in each emitting component.
+- [x] Replace variable-width, millisecond-only, nanosecond, and fractionless
       encodings with one shared fixed-width microsecond formatter per codebase.
-- [ ] Cover both routine request/response messages and less frequent issue,
+- [x] Cover both routine request/response messages and less frequent issue,
       status, or lifecycle reports.
-- [ ] Confirm unrelated timestamp encodings are not changed solely because
+- [x] Confirm unrelated timestamp encodings are not changed solely because
       they use a similar date-time representation.
-- [ ] Validate representative serialized messages directly against the
+- [x] Validate representative serialized messages directly against the
       governing XSDs.
 - [ ] Record the minimum remediated version of every deployed emitter for use
       by the rollout gate in Phase 5.
 
+### 6.1 Repository emitter inventory
+
+The repository-wide audit found one X1-emitting component. Its outbound paths
+all use `formatQualifiedMicrosecondDateTime` and are covered by the Phase 2
+schema-validation tests.
+
+| Component | Outbound timestamp paths | Remediation boundary |
+|---|---|---|
+| lippycat `internal/pkg/li/x1` | Server success, request-level error, and top-level error responses; client keepalive, task issue, destination issue, NE issue, and state-query requests; task-detail mediation start/end | Commit `a680ba2`; first released version not yet assigned |
+
+No other package constructs `schema.QualifiedMicrosecondDateTime` values or
+emits X1 XML. Other RFC 3339 and millisecond timestamp sites in the repository
+serve unrelated TUI, diagnostic, command-hook, or transport representations and
+were intentionally left unchanged.
+
+The final Phase 3 item remains open until the remediated commit is included in
+a release and the minimum deployed version is known. External X1 emitters, if
+any exist in the deployment environment, are outside this repository and must
+be inventoried before satisfying the Phase 5 rollout gate.
+
 ## 7. Phase 4 — Restore effective validation safely
+
+**Status:** Deferred. Production XSD enforcement requires a separately agreed
+validator and runtime strategy; no validation dependency is introduced by
+Phases 1–3.
 
 Before enforcement, determine why the validation API used on the live protocol
 path can accept a document that the same cached schema rejects through a

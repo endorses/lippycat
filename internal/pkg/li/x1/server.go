@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -216,7 +217,8 @@ type ServerConfig struct {
 	// NEIdentifier is the network element identifier for X1 responses.
 	NEIdentifier string
 
-	// Version is the X1 protocol version (default: "v1.13.1").
+	// Version is the declared outbound X1 protocol version. It defaults to
+	// DefaultProtocolVersion; inbound compatibility is independently validated.
 	Version string
 
 	// RateLimitPerIP is the maximum requests per second per IP address (default: 10).
@@ -279,6 +281,10 @@ type Server struct {
 	rateLimiters         map[string]*limiterEntry
 	trustedProxies       []netip.Prefix
 	rateLimiterEvictions atomic.Uint64
+
+	revisionMetrics revisionMetrics
+	revisionLogsMu  sync.Mutex
+	revisionLogs    map[string]struct{}
 }
 
 type limiterEntry struct {
@@ -288,12 +294,94 @@ type limiterEntry struct {
 
 const DefaultProtocolVersion = "v1.22.1"
 
-func supportedProtocolVersion(version string) bool {
-	switch version {
-	case "", "v1.13.1", "1.13.1", "v1.22.1", "1.22.1":
-		return true
-	default:
-		return false
+// The inbound window is based on verified wire compatibility with the bundled
+// V1.22.1 schema. It is deliberately not a general semantic-version policy.
+const minimumProtocolVersion = "v1.13.1"
+
+type protocolRevision struct{ major, minor, patch int }
+type revisionDisposition uint8
+
+const (
+	revisionAcceptedExact revisionDisposition = iota
+	revisionAcceptedCompatible
+	revisionAbsent
+	revisionMalformed
+	revisionUnsupported
+)
+
+type revisionMetrics struct {
+	acceptedExact, acceptedCompatible atomic.Uint64
+	absent, malformed, unsupported    atomic.Uint64
+}
+
+// RevisionStats is a snapshot of inbound X1 protocol revision counters.
+type RevisionStats struct {
+	AcceptedExact, AcceptedCompatible uint64
+	Absent, Malformed, Unsupported    uint64
+}
+
+func parseProtocolRevision(version string) (protocolRevision, error) {
+	value := version
+	if strings.HasPrefix(value, "v") {
+		value = value[1:]
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return protocolRevision{}, fmt.Errorf("expected MAJOR.MINOR.PATCH")
+	}
+	values := [3]int{}
+	for i, part := range parts {
+		if part == "" {
+			return protocolRevision{}, fmt.Errorf("empty revision component")
+		}
+		for _, char := range part {
+			if char < '0' || char > '9' {
+				return protocolRevision{}, fmt.Errorf("non-numeric revision component")
+			}
+		}
+		parsed, err := strconv.Atoi(part)
+		if err != nil {
+			return protocolRevision{}, fmt.Errorf("revision component out of range: %w", err)
+		}
+		values[i] = parsed
+	}
+	return protocolRevision{values[0], values[1], values[2]}, nil
+}
+
+func compareProtocolRevisions(left, right protocolRevision) int {
+	if left.major != right.major {
+		return left.major - right.major
+	}
+	if left.minor != right.minor {
+		return left.minor - right.minor
+	}
+	return left.patch - right.patch
+}
+
+func classifyProtocolVersion(version string) revisionDisposition {
+	if version == "" {
+		return revisionAbsent
+	}
+	revision, err := parseProtocolRevision(version)
+	if err != nil {
+		return revisionMalformed
+	}
+	minimum, _ := parseProtocolRevision(minimumProtocolVersion)
+	maximum, _ := parseProtocolRevision(DefaultProtocolVersion)
+	if compareProtocolRevisions(revision, minimum) < 0 || compareProtocolRevisions(revision, maximum) > 0 {
+		return revisionUnsupported
+	}
+	if compareProtocolRevisions(revision, maximum) == 0 {
+		return revisionAcceptedExact
+	}
+	return revisionAcceptedCompatible
+}
+
+// RevisionStats returns inbound revision classifications since server creation.
+func (s *Server) RevisionStats() RevisionStats {
+	return RevisionStats{
+		AcceptedExact: s.revisionMetrics.acceptedExact.Load(), AcceptedCompatible: s.revisionMetrics.acceptedCompatible.Load(),
+		Absent: s.revisionMetrics.absent.Load(), Malformed: s.revisionMetrics.malformed.Load(), Unsupported: s.revisionMetrics.unsupported.Load(),
 	}
 }
 
@@ -336,6 +424,7 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 		destManager:    destManager,
 		taskManager:    taskManager,
 		rateLimiters:   make(map[string]*limiterEntry),
+		revisionLogs:   make(map[string]struct{}),
 		trustedProxies: trusted,
 	}
 }
@@ -682,7 +771,7 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, message := range reqContainer.RequestMessages {
-			responses = append(responses, s.processEnvelopeMessage(message))
+			responses = append(responses, s.processEnvelopeMessage(message, clientIP))
 		}
 		if len(reqContainer.RequestMessages) == 0 {
 			responses = append(responses, s.buildErrorResponse(nil, "requestContainer", ErrorCodeRequestSyntaxError, "request container is empty"))
@@ -690,11 +779,11 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 
 	case "X1Request":
 		// ETSI-compliant X1Request envelope with xsi:type on x1RequestMessage.
-		responses = append(responses, s.processX1RequestEnvelope(body)...)
+		responses = append(responses, s.processX1RequestEnvelope(body, clientIP)...)
 
 	default:
 		// Direct request (not wrapped in container) for backward compatibility.
-		resp := s.processRequestMessage(body, nil)
+		resp := s.processRequestMessage(body, nil, clientIP)
 		responses = append(responses, resp)
 	}
 
@@ -782,7 +871,7 @@ type x1RequestMessageAttr struct {
 // processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
 // It extracts the xsi:type from x1RequestMessage and synthesizes a bare request
 // for processing by processRequestMessage.
-func (s *Server) processX1RequestEnvelope(body []byte) []any {
+func (s *Server) processX1RequestEnvelope(body []byte, peer string) []any {
 	var envelope x1RequestEnvelope
 	if err := xml.Unmarshal(body, &envelope); err != nil {
 		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())}
@@ -792,12 +881,12 @@ func (s *Server) processX1RequestEnvelope(body []byte) []any {
 	}
 	responses := make([]any, 0, len(envelope.RequestMessages))
 	for _, message := range envelope.RequestMessages {
-		responses = append(responses, s.processEnvelopeMessage(message))
+		responses = append(responses, s.processEnvelopeMessage(message, peer))
 	}
 	return responses
 }
 
-func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr) any {
+func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr, peer string) any {
 	requestMessage := envelopeBaseMessage(message)
 	messageType := message.Type
 	if messageType == "" {
@@ -816,7 +905,7 @@ func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr) any {
 	// so it can be processed by the existing processRequestMessage logic.
 	syntheticXML := []byte("<" + messageType + ">" + string(message.InnerXML) + "</" + messageType + ">")
 
-	return s.processRequestMessage(syntheticXML, nil)
+	return s.processRequestMessage(syntheticXML, requestMessage, peer)
 }
 
 func containsElement(data []byte, localName string) bool {
@@ -841,12 +930,74 @@ func envelopeBaseMessage(message x1RequestMessageAttr) *schema.X1RequestMessage 
 	return &requestMessage
 }
 
+func (s *Server) validateProtocolVersion(reqMsg *schema.X1RequestMessage, peer string) *schema.ErrorResponse {
+	version := ""
+	if reqMsg != nil {
+		version = reqMsg.Version
+	}
+	switch classifyProtocolVersion(version) {
+	case revisionAcceptedExact:
+		s.revisionMetrics.acceptedExact.Add(1)
+	case revisionAcceptedCompatible:
+		s.revisionMetrics.acceptedCompatible.Add(1)
+		revision, _ := parseProtocolRevision(version)
+		s.logRevisionOnce(peer, revision.String())
+	case revisionAbsent:
+		s.revisionMetrics.absent.Add(1)
+		s.logRevisionOnce(peer, "unspecified")
+	case revisionMalformed:
+		s.revisionMetrics.malformed.Add(1)
+		return s.protocolVersionError(reqMsg, version)
+	case revisionUnsupported:
+		s.revisionMetrics.unsupported.Add(1)
+		return s.protocolVersionError(reqMsg, version)
+	}
+	return nil
+}
+
+func (r protocolRevision) String() string {
+	return fmt.Sprintf("v%d.%d.%d", r.major, r.minor, r.patch)
+}
+
+func (s *Server) protocolVersionError(reqMsg *schema.X1RequestMessage, version string) *schema.ErrorResponse {
+	return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError,
+		fmt.Sprintf("unsupported X1 protocol version %q; supported range is %s through %s", version, minimumProtocolVersion, DefaultProtocolVersion))
+}
+
+func (s *Server) logRevisionOnce(peer, version string) {
+	if peer == "" {
+		peer = "unknown"
+	}
+	key := peer + "\x00" + version
+	s.revisionLogsMu.Lock()
+	defer s.revisionLogsMu.Unlock()
+	if _, loaded := s.revisionLogs[key]; loaded {
+		return
+	}
+	// Bound peer-derived observability state using the same configured ceiling
+	// as the per-client rate-limiter cache.
+	if len(s.revisionLogs) >= s.config.RateLimiterMaxEntries {
+		for oldKey := range s.revisionLogs {
+			delete(s.revisionLogs, oldKey)
+			break
+		}
+	}
+	s.revisionLogs[key] = struct{}{}
+	logger.Info("X1 peer uses a compatible protocol revision",
+		"peer", peer, "peer_revision", version, "declared_revision", DefaultProtocolVersion)
+}
+
 // processRequestMessage processes a single X1 request message.
 // Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
-func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) any {
-	if reqMsg != nil && !supportedProtocolVersion(reqMsg.Version) {
-		return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError,
-			"unsupported X1 protocol version "+reqMsg.Version+"; supported revisions are v1.13.1 and "+DefaultProtocolVersion)
+func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage, peer string) any {
+	if reqMsg == nil {
+		var parsed schema.X1RequestMessage
+		if err := xml.Unmarshal(body, &parsed); err == nil {
+			reqMsg = &parsed
+		}
+	}
+	if response := s.validateProtocolVersion(reqMsg, peer); response != nil {
+		return response
 	}
 	// Learn the ADMF identifier from the inbound request.
 	if reqMsg != nil && reqMsg.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {

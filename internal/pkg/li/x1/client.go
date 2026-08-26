@@ -154,7 +154,7 @@ type ClientConfig struct {
 	// NEIdentifier is the network element identifier for X1 messages.
 	NEIdentifier string
 
-	// Version is the X1 protocol version (default: "v1.13.1").
+	// Version is the X1 protocol version (default: DefaultProtocolVersion).
 	Version string
 
 	// TLSCertFile is the path to the client TLS certificate for mutual TLS.
@@ -191,7 +191,7 @@ func DefaultClientConfig() ClientConfig {
 	hostname, _ := os.Hostname()
 	return ClientConfig{
 		NEIdentifier:      hostname,
-		Version:           "v1.13.1",
+		Version:           DefaultProtocolVersion,
 		KeepaliveInterval: DefaultKeepaliveInterval,
 		RequestTimeout:    DefaultRequestTimeout,
 		InitialBackoff:    DefaultInitialBackoff,
@@ -412,26 +412,37 @@ func (c *Client) keepaliveLoop() {
 		case <-c.stopChan:
 			return
 		case <-ticker.C:
-			if err := c.SendKeepalive(context.Background()); err != nil {
-				c.mu.Lock()
-				c.stats.KeepalivesFailed++
-				c.stats.LastError = err.Error()
-				c.mu.Unlock()
-
-				logger.Warn("X1 keepalive failed",
-					"error", err,
-					"admf", c.config.ADMFEndpoint,
-				)
-			} else {
-				c.mu.Lock()
-				c.stats.KeepalivesSent++
-				c.stats.LastKeepalive = time.Now()
-				c.mu.Unlock()
-
-				logger.Debug("X1 keepalive sent", "admf", c.config.ADMFEndpoint)
+			if c.recordKeepaliveResult(c.SendKeepalive(context.Background())) {
+				return
 			}
 		}
 	}
+}
+
+// recordKeepaliveResult updates keepalive observability and reports whether the
+// loop should terminate. A keepalive rejected because Stop has begun is normal
+// shutdown, not an operational delivery failure.
+func (c *Client) recordKeepaliveResult(err error) bool {
+	if errors.Is(err, ErrClientStopped) {
+		return true
+	}
+	if err != nil {
+		c.mu.Lock()
+		c.stats.KeepalivesFailed++
+		c.stats.LastError = err.Error()
+		c.mu.Unlock()
+
+		logger.Warn("X1 keepalive failed", "error", err, "admf", c.config.ADMFEndpoint)
+		return false
+	}
+
+	c.mu.Lock()
+	c.stats.KeepalivesSent++
+	c.stats.LastKeepalive = time.Now()
+	c.mu.Unlock()
+
+	logger.Debug("X1 keepalive sent", "admf", c.config.ADMFEndpoint)
+	return false
 }
 
 // SendKeepalive sends a keepalive message to ADMF.

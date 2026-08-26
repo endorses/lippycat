@@ -595,7 +595,7 @@ func TestClientStats(t *testing.T) {
 func TestDefaultClientConfig(t *testing.T) {
 	config := DefaultClientConfig()
 	assert.NotEmpty(t, config.NEIdentifier)
-	assert.Equal(t, "v1.13.1", config.Version)
+	assert.Equal(t, DefaultProtocolVersion, config.Version)
 	assert.Equal(t, DefaultKeepaliveInterval, config.KeepaliveInterval)
 	assert.Equal(t, DefaultRequestTimeout, config.RequestTimeout)
 	assert.Equal(t, DefaultInitialBackoff, config.InitialBackoff)
@@ -723,6 +723,16 @@ func TestClient_KeepaliveUpdatesStats(t *testing.T) {
 	assert.False(t, stats.LastKeepalive.IsZero())
 }
 
+func TestClient_KeepaliveShutdownIsNotFailure(t *testing.T) {
+	client, err := NewClient(ClientConfig{ADMFEndpoint: "http://127.0.0.1"})
+	require.NoError(t, err)
+
+	assert.True(t, client.recordKeepaliveResult(ErrClientStopped))
+	stats := client.Stats()
+	assert.Zero(t, stats.KeepalivesFailed)
+	assert.Empty(t, stats.LastError)
+}
+
 // TestClient_KeepaliveFailureUpdatesStats tests that failed keepalives update stats.
 func TestClient_KeepaliveFailureUpdatesStats(t *testing.T) {
 	var requestCount int32
@@ -741,12 +751,15 @@ func TestClient_KeepaliveFailureUpdatesStats(t *testing.T) {
 	client, err := NewClient(ClientConfig{
 		ADMFEndpoint:      server.URL,
 		KeepaliveInterval: 5 * time.Millisecond,
-		MaxRetries:        0, // No retries
+		MaxRetries:        1,
+		InitialBackoff:    time.Millisecond,
 	})
 	require.NoError(t, err)
 
 	client.Start()
-	time.Sleep(25 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return client.Stats().KeepalivesFailed >= 1
+	}, time.Second, time.Millisecond)
 	client.Stop()
 
 	stats := client.Stats()

@@ -223,6 +223,8 @@ func (r *Registry) promotePending(xid uuid.UUID, activatedAt time.Time) error {
 // Returns ErrTaskAlreadyExists if a task with the same XID exists.
 // Returns ErrInvalidTask if the task parameters are invalid.
 func (r *Registry) ActivateTask(task *InterceptTask) error {
+	// Structural and capability validation is independent of registry state and
+	// must complete before taking the lock or creating rollback bookkeeping.
 	if err := r.validateTask(task); err != nil {
 		return err
 	}
@@ -230,18 +232,16 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if existing, exists := r.tasks[task.XID]; exists {
+	existing, exists := r.tasks[task.XID]
+	if exists {
 		if existing.Status != TaskStatusDeactivated {
 			return fmt.Errorf("%w: XID %s is %s", ErrTaskAlreadyExists, task.XID, existing.Status)
 		}
-		previous := *existing
-		previous.Targets = append([]TargetIdentity(nil), existing.Targets...)
-		previous.DestinationIDs = append([]uuid.UUID(nil), existing.DestinationIDs...)
-		r.rollbackTask[task.XID] = &previous
-		r.auditHistory[task.XID] = append(r.auditHistory[task.XID], previous)
 	}
 
-	// Validate destination IDs exist
+	// Destination existence and delivery compatibility are state-dependent.
+	// Validate them under the same lock as the eventual mutation so a
+	// destination cannot change between validation and registration.
 	for _, did := range task.DestinationIDs {
 		destination, exists := r.destinations[did]
 		if !exists {
@@ -252,11 +252,20 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 		}
 	}
 
-	// Create a copy to store
-	taskCopy := *task
-	taskCopy.Targets = append([]TargetIdentity(nil), task.Targets...)
-	taskCopy.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	// Only after every fallible validation has succeeded may reactivation add
+	// rollback and audit state. Both snapshots own their slices independently.
+	if exists {
+		rollback := cloneInterceptTask(existing)
+		audit := cloneInterceptTask(existing)
+		r.rollbackTask[task.XID] = rollback
+		r.auditHistory[task.XID] = append(r.auditHistory[task.XID], *audit)
+	}
+
+	taskCopy := cloneInterceptTask(task)
 	taskCopy.ActivatedAt = time.Now()
+	// Generations are monotonic attempt identifiers. A later enforcement
+	// failure may consume a generation, but rollback restores the externally
+	// visible tombstone and its prior generation.
 	r.generations[task.XID]++
 	taskCopy.ActivationGeneration = r.generations[task.XID]
 
@@ -267,8 +276,18 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 		taskCopy.Status = TaskStatusPending
 	}
 
-	r.tasks[task.XID] = &taskCopy
+	r.tasks[task.XID] = taskCopy
 	return nil
+}
+
+func cloneInterceptTask(task *InterceptTask) *InterceptTask {
+	if task == nil {
+		return nil
+	}
+	clone := *task
+	clone.Targets = append([]TargetIdentity(nil), task.Targets...)
+	clone.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	return &clone
 }
 
 // restorePendingTask restores durable state without installing enforcement.

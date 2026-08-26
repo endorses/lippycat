@@ -200,35 +200,57 @@ instant, and deep-copy all slices before comparison or storage.
 
 ### 3.2 Behavior
 
-- [ ] Reasserting an equivalent `Active` task returns success without mutating
+- [x] Reasserting an equivalent `Active` task returns success without mutating
       registry, generation, filters, workers, counters, or persistence state.
-- [ ] Reasserting an equivalent `Pending` task returns success without changing
+- [x] Reasserting an equivalent `Pending` task returns success without changing
       its scheduled boundary.
-- [ ] Reasserting an XID with a different canonical definition returns a
+- [x] Reasserting an XID with a different canonical definition returns a
       conflict and directs the requester to `ModifyTask`; do not silently apply
       partial changes.
-- [ ] Define explicit fail-closed results for `Suspended`, `Expiring`, `Failed`,
+- [x] Define explicit fail-closed results for `Suspended`, `Expiring`, `Failed`,
       and `Deactivated` states.
-- [ ] Keep the equivalence check and any state transition under the manager's
+- [x] Keep the equivalence check and any state transition under the manager's
       lifecycle serialization.
-- [ ] Do not remove and reinstall filters for a no-op reassertion.
-- [ ] Preserve the existing atomic rollback path for genuine activation.
+- [x] Do not remove and reinstall filters for a no-op reassertion.
+- [x] Preserve the existing atomic rollback path for genuine activation.
 
 ### 3.3 Tests
 
-- [ ] Equivalent active and pending reassertions return success.
-- [ ] Reordered targets and destinations are equivalent.
-- [ ] Differing target, destination, delivery type, start time, end time, or
+- [x] Equivalent active and pending reassertions return success.
+- [x] Reordered targets and destinations are equivalent.
+- [x] Differing target, destination, delivery type, start time, end time, or
       lifecycle option is a conflict.
-- [ ] No-op reassertion causes zero filter-pusher calls and no generation bump.
-- [ ] A conflicting reassertion leaves registry, filters, workers, and persisted
+- [x] No-op reassertion causes zero filter-pusher calls and no generation bump.
+- [x] A conflicting reassertion leaves registry, filters, workers, and persisted
       state byte-for-byte equivalent to their prior logical state.
-- [ ] Concurrent duplicate activations converge on one activation with no race
+- [x] Concurrent duplicate activations converge on one activation with no race
       or duplicate enforcement.
-- [ ] Repeat the cases after state restoration.
+- [x] Repeat the cases after state restoration.
 
 Durable LI state must not be considered operationally safe until these tests
 pass.
+
+### 3.4 Implementation status
+
+Implemented on 2026-08-26:
+
+- Activation identity canonicalizes enforcement fields, orders and deduplicates
+  targets and destinations, compares mediation times by instant, and owns copied
+  slices.
+- Equivalent Active and Pending retries return while holding lifecycle
+  serialization, before generation, filter, worker, counter, or persistence
+  mutation.
+- Definition changes and retries in Suspended (including expiration cleanup),
+  Failed, and Deactivated states fail closed and direct the ADMF to ModifyTask.
+- Tests cover reordered and duplicate values, every definition field,
+  concurrency, state restoration, filter calls, generations, persistence, and
+  lifecycle-state conflicts.
+
+Verification:
+
+```text
+go test -race -tags 'all,li' ./internal/pkg/li/...
+```
 
 ## 4. X2/X3 correlation and raw packet delivery
 

@@ -16,6 +16,9 @@ var (
 	ErrTaskNotFound = errors.New("task not found")
 	// ErrTaskAlreadyExists indicates a task with the given XID already exists.
 	ErrTaskAlreadyExists = errors.New("task already exists")
+	// ErrTaskDefinitionConflict indicates an activation retry reused an XID with
+	// a different enforcement definition. The caller must use ModifyTask.
+	ErrTaskDefinitionConflict = errors.New("task activation definition conflicts with existing task; use ModifyTask")
 	// ErrTaskNotActive indicates the operation requires an active task.
 	ErrTaskNotActive = errors.New("task is not active")
 	// ErrInvalidTask indicates the task parameters are invalid.
@@ -248,6 +251,8 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 
 	// Create a copy to store
 	taskCopy := *task
+	taskCopy.Targets = append([]TargetIdentity(nil), task.Targets...)
+	taskCopy.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
 	taskCopy.ActivatedAt = time.Now()
 	r.generations[task.XID]++
 	taskCopy.ActivationGeneration = r.generations[task.XID]

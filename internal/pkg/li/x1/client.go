@@ -803,7 +803,8 @@ type responseContainer struct {
 
 // rawXML captures raw XML content for deferred unmarshaling.
 type rawXML struct {
-	Inner []byte `xml:",innerxml"`
+	Attrs []xml.Attr `xml:",any,attr"`
+	Inner []byte     `xml:",innerxml"`
 }
 
 // sendQueryRequestWithRetry sends an X1 query request with exponential backoff retry
@@ -929,6 +930,25 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 				ErrorCode:          errResp.ErrorInformation.ErrorCode,
 				ErrorDescription:   errResp.ErrorInformation.ErrorDescription,
 				RequestMessageType: errResp.RequestMessageType,
+			}
+		}
+	}
+	for _, message := range container.RawMessages {
+		for _, attr := range message.Attrs {
+			if attr.Name.Local != "type" || attr.Value != "ErrorResponse" {
+				continue
+			}
+			wrappedXML := []byte("<x1ResponseMessage>" + string(message.Inner) + "</x1ResponseMessage>")
+			var errResp schema.ErrorResponse
+			if err := xml.Unmarshal(wrappedXML, &errResp); err != nil {
+				return fmt.Errorf("failed to parse error response: %w", err)
+			}
+			if errResp.ErrorInformation != nil {
+				return &ADMFError{
+					ErrorCode:          errResp.ErrorInformation.ErrorCode,
+					ErrorDescription:   errResp.ErrorInformation.ErrorDescription,
+					RequestMessageType: errResp.RequestMessageType,
+				}
 			}
 		}
 	}

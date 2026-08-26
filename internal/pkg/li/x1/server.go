@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +64,20 @@ const (
 	MessageTypeModifyTask        = "ModifyTaskRequest"
 	MessageTypeGetTaskDetails    = "GetTaskDetailsRequest"
 	MessageTypePing              = "PingRequest"
+)
+
+// X1 error response request types. These are operation names from the
+// RequestMessageType schema enumeration, not request element/type names.
+const (
+	RequestTypeCreateDestination = "CreateDestination"
+	RequestTypeModifyDestination = "ModifyDestination"
+	RequestTypeRemoveDestination = "RemoveDestination"
+	RequestTypeActivateTask      = "ActivateTask"
+	RequestTypeDeactivateTask    = "DeactivateTask"
+	RequestTypeModifyTask        = "ModifyTask"
+	RequestTypeGetTaskDetails    = "GetTaskDetails"
+	RequestTypePing              = "Ping"
+	RequestTypeExtended          = "ExtendedRequestMessageType"
 )
 
 // Sentinel errors for destination operations.
@@ -834,22 +849,29 @@ func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartEl
 	// Start the X1Response element with ETSI namespace.
 	containerStart := xml.StartElement{
 		Name: xml.Name{Local: "X1Response", Space: etsiX1Namespace},
+		Attr: []xml.Attr{{Name: xml.Name{Local: "xmlns:xsi"}, Value: "http://www.w3.org/2001/XMLSchema-instance"}},
 	}
 	if err := e.EncodeToken(containerStart); err != nil {
 		return err
 	}
 
-	// Marshal each response with appropriate element name
+	// Every response is carried in the element declared by ResponseContainer.
+	// Derived response values identify their concrete schema type using xsi:type.
 	for _, resp := range c.Responses {
-		var elemName string
-		switch resp.(type) {
-		case *schema.ErrorResponse:
-			elemName = "errorResponse"
-		default:
-			elemName = "x1ResponseMessage"
+		respStart := xml.StartElement{Name: xml.Name{Local: "x1ResponseMessage"}}
+		responseType := reflect.TypeOf(resp)
+		if responseType == nil {
+			return errors.New("cannot marshal nil X1 response")
 		}
-
-		respStart := xml.StartElement{Name: xml.Name{Local: elemName}}
+		if responseType.Kind() == reflect.Pointer {
+			responseType = responseType.Elem()
+		}
+		if responseType.Name() != "X1ResponseMessage" {
+			respStart.Attr = append(respStart.Attr, xml.Attr{
+				Name:  xml.Name{Local: "xsi:type"},
+				Value: responseType.Name(),
+			})
+		}
 		if err := e.EncodeElement(resp, respStart); err != nil {
 			return err
 		}
@@ -1603,7 +1625,8 @@ func taskDetailsResponse(task *Task) *schema.TaskDetails {
 		did := schema.UUID(id.String())
 		details.ListOfDIDs.DId = append(details.ListOfDIDs.DId, &did)
 	}
-	mediation := &schema.MediationDetails{DeliveryType: deliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
+	liid := schema.LIID(strings.ReplaceAll(task.XID.String(), "-", ""))
+	mediation := &schema.MediationDetails{LIID: &liid, DeliveryType: mediationDeliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
 	if !task.StartTime.IsZero() {
 		start := formatQualifiedMicrosecondDateTime(task.StartTime)
 		mediation.StartTime = &start
@@ -1624,6 +1647,19 @@ func deliveryTypeResponse(deliveryType DeliveryType) string {
 		return "X3Only"
 	case DeliveryX2andX3:
 		return "X2andX3"
+	default:
+		return ""
+	}
+}
+
+func mediationDeliveryTypeResponse(deliveryType DeliveryType) string {
+	switch deliveryType {
+	case DeliveryX2Only:
+		return "HI2Only"
+	case DeliveryX3Only:
+		return "HI3Only"
+	case DeliveryX2andX3:
+		return "HI2andHI3"
 	default:
 		return ""
 	}
@@ -1675,7 +1711,7 @@ func taskProvisioningStatus(status TaskStatus) string {
 
 func taskFaults(lastError string) *schema.ListOfFaults {
 	if lastError == "" {
-		return nil
+		return &schema.ListOfFaults{}
 	}
 	return &schema.ListOfFaults{UnresolvedFault: []*schema.ErrorInformation{{ErrorCode: ErrorCodeGenericError, ErrorDescription: lastError}}}
 }
@@ -1856,8 +1892,10 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 		transID = reqMsg.X1TransactionId
 	}
 
+	requestType, extension := errorRequestType(messageType)
 	return &schema.ErrorResponse{
-		RequestMessageType: messageType,
+		RequestMessageType:   requestType,
+		ExtensionInformation: extension,
 		ErrorInformation: &schema.ErrorInformation{
 			ErrorCode:        errorCode,
 			ErrorDescription: errorDesc,
@@ -1869,6 +1907,34 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 			Version:          s.config.Version,
 			X1TransactionId:  transID,
 		},
+	}
+}
+
+func errorRequestType(messageType string) (string, *schema.ExtensionInformation) {
+	requestTypes := map[string]string{
+		MessageTypeCreateDestination: RequestTypeCreateDestination,
+		MessageTypeModifyDestination: RequestTypeModifyDestination,
+		MessageTypeRemoveDestination: RequestTypeRemoveDestination,
+		MessageTypeActivateTask:      RequestTypeActivateTask,
+		MessageTypeDeactivateTask:    RequestTypeDeactivateTask,
+		MessageTypeModifyTask:        RequestTypeModifyTask,
+		MessageTypeGetTaskDetails:    RequestTypeGetTaskDetails,
+		MessageTypePing:              RequestTypePing,
+		RequestTypeCreateDestination: RequestTypeCreateDestination,
+		RequestTypeModifyDestination: RequestTypeModifyDestination,
+		RequestTypeRemoveDestination: RequestTypeRemoveDestination,
+		RequestTypeActivateTask:      RequestTypeActivateTask,
+		RequestTypeDeactivateTask:    RequestTypeDeactivateTask,
+		RequestTypeModifyTask:        RequestTypeModifyTask,
+		RequestTypeGetTaskDetails:    RequestTypeGetTaskDetails,
+		RequestTypePing:              RequestTypePing,
+	}
+	if requestType, ok := requestTypes[messageType]; ok {
+		return requestType, nil
+	}
+	return RequestTypeExtended, &schema.ExtensionInformation{
+		ExtensionSpecification:     "TS133128",
+		ExtendedRequestMessageType: messageType,
 	}
 }
 

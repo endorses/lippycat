@@ -2455,8 +2455,8 @@ func TestServer_ErrorResponse_IncludesDetails(t *testing.T) {
 	// Parse the response and verify error details are present
 	body := w.Body.String()
 
-	// Should contain error response element
-	assert.Contains(t, body, "errorResponse")
+	// Errors use the schema-declared response element with a derived type.
+	assert.Contains(t, body, `<x1ResponseMessage xsi:type="ErrorResponse">`)
 
 	// Should contain error information with code and description
 	assert.Contains(t, body, "errorInformation")

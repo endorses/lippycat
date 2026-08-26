@@ -2307,7 +2307,7 @@ func TestServer_RateLimiterCacheExpiresAndRemainsBounded(t *testing.T) {
 func TestServer_DefaultConfig(t *testing.T) {
 	s := NewServer(ServerConfig{}, nil, nil)
 
-	assert.Equal(t, "v1.13.1", s.config.Version)
+	assert.Equal(t, DefaultProtocolVersion, s.config.Version)
 	assert.Equal(t, float64(10), s.config.RateLimitPerIP)
 	assert.Equal(t, 20, s.config.RateLimitBurst)
 	assert.Equal(t, 5*time.Second, s.config.XMLParseTimeout)

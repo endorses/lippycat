@@ -207,51 +207,51 @@ Implementation tasks:
 
 ## 9. Documentation and compatibility updates
 
-- [ ] Update lifecycle documentation to distinguish idempotent retry from
+- [x] Update lifecycle documentation to distinguish idempotent retry from
       explicit reactivation of a tombstone.
-- [ ] Document which fields form protected reactivation identity and which may
+- [x] Document which fields form protected reactivation identity and which may
       be replaced.
-- [ ] Document the non-300 changed-identity response contract.
-- [ ] Document the task-status extension wire format and monitoring semantics.
-- [ ] Update the earlier interoperability plan's implementation-status section
+- [x] Document the non-300 changed-identity response contract.
+- [x] Document the task-status extension wire format and monitoring semantics.
+- [x] Update the earlier interoperability plan's implementation-status section
       so it no longer claims that deactivated tasks always conflict.
-- [ ] Review examples and runbooks that describe deactivate/reactivate recovery
+- [x] Review examples and runbooks that describe deactivate/reactivate recovery
       to ensure they include destination provisioning order and error handling.
 
 ## 10. Verification
 
-- [ ] Run the focused registry, manager, and X1 tests added by this plan.
-- [ ] Run the race-enabled LI suite:
+- [x] Run the focused registry, manager, and X1 tests added by this plan.
+- [x] Run the race-enabled LI suite:
 
 ```text
 go test -race -tags 'all,li' ./internal/pkg/li/...
 ```
 
-- [ ] Run the complete tagged repository suite:
+- [x] Run the complete tagged repository suite:
 
 ```text
 go test -tags 'all,li' ./...
 ```
 
-- [ ] Run vet for the LI packages:
+- [x] Run vet for the LI packages:
 
 ```text
 go vet -tags 'all,li' ./internal/pkg/li/...
 ```
 
-- [ ] Verify that LI code remains excluded from non-LI builds:
+- [x] Verify that LI code remains excluded from non-LI builds:
 
 ```text
 make verify-no-li
 ```
 
-- [ ] Check the final diff for whitespace errors:
+- [x] Check the final diff for whitespace errors:
 
 ```text
 git diff --check
 ```
 
-- [ ] Build the complete, processor-LI, and tap-LI variants to ensure the
+- [x] Build the complete, processor-LI, and tap-LI variants to ensure the
       lifecycle extension and new errors do not leak into or break non-LI
       builds.
 

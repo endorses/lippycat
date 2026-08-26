@@ -287,6 +287,29 @@ Tasks can be modified while active. The following fields are modifiable via `Mod
 
 The XID and StartTime cannot be modified after activation.
 
+#### Idempotent retry and explicit reactivation
+
+Repeating an equivalent `ActivateTask` while a task is active or pending is an
+idempotent retry. It does not reinstall filters, advance the activation
+generation, or change the scheduled start boundary.
+
+A deactivated task is retained temporarily as a tombstone and cannot resume
+automatically. An explicit, authenticated `ActivateTask` can reactivate it only
+when the protected interception identity is unchanged: the XID, delivery type,
+and canonical set of target type/value pairs must match. Target order and exact
+duplicates are insignificant. The new request may replace destination IDs,
+mediation start and end times, and lifecycle options, subject to normal current
+validation. Suspended and failed tasks remain ineligible for this operation.
+
+Provision every replacement destination before reactivation and verify that
+each supports the requested delivery type. On success, the processor preserves
+the old deactivation in audit history, advances the activation generation, and
+installs only the new filters. On validation or installation failure, the
+tombstone remains non-enforcing and unchanged. If the response is lost, use
+`GetTaskDetails` before retrying: an identical active/pending request is safe to
+repeat; a `deactivated` result requires another explicit activation after the
+underlying error is corrected.
+
 ### Delivery Types
 
 Each task specifies what information to deliver:
@@ -392,7 +415,7 @@ When the processor cannot fulfil an X1 request, it returns a structured error:
 
 | Code | Name | Description |
 |------|------|-------------|
-| 100 | GenericError | General processing error |
+| 100 | GenericError | General processing error; retained reactivation identity differs |
 | 101 | RequestSyntaxError | Invalid XML in request |
 | 300 | XIDAlreadyExists | A task with this XID is already active |
 | 301 | XIDNotFound | No task found for the given XID |
@@ -401,6 +424,13 @@ When the processor cannot fulfil an X1 request, it returns a structured error:
 | 400 | DeliveryNotPossible | Cannot reach MDF for delivery |
 | 401 | TargetNotSupported | Target identifier type not supported |
 | 402 | DeliveryTypeNotSupported | Requested delivery type not available |
+
+When reactivation changes a protected target or delivery type, code 100 has the
+stable description `retained task's interception identity differs` followed by
+the XID. This is intentionally distinct from code 300: code 300 continues to
+mean a conflicting definition for an active or pending XID. Operators should
+investigate a code-100 identity mismatch rather than changing the interception
+target under the retained XID.
 
 ## X2/X3 Delivery
 

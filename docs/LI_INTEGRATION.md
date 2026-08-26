@@ -251,7 +251,7 @@ Requests use XML per ETSI TS 103 221-1 schema:
 
 | Code | Name | Description |
 |------|------|-------------|
-| 100 | GenericError | General error |
+| 100 | GenericError | General error; reactivation identity differs from retained task |
 | 101 | RequestSyntaxError | Invalid XML |
 | 300 | XIDAlreadyExists | Task XID exists |
 | 301 | XIDNotFound | Task XID not found |
@@ -260,6 +260,20 @@ Requests use XML per ETSI TS 103 221-1 schema:
 | 400 | DeliveryNotPossible | Cannot deliver to MDF |
 | 401 | TargetNotSupported | Unsupported target type |
 | 402 | DeliveryTypeNotSupported | Unsupported delivery type |
+
+A repeated `ActivateTask` for an equivalent active or pending task is an
+idempotent retry: it returns success without reinstalling filters or changing
+the activation generation. A new, authenticated `ActivateTask` may reactivate
+a retained deactivated task (tombstone) only when its protected interception
+identity is unchanged. The protected identity is the XID, delivery type, and
+canonical set of target type/value pairs; target order and exact duplicates do
+not matter. Destination IDs, mediation start/end times, and lifecycle options
+may be replaced, but the complete replacement must pass current validation.
+
+If a retained task's protected identity differs, activation fails closed with
+error 100 and the stable description `retained task's interception identity
+differs` (followed by the XID). It is deliberately not error 300. Suspended and
+failed tasks cannot be reactivated with `ActivateTask`.
 
 ## X2/X3 Protocol (Binary TLV)
 
@@ -372,6 +386,25 @@ replacement for `provisioningStatus`. Consumers that do not recognize the
 lippycat namespace may ignore the foreign element as permitted by the ETSI
 extension point. No fault text or other internal operational detail is carried
 in this extension.
+
+### Explicit tombstone reactivation
+
+Deactivation removes the task's enforcement filters but retains a tombstone for
+audit and retry safety. It never becomes enforcing through startup,
+reconciliation, or tombstone maintenance. Reactivation requires an explicit,
+authenticated `ActivateTask` with the same protected identity described under
+[X1 Error Codes](#x1-error-codes). A successful reactivation increments the
+activation generation, preserves the prior deactivated task in audit history,
+and installs only the replacement task's filters.
+
+Provision destinations before sending the reactivation. A missing destination
+or an incompatible task/destination delivery combination rejects the request
+without changing the tombstone or filters. After an uncertain response, query
+`GetTaskDetails`: retry the identical request only when the state is `pending`
+or `active`; if it remains `deactivated`, correct the validation error and send
+a new explicit activation. Treat error 100 with the retained-identity
+description as an authorization/identity mismatch requiring operator review,
+not as a cue to modify the target under the retained XID.
 
 ### Implicit Deactivation
 

@@ -23,24 +23,26 @@ type LIConfig struct {
 	ADMFTLSCAFile   string
 	ADMFKeepalive   string
 	// Delivery (X2/X3) TLS
-	DeliveryTLSCertFile        string
-	DeliveryTLSKeyFile         string
-	DeliveryTLSCAFile          string
-	DeliveryTLSPinnedCert      []string
-	DeliveryQueueSize          int
-	DeliverySendTimeout        time.Duration
-	DeliveryInitialBackoff     time.Duration
-	DeliveryMaxBackoff         time.Duration
-	DeliveryKeepAliveIdle      time.Duration
-	DeliveryKeepAliveInterval  time.Duration
-	DeliveryKeepAliveCount     int
-	DeliveryShutdownTimeout    time.Duration
-	DeliveryX2KeepaliveEnabled bool
-	DeliveryX2KeepaliveTimeP1  time.Duration
-	DeliveryX2KeepaliveTimeP2  time.Duration
-	DeliveryX3KeepaliveEnabled bool
-	DeliveryX3KeepaliveTimeP1  time.Duration
-	DeliveryX3KeepaliveTimeP2  time.Duration
+	DeliveryTLSCertFile                   string
+	DeliveryTLSKeyFile                    string
+	DeliveryTLSCAFile                     string
+	DeliveryTLSPinnedCert                 []string
+	DeliveryQueueSize                     int
+	DeliverySendTimeout                   time.Duration
+	DeliveryInitialBackoff                time.Duration
+	DeliveryMaxBackoff                    time.Duration
+	DeliveryKeepAliveIdle                 time.Duration
+	DeliveryKeepAliveInterval             time.Duration
+	DeliveryKeepAliveCount                int
+	DeliveryShutdownTimeout               time.Duration
+	DeliveryX2KeepaliveEnabled            bool
+	DeliveryX2KeepaliveTimeP1             time.Duration
+	DeliveryX2KeepaliveTimeP2             time.Duration
+	DeliveryX3KeepaliveEnabled            bool
+	DeliveryX3KeepaliveTimeP1             time.Duration
+	DeliveryX3KeepaliveTimeP2             time.Duration
+	DeliveryX2AcknowledgeInboundKeepalive bool
+	DeliveryX3AcknowledgeInboundKeepalive bool
 	// ADMF state sync
 	ADMFSyncOnStartup     bool
 	ADMFSyncTimeout       time.Duration

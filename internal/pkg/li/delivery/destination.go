@@ -156,6 +156,11 @@ type DestinationConfig struct {
 	X3KeepaliveEnabled bool
 	X3KeepaliveTimeP1  time.Duration
 	X3KeepaliveTimeP2  time.Duration
+	// X2/X3AcknowledgeInboundKeepalive enable the optional responder role. When
+	// enabled, a valid inbound Keepalive is answered on the same interface and
+	// TLS association with an ACK carrying the identical sequence number.
+	X2AcknowledgeInboundKeepalive bool
+	X3AcknowledgeInboundKeepalive bool
 	// DeliveryFault is invoked after TIME_P2 forces a disconnect. The LI
 	// manager wires this to the X1 delivery-error reporting path.
 	DeliveryFault func(did uuid.UUID, err error)
@@ -257,14 +262,25 @@ type InterfaceKeepaliveStats struct {
 	LastValidACK    time.Time
 	ACKAge          time.Duration
 	Timeouts        uint64
+	Sent            uint64
+	Acknowledged    uint64
+	Disconnected    uint64
+	Reconnected     uint64
+	Inbound         uint64
+	InboundACKed    uint64
+	Unexpected      uint64
+	Malformed       uint64
 	ReconnectReason string
 }
 
 type connectionRuntime struct {
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	iface     PDUType
-	keepalive *interfaceKeepaliveState
+	writeMu              sync.Mutex
+	mu                   sync.Mutex
+	iface                PDUType
+	keepalive            *interfaceKeepaliveState
+	ackInbound           bool
+	lastUnexpectedLog    time.Time
+	suppressedUnexpected uint64
 }
 
 type interfaceKeepaliveState struct {
@@ -814,7 +830,15 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	value, runtimeOK := m.connectionRuntime.Load(conn)
 	pool := state.pool
 	if runtimeOK {
-		pool = state.interfacePools[value.(*connectionRuntime).iface]
+		runtime := value.(*connectionRuntime)
+		pool = state.interfacePools[runtime.iface]
+		if runtime.keepalive.enabled {
+			if runtime.iface == PDUTypeX2 {
+				state.stats.X2Keepalive.Disconnected++
+			} else {
+				state.stats.X3Keepalive.Disconnected++
+			}
+		}
 	}
 	put := pool.put(pooled)
 	state.mu.RUnlock()
@@ -1130,7 +1154,11 @@ func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn, if
 	} else {
 		keepalive.enabled, keepalive.timeP1, keepalive.timeP2 = m.config.X3KeepaliveEnabled, m.config.X3KeepaliveTimeP1, m.config.X3KeepaliveTimeP2
 	}
-	runtime := &connectionRuntime{iface: iface, keepalive: keepalive}
+	ackInbound := m.config.X2AcknowledgeInboundKeepalive
+	if iface == PDUTypeX3 {
+		ackInbound = m.config.X3AcknowledgeInboundKeepalive
+	}
+	runtime := &connectionRuntime{iface: iface, keepalive: keepalive, ackInbound: ackInbound}
 	m.connectionRuntime.Store(conn, runtime)
 	m.updateKeepaliveStatsForState(state, iface, keepalive, "")
 }
@@ -1162,27 +1190,74 @@ func (m *Manager) watchConnection(did uuid.UUID, conn *tls.Conn) {
 }
 
 func (m *Manager) handleInboundPDU(did uuid.UUID, conn *tls.Conn, pdu *x2x3.PDU) {
-	if pdu.Header.Type != x2x3.PDUTypeKeepaliveAck {
-		return
-	}
-	seq, err := pdu.KeepaliveSequence()
-	if err != nil {
-		logger.Warn("invalid MDF keepalive acknowledgement", "did", did, "error", err)
-		return
-	}
 	value, ok := m.connectionRuntime.Load(conn)
 	if !ok {
 		return
 	}
 	runtime := value.(*connectionRuntime)
+	if pdu.Header.Type != x2x3.PDUTypeKeepaliveAck && pdu.Header.Type != x2x3.PDUTypeKeepalive {
+		m.recordUnexpectedInbound(did, runtime, false, fmt.Sprintf("unexpected control PDU type %s", pdu.Header.Type))
+		return
+	}
+	seq, err := pdu.KeepaliveSequence()
+	if err != nil {
+		m.recordUnexpectedInbound(did, runtime, true, err.Error())
+		return
+	}
+
+	runtime.mu.Lock()
+	state := runtime.keepalive
+	if pdu.Header.Type == x2x3.PDUTypeKeepaliveAck {
+		if _, exists := state.outstanding[seq]; !exists {
+			runtime.mu.Unlock()
+			m.recordUnexpectedInbound(did, runtime, false, fmt.Sprintf("unexpected keepalive ACK sequence %d", seq))
+			return
+		}
+		delete(state.outstanding, seq)
+		state.lastACK = time.Now()
+		m.incrementKeepaliveStat(did, runtime.iface, func(stats *InterfaceKeepaliveStats) { stats.Acknowledged++ })
+		m.updateKeepaliveStats(did, runtime.iface, state, "")
+		runtime.mu.Unlock()
+		return
+	}
+	m.incrementKeepaliveStat(did, runtime.iface, func(stats *InterfaceKeepaliveStats) { stats.Inbound++ })
+	ackInbound := runtime.ackInbound
+	runtime.mu.Unlock()
+	if !ackInbound {
+		m.recordUnexpectedInbound(did, runtime, false, fmt.Sprintf("inbound keepalive sequence %d while acknowledgement is disabled", seq))
+		return
+	}
+	frame, err := x2x3.NewKeepaliveAckPDU(seq).MarshalBinary()
+	if err != nil {
+		m.recordUnexpectedInbound(did, runtime, true, err.Error())
+		return
+	}
+	if err := m.writeFrame(conn, frame, m.config.WriteTimeout); err != nil {
+		m.InvalidateConnection(did, conn)
+		return
+	}
+	m.incrementKeepaliveStat(did, runtime.iface, func(stats *InterfaceKeepaliveStats) { stats.InboundACKed++ })
+}
+
+// recordUnexpectedInbound keeps protocol anomalies observable without allowing
+// a noisy peer to amplify logs. Counters are never rate limited.
+func (m *Manager) recordUnexpectedInbound(did uuid.UUID, runtime *connectionRuntime, malformed bool, reason string) {
+	m.incrementKeepaliveStat(did, runtime.iface, func(stats *InterfaceKeepaliveStats) {
+		stats.Unexpected++
+		if malformed {
+			stats.Malformed++
+		}
+	})
 	runtime.mu.Lock()
 	now := time.Now()
-	state := runtime.keepalive
-	if _, exists := state.outstanding[seq]; exists {
-		delete(state.outstanding, seq)
-		state.lastACK = now
-		m.updateKeepaliveStats(did, runtime.iface, state, "")
+	if runtime.lastUnexpectedLog.IsZero() || now.Sub(runtime.lastUnexpectedLog) >= 30*time.Second {
+		suppressed := runtime.suppressedUnexpected
+		runtime.lastUnexpectedLog, runtime.suppressedUnexpected = now, 0
+		runtime.mu.Unlock()
+		logger.Warn("unexpected MDF control PDU", "did", did, "interface", runtime.iface, "reason", reason, "suppressed", suppressed)
+		return
 	}
+	runtime.suppressedUnexpected++
 	runtime.mu.Unlock()
 }
 
@@ -1216,7 +1291,7 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 			}
 			if timeoutErr != nil {
 				m.updateKeepaliveStats(did, iface, state, timeoutErr.Error())
-			} else if state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1 {
+			} else if len(state.outstanding) == 0 && (state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1) {
 				seq := state.next
 				state.next++
 				pdu := x2x3.NewKeepalivePDUWithSequence(seq)
@@ -1226,6 +1301,7 @@ func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 					state.outstanding[seq] = now
 					state.lastSequence = seq
 					state.lastSent = now
+					m.incrementKeepaliveStat(did, iface, func(stats *InterfaceKeepaliveStats) { stats.Sent++ })
 					m.updateKeepaliveStats(did, iface, state, "")
 				}
 			}
@@ -1277,6 +1353,7 @@ func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
 			continue
 		}
 		m.registerConnection(state, conn, iface)
+		m.incrementKeepaliveStat(did, iface, func(stats *InterfaceKeepaliveStats) { stats.Reconnected++ })
 		m.watchConnection(did, conn)
 		state.mu.RLock()
 		pool := state.interfacePools[iface]
@@ -1300,6 +1377,22 @@ func (m *Manager) updateKeepaliveStats(did uuid.UUID, iface PDUType, keepalive *
 	m.updateKeepaliveStatsForState(state, iface, keepalive, reason)
 }
 
+func (m *Manager) incrementKeepaliveStat(did uuid.UUID, iface PDUType, update func(*InterfaceKeepaliveStats)) {
+	m.mu.RLock()
+	state, ok := m.destinations[did]
+	m.mu.RUnlock()
+	if !ok {
+		return
+	}
+	state.mu.Lock()
+	if iface == PDUTypeX2 {
+		update(&state.stats.X2Keepalive)
+	} else {
+		update(&state.stats.X3Keepalive)
+	}
+	state.mu.Unlock()
+}
+
 func (m *Manager) updateKeepaliveStatsForState(state *destinationState, iface PDUType, keepalive *interfaceKeepaliveState, reason string) {
 	stats := InterfaceKeepaliveStats{Enabled: keepalive.enabled, TimeP1: keepalive.timeP1, TimeP2: keepalive.timeP2, LastSequence: keepalive.lastSequence, LastSent: keepalive.lastSent, LastValidACK: keepalive.lastACK, ReconnectReason: reason}
 	if !keepalive.lastACK.IsZero() {
@@ -1307,7 +1400,8 @@ func (m *Manager) updateKeepaliveStatsForState(state *destinationState, iface PD
 	}
 	state.mu.Lock()
 	if iface == PDUTypeX2 {
-		stats.Timeouts = state.stats.X2Keepalive.Timeouts
+		previous := state.stats.X2Keepalive
+		stats.Timeouts, stats.Sent, stats.Acknowledged, stats.Disconnected, stats.Reconnected, stats.Inbound, stats.InboundACKed, stats.Unexpected, stats.Malformed = previous.Timeouts, previous.Sent, previous.Acknowledged, previous.Disconnected, previous.Reconnected, previous.Inbound, previous.InboundACKed, previous.Unexpected, previous.Malformed
 		if reason == "" {
 			stats.ReconnectReason = state.stats.X2Keepalive.ReconnectReason
 		}
@@ -1316,7 +1410,8 @@ func (m *Manager) updateKeepaliveStatsForState(state *destinationState, iface PD
 		}
 		state.stats.X2Keepalive = stats
 	} else {
-		stats.Timeouts = state.stats.X3Keepalive.Timeouts
+		previous := state.stats.X3Keepalive
+		stats.Timeouts, stats.Sent, stats.Acknowledged, stats.Disconnected, stats.Reconnected, stats.Inbound, stats.InboundACKed, stats.Unexpected, stats.Malformed = previous.Timeouts, previous.Sent, previous.Acknowledged, previous.Disconnected, previous.Reconnected, previous.Inbound, previous.InboundACKed, previous.Unexpected, previous.Malformed
 		if reason == "" {
 			stats.ReconnectReason = state.stats.X3Keepalive.ReconnectReason
 		}

@@ -462,6 +462,8 @@ func runProcess(cmd *cobra.Command, args []string) error {
 		config.LIDeliveryX3KeepaliveEnabled = liConfig.DeliveryX3KeepaliveEnabled
 		config.LIDeliveryX3KeepaliveTimeP1 = liConfig.DeliveryX3KeepaliveTimeP1
 		config.LIDeliveryX3KeepaliveTimeP2 = liConfig.DeliveryX3KeepaliveTimeP2
+		config.LIDeliveryX2AcknowledgeInboundKeepalive = liConfig.DeliveryX2AcknowledgeInboundKeepalive
+		config.LIDeliveryX3AcknowledgeInboundKeepalive = liConfig.DeliveryX3AcknowledgeInboundKeepalive
 		config.LIDeliveryShutdownTimeout = liConfig.DeliveryShutdownTimeout
 		config.LIADMFSyncOnStartup = liConfig.ADMFSyncOnStartup
 		config.LIADMFSyncTimeout = liConfig.ADMFSyncTimeout

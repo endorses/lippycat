@@ -302,18 +302,38 @@ independently per interface. lippycat must not assume that every conforming MDF
 uses or acknowledges keepalives unless required by the negotiated/configured
 profile.
 
-- [ ] Keep outbound X2 and X3 keepalive disabled by default.
-- [ ] Allow each interface to be enabled and monitored independently.
-- [ ] Document the required acknowledgement behavior and timeout consequences
+- [x] Keep outbound X2 and X3 keepalive disabled by default.
+- [x] Allow each interface to be enabled and monitored independently.
+- [x] Document the required acknowledgement behavior and timeout consequences
       next to the flags.
-- [ ] When enabled, validate acknowledgement type and sequence and expose sent,
+- [x] When enabled, validate acknowledgement type and sequence and expose sent,
       acknowledged, timed-out, disconnected, and reconnected counters.
-- [ ] Treat unexpected inbound control PDUs as observable protocol events using
+- [x] Treat unexpected inbound control PDUs as observable protocol events using
       bounded metrics or rate-limited logs; do not create log amplification.
-- [ ] Decide separately whether to acknowledge an inbound Keepalive. If enabled,
+- [x] Decide separately whether to acknowledge an inbound Keepalive. If enabled,
       echo its sequence and test simultaneous bidirectional keepalive loops.
-- [ ] Add socket-backed conformance tests with peers that acknowledge, ignore,
+- [x] Add socket-backed conformance tests with peers that acknowledge, ignore,
       delay, duplicate, and send malformed acknowledgements.
+
+### 5.1 Implementation status
+
+Implemented on 2026-08-26:
+
+- X2 and X3 application keepalive remain disabled by default and have separate
+  enablement, TIME_P1, TIME_P2, responder, state, connection, and statistics.
+- Only one keepalive may be outstanding per interface, preventing an ignoring
+  peer from blocking a later write before the acknowledgement deadline is
+  enforced.
+- ACK PDUs are accepted only on the originating TLS association and only when
+  their single sequence attribute matches an outstanding request.
+- Per-interface statistics expose sent, acknowledged, timed-out, disconnected,
+  reconnected, inbound, inbound-acknowledged, unexpected, and malformed events.
+- Unexpected control PDUs increment bounded-width counters while warnings are
+  rate-limited per connection.
+- Inbound acknowledgement is independently opt-in for X2 and X3 and echoes the
+  received sequence on the same association. Socket-backed tests cover
+  acknowledging, ignoring, delaying, duplicating, malformed, and simultaneous
+  bidirectional peers.
 
 ## 6. Repair the current LI test baseline
 

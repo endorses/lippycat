@@ -42,6 +42,28 @@ new sequence contexts at zero; operators must confirm that the MDF treats a new
 connection after a POI restart as a new sequence epoch because TS 103 221-2 does
 not define a sequence-reset signal.
 
+### X2/X3 application keepalive
+
+Application keepalive is disabled by default and is configured independently
+for X2 and X3. Enabling `--li-delivery-x2-keepalive` or
+`--li-delivery-x3-keepalive` requires the MDF to return a KeepaliveAck on the
+same TLS association with the identical sequence number before that
+interface's TIME_P2. A missing, malformed, or wrong-sequence acknowledgement
+does not refresh liveness; expiry disconnects and reconnects only that
+interface and reports a delivery fault.
+
+Inbound keepalive acknowledgement is a separate, disabled-by-default role.
+Enable it per interface with
+`--li-delivery-x2-ack-inbound-keepalive` or
+`--li-delivery-x3-ack-inbound-keepalive`. A valid request is then answered on
+the same association with its sequence echoed. This allows bidirectional
+keepalive only when the MDF profile has been verified to support it.
+
+Per-destination X2 and X3 statistics expose sent, acknowledged, timed-out,
+disconnected, reconnected, inbound, inbound-acknowledged, unexpected, and
+malformed control-PDU counters. Unexpected control traffic is counted without
+limit while its warning log is rate-limited.
+
 ## Overview
 
 lippycat implements the following ETSI interfaces for lawful interception:

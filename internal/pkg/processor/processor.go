@@ -97,24 +97,26 @@ type Config struct {
 	LIADMFReconcileInterval time.Duration // Periodic reconciliation interval (0 = disabled)
 	LIStateFile             string        // Atomic LI lifecycle persistence file
 	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
-	LIDeliveryTLSCertFile        string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
-	LIDeliveryTLSKeyFile         string   // Path to client TLS key for X2/X3 delivery
-	LIDeliveryTLSCAFile          string   // Path to CA certificate for verifying MDF servers
-	LIDeliveryTLSPinnedCert      []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
-	LIDeliveryQueueSize          int
-	LIDeliverySendTimeout        time.Duration
-	LIDeliveryInitialBackoff     time.Duration
-	LIDeliveryMaxBackoff         time.Duration
-	LIDeliveryKeepAliveIdle      time.Duration
-	LIDeliveryKeepAliveInterval  time.Duration
-	LIDeliveryKeepAliveCount     int
-	LIDeliveryX2KeepaliveEnabled bool
-	LIDeliveryX2KeepaliveTimeP1  time.Duration
-	LIDeliveryX2KeepaliveTimeP2  time.Duration
-	LIDeliveryX3KeepaliveEnabled bool
-	LIDeliveryX3KeepaliveTimeP1  time.Duration
-	LIDeliveryX3KeepaliveTimeP2  time.Duration
-	LIDeliveryShutdownTimeout    time.Duration
+	LIDeliveryTLSCertFile                   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
+	LIDeliveryTLSKeyFile                    string   // Path to client TLS key for X2/X3 delivery
+	LIDeliveryTLSCAFile                     string   // Path to CA certificate for verifying MDF servers
+	LIDeliveryTLSPinnedCert                 []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
+	LIDeliveryQueueSize                     int
+	LIDeliverySendTimeout                   time.Duration
+	LIDeliveryInitialBackoff                time.Duration
+	LIDeliveryMaxBackoff                    time.Duration
+	LIDeliveryKeepAliveIdle                 time.Duration
+	LIDeliveryKeepAliveInterval             time.Duration
+	LIDeliveryKeepAliveCount                int
+	LIDeliveryX2KeepaliveEnabled            bool
+	LIDeliveryX2KeepaliveTimeP1             time.Duration
+	LIDeliveryX2KeepaliveTimeP2             time.Duration
+	LIDeliveryX3KeepaliveEnabled            bool
+	LIDeliveryX3KeepaliveTimeP1             time.Duration
+	LIDeliveryX3KeepaliveTimeP2             time.Duration
+	LIDeliveryX2AcknowledgeInboundKeepalive bool
+	LIDeliveryX3AcknowledgeInboundKeepalive bool
+	LIDeliveryShutdownTimeout               time.Duration
 	// Virtual interface settings
 	VirtualInterface      bool   // Enable virtual network interface
 	VirtualInterfaceName  string // Virtual interface name

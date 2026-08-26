@@ -216,6 +216,8 @@ func (p *Processor) initLIManager() {
 		destConfig.X3KeepaliveEnabled = p.config.LIDeliveryX3KeepaliveEnabled
 		destConfig.X3KeepaliveTimeP1 = p.config.LIDeliveryX3KeepaliveTimeP1
 		destConfig.X3KeepaliveTimeP2 = p.config.LIDeliveryX3KeepaliveTimeP2
+		destConfig.X2AcknowledgeInboundKeepalive = p.config.LIDeliveryX2AcknowledgeInboundKeepalive
+		destConfig.X3AcknowledgeInboundKeepalive = p.config.LIDeliveryX3AcknowledgeInboundKeepalive
 		destConfig.DeliveryFault = func(did uuid.UUID, err error) { p.liManager.ReportDeliveryError(did, 1, err.Error()) }
 		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
 			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert

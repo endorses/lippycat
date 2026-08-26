@@ -171,6 +171,22 @@ func TestStartupSync_RemovesFilterWithNoADMFTask(t *testing.T) {
 	requireTaskActive(t, m, liveXID)
 }
 
+func TestStartupSync_RetainsAmbiguousLegacyFilterOwnership(t *testing.T) {
+	prefix := "a1b2c3d4"
+	xidA := uuid.MustParse(prefix + "-0000-4000-8000-000000000001")
+	xidB := uuid.MustParse(prefix + "-0000-4000-8000-000000000002")
+	legacyID := "li-" + prefix + "-0"
+	store := newStubFilterStore(legacyID)
+
+	m := admfServing(t, store, 1, sipURITask(xidA), sipURITask(xidB))
+	m.config.SyncOnStartup = true
+	require.NoError(t, m.Start())
+	defer m.Stop()
+
+	assert.True(t, store.has(legacyID), "ambiguous legacy ownership must fail closed")
+	assert.NotContains(t, store.deletes, legacyID)
+}
+
 // An orphaned task must be torn down, not merely logged.
 func TestReconcile_DeactivatesOrphanedTask(t *testing.T) {
 	liveXID := uuid.New()

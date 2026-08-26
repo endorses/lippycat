@@ -125,26 +125,55 @@ additive schema compatibility but unsafe when an ignored element changes what
 traffic may be intercepted or delivered. Revision acceptance must therefore be
 followed by explicit capability validation.
 
-- [ ] Define a single capability-validation layer for `ActivateTask`,
+- [x] Define a single capability-validation layer for `ActivateTask`,
       `ModifyTask`, destination operations, and supported generic-object
       references.
-- [ ] Reject target identifier choices that cannot be converted into an exact
+- [x] Reject target identifier choices that cannot be converted into an exact
       lippycat filter.
-- [ ] Reject delivery types or destination configurations that cannot produce
+- [x] Reject delivery types or destination configurations that cannot produce
       the requested X2/X3 behavior.
-- [ ] Reject non-empty policy references whose semantics are not implemented;
+- [x] Reject non-empty policy references whose semantics are not implemented;
       never acknowledge them and then ignore them.
-- [ ] Detect multiple populated members of XSD choice structures and reject the
+- [x] Detect multiple populated members of XSD choice structures and reject the
       request rather than selecting one by implementation order.
-- [ ] Validate all targets before changing registry or filter state.
-- [ ] Return a precise X1 error that distinguishes invalid syntax, unsupported
+- [x] Validate all targets before changing registry or filter state.
+- [x] Return a precise X1 error that distinguishes invalid syntax, unsupported
       capability, missing destination, and conflicting task state.
-- [ ] Maintain a tested capability matrix mapping each accepted X1 element to
+- [x] Maintain a tested capability matrix mapping each accepted X1 element to
       `supported`, `rejected`, or `response-only` behavior.
 
 Tests must include conforming documents that use optional fields introduced at
 each revision boundary. The expected result may be success or an explicit
 unsupported-capability error, but never silent omission.
+
+### 2.1 Implementation status
+
+Implemented on 2026-08-26:
+
+- `internal/pkg/li/x1/capabilities.go` is the shared fail-closed validation
+  layer for task and destination requests.
+- Supported target choices are validated for an exact filter representation;
+  known unsupported choices, policy references, service scoping, and
+  enforcement-affecting extensions are rejected explicitly.
+- Target, delivery-address, IP-address, and port XSD choices reject zero or
+  multiple populated members where exactly one is required.
+- Destination delivery declarations and requested task delivery are checked
+  for compatible X2/X3 capabilities before activation or modification.
+- Registry modification validates a complete prospective task before mutating
+  live state, preventing partial updates on validation failure.
+- Capability-matrix tests are in `internal/pkg/li/x1/capabilities_test.go`, and
+  registry-level destination enforcement is covered by
+  `internal/pkg/li/capability_validation_test.go`.
+
+Verification:
+
+```text
+go test -race -tags 'all li' ./internal/pkg/li/...
+```
+
+The complete race-enabled LI suite passes. Schema-derived conforming document
+fixtures for every individual revision boundary remain desirable as additional
+coverage when authoritative fixtures are added to the repository.
 
 ## 3. Make task activation idempotent
 

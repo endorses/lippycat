@@ -99,6 +99,10 @@ Primary ETSI references:
       range.
 - [x] Assert mismatch observability without per-request log amplification.
 
+Audit note (2026-08-26): the current boundary test sends structurally empty
+requests and asserts only that they do not fail revision validation. It does not
+exercise valid oldest/newest requests through their operation handlers.
+
 ### 1.4 Future revision procedure
 
 A future revision is not added merely because its XML unmarshals. Before
@@ -171,9 +175,12 @@ Verification:
 go test -race -tags 'all li' ./internal/pkg/li/...
 ```
 
-The complete race-enabled LI suite passes. Schema-derived conforming document
-fixtures for every individual revision boundary remain desirable as additional
-coverage when authoritative fixtures are added to the repository.
+The post-implementation remediation now rejects mediation-level LIID, delivery
+type, and DID overrides rather than silently ignoring them. Reflection-backed
+matrix tests require every generated task, mediation, destination, and target
+field to retain an explicit classification when the schema model changes.
+Valid request fixtures exercise every implemented operation at both accepted
+revision boundaries.
 
 ## 3. Make task activation idempotent
 
@@ -245,6 +252,11 @@ Implemented on 2026-08-26:
 - Tests cover reordered and duplicate values, every definition field,
   concurrency, state restoration, filter calls, generations, persistence, and
   lifecycle-state conflicts.
+
+Post-audit remediation preserves `ErrTaskDefinitionConflict` through the X1
+adapter and returns a response directing the ADMF to `ModifyTask`. Restoration
+coverage now includes both pending and active durable state; active state is
+first re-confirmed and armed by the ADMF, then reasserted without side effects.
 
 Verification:
 
@@ -335,6 +347,12 @@ Implemented on 2026-08-26:
   acknowledging, ignoring, delaying, duplicating, malformed, and simultaneous
   bidirectional peers.
 
+Post-audit remediation counts per-interface disconnections on connection
+invalidation, not healthy pool return, and counts interface reconnection only
+after a replacement association is registered. `TIME_P1` and `TIME_P2` now use
+deadline-based timers that are rescheduled immediately when a valid ACK changes
+the next deadline.
+
 ## 6. Repair the current LI test baseline
 
 The race-enabled LI suite currently fails because
@@ -349,6 +367,10 @@ The race-enabled LI suite currently fails because
       that permits local listeners.
 - [x] Require the complete race-enabled LI suite to pass before marking this
       plan complete.
+
+The published integration guide now documents the inclusive
+V1.13.1-through-V1.22.1 verified compatibility window and distinguishes it from
+a general semantic-version compatibility promise.
 
 ## 7. Carry-over verification
 
@@ -405,3 +427,23 @@ This plan is complete when:
    observable when enabled.
 6. The full race-enabled LI suite passes, including socket-backed lifecycle and
    delivery cases.
+
+## 9. Post-implementation audit (2026-08-26)
+
+Verdict after remediation: **complete for the approved V1.13.1-through-V1.22.1
+scope**. The full race-enabled LI suite passes when local loopback listeners are
+permitted:
+
+```text
+GOCACHE=/tmp/lippycat-go-cache go test -race -tags 'all,li' ./internal/pkg/li/...
+```
+
+All six audit blockers are remediated: mediation overrides fail closed;
+keepalive accounting and deadline scheduling are corrected; activation
+conflicts retain `ModifyTask` guidance; the capability matrix is exhaustive for
+the generated request model; valid boundary fixtures and restored-active
+idempotency are covered; and the published compatibility range is accurate.
+
+Intentionally deferred work remains outside this completion boundary: raw-IP
+flow/IRI modeling and acceptance of X1 V1.23.1 or later still require the future
+procedures described in sections 1.4 and 4.

@@ -173,6 +173,37 @@ func TestActivateTaskRetryAfterPendingRestoration(t *testing.T) {
 	assert.Empty(t, pusher.deletes)
 }
 
+func TestActivateTaskRetryAfterActiveRestoration(t *testing.T) {
+	stateFile := t.TempDir() + "/li-state.json"
+	m1, _, dids := newIdempotencyManager(t, stateFile)
+	task := idempotencyTask(uuid.New(), dids, time.Time{})
+	require.NoError(t, m1.ActivateTask(task))
+
+	pusher := &mockFilterPusher{}
+	m2 := NewManager(ManagerConfig{Enabled: true, FilterPusher: pusher, StateFile: stateFile}, nil)
+	require.NoError(t, m2.Start())
+	t.Cleanup(m2.Stop)
+	// Active durable state remains disarmed until the ADMF reasserts it. The
+	// first activation confirms and re-arms it; the second is the idempotent
+	// retry whose side effects are audited below.
+	require.NoError(t, m2.ActivateTask(cloneActivationTask(task)))
+	beforeUpdates, beforeDeletes := len(pusher.updates), len(pusher.deletes)
+	beforeBytes, err := os.ReadFile(stateFile)
+	require.NoError(t, err)
+	before, err := m2.GetTaskDetails(task.XID)
+	require.NoError(t, err)
+
+	require.NoError(t, m2.ActivateTask(cloneActivationTask(task)))
+	after, err := m2.GetTaskDetails(task.XID)
+	require.NoError(t, err)
+	afterBytes, err := os.ReadFile(stateFile)
+	require.NoError(t, err)
+	assert.Equal(t, before, after)
+	assert.Equal(t, beforeBytes, afterBytes)
+	assert.Len(t, pusher.updates, beforeUpdates)
+	assert.Len(t, pusher.deletes, beforeDeletes)
+}
+
 func TestActivateTaskClosedLifecycleStatesConflict(t *testing.T) {
 	for _, status := range []TaskStatus{TaskStatusSuspended, TaskStatusFailed, TaskStatusDeactivated} {
 		t.Run(status.String(), func(t *testing.T) {

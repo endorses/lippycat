@@ -5,8 +5,11 @@ This guide covers the deployment and operation of lippycat's ETSI X1/X2/X3 lawfu
 ## X1 version compatibility
 
 lippycat declares ETSI TS 103 221-1 `v1.22.1`, matching the bundled
-`TS_103_221_01.xsd` schema. It accepts `v1.13.1` during migration and rejects
-other revisions with an explicit X1 request-syntax error.
+`TS_103_221_01.xsd` schema. It accepts the verified inclusive compatibility
+window from `v1.13.1` through `v1.22.1` (with or without the lowercase `v`
+prefix). Malformed revisions and revisions outside that window are rejected
+with an explicit X1 request-syntax error. This is a reviewed schema
+compatibility window, not a general semantic-version compatibility rule.
 
 The V1.23.1 gap review did not pass: the generated schema remains V1.22.1 and
 the implemented surface is destination create/modify/remove, task

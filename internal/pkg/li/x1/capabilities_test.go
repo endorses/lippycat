@@ -3,6 +3,7 @@
 package x1
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,59 @@ func TestCapabilityMatrix_TargetIdentifiers(t *testing.T) {
 	}
 }
 
+func TestCapabilityMatrix_CoversEveryAcceptedSchemaElement(t *testing.T) {
+	// Every generated request field must be deliberately classified here. The
+	// equality checks make schema regeneration fail this test until new fields
+	// receive a supported, rejected, or response-only decision.
+	task := map[string]string{
+		"XId": "supported", "TargetIdentifiers": "supported", "DeliveryType": "supported",
+		"ListOfDIDs": "supported", "ListOfMediationDetails": "supported-partially",
+		"CorrelationID": "rejected", "ImplicitDeactivationAllowed": "supported",
+		"ProductID": "rejected", "ListOfServiceTypes": "rejected",
+		"TaskDetailsExtensions": "rejected", "ListOfTrafficPolicyReferences": "rejected",
+	}
+	destination := map[string]string{
+		"DId": "supported", "FriendlyName": "supported", "DeliveryType": "supported",
+		"DeliveryAddress": "supported-partially", "DestinationDetailsExtensions": "rejected",
+	}
+	mediation := map[string]string{
+		"LIID": "rejected", "DeliveryType": "rejected", "StartTime": "supported",
+		"EndTime": "supported", "ListOfDIDs": "rejected", "MediationDetailsExtensions": "rejected",
+		"ServiceScopingOptions": "rejected", "ListOfTrafficPolicyReferences": "rejected",
+	}
+	assertStructMatrixComplete(t, reflect.TypeOf(schema.TaskDetails{}), task)
+	assertStructMatrixComplete(t, reflect.TypeOf(schema.DestinationDetails{}), destination)
+	assertStructMatrixComplete(t, reflect.TypeOf(schema.MediationDetails{}), mediation)
+
+	targets := map[string]string{
+		"E164Number": "supported", "SipUri": "supported", "TelUri": "supported", "Nai": "supported",
+		"Imsi": "rejected", "Imei": "rejected", "MacAddress": "rejected",
+		"Ipv4Address": "rejected", "Ipv6Address": "rejected", "Ipv4Cidr": "rejected", "Ipv6Cidr": "rejected",
+		"TcpPort": "rejected", "TcpPortRange": "rejected", "TcpPortList": "rejected",
+		"UdpPort": "rejected", "UdpPortRange": "rejected", "UdpPortList": "rejected",
+		"EmailAddress": "rejected", "InternationalizedEmailAddress": "rejected",
+		"H323Uri": "rejected", "Impu": "rejected", "Impi": "rejected", "RadiusAttribute": "rejected",
+		"GtpuTunnelId": "rejected", "GtpcTunnelId": "rejected", "CallPartyRole": "rejected",
+		"NonLocalIdentifier": "rejected", "Supiimsi": "rejected", "Supinai": "rejected", "Suci": "rejected",
+		"PeiImei": "rejected", "PeiImeiCheckDigit": "rejected", "PeiImeisv": "rejected",
+		"GpsiMsisdn": "rejected", "GpsiNai": "rejected", "Eui64": "rejected",
+		"ServiceAccessIdentifier": "rejected", "HashedIdentifier": "rejected",
+		"TargetIdentifierExtension": "rejected", "Vrf": "rejected",
+	}
+	targetType := reflect.TypeOf(schema.TargetIdentifier{})
+	assertStructMatrixComplete(t, targetType, targets)
+}
+
+func assertStructMatrixComplete(t *testing.T, typ reflect.Type, matrix map[string]string) {
+	t.Helper()
+	assert.Equal(t, typ.NumField(), len(matrix), "%s capability matrix is stale", typ.Name())
+	for i := 0; i < typ.NumField(); i++ {
+		classification, ok := matrix[typ.Field(i).Name]
+		assert.True(t, ok, "%s.%s is unclassified", typ.Name(), typ.Field(i).Name)
+		assert.Contains(t, []string{"supported", "supported-partially", "rejected", "response-only"}, classification)
+	}
+}
+
 func TestCapabilityValidation_RejectsUnsupportedTaskSemantics(t *testing.T) {
 	sip := schema.SIPURI("sip:alice@example.net")
 	policy := schema.UUID("4d9980dd-3b74-444d-a8fb-f3ee63fb9d5c")
@@ -53,6 +107,28 @@ func TestCapabilityValidation_RejectsUnsupportedTaskSemantics(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, ErrorCodeTargetNotSupported, err.code)
 	assert.Contains(t, err.Error(), "traffic policy")
+}
+
+func TestCapabilityValidation_RejectsMediationLevelOverrides(t *testing.T) {
+	liid := schema.LIID("LIID-1")
+	did := schema.UUID("4d9980dd-3b74-444d-a8fb-f3ee63fb9d5c")
+	tests := []struct {
+		name      string
+		mediation *schema.MediationDetails
+		contains  string
+	}{
+		{"LIID", &schema.MediationDetails{LIID: &liid}, "LIID"},
+		{"delivery type", &schema.MediationDetails{DeliveryType: "X2Only"}, "delivery type"},
+		{"destination IDs", &schema.MediationDetails{ListOfDIDs: &schema.ListOfDids{DId: []*schema.UUID{&did}}}, "destination IDs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateTaskCapabilities(&schema.TaskDetails{ListOfMediationDetails: &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{tt.mediation}}}, false)
+			require.Error(t, err)
+			assert.Equal(t, ErrorCodeTargetNotSupported, err.code)
+			assert.Contains(t, err.Error(), tt.contains)
+		})
+	}
 }
 
 func TestCapabilityValidation_DestinationChoices(t *testing.T) {

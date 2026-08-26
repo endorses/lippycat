@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -76,20 +77,63 @@ func TestServer_ProtocolRevisionErrorAndMetrics(t *testing.T) {
 }
 
 func TestServer_AllInboundOperationsAcceptWindowBoundaries(t *testing.T) {
-	operations := []string{
-		"createDestinationRequest", "modifyDestinationRequest", "removeDestinationRequest", "pingRequest",
-		"activateTaskRequest", "deactivateTaskRequest", "modifyTaskRequest", "getTaskDetailsRequest",
+	did, xid := uuid.New(), uuid.New()
+	operations := map[string]func(string) string{
+		"pingRequest": func(version string) string { return requestXML("pingRequest", version, "") },
+		"createDestinationRequest": func(version string) string {
+			return requestXML("createDestinationRequest", version, destinationXML(did))
+		},
+		"modifyDestinationRequest": func(version string) string {
+			return requestXML("modifyDestinationRequest", version, destinationXML(did))
+		},
+		"removeDestinationRequest": func(version string) string {
+			return requestXML("removeDestinationRequest", version, "<dId>"+did.String()+"</dId>")
+		},
+		"activateTaskRequest": func(version string) string {
+			return requestXML("activateTaskRequest", version, taskXML(xid, did, true))
+		},
+		"modifyTaskRequest": func(version string) string { return requestXML("modifyTaskRequest", version, taskXML(xid, did, false)) },
+		"deactivateTaskRequest": func(version string) string {
+			return requestXML("deactivateTaskRequest", version, "<xId>"+xid.String()+"</xId>")
+		},
+		"getTaskDetailsRequest": func(version string) string {
+			return requestXML("getTaskDetailsRequest", version, "<xId>"+xid.String()+"</xId>")
+		},
 	}
-	for _, operation := range operations {
+	for operation, fixture := range operations {
 		for _, version := range []string{minimumProtocolVersion, DefaultProtocolVersion} {
 			t.Run(operation+"_"+version, func(t *testing.T) {
-				s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), newMockTaskManager())
-				body := fmt.Sprintf("<%s><version>%s</version></%s>", operation, version, operation)
+				destinations, tasks := newMockDestinationManager(), newMockTaskManager()
+				destinations.destinations[did] = &Destination{DID: did, X2Enabled: true, X3Enabled: true, ProtocolType: "X2andX3"}
+				tasks.tasks[xid] = &Task{XID: xid, DeliveryType: DeliveryX2andX3, Status: TaskStatusActive}
+				if operation == "createDestinationRequest" {
+					delete(destinations.destinations, did)
+				}
+				if operation == "activateTaskRequest" {
+					delete(tasks.tasks, xid)
+				}
+				s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, destinations, tasks)
+				body := fixture(version)
 				req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
 				w := httptest.NewRecorder()
 				s.handleX1Request(w, req)
-				assert.NotContains(t, w.Body.String(), "unsupported X1 protocol version")
+				assert.NotContains(t, w.Body.String(), "errorResponse", w.Body.String())
 			})
 		}
 	}
+}
+
+func requestXML(operation, version, payload string) string {
+	return fmt.Sprintf("<%s><admfIdentifier>test-admf</admfIdentifier><neIdentifier>test-ne</neIdentifier><version>%s</version>%s</%s>", operation, version, payload, operation)
+}
+
+func destinationXML(did uuid.UUID) string {
+	return "<destinationDetails><dId>" + did.String() + "</dId><deliveryType>X2andX3</deliveryType><deliveryAddress><ipAddressAndPort><address><IPv4Address>192.0.2.10</IPv4Address></address><port><TCPPort>9443</TCPPort></port></ipAddressAndPort></deliveryAddress></destinationDetails>"
+}
+
+func taskXML(xid, did uuid.UUID, full bool) string {
+	if !full {
+		return "<taskDetails><xId>" + xid.String() + "</xId><implicitDeactivationAllowed>true</implicitDeactivationAllowed></taskDetails>"
+	}
+	return "<taskDetails><xId>" + xid.String() + "</xId><targetIdentifiers><targetIdentifier><sipUri>sip:alice@example.net</sipUri></targetIdentifier></targetIdentifiers><deliveryType>X2andX3</deliveryType><listOfDIDs><dId>" + did.String() + "</dId></listOfDIDs></taskDetails>"
 }

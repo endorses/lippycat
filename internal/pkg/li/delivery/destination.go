@@ -281,6 +281,7 @@ type connectionRuntime struct {
 	ackInbound           bool
 	lastUnexpectedLog    time.Time
 	suppressedUnexpected uint64
+	keepaliveWake        chan struct{}
 }
 
 type interfaceKeepaliveState struct {
@@ -789,6 +790,7 @@ func (m *Manager) GetConnectionForInterface(ctx context.Context, did uuid.UUID, 
 		return nil, err
 	}
 	m.registerConnection(state, conn, iface)
+	m.recordInterfaceReconnect(did, iface)
 	m.watchConnection(did, conn)
 
 	return conn, nil
@@ -832,13 +834,6 @@ func (m *Manager) releaseConnection(did uuid.UUID, conn *tls.Conn) {
 	if runtimeOK {
 		runtime := value.(*connectionRuntime)
 		pool = state.interfacePools[runtime.iface]
-		if runtime.keepalive.enabled {
-			if runtime.iface == PDUTypeX2 {
-				state.stats.X2Keepalive.Disconnected++
-			} else {
-				state.stats.X3Keepalive.Disconnected++
-			}
-		}
 	}
 	put := pool.put(pooled)
 	state.mu.RUnlock()
@@ -878,7 +873,15 @@ func (m *Manager) invalidateConnection(did uuid.UUID, conn *tls.Conn, reconnectD
 	remaining := len(state.connections)
 	pool := state.pool
 	if runtimeOK {
-		pool = state.interfacePools[value.(*connectionRuntime).iface]
+		runtime := value.(*connectionRuntime)
+		pool = state.interfacePools[runtime.iface]
+		if runtime.keepalive.enabled {
+			if runtime.iface == PDUTypeX2 {
+				state.stats.X2Keepalive.Disconnected++
+			} else {
+				state.stats.X3Keepalive.Disconnected++
+			}
+		}
 	}
 	state.mu.Unlock()
 	pool.remove(conn)
@@ -1018,6 +1021,7 @@ func (m *Manager) connectDestination(did uuid.UUID) {
 		iface = PDUTypeX3
 	}
 	m.registerConnection(state, conn, iface)
+	m.recordInterfaceReconnect(did, iface)
 	pooled := &pooledConn{
 		conn:      conn,
 		createdAt: time.Now(),
@@ -1158,7 +1162,7 @@ func (m *Manager) registerConnection(state *destinationState, conn *tls.Conn, if
 	if iface == PDUTypeX3 {
 		ackInbound = m.config.X3AcknowledgeInboundKeepalive
 	}
-	runtime := &connectionRuntime{iface: iface, keepalive: keepalive, ackInbound: ackInbound}
+	runtime := &connectionRuntime{iface: iface, keepalive: keepalive, ackInbound: ackInbound, keepaliveWake: make(chan struct{}, 1)}
 	m.connectionRuntime.Store(conn, runtime)
 	m.updateKeepaliveStatsForState(state, iface, keepalive, "")
 }
@@ -1218,6 +1222,10 @@ func (m *Manager) handleInboundPDU(did uuid.UUID, conn *tls.Conn, pdu *x2x3.PDU)
 		m.incrementKeepaliveStat(did, runtime.iface, func(stats *InterfaceKeepaliveStats) { stats.Acknowledged++ })
 		m.updateKeepaliveStats(did, runtime.iface, state, "")
 		runtime.mu.Unlock()
+		select {
+		case runtime.keepaliveWake <- struct{}{}:
+		default:
+		}
 		return
 	}
 	m.incrementKeepaliveStat(did, runtime.iface, func(stats *InterfaceKeepaliveStats) { stats.Inbound++ })
@@ -1263,65 +1271,85 @@ func (m *Manager) recordUnexpectedInbound(did uuid.UUID, runtime *connectionRunt
 
 func (m *Manager) keepaliveLoop(did uuid.UUID, conn *tls.Conn) {
 	defer m.wg.Done()
-	ticker := time.NewTicker(time.Second / 4)
-	defer ticker.Stop()
+	value, ok := m.connectionRuntime.Load(conn)
+	if !ok {
+		return
+	}
+	runtime := value.(*connectionRuntime)
+	timer := time.NewTimer(runtime.keepalive.timeP1)
+	defer timer.Stop()
 	for {
 		select {
 		case <-m.stopChan:
 			return
-		case now := <-ticker.C:
-			value, ok := m.connectionRuntime.Load(conn)
-			if !ok {
-				return
-			}
-			runtime := value.(*connectionRuntime)
-			var frames [][]byte
-			var timeoutErr error
-			runtime.mu.Lock()
-			iface, state := runtime.iface, runtime.keepalive
-			if !state.enabled {
-				runtime.mu.Unlock()
-				continue
-			}
-			for _, sent := range state.outstanding {
-				if now.Sub(sent) >= state.timeP2 {
-					timeoutErr = fmt.Errorf("interface %d keepalive acknowledgement timeout after %s", iface, state.timeP2)
-					break
-				}
-			}
-			if timeoutErr != nil {
-				m.updateKeepaliveStats(did, iface, state, timeoutErr.Error())
-			} else if len(state.outstanding) == 0 && (state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1) {
-				seq := state.next
-				state.next++
-				pdu := x2x3.NewKeepalivePDUWithSequence(seq)
-				frame, err := pdu.MarshalBinary()
-				if err == nil {
-					frames = append(frames, frame)
-					state.outstanding[seq] = now
-					state.lastSequence = seq
-					state.lastSent = now
-					m.incrementKeepaliveStat(did, iface, func(stats *InterfaceKeepaliveStats) { stats.Sent++ })
-					m.updateKeepaliveStats(did, iface, state, "")
-				}
-			}
+		case <-timer.C:
+		case <-runtime.keepaliveWake:
+		}
+		now := time.Now()
+		value, ok = m.connectionRuntime.Load(conn)
+		if !ok {
+			return
+		}
+		runtime = value.(*connectionRuntime)
+		var frames [][]byte
+		var timeoutErr error
+		runtime.mu.Lock()
+		iface, state := runtime.iface, runtime.keepalive
+		if !state.enabled {
 			runtime.mu.Unlock()
-			if timeoutErr != nil {
-				if m.config.DeliveryFault != nil {
-					m.config.DeliveryFault(did, timeoutErr)
-				}
-				m.invalidateConnection(did, conn, false)
-				m.wg.Add(1)
-				go m.reconnectInterface(did, iface)
-				return
-			}
-			for _, frame := range frames {
-				if err := m.writeFrame(conn, frame, m.config.WriteTimeout); err != nil {
-					m.InvalidateConnection(did, conn)
-					return
-				}
+			return
+		}
+		for _, sent := range state.outstanding {
+			if now.Sub(sent) >= state.timeP2 {
+				timeoutErr = fmt.Errorf("interface %d keepalive acknowledgement timeout after %s", iface, state.timeP2)
+				break
 			}
 		}
+		if timeoutErr != nil {
+			m.updateKeepaliveStats(did, iface, state, timeoutErr.Error())
+		} else if len(state.outstanding) == 0 && (state.lastSent.IsZero() || now.Sub(state.lastSent) >= state.timeP1) {
+			seq := state.next
+			state.next++
+			pdu := x2x3.NewKeepalivePDUWithSequence(seq)
+			frame, err := pdu.MarshalBinary()
+			if err == nil {
+				frames = append(frames, frame)
+				state.outstanding[seq] = now
+				state.lastSequence = seq
+				state.lastSent = now
+				m.incrementKeepaliveStat(did, iface, func(stats *InterfaceKeepaliveStats) { stats.Sent++ })
+				m.updateKeepaliveStats(did, iface, state, "")
+			}
+		}
+		runtime.mu.Unlock()
+		if timeoutErr != nil {
+			if m.config.DeliveryFault != nil {
+				m.config.DeliveryFault(did, timeoutErr)
+			}
+			m.invalidateConnection(did, conn, false)
+			m.wg.Add(1)
+			go m.reconnectInterface(did, iface)
+			return
+		}
+		for _, frame := range frames {
+			if err := m.writeFrame(conn, frame, m.config.WriteTimeout); err != nil {
+				m.InvalidateConnection(did, conn)
+				return
+			}
+		}
+		runtime.mu.Lock()
+		state = runtime.keepalive
+		next := state.timeP1
+		if len(state.outstanding) != 0 {
+			for _, sent := range state.outstanding {
+				next = max(time.Until(sent.Add(state.timeP2)), 0)
+				break
+			}
+		} else if !state.lastSent.IsZero() {
+			next = max(time.Until(state.lastSent.Add(state.timeP1)), 0)
+		}
+		runtime.mu.Unlock()
+		timer.Reset(next)
 	}
 }
 
@@ -1353,7 +1381,7 @@ func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
 			continue
 		}
 		m.registerConnection(state, conn, iface)
-		m.incrementKeepaliveStat(did, iface, func(stats *InterfaceKeepaliveStats) { stats.Reconnected++ })
+		m.recordInterfaceReconnect(did, iface)
 		m.watchConnection(did, conn)
 		state.mu.RLock()
 		pool := state.interfacePools[iface]
@@ -1365,6 +1393,16 @@ func (m *Manager) reconnectInterface(did uuid.UUID, iface PDUType) {
 		atomic.StoreInt32(&state.state, connStateConnected)
 		return
 	}
+}
+
+// recordInterfaceReconnect pairs a successful replacement association with a
+// previously observed disconnect. Initial connections are not reconnections.
+func (m *Manager) recordInterfaceReconnect(did uuid.UUID, iface PDUType) {
+	m.incrementKeepaliveStat(did, iface, func(stats *InterfaceKeepaliveStats) {
+		if stats.Enabled && stats.Reconnected < stats.Disconnected {
+			stats.Reconnected++
+		}
+	})
 }
 
 func (m *Manager) updateKeepaliveStats(did uuid.UUID, iface PDUType, keepalive *interfaceKeepaliveState, reason string) {

@@ -79,6 +79,9 @@ var (
 	ErrTaskNotFound = errors.New("task not found")
 	// ErrTaskAlreadyExists indicates a task with the given XID already exists.
 	ErrTaskAlreadyExists = errors.New("task already exists")
+	// ErrTaskDefinitionConflict indicates that an existing XID was reasserted
+	// with different enforcement semantics and must be changed with ModifyTask.
+	ErrTaskDefinitionConflict = errors.New("task definition conflicts with existing task")
 	// ErrInvalidTask indicates the task parameters are invalid.
 	ErrInvalidTask = errors.New("invalid task parameters")
 	// ErrModifyNotAllowed indicates the requested modification is not permitted.
@@ -1318,6 +1321,10 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 
 	// Activate task
 	if err := s.taskManager.ActivateTask(task); err != nil {
+		if errors.Is(err, ErrTaskDefinitionConflict) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeXIDAlreadyExists, "task definition conflicts with existing XID; use ModifyTask: "+xid.String())
+		}
 		if errors.Is(err, ErrTaskAlreadyExists) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 				ErrorCodeXIDAlreadyExists, "task already exists: "+xid.String())

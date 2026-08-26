@@ -631,6 +631,20 @@ func TestServer_HandleActivateTask(t *testing.T) {
 	assert.Equal(t, did, task.DestinationIDs[0])
 }
 
+func TestServer_ActivateTaskPreservesDefinitionConflictDetail(t *testing.T) {
+	tasks := newMockTaskManager()
+	tasks.activateErr = fmt.Errorf("%w: target differs", ErrTaskDefinitionConflict)
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), tasks)
+	xid, did := uuid.New(), uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(requestXML("activateTaskRequest", DefaultProtocolVersion, taskXML(xid, did, true))))
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Contains(t, w.Body.String(), "ModifyTask")
+	assert.Contains(t, w.Body.String(), xid.String())
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("%d", ErrorCodeXIDAlreadyExists))
+}
+
 func TestServer_HandleActivateTask_AlreadyExists(t *testing.T) {
 	destMock := newMockDestinationManager()
 	taskMock := newMockTaskManager()

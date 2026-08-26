@@ -63,6 +63,30 @@ func TestKeepaliveAcknowledgementIsScopedToInterfaceConnection(t *testing.T) {
 	assert.Equal(t, uint64(1), stats.X3Keepalive.Acknowledged)
 }
 
+func TestKeepaliveDisconnectAccountingTracksInvalidationNotPoolReturn(t *testing.T) {
+	did := uuid.New()
+	conn, peer := tlsPipe(t)
+	defer peer.Close()
+	m, state := testKeepaliveManager(did)
+	m.registerConnection(state, conn, PDUTypeX2)
+	m.releaseConnection(did, conn)
+	stats, err := m.Stats(did)
+	require.NoError(t, err)
+	assert.Zero(t, stats.X2Keepalive.Disconnected)
+
+	// Remove the pooled handle before invalidating the underlying association.
+	state.interfacePools[PDUTypeX2].remove(conn)
+	m.invalidateConnection(did, conn, false)
+	stats, err = m.Stats(did)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), stats.X2Keepalive.Disconnected)
+	assert.Zero(t, stats.X2Keepalive.Reconnected)
+	m.recordInterfaceReconnect(did, PDUTypeX2)
+	stats, err = m.Stats(did)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), stats.X2Keepalive.Reconnected)
+}
+
 func TestKeepaliveRejectsWrongDuplicateAndMalformedACKs(t *testing.T) {
 	did := uuid.New()
 	conn := &tls.Conn{}

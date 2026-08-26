@@ -1435,7 +1435,10 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 	err := m.ActivateTask(liTask)
 	if err != nil {
 		// Convert to x1 error types
-		if errors.Is(err, ErrTaskAlreadyExists) || errors.Is(err, ErrTaskDefinitionConflict) {
+		if errors.Is(err, ErrTaskDefinitionConflict) {
+			return fmt.Errorf("%w: %v", x1.ErrTaskDefinitionConflict, err)
+		}
+		if errors.Is(err, ErrTaskAlreadyExists) {
 			return x1.ErrTaskAlreadyExists
 		}
 		if errors.Is(err, ErrInvalidTask) {

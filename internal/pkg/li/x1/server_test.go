@@ -917,45 +917,30 @@ func TestServer_HandleGetTaskDetails(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "<provisioningStatus>complete</provisioningStatus>")
 }
 
-func TestServer_GetTaskDetailsLifecycleExtension(t *testing.T) {
+func TestServer_GetTaskDetailsProvisioningStatus(t *testing.T) {
 	tests := []struct {
 		status       TaskStatus
 		provisioning string
-		lifecycle    string
 	}{
-		{TaskStatusPending, "awaitingProvisioning", "pending"},
-		{TaskStatusActive, "complete", "active"},
-		{TaskStatusSuspended, "complete", "suspended"},
-		{TaskStatusDeactivated, "complete", "deactivated"},
-		{TaskStatusFailed, "failed", "failed"},
+		{TaskStatusPending, "awaitingProvisioning"},
+		{TaskStatusActive, "complete"},
+		{TaskStatusSuspended, "complete"},
+		{TaskStatusDeactivated, "complete"},
+		{TaskStatusFailed, "failed"},
 	}
 
-	type lifecycleElement struct {
-		Version string `xml:"version,attr"`
-		Value   string `xml:",chardata"`
-	}
-	type extension struct {
-		Owner     string           `xml:"Owner"`
-		Lifecycle lifecycleElement `xml:"urn:lippycat:etsi:x1:task-status lifecycleState"`
-	}
 	type response struct {
 		Messages []struct {
 			Details struct {
 				Status struct {
-					Provisioning string      `xml:"provisioningStatus"`
-					Extensions   []extension `xml:"taskStatusExtensions"`
+					Provisioning string `xml:"provisioningStatus"`
 				} `xml:"taskStatus"`
 			} `xml:"taskResponseDetails"`
 		} `xml:"x1ResponseMessage"`
 	}
-	type ignoringPeerResponse struct {
-		Messages []struct {
-			Details *schema.TaskResponseDetails `xml:"taskResponseDetails"`
-		} `xml:"x1ResponseMessage"`
-	}
 
 	for _, tt := range tests {
-		t.Run(tt.lifecycle, func(t *testing.T) {
+		t.Run(fmt.Sprintf("status_%d", tt.status), func(t *testing.T) {
 			taskMock := newMockTaskManager()
 			xid := uuid.New()
 			taskMock.tasks[xid] = &Task{XID: xid, Status: tt.status, DeliveryType: DeliveryX2Only}
@@ -970,20 +955,7 @@ func TestServer_GetTaskDetailsLifecycleExtension(t *testing.T) {
 			require.Len(t, got.Messages, 1)
 			status := got.Messages[0].Details.Status
 			require.Equal(t, tt.provisioning, status.Provisioning)
-			require.Len(t, status.Extensions, 1)
-			require.Equal(t, TaskStatusExtensionOwner, status.Extensions[0].Owner)
-			require.Equal(t, TaskStatusExtensionVersion, status.Extensions[0].Lifecycle.Version)
-			require.Equal(t, tt.lifecycle, status.Extensions[0].Lifecycle.Value)
-
-			// A schema-aware peer that does not model the foreign element still
-			// parses the standard response and extension owner.
-			var peer ignoringPeerResponse
-			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &peer))
-			require.Len(t, peer.Messages, 1)
-			require.NotNil(t, peer.Messages[0].Details)
-			require.Equal(t, tt.provisioning, peer.Messages[0].Details.TaskStatus.ProvisioningStatus)
-			require.Len(t, peer.Messages[0].Details.TaskStatus.TaskStatusExtensions, 1)
-			require.Equal(t, TaskStatusExtensionOwner, peer.Messages[0].Details.TaskStatus.TaskStatusExtensions[0].Owner)
+			require.NotContains(t, w.Body.String(), "taskStatusExtensions")
 		})
 	}
 }

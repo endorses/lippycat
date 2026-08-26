@@ -365,27 +365,10 @@ delivered and are labelled consistently, distinguished by their stream identifie
 | Deactivated | Explicitly stopped |
 | Failed | Fatal error occurred |
 
-### Task status lifecycle extension
-
 `GetTaskDetails` keeps the ETSI `provisioningStatus` enumeration unchanged:
 pending tasks use `awaitingProvisioning`, failed tasks use `failed`, and active,
-suspended, and deactivated tasks use `complete`. To distinguish operational
-enforcement state, every task-details response also includes this optional ETSI
-`taskStatusExtensions` entry:
-
-```xml
-<taskStatusExtensions>
-  <Owner>lippycat</Owner>
-  <lifecycleState xmlns="urn:lippycat:etsi:x1:task-status" version="1">active</lifecycleState>
-</taskStatusExtensions>
-```
-
-The version 1 values are `pending`, `active`, `suspended`, `deactivated`, and
-`failed`. The extension is an operational enforcement-state signal, not a
-replacement for `provisioningStatus`. Consumers that do not recognize the
-lippycat namespace may ignore the foreign element as permitted by the ETSI
-extension point. No fault text or other internal operational detail is carried
-in this extension.
+suspended, and deactivated tasks use `complete`. No vendor-specific task-status
+extension is emitted on X1.
 
 ### Explicit tombstone reactivation
 

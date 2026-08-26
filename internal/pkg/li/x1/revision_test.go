@@ -58,7 +58,7 @@ func TestServer_ProtocolRevisionErrorAndMetrics(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		if version == "broken" || version == "v1.23.1" {
 			var container struct {
-				Errors []*schema.ErrorResponse `xml:"errorResponse"`
+				Errors []*schema.ErrorResponse `xml:"x1ResponseMessage"`
 			}
 			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &container))
 			require.Len(t, container.Errors, 1)

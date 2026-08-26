@@ -1221,14 +1221,14 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
 
 func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 	t.Run("returns ADMFError for error response", func(t *testing.T) {
-		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
-  <errorResponse>
-    <requestMessageType>GetAllDetailsRequest</requestMessageType>
-    <errorInformation>
-      <errorCode>100</errorCode>
-      <errorDescription>Generic error occurred</errorDescription>
-    </errorInformation>
-  </errorResponse>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <x1ResponseMessage xsi:type="ErrorResponse">
+		<requestMessageType>GetAllDetails</requestMessageType>
+		<errorInformation>
+		  <errorCode>100</errorCode>
+		  <errorDescription>Generic error occurred</errorDescription>
+		</errorInformation>
+  </x1ResponseMessage>
 </X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1256,7 +1256,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 		require.ErrorAs(t, err, &admfErr)
 		assert.Equal(t, 100, admfErr.ErrorCode)
 		assert.Equal(t, "Generic error occurred", admfErr.ErrorDescription)
-		assert.Equal(t, "GetAllDetailsRequest", admfErr.RequestMessageType)
+		assert.Equal(t, "GetAllDetails", admfErr.RequestMessageType)
 	})
 
 	t.Run("returns ADMFError for unsupported operation", func(t *testing.T) {

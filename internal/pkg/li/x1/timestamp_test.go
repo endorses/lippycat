@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -92,10 +93,56 @@ func TestQualifiedMicrosecondWireMessagesValidate(t *testing.T) {
 		})
 	}
 
-	server := NewServer(ServerConfig{NEIdentifier: "test-ne", Version: DefaultProtocolVersion}, nil, nil)
-	response, err := xml.Marshal(&flexibleResponseContainer{Responses: []any{server.responseMessage(client.buildRequestMessage())}})
-	require.NoError(t, err)
-	validateX1DocumentWithSchema(t, response)
+	taskManager := newMockTaskManager()
+	server := NewServer(ServerConfig{NEIdentifier: "test-ne", Version: DefaultProtocolVersion}, nil, taskManager)
+	taskID := uuid.MustParse(string(id))
+	destinationID := schema.UUID("abcdefab-1234-1234-1234-abcdefabcdef")
+	taskManager.tasks[taskID] = &Task{
+		XID:            taskID,
+		Targets:        []TargetIdentity{{Type: TargetTypeSIPURI, Value: "sip:alice@example.com"}},
+		DestinationIDs: []uuid.UUID{uuid.MustParse(string(destinationID))},
+		DeliveryType:   DeliveryX2andX3,
+		Status:         TaskStatusActive,
+	}
+	requestMessage := client.buildRequestMessage()
+	responseShapes := []struct {
+		name     string
+		response any
+		contains []string
+	}{
+		{
+			name:     "bare OK response",
+			response: server.buildOKResponse(requestMessage, MessageTypePing),
+		},
+		{
+			name: "task details response",
+			response: server.handleGetTaskDetails(&schema.GetTaskDetailsRequest{
+				XId:              &id,
+				X1RequestMessage: requestMessage,
+			}),
+			contains: []string{`xsi:type="GetTaskDetailsResponse"`, "<taskResponseDetails>"},
+		},
+		{
+			name:     "unsupported target error",
+			response: server.buildErrorResponse(requestMessage, MessageTypeActivateTask, ErrorCodeTargetNotSupported, "unsupported capability"),
+			contains: []string{`xsi:type="ErrorResponse"`, "<requestMessageType>ActivateTask</requestMessageType>", "<errorCode>401</errorCode>"},
+		},
+		{
+			name:     "missing destination error",
+			response: server.buildErrorResponse(requestMessage, MessageTypeRemoveDestination, ErrorCodeDIDNotFound, "destination not found"),
+			contains: []string{`xsi:type="ErrorResponse"`, "<requestMessageType>RemoveDestination</requestMessageType>", "<errorCode>303</errorCode>"},
+		},
+	}
+	for _, tt := range responseShapes {
+		t.Run(tt.name, func(t *testing.T) {
+			response, marshalErr := xml.Marshal(&flexibleResponseContainer{Responses: []any{tt.response}})
+			require.NoError(t, marshalErr)
+			for _, expected := range tt.contains {
+				assert.Contains(t, string(response), expected)
+			}
+			validateX1DocumentWithSchema(t, response)
+		})
+	}
 
 	for _, timestamp := range []schema.QualifiedMicrosecondDateTime{
 		*client.buildRequestMessage().MessageTimestamp,

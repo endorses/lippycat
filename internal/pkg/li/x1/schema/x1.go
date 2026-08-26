@@ -69,10 +69,10 @@ type TopLevelErrorResponse struct {
 
 // ErrorResponse ...
 type ErrorResponse struct {
+	*X1ResponseMessage
 	RequestMessageType   string                `xml:"requestMessageType"`
 	ErrorInformation     *ErrorInformation     `xml:"errorInformation"`
 	ExtensionInformation *ExtensionInformation `xml:"extensionInformation"`
-	*X1ResponseMessage
 }
 
 // RequestMessageType ...
@@ -295,8 +295,8 @@ type NEIssueExtensions struct {
 
 // ActivateTaskResponse ...
 type ActivateTaskResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // OK ...
@@ -313,8 +313,8 @@ type ModifyTaskRequest struct {
 
 // ModifyTaskResponse ...
 type ModifyTaskResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // DeactivateTaskRequest ...
@@ -325,8 +325,8 @@ type DeactivateTaskRequest struct {
 
 // DeactivateTaskResponse ...
 type DeactivateTaskResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // DeactivateAllTasksRequest ...
@@ -336,8 +336,8 @@ type DeactivateAllTasksRequest struct {
 
 // DeactivateAllTasksResponse ...
 type DeactivateAllTasksResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // CreateDestinationRequest ...
@@ -370,8 +370,8 @@ type DestinationDetailsExtensions struct {
 
 // CreateDestinationResponse ...
 type CreateDestinationResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // ModifyDestinationRequest ...
@@ -382,8 +382,8 @@ type ModifyDestinationRequest struct {
 
 // ModifyDestinationResponse ...
 type ModifyDestinationResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // RemoveDestinationRequest ...
@@ -394,8 +394,8 @@ type RemoveDestinationRequest struct {
 
 // RemoveDestinationResponse ...
 type RemoveDestinationResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // RemoveAllDestinationsRequest ...
@@ -405,8 +405,8 @@ type RemoveAllDestinationsRequest struct {
 
 // RemoveAllDestinationsResponse ...
 type RemoveAllDestinationsResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // GetTaskDetailsRequest ...
@@ -417,8 +417,8 @@ type GetTaskDetailsRequest struct {
 
 // GetTaskDetailsResponse ...
 type GetTaskDetailsResponse struct {
-	TaskResponseDetails *TaskResponseDetails `xml:"taskResponseDetails"`
 	*X1ResponseMessage
+	TaskResponseDetails *TaskResponseDetails `xml:"taskResponseDetails"`
 }
 
 // TaskResponseDetails ...
@@ -455,8 +455,8 @@ type GetDestinationDetailsRequest struct {
 
 // GetDestinationDetailsResponse ...
 type GetDestinationDetailsResponse struct {
-	DestinationResponseDetails *DestinationResponseDetails `xml:"destinationResponseDetails"`
 	*X1ResponseMessage
+	DestinationResponseDetails *DestinationResponseDetails `xml:"destinationResponseDetails"`
 }
 
 // DestinationResponseDetails ...
@@ -481,8 +481,8 @@ type GetNEStatusRequest struct {
 
 // GetNEStatusResponse ...
 type GetNEStatusResponse struct {
-	NeStatusDetails *NeStatusDetails `xml:"neStatusDetails"`
 	*X1ResponseMessage
+	NeStatusDetails *NeStatusDetails `xml:"neStatusDetails"`
 }
 
 // NeStatusDetails ...
@@ -501,11 +501,11 @@ type GetAllDetailsRequest struct {
 
 // GetAllDetailsResponse ...
 type GetAllDetailsResponse struct {
+	*X1ResponseMessage
 	NeStatusDetails                    *NeStatusDetails                    `xml:"neStatusDetails"`
 	ListOfTaskResponseDetails          *ListOfTaskResponseDetails          `xml:"listOfTaskResponseDetails"`
 	ListOfDestinationResponseDetails   *ListOfDestinationResponseDetails   `xml:"listOfDestinationResponseDetails"`
 	ListOfGenericObjectResponseDetails *ListOfGenericObjectResponseDetails `xml:"listOfGenericObjectResponseDetails"`
-	*X1ResponseMessage
 }
 
 // ListOfTaskResponseDetails ...
@@ -525,10 +525,10 @@ type ListAllDetailsRequest struct {
 
 // ListAllDetailsResponse ...
 type ListAllDetailsResponse struct {
+	*X1ResponseMessage
 	ListOfXIDs             *ListOfXids             `xml:"ListOfXIDs"`
 	ListOfDIDs             *ListOfDids             `xml:"ListOfDIDs"`
 	ListOfGenericObjectIDs *ListOfGenericObjectIDs `xml:"ListOfGenericObjectIDs"`
-	*X1ResponseMessage
 }
 
 // ListOfXids ...
@@ -543,8 +543,8 @@ type GetAllTaskDetailsRequest struct {
 
 // GetAllTaskDetailsResponse ...
 type GetAllTaskDetailsResponse struct {
-	ListOfTaskResponseDetails *ListOfTaskResponseDetails `xml:"listOfTaskResponseDetails"`
 	*X1ResponseMessage
+	ListOfTaskResponseDetails *ListOfTaskResponseDetails `xml:"listOfTaskResponseDetails"`
 }
 
 // GetAllDestinationDetailsRequest ...
@@ -554,8 +554,8 @@ type GetAllDestinationDetailsRequest struct {
 
 // GetAllDestinationDetailsResponse ...
 type GetAllDestinationDetailsResponse struct {
-	ListOfDestinationResponseDetails *ListOfDestinationResponseDetails `xml:"listOfDestinationResponseDetails"`
 	*X1ResponseMessage
+	ListOfDestinationResponseDetails *ListOfDestinationResponseDetails `xml:"listOfDestinationResponseDetails"`
 }
 
 // GetAllGenericObjectDetailsRequest ...
@@ -566,8 +566,8 @@ type GetAllGenericObjectDetailsRequest struct {
 
 // GetAllGenericObjectDetailsResponse ...
 type GetAllGenericObjectDetailsResponse struct {
-	ListOfGenericObjectResponseDetails *ListOfGenericObjectResponseDetails `xml:"listOfGenericObjectResponseDetails"`
 	*X1ResponseMessage
+	ListOfGenericObjectResponseDetails *ListOfGenericObjectResponseDetails `xml:"listOfGenericObjectResponseDetails"`
 }
 
 // ReportTaskIssueRequest ...
@@ -585,8 +585,8 @@ type TaskReportType string
 
 // ReportTaskIssueResponse ...
 type ReportTaskIssueResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // ReportDestinationIssueRequest ...
@@ -600,8 +600,8 @@ type ReportDestinationIssueRequest struct {
 
 // ReportDestinationIssueResponse ...
 type ReportDestinationIssueResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // ReportNEIssueRequest ...
@@ -618,8 +618,8 @@ type TypeOfNeIssueMessage string
 
 // ReportNEIssueResponse ...
 type ReportNEIssueResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // PingRequest ...
@@ -629,8 +629,8 @@ type PingRequest struct {
 
 // PingResponse ...
 type PingResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // KeepaliveRequest ...
@@ -640,8 +640,8 @@ type KeepaliveRequest struct {
 
 // KeepaliveResponse ...
 type KeepaliveResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // GenericObjectID ...
@@ -663,8 +663,8 @@ type CreateObjectRequest struct {
 
 // CreateObjectResponse ...
 type CreateObjectResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // ModifyObjectRequest ...
@@ -675,8 +675,8 @@ type ModifyObjectRequest struct {
 
 // ModifyObjectResponse ...
 type ModifyObjectResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // GetObjectRequest ...
@@ -687,8 +687,8 @@ type GetObjectRequest struct {
 
 // GetObjectResponse ...
 type GetObjectResponse struct {
-	GenericObjectResponseDetails *GenericObjectResponseDetails `xml:"genericObjectResponseDetails"`
 	*X1ResponseMessage
+	GenericObjectResponseDetails *GenericObjectResponseDetails `xml:"genericObjectResponseDetails"`
 }
 
 // GenericObjectResponseDetails ...
@@ -714,8 +714,8 @@ type DeleteObjectRequest struct {
 
 // DeleteObjectResponse ...
 type DeleteObjectResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }
 
 // ListObjectsOfTypeRequest ...
@@ -726,8 +726,8 @@ type ListObjectsOfTypeRequest struct {
 
 // ListObjectsOfTypeResponse ...
 type ListObjectsOfTypeResponse struct {
-	ListOfObjects *ListOfGenericObjectIDs `xml:"listOfObjects"`
 	*X1ResponseMessage
+	ListOfObjects *ListOfGenericObjectIDs `xml:"listOfObjects"`
 }
 
 // ListOfGenericObjectIDs ...
@@ -742,6 +742,6 @@ type DeleteAllObjectsRequest struct {
 
 // DeleteAllObjectsResponse ...
 type DeleteAllObjectsResponse struct {
-	OK string `xml:"oK"`
 	*X1ResponseMessage
+	OK string `xml:"oK"`
 }

@@ -71,17 +71,18 @@ func TestPhase2ExpiryWithdrawsFilters(t *testing.T) {
 	assert.Empty(t, pusher.installed)
 }
 
-func TestPhase2ReactivationReplacesDeactivatedTask(t *testing.T) {
+func TestPhase3ReactivationOfDeactivatedTaskFailsClosed(t *testing.T) {
 	m, _, did := phase2Manager(t)
 	task := phase2Task(did)
 	require.NoError(t, m.ActivateTask(task))
 	require.NoError(t, m.DeactivateTask(task.XID))
+	before, err := m.GetTaskDetails(task.XID)
+	require.NoError(t, err)
 	replacement := phase2Task(did)
 	replacement.XID = task.XID
 	replacement.Targets[0].Value = "sip:replacement@example.com"
-	require.NoError(t, m.ActivateTask(replacement))
+	require.ErrorIs(t, m.ActivateTask(replacement), ErrTaskDefinitionConflict)
 	got, err := m.GetTaskDetails(task.XID)
 	require.NoError(t, err)
-	assert.Equal(t, TaskStatusActive, got.Status)
-	assert.Equal(t, replacement.Targets, got.Targets)
+	assert.Equal(t, before, got)
 }

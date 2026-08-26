@@ -1013,6 +1013,27 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 }
 
 func (m *Manager) activateTask(task *InterceptTask) error {
+	if task == nil {
+		return fmt.Errorf("%w: task is nil", ErrInvalidTask)
+	}
+	if existing, err := m.registry.GetTaskDetails(task.XID); err == nil {
+		switch existing.Status {
+		case TaskStatusActive, TaskStatusPending:
+			if equivalentTaskDefinition(existing, task) {
+				// A retry is deliberately a pure read: do not bump the generation,
+				// reinstall filters, move a pending boundary, or persist state.
+				return nil
+			}
+			return fmt.Errorf("%w: XID %s is %s", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		case TaskStatusSuspended, TaskStatusFailed, TaskStatusDeactivated:
+			return fmt.Errorf("%w: XID %s is %s", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		default:
+			return fmt.Errorf("%w: XID %s has unknown status %d", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		}
+	} else if !errors.Is(err, ErrTaskNotFound) {
+		return fmt.Errorf("check activation retry for XID %s: %w", task.XID, err)
+	}
+
 	// First activate in registry (validates task)
 	if err := m.registry.ActivateTask(task); err != nil {
 		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
@@ -1414,7 +1435,7 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 	err := m.ActivateTask(liTask)
 	if err != nil {
 		// Convert to x1 error types
-		if errors.Is(err, ErrTaskAlreadyExists) {
+		if errors.Is(err, ErrTaskAlreadyExists) || errors.Is(err, ErrTaskDefinitionConflict) {
 			return x1.ErrTaskAlreadyExists
 		}
 		if errors.Is(err, ErrInvalidTask) {

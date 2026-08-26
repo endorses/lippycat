@@ -292,13 +292,23 @@ func cloneInterceptTask(task *InterceptTask) *InterceptTask {
 
 // restorePendingTask restores durable state without installing enforcement.
 func (r *Registry) restorePendingTask(task *InterceptTask) error {
+	if task == nil || task.Status != TaskStatusPending {
+		return fmt.Errorf("restore pending task: invalid status")
+	}
+	return r.restoreNonEnforcingTask(task)
+}
+
+// restoreNonEnforcingTask restores durable lifecycle state without installing
+// enforcement. Retained deactivated and failed tasks must survive restart so
+// reactivation identity and fail-closed lifecycle rules remain enforceable.
+func (r *Registry) restoreNonEnforcingTask(task *InterceptTask) error {
 	if err := r.validateTask(task); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if task.Status != TaskStatusPending {
-		return fmt.Errorf("restore pending task %s: status is %s", task.XID, task.Status)
+	if task.Status != TaskStatusPending && task.Status != TaskStatusDeactivated && task.Status != TaskStatusFailed {
+		return fmt.Errorf("restore non-enforcing task %s: status is %s", task.XID, task.Status)
 	}
 	if _, exists := r.tasks[task.XID]; exists {
 		return fmt.Errorf("%w: XID %s", ErrTaskAlreadyExists, task.XID)

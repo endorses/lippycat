@@ -139,23 +139,23 @@ Update `Manager.activateTask` lifecycle dispatch as follows:
 
 Implementation tasks:
 
-- [ ] Preserve the schema-conformant provisioning mapping: pending to
+- [x] Preserve the schema-conformant provisioning mapping: pending to
       `awaitingProvisioning`, failed to `failed`, and active, suspended, and
       deactivated to `complete`.
-- [ ] Define a `taskStatusExtensions` wire contract using a stable,
+- [x] Define a `taskStatusExtensions` wire contract using a stable,
       project-controlled XML namespace and owner identifier.
-- [ ] Define a versioned extension element or structure.
-- [ ] Encode one of `pending`, `active`, `suspended`, `deactivated`, or `failed`.
-- [ ] Keep the extension optional so peers that ignore unknown extensions
+- [x] Define a versioned extension element or structure.
+- [x] Encode one of `pending`, `active`, `suspended`, `deactivated`, or `failed`.
+- [x] Keep the extension optional so peers that ignore unknown extensions
       remain compatible.
-- [ ] Include the extension consistently in `GetTaskDetails` responses for
+- [x] Include the extension consistently in `GetTaskDetails` responses for
       every task state.
-- [ ] Avoid exposing internal errors or sensitive operational details beyond
+- [x] Avoid exposing internal errors or sensitive operational details beyond
       the existing fault response.
-- [ ] If generated schema types cannot marshal the extension body, add the
+- [x] If generated schema types cannot marshal the extension body, add the
       smallest handwritten wire type or custom marshaling boundary needed.
-- [ ] Do not modify bundled ETSI schemas to add a project-specific element.
-- [ ] Document the extension namespace, version, values, and its role as an
+- [x] Do not modify bundled ETSI schemas to add a project-specific element.
+- [x] Document the extension namespace, version, values, and its role as an
       operational enforcement-state signal rather than a replacement for
       provisioning status.
 
@@ -163,46 +163,46 @@ Implementation tasks:
 
 ### 8.1 Registry and manager tests
 
-- [ ] Activate, deactivate, and reactivate the same XID with an identical task;
+- [x] Activate, deactivate, and reactivate the same XID with an identical task;
       assert success, active state, one generation increment, and installed
       filters.
-- [ ] Reactivate with reordered or duplicate-equivalent targets; assert the
+- [x] Reactivate with reordered or duplicate-equivalent targets; assert the
       chosen canonical duplicate policy is applied consistently.
-- [ ] Reactivate with a changed target type, target value, added target, or
+- [x] Reactivate with a changed target type, target value, added target, or
       removed target; assert the dedicated conflict and no state mutation.
-- [ ] Reactivate with a changed delivery type; assert the dedicated conflict and
+- [x] Reactivate with a changed delivery type; assert the dedicated conflict and
       no state mutation.
-- [ ] Reactivate with a changed destination set and valid renewed mediation
+- [x] Reactivate with a changed destination set and valid renewed mediation
       window; assert success and filters matching the replacement task.
-- [ ] Reactivate with changed lifecycle options and otherwise stable identity;
+- [x] Reactivate with changed lifecycle options and otherwise stable identity;
       assert the replacement options are stored and enforced.
-- [ ] Reactivate with a missing destination or incompatible delivery
+- [x] Reactivate with a missing destination or incompatible delivery
       combination; assert the tombstone, `rollbackTask`, `auditHistory`, filters,
       and persistence remain unchanged.
-- [ ] Inject filter creation and commit failures; assert the tombstone and its
+- [x] Inject filter creation and commit failures; assert the tombstone and its
       prior audit history are restored and no replacement filters remain.
-- [ ] Assert successful reactivation retains one audit snapshot of the prior
+- [x] Assert successful reactivation retains one audit snapshot of the prior
       deactivated task.
-- [ ] Assert suspended and failed tasks still reject activation.
-- [ ] Assert active and pending equivalent retries retain their existing
+- [x] Assert suspended and failed tasks still reject activation.
+- [x] Assert active and pending equivalent retries retain their existing
       side-effect-free behavior.
-- [ ] Exercise concurrent deactivate/reactivate and duplicate-reactivation
+- [x] Exercise concurrent deactivate/reactivate and duplicate-reactivation
       attempts under the race detector; assert lifecycle serialization and one
       committed activation.
-- [ ] Repeat successful and failed reactivation after durable state restoration.
+- [x] Repeat successful and failed reactivation after durable state restoration.
 
 ### 8.2 X1 tests
 
-- [ ] Changed protected identity maps to the selected non-300 response code and
+- [x] Changed protected identity maps to the selected non-300 response code and
       stable error description.
-- [ ] An ordinary conflicting active/pending XID retains its current error-300
+- [x] An ordinary conflicting active/pending XID retains its current error-300
       behavior.
-- [ ] Missing destinations and unsupported delivery combinations retain their
+- [x] Missing destinations and unsupported delivery combinations retain their
       existing specific response codes.
-- [ ] Task details marshal a valid lifecycle extension for all five internal
+- [x] Task details marshal a valid lifecycle extension for all five internal
       states while retaining schema-valid provisioning values.
-- [ ] The extension has the documented owner, namespace, version, and value.
-- [ ] A schema-aware round trip preserves the extension, and a peer that ignores
+- [x] The extension has the documented owner, namespace, version, and value.
+- [x] A schema-aware round trip preserves the extension, and a peer that ignores
       it can still parse the rest of the response.
 
 ## 9. Documentation and compatibility updates

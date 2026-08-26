@@ -147,9 +147,10 @@ type Manager struct {
 
 	// orphanStreak counts consecutive polls in which a local task was absent
 	// from the ADMF response.
-	orphanMu        sync.Mutex
-	orphanStreak    map[uuid.UUID]int
-	persistedActive map[uuid.UUID]*InterceptTask
+	orphanMu         sync.Mutex
+	orphanStreak     map[uuid.UUID]int
+	persistedActive  map[uuid.UUID]*InterceptTask
+	commitActivation func(uuid.UUID, time.Time) error
 
 	// stopChan signals shutdown.
 	stopChan chan struct{}
@@ -256,6 +257,7 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 	}
 
 	m.registry = NewRegistry(internalCallback)
+	m.commitActivation = m.registry.commitActivation
 
 	// Create X1 server if TLS is configured.
 	if config.X1ListenAddr != "" && config.X1TLSCertFile != "" && config.X1TLSKeyFile != "" {
@@ -1056,7 +1058,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		return fmt.Errorf("read activation identity for XID %s: %w", task.XID, getErr)
 	}
 	if registered.Status == TaskStatusPending {
-		if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
+		if err := m.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 			return err
 		}
 		logTaskActivation(isReactivation, registered, previousGeneration, 0)
@@ -1067,7 +1069,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		rollbackErr := m.registry.rollbackActivation(task.XID, registered.ActivatedAt)
 		return errors.Join(fmt.Errorf("activate XID %s: %w", task.XID, err), rollbackErr)
 	}
-	if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
+	if err := m.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 		return errors.Join(fmt.Errorf("commit activation XID %s: %w", task.XID, err),
 			m.filters.RemoveFiltersForTask(task.XID), m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
 	}

@@ -266,6 +266,15 @@ Tasks progress through the following states:
 | Deactivated | Explicitly stopped via `DeactivateTask` or implicit expiration |
 | Failed | A fatal error prevented continued interception |
 
+`GetTaskDetails` reports the schema-defined provisioning value
+`awaitingProvisioning` for pending tasks, `failed` for failed tasks, and
+`complete` for active, suspended, and deactivated tasks. It additionally emits
+the optional lippycat task-status extension (owner `lippycat`, namespace
+`urn:lippycat:etsi:x1:task-status`, version `1`) with the precise lifecycle value:
+`pending`, `active`, `suspended`, `deactivated`, or `failed`. This is an
+operational enforcement-state signal; it does not replace provisioning status,
+and peers that do not recognize the extension can ignore it.
+
 When `implicitDeactivationAllowed` is set to `true`, the processor will automatically deactivate the task when its `EndTime` is reached and notify the ADMF. When set to `false`, only an explicit `DeactivateTask` request or a fatal error can end the task.
 
 Tasks can be modified while active. The following fields are modifiable via `ModifyTask`:

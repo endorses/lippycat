@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-08-27
+
+### Added
+- Reactivation of deactivated LI tasks using the same XID when the interception identity remains compatible
+- Task lifecycle status in X1 task-detail responses, including pending, active, deactivated, and expired states
+
+### Changed
+- Made LI tombstone reactivation validation atomic and generation-aware while preserving activation identity
+- Emit X1 timestamps with qualified microsecond precision and updated the bundled ETSI schemas accordingly
+
+### Fixed
+- Prevented conflicting or invalid tombstone reactivation from partially mutating task state
+- Corrected X1 timestamp formatting to satisfy ETSI microsecond conformance requirements
+
 ## [0.10.2] - 2026-08-26
 
 ### Added

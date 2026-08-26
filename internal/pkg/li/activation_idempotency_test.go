@@ -205,7 +205,7 @@ func TestActivateTaskRetryAfterActiveRestoration(t *testing.T) {
 }
 
 func TestActivateTaskClosedLifecycleStatesConflict(t *testing.T) {
-	for _, status := range []TaskStatus{TaskStatusSuspended, TaskStatusFailed, TaskStatusDeactivated} {
+	for _, status := range []TaskStatus{TaskStatusSuspended, TaskStatusFailed} {
 		t.Run(status.String(), func(t *testing.T) {
 			m, _, dids := newIdempotencyManager(t, "")
 			task := idempotencyTask(uuid.New(), dids, time.Time{})
@@ -217,8 +217,6 @@ func TestActivateTaskClosedLifecycleStatesConflict(t *testing.T) {
 				m.registry.mu.Unlock()
 			case TaskStatusFailed:
 				require.NoError(t, m.registry.MarkTaskFailed(task.XID, "test"))
-			case TaskStatusDeactivated:
-				require.NoError(t, m.registry.DeactivateTask(task.XID))
 			}
 			err := m.ActivateTask(cloneActivationTask(task))
 			require.True(t, errors.Is(err, ErrTaskDefinitionConflict), err)

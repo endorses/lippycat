@@ -120,17 +120,17 @@ Implementation tasks, in mutation order:
 
 Update `Manager.activateTask` lifecycle dispatch as follows:
 
-- [ ] Preserve existing canonical retry behavior for `Active` and `Pending`.
-- [ ] Preserve the existing definition conflict for `Suspended` and `Failed`.
-- [ ] For `Deactivated`, compare the protected reactivation identity.
-- [ ] Return the new reactivation conflict on an identity mismatch without
+- [x] Preserve existing canonical retry behavior for `Active` and `Pending`.
+- [x] Preserve the existing definition conflict for `Suspended` and `Failed`.
+- [x] For `Deactivated`, compare the protected reactivation identity.
+- [x] Return the new reactivation conflict on an identity mismatch without
       changing registry, filters, persistence, or audit state.
-- [ ] On an identity match, continue through the ordinary registry activation,
+- [x] On an identity match, continue through the ordinary registry activation,
       filter-installation, commit, logging, and persistence path.
-- [ ] Continue to fail closed for unknown lifecycle states.
-- [ ] Keep the normal transactional activation and rollback path as the single
+- [x] Continue to fail closed for unknown lifecycle states.
+- [x] Keep the normal transactional activation and rollback path as the single
       filter-enforcement path; do not create a separate reactivation installer.
-- [ ] Add structured lifecycle logging that distinguishes reactivation from
+- [x] Add structured lifecycle logging that distinguishes reactivation from
       initial activation without logging target values. Include XID, previous
       and new generation, resulting state, destination count, and filter count
       where available.

@@ -81,7 +81,7 @@ func TestPhase3ReactivationOfDeactivatedTaskFailsClosed(t *testing.T) {
 	replacement := phase2Task(did)
 	replacement.XID = task.XID
 	replacement.Targets[0].Value = "sip:replacement@example.com"
-	require.ErrorIs(t, m.ActivateTask(replacement), ErrTaskDefinitionConflict)
+	require.ErrorIs(t, m.ActivateTask(replacement), ErrReactivationIdentityConflict)
 	got, err := m.GetTaskDetails(task.XID)
 	require.NoError(t, err)
 	assert.Equal(t, before, got)

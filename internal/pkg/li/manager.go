@@ -1016,6 +1016,8 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 	if task == nil {
 		return fmt.Errorf("%w: task is nil", ErrInvalidTask)
 	}
+	isReactivation := false
+	var previousGeneration uint64
 	if existing, err := m.registry.GetTaskDetails(task.XID); err == nil {
 		switch existing.Status {
 		case TaskStatusActive, TaskStatusPending:
@@ -1025,8 +1027,14 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 				return nil
 			}
 			return fmt.Errorf("%w: XID %s is %s", ErrTaskDefinitionConflict, task.XID, existing.Status)
-		case TaskStatusSuspended, TaskStatusFailed, TaskStatusDeactivated:
+		case TaskStatusSuspended, TaskStatusFailed:
 			return fmt.Errorf("%w: XID %s is %s", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		case TaskStatusDeactivated:
+			if !equivalentReactivationIdentity(existing, task) {
+				return fmt.Errorf("%w: XID %s", ErrReactivationIdentityConflict, task.XID)
+			}
+			isReactivation = true
+			previousGeneration = existing.ActivationGeneration
 		default:
 			return fmt.Errorf("%w: XID %s has unknown status %d", ErrTaskDefinitionConflict, task.XID, existing.Status)
 		}
@@ -1051,7 +1059,7 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 			return err
 		}
-		logger.Info("LI task registered pending", "xid", task.XID, "start_time", registered.StartTime, "end_time", registered.EndTime)
+		logTaskActivation(isReactivation, registered, previousGeneration, 0)
 		return m.persistState()
 	}
 	filterIDs, err := m.filters.CreateFiltersForTask(registered)
@@ -1064,13 +1072,28 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 			m.filters.RemoveFiltersForTask(task.XID), m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
 	}
 
-	logger.Info("LI task activated",
-		"xid", task.XID,
-		"targets", len(task.Targets),
-		"filters", len(filterIDs),
-		"delivery_type", task.DeliveryType.String(),
-	)
+	logTaskActivation(isReactivation, registered, previousGeneration, len(filterIDs))
 	return m.persistState()
+}
+
+func logTaskActivation(reactivation bool, task *InterceptTask, previousGeneration uint64, filterCount int) {
+	operation := "activation"
+	message := "LI task activated"
+	if reactivation {
+		operation = "reactivation"
+		message = "LI task reactivated"
+	} else if task.Status == TaskStatusPending {
+		message = "LI task registered pending"
+	}
+	logger.Info(message,
+		"operation", operation,
+		"xid", task.XID,
+		"previous_generation", previousGeneration,
+		"new_generation", task.ActivationGeneration,
+		"state", task.Status.String(),
+		"destinations", len(task.DestinationIDs),
+		"filters", filterCount,
+	)
 }
 
 func (m *Manager) completeExpiration(task *InterceptTask) error {

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.6] - 2026-08-27
+
+### Changed
+- Accept mandatory mediation-level LIID and delivery type fields from schema-conformant X1 peers while continuing to route delivery by DID
+
+### Fixed
+- Preserve mediation windows from conformant activation requests so task end times remain enforceable
+- Recognize namespace-prefixed `xsi:type` values in ADMF error responses and surface their error code and description
+
 ## [0.10.5] - 2026-08-27
 
 ### Changed

@@ -58,7 +58,7 @@ func TestCapabilityMatrix_CoversEveryAcceptedSchemaElement(t *testing.T) {
 		"DeliveryAddress": "supported-partially", "DestinationDetailsExtensions": "rejected",
 	}
 	mediation := map[string]string{
-		"LIID": "rejected", "DeliveryType": "rejected", "StartTime": "supported",
+		"LIID": "supported", "DeliveryType": "supported", "StartTime": "supported",
 		"EndTime": "supported", "ListOfDIDs": "rejected", "MediationDetailsExtensions": "rejected",
 		"ServiceScopingOptions": "rejected", "ListOfTrafficPolicyReferences": "rejected",
 	}
@@ -109,26 +109,19 @@ func TestCapabilityValidation_RejectsUnsupportedTaskSemantics(t *testing.T) {
 	assert.Contains(t, err.Error(), "traffic policy")
 }
 
-func TestCapabilityValidation_RejectsMediationLevelOverrides(t *testing.T) {
+func TestCapabilityValidation_AcceptsMandatoryMediationFieldsAndRejectsOptionalDIDs(t *testing.T) {
 	liid := schema.LIID("LIID-1")
 	did := schema.UUID("4d9980dd-3b74-444d-a8fb-f3ee63fb9d5c")
-	tests := []struct {
-		name      string
-		mediation *schema.MediationDetails
-		contains  string
-	}{
-		{"LIID", &schema.MediationDetails{LIID: &liid}, "LIID"},
-		{"delivery type", &schema.MediationDetails{DeliveryType: "X2Only"}, "delivery type"},
-		{"destination IDs", &schema.MediationDetails{ListOfDIDs: &schema.ListOfDids{DId: []*schema.UUID{&did}}}, "destination IDs"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateTaskCapabilities(&schema.TaskDetails{ListOfMediationDetails: &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{tt.mediation}}}, false)
-			require.Error(t, err)
-			assert.Equal(t, ErrorCodeTargetNotSupported, err.code)
-			assert.Contains(t, err.Error(), tt.contains)
-		})
-	}
+	require.Nil(t, validateTaskCapabilities(&schema.TaskDetails{ListOfMediationDetails: &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{
+		LIID: &liid, DeliveryType: "X2Only",
+	}}}}, false))
+
+	err := validateTaskCapabilities(&schema.TaskDetails{ListOfMediationDetails: &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{{
+		LIID: &liid, DeliveryType: "X2Only", ListOfDIDs: &schema.ListOfDids{DId: []*schema.UUID{&did}},
+	}}}}, false)
+	require.Error(t, err)
+	assert.Equal(t, ErrorCodeTargetNotSupported, err.code)
+	assert.Contains(t, err.Error(), "destination IDs")
 }
 
 func TestCapabilityValidation_DestinationChoices(t *testing.T) {

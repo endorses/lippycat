@@ -1375,6 +1375,13 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 			ErrorCodeGenericError, "failed to activate task: "+err.Error())
 	}
 
+	if hasMediationIdentity(details.ListOfMediationDetails) {
+		logger.Info("X1 mediation identity recorded but not used for enforcement",
+			"xid", xid,
+			"reason", "lippycat delivers by DID; the MDF owns XID-to-LIID mapping",
+		)
+	}
+
 	logger.Info("X1 task activated",
 		"xid", xid,
 		"targets", len(targets),
@@ -1383,6 +1390,18 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 	)
 
 	return s.buildOKResponse(req.X1RequestMessage, MessageTypeActivateTask)
+}
+
+func hasMediationIdentity(list *schema.ListOfMediationDetails) bool {
+	if list == nil {
+		return false
+	}
+	for _, mediation := range list.MediationDetails {
+		if mediation != nil && (mediation.LIID != nil || mediation.DeliveryType != "") {
+			return true
+		}
+	}
+	return false
 }
 
 // handleDeactivateTask handles DeactivateTaskRequest.

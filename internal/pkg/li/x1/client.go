@@ -935,7 +935,7 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 	}
 	for _, message := range container.RawMessages {
 		for _, attr := range message.Attrs {
-			if attr.Name.Local != "type" || attr.Value != "ErrorResponse" {
+			if attr.Name.Local != "type" || localXMLName(attr.Value) != "ErrorResponse" {
 				continue
 			}
 			wrappedXML := []byte("<x1ResponseMessage>" + string(message.Inner) + "</x1ResponseMessage>")
@@ -969,6 +969,15 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 	}
 
 	return nil
+}
+
+// localXMLName returns the local part of a lexical XML QName. encoding/xml
+// preserves namespace prefixes in attribute values rather than resolving them.
+func localXMLName(name string) string {
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		return name[i+1:]
+	}
+	return name
 }
 
 // sendRequestWithRetry sends an X1 request with exponential backoff retry.

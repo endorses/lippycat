@@ -660,6 +660,34 @@ func TestServer_ActivateTaskMapsReactivationIdentityConflict(t *testing.T) {
 	assert.Contains(t, w.Body.String(), xid.String())
 }
 
+func TestServer_ActivateTaskPreservesSpecificFailureCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		code   int
+		detail string
+	}{
+		{"active definition conflict", ErrTaskDefinitionConflict, ErrorCodeXIDAlreadyExists, "use ModifyTask"},
+		{"missing destination", ErrDestinationNotFound, ErrorCodeDIDNotFound, "destination not found"},
+		{"unsupported combination", ErrUnsupportedDeliveryCombination, ErrorCodeDeliveryNotPossible, "unsupported task capability"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := newMockTaskManager()
+			tasks.activateErr = fmt.Errorf("%w: injected detail", tt.err)
+			s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), tasks)
+			xid, did := uuid.New(), uuid.New()
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(requestXML("activateTaskRequest", DefaultProtocolVersion, taskXML(xid, did, true))))
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), fmt.Sprintf("<errorCode>%d</errorCode>", tt.code))
+			assert.Contains(t, w.Body.String(), tt.detail)
+		})
+	}
+}
+
 func TestServer_HandleActivateTask_AlreadyExists(t *testing.T) {
 	destMock := newMockDestinationManager()
 	taskMock := newMockTaskManager()
@@ -887,6 +915,77 @@ func TestServer_HandleGetTaskDetails(t *testing.T) {
 	assert.Contains(t, w.Body.String(), start.Format(time.RFC3339Nano))
 	assert.Contains(t, w.Body.String(), end.Format(time.RFC3339Nano))
 	assert.Contains(t, w.Body.String(), "<provisioningStatus>complete</provisioningStatus>")
+}
+
+func TestServer_GetTaskDetailsLifecycleExtension(t *testing.T) {
+	tests := []struct {
+		status       TaskStatus
+		provisioning string
+		lifecycle    string
+	}{
+		{TaskStatusPending, "awaitingProvisioning", "pending"},
+		{TaskStatusActive, "complete", "active"},
+		{TaskStatusSuspended, "complete", "suspended"},
+		{TaskStatusDeactivated, "complete", "deactivated"},
+		{TaskStatusFailed, "failed", "failed"},
+	}
+
+	type lifecycleElement struct {
+		Version string `xml:"version,attr"`
+		Value   string `xml:",chardata"`
+	}
+	type extension struct {
+		Owner     string           `xml:"Owner"`
+		Lifecycle lifecycleElement `xml:"urn:lippycat:etsi:x1:task-status lifecycleState"`
+	}
+	type response struct {
+		Messages []struct {
+			Details struct {
+				Status struct {
+					Provisioning string      `xml:"provisioningStatus"`
+					Extensions   []extension `xml:"taskStatusExtensions"`
+				} `xml:"taskStatus"`
+			} `xml:"taskResponseDetails"`
+		} `xml:"x1ResponseMessage"`
+	}
+	type ignoringPeerResponse struct {
+		Messages []struct {
+			Details *schema.TaskResponseDetails `xml:"taskResponseDetails"`
+		} `xml:"x1ResponseMessage"`
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.lifecycle, func(t *testing.T) {
+			taskMock := newMockTaskManager()
+			xid := uuid.New()
+			taskMock.tasks[xid] = &Task{XID: xid, Status: tt.status, DeliveryType: DeliveryX2Only}
+			s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), taskMock)
+			body := `<getTaskDetailsRequest><admfIdentifier>test-admf</admfIdentifier><xId>` + xid.String() + `</xId></getTaskDetailsRequest>`
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)))
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var got response
+			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &got))
+			require.Len(t, got.Messages, 1)
+			status := got.Messages[0].Details.Status
+			require.Equal(t, tt.provisioning, status.Provisioning)
+			require.Len(t, status.Extensions, 1)
+			require.Equal(t, TaskStatusExtensionOwner, status.Extensions[0].Owner)
+			require.Equal(t, TaskStatusExtensionVersion, status.Extensions[0].Lifecycle.Version)
+			require.Equal(t, tt.lifecycle, status.Extensions[0].Lifecycle.Value)
+
+			// A schema-aware peer that does not model the foreign element still
+			// parses the standard response and extension owner.
+			var peer ignoringPeerResponse
+			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &peer))
+			require.Len(t, peer.Messages, 1)
+			require.NotNil(t, peer.Messages[0].Details)
+			require.Equal(t, tt.provisioning, peer.Messages[0].Details.TaskStatus.ProvisioningStatus)
+			require.Len(t, peer.Messages[0].Details.TaskStatus.TaskStatusExtensions, 1)
+			require.Equal(t, TaskStatusExtensionOwner, peer.Messages[0].Details.TaskStatus.TaskStatusExtensions[0].Owner)
+		})
+	}
 }
 
 func TestServer_HandleGetTaskDetails_NotFound(t *testing.T) {

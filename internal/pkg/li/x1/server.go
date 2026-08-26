@@ -53,6 +53,14 @@ const contentTypeXML = "application/xml; charset=utf-8"
 // etsiX1Namespace is the ETSI TS 103 221-1 XML namespace for X1 messages.
 const etsiX1Namespace = "http://uri.etsi.org/03221/X1/2017/10"
 
+// Task lifecycle extension wire contract. The ETSI TaskStatusExtensions type
+// permits elements from foreign namespaces after its Owner field.
+const (
+	TaskStatusExtensionOwner     = "lippycat"
+	TaskStatusExtensionNamespace = "urn:lippycat:etsi:x1:task-status"
+	TaskStatusExtensionVersion   = "1"
+)
+
 // X1 request message types.
 const (
 	MessageTypeCreateDestination = "CreateDestinationRequest"
@@ -1575,16 +1583,58 @@ func (s *Server) handleGetTaskDetails(req *schema.GetTaskDetailsRequest) any {
 
 	logger.Debug("X1 task details retrieved", "xid", xid, "status", task.Status)
 
-	return &schema.GetTaskDetailsResponse{
+	return &getTaskDetailsResponseWire{
 		X1ResponseMessage: s.responseMessage(req.X1RequestMessage),
-		TaskResponseDetails: &schema.TaskResponseDetails{
+		TaskResponseDetails: &taskResponseDetailsWire{
 			TaskDetails: taskDetailsResponse(task),
-			TaskStatus: &schema.TaskStatus{
+			TaskStatus: &taskStatusWire{
 				ProvisioningStatus: taskProvisioningStatus(task.Status),
 				ListOfFaults:       taskFaults(task.LastError),
+				TaskStatusExtensions: []taskStatusExtensionWire{{
+					LifecycleState: taskLifecycleState(task.Status),
+				}},
 			},
 		},
 	}
+}
+
+// These handwritten response types are the smallest boundary needed to emit
+// the xs:any body omitted by the generated schema.Extension Go type.
+type getTaskDetailsResponseWire struct {
+	TaskResponseDetails *taskResponseDetailsWire `xml:"taskResponseDetails"`
+	*schema.X1ResponseMessage
+}
+
+type taskResponseDetailsWire struct {
+	TaskDetails *schema.TaskDetails `xml:"taskDetails"`
+	TaskStatus  *taskStatusWire     `xml:"taskStatus"`
+}
+
+type taskStatusWire struct {
+	ProvisioningStatus   string                    `xml:"provisioningStatus"`
+	ListOfFaults         *schema.ListOfFaults      `xml:"listOfFaults"`
+	TaskStatusExtensions []taskStatusExtensionWire `xml:"taskStatusExtensions,omitempty"`
+}
+
+type taskStatusExtensionWire struct {
+	LifecycleState string
+}
+
+func (x taskStatusExtensionWire) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	if err := e.EncodeToken(start); err != nil {
+		return err
+	}
+	if err := e.EncodeElement(TaskStatusExtensionOwner, xml.StartElement{Name: xml.Name{Local: "Owner"}}); err != nil {
+		return err
+	}
+	lifecycleStart := xml.StartElement{
+		Name: xml.Name{Space: TaskStatusExtensionNamespace, Local: "lifecycleState"},
+		Attr: []xml.Attr{{Name: xml.Name{Local: "version"}, Value: TaskStatusExtensionVersion}},
+	}
+	if err := e.EncodeElement(x.LifecycleState, lifecycleStart); err != nil {
+		return err
+	}
+	return e.EncodeToken(start.End())
 }
 
 func taskDetailsResponse(task *Task) *schema.TaskDetails {
@@ -1669,7 +1719,24 @@ func taskProvisioningStatus(status TaskStatus) string {
 	case TaskStatusFailed:
 		return "failed"
 	default:
-		return "unknown"
+		return "failed"
+	}
+}
+
+func taskLifecycleState(status TaskStatus) string {
+	switch status {
+	case TaskStatusPending:
+		return "pending"
+	case TaskStatusActive:
+		return "active"
+	case TaskStatusSuspended:
+		return "suspended"
+	case TaskStatusDeactivated:
+		return "deactivated"
+	case TaskStatusFailed:
+		return "failed"
+	default:
+		return "failed"
 	}
 }
 

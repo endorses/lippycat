@@ -11,7 +11,7 @@ Allow an explicit, authenticated activation request to replace a retained
 deactivated task with the same XID when the interception identity is unchanged.
 The replacement must pass normal activation validation, install enforcement
 filters transactionally, retain the prior deactivation in audit history, and
-remain distinguishable from an active task through the X1 status response.
+preserve standards-defined X1 provisioning status behavior.
 
 This plan supersedes only the decision in
 `docs/plans/etsi-li-interoperability-remediation-2026-08-26.md` that all
@@ -35,9 +35,9 @@ unchanged.
 6. Activation success increments the activation generation, installs exactly
    the filters for the new activation, and preserves the previous deactivated
    task in audit history.
-7. Task-detail responses expose whether a provisioned task is pending, active,
-   suspended, deactivated, or failed without assigning a non-standard value to
-   the closed `ProvisioningStatus` enumeration.
+7. Task-detail responses use only the closed, standards-defined
+   `ProvisioningStatus` enumeration and contain no vendor-specific lifecycle
+   element.
 8. Existing active and pending duplicate-activation behavior remains a pure,
    idempotent read for equivalent definitions.
 
@@ -135,29 +135,16 @@ Update `Manager.activateTask` lifecycle dispatch as follows:
       and new generation, resulting state, destination count, and filter count
       where available.
 
-## 7. Phase 4 — Expose lifecycle state through task status extensions
+## 7. Phase 4 — Preserve standards-defined task status
 
 Implementation tasks:
 
 - [x] Preserve the schema-conformant provisioning mapping: pending to
       `awaitingProvisioning`, failed to `failed`, and active, suspended, and
       deactivated to `complete`.
-- [x] Define a `taskStatusExtensions` wire contract using a stable,
-      project-controlled XML namespace and owner identifier.
-- [x] Define a versioned extension element or structure.
-- [x] Encode one of `pending`, `active`, `suspended`, `deactivated`, or `failed`.
-- [x] Keep the extension optional so peers that ignore unknown extensions
-      remain compatible.
-- [x] Include the extension consistently in `GetTaskDetails` responses for
-      every task state.
-- [x] Avoid exposing internal errors or sensitive operational details beyond
-      the existing fault response.
-- [x] If generated schema types cannot marshal the extension body, add the
-      smallest handwritten wire type or custom marshaling boundary needed.
-- [x] Do not modify bundled ETSI schemas to add a project-specific element.
-- [x] Document the extension namespace, version, values, and its role as an
-      operational enforcement-state signal rather than a replacement for
-      provisioning status.
+- [x] Emit no vendor-specific lifecycle element from `GetTaskDetails`.
+- [x] Remove the custom extension marshaler and use the generated ETSI response
+      types.
 
 ## 8. Tests
 
@@ -199,11 +186,9 @@ Implementation tasks:
       behavior.
 - [x] Missing destinations and unsupported delivery combinations retain their
       existing specific response codes.
-- [x] Task details marshal a valid lifecycle extension for all five internal
-      states while retaining schema-valid provisioning values.
-- [x] The extension has the documented owner, namespace, version, and value.
-- [x] A schema-aware round trip preserves the extension, and a peer that ignores
-      it can still parse the rest of the response.
+- [x] Task details retain schema-defined provisioning values for all five
+      internal states.
+- [x] Task-detail responses contain no vendor-specific status element.
 
 ## 9. Documentation and compatibility updates
 
@@ -212,7 +197,8 @@ Implementation tasks:
 - [x] Document which fields form protected reactivation identity and which may
       be replaced.
 - [x] Document the non-300 changed-identity response contract.
-- [x] Document the task-status extension wire format and monitoring semantics.
+- [x] Document that X1 task status uses only the standards-defined provisioning
+      values.
 - [x] Update the earlier interoperability plan's implementation-status section
       so it no longer claims that deactivated tasks always conflict.
 - [x] Review examples and runbooks that describe deactivate/reactivate recovery
@@ -251,9 +237,8 @@ make verify-no-li
 git diff --check
 ```
 
-- [x] Build the complete, processor-LI, and tap-LI variants to ensure the
-      lifecycle extension and new errors do not leak into or break non-LI
-      builds.
+- [x] Build the complete, processor-LI, and tap-LI variants to ensure the new
+      errors do not leak into or break non-LI builds.
 
 ## 11. Acceptance criteria
 

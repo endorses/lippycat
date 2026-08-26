@@ -175,7 +175,9 @@ func (p *Processor) initLIManager() {
 		liReorderBuffers.Range(func(key, value any) bool {
 			keyString, ok := key.(string)
 			if ok && strings.HasPrefix(keyString, prefix) {
-				value.(*delivery.ReorderBuffer).Stop()
+				// Expiry/deactivation is an enforcement boundary. Buffered X3
+				// packets must be discarded, not flushed after the task ended.
+				value.(*delivery.ReorderBuffer).Discard()
 				liReorderBuffers.Delete(key)
 			}
 			return true

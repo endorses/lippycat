@@ -355,18 +355,40 @@ The race-enabled LI suite currently fails because
 The following existing hardening work remains part of interoperability quality
 because failures are externally visible even when both peers conform:
 
-- [ ] Identify ownership of ambiguous legacy filters before removing them.
-- [ ] Verify start-boundary promotion installs filters before processing matched
+- [x] Identify ownership of ambiguous legacy filters before removing them.
+- [x] Verify start-boundary promotion installs filters before processing matched
       packets and rolls back atomically on failure.
-- [ ] Verify expiry stops packet processing, clears sequencing/reorder state,
+- [x] Verify expiry stops packet processing, clears sequencing/reorder state,
       retries failed removal, and is idempotent with concurrent deactivation.
-- [ ] Verify outage retries grow and cap under continuous enqueue without busy
+- [x] Verify outage retries grow and cap under continuous enqueue without busy
       looping, and shutdown interrupts them.
-- [ ] Verify saturated destination workers are isolated and drops are attributed
+- [x] Verify saturated destination workers are isolated and drops are attributed
       to the correct destination/interface.
-- [ ] Verify queued and reconnected delivery preserves capture timestamps.
-- [ ] Complete race-enabled callback-replacement tests and matched/unmatched
+- [x] Verify queued and reconnected delivery preserves capture timestamps.
+- [x] Complete race-enabled callback-replacement tests and matched/unmatched
       packet benchmarks.
+
+### 7.1 Implementation status
+
+Completed on 2026-08-26:
+
+- Startup reconciliation removes canonical and uniquely owned legacy LI filters,
+  but retains ambiguous eight-character legacy IDs when multiple ADMF XIDs share
+  the prefix.
+- Pending promotion installs filters before changing task status and rolls back
+  installed filters on promotion failure.
+- Expiry gates processing before withdrawal, retains failed filter mappings for
+  retry, and processor teardown now discards buffered X3 PDUs instead of
+  flushing them beyond the enforcement boundary. It also clears X2/X3
+  sequencing, media direction, call pins, and reorder state.
+- Per-destination delivery dispatchers use capped interruptible retry backoff;
+  queue pressure and terminal drops remain attributed by destination and X2/X3
+  interface.
+- X2/X3 PDUs are encoded from the packet capture timestamp before immutable
+  bytes enter the queue, so outage buffering and reconnection cannot replace it
+  with enqueue or delivery time.
+- Atomic packet-callback replacement is exercised concurrently under the race
+  detector, and matched/unmatched processing benchmarks cover both paths.
 
 ## 8. Completion criteria
 

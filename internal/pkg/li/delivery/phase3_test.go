@@ -59,6 +59,28 @@ func TestReorderLimitsAndCallbackOutsideLock(t *testing.T) {
 	require.LessOrEqual(t, p, 2)
 	rb.Stop()
 }
+
+func TestReorderDiscardStopsWithoutDeliveringBufferedPDUs(t *testing.T) {
+	var delivered [][]byte
+	rb := NewReorderBuffer(func(pdu []byte) {
+		delivered = append(delivered, append([]byte(nil), pdu...))
+	}, time.Hour)
+
+	rb.DeliverX3(7, 10, []byte("first"))
+	rb.DeliverX3(7, 12, []byte("buffered"))
+	require.Equal(t, [][]byte{[]byte("first")}, delivered)
+	packets, bytes := rb.Buffered()
+	require.Equal(t, 1, packets)
+	require.Positive(t, bytes)
+
+	rb.Discard()
+	rb.DeliverX3(7, 11, []byte("after-stop"))
+
+	assert.Equal(t, [][]byte{[]byte("first")}, delivered)
+	packets, bytes = rb.Buffered()
+	assert.Zero(t, packets)
+	assert.Zero(t, bytes)
+}
 func TestDestinationQueueSeparatesX2AndX3(t *testing.T) {
 	q := newDestinationQueue(uuid.New(), 2)
 	x2 := &deliveryItem{pduType: PDUTypeX2}

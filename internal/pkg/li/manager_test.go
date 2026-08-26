@@ -208,7 +208,7 @@ func TestManager_ModifyTask(t *testing.T) {
 	task := &InterceptTask{
 		XID: taskXID,
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:alice-ip-replacement@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,
@@ -220,8 +220,8 @@ func TestManager_ModifyTask(t *testing.T) {
 
 	// Modify targets
 	newTargets := []TargetIdentity{
-		{Type: TargetTypeIPv4Address, Value: "192.168.1.101"},
-		{Type: TargetTypeIPv4Address, Value: "192.168.1.102"},
+		{Type: TargetTypeSIPURI, Value: "sip:bob@example.com"},
+		{Type: TargetTypeTELURI, Value: "tel:+15550102"},
 	}
 
 	err = m.ModifyTask(taskXID, &TaskModification{
@@ -277,7 +277,7 @@ func TestManager_ProcessPacket_WithMatch(t *testing.T) {
 	err = m.ActivateTask(&InterceptTask{
 		XID: taskXID,
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:packet-match@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,
@@ -352,7 +352,7 @@ func TestManager_ProcessPacket_NoMatch(t *testing.T) {
 	err = m.ActivateTask(&InterceptTask{
 		XID: uuid.New(),
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:no-match@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,
@@ -494,7 +494,7 @@ func TestManager_MarkTaskFailed(t *testing.T) {
 	err = m.ActivateTask(&InterceptTask{
 		XID: taskXID,
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:failed-task@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,

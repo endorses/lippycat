@@ -337,7 +337,7 @@ func TestRegistryGetTaskDetails(t *testing.T) {
 		XID: uuid.New(),
 		Targets: []TargetIdentity{
 			{Type: TargetTypeSIPURI, Value: "sip:alice@example.com"},
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeTELURI, Value: "tel:+15550100"},
 		},
 		DestinationIDs: []uuid.UUID{dest.DID},
 		DeliveryType:   DeliveryX2andX3,

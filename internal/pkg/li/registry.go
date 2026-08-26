@@ -657,9 +657,7 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 	for _, target := range task.Targets {
 		switch target.Type {
 		case TargetTypeIPv4Address, TargetTypeIPv4CIDR, TargetTypeIPv6Address, TargetTypeIPv6CIDR:
-			if task.DeliveryType == DeliveryX2Only {
-				return fmt.Errorf("%w: %s targets require X3 raw-packet delivery", ErrUnsupportedDeliveryCombination, target.Type)
-			}
+			return fmt.Errorf("%w: %s targets require raw-IP interception, whose correlated IRI/CC session model is not implemented", ErrUnsupportedDeliveryCombination, target.Type)
 		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI:
 		default:
 			return fmt.Errorf("%w: target type %d has no encoder", ErrUnsupportedDeliveryCombination, target.Type)

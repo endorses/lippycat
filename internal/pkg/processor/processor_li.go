@@ -9,7 +9,6 @@ package processor
 import (
 	"errors"
 	"fmt"
-	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -377,33 +376,6 @@ func (p *Processor) initLIManager() {
 			}
 		}
 
-		// IP/CIDR targets carry matched ordinary traffic as raw X3 CC. They do
-		// not generate synthetic X2 IRI.
-		if deliverX3 && (pkt.VoIPData == nil || !pkt.VoIPData.IsRTP) {
-			matchedTarget, ok := matchedRawIPTarget(task.Targets, pkt)
-			if ok {
-				pdu, err := liX3Encoder.EncodeRawIPCC(pkt, task.XID, matchedTarget)
-				if err != nil {
-					liX3Errors.Add(1)
-					liNoEncoder.Add(1)
-					logger.Warn("LI raw X3 encode failed", "xid", task.XID, "target", matchedTarget, "error", err)
-					return
-				}
-				attrBuilder := x2x3.NewAttributeBuilder()
-				pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(matchedTarget))
-				if data, marshalErr := pdu.MarshalBinary(); marshalErr != nil {
-					liX3Errors.Add(1)
-					logger.Warn("raw X3 PDU marshal error", "xid", task.XID, "error", marshalErr)
-				} else {
-					liX3Encoded.Add(1)
-					if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
-						if sendErr := liDeliveryClient.SendX3(task.XID, task.DestinationIDs, data); sendErr != nil {
-							logger.Warn("raw X3 delivery enqueue failed", "xid", task.XID, "error", sendErr)
-						}
-					}
-				}
-			}
-		}
 	})
 
 	logger.Info("LI Manager initialized",
@@ -597,24 +569,4 @@ func (p *Processor) getLIEncodingStats() LIEncodingStats {
 		DirectionResolvedMedia: dirStats.ResolvedFromMedia,
 		DirectionUnknownRTP:    dirStats.UnknownRTP,
 	}
-}
-
-func matchedRawIPTarget(targets []li.TargetIdentity, pkt *types.PacketDisplay) (string, bool) {
-	src, srcErr := netip.ParseAddr(pkt.SrcIP)
-	dst, dstErr := netip.ParseAddr(pkt.DstIP)
-	for _, target := range targets {
-		switch target.Type {
-		case li.TargetTypeIPv4Address, li.TargetTypeIPv6Address:
-			a, err := netip.ParseAddr(target.Value)
-			if err == nil && ((srcErr == nil && src == a) || (dstErr == nil && dst == a)) {
-				return target.Value, true
-			}
-		case li.TargetTypeIPv4CIDR, li.TargetTypeIPv6CIDR:
-			prefix, err := netip.ParsePrefix(target.Value)
-			if err == nil && ((srcErr == nil && prefix.Contains(src)) || (dstErr == nil && prefix.Contains(dst))) {
-				return target.Value, true
-			}
-		}
-	}
-	return "", false
 }

@@ -1242,7 +1242,8 @@ func TestServer_HandleActivateTask_MultipleTargets(t *testing.T) {
 	assert.Equal(t, did2, task.DestinationIDs[1])
 }
 
-// TestServer_HandleActivateTask_IPv4Target tests task activation with IPv4 address target.
+// TestServer_HandleActivateTask_IPv4Target verifies raw-IP provisioning fails
+// closed until a correlated IRI/CC session model exists.
 func TestServer_HandleActivateTask_IPv4Target(t *testing.T) {
 	destMock := newMockDestinationManager()
 	taskMock := newMockTaskManager()
@@ -1275,12 +1276,9 @@ func TestServer_HandleActivateTask_IPv4Target(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	task := taskMock.tasks[xid]
-	require.NotNil(t, task)
-	require.Len(t, task.Targets, 1)
-	assert.Equal(t, TargetTypeIPv4Address, task.Targets[0].Type)
-	assert.Equal(t, "192.168.1.100", task.Targets[0].Value)
-	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
+	assert.Contains(t, w.Body.String(), "<errorCode>401</errorCode>")
+	assert.Contains(t, w.Body.String(), "raw-IP interception")
+	assert.NotContains(t, taskMock.tasks, xid)
 }
 
 // TestServer_HandleActivateTask_NAITarget tests task activation with NAI target.

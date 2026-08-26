@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.5] - 2026-08-27
+
+### Changed
+- Emit derived ETSI X1 responses through `x1ResponseMessage` with the correct `xsi:type`, base-field ordering, and request-operation vocabulary
+- Keep inbound X1 response parsing compatible with both schema-valid and legacy error response envelopes
+
+### Fixed
+- Correct task-detail mediation LIIDs, delivery-type values, and required fault-list serialization
+- Validate bare, derived, and error server responses against the bundled ETSI X1 schema
+
 ## [0.10.4] - 2026-08-27
 
 ### Changed

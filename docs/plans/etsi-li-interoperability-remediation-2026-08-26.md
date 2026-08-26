@@ -247,11 +247,19 @@ Implemented on 2026-08-26:
 - Equivalent Active and Pending retries return while holding lifecycle
   serialization, before generation, filter, worker, counter, or persistence
   mutation.
-- Definition changes and retries in Suspended (including expiration cleanup),
-  Failed, and Deactivated states fail closed and direct the ADMF to ModifyTask.
+- Definition changes and retries in Suspended (including expiration cleanup)
+  and Failed states fail closed and direct the ADMF to ModifyTask. A later
+  remediation permits an explicit activation to replace a Deactivated
+  tombstone only when its XID, canonical targets, and delivery type are
+  unchanged; active and pending retry identity remains unchanged.
 - Tests cover reordered and duplicate values, every definition field,
   concurrency, state restoration, filter calls, generations, persistence, and
   lifecycle-state conflicts.
+
+The deactivated-task rule above is superseded by
+`li-tombstone-reactivation-and-lifecycle-observability.md`. Changed protected
+identity fails with generic request error 100 rather than XID conflict 300, and
+successful reactivation follows the normal transactional activation path.
 
 Post-audit remediation preserves `ErrTaskDefinitionConflict` through the X1
 adapter and returns a response directing the ADMF to `ModifyTask`. Restoration

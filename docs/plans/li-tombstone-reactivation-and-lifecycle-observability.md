@@ -97,22 +97,22 @@ all fallible validation ahead of those mutations.
 
 Implementation tasks, in mutation order:
 
-- [ ] Validate the task structure and supported capabilities before mutating
+- [x] Validate the task structure and supported capabilities before mutating
       registry state.
-- [ ] Lock the registry and inspect the current XID state.
-- [ ] Validate every destination reference and task/destination delivery
+- [x] Lock the registry and inspect the current XID state.
+- [x] Validate every destination reference and task/destination delivery
       combination while holding the same lock used for the eventual mutation.
-- [ ] Deep-copy the prior deactivated task into rollback state and audit history
+- [x] Deep-copy the prior deactivated task into rollback state and audit history
       only after all validation succeeds.
-- [ ] Deep-copy the replacement task, assign activation time and the next
+- [x] Deep-copy the replacement task, assign activation time and the next
       generation, and store it as pending or active.
-- [ ] Commit the activation only after pending registration or successful
+- [x] Commit the activation only after pending registration or successful
       filter installation.
-- [ ] Ensure errors before rollback bookkeeping cause zero registry mutation.
-- [ ] Ensure manager-level failures after provisional activation restore the
+- [x] Ensure errors before rollback bookkeeping cause zero registry mutation.
+- [x] Ensure manager-level failures after provisional activation restore the
       tombstone and remove the provisional audit entry through
       `rollbackActivation`.
-- [ ] Define and document generation behavior for failed reactivation attempts.
+- [x] Define and document generation behavior for failed reactivation attempts.
       If counters remain monotonic across failed attempts, ensure persisted and
       externally visible task state still cannot appear to have activated.
 

@@ -237,8 +237,12 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 
 	// Validate destination IDs exist
 	for _, did := range task.DestinationIDs {
-		if _, exists := r.destinations[did]; !exists {
+		destination, exists := r.destinations[did]
+		if !exists {
 			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
+		}
+		if err := validateDestinationDelivery(task.DeliveryType, destination); err != nil {
+			return err
 		}
 	}
 
@@ -391,25 +395,47 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
+	// Validate the complete prospective definition before changing the live
+	// task. This prevents a later invalid field from leaving earlier fields
+	// partially applied.
+	candidate := *task
+	candidate.Targets = append([]TargetIdentity(nil), task.Targets...)
+	candidate.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	if mod.Targets != nil {
+		candidate.Targets = append([]TargetIdentity(nil), (*mod.Targets)...)
+	}
+	if mod.DestinationIDs != nil {
+		candidate.DestinationIDs = append([]uuid.UUID(nil), (*mod.DestinationIDs)...)
+	}
+	if mod.DeliveryType != nil {
+		candidate.DeliveryType = *mod.DeliveryType
+	}
+	if mod.EndTime != nil {
+		candidate.EndTime = *mod.EndTime
+	}
+	if mod.ImplicitDeactivationAllowed != nil {
+		candidate.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
+	}
+	if err := r.validateTask(&candidate); err != nil {
+		return err
+	}
+	for _, did := range candidate.DestinationIDs {
+		destination, exists := r.destinations[did]
+		if !exists {
+			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
+		}
+		if err := validateDestinationDelivery(candidate.DeliveryType, destination); err != nil {
+			return err
+		}
+	}
+
 	// Apply modifications atomically
 	if mod.Targets != nil {
-		// Validate new targets
-		for _, target := range *mod.Targets {
-			if target.Value == "" {
-				return fmt.Errorf("%w: empty target value", ErrInvalidTask)
-			}
-		}
-		task.Targets = *mod.Targets
+		task.Targets = candidate.Targets
 	}
 
 	if mod.DestinationIDs != nil {
-		// Validate destination IDs exist
-		for _, did := range *mod.DestinationIDs {
-			if _, destExists := r.destinations[did]; !destExists {
-				return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
-			}
-		}
-		task.DestinationIDs = *mod.DestinationIDs
+		task.DestinationIDs = candidate.DestinationIDs
 	}
 
 	if mod.DeliveryType != nil {
@@ -424,6 +450,24 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		task.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
 	}
 
+	return nil
+}
+
+func validateDestinationDelivery(deliveryType DeliveryType, destination *Destination) error {
+	if destination == nil {
+		return fmt.Errorf("%w: destination is nil", ErrUnsupportedDeliveryCombination)
+	}
+	// Destinations created by older internal APIs did not carry capability
+	// metadata. X1-created destinations always set ProtocolType, so enforce the
+	// declared interface capabilities without breaking restored legacy state.
+	if destination.ProtocolType == "" {
+		return nil
+	}
+	requiresX2 := deliveryType == DeliveryX2Only || deliveryType == DeliveryX2andX3
+	requiresX3 := deliveryType == DeliveryX3Only || deliveryType == DeliveryX2andX3
+	if (requiresX2 && !destination.X2Enabled) || (requiresX3 && !destination.X3Enabled) {
+		return fmt.Errorf("%w: DID %s cannot provide %s", ErrUnsupportedDeliveryCombination, destination.DID, deliveryType)
+	}
 	return nil
 }
 

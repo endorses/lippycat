@@ -83,6 +83,9 @@ var (
 	ErrInvalidTask = errors.New("invalid task parameters")
 	// ErrModifyNotAllowed indicates the requested modification is not permitted.
 	ErrModifyNotAllowed = errors.New("modification not allowed")
+	// ErrUnsupportedDeliveryCombination indicates that the requested targets
+	// and delivery type cannot be produced by this network element.
+	ErrUnsupportedDeliveryCombination = errors.New("unsupported delivery combination")
 )
 
 // Destination represents an X2/X3 delivery endpoint.
@@ -1085,6 +1088,10 @@ func (s *Server) handleCreateDestination(req *schema.CreateDestinationRequest) a
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeCreateDestination,
 			ErrorCodeRequestSyntaxError, "missing destination details or DID")
 	}
+	if capabilityErr := validateDestinationCapabilities(details, false); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeCreateDestination,
+			capabilityErr.code, capabilityErr.Error())
+	}
 
 	// Parse DID
 	did, err := uuid.Parse(string(*details.DId))
@@ -1139,6 +1146,10 @@ func (s *Server) handleModifyDestination(req *schema.ModifyDestinationRequest) a
 	if details == nil || details.DId == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyDestination,
 			ErrorCodeRequestSyntaxError, "missing destination details or DID")
+	}
+	if capabilityErr := validateDestinationCapabilities(details, true); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyDestination,
+			capabilityErr.code, capabilityErr.Error())
 	}
 
 	// Parse DID
@@ -1242,6 +1253,10 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 			ErrorCodeRequestSyntaxError, "missing task details or XID")
 	}
+	if capabilityErr := validateTaskCapabilities(details, false); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			capabilityErr.code, capabilityErr.Error())
+	}
 
 	// Parse XID
 	xid, err := uuid.Parse(string(*details.XId))
@@ -1311,6 +1326,10 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 				ErrorCodeRequestSyntaxError, "invalid task: "+err.Error())
 		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeDeliveryNotPossible, "unsupported task capability: "+err.Error())
+		}
 		// Check for destination not found error
 		if errors.Is(err, ErrDestinationNotFound) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
@@ -1376,6 +1395,10 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
 			ErrorCodeRequestSyntaxError, "missing task details or XID")
 	}
+	if capabilityErr := validateTaskCapabilities(details, true); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+			capabilityErr.code, capabilityErr.Error())
+	}
 
 	// Parse XID
 	xid, err := uuid.Parse(string(*details.XId))
@@ -1439,6 +1462,14 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 		if errors.Is(err, ErrModifyNotAllowed) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
 				ErrorCodeGenericError, "modification not allowed: "+err.Error())
+		}
+		if errors.Is(err, ErrInvalidTask) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeRequestSyntaxError, "invalid task modification: "+err.Error())
+		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeDeliveryNotPossible, "unsupported task capability: "+err.Error())
 		}
 		if errors.Is(err, ErrDestinationNotFound) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,

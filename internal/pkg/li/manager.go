@@ -1423,6 +1423,9 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
 		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return fmt.Errorf("%w: %v", x1.ErrUnsupportedDeliveryCombination, err)
+		}
 	}
 	return err
 }
@@ -1473,8 +1476,14 @@ func (m *Manager) ModifyTaskX1(xid uuid.UUID, mod *x1.TaskModification) error {
 		if errors.Is(err, ErrModifyNotAllowed) {
 			return x1.ErrModifyNotAllowed
 		}
+		if errors.Is(err, ErrInvalidTask) {
+			return x1.ErrInvalidTask
+		}
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
+		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return fmt.Errorf("%w: %v", x1.ErrUnsupportedDeliveryCombination, err)
 		}
 	}
 	return err

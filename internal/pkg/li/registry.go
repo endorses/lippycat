@@ -242,14 +242,16 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	// Destination existence and delivery compatibility are state-dependent.
 	// Validate them under the same lock as the eventual mutation so a
 	// destination cannot change between validation and registration.
+	destinations := make([]*Destination, 0, len(task.DestinationIDs))
 	for _, did := range task.DestinationIDs {
 		destination, exists := r.destinations[did]
 		if !exists {
 			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
 		}
-		if err := validateDestinationDelivery(task.DeliveryType, destination); err != nil {
-			return err
-		}
+		destinations = append(destinations, destination)
+	}
+	if err := validateDestinationDelivery(task, destinations); err != nil {
+		return err
 	}
 
 	// Only after every fallible validation has succeeded may reactivation add
@@ -456,14 +458,16 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	if err := r.validateTask(&candidate); err != nil {
 		return err
 	}
+	destinations := make([]*Destination, 0, len(candidate.DestinationIDs))
 	for _, did := range candidate.DestinationIDs {
 		destination, exists := r.destinations[did]
 		if !exists {
 			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
 		}
-		if err := validateDestinationDelivery(candidate.DeliveryType, destination); err != nil {
-			return err
-		}
+		destinations = append(destinations, destination)
+	}
+	if err := validateDestinationDelivery(&candidate, destinations); err != nil {
+		return err
 	}
 
 	// Apply modifications atomically
@@ -490,20 +494,35 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 	return nil
 }
 
-func validateDestinationDelivery(deliveryType DeliveryType, destination *Destination) error {
-	if destination == nil {
-		return fmt.Errorf("%w: destination is nil", ErrUnsupportedDeliveryCombination)
+func validateDestinationDelivery(task *InterceptTask, destinations []*Destination) error {
+	providesX2 := false
+	providesX3 := false
+	for _, destination := range destinations {
+		if destination == nil {
+			return fmt.Errorf("%w: destination is nil", ErrUnsupportedDeliveryCombination)
+		}
+		// Destinations created by older internal APIs did not carry capability
+		// metadata. Their capabilities are unknown, so retain the historical
+		// compatibility behavior rather than rejecting restored legacy state.
+		if destination.ProtocolType == "" {
+			providesX2 = true
+			providesX3 = true
+			continue
+		}
+		if !destination.X2Enabled && !destination.X3Enabled {
+			return fmt.Errorf("%w: destination DID %s declares neither X2 nor X3", ErrUnsupportedDeliveryCombination, destination.DID)
+		}
+		providesX2 = providesX2 || destination.X2Enabled
+		providesX3 = providesX3 || destination.X3Enabled
 	}
-	// Destinations created by older internal APIs did not carry capability
-	// metadata. X1-created destinations always set ProtocolType, so enforce the
-	// declared interface capabilities without breaking restored legacy state.
-	if destination.ProtocolType == "" {
-		return nil
+
+	requiresX2 := task.DeliveryType == DeliveryX2Only || task.DeliveryType == DeliveryX2andX3
+	requiresX3 := task.DeliveryType == DeliveryX3Only || task.DeliveryType == DeliveryX2andX3
+	if requiresX2 && !providesX2 {
+		return fmt.Errorf("%w: task XID %s requires X2, which none of its %d destinations provides", ErrUnsupportedDeliveryCombination, task.XID, len(destinations))
 	}
-	requiresX2 := deliveryType == DeliveryX2Only || deliveryType == DeliveryX2andX3
-	requiresX3 := deliveryType == DeliveryX3Only || deliveryType == DeliveryX2andX3
-	if (requiresX2 && !destination.X2Enabled) || (requiresX3 && !destination.X3Enabled) {
-		return fmt.Errorf("%w: DID %s cannot provide %s", ErrUnsupportedDeliveryCombination, destination.DID, deliveryType)
+	if requiresX3 && !providesX3 {
+		return fmt.Errorf("%w: task XID %s requires X3, which none of its %d destinations provides", ErrUnsupportedDeliveryCombination, task.XID, len(destinations))
 	}
 	return nil
 }

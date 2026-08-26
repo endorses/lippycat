@@ -5,15 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-08-26
+
+### Added
+- Persistent LI interception state with ADMF startup synchronization and periodic reconciliation
+- Raw IPv4, IPv6, and Ethernet X3 delivery for supported non-VoIP targets
+- Independently configurable ETSI X2/X3 application keepalives with framed ACK validation and timeout-driven reconnect reporting
+- ETSI-context-scoped X2/X3 sequence numbers with deterministic reset and wraparound behavior
+
+### Changed
+- Made LI filter activation and updates transactional, with rollback, collision-safe IDs, and actionable ADMF error reporting
+- Enforced mediation windows, pending activation, expiry cleanup, deliberate reactivation, and tombstone retention across the LI task lifecycle
+- Isolated X2 and X3 queue capacity, bounded RTP reordering, applied delivery retry backoff, and protected intercepted calls from ordinary LRU eviction
+- Hardened X1 request-container processing and trusted-proxy-aware rate limiting
+- Preserved original packet capture timestamps through hunter forwarding and X2/X3 encoding
+
+### Fixed
+- Rejected unsupported delivery combinations and empty SIP IRI payloads instead of silently losing interception product
+- Prevented saturated delivery queues and flow shards from blocking unrelated LI traffic
+- Kept non-LI processor configuration stubs in sync with the new X2/X3 keepalive settings
+
 ## [0.10.0] - 2026-08-25
 
 ### Added
 - Parallel multi-file PCAP processing for `sniff`
 - Direct `--processor` connection option for `watch remote`
-- ADMF startup state synchronization and periodic reconciliation for LI deployments
 - Protocol-aware X2/X3 delivery over TLS with reconnect buffering and RTP reordering
 - Optional pprof diagnostics endpoint via `LC_PPROF_ADDR`
-- Independently configurable ETSI X2/X3 application keepalives with framed ACK validation and timeout-driven reconnect reporting
 
 ### Changed
 - Migrated TCP stream handling to `gopacket` reassembly for port reuse and fragmented SIP support

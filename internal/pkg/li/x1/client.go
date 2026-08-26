@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -741,6 +742,39 @@ func marshalWrappedRequest(messageType string, req any) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected XML structure in marshaled request")
 	}
 	innerContent := innerStr[firstClose+1 : lastOpen]
+
+	// Generated derived request structs declare their extension fields before
+	// the embedded X1RequestMessage. encoding/xml follows declaration order,
+	// while XSD extension content must contain the base fields first.
+	value := reflect.ValueOf(req)
+	if value.Kind() == reflect.Pointer && !value.IsNil() {
+		value = value.Elem()
+	}
+	if value.Kind() == reflect.Struct {
+		baseField := value.FieldByName("X1RequestMessage")
+		if baseField.IsValid() && baseField.Kind() == reflect.Pointer && !baseField.IsNil() {
+			baseXML, marshalErr := xml.MarshalIndent(baseField.Interface(), "  ", "  ")
+			if marshalErr != nil {
+				return nil, fmt.Errorf("marshal X1 base request: %w", marshalErr)
+			}
+			baseString := string(baseXML)
+			baseFirstClose := strings.Index(baseString, ">")
+			baseLastOpen := strings.LastIndex(baseString, "</")
+			if baseFirstClose < 0 || baseLastOpen <= baseFirstClose {
+				return nil, fmt.Errorf("unexpected XML structure in marshaled X1 base request")
+			}
+			baseContent := baseString[baseFirstClose+1 : baseLastOpen]
+			trimmedInner := strings.TrimSpace(innerContent)
+			trimmedBase := strings.TrimSpace(baseContent)
+			if strings.HasSuffix(trimmedInner, trimmedBase) {
+				derivedContent := strings.TrimSpace(strings.TrimSuffix(trimmedInner, trimmedBase))
+				innerContent = baseContent
+				if derivedContent != "" {
+					innerContent += "\n  " + derivedContent
+				}
+			}
+		}
+	}
 
 	var buf bytes.Buffer
 	buf.WriteString(xml.Header)

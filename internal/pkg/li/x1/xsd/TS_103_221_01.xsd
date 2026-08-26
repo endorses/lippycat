@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="http://uri.etsi.org/03221/X1/2017/10" xmlns:etsi103280="http://uri.etsi.org/03280/common/2017/07" xmlns:hashedID="http://uri.etsi.org/03221/X1/2017/10/HashedID" xmlns:destinationSet="http://uri.etsi.org/03221/X1/2017/10/DestinationSet" targetNamespace="http://uri.etsi.org/03221/X1/2017/10" elementFormDefault="qualified" version="1.22.1">
-    <xs:import namespace="http://uri.etsi.org/03280/common/2017/07"/>
-    <xs:import namespace="http://uri.etsi.org/03221/X1/2017/10/HashedID"/>
+    <xs:import namespace="http://uri.etsi.org/03280/common/2017/07" schemaLocation="TS_103_280.xsd"/>
+    <xs:import namespace="http://uri.etsi.org/03221/X1/2017/10/HashedID" schemaLocation="TS_103_221_01_HashedID.xsd"/>
     <!-- Message containers -->
     <xs:element name="X1Request" type="RequestContainer"/>
     <xs:element name="X1Response" type="ResponseContainer"/>

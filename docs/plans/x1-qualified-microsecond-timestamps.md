@@ -93,28 +93,28 @@ Implementation tasks:
 
 ### 5.1 Formatter tests
 
-- [ ] Test a UTC value with non-zero nanoseconds and assert exactly six
+- [x] Test a UTC value with non-zero nanoseconds and assert exactly six
       fractional digits followed by `Z`.
-- [ ] Test a whole-second UTC value and assert the `.000000Z` suffix.
-- [ ] Test a value whose microsecond component ends in zeroes and assert that
+- [x] Test a whole-second UTC value and assert the `.000000Z` suffix.
+- [x] Test a value whose microsecond component ends in zeroes and assert that
       all six positions remain present.
-- [ ] Test positive and negative numeric offsets.
-- [ ] Test a value with sub-microsecond precision and assert the documented
+- [x] Test positive and negative numeric offsets.
+- [x] Test a value with sub-microsecond precision and assert the documented
       truncation behavior.
-- [ ] Parse the formatted results and assert that they represent the expected
+- [x] Parse the formatted results and assert that they represent the expected
       instants to microsecond precision.
 
 ### 5.2 Wire-message tests
 
-- [ ] Exercise every response-building path and validate the serialized XML
+- [x] Exercise every response-building path and validate the serialized XML
       against the bundled X1 and common-type schemas.
-- [ ] Exercise every autonomous request-building path and validate the
+- [x] Exercise every autonomous request-building path and validate the
       serialized XML against the same schemas.
-- [ ] Cover task-detail responses with absent, whole-second, and
+- [x] Cover task-detail responses with absent, whole-second, and
       sub-microsecond mediation boundaries.
-- [ ] Replace tests that expect `time.RFC3339Nano` output with exact
+- [x] Replace tests that expect `time.RFC3339Nano` output with exact
       qualified-microsecond expectations.
-- [ ] Add a source-level guard or focused test that fails if a new outbound X1
+- [x] Add a source-level guard or focused test that fails if a new outbound X1
       timestamp site uses `time.RFC3339Nano` directly.
 
 Schema validation is the authoritative conformance assertion. Regular

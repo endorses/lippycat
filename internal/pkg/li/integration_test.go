@@ -764,7 +764,7 @@ func TestIntegration_ModifyTask_AtomicUpdate(t *testing.T) {
 	// Modify task with new targets and destinations
 	newTargets := []li.TargetIdentity{
 		{Type: li.TargetTypeSIPURI, Value: "sip:bob@example.com"},
-		{Type: li.TargetTypeIPv4Address, Value: "10.0.0.1"},
+		{Type: li.TargetTypeTELURI, Value: "tel:+15550100"},
 	}
 	newDests := []uuid.UUID{did1, did2}
 	newDeliveryType := li.DeliveryX2andX3
@@ -784,7 +784,7 @@ func TestIntegration_ModifyTask_AtomicUpdate(t *testing.T) {
 
 	assert.Len(t, retrievedTask.Targets, 2)
 	assert.Equal(t, "sip:bob@example.com", retrievedTask.Targets[0].Value)
-	assert.Equal(t, "10.0.0.1", retrievedTask.Targets[1].Value)
+	assert.Equal(t, "tel:+15550100", retrievedTask.Targets[1].Value)
 
 	assert.Len(t, retrievedTask.DestinationIDs, 2)
 	assert.Equal(t, li.DeliveryX2andX3, retrievedTask.DeliveryType)

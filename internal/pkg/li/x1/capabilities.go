@@ -122,13 +122,13 @@ func validateTargetChoice(target *schema.TargetIdentifier) *capabilityError {
 		if err != nil || !addr.Is4() {
 			return invalidCapability("invalid IPv4 target")
 		}
-		return nil
+		return unsupportedCapability("IPv4 targets require raw-IP interception, whose correlated IRI/CC session model is not implemented")
 	case target.Ipv6Address != nil:
 		addr, err := netip.ParseAddr(string(*target.Ipv6Address))
 		if err != nil || !addr.Is6() {
 			return invalidCapability("invalid IPv6 target")
 		}
-		return nil
+		return unsupportedCapability("IPv6 targets require raw-IP interception, whose correlated IRI/CC session model is not implemented")
 	case target.Ipv4Cidr != nil:
 		if target.Ipv4Cidr.IPv4CIDR == nil {
 			return invalidCapability("empty IPv4 CIDR target")
@@ -137,13 +137,13 @@ func validateTargetChoice(target *schema.TargetIdentifier) *capabilityError {
 		if err != nil || !prefix.Addr().Is4() {
 			return invalidCapability("invalid IPv4 CIDR target")
 		}
-		return nil
+		return unsupportedCapability("IPv4 CIDR targets require raw-IP interception, whose correlated IRI/CC session model is not implemented")
 	case target.Ipv6Cidr != nil:
 		prefix, err := netip.ParsePrefix(string(*target.Ipv6Cidr))
 		if err != nil || !prefix.Addr().Is6() {
 			return invalidCapability("invalid IPv6 CIDR target")
 		}
-		return nil
+		return unsupportedCapability("IPv6 CIDR targets require raw-IP interception, whose correlated IRI/CC session model is not implemented")
 	default:
 		return unsupportedCapability("target identifier type cannot be converted to an exact lippycat filter")
 	}

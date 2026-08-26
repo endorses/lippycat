@@ -262,11 +262,11 @@ per interception target collapses unrelated traffic into a single indefinite
 communication, while emitting CC without a corresponding IRI context may be
 unusable to a conforming downstream implementation.
 
-- [ ] Keep raw-IP interception capability-gated until its session and IRI model
+- [x] Keep raw-IP interception capability-gated until its session and IRI model
       is fully implemented.
-- [ ] Reject any activation that would route traffic into an incomplete raw-IP
+- [x] Reject any activation that would route traffic into an incomplete raw-IP
       delivery path.
-- [ ] Do not infer that payload format alone selects the downstream ETSI handover
+- [x] Do not infer that payload format alone selects the downstream ETSI handover
       container; that selection belongs to explicit destination capability and
       configuration.
 - [ ] Before enabling raw-IP delivery, define stable bidirectional flow identity
@@ -274,7 +274,26 @@ unusable to a conforming downstream implementation.
       correlated IRI and CC, and specify timeout/reuse behavior.
 - [ ] Test that distinct flows under one target receive distinct communication
       identities and that both directions of one flow correlate.
-- [ ] Retain a regression test proving SIP X2 and X3 correlation remains shared.
+- [x] Retain a regression test proving SIP X2 and X3 correlation remains shared.
+
+### 4.1 Implementation status
+
+Implemented on 2026-08-26:
+
+- X1 capability validation rejects IPv4/IPv6 address and CIDR targets with a
+  precise unsupported-target response after first validating their syntax.
+- Registry validation independently rejects every raw-IP target before task,
+  filter, worker, or persistence state can be installed, including internal API,
+  modification, restored-state, and reconciliation paths.
+- The processor raw-IP encoder/delivery branch has been disconnected. X2/X3
+  fanout remains selected by the destination's explicit interface capability;
+  packet payload format is not used as a handover-routing decision.
+- `TestPhase5CaptureTimestampAndCorrelationWireInvariant` remains the wire-level
+  regression proving that SIP IRI and RTP CC derived from one Call-ID share a
+  correlation identifier.
+
+Raw-IP flow identity, correlated IRI generation, and lifecycle policy remain
+future prerequisites and are intentionally not marked complete.
 
 ## 5. X2/X3 keepalive interoperability
 

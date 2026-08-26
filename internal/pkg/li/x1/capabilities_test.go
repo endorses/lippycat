@@ -22,7 +22,7 @@ func TestCapabilityMatrix_TargetIdentifiers(t *testing.T) {
 		wantCode int
 	}{
 		{"sip supported", &schema.TargetIdentifier{SipUri: &sip}, 0},
-		{"IPv4 supported", &schema.TargetIdentifier{Ipv4Address: &ipv4}, 0},
+		{"IPv4 rejected until raw-IP sessions are implemented", &schema.TargetIdentifier{Ipv4Address: &ipv4}, ErrorCodeTargetNotSupported},
 		{"IMSI rejected", &schema.TargetIdentifier{Imsi: &imsi}, ErrorCodeTargetNotSupported},
 		{"email rejected", &schema.TargetIdentifier{EmailAddress: &email}, ErrorCodeTargetNotSupported},
 		{"empty choice invalid", &schema.TargetIdentifier{}, ErrorCodeRequestSyntaxError},

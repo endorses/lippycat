@@ -689,7 +689,7 @@ func (c *Client) GetAllTaskDetails(ctx context.Context) (*schema.GetAllTaskDetai
 
 // buildRequestMessage creates the base X1 request message.
 func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 	transID := schema.UUID(uuid.New().String())
 
 	c.mu.RLock()

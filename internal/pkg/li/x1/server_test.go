@@ -912,8 +912,8 @@ func TestServer_HandleGetTaskDetails(t *testing.T) {
 	assert.Contains(t, w.Body.String(), xid.String())
 	assert.Contains(t, w.Body.String(), did.String())
 	assert.Contains(t, w.Body.String(), "alice@example.test")
-	assert.Contains(t, w.Body.String(), start.Format(time.RFC3339Nano))
-	assert.Contains(t, w.Body.String(), end.Format(time.RFC3339Nano))
+	assert.Contains(t, w.Body.String(), string(formatQualifiedMicrosecondDateTime(start)))
+	assert.Contains(t, w.Body.String(), string(formatQualifiedMicrosecondDateTime(end)))
 	assert.Contains(t, w.Body.String(), "<provisioningStatus>complete</provisioningStatus>")
 }
 

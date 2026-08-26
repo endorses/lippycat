@@ -590,6 +590,7 @@ func TestServer_HandleActivateTask(t *testing.T) {
 
 	xid := uuid.New()
 	did := uuid.New()
+	endTime := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
 
 	// Build ActivateTask request
 	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
@@ -608,6 +609,14 @@ func TestServer_HandleActivateTask(t *testing.T) {
     <listOfDIDs>
       <dId>` + did.String() + `</dId>
     </listOfDIDs>
+    <listOfMediationDetails>
+      <mediationDetails>
+        <LIID>LIID-1</LIID>
+        <deliveryType>X2andX3</deliveryType>
+        <StartTime>` + time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano) + `</StartTime>
+        <EndTime>` + endTime.Format(time.RFC3339Nano) + `</EndTime>
+      </mediationDetails>
+    </listOfMediationDetails>
   </taskDetails>
 </activateTaskRequest>`
 
@@ -629,6 +638,7 @@ func TestServer_HandleActivateTask(t *testing.T) {
 	assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
 	require.Len(t, task.DestinationIDs, 1)
 	assert.Equal(t, did, task.DestinationIDs[0])
+	assert.Equal(t, endTime, task.EndTime)
 }
 
 func TestServer_ActivateTaskPreservesDefinitionConflictDetail(t *testing.T) {

@@ -47,15 +47,10 @@ func validateTaskCapabilities(details *schema.TaskDetails, modification bool) *c
 			if hasTrafficPolicyReferences(mediation.ListOfTrafficPolicyReferences) {
 				return unsupportedCapability("mediation entry %d uses unsupported traffic policy references", i)
 			}
-			// lippycat currently models one task-level LIID (the XID), delivery
-			// type, and DID set. Accepting mediation-level overrides would make
-			// the acknowledgement claim semantics that are never enforced.
-			if mediation.LIID != nil {
-				return unsupportedCapability("mediation entry %d uses an unsupported mediation-level LIID", i)
-			}
-			if mediation.DeliveryType != "" {
-				return unsupportedCapability("mediation entry %d uses an unsupported mediation-level delivery type", i)
-			}
+			// LIID and deliveryType are mandatory MediationDetails elements.
+			// They are accepted for schema-conformant interoperability, while
+			// task routing continues to use the task-level DID set and delivery
+			// type.
 			if mediation.ListOfDIDs != nil && len(mediation.ListOfDIDs.DId) != 0 {
 				return unsupportedCapability("mediation entry %d uses unsupported mediation-level destination IDs", i)
 			}

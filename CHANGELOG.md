@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-08-26
+
+### Added
+- Optional acknowledgement of valid inbound ETSI X2 and X3 keepalives, configurable independently per interface
+- Interoperability research and remediation documentation for ETSI X1 revisions, IRI policy support, and raw IP delivery
+
+### Changed
+- Accepted wire-compatible X1 revisions from v1.13.1 through the declared v1.22.1 revision, with revision metrics and bounded peer logging
+- Validated X1 task and destination capabilities before mutation and returned protocol-specific errors for unsupported combinations
+- Made repeated activation of an identical XID idempotent while rejecting conflicting definitions that require `ModifyTask`
+
+### Fixed
+- Enforced keepalive sequence matching, acknowledgement deadlines, direction handling, and reconnect behavior for X2/X3 delivery
+- Disabled incomplete raw IP X3 delivery so unsupported interception requests fail explicitly instead of emitting non-interoperable payloads
+- Discarded buffered X3 packets at task deactivation or expiry to prevent delivery beyond the enforcement window
+
 ## [0.10.1] - 2026-08-26
 
 ### Added

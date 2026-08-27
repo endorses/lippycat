@@ -93,6 +93,8 @@ func (c *Controller) SetPCAPQueue(depthFn func() int, capacityFn func() int) {
 // Checks all pressure sources and returns the most severe signal (PAUSE > SLOW > RESUME > CONTINUE)
 func (c *Controller) Determine() data.FlowControl {
 	mostSevere := data.FlowControl_FLOW_CONTINUE
+	pressureSources := 0
+	allSourcesBelowResume := true
 
 	// Check PCAP write queue depth if configured
 	if c.pcapQueueDepth != nil && c.pcapQueueCapacity != nil {
@@ -100,7 +102,9 @@ func (c *Controller) Determine() data.FlowControl {
 		queueCapacity := c.pcapQueueCapacity()
 
 		if queueCapacity > 0 {
+			pressureSources++
 			utilization := float64(queueDepth) / float64(queueCapacity)
+			allSourcesBelowResume = allSourcesBelowResume && utilization < constants.FlowControlResumeThreshold
 			utilizationPct := utilization * 100
 
 			// Pause if queue is critically full (>90%)
@@ -117,9 +121,6 @@ func (c *Controller) Determine() data.FlowControl {
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
 				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
-			} else if utilization < constants.FlowControlResumeThreshold {
-				// Resume if queue has drained (< 30%)
-				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
 			}
 		}
 	}
@@ -136,15 +137,23 @@ func (c *Controller) Determine() data.FlowControl {
 	if c.hasUpstream && c.upstreamQueueDepth != nil && c.upstreamQueueCapacity != nil {
 		depth, capacity := c.upstreamQueueDepth(), c.upstreamQueueCapacity()
 		if capacity > 0 {
+			pressureSources++
 			utilization := float64(depth) / float64(capacity)
+			allSourcesBelowResume = allSourcesBelowResume && utilization < constants.FlowControlResumeThreshold
 			if utilization > constants.FlowControlSlowThreshold {
 				logger.Warn("Upstream queue filling - requesting slowdown",
 					"queue_depth", depth, "capacity", capacity)
 				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
-			} else if utilization < constants.FlowControlResumeThreshold {
-				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
 			}
 		}
+	}
+
+	// RESUME is a release signal, not a pressure level. Emitting it when only
+	// one queue has drained can prematurely release hysteresis while another
+	// queue remains above the low watermark. Require every configured, valid
+	// pressure source to be below the resume threshold.
+	if mostSevere == data.FlowControl_FLOW_CONTINUE && pressureSources > 0 && allSourcesBelowResume {
+		mostSevere = data.FlowControl_FLOW_RESUME
 	}
 
 	for {

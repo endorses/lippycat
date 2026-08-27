@@ -228,6 +228,49 @@ func TestLocalTarget_ApplyFilter(t *testing.T) {
 	})
 }
 
+func TestLocalTarget_ApplicationFilterChangesDoNotReapplyUnchangedBPF(t *testing.T) {
+	target := NewLocalTarget(LocalTargetConfig{BaseBPF: "port 5060"})
+	bpfUpdater := &mockBPFUpdater{}
+	appFilter := &mockAppFilterUpdater{}
+	target.SetBPFUpdater(bpfUpdater)
+	target.SetApplicationFilter(appFilter)
+
+	_, err := target.ApplyFilter(&management.Filter{
+		Id: "phone-1", Type: management.FilterType_FILTER_PHONE_NUMBER,
+		Pattern: "12025550123", Enabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, bpfUpdater.FilterCount())
+
+	_, err = target.ApplyFilter(&management.Filter{
+		Id: "phone-2", Type: management.FilterType_FILTER_PHONE_NUMBER,
+		Pattern: "12025550124", Enabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, bpfUpdater.FilterCount(), "unchanged BPF must not be reapplied")
+	assert.Equal(t, 2, appFilter.CallCount())
+}
+
+func TestLocalTarget_GenuineBPFChangeIsApplied(t *testing.T) {
+	target := NewLocalTarget(LocalTargetConfig{BaseBPF: "port 5060"})
+	bpfUpdater := &mockBPFUpdater{}
+	target.SetBPFUpdater(bpfUpdater)
+
+	_, err := target.ApplyFilter(&management.Filter{
+		Id: "phone-1", Type: management.FilterType_FILTER_PHONE_NUMBER,
+		Pattern: "12025550123", Enabled: true,
+	})
+	require.NoError(t, err)
+
+	_, err = target.ApplyFilter(&management.Filter{
+		Id: "host-1", Type: management.FilterType_FILTER_IP_ADDRESS,
+		Pattern: "192.0.2.10", Enabled: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, bpfUpdater.FilterCount())
+	assert.Equal(t, "(port 5060) and (host 192.0.2.10)", bpfUpdater.LastFilter())
+}
+
 func TestLocalTarget_RemoveFilter(t *testing.T) {
 	t.Run("empty ID", func(t *testing.T) {
 		target := NewLocalTarget(LocalTargetConfig{})

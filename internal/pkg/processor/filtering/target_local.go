@@ -16,6 +16,7 @@ package filtering
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 
@@ -39,7 +40,8 @@ type AppFilterUpdater interface {
 // It applies BPF filters at the kernel level and routes VoIP filters
 // to an ApplicationFilter for userspace matching.
 type LocalTarget struct {
-	mu sync.RWMutex
+	mu         sync.RWMutex
+	bpfApplyMu sync.Mutex
 
 	// Active filters indexed by ID
 	filters map[string]*management.Filter
@@ -50,6 +52,12 @@ type LocalTarget struct {
 	// Dependencies (optional, set via Set* methods)
 	bpfUpdater    BPFUpdater
 	appFilterFunc AppFilterUpdater
+
+	// lastAppliedBPF is only valid when hasAppliedBPF is true. Keeping the
+	// boolean separate matters because an empty expression is a real applied
+	// state (it clears the kernel filter).
+	lastAppliedBPF string
+	hasAppliedBPF  bool
 }
 
 // LocalTargetConfig contains configuration for LocalTarget.
@@ -73,6 +81,9 @@ func (t *LocalTarget) SetBPFUpdater(updater BPFUpdater) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.bpfUpdater = updater
+	// A replacement updater has independent state and must receive the current
+	// expression on the next reconciliation.
+	t.hasAppliedBPF = false
 }
 
 // SetApplicationFilter sets the application filter for VoIP filtering.
@@ -250,7 +261,16 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 		filters = append(filters, f)
 	}
 	baseBPF := t.baseBPF
+	lastAppliedBPF := t.lastAppliedBPF
+	hasAppliedBPF := t.hasAppliedBPF
 	t.mu.RUnlock()
+
+	// Map iteration order is random. Stable ordering prevents an equivalent set
+	// of BPF filters from looking changed merely because reconciliation visited
+	// them in a different order.
+	sort.Slice(filters, func(i, j int) bool {
+		return filters[i].Id < filters[j].Id
+	})
 
 	// Separate filters by type
 	var bpfFilters []*management.Filter
@@ -276,19 +296,41 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 	// Build combined BPF expression
 	bpfExpr := t.buildBPFExpression(baseBPF, bpfFilters)
 
-	// Apply BPF filter if we have an updater
-	if bpfUpdater != nil && bpfExpr != "" {
+	// Apply BPF only when its effective expression changed. Phone-number, SIP
+	// URI, Call-ID, and codec filters are userspace-only and must not restart
+	// live capture when their reconciliation leaves BPF unchanged.
+	t.bpfApplyMu.Lock()
+	defer t.bpfApplyMu.Unlock()
+	// Another reconciliation may have completed while this one was building its
+	// expression, so refresh the applied state after entering the serial region.
+	t.mu.RLock()
+	if t.bpfUpdater == bpfUpdater {
+		lastAppliedBPF = t.lastAppliedBPF
+		hasAppliedBPF = t.hasAppliedBPF
+	} else {
+		bpfUpdater = t.bpfUpdater
+		hasAppliedBPF = false
+	}
+	t.mu.RUnlock()
+
+	if bpfUpdater != nil && (!hasAppliedBPF || bpfExpr != lastAppliedBPF) {
 		logger.Debug("LocalTarget applying BPF filter", "expression", bpfExpr)
 		if err := bpfUpdater.SetBPFFilter(bpfExpr); err != nil {
+			if bpfExpr == "" {
+				return fmt.Errorf("failed to clear BPF filter: %w", err)
+			}
 			return fmt.Errorf("failed to set BPF filter: %w", err)
 		}
-	} else if bpfUpdater != nil && bpfExpr == "" && baseBPF == "" {
-		// Clear any existing BPF filter
-		if err := bpfUpdater.SetBPFFilter(""); err != nil {
-			return fmt.Errorf("failed to clear BPF filter: %w", err)
-		}
-	}
 
+		t.mu.Lock()
+		// Do not let a concurrent updater replacement inherit another updater's
+		// applied state.
+		if t.bpfUpdater == bpfUpdater {
+			t.lastAppliedBPF = bpfExpr
+			t.hasAppliedBPF = true
+		}
+		t.mu.Unlock()
+	}
 	// Apply application-layer filters
 	if appFilter != nil {
 		logger.Info("LocalTarget updating application filter",

@@ -82,6 +82,10 @@ type Config struct {
 	// Zero uses the package default.
 	SlowSendInterval time.Duration
 
+	// SendTimeout is the maximum time a generation may spend in stream.Send.
+	// Zero uses constants.DefaultSendTimeout.
+	SendTimeout time.Duration
+
 	// Clock is injectable for deterministic pacing tests. Nil uses wall time.
 	Clock Clock
 }
@@ -153,6 +157,9 @@ type Manager struct {
 func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context, batchQueue chan *data.PacketBatch) *Manager {
 	if config.SlowSendInterval <= 0 {
 		config.SlowSendInterval = 25 * time.Millisecond
+	}
+	if config.SendTimeout <= 0 {
+		config.SendTimeout = constants.DefaultSendTimeout
 	}
 	if config.Clock == nil {
 		config.Clock = realClock{}
@@ -511,7 +518,7 @@ func (m *Manager) sendBatch(batch *data.PacketBatch) bool {
 	}
 
 	timedOut := atomic.Bool{}
-	timer := time.AfterFunc(constants.DefaultSendTimeout, func() {
+	timer := time.AfterFunc(m.config.SendTimeout, func() {
 		timedOut.Store(true)
 		m.signalDisconnect()
 	})

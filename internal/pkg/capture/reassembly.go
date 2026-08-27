@@ -38,27 +38,32 @@ type TCPAssembler struct {
 	mu            sync.Mutex
 	pool          *reassembly.StreamPool
 	asm           *reassembly.Assembler
-	stats         ReassemblyLimitStats
+	stats         ReassemblyGapStats
 	explicitFlush atomic.Bool
 }
 
-// ReassemblyLimitStats reports forced gap delivery caused by the configured
-// page limits. SkippedBytes are bytes missing from the TCP sequence space, not
+// ReassemblyGapStats reports sequence gaps that gopacket is forced to expose
+// while processing a packet. The gopacket callback exposes the gap but not the
+// reason it was delivered, so these counters deliberately do not attribute a
+// gap to either the per-connection or global page limit. With finite page
+// limits, growth pressure is one possible cause.
+//
+// MissingSequenceBytes are bytes absent from the TCP sequence space, not
 // captured payload bytes discarded by lippycat.
-type ReassemblyLimitStats struct {
-	LimitHits    atomic.Uint64
-	SkippedBytes atomic.Uint64
+type ReassemblyGapStats struct {
+	ForcedGapDeliveries  atomic.Uint64
+	MissingSequenceBytes atomic.Uint64
 }
 
-// ReassemblyLimitSnapshot is a consistent, copyable view of limit counters.
-type ReassemblyLimitSnapshot struct {
-	LimitHits    uint64
-	SkippedBytes uint64
+// ReassemblyGapSnapshot is a consistent, copyable view of forced-gap counters.
+type ReassemblyGapSnapshot struct {
+	ForcedGapDeliveries  uint64
+	MissingSequenceBytes uint64
 }
 
 type observedStreamFactory struct {
 	factory       reassembly.StreamFactory
-	stats         *ReassemblyLimitStats
+	stats         *ReassemblyGapStats
 	explicitFlush *atomic.Bool
 }
 
@@ -68,18 +73,18 @@ func (f observedStreamFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.T
 
 type observedStream struct {
 	reassembly.Stream
-	stats         *ReassemblyLimitStats
+	stats         *ReassemblyGapStats
 	explicitFlush *atomic.Bool
 }
 
 func (s *observedStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
 	_, _, _, skip := sg.Info()
-	// During Assemble, gopacket only forces a sequence gap when a configured
-	// page bound is hit. Explicit age/all flushes can also expose gaps and are
-	// deliberately excluded from these limit counters.
+	// Explicit age/all flushes can expose gaps too; exclude those so this metric
+	// describes forced delivery observed during normal packet assembly. The
+	// callback does not say whether a page limit caused the delivery.
 	if skip > 0 && !s.explicitFlush.Load() {
-		s.stats.LimitHits.Add(1)
-		s.stats.SkippedBytes.Add(uint64(skip))
+		s.stats.ForcedGapDeliveries.Add(1)
+		s.stats.MissingSequenceBytes.Add(uint64(skip))
 	}
 	s.Stream.ReassembledSG(sg, ac)
 }
@@ -117,10 +122,12 @@ func (a *TCPAssembler) BufferedPageLimits() (perConnection, total int) {
 	return a.asm.MaxBufferedPagesPerConnection, a.asm.MaxBufferedPagesTotal
 }
 
-// LimitStats returns observable forced-gap counters caused by page limits.
-func (a *TCPAssembler) LimitStats() ReassemblyLimitSnapshot {
-	return ReassemblyLimitSnapshot{
-		LimitHits: a.stats.LimitHits.Load(), SkippedBytes: a.stats.SkippedBytes.Load(),
+// GapStats returns observed forced-gap counters. Gopacket does not expose
+// whether a particular gap was forced by a configured page limit.
+func (a *TCPAssembler) GapStats() ReassemblyGapSnapshot {
+	return ReassemblyGapSnapshot{
+		ForcedGapDeliveries:  a.stats.ForcedGapDeliveries.Load(),
+		MissingSequenceBytes: a.stats.MissingSequenceBytes.Load(),
 	}
 }
 

@@ -30,7 +30,7 @@ func assembleLimitTestTCP(a *TCPAssembler, seq uint32, syn bool, payload byte) {
 	a.Assemble(limitTestNetFlow, tcp, time.Unix(int64(seq), 0))
 }
 
-func TestTCPAssemblerCountsPerConnectionLimitOnMissingSegments(t *testing.T) {
+func TestTCPAssemblerObservesForcedGapWhenPageLimitReleasesBufferedData(t *testing.T) {
 	a := NewTCPAssemblerWithLimits(discardReassemblyFactory{}, 3, 100)
 	assembleLimitTestTCP(a, 1000, true, 1)
 	// Leave one-byte gaps. The third buffered page forces gopacket to deliver
@@ -39,31 +39,31 @@ func TestTCPAssemblerCountsPerConnectionLimitOnMissingSegments(t *testing.T) {
 	assembleLimitTestTCP(a, 1005, false, 5)
 	assembleLimitTestTCP(a, 1007, false, 7)
 
-	stats := a.LimitStats()
-	if stats.LimitHits == 0 || stats.SkippedBytes == 0 {
-		t.Fatalf("limit stats = %+v, want an observed forced gap", stats)
+	stats := a.GapStats()
+	if stats.ForcedGapDeliveries == 0 || stats.MissingSequenceBytes == 0 {
+		t.Fatalf("gap stats = %+v, want an observed forced gap", stats)
 	}
 }
 
-func TestTCPAssemblerOutOfOrderRecoveryDoesNotCountAsLimitHit(t *testing.T) {
+func TestTCPAssemblerOutOfOrderRecoveryDoesNotCountAsForcedGap(t *testing.T) {
 	a := NewTCPAssemblerWithLimits(discardReassemblyFactory{}, 10, 100)
 	assembleLimitTestTCP(a, 1000, true, 1)
 	assembleLimitTestTCP(a, 1003, false, 3)
 	assembleLimitTestTCP(a, 1002, false, 2) // fills the gap normally
 
-	if stats := a.LimitStats(); stats.LimitHits != 0 || stats.SkippedBytes != 0 {
-		t.Fatalf("limit stats = %+v after recoverable reordering, want zero", stats)
+	if stats := a.GapStats(); stats.ForcedGapDeliveries != 0 || stats.MissingSequenceBytes != 0 {
+		t.Fatalf("gap stats = %+v after recoverable reordering, want zero", stats)
 	}
 }
 
-func TestTCPAssemblerExplicitFlushGapIsNotReportedAsLimitHit(t *testing.T) {
+func TestTCPAssemblerExplicitFlushGapIsNotReportedAsForcedGap(t *testing.T) {
 	a := NewTCPAssemblerWithLimits(discardReassemblyFactory{}, 10, 100)
 	assembleLimitTestTCP(a, 1000, true, 1)
 	assembleLimitTestTCP(a, 1003, false, 3)
 	a.FlushAll()
 
-	if stats := a.LimitStats(); stats.LimitHits != 0 || stats.SkippedBytes != 0 {
-		t.Fatalf("limit stats = %+v after explicit flush, want zero", stats)
+	if stats := a.GapStats(); stats.ForcedGapDeliveries != 0 || stats.MissingSequenceBytes != 0 {
+		t.Fatalf("gap stats = %+v after explicit flush, want zero", stats)
 	}
 }
 

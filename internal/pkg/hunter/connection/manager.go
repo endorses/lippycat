@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -109,7 +110,15 @@ type Manager struct {
 	connCtx    context.Context
 	connCancel context.CancelFunc
 	connWg     sync.WaitGroup
+	generation atomic.Uint64
+
+	// Test seams for the bounded sender shutdown path. Production uses the
+	// defaults below.
+	forwardingExitGrace time.Duration
+	closeDataTransport  func() error
 }
+
+const defaultForwardingExitGrace = time.Second
 
 // New creates a new connection manager
 func New(
@@ -179,11 +188,18 @@ func (m *Manager) GetForwardingManager() *forwarding.Manager {
 
 // MarkDisconnected marks the connection as disconnected and triggers reconnection
 func (m *Manager) MarkDisconnected() {
+	m.markGenerationDisconnected(m.generation.Load())
+}
+
+// markGenerationDisconnected cancels only the connection generation which
+// observed the failure. A late callback from an old sender must never tear
+// down its successor.
+func (m *Manager) markGenerationDisconnected(generation uint64) {
 	m.reconnectMu.Lock()
 
 	logger.Debug("MarkDisconnected() called", "already_reconnecting", m.reconnecting)
 
-	if m.reconnecting {
+	if generation != m.generation.Load() || m.reconnecting {
 		// Already reconnecting
 		logger.Debug("MarkDisconnected: already reconnecting, ignoring")
 		m.reconnectMu.Unlock()
@@ -214,6 +230,7 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 		}
 
 		m.connCtx, m.connCancel = context.WithCancel(m.ctx)
+		generation := m.generation.Add(1)
 
 		// Use circuit breaker for connection attempts
 		err := m.circuitBreaker.Call(func() error {
@@ -232,6 +249,9 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 
 			// Create forwarding manager for this connection
 			m.forwardingManager = m.forwardingFactory.CreateForwardingManager(m.connCtx, m.stream)
+			m.forwardingManager.SetDisconnectCallback(func() {
+				m.markGenerationDisconnected(generation)
+			})
 
 			// Start connection-dependent goroutines with connection-scoped waitgroup
 			m.connWg.Add(4)
@@ -763,7 +783,27 @@ func (m *Manager) cleanup() {
 		logger.Warn("Cleanup timeout - some goroutines may still be running, proceeding anyway")
 	}
 	if m.forwardingManager != nil {
-		m.forwardingManager.Wait()
+		grace := m.forwardingExitGrace
+		if grace <= 0 {
+			grace = defaultForwardingExitGrace
+		}
+		senderDone := make(chan struct{})
+		go func(manager *forwarding.Manager) {
+			manager.Wait()
+			close(senderDone)
+		}(m.forwardingManager)
+
+		select {
+		case <-senderDone:
+		case <-time.After(grace):
+			logger.Warn("Forwarding sender did not exit after cancellation; forcing data transport closed")
+			if err := m.forceCloseDataTransport(); err != nil {
+				logger.Error("Failed to force data transport closed", "error", err, "processor", m.config.ProcessorAddr)
+			}
+			// Do not permit creation of a successor while the old generation still
+			// owns Send/CloseSend. Closing a gRPC ClientConn unblocks its streams.
+			<-senderDone
+		}
 	}
 
 	m.streamMu.Lock()
@@ -781,6 +821,18 @@ func (m *Manager) cleanup() {
 			logger.Error("Failed to close management connection during shutdown", "error", err, "processor", m.config.ProcessorAddr)
 		}
 	}
+}
+
+func (m *Manager) forceCloseDataTransport() error {
+	if m.closeDataTransport != nil {
+		return m.closeDataTransport()
+	}
+	if m.dataConn != nil {
+		conn := m.dataConn
+		m.dataConn = nil // cleanup must not close and report the same transport twice
+		return conn.Close()
+	}
+	return nil
 }
 
 // getConnectionLocalIP returns the local IP address used for the gRPC connection

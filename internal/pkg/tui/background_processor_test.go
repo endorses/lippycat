@@ -35,7 +35,7 @@ func TestBackgroundProcessorStaleGenerationIgnored(t *testing.T) {
 	model := NewModel(10, 10, "test", "", nil, false, false, "", false)
 	t.Cleanup(model.Shutdown)
 	oldGeneration := model.backgroundProcessor.Generation()
-	model.backgroundProcessor.Configure(BackgroundProcessorConfig{CaptureMode: components.CaptureModeOffline})
+	model.backgroundProcessor.BeginGeneration()
 
 	updated, _ := model.handleDNSPacketResultMsg(DNSPacketResultMsg{
 		Generation: oldGeneration,

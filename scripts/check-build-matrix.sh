@@ -2,10 +2,14 @@
 set -euo pipefail
 
 readonly role_tags=(all hunter processor tap cli tui)
+matrix_dir="$(mktemp -d)"
+trap 'rm -rf -- "$matrix_dir"' EXIT
 
 echo '==> building supported non-CUDA binaries'
-go build -tags all .
-go build -tags 'all,li' .
+for tags in "${role_tags[@]}"; do
+    go build -tags "$tags" -o "$matrix_dir/lippycat-$tags" .
+done
+go build -tags 'all,li' -o "$matrix_dir/lippycat-all-li" .
 
 echo '==> testing supported package partitions'
 for tags in "${role_tags[@]}"; do
@@ -21,8 +25,8 @@ go vet -tags li ./internal/pkg/li/...
 
 if [[ "${CUDA:-0}" == 1 ]]; then
     echo '==> building CUDA variants'
-    CGO_ENABLED=1 go build -tags 'all,cuda' .
-    CGO_ENABLED=1 go build -tags 'tap,li,cuda' .
+    CGO_ENABLED=1 go build -tags 'all,cuda' -o "$matrix_dir/lippycat-all-cuda" .
+    CGO_ENABLED=1 go build -tags 'tap,li,cuda' -o "$matrix_dir/lippycat-tap-li-cuda" .
 else
     echo '==> skipping CUDA link builds (set CUDA=1 on a configured CUDA builder)'
 fi

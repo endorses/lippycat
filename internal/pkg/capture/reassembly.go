@@ -38,32 +38,36 @@ type TCPAssembler struct {
 	mu            sync.Mutex
 	pool          *reassembly.StreamPool
 	asm           *reassembly.Assembler
-	stats         ReassemblyGapStats
+	stats         ReassemblyLimitStats
 	explicitFlush atomic.Bool
 }
 
-// ReassemblyGapStats reports sequence gaps that gopacket is forced to expose
-// while processing a packet. The gopacket callback exposes the gap but not the
-// reason it was delivered, so these counters deliberately do not attribute a
-// gap to either the per-connection or global page limit. With finite page
-// limits, growth pressure is one possible cause.
+// ReassemblyLimitStats reports bounded-retention releases. With finite page
+// limits, gopacket releases queued out-of-order data across a missing sequence
+// gap instead of retaining pages indefinitely. Its public API does not identify
+// whether the per-connection or global limit fired, so these counters report
+// the observable release without inventing that attribution.
 //
-// MissingSequenceBytes are bytes absent from the TCP sequence space, not
-// captured payload bytes discarded by lippycat.
-type ReassemblyGapStats struct {
-	ForcedGapDeliveries  atomic.Uint64
-	MissingSequenceBytes atomic.Uint64
+// MissingSequenceBytes are absent sequence-space bytes, not captured payload
+// bytes discarded by lippycat.
+type ReassemblyLimitStats struct {
+	BufferedPageLimitReleases atomic.Uint64
+	MissingSequenceBytes      atomic.Uint64
 }
 
-// ReassemblyGapSnapshot is a consistent, copyable view of forced-gap counters.
-type ReassemblyGapSnapshot struct {
-	ForcedGapDeliveries  uint64
-	MissingSequenceBytes uint64
+// ReassemblyLimitSnapshot is a consistent, copyable view of retention releases.
+type ReassemblyLimitSnapshot struct {
+	BufferedPageLimitReleases uint64
+	MissingSequenceBytes      uint64
 }
+
+// ReassemblyGapSnapshot is retained for source compatibility.
+// Deprecated: use ReassemblyLimitSnapshot.
+type ReassemblyGapSnapshot = ReassemblyLimitSnapshot
 
 type observedStreamFactory struct {
 	factory       reassembly.StreamFactory
-	stats         *ReassemblyGapStats
+	stats         *ReassemblyLimitStats
 	explicitFlush *atomic.Bool
 }
 
@@ -73,7 +77,7 @@ func (f observedStreamFactory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.T
 
 type observedStream struct {
 	reassembly.Stream
-	stats         *ReassemblyGapStats
+	stats         *ReassemblyLimitStats
 	explicitFlush *atomic.Bool
 }
 
@@ -83,7 +87,7 @@ func (s *observedStream) ReassembledSG(sg reassembly.ScatterGather, ac reassembl
 	// describes forced delivery observed during normal packet assembly. The
 	// callback does not say whether a page limit caused the delivery.
 	if skip > 0 && !s.explicitFlush.Load() {
-		s.stats.ForcedGapDeliveries.Add(1)
+		s.stats.BufferedPageLimitReleases.Add(1)
 		s.stats.MissingSequenceBytes.Add(uint64(skip))
 	}
 	s.Stream.ReassembledSG(sg, ac)
@@ -122,14 +126,18 @@ func (a *TCPAssembler) BufferedPageLimits() (perConnection, total int) {
 	return a.asm.MaxBufferedPagesPerConnection, a.asm.MaxBufferedPagesTotal
 }
 
-// GapStats returns observed forced-gap counters. Gopacket does not expose
-// whether a particular gap was forced by a configured page limit.
-func (a *TCPAssembler) GapStats() ReassemblyGapSnapshot {
-	return ReassemblyGapSnapshot{
-		ForcedGapDeliveries:  a.stats.ForcedGapDeliveries.Load(),
-		MissingSequenceBytes: a.stats.MissingSequenceBytes.Load(),
+// LimitStats returns observable bounded-retention releases. Gopacket does not
+// expose whether the per-connection or global page bound caused a release.
+func (a *TCPAssembler) LimitStats() ReassemblyLimitSnapshot {
+	return ReassemblyLimitSnapshot{
+		BufferedPageLimitReleases: a.stats.BufferedPageLimitReleases.Load(),
+		MissingSequenceBytes:      a.stats.MissingSequenceBytes.Load(),
 	}
 }
+
+// GapStats is retained for callers compiled against the original API.
+// Deprecated: use LimitStats.
+func (a *TCPAssembler) GapStats() ReassemblyGapSnapshot { return a.LimitStats() }
 
 // timestampContext carries a packet's capture timestamp into the assembler so
 // FlushCloseOlderThan ages streams by capture time (essential for offline replay),

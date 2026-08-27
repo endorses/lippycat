@@ -131,9 +131,14 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	// Part 1: Protocol type (t=TLS, q=QUIC)
 	proto := "t"
 
-	// Part 2: TLS version (2 chars)
+	// Part 2: highest advertised non-GREASE TLS version. ClientHello version
+	// lists are not required to be sorted, so using their first entry is wrong.
+	version := highestSupportedVersion(metadata.SupportedVersions)
+	if version == 0 {
+		version = metadata.VersionRaw
+	}
 	var versionCode string
-	switch metadata.VersionRaw {
+	switch version {
 	case VersionSSL30:
 		versionCode = "s3"
 	case VersionTLS10:
@@ -234,6 +239,16 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	ja4String = ja4Fingerprint // JA4 string and fingerprint are the same
 
 	return ja4String, ja4Fingerprint
+}
+
+func highestSupportedVersion(versions []uint16) uint16 {
+	var highest uint16
+	for _, version := range versions {
+		if !isGREASE(version) && version > highest {
+			highest = version
+		}
+	}
+	return highest
 }
 
 // isGREASE checks if a value is a GREASE value.

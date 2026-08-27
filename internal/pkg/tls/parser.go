@@ -295,8 +295,10 @@ func (p *Parser) parseExtensions(data []byte, metadata *types.TLSMetadata) {
 		case ExtensionALPN:
 			metadata.ALPNProtocols = p.parseALPN(extData)
 		case ExtensionSupportedVer:
-			// TLS 1.3 uses supported_versions extension for real version
-			if realVersion := p.parseSupportedVersions(extData); realVersion != 0 {
+			// Preserve the complete list for JA4. The wire order is not required
+			// to be descending and may contain GREASE values.
+			metadata.SupportedVersions = p.parseSupportedVersions(extData)
+			if realVersion := highestSupportedVersion(metadata.SupportedVersions); realVersion != 0 {
 				metadata.VersionRaw = realVersion
 				metadata.Version = p.versionString(realVersion)
 			}
@@ -447,20 +449,21 @@ func (p *Parser) parseALPN(data []byte) []string {
 	return protocols
 }
 
-// parseSupportedVersions extracts the real TLS version from supported_versions extension.
-func (p *Parser) parseSupportedVersions(data []byte) uint16 {
+// parseSupportedVersions extracts every ClientHello supported_versions entry.
+func (p *Parser) parseSupportedVersions(data []byte) []uint16 {
 	if len(data) < 1 {
-		return 0
+		return nil
 	}
 
-	// In ClientHello, this is a list; take the first/highest
 	versionsLen := int(data[0])
-	if versionsLen+1 > len(data) || versionsLen < 2 {
-		return 0
+	if versionsLen+1 > len(data) || versionsLen < 2 || versionsLen%2 != 0 {
+		return nil
 	}
-
-	// Return first version (typically the highest)
-	return binary.BigEndian.Uint16(data[1:3])
+	versions := make([]uint16, 0, versionsLen/2)
+	for pos := 1; pos < versionsLen+1; pos += 2 {
+		versions = append(versions, binary.BigEndian.Uint16(data[pos:pos+2]))
+	}
+	return versions
 }
 
 // handshakeTypeName returns a human-readable name for the handshake type.

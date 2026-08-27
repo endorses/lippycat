@@ -71,6 +71,23 @@ func TestCalculateJA4GREASEExclusionsAndEmptyHashes(t *testing.T) {
 	assert.Equal(t, "t12d000200_000000000000_000000000000", fingerprint)
 }
 
+func TestCalculateJA4SelectsHighestNonGREASESupportedVersion(t *testing.T) {
+	metadata := &types.TLSMetadata{
+		VersionRaw:        VersionTLS12,
+		SupportedVersions: []uint16{0x2a2a, VersionTLS12, VersionTLS13, VersionTLS11},
+	}
+
+	_, fingerprint := CalculateJA4(metadata)
+	assert.Equal(t, "t13i000000_000000000000_000000000000", fingerprint)
+}
+
+func TestParseSupportedVersionsPreservesWireList(t *testing.T) {
+	p := NewParser()
+	versions := p.parseSupportedVersions([]byte{8, 0x2a, 0x2a, 0x03, 0x03, 0x03, 0x04, 0x03, 0x02})
+	assert.Equal(t, []uint16{0x2a2a, VersionTLS12, VersionTLS13, VersionTLS11}, versions)
+	assert.Equal(t, uint16(VersionTLS13), highestSupportedVersion(versions))
+}
+
 func TestCalculateJA3AndJA3SRegression(t *testing.T) {
 	client := &types.TLSMetadata{
 		VersionRaw:      VersionTLS12,

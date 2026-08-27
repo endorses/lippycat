@@ -4,6 +4,7 @@ package tls
 
 import (
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -153,7 +154,7 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 
 	// Part 3: SNI indicator (d=has domain, i=IP only)
 	sniIndicator := "i"
-	if metadata.SNI != "" {
+	if containsUint16(metadata.Extensions, ExtensionSNI) {
 		sniIndicator = "d"
 	}
 
@@ -179,16 +180,8 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 		extCount = 99
 	}
 
-	// Part 6: First ALPN protocol (h2, h1, etc.)
-	alpn := "00"
-	if len(metadata.ALPNProtocols) > 0 {
-		first := metadata.ALPNProtocols[0]
-		if len(first) >= 2 {
-			alpn = first[:2]
-		} else if len(first) == 1 {
-			alpn = first + "0"
-		}
-	}
+	// Part 6: First and last bytes of the first ALPN protocol.
+	alpn := ja4ALPN(metadata.ALPNProtocols)
 
 	// Build JA4_a (first part)
 	ja4a := fmt.Sprintf("%s%s%s%02d%02d%s", proto, versionCode, sniIndicator, cipherCount, extCount, alpn)
@@ -225,7 +218,9 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	// Add signature algorithms to extension hash
 	var sigAlgStrs []string
 	for _, s := range metadata.SignatureAlgos {
-		sigAlgStrs = append(sigAlgStrs, fmt.Sprintf("%04x", s))
+		if !isGREASE(s) {
+			sigAlgStrs = append(sigAlgStrs, fmt.Sprintf("%04x", s))
+		}
 	}
 	extInput := strings.Join(extStrs, ",")
 	if len(sigAlgStrs) > 0 {
@@ -246,12 +241,43 @@ func isGREASE(value uint16) bool {
 	return greaseValues[value]
 }
 
+func containsUint16(values []uint16, target uint16) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ja4ALPN applies JA4's first/last byte transformation to the first ALPN value.
+func ja4ALPN(protocols []string) string {
+	if len(protocols) == 0 || len(protocols[0]) == 0 {
+		return "00"
+	}
+
+	value := []byte(protocols[0])
+	first, last := value[0], value[len(value)-1]
+	if isASCIIAlphanumeric(first) && isASCIIAlphanumeric(last) {
+		return string([]byte{first, last})
+	}
+
+	hexValue := hex.EncodeToString(value)
+	return string([]byte{hexValue[0], hexValue[len(hexValue)-1]})
+}
+
+func isASCIIAlphanumeric(value byte) bool {
+	return value >= '0' && value <= '9' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= 'a' && value <= 'z'
+}
+
 // truncatedHash computes a truncated SHA256 hash for JA4.
 func truncatedHash(input string) string {
 	if input == "" {
 		return "000000000000"
 	}
-	hash := md5.Sum([]byte(input))
+	hash := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(hash[:6]) // First 12 hex chars (6 bytes)
 }
 

@@ -61,41 +61,41 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Processor to upstream
 
-- [ ] Add a connection-scoped outbound queue and sender loop to
+- [x] Add a connection-scoped outbound queue and sender loop to
       `internal/pkg/processor/upstream.Manager`.
-- [ ] Make `Forward` enqueue a batch rather than call `stream.Send` directly.
-- [ ] Define explicit behavior for a full outbound queue: report pressure to the
+- [x] Make `Forward` enqueue a batch rather than call `stream.Send` directly.
+- [x] Define explicit behavior for a full outbound queue: report pressure to the
       flow controller and apply the configured bounded drop/backlog policy.
-- [ ] Tie the sender loop to the connection generation so an old sender cannot
+- [x] Tie the sender loop to the connection generation so an old sender cannot
       send on or close a successor stream.
-- [ ] Route `CloseSend` through the stream owner after it has stopped accepting
+- [x] Route `CloseSend` through the stream owner after it has stopped accepting
       batches and drained or discarded the bounded queue.
-- [ ] Preserve packet-forwarded and consecutive-failure accounting in the sender
+- [x] Preserve packet-forwarded and consecutive-failure accounting in the sender
       loop rather than at enqueue time.
 
 ### Hunter to processor
 
-- [ ] Make `batchSender` the sole owner of `stream.Send`.
-- [ ] Remove the goroutine-per-send timeout pattern from `SendBatchToStream`.
-- [ ] Enforce send deadlines through the stream/connection context. If the gRPC
+- [x] Make `batchSender` the sole owner of `stream.Send`.
+- [x] Remove the goroutine-per-send timeout pattern from `SendBatchToStream`.
+- [x] Enforce send deadlines through the stream/connection context. If the gRPC
       API cannot apply a per-message deadline, cancel the connection generation
       on timeout and wait for its sender to exit before reconnecting.
 - [ ] Ensure shutdown flushing is requested through `batchSender`; do not drain
       `batchQueue` from a second goroutine.
-- [ ] Route `CloseSend` through the sender owner after sends have stopped.
-- [ ] Make failure callbacks non-blocking with respect to sender teardown and
+- [x] Route `CloseSend` through the sender owner after sends have stopped.
+- [x] Make failure callbacks non-blocking with respect to sender teardown and
       ensure only one disconnect transition occurs per connection generation.
 
 ### Tests
 
-- [ ] Add an upstream test with many concurrent `Forward` callers and a fake
+- [x] Add an upstream test with many concurrent `Forward` callers and a fake
       stream that detects overlapping `Send` calls.
-- [ ] Add a hunter test with a blocked fake stream and verify that a send timeout
+- [x] Add a hunter test with a blocked fake stream and verify that a send timeout
       leaves no abandoned send goroutine and starts no second send.
-- [ ] Add shutdown tests proving `CloseSend` never overlaps `Send`.
-- [ ] Add reconnect-generation tests proving an old sender cannot affect the new
+- [x] Add shutdown tests proving `CloseSend` never overlaps `Send`.
+- [x] Add reconnect-generation tests proving an old sender cannot affect the new
       stream.
-- [ ] Run relevant packages under `go test -race`.
+- [x] Run relevant packages under `go test -race`.
 
 ### Acceptance Criteria
 
@@ -110,24 +110,24 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Validate X1 configuration before constructing or starting the X1 server:
+- [x] Validate X1 configuration before constructing or starting the X1 server:
       listen address, server certificate, server key, and client CA must be
       present together.
-- [ ] Return an actionable startup error when X1 is enabled without a client CA.
-- [ ] Set `ClientAuth` to `tls.RequireAndVerifyClientCert` unconditionally for an
+- [x] Return an actionable startup error when X1 is enabled without a client CA.
+- [x] Set `ClientAuth` to `tls.RequireAndVerifyClientCert` unconditionally for an
       enabled X1 server.
-- [ ] Raise the X1 minimum TLS version to TLS 1.3 for consistency with the data
+- [x] Raise the X1 minimum TLS version to TLS 1.3 for consistency with the data
       plane unless a documented ETSI interoperability requirement mandates a
       separately configured compatibility mode.
-- [ ] Apply production-mode validation to X1 independently of the gRPC listener.
-- [ ] Ensure logs never describe a running X1 server as unauthenticated; missing
+- [x] Apply production-mode validation to X1 independently of the gRPC listener.
+- [x] Ensure logs never describe a running X1 server as unauthenticated; missing
       authentication must prevent startup.
-- [ ] Update LI deployment, certificate, manual, and command documentation so the
+- [x] Update LI deployment, certificate, manual, and command documentation so the
       X1 CA is shown as required rather than optional.
 
 ### Tests
 
-- [ ] Table-test every partial X1 TLS configuration and require startup failure.
+- [x] Table-test every partial X1 TLS configuration and require startup failure.
 - [ ] Verify a client without a certificate cannot complete the TLS handshake.
 - [ ] Verify a certificate signed by an untrusted CA is rejected.
 - [ ] Verify a trusted ADMF client can perform an authenticated X1 request.
@@ -144,30 +144,54 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 **Priority:** Critical
 
+### Shutdown dependency graph
+
+Shutdown proceeds from producers to consumers. Cancellation first stops the local
+`PacketSource`; gRPC graceful stop simultaneously rejects new streams and drains
+active handlers. A configured deadline falls back to forced gRPC stop. Only after
+the local source, its batch consumer, gRPC handlers, and the server goroutine have
+exited may packet consumers be closed. LI processing, upstream forwarding, virtual
+interface injection, subscriber broadcasts, TLS key logging, unified PCAP,
+auto-rotate PCAP, and per-call PCAP are all downstream of `processBatch`. The call
+completion monitor is an additional producer for per-call writer lifecycle, so it
+stops before that writer closes. Proxy/downstream topology managers and the hunter
+monitor do not feed the PCAP queue, but are stopped after ingress has quiesced.
+
+```text
+local PacketSource --cancel/drain--+
+                                   +--> processBatch producers exit
+gRPC listener/handlers --grace----+              |
+                                                  +--> LI / upstream / VIF / subscribers
+                                                  +--> TLS keylog
+                                                  +--> unified PCAP queue --drain--> file close
+                                                  +--> auto-rotate PCAP --> file close
+call completion monitor --stop------------------------> per-call PCAP --> file close
+```
+
 ### Tasks
 
-- [ ] Document the complete processor shutdown dependency graph, including gRPC
+- [x] Document the complete processor shutdown dependency graph, including gRPC
       handlers, local `PacketSource`, upstream forwarding, unified PCAP,
       auto-rotate PCAP, per-call PCAP, LI, virtual interfaces, and subscribers.
-- [ ] Stop new packet ingress first: cancel local sources and stop accepting new
+- [x] Stop new packet ingress first: cancel local sources and stop accepting new
       gRPC streams.
-- [ ] Gracefully stop gRPC handlers before closing the unified PCAP write queue.
-- [ ] Wait for local-source and handler goroutines that can call `QueuePackets` to
+- [x] Gracefully stop gRPC handlers before closing the unified PCAP write queue.
+- [x] Wait for local-source and handler goroutines that can call `QueuePackets` to
       exit before `pcapWriter.Stop` closes `writeQueue`.
-- [ ] Preserve bounded shutdown with a graceful-stop timeout and explicit forced
+- [x] Preserve bounded shutdown with a graceful-stop timeout and explicit forced
       stop fallback.
-- [ ] Make `pcap.Writer.Stop` idempotent and make enqueue-after-stop return a
+- [x] Make `pcap.Writer.Stop` idempotent and make enqueue-after-stop return a
       failure instead of panicking as defense in depth.
-- [ ] Close downstream writers only after their final producers have exited.
+- [x] Close downstream writers only after their final producers have exited.
 
 ### Tests
 
 - [ ] Start a processor with a continuously streaming fake hunter, initiate
       shutdown, and assert no panic and no goroutine leak.
 - [ ] Race local-source packet delivery against shutdown.
-- [ ] Call shutdown concurrently and repeatedly to verify idempotence.
-- [ ] Verify accepted queued PCAP batches drain before file closure.
-- [ ] Verify forced shutdown completes when a client refuses graceful closure.
+- [x] Call shutdown concurrently and repeatedly to verify idempotence.
+- [x] Verify accepted queued PCAP batches drain before file closure.
+- [x] Verify forced shutdown completes when a client refuses graceful closure.
 
 ### Acceptance Criteria
 
@@ -181,28 +205,28 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Remove the global `ExtractPortFromSdp` call from the tap-specific TCP SIP
+- [x] Remove the global `ExtractPortFromSdp` call from the tap-specific TCP SIP
       handler.
-- [ ] Trace TCP-signaled SDP through tap and determine whether the active
+- [x] Trace TCP-signaled SDP through tap and determine whether the active
       `voip/processor` instance already receives the parsed SDP metadata.
-- [ ] If TCP-signaled RTP association is required, add an explicit method on the
+- [x] If TCP-signaled RTP association is required, add an explicit method on the
       tap VoIP processor to register SDP endpoints in its per-call tracker.
-- [ ] Ensure that processor-owned mappings are removed on terminal call state,
+- [x] Ensure that processor-owned mappings are removed on terminal call state,
       timeout, eviction, and processor shutdown.
-- [ ] Keep the global tracker behavior unchanged for `sniff voip` and hunter paths
+- [x] Keep the global tracker behavior unchanged for `sniff voip` and hunter paths
       that actively use it.
-- [ ] Configure finite `MaxBufferedPagesPerConnection` and
+- [x] Configure finite `MaxBufferedPagesPerConnection` and
       `MaxBufferedPagesTotal` reassembly limits with production-safe defaults and
       observable drop/error counters.
 
 ### Tests and validation
 
-- [ ] Add a tap TCP-SIP regression test that creates and completes many calls and
+- [x] Add a tap TCP-SIP regression test that creates and completes many calls and
       verifies the global tracker's `portToCallID` size does not grow.
-- [ ] Verify TCP-signaled calls still associate RTP with the correct tap processor
+- [x] Verify TCP-signaled calls still associate RTP with the correct tap processor
       call when that behavior is supported.
-- [ ] Verify processor-owned mappings are removed after call completion.
-- [ ] Add reassembly limit tests for missing/out-of-order TCP segments.
+- [x] Verify processor-owned mappings are removed after call completion.
+- [x] Add reassembly limit tests for missing/out-of-order TCP segments.
 - [ ] Run a bounded soak test with repeated TCP SIP calls and record heap profiles,
       live mapping counts, reassembly pages, and goroutine counts.
 
@@ -218,33 +242,33 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Remove the PAUSE early return from batch rotation in `SendBatch`.
-- [ ] Continue rotating `currentBatch` at the configured batch size and enqueue it
+- [x] Remove the PAUSE early return from batch rotation in `SendBatch`.
+- [x] Continue rotating `currentBatch` at the configured batch size and enqueue it
       into the bounded memory queue while paused.
-- [ ] Gate transmission in the sole sender loop so PAUSE stops dequeue/send, not
+- [x] Gate transmission in the sole sender loop so PAUSE stops dequeue/send, not
       capture-side batching.
-- [ ] Retain the existing disk-overflow behavior when the memory queue fills and
+- [x] Retain the existing disk-overflow behavior when the memory queue fills and
       account for drops when both tiers are exhausted.
-- [ ] Define and implement SLOW semantics, such as bounded pacing or an adaptive
+- [x] Define and implement SLOW semantics, such as bounded pacing or an adaptive
       send rate, without spawning timers or goroutines per batch.
-- [ ] Replace protobuf numeric comparison with an explicit flow-control severity
+- [x] Replace protobuf numeric comparison with an explicit flow-control severity
       function.
-- [ ] Replace lifetime-counter subtraction with a real outstanding-queue metric or
+- [x] Replace lifetime-counter subtraction with a real outstanding-queue metric or
       interval-based ingress/egress rate calculation.
-- [ ] Define state transitions and hysteresis for CONTINUE, SLOW, PAUSE, and
+- [x] Define state transitions and hysteresis for CONTINUE, SLOW, PAUSE, and
       RESUME.
 
 ### Tests
 
-- [ ] Hold a hunter in PAUSE while injecting more than one batch and assert
+- [x] Hold a hunter in PAUSE while injecting more than one batch and assert
       `currentBatch` remains bounded.
-- [ ] Fill memory and disk queues during PAUSE and verify deterministic drop
+- [x] Fill memory and disk queues during PAUSE and verify deterministic drop
       accounting.
-- [ ] Verify RESUME drains queued batches in order.
-- [ ] Verify upstream backlog requests SLOW even when the PCAP queue requests
+- [x] Verify RESUME drains queued batches in order.
+- [x] Verify upstream backlog requests SLOW even when the PCAP queue requests
       RESUME.
-- [ ] Verify SLOW reduces the send rate without blocking capture batching.
-- [ ] Add long-duration state-transition tests using a fake clock.
+- [x] Verify SLOW reduces the send rate without blocking capture batching.
+- [x] Add long-duration state-transition tests using a fake clock.
 
 ### Acceptance Criteria
 
@@ -258,27 +282,27 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Change hunter-side `UPDATE_MODIFY` handling to replace an existing filter or
+- [x] Change hunter-side `UPDATE_MODIFY` handling to replace an existing filter or
       add it when absent.
-- [ ] Keep ID-based deduplication so repeated MODIFY messages cannot create
+- [x] Keep ID-based deduplication so repeated MODIFY messages cannot create
       duplicates.
-- [ ] Rebuild application/GPU filter state exactly once after an effective change.
-- [ ] Preserve processor-side DELETE delivery to hunters removed from the target
+- [x] Rebuild application/GPU filter state exactly once after an effective change.
+- [x] Preserve processor-side DELETE delivery to hunters removed from the target
       scope.
-- [ ] Add structured logging that distinguishes modify, modify-as-add, no-op, and
+- [x] Add structured logging that distinguishes modify, modify-as-add, no-op, and
       delete operations.
-- [ ] Confirm LI-created filters use the same upsert path without separate
+- [x] Confirm LI-created filters use the same upsert path without separate
       semantics.
 
 ### Tests
 
-- [ ] Retarget one filter from hunter A to hunter B and verify removal from A and
+- [x] Retarget one filter from hunter A to hunter B and verify removal from A and
       installation on B without reconnecting either hunter.
-- [ ] Broaden a targeted filter to all hunters and verify every newly included
+- [x] Broaden a targeted filter to all hunters and verify every newly included
       hunter installs it.
-- [ ] Narrow an all-hunter filter and verify excluded hunters delete it.
-- [ ] Replay the same MODIFY and verify only one filter exists.
-- [ ] Exercise CPU, GPU-capable, and LI filter types where supported.
+- [x] Narrow an all-hunter filter and verify excluded hunters delete it.
+- [x] Replay the same MODIFY and verify only one filter exists.
+- [x] Exercise CPU, GPU-capable, and LI filter types where supported.
 
 ### Acceptance Criteria
 
@@ -292,23 +316,23 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Make Go and assembly constraints for `internal/pkg/simd` use matching modern
+- [x] Make Go and assembly constraints for `internal/pkg/simd` use matching modern
       `//go:build` expressions.
-- [ ] Ensure CUDA builds select a complete SIMD implementation or an intentional
+- [x] Ensure CUDA builds select a complete SIMD implementation or an intentional
       pure-Go fallback; no declaration may be left without a compiled body.
-- [ ] Update `make build-cuda` to include the appropriate root command tag.
-- [ ] Scope tap LI and GPU stub files to the command variants that compile the tap
+- [x] Update `make build-cuda` to include the appropriate root command tag.
+- [x] Scope tap LI and GPU stub files to the command variants that compile the tap
       package, mirroring the positive implementation constraints.
-- [ ] Audit all `cmd/*/flags_{li,gpu}*.go` pairs for symmetric constraints.
-- [ ] Add a build-matrix script or Make target used identically by developers and
+- [x] Audit all `cmd/*/flags_{li,gpu}*.go` pairs for symmetric constraints.
+- [x] Add a build-matrix script or Make target used identically by developers and
       CI.
-- [ ] Keep non-LI builds free of LI implementation code and preserve documented
+- [x] Keep non-LI builds free of LI implementation code and preserve documented
       command visibility for specialized binaries.
 
 ### Required matrix
 
-- [ ] `go build -tags all .`
-- [ ] `go build -tags 'all,li' .`
+- [x] `go build -tags all .`
+- [x] `go build -tags 'all,li' .`
 - [ ] `go build -tags 'all,cuda' .` on a CUDA-capable builder.
 - [ ] `go build -tags 'tap,li,cuda' .` on a CUDA-capable builder.
 - [ ] `go test -tags all ./...`
@@ -332,27 +356,27 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Replace the JA4 truncated MD5 helper with SHA-256 truncated to the required
+- [x] Replace the JA4 truncated MD5 helper with SHA-256 truncated to the required
       12 hexadecimal characters.
-- [ ] Encode ALPN using the JA4-defined first and last character transformation.
-- [ ] Verify cipher, extension, GREASE, SNI, signature-algorithm, sorting, and empty
+- [x] Encode ALPN using the JA4-defined first and last character transformation.
+- [x] Verify cipher, extension, GREASE, SNI, signature-algorithm, sorting, and empty
       value behavior against the current JA4 specification.
-- [ ] Keep JA3 and JA3S hashing on MD5 as required by those formats; avoid sharing
+- [x] Keep JA3 and JA3S hashing on MD5 as required by those formats; avoid sharing
       a misleading generic hash helper.
-- [ ] Document that corrected JA4 values change existing stored fingerprints and
+- [x] Document that corrected JA4 values change existing stored fingerprints and
       filters.
-- [ ] Decide whether configuration migration needs a temporary compatibility
+- [x] Decide whether configuration migration needs a temporary compatibility
       warning for known legacy JA4 filters; do not silently match both formats.
 
 ### Tests
 
-- [ ] Add official or independently generated JA4 test vectors.
-- [ ] Cover ALPN values such as `h2`, `http/1.1`, one-character values, and no
+- [x] Add official or independently generated JA4 test vectors.
+- [x] Cover ALPN values such as `h2`, `http/1.1`, one-character values, and no
       ALPN.
-- [ ] Cover GREASE removal, extension exclusions, signature algorithms, and empty
+- [x] Cover GREASE removal, extension exclusions, signature algorithms, and empty
       hashes.
-- [ ] Assert JA3 and JA3S fixtures remain unchanged.
-- [ ] Add a `FILTER_TLS_JA4` integration test using a standard fingerprint.
+- [x] Assert JA3 and JA3S fixtures remain unchanged.
+- [x] Add a `FILTER_TLS_JA4` integration test using a standard fingerprint.
 
 ### Acceptance Criteria
 
@@ -365,28 +389,28 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Move SIP/RTP writer nil checks inside their corresponding writer mutexes in
+- [x] Move SIP/RTP writer nil checks inside their corresponding writer mutexes in
       both synchronous and asynchronous write paths.
-- [ ] Hold the mutex continuously across pointer inspection and `WritePacket`.
-- [ ] Keep `CallInfo.Close` responsible for closing the file and clearing writer
+- [x] Hold the mutex continuously across pointer inspection and `WritePacket`.
+- [x] Keep `CallInfo.Close` responsible for closing the file and clearing writer
       pointers under the same mutex.
-- [ ] Audit every access to `SIPWriter`, `RTPWriter`, `sipFile`, and `rtpFile` and
+- [x] Audit every access to `SIPWriter`, `RTPWriter`, `sipFile`, and `rtpFile` and
       route it through locked helpers where practical.
-- [ ] Define lock ordering between tracker locks and per-call writer locks and
+- [x] Define lock ordering between tracker locks and per-call writer locks and
       document it beside `CallInfo`.
-- [ ] Ensure LRU eviction and completion cleanup remove tracker state without
+- [x] Ensure LRU eviction and completion cleanup remove tracker state without
       introducing tracker-lock/writer-lock inversion.
-- [ ] Preserve `activeWrites` for whole-tracker shutdown, but do not depend on it
+- [x] Preserve `activeWrites` for whole-tracker shutdown, but do not depend on it
       for per-call close safety.
 
 ### Tests
 
-- [ ] Race RTP writes against completion-monitor close.
-- [ ] Race SIP writes against LRU eviction.
-- [ ] Exercise synchronous and asynchronous writer modes.
-- [ ] Assert late packets return a defined not-initialized/closed result instead
+- [x] Race RTP writes against completion-monitor close.
+- [x] Race SIP writes against LRU eviction.
+- [x] Exercise synchronous and asynchronous writer modes.
+- [x] Assert late packets return a defined not-initialized/closed result instead
       of panicking.
-- [ ] Run the VoIP package with `go test -race` and repeated stress counts.
+- [x] Run the VoIP package with `go test -race` and repeated stress counts.
 
 ### Acceptance Criteria
 
@@ -400,29 +424,29 @@ protocol/UI fixes can then land without obscuring the higher-risk lifecycle work
 
 ### Tasks
 
-- [ ] Introduce typed `tea.Msg` results for background DNS, HTTP, email, and local
+- [x] Introduce typed `tea.Msg` results for background DNS, HTTP, email, and local
       call processing.
-- [ ] Make `BackgroundProcessor` parse/enrich immutable packet input and publish
+- [x] Make `BackgroundProcessor` parse/enrich immutable packet input and publish
       result messages without mutating component instances.
-- [ ] Handle each result in the top-level Bubble Tea model's `Update` method and
+- [x] Handle each result in the top-level Bubble Tea model's `Update` method and
       call component mutation methods only there.
-- [ ] Preserve bounded background queues and expose dropped-result counters.
-- [ ] Copy or transfer ownership of slices/maps in messages so the background
+- [x] Preserve bounded background queues and expose dropped-result counters.
+- [x] Copy or transfer ownership of slices/maps in messages so the background
       worker cannot mutate data after delivery.
-- [ ] Make `Configure` and mode switching generation-aware so results from a prior
+- [x] Make `Configure` and mode switching generation-aware so results from a prior
       mode cannot update newly selected views.
-- [ ] Stop and wait for the background processor during model shutdown.
+- [x] Stop and wait for the background processor during model shutdown.
 
 ### Tests
 
-- [ ] Feed concurrent DNS, HTTP, and email packets while rendering views under the
+- [x] Feed concurrent DNS, HTTP, and email packets while rendering views under the
       race detector.
-- [ ] Switch capture modes while background results are in flight and verify stale
+- [x] Switch capture modes while background results are in flight and verify stale
       results are ignored.
-- [ ] Stress query-list rebuilding and selection to guard against index errors.
-- [ ] Stress HTTP request-map updates and reads to guard against concurrent-map
+- [x] Stress query-list rebuilding and selection to guard against index errors.
+- [x] Stress HTTP request-map updates and reads to guard against concurrent-map
       failures.
-- [ ] Verify queue overflow increments counters without blocking the UI.
+- [x] Verify queue overflow increments counters without blocking the UI.
 
 ### Acceptance Criteria
 

@@ -1,4 +1,4 @@
-//go:build li
+//go:build (tap || all) && li
 
 package tap
 

@@ -126,6 +126,9 @@ type Config struct {
 	VifDropPrivilegesUser string // User to drop privileges to after interface creation
 	// TLS keylog settings (for decryption support)
 	TLSKeylogConfig *TLSKeylogWriterConfig // TLS session key storage and file writing
+	// GracefulShutdownTimeout bounds waiting for clients to close gRPC streams.
+	// Zero uses the five-second default.
+	GracefulShutdownTimeout time.Duration
 }
 
 // Processor represents a processor node
@@ -439,6 +442,7 @@ func New(config Config) (*Processor, error) {
 			},
 			&p.packetsForwarded,
 		)
+		p.flowController.SetUpstreamQueue(p.upstreamManager.QueueDepth, p.upstreamManager.QueueCapacity)
 	}
 
 	// Initialize downstream manager (always, to track processors forwarding to us)

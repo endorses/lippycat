@@ -332,6 +332,17 @@ Hunters automatically receive filter updates via the filter subscription mechani
 
 ## Security
 
+### Lawful Interception X1 mTLS
+
+LI builds host the X1 administration endpoint when `--li-enabled` is set. X1
+always requires mutual TLS: configure `--li-x1-listen`, `--li-x1-tls-cert`,
+`--li-x1-tls-key`, and `--li-x1-tls-ca`. The CA file is required and is used to
+verify ADMF client certificates. The processor fails startup if any of these X1
+settings is missing or invalid.
+
+See [Lawful Interception](../../docs/manual/src/part5-advanced/lawful-interception.md)
+for the complete deployment configuration.
+
 ### Production Mode Enforcement
 
 Set `LIPPYCAT_PRODUCTION=true` to block the `--insecure` flag and require mutual authentication:

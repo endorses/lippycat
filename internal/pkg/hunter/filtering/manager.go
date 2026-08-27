@@ -11,6 +11,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"google.golang.org/protobuf/proto"
 )
 
 // CaptureRestarter is an interface for restarting capture with new filters
@@ -185,6 +186,11 @@ func (m *Manager) Subscribe(ctx, connCtx context.Context, mgmtClient management.
 // handleUpdate applies filter updates from processor
 // Routes updates by filter type: BPF filters require restart, app-level filters hot-reload
 func (m *Manager) handleUpdate(update *management.FilterUpdate) {
+	if update == nil || update.Filter == nil {
+		logger.Warn("Ignoring invalid filter update", "operation", "no-op")
+		return
+	}
+
 	logger.Info("Received filter update",
 		"type", update.UpdateType,
 		"filter_id", update.Filter.Id,
@@ -211,25 +217,56 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 			m.filters = append(m.filters, update.Filter)
 			filtersChanged = true
 			logger.Info("Filter added",
+				"operation", "add",
 				"filter_id", update.Filter.Id,
 				"pattern", update.Filter.Pattern)
+		} else {
+			logger.Info("Filter update made no change",
+				"operation", "no-op",
+				"filter_id", update.Filter.Id,
+				"update_type", update.UpdateType)
 		}
 
 	case management.FilterUpdateType_UPDATE_MODIFY:
-		// Modify existing filter
-		for i, f := range m.filters {
+		// MODIFY is an idempotent upsert. This is important when a filter's
+		// target scope expands: newly included hunters have never seen the ID.
+		found := false
+		modified := false
+		newFilters := make([]*management.Filter, 0, len(m.filters)+1)
+		for _, f := range m.filters {
 			if f.Id == update.Filter.Id {
-				m.filters[i] = update.Filter
-				filtersChanged = true
-				logger.Info("Filter modified",
-					"filter_id", update.Filter.Id,
-					"pattern", update.Filter.Pattern)
-				break
+				if !found {
+					found = true
+					modified = !proto.Equal(f, update.Filter)
+					newFilters = append(newFilters, update.Filter)
+				} else {
+					// Collapse any pre-existing duplicate IDs while upserting.
+					modified = true
+				}
+				continue
 			}
+			newFilters = append(newFilters, f)
 		}
-		if !filtersChanged {
-			logger.Warn("Filter to modify not found", "filter_id", update.Filter.Id)
+		if !found {
+			newFilters = append(newFilters, update.Filter)
+			filtersChanged = true
+			logger.Info("Filter installed from modify update",
+				"operation", "modify-as-add",
+				"filter_id", update.Filter.Id,
+				"pattern", update.Filter.Pattern)
+		} else if modified {
+			filtersChanged = true
+			logger.Info("Filter modified",
+				"operation", "modify",
+				"filter_id", update.Filter.Id,
+				"pattern", update.Filter.Pattern)
+		} else {
+			logger.Info("Filter update made no change",
+				"operation", "no-op",
+				"filter_id", update.Filter.Id,
+				"update_type", update.UpdateType)
 		}
+		m.filters = newFilters
 
 	case management.FilterUpdateType_UPDATE_DELETE:
 		// Delete filter
@@ -237,17 +274,20 @@ func (m *Manager) handleUpdate(update *management.FilterUpdate) {
 			if f.Id == update.Filter.Id {
 				m.filters = append(m.filters[:i], m.filters[i+1:]...)
 				filtersChanged = true
-				logger.Info("Filter deleted", "filter_id", update.Filter.Id)
+				logger.Info("Filter deleted", "operation", "delete", "filter_id", update.Filter.Id)
 				break
 			}
 		}
 		if !filtersChanged {
-			logger.Warn("Filter to delete not found", "filter_id", update.Filter.Id)
+			logger.Info("Filter update made no change",
+				"operation", "no-op",
+				"filter_id", update.Filter.Id,
+				"update_type", update.UpdateType)
 		}
 	}
 
 	// Get current filters and appFilterUpdater before unlocking
-	currentFilters := m.filters
+	currentFilters := append([]*management.Filter(nil), m.filters...)
 	appFilterUpdater := m.appFilterUpdater
 	m.mu.Unlock()
 

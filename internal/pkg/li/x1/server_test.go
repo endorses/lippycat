@@ -486,9 +486,10 @@ func TestServer_BuildTLSConfig(t *testing.T) {
 	assert.NotNil(t, tlsConfig)
 	assert.Equal(t, tls.RequireAndVerifyClientCert, tlsConfig.ClientAuth)
 	assert.NotNil(t, tlsConfig.ClientCAs)
+	assert.Equal(t, uint16(tls.VersionTLS13), tlsConfig.MinVersion)
 }
 
-func TestServer_BuildTLSConfig_NoMutualTLS(t *testing.T) {
+func TestServer_BuildTLSConfig_RejectsMissingClientCA(t *testing.T) {
 	// Skip if test certs don't exist
 	testCertDir := "../../../../testdata/certs"
 	certFile := filepath.Join(testCertDir, "server.crt")
@@ -507,10 +508,8 @@ func TestServer_BuildTLSConfig_NoMutualTLS(t *testing.T) {
 	}
 
 	tlsConfig, err := s.buildTLSConfig()
-	require.NoError(t, err)
-	assert.NotNil(t, tlsConfig)
-	assert.Equal(t, tls.NoClientCert, tlsConfig.ClientAuth)
-	assert.Nil(t, tlsConfig.ClientCAs)
+	require.ErrorContains(t, err, "client CA is required")
+	assert.Nil(t, tlsConfig)
 }
 
 func TestExtractDeliveryAddress_IPv4(t *testing.T) {

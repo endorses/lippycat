@@ -294,6 +294,9 @@ func (m *Manager) Start() error {
 		logger.Info("LI Manager disabled")
 		return nil
 	}
+	if err := m.ValidateConfiguration(); err != nil {
+		return err
+	}
 	if err := m.restorePersistedState(); err != nil {
 		return fmt.Errorf("restore LI state (interception remains disarmed): %w", err)
 	}
@@ -371,6 +374,27 @@ func (m *Manager) Start() error {
 		"x1_listen", m.config.X1ListenAddr,
 		"admf_endpoint", m.config.ADMFEndpoint,
 	)
+	return nil
+}
+
+// ValidateConfiguration checks security-sensitive LI configuration before any
+// listener or background worker is started.
+func (m *Manager) ValidateConfiguration() error {
+	configured := m.config.X1ListenAddr != "" || m.config.X1TLSCertFile != "" ||
+		m.config.X1TLSKeyFile != "" || m.config.X1TLSCAFile != ""
+	if !configured {
+		return nil
+	}
+	if m.config.X1ListenAddr == "" || m.config.X1TLSCertFile == "" ||
+		m.config.X1TLSKeyFile == "" || m.config.X1TLSCAFile == "" {
+		return errors.New("incomplete X1 configuration: listen address, server certificate, server key, and client CA are all required")
+	}
+	if m.x1Server == nil {
+		return errors.New("X1 server was not constructed from the configured authenticated listener")
+	}
+	if err := m.x1Server.ValidateConfiguration(); err != nil {
+		return fmt.Errorf("validate X1 server configuration: %w", err)
+	}
 	return nil
 }
 

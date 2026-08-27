@@ -1,3 +1,4 @@
+//go:build amd64 && !cuda
 // +build amd64,!cuda
 
 #include "textflag.h"

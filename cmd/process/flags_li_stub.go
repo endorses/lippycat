@@ -1,4 +1,4 @@
-//go:build !li
+//go:build (processor || all) && !li
 
 package process
 

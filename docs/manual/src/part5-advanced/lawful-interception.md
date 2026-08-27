@@ -80,7 +80,7 @@ Hunters do not need LI support. They perform edge filtering using the same filte
 
 ### Enabling LI
 
-LI is enabled with the `--li-enabled` flag on the processor. At minimum, you need the X1 server certificates for ADMF communication and delivery certificates for MDF communication.
+LI is enabled with the `--li-enabled` flag on the processor or tap. The X1 listen address, server certificate, server key, and ADMF client CA are mandatory; incomplete X1 TLS configuration causes startup to fail. Delivery certificates are also needed for MDF communication.
 
 ```bash
 lc process --listen :55555 \
@@ -183,7 +183,7 @@ The certificates required on the processor side are:
 | Delivery Cert + Key | `--li-delivery-tls-cert`, `--li-delivery-tls-key` | Authenticate to MDF for X2/X3 delivery |
 | MDF CA | `--li-delivery-tls-ca` | Verify MDF server certificates |
 
-All certificates must use RSA 2048+ or ECDSA P-256+ keys with SHA-256 or stronger hashing. TLS 1.2 is the minimum supported version on all LI interfaces.
+All certificates must use RSA 2048+ or ECDSA P-256+ keys with SHA-256 or stronger hashing. The X1 server requires TLS 1.3 and a trusted ADMF client CA; it will not start if its listen address, certificate, key, or client CA is missing. The outbound X1 and X2/X3 interfaces require TLS 1.2 or newer.
 
 For general TLS concepts and certificate generation, refer to [Chapter 13: Security](security.md). The key difference for LI is that you maintain separate CA chains for the ADMF, your organization's LI certificates, and the MDF -- these are typically operated by different entities.
 

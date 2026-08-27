@@ -249,9 +249,6 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 	// Create background processor for non-critical packet processing
 	bgProcessor := NewBackgroundProcessor()
 	bgProcessor.Configure(BackgroundProcessorConfig{
-		DNSView:     uiState.DNSQueriesView,
-		HTTPView:    uiState.HTTPView,
-		EmailView:   uiState.EmailView,
 		CaptureMode: initialMode,
 	})
 
@@ -300,7 +297,7 @@ func (m Model) Init() tea.Cmd {
 
 	// Load remote nodes if in remote mode
 	if m.captureMode == components.CaptureModeRemote {
-		cmds := []tea.Cmd{tickCmd(), cleanupProcessorsCmd()}
+		cmds := []tea.Cmd{tickCmd(), cleanupProcessorsCmd(), m.backgroundProcessor.WaitForResult()}
 		if m.nodesFilePath != "" {
 			cmds = append(cmds, loadNodesFile(m.nodesFilePath))
 		}
@@ -309,7 +306,7 @@ func (m Model) Init() tea.Cmd {
 		}
 		return tea.Batch(cmds...)
 	}
-	return tea.Batch(tickCmd(), cleanupProcessorsCmd())
+	return tea.Batch(tickCmd(), cleanupProcessorsCmd(), m.backgroundProcessor.WaitForResult())
 }
 
 // Shutdown cleans up resources before quitting.
@@ -321,6 +318,9 @@ func (m *Model) Shutdown() {
 
 	// Stop capture to prevent more packets from being processed
 	globalCaptureState.StopCapture()
+	if m.backgroundProcessor != nil {
+		m.backgroundProcessor.Stop()
+	}
 
 	// Stop system metrics collector
 	if m.metricsCollector != nil {
@@ -349,7 +349,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// BUT: Don't intercept PacketMsg, TickMsg, or RestartCaptureMsg - those need to be handled by the main model
 	if m.uiState.Tabs.GetActive() == 3 && m.uiState.SettingsView.IsEditingInterface() {
 		switch msg.(type) {
-		case PacketMsg, TickMsg, components.RestartCaptureMsg:
+		case PacketMsg, TickMsg, components.RestartCaptureMsg,
+			DNSPacketResultMsg, HTTPPacketResultMsg, EmailPacketResultMsg,
+			LocalCallPacketResultMsg, backgroundProcessorStoppedMsg:
 			// Let these fall through to normal handling
 		default:
 			// Handle quit/suspend keys
@@ -466,6 +468,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleCorrelatedCallUpdateMsg(msg)
 	case PacketMsg:
 		return m.handlePacketMsg(msg)
+	case DNSPacketResultMsg:
+		return m.handleDNSPacketResultMsg(msg)
+	case HTTPPacketResultMsg:
+		return m.handleHTTPPacketResultMsg(msg)
+	case EmailPacketResultMsg:
+		return m.handleEmailPacketResultMsg(msg)
+	case LocalCallPacketResultMsg:
+		return m.handleLocalCallPacketResultMsg(msg)
+	case backgroundProcessorStoppedMsg:
+		return m, nil
 	case HunterStatusMsg:
 		return m.handleHunterStatusMsg(msg)
 	case components.UpdateBufferSizeMsg:

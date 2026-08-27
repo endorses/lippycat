@@ -20,6 +20,15 @@ type TapTCPHandler struct {
 	packetChan chan<- source.InjectedPacket
 	// appFilter is optional for proper filter matching
 	appFilter ApplicationFilter
+	// sdpRegistrar owns tap-local RTP associations. Keeping this explicit avoids
+	// writing TCP SDP into the legacy package-global tracker used by sniff/hunt.
+	sdpRegistrar interface{ RegisterSDP(callID, sdp string) }
+}
+
+// SetSDPRegistrar routes SDP learned from reassembled TCP SIP to the tap's
+// processor-owned call tracker.
+func (h *TapTCPHandler) SetSDPRegistrar(registrar interface{ RegisterSDP(callID, sdp string) }) {
+	h.sdpRegistrar = registrar
 }
 
 // NewTapTCPHandler creates a handler for tap mode TCP SIP processing.
@@ -116,9 +125,10 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 		},
 	}
 
-	// Extract RTP ports from SDP for future RTP packet association
-	if body != "" {
-		ExtractPortFromSdp(body, callID)
+	// Register SDP only in the tap-local processor. The package-global tracker is
+	// intentionally reserved for sniff/hunter paths that consume it.
+	if body != "" && h.sdpRegistrar != nil {
+		h.sdpRegistrar.RegisterSDP(callID, body)
 	}
 
 	// Forward exactly one packet for this SIP message.

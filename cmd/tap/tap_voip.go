@@ -528,6 +528,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Create TapTCPHandler that sends processed TCP packets to the injection channel
 	tapTCPHandler := voip.NewTapTCPHandler(tcpInjectionChan)
 	tapTCPHandler.SetApplicationFilter(appFilter)
+	tapTCPHandler.SetSDPRegistrar(voipProc)
 
 	// Create SipStreamFactory with the tap TCP handler
 	// Use a background context for the stream factory - it runs for the lifetime of the tap node

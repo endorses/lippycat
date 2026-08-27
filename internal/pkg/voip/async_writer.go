@@ -327,21 +327,9 @@ func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	var err error
 	switch req.PacketType {
 	case PacketTypeSIP:
-		if call.SIPWriter == nil {
-			return ErrWriterNotInitialized
-		}
-		// Lock the SIP writer mutex for thread-safe write
-		call.sipWriterMu.Lock()
-		err = call.SIPWriter.WritePacket(req.Packet.Metadata().CaptureInfo, req.Packet.Data())
-		call.sipWriterMu.Unlock()
+		err = call.writeSIP(req.Packet)
 	case PacketTypeRTP:
-		if call.RTPWriter == nil {
-			return ErrWriterNotInitialized
-		}
-		// Lock the RTP writer mutex for thread-safe write
-		call.rtpWriterMu.Lock()
-		err = call.RTPWriter.WritePacket(req.Packet.Metadata().CaptureInfo, req.Packet.Data())
-		call.rtpWriterMu.Unlock()
+		err = call.writeRTP(req.Packet)
 	default:
 		return ErrInvalidPacketType
 	}
@@ -386,25 +374,6 @@ func (p *AsyncWriterPool) GetStats() *AsyncWriterStats {
 // SetErrorHandler sets a custom error handler
 func (p *AsyncWriterPool) SetErrorHandler(handler func(callID string, err error)) {
 	p.onError = handler
-}
-
-// Custom errors for async writer
-var (
-	ErrWriterStopped        = &AsyncWriterError{"writer pool is stopped"}
-	ErrQueueFull            = &AsyncWriterError{"write queue is full"}
-	ErrWriteTimeout         = &AsyncWriterError{"write operation timed out"}
-	ErrCallNotFound         = &AsyncWriterError{"call not found"}
-	ErrInvalidPacketType    = &AsyncWriterError{"invalid packet type"}
-	ErrWriterNotInitialized = &AsyncWriterError{"PCAP writer not initialized"}
-)
-
-// AsyncWriterError represents errors from the async writer system
-type AsyncWriterError struct {
-	Message string
-}
-
-func (e *AsyncWriterError) Error() string {
-	return e.Message
 }
 
 // Global async writer pool instance

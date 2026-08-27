@@ -15,18 +15,76 @@ type Controller struct {
 	pcapQueueCapacity func() int
 
 	// Upstream forwarding metrics (if enabled)
-	packetsReceived  *atomic.Uint64
-	packetsForwarded *atomic.Uint64
-	hasUpstream      bool
+	packetsReceived       *atomic.Uint64
+	packetsForwarded      *atomic.Uint64
+	hasUpstream           bool
+	upstreamQueueDepth    func() int
+	upstreamQueueCapacity func() int
+	state                 atomic.Int32
+}
+
+// SetUpstreamQueue sets the real outstanding upstream queue metrics. These
+// supersede lifetime received/forwarded counter subtraction when configured.
+func (c *Controller) SetUpstreamQueue(depthFn func() int, capacityFn func() int) {
+	c.upstreamQueueDepth = depthFn
+	c.upstreamQueueCapacity = capacityFn
+}
+
+func severity(control data.FlowControl) int {
+	switch control {
+	case data.FlowControl_FLOW_PAUSE:
+		return 3
+	case data.FlowControl_FLOW_SLOW:
+		return 2
+	case data.FlowControl_FLOW_RESUME:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func moreSevere(current, candidate data.FlowControl) data.FlowControl {
+	if severity(candidate) > severity(current) {
+		return candidate
+	}
+	return current
 }
 
 // NewController creates a new flow controller
 func NewController(packetsReceived, packetsForwarded *atomic.Uint64, hasUpstream bool) *Controller {
-	return &Controller{
+	c := &Controller{
 		packetsReceived:  packetsReceived,
 		packetsForwarded: packetsForwarded,
 		hasUpstream:      hasUpstream,
 	}
+	c.state.Store(int32(data.FlowControl_FLOW_CONTINUE))
+	return c
+}
+
+// transition applies queue hysteresis. Escalation is immediate, while SLOW and
+// PAUSE are held until every pressure source drains below the resume threshold.
+// RESUME is an observable release signal; the next neutral sample becomes
+// CONTINUE.
+func transition(previous, pressure data.FlowControl) data.FlowControl {
+	if pressure == data.FlowControl_FLOW_PAUSE {
+		return pressure
+	}
+	if previous == data.FlowControl_FLOW_PAUSE {
+		if pressure == data.FlowControl_FLOW_RESUME {
+			return pressure
+		}
+		return previous
+	}
+	if pressure == data.FlowControl_FLOW_SLOW {
+		return pressure
+	}
+	if previous == data.FlowControl_FLOW_SLOW {
+		if pressure == data.FlowControl_FLOW_RESUME {
+			return pressure
+		}
+		return previous
+	}
+	return pressure
 }
 
 // SetPCAPQueue sets the PCAP queue metrics functions
@@ -62,14 +120,10 @@ func (c *Controller) Determine() data.FlowControl {
 					"queue_depth", queueDepth,
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
-				if mostSevere < data.FlowControl_FLOW_SLOW {
-					mostSevere = data.FlowControl_FLOW_SLOW
-				}
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			} else if utilization < constants.FlowControlResumeThreshold {
 				// Resume if queue has drained (< 30%)
-				if mostSevere < data.FlowControl_FLOW_RESUME {
-					mostSevere = data.FlowControl_FLOW_RESUME
-				}
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
 			}
 		}
 	}
@@ -83,7 +137,19 @@ func (c *Controller) Determine() data.FlowControl {
 
 	// Check overall packet processing load (only if upstream forwarding is configured)
 	// If no upstream processor, packets are only consumed by TUI subscribers, not forwarded
-	if c.hasUpstream && c.packetsReceived != nil && c.packetsForwarded != nil {
+	if c.hasUpstream && c.upstreamQueueDepth != nil && c.upstreamQueueCapacity != nil {
+		depth, capacity := c.upstreamQueueDepth(), c.upstreamQueueCapacity()
+		if capacity > 0 {
+			utilization := float64(depth) / float64(capacity)
+			if utilization > constants.FlowControlSlowThreshold {
+				logger.Warn("Upstream queue filling - requesting slowdown",
+					"queue_depth", depth, "capacity", capacity)
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
+			} else if utilization < constants.FlowControlResumeThreshold {
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
+			}
+		}
+	} else if c.hasUpstream && c.packetsReceived != nil && c.packetsForwarded != nil {
 		packetsReceived := c.packetsReceived.Load()
 		packetsForwarded := c.packetsForwarded.Load()
 
@@ -93,12 +159,16 @@ func (c *Controller) Determine() data.FlowControl {
 			if backlog > constants.FlowControlUpstreamBacklogThreshold {
 				logger.Warn("Large packet backlog detected - requesting slowdown",
 					"backlog", backlog)
-				if mostSevere < data.FlowControl_FLOW_SLOW {
-					mostSevere = data.FlowControl_FLOW_SLOW
-				}
+				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			}
 		}
 	}
 
-	return mostSevere
+	for {
+		previousRaw := c.state.Load()
+		next := transition(data.FlowControl(previousRaw), mostSevere)
+		if c.state.CompareAndSwap(previousRaw, int32(next)) {
+			return next
+		}
+	}
 }

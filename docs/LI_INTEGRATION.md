@@ -478,7 +478,7 @@ Delivery uses:
 
 | Interface | Minimum TLS | Mutual TLS |
 |-----------|-------------|------------|
-| X1 Server | TLS 1.2 | Required |
+| X1 Server | TLS 1.3 | Required; `--li-x1-tls-ca` must trust the ADMF client CA |
 | X1 Client | TLS 1.2 | Required |
 | X2/X3 Delivery | TLS 1.2 | Required |
 

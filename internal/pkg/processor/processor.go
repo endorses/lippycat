@@ -423,7 +423,7 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize flow controller
 	hasUpstream := config.UpstreamAddr != ""
-	p.flowController = flow.NewController(&p.packetsReceived, &p.packetsForwarded, hasUpstream)
+	p.flowController = flow.NewController(hasUpstream)
 
 	// Initialize subscriber manager
 	p.subscriberManager = subscriber.NewManager(config.MaxSubscribers)

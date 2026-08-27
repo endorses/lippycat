@@ -328,6 +328,40 @@ func TestController_Determine_UpstreamSlowBeatsPCAPResume(t *testing.T) {
 	assert.Equal(t, data.FlowControl_FLOW_SLOW, c.Determine())
 }
 
+func TestController_Determine_ResumeRequiresAllSourcesBelowLowWatermark(t *testing.T) {
+	pcapDepth, upstreamDepth := 95, 80
+	c := NewController(true)
+	c.SetPCAPQueue(func() int { return pcapDepth }, func() int { return 100 })
+	c.SetUpstreamQueue(func() int { return upstreamDepth }, func() int { return 100 })
+
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, c.Determine())
+
+	// A drained PCAP queue must not release PAUSE while the upstream queue is
+	// still in the neutral hysteresis band.
+	pcapDepth, upstreamDepth = 0, 50
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, c.Determine())
+
+	upstreamDepth = 20
+	assert.Equal(t, data.FlowControl_FLOW_RESUME, c.Determine())
+}
+
+func TestController_Determine_SlowResumeRequiresAllSourcesBelowLowWatermark(t *testing.T) {
+	pcapDepth, upstreamDepth := 75, 0
+	c := NewController(true)
+	c.SetPCAPQueue(func() int { return pcapDepth }, func() int { return 100 })
+	c.SetUpstreamQueue(func() int { return upstreamDepth }, func() int { return 100 })
+
+	assert.Equal(t, data.FlowControl_FLOW_SLOW, c.Determine())
+
+	// A drained upstream queue must not release SLOW while PCAP remains above
+	// the resume threshold.
+	pcapDepth = 40
+	assert.Equal(t, data.FlowControl_FLOW_SLOW, c.Determine())
+
+	pcapDepth = 20
+	assert.Equal(t, data.FlowControl_FLOW_RESUME, c.Determine())
+}
+
 func TestFlowControlSeverityDoesNotDependOnProtobufNumbers(t *testing.T) {
 	assert.Equal(t, data.FlowControl_FLOW_PAUSE,
 		moreSevere(data.FlowControl_FLOW_RESUME, data.FlowControl_FLOW_PAUSE))

@@ -11,6 +11,10 @@ import (
 )
 
 func TestCalculateJA4ReferenceVector(t *testing.T) {
+	// Independently generated from the canonical JA4 Python implementation
+	// (FoxIO-LLC/ja4, python/ja4.py) using the ClientHello fields below. Keeping
+	// the unhashed inputs in this fixture makes the expected value reproducible
+	// without sharing CalculateJA4's helpers.
 	metadata := &types.TLSMetadata{
 		VersionRaw: VersionTLS13,
 		SNI:        "example.com",

@@ -125,7 +125,9 @@ type Manager struct {
 	senderWg   sync.WaitGroup // tracks batch sender goroutine
 
 	// Disk overflow buffer (optional)
-	diskBuffer *buffer.DiskOverflowBuffer
+	diskBuffer  *buffer.DiskOverflowBuffer
+	overflowMu  sync.Mutex
+	diskBacklog bool
 
 	// Flow control
 	flowControlState atomic.Int32  // FlowControl enum value
@@ -395,33 +397,42 @@ func (m *Manager) SendBatch() {
 	m.currentBatch = make([]*data.CapturedPacket, 0, m.config.BatchSize)
 	m.batchMu.Unlock()
 
-	// Queue batch for async sending (non-blocking)
+	// Serialize admission across the memory and disk tiers. Once a batch spills
+	// to disk, all later batches must follow it there until the sender drains the
+	// disk backlog; otherwise newer memory batches can overtake older disk ones.
+	m.overflowMu.Lock()
+	defer m.overflowMu.Unlock()
+	if m.diskBacklog {
+		m.writeBatchToDisk(batch)
+		return
+	}
+
+	// Queue batch for async sending (non-blocking).
 	select {
 	case m.batchQueue <- batch:
 		// Successfully queued to memory
 	default:
-		// Memory queue full - try disk overflow buffer
-		if m.diskBuffer != nil {
-			if err := m.diskBuffer.Write(batch); err != nil {
-				// Disk buffer also full or failed
-				logger.Warn("Batch queue and disk buffer full, dropping batch",
-					"sequence", batch.Sequence,
-					"packets", len(batch.Packets),
-					"error", err)
-				m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-			} else {
-				logger.Debug("Batch queued to disk overflow buffer",
-					"sequence", batch.Sequence,
-					"packets", len(batch.Packets))
-			}
-		} else {
-			// No disk buffer - drop batch
-			logger.Warn("Batch queue full, dropping batch (disk buffer disabled)",
-				"sequence", batch.Sequence,
-				"packets", len(batch.Packets))
-			m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-		}
+		m.writeBatchToDisk(batch)
 	}
+}
+
+// writeBatchToDisk is called with overflowMu held.
+func (m *Manager) writeBatchToDisk(batch *data.PacketBatch) {
+	if m.diskBuffer == nil {
+		logger.Warn("Batch queue full, dropping batch (disk buffer disabled)",
+			"sequence", batch.Sequence, "packets", len(batch.Packets))
+		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+		return
+	}
+	if err := m.diskBuffer.Write(batch); err != nil {
+		logger.Warn("Batch queue and disk buffer full, dropping batch",
+			"sequence", batch.Sequence, "packets", len(batch.Packets), "error", err)
+		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
+		return
+	}
+	m.diskBacklog = true
+	logger.Debug("Batch queued to disk overflow buffer",
+		"sequence", batch.Sequence, "packets", len(batch.Packets))
 }
 
 // batchSender goroutine sends batches from queue asynchronously
@@ -477,27 +488,22 @@ func (m *Manager) batchSender() {
 			pending = batch
 
 		case <-diskCheckChan:
-			// Check if we have room in memory queue and batches on disk
-			if len(m.batchQueue) < cap(m.batchQueue)/2 { // Only refill if queue is less than half full
-				// Try to read from disk buffer
-				if batch, err := m.diskBuffer.Read(); err != nil {
-					logger.Error("Failed to read from disk buffer", "error", err)
-				} else if batch != nil {
-					// Successfully read batch from disk - queue it to memory
-					select {
-					case m.batchQueue <- batch:
-						logger.Debug("Loaded batch from disk to memory queue",
-							"sequence", batch.Sequence,
-							"packets", len(batch.Packets))
-					default:
-						// Memory queue full again - write back to disk
-						// This is rare but can happen if queue fills up between check and send
-						if err := m.diskBuffer.Write(batch); err != nil {
-							logger.Warn("Failed to write batch back to disk", "error", err)
-							m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-						}
-					}
-				}
+			// Memory batches all predate the disk backlog, so drain them first.
+			if len(m.batchQueue) != 0 {
+				continue
+			}
+			m.overflowMu.Lock()
+			batch, err := m.diskBuffer.Read()
+			if err != nil {
+				logger.Error("Failed to read from disk buffer", "error", err)
+			} else if batch == nil {
+				// Admission is serialized by overflowMu, so no producer can append
+				// between observing an empty disk and reopening the memory tier.
+				m.diskBacklog = false
+			}
+			m.overflowMu.Unlock()
+			if batch != nil {
+				pending = batch
 			}
 		}
 	}

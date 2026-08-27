@@ -442,6 +442,14 @@ func (p *Processor) CleanupCallPorts(callID string) {
 	state.rtpPorts = state.rtpPorts[:0]
 }
 
+// CompleteCall removes RTP associations once SIP confirms that a dialog has
+// terminated. The call record is retained until normal timeout/eviction so
+// callers can still inspect its final metadata, but reused media endpoints can
+// no longer be attributed to the completed call.
+func (p *Processor) CompleteCall(callID string) {
+	p.CleanupCallPorts(callID)
+}
+
 // updateCallState updates the state and metadata for a call.
 func (p *Processor) updateCallState(callID, state string, metadata *CallMetadata) {
 	p.mu.Lock()

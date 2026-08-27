@@ -100,7 +100,7 @@ func RegisterLIFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&liX1ListenAddr, "li-x1-listen", ":8443", "X1 administration interface listen address")
 	cmd.PersistentFlags().StringVar(&liX1TLSCertFile, "li-x1-tls-cert", "", "Path to X1 server TLS certificate")
 	cmd.PersistentFlags().StringVar(&liX1TLSKeyFile, "li-x1-tls-key", "", "Path to X1 server TLS key")
-	cmd.PersistentFlags().StringVar(&liX1TLSCAFile, "li-x1-tls-ca", "", "Path to CA certificate for X1 client verification (mutual TLS)")
+	cmd.PersistentFlags().StringVar(&liX1TLSCAFile, "li-x1-tls-ca", "", "Required path to CA certificate for X1 client verification (mutual TLS)")
 	cmd.PersistentFlags().StringVar(&liADMFEndpoint, "li-admf-endpoint", "", "ADMF endpoint for X1 notifications (e.g., https://admf:8443)")
 	// LI ADMF client (X1 notifications) TLS flags - for connecting to ADMF
 	cmd.PersistentFlags().StringVar(&liADMFTLSCertFile, "li-admf-tls-cert", "", "Path to client TLS certificate for ADMF notifications (mutual TLS)")

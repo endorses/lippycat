@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.9] - 2026-08-27
+
+### Added
+- Build-matrix verification for supported tag combinations and regression coverage for streaming ownership, backpressure, filtering, reassembly, TLS fingerprinting, and writer lifecycles
+
+### Changed
+- Bound TCP reassembly memory and make stream, packet, and writer ownership explicit across hunter, processor, TUI, and VoIP pipelines
+- Require every active pressure source to clear before flow control resumes, with queue-specific state tracking for PCAP and upstream forwarding
+- Harden LI/X1 configuration and validation, filter synchronization, JA4/TLS parsing, and SIMD/backend selection
+
+### Fixed
+- Prevent stale stream generations, concurrent sends, reconnect races, and shutdown ordering errors in hunter and upstream forwarding
+- Prevent premature pooled-buffer reuse, dropped writer errors, and packet lifetime violations in capture, TUI, PCAP, and VoIP processing
+- Preserve filter consistency during concurrent updates and avoid resuming hunters while any processor backlog remains pressured
+
 ## [0.10.8] - 2026-08-27
 
 ### Changed

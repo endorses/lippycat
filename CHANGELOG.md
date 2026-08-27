@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.10] - 2026-08-27
+
+### Changed
+- Validate packet-buffer throughput with deterministic capacity, accounting, and drain invariants instead of a runner-speed-dependent delivery percentage
+- Coordinate socket-backed LI keepalive peer shutdown before closing manager-side TLS connections in tests
+
+### Fixed
+- Prevent build-matrix flakes in packet-buffer throughput and LI keepalive shutdown tests
+- Install `xmllint` in the build-partition job so authoritative X1 schema tests can run under the `li` build tag
+
 ## [0.10.9] - 2026-08-27
 
 ### Added

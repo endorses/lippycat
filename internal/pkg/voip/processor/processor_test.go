@@ -20,6 +20,47 @@ func TestNew(t *testing.T) {
 	assert.Equal(t, cfg.CallTimeout, p.config.CallTimeout)
 }
 
+func TestRegisterSDPAssociationLifecycle(t *testing.T) {
+	p := New(Config{MaxCalls: 2, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+
+	p.RegisterSDP("call-1", "v=0\r\nc=IN IP4 192.0.2.10\r\nm=audio 10000 RTP/AVP 0\r\n")
+	if got, ok := p.getCallIDForPort("192.0.2.10:10000"); !ok || got != "call-1" {
+		t.Fatalf("registered endpoint lookup = %q, %v; want call-1, true", got, ok)
+	}
+	p.CleanupCallPorts("call-1")
+	if _, ok := p.getCallIDForPort("192.0.2.10:10000"); ok {
+		t.Fatal("endpoint mapping survived call completion cleanup")
+	}
+
+	p.RegisterSDP("call-2", "v=0\r\nc=IN IP4 192.0.2.11\r\nm=audio 10002 RTP/AVP 0\r\n")
+	p.RegisterSDP("call-3", "v=0\r\nc=IN IP4 192.0.2.12\r\nm=audio 10004 RTP/AVP 0\r\n")
+	p.RegisterSDP("call-4", "v=0\r\nc=IN IP4 192.0.2.13\r\nm=audio 10006 RTP/AVP 0\r\n")
+	if _, ok := p.getCallIDForPort("192.0.2.11:10002"); ok {
+		t.Fatal("oldest call's endpoint mapping survived eviction")
+	}
+
+	p.Close()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
+		t.Fatalf("Close retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	}
+}
+
+func TestTerminalSIPResponseRemovesRTPAssociationWithoutPCAPMonitor(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+	p.RegisterSDP("completed-call", "v=0\r\nc=IN IP4 192.0.2.20\r\nm=audio 12000 RTP/AVP 0\r\n")
+
+	response := createUDPPacket(t, []byte("SIP/2.0 200 OK\r\n"+
+		"Call-ID: completed-call\r\n"+
+		"CSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n"), 5060, 5060)
+	require.NotNil(t, p.Process(response))
+	_, exists := p.getCallIDForPort("192.0.2.20:12000")
+	require.False(t, exists, "terminal SIP response must release RTP mapping without a PCAP monitor")
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	assert.Equal(t, 10000, cfg.MaxCalls)

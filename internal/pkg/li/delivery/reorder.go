@@ -210,6 +210,24 @@ func (rb *ReorderBuffer) Stop() {
 	rb.mu.Unlock()
 	rb.deliver(out)
 }
+
+// Discard stops the buffer and drops every queued PDU without invoking the
+// delivery callback. Task deactivation and expiry use this path: once
+// enforcement ends, packets held only for reordering must not be emitted.
+func (rb *ReorderBuffer) Discard() {
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	if rb.stopped {
+		return
+	}
+	rb.stopped = true
+	for _, s := range rb.streams {
+		rb.disarmLocked(s)
+		clear(s.buffer)
+		s.bytes = 0
+	}
+	clear(rb.streams)
+}
 func (rb *ReorderBuffer) Buffered() (packets, bytes int) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()

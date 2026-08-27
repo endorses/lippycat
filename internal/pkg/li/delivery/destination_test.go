@@ -58,6 +58,174 @@ func TestKeepaliveAcknowledgementIsScopedToInterfaceConnection(t *testing.T) {
 	assert.Contains(t, x2.outstanding, uint32(0))
 	assert.NotZero(t, x3.lastACK)
 	assert.NotContains(t, x3.outstanding, uint32(0))
+	stats, err := m.Stats(did)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), stats.X3Keepalive.Acknowledged)
+}
+
+func TestKeepaliveDisconnectAccountingTracksInvalidationNotPoolReturn(t *testing.T) {
+	did := uuid.New()
+	conn, peer := tlsPipe(t)
+	defer peer.Close()
+	m, state := testKeepaliveManager(did)
+	m.registerConnection(state, conn, PDUTypeX2)
+	m.releaseConnection(did, conn)
+	stats, err := m.Stats(did)
+	require.NoError(t, err)
+	assert.Zero(t, stats.X2Keepalive.Disconnected)
+
+	// Remove the pooled handle before invalidating the underlying association.
+	state.interfacePools[PDUTypeX2].remove(conn)
+	m.invalidateConnection(did, conn, false)
+	stats, err = m.Stats(did)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), stats.X2Keepalive.Disconnected)
+	assert.Zero(t, stats.X2Keepalive.Reconnected)
+	m.recordInterfaceReconnect(did, PDUTypeX2)
+	stats, err = m.Stats(did)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), stats.X2Keepalive.Reconnected)
+}
+
+func TestKeepaliveRejectsWrongDuplicateAndMalformedACKs(t *testing.T) {
+	did := uuid.New()
+	conn := &tls.Conn{}
+	keepalive := &interfaceKeepaliveState{enabled: true, outstanding: map[uint32]time.Time{7: time.Now()}}
+	state := &destinationState{stats: DestinationStats{}}
+	m := &Manager{destinations: map[uuid.UUID]*destinationState{did: state}}
+	runtime := &connectionRuntime{iface: PDUTypeX2, keepalive: keepalive}
+	m.connectionRuntime.Store(conn, runtime)
+
+	m.handleInboundPDU(did, conn, x2x3.NewKeepaliveAckPDU(8))
+	m.handleInboundPDU(did, conn, x2x3.NewKeepaliveAckPDU(7))
+	m.handleInboundPDU(did, conn, x2x3.NewKeepaliveAckPDU(7))
+	malformed := x2x3.NewKeepaliveAckPDU(9)
+	malformed.AddAttribute((&x2x3.TLVEncoder{}).EncodeUint32(x2x3.AttrSequenceNumber, 9))
+	m.handleInboundPDU(did, conn, malformed)
+
+	stats, err := m.Stats(did)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), stats.X2Keepalive.Acknowledged)
+	assert.Equal(t, uint64(3), stats.X2Keepalive.Unexpected)
+	assert.Equal(t, uint64(1), stats.X2Keepalive.Malformed)
+}
+
+func tlsPipe(t *testing.T) (*tls.Conn, *tls.Conn) {
+	t.Helper()
+	certPEM, keyPEM := generateTestCert(t)
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	clientNet, serverNet := net.Pipe()
+	client := tls.Client(clientNet, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}) // test-only pipe
+	server := tls.Server(serverNet, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	errCh := make(chan error, 2)
+	go func() { errCh <- server.Handshake() }()
+	go func() { errCh <- client.Handshake() }()
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+	return client, server
+}
+
+func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		respond   func(*tls.Conn, uint32)
+		wantACK   uint64
+		wantTO    uint64
+		wantUnexp uint64
+		wantBad   uint64
+	}{
+		{name: "acknowledge", respond: func(c *tls.Conn, seq uint32) { writeTestPDU(t, c, x2x3.NewKeepaliveAckPDU(seq)) }, wantACK: 1},
+		{name: "ignore", respond: func(*tls.Conn, uint32) {}, wantTO: 1},
+		{name: "delay", respond: func(c *tls.Conn, seq uint32) {
+			time.Sleep(700 * time.Millisecond)
+			writeTestPDU(t, c, x2x3.NewKeepaliveAckPDU(seq))
+		}, wantTO: 1},
+		{name: "duplicate", respond: func(c *tls.Conn, seq uint32) {
+			writeTestPDU(t, c, x2x3.NewKeepaliveAckPDU(seq))
+			writeTestPDU(t, c, x2x3.NewKeepaliveAckPDU(seq))
+		}, wantACK: 1, wantUnexp: 1},
+		{name: "malformed", respond: func(c *tls.Conn, seq uint32) {
+			p := x2x3.NewKeepaliveAckPDU(seq)
+			p.AddAttribute((&x2x3.TLVEncoder{}).EncodeUint32(x2x3.AttrSequenceNumber, seq))
+			writeTestPDU(t, c, p)
+		}, wantTO: 1, wantUnexp: 1, wantBad: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, peer := tlsPipe(t)
+			did := uuid.New()
+			m, state := testKeepaliveManager(did)
+			m.registerConnection(state, client, PDUTypeX2)
+			m.watchConnection(did, client)
+			peerDone := make(chan struct{})
+			go func() {
+				defer close(peerDone)
+				pdu, err := x2x3.ReadPDU(peer)
+				if err == nil {
+					seq, seqErr := pdu.KeepaliveSequence()
+					if seqErr == nil {
+						tc.respond(peer, seq)
+					}
+				}
+			}()
+			require.Eventually(t, func() bool {
+				stats, err := m.Stats(did)
+				return err == nil && stats.X2Keepalive.Acknowledged >= tc.wantACK && stats.X2Keepalive.Timeouts >= tc.wantTO && stats.X2Keepalive.Unexpected >= tc.wantUnexp && stats.X2Keepalive.Malformed >= tc.wantBad
+			}, 2*time.Second, 20*time.Millisecond)
+			// Close the peer first so the manager's TLS close_notify cannot block
+			// forever on net.Pipe after the peer responder has exited.
+			<-peerDone
+			require.NoError(t, peer.Close())
+			m.Stop()
+		})
+	}
+}
+
+func TestSocketBackedBidirectionalKeepalive(t *testing.T) {
+	client, peer := tlsPipe(t)
+	did := uuid.New()
+	m, state := testKeepaliveManager(did)
+	m.config.X2AcknowledgeInboundKeepalive = true
+	m.registerConnection(state, client, PDUTypeX2)
+	m.watchConnection(did, client)
+	peerDone := make(chan struct{})
+	go func() {
+		defer close(peerDone)
+		writeTestPDU(t, peer, x2x3.NewKeepalivePDUWithSequence(91))
+		for i := 0; i < 2; i++ {
+			pdu, err := x2x3.ReadPDU(peer)
+			if err != nil {
+				return
+			}
+			seq, err := pdu.KeepaliveSequence()
+			if err == nil && pdu.Header.Type == x2x3.PDUTypeKeepalive {
+				writeTestPDU(t, peer, x2x3.NewKeepaliveAckPDU(seq))
+			}
+		}
+	}()
+	require.Eventually(t, func() bool {
+		stats, err := m.Stats(did)
+		return err == nil && stats.X2Keepalive.Acknowledged >= 1 && stats.X2Keepalive.InboundACKed >= 1
+	}, 2*time.Second, 20*time.Millisecond)
+	<-peerDone
+	require.NoError(t, peer.Close())
+	m.Stop()
+}
+
+func testKeepaliveManager(did uuid.UUID) (*Manager, *destinationState) {
+	state := &destinationState{dest: &li.Destination{DID: did, Address: "127.0.0.1", Port: 1}, state: connStateConnected, connections: make(map[*tls.Conn]struct{}), pool: newConnPool(1), interfacePools: map[PDUType]*connPool{PDUTypeX2: newConnPool(1), PDUTypeX3: newConnPool(1)}}
+	m := &Manager{config: DestinationConfig{WriteTimeout: time.Second, InitialBackoff: time.Hour, MaxBackoff: time.Hour, BackoffMultiplier: 2, X2KeepaliveEnabled: true, X2KeepaliveTimeP1: 10 * time.Millisecond, X2KeepaliveTimeP2: 300 * time.Millisecond}, destinations: map[uuid.UUID]*destinationState{did: state}, stopChan: make(chan struct{})}
+	return m, state
+}
+
+func writeTestPDU(t *testing.T, conn net.Conn, pdu *x2x3.PDU) {
+	t.Helper()
+	wire, err := pdu.MarshalBinary()
+	if !assert.NoError(t, err) {
+		return
+	}
+	_, err = conn.Write(wire)
+	assert.NoError(t, err)
 }
 
 // testCertDirDest returns the path to the LI test certificates directory.

@@ -178,8 +178,9 @@ sudo lc tap tls -i eth0 \
 
 ### Management Interface
 
-- `-l, --listen` - Listen address for TUI connections (default: `:55555`)
+- `-l, --listen` - Listen address for hunter and TUI connections (default: `:55555`)
 - `-I, --id` - Unique tap identifier (default: hostname-tap)
+- `--max-hunters` - Maximum concurrent hunter connections (default: 0, unlimited)
 - `--max-subscribers` - Maximum concurrent TUI subscribers (default: 100, 0 = unlimited)
 
 ### Upstream Forwarding
@@ -497,6 +498,17 @@ wireshark -i lc0
 
 ## Security
 
+### Lawful Interception X1 mTLS
+
+LI builds host the X1 administration endpoint when `--li-enabled` is set. X1
+always requires mutual TLS: configure `--li-x1-listen`, `--li-x1-tls-cert`,
+`--li-x1-tls-key`, and `--li-x1-tls-ca`. The CA file is required and is used to
+verify ADMF client certificates. Tap fails startup if any of these X1 settings
+is missing or invalid.
+
+See [Lawful Interception](../../docs/manual/src/part5-advanced/lawful-interception.md)
+for the complete deployment configuration.
+
 TLS is enabled by default. Use `--insecure` for local testing without TLS.
 
 ### Production Mode Enforcement
@@ -546,6 +558,7 @@ tap:
   # Management interface
   listen_addr: ":55555"
   id: "edge-tap-01"
+  max_hunters: 0
   max_subscribers: 100
   processor_addr: ""
 

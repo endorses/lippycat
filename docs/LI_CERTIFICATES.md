@@ -41,7 +41,7 @@ flowchart TB
 |-------------|---------|---------|----------|
 | X1 Server Cert | X1 HTTPS server | Processor | - |
 | X1 Server Key | X1 server private key | Processor | - |
-| ADMF CA | Verify ADMF clients | Processor | ADMF client certs |
+| ADMF CA | Verify ADMF clients (required; X1 fails to start without it) | Processor | ADMF client certs |
 | X1 Client Cert | X1 notifications to ADMF | Processor | - |
 | X1 Client Key | X1 client private key | Processor | - |
 | ADMF Server CA | Verify ADMF server | Processor | ADMF server cert |

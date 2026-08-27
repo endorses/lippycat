@@ -409,7 +409,7 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
 		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
-		MaxHunters:            0,
+		MaxHunters:            cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
 		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:          true,

@@ -166,6 +166,9 @@ Used by `tap` and `process` for writing captured packets to disk.
 ### LI Flags
 
 Used by `process` and `tap`. Requires the `li` build tag (`make processor-li`, `make tap-li`, or `make build-li`).
+When `--li-enabled` is set, the X1 listen address, server certificate, server key,
+and ADMF client CA are all required; incomplete X1 TLS configuration causes
+startup to fail.
 
 See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) for details.
 
@@ -175,7 +178,7 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 | `--li-x1-listen` | string | | X1 (ADMF) HTTPS listen address |
 | `--li-x1-tls-cert` | string | | X1 server TLS certificate |
 | `--li-x1-tls-key` | string | | X1 server TLS private key |
-| `--li-x1-tls-ca` | string | | X1 CA certificate (ADMF client verification) |
+| `--li-x1-tls-ca` | string | | **Required when LI is enabled.** CA certificate used to verify ADMF client certificates |
 | `--li-delivery-tls-cert` | string | | X2/X3 delivery client certificate |
 | `--li-delivery-tls-key` | string | | X2/X3 delivery client private key |
 | `--li-delivery-tls-ca` | string | | X2/X3 delivery CA certificate (MDF verification) |
@@ -423,9 +426,10 @@ lc tap [flags]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--listen` | `-l` | string | `:55555` | gRPC listen address for TUI clients |
+| `--listen` | `-l` | string | `:55555` | gRPC listen address for hunter and TUI clients |
 | `--id` | `-I` | string | | Node identifier |
-| `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers |
+| `--max-hunters` | | int | `0` | Maximum concurrent hunters (0 = unlimited) |
+| `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers (0 = unlimited) |
 | `--insecure` | | bool | `false` | Disable TLS for gRPC server |
 | `--api-key-auth` | | bool | `false` | Enable API key authentication |
 | `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |

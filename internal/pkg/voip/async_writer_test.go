@@ -544,3 +544,81 @@ func TestAsyncWriterPool_StopDrainsQueuedPackets(t *testing.T) {
 		"every accepted packet should be written before the pool stops")
 	assert.Equal(t, int64(0), stats.WriteErrors.Load())
 }
+
+// A write that observes an open pool must either be admitted before Stop
+// closes the queues or rejected with ErrWriterStopped. In particular, it must
+// never panic by sending to a queue Stop closed concurrently.
+func TestAsyncWriterPool_ConcurrentStopAndAdmission(t *testing.T) {
+	ResetConfigOnce()
+
+	const rounds = 25
+	packet := createTestPacketForAsync(t)
+	for round := 0; round < rounds; round++ {
+		pool := NewAsyncWriterPool(2, 64)
+		require.NoError(t, pool.Start())
+
+		start := make(chan struct{})
+		var writers sync.WaitGroup
+		for writer := 0; writer < 32; writer++ {
+			writers.Add(1)
+			go func(writer int) {
+				defer writers.Done()
+				<-start
+				callID := fmt.Sprintf("stop-race-%d-%d", round, writer)
+				for {
+					err := pool.WritePacketAsync(callID, packet, PacketTypeSIP)
+					if err == ErrWriterStopped {
+						return
+					}
+					if err != nil && err != ErrQueueFull {
+						t.Errorf("unexpected async admission result: %v", err)
+						return
+					}
+				}
+			}(writer)
+		}
+
+		close(start)
+		require.NoError(t, pool.Stop())
+		writers.Wait()
+
+		stats := pool.GetStats()
+		assert.Equal(t, stats.PacketsQueued.Load(),
+			stats.PacketsWritten.Load()+stats.WriteErrors.Load(),
+			"all accepted writes must finish before Stop returns")
+	}
+}
+
+func TestAsyncWriterPool_SyncWriteConcurrentWithStop(t *testing.T) {
+	ResetConfigOnce()
+	pool := NewAsyncWriterPool(2, 64)
+	require.NoError(t, pool.Start())
+
+	packet := createTestPacketForAsync(t)
+	start := make(chan struct{})
+	results := make(chan error, 32)
+	var writers sync.WaitGroup
+	for writer := 0; writer < cap(results); writer++ {
+		writers.Add(1)
+		go func(writer int) {
+			defer writers.Done()
+			<-start
+			results <- pool.WritePacketSync(
+				fmt.Sprintf("sync-stop-race-%d", writer), packet, PacketTypeSIP)
+		}(writer)
+	}
+
+	close(start)
+	require.NoError(t, pool.Stop())
+	writers.Wait()
+	close(results)
+	for err := range results {
+		assert.True(t, err == ErrWriterStopped || err == ErrCallNotFound,
+			"write should either be rejected or finish after admission, got %v", err)
+	}
+
+	stats := pool.GetStats()
+	assert.Equal(t, stats.PacketsQueued.Load(),
+		stats.PacketsWritten.Load()+stats.WriteErrors.Load(),
+		"all accepted synchronous writes must finish before Stop returns")
+}

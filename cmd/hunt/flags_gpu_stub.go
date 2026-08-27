@@ -1,4 +1,4 @@
-//go:build !cuda
+//go:build (hunter || all) && !cuda
 
 package hunt
 

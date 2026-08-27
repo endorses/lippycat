@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -162,6 +163,66 @@ func TestProcessor_Shutdown_Idempotent(t *testing.T) {
 
 	// Should succeed without panicking
 	assert.NoError(t, err1)
+}
+
+func TestProcessor_Shutdown_Concurrent(t *testing.T) {
+	processor, err := New(Config{
+		ProcessorID: "concurrent-shutdown",
+		ListenAddr:  "localhost:0",
+		MaxHunters:  1,
+	})
+	require.NoError(t, err)
+
+	const callers = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- processor.Shutdown()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		assert.NoError(t, err)
+	}
+}
+
+type blockingGRPCStopper struct {
+	gracefulStarted chan struct{}
+	forceStop       chan struct{}
+	stopOnce        sync.Once
+}
+
+func (s *blockingGRPCStopper) GracefulStop() {
+	close(s.gracefulStarted)
+	<-s.forceStop
+}
+
+func (s *blockingGRPCStopper) Stop() {
+	s.stopOnce.Do(func() { close(s.forceStop) })
+}
+
+func TestGracefulStopWithTimeoutForcesBlockedServer(t *testing.T) {
+	server := &blockingGRPCStopper{
+		gracefulStarted: make(chan struct{}),
+		forceStop:       make(chan struct{}),
+	}
+	started := time.Now()
+	gracefulStopWithTimeout(server, 20*time.Millisecond)
+	assert.Less(t, time.Since(started), time.Second)
+	select {
+	case <-server.gracefulStarted:
+	default:
+		t.Fatal("GracefulStop was not attempted")
+	}
+	select {
+	case <-server.forceStop:
+	default:
+		t.Fatal("Stop was not used after the timeout")
+	}
 }
 
 // TestProcessor_StartStop_Cycle tests multiple start/stop cycles

@@ -65,7 +65,7 @@ type Config struct {
 	ListenAddr                  string
 	ProcessorID                 string
 	UpstreamAddr                string
-	MaxHunters                  int
+	MaxHunters                  int // Maximum concurrent hunter connections (0 = unlimited)
 	MaxSubscribers              int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
 	WriteFile                   string
 	DisplayStats                bool
@@ -106,24 +106,26 @@ type Config struct {
 	LIADMFReconcileInterval time.Duration // Periodic reconciliation interval (0 = disabled)
 	LIStateFile             string        // Atomic LI lifecycle persistence file
 	// LI Delivery (X2/X3) TLS settings - mutual TLS is required for delivery
-	LIDeliveryTLSCertFile        string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
-	LIDeliveryTLSKeyFile         string   // Path to client TLS key for X2/X3 delivery
-	LIDeliveryTLSCAFile          string   // Path to CA certificate for verifying MDF servers
-	LIDeliveryTLSPinnedCert      []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
-	LIDeliveryQueueSize          int
-	LIDeliverySendTimeout        time.Duration
-	LIDeliveryInitialBackoff     time.Duration
-	LIDeliveryMaxBackoff         time.Duration
-	LIDeliveryKeepAliveIdle      time.Duration
-	LIDeliveryKeepAliveInterval  time.Duration
-	LIDeliveryKeepAliveCount     int
-	LIDeliveryX2KeepaliveEnabled bool
-	LIDeliveryX2KeepaliveTimeP1  time.Duration
-	LIDeliveryX2KeepaliveTimeP2  time.Duration
-	LIDeliveryX3KeepaliveEnabled bool
-	LIDeliveryX3KeepaliveTimeP1  time.Duration
-	LIDeliveryX3KeepaliveTimeP2  time.Duration
-	LIDeliveryShutdownTimeout    time.Duration
+	LIDeliveryTLSCertFile                   string   // Path to client TLS certificate for X2/X3 delivery (mutual TLS)
+	LIDeliveryTLSKeyFile                    string   // Path to client TLS key for X2/X3 delivery
+	LIDeliveryTLSCAFile                     string   // Path to CA certificate for verifying MDF servers
+	LIDeliveryTLSPinnedCert                 []string // Pinned certificate fingerprints for MDF servers (SHA256, hex encoded)
+	LIDeliveryQueueSize                     int
+	LIDeliverySendTimeout                   time.Duration
+	LIDeliveryInitialBackoff                time.Duration
+	LIDeliveryMaxBackoff                    time.Duration
+	LIDeliveryKeepAliveIdle                 time.Duration
+	LIDeliveryKeepAliveInterval             time.Duration
+	LIDeliveryKeepAliveCount                int
+	LIDeliveryX2KeepaliveEnabled            bool
+	LIDeliveryX2KeepaliveTimeP1             time.Duration
+	LIDeliveryX2KeepaliveTimeP2             time.Duration
+	LIDeliveryX3KeepaliveEnabled            bool
+	LIDeliveryX3KeepaliveTimeP1             time.Duration
+	LIDeliveryX3KeepaliveTimeP2             time.Duration
+	LIDeliveryX2AcknowledgeInboundKeepalive bool
+	LIDeliveryX3AcknowledgeInboundKeepalive bool
+	LIDeliveryShutdownTimeout               time.Duration
 	// Virtual interface settings
 	VirtualInterface      bool   // Enable virtual network interface
 	VirtualInterfaceName  string // Virtual interface name
@@ -135,6 +137,9 @@ type Config struct {
 	TLSKeylogConfig *TLSKeylogWriterConfig // TLS session key storage and file writing
 	EventQueueSize  int
 	LogConfig       *StructuredLogConfig
+	// GracefulShutdownTimeout bounds waiting for clients to close gRPC streams.
+	// Zero uses the five-second default.
+	GracefulShutdownTimeout time.Duration
 }
 
 // StructuredLogConfig configures normalized protocol file logs.
@@ -516,7 +521,7 @@ func New(config Config) (*Processor, error) {
 
 	// Initialize flow controller
 	hasUpstream := config.UpstreamAddr != ""
-	p.flowController = flow.NewController(&p.packetsReceived, &p.packetsForwarded, hasUpstream)
+	p.flowController = flow.NewController(hasUpstream)
 
 	// Initialize subscriber manager
 	p.subscriberManager = subscriber.NewManager(config.MaxSubscribers)
@@ -535,6 +540,7 @@ func New(config Config) (*Processor, error) {
 			},
 			&p.packetsForwarded,
 		)
+		p.flowController.SetUpstreamQueue(p.upstreamManager.QueueDepth, p.upstreamManager.QueueCapacity)
 	}
 
 	// Initialize downstream manager (always, to track processors forwarding to us)

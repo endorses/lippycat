@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,6 +66,20 @@ const (
 	MessageTypePing              = "PingRequest"
 )
 
+// X1 error response request types. These are operation names from the
+// RequestMessageType schema enumeration, not request element/type names.
+const (
+	RequestTypeCreateDestination = "CreateDestination"
+	RequestTypeModifyDestination = "ModifyDestination"
+	RequestTypeRemoveDestination = "RemoveDestination"
+	RequestTypeActivateTask      = "ActivateTask"
+	RequestTypeDeactivateTask    = "DeactivateTask"
+	RequestTypeModifyTask        = "ModifyTask"
+	RequestTypeGetTaskDetails    = "GetTaskDetails"
+	RequestTypePing              = "Ping"
+	RequestTypeExtended          = "ExtendedRequestMessageType"
+)
+
 // Sentinel errors for destination operations.
 var (
 	// ErrDestinationNotFound indicates the requested destination DID does not exist.
@@ -78,10 +94,19 @@ var (
 	ErrTaskNotFound = errors.New("task not found")
 	// ErrTaskAlreadyExists indicates a task with the given XID already exists.
 	ErrTaskAlreadyExists = errors.New("task already exists")
+	// ErrTaskDefinitionConflict indicates that an existing XID was reasserted
+	// with different enforcement semantics and must be changed with ModifyTask.
+	ErrTaskDefinitionConflict = errors.New("task definition conflicts with existing task")
+	// ErrReactivationIdentityConflict indicates that a retained task was
+	// reasserted with different protected interception identity fields.
+	ErrReactivationIdentityConflict = errors.New("retained task interception identity differs")
 	// ErrInvalidTask indicates the task parameters are invalid.
 	ErrInvalidTask = errors.New("invalid task parameters")
 	// ErrModifyNotAllowed indicates the requested modification is not permitted.
 	ErrModifyNotAllowed = errors.New("modification not allowed")
+	// ErrUnsupportedDeliveryCombination indicates that the requested targets
+	// and delivery type cannot be produced by this network element.
+	ErrUnsupportedDeliveryCombination = errors.New("unsupported delivery combination")
 )
 
 // Destination represents an X2/X3 delivery endpoint.
@@ -216,7 +241,8 @@ type ServerConfig struct {
 	// NEIdentifier is the network element identifier for X1 responses.
 	NEIdentifier string
 
-	// Version is the X1 protocol version (default: "v1.13.1").
+	// Version is the declared outbound X1 protocol version. It defaults to
+	// DefaultProtocolVersion; inbound compatibility is independently validated.
 	Version string
 
 	// RateLimitPerIP is the maximum requests per second per IP address (default: 10).
@@ -279,6 +305,10 @@ type Server struct {
 	rateLimiters         map[string]*limiterEntry
 	trustedProxies       []netip.Prefix
 	rateLimiterEvictions atomic.Uint64
+
+	revisionMetrics revisionMetrics
+	revisionLogsMu  sync.Mutex
+	revisionLogs    map[string]struct{}
 }
 
 type limiterEntry struct {
@@ -288,12 +318,94 @@ type limiterEntry struct {
 
 const DefaultProtocolVersion = "v1.22.1"
 
-func supportedProtocolVersion(version string) bool {
-	switch version {
-	case "", "v1.13.1", "1.13.1", "v1.22.1", "1.22.1":
-		return true
-	default:
-		return false
+// The inbound window is based on verified wire compatibility with the bundled
+// V1.22.1 schema. It is deliberately not a general semantic-version policy.
+const minimumProtocolVersion = "v1.13.1"
+
+type protocolRevision struct{ major, minor, patch int }
+type revisionDisposition uint8
+
+const (
+	revisionAcceptedExact revisionDisposition = iota
+	revisionAcceptedCompatible
+	revisionAbsent
+	revisionMalformed
+	revisionUnsupported
+)
+
+type revisionMetrics struct {
+	acceptedExact, acceptedCompatible atomic.Uint64
+	absent, malformed, unsupported    atomic.Uint64
+}
+
+// RevisionStats is a snapshot of inbound X1 protocol revision counters.
+type RevisionStats struct {
+	AcceptedExact, AcceptedCompatible uint64
+	Absent, Malformed, Unsupported    uint64
+}
+
+func parseProtocolRevision(version string) (protocolRevision, error) {
+	value := version
+	if strings.HasPrefix(value, "v") {
+		value = value[1:]
+	}
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 {
+		return protocolRevision{}, fmt.Errorf("expected MAJOR.MINOR.PATCH")
+	}
+	values := [3]int{}
+	for i, part := range parts {
+		if part == "" {
+			return protocolRevision{}, fmt.Errorf("empty revision component")
+		}
+		for _, char := range part {
+			if char < '0' || char > '9' {
+				return protocolRevision{}, fmt.Errorf("non-numeric revision component")
+			}
+		}
+		parsed, err := strconv.Atoi(part)
+		if err != nil {
+			return protocolRevision{}, fmt.Errorf("revision component out of range: %w", err)
+		}
+		values[i] = parsed
+	}
+	return protocolRevision{values[0], values[1], values[2]}, nil
+}
+
+func compareProtocolRevisions(left, right protocolRevision) int {
+	if left.major != right.major {
+		return left.major - right.major
+	}
+	if left.minor != right.minor {
+		return left.minor - right.minor
+	}
+	return left.patch - right.patch
+}
+
+func classifyProtocolVersion(version string) revisionDisposition {
+	if version == "" {
+		return revisionAbsent
+	}
+	revision, err := parseProtocolRevision(version)
+	if err != nil {
+		return revisionMalformed
+	}
+	minimum, _ := parseProtocolRevision(minimumProtocolVersion)
+	maximum, _ := parseProtocolRevision(DefaultProtocolVersion)
+	if compareProtocolRevisions(revision, minimum) < 0 || compareProtocolRevisions(revision, maximum) > 0 {
+		return revisionUnsupported
+	}
+	if compareProtocolRevisions(revision, maximum) == 0 {
+		return revisionAcceptedExact
+	}
+	return revisionAcceptedCompatible
+}
+
+// RevisionStats returns inbound revision classifications since server creation.
+func (s *Server) RevisionStats() RevisionStats {
+	return RevisionStats{
+		AcceptedExact: s.revisionMetrics.acceptedExact.Load(), AcceptedCompatible: s.revisionMetrics.acceptedCompatible.Load(),
+		Absent: s.revisionMetrics.absent.Load(), Malformed: s.revisionMetrics.malformed.Load(), Unsupported: s.revisionMetrics.unsupported.Load(),
 	}
 }
 
@@ -336,12 +448,32 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 		destManager:    destManager,
 		taskManager:    taskManager,
 		rateLimiters:   make(map[string]*limiterEntry),
+		revisionLogs:   make(map[string]struct{}),
 		trustedProxies: trusted,
 	}
 }
 
 // Start begins serving the X1 interface.
 func (s *Server) Start(ctx context.Context) error {
+	return s.StartReady(ctx, nil)
+}
+
+// StartReady begins serving the X1 interface and reports the result of the
+// synchronous setup phase on ready. A nil error means the authenticated TLS
+// listener has been bound and the serving goroutine has been launched.
+//
+// Callers that need startup guarantees should wait for ready before starting
+// dependent background work. The channel is not closed by StartReady.
+func (s *Server) StartReady(ctx context.Context, ready chan<- error) error {
+	reportReady := func(err error) {
+		if ready != nil {
+			ready <- err
+		}
+	}
+	if err := s.ValidateConfiguration(); err != nil {
+		reportReady(err)
+		return err
+	}
 	// Setup phase - hold lock briefly.
 	s.mu.Lock()
 
@@ -349,7 +481,9 @@ func (s *Server) Start(ctx context.Context) error {
 	tlsConfig, err := s.buildTLSConfig()
 	if err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("failed to build TLS config: %w", err)
+		err = fmt.Errorf("failed to build TLS config: %w", err)
+		reportReady(err)
+		return err
 	}
 
 	// Create HTTP handler
@@ -370,7 +504,9 @@ func (s *Server) Start(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.config.ListenAddr)
 	if err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
+		err = fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
+		reportReady(err)
+		return err
 	}
 	s.listener = ln
 
@@ -380,7 +516,7 @@ func (s *Server) Start(ctx context.Context) error {
 	logger.Info("X1 server starting",
 		"addr", ln.Addr().String(),
 		"tls", true,
-		"mutual_tls", s.config.TLSCAFile != "",
+		"mutual_tls", true,
 	)
 
 	// Start serving in goroutine
@@ -391,6 +527,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		close(errChan)
 	}()
+	reportReady(nil)
 
 	// Wait for context or error
 	select {
@@ -399,6 +536,28 @@ func (s *Server) Start(ctx context.Context) error {
 	case err := <-errChan:
 		return err
 	}
+}
+
+// ValidateConfiguration verifies that the X1 listener can start with mandatory
+// mutual TLS. It is safe to call before Start so callers can fail before
+// launching any background lifecycle work.
+func (s *Server) ValidateConfiguration() error {
+	if s.config.ListenAddr == "" {
+		return errors.New("X1 listen address is required")
+	}
+	if s.config.TLSCertFile == "" {
+		return errors.New("X1 server TLS certificate is required")
+	}
+	if s.config.TLSKeyFile == "" {
+		return errors.New("X1 server TLS key is required")
+	}
+	if s.config.TLSCAFile == "" {
+		return errors.New("X1 client CA is required for mutual TLS authentication")
+	}
+	if _, err := s.buildTLSConfig(); err != nil {
+		return fmt.Errorf("invalid X1 TLS configuration: %w", err)
+	}
+	return nil
 }
 
 // Addr returns the server's bound address, or empty string if not started.
@@ -443,36 +602,26 @@ func (s *Server) buildTLSConfig() (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-		// Secure cipher suites - TLS 1.3 suites are automatically preferred when available
-		CipherSuites: []uint16{
-			// TLS 1.2 cipher suites (TLS 1.3 ciphers are handled automatically by Go)
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-		},
+		MinVersion:   tls.VersionTLS13,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
 
-	// Configure mutual TLS if CA file is provided
-	if s.config.TLSCAFile != "" {
-		caCert, err := os.ReadFile(s.config.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
-
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-
-		tlsConfig.ClientCAs = certPool
-		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-
-		logger.Info("X1 mutual TLS enabled", "ca_file", s.config.TLSCAFile)
+	if s.config.TLSCAFile == "" {
+		return nil, errors.New("X1 client CA is required for mutual TLS authentication")
 	}
+	caCert, err := os.ReadFile(s.config.TLSCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		return nil, fmt.Errorf("failed to parse CA certificate")
+	}
+
+	tlsConfig.ClientCAs = certPool
+
+	logger.Info("X1 mutual TLS enabled", "ca_file", s.config.TLSCAFile)
 
 	return tlsConfig, nil
 }
@@ -682,7 +831,7 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, message := range reqContainer.RequestMessages {
-			responses = append(responses, s.processEnvelopeMessage(message))
+			responses = append(responses, s.processEnvelopeMessage(message, clientIP))
 		}
 		if len(reqContainer.RequestMessages) == 0 {
 			responses = append(responses, s.buildErrorResponse(nil, "requestContainer", ErrorCodeRequestSyntaxError, "request container is empty"))
@@ -690,11 +839,11 @@ func (s *Server) handleX1Request(w http.ResponseWriter, r *http.Request) {
 
 	case "X1Request":
 		// ETSI-compliant X1Request envelope with xsi:type on x1RequestMessage.
-		responses = append(responses, s.processX1RequestEnvelope(body)...)
+		responses = append(responses, s.processX1RequestEnvelope(body, clientIP)...)
 
 	default:
 		// Direct request (not wrapped in container) for backward compatibility.
-		resp := s.processRequestMessage(body, nil)
+		resp := s.processRequestMessage(body, nil, clientIP)
 		responses = append(responses, resp)
 	}
 
@@ -736,22 +885,29 @@ func (c *flexibleResponseContainer) MarshalXML(e *xml.Encoder, start xml.StartEl
 	// Start the X1Response element with ETSI namespace.
 	containerStart := xml.StartElement{
 		Name: xml.Name{Local: "X1Response", Space: etsiX1Namespace},
+		Attr: []xml.Attr{{Name: xml.Name{Local: "xmlns:xsi"}, Value: "http://www.w3.org/2001/XMLSchema-instance"}},
 	}
 	if err := e.EncodeToken(containerStart); err != nil {
 		return err
 	}
 
-	// Marshal each response with appropriate element name
+	// Every response is carried in the element declared by ResponseContainer.
+	// Derived response values identify their concrete schema type using xsi:type.
 	for _, resp := range c.Responses {
-		var elemName string
-		switch resp.(type) {
-		case *schema.ErrorResponse:
-			elemName = "errorResponse"
-		default:
-			elemName = "x1ResponseMessage"
+		respStart := xml.StartElement{Name: xml.Name{Local: "x1ResponseMessage"}}
+		responseType := reflect.TypeOf(resp)
+		if responseType == nil {
+			return errors.New("cannot marshal nil X1 response")
 		}
-
-		respStart := xml.StartElement{Name: xml.Name{Local: elemName}}
+		if responseType.Kind() == reflect.Pointer {
+			responseType = responseType.Elem()
+		}
+		if responseType.Name() != "X1ResponseMessage" {
+			respStart.Attr = append(respStart.Attr, xml.Attr{
+				Name:  xml.Name{Local: "xsi:type"},
+				Value: responseType.Name(),
+			})
+		}
 		if err := e.EncodeElement(resp, respStart); err != nil {
 			return err
 		}
@@ -782,7 +938,7 @@ type x1RequestMessageAttr struct {
 // processX1RequestEnvelope processes an ETSI-compliant X1Request envelope.
 // It extracts the xsi:type from x1RequestMessage and synthesizes a bare request
 // for processing by processRequestMessage.
-func (s *Server) processX1RequestEnvelope(body []byte) []any {
+func (s *Server) processX1RequestEnvelope(body []byte, peer string) []any {
 	var envelope x1RequestEnvelope
 	if err := xml.Unmarshal(body, &envelope); err != nil {
 		return []any{s.buildErrorResponse(nil, "Unknown", ErrorCodeRequestSyntaxError, "invalid X1Request envelope: "+err.Error())}
@@ -792,12 +948,12 @@ func (s *Server) processX1RequestEnvelope(body []byte) []any {
 	}
 	responses := make([]any, 0, len(envelope.RequestMessages))
 	for _, message := range envelope.RequestMessages {
-		responses = append(responses, s.processEnvelopeMessage(message))
+		responses = append(responses, s.processEnvelopeMessage(message, peer))
 	}
 	return responses
 }
 
-func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr) any {
+func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr, peer string) any {
 	requestMessage := envelopeBaseMessage(message)
 	messageType := message.Type
 	if messageType == "" {
@@ -816,7 +972,7 @@ func (s *Server) processEnvelopeMessage(message x1RequestMessageAttr) any {
 	// so it can be processed by the existing processRequestMessage logic.
 	syntheticXML := []byte("<" + messageType + ">" + string(message.InnerXML) + "</" + messageType + ">")
 
-	return s.processRequestMessage(syntheticXML, nil)
+	return s.processRequestMessage(syntheticXML, requestMessage, peer)
 }
 
 func containsElement(data []byte, localName string) bool {
@@ -841,12 +997,74 @@ func envelopeBaseMessage(message x1RequestMessageAttr) *schema.X1RequestMessage 
 	return &requestMessage
 }
 
+func (s *Server) validateProtocolVersion(reqMsg *schema.X1RequestMessage, peer string) *schema.ErrorResponse {
+	version := ""
+	if reqMsg != nil {
+		version = reqMsg.Version
+	}
+	switch classifyProtocolVersion(version) {
+	case revisionAcceptedExact:
+		s.revisionMetrics.acceptedExact.Add(1)
+	case revisionAcceptedCompatible:
+		s.revisionMetrics.acceptedCompatible.Add(1)
+		revision, _ := parseProtocolRevision(version)
+		s.logRevisionOnce(peer, revision.String())
+	case revisionAbsent:
+		s.revisionMetrics.absent.Add(1)
+		s.logRevisionOnce(peer, "unspecified")
+	case revisionMalformed:
+		s.revisionMetrics.malformed.Add(1)
+		return s.protocolVersionError(reqMsg, version)
+	case revisionUnsupported:
+		s.revisionMetrics.unsupported.Add(1)
+		return s.protocolVersionError(reqMsg, version)
+	}
+	return nil
+}
+
+func (r protocolRevision) String() string {
+	return fmt.Sprintf("v%d.%d.%d", r.major, r.minor, r.patch)
+}
+
+func (s *Server) protocolVersionError(reqMsg *schema.X1RequestMessage, version string) *schema.ErrorResponse {
+	return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError,
+		fmt.Sprintf("unsupported X1 protocol version %q; supported range is %s through %s", version, minimumProtocolVersion, DefaultProtocolVersion))
+}
+
+func (s *Server) logRevisionOnce(peer, version string) {
+	if peer == "" {
+		peer = "unknown"
+	}
+	key := peer + "\x00" + version
+	s.revisionLogsMu.Lock()
+	defer s.revisionLogsMu.Unlock()
+	if _, loaded := s.revisionLogs[key]; loaded {
+		return
+	}
+	// Bound peer-derived observability state using the same configured ceiling
+	// as the per-client rate-limiter cache.
+	if len(s.revisionLogs) >= s.config.RateLimiterMaxEntries {
+		for oldKey := range s.revisionLogs {
+			delete(s.revisionLogs, oldKey)
+			break
+		}
+	}
+	s.revisionLogs[key] = struct{}{}
+	logger.Info("X1 peer uses a compatible protocol revision",
+		"peer", peer, "peer_revision", version, "declared_revision", DefaultProtocolVersion)
+}
+
 // processRequestMessage processes a single X1 request message.
 // Returns either *schema.X1ResponseMessage for success or *schema.ErrorResponse for errors.
-func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage) any {
-	if reqMsg != nil && !supportedProtocolVersion(reqMsg.Version) {
-		return s.buildErrorResponse(reqMsg, "Unknown", ErrorCodeRequestSyntaxError,
-			"unsupported X1 protocol version "+reqMsg.Version+"; supported revisions are v1.13.1 and "+DefaultProtocolVersion)
+func (s *Server) processRequestMessage(body []byte, reqMsg *schema.X1RequestMessage, peer string) any {
+	if reqMsg == nil {
+		var parsed schema.X1RequestMessage
+		if err := xml.Unmarshal(body, &parsed); err == nil {
+			reqMsg = &parsed
+		}
+	}
+	if response := s.validateProtocolVersion(reqMsg, peer); response != nil {
+		return response
 	}
 	// Learn the ADMF identifier from the inbound request.
 	if reqMsg != nil && reqMsg.AdmfIdentifier != "" && s.config.OnADMFIdentified != nil {
@@ -934,6 +1152,10 @@ func (s *Server) handleCreateDestination(req *schema.CreateDestinationRequest) a
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeCreateDestination,
 			ErrorCodeRequestSyntaxError, "missing destination details or DID")
 	}
+	if capabilityErr := validateDestinationCapabilities(details, false); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeCreateDestination,
+			capabilityErr.code, capabilityErr.Error())
+	}
 
 	// Parse DID
 	did, err := uuid.Parse(string(*details.DId))
@@ -988,6 +1210,10 @@ func (s *Server) handleModifyDestination(req *schema.ModifyDestinationRequest) a
 	if details == nil || details.DId == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyDestination,
 			ErrorCodeRequestSyntaxError, "missing destination details or DID")
+	}
+	if capabilityErr := validateDestinationCapabilities(details, true); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyDestination,
+			capabilityErr.code, capabilityErr.Error())
 	}
 
 	// Parse DID
@@ -1091,6 +1317,10 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 			ErrorCodeRequestSyntaxError, "missing task details or XID")
 	}
+	if capabilityErr := validateTaskCapabilities(details, false); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+			capabilityErr.code, capabilityErr.Error())
+	}
 
 	// Parse XID
 	xid, err := uuid.Parse(string(*details.XId))
@@ -1152,6 +1382,14 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 
 	// Activate task
 	if err := s.taskManager.ActivateTask(task); err != nil {
+		if errors.Is(err, ErrReactivationIdentityConflict) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeGenericError, "retained task's interception identity differs: "+xid.String())
+		}
+		if errors.Is(err, ErrTaskDefinitionConflict) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeXIDAlreadyExists, "task definition conflicts with existing XID; use ModifyTask: "+xid.String())
+		}
 		if errors.Is(err, ErrTaskAlreadyExists) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 				ErrorCodeXIDAlreadyExists, "task already exists: "+xid.String())
@@ -1159,6 +1397,10 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 		if errors.Is(err, ErrInvalidTask) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
 				ErrorCodeRequestSyntaxError, "invalid task: "+err.Error())
+		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeActivateTask,
+				ErrorCodeDeliveryNotPossible, "unsupported task capability: "+err.Error())
 		}
 		// Check for destination not found error
 		if errors.Is(err, ErrDestinationNotFound) {
@@ -1169,6 +1411,13 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 			ErrorCodeGenericError, "failed to activate task: "+err.Error())
 	}
 
+	if hasMediationIdentity(details.ListOfMediationDetails) {
+		logger.Info("X1 mediation identity recorded but not used for enforcement",
+			"xid", xid,
+			"reason", "lippycat delivers by DID; the MDF owns XID-to-LIID mapping",
+		)
+	}
+
 	logger.Info("X1 task activated",
 		"xid", xid,
 		"targets", len(targets),
@@ -1177,6 +1426,18 @@ func (s *Server) handleActivateTask(req *schema.ActivateTaskRequest) any {
 	)
 
 	return s.buildOKResponse(req.X1RequestMessage, MessageTypeActivateTask)
+}
+
+func hasMediationIdentity(list *schema.ListOfMediationDetails) bool {
+	if list == nil {
+		return false
+	}
+	for _, mediation := range list.MediationDetails {
+		if mediation != nil && (mediation.LIID != nil || mediation.DeliveryType != "") {
+			return true
+		}
+	}
+	return false
 }
 
 // handleDeactivateTask handles DeactivateTaskRequest.
@@ -1224,6 +1485,10 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 	if details == nil || details.XId == nil {
 		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
 			ErrorCodeRequestSyntaxError, "missing task details or XID")
+	}
+	if capabilityErr := validateTaskCapabilities(details, true); capabilityErr != nil {
+		return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+			capabilityErr.code, capabilityErr.Error())
 	}
 
 	// Parse XID
@@ -1288,6 +1553,14 @@ func (s *Server) handleModifyTask(req *schema.ModifyTaskRequest) any {
 		if errors.Is(err, ErrModifyNotAllowed) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
 				ErrorCodeGenericError, "modification not allowed: "+err.Error())
+		}
+		if errors.Is(err, ErrInvalidTask) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeRequestSyntaxError, "invalid task modification: "+err.Error())
+		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
+				ErrorCodeDeliveryNotPossible, "unsupported task capability: "+err.Error())
 		}
 		if errors.Is(err, ErrDestinationNotFound) {
 			return s.buildErrorResponse(req.X1RequestMessage, MessageTypeModifyTask,
@@ -1407,13 +1680,14 @@ func taskDetailsResponse(task *Task) *schema.TaskDetails {
 		did := schema.UUID(id.String())
 		details.ListOfDIDs.DId = append(details.ListOfDIDs.DId, &did)
 	}
-	mediation := &schema.MediationDetails{DeliveryType: deliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
+	liid := schema.LIID(strings.ReplaceAll(task.XID.String(), "-", ""))
+	mediation := &schema.MediationDetails{LIID: &liid, DeliveryType: mediationDeliveryTypeResponse(task.DeliveryType), ListOfDIDs: details.ListOfDIDs}
 	if !task.StartTime.IsZero() {
-		start := schema.QualifiedMicrosecondDateTime(task.StartTime.Format(time.RFC3339Nano))
+		start := formatQualifiedMicrosecondDateTime(task.StartTime)
 		mediation.StartTime = &start
 	}
 	if !task.EndTime.IsZero() {
-		end := schema.QualifiedMicrosecondDateTime(task.EndTime.Format(time.RFC3339Nano))
+		end := formatQualifiedMicrosecondDateTime(task.EndTime)
 		mediation.EndTime = &end
 	}
 	details.ListOfMediationDetails = &schema.ListOfMediationDetails{MediationDetails: []*schema.MediationDetails{mediation}}
@@ -1428,6 +1702,19 @@ func deliveryTypeResponse(deliveryType DeliveryType) string {
 		return "X3Only"
 	case DeliveryX2andX3:
 		return "X2andX3"
+	default:
+		return ""
+	}
+}
+
+func mediationDeliveryTypeResponse(deliveryType DeliveryType) string {
+	switch deliveryType {
+	case DeliveryX2Only:
+		return "HI2Only"
+	case DeliveryX3Only:
+		return "HI3Only"
+	case DeliveryX2andX3:
+		return "HI2andHI3"
 	default:
 		return ""
 	}
@@ -1473,13 +1760,13 @@ func taskProvisioningStatus(status TaskStatus) string {
 	case TaskStatusFailed:
 		return "failed"
 	default:
-		return "unknown"
+		return "failed"
 	}
 }
 
 func taskFaults(lastError string) *schema.ListOfFaults {
 	if lastError == "" {
-		return nil
+		return &schema.ListOfFaults{}
 	}
 	return &schema.ListOfFaults{UnresolvedFault: []*schema.ErrorInformation{{ErrorCode: ErrorCodeGenericError, ErrorDescription: lastError}}}
 }
@@ -1624,7 +1911,7 @@ func (s *Server) buildOKResponse(reqMsg *schema.X1RequestMessage, messageType st
 }
 
 func (s *Server) responseMessage(reqMsg *schema.X1RequestMessage) *schema.X1ResponseMessage {
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 
 	admfID := ""
 	var transID *schema.UUID
@@ -1651,7 +1938,7 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 		"error_desc", errorDesc,
 	)
 
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 
 	admfID := ""
 	var transID *schema.UUID
@@ -1660,8 +1947,10 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 		transID = reqMsg.X1TransactionId
 	}
 
+	requestType, extension := errorRequestType(messageType)
 	return &schema.ErrorResponse{
-		RequestMessageType: messageType,
+		RequestMessageType:   requestType,
+		ExtensionInformation: extension,
 		ErrorInformation: &schema.ErrorInformation{
 			ErrorCode:        errorCode,
 			ErrorDescription: errorDesc,
@@ -1676,6 +1965,34 @@ func (s *Server) buildErrorResponse(reqMsg *schema.X1RequestMessage, messageType
 	}
 }
 
+func errorRequestType(messageType string) (string, *schema.ExtensionInformation) {
+	requestTypes := map[string]string{
+		MessageTypeCreateDestination: RequestTypeCreateDestination,
+		MessageTypeModifyDestination: RequestTypeModifyDestination,
+		MessageTypeRemoveDestination: RequestTypeRemoveDestination,
+		MessageTypeActivateTask:      RequestTypeActivateTask,
+		MessageTypeDeactivateTask:    RequestTypeDeactivateTask,
+		MessageTypeModifyTask:        RequestTypeModifyTask,
+		MessageTypeGetTaskDetails:    RequestTypeGetTaskDetails,
+		MessageTypePing:              RequestTypePing,
+		RequestTypeCreateDestination: RequestTypeCreateDestination,
+		RequestTypeModifyDestination: RequestTypeModifyDestination,
+		RequestTypeRemoveDestination: RequestTypeRemoveDestination,
+		RequestTypeActivateTask:      RequestTypeActivateTask,
+		RequestTypeDeactivateTask:    RequestTypeDeactivateTask,
+		RequestTypeModifyTask:        RequestTypeModifyTask,
+		RequestTypeGetTaskDetails:    RequestTypeGetTaskDetails,
+		RequestTypePing:              RequestTypePing,
+	}
+	if requestType, ok := requestTypes[messageType]; ok {
+		return requestType, nil
+	}
+	return RequestTypeExtended, &schema.ExtensionInformation{
+		ExtensionSpecification:     "TS133128",
+		ExtendedRequestMessageType: messageType,
+	}
+}
+
 // sendErrorResponse sends a top-level error response.
 func (s *Server) sendErrorResponse(w http.ResponseWriter, admfID string, errorCode int, errorDesc string) {
 	logger.Warn("X1 top-level error",
@@ -1683,7 +2000,7 @@ func (s *Server) sendErrorResponse(w http.ResponseWriter, admfID string, errorCo
 		"error_desc", errorDesc,
 	)
 
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 	resp := &schema.TopLevelErrorResponse{
 		AdmfIdentifier:   admfID,
 		NeIdentifier:     s.config.NEIdentifier,

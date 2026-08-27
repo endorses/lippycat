@@ -16,6 +16,12 @@ var (
 	ErrTaskNotFound = errors.New("task not found")
 	// ErrTaskAlreadyExists indicates a task with the given XID already exists.
 	ErrTaskAlreadyExists = errors.New("task already exists")
+	// ErrTaskDefinitionConflict indicates an activation retry reused an XID with
+	// a different enforcement definition. The caller must use ModifyTask.
+	ErrTaskDefinitionConflict = errors.New("task activation definition conflicts with existing task; use ModifyTask")
+	// ErrReactivationIdentityConflict indicates that an explicit activation for
+	// a retained task changed its protected interception identity.
+	ErrReactivationIdentityConflict = errors.New("retained task interception identity differs")
 	// ErrTaskNotActive indicates the operation requires an active task.
 	ErrTaskNotActive = errors.New("task is not active")
 	// ErrInvalidTask indicates the task parameters are invalid.
@@ -217,6 +223,8 @@ func (r *Registry) promotePending(xid uuid.UUID, activatedAt time.Time) error {
 // Returns ErrTaskAlreadyExists if a task with the same XID exists.
 // Returns ErrInvalidTask if the task parameters are invalid.
 func (r *Registry) ActivateTask(task *InterceptTask) error {
+	// Structural and capability validation is independent of registry state and
+	// must complete before taking the lock or creating rollback bookkeeping.
 	if err := r.validateTask(task); err != nil {
 		return err
 	}
@@ -224,27 +232,42 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if existing, exists := r.tasks[task.XID]; exists {
+	existing, exists := r.tasks[task.XID]
+	if exists {
 		if existing.Status != TaskStatusDeactivated {
 			return fmt.Errorf("%w: XID %s is %s", ErrTaskAlreadyExists, task.XID, existing.Status)
 		}
-		previous := *existing
-		previous.Targets = append([]TargetIdentity(nil), existing.Targets...)
-		previous.DestinationIDs = append([]uuid.UUID(nil), existing.DestinationIDs...)
-		r.rollbackTask[task.XID] = &previous
-		r.auditHistory[task.XID] = append(r.auditHistory[task.XID], previous)
 	}
 
-	// Validate destination IDs exist
+	// Destination existence and delivery compatibility are state-dependent.
+	// Validate them under the same lock as the eventual mutation so a
+	// destination cannot change between validation and registration.
+	destinations := make([]*Destination, 0, len(task.DestinationIDs))
 	for _, did := range task.DestinationIDs {
-		if _, exists := r.destinations[did]; !exists {
+		destination, exists := r.destinations[did]
+		if !exists {
 			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
 		}
+		destinations = append(destinations, destination)
+	}
+	if err := validateDestinationDelivery(task, destinations); err != nil {
+		return err
 	}
 
-	// Create a copy to store
-	taskCopy := *task
+	// Only after every fallible validation has succeeded may reactivation add
+	// rollback and audit state. Both snapshots own their slices independently.
+	if exists {
+		rollback := cloneInterceptTask(existing)
+		audit := cloneInterceptTask(existing)
+		r.rollbackTask[task.XID] = rollback
+		r.auditHistory[task.XID] = append(r.auditHistory[task.XID], *audit)
+	}
+
+	taskCopy := cloneInterceptTask(task)
 	taskCopy.ActivatedAt = time.Now()
+	// Generations are monotonic attempt identifiers. A later enforcement
+	// failure may consume a generation, but rollback restores the externally
+	// visible tombstone and its prior generation.
 	r.generations[task.XID]++
 	taskCopy.ActivationGeneration = r.generations[task.XID]
 
@@ -255,19 +278,39 @@ func (r *Registry) ActivateTask(task *InterceptTask) error {
 		taskCopy.Status = TaskStatusPending
 	}
 
-	r.tasks[task.XID] = &taskCopy
+	r.tasks[task.XID] = taskCopy
 	return nil
+}
+
+func cloneInterceptTask(task *InterceptTask) *InterceptTask {
+	if task == nil {
+		return nil
+	}
+	clone := *task
+	clone.Targets = append([]TargetIdentity(nil), task.Targets...)
+	clone.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	return &clone
 }
 
 // restorePendingTask restores durable state without installing enforcement.
 func (r *Registry) restorePendingTask(task *InterceptTask) error {
+	if task == nil || task.Status != TaskStatusPending {
+		return fmt.Errorf("restore pending task: invalid status")
+	}
+	return r.restoreNonEnforcingTask(task)
+}
+
+// restoreNonEnforcingTask restores durable lifecycle state without installing
+// enforcement. Retained deactivated and failed tasks must survive restart so
+// reactivation identity and fail-closed lifecycle rules remain enforceable.
+func (r *Registry) restoreNonEnforcingTask(task *InterceptTask) error {
 	if err := r.validateTask(task); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if task.Status != TaskStatusPending {
-		return fmt.Errorf("restore pending task %s: status is %s", task.XID, task.Status)
+	if task.Status != TaskStatusPending && task.Status != TaskStatusDeactivated && task.Status != TaskStatusFailed {
+		return fmt.Errorf("restore non-enforcing task %s: status is %s", task.XID, task.Status)
 	}
 	if _, exists := r.tasks[task.XID]; exists {
 		return fmt.Errorf("%w: XID %s", ErrTaskAlreadyExists, task.XID)
@@ -391,25 +434,49 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		return err
 	}
 
+	// Validate the complete prospective definition before changing the live
+	// task. This prevents a later invalid field from leaving earlier fields
+	// partially applied.
+	candidate := *task
+	candidate.Targets = append([]TargetIdentity(nil), task.Targets...)
+	candidate.DestinationIDs = append([]uuid.UUID(nil), task.DestinationIDs...)
+	if mod.Targets != nil {
+		candidate.Targets = append([]TargetIdentity(nil), (*mod.Targets)...)
+	}
+	if mod.DestinationIDs != nil {
+		candidate.DestinationIDs = append([]uuid.UUID(nil), (*mod.DestinationIDs)...)
+	}
+	if mod.DeliveryType != nil {
+		candidate.DeliveryType = *mod.DeliveryType
+	}
+	if mod.EndTime != nil {
+		candidate.EndTime = *mod.EndTime
+	}
+	if mod.ImplicitDeactivationAllowed != nil {
+		candidate.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
+	}
+	if err := r.validateTask(&candidate); err != nil {
+		return err
+	}
+	destinations := make([]*Destination, 0, len(candidate.DestinationIDs))
+	for _, did := range candidate.DestinationIDs {
+		destination, exists := r.destinations[did]
+		if !exists {
+			return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
+		}
+		destinations = append(destinations, destination)
+	}
+	if err := validateDestinationDelivery(&candidate, destinations); err != nil {
+		return err
+	}
+
 	// Apply modifications atomically
 	if mod.Targets != nil {
-		// Validate new targets
-		for _, target := range *mod.Targets {
-			if target.Value == "" {
-				return fmt.Errorf("%w: empty target value", ErrInvalidTask)
-			}
-		}
-		task.Targets = *mod.Targets
+		task.Targets = candidate.Targets
 	}
 
 	if mod.DestinationIDs != nil {
-		// Validate destination IDs exist
-		for _, did := range *mod.DestinationIDs {
-			if _, destExists := r.destinations[did]; !destExists {
-				return fmt.Errorf("%w: DID %s", ErrDestinationNotFound, did)
-			}
-		}
-		task.DestinationIDs = *mod.DestinationIDs
+		task.DestinationIDs = candidate.DestinationIDs
 	}
 
 	if mod.DeliveryType != nil {
@@ -424,6 +491,39 @@ func (r *Registry) ModifyTask(xid uuid.UUID, mod *TaskModification) error {
 		task.ImplicitDeactivationAllowed = *mod.ImplicitDeactivationAllowed
 	}
 
+	return nil
+}
+
+func validateDestinationDelivery(task *InterceptTask, destinations []*Destination) error {
+	providesX2 := false
+	providesX3 := false
+	for _, destination := range destinations {
+		if destination == nil {
+			return fmt.Errorf("%w: destination is nil", ErrUnsupportedDeliveryCombination)
+		}
+		// Destinations created by older internal APIs did not carry capability
+		// metadata. Their capabilities are unknown, so retain the historical
+		// compatibility behavior rather than rejecting restored legacy state.
+		if destination.ProtocolType == "" {
+			providesX2 = true
+			providesX3 = true
+			continue
+		}
+		if !destination.X2Enabled && !destination.X3Enabled {
+			return fmt.Errorf("%w: destination DID %s declares neither X2 nor X3", ErrUnsupportedDeliveryCombination, destination.DID)
+		}
+		providesX2 = providesX2 || destination.X2Enabled
+		providesX3 = providesX3 || destination.X3Enabled
+	}
+
+	requiresX2 := task.DeliveryType == DeliveryX2Only || task.DeliveryType == DeliveryX2andX3
+	requiresX3 := task.DeliveryType == DeliveryX3Only || task.DeliveryType == DeliveryX2andX3
+	if requiresX2 && !providesX2 {
+		return fmt.Errorf("%w: task XID %s requires X2, which none of its %d destinations provides", ErrUnsupportedDeliveryCombination, task.XID, len(destinations))
+	}
+	if requiresX3 && !providesX3 {
+		return fmt.Errorf("%w: task XID %s requires X3, which none of its %d destinations provides", ErrUnsupportedDeliveryCombination, task.XID, len(destinations))
+	}
 	return nil
 }
 
@@ -608,9 +708,7 @@ func (r *Registry) validateTask(task *InterceptTask) error {
 	for _, target := range task.Targets {
 		switch target.Type {
 		case TargetTypeIPv4Address, TargetTypeIPv4CIDR, TargetTypeIPv6Address, TargetTypeIPv6CIDR:
-			if task.DeliveryType == DeliveryX2Only {
-				return fmt.Errorf("%w: %s targets require X3 raw-packet delivery", ErrUnsupportedDeliveryCombination, target.Type)
-			}
+			return fmt.Errorf("%w: %s targets require raw-IP interception, whose correlated IRI/CC session model is not implemented", ErrUnsupportedDeliveryCombination, target.Type)
 		case TargetTypeSIPURI, TargetTypeTELURI, TargetTypeNAI, TargetTypeUsername, TargetTypeIMSI, TargetTypeIMEI:
 		default:
 			return fmt.Errorf("%w: target type %d has no encoder", ErrUnsupportedDeliveryCombination, target.Type)

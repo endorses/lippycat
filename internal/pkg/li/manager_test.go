@@ -5,8 +5,11 @@ package li
 import (
 	"encoding/xml"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,6 +38,32 @@ func TestNewManager(t *testing.T) {
 	assert.Equal(t, config.ADMFEndpoint, m.Config().ADMFEndpoint)
 }
 
+func TestManagerStartRejectsPartialX1Configuration(t *testing.T) {
+	fields := []struct {
+		name  string
+		apply func(*ManagerConfig)
+	}{
+		{"listen", func(c *ManagerConfig) { c.X1ListenAddr = ":8443" }},
+		{"certificate", func(c *ManagerConfig) { c.X1TLSCertFile = "server.crt" }},
+		{"key", func(c *ManagerConfig) { c.X1TLSKeyFile = "server.key" }},
+		{"client CA", func(c *ManagerConfig) { c.X1TLSCAFile = "admf-ca.crt" }},
+	}
+	for mask := 1; mask < (1<<len(fields))-1; mask++ {
+		config := ManagerConfig{Enabled: true}
+		name := ""
+		for i, field := range fields {
+			if mask&(1<<i) != 0 {
+				field.apply(&config)
+				name += field.name + "+"
+			}
+		}
+		t.Run(name, func(t *testing.T) {
+			manager := NewManager(config, nil)
+			require.ErrorContains(t, manager.Start(), "incomplete X1 configuration")
+		})
+	}
+}
+
 func TestManager_StartStop(t *testing.T) {
 	config := ManagerConfig{
 		Enabled: true,
@@ -49,6 +78,34 @@ func TestManager_StartStop(t *testing.T) {
 
 	// Stop should not panic
 	m.Stop()
+}
+
+func TestManagerStartPropagatesX1BindFailureBeforeLifecycleStarts(t *testing.T) {
+	certDir := filepath.Join("..", "..", "..", "test", "testcerts", "li")
+	serverCert := filepath.Join(certDir, "x1-server-cert.pem")
+	serverKey := filepath.Join(certDir, "x1-server-key.pem")
+	caFile := filepath.Join(certDir, "ca-cert.pem")
+	if _, err := os.Stat(serverCert); os.IsNotExist(err) {
+		t.Skip("LI test certificates not available")
+	}
+
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, occupied.Close()) }()
+
+	m := NewManager(ManagerConfig{
+		Enabled:       true,
+		X1ListenAddr:  occupied.Addr().String(),
+		X1TLSCertFile: serverCert,
+		X1TLSKeyFile:  serverKey,
+		X1TLSCAFile:   caFile,
+	}, nil)
+
+	err = m.Start()
+	require.ErrorContains(t, err, "start X1 server")
+	require.ErrorContains(t, err, "failed to listen")
+	assert.Nil(t, m.registry.expirationTicker, "registry lifecycle must not start")
+	assert.Nil(t, m.x1ServerCancel, "failed listener must not be installed")
 }
 
 func TestManager_DisabledMode(t *testing.T) {
@@ -208,7 +265,7 @@ func TestManager_ModifyTask(t *testing.T) {
 	task := &InterceptTask{
 		XID: taskXID,
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:alice-ip-replacement@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,
@@ -220,8 +277,8 @@ func TestManager_ModifyTask(t *testing.T) {
 
 	// Modify targets
 	newTargets := []TargetIdentity{
-		{Type: TargetTypeIPv4Address, Value: "192.168.1.101"},
-		{Type: TargetTypeIPv4Address, Value: "192.168.1.102"},
+		{Type: TargetTypeSIPURI, Value: "sip:bob@example.com"},
+		{Type: TargetTypeTELURI, Value: "tel:+15550102"},
 	}
 
 	err = m.ModifyTask(taskXID, &TaskModification{
@@ -277,7 +334,7 @@ func TestManager_ProcessPacket_WithMatch(t *testing.T) {
 	err = m.ActivateTask(&InterceptTask{
 		XID: taskXID,
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:packet-match@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,
@@ -352,7 +409,7 @@ func TestManager_ProcessPacket_NoMatch(t *testing.T) {
 	err = m.ActivateTask(&InterceptTask{
 		XID: uuid.New(),
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:no-match@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,
@@ -494,7 +551,7 @@ func TestManager_MarkTaskFailed(t *testing.T) {
 	err = m.ActivateTask(&InterceptTask{
 		XID: taskXID,
 		Targets: []TargetIdentity{
-			{Type: TargetTypeIPv4Address, Value: "192.168.1.100"},
+			{Type: TargetTypeSIPURI, Value: "sip:failed-task@example.com"},
 		},
 		DestinationIDs: []uuid.UUID{destDID},
 		DeliveryType:   DeliveryX3Only,

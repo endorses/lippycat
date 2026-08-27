@@ -79,7 +79,7 @@ func (m *Manager) Register(hunterID, hostname string, interfaces []string, capab
 		// Allow re-registration (old connection will be replaced)
 	} else {
 		// Check max hunters limit (only for new hunters)
-		if len(m.hunters) >= m.maxHunters {
+		if m.maxHunters > 0 && len(m.hunters) >= m.maxHunters {
 			logger.Warn("Max hunters limit reached", "limit", m.maxHunters)
 			m.mu.Unlock()
 			return nil, false, ErrMaxHuntersReached

@@ -171,6 +171,57 @@ func TestStartupSync_RemovesFilterWithNoADMFTask(t *testing.T) {
 	requireTaskActive(t, m, liveXID)
 }
 
+func TestStartupSync_RetainsAmbiguousLegacyFilterOwnership(t *testing.T) {
+	prefix := "a1b2c3d4"
+	xidA := uuid.MustParse(prefix + "-0000-4000-8000-000000000001")
+	xidB := uuid.MustParse(prefix + "-0000-4000-8000-000000000002")
+	legacyID := "li-" + prefix + "-0"
+	store := newStubFilterStore(legacyID)
+
+	m := admfServing(t, store, 1, sipURITask(xidA), sipURITask(xidB))
+	m.config.SyncOnStartup = true
+	require.NoError(t, m.Start())
+	defer m.Stop()
+
+	assert.True(t, store.has(legacyID), "ambiguous legacy ownership must fail closed")
+	assert.NotContains(t, store.deletes, legacyID)
+}
+
+func TestStartupSync_RemovesFiltersForFailedActivation(t *testing.T) {
+	xid := uuid.New()
+	missingDID := uuid.New()
+	filterID := fmt.Sprintf("li-%s-0", xid.String())
+	store := newStubFilterStore(filterID)
+	sipURI := schema.SIPURI("sip:alice@example.com")
+	task := makeTaskResponseDetails(xid, []uuid.UUID{missingDID}, []schema.TargetIdentifier{{SipUri: &sipURI}})
+
+	m := admfServing(t, store, 1, task)
+	m.config.SyncOnStartup = true
+	require.NoError(t, m.Start())
+	defer m.Stop()
+
+	assert.False(t, store.has(filterID), "a refused task must not leave its persisted filter armed")
+	assert.Contains(t, store.deletes, filterID)
+	_, err := m.GetTaskDetails(xid)
+	assert.ErrorIs(t, err, ErrTaskNotFound)
+}
+
+func TestStartupSync_RemovesTargetIndexesOutsideActiveTask(t *testing.T) {
+	xid := uuid.New()
+	canonical := fmt.Sprintf("li-%s-0", xid.String())
+	duplicate := fmt.Sprintf("li-%s-1", xid.String())
+	store := newStubFilterStore(canonical, duplicate)
+
+	m := admfServing(t, store, 1, sipURITask(xid))
+	m.config.SyncOnStartup = true
+	require.NoError(t, m.Start())
+	defer m.Stop()
+
+	assert.True(t, store.has(canonical))
+	assert.False(t, store.has(duplicate), "target index must not exceed the task target list")
+	assert.Contains(t, store.deletes, duplicate)
+}
+
 // An orphaned task must be torn down, not merely logged.
 func TestReconcile_DeactivatesOrphanedTask(t *testing.T) {
 	liveXID := uuid.New()

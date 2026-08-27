@@ -110,6 +110,7 @@ var (
 	listenAddr      string
 	tapID           string // renamed from tap-id, now --id
 	tapIDDeprecated string // deprecated, use tapID
+	maxHunters      int
 	maxSubscribers  int
 
 	// Upstream forwarding (renamed from --upstream to --processor)
@@ -204,6 +205,7 @@ func init() {
 	TapCmd.PersistentFlags().StringVar(&tapIDDeprecated, "tap-id", "", "")
 	TapCmd.PersistentFlags().Lookup("tap-id").Deprecated = "use --id instead"
 	TapCmd.PersistentFlags().Lookup("tap-id").Hidden = true
+	TapCmd.PersistentFlags().IntVar(&maxHunters, "max-hunters", 0, "Maximum concurrent hunter connections (0 = unlimited)")
 	TapCmd.PersistentFlags().IntVar(&maxSubscribers, "max-subscribers", constants.DefaultMaxSubscribers, "Maximum concurrent TUI subscribers (0 = unlimited)")
 
 	// Upstream forwarding (--processor is the new name, --upstream is deprecated)
@@ -308,6 +310,7 @@ func init() {
 	_ = viper.BindPFlag("tap.id", TapCmd.PersistentFlags().Lookup("id"))
 	// Also bind to old key for backward compatibility with config files
 	_ = viper.BindPFlag("tap.tap_id", TapCmd.PersistentFlags().Lookup("id"))
+	_ = viper.BindPFlag("tap.max_hunters", TapCmd.PersistentFlags().Lookup("max-hunters"))
 	_ = viper.BindPFlag("tap.max_subscribers", TapCmd.PersistentFlags().Lookup("max-subscribers"))
 	_ = viper.BindPFlag("tap.processor_addr", TapCmd.PersistentFlags().Lookup("processor"))
 	// Also bind to old key for backward compatibility with config files
@@ -498,7 +501,7 @@ func runTap(cmd *cobra.Command, args []string) error {
 		ListenAddr:            cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:           effectiveTapID,
 		UpstreamAddr:          cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
-		MaxHunters:            0, // Not accepting hunters in tap mode
+		MaxHunters:            cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
 		MaxSubscribers:        cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:             cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:          cmdutil.GetBoolConfig("tap.display_stats", displayStats),

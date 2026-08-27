@@ -151,6 +151,10 @@ func (m *Manager) restorePersistedState() error {
 			if err := m.registry.restorePendingTask(task); err != nil {
 				return fmt.Errorf("restore pending XID %s: %w", task.XID, err)
 			}
+		case TaskStatusDeactivated, TaskStatusFailed:
+			if err := m.registry.restoreNonEnforcingTask(task); err != nil {
+				return fmt.Errorf("restore retained XID %s: %w", task.XID, err)
+			}
 		case TaskStatusActive, TaskStatusSuspended:
 			// Active state is only a candidate until a complete ADMF snapshot confirms it.
 			copyTask := *task

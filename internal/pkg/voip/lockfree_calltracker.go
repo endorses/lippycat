@@ -105,15 +105,8 @@ func (lf *LockFreeCallTracker) createCallSafely(callID string, linkType layers.L
 	// Atomic store - if another goroutine stored first, use theirs
 	if actual, loaded := lf.callMap.LoadOrStore(callID, lockFreeCall); loaded {
 		// Close our writers since we're using the existing call
-		if call.sipFile != nil {
-			if err := call.sipFile.Close(); err != nil {
-				logger.Error("Failed to close SIP file during race condition cleanup", "error", err, "call_id", callID)
-			}
-		}
-		if call.rtpFile != nil {
-			if err := call.rtpFile.Close(); err != nil {
-				logger.Error("Failed to close RTP file during race condition cleanup", "error", err, "call_id", callID)
-			}
+		if err := call.Close(); err != nil {
+			logger.Error("Failed to close call files during race condition cleanup", "error", err, "call_id", callID)
 		}
 		return actual.(*LockFreeCallInfo).getSnapshot()
 	}
@@ -196,16 +189,8 @@ func (lf *LockFreeCallTracker) removeCall(callID string) bool {
 		lockFreeCall := value.(*LockFreeCallInfo)
 		call := lockFreeCall.CallInfo
 
-		// Close writers
-		if call.sipFile != nil {
-			if err := call.sipFile.Close(); err != nil {
-				logger.Error("Failed to close SIP file during call removal", "error", err, "call_id", callID)
-			}
-		}
-		if call.rtpFile != nil {
-			if err := call.rtpFile.Close(); err != nil {
-				logger.Error("Failed to close RTP file during call removal", "error", err, "call_id", callID)
-			}
+		if err := call.Close(); err != nil {
+			logger.Error("Failed to close call files during call removal", "error", err, "call_id", callID)
 		}
 
 		// Remove associated port mappings
@@ -271,15 +256,8 @@ func (lf *LockFreeCallTracker) Shutdown() {
 			lockFreeCall := value.(*LockFreeCallInfo)
 			call := lockFreeCall.CallInfo
 			callID := key.(string)
-			if call.sipFile != nil {
-				if err := call.sipFile.Close(); err != nil {
-					logger.Error("Failed to close SIP file during shutdown", "error", err, "call_id", callID)
-				}
-			}
-			if call.rtpFile != nil {
-				if err := call.rtpFile.Close(); err != nil {
-					logger.Error("Failed to close RTP file during shutdown", "error", err, "call_id", callID)
-				}
+			if err := call.Close(); err != nil {
+				logger.Error("Failed to close call files during shutdown", "error", err, "call_id", callID)
 			}
 			return true
 		})

@@ -383,7 +383,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 		ListenAddr:                  cmdutil.GetStringConfig("tap.listen_addr", listenAddr),
 		ProcessorID:                 effectiveTapID,
 		UpstreamAddr:                cmdutil.GetStringConfig("tap.processor_addr", processorAddr),
-		MaxHunters:                  0,
+		MaxHunters:                  cmdutil.GetIntConfig("tap.max_hunters", maxHunters),
 		MaxSubscribers:              cmdutil.GetIntConfig("tap.max_subscribers", maxSubscribers),
 		WriteFile:                   cmdutil.GetStringConfig("tap.write_file", writeFile),
 		DisplayStats:                true,
@@ -531,6 +531,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	// Create TapTCPHandler that sends processed TCP packets to the injection channel
 	tapTCPHandler := voip.NewTapTCPHandler(tcpInjectionChan)
 	tapTCPHandler.SetApplicationFilter(appFilter)
+	tapTCPHandler.SetSDPRegistrar(voipProc)
 
 	// Create SipStreamFactory with the tap TCP handler
 	// Use a background context for the stream factory - it runs for the lifetime of the tap node

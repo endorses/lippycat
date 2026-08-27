@@ -48,6 +48,19 @@ func TestRegisterSDPAssociationLifecycle(t *testing.T) {
 	}
 }
 
+func TestTerminalSIPResponseRemovesRTPAssociationWithoutPCAPMonitor(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+	p.RegisterSDP("completed-call", "v=0\r\nc=IN IP4 192.0.2.20\r\nm=audio 12000 RTP/AVP 0\r\n")
+
+	response := createUDPPacket(t, []byte("SIP/2.0 200 OK\r\n"+
+		"Call-ID: completed-call\r\n"+
+		"CSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n"), 5060, 5060)
+	require.NotNil(t, p.Process(response))
+	_, exists := p.getCallIDForPort("192.0.2.20:12000")
+	require.False(t, exists, "terminal SIP response must release RTP mapping without a PCAP monitor")
+}
+
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	assert.Equal(t, 10000, cfg.MaxCalls)

@@ -243,6 +243,43 @@ func TestResumeDrainsPausedBatchesInOrder(t *testing.T) {
 	m.Wait()
 }
 
+func TestResumePreservesOrderAcrossMemoryAndDiskOverflow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	queue := make(chan *data.PacketBatch, 2)
+	m := New(Config{
+		BatchSize:         1,
+		DiskBufferEnabled: true,
+		DiskBufferDir:     t.TempDir(),
+		DiskBufferMaxSize: 1 << 20,
+	}, &flowStats{}, nil, ctx, queue)
+	stream := &recordingStream{ctx: ctx, sent: make(chan struct{}, 4)}
+	m.SetStream(stream)
+	m.HandleFlowControl(&data.StreamControl{FlowControl: data.FlowControl_FLOW_PAUSE})
+
+	for i := 0; i < 4; i++ {
+		m.AddPacketToBatch(packet())
+		m.SendBatch()
+	}
+	require.Len(t, queue, 2)
+	require.Equal(t, uint64(2), m.GetDiskBufferMetrics().PendingBatches)
+
+	m.HandleFlowControl(&data.StreamControl{FlowControl: data.FlowControl_FLOW_RESUME})
+	for i := 0; i < 4; i++ {
+		select {
+		case <-stream.sent:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("queued batch %d was not sent", i+1)
+		}
+	}
+	stream.mu.Lock()
+	require.Equal(t, []uint64{1, 2, 3, 4}, stream.sequences)
+	stream.mu.Unlock()
+
+	cancel()
+	m.Wait()
+	require.NoError(t, m.Close())
+}
+
 func TestSlowPacesSenderWithoutBlockingBatching(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

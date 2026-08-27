@@ -22,12 +22,18 @@ type TapTCPHandler struct {
 	appFilter ApplicationFilter
 	// sdpRegistrar owns tap-local RTP associations. Keeping this explicit avoids
 	// writing TCP SDP into the legacy package-global tracker used by sniff/hunt.
-	sdpRegistrar interface{ RegisterSDP(callID, sdp string) }
+	sdpRegistrar interface {
+		RegisterSDP(callID, sdp string)
+		CompleteCall(callID string)
+	}
 }
 
 // SetSDPRegistrar routes SDP learned from reassembled TCP SIP to the tap's
 // processor-owned call tracker.
-func (h *TapTCPHandler) SetSDPRegistrar(registrar interface{ RegisterSDP(callID, sdp string) }) {
+func (h *TapTCPHandler) SetSDPRegistrar(registrar interface {
+	RegisterSDP(callID, sdp string)
+	CompleteCall(callID string)
+}) {
 	h.sdpRegistrar = registrar
 }
 
@@ -129,6 +135,12 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 	// intentionally reserved for sniff/hunter paths that consume it.
 	if body != "" && h.sdpRegistrar != nil {
 		h.sdpRegistrar.RegisterSDP(callID, body)
+	}
+	if h.sdpRegistrar != nil && extractSipResponseCode(sipMessage) >= 200 {
+		cseqMethod := extractCSeqMethod(headers["cseq"])
+		if cseqMethod == "BYE" || cseqMethod == "CANCEL" {
+			h.sdpRegistrar.CompleteCall(callID)
+		}
 	}
 
 	// Forward exactly one packet for this SIP message.

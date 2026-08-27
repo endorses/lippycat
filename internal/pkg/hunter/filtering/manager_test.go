@@ -79,6 +79,36 @@ func TestModifyIsIdempotentUpsertForApplicationFilters(t *testing.T) {
 	require.Zero(t, restarter.calls)
 }
 
+func TestModifyUpsertCoversCPU_GPUCapableAndLIFilterTypes(t *testing.T) {
+	tests := []struct {
+		name       string
+		filterType management.FilterType
+		pattern    string
+	}{
+		{name: "CPU IP filter", filterType: management.FilterType_FILTER_IP_ADDRESS, pattern: "192.0.2.10"},
+		{name: "GPU-capable SIP filter", filterType: management.FilterType_FILTER_SIP_USER, pattern: "alice"},
+		// LI tasks are represented on hunters by the ordinary optimized filter
+		// types; they deliberately have no separate update semantics.
+		{name: "LI phone target", filterType: management.FilterType_FILTER_PHONE_NUMBER, pattern: "15551234567"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			updater := &recordingApplicationUpdater{}
+			manager := New("hunter", &recordingRestarter{}, noopDisconnectMarker{})
+			manager.SetApplicationFilterUpdater(updater)
+			filter := &management.Filter{Id: "li-or-admin-filter", Type: tt.filterType, Pattern: tt.pattern}
+			update := &management.FilterUpdate{UpdateType: management.FilterUpdateType_UPDATE_MODIFY, Filter: filter}
+
+			manager.handleUpdate(update)
+			manager.handleUpdate(update)
+
+			require.Equal(t, []*management.Filter{filter}, manager.GetFilters())
+			require.Equal(t, 1, updater.calls, "replayed MODIFY must not rebuild application/GPU state")
+		})
+	}
+}
+
 func TestModifyUpsertRebuildsBPFStateOncePerEffectiveChange(t *testing.T) {
 	restarter := &recordingRestarter{}
 	manager := New("hunter-b", restarter, noopDisconnectMarker{})

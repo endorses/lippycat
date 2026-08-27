@@ -27,9 +27,31 @@ type targetSubstringFilter struct {
 	seen []string
 }
 
-type recordingSDPRegistrar struct{ calls map[string]string }
+type recordingSDPRegistrar struct {
+	calls     map[string]string
+	completed []string
+}
 
 func (r *recordingSDPRegistrar) RegisterSDP(callID, sdp string) { r.calls[callID] = sdp }
+func (r *recordingSDPRegistrar) CompleteCall(callID string) {
+	r.completed = append(r.completed, callID)
+}
+
+func TestTapTCPHandlerReportsTerminalDialogResponse(t *testing.T) {
+	ch := make(chan source.InjectedPacket, 1)
+	h := NewTapTCPHandler(ch)
+	h.SetApplicationFilter(&targetSubstringFilter{target: "terminal-call"})
+	registrar := &recordingSDPRegistrar{calls: make(map[string]string)}
+	h.SetSDPRegistrar(registrar)
+
+	message := []byte("SIP/2.0 200 OK\r\nCall-ID: terminal-call\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n")
+	ok := h.HandleSIPMessage(message, "terminal-call", "10.0.0.1:5060", "10.0.0.2:5060",
+		testNetFlow(t, "10.0.0.1", "10.0.0.2"), testTransportFlow(t, 5060, 5060))
+
+	if !ok || len(registrar.completed) != 1 || registrar.completed[0] != "terminal-call" {
+		t.Fatalf("terminal response forwarded=%v completions=%v", ok, registrar.completed)
+	}
+}
 
 func (f *targetSubstringFilter) MatchPacket(pkt gopacket.Packet) bool {
 	var payload string

@@ -455,7 +455,23 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 
 // Start begins serving the X1 interface.
 func (s *Server) Start(ctx context.Context) error {
+	return s.StartReady(ctx, nil)
+}
+
+// StartReady begins serving the X1 interface and reports the result of the
+// synchronous setup phase on ready. A nil error means the authenticated TLS
+// listener has been bound and the serving goroutine has been launched.
+//
+// Callers that need startup guarantees should wait for ready before starting
+// dependent background work. The channel is not closed by StartReady.
+func (s *Server) StartReady(ctx context.Context, ready chan<- error) error {
+	reportReady := func(err error) {
+		if ready != nil {
+			ready <- err
+		}
+	}
 	if err := s.ValidateConfiguration(); err != nil {
+		reportReady(err)
 		return err
 	}
 	// Setup phase - hold lock briefly.
@@ -465,7 +481,9 @@ func (s *Server) Start(ctx context.Context) error {
 	tlsConfig, err := s.buildTLSConfig()
 	if err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("failed to build TLS config: %w", err)
+		err = fmt.Errorf("failed to build TLS config: %w", err)
+		reportReady(err)
+		return err
 	}
 
 	// Create HTTP handler
@@ -486,7 +504,9 @@ func (s *Server) Start(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.config.ListenAddr)
 	if err != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
+		err = fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
+		reportReady(err)
+		return err
 	}
 	s.listener = ln
 
@@ -507,6 +527,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		close(errChan)
 	}()
+	reportReady(nil)
 
 	// Wait for context or error
 	select {

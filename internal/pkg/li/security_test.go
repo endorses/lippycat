@@ -57,6 +57,14 @@ func loadTestCA(t *testing.T) string {
 	return filepath.Join(testCertDir(), "ca-cert.pem")
 }
 
+func loadTestADMFClientCertificate(t *testing.T) tls.Certificate {
+	t.Helper()
+	certFile, keyFile := loadTestCert(t, "admf-client")
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	require.NoError(t, err)
+	return cert
+}
+
 // ============================================================================
 // Step 5.3: Security Testing - Mutual TLS Enforcement
 // ============================================================================
@@ -558,11 +566,13 @@ func TestAuditLogging_X1Operations(t *testing.T) {
 	skipIfNoCerts(t)
 
 	serverCert, serverKey := loadTestCert(t, "x1-server")
+	caFile := loadTestCA(t)
 
 	config := x1.ServerConfig{
 		ListenAddr:   "127.0.0.1:0",
 		TLSCertFile:  serverCert,
 		TLSKeyFile:   serverKey,
+		TLSCAFile:    caFile,
 		NEIdentifier: "audit-test-ne",
 		Version:      "v1.13.1",
 	}
@@ -587,7 +597,10 @@ func TestAuditLogging_X1Operations(t *testing.T) {
 	// Make a request to trigger logging.
 	client := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{
+				Certificates:       []tls.Certificate{loadTestADMFClientCertificate(t)},
+				InsecureSkipVerify: true,
+			},
 		},
 		Timeout: 5 * time.Second,
 	}
@@ -668,11 +681,13 @@ func TestX1Server_TLSVersionEnforcement(t *testing.T) {
 	skipIfNoCerts(t)
 
 	serverCert, serverKey := loadTestCert(t, "x1-server")
+	caFile := loadTestCA(t)
 
 	config := x1.ServerConfig{
 		ListenAddr:   "127.0.0.1:0",
 		TLSCertFile:  serverCert,
 		TLSKeyFile:   serverKey,
+		TLSCAFile:    caFile,
 		NEIdentifier: "test-ne",
 	}
 
@@ -685,8 +700,9 @@ func TestX1Server_TLSVersionEnforcement(t *testing.T) {
 
 	addr := waitForServer(t, server, 5*time.Second)
 
-	t.Run("TLS 1.2 connection succeeds", func(t *testing.T) {
+	t.Run("TLS 1.2 connection is rejected", func(t *testing.T) {
 		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{loadTestADMFClientCertificate(t)},
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,
 			MaxVersion:         tls.VersionTLS12,
@@ -701,12 +717,12 @@ func TestX1Server_TLSVersionEnforcement(t *testing.T) {
 		if err == nil {
 			defer func() { _ = resp.Body.Close() }()
 		}
-		// Connection should succeed (may get 400 due to no body, but TLS works).
-		require.NoError(t, err, "TLS 1.2 connection should succeed")
+		require.Error(t, err, "TLS 1.2 connection should be rejected")
 	})
 
 	t.Run("TLS 1.3 connection succeeds", func(t *testing.T) {
 		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{loadTestADMFClientCertificate(t)},
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS13,
 			MaxVersion:         tls.VersionTLS13,
@@ -738,12 +754,14 @@ func TestX1Server_ResponseContainsNEIdentifier(t *testing.T) {
 	skipIfNoCerts(t)
 
 	serverCert, serverKey := loadTestCert(t, "x1-server")
+	caFile := loadTestCA(t)
 
 	neID := "security-test-ne-12345"
 	config := x1.ServerConfig{
 		ListenAddr:   "127.0.0.1:0",
 		TLSCertFile:  serverCert,
 		TLSKeyFile:   serverKey,
+		TLSCAFile:    caFile,
 		NEIdentifier: neID,
 		Version:      "v1.13.1",
 	}
@@ -759,7 +777,10 @@ func TestX1Server_ResponseContainsNEIdentifier(t *testing.T) {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{
+				Certificates:       []tls.Certificate{loadTestADMFClientCertificate(t)},
+				InsecureSkipVerify: true,
+			},
 		},
 		Timeout: 5 * time.Second,
 	}
@@ -797,11 +818,13 @@ func TestX1Server_ResponseContainsTimestamp(t *testing.T) {
 	skipIfNoCerts(t)
 
 	serverCert, serverKey := loadTestCert(t, "x1-server")
+	caFile := loadTestCA(t)
 
 	config := x1.ServerConfig{
 		ListenAddr:   "127.0.0.1:0",
 		TLSCertFile:  serverCert,
 		TLSKeyFile:   serverKey,
+		TLSCAFile:    caFile,
 		NEIdentifier: "timestamp-test-ne",
 		Version:      "v1.13.1",
 	}
@@ -817,7 +840,10 @@ func TestX1Server_ResponseContainsTimestamp(t *testing.T) {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{
+				Certificates:       []tls.Certificate{loadTestADMFClientCertificate(t)},
+				InsecureSkipVerify: true,
+			},
 		},
 		Timeout: 5 * time.Second,
 	}
@@ -929,11 +955,13 @@ func TestX1Server_SecureCipherSuites(t *testing.T) {
 	skipIfNoCerts(t)
 
 	serverCert, serverKey := loadTestCert(t, "x1-server")
+	caFile := loadTestCA(t)
 
 	config := x1.ServerConfig{
 		ListenAddr:   "127.0.0.1:0",
 		TLSCertFile:  serverCert,
 		TLSKeyFile:   serverKey,
+		TLSCAFile:    caFile,
 		NEIdentifier: "cipher-test-ne",
 	}
 
@@ -949,6 +977,7 @@ func TestX1Server_SecureCipherSuites(t *testing.T) {
 	// Test with secure cipher suites.
 	t.Run("secure cipher suites work", func(t *testing.T) {
 		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{loadTestADMFClientCertificate(t)},
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,
 			CipherSuites: []uint16{

@@ -77,9 +77,13 @@ type Manager struct {
 	packetsForwarded *atomic.Uint64
 
 	// Reconnection state
-	reconnecting         bool
-	reconnectMu          sync.Mutex
-	reconnectAttempts    int
+	reconnecting      bool
+	reconnectMu       sync.Mutex
+	reconnectAttempts int
+	// consecutiveFailures counts failed Send calls until a batch is successfully
+	// sent. It intentionally spans connection generations: opening a replacement
+	// stream is not evidence that packet delivery has recovered.
+	consecutiveFailures  atomic.Int32
 	droppedBatches       atomic.Uint64
 	maxReconnectAttempts int // 0 = unlimited
 
@@ -413,11 +417,19 @@ func (m *Manager) sendBatches(generation *connection) {
 			generation.inFlight.Add(1)
 			if err := generation.stream.Send(batch); err != nil {
 				generation.inFlight.Add(-1)
-				logger.Error("Failed to forward batch to upstream", "error", err)
+				failures := m.consecutiveFailures.Add(1)
+				logger.Error("Failed to forward batch to upstream", "error", err,
+					"consecutive_failures", failures)
+				if failures == constants.MaxConsecutiveSendFailures {
+					logger.Warn("Upstream packet delivery has repeatedly failed",
+						"consecutive_failures", failures,
+						"threshold", constants.MaxConsecutiveSendFailures)
+				}
 				m.disconnectGeneration(generation)
 				return
 			}
 			generation.inFlight.Add(-1)
+			m.consecutiveFailures.Store(0)
 			if m.packetsForwarded != nil {
 				m.packetsForwarded.Add(uint64(len(batch.Packets)))
 			}

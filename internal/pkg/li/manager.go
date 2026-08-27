@@ -306,28 +306,37 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("initialize LI state persistence (interception remains disarmed): %w", err)
 	}
 
-	// Start the registry's background task management
-	m.registry.Start()
-	m.wg.Add(1)
-	go m.runLifecycleMaintenance()
-
-	// Start X1 server if configured.
+	// Bind and start X1 before launching lifecycle workers. Listener or TLS
+	// startup failures must leave the manager entirely unstarted.
 	if m.x1Server != nil {
-		m.x1ServerCtx, m.x1ServerCancel = context.WithCancel(context.Background())
+		serverCtx, serverCancel := context.WithCancel(context.Background())
+		ready := make(chan error, 1)
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			if err := m.x1Server.Start(m.x1ServerCtx); err != nil {
+			if err := m.x1Server.StartReady(serverCtx, ready); err != nil {
 				logger.Error("X1 server error", "error", err)
 			}
 		}()
-		logger.Info("X1 server started", "addr", m.config.X1ListenAddr)
+		if err := <-ready; err != nil {
+			serverCancel()
+			m.wg.Wait()
+			return fmt.Errorf("start X1 server: %w", err)
+		}
+		m.x1ServerCtx, m.x1ServerCancel = serverCtx, serverCancel
+		logger.Info("X1 server started", "addr", m.x1Server.Addr())
 	} else if m.config.X1ListenAddr != "" {
 		logger.Warn("X1 server not started: TLS certificate not configured",
 			"addr", m.config.X1ListenAddr,
 			"hint", "provide --li-x1-tls-cert and --li-x1-tls-key",
 		)
 	}
+
+	// Start lifecycle management only after the authenticated administration
+	// listener is ready.
+	m.registry.Start()
+	m.wg.Add(1)
+	go m.runLifecycleMaintenance()
 
 	// Start X1 client if configured (for ADMF notifications).
 	if m.x1Client != nil {

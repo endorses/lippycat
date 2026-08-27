@@ -5,8 +5,11 @@ package li
 import (
 	"encoding/xml"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -75,6 +78,34 @@ func TestManager_StartStop(t *testing.T) {
 
 	// Stop should not panic
 	m.Stop()
+}
+
+func TestManagerStartPropagatesX1BindFailureBeforeLifecycleStarts(t *testing.T) {
+	certDir := filepath.Join("..", "..", "..", "test", "testcerts", "li")
+	serverCert := filepath.Join(certDir, "x1-server-cert.pem")
+	serverKey := filepath.Join(certDir, "x1-server-key.pem")
+	caFile := filepath.Join(certDir, "ca-cert.pem")
+	if _, err := os.Stat(serverCert); os.IsNotExist(err) {
+		t.Skip("LI test certificates not available")
+	}
+
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, occupied.Close()) }()
+
+	m := NewManager(ManagerConfig{
+		Enabled:       true,
+		X1ListenAddr:  occupied.Addr().String(),
+		X1TLSCertFile: serverCert,
+		X1TLSKeyFile:  serverKey,
+		X1TLSCAFile:   caFile,
+	}, nil)
+
+	err = m.Start()
+	require.ErrorContains(t, err, "start X1 server")
+	require.ErrorContains(t, err, "failed to listen")
+	assert.Nil(t, m.registry.expirationTicker, "registry lifecycle must not start")
+	assert.Nil(t, m.x1ServerCancel, "failed listener must not be installed")
 }
 
 func TestManager_DisabledMode(t *testing.T) {

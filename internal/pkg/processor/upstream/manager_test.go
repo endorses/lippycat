@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,7 +153,34 @@ func TestSendFailureTerminatesGenerationAndRequestsReconnect(t *testing.T) {
 	require.Equal(t, 0, m.QueueDepth())
 	stopTestGeneration(generation)
 	require.Equal(t, uint64(1), stream.sends.Load())
+	require.Equal(t, int32(1), m.consecutiveFailures.Load())
 	require.True(t, stream.closed.Load())
+}
+
+func TestSendFailureAccountingSpansGenerationsUntilSuccessfulSend(t *testing.T) {
+	m := NewManager(Config{OutboundQueueSize: 1}, nil)
+
+	for want := int32(1); want <= constants.MaxConsecutiveSendFailures; want++ {
+		stream := &failingStream{err: errors.New("send failed")}
+		generation := startTestGeneration(m, stream, 1)
+		m.Forward(&data.PacketBatch{})
+		require.Eventually(t, func() bool {
+			return generation.ctx.Err() != nil
+		}, time.Second, time.Millisecond)
+		stopTestGeneration(generation)
+		require.Equal(t, want, m.consecutiveFailures.Load(),
+			"creating a replacement stream must not count as recovered delivery")
+	}
+
+	stream := &detectingStream{}
+	generation := startTestGeneration(m, stream, 1)
+	m.Forward(&data.PacketBatch{})
+	require.Eventually(t, func() bool {
+		return stream.sends.Load() == 1
+	}, time.Second, time.Millisecond)
+	stopTestGeneration(generation)
+	require.Zero(t, m.consecutiveFailures.Load(),
+		"only a successful Send proves upstream packet delivery recovered")
 }
 
 func TestOldGenerationCannotSendOnSuccessor(t *testing.T) {

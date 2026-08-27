@@ -150,7 +150,7 @@ func init() {
 	ProcessCmd.Flags().StringVar(&upstreamAddrDeprecated, "upstream", "", "")
 	ProcessCmd.Flags().Lookup("upstream").Deprecated = "use --processor instead"
 	ProcessCmd.Flags().Lookup("upstream").Hidden = true
-	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", constants.DefaultMaxHunters, "Maximum number of concurrent hunter connections")
+	ProcessCmd.Flags().IntVarP(&maxHunters, "max-hunters", "m", constants.DefaultMaxHunters, "Maximum number of concurrent hunter connections (0 = unlimited)")
 	ProcessCmd.Flags().IntVarP(&maxSubscribers, "max-subscribers", "", constants.DefaultMaxSubscribers, "Maximum number of concurrent TUI/monitoring subscribers (0 = unlimited)")
 	ProcessCmd.Flags().StringVarP(&writeFile, "write-file", "w", "", "Write received packets to PCAP file")
 	ProcessCmd.Flags().BoolVarP(&displayStats, "stats", "s", true, "Display statistics")

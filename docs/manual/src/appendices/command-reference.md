@@ -426,9 +426,10 @@ lc tap [flags]
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--listen` | `-l` | string | `:55555` | gRPC listen address for TUI clients |
+| `--listen` | `-l` | string | `:55555` | gRPC listen address for hunter and TUI clients |
 | `--id` | `-I` | string | | Node identifier |
-| `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers |
+| `--max-hunters` | | int | `0` | Maximum concurrent hunters (0 = unlimited) |
+| `--max-subscribers` | | int | `100` | Maximum concurrent TUI subscribers (0 = unlimited) |
 | `--insecure` | | bool | `false` | Disable TLS for gRPC server |
 | `--api-key-auth` | | bool | `false` | Enable API key authentication |
 | `--debug-listen` | | string | | Enable pprof listener, loopback-only by default |

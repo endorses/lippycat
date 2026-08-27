@@ -59,7 +59,7 @@ type Config struct {
 	ListenAddr                  string
 	ProcessorID                 string
 	UpstreamAddr                string
-	MaxHunters                  int
+	MaxHunters                  int // Maximum concurrent hunter connections (0 = unlimited)
 	MaxSubscribers              int // Maximum concurrent TUI/monitoring subscribers (0 = unlimited)
 	WriteFile                   string
 	DisplayStats                bool

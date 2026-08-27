@@ -354,7 +354,7 @@ Processor nodes receive packets from hunters, perform analysis, write PCAPs, and
 | `processor.listen_addr` | string | `":55555"` | Address to listen on for hunter and TUI connections. |
 | `processor.processor_addr` | string | `""` | Address of an upstream processor for hierarchical forwarding. |
 | `processor.upstream_addr` | string | `""` | Alias for `processor.processor_addr`. |
-| `processor.max_hunters` | integer | `100` | Maximum concurrent hunter connections. |
+| `processor.max_hunters` | integer | `100` | Maximum concurrent hunter connections (0 = unlimited). |
 | `processor.max_subscribers` | integer | `100` | Maximum TUI subscriber connections (0 = unlimited). |
 | `processor.display_stats` | boolean | `true` | Display periodic statistics to stdout. |
 | `processor.enable_detection` | boolean | `true` | Enable protocol detection on received packets. |
@@ -481,8 +481,9 @@ Tap combines local capture with processor capabilities. See [Standalone Mode wit
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `tap.listen_addr` | string | `":55555"` | Listen address for TUI client connections. |
-| `tap.max_subscribers` | integer | `100` | Maximum TUI subscriber connections. |
+| `tap.listen_addr` | string | `":55555"` | Listen address for hunter and TUI client connections. |
+| `tap.max_hunters` | integer | `0` | Maximum hunter connections (0 = unlimited). |
+| `tap.max_subscribers` | integer | `100` | Maximum TUI subscriber connections (0 = unlimited). |
 | `tap.tls.cert_file` | string | `""` | Server TLS certificate. |
 | `tap.tls.key_file` | string | `""` | Server TLS private key. |
 | `tap.tls.ca_file` | string | `""` | CA certificate for client verification. |

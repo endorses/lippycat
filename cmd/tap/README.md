@@ -159,8 +159,9 @@ sudo lc tap tls -i eth0 \
 
 ### Management Interface
 
-- `-l, --listen` - Listen address for TUI connections (default: `:55555`)
+- `-l, --listen` - Listen address for hunter and TUI connections (default: `:55555`)
 - `-I, --id` - Unique tap identifier (default: hostname-tap)
+- `--max-hunters` - Maximum concurrent hunter connections (default: 0, unlimited)
 - `--max-subscribers` - Maximum concurrent TUI subscribers (default: 100, 0 = unlimited)
 
 ### Upstream Forwarding
@@ -538,6 +539,7 @@ tap:
   # Management interface
   listen_addr: ":55555"
   id: "edge-tap-01"
+  max_hunters: 0
   max_subscribers: 100
   processor_addr: ""
 

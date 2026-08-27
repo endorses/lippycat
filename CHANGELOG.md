@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.7] - 2026-08-27
+
+### Changed
+- Validate required X2 and X3 delivery capability collectively across all destinations assigned to an LI task while preserving compatibility with restored legacy destinations
+
+### Fixed
+- Allow combined X2/X3 tasks to activate and arm filters when separate X2-only and X3-only destinations provide complete coverage
+- Report a missing delivery interface against the task instead of blaming an individually valid split destination
+
 ## [0.10.6] - 2026-08-27
 
 ### Changed

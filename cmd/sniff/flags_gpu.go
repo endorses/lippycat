@@ -1,4 +1,4 @@
-//go:build cuda
+//go:build (cli || all) && cuda
 
 package sniff
 

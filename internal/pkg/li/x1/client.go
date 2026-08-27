@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -154,7 +155,7 @@ type ClientConfig struct {
 	// NEIdentifier is the network element identifier for X1 messages.
 	NEIdentifier string
 
-	// Version is the X1 protocol version (default: "v1.13.1").
+	// Version is the X1 protocol version (default: DefaultProtocolVersion).
 	Version string
 
 	// TLSCertFile is the path to the client TLS certificate for mutual TLS.
@@ -191,7 +192,7 @@ func DefaultClientConfig() ClientConfig {
 	hostname, _ := os.Hostname()
 	return ClientConfig{
 		NEIdentifier:      hostname,
-		Version:           "v1.13.1",
+		Version:           DefaultProtocolVersion,
 		KeepaliveInterval: DefaultKeepaliveInterval,
 		RequestTimeout:    DefaultRequestTimeout,
 		InitialBackoff:    DefaultInitialBackoff,
@@ -412,26 +413,37 @@ func (c *Client) keepaliveLoop() {
 		case <-c.stopChan:
 			return
 		case <-ticker.C:
-			if err := c.SendKeepalive(context.Background()); err != nil {
-				c.mu.Lock()
-				c.stats.KeepalivesFailed++
-				c.stats.LastError = err.Error()
-				c.mu.Unlock()
-
-				logger.Warn("X1 keepalive failed",
-					"error", err,
-					"admf", c.config.ADMFEndpoint,
-				)
-			} else {
-				c.mu.Lock()
-				c.stats.KeepalivesSent++
-				c.stats.LastKeepalive = time.Now()
-				c.mu.Unlock()
-
-				logger.Debug("X1 keepalive sent", "admf", c.config.ADMFEndpoint)
+			if c.recordKeepaliveResult(c.SendKeepalive(context.Background())) {
+				return
 			}
 		}
 	}
+}
+
+// recordKeepaliveResult updates keepalive observability and reports whether the
+// loop should terminate. A keepalive rejected because Stop has begun is normal
+// shutdown, not an operational delivery failure.
+func (c *Client) recordKeepaliveResult(err error) bool {
+	if errors.Is(err, ErrClientStopped) {
+		return true
+	}
+	if err != nil {
+		c.mu.Lock()
+		c.stats.KeepalivesFailed++
+		c.stats.LastError = err.Error()
+		c.mu.Unlock()
+
+		logger.Warn("X1 keepalive failed", "error", err, "admf", c.config.ADMFEndpoint)
+		return false
+	}
+
+	c.mu.Lock()
+	c.stats.KeepalivesSent++
+	c.stats.LastKeepalive = time.Now()
+	c.mu.Unlock()
+
+	logger.Debug("X1 keepalive sent", "admf", c.config.ADMFEndpoint)
+	return false
 }
 
 // SendKeepalive sends a keepalive message to ADMF.
@@ -678,7 +690,7 @@ func (c *Client) GetAllTaskDetails(ctx context.Context) (*schema.GetAllTaskDetai
 
 // buildRequestMessage creates the base X1 request message.
 func (c *Client) buildRequestMessage() *schema.X1RequestMessage {
-	now := schema.QualifiedMicrosecondDateTime(time.Now().Format(time.RFC3339Nano))
+	now := formatQualifiedMicrosecondDateTime(time.Now())
 	transID := schema.UUID(uuid.New().String())
 
 	c.mu.RLock()
@@ -731,6 +743,39 @@ func marshalWrappedRequest(messageType string, req any) ([]byte, error) {
 	}
 	innerContent := innerStr[firstClose+1 : lastOpen]
 
+	// Generated derived request structs declare their extension fields before
+	// the embedded X1RequestMessage. encoding/xml follows declaration order,
+	// while XSD extension content must contain the base fields first.
+	value := reflect.ValueOf(req)
+	if value.Kind() == reflect.Pointer && !value.IsNil() {
+		value = value.Elem()
+	}
+	if value.Kind() == reflect.Struct {
+		baseField := value.FieldByName("X1RequestMessage")
+		if baseField.IsValid() && baseField.Kind() == reflect.Pointer && !baseField.IsNil() {
+			baseXML, marshalErr := xml.MarshalIndent(baseField.Interface(), "  ", "  ")
+			if marshalErr != nil {
+				return nil, fmt.Errorf("marshal X1 base request: %w", marshalErr)
+			}
+			baseString := string(baseXML)
+			baseFirstClose := strings.Index(baseString, ">")
+			baseLastOpen := strings.LastIndex(baseString, "</")
+			if baseFirstClose < 0 || baseLastOpen <= baseFirstClose {
+				return nil, fmt.Errorf("unexpected XML structure in marshaled X1 base request")
+			}
+			baseContent := baseString[baseFirstClose+1 : baseLastOpen]
+			trimmedInner := strings.TrimSpace(innerContent)
+			trimmedBase := strings.TrimSpace(baseContent)
+			if strings.HasSuffix(trimmedInner, trimmedBase) {
+				derivedContent := strings.TrimSpace(strings.TrimSuffix(trimmedInner, trimmedBase))
+				innerContent = baseContent
+				if derivedContent != "" {
+					innerContent += "\n  " + derivedContent
+				}
+			}
+		}
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString(xml.Header)
 	buf.WriteString(`<X1Request xmlns="`)
@@ -758,7 +803,8 @@ type responseContainer struct {
 
 // rawXML captures raw XML content for deferred unmarshaling.
 type rawXML struct {
-	Inner []byte `xml:",innerxml"`
+	Attrs []xml.Attr `xml:",any,attr"`
+	Inner []byte     `xml:",innerxml"`
 }
 
 // sendQueryRequestWithRetry sends an X1 query request with exponential backoff retry
@@ -887,6 +933,25 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 			}
 		}
 	}
+	for _, message := range container.RawMessages {
+		for _, attr := range message.Attrs {
+			if attr.Name.Local != "type" || localXMLName(attr.Value) != "ErrorResponse" {
+				continue
+			}
+			wrappedXML := []byte("<x1ResponseMessage>" + string(message.Inner) + "</x1ResponseMessage>")
+			var errResp schema.ErrorResponse
+			if err := xml.Unmarshal(wrappedXML, &errResp); err != nil {
+				return fmt.Errorf("failed to parse error response: %w", err)
+			}
+			if errResp.ErrorInformation != nil {
+				return &ADMFError{
+					ErrorCode:          errResp.ErrorInformation.ErrorCode,
+					ErrorDescription:   errResp.ErrorInformation.ErrorDescription,
+					RequestMessageType: errResp.RequestMessageType,
+				}
+			}
+		}
+	}
 
 	// Unmarshal the first x1ResponseMessage into the expected response type.
 	if len(container.RawMessages) > 0 {
@@ -904,6 +969,15 @@ func (c *Client) sendQueryRequest(ctx context.Context, rootElement string, req a
 	}
 
 	return nil
+}
+
+// localXMLName returns the local part of a lexical XML QName. encoding/xml
+// preserves namespace prefixes in attribute values rather than resolving them.
+func localXMLName(name string) string {
+	if i := strings.LastIndexByte(name, ':'); i >= 0 {
+		return name[i+1:]
+	}
+	return name
 }
 
 // sendRequestWithRetry sends an X1 request with exponential backoff retry.

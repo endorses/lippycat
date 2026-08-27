@@ -595,7 +595,7 @@ func TestClientStats(t *testing.T) {
 func TestDefaultClientConfig(t *testing.T) {
 	config := DefaultClientConfig()
 	assert.NotEmpty(t, config.NEIdentifier)
-	assert.Equal(t, "v1.13.1", config.Version)
+	assert.Equal(t, DefaultProtocolVersion, config.Version)
 	assert.Equal(t, DefaultKeepaliveInterval, config.KeepaliveInterval)
 	assert.Equal(t, DefaultRequestTimeout, config.RequestTimeout)
 	assert.Equal(t, DefaultInitialBackoff, config.InitialBackoff)
@@ -723,6 +723,16 @@ func TestClient_KeepaliveUpdatesStats(t *testing.T) {
 	assert.False(t, stats.LastKeepalive.IsZero())
 }
 
+func TestClient_KeepaliveShutdownIsNotFailure(t *testing.T) {
+	client, err := NewClient(ClientConfig{ADMFEndpoint: "http://127.0.0.1"})
+	require.NoError(t, err)
+
+	assert.True(t, client.recordKeepaliveResult(ErrClientStopped))
+	stats := client.Stats()
+	assert.Zero(t, stats.KeepalivesFailed)
+	assert.Empty(t, stats.LastError)
+}
+
 // TestClient_KeepaliveFailureUpdatesStats tests that failed keepalives update stats.
 func TestClient_KeepaliveFailureUpdatesStats(t *testing.T) {
 	var requestCount int32
@@ -741,12 +751,15 @@ func TestClient_KeepaliveFailureUpdatesStats(t *testing.T) {
 	client, err := NewClient(ClientConfig{
 		ADMFEndpoint:      server.URL,
 		KeepaliveInterval: 5 * time.Millisecond,
-		MaxRetries:        0, // No retries
+		MaxRetries:        1,
+		InitialBackoff:    time.Millisecond,
 	})
 	require.NoError(t, err)
 
 	client.Start()
-	time.Sleep(25 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		return client.Stats().KeepalivesFailed >= 1
+	}, time.Second, time.Millisecond)
 	client.Stop()
 
 	stats := client.Stats()
@@ -1208,14 +1221,14 @@ func TestClient_SendQueryRequest_Success(t *testing.T) {
 
 func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 	t.Run("returns ADMFError for error response", func(t *testing.T) {
-		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10">
-  <errorResponse>
-    <requestMessageType>GetAllDetailsRequest</requestMessageType>
-    <errorInformation>
-      <errorCode>100</errorCode>
-      <errorDescription>Generic error occurred</errorDescription>
-    </errorInformation>
-  </errorResponse>
+		responseXML := `<X1Response xmlns="http://uri.etsi.org/03221/X1/2017/10" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ns0="http://uri.etsi.org/03221/X1/2017/10">
+  <x1ResponseMessage xsi:type="ns0:ErrorResponse">
+		<requestMessageType>GetAllDetails</requestMessageType>
+		<errorInformation>
+		  <errorCode>100</errorCode>
+		  <errorDescription>Generic error occurred</errorDescription>
+		</errorInformation>
+  </x1ResponseMessage>
 </X1Response>`
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1243,7 +1256,7 @@ func TestClient_SendQueryRequest_ErrorResponse(t *testing.T) {
 		require.ErrorAs(t, err, &admfErr)
 		assert.Equal(t, 100, admfErr.ErrorCode)
 		assert.Equal(t, "Generic error occurred", admfErr.ErrorDescription)
-		assert.Equal(t, "GetAllDetailsRequest", admfErr.RequestMessageType)
+		assert.Equal(t, "GetAllDetails", admfErr.RequestMessageType)
 	})
 
 	t.Run("returns ADMFError for unsupported operation", func(t *testing.T) {

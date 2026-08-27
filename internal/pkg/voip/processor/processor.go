@@ -256,7 +256,25 @@ func (p *Processor) Close() {
 		close(p.janitorCtx)
 		p.janitorClosed = true
 	}
+	// Release every association on shutdown. The processor is the sole owner of
+	// these maps, so retaining them after Close only prolongs endpoint/call data.
+	clear(p.portToCallID)
+	clear(p.calls)
 	p.mu.Unlock()
+}
+
+// RegisterSDP associates RTP endpoints advertised by a reassembled TCP SIP
+// message with this processor's call tracker. UDP SIP reaches the same logic via
+// detectSIP; tap's TCP handler calls this method because injected messages bypass
+// packet processing after reassembly.
+func (p *Processor) RegisterSDP(callID, sdp string) {
+	if callID == "" || sdp == "" {
+		return
+	}
+	_ = p.getOrCreateCall(callID)
+	for _, endpoint := range extractRTPPortsFromSDP(sdp) {
+		p.registerRTPPort(callID, endpoint)
+	}
 }
 
 // janitorLoop periodically cleans up expired calls.
@@ -422,6 +440,14 @@ func (p *Processor) CleanupCallPorts(callID string) {
 
 	// Clear the ports list but keep the call state for reference
 	state.rtpPorts = state.rtpPorts[:0]
+}
+
+// CompleteCall removes RTP associations once SIP confirms that a dialog has
+// terminated. The call record is retained until normal timeout/eviction so
+// callers can still inspect its final metadata, but reused media endpoints can
+// no longer be attributed to the completed call.
+func (p *Processor) CompleteCall(callID string) {
+	p.CleanupCallPorts(callID)
 }
 
 // updateCallState updates the state and metadata for a call.

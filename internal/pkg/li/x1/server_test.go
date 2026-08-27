@@ -486,9 +486,10 @@ func TestServer_BuildTLSConfig(t *testing.T) {
 	assert.NotNil(t, tlsConfig)
 	assert.Equal(t, tls.RequireAndVerifyClientCert, tlsConfig.ClientAuth)
 	assert.NotNil(t, tlsConfig.ClientCAs)
+	assert.Equal(t, uint16(tls.VersionTLS13), tlsConfig.MinVersion)
 }
 
-func TestServer_BuildTLSConfig_NoMutualTLS(t *testing.T) {
+func TestServer_BuildTLSConfig_RejectsMissingClientCA(t *testing.T) {
 	// Skip if test certs don't exist
 	testCertDir := "../../../../testdata/certs"
 	certFile := filepath.Join(testCertDir, "server.crt")
@@ -507,10 +508,8 @@ func TestServer_BuildTLSConfig_NoMutualTLS(t *testing.T) {
 	}
 
 	tlsConfig, err := s.buildTLSConfig()
-	require.NoError(t, err)
-	assert.NotNil(t, tlsConfig)
-	assert.Equal(t, tls.NoClientCert, tlsConfig.ClientAuth)
-	assert.Nil(t, tlsConfig.ClientCAs)
+	require.ErrorContains(t, err, "client CA is required")
+	assert.Nil(t, tlsConfig)
 }
 
 func TestExtractDeliveryAddress_IPv4(t *testing.T) {
@@ -590,6 +589,7 @@ func TestServer_HandleActivateTask(t *testing.T) {
 
 	xid := uuid.New()
 	did := uuid.New()
+	endTime := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
 
 	// Build ActivateTask request
 	reqBody := `<?xml version="1.0" encoding="UTF-8"?>
@@ -608,6 +608,14 @@ func TestServer_HandleActivateTask(t *testing.T) {
     <listOfDIDs>
       <dId>` + did.String() + `</dId>
     </listOfDIDs>
+    <listOfMediationDetails>
+      <mediationDetails>
+        <LIID>LIID-1</LIID>
+        <deliveryType>X2andX3</deliveryType>
+        <StartTime>` + time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano) + `</StartTime>
+        <EndTime>` + endTime.Format(time.RFC3339Nano) + `</EndTime>
+      </mediationDetails>
+    </listOfMediationDetails>
   </taskDetails>
 </activateTaskRequest>`
 
@@ -629,6 +637,64 @@ func TestServer_HandleActivateTask(t *testing.T) {
 	assert.Equal(t, DeliveryX2andX3, task.DeliveryType)
 	require.Len(t, task.DestinationIDs, 1)
 	assert.Equal(t, did, task.DestinationIDs[0])
+	assert.Equal(t, endTime, task.EndTime)
+}
+
+func TestServer_ActivateTaskPreservesDefinitionConflictDetail(t *testing.T) {
+	tasks := newMockTaskManager()
+	tasks.activateErr = fmt.Errorf("%w: target differs", ErrTaskDefinitionConflict)
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), tasks)
+	xid, did := uuid.New(), uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(requestXML("activateTaskRequest", DefaultProtocolVersion, taskXML(xid, did, true))))
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Contains(t, w.Body.String(), "ModifyTask")
+	assert.Contains(t, w.Body.String(), xid.String())
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("%d", ErrorCodeXIDAlreadyExists))
+}
+
+func TestServer_ActivateTaskMapsReactivationIdentityConflict(t *testing.T) {
+	tasks := newMockTaskManager()
+	tasks.activateErr = fmt.Errorf("%w: target differs", ErrReactivationIdentityConflict)
+	s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), tasks)
+	xid, did := uuid.New(), uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(requestXML("activateTaskRequest", DefaultProtocolVersion, taskXML(xid, did, true))))
+	w := httptest.NewRecorder()
+	s.handleX1Request(w, req)
+
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("%d", ErrorCodeGenericError))
+	assert.NotContains(t, w.Body.String(), fmt.Sprintf("<errorCode>%d</errorCode>", ErrorCodeXIDAlreadyExists))
+	assert.Contains(t, w.Body.String(), "retained task&#39;s interception identity differs")
+	assert.Contains(t, w.Body.String(), xid.String())
+}
+
+func TestServer_ActivateTaskPreservesSpecificFailureCodes(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		code   int
+		detail string
+	}{
+		{"active definition conflict", ErrTaskDefinitionConflict, ErrorCodeXIDAlreadyExists, "use ModifyTask"},
+		{"missing destination", ErrDestinationNotFound, ErrorCodeDIDNotFound, "destination not found"},
+		{"unsupported combination", ErrUnsupportedDeliveryCombination, ErrorCodeDeliveryNotPossible, "unsupported task capability"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := newMockTaskManager()
+			tasks.activateErr = fmt.Errorf("%w: injected detail", tt.err)
+			s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), tasks)
+			xid, did := uuid.New(), uuid.New()
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(requestXML("activateTaskRequest", DefaultProtocolVersion, taskXML(xid, did, true))))
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.Contains(t, w.Body.String(), fmt.Sprintf("<errorCode>%d</errorCode>", tt.code))
+			assert.Contains(t, w.Body.String(), tt.detail)
+		})
+	}
 }
 
 func TestServer_HandleActivateTask_AlreadyExists(t *testing.T) {
@@ -855,9 +921,52 @@ func TestServer_HandleGetTaskDetails(t *testing.T) {
 	assert.Contains(t, w.Body.String(), xid.String())
 	assert.Contains(t, w.Body.String(), did.String())
 	assert.Contains(t, w.Body.String(), "alice@example.test")
-	assert.Contains(t, w.Body.String(), start.Format(time.RFC3339Nano))
-	assert.Contains(t, w.Body.String(), end.Format(time.RFC3339Nano))
+	assert.Contains(t, w.Body.String(), string(formatQualifiedMicrosecondDateTime(start)))
+	assert.Contains(t, w.Body.String(), string(formatQualifiedMicrosecondDateTime(end)))
 	assert.Contains(t, w.Body.String(), "<provisioningStatus>complete</provisioningStatus>")
+}
+
+func TestServer_GetTaskDetailsProvisioningStatus(t *testing.T) {
+	tests := []struct {
+		status       TaskStatus
+		provisioning string
+	}{
+		{TaskStatusPending, "awaitingProvisioning"},
+		{TaskStatusActive, "complete"},
+		{TaskStatusSuspended, "complete"},
+		{TaskStatusDeactivated, "complete"},
+		{TaskStatusFailed, "failed"},
+	}
+
+	type response struct {
+		Messages []struct {
+			Details struct {
+				Status struct {
+					Provisioning string `xml:"provisioningStatus"`
+				} `xml:"taskStatus"`
+			} `xml:"taskResponseDetails"`
+		} `xml:"x1ResponseMessage"`
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("status_%d", tt.status), func(t *testing.T) {
+			taskMock := newMockTaskManager()
+			xid := uuid.New()
+			taskMock.tasks[xid] = &Task{XID: xid, Status: tt.status, DeliveryType: DeliveryX2Only}
+			s := NewServer(ServerConfig{NEIdentifier: "test-ne"}, newMockDestinationManager(), taskMock)
+			body := `<getTaskDetailsRequest><admfIdentifier>test-admf</admfIdentifier><xId>` + xid.String() + `</xId></getTaskDetailsRequest>`
+			w := httptest.NewRecorder()
+			s.handleX1Request(w, httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body)))
+
+			require.Equal(t, http.StatusOK, w.Code)
+			var got response
+			require.NoError(t, xml.Unmarshal(w.Body.Bytes(), &got))
+			require.Len(t, got.Messages, 1)
+			status := got.Messages[0].Details.Status
+			require.Equal(t, tt.provisioning, status.Provisioning)
+			require.NotContains(t, w.Body.String(), "taskStatusExtensions")
+		})
+	}
 }
 
 func TestServer_HandleGetTaskDetails_NotFound(t *testing.T) {
@@ -1242,7 +1351,8 @@ func TestServer_HandleActivateTask_MultipleTargets(t *testing.T) {
 	assert.Equal(t, did2, task.DestinationIDs[1])
 }
 
-// TestServer_HandleActivateTask_IPv4Target tests task activation with IPv4 address target.
+// TestServer_HandleActivateTask_IPv4Target verifies raw-IP provisioning fails
+// closed until a correlated IRI/CC session model exists.
 func TestServer_HandleActivateTask_IPv4Target(t *testing.T) {
 	destMock := newMockDestinationManager()
 	taskMock := newMockTaskManager()
@@ -1275,12 +1385,9 @@ func TestServer_HandleActivateTask_IPv4Target(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	task := taskMock.tasks[xid]
-	require.NotNil(t, task)
-	require.Len(t, task.Targets, 1)
-	assert.Equal(t, TargetTypeIPv4Address, task.Targets[0].Type)
-	assert.Equal(t, "192.168.1.100", task.Targets[0].Value)
-	assert.Equal(t, DeliveryX2Only, task.DeliveryType)
+	assert.Contains(t, w.Body.String(), "<errorCode>401</errorCode>")
+	assert.Contains(t, w.Body.String(), "raw-IP interception")
+	assert.NotContains(t, taskMock.tasks, xid)
 }
 
 // TestServer_HandleActivateTask_NAITarget tests task activation with NAI target.
@@ -2307,7 +2414,7 @@ func TestServer_RateLimiterCacheExpiresAndRemainsBounded(t *testing.T) {
 func TestServer_DefaultConfig(t *testing.T) {
 	s := NewServer(ServerConfig{}, nil, nil)
 
-	assert.Equal(t, "v1.13.1", s.config.Version)
+	assert.Equal(t, DefaultProtocolVersion, s.config.Version)
 	assert.Equal(t, float64(10), s.config.RateLimitPerIP)
 	assert.Equal(t, 20, s.config.RateLimitBurst)
 	assert.Equal(t, 5*time.Second, s.config.XMLParseTimeout)
@@ -2357,8 +2464,8 @@ func TestServer_ErrorResponse_IncludesDetails(t *testing.T) {
 	// Parse the response and verify error details are present
 	body := w.Body.String()
 
-	// Should contain error response element
-	assert.Contains(t, body, "errorResponse")
+	// Errors use the schema-declared response element with a derived type.
+	assert.Contains(t, body, `<x1ResponseMessage xsi:type="ErrorResponse">`)
 
 	// Should contain error information with code and description
 	assert.Contains(t, body, "errorInformation")

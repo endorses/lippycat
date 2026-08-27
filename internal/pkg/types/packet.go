@@ -210,11 +210,11 @@ type TLSMetadata struct {
 	// ClientHello data (if ClientHello)
 	CipherSuites      []uint16 // Advertised cipher suites
 	Extensions        []uint16 // Extension types
+	SupportedVersions []uint16 // Advertised supported_versions entries, in wire order
 	SupportedGroups   []uint16 // Elliptic curves / named groups
 	SignatureAlgos    []uint16 // Signature algorithms
 	ECPointFormats    []uint8  // EC point formats
 	ALPNProtocols     []string // ALPN protocols (e.g., ["h2", "http/1.1"])
-	SupportedVersions []uint16 // Versions advertised by ClientHello, in wire order
 
 	// ServerHello data (if ServerHello)
 	SelectedCipher uint16 // Selected cipher suite

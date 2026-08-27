@@ -5,15 +5,132 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.10] - 2026-08-27
+
+### Changed
+- Validate packet-buffer throughput with deterministic capacity, accounting, and drain invariants instead of a runner-speed-dependent delivery percentage
+- Coordinate socket-backed LI keepalive peer shutdown before closing manager-side TLS connections in tests
+
+### Fixed
+- Prevent build-matrix flakes in packet-buffer throughput and LI keepalive shutdown tests
+- Install `xmllint` in the build-partition job so authoritative X1 schema tests can run under the `li` build tag
+
+## [0.10.9] - 2026-08-27
+
+### Added
+- Build-matrix verification for supported tag combinations and regression coverage for streaming ownership, backpressure, filtering, reassembly, TLS fingerprinting, and writer lifecycles
+
+### Changed
+- Bound TCP reassembly memory and make stream, packet, and writer ownership explicit across hunter, processor, TUI, and VoIP pipelines
+- Require every active pressure source to clear before flow control resumes, with queue-specific state tracking for PCAP and upstream forwarding
+- Harden LI/X1 configuration and validation, filter synchronization, JA4/TLS parsing, and SIMD/backend selection
+
+### Fixed
+- Prevent stale stream generations, concurrent sends, reconnect races, and shutdown ordering errors in hunter and upstream forwarding
+- Prevent premature pooled-buffer reuse, dropped writer errors, and packet lifetime violations in capture, TUI, PCAP, and VoIP processing
+- Preserve filter consistency during concurrent updates and avoid resuming hunters while any processor backlog remains pressured
+
+## [0.10.8] - 2026-08-27
+
+### Changed
+- Keep LI filter IDs stable across task modification and reactivation, and reconcile persisted filters against active local task targets
+- Serialize changed live BPF updates and wait for the previous capture generation to close before reopening capture handles
+
+### Fixed
+- Avoid redundant live-capture restarts when application-layer filter changes leave the effective BPF expression unchanged
+- Remove orphaned LI filters during periodic ADMF reconciliation and roll back partially applied filter updates to their prior definitions
+- Remove an ineffectual BPF state assignment reported by CI
+
+## [0.10.7] - 2026-08-27
+
+### Changed
+- Validate required X2 and X3 delivery capability collectively across all destinations assigned to an LI task while preserving compatibility with restored legacy destinations
+
+### Fixed
+- Allow combined X2/X3 tasks to activate and arm filters when separate X2-only and X3-only destinations provide complete coverage
+- Report a missing delivery interface against the task instead of blaming an individually valid split destination
+
+## [0.10.6] - 2026-08-27
+
+### Changed
+- Accept mandatory mediation-level LIID and delivery type fields from schema-conformant X1 peers while continuing to route delivery by DID
+
+### Fixed
+- Preserve mediation windows from conformant activation requests so task end times remain enforceable
+- Recognize namespace-prefixed `xsi:type` values in ADMF error responses and surface their error code and description
+
+## [0.10.5] - 2026-08-27
+
+### Changed
+- Emit derived ETSI X1 responses through `x1ResponseMessage` with the correct `xsi:type`, base-field ordering, and request-operation vocabulary
+- Keep inbound X1 response parsing compatible with both schema-valid and legacy error response envelopes
+
+### Fixed
+- Correct task-detail mediation LIIDs, delivery-type values, and required fault-list serialization
+- Validate bare, derived, and error server responses against the bundled ETSI X1 schema
+
+## [0.10.4] - 2026-08-27
+
+### Changed
+- Stopped emitting the vendor-specific X1 task-status lifecycle extension so `GetTaskDetails` uses only ETSI-defined provisioning status
+
+## [0.10.3] - 2026-08-27
+
+### Added
+- Reactivation of deactivated LI tasks using the same XID when the interception identity remains compatible
+- Task lifecycle status in X1 task-detail responses, including pending, active, deactivated, and expired states
+
+### Changed
+- Made LI tombstone reactivation validation atomic and generation-aware while preserving activation identity
+- Emit X1 timestamps with qualified microsecond precision and updated the bundled ETSI schemas accordingly
+
+### Fixed
+- Prevented conflicting or invalid tombstone reactivation from partially mutating task state
+- Corrected X1 timestamp formatting to satisfy ETSI microsecond conformance requirements
+
+## [0.10.2] - 2026-08-26
+
+### Added
+- Optional acknowledgement of valid inbound ETSI X2 and X3 keepalives, configurable independently per interface
+- Interoperability research and remediation documentation for ETSI X1 revisions, IRI policy support, and raw IP delivery
+
+### Changed
+- Accepted wire-compatible X1 revisions from v1.13.1 through the declared v1.22.1 revision, with revision metrics and bounded peer logging
+- Validated X1 task and destination capabilities before mutation and returned protocol-specific errors for unsupported combinations
+- Made repeated activation of an identical XID idempotent while rejecting conflicting definitions that require `ModifyTask`
+
+### Fixed
+- Enforced keepalive sequence matching, acknowledgement deadlines, direction handling, and reconnect behavior for X2/X3 delivery
+- Disabled incomplete raw IP X3 delivery so unsupported interception requests fail explicitly instead of emitting non-interoperable payloads
+- Discarded buffered X3 packets at task deactivation or expiry to prevent delivery beyond the enforcement window
+
+## [0.10.1] - 2026-08-26
+
+### Added
+- Persistent LI interception state with ADMF startup synchronization and periodic reconciliation
+- Raw IPv4, IPv6, and Ethernet X3 delivery for supported non-VoIP targets
+- Independently configurable ETSI X2/X3 application keepalives with framed ACK validation and timeout-driven reconnect reporting
+- ETSI-context-scoped X2/X3 sequence numbers with deterministic reset and wraparound behavior
+
+### Changed
+- Made LI filter activation and updates transactional, with rollback, collision-safe IDs, and actionable ADMF error reporting
+- Enforced mediation windows, pending activation, expiry cleanup, deliberate reactivation, and tombstone retention across the LI task lifecycle
+- Isolated X2 and X3 queue capacity, bounded RTP reordering, applied delivery retry backoff, and protected intercepted calls from ordinary LRU eviction
+- Hardened X1 request-container processing and trusted-proxy-aware rate limiting
+- Preserved original packet capture timestamps through hunter forwarding and X2/X3 encoding
+
+### Fixed
+- Rejected unsupported delivery combinations and empty SIP IRI payloads instead of silently losing interception product
+- Prevented saturated delivery queues and flow shards from blocking unrelated LI traffic
+- Kept non-LI processor configuration stubs in sync with the new X2/X3 keepalive settings
+
 ## [0.10.0] - 2026-08-25
 
 ### Added
 - Parallel multi-file PCAP processing for `sniff`
 - Direct `--processor` connection option for `watch remote`
-- ADMF startup state synchronization and periodic reconciliation for LI deployments
 - Protocol-aware X2/X3 delivery over TLS with reconnect buffering and RTP reordering
 - Optional pprof diagnostics endpoint via `LC_PPROF_ADDR`
-- Independently configurable ETSI X2/X3 application keepalives with framed ACK validation and timeout-driven reconnect reporting
 
 ### Changed
 - Migrated TCP stream handling to `gopacket` reassembly for port reuse and fragmented SIP support

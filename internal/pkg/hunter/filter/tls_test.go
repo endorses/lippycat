@@ -9,18 +9,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTLSMatcherMatchesJA4(t *testing.T) {
-	const fingerprint = "t13d0206h1_62ed6f6ca7ad_fb71836bce29"
+func TestTLSMatcherMatchesStandardJA4Fingerprint(t *testing.T) {
+	const fingerprint = "t13d1516h2_8daaf6152771_e5627efa2ab1"
 	matcher := NewTLSMatcher()
 	matcher.UpdateFilters([]*management.Filter{{
-		Id:      "ja4-filter",
+		Id:      "standard-ja4",
 		Type:    management.FilterType_FILTER_TLS_JA4,
 		Pattern: fingerprint,
 		Enabled: true,
 	}})
 
 	matched, filterID := matcher.MatchJA4(fingerprint)
-
 	assert.True(t, matched)
-	assert.Equal(t, "ja4-filter", filterID)
+	assert.Equal(t, "standard-ja4", filterID)
 }

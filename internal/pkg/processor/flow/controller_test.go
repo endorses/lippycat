@@ -1,7 +1,6 @@
 package flow
 
 import (
-	"sync/atomic"
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -9,7 +8,7 @@ import (
 )
 
 func TestController_Determine_NoPCAPQueue(t *testing.T) {
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	// No PCAP queue configured
 
 	// Without PCAP queue, should always return CONTINUE
@@ -19,7 +18,7 @@ func TestController_Determine_NoPCAPQueue(t *testing.T) {
 }
 
 func TestControllerUsesMostSevereNamedQueue(t *testing.T) {
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetQueueSource(QueuePressureSource{Name: "events", Depth: func() int { return 95 }, Capacity: func() int { return 100 }})
 	c.SetQueueSource(QueuePressureSource{Name: "logs", Depth: func() int { return 1 }, Capacity: func() int { return 100 }})
 	assert.Equal(t, data.FlowControl_FLOW_PAUSE, c.Determine())
@@ -29,7 +28,7 @@ func TestController_Determine_QueueEmpty(t *testing.T) {
 	queueSize := 100
 	currentDepth := 0
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -44,7 +43,7 @@ func TestController_Determine_QueueSlightlyFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 40 // 40% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -59,7 +58,7 @@ func TestController_Determine_QueueMediumFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 75 // 75% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -74,7 +73,7 @@ func TestController_Determine_QueueAlmostFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 95 // 95% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -89,7 +88,7 @@ func TestController_Determine_QueueFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 100 // 100% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -104,7 +103,7 @@ func TestController_Determine_QueueDraining(t *testing.T) {
 	queueSize := 100
 	currentDepth := 25 // 25% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -171,7 +170,7 @@ func TestController_Determine_QueueThresholds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fillCount := tc.queueSize * tc.fillPercentage / 100
 
-			c := NewController(nil, nil, false)
+			c := NewController(false)
 			c.SetPCAPQueue(
 				func() int { return fillCount },
 				func() int { return tc.queueSize },
@@ -188,7 +187,7 @@ func TestController_Determine_DynamicBehavior(t *testing.T) {
 	queueSize := 100
 	currentDepth := 95 // Start at 95%
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -202,10 +201,10 @@ func TestController_Determine_DynamicBehavior(t *testing.T) {
 	// Drain queue to 75%
 	currentDepth = 75
 
-	// Should request SLOW (> 70%)
+	// Hysteresis holds PAUSE until the queue crosses the low watermark.
 	flowControl = c.Determine()
-	assert.Equal(t, data.FlowControl_FLOW_SLOW, flowControl,
-		"should SLOW when queue is 75% full")
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, flowControl,
+		"should remain paused while queue is above the resume threshold")
 
 	// Drain queue to 25%
 	currentDepth = 25
@@ -228,7 +227,7 @@ func TestController_Determine_EdgeCases(t *testing.T) {
 	t.Run("Queue size 1", func(t *testing.T) {
 		currentDepth := 0
 
-		c := NewController(nil, nil, false)
+		c := NewController(false)
 		c.SetPCAPQueue(
 			func() int { return currentDepth },
 			func() int { return 1 },
@@ -250,7 +249,7 @@ func TestController_Determine_EdgeCases(t *testing.T) {
 		queueSize := 10000
 		currentDepth := 9500 // 95% full
 
-		c := NewController(nil, nil, false)
+		c := NewController(false)
 		c.SetPCAPQueue(
 			func() int { return currentDepth },
 			func() int { return queueSize },
@@ -267,7 +266,7 @@ func TestController_Determine_Integration(t *testing.T) {
 	queueSize := 100
 	currentDepth := 0
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -278,15 +277,15 @@ func TestController_Determine_Integration(t *testing.T) {
 		depth         int
 		expectedState data.FlowControl
 	}{
-		{"Start empty", 0, data.FlowControl_FLOW_RESUME},          // 0% < 30%
-		{"Light load", 30, data.FlowControl_FLOW_CONTINUE},        // 30% >= 30%, < 70%
-		{"Medium load", 65, data.FlowControl_FLOW_CONTINUE},       // 65% >= 30%, < 70%
-		{"Medium-heavy load", 75, data.FlowControl_FLOW_SLOW},     // 75% > 70%, <= 90%
-		{"Heavy load", 95, data.FlowControl_FLOW_PAUSE},           // 95% > 90%
-		{"Drain slightly", 85, data.FlowControl_FLOW_SLOW},        // 85% > 70%, <= 90%
-		{"Continue draining", 65, data.FlowControl_FLOW_CONTINUE}, // 65% >= 30%, < 70%
-		{"Drain more", 25, data.FlowControl_FLOW_RESUME},          // 25% < 30%
-		{"Drain last", 0, data.FlowControl_FLOW_RESUME},           // 0% < 30%
+		{"Start empty", 0, data.FlowControl_FLOW_RESUME},       // 0% < 30%
+		{"Light load", 30, data.FlowControl_FLOW_CONTINUE},     // 30% >= 30%, < 70%
+		{"Medium load", 65, data.FlowControl_FLOW_CONTINUE},    // 65% >= 30%, < 70%
+		{"Medium-heavy load", 75, data.FlowControl_FLOW_SLOW},  // 75% > 70%, <= 90%
+		{"Heavy load", 95, data.FlowControl_FLOW_PAUSE},        // 95% > 90%
+		{"Drain slightly", 85, data.FlowControl_FLOW_PAUSE},    // hold until <30%
+		{"Continue draining", 65, data.FlowControl_FLOW_PAUSE}, // hold until <30%
+		{"Drain more", 25, data.FlowControl_FLOW_RESUME},       // 25% < 30%
+		{"Drain last", 0, data.FlowControl_FLOW_RESUME},        // 0% < 30%
 	}
 
 	for _, scenario := range scenarios {
@@ -305,39 +304,17 @@ func TestController_Determine_Integration(t *testing.T) {
 	}
 }
 
-func TestController_Determine_UpstreamBacklog(t *testing.T) {
-	packetsReceived := atomic.Uint64{}
-	packetsForwarded := atomic.Uint64{}
-
-	c := NewController(&packetsReceived, &packetsForwarded, true)
-
-	// Start with no backlog
-	packetsReceived.Store(1000)
-	packetsForwarded.Store(1000)
-
-	flowControl := c.Determine()
-	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, flowControl,
-		"should CONTINUE with no backlog")
-
-	// Create large backlog (>10000)
-	packetsReceived.Store(20000)
-	packetsForwarded.Store(5000)
-
-	flowControl = c.Determine()
-	assert.Equal(t, data.FlowControl_FLOW_SLOW, flowControl,
-		"should SLOW with large upstream backlog")
+func TestController_Determine_UpstreamWithoutQueueMetricDoesNotInferBacklog(t *testing.T) {
+	c := NewController(true)
+	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, c.Determine())
 }
 
 func TestController_Determine_Combined_PCAP_and_Upstream(t *testing.T) {
 	queueSize := 100
 	currentDepth := 95 // PCAP queue 95% full (should PAUSE)
 
-	packetsReceived := atomic.Uint64{}
-	packetsForwarded := atomic.Uint64{}
-	packetsReceived.Store(20000)
-	packetsForwarded.Store(5000) // Large backlog (should SLOW)
-
-	c := NewController(&packetsReceived, &packetsForwarded, true)
+	c := NewController(true)
+	c.SetUpstreamQueue(func() int { return 80 }, func() int { return 100 })
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -347,4 +324,74 @@ func TestController_Determine_Combined_PCAP_and_Upstream(t *testing.T) {
 	flowControl := c.Determine()
 	assert.Equal(t, data.FlowControl_FLOW_PAUSE, flowControl,
 		"should return most severe signal (PAUSE over SLOW)")
+}
+
+func TestController_Determine_UpstreamSlowBeatsPCAPResume(t *testing.T) {
+	depth, capacity := 80, 100
+	c := NewController(true)
+	c.SetPCAPQueue(func() int { return 0 }, func() int { return 100 })
+	c.SetUpstreamQueue(func() int { return depth }, func() int { return capacity })
+
+	assert.Equal(t, data.FlowControl_FLOW_SLOW, c.Determine())
+}
+
+func TestController_Determine_ResumeRequiresAllSourcesBelowLowWatermark(t *testing.T) {
+	pcapDepth, upstreamDepth := 95, 80
+	c := NewController(true)
+	c.SetPCAPQueue(func() int { return pcapDepth }, func() int { return 100 })
+	c.SetUpstreamQueue(func() int { return upstreamDepth }, func() int { return 100 })
+
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, c.Determine())
+
+	// A drained PCAP queue must not release PAUSE while the upstream queue is
+	// still in the neutral hysteresis band.
+	pcapDepth, upstreamDepth = 0, 50
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE, c.Determine())
+
+	upstreamDepth = 20
+	assert.Equal(t, data.FlowControl_FLOW_RESUME, c.Determine())
+}
+
+func TestController_Determine_SlowResumeRequiresAllSourcesBelowLowWatermark(t *testing.T) {
+	pcapDepth, upstreamDepth := 75, 0
+	c := NewController(true)
+	c.SetPCAPQueue(func() int { return pcapDepth }, func() int { return 100 })
+	c.SetUpstreamQueue(func() int { return upstreamDepth }, func() int { return 100 })
+
+	assert.Equal(t, data.FlowControl_FLOW_SLOW, c.Determine())
+
+	// A drained upstream queue must not release SLOW while PCAP remains above
+	// the resume threshold.
+	pcapDepth = 40
+	assert.Equal(t, data.FlowControl_FLOW_SLOW, c.Determine())
+
+	pcapDepth = 20
+	assert.Equal(t, data.FlowControl_FLOW_RESUME, c.Determine())
+}
+
+func TestFlowControlSeverityDoesNotDependOnProtobufNumbers(t *testing.T) {
+	assert.Equal(t, data.FlowControl_FLOW_PAUSE,
+		moreSevere(data.FlowControl_FLOW_RESUME, data.FlowControl_FLOW_PAUSE))
+	assert.Equal(t, data.FlowControl_FLOW_SLOW,
+		moreSevere(data.FlowControl_FLOW_RESUME, data.FlowControl_FLOW_SLOW))
+}
+
+func TestFlowControlTransitionHysteresis(t *testing.T) {
+	tests := []struct {
+		name               string
+		previous, pressure data.FlowControl
+		want               data.FlowControl
+	}{
+		{"pause held through slow band", data.FlowControl_FLOW_PAUSE, data.FlowControl_FLOW_SLOW, data.FlowControl_FLOW_PAUSE},
+		{"pause held through neutral band", data.FlowControl_FLOW_PAUSE, data.FlowControl_FLOW_CONTINUE, data.FlowControl_FLOW_PAUSE},
+		{"pause releases below low watermark", data.FlowControl_FLOW_PAUSE, data.FlowControl_FLOW_RESUME, data.FlowControl_FLOW_RESUME},
+		{"slow held through neutral band", data.FlowControl_FLOW_SLOW, data.FlowControl_FLOW_CONTINUE, data.FlowControl_FLOW_SLOW},
+		{"slow releases below low watermark", data.FlowControl_FLOW_SLOW, data.FlowControl_FLOW_RESUME, data.FlowControl_FLOW_RESUME},
+		{"resume settles to continue", data.FlowControl_FLOW_RESUME, data.FlowControl_FLOW_CONTINUE, data.FlowControl_FLOW_CONTINUE},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, transition(tc.previous, tc.pressure))
+		})
+	}
 }

@@ -79,6 +79,7 @@ type LocalSource struct {
 	packetBuffer  atomic.Pointer[capture.PacketBuffer]
 	captureCtx    context.Context
 	captureCancel context.CancelFunc
+	captureDone   chan struct{}
 
 	// Batching
 	batchMu      sync.Mutex
@@ -320,10 +321,11 @@ func (s *LocalSource) Start(ctx context.Context) error {
 
 	// Create capture context (separate from main context for restart support)
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
+	s.captureDone = make(chan struct{})
 
 	// Start capture goroutines
 	s.wg.Add(1)
-	go s.capturePackets()
+	go s.capturePackets(s.captureCtx, s.config.BPFFilter, s.captureDone)
 
 	// Start batching goroutine
 	s.wg.Add(1)
@@ -357,8 +359,9 @@ func (s *LocalSource) Start(ctx context.Context) error {
 }
 
 // capturePackets starts the gopacket capture loop.
-func (s *LocalSource) capturePackets() {
+func (s *LocalSource) capturePackets(ctx context.Context, filter string, done chan<- struct{}) {
 	defer s.wg.Done()
+	defer close(done)
 
 	// Build interface list
 	var devices []pcaptypes.PcapInterface
@@ -378,7 +381,7 @@ func (s *LocalSource) capturePackets() {
 
 	// Use InitWithBuffer to capture packets into our buffer
 	// nil processor means we own the buffer and read from it externally
-	capture.InitWithBuffer(s.captureCtx, devices, s.config.BPFFilter, s.packetBuffer.Load(), nil, nil)
+	capture.InitWithBuffer(ctx, devices, filter, s.packetBuffer.Load(), nil, nil)
 }
 
 // batchingLoop reads from packet buffer, applies filtering, and creates batches.
@@ -783,6 +786,16 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Re-applying an identical filter needlessly tears down and recreates every
+	// live capture handle. Apart from causing a capture gap, repeated libpcap
+	// filter operations while the old capture loops are winding down have been
+	// observed to crash inside pcap_setfilter. Application-layer filter changes
+	// commonly arrive here without changing the effective BPF expression, so
+	// make equality a hard no-op at the capture-source boundary.
+	if filter == s.config.BPFFilter {
+		return nil
+	}
+
 	if !s.started {
 		// Not started yet, just update config
 		s.config.BPFFilter = filter
@@ -798,13 +811,27 @@ func (s *LocalSource) SetBPFFilter(filter string) error {
 	if s.captureCancel != nil {
 		s.captureCancel()
 	}
+	// A changed filter is applied by reopening capture handles. Wait until every
+	// old handle is closed before creating the next generation; otherwise the
+	// old pcap_wait calls can overlap the new generation's pcap_setfilter calls.
+	if s.captureDone != nil {
+		<-s.captureDone
+	}
+
+	// Shutdown may have started while the previous capture generation drained.
+	// Preserve the requested configuration without adding a goroutine after
+	// Start has begun waiting on its WaitGroup.
+	if s.ctx == nil || s.ctx.Err() != nil {
+		return nil
+	}
 
 	// Create new capture context
 	s.captureCtx, s.captureCancel = context.WithCancel(s.ctx)
+	s.captureDone = make(chan struct{})
 
 	// Start new capture goroutine
 	s.wg.Add(1)
-	go s.capturePackets()
+	go s.capturePackets(s.captureCtx, filter, s.captureDone)
 
 	return nil
 }

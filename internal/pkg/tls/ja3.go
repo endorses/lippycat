@@ -118,7 +118,7 @@ func CalculateJA3S(metadata *types.TLSMetadata) (ja3sString string, ja3sHash str
 // JA4 is a more modern fingerprint format that improves on JA3.
 //
 // Format: t{version}{sni}{ciphers}_{extensions}_{alpn}
-// Example: t13d1516h2_8daaf6152771_e5627efa2ab1
+// Example: t13d1516h2_8daaf6152771_b186095e22bb
 //
 // Reference: https://github.com/FoxIO-LLC/ja4
 func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint string) {
@@ -131,13 +131,11 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	// Part 1: Protocol type (t=TLS, q=QUIC)
 	proto := "t"
 
-	// Part 2: TLS version (2 chars). JA4 uses the highest non-GREASE value
-	// from supported_versions when present, rather than the legacy_version field.
-	version := metadata.VersionRaw
-	for _, candidate := range metadata.SupportedVersions {
-		if !isGREASE(candidate) && candidate > version {
-			version = candidate
-		}
+	// Part 2: highest advertised non-GREASE TLS version. ClientHello version
+	// lists are not required to be sorted, so using their first entry is wrong.
+	version := highestSupportedVersion(metadata.SupportedVersions)
+	if version == 0 {
+		version = metadata.VersionRaw
 	}
 	var versionCode string
 	switch version {
@@ -152,7 +150,7 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	case VersionTLS13:
 		versionCode = "13"
 	default:
-		if version >= VersionTLS13D && version < 0x7F20 {
+		if metadata.VersionRaw >= VersionTLS13D && metadata.VersionRaw < 0x7F20 {
 			versionCode = "13"
 		} else {
 			versionCode = "00"
@@ -161,13 +159,7 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 
 	// Part 3: SNI indicator (d=has domain, i=IP only)
 	sniIndicator := "i"
-	for _, extension := range metadata.Extensions {
-		if extension == ExtensionSNI {
-			sniIndicator = "d"
-			break
-		}
-	}
-	if metadata.SNI != "" { // Preserve compatibility with manually-built metadata.
+	if containsUint16(metadata.Extensions, ExtensionSNI) {
 		sniIndicator = "d"
 	}
 
@@ -193,20 +185,8 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 		extCount = 99
 	}
 
-	// Part 6: First ALPN protocol (h2, h1, etc.)
-	alpn := "00"
-	if len(metadata.ALPNProtocols) > 0 {
-		first := metadata.ALPNProtocols[0]
-		if len(first) > 0 {
-			firstByte, lastByte := first[0], first[len(first)-1]
-			if isASCIIAlphaNumeric(firstByte) && isASCIIAlphaNumeric(lastByte) {
-				alpn = string([]byte{firstByte, lastByte})
-			} else {
-				hexALPN := hex.EncodeToString([]byte(first))
-				alpn = string([]byte{hexALPN[0], hexALPN[len(hexALPN)-1]})
-			}
-		}
-	}
+	// Part 6: First and last bytes of the first ALPN protocol.
+	alpn := ja4ALPN(metadata.ALPNProtocols)
 
 	// Build JA4_a (first part)
 	ja4a := fmt.Sprintf("%s%s%s%02d%02d%s", proto, versionCode, sniIndicator, cipherCount, extCount, alpn)
@@ -243,7 +223,9 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	// Add signature algorithms to extension hash
 	var sigAlgStrs []string
 	for _, s := range metadata.SignatureAlgos {
-		sigAlgStrs = append(sigAlgStrs, fmt.Sprintf("%04x", s))
+		if !isGREASE(s) {
+			sigAlgStrs = append(sigAlgStrs, fmt.Sprintf("%04x", s))
+		}
 	}
 	extInput := strings.Join(extStrs, ",")
 	if len(sigAlgStrs) > 0 {
@@ -259,22 +241,59 @@ func CalculateJA4(metadata *types.TLSMetadata) (ja4String string, ja4Fingerprint
 	return ja4String, ja4Fingerprint
 }
 
+func highestSupportedVersion(versions []uint16) uint16 {
+	var highest uint16
+	for _, version := range versions {
+		if !isGREASE(version) && version > highest {
+			highest = version
+		}
+	}
+	return highest
+}
+
 // isGREASE checks if a value is a GREASE value.
 func isGREASE(value uint16) bool {
 	return greaseValues[value]
 }
 
-// truncatedHash computes the first 12 lowercase hex characters of SHA-256.
+func containsUint16(values []uint16, target uint16) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ja4ALPN applies JA4's first/last byte transformation to the first ALPN value.
+func ja4ALPN(protocols []string) string {
+	if len(protocols) == 0 || len(protocols[0]) == 0 {
+		return "00"
+	}
+
+	value := []byte(protocols[0])
+	first, last := value[0], value[len(value)-1]
+	if isASCIIAlphanumeric(first) && isASCIIAlphanumeric(last) {
+		return string([]byte{first, last})
+	}
+
+	hexValue := hex.EncodeToString(value)
+	return string([]byte{hexValue[0], hexValue[len(hexValue)-1]})
+}
+
+func isASCIIAlphanumeric(value byte) bool {
+	return value >= '0' && value <= '9' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= 'a' && value <= 'z'
+}
+
+// truncatedHash computes a truncated SHA256 hash for JA4.
 func truncatedHash(input string) string {
 	if input == "" {
 		return "000000000000"
 	}
 	hash := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(hash[:6]) // First 12 hex chars (6 bytes)
-}
-
-func isASCIIAlphaNumeric(value byte) bool {
-	return value >= '0' && value <= '9' || value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z'
 }
 
 // IsValidJA3Hash checks if a string is a valid JA3/JA3S hash (32-char hex).

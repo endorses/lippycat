@@ -147,9 +147,10 @@ type Manager struct {
 
 	// orphanStreak counts consecutive polls in which a local task was absent
 	// from the ADMF response.
-	orphanMu        sync.Mutex
-	orphanStreak    map[uuid.UUID]int
-	persistedActive map[uuid.UUID]*InterceptTask
+	orphanMu         sync.Mutex
+	orphanStreak     map[uuid.UUID]int
+	persistedActive  map[uuid.UUID]*InterceptTask
+	commitActivation func(uuid.UUID, time.Time) error
 
 	// stopChan signals shutdown.
 	stopChan chan struct{}
@@ -256,6 +257,7 @@ func NewManager(config ManagerConfig, deactivationCallback DeactivationCallback)
 	}
 
 	m.registry = NewRegistry(internalCallback)
+	m.commitActivation = m.registry.commitActivation
 
 	// Create X1 server if TLS is configured.
 	if config.X1ListenAddr != "" && config.X1TLSCertFile != "" && config.X1TLSKeyFile != "" {
@@ -292,6 +294,9 @@ func (m *Manager) Start() error {
 		logger.Info("LI Manager disabled")
 		return nil
 	}
+	if err := m.ValidateConfiguration(); err != nil {
+		return err
+	}
 	if err := m.restorePersistedState(); err != nil {
 		return fmt.Errorf("restore LI state (interception remains disarmed): %w", err)
 	}
@@ -301,28 +306,37 @@ func (m *Manager) Start() error {
 		return fmt.Errorf("initialize LI state persistence (interception remains disarmed): %w", err)
 	}
 
-	// Start the registry's background task management
-	m.registry.Start()
-	m.wg.Add(1)
-	go m.runLifecycleMaintenance()
-
-	// Start X1 server if configured.
+	// Bind and start X1 before launching lifecycle workers. Listener or TLS
+	// startup failures must leave the manager entirely unstarted.
 	if m.x1Server != nil {
-		m.x1ServerCtx, m.x1ServerCancel = context.WithCancel(context.Background())
+		serverCtx, serverCancel := context.WithCancel(context.Background())
+		ready := make(chan error, 1)
 		m.wg.Add(1)
 		go func() {
 			defer m.wg.Done()
-			if err := m.x1Server.Start(m.x1ServerCtx); err != nil {
+			if err := m.x1Server.StartReady(serverCtx, ready); err != nil {
 				logger.Error("X1 server error", "error", err)
 			}
 		}()
-		logger.Info("X1 server started", "addr", m.config.X1ListenAddr)
+		if err := <-ready; err != nil {
+			serverCancel()
+			m.wg.Wait()
+			return fmt.Errorf("start X1 server: %w", err)
+		}
+		m.x1ServerCtx, m.x1ServerCancel = serverCtx, serverCancel
+		logger.Info("X1 server started", "addr", m.x1Server.Addr())
 	} else if m.config.X1ListenAddr != "" {
 		logger.Warn("X1 server not started: TLS certificate not configured",
 			"addr", m.config.X1ListenAddr,
 			"hint", "provide --li-x1-tls-cert and --li-x1-tls-key",
 		)
 	}
+
+	// Start lifecycle management only after the authenticated administration
+	// listener is ready.
+	m.registry.Start()
+	m.wg.Add(1)
+	go m.runLifecycleMaintenance()
 
 	// Start X1 client if configured (for ADMF notifications).
 	if m.x1Client != nil {
@@ -369,6 +383,27 @@ func (m *Manager) Start() error {
 		"x1_listen", m.config.X1ListenAddr,
 		"admf_endpoint", m.config.ADMFEndpoint,
 	)
+	return nil
+}
+
+// ValidateConfiguration checks security-sensitive LI configuration before any
+// listener or background worker is started.
+func (m *Manager) ValidateConfiguration() error {
+	configured := m.config.X1ListenAddr != "" || m.config.X1TLSCertFile != "" ||
+		m.config.X1TLSKeyFile != "" || m.config.X1TLSCAFile != ""
+	if !configured {
+		return nil
+	}
+	if m.config.X1ListenAddr == "" || m.config.X1TLSCertFile == "" ||
+		m.config.X1TLSKeyFile == "" || m.config.X1TLSCAFile == "" {
+		return errors.New("incomplete X1 configuration: listen address, server certificate, server key, and client CA are all required")
+	}
+	if m.x1Server == nil {
+		return errors.New("X1 server was not constructed from the configured authenticated listener")
+	}
+	if err := m.x1Server.ValidateConfiguration(); err != nil {
+		return fmt.Errorf("validate X1 server configuration: %w", err)
+	}
 	return nil
 }
 
@@ -648,23 +683,32 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 	return removed
 }
 
-// removeOrphanedLIFilters deletes LI filters belonging to no task in the
-// snapshot. Startup-only: filters are reloaded from disk before the registry
-// exists, so an orphaned filter is armed with no task pointing at it — which is
-// what re-armed the stale filter across restarts.
+// removeOrphanedLIFilters makes the persisted filter set match the targets of
+// tasks that are actually active locally. An ADMF-listed task whose activation
+// failed is deliberately excluded. Active local tasks retained during the
+// periodic orphan grace streak remain included.
 func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 	lister, ok := m.config.FilterPusher.(FilterLister)
 	if !ok || !snapshot.complete() {
 		return 0
 	}
 
-	live := make(map[string]bool, len(snapshot.tasks))
+	expected := make(map[string]bool)
 	legacyOwners := make(map[string][]uuid.UUID)
-	for xid := range snapshot.tasks {
-		live[xid.String()] = true
+	activeTasks := 0
+	m.registry.ListTasks(func(task *InterceptTask) bool {
+		if task.Status != TaskStatusActive {
+			return true
+		}
+		activeTasks++
+		for i := range task.Targets {
+			expected[fmt.Sprintf(liFilterIDPrefix+"%s-%d", task.XID.String(), i)] = true
+		}
+		xid := task.XID
 		prefix := xid.String()[:8]
 		legacyOwners[prefix] = append(legacyOwners[prefix], xid)
-	}
+		return true
+	})
 
 	var orphans []string
 	var migrations []string
@@ -687,7 +731,7 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 			}
 			continue
 		}
-		if !live[owner] {
+		if !expected[id] {
 			orphans = append(orphans, id)
 		}
 	}
@@ -696,7 +740,7 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 		return 0
 	}
 
-	if len(snapshot.tasks) == 0 {
+	if len(snapshot.tasks) == 0 && activeTasks > 0 {
 		logger.Warn("Startup reconciliation: ADMF returned no tasks while LI filters are installed, "+
 			"keeping them (explicit DeactivateTask required)",
 			"li_filters", len(orphans),
@@ -895,15 +939,17 @@ func (m *Manager) reconcileWithADMF() {
 	// intercept the ADMF has dropped is running without authorisation.
 	deactivated := m.removeOrphanedTasks(snapshot, true)
 	removedDestinations := m.removeOrphanedDestinations(snapshot)
+	removedFilters := m.removeOrphanedLIFilters(snapshot)
 	if err := m.persistState(); err != nil {
 		logger.Error("Reconciliation: persist LI state failed", "error", err)
 	}
 
-	if activated > 0 || deactivated > 0 || removedDestinations > 0 {
+	if activated > 0 || deactivated > 0 || removedDestinations > 0 || removedFilters > 0 {
 		logger.Info("ADMF reconciliation complete",
 			"activated", activated,
 			"deactivated", deactivated,
 			"destinations_removed", removedDestinations,
+			"orphan_filters_removed", removedFilters,
 			"admf_tasks", len(snapshot.tasks),
 		)
 	} else {
@@ -1013,6 +1059,35 @@ func (m *Manager) ActivateTask(task *InterceptTask) error {
 }
 
 func (m *Manager) activateTask(task *InterceptTask) error {
+	if task == nil {
+		return fmt.Errorf("%w: task is nil", ErrInvalidTask)
+	}
+	isReactivation := false
+	var previousGeneration uint64
+	if existing, err := m.registry.GetTaskDetails(task.XID); err == nil {
+		switch existing.Status {
+		case TaskStatusActive, TaskStatusPending:
+			if equivalentTaskDefinition(existing, task) {
+				// A retry is deliberately a pure read: do not bump the generation,
+				// reinstall filters, move a pending boundary, or persist state.
+				return nil
+			}
+			return fmt.Errorf("%w: XID %s is %s", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		case TaskStatusSuspended, TaskStatusFailed:
+			return fmt.Errorf("%w: XID %s is %s", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		case TaskStatusDeactivated:
+			if !equivalentReactivationIdentity(existing, task) {
+				return fmt.Errorf("%w: XID %s", ErrReactivationIdentityConflict, task.XID)
+			}
+			isReactivation = true
+			previousGeneration = existing.ActivationGeneration
+		default:
+			return fmt.Errorf("%w: XID %s has unknown status %d", ErrTaskDefinitionConflict, task.XID, existing.Status)
+		}
+	} else if !errors.Is(err, ErrTaskNotFound) {
+		return fmt.Errorf("check activation retry for XID %s: %w", task.XID, err)
+	}
+
 	// First activate in registry (validates task)
 	if err := m.registry.ActivateTask(task); err != nil {
 		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
@@ -1027,10 +1102,10 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		return fmt.Errorf("read activation identity for XID %s: %w", task.XID, getErr)
 	}
 	if registered.Status == TaskStatusPending {
-		if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
+		if err := m.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 			return err
 		}
-		logger.Info("LI task registered pending", "xid", task.XID, "start_time", registered.StartTime, "end_time", registered.EndTime)
+		logTaskActivation(isReactivation, registered, previousGeneration, 0)
 		return m.persistState()
 	}
 	filterIDs, err := m.filters.CreateFiltersForTask(registered)
@@ -1038,18 +1113,33 @@ func (m *Manager) activateTask(task *InterceptTask) error {
 		rollbackErr := m.registry.rollbackActivation(task.XID, registered.ActivatedAt)
 		return errors.Join(fmt.Errorf("activate XID %s: %w", task.XID, err), rollbackErr)
 	}
-	if err := m.registry.commitActivation(task.XID, registered.ActivatedAt); err != nil {
+	if err := m.commitActivation(task.XID, registered.ActivatedAt); err != nil {
 		return errors.Join(fmt.Errorf("commit activation XID %s: %w", task.XID, err),
 			m.filters.RemoveFiltersForTask(task.XID), m.registry.rollbackActivation(task.XID, registered.ActivatedAt))
 	}
 
-	logger.Info("LI task activated",
-		"xid", task.XID,
-		"targets", len(task.Targets),
-		"filters", len(filterIDs),
-		"delivery_type", task.DeliveryType.String(),
-	)
+	logTaskActivation(isReactivation, registered, previousGeneration, len(filterIDs))
 	return m.persistState()
+}
+
+func logTaskActivation(reactivation bool, task *InterceptTask, previousGeneration uint64, filterCount int) {
+	operation := "activation"
+	message := "LI task activated"
+	if reactivation {
+		operation = "reactivation"
+		message = "LI task reactivated"
+	} else if task.Status == TaskStatusPending {
+		message = "LI task registered pending"
+	}
+	logger.Info(message,
+		"operation", operation,
+		"xid", task.XID,
+		"previous_generation", previousGeneration,
+		"new_generation", task.ActivationGeneration,
+		"state", task.Status.String(),
+		"destinations", len(task.DestinationIDs),
+		"filters", filterCount,
+	)
 }
 
 func (m *Manager) completeExpiration(task *InterceptTask) error {
@@ -1414,6 +1504,12 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 	err := m.ActivateTask(liTask)
 	if err != nil {
 		// Convert to x1 error types
+		if errors.Is(err, ErrReactivationIdentityConflict) {
+			return fmt.Errorf("%w: %v", x1.ErrReactivationIdentityConflict, err)
+		}
+		if errors.Is(err, ErrTaskDefinitionConflict) {
+			return fmt.Errorf("%w: %v", x1.ErrTaskDefinitionConflict, err)
+		}
 		if errors.Is(err, ErrTaskAlreadyExists) {
 			return x1.ErrTaskAlreadyExists
 		}
@@ -1422,6 +1518,9 @@ func (m *Manager) ActivateTaskX1(task *x1.Task) error {
 		}
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
+		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return fmt.Errorf("%w: %v", x1.ErrUnsupportedDeliveryCombination, err)
 		}
 	}
 	return err
@@ -1473,8 +1572,14 @@ func (m *Manager) ModifyTaskX1(xid uuid.UUID, mod *x1.TaskModification) error {
 		if errors.Is(err, ErrModifyNotAllowed) {
 			return x1.ErrModifyNotAllowed
 		}
+		if errors.Is(err, ErrInvalidTask) {
+			return x1.ErrInvalidTask
+		}
 		if errors.Is(err, ErrDestinationNotFound) {
 			return x1.ErrDestinationNotFound
+		}
+		if errors.Is(err, ErrUnsupportedDeliveryCombination) {
+			return fmt.Errorf("%w: %v", x1.ErrUnsupportedDeliveryCombination, err)
 		}
 	}
 	return err

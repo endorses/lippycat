@@ -201,9 +201,9 @@ func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
 	// Clean up RTP port mappings for this call
 	CleanupPortMappings(callID)
 
-	// Get the call from the tracker
-	call, err := getCall(callID)
-	if err != nil {
+	// Detach tracker state before taking writer locks, then close the call.
+	found, err := getTracker().removeCall(callID)
+	if !found {
 		// Call may have already been evicted from LRU, just mark as closed
 		m.mu.Lock()
 		m.closedCalls[callID] = time.Now()
@@ -213,8 +213,7 @@ func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
 		return
 	}
 
-	// Close the PCAP files
-	if err := call.Close(); err != nil {
+	if err != nil {
 		logger.Error("Failed to close call PCAP files",
 			"call_id", SanitizeCallIDForLogging(callID),
 			"error", err)

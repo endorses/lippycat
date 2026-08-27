@@ -25,6 +25,15 @@ These features are designed for sensitive deployments where VoIP traffic data re
 
 ## TLS Transport Encryption
 
+### Lawful Interception X1 mutual TLS
+
+In builds with LI support, enabling LI also enables the X1 administration
+server. X1 does not permit server-only TLS: its listen address, server
+certificate, server key, and ADMF client CA must all be configured. Use
+`--li-x1-tls-ca` (or `processor.li.x1_tls_ca`) to provide the trust anchor used
+to verify ADMF client certificates. The processor or tap fails startup when any
+required X1 TLS setting is missing or invalid.
+
 ### Purpose
 
 In distributed mode, hunters forward captured network traffic to processor nodes via gRPC. This communication includes:

@@ -15,9 +15,10 @@ type Controller struct {
 	sources map[string]QueuePressureSource
 
 	// Upstream forwarding metrics (if enabled)
-	packetsReceived  *atomic.Uint64
-	packetsForwarded *atomic.Uint64
-	hasUpstream      bool
+	hasUpstream           bool
+	upstreamQueueDepth    func() int
+	upstreamQueueCapacity func() int
+	state                 atomic.Int32
 }
 
 // QueuePressureSource describes a processor-level bounded queue.
@@ -27,14 +28,67 @@ type QueuePressureSource struct {
 	Capacity func() int
 }
 
-// NewController creates a new flow controller
-func NewController(packetsReceived, packetsForwarded *atomic.Uint64, hasUpstream bool) *Controller {
-	return &Controller{
-		sources:          make(map[string]QueuePressureSource),
-		packetsReceived:  packetsReceived,
-		packetsForwarded: packetsForwarded,
-		hasUpstream:      hasUpstream,
+// SetUpstreamQueue sets the real outstanding upstream queue metrics. These
+// supersede lifetime received/forwarded counter subtraction when configured.
+func (c *Controller) SetUpstreamQueue(depthFn func() int, capacityFn func() int) {
+	c.upstreamQueueDepth = depthFn
+	c.upstreamQueueCapacity = capacityFn
+}
+
+func severity(control data.FlowControl) int {
+	switch control {
+	case data.FlowControl_FLOW_PAUSE:
+		return 3
+	case data.FlowControl_FLOW_SLOW:
+		return 2
+	case data.FlowControl_FLOW_RESUME:
+		return 1
+	default:
+		return 0
 	}
+}
+
+func moreSevere(current, candidate data.FlowControl) data.FlowControl {
+	if severity(candidate) > severity(current) {
+		return candidate
+	}
+	return current
+}
+
+// NewController creates a new flow controller
+func NewController(hasUpstream bool) *Controller {
+	c := &Controller{
+		hasUpstream: hasUpstream,
+		sources:     make(map[string]QueuePressureSource),
+	}
+	c.state.Store(int32(data.FlowControl_FLOW_CONTINUE))
+	return c
+}
+
+// transition applies queue hysteresis. Escalation is immediate, while SLOW and
+// PAUSE are held until every pressure source drains below the resume threshold.
+// RESUME is an observable release signal; the next neutral sample becomes
+// CONTINUE.
+func transition(previous, pressure data.FlowControl) data.FlowControl {
+	if pressure == data.FlowControl_FLOW_PAUSE {
+		return pressure
+	}
+	if previous == data.FlowControl_FLOW_PAUSE {
+		if pressure == data.FlowControl_FLOW_RESUME {
+			return pressure
+		}
+		return previous
+	}
+	if pressure == data.FlowControl_FLOW_SLOW {
+		return pressure
+	}
+	if previous == data.FlowControl_FLOW_SLOW {
+		if pressure == data.FlowControl_FLOW_RESUME {
+			return pressure
+		}
+		return previous
+	}
+	return pressure
 }
 
 // SetPCAPQueue sets the PCAP queue metrics functions
@@ -56,6 +110,8 @@ func (c *Controller) SetQueueSource(source QueuePressureSource) {
 // Checks all pressure sources and returns the most severe signal (PAUSE > SLOW > RESUME > CONTINUE)
 func (c *Controller) Determine() data.FlowControl {
 	mostSevere := data.FlowControl_FLOW_CONTINUE
+	pressureSources := 0
+	allSourcesBelowResume := true
 
 	c.mu.RLock()
 	sources := make([]QueuePressureSource, 0, len(c.sources))
@@ -63,15 +119,15 @@ func (c *Controller) Determine() data.FlowControl {
 		sources = append(sources, source)
 	}
 	c.mu.RUnlock()
-	if len(sources) > 0 {
-		mostSevere = data.FlowControl_FLOW_RESUME
-	}
+
 	for _, source := range sources {
 		queueDepth := source.Depth()
 		queueCapacity := source.Capacity()
 
 		if queueCapacity > 0 {
+			pressureSources++
 			utilization := float64(queueDepth) / float64(queueCapacity)
+			allSourcesBelowResume = allSourcesBelowResume && utilization < constants.FlowControlResumeThreshold
 			utilizationPct := utilization * 100
 
 			// Pause if queue is critically full (>90%)
@@ -81,7 +137,7 @@ func (c *Controller) Determine() data.FlowControl {
 					"queue_depth", queueDepth,
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
-				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_PAUSE)
+				mostSevere = data.FlowControl_FLOW_PAUSE
 			} else if utilization > constants.FlowControlSlowThreshold {
 				// Slow down if queue is getting full (>70%)
 				logger.Debug("Processor queue filling - requesting slowdown",
@@ -90,11 +146,6 @@ func (c *Controller) Determine() data.FlowControl {
 					"capacity", queueCapacity,
 					"utilization", utilizationPct)
 				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
-			} else if utilization < constants.FlowControlResumeThreshold {
-				// Resume if queue has drained (< 30%)
-				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
-			} else {
-				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_CONTINUE)
 			}
 		}
 	}
@@ -108,39 +159,33 @@ func (c *Controller) Determine() data.FlowControl {
 
 	// Check overall packet processing load (only if upstream forwarding is configured)
 	// If no upstream processor, packets are only consumed by TUI subscribers, not forwarded
-	if c.hasUpstream && c.packetsReceived != nil && c.packetsForwarded != nil {
-		packetsReceived := c.packetsReceived.Load()
-		packetsForwarded := c.packetsForwarded.Load()
-
-		// If we're significantly behind in forwarding, slow down
-		if packetsReceived > packetsForwarded {
-			backlog := packetsReceived - packetsForwarded
-			if backlog > constants.FlowControlUpstreamBacklogThreshold {
-				logger.Warn("Large packet backlog detected - requesting slowdown",
-					"backlog", backlog)
+	if c.hasUpstream && c.upstreamQueueDepth != nil && c.upstreamQueueCapacity != nil {
+		depth, capacity := c.upstreamQueueDepth(), c.upstreamQueueCapacity()
+		if capacity > 0 {
+			pressureSources++
+			utilization := float64(depth) / float64(capacity)
+			allSourcesBelowResume = allSourcesBelowResume && utilization < constants.FlowControlResumeThreshold
+			if utilization > constants.FlowControlSlowThreshold {
+				logger.Warn("Upstream queue filling - requesting slowdown",
+					"queue_depth", depth, "capacity", capacity)
 				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			}
 		}
 	}
 
-	return mostSevere
-}
+	// RESUME is a release signal, not a pressure level. Emitting it when only
+	// one queue has drained can prematurely release hysteresis while another
+	// queue remains above the low watermark. Require every configured, valid
+	// pressure source to be below the resume threshold.
+	if mostSevere == data.FlowControl_FLOW_CONTINUE && pressureSources > 0 && allSourcesBelowResume {
+		mostSevere = data.FlowControl_FLOW_RESUME
+	}
 
-func moreSevere(current, candidate data.FlowControl) data.FlowControl {
-	rank := func(value data.FlowControl) int {
-		switch value {
-		case data.FlowControl_FLOW_PAUSE:
-			return 3
-		case data.FlowControl_FLOW_SLOW:
-			return 2
-		case data.FlowControl_FLOW_CONTINUE:
-			return 1
-		default:
-			return 0
+	for {
+		previousRaw := c.state.Load()
+		next := transition(data.FlowControl(previousRaw), mostSevere)
+		if c.state.CompareAndSwap(previousRaw, int32(next)) {
+			return next
 		}
 	}
-	if rank(candidate) > rank(current) {
-		return candidate
-	}
-	return current
 }

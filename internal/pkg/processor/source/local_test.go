@@ -117,6 +117,25 @@ func TestLocalSource_SetBPFFilter_BeforeStart(t *testing.T) {
 	assert.Equal(t, "port 5061", s.config.BPFFilter)
 }
 
+func TestLocalSource_SetBPFFilter_UnchangedDoesNotRestartCapture(t *testing.T) {
+	s := NewLocalSource(LocalSourceConfig{
+		Interfaces: []string{"eth0"},
+		BPFFilter:  "port 5060",
+	})
+
+	// Model a running source without opening a privileged live capture. A
+	// redundant update must leave the capture generation untouched.
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	s.started = true
+	s.captureCtx = ctx
+	s.captureCancel = cancel
+
+	require.NoError(t, s.SetBPFFilter("port 5060"))
+	assert.Same(t, ctx, s.captureCtx)
+	assert.NoError(t, ctx.Err())
+}
+
 func TestLocalSource_Batches_ReturnsChannel(t *testing.T) {
 	s := NewLocalSource(DefaultLocalSourceConfig())
 

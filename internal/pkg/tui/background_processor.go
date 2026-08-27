@@ -6,173 +6,188 @@ import (
 	"sync"
 	"sync/atomic"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket/layers"
 )
 
-// BackgroundProcessorConfig holds configuration for the background processor
-type BackgroundProcessorConfig struct {
-	DNSView     *components.DNSQueriesView
-	HTTPView    *components.HTTPView
-	EmailView   *components.EmailView
-	CallAgg     *LocalCallAggregator
-	CaptureMode components.CaptureMode
+const backgroundQueueSize = 1000
+
+type DNSPacketResultMsg struct {
+	Generation uint64
+	Packet     types.PacketDisplay
 }
-
-// BackgroundProcessor handles non-critical packet processing in a separate goroutine
-// to prevent blocking the TUI's Update() loop. It processes:
-// - DNS metadata parsing
-// - HTTP metadata parsing
-// - Email metadata extraction
-// - Call aggregator updates
-type BackgroundProcessor struct {
-	mu sync.RWMutex
-
-	// Processing channels - buffered to absorb bursts
-	packetChan chan backgroundPacket
-	done       chan struct{}
-
-	// Views to update (set via Configure)
-	dnsView   *components.DNSQueriesView
-	httpView  *components.HTTPView
-	emailView *components.EmailView
-
-	// Call aggregator
-	callAgg     *LocalCallAggregator
-	captureMode components.CaptureMode
-
-	// Statistics
-	packetsProcessed int64
-	packetsDropped   int64
+type HTTPPacketResultMsg struct {
+	Generation uint64
+	Packet     types.PacketDisplay
 }
+type EmailPacketResultMsg struct {
+	Generation uint64
+	Packet     types.PacketDisplay
+}
+type LocalCallPacketResultMsg struct {
+	Generation uint64
+	Packet     types.PacketDisplay
+}
+type backgroundProcessorStoppedMsg struct{}
 
-// backgroundPacket holds packet data for background processing
 type backgroundPacket struct {
-	Packet   components.PacketDisplay
-	LinkType layers.LinkType
+	packet     types.PacketDisplay
+	linkType   layers.LinkType
+	generation uint64
 }
 
-// NewBackgroundProcessor creates a new background processor
+// BackgroundProcessor parses immutable packet snapshots and publishes results.
+// It never mutates Bubble Tea components.
+type BackgroundProcessor struct {
+	packetChan       chan backgroundPacket
+	resultChan       chan tea.Msg
+	done             chan struct{}
+	stopOnce         sync.Once
+	wg               sync.WaitGroup
+	generation       atomic.Uint64
+	packetsProcessed atomic.Int64
+	packetsDropped   atomic.Int64
+	resultsDropped   atomic.Int64
+}
+
 func NewBackgroundProcessor() *BackgroundProcessor {
-	bp := &BackgroundProcessor{
-		packetChan: make(chan backgroundPacket, 1000), // Large buffer for bursts
-		done:       make(chan struct{}),
-	}
+	bp := &BackgroundProcessor{packetChan: make(chan backgroundPacket, backgroundQueueSize), resultChan: make(chan tea.Msg, backgroundQueueSize), done: make(chan struct{})}
+	bp.generation.Store(1)
+	bp.wg.Add(1)
 	go bp.run()
 	return bp
 }
 
-// Configure sets the views and call aggregator to update
-// This must be called before packets are submitted
-func (bp *BackgroundProcessor) Configure(config BackgroundProcessorConfig) {
-	bp.mu.Lock()
-	defer bp.mu.Unlock()
+// BeginGeneration invalidates results already in flight. Component selection
+// and call aggregation belong to Model.Update; the background worker needs no
+// references to mutable UI state.
+func (bp *BackgroundProcessor) BeginGeneration() uint64 { return bp.generation.Add(1) }
+func (bp *BackgroundProcessor) Generation() uint64      { return bp.generation.Load() }
 
-	bp.dnsView = config.DNSView
-	bp.httpView = config.HTTPView
-	bp.emailView = config.EmailView
-	bp.callAgg = config.CallAgg
-	bp.captureMode = config.CaptureMode
-}
-
-// SetCallAggregator updates the call aggregator (for mode switching)
-func (bp *BackgroundProcessor) SetCallAggregator(agg *LocalCallAggregator, mode components.CaptureMode) {
-	bp.mu.Lock()
-	defer bp.mu.Unlock()
-	bp.callAgg = agg
-	bp.captureMode = mode
-}
-
-// Submit adds a packet for background processing (non-blocking)
 func (bp *BackgroundProcessor) Submit(packet components.PacketDisplay, linkType layers.LinkType) {
+	item := backgroundPacket{packet: cloneBackgroundPacket(types.PacketDisplay(packet)), linkType: linkType, generation: bp.generation.Load()}
 	select {
-	case bp.packetChan <- backgroundPacket{Packet: packet, LinkType: linkType}:
-		// Successfully queued
+	case <-bp.done:
+		bp.packetsDropped.Add(1)
+	case bp.packetChan <- item:
 	default:
-		// Queue full - drop packet for background processing
-		// This is acceptable since background processing is non-critical
-		atomic.AddInt64(&bp.packetsDropped, 1)
+		bp.packetsDropped.Add(1)
 	}
 }
 
-// SubmitBatch adds multiple packets for background processing (non-blocking)
 func (bp *BackgroundProcessor) SubmitBatch(packets []components.PacketDisplay, linkType layers.LinkType) {
 	for i := range packets {
 		bp.Submit(packets[i], linkType)
 	}
 }
 
-// Stop shuts down the background processor
-func (bp *BackgroundProcessor) Stop() {
-	close(bp.done)
+func (bp *BackgroundProcessor) WaitForResult() tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case msg := <-bp.resultChan:
+			return msg
+		case <-bp.done:
+			return backgroundProcessorStoppedMsg{}
+		}
+	}
 }
 
-// Stats returns processing statistics
+func (bp *BackgroundProcessor) Stop() { bp.stopOnce.Do(func() { close(bp.done) }); bp.wg.Wait() }
 func (bp *BackgroundProcessor) Stats() (processed, dropped int64) {
-	return atomic.LoadInt64(&bp.packetsProcessed), atomic.LoadInt64(&bp.packetsDropped)
+	return bp.packetsProcessed.Load(), bp.packetsDropped.Load()
 }
+func (bp *BackgroundProcessor) ResultDrops() int64 { return bp.resultsDropped.Load() }
 
-// run is the main processing loop
 func (bp *BackgroundProcessor) run() {
+	defer bp.wg.Done()
 	for {
 		select {
 		case <-bp.done:
 			return
-		case bgPkt := <-bp.packetChan:
-			bp.processPacket(bgPkt)
-			atomic.AddInt64(&bp.packetsProcessed, 1)
+		case item := <-bp.packetChan:
+			bp.processPacket(item)
+			bp.packetsProcessed.Add(1)
 		}
 	}
 }
 
-// processPacket handles non-critical processing for a single packet
-func (bp *BackgroundProcessor) processPacket(bgPkt backgroundPacket) {
-	bp.mu.RLock()
-	dnsView := bp.dnsView
-	httpView := bp.httpView
-	emailView := bp.emailView
-	callAgg := bp.callAgg
-	captureMode := bp.captureMode
-	bp.mu.RUnlock()
+func (bp *BackgroundProcessor) publish(msg tea.Msg) {
+	select {
+	case <-bp.done:
+		return
+	case bp.resultChan <- msg:
+	default:
+		bp.resultsDropped.Add(1)
+	}
+}
 
-	packet := bgPkt.Packet
-
-	// Process DNS packets
-	if packet.Protocol == "DNS" {
-		// Parse DNS from raw data if not already parsed
+func (bp *BackgroundProcessor) processPacket(item backgroundPacket) {
+	packet := item.packet
+	switch packet.Protocol {
+	case "DNS":
 		if packet.DNSData == nil && len(packet.RawData) > 0 {
-			packet.DNSData = parseDNSFromRawData(packet.RawData, bgPkt.LinkType)
+			packet.DNSData = parseDNSFromRawData(packet.RawData, item.linkType)
 		}
-		if packet.DNSData != nil && dnsView != nil {
-			typesPacket := types.PacketDisplay(packet)
-			dnsView.UpdateFromPacket(&typesPacket)
+		if packet.DNSData != nil {
+			bp.publish(DNSPacketResultMsg{item.generation, packet})
 		}
-	}
-
-	// Process HTTP packets
-	if packet.Protocol == "HTTP" {
-		// Parse HTTP from raw data if not already parsed
+	case "HTTP":
 		if packet.HTTPData == nil && len(packet.RawData) > 0 {
-			packet.HTTPData = parseHTTPFromRawData(packet.RawData, bgPkt.LinkType)
+			packet.HTTPData = parseHTTPFromRawData(packet.RawData, item.linkType)
 		}
-		if packet.HTTPData != nil && httpView != nil {
-			typesPacket := types.PacketDisplay(packet)
-			httpView.UpdateFromPacket(&typesPacket)
+		if packet.HTTPData != nil {
+			bp.publish(HTTPPacketResultMsg{item.generation, packet})
 		}
 	}
+	if packet.EmailData != nil {
+		bp.publish(EmailPacketResultMsg{item.generation, packet})
+	}
+	if packet.Protocol == "SIP" || packet.Protocol == "RTP" {
+		bp.publish(LocalCallPacketResultMsg{item.generation, packet})
+	}
+}
 
-	// Process Email packets
-	if packet.EmailData != nil && emailView != nil {
-		typesPacket := types.PacketDisplay(packet)
-		emailView.UpdateFromPacket(&typesPacket)
+func cloneBackgroundPacket(packet types.PacketDisplay) types.PacketDisplay {
+	packet.RawData = append([]byte(nil), packet.RawData...)
+	if packet.DNSData != nil {
+		metadata := *packet.DNSData
+		metadata.Answers = append([]types.DNSAnswer(nil), metadata.Answers...)
+		packet.DNSData = &metadata
 	}
-
-	// Process through call aggregator for VoIP packets
-	if callAgg != nil && (packet.Protocol == "SIP" || packet.Protocol == "RTP") {
-		if captureMode == components.CaptureModeOffline || captureMode == components.CaptureModeLive {
-			typesPacket := types.PacketDisplay(packet)
-			callAgg.ProcessPacket(&typesPacket)
+	if packet.HTTPData != nil {
+		metadata := *packet.HTTPData
+		metadata.Headers = cloneStringMap(metadata.Headers)
+		packet.HTTPData = &metadata
+	}
+	if packet.EmailData != nil {
+		metadata := *packet.EmailData
+		metadata.RcptTo = append([]string(nil), metadata.RcptTo...)
+		metadata.IMAPFlags = append([]string(nil), metadata.IMAPFlags...)
+		packet.EmailData = &metadata
+	}
+	if packet.VoIPData != nil {
+		metadata := *packet.VoIPData
+		metadata.Headers = cloneStringMap(metadata.Headers)
+		metadata.RawSIP = append([]byte(nil), metadata.RawSIP...)
+		if metadata.AccessNetworkInfo != nil {
+			ani := *metadata.AccessNetworkInfo
+			ani.Parameters = cloneStringMap(ani.Parameters)
+			metadata.AccessNetworkInfo = &ani
 		}
+		packet.VoIPData = &metadata
 	}
+	return packet
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }

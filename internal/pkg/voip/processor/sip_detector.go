@@ -121,6 +121,13 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		}
 	}
 
+	// A final response to dialog termination is the ownership boundary for RTP
+	// associations. Do this independently of per-call PCAP monitoring: tap mode
+	// may legitimately run without PCAP output enabled.
+	if isTerminalDialogResponse(metadata) {
+		p.CompleteCall(callID)
+	}
+
 	// Build protobuf metadata
 	pbMetadata := &data.PacketMetadata{
 		Sip: &data.SIPMetadata{
@@ -160,6 +167,13 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		FilterMatched:   filterMatched,
 		FilterIDs:       filterIDs,
 	}
+}
+
+func isTerminalDialogResponse(metadata *CallMetadata) bool {
+	if metadata == nil || metadata.ResponseCode < 200 {
+		return false
+	}
+	return metadata.CSeqMethod == "BYE" || metadata.CSeqMethod == "CANCEL"
 }
 
 // isSIPMessage checks if payload looks like a SIP message.

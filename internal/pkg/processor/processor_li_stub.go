@@ -13,6 +13,8 @@ import (
 // initLIManager is a no-op when LI is not compiled in.
 func (p *Processor) initLIManager() {}
 
+func (p *Processor) validateLIConfiguration() error { return nil }
+
 // startLIManager is a no-op when LI is not compiled in.
 func (p *Processor) startLIManager() error { return nil }
 

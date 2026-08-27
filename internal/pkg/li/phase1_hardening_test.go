@@ -98,7 +98,7 @@ func TestFilterUpdateFailurePreservesOriginalAndCleanupIsRetryable(t *testing.T)
 	xid := uuid.New()
 	p := newTransactionalPusher()
 	m := NewFilterManager(p)
-	original, err := m.CreateFiltersForTask(phase1Task(xid, "old"))
+	original, err := m.CreateFiltersForTask(phase1Task(xid, "old", "remove-me"))
 	require.NoError(t, err)
 
 	p.failUpdateCall = p.updateCalls + 1
@@ -108,13 +108,13 @@ func TestFilterUpdateFailurePreservesOriginalAndCleanupIsRetryable(t *testing.T)
 	assert.Contains(t, p.installed, original[0])
 
 	p.failUpdateCall = 0
-	p.failDeletes[original[0]] = true
+	p.failDeletes[original[1]] = true
 	err = m.UpdateFiltersForTask(phase1Task(xid, "new"))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), original[0])
-	assert.Contains(t, m.GetFiltersForXID(xid), original[0])
+	assert.Contains(t, err.Error(), original[1])
+	assert.Contains(t, m.GetFiltersForXID(xid), original[1])
 
-	delete(p.failDeletes, original[0])
+	delete(p.failDeletes, original[1])
 	require.NoError(t, m.RemoveFiltersForTask(xid))
 	assert.Empty(t, p.installed)
 }

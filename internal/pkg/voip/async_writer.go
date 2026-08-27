@@ -47,6 +47,11 @@ type AsyncWriterPool struct {
 	writeQueues []chan PacketWriteRequest
 	started     atomic.Bool
 	stopped     atomic.Bool
+	// admissionMu makes accepting a request and closing the queues mutually
+	// exclusive. An atomic stopped check alone is insufficient: Stop could close
+	// a queue after a writer observed stopped=false but before it sent.
+	admissionMu sync.RWMutex
+	stopDone    chan struct{}
 
 	// Statistics
 	stats AsyncWriterStats
@@ -94,6 +99,7 @@ func NewAsyncWriterPool(workerCount, bufferSize int) *AsyncWriterPool {
 		ctx:           ctx,
 		cancel:        cancel,
 		writeQueues:   writeQueues,
+		stopDone:      make(chan struct{}),
 		onError: func(callID string, err error) {
 			logger.Error("Async write error",
 				"call_id", SanitizeCallIDForLogging(callID),
@@ -123,21 +129,24 @@ func (p *AsyncWriterPool) Start() error {
 
 // Stop gracefully shuts down the async writer pool
 func (p *AsyncWriterPool) Stop() error {
-	if p.stopped.Load() {
-		return nil // Already stopped
-	}
-
-	logger.Info("Stopping async writer pool")
-	p.stopped.Store(true)
-
 	// Close the write queues and let the workers drain what is still queued.
 	// Cancelling the context here instead would race the workers and silently
 	// discard packets that were accepted for writing, losing the tail of every
 	// capture. The context is only cancelled once draining is done (or has
 	// timed out), as an escape hatch for a wedged writer.
+	p.admissionMu.Lock()
+	if p.stopped.Load() {
+		p.admissionMu.Unlock()
+		<-p.stopDone
+		return nil // Already stopped
+	}
+
+	logger.Info("Stopping async writer pool")
+	p.stopped.Store(true)
 	for _, q := range p.writeQueues {
 		close(q)
 	}
+	p.admissionMu.Unlock()
 
 	// Wait for all workers to finish with timeout
 	done := make(chan struct{})
@@ -153,12 +162,16 @@ func (p *AsyncWriterPool) Stop() error {
 		logger.Warn("Async writer pool stop timeout, abandoning queued packets")
 	}
 	p.cancel()
+	close(p.stopDone)
 
 	return nil
 }
 
 // WritePacketAsync queues a packet for async writing
 func (p *AsyncWriterPool) WritePacketAsync(callID string, packet gopacket.Packet, packetType PacketType) error {
+	p.admissionMu.RLock()
+	defer p.admissionMu.RUnlock()
+
 	if p.stopped.Load() {
 		return ErrWriterStopped
 	}
@@ -185,7 +198,9 @@ func (p *AsyncWriterPool) WritePacketAsync(callID string, packet gopacket.Packet
 
 // WritePacketSync queues a packet for async writing and waits for completion
 func (p *AsyncWriterPool) WritePacketSync(callID string, packet gopacket.Packet, packetType PacketType) error {
+	p.admissionMu.RLock()
 	if p.stopped.Load() {
+		p.admissionMu.RUnlock()
 		return ErrWriterStopped
 	}
 
@@ -202,6 +217,7 @@ func (p *AsyncWriterPool) WritePacketSync(callID string, packet gopacket.Packet,
 	select {
 	case p.queueFor(callID) <- req:
 		p.stats.PacketsQueued.Add(1)
+		p.admissionMu.RUnlock()
 		// Wait for result
 		select {
 		case err := <-resultChan:
@@ -210,6 +226,7 @@ func (p *AsyncWriterPool) WritePacketSync(callID string, packet gopacket.Packet,
 			return ErrWriteTimeout
 		}
 	default:
+		p.admissionMu.RUnlock()
 		// Queue is full
 		p.stats.PacketsDropped.Add(1)
 		p.stats.QueueFullEvents.Add(1)
@@ -327,21 +344,9 @@ func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	var err error
 	switch req.PacketType {
 	case PacketTypeSIP:
-		if call.SIPWriter == nil {
-			return ErrWriterNotInitialized
-		}
-		// Lock the SIP writer mutex for thread-safe write
-		call.sipWriterMu.Lock()
-		err = call.SIPWriter.WritePacket(req.Packet.Metadata().CaptureInfo, req.Packet.Data())
-		call.sipWriterMu.Unlock()
+		err = call.writeSIP(req.Packet)
 	case PacketTypeRTP:
-		if call.RTPWriter == nil {
-			return ErrWriterNotInitialized
-		}
-		// Lock the RTP writer mutex for thread-safe write
-		call.rtpWriterMu.Lock()
-		err = call.RTPWriter.WritePacket(req.Packet.Metadata().CaptureInfo, req.Packet.Data())
-		call.rtpWriterMu.Unlock()
+		err = call.writeRTP(req.Packet)
 	default:
 		return ErrInvalidPacketType
 	}
@@ -386,25 +391,6 @@ func (p *AsyncWriterPool) GetStats() *AsyncWriterStats {
 // SetErrorHandler sets a custom error handler
 func (p *AsyncWriterPool) SetErrorHandler(handler func(callID string, err error)) {
 	p.onError = handler
-}
-
-// Custom errors for async writer
-var (
-	ErrWriterStopped        = &AsyncWriterError{"writer pool is stopped"}
-	ErrQueueFull            = &AsyncWriterError{"write queue is full"}
-	ErrWriteTimeout         = &AsyncWriterError{"write operation timed out"}
-	ErrCallNotFound         = &AsyncWriterError{"call not found"}
-	ErrInvalidPacketType    = &AsyncWriterError{"invalid packet type"}
-	ErrWriterNotInitialized = &AsyncWriterError{"PCAP writer not initialized"}
-)
-
-// AsyncWriterError represents errors from the async writer system
-type AsyncWriterError struct {
-	Message string
-}
-
-func (e *AsyncWriterError) Error() string {
-	return e.Message
 }
 
 // Global async writer pool instance

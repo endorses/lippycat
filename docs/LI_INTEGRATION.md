@@ -5,8 +5,11 @@ This guide covers the deployment and operation of lippycat's ETSI X1/X2/X3 lawfu
 ## X1 version compatibility
 
 lippycat declares ETSI TS 103 221-1 `v1.22.1`, matching the bundled
-`TS_103_221_01.xsd` schema. It accepts `v1.13.1` during migration and rejects
-other revisions with an explicit X1 request-syntax error.
+`TS_103_221_01.xsd` schema. It accepts the verified inclusive compatibility
+window from `v1.13.1` through `v1.22.1` (with or without the lowercase `v`
+prefix). Malformed revisions and revisions outside that window are rejected
+with an explicit X1 request-syntax error. This is a reviewed schema
+compatibility window, not a general semantic-version compatibility rule.
 
 The V1.23.1 gap review did not pass: the generated schema remains V1.22.1 and
 the implemented surface is destination create/modify/remove, task
@@ -41,6 +44,28 @@ XID. A lippycat process restart establishes new delivery connections and starts
 new sequence contexts at zero; operators must confirm that the MDF treats a new
 connection after a POI restart as a new sequence epoch because TS 103 221-2 does
 not define a sequence-reset signal.
+
+### X2/X3 application keepalive
+
+Application keepalive is disabled by default and is configured independently
+for X2 and X3. Enabling `--li-delivery-x2-keepalive` or
+`--li-delivery-x3-keepalive` requires the MDF to return a KeepaliveAck on the
+same TLS association with the identical sequence number before that
+interface's TIME_P2. A missing, malformed, or wrong-sequence acknowledgement
+does not refresh liveness; expiry disconnects and reconnects only that
+interface and reports a delivery fault.
+
+Inbound keepalive acknowledgement is a separate, disabled-by-default role.
+Enable it per interface with
+`--li-delivery-x2-ack-inbound-keepalive` or
+`--li-delivery-x3-ack-inbound-keepalive`. A valid request is then answered on
+the same association with its sequence echoed. This allows bidirectional
+keepalive only when the MDF profile has been verified to support it.
+
+Per-destination X2 and X3 statistics expose sent, acknowledged, timed-out,
+disconnected, reconnected, inbound, inbound-acknowledged, unexpected, and
+malformed control-PDU counters. Unexpected control traffic is counted without
+limit while its warning log is rate-limited.
 
 ## Overview
 
@@ -226,7 +251,7 @@ Requests use XML per ETSI TS 103 221-1 schema:
 
 | Code | Name | Description |
 |------|------|-------------|
-| 100 | GenericError | General error |
+| 100 | GenericError | General error; reactivation identity differs from retained task |
 | 101 | RequestSyntaxError | Invalid XML |
 | 300 | XIDAlreadyExists | Task XID exists |
 | 301 | XIDNotFound | Task XID not found |
@@ -235,6 +260,20 @@ Requests use XML per ETSI TS 103 221-1 schema:
 | 400 | DeliveryNotPossible | Cannot deliver to MDF |
 | 401 | TargetNotSupported | Unsupported target type |
 | 402 | DeliveryTypeNotSupported | Unsupported delivery type |
+
+A repeated `ActivateTask` for an equivalent active or pending task is an
+idempotent retry: it returns success without reinstalling filters or changing
+the activation generation. A new, authenticated `ActivateTask` may reactivate
+a retained deactivated task (tombstone) only when its protected interception
+identity is unchanged. The protected identity is the XID, delivery type, and
+canonical set of target type/value pairs; target order and exact duplicates do
+not matter. Destination IDs, mediation start/end times, and lifecycle options
+may be replaced, but the complete replacement must pass current validation.
+
+If a retained task's protected identity differs, activation fails closed with
+error 100 and the stable description `retained task's interception identity
+differs` (followed by the XID). It is deliberately not error 300. Suspended and
+failed tasks cannot be reactivated with `ActivateTask`.
 
 ## X2/X3 Protocol (Binary TLV)
 
@@ -326,6 +365,30 @@ delivered and are labelled consistently, distinguished by their stream identifie
 | Deactivated | Explicitly stopped |
 | Failed | Fatal error occurred |
 
+`GetTaskDetails` keeps the ETSI `provisioningStatus` enumeration unchanged:
+pending tasks use `awaitingProvisioning`, failed tasks use `failed`, and active,
+suspended, and deactivated tasks use `complete`. No vendor-specific task-status
+extension is emitted on X1.
+
+### Explicit tombstone reactivation
+
+Deactivation removes the task's enforcement filters but retains a tombstone for
+audit and retry safety. It never becomes enforcing through startup,
+reconciliation, or tombstone maintenance. Reactivation requires an explicit,
+authenticated `ActivateTask` with the same protected identity described under
+[X1 Error Codes](#x1-error-codes). A successful reactivation increments the
+activation generation, preserves the prior deactivated task in audit history,
+and installs only the replacement task's filters.
+
+Provision destinations before sending the reactivation. A missing destination
+or an incompatible task/destination delivery combination rejects the request
+without changing the tombstone or filters. After an uncertain response, query
+`GetTaskDetails`: retry the identical request only when the state is `pending`
+or `active`; if it remains `deactivated`, correct the validation error and send
+a new explicit activation. Treat error 100 with the retained-identity
+description as an authorization/identity mismatch requiring operator review,
+not as a cue to modify the target under the retained XID.
+
 ### Implicit Deactivation
 
 When `ImplicitDeactivationAllowed=true`:
@@ -415,7 +478,7 @@ Delivery uses:
 
 | Interface | Minimum TLS | Mutual TLS |
 |-----------|-------------|------------|
-| X1 Server | TLS 1.2 | Required |
+| X1 Server | TLS 1.3 | Required; `--li-x1-tls-ca` must trust the ADMF client CA |
 | X1 Client | TLS 1.2 | Required |
 | X2/X3 Delivery | TLS 1.2 | Required |
 

@@ -80,7 +80,7 @@ Hunters do not need LI support. They perform edge filtering using the same filte
 
 ### Enabling LI
 
-LI is enabled with the `--li-enabled` flag on the processor. At minimum, you need the X1 server certificates for ADMF communication and delivery certificates for MDF communication.
+LI is enabled with the `--li-enabled` flag on the processor or tap. The X1 listen address, server certificate, server key, and ADMF client CA are mandatory; incomplete X1 TLS configuration causes startup to fail. Delivery certificates are also needed for MDF communication.
 
 ```bash
 lc process --listen :55555 \
@@ -183,7 +183,7 @@ The certificates required on the processor side are:
 | Delivery Cert + Key | `--li-delivery-tls-cert`, `--li-delivery-tls-key` | Authenticate to MDF for X2/X3 delivery |
 | MDF CA | `--li-delivery-tls-ca` | Verify MDF server certificates |
 
-All certificates must use RSA 2048+ or ECDSA P-256+ keys with SHA-256 or stronger hashing. TLS 1.2 is the minimum supported version on all LI interfaces.
+All certificates must use RSA 2048+ or ECDSA P-256+ keys with SHA-256 or stronger hashing. The X1 server requires TLS 1.3 and a trusted ADMF client CA; it will not start if its listen address, certificate, key, or client CA is missing. The outbound X1 and X2/X3 interfaces require TLS 1.2 or newer.
 
 For general TLS concepts and certificate generation, refer to [Chapter 13: Security](security.md). The key difference for LI is that you maintain separate CA chains for the ADMF, your organization's LI certificates, and the MDF -- these are typically operated by different entities.
 
@@ -266,6 +266,11 @@ Tasks progress through the following states:
 | Deactivated | Explicitly stopped via `DeactivateTask` or implicit expiration |
 | Failed | A fatal error prevented continued interception |
 
+`GetTaskDetails` reports the schema-defined provisioning value
+`awaitingProvisioning` for pending tasks, `failed` for failed tasks, and
+`complete` for active, suspended, and deactivated tasks. No vendor-specific
+task-status extension is emitted on X1.
+
 When `implicitDeactivationAllowed` is set to `true`, the processor will automatically deactivate the task when its `EndTime` is reached and notify the ADMF. When set to `false`, only an explicit `DeactivateTask` request or a fatal error can end the task.
 
 Tasks can be modified while active. The following fields are modifiable via `ModifyTask`:
@@ -277,6 +282,29 @@ Tasks can be modified while active. The following fields are modifiable via `Mod
 - Implicit deactivation setting
 
 The XID and StartTime cannot be modified after activation.
+
+#### Idempotent retry and explicit reactivation
+
+Repeating an equivalent `ActivateTask` while a task is active or pending is an
+idempotent retry. It does not reinstall filters, advance the activation
+generation, or change the scheduled start boundary.
+
+A deactivated task is retained temporarily as a tombstone and cannot resume
+automatically. An explicit, authenticated `ActivateTask` can reactivate it only
+when the protected interception identity is unchanged: the XID, delivery type,
+and canonical set of target type/value pairs must match. Target order and exact
+duplicates are insignificant. The new request may replace destination IDs,
+mediation start and end times, and lifecycle options, subject to normal current
+validation. Suspended and failed tasks remain ineligible for this operation.
+
+Provision every replacement destination before reactivation and verify that
+each supports the requested delivery type. On success, the processor preserves
+the old deactivation in audit history, advances the activation generation, and
+installs only the new filters. On validation or installation failure, the
+tombstone remains non-enforcing and unchanged. If the response is lost, use
+`GetTaskDetails` before retrying: an identical active/pending request is safe to
+repeat; a `deactivated` result requires another explicit activation after the
+underlying error is corrected.
 
 ### Delivery Types
 
@@ -383,7 +411,7 @@ When the processor cannot fulfil an X1 request, it returns a structured error:
 
 | Code | Name | Description |
 |------|------|-------------|
-| 100 | GenericError | General processing error |
+| 100 | GenericError | General processing error; retained reactivation identity differs |
 | 101 | RequestSyntaxError | Invalid XML in request |
 | 300 | XIDAlreadyExists | A task with this XID is already active |
 | 301 | XIDNotFound | No task found for the given XID |
@@ -392,6 +420,13 @@ When the processor cannot fulfil an X1 request, it returns a structured error:
 | 400 | DeliveryNotPossible | Cannot reach MDF for delivery |
 | 401 | TargetNotSupported | Target identifier type not supported |
 | 402 | DeliveryTypeNotSupported | Requested delivery type not available |
+
+When reactivation changes a protected target or delivery type, code 100 has the
+stable description `retained task's interception identity differs` followed by
+the XID. This is intentionally distinct from code 300: code 300 continues to
+mean a conflicting definition for an active or pending XID. Operators should
+investigate a code-100 identity mismatch rather than changing the interception
+target under the retained XID.
 
 ## X2/X3 Delivery
 

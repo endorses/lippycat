@@ -56,14 +56,14 @@ func WriteSIP(callID string, packet gopacket.Packet) {
 }
 
 // writeSIPSync performs synchronous SIP packet writing (legacy method)
-func writeSIPSync(callID string, packet gopacket.Packet) {
+func writeSIPSync(callID string, packet gopacket.Packet) error {
 	tracker := getTracker()
 
 	// Check if shutting down
 	if tracker.shuttingDown.Load() == 1 {
 		logger.Debug("Skipping SIP write during shutdown",
 			"call_id", SanitizeCallIDForLogging(callID))
-		return
+		return ErrShuttingDown
 	}
 
 	// Track active write
@@ -74,24 +74,21 @@ func writeSIPSync(callID string, packet gopacket.Packet) {
 	if tracker.shuttingDown.Load() == 1 {
 		logger.Debug("Skipping SIP write during shutdown",
 			"call_id", SanitizeCallIDForLogging(callID))
-		return
+		return ErrShuttingDown
 	}
 
 	tracker.mu.Lock()
 	call, ok := tracker.callMap[callID]
 	tracker.mu.Unlock()
 
-	if ok && call != nil && call.SIPWriter != nil {
-		// Lock the SIP writer mutex for thread-safe write
-		call.sipWriterMu.Lock()
-		err := call.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
-		call.sipWriterMu.Unlock()
+	if ok && call != nil {
+		err := call.writeSIP(packet)
 
 		if err != nil {
 			logger.Error("Error writing SIP packet for call",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
-			return
+			return err
 		}
 
 		// Update last updated time (with minimal locking)
@@ -100,7 +97,9 @@ func writeSIPSync(callID string, packet gopacket.Packet) {
 			call.LastUpdated = time.Now()
 		}
 		tracker.mu.Unlock()
+		return nil
 	}
+	return ErrCallNotFound
 }
 
 func WriteRTP(callID string, packet gopacket.Packet) {
@@ -122,14 +121,14 @@ func WriteRTP(callID string, packet gopacket.Packet) {
 }
 
 // writeRTPSync performs synchronous RTP packet writing (legacy method)
-func writeRTPSync(callID string, packet gopacket.Packet) {
+func writeRTPSync(callID string, packet gopacket.Packet) error {
 	tracker := getTracker()
 
 	// Check if shutting down
 	if tracker.shuttingDown.Load() == 1 {
 		logger.Debug("Skipping RTP write during shutdown",
 			"call_id", SanitizeCallIDForLogging(callID))
-		return
+		return ErrShuttingDown
 	}
 
 	// Track active write
@@ -140,24 +139,21 @@ func writeRTPSync(callID string, packet gopacket.Packet) {
 	if tracker.shuttingDown.Load() == 1 {
 		logger.Debug("Skipping RTP write during shutdown",
 			"call_id", SanitizeCallIDForLogging(callID))
-		return
+		return ErrShuttingDown
 	}
 
 	tracker.mu.Lock()
 	call, ok := tracker.callMap[callID]
 	tracker.mu.Unlock()
 
-	if ok && call != nil && call.RTPWriter != nil {
-		// Lock the RTP writer mutex for thread-safe write
-		call.rtpWriterMu.Lock()
-		err := call.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
-		call.rtpWriterMu.Unlock()
+	if ok && call != nil {
+		err := call.writeRTP(packet)
 
 		if err != nil {
 			logger.Error("Error writing RTP packet for call",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
-			return
+			return err
 		}
 
 		// Update last updated time (with minimal locking)
@@ -166,7 +162,9 @@ func writeRTPSync(callID string, packet gopacket.Packet) {
 			call.LastUpdated = time.Now()
 		}
 		tracker.mu.Unlock()
+		return nil
 	}
+	return ErrCallNotFound
 }
 
 // WriteSIPSync forces synchronous SIP packet writing (for critical operations)
@@ -177,8 +175,7 @@ func WriteSIPSync(callID string, packet gopacket.Packet) error {
 	}
 
 	// Fallback to legacy synchronous method
-	writeSIPSync(callID, packet)
-	return nil
+	return writeSIPSync(callID, packet)
 }
 
 // WriteRTPSync forces synchronous RTP packet writing (for critical operations)
@@ -189,8 +186,7 @@ func WriteRTPSync(callID string, packet gopacket.Packet) error {
 	}
 
 	// Fallback to legacy synchronous method
-	writeRTPSync(callID, packet)
-	return nil
+	return writeRTPSync(callID, packet)
 }
 
 // GetWriterStats returns statistics from the async writer pool

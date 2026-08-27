@@ -65,7 +65,7 @@ guidance.
 
 - `-I, --id` - Unique processor identifier (default: hostname)
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
-- `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100)
+- `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100, 0 = unlimited)
 - `--max-subscribers` - Maximum TUI/monitoring subscribers (default: 100, 0 = unlimited)
 - `-s, --stats` - Display statistics (default: true)
 
@@ -356,6 +356,17 @@ Hunters automatically receive filter updates via the filter subscription mechani
 - `--insecure` - Disable TLS encryption (must be explicitly set, NOT RECOMMENDED)
 
 ## Security
+
+### Lawful Interception X1 mTLS
+
+LI builds host the X1 administration endpoint when `--li-enabled` is set. X1
+always requires mutual TLS: configure `--li-x1-listen`, `--li-x1-tls-cert`,
+`--li-x1-tls-key`, and `--li-x1-tls-ca`. The CA file is required and is used to
+verify ADMF client certificates. The processor fails startup if any of these X1
+settings is missing or invalid.
+
+See [Lawful Interception](../../docs/manual/src/part5-advanced/lawful-interception.md)
+for the complete deployment configuration.
 
 ### Production Mode Enforcement
 

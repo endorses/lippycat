@@ -9,7 +9,6 @@ package processor
 import (
 	"errors"
 	"fmt"
-	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,7 +176,9 @@ func (p *Processor) initLIManager() {
 		liReorderBuffers.Range(func(key, value any) bool {
 			keyString, ok := key.(string)
 			if ok && strings.HasPrefix(keyString, prefix) {
-				value.(*delivery.ReorderBuffer).Stop()
+				// Expiry/deactivation is an enforcement boundary. Buffered X3
+				// packets must be discarded, not flushed after the task ended.
+				value.(*delivery.ReorderBuffer).Discard()
 				liReorderBuffers.Delete(key)
 			}
 			return true
@@ -218,6 +219,8 @@ func (p *Processor) initLIManager() {
 		destConfig.X3KeepaliveEnabled = p.config.LIDeliveryX3KeepaliveEnabled
 		destConfig.X3KeepaliveTimeP1 = p.config.LIDeliveryX3KeepaliveTimeP1
 		destConfig.X3KeepaliveTimeP2 = p.config.LIDeliveryX3KeepaliveTimeP2
+		destConfig.X2AcknowledgeInboundKeepalive = p.config.LIDeliveryX2AcknowledgeInboundKeepalive
+		destConfig.X3AcknowledgeInboundKeepalive = p.config.LIDeliveryX3AcknowledgeInboundKeepalive
 		destConfig.DeliveryFault = func(did uuid.UUID, err error) { p.liManager.ReportDeliveryError(did, 1, err.Error()) }
 		if len(p.config.LIDeliveryTLSPinnedCert) > 0 {
 			destConfig.TLSPinnedCerts = p.config.LIDeliveryTLSPinnedCert
@@ -389,33 +392,6 @@ func (p *Processor) initLIManager() {
 			}
 		}
 
-		// IP/CIDR targets carry matched ordinary traffic as raw X3 CC. They do
-		// not generate synthetic X2 IRI.
-		if deliverX3 && (pkt.VoIPData == nil || !pkt.VoIPData.IsRTP) {
-			matchedTarget, ok := matchedRawIPTarget(task.Targets, pkt)
-			if ok {
-				pdu, err := liX3Encoder.EncodeRawIPCC(pkt, task.XID, matchedTarget)
-				if err != nil {
-					liX3Errors.Add(1)
-					liNoEncoder.Add(1)
-					logger.Warn("LI raw X3 encode failed", "xid", task.XID, "target", matchedTarget, "error", err)
-					return
-				}
-				attrBuilder := x2x3.NewAttributeBuilder()
-				pdu.AddAttribute(attrBuilder.MatchedTargetIdentifier(matchedTarget))
-				if data, marshalErr := pdu.MarshalBinary(); marshalErr != nil {
-					liX3Errors.Add(1)
-					logger.Warn("raw X3 PDU marshal error", "xid", task.XID, "error", marshalErr)
-				} else {
-					liX3Encoded.Add(1)
-					if liDeliveryClient != nil && len(task.DestinationIDs) > 0 {
-						if sendErr := liDeliveryClient.SendX3(task.XID, task.DestinationIDs, data); sendErr != nil {
-							logger.Warn("raw X3 delivery enqueue failed", "xid", task.XID, "error", sendErr)
-						}
-					}
-				}
-			}
-		}
 	})
 
 	logger.Info("LI Manager initialized",
@@ -423,6 +399,13 @@ func (p *Processor) initLIManager() {
 		"admf_endpoint", p.config.LIADMFEndpoint,
 		"delivery_enabled", liDeliveryClient != nil,
 	)
+}
+
+func (p *Processor) validateLIConfiguration() error {
+	if p.liManager == nil {
+		return nil
+	}
+	return p.liManager.ValidateConfiguration()
 }
 
 // startLIManager starts the LI Manager and delivery client.
@@ -609,24 +592,4 @@ func (p *Processor) getLIEncodingStats() LIEncodingStats {
 		DirectionResolvedMedia: dirStats.ResolvedFromMedia,
 		DirectionUnknownRTP:    dirStats.UnknownRTP,
 	}
-}
-
-func matchedRawIPTarget(targets []li.TargetIdentity, pkt *types.PacketDisplay) (string, bool) {
-	src, srcErr := netip.ParseAddr(pkt.SrcIP)
-	dst, dstErr := netip.ParseAddr(pkt.DstIP)
-	for _, target := range targets {
-		switch target.Type {
-		case li.TargetTypeIPv4Address, li.TargetTypeIPv6Address:
-			a, err := netip.ParseAddr(target.Value)
-			if err == nil && ((srcErr == nil && src == a) || (dstErr == nil && dst == a)) {
-				return target.Value, true
-			}
-		case li.TargetTypeIPv4CIDR, li.TargetTypeIPv6CIDR:
-			prefix, err := netip.ParsePrefix(target.Value)
-			if err == nil && ((srcErr == nil && prefix.Contains(src)) || (dstErr == nil && prefix.Contains(dst))) {
-				return target.Value, true
-			}
-		}
-	}
-	return "", false
 }

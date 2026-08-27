@@ -2608,6 +2608,103 @@ func TestSubscribeFilters(t *testing.T) {
 	})
 }
 
+func TestSubscribeFiltersDeliversScopeChangesWithoutReconnect(t *testing.T) {
+	processor, err := New(Config{
+		ProcessorID: "test-processor",
+		ListenAddr:  "localhost:55555",
+		MaxHunters:  10,
+	})
+	require.NoError(t, err)
+	defer processor.Shutdown()
+
+	// Seed a global filter so each subscription proves it has completed channel
+	// registration before scope updates begin.
+	_, err = processor.UpdateFilter(context.Background(), &management.Filter{
+		Id: "subscription-ready", Type: management.FilterType_FILTER_BPF,
+		Pattern: "udp", Enabled: true,
+	})
+	require.NoError(t, err)
+
+	type subscription struct {
+		stream *mockSubscribeFiltersServer
+		cancel context.CancelFunc
+		done   chan error
+	}
+	subscriptions := make(map[string]subscription)
+	for _, hunterID := range []string{"hunter-a", "hunter-b", "hunter-c"} {
+		ctx, cancel := context.WithCancel(context.Background())
+		stream := &mockSubscribeFiltersServer{ctx: ctx}
+		done := make(chan error, 1)
+		go func(id string) {
+			done <- processor.SubscribeFilters(&management.FilterRequest{HunterId: id}, stream)
+		}(hunterID)
+		subscriptions[hunterID] = subscription{stream: stream, cancel: cancel, done: done}
+		require.Eventually(t, func() bool {
+			updates := stream.getUpdates()
+			return len(updates) == 1 && updates[0].Filter.Id == "subscription-ready"
+		}, time.Second, time.Millisecond, "subscription for %s did not become ready", hunterID)
+	}
+	defer func() {
+		for _, sub := range subscriptions {
+			sub.cancel()
+			require.NoError(t, <-sub.done)
+		}
+	}()
+
+	nextUpdate := func(t *testing.T, hunterID string, previousCount int) *management.FilterUpdate {
+		t.Helper()
+		stream := subscriptions[hunterID].stream
+		require.Eventually(t, func() bool {
+			return len(stream.getUpdates()) > previousCount
+		}, time.Second, time.Millisecond, "hunter %s did not receive filter update", hunterID)
+		return stream.getUpdates()[previousCount]
+	}
+	assertUpdate := func(t *testing.T, hunterID string, index int, updateType management.FilterUpdateType) {
+		t.Helper()
+		update := nextUpdate(t, hunterID, index)
+		require.Equal(t, "scope-filter", update.Filter.Id)
+		require.Equal(t, updateType, update.UpdateType)
+	}
+
+	// Initially target A.
+	_, err = processor.UpdateFilter(context.Background(), &management.Filter{
+		Id: "scope-filter", Type: management.FilterType_FILTER_BPF,
+		Pattern: "tcp", Enabled: true, TargetHunters: []string{"hunter-a"},
+	})
+	require.NoError(t, err)
+	assertUpdate(t, "hunter-a", 1, management.FilterUpdateType_UPDATE_ADD)
+
+	// Retarget A -> B. B has never held the ID, so its MODIFY exercises the
+	// hunter-side modify-as-add path while A is explicitly deleted.
+	_, err = processor.UpdateFilter(context.Background(), &management.Filter{
+		Id: "scope-filter", Type: management.FilterType_FILTER_BPF,
+		Pattern: "tcp", Enabled: true, TargetHunters: []string{"hunter-b"},
+	})
+	require.NoError(t, err)
+	assertUpdate(t, "hunter-a", 2, management.FilterUpdateType_UPDATE_DELETE)
+	assertUpdate(t, "hunter-b", 1, management.FilterUpdateType_UPDATE_MODIFY)
+
+	// Broaden B -> all connected hunters.
+	_, err = processor.UpdateFilter(context.Background(), &management.Filter{
+		Id: "scope-filter", Type: management.FilterType_FILTER_BPF,
+		Pattern: "tcp", Enabled: true,
+	})
+	require.NoError(t, err)
+	assertUpdate(t, "hunter-a", 3, management.FilterUpdateType_UPDATE_MODIFY)
+	assertUpdate(t, "hunter-b", 2, management.FilterUpdateType_UPDATE_MODIFY)
+	assertUpdate(t, "hunter-c", 1, management.FilterUpdateType_UPDATE_MODIFY)
+
+	// Narrow all -> C; excluded hunters delete while C receives the latest value.
+	_, err = processor.UpdateFilter(context.Background(), &management.Filter{
+		Id: "scope-filter", Type: management.FilterType_FILTER_BPF,
+		Pattern: "tcp port 443", Enabled: true, TargetHunters: []string{"hunter-c"},
+	})
+	require.NoError(t, err)
+	assertUpdate(t, "hunter-a", 4, management.FilterUpdateType_UPDATE_DELETE)
+	assertUpdate(t, "hunter-b", 3, management.FilterUpdateType_UPDATE_DELETE)
+	assertUpdate(t, "hunter-c", 2, management.FilterUpdateType_UPDATE_MODIFY)
+}
+
 // TestGetTopology tests the GetTopology gRPC handler
 func TestGetTopology(t *testing.T) {
 	t.Run("single processor no upstream", func(t *testing.T) {

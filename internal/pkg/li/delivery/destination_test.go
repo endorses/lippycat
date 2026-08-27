@@ -153,12 +153,13 @@ func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client, peer := tlsPipe(t)
-			defer peer.Close()
 			did := uuid.New()
 			m, state := testKeepaliveManager(did)
 			m.registerConnection(state, client, PDUTypeX2)
 			m.watchConnection(did, client)
+			peerDone := make(chan struct{})
 			go func() {
+				defer close(peerDone)
 				pdu, err := x2x3.ReadPDU(peer)
 				if err == nil {
 					seq, seqErr := pdu.KeepaliveSequence()
@@ -171,6 +172,10 @@ func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
 				stats, err := m.Stats(did)
 				return err == nil && stats.X2Keepalive.Acknowledged >= tc.wantACK && stats.X2Keepalive.Timeouts >= tc.wantTO && stats.X2Keepalive.Unexpected >= tc.wantUnexp && stats.X2Keepalive.Malformed >= tc.wantBad
 			}, 2*time.Second, 20*time.Millisecond)
+			// Close the peer first so the manager's TLS close_notify cannot block
+			// forever on net.Pipe after the peer responder has exited.
+			<-peerDone
+			require.NoError(t, peer.Close())
 			m.Stop()
 		})
 	}
@@ -178,13 +183,14 @@ func TestSocketBackedKeepalivePeerBehaviors(t *testing.T) {
 
 func TestSocketBackedBidirectionalKeepalive(t *testing.T) {
 	client, peer := tlsPipe(t)
-	defer peer.Close()
 	did := uuid.New()
 	m, state := testKeepaliveManager(did)
 	m.config.X2AcknowledgeInboundKeepalive = true
 	m.registerConnection(state, client, PDUTypeX2)
 	m.watchConnection(did, client)
+	peerDone := make(chan struct{})
 	go func() {
+		defer close(peerDone)
 		writeTestPDU(t, peer, x2x3.NewKeepalivePDUWithSequence(91))
 		for i := 0; i < 2; i++ {
 			pdu, err := x2x3.ReadPDU(peer)
@@ -201,6 +207,8 @@ func TestSocketBackedBidirectionalKeepalive(t *testing.T) {
 		stats, err := m.Stats(did)
 		return err == nil && stats.X2Keepalive.Acknowledged >= 1 && stats.X2Keepalive.InboundACKed >= 1
 	}, 2*time.Second, 20*time.Millisecond)
+	<-peerDone
+	require.NoError(t, peer.Close())
 	m.Stop()
 }
 

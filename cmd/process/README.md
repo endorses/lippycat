@@ -40,7 +40,7 @@ lc process --listen :55555 --write-file /var/capture/packets.pcap
 
 - `-I, --id` - Unique processor identifier (default: hostname)
 - `-P, --processor` - Upstream processor address for hierarchical mode (host:port)
-- `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100)
+- `-m, --max-hunters` - Maximum concurrent hunter connections (default: 100, 0 = unlimited)
 - `--max-subscribers` - Maximum TUI/monitoring subscribers (default: 100, 0 = unlimited)
 - `-s, --stats` - Display statistics (default: true)
 

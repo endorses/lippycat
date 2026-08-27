@@ -389,6 +389,13 @@ func (p *Processor) initLIManager() {
 	)
 }
 
+func (p *Processor) validateLIConfiguration() error {
+	if p.liManager == nil {
+		return nil
+	}
+	return p.liManager.ValidateConfiguration()
+}
+
 // startLIManager starts the LI Manager and delivery client.
 // Called during processor startup.
 func (p *Processor) startLIManager() error {

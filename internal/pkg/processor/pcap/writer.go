@@ -23,15 +23,17 @@ type Writer struct {
 
 	writeQueue chan []*data.CapturedPacket
 	writerWg   sync.WaitGroup
+	stateMu    sync.Mutex
+	started    bool
+	stopped    bool
+	fileClosed bool
+	stopDone   chan struct{}
 
 	writeErrors     atomic.Uint64 // Total write errors
 	consecErrors    atomic.Uint64 // Consecutive write errors
 	lastErrorLogged atomic.Int64  // Timestamp of last error log
 
 	headerWritten bool // Whether the PCAP file header has been written
-
-	ctx    context.Context
-	cancel context.CancelFunc
 }
 
 // NewWriter creates a new PCAP writer
@@ -53,6 +55,7 @@ func NewWriter(filePath string) (*Writer, error) {
 		file:       file,
 		writer:     pcapWriter,
 		writeQueue: make(chan []*data.CapturedPacket, constants.PCAPWriteQueueBuffer),
+		stopDone:   make(chan struct{}),
 	}
 
 	logger.Info("Async PCAP writer initialized", "file", filePath)
@@ -60,40 +63,60 @@ func NewWriter(filePath string) (*Writer, error) {
 }
 
 // Start begins the async write worker
-func (w *Writer) Start(ctx context.Context) {
-	w.ctx, w.cancel = context.WithCancel(ctx)
+func (w *Writer) Start(_ context.Context) {
+	w.stateMu.Lock()
+	if w.started || w.stopped {
+		w.stateMu.Unlock()
+		return
+	}
+	w.started = true
 
 	// Start single writer goroutine
 	// Note: PCAP writes are inherently serial (file format requires sequential writes)
 	// Multiple workers would just compete for mutex with no benefit
 	w.writerWg.Add(1)
 	go w.writeWorker()
+	w.stateMu.Unlock()
 }
 
 // Stop stops the writer and closes the file
 func (w *Writer) Stop() {
-	// Close queue to signal worker
-	if w.writeQueue != nil {
-		close(w.writeQueue)
+	w.stateMu.Lock()
+	if w.stopped {
+		w.stateMu.Unlock()
+		<-w.stopDone
+		return
 	}
+	w.stopped = true
+	close(w.writeQueue)
+	w.stateMu.Unlock()
 
 	// Wait for worker to finish
 	logger.Info("Waiting for PCAP writer to finish")
 	w.writerWg.Wait()
 
 	// Close file
-	if w.file != nil {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if w.file != nil && !w.fileClosed {
 		if err := w.file.Close(); err != nil {
 			logger.Error("Failed to close PCAP file during shutdown", "error", err)
 		} else {
 			logger.Info("PCAP file closed")
 		}
+		w.fileClosed = true
 	}
+	close(w.stopDone)
 }
 
 // QueuePackets queues packets for async writing
 // Returns false if queue is full (non-blocking)
 func (w *Writer) QueuePackets(packets []*data.CapturedPacket) bool {
+	w.stateMu.Lock()
+	defer w.stateMu.Unlock()
+	if !w.started || w.stopped {
+		return false
+	}
 	select {
 	case w.writeQueue <- packets:
 		return true
@@ -124,22 +147,11 @@ func (w *Writer) writeWorker() {
 
 	logger.Debug("PCAP write worker started")
 
-	for {
-		select {
-		case <-w.ctx.Done():
-			logger.Debug("PCAP write worker stopping")
-			return
-
-		case packets, ok := <-w.writeQueue:
-			if !ok {
-				logger.Debug("PCAP write queue closed")
-				return
-			}
-
-			// Write batch to PCAP file (single writer - no mutex needed)
-			w.writePacketBatch(packets)
-		}
+	for packets := range w.writeQueue {
+		// Write batch to PCAP file (single writer - no mutex needed)
+		w.writePacketBatch(packets)
 	}
+	logger.Debug("PCAP write queue drained and closed")
 }
 
 // writePacketBatch writes a batch of packets to PCAP file (called by single writer)

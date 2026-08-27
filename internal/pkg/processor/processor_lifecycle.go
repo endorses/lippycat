@@ -17,13 +17,13 @@
 //  7. Virtual interface manager (packet injection)
 //  8. gRPC server with TLS and keepalive configuration
 //
-// The Shutdown() method ensures graceful cleanup in this order:
-//  1. Upstream connection
-//  2. Hunter monitor
-//  3. Virtual interface
-//  4. All PCAP writers (unified, per-call, auto-rotating)
-//  5. gRPC server (with 5-second grace period)
-//  6. TUI subscribers
+// The Shutdown() dependency order is:
+//  1. stop ingress (cancel local PacketSource and reject new gRPC streams)
+//  2. drain/force-stop gRPC handlers and wait for local producers
+//  3. stop packet consumers (LI, upstream, virtual interfaces, subscribers)
+//  4. drain and close unified, auto-rotate, and per-call PCAP writers
+//
+// No QueuePackets producer may remain when the unified writer is stopped.
 package processor
 
 import (
@@ -49,6 +49,9 @@ import (
 
 // Start begins processor operation
 func (p *Processor) Start(ctx context.Context) error {
+	if err := p.validateLIConfiguration(); err != nil {
+		return fmt.Errorf("invalid LI configuration: %w", err)
+	}
 	p.ctx, p.cancel = context.WithCancel(ctx)
 	defer p.cancel()
 
@@ -285,6 +288,21 @@ func (p *Processor) Shutdown() error {
 			p.cancel()
 		}
 
+		// Stop accepting streams and let handlers already inside processBatch
+		// finish before any packet consumer is closed. A misbehaving client must
+		// not make shutdown unbounded.
+		if p.grpcServer != nil {
+			timeout := p.config.GracefulShutdownTimeout
+			if timeout <= 0 {
+				timeout = 5 * time.Second
+			}
+			gracefulStopWithTimeout(p.grpcServer, timeout)
+		}
+
+		// Includes the gRPC Serve goroutine and local source/consumer goroutines.
+		// Once this returns there is no producer that can call processBatch.
+		p.wg.Wait()
+
 		// Stop LI Manager (no-op if !li build)
 		p.stopLIManager()
 
@@ -359,17 +377,33 @@ func (p *Processor) Shutdown() error {
 			p.downstreamManager.Shutdown(5 * time.Second)
 		}
 
-		// Graceful gRPC shutdown
-		if p.grpcServer != nil {
-			p.grpcServer.GracefulStop()
-		}
-
-		// Wait for all goroutines to complete
-		p.wg.Wait()
-
 		logger.Info("Processor shutdown complete")
 	})
 	return nil
+}
+
+type grpcStopper interface {
+	GracefulStop()
+	Stop()
+}
+
+func gracefulStopWithTimeout(server grpcStopper, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		server.GracefulStop()
+		close(done)
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+		logger.Warn("Graceful gRPC shutdown timed out; forcing stop", "timeout", timeout)
+		server.Stop()
+		<-done
+	}
 }
 
 // ListenAddr returns the actual listening address of the processor.

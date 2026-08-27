@@ -27,6 +27,33 @@ type Config struct {
 	TLSKeyFile    string // Client key file
 	ProcessorID   string // This processor's ID (for registration)
 	ListenAddress string // This processor's listen address (for upstream to query back)
+	// OutboundQueueSize bounds batches waiting for the upstream connection. When
+	// full, Forward drops the new batch; because forwarded packet accounting only
+	// happens after Send succeeds, the processor flow controller observes the
+	// resulting backlog and applies pressure to hunters.
+	OutboundQueueSize int
+}
+
+const defaultOutboundQueueSize = 256
+
+type upstreamStream interface {
+	Send(*data.PacketBatch) error
+	Recv() (*data.StreamControl, error)
+	CloseSend() error
+}
+
+// connection owns all outbound operations for exactly one stream generation.
+// In particular, only sender calls Send and CloseSend.
+type connection struct {
+	stream upstreamStream
+	queue  chan *data.PacketBatch
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	accepting      atomic.Bool
+	inFlight       atomic.Int64
+	disconnectOnce sync.Once
+	wg             sync.WaitGroup
 }
 
 // Manager handles upstream processor connection and forwarding
@@ -37,7 +64,7 @@ type Manager struct {
 	conn       *grpc.ClientConn
 	dataClient data.DataServiceClient
 	mgmtClient management.ManagementServiceClient
-	stream     data.DataService_StreamPacketsClient
+	generation *connection
 	mu         sync.Mutex
 
 	// Connection pooling
@@ -53,7 +80,7 @@ type Manager struct {
 	reconnecting         bool
 	reconnectMu          sync.Mutex
 	reconnectAttempts    int
-	consecutiveFailures  atomic.Int32
+	droppedBatches       atomic.Uint64
 	maxReconnectAttempts int // 0 = unlimited
 
 	// Context for goroutines
@@ -64,6 +91,9 @@ type Manager struct {
 
 // NewManager creates a new upstream connection manager
 func NewManager(config Config, packetsForwarded *atomic.Uint64) *Manager {
+	if config.OutboundQueueSize <= 0 {
+		config.OutboundQueueSize = defaultOutboundQueueSize
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		config:           config,
@@ -112,8 +142,6 @@ func (m *Manager) connectionManager() {
 			m.reconnecting = false
 			m.reconnectAttempts = 0
 			m.reconnectMu.Unlock()
-			m.consecutiveFailures.Store(0)
-
 			// Monitor for disconnection
 			m.monitorConnection()
 
@@ -223,18 +251,28 @@ func (m *Manager) connectAndRegister() error {
 	}
 
 	// Create streaming connection
-	stream, err := m.dataClient.StreamPackets(m.ctx)
+	generationCtx, generationCancel := context.WithCancel(m.ctx)
+	stream, err := m.dataClient.StreamPackets(generationCtx)
 	if err != nil {
+		generationCancel()
 		grpcpool.Release(m.connPool, m.config.Address)
 		return fmt.Errorf("failed to create upstream stream: %w", err)
 	}
 
+	generation := &connection{
+		stream: stream,
+		queue:  make(chan *data.PacketBatch, m.config.OutboundQueueSize),
+		ctx:    generationCtx,
+		cancel: generationCancel,
+	}
+	generation.accepting.Store(true)
 	m.mu.Lock()
-	m.stream = stream
+	m.generation = generation
 	m.mu.Unlock()
 
-	// Start goroutine to receive upstream acks (connection-scoped)
-	go m.receiveAcks()
+	generation.wg.Add(2)
+	go m.sendBatches(generation)
+	go m.receiveAcks(generation)
 
 	return nil
 }
@@ -294,13 +332,14 @@ func (m *Manager) MarkDisconnected() {
 // cleanup closes current connection resources (called before reconnect or shutdown)
 func (m *Manager) cleanup() {
 	m.mu.Lock()
-	if m.stream != nil {
-		if err := m.stream.CloseSend(); err != nil {
-			logger.Error("Failed to close gRPC stream during cleanup", "error", err)
-		}
-		m.stream = nil
-	}
+	generation := m.generation
+	m.generation = nil
 	m.mu.Unlock()
+	if generation != nil {
+		generation.accepting.Store(false)
+		generation.cancel()
+		generation.wg.Wait()
+	}
 
 	if m.conn != nil {
 		// Release connection back to pool
@@ -311,83 +350,121 @@ func (m *Manager) cleanup() {
 
 // Forward forwards packet batch to upstream processor
 func (m *Manager) Forward(batch *data.PacketBatch) {
+	if batch == nil {
+		return
+	}
 	m.mu.Lock()
-	stream := m.stream
+	generation := m.generation
 	m.mu.Unlock()
 
-	if stream == nil {
+	if generation == nil || !generation.accepting.Load() {
 		logger.Debug("Upstream stream not available, dropping batch")
 		return
 	}
 
-	// Forward batch (keeping original hunter ID for traceability)
-	if err := stream.Send(batch); err != nil {
-		m.recordSendFailure()
-		logger.Error("Failed to forward batch to upstream", "error", err)
-		return
+	select {
+	case generation.queue <- batch:
+	case <-generation.ctx.Done():
+	case <-m.ctx.Done():
+	default:
+		dropped := m.droppedBatches.Add(1)
+		logger.Warn("Upstream outbound queue full, dropping batch",
+			"queue_capacity", cap(generation.queue), "dropped_batches", dropped,
+			"packets", len(batch.Packets))
 	}
-
-	// Reset consecutive failures on successful send
-	m.consecutiveFailures.Store(0)
-
-	// Update forwarded stats (atomic increment)
-	if m.packetsForwarded != nil {
-		m.packetsForwarded.Add(uint64(len(batch.Packets)))
-	}
-
-	logger.Debug("Forwarded batch to upstream",
-		"hunter_id", batch.HunterId,
-		"sequence", batch.Sequence,
-		"packets", len(batch.Packets))
 }
 
-// recordSendFailure records a send failure and triggers reconnection if threshold exceeded
-func (m *Manager) recordSendFailure() {
-	failures := m.consecutiveFailures.Add(1)
-	if failures >= constants.MaxConsecutiveSendFailures {
-		logger.Warn("Too many consecutive upstream send failures, triggering reconnection",
-			"consecutive_failures", failures)
-		m.MarkDisconnected()
-		m.consecutiveFailures.Store(0)
+// QueueDepth returns the current connection generation's outstanding batches.
+func (m *Manager) QueueDepth() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation == nil {
+		return 0
 	}
+	return len(m.generation.queue) + int(m.generation.inFlight.Load())
+}
+
+// QueueCapacity returns the bounded upstream queue capacity.
+func (m *Manager) QueueCapacity() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation != nil {
+		return cap(m.generation.queue)
+	}
+	return m.config.OutboundQueueSize
+}
+
+func (m *Manager) sendBatches(generation *connection) {
+	defer generation.wg.Done()
+	defer func() {
+		generation.accepting.Store(false)
+		if err := generation.stream.CloseSend(); err != nil {
+			logger.Error("Failed to close gRPC stream during cleanup", "error", err)
+		}
+	}()
+
+	for {
+		select {
+		case <-generation.ctx.Done():
+			// The queue is bounded. Discarding it on connection loss prevents an
+			// old generation from forwarding into its successor.
+			return
+		case batch := <-generation.queue:
+			generation.inFlight.Add(1)
+			if err := generation.stream.Send(batch); err != nil {
+				generation.inFlight.Add(-1)
+				logger.Error("Failed to forward batch to upstream", "error", err)
+				m.disconnectGeneration(generation)
+				return
+			}
+			generation.inFlight.Add(-1)
+			if m.packetsForwarded != nil {
+				m.packetsForwarded.Add(uint64(len(batch.Packets)))
+			}
+			logger.Debug("Forwarded batch to upstream", "hunter_id", batch.HunterId,
+				"sequence", batch.Sequence, "packets", len(batch.Packets))
+		}
+	}
+}
+
+// disconnectGeneration terminates a failed stream generation and requests one
+// reconnect, even when both its sender and receiver observe the failure.
+func (m *Manager) disconnectGeneration(generation *connection) {
+	generation.disconnectOnce.Do(func() {
+		generation.accepting.Store(false)
+		generation.cancel()
+		m.MarkDisconnected()
+	})
 }
 
 // receiveAcks receives acknowledgments from upstream (connection-scoped goroutine)
-func (m *Manager) receiveAcks() {
+func (m *Manager) receiveAcks(generation *connection) {
+	defer generation.wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("Recovered from panic in receiveAcks", "panic", r)
 		}
 	}()
 
-	m.mu.Lock()
-	stream := m.stream
-	m.mu.Unlock()
-
-	if stream == nil {
-		logger.Error("Upstream stream not available for receiving acks")
-		return
-	}
-
 	for {
 		// Check context before each Recv to avoid blocking on closed stream
 		select {
-		case <-m.ctx.Done():
+		case <-generation.ctx.Done():
 			logger.Debug("receiveAcks: context cancelled, exiting")
 			return
 		default:
 		}
 
-		ack, err := stream.Recv()
+		ack, err := generation.stream.Recv()
 		if err != nil {
 			// Check if we're shutting down
-			if m.ctx.Err() != nil {
+			if generation.ctx.Err() != nil {
 				logger.Debug("receiveAcks: error during shutdown, exiting gracefully", "error", err)
 				return
 			}
 			logger.Error("Upstream ack receive error", "error", err)
 			// Trigger reconnection
-			m.MarkDisconnected()
+			m.disconnectGeneration(generation)
 			return
 		}
 
@@ -403,7 +480,7 @@ func (m *Manager) receiveAcks() {
 func (m *Manager) IsConnected() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.stream != nil
+	return m.generation != nil && m.generation.accepting.Load()
 }
 
 // GetUpstreamProcessorID returns the upstream processor ID (learned during registration)

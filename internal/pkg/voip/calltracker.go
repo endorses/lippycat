@@ -17,6 +17,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/spf13/viper"
@@ -49,6 +50,11 @@ var (
 //
 // The Close() method handles all locking internally and is safe to call
 // concurrently and multiple times (idempotent).
+//
+// Lock ordering: tracker locks (CallTracker.mu or LockFreeCallTracker.complexOpsMu)
+// must never be held while acquiring a per-call writer lock. Remove the call from
+// tracker state first, release the tracker lock, and only then call Close. Writer
+// helpers likewise release writer locks before updating tracker metadata.
 type CallInfo struct {
 	CallID      string
 	State       string
@@ -64,6 +70,24 @@ type CallInfo struct {
 	rtpWriterMu sync.Mutex // Protects RTPWriter and rtpFile access
 }
 
+func (c *CallInfo) writeSIP(packet gopacket.Packet) error {
+	c.sipWriterMu.Lock()
+	defer c.sipWriterMu.Unlock()
+	if c.SIPWriter == nil || c.sipFile == nil {
+		return ErrWriterNotInitialized
+	}
+	return c.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+}
+
+func (c *CallInfo) writeRTP(packet gopacket.Packet) error {
+	c.rtpWriterMu.Lock()
+	defer c.rtpWriterMu.Unlock()
+	if c.RTPWriter == nil || c.rtpFile == nil {
+		return ErrWriterNotInitialized
+	}
+	return c.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+}
+
 // Close safely closes all PCAP writers and files for this call with proper locking.
 // This method is safe to call concurrently and idempotent.
 func (c *CallInfo) Close() error {
@@ -75,9 +99,9 @@ func (c *CallInfo) Close() error {
 		if err := c.sipFile.Close(); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("failed to close SIP file: %w", err)
 		}
-		c.sipFile = nil
-		c.SIPWriter = nil
 	}
+	c.sipFile = nil
+	c.SIPWriter = nil
 	c.sipWriterMu.Unlock()
 
 	// Close RTP file (with mutex protection)
@@ -86,12 +110,46 @@ func (c *CallInfo) Close() error {
 		if err := c.rtpFile.Close(); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("failed to close RTP file: %w", err)
 		}
-		c.rtpFile = nil
-		c.RTPWriter = nil
 	}
+	c.rtpFile = nil
+	c.RTPWriter = nil
 	c.rtpWriterMu.Unlock()
 
 	return firstErr
+}
+
+// removeCall detaches a call and all tracker-owned indexes before closing it.
+// Closing after releasing ct.mu is required by CallInfo's lock ordering rule.
+func (ct *CallTracker) removeCall(callID string) (bool, error) {
+	ct.mu.Lock()
+	call, exists := ct.callMap[callID]
+	if exists {
+		delete(ct.callMap, callID)
+		delete(ct.pins, callID)
+		if elem := ct.lruIndex[callID]; elem != nil {
+			ct.lruList.Remove(elem)
+			delete(ct.lruIndex, callID)
+		}
+		for port, callIDs := range ct.portToCallID {
+			kept := callIDs[:0]
+			for _, id := range callIDs {
+				if id != callID {
+					kept = append(kept, id)
+				}
+			}
+			if len(kept) == 0 {
+				delete(ct.portToCallID, port)
+			} else {
+				ct.portToCallID[port] = kept
+			}
+		}
+		ct.recency.Delete(callID)
+	}
+	ct.mu.Unlock()
+	if !exists || call == nil {
+		return exists, nil
+	}
+	return true, call.Close()
 }
 
 type CallTracker struct {
@@ -222,16 +280,17 @@ func (ct *CallTracker) Shutdown() {
 
 		// Now safe to close all files
 		ct.mu.Lock()
-		defer ct.mu.Unlock()
-
+		calls := make([]*CallInfo, 0, len(ct.callMap))
 		for id, call := range ct.callMap {
-			if err := call.Close(); err != nil {
-				logger.Error("Failed to close call files",
-					"call_id", SanitizeCallIDForLogging(id),
-					"error", err)
-			}
+			calls = append(calls, call)
 			delete(ct.callMap, id)
 			ct.recency.Delete(id)
+		}
+		ct.mu.Unlock()
+		for _, call := range calls {
+			if err := call.Close(); err != nil {
+				logger.Error("Failed to close call files", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
+			}
 		}
 		logger.Info("Call tracker shutdown complete")
 	})
@@ -326,7 +385,7 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	tracker.mu.RUnlock()
 
 	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
+	var evicted *CallInfo
 
 	call, exists = tracker.callMap[callID]
 	if !exists {
@@ -365,13 +424,10 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 				oldestCallID := oldest.Value.(string)
 				oldCall := tracker.callMap[oldestCallID]
 
-				// Clean up the old call's resources
+				// Detach the old call while holding the tracker lock. It is closed
+				// only after releasing that lock, per the documented lock order.
 				if oldCall != nil {
-					if err := oldCall.Close(); err != nil {
-						logger.Error("Error closing call files",
-							"call_id", SanitizeCallIDForLogging(oldestCallID),
-							"error", err)
-					}
+					evicted = oldCall
 					// Remove from port mapping
 					for port, callIDs := range tracker.portToCallID {
 						for i, cid := range callIDs {
@@ -407,6 +463,12 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	} else {
 		tracker.touchCall(callID)
 	}
+	tracker.mu.Unlock()
+	if evicted != nil {
+		if err := evicted.Close(); err != nil {
+			logger.Error("Error closing call files", "call_id", SanitizeCallIDForLogging(evicted.CallID), "error", err)
+		}
+	}
 	return call
 }
 
@@ -437,6 +499,13 @@ func (ct *CallTracker) leastRecentUnpinnedLocked() *list.Element {
 }
 
 func (c *CallInfo) initWriters() error {
+	// Initialization normally happens before publication, but use the same locks
+	// as every other writer-pointer access so future reuse cannot violate the
+	// lifetime contract. When both are needed, SIP is always acquired first.
+	c.sipWriterMu.Lock()
+	defer c.sipWriterMu.Unlock()
+	c.rtpWriterMu.Lock()
+	defer c.rtpWriterMu.Unlock()
 	// Check if user specified an output file
 	outputFile := viper.GetString("voip.output_file")
 
@@ -490,6 +559,7 @@ func (c *CallInfo) initWriters() error {
 			if closeErr := c.sipFile.Close(); closeErr != nil {
 				logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
 			}
+			c.sipFile = nil
 		}
 		return fmt.Errorf("failed to create RTP file %s: %w", rtpPath, err)
 	}
@@ -504,6 +574,8 @@ func (c *CallInfo) initWriters() error {
 		if closeErr := c.rtpFile.Close(); closeErr != nil {
 			logger.Error("Failed to close RTP file during error cleanup", "error", closeErr, "file", rtpPath)
 		}
+		c.sipFile, c.rtpFile = nil, nil
+		c.SIPWriter, c.RTPWriter = nil, nil
 		return fmt.Errorf("failed to write SIP file header: %w", err)
 	}
 
@@ -514,6 +586,8 @@ func (c *CallInfo) initWriters() error {
 		if closeErr := c.rtpFile.Close(); closeErr != nil {
 			logger.Error("Failed to close RTP file during error cleanup", "error", closeErr, "file", rtpPath)
 		}
+		c.sipFile, c.rtpFile = nil, nil
+		c.SIPWriter, c.RTPWriter = nil, nil
 		return fmt.Errorf("failed to write RTP file header: %w", err)
 	}
 

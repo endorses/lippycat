@@ -3,6 +3,8 @@
 package voip
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +26,10 @@ type targetSubstringFilter struct {
 	// in order, so the test can confirm each message was evaluated on its own.
 	seen []string
 }
+
+type recordingSDPRegistrar struct{ calls map[string]string }
+
+func (r *recordingSDPRegistrar) RegisterSDP(callID, sdp string) { r.calls[callID] = sdp }
 
 func (f *targetSubstringFilter) MatchPacket(pkt gopacket.Packet) bool {
 	var payload string
@@ -241,6 +247,43 @@ func TestTapHandler_MOLegMatchesFromAndPAI(t *testing.T) {
 	app := forwarded[0].PacketInfo.Packet.ApplicationLayer()
 	if app == nil || !strings.Contains(string(app.LayerContents()), "P-Access-Network-Info") {
 		t.Error("MO leg forwarding lost the P-Access-Network-Info header")
+	}
+}
+
+func TestTapHandler_TCPSDPDoesNotRetainInGlobalTracker(t *testing.T) {
+	tracker := TestCallTracker(t)
+	restore := OverrideDefaultTracker(tracker)
+	t.Cleanup(restore)
+
+	ch := make(chan source.InjectedPacket, 64)
+	h := NewTapTCPHandler(ch)
+	h.SetApplicationFilter(&targetSubstringFilter{target: "target"})
+	registrar := &recordingSDPRegistrar{calls: make(map[string]string)}
+	h.SetSDPRegistrar(registrar)
+	netFlow := testNetFlow(t, "10.0.0.1", "10.0.0.2")
+	transportFlow := testTransportFlow(t, 5060, 5060)
+
+	for i := 0; i < 50; i++ {
+		callID := fmt.Sprintf("tcp-sdp-%d", i)
+		body := fmt.Sprintf("v=0\r\nc=IN IP4 192.0.2.10\r\nm=audio %d RTP/AVP 0\r\n", 10000+i)
+		msg := []byte("INVITE sip:target@example SIP/2.0\r\nFrom: <sip:target@example>\r\nTo: <sip:b@example>\r\nCall-ID: " + callID + "\r\nCSeq: 1 INVITE\r\nContent-Type: application/sdp\r\nContent-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body)
+		if !h.HandleSIPMessage(msg, callID, "10.0.0.1:5060", "10.0.0.2:5060", netFlow, transportFlow) {
+			t.Fatalf("call %s was not handled", callID)
+		}
+		bye := []byte("BYE sip:target@example SIP/2.0\r\nFrom: <sip:target@example>\r\nTo: <sip:b@example>\r\nCall-ID: " + callID + "\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n")
+		if !h.HandleSIPMessage(bye, callID, "10.0.0.1:5060", "10.0.0.2:5060", netFlow, transportFlow) {
+			t.Fatalf("completed call %s was not handled", callID)
+		}
+	}
+
+	tracker.mu.RLock()
+	globalMappings := len(tracker.portToCallID)
+	tracker.mu.RUnlock()
+	if globalMappings != 0 {
+		t.Fatalf("tap TCP SDP created %d global port mappings, want 0", globalMappings)
+	}
+	if len(registrar.calls) != 50 {
+		t.Fatalf("processor registrar received %d calls, want 50", len(registrar.calls))
 	}
 }
 

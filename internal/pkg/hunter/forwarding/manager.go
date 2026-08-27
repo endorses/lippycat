@@ -77,7 +77,31 @@ type Config struct {
 	DiskBufferEnabled bool   // Enable disk overflow buffer
 	DiskBufferDir     string // Directory for disk buffer (default: /var/tmp/lippycat-buffer)
 	DiskBufferMaxSize uint64 // Maximum disk buffer size in bytes (default: 1GB)
+
+	// SlowSendInterval paces sends while the processor requests FLOW_SLOW.
+	// Zero uses the package default.
+	SlowSendInterval time.Duration
+
+	// Clock is injectable for deterministic pacing tests. Nil uses wall time.
+	Clock Clock
 }
+
+// Ticker is the subset of time.Ticker used by the sender.
+type Ticker interface {
+	Chan() <-chan time.Time
+	Stop()
+}
+
+// Clock creates reusable tickers without a timer or goroutine per batch.
+type Clock interface {
+	NewTicker(time.Duration) Ticker
+}
+
+type realClock struct{}
+type realTicker struct{ *time.Ticker }
+
+func (realClock) NewTicker(d time.Duration) Ticker { return realTicker{time.NewTicker(d)} }
+func (t realTicker) Chan() <-chan time.Time        { return t.C }
 
 // Manager handles packet batching and forwarding to processor
 type Manager struct {
@@ -100,12 +124,16 @@ type Manager struct {
 	diskBuffer *buffer.DiskOverflowBuffer
 
 	// Flow control
-	flowControlState atomic.Int32 // FlowControl enum value
-	paused           atomic.Bool  // Whether sending is paused
+	flowControlState atomic.Int32  // FlowControl enum value
+	paused           atomic.Bool   // Whether sending is paused
+	flowChanged      chan struct{} // wakes the sender when transmission policy changes
+	slowSendInterval time.Duration
+	clock            Clock
 
 	// Connection health tracking
 	consecutiveFailures atomic.Int32 // Track consecutive send failures
 	disconnectCallback  func()       // Called when connection appears dead
+	disconnectOnce      sync.Once
 
 	// Optional packet processing
 	packetProcessor     PacketProcessor
@@ -123,6 +151,12 @@ type Manager struct {
 // New creates a new forwarding manager with a persistent batch queue
 // The queue is provided externally to survive reconnections
 func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBufferProvider, connCtx context.Context, batchQueue chan *data.PacketBatch) *Manager {
+	if config.SlowSendInterval <= 0 {
+		config.SlowSendInterval = 25 * time.Millisecond
+	}
+	if config.Clock == nil {
+		config.Clock = realClock{}
+	}
 	m := &Manager{
 		config:           config,
 		currentBatch:     make([]*data.CapturedPacket, 0, config.BatchSize),
@@ -130,6 +164,9 @@ func New(config Config, statsCollector StatsCollector, packetBufferProv PacketBu
 		packetBufferProv: packetBufferProv,
 		connCtx:          connCtx,
 		batchQueue:       batchQueue, // Use provided persistent queue
+		flowChanged:      make(chan struct{}, 1),
+		slowSendInterval: config.SlowSendInterval,
+		clock:            config.Clock,
 	}
 
 	// Initialize disk overflow buffer if enabled
@@ -193,8 +230,14 @@ func (m *Manager) HandleFlowControl(ctrl *data.StreamControl) {
 	oldState := data.FlowControl(m.flowControlState.Load())
 	newState := ctrl.FlowControl
 
-	// Update flow control state
+	// PAUSE is the only state that gates transmission. CONTINUE and RESUME both
+	// release the gate; RESUME remains distinct so the transition is observable.
 	m.flowControlState.Store(int32(newState))
+	m.paused.Store(newState == data.FlowControl_FLOW_PAUSE)
+	select {
+	case m.flowChanged <- struct{}{}:
+	default:
+	}
 
 	// Log state changes
 	if oldState != newState {
@@ -207,15 +250,13 @@ func (m *Manager) HandleFlowControl(ctrl *data.StreamControl) {
 	// Handle specific flow control actions
 	switch newState {
 	case data.FlowControl_FLOW_PAUSE:
-		if !m.paused.Load() {
-			m.paused.Store(true)
+		if oldState != data.FlowControl_FLOW_PAUSE {
 			logger.Warn("Processor requested pause - buffering packets",
 				"recommendation", "processor may be overloaded")
 		}
 
 	case data.FlowControl_FLOW_RESUME:
-		if m.paused.Load() {
-			m.paused.Store(false)
+		if oldState == data.FlowControl_FLOW_PAUSE {
 			logger.Info("Processor requested resume - sending packets")
 		}
 
@@ -322,12 +363,6 @@ func (m *Manager) ForwardPackets(wg *sync.WaitGroup) {
 
 // SendBatch queues the current batch for async sending
 func (m *Manager) SendBatch() {
-	// Check if paused by processor
-	if m.paused.Load() {
-		logger.Debug("Skipping batch send - paused by processor")
-		return
-	}
-
 	m.batchMu.Lock()
 	if len(m.currentBatch) == 0 {
 		m.batchMu.Unlock()
@@ -385,6 +420,9 @@ func (m *Manager) SendBatch() {
 // batchSender goroutine sends batches from queue asynchronously
 func (m *Manager) batchSender() {
 	defer m.senderWg.Done()
+	defer m.closeStream()
+	slowTicker := m.clock.NewTicker(m.slowSendInterval)
+	defer slowTicker.Stop()
 
 	// Create ticker for checking disk buffer (only if enabled)
 	var diskCheckTicker *time.Ticker
@@ -395,21 +433,41 @@ func (m *Manager) batchSender() {
 		diskCheckChan = diskCheckTicker.C
 	}
 
+	var pending *data.PacketBatch
 	for {
-		select {
-		case <-m.connCtx.Done():
-			// Drain remaining batches on shutdown
-			for {
+		if pending != nil && !m.paused.Load() {
+			if m.GetFlowControlState() == data.FlowControl_FLOW_SLOW {
 				select {
-				case batch := <-m.batchQueue:
-					m.SendBatchToStream(batch)
-				default:
+				case <-m.connCtx.Done():
 					return
+				case <-m.flowChanged:
+					continue
+				case <-slowTicker.Chan():
 				}
 			}
+			if !m.sendBatch(pending) {
+				return
+			}
+			pending = nil
+			continue
+		}
 
-		case batch := <-m.batchQueue:
-			m.SendBatchToStream(batch)
+		// A nil channel disables the dequeue case. PAUSE therefore leaves all
+		// capture-side batching and bounded overflow behavior active while it
+		// prevents the sole stream owner from taking another batch.
+		var sendQueue <-chan *data.PacketBatch
+		if !m.paused.Load() {
+			sendQueue = m.batchQueue
+		}
+		select {
+		case <-m.connCtx.Done():
+			return
+
+		case <-m.flowChanged:
+			continue
+
+		case batch := <-sendQueue:
+			pending = batch
 
 		case <-diskCheckChan:
 			// Check if we have room in memory queue and batches on disk
@@ -438,9 +496,8 @@ func (m *Manager) batchSender() {
 	}
 }
 
-// SendBatchToStream sends a single batch via gRPC stream
-// Exported for use during graceful shutdown to flush buffered batches
-func (m *Manager) SendBatchToStream(batch *data.PacketBatch) {
+// sendBatch is called only by batchSender, the sole Send/CloseSend owner.
+func (m *Manager) sendBatch(batch *data.PacketBatch) bool {
 	// Get stream
 	m.streamMu.Lock()
 	stream := m.stream
@@ -450,47 +507,51 @@ func (m *Manager) SendBatchToStream(batch *data.PacketBatch) {
 		logger.Warn("Stream not available, dropping batch",
 			"sequence", batch.Sequence)
 		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-		return
+		return true
 	}
 
-	// Send with context timeout to prevent blocking indefinitely
-	sendCtx, sendCancel := context.WithTimeout(m.connCtx, constants.DefaultSendTimeout)
-	defer sendCancel()
-
-	// Create a channel to receive the result
-	sendDone := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		sendDone <- stream.Send(batch)
-	}()
-
-	select {
-	case err := <-sendDone:
-		if err != nil {
-			logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence)
-			m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
-			m.recordSendFailure()
-			return
-		}
-
-		// Send succeeded - reset failure counter
-		m.consecutiveFailures.Store(0)
-
-		logger.Debug("Sent packet batch",
-			"sequence", batch.Sequence,
-			"packets", len(batch.Packets))
-
-		m.statsCollector.IncrementForwarded(uint64(len(batch.Packets)))
-
-	case <-sendCtx.Done():
-		// Context cancelled or timed out
-		logger.Error("Batch send timeout - processor may be unresponsive",
-			"sequence", batch.Sequence,
-			"packets", len(batch.Packets))
+	timedOut := atomic.Bool{}
+	timer := time.AfterFunc(constants.DefaultSendTimeout, func() {
+		timedOut.Store(true)
+		m.signalDisconnect()
+	})
+	err := stream.Send(batch)
+	timer.Stop()
+	if err != nil {
+		logger.Error("Failed to send batch", "error", err, "sequence", batch.Sequence,
+			"timed_out", timedOut.Load())
 		m.statsCollector.IncrementDropped(uint64(len(batch.Packets)))
 		m.recordSendFailure()
-		return
+		return false
+	}
+	m.consecutiveFailures.Store(0)
+	logger.Debug("Sent packet batch", "sequence", batch.Sequence, "packets", len(batch.Packets))
+	m.statsCollector.IncrementForwarded(uint64(len(batch.Packets)))
+	return true
+}
+
+func (m *Manager) signalDisconnect() {
+	m.disconnectOnce.Do(func() {
+		if m.disconnectCallback != nil {
+			go m.disconnectCallback()
+		}
+	})
+}
+
+func (m *Manager) closeStream() {
+	m.streamMu.Lock()
+	stream := m.stream
+	m.stream = nil
+	m.streamMu.Unlock()
+	if stream != nil {
+		if err := stream.CloseSend(); err != nil {
+			logger.Error("Failed to close packet stream", "error", err)
+		}
 	}
 }
+
+// Wait waits for the connection generation's stream owner to exit.
+func (m *Manager) Wait() { m.senderWg.Wait() }
 
 // recordSendFailure tracks consecutive send failures and triggers disconnect if threshold exceeded
 func (m *Manager) recordSendFailure() {
@@ -505,9 +566,7 @@ func (m *Manager) recordSendFailure() {
 			"threshold", constants.MaxConsecutiveSendFailures)
 
 		// Trigger disconnect callback if set
-		if m.disconnectCallback != nil {
-			m.disconnectCallback()
-		}
+		m.signalDisconnect()
 
 		// Reset counter to avoid repeated callbacks
 		m.consecutiveFailures.Store(0)

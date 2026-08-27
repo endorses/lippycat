@@ -1,4 +1,4 @@
-//go:build !cuda
+//go:build (tap || all) && !cuda
 
 package tap
 

@@ -455,6 +455,9 @@ func NewServer(config ServerConfig, destManager DestinationManager, taskManager 
 
 // Start begins serving the X1 interface.
 func (s *Server) Start(ctx context.Context) error {
+	if err := s.ValidateConfiguration(); err != nil {
+		return err
+	}
 	// Setup phase - hold lock briefly.
 	s.mu.Lock()
 
@@ -493,7 +496,7 @@ func (s *Server) Start(ctx context.Context) error {
 	logger.Info("X1 server starting",
 		"addr", ln.Addr().String(),
 		"tls", true,
-		"mutual_tls", s.config.TLSCAFile != "",
+		"mutual_tls", true,
 	)
 
 	// Start serving in goroutine
@@ -512,6 +515,28 @@ func (s *Server) Start(ctx context.Context) error {
 	case err := <-errChan:
 		return err
 	}
+}
+
+// ValidateConfiguration verifies that the X1 listener can start with mandatory
+// mutual TLS. It is safe to call before Start so callers can fail before
+// launching any background lifecycle work.
+func (s *Server) ValidateConfiguration() error {
+	if s.config.ListenAddr == "" {
+		return errors.New("X1 listen address is required")
+	}
+	if s.config.TLSCertFile == "" {
+		return errors.New("X1 server TLS certificate is required")
+	}
+	if s.config.TLSKeyFile == "" {
+		return errors.New("X1 server TLS key is required")
+	}
+	if s.config.TLSCAFile == "" {
+		return errors.New("X1 client CA is required for mutual TLS authentication")
+	}
+	if _, err := s.buildTLSConfig(); err != nil {
+		return fmt.Errorf("invalid X1 TLS configuration: %w", err)
+	}
+	return nil
 }
 
 // Addr returns the server's bound address, or empty string if not started.
@@ -556,36 +581,26 @@ func (s *Server) buildTLSConfig() (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-		// Secure cipher suites - TLS 1.3 suites are automatically preferred when available
-		CipherSuites: []uint16{
-			// TLS 1.2 cipher suites (TLS 1.3 ciphers are handled automatically by Go)
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-		},
+		MinVersion:   tls.VersionTLS13,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
 
-	// Configure mutual TLS if CA file is provided
-	if s.config.TLSCAFile != "" {
-		caCert, err := os.ReadFile(s.config.TLSCAFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
-		}
-
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM(caCert) {
-			return nil, fmt.Errorf("failed to parse CA certificate")
-		}
-
-		tlsConfig.ClientCAs = certPool
-		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-
-		logger.Info("X1 mutual TLS enabled", "ca_file", s.config.TLSCAFile)
+	if s.config.TLSCAFile == "" {
+		return nil, errors.New("X1 client CA is required for mutual TLS authentication")
 	}
+	caCert, err := os.ReadFile(s.config.TLSCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		return nil, fmt.Errorf("failed to parse CA certificate")
+	}
+
+	tlsConfig.ClientCAs = certPool
+
+	logger.Info("X1 mutual TLS enabled", "ca_file", s.config.TLSCAFile)
 
 	return tlsConfig, nil
 }

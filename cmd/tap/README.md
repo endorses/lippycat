@@ -478,6 +478,17 @@ wireshark -i lc0
 
 ## Security
 
+### Lawful Interception X1 mTLS
+
+LI builds host the X1 administration endpoint when `--li-enabled` is set. X1
+always requires mutual TLS: configure `--li-x1-listen`, `--li-x1-tls-cert`,
+`--li-x1-tls-key`, and `--li-x1-tls-ca`. The CA file is required and is used to
+verify ADMF client certificates. Tap fails startup if any of these X1 settings
+is missing or invalid.
+
+See [Lawful Interception](../../docs/manual/src/part5-advanced/lawful-interception.md)
+for the complete deployment configuration.
+
 TLS is enabled by default. Use `--insecure` for local testing without TLS.
 
 ### Production Mode Enforcement

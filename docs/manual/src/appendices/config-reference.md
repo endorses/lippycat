@@ -428,6 +428,9 @@ TLS is enabled by default unless `processor.insecure` is true. Provide `processo
 #### Lawful Interception (LI)
 
 These settings require the `li` build tag. See [Lawful Interception](../part5-advanced/lawful-interception.md) for details.
+When `processor.li.enabled` is `true`, the X1 listen address, certificate, key,
+and client CA must all be configured. The processor or tap exits during startup
+if any of them is missing.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -435,7 +438,7 @@ These settings require the `li` build tag. See [Lawful Interception](../part5-ad
 | `processor.li.x1_listen_addr` | string | `":8443"` | Listen address for the X1 (ADMF) interface. |
 | `processor.li.x1_tls_cert` | string | `""` | TLS certificate for the X1 server. |
 | `processor.li.x1_tls_key` | string | `""` | TLS private key for the X1 server. |
-| `processor.li.x1_tls_ca` | string | `""` | CA certificate for X1 client verification. |
+| `processor.li.x1_tls_ca` | string | `""` | **Required when LI is enabled.** CA certificate for ADMF client verification. |
 | `processor.li.admf_endpoint` | string | `""` | ADMF endpoint for X1 registration. |
 | `processor.li.admf_keepalive` | duration | `"30s"` | ADMF keepalive interval. |
 | `processor.li.admf_tls_cert` | string | `""` | TLS certificate for ADMF connection. |

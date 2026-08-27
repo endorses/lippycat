@@ -13,6 +13,7 @@ nodes.yaml
 testdata/pcaps/*
 scripts/*
 !scripts/bump-version.sh
+!scripts/check-build-matrix.sh
 bin/
 docs/manual/book/
 

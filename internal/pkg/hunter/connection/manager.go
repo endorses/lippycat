@@ -180,18 +180,23 @@ func (m *Manager) GetForwardingManager() *forwarding.Manager {
 // MarkDisconnected marks the connection as disconnected and triggers reconnection
 func (m *Manager) MarkDisconnected() {
 	m.reconnectMu.Lock()
-	defer m.reconnectMu.Unlock()
 
 	logger.Debug("MarkDisconnected() called", "already_reconnecting", m.reconnecting)
 
 	if m.reconnecting {
 		// Already reconnecting
 		logger.Debug("MarkDisconnected: already reconnecting, ignoring")
+		m.reconnectMu.Unlock()
 		return
 	}
 
 	m.reconnecting = true
+	cancel := m.connCancel
+	m.reconnectMu.Unlock()
 	logger.Warn("Connection lost, will attempt reconnection")
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // connectionManager manages processor connection lifecycle
@@ -208,6 +213,8 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 		default:
 		}
 
+		m.connCtx, m.connCancel = context.WithCancel(m.ctx)
+
 		// Use circuit breaker for connection attempts
 		err := m.circuitBreaker.Call(func() error {
 			return m.connectAndRegister()
@@ -222,9 +229,6 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 			m.reconnecting = false
 			m.reconnectAttempts = 0
 			m.reconnectMu.Unlock()
-
-			// Create connection-scoped context for this connection's goroutines
-			m.connCtx, m.connCancel = context.WithCancel(m.ctx)
 
 			// Create forwarding manager for this connection
 			m.forwardingManager = m.forwardingFactory.CreateForwardingManager(m.connCtx, m.stream)
@@ -246,6 +250,7 @@ func (m *Manager) connectionManager(wg *sync.WaitGroup) {
 		}
 
 		// Connection failed or circuit breaker open
+		m.connCancel()
 		logger.Error("Failed to connect to processor", "error", err)
 
 		// Exponential backoff
@@ -474,7 +479,7 @@ func (m *Manager) register() error {
 func (m *Manager) startStreaming() error {
 	logger.Info("Starting packet stream to processor")
 
-	stream, err := m.dataClient.StreamPackets(m.ctx)
+	stream, err := m.dataClient.StreamPackets(m.connCtx)
 	if err != nil {
 		return fmt.Errorf("failed to create stream: %w", err)
 	}
@@ -757,13 +762,12 @@ func (m *Manager) cleanup() {
 	case <-time.After(10 * time.Second):
 		logger.Warn("Cleanup timeout - some goroutines may still be running, proceeding anyway")
 	}
+	if m.forwardingManager != nil {
+		m.forwardingManager.Wait()
+	}
 
 	m.streamMu.Lock()
-	if m.stream != nil {
-		if err := m.stream.CloseSend(); err != nil {
-			logger.Error("Failed to close gRPC stream during shutdown", "error", err)
-		}
-	}
+	m.stream = nil
 	m.streamMu.Unlock()
 
 	if m.dataConn != nil {

@@ -35,6 +35,32 @@ func TestNewManager(t *testing.T) {
 	assert.Equal(t, config.ADMFEndpoint, m.Config().ADMFEndpoint)
 }
 
+func TestManagerStartRejectsPartialX1Configuration(t *testing.T) {
+	fields := []struct {
+		name  string
+		apply func(*ManagerConfig)
+	}{
+		{"listen", func(c *ManagerConfig) { c.X1ListenAddr = ":8443" }},
+		{"certificate", func(c *ManagerConfig) { c.X1TLSCertFile = "server.crt" }},
+		{"key", func(c *ManagerConfig) { c.X1TLSKeyFile = "server.key" }},
+		{"client CA", func(c *ManagerConfig) { c.X1TLSCAFile = "admf-ca.crt" }},
+	}
+	for mask := 1; mask < (1<<len(fields))-1; mask++ {
+		config := ManagerConfig{Enabled: true}
+		name := ""
+		for i, field := range fields {
+			if mask&(1<<i) != 0 {
+				field.apply(&config)
+				name += field.name + "+"
+			}
+		}
+		t.Run(name, func(t *testing.T) {
+			manager := NewManager(config, nil)
+			require.ErrorContains(t, manager.Start(), "incomplete X1 configuration")
+		})
+	}
+}
+
 func TestManager_StartStop(t *testing.T) {
 	config := ManagerConfig{
 		Enabled: true,

@@ -21,6 +21,54 @@ import (
 	"github.com/spf13/viper"
 )
 
+func (m Model) nextBackgroundResultCmd() tea.Cmd {
+	if m.backgroundProcessor == nil {
+		return nil
+	}
+	return m.backgroundProcessor.WaitForResult()
+}
+
+func (m Model) backgroundResultIsCurrent(generation uint64) bool {
+	return m.backgroundProcessor != nil && generation == m.backgroundProcessor.Generation()
+}
+
+func (m Model) handleDNSPacketResultMsg(msg DNSPacketResultMsg) (Model, tea.Cmd) {
+	if m.backgroundResultIsCurrent(msg.Generation) {
+		m.uiState.DNSQueriesView.UpdateFromPacket(&msg.Packet)
+	}
+	return m, m.nextBackgroundResultCmd()
+}
+
+func (m Model) handleHTTPPacketResultMsg(msg HTTPPacketResultMsg) (Model, tea.Cmd) {
+	if m.backgroundResultIsCurrent(msg.Generation) {
+		m.uiState.HTTPView.UpdateFromPacket(&msg.Packet)
+	}
+	return m, m.nextBackgroundResultCmd()
+}
+
+func (m Model) handleEmailPacketResultMsg(msg EmailPacketResultMsg) (Model, tea.Cmd) {
+	if m.backgroundResultIsCurrent(msg.Generation) {
+		m.uiState.EmailView.UpdateFromPacket(&msg.Packet)
+	}
+	return m, m.nextBackgroundResultCmd()
+}
+
+func (m Model) handleLocalCallPacketResultMsg(msg LocalCallPacketResultMsg) (Model, tea.Cmd) {
+	if m.backgroundResultIsCurrent(msg.Generation) {
+		var aggregator *LocalCallAggregator
+		switch m.captureMode {
+		case components.CaptureModeLive:
+			aggregator = m.liveCallAggregator
+		case components.CaptureModeOffline:
+			aggregator = m.offlineCallAggregator
+		}
+		if aggregator != nil {
+			aggregator.ProcessPacket(&msg.Packet)
+		}
+	}
+	return m, m.nextBackgroundResultCmd()
+}
+
 // ensureCallAggregator lazily initializes the call aggregator for live/offline capture modes.
 // This is needed because the call aggregator requires a tea.Program reference, which isn't
 // available when NewModel() is called. The program is set later via SetCurrentProgram().

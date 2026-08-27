@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li manual manual-serve manual-clean
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li build-matrix manual manual-serve manual-clean
 
 # Build variables
 BINARY_NAME=lc
@@ -127,7 +127,12 @@ cuda-kernels:
 # Build with CUDA support
 build-cuda: cuda-kernels
 	@echo "Building $(CUDA_BINARY_NAME) $(VERSION) with CUDA support..."
-	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags cuda -ldflags "$(LDFLAGS)" -o $(CUDA_BINARY_NAME)
+	CGO_ENABLED=1 $(GO) build $(GOFLAGS) -tags all,cuda -ldflags "$(LDFLAGS)" -o $(CUDA_BINARY_NAME)
+
+# Validate every supported role/feature partition. Set CUDA=1 on a CUDA builder
+# to include the two CUDA variants.
+build-matrix:
+	./scripts/check-build-matrix.sh
 
 # Install to GOPATH/bin or /usr/local/bin
 install: build-release
@@ -277,6 +282,7 @@ help:
 	@echo "  make tui            - Build TUI interface only"
 	@echo "  make tap            - Build tap node (standalone capture + processor)"
 	@echo "  make binaries       - Build all variants"
+	@echo "  make build-matrix   - Test and vet every supported build partition"
 	@echo ""
 	@echo "LI (Lawful Interception) builds:"
 	@echo "  make build-li       - Build complete suite with LI support"

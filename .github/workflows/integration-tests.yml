@@ -348,7 +348,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpcap-dev
+          sudo apt-get install -y libpcap-dev libxml2-utils
 
       - name: Check non-CUDA build matrix
         run: make build-matrix

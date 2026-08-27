@@ -650,23 +650,32 @@ func (m *Manager) removeOrphanedTasks(snapshot admfSnapshot, requireStreak bool)
 	return removed
 }
 
-// removeOrphanedLIFilters deletes LI filters belonging to no task in the
-// snapshot. Startup-only: filters are reloaded from disk before the registry
-// exists, so an orphaned filter is armed with no task pointing at it — which is
-// what re-armed the stale filter across restarts.
+// removeOrphanedLIFilters makes the persisted filter set match the targets of
+// tasks that are actually active locally. An ADMF-listed task whose activation
+// failed is deliberately excluded. Active local tasks retained during the
+// periodic orphan grace streak remain included.
 func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 	lister, ok := m.config.FilterPusher.(FilterLister)
 	if !ok || !snapshot.complete() {
 		return 0
 	}
 
-	live := make(map[string]bool, len(snapshot.tasks))
+	expected := make(map[string]bool)
 	legacyOwners := make(map[string][]uuid.UUID)
-	for xid := range snapshot.tasks {
-		live[xid.String()] = true
+	activeTasks := 0
+	m.registry.ListTasks(func(task *InterceptTask) bool {
+		if task.Status != TaskStatusActive {
+			return true
+		}
+		activeTasks++
+		for i := range task.Targets {
+			expected[fmt.Sprintf(liFilterIDPrefix+"%s-%d", task.XID.String(), i)] = true
+		}
+		xid := task.XID
 		prefix := xid.String()[:8]
 		legacyOwners[prefix] = append(legacyOwners[prefix], xid)
-	}
+		return true
+	})
 
 	var orphans []string
 	var migrations []string
@@ -689,7 +698,7 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 			}
 			continue
 		}
-		if !live[owner] {
+		if !expected[id] {
 			orphans = append(orphans, id)
 		}
 	}
@@ -698,7 +707,7 @@ func (m *Manager) removeOrphanedLIFilters(snapshot admfSnapshot) int {
 		return 0
 	}
 
-	if len(snapshot.tasks) == 0 {
+	if len(snapshot.tasks) == 0 && activeTasks > 0 {
 		logger.Warn("Startup reconciliation: ADMF returned no tasks while LI filters are installed, "+
 			"keeping them (explicit DeactivateTask required)",
 			"li_filters", len(orphans),
@@ -897,15 +906,17 @@ func (m *Manager) reconcileWithADMF() {
 	// intercept the ADMF has dropped is running without authorisation.
 	deactivated := m.removeOrphanedTasks(snapshot, true)
 	removedDestinations := m.removeOrphanedDestinations(snapshot)
+	removedFilters := m.removeOrphanedLIFilters(snapshot)
 	if err := m.persistState(); err != nil {
 		logger.Error("Reconciliation: persist LI state failed", "error", err)
 	}
 
-	if activated > 0 || deactivated > 0 || removedDestinations > 0 {
+	if activated > 0 || deactivated > 0 || removedDestinations > 0 || removedFilters > 0 {
 		logger.Info("ADMF reconciliation complete",
 			"activated", activated,
 			"deactivated", deactivated,
 			"destinations_removed", removedDestinations,
+			"orphan_filters_removed", removedFilters,
 			"admf_tasks", len(snapshot.tasks),
 		)
 	} else {

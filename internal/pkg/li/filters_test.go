@@ -264,9 +264,9 @@ func TestFilterManagerUpdateFiltersForTask(t *testing.T) {
 		err = m.UpdateFiltersForTask(task)
 		require.NoError(t, err)
 
-		// Verify old filter was deleted
-		assert.Len(t, pusher.deletes, 1)
-		assert.Equal(t, initialIDs[0], pusher.deletes[0])
+		// The first target keeps its position-derived identity; only its
+		// definition is updated and the second target gets index 1.
+		assert.Empty(t, pusher.deletes)
 
 		// Verify new filters were created
 		assert.Len(t, pusher.updates, 2)
@@ -274,6 +274,8 @@ func TestFilterManagerUpdateFiltersForTask(t *testing.T) {
 		// Verify new filters are stored with updated patterns
 		newIDs := m.GetFiltersForXID(task.XID)
 		assert.Len(t, newIDs, 2)
+		assert.Equal(t, initialIDs[0], newIDs[0])
+		assert.Equal(t, "li-"+task.XID.String()+"-1", newIDs[1])
 
 		// Verify the first filter now has bob's pattern (not alice's)
 		newFilter, exists := m.GetFilter(newIDs[0])

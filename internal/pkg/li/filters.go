@@ -219,52 +219,44 @@ func (m *FilterManager) UpdateFiltersForTask(task *InterceptTask) error {
 	// From here on, we hold the lock until the end
 	defer m.mu.Unlock()
 
-	// Construct a complete replacement set before changing local or remote state.
+	// Target position is part of the filter identity. Reusing these canonical IDs
+	// keeps a target stable across modification and reactivation instead of
+	// allocating an ever-increasing index.
 	var newFilterIDs []string
 	var newFilters []*management.Filter
-	nextIndex := 0
 	for i, target := range task.Targets {
-		for {
-			candidate := fmt.Sprintf(liFilterIDPrefix+"%s-%d", task.XID.String(), nextIndex)
-			if _, used := m.filterStore[candidate]; !used {
-				break
-			}
-			nextIndex++
-		}
-		filter, err := m.targetToFilter(task.XID, nextIndex, target)
+		filter, err := m.targetToFilter(task.XID, i, target)
 		if err != nil {
 			return fmt.Errorf("construct replacement filters for XID %s target %d: %w", task.XID, i, err)
 		}
-		nextIndex++
 		if owner, ok := m.filterToXID[filter.Id]; ok && owner != task.XID {
 			return fmt.Errorf("replace filters for XID %s: filter ID %s is owned by XID %s", task.XID, filter.Id, owner)
-		}
-		if _, ok := m.filterStore[filter.Id]; ok {
-			return fmt.Errorf("replace filters for XID %s: filter ID %s already exists", task.XID, filter.Id)
 		}
 		newFilterIDs = append(newFilterIDs, filter.Id)
 		newFilters = append(newFilters, filter)
 	}
 
-	// Arm all replacements before withdrawing any old filter, avoiding a gap.
+	// Update canonical IDs in place. If a push fails, restore every already
+	// changed filter to its previous definition (or delete it if it was new).
 	if m.filterPusher != nil {
-		var pushed []string
+		var pushed []*management.Filter
 		for _, filter := range newFilters {
 			if err := m.filterPusher.UpdateFilter(filter); err != nil {
 				pushErr := fmt.Errorf("install replacement filters for XID %s: update filter %s: %w", task.XID, filter.Id, err)
-				rollbackErr := m.rollbackRemoteFiltersLocked(task.XID, pushed)
-				if rollbackErr != nil {
-					// Ownership is uncertain after rollback failure. Retain all
-					// attempted IDs so later cleanup safely retries every one.
-					for _, pushedFilter := range newFilters[:len(pushed)] {
-						m.filterStore[pushedFilter.Id] = pushedFilter
-						m.filterToXID[pushedFilter.Id] = task.XID
+				var rollbackErrs []error
+				for i := len(pushed) - 1; i >= 0; i-- {
+					applied := pushed[i]
+					if previous, ok := m.filterStore[applied.Id]; ok {
+						if restoreErr := m.filterPusher.UpdateFilter(previous); restoreErr != nil {
+							rollbackErrs = append(rollbackErrs, fmt.Errorf("rollback XID %s restore filter %s: %w", task.XID, applied.Id, restoreErr))
+						}
+					} else if deleteErr := m.filterPusher.DeleteFilter(applied.Id); deleteErr != nil {
+						rollbackErrs = append(rollbackErrs, fmt.Errorf("rollback XID %s delete filter %s: %w", task.XID, applied.Id, deleteErr))
 					}
-					m.xidToFilters[task.XID] = append(append([]string(nil), existingIDs...), pushed...)
 				}
-				return errors.Join(pushErr, rollbackErr)
+				return errors.Join(pushErr, errors.Join(rollbackErrs...))
 			}
-			pushed = append(pushed, filter.Id)
+			pushed = append(pushed, filter)
 		}
 	}
 
@@ -275,8 +267,15 @@ func (m *FilterManager) UpdateFiltersForTask(task *InterceptTask) error {
 		m.filterToXID[filter.Id] = task.XID
 	}
 	committedIDs := append([]string(nil), newFilterIDs...)
+	newIDSet := make(map[string]bool, len(newFilterIDs))
+	for _, id := range newFilterIDs {
+		newIDSet[id] = true
+	}
 	var deleteErrs []error
 	for _, id := range existingIDs {
+		if newIDSet[id] {
+			continue
+		}
 		if m.filterPusher != nil {
 			if err := m.filterPusher.DeleteFilter(id); err != nil {
 				committedIDs = append(committedIDs, id)

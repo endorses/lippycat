@@ -15,8 +15,6 @@ type Controller struct {
 	pcapQueueCapacity func() int
 
 	// Upstream forwarding metrics (if enabled)
-	packetsReceived       *atomic.Uint64
-	packetsForwarded      *atomic.Uint64
 	hasUpstream           bool
 	upstreamQueueDepth    func() int
 	upstreamQueueCapacity func() int
@@ -51,11 +49,9 @@ func moreSevere(current, candidate data.FlowControl) data.FlowControl {
 }
 
 // NewController creates a new flow controller
-func NewController(packetsReceived, packetsForwarded *atomic.Uint64, hasUpstream bool) *Controller {
+func NewController(hasUpstream bool) *Controller {
 	c := &Controller{
-		packetsReceived:  packetsReceived,
-		packetsForwarded: packetsForwarded,
-		hasUpstream:      hasUpstream,
+		hasUpstream: hasUpstream,
 	}
 	c.state.Store(int32(data.FlowControl_FLOW_CONTINUE))
 	return c
@@ -147,19 +143,6 @@ func (c *Controller) Determine() data.FlowControl {
 				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			} else if utilization < constants.FlowControlResumeThreshold {
 				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_RESUME)
-			}
-		}
-	} else if c.hasUpstream && c.packetsReceived != nil && c.packetsForwarded != nil {
-		packetsReceived := c.packetsReceived.Load()
-		packetsForwarded := c.packetsForwarded.Load()
-
-		// If we're significantly behind in forwarding, slow down
-		if packetsReceived > packetsForwarded {
-			backlog := packetsReceived - packetsForwarded
-			if backlog > constants.FlowControlUpstreamBacklogThreshold {
-				logger.Warn("Large packet backlog detected - requesting slowdown",
-					"backlog", backlog)
-				mostSevere = moreSevere(mostSevere, data.FlowControl_FLOW_SLOW)
 			}
 		}
 	}

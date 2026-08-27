@@ -29,7 +29,7 @@ func TestRegisterHunter_MaxHuntersExceeded(t *testing.T) {
 		},
 		hunterManager:  hunterMgr,
 		filterManager:  filtering.NewManager("", nil, hunterMgr, nil, nil),
-		flowController: flow.NewController(&packetsReceived, &packetsForwarded, false),
+		flowController: flow.NewController(false),
 		statsCollector: stats.NewCollector("test-processor", &packetsReceived, &packetsForwarded),
 	}
 
@@ -75,7 +75,7 @@ func TestRegisterHunter_AllowsReregistration(t *testing.T) {
 		},
 		hunterManager:  hunterMgr,
 		filterManager:  filtering.NewManager("", nil, hunterMgr, nil, nil),
-		flowController: flow.NewController(&packetsReceived, &packetsForwarded, false),
+		flowController: flow.NewController(false),
 		statsCollector: stats.NewCollector("test-processor", &packetsReceived, &packetsForwarded),
 	}
 

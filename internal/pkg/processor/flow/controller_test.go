@@ -1,7 +1,6 @@
 package flow
 
 import (
-	"sync/atomic"
 	"testing"
 
 	"github.com/endorses/lippycat/api/gen/data"
@@ -9,7 +8,7 @@ import (
 )
 
 func TestController_Determine_NoPCAPQueue(t *testing.T) {
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	// No PCAP queue configured
 
 	// Without PCAP queue, should always return CONTINUE
@@ -22,7 +21,7 @@ func TestController_Determine_QueueEmpty(t *testing.T) {
 	queueSize := 100
 	currentDepth := 0
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -37,7 +36,7 @@ func TestController_Determine_QueueSlightlyFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 40 // 40% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -52,7 +51,7 @@ func TestController_Determine_QueueMediumFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 75 // 75% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -67,7 +66,7 @@ func TestController_Determine_QueueAlmostFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 95 // 95% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -82,7 +81,7 @@ func TestController_Determine_QueueFull(t *testing.T) {
 	queueSize := 100
 	currentDepth := 100 // 100% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -97,7 +96,7 @@ func TestController_Determine_QueueDraining(t *testing.T) {
 	queueSize := 100
 	currentDepth := 25 // 25% full
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -164,7 +163,7 @@ func TestController_Determine_QueueThresholds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fillCount := tc.queueSize * tc.fillPercentage / 100
 
-			c := NewController(nil, nil, false)
+			c := NewController(false)
 			c.SetPCAPQueue(
 				func() int { return fillCount },
 				func() int { return tc.queueSize },
@@ -181,7 +180,7 @@ func TestController_Determine_DynamicBehavior(t *testing.T) {
 	queueSize := 100
 	currentDepth := 95 // Start at 95%
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -221,7 +220,7 @@ func TestController_Determine_EdgeCases(t *testing.T) {
 	t.Run("Queue size 1", func(t *testing.T) {
 		currentDepth := 0
 
-		c := NewController(nil, nil, false)
+		c := NewController(false)
 		c.SetPCAPQueue(
 			func() int { return currentDepth },
 			func() int { return 1 },
@@ -243,7 +242,7 @@ func TestController_Determine_EdgeCases(t *testing.T) {
 		queueSize := 10000
 		currentDepth := 9500 // 95% full
 
-		c := NewController(nil, nil, false)
+		c := NewController(false)
 		c.SetPCAPQueue(
 			func() int { return currentDepth },
 			func() int { return queueSize },
@@ -260,7 +259,7 @@ func TestController_Determine_Integration(t *testing.T) {
 	queueSize := 100
 	currentDepth := 0
 
-	c := NewController(nil, nil, false)
+	c := NewController(false)
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -298,39 +297,17 @@ func TestController_Determine_Integration(t *testing.T) {
 	}
 }
 
-func TestController_Determine_UpstreamBacklog(t *testing.T) {
-	packetsReceived := atomic.Uint64{}
-	packetsForwarded := atomic.Uint64{}
-
-	c := NewController(&packetsReceived, &packetsForwarded, true)
-
-	// Start with no backlog
-	packetsReceived.Store(1000)
-	packetsForwarded.Store(1000)
-
-	flowControl := c.Determine()
-	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, flowControl,
-		"should CONTINUE with no backlog")
-
-	// Create large backlog (>10000)
-	packetsReceived.Store(20000)
-	packetsForwarded.Store(5000)
-
-	flowControl = c.Determine()
-	assert.Equal(t, data.FlowControl_FLOW_SLOW, flowControl,
-		"should SLOW with large upstream backlog")
+func TestController_Determine_UpstreamWithoutQueueMetricDoesNotInferBacklog(t *testing.T) {
+	c := NewController(true)
+	assert.Equal(t, data.FlowControl_FLOW_CONTINUE, c.Determine())
 }
 
 func TestController_Determine_Combined_PCAP_and_Upstream(t *testing.T) {
 	queueSize := 100
 	currentDepth := 95 // PCAP queue 95% full (should PAUSE)
 
-	packetsReceived := atomic.Uint64{}
-	packetsForwarded := atomic.Uint64{}
-	packetsReceived.Store(20000)
-	packetsForwarded.Store(5000) // Large backlog (should SLOW)
-
-	c := NewController(&packetsReceived, &packetsForwarded, true)
+	c := NewController(true)
+	c.SetUpstreamQueue(func() int { return 80 }, func() int { return 100 })
 	c.SetPCAPQueue(
 		func() int { return currentDepth },
 		func() int { return queueSize },
@@ -344,7 +321,7 @@ func TestController_Determine_Combined_PCAP_and_Upstream(t *testing.T) {
 
 func TestController_Determine_UpstreamSlowBeatsPCAPResume(t *testing.T) {
 	depth, capacity := 80, 100
-	c := NewController(nil, nil, true)
+	c := NewController(true)
 	c.SetPCAPQueue(func() int { return 0 }, func() int { return 100 })
 	c.SetUpstreamQueue(func() int { return depth }, func() int { return capacity })
 

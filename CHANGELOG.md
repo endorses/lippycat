@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.8] - 2026-08-27
+
+### Changed
+- Keep LI filter IDs stable across task modification and reactivation, and reconcile persisted filters against active local task targets
+- Serialize changed live BPF updates and wait for the previous capture generation to close before reopening capture handles
+
+### Fixed
+- Avoid redundant live-capture restarts when application-layer filter changes leave the effective BPF expression unchanged
+- Remove orphaned LI filters during periodic ADMF reconciliation and roll back partially applied filter updates to their prior definitions
+- Remove an ineffectual BPF state assignment reported by CI
+
 ## [0.10.7] - 2026-08-27
 
 ### Changed

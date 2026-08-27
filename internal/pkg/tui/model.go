@@ -248,9 +248,7 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 
 	// Create background processor for non-critical packet processing
 	bgProcessor := NewBackgroundProcessor()
-	bgProcessor.Configure(BackgroundProcessorConfig{
-		CaptureMode: initialMode,
-	})
+	bgProcessor.BeginGeneration()
 
 	return Model{
 		packetStore:                packetStore,

@@ -53,6 +53,7 @@ type connection struct {
 	accepting      atomic.Bool
 	inFlight       atomic.Int64
 	disconnectOnce sync.Once
+	enqueueMu      sync.Mutex
 	wg             sync.WaitGroup
 }
 
@@ -85,6 +86,7 @@ type Manager struct {
 	// stream is not evidence that packet delivery has recovered.
 	consecutiveFailures  atomic.Int32
 	droppedBatches       atomic.Uint64
+	droppedPackets       atomic.Uint64
 	maxReconnectAttempts int // 0 = unlimited
 
 	// Context for goroutines
@@ -340,7 +342,9 @@ func (m *Manager) cleanup() {
 	m.generation = nil
 	m.mu.Unlock()
 	if generation != nil {
+		generation.enqueueMu.Lock()
 		generation.accepting.Store(false)
+		generation.enqueueMu.Unlock()
 		generation.cancel()
 		generation.wg.Wait()
 	}
@@ -361,22 +365,49 @@ func (m *Manager) Forward(batch *data.PacketBatch) {
 	generation := m.generation
 	m.mu.Unlock()
 
-	if generation == nil || !generation.accepting.Load() {
+	if generation == nil {
+		m.recordDropped(batch, "stream unavailable")
 		logger.Debug("Upstream stream not available, dropping batch")
+		return
+	}
+
+	// Serialize the accepting check with generation teardown. This prevents a
+	// producer that already loaded the old generation pointer from enqueueing
+	// after its sender has discarded the generation's queue.
+	generation.enqueueMu.Lock()
+	defer generation.enqueueMu.Unlock()
+	if !generation.accepting.Load() {
+		m.recordDropped(batch, "generation stopped")
 		return
 	}
 
 	select {
 	case generation.queue <- batch:
 	case <-generation.ctx.Done():
+		m.recordDropped(batch, "generation cancelled")
 	case <-m.ctx.Done():
+		m.recordDropped(batch, "manager stopped")
 	default:
-		dropped := m.droppedBatches.Add(1)
+		dropped := m.recordDropped(batch, "queue full")
 		logger.Warn("Upstream outbound queue full, dropping batch",
 			"queue_capacity", cap(generation.queue), "dropped_batches", dropped,
 			"packets", len(batch.Packets))
 	}
 }
+
+func (m *Manager) recordDropped(batch *data.PacketBatch, reason string) uint64 {
+	dropped := m.droppedBatches.Add(1)
+	m.droppedPackets.Add(uint64(len(batch.Packets)))
+	logger.Debug("Discarded upstream batch", "reason", reason,
+		"packets", len(batch.Packets), "dropped_batches", dropped)
+	return dropped
+}
+
+// DroppedBatches returns the total number of batches rejected or discarded.
+func (m *Manager) DroppedBatches() uint64 { return m.droppedBatches.Load() }
+
+// DroppedPackets returns the total number of packets in rejected or discarded batches.
+func (m *Manager) DroppedPackets() uint64 { return m.droppedPackets.Load() }
 
 // QueueDepth returns the current connection generation's outstanding batches.
 func (m *Manager) QueueDepth() int {
@@ -401,7 +432,7 @@ func (m *Manager) QueueCapacity() int {
 func (m *Manager) sendBatches(generation *connection) {
 	defer generation.wg.Done()
 	defer func() {
-		generation.accepting.Store(false)
+		m.discardGenerationQueue(generation)
 		if err := generation.stream.CloseSend(); err != nil {
 			logger.Error("Failed to close gRPC stream during cleanup", "error", err)
 		}
@@ -414,9 +445,16 @@ func (m *Manager) sendBatches(generation *connection) {
 			// old generation from forwarding into its successor.
 			return
 		case batch := <-generation.queue:
+			// Cancellation may race with a ready queue. Once cancelled, do not
+			// send another batch on this obsolete generation.
+			if generation.ctx.Err() != nil {
+				m.recordDropped(batch, "generation cancelled")
+				return
+			}
 			generation.inFlight.Add(1)
 			if err := generation.stream.Send(batch); err != nil {
 				generation.inFlight.Add(-1)
+				m.recordDropped(batch, "send failed")
 				failures := m.consecutiveFailures.Add(1)
 				logger.Error("Failed to forward batch to upstream", "error", err,
 					"consecutive_failures", failures)
@@ -439,11 +477,30 @@ func (m *Manager) sendBatches(generation *connection) {
 	}
 }
 
+// discardGenerationQueue stops producers and synchronously empties only the
+// bounded in-memory queue. It never waits for delivery, so shutdown remains
+// bounded once the active Send returns.
+func (m *Manager) discardGenerationQueue(generation *connection) {
+	generation.enqueueMu.Lock()
+	defer generation.enqueueMu.Unlock()
+	generation.accepting.Store(false)
+	for {
+		select {
+		case batch := <-generation.queue:
+			m.recordDropped(batch, "generation teardown")
+		default:
+			return
+		}
+	}
+}
+
 // disconnectGeneration terminates a failed stream generation and requests one
 // reconnect, even when both its sender and receiver observe the failure.
 func (m *Manager) disconnectGeneration(generation *connection) {
 	generation.disconnectOnce.Do(func() {
+		generation.enqueueMu.Lock()
 		generation.accepting.Store(false)
+		generation.enqueueMu.Unlock()
 		generation.cancel()
 		m.MarkDisconnected()
 	})

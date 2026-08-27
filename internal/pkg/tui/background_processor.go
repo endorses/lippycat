@@ -14,11 +14,6 @@ import (
 
 const backgroundQueueSize = 1000
 
-type BackgroundProcessorConfig struct {
-	CallAgg     *LocalCallAggregator
-	CaptureMode components.CaptureMode
-}
-
 type DNSPacketResultMsg struct {
 	Generation uint64
 	Packet     types.PacketDisplay
@@ -65,15 +60,11 @@ func NewBackgroundProcessor() *BackgroundProcessor {
 	return bp
 }
 
-// Configure begins a new capture generation. Results already in flight retain
-// their old generation and are ignored by Model.Update.
-func (bp *BackgroundProcessor) Configure(_ BackgroundProcessorConfig) uint64 {
-	return bp.generation.Add(1)
-}
-func (bp *BackgroundProcessor) SetCallAggregator(_ *LocalCallAggregator, _ components.CaptureMode) {
-	bp.generation.Add(1)
-}
-func (bp *BackgroundProcessor) Generation() uint64 { return bp.generation.Load() }
+// BeginGeneration invalidates results already in flight. Component selection
+// and call aggregation belong to Model.Update; the background worker needs no
+// references to mutable UI state.
+func (bp *BackgroundProcessor) BeginGeneration() uint64 { return bp.generation.Add(1) }
+func (bp *BackgroundProcessor) Generation() uint64      { return bp.generation.Load() }
 
 func (bp *BackgroundProcessor) Submit(packet components.PacketDisplay, linkType layers.LinkType) {
 	item := backgroundPacket{packet: cloneBackgroundPacket(types.PacketDisplay(packet)), linkType: linkType, generation: bp.generation.Load()}

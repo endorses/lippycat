@@ -26,6 +26,19 @@ type failingStream struct {
 	err error
 }
 
+type blockingFailingStream struct {
+	detectingStream
+	err error
+}
+
+func (s *blockingFailingStream) Send(*data.PacketBatch) error {
+	s.inSend.Add(1)
+	defer s.inSend.Add(-1)
+	<-s.release
+	s.sends.Add(1)
+	return s.err
+}
+
 func (s *failingStream) Send(*data.PacketBatch) error {
 	s.sends.Add(1)
 	return s.err
@@ -203,11 +216,52 @@ func TestForwardDropsWhenOutboundQueueIsFull(t *testing.T) {
 	m := NewManager(Config{OutboundQueueSize: 1}, nil)
 	stream := &detectingStream{release: make(chan struct{})}
 	generation := startTestGeneration(m, stream, 1)
-	m.Forward(&data.PacketBatch{})
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}}})
 	require.Eventually(t, func() bool { return stream.inSend.Load() == 1 }, time.Second, time.Millisecond)
-	m.Forward(&data.PacketBatch{})
-	m.Forward(&data.PacketBatch{})
-	require.Equal(t, uint64(1), m.droppedBatches.Load())
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}, {}}})
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}, {}, {}}})
+	require.Equal(t, uint64(1), m.DroppedBatches())
+	require.Equal(t, uint64(3), m.DroppedPackets())
 	close(stream.release)
 	stopTestGeneration(generation)
+}
+
+func TestGenerationLossAccountsFailedAndQueuedBatches(t *testing.T) {
+	m := NewManager(Config{OutboundQueueSize: 2}, nil)
+	stream := &blockingFailingStream{
+		detectingStream: detectingStream{release: make(chan struct{})},
+		err:             errors.New("send failed"),
+	}
+	generation := startTestGeneration(m, stream, 2)
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}}})
+	require.Eventually(t, func() bool { return stream.inSend.Load() == 1 }, time.Second, time.Millisecond)
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}, {}}})
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}, {}, {}}})
+
+	close(stream.release)
+	require.Eventually(t, func() bool { return generation.ctx.Err() != nil }, time.Second, time.Millisecond)
+	stopTestGeneration(generation)
+
+	require.Equal(t, uint64(3), m.DroppedBatches(), "failed batch and both queued batches")
+	require.Equal(t, uint64(6), m.DroppedPackets())
+	require.Equal(t, uint64(1), stream.sends.Load())
+}
+
+func TestShutdownAccountsQueuedBatchesWithoutDrainingToStream(t *testing.T) {
+	m := NewManager(Config{OutboundQueueSize: 2}, nil)
+	stream := &detectingStream{release: make(chan struct{})}
+	generation := startTestGeneration(m, stream, 2)
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}}})
+	require.Eventually(t, func() bool { return stream.inSend.Load() == 1 }, time.Second, time.Millisecond)
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}, {}}})
+	m.Forward(&data.PacketBatch{Packets: []*data.CapturedPacket{{}, {}, {}}})
+
+	generation.cancel()
+	close(stream.release)
+	generation.wg.Wait()
+
+	require.Equal(t, uint64(2), m.DroppedBatches())
+	require.Equal(t, uint64(5), m.DroppedPackets())
+	require.Equal(t, uint64(1), stream.sends.Load(), "shutdown must not drain queued batches to upstream")
+	require.True(t, stream.closed.Load())
 }

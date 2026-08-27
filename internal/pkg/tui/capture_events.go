@@ -100,7 +100,7 @@ func (m *Model) ensureCallAggregator() {
 		// Set global accessor for TCP reassembly handler to trigger merges
 		SetLocalCallAggregator(m.liveCallAggregator)
 		if m.backgroundProcessor != nil {
-			m.backgroundProcessor.SetCallAggregator(m.liveCallAggregator, components.CaptureModeLive)
+			m.backgroundProcessor.BeginGeneration()
 		}
 		// Initialize call tracker for RTP-to-CallID mapping
 		if GetCallTracker() == nil {
@@ -114,7 +114,7 @@ func (m *Model) ensureCallAggregator() {
 		// Set global accessor for TCP reassembly handler to trigger merges
 		SetLocalCallAggregator(m.offlineCallAggregator)
 		if m.backgroundProcessor != nil {
-			m.backgroundProcessor.SetCallAggregator(m.offlineCallAggregator, components.CaptureModeOffline)
+			m.backgroundProcessor.BeginGeneration()
 		}
 		// Initialize call tracker for RTP-to-CallID mapping
 		if GetCallTracker() == nil {

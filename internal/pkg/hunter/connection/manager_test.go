@@ -4,7 +4,9 @@ package connection
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/forwarding"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/metadata"
 )
 
 // Mock implementations for testing
@@ -61,6 +64,47 @@ func (m *mockForwardingFactory) CreateForwardingManager(
 ) *forwarding.Manager {
 	return nil
 }
+
+type teardownStats struct{}
+
+func (*teardownStats) IncrementCaptured()        {}
+func (*teardownStats) IncrementMatched()         {}
+func (*teardownStats) IncrementForwarded(uint64) {}
+func (*teardownStats) IncrementDropped(uint64)   {}
+func (*teardownStats) GetCaptured() uint64       { return 0 }
+func (*teardownStats) GetMatched() uint64        { return 0 }
+func (*teardownStats) GetDropped() uint64        { return 0 }
+
+type transportBlockedStream struct {
+	started      chan struct{}
+	release      chan struct{}
+	startOnce    sync.Once
+	releaseOnce  sync.Once
+	active       atomic.Bool
+	closeOverlap atomic.Bool
+	closed       atomic.Int32
+}
+
+func (s *transportBlockedStream) Send(*data.PacketBatch) error {
+	s.active.Store(true)
+	defer s.active.Store(false)
+	s.startOnce.Do(func() { close(s.started) })
+	<-s.release
+	return errors.New("transport closed")
+}
+func (*transportBlockedStream) Recv() (*data.StreamControl, error) { return nil, context.Canceled }
+func (*transportBlockedStream) Header() (metadata.MD, error)       { return nil, nil }
+func (*transportBlockedStream) Trailer() metadata.MD               { return nil }
+func (s *transportBlockedStream) CloseSend() error {
+	if s.active.Load() {
+		s.closeOverlap.Store(true)
+	}
+	s.closed.Add(1)
+	return nil
+}
+func (*transportBlockedStream) Context() context.Context { return context.Background() }
+func (*transportBlockedStream) SendMsg(any) error        { return nil }
+func (*transportBlockedStream) RecvMsg(any) error        { return nil }
 
 // Tests
 
@@ -151,6 +195,83 @@ func TestMarkDisconnected_Concurrent(t *testing.T) {
 
 	wg.Wait()
 	assert.True(t, manager.reconnecting)
+}
+
+func TestSendTimeoutCancelsExactGenerationAndForcesTransportClose(t *testing.T) {
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+	connCtx, connCancel := context.WithCancel(rootCtx)
+	stream := &transportBlockedStream{started: make(chan struct{}), release: make(chan struct{})}
+	queue := make(chan *data.PacketBatch, 1)
+	fwd := forwarding.New(forwarding.Config{
+		BatchSize:   1,
+		SendTimeout: 10 * time.Millisecond,
+	}, &teardownStats{}, nil, connCtx, queue)
+	fwd.SetStream(stream)
+
+	manager := &Manager{
+		ctx:                 rootCtx,
+		connCtx:             connCtx,
+		connCancel:          connCancel,
+		forwardingManager:   fwd,
+		forwardingExitGrace: 10 * time.Millisecond,
+	}
+	generation := manager.generation.Add(1)
+	fwd.SetDisconnectCallback(func() { manager.markGenerationDisconnected(generation) })
+	transportClosed := make(chan struct{})
+	manager.closeDataTransport = func() error {
+		stream.releaseOnce.Do(func() { close(stream.release) })
+		close(transportClosed)
+		return nil
+	}
+
+	queue <- &data.PacketBatch{Sequence: 1, Packets: []*data.CapturedPacket{{}}}
+	select {
+	case <-stream.started:
+	case <-time.After(time.Second):
+		t.Fatal("send did not start")
+	}
+	select {
+	case <-connCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("timeout callback did not cancel its connection generation")
+	}
+	manager.reconnectMu.Lock()
+	require.True(t, manager.reconnecting)
+	manager.reconnectMu.Unlock()
+
+	cleanupDone := make(chan struct{})
+	go func() {
+		manager.cleanup()
+		close(cleanupDone)
+	}()
+	select {
+	case <-cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup remained blocked after forced transport close")
+	}
+	require.Equal(t, int32(1), stream.closed.Load())
+	require.False(t, stream.closeOverlap.Load(), "CloseSend overlapped the sole sender")
+	select {
+	case <-transportClosed:
+	default:
+		t.Fatal("cleanup did not use the forced transport-close fallback")
+	}
+
+	// A delayed timeout from this generation cannot cancel a successor.
+	successorCtx, successorCancel := context.WithCancel(rootCtx)
+	defer successorCancel()
+	manager.connCtx = successorCtx
+	manager.connCancel = successorCancel
+	manager.reconnectMu.Lock()
+	manager.reconnecting = false
+	manager.reconnectMu.Unlock()
+	manager.generation.Add(1)
+	manager.markGenerationDisconnected(generation)
+	require.NoError(t, successorCtx.Err())
+	manager.reconnectMu.Lock()
+	require.False(t, manager.reconnecting)
+	manager.reconnectMu.Unlock()
 }
 
 func TestCalculateStatus_Healthy(t *testing.T) {

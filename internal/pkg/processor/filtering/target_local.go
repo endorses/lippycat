@@ -261,8 +261,6 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 		filters = append(filters, f)
 	}
 	baseBPF := t.baseBPF
-	lastAppliedBPF := t.lastAppliedBPF
-	hasAppliedBPF := t.hasAppliedBPF
 	t.mu.RUnlock()
 
 	// Map iteration order is random. Stable ordering prevents an equivalent set
@@ -303,6 +301,8 @@ func (t *LocalTarget) applyFilters(bpfUpdater BPFUpdater, appFilter AppFilterUpd
 	defer t.bpfApplyMu.Unlock()
 	// Another reconciliation may have completed while this one was building its
 	// expression, so refresh the applied state after entering the serial region.
+	var lastAppliedBPF string
+	var hasAppliedBPF bool
 	t.mu.RLock()
 	if t.bpfUpdater == bpfUpdater {
 		lastAppliedBPF = t.lastAppliedBPF

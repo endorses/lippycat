@@ -230,7 +230,9 @@ func TestPacketBuffer_HighThroughput(t *testing.T) {
 
 	// Start a receiver to consume packets
 	var received int64
+	receiverDone := make(chan struct{})
 	go func() {
+		defer close(receiverDone)
 		ch := buffer.Receive()
 		for range ch {
 			atomic.AddInt64(&received, 1)
@@ -249,13 +251,21 @@ func TestPacketBuffer_HighThroughput(t *testing.T) {
 
 	duration := time.Since(start)
 
-	// Give receiver time to catch up
-	time.Sleep(100 * time.Millisecond)
+	// Close the inputs so the merger drains every accepted packet and closes the
+	// receive channel. This avoids making correctness depend on runner speed.
+	buffer.CloseInputs()
+	select {
+	case <-receiverDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for packet buffer to drain")
+	}
 
 	t.Logf("Sent %d packets in %v (%.0f packets/sec)", sent, duration, float64(sent)/duration.Seconds())
 
-	// With a receiver, we should be able to send most packets
-	assert.Greater(t, sent, numPackets/2, "Should be able to send at least half the packets")
+	// Non-blocking Send may drop packets whenever the producer outruns the
+	// receiver. The main channel capacity is the deterministic lower bound;
+	// requiring an arbitrary delivery percentage makes this test CPU-sensitive.
+	assert.GreaterOrEqual(t, sent, buffer.Cap(), "Should accept at least one full main buffer")
 
 	dropped := atomic.LoadInt64(&buffer.dropped)
 	receivedCount := atomic.LoadInt64(&received)
@@ -263,6 +273,7 @@ func TestPacketBuffer_HighThroughput(t *testing.T) {
 
 	// Total should match
 	assert.Equal(t, int64(numPackets), int64(sent)+dropped, "Total packets should equal sent + dropped")
+	assert.Equal(t, int64(sent), receivedCount, "Every accepted packet should be received")
 }
 
 func TestPacketBuffer_IsClosed(t *testing.T) {

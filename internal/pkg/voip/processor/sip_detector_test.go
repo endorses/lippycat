@@ -90,7 +90,6 @@ To: Bob <sip:bob@example.com>
 Call-ID: abc123@example.com
 CSeq: 1 INVITE
 Content-Type: application/sdp
-Content-Length: 50
 
 v=0
 o=- 12345 12345 IN IP4 192.168.1.1
@@ -386,7 +385,7 @@ func TestNormalizeHeaderName(t *testing.T) {
 		{"f", "from"},
 		{"t", "to"},
 		{"v", "via"},
-		{"c", "contact"},
+		{"c", "content-type"},
 		{"l", "content-length"},
 		{"call-id", "call-id"}, // Not a compact form
 		{"from", "from"},

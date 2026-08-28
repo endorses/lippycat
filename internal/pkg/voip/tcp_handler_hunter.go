@@ -8,6 +8,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -56,19 +57,26 @@ func (h *HunterForwardHandler) SetApplicationFilter(filter ApplicationFilter) {
 // and forwarding delivers this message's own packet (not a drained whole-flow
 // buffer), so there is no match-once-per-connection and no double-forwarding.
 func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
+	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Now())
+}
+
+func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
 	if callID == "" {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
-	// Parse SIP headers and method
-	headers, body := parseSipHeaders(sipMessage)
-	method := detectSipMethod(string(sipMessage))
+	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
+	if err != nil || event.CallID != callID {
+		discardTCPBufferedPackets(netFlow, transportFlow)
+		return false
+	}
+	headers, body, method := event.Headers, string(event.Body), event.Method
 
 	// Synthesize a packet carrying exactly this reassembled SIP message so both
 	// matching and forwarding operate on THIS message rather than on the first
 	// raw packet buffered for the whole flow.
-	pkt, ok := buildSIPPacketInfo(sipMessage, srcEndpoint, dstEndpoint, netFlow, time.Now())
+	pkt, ok := buildSIPPacketInfo(sipMessage, srcEndpoint, dstEndpoint, netFlow, capturedAt)
 	if !ok {
 		logger.Warn("TCP SIP: failed to synthesize packet for message, dropping",
 			"call_id", SanitizeCallIDForLogging(callID),
@@ -79,14 +87,14 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 
 	metadata := &CallMetadata{
 		CallID:            callID,
-		From:              extractUserFromSIPURI(headers["from"]),
-		To:                extractUserFromSIPURI(headers["to"]),
-		FromTag:           extractTagFromHeader(headers["from"]),
-		ToTag:             extractTagFromHeader(headers["to"]),
+		From:              event.FromUser,
+		To:                event.ToUser,
+		FromTag:           event.FromTag,
+		ToTag:             event.ToTag,
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            method,
-		CSeqMethod:        extractCSeqMethod(headers["cseq"]),
-		ResponseCode:      extractSipResponseCode(sipMessage),
+		CSeqMethod:        event.CSeqMethod,
+		ResponseCode:      uint32(event.ResponseCode),
 		SDPBody:           body,
 	}
 
@@ -97,8 +105,8 @@ func (h *HunterForwardHandler) HandleSIPMessage(sipMessage []byte, callID string
 			ToUser:            metadata.To,   // username only
 			FromTag:           metadata.FromTag,
 			ToTag:             metadata.ToTag,
-			FromUri:           extractFullSIPURI(headers["from"]),
-			ToUri:             extractFullSIPURI(headers["to"]),
+			FromUri:           event.FromURI,
+			ToUri:             event.ToURI,
 			Method:            metadata.Method,
 			CseqMethod:        metadata.CSeqMethod,
 			ResponseCode:      metadata.ResponseCode,

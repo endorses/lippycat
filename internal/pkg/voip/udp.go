@@ -6,6 +6,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip/monitoring"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -68,9 +69,9 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 			injectPacketToVirtualInterface(pkt)
 
 			// Process it
-			headers, body := parseSipHeaders(payload)
-			callID := headers["call-id"]
-			if callID != "" {
+			event, parseErr := sharedsip.Parse(payload, sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp})
+			if parseErr == nil && event.CallID != "" {
+				callID, body := event.CallID, string(event.Body)
 				// Validate the Call-ID for security
 				if err := ValidateCallIDForSecurity(callID); err != nil {
 					logger.Warn("Malicious Call-ID detected and rejected",
@@ -133,11 +134,11 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 		// Try to parse as SIP message (content-based detection, not port-based)
 		if handleSipMessage(payload, pkt.LinkType) {
 			// It's a SIP packet - process it
-			headers, body := parseSipHeaders(payload)
-			callID := headers["call-id"]
-			if callID == "" {
+			event, parseErr := sharedsip.Parse(payload, sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp})
+			if parseErr != nil || event.CallID == "" {
 				return
 			}
+			headers, body, callID := event.Headers, string(event.Body), event.CallID
 
 			// Validate Call-ID for security
 			if err := ValidateCallIDForSecurity(callID); err != nil {
@@ -153,10 +154,12 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				CallID:            callID,
 				From:              headers["from"],
 				To:                headers["to"],
-				FromTag:           extractTagFromHeader(headers["from"]),
-				ToTag:             extractTagFromHeader(headers["to"]),
+				FromTag:           event.FromTag,
+				ToTag:             event.ToTag,
 				PAssertedIdentity: headers["p-asserted-identity"],
-				Method:            detectSipMethod(string(payload)),
+				Method:            event.Method,
+				CSeqMethod:        event.CSeqMethod,
+				ResponseCode:      uint32(event.ResponseCode),
 				SDPBody:           body,
 			}
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket/layers"
 )
 
@@ -12,58 +13,14 @@ import (
 // Example: "Alicent <sip:alicent@domain.com>" -> "alicent"
 // Example: "sip:robb@example.org" -> "robb"
 func extractUserFromSIPURI(uri string) string {
-	// Find "sip:" or "sips:" prefix
-	start := strings.Index(uri, "sip:")
-	if start == -1 {
-		start = strings.Index(uri, "sips:")
-		if start == -1 {
-			return ""
-		}
-		start += 5 // len("sips:")
-	} else {
-		start += 4 // len("sip:")
-	}
-
-	// Find the @ symbol
-	end := strings.Index(uri[start:], "@")
-	if end == -1 {
-		return ""
-	}
-
-	return uri[start : start+end]
+	return sharedsip.User(sharedsip.URI(uri))
 }
 
 // extractFullSIPURI extracts the full SIP URI from a header value
 // Example: "Alicent <sip:alicent@domain.com>;tag=123" -> "sip:alicent@domain.com"
 // Example: "sip:robb@example.org" -> "sip:robb@example.org"
 func extractFullSIPURI(header string) string {
-	// Find the URI between < and > if present
-	start := strings.Index(header, "<")
-	if start != -1 {
-		end := strings.Index(header[start:], ">")
-		if end != -1 {
-			return header[start+1 : start+end]
-		}
-	}
-
-	// No angle brackets, find sip: or sips: prefix
-	sipStart := strings.Index(header, "sip:")
-	if sipStart == -1 {
-		sipStart = strings.Index(header, "sips:")
-		if sipStart == -1 {
-			return ""
-		}
-	}
-
-	// Find the end of the URI (space, semicolon, or newline)
-	uri := header[sipStart:]
-	for i, ch := range uri {
-		if ch == ' ' || ch == ';' || ch == '\r' || ch == '\n' || ch == '>' {
-			return uri[:i]
-		}
-	}
-
-	return uri
+	return sharedsip.URI(header)
 }
 
 // ExtractUserFromHeader extracts the username from a SIP header value (From, To, P-Asserted-Identity)
@@ -123,27 +80,7 @@ func ExtractURIFromHeaderBytes(header []byte) string {
 // Example: "<sip:user@host>;tag=xyz789;other=param" -> "xyz789"
 // Returns empty string if no tag parameter found
 func extractTagFromHeader(header string) string {
-	// Look for ";tag=" parameter (case-insensitive)
-	tagStart := strings.Index(strings.ToLower(header), ";tag=")
-	if tagStart == -1 {
-		return ""
-	}
-
-	// Start after ";tag="
-	valueStart := tagStart + 5 // len(";tag=")
-	if valueStart >= len(header) {
-		return ""
-	}
-
-	// Find the end of the tag value (semicolon, space, or end of string)
-	value := header[valueStart:]
-	for i, ch := range value {
-		if ch == ';' || ch == ' ' || ch == '\r' || ch == '\n' || ch == '>' {
-			return value[:i]
-		}
-	}
-
-	return value
+	return sharedsip.Tag(header)
 }
 
 func handleSipMessage(data []byte, linkType layers.LinkType) bool {
@@ -209,10 +146,15 @@ func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 }
 
 func detectSipMethod(line string) string {
-	lineBytes := StringToBytes(line)
-
-	// Use SIMD-optimized method matching if available
-	return SIPMethodMatchSIMD(lineBytes)
+	event, err := sharedsip.Parse([]byte(line), sharedsip.ParseOptions{})
+	if err == nil {
+		return event.Method
+	}
+	fields := strings.Fields(line)
+	if len(fields) > 0 && sharedsip.IsRequestMethod(fields[0]) {
+		return fields[0]
+	}
+	return ""
 }
 
 // extractCSeqMethod returns the method token from a CSeq header value.
@@ -223,17 +165,16 @@ func detectSipMethod(line string) string {
 // first observed via a response (capture started mid-call, or packets
 // reordered) can still be classified.
 func extractCSeqMethod(cseq string) string {
-	fields := strings.Fields(cseq)
-	if len(fields) < 2 {
-		return ""
-	}
-	return strings.ToUpper(fields[1])
+	return sharedsip.CSeqMethod(cseq)
 }
 
 // extractSipResponseCode extracts the response code from a SIP response message.
 // Returns 0 if this is not a response or if the response code cannot be parsed.
 // Example: "SIP/2.0 200 OK" returns 200
 func extractSipResponseCode(payload []byte) uint32 {
+	if event, err := sharedsip.Parse(payload, sharedsip.ParseOptions{}); err == nil {
+		return uint32(event.ResponseCode)
+	}
 	// SIP responses start with "SIP/2.0 <code>"
 	// Minimum: "SIP/2.0 100" = 12 bytes
 	if len(payload) < 12 {
@@ -266,41 +207,17 @@ func extractSipResponseCode(payload []byte) uint32 {
 }
 
 func isSipStartLine(line string) bool {
-	lineBytes := StringToBytes(line)
-
-	// SIP responses start with SIP/2.0
-	if BytesHasPrefixString(lineBytes, "SIP/2.0") {
-		return true
-	}
-
-	// SIP requests must contain "SIP/2.0" at the end
-	if !BytesContains(lineBytes, []byte("SIP/2.0")) {
-		return false
-	}
-
-	// Check for valid SIP methods at the beginning. This must include the
-	// message-oriented methods (MESSAGE, INFO, NOTIFY, ...) — IMS/VoLTE SMS is
-	// carried as a SIP MESSAGE request, and omitting it here caused reassembled
-	// MESSAGE requests to be rejected as "not a SIP start line" even though the
-	// request bytes reached the handler. Keep this in sync with the method list
-	// used by isSIPRequestLine in tcp_stream.go.
-	return BytesHasPrefixString(lineBytes, "INVITE ") ||
-		BytesHasPrefixString(lineBytes, "REGISTER ") ||
-		BytesHasPrefixString(lineBytes, "OPTIONS ") ||
-		BytesHasPrefixString(lineBytes, "ACK ") ||
-		BytesHasPrefixString(lineBytes, "BYE ") ||
-		BytesHasPrefixString(lineBytes, "CANCEL ") ||
-		BytesHasPrefixString(lineBytes, "UPDATE ") ||
-		BytesHasPrefixString(lineBytes, "REFER ") ||
-		BytesHasPrefixString(lineBytes, "SUBSCRIBE ") ||
-		BytesHasPrefixString(lineBytes, "NOTIFY ") ||
-		BytesHasPrefixString(lineBytes, "INFO ") ||
-		BytesHasPrefixString(lineBytes, "MESSAGE ") ||
-		BytesHasPrefixString(lineBytes, "PRACK ") ||
-		BytesHasPrefixString(lineBytes, "PUBLISH ")
+	return sharedsip.IsStartLine(line)
 }
 
 func parseSipHeaders(data []byte) (map[string]string, string) {
+	if event, err := sharedsip.Parse(data, sharedsip.ParseOptions{}); err == nil {
+		body := string(event.Body)
+		if body != "" && !strings.HasSuffix(body, "\n") {
+			body += "\n" // retain the legacy helper contract during migration
+		}
+		return event.Headers, body
+	}
 	// Protect against buffer overflow by limiting input size
 	const maxSipMessageSize = 65536 // 64KB limit for SIP messages
 	if len(data) > maxSipMessageSize {

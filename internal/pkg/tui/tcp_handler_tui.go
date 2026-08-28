@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
@@ -44,21 +45,25 @@ func NewTUISIPHandler() *TUISIPHandler {
 // It marks the flow as SIP so subsequent packets on this flow are displayed correctly.
 // srcEndpoint and dstEndpoint are in "IP:port" format (e.g., "192.168.1.1:5060").
 // netFlow is not used by TUI handler but required by the interface for other handlers.
-func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, _, _ gopacket.Flow) bool {
+func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
+	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Now())
+}
+
+func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, _, _ gopacket.Flow, capturedAt time.Time) bool {
 	if len(sipMessage) == 0 {
 		return false
 	}
+	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
+	if err != nil || event.CallID != callID {
+		return false
+	}
 
-	// Track whether this is a request or response, and extract method/status code
-	isResponse := len(sipMessage) >= 7 && sipMessage[0] == 'S' && sipMessage[1] == 'I' && sipMessage[2] == 'P' && sipMessage[3] == '/'
-	var method string
-	var responseCode int
+	isResponse := event.Method == "RESPONSE"
+	method, responseCode := event.Method, event.ResponseCode
 	if isResponse {
 		atomic.AddInt64(&tcpSIPResponsesProcessed, 1)
-		responseCode = extractResponseCodeFromSIP(sipMessage)
 	} else {
 		atomic.AddInt64(&tcpSIPRequestsProcessed, 1)
-		method = extractMethodFromSIP(sipMessage)
 	}
 
 	// Increment SIP messages detected counter (diagnostic)
@@ -90,9 +95,8 @@ func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 	// This ensures TCP SIP responses update call state (e.g., 401 → Failed with error code)
 	if callID != "" {
 		if agg := GetLocalCallAggregator(); agg != nil {
-			from, to := extractFromToFromSIP(sipMessage)
 			pkt := &components.PacketDisplay{
-				Timestamp: time.Now(), // TCP reassembly doesn't preserve original timestamp
+				Timestamp: capturedAt,
 				SrcIP:     srcIP,
 				SrcPort:   srcPort,
 				DstIP:     dstIP,
@@ -102,8 +106,8 @@ func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 					CallID: callID,
 					Method: method,
 					Status: responseCode,
-					From:   from,
-					To:     to,
+					From:   event.From,
+					To:     event.To,
 				},
 			}
 			agg.ProcessPacket(pkt)
@@ -115,7 +119,7 @@ func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 		if tracker := GetCallTracker(); tracker != nil {
 			// Parse SIP message to extract media ports for RTP mapping
 			// This is a lightweight parse - just looking for SDP m= lines
-			mediaPorts := extractMediaPortsFromSIP(sipMessage)
+			mediaPorts := extractMediaPortsFromSIP(event.Body)
 			if len(mediaPorts) > 0 {
 				// Track requests/responses with SDP
 				if isResponse {
@@ -126,7 +130,7 @@ func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 
 				// Extract the SDP c= line IP (connection address) - this is where RTP should go
 				// In SBC/B2BUA environments, the signaling IP (srcIP) differs from media IP
-				mediaIP := extractConnectionIPFromPayload(sipMessage)
+				mediaIP := extractConnectionIPFromPayload(event.Body)
 
 				// Log TCP SIP with SDP
 				msgType := "request"
@@ -169,9 +173,8 @@ func (h *TUISIPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 			}
 
 			// Extract and register From/To for call display
-			from, to := extractFromToFromSIP(sipMessage)
-			if from != "" || to != "" {
-				tracker.RegisterCallPartyInfo(callID, from, to)
+			if event.From != "" || event.To != "" {
+				tracker.RegisterCallPartyInfo(callID, event.From, event.To)
 			}
 		}
 	}

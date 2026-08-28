@@ -6,6 +6,7 @@ import (
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -90,12 +91,15 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		linkType = layers.LinkType(linkLayer.LayerType())
 	}
 
-	// Parse headers for metadata first
-	headers, body := parseSipHeaders(payload)
-	callID := headers["call-id"]
-	if callID == "" {
+	opts := sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp, SourcePort: uint16(layer.SrcPort), DestinationPort: uint16(layer.DstPort)}
+	if network := packet.NetworkLayer(); network != nil {
+		opts.SourceIP, opts.DestinationIP = network.NetworkFlow().Src().String(), network.NetworkFlow().Dst().String()
+	}
+	event, err := sharedsip.Parse(payload, opts)
+	if err != nil || event.CallID == "" {
 		return false
 	}
+	headers, body, callID := event.Headers, string(event.Body), event.CallID
 
 	// Validate Call-ID for security
 	if err := ValidateCallIDForSecurity(callID); err != nil {
@@ -111,8 +115,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	call := GetOrCreateCall(callID, linkType)
 	if call != nil {
 		// Update call state based on SIP method
-		method := detectSipMethod(string(payload))
-		call.SetCallInfoState(method)
+		call.SetCallInfoState(event.Method)
 	}
 
 	// Check if the SIP message matches our filter (for forwarding decision)
@@ -127,12 +130,12 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		CallID:            callID,
 		From:              headers["from"],
 		To:                headers["to"],
-		FromTag:           extractTagFromHeader(headers["from"]),
-		ToTag:             extractTagFromHeader(headers["to"]),
+		FromTag:           event.FromTag,
+		ToTag:             event.ToTag,
 		PAssertedIdentity: headers["p-asserted-identity"],
-		Method:            detectSipMethod(string(payload)),
-		CSeqMethod:        extractCSeqMethod(headers["cseq"]),
-		ResponseCode:      extractSipResponseCode(payload),
+		Method:            event.Method,
+		CSeqMethod:        event.CSeqMethod,
+		ResponseCode:      uint32(event.ResponseCode),
 		SDPBody:           body,
 	}
 

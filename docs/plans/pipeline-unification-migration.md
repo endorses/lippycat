@@ -293,6 +293,11 @@ unifying call policy or delivery.
 - [x] During transition, compare normalized results from old and new parsing on
       a synthetic reference corpus suitable for CI.
 
+Verification correction (2026-08-28): the VoIP compatibility fallback now uses
+the package-scope RFC compact-header map, and the synthetic corpus compares the
+shared parser with frozen legacy results rather than shared-parser-backed
+compatibility adapters.
+
 ### Exit Criteria
 
 - One implementation produces SIP domain metadata.

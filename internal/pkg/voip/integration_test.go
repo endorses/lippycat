@@ -188,7 +188,7 @@ Call-ID: end-to-end-test-call@example.com
 CSeq: 1 INVITE
 Contact: <sip:robb@192.168.1.100:5060>
 Content-Type: application/sdp
-Content-Length: 142
+Content-Length: 122
 
 v=0
 o=robb 123456 789012 IN IP4 192.168.1.100

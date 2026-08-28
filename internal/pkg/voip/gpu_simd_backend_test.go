@@ -347,7 +347,7 @@ func TestSIMDCallIDExtractor(t *testing.T) {
 
 	packets := [][]byte{
 		[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
-		[]byte("200 OK\r\nCall-ID: xyz789\r\n"),
+		[]byte("SIP/2.0 200 OK\r\nCall-ID: xyz789\r\n"),
 		[]byte("REGISTER sip:proxy SIP/2.0\r\ni: short123\r\n"),
 		[]byte("No Call-ID here"),
 	}

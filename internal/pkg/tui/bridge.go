@@ -20,7 +20,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
-	"github.com/endorses/lippycat/internal/pkg/simd"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
@@ -135,15 +135,6 @@ var (
 	}
 	protocolMu sync.RWMutex
 
-	// Pre-allocated SIP method prefixes for fast detection (no allocations)
-	sipMethodINVITE   = []byte("INVITE")
-	sipMethodREGISTER = []byte("REGISTER")
-	sipMethodOPTIONS  = []byte("OPTIONS")
-	sipMethodACK      = []byte("ACK")
-	sipMethodBYE      = []byte("BYE")
-	sipMethodCANCEL   = []byte("CANCEL")
-	sipResponse       = []byte("SIP/2.0")
-
 	// TCP SIP flow cache for TCP reassembly-based detection
 	// Flows are marked as SIP when the TCP reassembly handler detects complete SIP messages
 	tcpSIPFlowCache   = make(map[string]tcpSIPFlowEntry)
@@ -193,35 +184,11 @@ func isSIPPacket(pkt gopacket.Packet) bool {
 // isSIPBytes performs fast SIP detection using SIMD-optimized byte comparison
 // This is used in the fast conversion path to avoid full protocol detection overhead
 func isSIPBytes(payload []byte) bool {
-	if len(payload) < 3 {
-		return false
+	line := payload
+	if newline := strings.IndexByte(string(line), '\n'); newline >= 0 {
+		line = line[:newline]
 	}
-
-	// Check for common SIP methods and responses
-	// Using pre-allocated byte slices and SIMD comparison for zero allocations
-	if len(payload) >= len(sipMethodINVITE) && simd.BytesEqual(payload[:len(sipMethodINVITE)], sipMethodINVITE) {
-		return true
-	}
-	if len(payload) >= len(sipMethodREGISTER) && simd.BytesEqual(payload[:len(sipMethodREGISTER)], sipMethodREGISTER) {
-		return true
-	}
-	if len(payload) >= len(sipMethodOPTIONS) && simd.BytesEqual(payload[:len(sipMethodOPTIONS)], sipMethodOPTIONS) {
-		return true
-	}
-	if len(payload) >= len(sipResponse) && simd.BytesEqual(payload[:len(sipResponse)], sipResponse) {
-		return true
-	}
-	if len(payload) >= len(sipMethodACK) && simd.BytesEqual(payload[:len(sipMethodACK)], sipMethodACK) {
-		return true
-	}
-	if len(payload) >= len(sipMethodBYE) && simd.BytesEqual(payload[:len(sipMethodBYE)], sipMethodBYE) {
-		return true
-	}
-	if len(payload) >= len(sipMethodCANCEL) && simd.BytesEqual(payload[:len(sipMethodCANCEL)], sipMethodCANCEL) {
-		return true
-	}
-
-	return false
+	return sharedsip.IsStartLine(string(line))
 }
 
 // tcpSIPFlowEntry tracks a TCP flow that has been identified as SIP

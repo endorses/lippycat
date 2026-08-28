@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 )
 
@@ -337,54 +338,11 @@ func (ve *VectorizedCallIDExtractor) extractCallIDsStandard(packets [][]byte) []
 
 // extractCallIDFast is a fast Call-ID extraction (uses zero-alloc ops)
 func extractCallIDFast(data []byte) string {
-	// Quick check for Call-ID presence
-	hasCallID := BytesContains(data, []byte("Call-ID"))
-	hasShortForm := BytesContains(data, []byte("\ni:"))
-
-	if !hasCallID && !hasShortForm {
+	event, err := sharedsip.Parse(data, sharedsip.ParseOptions{})
+	if err != nil {
 		return ""
 	}
-
-	// Find Call-ID header line by line
-	start := 0
-	for start < len(data) {
-		// Find end of line
-		end := start
-		for end < len(data) && data[end] != '\n' {
-			end++
-		}
-
-		line := data[start:end]
-
-		// Remove trailing \r
-		if len(line) > 0 && line[len(line)-1] == '\r' {
-			line = line[:len(line)-1]
-		}
-
-		// Check for Call-ID header
-		if len(line) >= 9 && BytesEqual(line[:9], []byte("Call-ID: ")) {
-			// Extract value (skip "Call-ID: ")
-			value := TrimSpace(line[9:])
-			return BytesToString(value)
-		} else if len(line) >= 8 && BytesEqual(line[:8], []byte("Call-ID:")) {
-			// No space after colon
-			value := TrimSpace(line[8:])
-			return BytesToString(value)
-		} else if len(line) >= 3 && BytesEqual(line[:3], []byte("i: ")) {
-			// Short form with space
-			value := TrimSpace(line[3:])
-			return BytesToString(value)
-		} else if len(line) >= 2 && BytesEqual(line[:2], []byte("i:")) {
-			// Short form without space
-			value := TrimSpace(line[2:])
-			return BytesToString(value)
-		}
-
-		// Move to next line
-		start = end + 1
-	}
-
-	return ""
+	return event.CallID
 }
 
 // BatchCollector collects packets into batches

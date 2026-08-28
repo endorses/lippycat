@@ -298,6 +298,12 @@ the package-scope RFC compact-header map, and the synthetic corpus compares the
 shared parser with frozen legacy results rather than shared-parser-backed
 compatibility adapters.
 
+Verification follow-up (2026-08-28): removed the remaining metadata-producing
+legacy fallback and optional plugin parser, removed the unused duplicate SIMD
+method matcher, centralized SDP classification on `SIPEvent`, and expanded the
+corpus to cover transport framing, folded headers, malformed and conflicting
+lengths, response-code bounds, normalized identities, SDP, and provenance.
+
 ### Exit Criteria
 
 - One implementation produces SIP domain metadata.

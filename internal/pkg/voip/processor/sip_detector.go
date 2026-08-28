@@ -102,7 +102,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		Method:            method,
 		CSeqMethod:        event.CSeqMethod,
 		ResponseCode:      uint32(event.ResponseCode),
-		SDPBody:           body,
+		SDPBody:           string(event.SDP),
 		ContentType:       contentType,
 	}
 
@@ -123,8 +123,8 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	p.updateCallState(callID, method, metadata)
 
 	// Extract RTP ports from SDP if present
-	if strings.Contains(body, "m=audio") {
-		ports := extractRTPPortsFromSDP(body)
+	if strings.Contains(string(event.SDP), "m=audio") {
+		ports := extractRTPPortsFromSDP(string(event.SDP))
 		for _, port := range ports {
 			p.registerRTPPort(callID, port)
 		}

@@ -135,7 +135,7 @@ func TestVectorizedCallIDExtractor(t *testing.T) {
 			name: "packets with Call-ID",
 			packets: [][]byte{
 				[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
-				[]byte("200 OK\r\nCall-ID: xyz789\r\n"),
+				[]byte("SIP/2.0 200 OK\r\nCall-ID: xyz789\r\n"),
 			},
 			expected: 2,
 		},

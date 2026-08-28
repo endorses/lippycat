@@ -137,32 +137,6 @@ func TestIndexByteSIMD(t *testing.T) {
 	}
 }
 
-func TestSIPMethodMatchSIMD(t *testing.T) {
-	tests := []struct {
-		name     string
-		line     []byte
-		expected string
-	}{
-		{"INVITE", []byte("INVITE sip:user@host SIP/2.0"), "INVITE"},
-		{"REGISTER", []byte("REGISTER sip:user@host SIP/2.0"), "REGISTER"},
-		{"BYE", []byte("BYE sip:user@host SIP/2.0"), "BYE"},
-		{"CANCEL", []byte("CANCEL sip:user@host SIP/2.0"), "CANCEL"},
-		{"ACK", []byte("ACK sip:user@host SIP/2.0"), "ACK"},
-		{"OPTIONS", []byte("OPTIONS sip:user@host SIP/2.0"), "OPTIONS"},
-		{"SIP response", []byte("SIP/2.0 200 OK"), ""},
-		{"invalid", []byte("INVALID"), ""},
-		{"too short", []byte("IN"), ""},
-		{"empty", []byte(""), ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := SIPMethodMatchSIMD(tt.line)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestBytesEqualUnrolled(t *testing.T) {
 	tests := []struct {
 		name string
@@ -327,17 +301,6 @@ func BenchmarkIndexByte_Long(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = bytes.IndexByte(data, c)
-	}
-}
-
-func BenchmarkSIPMethodMatchSIMD(b *testing.B) {
-	line := []byte("INVITE sip:user@example.com SIP/2.0")
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_ = SIPMethodMatchSIMD(line)
 	}
 }
 

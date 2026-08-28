@@ -71,7 +71,7 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
-	headers, body, method := event.Headers, string(event.Body), event.Method
+	headers, method := event.Headers, event.Method
 
 	// Synthesize a packet carrying exactly this reassembled SIP message so both
 	// matching and forwarding operate on THIS message rather than on the first
@@ -95,7 +95,7 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 		Method:            method,
 		CSeqMethod:        event.CSeqMethod,
 		ResponseCode:      uint32(event.ResponseCode),
-		SDPBody:           body,
+		SDPBody:           string(event.SDP),
 	}
 
 	pbMetadata := &data.PacketMetadata{
@@ -159,8 +159,8 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 	}
 
 	// Extract RTP ports from SDP for future RTP packet association
-	if body != "" {
-		ExtractPortFromSdp(body, callID)
+	if len(event.SDP) > 0 {
+		ExtractPortFromSdp(string(event.SDP), callID)
 	}
 
 	// Register the call as matched so its RTP media and later in-dialog messages

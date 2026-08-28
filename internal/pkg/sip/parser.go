@@ -118,7 +118,7 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 			return ev, ErrNotSIP
 		}
 		code, err := strconv.Atoi(fields[1])
-		if err != nil || code < 100 {
+		if err != nil || code < 100 || code > 699 {
 			return ev, ErrNotSIP
 		}
 		ev.Method, ev.ResponseCode = "RESPONSE", code
@@ -126,27 +126,54 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 		ev.Method, ev.RequestURI = fields[0], fields[1]
 	}
 	ev.Headers = make(map[string]string)
+	var contentLengths []string
+	var previousHeader string
 	for _, raw := range lines[1:] {
+		raw = bytes.TrimSuffix(raw, []byte("\r"))
+		if len(raw) > 0 && (raw[0] == ' ' || raw[0] == '\t') {
+			if previousHeader != "" {
+				continuation := strings.TrimSpace(string(raw))
+				if continuation != "" {
+					ev.Headers[previousHeader] += " " + continuation
+					if previousHeader == "content-length" {
+						contentLengths[len(contentLengths)-1] = ev.Headers[previousHeader]
+					}
+				}
+			}
+			continue
+		}
 		line := bytes.TrimSpace(raw)
 		if len(line) == 0 {
 			continue
 		}
 		colon := bytes.IndexByte(line, ':')
 		if colon <= 0 {
+			previousHeader = ""
 			continue
 		}
 		name := strings.ToLower(strings.TrimSpace(string(line[:colon])))
 		if full, ok := CompactHeaders[name]; ok {
 			name = full
 		}
-		ev.Headers[name] = strings.TrimSpace(string(line[colon+1:]))
+		value := strings.TrimSpace(string(line[colon+1:]))
+		previousHeader = name
+		if name == "content-length" {
+			contentLengths = append(contentLengths, value)
+		}
+		ev.Headers[name] = value
 	}
 	bodyStart := headerEnd + sepLen
 	if bodyStart < len(data) {
 		ev.Body = append([]byte(nil), data[bodyStart:]...)
 	}
-	if value, ok := ev.Headers["content-length"]; ok {
-		n, err := strconv.Atoi(strings.TrimSpace(value))
+	if len(contentLengths) > 0 {
+		value := strings.TrimSpace(contentLengths[0])
+		for _, duplicate := range contentLengths[1:] {
+			if strings.TrimSpace(duplicate) != value {
+				return SIPEvent{}, ErrMalformedContentLength
+			}
+		}
+		n, err := strconv.Atoi(value)
 		if err != nil || n < 0 || n > MaxMessageSize {
 			return SIPEvent{}, ErrMalformedContentLength
 		}
@@ -162,7 +189,11 @@ func Parse(data []byte, opts ParseOptions) (SIPEvent, error) {
 	ev.FromUser, ev.ToUser = User(ev.FromURI), User(ev.ToURI)
 	ev.FromTag, ev.ToTag = Tag(ev.From), Tag(ev.To)
 	ev.PAssertedIdentity, ev.ContentType = ev.Headers["p-asserted-identity"], ev.Headers["content-type"]
-	if bytes.Contains(ev.Body, []byte("m=")) {
+	mediaType := ev.ContentType
+	if semicolon := strings.IndexByte(mediaType, ';'); semicolon >= 0 {
+		mediaType = mediaType[:semicolon]
+	}
+	if strings.EqualFold(strings.TrimSpace(mediaType), "application/sdp") {
 		ev.SDP = append([]byte(nil), ev.Body...)
 	}
 	cseq := strings.Fields(ev.Headers["cseq"])
@@ -213,16 +244,18 @@ func User(uri string) string {
 }
 
 func Tag(header string) string {
-	lower := strings.ToLower(header)
-	i := strings.Index(lower, ";tag=")
-	if i < 0 {
-		return ""
+	for _, parameter := range strings.Split(header, ";")[1:] {
+		name, value, found := strings.Cut(strings.TrimSpace(parameter), "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), "tag") {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if end := strings.IndexAny(value, " >\r\n"); end >= 0 {
+			value = value[:end]
+		}
+		return value
 	}
-	value := header[i+5:]
-	if end := strings.IndexAny(value, "; >\r\n"); end >= 0 {
-		value = value[:end]
-	}
-	return value
+	return ""
 }
 
 func CSeqMethod(value string) string {

@@ -86,7 +86,7 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
-	headers, body, method := event.Headers, string(event.Body), event.Method
+	headers, method := event.Headers, event.Method
 
 	// Synthesize a packet carrying exactly this reassembled SIP message so that
 	// both filter matching and forwarding operate on THIS message rather than on
@@ -139,8 +139,8 @@ func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 
 	// Register SDP only in the tap-local processor. The package-global tracker is
 	// intentionally reserved for sniff/hunter paths that consume it.
-	if body != "" && h.sdpRegistrar != nil {
-		h.sdpRegistrar.RegisterSDP(callID, body)
+	if len(event.SDP) > 0 && h.sdpRegistrar != nil {
+		h.sdpRegistrar.RegisterSDP(callID, string(event.SDP))
 	}
 	if h.sdpRegistrar != nil && event.ResponseCode >= 200 {
 		if event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL" {

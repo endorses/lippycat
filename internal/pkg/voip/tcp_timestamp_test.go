@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -66,5 +68,37 @@ func TestTCPFramingAcrossFragments(t *testing.T) {
 	}
 	if _, err := reader.Peek(1); err != io.EOF {
 		t.Fatalf("reader has trailing data: %v", err)
+	}
+}
+
+func TestUDPAndReassembledTCPProduceEquivalentSIPMetadata(t *testing.T) {
+	sdp := "v=0\r\nm=audio 49170 RTP/AVP 0\r\n"
+	message := []byte("INVITE sip:bob@example.test SIP/2.0\r\nf: <sip:alice@example.test>;tag=a\r\nt: <sip:bob@example.test>;tag=b\r\ni: equivalent-call\r\nP-Asserted-Identity: <sip:alice@example.test>\r\nCSeq: 7 INVITE\r\nc: application/sdp\r\nl: " + strconv.Itoa(len(sdp)) + "\r\n\r\n" + sdp)
+	opts := sharedsip.ParseOptions{
+		Timestamp: time.Unix(30, 0), SourceIP: "192.0.2.1", DestinationIP: "198.51.100.1",
+		SourcePort: 5060, DestinationPort: 5070,
+	}
+	udp, err := sharedsip.Parse(message, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &bufferedSIPStream{ctx: ctx}
+	framed, err := stream.readCompleteSipMessageFromReader(bufio.NewReader(&fragmentReader{
+		reader: bytes.NewReader(message),
+		limit:  5,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcp, err := sharedsip.Parse(framed, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(udp, tcp) {
+		t.Fatalf("transport metadata differ: UDP=%+v TCP=%+v", udp, tcp)
 	}
 }

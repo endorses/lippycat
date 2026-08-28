@@ -23,17 +23,6 @@ type PacketInfo struct {
 	Interface string // Name of the interface where packet was captured
 }
 
-// SIP method prefixes for fast detection (no allocations)
-var (
-	sipMethodINVITE   = []byte("INVITE")
-	sipMethodREGISTER = []byte("REGISTER")
-	sipMethodOPTIONS  = []byte("OPTIONS")
-	sipMethodACK      = []byte("ACK")
-	sipMethodBYE      = []byte("BYE")
-	sipMethodCANCEL   = []byte("CANCEL")
-	sipResponse       = []byte("SIP/2.0")
-)
-
 // espNullSPICache maps ESP SPIs confirmed as NULL-encrypted to their inner IP protocol.
 // Once a SPI is confirmed via content heuristic (SIP/RTP detected), subsequent packets
 // from the same SPI are decapsulated without requiring a SIP/RTP payload at the start.
@@ -414,34 +403,7 @@ func (pb *PacketBuffer) isSIPPacket(pkt gopacket.Packet) bool {
 // isSIPBytes performs fast SIP detection using byte comparison.
 // Checks for common SIP methods (INVITE, REGISTER, etc.) and responses (SIP/2.0).
 func isSIPBytes(payload []byte) bool {
-	if len(payload) < 3 {
-		return false
-	}
-
-	// Check for common SIP methods and responses
-	if bytes.HasPrefix(payload, sipMethodINVITE) {
-		return true
-	}
-	if bytes.HasPrefix(payload, sipMethodREGISTER) {
-		return true
-	}
-	if bytes.HasPrefix(payload, sipMethodOPTIONS) {
-		return true
-	}
-	if bytes.HasPrefix(payload, sipResponse) {
-		return true
-	}
-	if bytes.HasPrefix(payload, sipMethodACK) {
-		return true
-	}
-	if bytes.HasPrefix(payload, sipMethodBYE) {
-		return true
-	}
-	if bytes.HasPrefix(payload, sipMethodCANCEL) {
-		return true
-	}
-
-	return false
+	return mightBeSIP(payload)
 }
 
 func (pb *PacketBuffer) Receive() <-chan PacketInfo {

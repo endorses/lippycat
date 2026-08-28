@@ -110,7 +110,7 @@ func TestGPUAccelerator_ExtractCallIDsGPU(t *testing.T) {
 
 	packets := [][]byte{
 		[]byte("INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: abc123@host\r\n"),
-		[]byte("200 OK\r\nCall-ID: xyz789@server\r\n"),
+		[]byte("SIP/2.0 200 OK\r\nCall-ID: xyz789@server\r\n"),
 		[]byte("REGISTER sip:proxy SIP/2.0\r\ni: short123\r\n"),
 	}
 
@@ -300,7 +300,7 @@ func TestGPUAccelerator_WithBatchProcessor(t *testing.T) {
 	// Add packets
 	sipPackets := []string{
 		"INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: call1\r\n",
-		"200 OK\r\nCall-ID: call2\r\n",
+		"SIP/2.0 200 OK\r\nCall-ID: call2\r\n",
 		"ACK sip:bob@example.com SIP/2.0\r\nCall-ID: call3\r\n",
 		"BYE sip:bob@example.com SIP/2.0\r\nCall-ID: call4\r\n",
 	}

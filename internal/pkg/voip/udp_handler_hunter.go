@@ -99,7 +99,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	if err != nil || event.CallID == "" {
 		return false
 	}
-	headers, body, callID := event.Headers, string(event.Body), event.CallID
+	headers, callID := event.Headers, event.CallID
 
 	// Validate Call-ID for security
 	if err := ValidateCallIDForSecurity(callID); err != nil {
@@ -136,7 +136,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 		Method:            event.Method,
 		CSeqMethod:        event.CSeqMethod,
 		ResponseCode:      uint32(event.ResponseCode),
-		SDPBody:           body,
+		SDPBody:           string(event.SDP),
 	}
 
 	// Buffer the SIP packet with link type for proper PCAP writing.
@@ -144,8 +144,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 	// of the call is forwarded directly instead of buffered.
 	alreadyMatched := h.bufferMgr.AddSIPPacket(callID, packet, metadata, interfaceName, pkt.LinkType)
 
-	bodyBytes := StringToBytes(body)
-	hasSDP := BytesContains(bodyBytes, []byte("m=audio"))
+	hasSDP := BytesContains(event.SDP, []byte("m=audio"))
 	method := metadata.Method
 
 	if alreadyMatched {

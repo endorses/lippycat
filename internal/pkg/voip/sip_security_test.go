@@ -424,7 +424,7 @@ Call-ID: a84b4c76e66710@pc33.atlanta.com
 CSeq: 314159 INVITE
 Contact: <sip:alicent@client.atlanta.com>
 Content-Type: application/sdp
-Content-Length: 142
+Content-Length: 116
 
 v=0
 o=alicent 53655765 2353687637 IN IP4 client.atlanta.com

@@ -2,7 +2,8 @@ package plugins
 
 import (
 	"context"
-	"regexp"
+	"fmt"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -15,11 +16,10 @@ import (
 
 // SIPPlugin handles SIP protocol processing
 type SIPPlugin struct {
-	name     string
-	version  string
-	enabled  atomic.Bool
-	metrics  SIPMetrics
-	patterns []*regexp.Regexp
+	name    string
+	version string
+	enabled atomic.Bool
+	metrics SIPMetrics
 }
 
 // SIPMetrics tracks SIP-specific metrics
@@ -34,30 +34,10 @@ type SIPMetrics struct {
 
 // NewSIPPlugin creates a new SIP protocol plugin
 func NewSIPPlugin() *SIPPlugin {
-	plugin := &SIPPlugin{
+	return &SIPPlugin{
 		name:    "SIP Protocol Handler",
 		version: "1.0.0",
 	}
-
-	// Compile common SIP patterns
-	patterns := []string{
-		`^(` + strings.Join(sharedsip.RequestMethods[:], "|") + `)\s+`,
-		`^SIP/2\.0\s+(\d{3})\s+`,
-		`Call-ID:\s*([^\r\n]+)`,
-		`From:\s*([^\r\n]+)`,
-		`To:\s*([^\r\n]+)`,
-		`Contact:\s*([^\r\n]+)`,
-		`Via:\s*([^\r\n]+)`,
-		`Content-Length:\s*(\d+)`,
-	}
-
-	for _, pattern := range patterns {
-		if compiled, err := regexp.Compile(pattern); err == nil {
-			plugin.patterns = append(plugin.patterns, compiled)
-		}
-	}
-
-	return plugin
 }
 
 // Name returns the plugin name
@@ -81,8 +61,7 @@ func (s *SIPPlugin) Initialize(config map[string]interface{}) error {
 
 	logger.Info("SIP plugin initialized",
 		"name", s.name,
-		"version", s.version,
-		"patterns", len(s.patterns))
+		"version", s.version)
 
 	return nil
 }
@@ -109,9 +88,14 @@ func (s *SIPPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packet) (
 		return nil, nil
 	}
 
-	payload := string(payloadBytes)
-	if !s.isSIPPacket(payload) {
+	if !s.isSIPPacket(string(payloadBytes)) {
 		return nil, nil
+	}
+
+	event, err := sharedsip.Parse(payloadBytes, sipParseOptions(packet))
+	if err != nil {
+		s.metrics.ErrorCount.Add(1)
+		return nil, fmt.Errorf("parse SIP packet: %w", err)
 	}
 
 	// Extract SIP information
@@ -124,14 +108,13 @@ func (s *SIPPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packet) (
 		ShouldContinue: true,
 	}
 
-	// Extract Call-ID
-	if callID := s.extractCallID(payload); callID != "" {
-		result.CallID = callID
-		result.Metadata["call_id"] = callID
+	if event.CallID != "" {
+		result.CallID = event.CallID
+		result.Metadata["call_id"] = event.CallID
 	}
 
 	// Determine SIP method or response
-	if method := s.extractSIPMethod(payload); method != "" {
+	if method := event.Method; method != "RESPONSE" {
 		result.Metadata["method"] = method
 		result.Action = s.getActionForMethod(method)
 
@@ -139,14 +122,14 @@ func (s *SIPPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packet) (
 			s.metrics.InvitesSeen.Add(1)
 			s.metrics.CallsDetected.Add(1)
 		}
-	} else if statusCode := s.extractStatusCode(payload); statusCode != "" {
+	} else {
+		statusCode := strconv.Itoa(event.ResponseCode)
 		result.Metadata["status_code"] = statusCode
 		result.Metadata["response_type"] = s.getResponseType(statusCode)
 		s.metrics.ResponsesSeen.Add(1)
 	}
 
-	// Extract additional SIP headers
-	s.extractSIPHeaders(payload, result.Metadata)
+	copySIPHeaders(event.Headers, result.Metadata)
 
 	// Extract network information
 	if networkLayer := packet.NetworkLayer(); networkLayer != nil {
@@ -171,6 +154,20 @@ func (s *SIPPlugin) ProcessPacket(ctx context.Context, packet gopacket.Packet) (
 	return result, nil
 }
 
+func sipParseOptions(packet gopacket.Packet) sharedsip.ParseOptions {
+	opts := sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp}
+	if ipv4, ok := packet.NetworkLayer().(*layers.IPv4); ok {
+		opts.SourceIP, opts.DestinationIP = ipv4.SrcIP.String(), ipv4.DstIP.String()
+	}
+	switch transport := packet.TransportLayer().(type) {
+	case *layers.UDP:
+		opts.SourcePort, opts.DestinationPort = uint16(transport.SrcPort), uint16(transport.DstPort)
+	case *layers.TCP:
+		opts.SourcePort, opts.DestinationPort = uint16(transport.SrcPort), uint16(transport.DstPort)
+	}
+	return opts
+}
+
 // isSIPPacket determines if the payload contains SIP content
 func (s *SIPPlugin) isSIPPacket(payload string) bool {
 	if len(payload) < 8 {
@@ -184,83 +181,14 @@ func (s *SIPPlugin) isSIPPacket(payload string) bool {
 	return sharedsip.IsStartLine(strings.TrimSpace(firstLine))
 }
 
-// extractCallID extracts Call-ID from SIP message
-func (s *SIPPlugin) extractCallID(payload string) string {
-	lines := strings.Split(payload, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(strings.ToLower(line), "call-id:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
-	return ""
-}
-
-// extractSIPMethod extracts SIP method from request line
-func (s *SIPPlugin) extractSIPMethod(payload string) string {
-	lines := strings.Split(payload, "\n")
-	if len(lines) > 0 {
-		firstLine := strings.TrimSpace(lines[0])
-		parts := strings.Split(firstLine, " ")
-		if len(parts) >= 2 && !strings.HasPrefix(firstLine, "SIP/2.0") {
-			return parts[0]
-		}
-	}
-	return ""
-}
-
-// extractStatusCode extracts status code from SIP response
-func (s *SIPPlugin) extractStatusCode(payload string) string {
-	lines := strings.Split(payload, "\n")
-	if len(lines) > 0 {
-		firstLine := strings.TrimSpace(lines[0])
-		if strings.HasPrefix(firstLine, "SIP/2.0 ") {
-			parts := strings.Split(firstLine, " ")
-			if len(parts) >= 2 {
-				return parts[1]
-			}
-		}
-	}
-	return ""
-}
-
-// extractSIPHeaders extracts common SIP headers
-func (s *SIPPlugin) extractSIPHeaders(payload string, metadata map[string]interface{}) {
-	lines := strings.Split(payload, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break // End of headers
-		}
-
-		colonIndex := strings.Index(line, ":")
-		if colonIndex == -1 {
-			continue
-		}
-
-		header := strings.ToLower(strings.TrimSpace(line[:colonIndex]))
-		value := strings.TrimSpace(line[colonIndex+1:])
-
-		switch header {
-		case "from", "f":
-			metadata["from"] = value
-		case "to", "t":
-			metadata["to"] = value
-		case "contact", "m":
-			metadata["contact"] = value
-		case "via", "v":
-			metadata["via"] = value
-		case "content-length", "l":
-			metadata["content_length"] = value
-		case "user-agent":
-			metadata["user_agent"] = value
-		case "server":
-			metadata["server"] = value
-		case "cseq":
-			metadata["cseq"] = value
+func copySIPHeaders(headers map[string]string, metadata map[string]interface{}) {
+	for header, key := range map[string]string{
+		"from": "from", "to": "to", "contact": "contact", "via": "via",
+		"content-length": "content_length", "user-agent": "user_agent",
+		"server": "server", "cseq": "cseq",
+	} {
+		if value := headers[header]; value != "" {
+			metadata[key] = value
 		}
 	}
 }

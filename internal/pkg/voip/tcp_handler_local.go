@@ -127,7 +127,7 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 			Method:            event.Method,
 			CSeqMethod:        event.CSeqMethod,
 			ResponseCode:      uint32(event.ResponseCode),
-			SDPBody:           string(event.Body),
+			SDPBody:           string(event.SDP),
 		}, "", layers.LinkTypeEthernet)
 	}
 

@@ -35,7 +35,7 @@ Call-ID: test-call-123@example.com
 CSeq: 1 INVITE
 Contact: <sip:alicent@192.168.1.100:5060>
 Content-Type: application/sdp
-Content-Length: 142
+Content-Length: 131
 
 v=0
 o=alicent 2890844526 2890844527 IN IP4 192.168.1.100
@@ -84,6 +84,40 @@ func TestSIPPluginRecognizesEverySharedRequestMethod(t *testing.T) {
 			assert.True(t, plugin.isSIPPacket(payload))
 		})
 	}
+}
+
+func TestSIPPluginUsesSharedCompactHeaderNormalization(t *testing.T) {
+	plugin := NewSIPPlugin()
+	payload := []byte("INVITE sip:bob@example.test SIP/2.0\r\n" +
+		"i: compact-call-id\r\n" +
+		"f: <sip:alice@example.test>;tag=from-tag\r\n" +
+		"t: <sip:bob@example.test>\r\n" +
+		"m: <sip:alice@192.0.2.1>\r\n" +
+		"v: SIP/2.0/UDP 192.0.2.1\r\n" +
+		"l: 0\r\n\r\n")
+
+	result, err := plugin.ProcessPacket(context.Background(), createMockPacket(payload))
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "compact-call-id", result.CallID)
+	assert.Equal(t, "compact-call-id", result.Metadata["call_id"])
+	assert.Equal(t, "<sip:alice@example.test>;tag=from-tag", result.Metadata["from"])
+	assert.Equal(t, "<sip:bob@example.test>", result.Metadata["to"])
+	assert.Equal(t, "<sip:alice@192.0.2.1>", result.Metadata["contact"])
+	assert.Equal(t, "SIP/2.0/UDP 192.0.2.1", result.Metadata["via"])
+	assert.Equal(t, "0", result.Metadata["content_length"])
+}
+
+func TestSIPPluginRejectsMalformedContentLength(t *testing.T) {
+	plugin := NewSIPPlugin()
+	payload := []byte("INVITE sip:bob@example.test SIP/2.0\r\n" +
+		"Call-ID: invalid-length\r\nContent-Length: nope\r\n\r\nbody")
+
+	result, err := plugin.ProcessPacket(context.Background(), createMockPacket(payload))
+	assert.Nil(t, result)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sharedsip.ErrMalformedContentLength)
+	assert.Equal(t, int64(1), plugin.Metrics().ErrorCount)
 }
 
 func TestRTPPlugin(t *testing.T) {

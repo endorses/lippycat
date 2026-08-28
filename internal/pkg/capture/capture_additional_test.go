@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -673,6 +674,11 @@ func TestIsSIPBytes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isSIPBytes(tt.payload)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+	for _, method := range sharedsip.RequestMethods {
+		t.Run(method, func(t *testing.T) {
+			assert.True(t, isSIPBytes([]byte(method+" sip:alice@example.com SIP/2.0\r\n")))
 		})
 	}
 }

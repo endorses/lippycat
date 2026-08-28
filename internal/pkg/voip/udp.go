@@ -69,9 +69,9 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 			injectPacketToVirtualInterface(pkt)
 
 			// Process it
-			event, parseErr := sharedsip.Parse(payload, sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp})
+			event, parseErr := sharedsip.Parse(payload, sipParseOptions(packet, layer))
 			if parseErr == nil && event.CallID != "" {
-				callID, body := event.CallID, string(event.Body)
+				callID := event.CallID
 				// Validate the Call-ID for security
 				if err := ValidateCallIDForSecurity(callID); err != nil {
 					logger.Warn("Malicious Call-ID detected and rejected",
@@ -96,9 +96,8 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 				} else {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
 				}
-				bodyBytes := StringToBytes(body)
-				if BytesContains(bodyBytes, []byte("m=audio")) {
-					ExtractPortFromSdp(body, callID)
+				if BytesContains(event.SDP, []byte("m=audio")) {
+					ExtractPortFromSdp(string(event.SDP), callID)
 				}
 			}
 			return // SIP packet processed, done
@@ -134,11 +133,11 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 		// Try to parse as SIP message (content-based detection, not port-based)
 		if handleSipMessage(payload, pkt.LinkType) {
 			// It's a SIP packet - process it
-			event, parseErr := sharedsip.Parse(payload, sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp})
+			event, parseErr := sharedsip.Parse(payload, sipParseOptions(packet, layer))
 			if parseErr != nil || event.CallID == "" {
 				return
 			}
-			headers, body, callID := event.Headers, string(event.Body), event.CallID
+			headers, callID := event.Headers, event.CallID
 
 			// Validate Call-ID for security
 			if err := ValidateCallIDForSecurity(callID); err != nil {
@@ -160,7 +159,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				Method:            event.Method,
 				CSeqMethod:        event.CSeqMethod,
 				ResponseCode:      uint32(event.ResponseCode),
-				SDPBody:           body,
+				SDPBody:           string(event.SDP),
 			}
 
 			// Buffer the SIP packet with link type for proper PCAP writing.
@@ -168,8 +167,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 			// packet of the call is written directly instead of buffered.
 			alreadyMatched := globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface, pkt.LinkType)
 
-			bodyBytes := StringToBytes(body)
-			hasSDP := BytesContains(bodyBytes, []byte("m=audio"))
+			hasSDP := BytesContains(event.SDP, []byte("m=audio"))
 
 			if alreadyMatched {
 				// Call already passed the filter: write this packet now,
@@ -184,7 +182,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 
 				// A re-INVITE or delayed answer can move the media ports.
 				if hasSDP {
-					ExtractPortFromSdp(body, callID)
+					ExtractPortFromSdp(string(event.SDP), callID)
 				}
 				return
 			}
@@ -219,7 +217,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 						handleMatchedCallForFileWrite(callID, packets, metadata)
 
 						// Extract RTP ports from SDP for future RTP association
-						ExtractPortFromSdp(body, callID)
+						ExtractPortFromSdp(string(event.SDP), callID)
 					},
 				)
 				_ = matched // Callback already handled everything
@@ -291,6 +289,19 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 			}
 		}
 	}
+}
+
+func sipParseOptions(packet gopacket.Packet, layer *layers.UDP) sharedsip.ParseOptions {
+	opts := sharedsip.ParseOptions{
+		Timestamp:       packet.Metadata().Timestamp,
+		SourcePort:      uint16(layer.SrcPort),
+		DestinationPort: uint16(layer.DstPort),
+	}
+	if network := packet.NetworkLayer(); network != nil {
+		opts.SourceIP = network.NetworkFlow().Src().String()
+		opts.DestinationIP = network.NetworkFlow().Dst().String()
+	}
+	return opts
 }
 
 // isSIPPacket checks if a packet is a SIP packet using content-based detection

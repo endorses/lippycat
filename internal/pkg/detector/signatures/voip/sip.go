@@ -84,12 +84,14 @@ func (s *SIPSignature) Detect(ctx *signatures.DetectionContext) *signatures.Dete
 	for i, methodBytes := range s.methodsBytes {
 		if len(ctx.Payload) >= len(methodBytes) &&
 			simd.BytesEqual(ctx.Payload[:len(methodBytes)], methodBytes) {
-			// Extract metadata (still needs string for parsing headers)
-			payloadStr := string(ctx.Payload)
-			metadata := s.extractMetadata(payloadStr)
+			event, err := sharedsip.Parse(ctx.Payload, sharedsip.ParseOptions{})
+			if err != nil {
+				return nil
+			}
+			metadata := s.metadataFromEvent(event)
 
 			// Extract SDP info (media ports and connection IP) for RTP correlation
-			sdpInfo := s.extractSDPInfo(payloadStr)
+			sdpInfo := s.extractSDPInfo(string(event.SDP))
 			if len(sdpInfo.MediaPorts) > 0 {
 				// Store in flow context for RTP correlation
 				if ctx.Flow != nil {
@@ -231,11 +233,15 @@ func hasDSCPEF(pkt gopacket.Packet) bool {
 
 // extractMetadata extracts SIP-specific metadata from the payload
 func (s *SIPSignature) extractMetadata(payload string) map[string]interface{} {
-	metadata := make(map[string]interface{})
 	event, err := sharedsip.Parse([]byte(payload), sharedsip.ParseOptions{})
 	if err != nil {
-		return metadata
+		return map[string]interface{}{}
 	}
+	return s.metadataFromEvent(event)
+}
+
+func (s *SIPSignature) metadataFromEvent(event sharedsip.SIPEvent) map[string]interface{} {
+	metadata := make(map[string]interface{})
 	metadata["first_line"] = event.StartLine
 	if event.Method == "RESPONSE" {
 		metadata["type"] = "response"
@@ -359,22 +365,10 @@ func (s *SIPSignature) extractSDPInfo(payload string) SDPInfo {
 		MediaPorts: make([]uint16, 0),
 	}
 
-	// Look for SDP content (appears after empty line in SIP message)
 	lines := strings.Split(payload, "\n")
-	inSDP := false
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-
-		// Empty line marks start of SDP body
-		if line == "" {
-			inSDP = true
-			continue
-		}
-
-		if !inSDP {
-			continue
-		}
 
 		// SDP connection line: c=IN IP4 10.0.0.5
 		// Format: c=<nettype> <addrtype> <connection-address>

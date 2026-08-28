@@ -98,7 +98,11 @@ func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 	}
 
 	logger.Debug("handleSipMessage: parsing SIP headers")
-	headers, body := parseSipHeaders(data)
+	event, err := sharedsip.Parse(data, sharedsip.ParseOptions{})
+	if err != nil {
+		return false
+	}
+	headers := event.Headers
 
 	logger.Debug("handleSipMessage: checking user filter", "call_id", headers["call-id"])
 	if containsUserInHeaders(headers) {
@@ -125,7 +129,7 @@ func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 			}
 
 			// Detect SIP method for state tracking
-			method := detectSipMethod(startLine)
+			method := event.Method
 
 			// Update call state if call already exists
 			// Note: In hunter mode, calls should be created separately for local tracking
@@ -135,9 +139,8 @@ func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 			}
 
 			// Extract RTP ports from SDP if present
-			bodyBytes := StringToBytes(body)
-			if BytesContains(bodyBytes, []byte("m=audio")) {
-				ExtractPortFromSdp(body, callID)
+			if BytesContains(event.SDP, []byte("m=audio")) {
+				ExtractPortFromSdp(string(event.SDP), callID)
 			}
 		}
 		return true
@@ -149,10 +152,6 @@ func detectSipMethod(line string) string {
 	event, err := sharedsip.Parse([]byte(line), sharedsip.ParseOptions{})
 	if err == nil {
 		return event.Method
-	}
-	fields := strings.Fields(line)
-	if len(fields) > 0 && sharedsip.IsRequestMethod(fields[0]) {
-		return fields[0]
 	}
 	return ""
 }
@@ -175,35 +174,7 @@ func extractSipResponseCode(payload []byte) uint32 {
 	if event, err := sharedsip.Parse(payload, sharedsip.ParseOptions{}); err == nil {
 		return uint32(event.ResponseCode)
 	}
-	// SIP responses start with "SIP/2.0 <code>"
-	// Minimum: "SIP/2.0 100" = 12 bytes
-	if len(payload) < 12 {
-		return 0
-	}
-
-	// Check if this is a SIP response (starts with "SIP/2.0 ")
-	if !BytesHasPrefixString(payload, "SIP/2.0 ") {
-		return 0
-	}
-
-	// Extract the status code (3 digits after "SIP/2.0 ")
-	// Format: "SIP/2.0 <code> <reason>"
-	codeStart := 8 // Length of "SIP/2.0 "
-	if len(payload) < codeStart+3 {
-		return 0
-	}
-
-	// Parse 3-digit response code
-	code := uint32(0)
-	for i := 0; i < 3; i++ {
-		digit := payload[codeStart+i]
-		if digit < '0' || digit > '9' {
-			return 0 // Invalid response code
-		}
-		code = code*10 + uint32(digit-'0')
-	}
-
-	return code
+	return 0
 }
 
 func isSipStartLine(line string) bool {
@@ -218,58 +189,7 @@ func parseSipHeaders(data []byte) (map[string]string, string) {
 		}
 		return event.Headers, body
 	}
-	// Protect against buffer overflow by limiting input size
-	const maxSipMessageSize = 65536 // 64KB limit for SIP messages
-	if len(data) > maxSipMessageSize {
-		logger.Debug("SIP message too large, truncating",
-			"size", len(data),
-			"max_size", maxSipMessageSize)
-		data = data[:maxSipMessageSize]
-	}
-
-	headers := make(map[string]string)
-	lines := bytes.Split(data, []byte("\n"))
-
-	var bodyStart bool
-	var bodyBuilder strings.Builder
-	var isFirstLine = true
-	var headerCount int
-	const maxHeaders = 100 // Reasonable limit for SIP headers
-
-	for _, line := range lines {
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) == 0 {
-			bodyStart = true
-			continue
-		}
-		if !bodyStart {
-			// Skip the first line (SIP request/response line)
-			if isFirstLine {
-				isFirstLine = false
-				continue
-			}
-
-			// Prevent header overflow attacks
-			if headerCount >= maxHeaders {
-				logger.Debug("Too many SIP headers, ignoring remaining",
-					"header_count", headerCount,
-					"max_headers", maxHeaders)
-				break
-			}
-
-			key, val := parseHeaderLineBytes(trimmed)
-			if key != "" {
-				headers[key] = val
-				headerCount++
-			}
-		} else {
-			// Convert to string only when building body
-			bodyBuilder.Write(trimmed)
-			bodyBuilder.WriteByte('\n')
-		}
-	}
-
-	return headers, bodyBuilder.String()
+	return map[string]string{}, ""
 }
 
 func parseHeaderLine(line string) (string, string) {

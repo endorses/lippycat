@@ -134,6 +134,17 @@ func TestMethodTableIncludesPublish(t *testing.T) {
 	}
 }
 
+func TestIdentityCompactHeader(t *testing.T) {
+	msg := []byte("INVITE sip:b@x SIP/2.0\r\ny: signed-identity\r\nContent-Length: 0\r\n\r\n")
+	event, err := Parse(msg, ParseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Headers["identity"] != "signed-identity" {
+		t.Fatalf("identity compact header not normalized: %+v", event.Headers)
+	}
+}
+
 func TestPipelinedInputHonorsFirstContentLength(t *testing.T) {
 	first := "MESSAGE sip:b@example.test SIP/2.0\r\nCall-ID: one\r\nContent-Length: 3\r\n\r\nabc"
 	second := "BYE sip:b@example.test SIP/2.0\r\nCall-ID: two\r\nContent-Length: 0\r\n\r\n"

@@ -31,7 +31,7 @@ var CompactHeaders = map[string]string{
 	"i": "call-id", "j": "reject-contact", "k": "supported",
 	"l": "content-length", "m": "contact", "n": "identity-info",
 	"o": "event", "r": "refer-to", "s": "subject", "t": "to",
-	"u": "allow-events", "v": "via", "x": "session-expires",
+	"u": "allow-events", "v": "via", "x": "session-expires", "y": "identity",
 }
 
 type ParseOptions struct {

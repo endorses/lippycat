@@ -2,6 +2,8 @@ package records
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/logstream"
 )
@@ -23,6 +25,10 @@ func Conn(event events.Event) (logstream.Record, bool, error) {
 		}
 		return s
 	}
-	record, err := logstream.NewRecord("conn", env.Timestamp, env.UID, env.Flow.SourceAddress, env.Flow.SourcePort, env.Flow.DestinationAddress, env.Flow.DestinationPort, proto, value(ev.Service), ev.Duration, ev.OriginBytes, ev.ResponseBytes, value(ev.State), ev.LocalOrigin, ev.LocalResponse, ev.MissedBytes, value(ev.History), ev.OriginPackets, ev.OriginIPBytes, ev.ResponsePackets, ev.ResponseIPBytes, env.CommunityID, env.NodeID, string(env.CaptureScope), env.Partial)
+	service := strings.ToLower(ev.Service)
+	if service == "tls" {
+		service = "ssl"
+	}
+	record, err := logstream.NewRecord("conn", env.Timestamp, env.UID, env.Flow.SourceAddress, env.Flow.SourcePort, env.Flow.DestinationAddress, env.Flow.DestinationPort, proto, value(service), ev.Duration, ev.OriginBytes, ev.ResponseBytes, value(ev.State), ev.LocalOrigin, ev.LocalResponse, ev.MissedBytes, value(ev.History), ev.OriginPackets, ev.OriginIPBytes, ev.ResponsePackets, ev.ResponseIPBytes, env.CommunityID, env.NodeID, string(env.CaptureScope), env.Partial)
 	return record, true, err
 }

@@ -4,7 +4,8 @@ package fileanalysis
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/md5"  // #nosec G501 -- compatibility hashes are intentionally emitted alongside SHA-256.
+	"crypto/md5" // #nosec G501 -- compatibility hashes are intentionally emitted alongside SHA-256.
+	"crypto/rand"
 	"crypto/sha1" // #nosec G505 -- compatibility hashes are intentionally emitted alongside SHA-256.
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,10 +39,12 @@ type Observation struct {
 }
 
 type Analyzer struct {
-	cfg   Config
-	total atomic.Int64
-	mu    sync.Mutex
-	seen  map[string]string
+	cfg               Config
+	total             atomic.Int64
+	sequence          atomic.Uint64
+	observationPrefix string
+	mu                sync.Mutex
+	seen              map[string]string
 }
 
 func New(cfg Config) (*Analyzer, error) {
@@ -59,7 +62,15 @@ func New(cfg Config) (*Analyzer, error) {
 			return nil, fmt.Errorf("create extraction directory: %w", err)
 		}
 	}
-	return &Analyzer{cfg: cfg, seen: make(map[string]string)}, nil
+	var prefix [6]byte
+	if _, err := rand.Read(prefix[:]); err != nil {
+		return nil, fmt.Errorf("generate file observation ID prefix: %w", err)
+	}
+	return &Analyzer{
+		cfg:               cfg,
+		observationPrefix: strings.ToUpper(hex.EncodeToString(prefix[:])),
+		seen:              make(map[string]string),
+	}, nil
 }
 
 // Analyze hashes at most MaxFileSize bytes and emits metadata unconditionally.
@@ -84,7 +95,7 @@ func (a *Analyzer) Analyze(obs Observation) (events.FileMetadataEvent, *events.F
 		return events.FileMetadataEvent{}, nil, fmt.Errorf("hash file: %w", err)
 	}
 	sha256Text := hex.EncodeToString(hSHA256.Sum(nil))
-	fuid, duplicate := a.fileID(sha256Text)
+	fuid := a.fileID()
 	mimeType := sniffMIME(content, obs.ContentType)
 	ev := events.NewFileMetadataEvent(obs.Envelope)
 	ev.FileID, ev.Source, ev.MIMEType, ev.Filename = fuid, obs.Source, mimeType, filepath.Base(obs.Filename)
@@ -95,33 +106,49 @@ func (a *Analyzer) Analyze(obs Observation) (events.FileMetadataEvent, *events.F
 	ev.TimedOut = obs.Truncated
 	ev.HashComplete = !obs.Truncated && ev.MissingBytes == 0 && ev.OverflowBytes == 0 && decodeErr == nil
 	var contentEvent *events.FileContentEvent
-	if a.cfg.Extract && duplicate {
-		path := filepath.Join(a.cfg.Directory, fuid)
-		if _, err := os.Stat(path); err == nil {
-			ev.ExtractedPath = path
-		}
-	} else if a.cfg.Extract && a.reserve(int64(len(content))) {
-		path := filepath.Join(a.cfg.Directory, fuid)
-		if err := os.WriteFile(path, content, 0o640); err != nil {
-			return ev, nil, fmt.Errorf("extract file: %w", err)
+	if a.cfg.Extract {
+		path, extracted, err := a.extract(sha256Text, content)
+		if err != nil {
+			return ev, nil, err
 		}
 		ev.ExtractedPath = path
-		ce := events.NewFileContentEvent(obs.Envelope)
-		ce.FileID, ce.MIMEType, ce.Filename, ce.Content = fuid, mimeType, ev.Filename, append([]byte(nil), content...)
-		contentEvent = &ce
+		if extracted {
+			ce := events.NewFileContentEvent(obs.Envelope)
+			ce.FileID, ce.MIMEType, ce.Filename, ce.Content = fuid, mimeType, ev.Filename, append([]byte(nil), content...)
+			contentEvent = &ce
+		}
 	}
 	return ev, contentEvent, nil
 }
 
-func (a *Analyzer) fileID(sum string) (string, bool) {
+// fileID returns an identifier for this observation, rather than for its
+// content. Zeek FUIDs identify file observations, so equal content seen on two
+// connections must still receive different IDs.
+func (a *Analyzer) fileID() string {
+	sequence := a.sequence.Add(1)
+	return fmt.Sprintf("F%s%016X", a.observationPrefix, sequence)
+}
+
+// extract stores one copy of identical content and returns its path to every
+// observation. Serialization prevents concurrent observations from both
+// reserving quota or racing to create the same artifact.
+func (a *Analyzer) extract(sum string, content []byte) (path string, extracted bool, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if id := a.seen[sum]; id != "" {
-		return id, true
+	if path := a.seen[sum]; path != "" {
+		return path, false, nil
 	}
-	id := "F" + strings.ToUpper(sum[:20])
-	a.seen[sum] = id
-	return id, false
+	if !a.reserve(int64(len(content))) {
+		return "", false, nil
+	}
+	contentID := "F" + strings.ToUpper(sum[:20])
+	path = filepath.Join(a.cfg.Directory, contentID)
+	if err := os.WriteFile(path, content, 0o640); err != nil {
+		a.total.Add(-int64(len(content)))
+		return "", false, fmt.Errorf("extract file: %w", err)
+	}
+	a.seen[sum] = path
+	return path, true, nil
 }
 func (a *Analyzer) reserve(n int64) bool {
 	for {

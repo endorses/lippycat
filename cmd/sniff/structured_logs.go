@@ -13,6 +13,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	dnsparser "github.com/endorses/lippycat/internal/pkg/dns"
+	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
@@ -102,7 +103,11 @@ func newSniffLogSession(dir string) (*sniffLogSession, error) {
 			return nil, err
 		}
 	}
-	if err := d.Register(sink, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
+	coalescedLogs, err := eventcoalesce.New(sink, eventcoalesce.Config{})
+	if err != nil {
+		return nil, err
+	}
+	if err := d.Register(coalescedLogs, events.KindDNS, events.KindTLS, events.KindHTTP, events.KindSMTP, events.KindConn, events.KindFileMetadata); err != nil {
 		return nil, err
 	}
 	identity, err := flowid.NewCache(flowid.Config{MaxEntries: 100000, IdleTimeout: 5 * time.Minute})
@@ -153,6 +158,7 @@ func (s *sniffLogSession) observe(info capture.PacketInfo) {
 			reverseEnvelope(&env)
 		}
 		e := events.NewDNSEvent(env)
+		e.IsResponse = dm.IsResponse
 		e.TransactionID, e.Query = dm.TransactionID, dm.QueryName
 		e.QClass, e.QType, e.RCode = dnsCode(dm.QueryClass, map[string]uint16{"IN": 1}), dnsCode(dm.QueryType, map[string]uint16{"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "PTR": 12, "MX": 15, "TXT": 16, "AAAA": 28, "SRV": 33, "OPT": 41, "ANY": 255}), dnsCode(dm.ResponseCode, map[string]uint16{"NOERROR": 0, "FORMERR": 1, "SERVFAIL": 2, "NXDOMAIN": 3, "NOTIMP": 4, "REFUSED": 5})
 		e.Authoritative, e.Truncated, e.RecursionDesired, e.RecursionAvailable = dm.Authoritative, dm.Truncated, dm.RecursionDesired, dm.RecursionAvailable
@@ -230,7 +236,18 @@ func sniffHTTP(env events.Envelope, m *data.HTTPMetadata, headers bool) events.H
 		reverseEnvelope(&env)
 	}
 	e := events.NewHTTPEvent(env)
+	e.TransactionDepth = 1
 	e.Method, e.Host, e.URI, e.Version, e.UserAgent = m.Method, m.Host, m.Path, m.Version, m.UserAgent
+	if m.QueryString != "" {
+		e.URI += "?" + m.QueryString
+	}
+	if m.ContentLength > 0 {
+		if m.IsServer || strings.EqualFold(m.Type, "response") {
+			e.ResponseBodyLength = uint64(m.ContentLength)
+		} else {
+			e.RequestBodyLength = uint64(m.ContentLength)
+		}
+	}
 	e.StatusCode, e.StatusMessage = uint16(m.StatusCode), m.StatusReason
 	if headers {
 		e.Headers = map[string][]string{}

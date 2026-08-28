@@ -37,6 +37,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/conntrack"
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/dns"
+	"github.com/endorses/lippycat/internal/pkg/eventcoalesce"
 	"github.com/endorses/lippycat/internal/pkg/events"
 	"github.com/endorses/lippycat/internal/pkg/fileanalysis"
 	"github.com/endorses/lippycat/internal/pkg/flowid"
@@ -310,7 +311,11 @@ func New(config Config) (*Processor, error) {
 				return nil, fmt.Errorf("register %s structured log: %w", stream, err)
 			}
 		}
-		if err = p.eventDispatcher.Register(p.logSink, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
+		coalescedLogs, coalesceErr := eventcoalesce.New(p.logSink, eventcoalesce.Config{})
+		if coalesceErr != nil {
+			return nil, fmt.Errorf("initialize structured log event coalescer: %w", coalesceErr)
+		}
+		if err = p.eventDispatcher.Register(coalescedLogs, events.KindDNS, events.KindSMTP, events.KindTLS, events.KindHTTP, events.KindConn, events.KindFileMetadata); err != nil {
 			return nil, fmt.Errorf("register structured log event sink: %w", err)
 		}
 	}

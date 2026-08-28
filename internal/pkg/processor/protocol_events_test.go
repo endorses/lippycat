@@ -109,6 +109,7 @@ func TestEmitTLSAndHTTPEventsNormalizesResponseDirection(t *testing.T) {
 	require.Len(t, sink.events, 2)
 	require.Equal(t, "example.test", sink.events[0].(events.TLSEvent).ServerName)
 	httpEvent := sink.events[1].(events.HTTPEvent)
+	require.Equal(t, uint64(1), httpEvent.TransactionDepth)
 	require.Equal(t, uint16(204), httpEvent.StatusCode)
 	require.Equal(t, uint16(50001), httpEvent.Envelope().Flow.SourcePort)
 }

@@ -241,6 +241,12 @@ func (w *streamWriter) write(r Record) error {
 	if err := w.enc.Encode(r); err != nil {
 		return err
 	}
+	// Keep the active log safe for line-oriented consumers to tail. Encoding is
+	// buffered, so without this flush a low-volume stream can remain invisible
+	// and a busy stream can expose the buffer's final, incomplete record.
+	if err := w.enc.Flush(); err != nil {
+		return fmt.Errorf("flush %s record: %w", w.name, err)
+	}
 	w.sink.written.Add(1)
 	return nil
 }
@@ -262,6 +268,13 @@ func (w *streamWriter) open() error {
 		_ = f.Close()
 		w.file = nil
 		return fmt.Errorf("write %s header: %w", path, err)
+	}
+	// Zeek readers need the header before they can interpret records. Publish it
+	// immediately rather than leaving low-volume logs in the encoder buffer.
+	if err = w.enc.Flush(); err != nil {
+		closeErr := f.Close()
+		w.file = nil
+		return errors.Join(fmt.Errorf("flush %s header: %w", path, err), closeErr)
 	}
 	return nil
 }

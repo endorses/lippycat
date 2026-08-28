@@ -162,6 +162,43 @@ func jsonValue(v any) any {
 			return nil
 		}
 		return value.String()
+	}
+
+	if v == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if rv.IsNil() {
+			return nil
+		}
+		return jsonValue(rv.Elem().Interface())
+	case reflect.Slice:
+		if rv.IsNil() {
+			return nil
+		}
+		// Preserve encoding/json's base64 representation for byte slices.
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return v
+		}
+		fallthrough
+	case reflect.Array:
+		values := make([]any, rv.Len())
+		for i := range values {
+			values[i] = jsonValue(rv.Index(i).Interface())
+		}
+		return values
+	case reflect.Map:
+		if rv.IsNil() || rv.Type().Key().Kind() != reflect.String {
+			return v
+		}
+		values := make(map[string]any, rv.Len())
+		iter := rv.MapRange()
+		for iter.Next() {
+			values[iter.Key().String()] = jsonValue(iter.Value().Interface())
+		}
+		return values
 	default:
 		return v
 	}

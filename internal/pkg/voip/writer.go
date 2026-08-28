@@ -3,39 +3,11 @@
 package voip
 
 import (
-	"os"
-	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 )
-
-var (
-	sipFile, rtpFile *os.File
-	writerMutex      sync.Mutex
-)
-
-func CloseWriters() {
-	writerMutex.Lock()
-	defer writerMutex.Unlock()
-
-	// Close async writer pool first
-	CloseAsyncWriter()
-
-	if sipFile != nil {
-		if err := sipFile.Close(); err != nil {
-			logger.Error("Error closing SIP file", "error", err)
-		}
-		sipFile = nil
-	}
-	if rtpFile != nil {
-		if err := rtpFile.Close(); err != nil {
-			logger.Error("Error closing RTP file", "error", err)
-		}
-		rtpFile = nil
-	}
-}
 
 func WriteSIP(tracker *CallTracker, callID string, packet gopacket.Packet) {
 	// Try async writer first for better performance
@@ -81,7 +53,7 @@ func (tracker *CallTracker) writeSIPSync(callID string, packet gopacket.Packet) 
 	tracker.mu.Unlock()
 
 	if ok && call != nil {
-		err := call.writeSIP(packet)
+		err := tracker.output.WritePacket(callID, packet, PacketTypeSIP)
 
 		if err != nil {
 			logger.Error("Error writing SIP packet for call",
@@ -145,7 +117,7 @@ func (tracker *CallTracker) writeRTPSync(callID string, packet gopacket.Packet) 
 	tracker.mu.Unlock()
 
 	if ok && call != nil {
-		err := call.writeRTP(packet)
+		err := tracker.output.WritePacket(callID, packet, PacketTypeRTP)
 
 		if err != nil {
 			logger.Error("Error writing RTP packet for call",

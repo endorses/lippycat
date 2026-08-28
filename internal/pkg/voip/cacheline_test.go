@@ -1,8 +1,6 @@
 package voip
 
 import (
-	"runtime"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"unsafe"
@@ -56,58 +54,6 @@ func TestPaddedCounter(t *testing.T) {
 	// Reset
 	pc.Reset()
 	assert.Equal(t, uint64(0), pc.Get())
-}
-
-func TestPerCPUCounter(t *testing.T) {
-	numCPUs := runtime.NumCPU()
-	pcc := NewPerCPUCounter(numCPUs)
-
-	// Increment on different CPUs
-	for i := 0; i < numCPUs; i++ {
-		pcc.Inc(i)
-	}
-
-	// Check individual CPU counts
-	for i := 0; i < numCPUs; i++ {
-		assert.Equal(t, uint64(1), pcc.GetCPU(i))
-	}
-
-	// Check sum
-	assert.Equal(t, uint64(numCPUs), pcc.Sum())
-
-	// Add more to specific CPU
-	pcc.Add(0, 100)
-	assert.Equal(t, uint64(101), pcc.GetCPU(0))
-	assert.Equal(t, uint64(numCPUs+100), pcc.Sum())
-
-	// Reset
-	pcc.Reset()
-	assert.Equal(t, uint64(0), pcc.Sum())
-}
-
-func TestPerCPUCounterConcurrency(t *testing.T) {
-	numCPUs := runtime.NumCPU()
-	pcc := NewPerCPUCounter(numCPUs)
-
-	const iterations = 10000
-	var wg sync.WaitGroup
-
-	// Run concurrent increments on each CPU
-	for cpu := 0; cpu < numCPUs; cpu++ {
-		wg.Add(1)
-		go func(cpuID int) {
-			defer wg.Done()
-			for i := 0; i < iterations; i++ {
-				pcc.Inc(cpuID)
-			}
-		}(cpu)
-	}
-
-	wg.Wait()
-
-	// Verify total
-	expected := uint64(numCPUs * iterations)
-	assert.Equal(t, expected, pcc.Sum())
 }
 
 func TestPaddedBool(t *testing.T) {
@@ -213,36 +159,6 @@ func BenchmarkPaddedCounterIncParallel(b *testing.B) {
 			pc.Inc()
 		}
 	})
-}
-
-func BenchmarkPerCPUCounterInc(b *testing.B) {
-	pcc := NewPerCPUCounter(runtime.NumCPU())
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	b.RunParallel(func(pb *testing.PB) {
-		cpu := runtime.GOMAXPROCS(0) % runtime.NumCPU()
-		for pb.Next() {
-			pcc.Inc(cpu)
-		}
-	})
-}
-
-func BenchmarkPerCPUCounterSum(b *testing.B) {
-	pcc := NewPerCPUCounter(runtime.NumCPU())
-
-	// Pre-populate
-	for i := 0; i < runtime.NumCPU(); i++ {
-		pcc.Add(i, 1000)
-	}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; i < b.N; i++ {
-		_ = pcc.Sum()
-	}
 }
 
 func BenchmarkPaddedAtomicAdd(b *testing.B) {

@@ -927,7 +927,12 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	defer cancel()
 
 	tcpHandler := NewTUISIPHandler(tracker)
-	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
+	streamFactory := voip.NewSipStreamFactoryWithConfig(
+		ctx,
+		tcpHandler,
+		*voip.GetConfig(),
+		tracker.IsCallActive,
+	)
 	assembler := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
 	defer func() {
 		if err := assembler.Close(); err != nil {

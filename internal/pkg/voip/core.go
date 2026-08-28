@@ -50,7 +50,11 @@ func ProcessorWorkersStats() []ProcessorWorkerStats {
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	ctx := context.Background()
 	config := GetConfig()
-	tracker := NewCallTracker()
+	var callOutput CallOutput = NoopCallOutput{}
+	if config.WriteVoIP {
+		callOutput = NewSessionOutputManager(config)
+	}
+	tracker := NewCallTrackerWithOutput(config, callOutput)
 	defer tracker.Shutdown()
 	logger.InfoContext(ctx, "Starting VoIP sniffer",
 		"device_count", len(devices),
@@ -71,11 +75,11 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			CheckInterval: 1 * time.Second,
 			ClosedCallTTL: closedCallTTL,
 		})
-		SetSniffCompletionMonitor(monitor)
+		tracker.SetCompletionMonitor(monitor)
 		monitor.Start()
 		defer func() {
 			monitor.Stop()
-			SetSniffCompletionMonitor(nil)
+			tracker.SetCompletionMonitor(nil)
 		}()
 		logger.Info("Sniff completion monitor initialized",
 			"grace_period", gracePeriod,
@@ -245,7 +249,6 @@ func StartOfflineVoipSniffer(readFiles []string, filter string) {
 
 func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
 	offline := len(offlineMode) > 0 && offlineMode[0]
-	defer CloseWriters()
 
 	// Initialize buffer manager (5 second timeout, 200 packet max per call)
 	bufferOnce.Do(func() {

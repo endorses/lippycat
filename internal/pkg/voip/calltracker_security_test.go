@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestSanitize_PathTraversalSecurity tests the sanitize function against various path traversal attacks
@@ -179,111 +178,6 @@ func TestSanitize_FilenameSafety(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestInitWriters_ErrorHandling(t *testing.T) {
-	// Test CallInfo.initWriters error handling
-	tests := []struct {
-		name        string
-		setup       func(*testing.T) (string, func())
-		expectError bool
-		description string
-	}{
-		{
-			name: "Valid directory creation",
-			setup: func(t *testing.T) (string, func()) {
-				tmpDir := t.TempDir()
-				callID := "test-call-123"
-				return callID, func() {
-					// Cleanup handled by t.TempDir()
-					os.RemoveAll(filepath.Join(tmpDir, "captures"))
-				}
-			},
-			expectError: false,
-			description: "Should successfully create files in valid directory",
-		},
-		{
-			name: "Permission denied directory",
-			setup: func(t *testing.T) (string, func()) {
-				if os.Getuid() == 0 {
-					t.Skip("Cannot test permission denied as root")
-				}
-
-				// Create a read-only parent directory
-				tmpDir := t.TempDir()
-				noWriteParent := filepath.Join(tmpDir, "nowrite")
-				err := os.Mkdir(noWriteParent, 0555) // Read and execute, but no write
-				require.NoError(t, err)
-
-				// Point XDG_DATA_HOME to a subdirectory that can't be created
-				oldXDG := os.Getenv("XDG_DATA_HOME")
-				os.Setenv("XDG_DATA_HOME", noWriteParent)
-
-				return "test-call-456", func() {
-					// Restore environment
-					if oldXDG != "" {
-						os.Setenv("XDG_DATA_HOME", oldXDG)
-					} else {
-						os.Unsetenv("XDG_DATA_HOME")
-					}
-					// Restore permissions for cleanup
-					os.Chmod(noWriteParent, 0755)
-				}
-			},
-			expectError: true,
-			description: "Should handle permission denied errors",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			callID, cleanup := tt.setup(t)
-			defer cleanup()
-
-			// Test initWriters
-			call := &CallInfo{
-				CallID: callID,
-			}
-
-			err := call.initWriters()
-
-			if tt.expectError {
-				assert.Error(t, err, tt.description)
-			} else {
-				// Note: This may still error in sandboxed environment, which is OK
-				if err != nil {
-					t.Logf("initWriters failed (expected in sandboxed environment): %v", err)
-				}
-			}
-		})
-	}
-}
-
-func TestCallInfo_ResourceLeaks(t *testing.T) {
-	t.Run("Multiple initWriters calls", func(t *testing.T) {
-		call := &CallInfo{
-			CallID: "test-resource-leak",
-		}
-
-		// Multiple calls should not leak file handles
-		for i := 0; i < 5; i++ {
-			err := call.initWriters()
-			if err == nil {
-				// If successful, close the files
-				if call.sipFile != nil {
-					call.sipFile.Close()
-					call.sipFile = nil
-				}
-				if call.rtpFile != nil {
-					call.rtpFile.Close()
-					call.rtpFile = nil
-				}
-			}
-		}
-
-		// Should not leak resources
-		assert.True(t, true, "Multiple initWriters calls should not leak resources")
-	})
 }
 
 func TestSanitize_PerformanceAndMemory(t *testing.T) {

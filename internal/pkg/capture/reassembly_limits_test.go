@@ -103,3 +103,18 @@ func BenchmarkTCPAssemblerBoundedReassembly(b *testing.B) {
 		a.FlushAll()
 	}
 }
+
+func TestTCPAssemblerBoundedReassemblyAllocationBaseline(t *testing.T) {
+	allocs := testing.AllocsPerRun(25, func() {
+		a := NewTCPAssemblerWithLimits(discardReassemblyFactory{}, 3, 100)
+		assembleLimitTestTCP(a, 1000, true, 1)
+		assembleLimitTestTCP(a, 1003, false, 3)
+		assembleLimitTestTCP(a, 1005, false, 5)
+		a.FlushAll()
+	})
+	// Keep the regression gate broad enough for supported Go versions. Its
+	// purpose is to catch loss of pooling or work proportional to page limits.
+	if allocs > 100 {
+		t.Fatalf("bounded reassembly allocations/run = %.1f, want <= 100", allocs)
+	}
+}

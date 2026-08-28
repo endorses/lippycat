@@ -165,10 +165,11 @@ Make every supported build variant and important observable behavior verifiable.
 ### Tasks
 
 - [x] Compile and vet `all`, `hunter`, `processor`, `tap`, `cli`, and `tui`.
-- [x] Compile and vet supported combinations with `li` and `cuda`, including
+- [ ] Compile and vet supported combinations with `li` and `cuda`, including
       `all,li`, `tap,li`, and `all,cuda`.
 - [x] Repair build constraints or CUDA/root-tag combinations found by the matrix.
-- [x] Add a Make/CI target that runs the complete build-tag matrix.
+- [ ] Add a Make/CI target that runs the complete build-tag matrix. The local
+      `make build-matrix-cuda` target exists, but CI still needs a CUDA builder.
 - [x] Document that the required test entry point is `make test` plus the
       dedicated LI package run; untagged `go test ./...` is not sufficient.
 - [x] Record golden CLI and TUI event fixtures from representative PCAPs.

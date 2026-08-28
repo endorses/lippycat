@@ -1,10 +1,13 @@
 # Pipeline behavior fixtures
 
 These fixtures freeze the observable semantics used during pipeline unification.
-The named PCAPs describe the representative capture scenario; the fixture stores
-the stable decoded observation rather than a host-dependent CLI rendering or a
-Bubble Tea frame. `protocol-events.json` is shared by CLI and TUI consumers.
+Tests construct deterministic representative packets, pass them through the real
+offline sniff and TUI conversion paths, and compare the resulting observations.
+The `source_pcap` names identify those generated capture scenarios; the generated
+files live in test temporary directories rather than being checked-in binaries.
 
-`per-call-pcap.json` deliberately compares semantic packet properties: packet
-count, link type, capture timestamp, five-tuple, SIP fields, payload SHA-256, and
-call association. PCAP global-header bytes and writer timing are not contractual.
+`per-call-pcap.json` is consumed by the processor per-call writer test. That test
+writes real SIP and RTP PCAPs, closes and reopens them, decodes every packet, and
+compares packet count, link type, capture timestamp, five-tuple, SIP fields,
+payload SHA-256, and call association. PCAP global-header bytes and writer timing
+are not contractual.

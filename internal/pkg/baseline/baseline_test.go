@@ -1,7 +1,6 @@
 package baseline
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"testing"
@@ -18,20 +17,6 @@ type protocolEvent struct {
 	DstPort    string   `json:"dst_port"`
 	Info       string   `json:"info"`
 	Modes      []string `json:"modes"`
-}
-
-type perCallFixture struct {
-	SourcePCAP  string `json:"source_pcap"`
-	CallID      string `json:"call_id"`
-	PacketCount int    `json:"packet_count"`
-	LinkType    string `json:"link_type"`
-	Packets     []struct {
-		Timestamp       string          `json:"timestamp"`
-		FiveTuple       json.RawMessage `json:"five_tuple"`
-		SIP             json.RawMessage `json:"sip"`
-		PayloadSHA256   string          `json:"payload_sha256"`
-		CallAssociation string          `json:"call_association"`
-	} `json:"packets"`
 }
 
 func readFixture(t *testing.T, name string, dst any) {
@@ -73,26 +58,6 @@ func TestProtocolEventGoldenFixtures(t *testing.T) {
 	for protocol, found := range wantProtocols {
 		if !found {
 			t.Errorf("missing %s fixture", protocol)
-		}
-	}
-}
-
-func TestPerCallPCAPSemanticFixture(t *testing.T) {
-	var fixture perCallFixture
-	readFixture(t, "per-call-pcap.json", &fixture)
-	if fixture.SourcePCAP == "" || fixture.CallID == "" || fixture.LinkType == "" || fixture.PacketCount != len(fixture.Packets) {
-		t.Fatal("incomplete per-call PCAP fixture header")
-	}
-	for i, packet := range fixture.Packets {
-		if _, err := time.Parse(time.RFC3339Nano, packet.Timestamp); err != nil {
-			t.Errorf("packet %d timestamp: %v", i, err)
-		}
-		if len(packet.FiveTuple) == 0 || packet.CallAssociation != fixture.CallID {
-			t.Errorf("packet %d has incomplete flow/call association", i)
-		}
-		digest, err := hex.DecodeString(packet.PayloadSHA256)
-		if err != nil || len(digest) != 32 {
-			t.Errorf("packet %d has invalid SHA-256 digest", i)
 		}
 	}
 }

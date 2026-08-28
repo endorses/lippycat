@@ -291,7 +291,7 @@ unifying call policy or delivery.
 - [x] Add corpus tests for compact headers, pipelined messages, fragmented TCP,
       malformed lengths, PUBLISH, provisional/final responses, and SDP.
 - [x] During transition, compare normalized results from old and new parsing on
-      the reference captures.
+      a synthetic reference corpus suitable for CI.
 
 ### Exit Criteria
 

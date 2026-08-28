@@ -27,7 +27,7 @@ func dnsRecord(t *testing.T) Record {
 	}
 	values[0], values[1] = time.Unix(1_700_000_000, 125_000_000).UTC(), "Ctest"
 	values[2], values[9] = netip.MustParseAddr("192.0.2.1"), "a\tb\\c\n"
-	values[21], values[22], values[23] = []string{"one", "two"}, []time.Duration{}, false
+	values[21], values[22], values[23] = []string{"one", "two"}, []time.Duration{30 * time.Second, 90*time.Second + 500*time.Millisecond}, false
 	r, err := NewRecord("dns", values...)
 	require.NoError(t, err)
 	return r
@@ -46,7 +46,7 @@ func TestTSVEncoder(t *testing.T) {
 	require.Contains(t, got, "#separator \\x09\n#set_separator\t,\n#empty_field\t(empty)\n#unset_field\t-\n")
 	require.Contains(t, got, "#path\tdns\n#open\t2026-08-24-12-30-05\n#fields\tts\tuid")
 	require.Contains(t, got, "a\\x09b\\x5cc\\x0a")
-	require.Contains(t, got, "\tone,two\t(empty)\tF\t")
+	require.Contains(t, got, "\tone,two\t30.000000,90.500000\tF\t")
 	require.Contains(t, got, "\t-\t")
 	require.True(t, strings.HasSuffix(got, "#close\t2026-08-24-12-30-06\n"))
 }
@@ -64,6 +64,30 @@ func TestJSONEncoder(t *testing.T) {
 	require.Equal(t, "192.0.2.1", got["id.orig_h"])
 	require.Nil(t, got["id.orig_p"])
 	require.Equal(t, []any{"one", "two"}, got["answers"])
+	require.Equal(t, []any{30.0, 90.5}, got["TTLs"])
+}
+
+func TestJSONValueRecursivelyConvertsCollections(t *testing.T) {
+	duration := 1500 * time.Millisecond
+	value := map[string]any{
+		"slice":   []time.Duration{time.Second, duration},
+		"array":   [2]time.Duration{2 * time.Second, 3 * time.Second},
+		"pointer": &duration,
+		"nested":  map[string][]any{"values": {4 * time.Second, netip.MustParseAddr("192.0.2.2")}},
+		"nil":     []time.Duration(nil),
+		"bytes":   []byte("ok"),
+	}
+
+	encoded, err := json.Marshal(jsonValue(value))
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &got))
+	require.Equal(t, []any{1.0, 1.5}, got["slice"])
+	require.Equal(t, []any{2.0, 3.0}, got["array"])
+	require.Equal(t, 1.5, got["pointer"])
+	require.Equal(t, map[string]any{"values": []any{4.0, "192.0.2.2"}}, got["nested"])
+	require.Nil(t, got["nil"])
+	require.Equal(t, "b2s=", got["bytes"])
 }
 
 func TestSinkLazyCreationFlushAndClose(t *testing.T) {
@@ -147,6 +171,88 @@ func TestSinkRotationAndHook(t *testing.T) {
 	}
 	require.NoError(t, sink.Close(context.Background()))
 	require.Equal(t, uint64(1), calls.Load())
+}
+
+func TestSinkRotatesExistingLogWhenFormatChanges(t *testing.T) {
+	tests := []struct {
+		name, existing string
+		format         Format
+	}{
+		{"tsv-to-json", "#separator \\x09\nold-tsv\n", FormatJSON},
+		{"json-to-tsv", "{\"uid\":\"old-json\"}\n", FormatTSV},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			active := filepath.Join(dir, "dns.log")
+			require.NoError(t, os.WriteFile(active, []byte(tt.existing), 0o640))
+			now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+			sink, err := New(Config{Directory: dir, Format: tt.format, QueueSize: 8, Now: func() time.Time { return now }})
+			require.NoError(t, err)
+			require.NoError(t, sink.Register(events.KindDNS, "dns", func(events.Event) (Record, bool, error) { return dnsRecord(t), true, nil }))
+			require.NoError(t, sink.Start(context.Background()))
+			require.NoError(t, sink.HandleEvent(context.Background(), events.NewDNSEvent(events.Envelope{})))
+			require.NoError(t, sink.Flush(context.Background()))
+			require.NoError(t, sink.Close(context.Background()))
+
+			archived := filepath.Join(dir, "dns-2026-08-28-12-00-00.log")
+			old, err := os.ReadFile(archived)
+			require.NoError(t, err)
+			require.Equal(t, tt.existing, string(old))
+			current, err := os.ReadFile(active)
+			require.NoError(t, err)
+			if tt.format == FormatJSON {
+				require.NotContains(t, string(current), "#separator")
+				for _, line := range bytes.Split(bytes.TrimSpace(current), []byte{'\n'}) {
+					require.True(t, json.Valid(line), "invalid JSON line: %q", line)
+				}
+			} else {
+				require.True(t, strings.HasPrefix(string(current), "#separator \\x09\n"))
+				require.NotContains(t, string(current), "old-json")
+			}
+			require.Equal(t, uint64(1), sink.Stats().Rotations)
+		})
+	}
+}
+
+func TestSinkFormatChangeRotationDoesNotOverwriteCollision(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "dns.log")
+	firstArchive := filepath.Join(dir, "dns-2026-08-28-12-00-00.log")
+	require.NoError(t, os.WriteFile(active, []byte("#separator \\x09\nold-tsv\n"), 0o640))
+	require.NoError(t, os.WriteFile(firstArchive, []byte("keep-me"), 0o640))
+	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+	sink, err := New(Config{Directory: dir, Format: FormatJSON, QueueSize: 8, Now: func() time.Time { return now }})
+	require.NoError(t, err)
+	require.NoError(t, sink.Register(events.KindDNS, "dns", func(events.Event) (Record, bool, error) { return dnsRecord(t), true, nil }))
+	require.NoError(t, sink.Start(context.Background()))
+	require.NoError(t, sink.HandleEvent(context.Background(), events.NewDNSEvent(events.Envelope{})))
+	require.NoError(t, sink.Flush(context.Background()))
+	require.NoError(t, sink.Close(context.Background()))
+
+	data, err := os.ReadFile(firstArchive)
+	require.NoError(t, err)
+	require.Equal(t, "keep-me", string(data))
+	data, err = os.ReadFile(filepath.Join(dir, "dns-2026-08-28-12-00-00-1.log"))
+	require.NoError(t, err)
+	require.Equal(t, "#separator \\x09\nold-tsv\n", string(data))
+}
+
+func TestSinkRejectsUnrecognizedExistingLogWithoutModifyingIt(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, "dns.log")
+	require.NoError(t, os.WriteFile(active, []byte("not a structured log\n"), 0o640))
+	sink, err := New(Config{Directory: dir, Format: FormatJSON, QueueSize: 8})
+	require.NoError(t, err)
+	require.NoError(t, sink.Register(events.KindDNS, "dns", func(events.Event) (Record, bool, error) { return dnsRecord(t), true, nil }))
+	require.NoError(t, sink.Start(context.Background()))
+	require.NoError(t, sink.HandleEvent(context.Background(), events.NewDNSEvent(events.Envelope{})))
+	require.NoError(t, sink.Flush(context.Background()))
+	require.Equal(t, uint64(1), sink.Stats().Errors)
+	require.NoError(t, sink.Close(context.Background()))
+	data, err := os.ReadFile(active)
+	require.NoError(t, err)
+	require.Equal(t, "not a structured log\n", string(data))
 }
 
 func TestSinkQueueFullDrops(t *testing.T) {

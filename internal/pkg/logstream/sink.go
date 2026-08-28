@@ -1,9 +1,11 @@
 package logstream
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -253,7 +255,25 @@ func (w *streamWriter) write(r Record) error {
 func (w *streamWriter) open() error {
 	schema, _ := logschema.ByName(w.name)
 	path := filepath.Join(w.sink.cfg.Directory, schema.Filename)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	existingFormat, err := detectLogFormat(path)
+	if err != nil {
+		return err
+	}
+	if existingFormat != "" && existingFormat != w.sink.cfg.Format {
+		rotated, err := w.archiveActive(path, schema.Filename)
+		if err != nil {
+			return fmt.Errorf("rotate %s before changing format from %s to %s: %w", path, existingFormat, w.sink.cfg.Format, err)
+		}
+		w.sink.rotations.Add(1)
+		w.runPostRotate(rotated)
+	}
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if existingFormat == "" {
+		// Empty or whitespace-only remnants do not contain records worth
+		// preserving and must not precede a Zeek header or JSONL record.
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+	f, err := os.OpenFile(path, flags, 0o640)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
@@ -310,13 +330,16 @@ func (w *streamWriter) rotate() error {
 	}
 	schema, _ := logschema.ByName(w.name)
 	active := filepath.Join(w.sink.cfg.Directory, schema.Filename)
-	ext := filepath.Ext(schema.Filename)
-	base := strings.TrimSuffix(schema.Filename, ext)
-	rotated := filepath.Join(w.sink.cfg.Directory, base+"-"+zeekClock(w.sink.cfg.Now())+ext)
-	if err := os.Rename(active, rotated); err != nil {
-		return fmt.Errorf("rename rotated log: %w", err)
+	rotated, err := w.archiveActive(active, schema.Filename)
+	if err != nil {
+		return fmt.Errorf("archive rotated log: %w", err)
 	}
 	w.sink.rotations.Add(1)
+	w.runPostRotate(rotated)
+	return nil
+}
+
+func (w *streamWriter) runPostRotate(rotated string) {
 	if hook := w.sink.cfg.PostRotate; hook != nil {
 		go func() {
 			if err := hook(w.sink.ctx, rotated); err != nil {
@@ -325,7 +348,66 @@ func (w *streamWriter) rotate() error {
 			}
 		}()
 	}
-	return nil
+}
+
+// archiveActive preserves an active log under a collision-free rotation name.
+// Link followed by remove avoids os.Rename's overwrite behavior when two
+// rotations receive the same second-resolution timestamp.
+func (w *streamWriter) archiveActive(active, filename string) (string, error) {
+	ext := filepath.Ext(filename)
+	base := strings.TrimSuffix(filename, ext) + "-" + zeekClock(w.sink.cfg.Now())
+	for sequence := 0; ; sequence++ {
+		suffix := ""
+		if sequence > 0 {
+			suffix = fmt.Sprintf("-%d", sequence)
+		}
+		rotated := filepath.Join(w.sink.cfg.Directory, base+suffix+ext)
+		if err := os.Link(active, rotated); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", fmt.Errorf("preserve active log as %s: %w", rotated, err)
+		}
+		if err := os.Remove(active); err != nil {
+			cleanupErr := os.Remove(rotated)
+			return "", errors.Join(fmt.Errorf("remove archived active log %s: %w", active, err), cleanupErr)
+		}
+		return rotated, nil
+	}
+}
+
+// detectLogFormat identifies formats by their first non-whitespace byte: Zeek
+// TSV files begin with a header comment and JSONL records begin with an object.
+func detectLogFormat(path string) (format Format, result error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect existing log %s: %w", path, err)
+	}
+	defer func() { result = errors.Join(result, f.Close()) }()
+	r := bufio.NewReader(f)
+	for {
+		b, readErr := r.ReadByte()
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				return "", nil
+			}
+			return "", fmt.Errorf("inspect existing log %s: %w", path, readErr)
+		}
+		if b == ' ' || b == '\t' || b == '\r' || b == '\n' {
+			continue
+		}
+		switch b {
+		case '#':
+			return FormatTSV, nil
+		case '{':
+			return FormatJSON, nil
+		default:
+			return "", fmt.Errorf("inspect existing log %s: unrecognized format", path)
+		}
+	}
 }
 
 func (s *Sink) Flush(ctx context.Context) error { return s.each(ctx, false) }

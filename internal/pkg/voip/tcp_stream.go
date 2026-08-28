@@ -719,8 +719,12 @@ func (s *bufferedSIPStream) isAssociatedCallActive() bool {
 		return false
 	}
 
-	// Check if the call is still active
-	return IsCallActive(callID)
+	// Query the registry owned by the composition root. A missing query means no
+	// call-aware extension, rather than falling back to hidden global state.
+	if s.factory.callActive == nil {
+		return false
+	}
+	return s.factory.callActive(callID)
 }
 
 // processSipMessage processes a complete SIP message (shared with bufferedSIPStream)

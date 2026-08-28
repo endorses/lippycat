@@ -17,7 +17,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket/layers"
-	"github.com/spf13/viper"
 )
 
 // ProcessorWorkerStats describes bounded flow-shard queue pressure.
@@ -50,21 +49,24 @@ func ProcessorWorkersStats() []ProcessorWorkerStats {
 
 func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	ctx := context.Background()
+	config := GetConfig()
+	tracker := NewCallTracker()
+	defer tracker.Shutdown()
 	logger.InfoContext(ctx, "Starting VoIP sniffer",
 		"device_count", len(devices),
 		"filter", filter)
 
 	// Initialize sniff completion monitor for PCAP file closure when writing is enabled
-	if viper.GetBool("writeVoip") {
-		gracePeriod := viper.GetDuration("voip.pcap_grace_period")
+	if config.WriteVoIP {
+		gracePeriod := config.PCAPGracePeriod
 		if gracePeriod <= 0 {
 			gracePeriod = 5 * time.Second
 		}
-		closedCallTTL := viper.GetDuration("voip.pcap_closed_call_ttl")
+		closedCallTTL := config.PCAPClosedCallTTL
 		if closedCallTTL <= 0 {
 			closedCallTTL = time.Hour
 		}
-		monitor := NewSniffCompletionMonitor(&SniffCompletionMonitorConfig{
+		monitor := NewSniffCompletionMonitor(tracker, &SniffCompletionMonitorConfig{
 			GracePeriod:   gracePeriod,
 			CheckInterval: 1 * time.Second,
 			ClosedCallTTL: closedCallTTL,
@@ -82,8 +84,8 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	// Initialize virtual interface FIRST if enabled (before processing any packets)
 	// This allows early permission check and avoids wasting time processing packets
-	if viper.GetBool("sniff.virtual_interface") {
-		vifName := viper.GetString("sniff.vif_name")
+	if config.VirtualInterface {
+		vifName := config.VIFName
 		if vifName == "" {
 			vifName = "lc0"
 		}
@@ -92,22 +94,22 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		cfg.Name = vifName
 
 		// Read interface type from config (default: tap)
-		if vifType := viper.GetString("sniff.vif_type"); vifType != "" {
+		if vifType := config.VIFType; vifType != "" {
 			cfg.Type = vifType
 		}
 
 		// Read buffer size from config (default: 4096)
-		if bufferSize := viper.GetInt("sniff.vif_buffer_size"); bufferSize > 0 {
+		if bufferSize := config.VIFBufferSize; bufferSize > 0 {
 			cfg.BufferSize = bufferSize
 		}
 
 		// Read network namespace from config (default: empty)
-		if netNS := viper.GetString("sniff.vif_netns"); netNS != "" {
+		if netNS := config.VIFNetNS; netNS != "" {
 			cfg.NetNS = netNS
 		}
 
 		// Read privilege dropping user from config (default: empty)
-		if dropPrivUser := viper.GetString("sniff.vif_drop_privileges"); dropPrivUser != "" {
+		if dropPrivUser := config.VIFDropPrivilegesUser; dropPrivUser != "" {
 			cfg.DropPrivilegesUser = dropPrivUser
 		}
 
@@ -161,11 +163,11 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 				"interface_name", globalVifMgr.Name())
 
 			// Initialize timing replayer for virtual interface
-			replayTiming := viper.GetBool("sniff.vif_replay_timing")
+			replayTiming := config.VIFReplayTiming
 			globalTimingReplay = vinterface.NewTimingReplayer(replayTiming)
 
 			// Wait for external tools (tcpdump, Wireshark) to attach
-			startupDelay := viper.GetDuration("sniff.vif_startup_delay")
+			startupDelay := config.VIFStartupDelay
 			if startupDelay > 0 {
 				logger.Info("Waiting for monitoring tools to attach...",
 					"delay", startupDelay)
@@ -194,8 +196,8 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create handler for local file writing
-	handler := NewLocalFileHandler()
-	streamFactory := NewSipStreamFactory(ctx, handler)
+	handler := NewLocalFileHandler(tracker)
+	streamFactory := NewSipStreamFactoryWithConfig(ctx, handler, *GetConfig(), tracker.IsCallActive)
 	// VoIP owns its (connection-aware reassembly) assembler internally rather
 	// than threading it through the shared capture-layer signatures, which stay
 	// typed to the legacy *tcpassembly.Assembler for the other protocols.
@@ -222,7 +224,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			break
 		}
 	}
-	processor := func(ch <-chan capture.PacketInfo) { startProcessor(ch, assembler, isOffline) }
+	processor := func(ch <-chan capture.PacketInfo) { startProcessor(tracker, ch, assembler, isOffline) }
 
 	if isOffline {
 		// For offline mode, run until PCAP is fully read
@@ -241,7 +243,7 @@ func StartOfflineVoipSniffer(readFiles []string, filter string) {
 	capture.StartOfflineSniffer(readFiles, filter, StartVoipSniffer)
 }
 
-func startProcessor(ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
+func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
 	offline := len(offlineMode) > 0 && offlineMode[0]
 	defer CloseWriters()
 
@@ -263,7 +265,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, 
 	if numWorkers <= 1 {
 		// Single-threaded path (original behaviour / offline-ordered mode).
 		for pkt := range ch {
-			processOnePacket(pkt, assembler, offline)
+			processOnePacket(tracker, pkt, assembler, offline)
 		}
 	} else {
 		// Flow-sharded worker pool. Each flow (both directions) is pinned to one
@@ -287,7 +289,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, 
 			go func(in <-chan capture.PacketInfo) {
 				defer wg.Done()
 				for pkt := range in {
-					processOnePacket(pkt, assembler, offline)
+					processOnePacket(tracker, pkt, assembler, offline)
 				}
 			}(workers[i])
 		}
@@ -330,11 +332,15 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, 
 	logger.Info("VoIP processor finished")
 }
 
+func startProcessorWithTracker(tracker *CallTracker, ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
+	startProcessor(tracker, ch, assembler, offlineMode...)
+}
+
 // processOnePacket dispatches a single packet to the appropriate transport handler.
 // Safe to call from multiple worker goroutines concurrently as long as packets of
 // the same flow are delivered to the same worker (see startProcessor) and shared
 // call/registry/writer state remains mutex-protected.
-func processOnePacket(pkt capture.PacketInfo, assembler tcpPacketAssembler, offline bool) {
+func processOnePacket(tracker *CallTracker, pkt capture.PacketInfo, assembler tcpPacketAssembler, offline bool) {
 	packet := pkt.Packet
 	if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
 		return
@@ -343,7 +349,7 @@ func processOnePacket(pkt capture.PacketInfo, assembler tcpPacketAssembler, offl
 	case *layers.TCP:
 		handleTcpPackets(pkt, layer, assembler, offline)
 	case *layers.UDP:
-		handleUdpPackets(pkt, layer)
+		handleUdpPackets(tracker, pkt, layer)
 	}
 }
 
@@ -352,10 +358,8 @@ func processOnePacket(pkt capture.PacketInfo, assembler tcpPacketAssembler, offl
 // headroom for the capture/decode goroutine and async writers), minimum 1.
 // A value of 1 selects the original single-threaded path.
 func getProcessorWorkerCount() int {
-	if viper.IsSet("voip.processor_workers") {
-		if n := viper.GetInt("voip.processor_workers"); n >= 1 {
-			return n
-		}
+	if n := GetConfig().ProcessorWorkers; n >= 1 {
+		return n
 	}
 	n := runtime.NumCPU() - 2
 	if n < 1 {
@@ -367,10 +371,8 @@ func getProcessorWorkerCount() int {
 // getProcessorWorkerBuffer returns the per-worker input channel depth.
 // Configurable via voip.processor_worker_buffer; defaults to 8192.
 func getProcessorWorkerBuffer() int {
-	if viper.IsSet("voip.processor_worker_buffer") {
-		if b := viper.GetInt("voip.processor_worker_buffer"); b > 0 {
-			return b
-		}
+	if b := GetConfig().ProcessorWorkerBuffer; b > 0 {
+		return b
 	}
 	return 8192
 }

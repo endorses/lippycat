@@ -10,7 +10,8 @@ import (
 
 // portToCallID is now managed by the CallTracker
 
-func ExtractPortFromSdp(sdpBody string, callID string) {
+// ExtractPortFromSDP registers every RTP endpoint advertised by SDP on this tracker.
+func (tracker *CallTracker) ExtractPortFromSDP(sdpBody string, callID string) {
 	// Extract all RTP endpoints (IP:port) from SDP body (supports multi-stream calls)
 	endpoints := extractAllRTPEndpoints(sdpBody)
 
@@ -19,7 +20,6 @@ func ExtractPortFromSdp(sdpBody string, callID string) {
 	}
 
 	// Register all endpoints with the CallTracker
-	tracker := getTracker()
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
@@ -135,7 +135,8 @@ func extractAllRTPPorts(sdp string) []string {
 	return ports
 }
 
-func IsTracked(packet gopacket.Packet) bool {
+// IsTracked reports whether a packet matches an RTP endpoint on this tracker.
+func (tracker *CallTracker) IsTracked(packet gopacket.Packet) bool {
 	transportLayer := packet.TransportLayer()
 	if transportLayer == nil {
 		return false
@@ -145,7 +146,6 @@ func IsTracked(packet gopacket.Packet) bool {
 	dstPort := transportLayer.TransportFlow().Dst().String()
 	srcPort := transportLayer.TransportFlow().Src().String()
 
-	tracker := getTracker()
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 
@@ -173,8 +173,9 @@ func IsTracked(packet gopacket.Packet) bool {
 
 // GetCallIDForPacket returns the first call ID associated with a packet's port.
 // For B2BUA scenarios where multiple calls share a port, use GetAllCallIDsForPacket.
-func GetCallIDForPacket(packet gopacket.Packet) string {
-	callIDs := GetAllCallIDsForPacket(packet)
+// GetCallIDForPacket returns the first call associated with a packet.
+func (tracker *CallTracker) GetCallIDForPacket(packet gopacket.Packet) string {
+	callIDs := tracker.GetAllCallIDsForPacket(packet)
 	if len(callIDs) > 0 {
 		return callIDs[0]
 	}
@@ -183,7 +184,8 @@ func GetCallIDForPacket(packet gopacket.Packet) string {
 
 // GetAllCallIDsForPacket returns all call IDs associated with a packet's port.
 // This supports B2BUA scenarios where multiple call legs share the same RTP port.
-func GetAllCallIDsForPacket(packet gopacket.Packet) []string {
+// GetAllCallIDsForPacket returns all calls associated with a packet.
+func (tracker *CallTracker) GetAllCallIDsForPacket(packet gopacket.Packet) []string {
 	transportLayer := packet.TransportLayer()
 	if transportLayer == nil {
 		return nil
@@ -193,7 +195,6 @@ func GetAllCallIDsForPacket(packet gopacket.Packet) []string {
 	dstPort := transportLayer.TransportFlow().Dst().String()
 	srcPort := transportLayer.TransportFlow().Src().String()
 
-	tracker := getTracker()
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 
@@ -226,8 +227,8 @@ func GetAllCallIDsForPacket(packet gopacket.Packet) []string {
 // CleanupPortMappings removes all port-to-callID mappings for a given callID.
 // This should be called when a call ends (after grace period) to prevent
 // port collisions with new calls.
-func CleanupPortMappings(callID string) {
-	tracker := getTracker()
+// CleanupPortMappings removes this call from every endpoint on this tracker.
+func (tracker *CallTracker) CleanupPortMappings(callID string) {
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 

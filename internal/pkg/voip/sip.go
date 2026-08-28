@@ -83,7 +83,7 @@ func extractTagFromHeader(header string) string {
 	return sharedsip.Tag(header)
 }
 
-func handleSipMessage(data []byte, linkType layers.LinkType) bool {
+func handleSipMessage(tracker *CallTracker, data []byte, linkType layers.LinkType) bool {
 	logger.Debug("handleSipMessage called", "data_len", len(data))
 	lines := bytes.Split(data, []byte("\n"))
 	if len(lines) == 0 {
@@ -133,19 +133,23 @@ func handleSipMessage(data []byte, linkType layers.LinkType) bool {
 
 			// Update call state if call already exists
 			// Note: In hunter mode, calls should be created separately for local tracking
-			call, err := getCall(callID)
+			call, err := tracker.GetCall(callID)
 			if err == nil {
 				call.SetCallInfoState(method)
 			}
 
 			// Extract RTP ports from SDP if present
 			if BytesContains(event.SDP, []byte("m=audio")) {
-				ExtractPortFromSdp(string(event.SDP), callID)
+				tracker.ExtractPortFromSDP(string(event.SDP), callID)
 			}
 		}
 		return true
 	}
 	return false
+}
+
+func handleSipMessageWithTracker(tracker *CallTracker, data []byte, linkType layers.LinkType) bool {
+	return handleSipMessage(tracker, data, linkType)
 }
 
 func detectSipMethod(line string) string {

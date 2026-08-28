@@ -66,6 +66,9 @@ func TestValidateContentLength(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set configuration
 			viper.Set("voip.security.max_content_length", tt.maxContentLen)
+			cfg := *GetConfig()
+			cfg.Security.MaxContentLength = tt.maxContentLen
+			SetConfig(&cfg)
 			ResetSecurityConfigForTesting() // Reset to pick up new config
 
 			err := ValidateContentLength(tt.contentLength)

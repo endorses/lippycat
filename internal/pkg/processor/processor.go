@@ -193,7 +193,9 @@ type Processor struct {
 	vifInjectionErrors atomic.Uint64 // Virtual interface injection failures
 
 	// Per-call PCAP writer (separate from main PCAP writer)
-	perCallPcapWriter *PcapWriterManager
+	// Deprecated compatibility alias; sessionOutputManager owns this writer.
+	perCallPcapWriter    *PcapWriterManager
+	sessionOutputManager *SessionOutputManager
 
 	// Auto-rotate PCAP writer (for non-VoIP traffic)
 	autoRotatePcapWriter *AutoRotatePcapWriter
@@ -202,6 +204,7 @@ type Processor struct {
 	commandExecutor *CommandExecutor
 
 	// Call completion monitor (closes PCAP files after grace period)
+	// Deprecated compatibility alias; sessionOutputManager owns this monitor.
 	callCompletionMonitor *CallCompletionMonitor
 
 	// Protocol aggregators
@@ -380,11 +383,19 @@ func New(config Config) (*Processor, error) {
 			config.PcapWriterConfig.OnFileClose = p.commandExecutor.OnFileClose()
 			config.PcapWriterConfig.OnCallComplete = p.commandExecutor.OnCallComplete()
 		}
-		writer, err := NewPcapWriterManager(config.PcapWriterConfig)
+		manager, err := NewSessionOutputManager(
+			config.PcapWriterConfig,
+			config.CallCompletionMonitorConfig,
+			p.callAggregator,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize per-call PCAP writer: %w", err)
+			return nil, fmt.Errorf("failed to initialize session output manager: %w", err)
 		}
-		p.perCallPcapWriter = writer
+		p.sessionOutputManager = manager
+		p.perCallPcapWriter = manager.writer
+		if monitor, ok := manager.monitor.(*CallCompletionMonitor); ok {
+			p.callCompletionMonitor = monitor
+		}
 		logger.Info("Per-call PCAP writing enabled",
 			"output_dir", config.PcapWriterConfig.OutputDir,
 			"pattern", config.PcapWriterConfig.FilePattern)
@@ -408,14 +419,8 @@ func New(config Config) (*Processor, error) {
 			"max_file_size", config.AutoRotateConfig.MaxFileSize)
 	}
 
-	// Initialize call completion monitor if per-call PCAP is enabled
-	// This monitors VoIP call state and closes PCAP files after grace period
-	if p.perCallPcapWriter != nil {
-		monitorConfig := config.CallCompletionMonitorConfig
-		if monitorConfig == nil {
-			monitorConfig = DefaultCallCompletionMonitorConfig()
-		}
-		p.callCompletionMonitor = NewCallCompletionMonitor(monitorConfig, p.callAggregator, p.perCallPcapWriter)
+	if p.sessionOutputManager != nil {
+		monitorConfig := p.callCompletionMonitor.config
 		logger.Info("Call completion monitor configured",
 			"grace_period", monitorConfig.GracePeriod,
 			"check_interval", monitorConfig.CheckInterval)

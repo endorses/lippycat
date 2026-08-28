@@ -6,10 +6,12 @@
 package processor
 
 import (
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -68,14 +70,7 @@ const (
 )
 
 // CallInfo contains information about an active call.
-type CallInfo struct {
-	CallID      string
-	State       string
-	From        string
-	To          string
-	Created     time.Time
-	LastUpdated time.Time
-}
+type CallInfo = callregistry.Call
 
 // CallMetadata contains extracted SIP header information.
 type CallMetadata struct {
@@ -135,6 +130,9 @@ type Config struct {
 	// LI correlation). Without it the cheaper boolean match is used, which can
 	// also take the GPU path.
 	NeedFilterIDs bool
+
+	// LifecycleObservers receive ordered notifications after registry mutations.
+	LifecycleObservers []callregistry.LifecycleObserver
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -155,6 +153,9 @@ type Processor struct {
 	calls        map[string]*callState
 	portToCallID map[string][]string // RTP port -> []CallID (multi-value for B2BUA)
 	mu           sync.RWMutex
+	eventMu      sync.Mutex
+	janitorWG    sync.WaitGroup
+	observers    []callregistry.LifecycleObserver
 
 	// Optional application filter for call selection
 	appFilter     ApplicationFilter
@@ -162,6 +163,7 @@ type Processor struct {
 
 	// Janitor for cleanup
 	janitorCtx    chan struct{}
+	closeDone     chan struct{}
 	janitorClosed bool
 }
 
@@ -189,9 +191,12 @@ func New(cfg Config) *Processor {
 		appFilter:     cfg.ApplicationFilter,
 		needFilterIDs: cfg.NeedFilterIDs,
 		janitorCtx:    make(chan struct{}),
+		closeDone:     make(chan struct{}),
+		observers:     append([]callregistry.LifecycleObserver(nil), cfg.LifecycleObservers...),
 	}
 
 	// Start janitor goroutine for cleanup
+	p.janitorWG.Add(1)
 	go p.janitorLoop()
 
 	return p
@@ -252,15 +257,26 @@ func (p *Processor) ActiveCalls() []CallInfo {
 // Close releases resources held by the processor.
 func (p *Processor) Close() {
 	p.mu.Lock()
-	if !p.janitorClosed {
-		close(p.janitorCtx)
-		p.janitorClosed = true
+	if p.janitorClosed {
+		p.mu.Unlock()
+		<-p.closeDone
+		return
 	}
+	close(p.janitorCtx)
+	p.janitorClosed = true
+	ended := make([]CallInfo, 0, len(p.calls))
+	for _, state := range p.calls {
+		ended = append(ended, state.info)
+	}
+	sort.Slice(ended, func(i, j int) bool { return ended[i].CallID < ended[j].CallID })
 	// Release every association on shutdown. The processor is the sole owner of
 	// these maps, so retaining them after Close only prolongs endpoint/call data.
 	clear(p.portToCallID)
 	clear(p.calls)
 	p.mu.Unlock()
+	p.notifyEnded(ended, callregistry.EndShutdown)
+	p.janitorWG.Wait()
+	close(p.closeDone)
 }
 
 // RegisterSDP associates RTP endpoints advertised by a reassembled TCP SIP
@@ -279,6 +295,7 @@ func (p *Processor) RegisterSDP(callID, sdp string) {
 
 // janitorLoop periodically cleans up expired calls.
 func (p *Processor) janitorLoop() {
+	defer p.janitorWG.Done()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -295,9 +312,9 @@ func (p *Processor) janitorLoop() {
 // cleanupExpiredCalls removes calls that have exceeded the timeout.
 func (p *Processor) cleanupExpiredCalls() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	now := time.Now()
+	var ended []CallInfo
 	for callID, state := range p.calls {
 		if now.Sub(state.lastUpdated) > p.config.CallTimeout {
 			// Remove this callID from port mappings (multi-value for B2BUA)
@@ -305,17 +322,26 @@ func (p *Processor) cleanupExpiredCalls() {
 				p.removeCallIDFromPort(port, callID)
 			}
 			delete(p.calls, callID)
+			ended = append(ended, state.info)
 		}
 	}
+	p.mu.Unlock()
+	sort.Slice(ended, func(i, j int) bool { return ended[i].CallID < ended[j].CallID })
+	p.notifyEnded(ended, callregistry.EndTimeout)
 }
 
 // getOrCreateCall gets or creates a call state for the given CallID.
 func (p *Processor) getOrCreateCall(callID string) *callState {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	state, exists := p.calls[callID]
+	var started *CallInfo
+	var evicted *CallInfo
 	if !exists {
+		if p.janitorClosed {
+			p.mu.Unlock()
+			return nil
+		}
 		now := time.Now()
 		state = &callState{
 			info: CallInfo{
@@ -328,17 +354,28 @@ func (p *Processor) getOrCreateCall(callID string) *callState {
 			lastUpdated: now,
 		}
 		p.calls[callID] = state
+		info := state.info
+		started = &info
 
 		// Evict oldest call if at capacity
 		if len(p.calls) > p.config.MaxCalls {
-			p.evictOldestCallLocked()
+			if info, ok := p.evictOldestCallLocked(); ok {
+				evicted = &info
+			}
 		}
+	}
+	p.mu.Unlock()
+	if evicted != nil {
+		p.notifyEnded([]CallInfo{*evicted}, callregistry.EndEvicted)
+	}
+	if started != nil {
+		p.notifyStarted(*started)
 	}
 	return state
 }
 
 // evictOldestCallLocked removes the oldest call (must hold mu lock).
-func (p *Processor) evictOldestCallLocked() {
+func (p *Processor) evictOldestCallLocked() (CallInfo, bool) {
 	var oldestID string
 	var oldestTime time.Time
 
@@ -355,7 +392,9 @@ func (p *Processor) evictOldestCallLocked() {
 			p.removeCallIDFromPort(port, oldestID)
 		}
 		delete(p.calls, oldestID)
+		return state.info, true
 	}
+	return CallInfo{}, false
 }
 
 // removeCallIDFromPort removes a specific callID from a port's mapping (must hold mu lock).
@@ -377,6 +416,10 @@ func (p *Processor) removeCallIDFromPort(port, callID string) {
 func (p *Processor) registerRTPPort(callID, port string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	state, exists := p.calls[callID]
+	if p.janitorClosed || !exists {
+		return
+	}
 
 	// Append to slice, avoiding duplicates (supports B2BUA with shared ports)
 	existing := p.portToCallID[port]
@@ -391,15 +434,13 @@ func (p *Processor) registerRTPPort(callID, port string) {
 		p.portToCallID[port] = append(existing, callID)
 	}
 
-	if state, exists := p.calls[callID]; exists {
-		// Avoid duplicates in call's port list
-		for _, pt := range state.rtpPorts {
-			if pt == port {
-				return
-			}
+	// Avoid duplicates in call's port list
+	for _, pt := range state.rtpPorts {
+		if pt == port {
+			return
 		}
-		state.rtpPorts = append(state.rtpPorts, port)
 	}
+	state.rtpPorts = append(state.rtpPorts, port)
 }
 
 // getCallIDForPort looks up the first CallID for an RTP port.
@@ -419,7 +460,31 @@ func (p *Processor) getCallIDForPort(port string) (string, bool) {
 func (p *Processor) getAllCallIDsForPort(port string) []string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.portToCallID[port]
+	return append([]string(nil), p.portToCallID[port]...)
+}
+
+// Call returns a copy of the tracked call.
+func (p *Processor) Call(callID string) (callregistry.Call, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	state, ok := p.calls[callID]
+	if !ok {
+		return callregistry.Call{}, false
+	}
+	return state.info, true
+}
+
+// CallIDsForEndpoint returns a copy of all calls associated with endpoint.
+func (p *Processor) CallIDsForEndpoint(endpoint string) []string {
+	return p.getAllCallIDsForPort(endpoint)
+}
+
+// AssociateEndpoint associates a media endpoint with an existing call.
+func (p *Processor) AssociateEndpoint(callID, endpoint string) {
+	if callID == "" || endpoint == "" || p.getOrCreateCall(callID) == nil {
+		return
+	}
+	p.registerRTPPort(callID, endpoint)
 }
 
 // CleanupCallPorts removes all port-to-callID mappings for a given callID.
@@ -447,7 +512,40 @@ func (p *Processor) CleanupCallPorts(callID string) {
 // callers can still inspect its final metadata, but reused media endpoints can
 // no longer be attributed to the completed call.
 func (p *Processor) CompleteCall(callID string) {
-	p.CleanupCallPorts(callID)
+	p.removeCall(callID, callregistry.EndCompleted)
+}
+
+func (p *Processor) removeCall(callID string, reason callregistry.EndReason) {
+	p.mu.Lock()
+	state, exists := p.calls[callID]
+	if exists {
+		for _, port := range state.rtpPorts {
+			p.removeCallIDFromPort(port, callID)
+		}
+		delete(p.calls, callID)
+	}
+	p.mu.Unlock()
+	if exists {
+		p.notifyEnded([]CallInfo{state.info}, reason)
+	}
+}
+
+func (p *Processor) notifyStarted(call CallInfo) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	for _, observer := range p.observers {
+		observer.OnCallStarted(call)
+	}
+}
+
+func (p *Processor) notifyEnded(calls []CallInfo, reason callregistry.EndReason) {
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	for _, call := range calls {
+		for _, observer := range p.observers {
+			observer.OnCallEnded(call, reason)
+		}
+	}
 }
 
 // updateCallState updates the state and metadata for a call.
@@ -469,3 +567,4 @@ func (p *Processor) updateCallState(callID, state string, metadata *CallMetadata
 
 // Ensure Processor implements VoIPProcessor.
 var _ VoIPProcessor = (*Processor)(nil)
+var _ callregistry.Registry = (*Processor)(nil)

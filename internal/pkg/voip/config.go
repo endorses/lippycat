@@ -3,26 +3,45 @@ package voip
 import (
 	"sync"
 	"time"
-
-	"github.com/spf13/viper"
 )
 
 var (
+	configMu sync.RWMutex
+	config   = DefaultConfig()
+	// configOnce remains only for compatibility with legacy in-package tests.
 	configOnce sync.Once
-	cachedOnce sync.Once
-	cachedCfg  *Config
 )
 
-// ResetConfigCache forces the next GetConfig call to re-read from viper.
-// Only needed if viper values change at runtime (rare); call sites
-// must coordinate so readers don't observe a torn struct.
+// ResetConfigCache restores the immutable process configuration to defaults.
+// It exists for tests; production composition should call SetConfig once.
 func ResetConfigCache() {
-	cachedOnce = sync.Once{}
-	cachedCfg = nil
+	SetConfig(DefaultConfig())
 }
+
+// initConfigDefaults is retained for older in-package tests. Defaults are now
+// ordinary Go values rather than registrations in a global config registry.
+func initConfigDefaults() {}
 
 // Config holds all configurable VoIP processing parameters
 type Config struct {
+	// Output and registry settings are resolved by command composition.
+	WriteVoIP         bool
+	OutputFile        string
+	MaxCalls          int
+	PCAPGracePeriod   time.Duration
+	PCAPClosedCallTTL time.Duration
+	Security          SecurityConfig
+
+	VirtualInterface      bool
+	VIFName               string
+	VIFType               string
+	VIFBufferSize         int
+	VIFNetNS              string
+	VIFDropPrivilegesUser string
+	VIFReplayTiming       bool
+	VIFStartupDelay       time.Duration
+	ProcessorWorkers      int
+	ProcessorWorkerBuffer int
 	// Goroutine limits
 	MaxGoroutines int `mapstructure:"max_goroutines"`
 
@@ -93,152 +112,50 @@ type Config struct {
 	EnableAutoTuning         bool          `mapstructure:"enable_auto_tuning"`
 }
 
-// initConfigDefaults initializes viper defaults once
-func initConfigDefaults() {
-	viper.SetDefault("voip.max_goroutines", DefaultGoroutineLimit)
-	viper.SetDefault("voip.max_streams", DefaultMaxStreams)
-	viper.SetDefault("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout)
-	viper.SetDefault("voip.janitor_cleanup_interval", DefaultJanitorCleanupInterval)
-	viper.SetDefault("voip.call_expiration_time", DefaultCallExpirationTime)
-	viper.SetDefault("voip.stream_queue_buffer", DefaultStreamQueueBuffer)
-	viper.SetDefault("voip.max_filename_length", DefaultMaxFilenameLength)
-	viper.SetDefault("voip.log_goroutine_limit_interval", 30*time.Second)
-
-	// TCP-specific defaults
-	viper.SetDefault("voip.tcp_cleanup_interval", DefaultTCPCleanupInterval)
-	viper.SetDefault("voip.tcp_buffer_max_age", DefaultTCPBufferMaxAge)
-	viper.SetDefault("voip.tcp_stream_max_queue_time", DefaultTCPStreamMaxQueueTime)
-	viper.SetDefault("voip.max_tcp_buffers", DefaultMaxTCPBuffers)
-	viper.SetDefault("voip.tcp_stream_timeout", DefaultTCPStreamTimeout)
-	viper.SetDefault("voip.tcp_assembler_max_pages", DefaultTCPAssemblerMaxPages)
-	viper.SetDefault("voip.tcp_sip_idle_timeout", DefaultTCPSIPIdleTimeout)
-
-	// Phase 3: State-based TCP timeout defaults
-	viper.SetDefault("voip.enable_state_tcp_timeouts", false) // Disabled by default for backward compatibility
-	viper.SetDefault("voip.tcp_opening_timeout", DefaultTCPOpeningTimeout)
-	viper.SetDefault("voip.tcp_established_timeout", DefaultTCPEstablishedTimeout)
-	viper.SetDefault("voip.tcp_closing_timeout", DefaultTCPClosingTimeout)
-	viper.SetDefault("voip.enable_call_aware_timeout", false) // Disabled by default for backward compatibility
-
-	// TCP Performance defaults
-	viper.SetDefault("voip.tcp_performance_mode", DefaultTCPPerformanceMode)
-	viper.SetDefault("voip.tcp_buffer_strategy", DefaultTCPBufferStrategy)
-	viper.SetDefault("voip.enable_backpressure", DefaultEnableBackpressure)
-	viper.SetDefault("voip.memory_optimization", DefaultMemoryOptimization)
-	viper.SetDefault("voip.tcp_buffer_pool_size", DefaultTCPBufferPoolSize)
-	viper.SetDefault("voip.tcp_batch_size", DefaultTCPBatchSize)
-	viper.SetDefault("voip.tcp_io_threads", DefaultTCPIOThreads)
-	viper.SetDefault("voip.tcp_compression_level", DefaultTCPCompressionLevel)
-	viper.SetDefault("voip.tcp_memory_limit", DefaultTCPMemoryLimit)
-	viper.SetDefault("voip.tcp_latency_optimization", DefaultTCPLatencyOptimization)
-	viper.SetDefault("voip.enable_auto_tuning", true)
-
-	// Plugin system defaults - disabled by default for backward compatibility
-	viper.SetDefault("voip.plugins_enabled", false)
-	viper.SetDefault("voip.plugin_paths", []string{})
-	viper.SetDefault("voip.plugin_watch_enabled", false)
-	viper.SetDefault("voip.plugin_sip_enabled", true)
-	viper.SetDefault("voip.plugin_rtp_enabled", true)
-	viper.SetDefault("voip.plugin_generic_enabled", true)
-
-	// Monitoring system defaults - disabled by default for backward compatibility
-	viper.SetDefault("voip.monitoring_enabled", false)
-	viper.SetDefault("voip.metrics_enabled", false)
-	viper.SetDefault("voip.tracing_enabled", false)
-	viper.SetDefault("voip.monitoring_update_interval", 30*time.Second)
-	viper.SetDefault("voip.enable_runtime_metrics", true)
-	viper.SetDefault("voip.enable_system_metrics", false)
-	viper.SetDefault("voip.enable_plugin_metrics", true)
-}
-
-// getPositiveDuration returns the duration from viper if it's positive, otherwise returns the default
-func getPositiveDuration(key string, defaultVal time.Duration) time.Duration {
-	val := viper.GetDuration(key)
-	if val <= 0 {
-		return defaultVal
-	}
-	return val
-}
-
-// getPositiveInt returns the int from viper if it's positive, otherwise returns the default
-func getPositiveInt(key string, defaultVal int) int {
-	val := viper.GetInt(key)
-	if val <= 0 {
-		return defaultVal
-	}
-	return val
-}
-
-// getPositiveInt64 returns the int64 from viper if it's positive, otherwise returns the default
-func getPositiveInt64(key string, defaultVal int64) int64 {
-	val := viper.GetInt64(key)
-	if val <= 0 {
-		return defaultVal
-	}
-	return val
-}
-
-// GetConfig returns the current VoIP configuration with defaults
+// GetConfig returns a copy of the installed process configuration.
 func GetConfig() *Config {
-	// Initialize defaults only once to prevent race conditions
-	configOnce.Do(initConfigDefaults)
-
-	// Cache the assembled Config — viper reads in this function are expensive
-	// (reflection + path-shadow checks) and called from per-packet hot paths.
-	// Return a copy so callers (e.g. applyPerformanceModeOptimizations) can
-	// mutate without poisoning the cache for other goroutines.
-	cachedOnce.Do(func() {
-		cachedCfg = buildConfig()
-	})
-	cfg := *cachedCfg
+	configMu.RLock()
+	defer configMu.RUnlock()
+	cfg := *config
+	cfg.PluginPaths = append([]string(nil), config.PluginPaths...)
 	return &cfg
 }
 
-func buildConfig() *Config {
-	// Resolve the active TCP performance profile. The profile bundles every
-	// TCP-tuning value (per-buffer packet cap, eviction strategy, cleanup
-	// cadence, stream timeouts) and the `--tcp-performance-mode` flag selects
-	// it. These values used to be applied via ExpandSimplifiedConfig, which
-	// nothing ever called — so every mode silently fell back to the generic
-	// defaults (e.g. MaxTCPBuffers 10000 instead of "minimal"'s 500). Resolve
-	// and apply the profile here so the flag actually takes effect.
-	profiles := GetPerformanceProfiles()
-	profile, ok := profiles[viper.GetString("voip.tcp_performance_mode")]
-	if !ok {
-		profile = profiles["balanced"]
+// SetConfig installs a defensive copy. Call it at a command/composition boundary
+// before starting packet-processing goroutines.
+func SetConfig(cfg *Config) {
+	if cfg == nil {
+		cfg = DefaultConfig()
 	}
+	clone := *cfg
+	clone.PluginPaths = append([]string(nil), cfg.PluginPaths...)
+	configMu.Lock()
+	config = &clone
+	configMu.Unlock()
+}
 
-	config := &Config{
-		MaxGoroutines:          getPositiveInt("voip.max_goroutines", DefaultGoroutineLimit),
-		MaxStreams:             viper.GetInt("voip.max_streams"),
-		CallIDDetectionTimeout: getPositiveDuration("voip.call_id_detection_timeout", DefaultCallIDDetectionTimeout),
+// DefaultConfig returns the balanced, dependency-free library defaults.
+func DefaultConfig() *Config {
+	profile := GetPerformanceProfiles()[DefaultTCPPerformanceMode]
+	return &Config{
+		PCAPGracePeriod: 5 * time.Second, PCAPClosedCallTTL: time.Hour,
+		Security: DefaultSecurityConfig(), VIFName: "lc0", VIFType: "tap", VIFBufferSize: 4096,
+		MaxGoroutines: DefaultGoroutineLimit, MaxStreams: DefaultMaxStreams,
+		CallIDDetectionTimeout: DefaultCallIDDetectionTimeout,
 		JanitorCleanupInterval: profile.TCPCleanupInterval / 2,
 		CallExpirationTime:     profile.TCPBufferMaxAge,
 		StreamQueueBuffer:      profile.StreamQueueBuffer,
-		// Guarded like its neighbours: a zero/negative length truncates every
-		// sanitized Call-ID to "", which sanitize() maps to a single fixed
-		// filename — every call would then share one PCAP.
-		MaxFilenameLength:         getPositiveInt("voip.max_filename_length", DefaultMaxFilenameLength),
-		LogGoroutineLimitInterval: getPositiveDuration("voip.log_goroutine_limit_interval", 30*time.Second),
-
-		// TCP-specific configurations (from the selected performance profile)
+		MaxFilenameLength:      DefaultMaxFilenameLength, LogGoroutineLimitInterval: 30 * time.Second,
 		TCPCleanupInterval:    profile.TCPCleanupInterval,
 		TCPBufferMaxAge:       profile.TCPBufferMaxAge,
 		TCPStreamMaxQueueTime: profile.TCPStreamMaxQueueTime,
 		MaxTCPBuffers:         profile.MaxTCPBuffers,
 		TCPStreamTimeout:      profile.TCPStreamTimeout,
 		TCPAssemblerMaxPages:  profile.TCPAssemblerMaxPages,
-		TCPSIPIdleTimeout:     getPositiveDuration("voip.tcp_sip_idle_timeout", DefaultTCPSIPIdleTimeout),
-
-		// Phase 3: State-based TCP timeout configurations
-		EnableStateTCPTimeouts: viper.GetBool("voip.enable_state_tcp_timeouts"),
-		TCPOpeningTimeout:      getPositiveDuration("voip.tcp_opening_timeout", DefaultTCPOpeningTimeout),
-		TCPEstablishedTimeout:  getPositiveDuration("voip.tcp_established_timeout", DefaultTCPEstablishedTimeout),
-		TCPClosingTimeout:      getPositiveDuration("voip.tcp_closing_timeout", DefaultTCPClosingTimeout),
-		EnableCallAwareTimeout: viper.GetBool("voip.enable_call_aware_timeout"),
-
-		// TCP Performance configurations (from the selected performance profile)
-		TCPPerformanceMode:     viper.GetString("voip.tcp_performance_mode"),
+		TCPSIPIdleTimeout:     DefaultTCPSIPIdleTimeout,
+		TCPOpeningTimeout:     DefaultTCPOpeningTimeout, TCPEstablishedTimeout: DefaultTCPEstablishedTimeout,
+		TCPClosingTimeout:      DefaultTCPClosingTimeout,
+		TCPPerformanceMode:     DefaultTCPPerformanceMode,
 		TCPBufferStrategy:      profile.TCPBufferStrategy,
 		EnableBackpressure:     profile.EnableBackpressure,
 		MemoryOptimization:     profile.MemoryOptimization,
@@ -249,23 +166,8 @@ func buildConfig() *Config {
 		TCPMemoryLimit:         profile.TCPMemoryLimit,
 		TCPLatencyOptimization: profile.TCPLatencyOptimization,
 
-		// Plugin system configurations
-		PluginsEnabled:       viper.GetBool("voip.plugins_enabled"),
-		PluginPaths:          viper.GetStringSlice("voip.plugin_paths"),
-		PluginWatchEnabled:   viper.GetBool("voip.plugin_watch_enabled"),
-		PluginSIPEnabled:     viper.GetBool("voip.plugin_sip_enabled"),
-		PluginRTPEnabled:     viper.GetBool("voip.plugin_rtp_enabled"),
-		PluginGenericEnabled: viper.GetBool("voip.plugin_generic_enabled"),
-
-		// Monitoring configurations
-		MonitoringEnabled:        viper.GetBool("voip.monitoring_enabled"),
-		MetricsEnabled:           viper.GetBool("voip.metrics_enabled"),
-		TracingEnabled:           viper.GetBool("voip.tracing_enabled"),
-		MonitoringUpdateInterval: getPositiveDuration("voip.monitoring_update_interval", 30*time.Second),
-		EnableRuntimeMetrics:     viper.GetBool("voip.enable_runtime_metrics"),
-		EnableSystemMetrics:      viper.GetBool("voip.enable_system_metrics"),
-		EnablePluginMetrics:      viper.GetBool("voip.enable_plugin_metrics"),
+		PluginSIPEnabled: true, PluginRTPEnabled: true, PluginGenericEnabled: true,
+		MonitoringUpdateInterval: 30 * time.Second,
+		EnableRuntimeMetrics:     true, EnablePluginMetrics: true, EnableAutoTuning: true,
 	}
-
-	return config
 }

@@ -23,6 +23,7 @@ import (
 // reassembler dispatches it.
 type tcpSIPHarness struct {
 	t       *testing.T
+	tracker *CallTracker
 	handler *LocalFileHandler
 	tmpDir  string
 }
@@ -42,6 +43,10 @@ func newTCPSIPHarness(t *testing.T) *tcpSIPHarness {
 
 	viper.Set("writeVoip", true)
 	viper.Set("voip.output_file", filepath.Join(tmpDir, "capture.pcap"))
+	cfg := *GetConfig()
+	cfg.WriteVoIP = true
+	cfg.OutputFile = filepath.Join(tmpDir, "capture.pcap")
+	SetConfig(&cfg)
 	t.Cleanup(func() { viper.Reset() })
 
 	setCurrentLinkType(layers.LinkTypeEthernet)
@@ -49,8 +54,9 @@ func newTCPSIPHarness(t *testing.T) *tcpSIPHarness {
 	// The call tracker is a process global shared with every other test in the
 	// package; leftover calls can evict this test's call between queueing a
 	// write and the writer draining it, silently losing the packet.
-	resetCallTracker()
-	t.Cleanup(resetCallTracker)
+	tracker := TestCallTracker(t)
+	resetCallTracker(tracker)
+	t.Cleanup(func() { resetCallTracker(tracker) })
 
 	// tcpPacketBuffers is a process global keyed by network and transport flow; a previous
 	// test's unflushed packets would otherwise land in this test's PCAP.
@@ -66,13 +72,12 @@ func newTCPSIPHarness(t *testing.T) *tcpSIPHarness {
 		globalBufferMgr = prevMgr
 	})
 
-	return &tcpSIPHarness{t: t, handler: NewLocalFileHandler(), tmpDir: tmpDir}
+	return &tcpSIPHarness{t: t, tracker: tracker, handler: NewLocalFileHandler(tracker), tmpDir: tmpDir}
 }
 
 // resetCallTracker drops every tracked call and rearms the async writer pool,
 // so a test's writes cannot be affected by what ran before it.
-func resetCallTracker() {
-	tracker := getTracker()
+func resetCallTracker(tracker *CallTracker) {
 	tracker.shuttingDown.Store(0)
 
 	tracker.mu.Lock()
@@ -194,8 +199,8 @@ func TestTCPLocalPath_WritesInDialogMessagesOfMatchedCall(t *testing.T) {
 	h := newTCPSIPHarness(t)
 	callID := "tcp-pai@example.com"
 
-	resetVoipWriteState(callID)
-	t.Cleanup(func() { resetVoipWriteState(callID) })
+	resetVoipWriteState(h.tracker, callID)
+	t.Cleanup(func() { resetVoipWriteState(h.tracker, callID) })
 
 	// Carrier-style CLIR call: the real identity is only in P-Asserted-Identity,
 	// the From header is anonymized.
@@ -231,8 +236,8 @@ func TestTCPLocalPath_DoesNotWriteOtherCallsPacketsIntoMatchedCall(t *testing.T)
 	callB := "tcp-call-b@example.com"
 
 	for _, id := range []string{callA, callB} {
-		resetVoipWriteState(id)
-		t.Cleanup(func() { resetVoipWriteState(id) })
+		resetVoipWriteState(h.tracker, id)
+		t.Cleanup(func() { resetVoipWriteState(h.tracker, id) })
 	}
 	sipusers.ClearAll() // promiscuous: every message matches
 
@@ -261,8 +266,8 @@ func TestTCPBuffersAreIsolatedPerConnection(t *testing.T) {
 	callB := "tcp-conn-b@example.com"
 
 	for _, id := range []string{callA, callB} {
-		resetVoipWriteState(id)
-		t.Cleanup(func() { resetVoipWriteState(id) })
+		resetVoipWriteState(h.tracker, id)
+		t.Cleanup(func() { resetVoipWriteState(h.tracker, id) })
 	}
 	sipusers.ClearAll() // promiscuous: every message matches
 
@@ -297,8 +302,8 @@ func TestTCPLocalPath_DoesNotWriteFilteredOutMessageIntoNextMatchedCall(t *testi
 	h := newTCPSIPHarness(t)
 	callID := "tcp-leak@example.com"
 
-	resetVoipWriteState(callID)
-	t.Cleanup(func() { resetVoipWriteState(callID) })
+	resetVoipWriteState(h.tracker, callID)
+	t.Cleanup(func() { resetVoipWriteState(h.tracker, callID) })
 
 	sipusers.ClearAll()
 	sipusers.AddSipUser("alice", &sipusers.SipUser{})

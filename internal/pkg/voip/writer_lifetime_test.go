@@ -26,13 +26,13 @@ func lifetimeTestPacket() gopacket.Packet {
 func TestRTPWriteRaceWithCompletionClose(t *testing.T) {
 	callID := "rtp-completion-race"
 	call := createCallWithRTPWriter(t, callID)
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.shuttingDown.Store(0)
 	tracker.mu.Lock()
 	tracker.callMap[callID] = call
 	tracker.lruIndex[callID] = tracker.lruList.PushFront(callID)
 	tracker.mu.Unlock()
-	monitor := NewSniffCompletionMonitor(nil)
+	monitor := NewSniffCompletionMonitor(tracker, nil)
 	packet := lifetimeTestPacket()
 	var wg sync.WaitGroup
 	for range 8 {
@@ -92,7 +92,7 @@ func TestSIPWriteRaceWithLRUEviction(t *testing.T) {
 }
 
 func TestAsyncWriteRaceWithClose(t *testing.T) {
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.shuttingDown.Store(0)
 	callID := "async-close-race"
 	call := createCallWithSIPWriter(t, callID)
@@ -106,7 +106,7 @@ func TestAsyncWriteRaceWithClose(t *testing.T) {
 		_ = call.Close()
 	})
 
-	pool := NewAsyncWriterPool(1, 16)
+	pool := NewAsyncWriterPoolWithTracker(tracker, 1, 16)
 	req := PacketWriteRequest{CallID: callID, Packet: lifetimeTestPacket(), PacketType: PacketTypeSIP}
 	var wg sync.WaitGroup
 	for range 8 {

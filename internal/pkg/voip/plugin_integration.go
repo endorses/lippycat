@@ -10,12 +10,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip/plugins"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/spf13/viper"
 )
 
 // PluginPacketProcessor integrates the plugin system with packet processing
 type PluginPacketProcessor struct {
 	registry *plugins.PluginRegistry
+	tracker  *CallTracker
 	enabled  atomic.Bool
 	stats    PluginProcessorStats
 }
@@ -31,8 +31,14 @@ type PluginProcessorStats struct {
 
 // NewPluginPacketProcessor creates a new plugin packet processor
 func NewPluginPacketProcessor() *PluginPacketProcessor {
+	return NewPluginPacketProcessorWithTracker(NewCallTracker())
+}
+
+// NewPluginPacketProcessorWithTracker constructs a processor with instance-owned call state.
+func NewPluginPacketProcessorWithTracker(tracker *CallTracker) *PluginPacketProcessor {
 	return &PluginPacketProcessor{
 		registry: plugins.GetGlobalRegistry(),
+		tracker:  tracker,
 	}
 }
 
@@ -104,12 +110,7 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 	// Use Ethernet as default link type since packet doesn't have LinkType method
 	linkType := layers.LinkTypeEthernet
 
-	var call *CallInfo
-	if IsLockFreeModeEnabled() {
-		call = GetOrCreateCallLockFree(result.CallID, linkType)
-	} else {
-		call = GetOrCreateCall(result.CallID, linkType)
-	}
+	call := p.tracker.GetOrCreateCall(result.CallID, linkType)
 
 	if call == nil {
 		return nil
@@ -118,74 +119,26 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 	// Update call state based on plugin action
 	switch result.Action {
 	case "call_start":
-		if IsLockFreeModeEnabled() {
-			GetHybridTracker().SetCallState(result.CallID, "ACTIVE")
-		} else {
-			call.SetCallInfoState("ACTIVE")
-		}
+		call.SetCallInfoState("ACTIVE")
 	case "call_end":
-		if IsLockFreeModeEnabled() {
-			GetHybridTracker().SetCallState(result.CallID, "TERMINATED")
-		} else {
-			call.SetCallInfoState("TERMINATED")
-		}
+		call.SetCallInfoState("TERMINATED")
 	case "call_cancel":
-		if IsLockFreeModeEnabled() {
-			GetHybridTracker().SetCallState(result.CallID, "CANCELLED")
-		} else {
-			call.SetCallInfoState("CANCELLED")
-		}
+		call.SetCallInfoState("CANCELLED")
 	}
 
 	// Add port mappings for RTP streams (multi-value for B2BUA)
 	if result.Protocol == "rtp" || result.Protocol == "sip" {
 		if srcPort, ok := result.Metadata["src_port"].(string); ok {
-			if IsLockFreeModeEnabled() {
-				AddPortMappingLockFree(srcPort, result.CallID)
-			} else {
-				// Use traditional method (multi-value for B2BUA)
-				tracker := getTracker()
-				tracker.mu.Lock()
-				existing := tracker.portToCallID[srcPort]
-				alreadyRegistered := false
-				for _, cid := range existing {
-					if cid == result.CallID {
-						alreadyRegistered = true
-						break
-					}
-				}
-				if !alreadyRegistered {
-					tracker.portToCallID[srcPort] = append(existing, result.CallID)
-				}
-				tracker.mu.Unlock()
-			}
+			p.tracker.registerEndpoint(srcPort, result.CallID)
 		}
 
 		if dstPort, ok := result.Metadata["dst_port"].(string); ok {
-			if IsLockFreeModeEnabled() {
-				AddPortMappingLockFree(dstPort, result.CallID)
-			} else {
-				// Use traditional method (multi-value for B2BUA)
-				tracker := getTracker()
-				tracker.mu.Lock()
-				existing := tracker.portToCallID[dstPort]
-				alreadyRegistered := false
-				for _, cid := range existing {
-					if cid == result.CallID {
-						alreadyRegistered = true
-						break
-					}
-				}
-				if !alreadyRegistered {
-					tracker.portToCallID[dstPort] = append(existing, result.CallID)
-				}
-				tracker.mu.Unlock()
-			}
+			p.tracker.registerEndpoint(dstPort, result.CallID)
 		}
 	}
 
 	// Write packet to appropriate files if writeVoip is enabled
-	if viper.GetBool("writeVoip") && call != nil {
+	if GetConfig().WriteVoIP && call != nil {
 		switch result.Protocol {
 		case "sip":
 			if err := call.writeSIP(packet); err != nil {
@@ -266,7 +219,7 @@ func ShutdownPluginProcessing(ctx context.Context) error {
 
 // EnablePluginProcessingForConfig enables plugin processing based on configuration
 func EnablePluginProcessingForConfig() {
-	if viper.GetBool("plugins.enabled") {
+	if GetConfig().PluginsEnabled {
 		if err := InitializePluginProcessing(); err != nil {
 			logger.Error("Failed to initialize plugin processing", "error", err)
 		} else {

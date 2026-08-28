@@ -83,7 +83,7 @@ func TestCloseWriters(t *testing.T) {
 
 func TestWriteSIP(t *testing.T) {
 	// Get tracker for fresh state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 
 	// Reset shutdown flag to allow writes (other tests may have shut down the tracker)
 	tracker.shuttingDown.Store(0)
@@ -169,7 +169,7 @@ func TestWriteSIP(t *testing.T) {
 			// This should not panic
 			// Call writeSIPSync directly to bypass async writer and ensure deterministic test behavior
 			assert.NotPanics(t, func() {
-				writeSIPSync(tt.callID, packet)
+				tracker.writeSIPSync(tt.callID, packet)
 			})
 
 			if tt.shouldWrite && call != nil {
@@ -187,7 +187,7 @@ func TestWriteSIP(t *testing.T) {
 
 func TestWriteRTP(t *testing.T) {
 	// Get tracker for fresh state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 
 	// Reset shutdown flag to allow writes (other tests may have shut down the tracker)
 	tracker.shuttingDown.Store(0)
@@ -273,7 +273,7 @@ func TestWriteRTP(t *testing.T) {
 			// This should not panic
 			// Call writeRTPSync directly to bypass async writer and ensure deterministic test behavior
 			assert.NotPanics(t, func() {
-				writeRTPSync(tt.callID, packet)
+				tracker.writeRTPSync(tt.callID, packet)
 			})
 
 			if tt.shouldWrite && call != nil {
@@ -291,7 +291,7 @@ func TestWriteRTP(t *testing.T) {
 
 func TestWritersConcurrency(t *testing.T) {
 	// Test concurrent access to WriteSIP and WriteRTP
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	originalCallMap := make(map[string]*CallInfo)
 	for k, v := range tracker.callMap {
@@ -327,7 +327,7 @@ func TestWritersConcurrency(t *testing.T) {
 			for j := 0; j < operationsPerGoroutine; j++ {
 				callID := calls[j%len(calls)]
 				packet := createMockSIPPacket()
-				WriteSIP(callID, packet)
+				WriteSIP(tracker, callID, packet)
 			}
 		}(i)
 	}
@@ -340,7 +340,7 @@ func TestWritersConcurrency(t *testing.T) {
 			for j := 0; j < operationsPerGoroutine; j++ {
 				callID := calls[j%len(calls)]
 				packet := createMockRTPPacket()
-				WriteRTP(callID, packet)
+				WriteRTP(tracker, callID, packet)
 			}
 		}(i)
 	}

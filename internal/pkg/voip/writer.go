@@ -37,27 +37,26 @@ func CloseWriters() {
 	}
 }
 
-func WriteSIP(callID string, packet gopacket.Packet) {
+func WriteSIP(tracker *CallTracker, callID string, packet gopacket.Packet) {
 	// Try async writer first for better performance
-	asyncWriter := GetAsyncWriter()
+	asyncWriter := GetAsyncWriter(tracker)
 	if asyncWriter != nil && !asyncWriter.stopped.Load() {
 		if err := asyncWriter.WritePacketAsync(callID, packet, PacketTypeSIP); err != nil {
 			// Fallback to synchronous writing if async fails
 			logger.Debug("Async SIP write failed, falling back to sync",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
-			writeSIPSync(callID, packet)
+			tracker.writeSIPSync(callID, packet)
 		}
 		return
 	}
 
 	// Fallback to synchronous writing
-	writeSIPSync(callID, packet)
+	tracker.writeSIPSync(callID, packet)
 }
 
 // writeSIPSync performs synchronous SIP packet writing (legacy method)
-func writeSIPSync(callID string, packet gopacket.Packet) error {
-	tracker := getTracker()
+func (tracker *CallTracker) writeSIPSync(callID string, packet gopacket.Packet) error {
 
 	// Check if shutting down
 	if tracker.shuttingDown.Load() == 1 {
@@ -102,27 +101,26 @@ func writeSIPSync(callID string, packet gopacket.Packet) error {
 	return ErrCallNotFound
 }
 
-func WriteRTP(callID string, packet gopacket.Packet) {
+func WriteRTP(tracker *CallTracker, callID string, packet gopacket.Packet) {
 	// Try async writer first for better performance
-	asyncWriter := GetAsyncWriter()
+	asyncWriter := GetAsyncWriter(tracker)
 	if asyncWriter != nil && !asyncWriter.stopped.Load() {
 		if err := asyncWriter.WritePacketAsync(callID, packet, PacketTypeRTP); err != nil {
 			// Fallback to synchronous writing if async fails
 			logger.Debug("Async RTP write failed, falling back to sync",
 				"call_id", SanitizeCallIDForLogging(callID),
 				"error", err)
-			writeRTPSync(callID, packet)
+			tracker.writeRTPSync(callID, packet)
 		}
 		return
 	}
 
 	// Fallback to synchronous writing
-	writeRTPSync(callID, packet)
+	tracker.writeRTPSync(callID, packet)
 }
 
 // writeRTPSync performs synchronous RTP packet writing (legacy method)
-func writeRTPSync(callID string, packet gopacket.Packet) error {
-	tracker := getTracker()
+func (tracker *CallTracker) writeRTPSync(callID string, packet gopacket.Packet) error {
 
 	// Check if shutting down
 	if tracker.shuttingDown.Load() == 1 {
@@ -168,30 +166,30 @@ func writeRTPSync(callID string, packet gopacket.Packet) error {
 }
 
 // WriteSIPSync forces synchronous SIP packet writing (for critical operations)
-func WriteSIPSync(callID string, packet gopacket.Packet) error {
-	asyncWriter := GetAsyncWriter()
+func WriteSIPSync(tracker *CallTracker, callID string, packet gopacket.Packet) error {
+	asyncWriter := GetAsyncWriter(tracker)
 	if asyncWriter != nil && !asyncWriter.stopped.Load() {
 		return asyncWriter.WritePacketSync(callID, packet, PacketTypeSIP)
 	}
 
 	// Fallback to legacy synchronous method
-	return writeSIPSync(callID, packet)
+	return tracker.writeSIPSync(callID, packet)
 }
 
 // WriteRTPSync forces synchronous RTP packet writing (for critical operations)
-func WriteRTPSync(callID string, packet gopacket.Packet) error {
-	asyncWriter := GetAsyncWriter()
+func WriteRTPSync(tracker *CallTracker, callID string, packet gopacket.Packet) error {
+	asyncWriter := GetAsyncWriter(tracker)
 	if asyncWriter != nil && !asyncWriter.stopped.Load() {
 		return asyncWriter.WritePacketSync(callID, packet, PacketTypeRTP)
 	}
 
 	// Fallback to legacy synchronous method
-	return writeRTPSync(callID, packet)
+	return tracker.writeRTPSync(callID, packet)
 }
 
 // GetWriterStats returns statistics from the async writer pool
-func GetWriterStats() *AsyncWriterStats {
-	asyncWriter := GetAsyncWriter()
+func GetWriterStats(tracker *CallTracker) *AsyncWriterStats {
+	asyncWriter := GetAsyncWriter(tracker)
 	if asyncWriter != nil {
 		return asyncWriter.GetStats()
 	}

@@ -31,6 +31,7 @@ const (
 
 // AsyncWriterPool manages multiple worker goroutines for async PCAP writing
 type AsyncWriterPool struct {
+	tracker *CallTracker
 	// Configuration
 	workerCount   int
 	bufferSize    int
@@ -73,6 +74,11 @@ type AsyncWriterStats struct {
 
 // NewAsyncWriterPool creates a new async writer pool
 func NewAsyncWriterPool(workerCount, bufferSize int) *AsyncWriterPool {
+	return NewAsyncWriterPoolWithTracker(NewCallTracker(), workerCount, bufferSize)
+}
+
+// NewAsyncWriterPoolWithTracker constructs a writer bound to one call tracker.
+func NewAsyncWriterPoolWithTracker(tracker *CallTracker, workerCount, bufferSize int) *AsyncWriterPool {
 	if workerCount <= 0 {
 		workerCount = 4 // Default worker count
 	}
@@ -93,6 +99,7 @@ func NewAsyncWriterPool(workerCount, bufferSize int) *AsyncWriterPool {
 	}
 
 	return &AsyncWriterPool{
+		tracker:       tracker,
 		workerCount:   workerCount,
 		bufferSize:    bufferSize,
 		workerTimeout: 5 * time.Second,
@@ -303,7 +310,7 @@ func (p *AsyncWriterPool) worker(workerID int) {
 
 // processWriteRequest handles the actual writing of a packet
 func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
-	tracker := getTracker()
+	tracker := p.tracker
 
 	// Check if shutting down
 	if tracker.shuttingDown.Load() == 1 {
@@ -397,11 +404,17 @@ func (p *AsyncWriterPool) SetErrorHandler(handler func(callID string, err error)
 var (
 	globalAsyncWriter *AsyncWriterPool
 	asyncWriterOnce   sync.Once
+	asyncWriterMu     sync.Mutex
 )
 
 // GetAsyncWriter returns the global async writer pool instance
-func GetAsyncWriter() *AsyncWriterPool {
-	asyncWriterOnce.Do(func() {
+func GetAsyncWriter(tracker *CallTracker) *AsyncWriterPool {
+	asyncWriterMu.Lock()
+	defer asyncWriterMu.Unlock()
+	if globalAsyncWriter == nil || globalAsyncWriter.tracker != tracker || globalAsyncWriter.stopped.Load() {
+		if globalAsyncWriter != nil && !globalAsyncWriter.stopped.Load() {
+			_ = globalAsyncWriter.Stop()
+		}
 		config := GetConfig()
 		workerCount := config.TCPIOThreads
 		if workerCount <= 0 {
@@ -412,19 +425,22 @@ func GetAsyncWriter() *AsyncWriterPool {
 			bufferSize = 1000
 		}
 
-		globalAsyncWriter = NewAsyncWriterPool(workerCount, bufferSize)
+		globalAsyncWriter = NewAsyncWriterPoolWithTracker(tracker, workerCount, bufferSize)
 
 		// Start the async writer automatically
 		if err := globalAsyncWriter.Start(); err != nil {
 			logger.Error("Failed to start async writer pool", "error", err)
 		}
-	})
+	}
 	return globalAsyncWriter
 }
 
 // Cleanup function for graceful shutdown
 func CloseAsyncWriter() {
+	asyncWriterMu.Lock()
+	defer asyncWriterMu.Unlock()
 	if globalAsyncWriter != nil {
 		_ = globalAsyncWriter.Stop()
+		globalAsyncWriter = nil
 	}
 }

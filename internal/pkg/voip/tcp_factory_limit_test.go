@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -14,14 +13,12 @@ import (
 // TestSipStreamFactory_MaxStreamsCap verifies voip.max_streams rejects new
 // streams once the cap is reached, instead of spawning goroutines without bound.
 func TestSipStreamFactory_MaxStreamsCap(t *testing.T) {
-	viper.Set("voip.max_streams", 1)
-	ResetConfigCache()
-	t.Cleanup(func() {
-		viper.Set("voip.max_streams", 0)
-		ResetConfigCache()
-	})
+	cfg := DefaultConfig()
+	cfg.MaxStreams = 1
+	SetConfig(cfg)
+	t.Cleanup(ResetConfigCache)
 
-	factory := NewSipStreamFactory(context.Background(), NewLocalFileHandler()).(*sipStreamFactory)
+	factory := NewSipStreamFactory(context.Background(), NewLocalFileHandler(TestCallTracker(t))).(*sipStreamFactory)
 	defer factory.Shutdown()
 	require.Equal(t, 1, factory.config.MaxStreams)
 
@@ -40,7 +37,7 @@ func TestSipStreamFactory_MaxStreamsCap(t *testing.T) {
 // TestSipStreamFactory_UnlimitedByDefault verifies the cap is opt-in.
 func TestSipStreamFactory_UnlimitedByDefault(t *testing.T) {
 	ResetConfigCache()
-	factory := NewSipStreamFactory(context.Background(), NewLocalFileHandler()).(*sipStreamFactory)
+	factory := NewSipStreamFactory(context.Background(), NewLocalFileHandler(TestCallTracker(t))).(*sipStreamFactory)
 	defer factory.Shutdown()
 
 	assert.Zero(t, factory.config.MaxStreams)

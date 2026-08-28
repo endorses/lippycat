@@ -258,7 +258,7 @@ func TestHandleTcpPackets_PortFiltering(t *testing.T) {
 func TestSipStreamFactory_ResourceManagement(t *testing.T) {
 	t.Run("Factory cleanup", func(t *testing.T) {
 		ctx := context.Background()
-		factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+		factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 		defer factory.(*sipStreamFactory).Shutdown()
 
 		// Create multiple streams

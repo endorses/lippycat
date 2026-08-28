@@ -54,6 +54,7 @@ type sniffPendingCallInfo struct {
 // This is the sniff mode equivalent of processor's CallCompletionMonitor.
 // It integrates with CallTracker to monitor call state changes and close PCAP files.
 type SniffCompletionMonitor struct {
+	tracker      *CallTracker
 	config       *SniffCompletionMonitorConfig
 	pendingClose map[string]*sniffPendingCallInfo // callID -> pending closure info
 	closedCalls  map[string]time.Time             // callIDs that have already been closed
@@ -64,7 +65,7 @@ type SniffCompletionMonitor struct {
 }
 
 // NewSniffCompletionMonitor creates a new sniff completion monitor
-func NewSniffCompletionMonitor(config *SniffCompletionMonitorConfig) *SniffCompletionMonitor {
+func NewSniffCompletionMonitor(tracker *CallTracker, config *SniffCompletionMonitorConfig) *SniffCompletionMonitor {
 	if config == nil {
 		config = DefaultSniffCompletionMonitorConfig()
 	}
@@ -81,6 +82,7 @@ func NewSniffCompletionMonitor(config *SniffCompletionMonitorConfig) *SniffCompl
 	}
 
 	return &SniffCompletionMonitor{
+		tracker:      tracker,
 		config:       config,
 		pendingClose: make(map[string]*sniffPendingCallInfo),
 		closedCalls:  make(map[string]time.Time),
@@ -199,10 +201,10 @@ func (m *SniffCompletionMonitor) processPendingClose() {
 // closeCallPcap closes the PCAP files for a call
 func (m *SniffCompletionMonitor) closeCallPcap(callID string) {
 	// Clean up RTP port mappings for this call
-	CleanupPortMappings(callID)
+	m.tracker.CleanupPortMappings(callID)
 
 	// Detach tracker state before taking writer locks, then close the call.
-	found, err := getTracker().removeCall(callID)
+	found, err := m.tracker.removeCall(callID)
 	if !found {
 		// Call may have already been evicted from LRU, just mark as closed
 		m.mu.Lock()

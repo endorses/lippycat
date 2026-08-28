@@ -11,7 +11,7 @@ import (
 
 func TestHandleUdpPackets(t *testing.T) {
 	// Clear existing state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -93,7 +93,7 @@ Content-Length: 0
 			// Test that the function doesn't panic
 			assert.NotPanics(t, func() {
 				if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-					handleUdpPackets(pktInfo, udpLayer.(*layers.UDP))
+					handleUdpPacketsWithTracker(tracker, pktInfo, udpLayer.(*layers.UDP))
 				}
 			}, "handleUdpPackets should not panic with %s", tt.name)
 		})
@@ -102,7 +102,7 @@ Content-Length: 0
 
 func TestHandleUdpPackets_RTPTracking(t *testing.T) {
 	// Setup RTP port tracking
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.portToCallID["8000"] = []string{"rtp-test-call-1"}
@@ -156,7 +156,7 @@ func TestHandleUdpPackets_RTPTracking(t *testing.T) {
 			}
 
 			// Verify packet tracking
-			isTracked := IsTracked(packet)
+			isTracked := tracker.IsTracked(packet)
 			if tt.isRTP {
 				assert.True(t, isTracked, "RTP packet should be tracked")
 			}
@@ -164,7 +164,7 @@ func TestHandleUdpPackets_RTPTracking(t *testing.T) {
 			// Test UDP handling
 			assert.NotPanics(t, func() {
 				if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-					handleUdpPackets(pktInfo, udpLayer.(*layers.UDP))
+					handleUdpPacketsWithTracker(tracker, pktInfo, udpLayer.(*layers.UDP))
 				}
 			}, "handleUdpPackets should not panic with RTP packet")
 		})
@@ -200,7 +200,7 @@ a=rtpmap:0 PCMU/8000`
 	}
 
 	// Clear existing state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -208,7 +208,7 @@ a=rtpmap:0 PCMU/8000`
 	// Test UDP handling with SIP content
 	assert.NotPanics(t, func() {
 		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-			handleUdpPackets(pktInfo, udpLayer.(*layers.UDP))
+			handleUdpPacketsWithTracker(tracker, pktInfo, udpLayer.(*layers.UDP))
 		}
 	}, "handleUdpPackets should handle SIP messages properly")
 

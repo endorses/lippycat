@@ -53,6 +53,8 @@ type CallCompletionMonitor struct {
 	checkTicker  *time.Ticker
 	stopChan     chan struct{}
 	wg           sync.WaitGroup
+	startOnce    sync.Once
+	stopOnce     sync.Once
 }
 
 // NewCallCompletionMonitor creates a new call completion monitor
@@ -95,15 +97,15 @@ func (m *CallCompletionMonitor) Start() {
 		return
 	}
 
-	m.checkTicker = time.NewTicker(m.config.CheckInterval)
-
-	m.wg.Add(1)
-	go m.monitorLoop()
-
-	logger.Info("Call completion monitor started",
-		"grace_period", m.config.GracePeriod,
-		"check_interval", m.config.CheckInterval,
-		"rtp_wait_timeout", m.config.RTPWaitTimeout)
+	m.startOnce.Do(func() {
+		m.checkTicker = time.NewTicker(m.config.CheckInterval)
+		m.wg.Add(1)
+		go m.monitorLoop()
+		logger.Info("Call completion monitor started",
+			"grace_period", m.config.GracePeriod,
+			"check_interval", m.config.CheckInterval,
+			"rtp_wait_timeout", m.config.RTPWaitTimeout)
+	})
 }
 
 // Stop stops the monitor
@@ -112,15 +114,14 @@ func (m *CallCompletionMonitor) Stop() {
 		return
 	}
 
-	close(m.stopChan)
-
-	if m.checkTicker != nil {
-		m.checkTicker.Stop()
-	}
-
-	m.wg.Wait()
-
-	logger.Info("Call completion monitor stopped")
+	m.stopOnce.Do(func() {
+		close(m.stopChan)
+		if m.checkTicker != nil {
+			m.checkTicker.Stop()
+		}
+		m.wg.Wait()
+		logger.Info("Call completion monitor stopped")
+	})
 }
 
 // SetVoIPPortCleaner sets an optional VoIP port cleaner for cleanup when calls end.
@@ -199,6 +200,24 @@ func (m *CallCompletionMonitor) checkEndedCalls() {
 	}
 }
 
+// ScheduleClose records an explicit lifecycle completion. This is the observer
+// path used by instance-owned registries; polling remains temporarily for the
+// processor aggregator until its Phase 5 orchestration migration.
+func (m *CallCompletionMonitor) ScheduleClose(callID string, rtpExpected bool) {
+	if m == nil || callID == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, closed := m.closedCalls[callID]; closed {
+		return
+	}
+	if _, pending := m.pendingClose[callID]; pending {
+		return
+	}
+	m.pendingClose[callID] = &pendingCallInfo{scheduledAt: time.Now(), rtpExpected: rtpExpected}
+}
+
 // processPendingClose closes PCAP files for calls whose grace period has expired
 func (m *CallCompletionMonitor) processPendingClose() {
 	now := time.Now()
@@ -259,11 +278,8 @@ func (m *CallCompletionMonitor) processPendingClose() {
 
 // closeCallPcap closes the PCAP files for a call and fires the voipcommand callback
 func (m *CallCompletionMonitor) closeCallPcap(callID string) {
-	// Clean up RTP port mappings for this call to prevent port collisions
-	// with new calls reusing the same port
-	voip.CleanupPortMappings(callID)
-
-	// Also clean up voip processor's port mappings if available (tap mode)
+	// Clean up the instance-owned registry before closing output resources so a
+	// reused endpoint can never resolve to a session whose files are closing.
 	if m.voipCleaner != nil {
 		m.voipCleaner.CleanupCallPorts(callID)
 	}

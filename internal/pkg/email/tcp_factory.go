@@ -52,8 +52,13 @@ func DefaultSMTPStreamFactoryConfig() SMTPStreamFactoryConfig {
 	}
 }
 
+type SMTPStreamFactory interface {
+	reassembly.StreamFactory
+	Shutdown() error
+}
+
 // NewSMTPStreamFactory creates a new SMTP stream factory.
-func NewSMTPStreamFactory(ctx context.Context, handler SMTPMessageHandler, config SMTPStreamFactoryConfig) reassembly.StreamFactory {
+func NewSMTPStreamFactory(ctx context.Context, handler SMTPMessageHandler, config SMTPStreamFactoryConfig) SMTPStreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 
 	if config.MaxGoroutines <= 0 {
@@ -171,8 +176,12 @@ func (f *smtpStreamFactory) cleanupRoutine() {
 
 // Close shuts down the factory.
 func (f *smtpStreamFactory) Close() {
+	_ = f.Shutdown()
+}
+
+func (f *smtpStreamFactory) Shutdown() error {
 	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
-		return
+		return nil
 	}
 
 	f.cancel()
@@ -180,6 +189,7 @@ func (f *smtpStreamFactory) Close() {
 	f.allWorkers.Wait()
 
 	logger.Info("SMTP stream factory closed")
+	return nil
 }
 
 // GetActiveGoroutines returns the current number of active goroutines.

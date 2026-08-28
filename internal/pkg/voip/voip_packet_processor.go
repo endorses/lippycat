@@ -5,14 +5,16 @@ package voip
 import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/google/gopacket/layers"
 )
 
 // VoIPPacketProcessor processes VoIP packets (SIP/RTP) with buffering for hunter mode
 type VoIPPacketProcessor struct {
 	udpHandler *UDPPacketHandler
-	tcpHandler *HunterForwardHandler // Optional: for wiring ApplicationFilter to TCP handler
-	assembler  *capture.TCPAssembler // TCP stream assembler for SIP reassembly
+	tcpHandler *HunterForwardHandler      // Optional: for wiring ApplicationFilter to TCP handler
+	assembler  *pipeline.ReassemblyEngine // TCP stream assembler for SIP reassembly
 }
 
 // NewVoIPPacketProcessor creates a packet processor for VoIP buffering in hunter mode
@@ -30,7 +32,7 @@ func (p *VoIPPacketProcessor) SetTCPHandler(handler *HunterForwardHandler) {
 
 // SetAssembler sets the TCP stream assembler for SIP message reassembly.
 // When set, TCP packets are fed to the assembler for stream reconstruction.
-func (p *VoIPPacketProcessor) SetAssembler(assembler *capture.TCPAssembler) {
+func (p *VoIPPacketProcessor) SetAssembler(assembler *pipeline.ReassemblyEngine) {
 	p.assembler = assembler
 }
 
@@ -81,11 +83,9 @@ func (p *VoIPPacketProcessor) ProcessPacket(pktInfo capture.PacketInfo) bool {
 			BufferTCPPacket(flow, transportFlow, pktInfo)
 
 			// Feed the packet to the TCP assembler for stream reconstruction
-			p.assembler.Assemble(
-				flow,
-				layer,
-				packet.Metadata().Timestamp,
-			)
+			if err := p.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
+				logger.Error("Failed to assemble TCP packet", "error", err)
+			}
 		} else {
 			logger.Debug("TCP packet received but no assembler configured - dropping",
 				"src_port", layer.SrcPort,

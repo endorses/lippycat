@@ -238,8 +238,12 @@ func (f *MultiProtocolFactory) cleanupRoutine() {
 
 // Close shuts down the factory.
 func (f *MultiProtocolFactory) Close() {
+	_ = f.Shutdown()
+}
+
+func (f *MultiProtocolFactory) Shutdown() error {
 	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
-		return
+		return nil
 	}
 
 	f.cancel()
@@ -247,6 +251,7 @@ func (f *MultiProtocolFactory) Close() {
 	f.allWorkers.Wait()
 
 	logger.Info("Multi-protocol email factory closed")
+	return nil
 }
 
 // GetActiveGoroutines returns the current number of active goroutines.

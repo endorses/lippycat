@@ -18,6 +18,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/detector"
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/simd"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/voip"
@@ -990,11 +992,17 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 	tcpHandler := NewTUISIPHandler()
 	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
-	assembler := capture.NewTCPAssembler(streamFactory)
-
-	// Start background goroutine to periodically flush old TCP streams
-	// This prevents memory leaks from incomplete streams
-	go runTCPStreamFlusher(ctx, assembler)
+	assembler := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
+	defer func() {
+		if err := assembler.Close(); err != nil {
+			logger.Error("Failed to close TUI TCP reassembly engine", "error", err)
+		}
+	}()
+	go func() {
+		if err := assembler.Run(ctx); err != nil {
+			logger.Error("TUI TCP reassembly engine stopped", "error", err)
+		}
+	}()
 
 	batch := make([]components.PacketDisplay, 0, 100)
 	packetCount := int64(0)
@@ -1228,7 +1236,13 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 								"total_count", count,
 								"payload_len", len(tcp.Payload))
 						}
-						assembler.Assemble(netFlow.NetworkFlow(), tcp, pktInfo.Packet.Metadata().Timestamp)
+						kind := pipeline.SourceLiveCapture
+						if hasCallTracker {
+							kind = pipeline.SourcePCAPReplay
+						}
+						if err := assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, kind)); err != nil {
+							logger.Error("Failed to assemble TUI TCP packet", "error", err)
+						}
 					}
 				}
 			}
@@ -1268,36 +1282,6 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 		case <-ticker.C:
 			// Send batch on interval
 			sendBatch()
-		}
-	}
-}
-
-// runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks.
-// This ensures that incomplete or idle TCP streams don't accumulate indefinitely.
-func runTCPStreamFlusher(ctx context.Context, assembler *capture.TCPAssembler) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Final flush on shutdown
-			flushed, closed := assembler.FlushCloseOlderThan(time.Now())
-			if flushed > 0 || closed > 0 {
-				logger.Debug("TCP streams flushed on shutdown",
-					"flushed", flushed,
-					"closed", closed)
-			}
-			return
-		case <-ticker.C:
-			// Flush streams that haven't received data in 2 minutes
-			cutoff := time.Now().Add(-2 * time.Minute)
-			flushed, closed := assembler.FlushCloseOlderThan(cutoff)
-			if flushed > 0 || closed > 0 {
-				logger.Debug("Flushed old TCP streams",
-					"flushed", flushed,
-					"closed", closed)
-			}
 		}
 	}
 }

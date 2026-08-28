@@ -14,6 +14,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -198,8 +199,17 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	// VoIP owns its (connection-aware reassembly) assembler internally rather
 	// than threading it through the shared capture-layer signatures, which stay
 	// typed to the legacy *tcpassembly.Assembler for the other protocols.
-	assembler := capture.NewTCPAssembler(streamFactory)
-
+	assembler := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
+	defer func() {
+		if err := assembler.Close(); err != nil {
+			logger.Error("Failed to close VoIP reassembly engine", "error", err)
+		}
+	}()
+	go func() {
+		if err := assembler.Run(ctx); err != nil {
+			logger.Error("VoIP reassembly engine stopped", "error", err)
+		}
+	}()
 	// Detect offline mode (reading from PCAP file)
 	// Offline interfaces have filenames as their Name(), not network interface names
 	isOffline := false
@@ -212,13 +222,14 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			break
 		}
 	}
+	processor := func(ch <-chan capture.PacketInfo) { startProcessor(ch, assembler, isOffline) }
 
 	if isOffline {
 		// For offline mode, run until PCAP is fully read
-		capture.RunOffline(devices, filter, startProcessor, assembler)
+		capture.RunOffline(devices, filter, processor)
 	} else {
 		// For live mode, run with signal handler (waits for Ctrl+C)
-		capture.RunWithSignalHandler(devices, filter, startProcessor, assembler)
+		capture.RunWithSignalHandler(devices, filter, processor)
 	}
 }
 
@@ -230,7 +241,8 @@ func StartOfflineVoipSniffer(readFiles []string, filter string) {
 	capture.StartOfflineSniffer(readFiles, filter, StartVoipSniffer)
 }
 
-func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
+func startProcessor(ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
+	offline := len(offlineMode) > 0 && offlineMode[0]
 	defer CloseWriters()
 
 	// Initialize buffer manager (5 second timeout, 200 packet max per call)
@@ -251,7 +263,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 	if numWorkers <= 1 {
 		// Single-threaded path (original behaviour / offline-ordered mode).
 		for pkt := range ch {
-			processOnePacket(pkt, assembler)
+			processOnePacket(pkt, assembler, offline)
 		}
 	} else {
 		// Flow-sharded worker pool. Each flow (both directions) is pinned to one
@@ -275,7 +287,7 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 			go func(in <-chan capture.PacketInfo) {
 				defer wg.Done()
 				for pkt := range in {
-					processOnePacket(pkt, assembler)
+					processOnePacket(pkt, assembler, offline)
 				}
 			}(workers[i])
 		}
@@ -315,19 +327,6 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 		wg.Wait()
 	}
 
-	// Flush and close all TCP streams
-	// This is critical for offline mode where streams may not be closed with FIN/RST
-	if assembler != nil {
-		logger.Debug("Flushing and closing TCP assembler streams")
-		// Close ALL streams regardless of age. This signals EOF to all stream
-		// readers so they stop blocking and process their buffers.
-		closed := assembler.FlushAll()
-		logger.Debug("TCP streams flushed", "closed", closed)
-
-		// Give stream goroutines time to process and finish
-		time.Sleep(200 * time.Millisecond)
-	}
-
 	logger.Info("VoIP processor finished")
 }
 
@@ -335,14 +334,14 @@ func startProcessor(ch <-chan capture.PacketInfo, assembler *capture.TCPAssemble
 // Safe to call from multiple worker goroutines concurrently as long as packets of
 // the same flow are delivered to the same worker (see startProcessor) and shared
 // call/registry/writer state remains mutex-protected.
-func processOnePacket(pkt capture.PacketInfo, assembler *capture.TCPAssembler) {
+func processOnePacket(pkt capture.PacketInfo, assembler tcpPacketAssembler, offline bool) {
 	packet := pkt.Packet
 	if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
 		return
 	}
 	switch layer := packet.TransportLayer().(type) {
 	case *layers.TCP:
-		handleTcpPackets(pkt, layer, assembler)
+		handleTcpPackets(pkt, layer, assembler, offline)
 	case *layers.UDP:
 		handleUdpPackets(pkt, layer)
 	}

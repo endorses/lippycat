@@ -4,13 +4,15 @@ package email
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/reassembly"
 )
 
 // EmailPacketProcessor processes email packets (SMTP) with TCP reassembly for hunter mode.
@@ -19,14 +21,17 @@ import (
 // and forwards matched sessions to the processor.
 type EmailPacketProcessor struct {
 	ctx       context.Context
-	assembler *capture.TCPAssembler
+	cancel    context.CancelFunc
+	assembler *pipeline.ReassemblyEngine
 	handler   *EmailHunterHandler
-	factory   reassembly.StreamFactory
+	workers   sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // NewEmailPacketProcessor creates a packet processor for email capture in hunter mode.
 // It sets up TCP reassembly with the provided handler for content filtering.
 func NewEmailPacketProcessor(ctx context.Context, forwarder EmailPacketForwarder, contentFilter *ContentFilter, config SMTPStreamFactoryConfig) *EmailPacketProcessor {
+	ctx, cancel := context.WithCancel(ctx)
 	// Create email hunter handler
 	handler := NewEmailHunterHandler(forwarder, contentFilter)
 
@@ -40,16 +45,27 @@ func NewEmailPacketProcessor(ctx context.Context, forwarder EmailPacketForwarder
 	factory := NewSMTPStreamFactory(ctx, handler, config)
 
 	// Create assembler
-	assembler := capture.NewTCPAssembler(factory)
+	assembler := pipeline.NewReassemblyEngine(factory, pipeline.ReassemblyConfig{
+		FlushInterval: 30 * time.Second,
+		IdleTimeout:   60 * time.Second,
+	})
 
 	processor := &EmailPacketProcessor{
 		ctx:       ctx,
+		cancel:    cancel,
 		assembler: assembler,
 		handler:   handler,
-		factory:   factory,
 	}
+	processor.workers.Add(1)
+	go func() {
+		defer processor.workers.Done()
+		if err := assembler.Run(ctx); err != nil {
+			logger.Error("Email TCP reassembly engine stopped", "error", err)
+		}
+	}()
 
 	// Start background cleanup goroutine
+	processor.workers.Add(1)
 	go processor.cleanupRoutine()
 
 	logger.Info("Email packet processor initialized with TCP reassembly",
@@ -113,11 +129,9 @@ func (p *EmailPacketProcessor) handleTCPPacket(pktInfo capture.PacketInfo, tcpLa
 	BufferEmailTCPPacket(sessionID, pktInfo)
 
 	// Feed to TCP assembler for stream reconstruction
-	p.assembler.Assemble(
-		netFlow,
-		tcpLayer,
-		packet.Metadata().Timestamp,
-	)
+	if err := p.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
+		logger.Error("Failed to assemble email TCP packet", "error", err)
+	}
 }
 
 // createSessionIDFromFlows creates a session ID from network and transport flows.
@@ -129,6 +143,7 @@ func createSessionIDFromFlows(netFlow gopacket.Flow, tcpLayer *layers.TCP) strin
 
 // cleanupRoutine periodically cleans up stale buffers and old assembler streams.
 func (p *EmailPacketProcessor) cleanupRoutine() {
+	defer p.workers.Done()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -139,12 +154,6 @@ func (p *EmailPacketProcessor) cleanupRoutine() {
 		case <-ticker.C:
 			// Clean up old email TCP buffers
 			CleanupOldEmailBuffers(60 * time.Second)
-
-			// Flush old assembler connections
-			flushed, _ := p.assembler.FlushCloseOlderThan(time.Now().Add(-60 * time.Second))
-			if flushed > 0 {
-				logger.Debug("Flushed old email TCP streams", "count", flushed)
-			}
 
 			// Cleanup stale handler sessions
 			p.handler.CleanupStaleSessions()
@@ -169,15 +178,14 @@ func (p *EmailPacketProcessor) GetBufferStats() EmailTCPBufferStats {
 
 // Close gracefully shuts down the processor.
 func (p *EmailPacketProcessor) Close() {
-	// Flush remaining streams
-	if p.assembler != nil {
-		p.assembler.FlushAll()
-	}
-
-	// Close the factory if it supports closing
-	if closer, ok := p.factory.(interface{ Close() }); ok {
-		closer.Close()
-	}
-
-	logger.Info("Email packet processor closed")
+	p.closeOnce.Do(func() {
+		p.cancel()
+		if p.assembler != nil {
+			if err := p.assembler.Close(); err != nil {
+				logger.Error("Failed to close email TCP reassembly engine", "error", err)
+			}
+		}
+		p.workers.Wait()
+		logger.Info("Email packet processor closed")
+	})
 }

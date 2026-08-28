@@ -148,7 +148,7 @@ func StartOfflineSniffer(readFiles []string, filter string, startSniffer func(de
 // RunWithSignalHandler runs the capture in background and handles signals for graceful shutdown
 // This is the common pattern used by hunt, sniff, and sniff voip commands
 func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
-	processor func(ch <-chan PacketInfo, asm *TCPAssembler), assembler *TCPAssembler) {
+	processor func(<-chan PacketInfo)) {
 
 	// Create cancellable context for capture
 	ctx, cancel := context.WithCancel(context.Background())
@@ -163,7 +163,9 @@ func RunWithSignalHandler(devices []pcaptypes.PcapInterface, filter string,
 
 	// Run capture in background (like hunter nodes do)
 	go func() {
-		InitWithContext(ctx, devices, filter, processor, assembler, nil)
+		InitWithContext(ctx, devices, filter, func(ch <-chan PacketInfo, _ *TCPAssembler) {
+			processor(ch)
+		}, nil, nil)
 		close(captureDone)
 	}()
 
@@ -218,7 +220,7 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	// For basic sniffing, we don't need TCP stream reassembly
 	// Pass nil assembler to skip expensive TCP assembly
-	processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
+	processor := func(ch <-chan PacketInfo) {
 		processPacketSimple(ch)
 	}
 
@@ -245,17 +247,17 @@ func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 	if isOffline {
 		// For offline mode, run until PCAP is fully read
-		RunOffline(devices, filter, processor, nil)
+		RunOffline(devices, filter, processor)
 	} else {
 		// For live mode, run with signal handler (waits for Ctrl+C)
-		RunWithSignalHandler(devices, filter, processor, nil)
+		RunWithSignalHandler(devices, filter, processor)
 	}
 }
 
 // RunOffline runs the capture for offline PCAP files and exits when complete
 // Unlike RunWithSignalHandler, this cancels the context when all packets are read
 func RunOffline(devices []pcaptypes.PcapInterface, filter string,
-	processor func(ch <-chan PacketInfo, asm *TCPAssembler), assembler *TCPAssembler) {
+	processor func(<-chan PacketInfo)) {
 
 	// For offline mode, we use a custom implementation that detects EOF
 	// and cancels the context to trigger cleanup
@@ -310,7 +312,7 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 	processorWg.Add(1)
 	go func() {
 		defer processorWg.Done()
-		processor(packetBuffer.Receive(), assembler)
+		processor(packetBuffer.Receive())
 	}()
 
 	// Wait for all capture goroutines to finish (EOF reached)
@@ -324,14 +326,6 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 		packetBuffer.Close()
 		processorWg.Wait()
 		return
-	}
-
-	// Flush TCP assembler if present (forces reassembly of any remaining streams)
-	if assembler != nil {
-		_, _ = assembler.FlushCloseOlderThan(time.Now())
-		// Give assembler time to process flushed streams
-		// This ensures SIP messages are extracted before we close the buffer
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Stop accepting input while allowing the merger to drain both the regular
@@ -350,7 +344,7 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 // Unlike RunOffline which processes files in parallel (non-deterministic order),
 // this function ensures proper temporal ordering across all files.
 func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
-	processor func(ch <-chan PacketInfo, asm *TCPAssembler), assembler *TCPAssembler) {
+	processor func(<-chan PacketInfo)) {
 
 	logger.Info("Starting timestamp-ordered offline capture",
 		"file_count", len(devices))
@@ -403,7 +397,7 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	processorWg.Add(1)
 	go func() {
 		defer processorWg.Done()
-		processor(packetBuffer.Receive(), assembler)
+		processor(packetBuffer.Receive())
 	}()
 
 	// Send all packets in timestamp order using blocking send.
@@ -416,12 +410,6 @@ func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 			// Buffer closed or context cancelled
 			break
 		}
-	}
-
-	// Flush TCP assembler if present
-	if assembler != nil {
-		_, _ = assembler.FlushCloseOlderThan(time.Now())
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Signal end of input by closing input channels.

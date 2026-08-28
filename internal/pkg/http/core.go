@@ -13,11 +13,12 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/google/gopacket/reassembly"
 	"github.com/spf13/viper"
 )
 
@@ -29,8 +30,8 @@ var (
 	httpContentFilter *ContentFilter
 	httpPcapWriter    *pcapgo.Writer
 	httpOutputFile    *os.File
-	httpFactory       reassembly.StreamFactory
-	httpAssembler     *capture.TCPAssembler
+	httpFactory       HTTPStreamFactory
+	httpAssembler     *pipeline.ReassemblyEngine
 	httpHandler       *cliHTTPHandler
 )
 
@@ -148,7 +149,8 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create TCP reassembly factory
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	factoryConfig := DefaultHTTPStreamFactoryConfig()
 
 	// Configure ports from viper
@@ -167,7 +169,17 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	httpFactory = NewHTTPStreamFactory(ctx, httpHandler, factoryConfig)
 
 	// Create assembler
-	httpAssembler = capture.NewTCPAssembler(httpFactory)
+	httpAssembler = pipeline.NewReassemblyEngine(httpFactory, pipeline.DefaultReassemblyConfig())
+	defer func() {
+		if err := httpAssembler.Close(); err != nil {
+			logger.Error("Failed to close HTTP reassembly engine", "error", err)
+		}
+	}()
+	go func() {
+		if err := httpAssembler.Run(ctx); err != nil {
+			logger.Error("HTTP reassembly engine stopped", "error", err)
+		}
+	}()
 
 	// Detect offline mode
 	isOffline := false
@@ -180,15 +192,18 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function
-	processor := func(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
-		processHTTPPackets(packetChan, asm)
+	processor := func(packetChan <-chan capture.PacketInfo) {
+		processHTTPPackets(packetChan, httpAssembler, isOffline)
 	}
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor, httpAssembler)
+		capture.RunOffline(devices, filter, processor)
 	} else {
-		capture.RunWithSignalHandler(devices, filter, processor, httpAssembler)
+		capture.RunWithSignalHandler(devices, filter, processor)
+	}
+	if err := httpAssembler.Close(); err != nil {
+		logger.Error("Failed to close HTTP reassembly engine", "error", err)
 	}
 
 	// Print statistics and cleanup
@@ -197,7 +212,7 @@ func StartHTTPSniffer(devices []pcaptypes.PcapInterface, filter string) {
 }
 
 // processHTTPPackets processes packets from the channel.
-func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
+func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.ReassemblyEngine, offline bool) {
 	for pktInfo := range packetChan {
 		packet := pktInfo.Packet
 
@@ -212,13 +227,18 @@ func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPAs
 			continue
 		}
 
-		tcp, ok := tcpLayer.(*layers.TCP)
-		if !ok {
+		if _, ok := tcpLayer.(*layers.TCP); !ok {
 			continue
 		}
 
 		// Feed to assembler for reassembly
-		asm.Assemble(netLayer.NetworkFlow(), tcp, packet.Metadata().Timestamp)
+		kind := pipeline.SourceLiveCapture
+		if offline {
+			kind = pipeline.SourcePCAPReplay
+		}
+		if err := asm.Assemble(captureadapter.FromPacketInfo(pktInfo, kind)); err != nil {
+			logger.Error("Failed to assemble HTTP TCP packet", "error", err)
+		}
 
 		// Write to PCAP if configured
 		if httpPcapWriter != nil {
@@ -234,10 +254,6 @@ func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPAs
 		}
 	}
 
-	// Flush remaining streams
-	if asm != nil {
-		asm.FlushAll()
-	}
 }
 
 // buildContentFilterConfig builds content filter config from viper.
@@ -268,9 +284,6 @@ func (c ContentFilterConfig) hasFilters() bool {
 func cleanup() {
 	if httpTracker != nil {
 		httpTracker.Close()
-	}
-	if closer, ok := httpFactory.(interface{ Close() }); ok {
-		closer.Close()
 	}
 	if httpOutputFile != nil {
 		if err := httpOutputFile.Close(); err != nil {

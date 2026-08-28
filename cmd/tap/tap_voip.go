@@ -14,6 +14,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
@@ -29,11 +31,11 @@ import (
 // TapTCPAssembler implements source.TCPAssembler for tap mode.
 // It buffers TCP packets and feeds them to the assembler for SIP stream reconstruction.
 type TapTCPAssembler struct {
-	assembler *capture.TCPAssembler
+	assembler *pipeline.ReassemblyEngine
 }
 
 // NewTapTCPAssembler creates a TCP assembler wrapper for tap mode.
-func NewTapTCPAssembler(assembler *capture.TCPAssembler) *TapTCPAssembler {
+func NewTapTCPAssembler(assembler *pipeline.ReassemblyEngine) *TapTCPAssembler {
 	return &TapTCPAssembler{assembler: assembler}
 }
 
@@ -58,7 +60,10 @@ func (a *TapTCPAssembler) AssemblePacket(pktInfo capture.PacketInfo) bool {
 	voip.BufferTCPPacket(netFlow, transportFlow, pktInfo)
 
 	// Feed the packet to the TCP assembler for stream reconstruction
-	a.assembler.Assemble(netFlow, tcpLayer, packet.Metadata().Timestamp)
+	if err := a.assembler.Assemble(captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)); err != nil {
+		logger.Error("Failed to assemble tap TCP packet", "error", err)
+		return false
+	}
 
 	return true
 }
@@ -539,10 +544,15 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	streamFactory := voip.NewSipStreamFactory(tapCtx, tapTCPHandler)
 
 	// Create connection-aware reassembly assembler
-	tcpAssembler := capture.NewTCPAssembler(streamFactory)
+	reassemblyEngine := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
+	defer func() {
+		if err := reassemblyEngine.Close(); err != nil {
+			logger.Error("Failed to close TCP reassembly engine", "error", err)
+		}
+	}()
 
 	// Create TapTCPAssembler wrapper that implements source.TCPAssembler
-	tapTCPAssemblerWrapper := NewTapTCPAssembler(tcpAssembler)
+	tapTCPAssemblerWrapper := NewTapTCPAssembler(reassemblyEngine)
 
 	// Wire TCP injection channel and assembler to LocalSource
 	localSource.SetTCPInjectionChannel(tcpInjectionChan)
@@ -591,7 +601,11 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	// Start TCP stream flusher goroutine to prevent memory leaks
 	// This periodically flushes old TCP streams that haven't received data
-	go runTCPStreamFlusher(ctx, tcpAssembler)
+	go func() {
+		if err := reassemblyEngine.Run(ctx); err != nil {
+			logger.Error("TCP reassembly engine stopped", "error", err)
+		}
+	}()
 
 	logger.Info("VoIP Tap node started successfully",
 		"listen", config.ListenAddr,
@@ -608,33 +622,4 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 
 	logger.Info("VoIP Tap node stopped")
 	return nil
-}
-
-// runTCPStreamFlusher periodically flushes old TCP streams to prevent memory leaks
-// and ensure timely processing of SIP messages in slow or incomplete connections.
-func runTCPStreamFlusher(ctx context.Context, assembler *capture.TCPAssembler) {
-	// Flush streams older than 2 minutes every 30 seconds
-	// This matches the behavior in hunt mode
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Flush all remaining streams on shutdown
-			logger.Debug("Flushing TCP assembler streams on shutdown")
-			flushed, closed := assembler.FlushCloseOlderThan(time.Now())
-			logger.Debug("TCP streams flushed on shutdown", "flushed", flushed, "closed", closed)
-			return
-		case <-ticker.C:
-			// Flush streams that haven't received data in 2 minutes
-			cutoff := time.Now().Add(-2 * time.Minute)
-			flushed, closed := assembler.FlushCloseOlderThan(cutoff)
-			if flushed > 0 || closed > 0 {
-				logger.Debug("Flushed old TCP streams",
-					"flushed", flushed,
-					"closed", closed)
-			}
-		}
-	}
 }

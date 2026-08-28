@@ -284,7 +284,7 @@ func TestRunOffline(t *testing.T) {
 		}
 
 		var processedPackets atomic.Int32
-		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
+		processor := func(ch <-chan PacketInfo) {
 			for range ch {
 				processedPackets.Add(1)
 			}
@@ -293,7 +293,7 @@ func TestRunOffline(t *testing.T) {
 		// Run with timeout to ensure completion
 		done := make(chan struct{})
 		go func() {
-			RunOffline(devices, "", processor, nil)
+			RunOffline(devices, "", processor)
 			close(done)
 		}()
 
@@ -312,13 +312,13 @@ func TestRunOffline(t *testing.T) {
 		}
 
 		var processorCalled atomic.Bool
-		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
+		processor := func(ch <-chan PacketInfo) {
 			processorCalled.Store(true)
 			for range ch {
 			}
 		}
 
-		RunOffline(devices, "", processor, nil)
+		RunOffline(devices, "", processor)
 
 		// Processor should be called even if captures fail
 		assert.True(t, processorCalled.Load(), "Processor should be called")
@@ -339,19 +339,15 @@ func TestRunOffline(t *testing.T) {
 		}
 
 		var processedPackets atomic.Int32
-		processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
+		processor := func(ch <-chan PacketInfo) {
 			for range ch {
 				processedPackets.Add(1)
 			}
 		}
 
-		// Create TCP assembler
-		streamFactory := &MockStreamFactory{}
-		assembler := NewTCPAssembler(streamFactory)
-
 		done := make(chan struct{})
 		go func() {
-			RunOffline(devices, "", processor, assembler)
+			RunOffline(devices, "", processor)
 			close(done)
 		}()
 

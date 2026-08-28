@@ -41,7 +41,7 @@ func TestOfflineFlowIntegration(t *testing.T) {
 	var packetCount int
 	var mu sync.Mutex
 
-	processor := func(ch <-chan PacketInfo, asm *TCPAssembler) {
+	processor := func(ch <-chan PacketInfo) {
 		for pkt := range ch {
 			mu.Lock()
 			packetCount++
@@ -51,7 +51,7 @@ func TestOfflineFlowIntegration(t *testing.T) {
 	}
 
 	// Run offline ordered capture
-	RunOfflineOrdered(devices, "", processor, nil)
+	RunOfflineOrdered(devices, "", processor)
 
 	mu.Lock()
 	count := packetCount

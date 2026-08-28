@@ -241,7 +241,7 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
-	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
+	processor := func(ch <-chan capture.PacketInfo) {
 		StartPacketBridge(ch, program, pauseSignal)
 	}
 
@@ -249,7 +249,9 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 	// For offline: blocks until file is read (StartOfflineSniffer keeps file open)
 	// For live: caller uses goroutine for non-blocking behavior
 	// Pass pause function to drop packets at source when paused (reduces CPU)
-	capture.InitWithContext(ctx, devices, filter, processor, nil, pauseSignal.IsPaused)
+	capture.InitWithContext(ctx, devices, filter, func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {
+		processor(ch)
+	}, nil, pauseSignal.IsPaused)
 }
 
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
@@ -260,10 +262,10 @@ func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterfa
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
-	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
+	processor := func(ch <-chan capture.PacketInfo) {
 		StartPacketBridge(ch, program, pauseSignal)
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes
-	capture.RunOfflineOrdered(devices, filter, processor, nil)
+	capture.RunOfflineOrdered(devices, filter, processor)
 }

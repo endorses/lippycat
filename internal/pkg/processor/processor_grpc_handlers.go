@@ -81,7 +81,10 @@ func (p *Processor) StreamPackets(stream data.DataService_StreamPacketsServer) e
 		}
 
 		// Convert protobuf batch to internal format and process
-		internalBatch := source.FromProtoBatch(batch)
+		internalBatch, err := source.FromProtoBatchE(batch)
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid packet batch: %v", err)
+		}
 		p.processBatch(internalBatch)
 
 		// Determine flow control state based on processor load

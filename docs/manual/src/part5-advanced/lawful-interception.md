@@ -14,7 +14,7 @@ lippycat implements three ETSI interfaces defined in TS 103 221-1 and TS 103 221
 | **X2** | IRI delivery (signaling metadata) | Binary TLV/TLS | TS 103 221-2 |
 | **X3** | CC delivery (communication content) | Binary TLV/TLS | TS 103 221-2 |
 
-The **X1** interface carries administrative commands: the ADMF sends task activation, modification, and deactivation requests to the processor (acting as the Network Element). The **X2** interface delivers Intercept Related Information (IRI) -- signaling events such as call setup, answer, and teardown. The **X3** interface delivers Content of Communication (CC) -- the actual media payloads such as RTP audio.
+The **X1** interface carries administrative commands: the ADMF sends task activation, modification, and deactivation requests to the processor (acting as the Network Element). The **X2** interface delivers Intercept Related Information (IRI), including SIP signaling events and, when explicitly enabled, authorized normalized internet metadata. The **X3** interface delivers Content of Communication (CC) -- the actual media payloads such as RTP audio.
 
 ### Architecture
 
@@ -53,7 +53,7 @@ The flow works as follows:
 1. The ADMF sends an interception task to the processor via the X1 interface (or the processor queries the ADMF for existing tasks on startup -- see [ADMF State Synchronization](#admf-state-synchronization)).
 2. The LI Manager translates the task's target identifiers into capture filters and pushes them to connected hunters.
 3. Hunters match packets against those filters at the edge and forward matching traffic to the processor.
-4. The processor encodes matched SIP signaling as X2 IRI PDUs and RTP media as X3 CC PDUs.
+4. The processor encodes matched SIP signaling and enabled, authorized protocol metadata as X2 IRI PDUs, and RTP media as X3 CC PDUs.
 5. The delivery client sends encoded PDUs to the designated MDF endpoints over TLS.
 
 ## Build Requirements
@@ -432,7 +432,13 @@ target under the retained XID.
 
 Intercepted data is delivered to MDF endpoints using binary TLV (Type-Length-Value) encoding per ETSI TS 103 221-2.
 
-### X2 IRI Events
+### X2 IRI Delivery
+
+X2 can carry both SIP-derived IRI events and explicitly enabled normalized
+internet metadata. Both paths require an active authorizing task and an enabled
+X2 destination.
+
+#### SIP-derived IRI events
 
 X2 PDUs carry signaling metadata derived from SIP messages:
 
@@ -447,9 +453,50 @@ X2 PDUs carry signaling metadata derived from SIP messages:
 
 Each X2 PDU includes structured attributes: timestamp, source/destination IP and port, SIP Call-ID, From/To headers, and a correlation number that links related events within the same session.
 
+#### Normalized protocol metadata over X2
+
+LI builds can also map authorized normalized protocol observations to X2 IRI.
+This path consumes the same internal DNS, TLS, HTTP, SMTP, connection, and file
+metadata events used by [Structured Protocol Logs](structured-protocol-logs.md),
+but it does not depend on structured log files or `--log-dir`.
+
+Enable the metadata sink explicitly on `process` or `tap`:
+
+```bash
+lc process --listen :55555 \
+  --li-enabled \
+  --li-metadata-events \
+  --li-metadata-delivery-profile internet_metadata
+```
+
+The required X1 and X2/X3 TLS options are omitted from this focused example.
+
+The `internet_metadata` profile is currently the only supported profile. It
+allows the following content-free observations:
+
+| Event | X2 metadata behavior |
+|-------|----------------------|
+| Connection | Flow endpoints, protocol, timing, counters, and identifiers |
+| DNS | Query and response metadata |
+| TLS | Handshake, certificate identity, and fingerprint metadata |
+| HTTP | Transaction metadata; arbitrary header maps are removed |
+| SMTP | Transport envelope only; message headers, body previews, attachment IDs, and content are removed |
+| File metadata | Disabled unless `--li-metadata-allow-file-metadata` is set |
+| File content | Always rejected by the metadata profile |
+
+Delivery requires more than enabling the sink. An active LI task must match the
+event target, use `X2 only` or `X2 and X3` delivery, and reference an enabled X2
+destination. Events that do not meet all of those authorization conditions are
+skipped. Accepted metadata is encoded as an X2 PDU with a proprietary metadata
+payload and queued through the normal authenticated MDF delivery client.
+
+Local structured logs and LI delivery remain independent. Enabling TSV/JSONL
+files does not authorize X2 delivery, and enabling LI metadata does not create
+local log files.
+
 ### X3 CC Content
 
-X3 PDUs carry communication content:
+X3 PDUs carry communication content; X3 is not a structured-log transport:
 
 | Content Type | Description |
 |--------------|-------------|
@@ -505,14 +552,15 @@ flowchart TD
     C --> D["Hunters match packets<br/>using optimized filter engines"]
     D --> E["Matched packets forwarded<br/>to processor with filter IDs"]
     E --> F["LI Manager correlates<br/>filter ID → XID"]
-    F --> G{"Packet type?"}
+    F --> G{"Authorized output?"}
     G -->|SIP signaling| H["X2 Encoder<br/>(IRI PDU)"]
+    G -->|Normalized protocol metadata| H
     G -->|RTP media| I["X3 Encoder<br/>(CC PDU)"]
     H --> J["Delivery Client → MDF"]
     I --> J
 ```
 
-Each filter created by the LI Manager is assigned an internal ID with the format `li-{xid_prefix}-{index}` (for example, `li-a1b2c3d4-0`). When packets matching these filters arrive at the processor, the LI Manager looks up the corresponding XID and routes the data through the appropriate encoder and delivery path.
+Each filter created by the LI Manager is assigned an internal ID with the format `li-{xid_prefix}-{index}` (for example, `li-a1b2c3d4-0`). When packets matching these filters arrive at the processor, the LI Manager looks up the corresponding XID and routes SIP IRI, enabled normalized protocol metadata, and communication content through their appropriate delivery paths.
 
 When a task is deactivated, the associated filters are removed from all hunters, and matching stops immediately.
 

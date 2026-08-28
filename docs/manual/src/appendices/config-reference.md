@@ -56,6 +56,33 @@ These top-level keys apply to all commands.
 
 ---
 
+## Structured Protocol Logging
+
+These keys configure the optional normalized protocol logs for `sniff`,
+`process`, and `tap`. Setting `logs.dir` enables the file sink. See
+[Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md) for
+stream schemas, hierarchy behavior, rotation, and privacy guidance.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `events.queue_size` | integer | `20000` | Capacity of the normalized protocol-event queue. |
+| `events.drop_policy` | string | `"drop_new"` | Overflow policy for normalized events. |
+| `logs.dir` | string | `""` | Structured-log directory; an empty value disables logging. |
+| `logs.format` | string | `"tsv"` | Output encoding: `"tsv"` or `"json"` (JSONL). |
+| `logs.streams` | list | `[conn, dns, ssl, http, smtp, files]` | Enabled log streams. |
+| `logs.include_http_headers` | boolean | `false` | Preserve full HTTP header maps in normalized events. |
+| `logs.include_email_body_preview` | boolean | `false` | Permit potentially sensitive email body previews for file analysis. |
+| `logs.rotate_interval` | duration | `"1h"` | Periodic rotation interval; `0` disables periodic rotation. |
+| `logs.queue_size` | integer | `10000` | Capacity of each stream's output queue. |
+| `logs.emit_stage` | string | `"terminal"` | `process`/`tap`: `"terminal"`, `"all"`, or `"none"`. |
+| `logs.post_rotate_command` | string | `""` | Command after rotation; `%log%` expands to the safely quoted rotated path. |
+| `files.extract` | boolean | `false` | Extract bounded HTTP and SMTP file content. |
+| `files.extract_dir` | string | `""` | Extraction directory; required when extraction is enabled. |
+| `files.max_size` | integer | `10485760` | Maximum bytes analyzed or extracted per file. |
+| `files.total_size` | integer | `104857600` | Maximum bytes extracted over the process lifetime. |
+
+---
+
 ## Protocol Capture Settings
 
 These sections configure protocol-specific analysis for `lc sniff <protocol>` subcommands. They control which ports to monitor, what patterns to match, and whether to capture payload content.
@@ -451,6 +478,9 @@ if any of them is missing.
 | `processor.li.delivery_tls_key` | string | `""` | TLS private key for X2/X3 delivery. |
 | `processor.li.delivery_tls_ca` | string | `""` | CA certificate for MDF verification. |
 | `processor.li.delivery_tls_pinned_cert` | list | `[]` | Pinned certificates for MDF connections. |
+| `processor.li.metadata_events.enabled` | boolean | `false` | Deliver authorized normalized protocol metadata over X2. |
+| `processor.li.metadata_events.delivery_profile` | string | `"internet_metadata"` | Metadata authorization and redaction profile. |
+| `processor.li.metadata_events.allow_file_metadata` | boolean | `false` | Permit file metadata over X2; file content is always rejected. |
 
 ### `tap` — Tap Node
 
@@ -537,6 +567,18 @@ TLS is enabled by default unless `tap.insecure` is true. Provide `tap.tls.cert_f
 | `tap.vif_buffer_size` | integer | `65536` | Virtual interface buffer size. |
 | `tap.vif_drop_privileges` | string | `""` | User to drop privileges to. |
 | `tap.vif_netns` | string | `""` | Network namespace. |
+
+#### Tap LI Metadata Delivery
+
+These settings require the `li` build tag. Tap supports the same X1 and X2/X3
+delivery configuration as the processor; these keys control normalized protocol
+metadata specifically.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `tap.li.metadata_events.enabled` | boolean | `false` | Deliver authorized normalized protocol metadata over X2. |
+| `tap.li.metadata_events.delivery_profile` | string | `"internet_metadata"` | Metadata authorization and redaction profile. |
+| `tap.li.metadata_events.allow_file_metadata` | boolean | `false` | Permit file metadata over X2; file content is always rejected. |
 
 #### Tap Protocol Filters
 

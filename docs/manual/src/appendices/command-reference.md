@@ -163,6 +163,30 @@ Used by `tap` and `process` for writing captured packets to disk.
 | `--command-concurrency` | int | `10` | Maximum concurrent command executions |
 | `--command-timeout` | duration | `30s` | Timeout for command execution |
 
+### Structured Protocol Log Flags
+
+Used by `sniff`, `process`, and `tap`. Logging remains disabled until
+`--log-dir` is set. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
+for stream schemas, completeness semantics, rotation, and privacy guidance.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--event-queue-size` | int | `20000` | Normalized protocol-event queue capacity |
+| `--event-drop-policy` | string | `drop_new` | Normalized event overflow policy |
+| `--log-dir` | string | | Directory for structured log files; enables logging |
+| `--log-format` | string | `tsv` | Output format: `tsv` or `json` (JSONL) |
+| `--log-streams` | strings | `conn,dns,ssl,http,smtp,files` | Enabled streams |
+| `--log-include-http-headers` | bool | `false` | Preserve full HTTP header maps in normalized events |
+| `--log-include-email-body-preview` | bool | `false` | Permit sensitive email body previews for file analysis |
+| `--log-rotate-interval` | duration | `1h` | Periodic rotation interval; `0` disables it |
+| `--log-queue-size` | int | `10000` | Queue capacity for each output stream |
+| `--log-post-rotate-command` | string | | Command after rotation; `%log%` is the rotated path |
+| `--log-emit-stage` | string | `terminal` | `process`/`tap` only: `terminal`, `all`, or `none` |
+| `--extract-files` | bool | `false` | Extract bounded HTTP and SMTP files |
+| `--extract-files-dir` | string | | Required output directory when extraction is enabled |
+| `--extract-files-max-size` | int64 | `10485760` | Maximum bytes analyzed or extracted per file |
+| `--extract-files-total-size` | int64 | `104857600` | Process-lifetime extracted-byte limit |
+
 ### LI Flags
 
 Used by `process` and `tap`. Requires the `li` build tag (`make processor-li`, `make tap-li`, or `make build-li`).
@@ -198,6 +222,9 @@ See [Chapter 14: Lawful Interception](../part5-advanced/lawful-interception.md) 
 | `--li-admf-sync-on-startup` | bool | `true` | Query ADMF for state on startup |
 | `--li-admf-sync-timeout` | duration | `30s` | Timeout for startup state sync |
 | `--li-admf-reconcile-interval` | duration | `5m` | Periodic ADMF reconciliation interval (0 = disabled) |
+| `--li-metadata-events` | bool | `false` | Deliver authorized normalized protocol metadata over X2 |
+| `--li-metadata-delivery-profile` | string | `internet_metadata` | Metadata authorization and redaction profile |
+| `--li-metadata-allow-file-metadata` | bool | `false` | Permit file metadata over X2; file content is always rejected |
 
 ---
 
@@ -221,7 +248,8 @@ lc sniff [flags]
 | `--format` | | string | `json` | Output format: `json` or `text` |
 | `--quiet` | `-q` | bool | `false` | Suppress non-packet output |
 
-Plus [Virtual Interface Flags](#virtual-interface-flags).
+Plus [Virtual Interface Flags](#virtual-interface-flags) and
+[Structured Protocol Log Flags](#structured-protocol-log-flags).
 
 See [Chapter 4: CLI Capture with `lc sniff`](../part2-local-capture/sniff.md).
 
@@ -449,7 +477,9 @@ lc tap [flags]
 | `--filter-file` | | string | | Filter definition file |
 | `--no-filter-policy` | | string | `deny` | Behavior when no filters exist: `allow` or `deny` |
 
-Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags), [Virtual Interface Flags](#virtual-interface-flags), and [GPU Flags](#gpu-flags).
+Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags),
+[Virtual Interface Flags](#virtual-interface-flags), [GPU Flags](#gpu-flags), and
+[Structured Protocol Log Flags](#structured-protocol-log-flags).
 
 See [Chapter 9: Standalone Mode with `lc tap`](../part3-distributed/tap.md).
 
@@ -731,7 +761,9 @@ lc process [flags]
 |------|------|---------|-------------|
 | `--tls-keylog-dir` | string | | Directory for TLS key log files from hunters |
 
-Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags), [Virtual Interface Flags](#virtual-interface-flags), and [LI Flags](#li-flags).
+Plus [PCAP Output Flags](#pcap-output-flags), [TLS Server Flags](#tls-server-flags),
+[Virtual Interface Flags](#virtual-interface-flags), [Structured Protocol Log Flags](#structured-protocol-log-flags),
+and [LI Flags](#li-flags).
 
 See [Chapter 8: Central Aggregation with `lc process`](../part3-distributed/process.md).
 

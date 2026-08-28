@@ -89,7 +89,7 @@ lc sniff http -r capture.pcap --log-dir ./logs --log-streams conn,http,files
 
 Logging is off by default. Output is Zeek-style TSV by default, or JSONL with
 `--log-format json`. Queues are bounded, so heed drop warnings and use graceful
-shutdown to flush files. See [Structured Protocol Logs](../../../STRUCTURED_LOGS.md)
+shutdown to flush files. See [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 for all schemas, flags, rotation, completeness semantics, and privacy guidance.
 
 ## Protocol Modes

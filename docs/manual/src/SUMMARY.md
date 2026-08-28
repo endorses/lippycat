@@ -39,6 +39,7 @@
 - [Security](part5-advanced/security.md)
 - [Performance Optimization](part5-advanced/performance.md)
 - [Protocol Deep Dives](part5-advanced/protocol-deep-dives.md)
+- [Structured Protocol Logs](part5-advanced/structured-protocol-logs.md)
 - [Lawful Interception](part5-advanced/lawful-interception.md)
 - [Troubleshooting](part5-advanced/troubleshooting.md)
 

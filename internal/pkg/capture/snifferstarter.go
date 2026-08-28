@@ -334,8 +334,10 @@ func RunOffline(devices []pcaptypes.PcapInterface, filter string,
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Close the buffer so processor can exit
-	packetBuffer.Close()
+	// Stop accepting input while allowing the merger to drain both the regular
+	// and SIP-priority queues. Close() cancels the buffer context immediately and
+	// can discard the last packets of a short offline capture at EOF.
+	packetBuffer.CloseInputs()
 
 	// Wait for processor to finish draining
 	processorWg.Wait()

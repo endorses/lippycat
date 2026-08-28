@@ -12,8 +12,11 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
+	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/require"
 )
 
@@ -44,18 +47,45 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 	for _, want := range goldens {
 		ts, err := time.Parse(time.RFC3339Nano, want.Timestamp)
 		require.NoError(t, err)
-		packet := gopacket.NewPacket(packets[want.Protocol], layers.LayerTypeEthernet, gopacket.Default)
-		packet.Metadata().Timestamp = ts
-		packet.Metadata().Length = len(packet.Data())
-		got := convertPacket(capture.PacketInfo{Packet: packet, Interface: "golden0", LinkType: layers.LinkTypeEthernet})
-		require.Equal(t, want.Protocol, got.Protocol)
-		require.Equal(t, want.Timestamp, got.Timestamp.UTC().Format(time.RFC3339Nano))
-		require.Equal(t, want.SrcIP, got.SrcIP)
-		require.Equal(t, want.DstIP, got.DstIP)
-		require.Equal(t, want.SrcPort, got.SrcPort)
-		require.Equal(t, want.DstPort, got.DstPort)
-		require.Equal(t, want.Info, got.Info)
+		path := filepath.Join(t.TempDir(), want.Protocol+".pcap")
+		writeGoldenPCAP(t, path, packets[want.Protocol], ts)
+		file, err := os.Open(path)
+		require.NoError(t, err)
+		var observed []types.PacketDisplay
+		capture.RunOfflineOrdered([]pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {
+			for info := range ch {
+				observed = append(observed, convertPacket(info))
+			}
+		}, nil)
+		require.NoError(t, file.Close())
+		require.Len(t, observed, 1)
+
+		livePacket := gopacket.NewPacket(packets[want.Protocol], layers.LayerTypeEthernet, gopacket.Default)
+		livePacket.Metadata().Timestamp = ts
+		livePacket.Metadata().Length = len(livePacket.Data())
+		live := convertPacket(capture.PacketInfo{Packet: livePacket, Interface: "golden0", LinkType: layers.LinkTypeEthernet})
+		for mode, got := range map[string]types.PacketDisplay{"watch-file": observed[0], "watch-live": live} {
+			t.Run(mode, func(t *testing.T) {
+				require.Equal(t, want.Protocol, got.Protocol)
+				require.Equal(t, want.Timestamp, got.Timestamp.UTC().Format(time.RFC3339Nano))
+				require.Equal(t, want.SrcIP, got.SrcIP)
+				require.Equal(t, want.DstIP, got.DstIP)
+				require.Equal(t, want.SrcPort, got.SrcPort)
+				require.Equal(t, want.DstPort, got.DstPort)
+				require.Equal(t, want.Info, got.Info)
+			})
+		}
 	}
+}
+
+func writeGoldenPCAP(t *testing.T, path string, packet []byte, timestamp time.Time) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	w := pcapgo.NewWriter(f)
+	require.NoError(t, w.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	require.NoError(t, w.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(packet), Length: len(packet)}, packet))
+	require.NoError(t, f.Close())
 }
 
 func goldenDNSPacket(t *testing.T) []byte {

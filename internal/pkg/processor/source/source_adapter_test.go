@@ -44,6 +44,8 @@ func TestProtoBatchBoundaryPreservesProcessorEnrichment(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "HTTP", out.Packets[0].Metadata.Protocol)
 	require.Equal(t, "GET /", out.Packets[0].Metadata.Info)
+	require.False(t, batch.Envelopes[0].Stages.Has(pipeline.StageDetected))
+	require.False(t, batch.Envelopes[0].Stages.Has(pipeline.StageAnalyzed))
 }
 
 func TestProtoBatchBoundaryUsesAuthoritativeEnvelope(t *testing.T) {

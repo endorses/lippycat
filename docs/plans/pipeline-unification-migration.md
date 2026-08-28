@@ -202,7 +202,8 @@ behavior.
 - [x] Move protobuf conversion into gRPC ingress/egress adapters.
 - [x] Add round-trip tests proving that source identity, timestamps, filter IDs,
       metadata, link type, and packet bytes survive adapter conversion.
-- [x] Document which operations are edge-safe, central-only, or idempotent.
+- [x] Document which operations are edge-safe, central-only, or idempotent
+      ([operation safety contract](../pipeline-operation-safety.md)).
 
 ### Exit Criteria
 

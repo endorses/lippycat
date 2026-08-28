@@ -46,7 +46,7 @@ func activeMetadataManager(t *testing.T, target TargetIdentity, deliveryType Del
 }
 
 func TestMetadataSinkDeliversAuthorizedHTTPWithoutHeaders(t *testing.T) {
-	m, task := activeMetadataManager(t, TargetIdentity{Type: TargetTypeIPv4Address, Value: "192.0.2.10"}, DeliveryX2Only)
+	m, task := activeMetadataManager(t, TargetIdentity{Type: TargetTypeNAI, Value: "example.test"}, DeliveryX2Only)
 	sender := &metadataTestSender{}
 	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Profile: InternetMetadataProfile, Manager: m, Sender: sender, NFID: "processor-a"})
 	require.NoError(t, err)
@@ -61,7 +61,7 @@ func TestMetadataSinkDeliversAuthorizedHTTPWithoutHeaders(t *testing.T) {
 	require.NoError(t, pdu.UnmarshalBinary(sender.data))
 	assert.Equal(t, x2x3.PDUTypeX2, pdu.Header.Type)
 	assert.Equal(t, x2x3.PayloadFormatProprietary, pdu.Header.PayloadFormat)
-	assert.Equal(t, x2x3.PayloadDirectionFromTarget, pdu.Header.PayloadDirection)
+	assert.Equal(t, x2x3.PayloadDirectionUnknown, pdu.Header.PayloadDirection)
 	var payload struct {
 		Profile  string      `json:"profile"`
 		Kind     events.Kind `json:"kind"`
@@ -79,7 +79,7 @@ func TestMetadataSinkDeliversAuthorizedHTTPWithoutHeaders(t *testing.T) {
 }
 
 func TestMetadataSinkRequiresX2TaskAndTargetMatch(t *testing.T) {
-	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeIPv4Address, Value: "203.0.113.9"}, DeliveryX3Only)
+	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeNAI, Value: "nomatch.example"}, DeliveryX3Only)
 	sender := &metadataTestSender{}
 	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Manager: m, Sender: sender})
 	require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestMetadataSinkRequiresX2TaskAndTargetMatch(t *testing.T) {
 }
 
 func TestMetadataSinkRejectsContentAndGatesFileMetadata(t *testing.T) {
-	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeIPv4Address, Value: "192.0.2.10"}, DeliveryX2Only)
+	m, _ := activeMetadataManager(t, TargetIdentity{Type: TargetTypeNAI, Value: "example.test"}, DeliveryX2Only)
 	sender := &metadataTestSender{}
 	sink, err := NewMetadataSink(MetadataSinkConfig{Enabled: true, Manager: m, Sender: sender})
 	require.NoError(t, err)

@@ -77,15 +77,15 @@ func StartTLSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function
-	processor := func(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
+	processor := func(packetChan <-chan capture.PacketInfo) {
 		processTLSPackets(packetChan)
 	}
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor, nil)
+		capture.RunOffline(devices, filter, processor)
 	} else {
-		capture.RunWithSignalHandler(devices, filter, processor, nil)
+		capture.RunWithSignalHandler(devices, filter, processor)
 	}
 
 	// Print statistics and cleanup

@@ -251,14 +251,14 @@ idle checks and deterministic tests.
 
 ### Tasks
 
-- [ ] Implement the engine over the existing bounded `capture.TCPAssembler`.
-- [ ] Make the concrete SIP stream factory shutdown reachable without a type
+- [x] Implement the engine over the existing bounded `capture.TCPAssembler`.
+- [x] Make the concrete SIP stream factory shutdown reachable without a type
       assertion.
-- [ ] Preserve configurable page limits and expose forced-release metrics.
-- [ ] Migrate, one commit each: tap VoIP, hunt VoIP, TUI bridge, capture sniffer,
+- [x] Preserve configurable page limits and expose forced-release metrics.
+- [x] Migrate: tap VoIP, hunt VoIP, TUI bridge, capture sniffer,
       email, HTTP, and the legacy VoIP loop.
-- [ ] Remove each open-coded flush loop after its consumer migrates.
-- [ ] Add race-tested lifecycle cases: concurrent assemble/flush, cancellation,
+- [x] Remove each open-coded flush loop after its consumer migrates.
+- [x] Add race-tested lifecycle cases: concurrent assemble/flush, cancellation,
       close during input, repeated close, factory shutdown error, and offline
       timestamp aging.
 

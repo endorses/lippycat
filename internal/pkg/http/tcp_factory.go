@@ -66,7 +66,12 @@ func DefaultHTTPStreamFactoryConfig() HTTPStreamFactoryConfig {
 }
 
 // NewHTTPStreamFactory creates a new HTTP stream factory.
-func NewHTTPStreamFactory(ctx context.Context, handler HTTPMessageHandler, config HTTPStreamFactoryConfig) reassembly.StreamFactory {
+type HTTPStreamFactory interface {
+	reassembly.StreamFactory
+	Shutdown() error
+}
+
+func NewHTTPStreamFactory(ctx context.Context, handler HTTPMessageHandler, config HTTPStreamFactoryConfig) HTTPStreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 
 	if config.MaxGoroutines <= 0 {
@@ -185,8 +190,12 @@ func (f *httpStreamFactory) cleanupRoutine() {
 
 // Close shuts down the factory.
 func (f *httpStreamFactory) Close() {
+	_ = f.Shutdown()
+}
+
+func (f *httpStreamFactory) Shutdown() error {
 	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
-		return
+		return nil
 	}
 
 	f.cancel()
@@ -194,6 +203,7 @@ func (f *httpStreamFactory) Close() {
 	f.allWorkers.Wait()
 
 	logger.Info("HTTP stream factory closed")
+	return nil
 }
 
 // GetActiveGoroutines returns the current number of active goroutines.

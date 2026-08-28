@@ -155,6 +155,13 @@ func (a *TCPAssembler) Assemble(netFlow gopacket.Flow, tcp *layers.TCP, ts time.
 	a.asm.AssembleWithContext(netFlow, tcp, timestampContext{ci: gopacket.CaptureInfo{Timestamp: ts}})
 }
 
+// AssembleTCP implements the transitional packet-assembler contract used while
+// production composition roots migrate to pipeline.ReassemblyEngine.
+func (a *TCPAssembler) AssembleTCP(netFlow gopacket.Flow, tcp *layers.TCP, ts time.Time) error {
+	a.Assemble(netFlow, tcp, ts)
+	return nil
+}
+
 // FlushCloseOlderThan flushes buffered data and closes streams with no activity
 // since cutoff. Returns (flushed, closed) counts.
 //

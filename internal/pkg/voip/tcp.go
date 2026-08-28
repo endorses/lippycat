@@ -25,8 +25,8 @@ import (
 
 // HandleTcpPackets is the main entry point for TCP packet processing
 // It processes TCP packets and feeds them to the assembler for VoIP analysis
-func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler *capture.TCPAssembler) {
-	handleTcpPackets(pkt, layer, assembler)
+func HandleTcpPackets(pkt capture.PacketInfo, layer *layers.TCP, assembler tcpPacketAssembler) {
+	handleTcpPackets(pkt, layer, assembler, false)
 }
 
 // Functions are exported directly from their respective files

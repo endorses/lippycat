@@ -55,12 +55,12 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		file, err := os.Open(path)
 		require.NoError(t, err)
 		var observed []types.PacketDisplay
-		capture.RunOfflineOrdered([]pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {
+		capture.RunOfflineOrdered([]pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(ch <-chan capture.PacketInfo) {
 			for info := range ch {
 				fileInfos = append(fileInfos, info)
 				observed = append(observed, convertPacket(info))
 			}
-		}, nil)
+		})
 		require.NoError(t, file.Close())
 		require.Len(t, observed, 1)
 		fileEvents = append(fileEvents, observed[0])

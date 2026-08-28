@@ -13,6 +13,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -34,7 +36,7 @@ var (
 	smtpFactory     reassembly.StreamFactory
 	imapFactory     reassembly.StreamFactory
 	pop3Factory     reassembly.StreamFactory
-	emailAssembler  *capture.TCPAssembler
+	emailAssembler  *pipeline.ReassemblyEngine
 	emailHandler    *cliEmailHandler
 	activeProtocol  string
 	activeSmtpPorts map[uint16]bool
@@ -231,12 +233,9 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function with TCP reassembly
-	processor := func(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
-		processEmailPackets(packetChan, asm)
-	}
-
 	// Create TCP assembler with multi-protocol factory
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	captureBody := viper.GetBool("email.capture_body")
 	maxBodySize := viper.GetInt("email.max_body_size")
 
@@ -248,13 +247,29 @@ func StartEmailSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		IMAPPorts:   activeImapPorts,
 		POP3Ports:   activePop3Ports,
 	})
-	emailAssembler = capture.NewTCPAssembler(multiFactory)
+	emailAssembler = pipeline.NewReassemblyEngine(multiFactory, pipeline.DefaultReassemblyConfig())
+	defer func() {
+		if err := emailAssembler.Close(); err != nil {
+			logger.Error("Failed to close email reassembly engine", "error", err)
+		}
+	}()
+	go func() {
+		if err := emailAssembler.Run(ctx); err != nil {
+			logger.Error("Email reassembly engine stopped", "error", err)
+		}
+	}()
+	processor := func(packetChan <-chan capture.PacketInfo) {
+		processEmailPackets(packetChan, emailAssembler, isOffline)
+	}
 
 	// Run capture with appropriate mode
 	if isOffline {
-		capture.RunOffline(devices, filter, processor, emailAssembler)
+		capture.RunOffline(devices, filter, processor)
 	} else {
-		capture.RunWithSignalHandler(devices, filter, processor, emailAssembler)
+		capture.RunWithSignalHandler(devices, filter, processor)
+	}
+	if err := emailAssembler.Close(); err != nil {
+		logger.Error("Failed to close email reassembly engine", "error", err)
 	}
 
 	// Print statistics and cleanup
@@ -315,7 +330,7 @@ func initializePortMaps() {
 }
 
 // processEmailPackets processes packets from the channel.
-func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
+func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.ReassemblyEngine, offline bool) {
 	for pktInfo := range packetChan {
 		packet := pktInfo.Packet
 
@@ -325,8 +340,7 @@ func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPA
 			continue
 		}
 
-		tcp, ok := tcpLayer.(*layers.TCP)
-		if !ok {
+		if _, ok := tcpLayer.(*layers.TCP); !ok {
 			continue
 		}
 
@@ -338,7 +352,13 @@ func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPA
 
 		// Feed to assembler
 		if asm != nil {
-			asm.Assemble(netLayer.NetworkFlow(), tcp, packet.Metadata().Timestamp)
+			kind := pipeline.SourceLiveCapture
+			if offline {
+				kind = pipeline.SourcePCAPReplay
+			}
+			if err := asm.Assemble(captureadapter.FromPacketInfo(pktInfo, kind)); err != nil {
+				logger.Error("Failed to assemble email TCP packet", "error", err)
+			}
 		}
 
 		// Write to PCAP if configured
@@ -355,10 +375,6 @@ func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *capture.TCPA
 		}
 	}
 
-	// Flush assembler on channel close
-	if asm != nil {
-		asm.FlushAll()
-	}
 }
 
 // cleanup releases resources.

@@ -65,7 +65,7 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			var packetsInPending int64
 
 			// Create processor that uses the bridge (like TUI does)
-			processor := func(ch <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
+			processor := func(ch <-chan capture.PacketInfo) {
 				// Run bridge (this is what TUI's startFileSnifferOrdered does)
 				StartPacketBridge(ch, nil, pauseSignal) // nil program is ok, we don't use it
 
@@ -76,7 +76,7 @@ func TestBridgeOfflinePacketCounting(t *testing.T) {
 			}
 
 			// Run offline ordered capture
-			capture.RunOfflineOrdered(devices, "", processor, nil)
+			capture.RunOfflineOrdered(devices, "", processor)
 
 			// Allow time for consumer to finish
 			time.Sleep(100 * time.Millisecond)
@@ -149,11 +149,11 @@ func TestBridgeOfflineConsistency(t *testing.T) {
 
 		pauseSignal := NewPauseSignal()
 
-		processor := func(ch <-chan capture.PacketInfo, asm *capture.TCPAssembler) {
+		processor := func(ch <-chan capture.PacketInfo) {
 			StartPacketBridge(ch, nil, pauseSignal)
 		}
 
-		capture.RunOfflineOrdered(devices, "", processor, nil)
+		capture.RunOfflineOrdered(devices, "", processor)
 
 		// Wait for everything to settle
 		time.Sleep(50 * time.Millisecond)

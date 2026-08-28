@@ -28,7 +28,12 @@ type sipStreamFactory struct {
 	handler                SIPMessageHandler // handler for processing complete SIP messages
 }
 
-func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) reassembly.StreamFactory {
+type SIPStreamFactory interface {
+	reassembly.StreamFactory
+	Shutdown() error
+}
+
+func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) SIPStreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
 	config := GetConfig()
 
@@ -60,10 +65,10 @@ func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) reassem
 }
 
 // Shutdown gracefully shuts down the stream factory and waits for all goroutines to complete
-func (f *sipStreamFactory) Shutdown() {
+func (f *sipStreamFactory) Shutdown() error {
 	// Mark as closed
 	if !atomic.CompareAndSwapInt32(&f.closed, 0, 1) {
-		return // Already closed
+		return nil // Already closed
 	}
 
 	// Cancel context to signal goroutines to stop
@@ -76,6 +81,7 @@ func (f *sipStreamFactory) Shutdown() {
 
 	// Wait for all background goroutines to complete
 	f.allWorkers.Wait()
+	return nil
 }
 
 // applyPerformanceModeOptimizations adjusts configuration based on performance mode

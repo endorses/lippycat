@@ -160,11 +160,11 @@ func runFile(cmd *cobra.Command, args []string) {
 // which is essential for proper call tracking and RTP-to-CallID mapping.
 func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
 	pauseSignal := tui.GetGlobalPauseSignal()
-	processor := func(ch <-chan capture.PacketInfo, assembler *capture.TCPAssembler) {
+	processor := func(ch <-chan capture.PacketInfo) {
 		tui.StartPacketBridge(ch, program, pauseSignal)
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
-	capture.RunOfflineOrdered(devices, filter, processor, nil)
+	capture.RunOfflineOrdered(devices, filter, processor)
 }
 
 func init() {

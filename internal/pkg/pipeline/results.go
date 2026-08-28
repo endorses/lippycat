@@ -9,15 +9,18 @@ type DomainResult interface {
 }
 
 type SIPResult struct {
-	Timestamp                         time.Time
-	CallID, Method, CSeqMethod        string
-	ResponseCode                      int
-	From, To, SourceIP, DestinationIP string
-	SourcePort, DestinationPort       uint16
-	SDP                               []byte
-	Packet                            *PacketEnvelope
-	MatchedFilterIDs                  []string
-	Lifecycle                         []CallLifecycleObservation
+	Timestamp                      time.Time
+	CallID, Method, CSeqMethod     string
+	ResponseCode                   int
+	From, To, FromUser, ToUser     string
+	FromURI, ToURI, FromTag, ToTag string
+	PAssertedIdentity, ContentType string
+	SourceIP, DestinationIP        string
+	SourcePort, DestinationPort    uint16
+	SDP                            []byte
+	Packet                         *PacketEnvelope
+	MatchedFilterIDs               []string
+	Lifecycle                      []CallLifecycleObservation
 }
 
 func (r SIPResult) CapturedAt() time.Time { return r.Timestamp }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -1726,18 +1727,9 @@ func mightBeSIP(payload []byte) bool {
 		return false
 	}
 
-	// SIP is a text protocol. Every SIP message starts with a method name or "SIP/2.0".
-	for _, prefix := range [][]byte{
-		[]byte("SIP/2.0"), []byte("INVITE "), []byte("BYE "), []byte("ACK "),
-		[]byte("REGISTER"), []byte("OPTIONS "), []byte("SUBSCRIBE"),
-		[]byte("NOTIFY "), []byte("CANCEL "), []byte("PRACK "),
-		[]byte("INFO "), []byte("REFER "), []byte("MESSAGE "),
-		[]byte("UPDATE "), []byte("PUBLISH "),
-	} {
-		if bytes.HasPrefix(payload, prefix) {
-			return true
-		}
+	line := payload
+	if nl := bytes.IndexByte(line, '\n'); nl >= 0 {
+		line = line[:nl]
 	}
-
-	return false
+	return sharedsip.IsStartLine(string(line))
 }

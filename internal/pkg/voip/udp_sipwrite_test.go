@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -159,7 +160,7 @@ func sipMsg(startLine, callID, extra, body string) string {
 	if body != "" {
 		msg += "Content-Type: application/sdp\r\n"
 	}
-	return msg + "Content-Length: 0\r\n\r\n" + body
+	return msg + "Content-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body
 }
 
 const testSDP = "v=0\r\no=alice 1 1 IN IP4 192.168.1.1\r\ns=-\r\n" +

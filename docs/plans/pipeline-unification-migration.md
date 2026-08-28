@@ -280,17 +280,17 @@ unifying call policy or delivery.
 
 ### Tasks
 
-- [ ] Define one SIP request-method table and use it in UDP detection, TCP stream
+- [x] Define one SIP request-method table and use it in UDP detection, TCP stream
       framing, and request-line validation.
-- [ ] Define one RFC-correct compact-header map at package scope.
-- [ ] Extract a pure parser that accepts bytes and returns a domain `SIPEvent`.
-- [ ] Centralize identity, tag, CSeq, response, and SDP extraction.
-- [ ] Preserve per-message TCP semantics and capture timestamps.
-- [ ] Use the parser from tap and hunt first, then sniff and the processor VoIP
+- [x] Define one RFC-correct compact-header map at package scope.
+- [x] Extract a pure parser that accepts bytes and returns a domain `SIPEvent`.
+- [x] Centralize identity, tag, CSeq, response, and SDP extraction.
+- [x] Preserve per-message TCP semantics and capture timestamps.
+- [x] Use the parser from tap and hunt first, then sniff and the processor VoIP
       analyzer.
-- [ ] Add corpus tests for compact headers, pipelined messages, fragmented TCP,
+- [x] Add corpus tests for compact headers, pipelined messages, fragmented TCP,
       malformed lengths, PUBLISH, provisional/final responses, and SDP.
-- [ ] During transition, compare normalized results from old and new parsing on
+- [x] During transition, compare normalized results from old and new parsing on
       the reference captures.
 
 ### Exit Criteria

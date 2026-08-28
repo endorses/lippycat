@@ -8,6 +8,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/detector/signatures"
 	"github.com/endorses/lippycat/internal/pkg/simd"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -27,11 +28,8 @@ type SIPSignature struct {
 
 // NewSIPSignature creates a new SIP signature detector
 func NewSIPSignature() *SIPSignature {
-	methods := []string{
-		"INVITE", "ACK", "BYE", "CANCEL", "REGISTER", "OPTIONS",
-		"PRACK", "SUBSCRIBE", "NOTIFY", "PUBLISH", "INFO", "REFER",
-		"MESSAGE", "UPDATE", "SIP/2.0",
-	}
+	methods := append([]string(nil), sharedsip.RequestMethods[:]...)
+	methods = append(methods, "SIP/2.0")
 
 	// Pre-convert methods to byte slices for SIMD matching
 	methodsBytes := make([][]byte, len(methods))
@@ -234,79 +232,35 @@ func hasDSCPEF(pkt gopacket.Packet) bool {
 // extractMetadata extracts SIP-specific metadata from the payload
 func (s *SIPSignature) extractMetadata(payload string) map[string]interface{} {
 	metadata := make(map[string]interface{})
-
-	lines := splitLines(payload)
-	if len(lines) == 0 {
+	event, err := sharedsip.Parse([]byte(payload), sharedsip.ParseOptions{})
+	if err != nil {
 		return metadata
 	}
-
-	// First line is the request/status line
-	firstLine := lines[0]
-	metadata["first_line"] = firstLine
-
-	// Determine if request or response
-	if strings.HasPrefix(firstLine, "SIP/2.0") {
+	metadata["first_line"] = event.StartLine
+	if event.Method == "RESPONSE" {
 		metadata["type"] = "response"
-		// Extract status code
-		parts := strings.SplitN(firstLine, " ", 3)
-		if len(parts) >= 2 {
-			metadata["status_code"] = parts[1]
-		}
+		metadata["status_code"] = fmt.Sprint(event.ResponseCode)
+		parts := strings.SplitN(event.StartLine, " ", 3)
 		if len(parts) >= 3 {
 			metadata["reason"] = parts[2]
 		}
 	} else {
 		metadata["type"] = "request"
-		// Extract method
-		parts := strings.SplitN(firstLine, " ", 2)
-		if len(parts) >= 1 {
-			metadata["method"] = parts[0]
-		}
+		metadata["method"] = event.Method
 	}
-
-	// Parse headers
-	headers := make(map[string]string)
-	for i := 1; i < len(lines); i++ {
-		line := lines[i]
-		if line == "" {
-			break // End of headers
-		}
-
-		// Parse header
-		colonIdx := strings.Index(line, ":")
-		if colonIdx > 0 {
-			// SIP headers are case-insensitive (RFC 3261)
-			key := strings.ToLower(strings.TrimSpace(line[:colonIdx]))
-			value := strings.TrimSpace(line[colonIdx+1:])
-			headers[key] = value
-
-			// Extract important fields (all keys are now lowercase)
-			switch key {
-			case "from", "f":
-				metadata["from"] = value
-				metadata["from_user"] = extractUserFromURI(value)
-				metadata["from_tag"] = extractTagFromHeader(value)
-			case "to", "t":
-				metadata["to"] = value
-				metadata["to_user"] = extractUserFromURI(value)
-				metadata["to_tag"] = extractTagFromHeader(value)
-			case "call-id", "i":
-				metadata["call_id"] = value
-			case "cseq":
-				metadata["cseq"] = value
-			case "via", "v":
-				if _, ok := metadata["via"]; !ok {
-					metadata["via"] = value
-				}
-			case "contact", "m":
-				metadata["contact"] = value
-			case "user-agent":
-				metadata["user_agent"] = value
-			}
-		}
+	metadata["from"], metadata["from_user"], metadata["from_tag"] = event.From, event.FromUser, event.FromTag
+	metadata["to"], metadata["to_user"], metadata["to_tag"] = event.To, event.ToUser, event.ToTag
+	metadata["call_id"], metadata["cseq"] = event.CallID, event.Headers["cseq"]
+	if via := event.Headers["via"]; via != "" {
+		metadata["via"] = via
 	}
-
-	metadata["headers"] = headers
+	if contact := event.Headers["contact"]; contact != "" {
+		metadata["contact"] = contact
+	}
+	if ua := event.Headers["user-agent"]; ua != "" {
+		metadata["user_agent"] = ua
+	}
+	metadata["headers"] = event.Headers
 
 	return metadata
 }
@@ -390,26 +344,7 @@ func extractUserFromURI(uri string) string {
 }
 
 func extractTagFromHeader(header string) string {
-	// Extract tag parameter from SIP From/To header
-	// Example: "Alicent <sip:alicent@domain.com>;tag=abc123" -> "abc123"
-	tagStart := strings.Index(strings.ToLower(header), ";tag=")
-	if tagStart == -1 {
-		return ""
-	}
-
-	valueStart := tagStart + 5 // len(";tag=")
-	if valueStart >= len(header) {
-		return ""
-	}
-
-	// Find the end of the tag value
-	value := header[valueStart:]
-	for i, ch := range value {
-		if ch == ';' || ch == ' ' || ch == '\r' || ch == '\n' || ch == '>' {
-			return value[:i]
-		}
-	}
-	return value
+	return sharedsip.Tag(header)
 }
 
 // SDPInfo contains parsed SDP information for RTP correlation

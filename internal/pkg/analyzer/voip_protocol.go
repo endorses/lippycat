@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -70,13 +71,17 @@ func (v *VoIPProtocol) ProcessPacket(ctx context.Context, packet gopacket.Packet
 
 		// Common SIP ports: 5060 (UDP), 5061 (TLS)
 		if udp.SrcPort == 5060 || udp.DstPort == 5060 || udp.SrcPort == 5061 || udp.DstPort == 5061 {
-			// This is a simplified example - real implementation would parse SIP headers
-			// and delegate to existing voip package functionality
 			v.metrics.sipPackets.Add(1)
 
-			// Extract Call-ID from SIP message (simplified)
-			payload := string(udp.Payload)
-			callID := extractCallID(payload)
+			opts := sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp, SourcePort: uint16(udp.SrcPort), DestinationPort: uint16(udp.DstPort)}
+			if network := packet.NetworkLayer(); network != nil {
+				opts.SourceIP, opts.DestinationIP = network.NetworkFlow().Src().String(), network.NetworkFlow().Dst().String()
+			}
+			event, err := sharedsip.Parse(udp.Payload, opts)
+			if err != nil {
+				return nil, nil
+			}
+			callID := event.CallID
 
 			if callID != "" {
 				v.metrics.callsDetected.Add(1)
@@ -92,6 +97,8 @@ func (v *VoIPProtocol) ProcessPacket(ctx context.Context, packet gopacket.Packet
 				Metadata: map[string]interface{}{
 					"src_port": udp.SrcPort.String(),
 					"dst_port": udp.DstPort.String(),
+					"method":   event.Method,
+					"cseq":     event.CSeqMethod,
 				},
 			}, nil
 		}
@@ -120,12 +127,14 @@ func (v *VoIPProtocol) ProcessPacket(ctx context.Context, packet gopacket.Packet
 	return nil, nil
 }
 
-// extractCallID extracts Call-ID from SIP message (simplified)
+// extractCallID remains as a compatibility seam for analyzer callers while SIP
+// interpretation is owned by the shared parser.
 func extractCallID(payload string) string {
-	// This is a simplified implementation
-	// Real implementation should use proper SIP parsing from voip package
-	// TODO: Integrate with existing voip.ParseSIPHeaders()
-	return ""
+	event, err := sharedsip.Parse([]byte(payload), sharedsip.ParseOptions{})
+	if err != nil {
+		return ""
+	}
+	return event.CallID
 }
 
 // Initialize sets up the VoIP analyzer

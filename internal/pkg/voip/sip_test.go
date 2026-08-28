@@ -47,7 +47,7 @@ func TestDetectSipMethod(t *testing.T) {
 		{
 			name:     "SIP response",
 			sipData:  []byte("SIP/2.0 200 OK\r\nFrom: <sip:caller@example.com>\r\n"),
-			expected: "",
+			expected: "RESPONSE",
 		},
 		{
 			name:     "Invalid SIP",

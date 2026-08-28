@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -35,6 +36,10 @@ func NewLocalFileHandler() *LocalFileHandler {
 // on their own headers. Otherwise a target identified only by
 // P-Asserted-Identity on the INVITE would have the rest of its dialog dropped.
 func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
+	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Now())
+}
+
+func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
 	logger.Debug("TCP HandleSIPMessage called",
 		"call_id", SanitizeCallIDForLogging(callID),
 		"message_len", len(sipMessage),
@@ -49,7 +54,10 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 	// Take the capture timestamp before releasing the raw buffer: those are the
 	// segments that carried this message, so their time is the message's time.
 	// Falling back to wall-clock would stamp an offline PCAP replay with today.
-	ts := time.Now()
+	ts := capturedAt
+	if ts.IsZero() {
+		ts = time.Now()
+	}
 	if raw, ok := peekFirstTCPBufferedPacket(netFlow, transportFlow); ok && raw.Packet != nil {
 		if bufTS := raw.Packet.Metadata().Timestamp; !bufTS.IsZero() {
 			ts = bufTS
@@ -104,18 +112,22 @@ func (h *LocalFileHandler) HandleSIPMessage(sipMessage []byte, callID string, sr
 	// Remember the decision so the rest of this dialog is written even when an
 	// individual message carries no matchable identity.
 	if globalBufferMgr != nil && !alreadyMatched {
-		headers, body := parseSipHeaders(sipMessage)
+		event, err := sharedsip.Parse(sipMessage, sharedsip.ParseOptions{Timestamp: ts})
+		if err != nil {
+			discardTCPBufferedPackets(netFlow, transportFlow)
+			return false
+		}
 		globalBufferMgr.MarkCallMatched(callID, &CallMetadata{
 			CallID:            callID,
-			From:              headers["from"],
-			To:                headers["to"],
-			FromTag:           extractTagFromHeader(headers["from"]),
-			ToTag:             extractTagFromHeader(headers["to"]),
-			PAssertedIdentity: headers["p-asserted-identity"],
-			Method:            detectSipMethod(string(sipMessage)),
-			CSeqMethod:        extractCSeqMethod(headers["cseq"]),
-			ResponseCode:      extractSipResponseCode(sipMessage),
-			SDPBody:           body,
+			From:              event.From,
+			To:                event.To,
+			FromTag:           event.FromTag,
+			ToTag:             event.ToTag,
+			PAssertedIdentity: event.PAssertedIdentity,
+			Method:            event.Method,
+			CSeqMethod:        event.CSeqMethod,
+			ResponseCode:      uint32(event.ResponseCode),
+			SDPBody:           string(event.Body),
 		}, "", layers.LinkTypeEthernet)
 	}
 

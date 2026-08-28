@@ -6,6 +6,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -22,14 +23,22 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		return nil
 	}
 
-	// Check if payload looks like a SIP message
-	if !isSIPMessage(payload) {
+	opts := sharedsip.ParseOptions{Timestamp: packet.Metadata().Timestamp}
+	if net := packet.NetworkLayer(); net != nil {
+		opts.SourceIP, opts.DestinationIP = net.NetworkFlow().Src().String(), net.NetworkFlow().Dst().String()
+	}
+	if udp != nil {
+		opts.SourcePort, opts.DestinationPort = uint16(udp.SrcPort), uint16(udp.DstPort)
+	} else if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+		tcp := tcpLayer.(*layers.TCP)
+		opts.SourcePort, opts.DestinationPort = uint16(tcp.SrcPort), uint16(tcp.DstPort)
+	}
+	event, err := sharedsip.Parse(payload, opts)
+	if err != nil {
 		return nil
 	}
-
-	// Parse SIP headers
-	headers, body := parseSIPHeaders(payload)
-	callID := headers["call-id"]
+	headers, body := event.Headers, string(event.Body)
+	callID := event.CallID
 	if callID == "" {
 		return nil
 	}
@@ -77,7 +86,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	_ = p.getOrCreateCall(callID)
 
 	// Detect SIP method
-	method := detectSIPMethod(payload)
+	method := event.Method
 
 	// Extract Content-Type header
 	contentType := headers["content-type"]
@@ -87,12 +96,12 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		CallID:            callID,
 		From:              headers["from"],
 		To:                headers["to"],
-		FromTag:           extractTagFromHeader(headers["from"]),
-		ToTag:             extractTagFromHeader(headers["to"]),
+		FromTag:           event.FromTag,
+		ToTag:             event.ToTag,
 		PAssertedIdentity: headers["p-asserted-identity"],
 		Method:            method,
-		CSeqMethod:        extractCSeqMethod(headers["cseq"]),
-		ResponseCode:      extractSIPResponseCode(payload),
+		CSeqMethod:        event.CSeqMethod,
+		ResponseCode:      uint32(event.ResponseCode),
 		SDPBody:           body,
 		ContentType:       contentType,
 	}
@@ -132,12 +141,12 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 	pbMetadata := &data.PacketMetadata{
 		Sip: &data.SIPMetadata{
 			CallId:            callID,
-			FromUser:          extractUserFromSIPURI(metadata.From),
-			ToUser:            extractUserFromSIPURI(metadata.To),
+			FromUser:          event.FromUser,
+			ToUser:            event.ToUser,
 			FromTag:           metadata.FromTag,
 			ToTag:             metadata.ToTag,
-			FromUri:           extractFullSIPURI(metadata.From),
-			ToUri:             extractFullSIPURI(metadata.To),
+			FromUri:           event.FromURI,
+			ToUri:             event.ToURI,
 			Method:            metadata.Method,
 			CseqMethod:        metadata.CSeqMethod,
 			ResponseCode:      metadata.ResponseCode,
@@ -178,12 +187,6 @@ func isTerminalDialogResponse(metadata *CallMetadata) bool {
 
 // isSIPMessage checks if payload looks like a SIP message.
 func isSIPMessage(payload []byte) bool {
-	// SIP messages must have at least one line
-	if len(payload) < 10 {
-		return false
-	}
-
-	// Find first line
 	nlIdx := bytes.IndexByte(payload, '\n')
 	if nlIdx == -1 {
 		nlIdx = len(payload)
@@ -192,81 +195,15 @@ func isSIPMessage(payload []byte) bool {
 		nlIdx--
 	}
 
-	firstLine := payload[:nlIdx]
-
-	// SIP responses start with SIP/2.0
-	if bytes.HasPrefix(firstLine, []byte("SIP/2.0")) {
-		return true
-	}
-
-	// SIP requests must contain "SIP/2.0" somewhere
-	if !bytes.Contains(firstLine, []byte("SIP/2.0")) {
-		return false
-	}
-
-	// Check for valid SIP methods at the beginning
-	return bytes.HasPrefix(firstLine, []byte("INVITE ")) ||
-		bytes.HasPrefix(firstLine, []byte("BYE ")) ||
-		bytes.HasPrefix(firstLine, []byte("ACK ")) ||
-		bytes.HasPrefix(firstLine, []byte("OPTIONS ")) ||
-		bytes.HasPrefix(firstLine, []byte("REGISTER ")) ||
-		bytes.HasPrefix(firstLine, []byte("CANCEL ")) ||
-		bytes.HasPrefix(firstLine, []byte("PRACK ")) ||
-		bytes.HasPrefix(firstLine, []byte("SUBSCRIBE ")) ||
-		bytes.HasPrefix(firstLine, []byte("NOTIFY ")) ||
-		bytes.HasPrefix(firstLine, []byte("PUBLISH ")) ||
-		bytes.HasPrefix(firstLine, []byte("INFO ")) ||
-		bytes.HasPrefix(firstLine, []byte("REFER ")) ||
-		bytes.HasPrefix(firstLine, []byte("MESSAGE ")) ||
-		bytes.HasPrefix(firstLine, []byte("UPDATE "))
+	return sharedsip.IsStartLine(string(payload[:nlIdx]))
 }
 
 // parseSIPHeaders parses SIP headers from payload.
 func parseSIPHeaders(payload []byte) (map[string]string, string) {
-	// Limit input size for security
-	const maxSize = 65536
-	if len(payload) > maxSize {
-		payload = payload[:maxSize]
+	if event, err := sharedsip.Parse(payload, sharedsip.ParseOptions{}); err == nil {
+		return event.Headers, string(event.Body)
 	}
-
-	headers := make(map[string]string)
-	lines := bytes.Split(payload, []byte("\n"))
-
-	var bodyStart bool
-	var bodyBuilder strings.Builder
-	var isFirstLine = true
-	var headerCount int
-	const maxHeaders = 100
-
-	for _, line := range lines {
-		trimmed := bytes.TrimSpace(line)
-		if len(trimmed) == 0 {
-			bodyStart = true
-			continue
-		}
-		if !bodyStart {
-			// Skip the first line (SIP request/response line)
-			if isFirstLine {
-				isFirstLine = false
-				continue
-			}
-
-			if headerCount >= maxHeaders {
-				break
-			}
-
-			key, val := parseHeaderLine(trimmed)
-			if key != "" {
-				headers[key] = val
-				headerCount++
-			}
-		} else {
-			bodyBuilder.Write(trimmed)
-			bodyBuilder.WriteByte('\n')
-		}
-	}
-
-	return headers, bodyBuilder.String()
+	return map[string]string{}, ""
 }
 
 // parseHeaderLine parses a single header line.
@@ -290,68 +227,17 @@ func parseHeaderLine(line []byte) (string, string) {
 
 // normalizeHeaderName converts SIP compact header names to full form.
 func normalizeHeaderName(compact string) string {
-	switch compact {
-	case "i":
-		return "call-id"
-	case "f":
-		return "from"
-	case "t":
-		return "to"
-	case "v":
-		return "via"
-	case "c", "m":
-		return "contact"
-	case "l":
-		return "content-length"
-	case "x":
-		return "expires"
-	case "s":
-		return "subject"
-	case "k":
-		return "supported"
-	case "r":
-		return "refer-to"
-	case "b":
-		return "referred-by"
-	case "j":
-		return "reject-contact"
-	case "d":
-		return "request-disposition"
-	case "u":
-		return "allow-events"
-	case "o":
-		return "event"
-	case "a":
-		return "accept-contact"
-	case "n":
-		return "in-reply-to"
-	case "p":
-		return "p-access-network-info"
-	default:
-		return compact
+	if full, ok := sharedsip.CompactHeaders[compact]; ok {
+		return full
 	}
+	return compact
 }
 
 // detectSIPMethod extracts the SIP method from the first line.
 func detectSIPMethod(payload []byte) string {
-	// Find first line
-	nlIdx := bytes.IndexByte(payload, '\n')
-	if nlIdx == -1 {
-		nlIdx = len(payload)
+	if event, err := sharedsip.Parse(payload, sharedsip.ParseOptions{}); err == nil {
+		return event.Method
 	}
-	firstLine := string(bytes.TrimSpace(payload[:nlIdx]))
-
-	// SIP response
-	if strings.HasPrefix(firstLine, "SIP/2.0") {
-		return "RESPONSE"
-	}
-
-	// SIP request - extract method
-	spaceIdx := strings.Index(firstLine, " ")
-	if spaceIdx > 0 {
-		return firstLine[:spaceIdx]
-	}
-
 	return ""
 }
 
@@ -362,109 +248,30 @@ func detectSIPMethod(payload []byte) string {
 // which the status line does not carry — letting a call first observed via
 // a response still be classified.
 func extractCSeqMethod(cseq string) string {
-	fields := strings.Fields(cseq)
-	if len(fields) < 2 {
-		return ""
-	}
-	return strings.ToUpper(fields[1])
+	return sharedsip.CSeqMethod(cseq)
 }
 
 // extractSIPResponseCode extracts the response code from a SIP response.
 func extractSIPResponseCode(payload []byte) uint32 {
-	if len(payload) < 12 {
-		return 0
+	if event, err := sharedsip.Parse(payload, sharedsip.ParseOptions{}); err == nil {
+		return uint32(event.ResponseCode)
 	}
-
-	if !bytes.HasPrefix(payload, []byte("SIP/2.0 ")) {
-		return 0
-	}
-
-	codeStart := 8
-	if len(payload) < codeStart+3 {
-		return 0
-	}
-
-	code := uint32(0)
-	for i := 0; i < 3; i++ {
-		digit := payload[codeStart+i]
-		if digit < '0' || digit > '9' {
-			return 0
-		}
-		code = code*10 + uint32(digit-'0')
-	}
-
-	return code
+	return 0
 }
 
 // extractUserFromSIPURI extracts the username from a SIP URI.
 func extractUserFromSIPURI(uri string) string {
-	start := strings.Index(uri, "sip:")
-	if start == -1 {
-		start = strings.Index(uri, "sips:")
-		if start == -1 {
-			return ""
-		}
-		start += 5
-	} else {
-		start += 4
-	}
-
-	end := strings.Index(uri[start:], "@")
-	if end == -1 {
-		return ""
-	}
-
-	return uri[start : start+end]
+	return sharedsip.User(sharedsip.URI(uri))
 }
 
 // extractFullSIPURI extracts the full SIP URI from a header value.
 func extractFullSIPURI(header string) string {
-	start := strings.Index(header, "<")
-	if start != -1 {
-		end := strings.Index(header[start:], ">")
-		if end != -1 {
-			return header[start+1 : start+end]
-		}
-	}
-
-	sipStart := strings.Index(header, "sip:")
-	if sipStart == -1 {
-		sipStart = strings.Index(header, "sips:")
-		if sipStart == -1 {
-			return ""
-		}
-	}
-
-	uri := header[sipStart:]
-	for i, ch := range uri {
-		if ch == ' ' || ch == ';' || ch == '\r' || ch == '\n' || ch == '>' {
-			return uri[:i]
-		}
-	}
-
-	return uri
+	return sharedsip.URI(header)
 }
 
 // extractTagFromHeader extracts the tag parameter from a SIP header.
 func extractTagFromHeader(header string) string {
-	tagStart := strings.Index(strings.ToLower(header), ";tag=")
-	if tagStart == -1 {
-		return ""
-	}
-
-	valueStart := tagStart + 5
-	if valueStart >= len(header) {
-		return ""
-	}
-
-	value := header[valueStart:]
-	for i, ch := range value {
-		if ch == ';' || ch == ' ' || ch == '\r' || ch == '\n' || ch == '>' {
-			return value[:i]
-		}
-	}
-
-	return value
+	return sharedsip.Tag(header)
 }
 
 // validateCallID validates a Call-ID for security.

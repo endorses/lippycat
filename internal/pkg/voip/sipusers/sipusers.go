@@ -3,6 +3,8 @@ package sipusers
 import (
 	"strings"
 	"sync"
+
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/filtering"
@@ -134,28 +136,10 @@ func HasSurveiled() bool {
 // Example: "sip:robb@example.org" -> "robb"
 // Example: "+49123456789" (already extracted) -> "+49123456789"
 func extractUserFromSIPURI(uri string) string {
-	// Find "sip:" or "sips:" prefix
-	sipIdx := strings.Index(uri, "sip:")
-	if sipIdx == -1 {
-		sipIdx = strings.Index(uri, "sips:")
-		if sipIdx == -1 {
-			// No SIP URI found, the value might already be just the username
-			// This happens when the caller extracts headers differently
-			return uri
-		}
-		sipIdx += 5 // len("sips:")
-	} else {
-		sipIdx += 4 // len("sip:")
+	if parsed := sharedsip.URI(uri); parsed != "" {
+		return sharedsip.User(parsed)
 	}
-
-	// Find the @ symbol
-	remaining := uri[sipIdx:]
-	atIdx := strings.Index(remaining, "@")
-	if atIdx == -1 {
-		return ""
-	}
-
-	return remaining[:atIdx]
+	return uri
 }
 
 func IsSurveiled(sipHeader string) bool {

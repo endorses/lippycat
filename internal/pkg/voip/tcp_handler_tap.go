@@ -9,6 +9,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 )
 
@@ -71,16 +72,21 @@ func (h *TapTCPHandler) SetApplicationFilter(filter ApplicationFilter) {
 // is dispatched exactly once by the reassembler and forwarded as a single unit,
 // there is no whole-flow "drain-and-forget" and no double-forwarding.
 func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow) bool {
+	return h.HandleSIPMessageAt(sipMessage, callID, srcEndpoint, dstEndpoint, netFlow, transportFlow, time.Now())
+}
+
+func (h *TapTCPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, srcEndpoint, dstEndpoint string, netFlow, transportFlow gopacket.Flow, capturedAt time.Time) bool {
 	if callID == "" {
 		discardTCPBufferedPackets(netFlow, transportFlow)
 		return false
 	}
 
-	// Parse SIP headers
-	headers, body := parseSipHeaders(sipMessage)
-
-	// Detect SIP method
-	method := detectSipMethod(string(sipMessage))
+	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
+	if err != nil || event.CallID != callID {
+		discardTCPBufferedPackets(netFlow, transportFlow)
+		return false
+	}
+	headers, body, method := event.Headers, string(event.Body), event.Method
 
 	// Synthesize a packet carrying exactly this reassembled SIP message so that
 	// both filter matching and forwarding operate on THIS message rather than on
@@ -88,7 +94,7 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 	// real 5-tuple (IPs from netFlow, ports from the endpoint strings) so the
 	// downstream LI correlation (MatchPacketWithIDs) and delivery see correct
 	// addressing.
-	pkt, ok := buildSIPPacketInfo(sipMessage, srcEndpoint, dstEndpoint, netFlow, time.Now())
+	pkt, ok := buildSIPPacketInfo(sipMessage, srcEndpoint, dstEndpoint, netFlow, capturedAt)
 	if !ok {
 		logger.Warn("TCP SIP: failed to synthesize packet for message, dropping",
 			"call_id", SanitizeCallIDForLogging(callID),
@@ -118,15 +124,15 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 	pbMetadata := &data.PacketMetadata{
 		Sip: &data.SIPMetadata{
 			CallId:            callID,
-			FromUser:          extractUserFromSIPURI(headers["from"]),
-			ToUser:            extractUserFromSIPURI(headers["to"]),
-			FromTag:           extractTagFromHeader(headers["from"]),
-			ToTag:             extractTagFromHeader(headers["to"]),
-			FromUri:           extractFullSIPURI(headers["from"]),
-			ToUri:             extractFullSIPURI(headers["to"]),
+			FromUser:          event.FromUser,
+			ToUser:            event.ToUser,
+			FromTag:           event.FromTag,
+			ToTag:             event.ToTag,
+			FromUri:           event.FromURI,
+			ToUri:             event.ToURI,
 			Method:            method,
-			CseqMethod:        extractCSeqMethod(headers["cseq"]),
-			ResponseCode:      extractSipResponseCode(sipMessage),
+			CseqMethod:        event.CSeqMethod,
+			ResponseCode:      uint32(event.ResponseCode),
 			PAssertedIdentity: headers["p-asserted-identity"],
 		},
 	}
@@ -136,9 +142,8 @@ func (h *TapTCPHandler) HandleSIPMessage(sipMessage []byte, callID string, srcEn
 	if body != "" && h.sdpRegistrar != nil {
 		h.sdpRegistrar.RegisterSDP(callID, body)
 	}
-	if h.sdpRegistrar != nil && extractSipResponseCode(sipMessage) >= 200 {
-		cseqMethod := extractCSeqMethod(headers["cseq"])
-		if cseqMethod == "BYE" || cseqMethod == "CANCEL" {
+	if h.sdpRegistrar != nil && event.ResponseCode >= 200 {
+		if event.CSeqMethod == "BYE" || event.CSeqMethod == "CANCEL" {
 			h.sdpRegistrar.CompleteCall(callID)
 		}
 	}

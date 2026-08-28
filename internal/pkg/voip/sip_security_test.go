@@ -285,12 +285,12 @@ func TestDetectSipMethod_Comprehensive(t *testing.T) {
 		{
 			name:           "200 OK response",
 			startLine:      "SIP/2.0 200 OK",
-			expectedMethod: "",
+			expectedMethod: "RESPONSE",
 		},
 		{
 			name:           "404 Not Found response",
 			startLine:      "SIP/2.0 404 Not Found",
-			expectedMethod: "",
+			expectedMethod: "RESPONSE",
 		},
 		{
 			name:           "REGISTER method",
@@ -310,7 +310,7 @@ func TestDetectSipMethod_Comprehensive(t *testing.T) {
 		{
 			name:           "INVITE with extra spaces",
 			startLine:      "  INVITE sip:user@example.com SIP/2.0  ",
-			expectedMethod: "", // strings.HasPrefix is strict
+			expectedMethod: "INVITE",
 		},
 		{
 			name:           "Case sensitivity test",

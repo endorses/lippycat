@@ -48,9 +48,10 @@ type DNSProcessor interface {
 	Stop()
 }
 
-// PacketBatch contains a batch of packets from a source.
-// This is the internal representation used by the processor, distinct from
-// the protobuf data.PacketBatch which is used for gRPC transport.
+// PacketBatch contains a batch of packets from a source. Envelopes is the
+// authoritative, transport-neutral representation. Packets is a temporary
+// compatibility view for processor stages that have not yet migrated away
+// from generated protocol types.
 type PacketBatch struct {
 	// SourceID identifies where this batch came from.
 	// For hunters, this is the hunter ID.
@@ -220,6 +221,48 @@ func FromProtoBatchE(pb *data.PacketBatch) (*PacketBatch, error) {
 	}, nil
 }
 
+// SyncEnvelopesFromPackets copies changes made by legacy protobuf-based stages
+// into the authoritative envelopes without discarding envelope provenance.
+// Remove this compatibility bridge once all processor stages consume domain
+// results directly.
+func (b *PacketBatch) SyncEnvelopesFromPackets() error {
+	if b == nil {
+		return nil
+	}
+	if len(b.Envelopes) != 0 && len(b.Envelopes) != len(b.Packets) {
+		return fmt.Errorf("sync packet batch: envelope count %d differs from packet count %d", len(b.Envelopes), len(b.Packets))
+	}
+	if len(b.Envelopes) == 0 {
+		b.Envelopes = make([]*pipeline.PacketEnvelope, len(b.Packets))
+	}
+	for i, packet := range b.Packets {
+		sourceProvenance := pipeline.SourceProvenance{
+			Kind:           pipeline.SourceLiveCapture,
+			NodeID:         b.SourceID,
+			BatchSequence:  b.Sequence,
+			BatchTimestamp: time.Unix(0, b.TimestampNs),
+		}
+		current := b.Envelopes[i]
+		if current != nil {
+			sourceProvenance = current.Source
+		}
+		normalized, err := grpcadapter.FromCapturedPacket(packet, sourceProvenance)
+		if err != nil {
+			return fmt.Errorf("sync packet %d: %w", i, err)
+		}
+		if current == nil {
+			b.Envelopes[i] = normalized
+			continue
+		}
+		// Metadata and TLS keys are the fields currently enriched by legacy
+		// processor stages. All other envelope fields remain authoritative.
+		current.Metadata = normalized.Metadata
+		current.TLSKeys = normalized.TLSKeys
+		current.Stages = pipeline.StageProvenance(uint32(current.Stages) | uint32(normalized.Stages))
+	}
+	return nil
+}
+
 // ToProtoBatch converts the internal PacketBatch to a protobuf PacketBatch.
 func (b *PacketBatch) ToProtoBatch() *data.PacketBatch {
 	pb, err := b.ToProtoBatchE()
@@ -235,14 +278,13 @@ func (b *PacketBatch) ToProtoBatchE() (*data.PacketBatch, error) {
 		return nil, nil
 	}
 	if b.Envelopes != nil {
-		// Unmigrated processor stages still enrich Packets directly. Normalize
-		// their current values here so those enrichments survive forwarding.
-		normalized, err := grpcadapter.FromPacketBatch(&data.PacketBatch{
-			HunterId: b.SourceID, Sequence: b.Sequence, TimestampNs: b.TimestampNs,
-			Packets: b.Packets, Stats: b.Stats,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("normalize processed packet batch: %w", err)
+		normalized := &pipeline.PacketBatch{
+			Source: pipeline.SourceProvenance{NodeID: b.SourceID}, Sequence: b.Sequence,
+			CreatedAt: time.Unix(0, b.TimestampNs), Packets: b.Envelopes,
+		}
+		if b.Stats != nil {
+			normalized.HasStats = true
+			normalized.Stats = pipeline.BatchStats{TotalCaptured: b.Stats.TotalCaptured, FilteredMatched: b.Stats.FilteredMatched, Dropped: b.Stats.Dropped, BufferUsage: b.Stats.BufferUsage}
 		}
 		pb, err := grpcadapter.ToPacketBatch(normalized)
 		if err != nil {

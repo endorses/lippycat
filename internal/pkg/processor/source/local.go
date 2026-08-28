@@ -725,6 +725,14 @@ func (s *LocalSource) sendBatch() {
 	// Reset batch
 	s.currentBatch = make([]*data.CapturedPacket, 0, s.config.BatchSize)
 	s.batchMu.Unlock()
+	if err := batch.SyncEnvelopesFromPackets(); err != nil {
+		s.stats.AddDropped(uint64(len(batch.Packets)))
+		logger.Error("Failed to normalize local packet batch",
+			"sequence", batch.Sequence,
+			"packets", len(batch.Packets),
+			"error", err)
+		return
+	}
 
 	s.stats.AddBatch()
 

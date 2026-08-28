@@ -266,6 +266,13 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	}
 
 	// Convert to protobuf batch for upstream forwarding and subscriber broadcast
+	// Legacy processor stages above still mutate the compatibility protobuf view.
+	// Merge those changes at this explicit boundary; egress then reads only the
+	// normalized envelopes.
+	if err := batch.SyncEnvelopesFromPackets(); err != nil {
+		logger.Error("Failed to normalize processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
+		return
+	}
 	protoBatch, err := batch.ToProtoBatchE()
 	if err != nil {
 		logger.Error("Failed to encode processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)

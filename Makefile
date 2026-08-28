@@ -167,9 +167,11 @@ pgo-prepare: $(PROFILE_DATA)
 	cp $(PROFILE_DATA) $(PGO_PROFILE)
 	@echo "PGO profile ready. Run 'make build-pgo' to build with optimizations."
 
-# Run tests
+# Required test entry point. Untagged `go test ./...` does not compile the
+# command partitions selected by the all tag or the dedicated LI implementation.
 test:
 	$(GO) test -tags all ./...
+	$(GO) test -tags li ./internal/pkg/li/...
 
 # Run tests with verbose output
 test-verbose:

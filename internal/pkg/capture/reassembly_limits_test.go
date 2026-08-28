@@ -89,3 +89,17 @@ func TestTCPAssemblerHasFiniteBufferedPageLimits(t *testing.T) {
 		t.Fatalf("custom limits = (%d, %d), want (7, 23)", perConnection, total)
 	}
 }
+
+// BenchmarkTCPAssemblerBoundedReassembly is the allocation baseline for the
+// migration. Each iteration owns and drains its assembler so retained stream
+// state is included in the measurement.
+func BenchmarkTCPAssemblerBoundedReassembly(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		a := NewTCPAssemblerWithLimits(discardReassemblyFactory{}, 3, 100)
+		assembleLimitTestTCP(a, 1000, true, 1)
+		assembleLimitTestTCP(a, 1003, false, 3)
+		assembleLimitTestTCP(a, 1005, false, 5)
+		a.FlushAll()
+	}
+}

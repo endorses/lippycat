@@ -1,0 +1,22 @@
+{
+  "source_pcap": "sip-call.pcap",
+  "call_id": "baseline-call",
+  "packet_count": 2,
+  "link_type": "Ethernet",
+  "packets": [
+    {
+      "timestamp": "2026-08-27T12:00:04.000005Z",
+      "five_tuple": {"src_ip":"192.0.2.10","src_port":5060,"dst_ip":"198.51.100.50","dst_port":5060,"transport":"UDP"},
+      "sip": {"call_id":"baseline-call","method":"INVITE","cseq_method":"INVITE","response_code":0},
+      "payload_sha256": "dac21628bd2dd1f9a0c995ec4781ecee9cd3cd000e1652405f1daf6456c8ebd0",
+      "call_association": "baseline-call"
+    },
+    {
+      "timestamp": "2026-08-27T12:00:05.000006Z",
+      "five_tuple": {"src_ip":"198.51.100.50","src_port":10000,"dst_ip":"192.0.2.10","dst_port":20000,"transport":"UDP"},
+      "sip": null,
+      "payload_sha256": "db57c8ff7d7be2ac492da3472fd32a94d30b1fb58cff6255c2dc816e3501c525",
+      "call_association": "baseline-call"
+    }
+  ]
+}

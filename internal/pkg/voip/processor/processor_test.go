@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -45,6 +46,38 @@ func TestRegisterSDPAssociationLifecycle(t *testing.T) {
 	defer p.mu.RUnlock()
 	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
 		t.Fatalf("Close retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	}
+}
+
+func TestCallAssociationCleanupBaseline(t *testing.T) {
+	p := New(Config{MaxCalls: 128, CallTimeout: time.Hour})
+	for i := 0; i < 100; i++ {
+		callID := fmt.Sprintf("baseline-%d", i)
+		p.RegisterSDP(callID, fmt.Sprintf("v=0\r\nc=IN IP4 192.0.2.%d\r\nm=audio %d RTP/AVP 0\r\n", i%250+1, 10000+i))
+		p.CleanupCallPorts(callID)
+	}
+	p.mu.RLock()
+	retainedMappings := len(p.portToCallID)
+	p.mu.RUnlock()
+	if retainedMappings != 0 {
+		t.Fatalf("cleanup baseline retained mappings=%d", retainedMappings)
+	}
+	p.Close()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
+		t.Fatalf("close baseline retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	}
+}
+
+func BenchmarkCallAssociationLifecycle(b *testing.B) {
+	p := New(Config{MaxCalls: 1, CallTimeout: time.Hour})
+	b.Cleanup(p.Close)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		callID := fmt.Sprintf("benchmark-%d", i)
+		p.RegisterSDP(callID, "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 10000 RTP/AVP 0\r\n")
+		p.CleanupCallPorts(callID)
 	}
 }
 

@@ -25,8 +25,10 @@ func lifetimeTestPacket() gopacket.Packet {
 
 func TestRTPWriteRaceWithCompletionClose(t *testing.T) {
 	callID := "rtp-completion-race"
-	call := createCallWithRTPWriter(t, callID)
+	call := createCallWithRTPOutput(t, callID)
 	tracker := TestCallTracker(t)
+	tracker.output = call.tracker.output
+	call.tracker = tracker
 	tracker.shuttingDown.Store(0)
 	tracker.mu.Lock()
 	tracker.callMap[callID] = call
@@ -64,7 +66,9 @@ func TestSIPWriteRaceWithLRUEviction(t *testing.T) {
 
 	tracker := NewCallTrackerWithCapacity(1)
 	t.Cleanup(tracker.Shutdown)
-	call := createCallWithSIPWriter(t, "sip-lru-race")
+	call := createCallWithSIPOutput(t, "sip-lru-race")
+	tracker.output = call.tracker.output
+	call.tracker = tracker
 	tracker.mu.Lock()
 	tracker.callMap[call.CallID] = call
 	tracker.lruIndex[call.CallID] = tracker.lruList.PushFront(call.CallID)
@@ -95,7 +99,9 @@ func TestAsyncWriteRaceWithClose(t *testing.T) {
 	tracker := TestCallTracker(t)
 	tracker.shuttingDown.Store(0)
 	callID := "async-close-race"
-	call := createCallWithSIPWriter(t, callID)
+	call := createCallWithSIPOutput(t, callID)
+	tracker.output = call.tracker.output
+	call.tracker = tracker
 	tracker.mu.Lock()
 	tracker.callMap[callID] = call
 	tracker.mu.Unlock()

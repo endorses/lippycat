@@ -509,6 +509,20 @@ func (t *CallTracker) GetTrackedCallCount() int {
 	return t.lruList.Len()
 }
 
+// IsCallActive reports whether the tracker currently owns state for callID.
+// The TCP reassembler uses this query to retain idle streams belonging to a
+// known SIP dialog without reaching into package-global VoIP state.
+func (t *CallTracker) IsCallActive(callID string) bool {
+	if callID == "" {
+		return false
+	}
+
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	_, active := t.lruIndex[callID]
+	return active
+}
+
 // Clear removes all tracked mappings
 func (t *CallTracker) Clear() {
 	t.mu.Lock()

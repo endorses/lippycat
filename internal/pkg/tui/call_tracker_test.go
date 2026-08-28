@@ -10,6 +10,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCallTracker_IsCallActive(t *testing.T) {
+	tracker := NewCallTrackerWithCapacity(1)
+
+	assert.False(t, tracker.IsCallActive(""))
+	assert.False(t, tracker.IsCallActive("missing"))
+
+	tracker.RegisterMediaPorts("call-1", "10.0.0.1", []uint16{10000}, false)
+	assert.True(t, tracker.IsCallActive("call-1"))
+
+	tracker.RegisterMediaPorts("call-2", "10.0.0.2", []uint16{20000}, false)
+	assert.False(t, tracker.IsCallActive("call-1"), "evicted calls must not keep TCP streams active")
+	assert.True(t, tracker.IsCallActive("call-2"))
+
+	tracker.Clear()
+	assert.False(t, tracker.IsCallActive("call-2"))
+}
+
 func TestCallTracker_GetCallIDForRTPPacket_DirectMatch(t *testing.T) {
 	tracker := NewCallTrackerWithCapacity(100)
 

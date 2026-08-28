@@ -231,14 +231,7 @@ func (cip *CallInfoPool) Put(ci *CallInfo) {
 	ci.LastUpdated = time.Time{}
 	ci.EndTime = nil
 	ci.LinkType = 0
-	ci.sipWriterMu.Lock()
-	ci.SIPWriter = nil
-	ci.sipFile = nil
-	ci.sipWriterMu.Unlock()
-	ci.rtpWriterMu.Lock()
-	ci.RTPWriter = nil
-	ci.rtpFile = nil
-	ci.rtpWriterMu.Unlock()
+	ci.tracker = nil
 
 	cip.pool.Put(ci)
 	cip.updateCurrentSize(-1)

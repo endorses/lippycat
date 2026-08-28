@@ -89,58 +89,6 @@ func (pc *PaddedCounter) Reset() {
 	pc.count.Store(0)
 }
 
-// PerCPUCounter provides per-CPU counters to eliminate contention
-type PerCPUCounter struct {
-	counters []PaddedCounter
-	numCPUs  int
-}
-
-// NewPerCPUCounter creates a new per-CPU counter
-func NewPerCPUCounter(numCPUs int) *PerCPUCounter {
-	return &PerCPUCounter{
-		counters: make([]PaddedCounter, numCPUs),
-		numCPUs:  numCPUs,
-	}
-}
-
-// Inc increments the counter for the current CPU
-func (pcc *PerCPUCounter) Inc(cpuID int) {
-	if cpuID >= 0 && cpuID < pcc.numCPUs {
-		pcc.counters[cpuID].Inc()
-	}
-}
-
-// Add adds a value for the current CPU
-func (pcc *PerCPUCounter) Add(cpuID int, n uint64) {
-	if cpuID >= 0 && cpuID < pcc.numCPUs {
-		pcc.counters[cpuID].Add(n)
-	}
-}
-
-// Sum returns the total across all CPUs
-func (pcc *PerCPUCounter) Sum() uint64 {
-	var total uint64
-	for i := range pcc.numCPUs {
-		total += pcc.counters[i].Get()
-	}
-	return total
-}
-
-// GetCPU returns the counter for a specific CPU
-func (pcc *PerCPUCounter) GetCPU(cpuID int) uint64 {
-	if cpuID >= 0 && cpuID < pcc.numCPUs {
-		return pcc.counters[cpuID].Get()
-	}
-	return 0
-}
-
-// Reset resets all CPU counters
-func (pcc *PerCPUCounter) Reset() {
-	for i := range pcc.numCPUs {
-		pcc.counters[i].Reset()
-	}
-}
-
 // AlignedAlloc allocates memory aligned to cache line boundaries
 func AlignedAlloc(size int) []byte {
 	// Allocate extra space for alignment

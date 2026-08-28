@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -77,8 +76,7 @@ func newSIPWriteHarness(t *testing.T, callID string) *sipWriteHarness {
 	}
 }
 
-// resetVoipWriteState drops any tracker entry for callID and rearms the global
-// async writer pool, which CloseWriters stops permanently.
+// resetVoipWriteState drops any tracker entry for callID and rearms its writer.
 func resetVoipWriteState(tracker *CallTracker, callID string) {
 
 	// Another test in this package may have shut the global tracker down,
@@ -92,8 +90,7 @@ func resetVoipWriteState(tracker *CallTracker, callID string) {
 	}
 	tracker.mu.Unlock()
 
-	asyncWriterOnce = sync.Once{}
-	globalAsyncWriter = nil
+	tracker.closeAsyncWriter()
 }
 
 func (h *sipWriteHarness) feed(payload string) {
@@ -118,7 +115,8 @@ func (h *sipWriteHarness) feed(payload string) {
 func (h *sipWriteHarness) writtenStartLines() []string {
 	h.t.Helper()
 
-	CloseWriters()
+	h.tracker.closeAsyncWriter()
+	require.NoError(h.t, h.tracker.output.CloseSession(h.callID))
 	return sipStartLinesFromPcap(h.t, h.sipPath)
 }
 
@@ -250,7 +248,8 @@ func TestUDPBufferedPath_UnmatchedCallNotWritten(t *testing.T) {
 	h.feed(sipMsg("SIP/2.0 100 Trying", callID, "", ""))
 	h.feed(sipMsg("BYE sip:bob@example.com SIP/2.0", callID, ";tag=2", ""))
 
-	CloseWriters()
+	h.tracker.closeAsyncWriter()
+	require.NoError(t, h.tracker.output.CloseSession(callID))
 	_, err := os.Stat(h.sipPath)
 	require.True(t, os.IsNotExist(err), "no PCAP should be created for an unmatched call, got err=%v", err)
 }

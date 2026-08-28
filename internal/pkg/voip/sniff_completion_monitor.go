@@ -7,25 +7,11 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
-// Package-level monitor for sniff mode PCAP completion
-var (
-	globalSniffCompletionMonitor *SniffCompletionMonitor
-	sniffMonitorMu               sync.RWMutex
-)
-
-// SetSniffCompletionMonitor sets the global sniff completion monitor.
-// Called by StartVoipSniffer when PCAP writing is enabled.
-func SetSniffCompletionMonitor(m *SniffCompletionMonitor) {
-	sniffMonitorMu.Lock()
-	defer sniffMonitorMu.Unlock()
-	globalSniffCompletionMonitor = m
-}
-
-// getSniffCompletionMonitor returns the global sniff completion monitor (may be nil).
-func getSniffCompletionMonitor() *SniffCompletionMonitor {
-	sniffMonitorMu.RLock()
-	defer sniffMonitorMu.RUnlock()
-	return globalSniffCompletionMonitor
+// SetCompletionMonitor binds lifecycle output handling to this tracker instance.
+func (ct *CallTracker) SetCompletionMonitor(m *SniffCompletionMonitor) {
+	ct.mu.Lock()
+	ct.completionMonitor = m
+	ct.mu.Unlock()
 }
 
 // SniffCompletionMonitorConfig configures the sniff completion monitor

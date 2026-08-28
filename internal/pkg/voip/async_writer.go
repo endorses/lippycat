@@ -21,14 +21,6 @@ type PacketWriteRequest struct {
 	ResultChan chan<- error // Optional channel to receive write result
 }
 
-// PacketType indicates whether this is SIP or RTP packet
-type PacketType int
-
-const (
-	PacketTypeSIP PacketType = iota
-	PacketTypeRTP
-)
-
 // AsyncWriterPool manages multiple worker goroutines for async PCAP writing
 type AsyncWriterPool struct {
 	tracker *CallTracker
@@ -312,26 +304,14 @@ func (p *AsyncWriterPool) worker(workerID int) {
 func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	tracker := p.tracker
 
-	// Check if shutting down
-	if tracker.shuttingDown.Load() == 1 {
-		logger.Debug("Skipping async write during shutdown",
-			"call_id", SanitizeCallIDForLogging(req.CallID))
-		return ErrShuttingDown
-	}
-
 	// Track active write
 	tracker.activeWrites.Add(1)
 	defer tracker.activeWrites.Done()
-
-	// Double-check shutdown after acquiring write slot
-	if tracker.shuttingDown.Load() == 1 {
-		logger.Debug("Skipping async write during shutdown",
-			"call_id", SanitizeCallIDForLogging(req.CallID))
-		return ErrShuttingDown
-	}
+	// Requests already admitted to the pool must drain during shutdown. The
+	// stopped flag prevents new admissions while these accepted writes finish.
 
 	tracker.mu.RLock()
-	call, exists := tracker.callMap[req.CallID]
+	_, exists := tracker.callMap[req.CallID]
 	tracker.mu.RUnlock()
 
 	if !exists {
@@ -351,9 +331,9 @@ func (p *AsyncWriterPool) processWriteRequest(req PacketWriteRequest) error {
 	var err error
 	switch req.PacketType {
 	case PacketTypeSIP:
-		err = call.writeSIP(req.Packet)
+		err = p.tracker.output.WritePacket(req.CallID, req.Packet, PacketTypeSIP)
 	case PacketTypeRTP:
-		err = call.writeRTP(req.Packet)
+		err = p.tracker.output.WritePacket(req.CallID, req.Packet, PacketTypeRTP)
 	default:
 		return ErrInvalidPacketType
 	}
@@ -400,22 +380,16 @@ func (p *AsyncWriterPool) SetErrorHandler(handler func(callID string, err error)
 	p.onError = handler
 }
 
-// Global async writer pool instance
-var (
-	globalAsyncWriter *AsyncWriterPool
-	asyncWriterOnce   sync.Once
-	asyncWriterMu     sync.Mutex
-)
-
-// GetAsyncWriter returns the global async writer pool instance
+// GetAsyncWriter returns the writer pool owned by tracker.
 func GetAsyncWriter(tracker *CallTracker) *AsyncWriterPool {
-	asyncWriterMu.Lock()
-	defer asyncWriterMu.Unlock()
-	if globalAsyncWriter == nil || globalAsyncWriter.tracker != tracker || globalAsyncWriter.stopped.Load() {
-		if globalAsyncWriter != nil && !globalAsyncWriter.stopped.Load() {
-			_ = globalAsyncWriter.Stop()
-		}
-		config := GetConfig()
+	if tracker == nil {
+		return nil
+	}
+	tracker.asyncWriterMu.Lock()
+	defer tracker.asyncWriterMu.Unlock()
+	pool, _ := tracker.asyncWriter.(*AsyncWriterPool)
+	if pool == nil || pool.stopped.Load() {
+		config := tracker.config
 		workerCount := config.TCPIOThreads
 		if workerCount <= 0 {
 			workerCount = 4
@@ -425,22 +399,24 @@ func GetAsyncWriter(tracker *CallTracker) *AsyncWriterPool {
 			bufferSize = 1000
 		}
 
-		globalAsyncWriter = NewAsyncWriterPoolWithTracker(tracker, workerCount, bufferSize)
+		pool = NewAsyncWriterPoolWithTracker(tracker, workerCount, bufferSize)
+		tracker.asyncWriter = pool
 
 		// Start the async writer automatically
-		if err := globalAsyncWriter.Start(); err != nil {
+		if err := pool.Start(); err != nil {
 			logger.Error("Failed to start async writer pool", "error", err)
 		}
 	}
-	return globalAsyncWriter
+	return pool
 }
 
-// Cleanup function for graceful shutdown
-func CloseAsyncWriter() {
-	asyncWriterMu.Lock()
-	defer asyncWriterMu.Unlock()
-	if globalAsyncWriter != nil {
-		_ = globalAsyncWriter.Stop()
-		globalAsyncWriter = nil
+func (tracker *CallTracker) closeAsyncWriter() {
+	tracker.asyncWriterMu.Lock()
+	defer tracker.asyncWriterMu.Unlock()
+	if tracker.asyncWriter != nil {
+		if err := tracker.asyncWriter.Stop(); err != nil {
+			logger.Error("Failed to stop async writer pool", "error", err)
+		}
+		tracker.asyncWriter = nil
 	}
 }

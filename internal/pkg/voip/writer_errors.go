@@ -10,6 +10,7 @@ var (
 	ErrCallNotFound         = &AsyncWriterError{"call not found"}
 	ErrInvalidPacketType    = &AsyncWriterError{"invalid packet type"}
 	ErrWriterNotInitialized = &AsyncWriterError{"PCAP writer not initialized"}
+	ErrOutputManagerClosed  = &AsyncWriterError{"session output manager is closed"}
 )
 
 // AsyncWriterError represents errors from the PCAP writer system.

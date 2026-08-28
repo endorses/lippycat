@@ -1,12 +1,34 @@
 package voip
 
 import (
+	"sync"
+	"testing"
 	"time"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
+
+type recordingCallOutput struct {
+	mu             sync.Mutex
+	opened, closed []string
+}
+
+func (r *recordingCallOutput) OpenSession(id string, _ layers.LinkType) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.opened = append(r.opened, id)
+	return nil
+}
+func (r *recordingCallOutput) WritePacket(string, gopacket.Packet, PacketType) error { return nil }
+func (r *recordingCallOutput) CloseSession(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = append(r.closed, id)
+	return nil
+}
+func (r *recordingCallOutput) Shutdown() error { return nil }
 
 func TestPinnedCallSurvivesCapacityPressure(t *testing.T) {
 	ct := NewCallTrackerWithCapacity(2)
@@ -47,6 +69,37 @@ func TestRTPOnlyCallAtomicRecencyProtectsItFromEviction(t *testing.T) {
 	ct.mu.RUnlock()
 	assert.True(t, recentExists)
 	assert.False(t, ordinaryExists)
+}
+
+func TestPinnedCallsEnforceHardCapacity(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxCalls = 1
+	cfg.WriteVoIP = true
+	output := &recordingCallOutput{}
+	ct := NewCallTrackerWithOutput(cfg, output)
+	t.Cleanup(ct.Shutdown)
+	ct.PinCall("pinned")
+	assert.NotNil(t, ct.GetOrCreateCall("pinned", layers.LinkTypeEthernet))
+
+	assert.Nil(t, ct.GetOrCreateCall("rejected", layers.LinkTypeEthernet))
+	ct.mu.RLock()
+	defer ct.mu.RUnlock()
+	assert.Len(t, ct.callMap, 1)
+	assert.Contains(t, ct.callMap, "pinned")
+	assert.Equal(t, []string{"pinned"}, output.opened, "rejected calls must not allocate output resources")
+}
+
+func TestCallTrackerCopiesConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxCalls = 7
+	cfg.PluginPaths = []string{"original"}
+	ct := NewCallTrackerWithConfig(cfg)
+	t.Cleanup(ct.Shutdown)
+
+	cfg.MaxCalls = 99
+	cfg.PluginPaths[0] = "changed"
+	assert.Equal(t, 7, ct.maxCalls)
+	assert.Equal(t, []string{"original"}, ct.config.PluginPaths)
 }
 func createTrackedCall(ct *CallTracker, id string) {
 	ct.mu.Lock()

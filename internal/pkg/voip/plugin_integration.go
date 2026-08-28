@@ -141,11 +141,11 @@ func (p *PluginPacketProcessor) integrateResult(result *plugins.ProcessResult, p
 	if GetConfig().WriteVoIP && call != nil {
 		switch result.Protocol {
 		case "sip":
-			if err := call.writeSIP(packet); err != nil {
+			if err := p.tracker.output.WritePacket(call.CallID, packet, PacketTypeSIP); err != nil {
 				logger.Error("Failed to write SIP packet", "error", err)
 			}
 		case "rtp":
-			if err := call.writeRTP(packet); err != nil {
+			if err := p.tracker.output.WritePacket(call.CallID, packet, PacketTypeRTP); err != nil {
 				logger.Error("Failed to write RTP packet", "error", err)
 			}
 		}

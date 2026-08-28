@@ -370,6 +370,15 @@ local-registry lifecycle observer; B2BUA RTP associations and inherited filter
 IDs preserve every call leg; and the TUI call tracker is session-owned and
 passed explicitly through capture, reassembly, conversion, and aggregation.
 
+Second follow-up audit fixes (2026-08-29): legacy VoIP call state no longer owns
+PCAP files or writers; an injected, instance-owned session-output manager owns
+those resources and the async writer pool is tracker-scoped. Legacy tracker
+configuration is snapshotted at construction, capacity is a hard bound even
+when every resident call is pinned, and obsolete per-CPU/work-stealing
+machinery was removed. TUI reassembly now receives its session registry's
+call-active query, and tap deterministically closes its local VoIP registry.
+Focused race tests, `make test`, and the supported non-CUDA build matrix pass.
+
 ### Exit Criteria
 
 - No package-global call tracker or `getTracker()` consumer remains.

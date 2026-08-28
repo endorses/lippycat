@@ -14,11 +14,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 )
 
 const (
@@ -32,27 +30,8 @@ var (
 	ErrShuttingDown = errors.New("call tracker is shutting down")
 )
 
-// CallInfo contains information about a VoIP call and manages PCAP file writing.
-//
-// Thread Safety:
-// - SIPWriter and sipFile must be accessed only while holding sipWriterMu
-// - RTPWriter and rtpFile must be accessed only while holding rtpWriterMu
-// - All other fields (CallID, State, etc.) are protected by CallTracker.mu
-//
-// Mutex Usage Pattern:
-// Always lock the appropriate writer mutex before accessing the writer or file:
-//
-//	call.sipWriterMu.Lock()
-//	err := call.SIPWriter.WritePacket(...)
-//	call.sipWriterMu.Unlock()
-//
-// The Close() method handles all locking internally and is safe to call
-// concurrently and multiple times (idempotent).
-//
-// Lock ordering: CallTracker.mu
-// must never be held while acquiring a per-call writer lock. Remove the call from
-// tracker state first, release the tracker lock, and only then call Close. Writer
-// helpers likewise release writer locks before updating tracker metadata.
+// CallInfo contains registry state for a VoIP call. Output resources are owned
+// by the CallOutput service injected into its tracker.
 type CallInfo struct {
 	CallID      string
 	State       string
@@ -60,61 +39,28 @@ type CallInfo struct {
 	LastUpdated time.Time
 	EndTime     *time.Time // Set when BYE/CANCEL is detected
 	LinkType    layers.LinkType
-	SIPWriter   *pcapgo.Writer
-	RTPWriter   *pcapgo.Writer
-	sipFile     *os.File
-	rtpFile     *os.File
-	sipWriterMu sync.Mutex // Protects SIPWriter and sipFile access
-	rtpWriterMu sync.Mutex // Protects RTPWriter and rtpFile access
 	tracker     *CallTracker
 }
 
 func (c *CallInfo) writeSIP(packet gopacket.Packet) error {
-	c.sipWriterMu.Lock()
-	defer c.sipWriterMu.Unlock()
-	if c.SIPWriter == nil || c.sipFile == nil {
+	if c.tracker == nil {
 		return ErrWriterNotInitialized
 	}
-	return c.SIPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+	return c.tracker.output.WritePacket(c.CallID, packet, PacketTypeSIP)
 }
-
 func (c *CallInfo) writeRTP(packet gopacket.Packet) error {
-	c.rtpWriterMu.Lock()
-	defer c.rtpWriterMu.Unlock()
-	if c.RTPWriter == nil || c.rtpFile == nil {
+	if c.tracker == nil {
 		return ErrWriterNotInitialized
 	}
-	return c.RTPWriter.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+	return c.tracker.output.WritePacket(c.CallID, packet, PacketTypeRTP)
 }
 
-// Close safely closes all PCAP writers and files for this call with proper locking.
-// This method is safe to call concurrently and idempotent.
+// Close emits a lifecycle callback; CallInfo itself owns no resources.
 func (c *CallInfo) Close() error {
-	var firstErr error
-
-	// Close SIP file (with mutex protection)
-	c.sipWriterMu.Lock()
-	if c.sipFile != nil {
-		if err := c.sipFile.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("failed to close SIP file: %w", err)
-		}
+	if c.tracker == nil {
+		return nil
 	}
-	c.sipFile = nil
-	c.SIPWriter = nil
-	c.sipWriterMu.Unlock()
-
-	// Close RTP file (with mutex protection)
-	c.rtpWriterMu.Lock()
-	if c.rtpFile != nil {
-		if err := c.rtpFile.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("failed to close RTP file: %w", err)
-		}
-	}
-	c.rtpFile = nil
-	c.RTPWriter = nil
-	c.rtpWriterMu.Unlock()
-
-	return firstErr
+	return c.tracker.output.CloseSession(c.CallID)
 }
 
 // removeCall detaches a call and all tracker-owned indexes before closing it.
@@ -148,7 +94,7 @@ func (ct *CallTracker) removeCall(callID string) (bool, error) {
 	if !exists || call == nil {
 		return exists, nil
 	}
-	return true, call.Close()
+	return true, ct.output.CloseSession(callID)
 }
 
 type CallTracker struct {
@@ -167,6 +113,10 @@ type CallTracker struct {
 	janitorWG         sync.WaitGroup
 	shutdownOnce      sync.Once
 	config            *Config
+	output            CallOutput
+	completionMonitor *SniffCompletionMonitor
+	asyncWriterMu     sync.Mutex
+	asyncWriter       interface{ Stop() error }
 	shuttingDown      atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
 	activeWrites      sync.WaitGroup // Tracks active write operations
 }
@@ -183,11 +133,39 @@ func (ct *CallTracker) registerEndpoint(endpoint, callID string) {
 }
 
 func NewCallTracker() *CallTracker {
-	return NewCallTrackerWithCapacity(GetConfig().MaxCalls)
+	return NewCallTrackerWithConfig(GetConfig())
 }
 
-// NewCallTrackerWithCapacity creates a tracker with the configured soft cap.
+// NewCallTrackerWithConfig creates a tracker with an immutable configuration
+// snapshot. Subsequent SetConfig calls do not affect the tracker.
+func NewCallTrackerWithConfig(config *Config) *CallTracker {
+	return NewCallTrackerWithOutput(config, nil)
+}
+
+// NewCallTrackerWithOutput injects the output lifecycle service used by the
+// registry. A nil service selects the configured session output or a no-op.
+func NewCallTrackerWithOutput(config *Config, output CallOutput) *CallTracker {
+	if config == nil {
+		config = DefaultConfig()
+	}
+	clone := *config
+	clone.PluginPaths = append([]string(nil), config.PluginPaths...)
+	if output == nil {
+		if clone.WriteVoIP {
+			output = NewSessionOutputManager(&clone)
+		} else {
+			output = NoopCallOutput{}
+		}
+	}
+	return newCallTracker(&clone, clone.MaxCalls, output)
+}
+
+// NewCallTrackerWithCapacity creates a tracker with the configured hard cap.
 func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
+	return newCallTracker(GetConfig(), maxCalls, NoopCallOutput{})
+}
+
+func newCallTracker(config *Config, maxCalls int, output CallOutput) *CallTracker {
 	ctx, cancel := context.WithCancel(context.Background())
 	if maxCalls <= 0 {
 		maxCalls = DefaultMaxCalls
@@ -202,7 +180,8 @@ func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 		janitorCtx:     ctx,
 		janitorCancel:  cancel,
 		janitorStarted: false,
-		config:         GetConfig(),
+		config:         config,
+		output:         output,
 	}
 
 	tracker.startJanitor()
@@ -264,23 +243,29 @@ func (ct *CallTracker) Shutdown() {
 		}
 		ct.janitorWG.Wait()
 
+		ct.closeAsyncWriter()
+
 		// Wait for all active writes to complete
 		ct.activeWrites.Wait()
 		logger.Info("All active writes completed, closing call files")
 
 		// Now safe to close all files
 		ct.mu.Lock()
-		calls := make([]*CallInfo, 0, len(ct.callMap))
+		callIDs := make([]string, 0, len(ct.callMap))
 		for id, call := range ct.callMap {
-			calls = append(calls, call)
+			_ = call
+			callIDs = append(callIDs, id)
 			delete(ct.callMap, id)
 			ct.recency.Delete(id)
 		}
 		ct.mu.Unlock()
-		for _, call := range calls {
-			if err := call.Close(); err != nil {
-				logger.Error("Failed to close call files", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
+		for _, id := range callIDs {
+			if err := ct.output.CloseSession(id); err != nil {
+				logger.Error("Failed to close call output", "call_id", SanitizeCallIDForLogging(id), "error", err)
 			}
+		}
+		if err := ct.output.Shutdown(); err != nil {
+			logger.Error("Failed to shut down call output", "error", err)
 		}
 		logger.Info("Call tracker shutdown complete")
 	})
@@ -307,8 +292,8 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 				"method", newState,
 				"duration", now.Sub(c.Created))
 
-			// Schedule PCAP closure via sniff completion monitor (if active)
-			if monitor := getSniffCompletionMonitor(); monitor != nil {
+			// Schedule PCAP closure via this tracker's completion monitor.
+			if monitor := tracker.completionMonitor; monitor != nil {
 				monitor.ScheduleClose(c.CallID)
 			}
 		}
@@ -372,6 +357,16 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 
 	call, exists = tracker.callMap[callID]
 	if !exists {
+		// Enforce the capacity before allocating output resources. Pinned calls
+		// cannot be evicted, so admission fails when every resident is pinned.
+		if tracker.lruList.Len() >= tracker.maxCalls && tracker.leastRecentUnpinnedLocked() == nil {
+			if time.Since(tracker.lastPinnedWarning) > time.Minute {
+				tracker.lastPinnedWarning = time.Now()
+				logger.Warn("call tracker capacity reached; rejecting call because all calls are pinned", "max_calls", tracker.maxCalls)
+			}
+			tracker.mu.Unlock()
+			return nil
+		}
 		call = &CallInfo{
 			CallID:      callID,
 			State:       "NEW",
@@ -380,12 +375,13 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 			LinkType:    linkType,
 			tracker:     tracker,
 		}
-		if GetConfig().WriteVoIP {
-			if err := call.initWriters(); err != nil {
+		if tracker.config.WriteVoIP {
+			if err := tracker.output.OpenSession(callID, linkType); err != nil {
 				logger.Error("Failed to initialize writers for call",
 					"call_id", SanitizeCallIDForLogging(callID),
 					"error", err)
 				// Don't track call if we can't write it - prevents silent data loss
+				tracker.mu.Unlock()
 				return nil
 			}
 		}
@@ -433,9 +429,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 				delete(tracker.lruIndex, oldestCallID)
 				logger.Debug("Evicted LRU call (buffer full)",
 					"call_id", SanitizeCallIDForLogging(oldestCallID))
-			} else if time.Since(tracker.lastPinnedWarning) > time.Minute {
-				tracker.lastPinnedWarning = time.Now()
-				logger.Warn("call tracker soft cap exceeded because all calls are pinned", "max_calls", tracker.maxCalls, "current_calls", tracker.lruList.Len())
 			}
 		}
 
@@ -449,7 +442,7 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	}
 	tracker.mu.Unlock()
 	if evicted != nil {
-		if err := evicted.Close(); err != nil {
+		if err := tracker.output.CloseSession(evicted.CallID); err != nil {
 			logger.Error("Error closing call files", "call_id", SanitizeCallIDForLogging(evicted.CallID), "error", err)
 		}
 	}
@@ -482,103 +475,11 @@ func (ct *CallTracker) leastRecentUnpinnedLocked() *list.Element {
 	return selected
 }
 
-func (c *CallInfo) initWriters() error {
-	// Initialization normally happens before publication, but use the same locks
-	// as every other writer-pointer access so future reuse cannot violate the
-	// lifetime contract. When both are needed, SIP is always acquired first.
-	c.sipWriterMu.Lock()
-	defer c.sipWriterMu.Unlock()
-	c.rtpWriterMu.Lock()
-	defer c.rtpWriterMu.Unlock()
-	// Check if user specified an output file
-	outputFile := GetConfig().OutputFile
-
-	var sipPath, rtpPath string
-
-	if outputFile != "" {
-		// User specified output file - use it as base name
-		// Generate: <file>_sip_<callid>.pcap and <file>_rtp_<callid>.pcap
-		base := strings.TrimSuffix(outputFile, filepath.Ext(outputFile))
-		sipPath = fmt.Sprintf("%s_sip_%s.pcap", base, sanitize(c.CallID))
-		rtpPath = fmt.Sprintf("%s_rtp_%s.pcap", base, sanitize(c.CallID))
-	} else {
-		// No output file specified - use default directory
-		capturesDir, err := getCapturesDir()
-		if err != nil {
-			return fmt.Errorf("failed to get captures directory: %w", err)
-		}
-
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(capturesDir, 0o750); err != nil {
-			return fmt.Errorf("failed to create captures directory: %w", err)
-		}
-
-		// Verify directory is not a symlink to prevent symlink attacks
-		dirInfo, err := os.Lstat(capturesDir)
-		if err != nil {
-			return fmt.Errorf("failed to stat captures directory: %w", err)
-		}
-		if dirInfo.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("captures directory is a symlink, refusing to use it for security")
-		}
-
-		sipPath = filepath.Join(capturesDir, fmt.Sprintf("sip_%s.pcap", sanitize(c.CallID)))
-		rtpPath = filepath.Join(capturesDir, fmt.Sprintf("rtp_%s.pcap", sanitize(c.CallID)))
-	}
-
-	var err error
-
-	// Create SIP file with restrictive permissions (owner read/write only)
-	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked or user-specified
-	c.sipFile, err = os.OpenFile(sipPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create SIP file %s: %w", sipPath, err)
-	}
-
-	// Create RTP file with restrictive permissions (owner read/write only)
-	// #nosec G304 -- Path is safe: uses getCapturesDir() + sanitized CallID, symlink-checked or user-specified
-	c.rtpFile, err = os.OpenFile(rtpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		if c.sipFile != nil {
-			if closeErr := c.sipFile.Close(); closeErr != nil {
-				logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
-			}
-			c.sipFile = nil
-		}
-		return fmt.Errorf("failed to create RTP file %s: %w", rtpPath, err)
-	}
-
-	c.SIPWriter = pcapgo.NewWriter(c.sipFile)
-	c.RTPWriter = pcapgo.NewWriter(c.rtpFile)
-
-	if err := c.SIPWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, c.LinkType); err != nil {
-		if closeErr := c.sipFile.Close(); closeErr != nil {
-			logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
-		}
-		if closeErr := c.rtpFile.Close(); closeErr != nil {
-			logger.Error("Failed to close RTP file during error cleanup", "error", closeErr, "file", rtpPath)
-		}
-		c.sipFile, c.rtpFile = nil, nil
-		c.SIPWriter, c.RTPWriter = nil, nil
-		return fmt.Errorf("failed to write SIP file header: %w", err)
-	}
-
-	if err := c.RTPWriter.WriteFileHeader(pcaptypes.MaxPcapSnapshotLen, c.LinkType); err != nil {
-		if closeErr := c.sipFile.Close(); closeErr != nil {
-			logger.Error("Failed to close SIP file during error cleanup", "error", closeErr, "file", sipPath)
-		}
-		if closeErr := c.rtpFile.Close(); closeErr != nil {
-			logger.Error("Failed to close RTP file during error cleanup", "error", closeErr, "file", rtpPath)
-		}
-		c.sipFile, c.rtpFile = nil, nil
-		c.SIPWriter, c.RTPWriter = nil, nil
-		return fmt.Errorf("failed to write RTP file header: %w", err)
-	}
-
-	return nil
+func sanitize(id string) string {
+	return sanitizeWithMaxLength(id, GetConfig().MaxFilenameLength)
 }
 
-func sanitize(id string) string {
+func sanitizeWithMaxLength(id string, maxLen int) string {
 	// Handle empty string case
 	if id == "" {
 		return "safe_filename"
@@ -616,8 +517,7 @@ func sanitize(id string) string {
 	cleaned = removeControlCharacters(cleaned)
 
 	// Limit length to prevent filesystem issues (configurable)
-	maxLen := GetConfig().MaxFilenameLength
-	if len(cleaned) > maxLen {
+	if maxLen > 0 && len(cleaned) > maxLen {
 		cleaned = cleaned[:maxLen]
 	}
 

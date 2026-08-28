@@ -18,7 +18,3 @@ func WriteRTP(tracker *CallTracker, callID string, packet gopacket.Packet) {
 	// No-op stub for non-CLI builds
 	// If this gets called, it's a bug - writeVoip should be false in these modes
 }
-
-func CloseWriters() {
-	// No-op stub for non-CLI builds
-}

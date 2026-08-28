@@ -526,6 +526,10 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	voipProcConfig.MaxCalls = cmdutil.GetIntConfig("voip.max_calls", voipProcConfig.MaxCalls)
 	voipProc := voipprocessor.New(voipProcConfig)
 	voipAdapter := voipprocessor.NewSourceAdapter(voipProc)
+	// The tap composition root owns this registry. Close it after packet
+	// processing and TCP reassembly have stopped so its janitor terminates and
+	// remaining calls receive deterministic shutdown lifecycle notifications.
+	defer voipAdapter.Close()
 	localSource.SetVoIPProcessor(voipAdapter)
 	logger.Info("VoIP processor enabled for tap mode (UDP SIP/RTP)")
 

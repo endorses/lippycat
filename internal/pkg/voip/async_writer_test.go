@@ -4,7 +4,7 @@ package voip
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,7 +12,6 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -314,14 +313,10 @@ func TestAsyncWriterPool_SecurityValidation(t *testing.T) {
 
 func TestGetAsyncWriter(t *testing.T) {
 	tracker := TestCallTracker(t)
-	// Reset the global async writer to test initialization
-	globalAsyncWriter = nil
-	asyncWriterOnce = sync.Once{}
-
 	// Reset config for proper initialization
 	ResetConfigOnce()
 
-	// Get the global async writer
+	// Get the tracker-owned async writer
 	writer := GetAsyncWriter(tracker)
 	assert.NotNil(t, writer)
 	assert.True(t, writer.started.Load())
@@ -331,14 +326,11 @@ func TestGetAsyncWriter(t *testing.T) {
 	assert.Same(t, writer, writer2)
 
 	// Cleanup
-	CloseAsyncWriter()
+	tracker.closeAsyncWriter()
 }
 
 func TestAsyncWriterIntegration_WithUpdatedWriter(t *testing.T) {
 	tracker := TestCallTracker(t)
-	// Reset global state
-	globalAsyncWriter = nil
-	asyncWriterOnce = sync.Once{}
 	ResetConfigOnce()
 
 	packet := createTestPacketForAsync(t)
@@ -362,7 +354,7 @@ func TestAsyncWriterIntegration_WithUpdatedWriter(t *testing.T) {
 	assert.Greater(t, stats.PacketsQueued.Load(), int64(0))
 
 	// Cleanup
-	CloseAsyncWriter()
+	tracker.closeAsyncWriter()
 }
 
 // Helper functions for testing
@@ -409,56 +401,20 @@ func createTestPacketForAsync(t *testing.T) gopacket.Packet {
 }
 
 func setupTestCall(t testing.TB, tracker *CallTracker, callID string) {
+	if _, ok := tracker.output.(*SessionOutputManager); !ok {
+		cfg := *tracker.config
+		cfg.OutputFile = filepath.Join(t.TempDir(), "capture.pcap")
+		tracker.output = NewSessionOutputManager(&cfg)
+	}
 	call := tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 	require.NotNil(t, call)
-
-	// Initialize the call's writers if they're not already set up
-	if call.SIPWriter == nil || call.RTPWriter == nil {
-		// Use the existing test helper pattern
-		setupTestCallWithWriters(t, callID, call)
+	if _, ok := tracker.output.(*SessionOutputManager).sessions[callID]; !ok {
+		require.NoError(t, tracker.output.OpenSession(callID, layers.LinkTypeEthernet))
 	}
-}
-
-func setupTestCallWithWriters(t testing.TB, callID string, call *CallInfo) {
-	// Create temporary files for testing
-	sipFile, err := os.CreateTemp("", "test-sip-*.pcap")
-	require.NoError(t, err)
-
-	rtpFile, err := os.CreateTemp("", "test-rtp-*.pcap")
-	require.NoError(t, err)
-
-	// Initialize writers
-	call.sipFile = sipFile
-	call.rtpFile = rtpFile
-	call.SIPWriter = pcapgo.NewWriter(sipFile)
-	call.RTPWriter = pcapgo.NewWriter(rtpFile)
-
-	// Write headers
-	err = call.SIPWriter.WriteFileHeader(65536, layers.LinkTypeEthernet)
-	require.NoError(t, err)
-
-	err = call.RTPWriter.WriteFileHeader(65536, layers.LinkTypeEthernet)
-	require.NoError(t, err)
 }
 
 func cleanupTestCall(t testing.TB, callID string) {
-	tracker := TestCallTracker(t)
-	tracker.mu.Lock()
-	defer tracker.mu.Unlock()
-
-	if call, exists := tracker.callMap[callID]; exists {
-		// Clean up temporary files
-		if call.sipFile != nil {
-			call.sipFile.Close()
-			os.Remove(call.sipFile.Name())
-		}
-		if call.rtpFile != nil {
-			call.rtpFile.Close()
-			os.Remove(call.rtpFile.Name())
-		}
-	}
-
-	delete(tracker.callMap, callID)
+	// TestCallTracker owns and shuts down its output manager through t.Cleanup.
 }
 
 func BenchmarkAsyncWriterPool_WritePacketAsync(b *testing.B) {

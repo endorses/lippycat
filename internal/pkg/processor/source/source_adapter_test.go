@@ -38,9 +38,24 @@ func TestProtoBatchBoundaryPreservesProcessorEnrichment(t *testing.T) {
 	batch, err := FromProtoBatchE(in)
 	require.NoError(t, err)
 	batch.Packets[0].Metadata = &data.PacketMetadata{Protocol: "HTTP", Info: "GET /"}
+	require.NoError(t, batch.SyncEnvelopesFromPackets())
 
 	out, err := batch.ToProtoBatchE()
 	require.NoError(t, err)
 	require.Equal(t, "HTTP", out.Packets[0].Metadata.Protocol)
 	require.Equal(t, "GET /", out.Packets[0].Metadata.Info)
+}
+
+func TestProtoBatchBoundaryUsesAuthoritativeEnvelope(t *testing.T) {
+	in := &data.PacketBatch{HunterId: "hunter-a", Packets: []*data.CapturedPacket{{Data: []byte{1}, MatchedFilterIds: []string{"old"}}}}
+	batch, err := FromProtoBatchE(in)
+	require.NoError(t, err)
+	batch.Envelopes[0].MatchedFilterIDs = []string{"normalized"}
+	batch.Envelopes[0].Source.InterfaceName = "normalized0"
+	require.NoError(t, batch.SyncEnvelopesFromPackets())
+
+	out, err := batch.ToProtoBatchE()
+	require.NoError(t, err)
+	require.Equal(t, []string{"normalized"}, out.Packets[0].MatchedFilterIds)
+	require.Equal(t, "normalized0", out.Packets[0].InterfaceName)
 }

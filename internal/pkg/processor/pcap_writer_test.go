@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -59,22 +60,26 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 	require.NoError(t, err)
 
 	sipPayload := []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
+	responsePayload := []byte("SIP/2.0 200 OK\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
 	rtpPayload := []byte{0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x12, 0x34, 0x56, 0x78, 0xde, 0xad, 0xbe, 0xef}
 	sipPacket := semanticUDPPacket(t, net.ParseIP("192.0.2.10"), net.ParseIP("198.51.100.50"), 5060, 5060, sipPayload)
+	responsePacket := semanticUDPPacket(t, net.ParseIP("198.51.100.50"), net.ParseIP("192.0.2.10"), 5060, 5060, responsePayload)
 	rtpPacket := semanticUDPPacket(t, net.ParseIP("198.51.100.50"), net.ParseIP("192.0.2.10"), 10000, 20000, rtpPayload)
 	t0, err := time.Parse(time.RFC3339Nano, fixture.Packets[0].Timestamp)
 	require.NoError(t, err)
 	t1, err := time.Parse(time.RFC3339Nano, fixture.Packets[1].Timestamp)
 	require.NoError(t, err)
+	t2, err := time.Parse(time.RFC3339Nano, fixture.Packets[2].Timestamp)
+	require.NoError(t, err)
 	require.NoError(t, writer.WriteSIPPacket(t0, sipPacket, layers.LinkTypeEthernet))
-	require.NoError(t, writer.WriteRTPPacket(t1, rtpPacket, layers.LinkTypeEthernet))
+	require.NoError(t, writer.WriteSIPPacket(t1, responsePacket, layers.LinkTypeEthernet))
+	require.NoError(t, writer.WriteRTPPacket(t2, rtpPacket, layers.LinkTypeEthernet))
 	require.NoError(t, manager.CloseCallWriter(fixture.CallID))
 
-	observed := make([]semanticObservation, 0, 2)
-	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_sip.pcap"), fixture.CallID, true)...)
-	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_rtp.pcap"), fixture.CallID, false)...)
+	observed := make([]semanticObservation, 0, 3)
+	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_sip.pcap"), true)...)
+	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_rtp.pcap"), false)...)
 	require.Len(t, observed, fixture.PacketCount)
-	require.Equal(t, fixture.LinkType, layers.LinkTypeEthernet.String())
 	for i := range fixture.Packets {
 		want := fixture.Packets[i]
 		got := observed[i]
@@ -86,18 +91,21 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 		require.Equal(t, strings.ToUpper(want.FiveTuple.Transport), got.Transport)
 		require.Equal(t, want.PayloadSHA256, got.PayloadSHA256)
 		require.Equal(t, want.CallAssociation, got.CallAssociation)
+		require.Equal(t, fixture.LinkType, got.LinkType)
 		if want.SIP != nil {
 			require.Equal(t, want.SIP.CallID, got.CallID)
 			require.Equal(t, want.SIP.Method, got.Method)
 			require.Equal(t, want.SIP.CSeqMethod, got.CSeqMethod)
+			require.Equal(t, want.SIP.ResponseCode, got.ResponseCode)
 		}
 	}
 }
 
 type semanticObservation struct {
-	Timestamp, SrcIP, DstIP, Transport                         string
+	Timestamp, SrcIP, DstIP, Transport, LinkType               string
 	SrcPort, DstPort                                           uint16
 	PayloadSHA256, CallAssociation, CallID, Method, CSeqMethod string
+	ResponseCode                                               int
 }
 
 func semanticUDPPacket(t *testing.T, srcIP, dstIP net.IP, srcPort, dstPort layers.UDPPort, payload []byte) []byte {
@@ -111,13 +119,15 @@ func semanticUDPPacket(t *testing.T, srcIP, dstIP net.IP, srcPort, dstPort layer
 	return buf.Bytes()
 }
 
-func readSemanticPCAP(t *testing.T, path, callID string, sip bool) []semanticObservation {
+func readSemanticPCAP(t *testing.T, path string, sip bool) []semanticObservation {
 	t.Helper()
 	f, err := os.Open(path)
 	require.NoError(t, err)
 	defer f.Close()
 	r, err := pcapgo.NewReader(f)
 	require.NoError(t, err)
+	association := strings.TrimSuffix(filepath.Base(path), "_sip.pcap")
+	association = strings.TrimSuffix(association, "_rtp.pcap")
 	var result []semanticObservation
 	for {
 		data, ci, err := r.ReadPacketData()
@@ -129,10 +139,16 @@ func readSemanticPCAP(t *testing.T, path, callID string, sip bool) []semanticObs
 		ip := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
 		udp := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
 		digest := sha256.Sum256(udp.Payload)
-		o := semanticObservation{Timestamp: ci.Timestamp.UTC().Format(time.RFC3339Nano), SrcIP: ip.SrcIP.String(), DstIP: ip.DstIP.String(), SrcPort: uint16(udp.SrcPort), DstPort: uint16(udp.DstPort), Transport: "UDP", PayloadSHA256: hex.EncodeToString(digest[:]), CallAssociation: callID}
+		o := semanticObservation{Timestamp: ci.Timestamp.UTC().Format(time.RFC3339Nano), SrcIP: ip.SrcIP.String(), DstIP: ip.DstIP.String(), SrcPort: uint16(udp.SrcPort), DstPort: uint16(udp.DstPort), Transport: "UDP", LinkType: r.LinkType().String(), PayloadSHA256: hex.EncodeToString(digest[:]), CallAssociation: association}
 		if sip {
 			lines := strings.Split(string(udp.Payload), "\r\n")
-			o.Method = strings.Fields(lines[0])[0]
+			startLine := strings.Fields(lines[0])
+			if len(startLine) >= 2 && startLine[0] == "SIP/2.0" {
+				o.ResponseCode, err = strconv.Atoi(startLine[1])
+				require.NoError(t, err)
+			} else {
+				o.Method = startLine[0]
+			}
 			for _, line := range lines[1:] {
 				if strings.HasPrefix(line, "Call-ID: ") {
 					o.CallID = strings.TrimPrefix(line, "Call-ID: ")

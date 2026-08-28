@@ -8,15 +8,17 @@ import (
 )
 
 type protocolEvent struct {
-	Protocol   string   `json:"protocol"`
-	SourcePCAP string   `json:"source_pcap"`
-	Timestamp  string   `json:"timestamp"`
-	SrcIP      string   `json:"src_ip"`
-	DstIP      string   `json:"dst_ip"`
-	SrcPort    string   `json:"src_port"`
-	DstPort    string   `json:"dst_port"`
-	Info       string   `json:"info"`
-	Modes      []string `json:"modes"`
+	Protocol    string   `json:"protocol"`
+	CLIProtocol string   `json:"cli_protocol"`
+	CLIInfo     string   `json:"cli_info"`
+	SourcePCAP  string   `json:"source_pcap"`
+	Timestamp   string   `json:"timestamp"`
+	SrcIP       string   `json:"src_ip"`
+	DstIP       string   `json:"dst_ip"`
+	SrcPort     string   `json:"src_port"`
+	DstPort     string   `json:"dst_port"`
+	Info        string   `json:"info"`
+	Modes       []string `json:"modes"`
 }
 
 func readFixture(t *testing.T, name string, dst any) {
@@ -42,7 +44,7 @@ func TestProtocolEventGoldenFixtures(t *testing.T) {
 		if _, err := time.Parse(time.RFC3339Nano, event.Timestamp); err != nil {
 			t.Errorf("%s timestamp: %v", event.Protocol, err)
 		}
-		if event.SourcePCAP == "" || event.SrcIP == "" || event.DstIP == "" || event.SrcPort == "" || event.DstPort == "" || event.Info == "" {
+		if event.SourcePCAP == "" || event.SrcIP == "" || event.DstIP == "" || event.SrcPort == "" || event.DstPort == "" || event.Info == "" || event.CLIProtocol == "" || event.CLIInfo == "" {
 			t.Errorf("%s has an incomplete observable event", event.Protocol)
 		}
 		for _, mode := range []string{"sniff", "watch-live", "watch-file"} {

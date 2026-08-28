@@ -1,8 +1,10 @@
 # Pipeline behavior fixtures
 
 These fixtures freeze the observable semantics used during pipeline unification.
-Tests construct deterministic representative packets, pass them through the real
-offline sniff and TUI conversion paths, and compare the resulting observations.
+Tests construct deterministic representative packets and write them to temporary
+PCAPs. The CLI test reads those files through `StartOfflineSniffer` and compares
+the emitted JSON, while the TUI test compares both ordered file replay and the
+shared live-capture `PacketInfo` conversion boundary.
 The `source_pcap` names identify those generated capture scenarios; the generated
 files live in test temporary directories rather than being checked-in binaries.
 

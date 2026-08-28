@@ -23,8 +23,6 @@ func FromCapturedPacket(p *data.CapturedPacket, source pipeline.SourceProvenance
 			return nil, fmt.Errorf("encode packet metadata: %w", err)
 		}
 		e.Metadata = &pipeline.Metadata{Protocol: p.Metadata.Protocol, SourceIP: p.Metadata.SrcIp, DestinationIP: p.Metadata.DstIp, SourcePort: p.Metadata.SrcPort, DestinationPort: p.Metadata.DstPort, Transport: p.Metadata.Transport, Info: p.Metadata.Info, Details: cloneMap(p.Metadata.Details), Encoding: pipeline.MetadataProtobuf, Payload: payload}
-		// Hunter metadata means edge detection/analysis already ran.
-		e.Stages = e.Stages.With(pipeline.StageDetected).With(pipeline.StageAnalyzed)
 	}
 	if len(e.MatchedFilterIDs) > 0 {
 		e.Stages = e.Stages.With(pipeline.StageFiltered)
@@ -46,6 +44,13 @@ func FromPacketBatch(b *data.PacketBatch) (*pipeline.PacketBatch, error) {
 		e, err := FromCapturedPacket(p, source)
 		if err != nil {
 			return nil, fmt.Errorf("convert packet %d: %w", i, err)
+		}
+		// Metadata on the gRPC ingress contract was produced upstream by the
+		// hunter. Attribute those edge operations here, where the transport
+		// topology is known, rather than in FromCapturedPacket (which is also
+		// used to normalize locally and centrally enriched packets).
+		if p.Metadata != nil {
+			e.Stages = e.Stages.With(pipeline.StageDetected).With(pipeline.StageAnalyzed)
 		}
 		out.Packets = append(out.Packets, e)
 	}

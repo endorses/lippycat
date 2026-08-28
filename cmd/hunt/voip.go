@@ -253,13 +253,15 @@ func runVoIPHunt(cmd *cobra.Command, args []string) error {
 
 // runVoIPHunterWithBuffering wraps hunter packet processing with VoIP buffering and TCP reassembly
 func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr *voip.BufferManager) error {
+	tracker := voip.NewCallTracker()
+	defer tracker.Shutdown()
 	// Create TCP SIP handler for hunter mode
 	// This handler is called when complete SIP messages are reassembled from TCP streams
-	tcpHandler := voip.NewHunterForwardHandler(h, bufferMgr)
+	tcpHandler := voip.NewHunterForwardHandler(tracker, h, bufferMgr)
 
 	// Create TCP stream factory with hunter handler
 	// The factory creates SIPStream instances that parse TCP streams for SIP messages
-	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
+	streamFactory := voip.NewSipStreamFactoryWithConfig(ctx, tcpHandler, *voip.GetConfig(), tracker.IsCallActive)
 
 	// Create connection-aware reassembly assembler for TCP reassembly
 	// This is the same pattern used in sniff/tap modes (see voip/core.go)
@@ -272,7 +274,7 @@ func runVoIPHunterWithBuffering(ctx context.Context, h *hunter.Hunter, bufferMgr
 
 	// Create VoIP packet processor for UDP buffering
 	// This handles UDP SIP/RTP packets with buffering and filtering
-	processor := voip.NewVoIPPacketProcessor(h, bufferMgr)
+	processor := voip.NewVoIPPacketProcessor(tracker, h, bufferMgr)
 
 	// Wire TCP handler to processor so ApplicationFilter propagates to both
 	// This enables proper multi-filter support (phone_number, sip_user, etc.)

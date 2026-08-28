@@ -15,7 +15,7 @@ import (
 
 func TestExtractPortFromSdp_ComprehensiveParsing(t *testing.T) {
 	// Reset port map before tests
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -123,12 +123,12 @@ m=audio 65535 RTP/AVP 0`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clear port map for each test
-			tracker := getTracker()
+			tracker := TestCallTracker(t)
 			tracker.mu.Lock()
 			tracker.portToCallID = make(map[string][]string)
 			tracker.mu.Unlock()
 
-			ExtractPortFromSdp(tt.sdpBody, tt.callID)
+			tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)
 
 			tracker.mu.Lock()
 			actualCallIDs, exists := tracker.portToCallID[tt.expectedPort]
@@ -146,7 +146,7 @@ m=audio 65535 RTP/AVP 0`,
 
 func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 	// Reset port map
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -168,7 +168,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 					callID := fmt.Sprintf("call-%d-%d", routineID, j)
 					sdpBody := fmt.Sprintf("m=audio %s RTP/AVP 0", port)
 
-					ExtractPortFromSdp(sdpBody, callID)
+					tracker.ExtractPortFromSDP(sdpBody, callID)
 				}
 			}(i)
 		}
@@ -218,7 +218,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 					callID := fmt.Sprintf("concurrent-call-%d-%d", writerID, j)
 					sdpBody := fmt.Sprintf("m=audio %s RTP/AVP 0", port)
 
-					ExtractPortFromSdp(sdpBody, callID)
+					tracker.ExtractPortFromSDP(sdpBody, callID)
 				}
 			}(i)
 		}
@@ -232,7 +232,7 @@ func TestPortMapping_ConcurrencyAndRaceConditions(t *testing.T) {
 
 func TestIsTracked_EdgeCases(t *testing.T) {
 	// Setup port mappings for testing
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = map[string][]string{
 		"5004": {"call-audio-1"},
@@ -275,7 +275,7 @@ func TestIsTracked_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsTracked(tt.packet)
+			result := tracker.IsTracked(tt.packet)
 			assert.Equal(t, tt.expected, result, tt.description)
 		})
 	}
@@ -283,7 +283,7 @@ func TestIsTracked_EdgeCases(t *testing.T) {
 
 func TestGetCallIDForPacket_PortMapping(t *testing.T) {
 	// Setup port mappings
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = map[string][]string{
 		"5004": {"call-audio-1"},
@@ -320,7 +320,7 @@ func TestGetCallIDForPacket_PortMapping(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := GetCallIDForPacket(tt.packet)
+			result := tracker.GetCallIDForPacket(tt.packet)
 			assert.Equal(t, tt.expected, result, tt.description)
 		})
 	}
@@ -329,7 +329,7 @@ func TestGetCallIDForPacket_PortMapping(t *testing.T) {
 func TestPortMapping_MemoryLeaks(t *testing.T) {
 	t.Run("Port map growth", func(t *testing.T) {
 		// Reset map
-		tracker := getTracker()
+		tracker := TestCallTracker(t)
 		tracker.mu.Lock()
 		tracker.portToCallID = make(map[string][]string)
 		tracker.mu.Unlock()
@@ -340,7 +340,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 			callID := fmt.Sprintf("call-%d", i)
 			sdpBody := fmt.Sprintf("m=audio %s RTP/AVP 0", port)
 
-			ExtractPortFromSdp(sdpBody, callID)
+			tracker.ExtractPortFromSDP(sdpBody, callID)
 		}
 
 		tracker.mu.Lock()
@@ -358,7 +358,7 @@ func TestPortMapping_MemoryLeaks(t *testing.T) {
 
 func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 	// Reset port map
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -411,7 +411,7 @@ func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Should not panic or crash
 			assert.NotPanics(t, func() {
-				ExtractPortFromSdp(tt.sdpBody, tt.callID)
+				tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)
 			}, tt.description)
 
 			// Function should complete and not leave system in bad state
@@ -428,7 +428,7 @@ func TestExtractPortFromSdp_SecurityVulnerabilities(t *testing.T) {
 func TestPortMapping_Cleanup(t *testing.T) {
 	t.Run("Port map state isolation", func(t *testing.T) {
 		// Ensure each test has clean state
-		tracker := getTracker()
+		tracker := TestCallTracker(t)
 		tracker.mu.Lock()
 		initialSize := len(tracker.portToCallID)
 		tracker.portToCallID["test-isolation"] = []string{"test-call"}

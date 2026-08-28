@@ -97,7 +97,7 @@ a=rtpmap:0 PCMU/8000
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+			factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 			defer factory.(*sipStreamFactory).Shutdown()
 
 			assembler := capture.NewTCPAssembler(factory)
@@ -309,7 +309,7 @@ Content-Length: 0
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
-			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+			factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 			defer factory.(*sipStreamFactory).Shutdown()
 
 			assembler := capture.NewTCPAssembler(factory)
@@ -456,7 +456,7 @@ Content-Length: 0
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+			factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 			defer factory.(*sipStreamFactory).Shutdown()
 
 			assembler := capture.NewTCPAssembler(factory)

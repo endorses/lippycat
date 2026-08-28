@@ -19,13 +19,13 @@ import (
 
 func TestNewSipStreamFactory(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 	assert.NotNil(t, factory, "NewSipStreamFactory should return a non-nil factory")
 }
 
 func TestSipStreamFactoryNew(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 
 	// Create mock network and transport flows
 	var netFlow, transportFlow gopacket.Flow
@@ -153,7 +153,7 @@ func TestCallIDDetector_Close_Before_Set(t *testing.T) {
 
 func TestSipStreamFactory_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 
 	// Create a stream
 	var netFlow, transportFlow gopacket.Flow
@@ -176,7 +176,7 @@ func TestSipStreamFactory_ContextCancellation(t *testing.T) {
 
 func TestSipStreamFactory_MultipleStreams(t *testing.T) {
 	ctx := context.Background()
-	factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 	defer func() {
 		if closer, ok := factory.(*sipStreamFactory); ok {
 			closer.Close()
@@ -247,7 +247,7 @@ func TestHandleTcpPackets_Integration(t *testing.T) {
 
 	// Create assembler
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Test that handleTcpPackets doesn't panic
@@ -302,7 +302,7 @@ func TestHandleTcpPackets_NonSipPort(t *testing.T) {
 
 	// Create assembler
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Should handle non-SIP packets gracefully (essentially ignore them)
@@ -805,7 +805,7 @@ func TestSipStreamFactoryHealthChecks(t *testing.T) {
 	config.StreamQueueBuffer = 5
 	config.TCPCleanupInterval = 100 * time.Millisecond
 
-	factory := NewSipStreamFactory(ctx, NewLocalFileHandler()).(*sipStreamFactory)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t))).(*sipStreamFactory)
 	defer factory.Close()
 
 	// Test initial healthy state
@@ -841,7 +841,7 @@ func TestGlobalTCPAssemblerMonitoring(t *testing.T) {
 	assert.False(t, healthy)
 
 	// Register a factory
-	factory := NewSipStreamFactory(ctx, NewLocalFileHandler()).(*sipStreamFactory)
+	factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t))).(*sipStreamFactory)
 	defer factory.Close()
 
 	// Now health should be available
@@ -972,6 +972,8 @@ func createTestPacket(t *testing.T, linkType gopacket.LayerType) gopacket.Packet
 // Helper function to reset config for testing
 func ResetConfigOnce() {
 	configOnce = sync.Once{}
+	defaults := DefaultConfig()
+	SetConfig(defaults)
 }
 
 // ResetTestState resets all global state for test isolation

@@ -7,16 +7,17 @@ import (
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/spf13/viper"
 )
 
 // LocalFileHandler handles SIP messages for local capture mode (lc sniff voip)
 // It writes matched calls to local PCAP files
-type LocalFileHandler struct{}
+type LocalFileHandler struct {
+	tracker *CallTracker
+}
 
 // NewLocalFileHandler creates a handler for local file writing
-func NewLocalFileHandler() *LocalFileHandler {
-	return &LocalFileHandler{}
+func NewLocalFileHandler(tracker *CallTracker) *LocalFileHandler {
+	return &LocalFileHandler{tracker: tracker}
 }
 
 // HandleSIPMessage processes a complete SIP message for local file writing.
@@ -74,7 +75,7 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 
 	// Always run the per-message check: besides matching, it updates call state
 	// and extracts RTP ports from any SDP body.
-	matched := handleSipMessage(sipMessage, getCurrentLinkType())
+	matched := handleSipMessage(h.tracker, sipMessage, getCurrentLinkType())
 
 	logger.Debug("TCP SIP filter check result",
 		"call_id", SanitizeCallIDForLogging(callID),
@@ -102,7 +103,7 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 	}
 
 	// The synthesized frame is Ethernet, so the call's writers must be too.
-	call := GetOrCreateCall(callID, layers.LinkTypeEthernet)
+	call := h.tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 	if call == nil {
 		logger.Warn("Failed to create call for TCP SIP message", "call_id", SanitizeCallIDForLogging(callID))
 		discardTCPBufferedPackets(netFlow, transportFlow)
@@ -133,8 +134,8 @@ func (h *LocalFileHandler) HandleSIPMessageAt(sipMessage []byte, callID string, 
 
 	injectPacketToVirtualInterface(pkt)
 
-	if viper.GetViper().GetBool("writeVoip") {
-		WriteSIP(callID, pkt.Packet)
+	if GetConfig().WriteVoIP {
+		WriteSIP(h.tracker, callID, pkt.Packet)
 	}
 
 	// The synthesized packet is self-contained; release the raw buffer so a

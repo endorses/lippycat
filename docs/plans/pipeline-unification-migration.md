@@ -339,21 +339,30 @@ different policies without duplicating parsing.
 
 ### Tasks
 
-- [ ] Define `CallRegistry` and `CallLifecycleObserver` contracts.
-- [ ] Adapt the current processor-owned tracker into the registry implementation.
-- [ ] Support multi-valued endpoint associations required by B2BUA traffic.
-- [ ] Inject registry queries into TCP stream timeout decisions.
-- [ ] Move per-call PCAP writer and grace-period behavior into a session-output
+- [x] Define `CallRegistry` and `CallLifecycleObserver` contracts.
+- [x] Adapt the current processor-owned tracker into the registry implementation.
+- [x] Support multi-valued endpoint associations required by B2BUA traffic.
+- [x] Inject registry queries into TCP stream timeout decisions.
+- [x] Move per-call PCAP writer and grace-period behavior into a session-output
       manager observing call lifecycle events.
-- [ ] Port global tracker consumers by capability: RTP lookup, SIP updates,
+- [x] Port global tracker consumers by capability: RTP lookup, SIP updates,
       writer/session lifecycle, completion, and timeout.
-- [ ] Remove Viper reads from VoIP library code; pass immutable config structs.
-- [ ] Delete global tracker access only after all production and test consumers
+- [x] Remove Viper reads from VoIP library code; pass immutable config structs.
+- [x] Delete global tracker access only after all production and test consumers
       use explicit instances.
-- [ ] Remove unused alternative trackers and unused performance machinery after
+- [x] Remove unused alternative trackers and unused performance machinery after
       a production-reference search and build-tag matrix confirm no callers.
-- [ ] Add tests for timeout, completion, B2BUA shared endpoints, writer-close
+- [x] Add tests for timeout, completion, B2BUA shared endpoints, writer-close
       ordering, bounded capacity, and concurrent shutdown.
+
+Implementation verification (2026-08-29): introduced protocol-neutral registry
+and observer contracts, migrated processor and legacy VoIP paths to explicit
+tracker ownership, separated processor session output from registry state,
+injected call-active queries into TCP reassembly, and removed unused lock-free,
+hybrid, memory-mapped writer, and PCAP-encryption alternatives. `make test`, the
+dedicated `all,li` package tests, focused race tests, and the non-CUDA supported
+build matrix pass. The operational 24-hour and traffic soak tests remain a
+release qualification activity under the plan's Soak Tests section.
 
 ### Exit Criteria
 

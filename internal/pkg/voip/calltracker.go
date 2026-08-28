@@ -16,11 +16,9 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/signals"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/spf13/viper"
 )
 
 const (
@@ -51,7 +49,7 @@ var (
 // The Close() method handles all locking internally and is safe to call
 // concurrently and multiple times (idempotent).
 //
-// Lock ordering: tracker locks (CallTracker.mu or LockFreeCallTracker.complexOpsMu)
+// Lock ordering: CallTracker.mu
 // must never be held while acquiring a per-call writer lock. Remove the call from
 // tracker state first, release the tracker lock, and only then call Close. Writer
 // helpers likewise release writer locks before updating tracker metadata.
@@ -68,6 +66,7 @@ type CallInfo struct {
 	rtpFile     *os.File
 	sipWriterMu sync.Mutex // Protects SIPWriter and sipFile access
 	rtpWriterMu sync.Mutex // Protects RTPWriter and rtpFile access
+	tracker     *CallTracker
 }
 
 func (c *CallInfo) writeSIP(packet gopacket.Packet) error {
@@ -165,27 +164,26 @@ type CallTracker struct {
 	janitorCtx        context.Context
 	janitorCancel     context.CancelFunc
 	janitorStarted    bool
+	janitorWG         sync.WaitGroup
 	shutdownOnce      sync.Once
-	signalHandlerOnce sync.Once
 	config            *Config
 	shuttingDown      atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
 	activeWrites      sync.WaitGroup // Tracks active write operations
 }
 
-var (
-	defaultTracker *CallTracker
-	trackerOnce    sync.Once
-)
-
-func getTracker() *CallTracker {
-	trackerOnce.Do(func() {
-		defaultTracker = NewCallTracker()
-	})
-	return defaultTracker
+func (ct *CallTracker) registerEndpoint(endpoint, callID string) {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+	for _, existing := range ct.portToCallID[endpoint] {
+		if existing == callID {
+			return
+		}
+	}
+	ct.portToCallID[endpoint] = append(ct.portToCallID[endpoint], callID)
 }
 
 func NewCallTracker() *CallTracker {
-	return NewCallTrackerWithCapacity(viper.GetInt("voip.max_calls"))
+	return NewCallTrackerWithCapacity(GetConfig().MaxCalls)
 }
 
 // NewCallTrackerWithCapacity creates a tracker with the configured soft cap.
@@ -208,9 +206,6 @@ func NewCallTrackerWithCapacity(maxCalls int) *CallTracker {
 	}
 
 	tracker.startJanitor()
-
-	// Set up automatic cleanup on process termination
-	go tracker.setupSignalHandler()
 
 	return tracker
 }
@@ -250,16 +245,10 @@ func (ct *CallTracker) startJanitor() {
 	defer ct.mu.Unlock()
 
 	if !ct.janitorStarted {
+		ct.janitorWG.Add(1)
 		go ct.janitorLoop()
 		ct.janitorStarted = true
 	}
-}
-
-// setupSignalHandler handles cleanup on process termination
-func (ct *CallTracker) setupSignalHandler() {
-	ct.signalHandlerOnce.Do(func() {
-		_ = signals.SetupHandlerWithCallback(ct.janitorCtx, ct.Shutdown)
-	})
 }
 
 // Shutdown gracefully shuts down the call tracker
@@ -273,6 +262,7 @@ func (ct *CallTracker) Shutdown() {
 		if ct.janitorCancel != nil {
 			ct.janitorCancel()
 		}
+		ct.janitorWG.Wait()
 
 		// Wait for all active writes to complete
 		ct.activeWrites.Wait()
@@ -296,13 +286,11 @@ func (ct *CallTracker) Shutdown() {
 	})
 }
 
-// ShutdownCallTracker gracefully shuts down the default call tracker
-func ShutdownCallTracker() {
-	getTracker().Shutdown()
-}
-
 func (c *CallInfo) SetCallInfoState(newState string) {
-	tracker := getTracker()
+	tracker := c.tracker
+	if tracker == nil {
+		return
+	}
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
@@ -327,8 +315,8 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 	}
 }
 
-func getCall(callID string) (*CallInfo, error) {
-	tracker := getTracker()
+// GetCall retrieves a call owned by this tracker.
+func (tracker *CallTracker) GetCall(callID string) (*CallInfo, error) {
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 
@@ -343,12 +331,12 @@ func getCall(callID string) (*CallInfo, error) {
 // IsCallActive checks if a call with the given Call-ID is currently active.
 // A call is considered active if it exists and has not received a BYE or CANCEL.
 // This is used by call-aware TCP timeouts to keep connections open for active calls.
-func IsCallActive(callID string) bool {
+// IsCallActive reports whether this tracker owns a call which has not ended.
+func (tracker *CallTracker) IsCallActive(callID string) bool {
 	if callID == "" {
 		return false
 	}
 
-	tracker := getTracker()
 	tracker.mu.RLock()
 	defer tracker.mu.RUnlock()
 
@@ -361,14 +349,9 @@ func IsCallActive(callID string) bool {
 	return call.EndTime == nil
 }
 
-// GetCallTracker returns the default call tracker instance.
-// Used for call-aware timeout checks in TCP streams.
-func GetCallTracker() *CallTracker {
-	return getTracker()
-}
-
-func GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
-	return getTracker().getOrCreateCall(callID, linkType)
+// GetOrCreateCall returns the existing call or creates one owned by this tracker.
+func (tracker *CallTracker) GetOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
+	return tracker.getOrCreateCall(callID, linkType)
 }
 
 func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkType) *CallInfo {
@@ -395,8 +378,9 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 			Created:     time.Now(),
 			LastUpdated: time.Now(),
 			LinkType:    linkType,
+			tracker:     tracker,
 		}
-		if viper.GetViper().GetBool("writeVoip") {
+		if GetConfig().WriteVoIP {
 			if err := call.initWriters(); err != nil {
 				logger.Error("Failed to initialize writers for call",
 					"call_id", SanitizeCallIDForLogging(callID),
@@ -507,7 +491,7 @@ func (c *CallInfo) initWriters() error {
 	c.rtpWriterMu.Lock()
 	defer c.rtpWriterMu.Unlock()
 	// Check if user specified an output file
-	outputFile := viper.GetString("voip.output_file")
+	outputFile := GetConfig().OutputFile
 
 	var sipPath, rtpPath string
 
@@ -685,6 +669,7 @@ func removeControlCharacters(s string) string {
 }
 
 func (ct *CallTracker) janitorLoop() {
+	defer ct.janitorWG.Done()
 	ticker := time.NewTicker(ct.config.JanitorCleanupInterval)
 	defer ticker.Stop()
 

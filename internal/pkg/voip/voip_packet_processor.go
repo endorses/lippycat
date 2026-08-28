@@ -18,9 +18,9 @@ type VoIPPacketProcessor struct {
 }
 
 // NewVoIPPacketProcessor creates a packet processor for VoIP buffering in hunter mode
-func NewVoIPPacketProcessor(forwarder PacketForwarder, bufferMgr *BufferManager) *VoIPPacketProcessor {
+func NewVoIPPacketProcessor(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *VoIPPacketProcessor {
 	return &VoIPPacketProcessor{
-		udpHandler: NewUDPPacketHandler(forwarder, bufferMgr),
+		udpHandler: NewUDPPacketHandler(tracker, forwarder, bufferMgr),
 	}
 }
 

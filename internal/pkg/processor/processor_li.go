@@ -163,9 +163,7 @@ func (p *Processor) initLIManager() {
 	// (e.g., EndTime expiration with ImplicitDeactivationAllowed=true)
 	// The LI Manager automatically reports these to ADMF via X1 client.
 	deactivationCallback := func(task *li.InterceptTask, reason li.DeactivationReason) {
-		if calls, ok := liPinnedCalls.LoadAndDelete(task.XID); ok {
-			calls.(*sync.Map).Range(func(key, _ any) bool { voip.GetCallTracker().UnpinCall(key.(string)); return true })
-		}
+		liPinnedCalls.Delete(task.XID)
 		if liSequencer != nil {
 			liSequencer.ClearXID(task.XID)
 		}
@@ -264,13 +262,9 @@ func (p *Processor) initLIManager() {
 		if deliverX3 && pkt.VoIPData != nil && pkt.VoIPData.CallID != "" {
 			callsAny, _ := liPinnedCalls.LoadOrStore(task.XID, &sync.Map{})
 			calls := callsAny.(*sync.Map)
-			if _, loaded := calls.LoadOrStore(pkt.VoIPData.CallID, struct{}{}); !loaded {
-				voip.GetCallTracker().PinCall(pkt.VoIPData.CallID)
-			}
+			calls.LoadOrStore(pkt.VoIPData.CallID, struct{}{})
 			if pkt.VoIPData.Method == "BYE" || pkt.VoIPData.Method == "CANCEL" {
-				if _, loaded := calls.LoadAndDelete(pkt.VoIPData.CallID); loaded {
-					voip.GetCallTracker().UnpinCall(pkt.VoIPData.CallID)
-				}
+				calls.Delete(pkt.VoIPData.CallID)
 			}
 		}
 

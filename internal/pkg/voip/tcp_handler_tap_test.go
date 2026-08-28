@@ -274,8 +274,6 @@ func TestTapHandler_MOLegMatchesFromAndPAI(t *testing.T) {
 
 func TestTapHandler_TCPSDPDoesNotRetainInGlobalTracker(t *testing.T) {
 	tracker := TestCallTracker(t)
-	restore := OverrideDefaultTracker(tracker)
-	t.Cleanup(restore)
 
 	ch := make(chan source.InjectedPacket, 64)
 	h := NewTapTCPHandler(ch)

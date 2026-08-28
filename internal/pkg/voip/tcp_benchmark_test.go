@@ -91,7 +91,7 @@ func BenchmarkTCPStreamFactory(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ctx := context.Background()
-		factory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+		factory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(b)))
 		factory.(*sipStreamFactory).Shutdown()
 	}
 }

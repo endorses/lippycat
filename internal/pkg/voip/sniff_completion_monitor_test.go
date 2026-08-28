@@ -6,7 +6,7 @@ import (
 )
 
 func TestSniffCompletionMonitorPrunesClosedCalls(t *testing.T) {
-	monitor := NewSniffCompletionMonitor(&SniffCompletionMonitorConfig{
+	monitor := NewSniffCompletionMonitor(TestCallTracker(t), &SniffCompletionMonitorConfig{
 		GracePeriod:   time.Second,
 		CheckInterval: time.Second,
 		ClosedCallTTL: time.Minute,

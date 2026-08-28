@@ -10,10 +10,9 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/voip/monitoring"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/spf13/viper"
 )
 
-func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
+func handleUdpPackets(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP) {
 	start := time.Now()
 	packet := pkt.Packet
 	ctx := context.Background()
@@ -44,15 +43,19 @@ func handleUdpPackets(pkt capture.PacketInfo, layer *layers.UDP) {
 	// Use buffering if buffer manager is initialized
 	if globalBufferMgr != nil {
 		logger.Debug("Using buffered UDP processing")
-		handleUdpPacketsWithBuffer(pkt, layer, tracingCtx)
+		handleUdpPacketsWithBuffer(tracker, pkt, layer, tracingCtx)
 	} else {
 		logger.Debug("Using immediate UDP processing")
 		// Fallback to immediate processing (no buffering)
-		handleUdpPacketsImmediate(pkt, layer, tracingCtx)
+		handleUdpPacketsImmediate(tracker, pkt, layer, tracingCtx)
 	}
 }
 
-func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
+func handleUdpPacketsWithTracker(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP) {
+	handleUdpPackets(tracker, pkt, layer)
+}
+
+func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
 	packet := pkt.Packet
 
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
@@ -64,7 +67,7 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 		payload := udp.Payload
 
 		// Try to parse as SIP message (content-based detection, not port-based)
-		if handleSipMessage(payload, pkt.LinkType) {
+		if handleSipMessage(tracker, payload, pkt.LinkType) {
 			// It's a SIP packet - inject into virtual interface
 			injectPacketToVirtualInterface(pkt)
 
@@ -80,7 +83,7 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 						"source", "udp_processing")
 					return
 				}
-				call, _ := getCall(callID) // Call already created by handleSipMessage
+				call, _ := tracker.GetCall(callID) // Call already created by handleSipMessage
 				if call != nil {
 					// Record call tracking event
 					monitoring.RecordCallEvent(tracingCtx, callID, "sip_packet", map[string]interface{}{
@@ -91,13 +94,13 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 					})
 				}
 
-				if viper.GetViper().GetBool("writeVoip") {
-					WriteSIP(callID, packet)
+				if GetConfig().WriteVoIP {
+					WriteSIP(tracker, callID, packet)
 				} else {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
 				}
 				if BytesContains(event.SDP, []byte("m=audio")) {
-					ExtractPortFromSdp(string(event.SDP), callID)
+					tracker.ExtractPortFromSDP(string(event.SDP), callID)
 				}
 			}
 			return // SIP packet processed, done
@@ -105,13 +108,13 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 	}
 
 	// Not a SIP packet - check if it's RTP for a tracked call
-	if IsTracked(packet) {
+	if tracker.IsTracked(packet) {
 		// It's an RTP packet for a tracked call - inject into virtual interface
 		injectPacketToVirtualInterface(pkt)
 
-		callID := GetCallIDForPacket(packet)
-		if viper.GetViper().GetBool("writeVoip") {
-			WriteRTP(callID, packet)
+		callID := tracker.GetCallIDForPacket(packet)
+		if GetConfig().WriteVoIP {
+			WriteRTP(tracker, callID, packet)
 		} else {
 			logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
 		}
@@ -119,7 +122,7 @@ func handleUdpPacketsImmediate(pkt capture.PacketInfo, layer *layers.UDP, tracin
 }
 
 // handleUdpPacketsWithBuffer processes UDP packets with buffering for call filtering
-func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
+func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
 	packet := pkt.Packet
 
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
@@ -131,7 +134,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 		payload := udp.Payload
 
 		// Try to parse as SIP message (content-based detection, not port-based)
-		if handleSipMessage(payload, pkt.LinkType) {
+		if handleSipMessage(tracker, payload, pkt.LinkType) {
 			// It's a SIP packet - process it
 			event, parseErr := sharedsip.Parse(payload, sipParseOptions(packet, layer))
 			if parseErr != nil || event.CallID == "" {
@@ -174,15 +177,15 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 				// whether or not it carries SDP.
 				injectPacketToVirtualInterface(pkt)
 
-				if viper.GetViper().GetBool("writeVoip") {
-					WriteSIP(callID, packet)
+				if GetConfig().WriteVoIP {
+					WriteSIP(tracker, callID, packet)
 				} else {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
 				}
 
 				// A re-INVITE or delayed answer can move the media ports.
 				if hasSDP {
-					ExtractPortFromSdp(string(event.SDP), callID)
+					tracker.ExtractPortFromSDP(string(event.SDP), callID)
 				}
 				return
 			}
@@ -202,7 +205,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 					},
 					func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
 						// Create call tracker entry
-						call := GetOrCreateCall(callID, linkType)
+						call := tracker.GetOrCreateCall(callID, linkType)
 						if call != nil {
 							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
 								"from": metadata.From,
@@ -214,10 +217,10 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 						injectPacketToVirtualInterface(pkt)
 
 						// Write all buffered packets using helper
-						handleMatchedCallForFileWrite(callID, packets, metadata)
+						handleMatchedCallForFileWrite(tracker, callID, packets, metadata)
 
 						// Extract RTP ports from SDP for future RTP association
-						ExtractPortFromSdp(string(event.SDP), callID)
+						tracker.ExtractPortFromSDP(string(event.SDP), callID)
 					},
 				)
 				_ = matched // Callback already handled everything
@@ -229,7 +232,7 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 	// Not a SIP packet - check if it's RTP for a tracked call
 	{
 		// Potentially RTP packet - check if it belongs to a tracked call
-		callID := GetCallIDForPacket(packet)
+		callID := tracker.GetCallIDForPacket(packet)
 		if callID != "" {
 			// Check if this is a port we're tracking
 			dstPort := layer.DstPort.String()
@@ -274,17 +277,17 @@ func handleUdpPacketsWithBuffer(pkt capture.PacketInfo, layer *layers.UDP, traci
 					// Call already matched, inject into virtual interface and write immediately
 					injectPacketToVirtualInterface(pkt)
 
-					if viper.GetViper().GetBool("writeVoip") {
-						WriteRTP(bufCallID, packet)
+					if GetConfig().WriteVoIP {
+						WriteRTP(tracker, bufCallID, packet)
 					}
 				}
 				// Otherwise packet is buffered, waiting for filter decision
-			} else if IsTracked(packet) {
+			} else if tracker.IsTracked(packet) {
 				// Call already decided and tracker knows about it, inject into virtual interface
 				injectPacketToVirtualInterface(pkt)
 
-				if viper.GetViper().GetBool("writeVoip") {
-					WriteRTP(callID, packet)
+				if GetConfig().WriteVoIP {
+					WriteRTP(tracker, callID, packet)
 				}
 			}
 		}
@@ -305,7 +308,7 @@ func sipParseOptions(packet gopacket.Packet, layer *layers.UDP) sharedsip.ParseO
 }
 
 // isSIPPacket checks if a packet is a SIP packet using content-based detection
-func isSIPPacket(packet gopacket.Packet) bool {
+func isSIPPacket(tracker *CallTracker, packet gopacket.Packet) bool {
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
 		udp, ok := udpLayer.(*layers.UDP)
 		if ok {
@@ -315,24 +318,24 @@ func isSIPPacket(packet gopacket.Packet) bool {
 			}
 			// Use content-based SIP detection, not port-based
 			// Use Ethernet as default link type (most common case)
-			return handleSipMessage(payload, layers.LinkTypeEthernet)
+			return handleSipMessage(tracker, payload, layers.LinkTypeEthernet)
 		}
 	}
 	return false
 }
 
 // handleMatchedCallForFileWrite is a callback for BufferManager that writes packets to files
-func handleMatchedCallForFileWrite(callID string, packets []gopacket.Packet, metadata *CallMetadata) {
-	if !viper.GetViper().GetBool("writeVoip") {
+func handleMatchedCallForFileWrite(tracker *CallTracker, callID string, packets []gopacket.Packet, metadata *CallMetadata) {
+	if !GetConfig().WriteVoIP {
 		return
 	}
 
 	// Write all buffered packets
 	for _, packet := range packets {
-		if isSIPPacket(packet) {
-			WriteSIP(callID, packet)
+		if isSIPPacket(tracker, packet) {
+			WriteSIP(tracker, callID, packet)
 		} else {
-			WriteRTP(callID, packet)
+			WriteRTP(tracker, callID, packet)
 		}
 	}
 }

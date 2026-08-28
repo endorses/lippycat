@@ -30,8 +30,6 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 
 	// Create isolated tracker for this test
 	tracker := TestCallTracker(t)
-	restore := OverrideDefaultTracker(tracker)
-	defer restore()
 
 	// Setup test user for surveillance
 	sipusers.AddSipUser("testuser", &sipusers.SipUser{
@@ -42,7 +40,7 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 	// Create packet channel and assembler
 	packetCh := make(chan capture.PacketInfo, 100)
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler(tracker))
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assembler := capture.NewTCPAssembler(streamFactory)
 
@@ -51,7 +49,7 @@ func TestStartProcessorChannelProcessing(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		startProcessor(packetCh, assembler)
+		startProcessorWithTracker(tracker, packetCh, assembler)
 	}()
 
 	// Send test packets
@@ -166,7 +164,7 @@ func TestContainsUserInHeadersIntegration(t *testing.T) {
 
 func TestEndToEndSipCallProcessing(t *testing.T) {
 	// Get CallTracker instance and reset state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 
 	// Clear any existing state
 	tracker.mu.Lock()
@@ -199,7 +197,7 @@ m=audio 8000 RTP/AVP 0
 a=rtpmap:0 PCMU/8000`)
 
 	// Process the SIP message
-	isValidSip := handleSipMessage(sipMessage, layers.LinkTypeEthernet)
+	isValidSip := handleSipMessageWithTracker(tracker, sipMessage, layers.LinkTypeEthernet)
 	assert.True(t, isValidSip, "SIP message should be processed successfully")
 
 	// Verify call was created
@@ -226,7 +224,7 @@ a=rtpmap:0 PCMU/8000`)
 	// Test RTP packet handling for tracked port
 	rtpPacket := createRtpPacketInfo(t, 9999, 8000)
 	if udpLayer := rtpPacket.Packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-		handleUdpPackets(rtpPacket, udpLayer.(*layers.UDP))
+		handleUdpPacketsWithTracker(tracker, rtpPacket, udpLayer.(*layers.UDP))
 	}
 
 	// Verify the integration completed without errors
@@ -238,7 +236,7 @@ func TestStreamFactoryIntegration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assert.NotNil(t, streamFactory, "Stream factory should be created")
 
@@ -262,7 +260,7 @@ func TestStreamFactoryIntegration(t *testing.T) {
 
 func TestMultiProtocolPacketProcessing(t *testing.T) {
 	// Test handling multiple packet types in sequence
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 
 	// Clear any existing state
 	tracker.mu.Lock()
@@ -291,7 +289,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler())
+	streamFactory := NewSipStreamFactory(ctx, NewLocalFileHandler(TestCallTracker(t)))
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assembler := capture.NewTCPAssembler(streamFactory)
 
@@ -309,7 +307,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 				case *layers.TCP:
 					handleTcpPackets(pkt.packet, layer, assembler)
 				case *layers.UDP:
-					handleUdpPackets(pkt.packet, layer)
+					handleUdpPacketsWithTracker(tracker, pkt.packet, layer)
 				}
 			})
 		})
@@ -326,7 +324,7 @@ func TestMultiProtocolPacketProcessing(t *testing.T) {
 
 func TestSipUserSurveillanceIntegration(t *testing.T) {
 	// Test surveillance integration across the entire pipeline
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 
 	// Clear any existing state
 	tracker.mu.Lock()
@@ -343,7 +341,7 @@ Content-Length: 0
 
 `)
 
-	result := handleSipMessage(sipMessage, layers.LinkTypeEthernet)
+	result := handleSipMessageWithTracker(tracker, sipMessage, layers.LinkTypeEthernet)
 	assert.True(t, result, "Should process all users in promiscuous mode (no surveillance configured)")
 
 	// Add surveillance
@@ -362,7 +360,7 @@ Content-Length: 0
 
 `)
 
-	result = handleSipMessage(surveilledMessage, layers.LinkTypeEthernet)
+	result = handleSipMessageWithTracker(tracker, surveilledMessage, layers.LinkTypeEthernet)
 	assert.True(t, result, "Should process surveiled users")
 }
 
@@ -508,7 +506,7 @@ func (m *MockOfflinePcapInterface) Handle() (*pcap.Handle, error) {
 
 func TestIntegrationErrorHandling(t *testing.T) {
 	// Test error handling across the VoIP processing pipeline
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 
 	// Clear any existing state
 	tracker.mu.Lock()
@@ -555,7 +553,7 @@ Content-Length: -1
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.NotPanics(t, func() {
-				result := handleSipMessage(tt.sipMessage, layers.LinkTypeEthernet)
+				result := handleSipMessageWithTracker(TestCallTracker(t), tt.sipMessage, layers.LinkTypeEthernet)
 				if tt.shouldFail {
 					assert.False(t, result, "Should handle malformed messages gracefully")
 				}

@@ -26,6 +26,7 @@ type sipStreamFactory struct {
 	cleanupTicker          *time.Ticker
 	closed                 int32             // atomic flag to track if factory is closed
 	handler                SIPMessageHandler // handler for processing complete SIP messages
+	callActive             func(string) bool // injected registry query for call-aware timeouts
 }
 
 type SIPStreamFactory interface {
@@ -34,17 +35,26 @@ type SIPStreamFactory interface {
 }
 
 func NewSipStreamFactory(ctx context.Context, handler SIPMessageHandler) SIPStreamFactory {
+	return NewSipStreamFactoryWithConfig(ctx, handler, *GetConfig(), nil)
+}
+
+// NewSipStreamFactoryWithConfig constructs a stream factory from immutable
+// configuration and an optional instance-owned call registry query. Keeping the
+// query at the composition boundary prevents TCP stream aging from reaching into
+// package-global call state.
+func NewSipStreamFactoryWithConfig(ctx context.Context, handler SIPMessageHandler, cfg Config, callActive func(string) bool) SIPStreamFactory {
 	ctx, cancel := context.WithCancel(ctx)
-	config := GetConfig()
+	config := cfg
 
 	// Apply performance mode optimizations
-	applyPerformanceModeOptimizations(config)
+	applyPerformanceModeOptimizations(&config)
 
 	factory := &sipStreamFactory{
 		ctx:           ctx,
 		cancel:        cancel,
-		config:        config,
+		config:        &config,
 		handler:       handler,
+		callActive:    callActive,
 		cleanupTicker: time.NewTicker(config.TCPCleanupInterval),
 	}
 

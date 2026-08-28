@@ -74,8 +74,8 @@ func TestAsyncWriterPool_WritePacketAsync(t *testing.T) {
 	callID := "test-call-async"
 
 	// Setup call tracker with a test call
-	setupTestCall(t, callID)
-	defer cleanupTestCall(callID)
+	setupTestCall(t, pool.tracker, callID)
+	defer cleanupTestCall(t, callID)
 
 	// Test async write
 	err := pool.WritePacketAsync(callID, packet, PacketTypeSIP)
@@ -101,8 +101,8 @@ func TestAsyncWriterPool_WritePacketSync(t *testing.T) {
 	callID := "test-call-sync"
 
 	// Setup call tracker with a test call
-	setupTestCall(t, callID)
-	defer cleanupTestCall(callID)
+	setupTestCall(t, pool.tracker, callID)
+	defer cleanupTestCall(t, callID)
 
 	// Test sync write
 	err := pool.WritePacketSync(callID, packet, PacketTypeSIP)
@@ -124,8 +124,8 @@ func TestAsyncWriterPool_QueueFull(t *testing.T) {
 	callID := "test-call-full"
 
 	// Setup call tracker
-	setupTestCall(t, callID)
-	defer cleanupTestCall(callID)
+	setupTestCall(t, pool.tracker, callID)
+	defer cleanupTestCall(t, callID)
 
 	// Fill the queue to capacity
 	err1 := pool.WritePacketAsync(callID, packet, PacketTypeSIP)
@@ -174,8 +174,8 @@ func TestAsyncWriterPool_ConcurrentWrites(t *testing.T) {
 	callIDs := make([]string, numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
 		callIDs[i] = "test-call-concurrent-" + string(rune(i))
-		setupTestCall(t, callIDs[i])
-		defer cleanupTestCall(callIDs[i])
+		setupTestCall(t, pool.tracker, callIDs[i])
+		defer cleanupTestCall(t, callIDs[i])
 	}
 
 	var wg sync.WaitGroup
@@ -236,8 +236,8 @@ func TestAsyncWriterPool_InvalidPacketType(t *testing.T) {
 	packet := createTestPacketForAsync(t)
 	callID := "test-call-invalid-type"
 
-	setupTestCall(t, callID)
-	defer cleanupTestCall(callID)
+	setupTestCall(t, pool.tracker, callID)
+	defer cleanupTestCall(t, callID)
 
 	// Test with invalid packet type
 	err := pool.WritePacketSync(callID, packet, PacketType(999))
@@ -300,8 +300,8 @@ func TestAsyncWriterPool_SecurityValidation(t *testing.T) {
 
 	// Test malicious call ID
 	maliciousCallID := "../path/traversal/attack"
-	setupTestCall(t, maliciousCallID)
-	defer cleanupTestCall(maliciousCallID)
+	setupTestCall(t, pool.tracker, maliciousCallID)
+	defer cleanupTestCall(t, maliciousCallID)
 
 	// Write should be rejected due to security validation
 	err := pool.WritePacketSync(maliciousCallID, packet, PacketTypeSIP)
@@ -313,6 +313,7 @@ func TestAsyncWriterPool_SecurityValidation(t *testing.T) {
 }
 
 func TestGetAsyncWriter(t *testing.T) {
+	tracker := TestCallTracker(t)
 	// Reset the global async writer to test initialization
 	globalAsyncWriter = nil
 	asyncWriterOnce = sync.Once{}
@@ -321,12 +322,12 @@ func TestGetAsyncWriter(t *testing.T) {
 	ResetConfigOnce()
 
 	// Get the global async writer
-	writer := GetAsyncWriter()
+	writer := GetAsyncWriter(tracker)
 	assert.NotNil(t, writer)
 	assert.True(t, writer.started.Load())
 
 	// Verify singleton behavior
-	writer2 := GetAsyncWriter()
+	writer2 := GetAsyncWriter(tracker)
 	assert.Same(t, writer, writer2)
 
 	// Cleanup
@@ -334,6 +335,7 @@ func TestGetAsyncWriter(t *testing.T) {
 }
 
 func TestAsyncWriterIntegration_WithUpdatedWriter(t *testing.T) {
+	tracker := TestCallTracker(t)
 	// Reset global state
 	globalAsyncWriter = nil
 	asyncWriterOnce = sync.Once{}
@@ -343,20 +345,20 @@ func TestAsyncWriterIntegration_WithUpdatedWriter(t *testing.T) {
 	callID := "test-integration-call"
 
 	// Setup call
-	setupTestCall(t, callID)
-	defer cleanupTestCall(callID)
+	setupTestCall(t, tracker, callID)
+	defer cleanupTestCall(t, callID)
 
 	// Test WriteSIP function (should use async writer)
-	WriteSIP(callID, packet)
+	WriteSIP(tracker, callID, packet)
 
 	// Test WriteRTP function (should use async writer)
-	WriteRTP(callID, packet)
+	WriteRTP(tracker, callID, packet)
 
 	// Wait for async processing
 	time.Sleep(200 * time.Millisecond)
 
 	// Get statistics
-	stats := GetWriterStats()
+	stats := GetWriterStats(tracker)
 	assert.Greater(t, stats.PacketsQueued.Load(), int64(0))
 
 	// Cleanup
@@ -406,8 +408,8 @@ func createTestPacketForAsync(t *testing.T) gopacket.Packet {
 	return packet
 }
 
-func setupTestCall(t *testing.T, callID string) {
-	call := GetOrCreateCall(callID, layers.LinkTypeEthernet)
+func setupTestCall(t testing.TB, tracker *CallTracker, callID string) {
+	call := tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 	require.NotNil(t, call)
 
 	// Initialize the call's writers if they're not already set up
@@ -417,7 +419,7 @@ func setupTestCall(t *testing.T, callID string) {
 	}
 }
 
-func setupTestCallWithWriters(t *testing.T, callID string, call *CallInfo) {
+func setupTestCallWithWriters(t testing.TB, callID string, call *CallInfo) {
 	// Create temporary files for testing
 	sipFile, err := os.CreateTemp("", "test-sip-*.pcap")
 	require.NoError(t, err)
@@ -439,8 +441,8 @@ func setupTestCallWithWriters(t *testing.T, callID string, call *CallInfo) {
 	require.NoError(t, err)
 }
 
-func cleanupTestCall(callID string) {
-	tracker := getTracker()
+func cleanupTestCall(t testing.TB, callID string) {
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 
@@ -467,7 +469,7 @@ func BenchmarkAsyncWriterPool_WritePacketAsync(b *testing.B) {
 
 	packet := createTestPacketForAsync(&testing.T{})
 	callID := "benchmark-call"
-	setupTestCall(&testing.T{}, callID)
+	setupTestCall(b, pool.tracker, callID)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -483,7 +485,7 @@ func BenchmarkAsyncWriterPool_WritePacketSync(b *testing.B) {
 
 	packet := createTestPacketForAsync(&testing.T{})
 	callID := "benchmark-call-sync"
-	setupTestCall(&testing.T{}, callID)
+	setupTestCall(b, pool.tracker, callID)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -521,14 +523,14 @@ func TestAsyncWriterPool_QueueShardingIsStablePerCall(t *testing.T) {
 func TestAsyncWriterPool_StopDrainsQueuedPackets(t *testing.T) {
 	ResetConfigOnce()
 
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.shuttingDown.Store(0)
+	pool := NewAsyncWriterPoolWithTracker(tracker, 4, 200)
 
 	callID := "test-call-stop-drain"
-	setupTestCall(t, callID)
-	defer cleanupTestCall(callID)
+	setupTestCall(t, tracker, callID)
+	defer cleanupTestCall(t, callID)
 
-	pool := NewAsyncWriterPool(4, 200)
 	require.NoError(t, pool.Start())
 
 	packet := createTestPacketForAsync(t)

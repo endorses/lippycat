@@ -64,13 +64,14 @@ func TestStartProcessor_UDPHandling(t *testing.T) {
 
 	// Create assembler for TCP processing
 	ctx := context.Background()
-	handler := NewLocalFileHandler()
+	tracker := TestCallTracker(t)
+	handler := NewLocalFileHandler(tracker)
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Test the processor
-	startProcessor(ch, assembler)
+	startProcessor(tracker, ch, assembler)
 
 	// The test passes if no panic occurs and the processor completes
 	assert.True(t, true, "Processor completed successfully")
@@ -126,13 +127,14 @@ func TestStartProcessor_TCPHandling(t *testing.T) {
 
 	// Create assembler for TCP processing
 	ctx := context.Background()
-	handler := NewLocalFileHandler()
+	tracker := TestCallTracker(t)
+	handler := NewLocalFileHandler(tracker)
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Test the processor
-	startProcessor(ch, assembler)
+	startProcessor(tracker, ch, assembler)
 
 	// The test passes if no panic occurs and the processor completes
 	assert.True(t, true, "TCP processor completed successfully")
@@ -152,13 +154,14 @@ func TestStartProcessor_InvalidPackets(t *testing.T) {
 	close(ch)
 
 	ctx := context.Background()
-	handler := NewLocalFileHandler()
+	tracker := TestCallTracker(t)
+	handler := NewLocalFileHandler(tracker)
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assembler := capture.NewTCPAssembler(streamFactory)
 
 	// Should handle invalid packets gracefully
-	startProcessor(ch, assembler)
+	startProcessor(tracker, ch, assembler)
 
 	assert.True(t, true, "Invalid packet handled gracefully")
 }
@@ -225,7 +228,8 @@ func TestProcessorChannelClosure(t *testing.T) {
 	close(ch) // Close immediately
 
 	ctx := context.Background()
-	handler := NewLocalFileHandler()
+	tracker := TestCallTracker(t)
+	handler := NewLocalFileHandler(tracker)
 	streamFactory := NewSipStreamFactory(ctx, handler)
 	defer streamFactory.(*sipStreamFactory).Shutdown()
 	assembler := capture.NewTCPAssembler(streamFactory)
@@ -233,7 +237,7 @@ func TestProcessorChannelClosure(t *testing.T) {
 	// Should complete without hanging
 	done := make(chan bool, 1)
 	go func() {
-		startProcessor(ch, assembler)
+		startProcessor(tracker, ch, assembler)
 		done <- true
 	}()
 

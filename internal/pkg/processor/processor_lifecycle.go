@@ -226,14 +226,14 @@ func (p *Processor) Start(ctx context.Context) error {
 	p.hunterMonitor.Start(p.ctx)
 
 	// Start call completion monitor (VoIP PCAP file management)
-	if p.callCompletionMonitor != nil {
+	if p.sessionOutputManager != nil {
 		// Wire up voip processor cleanup if available (tap mode with LocalSource)
 		if localSrc, ok := p.packetSource.(*source.LocalSource); ok {
 			if voipProc := localSrc.GetVoIPProcessor(); voipProc != nil {
-				p.callCompletionMonitor.SetVoIPPortCleaner(voipProc)
+				p.sessionOutputManager.SetVoIPPortCleaner(voipProc)
 			}
 		}
-		p.callCompletionMonitor.Start()
+		p.sessionOutputManager.Start()
 	}
 
 	// Start LI Manager if configured (no-op if !li build)
@@ -349,15 +349,10 @@ func (p *Processor) Shutdown() error {
 			p.dnsTunneling.Stop()
 		}
 
-		// Stop call completion monitor (closes any pending PCAP files)
-		if p.callCompletionMonitor != nil {
-			p.callCompletionMonitor.Stop()
-		}
-
-		// Close per-call PCAP writer
-		if p.perCallPcapWriter != nil {
-			if err := p.perCallPcapWriter.Close(); err != nil {
-				logger.Warn("Failed to close per-call PCAP writer", "error", err)
+		// Stop lifecycle observation before closing session-owned writers.
+		if p.sessionOutputManager != nil {
+			if err := p.sessionOutputManager.Close(); err != nil {
+				logger.Warn("Failed to close session output manager", "error", err)
 			}
 		}
 

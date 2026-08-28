@@ -25,6 +25,7 @@ import (
 // PCAP and returns a feed function plus a reader for what actually got written.
 type sipWriteHarness struct {
 	t       *testing.T
+	tracker *CallTracker
 	callID  string
 	sipPath string
 }
@@ -45,14 +46,19 @@ func newSIPWriteHarness(t *testing.T, callID string) *sipWriteHarness {
 
 	viper.Set("writeVoip", true)
 	viper.Set("voip.output_file", out)
+	cfg := *GetConfig()
+	cfg.WriteVoIP = true
+	cfg.OutputFile = out
+	SetConfig(&cfg)
 	t.Cleanup(func() { viper.Reset() })
 
 	// The call tracker and async writer pool are process globals that outlive
 	// a single test, so reset the state this call depends on. Without this a
 	// repeat run reuses the previous run's CallInfo, whose writers point at an
 	// already-deleted temp directory.
-	resetVoipWriteState(callID)
-	t.Cleanup(func() { resetVoipWriteState(callID) })
+	tracker := TestCallTracker(t)
+	resetVoipWriteState(tracker, callID)
+	t.Cleanup(func() { resetVoipWriteState(tracker, callID) })
 
 	// Fresh buffer manager so the buffered path is exercised, with a long
 	// max age so the janitor does not interfere with the test.
@@ -65,6 +71,7 @@ func newSIPWriteHarness(t *testing.T, callID string) *sipWriteHarness {
 
 	return &sipWriteHarness{
 		t:       t,
+		tracker: tracker,
 		callID:  callID,
 		sipPath: filepath.Join(tmpDir, fmt.Sprintf("capture_sip_%s.pcap", sanitize(callID))),
 	}
@@ -72,8 +79,7 @@ func newSIPWriteHarness(t *testing.T, callID string) *sipWriteHarness {
 
 // resetVoipWriteState drops any tracker entry for callID and rearms the global
 // async writer pool, which CloseWriters stops permanently.
-func resetVoipWriteState(callID string) {
-	tracker := getTracker()
+func resetVoipWriteState(tracker *CallTracker, callID string) {
 
 	// Another test in this package may have shut the global tracker down,
 	// which makes every write a no-op. Same convention as writer_test.go.
@@ -101,7 +107,7 @@ func (h *sipWriteHarness) feed(payload string) {
 	ci.Timestamp = time.Unix(1700000000, 0)
 
 	udp := pkt.Layer(layers.LayerTypeUDP).(*layers.UDP)
-	handleUdpPackets(capture.PacketInfo{
+	handleUdpPackets(h.tracker, capture.PacketInfo{
 		Packet:   pkt,
 		LinkType: layers.LinkTypeEthernet,
 	}, udp)

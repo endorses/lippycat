@@ -47,11 +47,12 @@ func BenchmarkUDPPacketProcessing(b *testing.B) {
 		LinkType: layers.LinkTypeEthernet,
 		Packet:   packet,
 	}
+	tracker := TestCallTracker(b)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-			handleUdpPackets(pktInfo, udpLayer.(*layers.UDP))
+			handleUdpPacketsWithTracker(tracker, pktInfo, udpLayer.(*layers.UDP))
 		}
 	}
 }
@@ -83,26 +84,18 @@ a=rtpmap:0 PCMU/8000`)
 
 // BenchmarkCallTracking benchmarks call creation and lookup performance
 func BenchmarkCallTracking(b *testing.B) {
-	// Clean up after benchmark
-	defer func() {
-		tracker := getTracker()
-		tracker.mu.Lock()
-		tracker.callMap = make(map[string]*CallInfo)
-		tracker.portToCallID = make(map[string][]string)
-		tracker.mu.Unlock()
-	}()
-
+	tracker := TestCallTracker(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		callID := "benchmark-call-" + string(rune(i%1000))
-		GetOrCreateCall(callID, layers.LinkTypeEthernet)
+		tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 	}
 }
 
 // BenchmarkCallIDExtraction benchmarks Call-ID extraction from various packet types
 func BenchmarkCallIDExtraction(b *testing.B) {
 	// Create a packet with stored Call-ID mapping
-	tracker := getTracker()
+	tracker := TestCallTracker(b)
 	tracker.mu.Lock()
 	tracker.portToCallID["5060"] = []string{"benchmark-call-mapping"}
 	tracker.mu.Unlock()
@@ -141,7 +134,7 @@ func BenchmarkCallIDExtraction(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		GetCallIDForPacket(packet)
+		tracker.GetCallIDForPacket(packet)
 	}
 
 	// Clean up
@@ -193,22 +186,24 @@ func BenchmarkHighVolumeProcessing(b *testing.B) {
 		}
 	}
 
+	tracker := TestCallTracker(b)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pkt := packets[i%100]
 		if udpLayer := pkt.Packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
-			handleUdpPackets(pkt, udpLayer.(*layers.UDP))
+			handleUdpPacketsWithTracker(tracker, pkt, udpLayer.(*layers.UDP))
 		}
 	}
 }
 
 // BenchmarkConcurrentCallProcessing benchmarks concurrent call processing
 func BenchmarkConcurrentCallProcessing(b *testing.B) {
+	tracker := TestCallTracker(b)
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
 			callID := "concurrent-call-" + string(rune(i%1000))
-			GetOrCreateCall(callID, layers.LinkTypeEthernet)
+			tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 			i++
 		}
 	})
@@ -217,11 +212,12 @@ func BenchmarkConcurrentCallProcessing(b *testing.B) {
 // BenchmarkMemoryUsage benchmarks memory usage patterns
 func BenchmarkMemoryUsage(b *testing.B) {
 	b.ReportAllocs()
+	tracker := TestCallTracker(b)
 
 	for i := 0; i < b.N; i++ {
 		// Create and process a complete SIP transaction
 		callID := "memory-test-call-" + string(rune(i%100))
-		call := GetOrCreateCall(callID, layers.LinkTypeEthernet)
+		call := tracker.GetOrCreateCall(callID, layers.LinkTypeEthernet)
 
 		// Simulate some processing
 		call.SetCallInfoState("INVITE")
@@ -229,10 +225,9 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		call.SetCallInfoState("ACK")
 
 		// Extract port mapping
-		ExtractPortFromSdp("m=audio 8000 RTP/AVP 0", callID)
+		tracker.ExtractPortFromSDP("m=audio 8000 RTP/AVP 0", callID)
 
 		// Get Call-ID from packet simulation
-		tracker := getTracker()
 		tracker.mu.RLock()
 		_ = tracker.portToCallID["8000"]
 		tracker.mu.RUnlock()

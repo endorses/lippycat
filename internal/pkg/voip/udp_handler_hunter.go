@@ -16,14 +16,16 @@ import (
 
 // UDPPacketHandler processes UDP SIP/RTP packets for hunter mode with buffering
 type UDPPacketHandler struct {
+	tracker   *CallTracker
 	forwarder PacketForwarder
 	bufferMgr *BufferManager
 	appFilter ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
 }
 
 // NewUDPPacketHandler creates a UDP packet handler for hunter mode
-func NewUDPPacketHandler(forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
+func NewUDPPacketHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *UDPPacketHandler {
 	return &UDPPacketHandler{
+		tracker:   tracker,
 		forwarder: forwarder,
 		bufferMgr: bufferMgr,
 	}
@@ -112,7 +114,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 
 	// Create call locally for TUI display (before filter check)
 	// This ensures the TUI shows all calls, not just matched ones
-	call := GetOrCreateCall(callID, linkType)
+	call := h.tracker.GetOrCreateCall(callID, linkType)
 	if call != nil {
 		// Update call state based on SIP method
 		call.SetCallInfoState(event.Method)
@@ -160,7 +162,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 
 		// A re-INVITE or delayed answer can move the media ports.
 		if hasSDP {
-			ExtractPortFromSdp(metadata.SDPBody, callID)
+			h.tracker.ExtractPortFromSDP(metadata.SDPBody, callID)
 		}
 		return true
 	}
@@ -190,7 +192,7 @@ func (h *UDPPacketHandler) handleSIPPacket(pkt capture.PacketInfo, layer *layers
 				h.forwardBufferedPackets(callID, packets, metadata, interfaceName, linkType)
 
 				// Extract RTP ports from SDP for future RTP association
-				ExtractPortFromSdp(metadata.SDPBody, callID)
+				h.tracker.ExtractPortFromSDP(metadata.SDPBody, callID)
 			},
 		)
 

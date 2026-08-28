@@ -22,14 +22,16 @@ type PacketForwarder interface {
 // HunterForwardHandler handles SIP messages for hunter mode (lc hunt voip)
 // It checks filters, extracts metadata, and forwards matched calls to processor
 type HunterForwardHandler struct {
+	tracker   *CallTracker
 	forwarder PacketForwarder
 	bufferMgr *BufferManager
 	appFilter ApplicationFilter // Optional: for proper filter matching (supports phone_number, sip_user, etc.)
 }
 
 // NewHunterForwardHandler creates a handler for hunter packet forwarding
-func NewHunterForwardHandler(forwarder PacketForwarder, bufferMgr *BufferManager) *HunterForwardHandler {
+func NewHunterForwardHandler(tracker *CallTracker, forwarder PacketForwarder, bufferMgr *BufferManager) *HunterForwardHandler {
 	return &HunterForwardHandler{
+		tracker:   tracker,
 		forwarder: forwarder,
 		bufferMgr: bufferMgr,
 	}
@@ -160,7 +162,7 @@ func (h *HunterForwardHandler) HandleSIPMessageAt(sipMessage []byte, callID stri
 
 	// Extract RTP ports from SDP for future RTP packet association
 	if len(event.SDP) > 0 {
-		ExtractPortFromSdp(string(event.SDP), callID)
+		h.tracker.ExtractPortFromSDP(string(event.SDP), callID)
 	}
 
 	// Register the call as matched so its RTP media and later in-dialog messages

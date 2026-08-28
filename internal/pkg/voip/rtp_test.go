@@ -11,7 +11,7 @@ import (
 
 func TestExtractPortFromSdp(t *testing.T) {
 	// Clear existing port mappings
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -56,7 +56,7 @@ func TestExtractPortFromSdp(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// ExtractPortFromSdp doesn't return anything, it just updates the global map
-			ExtractPortFromSdp(tt.sdpLine, tt.callID)
+			tracker.ExtractPortFromSDP(tt.sdpLine, tt.callID)
 
 			// The test passes if the function doesn't panic
 			assert.True(t, true, "ExtractPortFromSdp should not panic")
@@ -66,7 +66,7 @@ func TestExtractPortFromSdp(t *testing.T) {
 
 func TestIsTracked(t *testing.T) {
 	// Clear existing port mappings
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.portToCallID["8000"] = []string{"test-call-1"}
@@ -108,7 +108,7 @@ func TestIsTracked(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			packet := createRTPPacket(tt.srcPort, tt.dstPort)
-			result := IsTracked(packet.Packet)
+			result := tracker.IsTracked(packet.Packet)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -116,7 +116,7 @@ func TestIsTracked(t *testing.T) {
 
 func TestGetCallIDForPacket(t *testing.T) {
 	// Clear existing port mappings and setup test data
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.portToCallID["8000"] = []string{"test-call-packet-1"}
@@ -158,7 +158,7 @@ func TestGetCallIDForPacket(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			packet := createRTPPacket(tt.srcPort, tt.dstPort)
-			result := GetCallIDForPacket(packet.Packet)
+			result := tracker.GetCallIDForPacket(packet.Packet)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -170,7 +170,7 @@ func TestRTPPacketProcessing_Integration(t *testing.T) {
 	testPort := uint16(8000)
 
 	// Setup port mapping
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.portToCallID["8000"] = []string{testCallID}
@@ -180,20 +180,20 @@ func TestRTPPacketProcessing_Integration(t *testing.T) {
 	testPacket := createRTPPacket(9999, testPort)
 
 	// Verify the packet is tracked
-	assert.True(t, IsTracked(testPacket.Packet), "RTP packet should be tracked")
+	assert.True(t, tracker.IsTracked(testPacket.Packet), "RTP packet should be tracked")
 
 	// Test call ID retrieval
-	retrievedCallID := GetCallIDForPacket(testPacket.Packet)
+	retrievedCallID := tracker.GetCallIDForPacket(testPacket.Packet)
 	assert.Equal(t, testCallID, retrievedCallID, "Should retrieve correct call ID for RTP packet")
 
 	// Test with untracked packet
 	untrackedPacket := createRTPPacket(5555, 5556)
-	assert.False(t, IsTracked(untrackedPacket.Packet), "Untracked packet should not be tracked")
+	assert.False(t, tracker.IsTracked(untrackedPacket.Packet), "Untracked packet should not be tracked")
 }
 
 func TestRTPPortTracking_EdgeCases(t *testing.T) {
 	// Test edge cases in port tracking
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.portToCallID["65534"] = []string{"test-high-port"}
@@ -231,7 +231,7 @@ func TestRTPPortTracking_EdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			packet := createRTPPacket(9999, tt.port)
-			result := IsTracked(packet.Packet)
+			result := tracker.IsTracked(packet.Packet)
 			assert.Equal(t, tt.shouldTrack, result, "Port tracking should match expected result")
 		})
 	}
@@ -240,7 +240,7 @@ func TestRTPPortTracking_EdgeCases(t *testing.T) {
 func TestExtractPortFromSdp_MultiStream(t *testing.T) {
 	// Test multi-stream call support (conference calls, multiple audio streams)
 	// Now registers both IP:PORT endpoints (more specific) and port-only (NAT fallback)
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.mu.Unlock()
@@ -334,7 +334,7 @@ a=inactive`,
 			tracker.mu.Unlock()
 
 			// Extract ports from SDP
-			ExtractPortFromSdp(tt.sdpBody, tt.callID)
+			tracker.ExtractPortFromSDP(tt.sdpBody, tt.callID)
 
 			// Verify all expected ports are registered
 			tracker.mu.RLock()

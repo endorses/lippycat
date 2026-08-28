@@ -296,7 +296,7 @@ func TestParseHeaderLine(t *testing.T) {
 
 func TestHandleSipMessage_Integration(t *testing.T) {
 	// Clear any existing state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.portToCallID = make(map[string][]string)
 	tracker.callMap = make(map[string]*CallInfo)
@@ -382,7 +382,7 @@ Not a valid SIP message`),
 		t.Run(tt.name, func(t *testing.T) {
 			// This test verifies that handleSipMessage processes messages without panicking
 			assert.NotPanics(t, func() {
-				handleSipMessage(tt.sipMessage, layers.LinkTypeEthernet)
+				handleSipMessageWithTracker(TestCallTracker(t), tt.sipMessage, layers.LinkTypeEthernet)
 			}, "handleSipMessage should not panic with message: %s", tt.name)
 		})
 	}
@@ -390,7 +390,7 @@ Not a valid SIP message`),
 
 func TestSipMessageProcessing_WithCallTracking(t *testing.T) {
 	// Clear existing state
-	tracker := getTracker()
+	tracker := TestCallTracker(t)
 	tracker.mu.Lock()
 	tracker.callMap = make(map[string]*CallInfo)
 	tracker.mu.Unlock()
@@ -414,7 +414,7 @@ m=audio 8000 RTP/AVP 0
 a=rtpmap:0 PCMU/8000`)
 
 	// Process the SIP message
-	handleSipMessage(sipInvite, layers.LinkTypeEthernet)
+	handleSipMessageWithTracker(tracker, sipInvite, layers.LinkTypeEthernet)
 
 	// The exact behavior depends on implementation details
 	// At minimum, the function should not crash

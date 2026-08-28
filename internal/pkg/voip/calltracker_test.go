@@ -94,9 +94,10 @@ func TestCallInfoSetState(t *testing.T) {
 }
 
 func TestShutdownCallTracker(t *testing.T) {
+	tracker := TestCallTracker(t)
 	// Test that shutdown function exists and can be called without panic
 	assert.NotPanics(t, func() {
-		ShutdownCallTracker()
+		tracker.Shutdown()
 	}, "ShutdownCallTracker should not panic")
 }
 

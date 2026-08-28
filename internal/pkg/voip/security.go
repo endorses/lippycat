@@ -4,9 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
-	"sync"
-
-	"github.com/spf13/viper"
 )
 
 // SecurityConfig holds security-related configuration
@@ -19,44 +16,14 @@ type SecurityConfig struct {
 	MaxMessageSize       int  `mapstructure:"max_message_size"`
 }
 
-var (
-	securityConfig     *SecurityConfig
-	securityConfigOnce sync.Once
-)
-
-// ResetSecurityConfigForTesting resets the security configuration state for testing.
-// This allows tests to reinitialize with different configurations.
-// DO NOT use in production code.
-func ResetSecurityConfigForTesting() {
-	securityConfig = nil
-	securityConfigOnce = sync.Once{}
-}
-
-// initSecurityConfig initializes security configuration from viper
-// This function is called via sync.Once and should not be called directly.
-func initSecurityConfig() {
-	// Set security defaults
-	viper.SetDefault("voip.security.sanitize_call_ids", false)
-	viper.SetDefault("voip.security.call_id_hash_length", 8)
-	viper.SetDefault("voip.security.call_id_max_log_length", 16)
-	viper.SetDefault("voip.security.enable_pcap_encryption", false)
-	viper.SetDefault("voip.security.max_content_length", 1048576) // 1MB default
-	viper.SetDefault("voip.security.max_message_size", 2097152)   // 2MB default
-
-	securityConfig = &SecurityConfig{
-		SanitizeCallIDs:      viper.GetBool("voip.security.sanitize_call_ids"),
-		CallIDHashLength:     viper.GetInt("voip.security.call_id_hash_length"),
-		CallIDMaxLogLength:   viper.GetInt("voip.security.call_id_max_log_length"),
-		EnablePCAPEncryption: viper.GetBool("voip.security.enable_pcap_encryption"),
-		MaxContentLength:     viper.GetInt("voip.security.max_content_length"),
-		MaxMessageSize:       viper.GetInt("voip.security.max_message_size"),
-	}
+func DefaultSecurityConfig() SecurityConfig {
+	return SecurityConfig{CallIDHashLength: 8, CallIDMaxLogLength: 16, MaxContentLength: 1048576, MaxMessageSize: 2097152}
 }
 
 // GetSecurityConfig returns the current security configuration
 func GetSecurityConfig() *SecurityConfig {
-	securityConfigOnce.Do(initSecurityConfig)
-	return securityConfig
+	config := GetConfig().Security
+	return &config
 }
 
 // SanitizeCallIDForLogging sanitizes Call-IDs for log output to prevent information leakage

@@ -217,6 +217,10 @@ func voipHandler(cmd *cobra.Command, args []string) {
 		"vif_startup_delay", viper.GetDuration("sniff.vif_startup_delay"),
 		"vif_replay_timing", viper.GetBool("sniff.vif_replay_timing"))
 
+	// Snapshot command/config-file values before starting concurrent library work.
+	// The VoIP package deliberately has no dependency on Viper.
+	voip.SetConfig(loadVoIPLibraryConfig())
+
 	readFiles := collectReadFiles(readFile, args)
 	withStructuredLogs(func() {
 		if len(readFiles) == 0 {
@@ -225,6 +229,100 @@ func voipHandler(cmd *cobra.Command, args []string) {
 			voip.StartOfflineVoipSniffer(readFiles, effectiveFilter)
 		}
 	})
+}
+
+func loadVoIPLibraryConfig() *voip.Config {
+	cfg := voip.DefaultConfig()
+	mode := viper.GetString("voip.tcp_performance_mode")
+	if profile, ok := voip.GetPerformanceProfiles()[mode]; ok {
+		cfg.TCPPerformanceMode = mode
+		cfg.JanitorCleanupInterval = profile.TCPCleanupInterval / 2
+		cfg.CallExpirationTime = profile.TCPBufferMaxAge
+		cfg.StreamQueueBuffer = profile.StreamQueueBuffer
+		cfg.TCPCleanupInterval = profile.TCPCleanupInterval
+		cfg.TCPBufferMaxAge = profile.TCPBufferMaxAge
+		cfg.TCPStreamMaxQueueTime = profile.TCPStreamMaxQueueTime
+		cfg.MaxTCPBuffers = profile.MaxTCPBuffers
+		cfg.TCPStreamTimeout = profile.TCPStreamTimeout
+		cfg.TCPAssemblerMaxPages = profile.TCPAssemblerMaxPages
+		cfg.TCPBufferStrategy = profile.TCPBufferStrategy
+		cfg.EnableBackpressure = profile.EnableBackpressure
+		cfg.MemoryOptimization = profile.MemoryOptimization
+		cfg.TCPBufferPoolSize = profile.TCPBufferPoolSize
+		cfg.TCPBatchSize = profile.TCPBatchSize
+		cfg.TCPIOThreads = profile.TCPIOThreads
+		cfg.TCPCompressionLevel = profile.TCPCompressionLevel
+		cfg.TCPMemoryLimit = profile.TCPMemoryLimit
+		cfg.TCPLatencyOptimization = profile.TCPLatencyOptimization
+	}
+	cfg.WriteVoIP = viper.GetBool("writeVoip")
+	cfg.OutputFile = viper.GetString("voip.output_file")
+	cfg.MaxCalls = viper.GetInt("voip.max_calls")
+	if value := viper.GetDuration("voip.pcap_grace_period"); value > 0 {
+		cfg.PCAPGracePeriod = value
+	}
+	if value := viper.GetDuration("voip.pcap_closed_call_ttl"); value > 0 {
+		cfg.PCAPClosedCallTTL = value
+	}
+	if value := viper.GetInt("voip.max_goroutines"); value > 0 {
+		cfg.MaxGoroutines = value
+	}
+	cfg.MaxStreams = viper.GetInt("voip.max_streams")
+	if value := viper.GetDuration("voip.call_id_detection_timeout"); value > 0 {
+		cfg.CallIDDetectionTimeout = value
+	}
+	if value := viper.GetDuration("voip.tcp_sip_idle_timeout"); value > 0 {
+		cfg.TCPSIPIdleTimeout = value
+	}
+	if value := viper.GetDuration("voip.tcp_opening_timeout"); value > 0 {
+		cfg.TCPOpeningTimeout = value
+	}
+	if value := viper.GetDuration("voip.tcp_established_timeout"); value > 0 {
+		cfg.TCPEstablishedTimeout = value
+	}
+	if value := viper.GetDuration("voip.tcp_closing_timeout"); value > 0 {
+		cfg.TCPClosingTimeout = value
+	}
+	cfg.EnableStateTCPTimeouts = viper.GetBool("voip.enable_state_tcp_timeouts")
+	cfg.EnableCallAwareTimeout = viper.GetBool("voip.enable_call_aware_timeout")
+	cfg.PluginsEnabled = viper.GetBool("voip.plugins_enabled")
+	cfg.PluginPaths = append([]string(nil), viper.GetStringSlice("voip.plugin_paths")...)
+	cfg.PluginWatchEnabled = viper.GetBool("voip.plugin_watch_enabled")
+	cfg.MonitoringEnabled = viper.GetBool("voip.monitoring_enabled")
+	cfg.MetricsEnabled = viper.GetBool("voip.metrics_enabled")
+	cfg.TracingEnabled = viper.GetBool("voip.tracing_enabled")
+	cfg.Security = voip.SecurityConfig{
+		SanitizeCallIDs:      viper.GetBool("voip.security.sanitize_call_ids"),
+		CallIDHashLength:     viper.GetInt("voip.security.call_id_hash_length"),
+		CallIDMaxLogLength:   viper.GetInt("voip.security.call_id_max_log_length"),
+		EnablePCAPEncryption: viper.GetBool("voip.security.enable_pcap_encryption"),
+		MaxContentLength:     viper.GetInt("voip.security.max_content_length"),
+		MaxMessageSize:       viper.GetInt("voip.security.max_message_size"),
+	}
+	defaults := voip.DefaultSecurityConfig()
+	if cfg.Security.CallIDHashLength <= 0 {
+		cfg.Security.CallIDHashLength = defaults.CallIDHashLength
+	}
+	if cfg.Security.CallIDMaxLogLength <= 0 {
+		cfg.Security.CallIDMaxLogLength = defaults.CallIDMaxLogLength
+	}
+	if cfg.Security.MaxContentLength <= 0 {
+		cfg.Security.MaxContentLength = defaults.MaxContentLength
+	}
+	if cfg.Security.MaxMessageSize <= 0 {
+		cfg.Security.MaxMessageSize = defaults.MaxMessageSize
+	}
+	cfg.VirtualInterface = viper.GetBool("sniff.virtual_interface")
+	cfg.VIFName = viper.GetString("sniff.vif_name")
+	cfg.VIFType = viper.GetString("sniff.vif_type")
+	cfg.VIFBufferSize = viper.GetInt("sniff.vif_buffer_size")
+	cfg.VIFNetNS = viper.GetString("sniff.vif_netns")
+	cfg.VIFDropPrivilegesUser = viper.GetString("sniff.vif_drop_privileges")
+	cfg.VIFReplayTiming = viper.GetBool("sniff.vif_replay_timing")
+	cfg.VIFStartupDelay = viper.GetDuration("sniff.vif_startup_delay")
+	cfg.ProcessorWorkers = viper.GetInt("voip.processor_workers")
+	cfg.ProcessorWorkerBuffer = viper.GetInt("voip.processor_worker_buffer")
+	return cfg
 }
 
 func init() {

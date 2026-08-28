@@ -27,6 +27,7 @@
 package processor
 
 import (
+	"errors"
 	"strconv"
 	"time"
 
@@ -201,7 +202,7 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 
 	// Write VoIP packets to per-call PCAP files if configured
 	// Writes separate SIP and RTP files for each call
-	if p.perCallPcapWriter != nil {
+	if p.sessionOutputManager != nil {
 		for _, packet := range batch.Packets {
 			// Check if packet has SIP metadata with call-id
 			if packet.Metadata != nil && packet.Metadata.Sip != nil && packet.Metadata.Sip.CallId != "" {
@@ -209,35 +210,16 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 				from := packet.Metadata.Sip.FromUser
 				to := packet.Metadata.Sip.ToUser
 
-				// Get or create writer for this call
-				writer, err := p.perCallPcapWriter.GetOrCreateWriter(callID, from, to)
-				if err != nil {
-					logger.Warn("Failed to get/create PCAP writer for call",
-						"call_id", callID,
-						"error", err)
-					continue
-				}
-
 				// Write packet to appropriate file (SIP or RTP) using raw packet data
 				if len(packet.Data) > 0 {
 					timestamp := time.Unix(0, packet.TimestampNs)
 					linkType := layers.LinkType(packet.LinkType)
-
-					// Check if this is an RTP packet (has RTP metadata)
-					if packet.Metadata.Rtp != nil {
-						// Write to RTP PCAP file
-						if err := writer.WriteRTPPacket(timestamp, packet.Data, linkType); err != nil {
-							logger.Warn("Failed to write RTP packet to call PCAP",
-								"call_id", callID,
-								"error", err)
-						}
-					} else {
-						// Write to SIP PCAP file
-						if err := writer.WriteSIPPacket(timestamp, packet.Data, linkType); err != nil {
-							logger.Warn("Failed to write SIP packet to call PCAP",
-								"call_id", callID,
-								"error", err)
-						}
+					if err := p.sessionOutputManager.WritePacket(
+						callID, from, to, timestamp, packet.Data, linkType, packet.Metadata.Rtp != nil,
+					); err != nil && !errors.Is(err, errSessionOutputClosed) {
+						logger.Warn("Failed to write packet to call PCAP",
+							"call_id", callID,
+							"error", err)
 					}
 				}
 			}

@@ -640,8 +640,16 @@ func (p *Processor) GetStats() stats.Stats {
 // SetPacketSource sets the packet source for the processor.
 // This allows overriding the default GRPCSource for standalone/tap mode.
 // Must be called before Start().
-func (p *Processor) SetPacketSource(source source.PacketSource) {
-	p.packetSource = source
+func (p *Processor) SetPacketSource(packetSource source.PacketSource) {
+	p.packetSource = packetSource
+	if p.sessionOutputManager == nil {
+		return
+	}
+	if localSource, ok := packetSource.(*source.LocalSource); ok {
+		if voipProcessor := localSource.GetVoIPProcessor(); voipProcessor != nil {
+			voipProcessor.AddLifecycleObserver(p.sessionOutputManager)
+		}
+	}
 }
 
 // SetFilterTarget sets the filter target for the processor.

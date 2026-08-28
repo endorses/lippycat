@@ -95,7 +95,7 @@ func (m *Model) ensureCallAggregator() {
 	// Initialize call aggregator based on mode
 	switch m.captureMode {
 	case components.CaptureModeLive:
-		m.liveCallAggregator = NewLocalCallAggregator(program)
+		m.liveCallAggregator = NewLocalCallAggregator(program, m.callTracker)
 		m.liveCallAggregator.Start()
 		// Set global accessor for TCP reassembly handler to trigger merges
 		SetLocalCallAggregator(m.liveCallAggregator)
@@ -103,13 +103,12 @@ func (m *Model) ensureCallAggregator() {
 			m.backgroundProcessor.BeginGeneration()
 		}
 		// Initialize call tracker for RTP-to-CallID mapping
-		if GetCallTracker() == nil {
-			liveTracker := NewCallTracker()
-			SetCallTracker(liveTracker)
+		if m.callTracker == nil {
+			m.callTracker = NewCallTracker()
 		}
 
 	case components.CaptureModeOffline:
-		m.offlineCallAggregator = NewLocalCallAggregator(program)
+		m.offlineCallAggregator = NewLocalCallAggregator(program, m.callTracker)
 		m.offlineCallAggregator.Start()
 		// Set global accessor for TCP reassembly handler to trigger merges
 		SetLocalCallAggregator(m.offlineCallAggregator)
@@ -117,9 +116,8 @@ func (m *Model) ensureCallAggregator() {
 			m.backgroundProcessor.BeginGeneration()
 		}
 		// Initialize call tracker for RTP-to-CallID mapping
-		if GetCallTracker() == nil {
-			offlineTracker := NewCallTracker()
-			SetCallTracker(offlineTracker)
+		if m.callTracker == nil {
+			m.callTracker = NewCallTracker()
 		}
 	}
 }

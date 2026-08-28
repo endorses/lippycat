@@ -76,6 +76,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 			return &ProcessResult{
 				PacketType:      PacketTypeSIP,
 				CallID:          callID,
+				CallIDs:         []string{callID},
 				FilterEvaluated: true,
 			}
 		}
@@ -170,6 +171,7 @@ func (p *Processor) detectSIP(packet gopacket.Packet, udp *layers.UDP, payload [
 		IsVoIP:          true,
 		PacketType:      PacketTypeSIP,
 		CallID:          callID,
+		CallIDs:         []string{callID},
 		Metadata:        pbMetadata,
 		CallMetadata:    metadata,
 		FilterEvaluated: filterEvaluated,

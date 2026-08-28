@@ -58,7 +58,7 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		capture.RunOfflineOrdered([]pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(ch <-chan capture.PacketInfo) {
 			for info := range ch {
 				fileInfos = append(fileInfos, info)
-				observed = append(observed, convertPacket(info))
+				observed = append(observed, convertPacket(info, nil))
 			}
 		})
 		require.NoError(t, file.Close())
@@ -108,20 +108,19 @@ func runProtocolGoldenBridge(t *testing.T, infos []capture.PacketInfo, offline b
 	t.Helper()
 	ResetBridgeStats()
 	ClearPendingPackets()
-	ClearCallTracker()
 	ResetTUIReady()
 	SignalTUIReady()
 	SetVoIPModeEnabled(false)
+	var tracker *CallTracker
 	if offline {
-		SetCallTracker(NewCallTracker())
-		defer ClearCallTracker()
+		tracker = NewCallTracker()
 	}
 	packetChan := make(chan capture.PacketInfo, len(infos))
 	for _, info := range infos {
 		packetChan <- info
 	}
 	close(packetChan)
-	StartPacketBridge(packetChan, nil, NewPauseSignal())
+	StartPacketBridge(packetChan, nil, NewPauseSignal(), tracker, offline)
 	stats := GetBridgeStats()
 	require.Equal(t, int64(len(infos)), stats.PacketsReceived)
 	require.Equal(t, int64(len(infos)), stats.PacketsDisplayed)

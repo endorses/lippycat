@@ -69,6 +69,23 @@ type cachedFilterIDs struct {
 	storedAt  time.Time
 }
 
+func (s *LocalSource) cachedFilterIDsForCalls(callIDs []string) []string {
+	filterIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, callID := range callIDs {
+		if cached, ok := s.callFilterCache.Load(callID); ok {
+			for _, filterID := range cached.(cachedFilterIDs).filterIDs {
+				if _, exists := seen[filterID]; exists {
+					continue
+				}
+				seen[filterID] = struct{}{}
+				filterIDs = append(filterIDs, filterID)
+			}
+		}
+	}
+	return filterIDs
+}
+
 // LocalSource captures packets from local network interfaces.
 // It implements the PacketSource interface for standalone capture mode.
 type LocalSource struct {
@@ -589,10 +606,12 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 			// The VoIP processor already evaluates the application filter while
 			// detecting SIP, so reuse its verdict rather than matching again.
 			var isVoIPPacket bool
+			var voipCallIDs []string
 			var reuseVerdict, reuseMatched bool
 			var reuseIDs []string
 			if voipProc != nil {
 				if result := voipProc.Process(pktInfo.Packet); result != nil {
+					voipCallIDs = result.GetCallIDs()
 					reuseVerdict, reuseMatched, reuseIDs = result.FilterVerdict()
 					if result.IsVoIPPacket() {
 						pbPkt.Metadata = result.GetMetadata()
@@ -662,11 +681,10 @@ func (s *LocalSource) batchingWorker(input <-chan capture.PacketInfo) {
 					if pbPkt.Metadata != nil && pbPkt.Metadata.Sip != nil {
 						callID = pbPkt.Metadata.Sip.CallId
 					}
-					if callID != "" {
-						if cached, ok := s.callFilterCache.Load(callID); ok {
-							matchedFilterIDs = cached.(cachedFilterIDs).filterIDs
-						}
+					if len(voipCallIDs) == 0 && callID != "" {
+						voipCallIDs = []string{callID}
 					}
+					matchedFilterIDs = s.cachedFilterIDsForCalls(voipCallIDs)
 
 					// If still no filter IDs, drop the packet
 					if len(matchedFilterIDs) == 0 {

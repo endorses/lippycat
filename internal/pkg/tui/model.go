@@ -138,6 +138,7 @@ type Model struct {
 	// Call aggregation (offline and live modes)
 	offlineCallAggregator *LocalCallAggregator // Call aggregator for offline PCAP analysis
 	liveCallAggregator    *LocalCallAggregator // Call aggregator for live capture
+	callTracker           *CallTracker         // Session-owned RTP-to-CallID mapping
 
 	// Background processor for non-critical packet processing (DNS, HTTP, call aggregator)
 	backgroundProcessor *BackgroundProcessor
@@ -263,12 +264,16 @@ func NewModel(bufferSize int, maxCalls int, interfaceName string, bpfFilter stri
 		remoteNodes:                remoteNodes,
 		insecure:                   insecure,
 		pcapFiles:                  pcapFiles,
+		callTracker:                NewCallTracker(),
 		detailsPanelUpdateInterval: 50 * time.Millisecond,     // 20 Hz throttle (imperceptible to user)
 		packetListUpdateInterval:   constants.TUITickInterval, // 10 Hz throttle for packet list (prevents freeze)
 		backgroundProcessor:        bgProcessor,
 		metricsCollector:           sysmetrics.New(),
 	}
 }
+
+// CallTracker returns the tracker owned by this TUI session.
+func (m *Model) CallTracker() *CallTracker { return m.callTracker }
 
 // formatPCAPFilesDisplay formats PCAP files for display in the header.
 // For single file: returns the basename (e.g., "capture.pcap")

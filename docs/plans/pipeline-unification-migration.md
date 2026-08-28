@@ -364,6 +364,12 @@ dedicated `all,li` package tests, focused race tests, and the non-CUDA supported
 build matrix pass. The operational 24-hour and traffic soak tests remain a
 release qualification activity under the plan's Soak Tests section.
 
+Follow-up audit fixes (2026-08-29): tap TCP reassembly now uses its local
+registry for call-aware timeout decisions; session output is registered as a
+local-registry lifecycle observer; B2BUA RTP associations and inherited filter
+IDs preserve every call leg; and the TUI call tracker is session-owned and
+passed explicitly through capture, reassembly, conversion, and aggregation.
+
 ### Exit Criteria
 
 - No package-global call tracker or `getTracker()` consumer remains.

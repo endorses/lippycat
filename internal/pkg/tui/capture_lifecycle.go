@@ -54,7 +54,9 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 	}
 
 	// Clear call tracker (used by both live and offline modes)
-	ClearCallTracker()
+	if m.callTracker != nil {
+		m.callTracker.Clear()
+	}
 
 	// Keep all remote clients connected regardless of mode
 	// Users can switch between modes without losing node connections
@@ -143,7 +145,8 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 			switch msg.Mode {
 			case components.CaptureModeLive:
 				// Initialize live call aggregator for VoIP analysis
-				m.liveCallAggregator = NewLocalCallAggregator(program)
+				m.callTracker = NewCallTracker()
+				m.liveCallAggregator = NewLocalCallAggregator(program, m.callTracker)
 				m.liveCallAggregator.Start()
 				// Set global accessor for TCP reassembly handler to trigger merges
 				SetLocalCallAggregator(m.liveCallAggregator)
@@ -154,13 +157,11 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				}
 
 				// Initialize call tracker for RTP-to-CallID mapping (shared with offline mode)
-				liveTracker := NewCallTracker()
-				SetCallTracker(liveTracker)
-
-				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, program, done)
+				go startLiveCapture(ctx, msg.Interface, m.bpfFilter, program, done, m.callTracker)
 			case components.CaptureModeOffline:
 				// Initialize offline call aggregator for VoIP analysis
-				m.offlineCallAggregator = NewLocalCallAggregator(program)
+				m.callTracker = NewCallTracker()
+				m.offlineCallAggregator = NewLocalCallAggregator(program, m.callTracker)
 				m.offlineCallAggregator.Start()
 				// Set global accessor for TCP reassembly handler to trigger merges
 				SetLocalCallAggregator(m.offlineCallAggregator)
@@ -171,10 +172,7 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 				}
 
 				// Initialize offline call tracker for RTP-to-CallID mapping
-				offlineTracker := NewCallTracker()
-				SetCallTracker(offlineTracker)
-
-				go startOfflineCapture(ctx, msg.PCAPFiles, m.bpfFilter, program, done)
+				go startOfflineCapture(ctx, msg.PCAPFiles, m.bpfFilter, program, done, m.callTracker)
 			}
 
 			// Mark capture as active for live/offline modes
@@ -209,20 +207,20 @@ func (m Model) handleRestartCaptureMsg(msg components.RestartCaptureMsg) (Model,
 }
 
 // startLiveCapture starts live packet capture on a network interface
-func startLiveCapture(ctx context.Context, interfaceName string, filter string, program *tea.Program, done chan struct{}) {
+func startLiveCapture(ctx context.Context, interfaceName string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker) {
 	defer close(done) // Signal completion when capture goroutine exits
 	capture.StartLiveSniffer(interfaceName, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTUISniffer(ctx, devices, filter, program)
+		startTUISniffer(ctx, devices, filter, program, tracker)
 	})
 }
 
 // startOfflineCapture starts packet capture from PCAP files
 // Uses timestamp-ordered processing to ensure SIP packets register media ports
 // before their corresponding RTP packets are processed (critical for VoIP analysis)
-func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}) {
+func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string, program *tea.Program, done chan struct{}, tracker *CallTracker) {
 	defer close(done) // Signal completion when capture goroutine exits
 	capture.StartOfflineSnifferOrdered(pcapFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
-		startTUISnifferOrdered(ctx, devices, filter, program)
+		startTUISnifferOrdered(ctx, devices, filter, program, tracker)
 	})
 
 	// Notify TUI that capture is complete so it can drain remaining packets
@@ -236,13 +234,13 @@ func startOfflineCapture(ctx context.Context, pcapFiles []string, filter string,
 }
 
 // startTUISniffer initializes packet capture and bridges packets to the TUI
-func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *CallTracker) {
 	// Get pause signal for bridge to respect pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartPacketBridge(ch, program, pauseSignal)
+		StartPacketBridge(ch, program, pauseSignal, tracker, false)
 	}
 
 	// Run capture - InitWithContext handles both live and offline modes
@@ -257,13 +255,13 @@ func startTUISniffer(ctx context.Context, devices []pcaptypes.PcapInterface, fil
 // startTUISnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
-func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+func startTUISnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *CallTracker) {
 	// Get pause signal for bridge to respect pause/resume
 	pauseSignal := globalCaptureState.GetPauseSignal()
 
 	// Create a simple processor that forwards packets to TUI
 	processor := func(ch <-chan capture.PacketInfo) {
-		StartPacketBridge(ch, program, pauseSignal)
+		StartPacketBridge(ch, program, pauseSignal, tracker, true)
 	}
 
 	// Run capture with timestamp ordering - reads all packets, sorts by timestamp, then processes

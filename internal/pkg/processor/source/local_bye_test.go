@@ -19,6 +19,15 @@ import (
 // present in the INVITE but not in in-dialog requests like BYE.
 type inviteOnlyFilter struct{}
 
+func TestCachedFilterIDsForB2BUACallAssociations(t *testing.T) {
+	s := NewLocalSource(DefaultLocalSourceConfig())
+	now := time.Now()
+	s.callFilterCache.Store("leg-a", cachedFilterIDs{filterIDs: []string{"filter-a", "shared"}, storedAt: now})
+	s.callFilterCache.Store("leg-b", cachedFilterIDs{filterIDs: []string{"filter-b", "shared"}, storedAt: now})
+
+	require.Equal(t, []string{"filter-a", "shared", "filter-b"}, s.cachedFilterIDsForCalls([]string{"leg-a", "leg-b"}))
+}
+
 func (f *inviteOnlyFilter) MatchPacket(packet gopacket.Packet) bool {
 	matched, _ := f.MatchPacketWithIDs(packet)
 	return matched

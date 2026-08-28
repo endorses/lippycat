@@ -45,6 +45,8 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		"SIP":  goldenUDPPacket(t, 5060, 5060, []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")),
 	}
 	fileEvents := make([]types.PacketDisplay, 0, len(goldens))
+	fileInfos := make([]capture.PacketInfo, 0, len(goldens))
+	liveInfos := make([]capture.PacketInfo, 0, len(goldens))
 	for _, want := range goldens {
 		ts, err := time.Parse(time.RFC3339Nano, want.Timestamp)
 		require.NoError(t, err)
@@ -55,6 +57,7 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		var observed []types.PacketDisplay
 		capture.RunOfflineOrdered([]pcaptypes.PcapInterface{pcaptypes.CreateOfflineInterface(file)}, "", func(ch <-chan capture.PacketInfo, _ *capture.TCPAssembler) {
 			for info := range ch {
+				fileInfos = append(fileInfos, info)
 				observed = append(observed, convertPacket(info))
 			}
 		}, nil)
@@ -65,17 +68,24 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		livePacket := gopacket.NewPacket(packets[want.Protocol], layers.LayerTypeEthernet, gopacket.Default)
 		livePacket.Metadata().Timestamp = ts
 		livePacket.Metadata().Length = len(livePacket.Data())
-		live := convertPacket(capture.PacketInfo{Packet: livePacket, Interface: "golden0", LinkType: layers.LinkTypeEthernet})
-		for mode, got := range map[string]types.PacketDisplay{"watch-file": observed[0], "watch-live": live} {
-			t.Run(mode, func(t *testing.T) {
-				require.Equal(t, want.Protocol, got.Protocol)
-				require.Equal(t, want.Timestamp, got.Timestamp.UTC().Format(time.RFC3339Nano))
-				require.Equal(t, want.SrcIP, got.SrcIP)
-				require.Equal(t, want.DstIP, got.DstIP)
-				require.Equal(t, want.SrcPort, got.SrcPort)
-				require.Equal(t, want.DstPort, got.DstPort)
-				require.Equal(t, want.Info, got.Info)
-			})
+		liveInfos = append(liveInfos, capture.PacketInfo{Packet: livePacket, Interface: "golden0", LinkType: layers.LinkTypeEthernet})
+	}
+
+	for mode, infos := range map[string][]capture.PacketInfo{"watch-file": fileInfos, "watch-live": liveInfos} {
+		bridged := runProtocolGoldenBridge(t, infos, mode == "watch-file")
+		require.Len(t, bridged, len(goldens))
+		for i, want := range goldens {
+			got := bridged[i]
+			require.Equal(t, want.Protocol, got.Protocol, mode)
+			require.Equal(t, want.Timestamp, got.Timestamp.UTC().Format(time.RFC3339Nano), mode)
+			require.Equal(t, want.SrcIP, got.SrcIP, mode)
+			require.Equal(t, want.DstIP, got.DstIP, mode)
+			require.Equal(t, want.SrcPort, got.SrcPort, mode)
+			require.Equal(t, want.DstPort, got.DstPort, mode)
+			require.Equal(t, want.Info, got.Info, mode)
+		}
+		if mode == "watch-file" {
+			fileEvents = bridged
 		}
 	}
 
@@ -92,6 +102,31 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		require.Equal(t, want.Timestamp, stored[i].Timestamp.UTC().Format(time.RFC3339Nano))
 		require.Equal(t, "Local", stored[i].NodeID)
 	}
+}
+
+func runProtocolGoldenBridge(t *testing.T, infos []capture.PacketInfo, offline bool) []types.PacketDisplay {
+	t.Helper()
+	ResetBridgeStats()
+	ClearPendingPackets()
+	ClearCallTracker()
+	ResetTUIReady()
+	SignalTUIReady()
+	SetVoIPModeEnabled(false)
+	if offline {
+		SetCallTracker(NewCallTracker())
+		defer ClearCallTracker()
+	}
+	packetChan := make(chan capture.PacketInfo, len(infos))
+	for _, info := range infos {
+		packetChan <- info
+	}
+	close(packetChan)
+	StartPacketBridge(packetChan, nil, NewPauseSignal())
+	stats := GetBridgeStats()
+	require.Equal(t, int64(len(infos)), stats.PacketsReceived)
+	require.Equal(t, int64(len(infos)), stats.PacketsDisplayed)
+	require.Zero(t, stats.BatchesDropped)
+	return pendingPackets.drainPackets(len(infos))
 }
 
 func writeGoldenPCAP(t *testing.T, path string, packet []byte, timestamp time.Time) {

@@ -44,6 +44,7 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		"SMTP": goldenTCPPacket(t, 49154, 25, []byte("MAIL FROM:<alice@example.test>\r\n")),
 		"SIP":  goldenUDPPacket(t, 5060, 5060, []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")),
 	}
+	fileEvents := make([]types.PacketDisplay, 0, len(goldens))
 	for _, want := range goldens {
 		ts, err := time.Parse(time.RFC3339Nano, want.Timestamp)
 		require.NoError(t, err)
@@ -59,6 +60,7 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 		}, nil)
 		require.NoError(t, file.Close())
 		require.Len(t, observed, 1)
+		fileEvents = append(fileEvents, observed[0])
 
 		livePacket := gopacket.NewPacket(packets[want.Protocol], layers.LayerTypeEthernet, gopacket.Default)
 		livePacket.Metadata().Timestamp = ts
@@ -75,6 +77,20 @@ func TestLocalTUIProtocolEventGoldens(t *testing.T) {
 				require.Equal(t, want.Info, got.Info)
 			})
 		}
+	}
+
+	// Cross the actual Bubble Tea message boundary used by both the local bridge
+	// and TUIEventHandler, then assert the model/store observable state.
+	model := NewModel(32, 32, "", "", []string{"representative-protocols.pcap"}, false, false, "", false)
+	t.Cleanup(model.backgroundProcessor.Stop)
+	updated, _ := model.Update(PacketBatchMsg{Packets: fileEvents})
+	gotModel := updated.(Model)
+	stored := gotModel.packetStore.GetPacketsInOrder()
+	require.Len(t, stored, len(goldens))
+	for i, want := range goldens {
+		require.Equal(t, want.Protocol, stored[i].Protocol)
+		require.Equal(t, want.Timestamp, stored[i].Timestamp.UTC().Format(time.RFC3339Nano))
+		require.Equal(t, "Local", stored[i].NodeID)
 	}
 }
 

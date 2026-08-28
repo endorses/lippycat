@@ -3,6 +3,7 @@ package voip
 import (
 	"context"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -96,4 +97,34 @@ func TestSIPReassemblyStreamLifecycleBaseline(t *testing.T) {
 	require.Equal(t, int64(0), factory.GetActiveGoroutines(), "factory close must wait for every SIP stream worker")
 	require.Equal(t, metricsBefore.ActiveStreams, metricsAfter.ActiveStreams, "SIP stream metrics must return to their pre-test baseline")
 	require.GreaterOrEqual(t, metricsAfter.TotalStreamsCreated-metricsBefore.TotalStreamsCreated, int64(64))
+}
+
+func TestSIPReassemblyRetainedHeapBaseline(t *testing.T) {
+	before := liveHeapBytes()
+	for cycle := 0; cycle < 20; cycle++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		factory := NewSipStreamFactory(ctx, lifecycleSIPHandler{}).(*sipStreamFactory)
+		for i := 0; i < 128; i++ {
+			netFlow := gopacket.NewFlow(layers.EndpointIPv4, net.IPv4(192, 0, 2, byte(i%250+1)).To4(), net.IPv4(198, 51, 100, 1).To4())
+			transportFlow := gopacket.NewFlow(layers.EndpointTCPPort, layers.NewTCPPortEndpoint(layers.TCPPort(20000+i)).Raw(), layers.NewTCPPortEndpoint(5060).Raw())
+			stream := factory.New(netFlow, transportFlow, &layers.TCP{}, nil).(*bufferedSIPStream)
+			stream.ReassemblyComplete(nil)
+		}
+		factory.Close()
+		cancel()
+		require.Zero(t, factory.GetActiveGoroutines())
+	}
+	after := liveHeapBytes()
+	const maxRetainedGrowth = uint64(8 << 20)
+	if after > before+maxRetainedGrowth {
+		t.Fatalf("SIP reassembly retained heap grew by %d bytes, limit %d", after-before, maxRetainedGrowth)
+	}
+}
+
+func liveHeapBytes() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
 }

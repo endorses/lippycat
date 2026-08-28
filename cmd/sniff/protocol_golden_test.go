@@ -3,6 +3,7 @@
 package sniff
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net"
@@ -11,12 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,40 +24,43 @@ func TestOfflineSniffProtocolEventGoldens(t *testing.T) {
 	require.NoError(t, err)
 	var fixtures []protocolEventFixture
 	require.NoError(t, json.Unmarshal(data, &fixtures))
+	pcapPath := filepath.Join(t.TempDir(), "representative-protocols.pcap")
+	writeProtocolGoldenPCAP(t, pcapPath, fixtures)
+
+	oldStdout := os.Stdout
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = writer
+	t.Cleanup(func() { os.Stdout = oldStdout })
+	oldQuiet, oldFormat, oldReadFile := quiet, format, readFile
+	readFlag := SniffCmd.PersistentFlags().Lookup("read-file")
+	formatFlag := SniffCmd.PersistentFlags().Lookup("format")
+	oldReadChanged, oldFormatChanged := readFlag.Changed, formatFlag.Changed
+	t.Cleanup(func() {
+		quiet, format, readFile = oldQuiet, oldFormat, oldReadFile
+		readFlag.Changed, formatFlag.Changed = oldReadChanged, oldFormatChanged
+		SniffCmd.SetArgs([]string{})
+	})
+	SniffCmd.SetArgs([]string{"--read-file", pcapPath, "--format", "json"})
+	require.NoError(t, SniffCmd.Execute())
+	require.NoError(t, writer.Close())
+	os.Stdout = oldStdout
+	output, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	gotByTimestamp := make(map[string]types.PacketDisplay, len(fixtures))
+	for decoder.More() {
+		var got types.PacketDisplay
+		require.NoError(t, decoder.Decode(&got), string(output))
+		gotByTimestamp[got.Timestamp.UTC().Format(time.RFC3339Nano)] = got
+	}
+	require.Len(t, gotByTimestamp, len(fixtures))
 	for _, want := range fixtures {
 		t.Run(want.Protocol, func(t *testing.T) {
-			pcapPath := filepath.Join(t.TempDir(), want.SourcePCAP)
-			writeTestPCAPAt(t, pcapPath, baselinePacket(t, want.Protocol), mustGoldenTime(t, want.Timestamp))
-
-			oldStdout := os.Stdout
-			reader, writer, err := os.Pipe()
-			require.NoError(t, err)
-			os.Stdout = writer
-			t.Cleanup(func() { os.Stdout = oldStdout })
-			oldQuiet := viper.Get("sniff.quiet")
-			oldFormat := viper.Get("sniff.format")
-			oldWriteFile := viper.Get("sniff.write_file")
-			oldVirtualInterface := viper.Get("sniff.virtual_interface")
-			t.Cleanup(func() {
-				viper.Set("sniff.quiet", oldQuiet)
-				viper.Set("sniff.format", oldFormat)
-				viper.Set("sniff.write_file", oldWriteFile)
-				viper.Set("sniff.virtual_interface", oldVirtualInterface)
-			})
-			viper.Set("sniff.quiet", false)
-			viper.Set("sniff.format", "json")
-			viper.Set("sniff.write_file", "")
-			viper.Set("sniff.virtual_interface", false)
-
-			capture.StartOfflineSniffer([]string{pcapPath}, "", capture.StartSniffer)
-			require.NoError(t, writer.Close())
-			os.Stdout = oldStdout
-			output, err := io.ReadAll(reader)
-			require.NoError(t, err)
-			require.NoError(t, reader.Close())
-
-			var got types.PacketDisplay
-			require.NoError(t, json.Unmarshal(output, &got), string(output))
+			got, ok := gotByTimestamp[want.Timestamp]
+			require.True(t, ok, "missing event at %s", want.Timestamp)
 			require.Equal(t, want.CLIProtocol, got.Protocol)
 			require.Equal(t, want.Timestamp, got.Timestamp.UTC().Format(time.RFC3339Nano))
 			require.Equal(t, want.SrcIP, got.SrcIP)
@@ -68,6 +70,19 @@ func TestOfflineSniffProtocolEventGoldens(t *testing.T) {
 			require.Equal(t, want.CLIInfo, got.Info)
 		})
 	}
+}
+
+func writeProtocolGoldenPCAP(t *testing.T, path string, fixtures []protocolEventFixture) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	w := pcapgo.NewWriter(f)
+	require.NoError(t, w.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	for _, fixture := range fixtures {
+		packet := baselinePacket(t, fixture.Protocol)
+		require.NoError(t, w.WritePacket(gopacket.CaptureInfo{Timestamp: mustGoldenTime(t, fixture.Timestamp), CaptureLength: len(packet), Length: len(packet)}, packet))
+	}
+	require.NoError(t, f.Close())
 }
 
 type protocolEventFixture struct {
@@ -81,16 +96,6 @@ type protocolEventFixture struct {
 	SrcPort     string `json:"src_port"`
 	DstPort     string `json:"dst_port"`
 	Info        string `json:"info"`
-}
-
-func writeTestPCAPAt(t *testing.T, path string, packet []byte, timestamp time.Time) {
-	t.Helper()
-	f, err := os.Create(path)
-	require.NoError(t, err)
-	w := pcapgo.NewWriter(f)
-	require.NoError(t, w.WriteFileHeader(65535, layers.LinkTypeEthernet))
-	require.NoError(t, w.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(packet), Length: len(packet)}, packet))
-	require.NoError(t, f.Close())
 }
 
 func mustGoldenTime(t *testing.T, value string) time.Time {

@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
@@ -54,10 +56,14 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 	require.NoError(t, json.Unmarshal(fixtureBytes, &fixture))
 
 	dir := t.TempDir()
-	manager, err := NewPcapWriterManager(&PcapWriterConfig{Enabled: true, OutputDir: dir, FilePattern: "{callid}.pcap", SyncInterval: time.Hour})
+	processor, err := New(Config{
+		ProcessorID: "semantic-pcap-baseline", ListenAddr: "127.0.0.1:0",
+		PcapWriterConfig: &PcapWriterConfig{
+			Enabled: true, OutputDir: dir, FilePattern: "{callid}.pcap", SyncInterval: time.Hour,
+		},
+	})
 	require.NoError(t, err)
-	writer, err := manager.GetOrCreateWriter(fixture.CallID, "alice", "bob")
-	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, processor.Shutdown()) })
 
 	sipPayload := []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
 	responsePayload := []byte("SIP/2.0 200 OK\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
@@ -71,10 +77,15 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 	require.NoError(t, err)
 	t2, err := time.Parse(time.RFC3339Nano, fixture.Packets[2].Timestamp)
 	require.NoError(t, err)
-	require.NoError(t, writer.WriteSIPPacket(t0, sipPacket, layers.LinkTypeEthernet))
-	require.NoError(t, writer.WriteSIPPacket(t1, responsePacket, layers.LinkTypeEthernet))
-	require.NoError(t, writer.WriteRTPPacket(t2, rtpPacket, layers.LinkTypeEthernet))
-	require.NoError(t, manager.CloseCallWriter(fixture.CallID))
+	packets := []*data.CapturedPacket{
+		semanticCapturedPacket(t0, sipPacket, &data.SIPMetadata{CallId: fixture.CallID, FromUser: "alice", ToUser: "bob", Method: "INVITE"}, nil),
+		semanticCapturedPacket(t1, responsePacket, &data.SIPMetadata{CallId: fixture.CallID, FromUser: "alice", ToUser: "bob", CseqMethod: "INVITE", ResponseCode: 200}, nil),
+		// Hunter enrichment preserves the SIP call association alongside RTP
+		// metadata. The production pipeline must use it to select the call writer.
+		semanticCapturedPacket(t2, rtpPacket, &data.SIPMetadata{CallId: fixture.CallID}, &data.RTPMetadata{}),
+	}
+	processor.processBatch(&source.PacketBatch{SourceID: "semantic-hunter", Sequence: 1, TimestampNs: t0.UnixNano(), Packets: packets})
+	require.NoError(t, processor.perCallPcapWriter.CloseCallWriter(fixture.CallID))
 
 	observed := make([]semanticObservation, 0, 3)
 	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_sip.pcap"), true)...)
@@ -98,6 +109,15 @@ func TestPerCallPCAPSemanticGolden(t *testing.T) {
 			require.Equal(t, want.SIP.CSeqMethod, got.CSeqMethod)
 			require.Equal(t, want.SIP.ResponseCode, got.ResponseCode)
 		}
+	}
+}
+
+func semanticCapturedPacket(timestamp time.Time, packet []byte, sip *data.SIPMetadata, rtp *data.RTPMetadata) *data.CapturedPacket {
+	return &data.CapturedPacket{
+		TimestampNs: timestamp.UnixNano(), Data: packet,
+		CaptureLength: uint32(len(packet)), OriginalLength: uint32(len(packet)),
+		LinkType: uint32(layers.LinkTypeEthernet),
+		Metadata: &data.PacketMetadata{Protocol: "UDP", Sip: sip, Rtp: rtp},
 	}
 }
 

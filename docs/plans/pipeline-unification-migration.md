@@ -194,15 +194,15 @@ behavior.
 
 ### Tasks
 
-- [ ] Add `PacketEnvelope` to a protocol-neutral internal package.
-- [ ] Define typed source provenance and stage provenance.
-- [ ] Add lossless conversions from local capture records and gRPC batches.
-- [ ] Define typed stage and sink outcomes, including drop reasons.
-- [ ] Define protocol-domain result types independent of protobuf generation.
-- [ ] Move protobuf conversion into gRPC ingress/egress adapters.
-- [ ] Add round-trip tests proving that source identity, timestamps, filter IDs,
+- [x] Add `PacketEnvelope` to a protocol-neutral internal package.
+- [x] Define typed source provenance and stage provenance.
+- [x] Add lossless conversions from local capture records and gRPC batches.
+- [x] Define typed stage and sink outcomes, including drop reasons.
+- [x] Define protocol-domain result types independent of protobuf generation.
+- [x] Move protobuf conversion into gRPC ingress/egress adapters.
+- [x] Add round-trip tests proving that source identity, timestamps, filter IDs,
       metadata, link type, and packet bytes survive adapter conversion.
-- [ ] Document which operations are edge-safe, central-only, or idempotent.
+- [x] Document which operations are edge-safe, central-only, or idempotent.
 
 ### Exit Criteria
 

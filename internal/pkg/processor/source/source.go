@@ -6,10 +6,13 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/grpcadapter"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
 	"github.com/google/gopacket"
 )
@@ -56,6 +59,11 @@ type PacketBatch struct {
 
 	// Packets in this batch
 	Packets []*data.CapturedPacket
+
+	// Envelopes is the transport-neutral representation produced at the gRPC
+	// boundary. Packets remains temporarily available to unmigrated processor
+	// consumers during the pipeline migration.
+	Envelopes []*pipeline.PacketEnvelope
 
 	// Sequence number for ordering and loss detection
 	Sequence uint64
@@ -186,22 +194,61 @@ func (s *AtomicStats) Snapshot() Stats {
 
 // FromProtoBatch converts a protobuf PacketBatch to the internal PacketBatch type.
 func FromProtoBatch(pb *data.PacketBatch) *PacketBatch {
+	b, err := FromProtoBatchE(pb)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// FromProtoBatchE converts at the gRPC boundary and reports malformed metadata.
+func FromProtoBatchE(pb *data.PacketBatch) (*PacketBatch, error) {
 	if pb == nil {
-		return nil
+		return nil, nil
+	}
+	normalized, err := grpcadapter.FromPacketBatch(pb)
+	if err != nil {
+		return nil, fmt.Errorf("normalize gRPC packet batch: %w", err)
 	}
 	return &PacketBatch{
 		SourceID:    pb.HunterId,
 		Packets:     pb.Packets,
+		Envelopes:   normalized.Packets,
 		Sequence:    pb.Sequence,
 		TimestampNs: pb.TimestampNs,
 		Stats:       pb.Stats,
-	}
+	}, nil
 }
 
 // ToProtoBatch converts the internal PacketBatch to a protobuf PacketBatch.
 func (b *PacketBatch) ToProtoBatch() *data.PacketBatch {
+	pb, err := b.ToProtoBatchE()
+	if err != nil {
+		panic(err)
+	}
+	return pb
+}
+
+// ToProtoBatchE performs transport encoding in the gRPC adapter.
+func (b *PacketBatch) ToProtoBatchE() (*data.PacketBatch, error) {
 	if b == nil {
-		return nil
+		return nil, nil
+	}
+	if b.Envelopes != nil {
+		// Unmigrated processor stages still enrich Packets directly. Normalize
+		// their current values here so those enrichments survive forwarding.
+		normalized, err := grpcadapter.FromPacketBatch(&data.PacketBatch{
+			HunterId: b.SourceID, Sequence: b.Sequence, TimestampNs: b.TimestampNs,
+			Packets: b.Packets, Stats: b.Stats,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("normalize processed packet batch: %w", err)
+		}
+		pb, err := grpcadapter.ToPacketBatch(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("encode gRPC packet batch: %w", err)
+		}
+		return pb, nil
 	}
 	return &data.PacketBatch{
 		HunterId:    b.SourceID,
@@ -209,5 +256,5 @@ func (b *PacketBatch) ToProtoBatch() *data.PacketBatch {
 		Sequence:    b.Sequence,
 		TimestampNs: b.TimestampNs,
 		Stats:       b.Stats,
-	}
+	}, nil
 }

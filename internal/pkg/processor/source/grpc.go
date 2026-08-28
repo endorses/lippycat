@@ -117,7 +117,11 @@ func (s *GRPCSource) SourceID() string {
 // Returns true if the batch was sent, false if the source is stopped or buffer is full.
 func (s *GRPCSource) Push(batch *data.PacketBatch) bool {
 	// Convert protobuf batch to internal format
-	internalBatch := FromProtoBatch(batch)
+	internalBatch, err := FromProtoBatchE(batch)
+	if err != nil {
+		logger.Warn("GRPCSource rejected malformed packet batch", "error", err)
+		return false
+	}
 	if internalBatch == nil {
 		return false
 	}

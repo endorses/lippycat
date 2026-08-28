@@ -266,7 +266,11 @@ func (p *Processor) processBatch(batch *source.PacketBatch) {
 	}
 
 	// Convert to protobuf batch for upstream forwarding and subscriber broadcast
-	protoBatch := batch.ToProtoBatch()
+	protoBatch, err := batch.ToProtoBatchE()
+	if err != nil {
+		logger.Error("Failed to encode processed packet batch", "error", err, "source_id", batch.SourceID, "sequence", batch.Sequence)
+		return
+	}
 
 	// Forward to upstream in hierarchical mode
 	if p.upstreamManager != nil {

@@ -90,7 +90,7 @@ lc process --listen :55555 --log-dir /var/log/lippycat \
 
 The default `--log-emit-stage terminal` prevents duplicate files in a processor
 hierarchy. Bounded queues protect packet processing, so operators must monitor
-drop warnings. See the full [Structured Protocol Logs](../../../STRUCTURED_LOGS.md)
+drop warnings. See the full [Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md)
 guide for schemas, rotation, completeness, SIEM ingestion, and privacy.
 
 ## PCAP Writing Modes

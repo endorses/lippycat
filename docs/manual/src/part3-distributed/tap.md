@@ -46,7 +46,7 @@ sudo lc tap dns -i eth0 --insecure \
 
 Logging is disabled by default. When forwarding upstream, the default
 `--log-emit-stage terminal` emits only at the terminal processor. See
-[Structured Protocol Logs](../../../STRUCTURED_LOGS.md) for field schemas,
+[Structured Protocol Logs](../part5-advanced/structured-protocol-logs.md) for field schemas,
 TSV/JSONL behavior, rotation, lower-bound observations, and privacy controls.
 
 TLS is enabled by default for the management interface (TUI connections):

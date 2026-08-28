@@ -2,6 +2,7 @@ package processor
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -99,6 +100,32 @@ func TestCallAssociationCleanupHasBoundedRetainedAllocations(t *testing.T) {
 	if allocs > 100 {
 		t.Fatalf("call lifecycle allocations/run = %.1f, want <= 100", allocs)
 	}
+}
+
+func TestCallAssociationCleanupRetainedHeapBaseline(t *testing.T) {
+	before := processorLiveHeapBytes()
+	for cycle := 0; cycle < 50; cycle++ {
+		p := New(Config{MaxCalls: 256, CallTimeout: time.Hour})
+		for i := 0; i < 256; i++ {
+			callID := fmt.Sprintf("retained-%d-%d", cycle, i)
+			p.RegisterSDP(callID, fmt.Sprintf("v=0\r\nc=IN IP4 192.0.2.%d\r\nm=audio %d RTP/AVP 0\r\n", i%250+1, 10000+i))
+			p.CleanupCallPorts(callID)
+		}
+		p.Close()
+	}
+	after := processorLiveHeapBytes()
+	const maxRetainedGrowth = uint64(4 << 20)
+	if after > before+maxRetainedGrowth {
+		t.Fatalf("call cleanup retained heap grew by %d bytes, limit %d", after-before, maxRetainedGrowth)
+	}
+}
+
+func processorLiveHeapBytes() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
 }
 
 func BenchmarkCallAssociationLifecycle(b *testing.B) {

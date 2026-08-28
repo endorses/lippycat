@@ -2,9 +2,10 @@
 
 These fixtures freeze the observable semantics used during pipeline unification.
 Tests construct deterministic representative packets and write them to temporary
-PCAPs. The CLI test reads those files through `StartOfflineSniffer` and compares
-the emitted JSON, while the TUI test compares both ordered file replay and the
-shared live-capture `PacketInfo` conversion boundary.
+PCAPs. The CLI test executes the Cobra command over a multi-protocol PCAP and
+compares the emitted JSON. The TUI test compares ordered file replay and live
+conversion, then passes the complete event batch through `Model.Update` into the
+bounded packet store.
 The `source_pcap` names identify those generated capture scenarios; the generated
 files live in test temporary directories rather than being checked-in binaries.
 

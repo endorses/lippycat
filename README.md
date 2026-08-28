@@ -370,8 +370,12 @@ See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation. Fo
 
 ### Testing
 ```bash
-go test ./...
+make test
 ```
+
+`make test` runs the complete `all` build-tag suite and the dedicated LI
+package tests. Untagged `go test ./...` does not cover every supported command
+partition.
 
 ### Code Standards
 - Follow Go conventions and `gofmt`

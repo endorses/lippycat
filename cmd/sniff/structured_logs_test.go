@@ -33,6 +33,7 @@ func TestProtocolSniffPCAPWritesStructuredLogs(t *testing.T) {
 		{"dns", "dns", "example.test", dnsPacket(t), func(path string) { dnsHandler(dnsCmd, []string{path}) }},
 		{"tls", "ssl", "example.com", tcpPacket(t, 49152, 443, tlsClientHello()), func(path string) { tlsHandler(tlsCmd, []string{path}) }},
 		{"http", "http", "example.test", tcpPacket(t, 49153, 80, []byte("GET /phase6 HTTP/1.1\r\nHost: example.test\r\nUser-Agent: lippycat-test\r\n\r\n")), func(path string) { httpHandler(httpCmd, []string{path}) }},
+		{"smtp", "smtp", "alice@example.test", tcpPacket(t, 49154, 25, []byte("MAIL FROM:<alice@example.test>\r\n")), func(path string) { emailHandler(emailCmd, []string{path}) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -1,4 +1,4 @@
-.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li build-matrix manual manual-serve manual-clean
+.PHONY: build build-pgo build-release build-cuda cuda-kernels install install-system dev profile pgo-prepare clean clean-cuda test test-verbose test-coverage test-race bench fmt vet lint gosec gosec-verbose tidy version help all hunter processor cli tui tap binaries clean-binaries build-li processor-li tap-li binaries-li tap-li-cuda verify-no-li build-matrix build-matrix-cuda manual manual-serve manual-clean
 
 # Build variables
 BINARY_NAME=lc
@@ -133,6 +133,11 @@ build-cuda: cuda-kernels
 # to include the two CUDA variants.
 build-matrix:
 	./scripts/check-build-matrix.sh
+
+# CUDA builders must use this target; unlike build-matrix it fails if the CUDA
+# toolchain or either supported CUDA partition cannot be built and vetted.
+build-matrix-cuda:
+	CUDA=1 ./scripts/check-build-matrix.sh
 
 # Install to GOPATH/bin or /usr/local/bin
 install: build-release

@@ -3,16 +3,152 @@
 package processor
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type semanticPCAPFixture struct {
+	CallID      string `json:"call_id"`
+	PacketCount int    `json:"packet_count"`
+	LinkType    string `json:"link_type"`
+	Packets     []struct {
+		Timestamp string `json:"timestamp"`
+		FiveTuple struct {
+			SrcIP     string `json:"src_ip"`
+			DstIP     string `json:"dst_ip"`
+			SrcPort   uint16 `json:"src_port"`
+			DstPort   uint16 `json:"dst_port"`
+			Transport string `json:"transport"`
+		} `json:"five_tuple"`
+		SIP *struct {
+			CallID       string `json:"call_id"`
+			Method       string `json:"method"`
+			CSeqMethod   string `json:"cseq_method"`
+			ResponseCode int    `json:"response_code"`
+		} `json:"sip"`
+		PayloadSHA256   string `json:"payload_sha256"`
+		CallAssociation string `json:"call_association"`
+	} `json:"packets"`
+}
+
+func TestPerCallPCAPSemanticGolden(t *testing.T) {
+	fixtureBytes, err := os.ReadFile(filepath.Join("..", "baseline", "testdata", "per-call-pcap.json"))
+	require.NoError(t, err)
+	var fixture semanticPCAPFixture
+	require.NoError(t, json.Unmarshal(fixtureBytes, &fixture))
+
+	dir := t.TempDir()
+	manager, err := NewPcapWriterManager(&PcapWriterConfig{Enabled: true, OutputDir: dir, FilePattern: "{callid}.pcap", SyncInterval: time.Hour})
+	require.NoError(t, err)
+	writer, err := manager.GetOrCreateWriter(fixture.CallID, "alice", "bob")
+	require.NoError(t, err)
+
+	sipPayload := []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")
+	rtpPayload := []byte{0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x12, 0x34, 0x56, 0x78, 0xde, 0xad, 0xbe, 0xef}
+	sipPacket := semanticUDPPacket(t, net.ParseIP("192.0.2.10"), net.ParseIP("198.51.100.50"), 5060, 5060, sipPayload)
+	rtpPacket := semanticUDPPacket(t, net.ParseIP("198.51.100.50"), net.ParseIP("192.0.2.10"), 10000, 20000, rtpPayload)
+	t0, err := time.Parse(time.RFC3339Nano, fixture.Packets[0].Timestamp)
+	require.NoError(t, err)
+	t1, err := time.Parse(time.RFC3339Nano, fixture.Packets[1].Timestamp)
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteSIPPacket(t0, sipPacket, layers.LinkTypeEthernet))
+	require.NoError(t, writer.WriteRTPPacket(t1, rtpPacket, layers.LinkTypeEthernet))
+	require.NoError(t, manager.CloseCallWriter(fixture.CallID))
+
+	observed := make([]semanticObservation, 0, 2)
+	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_sip.pcap"), fixture.CallID, true)...)
+	observed = append(observed, readSemanticPCAP(t, filepath.Join(dir, fixture.CallID+"_rtp.pcap"), fixture.CallID, false)...)
+	require.Len(t, observed, fixture.PacketCount)
+	require.Equal(t, fixture.LinkType, layers.LinkTypeEthernet.String())
+	for i := range fixture.Packets {
+		want := fixture.Packets[i]
+		got := observed[i]
+		require.Equal(t, want.Timestamp, got.Timestamp)
+		require.Equal(t, want.FiveTuple.SrcIP, got.SrcIP)
+		require.Equal(t, want.FiveTuple.DstIP, got.DstIP)
+		require.Equal(t, want.FiveTuple.SrcPort, got.SrcPort)
+		require.Equal(t, want.FiveTuple.DstPort, got.DstPort)
+		require.Equal(t, strings.ToUpper(want.FiveTuple.Transport), got.Transport)
+		require.Equal(t, want.PayloadSHA256, got.PayloadSHA256)
+		require.Equal(t, want.CallAssociation, got.CallAssociation)
+		if want.SIP != nil {
+			require.Equal(t, want.SIP.CallID, got.CallID)
+			require.Equal(t, want.SIP.Method, got.Method)
+			require.Equal(t, want.SIP.CSeqMethod, got.CSeqMethod)
+		}
+	}
+}
+
+type semanticObservation struct {
+	Timestamp, SrcIP, DstIP, Transport                         string
+	SrcPort, DstPort                                           uint16
+	PayloadSHA256, CallAssociation, CallID, Method, CSeqMethod string
+}
+
+func semanticUDPPacket(t *testing.T, srcIP, dstIP net.IP, srcPort, dstPort layers.UDPPort, payload []byte) []byte {
+	t.Helper()
+	eth := &layers.Ethernet{SrcMAC: net.HardwareAddr{0, 1, 2, 3, 4, 5}, DstMAC: net.HardwareAddr{6, 7, 8, 9, 10, 11}, EthernetType: layers.EthernetTypeIPv4}
+	ip := &layers.IPv4{Version: 4, IHL: 5, TTL: 64, Protocol: layers.IPProtocolUDP, SrcIP: srcIP.To4(), DstIP: dstIP.To4()}
+	udp := &layers.UDP{SrcPort: srcPort, DstPort: dstPort}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	buf := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, eth, ip, udp, gopacket.Payload(payload)))
+	return buf.Bytes()
+}
+
+func readSemanticPCAP(t *testing.T, path, callID string, sip bool) []semanticObservation {
+	t.Helper()
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+	r, err := pcapgo.NewReader(f)
+	require.NoError(t, err)
+	var result []semanticObservation
+	for {
+		data, ci, err := r.ReadPacketData()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(data, r.LinkType(), gopacket.Default)
+		ip := packet.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
+		udp := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
+		digest := sha256.Sum256(udp.Payload)
+		o := semanticObservation{Timestamp: ci.Timestamp.UTC().Format(time.RFC3339Nano), SrcIP: ip.SrcIP.String(), DstIP: ip.DstIP.String(), SrcPort: uint16(udp.SrcPort), DstPort: uint16(udp.DstPort), Transport: "UDP", PayloadSHA256: hex.EncodeToString(digest[:]), CallAssociation: callID}
+		if sip {
+			lines := strings.Split(string(udp.Payload), "\r\n")
+			o.Method = strings.Fields(lines[0])[0]
+			for _, line := range lines[1:] {
+				if strings.HasPrefix(line, "Call-ID: ") {
+					o.CallID = strings.TrimPrefix(line, "Call-ID: ")
+				}
+				if strings.HasPrefix(line, "CSeq: ") {
+					fields := strings.Fields(line)
+					if len(fields) == 3 {
+						o.CSeqMethod = fields[2]
+					}
+				}
+			}
+		}
+		result = append(result, o)
+	}
+	return result
+}
 
 // TestDefaultPcapWriterConfig tests default configuration
 func TestDefaultPcapWriterConfig(t *testing.T) {

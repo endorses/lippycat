@@ -1,0 +1,119 @@
+//go:build tui || all
+
+package tui
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/stretchr/testify/require"
+)
+
+type protocolGolden struct {
+	Protocol  string `json:"protocol"`
+	Timestamp string `json:"timestamp"`
+	SrcIP     string `json:"src_ip"`
+	DstIP     string `json:"dst_ip"`
+	SrcPort   string `json:"src_port"`
+	DstPort   string `json:"dst_port"`
+	Info      string `json:"info"`
+}
+
+func TestLocalTUIProtocolEventGoldens(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "baseline", "testdata", "protocol-events.json"))
+	require.NoError(t, err)
+	var goldens []protocolGolden
+	require.NoError(t, json.Unmarshal(data, &goldens))
+	require.Len(t, goldens, 5)
+
+	packets := map[string][]byte{
+		"DNS":  goldenDNSPacket(t),
+		"TLS":  goldenTCPPacket(t, 49152, 443, goldenTLSClientHello()),
+		"HTTP": goldenTCPPacket(t, 49153, 80, []byte("GET /baseline HTTP/1.1\r\nHost: example.test\r\n\r\n")),
+		"SMTP": goldenTCPPacket(t, 49154, 25, []byte("MAIL FROM:<alice@example.test>\r\n")),
+		"SIP":  goldenUDPPacket(t, 5060, 5060, []byte("INVITE sip:bob@example.test SIP/2.0\r\nCall-ID: baseline-call\r\nCSeq: 1 INVITE\r\nContent-Length: 0\r\n\r\n")),
+	}
+	for _, want := range goldens {
+		ts, err := time.Parse(time.RFC3339Nano, want.Timestamp)
+		require.NoError(t, err)
+		packet := gopacket.NewPacket(packets[want.Protocol], layers.LayerTypeEthernet, gopacket.Default)
+		packet.Metadata().Timestamp = ts
+		packet.Metadata().Length = len(packet.Data())
+		got := convertPacket(capture.PacketInfo{Packet: packet, Interface: "golden0", LinkType: layers.LinkTypeEthernet})
+		require.Equal(t, want.Protocol, got.Protocol)
+		require.Equal(t, want.Timestamp, got.Timestamp.UTC().Format(time.RFC3339Nano))
+		require.Equal(t, want.SrcIP, got.SrcIP)
+		require.Equal(t, want.DstIP, got.DstIP)
+		require.Equal(t, want.SrcPort, got.SrcPort)
+		require.Equal(t, want.DstPort, got.DstPort)
+		require.Equal(t, want.Info, got.Info)
+	}
+}
+
+func goldenDNSPacket(t *testing.T) []byte {
+	t.Helper()
+	eth, ip := goldenEthernetIPv4(layers.IPProtocolUDP)
+	udp := &layers.UDP{SrcPort: 53000, DstPort: 53}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	dns := &layers.DNS{ID: 7, RD: true, QDCount: 1, Questions: []layers.DNSQuestion{{Name: []byte("example.test"), Type: layers.DNSTypeA, Class: layers.DNSClassIN}}}
+	return goldenSerialize(t, eth, ip, udp, dns)
+}
+
+func goldenUDPPacket(t *testing.T, src, dst layers.UDPPort, payload []byte) []byte {
+	t.Helper()
+	eth, ip := goldenEthernetIPv4(layers.IPProtocolUDP)
+	if dst == 5060 {
+		ip.DstIP = net.ParseIP("198.51.100.50").To4()
+	}
+	udp := &layers.UDP{SrcPort: src, DstPort: dst}
+	require.NoError(t, udp.SetNetworkLayerForChecksum(ip))
+	return goldenSerialize(t, eth, ip, udp, gopacket.Payload(payload))
+}
+
+func goldenTCPPacket(t *testing.T, src, dst layers.TCPPort, payload []byte) []byte {
+	t.Helper()
+	eth, ip := goldenEthernetIPv4(layers.IPProtocolTCP)
+	switch dst {
+	case 443:
+		ip.DstIP = net.ParseIP("198.51.100.20").To4()
+	case 80:
+		ip.DstIP = net.ParseIP("198.51.100.80").To4()
+	case 25:
+		ip.DstIP = net.ParseIP("198.51.100.25").To4()
+	}
+	tcp := &layers.TCP{SrcPort: src, DstPort: dst, Seq: 1, ACK: true, PSH: true, Window: 65535}
+	require.NoError(t, tcp.SetNetworkLayerForChecksum(ip))
+	return goldenSerialize(t, eth, ip, tcp, gopacket.Payload(payload))
+}
+
+func goldenEthernetIPv4(protocol layers.IPProtocol) (*layers.Ethernet, *layers.IPv4) {
+	return &layers.Ethernet{SrcMAC: net.HardwareAddr{0, 1, 2, 3, 4, 5}, DstMAC: net.HardwareAddr{6, 7, 8, 9, 10, 11}, EthernetType: layers.EthernetTypeIPv4},
+		&layers.IPv4{Version: 4, IHL: 5, TTL: 64, SrcIP: net.ParseIP("192.0.2.10").To4(), DstIP: net.ParseIP("198.51.100.53").To4(), Protocol: protocol}
+}
+
+func goldenSerialize(t *testing.T, layersToWrite ...gopacket.SerializableLayer) []byte {
+	t.Helper()
+	buf := gopacket.NewSerializeBuffer()
+	require.NoError(t, gopacket.SerializeLayers(buf, gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}, layersToWrite...))
+	return buf.Bytes()
+}
+
+func goldenTLSClientHello() []byte {
+	ext := []byte{0, 0, 0, 16, 0, 14, 0, 0, 11, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm'}
+	body := binary.BigEndian.AppendUint16(nil, 0x0303)
+	body = append(body, make([]byte, 32)...)
+	body = append(body, 0, 0, 2, 0x13, 0x01, 1, 0)
+	body = binary.BigEndian.AppendUint16(body, uint16(len(ext)))
+	body = append(body, ext...)
+	handshake := append([]byte{1, byte(len(body) >> 16), byte(len(body) >> 8), byte(len(body))}, body...)
+	record := binary.BigEndian.AppendUint16([]byte{22, 3, 1}, uint16(len(handshake)))
+	return append(record, handshake...)
+}

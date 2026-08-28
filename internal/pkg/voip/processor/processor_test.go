@@ -70,6 +70,37 @@ func TestCallAssociationCleanupBaseline(t *testing.T) {
 	}
 }
 
+func TestCallAssociationTimeoutCleanupBaseline(t *testing.T) {
+	p := New(Config{MaxCalls: 8, CallTimeout: time.Millisecond})
+	t.Cleanup(p.Close)
+
+	p.RegisterSDP("expired-call", "v=0\r\nc=IN IP4 192.0.2.30\r\nm=audio 13000 RTP/AVP 0\r\n")
+	p.mu.Lock()
+	p.calls["expired-call"].lastUpdated = time.Now().Add(-time.Second)
+	p.mu.Unlock()
+
+	p.cleanupExpiredCalls()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.calls) != 0 || len(p.portToCallID) != 0 {
+		t.Fatalf("timeout cleanup retained calls=%d mappings=%d", len(p.calls), len(p.portToCallID))
+	}
+}
+
+func TestCallAssociationCleanupHasBoundedRetainedAllocations(t *testing.T) {
+	allocs := testing.AllocsPerRun(25, func() {
+		p := New(Config{MaxCalls: 1, CallTimeout: time.Hour})
+		p.RegisterSDP("allocation-baseline", "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 10000 RTP/AVP 0\r\n")
+		p.CleanupCallPorts("allocation-baseline")
+		p.Close()
+	})
+	// This is deliberately generous enough to tolerate Go runtime/compiler
+	// changes while still detecting an accidental unbounded allocation loop.
+	if allocs > 100 {
+		t.Fatalf("call lifecycle allocations/run = %.1f, want <= 100", allocs)
+	}
+}
+
 func BenchmarkCallAssociationLifecycle(b *testing.B) {
 	p := New(Config{MaxCalls: 1, CallTimeout: time.Hour})
 	b.Cleanup(p.Close)

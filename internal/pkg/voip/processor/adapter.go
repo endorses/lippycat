@@ -2,6 +2,7 @@ package processor
 
 import (
 	"github.com/endorses/lippycat/api/gen/data"
+	"github.com/endorses/lippycat/internal/pkg/callregistry"
 	"github.com/google/gopacket"
 )
 
@@ -21,6 +22,7 @@ func NewSourceAdapter(proc *Processor) *SourceAdapter {
 type SourceProcessResult struct {
 	isVoIP          bool
 	callID          string
+	callIDs         []string
 	metadata        *data.PacketMetadata
 	filterEvaluated bool
 	filterMatched   bool
@@ -35,6 +37,12 @@ func (r *SourceProcessResult) IsVoIPPacket() bool {
 // GetCallID implements source.VoIPResult.
 func (r *SourceProcessResult) GetCallID() string {
 	return r.callID
+}
+
+// GetCallIDs returns every call associated with the packet. The returned slice
+// is a copy so callers cannot mutate processor-owned result state.
+func (r *SourceProcessResult) GetCallIDs() []string {
+	return append([]string(nil), r.callIDs...)
 }
 
 // GetMetadata implements source.VoIPResult.
@@ -59,6 +67,7 @@ func (a *SourceAdapter) Process(packet gopacket.Packet) *SourceProcessResult {
 	return &SourceProcessResult{
 		isVoIP:          result.IsVoIP,
 		callID:          result.CallID,
+		callIDs:         result.CallIDs,
 		metadata:        result.Metadata,
 		filterEvaluated: result.FilterEvaluated,
 		filterMatched:   result.FilterMatched,
@@ -74,6 +83,14 @@ func (a *SourceAdapter) Close() {
 // ActiveCalls returns information about currently tracked calls.
 func (a *SourceAdapter) ActiveCalls() []CallInfo {
 	return a.proc.ActiveCalls()
+}
+
+// AddLifecycleObserver subscribes an observer to future call lifecycle events.
+func (a *SourceAdapter) AddLifecycleObserver(observer callregistry.LifecycleObserver) {
+	if a == nil || a.proc == nil {
+		return
+	}
+	a.proc.AddLifecycleObserver(observer)
 }
 
 // CleanupCallPorts removes all port-to-callID mappings for a given callID.

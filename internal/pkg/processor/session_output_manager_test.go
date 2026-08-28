@@ -9,20 +9,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/processor/source"
+	voipprocessor "github.com/endorses/lippycat/internal/pkg/voip/processor"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type recordingSessionMonitor struct {
-	mu     sync.Mutex
-	events *[]string
-	stops  atomic.Int32
+	mu        sync.Mutex
+	events    *[]string
+	stops     atomic.Int32
+	scheduled []string
 }
 
 func (m *recordingSessionMonitor) Start()                             {}
 func (m *recordingSessionMonitor) SetVoIPPortCleaner(VoIPPortCleaner) {}
-func (m *recordingSessionMonitor) ScheduleClose(string, bool)         {}
+func (m *recordingSessionMonitor) ScheduleClose(callID string, _ bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scheduled = append(m.scheduled, callID)
+}
 func (m *recordingSessionMonitor) Stop() {
 	m.stops.Add(1)
 	m.mu.Lock()
@@ -82,4 +89,22 @@ func TestSessionOutputManagerRejectsWritesAfterClose(t *testing.T) {
 		"call-id", "alice", "bob", time.Now(), []byte{1}, layers.LinkTypeEthernet, false,
 	)
 	require.ErrorIs(t, err, errSessionOutputClosed)
+}
+
+func TestSetPacketSourceRegistersSessionOutputLifecycleObserver(t *testing.T) {
+	monitor := &recordingSessionMonitor{}
+	manager := newSessionOutputManager(nil, monitor)
+	registry := voipprocessor.New(voipprocessor.Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(registry.Close)
+	localSource := source.NewLocalSource(source.DefaultLocalSourceConfig())
+	localSource.SetVoIPProcessor(voipprocessor.NewSourceAdapter(registry))
+	p := &Processor{sessionOutputManager: manager}
+
+	p.SetPacketSource(localSource)
+	registry.AssociateEndpoint("call-id", "192.0.2.1:10000")
+	registry.CompleteCall("call-id")
+
+	monitor.mu.Lock()
+	defer monitor.mu.Unlock()
+	require.Equal(t, []string{"call-id"}, monitor.scheduled)
 }

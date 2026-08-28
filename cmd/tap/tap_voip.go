@@ -538,10 +538,19 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	tapTCPHandler.SetApplicationFilter(appFilter)
 	tapTCPHandler.SetSDPRegistrar(voipProc)
 
-	// Create SipStreamFactory with the tap TCP handler
+	// Create SipStreamFactory with the tap TCP handler. Query the tap-local call
+	// registry so active dialogs retain their TCP streams across idle intervals.
 	// Use a background context for the stream factory - it runs for the lifetime of the tap node
 	tapCtx := context.Background()
-	streamFactory := voip.NewSipStreamFactory(tapCtx, tapTCPHandler)
+	streamFactory := voip.NewSipStreamFactoryWithConfig(
+		tapCtx,
+		tapTCPHandler,
+		*voip.GetConfig(),
+		func(callID string) bool {
+			_, active := voipProc.Call(callID)
+			return active
+		},
+	)
 
 	// Create connection-aware reassembly assembler
 	reassemblyEngine := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())

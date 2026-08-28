@@ -89,11 +89,7 @@ func (rb *timeRingBuffer) len() int {
 	return rb.count
 }
 
-// Call tracker for RTP-to-CallID mapping in TUI capture modes
 var (
-	callTracker   *CallTracker
-	callTrackerMu sync.RWMutex
-
 	// Local call aggregator for direct merge triggering from TCP reassembly
 	localCallAggregator   *LocalCallAggregator
 	localCallAggregatorMu sync.RWMutex
@@ -389,30 +385,6 @@ func classifyICMPv6InnerPacket(pkt gopacket.Packet) (protocol, info string) {
 	return "", ""
 }
 
-// SetCallTracker sets the call tracker for RTP-to-CallID mapping
-func SetCallTracker(tracker *CallTracker) {
-	callTrackerMu.Lock()
-	defer callTrackerMu.Unlock()
-	callTracker = tracker
-}
-
-// GetCallTracker returns the current call tracker
-func GetCallTracker() *CallTracker {
-	callTrackerMu.RLock()
-	defer callTrackerMu.RUnlock()
-	return callTracker
-}
-
-// ClearCallTracker clears the call tracker
-func ClearCallTracker() {
-	callTrackerMu.Lock()
-	defer callTrackerMu.Unlock()
-	if callTracker != nil {
-		callTracker.Clear()
-		callTracker = nil
-	}
-}
-
 // SetLocalCallAggregator sets the local call aggregator for direct merge triggering
 func SetLocalCallAggregator(agg *LocalCallAggregator) {
 	localCallAggregatorMu.Lock()
@@ -495,7 +467,7 @@ func GetMergeAggregatorStats() (attempts, syntheticFound, realFound, success int
 // extractAndRegisterSIPFromPacket extracts Call-ID, media ports, and From/To from a SIP packet
 // and registers them with the CallTracker for RTP correlation.
 // This provides a backup path when TCP reassembly fails (mid-stream captures, fragmentation, etc.)
-func extractAndRegisterSIPFromPacket(payload []byte, srcIP, dstIP string) {
+func extractAndRegisterSIPFromPacket(tracker *CallTracker, payload []byte, srcIP, dstIP string) {
 	atomic.AddInt64(&perPacketExtractCalls, 1)
 
 	if len(payload) == 0 {
@@ -510,7 +482,6 @@ func extractAndRegisterSIPFromPacket(payload []byte, srcIP, dstIP string) {
 		atomic.AddInt64(&sipRequestsProcessed, 1)
 	}
 
-	tracker := GetCallTracker()
 	if tracker == nil {
 		return
 	}
@@ -745,7 +716,7 @@ var pendingPackets = &pendingPacketBuffer{
 }
 
 // addPackets adds packets to the pending buffer (called by bridge consumer)
-func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
+func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay, preserveAll bool) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 	pb.packets = append(pb.packets, packets...)
@@ -753,15 +724,14 @@ func (pb *pendingPacketBuffer) addPackets(packets []components.PacketDisplay) {
 	// Cap buffer size to prevent unbounded growth (only for live capture).
 	// In offline mode (VoIP with CallTracker), we preserve all packets.
 	// Note: Pause is now handled upstream (source + bridge), so no pause check needed here.
-	hasCallTracker := GetCallTracker() != nil
-	if !hasCallTracker {
+	if !preserveAll {
 		const maxPending = 5000
 		if len(pb.packets) > maxPending {
 			dropped := len(pb.packets) - maxPending
 			pb.packets = pb.packets[len(pb.packets)-maxPending:]
 			logger.Warn("pendingPackets: buffer capped, packets dropped",
 				"dropped", dropped,
-				"has_call_tracker", hasCallTracker)
+				"preserve_all", preserveAll)
 		}
 	}
 
@@ -802,10 +772,9 @@ func (pb *pendingPacketBuffer) drainPackets(maxPackets int) []components.PacketD
 // This is the public API called by the TUI's tick handler.
 // For live capture: Limited to 50 packets per tick to prevent UI stutter.
 // For offline capture: Returns ALL pending packets to ensure complete processing.
-func DrainPendingPackets() []components.PacketDisplay {
+func DrainPendingPackets(preserveAll bool) []components.PacketDisplay {
 	// In offline mode, drain all packets to ensure none are lost
-	hasCallTracker := GetCallTracker() != nil
-	if hasCallTracker {
+	if preserveAll {
 		return pendingPackets.drainPackets(100000) // Large number = all packets
 	}
 	// Live mode: limit to prevent UI stutter
@@ -932,7 +901,7 @@ func ResetBridgeStats() {
 //
 // The pause signal allows the bridge to block when capture is paused,
 // reducing CPU usage to near-idle.
-func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal) {
+func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Program, pause *PauseSignal, tracker *CallTracker, preserveAll bool) {
 	// Wait for TUI to be fully initialized before processing packets.
 	// This prevents race conditions where messages are sent before
 	// Bubbletea has completed terminal setup, which can cause
@@ -957,7 +926,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tcpHandler := NewTUISIPHandler()
+	tcpHandler := NewTUISIPHandler(tracker)
 	streamFactory := voip.NewSipStreamFactory(ctx, tcpHandler)
 	assembler := pipeline.NewReassemblyEngine(streamFactory, pipeline.DefaultReassemblyConfig())
 	defer func() {
@@ -1018,7 +987,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 				}
 				// Add to pending buffer (never blocks - TUI pulls when ready)
 				consumerPacketsReceived += int64(len(msg.Packets))
-				pendingPackets.addPackets(msg.Packets)
+				pendingPackets.addPackets(msg.Packets, preserveAll)
 			}
 		}
 	}()
@@ -1032,7 +1001,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, we MUST NOT drop packets - use blocking send
-			hasCallTracker := GetCallTracker() != nil
+			hasCallTracker := tracker != nil
 
 			if hasCallTracker {
 				// Blocking send - wait until TUI is ready (offline mode)
@@ -1184,7 +1153,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			// Check if we're in offline mode (reading from PCAP files)
 			// In offline mode, process ALL packets - no sampling needed
-			hasCallTracker := GetCallTracker() != nil
+			hasCallTracker := preserveAll
 
 			// Feed TCP packets to the assembler for SIP reassembly
 			// Only when VoIP mode is enabled - this mirrors the behavior of
@@ -1237,7 +1206,7 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 			if shouldDisplay {
 				// Full conversion to extract all metadata (SDP, etc.)
-				packet := convertPacket(pktInfo)
+				packet := convertPacket(pktInfo, tracker)
 				batch = append(batch, packet)
 			}
 
@@ -1255,7 +1224,11 @@ func StartPacketBridge(packetChan <-chan capture.PacketInfo, program *tea.Progra
 
 // convertPacketFast is a lightweight version for high-speed scenarios
 // Uses shared extraction logic with TUI-specific fast SIP detection
-func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
+func convertPacketFast(pktInfo capture.PacketInfo, tracker ...*CallTracker) components.PacketDisplay {
+	var callTracker *CallTracker
+	if len(tracker) > 0 {
+		callTracker = tracker[0]
+	}
 	pkt := pktInfo.Packet
 
 	// Use shared extraction for basic fields
@@ -1308,7 +1281,7 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 					// Mark the flow so non-first-fragment continuations are also classified as SIP.
 					markUDPSIPFlow(flowKey)
 					// Extract Call-ID and register with CallTracker for RTP correlation
-					extractAndRegisterSIPFromPacket(payload, fields.SrcIP, fields.DstIP)
+					extractAndRegisterSIPFromPacket(callTracker, payload, fields.SrcIP, fields.DstIP)
 				} else if isUDPSIPFlow(flowKey) {
 					display.Protocol = internProtocol("SIP")
 					display.Info = "UDP SIP (continuation)"
@@ -1330,7 +1303,7 @@ func convertPacketFast(pktInfo capture.PacketInfo) components.PacketDisplay {
 
 // convertPacket converts a gopacket.Packet to PacketDisplay
 // Uses shared extraction logic enhanced with protocol detection
-func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
+func convertPacket(pktInfo capture.PacketInfo, tracker *CallTracker) components.PacketDisplay {
 	pkt := pktInfo.Packet
 
 	// Use shared extraction for basic fields
@@ -1365,7 +1338,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 		display.Protocol = detectionResult.Protocol
 
 		// Generate display info from metadata
-		display.Info = buildProtocolInfo(detectionResult, pkt, &display)
+		display.Info = buildProtocolInfo(detectionResult, pkt, &display, tracker)
 
 		// If detected as SIP, cache the flow for continuation-segment classification.
 		if detectionResult.Protocol == "SIP" {
@@ -1434,7 +1407,7 @@ func convertPacket(pktInfo capture.PacketInfo) components.PacketDisplay {
 }
 
 // buildProtocolInfo generates display info from detector metadata
-func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, display *components.PacketDisplay) string {
+func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, display *components.PacketDisplay, tracker *CallTracker) string {
 	switch result.Protocol {
 	case "SIP":
 		// Convert metadata to VoIPData for compatibility
@@ -1442,7 +1415,7 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 
 		// Feed SIP packet to offline tracker for RTP-to-CallID mapping
 		// Use media_ports and media_ip from detector metadata (parsed from SDP)
-		if tracker := GetCallTracker(); tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
+		if tracker != nil && display.VoIPData != nil && display.VoIPData.CallID != "" {
 			if mediaPorts, ok := result.Metadata["media_ports"].([]uint16); ok && len(mediaPorts) > 0 {
 				atomic.AddInt64(&detectorMediaPortsFound, 1)
 				// Log SDP port registration
@@ -1517,7 +1490,7 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 		display.VoIPData = metadataToVoIPData(result.Metadata)
 
 		// Query offline tracker for CallID based on IP/port
-		if tracker := GetCallTracker(); tracker != nil && display.VoIPData != nil {
+		if tracker != nil && display.VoIPData != nil {
 			callID := tracker.GetCallIDForRTPPacket(display.SrcIP, display.SrcPort, display.DstIP, display.DstPort)
 			if callID != "" {
 				display.VoIPData.CallID = callID
@@ -1546,7 +1519,7 @@ func buildProtocolInfo(result *signatures.DetectionResult, pkt gopacket.Packet, 
 			// Try to register endpoints - if they already belong to a real SIP call,
 			// use that call ID instead of the synthetic one. This handles race conditions
 			// where SIP registers endpoints just before RTP arrives.
-			if tracker := GetCallTracker(); tracker != nil {
+			if tracker != nil {
 				if realCallID := tracker.RegisterRTPOnlyEndpoints(syntheticCallID, display.SrcIP, display.SrcPort, display.DstIP, display.DstPort); realCallID != "" {
 					// Endpoint already belongs to a real SIP call - use that call ID
 					display.VoIPData.CallID = realCallID

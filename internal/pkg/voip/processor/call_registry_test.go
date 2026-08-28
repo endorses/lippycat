@@ -58,6 +58,21 @@ func TestCallRegistryCapacityAndLifecycleOrdering(t *testing.T) {
 	p.Close()
 }
 
+func TestCallRegistryObserverCanBeAddedAfterConstruction(t *testing.T) {
+	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
+	t.Cleanup(p.Close)
+	observer := &recordingLifecycleObserver{}
+	p.AddLifecycleObserver(observer)
+
+	p.AssociateEndpoint("call", "192.0.2.1:10000")
+	p.CompleteCall("call")
+
+	require.Equal(t, []lifecycleEvent{
+		{callID: "call"},
+		{callID: "call", reason: callregistry.EndCompleted},
+	}, observer.snapshot())
+}
+
 func TestCallRegistryB2BUAAssociationsAreCopied(t *testing.T) {
 	p := New(Config{MaxCalls: 10, CallTimeout: time.Hour})
 	t.Cleanup(p.Close)

@@ -324,6 +324,31 @@ func TestProcessor_ProcessRTPPacket(t *testing.T) {
 	assert.Equal(t, uint32(0x12345678), result.Metadata.Rtp.Ssrc)
 }
 
+func TestProcessor_ProcessRTPPacketReturnsAllSharedEndpointCalls(t *testing.T) {
+	p := New(DefaultConfig())
+	defer p.Close()
+
+	const endpoint = "192.168.1.1:20000"
+	p.AssociateEndpoint("b2bua-leg-a", endpoint)
+	p.AssociateEndpoint("b2bua-leg-b", endpoint)
+
+	rtpPayload := createRTPPayload(2, 0, 1, 12345, 0x12345678)
+	result := p.Process(createUDPPacket(t, rtpPayload, 20000, 12345))
+
+	require.NotNil(t, result)
+	assert.Equal(t, "b2bua-leg-a", result.CallID, "legacy primary association must remain deterministic")
+	assert.Equal(t, []string{"b2bua-leg-a", "b2bua-leg-b"}, result.CallIDs)
+	assert.Equal(t, "b2bua-leg-a", result.Metadata.Sip.CallId)
+
+	adapterResult := NewSourceAdapter(p).Process(createUDPPacket(t, rtpPayload, 20000, 12345))
+	require.NotNil(t, adapterResult)
+	assert.Equal(t, []string{"b2bua-leg-a", "b2bua-leg-b"}, adapterResult.GetCallIDs())
+
+	callIDs := adapterResult.GetCallIDs()
+	callIDs[0] = "mutated"
+	assert.Equal(t, []string{"b2bua-leg-a", "b2bua-leg-b"}, adapterResult.GetCallIDs())
+}
+
 func TestProcessor_ActiveCalls(t *testing.T) {
 	p := New(DefaultConfig())
 	defer p.Close()

@@ -106,7 +106,7 @@ func (m Model) handleTickMsg(msg TickMsg) (Model, tea.Cmd) {
 	if !m.uiState.Paused && m.uiState.Capturing {
 		// PULL-BASED ARCHITECTURE: Drain pending packets from buffer
 		// This ensures TUI is never blocked by incoming packets - it pulls when ready
-		pendingPackets := DrainPendingPackets()
+		pendingPackets := DrainPendingPackets(m.captureMode == components.CaptureModeOffline)
 
 		if len(pendingPackets) > 0 {
 			m.processPendingPackets(pendingPackets)
@@ -479,7 +479,7 @@ func (m Model) handleCaptureCompleteMsg(msg CaptureCompleteMsg) (Model, tea.Cmd)
 	// Unlike the tick handler which drains a limited number, we drain everything
 	// to ensure no packets are lost when capture completes
 	for {
-		pendingPackets := DrainPendingPackets()
+		pendingPackets := DrainPendingPackets(m.captureMode == components.CaptureModeOffline)
 		if len(pendingPackets) == 0 {
 			break
 		}

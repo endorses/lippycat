@@ -43,6 +43,12 @@ type ProcessResult struct {
 	// For RTP packets, this is looked up from the port-to-call mapping.
 	CallID string
 
+	// CallIDs contains every SIP Call-ID associated with this packet. RTP can
+	// belong to multiple call legs when a B2BUA advertises a shared media
+	// endpoint. CallID remains the first entry for compatibility with consumers
+	// that can represent only one call.
+	CallIDs []string
+
 	// Metadata contains protobuf metadata for forwarding to processors.
 	Metadata *data.PacketMetadata
 
@@ -200,6 +206,17 @@ func New(cfg Config) *Processor {
 	go p.janitorLoop()
 
 	return p
+}
+
+// AddLifecycleObserver subscribes an observer to future call lifecycle events.
+// It is safe to call after construction, before packet processing starts.
+func (p *Processor) AddLifecycleObserver(observer callregistry.LifecycleObserver) {
+	if p == nil || observer == nil {
+		return
+	}
+	p.eventMu.Lock()
+	defer p.eventMu.Unlock()
+	p.observers = append(p.observers, observer)
 }
 
 // Process analyzes a packet and returns VoIP metadata if applicable.

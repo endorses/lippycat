@@ -27,19 +27,28 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 	// disabled — on busy networks ports get reused across unrelated calls and
 	// a port-only fallback stamps the wrong CallID on RTP from a different
 	// host. SDP carries the c= connection address; we require it.
-	var callID string
-	var exists bool
-
+	callIDs := make([]string, 0, 2)
+	seenCallIDs := make(map[string]struct{})
+	appendCallIDs := func(endpoint string) {
+		for _, callID := range p.getAllCallIDsForPort(endpoint) {
+			if _, exists := seenCallIDs[callID]; exists {
+				continue
+			}
+			seenCallIDs[callID] = struct{}{}
+			callIDs = append(callIDs, callID)
+		}
+	}
 	if dstIP != "" {
-		callID, exists = p.getCallIDForPort(dstIP + ":" + dstPort)
+		appendCallIDs(dstIP + ":" + dstPort)
 	}
-	if !exists && srcIP != "" {
-		callID, exists = p.getCallIDForPort(srcIP + ":" + srcPort)
+	if srcIP != "" {
+		appendCallIDs(srcIP + ":" + srcPort)
 	}
 
-	if !exists {
+	if len(callIDs) == 0 {
 		return nil
 	}
+	callID := callIDs[0]
 
 	// Validate RTP header
 	payload := udp.Payload
@@ -62,6 +71,7 @@ func (p *Processor) detectRTP(packet gopacket.Packet, udp *layers.UDP) *ProcessR
 		IsVoIP:     true,
 		PacketType: PacketTypeRTP,
 		CallID:     callID,
+		CallIDs:    callIDs,
 		Metadata:   pbMetadata,
 	}
 }

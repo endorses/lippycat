@@ -37,6 +37,7 @@ const rtpStalenessThreshold = 10 * time.Second
 type LocalCallAggregator struct {
 	aggregator      *voip.CallAggregator
 	program         *tea.Program
+	callTracker     *CallTracker
 	lastNotifyTime  time.Time
 	notifyThrottle  time.Duration
 	mu              sync.Mutex
@@ -50,10 +51,11 @@ type LocalCallAggregator struct {
 }
 
 // NewLocalCallAggregator creates a new local call aggregator for live or offline mode
-func NewLocalCallAggregator(program *tea.Program) *LocalCallAggregator {
+func NewLocalCallAggregator(program *tea.Program, tracker *CallTracker) *LocalCallAggregator {
 	return &LocalCallAggregator{
 		aggregator:     voip.NewCallAggregator(),
 		program:        program,
+		callTracker:    tracker,
 		notifyThrottle: 500 * time.Millisecond, // Throttle call updates
 		stopCh:         make(chan struct{}),
 	}
@@ -183,7 +185,7 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 	to := call.To
 	if (from == "" || to == "") && call.CallID != "" {
 		atomic.AddInt64(&trackerFallbackAttempts, 1)
-		if tracker := GetCallTracker(); tracker != nil {
+		if tracker := lca.callTracker; tracker != nil {
 			trackerFrom, trackerTo := tracker.GetCallPartyInfo(call.CallID)
 			foundAny := false
 			if from == "" && trackerFrom != "" {
@@ -233,7 +235,7 @@ func (lca *LocalCallAggregator) convertToTUICall(call voip.AggregatedCall) types
 
 	// Get SDP endpoints from CallTracker for debugging correlation
 	var sdpEndpoints []string
-	if tracker := GetCallTracker(); tracker != nil {
+	if tracker := lca.callTracker; tracker != nil {
 		sdpEndpoints = tracker.GetEndpointsForCall(call.CallID)
 	}
 

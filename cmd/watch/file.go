@@ -120,11 +120,6 @@ func runFile(cmd *cobra.Command, args []string) {
 	// Store program reference for packet bridge
 	tui.SetCurrentProgram(p)
 
-	// Initialize call tracker for RTP-to-CallID mapping BEFORE starting capture
-	// This is critical - the bridge needs the tracker available when processing SIP packets
-	callTracker := tui.NewCallTracker()
-	tui.SetCallTracker(callTracker)
-
 	// Start packet capture in background using timestamp-ordered processing
 	// This ensures SIP packets are processed before their corresponding RTP packets,
 	// which is essential for proper call tracking
@@ -140,7 +135,7 @@ func runFile(cmd *cobra.Command, args []string) {
 		tui.WaitForTUIReady()
 
 		capture.StartOfflineSnifferOrdered(args, fileFilter, func(devices []pcaptypes.PcapInterface, filter string) {
-			startFileSnifferOrdered(ctx, devices, filter, p)
+			startFileSnifferOrdered(ctx, devices, filter, p, model.CallTracker())
 		})
 
 		// Notify TUI that capture is complete so it can drain remaining packets
@@ -158,10 +153,10 @@ func runFile(cmd *cobra.Command, args []string) {
 // startFileSnifferOrdered initializes timestamp-ordered packet capture for offline VoIP analysis.
 // This ensures SIP packets are processed before their corresponding RTP packets,
 // which is essential for proper call tracking and RTP-to-CallID mapping.
-func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program) {
+func startFileSnifferOrdered(ctx context.Context, devices []pcaptypes.PcapInterface, filter string, program *tea.Program, tracker *tui.CallTracker) {
 	pauseSignal := tui.GetGlobalPauseSignal()
 	processor := func(ch <-chan capture.PacketInfo) {
-		tui.StartPacketBridge(ch, program, pauseSignal)
+		tui.StartPacketBridge(ch, program, pauseSignal, tracker, true)
 	}
 	// Use RunOfflineOrdered which reads all packets, sorts by timestamp, then processes
 	capture.RunOfflineOrdered(devices, filter, processor)

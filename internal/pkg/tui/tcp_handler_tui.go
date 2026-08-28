@@ -34,11 +34,13 @@ func GetTCPSIPTypeStats() (requests, responses, requestsWithSDP, responsesWithSD
 // TUISIPHandler handles SIP messages for TUI live capture mode.
 // It marks TCP flows as SIP when complete messages are detected via TCP reassembly.
 // This replaces the heuristic-based detection that caused false positives.
-type TUISIPHandler struct{}
+type TUISIPHandler struct {
+	callTracker *CallTracker
+}
 
 // NewTUISIPHandler creates a handler for TUI SIP detection
-func NewTUISIPHandler() *TUISIPHandler {
-	return &TUISIPHandler{}
+func NewTUISIPHandler(tracker *CallTracker) *TUISIPHandler {
+	return &TUISIPHandler{callTracker: tracker}
 }
 
 // HandleSIPMessage processes a complete SIP message detected via TCP reassembly.
@@ -116,7 +118,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 
 	// Register with CallTracker if available (for RTP-to-CallID mapping)
 	if callID != "" {
-		if tracker := GetCallTracker(); tracker != nil {
+		if tracker := h.callTracker; tracker != nil {
 			// Parse SIP message to extract media ports for RTP mapping
 			// This is a lightweight parse - just looking for SDP m= lines
 			mediaPorts := extractMediaPortsFromSIP(event.Body)

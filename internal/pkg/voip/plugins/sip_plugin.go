@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -40,7 +41,7 @@ func NewSIPPlugin() *SIPPlugin {
 
 	// Compile common SIP patterns
 	patterns := []string{
-		`^(INVITE|REGISTER|BYE|CANCEL|ACK|OPTIONS|PRACK|SUBSCRIBE|NOTIFY|PUBLISH|INFO|MESSAGE|UPDATE|REFER)\s+`,
+		`^(` + strings.Join(sharedsip.RequestMethods[:], "|") + `)\s+`,
 		`^SIP/2\.0\s+(\d{3})\s+`,
 		`Call-ID:\s*([^\r\n]+)`,
 		`From:\s*([^\r\n]+)`,
@@ -176,20 +177,11 @@ func (s *SIPPlugin) isSIPPacket(payload string) bool {
 		return false
 	}
 
-	// Check for SIP request methods
-	sipMethods := []string{"INVITE", "REGISTER", "BYE", "CANCEL", "ACK", "OPTIONS"}
-	for _, method := range sipMethods {
-		if strings.HasPrefix(payload, method+" ") {
-			return true
-		}
+	firstLine := payload
+	if newline := strings.IndexByte(firstLine, '\n'); newline >= 0 {
+		firstLine = firstLine[:newline]
 	}
-
-	// Check for SIP response
-	if strings.HasPrefix(payload, "SIP/2.0 ") {
-		return true
-	}
-
-	return false
+	return sharedsip.IsStartLine(strings.TrimSpace(firstLine))
 }
 
 // extractCallID extracts Call-ID from SIP message

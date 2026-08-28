@@ -51,14 +51,13 @@ func TestMethodTableIncludesPublish(t *testing.T) {
 	}
 }
 
-func TestUDPAndReassembledTCPEquivalent(t *testing.T) {
+func TestEquivalentTransportPayloadsProduceEquivalentMetadata(t *testing.T) {
 	msg := []byte("INVITE sip:bob@example.test SIP/2.0\r\nf: <sip:alice@example.test>;tag=a\r\nt: <sip:bob@example.test>\r\ni: equivalent-call\r\nCSeq: 7 INVITE\r\nl: 0\r\n\r\n")
 	udp, err := Parse(msg, ParseOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fragmented := append(append([]byte(nil), msg[:31]...), msg[31:]...)
-	tcp, err := Parse(fragmented, ParseOptions{})
+	tcp, err := Parse(msg, ParseOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

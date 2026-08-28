@@ -546,8 +546,15 @@ func (s *bufferedSIPStream) readCompleteSipMessageFromReader(bufReader *bufio.Re
 		}
 
 		if !headersDone {
-			if strings.HasPrefix(strings.ToLower(line), "content-length:") {
-				lengthStr := strings.TrimSpace(line[15:])
+			if colon := strings.IndexByte(line, ':'); colon > 0 {
+				headerName := strings.ToLower(strings.TrimSpace(line[:colon]))
+				if full, ok := sharedsip.CompactHeaders[headerName]; ok {
+					headerName = full
+				}
+				if headerName != "content-length" {
+					continue
+				}
+				lengthStr := strings.TrimSpace(line[colon+1:])
 				if length, parseErr := ParseContentLengthSecurely(lengthStr); parseErr == nil {
 					contentLength = length
 				} else {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/detector"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -73,6 +74,16 @@ m=audio 49170 RTP/AVP 0`
 	// Test shutdown
 	err = plugin.Shutdown(ctx)
 	assert.NoError(t, err)
+}
+
+func TestSIPPluginRecognizesEverySharedRequestMethod(t *testing.T) {
+	plugin := NewSIPPlugin()
+	for _, method := range sharedsip.RequestMethods {
+		t.Run(method, func(t *testing.T) {
+			payload := method + " sip:user@example.test SIP/2.0\r\nContent-Length: 0\r\n\r\n"
+			assert.True(t, plugin.isSIPPacket(payload))
+		})
+	}
 }
 
 func TestRTPPlugin(t *testing.T) {

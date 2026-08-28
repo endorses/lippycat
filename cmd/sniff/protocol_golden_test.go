@@ -8,7 +8,10 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +75,43 @@ func TestOfflineSniffProtocolEventGoldens(t *testing.T) {
 	}
 }
 
+func TestVoIPSubcommandOfflineGolden(t *testing.T) {
+	if os.Getenv("LIPPYCAT_VOIP_GOLDEN_CHILD") == "1" {
+		writeVoipFile = os.Getenv("LIPPYCAT_VOIP_GOLDEN_PREFIX")
+		sipuser, filter, readFile = "", "", ""
+		voipHandler(voipCmd, []string{os.Getenv("LIPPYCAT_VOIP_GOLDEN_INPUT")})
+		return
+	}
+	pcapPath := filepath.Join(t.TempDir(), "sip-call.pcap")
+	sdp := "v=0\r\nc=IN IP4 198.51.100.50\r\nm=audio 10000 RTP/AVP 0\r\n"
+	payload := []byte("INVITE sip:bob@example.test SIP/2.0\r\nVia: SIP/2.0/UDP 192.0.2.10:5060;branch=z9hG4bKbaseline\r\nFrom: <sip:alice@example.test>;tag=1\r\nTo: <sip:bob@example.test>\r\nCall-ID: baseline-subcommand-call\r\nCSeq: 1 INVITE\r\nContent-Type: application/sdp\r\nContent-Length: " + strconv.Itoa(len(sdp)) + "\r\n\r\n" + sdp)
+	packet := baselineUDPPacket(t, net.IPv4(198, 51, 100, 50), 5060, 5060, payload, false)
+	writeSingleGoldenPCAP(t, pcapPath, packet, mustGoldenTime(t, "2026-08-27T12:00:04.000005Z"))
+
+	prefix := filepath.Join(t.TempDir(), "voip-golden.pcap")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestVoIPSubcommandOfflineGolden$", "-test.count=1")
+	cmd.Env = append(os.Environ(),
+		"LIPPYCAT_VOIP_GOLDEN_CHILD=1",
+		"LIPPYCAT_VOIP_GOLDEN_PREFIX="+prefix,
+		"LIPPYCAT_VOIP_GOLDEN_INPUT="+pcapPath,
+	)
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(output))
+
+	outPath := strings.TrimSuffix(prefix, filepath.Ext(prefix)) + "_sip_baseline-subcommand-call.pcap"
+	f, err := os.Open(outPath)
+	require.NoError(t, err)
+	defer f.Close()
+	r, err := pcapgo.NewReader(f)
+	require.NoError(t, err)
+	got, ci, err := r.ReadPacketData()
+	require.NoError(t, err)
+	require.Equal(t, layers.LinkTypeEthernet, r.LinkType())
+	require.Equal(t, "2026-08-27T12:00:04.000005Z", ci.Timestamp.UTC().Format(time.RFC3339Nano))
+	decoded := gopacket.NewPacket(got, r.LinkType(), gopacket.Default)
+	require.Equal(t, payload, decoded.Layer(layers.LayerTypeUDP).(*layers.UDP).Payload)
+}
+
 func writeProtocolGoldenPCAP(t *testing.T, path string, fixtures []protocolEventFixture) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -82,6 +122,16 @@ func writeProtocolGoldenPCAP(t *testing.T, path string, fixtures []protocolEvent
 		packet := baselinePacket(t, fixture.Protocol)
 		require.NoError(t, w.WritePacket(gopacket.CaptureInfo{Timestamp: mustGoldenTime(t, fixture.Timestamp), CaptureLength: len(packet), Length: len(packet)}, packet))
 	}
+	require.NoError(t, f.Close())
+}
+
+func writeSingleGoldenPCAP(t *testing.T, path string, packet []byte, timestamp time.Time) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	w := pcapgo.NewWriter(f)
+	require.NoError(t, w.WriteFileHeader(65535, layers.LinkTypeEthernet))
+	require.NoError(t, w.WritePacket(gopacket.CaptureInfo{Timestamp: timestamp, CaptureLength: len(packet), Length: len(packet)}, packet))
 	require.NoError(t, f.Close())
 }
 

@@ -71,6 +71,7 @@ func (e eventBase) Envelope() Envelope { return e.EventEnvelope }
 
 type DNSEvent struct {
 	eventBase
+	IsResponse                                                     bool
 	TransactionID                                                  uint16
 	RTT                                                            time.Duration
 	Query                                                          string

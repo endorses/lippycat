@@ -127,6 +127,14 @@ func (t *RequestTracker) CorrelateResponse(srcIP, dstIP, srcPort, dstPort string
 	if metadata.Host == "" {
 		metadata.Host = pending.Host
 	}
+	// Preserve the matched request identity on the response so downstream
+	// consumers can construct a combined Zeek-style transaction record.
+	if metadata.Method == "" {
+		metadata.Method = pending.Method
+	}
+	if metadata.Path == "" {
+		metadata.Path = pending.Path
+	}
 
 	t.totalResponses++
 	t.correlatedCount++

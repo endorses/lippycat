@@ -86,6 +86,45 @@ func TestSinkLazyCreationFlushAndClose(t *testing.T) {
 	require.Equal(t, uint64(1), sink.Stats().Written)
 }
 
+func TestSinkPublishesCompleteRecordsWithoutExplicitFlush(t *testing.T) {
+	dir := t.TempDir()
+	sink, err := New(Config{Directory: dir, Format: FormatTSV, QueueSize: 8, Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))})
+	require.NoError(t, err)
+	require.NoError(t, sink.Register(events.KindDNS, "dns", func(events.Event) (Record, bool, error) { return dnsRecord(t), true, nil }))
+	require.NoError(t, sink.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, sink.Close(context.Background())) })
+
+	require.NoError(t, sink.HandleEvent(context.Background(), events.NewDNSEvent(events.Envelope{})))
+	require.Eventually(t, func() bool { return sink.Stats().Written == 1 }, time.Second, time.Millisecond)
+
+	data, err := os.ReadFile(filepath.Join(dir, "dns.log"))
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	require.GreaterOrEqual(t, len(lines), 9)
+	require.Equal(t, "#separator \\x09", lines[0])
+	require.True(t, strings.HasPrefix(lines[len(lines)-1], "1700000000.125000\tCtest\t"))
+	require.True(t, strings.HasSuffix(string(data), "\n"), "tailing readers must never see a partial final record")
+}
+
+func TestSinkPublishesLowVolumeJSONRecordWithoutExplicitFlush(t *testing.T) {
+	dir := t.TempDir()
+	sink, err := New(Config{Directory: dir, Format: FormatJSON, QueueSize: 8, Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))})
+	require.NoError(t, err)
+	require.NoError(t, sink.Register(events.KindDNS, "dns", func(events.Event) (Record, bool, error) { return dnsRecord(t), true, nil }))
+	require.NoError(t, sink.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, sink.Close(context.Background())) })
+
+	require.NoError(t, sink.HandleEvent(context.Background(), events.NewDNSEvent(events.Envelope{})))
+	require.Eventually(t, func() bool { return sink.Stats().Written == 1 }, time.Second, time.Millisecond)
+
+	data, err := os.ReadFile(filepath.Join(dir, "dns.log"))
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(string(data), "\n"))
+	var record map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSuffix(data, []byte{'\n'}), &record))
+	require.Equal(t, "Ctest", record["uid"])
+}
+
 func TestSinkRotationAndHook(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 8, 24, 10, 0, 0, 0, time.UTC)

@@ -57,13 +57,14 @@ func TestSSLAndHTTPRecords(t *testing.T) {
 func TestConnRecord(t *testing.T) {
 	env := events.Envelope{Timestamp: time.Unix(1, 0), UID: "Ctest", CommunityID: "1:test", NodeID: "hunter-a", CaptureScope: events.CaptureScopeFiltered, Partial: true, Flow: events.FlowTuple{Protocol: 6, SourceAddress: netip.MustParseAddr("192.0.2.1"), DestinationAddress: netip.MustParseAddr("192.0.2.2"), SourcePort: 50000, DestinationPort: 443}}
 	ev := events.NewConnEvent(env)
-	ev.Service, ev.State, ev.Duration = "ssl", "S1", time.Second
+	ev.Service, ev.State, ev.Duration = "TLS", "S1", time.Second
 	ev.OriginPackets, ev.OriginIPBytes = 2, 100
 	record, emit, err := Conn(ev)
 	require.NoError(t, err)
 	require.True(t, emit)
 	require.Len(t, record.Values, 24)
 	require.Equal(t, "tcp", record.Values[6])
+	require.Equal(t, "ssl", record.Values[7])
 	require.Equal(t, "1:test", record.Values[20])
 	require.Equal(t, true, record.Values[23])
 }

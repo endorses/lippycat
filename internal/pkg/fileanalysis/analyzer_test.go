@@ -26,7 +26,7 @@ func TestAnalyzeHashesMIMETruncationAndDedup(t *testing.T) {
 	require.False(t, one.HashComplete)
 	two, _, err := a.Analyze(Observation{Content: []byte("hello")})
 	require.NoError(t, err)
-	require.Equal(t, one.FileID, two.FileID)
+	require.NotEqual(t, one.FileID, two.FileID)
 	require.True(t, two.HashComplete)
 }
 
@@ -50,6 +50,40 @@ func TestAnalyzeGzipAndExtractionTotalLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, content2)
 	require.Empty(t, ev2.ExtractedPath)
+}
+
+func TestAnalyzeDuplicateContentHasUniqueFUIDAndSharedExtraction(t *testing.T) {
+	dir := t.TempDir()
+	a, err := New(Config{MaxFileSize: 100, MaxTotalSize: 100, Extract: true, Directory: dir})
+	require.NoError(t, err)
+
+	one, contentOne, err := a.Analyze(Observation{Source: "HTTP", Filename: "one.txt", Content: []byte("same")})
+	require.NoError(t, err)
+	two, contentTwo, err := a.Analyze(Observation{Source: "SMTP", Filename: "two.txt", Content: []byte("same")})
+	require.NoError(t, err)
+
+	require.NotEqual(t, one.FileID, two.FileID)
+	require.Equal(t, one.ExtractedPath, two.ExtractedPath)
+	require.NotEmpty(t, one.ExtractedPath)
+	require.NotNil(t, contentOne)
+	require.Equal(t, one.FileID, contentOne.FileID)
+	require.Nil(t, contentTwo)
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+}
+
+func TestAnalyzeFUIDIsUniqueAcrossAnalyzers(t *testing.T) {
+	oneAnalyzer, err := New(Config{})
+	require.NoError(t, err)
+	twoAnalyzer, err := New(Config{})
+	require.NoError(t, err)
+
+	one, _, err := oneAnalyzer.Analyze(Observation{Content: []byte("same")})
+	require.NoError(t, err)
+	two, _, err := twoAnalyzer.Analyze(Observation{Content: []byte("same")})
+	require.NoError(t, err)
+	require.NotEqual(t, one.FileID, two.FileID)
 }
 
 func TestSMTPAttachments(t *testing.T) {

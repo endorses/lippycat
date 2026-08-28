@@ -138,6 +138,10 @@ func mapHTTPEvent(env events.Envelope, meta *data.HTTPMetadata, includeHeaders b
 		reverseFlow(&env.Flow)
 	}
 	ev := events.NewHTTPEvent(env)
+	// Zeek numbers HTTP transactions from one. The protobuf metadata does not
+	// currently carry a pipeline index, so one is the only sound value until
+	// the analyzer exports it.
+	ev.TransactionDepth = 1
 	ev.Method, ev.Host, ev.Version, ev.UserAgent = meta.Method, meta.Host, meta.Version, meta.UserAgent
 	ev.URI = meta.Path
 	if meta.QueryString != "" {
@@ -198,6 +202,7 @@ func mapDNSEvent(env events.Envelope, meta *data.DNSMetadata) events.DNSEvent {
 		env.Flow.SourcePort, env.Flow.DestinationPort = env.Flow.DestinationPort, env.Flow.SourcePort
 	}
 	ev := events.NewDNSEvent(env)
+	ev.IsResponse = meta.IsResponse
 	ev.TransactionID = uint16(meta.TransactionId)
 	if meta.CorrelatedQuery && meta.QueryResponseTimeMs > 0 {
 		ev.RTT = time.Duration(meta.QueryResponseTimeMs) * time.Millisecond

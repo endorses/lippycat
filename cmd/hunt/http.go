@@ -161,10 +161,7 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(hunterConfigSpec{
-		bpfFilter:            effectiveBPFFilter,
-		supportedFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"},
-	})
+	config := buildHunterConfig(httpHunterConfigSpec(effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -263,6 +260,10 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Shutdown signal received, stopping HTTP hunter...")
 		return nil
 	}
+}
+
+func httpHunterConfigSpec(filter string) hunterConfigSpec {
+	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}}
 }
 
 // buildHTTPContentFilter creates a ContentFilter from command-line flags.

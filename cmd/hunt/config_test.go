@@ -30,28 +30,30 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 
 	tests := []struct {
 		name               string
-		spec               hunterConfigSpec
+		specForCommand     func(string) hunterConfigSpec
 		wantVoIP           bool
 		wantVoIPFilter     bool
 		wantFilterTypes    []string
 		wantDiskBuffer     bool
 		wantNoFilterPolicy string
 	}{
-		{name: "dns", spec: hunterConfigSpec{bpfFilter: "dns-filter", supportedFilterTypes: []string{"bpf", "ip_address", "dns_domain"}}, wantFilterTypes: []string{"bpf", "ip_address", "dns_domain"}},
-		{name: "http", spec: hunterConfigSpec{bpfFilter: "http-filter", supportedFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}}, wantFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}},
-		{name: "tls", spec: hunterConfigSpec{bpfFilter: "tls-filter", supportedFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}}, wantFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}},
-		{name: "email", spec: hunterConfigSpec{bpfFilter: "email-filter", supportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}}, wantFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}},
-		{name: "voip", spec: hunterConfigSpec{bpfFilter: "voip-filter", voIPMode: true, enableVoIPFilter: true, useGPUFlag: true, includeFilterPolicy: true}, wantVoIP: true, wantVoIPFilter: true, wantNoFilterPolicy: "deny"},
-		{name: "generic", spec: hunterConfigSpec{bpfFilter: "generic-filter", useGPUFlag: true, includeDiskBuffer: true, includeFilterPolicy: true}, wantDiskBuffer: true, wantNoFilterPolicy: "deny"},
+		{name: "dns", specForCommand: dnsHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "dns_domain"}},
+		{name: "http", specForCommand: httpHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}},
+		{name: "tls", specForCommand: tlsHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}},
+		{name: "email", specForCommand: emailHunterConfigSpec, wantFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}},
+		{name: "voip", specForCommand: voipHunterConfigSpec, wantVoIP: true, wantVoIPFilter: true, wantNoFilterPolicy: "deny"},
+		{name: "generic", specForCommand: genericHunterConfigSpec, wantDiskBuffer: true, wantNoFilterPolicy: "deny"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := buildHunterConfig(tt.spec)
+			filterFixture := tt.name + "-filter"
+			spec := tt.specForCommand(filterFixture)
+			config := buildHunterConfig(spec)
 			require.Equal(t, "processor.example:55555", config.ProcessorAddr)
 			assert.Equal(t, "edge-01", config.HunterID)
 			assert.Equal(t, []string{"eth0", "eth1"}, config.Interfaces)
-			assert.Equal(t, tt.spec.bpfFilter, config.BPFFilter)
+			assert.Equal(t, filterFixture, config.BPFFilter)
 			assert.Equal(t, 1234, config.BufferSize)
 			assert.Equal(t, 42, config.BatchSize)
 			assert.Equal(t, 75*time.Millisecond, config.BatchTimeout)

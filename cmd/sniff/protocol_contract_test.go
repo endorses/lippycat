@@ -3,9 +3,10 @@
 package sniff
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -21,6 +22,13 @@ type sniffProtocolContract struct {
 }
 
 func TestSniffProtocolCLIContracts(t *testing.T) {
+	helpHashes := map[string]string{
+		"dns":   "d3a2af6bbe6dac200da1cbe0b8d5b1db13433b793284147d2bd89fc83857de75",
+		"email": "6a1ee5a633253c471a9c037992839574256761837c3f7699d4b0e1a24661cea4",
+		"http":  "0a1672d2e751724ff51a106810160bf8af449e51be4e6e9ea20f2fd06014d07b",
+		"tls":   "f36cec27a08e52741ca5758d8acb7b706bb4fb8553bcd0ba68ce5b8daeae387b",
+		"voip":  "685967ddfc2bffe7bd3e8ea96cecac950f4aee5003a5c43d128c623f079dfc2e",
+	}
 	contracts := map[string]sniffProtocolContract{
 		"dns": {
 			cmd:      dnsCmd,
@@ -52,25 +60,55 @@ func TestSniffProtocolCLIContracts(t *testing.T) {
 	for name, contract := range contracts {
 		t.Run(name, func(t *testing.T) {
 			require.Equal(t, name, contract.cmd.Use)
-			if name == "voip" {
-				// VoIP's intentionally terse legacy help is itself part of the
-				// compatibility snapshot; examples remain in cmd/sniff/README.md.
-				require.Equal(t, "Sniff in VOIP mode. Filter for SIP username, capture RTP stream.", contract.cmd.Long)
-			} else {
-				require.Contains(t, contract.cmd.Long, "Examples:")
-				require.Contains(t, contract.cmd.Long, "lc sniff "+name)
-			}
 			require.Equal(t, contract.flags, commandFlagDefaults(contract.cmd))
+			require.Equal(t, helpHashes[name], renderedHelpHash(t, contract.cmd), "full rendered help changed")
 
-			allKeys := make(map[string]struct{}, len(viper.AllKeys()))
-			for _, key := range viper.AllKeys() {
-				allKeys[key] = struct{}{}
-			}
 			for flagName, key := range contract.bindings {
-				require.NotNil(t, contract.cmd.Flags().Lookup(flagName), "binding references missing flag")
-				require.Contains(t, allKeys, strings.ToLower(key), "missing Viper key for --%s", flagName)
+				assertExactViperBinding(t, contract.cmd, flagName, key)
 			}
 		})
+	}
+}
+
+func renderedHelpHash(t *testing.T, cmd *cobra.Command) string {
+	t.Helper()
+	var output bytes.Buffer
+	oldOut := cmd.OutOrStdout()
+	cmd.SetOut(&output)
+	t.Cleanup(func() { cmd.SetOut(oldOut) })
+	require.NoError(t, cmd.Help())
+	return fmt.Sprintf("%x", sha256.Sum256(output.Bytes()))
+}
+
+func assertExactViperBinding(t *testing.T, cmd *cobra.Command, flagName, key string) {
+	t.Helper()
+	flag := cmd.Flags().Lookup(flagName)
+	require.NotNil(t, flag, "binding references missing flag")
+
+	oldValue, oldChanged := flag.Value.String(), flag.Changed
+	defer func() {
+		require.NoError(t, flag.Value.Set(oldValue))
+		flag.Changed = oldChanged
+	}()
+	require.Equal(t, flag.DefValue, viper.GetString(key), "unexpected baseline for Viper key %q", key)
+	require.NoError(t, flag.Value.Set(distinctFlagValue(flag)))
+	flag.Changed = true
+	require.Equal(t, flag.Value.String(), viper.GetString(key), "Viper key %q is not bound to --%s", key, flagName)
+}
+
+func distinctFlagValue(flag *pflag.Flag) string {
+	switch flag.Value.Type() {
+	case "bool":
+		if flag.DefValue == "true" {
+			return "false"
+		}
+		return "true"
+	case "duration":
+		return "37s"
+	case "int":
+		return "37123"
+	default:
+		return "binding-" + flag.Name
 	}
 }
 

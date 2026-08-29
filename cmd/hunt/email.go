@@ -202,10 +202,7 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		"effective_filter", effectiveBPFFilter)
 
 	// Get configuration (reuse flags from parent command)
-	config := buildHunterConfig(hunterConfigSpec{
-		bpfFilter:            effectiveBPFFilter,
-		supportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"},
-	})
+	config := buildHunterConfig(emailHunterConfigSpec(effectiveBPFFilter))
 
 	// Validate TLS configuration: CA file required when TLS is enabled
 	if config.TLSEnabled && config.TLSCAFile == "" && !config.TLSSkipVerify {
@@ -308,6 +305,10 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		logger.Info("Shutdown signal received, stopping Email hunter...")
 		return nil
 	}
+}
+
+func emailHunterConfigSpec(filter string) hunterConfigSpec {
+	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}}
 }
 
 // buildEmailContentFilter creates a ContentFilter from command-line flags.

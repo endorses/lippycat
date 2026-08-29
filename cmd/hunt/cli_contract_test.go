@@ -3,7 +3,9 @@
 package hunt
 
 import (
-	"strings"
+	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -63,27 +65,77 @@ func TestHuntProtocolCLIContract(t *testing.T) {
 }
 
 func TestHuntViperBindingContract(t *testing.T) {
-	wantKeys := []string{
-		"dns.detect_tunneling", "esp_heuristic", "esp_icv_size", "esp_null",
-		"hunter.batch_queue_size", "hunter.batch_size", "hunter.batch_timeout_ms", "hunter.bpf_filter", "hunter.buffer_size",
-		"hunter.debug_allow_non_loopback", "hunter.debug_listen",
-		"hunter.disk_buffer.dir", "hunter.disk_buffer.enabled", "hunter.disk_buffer.max_mb",
-		"hunter.dns.ports", "hunter.dns.udp_only",
-		"hunter.email.capture_body", "hunter.email.command", "hunter.email.imap_ports", "hunter.email.keywords", "hunter.email.mailbox", "hunter.email.max_body_size", "hunter.email.pop3_ports", "hunter.email.protocol", "hunter.email.recipient", "hunter.email.sender", "hunter.email.smtp_ports", "hunter.email.subject",
-		"hunter.http.capture_body", "hunter.http.host", "hunter.http.keywords", "hunter.http.max_body_size", "hunter.http.method", "hunter.http.path", "hunter.http.ports", "hunter.http.status", "hunter.http.tls_keylog", "hunter.http.tls_keylog_pipe",
-		"hunter.hunter_id", "hunter.id", "hunter.insecure", "hunter.interfaces", "hunter.no_filter_policy", "hunter.processor_addr",
-		"hunter.tls.ca_file", "hunter.tls.cert_file", "hunter.tls.key_file", "hunter.tls.ports", "hunter.tls.skip_verify",
-		"hunter.voip.rtp_port_ranges", "hunter.voip.sip_ports", "hunter.voip.udp_only",
-		"pcap_buffer_size", "promiscuous", "voip.pattern_algorithm", "voip.pattern_buffer_mb", "voip.tcp_sip_idle_timeout",
+	bindings := map[string]*pflag.Flag{
+		"hunter.processor_addr": HuntCmd.PersistentFlags().Lookup("processor"), "hunter.id": HuntCmd.PersistentFlags().Lookup("id"), "hunter.hunter_id": HuntCmd.PersistentFlags().Lookup("id"),
+		"hunter.interfaces": HuntCmd.PersistentFlags().Lookup("interface"), "hunter.bpf_filter": HuntCmd.PersistentFlags().Lookup("filter"), "hunter.buffer_size": HuntCmd.PersistentFlags().Lookup("buffer-size"),
+		"hunter.batch_size": HuntCmd.PersistentFlags().Lookup("batch-size"), "hunter.batch_timeout_ms": HuntCmd.PersistentFlags().Lookup("batch-timeout"), "hunter.batch_queue_size": HuntCmd.PersistentFlags().Lookup("batch-queue-size"),
+		"promiscuous": HuntCmd.PersistentFlags().Lookup("promisc"), "pcap_buffer_size": HuntCmd.PersistentFlags().Lookup("pcap-buffer-size"),
+		"hunter.disk_buffer.enabled": HuntCmd.PersistentFlags().Lookup("disk-buffer"), "hunter.disk_buffer.dir": HuntCmd.PersistentFlags().Lookup("disk-buffer-dir"), "hunter.disk_buffer.max_mb": HuntCmd.PersistentFlags().Lookup("disk-buffer-max-mb"),
+		"hunter.tls.cert_file": HuntCmd.PersistentFlags().Lookup("tls-cert"), "hunter.tls.key_file": HuntCmd.PersistentFlags().Lookup("tls-key"), "hunter.tls.ca_file": HuntCmd.PersistentFlags().Lookup("tls-ca"), "hunter.tls.skip_verify": HuntCmd.PersistentFlags().Lookup("tls-skip-verify"),
+		"hunter.insecure": HuntCmd.PersistentFlags().Lookup("insecure"), "hunter.no_filter_policy": HuntCmd.PersistentFlags().Lookup("no-filter-policy"),
+		"esp_null": HuntCmd.PersistentFlags().Lookup("esp-null"), "esp_heuristic": HuntCmd.PersistentFlags().Lookup("esp-heuristic"), "esp_icv_size": HuntCmd.PersistentFlags().Lookup("esp-icv-size"),
+		"hunter.debug_listen": HuntCmd.PersistentFlags().Lookup("debug-listen"), "hunter.debug_allow_non_loopback": HuntCmd.PersistentFlags().Lookup("debug-allow-non-loopback"),
+		"hunter.dns.ports": dnsHuntCmd.Flags().Lookup("dns-port"), "hunter.dns.udp_only": dnsHuntCmd.Flags().Lookup("udp-only"), "dns.detect_tunneling": dnsHuntCmd.Flags().Lookup("detect-tunneling"),
+		"hunter.http.ports": httpHuntCmd.Flags().Lookup("http-port"), "hunter.http.host": httpHuntCmd.Flags().Lookup("host"), "hunter.http.path": httpHuntCmd.Flags().Lookup("path"), "hunter.http.method": httpHuntCmd.Flags().Lookup("method"), "hunter.http.status": httpHuntCmd.Flags().Lookup("status"), "hunter.http.keywords": httpHuntCmd.Flags().Lookup("keywords"), "hunter.http.capture_body": httpHuntCmd.Flags().Lookup("capture-body"), "hunter.http.max_body_size": httpHuntCmd.Flags().Lookup("max-body-size"), "hunter.http.tls_keylog": httpHuntCmd.Flags().Lookup("tls-keylog"), "hunter.http.tls_keylog_pipe": httpHuntCmd.Flags().Lookup("tls-keylog-pipe"),
+		"hunter.tls.ports":      tlsHuntCmd.Flags().Lookup("tls-port"),
+		"hunter.email.protocol": emailHuntCmd.Flags().Lookup("protocol"), "hunter.email.smtp_ports": emailHuntCmd.Flags().Lookup("smtp-port"), "hunter.email.imap_ports": emailHuntCmd.Flags().Lookup("imap-port"), "hunter.email.pop3_ports": emailHuntCmd.Flags().Lookup("pop3-port"), "hunter.email.sender": emailHuntCmd.Flags().Lookup("sender"), "hunter.email.recipient": emailHuntCmd.Flags().Lookup("recipient"), "hunter.email.subject": emailHuntCmd.Flags().Lookup("subject"), "hunter.email.keywords": emailHuntCmd.Flags().Lookup("keywords"), "hunter.email.mailbox": emailHuntCmd.Flags().Lookup("mailbox"), "hunter.email.command": emailHuntCmd.Flags().Lookup("command"), "hunter.email.capture_body": emailHuntCmd.Flags().Lookup("capture-body"), "hunter.email.max_body_size": emailHuntCmd.Flags().Lookup("max-body-size"),
+		"hunter.voip.udp_only": voipHuntCmd.Flags().Lookup("udp-only"), "hunter.voip.sip_ports": voipHuntCmd.Flags().Lookup("sip-port"), "hunter.voip.rtp_port_ranges": voipHuntCmd.Flags().Lookup("rtp-port-range"), "voip.pattern_algorithm": voipHuntCmd.Flags().Lookup("pattern-algorithm"), "voip.pattern_buffer_mb": voipHuntCmd.Flags().Lookup("pattern-buffer-mb"), "voip.tcp_sip_idle_timeout": voipHuntCmd.Flags().Lookup("tcp-sip-idle-timeout"),
 	}
+	for key, flag := range bindings {
+		t.Run(key, func(t *testing.T) {
+			require.NotNil(t, flag)
+			original, originalChanged := flag.Value.String(), flag.Changed
+			fixture := bindingFixture(flag.Value.Type(), original)
+			require.NoError(t, flag.Value.Set(fixture))
+			flag.Changed = true
+			t.Cleanup(func() {
+				require.NoError(t, flag.Value.Set(original))
+				flag.Changed = originalChanged
+			})
+			if flag.Value.Type() == "stringSlice" {
+				assert.Equal(t, []string{"phase-seven-a", "phase-seven-b"}, viper.Get(key), "Viper key is not bound to --%s", flag.Name)
+			} else {
+				assert.Equal(t, flag.Value.String(), fmt.Sprint(viper.Get(key)), "Viper key is not bound to --%s", flag.Name)
+			}
+		})
+	}
+}
 
-	allKeys := make(map[string]struct{}, len(viper.AllKeys()))
-	for _, key := range viper.AllKeys() {
-		allKeys[strings.ToLower(key)] = struct{}{}
+func bindingFixture(flagType, original string) string {
+	switch flagType {
+	case "bool":
+		return fmt.Sprint(original != "true")
+	case "int":
+		return "314159"
+	case "duration":
+		return "37s"
+	case "stringSlice":
+		return "phase-seven-a,phase-seven-b"
+	default:
+		return "phase-seven-fixture"
 	}
-	for _, key := range wantKeys {
-		_, ok := allKeys[key]
-		assert.Truef(t, ok, "Viper key %q is not bound", key)
+}
+
+func TestHuntRenderedHelpSnapshots(t *testing.T) {
+	want := map[string]string{
+		"hunt":  "182eb36e5c7df71544938fe1a4ed7a5e2faa3b20e10dfee0a3ebb07129120af1",
+		"dns":   "adbc29a0e80452449786b14d9461338635ca4758a9b1f6e578a32729e006b93a",
+		"http":  "b440b35caac98873397fd23532f54e799e254c26e10a5c0cb48a9b2dc58e0322",
+		"tls":   "05fd4c020a4808319490cf34c1eb28af371e3ebc8451e03223e40ba7497864a4",
+		"email": "3f918f9b2b57075e915d53abec0c26baeeb50e1fb9f5793bb56d91c81adb5c49",
+		"voip":  "244d126ff9386a2796e0de6fc0167f7dd31b389449a33f1e56d42ab919287d4e",
+	}
+	commands := map[string]*cobra.Command{"hunt": HuntCmd, "dns": dnsHuntCmd, "http": httpHuntCmd, "tls": tlsHuntCmd, "email": emailHuntCmd, "voip": voipHuntCmd}
+	for name, cmd := range commands {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			originalOut := cmd.OutOrStdout()
+			cmd.SetOut(&output)
+			t.Cleanup(func() { cmd.SetOut(originalOut) })
+			require.NoError(t, cmd.Help())
+			digest := fmt.Sprintf("%x", sha256.Sum256(output.Bytes()))
+			assert.Equal(t, want[name], digest, "rendered help changed; review it before updating this snapshot")
+		})
 	}
 }
 

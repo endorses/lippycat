@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -12,15 +13,22 @@ import (
 type CallBuffer struct {
 	mu            sync.RWMutex
 	callID        string
-	sipPackets    []gopacket.Packet // Buffered SIP packets
-	rtpPackets    []gopacket.Packet // Buffered RTP packets
-	metadata      *CallMetadata     // Extracted SIP headers
-	filterChecked bool              // Whether filter match was evaluated
-	matched       bool              // Whether call matches filter
+	sipPackets    []BufferedSIPPacket // Buffered SIP packets and their single-parse results
+	rtpPackets    []gopacket.Packet   // Buffered RTP packets
+	metadata      *CallMetadata       // Extracted SIP headers
+	filterChecked bool                // Whether filter match was evaluated
+	matched       bool                // Whether call matches filter
 	createdAt     time.Time
 	rtpPorts      []string        // RTP ports for this call
 	interfaceName string          // Interface where packets were captured
 	linkType      layers.LinkType // Link type for PCAP writing (e.g., Ethernet, Linux cooked, raw IP)
+}
+
+// BufferedSIPPacket keeps a SIP packet aligned with the typed result produced
+// when it first entered the shared parser/selection path.
+type BufferedSIPPacket struct {
+	Packet gopacket.Packet
+	Result pipeline.SIPResult
 }
 
 // CallMetadata contains extracted SIP header information
@@ -41,7 +49,7 @@ type CallMetadata struct {
 func NewCallBuffer(callID string) *CallBuffer {
 	return &CallBuffer{
 		callID:     callID,
-		sipPackets: make([]gopacket.Packet, 0, 10),
+		sipPackets: make([]BufferedSIPPacket, 0, 10),
 		rtpPackets: make([]gopacket.Packet, 0, 100),
 		createdAt:  time.Now(),
 		rtpPorts:   make([]string, 0, 2),
@@ -50,10 +58,15 @@ func NewCallBuffer(callID string) *CallBuffer {
 
 // AddSIPPacket adds a SIP packet to the buffer
 func (cb *CallBuffer) AddSIPPacket(packet gopacket.Packet) {
+	cb.AddSIPResult(packet, pipeline.SIPResult{})
+}
+
+// AddSIPResult adds a SIP packet together with its shared pipeline result.
+func (cb *CallBuffer) AddSIPResult(packet gopacket.Packet, result pipeline.SIPResult) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	cb.sipPackets = append(cb.sipPackets, packet)
+	cb.sipPackets = append(cb.sipPackets, BufferedSIPPacket{Packet: packet, Result: result})
 }
 
 // AddRTPPacket adds an RTP packet to the buffer
@@ -76,9 +89,25 @@ func (cb *CallBuffer) GetAllPackets() []gopacket.Packet {
 
 func (cb *CallBuffer) getAllPacketsLocked() []gopacket.Packet {
 	all := make([]gopacket.Packet, 0, len(cb.sipPackets)+len(cb.rtpPackets))
-	all = append(all, cb.sipPackets...)
+	for _, buffered := range cb.sipPackets {
+		all = append(all, buffered.Packet)
+	}
 	all = append(all, cb.rtpPackets...)
 	return all
+}
+
+// DrainTypedPackets returns typed SIP entries separately from RTP packets and
+// empties both buffers. The split preserves SIP result alignment without
+// reparsing packets when a call becomes selected.
+func (cb *CallBuffer) DrainTypedPackets() ([]BufferedSIPPacket, []gopacket.Packet) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	sip := append([]BufferedSIPPacket(nil), cb.sipPackets...)
+	rtp := append([]gopacket.Packet(nil), cb.rtpPackets...)
+	cb.sipPackets = cb.sipPackets[:0]
+	cb.rtpPackets = cb.rtpPackets[:0]
+	return sip, rtp
 }
 
 // DrainPackets returns all buffered packets (SIP + RTP) and empties the buffer.

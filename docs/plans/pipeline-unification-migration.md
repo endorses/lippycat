@@ -588,6 +588,14 @@ parsed-event orchestration stage; and removed tap TCP's nested processor parse
 by passing the existing typed SIP result directly to the processor registry.
 Regression tests cover each corrected behavior.
 
+Buffered sniff UDP remediation (2026-08-29): buffered SIP packets now retain
+their original typed parse results, drain through the shared registry and
+independently queued sniff sink without reparsing, and expose attributable sink
+outcomes and drop metrics. Buffer match callbacks run after releasing the
+manager lock, allowing sink selection-state queries without deadlock. Regression
+tests cover typed-result retention, unlocked callbacks, sink dispatch counts,
+and unchanged ordered PCAP output.
+
 ### Exit Criteria
 
 - One SIP parsing/orchestration implementation serves TCP and UDP compositions.

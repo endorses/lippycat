@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-
-	"github.com/endorses/lippycat/internal/pkg/logger"
 )
 
 // BufferManager manages per-call packet buffers
@@ -58,6 +58,16 @@ func NewBufferManager(maxAge time.Duration, maxSize int) *BufferManager {
 // A nil packet is allowed: callers that have already delivered the packet
 // themselves use it to seed the buffer's metadata and RTP ports.
 func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) bool {
+	return bm.addSIPPacket(callID, packet, pipeline.SIPResult{}, metadata, interfaceName, linkType)
+}
+
+// AddSIPResult records a SIP packet with the typed result from its original
+// shared parse. The result is drained with the packet when the call matches.
+func (bm *BufferManager) AddSIPResult(callID string, packet gopacket.Packet, result pipeline.SIPResult, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) bool {
+	return bm.addSIPPacket(callID, packet, result, metadata, interfaceName, linkType)
+}
+
+func (bm *BufferManager) addSIPPacket(callID string, packet gopacket.Packet, result pipeline.SIPResult, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) bool {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -94,9 +104,50 @@ func (bm *BufferManager) AddSIPPacket(callID string, packet gopacket.Packet, met
 	}
 
 	if packet != nil {
-		buffer.AddSIPPacket(packet)
+		buffer.AddSIPResult(packet, result)
 	}
 	return false
+}
+
+// CheckFilterWithTypedCallback drains the original typed SIP results and RTP
+// packets for a matched call. The callback runs after releasing bm.mu so it can
+// safely dispatch through sinks that query call selection state.
+func (bm *BufferManager) CheckFilterWithTypedCallback(
+	callID string,
+	filterFunc func(*CallMetadata) bool,
+	onMatch func(string, []BufferedSIPPacket, []gopacket.Packet, *CallMetadata, string, layers.LinkType),
+) bool {
+	bm.mu.Lock()
+	buffer, exists := bm.buffers[callID]
+	if !exists || buffer.GetMetadata() == nil {
+		bm.mu.Unlock()
+		return false
+	}
+
+	metadata := buffer.GetMetadata()
+	matched := filterFunc(metadata)
+	buffer.SetFilterResult(matched)
+	if !matched {
+		delete(bm.buffers, callID)
+		packetCount := buffer.GetPacketCount()
+		bm.mu.Unlock()
+		logger.Debug("Call did not match filter, discarding buffer",
+			"call_id", SanitizeCallIDForLogging(callID), "packet_count", packetCount)
+		return false
+	}
+
+	bm.matchedCalls[callID] = time.Now()
+	sip, rtp := buffer.DrainTypedPackets()
+	interfaceName, linkType := buffer.GetInterfaceName(), buffer.GetLinkType()
+	bm.mu.Unlock()
+
+	logger.Info("Call matched filter, invoking typed callback",
+		"call_id", SanitizeCallIDForLogging(callID), "packet_count", len(sip)+len(rtp),
+		"from", metadata.From, "to", metadata.To)
+	if onMatch != nil {
+		onMatch(callID, sip, rtp, metadata, interfaceName, linkType)
+	}
+	return true
 }
 
 // AddRTPPacket adds an RTP packet to the buffer if call is being tracked

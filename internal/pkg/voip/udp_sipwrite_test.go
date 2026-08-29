@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -255,4 +257,31 @@ func TestUDPBufferedPath_UnmatchedCallNotWritten(t *testing.T) {
 	require.NoError(t, trackerOutput(t, h.tracker).CloseSession(callID))
 	_, err := os.Stat(h.sipPath)
 	require.True(t, os.IsNotExist(err), "no PCAP should be created for an unmatched call, got err=%v", err)
+}
+
+func TestReleaseBufferedSniffPacketsDispatchesEveryTypedSIPResult(t *testing.T) {
+	callID := "typed-release@example.com"
+	h := newSIPWriteHarness(t, callID)
+	messages := []string{
+		sipMsg("INVITE sip:bob@example.com SIP/2.0", callID, "", ""),
+		sipMsg("SIP/2.0 200 OK", callID, ";tag=2", testSDP),
+	}
+	buffered := make([]BufferedSIPPacket, 0, len(messages))
+	for _, message := range messages {
+		packet := createUDPPacket(5060, 5060, []byte(message))
+		packet.Metadata().CaptureLength = len(packet.Data())
+		packet.Metadata().Length = len(packet.Data())
+		packet.Metadata().Timestamp = time.Unix(1700000000, 0)
+		event, err := sharedsip.Parse([]byte(message), sharedsip.ParseOptions{Timestamp: time.Unix(1700000000, 0)})
+		require.NoError(t, err)
+		buffered = append(buffered, BufferedSIPPacket{Packet: packet, Result: pipeline.SIPResultFromEvent(event, nil)})
+	}
+
+	stats := releaseBufferedSniffPackets(h.tracker, callID, buffered, nil, "eth0", layers.LinkTypeEthernet)
+	require.Equal(t, uint64(len(buffered)), stats[sniffSIPSinkName].Accepted)
+	require.Zero(t, stats[sniffSIPSinkName].Dropped)
+	require.Equal(t, []string{
+		"INVITE sip:bob@example.com SIP/2.0",
+		"SIP/2.0 200 OK",
+	}, h.writtenStartLines())
 }

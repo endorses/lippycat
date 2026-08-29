@@ -723,6 +723,10 @@ defaults, Viper keys, and stable protocol names. `make test`, focused command
 vet and race tests, the dedicated LI command/package tests, and all supported
 non-CUDA build variants pass.
 
+Follow-up audit (2026-08-29): migrated the remaining VoIP tap construction to
+the shared runtime and expanded tap CLI contracts to cover every protocol-local
+flag/default and Viper binding.
+
 ### Exit Criteria
 
 - Protocol subcommand files primarily declare flags and protocol differences.

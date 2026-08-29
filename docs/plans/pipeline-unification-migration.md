@@ -612,17 +612,31 @@ Retire the remaining legacy local-capture pipelines.
 
 ### Tasks
 
-- [ ] Implement a CLI sink using existing output formatters.
-- [ ] Implement a TUI event adapter using the existing `EventHandler` boundary.
-- [ ] Adapt live and file capture to emit normalized envelopes.
-- [ ] Migrate non-VoIP protocol subcommands incrementally.
-- [ ] Migrate VoIP after the shared parser, registry, and sink path is proven by
+- [x] Implement a CLI sink using existing output formatters.
+- [x] Implement a TUI event adapter using the existing `EventHandler` boundary.
+- [x] Adapt live and file capture to emit normalized envelopes.
+- [x] Migrate non-VoIP protocol subcommands incrementally.
+- [x] Migrate VoIP after the shared parser, registry, and sink path is proven by
       tap and hunt.
-- [ ] Preserve file replay ordering and capture-time-based aging.
-- [ ] Preserve optional PCAP and virtual-interface behavior as explicit sinks.
-- [ ] Reduce the TUI bridge to capture composition and event translation.
-- [ ] Delete the legacy capture loop, global completion monitor, and unused
+- [x] Preserve file replay ordering and capture-time-based aging.
+- [x] Preserve optional PCAP and virtual-interface behavior as explicit sinks.
+- [x] Reduce the TUI bridge to capture composition and event translation.
+- [x] Delete the legacy capture loop, global completion monitor, and unused
       compatibility paths after the final consumer moves.
+
+Implementation verification (2026-08-29): added protocol-neutral normalized
+stream adaptation, ordered typed packet-sink fan-out, and explicit CLI, PCAP,
+virtual-interface, and TUI event adapters. General and protocol-specific sniff,
+VoIP worker dispatch, and watch live/file now normalize packets at ingress with
+explicit live/replay provenance. HTTP/email and TUI reassembly consume the
+original envelope, while TUI TCP SIP uses the shared typed orchestration path
+without reparsing. Offline replay preserves stable timestamp order and capture
+metadata; local TUI backpressure distinguishes live sampling from lossless file
+replay. The old general capture/output loop and TUI `PacketInfo` compatibility
+conversion were removed. `make test`, focused race tests, dedicated LI tests,
+semantic CLI/TUI fixtures, and the supported non-CUDA build matrix pass. The
+24-hour and large-traffic soak tests remain release qualification activities
+under the plan's Soak Tests section.
 
 ### Exit Criteria
 

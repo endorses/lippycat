@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -58,8 +60,8 @@ func TestStartProcessor_UDPHandling(t *testing.T) {
 	}
 
 	// Create channel and send packet
-	ch := make(chan capture.PacketInfo, 1)
-	ch <- pktInfo
+	ch := make(chan *pipeline.PacketEnvelope, 1)
+	ch <- captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)
 	close(ch)
 
 	// Create assembler for TCP processing
@@ -121,8 +123,8 @@ func TestStartProcessor_TCPHandling(t *testing.T) {
 	}
 
 	// Create channel and send packet
-	ch := make(chan capture.PacketInfo, 1)
-	ch <- pktInfo
+	ch := make(chan *pipeline.PacketEnvelope, 1)
+	ch <- captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)
 	close(ch)
 
 	// Create assembler for TCP processing
@@ -149,8 +151,8 @@ func TestStartProcessor_InvalidPackets(t *testing.T) {
 		Packet:   invalidPacket,
 	}
 
-	ch := make(chan capture.PacketInfo, 1)
-	ch <- pktInfo
+	ch := make(chan *pipeline.PacketEnvelope, 1)
+	ch <- captureadapter.FromPacketInfo(pktInfo, pipeline.SourceLiveCapture)
 	close(ch)
 
 	ctx := context.Background()
@@ -224,7 +226,7 @@ func TestContainsUserInHeaders(t *testing.T) {
 
 func TestProcessorChannelClosure(t *testing.T) {
 	// Test that processor handles channel closure gracefully
-	ch := make(chan capture.PacketInfo)
+	ch := make(chan *pipeline.PacketEnvelope)
 	close(ch) // Close immediately
 
 	ctx := context.Background()

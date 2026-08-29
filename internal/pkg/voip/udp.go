@@ -16,6 +16,10 @@ import (
 )
 
 func handleUdpPackets(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP) {
+	handleUdpPacketsWithManager(tracker, pkt, layer, globalBufferMgr)
+}
+
+func handleUdpPacketsWithManager(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, buffer *BufferManager) {
 	start := time.Now()
 	packet := pkt.Packet
 	ctx := context.Background()
@@ -44,9 +48,9 @@ func handleUdpPackets(tracker *CallTracker, pkt capture.PacketInfo, layer *layer
 	}()
 
 	// Use buffering if buffer manager is initialized
-	if globalBufferMgr != nil {
+	if buffer != nil {
 		logger.Debug("Using buffered UDP processing")
-		handleUdpPacketsWithBuffer(tracker, pkt, layer, tracingCtx)
+		handleUdpPacketsWithBuffer(tracker, pkt, layer, tracingCtx, buffer)
 	} else {
 		logger.Debug("Using immediate UDP processing")
 		// Fallback to immediate processing (no buffering)
@@ -113,7 +117,11 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 }
 
 // handleUdpPacketsWithBuffer processes UDP packets with buffering for call filtering
-func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context) {
+func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, layer *layers.UDP, tracingCtx context.Context, buffers ...*BufferManager) {
+	buffer := globalBufferMgr
+	if len(buffers) > 0 {
+		buffer = buffers[0]
+	}
 	packet := pkt.Packet
 
 	if udpLayer := packet.Layer(layers.LayerTypeUDP); udpLayer != nil {
@@ -124,7 +132,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 		}
 		payload := udp.Payload
 
-		flow, analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, false, false)
+		flow, analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, false, false, buffer)
 		defer flow.Close()
 		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
 			callID := analysis.SIP.CallID
@@ -135,7 +143,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 			// Buffer the SIP packet with link type for proper PCAP writing.
 			// Returns true once the call is matched, from which point every SIP
 			// packet of the call is written directly instead of buffered.
-			alreadyMatched := globalBufferMgr.AddSIPResult(callID, packet, analysis.SIP, metadata, pkt.Interface, pkt.LinkType)
+			alreadyMatched := buffer.AddSIPResult(callID, packet, analysis.SIP, metadata, pkt.Interface, pkt.LinkType)
 
 			hasSDP := BytesContains(analysis.SIP.SDP, []byte("m=audio"))
 
@@ -159,7 +167,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 			// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 			if hasSDP {
 				// Use callback-based filter check for flexible handling
-				matched := globalBufferMgr.CheckFilterWithTypedCallback(
+				matched := buffer.CheckFilterWithTypedCallback(
 					callID,
 					func(m *CallMetadata) bool {
 						// Check if From, To, or P-Asserted-Identity matches tracked users
@@ -170,7 +178,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 						})
 					},
 					func(callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
-						releaseBufferedSniffPackets(tracker, callID, sipPackets, rtpPackets, interfaceName, linkType)
+						releaseBufferedSniffPackets(tracker, callID, sipPackets, rtpPackets, interfaceName, linkType, buffer)
 						call, _ := tracker.GetCall(callID)
 						if call != nil {
 							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
@@ -209,17 +217,17 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 			var exists bool
 
 			if dstIP != "" {
-				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(dstIP + ":" + dstPort)
+				bufCallID, exists = buffer.GetCallIDForRTPPort(dstIP + ":" + dstPort)
 			}
 			if !exists && srcIP != "" {
-				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(srcIP + ":" + srcPort)
+				bufCallID, exists = buffer.GetCallIDForRTPPort(srcIP + ":" + srcPort)
 			}
 			// Fall back to port-only lookups
 			if !exists {
-				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(dstPort)
+				bufCallID, exists = buffer.GetCallIDForRTPPort(dstPort)
 			}
 			if !exists {
-				bufCallID, exists = globalBufferMgr.GetCallIDForRTPPort(srcPort)
+				bufCallID, exists = buffer.GetCallIDForRTPPort(srcPort)
 			}
 
 			if exists {
@@ -229,7 +237,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 				if dstIP != "" {
 					portKey = dstIP + ":" + dstPort
 				}
-				shouldWrite := globalBufferMgr.AddRTPPacket(bufCallID, portKey, packet)
+				shouldWrite := buffer.AddRTPPacket(bufCallID, portKey, packet)
 
 				if shouldWrite {
 					// Call already matched, inject into virtual interface and write immediately
@@ -292,9 +300,13 @@ func isSIPPacket(_ *CallTracker, packet gopacket.Packet) bool {
 
 // releaseBufferedSniffPackets publishes the original typed SIP results through
 // the shared registry and queued sink, then preserves legacy RTP file output.
-func releaseBufferedSniffPackets(tracker *CallTracker, callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, interfaceName string, linkType layers.LinkType) map[string]sipflow.SinkStats {
-	flow := newSniffSIPFlow(tracker, false, false)
-	registry := sniffRegistry{tracker: tracker}
+func releaseBufferedSniffPackets(tracker *CallTracker, callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, interfaceName string, linkType layers.LinkType, buffers ...*BufferManager) map[string]sipflow.SinkStats {
+	var buffer *BufferManager
+	if len(buffers) > 0 {
+		buffer = buffers[0]
+	}
+	flow := newSniffSIPFlow(tracker, false, false, buffer)
+	registry := sniffRegistry{tracker: tracker, buffer: buffer}
 	for _, buffered := range sipPackets {
 		if _, err := registry.Observe(buffered.Result); err != nil {
 			logger.Warn("Failed to update buffered UDP SIP call", "call_id", SanitizeCallIDForLogging(callID), "error", err)

@@ -12,16 +12,17 @@ import (
 )
 
 type sniffSelectionStore struct {
-	mark bool
+	mark   bool
+	buffer *BufferManager
 }
 
 func (s sniffSelectionStore) Selected(callID string) bool {
-	return globalBufferMgr != nil && globalBufferMgr.IsCallMatched(callID)
+	return s.buffer != nil && s.buffer.IsCallMatched(callID)
 }
 
 func (s sniffSelectionStore) MarkSelected(callID string) {
-	if s.mark && globalBufferMgr != nil {
-		globalBufferMgr.MarkCallMatched(callID, nil, "", layers.LinkTypeEthernet)
+	if s.mark && s.buffer != nil {
+		s.buffer.MarkCallMatched(callID, nil, "", layers.LinkTypeEthernet)
 	}
 }
 
@@ -32,6 +33,7 @@ func (sniffSelectionStore) Forget(string) {}
 type sniffRegistry struct {
 	tracker    *CallTracker
 	markBuffer bool
+	buffer     *BufferManager
 }
 
 func (r sniffRegistry) Observe(result pipeline.SIPResult) (sipflow.RegistryObservation, error) {
@@ -47,8 +49,8 @@ func (r sniffRegistry) Observe(result pipeline.SIPResult) (sipflow.RegistryObser
 	if len(result.SDP) > 0 && BytesContains(result.SDP, []byte("m=audio")) {
 		r.tracker.ExtractPortFromSDP(string(result.SDP), result.CallID)
 	}
-	if r.markBuffer && globalBufferMgr != nil {
-		globalBufferMgr.MarkCallMatched(result.CallID, callMetadataFromSIPResult(result), "", linkType)
+	if r.markBuffer && r.buffer != nil {
+		r.buffer.MarkCallMatched(result.CallID, callMetadataFromSIPResult(result), "", linkType)
 	}
 	return sipflow.RegistryObservation{}, nil
 }
@@ -81,13 +83,19 @@ func (s sniffSink) HandleSIP(_ context.Context, input sipflow.SinkInput) pipelin
 	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
 }
 
-func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool) *sipflow.Orchestrator {
+func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool, buffers ...*BufferManager) *sipflow.Orchestrator {
+	var buffer *BufferManager
+	if len(buffers) > 0 {
+		buffer = buffers[0]
+	} else {
+		buffer = globalBufferMgr
+	}
 	cfg := sipflow.Config{
-		SelectionStore: sniffSelectionStore{mark: markSelection},
+		SelectionStore: sniffSelectionStore{mark: markSelection, buffer: buffer},
 		Completion:     sniffNeverComplete{},
 	}
 	if updateRegistry {
-		cfg.Registry = sniffRegistry{tracker: tracker, markBuffer: true}
+		cfg.Registry = sniffRegistry{tracker: tracker, markBuffer: true, buffer: buffer}
 	}
 	flow, err := sipflow.New(cfg)
 	if err != nil {
@@ -102,13 +110,13 @@ func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool) *
 	return flow
 }
 
-func sniffSIPMessage(packet capture.PacketInfo, payload []byte, opts sharedsip.ParseOptions, tracker *CallTracker, markSelection, updateRegistry bool) (*sipflow.Orchestrator, sipflow.ProcessResult) {
+func sniffSIPMessage(packet capture.PacketInfo, payload []byte, opts sharedsip.ParseOptions, tracker *CallTracker, markSelection, updateRegistry bool, buffers ...*BufferManager) (*sipflow.Orchestrator, sipflow.ProcessResult) {
 	envelope := &pipeline.PacketEnvelope{LinkType: packet.LinkType}
 	if packet.Packet != nil {
 		envelope.Data = packet.Packet.Data()
 		envelope.CaptureTime = packet.Packet.Metadata().Timestamp
 	}
-	flow := newSniffSIPFlow(tracker, markSelection, updateRegistry)
+	flow := newSniffSIPFlow(tracker, markSelection, updateRegistry, buffers...)
 	result := flow.Analyze(sipflow.Message{
 		Payload:          payload,
 		Envelope:         envelope,

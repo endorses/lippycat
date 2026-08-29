@@ -119,6 +119,11 @@ func (e *PacketEnvelope) Packet() gopacket.Packet {
 	}
 	e.decodeOnce.Do(func() {
 		e.packet = gopacket.NewPacket(e.Data, e.LinkType, gopacket.NoCopy)
+		e.packet.Metadata().CaptureInfo = gopacket.CaptureInfo{
+			Timestamp:     e.CaptureTime,
+			CaptureLength: e.CaptureLength,
+			Length:        e.OriginalLength,
+		}
 		e.Stages = e.Stages.With(StageDecoded)
 	})
 	return e.packet

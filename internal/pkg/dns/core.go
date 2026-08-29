@@ -13,6 +13,8 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -91,8 +93,12 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	}
 
 	// Create processor function
+	kind := pipeline.SourceLiveCapture
+	if isOffline {
+		kind = pipeline.SourcePCAPReplay
+	}
 	processor := func(packetChan <-chan capture.PacketInfo) {
-		processDNSPackets(packetChan)
+		captureadapter.ForEach(packetChan, kind, processDNSEnvelope)
 	}
 
 	// Run capture with appropriate mode
@@ -109,6 +115,10 @@ func StartDNSSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 // processDNSPackets processes packets from the channel.
 func processDNSPackets(packetChan <-chan capture.PacketInfo) {
+	captureadapter.ForEach(packetChan, pipeline.SourceLiveCapture, processDNSEnvelope)
+}
+
+func processDNSEnvelope(env *pipeline.PacketEnvelope) {
 	quietMode := viper.GetBool("sniff.quiet")
 	format := viper.GetString("sniff.format")
 
@@ -118,18 +128,19 @@ func processDNSPackets(packetChan <-chan capture.PacketInfo) {
 		jsonEncoder = json.NewEncoder(os.Stdout)
 	}
 
-	for pktInfo := range packetChan {
+	pktInfo := captureadapter.ToPacketInfo(env)
+	{
 		packet := pktInfo.Packet
 
 		// Parse DNS
 		metadata := dnsParser.Parse(packet)
 		if metadata == nil {
-			continue
+			return
 		}
 
 		// Apply domain filter if configured
 		if len(dnsDomainPatterns) > 0 && !filtering.MatchAnyGlob(dnsDomainPatterns, metadata.QueryName) {
-			continue
+			return
 		}
 
 		// Create packet display

@@ -3,11 +3,16 @@
 package tui
 
 import (
+	"context"
+	"net"
+	"strconv"
 	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/endorses/lippycat/internal/pkg/tui/components"
 	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
@@ -37,11 +42,47 @@ func GetTCPSIPTypeStats() (requests, responses, requestsWithSDP, responsesWithSD
 type TUISIPHandler struct {
 	callTracker *CallTracker
 	aggregator  *LocalCallAggregator
+	flow        *sipflow.Orchestrator
+	sink        tuiSIPSink
+}
+
+type tuiSIPSelections struct{}
+
+func (tuiSIPSelections) Selected(string) bool { return false }
+func (tuiSIPSelections) MarkSelected(string)  {}
+func (tuiSIPSelections) Forget(string)        {}
+
+type tuiSIPSink struct{ handler *TUISIPHandler }
+
+func (s tuiSIPSink) HandleSIP(_ context.Context, input sipflow.SinkInput) pipeline.Result {
+	if s.handler == nil {
+		return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure}
+	}
+	s.handler.consumeSIPResult(input.Result)
+	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
 }
 
 // NewTUISIPHandler creates a handler for TUI SIP detection
 func NewTUISIPHandler(tracker *CallTracker, aggregator *LocalCallAggregator) *TUISIPHandler {
-	return &TUISIPHandler{callTracker: tracker, aggregator: aggregator}
+	h := &TUISIPHandler{callTracker: tracker, aggregator: aggregator}
+	h.sink = tuiSIPSink{handler: h}
+	flow, err := sipflow.New(sipflow.Config{SelectionStore: tuiSIPSelections{}})
+	if err != nil {
+		panic(err)
+	}
+	if err := flow.Start(context.Background()); err != nil {
+		panic(err)
+	}
+	h.flow = flow
+	return h
+}
+
+// Close drains the shared SIP orchestration lifecycle. TUI delivery remains
+// synchronous to preserve SIP-before-RTP ordering during offline replay.
+func (h *TUISIPHandler) Close() {
+	if h != nil && h.flow != nil {
+		h.flow.Close()
+	}
 }
 
 // HandleSIPMessage processes a complete SIP message detected via TCP reassembly.
@@ -56,13 +97,36 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 	if len(sipMessage) == 0 {
 		return false
 	}
-	event, err := sharedsip.Parse(sipMessage, sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint))
-	if err != nil || event.CallID != callID {
+	analysis := h.flow.Analyze(sipflow.Message{
+		Payload: sipMessage, ExpectedCallID: callID,
+		ParseOptions: sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint),
+	})
+	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
 		return false
 	}
+	return h.sink.HandleSIP(context.Background(), sipflow.SinkInput{Result: analysis.SIP}).Outcome == pipeline.OutcomeAccepted
+}
 
-	isResponse := event.Method == "RESPONSE"
-	method, responseCode := event.Method, event.ResponseCode
+// HandleParsedSIPMessage consumes the stream framer's parsed event without
+// reparsing, then publishes the typed pipeline result through the TUI sink.
+func (h *TUISIPHandler) HandleParsedSIPMessage(sipMessage []byte, event sharedsip.Event, srcEndpoint, dstEndpoint string, _, _ gopacket.Flow) bool {
+	analysis := h.flow.Analyze(sipflow.Message{
+		Payload: sipMessage, Event: &event, ExpectedCallID: event.CallID,
+		ParseOptions: sharedsip.OptionsForEndpoints(event.Timestamp, srcEndpoint, dstEndpoint),
+	})
+	if analysis.Stage.Outcome != pipeline.OutcomeAccepted {
+		return false
+	}
+	return h.sink.HandleSIP(context.Background(), sipflow.SinkInput{Result: analysis.SIP}).Outcome == pipeline.OutcomeAccepted
+}
+
+func (h *TUISIPHandler) consumeSIPResult(result pipeline.SIPResult) {
+	callID := result.CallID
+	srcEndpoint := net.JoinHostPort(result.SourceIP, resultSourcePort(result.SourcePort))
+	dstEndpoint := net.JoinHostPort(result.DestinationIP, resultSourcePort(result.DestinationPort))
+
+	isResponse := result.Method == "RESPONSE"
+	method, responseCode := result.Method, result.ResponseCode
 	if isResponse {
 		atomic.AddInt64(&tcpSIPResponsesProcessed, 1)
 	} else {
@@ -74,10 +138,10 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 
 	// Extract IP and port from endpoints to use getTCPFlowKey
 	// This ensures the same key format is used for marking and lookup
-	srcIP := extractIPFromEndpoint(srcEndpoint)
-	srcPort := extractPortFromEndpoint(srcEndpoint)
-	dstIP := extractIPFromEndpoint(dstEndpoint)
-	dstPort := extractPortFromEndpoint(dstEndpoint)
+	srcIP := result.SourceIP
+	srcPort := resultSourcePort(result.SourcePort)
+	dstIP := result.DestinationIP
+	dstPort := resultSourcePort(result.DestinationPort)
 
 	// Use getTCPFlowKey which creates a symmetric, sorted key
 	// This matches the format used in bridge.go for lookups
@@ -89,7 +153,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 	logger.Debug("TCP SIP message detected via reassembly",
 		"call_id", voip.SanitizeCallIDForLogging(callID),
 		"flow", srcEndpoint+"->"+dstEndpoint,
-		"message_len", len(sipMessage),
+		"message_len", len(result.Body),
 		"is_response", isResponse,
 		"method", method,
 		"response_code", responseCode)
@@ -99,7 +163,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 	if callID != "" {
 		if agg := h.aggregator; agg != nil {
 			pkt := &components.PacketDisplay{
-				Timestamp: capturedAt,
+				Timestamp: result.Timestamp,
 				SrcIP:     srcIP,
 				SrcPort:   srcPort,
 				DstIP:     dstIP,
@@ -109,8 +173,8 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 					CallID: callID,
 					Method: method,
 					Status: responseCode,
-					From:   event.From,
-					To:     event.To,
+					From:   result.From,
+					To:     result.To,
 				},
 			}
 			agg.ProcessPacket(pkt)
@@ -122,7 +186,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 		if tracker := h.callTracker; tracker != nil {
 			// Parse SIP message to extract media ports for RTP mapping
 			// This is a lightweight parse - just looking for SDP m= lines
-			mediaPorts := extractMediaPortsFromSIP(event.Body)
+			mediaPorts := extractMediaPortsFromSIP(result.Body)
 			if len(mediaPorts) > 0 {
 				// Track requests/responses with SDP
 				if isResponse {
@@ -133,7 +197,7 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 
 				// Extract the SDP c= line IP (connection address) - this is where RTP should go
 				// In SBC/B2BUA environments, the signaling IP (srcIP) differs from media IP
-				mediaIP := extractConnectionIPFromPayload(event.Body)
+				mediaIP := extractConnectionIPFromPayload(result.Body)
 
 				// Log TCP SIP with SDP
 				msgType := "request"
@@ -176,15 +240,14 @@ func (h *TUISIPHandler) HandleSIPMessageAt(sipMessage []byte, callID string, src
 			}
 
 			// Extract and register From/To for call display
-			if event.From != "" || event.To != "" {
-				tracker.RegisterCallPartyInfo(callID, event.From, event.To)
+			if result.From != "" || result.To != "" {
+				tracker.RegisterCallPartyInfo(callID, result.From, result.To)
 			}
 		}
 	}
-
-	// Always return true - in TUI mode we display all SIP messages
-	return true
 }
+
+func resultSourcePort(port uint16) string { return strconv.FormatUint(uint64(port), 10) }
 
 // extractMediaPortsFromSIP does a lightweight parse of SIP message for m= lines
 func extractMediaPortsFromSIP(msg []byte) []uint16 {

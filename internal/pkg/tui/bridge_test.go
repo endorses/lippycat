@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
@@ -125,7 +126,7 @@ func TestConvertPacketFast_SIPDetection(t *testing.T) {
 				Interface: "test0",
 			}
 
-			display := convertPacketFast(pktInfo)
+			display := convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo))
 
 			// Verify protocol detection
 			assert.Equal(t, tt.expectedProto, display.Protocol,
@@ -173,7 +174,7 @@ func TestConvertPacketFast_NonSIPUDP(t *testing.T) {
 		Packet:    packet,
 		Interface: "test0",
 	}
-	display := convertPacketFast(pktInfo)
+	display := convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo))
 
 	// Should be detected as UDP, not SIP
 	assert.Equal(t, "UDP", display.Protocol)
@@ -309,7 +310,7 @@ func TestConvertPacketFast_TCPSIPContinuation(t *testing.T) {
 
 	// Without flow being marked, continuation packets should NOT be detected as SIP
 	// (TCP reassembly would mark the flow when complete SIP messages are detected)
-	display := convertPacketFast(pktInfo)
+	display := convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo))
 	assert.Equal(t, "TCP", display.Protocol,
 		"TCP SIP continuation should NOT be detected without flow cache entry (relies on TCP reassembly)")
 
@@ -318,7 +319,7 @@ func TestConvertPacketFast_TCPSIPContinuation(t *testing.T) {
 	markTCPSIPFlow(flowKey)
 
 	// Now the same packet should be detected as SIP
-	display = convertPacketFast(pktInfo)
+	display = convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo))
 	assert.Equal(t, "SIP", display.Protocol,
 		"TCP SIP continuation should be detected as SIP when flow is cached")
 
@@ -371,7 +372,7 @@ func TestConvertPacketFast_TCPSIPFlowMemory(t *testing.T) {
 	packet1 := gopacket.NewPacket(buffer1.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 	pktInfo1 := capture.PacketInfo{Packet: packet1, Interface: "test0"}
 
-	display1 := convertPacketFast(pktInfo1)
+	display1 := convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo1))
 	assert.Equal(t, "SIP", display1.Protocol, "First packet with INVITE should be detected as SIP")
 
 	// Second packet: continuation (no SIP method, no SIP headers, just data)
@@ -398,7 +399,7 @@ func TestConvertPacketFast_TCPSIPFlowMemory(t *testing.T) {
 	packet2 := gopacket.NewPacket(buffer2.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
 	pktInfo2 := capture.PacketInfo{Packet: packet2, Interface: "test0"}
 
-	display2 := convertPacketFast(pktInfo2)
+	display2 := convertEnvelopeFast(captureadapter.FromPacketInfo(pktInfo2))
 	assert.Equal(t, "SIP", display2.Protocol,
 		"Second packet on same flow should be detected as SIP due to flow memory")
 

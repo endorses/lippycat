@@ -15,6 +15,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/google/gopacket/layers"
 )
@@ -29,7 +30,7 @@ type ProcessorWorkerStats struct {
 type processorWorkerCounters struct {
 	highWater atomic.Uint64
 	drops     atomic.Uint64
-	queue     chan capture.PacketInfo
+	queue     chan *pipeline.PacketEnvelope
 }
 
 var currentProcessorWorkers atomic.Pointer[[]*processorWorkerCounters]
@@ -204,8 +205,12 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		}()
 	}
 
+	bufferManager := NewBufferManager(5*time.Second, 200)
+	defer bufferManager.Close()
+	logger.Info("Initialized VoIP buffer manager", "max_age", "5s", "max_size", 200)
+
 	// Create handler for local file writing
-	handler := NewLocalFileHandler(tracker)
+	handler := newLocalFileHandlerWithBuffer(tracker, bufferManager)
 	streamFactory := NewSipStreamFactoryWithConfig(ctx, handler, *tracker.config, tracker.IsCallActive)
 	// VoIP owns its (connection-aware reassembly) assembler internally rather
 	// than threading it through the shared capture-layer signatures, which stay
@@ -233,7 +238,20 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 			break
 		}
 	}
-	processor := func(ch <-chan capture.PacketInfo) { startProcessor(tracker, ch, assembler, isOffline) }
+	kind := pipeline.SourceLiveCapture
+	if isOffline {
+		kind = pipeline.SourcePCAPReplay
+	}
+	processor := func(ch <-chan capture.PacketInfo) {
+		envelopes := make(chan *pipeline.PacketEnvelope)
+		go func() {
+			defer close(envelopes)
+			if err := captureadapter.Stream(ctx, ch, envelopes, kind); err != nil {
+				logger.Error("VoIP ingress normalization stopped", "error", err)
+			}
+		}()
+		startProcessorWithBuffer(tracker, bufferManager, envelopes, assembler, isOffline)
+	}
 
 	if isOffline {
 		// For offline mode, run until PCAP is fully read
@@ -252,19 +270,17 @@ func StartOfflineVoipSniffer(readFiles []string, filter string) {
 	capture.StartOfflineSniffer(readFiles, filter, StartVoipSniffer)
 }
 
-func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
-	offline := len(offlineMode) > 0 && offlineMode[0]
+func startProcessor(tracker *CallTracker, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offlineMode ...bool) {
+	bufferManager := globalBufferMgr
+	if bufferManager == nil {
+		bufferManager = NewBufferManager(5*time.Second, 200)
+		defer bufferManager.Close()
+	}
+	startProcessorWithBuffer(tracker, bufferManager, ch, assembler, offlineMode...)
+}
 
-	// Initialize buffer manager (5 second timeout, 200 packet max per call)
-	bufferOnce.Do(func() {
-		globalBufferMgr = NewBufferManager(5*time.Second, 200)
-		logger.Info("Initialized VoIP buffer manager", "max_age", "5s", "max_size", 200)
-	})
-	defer func() {
-		if globalBufferMgr != nil {
-			globalBufferMgr.Close()
-		}
-	}()
+func startProcessorWithBuffer(tracker *CallTracker, bufferManager *BufferManager, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offlineMode ...bool) {
+	offline := len(offlineMode) > 0 && offlineMode[0]
 
 	// Note: Virtual interface is now initialized in StartVoipSniffer() before packet processing begins
 	// This allows early permission checking and avoids wasting time if permissions are insufficient
@@ -273,7 +289,7 @@ func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assemble
 	if numWorkers <= 1 {
 		// Single-threaded path (original behaviour / offline-ordered mode).
 		for pkt := range ch {
-			processOnePacket(tracker, pkt, assembler, offline)
+			processOnePacket(tracker, bufferManager, pkt, assembler, offline)
 		}
 	} else {
 		// Flow-sharded worker pool. Each flow (both directions) is pinned to one
@@ -286,25 +302,29 @@ func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assemble
 		// negligible here).
 		logger.Info("VoIP processor starting flow-sharded workers", "workers", numWorkers)
 		workerBuf := getProcessorWorkerBuffer(tracker.config)
-		workers := make([]chan capture.PacketInfo, numWorkers)
+		workers := make([]chan *pipeline.PacketEnvelope, numWorkers)
 		counters := make([]*processorWorkerCounters, numWorkers)
 		var lastOverloadLog atomic.Int64
 		var wg sync.WaitGroup
 		for i := range workers {
-			workers[i] = make(chan capture.PacketInfo, workerBuf)
+			workers[i] = make(chan *pipeline.PacketEnvelope, workerBuf)
 			counters[i] = &processorWorkerCounters{queue: workers[i]}
 			wg.Add(1)
-			go func(in <-chan capture.PacketInfo) {
+			go func(in <-chan *pipeline.PacketEnvelope) {
 				defer wg.Done()
 				for pkt := range in {
-					processOnePacket(tracker, pkt, assembler, offline)
+					processOnePacket(tracker, bufferManager, pkt, assembler, offline)
 				}
 			}(workers[i])
 		}
 		currentProcessorWorkers.Store(&counters)
+		defer currentProcessorWorkers.Store(nil)
 
 		for pkt := range ch {
-			packet := pkt.Packet
+			if pkt == nil {
+				continue
+			}
+			packet := pkt.Packet()
 			netLayer := packet.NetworkLayer()
 			transLayer := packet.TransportLayer()
 			if netLayer == nil || transLayer == nil {
@@ -340,7 +360,7 @@ func startProcessor(tracker *CallTracker, ch <-chan capture.PacketInfo, assemble
 	logger.Info("VoIP processor finished")
 }
 
-func startProcessorWithTracker(tracker *CallTracker, ch <-chan capture.PacketInfo, assembler tcpPacketAssembler, offlineMode ...bool) {
+func startProcessorWithTracker(tracker *CallTracker, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offlineMode ...bool) {
 	startProcessor(tracker, ch, assembler, offlineMode...)
 }
 
@@ -348,16 +368,20 @@ func startProcessorWithTracker(tracker *CallTracker, ch <-chan capture.PacketInf
 // Safe to call from multiple worker goroutines concurrently as long as packets of
 // the same flow are delivered to the same worker (see startProcessor) and shared
 // call/registry/writer state remains mutex-protected.
-func processOnePacket(tracker *CallTracker, pkt capture.PacketInfo, assembler tcpPacketAssembler, offline bool) {
-	packet := pkt.Packet
+func processOnePacket(tracker *CallTracker, bufferManager *BufferManager, env *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offline bool) {
+	if env == nil {
+		return
+	}
+	packet := env.Packet()
 	if packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
 		return
 	}
+	pkt := captureadapter.ToPacketInfo(env)
 	switch layer := packet.TransportLayer().(type) {
 	case *layers.TCP:
 		handleTcpPacketsWithConfig(pkt, layer, assembler, tracker.config, offline)
 	case *layers.UDP:
-		handleUdpPackets(tracker, pkt, layer)
+		handleUdpPacketsWithManager(tracker, pkt, layer, bufferManager)
 	}
 }
 

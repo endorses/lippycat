@@ -141,7 +141,7 @@ func (cs *CaptureState) GetPauseSignal() *PauseSignal {
 }
 
 // GetGlobalPauseSignal returns the global pause signal for external callers.
-// This is used by cmd/watch to pass to StartPacketBridge.
+// This is used by cmd/watch to pass to StartEnvelopeBridge.
 func GetGlobalPauseSignal() *PauseSignal {
 	return globalCaptureState.GetPauseSignal()
 }

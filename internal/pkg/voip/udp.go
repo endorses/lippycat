@@ -9,6 +9,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
+	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/endorses/lippycat/internal/pkg/voip/monitoring"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -134,7 +135,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 			// Buffer the SIP packet with link type for proper PCAP writing.
 			// Returns true once the call is matched, from which point every SIP
 			// packet of the call is written directly instead of buffered.
-			alreadyMatched := globalBufferMgr.AddSIPPacket(callID, packet, metadata, pkt.Interface, pkt.LinkType)
+			alreadyMatched := globalBufferMgr.AddSIPResult(callID, packet, analysis.SIP, metadata, pkt.Interface, pkt.LinkType)
 
 			hasSDP := BytesContains(analysis.SIP.SDP, []byte("m=audio"))
 
@@ -158,7 +159,7 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 			// Check filter if we have SDP (INVITE or 200 OK with m=audio)
 			if hasSDP {
 				// Use callback-based filter check for flexible handling
-				matched := globalBufferMgr.CheckFilterWithCallback(
+				matched := globalBufferMgr.CheckFilterWithTypedCallback(
 					callID,
 					func(m *CallMetadata) bool {
 						// Check if From, To, or P-Asserted-Identity matches tracked users
@@ -168,11 +169,8 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 							"p-asserted-identity": m.PAssertedIdentity,
 						})
 					},
-					func(callID string, packets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
-						if _, err := (sniffRegistry{tracker: tracker}).Observe(analysis.SIP); err != nil {
-							logger.Warn("Failed to update matched UDP SIP call", "call_id", SanitizeCallIDForLogging(callID), "error", err)
-							return
-						}
+					func(callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, metadata *CallMetadata, interfaceName string, linkType layers.LinkType) {
+						releaseBufferedSniffPackets(tracker, callID, sipPackets, rtpPackets, interfaceName, linkType)
 						call, _ := tracker.GetCall(callID)
 						if call != nil {
 							monitoring.RecordCallEvent(tracingCtx, callID, "sip_matched", map[string]interface{}{
@@ -181,11 +179,6 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 							})
 						}
 
-						// Write all buffered packets using helper
-						// Preserve legacy behavior: the current matching packet is
-						// injected once before the buffered PCAP writes.
-						injectPacketToVirtualInterface(pkt)
-						handleMatchedCallForFileWrite(tracker, callID, packets, metadata)
 					},
 				)
 				_ = matched // Callback already handled everything
@@ -297,18 +290,30 @@ func isSIPPacket(_ *CallTracker, packet gopacket.Packet) bool {
 	return false
 }
 
-// handleMatchedCallForFileWrite is a callback for BufferManager that writes packets to files
-func handleMatchedCallForFileWrite(tracker *CallTracker, callID string, packets []gopacket.Packet, metadata *CallMetadata) {
-	if !tracker.config.WriteVoIP {
-		return
+// releaseBufferedSniffPackets publishes the original typed SIP results through
+// the shared registry and queued sink, then preserves legacy RTP file output.
+func releaseBufferedSniffPackets(tracker *CallTracker, callID string, sipPackets []BufferedSIPPacket, rtpPackets []gopacket.Packet, interfaceName string, linkType layers.LinkType) map[string]sipflow.SinkStats {
+	flow := newSniffSIPFlow(tracker, false, false)
+	registry := sniffRegistry{tracker: tracker}
+	for _, buffered := range sipPackets {
+		if _, err := registry.Observe(buffered.Result); err != nil {
+			logger.Warn("Failed to update buffered UDP SIP call", "call_id", SanitizeCallIDForLogging(callID), "error", err)
+			continue
+		}
+		info := capture.PacketInfo{Packet: buffered.Packet, Interface: interfaceName, LinkType: linkType}
+		analysis := sipflow.ProcessResult{
+			SIP: buffered.Result, Stage: pipeline.Result{Outcome: pipeline.OutcomeAccepted}, Attachment: info,
+		}
+		delivery := flow.Dispatch(analysis)
+		if delivery.Sinks[sniffSIPSinkName].Outcome != pipeline.OutcomeAccepted {
+			logger.Warn("Failed to deliver buffered UDP SIP packet", "call_id", SanitizeCallIDForLogging(callID))
+		}
 	}
-
-	// Write all buffered packets
-	for _, packet := range packets {
-		if isSIPPacket(tracker, packet) {
-			WriteSIP(tracker, callID, packet)
-		} else {
+	if tracker.config.WriteVoIP {
+		for _, packet := range rtpPackets {
 			WriteRTP(tracker, callID, packet)
 		}
 	}
+	flow.Close()
+	return flow.Stats()
 }

@@ -6,11 +6,36 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBufferManagerTypedCallbackPreservesResultsAndRunsUnlocked(t *testing.T) {
+	bm := NewBufferManager(time.Minute, 10)
+	t.Cleanup(bm.Close)
+	callID := "typed-buffer@example.com"
+	packet := createUDPPacket(5060, 5060, []byte("SIP/2.0 180 Ringing\r\n"))
+	result := pipeline.SIPResult{CallID: callID, Method: "INVITE"}
+	metadata := &CallMetadata{CallID: callID, From: "alice", SDPBody: "m=audio 40000 RTP/AVP 0\r\n"}
+
+	require.False(t, bm.AddSIPResult(callID, packet, result, metadata, "eth0", layers.LinkTypeEthernet))
+	called := false
+	require.True(t, bm.CheckFilterWithTypedCallback(callID, func(*CallMetadata) bool { return true },
+		func(id string, sip []BufferedSIPPacket, rtp []gopacket.Packet, _ *CallMetadata, iface string, link layers.LinkType) {
+			called = true
+			require.True(t, bm.IsCallMatched(id), "callback must run after the manager lock is released")
+			require.Len(t, sip, 1)
+			require.Empty(t, rtp)
+			require.Equal(t, result, sip[0].Result)
+			require.Same(t, packet, sip[0].Packet)
+			require.Equal(t, "eth0", iface)
+			require.Equal(t, layers.LinkTypeEthernet, link)
+		}))
+	require.True(t, called)
+}
 
 func TestNewBufferManager(t *testing.T) {
 	maxAge := 5 * time.Second

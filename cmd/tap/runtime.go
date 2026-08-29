@@ -9,6 +9,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
+	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/processor"
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
@@ -21,11 +22,14 @@ import (
 // only captures the differences needed after configuration has been resolved.
 type ProtocolSpec struct {
 	Name            string
+	ConfigureGPU    func(GPUConfig) GPUConfig
 	ConfigureSource func(*source.LocalSource)
 }
 
 type tapRuntime struct {
 	processor    *processor.Processor
+	localSource  *source.LocalSource
+	appFilter    *hunter.ApplicationFilter
 	sourceConfig source.LocalSourceConfig
 	mode         string
 	startHook    func(context.Context)
@@ -50,7 +54,11 @@ func newTapRuntime(config processor.Config, effectiveBPF string, spec ProtocolSp
 	localTarget := filtering.NewLocalTarget(filtering.LocalTargetConfig{BaseBPF: effectiveBPF})
 	localTarget.SetBPFUpdater(localSource)
 
-	appFilter, err := createApplicationFilter(GetGPUConfig())
+	gpuConfig := GetGPUConfig()
+	if spec.ConfigureGPU != nil {
+		gpuConfig = spec.ConfigureGPU(gpuConfig)
+	}
+	appFilter, err := createApplicationFilter(gpuConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +74,13 @@ func newTapRuntime(config processor.Config, effectiveBPF string, spec ProtocolSp
 	if config.UpstreamAddr != "" {
 		mode = "hierarchical"
 	}
-	return &tapRuntime{processor: p, sourceConfig: sourceConfig, mode: mode}, nil
+	return &tapRuntime{
+		processor:    p,
+		localSource:  localSource,
+		appFilter:    appFilter,
+		sourceConfig: sourceConfig,
+		mode:         mode,
+	}, nil
 }
 
 func tapSourceConfig(config processor.Config, effectiveBPF string, spec ProtocolSpec) source.LocalSourceConfig {

@@ -20,7 +20,7 @@ import (
 )
 
 type tapCallRegistry interface {
-	ProcessReassembledSIP(gopacket.Packet) *data.PacketMetadata
+	ProcessReassembledSIPResult(pipeline.SIPResult) (*data.PacketMetadata, error)
 	CompleteCall(string)
 }
 
@@ -50,7 +50,11 @@ func (a tapRegistryAdapter) Observe(r pipeline.SIPResult) (sipflow.RegistryObser
 	if a.registry == nil || r.Packet == nil {
 		return sipflow.RegistryObservation{}, nil
 	}
-	return sipflow.RegistryObservation{Attachment: a.registry.ProcessReassembledSIP(r.Packet.Packet())}, nil
+	metadata, err := a.registry.ProcessReassembledSIPResult(r)
+	if err != nil {
+		return sipflow.RegistryObservation{}, err
+	}
+	return sipflow.RegistryObservation{Attachment: metadata}, nil
 }
 func (a tapRegistryAdapter) Complete(id string, _ time.Time) ([]pipeline.CallLifecycleObservation, error) {
 	return nil, nil

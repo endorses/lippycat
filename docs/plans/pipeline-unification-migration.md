@@ -580,6 +580,14 @@ was removed. Terminal tap packets retain deferred `AfterProcess` completion,
 including deterministic drop paths. `make test`, focused race tests, and the
 supported non-CUDA build matrix pass.
 
+Corrective audit (2026-08-29): routed sniff TCP and UDP output through a
+registered, independently queued sink so delivery outcomes and drops are
+attributable; retained hunter dialog selection through final BYE/CANCEL
+responses; moved hunter fallback matching and Call-ID validation into the
+parsed-event orchestration stage; and removed tap TCP's nested processor parse
+by passing the existing typed SIP result directly to the processor registry.
+Regression tests cover each corrected behavior.
+
 ### Exit Criteria
 
 - One SIP parsing/orchestration implementation serves TCP and UDP compositions.

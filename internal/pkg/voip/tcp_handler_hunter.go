@@ -105,11 +105,17 @@ func (h *HunterForwardHandler) handleSIPMessage(sipMessage []byte, event *shared
 		return false
 	}
 
-	directMatch := h.matchesMessage(pkt, nil)
+	directMatch := h.appFilter != nil && h.matchesMessage(pkt, nil)
 	analysis := h.orchestrator.Process(sipflow.Message{
 		Payload: sipMessage, Event: event, ExpectedCallID: callID, Envelope: envelopeForHunterPacket(pkt),
 		ParseOptions:     sharedsip.OptionsForEndpoints(capturedAt, srcEndpoint, dstEndpoint),
 		FilterConfigured: true, DirectMatch: directMatch,
+		Match: func(event sharedsip.Event) bool {
+			return h.appFilter == nil && containsUserInHeaders(event.Headers)
+		},
+		Validate: func(event sharedsip.Event) error {
+			return ValidateCallIDForSecurity(event.CallID)
+		},
 	})
 	if analysis.Stage.Outcome != pipeline.OutcomeAccepted || analysis.SIP.CallID != callID {
 		discardTCPBufferedPackets(netFlow, transportFlow)

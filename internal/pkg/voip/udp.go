@@ -9,7 +9,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
-	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/endorses/lippycat/internal/pkg/voip/monitoring"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -70,7 +69,8 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 		payload := udp.Payload
 
 		// Analyze through the shared parser/selection/registry path.
-		analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, true, true)
+		flow, analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, true, true)
+		defer flow.Close()
 		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
 			callID := analysis.SIP.CallID
 			if callID != "" {
@@ -85,8 +85,9 @@ func handleUdpPacketsImmediate(tracker *CallTracker, pkt capture.PacketInfo, lay
 					})
 				}
 
-				delivery := (sniffSink{tracker: tracker}).HandleSIP(tracingCtx, sipflow.SinkInput{Result: analysis.SIP, Attachment: pkt})
-				if delivery.Outcome != pipeline.OutcomeAccepted {
+				analysis.Attachment = pkt
+				delivery := flow.Dispatch(analysis)
+				if delivery.Sinks[sniffSIPSinkName].Outcome != pipeline.OutcomeAccepted {
 					logger.Warn("Failed to deliver UDP SIP packet", "call_id", SanitizeCallIDForLogging(callID))
 				} else if !tracker.config.WriteVoIP {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)
@@ -122,7 +123,8 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 		}
 		payload := udp.Payload
 
-		analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, false, false)
+		flow, analysis := sniffSIPMessage(pkt, payload, sipParseOptions(packet, layer), tracker, false, false)
+		defer flow.Close()
 		if analysis.Stage.Outcome == pipeline.OutcomeAccepted {
 			callID := analysis.SIP.CallID
 
@@ -143,8 +145,9 @@ func handleUdpPacketsWithBuffer(tracker *CallTracker, pkt capture.PacketInfo, la
 					logger.Warn("Failed to update UDP SIP call", "call_id", SanitizeCallIDForLogging(callID), "error", err)
 					return
 				}
-				delivery := (sniffSink{tracker: tracker}).HandleSIP(tracingCtx, sipflow.SinkInput{Result: analysis.SIP, Attachment: pkt})
-				if delivery.Outcome != pipeline.OutcomeAccepted {
+				analysis.Attachment = pkt
+				delivery := flow.Dispatch(analysis)
+				if delivery.Sinks[sniffSIPSinkName].Outcome != pipeline.OutcomeAccepted {
 					logger.Warn("Failed to deliver buffered UDP SIP packet", "call_id", SanitizeCallIDForLogging(callID))
 				} else if !tracker.config.WriteVoIP {
 					logger.Info("SIP packet processed", "call_id", SanitizeCallIDForLogging(callID), "packet", packet)

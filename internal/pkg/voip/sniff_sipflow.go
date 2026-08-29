@@ -63,6 +63,11 @@ func (sniffNeverComplete) Completes(sharedsip.Event) bool { return false }
 
 type sniffSink struct{ tracker *CallTracker }
 
+const (
+	sniffSIPSinkName  = "sniff-output"
+	sniffSIPQueueSize = 256
+)
+
 func (s sniffSink) HandleSIP(_ context.Context, input sipflow.SinkInput) pipeline.Result {
 	pkt, ok := input.Attachment.(capture.PacketInfo)
 	if !ok || pkt.Packet == nil {
@@ -88,21 +93,23 @@ func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool) *
 	if err != nil {
 		panic(err)
 	}
+	if err := flow.RegisterSink(sniffSIPSinkName, sniffSink{tracker: tracker}, sniffSIPQueueSize); err != nil {
+		panic(err)
+	}
 	if err := flow.Start(context.Background()); err != nil {
 		panic(err)
 	}
 	return flow
 }
 
-func sniffSIPMessage(packet capture.PacketInfo, payload []byte, opts sharedsip.ParseOptions, tracker *CallTracker, markSelection, updateRegistry bool) sipflow.ProcessResult {
+func sniffSIPMessage(packet capture.PacketInfo, payload []byte, opts sharedsip.ParseOptions, tracker *CallTracker, markSelection, updateRegistry bool) (*sipflow.Orchestrator, sipflow.ProcessResult) {
 	envelope := &pipeline.PacketEnvelope{LinkType: packet.LinkType}
 	if packet.Packet != nil {
 		envelope.Data = packet.Packet.Data()
 		envelope.CaptureTime = packet.Packet.Metadata().Timestamp
 	}
 	flow := newSniffSIPFlow(tracker, markSelection, updateRegistry)
-	defer flow.Close()
-	return flow.Analyze(sipflow.Message{
+	result := flow.Analyze(sipflow.Message{
 		Payload:          payload,
 		Envelope:         envelope,
 		ParseOptions:     opts,
@@ -114,6 +121,7 @@ func sniffSIPMessage(packet capture.PacketInfo, payload []byte, opts sharedsip.P
 			return ValidateCallIDForSecurity(event.CallID)
 		},
 	})
+	return flow, result
 }
 
 func callMetadataFromSIPResult(result pipeline.SIPResult) *CallMetadata {

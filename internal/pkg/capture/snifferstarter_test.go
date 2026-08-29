@@ -33,10 +33,10 @@ func TestStartLiveSniffer(t *testing.T) {
 	assert.True(t, called, "startSniffer function should be called")
 }
 
-func TestStartOfflineSniffer(t *testing.T) {
-	// Test that StartOfflineSniffer function exists
+func TestStartOfflineSnifferOrdered(t *testing.T) {
+	// Test that StartOfflineSnifferOrdered function exists
 	// We'll just test that the function exists and compiles
-	assert.NotNil(t, StartOfflineSniffer)
+	assert.NotNil(t, StartOfflineSnifferOrdered)
 }
 
 func TestStartOfflineSnifferExtensionlessRelativeFile(t *testing.T) {
@@ -47,7 +47,7 @@ func TestStartOfflineSnifferExtensionlessRelativeFile(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, os.Remove(name)) })
 
 	called := false
-	StartOfflineSniffer([]string{name}, "", func(devices []pcaptypes.PcapInterface, _ string) {
+	StartOfflineSnifferOrdered([]string{name}, "", func(devices []pcaptypes.PcapInterface, _ string) {
 		called = true
 		require.Len(t, devices, 1)
 		require.Equal(t, name, devices[0].Name())
@@ -227,8 +227,8 @@ func TestStartLiveSniffer_MultipleInterfaces(t *testing.T) {
 	}
 }
 
-// TestStartOfflineSniffer_ErrorHandling tests StartOfflineSniffer error paths
-func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
+// TestStartOfflineSnifferOrdered_ErrorHandling tests StartOfflineSnifferOrdered error paths.
+func TestStartOfflineSnifferOrdered_ErrorHandling(t *testing.T) {
 	// Create test PCAP files
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.pcap")
@@ -252,7 +252,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			capturedFilter = filter
 		}
 
-		StartOfflineSniffer([]string{testFile}, "tcp port 5060", mockStartSniffer)
+		StartOfflineSnifferOrdered([]string{testFile}, "tcp port 5060", mockStartSniffer)
 
 		assert.True(t, startSnifferCalled.Load(), "startSniffer should be called")
 		assert.Equal(t, 1, len(capturedDevices), "Should create one offline device")
@@ -271,7 +271,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			capturedFilter = filter
 		}
 
-		StartOfflineSniffer([]string{testFile, testFile2, testFile3}, "udp port 5060", mockStartSniffer)
+		StartOfflineSnifferOrdered([]string{testFile, testFile2, testFile3}, "udp port 5060", mockStartSniffer)
 
 		assert.True(t, startSnifferCalled.Load(), "startSniffer should be called")
 		assert.Equal(t, 3, len(capturedDevices), "Should create three offline devices")
@@ -287,7 +287,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			startSnifferCalled.Store(true)
 		}
 
-		StartOfflineSniffer([]string{"/nonexistent/file.pcap"}, "tcp", mockStartSniffer)
+		StartOfflineSnifferOrdered([]string{"/nonexistent/file.pcap"}, "tcp", mockStartSniffer)
 
 		// Function should return early without calling startSniffer
 		assert.False(t, startSnifferCalled.Load(), "startSniffer should not be called for nonexistent file")
@@ -300,7 +300,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 		}
 
 		// Mix of existing and non-existing files
-		StartOfflineSniffer([]string{testFile, "/nonexistent/file.pcap", testFile2}, "tcp", mockStartSniffer)
+		StartOfflineSnifferOrdered([]string{testFile, "/nonexistent/file.pcap", testFile2}, "tcp", mockStartSniffer)
 
 		// Function should return early without calling startSniffer when any file is missing
 		assert.False(t, startSnifferCalled.Load(), "startSniffer should not be called when one file is missing")
@@ -314,7 +314,7 @@ func TestStartOfflineSniffer_ErrorHandling(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 		}
 
-		StartOfflineSniffer([]string{testFile}, "tcp", blockingStartSniffer)
+		StartOfflineSnifferOrdered([]string{testFile}, "tcp", blockingStartSniffer)
 
 		// Should complete (either normally or via timeout context)
 		assert.True(t, startSnifferCalled.Load(), "startSniffer should have been called")
@@ -376,8 +376,8 @@ func TestCheckCapturePermissions(t *testing.T) {
 	})
 }
 
-// TestRunOffline tests the RunOffline function
-func TestRunOffline(t *testing.T) {
+// TestRunOfflineOrderedProcessing tests RunOfflineOrdered with real captures.
+func TestRunOfflineOrderedProcessing(t *testing.T) {
 	t.Run("successful offline processing with real pcap", func(t *testing.T) {
 		// Use a real small PCAP file
 		pcapFile := "../../testdata/pcaps/http.pcap"
@@ -403,7 +403,7 @@ func TestRunOffline(t *testing.T) {
 		// Run with timeout to ensure completion
 		done := make(chan struct{})
 		go func() {
-			RunOffline(devices, "", processor)
+			RunOfflineOrdered(devices, "", processor)
 			close(done)
 		}()
 
@@ -412,26 +412,8 @@ func TestRunOffline(t *testing.T) {
 			// Completed successfully
 			assert.Greater(t, processedPackets.Load(), int32(0), "Should process at least one packet")
 		case <-time.After(5 * time.Second):
-			t.Fatal("RunOffline timed out")
+			t.Fatal("RunOfflineOrdered timed out")
 		}
-	})
-
-	t.Run("all captures fail", func(t *testing.T) {
-		devices := []pcaptypes.PcapInterface{
-			&mockPcapInterface{name: "fail1", setError: errors.New("permission denied")},
-		}
-
-		var processorCalled atomic.Bool
-		processor := func(ch <-chan PacketInfo) {
-			processorCalled.Store(true)
-			for range ch {
-			}
-		}
-
-		RunOffline(devices, "", processor)
-
-		// Processor should be called even if captures fail
-		assert.True(t, processorCalled.Load(), "Processor should be called")
 	})
 
 	t.Run("with TCP assembler", func(t *testing.T) {
@@ -457,7 +439,7 @@ func TestRunOffline(t *testing.T) {
 
 		done := make(chan struct{})
 		go func() {
-			RunOffline(devices, "", processor)
+			RunOfflineOrdered(devices, "", processor)
 			close(done)
 		}()
 
@@ -465,7 +447,7 @@ func TestRunOffline(t *testing.T) {
 		case <-done:
 			assert.Greater(t, processedPackets.Load(), int32(0), "Should process packets")
 		case <-time.After(5 * time.Second):
-			t.Fatal("RunOffline with assembler timed out")
+			t.Fatal("RunOfflineOrdered timed out")
 		}
 	})
 }

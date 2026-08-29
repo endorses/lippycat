@@ -54,7 +54,7 @@ func runMode(cmd *cobra.Command, args []string) {
 | Mode | Capture Source | Background Task |
 |------|---------------|-----------------|
 | `live` | Network interface | `capture.StartLiveSniffer()` |
-| `file` | PCAP file | `capture.StartOfflineSniffer()` |
+| `file` | PCAP file | `capture.StartOfflineSnifferOrdered()` |
 | `remote` | gRPC stream | None (connections via TUI) |
 
 ## Key Integration Points
@@ -67,7 +67,7 @@ func runMode(cmd *cobra.Command, args []string) {
 
 ### With internal/pkg/capture/
 - `capture.StartLiveSniffer()` - Live interface capture
-- `capture.StartOfflineSniffer()` - PCAP file reading
+- `capture.StartOfflineSnifferOrdered()` - Timestamp-ordered PCAP file reading
 - `capture.InitWithContext()` - Context-aware capture loop
 
 ## Viper Configuration

@@ -665,6 +665,13 @@ TLS, HTTP, and email offline starters now use the same stable timestamp-ordered
 runner as VoIP and watch-file replay. Multi-file ordering is therefore
 preserved across every Phase 6 local file-capture path.
 
+Legacy cleanup verification (2026-08-29): removed the superseded
+`StartOfflineSniffer` and `RunOffline` implementations and the unused DNS, TLS,
+HTTP, and email packet-processing compatibility wrappers. Their remaining tests
+now exercise `StartOfflineSnifferOrdered` and `RunOfflineOrdered`, including the
+extensionless relative-file regression, so no test-only consumer keeps the
+legacy paths alive.
+
 ### Exit Criteria
 
 - All five modes use normalized ingress and shared pipeline components.

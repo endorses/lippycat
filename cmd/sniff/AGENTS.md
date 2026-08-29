@@ -118,9 +118,9 @@ Network Interface → gopacket → ConvertPacketToDisplay → JSON Encoder → s
 
 **Offline Mode:**
 ```
-PCAP File → gopacket → Packet Buffer → processPacketSimple → stdout
-     ↓
-   EOF detected → Close buffer → Drain processor → Exit cleanly
+PCAP Files → gopacket → Stable timestamp ordering → PacketEnvelope → Sink fan-out
+     ↓                                                               ↓
+   EOF detected                                                   CLI / PCAP / VIF
 ```
 
 ### VoIP Sniff Flow
@@ -202,36 +202,26 @@ Following Unix conventions:
 **Solution:** Separate execution paths for live vs offline:
 
 ```go
-func StartSniffer(devices []pcaptypes.PcapInterface, filter string) {
-    processor := func(ch <-chan PacketInfo, asm *tcpassembly.Assembler) {
-        processPacketSimple(ch)
-    }
+processor := func(kind pipeline.SourceKind) func(<-chan capture.PacketInfo) {
+    return func(ch <-chan capture.PacketInfo) { localPipeline.process(ch, kind) }
+}
 
-    // Detect offline mode (filename contains .pcap/.pcapng or /)
-    isOffline := false
-    for _, dev := range devices {
-        name := dev.Name()
-        if strings.Contains(name, ".pcap") || strings.Contains(name, ".pcapng") || strings.Contains(name, "/") {
-            isOffline = true
-            break
-        }
-    }
-
-    if isOffline {
-        RunOffline(devices, filter, processor, nil)  // Exits on EOF
-    } else {
-        RunWithSignalHandler(devices, filter, processor, nil)  // Waits for signal
-    }
+if len(files) == 0 {
+    capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+        capture.RunWithSignalHandler(devices, filter, processor(pipeline.SourceLiveCapture))
+    })
+} else {
+    capture.StartOfflineSnifferOrdered(files, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+        capture.RunOfflineOrdered(devices, filter, processor(pipeline.SourcePCAPReplay))
+    })
 }
 ```
 
-**RunOffline() implementation:**
-1. Start capture goroutines with WaitGroup
-2. Start processor goroutine
-3. Wait for capture goroutines to finish (EOF detected)
-4. Close packet buffer channel
-5. Wait for processor to drain remaining packets
-6. Return cleanly
+**RunOfflineOrdered() implementation:**
+1. Read packets from every PCAP input
+2. Stable-sort packets by capture timestamp
+3. Send packets through a lossless channel in timestamp order
+4. Close the channel and wait for the processor to drain
 
 **Why this matters:**
 - Works with pipes: `lc sniff -r file.pcap | head -100`
@@ -395,10 +385,14 @@ assembler.AssembleWithContext(ctx, tcp.NetworkFlow(), tcp)
 **General sniff mode:**
 ```go
 // Live capture
-capture.StartLiveSniffer(interfaces, filter, capture.StartSniffer)
+capture.StartLiveSniffer(interfaces, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+    capture.RunWithSignalHandler(devices, filter, processor(pipeline.SourceLiveCapture))
+})
 
 // Offline capture (PCAP file)
-capture.StartOfflineSniffer(readFile, filter, capture.StartSniffer)
+capture.StartOfflineSnifferOrdered(readFiles, filter, func(devices []pcaptypes.PcapInterface, filter string) {
+    capture.RunOfflineOrdered(devices, filter, processor(pipeline.SourcePCAPReplay))
+})
 ```
 
 **VoIP sniff mode:**
@@ -414,10 +408,9 @@ These functions in `internal/pkg/voip` handle all the VoIP capture logic using `
 
 **Key capture functions:**
 - `StartLiveSniffer()` - Live network interface capture
-- `StartOfflineSniffer()` - PCAP file reading with EOF detection
+- `StartOfflineSnifferOrdered()` - Opens one or more PCAP files for ordered replay
 - `RunWithSignalHandler()` - Live mode with signal handling
-- `RunOffline()` - Offline mode with automatic exit
-- `processPacketSimple()` - Lightweight packet processor for general sniff mode
+- `RunOfflineOrdered()` - Lossless, timestamp-ordered offline replay
 
 ### With internal/pkg/voip
 
@@ -539,12 +532,14 @@ viper.Set("voip.tcp_performance_mode", "minimal")
 ### Supporting Files
 
 **internal/pkg/capture/snifferstarter.go** - Capture orchestration
-- `StartSniffer()` - Entry point for general sniffing
 - `StartLiveSniffer()` - Live network capture setup
-- `StartOfflineSniffer()` - PCAP file reading setup
+- `StartOfflineSnifferOrdered()` - PCAP file reading setup
 - `RunWithSignalHandler()` - Live mode with graceful shutdown
-- `RunOffline()` - Offline mode with EOF detection (NEW in v0.2.9)
-- `processPacketSimple()` - JSON/text packet output (NEW in v0.2.9)
+- `RunOfflineOrdered()` - Timestamp-ordered replay with EOF completion
+
+**cmd/sniff/local_pipeline.go** - Normalized local packet pipeline
+- `localEnvelopePipeline` - Normalizes capture input and fans out to explicit sinks
+- `cliEnvelopeSink` - JSON/text packet output
 
 **internal/pkg/capture/converter.go** - Packet conversion (NEW in v0.2.9)
 - `ConvertPacketToDisplay()` - Converts gopacket.Packet to types.PacketDisplay
@@ -593,16 +588,15 @@ func ConvertPacketToDisplay(pktInfo PacketInfo) types.PacketDisplay {
 ### Adding a New Output Format
 
 1. Add format to flag choices in `cmd/sniff/sniff.go`
-2. Add format handling in `processPacketSimple()` in `internal/pkg/capture/snifferstarter.go`
+2. Add format handling to `cliEnvelopeSink.HandlePacket()` in `cmd/sniff/local_pipeline.go`
 
 Example (adding CSV format):
 ```go
 // cmd/sniff/sniff.go
 SniffCmd.PersistentFlags().StringVar(&format, "format", "json", "output format: json, text, csv")
 
-// snifferstarter.go
-format := viper.GetString("sniff.format")
-switch format {
+// local_pipeline.go
+switch s.format {
 case "json":
     // existing JSON handling
 case "csv":

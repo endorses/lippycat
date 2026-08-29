@@ -86,11 +86,6 @@ func startTLSSniffer(devices []pcaptypes.PcapInterface, filter string, isOffline
 	cleanup()
 }
 
-// processTLSPackets processes packets from the channel.
-func processTLSPackets(packetChan <-chan capture.PacketInfo) {
-	captureadapter.ForEach(packetChan, pipeline.SourceLiveCapture, processTLSEnvelope)
-}
-
 func processTLSEnvelope(env *pipeline.PacketEnvelope) {
 	quietMode := viper.GetBool("sniff.quiet")
 	format := viper.GetString("sniff.format")
@@ -102,53 +97,51 @@ func processTLSEnvelope(env *pipeline.PacketEnvelope) {
 	}
 
 	pktInfo := captureadapter.ToPacketInfo(env)
-	{
-		packet := pktInfo.Packet
+	packet := pktInfo.Packet
 
-		// Parse TLS
-		metadata := tlsParser.Parse(packet)
-		if metadata == nil {
-			return
+	// Parse TLS
+	metadata := tlsParser.Parse(packet)
+	if metadata == nil {
+		return
+	}
+
+	// Apply content filter if configured
+	if tlsContentFilter.HasFilters() && !tlsContentFilter.Match(metadata) {
+		return
+	}
+
+	// Create packet display
+	pktDisplay := createPacketDisplayFromInfo(pktInfo, metadata)
+
+	// Track connection correlation
+	if tlsTracker != nil {
+		if metadata.IsServer {
+			tlsTracker.CorrelateServerHello(pktDisplay, metadata)
+		} else {
+			tlsTracker.TrackClientHello(pktDisplay, metadata)
 		}
+	}
 
-		// Apply content filter if configured
-		if tlsContentFilter.HasFilters() && !tlsContentFilter.Match(metadata) {
-			return
-		}
+	// Record for aggregation
+	tlsAggregator.RecordHandshake(metadata, pktDisplay.SrcIP, pktDisplay.DstIP)
 
-		// Create packet display
-		pktDisplay := createPacketDisplayFromInfo(pktInfo, metadata)
-
-		// Track connection correlation
-		if tlsTracker != nil {
-			if metadata.IsServer {
-				tlsTracker.CorrelateServerHello(pktDisplay, metadata)
-			} else {
-				tlsTracker.TrackClientHello(pktDisplay, metadata)
+	// Print to console unless quiet mode
+	if !quietMode {
+		if format == "json" {
+			// Output as JSON (omit RawData for cleaner output)
+			pktDisplay.RawData = nil
+			if err := jsonEncoder.Encode(pktDisplay); err != nil {
+				logger.Error("Failed to encode packet as JSON", "error", err)
 			}
+		} else {
+			printTLSPacket(pktDisplay, metadata)
 		}
+	}
 
-		// Record for aggregation
-		tlsAggregator.RecordHandshake(metadata, pktDisplay.SrcIP, pktDisplay.DstIP)
-
-		// Print to console unless quiet mode
-		if !quietMode {
-			if format == "json" {
-				// Output as JSON (omit RawData for cleaner output)
-				pktDisplay.RawData = nil
-				if err := jsonEncoder.Encode(pktDisplay); err != nil {
-					logger.Error("Failed to encode packet as JSON", "error", err)
-				}
-			} else {
-				printTLSPacket(pktDisplay, metadata)
-			}
-		}
-
-		// Write to PCAP if configured
-		if tlsPacketSink != nil {
-			if result := tlsPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
-				logger.Error("TLS PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
-			}
+	// Write to PCAP if configured
+	if tlsPacketSink != nil {
+		if result := tlsPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+			logger.Error("TLS PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
 		}
 	}
 }

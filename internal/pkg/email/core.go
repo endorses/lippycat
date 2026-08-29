@@ -321,50 +321,39 @@ func initializePortMaps() {
 	}
 }
 
-// processEmailPackets processes packets from the channel.
-func processEmailPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.ReassemblyEngine, offline bool) {
-	kind := pipeline.SourceLiveCapture
-	if offline {
-		kind = pipeline.SourcePCAPReplay
-	}
-	captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) { processEmailEnvelope(env, asm) })
-}
-
 func processEmailEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.ReassemblyEngine) {
-	for _, pktInfo := range []capture.PacketInfo{captureadapter.ToPacketInfo(env)} {
-		packet := pktInfo.Packet
+	pktInfo := captureadapter.ToPacketInfo(env)
+	packet := pktInfo.Packet
 
-		// Check for TCP layer
-		tcpLayer := packet.Layer(layers.LayerTypeTCP)
-		if tcpLayer == nil {
-			continue
-		}
+	// Check for TCP layer
+	tcpLayer := packet.Layer(layers.LayerTypeTCP)
+	if tcpLayer == nil {
+		return
+	}
 
-		if _, ok := tcpLayer.(*layers.TCP); !ok {
-			continue
-		}
+	if _, ok := tcpLayer.(*layers.TCP); !ok {
+		return
+	}
 
-		// Get network layer for flow
-		netLayer := packet.NetworkLayer()
-		if netLayer == nil {
-			continue
-		}
+	// Get network layer for flow
+	netLayer := packet.NetworkLayer()
+	if netLayer == nil {
+		return
+	}
 
-		// Feed to assembler
-		if asm != nil {
-			if err := asm.Assemble(env); err != nil {
-				logger.Error("Failed to assemble email TCP packet", "error", err)
-			}
-		}
-
-		// Write to PCAP if configured
-		if emailPacketSink != nil {
-			if result := emailPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
-				logger.Error("Email PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
-			}
+	// Feed to assembler
+	if asm != nil {
+		if err := asm.Assemble(env); err != nil {
+			logger.Error("Failed to assemble email TCP packet", "error", err)
 		}
 	}
 
+	// Write to PCAP if configured
+	if emailPacketSink != nil {
+		if result := emailPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+			logger.Error("Email PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
+		}
+	}
 }
 
 // cleanup releases resources.

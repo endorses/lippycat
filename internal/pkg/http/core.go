@@ -204,47 +204,36 @@ func startHTTPSniffer(devices []pcaptypes.PcapInterface, filter string, isOfflin
 	cleanup()
 }
 
-// processHTTPPackets processes packets from the channel.
-func processHTTPPackets(packetChan <-chan capture.PacketInfo, asm *pipeline.ReassemblyEngine, offline bool) {
-	kind := pipeline.SourceLiveCapture
-	if offline {
-		kind = pipeline.SourcePCAPReplay
-	}
-	captureadapter.ForEach(packetChan, kind, func(env *pipeline.PacketEnvelope) { processHTTPEnvelope(env, asm) })
-}
-
 func processHTTPEnvelope(env *pipeline.PacketEnvelope, asm *pipeline.ReassemblyEngine) {
-	for _, pktInfo := range []capture.PacketInfo{captureadapter.ToPacketInfo(env)} {
-		packet := pktInfo.Packet
+	pktInfo := captureadapter.ToPacketInfo(env)
+	packet := pktInfo.Packet
 
-		// Feed TCP packets to assembler
-		netLayer := packet.NetworkLayer()
-		if netLayer == nil {
-			continue
-		}
-
-		tcpLayer := packet.Layer(layers.LayerTypeTCP)
-		if tcpLayer == nil {
-			continue
-		}
-
-		if _, ok := tcpLayer.(*layers.TCP); !ok {
-			continue
-		}
-
-		// Feed to assembler for reassembly
-		if err := asm.Assemble(env); err != nil {
-			logger.Error("Failed to assemble HTTP TCP packet", "error", err)
-		}
-
-		// Write to PCAP if configured
-		if httpPacketSink != nil {
-			if result := httpPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
-				logger.Error("HTTP PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
-			}
-		}
+	// Feed TCP packets to assembler
+	netLayer := packet.NetworkLayer()
+	if netLayer == nil {
+		return
 	}
 
+	tcpLayer := packet.Layer(layers.LayerTypeTCP)
+	if tcpLayer == nil {
+		return
+	}
+
+	if _, ok := tcpLayer.(*layers.TCP); !ok {
+		return
+	}
+
+	// Feed to assembler for reassembly
+	if err := asm.Assemble(env); err != nil {
+		logger.Error("Failed to assemble HTTP TCP packet", "error", err)
+	}
+
+	// Write to PCAP if configured
+	if httpPacketSink != nil {
+		if result := httpPacketSink.HandlePacket(context.Background(), env); result.Err != nil {
+			logger.Error("HTTP PCAP sink failed", "outcome", result.Outcome, "error", result.Err)
+		}
+	}
 }
 
 // buildContentFilterConfig builds content filter config from viper.

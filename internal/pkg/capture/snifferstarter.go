@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/capture/pcaptypes"
@@ -72,71 +71,6 @@ func StartOfflineSnifferOrdered(readFiles []string, filter string, startSniffer 
 
 	// Run the sniffer (blocks until complete)
 	startSniffer(devices, filter)
-}
-
-func StartOfflineSniffer(readFiles []string, filter string, startSniffer func(devices []pcaptypes.PcapInterface, filter string)) {
-	if len(readFiles) == 0 {
-		logger.Error("No files provided for offline capture")
-		return
-	}
-
-	// Open all files and create interfaces
-	var files []*os.File
-	var devices []pcaptypes.PcapInterface
-
-	for _, readFile := range readFiles {
-		// #nosec G304 -- readFile is from CLI positional args, intentional user-specified path
-		file, err := os.Open(readFile)
-		if err != nil {
-			logger.Error("Could not read file",
-				"file", readFile,
-				"error", err)
-			// Close any files we already opened
-			for _, f := range files {
-				f.Close()
-			}
-			return
-		}
-		files = append(files, file)
-		devices = append(devices, pcaptypes.CreateOfflineInterface(file))
-	}
-
-	// Log multi-file capture info
-	if len(readFiles) > 1 {
-		logger.Info("Starting multi-file offline capture",
-			"file_count", len(readFiles),
-			"files", readFiles)
-	}
-
-	// Create a context with timeout to prevent indefinite blocking
-	// Scale timeout with number of files
-	timeout := time.Duration(len(readFiles)) * 5 * time.Minute
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	// Ensure all files are closed when done
-	defer func() {
-		for _, f := range files {
-			f.Close()
-		}
-	}()
-
-	// Run startSniffer in a goroutine with context monitoring
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		startSniffer(devices, filter)
-	}()
-
-	// Wait for completion or timeout
-	select {
-	case <-done:
-		// Completed normally
-	case <-ctx.Done():
-		logger.Error("Offline sniffer timed out, forcing cleanup",
-			"files", readFiles,
-			"error", ctx.Err())
-	}
 }
 
 // RunWithSignalHandler runs the capture in background and handles signals for graceful shutdown
@@ -209,95 +143,11 @@ func checkCapturePermissions(devices []pcaptypes.PcapInterface) bool {
 	return hasPermission
 }
 
-// RunOffline runs the capture for offline PCAP files and exits when complete
-// Unlike RunWithSignalHandler, this cancels the context when all packets are read
-func RunOffline(devices []pcaptypes.PcapInterface, filter string,
-	processor func(<-chan PacketInfo)) {
-
-	// For offline mode, we use a custom implementation that detects EOF
-	// and cancels the context to trigger cleanup
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Create buffer
-	bufferSize := getPacketBufferSize()
-	packetBuffer := NewPacketBuffer(ctx, bufferSize)
-	defer packetBuffer.Close()
-
-	// Create a single shared IPv4 defragmenter for all interfaces.
-	// This is critical for multi-interface capture: IP fragments from the same
-	// packet may arrive on different interfaces (e.g., due to port mirror splits).
-	sharedDefragmenter := NewIPv4Defragmenter()
-
-	// Shared IPv6 defragmenter — gopacket has no built-in IPv6 reassembly,
-	// so without this a fragmented IPv6 SIP INVITE is dropped.
-	sharedV6Defragmenter := NewIPv6Defragmenter()
-
-	// Track if any capture succeeded (for error handling)
-	var captureSuccessCount atomic.Int32
-
-	// Start capture goroutines
-	var captureWg sync.WaitGroup
-	for _, iface := range devices {
-		captureWg.Add(1)
-		go func(pif pcaptypes.PcapInterface) {
-			defer captureWg.Done()
-
-			err := pif.SetHandle()
-			if err != nil {
-				logger.Error("Error setting pcap handle", "error", err, "interface", pif.Name())
-				return
-			}
-			handle, err := pif.Handle()
-			if err != nil || handle == nil {
-				logger.Error("Error getting pcap handle", "error", err, "interface", pif.Name())
-				return
-			}
-			defer handle.Close()
-
-			// Mark that at least one capture succeeded
-			captureSuccessCount.Add(1)
-
-			captureFromInterface(ctx, pif, filter, packetBuffer, sharedDefragmenter, sharedV6Defragmenter)
-		}(iface)
-	}
-
-	// Start processor
-	var processorWg sync.WaitGroup
-	processorWg.Add(1)
-	go func() {
-		defer processorWg.Done()
-		processor(packetBuffer.Receive())
-	}()
-
-	// Wait for all capture goroutines to finish (EOF reached)
-	captureWg.Wait()
-
-	// If no captures succeeded, all goroutines failed (likely permission error)
-	// Exit immediately without waiting for signal
-	if captureSuccessCount.Load() == 0 {
-		logger.Error("All capture interfaces failed to start - exiting")
-		// Close buffer immediately so processor can exit
-		packetBuffer.Close()
-		processorWg.Wait()
-		return
-	}
-
-	// Stop accepting input while allowing the merger to drain both the regular
-	// and SIP-priority queues. Close() cancels the buffer context immediately and
-	// can discard the last packets of a short offline capture at EOF.
-	packetBuffer.CloseInputs()
-
-	// Wait for processor to finish draining
-	processorWg.Wait()
-}
-
 // RunOfflineOrdered reads all packets from multiple PCAP files, sorts them by timestamp,
 // and processes them in chronological order. This is essential for VoIP analysis where
 // SIP signaling must be processed before corresponding RTP packets to establish call mappings.
 //
-// Unlike RunOffline which processes files in parallel (non-deterministic order),
-// this function ensures proper temporal ordering across all files.
+// It ensures proper temporal ordering across all files.
 func RunOfflineOrdered(devices []pcaptypes.PcapInterface, filter string,
 	processor func(<-chan PacketInfo)) {
 

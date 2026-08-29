@@ -783,6 +783,11 @@ and validates packet and pattern capacities. Backend-selection tests no longer
 assume CUDA is absent. The CUDA matrix now runs the GPU package tests, and the
 full CUDA suite passes on an NVIDIA RTX 4090.
 
+Dead-code remediation (2026-08-29): removed the unreferenced SIP Call-ID CUDA
+kernel and exported launch wrapper from the protocol-neutral GPU library. The
+library now exports only the generic linear and Aho-Corasick matching entry
+points used by production code.
+
 ### Exit Criteria
 
 - The VoIP package contains SIP/RTP/SDP analysis and integration, not generic

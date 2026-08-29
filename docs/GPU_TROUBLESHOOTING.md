@@ -135,10 +135,10 @@ go run test_cuda_basic.go
 ### 3. Run GPU Tests
 ```bash
 # Test SIMD backend (always works)
-go test ./internal/pkg/voip/ -run TestSIMD -v
+go test ./internal/pkg/gpuaccel/ -run TestSIMD -v
 
 # Test CUDA backend (requires GPU)
-cd internal/pkg/voip
+cd internal/pkg/gpuaccel
 go test -tags cuda -run TestCUDA -v
 ```
 
@@ -187,7 +187,7 @@ Once GPU is accessible:
 
 ```bash
 # Compile CUDA kernels
-cd internal/pkg/voip
+cd internal/pkg/gpuaccel
 make -f Makefile.cuda
 
 # Build lippycat with CUDA support

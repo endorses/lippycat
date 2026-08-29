@@ -9,8 +9,8 @@ import (
 	"github.com/endorses/lippycat/api/gen/management"
 	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
 	"github.com/endorses/lippycat/internal/pkg/filtering"
+	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	"github.com/endorses/lippycat/internal/pkg/phonematcher"
-	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -549,10 +549,10 @@ To: <sip:dest@example.com>
 // This verifies that SIPURI matching via GPU works correctly using a separate named automaton.
 func TestMatchWithGPU_SIPURINamedAutomaton(t *testing.T) {
 	// Create an ApplicationFilter with GPU enabled (SIMD backend)
-	config := &voip.GPUConfig{
+	config := &gpuaccel.GPUConfig{
 		Enabled:          true,
 		Backend:          "cpu-simd",
-		PatternAlgorithm: voip.PatternAlgorithmAhoCorasick,
+		PatternAlgorithm: gpuaccel.PatternAlgorithmAhoCorasick,
 	}
 
 	af, err := NewApplicationFilter(config)

@@ -1,13 +1,81 @@
 //go:build cuda
 
-package voip
+package gpuaccel
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/endorses/lippycat/internal/pkg/ahocorasick"
+	"github.com/endorses/lippycat/internal/pkg/filtering"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newTestCUDABackend(t *testing.T, maxBatchSize int) *CUDABackendImpl {
+	t.Helper()
+	backend := NewCUDABackendImpl()
+	if !backend.IsAvailable() {
+		t.Skip("CUDA not available")
+	}
+	config := DefaultGPUConfig()
+	config.MaxBatchSize = maxBatchSize
+	require.NoError(t, backend.Initialize(config))
+	t.Cleanup(func() { require.NoError(t, backend.Cleanup()) })
+	return backend
+}
+
+func TestCUDABackend_AhoCorasickSemantics(t *testing.T) {
+	backend := newTestCUDABackend(t, 16)
+	patterns := []ahocorasick.Pattern{
+		{ID: 101, Text: "alice", Type: filtering.PatternTypeContains},
+		{ID: 205, Text: "+49", Type: filtering.PatternTypePrefix},
+		{ID: 307, Text: "example.com", Type: filtering.PatternTypeSuffix},
+		{ID: 409, Text: "he", Type: filtering.PatternTypeContains},
+		{ID: 503, Text: "she", Type: filtering.PatternTypeContains},
+		{ID: 601, Text: "alice", Type: filtering.PatternTypeContains},
+	}
+	require.NoError(t, backend.BuildAutomaton(patterns))
+
+	inputs := [][]byte{
+		[]byte("ALICE-alice@example.com"), // case fold, repeated match, suffix
+		[]byte("x+49-middle"),             // prefix false positive
+		[]byte("+49123"),                  // valid prefix
+		[]byte("example.com.invalid"),     // suffix false positive
+		[]byte("she"),                     // failure-link output: she and he
+		{},
+	}
+	results, err := backend.MatchUsernames(inputs)
+	require.NoError(t, err)
+	require.Len(t, results, len(inputs))
+	assert.ElementsMatch(t, []int{101, 601, 307}, results[0])
+	assert.Empty(t, results[1])
+	assert.Equal(t, []int{205}, results[2])
+	assert.Empty(t, results[3])
+	assert.ElementsMatch(t, []int{503, 409}, results[4])
+	assert.Empty(t, results[5])
+}
+
+func TestCUDABackend_AhoCorasickDistinctMatchLimit(t *testing.T) {
+	backend := newTestCUDABackend(t, 2)
+	patterns := make([]ahocorasick.Pattern, 20)
+	input := make([]byte, 0, 100)
+	for i := range patterns {
+		text := fmt.Sprintf("p%02d", i)
+		patterns[i] = ahocorasick.Pattern{ID: 1000 + i, Text: text, Type: filtering.PatternTypeContains}
+		input = append(input, text...)
+	}
+	require.NoError(t, backend.BuildAutomaton(patterns))
+
+	results, err := backend.MatchUsernames([][]byte{input, make([]byte, 200)})
+	require.NoError(t, err)
+	require.Len(t, results[0], 16)
+	for i := range 16 {
+		assert.Contains(t, results[0], 1000+i)
+	}
+	assert.Empty(t, results[1])
+	assert.GreaterOrEqual(t, backend.usernameBufferCapacity, len(input)+200)
+}
 
 func TestCUDABackend_Available(t *testing.T) {
 	backend := NewCUDABackendImpl()

@@ -5,6 +5,7 @@ Thank you for your interest in contributing to lippycat! This document provides 
 ## Table of Contents
 
 - [Code Style](#code-style)
+- [Pipeline Architecture](#pipeline-architecture)
 - [Error Handling](#error-handling)
 - [Testing](#testing)
 - [Pull Request Process](#pull-request-process)
@@ -17,6 +18,33 @@ Thank you for your interest in contributing to lippycat! This document provides 
 - Run `golangci-lint` to check for common issues
 - Keep functions focused and under 50 lines when possible
 - Add comments for exported functions and types (godoc format)
+
+## Pipeline Architecture
+
+Packet-processing commands share a normalized pipeline. Capture and gRPC
+adapters produce `pipeline.PacketEnvelope` values, protocol stages enrich those
+envelopes, and topology-specific sinks deliver CLI/TUI output, PCAP data, gRPC
+batches, or authorized LI events. Keep Cobra flags and Viper bindings in command
+packages; reusable processing and lifecycle ownership belong under
+`internal/pkg`.
+
+The primary package boundaries are:
+
+- `internal/pkg/pipeline`: protocol-neutral packet, provenance, stage, and sink
+  contracts.
+- `internal/pkg/capture`: live/PCAP ingress and bounded TCP reassembly ownership.
+- `internal/pkg/processor/source`: local and gRPC processor ingress adapters.
+- `internal/pkg/voip`: SIP, SDP, RTP, and VoIP call integration.
+- `internal/pkg/gpuaccel`: protocol-neutral CUDA, SIMD, and fallback matching
+  backends. Preserve the paired `cuda`/`!cuda` build constraints when changing
+  this package.
+
+Before adding a new buffer, pool, metric collector, compatibility adapter, or
+writer, search for an existing protocol-neutral owner. New abstractions should
+have at least two production consumers. When deleting a migration shim or
+alternative implementation, verify that it has no production call sites across
+all build tags and run the supported build/test matrix; tests alone may be its
+only remaining caller and do not prove production use.
 
 ## Error Handling
 

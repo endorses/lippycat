@@ -749,13 +749,32 @@ Leave packages aligned with their responsibilities after migration.
 
 ### Tasks
 
-- [ ] Move protocol-neutral GPU backends out of the VoIP package while preserving
+- [x] Move protocol-neutral GPU backends out of the VoIP package while preserving
       CUDA/non-CUDA build constraints.
-- [ ] Move or fold generic pools into protocol-neutral owners.
-- [ ] Remove orphaned buffer strategies, duplicate metrics, compatibility shims,
+- [x] Move or fold generic pools into protocol-neutral owners.
+- [x] Remove orphaned buffer strategies, duplicate metrics, compatibility shims,
       and unused writer implementations.
-- [ ] Verify removals with production-call searches, all build tags, and tests.
-- [ ] Update architecture, command, and contributor documentation.
+- [x] Verify removals with production-call searches, all build tags, and tests.
+- [x] Update architecture, command, and contributor documentation.
+
+Implementation verification (2026-08-29): moved CUDA, OpenCL, SIMD, and generic
+GPU orchestration from `internal/pkg/voip` to the protocol-neutral
+`internal/pkg/gpuaccel` package, preserving the paired CUDA and architecture
+build constraints. Hunter and tap filtering now consume that package directly.
+Removed the orphaned placeholder batch pipeline and its generic packet/call-info
+pools; capture-engine buffers now have explicit ownership. Production-call
+searches retained the active TCP buffer strategies, TUI PCAP writers, TCP
+metrics, and processor compatibility boundary while removing an unreferenced
+TCP buffer accessor. Architecture, command, contributor, and GPU operator
+documentation now describe the normalized package boundaries.
+
+CUDA verification also repaired the previously missing exported Aho-Corasick
+kernel. The implementation preserves case-insensitive matching, public pattern
+IDs, prefix/suffix semantics, failure-link outputs, distinct-match limits, and
+duplicate suppression; grows flattened input storage safely; and serializes
+shared CUDA automaton/buffer access. The rebuilt shared library exports both
+matching entry points. `make test`, CUDA-tagged and race tests, and
+`make build-matrix-cuda` pass.
 
 ### Exit Criteria
 

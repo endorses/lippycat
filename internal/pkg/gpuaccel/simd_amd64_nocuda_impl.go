@@ -1,6 +1,6 @@
 //go:build amd64 && !cuda
 
-package voip
+package gpuaccel
 
 // Non-CUDA implementations of SIMD functions
 // When building without CUDA, these are TODO assembly implementations

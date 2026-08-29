@@ -23,7 +23,6 @@ type CaptureEngine struct {
 	cancel     context.CancelFunc
 	stats      CaptureStats
 	running    atomic.Bool
-	bufferPool *BufferPool
 }
 
 // CaptureConfig configures the capture engine
@@ -102,7 +101,6 @@ func NewCaptureEngine(config *CaptureConfig) (*CaptureEngine, error) {
 		packetChan: make(chan []byte, config.BufferSize),
 		ctx:        ctx,
 		cancel:     cancel,
-		bufferPool: GetBufferPool(),
 	}
 
 	// Try to initialize capture
@@ -233,8 +231,7 @@ func (ce *CaptureEngine) captureLoopXDP() {
 			ce.stats.BytesReceived.Add(uint64(len(pkt)))
 
 			// Copy packet data (in production, might use zero-copy)
-			pktCopy := ce.bufferPool.Get(len(pkt))
-			pktCopy = append(pktCopy, pkt...)
+			pktCopy := append([]byte(nil), pkt...)
 
 			select {
 			case ce.packetChan <- pktCopy:

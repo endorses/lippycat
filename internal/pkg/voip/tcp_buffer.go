@@ -275,31 +275,6 @@ func peekFirstTCPBufferedPacket(netFlow, transportFlow gopacket.Flow) (capture.P
 	return reconstructPacket(buffer.packets[0]), true
 }
 
-// getTCPBufferedPackets returns buffered packets for a flow without clearing them
-// Used by hunter mode to forward packets to processor
-func getTCPBufferedPackets(netFlow, transportFlow gopacket.Flow) []capture.PacketInfo {
-	key := newTCPBufferKey(netFlow, transportFlow)
-
-	tcpPacketBuffersMu.Lock()
-	defer tcpPacketBuffersMu.Unlock()
-
-	buffer, exists := tcpPacketBuffers[key]
-	if !exists || len(buffer.packets) == 0 {
-		return nil
-	}
-
-	// Reconstruct PacketInfo for each buffered frame
-	packets := make([]capture.PacketInfo, len(buffer.packets))
-	for i, frame := range buffer.packets {
-		packets[i] = reconstructPacket(frame)
-	}
-
-	delete(tcpPacketBuffers, key)
-	releaseBuffer(buffer)
-
-	return packets
-}
-
 // discardTCPBufferedPackets removes buffered packets for a flow without writing them
 // Used when SIP message doesn't match filter
 func discardTCPBufferedPackets(netFlow, transportFlow gopacket.Flow) {

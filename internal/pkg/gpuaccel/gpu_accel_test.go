@@ -1,9 +1,9 @@
-package voip
+package gpuaccel
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/google/gopacket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -114,7 +114,7 @@ func TestGPUAccelerator_ExtractCallIDsGPU(t *testing.T) {
 		[]byte("REGISTER sip:proxy SIP/2.0\r\ni: short123\r\n"),
 	}
 
-	callIDs, err := ga.ExtractCallIDsGPU(packets)
+	callIDs, err := extractCallIDsForTest(ga, packets)
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, len(callIDs))
@@ -269,8 +269,7 @@ func TestGPUPattern_String(t *testing.T) {
 	assert.Contains(t, str, "test")
 }
 
-// Integration test with batch processor
-func TestGPUAccelerator_WithBatchProcessor(t *testing.T) {
+func TestGPUAccelerator_ExtractCallIDs(t *testing.T) {
 	// Create GPU accelerator
 	gpuConfig := DefaultGPUConfig()
 	gpuConfig.Enabled = true
@@ -279,42 +278,11 @@ func TestGPUAccelerator_WithBatchProcessor(t *testing.T) {
 	require.NoError(t, err)
 	defer ga.Close()
 
-	// Create batch processor
-	batchConfig := DefaultBatchConfig()
-	batchConfig.BatchSize = 4
-	batchConfig.WorkerAffinity = false
-
-	bp := NewBatchProcessor(batchConfig)
-	defer bp.Stop()
-
-	// Consume results
-	go func() {
-		for range bp.GetResults() {
-			// Discard
-		}
-	}()
-
-	// Create batch collector
-	bc := NewBatchCollector(batchConfig, bp)
-
-	// Add packets
 	sipPackets := []string{
 		"INVITE sip:bob@example.com SIP/2.0\r\nCall-ID: call1\r\n",
 		"SIP/2.0 200 OK\r\nCall-ID: call2\r\n",
 		"ACK sip:bob@example.com SIP/2.0\r\nCall-ID: call3\r\n",
 		"BYE sip:bob@example.com SIP/2.0\r\nCall-ID: call4\r\n",
-	}
-
-	for i, sipData := range sipPackets {
-		pkt := GetPacketPool().Get()
-		pkt.Data = []byte(sipData)
-
-		ci := gopacket.CaptureInfo{
-			CaptureLength: len(pkt.Data),
-			Length:        len(pkt.Data),
-		}
-
-		bc.Add(pkt, ci, uint32(i))
 	}
 
 	// Extract Call-IDs using GPU
@@ -323,7 +291,7 @@ func TestGPUAccelerator_WithBatchProcessor(t *testing.T) {
 		packets[i] = []byte(data)
 	}
 
-	callIDs, err := ga.ExtractCallIDsGPU(packets)
+	callIDs, err := extractCallIDsForTest(ga, packets)
 	require.NoError(t, err)
 
 	assert.Equal(t, 4, len(callIDs))
@@ -383,8 +351,39 @@ func BenchmarkGPUAccelerator_ExtractCallIDs(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, _ = ga.ExtractCallIDsGPU(packets)
+		_, _ = extractCallIDsForTest(ga, packets)
 	}
+}
+
+func extractCallIDsForTest(ga *GPUAccelerator, packets [][]byte) ([]string, error) {
+	patterns := []GPUPattern{
+		{ID: 0, Pattern: []byte("Call-ID:"), PatternLen: 8, Type: PatternTypeContains},
+		{ID: 1, Pattern: []byte("\ni:"), PatternLen: 3, Type: PatternTypeContains},
+	}
+	results, err := ga.ProcessBatch(packets, patterns)
+	if err != nil {
+		return nil, err
+	}
+	callIDs := make([]string, 0, len(results))
+	seen := make(map[int]bool)
+	for _, result := range results {
+		if !result.Matched || seen[result.PacketIndex] {
+			continue
+		}
+		seen[result.PacketIndex] = true
+		packet := string(packets[result.PacketIndex])
+		for _, marker := range []string{"Call-ID:", "\ni:"} {
+			if start := strings.Index(packet, marker); start >= 0 {
+				value := packet[start+len(marker):]
+				if end := strings.IndexAny(value, "\r\n"); end >= 0 {
+					value = value[:end]
+				}
+				callIDs = append(callIDs, strings.TrimSpace(value))
+				break
+			}
+		}
+	}
+	return callIDs, nil
 }
 
 func BenchmarkMatchPattern_Literal(b *testing.B) {

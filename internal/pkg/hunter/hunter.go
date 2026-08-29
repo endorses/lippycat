@@ -10,6 +10,7 @@ import (
 
 	"github.com/endorses/lippycat/api/gen/data"
 	"github.com/endorses/lippycat/internal/pkg/capture"
+	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	huntercapture "github.com/endorses/lippycat/internal/pkg/hunter/capture"
 	"github.com/endorses/lippycat/internal/pkg/hunter/connection"
 	"github.com/endorses/lippycat/internal/pkg/hunter/filtering"
@@ -17,7 +18,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/hunter/stats"
 	"github.com/endorses/lippycat/internal/pkg/logger"
 	"github.com/endorses/lippycat/internal/pkg/sysmetrics"
-	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/spf13/viper"
@@ -177,9 +177,9 @@ func (h *Hunter) Start(ctx context.Context) error {
 
 	// Initialize application filter (always, for hot-reload support)
 	// GPU acceleration is only enabled if VoIP filtering is enabled
-	var gpuConfig *voip.GPUConfig
+	var gpuConfig *gpuaccel.GPUConfig
 	if h.config.EnableVoIPFilter {
-		gpuConfig = &voip.GPUConfig{
+		gpuConfig = &gpuaccel.GPUConfig{
 			Enabled:      true,
 			DeviceID:     0,
 			Backend:      h.config.GPUBackend,
@@ -189,7 +189,7 @@ func (h *Hunter) Start(ctx context.Context) error {
 		}
 	} else {
 		// CPU-only mode (no GPU acceleration)
-		gpuConfig = &voip.GPUConfig{
+		gpuConfig = &gpuaccel.GPUConfig{
 			Enabled: false,
 		}
 	}

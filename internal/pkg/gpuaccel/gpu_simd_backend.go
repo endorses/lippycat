@@ -1,4 +1,4 @@
-package voip
+package gpuaccel
 
 import (
 	"fmt"
@@ -28,9 +28,9 @@ type SIMDBackend struct {
 
 // SIMDBackendStats holds SIMD backend statistics
 type SIMDBackendStats struct {
-	ProcessingTimeNS PaddedCounter
-	PacketsProcessed PaddedCounter
-	PatternsMatched  PaddedCounter
+	ProcessingTimeNS counter
+	PacketsProcessed counter
+	PatternsMatched  counter
 }
 
 // NewSIMDBackend creates a new SIMD-optimized CPU backend
@@ -168,7 +168,7 @@ func (sb *SIMDBackend) matchLiteralSIMD(data []byte, pattern GPUPattern) (bool, 
 	}
 
 	// Use SIMD-optimized BytesEqual
-	if BytesEqual(data, pattern.Pattern) {
+	if BytesEqualSIMD(data, pattern.Pattern) {
 		return true, 0
 	}
 
@@ -182,7 +182,7 @@ func (sb *SIMDBackend) matchPrefixSIMD(data []byte, pattern GPUPattern) (bool, i
 	}
 
 	// Use SIMD-optimized comparison
-	if BytesEqual(data[:pattern.PatternLen], pattern.Pattern) {
+	if BytesEqualSIMD(data[:pattern.PatternLen], pattern.Pattern) {
 		return true, 0
 	}
 
@@ -199,7 +199,7 @@ func (sb *SIMDBackend) matchSuffixSIMD(data []byte, pattern GPUPattern) (bool, i
 	offset := len(data) - pattern.PatternLen
 
 	// Use SIMD-optimized comparison on last N bytes
-	if BytesEqual(data[offset:], pattern.Pattern) {
+	if BytesEqualSIMD(data[offset:], pattern.Pattern) {
 		return true, offset
 	}
 
@@ -213,7 +213,7 @@ func (sb *SIMDBackend) matchContainsSIMD(data []byte, pattern GPUPattern) (bool,
 	}
 
 	// Use SIMD-optimized BytesContains for quick check
-	if !BytesContains(data, pattern.Pattern) {
+	if !BytesContainsSIMD(data, pattern.Pattern) {
 		return false, -1
 	}
 
@@ -265,7 +265,7 @@ func (sb *SIMDBackend) findOffsetScalar(data, pattern []byte) (bool, int) {
 		}
 
 		// Full comparison using SIMD-optimized BytesEqual
-		if BytesEqual(data[i:i+patternLen], pattern) {
+		if BytesEqualSIMD(data[i:i+patternLen], pattern) {
 			return true, i
 		}
 	}
@@ -490,77 +490,6 @@ func (mps *MultiPatternSearch) Search(data []byte) []GPUResult {
 	}
 
 	return results
-}
-
-// SIMDCallIDExtractor extracts Call-IDs using SIMD acceleration
-type SIMDCallIDExtractor struct {
-	backend  *SIMDBackend
-	patterns []GPUPattern
-}
-
-// NewSIMDCallIDExtractor creates a SIMD-accelerated Call-ID extractor
-func NewSIMDCallIDExtractor() *SIMDCallIDExtractor {
-	backend := NewSIMDBackend().(*SIMDBackend)
-	_ = backend.Initialize(DefaultGPUConfig())
-
-	patterns := []GPUPattern{
-		{
-			ID:         0,
-			Pattern:    []byte("Call-ID:"),
-			PatternLen: 8,
-			Type:       PatternTypeContains,
-		},
-		{
-			ID:         1,
-			Pattern:    []byte("\ni:"),
-			PatternLen: 3,
-			Type:       PatternTypeContains,
-		},
-	}
-
-	return &SIMDCallIDExtractor{
-		backend:  backend,
-		patterns: patterns,
-	}
-}
-
-// ExtractCallIDs extracts Call-IDs from packet batch
-func (sce *SIMDCallIDExtractor) ExtractCallIDs(packets [][]byte) ([]string, error) {
-	// Transfer packets
-	if err := sce.backend.TransferPacketsToGPU(packets); err != nil {
-		return nil, err
-	}
-
-	// Execute pattern matching
-	if err := sce.backend.ExecutePatternMatching(sce.patterns); err != nil {
-		return nil, err
-	}
-
-	// Get results
-	results, err := sce.backend.TransferResultsFromGPU()
-	if err != nil {
-		return nil, err
-	}
-
-	// Extract Call-IDs from matched packets
-	callIDs := make([]string, 0)
-	seen := make(map[int]bool)
-
-	for _, result := range results {
-		if !result.Matched || seen[result.PacketIndex] {
-			continue
-		}
-
-		seen[result.PacketIndex] = true
-		packet := packets[result.PacketIndex]
-
-		// Use fast extraction
-		if callID := extractCallIDFast(packet); callID != "" {
-			callIDs = append(callIDs, callID)
-		}
-	}
-
-	return callIDs, nil
 }
 
 // String returns a string representation of the pattern

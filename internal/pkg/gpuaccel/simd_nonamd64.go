@@ -1,6 +1,6 @@
 //go:build !amd64
 
-package voip
+package gpuaccel
 
 // CPUFeatures holds detected CPU capabilities
 // On non-amd64 platforms, all x86-specific features are false

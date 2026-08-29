@@ -1,4 +1,4 @@
-package voip
+package gpuaccel
 
 import (
 	"testing"
@@ -343,7 +343,8 @@ func TestSIMDBackend_SuffixMatching(t *testing.T) {
 }
 
 func TestSIMDCallIDExtractor(t *testing.T) {
-	extractor := NewSIMDCallIDExtractor()
+	accelerator, err := NewGPUAccelerator(DefaultGPUConfig())
+	require.NoError(t, err)
 
 	packets := [][]byte{
 		[]byte("INVITE sip:robb@example.com SIP/2.0\r\nCall-ID: abc123\r\n"),
@@ -352,7 +353,7 @@ func TestSIMDCallIDExtractor(t *testing.T) {
 		[]byte("No Call-ID here"),
 	}
 
-	callIDs, err := extractor.ExtractCallIDs(packets)
+	callIDs, err := extractCallIDsForTest(accelerator, packets)
 	require.NoError(t, err)
 
 	assert.Equal(t, 3, len(callIDs))
@@ -579,7 +580,8 @@ func BenchmarkSIMDBackend_PatternMatching(b *testing.B) {
 }
 
 func BenchmarkSIMDCallIDExtractor(b *testing.B) {
-	extractor := NewSIMDCallIDExtractor()
+	accelerator, err := NewGPUAccelerator(DefaultGPUConfig())
+	require.NoError(b, err)
 
 	packets := make([][]byte, 64)
 	for i := 0; i < 64; i++ {
@@ -590,7 +592,7 @@ func BenchmarkSIMDCallIDExtractor(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		_, _ = extractor.ExtractCallIDs(packets)
+		_, _ = extractCallIDsForTest(accelerator, packets)
 	}
 }
 

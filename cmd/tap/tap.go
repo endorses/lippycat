@@ -16,6 +16,7 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/debugserver"
+	"github.com/endorses/lippycat/internal/pkg/gpuaccel"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logflags"
 	"github.com/endorses/lippycat/internal/pkg/logger"
@@ -23,7 +24,6 @@ import (
 	"github.com/endorses/lippycat/internal/pkg/processor/filtering"
 	"github.com/endorses/lippycat/internal/pkg/processor/source"
 	"github.com/endorses/lippycat/internal/pkg/signals"
-	"github.com/endorses/lippycat/internal/pkg/voip"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -690,17 +690,17 @@ func runTap(cmd *cobra.Command, args []string) error {
 // This is a shared helper for all tap subcommands to avoid duplication.
 // The gpuConfig parameter controls GPU acceleration for VoIP filtering.
 func createApplicationFilter(gpuConfig GPUConfig) (*hunter.ApplicationFilter, error) {
-	// Convert tap GPUConfig to voip.GPUConfig
-	var voipGPUConfig *voip.GPUConfig
+	// Convert tap GPUConfig to gpuaccel.GPUConfig.
+	var acceleratorConfig *gpuaccel.GPUConfig
 	if gpuConfig.EnableVoIPFilter {
-		voipGPUConfig = &voip.GPUConfig{
+		acceleratorConfig = &gpuaccel.GPUConfig{
 			Enabled:      true,
 			Backend:      gpuConfig.GPUBackend,
 			MaxBatchSize: gpuConfig.GPUBatchSize,
 		}
 	}
 
-	appFilter, err := hunter.NewApplicationFilter(voipGPUConfig)
+	appFilter, err := hunter.NewApplicationFilter(acceleratorConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create application filter: %w", err)
 	}

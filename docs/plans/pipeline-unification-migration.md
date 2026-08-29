@@ -638,6 +638,19 @@ semantic CLI/TUI fixtures, and the supported non-CUDA build matrix pass. The
 24-hour and large-traffic soak tests remain release qualification activities
 under the plan's Soak Tests section.
 
+Remediation verification (2026-08-29): removed the remaining polling sniff
+completion monitor and its compatibility observer path. Call completion now
+uses generation-safe lifecycle timers owned by the call registry, preserving
+the trailing-RTP grace period without a global monitor. VoIP virtual-interface
+delivery is an explicit normalized packet sink with lifecycle-managed closure,
+and offline VoIP replay bypasses the live flow-sharded queues so it cannot drop
+or reorder packets. The local TUI bridge now composes dedicated SIP reassembly
+and display-admission stages while continuing to publish through the shared
+`EventHandler` adapter. Regression tests cover lifecycle closure and Call-ID
+reuse, normalized VIF delivery, and lossless capture-time-ordered VoIP replay.
+`make test`, focused race tests, and the `all`, `hunter`, `processor`, `tap`,
+`cli`, and `tui` non-CUDA build targets pass.
+
 ### Exit Criteria
 
 - All five modes use normalized ingress and shared pipeline components.

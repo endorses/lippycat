@@ -49,11 +49,6 @@ type CallLifecycleObserver interface {
 	OnCallEnded(*CallInfo) error
 }
 
-type CallStateObserver interface {
-	OnCallAdmitted(callID string)
-	OnCallStateChanged(callID, state string)
-}
-
 type callOutputLifecycleAdapter struct{ output CallOutput }
 
 func (a callOutputLifecycleAdapter) OnCallStarted(call *CallInfo) error {
@@ -121,6 +116,10 @@ func (ct *CallTracker) detachCallLocked(callID string) *CallInfo {
 		return nil
 	}
 	delete(ct.callMap, callID)
+	if timer := ct.completionTimers[callID]; timer != nil {
+		timer.Stop()
+		delete(ct.completionTimers, callID)
+	}
 	delete(ct.pins, callID)
 	if elem := ct.lruIndex[callID]; elem != nil {
 		ct.lruList.Remove(elem)
@@ -162,7 +161,7 @@ type CallTracker struct {
 	config             *Config
 	writePacket        func(string, gopacket.Packet, PacketType) error
 	lifecycleObservers []CallLifecycleObserver
-	stateObservers     []CallStateObserver
+	completionTimers   map[string]*time.Timer // callID -> exact-generation completion timer
 	asyncWriterMu      sync.Mutex
 	asyncWriter        interface{ Stop() error }
 	shuttingDown       atomic.Int32   // Atomic flag: 1 if shutting down, 0 otherwise
@@ -246,17 +245,18 @@ func newCallTracker(config *Config, maxCalls int, output CallOutput) *CallTracke
 		config.MaxEndpointAssociations = maxCalls * 8
 	}
 	tracker := &CallTracker{
-		callMap:        make(map[string]*CallInfo),
-		portToCallID:   make(map[string][]string),
-		lruList:        list.New(),
-		lruIndex:       make(map[string]*list.Element),
-		pins:           make(map[string]int),
-		maxCalls:       maxCalls,
-		janitorCtx:     ctx,
-		janitorCancel:  cancel,
-		janitorStarted: false,
-		config:         config,
-		writePacket:    output.WritePacket,
+		callMap:          make(map[string]*CallInfo),
+		portToCallID:     make(map[string][]string),
+		lruList:          list.New(),
+		lruIndex:         make(map[string]*list.Element),
+		pins:             make(map[string]int),
+		maxCalls:         maxCalls,
+		janitorCtx:       ctx,
+		janitorCancel:    cancel,
+		janitorStarted:   false,
+		config:           config,
+		writePacket:      output.WritePacket,
+		completionTimers: make(map[string]*time.Timer),
 	}
 	if observer, ok := output.(CallLifecycleObserver); ok {
 		tracker.lifecycleObservers = append(tracker.lifecycleObservers, observer)
@@ -339,6 +339,10 @@ func (ct *CallTracker) Shutdown() {
 		// Now safe to close all files
 		ct.lifecycleMu.Lock()
 		ct.mu.Lock()
+		for id, timer := range ct.completionTimers {
+			timer.Stop()
+			delete(ct.completionTimers, id)
+		}
 		calls := make([]*CallInfo, 0, len(ct.callMap))
 		for id, call := range ct.callMap {
 			calls = append(calls, call)
@@ -384,14 +388,37 @@ func (c *CallInfo) SetCallInfoState(newState string) {
 			notifyEnded = true
 		}
 	}
-	observers := append([]CallStateObserver(nil), tracker.stateObservers...)
 	tracker.mu.Unlock()
 	if notifyEnded {
-		// Observer callbacks may inspect tracker state, so invoke them unlocked.
-		for _, observer := range observers {
-			observer.OnCallStateChanged(c.CallID, newState)
-		}
+		tracker.scheduleCallCompletion(c)
 	}
+}
+
+// scheduleCallCompletion keeps the call admitted for a short trailing-media
+// grace period, then removes that exact registry generation. A reused Call-ID
+// can therefore never be closed by an older dialog's completion callback.
+func (ct *CallTracker) scheduleCallCompletion(call *CallInfo) {
+	gracePeriod := ct.config.PCAPGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = 5 * time.Second
+	}
+	ct.mu.Lock()
+	if ct.shuttingDown.Load() != 0 || ct.callMap[call.CallID] != call {
+		ct.mu.Unlock()
+		return
+	}
+	if timer := ct.completionTimers[call.CallID]; timer != nil {
+		timer.Stop()
+	}
+	ct.completionTimers[call.CallID] = time.AfterFunc(gracePeriod, func() {
+		found, err := ct.removeCallIf(call.CallID, call)
+		if err != nil {
+			logger.Error("Failed to complete call lifecycle", "call_id", SanitizeCallIDForLogging(call.CallID), "error", err)
+		} else if found {
+			logger.Debug("Completed call lifecycle", "call_id", SanitizeCallIDForLogging(call.CallID))
+		}
+	})
+	ct.mu.Unlock()
 }
 
 // GetCall retrieves a call owned by this tracker.
@@ -458,7 +485,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 	tracker.mu.Lock()
 	var evicted *CallInfo
 	var admitted bool
-	var stateObservers []CallStateObserver
 	if tracker.shuttingDown.Load() != 0 {
 		tracker.mu.Unlock()
 		return nil
@@ -522,6 +548,10 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 						}
 					}
 					delete(tracker.callMap, oldestCallID)
+					if timer := tracker.completionTimers[oldestCallID]; timer != nil {
+						timer.Stop()
+						delete(tracker.completionTimers, oldestCallID)
+					}
 					tracker.recency.Delete(oldestCallID)
 				}
 				tracker.lruList.Remove(oldest)
@@ -537,7 +567,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 		tracker.callMap[callID] = call
 		tracker.touchCall(callID)
 		admitted = true
-		stateObservers = append([]CallStateObserver(nil), tracker.stateObservers...)
 	} else {
 		tracker.touchCall(callID)
 	}
@@ -572,9 +601,6 @@ func (tracker *CallTracker) getOrCreateCall(callID string, linkType layers.LinkT
 				}
 			}
 			return nil
-		}
-		for _, observer := range stateObservers {
-			observer.OnCallAdmitted(callID)
 		}
 	}
 	return call

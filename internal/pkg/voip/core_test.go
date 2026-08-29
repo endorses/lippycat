@@ -4,6 +4,7 @@ package voip
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +16,42 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type timestampRecordingAssembler struct {
+	mu         sync.Mutex
+	timestamps []time.Time
+}
+
+func (a *timestampRecordingAssembler) AssembleTCP(_ gopacket.Flow, _ *layers.TCP, timestamp time.Time) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.timestamps = append(a.timestamps, timestamp)
+	return nil
+}
+
+func TestStartProcessorOfflineIsLosslessAndCaptureOrdered(t *testing.T) {
+	tracker := TestCallTracker(t)
+	tracker.config.ProcessorWorkers = 4
+	tracker.config.ProcessorWorkerBuffer = 1
+	bufferManager := NewBufferManager(time.Second, 10)
+	defer bufferManager.Close()
+	assembler := &timestampRecordingAssembler{}
+	input := make(chan *pipeline.PacketEnvelope, 32)
+	want := make([]time.Time, 32)
+	for i := range want {
+		packet := createTCPSIPPacket(t, "OPTIONS sip:test@example.com SIP/2.0\r\nCall-ID: ordered\r\nContent-Length: 0\r\n\r\n", "192.0.2.1", "192.0.2.2")
+		info := capture.PacketInfo{Packet: packet, LinkType: layers.LinkTypeEthernet}
+		want[i] = time.Unix(int64(i+1), 0)
+		info.Packet.Metadata().Timestamp = want[i]
+		input <- captureadapter.FromPacketInfo(info, pipeline.SourcePCAPReplay)
+	}
+	close(input)
+
+	startProcessorWithBuffer(tracker, bufferManager, input, assembler, true)
+
+	require.Equal(t, want, assembler.timestamps)
+	require.Nil(t, ProcessorWorkersStats(), "offline replay must not create dropping worker queues")
+}
 
 func TestStartProcessor_UDPHandling(t *testing.T) {
 	// Reset and initialize config for this test

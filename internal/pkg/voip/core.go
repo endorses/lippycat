@@ -56,6 +56,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		callOutput = NewSessionOutputManager(config)
 	}
 	tracker := NewCallTrackerWithOutput(config, callOutput)
+	var packetOutputs *pipeline.PacketFanout
 	defer func() {
 		if err := callOutput.Shutdown(); err != nil {
 			logger.Error("Failed to shut down VoIP session output", "error", err)
@@ -65,32 +66,6 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	logger.InfoContext(ctx, "Starting VoIP sniffer",
 		"device_count", len(devices),
 		"filter", filter)
-
-	// Initialize sniff completion monitor for PCAP file closure when writing is enabled
-	if config.WriteVoIP {
-		gracePeriod := config.PCAPGracePeriod
-		if gracePeriod <= 0 {
-			gracePeriod = 5 * time.Second
-		}
-		closedCallTTL := config.PCAPClosedCallTTL
-		if closedCallTTL <= 0 {
-			closedCallTTL = time.Hour
-		}
-		monitor := NewSniffCompletionMonitor(tracker, &SniffCompletionMonitorConfig{
-			GracePeriod:   gracePeriod,
-			CheckInterval: 1 * time.Second,
-			ClosedCallTTL: closedCallTTL,
-		})
-		tracker.SetCompletionMonitor(monitor)
-		monitor.Start()
-		defer func() {
-			monitor.Stop()
-			tracker.SetCompletionMonitor(nil)
-		}()
-		logger.Info("Sniff completion monitor initialized",
-			"grace_period", gracePeriod,
-			"closed_call_ttl", closedCallTTL)
-	}
 
 	// Initialize virtual interface FIRST if enabled (before processing any packets)
 	// This allows early permission check and avoids wasting time processing packets
@@ -124,7 +99,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 		}
 
 		var err error
-		globalVifMgr, err = vinterface.NewManager(cfg)
+		vifMgr, err := vinterface.NewManager(cfg)
 		if err != nil {
 			// Provide helpful error message for common errors
 			if errors.Is(err, vinterface.ErrPermissionDenied) {
@@ -143,9 +118,8 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 					"interface_name", vifName)
 			}
 			logger.Warn("Continuing without virtual interface")
-			globalVifMgr = nil
 		} else {
-			err = globalVifMgr.Start()
+			err = vifMgr.Start()
 			if err != nil {
 				// Provide helpful error message for common errors
 				if errors.Is(err, vinterface.ErrPermissionDenied) {
@@ -164,17 +138,25 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 						"interface_name", vifName)
 				}
 				logger.Warn("Continuing without virtual interface")
-				globalVifMgr = nil
+				vifMgr = nil
 			}
 		}
 
-		if globalVifMgr != nil {
+		if vifMgr != nil {
 			logger.Info("Virtual interface started successfully",
-				"interface_name", globalVifMgr.Name())
+				"interface_name", vifMgr.Name())
 
 			// Initialize timing replayer for virtual interface
 			replayTiming := config.VIFReplayTiming
-			globalTimingReplay = vinterface.NewTimingReplayer(replayTiming)
+			vifSink := &virtualInterfacePacketSink{manager: vifMgr, timing: vinterface.NewTimingReplayer(replayTiming)}
+			packetOutputs, err = pipeline.NewPacketFanout(pipeline.SinkRegistration{Name: "virtual-interface", Sink: vifSink})
+			if err != nil {
+				logger.Error("Failed to compose VoIP packet sinks", "error", err)
+				if shutdownErr := vifMgr.Shutdown(); shutdownErr != nil {
+					logger.Error("Failed to clean up virtual interface", "error", shutdownErr)
+				}
+				vifMgr = nil
+			}
 
 			// Wait for external tools (tcpdump, Wireshark) to attach
 			startupDelay := config.VIFStartupDelay
@@ -188,17 +170,24 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 
 		// Ensure cleanup on exit
 		defer func() {
-			if globalVifMgr != nil {
-				stats := globalVifMgr.Stats()
+			if vifMgr != nil {
+				stats := vifMgr.Stats()
 				logger.Info("Virtual interface statistics",
 					"packets_injected", stats.PacketsInjected,
 					"packets_dropped", stats.PacketsDropped,
 					"injection_errors", stats.InjectionErrors,
 					"conversion_errors", stats.ConversionErrors)
 
-				if err := globalVifMgr.Shutdown(); err != nil {
-					logger.Error("Error shutting down virtual interface", "error", err)
+				if packetOutputs != nil {
+					if err := packetOutputs.Close(context.Background()); err != nil {
+						logger.Error("Error shutting down virtual interface", "error", err)
+					}
 				} else {
+					if err := vifMgr.Shutdown(); err != nil {
+						logger.Error("Error shutting down virtual interface", "error", err)
+					}
+				}
+				if packetOutputs != nil {
 					logger.Info("Virtual interface shutdown successfully")
 				}
 			}
@@ -210,7 +199,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 	logger.Info("Initialized VoIP buffer manager", "max_age", "5s", "max_size", 200)
 
 	// Create handler for local file writing
-	handler := newLocalFileHandlerWithBuffer(tracker, bufferManager)
+	handler := newLocalFileHandlerWithOutputs(tracker, bufferManager, packetOutputs)
 	streamFactory := NewSipStreamFactoryWithConfig(ctx, handler, *tracker.config, tracker.IsCallActive)
 	// VoIP owns its (connection-aware reassembly) assembler internally rather
 	// than threading it through the shared capture-layer signatures, which stay
@@ -250,7 +239,7 @@ func StartVoipSniffer(devices []pcaptypes.PcapInterface, filter string) {
 				logger.Error("VoIP ingress normalization stopped", "error", err)
 			}
 		}()
-		startProcessorWithBuffer(tracker, bufferManager, envelopes, assembler, isOffline)
+		startProcessorWithBufferAndOutputs(tracker, bufferManager, envelopes, assembler, isOffline, packetOutputs)
 	}
 
 	if isOffline {
@@ -281,15 +270,19 @@ func startProcessor(tracker *CallTracker, ch <-chan *pipeline.PacketEnvelope, as
 
 func startProcessorWithBuffer(tracker *CallTracker, bufferManager *BufferManager, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offlineMode ...bool) {
 	offline := len(offlineMode) > 0 && offlineMode[0]
+	startProcessorWithBufferAndOutputs(tracker, bufferManager, ch, assembler, offline, nil)
+}
+
+func startProcessorWithBufferAndOutputs(tracker *CallTracker, bufferManager *BufferManager, ch <-chan *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offline bool, outputs *pipeline.PacketFanout) {
 
 	// Note: Virtual interface is now initialized in StartVoipSniffer() before packet processing begins
 	// This allows early permission checking and avoids wasting time if permissions are insufficient
 
 	numWorkers := getProcessorWorkerCount(tracker.config)
-	if numWorkers <= 1 {
+	if offline || numWorkers <= 1 {
 		// Single-threaded path (original behaviour / offline-ordered mode).
 		for pkt := range ch {
-			processOnePacket(tracker, bufferManager, pkt, assembler, offline)
+			processOnePacketWithOutputs(tracker, bufferManager, pkt, assembler, offline, outputs)
 		}
 	} else {
 		// Flow-sharded worker pool. Each flow (both directions) is pinned to one
@@ -313,7 +306,7 @@ func startProcessorWithBuffer(tracker *CallTracker, bufferManager *BufferManager
 			go func(in <-chan *pipeline.PacketEnvelope) {
 				defer wg.Done()
 				for pkt := range in {
-					processOnePacket(tracker, bufferManager, pkt, assembler, offline)
+					processOnePacketWithOutputs(tracker, bufferManager, pkt, assembler, offline, outputs)
 				}
 			}(workers[i])
 		}
@@ -369,6 +362,10 @@ func startProcessorWithTracker(tracker *CallTracker, ch <-chan *pipeline.PacketE
 // the same flow are delivered to the same worker (see startProcessor) and shared
 // call/registry/writer state remains mutex-protected.
 func processOnePacket(tracker *CallTracker, bufferManager *BufferManager, env *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offline bool) {
+	processOnePacketWithOutputs(tracker, bufferManager, env, assembler, offline, nil)
+}
+
+func processOnePacketWithOutputs(tracker *CallTracker, bufferManager *BufferManager, env *pipeline.PacketEnvelope, assembler tcpPacketAssembler, offline bool, outputs *pipeline.PacketFanout) {
 	if env == nil {
 		return
 	}
@@ -381,7 +378,7 @@ func processOnePacket(tracker *CallTracker, bufferManager *BufferManager, env *p
 	case *layers.TCP:
 		handleTcpPacketsWithConfig(pkt, layer, assembler, tracker.config, offline)
 	case *layers.UDP:
-		handleUdpPacketsWithManager(tracker, pkt, layer, bufferManager)
+		handleUdpPacketsWithManagerAndOutputs(tracker, pkt, layer, bufferManager, outputs)
 	}
 }
 

@@ -296,7 +296,6 @@ Inherits all `lc sniff` flags, plus:
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--pcap-grace-period` | duration | `5s` | Grace period before closing call PCAP files after call end |
-| `--pcap-closed-call-ttl` | duration | `1h` | Suppress duplicate close handling for completed calls |
 
 See [Chapter 4: CLI Capture with `lc sniff`](../part2-local-capture/sniff.md) and [Chapter 13: Performance Optimization](../part5-advanced/performance.md).
 

@@ -61,8 +61,7 @@ var (
 	tcpSIPIdleTimeout     time.Duration
 
 	// PCAP completion flags
-	pcapGracePeriod   time.Duration
-	pcapClosedCallTTL time.Duration
+	pcapGracePeriod time.Duration
 
 	// Virtual interface flags inherited from parent SniffCmd
 	// (defined in sniff.go as PersistentFlags)
@@ -146,9 +145,6 @@ func voipHandler(cmd *cobra.Command, args []string) {
 	}
 	if cmd.Flags().Changed("pcap-grace-period") {
 		viper.Set("voip.pcap_grace_period", pcapGracePeriod)
-	}
-	if cmd.Flags().Changed("pcap-closed-call-ttl") {
-		viper.Set("voip.pcap_closed_call_ttl", pcapClosedCallTTL)
 	}
 
 	// Virtual interface flags are inherited from parent SniffCmd
@@ -261,9 +257,6 @@ func loadVoIPLibraryConfig() *voip.Config {
 	if value := viper.GetDuration("voip.pcap_grace_period"); value > 0 {
 		cfg.PCAPGracePeriod = value
 	}
-	if value := viper.GetDuration("voip.pcap_closed_call_ttl"); value > 0 {
-		cfg.PCAPClosedCallTTL = value
-	}
 	if value := viper.GetInt("voip.max_goroutines"); value > 0 {
 		cfg.MaxGoroutines = value
 	}
@@ -370,7 +363,6 @@ func init() {
 
 	// PCAP completion flags
 	voipCmd.Flags().DurationVar(&pcapGracePeriod, "pcap-grace-period", 5*time.Second, "Grace period before closing PCAP files after call ends (for trailing RTP)")
-	voipCmd.Flags().DurationVar(&pcapClosedCallTTL, "pcap-closed-call-ttl", time.Hour, "How long to suppress duplicate PCAP close handling for completed calls")
 
 	// Bind GPU flags to viper (only in CUDA builds)
 	BindGPUViperFlags(voipCmd)
@@ -393,7 +385,6 @@ func init() {
 	_ = viper.BindPFlag("voip.memory_optimization", voipCmd.Flags().Lookup("memory-optimization"))
 	_ = viper.BindPFlag("voip.tcp_sip_idle_timeout", voipCmd.Flags().Lookup("tcp-sip-idle-timeout"))
 	_ = viper.BindPFlag("voip.pcap_grace_period", voipCmd.Flags().Lookup("pcap-grace-period"))
-	_ = viper.BindPFlag("voip.pcap_closed_call_ttl", voipCmd.Flags().Lookup("pcap-closed-call-ttl"))
 
 	// Virtual Interface Flags are inherited from parent SniffCmd (sniff.go)
 	// No need to register them here - they're PersistentFlags on the parent

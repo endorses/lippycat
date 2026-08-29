@@ -1,8 +1,13 @@
 package voip
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	"github.com/endorses/lippycat/internal/pkg/types"
 	"github.com/endorses/lippycat/internal/pkg/vinterface"
 	"github.com/endorses/lippycat/internal/pkg/voip/sipusers"
@@ -11,40 +16,40 @@ import (
 // Shared variables and helpers used by both CLI and hunter builds
 
 var (
-	globalBufferMgr    *BufferManager
-	globalVifMgr       vinterface.Manager         // Virtual interface manager for packet injection
-	globalTimingReplay *vinterface.TimingReplayer // Timing replayer for virtual interface
+	globalBufferMgr *BufferManager
 )
 
-// injectPacketToVirtualInterface injects a packet into the virtual interface if enabled
-// This should be called only for confirmed VoIP packets (SIP or RTP)
-// If vif_replay_timing is enabled, respects original PCAP packet timing (like tcpreplay)
-func injectPacketToVirtualInterface(pkt capture.PacketInfo) {
-	if globalVifMgr == nil {
-		return
+// virtualInterfacePacketSink makes optional VoIP virtual-interface output an
+// ordinary normalized packet sink. Selection happens before dispatch; the sink
+// has no knowledge of SIP/RTP or call tracking.
+type virtualInterfacePacketSink struct {
+	manager vinterface.Manager
+	timing  *vinterface.TimingReplayer
+}
+
+func (s *virtualInterfacePacketSink) HandlePacket(_ context.Context, env *pipeline.PacketEnvelope) pipeline.Result {
+	if s.timing != nil {
+		s.timing.WaitForPacketTime(env.CaptureTime)
 	}
-
-	// Handle packet timing replay (respects PCAP timestamps like tcpreplay)
-	if globalTimingReplay != nil {
-		globalTimingReplay.WaitForPacketTime(pkt.Packet.Metadata().Timestamp)
+	display := capture.ConvertPacketToDisplay(captureadapter.ToPacketInfo(env))
+	display.RawData = append([]byte(nil), env.Data...)
+	display.LinkType = env.LinkType
+	if err := s.manager.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
+		return pipeline.Result{Outcome: pipeline.OutcomeRetryableFailure, Err: fmt.Errorf("inject packet: %w", err)}
 	}
+	return pipeline.Result{Outcome: pipeline.OutcomeAccepted}
+}
 
-	// Inject the packet
-	display := capture.ConvertPacketToDisplay(pkt)
-
-	// Preserve raw packet data for virtual interface injection
-	// (normally nil to save memory, but required for packet reconstruction)
-	display.RawData = pkt.Packet.Data()
-	display.LinkType = pkt.LinkType
-
-	logger.Debug("Injecting packet to virtual interface",
-		"raw_data_len", len(display.RawData),
-		"link_type", display.LinkType,
-		"packet_len", pkt.Packet.Metadata().Length)
-
-	if err := globalVifMgr.InjectPacketBatch([]types.PacketDisplay{display}); err != nil {
-		logger.Debug("Failed to inject VoIP packet into virtual interface", "error", err)
+func (s *virtualInterfacePacketSink) Close(context.Context) error {
+	if s.manager == nil {
+		return nil
 	}
+	err := s.manager.Shutdown()
+	s.manager = nil
+	if err != nil {
+		return fmt.Errorf("shut down virtual interface: %w", err)
+	}
+	return nil
 }
 
 // containsUserInHeaders checks if any of the SIP headers contain a surveiled user

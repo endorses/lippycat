@@ -31,7 +31,6 @@ type Config struct {
 	MaxEndpointsPerCall     int
 	MaxEndpointAssociations int
 	PCAPGracePeriod         time.Duration
-	PCAPClosedCallTTL       time.Duration
 	Security                SecurityConfig
 
 	VirtualInterface      bool
@@ -146,8 +145,8 @@ func securityConfigSnapshot() SecurityConfig {
 func DefaultConfig() *Config {
 	profile := GetPerformanceProfiles()[DefaultTCPPerformanceMode]
 	return &Config{
-		PCAPGracePeriod: 5 * time.Second, PCAPClosedCallTTL: time.Hour,
-		Security: DefaultSecurityConfig(), VIFName: "lc0", VIFType: "tap", VIFBufferSize: 4096,
+		PCAPGracePeriod: 5 * time.Second,
+		Security:        DefaultSecurityConfig(), VIFName: "lc0", VIFType: "tap", VIFBufferSize: 4096,
 		MaxGoroutines: DefaultGoroutineLimit, MaxStreams: DefaultMaxStreams,
 		MaxEndpointsPerCall: 64, MaxEndpointAssociations: DefaultMaxCalls * 8,
 		CallIDDetectionTimeout: DefaultCallIDDetectionTimeout,

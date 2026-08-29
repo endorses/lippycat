@@ -6,6 +6,7 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/capture"
 	"github.com/endorses/lippycat/internal/pkg/pipeline"
+	"github.com/endorses/lippycat/internal/pkg/pipeline/captureadapter"
 	sharedsip "github.com/endorses/lippycat/internal/pkg/sip"
 	"github.com/endorses/lippycat/internal/pkg/sipflow"
 	"github.com/google/gopacket/layers"
@@ -63,7 +64,10 @@ type sniffNeverComplete struct{}
 
 func (sniffNeverComplete) Completes(sharedsip.Event) bool { return false }
 
-type sniffSink struct{ tracker *CallTracker }
+type sniffSink struct {
+	tracker       *CallTracker
+	packetOutputs *pipeline.PacketFanout
+}
 
 const (
 	sniffSIPSinkName  = "sniff-output"
@@ -75,8 +79,14 @@ func (s sniffSink) HandleSIP(_ context.Context, input sipflow.SinkInput) pipelin
 	if !ok || pkt.Packet == nil {
 		return pipeline.Result{Outcome: pipeline.OutcomePermanentFailure}
 	}
-	// Virtual-interface delivery has historically preceded session PCAP output.
-	injectPacketToVirtualInterface(pkt)
+	if s.packetOutputs != nil {
+		env := captureadapter.FromPacketInfo(pkt, pipeline.SourceLiveCapture)
+		for _, result := range s.packetOutputs.Dispatch(context.Background(), env) {
+			if result.Result.Outcome != pipeline.OutcomeAccepted {
+				return result.Result
+			}
+		}
+	}
 	if s.tracker.config.WriteVoIP {
 		WriteSIP(s.tracker, input.Result.CallID, pkt.Packet)
 	}
@@ -84,6 +94,10 @@ func (s sniffSink) HandleSIP(_ context.Context, input sipflow.SinkInput) pipelin
 }
 
 func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool, buffers ...*BufferManager) *sipflow.Orchestrator {
+	return newSniffSIPFlowWithOutputs(tracker, markSelection, updateRegistry, nil, buffers...)
+}
+
+func newSniffSIPFlowWithOutputs(tracker *CallTracker, markSelection, updateRegistry bool, outputs *pipeline.PacketFanout, buffers ...*BufferManager) *sipflow.Orchestrator {
 	var buffer *BufferManager
 	if len(buffers) > 0 {
 		buffer = buffers[0]
@@ -101,7 +115,7 @@ func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool, b
 	if err != nil {
 		panic(err)
 	}
-	if err := flow.RegisterSink(sniffSIPSinkName, sniffSink{tracker: tracker}, sniffSIPQueueSize); err != nil {
+	if err := flow.RegisterSink(sniffSIPSinkName, sniffSink{tracker: tracker, packetOutputs: outputs}, sniffSIPQueueSize); err != nil {
 		panic(err)
 	}
 	if err := flow.Start(context.Background()); err != nil {
@@ -111,12 +125,16 @@ func newSniffSIPFlow(tracker *CallTracker, markSelection, updateRegistry bool, b
 }
 
 func sniffSIPMessage(packet capture.PacketInfo, payload []byte, opts sharedsip.ParseOptions, tracker *CallTracker, markSelection, updateRegistry bool, buffers ...*BufferManager) (*sipflow.Orchestrator, sipflow.ProcessResult) {
+	return sniffSIPMessageWithOutputs(packet, payload, opts, tracker, markSelection, updateRegistry, nil, buffers...)
+}
+
+func sniffSIPMessageWithOutputs(packet capture.PacketInfo, payload []byte, opts sharedsip.ParseOptions, tracker *CallTracker, markSelection, updateRegistry bool, outputs *pipeline.PacketFanout, buffers ...*BufferManager) (*sipflow.Orchestrator, sipflow.ProcessResult) {
 	envelope := &pipeline.PacketEnvelope{LinkType: packet.LinkType}
 	if packet.Packet != nil {
 		envelope.Data = packet.Packet.Data()
 		envelope.CaptureTime = packet.Packet.Metadata().Timestamp
 	}
-	flow := newSniffSIPFlow(tracker, markSelection, updateRegistry, buffers...)
+	flow := newSniffSIPFlowWithOutputs(tracker, markSelection, updateRegistry, outputs, buffers...)
 	result := flow.Analyze(sipflow.Message{
 		Payload:          payload,
 		Envelope:         envelope,

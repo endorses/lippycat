@@ -455,7 +455,7 @@ func runVoIPTap(cmd *cobra.Command, args []string) error {
 	}
 
 	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{
-		Name: "voip",
+		Spec: sharedProtocolSpec("voip"),
 		ConfigureGPU: func(gpuConfig GPUConfig) GPUConfig {
 			// VoIP mode should always enable VoIP filtering.
 			gpuConfig.EnableVoIPFilter = true

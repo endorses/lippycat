@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +50,9 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			filterFixture := tt.name + "-filter"
 			spec := tt.specForCommand(filterFixture)
+			if tt.name != "generic" {
+				assert.Equal(t, protocolcatalog.MustLookup(tt.name), spec.protocol)
+			}
 			config := buildHunterConfig(spec)
 			require.Equal(t, "processor.example:55555", config.ProcessorAddr)
 			assert.Equal(t, "edge-01", config.HunterID)
@@ -77,7 +81,7 @@ func TestBuildHunterConfigProtocolFixtures(t *testing.T) {
 
 func TestBuildHunterConfigCopiesFilterCapabilities(t *testing.T) {
 	filterTypes := []string{"bpf", "dns_domain"}
-	config := buildHunterConfig(hunterConfigSpec{supportedFilterTypes: filterTypes})
+	config := buildHunterConfig(hunterConfigSpec{protocol: protocolcatalog.Spec{SupportedFilterTypes: filterTypes}})
 	filterTypes[1] = "changed"
 	assert.Equal(t, []string{"bpf", "dns_domain"}, config.SupportedFilterTypes)
 }

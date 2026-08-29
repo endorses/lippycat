@@ -469,7 +469,7 @@ func runEmailTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{Name: "email"})
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{Spec: sharedProtocolSpec("email")})
 	if err != nil {
 		return err
 	}

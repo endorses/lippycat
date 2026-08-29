@@ -9,11 +9,10 @@ import (
 	"strings"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
-	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/http"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -206,64 +205,26 @@ func runHTTPHunt(cmd *cobra.Command, args []string) error {
 		"http_ports", hunterHTTPPorts,
 		"tls_decryption", tlsKeylogPath != "")
 
-	// Create hunter instance
-	h, err := hunter.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create hunter: %w", err)
-	}
-
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Build content filter from flags (local filters)
-	contentFilter := buildHTTPContentFilter()
-
-	// Create HTTP packet processor with content filtering
-	processorConfig := http.ProcessorConfig{
-		HostPatterns:  splitAndTrimHTTP(hunterHTTPHost),
-		PathPatterns:  splitAndTrimHTTP(hunterHTTPPath),
-		Methods:       splitAndTrimHTTP(hunterHTTPMethods),
-		ContentFilter: contentFilter,
-	}
-
-	processor := http.NewProcessor(processorConfig)
-	defer processor.Stop()
-
-	// Set the packet processor on the hunter
-	h.SetPacketProcessor(processor)
-
-	logger.Info("HTTP hunter initialized with content filtering",
-		"has_host_filter", len(hunterHTTPHost) > 0,
-		"has_path_filter", len(hunterHTTPPath) > 0,
-		"has_method_filter", len(hunterHTTPMethods) > 0,
-		"has_keywords", len(hunterHTTPKeywords) > 0,
-		"capture_body", hunterHTTPCaptureBody)
-
-	// Start hunter in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := h.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
-	// Wait for error or context cancellation
-	select {
-	case err := <-errChan:
-		return fmt.Errorf("hunter error: %w", err)
-	case <-ctx.Done():
-		logger.Info("Shutdown signal received, stopping HTTP hunter...")
-		return nil
-	}
+	return runHunterRuntime(config, hunterRuntimeSpec{
+		name: "http",
+		setup: func(_ context.Context, h *hunter.Hunter) (func(), error) {
+			contentFilter := buildHTTPContentFilter()
+			processor := http.NewProcessor(http.ProcessorConfig{
+				HostPatterns: splitAndTrimHTTP(hunterHTTPHost), PathPatterns: splitAndTrimHTTP(hunterHTTPPath),
+				Methods: splitAndTrimHTTP(hunterHTTPMethods), ContentFilter: contentFilter,
+			})
+			h.SetPacketProcessor(processor)
+			logger.Info("HTTP hunter initialized with content filtering",
+				"has_host_filter", len(hunterHTTPHost) > 0, "has_path_filter", len(hunterHTTPPath) > 0,
+				"has_method_filter", len(hunterHTTPMethods) > 0, "has_keywords", len(hunterHTTPKeywords) > 0,
+				"capture_body", hunterHTTPCaptureBody)
+			return processor.Stop, nil
+		},
+	})
 }
 
 func httpHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "http_host", "http_path"}}
+	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("http"), bpfFilter: filter}
 }
 
 // buildHTTPContentFilter creates a ContentFilter from command-line flags.

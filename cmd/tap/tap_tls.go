@@ -251,7 +251,7 @@ func runTLSTap(cmd *cobra.Command, args []string) error {
 		logger.Info("Security: TLS ENABLED, Mode: " + authMode)
 	}
 
-	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{Name: "tls"})
+	runtime, err := newTapRuntime(config, effectiveBPFFilter, ProtocolSpec{Spec: sharedProtocolSpec("tls")})
 	if err != nil {
 		return err
 	}

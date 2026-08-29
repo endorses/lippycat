@@ -49,7 +49,7 @@ var (
 )
 
 var dnsSpec = ProtocolSpec{
-	Name: "dns",
+	Spec: sharedProtocolSpec("dns"),
 	BuildBPF: func(baseFilter string) (string, error) {
 		ports, err := dns.ParsePorts(dnsPorts)
 		if err != nil {

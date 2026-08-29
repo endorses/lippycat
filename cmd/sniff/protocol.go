@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/endorses/lippycat/internal/pkg/logger"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 )
 
@@ -13,10 +14,14 @@ import (
 // and Viper remain in this composition-root package; protocol packages only
 // provide filtering, analysis, and capture implementations.
 type ProtocolSpec struct {
-	Name       string
+	protocolcatalog.Spec
 	BuildBPF   func(baseFilter string) (string, error)
 	StartLive  func(interfaces, filter string)
 	StartFiles func(files []string, filter string)
+}
+
+func sharedProtocolSpec(name string) protocolcatalog.Spec {
+	return protocolcatalog.MustLookup(name)
 }
 
 func (s ProtocolSpec) validate() error {

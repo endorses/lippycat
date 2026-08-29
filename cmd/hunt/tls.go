@@ -3,15 +3,12 @@
 package hunt
 
 import (
-	"context"
 	"fmt"
 	"os"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
-	"github.com/endorses/lippycat/internal/pkg/constants"
-	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/endorses/lippycat/internal/pkg/tls"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -131,39 +128,10 @@ func runTLSHunt(cmd *cobra.Command, args []string) error {
 		"interfaces", config.Interfaces,
 		"tls_ports", hunterTLSPorts)
 
-	// Create hunter instance
-	// Note: SNI and fingerprint filtering is managed by the processor and pushed to hunters via gRPC
-	h, err := hunter.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create hunter: %w", err)
-	}
-
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Start hunter in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := h.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
-	// Wait for error or context cancellation
-	select {
-	case err := <-errChan:
-		return fmt.Errorf("hunter error: %w", err)
-	case <-ctx.Done():
-		logger.Info("Shutdown signal received, stopping TLS hunter...")
-		return nil
-	}
+	// SNI and fingerprint filtering is managed by the processor and pushed to hunters via gRPC.
+	return runHunterRuntime(config, hunterRuntimeSpec{name: "tls"})
 }
 
 func tlsHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "tls_sni", "tls_ja3", "tls_ja3s", "tls_ja4"}}
+	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("tls"), bpfFilter: filter}
 }

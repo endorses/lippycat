@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/processor"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -25,7 +26,7 @@ func TestTapSourceConfigUsesProtocolSpec(t *testing.T) {
 	interfaces = []string{"eth0", "eth1"}
 	batchSize, batchTimeout, bufferSize = 42, 250, 2048
 
-	got := tapSourceConfig(processor.Config{ProcessorID: "tap-test"}, "tcp port 443", ProtocolSpec{Name: "tls"})
+	got := tapSourceConfig(processor.Config{ProcessorID: "tap-test"}, "tcp port 443", ProtocolSpec{Spec: sharedProtocolSpec("tls")})
 	require.Equal(t, []string{"eth0", "eth1"}, got.Interfaces)
 	require.Equal(t, "tcp port 443", got.BPFFilter)
 	require.Equal(t, 42, got.BatchSize)
@@ -34,6 +35,14 @@ func TestTapSourceConfigUsesProtocolSpec(t *testing.T) {
 	require.Equal(t, 1000, got.BatchBuffer)
 	require.Equal(t, "tap-test", got.ProcessorID)
 	require.Equal(t, "tls", got.ProtocolMode)
+}
+
+func TestTapProtocolSpecsComeFromSharedCatalog(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"dns", "email", "http", "tls", "voip"} {
+		require.Equal(t, protocolcatalog.MustLookup(name), sharedProtocolSpec(name))
+	}
 }
 
 type tapProtocolContract struct {

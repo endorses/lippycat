@@ -7,18 +7,19 @@ import (
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 )
 
 // hunterConfigSpec contains the protocol-specific differences in the otherwise
 // common hunter transport configuration.
 type hunterConfigSpec struct {
-	bpfFilter            string
-	voIPMode             bool
-	enableVoIPFilter     bool
-	useGPUFlag           bool
-	supportedFilterTypes []string
-	includeDiskBuffer    bool
-	includeFilterPolicy  bool
+	protocol            protocolcatalog.Spec
+	bpfFilter           string
+	voIPMode            bool
+	enableVoIPFilter    bool
+	useGPUFlag          bool
+	includeDiskBuffer   bool
+	includeFilterPolicy bool
 }
 
 func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
@@ -33,7 +34,7 @@ func buildHunterConfig(spec hunterConfigSpec) hunter.Config {
 		BatchQueueSize:       cmdutil.GetIntConfig("hunter.batch_queue_size", batchQueueSize),
 		VoIPMode:             spec.voIPMode,
 		EnableVoIPFilter:     spec.enableVoIPFilter,
-		SupportedFilterTypes: append([]string(nil), spec.supportedFilterTypes...),
+		SupportedFilterTypes: append([]string(nil), spec.protocol.SupportedFilterTypes...),
 		TLSEnabled:           !cmdutil.GetBoolConfig("insecure", insecureAllowed),
 		TLSCertFile:          cmdutil.GetStringConfig("hunter.tls.cert_file", tlsCertFile),
 		TLSKeyFile:           cmdutil.GetStringConfig("hunter.tls.key_file", tlsKeyFile),

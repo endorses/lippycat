@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"github.com/endorses/lippycat/internal/pkg/cmdutil"
-	"github.com/endorses/lippycat/internal/pkg/constants"
 	"github.com/endorses/lippycat/internal/pkg/email"
 	"github.com/endorses/lippycat/internal/pkg/hunter"
 	"github.com/endorses/lippycat/internal/pkg/logger"
-	"github.com/endorses/lippycat/internal/pkg/signals"
+	"github.com/endorses/lippycat/internal/pkg/protocolcatalog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -246,69 +245,28 @@ func runEmailHunt(cmd *cobra.Command, args []string) error {
 		"interfaces", config.Interfaces,
 		"smtp_ports", hunterEmailPorts)
 
-	// Create hunter instance
-	h, err := hunter.New(config)
-	if err != nil {
-		return fmt.Errorf("failed to create hunter: %w", err)
-	}
-
-	// Set up context with cancellation
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Handle signals for graceful shutdown
-	cleanup := signals.SetupHandler(ctx, cancel)
-	defer cleanup()
-
-	// Build content filter from flags (local filters)
-	contentFilter := buildEmailContentFilter()
-
-	// Configure SMTP stream factory
-	smtpConfig := email.SMTPStreamFactoryConfig{
-		MaxGoroutines:   1000,
-		CleanupInterval: 30 * time.Second,
-		ServerPorts:     ports,
-		CaptureBody:     hunterCaptureBody || len(hunterEmailKeywords) > 0, // Enable if keywords specified
-		MaxBodySize:     hunterMaxBodySize,
-	}
-
-	// Create email packet processor with TCP reassembly and content filtering
-	processor := email.NewEmailPacketProcessor(ctx, h, contentFilter, smtpConfig)
-	defer processor.Close()
-
-	// Set the packet processor on the hunter
-	h.SetPacketProcessor(processor)
-
-	logger.Info("Email hunter initialized with TCP reassembly and content filtering",
-		"protocol", protocol,
-		"has_sender_filter", len(hunterEmailSender) > 0,
-		"has_recipient_filter", len(hunterEmailRecipient) > 0,
-		"has_subject_filter", len(hunterEmailSubject) > 0,
-		"has_mailbox_filter", len(hunterEmailMailbox) > 0,
-		"has_command_filter", len(hunterEmailCommand) > 0,
-		"has_keywords", len(hunterEmailKeywords) > 0,
-		"capture_body", smtpConfig.CaptureBody)
-
-	// Start hunter in background
-	errChan := make(chan error, constants.ErrorChannelBuffer)
-	go func() {
-		if err := h.Start(ctx); err != nil {
-			errChan <- err
-		}
-	}()
-
-	// Wait for error or context cancellation
-	select {
-	case err := <-errChan:
-		return fmt.Errorf("hunter error: %w", err)
-	case <-ctx.Done():
-		logger.Info("Shutdown signal received, stopping Email hunter...")
-		return nil
-	}
+	return runHunterRuntime(config, hunterRuntimeSpec{
+		name: "email",
+		setup: func(ctx context.Context, h *hunter.Hunter) (func(), error) {
+			contentFilter := buildEmailContentFilter()
+			smtpConfig := email.SMTPStreamFactoryConfig{
+				MaxGoroutines: 1000, CleanupInterval: 30 * time.Second, ServerPorts: ports,
+				CaptureBody: hunterCaptureBody || len(hunterEmailKeywords) > 0, MaxBodySize: hunterMaxBodySize,
+			}
+			processor := email.NewEmailPacketProcessor(ctx, h, contentFilter, smtpConfig)
+			h.SetPacketProcessor(processor)
+			logger.Info("Email hunter initialized with TCP reassembly and content filtering",
+				"protocol", protocol, "has_sender_filter", len(hunterEmailSender) > 0,
+				"has_recipient_filter", len(hunterEmailRecipient) > 0, "has_subject_filter", len(hunterEmailSubject) > 0,
+				"has_mailbox_filter", len(hunterEmailMailbox) > 0, "has_command_filter", len(hunterEmailCommand) > 0,
+				"has_keywords", len(hunterEmailKeywords) > 0, "capture_body", smtpConfig.CaptureBody)
+			return processor.Close, nil
+		},
+	})
 }
 
 func emailHunterConfigSpec(filter string) hunterConfigSpec {
-	return hunterConfigSpec{bpfFilter: filter, supportedFilterTypes: []string{"bpf", "ip_address", "email_address", "email_subject"}}
+	return hunterConfigSpec{protocol: protocolcatalog.MustLookup("email"), bpfFilter: filter}
 }
 
 // buildEmailContentFilter creates a ContentFilter from command-line flags.

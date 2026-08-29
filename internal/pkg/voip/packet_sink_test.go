@@ -56,3 +56,14 @@ func TestVirtualInterfacePacketSinkReportsInjectionFailure(t *testing.T) {
 	require.Equal(t, pipeline.OutcomeRetryableFailure, result.Outcome)
 	require.ErrorContains(t, result.Err, "queue full")
 }
+
+func TestVirtualInterfacePacketSinkReportsQueueFullAsDrop(t *testing.T) {
+	mgr := &recordingVIFManager{injectErr: vinterface.ErrQueueFull}
+	sink := &virtualInterfacePacketSink{manager: mgr}
+
+	result := sink.HandlePacket(context.Background(), &pipeline.PacketEnvelope{Data: []byte{0}, LinkType: layers.LinkTypeEthernet})
+
+	require.Equal(t, pipeline.OutcomeDropped, result.Outcome)
+	require.Equal(t, pipeline.DropQueueFull, result.DropReason)
+	require.NoError(t, result.Err)
+}

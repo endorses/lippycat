@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-29
+
+### Added
+- Add optional structured protocol logging for `sniff`, `tap`, and `process`, with Zeek-style TSV or JSONL `conn`, `dns`, `ssl`, `http`, `smtp`, and `files` streams, bounded asynchronous queues, rotation hooks, and stage-aware emission for hierarchical deployments
+- Add stable flow and Community IDs, connection lifecycle summaries, bounded HTTP/SMTP file metadata and optional extraction, plus direct metadata-event delivery to LI X2 in LI builds
+- Allow tap nodes to accept hunter connections, with configurable `--max-hunters` (`0` means unlimited)
+- Add multi-architecture CUDA kernels for compute capabilities 7.5, 8.0, 8.6, and 8.9, with PTX forward compatibility
+
+### Changed
+- Unify local, distributed, live, and offline packet handling behind normalized pipeline contracts while preserving source identity, timestamps, filtering, PCAP and virtual-interface output, and replay order
+- Centralize SIP parsing, TCP reassembly, VoIP call registry and lifecycle, selection policy, and session output across sniff, hunt, tap, process, and TUI paths
+- Consolidate protocol command construction and DNS analysis, and move GPU filtering into the protocol-neutral `gpuaccel` package
+- Make `make test` the documented complete test entry point, covering the all-tag suite and LI package tests
+
+### Fixed
+- Correct structured-log TSV and JSON encoding, rotation and transaction behavior, queue-drain semantics, and TUI and LI build-partition adapters
+- Preserve injected TCP security settings, compact SIP identity headers, buffered SIP sink delivery, terminal call ordering, offline replay order, and PCAP sink behavior
+- Repair CUDA pattern-matching runtime initialization and backend cleanup
+
+### Removed
+- Remove legacy local capture paths and unused VoIP performance and plugin machinery, including unsupported AF_XDP capture code and documentation
+
 ## [0.10.10] - 2026-08-27
 
 ### Changed
